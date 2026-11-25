@@ -1,0 +1,477 @@
+// Every reference to a Core module member names a member that module has in
+// the checkout: a Core.rows dispatcher row or type, or a top-level Jet
+// declaration in one of the module's Core sources (its Core.rows source rows,
+// the private parts and runtime units it owns). A reference is a qualified
+// path (`core.files.read`, `jet_builtins.temp_join`, `core.process.[args]`)
+// or a member of a `use` alias of a Core module (`builtin.temp_join` after
+// `builtin: jet_builtins`), in the code of every Jet source under the Core,
+// Prelude, Jetpack, Tests and Examples trees; comments and string literals
+// are not code.
+// The compiler resolves these through the Core tables it embedded when it
+// was built, so a member a change deletes from Core.rows or a Core source
+// still resolves on the compiler that change is checked with, and the miss
+// only shows when the next compiler builds. This guard reads the tables from
+// the checkout's files instead, so the miss fails here first.
+use {
+    jet_foundation.[CoreDeclarationSource, CoreDeclarations]
+    jet_lexer.[lex, Token, TokenTables, token_decoded, TOKEN_COLON, TOKEN_COLON_EQ, TOKEN_COMMA, TOKEN_DOT, TOKEN_HASH, TOKEN_IDENT, TOKEN_KW_FN, TOKEN_KW_IN, TOKEN_KW_USE, TOKEN_LBRACE, TOKEN_LBRACKET, TOKEN_LPAREN, TOKEN_RBRACE, TOKEN_RBRACKET, TOKEN_RPAREN]
+    corpus_manifest.[guards_enter_root]
+    crr_files: core.files
+    crr_process: core.process
+}
+
+// The trees whose Jet sources reference Core members.
+CRR_TREES: [String]{"Core", "Compiler/Prelude", "Jetpack", "Tests", "Examples"}
+
+// The roots a qualified reference starts with.
+CRR_ROOTS: [String]{"core", "jet_builtins"}
+
+// The members the checker resolves in its own code rather than through a
+// row or declaration, as `<module> <member> <source>`: the source spells the
+// member it answers.
+CRR_CODED_MEMBERS: [String]{
+    // `#run net.fetch(url, sha256:)` is a comptime input.
+    "core.net fetch Compiler/JetSema/Source/Sema/Calls/ComptimeInputs.jet",
+    // The shared publication sites only Core may call.
+    "core.mem __attempt_shared Compiler/JetFoundation/Source/Facts/Checked.jet",
+    "core.mem __process_shared Compiler/JetFoundation/Source/Facts/Checked.jet",
+    "core.mem __thread_shared Compiler/JetFoundation/Source/Facts/Checked.jet",
+    "core.mem __world_shared Compiler/JetFoundation/Source/Facts/Checked.jet",
+}
+
+// The missing paths sources under Tests may name: each must still be
+// missing and named there.
+CRR_TEST_REFUSED: [String]{
+    // Refusal tests: a retired, private or misspelled module or member.
+    "core.World",
+    "core.async",
+    "core.compute.raw_kernel_contract",
+    "core.crypto.__jetc_read",
+    "core.crypto.blake3_bytes",
+    "core.crypto.constant_time_eq",
+    "core.crypto.sha256_bytes",
+    "core.crypto.sha512_bytes",
+    "core.crypto.v4",
+    "core.data.__TablePlan",
+    "core.devserver",
+    "core.encoding.json.decod",
+    "core.event.policy_async",
+    "core.files.reed",
+    "core.io",
+    "core.json",
+    "core.math.infinity",
+    "core.math.min",
+    "core.math.pi",
+    "core.math.tau",
+    "core.perf.set_fidelity",
+    "core.plugin.__authority_to_wire",
+    "core.secrets",
+    "core.services",
+    "core.task",
+    "core.tasks.Condition",
+    "core.text.string",
+    "core.time.clock",
+    "core.time.expiring.new",
+    "core.time.seconds",
+    // Retired print spellings the formatter migrates or the checker refuses.
+    "core.term.println",
+    "core.term.repr",
+    "core.term.sprint",
+    "core.ui.print",
+    // Pending fixtures: the authority-scoped process calls they wait on.
+    "core.process.run",
+    "core.process.workspace",
+    // Stale fixtures and conformance sources: members Core no longer has.
+    "core.net.set_read_timeout",
+    "core.net.udp_close",
+    "core.tasks.sleep",
+    "core.text.runtime.kernel_unicode_string.trim_view",
+    "core.text.sentence_segments",
+    "core.text.word_segments",
+}
+
+// The fixture trees that exist to be refused: each must still name a
+// missing path.
+CRR_REFUSED_FIXTURES: [String]{
+    "Tests/Cases/CoreLib/Fixtures/RetiredCoreNamespacesNameTheirCanonicalHomes/",
+}
+
+// The Core modules, each true once it has a member, and the members, as
+// `<module> <member>` keys.
+CRRTable: struct {
+    modules: [String:Bool],
+    members: [String:Bool],
+}
+
+// The top-level names one Jet source declares: each line at column 0 that,
+// after its `#Marker` and `#Marker(…)` prefixes and a `priv`, starts
+// `<name>:` or `<name><`.
+crr_declared_names: fn(text: String) -> [String] Never! {
+    names := [String]{}
+    loop raw in text.lines() {
+        line := raw.copy()
+        loop line.starts_with("#") {
+            bytes: line.bytes()
+            at := 1
+            loop at < bytes.len() && (crr_name_byte(bytes[at]) || bytes[at] == 46) -> at += 1
+            if at < bytes.len() && bytes[at] == 40 {
+                depth := 0
+                loop at < bytes.len() {
+                    if bytes[at] == 40 -> depth += 1
+                    if bytes[at] == 41 {
+                        depth -= 1
+                        if depth == 0 -> break
+                    }
+                    at += 1
+                }
+                at += 1
+            }
+            if at >= bytes.len() || bytes[at] != 32 {
+                line = ""
+                break
+            }
+            line = line.slice(at + 1, line.len())
+        }
+        if line.starts_with("priv(") {
+            parts: line.split_once(") ") ?? next
+            line = parts.after.copy()
+        } else if line.starts_with("priv ") {
+            line = line.slice("priv ".len(), line.len())
+        }
+        bytes: line.bytes()
+        end := 0
+        loop end < bytes.len() && crr_name_byte(bytes[end]) -> end += 1
+        if end == 0 || end >= bytes.len() || (bytes[end] != 58 && bytes[end] != 60) -> next
+        names.push(line.slice(0, end))
+    }
+    names
+}
+
+crr_name_byte: fn(byte: U8) -> Bool Never! {
+    (byte >= 97 && byte <= 122) || (byte >= 65 && byte <= 90) || (byte >= 48 && byte <= 57) || byte == 95
+}
+
+crr_module: fn(table: ^CRRTable, module_name: String) {
+    if table.modules.get(module_name) == None -> table.modules[module_name] = false
+}
+
+crr_add: fn(table: ^CRRTable, module_name: String, member: String) {
+    table.modules[module_name] = true
+    table.members["{module_name} {member}"] = true
+}
+
+// The modules and members `declared` gives: each module's exports, types
+// and dispatcher rows, and the names each of its Core sources declares (a
+// part also counts for its owner).
+crr_table: fn(declared: CoreDeclarations) -[FS]> CRRTable {
+    table := CRRTable{modules: [String:Bool]{}, members: [String:Bool]{}}
+    loop entry in declared.modules {
+        crr_module(table, entry.name)
+        loop member in entry.members -> crr_add(table, entry.name, member)
+        loop leaf in entry.types -> crr_add(table, entry.name, leaf.name)
+    }
+    loop name in declared.namespace_only -> crr_module(table, name)
+    loop row in declared.dispatchers {
+        if row.module_name != "" -> crr_add(table, row.module_name, row.member)
+    }
+    sources := [CoreDeclarationSource]{}
+    loop row in declared.source_rows -> sources.push(row.copy())
+    loop row in declared.parts -> sources.push(row.copy())
+    loop row in declared.runtime -> sources.push(row.copy())
+    loop row in sources {
+        crr_module(table, row.module_name)
+        text: crr_files.read(row.path) ?? panic("{row.path} did not read")
+        loop name in crr_declared_names(text) {
+            crr_add(table, row.module_name, name)
+            if row.owner != "" -> crr_add(table, row.owner, name)
+        }
+        loop name in row.members -> crr_add(table, if row.owner != "" -> row.owner else -> row.module_name, name)
+    }
+    table
+}
+
+// The 1-based line of byte `at` in `text`.
+crr_line: fn(text: String, at: Int) -> Int Never! {
+    line := 1
+    loop (index, byte) in text.bytes() {
+        if index >= at -> break
+        if byte == 10 -> line += 1
+    }
+    line
+}
+
+// The first `count` of `segments`, joined with dots.
+crr_path: fn(segments: [String], count: Int) -> String Never! {
+    out := [String]{}
+    loop at in 0..<count -> out.push(segments[at].copy())
+    out.join(".")
+}
+
+// A reference no row or declaration gives: at `line` of `path`, written
+// `written`, where `owner` (None when no Core module prefixes it) has no
+// `missing`.
+CRRMiss: struct {
+    path: String,
+    line: Int,
+    written: String,
+    owner: String?,
+    missing: String,
+}
+
+// The dotted path `miss` misses: `<owner>.<member>`, or the module path no
+// Core module prefixes.
+crr_miss_key: fn(miss: CRRMiss) -> String Never! {
+    if miss.owner == Val(owner) -> return "{owner}.{miss.missing}"
+    miss.missing.copy()
+}
+
+crr_miss_text: fn(miss: CRRMiss) -> String Never! {
+    if miss.owner == Val(owner) -> return "{miss.path}:{miss.line}: `{miss.written}`: {owner} has no Core.rows row or declaration `{miss.missing}`"
+    "{miss.path}:{miss.line}: `{miss.written}` names no Core module"
+}
+
+// The miss of the reference `segments` (written `written`, at byte `at` of
+// `path`), or None when its longest module prefix is the whole path, is a
+// namespace with no members to check (`core.context`'s are the program's
+// context keys) or has the next segment as a member. A segment a template
+// pastes (`#{hook}`) is not known before the paste.
+crr_resolve: fn(table: CRRTable, path: String, text: String, at: Int, segments: [String], written: String) -> CRRMiss? Never! {
+    count := segments.len()
+    loop count > 0 {
+        if table.modules.get(crr_path(segments, count)) != None -> break
+        count -= 1
+    }
+    if count == segments.len() -> return None
+    if segments[count].starts_with("#") -> return None
+    owner: crr_path(segments, count)
+    unchecked: table.modules.get(owner) == Val(false)
+    if count == 0 || (unchecked && CRR_ROOTS.contains(owner)) {
+        return Val(CRRMiss{path: path.copy(), line: crr_line(text, at), written: written.copy(), owner: None, missing: crr_path(segments, count + 1)})
+    }
+    if unchecked || table.members.get("{owner} {segments[count]}") != None -> return None
+    Val(CRRMiss{path: path.copy(), line: crr_line(text, at), written: written.copy(), owner: Val(owner), missing: segments[count].copy()})
+}
+
+// The `use` aliases of Core modules in `tokens`: `alias: <module path>` rows
+// of a `use` line or block. Each token of a `use` declaration is marked in
+// `declared`.
+crr_aliases: fn(table: CRRTable, tables: TokenTables, tokens: [Token], declared: ^[Bool]) -> [String:String] Never! {
+    aliases := [String:String]{}
+    at := 0
+    loop at < tokens.len() {
+        if tokens[at].kind != TOKEN_KW_USE {
+            at += 1
+            next
+        }
+        start: at
+        at += 1
+        end := at + 1
+        if at < tokens.len() && tokens[at].kind == TOKEN_LBRACE {
+            depth := 0
+            end = at
+            loop end < tokens.len() {
+                if tokens[end].kind == TOKEN_LBRACE -> depth += 1
+                if tokens[end].kind == TOKEN_RBRACE {
+                    depth -= 1
+                    if depth == 0 -> break
+                }
+                end += 1
+            }
+        }
+        loop at < end && at + 2 < tokens.len() {
+            if tokens[at].kind == TOKEN_IDENT && tokens[at + 1].kind == TOKEN_COLON && tokens[at + 2].kind == TOKEN_IDENT {
+                alias: token_decoded(tables, tokens[at])
+                segments := [String]{token_decoded(tables, tokens[at + 2])}
+                cursor := at + 3
+                loop cursor + 1 < tokens.len() && tokens[cursor].kind == TOKEN_DOT && tokens[cursor + 1].kind == TOKEN_IDENT {
+                    segments.push(token_decoded(tables, tokens[cursor + 1]))
+                    cursor += 2
+                }
+                target: segments.join(".")
+                if table.modules.get(target) != None -> aliases[alias] = target
+                at = cursor
+                next
+            }
+            at += 1
+        }
+        stop: if end < tokens.len() -> end else -> tokens.len()
+        loop marked in start..<stop -> declared[marked] = true
+        at = end
+    }
+    aliases
+}
+
+// Every unresolved Core reference in the code of `text`, the source at `path`.
+// A root or alias the source also binds as a local name (`name:`,
+// `name :=`, `loop name in`, `fn(name)`, `.Case(name)`) outside its `use`
+// declarations may be that local, so its references are not read. A
+// marker's arguments (`#On(build.link)`) name no member.
+crr_findings: fn(table: CRRTable, path: String, text: String) -> [CRRMiss] Never! {
+    findings := [CRRMiss]{}
+    lexed: lex(text.bytes())
+    tokens: lexed.tokens
+    tables: lexed.tables
+    bound := [String:Bool]{}
+    marked := [Bool]{}
+    declared := [Bool]{}
+    loop _ in tokens {
+        marked.push(false)
+        declared.push(false)
+    }
+    aliases: crr_aliases(table, tables, tokens, declared)
+    loop at in 0..<tokens.len() {
+        kind: tokens[at].kind
+        if kind == TOKEN_HASH {
+            cursor := at + 1
+            loop cursor < tokens.len() && (tokens[cursor].kind == TOKEN_IDENT || tokens[cursor].kind == TOKEN_DOT) -> cursor += 1
+            if cursor < tokens.len() && tokens[cursor].kind == TOKEN_LPAREN && cursor > at + 1 {
+                depth := 0
+                loop cursor < tokens.len() {
+                    if tokens[cursor].kind == TOKEN_LPAREN -> depth += 1
+                    if tokens[cursor].kind == TOKEN_RPAREN -> depth -= 1
+                    marked[cursor] = true
+                    if depth == 0 -> break
+                    cursor += 1
+                }
+            }
+            next
+        }
+        if kind != TOKEN_IDENT || declared[at] || at + 1 >= tokens.len() || (at > 0 && tokens[at - 1].kind == TOKEN_DOT) -> next
+        after: tokens[at + 1].kind
+        opened: at > 1 && tokens[at - 1].kind == TOKEN_LPAREN && after == TOKEN_RPAREN
+        parameter: opened && tokens[at - 2].kind == TOKEN_KW_FN
+        payload: opened && at > 2 && tokens[at - 2].kind == TOKEN_IDENT && tokens[at - 3].kind == TOKEN_DOT
+        if after == TOKEN_COLON || after == TOKEN_COLON_EQ || after == TOKEN_KW_IN || parameter || payload {
+            name: token_decoded(tables, tokens[at])
+            bound[name] = true
+        }
+    }
+    loop at in 0..<tokens.len() {
+        if marked[at] || tokens[at].kind != TOKEN_IDENT || (at > 0 && tokens[at - 1].kind == TOKEN_DOT) -> next
+        head: token_decoded(tables, tokens[at])
+        base := [String]{}
+        if CRR_ROOTS.contains(head) {
+            if bound.get(head) != None -> next
+            base.push(head.copy())
+        } else if aliases.get(head) == Val(target) {
+            if bound.get(head) != None -> next
+            loop segment in target.split(".") -> base.push(segment.copy())
+        } else {
+            next
+        }
+        rest := [String]{}
+        cursor := at + 1
+        loop cursor + 1 < tokens.len() && tokens[cursor].kind == TOKEN_DOT && tokens[cursor + 1].kind == TOKEN_IDENT {
+            rest.push(token_decoded(tables, tokens[cursor + 1]))
+            cursor += 2
+        }
+        spelled: if rest.len() == 0 -> head.copy() else -> "{head}.{rest.join(".")}"
+        // A bracket list after the path names members of it.
+        if cursor + 1 < tokens.len() && tokens[cursor].kind == TOKEN_DOT && tokens[cursor + 1].kind == TOKEN_LBRACKET {
+            item := [String]{}
+            inner := cursor + 2
+            loop inner < tokens.len() && tokens[inner].kind != TOKEN_RBRACKET {
+                kind: tokens[inner].kind
+                if kind == TOKEN_IDENT -> item.push(token_decoded(tables, tokens[inner]))
+                if kind == TOKEN_COMMA || (inner + 1 < tokens.len() && tokens[inner + 1].kind == TOKEN_RBRACKET) {
+                    if item.len() > 0 {
+                        segments := base.copy()
+                        loop segment in rest -> segments.push(segment.copy())
+                        loop segment in item -> segments.push(segment.copy())
+                        written: "{spelled}.[{item.join(".")}]"
+                        if crr_resolve(table, path, text, tokens[at].span.start, segments, written) == Val(finding) -> findings.push(finding)
+                    }
+                    item = [String]{}
+                } else if kind != TOKEN_IDENT && kind != TOKEN_DOT {
+                    item = [String]{}
+                }
+                inner += 1
+            }
+            next
+        }
+        if rest.len() == 0 && !CRR_ROOTS.contains(head) -> next
+        segments := base.copy()
+        loop segment in rest -> segments.push(segment.copy())
+        if crr_resolve(table, path, text, tokens[at].span.start, segments, spelled) == Val(finding) -> findings.push(finding)
+    }
+    findings
+}
+
+// The tracked Jet sources under CRR_TREES.
+crr_tracked_sources: fn() -> [String] {
+    argv := [String]{"git", "ls-files", "--"}
+    loop tree in CRR_TREES -> argv.push(tree)
+    listed: crr_process.cmd(argv).stdout(.Capture).stderr(.Capture).run() ?? panic("run git ls-files: {err}")
+    assert(listed.code == 0, "git ls-files failed: {crr_process.combined_output(listed).trim()}")
+    paths := [String]{}
+    loop line in crr_process.stdout_lines(listed) {
+        if line.ends_with(".jet") -> paths.push(line.copy())
+    }
+    paths
+}
+
+#Test("every Core member reference names a Core.rows row or declaration of the checkout") {
+    guards_enter_root()
+    declared: core_guard_declared() ?? panic("Core.rows was refused: {err.message}")
+    table := crr_table(declared)
+    loop row in CRR_CODED_MEMBERS {
+        words: row.split(" ").to_list()
+        assert(words.len() == 3, "`{row}` is no `<module> <member> <source>` row")
+        text: crr_files.read(words[2]) ?? panic("{words[2]} did not read")
+        assert(text.contains("\"{words[1]}\""), "{words[2]} no longer spells `{words[0]}.{words[1]}`; drop its CRR_CODED_MEMBERS row")
+        assert(table.members.get("{words[0]} {words[1]}") == None, "`{words[0]}.{words[1]}` is a row or declaration now; drop its CRR_CODED_MEMBERS row")
+        crr_add(table, words[0], words[1])
+    }
+    paths: crr_tracked_sources()
+    assert(paths.len() > 10000, "only {paths.len()} tracked Jet sources were found")
+    refused := [String:Bool]{}
+    fixtures := [String:Bool]{}
+    findings := [String]{}
+    loop path in paths {
+        text: crr_files.read(path) ?? panic("{path} did not read")
+        if !text.contains("core") && !text.contains("jet_builtins") -> next
+        loop miss in crr_findings(table, path, text) {
+            key: crr_miss_key(miss)
+            if path.starts_with("Tests/") && CRR_TEST_REFUSED.contains(key) {
+                refused[key] = true
+                next
+            }
+            fixture := false
+            loop prefix in CRR_REFUSED_FIXTURES {
+                if path.starts_with(prefix) {
+                    fixtures[prefix] = true
+                    fixture = true
+                }
+            }
+            if !fixture -> findings.push(crr_miss_text(miss))
+        }
+    }
+    loop key in CRR_TEST_REFUSED {
+        if refused.get(key) == None -> findings.push("`{key}` is no longer refused in Tests; drop its CRR_TEST_REFUSED row")
+    }
+    loop prefix in CRR_REFUSED_FIXTURES {
+        if fixtures.get(prefix) == None -> findings.push("{prefix} refers to no missing member; drop its CRR_REFUSED_FIXTURES row")
+    }
+    assert_eq(findings.join("\n"), "")
+}
+
+#Test("a reference to a member no row or declaration gives is named") {
+    table := CRRTable{modules: [String:Bool]{}, members: [String:Bool]{}}
+    modules: [String]{"core", "core.context", "core.service", "core.files", "jet_builtins"}
+    loop name in modules -> crr_module(table, name)
+    declared: crr_declared_names("#Builtin.Role(.X) priv atomic_rename: fn(a: Int) -> Int {{\nRecord<T>: struct {{\nuse {{\n    impl_x: fn() {{\n#Test(\"t\") {{\n")
+    loop name in declared {
+        crr_add(table, "core.files", name)
+    }
+    crr_add(table, "jet_builtins", "temp_join")
+    crr_add(table, "core.service", "state_publish")
+    source: "use {{\n    core: core\n    builtin: jet_builtins\n    fs: core.files\n    ctx: core.context\n    core.files.[Record, gone_type]\n}}\n// core.files.__comment_only\n#On(core.files.event) run: fn() {{\n    core.files.atomic_rename(1)\n    core.service.__host_rename(\"core.files.nope\")\n    builtin.temp_join()\n    builtin.lock_open()\n    fs.Record.new()\n    fs.vanished()\n    core.nothing.at_all()\n    local.core.files.skipped()\n    ctx.deadline\n    core.files.#{{hook}}()\n}}\n"
+    found: loop miss in crr_findings(table, "x.jet", source) -> crr_miss_text(miss)
+    assert_eq(found.join("\n"), [String]{
+        "x.jet:6: `core.files.[gone_type]`: core.files has no Core.rows row or declaration `gone_type`",
+        "x.jet:11: `core.service.__host_rename`: core.service has no Core.rows row or declaration `__host_rename`",
+        "x.jet:13: `builtin.lock_open`: jet_builtins has no Core.rows row or declaration `lock_open`",
+        "x.jet:15: `fs.vanished`: core.files has no Core.rows row or declaration `vanished`",
+        "x.jet:16: `core.nothing.at_all` names no Core module",
+    }.join("\n"))
+}
