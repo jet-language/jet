@@ -1,0 +1,79 @@
+// The compiler's carriers: the storage types Core's door to the compiler
+// (Core/Builtins/Builtins.jet) declares `priv` and by arity alone, such as
+// `priv Atomic: struct<T> {}`, with the Prelude type markers written on each
+// (`#MoveOnly`, `#Local`). Being private, a declaration is never what a bare
+// `Atomic<Int>` names: the checker types and lowers the carrier itself, in
+// programs that load no jet_builtins too. So the file is read while the
+// compiler builds, and the checker reads a carrier's facts from its row here
+// rather than from a list of names.
+
+BUILTIN_CARRIERS_PATH: "Core/Builtins/Builtins.jet"
+
+// One arity-only declaration and the hooks of the markers written on it.
+BuiltinCarrier: struct {
+    name: String,
+    hooks: [MarkerHook],
+}
+
+BUILTIN_CARRIERS: #run builtin_carrier_rows(embed_file("toolchain:{BUILTIN_CARRIERS_PATH}"))
+
+// Each top-level `priv Name: struct<…> {}` line of `text`, in source order,
+// with the hooks of the markers on the lines right above it (`#MoveOnly`,
+// `#[MoveOnly, Local]`). A marker with no compiler hook adds none.
+builtin_carrier_rows: fn(text: String) -> [BuiltinCarrier] Never! {
+    rows := [BuiltinCarrier]{}
+    hooks := [MarkerHook]{}
+    loop line in text.split("\n").to_list() {
+        if line.starts_with("#[") && line.ends_with("]") {
+            loop name in line.slice(2..<line.len() - 1).split(", ").to_list() {
+                if marker_hook_of_declaration(name) == .Val(hook) -> hooks.push(hook)
+            }
+            next
+        }
+        if line.starts_with("#") {
+            if marker_hook_of_declaration(line.slice(1..<line.len())) == .Val(hook) -> hooks.push(hook)
+            next
+        }
+        colon: line.find(": struct<")
+        if colon > 0 && line.starts_with("priv ") && line.ends_with("> {{}}") {
+            rows.push(BuiltinCarrier{name: line.slice("priv ".len()..<colon), hooks: hooks.move()})
+        }
+        hooks = [MarkerHook]{}
+    }
+    rows
+}
+
+// Whether `name` is a carrier whose declaration carries the marker that
+// reaches `hook`.
+builtin_carrier_declares: fn(name: String, hook: MarkerHook) -> Bool Never! {
+    loop row in BUILTIN_CARRIERS {
+        if row.name != name -> next
+        loop declared in row.hooks {
+            if declared == hook -> return true
+        }
+        return false
+    }
+    false
+}
+
+// Whether `name` is a carrier Core declares.
+builtin_carrier_named: fn(name: String) -> Bool Never! {
+    loop row in BUILTIN_CARRIERS {
+        if row.name == name -> return true
+    }
+    false
+}
+
+#Test("a carrier takes the hooks of the markers right above it") {
+    text: "#MoveOnly\npriv Atomic: struct<T> {{}}\n\n#[MoveOnly, Local]\npriv SharedGuard: struct<T> {{}}\n// a comment\npriv Plain: struct<T> {{}}\n#MoveOnly\nWord: struct<bits: Int> {{}}\nRole: struct {{\n    kind: RoleKind,\n}}\n"
+    rows: builtin_carrier_rows(text)
+    assert_eq(rows.len(), 3)
+    assert_eq(rows[0].name, "Atomic")
+    assert_eq(rows[0].hooks, [MarkerHook]{MarkerHook.MoveOnly})
+    assert_eq(rows[1].hooks, [MarkerHook]{MarkerHook.MoveOnly, MarkerHook.Local})
+    assert_eq(rows[2].name, "Plain")
+    assert_eq(rows[2].hooks.len(), 0)
+    assert(builtin_carrier_declares("Atomic", MarkerHook.MoveOnly) && !builtin_carrier_declares("Atomic", MarkerHook.Local))
+    assert(builtin_carrier_declares("ViewMut", MarkerHook.MoveOnly))
+    assert(!builtin_carrier_named("Word") && !builtin_carrier_named("Arena"))
+}

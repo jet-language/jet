@@ -5,6 +5,7 @@
 // string-view fact; it does not read a mutable scope singleton or guess
 // nominal capabilities from a successful lowering.
 use jet_foundation.[
+    builtin_carrier_declares,
     effect_vocabulary_view_count,
     CopyFact,
     symbol_key_names,
@@ -382,15 +383,24 @@ sema_copy_handle_without_clone: fn(name: String) -> Bool Never! {
     !IR_RUNTIME_HANDLES[row].clone
 }
 
-// One Atomic owner recognition shared by copy policy and field initialization.
+// One Atomic owner recognition shared by field initialization and task groups.
 sema_atomic_type_name: fn(name: String) -> Bool Never! { name == "Atomic" }
 
+// A builtin head whose values move and never copy: one whose Core
+// declaration is `#MoveOnly` (`Atomic`, `ViewMut`), or a reserved carrier
+// Core does not declare yet (`ViewIter`, the Cell and Shared guards).
 sema_copy_apply_is_noncloneable: fn(name: String) -> Bool Never! {
-    if sema_atomic_type_name(name) -> return true
-    if name == {
-        "Atomic" | "ViewMut" | "ViewIter" | "CellReadGuard" | "CellEditGuard" | "SharedGuard" -> true
-        else -> false
+    if builtin_carrier_declares(name, MarkerHook.MoveOnly) -> return true
+    name == "ViewIter" || name == "CellReadGuard" || name == "CellEditGuard" || name == "SharedGuard"
+}
+
+// Whether `ty` is a builtin head (`Atomic<Int>`) whose Core declaration
+// carries the marker that reaches `hook` (builtin_carrier_declares).
+sema_copy_carrier_declares: fn(ty: Type, hook: MarkerHook) -> Bool Never! {
+    if ty == .Apply(name, _) {
+        return builtin_carrier_declares(name, hook)
     }
+    false
 }
 
 sema_copy_apply_is_dynamic_loan: fn(name: String) -> Bool Never! {
@@ -1345,7 +1355,8 @@ sema_copy_nominal_declares: fn(nominal: SemaRegistrationNominal, hook: MarkerHoo
 SEMA_COPY_DECLARED_WALK: 256
 
 // Whether a value of `ty` is or holds, at any depth, a value of a type
-// declared with the marker that reaches `hook` (sema_copy_nominal_declares):
+// declared with the marker that reaches `hook` (sema_copy_nominal_declares,
+// or sema_copy_carrier_declares for a builtin head with no nominal row):
 // a field, an enum payload, an element or an entry. A type argument counts
 // where the nominal's parts hold it (sema_copy_fork_parts substitutes it).
 // `seen` holds each instance walked once; a nominal whose parts grow its own
@@ -1354,7 +1365,7 @@ SEMA_COPY_DECLARED_WALK: 256
 sema_copy_holds_declared: fn(ty: Type, graph: SemaRegistrationGraph, caller: Int, seen: ^[String], hook: MarkerHook) -> Bool {
     if ty == {
         .Named(_) | .Apply(_, _) -> {
-            row: sema_copy_fork_row_at(ty, graph, caller) ?? return false
+            row: sema_copy_fork_row_at(ty, graph, caller) ?? return sema_copy_carrier_declares(ty, hook)
             nominal: graph.modules[row.module_index].nominals[row.row]
             if sema_copy_nominal_declares(nominal, hook) -> return true
             shown: type_name(ty)
@@ -1428,7 +1439,8 @@ sema_copy_refusal: fn(facts: SemaCopyFacts, span: Span, environment: SemaScopeEn
     if facts.resource || facts.dynamic_loan || !sema_copy_holds_declared_in(facts.source, environment, program, MarkerHook.MoveOnly) {
         return sema_copy_diagnostic(facts, span)
     }
-    if found == .Val(row) && sema_copy_nominal_declares(graph.modules[row.module_index].nominals[row.row], MarkerHook.MoveOnly) {
+    declared: if found == .Val(row) -> sema_copy_nominal_declares(graph.modules[row.module_index].nominals[row.row], MarkerHook.MoveOnly) else -> sema_copy_carrier_declares(facts.source, MarkerHook.MoveOnly)
+    if declared {
         return Val(sema_error("E0211", span, "`{shown}` can't be copied", "`{shown}` is `#MoveOnly`: its values move and never copy", fix))
     }
     Val(sema_error("E0211", span, "`{shown}` can't be copied", "it holds a `#MoveOnly` value, which moves and never copies", fix))

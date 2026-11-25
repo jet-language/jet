@@ -3,6 +3,6 @@ Error: Jet.CopyNotSupported: `AtomicHolder` can't be copied
     |
   7 | copy_holder: fn(value: AtomicHolder) { _: value.copy() }
     |                                           ^^^^^^^^^^
- Why: Copy needs a value made only of duplicable parts; this type holds something Jet can't duplicate — a function value, a trait value, or a type from outside Jet
- Fix: Move it instead with `.move()` if this is its last use, or change the type so every part can be copied
+ Why: It holds a `#MoveOnly` value, which moves and never copies
+ Fix: Move it instead with `.move()`; a second one has to come from wherever this one came from
 More: jet-lang.dev/e/Jet.CopyNotSupported
