@@ -152,10 +152,11 @@ An immutable `name: value` local, in a function body or any block in it,
 falls back to run time quietly, with no report, when it can't be
 computed while building: it reads a run-time input such as a parameter, it
 calls code that reaches the outside world, it holds a value no build can
-keep (a function, a shared cell), computing it stops or runs out of the
-evaluator's steps, or `#Runtime` keeps it to run time. Hover on the local
-and `jet inspect semindex` give the reason it fell back, or the value it
-holds when it was computed
+keep (a function, a shared cell, a task or a channel endpoint, so
+`worker: task f()` starts `f` when the program runs), computing it stops or
+runs out of the evaluator's steps, or `#Runtime` keeps it to run time. Hover
+on the local and `jet inspect semindex` give the reason it fell back, or the
+value it holds when it was computed
 ([`comptime_fallback_reason_shows_in_inspect`](../../../Tests/Cases/Semindex/comptime_fallback_reason_shows_in_inspect.case),
 [`comptime_fallback_reason_shows_in_hover`](../../../Tests/Cases/LSP/comptime_fallback_reason_shows_in_hover.case),
 [`comptime_fallback_reason_names_the_runtime_mark`](../../../Tests/Cases/Semindex/comptime_fallback_reason_names_the_runtime_mark.case)).
