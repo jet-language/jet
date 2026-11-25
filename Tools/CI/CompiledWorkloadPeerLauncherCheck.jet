@@ -49,11 +49,13 @@ Ran: struct {
     stderr: String,
 }
 
-// The temporary tree the launcher confines, and a sibling it must not touch.
+// The temporary tree the launcher confines, a sibling it must not touch, and
+// the scratch root both sit in.
 Layout: struct {
     root: String,
     run_root: String,
     outside: String,
+    scratch: String,
 }
 
 run: fn() {
@@ -64,7 +66,7 @@ run: fn() {
 main: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Int {
     base: scratch_root()
     stamp: time.unix_ns()
-    layout: Layout{root: root, run_root: "{base}/compiled-workload-peer-launcher-{stamp}", outside: "{base}/compiled-workload-peer-launcher-{stamp}-outside"}
+    layout: Layout{root: root, run_root: "{base}/compiled-workload-peer-launcher-{stamp}", outside: "{base}/compiled-workload-peer-launcher-{stamp}-outside", scratch: base.copy()}
     code: if check(layout) == {
         .Ok(message) -> {
             term.print("peer launcher self-test: {message}")
@@ -85,14 +87,14 @@ check: fn(layout: Layout) -[Env, Exec, FS, IO, Time, Time.Wait]> String Problem!
     files.create_dir_all(layout.outside) ?? return Err(problem("`{layout.outside}` cannot be created: {err}"))
     jet: jet_binary() ?? return Err(problem("JET is not set and no jet is on PATH to build the launcher"))
     launcher: build(layout, jet, LAUNCHER, "compiled-workload-peer-launcher") ?? return Err(err)
-    contract: launch(process.cmd([String]{launcher.copy(), "--contract"}).cwd(layout.root))
+    contract: launch(launcher_cmd(layout, [String]{launcher.copy(), "--contract"}).cwd(layout.root))
     if contract.code != 0 || contract.signal != None || contract.stdout.trim() != CONTRACT {
         // An unavailable host must still prove the fail-closed contract. Linux
         // hides its discovered primitive behind PATH; this catches a missing
         // bwrap without ever launching an unisolated child. Other hosts always
         // refuse.
         missing_primitive(layout, launcher) ?? return Err(err)
-        escape: launch(process.cmd(launch_args(layout, launcher, layout.outside, "disabled", [String]{launcher.copy()})).cwd(layout.run_root).env("PATH", ""))
+        escape: launch(launcher_cmd(layout, launch_args(layout, launcher, layout.outside, "disabled", [String]{launcher.copy()})).cwd(layout.run_root).env("PATH", ""))
         rejected(escape, "cwd") ?? return Err(err)
         return Ok("fail-closed unavailable host ({contract.stderr.trim()})")
     }
@@ -119,7 +121,7 @@ check: fn(layout: Layout) -[Env, Exec, FS, IO, Time, Time.Wait]> String Problem!
         return Err(problem("loopback-only network mismatch: {shown(loopback)}"))
     }
 
-    escape: launch(process.cmd(launch_args(layout, launcher, layout.outside, "disabled", [String]{probe.copy(), "result"})).cwd(layout.run_root))
+    escape: launch(launcher_cmd(layout, launch_args(layout, launcher, layout.outside, "disabled", [String]{probe.copy(), "result"})).cwd(layout.run_root))
     rejected(escape, "cwd") ?? return Err(err)
     authority: launch(probe_spec(layout, launcher, "internet", probe, "result"))
     rejected(authority, "unsupported network authority") ?? return Err(err)
@@ -150,7 +152,7 @@ check: fn(layout: Layout) -[Env, Exec, FS, IO, Time, Time.Wait]> String Problem!
 
 // `--contract` with an empty PATH names the primitive it could not find.
 missing_primitive: fn(layout: Layout, launcher: String) -[Env, Exec, Time.Wait]> Problem! {
-    missing: launch(process.cmd([String]{launcher.copy(), "--contract"}).cwd(layout.root).env("PATH", ""))
+    missing: launch(launcher_cmd(layout, [String]{launcher.copy(), "--contract"}).cwd(layout.root).env("PATH", ""))
     rejected(missing, if sys.is_linux() -> "bubblewrap" else -> "unavailable")
 }
 
@@ -161,7 +163,14 @@ launch_args: fn(layout: Layout, launcher: String, cwd: String, network: String, 
 }
 
 probe_spec: fn(layout: Layout, launcher: String, network: String, probe: String, mode: String) -> ProcessSpec Never! {
-    process.cmd(launch_args(layout, launcher, layout.run_root, network, [String]{probe.copy(), mode.copy()})).cwd(layout.run_root)
+    launcher_cmd(layout, launch_args(layout, launcher, layout.run_root, network, [String]{probe.copy(), mode.copy()})).cwd(layout.run_root)
+}
+
+// A launcher command. The launcher runs from a copy in the scratch tree,
+// outside the checkout, so it cannot read the roots table beside itself; it
+// gets the scratch root this checkout's table names as its probe root.
+launcher_cmd: fn(layout: Layout, argv: [String]) -> ProcessSpec Never! {
+    process.cmd(argv).env("JET_COMPILED_WORKLOAD_PEER_PROBE_ROOT", layout.scratch.copy())
 }
 
 launch: fn(spec: ProcessSpec) -[Exec, Time.Wait]> Ran Never! {
