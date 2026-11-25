@@ -1,0 +1,11 @@
+# A collecting loop inside a generic body's `#run` reads the type parameter
+# in the loop's body: `names_of` lists the field names of the type each call
+# fills `T` with, one answer per instance, on every tier.
+fixture: AGenericBodysCollectingLoopReadsItsTypeParameter.fixture
+env: NO_COLOR=1
+step o0: jet run -O0 names.jet
+exit: 0
+stdout: = "x, y\nname, size, city\n"
+step o2: jet run -O2 names.jet
+exit: 0
+stdout: == o0

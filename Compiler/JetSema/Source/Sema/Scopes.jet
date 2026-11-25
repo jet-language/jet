@@ -1879,6 +1879,10 @@ sema_check_context_snapshot: fn(source: SemaCheckContext) -> SemaCheckContext Ne
         autodiff_obligations: source.autodiff_obligations.copy(),
         generic_crossings: source.generic_crossings.copy(),
         generic_calls: source.generic_calls.copy(),
+        // A lambda in a generic body's compile-time site is part of that
+        // site: its `T.reflect()` reads type the site's code, and the caller
+        // takes the reads it adds back (sema_expression_lambda_merge_context_facts).
+        generic_site: source.generic_site,
         autodiff_safe_panic: source.autodiff_safe_panic,
         autodiff_unsafe_panic: source.autodiff_unsafe_panic,
         autodiff_safe_panic_context: source.autodiff_safe_panic_context,

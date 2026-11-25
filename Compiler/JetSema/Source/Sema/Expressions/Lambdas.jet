@@ -1744,7 +1744,7 @@ sema_expression_lambda_keep_waits: fn(source: SemaCheckContext, target: ^SemaChe
     }
 }
 
-sema_expression_lambda_merge_context_facts: fn(source: SemaCheckContext, target: ^SemaCheckContext, call_start: Int, name_start: Int, comptime_start: Int, body_source_start: Int, compute_call_start: Int, autodiff_obligation_start: Int, copy_start: Int) Never! {
+sema_expression_lambda_merge_context_facts: fn(source: ^SemaCheckContext, target: ^SemaCheckContext, call_start: Int, name_start: Int, comptime_start: Int, body_source_start: Int, compute_call_start: Int, autodiff_obligation_start: Int, copy_start: Int) Never! {
     index := call_start
     loop index < source.call_facts.len() {
         target.call_facts.push(source.call_facts[index])
@@ -1789,6 +1789,9 @@ sema_expression_lambda_merge_context_facts: fn(source: SemaCheckContext, target:
     loop proof_index in 0..<source.index_proofs.len() {
         target.index_proofs.push(source.index_proofs[proof_index])
     }
+    // A snapshot starts with no `T.reflect()` reads, so every one it holds
+    // is this lambda's, and the compile-time site around it reads them.
+    target.generic_reflections.extend(source.generic_reflections.move())
     sema_check_context_merge_expr_ids(source, target)
 }
 

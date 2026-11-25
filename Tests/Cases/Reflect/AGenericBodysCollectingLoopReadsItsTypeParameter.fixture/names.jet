@@ -1,0 +1,21 @@
+// A collecting loop in a generic body's compile-time code reads the type
+// parameter inside the loop's own body: each instance lists the fields of
+// the type that fills `T`.
+Point: struct {
+    x: Int,
+    y: Float,
+}
+
+Team: struct {
+    name: String,
+    size: Int,
+    city: String,
+}
+
+names_of: fn<T>(_rows: [T]) -> [String] {
+    names: #run (loop field in T.reflect().fields -> field.name)
+    names
+}
+
+print(names_of([Point{x: 1, y: 2.0}]).join(", "))
+print(names_of([Team{name: "a", size: 2, city: "b"}]).join(", "))
