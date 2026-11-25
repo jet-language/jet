@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7038,
-    "rev": 114261,
+    "rev": 114266,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -77668,7 +77668,7 @@
       "id": "c028o7uk",
       "num": 7035,
       "title": "Effect classes in plain words: Reads, Adds or Replaces, plus repeatable, checked at routes, retries, transactions and previews",
-      "body": "Owner approved the reworded greenfield proposal item P7 for ballot D-EFFECT-CLASS1 on 2026-11-25. Each effect operation answers three separate questions: what it does to existing data (Reads: only looks; Adds: makes something new and leaves existing data alone; Replaces: old data is gone afterward), whether calling it twice ends the same as once (repeatable), and whether it can be taken back (the existing irreversible() flag, Compiler/Prelude/Effects.jet:14-15, kept separate: an email Adds and can't be undone, a database delete Replaces and can be rolled back). The words map one to one onto MCP tool annotations (readOnlyHint, destructiveHint, idempotentHint). Source: Docs/Proposals/2026-11-24-greenfield-language.md, Part 2, item P7 (master checkout, not yet on dev).",
+      "body": "Owner approved the reworded greenfield proposal item P7 for ballot D-EFFECT-CLASS1 on 2026-11-25. Each effect operation answers three separate questions: what it does to existing data (Reads: only looks; Adds: makes something new and leaves existing data alone; Replaces: old data is gone afterward), whether calling it twice ends the same as once (repeatable), and whether it can be taken back (the existing irreversible() flag, Compiler/Prelude/Effects.jet:14-15, kept separate: an email Adds and can't be undone, a database delete Replaces and can be rolled back). The words map one to one onto MCP tool annotations (readOnlyHint, destructiveHint, idempotentHint). Source: Docs/Proposals/2026-11-24-greenfield-language.md, Part 2, item P7 (master checkout, not yet on dev). Ballot D-EFFECT-CLASS1 posted 2026-11-25 (reviewed by ReviewEffectClass1); its review is Docs/Audits/2026-11-25-effect-access-review.md (in the master checkout, to land on dev).",
       "kind": "feature",
       "track": "epoch",
       "epoch": "G1",
@@ -77681,7 +77681,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-25",
+          "by": "Pip",
+          "text": "Posted D-EFFECT-CLASS1 to the owner; recorded two effect defects the review found."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -77727,6 +77733,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-25T18:17:02.711Z"
+        },
+        {
+          "n": 6,
+          "text": "Independent of the ballot: E0746 refuses an irreversible call inside an `on_commit` closure in `#Transact`, the very place its own fix text recommends (probed on jet a0.0.46). A call inside `on_commit` runs after the commit and is accepted; proof is a case that calls an irreversible function from `on_commit` and runs it on every tier.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T21:08:23.708Z"
+        },
+        {
+          "n": 7,
+          "text": "Independent of the ballot: a `mux.get` route closure that removes a file is accepted although the route handler types (Core/Web/Web.jet:527, Core/HTTP/Server.jet:219) declare `-[Net, FS.Read]>`. Trace the path `mux.get` takes, make the handler row checked at every registration path, and prove it with a UI snapshot of the refused closure.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T21:08:25.472Z"
         }
       ],
       "refs": [],
@@ -77734,8 +77758,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-25T18:17:02.711Z",
-      "updated": "2026-11-25T18:17:02.711Z",
-      "updatedBy": "Pip"
+      "updated": "2026-11-25T21:08:28.462Z",
+      "updatedBy": "Pip",
+      "criteriaLastN": 7
     },
     {
       "id": "c0pej44b",
@@ -140061,6 +140086,298 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-25T20:21:05.518Z"
+    },
+    {
+      "id": "D-EFFECT-CLASS1",
+      "cardId": "c028o7uk",
+      "group": "language",
+      "title": "Effect classes: every effect Reads, Adds or Replaces, operations say whether they are repeatable, and irreversible stays its own fact",
+      "situation": "A small notes server lists notes, saves a note, appends a line to a journal and sends a welcome email. Jet's effects say what each function touches, such as files or the network, but not what it does to data already there. One leaf, FS.Write, covers appending, overwriting and deleting alike. So nothing refuses a GET route that deletes a file, a retried job that sends a push twice, or an agent tool that claims to only read. Retries, previews, GET answers and route checks each guess with a list of their own today. We recommend A: every effect leaf says whether it Reads, Adds or Replaces, an operation that is safe to call twice says so with #Repeatable, and irreversible stays a separate fact.",
+      "gist": "Should every effect say whether it reads, adds or replaces data, and whether calling it twice is safe, and where should those facts live?",
+      "lesson": "An effect names what a function touches, such as files or the network, but not what it does to data already there. This ballot adds that answer as three plain facts. A call Reads, Adds or Replaces. It is repeatable when a second call leaves the kept data as one call would. It is irreversible, a fact Jet already has, when a rollback can't take it back. Retries, previews, transactions, route checks, agent tools, caches and docs then read the same facts instead of guessing.",
+      "explainer": "",
+      "story": "Maya runs a notes service for her team and lets an AI agent use it as a set of tools. A GET link must never delete a note, even when a browser prefetches it. A failed job may run again only if running it twice is harmless. The agent may add notes but never overwrite or delete one, and its tool list should say which tools only read. She also wants a dry run that shows what a script would change.",
+      "inWild": "// MCP: each tool says whether it only reads, may destroy data, and is safe to call twice.\n// https://modelcontextprotocol.io/specification/2025-06-18/server/tools\n{\"name\": \"delete_note\", \"annotations\": {\"readOnlyHint\": false, \"destructiveHint\": true, \"idempotentHint\": true}}\n\n// HTTP: GET, HEAD and OPTIONS are safe; PUT and DELETE are idempotent; POST is neither.\n// https://www.rfc-editor.org/rfc/rfc9110#section-9.2\nPUT /notes/42 HTTP/1.1\n\n// Stripe: a POST carries an Idempotency-Key, so a retried charge is made once.\n// https://docs.stripe.com/api/idempotent_requests\ncurl https://api.stripe.com/v1/charges -H \"Idempotency-Key: KG5LxwFBepaKHyUD\"\n\n// Terraform: plan prints what apply would add, change and destroy before doing it.\n// https://developer.hashicorp.com/terraform/cli/commands/plan\nPlan: 1 to add, 0 to change, 1 to destroy.",
+      "detail": "What this decides. Card #7035 carries greenfield proposal item P7 as the owner reworded it on 2026-11-25. Every effect operation states what it does to data already there: it Reads, Adds or Replaces. Separately it states whether it is repeatable. The existing irreversible fact stays a third answer. This ballot decides where the three facts live, how they reach user code, and every site that reads them.\n\nThe proposal's older wording (read, idempotent write, destructive) is superseded. A fresh adversarial review repaired this text; its audit is Docs/Audits/2026-11-25-effect-access-review.md.\n\n```text\nThe three facts, one question each                          MCP tool hint (2025-06-18 schema)\naccess        Reads     changes no data the program keeps    readOnlyHint: true\n              Adds      puts new data beside the old          readOnlyHint: false, destructiveHint: false\n              Replaces  changes or removes data already there readOnlyHint: false, destructiveHint: true\nrepeatable    a second call, even after a failed or lost      idempotentHint\n              first one, leaves kept data as one call would\nirreversible  a #Transact rollback can't take it back         (none; Jet's own fact, unchanged in meaning)\n```\n\nThe questions are separate, and every combination occurs in one program. Sending an email Adds, is not repeatable and can't be undone. Deleting a database row Replaces, is repeatable and can be rolled back. Overwriting a file Replaces, is repeatable and can't be undone. Appending to a file Adds and is neither repeatable nor undoable.\n\nA read is repeatable, since it changes no kept data, even when a second read of input returns other text. Returning the same result is a different fact, #Replayable's (E0725), and stays separate. MCP's fourth hint, openWorldHint, comes from the row too: a tool whose row reaches Net, Browser, Exec or FFI is open-world.\n\nKept data means files, databases, other services' records, the process environment and the program's code. The memory of the running process is not kept data, so Mem, GPU, Unsafe and Panic Read. State in memory is outside these facts; the edge cases below say what that leaves open.\n\nAlready settled and not reopened. An effect is a type that implements Effect (D-DECL-TYPES1=A), and a root covers its leaves (D-EFFTREE1=A). Irreversible is a declared fact the checker reads (D-RIGHTS1=C), and E0746 refuses it inside #Transact (D-BOUND-UNDO1=A, D-UNDOKW1=A).\n\nA durable send needs a typed key, and at-least-once is the only retry path (D-SERVICE-DELIVERY1=D). The client retries on its own only a stale pooled connection, only for idempotent methods with replayable bodies, at most once (D-HTTP-CLIENT2=A). Run modes are card #7007. Effect scopes come from constant arguments (D-EFFECT-ARGS1=A). A marker setting is already named repeatable (D-MARK-REPEAT1, ratified).\n\n```text\nToday on dev 8f4309b5023 (Main-dev-collectall worktree); probes on jet a0.0.46\n- Compiler/Prelude/Effects.jet: Net is one root with no leaves; FS has Read and Write. Effects state\n  two facts, irreversible and expert (Core/Compiler/Meta.jet:27), and may name a parent:.\n  Exec{Exit, Args} is irreversible in every case, so process.args() inside #Transact is refused.\n- Core/Effects/Effects.jet: #FX(Net, FS) DB{Read, Write}, not irreversible; Log #FX(IO, FS, Net);\n  Secret #FX(Env, FS, Net). Env is one root: Core/Sys/Sys.jet:64-83 reads and sets under it alike.\n- Compiler/JetFoundation/Source/Registry/EffectVocabulary.jet:264-462 reads those facts line by line:\n  a one-line body of true, false, self == .Case or an || of those. Anything else is refused (E3010).\n- Compiler/JetFoundation/Source/CoreDeclarations/Calls.jet:421-532: a hand table maps Core members to\n  roots, and line 515 lists the members that record FS.Write. D-EFFDBREAD1 added DB leaves there.\n  CoreDeclarations/Declarations.jet:823-851 asserts the irreversible roots are Net, FS, Exec and FFI.\n- Core/Files/Files.jet: write (1211), append_all (1224), remove (1753), rename (1831), symlink (1841)\n  and create (612) record FS.Write. create's if_exists defaults to .Replace; .Refuse is an exclusive\n  create. copy (1772), remove_all (1765) and truncate (2999) record bare FS.\n- Core/HTTP/Client.jet:231-247: get, post and request record Net. request only builds a value, and\n  the network is reached at send. RetryPolicy (212-217) is stored on Client.retry (66, 86, 171-175)\n  but never read, and the configured Client.send is not built (card #3665). request_with_retries\n  (394-407) asks retryable_method (409-412): GET, HEAD, OPTIONS, TRACE, PUT and DELETE.\n- Core/HTTP/Server.jet:29-97: route markers hold only a path. A #Server.Get method and a mux.get\n  closure that remove a file both build today.\n- Core/Web/Web.jet:2716-2731: an #App.Public method answers GET only when its reply type is cached\n  .Public, a stand-in for \"only reads\". Web.jet:3087-3104 runs an endpoint or webhook body again,\n  rolled back, up to transactions.attempts() times while the store is busy.\n- Core/App/App.jet:123-138: #App.UploadCheck runs in an always-rolled-back transaction, \"so it can\n  read but never write\"; a file write or a network call escapes it.\n- Core/App/App.jet:140-153: #App.Job reruns a failed run, 5 times by default, unchecked.\n  Tests/Cases/WebApp/AssigneePushIsSentAfterCommitOnly.fixture/main.jet:75 sends a push from a job\n  with retries: 3; app.__notify records bare Net (App.jet:3122).\n- Core/App/App.jet:887-905: a remote call is sent under one fresh request key and resent.\n- Core/Jobs/Jobs.jet:31-33, 400: AtLeastOnce delivery; the private __enqueue takes key: String?.\n  A worker runs its own code between claim (200) and acknowledge or fail (219-227); no handler\n  function is registered.\n- Core/Service/Service.jet:618-621, 680, 725: send_durable requires key; workflow_activity names its\n  activity by a String, with key and max_attempts, and the activity's code is the caller's.\n- Core/DB/DB.jet:969-977, 1028: query records DB.Read, execute DB.Write. Table add, put and delete\n  (1213-1278) record DB.Read and DB.Write; add refuses a taken key, and deleting a missing key is Ok.\n  Op{Read, Insert, Update, Delete} (1072-1077) names the split per row. migrate (3694) is bare DB.\n- Compiler/JetSema/Source/Sema/Calls/Live.jet:466-497: live allows only DB.Read; subscribe allows\n  DB.Read, Net and Time, so a subscribe source may POST.\n- Compiler/JetSema/Source/Sema/Effects/Checks.jet:1095-1127 and 6871-6883: two readers of the\n  irreversible fact. E0746 also refuses an irreversible call inside an on_commit closure, the place\n  its own fix text names; that bug is outside this ballot and goes to a card of its own.\n- Compiler/JetFoundation/Source/Policy/Authority.jet:288-321: a hand table of plain words for the\n  jet run notice (spec.md:3256-3263).\n- Compiler/JetCLI/Source/CLI/InspectRights.jet:350-353 prints \"(irreversible)\" per row, and\n  ProveReport.jet:753 prints \"is replayable\" for a #Replayable function.\n- Jetpack/Integrations/Source/MCP holds the protocol only; no tool hints exist anywhere.\n- \"repeatable\" already names three things: a marker setting (Compiler/Prelude/Markers.jet:12,\n  reflected as MarkerInfo.repeatable in Sema Comptime/Reflection.jet:727, 739), a CLI flag that may\n  be given more than once, and D-HONEST-SIG2=A's labels, which mean replay and are not built.\n```\n\nThe recommended design, A. The access fact lives on the effect leaf, because that is where Jet already infers, checks and grants. Where one leaf mixes kinds of change today, it splits. Repeatable lives on the operation, because it is not a property of a leaf and does not survive composition. Irreversible stays on the leaf as today.\n\n```text\nA, part 1: access is a leaf fact, inferred like every effect\n- New Prelude enum EffectAccess { Reads, Adds, Replaces }, and a third fact method in impl Effect,\n  beside irreversible and expert:\n    access: fn(self) -> EffectAccess { .Reads }\n  Its body is one line: a case, or a chain that checks today, such as\n    if self == .Read -> .Reads else if self == .Add -> .Adds else -> .Replaces\n  A match table with else is refused on a closed enum (Jet.ClosedSetElse), so EffectVocabulary.jet\n  learns this one chain, and E0633's text names access.\n- No access method means .Replaces. A package effect with parent: takes its parent's access, as it\n  takes its irreversibility (spec.md:3031). A bare root's access is the largest of its leaves.\n- Leaves split where one mixes kinds: FS{Read, Add, Replace}, DB{Read, Add, Replace},\n  Net{Read, Add, Replace}, Env{Read, Replace}. FS.Write and DB.Write are deleted. A bare Net, FS,\n  DB or Env row stays valid as a root over its leaves and means Replaces. Scopes keep working:\n  Net.Read(\"api.example.com\"), FS.Add(\"notes/\").\n- Reads: Mem, GPU, Unsafe, Panic, Time, Rand, Secret, Exec.Args, Exec.Exit, Meta.Include and\n  Meta.Host (host work keeps its own effects). IO and Log Read by a stated rule, the one RFC 9110\n  9.2.1 gives for access logs: their output records the run and is not data the program keeps.\n  Adds: Meta.Generate, Meta.Code.Types and Meta.Code.Raw. Replaces: running a program (bare Exec),\n  FFI, Browser and Meta.Code.Rewrite.\n- A function's access is the largest in its row: Reads < Adds < Replaces. A package effect counts\n  at its declared access. That is the package's statement, as an MCP hint is a server's; the hard\n  bound is the package's authority grant, which the runtime already enforces, and jet inspect\n  rights prints each package effect's declared access beside the kernel effects it reaches.\n- No argument value picks a leaf. An operation whose argument chooses between adding and replacing\n  records Replaces, and the add-only case gets its own function, as Rust's File::create_new does:\n  files.create_new(path) records FS.Add, files.create records FS.Replace, and CreateIfExists is\n  deleted. The HTTP client gets one function per method: get, head and options record Net.Read,\n  post records Net.Add, and put, patch and delete record Net.Replace. send of a built request, whose\n  method is a run-time value, records bare Net.\n\nA, part 2: repeatable is an operation fact\n- New marker #Repeatable on a function or method, a marker struct in Compiler/Prelude/Markers.jet.\n  #Repeatable(key: p) says the call is repeatable when parameter p carries a key that is the same on\n  every try, as Stripe's Idempotency-Key does.\n- Repeatable is about kept data, not the returned value: a second remove of one file reports\n  NotFound and is still repeatable, as RFC 9110 9.2.2 lets a second DELETE answer differently.\n- Every operation whose row only Reads is repeatable without a mark.\n- Core marks: files.write, write_bytes, write_atomic, write_at, remove, remove_dir, remove_all,\n  create_dir_all, set_mode, chown, rename and copy; Table add (#Repeatable(key: row), since a taken\n  key is refused), put and delete; db migrate, which replays by checksum; client get, head, options,\n  put and delete; send_durable(key:) and the jobs enqueue (key:). append, append_all, create_new,\n  post, patch, send and execute stay unmarked.\n- A user function is repeatable when it only Reads, or when it carries #Repeatable and reaches no\n  call that is not repeatable, keyed or deferred until commit. A claim that reaches one is a new\n  registered error naming the call path. The rest can't be proved: save(load(n) + 1) calls two\n  repeatable operations and is not repeatable. A written #Repeatable is a promise the compiler can\n  refute but never prove, like #Undo(inverse) on a foreign binding.\n- A key counts only when it is built from the body's parameters and constants, which are the same\n  on every try. A key built from Rand or Time is refused.\n\nA, part 3: irreversible keeps its meaning and its one rule\n- FS.Add, FS.Replace, Net.Add and Net.Replace are irreversible, as FS.Write and Net are. FS.Read\n  and Net.Read are not, so E0746 stops refusing them in #Transact. Exec's fact becomes\n  self == .Exit, so reading process.args() inside #Transact builds. DB stays reversible.\n- Sema keeps one reader of the three facts. sema_effect_vocabulary_irreversible\n  (Checks.jet:6871-6883) is deleted, and the hand leaf list in Calls.jet:494-532 is replaced by rows\n  that Tools/Agent/CoreSourceRows.jet generates from Core's declared rows; no hand list stays.\n```\n\n```text\nThe notes service under A                                  access     repeatable  irreversible\nlist_notes    files.read(\"notes/index.txt\")              Reads      yes         no\nsave_note     files.write(\"notes/42.txt\", t)              Replaces   yes         yes\njournal       files.append_all(\"journal.txt\", line)       Adds       no          yes\nwelcome       client.post(mail_url, to)                   Adds       no          yes\nrename_note   notes.put(row) in #Transact, then welcome   Replaces   no          yes\n```\n\nWhat each fact buys in this program. Safe retries: an HTTP client may resend GET /notes and PUT /notes/42 after a dropped connection, and the route checks make both harmless; nothing resends welcome's POST. An #App.Job that calls journal is refused until it sets retries: 0 or at_least_once: true, or journal takes a key. Previews: jet run --preview runs list_notes for real and records save_note, journal and welcome, with save_note marked as replacing.\n\nTransactions: E0746 still refuses welcome inside #Transact, because it can't be undone, so rename_note calls it after the block. Caching: only a Reads method answers GET or keeps a cached reply. Docs: hover on save_note shows its three facts.\n\nAgent tools: an MCP tool built from save_note gets destructiveHint true and idempotentHint true with no hand-written hints. Running the agent with --deny=FS.Replace,Exec,FFI lets it add notes but never overwrite or delete one. That grant holds for every call Jet makes. A program the agent starts is held by denying Exec, since Jet's kernel confinement covers reads only today (Compiler/JetBackend/Source/Image/Loader.jet:1958-1990).\n\n```text\n$ jet run --preview notes.jet        (format is card #7007's to settle; illustrative)\nplan: notes.jet would\n  replace  notes/42.txt                    save_note  notes.jet:27   repeatable, can't be undone\n  add      journal.txt                     journal    notes.jet:31   can't be undone\n  add      POST https://mail.example/send  welcome    notes.jet:35   can't be undone\nran for real: read notes/index.txt (list_notes)\n\nhover on save_note\n  save_note: fn(id: String, text: String) -[FS.Replace]> IOError!\n  replaces files · repeatable · can't be undone\n\nerror: GET route `reset` replaces data          (new registered error)\n  --> notes.jet:57\n   | files.remove(\"notes/old.txt\")              FS.Replace\n   = browsers and proxies may send a GET again, prefetch it or cache it, so a GET may only read\n   = fix: mark the route #Server.Post or #Server.Delete\n```\n\nThe checks A adds, each a new registered error.\n\nRoutes. A #Server.Get, Head or Options handler that reaches Adds or Replaces is refused. A #Server.Put or Delete handler that isn't repeatable is refused, since HTTP lets a client resend those. The check reads the handler's row, so it covers marked methods, mounted values and closures passed to mux.get, because a function value's type carries its row.\n\nRFC 9110 9.2.1 and 9.2.2 let a server log, count or charge on such a request. Log Reads, so logging needs nothing. Any other side record writes one field on the route marker, #Server.Get(\"/ads/:id\", side_adds: true). The handler may then reach Adds that aren't repeatable, but a GET never reaches Replaces.\n\nRetries. Core runs two kinds of body again that Jet can see. One is an #App.Job method after a failure, 5 tries by default; the other is an App endpoint or webhook body while the store is busy (Web.jet:3087-3104). In such a body every irreversible call must be repeatable, keyed, or deferred until commit with app.enqueue. Database work in the App store is rolled back with each try and needs nothing. Otherwise the body is refused, and the error names the call path.\n\nA job that accepts doing its work twice says so with #App.Job(retries: 3, at_least_once: true), the delivery name Jobs.jet and D-SERVICE-DELIVERY1 already use. The client's own retry reads the method table while running, at most once (D-HTTP-CLIENT2).\n\nNot checked, and said so on their reference pages: a core.jobs worker's code between claim and acknowledge, and a workflow activity named by a String. No function is registered for either, so there is no body to read; D-SERVICE-DELIVERY1's typed key stays their guard.\n\nClaims. A #Repeatable claim that reaches a call that is not repeatable, keyed or deferred is refused.\n\nApp sites. An #App.Public method answers GET, or keeps a cached reply, only when it Reads; the cached .Public reply type stops standing in for that. #App.UploadCheck's method must Read, and its always-rolled-back transaction is deleted. A subscribe source may use Net.Read but not Net.Add or Net.Replace.\n\n```text\nEdge cases under A\n- Adds and Replaces in one function: its row holds both leaves and its access is Replaces. A preview\n  still lists each call with its own access.\n- db.execute(sql) records DB.Replace whatever its SQL; typed Table add records DB.Add.\n- Generic code: an open row (..E) takes each instance's leaves, and each instance is checked, as\n  rows are today. Hover on the generic function says its access depends on E.\n- Dynamic dispatch: a function value or trait call has its type's declared row, so its access is\n  known. Its repeatable fact is not, so it counts as not repeatable unless its row only Reads.\n- FFI: every FFI leaf Replaces and is irreversible. A binding may carry #Repeatable beside\n  #Undo(inverse); its access stays Replaces. A package that wraps a foreign library in its own\n  effect declares that effect's access, as Core's DB does.\n- Partial failure: repeatable is defined over a failed or lost first call. write truncates and\n  rewrites the whole file, so a second call fixes a half-written one; append_all can't.\n- A call that removes what it reads, such as a queue claim, is not a read: Core's claim records DB,\n  which is Replaces.\n- State in memory: a write through a Shared handle is not an effect, so the route checks don't see\n  it. A module variable write is seen once D-GLOBAL-SAFE1's touch fact (card #6859) lands, and the\n  route checks count it as Replaces.\n- Net.Read is not a secrecy boundary: a GET can carry data out in its URL. Host scopes and\n  --deny=Net stay the secrecy controls.\n- Browser stays one leaf, Replaces; splitting it is left to a later ballot if a need appears.\n- Compile time: access is a maximum over a row the checker already holds. The claim, route and\n  retry checks walk call edges the effect solver already built, once per marked body. The build\n  card measures check time on Tests/Cases before and after (AGENTS.md performance gate).\n- Beginners write nothing: rows are inferred, and hover, preview and errors speak the three words.\n  Experts write --deny=FS.Replace, access in their own effects, and #Repeatable(key:) on their APIs.\n```\n\n```text\nAmendments A states\n- D-HONEST-SIG2=A: its \"repeatable\" and \"not repeatable\" labels, which mean #Replayable, become\n  \"replayable\" and \"not replayable\", matching #Replayable and E0725. Not built, so no code moves.\n- D-EFFDBREAD1=A: execute records DB.Replace, not DB.Write, and the Core-call table it extended is\n  generated from Core's rows. Its note that user inference keeps only bare roots is stale: on\n  jet a0.0.46 a helper that calls files.read checks under -[FS.Read]>.\n- D-HTTP-CLIENT2=A: the client gains head, options, put, patch and delete functions, and its\n  retry reads the one method table.\n- D-MARK-REPEAT1: the marker setting keeps the word. Both meanings say doing it twice is fine; one\n  lives on MarkerInfo, the other on a function's reflection, and hover names which.\n- Spec \"Effects\" and \"Transactions\": the root table (spec.md:3108-3126), the FS.Read and FS.Write\n  text of #Transact (spec.md:2951-2968), and E0746 no longer refusing reads.\n- Card #7007: a preview records Adds and Replaces calls, not \"every write effect\".\n```\n\n```text\nCutover: every site, and what it deletes (git-tracked hits; Docs/Audits is history and\nTools/Tower is board data, so both keep their text)\n 1 Compiler/Prelude/Effects.jet: EffectAccess; split FS, Net and Env; access on every effect;\n   Exec's irreversible becomes self == .Exit; header 1-19.\n 2 Core/Effects/Effects.jet: DB{Read, Add, Replace}; access for DB, Log and Secret.\n   Core/Compiler/Meta.jet: access for each Meta leaf.\n 3 Parser Declarations/Effects.jet:43-171, formatter Items.jet:2506-2524, AST Items.jet:277-290,\n   codec SyntaxCodec.jet:5635-5666, E0907 and E0633 texts: the access method beside irreversible.\n 4 Registry/EffectVocabulary.jet:264-462: EffectVocabularyRow gains access, and the scanner reads\n   the one-line chain. CoreDeclarations/Declarations.jet:823-851 asserts it.\n   Tools/Agent/CoreSourceRows.jet and the generated Core/Compiler/Lang.jet:52-77 follow.\n 5 CoreDeclarations/Calls.jet:421-532: the hand tables become generated rows; the leaf list is\n   deleted.\n 6 Sema Effects/Checks.jet: one fact reader for access, repeatable and irreversible; delete\n   sema_effect_vocabulary_irreversible (6871-6883). Add the route, retry and claim checks.\n 7 Compiler/Prelude/Markers.jet: the Repeatable marker struct; the at_least_once field on\n   App.Job and side_adds on the route markers (Core/HTTP/Server.jet:29-97); diagnostics rows.\n 8 Core/Files/Files.jet: every FS.Write and mixed FS row gets its precise leaf; #Repeatable marks;\n   create_new added, CreateIfExists deleted (9 hits in 5 files). create(if_exists: .Refuse)\n   becomes create_new at 84 hits in 57 files.\n 9 Core/DB/DB.jet: execute DB.Replace; Table add DB.Add, put and delete DB.Replace; marks.\n   Op{Read, Insert, Update, Delete} stays for row policies and is documented in the three words.\n10 Core/HTTP/Client.jet: one function per method and one method table; RetryPolicy is read by\n   request_with_retries or deleted with it (5 hits in 3 files: Client.jet,\n   Compiler/Prelude/Core.rows:145, Compiler/JetRuntime/Source/HTTPRetry.jet); delete\n   retryable_method (409-412).\n11 Core/Web/Web.jet:2716-2731: GET and the reply cache read access; delete the .Public stand-in.\n12 Core/App/App.jet: Job and UploadCheck checks; delete UploadCheck's rolled-back transaction.\n   Run the retry check over every #App.Job site (89 hits in 34 files) and fix each refusal;\n   AssigneePushIsSentAfterCommitOnly's job gets at_least_once: true.\n13 Core/Jobs/Jobs.jet and Core/Service/Service.jet: enqueue and send_durable marks; reference\n   pages say worker and activity bodies are not checked.\n14 Core/Sys/Sys.jet:64-83: get, vars and environment record Env.Read; set and unset Env.Replace.\n15 Sema Calls/Live.jet:482-497: subscribe allows Net.Read only.\n16 Policy/Authority.jet:71, 150, 288-321: words come from the root's noun and the access verb\n   (\"adds files\", \"replaces files\"); delete the per-leaf rows; the workspace grant names leaves.\n17 Runtime grants and keys: Compiler/JetFoundation/Source/Registry/RuntimeInterface.jet:136-170,\n   Compiler/JetRuntime/Source/Public/Files.jet:37-154 (#Import rows),\n   Compiler/JetRuntime/Source/FilesStreams.jet:7-10 (the fault-injection key \"FS.Write\"),\n   PluginHost.jet:966, ProcessGrants.jet:8-9 and ProcessExecutionAuthority.jet:501 in\n   Compiler/JetRuntime/Source, Compiler/JetRuntime/Tests/AuthorityWitness.c:173 and\n   CompilerRoutesParity.tsv:7.\n18 Policy/EffectScope.jet:148 and Compiler/JetFoundation/Tests/Policy/EffectScope.jet:53-140;\n   Evidence/EvidenceIO.jet:56; Record/JetLib.jet:164; Sema Calls/Methods.jet:414 and\n   Checks.jet:2932, 4811; JetCLI Perf/BrowserCapture.jet:174 and CLI/Authority.jet:275;\n   Compiler/JetParser/Tests/Parser/MarkerRegistryCoverage.jet:45;\n   Compiler/JetCanvas/Source/CanvasAssets/JS/inspector-connections.js:549;\n   Compiler/Migrations/SigArrow1.jet:2-3.\n19 Syntax registry: Compiler/JetFoundation/Data/Syntax/Spellings.jet:66 (its example row) and\n   EffectsSurface.jet:150 (the #Transact text).\n20 JetCLI InspectRights.jet:350-353 and ProveReport.jet:753: print access and repeatable beside\n   irreversible and replayable.\n21 Reflection: f.reflect().access, .repeatable and .irreversible, which hover, jet doc, API\n   snapshots, jet explain and the MCP tool builder (D-MCP-SURFACE1) read. No hand-written hints.\n22 One language rewrite: a written FS.Write becomes FS.Add, FS.Replace, and DB.Write likewise; the\n   run notice says which rows can narrow. No alias for the old leaves. FS.Write: 736 hits in about\n   372 files (Tests/Cases 333, Tools/AgentEval 49, Examples 62, Core/Files 57, Compiler 132, Docs\n   43, the rest under 25 each). DB.Write: 121 hits in about 59 files. Bare Net, FS and Env rows\n   stay valid and are not rewritten.\n23 Spec, Reference pages, editor grammars, Examples/ErrorsAndEffects/Effects/EffectDeclarations.jet\n   (Ledger.Post Adds), and a new notes example with golden output.\n```",
+      "options": [
+        {
+          "name": "Access on the effect leaf, split where a leaf mixes kinds; repeatable on the operation; irreversible unchanged",
+          "key": "A",
+          "detail": "Each effect declares whether it Reads, Adds or Replaces, beside its irreversible fact. FS.Write and DB.Write split into Add and Replace leaves, and Net gains Read, Add and Replace leaves, so a function's row already says what it does. The compiler infers it for user code exactly as it infers effects today, and --allow and --deny can grant adding without replacing.\n\nRepeatable is marked on operations with #Repeatable, because it depends on the call, not the leaf. User code is repeatable when it only reads, or when it says #Repeatable and reaches nothing that isn't. Routes, retried bodies and claims are checked while building, and a route or job that means to do more says so in one field.",
+          "technical": "EffectAccess and the access fact method join irreversible and expert in impl Effect and in the vocabulary rows every reader uses; the scanner learns one one-line chain. Rows split FS, DB, Net and Env. One language rewrite moves FS.Write (736 hits) to FS.Add, FS.Replace and DB.Write (121 hits) likewise. The hand leaf list in Calls.jet and the second irreversible reader are deleted.\n\nA function's access is the largest in its row, and a package effect counts at its declared access, bounded by its grant. An argument value never picks a leaf: files.create_new and one client function per method do that. #Repeatable and #Repeatable(key:) are marker structs; sema joins them over the call graph only to refute a claim.\n\nNew errors cover GET, HEAD and OPTIONS handlers that change data, PUT and DELETE handlers that aren't repeatable, retried #App.Job and endpoint bodies, and refuted claims. Route markers gain side_adds and #App.Job gains at_least_once.\n\nBeginner path: nothing to write; hover, preview and errors use the three words. Expert path: grant FS.Add without FS.Replace, declare access in package effects, and put #Repeatable(key:) on keyed APIs. Costs: every FS.Write and DB.Write row is rewritten, and a true #Repeatable claim is trusted past what the compiler can see. A package's declared access is its own statement, and core.jobs workers and workflow activities stay unchecked.",
+          "code": "// Compiler/Prelude/Effects.jet under A (new spelling)\nEffectAccess: enum {\n    Reads,\n    Adds,\n    Replaces,\n}\n\nFS: enum {\n    Read,\n    Add,\n    Replace,\n\n    impl Effect {\n        irreversible: fn(self) -> Bool { self == .Add || self == .Replace }\n        access: fn(self) -> EffectAccess { if self == .Read -> .Reads else if self == .Add -> .Adds else -> .Replaces }\n    }\n}\n\n// Core/Files/Files.jet under A (new spelling)\n#Repeatable\nwrite: fn(path: Path | String, text: String) -[FS.Replace]> IOError! { … }\nappend_all: fn(path: Path | String, text: String) -[FS.Add]> IOError! { … }\ncreate_new: fn(path: Path | String, mode: Int?{None}, links: LinkPolicy{.Follow}) -[FS.Add]> FileWriter IOError! { … }\n\n// notes.jet: the same program under every option. Without #Repeatable and the two\n// reflect lines it checks on jet a0.0.46. The user writes no new facts; each\n// comment shows what A infers.\nuse {\n    app\n    files: core.files\n    client: core.http.client\n    db: core.db\n    core.http.server\n    web: core.web\n}\n\n#Codable\nNoteText: struct {\n    text: String,\n}\n\n#Codable\nNote: struct {\n    id: String,\n    owner: String,\n    title: String,\n}\n\nlist_notes: fn() -> String IOError! {\n    files.read(\"notes/index.txt\")                     // FS.Read: Reads\n}\n\nsave_note: fn(id: String, text: String) IOError! {\n    files.write(\"notes/{id}.txt\", text)              // FS.Replace: Replaces, repeatable\n}\n\njournal: fn(line: String) IOError! {\n    files.append_all(\"journal.txt\", \"{line}\\n\")     // FS.Add: Adds, not repeatable\n}\n\nwelcome: fn(to: String) HTTPError! {\n    _: client.post(\"https://mail.example/send\", to)  // Net.Add: Adds, can't be undone\n}\n\nrename_note: fn(notes: db.Table<String, Note>, row: Note) DBError! {\n    #Transact {\n        _: notes.put(row.copy())                     // DB.Replace: rolled back on failure\n    }\n    welcome(row.owner) ?? return                     // irreversible: after the block\n}\n\nNotes: struct {\n    #Server.Get(\"/notes\") list: fn(self) -> HTTPResponse HTTPError! {\n        Ok(server.response(200, list_notes() ?? \"\"))\n    }\n\n    #Server.Put(\"/notes/:id\") save: fn(self, id: String, request: HTTPRequest) -> HTTPResponse HTTPError! {\n        body: request.json<NoteText>()\n        save_note(id, body.text) ?? return Ok(server.response(500, \"not saved\"))   // repeatable: allowed\n        Ok(server.response(200, \"saved\"))\n    }\n\n    #Server.Get(\"/reset\") reset: fn(self) -> HTTPResponse HTTPError! {\n        files.remove(\"notes/old.txt\") ?? return Ok(server.response(500, \"not removed\"))   // error: a GET reaches FS.Replace\n        Ok(server.response(200, \"gone\"))\n    }\n}\n\nDigest: struct {\n    #App.Job(retries: 3) send: fn(self) -> Int IOError! {\n        journal(\"digest sent\")   // error: retried, and journal is irreversible and not repeatable\n        Ok(1)\n    }\n}\n\n#Repeatable\nset_title: fn(id: String, title: String) IOError! {\n    files.write(\"titles/{id}.txt\", title)   // a checked promise: reaches only repeatable calls\n}\n\nrun: fn() {\n    mux: web.app()\n    mux.mount(Notes{})\n    print(list_notes() ?? \"no notes\")\n    print(save_note.reflect().access)       // Replaces\n    print(save_note.reflect().repeatable)   // true\n}"
+        },
+        {
+          "name": "Access and repeatable on each operation, inferred through user code beside the row; leaves unchanged",
+          "key": "B",
+          "detail": "FS.Write and the other leaves stay as they are. Each Core operation carries two marks, its access and whether it is repeatable, and the compiler infers a function's access from the calls it reaches, beside its effect row. Nothing in existing rows changes.\n\nThe facts are as precise as A's for inference, but they live in a second plane that rows, scopes, manifests and --allow can't see. So a grant can't allow adding files without replacing them.",
+          "technical": "New markers #Access(.Adds) and #Repeatable on Core operations and foreign bindings. The effect walker carries a second inferred value per function, the largest access reached, which reflection and tools read. Repeatable is refuted as in A. Routes, retries, previews and tools read the new value.\n\nBeginner path: same as A. Expert path: no add-only grant; a package effect declares access per operation instead of once. Costs: two parallel facts about one call, which every reader of rows must also learn to read (I8). Edge cases match A, but a function value's type has no access unless function types gain one, a new spelling this option would still need.",
+          "code": "// Core/Files/Files.jet under B (new spelling)\n#Access(.Replaces)\n#Repeatable\nwrite: fn(path: Path | String, text: String) -[FS.Write]> IOError! { … }\n#Access(.Adds)\nappend_all: fn(path: Path | String, text: String) -[FS.Write]> IOError! { … }\n\n// notes.jet\nNotes: struct {\n    #Server.Get(\"/reset\") reset: fn(self) -> HTTPResponse HTTPError! {\n        files.remove(\"notes/old.txt\") ?? return Ok(server.response(500, \"not removed\"))   // error: reaches #Access(.Replaces)\n        Ok(server.response(200, \"gone\"))\n    }\n}\n\n// an agent can't be allowed to add files but not replace them\n// $ jet run --allow=FS.Write agent.jet    (all or nothing)"
+        },
+        {
+          "name": "A leaf for every kind of change, with access and repeatable both declared on the leaf",
+          "key": "C",
+          "detail": "Effects split further, one leaf per kind of change. FS gets Create, Append, Overwrite and Delete; Net gets Get, Post, Put and Delete; DB gets Insert, Update and Delete. Each leaf declares both its access and whether it is repeatable, so every fact is a leaf fact and grants are as fine as they can be.\n\nRows grow long, and repeatable still isn't a leaf property: an UPDATE that sets a value is repeatable and one that adds to it is not.",
+          "technical": "impl Effect gains access and repeatable fact methods. About fifteen new leaves; every Core row is rewritten by hand, since no rewrite can tell an append from an overwrite. A function is repeatable when all its leaves are, which is unsound for read-then-write code, so C either accepts wrong answers or adds A's refutation-only rule.\n\nBeginner path: rows read like verbs but are long. Expert path: the finest grants, such as --allow=FS.Create. Costs: a leaf list per store that grows with every new kind of change, and a repeatable fact that is still wrong for DB.Update and FS.Rename.",
+          "code": "// Compiler/Prelude/Effects.jet under C (new spelling)\nFS: enum {\n    Read,\n    Create,\n    Append,\n    Overwrite,\n    Delete,\n\n    impl Effect {\n        irreversible: fn(self) -> Bool { self == .Create || self == .Append || self == .Overwrite || self == .Delete }\n        access: fn(self) -> EffectAccess { … }\n        repeatable: fn(self) -> Bool { self == .Read || self == .Create || self == .Overwrite || self == .Delete }\n    }\n}\n\n// notes.jet\nsave_note: fn(id: String, text: String) IOError! {\n    files.write(\"notes/{id}.txt\", text)              // FS.Overwrite\n}\n\njournal: fn(line: String) IOError! {\n    files.append_all(\"journal.txt\", \"{line}\\n\")     // FS.Append\n}\n\nbump: fn(id: String) IOError! {\n    n: Int.parse(files.read(\"counts/{id}\") ?? \"0\") ?? 0\n    files.write(\"counts/{id}\", \"{n + 1}\")            // every leaf repeatable, yet bump isn't\n}"
+        },
+        {
+          "name": "Declared hints at boundaries only, as MCP does: routes, tools and jobs state them, nothing infers or checks them",
+          "key": "D",
+          "detail": "Leaves stay as today. A route, a tool or a job states its own hints where it is declared, and tools copy them out, as MCP servers do. The compiler neither infers nor checks them.\n\nThis is the cheapest option and maps one to one onto MCP. A hint can be wrong, though, and nothing notices: a GET route marked read-only may still delete.",
+          "technical": "New fields on boundary markers, for example #App.Public(reads_only: true) and an MCP tool builder's hints argument. Retries, previews and caches read those fields where a boundary exists and the coarse leaves elsewhere. The retry lists in Client.jet and Web.jet stay.\n\nBeginner path: write hints on each tool and route, or get MCP's pessimistic defaults. Expert path: none beyond the hints. Costs: hints duplicate what the code shows and drift from it, every boundary kind needs its own field (I8), and inner calls have no facts.",
+          "code": "// notes.jet under D (new spelling)\nNotes: struct {\n    #Server.Get(\"/reset\", reads_only: true) reset: fn(self) -> HTTPResponse HTTPError! {\n        files.remove(\"notes/old.txt\") ?? return Ok(server.response(500, \"not removed\"))   // builds: nothing checks the hint\n        Ok(server.response(200, \"gone\"))\n    }\n}\n\ntools: mcp.server(\"notes\").tool(\"save_note\", save_note, read_only: false, destructive: true, idempotent: true)"
+        },
+        {
+          "name": "Keep today's state: one write leaf, irreversible as the only fact, and each site's own list",
+          "key": "E",
+          "detail": "FS.Write and DB.Write keep covering every change. Irreversible stays the one fact, read by #Transact. The client keeps its fixed list of retryable methods, a GET keeps reading the cached reply type, and a preview counts every write as destructive.\n\nNothing changes, and nothing new is checked.",
+          "technical": "No work. The known gaps stay: RetryPolicy is stored but never read, and a .Public method that writes still answers GET. A subscribe source may POST, #App.Job reruns anything, and reading process.args() inside #Transact stays refused. MCP tools would need hand-written hints when D-MCP-SURFACE1 is built.\n\nBeginner path: unchanged. Expert path: unchanged. Costs: the owner's three facts are not available to any tool, and card #7007's preview can't tell an append from a delete.",
+          "code": "// notes.jet today: both build on jet a0.0.46\nNotes: struct {\n    #Server.Get(\"/reset\") reset: fn(self) -> HTTPResponse HTTPError! {\n        files.remove(\"notes/old.txt\") ?? return Ok(server.response(500, \"not removed\"))   // FS.Write: builds\n        Ok(server.response(200, \"gone\"))\n    }\n}\n\nDigest: struct {\n    #App.Job(retries: 3) send: fn(self) -> Int IOError! {\n        files.append_all(\"journal.txt\", \"digest sent\\n\")   // may run four times\n        Ok(1)\n    }\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "MCP",
+          "note": "Tool annotations carry readOnlyHint (default false), destructiveHint (default true, and false means the tool only adds), idempotentHint (default false) and openWorldHint (default true). The spec says a client must treat them as untrusted unless the server is trusted. A maps Reads to readOnlyHint, Adds to destructiveHint false, repeatable to idempotentHint, and a reached Net effect to openWorldHint, all derived from checked facts instead of written by hand. Sources: https://modelcontextprotocol.io/specification/2025-06-18/server/tools and the 2025-06-18 schema.ts in the modelcontextprotocol GitHub repository.",
+          "code": "{\"name\": \"save_note\",\n \"annotations\": {\"readOnlyHint\": false, \"destructiveHint\": true,\n                 \"idempotentHint\": true, \"openWorldHint\": false}}"
+        },
+        {
+          "lang": "HTTP",
+          "note": "RFC 9110 calls GET, HEAD, OPTIONS and TRACE safe, and PUT and DELETE idempotent as well. A safe method may still log, count or charge for a request, and an idempotent one may log each request separately. A client should not retry a request that isn't idempotent unless it knows the request is. A makes a Jet route keep those promises while building, treats logging as Reads, and lets a route that records a side row say side_adds. Source: https://www.rfc-editor.org/rfc/rfc9110#section-9.2",
+          "code": "GET /notes        safe, idempotent\nPUT /notes/42     idempotent\nPOST /journal     neither"
+        },
+        {
+          "lang": "Stripe",
+          "note": "Any v1 POST may carry an Idempotency-Key. The server saves the status code and body of the first request with that key, even a 500 error, and answers a retry with the saved result. It refuses a retry whose parameters differ and may forget keys after 24 hours. That turns a call that isn't repeatable into one that is, which is A's #Repeatable(key:). Source: https://docs.stripe.com/api/idempotent_requests",
+          "code": "curl https://api.stripe.com/v1/charges \\\n  -H \"Idempotency-Key: KG5LxwFBepaKHyUD\" -d amount=2000"
+        },
+        {
+          "lang": "Terraform",
+          "note": "terraform plan prints what apply would add, change and destroy; a plan saved with -out is what apply performs. Its three counts are A's Adds and Replaces, which card #7007's preview reads. Source: https://developer.hashicorp.com/terraform/cli/commands/plan",
+          "code": "Plan: 2 to add, 1 to change, 2 to destroy."
+        },
+        {
+          "lang": "Koka",
+          "note": "Koka infers effect rows like Jet, and its heap effect is already split by what a call does: st<h> is read<h>, write<h> and alloc<h>. A function that only reads a reference has read<h> in its type. That is A's split on a leaf, with alloc as Adds; Koka has no repeatable fact. Source: https://koka-lang.github.io/koka/doc/std_core_types.html",
+          "code": "alias st<h> = <read<h>, write<h>, alloc<h>>\nfun peek(r : ref<h,int>) : read<h> int\n  !r"
+        },
+        {
+          "lang": "Haskell and Rust",
+          "note": "Haskell's runST runs a computation whose state no one else can see, so local changes are not effects at all; A's Mem Reads says the same about process memory. Rust gives creating a new file its own function, File::create_new, which fails if the file exists and is atomic. No argument picks the meaning, and A's files.create_new follows it. Sources: https://hackage.haskell.org/package/base/docs/Control-Monad-ST.html and https://doc.rust-lang.org/std/fs/struct.File.html#method.create_new",
+          "code": "runST :: (forall s. ST s a) -> a\n\nlet f = File::create_new(\"notes/42.txt\")?;"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A puts what a call does to data on the effect leaf, where Jet already infers, checks, grants and reports. User code writes nothing new, and --deny=FS.Replace becomes an add-only grant for Jet code. Repeatable stays on operations because it depends on the call and can't be inferred through composition. Irreversible keeps its meaning and its one rule. Every site that guesses today reads the same three facts instead, and the hand-kept lists in the compiler are deleted.",
+        "tradeoff": "Checked routes, safer retries, honest previews, add-only grants and MCP hints without hand-written hints. In return every FS.Write and DB.Write row is rewritten once, a true #Repeatable claim is a promise the compiler can only refute, and a package states its own effect's access.",
+        "gains": [
+          "A GET, HEAD or OPTIONS route can't change data, and a PUT or DELETE route can't append twice.",
+          "A retried #App.Job or endpoint body is refused unless running it again is harmless, keyed, rolled back or accepted out loud.",
+          "jet run --preview runs reads for real and records adds and replaces, with replaces marked.",
+          "An agent can be allowed to add files or rows but never overwrite or delete them.",
+          "MCP tool hints, hover, jet doc and the run notice come from one checked fact, with no hand-written hints."
+        ],
+        "losses": [
+          {
+            "loss": "Every row that names FS.Write or DB.Write is rewritten, about 860 places in at most 431 files, and old --allow=FS.Write lines stop working.",
+            "mitigation": "One language rewrite turns FS.Write into FS.Add, FS.Replace, which covers the same calls, and the run notice says which rows can narrow. Bare FS, DB and Net rows stay valid."
+          },
+          {
+            "loss": "A user function that changes data is repeatable only when marked, and a mark can't be fully proved.",
+            "mitigation": "The compiler refuses a mark that reaches any call that isn't repeatable, and keyed calls count as repeatable, so the common retry paths are checked."
+          },
+          {
+            "loss": "A foreign call, a request sent with a method chosen at run time, or raw db.execute counts as Replaces even when it only reads.",
+            "mitigation": "Typed Table methods, one client function per HTTP method and files.create_new keep exact facts, and a package that wraps a foreign library declares its own effect's access."
+          },
+          {
+            "loss": "A package's declared access and the bodies run by core.jobs workers and workflow activities are not checked.",
+            "mitigation": "The package's authority grant stays the hard limit, and inspect rights shows declared access beside the effects reached. Workers and activities keep D-SERVICE-DELIVERY1's typed key."
+          },
+          {
+            "loss": "A GET that records a side row, and a job that may send twice, need one written field.",
+            "mitigation": "Logging needs nothing, since Log Reads. side_adds: true on the route or at_least_once: true on the job is one field, on the rare route or job that needs it."
+          },
+          {
+            "loss": "Net.Read sounds safe but is no secrecy boundary, since a GET can carry data out.",
+            "mitigation": "Host scopes such as Net.Read(\"api.example.com\") and --deny=Net stay the secrecy controls, and the reference page says so."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B keeps two parallel facts about one call. Rows, scopes, manifests and --allow can't see access, so an agent can't be allowed to add without replacing, and every row reader must learn a second plane."
+          },
+          {
+            "key": "C",
+            "reason": "C makes rows long and the leaf list grow with each new kind of change. Its repeatable leaf fact is still wrong for updates, renames and read-then-write code."
+          },
+          {
+            "key": "D",
+            "reason": "D's hints are unchecked and duplicate what the code shows. A GET marked read-only may still delete, and inner calls have no facts for retries or previews."
+          },
+          {
+            "key": "E",
+            "reason": "E leaves the owner's three facts unavailable. Retries, GET answers and previews keep guessing from their own lists, and the gaps found on dev stay open."
+          }
+        ]
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: ReviewEffectClass1. The review probed every example on jet a0.0.46 and checked each claim against dev, the decisions and the external sources. It replaced constant-argument narrowing with split operations, added the endpoint reruns, side_adds and at_least_once to the checks, and completed the cutover; see Docs/Audits/2026-11-25-effect-access-review.md."
+      },
+      "checkInstructions": "On dev, read Compiler/Prelude/Effects.jet:1-70, Core/Effects/Effects.jet and Core/Compiler/Meta.jet:20-43 for today's leaves and their irreversible, expert and parent facts. Read Compiler/JetFoundation/Source/Registry/EffectVocabulary.jet:264-462 for the one-line fact scanner, and Compiler/JetSema/Source/Sema/Effects/Checks.jet:1095-1131 and 6850-6883 for the two irreversible readers and E0746. Read Compiler/JetFoundation/Source/CoreDeclarations/Calls.jet:421-532 for the hand table of Core calls.\n\nFor the sites that guess or rerun today, read Core/HTTP/Client.jet:212-217 and 394-412, Core/Web/Web.jet:2716-2731 and 3087-3107, and Core/App/App.jet:123-153, 887-905 and 3122. Read Tests/Cases/WebApp/AssigneePushIsSentAfterCommitOnly.fixture/main.jet:75 for a retried job that sends. Then read Core/Jobs/Jobs.jet:31-33, 200-227 and 400, and Core/Service/Service.jet:618-621, 680 and 725, where no handler body is registered.\n\nFor the leaves that split, read Core/Files/Files.jet:181-200, 612, 1211-1231, 1747-1841 and 2999, Core/DB/DB.jet:969-977, 1072-1077 and 1213-1278, and Core/Sys/Sys.jet:64-92. Read Compiler/JetSema/Source/Sema/Calls/Live.jet:466-497, Compiler/JetFoundation/Source/Policy/Authority.jet:288-321 and Docs/Spec/spec.md:3207-3217.\n\nTo probe on jet a0.0.46, copy the notes.jet part of option A's code into a scratch directory. Drop #Repeatable and the two reflect lines, and run jet check; it passes. Then add a match with else to an enum method, or a ?? {} fallback, and see Jet.ClosedSetElse and Jet.InvalidStatement. Put a call to a function with the Net effect inside an on_commit closure in #Transact to see E0746 refuse it.\n\nRun `node Tools/Tower/tower.mjs card show 7035 --json` and `card show 7007 --json`. Then run `decision show` with --json for D-HONEST-SIG2, D-MARK-REPEAT1, D-HTTP-CLIENT2 and D-SERVICE-DELIVERY1, the facts this builds on and amends.",
+      "surface": {
+        "gist": "Should every effect say whether it reads, adds or replaces data, and whether a second call is safe?",
+        "lesson": "Effects say what a function touches, not what it does to data already there. Three facts answer that: a call Reads, Adds or Replaces; it may be repeatable; and it may be irreversible, as today. Routes, retries, previews, agent tools and docs then read the same facts.",
+        "trio": {
+          "current": {
+            "note": "Today one write leaf covers appending and deleting, so nothing stops this.",
+            "code": "#Server.Get(\"/reset\") reset: fn(self) -> HTTPResponse HTTPError! {\n    files.remove(\"notes/old.txt\") ?? return Ok(server.response(500, \"not removed\"))   // FS.Write: builds\n    Ok(server.response(200, \"gone\"))\n}\n\n#App.Job(retries: 3) digest: fn(self) -> Int IOError! {\n    files.append_all(\"journal.txt\", \"sent\\n\")   // may run four times\n    Ok(1)\n}"
+          },
+          "wild": {
+            "lang": "MCP",
+            "note": "Each tool states three hints by hand; nothing checks them.",
+            "code": "{\"name\": \"save_note\",\n \"annotations\": {\n   \"readOnlyHint\": false,\n   \"destructiveHint\": true,\n   \"idempotentHint\": true}}"
+          }
+        },
+        "options": [
+          {
+            "name": "Access on effect leaves, repeatable on operations",
+            "gist": "Leaves say Reads, Adds or Replaces and are inferred; #Repeatable marks safe-to-repeat operations.",
+            "proposed": {
+              "code": "FS: enum {\n    Read,\n    Add,\n    Replace,\n    impl Effect {\n        access: fn(self) -> EffectAccess { if self == .Read -> .Reads else if self == .Add -> .Adds else -> .Replaces }\n    }\n}\n#Repeatable\nwrite: fn(path: Path | String, text: String) -[FS.Replace]> IOError! { … }\n#Server.Get(\"/reset\") reset: fn(self) -> HTTPResponse HTTPError! {\n    files.remove(\"notes/old.txt\") ?? return Ok(server.response(500, \"not removed\"))   // error: GET replaces\n    Ok(server.response(200, \"gone\"))\n}"
+            },
+            "key": "A",
+            "gains": [
+              "User code writes nothing; rows already carry the facts.",
+              "Agents can add files without overwriting or deleting.",
+              "Routes, retries and previews are checked while building."
+            ],
+            "losses": [
+              "Every FS.Write and DB.Write row is rewritten once.",
+              "A #Repeatable claim is refuted, never proved."
+            ]
+          },
+          {
+            "name": "Facts on operations, beside the row",
+            "gist": "Core operations carry access marks; a second inferred fact rides beside the effect row.",
+            "proposed": {
+              "code": "#Access(.Replaces)\n#Repeatable\nwrite: fn(path: Path | String, text: String) -[FS.Write]> IOError! { … }\n\n#Access(.Adds)\nappend_all: fn(path: Path | String, text: String) -[FS.Write]> IOError! { … }"
+            },
+            "key": "B",
+            "gains": [
+              "No row or leaf changes."
+            ],
+            "losses": [
+              "Grants can't allow adding without replacing.",
+              "Two facts describe one call."
+            ]
+          },
+          {
+            "name": "A leaf per kind of change",
+            "gist": "FS.Create, FS.Append, FS.Overwrite, FS.Delete and more, each declaring both facts.",
+            "proposed": {
+              "code": "FS: enum {\n    Read,\n    Create,\n    Append,\n    Overwrite,\n    Delete,\n    impl Effect {\n        repeatable: fn(self) -> Bool { self == .Read || self == .Create || self == .Overwrite || self == .Delete }\n    }\n}"
+            },
+            "key": "C",
+            "gains": [
+              "The finest grants."
+            ],
+            "losses": [
+              "Long rows and a growing leaf list.",
+              "Leaf repeatable is wrong for updates."
+            ]
+          },
+          {
+            "name": "Hand-written hints at boundaries",
+            "gist": "Routes and tools state MCP-style hints; nothing infers or checks them.",
+            "proposed": {
+              "code": "#Server.Get(\"/reset\", reads_only: true) reset: fn(self) -> HTTPResponse HTTPError! {\n    files.remove(\"notes/old.txt\") ?? return Ok(server.response(500, \"not removed\"))   // builds\n    Ok(server.response(200, \"gone\"))\n}"
+            },
+            "key": "D",
+            "gains": [
+              "Cheapest, and maps straight onto MCP."
+            ],
+            "losses": [
+              "Hints can lie and nothing notices."
+            ]
+          },
+          {
+            "name": "Keep today's state",
+            "gist": "One write leaf, irreversible only, and each site's own guess.",
+            "proposed": {
+              "code": "files.remove(\"notes/old.txt\")   // FS.Write\nfiles.append_all(\"journal.txt\", s)   // FS.Write"
+            },
+            "key": "E",
+            "gains": [
+              "No work."
+            ],
+            "losses": [
+              "No route, retry or preview can tell adding from deleting."
+            ]
+          }
+        ],
+        "recommendation": {
+          "why": "A puts the facts where Jet already infers, checks and grants effects, so user code writes nothing and agents get add-only grants. Repeatable stays on operations because composition can't prove it.",
+          "tradeoff": "Checked routes, retries and previews, for one row rewrite, trusted repeatable claims and a rare extra field.",
+          "rec": "A",
+          "gains": [
+            "GET routes can't change data; retries must be harmless.",
+            "Previews and MCP hints come from checked facts.",
+            "Agents can add without overwriting or deleting."
+          ],
+          "losses": [
+            {
+              "loss": "Every FS.Write and DB.Write row is rewritten, about 860 places.",
+              "mitigation": "One rewrite writes FS.Add, FS.Replace, which covers the same calls; bare roots stay valid."
+            },
+            {
+              "loss": "A #Repeatable claim is refuted, never proved.",
+              "mitigation": "Claims reaching a call that isn't repeatable are refused."
+            },
+            {
+              "loss": "Package access and worker bodies aren't checked.",
+              "mitigation": "Grants bound packages; workers keep typed keys."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Grants can't see a second fact plane."
+            },
+            {
+              "key": "C",
+              "reason": "Long rows, and leaf repeatable is still wrong."
+            },
+            {
+              "key": "D",
+              "reason": "Unchecked hints drift from the code."
+            },
+            {
+              "key": "E",
+              "reason": "Every site keeps guessing."
+            }
+          ]
+        }
+      },
+      "reports": [
+        {
+          "title": "Effect access review",
+          "path": "Docs/Audits/2026-11-25-effect-access-review.md",
+          "note": "Fresh adversarial review of this ballot: the strongest existing solutions, each claim attacked with a verdict, probe results on jet a0.0.46, the gaps that remain, and the cutover count."
+        }
+      ],
+      "draftedBy": "Pip",
+      "reviewedBy": "ReviewEffectClass1",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-25T21:07:55.154Z"
     }
   ],
   "questions": [
@@ -142303,6 +142620,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-25T21:08:28.462Z",
+      "by": "Pip",
+      "action": "card.update",
+      "ref": "c028o7uk",
+      "note": "body,logEntry"
+    },
+    {
+      "at": "2026-11-25T21:08:25.472Z",
+      "by": "Pip",
+      "action": "card.over-limit",
+      "ref": "c028o7uk",
+      "note": "7 criteria, soft limit 6: Defects found by the D-EFFECT-CLASS1 review on 2026-11-25; they hold whichever option wins"
+    },
+    {
+      "at": "2026-11-25T21:08:25.472Z",
+      "by": "Pip",
+      "action": "card.criteria-add",
+      "ref": "c028o7uk",
+      "note": "#7 Independent of the ballot: a `mux.get` route closure that re"
+    },
+    {
+      "at": "2026-11-25T21:08:23.708Z",
+      "by": "Pip",
+      "action": "card.criteria-add",
+      "ref": "c028o7uk",
+      "note": "#6 Independent of the ballot: E0746 refuses an irreversible cal"
+    },
+    {
+      "at": "2026-11-25T21:07:56.266Z",
+      "by": "Pip",
+      "action": "decision.post",
+      "ref": "D-EFFECT-CLASS1",
+      "note": "reviewed by ReviewEffectClass1"
+    },
+    {
+      "at": "2026-11-25T21:07:55.154Z",
+      "by": "Pip",
+      "action": "decision.add",
+      "ref": "D-EFFECT-CLASS1",
+      "note": "Effect classes: every effect Reads, Adds or Replaces, operations say whether they are repeatable, and irreversible stays its own fact (draft)"
+    },
     {
       "at": "2026-11-25T21:02:02.103Z",
       "by": "Orchestrator",
