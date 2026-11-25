@@ -4784,7 +4784,7 @@ run: fn() {
 | `DataStream<T>` | type | One-shot bounded cursor over typed rows. |
 | `DataJoin<L, R>` / `Group<K, V>` | types | Join rows and grouped reduction rows; a left join uses `R?`. |
 | `Query<T>` / `DataTracked<T, K>` / `DataWatch<T>` | types | Query operation carrier, maintained keyed state, and update watcher. |
-| `track<T, K>(rows, fn(row) { key })` | `DataTracked<T, K> DataError!` | Attach maintained keyed state to owned rows. |
+| `track<T, K: Comparable>(rows, fn(row) { key })` | `DataTracked<T, K> DataError!` | Attach keyed state to owned rows; two rows with one key fail with `DuplicateKey`. |
 | `file<T>(path, format, limits)` / `file_member<T>(path, member, format, limits)` | `DataLoader<T> DataError!` | Build a typed file or archive-member loader. |
 | `url<T>(url, format, authority, limits)` / `database<T>(query, parameters, authority, limits)` | `DataLoader<T> DataError!` | Build an authority-bound remote or SQL loader. |
 | `file_as<T, F: Format>(path, limits)` / `url_as<T, F: Format>(url, authority, limits)` | `DataLoader<T> DataError!` | Build a file or remote loader over a `Format` impl, a package's codec as well as Core's; its `format` is None and its `codec` is `F.name`, so `loader.stream_as` reads it and `snapshot` refuses it with a `Bridge` error. |
@@ -4828,7 +4828,23 @@ collected rows, and every query derived from it keeps them: grouping a
 Grouped `count`, `sum`, and `mean` return `Query<Group<K, V>>`, and `mean`
 requires a floating numeric selector. `DataTracked<T, K>` supports `query`,
 `insert`, `replace`, and `remove`; `DataWatch<T>` supports `get`, `status`, and
-`cancel` (D-QUERY-RETAIN1).
+`cancel` (D-QUERY-RETAIN1). `insert` fails with `DuplicateKey` when the key is
+already tracked, `replace` and `remove` with `MissingKey` when it is not, and
+`replace` with `InvalidValue` when the new row's key differs. A tracked query
+reads the rows as they are when it runs. `query.watch()` maintains a query
+over tracked rows: its `filter`, `sort_by`, `map`, `min`, `max`, `limit`, its
+grouped `count`, `sum`, and `mean` after filters and sorts, and a join with a
+tracked side. Any other query fails with `Unsupported`. A `get` with no edit
+since the last one answers the kept rows without running a callback; after
+edits it applies each insert, replace, and remove to them, running the
+callbacks on the changed rows only, and a derived step derives again from its
+input. The status reports mode `incremental`, or `recomputed` for a float
+`sum` and a `mean`, which reduce a touched group again, and counts those
+refreshes in `recomputations`. `revision` is the tracked edit the rows are at
+(a join counts its own changes), `retained_rows` the tracked row count. A
+failed `get` keeps the published rows and revision and marks the watch
+`dirty` with the error; `cancel` moves `generation` on and makes later gets
+fail. `freshness_ms` stays 0 (D-QUERY-LIVE1).
 The bounded SQL kernel accepts `SELECT *` or explicit fields, the aggregates
 `COUNT`, `SUM`, `AVG`, `MIN`, and `MAX`, and optional `WHERE`, `GROUP BY`,
 `ORDER BY`, and `LIMIT` clauses. It validates projected and grouped fields
