@@ -314,9 +314,6 @@ sema_call_core_source_target: fn(environment: SemaScopeEnvironment, program: Sem
     if sema_call_core_module_identity(environment, program, source_name) != Val(module_identity) {
         return None
     }
-    if sema_call_core_typed_decode_role(source_name) != None && member == "decode" && type_args.len() != 0 {
-        return None
-    }
     caller_index: sema_scope_caller_index(environment, graph) ?? return None
     // Same-owner native providers keep their host row. A source-only function
     // has no such row and still resolves to its declaration from this module.
@@ -713,6 +710,9 @@ sema_call_core_no_os_refused: fn(check: ^SemaBodyCheck, module_name: String, mem
 sema_call_core_resolve_route: fn(check: ^SemaBodyCheck, module_name: String, member: String, type_args: [Type], actual_arity: Int, configured_client: Bool, span: Span) -> SemaCoreCallRoute? {
     diagnostic_count := check.diagnostics.len()
     if sema_call_core_no_os_refused(check, module_name, member, span) -> return None
+    if sema_call_core_typed_decode_call(module_name, member, type_args) == .Val(role) {
+        return sema_call_core_typed_decode_route(check, module_name, role, type_args, span)
+    }
     source_identity: if sema_call_core_has_explicit_source_target(module_name, member) || sema_call_core_native_resource_consumer(module_name, member, configured_client) -> None else -> sema_call_core_module_identity(check.environment.*, check.program.*, module_name)
     source: if source_identity == {
         .Val(identity) -> sema_call_core_source_target(check.environment.*, check.program.*, identity, member, type_args, span, false, check.diagnostics)
@@ -765,6 +765,9 @@ sema_call_core_resolve_import_route: fn(check: ^SemaBodyCheck, alias: String, re
         }
     }
     if sema_call_core_no_os_refused(check, imported.module_name, member, span) -> return None
+    if sema_call_core_typed_decode_call(imported.module_name, member, type_args) == .Val(role) {
+        return sema_call_core_typed_decode_route(check, imported.module_name, role, type_args, span)
+    }
     diagnostic_count := check.diagnostics.len()
     // `core.term` owns only the one-argument print, eprint
     // and progress wrappers; other arities keep the fixed Core route.
@@ -1081,15 +1084,10 @@ sema_call_core_math_exact_crossing: fn(module_name: String, member: String, args
     Val(crossed)
 }
 
-// A typed `json.decode<T>` / `toml.decode<T>` / `yaml.decode<T>` runs the
-// Core function that fills its module's typed decode role; a
-// `net.unix_connect` and a `tls.client` run the one that fills the role of
-// their arity and arguments.
-sema_call_core_normalized_source_record: fn(record: CoreCallRecord, args: [TExpr], type_args: [Type]) -> CoreCallRecord Never! {
+// A `net.unix_connect` and a `tls.client` run the Core function that fills the
+// role of their arity and arguments.
+sema_call_core_normalized_source_record: fn(record: CoreCallRecord, args: [TExpr]) -> CoreCallRecord Never! {
     normalized := record
-    if record.symbol == CoreCallSymbol.SourceOwned && record.member == "decode" && type_args.len() != 0 {
-        if sema_call_core_typed_decode_role(record.module_name) == .Val(role) -> normalized.source_role = Val(role)
-    }
     if record.symbol == CoreCallSymbol.SourceOwned && record.module_name == "core.net" && record.member == "unix_connect" {
         normalized.source_role = Val(if args.len() == 1 -> "UnixConnect" else -> "UnixConnectDeadline")
     }
@@ -1104,14 +1102,31 @@ sema_call_core_normalized_source_record: fn(record: CoreCallRecord, args: [TExpr
 }
 
 // The role whose Core function a text codec's typed `decode<T>(text)` runs,
-// decoding the parsed tree in place; an untyped `decode(text)` stays the tree.
-sema_call_core_typed_decode_role: fn(module_name: String) -> String? Never! {
+// decoding the parsed tree in place, or None when the call is no text codec's
+// typed decode; an untyped `decode(text)` is the module's own `decode`, the
+// tree.
+sema_call_core_typed_decode_call: fn(module_name: String, member: String, type_args: [Type]) -> String? Never! {
+    if member != "decode" || type_args.len() == 0 -> return None
     if module_name == {
         "core.encoding.json" -> Val("JSONTypedDecode")
         "core.encoding.toml" -> Val("TOMLTypedDecode")
         "core.encoding.yaml" -> Val("YAMLTypedDecode")
         else -> None
     }
+}
+
+// A typed `json.decode<T>(text)` (and toml's, yaml's) is a call of the Core
+// function filling `role` with `T`; a `T` without the Decode contract is E0905
+// at the call, the one report.
+sema_call_core_typed_decode_route: fn(check: ^SemaBodyCheck, module_name: String, role: String, type_args: [Type], span: Span) -> SemaCoreCallRoute? {
+    target_type: sema_data_core_target_type(type_args, "decode", span, check) ?? return None
+    if !sema_serde_type_is_admissible(check.environment.*, check.program.*, target_type, SemaSerdeDirection.Decode) {
+        fix: sema_serde_shape_fix(target_type, "Decode") ?? "derive `Decode` on this type, or write its Decode implementation"
+        check.diagnostics.push(sema_error("E0905", span, "`{type_name(target_type)}` does not implement `Decode`", "`{module_name}.decode<T>` can only decode into a type with the registered Decode contract", fix))
+        return None
+    }
+    target: sema_call_core_role_target(role, type_args, span, check.environment.*, check.program.*, check.diagnostics) ?? return None
+    Val(SemaCoreCallRoute.Source{target: target})
 }
 
 sema_call_core_source_arguments: fn(args: [TExpr], params: [SemaCallParam], check: SemaBodyCheck) -> [TCallArg] Never! {
@@ -1156,7 +1171,7 @@ sema_call_core_tree_checked: fn(record: CoreCallRecord, args: [TExpr], span: Spa
         check.diagnostics.push(sema_error("E0104", span, "`{record.module_name}.{record.member}` expects {range} argument(s), got {args.len()}", "the registered Core call arity is fixed", "provide the registered number of arguments"))
         return None
     }
-    normalized: sema_call_core_normalized_source_record(record, args, type_args)
+    normalized: sema_call_core_normalized_source_record(record, args)
     if core_call_source_role(normalized) == .Val(role) {
         graph: check.program.registration_graph
         filler: sema_core_role_function(graph, role) ?? {

@@ -966,10 +966,6 @@ sema_call_try_data_literal: fn(ty: Type, variant: String, args: [CallArg], span:
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, check.environment.*, check.program.*, check.diagnostics)}
 }
 
-sema_data_core_default_call: fn(type_name: String, method: String, span: Span) -> Expr Never! {
-    Expr.MethodCall{receiver: Expr.Ident{name: type_name, span: span, id: AST_NODE_GENERATED}, method: method, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{}, id: AST_NODE_GENERATED}
-}
-
 sema_data_core_param: fn(label: String, ty: Type, convention: AccessConvention, zone: ParamZone, default: Expr?) -> SemaCallParam Never! {
     SemaCallParam{label: label, name: label, zone: zone, default: default, default_ref: None, convention: convention, ty: Val(ty), variadic: false}
 }
@@ -1032,36 +1028,6 @@ sema_data_core_target_type: fn(type_args: [Type], name: String, span: Span, chec
     graph: check.program.registration_graph
     target = sema_type_resolve_declared_with_generics(graph, target, check.environment.module_identity, check.environment.generic_params)
     Val(target)
-}
-
-SemaDataCoreDecodeContract: struct {
-    call_member: String,
-    argument_types: [Type],
-    result_type: Type,
-    type_args: [Type],
-    optional_options: Bool,
-}
-
-sema_data_core_decode_contract: fn(module_name: String, member: String, target: Type) -> SemaDataCoreDecodeContract? {
-    if module_name == "core.db" && member == "decode" {
-        return Val(SemaDataCoreDecodeContract{call_member: "decode", argument_types: [Type]{Type.Map{key: Type.String, key_span: None, value: Type.Named{name: "DBValue"}}}, result_type: Type.Result{ok: target, err: Type.List{element: Type.Named{name: "FieldError"}}}, type_args: [Type]{target}, optional_options: false})
-    }
-    if module_name == "core.encoding.json" && member == "decode" {
-        return Val(SemaDataCoreDecodeContract{call_member: "decode", argument_types: [Type]{Type.String}, result_type: Type.Result{ok: target, err: Type.List{element: Type.Named{name: "FieldError"}}}, type_args: [Type]{target}, optional_options: false})
-    }
-    if module_name == "core.encoding.csv" && member == "decode" {
-        return Val(SemaDataCoreDecodeContract{call_member: "decode", argument_types: [Type]{Type.String}, result_type: Type.Result{ok: Type.List{element: target}, err: Type.List{element: Type.Named{name: "FieldError"}}}, type_args: [Type]{target}, optional_options: false})
-    }
-    if (module_name == "core.encoding.toml" || module_name == "core.encoding.yaml") && member == "decode" {
-        return Val(SemaDataCoreDecodeContract{call_member: "decode", argument_types: [Type]{Type.String}, result_type: Type.Result{ok: target, err: Type.List{element: Type.Named{name: "FieldError"}}}, type_args: [Type]{target}, optional_options: false})
-    }
-    if module_name == "core.encoding.xml" && member == "decode" {
-        return Val(SemaDataCoreDecodeContract{call_member: "decode", argument_types: [Type]{Type.String, Type.Named{name: "XMLParseOptions"}}, result_type: Type.Result{ok: target, err: Type.List{element: Type.Named{name: "FieldError"}}}, type_args: [Type]{target}, optional_options: true})
-    }
-    if module_name == "core.encoding.xml" && member == "decode_bytes" {
-        return Val(SemaDataCoreDecodeContract{call_member: "decode", argument_types: [Type]{Type.List{element: Type.IntN{signed: false, bits: 8}}, Type.Named{name: "XMLParseOptions"}}, result_type: Type.Result{ok: target, err: Type.List{element: Type.Named{name: "FieldError"}}}, type_args: [Type]{target}, optional_options: true})
-    }
-    None
 }
 
 sema_data_db_names_row_type: fn() -> Type Never! {
@@ -1259,78 +1225,6 @@ sema_call_try_args_decode: fn(module_name: String, member: String, alias: String
     sema_data_args_decode(args, type_args, span, expected, check)
 }
 
-// The Core calls whose typed decode contract lives here.
-sema_data_core_decode_member: fn(module_name: String, member: String) -> Bool Never! {
-    if module_name != "core.db" && !module_name.starts_with("core.encoding.") -> return false
-    member == "decode" || (module_name == "core.encoding.xml" && member == "decode_bytes")
-}
-
-sema_data_core_try_decode: fn(module_name: String, member: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaDirectSpecialCheck? {
-    updated_args := args
-    if !sema_data_core_decode_member(module_name, member) -> return None
-    if module_name == "core.encoding.json" && type_args.len() == 0 {
-        if updated_args.len() != 1 {
-            sema_data_arity_diagnostic("core.encoding.json.decode", 1, updated_args.len(), span, check.diagnostics)
-            sema_data_check_discarded_arguments(updated_args, check)
-            return Val(SemaDirectSpecialCheck{handled: true, value: None})
-        }
-        argument_types := [Type]{Type.String}
-        value: sema_check_expression(updated_args[0].expr, Val(Type.String), check) ?? return Val(SemaDirectSpecialCheck{handled: true, value: None})
-        record: sema_call_core_record(module_name, member, updated_args.len(), span, check.diagnostics) ?? return Val(SemaDirectSpecialCheck{handled: true, value: None})
-        result_type := Type.Result{ok: sema_dyn_type(), err: Type.Named{name: "EncodingError"}}
-        result: sema_data_core_emit(record, "{module_name}.{member}", updated_args, argument_types, [TExpr]{value}, [Type]{}, result_type, span, expected, check) ?? return Val(SemaDirectSpecialCheck{handled: true, value: None})
-        return Val(SemaDirectSpecialCheck{handled: true, value: Val(result)})
-    }
-    target: sema_data_core_target_type(type_args, member, span, check) ?? return Val(SemaDirectSpecialCheck{handled: true, value: None})
-    if !sema_serde_type_is_admissible(check.environment.*, check.program.*, target, SemaSerdeDirection.Decode) {
-        fix: sema_serde_shape_fix(target, "Decode") ?? "derive `Decode` on this type, or write its Decode implementation"
-        check.diagnostics.push(sema_error("E0905", span, "`{type_name(target)}` does not implement `Decode`", "`{module_name}.{member}<T>` can only decode into a type with the registered Decode contract", fix))
-        sema_data_check_discarded_arguments(updated_args, check)
-        return Val(SemaDirectSpecialCheck{handled: true, value: None})
-    }
-    contract: sema_data_core_decode_contract(module_name, member, target) ?? return None
-    call_member := contract.call_member
-    argument_types := contract.argument_types
-    result_type := contract.result_type
-    effective_type_args := contract.type_args
-    min_arity := 1
-    if updated_args.len() < min_arity || updated_args.len() > argument_types.len() || (!contract.optional_options && updated_args.len() != argument_types.len()) {
-        check.diagnostics.push(sema_error("E0104", span, "`{module_name}.{member}` expects {if contract.optional_options -> "between 1 and {argument_types.len()}" else -> "{argument_types.len()}"} argument(s), got {updated_args.len()}", "typed decoding uses the format's registered input and optional settings shape", "pass the documented typed decoder arguments"))
-        sema_data_check_discarded_arguments(updated_args, check)
-        return Val(SemaDirectSpecialCheck{handled: true, value: None})
-    }
-    if module_name == "core.encoding.xml" {
-        params := [SemaCallParam]{
-            sema_data_core_param(if member == "decode_bytes" -> "bytes" else -> "text", argument_types[0], AccessConvention.Read, ParamZone.PositionalOnly, None),
-            sema_data_core_param("options", argument_types[1], AccessConvention.Read, ParamZone.PositionalOnly, Val(sema_data_core_default_call("XMLParseOptions", "safe", span))),
-        }
-        binding: sema_call_bind_args("{module_name}.{member}", params, updated_args, span, check.diagnostics)
-        if binding == None {
-            sema_data_check_discarded_arguments(updated_args, check)
-            return Val(SemaDirectSpecialCheck{handled: true, value: None})
-        }
-    }
-    typed := [TExpr]{}
-    checked_types := [Type]{}
-    loop (index, argument) in updated_args {
-        expected_arg := argument_types[index]
-        value: sema_check_expression(argument.expr, Val(expected_arg), check) ?? return Val(SemaDirectSpecialCheck{handled: true, value: None})
-        typed.push(value)
-        checked_types.push(expected_arg)
-    }
-    if module_name == "core.db" {
-        names_type: Type.List{element: sema_data_db_names_row_type()}
-        names: sema_data_db_names(target, check, span)
-        value: sema_check_expression(names, Val(names_type), check) ?? return Val(SemaDirectSpecialCheck{handled: true, value: None})
-        updated_args.push(CallArg{convention: AccessConvention.Read, expr: names, span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false})
-        typed.push(value)
-        checked_types.push(names_type)
-    }
-    record: sema_call_core_record(module_name, call_member, updated_args.len(), span, check.diagnostics) ?? return Val(SemaDirectSpecialCheck{handled: true, value: None})
-    result: sema_data_core_emit(record, "{module_name}.{member}", updated_args, checked_types, typed, effective_type_args, result_type, span, expected, check) ?? return Val(SemaDirectSpecialCheck{handled: true, value: None})
-    Val(SemaDirectSpecialCheck{handled: true, value: Val(result)})
-}
-
 sema_data_sql_ascii_equal: fn(left: String, right: String) -> Bool Never! {
     a := left.bytes()
     b := right.bytes()
@@ -1450,8 +1344,6 @@ sema_data_check_analytics_sql_schema: fn(row: Type, query: Expr, span: Span, che
 }
 
 sema_call_try_data_core_call: fn(module_name: String, member: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaDirectSpecialCheck {
-    decoder: sema_data_core_try_decode(module_name, member, args, type_args, span, expected, check)
-    if decoder == .Val(result) -> return result
     if module_name == "core.data" && member == "schema" {
         return sema_data_check_schema(args, type_args, span, expected, check)
     }
