@@ -9,12 +9,14 @@
 // Compiler/Prelude/CoreSourceParts.tsv attaches to it) declares
 // `X: struct { … }`, X's field rows are its declared fields other than its
 // `priv` storage, in declaration order, and its literal row, when it has
-// one, lists the same fields. Each field's type is written the way the rows spell
-// it: `Int` `Float` `Bool` `String` `Char` `F32`, `U8`/`I32`… (IntN),
-// `[T]`, `[K:V]`, `T?`, `(name: T, …)`, `Name<T, …>` and any other name by
-// its last segment. A record no Core source declares, one declared twice
-// with different fields, a generic one or one with a field of another type
-// (a function) is the compiler-owned residue, left as it is written.
+// one, lists the same fields; a struct with `priv` storage has no literal
+// row, since only its own module builds one. Each field's type is written
+// the way the rows spell it: `Int` `Float` `Bool` `String` `Char` `F32`,
+// `U8`/`I32`… (IntN), `[T]`, `[K:V]`, `T?`, `(name: T, …)`, `Name<T, …>`
+// and any other name by its last segment. A record no Core source declares,
+// one declared twice with different fields, a generic one or one with a
+// field of another type (a function) is the compiler-owned residue, left as
+// it is written.
 // Usage (from the repository root): jet Tools/Agent/CoreRecordRows.jet
 // [--check|--write|--residue]; --check fails when a declared record's rows
 // differ from its declaration, --write rewrites them and --residue lists
@@ -49,10 +51,11 @@ DeclaredField: struct {
     ty: String,
 }
 
-// A struct's declared fields, or why the rows cannot carry them
-// (`unsupported` is "" when they can).
+// A struct's declared fields, whether it holds `priv` storage, or why the
+// rows cannot carry them (`unsupported` is "" when they can).
 DeclaredStruct: struct {
     fields: [DeclaredField],
+    sealed: Bool,
     unsupported: String,
 }
 
@@ -274,7 +277,7 @@ parse_tuple: fn(bytes: [U8], start: Int) -> ParsedType? {
 }
 
 unsupported: fn(reason: String) -> DeclaredStruct Never! {
-    DeclaredStruct{fields: [DeclaredField]{}, unsupported: reason}
+    DeclaredStruct{fields: [DeclaredField]{}, sealed: false, unsupported: reason}
 }
 
 // The fields of the struct body that opens at byte `open`, in declaration
@@ -282,6 +285,7 @@ unsupported: fn(reason: String) -> DeclaredStruct Never! {
 // impl blocks passed over.
 struct_fields: fn(bytes: [U8], open: Int) -> DeclaredStruct Never! {
     fields := [DeclaredField]{}
+    sealed := false
     private := false
     at := open + 1
     loop {
@@ -289,7 +293,7 @@ struct_fields: fn(bytes: [U8], open: Int) -> DeclaredStruct Never! {
         if at >= bytes.len() -> return unsupported("its body is not closed")
         code: code_at(bytes, at)
         if code == {
-            125 -> return DeclaredStruct{fields: fields, unsupported: ""}
+            125 -> return DeclaredStruct{fields: fields, sealed: sealed, unsupported: ""}
             44 -> {
                 at += 1
                 next
@@ -334,7 +338,7 @@ struct_fields: fn(bytes: [U8], open: Int) -> DeclaredStruct Never! {
         }
         if upper_byte(code) -> return unsupported("its member {word} is not a field")
         ty: parse_type(bytes, value) ?? return unsupported("the rows cannot spell the type of its field {word}")
-        if !private -> fields.push(DeclaredField{name: word, ty: ty.text})
+        if private -> sealed = true else -> fields.push(DeclaredField{name: word, ty: ty.text})
         private = false
         at = skip_space(bytes, ty.next)
         if at + 1 < bytes.len() && code_at(bytes, at) == 45 && code_at(bytes, at + 1) == 62 {
@@ -401,32 +405,34 @@ struct_sites: fn(paths: [String], texts: [String:String]) -> [String:[StructSite
     sites
 }
 
-// The declared fields of record `owner` and the source that declares them,
-// or why its rows stay as written.
-owner_declaration: fn(owner: String, sites: [String:[StructSite]], texts: [String:String]) -> {fields: [DeclaredField], path: String, reason: String} {
-    found: sites.get(owner) ?? return {fields: [DeclaredField]{}, path: "", reason: "no Core source declares it"}
+// The declared fields of record `owner`, whether it holds `priv` storage and
+// the source that declares them, or why its rows stay as written.
+owner_declaration: fn(owner: String, sites: [String:[StructSite]], texts: [String:String]) -> {fields: [DeclaredField], sealed: Bool, path: String, reason: String} {
+    found: sites.get(owner) ?? return {fields: [DeclaredField]{}, sealed: false, path: "", reason: "no Core source declares it"}
     chosen := [DeclaredField]{}
+    sealed := false
     path := ""
     loop site in found {
         if site.open < 0 {
-            return {fields: [DeclaredField]{}, path: "", reason: "{site.path} declares it generic"}
+            return {fields: [DeclaredField]{}, sealed: false, path: "", reason: "{site.path} declares it generic"}
         }
         declared: struct_fields((texts.get(site.path) ?? "").bytes(), site.open)
         if declared.unsupported != "" {
-            return {fields: [DeclaredField]{}, path: "", reason: "{site.path}: {declared.unsupported}"}
+            return {fields: [DeclaredField]{}, sealed: false, path: "", reason: "{site.path}: {declared.unsupported}"}
         }
         if {
             path == "" -> {
                 chosen = declared.fields
+                sealed = declared.sealed
                 path = site.path
             }
-            field_rows(owner, declared.fields) != field_rows(owner, chosen) -> {
-                return {fields: [DeclaredField]{}, path: "", reason: "{path} and {site.path} declare it with different fields"}
+            declared.sealed != sealed || field_rows(owner, declared.fields) != field_rows(owner, chosen) -> {
+                return {fields: [DeclaredField]{}, sealed: false, path: "", reason: "{path} and {site.path} declare it with different fields"}
             }
             else -> {}
         }
     }
-    {fields: chosen, path: path, reason: ""}
+    {fields: chosen, sealed: sealed, path: path, reason: ""}
 }
 
 // The field rows of record `owner` with `fields`.
@@ -447,11 +453,11 @@ row_owner: fn(line: String, open: String) -> String Never! {
 
 // CoreRecordRows.jet (`records`) with the rows of each record a Core source
 // declares written from it: its field rows where its first one stood, its
-// literal row in place.
+// literal row in place unless the record holds `priv` storage.
 record_rows: fn(records: String, sites: [String:[StructSite]], texts: [String:String]) -> RecordRows {
     lines: records.split("\n").to_list()
     left := [String:Bool]{}
-    declared := [String:{fields: [DeclaredField], path: String}]{}
+    declared := [String:{fields: [DeclaredField], sealed: Bool, path: String}]{}
     order := [String]{}
     residue := [ResidueRecord]{}
     loop line in lines {
@@ -467,7 +473,7 @@ record_rows: fn(records: String, sites: [String:[StructSite]], texts: [String:St
             left[owner] = true
             next
         }
-        declared[owner] = {fields: found.fields, path: found.path}
+        declared[owner] = {fields: found.fields, sealed: found.sealed, path: found.path}
         order.push(owner)
     }
     old := [String:[String]]{}
@@ -488,7 +494,7 @@ record_rows: fn(records: String, sites: [String:[StructSite]], texts: [String:St
         if !old.has_key(owner) -> old[owner] = [String]{}
         old[owner].push(line)
         if is_literal {
-            out.push(literal_row(owner, record.fields))
+            if !record.sealed -> out.push(literal_row(owner, record.fields))
             next
         }
         if emitted.has_key(owner) -> next
@@ -501,7 +507,9 @@ record_rows: fn(records: String, sites: [String:[StructSite]], texts: [String:St
         written_rows: old.get(owner) ?? [String]{}
         fresh := field_rows(owner, record.fields)
         loop line in written_rows {
-            if line.starts_with(LITERAL_OPEN) -> fresh.push(literal_row(owner, record.fields))
+            if line.starts_with(LITERAL_OPEN) && !record.sealed {
+                fresh.push(literal_row(owner, record.fields))
+            }
         }
         if written_rows != fresh -> stale.push(StaleRecord{owner: owner, path: record.path})
     }
@@ -548,7 +556,7 @@ core_record_rows_main: fn(args: [String]) -[FS]> String CoreRecordRowsError! {
 run: fn() { print(core_record_rows_main(process.args()) ?? process.fail(1, err.message)) }
 
 #Test("a struct's fields are its typed members in declaration order") {
-    text: "// Box: struct {{ wrong: Int }}\npub Box: struct {{\n    /// the count\n    count: Int{{0}},\n    #Skip\n    name: core.text.Name?,\n    priv cache: [String:[U8]],\n    label: String -> cache,\n    pair: (index: Int, size: I32),\n    span: fn(self) -> {{start: Int}} Never! {{ {{start: 0}} }}\n    items: List<Item>,\n\n    impl Show {{ show: fn(self) -> String {{ \"}}\" }} }}\n    width: fn(self) -> Int {{ self.count }}\n}}\n"
+    text: "// Box: struct {{ wrong: Int }}\npub Box: struct {{\n    /// the count\n    count: Int{{0}},\n    #Skip\n    name: core.text.Name?,\n    priv cache: [String:[U8]],\n    label: String -> cache,\n    pair: (index: Int, size: I32),\n    span: fn(self) -> {{start: Int}} Never! {{ {{start: 0}} }}\n    items: Bag<Item>,\n\n    impl Show {{ show: fn(self) -> String {{ \"}}\" }} }}\n    width: fn(self) -> Int {{ self.count }}\n}}\n"
     texts := [String:String]{}
     texts["a.jet"] = text
     sites: struct_sites([String]{"a.jet"}, texts)
@@ -558,7 +566,7 @@ run: fn() { print(core_record_rows_main(process.args()) ?? process.fail(1, err.m
     assert_eq((loop field in declared.fields -> field.name).join(","), "count,name,label,pair,items")
     assert_eq(declared.fields[1].ty, "Type.Option{{inner: Type.Named{{name: \"Name\"}}}}")
     assert_eq(declared.fields[3].ty, "Type.Tuple{{fields: [TypeTupleField]{{TypeTupleField{{name: \"index\", ty: Type.Int}}, TypeTupleField{{name: \"size\", ty: Type.IntN{{signed: true, bits: 32}}}}}}}}")
-    assert_eq(declared.fields[4].ty, "Type.Apply{{name: \"List\", args: [Type]{{Type.Named{{name: \"Item\"}}}}}}")
+    assert_eq(declared.fields[4].ty, "Type.Apply{{name: \"Bag\", args: [Type]{{Type.Named{{name: \"Item\"}}}}}}")
     other: "Bag: struct {{\n    data: [String:[U8]],\n    ops: Shared<Ops>,\n    ratio: F64,\n}}\n"
     bag: struct_fields(other.bytes(), "Bag: struct ".len())
     assert_eq(bag.fields[0].ty, "Type.Map{{key: Type.String, key_span: None, value: Type.List{{element: Type.IntN{{signed: false, bits: 8}}}}}}")
@@ -577,6 +585,18 @@ run: fn() { print(core_record_rows_main(process.args()) ?? process.fail(1, err.m
     assert_eq((loop record in result.residue -> record.owner).join(","), "Gone,Box")
     assert(result.text.contains("{FIELD_OPEN}Pair\", field: \"left\", ty: Type.Int}},\n{FIELD_OPEN}Pair\", field: \"right\", ty: Type.String}},\n{FIELD_OPEN}Gone\""))
     assert(result.text.contains("{LITERAL_OPEN}Pair\", fields: [TypeTupleField]{{TypeTupleField{{name: \"left\", ty: Type.Int}}, TypeTupleField{{name: \"right\", ty: Type.String}}}}}},"))
+    again: record_rows(result.text, sites, texts)
+    assert_eq(again.stale.len(), 0)
+}
+
+#Test("a record with priv storage keeps field rows for its other fields and loses its literal row") {
+    texts := [String:String]{}
+    texts["Core/Demo/Demo.jet"] = "Device: struct {{\n    priv name: String,\n    label: String,\n}}\n"
+    sites: struct_sites([String]{"Core/Demo/Demo.jet"}, texts)
+    records: "ROWS: [CoreRecordFieldRow]{{\n{FIELD_OPEN}Device\", field: \"name\", ty: Type.String, core_only: true}},\n}}\nLITERALS: [CoreRecordLiteralRow]{{\n{LITERAL_OPEN}Device\", fields: [TypeTupleField]{{TypeTupleField{{name: \"name\", ty: Type.String}}}}, core_only: true}},\n}}"
+    result: record_rows(records, sites, texts)
+    assert_eq(result.stale.len(), 1)
+    assert_eq(result.text, "ROWS: [CoreRecordFieldRow]{{\n{FIELD_OPEN}Device\", field: \"label\", ty: Type.String}},\n}}\nLITERALS: [CoreRecordLiteralRow]{{\n}}")
     again: record_rows(result.text, sites, texts)
     assert_eq(again.stale.len(), 0)
 }
