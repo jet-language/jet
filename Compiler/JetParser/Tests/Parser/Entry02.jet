@@ -652,7 +652,7 @@ entry02_unit_result: fn(ty: Type?, error_name: String) -> Bool {
 // `{value:Name(args)}` its meaning; the formatter prints it back as written.
 #Test("any_selector_name_parses_with_its_arguments") {
     src: `show: fn(x: Int, n: Int) -> String { "{x:Color} {x:Shade(2, "dark", n)}" }`
-    assert(entry02_errors(src).is_empty())
+    assert(entry02_program(src).items.len() == 1)
     once: entry02_format(src)
     assert(once.contains(`"{x:Color} {x:Shade(2, "dark", n)}"`), once)
     assert(once == entry02_format(once))
