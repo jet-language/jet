@@ -300,6 +300,37 @@ runs and one 39-minute full test pass. These rules bind every train:
     left per epoch, never in activity. A submission sitting in the inbox while
     the build slot is idle, or a proven criterion left unmet, is an
     orchestrator failure, fixed the same hour.
+25. **Refuse stale patches on arrival.** A patch is checked with `git apply
+    --check` against the current train tip (or the `dev` tip when no train
+    is composing) the minute it arrives, and goes straight back to its worker
+    if it fails. A stale patch is never discovered when the train is
+    composed: on 2026-11-25 two such patches cost a full recompose.
+26. **A train freezes when its gate starts.** Nothing joins a train once
+    its preflight has begun. A submission that arrives later starts the
+    next train, which launches the moment this one's build compiles. Adding
+    late patches to a composed train cost batch 49 four recomposes and two
+    regenerations.
+27. **The gate is the seed's build, not a check.** The preflight before the
+    launch is `Land.jet census`, which includes the seed's keep-going `jet
+    build` and its Core body recheck. A `jet check`-only preflight passed
+    batch 49 while the seed's self-hosted checker could not read a Core
+    marker the batch added, and its stage-1 build failed.
+28. **The split comes from the submission, never a guess.** A submission
+    whose Core, Prelude or test half needs the compiler half it ships names
+    the split in `meta` (`seed: <part a>`), and the orchestrator places part
+    a before the stage-1 tip and part b after it exactly as named. A Core
+    marker, contract or row is a part b by default. A submission without
+    the line is refused at intake.
+29. **Land on the build.** The moment the train's final compiler builds,
+    its commits land on `dev` and `master` is merged. The suites, proofs and
+    gates then run on the landed commit, and a new red goes back to its
+    owner the same hour. No train ever waits for its suite to land.
+30. **The orchestrator composes nothing by hand that a tool can do.**
+    Composing, regenerating, splitting into stages, the preflight, the
+    build and the landing are one script run per train. A step the script
+    lacks is added to the script the same day it is first done by hand, so
+    it is never done by hand twice.
+
 
 `Tools/Agent/Land.jet batch` runs rules 1 to 4, 7 and 8 itself: the seed gate
 of every touched package from an empty directory, one `precommit`, the
