@@ -170,6 +170,21 @@ int_word: fn(value: I64) -> I64 {
     return if (int_negative(value)) -> wrapping(I64{0} - magnitude) else -> magnitude
 }
 
+// The I64 an exact-Int carrier lent to a route export holds, saturated: a
+// value below I64.MIN reads as I64.MIN and one above I64.MAX as I64.MAX, so
+// the export's own range check refuses it, or its cap takes it, as it would
+// that bound. Every route crosses an Int or machine-integer argument as its
+// carrier (JetIR BuildRoutes.jet ir_route_declared); an export that reads
+// such a word as a number reads it through this or another carrier reader,
+// never as the bare word, which above the inline range is a node address.
+int_saturated: fn(value: I64) -> I64 {
+    if int_inline(value) -> return value
+    negative: int_negative(value)
+    bound: if negative -> U64{9223372036854775808} else -> U64{9223372036854775807}
+    if int_fits(value, bound) -> return int_word(value)
+    if negative -> I64{-9223372036854775807 - 1} else -> I64{9223372036854775807}
+}
+
 int_pack: fn(node: I64) -> I64 {
     int_normalize(node)
     tagged: int_tag(node)

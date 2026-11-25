@@ -396,7 +396,7 @@ mod_granted_path: fn(path: I64, roots: I64, count: I64, error: I64) -> I64 {
     mod_put(context, MOD_LENGTH, rt_text_word(wrapping(output + I64{8})))
     mod_put(context, MOD_CAPACITY, rt_text_word(wrapping(output + I64{16})))
     jet_rt_free(output, I64{24}, I64{8})
-    rt_text_store(ok, context)
+    rt_text_store(ok, jet_int_owned_from_i64(context))
     I64{1}
 }
 
@@ -913,7 +913,7 @@ mod_stage_error: fn(errno: I64) -> I64 {
 }
 
 #Export(c) jet_mod_exports_count_raw: fn(id: I64) -> I64 {
-    mod_word(jet_int_owned_to_i64(id), MOD_EXPORT_COUNT)
+    jet_int_owned_from_i64(mod_word(jet_int_owned_to_i64(id), MOD_EXPORT_COUNT))
 }
 
 #Export(c) jet_mod_export_info_raw: fn(id: I64, index: I64, name: I64, symbol: I64, text: I64) {

@@ -245,8 +245,11 @@ stdin_utf8_error: fn(error: I64) -> I64 {
 // One stdin read of up to `n` bytes (the buffered ones first, without a read),
 // as (bytes, None), or ([], Some(io.Error Display)). Read errors propagate as
 // read() reports them (no EINTR retry); std's stdin maps EBADF to end of input.
-// Core rejects a negative `n` before the call.
-#Export(c) jet_terminal8_take: fn(n: I64, data: I64, length: I64, error_tag: I64, error: I64) {
+// Core rejects a negative `n` before the call. `n` is a lent exact-Int
+// carrier, read saturated (Int.jet int_saturated): one beyond I64 asks for
+// as many bytes as I64.MAX does.
+#Export(c) jet_terminal8_take: fn(n_int: I64, data: I64, length: I64, error_tag: I64, error: I64) {
+    n: int_saturated(n_int)
     capacity: if (n > I64{0}) -> n else -> I64{0}
     got := I64{0}
     buffer := I64{0}
@@ -277,8 +280,12 @@ stdin_utf8_error: fn(error: I64) -> I64 {
 // without a wait, and [] at end of input. ([], None, true) when the wait ran
 // out first, or ([], Some(io.Error Display), false). A wait of 0 or less looks
 // without waiting. The wait's answer is journaled like every stdin read
-// (ProveJournal.jet rt_prove_stdin_wait). Core rejects a negative `n`.
-#Export(c) jet_terminal8_take_within: fn(n: I64, wait: I64, data: I64, length: I64, error_tag: I64, error: I64, waited_out: I64) {
+// (ProveJournal.jet rt_prove_stdin_wait). Core rejects a negative `n`. Both
+// `n` and `wait` are lent exact-Int carriers, read saturated (Int.jet
+// int_saturated), as jet_terminal8_take's `n` is.
+#Export(c) jet_terminal8_take_within: fn(n_int: I64, wait_int: I64, data: I64, length: I64, error_tag: I64, error: I64, waited_out: I64) {
+    n: int_saturated(n_int)
+    wait: int_saturated(wait_int)
     capacity: if (n > I64{0}) -> n else -> I64{0}
     got := I64{0}
     buffer := I64{0}
@@ -339,8 +346,8 @@ stdin_utf8_error: fn(error: I64) -> I64 {
     columns: (packed >> I64{16}) & I64{65535}
     none: I64{0}
     if result != none || rows <= none || columns <= none -> return none
-    rt_text_store(height, rows)
-    rt_text_store(width, columns)
+    rt_text_store(height, jet_int_owned_from_i64(rows))
+    rt_text_store(width, jet_int_owned_from_i64(columns))
     I64{1}
 }
 

@@ -6777,7 +6777,9 @@ ir_route_ambient_refusals: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, symbol:
 
 // The route `symbol` (`declared`, else its table row) on the checked
 // argument expressions `args`, typed `ty`: an exact Int argument the route
-// consumes (borrow_mask false) crosses as its native I64.
+// consumes (borrow_mask false) is narrowed to its native I64 (E3010 at the
+// call when it does not fit), which a Word carrier then crosses as an
+// exact-Int carrier again (ir_route_declared); a lent one crosses as is.
 ir_route_call_args: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, symbol: String, declared: IRRoute?, args: [Int], borrow_mask: [Bool], ty: Type, labels: [String], span: Span) -> Int Never! {
     // Only the route call itself may split a `??` or `?` operand, not the
     // argument conversions before it.

@@ -55,9 +55,13 @@ host_i32: fn(value: I64) -> I64 {
     if (low >= I64{2147483648}) -> wrapping(low - I64{4294967296}) else -> low
 }
 
-#Export(c) jet_std_os_pid: fn() -> I64 { host_call(I64{39}, I64{0}, I64{0}, I64{0}) }
+// The process id: the native pid for the runtime's own uses, and as the
+// owned exact-Int carrier every route answers an Int with.
+host_pid: fn() -> I64 { host_call(I64{39}, I64{0}, I64{0}, I64{0}) }
 
-#Export(c) jet_std_os_getpid: fn() -> I64 { jet_std_os_pid() }
+#Export(c) jet_std_os_pid: fn() -> I64 { jet_int_owned_from_i64(host_pid()) }
+
+#Export(c) jet_std_os_getpid: fn() -> I64 { host_pid() }
 
 #Export(c) jet_std_os_getppid: fn() -> I64 { host_call(I64{110}, I64{0}, I64{0}, I64{0}) }
 
@@ -73,7 +77,7 @@ host_i32: fn(value: I64) -> I64 {
 
 // jet_sys_getuid_raw: unix getuid(2) cannot fail, so Some.
 #Export(c) jet_sys_getuid_raw: fn(some: I64) -> I64 {
-    rt_text_store(some, jet_std_os_getuid())
+    rt_text_store(some, jet_int_owned_from_i64(jet_std_os_getuid()))
     I64{1}
 }
 
@@ -124,7 +128,8 @@ host_i32: fn(value: I64) -> I64 {
 #Export(c) jet_std_process_exit_owned: fn(code: I64) { jet_rt_process_exit(host_i32(code)) }
 
 // Raw tuples marshal into the generator's separate out slots, never a boxed
-// tuple. Bool is one byte; exact Int success/error facts fit inline words.
+// tuple. Bool is one byte; each Int fact is written as its owned exact-Int
+// carrier (jet_int_owned_from_i64), as every route answers an Int.
 host_sample_out: fn(result: I64, available: I64, value: I64, errno: I64) {
     host_sample_fields(if (result < I64{0}) -> I64{-1} else -> result, if (result < I64{0}) -> wrapping(I64{0} - result) else -> I64{0}, available, value, errno)
 }
@@ -132,8 +137,8 @@ host_sample_out: fn(result: I64, available: I64, value: I64, errno: I64) {
 host_sample_fields: fn(result: I64, error: I64, available: I64, value: I64, errno: I64) {
     // The caller lends the C-ABI tuple's Bool byte and two writable Int words.
     rt_text_put(available, I64{1})
-    rt_text_store(value, result)
-    rt_text_store(errno, error)
+    rt_text_store(value, jet_int_owned_from_i64(result))
+    rt_text_store(errno, jet_int_owned_from_i64(error))
 }
 
 #Export(c) jet_sys_getpgid_raw: fn(pid: I64, available: I64, value: I64, errno: I64) {
@@ -258,7 +263,7 @@ host_sample_fields: fn(result: I64, error: I64, available: I64, value: I64, errn
     rt_text_put(available, I64{1})
     rt_text_store(soft, jet_int_owned_from_i64(if (result < I64{0}) -> I64{0} else -> rt_text_word(buffer)))
     rt_text_store(hard, jet_int_owned_from_i64(if (result < I64{0}) -> I64{0} else -> rt_text_word(wrapping(buffer + I64{8}))))
-    rt_text_store(errno, if (result < I64{0}) -> wrapping(I64{0} - result) else -> I64{0})
+    rt_text_store(errno, jet_int_owned_from_i64(if (result < I64{0}) -> wrapping(I64{0} - result) else -> I64{0}))
     jet_rt_free(buffer, I64{16}, I64{8})
 }
 
@@ -302,7 +307,7 @@ host_sample_fields: fn(result: I64, error: I64, available: I64, value: I64, errn
     rt_text_store(user, jet_int_owned_from_i64(rt_text_word(buffer) * I64{1000000} + rt_text_word(wrapping(buffer + I64{8}))))
     rt_text_store(system, jet_int_owned_from_i64(rt_text_word(wrapping(buffer + I64{16})) * I64{1000000} + rt_text_word(wrapping(buffer + I64{24}))))
     rt_text_store(peak, jet_int_owned_from_i64(rt_text_word(wrapping(buffer + I64{32})) * I64{1024}))
-    rt_text_store(errno, if (result < I64{0}) -> wrapping(I64{0} - result) else -> I64{0})
+    rt_text_store(errno, jet_int_owned_from_i64(if (result < I64{0}) -> wrapping(I64{0} - result) else -> I64{0}))
     jet_rt_free(buffer, I64{144}, I64{8})
 }
 
@@ -311,7 +316,7 @@ host_sample_fields: fn(result: I64, error: I64, available: I64, value: I64, errn
     if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     result: host_call(I64{95}, native & I64{4294967295}, I64{0}, I64{0})
     // `some` lends a writable C-ABI Option success word.
-    rt_text_store(some, result)
+    rt_text_store(some, jet_int_owned_from_i64(result))
     I64{1}
 }
 
@@ -328,6 +333,7 @@ host_sample_fields: fn(result: I64, error: I64, available: I64, value: I64, errn
     rt_text_store(status, I64{0})
     #Unsafe("status lends an eight-byte out slot; wait4 writes its low four bytes and retains no pointer") {
         result: host_syscall(I64{61}, native_pid, status, native_options, I64{0}, I64{0}, I64{0})
+        rt_text_store(status, jet_int_owned_from_i64(rt_text_word(status)))
         host_sample_out(result, available, value, errno)
     }
 }
@@ -342,7 +348,7 @@ host_sample_fields: fn(result: I64, error: I64, available: I64, value: I64, errn
     rt_text_store(read_fd, I64{0})
     result: host_call(I64{22}, read_fd, I64{0}, I64{0})
     packed: rt_text_word(read_fd)
-    rt_text_store(read_fd, packed & I64{4294967295})
-    rt_text_store(write_fd, (packed >> I64{32}) & I64{4294967295})
+    rt_text_store(read_fd, jet_int_owned_from_i64(packed & I64{4294967295}))
+    rt_text_store(write_fd, jet_int_owned_from_i64((packed >> I64{32}) & I64{4294967295}))
     host_sample_out(result, available, value, errno)
 }

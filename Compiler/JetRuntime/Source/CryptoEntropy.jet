@@ -127,7 +127,11 @@ rt_crypto_entropy_fill: fn(out: I64, count: I64) -> I64 {
 
 // CAbiRoutes:15924 Option<[U8]> transfers payload pointer/count on Some;
 // None leaves both out slots untouched. No list header crosses this boundary.
-#Export(c) jet_random_os_entropy: fn(count: I64, some: I64, some_len: I64) -> I64 {
+// The binding lends the count as its exact-Int carrier, read saturated
+// (Int.jet int_saturated): one beyond I64 is refused as any count past the
+// cap is.
+#Export(c) jet_random_os_entropy: fn(count_int: I64, some: I64, some_len: I64) -> I64 {
+    count: int_saturated(count_int)
     jet_rt_world_reject_uncontrolled(I64{3})
     if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     if (count < I64{0} || count > I64{1048576}) { return I64{0} }

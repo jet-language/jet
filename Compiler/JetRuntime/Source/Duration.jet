@@ -11,7 +11,10 @@ runtime_duration_error: fn(error: I64) -> I64 {
     I64{0}
 }
 
-runtime_duration_scale: fn(unit: I64) -> I64 {
+// The unit index crosses as its lent exact-Int carrier, read saturated
+// (Int.jet int_saturated): one beyond I64 is past Hours like any other.
+runtime_duration_scale: fn(unit_int: I64) -> I64 {
+    unit: int_saturated(unit_int)
     if (unit == I64{0}) { return I64{1} }
     if (unit == I64{1}) { return I64{1000} }
     if (unit == I64{2}) { return I64{1000000} }

@@ -106,8 +106,9 @@ net_unix_connect_run: fn(path: I64, output: I64, error: I64) -> I64 {
 
 #Export(c) jet_net_unix_connect_deadline: fn(path: I64, deadline: I64, output: I64, error: I64) -> I64 {
     operation: rt_static_text("unix connect")
-    // Duration's provider word is untagged nanoseconds (not an exact Int).
-    milliseconds: deadline / I64{1000000}
+    // The binding lends its Int nanoseconds as their exact-Int carrier, read
+    // saturated (Int.jet int_saturated).
+    milliseconds: int_saturated(deadline) / I64{1000000}
     if (milliseconds < I64{0}) {
         return net_route_fail_take(NET_ERROR_INVALID_INPUT, operation, I64{0}, jet_rt_string_clone(rt_static_text("network timeout must be non-negative")), I64{0}, error)
     }

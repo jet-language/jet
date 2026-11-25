@@ -288,9 +288,10 @@ host_is_tty: fn(fd: I64) -> Bool {
 }
 
 // core.term.jet_term_is_terminal_raw: only stdin, stdout and stderr are
-// standard streams; any other Int reads false. An exact Int 0..2 is its own
-// inline word, so the borrowed word compares directly.
-#Export(c) jet_term_is_terminal_raw: fn(fd: I64) -> Bool {
+// standard streams; any other Int reads false. The binding lends the fd as
+// its exact-Int carrier, read saturated (Int.jet int_saturated).
+#Export(c) jet_term_is_terminal_raw: fn(fd_int: I64) -> Bool {
+    fd: int_saturated(fd_int)
     if (fd < I64{0} || fd > I64{2}) { return false }
     host_is_tty(fd)
 }

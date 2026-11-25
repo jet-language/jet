@@ -169,15 +169,17 @@ codec_etf_strings_key := I64{0}
     }
 }
 
-// Enter returns the previous mode, which leave restores.
+// Enter returns the previous mode, which leave restores. Each mode crosses
+// as its lent exact-Int carrier; the slot keeps its I64, read saturated
+// (Int.jet int_saturated), and enter answers it as an owned exact Int.
 #Export(c) jet_rt_codec_etf_strings_enter: fn(mode: I64) -> I64 {
     previous: jet_rt_tls_get(codec_etf_strings_key)
-    jet_rt_tls_set(codec_etf_strings_key, mode)
-    previous
+    jet_rt_tls_set(codec_etf_strings_key, int_saturated(mode))
+    jet_int_owned_from_i64(previous)
 }
 
 #Export(c) jet_rt_codec_etf_strings_leave: fn(previous: I64) {
-    jet_rt_tls_set(codec_etf_strings_key, previous)
+    jet_rt_tls_set(codec_etf_strings_key, int_saturated(previous))
 }
 
 // The ETF scope's String from a Bytes leaf (mode 1) or a list of byte Ints

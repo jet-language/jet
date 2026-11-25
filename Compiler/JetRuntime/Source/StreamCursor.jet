@@ -55,14 +55,17 @@ stream_clone: fn(handle: I64) -> I64 {
     stream_new(rt_text_data(text), rt_text_len(text), I64{1}, I64{0})
 }
 
+// The route lends every Word (stride, position, count) as its exact-Int
+// carrier, read saturated (Int.jet int_saturated): one beyond I64 is refused
+// as I64.MIN or I64.MAX would be, and its message shows that bound.
 #Export(c) jet_reader_over: fn(data: I64, len: I64, stride: I64) -> I64 {
-    stream_new(data, len, stride, I64{0})
+    stream_new(data, len, int_saturated(stride), I64{0})
 }
 
 #Export(c) jet_reader_over_owned: fn(data: I64, len: I64, stride: I64) -> I64 {
     // The C route lends its source buffer even for the lowering-only owned
     // constructor; the reference list_in adapter also copies before transfer.
-    stream_new(data, len, stride, I64{0})
+    stream_new(data, len, int_saturated(stride), I64{0})
 }
 
 #Export(c) jet_cursor_skip_ws: fn(handle: I64) {
@@ -282,7 +285,8 @@ stream_negative_error: fn(method: I64, value: I64) -> I64 {
     message
 }
 
-#Export(c) jet_reader_seek: fn(handle: I64, position: I64, error: I64) -> I64 {
+#Export(c) jet_reader_seek: fn(handle: I64, position_int: I64, error: I64) -> I64 {
+    position: int_saturated(position_int)
     if (position < I64{0}) {
         rt_text_store(error, stream_negative_error(I64{0}, position))
         return I64{0}
@@ -305,7 +309,8 @@ stream_negative_error: fn(method: I64, value: I64) -> I64 {
     I64{1}
 }
 
-#Export(c) jet_reader_skip: fn(handle: I64, count: I64, error: I64) -> I64 {
+#Export(c) jet_reader_skip: fn(handle: I64, count_int: I64, error: I64) -> I64 {
+    count: int_saturated(count_int)
     if (count < I64{0}) {
         rt_text_store(error, stream_negative_error(I64{3}, count))
         return I64{0}
@@ -319,7 +324,9 @@ stream_negative_error: fn(method: I64, value: I64) -> I64 {
     I64{1}
 }
 
-#Export(c) jet_reader_take: fn(handle: I64, count: I64, stride: I64, ok_data: I64, ok_len: I64, error: I64) -> I64 {
+#Export(c) jet_reader_take: fn(handle: I64, count_int: I64, stride_int: I64, ok_data: I64, ok_len: I64, error: I64) -> I64 {
+    count: int_saturated(count_int)
+    stride: int_saturated(stride_int)
     if (count < I64{0}) {
         rt_text_store(error, stream_negative_error(I64{2}, count))
         return I64{0}

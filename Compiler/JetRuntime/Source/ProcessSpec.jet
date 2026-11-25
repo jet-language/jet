@@ -437,13 +437,6 @@ jet_process_limit_i64: fn(value: I64) -> I64 {
     process_spec_raw_replace(value, PROCESS_SPEC_OPEN_FILE_LIMIT, jet_process_limit_i64(limit))
 }
 
-// An exact Int as a word: inline values as they are, larger ones saturated,
-// so the launch check still sees their sign and that they are out of range.
-process_int_saturated: fn(value: I64) -> I64 {
-    if int_inline(value) -> return value
-    if int_negative(value) -> I64{-9223372036854775807} else -> I64{9223372036854775807}
-}
-
 // `.cpu_affinity(cpus)`: the CPUs the child may run on, set with
 // sched_setaffinity in the child before exec. The list is kept as given;
 // launch refuses an empty one or a CPU outside the PROCESS_CPU_SET_CPUS set
@@ -456,7 +449,7 @@ process_int_saturated: fn(value: I64) -> I64 {
     target: encoding_word(wrapping(cpus + DATA_SEQUENCE_DATA))
     at := I64{0}
     loop at < count {
-        encoding_store(wrapping(target + at * DYN_ELEMENT_BYTES), process_int_saturated(encoding_word(wrapping(data + at * DYN_ELEMENT_BYTES))))
+        encoding_store(wrapping(target + at * DYN_ELEMENT_BYTES), int_saturated(encoding_word(wrapping(data + at * DYN_ELEMENT_BYTES))))
         at += I64{1}
     }
     encoding_store(wrapping(cpus + DATA_SEQUENCE_LENGTH), count)
@@ -471,7 +464,7 @@ process_int_saturated: fn(value: I64) -> I64 {
 #Export(c) jet_process_spec_io_priority: fn(value: I64, level: I64) -> I64 {
     result: value
     encoding_store(wrapping(result + PROCESS_SPEC_IO_PRIORITY), PROCESS_IO_PRIORITY_BEST_EFFORT)
-    encoding_store(wrapping(result + PROCESS_SPEC_IO_PRIORITY_LEVEL), process_int_saturated(level))
+    encoding_store(wrapping(result + PROCESS_SPEC_IO_PRIORITY_LEVEL), int_saturated(level))
     result
 }
 
@@ -490,7 +483,7 @@ process_int_saturated: fn(value: I64) -> I64 {
 #Export(c) jet_process_spec_memory_scope: fn(value: I64, bytes: I64) -> I64 {
     result: value
     encoding_store(wrapping(result + PROCESS_SPEC_MEMORY_SCOPE), I64{1})
-    encoding_store(wrapping(result + PROCESS_SPEC_MEMORY_SCOPE_BYTES), process_int_saturated(bytes))
+    encoding_store(wrapping(result + PROCESS_SPEC_MEMORY_SCOPE_BYTES), int_saturated(bytes))
     result
 }
 

@@ -14,7 +14,10 @@
 // FilesIgnore matcher or 0 @16, directory stream or 0 @24. A released slot is
 // the next one a push takes, so a walk that releases each slot it is done
 // with holds as many as its open path needs. Stream40: fd @0, getdents64
-// buffer @8, filled @16, position @24, ended @32.
+// buffer @8, filled @16, position @24, ended @32. A key or slot a route
+// lends is its exact-Int carrier, read saturated (Int.jet int_saturated):
+// one beyond I64 is past every live key and slot, so it panics as any other
+// dead one does.
 WALK_CONTEXT_BYTES: I64{72}
 
 WALK_SLOT_BYTES: I64{32}
@@ -417,7 +420,8 @@ walk_out_error: fn(failure: I64, kind: I64, code_tag: I64, code: I64, cause_tag:
 
 // HashMap.remove: a key that is not live is a no-op; the context itself is
 // freed by whichever of the table and in-flight operations releases it last.
-#Export(c) jet_walk8_close: fn(key: I64) {
+#Export(c) jet_walk8_close: fn(key_int: I64) {
+    key: int_saturated(key_int)
     root: walk_root
     sync_mutex_lock(root)
     link := root + I64{16}
@@ -437,7 +441,9 @@ walk_out_error: fn(failure: I64, kind: I64, code_tag: I64, code: I64, cause_tag:
 }
 
 // An empty path validates as "." in a new slot.
-#Export(c) jet_walk8_validation_path: fn(key: I64, slot: I64) -> I64 {
+#Export(c) jet_walk8_validation_path: fn(key_int: I64, slot_int: I64) -> I64 {
+    key: int_saturated(key_int)
+    slot: int_saturated(slot_int)
     context: walk_enter(key)
     if (context == I64{0}) { return I64{0} }
     if !walk_live(context, slot) -> return I64{0}
@@ -453,7 +459,9 @@ walk_out_error: fn(failure: I64, kind: I64, code_tag: I64, code: I64, cause_tag:
 }
 
 // Path.ancestors without empty paths, each as a new slot.
-#Export(c) jet_walk8_ancestors: fn(key: I64, slot: I64, output: I64) -> I64 {
+#Export(c) jet_walk8_ancestors: fn(key_int: I64, slot_int: I64, output: I64) -> I64 {
+    key: int_saturated(key_int)
+    slot: int_saturated(slot_int)
     context: walk_enter(key)
     if (context == I64{0}) { return I64{0} }
     if !walk_live(context, slot) -> return I64{0}
@@ -471,7 +479,9 @@ walk_out_error: fn(failure: I64, kind: I64, code_tag: I64, code: I64, cause_tag:
 }
 
 // symlink_metadata: (directory, symlink, kind, code?, cause?).
-#Export(c) jet_walk8_metadata: fn(key: I64, slot: I64, directory: I64, symlink: I64, kind: I64, code_tag: I64, code: I64, cause_tag: I64, cause: I64) {
+#Export(c) jet_walk8_metadata: fn(key_int: I64, slot_int: I64, directory: I64, symlink: I64, kind: I64, code_tag: I64, code: I64, cause_tag: I64, cause: I64) {
+    key: int_saturated(key_int)
+    slot: int_saturated(slot_int)
     context: walk_enter(key)
     if (context == I64{0}) {
         return
@@ -493,7 +503,9 @@ walk_out_error: fn(failure: I64, kind: I64, code_tag: I64, code: I64, cause_tag:
     walk_out_error(failure, kind, code_tag, code, cause_tag, cause)
 }
 
-#Export(c) jet_walk8_shown: fn(key: I64, slot: I64) -> I64 {
+#Export(c) jet_walk8_shown: fn(key_int: I64, slot_int: I64) -> I64 {
+    key: int_saturated(key_int)
+    slot: int_saturated(slot_int)
     context: walk_enter(key)
     if (context == I64{0}) { return jet_rt_string_builder_new() }
     if !walk_live(context, slot) -> return jet_rt_string_builder_new()
@@ -505,7 +517,9 @@ walk_out_error: fn(failure: I64, kind: I64, code_tag: I64, code: I64, cause_tag:
 // Release the slot `slot` once the walk is done with it (walk_slot_clear),
 // closing its directory stream if one is open; a later push takes it. The
 // root's slot 0 and a slot already released stay as they are.
-#Export(c) jet_walk8_release: fn(key: I64, slot: I64) {
+#Export(c) jet_walk8_release: fn(key_int: I64, slot_int: I64) {
+    key: int_saturated(key_int)
+    slot: int_saturated(slot_int)
     context: walk_enter(key)
     if (context == I64{0}) {
         return
@@ -521,7 +535,8 @@ walk_out_error: fn(failure: I64, kind: I64, code_tag: I64, code: I64, cause_tag:
     walk_leave(context)
 }
 
-#Export(c) jet_walk8_matcher_new: fn(key: I64) {
+#Export(c) jet_walk8_matcher_new: fn(key_int: I64) {
+    key: int_saturated(key_int)
     context: walk_enter(key)
     if (context == I64{0}) {
         return
@@ -575,7 +590,9 @@ walk_read_file: fn(name: I64, output: I64) -> I64 {
 
 // JetFsIgnoreMatcher.with_directory_rules(slot path, filename): a missing or
 // non-regular (including symlink) ignore file keeps the inherited rules.
-#Export(c) jet_walk8_rules: fn(key: I64, slot: I64, filename: I64, kind: I64, code_tag: I64, code: I64, cause_tag: I64, cause: I64) {
+#Export(c) jet_walk8_rules: fn(key_int: I64, slot_int: I64, filename: I64, kind: I64, code_tag: I64, code: I64, cause_tag: I64, cause: I64) {
+    key: int_saturated(key_int)
+    slot: int_saturated(slot_int)
     context: walk_enter(key)
     if (context == I64{0}) {
         return
@@ -625,7 +642,9 @@ walk_read_file: fn(name: I64, output: I64) -> I64 {
     walk_out_error(failure, kind, code_tag, code, cause_tag, cause)
 }
 
-#Export(c) jet_walk8_ignored: fn(key: I64, slot: I64, relative: I64, directory: Bool) -> Bool {
+#Export(c) jet_walk8_ignored: fn(key_int: I64, slot_int: I64, relative: I64, directory: Bool) -> Bool {
+    key: int_saturated(key_int)
+    slot: int_saturated(slot_int)
     context: walk_enter(key)
     if (context == I64{0}) { return false }
     if !walk_live(context, slot) -> return false
@@ -640,7 +659,10 @@ walk_read_file: fn(name: I64, output: I64) -> I64 {
     result
 }
 
-#Export(c) jet_walk8_inherit: fn(key: I64, child: I64, parent: I64) {
+#Export(c) jet_walk8_inherit: fn(key_int: I64, child_int: I64, parent_int: I64) {
+    key: int_saturated(key_int)
+    child: int_saturated(child_int)
+    parent: int_saturated(parent_int)
     context: walk_enter(key)
     if (context == I64{0}) {
         return
@@ -656,7 +678,9 @@ walk_read_file: fn(name: I64, output: I64) -> I64 {
 }
 
 // std.fs.read_dir (opendir: O_RDONLY|O_DIRECTORY|O_CLOEXEC) into the slot.
-#Export(c) jet_walk8_read_dir: fn(key: I64, slot: I64, kind: I64, code_tag: I64, code: I64, cause_tag: I64, cause: I64) {
+#Export(c) jet_walk8_read_dir: fn(key_int: I64, slot_int: I64, kind: I64, code_tag: I64, code: I64, cause_tag: I64, cause: I64) {
+    key: int_saturated(key_int)
+    slot: int_saturated(slot_int)
     context: walk_enter(key)
     if (context == I64{0}) {
         return
@@ -716,7 +740,9 @@ walk_stream_next: fn(stream: I64) -> I64 {
 // failure is neither a directory nor a file. Only a directory gets a child
 // slot, the one the walk reads it through; any other entry's child is 0,
 // which needs no release.
-#Export(c) jet_walk8_next: fn(key: I64, slot: I64, end: I64, child: I64, directory: I64, file: I64, path: I64, relative: I64, ignore_file: I64, kind: I64, code_tag: I64, code: I64, cause_tag: I64, cause: I64) {
+#Export(c) jet_walk8_next: fn(key_int: I64, slot_int: I64, end: I64, child: I64, directory: I64, file: I64, path: I64, relative: I64, ignore_file: I64, kind: I64, code_tag: I64, code: I64, cause_tag: I64, cause: I64) {
+    key: int_saturated(key_int)
+    slot: int_saturated(slot_int)
     context: walk_enter(key)
     if (context == I64{0}) {
         return

@@ -101,10 +101,12 @@ net_udp_wait: fn(state: I64, reading: Bool, operation: I64, scratch: I64, error:
     result
 }
 
-#Export(c) jet_net_udp_set_timeout: fn(value: I64, milliseconds: I64, error: I64) -> I64 {
+#Export(c) jet_net_udp_set_timeout: fn(value: I64, milliseconds_int: I64, error: I64) -> I64 {
     operation: rt_static_text("set udp timeout")
     if !net_udp_open(value, operation, error) -> return I64{0}
-    // Private i64 parameters are raw milliseconds, unlike Int fields.
+    // The binding lends its Int milliseconds as their exact-Int carrier,
+    // read saturated (Int.jet int_saturated).
+    milliseconds: int_saturated(milliseconds_int)
     if (milliseconds < I64{0}) {
         return net_route_fail_take(NET_ERROR_INVALID_INPUT, operation, I64{0}, jet_rt_string_clone(rt_static_text("network timeout must be non-negative")), I64{0}, error)
     }
