@@ -1,0 +1,10 @@
+// A lambda body written as fields builds a record. Passed where the call takes
+// nothing back (`each`), it throws that record away, as a named function's
+// last line is when it writes no result.
+run: fn() {
+    [1, 2].each(fn(n) { n: n, sq: n * n })
+
+    // Quiet: a callback whose record the call keeps.
+    rows: [1, 2].map(fn(n) { n: n, sq: n * n })
+    print(rows.len())
+}

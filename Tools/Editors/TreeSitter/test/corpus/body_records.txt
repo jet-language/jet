@@ -1,0 +1,79 @@
+========================
+Function body written as fields
+========================
+
+mk: fn(w: Int, h: Int) -> Rect { width: w, height: h }
+
+---
+
+(source_file
+  (function_def
+    (identifier)
+    (parameters
+      (label
+        (identifier))
+      (primitive_type)
+      (label
+        (identifier))
+      (primitive_type))
+    (type_identifier)
+    (block
+      (label
+        (identifier))
+      (identifier)
+      (label
+        (identifier))
+      (identifier))))
+
+========================
+Result type touching the body brace
+========================
+
+sq: fn(n: Int) -> Int{n * n}
+
+---
+
+(source_file
+  (function_def
+    (identifier)
+    (parameters
+      (label
+        (identifier))
+      (primitive_type))
+    (primitive_type)
+    (block
+      (identifier)
+      (identifier))))
+
+========================
+Lambda body written as fields
+========================
+
+run: fn() {
+    rows: xs.map(fn(r) { n: r, sq: r * r })
+}
+
+---
+
+(source_file
+  (function_def
+    (identifier)
+    (parameters)
+    (block
+      (label
+        (identifier))
+      (identifier)
+      (method_call_expr
+        (identifier)
+        (arguments
+          (function_def
+            (parameters
+              (identifier))
+            (block
+              (label
+                (identifier))
+              (identifier)
+              (label
+                (identifier))
+              (identifier)
+              (identifier))))))))

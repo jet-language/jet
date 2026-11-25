@@ -1370,14 +1370,11 @@ ArrowFunctionBody: struct {
     impl Diagnostic {
         code: "E0080",
         safety_class: .Opinion,
-        safety_reason: "The arrow body's meaning is clear, and Jet keeps one spelling: named function bodies sit in braces.",
+        safety_reason: "Jet keeps one spelling, a named function body in braces; the result type the arrow body gives is the author's to write, so no edit is offered.",
         stage: [.Parse],
         meaning: "A named function body follows an arrow instead of braces",
         detail: true,
-        structured_fix: .SourceEdit,
-        no_fix: None,
-        fix_safety: .Formatting,
-        fmt_applies_fix: true,
+        no_fix: .Ambiguous,
 
         what: fn(self) -> String { "This named function body follows an arrow instead of braces." }
 
@@ -1386,7 +1383,7 @@ ArrowFunctionBody: struct {
         }
 
         fix: fn(self) -> String {
-            "Replace `-> expr` with `{{ expr }}`; `jet fmt` applies this fix."
+            "Write the result type after the arrow and the body in braces: `-> Type {{ expr }}`."
         }
     }
 }

@@ -1763,8 +1763,33 @@ show: fn(n: Int) { print(n) }
 one arrow after its inputs, `->` or an effect ceiling `-[Effect]>` / `-[]>`,
 followed by its optional result type and then a braced body:
 `f: fn() -> T { expr }`. A unit or unit-fallible callable keeps a bare braced
-body. A second body arrow (`f: fn() -> T -> expr`) or an unbraced body after the
-arrow reports **E0080**; `jet fmt` rewrites it to `{ expr }` (D-SIG-AFTER1=A).
+body. A result type touching its brace ends there and the brace opens the body:
+`sq: fn(n: Int) -> Int{n * n}` keeps its result, and `jet fmt` prints
+`-> Int { n * n }`. A second body arrow (`f: fn() -> T -> expr`) or an unbraced
+body after the arrow reports **E0080**, whose fix is to write the result type
+after the arrow and the body in braces; `jet fmt` leaves it alone, since only
+the author knows which part is the result type (D-SIG-AFTER1=A,
+D-BODY-RECORD1=A).
+
+A value body written as fields builds the record, the unnamed struct, which
+then builds the struct the result names. That holds after a signature with a
+result, a lambda head, an arm's arrow and a value-giving marker block such as
+`#run`: a `,` between `name: value` or bare-name members at the body's own
+level makes it a record. After a declared result that carries a value, one
+`name: value` line is a record too, unless its value starts with `loop`, which
+stays a labeled loop. `{x}` and `{}` stay blocks, a lambda with no declared
+result keeps one field as a binding (**L0101** shows the `{ {name: value} }`
+fix), and a record body where no value is taken is thrown away (**L0508**)
+(D-RECORD-BRACE1=A, D-BODY-RECORD1=A).
+
+```jet
+Rect: struct { width: Int, height: Int }
+Box: struct { value: Int }
+
+rect: fn(w: Int, h: Int) -> Rect { width: w, height: h }
+wrap: fn(v: Int) -> Box { value: v }
+squares: fn(xs: [Int]) -> [{n: Int, sq: Int}] { xs.map(fn(x) { n: x, sq: x * x }) }
+```
 
 Function values use a function type with parameter types and a result:
 `fn(T1, T2) -> R`. A result may be omitted for a unit callback. A pure

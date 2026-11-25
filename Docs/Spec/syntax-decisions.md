@@ -94,7 +94,7 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, then rer
 | `^self.field / ^self.[a, b]` | stated receiver field footprint: the record fields a method may read or change, checked against its body (E0231) and published in the API snapshot; reuses member spread `.[` |
 | `T{expr}` | field default |
 | `Name{"…"}` | checked text head |
-| `{ … }` | record, the unnamed struct: `{x: 1, y: 2}` as a value, `{min: Int, max: Int}` as a type, `{min, max}: bounds` as a destructure; braces hold a record when every entry is a field or a pun and a colon or comma appears, so `{x}` is a block, `{x, y}` and `{x: x}` are records and `{}` is a block; where a struct type is expected the same braces build it; braces after a signature, a control head or a block marker hold code, and a paren tuple `(x: 1)` is not Jet syntax |
+| `{ … }` | record, the unnamed struct: `{x: 1, y: 2}` as a value, `{min: Int, max: Int}` as a type, `{min, max}: bounds` as a destructure; braces hold a record when every entry is a field or a pun and a colon or comma appears, so `{x}` is a block, `{x, y}` and `{x: x}` are records and `{}` is a block; where a struct type is expected the same braces build it; a value body (after a signature with a result, a lambda head, an arm's arrow, or a value-giving marker block such as `#run`) holds a record when a comma separates field or pun members at its top level, or when its declared result carries a value and its only line is `name: value` whose value does not start with `loop`; otherwise it holds code, and braces after a control head hold code; a paren tuple `(x: 1)` is not Jet syntax |
 | `loop x in xs -> item / Head{loop x in xs -> item}` | yielding loop: in value position a finite loop yields one item per accepted pass, in loop order; a bare one builds a List and ignores the expected type; a typed set or map head holding one loop in place of its items builds that collection, a map loop yielding `key: value` where a later key replaces an earlier one; items beside a loop in one head are a build error |
 | <code>`</code> | raw ordinary String fence |
 | `"""` | multi-line string; only spaces or tabs on the delimiter lines (raw foreign bodies excepted) |
@@ -1665,7 +1665,7 @@ declare. To order by another member first, use `sort_by` (example:
 `Examples/Collections/NamedTupleOrder.jet`).
 
 **D-RECORD-BRACE1=A — a record is written in braces** *(ratified 2026-11-06,
-card #6251)*: braces after a signature, a control head or a block marker hold
+card #6251; amended by D-BODY-RECORD1=A)*: braces after a signature, a control head or a block marker hold
 code, and braces after `struct`, `enum`, `trait`, `module` or `impl` hold
 members. Anywhere else braces hold a record, the unnamed struct, when every
 entry is a field or a pun and at least one colon or comma appears: `{x}` is a
@@ -1674,6 +1674,29 @@ empty block. A paren tuple is not Jet syntax. Destructuring is a brace pattern
 followed by `:` or `:=` (`{min, max}: bounds`). The `paren-tuple1` rewrite
 (D-LANG-MIGRATE1) moves paren records, types, patterns and destructures to
 braces.
+
+**D-BODY-RECORD1=A — a value body written as fields builds the record**
+*(ratified 2026-11-25, card c0yuue6m; amends D-RECORD-BRACE1 and narrows
+S29-FLUSH)*: a value body — after a signature with a result, a lambda head, an
+arm's arrow, or a value-giving marker block such as `#run` — holds a record when
+a comma separates field or pun members at its top level, the rule arm bodies
+already used: `mk: fn(w: Int, h: Int) -> Rect { width: w, height: h }`,
+`rows.map(fn(r) { name: r.name, total: r.total })`, `X: #run { a: 1, b: 2 }`.
+When the declared result carries a value (not Unit and not a unit-fallible
+`E!`), a body whose only line is `name: value` builds the record too, unless
+that value starts with `loop`: `-> Int { outer: loop { … } }` stays a labeled
+loop. A lambda with no declared result keeps one field as a binding, which
+Jet.UnusedLocalBinding reports with the `{ {name: value} }` fix. `{x}` and `{}`
+stay blocks, a decision table is not fields, and control heads keep code. The
+test is syntactic; a `<…>` argument list is one member value where the
+generic-head test holds, so `{a: 1, q: Pair<Int, Int>{first: 1, second: 2}}`
+is two fields and `{ok: MAX < n, big: m > LIMIT}` two comparisons. Body braces
+never convert: the record is checked against the declared result. After a
+signature's arrow a result type touching `{` ends there and the brace opens
+the body, so `sq: fn(n: Int) -> Int{n * n}` keeps its result and `jet fmt`
+prints `-> Int { n * n }`; E0080 fires only for a real arrow body such as
+`-> n * n` and `jet fmt` no longer rewrites it. A record body where no value is
+expected is Jet.ValueThrownAway in a lambda as in a named function.
 
 **D-BRACE-LAYOUT1=A — commas separate data members** *(ratified 2026-11-06,
 card #6251)*: commas separate the data members of a braced list: struct
@@ -1694,7 +1717,9 @@ D-LIT-DOT1=B)*: named struct and typed-literal heads touch their braces:
 **`Type{ field: expr, … }`**. An anonymous record is **`{ … }`**. The leading
 dot remains only for enum unit/payload selectors such as `.Tls13` and
 `.Password{ username: u }`. Dotted literal heads are E0320. Every field
-exactly once, any order; flush style `Point{x: 3.0, y: 4.0}` (S29-FLUSH).
+exactly once, any order; flush style `Point{x: 3.0, y: 4.0}` (S29-FLUSH;
+after a signature's arrow a type touching `{` is the result type and the brace
+opens the body, D-BODY-RECORD1).
 Qualified generic heads retain their arguments too:
 `library.Record<T>{ field: expr }` has the same construction meaning as
 `Record<T>{ field: expr }`; the adjacent `<…>{` is not a comparison chain.

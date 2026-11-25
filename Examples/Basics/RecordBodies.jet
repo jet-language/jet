@@ -1,0 +1,32 @@
+// A body written as fields builds the record: a function's, a lambda's, a
+// `#run` block's and an arm's. A `,` between `name: value` members makes the
+// braces a record; after a declared result that carries a value, one field is
+// enough. The record builds the struct the result names.
+Rect: struct {
+    width: Int,
+    height: Int,
+}
+
+Box: struct {
+    value: Int,
+}
+
+rect: fn(w: Int, h: Int) -> Rect { width: w, height: h }
+
+wrap: fn(v: Int) -> Box { value: v }
+
+LIMITS: #run { low: 1, high: 3 }
+
+sq: fn(n: Int) -> Int { n * n }
+
+run: fn() {
+    r: rect(4, 3)
+    print("rect {r.width}x{r.height}")
+    print("box {wrap(7).value}")
+    print("limits {LIMITS.low}..{LIMITS.high}")
+    rows: [1, 2, 3].map(fn(n) { n: n, sq: sq(n) })
+    loop row in rows -> print("{row.n} squared is {row.sq}")
+    big: true
+    size: if big -> {kind: "big", scale: 10} else -> {kind: "small", scale: 1}
+    print("{size.kind} x{size.scale}")
+}

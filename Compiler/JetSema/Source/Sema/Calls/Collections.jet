@@ -330,6 +330,11 @@ sema_call_try_builtin_collections: fn(receiver: Expr, receiver_value: TExpr, met
             updated_args[index].expr = taken
             updated_args[index].convention = AccessConvention.Move
         }
+        // A callback whose method gives nothing back (`each`) takes no record
+        // from a lambda body that ends in one.
+        if callback && contract.row.result == CollectionResult.Unit && ^updated_args[index].expr == .Lambda(lambda, _) {
+            sema_expression_lambda_drop_record_tail(lambda, check.diagnostics)
+        }
         value: if {
             seed_argument -> sema_check_expression(updated_args[index].expr, None, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
             else -> {

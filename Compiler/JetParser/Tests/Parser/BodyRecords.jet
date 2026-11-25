@@ -1,0 +1,118 @@
+// A function, lambda or `#run` body written as fields builds the record, as an
+// arm body does: a `,` between `name: value` or bare-name members at the
+// body's own level makes it a record. After a declared result that carries a
+// value, one `name: value` line is a record too, unless its value starts with
+// `loop`. Every other body holds code.
+use {
+    jet_foundation.[Func, Stmt]
+}
+
+// The field count of the record a body's one line builds; -1 when the body is
+// code.
+body_record_fields: fn(body: [Stmt]) -> Int {
+    if body.len() == 1 && body[0] == .Expr(value) && value == .StructLit(_, _, _, _, fields, _, _, _) -> return fields.len()
+    return -1
+}
+
+// What the braced lambda the first binding of `run` stores holds: the field
+// count of the record its one line builds, 0 for one binding line, -1 for
+// other code.
+body_record_lambda_fields: fn(source: String) -> Int {
+    initializer: parser_test_binding(parser_test_function(parser_test_program(source), "run")).init
+    if initializer == .Lambda(lambda, _) && lambda.body == .Block(statements) {
+        if statements.len() == 1 && statements[0] == .Val(_) -> return 0
+        return body_record_fields(statements)
+    }
+    panic("expected a stored lambda with a braced body")
+}
+
+body_record_function: fn(source: String, name: String) -> Func {
+    parser_test_function(parser_test_program(source), name)
+}
+
+#Test("a function body written as comma-separated fields builds the record") {
+    source: "Rect: struct {{ width: Int, height: Int }}\nmk: fn(w: Int, h: Int) -> Rect {{ width: w, height: h }}\n"
+    assert_eq(body_record_fields(body_record_function(source, "mk").body), 2)
+    formatted: parser_test_stable(source)
+    assert(formatted.contains("-> Rect {{ width: w, height: h }}\n"), formatted)
+    assert_eq(body_record_fields(body_record_function(formatted, "mk").body), 2)
+    doubled: parser_test_stable("Rect: struct {{ width: Int, height: Int }}\nmk: fn(w: Int, h: Int) -> Rect {{ {{width: w, height: h}} }}\n")
+    assert(doubled.contains("-> Rect {{ {{width: w, height: h}} }}\n"), doubled)
+}
+
+#Test("a record body written over several lines keeps one field per line") {
+    source: "Rect: struct {{ width: Int, height: Int }}\nmk: fn(w: Int, h: Int) -> Rect {{\n    width: w,\n    height: h,\n}}\n"
+    formatted: parser_test_stable(source)
+    assert(formatted.contains("-> Rect {{\n    width: w,\n    height: h,\n}}\n"), formatted)
+}
+
+#Test("a bare name is a member of a comma record body") {
+    source: "P: struct {{ x: Int, y: Int }}\nmk: fn(x: Int, y: Int) -> P {{ x, y }}\n"
+    assert_eq(body_record_fields(body_record_function(source, "mk").body), 2)
+}
+
+#Test("one field after a declared result that carries a value builds the record") {
+    source: "Box: struct {{ value: Int }}\nwrap: fn(v: Int) -> Box {{ value: v }}\n"
+    assert_eq(body_record_fields(body_record_function(source, "wrap").body), 1)
+    formatted: parser_test_stable(source)
+    assert(formatted.contains("-> Box {{ value: v }}\n"), formatted)
+    assert_eq(body_record_fields(body_record_function(formatted, "wrap").body), 1)
+}
+
+#Test("one field with no result, a unit-fallible result or a loop value stays code") {
+    unit: body_record_function("keep: fn(v: Int) {{ value: v }}\n", "keep").body
+    assert_eq(body_record_fields(unit), -1)
+    assert(unit[0] == .Val(_), "a binding")
+    fallible: body_record_function("IOError: enum {{ Lost }}\nsave: fn(n: Int) IOError! {{ x: n }}\n", "save").body
+    assert_eq(body_record_fields(fallible), -1)
+    labeled: body_record_function("find: fn(n: Int) -> Int {{ outer: loop {{ return n }} }}\n", "find").body
+    assert_eq(body_record_fields(labeled), -1)
+}
+
+#Test("one pun and empty braces stay blocks") {
+    assert_eq(body_record_fields(body_record_function("echo: fn(x: Int) -> Int {{ x }}\n", "echo").body), -1)
+    assert_eq(body_record_function("none: fn() {{}}\n", "none").body.len(), 0)
+}
+
+#Test("a lambda body written as comma-separated fields builds the record") {
+    source: "run: fn() {{\n    f: fn(r: Int) {{ n: r, sq: r * r }}\n}}\n"
+    assert_eq(body_record_lambda_fields(source), 2)
+    formatted: parser_test_stable(source)
+    assert(formatted.contains("f: fn(r: Int) {{ n: r, sq: r * r }}"), formatted)
+}
+
+#Test("a lambda with no declared result keeps one field as a binding") {
+    assert_eq(body_record_lambda_fields("run: fn() {{\n    f: fn(r: Int) {{ name: r }}\n}}\n"), 0)
+}
+
+#Test("a lambda with a declared result reads one field as the record") {
+    assert_eq(body_record_lambda_fields("Box: struct {{ value: Int }}\nrun: fn() {{\n    f: fn(r: Int) -> Box {{ value: r }}\n}}\n"), 1)
+}
+
+#Test("a run block written as fields builds the record") {
+    source: "LIMITS: #run {{ low: 1, high: 2 }}\nrun: fn() {{ print(LIMITS.low) }}\n"
+    parser_test_program(source)
+    formatted: parser_test_stable(source)
+    assert(formatted.contains("LIMITS: #run {{ low: 1, high: 2 }}\n"), formatted)
+}
+
+#Test("a generic argument list is one member value where the generic-head test holds") {
+    source: "Pair: struct<A, B> {{ first: A, second: B }}\nrun: fn(c: Bool) {{\n    p: if c -> {{a: 1, q: Pair<Int, Int>{{first: 1, second: 2}}}} else -> {{a: 2, q: Pair<Int, Int>{{first: 3, second: 4}}}}\n    print(p.a)\n}}\n"
+    parser_test_program(source)
+    assert_eq(body_record_lambda_fields("Pair: struct<A, B> {{ first: A, second: B }}\nrun: fn() {{\n    f: fn(n: Int) {{ a: n, q: Pair<Int, Int>{{first: n, second: n}} }}\n}}\n"), 2)
+}
+
+#Test("comparisons with capitalized names stay comparisons in a comma record body") {
+    spaced: "Flags: struct {{ ok: Bool, big: Bool }}\nMAX: 3\nLIMIT: 9\nmk: fn(n: Int, m: Int) -> Flags {{ ok: MAX < n, big: m > LIMIT }}\n"
+    assert_eq(body_record_fields(body_record_function(spaced, "mk").body), 2)
+}
+
+#Test("a result type touching the brace ends there and the brace opens the body") {
+    source: "sq: fn(n: Int) -> Int{{n * n}}\n"
+    function: body_record_function(source, "sq")
+    assert(function.return_type != None, "the result type is kept")
+    assert_eq(function.body.len(), 1)
+    assert_eq(parser_test_stable(source), "sq: fn(n: Int) -> Int {{ n * n }}\n")
+    listed: body_record_function("ys: fn(y: Int) -> [Int]{{[y]}}\n", "ys")
+    assert(listed.return_type != None, "the list result type is kept")
+}

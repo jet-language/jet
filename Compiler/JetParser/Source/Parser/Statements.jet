@@ -319,8 +319,17 @@ parser_parse_block: fn(state: ^JetParserState) -> ParsedBlock {
 
 // The last line of a callable body may be a bare value. `value_tail` marks the
 // body of a callable with a declared result its final line is in value
-// position, where a finite source loop with `->` keeps its collecting meaning
-parser_parse_callable_body: fn(state: ^JetParserState, value_tail: Bool) -> ParsedBlock {
+// position, where a finite source loop with `->` keeps its collecting meaning.
+// Braces written as fields, `{ width: w, height: h }`, hold a record, as an
+// arm body's do (parser_brace_record_value_at): the record is the body's one
+// value line. `one_field_record` marks a body whose declared result carries a
+// value, where one `name: value` line is a record too.
+parser_parse_callable_body: fn(state: ^JetParserState, value_tail: Bool, one_field_record: Bool) -> ParsedBlock {
+    if parser_brace_record_value_at(state, 0, one_field_record) {
+        open: parser_current(state).span
+        record: parser_parse_typed_literal_body(state, None, open, 1)
+        return ParsedBlock{span: record.span, statements: [Stmt]{Stmt.Expr{expr: record.expr}}, tail: None}
+    }
     saved_tail_depth: state.callable_tail_depth
     saved_tail_value: state.callable_tail_value
     state.callable_tail_depth = state.block_depth + 1
@@ -453,6 +462,13 @@ parser_expression_is_collecting_loop: fn(expr: Expr) -> Bool Never! {
 // prepared binding inside the first one without bound.
 parser_parse_value_block: fn(state: ^JetParserState, depth: Int, prepared_value: Bool) -> ParsedBlock {
     if !prepared_value -> return parser_parse_value_lines(state, depth, false)
+    // A prepared value written as fields, `#run { a: 1, b: 2 }`, is that
+    // record, as a callable body's fields are.
+    if parser_brace_record_value_at(state, 0, false) {
+        open: parser_current(state).span
+        record: parser_parse_typed_literal_body(state, None, open, depth + 1)
+        return ParsedBlock{span: record.span, statements: [Stmt]{}, tail: Val(record.expr)}
+    }
     // A prepared value's lines are read as a callable body (#18).
     saved_tail_depth: state.callable_tail_depth
     saved_tail_value: state.callable_tail_value
@@ -1019,7 +1035,7 @@ parser_select_after_field: fn() -> String Never! {
 
 parser_parse_guard_arm_body: fn(state: ^JetParserState) -> [Stmt] {
     token: parser_current(state)
-    if token.kind == TOKEN_LBRACE && !parser_brace_record_value_at(state, 0) {
+    if token.kind == TOKEN_LBRACE && !parser_brace_record_value_at(state, 0, false) {
         return parser_parse_block(state).statements
     }
     // A nested braced guard table closes itself; only a braceless nested
@@ -1038,7 +1054,7 @@ parser_parse_guard_arm_body: fn(state: ^JetParserState) -> [Stmt] {
 // Q2: a dispatch arm body is a braced block or one braceless statement; a
 // record value `{x: 1, y: 2}` is such a statement.
 parser_parse_arm_body: fn(state: ^JetParserState) -> [Stmt] {
-    if parser_current_kind(state) == TOKEN_LBRACE && !parser_brace_record_value_at(state, 0) {
+    if parser_current_kind(state) == TOKEN_LBRACE && !parser_brace_record_value_at(state, 0, false) {
         return parser_parse_block(state).statements
     }
     state.arm_body_depth += 1
