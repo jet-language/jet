@@ -2247,7 +2247,7 @@ patch_call_runtime: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f
         p.colds.push(cold)
         return
     }
-    if leaf && (tag == O0_RTTAG_INT_FROM_I64 || (tag == O0_RTTAG_MATH_TO_BITS && fast.type_kind[f.slot_type[f.args[f.b[at]]]] == O0_KIND_FLOAT && fast.type_class[f.slot_type[dst]] == O0_CLS_GENERAL)) {
+    if leaf && tag == O0_RTTAG_INT_FROM_I64 {
         val: f.args[f.b[at]]
         p.routed_at = at
         patch_load_slot(p, 0, val)
@@ -2263,30 +2263,6 @@ patch_call_runtime: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f
         cold.sym_id = O0_RT_INT_OWNED_FROM_I64
         cold.left = val
         cold.dst = dst
-        cold.at = at
-        p.colds.push(cold)
-        return
-    }
-    if leaf && tag == O0_RTTAG_MATH_FROM_BITS && fast.type_kind[f.slot_type[dst]] == O0_KIND_FLOAT && fast.type_class[f.slot_type[f.args[f.b[at]]]] == O0_CLS_GENERAL {
-        val: f.args[f.b[at]]
-        p.routed_at = at
-        patch_load_slot(p, 0, val)
-        if patch_is_const(p, val) {
-            patch_store_slot(p, dst, 0)
-            p.rax_slot = -1
-            return
-        }
-        patch_ensure(p, 16)
-        t1: p.pos
-        p.pos = o0_st_test_inline_rax(p.code, t1)
-        patch_store_slot(p, dst, 0)
-        p.rax_slot = -1
-        s_start: p.cold_sites.len()
-        p.cold_sites.push(t1 + 8)
-        cold := patch_cold_new(IRX64ColdKind.Call, s_start, 1)
-        cold.resume = p.pos
-        cold.sym_id = fast.name_rt_sym_id[name_row]
-        cold.left = at
         cold.at = at
         p.colds.push(cold)
         return

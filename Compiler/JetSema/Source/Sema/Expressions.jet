@@ -4274,6 +4274,10 @@ sema_expr_core_module_method_checked: fn(receiver: Expr, method: String, method_
             if float_class.handled {
                 return SemaMethodSpecialCheck{handled: true, value: float_class.value}
             }
+            root: sema_call_try_core_math_sqrt(module_name, method, type_args, args, method_span, expected, check)
+            if root.handled {
+                return SemaMethodSpecialCheck{handled: true, value: root.value}
+            }
             f32_math: sema_call_try_core_math_f32(module_name, method, type_args, args, method_span, expected, check)
             if f32_math.handled {
                 return SemaMethodSpecialCheck{handled: true, value: f32_math.value}

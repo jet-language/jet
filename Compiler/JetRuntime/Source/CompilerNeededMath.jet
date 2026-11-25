@@ -52,10 +52,11 @@
 
 #Export(c) jet_std_math_to_bits: fn(x: Float) -> I64 { jet_int_owned_from_i64(rt_f64_bits(x)) }
 
-// The F32 bit routes' reference: Lower builds both as one bit-preserving
-// frame-word copy (BuildRoutes.jet ir_f32_bits), so no route call reaches
-// these. A route F32 crosses widened to Float, which quiets a signaling NaN;
-// the binary64 fields repack exactly otherwise.
+// The F32 bit routes' reference. Core builds its F32 bit pair as one
+// bit-preserving copy (Lower's InlineF32Bits and InlineF32FromBits), so only
+// a compiler that still carries the core.math rows calls these. A route F32
+// crosses widened to Float, which quiets a signaling NaN; the binary64 fields
+// repack exactly otherwise.
 #Export(c) jet_std_math_to_bits_f32: fn(x: Float) -> I64 {
     bits: rt_f64_bits(x)
     sign: if (bits < I64{0}) -> I64{2147483648} else -> I64{0}

@@ -4993,32 +4993,30 @@ body_codec_put_corecallpureroute: fn(out: ^BodyCodecOut, value: CoreCallPureRout
         .NoPureRoute -> { body_codec_put_tag(out, 0) }
         .MIME -> { body_codec_put_tag(out, 1) }
         .EncodingXML -> { body_codec_put_tag(out, 2) }
-        .Math -> { body_codec_put_tag(out, 3) }
-        .SketchHLL -> { body_codec_put_tag(out, 4) }
-        .SketchTDigest -> { body_codec_put_tag(out, 5) }
-        .SketchCMS -> { body_codec_put_tag(out, 6) }
-        .SketchReservoir -> { body_codec_put_tag(out, 7) }
-        .UI -> { body_codec_put_tag(out, 8) }
-        .IO -> { body_codec_put_tag(out, 9) }
-        .Net -> { body_codec_put_tag(out, 10) }
-        .Crypto -> body_codec_put_tag(out, 11)
+        .SketchHLL -> { body_codec_put_tag(out, 3) }
+        .SketchTDigest -> { body_codec_put_tag(out, 4) }
+        .SketchCMS -> { body_codec_put_tag(out, 5) }
+        .SketchReservoir -> { body_codec_put_tag(out, 6) }
+        .UI -> { body_codec_put_tag(out, 7) }
+        .IO -> { body_codec_put_tag(out, 8) }
+        .Net -> { body_codec_put_tag(out, 9) }
+        .Crypto -> body_codec_put_tag(out, 10)
     }
 }
 
 body_codec_get_corecallpureroute: fn(bytes: [U8], input: ^BodyCodecIn) -> CoreCallPureRoute Never! {
-    position: body_codec_get_tag(bytes, input, 12, 0)
+    position: body_codec_get_tag(bytes, input, 11, 0)
     if position == {
         1 -> CoreCallPureRoute.MIME
         2 -> CoreCallPureRoute.EncodingXML
-        3 -> CoreCallPureRoute.Math
-        4 -> CoreCallPureRoute.SketchHLL
-        5 -> CoreCallPureRoute.SketchTDigest
-        6 -> CoreCallPureRoute.SketchCMS
-        7 -> CoreCallPureRoute.SketchReservoir
-        8 -> CoreCallPureRoute.UI
-        9 -> CoreCallPureRoute.IO
-        10 -> CoreCallPureRoute.Net
-        11 -> CoreCallPureRoute.Crypto
+        3 -> CoreCallPureRoute.SketchHLL
+        4 -> CoreCallPureRoute.SketchTDigest
+        5 -> CoreCallPureRoute.SketchCMS
+        6 -> CoreCallPureRoute.SketchReservoir
+        7 -> CoreCallPureRoute.UI
+        8 -> CoreCallPureRoute.IO
+        9 -> CoreCallPureRoute.Net
+        10 -> CoreCallPureRoute.Crypto
         else -> CoreCallPureRoute.NoPureRoute
     }
 }

@@ -1,0 +1,33 @@
+// The one program of the Core math pair (Tools/Perf/CoreMathPair.jet): a
+// sin/exp loop whose every step also goes through core.math's Float leaves
+// (sqrt, floor, ceil, trunc, fabs, fma, fmod, the IEEE class tests, cmp and
+// the Float and F32 bit casts). Built by a compiler that still routes those
+// leaves through its Core rows and by one that builds Core's Jet bodies, it
+// prints the same bits.
+use math: core.math
+
+#CLI
+Args: struct {
+    n: Int,
+}
+
+step: fn(i: Int, sum: Float) -> Float {
+    x: Float.from_int(i) * 0.0001 - 20.0
+    s: math.sin(x)
+    e: math.exp(math.fabs(s) - 1.0)
+    whole: math.floor(x) + math.ceil(s) - math.trunc(e * 3.0)
+    root: math.sqrt(e + math.fabs(whole))
+    wrapped: math.fmod(root * 7.0, 3.0)
+    narrow: math.f32_from_bits(math.f32_to_bits(F32.from_float(wrapped) ?? F32{0.0}))
+    bits: math.from_bits(math.to_bits(Float.from_f32(narrow)))
+    total: math.fma(s, bits, sum)
+    if !math.is_finite(total) || math.is_nan(total) || math.is_inf(total) -> return sum
+    if math.cmp(total, sum) < 0 -> return total * 0.5
+    total
+}
+
+run: fn(args: Args) {
+    sum := Float{0.0}
+    loop i in 0..<args.n -> sum = step(i, sum)
+    print(math.to_bits(sum))
+}

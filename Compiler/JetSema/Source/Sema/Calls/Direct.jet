@@ -1297,6 +1297,8 @@ sema_call_core_direct_checked: fn(call: Call, expected: Type?, check: ^SemaBodyC
             if math_abs.handled -> return math_abs
             float_class: sema_call_try_core_math_float_class(module_name, member, call.type_args, call.args, check)
             if float_class.handled -> return float_class
+            root: sema_call_try_core_math_sqrt(module_name, member, call.type_args, call.args, call.name_span, expected, check)
+            if root.handled -> return root
             f32_math: sema_call_try_core_math_f32(module_name, member, call.type_args, call.args, call.name_span, expected, check)
             if f32_math.handled -> return f32_math
             compute_alias: sema_call_try_compute_alias(module_name, member, target, call.type_args, call.args, call.name_span, expected, check)

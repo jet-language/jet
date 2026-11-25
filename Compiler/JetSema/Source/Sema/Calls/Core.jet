@@ -14,10 +14,8 @@ use jet_foundation.[
     CoreCallDefault,
     CoreCallProjectionError,
     CoreCallRecord,
-    CoreCallPureRoute,
     CoreCallSignatureRequest,
     CoreCallTypeConstraint,
-    CoreCallTypeParameter,
     CoreTypedCallSignature,
     CoreUnbuiltRow,
     core_unbuilt_call,
@@ -672,9 +670,7 @@ sema_call_core_receiver_record: fn(receiver_type: Type, member: String, actual_a
 sema_call_core_configured_client: fn(args: [CallArg]) -> Bool Never! { args.len() >= 3 }
 
 sema_call_core_native_resource_consumer: fn(module_name: String, member: String, configured_client: Bool) -> Bool Never! {
-    // #4747: the fixed floating constraint preserves Float/F32 inference.
-    // The checked-tree call below selects the reserved source wrapper.
-    (module_name == "core.math" && (member == "cmp" || member == "is_finite" || member == "sqrt")) || (module_name == "core.net.tls" && member == "client" && configured_client) || (module_name == "core.service" && member == "worker")
+    (module_name == "core.net.tls" && member == "client" && configured_client) || (module_name == "core.service" && member == "worker")
     // Worker alone keeps checked fn() inference; its source slot is opaque.
 }
 
@@ -883,6 +879,31 @@ sema_call_try_core_math_float_class: fn(module_name: String, member: String, typ
     SemaDirectSpecialCheck{handled: true, value: None}
 }
 
+// `("core.math", "sqrt")`: the square root takes Float, F32, an exact
+// Fraction or Decimal (crossed to Float first,
+// sema_call_core_math_exact_crossing) or a Measurement<Float>. A Float or F32
+// argument stays the ordinary source call (an F32 one at F32 width,
+// sema_call_try_core_math_f32); a measurement runs the Core function filling
+// role `MeasurementSqrt`; any other checked argument type is refused here.
+sema_call_try_core_math_sqrt: fn(module_name: String, member: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaDirectSpecialCheck {
+    unhandled: SemaDirectSpecialCheck{handled: false, value: None}
+    if module_name != "core.math" || member != "sqrt" || args.len() != 1 || type_args.len() != 0 || args[0].label != None {
+        return unhandled
+    }
+    probe_diagnostics := [Diagnostic]{}
+    probed: sema_probe_expression(args[0].expr, None, check, probe_diagnostics) ?? return unhandled
+    if probed.ty == Type.Float || probed.ty == Type.Float32 -> return unhandled
+    failed: SemaDirectSpecialCheck{handled: true, value: None}
+    value: sema_check_expression(args[0].expr, None, check) ?? return failed
+    if sema_expression_is_float_measurement(value.ty, check) {
+        measured: value.ty.copy()
+        root: sema_expression_measurement_source_call("MeasurementSqrt", [TExpr]{value}, measured, span, check) ?? return failed
+        return SemaDirectSpecialCheck{handled: true, value: sema_expr_expected_owned(root, expected, check.environment.*, check.program.*, check.diagnostics)}
+    }
+    check.diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`sqrt` needs Float, F32, or Measurement<Float>, not {sema_type_show(value.ty)}", "math functions preserve their numeric knowledge grade", "pass a Float or F32 value, or use `sqrt` with a measurement"))
+    failed
+}
+
 // `core.math` is width-generic. A math function whose every floating
 // argument is F32 computes at F32 width: its Float source runs on the exactly
 // widened arguments and the Float result rounds once back to F32. A correctly
@@ -943,8 +964,8 @@ sema_call_core_math_f32_wide: fn(module_name: String, member: String, values: [T
 // (exp: Int, frac: T) and (fract: T, whole: T).
 sema_call_core_math_f32_kept: fn(member: String) -> Type? Never! {
     if member == {
-        "to_bits" -> Val(Type.Int)
-        "is_signaling" | "is_normal" | "is_subnormal" | "total_order" | "total_order_mag" -> Val(Type.Bool)
+        "to_bits" | "cmp" -> Val(Type.Int)
+        "is_signaling" | "is_normal" | "is_subnormal" | "total_order" | "total_order_mag" | "is_finite" -> Val(Type.Bool)
         "canonicalize" | "fabs" | "abs_float" | "copysign" -> Val(Type.Float32)
         "get_payload" | "set_payload" | "set_payload_signaling" -> Val(Type.Option{inner: Type.Float32})
         "rem_quo" -> Val(Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "rem", ty: Type.Float32}, TypeTupleField{name: "quo", ty: Type.Int}}})
@@ -963,14 +984,15 @@ sema_call_core_math_round_f32: fn(wide: TExpr, span: Span) -> TExpr Never! {
 }
 
 // The core.math functions of Float arguments with a Float result that an
-// all-F32 call computes at F32 width (sqrt keeps its own record rule). The
-// exact ones (fmod through scaleb) are exact on the widened arguments too.
-// The other spellings (expm1, truncate, log1p, nextafter, abs_float) are
-// their members' F32 forms. The roundings are Roundable, whose F32 impl
-// rounds at F32 width itself.
+// all-F32 call computes at F32 width. The binary64 square root rounded to
+// binary32 is the correctly rounded binary32 one. The exact ones (fmod
+// through scaleb) are exact on the widened arguments too. The other spellings
+// (expm1, truncate, log1p, nextafter, abs_float) are their members' F32
+// forms. The roundings are Roundable, whose F32 impl rounds at F32 width
+// itself.
 sema_call_core_math_f32_member: fn(member: String) -> Bool Never! {
     if member == {
-        "tan" | "asin" | "cosh" | "tanh" | "exp" | "log2" | "atanh" | "cbrt" | "exp10" | "exp_m1" | "expm1" | "degrees" | "radians" | "log" | "truncate" | "fract" | "lerp" | "rsqrt" | "exp2_m1" | "sin_pi" | "cos_pi" | "tan_pi" | "asin_pi" | "acos_pi" -> true
+        "tan" | "asin" | "cosh" | "tanh" | "exp" | "log2" | "atanh" | "cbrt" | "exp10" | "exp_m1" | "expm1" | "degrees" | "radians" | "log" | "truncate" | "fract" | "lerp" | "rsqrt" | "exp2_m1" | "sin_pi" | "cos_pi" | "tan_pi" | "asin_pi" | "acos_pi" | "sqrt" -> true
         "fmod" | "remainder" | "fdim" | "max_float" | "min_float" | "maximum" | "minimum" | "maximum_mag" | "minimum_mag" | "maximum_num" | "minimum_num" | "maximum_mag_num" | "minimum_mag_num" | "logb" | "ldexp" | "scaleb" -> true
         else -> sema_call_core_math_f32_own(member)
     }
@@ -981,13 +1003,12 @@ sema_call_core_math_f32_member: fn(member: String) -> Bool Never! {
 // widened arguments would round twice when it lands on a binary32 midpoint,
 // and the Float next_up would step by a binary64 unit.
 sema_call_core_math_f32_own: fn(member: String) -> Bool Never! {
-    member != "cmp" && member != "is_finite" && SEMA_CORE_MATH_F32_SOURCES.contains(member) && sema_call_core_math_f32_kept(member) == None
+    SEMA_CORE_MATH_F32_SOURCES.contains(member) && sema_call_core_math_f32_kept(member) == None
 }
 
-// The core.math members with an F32-width source of their own: the F32 `cmp`
-// and `is_finite`, each member that source runs on the widened arguments
-// (sema_call_core_math_f32_own), and each one that keeps its F32 arguments
-// (sema_call_core_math_f32_kept).
+// The core.math members with an F32-width source of their own: each member
+// that source runs on the widened arguments (sema_call_core_math_f32_own) and
+// each one that keeps its F32 arguments (sema_call_core_math_f32_kept).
 SEMA_CORE_MATH_F32_SOURCES: [String]{
     "cmp", "is_finite",
     "pow_n", "pow_r", "root_n", "compound_n", "atan2_pi", "atan_pi", "exp10_m1", "log2_1p", "log10_1p", "exp2", "ln", "log10", "ln_1p", "log1p", "sin", "cos", "acos", "atan", "atan2", "sinh", "asinh", "acosh", "hypot", "erf", "erfc", "gamma", "lgamma", "fma", "muladd",
@@ -1060,21 +1081,14 @@ sema_call_core_math_exact_crossing: fn(module_name: String, member: String, args
     Val(crossed)
 }
 
-// Width selection is the existing checked mathematical normalization; it is
-// separate from source forwarding and never widens F32 values: an F32
-// `math.cmp` / `math.is_finite` runs its `__<member>_f32` source in place of
-// the Float row. A typed `json.decode<T>` / `toml.decode<T>` /
-// `yaml.decode<T>` runs the Core function that fills its module's typed
-// decode role; a `net.unix_connect` and a `tls.client` run the one that
-// fills the role of their arity and arguments.
+// A typed `json.decode<T>` / `toml.decode<T>` / `yaml.decode<T>` runs the
+// Core function that fills its module's typed decode role; a
+// `net.unix_connect` and a `tls.client` run the one that fills the role of
+// their arity and arguments.
 sema_call_core_normalized_source_record: fn(record: CoreCallRecord, args: [TExpr], type_args: [Type]) -> CoreCallRecord Never! {
     normalized := record
     if record.symbol == CoreCallSymbol.SourceOwned && record.member == "decode" && type_args.len() != 0 {
         if sema_call_core_typed_decode_role(record.module_name) == .Val(role) -> normalized.source_role = Val(role)
-    }
-    if record.module_name == "core.math" && (record.member == "cmp" || record.member == "is_finite") && args.len() > 0 && args[0].ty == Type.Float32 {
-        normalized.symbol = CoreCallSymbol.SourceOwned
-        normalized.source_role = sema_call_core_f32_role(record.module_name, record.member)
     }
     if record.symbol == CoreCallSymbol.SourceOwned && record.module_name == "core.net" && record.member == "unix_connect" {
         normalized.source_role = Val(if args.len() == 1 -> "UnixConnect" else -> "UnixConnectDeadline")
@@ -1141,40 +1155,6 @@ sema_call_core_tree_checked: fn(record: CoreCallRecord, args: [TExpr], span: Spa
         range: if maximum > record.signature.arity -> "between {record.signature.arity} and {maximum}" else -> "{record.signature.arity}"
         check.diagnostics.push(sema_error("E0104", span, "`{record.module_name}.{record.member}` expects {range} argument(s), got {args.len()}", "the registered Core call arity is fixed", "provide the registered number of arguments"))
         return None
-    }
-    if record.module_name == "core.math" && record.member == "sqrt" && args.len() == 1 && sema_expression_is_float_measurement(args[0].ty, check) {
-        value: sema_expression_measurement_source_call("MeasurementSqrt", args, result_type, span, check) ?? return None
-        return sema_expr_expected_owned(value, expected, check.environment.*, check.program.*, check.diagnostics)
-    }
-    if record.module_name == "core.math" && record.member == "sqrt" && args.len() == 1 {
-        // Sqrt is width-generic. The Core source `sqrt(Float)`
-        // computes it: an F32 argument widens and the root narrows back (the
-        // double root rounded to F32 is the correctly rounded F32 root), and
-        // an exact Fraction or Decimal crosses to Float once.
-        source: args[0].ty.copy()
-        widened := TExpr?{None}
-        nominal := ""
-        if source == .Named(name) -> nominal = name.copy()
-        if {
-            source == Type.Float -> widened = Val(args[0].copy())
-            source == Type.Float32 -> {
-                widened = sema_expr_numeric_conversion(args[0].copy(), Type.Float, span, 0)
-            }
-            nominal == "Fraction" || nominal.ends_with(".Fraction") || nominal == "Decimal" || nominal.ends_with(".Decimal") -> {
-                // An exact number's Float is its precise `to_float`, which
-                // runs core.math's own function (sema_precise_bind).
-                exact: if nominal == "Fraction" || nominal.ends_with(".Fraction") -> "Fraction" else -> "Decimal"
-                widened = Val(sema_tree_node(Type.Float, TExprKind.PreciseBuiltin{type_name: exact, function: "to_float", args: [TExpr]{args[0].copy()}}, span))
-            }
-            else -> widened = None
-        }
-        if widened == .Val(argument) {
-            if sema_call_core_source("core.math", "sqrt", [TExpr]{argument}, Type.Float, false, span, check) == .Val(root) {
-                value := root.copy()
-                if source == Type.Float32 -> value = sema_call_core_math_round_f32(root, span)
-                return sema_expr_expected_owned(value, expected, check.environment.*, check.program.*, check.diagnostics)
-            }
-        }
     }
     normalized: sema_call_core_normalized_source_record(record, args, type_args)
     if core_call_source_role(normalized) == .Val(role) {
@@ -1341,11 +1321,7 @@ sema_call_core_record_effects_as: fn(record: CoreCallRecord, api: String, span: 
         last: check.context.call_facts.len() - 1
         detail := sema_call_site_detail(check.context.call_facts[last])
         detail.lifecycle = record.marker
-        // A Math route computes from its arguments alone, so its export is
-        // not one the runtime answers from the running program.
-        if record.symbol == .Prelude(symbol) && record.pure_route != CoreCallPureRoute.Math {
-            detail.runtime_export = Val(symbol.copy())
-        }
+        if record.symbol == .Prelude(symbol) -> detail.runtime_export = Val(symbol.copy())
         check.context.call_facts[last].detail = sema_call_site_detail_of(detail)
     }
     accepted
@@ -1358,35 +1334,9 @@ sema_call_core_default_expr: fn(default: CoreCallDefault, span: Span) -> Expr Ne
     }
 }
 
-sema_call_core_type_parameter: fn(signature: CoreTypedCallSignature, name: String) -> CoreCallTypeParameter? {
-    loop parameter in signature.type_parameters {
-        if parameter.name == name -> return Val(parameter)
-    }
-    None
-}
-
-sema_call_core_math_exact_type: fn(ty: Type) -> Bool Never! {
-    if ty == {
-        .Named(name) -> name == "Fraction" || name == "Decimal"
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
-    }
-}
-
-sema_call_core_math_float_type: fn(ty: Type) -> Bool Never! {
-    ty == Type.Float || ty == Type.Float32
-}
-
 sema_call_core_type_constraint_satisfied: fn(constraint: CoreCallTypeConstraint, ty: Type, check: SemaBodyCheck) -> Bool Never! {
     return if constraint == {
         .Any -> true
-        .Floating -> sema_call_core_math_float_type(ty)
-        .FloatingOrExact -> sema_call_core_math_float_type(ty) || sema_call_core_math_exact_type(ty)
-        .SquareRootInput -> {
-            if sema_call_core_math_float_type(ty) || sema_call_core_math_exact_type(ty) {
-                return true
-            }
-            return sema_expression_is_float_measurement(ty, check)
-        }
         // VaultKey is sealed to SigningKey and X25519SecretKey; a generic body
         // defers the bound to monomorphization, so a type parameter in scope
         // satisfies it.
@@ -1410,15 +1360,6 @@ sema_call_core_type_constraint_satisfied: fn(constraint: CoreCallTypeConstraint,
     }
 }
 
-sema_call_core_inference_type: fn(signature: CoreTypedCallSignature, ty: Type) -> Type Never! {
-    special_float := (loop parameter in signature.type_parameters {
-        if parameter.constraint == CoreCallTypeConstraint.FloatingOrExact || parameter.constraint == CoreCallTypeConstraint.SquareRootInput {
-            break true
-        }
-    } ?? false)
-    if special_float && sema_call_core_math_exact_type(ty) -> Type.Float else -> ty
-}
-
 sema_call_core_inference_parameters: fn(signature: CoreTypedCallSignature, span: Span) -> [SemaInferenceTypeParam] Never! {
     parameters: loop parameter in signature.type_parameters -> SemaInferenceTypeParam{
         name: parameter.name,
@@ -1430,26 +1371,11 @@ sema_call_core_inference_parameters: fn(signature: CoreTypedCallSignature, span:
     parameters
 }
 
-sema_call_core_parameter_records: fn(signature: CoreTypedCallSignature, type_args: [Type], span: Span, allow_exact_math_inputs: Bool) -> [SemaCallParam] Never! {
+sema_call_core_parameter_records: fn(signature: CoreTypedCallSignature, type_args: [Type], span: Span) -> [SemaCallParam] Never! {
     names: loop parameter in signature.type_parameters -> parameter.name
     result := [SemaCallParam]{}
     loop (index, parameter) in signature.parameters {
         ty := sema_inference_substitute_type(parameter.ty, names, type_args)
-        if allow_exact_math_inputs && parameter.ty == .Named(name) {
-            if sema_call_core_type_parameter(signature, name) == {
-                .Val(type_parameter) -> {
-                    if {
-                        type_parameter.constraint == CoreCallTypeConstraint.FloatingOrExact -> {
-                            ty = Type.Union{members: [Type]{Type.Float, Type.Float32, Type.Named{name: "Fraction"}, Type.Named{name: "Decimal"}}}
-                        }
-                        type_parameter.constraint == CoreCallTypeConstraint.SquareRootInput -> {
-                            ty = Type.Union{members: [Type]{Type.Float, Type.Float32, Type.Named{name: "Fraction"}, Type.Named{name: "Decimal"}, Type.Apply{name: "Measurement", args: [Type]{Type.Float}}}}
-                        }
-                    }
-                }
-                .None -> {}
-            }
-        }
         default_expr := if parameter.default == {
             .Val(value) -> Val(sema_call_core_default_expr(value, span))
             .None -> None
@@ -1485,8 +1411,7 @@ sema_call_core_infer_type_args: fn(signature: CoreTypedCallSignature, params: [S
     }
     facts := sema_call_collect_inference_facts(params, binding, source_args, check)
     sema_call_lambda_failure_facts(facts, inference_parameters, params, binding, source_args, check)
-    inferred_arguments: loop ty in facts.argument_types -> sema_call_core_inference_type(signature, ty)
-    inference: sema_infer_callable(check.program.registration_graph, inference_context, facts.parameter_types, signature.return_type, inferred_arguments, [Type]{}, span, check.diagnostics) ?? return None
+    inference: sema_infer_callable(check.program.registration_graph, inference_context, facts.parameter_types, signature.return_type, facts.argument_types, [Type]{}, span, check.diagnostics) ?? return None
     if !inference.complete || !inference.compatible {
         check.diagnostics.push(sema_error("E0904", span, "cannot infer the type arguments for `{signature.module_name}.{signature.member}`", "the fixed Core signature must resolve each declared type parameter from its checked arguments or expected result", "provide enough arguments to determine the Core call's type"))
         return None
@@ -1494,16 +1419,13 @@ sema_call_core_infer_type_args: fn(signature: CoreTypedCallSignature, params: [S
     Val(inference.type_args)
 }
 
-sema_call_core_check_type_constraints: fn(signature: CoreTypedCallSignature, type_args: [Type], source_args: [CallArg], span: Span, check: ^SemaBodyCheck) -> Bool {
+sema_call_core_check_type_constraints: fn(signature: CoreTypedCallSignature, type_args: [Type], span: Span, check: ^SemaBodyCheck) -> Bool {
     if signature.type_parameters.len() != type_args.len() -> return false
     loop index in 0..<signature.type_parameters.len() {
         parameter: signature.type_parameters[index]
         if !sema_call_core_type_constraint_satisfied(parameter.constraint, type_args[index], check) {
             if parameter.constraint == CoreCallTypeConstraint.VaultKey {
                 check.diagnostics.push(sema_error("E0905", span, "`{type_name(type_args[index])}` is not a persistent vault key type", "VaultKey is sealed and implemented only by SigningKey and X25519SecretKey", "use `crypto.SigningKey` or `crypto.X25519SecretKey`"))
-            } else if parameter.constraint == CoreCallTypeConstraint.SquareRootInput && source_args.len() > 0 {
-                // The one input is the value that has the wrong numeric grade.
-                check.diagnostics.push(sema_error("E0112", expr_span(source_args[0].expr), "`{signature.member}` needs Float, F32, or Measurement<Float>, not {sema_type_show(type_args[index])}", "math functions preserve their numeric knowledge grade", "pass a Float or F32 value, or use `{signature.member}` with a measurement"))
             } else {
                 check.diagnostics.push(sema_error("E0905", span, "`{type_name(type_args[index])}` does not satisfy the canonical Core constraint for type parameter `{parameter.name}`", "Core polymorphic signatures preserve the native type constraint", "pass a value with the required Core numeric or comparison type"))
             }
@@ -1513,21 +1435,12 @@ sema_call_core_check_type_constraints: fn(signature: CoreTypedCallSignature, typ
     true
 }
 
-sema_call_core_result_type: fn(signature: CoreTypedCallSignature, type_args: [Type], arguments: [TExpr]) -> Type? {
+// A fixed row with no declared return (`-` in the host tables) is a Unit
+// call.
+sema_call_core_result_type: fn(signature: CoreTypedCallSignature, type_args: [Type]) -> Type {
     names: loop parameter in signature.type_parameters -> parameter.name
-    if signature.result_rule == {
-        .Declared -> {
-            // A fixed row with no declared return (`-` in the host tables) is a
-            // Unit call.
-            declared: signature.return_type ?? return Val(Type.Named{name: "Unit"})
-            return Val(sema_inference_substitute_type(declared, names, type_args))
-        }
-        .FloatIfExactElseParameter(parameter_index) -> {
-            if parameter_index < 0 || parameter_index >= arguments.len() -> return None
-            argument := arguments[parameter_index]
-            return Val(if sema_call_core_math_exact_type(argument.ty) -> Type.Float else -> argument.ty)
-        }
-    }
+    declared: signature.return_type ?? return Type.Named{name: "Unit"}
+    sema_inference_substitute_type(declared, names, type_args)
 }
 
 // The fixed path starts from the canonical Source contract. Specialized native
@@ -1603,13 +1516,13 @@ sema_call_core_check_fixed_record: fn(record: CoreCallRecord, args: [CallArg], t
         source_args.push(argument.copy())
         local_args.push(argument.copy())
     }
-    shape_params := sema_call_core_parameter_records(signature, [Type]{}, span, false)
+    shape_params := sema_call_core_parameter_records(signature, [Type]{}, span)
     binding: sema_call_bind_args("{canonical_record.module_name}.{canonical_record.member}", shape_params, local_args, span, check.diagnostics) ?? return None
     resolved_type_args: sema_call_core_infer_type_args(signature, shape_params, binding, source_args, type_args, expected, span, check) ?? return None
-    if !sema_call_core_check_type_constraints(signature, resolved_type_args, source_args, span, check) {
+    if !sema_call_core_check_type_constraints(signature, resolved_type_args, span, check) {
         return None
     }
-    params := sema_call_core_parameter_records(signature, resolved_type_args, span, type_args.len() == 0)
+    params := sema_call_core_parameter_records(signature, resolved_type_args, span)
     {lowered, pins} := sema_call_check_bound_arguments_owned(check, "{canonical_record.module_name}.{canonical_record.member}", params, None, false, binding, local_args, span) ?? return None
     // A `^` argument keeps its Write borrow of the caller's place: a Core leaf
     // that lends a buffer or handle (wipe, reserve, stream writers) works
@@ -1622,10 +1535,7 @@ sema_call_core_check_fixed_record: fn(record: CoreCallRecord, args: [CallArg], t
             values.push(sema_tree_node(ty, TExprKind.Borrow{place: argument.value, access: AccessConvention.Write}, at))
         } else { values.push(argument.value) }
     }
-    declared_result: sema_call_core_result_type(signature, resolved_type_args, values) ?? {
-        check.diagnostics.push(sema_error("E0904", span, "`{canonical_record.module_name}.{canonical_record.member}` did not resolve a result type", "the typed Core result rule must produce the value shape written into the checked tree", "complete the source typed return contract"))
-        return None
-    }
+    declared_result: sema_call_core_result_type(signature, resolved_type_args)
     result_type: sema_call_core_plugin_load_type(canonical_record, values, declared_result, check.program.*)
     // The CoreCall carrier is derived from the checked result type
     // (`TFailureCarrier.from_checked_type`: only a Result or Option result can
@@ -1798,7 +1708,7 @@ sema_call_core_check_source_owned: fn(target: SemaCallDirectTarget, qualified_na
     configured: [Bool]{false, true}
     loop row in CORE_CALLS {
         loop moved in configured {
-            previous: (row.module_name == "core.math" && (row.member == "cmp" || row.member == "is_finite" || row.member == "sqrt")) || (row.module_name == "core.net.tls" && row.member == "client" && moved)
+            previous: row.module_name == "core.net.tls" && row.member == "client" && moved
             worker: row.module_name == "core.service" && row.member == "worker"
             assert(sema_call_core_native_resource_consumer(row.module_name, row.member, moved) == (previous || worker))
         }

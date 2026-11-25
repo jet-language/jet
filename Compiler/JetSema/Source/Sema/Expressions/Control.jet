@@ -628,8 +628,8 @@ sema_expression_call_expected: fn(value: TExpr, expected: Type?, check: ^SemaBod
     // A call whose checked result has a `Never` success (`Never`, or
     // `Never E!`) diverges, and the slot type is only an inference hint for it;
     // its consumer (`??`, a branch) accepts divergence. This is
-    // `x ?? fail(...)` with `fail: fn() -> Never Never!`, and the fixed Core
-    // route of `x ?? core.math.__numeric_stop(...)`.
+    // `x ?? fail(...)` with `fail: fn() -> Never Never!`, as Core's
+    // `x ?? core.math.__numeric_stop(...)` is.
     if sema_expr_never_success(Val(sema_expr_unwrap_tag(value.ty))) -> return Val(value)
     if check.context.failure_success_view && expected != None && !sema_expression_failure_carrier_position(expected, value.ty) {
         if sema_expr_unwrap_tag(value.ty) == .Result(success, _) {
