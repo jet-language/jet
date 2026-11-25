@@ -397,6 +397,15 @@ SingleUse: struct {
     }
 }
 
+// A type whose values move and never copy: a copy of one, or of a value that
+// holds one, is E0211. A resource says the same with its `impl Close`; this
+// is the fact on its own, for a type that closes nothing.
+MoveOnly: struct {
+    impl Marker {
+        sites: [.Type],
+    }
+}
+
 // Structs use the second argument for `align(N)`; enums retain
 // the legacy bare tag-width argument in this same registry slot.
 // The layout parser teaches the menu: `c`, `columnar`, and an enum's
@@ -515,9 +524,12 @@ Track: struct {
     }
 }
 
+// On a binding, it keeps a reactive value in the fast one-thread form. On a
+// type, its values never leave the thread that made them: a task, channel or
+// parallel crossing of one, or of a value that holds one, is E1102.
 Local: struct {
     impl Marker {
-        sites: [.Declaration],
+        sites: [.Declaration, .Type],
     }
 }
 

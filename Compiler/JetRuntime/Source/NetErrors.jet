@@ -83,13 +83,13 @@ net_dns_new: fn(ordinal: I64, text: I64) -> I64 {
     if (ordinal < NET_DNS_NOT_FOUND || ordinal > NET_DNS_FAILURE) { trap_native_index_range_stop() }
     result: jet_rt_alloc(NET_DNS_BYTES, I64{8})
     encoding_store(wrapping(result + NET_DNS_TAG), ordinal)
-    encoding_store(wrapping(result + NET_DNS_TEXT), jet_rt_string_clone(text))
+    encoding_store(wrapping(result + NET_DNS_PAYLOAD), jet_rt_string_clone(text))
     result
 }
 
 net_dns_get: fn(value: I64, ordinal: I64) -> I64 {
     if encoding_word(wrapping(value + NET_DNS_TAG)) != ordinal -> rt_record_variant_panic()
-    jet_rt_string_clone(encoding_word(wrapping(value + NET_DNS_TEXT)))
+    jet_rt_string_clone(encoding_word(wrapping(value + NET_DNS_PAYLOAD)))
 }
 
 #Export(c) jet_rt_record_tag_jet_net_dns_error: fn(value: I64) -> I64 {
@@ -113,19 +113,19 @@ net_dns_get: fn(value: I64, ordinal: I64) -> I64 {
 }
 
 #Export(c) jet_rt_handle_clone_jet_net_dns_error: fn(value: I64) -> I64 {
-    net_dns_new(encoding_word(wrapping(value + NET_DNS_TAG)), encoding_word(wrapping(value + NET_DNS_TEXT)))
+    net_dns_new(encoding_word(wrapping(value + NET_DNS_TAG)), encoding_word(wrapping(value + NET_DNS_PAYLOAD)))
 }
 
 #Export(c) jet_rt_handle_drop_jet_net_dns_error: fn(value: I64) {
     if (value == I64{0}) {
         return
     }
-    jet_rt_string_drop(encoding_word(wrapping(value + NET_DNS_TEXT)))
+    jet_rt_string_drop(encoding_word(wrapping(value + NET_DNS_PAYLOAD)))
     jet_rt_free(value, NET_DNS_BYTES, I64{8})
 }
 
 #Export(c) jet_rt_handle_eq_jet_net_dns_error: fn(left: I64, right: I64) -> Bool {
-    encoding_word(wrapping(left + NET_DNS_TAG)) == encoding_word(wrapping(right + NET_DNS_TAG)) && jet_rt_string_eq(encoding_word(wrapping(left + NET_DNS_TEXT)), encoding_word(wrapping(right + NET_DNS_TEXT)))
+    encoding_word(wrapping(left + NET_DNS_TAG)) == encoding_word(wrapping(right + NET_DNS_TAG)) && jet_rt_string_eq(encoding_word(wrapping(left + NET_DNS_PAYLOAD)), encoding_word(wrapping(right + NET_DNS_PAYLOAD)))
 }
 
 net_error_new: fn(ordinal: I64, payload: I64) -> I64 {
@@ -190,7 +190,7 @@ net_render_ordinal: fn(ordinal: I64) -> I64 {
     if ordinal != NET_RENDER_DNS {
         return jet_rt_string_clone(encoding_word(wrapping(payload + NET_DETAIL_MESSAGE)))
     }
-    text: encoding_word(wrapping(payload + NET_DNS_TEXT))
+    text: encoding_word(wrapping(payload + NET_DNS_PAYLOAD))
     if encoding_word(wrapping(payload + NET_DNS_TAG)) == NET_DNS_FAILURE {
         return jet_rt_string_clone(text)
     }

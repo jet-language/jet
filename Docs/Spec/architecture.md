@@ -947,7 +947,7 @@ view to those parameters still materializes it.
 
 ### One reflection model
 
-`StructDef::reflection_fields()` is the declaration-owned stored-field-row source for
+A struct declaration's `StructDef.fields` are the declaration-owned stored-field-row source for
 comptime `TypeInfo`, runtime `reflect.of`, and generated field projection.
 Comptime reads facts from those rows; runtime wraps each projected field in a
 typed `Value` and adds display text only as a view. Every back end therefore
@@ -965,7 +965,7 @@ snapshot, not a dynamic type registry.
 ### Structure fact plane
 
 D-STRUCT-PLANE1=A puts liveness, lifecycle, and import-edge observations in the
-same `StructureFact` shape in `jet-foundation::Names`, with one registry row per
+same `StructureFact` shape (`Compiler/JetFoundation/Source/Names/NameFacts.jet`), with one registry row per
 kind. Each row carries its safe direction and gate. Sema writes the facts while
 it checks names, lifecycle markers, and resolved imports; `GateLedger` projects
 each gate-bearing fact once with its source span and provenance. The CLI command
@@ -1354,10 +1354,11 @@ environment writer, never a second OS-environment mutation path. Terminal
 sessions retain the same native child descriptor owner and resize its held PTY
 under the child lock, validating dimensions before the ioctl.
 
-Package-to-JetOS projection stays on this split. jet-pkg-model reads the
+Package-to-JetOS projection stays on this split. `Jetpack/PackageModel` reads the
 canonical Package outputs and computes the semantic graph identity.
-jet-env-model::ModuleEval::project_package_outputs lowers System and Fleet
-payloads into SystemPlan and FleetPlan, including service open-record fields.
+`envmodel_project_package_outputs` (`Jetpack/EnvModel/Source/ModuleEval/PackageOutput.jet`)
+lowers System and Fleet payloads into SystemPlan and FleetPlan, including service
+open-record fields.
 jetpack loads that plan for jet os plan and the existing generation writer
 carries the same identity and service facts into plan.json and the source proof.
 Hangar realization and atomic generation
@@ -1377,8 +1378,9 @@ writers and path escapes.
 Host extraction keeps the checked System Output intact and binds the sole-host
 Fleet to that System's name, not to its output-map key.
 
-Environment OCI projection follows the same split. `jet-env-model` owns the
-pure `ImagePlan`; `jetpack::Image` is the one deterministic OCI realization
+Environment OCI projection follows the same split. `Jetpack/EnvModel` owns the
+pure `ImagePlan` (`ModuleEval/Plans.jet`); `Jetpack/Image/Source/OCI` is the one
+deterministic OCI realization
 path. A successful environment projection writes `projection.json`,
 `plan.json`, and `dossier.json` as secret-free, atomically recovered read-only
 views. Hangar owns content, cache, archive, signing, and publish; `.jet/lock` owns locked
@@ -1442,7 +1444,7 @@ snapshots):
   guards across task, channel, `Shared<T>`, and parallel boundaries.
 - `Signal<T>`, `Derived<T>`, and `Computed<T>` use lock-ordered `Arc` storage
   with the same public API. A handle may cross a task, task group, channel, or
-  parallel adapter without a data race and without a rustc `Send` ICE.
+  parallel adapter without a data race.
 - `#Local` pins the fast one-thread form; a crossing is E1102.
 - `#Shared` pins the synchronized form (today every reactive box already uses
   that form). Crossing sites are recorded for the upgrade report.
@@ -1538,7 +1540,7 @@ Stable exit codes and the JSON codec live in dependency-free `JetFoundation`.
 ### Browser automation protocol core
 
 D-BROWSER-AUTO1=A puts the portable automation API in `core.browser`. The
-generated runtime uses the existing std-only WebSocket and strict JSON codecs
+generated runtime uses the existing WebSocket and strict JSON codecs
 to speak WebDriver BiDi. It does not require Node, Playwright, or a Canvas
 facade. Browser installation is Jetpack work: `jetpack browser lock|provision`
 writes `[[browser]]` entries into `.jet/lock`, and `browser.locked(engine)`
@@ -1630,7 +1632,7 @@ audit receipt — the same redacted fact stream as the trace, plus `isolated` an
 The AOT back end and default development tier use the same
 [`Browser.jet`](../../Core/Browser/Browser.jet), strict-JSON behavior, and
 extracted RFC6455 client source. Browser session
-handles are thread-confined. Programs that use them select the canonical
+handles are declared `#Local`. Programs that use them select the canonical
 tier-0 network host; the tier trace reports that choice and no AOT fallback is
 hidden behind `jet dev`.
 
@@ -1644,7 +1646,7 @@ transport.
 ### FFI bridge boundary
 
 Foreign dependencies stay behind the runtime boundary; they never become
-dependencies of compiler workspace crates. A bridge starts from a ratified
+dependencies of the compiler's packages. A bridge starts from a ratified
 interop surface and dependency approval, and declarations are parsed and
 checked by the ordinary front end before codegen.
 
@@ -1875,9 +1877,11 @@ process signals, thread creation, and isolation for a failing call.
 | Panic containment | A panic cannot unwind into C. The boundary emits `Stop: Jet.Panic` and terminates the calling process with status `70`; it never fabricates a scalar success value. | Expect an error return or continued execution in the same process. | The process exits `70`; a host that must continue forks the call and checks the child status. |
 | Repeated load/unload | A host may repeat map → resolve → call → free → join → unmap when every cycle obeys the rows above. | Reuse function pointers or `JetText` after unmapping. | Behavior is invalid C/loader use, not a recoverable Jet call. |
 
-The executable proof in `tests/library_outputs.rs` exercises two concurrent
-threads, nested `#Import(c)` re-entry, signal preservation, allocator release,
-three load/unload cycles, and a forked panic call whose parent continues.
+The executable proof,
+`Tests/Cases/LibraryOutputs/guest_embedding_contract_covers_lifecycle_threads_reentry_and_panic.case`,
+exercises two concurrent threads, nested `#Import(c)` re-entry, signal
+preservation, allocator release, three load/unload cycles, and a forked panic
+call whose parent continues.
 
 ### Incremental Compiler Service
 
@@ -1938,25 +1942,29 @@ receipts index, reports, build outputs, and logs. Packages never get their own
 `.jet/` folder, and code that creates `.jet/` paths resolves the workspace root
 first (owner ruling, 2026-09-30). The
 content-addressed records stay in the machine-wide `jet-store`, shared across
-workspaces (D-BUILD-STORE1=E; record kinds in `jet_store::records`), and use
-one std-only binary codec with a trailing SHA-256
-(`jet_foundation::RecordCodec`). A missing or corrupt record is a miss, never
-an error.
+workspaces (D-BUILD-STORE1=E). A record kind is the `schema` name the host's
+`JetDriverRecordStore` takes (`jet.pkg-check/v1`, `jet.iface/v1`, ...), and every
+record uses one binary codec with a trailing SHA-256
+(`Compiler/JetFoundation/Source/Record/RecordCodec.jet`). A missing or corrupt
+record is a miss, never an error.
 
 **Sealed reads.** Every file, directory listing, and environment variable that
-loading, sema, or compile-time evaluation reads while checking goes through
-`jet_foundation::CheckReads`. A recorded result declares those reads with
+loading, sema, or compile-time evaluation reads while checking goes through one
+sealed reader; files and listings reach it through the host's
+`JetDriverBuildInputs` transport (`Compiler/JetDriver/Source/Driver/Identity.jet`).
+A recorded result declares those reads with
 their digests and re-verifies them before reuse; a read that changed during
 the check, or a network input, leaves the result unrecorded. The read audit
 (`JET_CHECK_READS_AUDIT`) proves the declaration complete: a verified record
 does not replay, the program is checked fresh, and any read of the fresh
 check that the record does not declare with the same digest fails as an
 internal compiler error. `JET_CHECK_READS_INJECT` injects one undeclared read
-so tests can show the audit catches it.
+so tests can show the audit catches it. The audit is not ported yet: its proof,
+`Tests/Cases/BuildEntry/check_inputs_are_all_declared.case`, is a known failure
+(card #6967).
 
-**Self-hosted compiler.** JetFoundation implements the same codec
-(`Record/RecordCodec.jet`) and key framing (`Record/PackageIdentity.jet`);
-`tests/record_conformance.rs` holds both implementations to identical bytes.
+**Self-hosted compiler.** JetFoundation frames the record keys
+(`Record/PackageIdentity.jet`).
 JetDriver reaches the store only through the typed `JetDriverRecordStore`
 the host passes in the compile request. Without a store every lookup is a
 miss and the package is checked.
@@ -2152,7 +2160,7 @@ The host does not load PATH-discovered `jet-*` helpers or application
 
 `analyze` carries opaque `list<u8>` payloads. Host-owned wire format is UTF-8
 JSON with lexicographic key order and no insignificant whitespace
-(`CompilerExtension::{TypedSnapshot,AnalyzeResponse}`).
+(`TypedSnapshot` and `AnalyzeResponse` in `CompilerExtension.jet`).
 
 **Snapshot** (`protocol=1`, `stage="typed"`, `trust="untrusted"`):
 
@@ -2171,7 +2179,7 @@ Edits are `{span_id, replacement, rationale}`. V1 requires `artifacts: []`.
 Unknown keys are rejected. Span/type refs must resolve. Findings need
 `emit_finding`; edits need `propose_edit`. Counts and raw byte length must
 fit `limits`. Successful validation **stages** output only — the host alone
-may accept; guests never mutate compiler facts or expose rustc (I2/I3).
+may accept; guests never mutate compiler facts (I2/I3).
 
 ### Limits, trust, lifecycle, rollback
 
@@ -2183,8 +2191,8 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
 - **Deterministic sandbox (D-DX5-HOOK1):** the host registers no
   imports, so guests get no ambient clock, random, filesystem, network, or
   process. Components that declare any host import (for example WASI random
-  or clocks) fail closed at load — a Jet-owned message, no session commit,
-  no rustc leak. Pure guests over a frozen snapshot are the only admitted
+  or clocks) fail closed at load with a Jet-owned message and no session
+  commit. Pure guests over a frozen snapshot are the only admitted
   shape; the host never supplies nondeterminism sources.
 - **Lifecycle:** `ExtensionSession` Idle → Loaded → Closed. `stage_response`
   validates without commit; `rollback` discards staged output only (an
@@ -2192,7 +2200,7 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   `close(close_guest)` invokes the host's guest closer so guest
   memory is dropped.
   Uncommitted work never reaches sema or codegen.
-- **Process IPC:** when configured, `jet-driver` resolves `jetpack` only beside
+- **Process IPC:** when configured, the compiler resolves `jetpack` only beside
   the current Jet executable (never PATH), invokes hidden versioned verb
   `__compiler-extension-v1`, writes at most `16 MiB` of snapshot bytes to
   stdin, and accepts at most the snapshot's `max_response_bytes` on stdout.
@@ -2206,9 +2214,11 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   guest runs.
 - **Post-sema driver wire:** when `JET_COMPILER_EXTENSION` names a component
   path (expert env registration — no new user syntax until a spelling ballot),
-  `jet-driver::CompilerExtensionHook` freezes a typed snapshot after sema,
-  exchanges it with the sibling host, then maps validated findings to `L1401`
-  and fails closed on host/process failures (card #6516).
+  the compiler freezes a typed snapshot after sema, exchanges it with the
+  sibling host, then maps validated findings to `L1401` and fails closed on
+  host/process failures (card #6516). JetDriver has no such hook yet, so no
+  compiler reads `JET_COMPILER_EXTENSION` and this wire and the process IPC
+  above are the contract the port must meet.
 
 ## Rules
 
@@ -2291,10 +2301,10 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   file, but no generation path may inject unchecked AST or source text past the
   sema gatekeeper (R2). The guarantee that buys:
   generated code is trustworthy-by-construction (R1 codegen-dumb, R2
-  sema-gatekeeper, R5/I2 rustc-never-speaks all keep holding through
+  sema-gatekeeper, R5/I2 hidden-backend all keep holding through
   generation), and any error in generated output surfaces as a **real sema
   diagnostic pinned to the user's trigger site** — the struct, field, or derive
-  marker that caused it — never as raw rustc output. The `#Codable` derive
+  marker that caused it — never as a back-end failure. The `#Codable` derive
   follows this shape for derives and build-time steps (S56 user derives,
   comptime).
   (D-META-CODE1/D-META-BODY1 supersede the old source-reparse route.)

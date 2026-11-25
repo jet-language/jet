@@ -11,6 +11,7 @@ use jet_foundation.[
     InternalTag,
     IR_PRELUDE_MARKER_RECORD,
     MarkerDecl,
+    MarkerHook,
     ParamZone,
     Span,
     Symbol,
@@ -43,7 +44,7 @@ sema_call_reflection_name_args: fn(ty: Type, span: Span, value_span: Span, check
     facts: sema_copy_classify(ty, SemaCopyIntent.Clone, check.environment.*, check.program.*, check.environment.generic_params, false)
     if facts.holds_resource -> held = "resource state, which has one owner"
     if facts.dynamic_loan -> held = "a borrowed loan, which lives only as long as its lender"
-    if sema_copy_holds_single_use_in(ty, check.environment.*, check.program.*) {
+    if sema_copy_holds_declared_in(ty, check.environment.*, check.program.*, MarkerHook.SingleUse) {
         held = "a `#SingleUse` value, whose one duty a copy would double"
     }
     if held != "" {

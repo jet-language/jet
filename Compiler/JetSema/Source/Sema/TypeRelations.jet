@@ -2695,23 +2695,15 @@ sema_type_conditional_impl_head: fn(graph: SemaRegistrationGraph, actual: Type, 
     None
 }
 
-// These provider-backed Core owners already implement the consuming runtime
-// Close protocol. Check the declaring identity, never the display path or an
-// application's same-named struct.
+// A temporary directory or file is a shared runtime owner (its handle clones),
+// so it declares no `Close`, which would make it move-only; consuming one
+// still runs the runtime's Close protocol. Check the declaring identity, never
+// the display path or an application's same-named struct. Every other Core
+// owner that closes declares its `impl Close`.
 sema_type_provider_close_owner: fn(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal) -> Bool Never! {
     identity: module_text(graph.module_table, nominal.symbol.module_identity)
-    // The compiler-owned allocators release their storage when consumed.
-    if core_identity_in_module(identity, "core.mem") {
-        if nominal.symbol.name == {
-            "Arena" | "Bump" | "Pool" | "Fixed" -> return true
-            else -> return false
-        }
-    }
     if !core_identity_in_module(identity, "core.files") -> return false
-    if nominal.symbol.name == {
-        "FileReader" | "FileWriter" | "FileLock" | "TempDir" | "TempFile" -> true
-        else -> false
-    }
+    nominal.symbol.name == "TempDir" || nominal.symbol.name == "TempFile"
 }
 
 // Bound satisfaction for a bound that names an undeclared builtin trait

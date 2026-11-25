@@ -143,7 +143,9 @@ body_type_id: fn(tree: BodyTree, id: Int) -> TypeID Never! {
     checked_expr_type_id(tree.expr_types, id) ?? panic("body tree has no expression-type row for node {id}")
 }
 
-// Renumbers every worker-local TypeID in `tree.expr_types` through `remap`.
+// Renumbers every worker-local TypeID in `tree.expr_types` through `remap`,
+// and every TypeId handle a compile-time literal holds
+// (comptime_value_remap_types).
 body_tree_remap_types: fn(tree: ^BodyTree, remap: InternerRemap) Never! {
     if remap.types.len() == 0 -> return
     mark: remap.marks.types
@@ -152,6 +154,10 @@ body_tree_remap_types: fn(tree: ^BodyTree, remap: InternerRemap) Never! {
         if row_id >= mark {
             tree.expr_types[i].ty = remap.types[row_id - mark]
         }
+    }
+    loop i in 0..<tree.nodes.len() {
+        if tree.nodes[i].kind == .CtLit(value) && !comptime_value_holds_types_from(value, mark) -> next
+        if ^tree.nodes[i].kind == .CtLit(value) -> comptime_value_remap_types(value, remap)
     }
 }
 

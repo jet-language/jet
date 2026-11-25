@@ -3,8 +3,8 @@
 This page is the single definition home for **collecting loop**, **event**,
 **reader**, and **stream**. It is for language authors and documentation
 writers; the governing decisions are linked beside each definition, and
-`tests/truthfulness.rs::vocabulary_page_has_one_definition_and_no_retired_senses`
-checks the home and its cross-page link rule.
+the `vocabulary_page_has_one_definition_and_no_retired_senses` test in
+`Tests/Guards/truthfulness.jet` checks the home and its cross-page link rule.
 
 ## Collecting loop
 
@@ -87,7 +87,7 @@ the definitions above. The doc lint rejects these retired senses:
 
 The vocabulary page and this rule are checked by
 `vocabulary_page_has_one_definition_and_no_retired_senses` in
-`tests/truthfulness.rs`; the truth row is registered in the corpus table.
+`Tests/Guards/truthfulness.jet`; the truth row is registered in the corpus table.
 
 ## Corpus truth row
 

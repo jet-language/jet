@@ -1,0 +1,15 @@
+// E0211: a `#MoveOnly` value moves and never copies, so a copy of it, or of
+// a record that holds one, is refused.
+#MoveOnly Ticket: struct {
+    seat: Int,
+}
+
+Holder: struct {
+    ticket: Ticket,
+}
+
+copy_value: fn(ticket: Ticket) -> Ticket { ticket.copy() }
+
+copy_holder: fn(holder: Holder) -> Holder { holder.copy() }
+
+run: fn() {}

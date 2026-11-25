@@ -140,11 +140,11 @@ it with the previous tag's `s2` as its seed.
    which records and signs `CANDIDATE.json` with the key
    `jet registry keygen --registry jet-release` made, and
    `jet run Tools/Release/Main.jet -- publish DIR`, which uploads the assets.
-3. **The `rust` branch.** The last commit that still contains the Rust
-   implementation (`6083377777`) is kept as the frozen `rust` branch (see
-   `AGENTS.md`). It carries the Rust `jet` (`cargo build --release --bin jet`)
-   and the stage-zero tooling (`Tools/stage0-repack/`) that produced the
-   self-hosted compilers before the release train existed. It needs a Rust
-   toolchain and no Jet binary. Use it only when no release seed survives.
-   Then walk the release tags forward from the first release after the branch
-   point.
+3. **The `rust` branch.** At the Rust cutover, the last commit that still
+   contained the Rust implementation (`6083377777`) became the frozen `rust`
+   branch (see `AGENTS.md`), kept as a reference and a re-bootstrap safety
+   net. That commit, not this checkout, documents how to build its Rust `jet`
+   and run its stage-zero tooling (`Tools/stage0-repack/`); doing so needs a
+   Rust toolchain and no Jet binary. Use it only when no release seed
+   survives. Then walk the release tags forward from the first release after
+   the branch point.

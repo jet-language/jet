@@ -506,11 +506,14 @@ sema_core_is_closure_marker: fn(usage: String) -> Bool Never! {
 // reported once per module, on its first located use: the module's calls
 // into Core source functions first, then its Core usage rows.
 SemaCoreUIIndex: struct {
-    // The capabilities each Core function that needs one needs, by its
-    // `module.member`.
-    capabilities: [String:[String]],
-    // Each such function's symbol: its `module.member`.
-    ui_symbols: [U32:String],
+    // Each Core function that needs a capability, by its `module.member`:
+    // id n of `functions` needs capabilities[starts[n]..<starts[n + 1]]
+    // (id 0, the empty spelling, needs none).
+    functions: NameTable,
+    starts: [Int],
+    capabilities: [String],
+    // Each such function's symbol: its id in `functions`.
+    ui_symbols: [U32:Int],
     usage_by_id: [U32:Int],
 }
 
@@ -519,17 +522,23 @@ SemaCoreUIIndex: struct {
 SEMA_CORE_NEEDS_MARKER: "Needs"
 
 sema_core_ui_index: fn(graph: SemaRegistrationGraph, usage_modules: [SemaCoreModuleUsageResult]) -> SemaCoreUIIndex {
-    capabilities := [String:[String]]{}
-    ui_symbols := [U32:String]{}
+    functions := name_table_sized(64)
+    starts := [Int]{0, 0}
+    capabilities := [String]{}
+    ui_symbols := [U32:Int]{}
     loop graph_module in graph.modules {
         if !module_is_core(graph_module.module_identity) -> next
         loop function in graph_module.functions {
             if function.symbol.owner != None || function.declaration.markers.len() == 0 -> next
             declared: sema_core_needs(function.declaration.markers, graph, graph_module.module_identity)
             if declared.len() == 0 -> next
-            usage: "{graph_module.module_name}.{function.declaration.name}"
-            capabilities[usage] = declared
-            ui_symbols[function.symbol.id.id] = usage
+            id: name_index(name_intern(functions, "{graph_module.module_name}.{function.declaration.name}"))
+            // A `module.member` declared twice keeps its first capabilities.
+            if id == starts.len() - 1 {
+                capabilities.extend(declared)
+                starts.push(capabilities.len())
+            }
+            ui_symbols[function.symbol.id.id] = id
         }
     }
     usage_by_id := [U32:Int]{}
@@ -538,7 +547,7 @@ sema_core_ui_index: fn(graph: SemaRegistrationGraph, usage_modules: [SemaCoreMod
             usage_by_id[usage_modules[index].module_identity.id] = index
         }
     }
-    SemaCoreUIIndex{capabilities: capabilities, ui_symbols: ui_symbols, usage_by_id: usage_by_id}
+    SemaCoreUIIndex{functions: functions, starts: starts, capabilities: capabilities, ui_symbols: ui_symbols, usage_by_id: usage_by_id}
 }
 
 // The UI capabilities `markers`, written on a function of module
@@ -564,15 +573,17 @@ sema_core_check_ui_capabilities_indexed: fn(call_facts: [SemaCallSiteFact], ui_i
     loop fact in call_facts {
         callee: fact.callee ?? next
         if symbol_is_local(callee) -> next
-        usage: ui_index.ui_symbols.get(callee.id) ?? next
-        sema_core_check_ui_usage(ui_index, usage, Val(fact.span), needs, reported, diagnostics)
+        id: ui_index.ui_symbols.get(callee.id) ?? next
+        sema_core_check_ui_usage(ui_index, id, Val(fact.span), needs, reported, diagnostics)
     }
     if ui_index.usage_by_id.get(module_identity.id) == .Val(index) {
         loop row in usage_modules[index].usage_spans {
-            sema_core_check_ui_usage(ui_index, row.usage, Val(row.span), needs, reported, diagnostics)
+            id: name_find(ui_index.functions, row.usage) ?? next
+            sema_core_check_ui_usage(ui_index, name_index(id), Val(row.span), needs, reported, diagnostics)
         }
         loop usage in usage_modules[index].used_core {
-            sema_core_check_ui_usage(ui_index, usage, None, needs, reported, diagnostics)
+            id: name_find(ui_index.functions, usage) ?? next
+            sema_core_check_ui_usage(ui_index, name_index(id), None, needs, reported, diagnostics)
         }
     }
 }
@@ -588,9 +599,12 @@ sema_core_source_call_usage: fn(key: String, graph: SemaRegistrationGraph) -> St
     Val("{graph.modules[index].module_name}.{parts.name}")
 }
 
-sema_core_check_ui_usage: fn(ui_index: SemaCoreUIIndex, usage: String, span: Span?, needs: [String], reported: ^[String], diagnostics: ^[Diagnostic]) {
-    capabilities: ui_index.capabilities.get(usage) ?? return
-    loop capability in capabilities {
+// The capabilities of `ui_index.functions` id `id` the package's `needs`
+// lacks, each reported once.
+sema_core_check_ui_usage: fn(ui_index: SemaCoreUIIndex, id: Int, span: Span?, needs: [String], reported: ^[String], diagnostics: ^[Diagnostic]) {
+    usage: ui_index.functions.texts[id]
+    loop row in ui_index.starts[id]..<ui_index.starts[id + 1] {
+        capability: ui_index.capabilities[row]
         if sema_core_string_contains(needs, capability) || sema_core_string_contains(reported, capability) {
             next
         }

@@ -39,6 +39,8 @@ use {
         ExprField,
         ExprPair,
         Field,
+        Interner,
+        InternerDelta,
         ForKind,
         Func,
         ImplConstValue,
@@ -83,6 +85,7 @@ use {
         VariantPayload,
         ast_comptime_value_debug,
         ast_comptime_value_type,
+        interner,
         AST_EMPTY_CALL_ARG_FLAGS,
         ast_func,
         body_codec_get_count,
@@ -2294,25 +2297,30 @@ sema_derive_ct_str: fn(name: String, value: String) -> NamedCtValue {
     NamedCtValue{name: name, value: CtValue.Str{value: value}}
 }
 
-// A payload type reads as its written name; a nominal applied to no arguments
-// is the nominal itself.
-sema_derive_type_text: fn(ty: Type) -> String {
-    if ty == .Apply(name, args) {
-        if args.len() == 0 -> return name
-    }
-    type_name(ty)
+// The TypeId of a type a builtin derive provider reads, made by the one
+// TypeId maker (sema_comptime_reflection_type_id_headed) from the heads
+// `heads` holds. The providers read the partial TypeInfo before its item is
+// placed in a module, so no other head resolves through a module: it keeps
+// its written spelling as its identity, as the record's `path` does. A
+// nominal applied to no arguments is the nominal itself. No table keeps the
+// rows it interns past `table`'s own (sema_comptime_reflection_dropped_types),
+// so an expansion's input reads the same in every compile.
+sema_derive_type_id_value: fn(heads: [SemaTypeIDHead], ty: Type, table: Interner, types: ^[InternerDelta]) -> TComptimeValue {
+    if ty == .Apply(name, args) && args.len() == 0 -> return sema_derive_type_id_value(heads, Type.Named{name: name}, table, types)
+    value := sema_comptime_reflection_type_id_headed(heads, ty, table, types)
+    sema_comptime_reflection_drop_types(value, types)
+    value
 }
 
-// The TypeId of a type as the partial TypeInfo names it. The builtin derive
-// providers read that record before its item is placed in a module, so a
-// TypeId's identity is the type as written, as the record's `path` is.
-sema_derive_type_id: fn(text: String) -> CtValue {
-    sema_derive_ct_struct("TypeId", [NamedCtValue]{sema_derive_ct_str("identity", text), sema_derive_ct_str("name", text)})
+// That TypeId as the template value the providers read; a TypeId holds no
+// function or character, so it always has one.
+sema_derive_type_id: fn(heads: [SemaTypeIDHead], ty: Type, table: Interner, types: ^[InternerDelta]) -> CtValue {
+    sema_user_template_ct_value(sema_derive_type_id_value(heads, ty, table, types)) ?? CtValue.Failed{report: CtReport.Clean{ty: Type.Named{name: "TypeId"}}}
 }
 
 // A field row; `default` is where the field's written default expression
 // stands (DefaultInfo, read without running it), absent when it has none.
-sema_derive_field_info: fn(name: String, ty: Type, is_pub: Bool, default: Span?) -> CtValue {
+sema_derive_field_info: fn(name: String, ty: Type, is_pub: Bool, default: Span?, table: Interner, types: ^[InternerDelta]) -> CtValue {
     default_info := CtValue.Failed{report: CtReport.Clean{ty: Type.Named{name: "DefaultInfo"}}}
     if default == .Val(source) {
         // The builtin derive providers read this partial TypeInfo before
@@ -2320,23 +2328,16 @@ sema_derive_field_info: fn(name: String, ty: Type, is_pub: Bool, default: Span?)
         span: sema_derive_ct_struct("SourceSpan", [NamedCtValue]{sema_derive_ct_str("file", ""), NamedCtValue{name: "start", value: CtValue.Int{value: source.start}}, NamedCtValue{name: "end", value: CtValue.Int{value: source.end}}})
         default_info = CtValue.Present{value: sema_derive_ct_struct("DefaultInfo", [NamedCtValue]{NamedCtValue{name: "source", value: span}})}
     }
-    sema_derive_ct_struct("FieldInfo", [NamedCtValue]{sema_derive_ct_str("name", name), NamedCtValue{name: "type", value: sema_derive_type_id(sema_derive_type_text(ty))}, NamedCtValue{name: "is_pub", value: CtValue.Bool{value: is_pub}}, NamedCtValue{name: "default", value: default_info}})
+    sema_derive_ct_struct("FieldInfo", [NamedCtValue]{sema_derive_ct_str("name", name), NamedCtValue{name: "type", value: sema_derive_type_id([SemaTypeIDHead]{}, ty, table, types)}, NamedCtValue{name: "is_pub", value: CtValue.Bool{value: is_pub}}, NamedCtValue{name: "default", value: default_info}})
 }
 
-// The partial TypeInfo a builtin derive provider reads. Its `identity` says
-// what the type is: its `kind` (a TypeKind variant), and a distinct type's
-// `base` binding (`bindings`). Its `methods` lists only those a provider
-// asks after (`has_method`).
-sema_derive_type_info: fn(name: String, kind: String, fields: [CtValue], cases: [CtValue], methods: [CtValue], bindings: [CtValue]) -> CtValue {
-    identity: sema_derive_ct_struct(
-        "TypeId",
-        [NamedCtValue]{
-            sema_derive_ct_str("identity", name),
-            sema_derive_ct_str("name", name),
-            NamedCtValue{name: "generic_bindings", value: CtValue.List{values: bindings}},
-            NamedCtValue{name: "kind", value: CtValue.Enum{type_name: "TypeKind", variant: kind, args: [CtEnumArg]{}}},
-        },
-    )
+// The partial TypeInfo a builtin derive provider reads. Its `identity` is
+// the type's TypeId, made by the one maker from the type's own head: its
+// `kind` (a TypeKind variant), and a distinct type's `base`. Its `methods`
+// lists only those a provider asks after (`has_method`).
+sema_derive_type_info: fn(name: String, kind: String, fields: [CtValue], cases: [CtValue], methods: [CtValue], base: Type?, table: Interner, types: ^[InternerDelta]) -> CtValue {
+    own: SemaTypeIDHead{written: name, identity: name, name: name, params: [String]{}, kind: kind, base: base}
+    identity: sema_derive_type_id([SemaTypeIDHead]{own}, Type.Named{name: name}, table, types)
     sema_derive_ct_struct(
         "TypeInfo",
         [NamedCtValue]{
@@ -2350,7 +2351,7 @@ sema_derive_type_info: fn(name: String, kind: String, fields: [CtValue], cases: 
     )
 }
 
-sema_derive_struct_type_info: fn(definition: StructDef) -> CtValue {
+sema_derive_struct_type_info: fn(definition: StructDef, table: Interner, types: ^[InternerDelta]) -> CtValue {
     fields := [CtValue]{}
     loop field_index in 0..<definition.fields.len() {
         if definition.fields[field_index].computed != None -> next
@@ -2358,30 +2359,30 @@ sema_derive_struct_type_info: fn(definition: StructDef) -> CtValue {
         if definition.fields[field_index].default == .Val(expression) {
             default = Val(expr_source_span(expression))
         }
-        fields.push(sema_derive_field_info(definition.fields[field_index].name, definition.fields[field_index].ty, definition.fields[field_index].is_pub, default))
+        fields.push(sema_derive_field_info(definition.fields[field_index].name, definition.fields[field_index].ty, definition.fields[field_index].is_pub, default, table, types))
     }
-    sema_derive_type_info(definition.name, "Struct", fields, [CtValue]{}, [CtValue]{}, [CtValue]{})
+    sema_derive_type_info(definition.name, "Struct", fields, [CtValue]{}, [CtValue]{}, None, table, types)
 }
 
 // A KeyBy type's derive input, `kind` its Struct or Enum: its members
 // compare its `key()` values, so it lists that one method and no fields or
 // cases.
-sema_derive_key_type_info: fn(name: String, kind: String) -> CtValue {
+sema_derive_key_type_info: fn(name: String, kind: String, table: Interner, types: ^[InternerDelta]) -> CtValue {
     key: sema_derive_ct_struct("MethodInfo", [NamedCtValue]{sema_derive_ct_str("name", "key")})
-    sema_derive_type_info(name, kind, [CtValue]{}, [CtValue]{}, [CtValue]{key}, [CtValue]{})
+    sema_derive_type_info(name, kind, [CtValue]{}, [CtValue]{}, [CtValue]{key}, None, table, types)
 }
 
 // An enum lists its leaf cases as CaseInfo rows under `cases`, as the
 // comptime TypeInfo does, and has no stored fields. A case's `path` runs
 // through the enum's, so a template spells a grouped case `Fire.Burn`.
-sema_derive_enum_type_info: fn(definition: EnumDef) -> CtValue {
+sema_derive_enum_type_info: fn(definition: EnumDef, table: Interner, types: ^[InternerDelta]) -> CtValue {
     cases := [CtValue]{}
     loop (index, variant) in definition.variants {
         payload: if variant.payload == {
             .Unit -> CtValue.Enum{type_name: "CasePayload", variant: "Unit", args: [CtEnumArg]{}}
-            .Single(payload_type, _) -> CtValue.Enum{type_name: "CasePayload", variant: "Single", args: [CtEnumArg]{CtEnumArg{label: None, value: sema_derive_type_id(sema_derive_type_text(payload_type))}}}
+            .Single(payload_type, _) -> CtValue.Enum{type_name: "CasePayload", variant: "Single", args: [CtEnumArg]{CtEnumArg{label: None, value: sema_derive_type_id([SemaTypeIDHead]{}, payload_type, table, types)}}}
             .Named(named) -> {
-                fields: loop field in named -> sema_derive_field_info(field.name, field.ty, definition.is_pub, None)
+                fields: loop field in named -> sema_derive_field_info(field.name, field.ty, definition.is_pub, None, table, types)
                 CtValue.Enum{type_name: "CasePayload", variant: "Named", args: [CtEnumArg]{CtEnumArg{label: None, value: CtValue.List{values: fields}}}}
             }
         }
@@ -2398,13 +2399,12 @@ sema_derive_enum_type_info: fn(definition: EnumDef) -> CtValue {
             ),
         )
     }
-    sema_derive_type_info(definition.name, "Enum", [CtValue]{}, cases, [CtValue]{}, [CtValue]{})
+    sema_derive_type_info(definition.name, "Enum", [CtValue]{}, cases, [CtValue]{}, None, table, types)
 }
 
 // A distinct type binds its base type as `base`, as its TypeId does.
-sema_derive_distinct_type_info: fn(definition: DistinctDef) -> CtValue {
-    base: sema_derive_ct_struct("GenericBindingInfo", [NamedCtValue]{sema_derive_ct_str("name", "base"), NamedCtValue{name: "type", value: sema_derive_type_id(sema_derive_type_text(definition.base))}})
-    sema_derive_type_info(definition.name, "Distinct", [CtValue]{}, [CtValue]{}, [CtValue]{}, [CtValue]{base})
+sema_derive_distinct_type_info: fn(definition: DistinctDef, table: Interner, types: ^[InternerDelta]) -> CtValue {
+    sema_derive_type_info(definition.name, "Distinct", [CtValue]{}, [CtValue]{}, [CtValue]{}, Val(definition.base), table, types)
 }
 
 sema_derive_replace_provider_type: fn(ty: Type, type_param: String, owner_type: Type) -> Type Never! {
@@ -3157,6 +3157,10 @@ sema_derive_expand_builtin_items_with: fn(items: ^[Item], diagnostics: ^[Diagnos
     auto_equatable: sema_derive_auto_selected(items, facts, "Equatable", SemaCodecNames{})
     auto_comparable: sema_derive_auto_selected(items, facts, "Comparable", SemaCodecNames{})
     generated := [Item]{}
+    // The providers' TypeIds intern past the well-known types alone
+    // (sema_derive_type_id_value).
+    table: interner()
+    types := [InternerDelta]{}
     // Each item is read in place; an expanded declaration gains its derived
     // trait impls in place.
     loop index in 0..<items.len() {
@@ -3164,7 +3168,7 @@ sema_derive_expand_builtin_items_with: fn(items: ^[Item], diagnostics: ^[Diagnos
         // the marker; its derived bodies are not expanded, so no `<` error
         // follows from inside them.
         if sema_derive_unordered_comparable(items[index], diagnostics) -> next
-        blocks: sema_derive_builtin_blocks(items[index], facts, auto_equatable, auto_comparable, generated, memo, diagnostics)
+        blocks: sema_derive_builtin_blocks(items[index], facts, auto_equatable, auto_comparable, table, types, generated, memo, diagnostics)
         if blocks.len() == 0 -> next
         if ^items[index] == .Struct(definition) {
             loop block in blocks -> definition.trait_impls.push(block)
@@ -3255,13 +3259,13 @@ sema_derive_memo_expand: fn(memo: ^SemaDeriveMemo, trait_name: String, body: [De
 
 // The key of an expansion of `trait_name`'s provider over `type_info`:
 // both in the codec's plain form, which spells each string where it falls.
-// None when the info names a symbol, declaration or module, which only a
-// compile's own tables number.
+// None when the info names a symbol, declaration, module or type row,
+// which only a compile's own tables number.
 sema_derive_memo_key: fn(trait_name: String, type_info: CtValue) -> [U8]? Never! {
     out := body_codec_out()
     body_codec_put_string(out, trait_name)
     body_codec_put_ctvalue(out, type_info)
-    if out.symbols.len() > 0 || out.decls.len() > 0 || out.modules.len() > 0 -> return None
+    if out.symbols.len() > 0 || out.decls.len() > 0 || out.modules.len() > 0 || out.types.len() > 0 -> return None
     Val(out.bytes.move())
 }
 
@@ -3292,11 +3296,11 @@ sema_derive_memo_take: fn(memo: ^SemaDeriveMemo, found: Int) -> [Item]? Never! {
 // Pushes onto `captures` the record of the expansions `memo` captured: the
 // count of keys, then each key with where its expansion starts after them,
 // then the expansions. Nothing when it captured none, or when an expansion
-// names a symbol or declaration, which a record can't hold.
+// names a symbol, declaration or type row, which a record can't hold.
 sema_derive_memo_capture: fn(memo: ^^SemaDeriveMemo, captures: ^[SemaDeriveCapture]) Never! {
     taken := memo.move()
     expansions := taken.capture.move() ?? return
-    if taken.keys.len() == 0 || expansions.symbols.len() > 0 || expansions.decls.len() > 0 {
+    if taken.keys.len() == 0 || expansions.symbols.len() > 0 || expansions.decls.len() > 0 || expansions.types.len() > 0 {
         return
     }
     head := body_codec_out()
@@ -3736,7 +3740,7 @@ sema_computed_field_param: fn(name: String, ty: Type, span: Span) -> Param Never
 
 // The derived trait impls of a struct or enum `item`, in trait order. A
 // distinct's impls join `generated` as separate impl items instead.
-sema_derive_builtin_blocks: fn(item: Item, facts: SemaDeriveItemIndex, auto_equatable: NameTable, auto_comparable: NameTable, generated: ^[Item], memo: ^SemaDeriveMemo, diagnostics: ^[Diagnostic]) -> [TraitImplBlock] {
+sema_derive_builtin_blocks: fn(item: Item, facts: SemaDeriveItemIndex, auto_equatable: NameTable, auto_comparable: NameTable, table: Interner, types: ^[InternerDelta], generated: ^[Item], memo: ^SemaDeriveMemo, diagnostics: ^[Diagnostic]) -> [TraitImplBlock] {
     blocks := [TraitImplBlock]{}
     if item == {
         .Struct(definition) -> {
@@ -3746,7 +3750,7 @@ sema_derive_builtin_blocks: fn(item: Item, facts: SemaDeriveItemIndex, auto_equa
             comparable: keyed || sema_derive_has_name(definition.derives, "Comparable") || name_find(auto_comparable, definition.name) != None
             if !equatable && !comparable -> return blocks.move()
             owner_type: sema_derive_owner_type(definition.name, definition.type_params)
-            type_info: if keyed -> sema_derive_key_type_info(definition.name, "Struct") else -> sema_derive_struct_type_info(definition)
+            type_info: if keyed -> sema_derive_key_type_info(definition.name, "Struct", table, types) else -> sema_derive_struct_type_info(definition, table, types)
             loop trait_name in owned_trait_structural_names() {
                 wanted: (trait_name == "Equatable" && equatable) || (trait_name == "Comparable" && comparable)
                 if !wanted || sema_derive_has_trait_impl(facts, definition.name, trait_name) -> next
@@ -3760,7 +3764,7 @@ sema_derive_builtin_blocks: fn(item: Item, facts: SemaDeriveItemIndex, auto_equa
             comparable: keyed || sema_derive_has_name(definition.derives, "Comparable") || name_find(auto_comparable, definition.name) != None
             if !equatable && !comparable -> return blocks.move()
             owner_type: sema_derive_owner_type(definition.name, definition.type_params)
-            type_info: if keyed -> sema_derive_key_type_info(definition.name, "Enum") else -> sema_derive_enum_type_info(definition)
+            type_info: if keyed -> sema_derive_key_type_info(definition.name, "Enum", table, types) else -> sema_derive_enum_type_info(definition, table, types)
             loop trait_name in owned_trait_structural_names() {
                 wanted: (trait_name == "Equatable" && equatable) || (trait_name == "Comparable" && comparable)
                 if !wanted || sema_derive_has_trait_impl(facts, definition.name, trait_name) -> next
@@ -3775,7 +3779,7 @@ sema_derive_builtin_blocks: fn(item: Item, facts: SemaDeriveItemIndex, auto_equa
                 if facts.distinct[sema_derive_index_find(facts, base)] -> return blocks.move()
             }
             owner_type: Type.Named{name: definition.name}
-            type_info: sema_derive_distinct_type_info(definition)
+            type_info: sema_derive_distinct_type_info(definition, table, types)
             loop trait_name in owned_trait_structural_names() {
                 if trait_name == "Comparable" && !sema_derive_has_name(definition.derives, "Comparable") {
                     next

@@ -37652,7 +37652,12 @@ is_nan: fn(n: Float) -> Bool Never! { n != n }
 
 is_inf: fn(n: Float) -> Bool Never! { fabs(n) == INFINITY }
 
-is_finite: fn(n: Float) -> Bool Never! { fabs(n) < INFINITY }
+// n - n is 0 for a finite n and NaN for an infinity or a NaN: one
+// subtraction and a self-comparison, with no trip through the bits.
+is_finite: fn(n: Float) -> Bool Never! {
+    zero: n - n
+    zero == zero
+}
 
 // #4747: preserve the existing F32 call contract without changing Float policy.
 #Builtin.Role(.IsFiniteF32) priv __is_finite_f32: fn(n: F32) -> Bool Never! { is_finite(Float.from_f32(n)) }

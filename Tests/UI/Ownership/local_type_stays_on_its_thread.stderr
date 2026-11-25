@@ -1,0 +1,17 @@
+Error: Jet.ValueNotSendable: `pool` can't cross into a task because `Pool` isn't sendable
+  --> Tests/UI/Ownership/local_type_stays_on_its_thread.jet:12:18
+    |
+ 12 |     worker: task {
+    |                  ^
+ Why: `Pool` is declared `#Local`, so its values stay on the thread that made them; tasks and channels move owned values between threads
+ Fix: Give the task plain owned data, or rebuild the value as an owned copy before spawning
+More: jet-lang.dev/e/Jet.ValueNotSendable
+
+Error: Jet.ValueNotSendable: `holder` can't cross into a task because `Holder` isn't sendable
+  --> Tests/UI/Ownership/local_type_stays_on_its_thread.jet:19:18
+    |
+ 19 |     worker: task {
+    |                  ^
+ Why: `Pool` is declared `#Local`, so its values stay on the thread that made them; tasks and channels move owned values between threads
+ Fix: Give the task plain owned data, or rebuild the value as an owned copy before spawning
+More: jet-lang.dev/e/Jet.ValueNotSendable

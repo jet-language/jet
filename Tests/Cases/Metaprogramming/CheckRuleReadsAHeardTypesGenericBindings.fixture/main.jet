@@ -42,13 +42,16 @@ Spaces: struct {
         sites: [.Function],
 
         check: fn(self, call: CompilerCall) {
-            if call.args.len() != 2 -> return
-            first: call.args[0].type.generic_bindings
-            second: call.args[1].type.generic_bindings
-            if first.len() != 2 || first[0].name != "From" || first[1].name != "To" -> return reject(Unbound{index: 0}, at: call.args[0])
-            if second.len() != 2 || second[0].name != "From" || second[1].name != "To" -> return reject(Unbound{index: 1}, at: call.args[1])
-            if first[1].type.identity != second[0].type.identity {
-                reject(Mismatch{left: first[1].type.name, right: second[0].type.name}, at: call.args[1])
+            if call.args.len() == 2 {
+                first: call.args[0].type.generic_bindings
+                second: call.args[1].type.generic_bindings
+                if first.len() != 2 || first[0].name != "From" || first[1].name != "To" {
+                    reject(Unbound{index: 0}, at: call.args[0])
+                } else if second.len() != 2 || second[0].name != "From" || second[1].name != "To" {
+                    reject(Unbound{index: 1}, at: call.args[1])
+                } else if first[1].type.identity != second[0].type.identity {
+                    reject(Mismatch{left: first[1].type.name, right: second[0].type.name}, at: call.args[1])
+                }
             }
         }
     }

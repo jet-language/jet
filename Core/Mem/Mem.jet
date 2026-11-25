@@ -26,13 +26,35 @@ AllocError: struct {
 // Allocator and pointer values are compiler-owned nominal surfaces. Their
 // constructors and methods are lowered by the memory CoreLib; source keeps
 // only the canonical type arities, never a fake runtime state carrier.
-Arena: struct {}
+// `Pool` is the slot allocator and takes no type argument; the generic
+// `Pool<T>` is the ambient store, a separate type. Each allocator owns its
+// storage, so it is `Close`: a copy would release that storage twice. Its
+// runtime handle's drop releases the storage once the close has run, so the
+// close itself has nothing left to do. The storage belongs to the thread
+// that made it, so each allocator is `#Local`.
+#Local Arena: struct {
+    impl Close {
+        close: fn(^^self) {}
+    }
+}
 
-Bump: struct {}
+#Local Bump: struct {
+    impl Close {
+        close: fn(^^self) {}
+    }
+}
 
-Fixed: struct {}
+#Local Fixed: struct {
+    impl Close {
+        close: fn(^^self) {}
+    }
+}
 
-Pool: struct<T> {}
+#Local Pool: struct {
+    impl Close {
+        close: fn(^^self) {}
+    }
+}
 
 Pin: struct<T> {}
 

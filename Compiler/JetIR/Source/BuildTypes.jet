@@ -5419,21 +5419,19 @@ ir_try_from: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, value: Int, ty: Type,
 }
 
 // The Ok word row of the narrowing conversion `ty` (a Result of a word of 1
-// to 64 bits and a String) of the exact Int or fixed word `value`; -1 once
-// the build failed on another shape.
+// to 64 bits and a String, or `checked(T{x})`'s Option of that word) of the
+// exact Int or fixed word `value`; -1 once the build failed on another shape.
 ir_try_from_ok_row: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, value: Int, ty: Type, span: Span) -> Int Never! {
     unsupported: "Prelude conversion try_from into {ir_type_name(ty)} is not lowered at O0 yet"
-    ok_ty: if ir_untag(ty) == .Result(ok, _) -> ok else -> {
-        return ir_fail_slot(b, span, unsupported)
-    }
-    err_ty: if ir_untag(ty) == .Result(_, err) -> err else -> {
+    ok_ty: if ir_untag(ty) == .Option(inner) -> inner else if ir_untag(ty) == .Result(ok, _) -> ok else -> {
         return ir_fail_slot(b, span, unsupported)
     }
     ok_row: ir_value_type(m, p, ok_ty) ?? return ir_type_fail(b, span, ok_ty)
-    err_row: ir_value_type(m, p, err_ty) ?? return ir_type_fail(b, span, err_ty)
-    if m.types[err_row].kind != .String || m.types[ok_row].kind != .Word {
-        return ir_fail_slot(b, span, unsupported)
+    if ir_untag(ty) == .Result(_, err_ty) {
+        err_row: ir_value_type(m, p, err_ty) ?? return ir_type_fail(b, span, err_ty)
+        if m.types[err_row].kind != .String -> return ir_fail_slot(b, span, unsupported)
     }
+    if m.types[ok_row].kind != .Word -> return ir_fail_slot(b, span, unsupported)
     t_bits: m.types[ok_row].bits
     if t_bits < 1 || t_bits > 64 -> return ir_fail_slot(b, span, unsupported)
     source: m.types[b.f.slot_type[value]]

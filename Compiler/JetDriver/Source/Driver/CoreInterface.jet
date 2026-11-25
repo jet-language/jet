@@ -707,9 +707,10 @@ jet_driver_core_heads_program: fn(bytes: [U8]) -> Program? Never! {
 
 // A Core text parsed whole holding no declaration, its inline package
 // carrier blanked as the load blanks it: the parse, and the `{`..`}` span of
-// each of its function bodies that holds statements (`bodies`): top-level
-// functions, the methods of structs, enums and their trait blocks, `impl`
-// methods, and trait methods' default bodies.
+// each of its function bodies that holds statements of its own
+// (jet_driver_core_body_blank): top-level functions, the methods of
+// structs, enums and their trait blocks, `impl` methods, and trait methods'
+// default bodies.
 JetDriverCoreOpenParse: struct {
     parsed: ParseResult,
     bodies: [Span],
@@ -731,19 +732,19 @@ jet_driver_core_open_parse: fn(text: String, threads: CompilerThreads) -> JetDri
     loop item in parsed.program.items {
         if item == {
             .Func(value) -> {
-                if value.body.len() > 0 {
+                if !jet_driver_core_body_blank(value) {
                     jet_driver_core_body_push(spans, braces, opens, value.name_span.end, value.span.end)
                 }
             }
             .Struct(value) -> {
                 loop method in value.methods {
-                    if method.body.len() > 0 {
+                    if !jet_driver_core_body_blank(method) {
                         jet_driver_core_body_push(spans, braces, opens, method.name_span.end, method.span.end)
                     }
                 }
                 loop block in value.trait_impls {
                     loop method in block.methods {
-                        if method.body.len() > 0 {
+                        if !jet_driver_core_body_blank(method) {
                             jet_driver_core_body_push(spans, braces, opens, method.name_span.end, method.span.end)
                         }
                     }
@@ -751,13 +752,13 @@ jet_driver_core_open_parse: fn(text: String, threads: CompilerThreads) -> JetDri
             }
             .Enum(value) -> {
                 loop method in value.methods {
-                    if method.body.len() > 0 {
+                    if !jet_driver_core_body_blank(method) {
                         jet_driver_core_body_push(spans, braces, opens, method.name_span.end, method.span.end)
                     }
                 }
                 loop block in value.trait_impls {
                     loop method in block.methods {
-                        if method.body.len() > 0 {
+                        if !jet_driver_core_body_blank(method) {
                             jet_driver_core_body_push(spans, braces, opens, method.name_span.end, method.span.end)
                         }
                     }
@@ -765,7 +766,7 @@ jet_driver_core_open_parse: fn(text: String, threads: CompilerThreads) -> JetDri
             }
             .Impl(value) -> {
                 loop method in value.methods {
-                    if method.body.len() > 0 {
+                    if !jet_driver_core_body_blank(method) {
                         jet_driver_core_body_push(spans, braces, opens, method.name_span.end, method.span.end)
                     }
                 }
@@ -1734,10 +1735,11 @@ jet_driver_core_restore_rules: fn(own: [AppliedRuleApplication], fresh: ^^[Appli
 }
 
 // Files the end of each function and trait method of `item` whose body is
-// empty: those a lazy parse blanked, among others.
+// blank (jet_driver_core_body_blank): those a lazy parse blanked, among
+// others.
 jet_driver_core_blanked_ends: fn(item: Item, ends: ^[Int:Bool]) Never! {
     if item == .Func(value) {
-        if value.body.len() == 0 -> ends[value.span.end] = true
+        if jet_driver_core_body_blank(value) -> ends[value.span.end] = true
     } else if item == .Struct(value) {
         jet_driver_core_blanked_method_ends(value.methods, value.trait_impls, ends)
     } else if item == .Enum(value) {
@@ -1753,20 +1755,35 @@ jet_driver_core_blanked_ends: fn(item: Item, ends: ^[Int:Bool]) Never! {
 
 jet_driver_core_blanked_method_ends: fn(methods: [Func], blocks: [TraitImplBlock], ends: ^[Int:Bool]) Never! {
     loop method in methods {
-        if method.body.len() == 0 -> ends[method.span.end] = true
+        if jet_driver_core_body_blank(method) -> ends[method.span.end] = true
     }
     loop block in blocks {
         loop method in block.methods {
-            if method.body.len() == 0 -> ends[method.span.end] = true
+            if jet_driver_core_body_blank(method) -> ends[method.span.end] = true
         }
     }
 }
 
+// Whether `function`'s body holds no statement of its own: it is empty, or
+// it is a marker's `check` holding only the closing `None` the parser gives
+// every rule (JetParser parser_parse_marker_check), which sits at the
+// method's end. A lazy parse blanks a rule's body as it does any other, so
+// the rule keeps only that `None` until its body comes back.
+jet_driver_core_body_blank: fn(function: Func) -> Bool Never! {
+    if function.body.len() == 0 -> return true
+    if !function.marker_check || function.name != "check" || function.body.len() != 1 -> return false
+    if function.body[0] == .Expr(value) && value == .EnumLit(_, variant, _, _, _, span, _) {
+        return variant == "None" && span.start == function.span.end
+    }
+    false
+}
+
 // Files each function and trait method of `item`, an item of a restoring
-// parse, that has a body, by the byte where it starts.
+// parse, whose body holds statements of its own, by the byte where it
+// starts.
 jet_driver_core_restore_index: fn(item: ^^Item, funcs: ^[Int:Func], sigs: ^[Int:TraitMethodSig]) Never! {
     if item == .Func(value) {
-        if value.body.len() > 0 -> funcs[value.span.start] = value
+        if !jet_driver_core_body_blank(value) -> funcs[value.span.start] = value
     } else if item == .Struct(value) {
         jet_driver_core_restore_index_methods(value.methods, value.trait_impls, funcs)
     } else if item == .Enum(value) {
@@ -1784,23 +1801,23 @@ jet_driver_core_restore_index: fn(item: ^^Item, funcs: ^[Int:Func], sigs: ^[Int:
 
 jet_driver_core_restore_index_methods: fn(methods: [Func], blocks: [TraitImplBlock], funcs: ^[Int:Func]) Never! {
     loop method in methods {
-        if method.body.len() > 0 -> funcs[method.span.start] = method
+        if !jet_driver_core_body_blank(method) -> funcs[method.span.start] = method
     }
     loop block in blocks {
         loop method in block.methods {
-            if method.body.len() > 0 -> funcs[method.span.start] = method
+            if !jet_driver_core_body_blank(method) -> funcs[method.span.start] = method
         }
     }
 }
 
 // Puts the parse in `funcs` or `sigs` (jet_driver_core_restore_index) of
-// each function and trait method of `items` with an empty body in its
-// place. Returns how many it put.
+// each function and trait method of `items` with a blank body
+// (jet_driver_core_body_blank) in its place. Returns how many it put.
 jet_driver_core_restore_items: fn(items: ^[Item], funcs: [Int:Func], sigs: [Int:TraitMethodSig]) -> Int Never! {
     restored := 0
     loop position in 0..<items.len() {
         if items[position] == .Func(value) {
-            if value.body.len() > 0 -> next
+            if !jet_driver_core_body_blank(value) -> next
             found := funcs.get(value.span.start) ?? next
             items[position] = Item.Func{value: found}
             restored += 1
@@ -1841,33 +1858,34 @@ jet_driver_core_restore_items: fn(items: ^[Item], funcs: [Int:Func], sigs: [Int:
     restored
 }
 
-// Whether a method of `methods` or `blocks` with an empty body has a parse
-// in `funcs`.
+// Whether a method of `methods` or `blocks` with a blank body
+// (jet_driver_core_body_blank) has a parse in `funcs`.
 jet_driver_core_restorable: fn(methods: [Func], blocks: [TraitImplBlock], funcs: [Int:Func]) -> Bool Never! {
     loop method in methods {
-        if method.body.len() == 0 && funcs.get(method.span.start) != None -> return true
+        if jet_driver_core_body_blank(method) && funcs.get(method.span.start) != None -> return true
     }
     loop block in blocks {
         loop method in block.methods {
-            if method.body.len() == 0 && funcs.get(method.span.start) != None -> return true
+            if jet_driver_core_body_blank(method) && funcs.get(method.span.start) != None -> return true
         }
     }
     false
 }
 
-// Puts the parse in `funcs` of each method of `methods` and `blocks` with
-// an empty body in its place. Returns how many it put.
+// Puts the parse in `funcs` of each method of `methods` and `blocks` with a
+// blank body (jet_driver_core_body_blank) in its place. Returns how many it
+// put.
 jet_driver_core_restore_methods: fn(methods: ^[Func], blocks: ^[TraitImplBlock], funcs: [Int:Func]) -> Int Never! {
     restored := 0
     loop index in 0..<methods.len() {
-        if methods[index].body.len() > 0 -> next
+        if !jet_driver_core_body_blank(methods[index]) -> next
         found := funcs.get(methods[index].span.start) ?? next
         methods[index] = found
         restored += 1
     }
     loop block in 0..<blocks.len() {
         loop index in 0..<blocks[block].methods.len() {
-            if blocks[block].methods[index].body.len() > 0 -> next
+            if !jet_driver_core_body_blank(blocks[block].methods[index]) -> next
             found := funcs.get(blocks[block].methods[index].span.start) ?? next
             blocks[block].methods[index] = found
             restored += 1

@@ -8,6 +8,7 @@ use jet_foundation.[
     AST_NODE_GENERATED,
     COMPTIME_SITE_TRAIT,
     Diagnostic,
+    InternerDelta,
     EnumLitArg,
     Expr,
     FactRead,
@@ -38,6 +39,7 @@ use jet_foundation.[
     Type,
     TYPE_ID_TRAIT,
     TYPE_REFLECTION_TRAIT,
+    comptime_value_remap_types,
     TypeTupleField,
     TypedLitBody,
     UnitScaleProvenance,
@@ -1183,17 +1185,17 @@ sema_fact_subject_item: fn(symbol: Symbol?, check: SemaBodyCheck) -> Item? {
 // module scope does not bind (a Core type, `module.Type`) is the nominal row
 // its path names from this module. `args` names a specialization
 // (`Shelf<Int>.reflect()`, see sema_comptime_reflection_type_info).
-sema_fact_type_info: fn(symbol: Symbol?, name: String, args: [Type], check: SemaBodyCheck) -> TComptimeValue? {
+sema_fact_type_info: fn(symbol: Symbol?, name: String, args: [Type], check: ^SemaBodyCheck) -> TComptimeValue? {
     catalog: TAppliedRuleCatalog{rows: [TAppliedRule]{}, argument_menus: [TAppliedRuleArgumentMenu]{}}
     // Snapshot: type info reads a registered declaration.
     if check.program.registration_graph.mode == .Snapshot -> return None
     graph: check.program.registration_graph
     if symbol == .Val(resolved) {
         if resolved.kind != SymbolKind.Type -> return None
-        return sema_comptime_reflection_type_info(graph, resolved.module_identity, name, catalog, args)
+        return sema_comptime_reflection_type_info(graph, check.context.type_delta, resolved.module_identity, name, catalog, args)
     }
     row: sema_type_resolve_nominal_row(graph, Type.Named{name: name}, check.environment.module_identity) ?? return None
-    sema_comptime_reflection_type_info(graph, graph.modules[row.module_index].module_identity, graph.modules[row.module_index].nominals[row.row].symbol.name, catalog, args)
+    sema_comptime_reflection_type_info(graph, check.context.type_delta, graph.modules[row.module_index].module_identity, graph.modules[row.module_index].nominals[row.row].symbol.name, catalog, args)
 }
 
 // The TypeInfo record `ty.reflect()` folds to, `ty` a type a checked body
@@ -1201,7 +1203,7 @@ sema_fact_type_info: fn(symbol: Symbol?, name: String, args: [Type], check: Sema
 // type arguments, else a builtin number's. It is the record an instance of a
 // `T.reflect()` read takes when `ty` fills `T` (sema_effect_type_reflections),
 // folded by the builders a written `X.reflect()` folds by.
-sema_fact_type_info_of: fn(graph: SemaRegistrationGraph, ty: Type, module_identity: ModuleID) -> TComptimeValue? {
+sema_fact_type_info_of: fn(graph: SemaRegistrationGraph, types: ^[InternerDelta], ty: Type, module_identity: ModuleID) -> TComptimeValue? {
     plain: sema_expr_unwrap_tag(ty)
     // Snapshot: a nominal's record reads a registered declaration; a builtin
     // number's needs none.
@@ -1209,10 +1211,10 @@ sema_fact_type_info_of: fn(graph: SemaRegistrationGraph, ty: Type, module_identi
         if sema_fact_nominal_row_of(graph, plain, module_identity) == .Val(row) {
             catalog: TAppliedRuleCatalog{rows: [TAppliedRule]{}, argument_menus: [TAppliedRuleArgumentMenu]{}}
             args: if plain == .Apply(_, values) -> values else -> [Type]{}
-            return sema_comptime_reflection_type_info(graph, graph.modules[row.module_index].module_identity, graph.modules[row.module_index].nominals[row.row].symbol.name, catalog, args)
+            return sema_comptime_reflection_type_info(graph, types, graph.modules[row.module_index].module_identity, graph.modules[row.module_index].nominals[row.row].symbol.name, catalog, args)
         }
     }
-    sema_comptime_reflection_builtin_type_info(graph, type_name(plain))
+    sema_comptime_reflection_builtin_type_info(graph, types, type_name(plain))
 }
 
 // The nominal row of the declared type `ty` names: the row a checked type
@@ -1251,10 +1253,12 @@ SemaInstanceConstants: struct {
 // landed and takes its arm: one in an arm its instance does not take has no
 // row, no E0302 and nothing staged, as JetIR never builds that arm. The
 // program holds these rows, never a module: which rows there are depends on
-// every instance the program builds.
-sema_fact_instance_constants: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], reflections: [SemaTypeReflection], values: [SemaComptimeItemValue], diagnostics: ^[Diagnostic]) -> SemaInstanceConstants {
+// every instance the program builds. Each TypeId they hold is a row of the
+// compilation's interner in `graph`, which takes the rows they add.
+sema_fact_instance_constants: fn(graph: ^SemaRegistrationGraph, modules: [SemaGraphModuleResult], reflections: [SemaTypeReflection], values: [SemaComptimeItemValue], diagnostics: ^[Diagnostic]) -> SemaInstanceConstants {
     rows := [TConstantDef]{}
     sources := [SemaComptimeBodySource]{}
+    types := [InternerDelta]{}
     // The value each reflection's site took at its instance, once the
     // instance's copy has landed, by reflection.
     known := [Bool?]{}
@@ -1268,11 +1272,11 @@ sema_fact_instance_constants: fn(graph: SemaRegistrationGraph, modules: [SemaGra
         if !counts -> next
         caller: sema_registration_module_index(graph, reflection.module_identity) ?? -1
         if reflection.type_id {
-            rows.push(TConstantDef{module_identity: reflection.read_module_identity, key: reflection.key, name: TYPE_ID_TRAIT, span: reflection.span, visibility: NameVisibility.Public, ty: Type.Named{name: "TypeId"}, is_comptime: true, is_storage: false, value: sema_comptime_reflection_type_id(graph, caller, reflection.ty)})
+            rows.push(TConstantDef{module_identity: reflection.read_module_identity, key: reflection.key, name: TYPE_ID_TRAIT, span: reflection.span, visibility: NameVisibility.Public, ty: Type.Named{name: "TypeId"}, is_comptime: true, is_storage: false, value: sema_comptime_reflection_type_id(graph, types, caller, reflection.ty)})
             next
         }
         if reflection.site == "" {
-            info: sema_fact_type_info_of(graph, reflection.ty, reflection.module_identity) ?? {
+            info: sema_fact_type_info_of(graph, types, reflection.ty, reflection.module_identity) ?? {
                 sema_fact_report_located(graph, reflection.read_module_identity, sema_fact_no_type_info_error(reflection.span, reflection.params[0], type_name(reflection.ty)), diagnostics)
                 next
             }
@@ -1291,10 +1295,17 @@ sema_fact_instance_constants: fn(graph: SemaRegistrationGraph, modules: [SemaGra
         ids := [TComptimeValue]{}
         infos := [TComptimeValue?]{}
         loop arg in args {
-            ids.push(sema_comptime_reflection_type_id(graph, caller, arg))
-            infos.push(if sema_fact_type_info_of(graph, arg, reflection.module_identity) == .Val(info) -> Val(sema_fact_declared_value(info)) else -> None)
+            ids.push(sema_comptime_reflection_type_id(graph, types, caller, arg))
+            infos.push(if sema_fact_type_info_of(graph, types, arg, reflection.module_identity) == .Val(info) -> Val(sema_fact_declared_value(info)) else -> None)
         }
         sources.push(sema_comptime_generic_site_instance(site, reflection.params, ids, infos, type_carrier_identity(reflection.ty)))
+    }
+    remap: sema_comptime_reflection_merge_types(graph.interner, types)
+    if remap.types.len() > 0 {
+        loop index in 0..<rows.len() -> comptime_value_remap_types(rows[index].value, remap)
+        loop index in 0..<sources.len() {
+            loop local in 0..<sources[index].prepared.len() -> comptime_value_remap_types(sources[index].prepared[local].value, remap)
+        }
     }
     SemaInstanceConstants{rows: rows, sources: sources}
 }
@@ -1383,7 +1394,7 @@ sema_fact_report_located: fn(graph: SemaRegistrationGraph, module_identity: Modu
 // package. `args` names a specialization (`f.reflect(types: [Int])`): one
 // type per type parameter, else E0119 at `span` and None. With no `args` it
 // is the declaration.
-sema_fact_function_info: fn(symbol: Symbol, graph: SemaRegistrationGraph, args: [Type]?, span: Span, diagnostics: ^[Diagnostic]) -> TComptimeValue? {
+sema_fact_function_info: fn(symbol: Symbol, graph: SemaRegistrationGraph, types: ^[InternerDelta], args: [Type]?, span: Span, diagnostics: ^[Diagnostic]) -> TComptimeValue? {
     index: sema_registration_module_index(graph, symbol.module_identity) ?? return None
     registered_module: graph.modules[index]
     catalog: TAppliedRuleCatalog{rows: [TAppliedRule]{}, argument_menus: [TAppliedRuleArgumentMenu]{}}
@@ -1399,12 +1410,12 @@ sema_fact_function_info: fn(symbol: Symbol, graph: SemaRegistrationGraph, args: 
             }
             bindings = sema_comptime_reflection_specialization(registered.declaration.type_params, written)
         }
-        markers: sema_comptime_reflection_written_markers(graph, registered_module.module_identity, registered_module.program, catalog, registered.declaration.markers, registry) ?? return None
+        markers: sema_comptime_reflection_written_markers(graph, types, registered_module.module_identity, registered_module.program, catalog, registered.declaration.markers, registry) ?? return None
         identity: "{registered_module.module_name}.{registered.declaration.name}"
         if bindings.len() == 0 {
-            return Val(sema_comptime_reflection_function_info(graph, index, registered.declaration, registered_module.module_name, identity, registered_module.package_identity, registered_module, markers, bindings))
+            return Val(sema_comptime_reflection_function_info(graph, types, index, registered.declaration, registered_module.module_name, identity, registered_module.package_identity, registered_module, markers, bindings))
         }
-        return Val(sema_comptime_reflection_function_info(graph, index, sema_comptime_reflection_specialize_func(registered.declaration, bindings), registered_module.module_name, sema_comptime_reflection_specialized_identity(identity, bindings), registered_module.package_identity, registered_module, markers, bindings))
+        return Val(sema_comptime_reflection_function_info(graph, types, index, sema_comptime_reflection_specialize_func(registered.declaration, bindings), registered_module.module_name, sema_comptime_reflection_specialized_identity(identity, bindings), registered_module.package_identity, registered_module, markers, bindings))
     }
     None
 }
@@ -1525,7 +1536,7 @@ sema_fact_type_param_read: fn(read: FactRead, name: String, span: Span, expected
 
 // One subject named by a bare identifier that is not a local: a type, a
 // function, a unit member, or the `report` attribution subject.
-sema_fact_subject_value: fn(read: FactRead, name: String, symbol: Symbol?, check: SemaBodyCheck) -> SemaFactReadValue? {
+sema_fact_subject_value: fn(read: FactRead, name: String, symbol: Symbol?, check: ^SemaBodyCheck) -> SemaFactReadValue? {
     item: sema_fact_subject_item(symbol, check)
     unit: sema_fact_unit(name, check)
     declared: item != None || unit != None

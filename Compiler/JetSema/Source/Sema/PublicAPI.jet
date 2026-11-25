@@ -7,6 +7,7 @@
 // and signature, so one API always renders as one snapshot.
 use jet_foundation.[
     access_sigil,
+    ast_comptime_generated_path,
     dimension_identity,
     EnumDef,
     FnBody,
@@ -187,7 +188,7 @@ sema_public_api_row_name: fn(name: String, prefix: String, modules: [String:Bool
 sema_public_api_lifted_name: fn(name: String, prefix: String, modules: [String:Bool]) -> String? Never! {
     if name.starts_with("__jet_") {
         decoded: sema_inline_decode_generated_suffix(String.from_bytes(name.bytes()[6..<name.bytes().len()]) ?? "") ?? return None
-        if !decoded.contains(".") || sema_inline_generated_path(decoded) != name -> return None
+        if !decoded.contains(".") || ast_comptime_generated_path(decoded) != name -> return None
         segments: decoded.split(".").to_list()
         module_path := segments[0].copy()
         loop index in 1..<segments.len() - 1 -> module_path = "{module_path}.{segments[index]}"

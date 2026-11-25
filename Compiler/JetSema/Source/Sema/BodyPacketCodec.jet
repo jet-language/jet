@@ -933,21 +933,25 @@ body_codec_put_semasendproblemkind: fn(out: ^BodyCodecOut, value: SemaSendProble
             body_codec_put_tag(out, 4)
             body_codec_put_string(out, p0)
         }
-        .LocalReactive(p0) -> {
+        .DeclaredLocal(p0) -> {
             body_codec_put_tag(out, 5)
             body_codec_put_string(out, p0)
         }
-        .ViewBorrow -> { body_codec_put_tag(out, 6) }
-        .SharedMutation -> { body_codec_put_tag(out, 7) }
+        .LocalReactive(p0) -> {
+            body_codec_put_tag(out, 6)
+            body_codec_put_string(out, p0)
+        }
+        .ViewBorrow -> { body_codec_put_tag(out, 7) }
+        .SharedMutation -> { body_codec_put_tag(out, 8) }
         .UnknownType(p0) -> {
-            body_codec_put_tag(out, 8)
+            body_codec_put_tag(out, 9)
             body_codec_put_string(out, p0)
         }
     }
 }
 
 body_codec_get_semasendproblemkind: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaSendProblemKind Never! {
-    position: body_codec_get_tag(bytes, input, 9, 0)
+    position: body_codec_get_tag(bytes, input, 10, 0)
     if position == {
         1 -> SemaSendProblemKind.ClosureCaptures
         2 -> SemaSendProblemKind.CallableValue
@@ -961,11 +965,15 @@ body_codec_get_semasendproblemkind: fn(bytes: [U8], input: ^BodyCodecIn) -> Sema
         }
         5 -> {
             f0: body_codec_get_string(bytes, input)
+            SemaSendProblemKind.DeclaredLocal{key: f0}
+        }
+        6 -> {
+            f0: body_codec_get_string(bytes, input)
             SemaSendProblemKind.LocalReactive{name: f0}
         }
-        6 -> SemaSendProblemKind.ViewBorrow
-        7 -> SemaSendProblemKind.SharedMutation
-        8 -> {
+        7 -> SemaSendProblemKind.ViewBorrow
+        8 -> SemaSendProblemKind.SharedMutation
+        9 -> {
             f0: body_codec_get_string(bytes, input)
             SemaSendProblemKind.UnknownType{name: f0}
         }

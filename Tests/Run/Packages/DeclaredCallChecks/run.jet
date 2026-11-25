@@ -1,0 +1,19 @@
+// The package's route table and lease are refused where Core's own would be:
+// an interpolated route, two routes one address matches, a route method only
+// the run knows, and a forced lease, each with its Core diagnostic.
+use routes
+
+register: fn(table: routes.Routes, method: String) {
+    print(table.custom(method, "/cache", "purge"))
+}
+
+run: fn() {
+    table: routes.Routes{name: "shop"}
+    id: "7"
+    print(table.get("/users/{id}", "show"))
+    print(table.get("/a/:id", "a"))
+    print(table.get("/a/:name", "b"))
+    register(table, "PURGE")
+    lease: routes.Lease{holder: "ana"}
+    print(lease.force())
+}

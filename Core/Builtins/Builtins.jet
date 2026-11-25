@@ -506,6 +506,19 @@ Word: struct<bits: Int> {}
 
 FloatWord: struct<exponent: Int, fraction: Int> {}
 
+// The carriers the compiler types and lowers itself, declared `priv` and by
+// arity alone, so a bare `Atomic<Int>` still names the compiler's type and
+// never this declaration. Its facts are the markers written here, which the
+// compiler reads while it builds
+// (Compiler/JetFoundation/Source/Registry/BuiltinCarriers.jet): a
+// `#MoveOnly` value moves and never copies, and a `#Local` one stays on the
+// thread that made it. Each marker goes on the line right above its type.
+#MoveOnly
+priv Atomic: struct<T> {}
+
+#MoveOnly
+priv ViewMut: struct<T> {}
+
 // The test harness's evidence and temporary-directory operations
 // (jet.runtime.testing's, behind `core.testing`'s snap, golden, fixture and
 // temp_dir): plain records of physical facts, not raw-codec tuples.

@@ -149,7 +149,10 @@ sema_comptime_local_value_holds_callback_bound: fn(check: SemaBodyCheck, node_st
 }
 
 // A value a build can't hand to the running program: nothing, a function, a
-// shared cell, a trait object, or a collection or option of one.
+// shared cell, a trait object, a task or channel endpoint (whose scheduler
+// state lives only in the run that made it: computing `worker: task f()`
+// would start `f` inside the compiler's comptime child, where it runs on
+// and stops it mid-build), or a collection, option or tuple of one.
 sema_comptime_local_value_unstorable: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Fn(_, _, _, _, _, _) | .Shared(_) | .TraitObject(_) -> true
@@ -157,7 +160,14 @@ sema_comptime_local_value_unstorable: fn(ty: Type) -> Bool Never! {
         .Option(inner) -> sema_comptime_local_value_unstorable(inner)
         .Map(_, _, value) -> sema_comptime_local_value_unstorable(value)
         .Named(name) -> name == "Unit"
-        .Int | .Float | .Bool | .String | .Char | .Result(_, _) | .Apply(_, _) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
+        .Apply(name, _) -> sema_registration_core_builtin_is_name(name)
+        .Tuple(fields) -> {
+            loop field in fields {
+                if sema_comptime_local_value_unstorable(field.ty) -> return true
+            }
+            false
+        }
+        .Int | .Float | .Bool | .String | .Char | .Result(_, _) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 

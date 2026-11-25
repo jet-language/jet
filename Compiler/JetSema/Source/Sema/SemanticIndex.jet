@@ -16,6 +16,7 @@ use jet_foundation.[
     name_intern,
     name_table,
     NameTable,
+    InternerDelta,
     ArithmeticMode,
     ArithmeticOperation,
     ArithmeticPolicyFact,
@@ -323,9 +324,19 @@ sema_compiler_index_definition_kind: fn(symbol: Symbol, registration: SemaRegist
 // is registered in this compilation, so every type it names has a TypeId.
 sema_compiler_index_type_id_option: fn(registration: SemaRegistrationGraph, caller: Int, ty: Type?) -> TComptimeValue {
     if ty == .Val(value) {
-        return sema_comptime_reflection_some(sema_comptime_reflection_type_id(registration, caller, value))
+        return sema_comptime_reflection_some(sema_compiler_index_type_id(registration, caller, value))
     }
     sema_comptime_reflection_none(Type.Named{name: "TypeId"})
+}
+
+// The TypeId of `ty`, written in the module at row `caller`. The graph is
+// read-only here, so a type it has no row for keeps no handle
+// (sema_comptime_reflection_drop_types).
+sema_compiler_index_type_id: fn(registration: SemaRegistrationGraph, caller: Int, ty: Type) -> TComptimeValue {
+    types := [InternerDelta]{}
+    value := sema_comptime_reflection_type_id(registration, types, caller, ty)
+    sema_comptime_reflection_drop_types(value, types)
+    value
 }
 
 sema_compiler_index_parameter_values: fn(registration: SemaRegistrationGraph, caller: Int, parameters: [SemaRegistrationParameter]) -> TComptimeValue {
@@ -336,7 +347,7 @@ sema_compiler_index_parameter_values: fn(registration: SemaRegistrationGraph, ca
                 type_name: "CompilerParam",
                 fields: [TComptimeField]{
                     TComptimeField{name: "name", value: sema_compiler_index_string(parameter.name)},
-                    TComptimeField{name: "type", value: sema_comptime_reflection_type_id(registration, caller, parameter.ty)},
+                    TComptimeField{name: "type", value: sema_compiler_index_type_id(registration, caller, parameter.ty)},
                 },
             },
         )
@@ -376,7 +387,7 @@ sema_compiler_index_symbol_kind: fn(registration: SemaRegistrationGraph, caller:
                             type_name: "CompilerField",
                             fields: [TComptimeField]{
                                 TComptimeField{name: "name", value: sema_compiler_index_string(field.symbol.name)},
-                                TComptimeField{name: "type", value: sema_comptime_reflection_type_id(registration, caller, field.ty)},
+                                TComptimeField{name: "type", value: sema_compiler_index_type_id(registration, caller, field.ty)},
                             },
                         },
                     )
@@ -699,7 +710,7 @@ sema_compiler_index_output_value: fn(output: ResolvedOutput, binding: ConstDef, 
     registered_module: registration.modules[caller]
     target_row: if output.module_id >= 0 && output.module_id < registration.modules.len() -> output.module_id else -> caller
     target_module: registration.modules[target_row]
-    params: loop parameter in output.params -> sema_comptime_reflection_type_id(registration, target_row, parameter.ty)
+    params: loop parameter in output.params -> sema_compiler_index_type_id(registration, target_row, parameter.ty)
     effects := output.effects
     TComptimeValue.Struct{
         type_name: "CompilerOutput",

@@ -171,8 +171,8 @@ a readiness event. Percentiles are exactly `P50`, `P90`, `P95`, `P99`, and
 
 The value families are `Duration` (`ns`, `us`, `ms`, `s`), `Bytes` (`B`,
 `KiB`, `MiB`, `GiB`), `Percent` (`pct`), nonnegative integer `Count`, and
-`Rate{ count: Int, per: Duration }`. These suffixes are reserved in
-`Syntax.rs`. Source quantities normalize to unsigned integer nanoseconds,
+`Rate{ count: Int, per: Duration }`. These suffixes are reserved by the
+Prelude's unit families (`Compiler/Prelude/Units.jet`). Source quantities normalize to unsigned integer nanoseconds,
 bytes, counts, or exact rate rationals. Overflow, fractional bytes or counts,
 negative values, NaN, infinity, and runtime expressions are rejected. The
 same typed values feed beginner and expert forms; a metric-key mini-language
@@ -255,7 +255,7 @@ Each compile candidate records source-tree and patch identities, cache
 scenario, compiler/Core digests, target, profile, backend, linker, host, one
 fixed warmup, twenty samples, process CPU-time variance, peak RSS, workload
 bytes, edit bytes, and resident-compiler phase totals. Every profile uses the
-production rustc AOT build (D-EXEC2=A). Missing or changed inputs, unsupported targets, incompatible
+production native AOT build (D-EXEC2=A). Missing or changed inputs, unsupported targets, incompatible
 identities, partial timing, unsupported profiles, provider crashes, and
 deadlines are unavailable evidence or operation failures, never passes. The
 resident fixture accepts `dev`, `release`, `debug`, `ci`, and `small`, plus
@@ -734,7 +734,7 @@ warning-only output, canceled plans, non-TTY/JSON plan-only output, and
 successful or idempotent mutation. USER_ERROR=1 covers budget, evidence,
 compiler, and tool failure. USAGE=2 covers command, flag, argument, and
 combination errors. RUNTIME_PANIC=70 never comes from budget tooling. ICE=101
-is reserved for an impossible invariant or rustc exposure; malformed source,
+is reserved for an impossible invariant; malformed source,
 bad data, unavailable providers, and statistical outcomes are not ICEs.
 JSON `failure_kind` distinguishes the shared exit 1; human copy distinguishes
 the diagnostic or summary. Signals retain OS behavior.
@@ -748,7 +748,7 @@ BudgetSpec; E2907 severity follows Warn/Fail. E2908 covers corrupt or
 non-canonical artifacts, provider protocol/execution failures,
 CAS/permission/filesystem/report-write refusal, and disallowed updates. Its
 What is always `performance budget operation failed`, never a
-baseline-specific message. Tool diagnostics never come from rustc.
+baseline-specific message.
 
 The `I4` copy is:
 

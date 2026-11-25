@@ -1,0 +1,58 @@
+use core.mem
+
+// A package's own generic resource: each instance runs its Close once,
+// whether `close(…)` consumes the value or its scope ends.
+Box: struct<T> {
+    label: String,
+    value: T,
+    impl Close {
+        close: fn(^^self) {
+            print("closed {self.label}")
+        }
+    }
+}
+
+// An empty Close still makes a generic type a resource.
+Quiet: struct<T> {
+    value: T,
+    impl Close {
+        close: fn(^^self) {}
+    }
+}
+
+boxed_closed: fn() {
+    numbers: Box<Int>{label: "numbers", value: 1}
+    print("numbers holds {numbers.value}")
+    close(numbers)
+    print("after close")
+}
+
+boxed_dropped: fn() {
+    words: Box<String>{label: "words", value: "two"}
+    print("words holds {words.value}")
+}
+
+// Core's slot allocator `mem.Pool` has an empty Close: its handle's drop
+// frees the slots once, whether `close(…)` consumes it or its scope ends.
+pooled_closed: fn() {
+    pool: mem.Pool.new(slots: 4)
+    three: pool.alloc(3)
+    print(three)
+    close(pool)
+}
+
+pooled_dropped: fn() {
+    pool: mem.Pool.new(slots: 2)
+    four: pool.alloc(4)
+    print(four)
+}
+
+run: fn() {
+    boxed_closed()
+    boxed_dropped()
+    quiet: Quiet<Int>{value: 5}
+    print("quiet holds {quiet.value}")
+    close(quiet)
+    pooled_closed()
+    pooled_dropped()
+}

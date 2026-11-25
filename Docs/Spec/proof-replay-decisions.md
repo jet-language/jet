@@ -108,8 +108,8 @@ honest.
 
 **Consequence.** After a valid invocation, exit precedence is ICE 101, runtime
 stop 70, user/static/caught-assertion/budget/policy failure 1, then success 0.
-Malformed CLI remains 2. No view may expose raw rustc text, generated-Rust
-paths, a backtrace, or an implementation-only type name. A reached contract is
+Malformed CLI remains 2. No view may expose raw back-end text, a backtrace, or
+an implementation-only type name. A reached contract is
 attached to the producer invocation that called it; an unreached clause is
 `declared` and `not_observed`.
 
@@ -183,7 +183,7 @@ metadata, not a second evidence model. Human output projects the same report.
 Front-end and producer diagnostics preserve What, Why, Fix, source span, source
 line, and caret. Runtime E3001 and E3005 preserve the Jet message, Jet span and
 caret, ordered Jet frames, source context, and D-OBS2 safe locals
-`{name,type,value,redacted}`. No diagnostic contains rustc material.
+`{name,type,value,redacted}`. No diagnostic contains back-end material.
 
 **Reason.** A proof receipt must remain useful after the producer process exits,
 and a user must be able to act on the Jet source location rather than an
@@ -221,7 +221,7 @@ inspection flag exists.
 The source writer's concrete envelope uses `schema:"jet.jproof"`,
 `version:2`, `consumed`, `produced`, and `links_version:1` beside the
 `proofReport`. Those links are delivery metadata and do not change report
-identity. Proof links use `RecordKind::Proof` in
+identity. Proof links use the `proof` record kind in
 `.jet/records/index.jsonl`. Test evidence is written as a typed report under
 `.jet/evidence/<artifact-id>.json`.
 The envelope contains the complete `ProofReport` and its `report_id`. Version 2 separately
@@ -505,7 +505,7 @@ rendered What for E3623 is `Replay diverged from captured authority`).
 The replay receipt index is `.jet/records/index.jsonl`, keyed by target input
 hash, tool version, and execution engine. Saved replay bytes use
 `.jet/records/saved/<artifact_id>`; ordinary artifacts retain the
-`.jetproof-replay` suffix. These paths and the `RecordKind::Replay` links are
+`.jetproof-replay` suffix. These paths and the `replay` record-kind links are
 source-owned receipt mechanisms, not a second replay format. The index is
 per-machine cache and the saved bytes are project-owned; see the `.jet/` layout
 in [jetpack-epoch5.md](Reference/jetpack-epoch5.md).
@@ -516,8 +516,8 @@ in [jetpack-epoch5.md](Reference/jetpack-epoch5.md).
 TARGET` never runs it. Sema remains authoritative for compilation, user
 rejections, and diagnostics; the solver consumes immutable typed obligations
 exported after sema. It cannot parse source as an authority, add syntax, relax a
-rejection, alter the checked program or codegen, or ask rustc whether code works. It is a
-standard-library-only path producer with no external crate, daemon, network
+rejection, alter the checked program or codegen, or ask a back end whether code works. It is a
+standard-library-only path producer with no external package, daemon, network
 call, executable, or compiler dependency. (D-WD12) (D-OOBPROOF1)
 
 **Reason.** Proof must discharge facts Jet already understands, not create a
@@ -587,8 +587,8 @@ Native-finite certificates carry `domainManifest`, `assignmentCount`, and
 `rollingResultSha256`. `certificateSha256` hashes A-canonical certificate JSON
 plus LF. `disproved` requires a concrete integer assignment that satisfies all
 assumptions and falsifies the claim. An invalid certificate or counterexample
-is ICE 101. There is no fallback to execution, property tests, another backend,
-or rustc.
+is ICE 101. There is no fallback to execution, property tests, or another
+backend.
 
 **Reason.** A proof claim is stronger than a sampled test. Independent checking
 makes the producer's output auditable, while a concrete counterexample keeps a

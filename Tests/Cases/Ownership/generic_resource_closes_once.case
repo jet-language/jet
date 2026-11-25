@@ -1,0 +1,20 @@
+# A generic type's `impl Close` is built for each instance its values spell,
+# like any generic method: a package's own `Box<T>` closes once, whether
+# `close(…)` consumes it or its scope ends, and an empty Close lowers too.
+# Core's slot allocator `mem.Pool` is not generic (the generic `Pool<T>` is
+# the ambient store, a separate type), so its empty Close lowers as declared
+# and its handle's drop frees the slots once, closed or dropped.
+fixture: CoreResourceClosesOnce.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+write: run.jet generic_resource_closes_once.run.jet
+step o0: jet run -O0 run.jet
+exit: 0
+stdout: = "numbers holds 1\nclosed numbers\nafter close\nwords holds two\nclosed words\nquiet holds 5\n3\n4\n"
+step o1: jet run -O1 run.jet
+exit: 0
+stdout: = "numbers holds 1\nclosed numbers\nafter close\nwords holds two\nclosed words\nquiet holds 5\n3\n4\n"
+step o2: jet run -O2 run.jet
+exit: 0
+stdout: = "numbers holds 1\nclosed numbers\nafter close\nwords holds two\nclosed words\nquiet holds 5\n3\n4\n"

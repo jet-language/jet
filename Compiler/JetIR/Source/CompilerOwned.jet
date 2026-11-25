@@ -239,6 +239,14 @@ ir_compiler_owned_core_fields: fn() -> IRCompilerOwnedCore Never! {
         if owner == "MarkerArgInfo" {
             row.push(TypeTupleField{name: "value", ty: Type.Named{name: IR_MARKER_ARG_VALUE}})
         }
+        // A TypeId's handle, its type's row, and the table that issued it
+        // (JetFoundation comptime_type_id): no program reads them, but the
+        // compiler reads a TypeId back by its row, so every TypeId carries
+        // both as words.
+        if owner == "TypeId" {
+            row.push(TypeTupleField{name: "handle", ty: Type.Int})
+            row.push(TypeTupleField{name: "table", ty: Type.Int})
+        }
         out.fields.push(row)
     }
     out

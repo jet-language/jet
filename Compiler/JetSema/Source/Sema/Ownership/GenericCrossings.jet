@@ -137,7 +137,7 @@ sema_generic_crossing_diagnostic: fn(call: SemaGenericCall, argument: SemaGeneri
     reason := if crossing.crossing == SemaSendCrossing.ParallelWorker || crossing.crossing == SemaSendCrossing.Kernel -> "this concurrent boundary moves owned values between workers" else -> "tasks and channels move owned values between threads"
     fix := if problem.kind == {
         .ClosureNeedsTake -> "have `{call.name}` give the closure away with `.move()` where it moves `{argument.param}` {boundary}, or pass plain owned data"
-        .ClosureCaptures | .CallableValue | .TraitValue(_) | .ThreadConfined(_) | .LocalReactive(_) | .ViewBorrow | .SharedMutation | .UnknownType(_) -> "call `{call.name}` with plain owned data, or share state through `Shared<T>`"
+        .ClosureCaptures | .CallableValue | .TraitValue(_) | .ThreadConfined(_) | .DeclaredLocal(_) | .LocalReactive(_) | .ViewBorrow | .SharedMutation | .UnknownType(_) -> "call `{call.name}` with plain owned data, or share state through `Shared<T>`"
     }
     sema_error(
         "E1102",

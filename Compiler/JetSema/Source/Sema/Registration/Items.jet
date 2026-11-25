@@ -93,6 +93,7 @@ use {
         Stmt,
         VariantPayload,
         ast_program,
+        ast_comptime_generated_path,
         compiler_apply_order,
         compiler_threads_admit,
         compiler_threads_joined,
@@ -106,6 +107,8 @@ use {
         core_module_has_type,
         core_record_literal_fields,
         core_source_owns_type,
+        core_identity_is,
+        CORE_BUILTINS_MODULE,
         expr_span,
         core_bare_source_module,
         ir_runtime_handle_row,
@@ -3021,7 +3024,7 @@ sema_registration_original_error_module: fn(module_table: ^ModuleTable) -> SemaR
     SemaRegistrationModuleInput{
         package_identity: "jet:canonical-prelude",
         module_identity: module_intern(module_table, path),
-        module_name: sema_inline_generated_path(path),
+        module_name: ast_comptime_generated_path(path),
         core_source_alias: "",
         module_path: "Prelude/Errors.jet",
         source_file: path,
@@ -3059,7 +3062,7 @@ sema_registration_rule_module: fn(module_table: ^ModuleTable) -> SemaRegistratio
     SemaRegistrationModuleInput{
         package_identity: "jet:canonical-prelude",
         module_identity: module_intern(module_table, path),
-        module_name: sema_inline_generated_path(path),
+        module_name: ast_comptime_generated_path(path),
         core_source_alias: "",
         module_path: "Prelude/Rules.jet",
         source_file: path,
@@ -3078,7 +3081,7 @@ sema_registration_rule_module: fn(module_table: ^ModuleTable) -> SemaRegistratio
 // trusted.
 sema_registration_retain_original_error_module: fn(inputs: ^[SemaRegistrationModuleInput], module_table: ^ModuleTable, diagnostics: ^[Diagnostic]) {
     path: SEMA_PRELUDE_ERROR_SOURCE_PATH
-    alias: sema_inline_generated_path(path)
+    alias: ast_comptime_generated_path(path)
     owners := 0
     loop input in inputs {
         retained := false
@@ -3539,7 +3542,9 @@ sema_registration_declared_item: fn(item: Item) -> Item Never! {
 }
 
 // E0106: a struct, enum, distinct type or type alias named like a built-in
-// type is rejected before the declaration registers.
+// type is rejected before the declaration registers. Core's builtins door
+// (`jet_builtins`) is where a builtin carrier is declared, so its own
+// declaration of the name stands.
 sema_registration_reserved_type_rule: fn(module_text: String, item: Item, name: String, diagnostics: ^[Diagnostic]) -> Bool {
     kind: if item == {
         .Struct(_) -> "struct"
@@ -3551,7 +3556,7 @@ sema_registration_reserved_type_rule: fn(module_text: String, item: Item, name: 
     if kind == "" || !sema_reserved_type_name(name) -> return true
     // `item` is the loaded declaration; canonical identity supplies the exact
     // source path and name from CORE_SOURCE_OWNED_TYPES, never the export superset.
-    if core_source_owns_type("{module_text}.{name}") -> return true
+    if core_source_owns_type("{module_text}.{name}") || core_identity_is("{module_text}.{name}", CORE_BUILTINS_MODULE, name) -> return true
     diagnostics.push(sema_error("E0106", sema_registration_root_span(item), "the name `{name}` is built in and can't be redefined", "`{name}` is provided by the language itself", "choose a different name for this {kind}"))
     false
 }

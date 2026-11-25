@@ -1,0 +1,46 @@
+use {
+    files: core.files
+}
+
+// `close(writer)` runs the writer's Close, then its drop flushes and closes
+// the file once.
+write_closed: fn(path: String) -> String {
+    writer := files.create(path.copy()) ?? return "create failed"
+    _written: writer.write_line("one")
+    close(writer)
+    (files.read(path) ?? "<none>").trim().copy()
+}
+
+// The scope's end runs the same Close and drop.
+write_dropped: fn(path: String) -> String {
+    writer := files.create(path.copy()) ?? return "create failed"
+    _written: writer.write_line("two")
+    "written"
+}
+
+lock_closed: fn(path: String) -> String {
+    lock: files.lock(path) ?? return "lock failed"
+    close(lock)
+    "taken"
+}
+
+// `try_lock` is None while another owner holds the lock, so a lock the last
+// owner never released reads "still held".
+lock_dropped: fn(path: String) -> String {
+    _lock: files.try_lock(path) ?? return "still held"
+    "taken again"
+}
+
+lock_third: fn(path: String) -> String {
+    _lock: files.try_lock(path) ?? return "still held"
+    "taken a third time"
+}
+
+run: fn() {
+    print("closed: {write_closed("{work}/closed.txt")}")
+    _: write_dropped("{work}/dropped.txt")
+    print("dropped: {(files.read("{work}/dropped.txt") ?? "<none>").trim()}")
+    print("lock: {lock_closed("{work}/held.lock")}")
+    print("lock: {lock_dropped("{work}/held.lock")}")
+    print("lock: {lock_third("{work}/held.lock")}")
+}

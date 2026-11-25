@@ -424,6 +424,8 @@ priv QueryState: struct {
 // reader's stream keeps that reader's limits, every other source starts at
 // `DataLimits.safe()`, and each derived query inherits its source's.
 // `__take`, set by `limit`, is how many of its cell's rows it gives.
+// `__live` is how a watch maintains the query's rows (QueryLive); None when
+// no watch can.
 Query: struct<T> {
     __steps: [String],
     __one_shot: Bool,
@@ -431,6 +433,7 @@ Query: struct<T> {
     __state: Shared<QueryState>,
     __cell: Shared<QueryCell<T>>,
     __take: Int?,
+    __live: Shared<QueryLive<T>>?,
 
     // The first `count` rows the query gives, in its order; a count below
     // one gives none. A table's query gives the rows its row policy let the
@@ -439,12 +442,25 @@ Query: struct<T> {
     // the source reads, without a filter after it narrowing that read.
     limit: fn(self, count: Int) -> Query<T> Never! {
         most: if self.__take == .Val(held) && held < count -> held else -> count
-        Query<T>{__steps: query_steps(self.__steps, "limit"), __one_shot: self.__one_shot, __limits: self.__limits.copy(), __state: self.__state.copy(), __cell: self.__cell.copy(), __take: Val(most)}
+        live: query_live_derived<T, T>(self, fn(entries: [WatchEntry<T>]) {
+            out := [WatchEntry<T>]{}
+            loop entry in entries {
+                if out.len() >= most -> break
+                out.push(entry.copy())
+            }
+            Ok(out)
+        })
+        Query<T>{__steps: query_steps(self.__steps, "limit"), __one_shot: self.__one_shot, __limits: self.__limits.copy(), __state: self.__state.copy(), __cell: self.__cell.copy(), __take: Val(most), __live: live}
     }
 
     // The steps the query runs, from its source on (`"scan"`, `"filter"`,
     // `"sql"`, …).
     plan: fn(self) -> [String] Never! { self.__steps.copy() }
+
+    // A watch over the query (DataWatch), which keeps its rows and maintains
+    // them from the edits of the `data.track` rows the query reads. Only
+    // such a query can be watched.
+    watch: fn(self) -> DataWatch<T> DataError! { query_watch<T>(self) }
 
     // Grouped row counts over an `Int` key: runs a single SQL `GROUP BY` query
     // when `column` names a table's field column and the source supports SQL
@@ -557,8 +573,17 @@ Query: struct<T> {
     }
 }
 
+// A row callback that a query's batch run and its watch both call: a
+// filter's predicate, a sort or join key, a projection, a group key or a
+// group value. It sits in a Shared cell because a function value cannot be
+// copied.
 priv QueryKeyCell: struct<T, K> {
     key: fn(T) -> K DataError!,
+}
+
+// A grouped sum's addition, shared the same way.
+priv QueryAddCell: struct<V> {
+    add: fn(V, V) -> V DataError!,
 }
 
 // `query.group_by(key)`: the grouped carrier its count/sum/mean reducers read.
@@ -567,16 +592,171 @@ DataGroupedQuery: struct<T, K> {
     __key: Shared<QueryKeyCell<T, K>>,
 }
 
-DataTracked: struct<T, K> {
-    snapshot: DataSnapshot<[T]>,
+// `data.track(rows, key)`: owned rows with unique keys, changed in place by
+// `insert`, `replace` and `remove`. The table is shared, so a query over it
+// reads the rows as they are when it runs, and a watch of that query
+// maintains its result from the table's changes (D-QUERY-LIVE1).
+DataTracked: struct<T, K: Comparable> {
+    __table: Shared<TrackedTable<T, K>>,
 
-    // A reusable scan of the tracked snapshot rows.
+    // A reusable scan of the tracked rows, in the order they were added.
     query: fn(self) -> Query<T> Never! { __query_tracked<T, K>(self) }
+
+    // Adds `row`, whose key must not be tracked yet.
+    insert: fn(self, row: T) DataError! { tracked_insert<T, K>(self, row) }
+
+    // Replaces the row tracked under `key` with `row`, whose own key must be
+    // `key`: a replace never adds a row.
+    replace: fn(self, key: K, row: T) DataError! { tracked_replace<T, K>(self, key, row) }
+
+    // Removes the row tracked under `key`.
+    remove: fn(self, key: K) DataError! { tracked_remove<T, K>(self, key) }
 }
 
+// A tracked table's rows: `keys[i]` is the key of `rows[i]` and `orders[i]`
+// its stamp, which a row keeps from its insert to its removal; stamps only
+// grow, so the rows are in stamp order. `by_key` holds the positions sorted
+// by key, so a lookup is a binary search (group_find). Each edit is the
+// table's next `revision` and logs one change (tracked_log).
+priv TrackedTable: struct<T, K> {
+    rows: [T],
+    keys: [K],
+    by_key: [Int],
+    orders: [Int],
+    next_order: Int,
+    revision: Int,
+    changes: [TrackedChange<T>],
+    key: fn(T) -> K DataError!,
+}
+
+// One edit of a tracked table: from `revision` on, the row stamped `order`
+// is `row`, or is gone when `row` is None. An insert, a replace and a remove
+// are each one change.
+priv TrackedChange: struct<T> {
+    revision: Int,
+    order: Int,
+    row: T?,
+}
+
+// A tracked table as a watch reads it, without its key type: `snapshot`
+// reads every row, `changes` the changes after a revision (TrackedDelta).
+priv TrackedReader: struct<T> {
+    snapshot: fn() -> TrackedSnapshot<T> Never!,
+    changes: fn(Int) -> TrackedDelta<T> DataError!,
+}
+
+priv TrackedSnapshot: struct<T> {
+    revision: Int,
+    orders: [Int],
+    rows: [T],
+}
+
+// The changes after a revision, oldest first, up to the table's `revision`.
+// `complete` is false when the table's log no longer holds them all.
+priv TrackedDelta: struct<T> {
+    revision: Int,
+    retained_rows: Int,
+    complete: Bool,
+    changes: [TrackedChange<T>],
+}
+
+// How a watch maintains a query's rows (D-QUERY-LIVE1, #2964). A query over
+// a tracked table that only filters and sorts has the table's `reader` and
+// its `steps`, and a watch applies each change to the rows it holds
+// (watch_tracked); a grouped reducer over such a query maintains its groups
+// the same way (watch_group). Every other maintained query (`map`, `min`,
+// `max`, `limit`, a join with a maintained side, and a filter or sort after
+// one of them) has `derived`, whose source derives its result again from
+// its input's maintained result when that changed (watch_derived,
+// watch_join).
+priv QueryLive: struct<T> {
+    reader: Shared<TrackedReader<T>>?,
+    steps: [WatchStep<T>],
+    derived: Shared<WatchFactory<T>>?,
+}
+
+// A filter (`keep`) or a sort (`key`) over a tracked table's rows.
+priv WatchStep: struct<T> {
+    keep: Shared<QueryKeyCell<T, Bool>>?,
+    key: Shared<QueryKeyCell<T, String>>?,
+}
+
+// Makes the source of a new watch; None when its input has none.
+priv WatchFactory: struct<T> {
+    make: fn() -> WatchSource<T>? Never!,
+}
+
+priv WatchDerive: struct<S, T> {
+    run: fn([WatchEntry<S>]) -> [WatchEntry<T>] DataError!,
+}
+
+priv WatchJoin: struct<T, U, O> {
+    run: fn([T], [U]) -> [O] DataError!,
+}
+
+// One row of a maintained result. `order` is the stamp of its tracked row
+// (a position, in a derived result) and `keys` the sort keys that place it,
+// last sort first (watch_before).
+priv WatchEntry: struct<T> {
+    order: Int,
+    keys: [String],
+    value: T,
+}
+
+// A source's result at `revision`. An unchanged result has no entries: its
+// holder keeps the ones it has. `commit` records the result as the base of
+// the source's next refresh; a watch runs it only when it publishes the
+// result, so a failed refresh leaves every source where it was.
+priv WatchView: struct<T> {
+    entries: [WatchEntry<T>],
+    revision: Int,
+    mode: String,
+    recomputed: Bool,
+    changed: Bool,
+    retained_rows: Int,
+    commit: fn() Never!,
+}
+
+// `refresh(revision, prior)` brings `prior`, the result published at
+// `revision`, up to the source's current revision.
+priv WatchSource: struct<T> {
+    initial: fn() -> WatchView<T> DataError!,
+    refresh: fn(Int, [WatchEntry<T>]) -> WatchView<T> DataError!,
+}
+
+// A watch's published result and lifecycle. `publications` counts the
+// writes, so a refresh publishes only over the state it started from.
+priv WatchState: struct<T> {
+    entries: [WatchEntry<T>],
+    revision: Int,
+    mode: String,
+    retained_rows: Int,
+    recomputations: Int,
+    generation: Int,
+    publications: Int,
+    dirty: Bool,
+    error: String,
+    invalidation_cause: String,
+    canceled: Bool,
+    max_output_rows: Int,
+}
+
+// `query.watch()`: the query's rows, kept and maintained from the changes of
+// the tracked table under it (QueryLive). `get` brings them up to the
+// table's revision: with no change since the last get it answers the kept
+// rows without running a callback, and otherwise it applies each change to
+// them. A refresh publishes all of its result or none: a failure keeps the
+// published rows and their revision, marks the watch dirty and records the
+// error. `cancel` ends the watch: a later `get` fails.
 DataWatch: struct<T> {
-    query: Query<T>,
-    status: DataWatchStatus,
+    __source: Shared<WatchSource<T>>,
+    __state: Shared<WatchState<T>>,
+
+    get: fn(self) -> [T] DataError! { watch_get<T>(self) }
+
+    status: fn(self) -> DataWatchStatus Never! { watch_status<T>(self) }
+
+    cancel: fn(self) Never! { watch_cancel<T>(self) }
 }
 
 #Comparable
@@ -870,8 +1050,121 @@ JetDataPlotPlan: struct {
     schema: JetDataPlotSchema,
 }
 
-track: fn<T, K>(rows: [T], _key: fn(T) -> K) -> DataTracked<T, K> DataError! {
-    Ok(DataTracked<T, K>{snapshot: snapshot_from_rows<T>(rows)})
+// The rows of `rows` tracked under `key`; two rows with one key fail, and so
+// do more rows than `max_output_rows`.
+track: fn<T, K: Comparable>(rows: [T], key: ^^fn(T) -> K) -> DataTracked<T, K> DataError! {
+    limit: DataLimits.safe().max_output_rows
+    if rows.len() > limit {
+        return Err(data_error(DataErrorKind.Limit, "{rows.len()} rows exceed max_output_rows {limit}", "data.track"))
+    }
+    table := TrackedTable<T, K>{
+        rows: [T]{},
+        keys: [K]{},
+        by_key: [Int]{},
+        orders: [Int]{},
+        next_order: 0,
+        revision: 0,
+        changes: [TrackedChange<T>]{},
+        key: fn(row: T) {
+            value: key(row) ?? return Err(data_error(DataErrorKind.State, "track key callback failed", "data.track"))
+            Ok(value)
+        },
+    }
+    loop row in rows {
+        value: table.key(row.copy()) ?? return Err(err)
+        found: group_find<K>(table.keys, table.by_key, value)
+        if found >= 0 -> return Err(data_error(DataErrorKind.DuplicateKey, "two rows have the same key", "data.track"))
+        group_add<K>(table.keys, table.by_key, found, value)
+        table.rows.push(row.copy())
+        table.orders.push(table.next_order)
+        table.next_order += 1
+    }
+    Ok(DataTracked<T, K>{__table: Shared{table}})
+}
+
+priv tracked_insert: fn<T, K: Comparable>(tracked: DataTracked<T, K>, row: T) DataError! {
+    table := tracked.__table.guard_edit()
+    key: table.value.key(row.copy()) ?? return Err(err)
+    found: group_find<K>(table.value.keys, table.value.by_key, key)
+    if found >= 0 -> return Err(data_error(DataErrorKind.DuplicateKey, "the key is already tracked", "tracked.insert"))
+    limit: DataLimits.safe().max_output_rows
+    if table.value.rows.len() >= limit {
+        return Err(data_error(DataErrorKind.Limit, "the tracked rows would exceed max_output_rows {limit}", "tracked.insert"))
+    }
+    group_add<K>(table.value.keys, table.value.by_key, found, key)
+    table.value.rows.push(row.copy())
+    order: table.value.next_order
+    table.value.orders.push(order)
+    table.value.next_order += 1
+    tracked_log<T, K>(table.value, order, Val(row.copy()))
+    Ok()
+}
+
+priv tracked_replace: fn<T, K: Comparable>(tracked: DataTracked<T, K>, key: K, row: T) DataError! {
+    table := tracked.__table.guard_edit()
+    found: group_find<K>(table.value.keys, table.value.by_key, key)
+    if found < 0 -> return Err(data_error(DataErrorKind.MissingKey, "the key is not tracked", "tracked.replace"))
+    own: table.value.key(row.copy()) ?? return Err(err)
+    if (own <=> key) != Ordering.Equal {
+        return Err(data_error(DataErrorKind.InvalidValue, "the row's key differs from the key it replaces", "tracked.replace"))
+    }
+    table.value.rows[found] = row.copy()
+    tracked_log<T, K>(table.value, table.value.orders[found], Val(row.copy()))
+    Ok()
+}
+
+priv tracked_remove: fn<T, K: Comparable>(tracked: DataTracked<T, K>, key: K) DataError! {
+    table := tracked.__table.guard_edit()
+    found: group_find<K>(table.value.keys, table.value.by_key, key)
+    if found < 0 -> return Err(data_error(DataErrorKind.MissingKey, "the key is not tracked", "tracked.remove"))
+    order: table.value.orders[found]
+    _: table.value.rows.remove(found, .Slot)
+    _: table.value.keys.remove(found, .Slot)
+    _: table.value.orders.remove(found, .Slot)
+    by_key := [Int]{}
+    loop position in table.value.by_key {
+        if position < found -> by_key.push(position) else if position > found -> by_key.push(position - 1)
+    }
+    table.value.by_key = by_key
+    tracked_log<T, K>(table.value, order, None)
+    Ok()
+}
+
+// Logs an edit as the table's next revision. The log keeps at most
+// `max_output_rows` changes: a full log drops its older half, and a watch
+// whose revision is older than every change left reads the table again
+// (TrackedDelta).
+priv tracked_log: fn<T, K>(table: ^TrackedTable<T, K>, order: Int, row: T?) Never! {
+    limit: DataLimits.safe().max_output_rows
+    count: table.changes.len()
+    if count >= limit {
+        kept := [TrackedChange<T>]{}
+        loop index in (count /% 2)..<count -> kept.push(table.changes[index].copy())
+        table.changes = kept
+    }
+    table.revision += 1
+    table.changes.push(TrackedChange<T>{revision: table.revision, order: order, row: row.copy()})
+}
+
+priv tracked_changes: fn<T, K>(table: Shared<TrackedTable<T, K>>, since: Int) -> TrackedDelta<T> DataError! {
+    held: table.guard_read()
+    revision: held.value.revision
+    if since > revision {
+        return Err(data_error(DataErrorKind.StaleRevision, "the watched revision is newer than the tracked rows", "query.watch"))
+    }
+    count: held.value.changes.len()
+    low := 0
+    high := count
+    loop low < high {
+        middle: low + (high - low) /% 2
+        if held.value.changes[middle].revision <= since -> low = middle + 1 else -> high = middle
+    }
+    complete: since == revision || (low < count && held.value.changes[low].revision == since + 1)
+    changes := [TrackedChange<T>]{}
+    if complete {
+        loop index in low..<count -> changes.push(held.value.changes[index].copy())
+    }
+    Ok(TrackedDelta<T>{revision: revision, retained_rows: held.value.rows.len(), complete: complete, changes: changes})
 }
 
 priv query_make: fn<T>(steps: [String], one_shot: Bool, limits: DataLimits, run: ^^fn() -> [T] DataError!) -> Query<T> Never! {
@@ -883,7 +1176,14 @@ priv query_narrowing: fn<T>(steps: [String], one_shot: Bool, limits: DataLimits,
 }
 
 priv query_narrowing_grouped: fn<T>(steps: [String], one_shot: Bool, limits: DataLimits, run: ^^fn(String, [String]) -> [T] DataError!, count_by: ^^(fn(String, String, [String]) -[DB.Read]> [{key: String, count: Int}]? DataError!)?) -> Query<T> Never! {
-    Query<T>{__steps: steps, __one_shot: one_shot, __limits: limits, __state: Shared{QueryState{consumed: false}}, __cell: Shared{QueryCell<T>{run: run.move(), count_by: count_by.move()}}, __take: None}
+    Query<T>{__steps: steps, __one_shot: one_shot, __limits: limits, __state: Shared{QueryState{consumed: false}}, __cell: Shared{QueryCell<T>{run: run.move(), count_by: count_by.move()}}, __take: None, __live: None}
+}
+
+// `query` maintained by watches as `live` says (QueryLive).
+priv query_live: fn<T>(query: ^^Query<T>, live: ^^Shared<QueryLive<T>>?) -> Query<T> Never! {
+    out := query.move()
+    out.__live = live.move()
+    out
 }
 
 priv query_steps: fn(steps: [String], step: String) -> [String] Never! {
@@ -1249,9 +1549,20 @@ priv stream_windows_ready: fn<K, T>(keys: [K], pending: ^[PendingWindow<T>], wid
 }
 
 // `data.query(tracked)` and `tracked.query()`: a reusable scan of the
-// tracked snapshot rows.
-#Builtin.Role(.QueryTracked) priv __query_tracked: fn<T, K>(tracked: DataTracked<T, K>) -> Query<T> Never! {
-    query_make<T>([String]{"track"}, false, DataLimits.safe(), fn() { Ok(tracked.snapshot.value.copy()) })
+// tracked rows as they are when the query runs.
+#Builtin.Role(.QueryTracked) priv __query_tracked: fn<T, K: Comparable>(tracked: DataTracked<T, K>) -> Query<T> Never! {
+    rows_table: tracked.__table.copy()
+    snapshot_table: tracked.__table.copy()
+    changes_table: tracked.__table.copy()
+    reader: TrackedReader<T>{
+        snapshot: fn() {
+            held: snapshot_table.guard_read()
+            TrackedSnapshot<T>{revision: held.value.revision, orders: held.value.orders.copy(), rows: held.value.rows.copy()}
+        },
+        changes: fn(since: Int) { tracked_changes<T, K>(changes_table, since) },
+    }
+    live: Shared{QueryLive<T>{reader: Val(Shared{reader}), steps: [WatchStep<T>]{}, derived: None}}
+    query_live<T>(query_make<T>([String]{"track"}, false, DataLimits.safe(), fn() { Ok(rows_table.guard_read().value.rows.copy()) }), Val(live))
 }
 
 #Builtin.Role(.QueryCollect) priv __query_collect: fn<T>(query: Query<T>) -> [T] DataError! {
@@ -1268,6 +1579,21 @@ priv stream_windows_ready: fn<K, T>(keys: [K], pending: ^[PendingWindow<T>], wid
 // not write it so, and then `values` is unused (QueryCell). They come before
 // the predicate, which may take the locals they read.
 #Builtin.Role(.QueryFilter) priv __query_filter: fn<T>(query: Query<T>, condition: String, values: [String], predicate: ^^fn(T) -> Bool) -> Query<T> Never! {
+    keep: Shared{QueryKeyCell<T, Bool>{key: fn(row: T) {
+        kept: predicate(row) ?? return Err(data_error(DataErrorKind.State, "filter callback failed", "query.filter"))
+        Ok(kept)
+    }}}
+    batch_keep: keep.copy()
+    derive_keep: keep.copy()
+    live: query_live_step<T>(query, WatchStep<T>{keep: Val(keep), key: None}, fn(entries: [WatchEntry<T>]) {
+        held: derive_keep.guard_read()
+        out := [WatchEntry<T>]{}
+        loop entry in entries {
+            kept: held.value.key(entry.value.copy()) ?? return Err(err)
+            if kept -> out.push(entry.copy())
+        }
+        Ok(out)
+    })
     count_by: if condition != "" && query.__take == None -> {
         source: query.copy()
         filter_condition: condition.copy()
@@ -1279,7 +1605,7 @@ priv stream_windows_ready: fn<K, T>(keys: [K], pending: ^[PendingWindow<T>], wid
             query_count_by_sql<T>(source, column, narrowed, joined)
         })
     } else -> None
-    query_narrowing_grouped<T>(
+    filtered: query_narrowing_grouped<T>(
         query_steps(query.__steps, "filter"),
         false,
         query.__limits.copy(),
@@ -1288,34 +1614,59 @@ priv stream_windows_ready: fn<K, T>(keys: [K], pending: ^[PendingWindow<T>], wid
             joined.extend(bound.copy())
             narrowed: if condition == "" -> outer.copy() else if outer == "" -> condition.copy() else -> "({condition}) AND ({outer})"
             rows: query_read<T>(query, narrowed, joined) ?? return Err(err)
+            held: batch_keep.guard_read()
             out := [T]{}
             loop row in rows {
-                keep: predicate(row.copy()) ?? return Err(data_error(DataErrorKind.State, "filter callback failed", "query.filter"))
-                if keep -> out.push(row.copy())
+                kept: held.value.key(row.copy()) ?? return Err(err)
+                if kept -> out.push(row.copy())
             }
             Ok(out)
         },
         count_by,
     )
+    query_live<T>(filtered, live)
 }
 
 // A stable sort by the String key, bounded by `max_sort_rows`.
 #Builtin.Role(.QuerySortBy) priv __query_sort_by: fn<T>(query: Query<T>, key: ^^fn(T) -> String) -> Query<T> Never! {
-    query_make<T>(query_steps(query.__steps, "sort_by"), false, query.__limits.copy(), fn() {
+    key_cell: Shared{QueryKeyCell<T, String>{key: fn(row: T) {
+        text: key(row) ?? return Err(data_error(DataErrorKind.State, "sort key callback failed", "query.sort_by"))
+        Ok(text)
+    }}}
+    batch_key: key_cell.copy()
+    derive_key: key_cell.copy()
+    derive_limits: query.__limits.copy()
+    live: query_live_step<T>(query, WatchStep<T>{keep: None, key: Val(key_cell)}, fn(entries: [WatchEntry<T>]) {
+        if entries.len() > derive_limits.max_sort_rows {
+            return Err(data_error(DataErrorKind.Limit, "max_sort_rows {derive_limits.max_sort_rows} exceeded", "query.sort_by"))
+        }
+        held: derive_key.guard_read()
+        keys := [String]{}
+        loop entry in entries {
+            text: held.value.key(entry.value.copy()) ?? return Err(err)
+            keys.push(text)
+        }
+        out := [WatchEntry<T>]{}
+        loop index in query_merge_order(keys, false, false) -> out.push(entries[index].copy())
+        Ok(out)
+    })
+    sorted: query_make<T>(query_steps(query.__steps, "sort_by"), false, query.__limits.copy(), fn() {
         rows: query_rows<T>(query) ?? return Err(err)
         limits: query.__limits.copy()
         if rows.len() > limits.max_sort_rows {
             return Err(data_error(DataErrorKind.Limit, "max_sort_rows {limits.max_sort_rows} exceeded", "query.sort_by"))
         }
+        held: batch_key.guard_read()
         keys := [String]{}
         loop row in rows {
-            text: key(row.copy()) ?? return Err(data_error(DataErrorKind.State, "sort key callback failed", "query.sort_by"))
+            text: held.value.key(row.copy()) ?? return Err(err)
             keys.push(text)
         }
         out := [T]{}
         loop index in query_merge_order(keys, false, false) -> out.push(rows[index].copy())
         Ok(out)
     })
+    query_live<T>(sorted, live)
 }
 
 // Whether position `left` stays before position `right`. `sort_by` compares
@@ -1384,36 +1735,78 @@ priv query_merge_order: fn(keys: [String], sql_order: Bool, descending: Bool) ->
 }
 
 #Builtin.Role(.QueryMap) priv __query_map: fn<T, U>(query: Query<T>, mapper: ^^fn(T) -> U) -> Query<U> Never! {
-    query_make<U>(query_steps(query.__steps, "map"), true, query.__limits.copy(), fn() {
+    map_cell: Shared{QueryKeyCell<T, U>{key: fn(row: T) {
+        value: mapper(row) ?? return Err(data_error(DataErrorKind.State, "map callback failed", "query.map"))
+        Ok(value)
+    }}}
+    derive_map: map_cell.copy()
+    live: query_live_derived<T, U>(query, fn(entries: [WatchEntry<T>]) {
+        held: derive_map.guard_read()
+        out := [WatchEntry<U>]{}
+        loop entry in entries {
+            value: held.value.key(entry.value.copy()) ?? return Err(err)
+            out.push(WatchEntry<U>{order: entry.order, keys: [String]{}, value: value})
+        }
+        Ok(out)
+    })
+    mapped: query_make<U>(query_steps(query.__steps, "map"), true, query.__limits.copy(), fn() {
         rows: query_rows<T>(query) ?? return Err(err)
+        held: map_cell.guard_read()
         out := [U]{}
         loop row in rows {
-            value: mapper(row.copy()) ?? return Err(data_error(DataErrorKind.State, "map callback failed", "query.map"))
+            value: held.value.key(row.copy()) ?? return Err(err)
             out.push(value)
         }
         Ok(out)
     })
+    query_live<U>(mapped, live)
 }
 
 // The first minimum or maximum key in row order; an empty query has none.
 priv query_extreme: fn<T, V: Comparable>(query: Query<T>, key: ^^fn(T) -> V, maximum: Bool) -> Query<V> Never! {
     step: if maximum -> "max" else -> "min"
     operation: "query.{step}"
-    query_make<V>(query_steps(query.__steps, step), true, query.__limits.copy(), fn() {
-        rows: query_rows<T>(query) ?? return Err(err)
-        selected := [V]{}
-        loop row in rows {
-            candidate: key(row.copy()) ?? return Err(data_error(DataErrorKind.State, "extreme key callback failed", operation))
-            if selected.len() == 0 -> selected.push(candidate) else {
-                replace: if maximum -> candidate > selected[0] else -> candidate < selected[0]
-                if replace -> selected[0] = candidate
-            }
+    key_operation: operation.copy()
+    key_cell: Shared{QueryKeyCell<T, V>{key: fn(row: T) {
+        found: key(row) ?? return Err(data_error(DataErrorKind.State, "extreme key callback failed", key_operation))
+        Ok(found)
+    }}}
+    derive_key: key_cell.copy()
+    derive_operation: operation.copy()
+    live: query_live_derived<T, V>(query, fn(entries: [WatchEntry<T>]) {
+        held: derive_key.guard_read()
+        candidates := [V]{}
+        loop entry in entries {
+            candidate: held.value.key(entry.value.copy()) ?? return Err(err)
+            candidates.push(candidate)
         }
-        if selected.len() == 0 {
-            return Err(data_error(DataErrorKind.Empty, "empty query has no extreme", operation))
-        }
-        Ok(selected)
+        selected: query_extreme_pick<V>(candidates, maximum, derive_operation) ?? return Err(err)
+        Ok([WatchEntry<V>]{WatchEntry<V>{order: 0, keys: [String]{}, value: selected}})
     })
+    extreme: query_make<V>(query_steps(query.__steps, step), true, query.__limits.copy(), fn() {
+        rows: query_rows<T>(query) ?? return Err(err)
+        held: key_cell.guard_read()
+        candidates := [V]{}
+        loop row in rows {
+            candidate: held.value.key(row.copy()) ?? return Err(err)
+            candidates.push(candidate)
+        }
+        selected: query_extreme_pick<V>(candidates, maximum, operation) ?? return Err(err)
+        Ok([V]{selected})
+    })
+    query_live<V>(extreme, live)
+}
+
+priv query_extreme_pick: fn<V: Comparable>(candidates: [V], maximum: Bool, operation: String) -> V DataError! {
+    if candidates.len() == 0 {
+        return Err(data_error(DataErrorKind.Empty, "empty query has no extreme", operation))
+    }
+    selected := 0
+    loop index in 1..<candidates.len() {
+        replace: if maximum -> candidates[index] > candidates[selected] else -> candidates[index] < candidates[selected]
+        if replace -> selected = index
+    }
+    Ok(candidates[selected].copy())
 }
 
 #Builtin.Role(.QueryMin) priv __query_min: fn<T, V: Comparable>(query: Query<T>, key: ^^fn(T) -> V) -> Query<V> Never! {
@@ -1425,31 +1818,62 @@ priv query_extreme: fn<T, V: Comparable>(query: Query<T>, key: ^^fn(T) -> V, max
 }
 
 #Builtin.Role(.QueryInnerJoin) priv __query_inner_join: fn<T, U>(left: Query<T>, right: Query<U>, left_key: ^^fn(T) -> String, right_key: ^^fn(U) -> String) -> Query<DataJoin<T, U>> Never! {
-    query_make<DataJoin<T, U>>(query_steps(left.__steps, "inner_join"), true, left.__limits.copy(), fn() {
-        left_rows: query_rows<T>(left) ?? return Err(err)
-        right_rows: query_rows<U>(right) ?? return Err(err)
-        left_keys: query_join_keys<T>(left_rows, left_key, "left", "inner_join") ?? return Err(err)
-        right_keys: query_join_keys<U>(right_rows, right_key, "right", "inner_join") ?? return Err(err)
+    left_cell: query_join_cell<T>(left_key, "left", "inner_join")
+    right_cell: query_join_cell<U>(right_key, "right", "inner_join")
+    join: Shared{WatchJoin<T, U, DataJoin<T, U>>{run: fn(left_rows: [T], right_rows: [U]) {
+        left_keys: query_join_keys<T>(left_rows, left_cell) ?? return Err(err)
+        right_keys: query_join_keys<U>(right_rows, right_cell) ?? return Err(err)
         inner_join_keyed<T, U>(left_rows, right_rows, left_keys, right_keys)
-    })
+    }}}
+    query_join<T, U, DataJoin<T, U>>(left, right, join, "inner_join")
 }
 
 #Builtin.Role(.QueryLeftJoin) priv __query_left_join: fn<T, U>(left: Query<T>, right: Query<U>, left_key: ^^fn(T) -> String, right_key: ^^fn(U) -> String) -> Query<DataJoin<T, U?>> Never! {
-    query_make<DataJoin<T, U?>>(query_steps(left.__steps, "left_join"), true, left.__limits.copy(), fn() {
-        left_rows: query_rows<T>(left) ?? return Err(err)
-        right_rows: query_rows<U>(right) ?? return Err(err)
-        left_keys: query_join_keys<T>(left_rows, left_key, "left", "left_join") ?? return Err(err)
-        right_keys: query_join_keys<U>(right_rows, right_key, "right", "left_join") ?? return Err(err)
+    left_cell: query_join_cell<T>(left_key, "left", "left_join")
+    right_cell: query_join_cell<U>(right_key, "right", "left_join")
+    join: Shared{WatchJoin<T, U, DataJoin<T, U?>>{run: fn(left_rows: [T], right_rows: [U]) {
+        left_keys: query_join_keys<T>(left_rows, left_cell) ?? return Err(err)
+        right_keys: query_join_keys<U>(right_rows, right_cell) ?? return Err(err)
         left_join_keyed<T, U>(left_rows, right_rows, left_keys, right_keys)
-    })
+    }}}
+    query_join<T, U, DataJoin<T, U?>>(left, right, join, "left_join")
 }
 
-// The join key of each of a query's rows; a key that fails is the query's
-// Decode error, since a query fails only with DataError.
-priv query_join_keys: fn<T>(rows: [T], key: fn(T) -> String, side: String, api: String) -> [String] DataError! {
+// The join of `left`'s rows with `right`'s, and its maintained result
+// (watch_join) when a watch maintains either side.
+priv query_join: fn<T, U, O>(left: Query<T>, right: Query<U>, join: Shared<WatchJoin<T, U, O>>, step: String) -> Query<O> Never! {
+    batch_join: join.copy()
+    batch_left: left.copy()
+    batch_right: right.copy()
+    joined: query_make<O>(query_steps(left.__steps, step), true, left.__limits.copy(), fn() {
+        left_rows: query_rows<T>(batch_left) ?? return Err(err)
+        right_rows: query_rows<U>(batch_right) ?? return Err(err)
+        batch_join.guard_read().value.run(left_rows, right_rows)
+    })
+    if !query_maintained<T>(left) && !query_maintained<U>(right) -> return joined
+    left_query: left.copy()
+    right_query: right.copy()
+    query_live<O>(joined, Val(Shared{QueryLive<O>{reader: None, steps: [WatchStep<O>]{}, derived: Val(Shared{WatchFactory<O>{make: fn() {
+        left_source: query_watch_source<T>(left_query) ?? watch_static<T>(left_query)
+        right_source: query_watch_source<U>(right_query) ?? watch_static<U>(right_query)
+        Val(watch_join<T, U, O>(left_source, right_source, join))
+    }}})}}))
+}
+
+// A join key callback; a key that fails is the query's Decode error, since
+// a query fails only with DataError.
+priv query_join_cell: fn<T>(key: ^^fn(T) -> String, side: String, api: String) -> Shared<QueryKeyCell<T, String>> Never! {
+    Shared{QueryKeyCell<T, String>{key: fn(row: T) {
+        found: key(row) ?? return Err(data_error(DataErrorKind.Decode, "{side} join key failed", api))
+        Ok(found)
+    }}}
+}
+
+priv query_join_keys: fn<T>(rows: [T], key: Shared<QueryKeyCell<T, String>>) -> [String] DataError! {
+    held: key.guard_read()
     keys := [String]{}
     loop row in rows {
-        found: key(row) ?? return Err(data_error(DataErrorKind.Decode, "{side} join key failed", api))
+        found: held.value.key(row.copy()) ?? return Err(err)
         keys.push(found)
     }
     Ok(keys)
@@ -1500,7 +1924,9 @@ priv group_sorted: fn<K: Comparable, V>(groups: [Group<K, V>]) -> [Group<K, V>] 
 }
 
 #Builtin.Role(.GroupCount) priv __group_count: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>) -> Query<Group<K, Int>> Never! {
-    query_make<Group<K, Int>>(group_steps<T, K>(grouped, "count"), true, grouped.__query.__limits.copy(), fn() {
+    one: Shared{QueryKeyCell<T, Int>{key: fn(_row: T) { Ok(1) }}}
+    live: group_live<T, K, Int>(grouped, one, fn(values: [Int]) { Ok(values.len()) }, "query.group_by.count", "incremental")
+    counted: query_make<Group<K, Int>>(group_steps<T, K>(grouped, "count"), true, grouped.__query.__limits.copy(), fn() {
         rows: query_rows<T>(grouped.__query) ?? return Err(err)
         limits: grouped.__query.__limits.copy()
         cell: grouped.__key.guard_read()
@@ -1524,24 +1950,40 @@ priv group_sorted: fn<K: Comparable, V>(groups: [Group<K, V>]) -> [Group<K, V>] 
         }
         Ok(group_sorted<K, Int>(out))
     })
+    query_live<Group<K, Int>>(counted, live)
 }
 
 // Group sums keep the value callback's numeric type; each numeric domain
-// supplies its own addition to the shared reducer.
-priv __group_sum: fn<T, K: Comparable, V>(grouped: DataGroupedQuery<T, K>, value: ^^fn(T) -> V, add: ^^fn(V, V) -> V) -> Query<Group<K, V>> Never! {
-    query_make<Group<K, V>>(group_steps<T, K>(grouped, "sum"), true, grouped.__query.__limits.copy(), fn() {
+// supplies its own addition to the shared reducer. `mode` is the watch mode
+// of a maintained sum: "recomputed" for a float sum, whose groups a watch
+// adds up again whenever one of their rows changes.
+priv __group_sum: fn<T, K: Comparable, V>(grouped: DataGroupedQuery<T, K>, value: ^^fn(T) -> V, add: ^^fn(V, V) -> V, mode: String) -> Query<Group<K, V>> Never! {
+    value_cell: Shared{QueryKeyCell<T, V>{key: fn(row: T) {
+        found: value(row) ?? return Err(data_error(DataErrorKind.State, "group value callback failed", "query.group_by.sum"))
+        Ok(found)
+    }}}
+    add_cell: Shared{QueryAddCell<V>{add: fn(left: V, right: V) {
+        total: add(left, right) ?? return Err(data_error(DataErrorKind.Overflow, "group sum overflowed", "query.group_by.sum"))
+        Ok(total)
+    }}}
+    batch_value: value_cell.copy()
+    batch_add: add_cell.copy()
+    live: group_live<T, K, V>(grouped, value_cell, fn(values: [V]) { group_total<V>(values, add_cell) }, "query.group_by.sum", mode)
+    summed: query_make<Group<K, V>>(group_steps<T, K>(grouped, "sum"), true, grouped.__query.__limits.copy(), fn() {
         rows: query_rows<T>(grouped.__query) ?? return Err(err)
         limits: grouped.__query.__limits.copy()
         cell: grouped.__key.guard_read()
+        values: batch_value.guard_read()
+        adder: batch_add.guard_read()
         keys := [K]{}
         order := [Int]{}
         totals := [V]{}
         loop row in rows {
             group_key: cell.value.key(row.copy()) ?? return Err(err)
-            group_value: value(row.copy()) ?? return Err(data_error(DataErrorKind.State, "group value callback failed", "query.group_by.sum"))
+            group_value: values.value.key(row.copy()) ?? return Err(err)
             found: group_find<K>(keys, order, group_key)
             if found >= 0 {
-                total: add(totals[found].copy(), group_value) ?? return Err(data_error(DataErrorKind.Overflow, "group sum overflowed", "query.group_by.sum"))
+                total: adder.value.add(totals[found].copy(), group_value) ?? return Err(err)
                 totals[found] = total
             } else {
                 if keys.len() >= limits.max_groups {
@@ -1560,67 +2002,92 @@ priv __group_sum: fn<T, K: Comparable, V>(grouped: DataGroupedQuery<T, K>, value
         }
         Ok(group_sorted<K, V>(out))
     })
+    query_live<Group<K, V>>(summed, live)
+}
+
+// A group's values added in order, as the batch sum adds them.
+priv group_total: fn<V>(values: [V], add: Shared<QueryAddCell<V>>) -> V DataError! {
+    if values.len() == 0 -> return Err(data_error(DataErrorKind.Empty, "an empty group has no sum", "query.group_by.sum"))
+    held: add.guard_read()
+    total := values[0].copy()
+    loop index in 1..<values.len() {
+        next_total: held.value.add(total, values[index].copy()) ?? return Err(err)
+        total = next_total
+    }
+    Ok(total)
 }
 
 #Builtin.Role(.GroupSumInt) priv __group_sum_int: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^^fn(T) -> Int) -> Query<Group<K, Int>> Never! {
-    __group_sum<T, K, Int>(grouped, value, fn(left: Int, right: Int) { left + right })
+    __group_sum<T, K, Int>(grouped, value, fn(left: Int, right: Int) { left + right }, "incremental")
 }
 
 #Builtin.Role(.GroupSumFloat) priv __group_sum_float: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^^fn(T) -> Float) -> Query<Group<K, Float>> Never! {
-    __group_sum<T, K, Float>(grouped, value, fn(left: Float, right: Float) { left + right })
+    __group_sum<T, K, Float>(grouped, value, fn(left: Float, right: Float) { left + right }, "recomputed")
 }
 
 #Builtin.Role(.GroupSumF32) priv __group_sum_f32: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^^fn(T) -> F32) -> Query<Group<K, F32>> Never! {
-    __group_sum<T, K, F32>(grouped, value, fn(left: F32, right: F32) { left + right })
+    __group_sum<T, K, F32>(grouped, value, fn(left: F32, right: F32) { left + right }, "recomputed")
 }
 
 #Builtin.Role(.GroupSumI8) priv __group_sum_i8: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^^fn(T) -> I8) -> Query<Group<K, I8>> Never! {
-    __group_sum<T, K, I8>(grouped, value, fn(left: I8, right: I8) { left + right })
+    __group_sum<T, K, I8>(grouped, value, fn(left: I8, right: I8) { left + right }, "incremental")
 }
 
 #Builtin.Role(.GroupSumI16) priv __group_sum_i16: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^^fn(T) -> I16) -> Query<Group<K, I16>> Never! {
-    __group_sum<T, K, I16>(grouped, value, fn(left: I16, right: I16) { left + right })
+    __group_sum<T, K, I16>(grouped, value, fn(left: I16, right: I16) { left + right }, "incremental")
 }
 
 #Builtin.Role(.GroupSumI32) priv __group_sum_i32: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^^fn(T) -> I32) -> Query<Group<K, I32>> Never! {
-    __group_sum<T, K, I32>(grouped, value, fn(left: I32, right: I32) { left + right })
+    __group_sum<T, K, I32>(grouped, value, fn(left: I32, right: I32) { left + right }, "incremental")
 }
 
 #Builtin.Role(.GroupSumI64) priv __group_sum_i64: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^^fn(T) -> I64) -> Query<Group<K, I64>> Never! {
-    __group_sum<T, K, I64>(grouped, value, fn(left: I64, right: I64) { left + right })
+    __group_sum<T, K, I64>(grouped, value, fn(left: I64, right: I64) { left + right }, "incremental")
 }
 
 #Builtin.Role(.GroupSumU8) priv __group_sum_u8: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^^fn(T) -> U8) -> Query<Group<K, U8>> Never! {
-    __group_sum<T, K, U8>(grouped, value, fn(left: U8, right: U8) { left + right })
+    __group_sum<T, K, U8>(grouped, value, fn(left: U8, right: U8) { left + right }, "incremental")
 }
 
 #Builtin.Role(.GroupSumU16) priv __group_sum_u16: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^^fn(T) -> U16) -> Query<Group<K, U16>> Never! {
-    __group_sum<T, K, U16>(grouped, value, fn(left: U16, right: U16) { left + right })
+    __group_sum<T, K, U16>(grouped, value, fn(left: U16, right: U16) { left + right }, "incremental")
 }
 
 #Builtin.Role(.GroupSumU32) priv __group_sum_u32: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^^fn(T) -> U32) -> Query<Group<K, U32>> Never! {
-    __group_sum<T, K, U32>(grouped, value, fn(left: U32, right: U32) { left + right })
+    __group_sum<T, K, U32>(grouped, value, fn(left: U32, right: U32) { left + right }, "incremental")
 }
 
 #Builtin.Role(.GroupSumU64) priv __group_sum_u64: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^^fn(T) -> U64) -> Query<Group<K, U64>> Never! {
-    __group_sum<T, K, U64>(grouped, value, fn(left: U64, right: U64) { left + right })
+    __group_sum<T, K, U64>(grouped, value, fn(left: U64, right: U64) { left + right }, "incremental")
 }
 
 #Builtin.Role(.GroupMean) priv __group_mean: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^^fn(T) -> Float) -> Query<Group<K, Float>> Never! {
-    query_make<Group<K, Float>>(group_steps<T, K>(grouped, "mean"), true, grouped.__query.__limits.copy(), fn() {
+    value_cell: Shared{QueryKeyCell<T, Float>{key: fn(row: T) {
+        found: value(row) ?? return Err(data_error(DataErrorKind.State, "group value callback failed", "query.group_by.mean"))
+        if nonfinite(found) {
+            return Err(data_error(DataErrorKind.NonFinite, "group values must be finite", "query.group_by.mean"))
+        }
+        Ok(found)
+    }}}
+    batch_value: value_cell.copy()
+    live: group_live<T, K, Float>(grouped, value_cell, fn(values: [Float]) {
+        if values.len() == 0 -> return Err(data_error(DataErrorKind.Empty, "an empty group has no mean", "query.group_by.mean"))
+        total := values[0]
+        loop index in 1..<values.len() -> total = total + values[index]
+        Ok(total / Float{values.len()})
+    }, "query.group_by.mean", "recomputed")
+    averaged: query_make<Group<K, Float>>(group_steps<T, K>(grouped, "mean"), true, grouped.__query.__limits.copy(), fn() {
         rows: query_rows<T>(grouped.__query) ?? return Err(err)
         limits: grouped.__query.__limits.copy()
         cell: grouped.__key.guard_read()
+        values: batch_value.guard_read()
         keys := [K]{}
         order := [Int]{}
         totals := [Float]{}
         counts := [Int]{}
         loop row in rows {
             group_key: cell.value.key(row.copy()) ?? return Err(err)
-            group_value: value(row.copy()) ?? return Err(data_error(DataErrorKind.State, "group value callback failed", "query.group_by.mean"))
-            if nonfinite(group_value) {
-                return Err(data_error(DataErrorKind.NonFinite, "group values must be finite", "query.group_by.mean"))
-            }
+            group_value: values.value.key(row.copy()) ?? return Err(err)
             found: group_find<K>(keys, order, group_key)
             if found >= 0 {
                 totals[found] = totals[found] + group_value
@@ -1640,6 +2107,605 @@ priv __group_sum: fn<T, K: Comparable, V>(grouped: DataGroupedQuery<T, K>, value
         }
         Ok(group_sorted<K, Float>(out))
     })
+    query_live<Group<K, Float>>(averaged, live)
+}
+
+// ---- maintained queries (QueryLive, D-QUERY-LIVE1, #2964) ----
+
+priv query_maintained: fn<T>(query: Query<T>) -> Bool Never! {
+    _: query.__live.copy() ?? return false
+    true
+}
+
+// The `__live` of a query whose step derives its rows from `query`'s by
+// `derive` (watch_derived), or None when no watch maintains `query`.
+priv query_live_derived: fn<S, T>(query: Query<S>, derive: ^^fn([WatchEntry<S>]) -> [WatchEntry<T>] DataError!) -> Shared<QueryLive<T>>? Never! {
+    if !query_maintained<S>(query) -> return None
+    source: query.copy()
+    cell: Shared{WatchDerive<S, T>{run: derive.move()}}
+    Val(Shared{QueryLive<T>{reader: None, steps: [WatchStep<T>]{}, derived: Val(Shared{WatchFactory<T>{make: fn() {
+        inner: query_watch_source<S>(source) ?? return None
+        Val(watch_derived<S, T>(inner, cell))
+    }}})}})
+}
+
+// The `__live` of a filter or sort after `query`: one more step over the
+// tracked rows when `query` reads them through filters and sorts only, and
+// otherwise a derived step running `derive`.
+priv query_live_step: fn<T>(query: Query<T>, step: WatchStep<T>, derive: ^^fn([WatchEntry<T>]) -> [WatchEntry<T>] DataError!) -> Shared<QueryLive<T>>? Never! {
+    cell: query.__live.copy() ?? return None
+    live: cell.guard_read()
+    reader: live.value.reader.copy() ?? return query_live_derived<T, T>(query, derive)
+    steps := live.value.steps.copy()
+    steps.push(step.copy())
+    Val(Shared{QueryLive<T>{reader: Val(reader), steps: steps, derived: None}})
+}
+
+// A new watch source for `query`, or None when no watch maintains it.
+priv query_watch_source: fn<T>(query: Query<T>) -> WatchSource<T>? Never! {
+    cell: query.__live.copy() ?? return None
+    live: cell.guard_read()
+    derived: live.value.derived.copy()
+    if derived == .Val(factory) -> return factory.guard_read().value.make()
+    reader: live.value.reader.copy() ?? return None
+    Val(watch_tracked<T>(reader, live.value.steps, query.__limits))
+}
+
+priv watch_unchanged: fn<T>(revision: Int, mode: String, retained_rows: Int) -> WatchView<T> Never! {
+    WatchView<T>{entries: [WatchEntry<T>]{}, revision: revision, mode: mode.copy(), recomputed: false, changed: false, retained_rows: retained_rows, commit: fn() {}}
+}
+
+// The source of a watch over a tracked table's rows that pass `steps`. Its
+// initial result reads every row. A refresh applies each change after the
+// revision of the result it holds to that result: the changed row leaves,
+// and comes back where the steps place it if they keep it (watch_apply).
+// When the table's log no longer holds those changes, the refresh reads
+// every row again, which counts as a recomputation.
+priv watch_tracked: fn<T>(reader: Shared<TrackedReader<T>>, steps: [WatchStep<T>], limits: DataLimits) -> WatchSource<T> Never! {
+    initial_reader: reader.copy()
+    initial_steps: steps.copy()
+    initial_limits: limits.copy()
+    refresh_steps: steps.copy()
+    refresh_limits: limits.copy()
+    WatchSource<T>{
+        initial: fn() { watch_tracked_read<T>(initial_reader, initial_steps, initial_limits, false) },
+        refresh: fn(revision: Int, prior: [WatchEntry<T>]) {
+            delta: reader.guard_read().value.changes(revision) ?? return Err(err)
+            if delta.revision == revision -> return Ok(watch_unchanged<T>(revision, "incremental", delta.retained_rows))
+            if !delta.complete -> return watch_tracked_read<T>(reader, refresh_steps, refresh_limits, true)
+            watch_sort_limit<T>(refresh_steps, delta.retained_rows, refresh_limits) ?? return Err(err)
+            entries := prior.copy()
+            loop change in delta.changes {
+                watch_apply<T>(entries, refresh_steps, change) ?? return Err(err)
+            }
+            Ok(WatchView<T>{entries: entries, revision: delta.revision, mode: "incremental", recomputed: false, changed: true, retained_rows: delta.retained_rows, commit: fn() {}})
+        },
+    }
+}
+
+priv watch_tracked_read: fn<T>(reader: Shared<TrackedReader<T>>, steps: [WatchStep<T>], limits: DataLimits, recomputed: Bool) -> WatchView<T> DataError! {
+    snapshot: reader.guard_read().value.snapshot()
+    watch_sort_limit<T>(steps, snapshot.rows.len(), limits) ?? return Err(err)
+    entries := [WatchEntry<T>]{}
+    loop index in 0..<snapshot.rows.len() {
+        keys := [String]{}
+        kept: watch_place<T>(steps, snapshot.rows[index], keys) ?? return Err(err)
+        if !kept -> next
+        entries.push(WatchEntry<T>{order: snapshot.orders[index], keys: keys, value: snapshot.rows[index].copy()})
+    }
+    mode: if recomputed -> "recomputed" else -> "incremental"
+    Ok(WatchView<T>{entries: watch_sorted<T>(entries), revision: snapshot.revision, mode: mode, recomputed: recomputed, changed: true, retained_rows: snapshot.rows.len(), commit: fn() {}})
+}
+
+priv watch_sort_limit: fn<T>(steps: [WatchStep<T>], rows: Int, limits: DataLimits) DataError! {
+    if rows <= limits.max_sort_rows -> return Ok()
+    loop step in steps {
+        _: step.key.copy() ?? next
+        return Err(data_error(DataErrorKind.Limit, "max_sort_rows {limits.max_sort_rows} exceeded", "query.sort_by"))
+    }
+    Ok()
+}
+
+// Whether `steps` keep `row`, with the sort keys that place it in `keys`,
+// last sort first.
+priv watch_place: fn<T>(steps: [WatchStep<T>], row: T, keys: ^[String]) -> Bool DataError! {
+    loop step in steps {
+        keep: step.keep.copy()
+        if keep == .Val(cell) {
+            kept: cell.guard_read().value.key(row.copy()) ?? return Err(err)
+            if !kept -> return Ok(false)
+        }
+        key: step.key.copy()
+        if key == .Val(cell) {
+            text: cell.guard_read().value.key(row.copy()) ?? return Err(err)
+            keys.insert(0, text)
+        }
+    }
+    Ok(true)
+}
+
+// Whether `left` comes before `right` in a maintained result: the batch
+// query's stable sorts put rows in order of their last sort's key, then the
+// sort before it, and so on, and then in stamp order.
+priv watch_before: fn<T>(left: WatchEntry<T>, right: WatchEntry<T>) -> Bool Never! {
+    loop index in 0..<left.keys.len() {
+        if left.keys[index] < right.keys[index] -> return true
+        if left.keys[index] > right.keys[index] -> return false
+    }
+    left.order < right.order
+}
+
+// Entries in stamp order put in watch_before order: one stable sort per
+// sort key, the first sort's first.
+priv watch_sorted: fn<T>(entries: ^^[WatchEntry<T>]) -> [WatchEntry<T>] Never! {
+    out := entries.move()
+    if out.len() == 0 -> return out
+    sorts: out[0].keys.len()
+    loop step in 0..<sorts {
+        at: sorts - 1 - step
+        keys := [String]{}
+        loop entry in out -> keys.push(entry.keys[at].copy())
+        sorted := [WatchEntry<T>]{}
+        loop index in query_merge_order(keys, false, false) -> sorted.push(out[index].copy())
+        out = sorted
+    }
+    out
+}
+
+priv watch_insert: fn<T>(entries: ^[WatchEntry<T>], entry: ^^WatchEntry<T>) Never! {
+    low := 0
+    high := entries.len()
+    loop low < high {
+        middle: low + (high - low) /% 2
+        if watch_before<T>(entry, entries[middle]) -> high = middle else -> low = middle + 1
+    }
+    entries.insert(low, entry.move())
+}
+
+// One change applied to a maintained result over tracked rows.
+priv watch_apply: fn<T>(entries: ^[WatchEntry<T>], steps: [WatchStep<T>], change: TrackedChange<T>) DataError! {
+    loop index in 0..<entries.len() {
+        if entries[index].order == change.order {
+            _: entries.remove(index, .Slot)
+            break
+        }
+    }
+    row: change.row.copy() ?? return Ok()
+    keys := [String]{}
+    kept: watch_place<T>(steps, row, keys) ?? return Err(err)
+    if !kept -> return Ok()
+    watch_insert<T>(entries, WatchEntry<T>{order: change.order, keys: keys, value: row})
+    Ok()
+}
+
+// A source whose result `derive` makes from `inner`'s, at `inner`'s
+// revision. It keeps the inner result it last published as the base an
+// inner refresh brings up to date, answers its own prior result while the
+// inner one is unchanged, and derives again when it changed. Its commit
+// publishes the new base with the inner source's.
+priv watch_derived: fn<S, T>(inner: ^^WatchSource<S>, derive: Shared<WatchDerive<S, T>>) -> WatchSource<T> Never! {
+    source: Shared{inner.move()}
+    base: Shared{[WatchEntry<S>]{}}
+    initial_source: source.copy()
+    initial_base: base.copy()
+    initial_derive: derive.copy()
+    WatchSource<T>{
+        initial: fn() {
+            view: initial_source.guard_read().value.initial() ?? return Err(err)
+            watch_derive<S, T>(view, initial_derive, initial_base)
+        },
+        refresh: fn(revision: Int, _prior: [WatchEntry<T>]) {
+            view: watch_derived_refresh<S>(source, base, revision) ?? return Err(err)
+            if !view.changed -> return Ok(watch_unchanged<T>(view.revision, view.mode, view.retained_rows))
+            watch_derive<S, T>(view, derive, base)
+        },
+    }
+}
+
+priv watch_derived_refresh: fn<S>(source: Shared<WatchSource<S>>, base: Shared<[WatchEntry<S>]>, revision: Int) -> WatchView<S> DataError! {
+    held: base.guard_read()
+    source.guard_read().value.refresh(revision, held.value)
+}
+
+// `view` derived, with a commit that runs `view`'s and then records its
+// entries as the base.
+priv watch_derive: fn<S, T>(view: ^^WatchView<S>, derive: Shared<WatchDerive<S, T>>, base: Shared<[WatchEntry<S>]>) -> WatchView<T> DataError! {
+    entries: derive.guard_read().value.run(view.entries) ?? return Err(err)
+    revision: view.revision
+    mode: view.mode.copy()
+    recomputed: view.recomputed
+    retained_rows: view.retained_rows
+    target: base.copy()
+    inner: view.move()
+    Ok(WatchView<T>{entries: entries, revision: revision, mode: mode, recomputed: recomputed, changed: true, retained_rows: retained_rows, commit: fn() {
+        inner.commit()
+        target.guard_edit().value = inner.entries.copy()
+    }})
+}
+
+priv WatchPair: struct<T, U> {
+    left: WatchSource<T>,
+    right: WatchSource<U>,
+}
+
+// A maintained join's published inputs, the revision each side's result is
+// at, and the join's own revision.
+priv WatchJoinState: struct<T, U> {
+    left: [WatchEntry<T>],
+    right: [WatchEntry<U>],
+    left_revision: Int,
+    right_revision: Int,
+    revision: Int,
+}
+
+// A join's source: it holds both sides' results, refreshes both, and joins
+// them again when either changed, which is the join's next revision.
+priv watch_join: fn<T, U, O>(left: ^^WatchSource<T>, right: ^^WatchSource<U>, join: Shared<WatchJoin<T, U, O>>) -> WatchSource<O> Never! {
+    sources: Shared{WatchPair<T, U>{left: left.move(), right: right.move()}}
+    state: Shared{WatchJoinState<T, U>{left: [WatchEntry<T>]{}, right: [WatchEntry<U>]{}, left_revision: 0, right_revision: 0, revision: 0}}
+    initial_sources: sources.copy()
+    initial_state: state.copy()
+    initial_join: join.copy()
+    WatchSource<O>{
+        initial: fn() {
+            pair: initial_sources.guard_read()
+            left_view: pair.value.left.initial() ?? return Err(err)
+            right_view: pair.value.right.initial() ?? return Err(err)
+            revision: if left_view.revision > right_view.revision -> left_view.revision else -> right_view.revision
+            empty: WatchJoinState<T, U>{left: [WatchEntry<T>]{}, right: [WatchEntry<U>]{}, left_revision: 0, right_revision: 0, revision: 0}
+            watch_join_view<T, U, O>(left_view, right_view, empty, initial_join, initial_state, revision)
+        },
+        refresh: fn(_revision: Int, _prior: [WatchEntry<O>]) { watch_join_refresh<T, U, O>(sources, state, join) },
+    }
+}
+
+priv watch_join_refresh: fn<T, U, O>(sources: Shared<WatchPair<T, U>>, state: Shared<WatchJoinState<T, U>>, join: Shared<WatchJoin<T, U, O>>) -> WatchView<O> DataError! {
+    held: state.guard_read()
+    pair: sources.guard_read()
+    left_view: pair.value.left.refresh(held.value.left_revision, held.value.left) ?? return Err(err)
+    right_view: pair.value.right.refresh(held.value.right_revision, held.value.right) ?? return Err(err)
+    if !left_view.changed && !right_view.changed {
+        return Ok(watch_unchanged<O>(held.value.revision, watch_join_mode(left_view.mode, right_view.mode), left_view.retained_rows + right_view.retained_rows))
+    }
+    watch_join_view<T, U, O>(left_view, right_view, held.value, join, state, held.value.revision + 1)
+}
+
+// The join of both sides' results at `revision`; an unchanged side joins
+// with the result `prior` holds for it.
+priv watch_join_view: fn<T, U, O>(left: ^^WatchView<T>, right: ^^WatchView<U>, prior: WatchJoinState<T, U>, join: Shared<WatchJoin<T, U, O>>, state: Shared<WatchJoinState<T, U>>, revision: Int) -> WatchView<O> DataError! {
+    next := prior.copy()
+    if left.changed {
+        next.left = left.entries.copy()
+        next.left_revision = left.revision
+    }
+    if right.changed {
+        next.right = right.entries.copy()
+        next.right_revision = right.revision
+    }
+    next.revision = revision
+    left_rows := [T]{}
+    loop entry in next.left -> left_rows.push(entry.value.copy())
+    right_rows := [U]{}
+    loop entry in next.right -> right_rows.push(entry.value.copy())
+    rows: join.guard_read().value.run(left_rows, right_rows) ?? return Err(err)
+    entries := [WatchEntry<O>]{}
+    loop index in 0..<rows.len() -> entries.push(WatchEntry<O>{order: index, keys: [String]{}, value: rows[index].copy()})
+    mode: watch_join_mode(left.mode, right.mode)
+    recomputed: left.recomputed || right.recomputed
+    retained_rows: left.retained_rows + right.retained_rows
+    target: state.copy()
+    left_view: left.move()
+    right_view: right.move()
+    Ok(WatchView<O>{entries: entries, revision: revision, mode: mode, recomputed: recomputed, changed: true, retained_rows: retained_rows, commit: fn() {
+        left_view.commit()
+        right_view.commit()
+        target.guard_edit().value = next.copy()
+    }})
+}
+
+priv watch_join_mode: fn(left: String, right: String) -> String Never! {
+    if left == "recomputed" || right == "recomputed" -> "recomputed" else -> "incremental"
+}
+
+// A join side no watch maintains: read once when the watch starts, and
+// unchanged after.
+priv watch_static: fn<T>(query: Query<T>) -> WatchSource<T> Never! {
+    source: query.copy()
+    count: Shared{0}
+    initial_count: count.copy()
+    WatchSource<T>{
+        initial: fn() {
+            rows: query_rows<T>(source) ?? return Err(err)
+            entries := [WatchEntry<T>]{}
+            loop index in 0..<rows.len() -> entries.push(WatchEntry<T>{order: index, keys: [String]{}, value: rows[index].copy()})
+            total: rows.len()
+            target: initial_count.copy()
+            Ok(WatchView<T>{entries: entries, revision: 0, mode: "incremental", recomputed: false, changed: true, retained_rows: total, commit: fn() { target.guard_edit().value = total }})
+        },
+        refresh: fn(_revision: Int, _prior: [WatchEntry<T>]) { Ok(watch_unchanged<T>(0, "incremental", count.guard_read().value)) },
+    }
+}
+
+// A grouped reducer over tracked rows that a watch maintains: the rows
+// pass `steps`, `key` groups them, `value` is each row's value and
+// `aggregate` reduces a group's values, in their batch order.
+priv GroupWatchPlan: struct<T, K, V> {
+    reader: Shared<TrackedReader<T>>,
+    steps: [WatchStep<T>],
+    key: Shared<QueryKeyCell<T, K>>,
+    value: Shared<QueryKeyCell<T, V>>,
+    aggregate: Shared<QueryKeyCell<[V], V>>,
+    operation: String,
+    mode: String,
+    limits: DataLimits,
+}
+
+// A maintained grouped result: `keys` ascending, each group's `members` in
+// watch_before order and its aggregate in `values`, and the group of each
+// stamp in `group_of`.
+priv GroupWatchState: struct<K, V> {
+    revision: Int,
+    keys: [K],
+    members: [[WatchEntry<V>]],
+    values: [V],
+    group_of: [Int:K],
+}
+
+// The `__live` of a grouped reducer: maintained only over a query that reads
+// tracked rows through filters and sorts (watch_group).
+priv group_live: fn<T, K: Comparable, V>(grouped: DataGroupedQuery<T, K>, value: Shared<QueryKeyCell<T, V>>, aggregate: ^^fn([V]) -> V DataError!, operation: String, mode: String) -> Shared<QueryLive<Group<K, V>>>? Never! {
+    cell: grouped.__query.__live.copy() ?? return None
+    live: cell.guard_read()
+    reader: live.value.reader.copy() ?? return None
+    plan: GroupWatchPlan<T, K, V>{reader: reader, steps: live.value.steps.copy(), key: grouped.__key.copy(), value: value.copy(), aggregate: Shared{QueryKeyCell<[V], V>{key: aggregate.move()}}, operation: operation.copy(), mode: mode.copy(), limits: grouped.__query.__limits.copy()}
+    Val(Shared{QueryLive<Group<K, V>>{reader: None, steps: [WatchStep<Group<K, V>>]{}, derived: Val(Shared{WatchFactory<Group<K, V>>{make: fn() { Val(watch_group<T, K, V>(plan)) }}})}})
+}
+
+// A grouped reducer's source. A refresh takes each changed row out of its
+// group and adds it back to the group it is in now, and reduces again only
+// the groups those changes touched.
+priv watch_group: fn<T, K: Comparable, V>(plan: GroupWatchPlan<T, K, V>) -> WatchSource<Group<K, V>> Never! {
+    state: Shared{GroupWatchState<K, V>{revision: 0, keys: [K]{}, members: [[WatchEntry<V>]]{}, values: [V]{}, group_of: [Int:K]{}}}
+    initial_plan: plan.copy()
+    initial_state: state.copy()
+    refresh_plan: plan.copy()
+    WatchSource<Group<K, V>>{
+        initial: fn() { watch_group_read<T, K, V>(initial_plan, initial_state, false) },
+        refresh: fn(_revision: Int, _prior: [WatchEntry<Group<K, V>>]) { watch_group_refresh<T, K, V>(refresh_plan, state) },
+    }
+}
+
+priv watch_group_read: fn<T, K: Comparable, V>(plan: GroupWatchPlan<T, K, V>, state: Shared<GroupWatchState<K, V>>, recomputed: Bool) -> WatchView<Group<K, V>> DataError! {
+    snapshot: plan.reader.guard_read().value.snapshot()
+    watch_sort_limit<T>(plan.steps, snapshot.rows.len(), plan.limits) ?? return Err(err)
+    groups := GroupWatchState<K, V>{revision: snapshot.revision, keys: [K]{}, members: [[WatchEntry<V>]]{}, values: [V]{}, group_of: [Int:K]{}}
+    touched := [K]{}
+    loop index in 0..<snapshot.rows.len() {
+        group_watch_add<T, K, V>(groups, touched, plan, snapshot.orders[index], snapshot.rows[index], true) ?? return Err(err)
+    }
+    loop index in 0..<groups.members.len() {
+        if groups.members[index][0].keys.len() > 0 -> groups.members[index] = watch_sorted<V>(groups.members[index].copy())
+    }
+    mode: if recomputed -> "recomputed" else -> plan.mode.copy()
+    watch_group_view<T, K, V>(groups, touched, plan, state, mode, recomputed, snapshot.rows.len())
+}
+
+priv watch_group_refresh: fn<T, K: Comparable, V>(plan: GroupWatchPlan<T, K, V>, state: Shared<GroupWatchState<K, V>>) -> WatchView<Group<K, V>> DataError! {
+    held: state.guard_read()
+    delta: plan.reader.guard_read().value.changes(held.value.revision) ?? return Err(err)
+    if delta.revision == held.value.revision -> return Ok(watch_unchanged<Group<K, V>>(delta.revision, plan.mode, delta.retained_rows))
+    if !delta.complete -> return watch_group_read<T, K, V>(plan, state, true)
+    watch_sort_limit<T>(plan.steps, delta.retained_rows, plan.limits) ?? return Err(err)
+    groups := held.value.copy()
+    touched := [K]{}
+    loop change in delta.changes {
+        group_watch_remove<K, V>(groups, touched, change.order)
+        row: change.row.copy() ?? next
+        group_watch_add<T, K, V>(groups, touched, plan, change.order, row, false) ?? return Err(err)
+    }
+    groups.revision = delta.revision
+    watch_group_view<T, K, V>(groups, touched, plan, state, plan.mode, plan.mode == "recomputed", delta.retained_rows)
+}
+
+// Adds the row stamped `order` to its group, a new group if its key has
+// none, unless the plan's filters drop it. `append` adds it last, as a read
+// of every row in stamp order does before it sorts the groups.
+priv group_watch_add: fn<T, K: Comparable, V>(groups: ^GroupWatchState<K, V>, touched: ^[K], plan: GroupWatchPlan<T, K, V>, order: Int, row: T, append: Bool) DataError! {
+    keys := [String]{}
+    kept: watch_place<T>(plan.steps, row, keys) ?? return Err(err)
+    if !kept -> return Ok()
+    group_key: plan.key.guard_read().value.key(row.copy()) ?? return Err(err)
+    member: plan.value.guard_read().value.key(row.copy()) ?? return Err(err)
+    found: group_watch_find<K>(groups.keys, group_key)
+    index := found
+    if found < 0 {
+        if groups.keys.len() >= plan.limits.max_groups {
+            return Err(data_error(DataErrorKind.Limit, "max_groups {plan.limits.max_groups} exceeded", plan.operation))
+        }
+        index = -1 - found
+        groups.keys.insert(index, group_key.copy())
+        groups.members.insert(index, [WatchEntry<V>]{})
+        groups.values.insert(index, member.copy())
+    }
+    entry: WatchEntry<V>{order: order, keys: keys, value: member}
+    if append -> groups.members[index].push(entry) else -> watch_insert<V>(groups.members[index], entry)
+    groups.group_of[order] = group_key.copy()
+    touched.push(group_key)
+    Ok()
+}
+
+// Takes the row stamped `order` out of its group; a group left empty goes.
+priv group_watch_remove: fn<K: Comparable, V>(groups: ^GroupWatchState<K, V>, touched: ^[K], order: Int) Never! {
+    group_key: groups.group_of.get(order) ?? return
+    _: groups.group_of.remove(order)
+    index: group_watch_find<K>(groups.keys, group_key)
+    if index < 0 -> return
+    loop at in 0..<groups.members[index].len() {
+        if groups.members[index][at].order == order {
+            _: groups.members[index].remove(at, .Slot)
+            break
+        }
+    }
+    if groups.members[index].len() > 0 -> return touched.push(group_key)
+    _: groups.keys.remove(index, .Slot)
+    _: groups.members.remove(index, .Slot)
+    _: groups.values.remove(index, .Slot)
+}
+
+// The position of `key` in ascending `keys`, else -1 - where it goes.
+priv group_watch_find: fn<K: Comparable>(keys: [K], key: K) -> Int Never! {
+    low := 0
+    high := keys.len()
+    loop low < high {
+        middle: low + (high - low) /% 2
+        compared: keys[middle] <=> key
+        if compared == Ordering.Equal -> return middle
+        if compared == Ordering.Less -> low = middle + 1 else -> high = middle
+    }
+    -1 - low
+}
+
+// Reduces the `touched` groups again and gives every group, with a commit
+// that publishes `groups` as the source's state.
+priv watch_group_view: fn<T, K: Comparable, V>(reduced: ^^GroupWatchState<K, V>, touched: [K], plan: GroupWatchPlan<T, K, V>, state: Shared<GroupWatchState<K, V>>, mode: String, recomputed: Bool, retained_rows: Int) -> WatchView<Group<K, V>> DataError! {
+    groups := reduced.move()
+    marked := [Bool]{}
+    loop _ in 0..<groups.keys.len() -> marked.push(false)
+    loop group_key in touched {
+        index: group_watch_find<K>(groups.keys, group_key)
+        if index >= 0 -> marked[index] = true
+    }
+    aggregate: plan.aggregate.guard_read()
+    loop index in 0..<groups.keys.len() {
+        if marked[index] {
+            values := [V]{}
+            loop member in groups.members[index] -> values.push(member.value.copy())
+            total: aggregate.value.key(values) ?? return Err(err)
+            groups.values[index] = total
+        }
+    }
+    entries := [WatchEntry<Group<K, V>>]{}
+    loop index in 0..<groups.keys.len() {
+        entries.push(WatchEntry<Group<K, V>>{order: index, keys: [String]{}, value: Group<K, V>{key: groups.keys[index].copy(), value: groups.values[index].copy()}})
+    }
+    revision: groups.revision
+    target: state.copy()
+    published: groups.move()
+    Ok(WatchView<Group<K, V>>{entries: entries, revision: revision, mode: mode.copy(), recomputed: recomputed, changed: true, retained_rows: retained_rows, commit: fn() { target.guard_edit().value = published.copy() }})
+}
+
+// `query.watch()` (DataWatch): no maintained source is Unsupported, the
+// fallback #2964 gives a query it cannot maintain.
+priv query_watch: fn<T>(query: Query<T>) -> DataWatch<T> DataError! {
+    source: query_watch_source<T>(query) ?? return Err(data_error(DataErrorKind.Unsupported, "watch requires a maintained data.track source", "query.watch"))
+    view: source.initial() ?? return Err(err)
+    limit: query.__limits.max_output_rows
+    if view.entries.len() > limit {
+        return Err(data_error(DataErrorKind.Limit, "max_output_rows {limit} exceeded", "query.watch"))
+    }
+    view.commit()
+    recomputations: if view.recomputed -> 1 else -> 0
+    state: WatchState<T>{
+        entries: view.entries,
+        revision: view.revision,
+        mode: view.mode.copy(),
+        retained_rows: view.retained_rows,
+        recomputations: recomputations,
+        generation: 1,
+        publications: 0,
+        dirty: false,
+        error: "",
+        invalidation_cause: "",
+        canceled: false,
+        max_output_rows: limit,
+    }
+    Ok(DataWatch<T>{__source: Shared{source}, __state: Shared{state}})
+}
+
+priv watch_get: fn<T>(watch: DataWatch<T>) -> [T] DataError! {
+    publications: watch.__state.guard_read().value.publications
+    dirty: watch.__state.guard_read().value.dirty
+    view: watch_refresh<T>(watch) ?? {
+        watch_fail<T>(watch, publications, "{err}")
+        return Err(err)
+    }
+    if !view.changed && !dirty -> return Ok(watch_values<T>(watch.__state.guard_read().value.entries))
+    limit: watch.__state.guard_read().value.max_output_rows
+    if view.changed && view.entries.len() > limit {
+        failed: data_error(DataErrorKind.Limit, "maintained result exceeds max_output_rows", "watch.get")
+        watch_fail<T>(watch, publications, "{failed}")
+        return Err(failed)
+    }
+    state := watch.__state.guard_edit()
+    if state.value.canceled -> return Err(data_error(DataErrorKind.State, "the watch was canceled before publication", "watch.get"))
+    if state.value.publications != publications {
+        return Err(data_error(DataErrorKind.StaleRevision, "the watch changed before publication", "watch.get"))
+    }
+    view.commit()
+    state.value.revision = view.revision
+    state.value.mode = view.mode.copy()
+    state.value.retained_rows = view.retained_rows
+    if view.recomputed -> state.value.recomputations += 1
+    state.value.publications += 1
+    state.value.dirty = false
+    state.value.error = ""
+    if view.changed -> state.value.entries = view.entries
+    Ok(watch_values<T>(state.value.entries))
+}
+
+// The source's result brought up to date from the published one; a
+// canceled watch has none.
+priv watch_refresh: fn<T>(watch: DataWatch<T>) -> WatchView<T> DataError! {
+    held: watch.__state.guard_read()
+    if held.value.canceled -> return Err(data_error(DataErrorKind.State, "the watch was canceled", "watch.get"))
+    watch.__source.guard_read().value.refresh(held.value.revision, held.value.entries)
+}
+
+// A failed refresh keeps the published result and its revision, and marks
+// the watch dirty with the error, unless the watch changed since the refresh
+// began.
+priv watch_fail: fn<T>(watch: DataWatch<T>, publications: Int, error: String) Never! {
+    state := watch.__state.guard_edit()
+    if state.value.canceled || state.value.publications != publications -> return
+    state.value.dirty = true
+    state.value.error = error.copy()
+    state.value.publications += 1
+}
+
+priv watch_values: fn<T>(entries: [WatchEntry<T>]) -> [T] Never! {
+    out := [T]{}
+    loop entry in entries -> out.push(entry.value.copy())
+    out
+}
+
+// `freshness_ms` stays 0: reading the clock is the Time effect, which
+// `get` and `status` do not have.
+priv watch_status: fn<T>(watch: DataWatch<T>) -> DataWatchStatus Never! {
+    held: watch.__state.guard_read()
+    DataWatchStatus{
+        mode: held.value.mode.copy(),
+        revision: held.value.revision,
+        retained_rows: held.value.retained_rows,
+        recomputations: held.value.recomputations,
+        active: true,
+        generation: held.value.generation,
+        dirty: held.value.dirty,
+        error: held.value.error.copy(),
+        freshness_ms: 0,
+        invalidation_cause: held.value.invalidation_cause.copy(),
+        refreshing: false,
+        canceled: held.value.canceled,
+    }
+}
+
+// Ends the watch: a later `get` fails, and its generation moves on.
+priv watch_cancel: fn<T>(watch: DataWatch<T>) Never! {
+    state := watch.__state.guard_edit()
+    state.value.generation += 1
+    state.value.dirty = true
+    state.value.canceled = true
+    state.value.invalidation_cause = "canceled"
+    state.value.publications += 1
 }
 
 // `data.schema(rows)`: sema passes the checked row type's column names and
@@ -1758,6 +2824,101 @@ priv __query_test_sales: fn() -> [QueryTestSale] Never! {
     assert_eq(found.len(), 1)
     assert_eq(found[0].cents, 40)
     assert_eq(asked.guard_read().value, [String]{" "})
+}
+
+priv __watch_test_items: fn(rows: [QueryTestSale]) -> [String] Never! {
+    out := [String]{}
+    loop row in rows -> out.push("{row.item}:{row.cents}")
+    out
+}
+
+#Test("a watch keeps its rows: a get with no change runs no callback, and each tracked change updates the rows") {
+    tracked: track<QueryTestSale, Int>(__query_test_sales(), fn(sale) { sale.cents }) ?? panic("track")
+    calls: Shared{0}
+    counted: calls.copy()
+    big: __query_filter<QueryTestSale>(__query_tracked<QueryTestSale, Int>(tracked), "", [String]{}, fn(sale) {
+        counted.guard_edit().value += 1
+        sale.cents >= 80
+    })
+    sorted: __query_sort_by<QueryTestSale>(big, fn(sale) { sale.item })
+    watch: query_watch<QueryTestSale>(sorted) ?? panic("watch")
+    assert_eq(__watch_test_items(watch_get<QueryTestSale>(watch) ?? panic("get")), [String]{"apps:80", "core:90", "tools:125"})
+    seen: calls.guard_read().value
+    assert_eq(__watch_test_items(watch_get<QueryTestSale>(watch) ?? panic("get again")), [String]{"apps:80", "core:90", "tools:125"})
+    assert_eq(calls.guard_read().value, seen)
+    unchanged: watch_status<QueryTestSale>(watch)
+    assert_eq(unchanged.mode, "incremental")
+    assert_eq(unchanged.revision, 0)
+    assert_eq(unchanged.recomputations, 0)
+    assert_eq(unchanged.retained_rows, 4)
+    tracked_insert<QueryTestSale, Int>(tracked, QueryTestSale{item: "bits", cents: 99}) ?? panic("insert")
+    tracked_replace<QueryTestSale, Int>(tracked, 125, QueryTestSale{item: "aaa", cents: 125}) ?? panic("replace")
+    tracked_remove<QueryTestSale, Int>(tracked, 80) ?? panic("remove")
+    before: calls.guard_read().value
+    assert_eq(__watch_test_items(watch_get<QueryTestSale>(watch) ?? panic("get after changes")), [String]{"aaa:125", "bits:99", "core:90"})
+    assert_eq(calls.guard_read().value - before, 2)
+    changed: watch_status<QueryTestSale>(watch)
+    assert_eq(changed.revision, 3)
+    assert_eq(changed.recomputations, 0)
+    assert_eq(changed.retained_rows, 4)
+    assert_eq(__watch_test_items(__query_collect<QueryTestSale>(sorted) ?? panic("the batch query still collects")), [String]{"aaa:125", "bits:99", "core:90"})
+    if tracked_insert<QueryTestSale, Int>(tracked, QueryTestSale{item: "again", cents: 99}) == .Ok(_) -> panic("a tracked key is unique")
+    if query_watch<QueryTestSale>(query<QueryTestSale>(__query_test_sales())) == .Ok(_) -> panic("only tracked rows are maintained")
+}
+
+#Test("derived, grouped and joined watches follow tracked changes, a failed get keeps the published rows, and a canceled watch fails") {
+    tracked: track<QueryTestSale, Int>(__query_test_sales(), fn(sale) { sale.cents }) ?? panic("track")
+    source: __query_tracked<QueryTestSale, Int>(tracked)
+    doubled: query_watch<Int>(__query_map<QueryTestSale, Int>(source, fn(sale) { sale.cents * 2 })) ?? panic("map watch")
+    cheapest: query_watch<Int>(__query_min<QueryTestSale, Int>(source, fn(sale) { sale.cents })) ?? panic("min watch")
+    sums: query_watch<Group<String, Int>>(__group_sum_int<QueryTestSale, String>(__query_group_by<QueryTestSale, String>(source, fn(sale) { sale.item }), fn(sale) { sale.cents })) ?? panic("sum watch")
+    means: query_watch<Group<String, Float>>(__group_mean<QueryTestSale, String>(__query_group_by<QueryTestSale, String>(source, fn(sale) { sale.item }), fn(sale) { Float{sale.cents} })) ?? panic("mean watch")
+    labels: query<QueryTestSale>([QueryTestSale]{QueryTestSale{item: "core", cents: 1}})
+    joined: query_watch<DataJoin<QueryTestSale, QueryTestSale>>(__query_inner_join<QueryTestSale, QueryTestSale>(source, labels, fn(sale) { sale.item }, fn(sale) { sale.item })) ?? panic("join watch")
+    first: query_watch<QueryTestSale>(source.limit(2)) ?? panic("limit watch")
+    dear: query_watch<Int>(__query_min<QueryTestSale, Int>(__query_filter<QueryTestSale>(source, "", [String]{}, fn(sale) { sale.cents > 100 }), fn(sale) { sale.cents })) ?? panic("filtered min watch")
+    assert_eq(watch_get<Int>(doubled) ?? panic("map"), [Int]{250, 80, 160, 180})
+    assert_eq(watch_get<Int>(cheapest) ?? panic("min"), [Int]{40})
+    assert_eq((watch_get<Group<String, Int>>(sums) ?? panic("sum"))[1].value, 130)
+    assert_eq((watch_get<DataJoin<QueryTestSale, QueryTestSale>>(joined) ?? panic("join")).len(), 2)
+    assert_eq(__watch_test_items(watch_get<QueryTestSale>(first) ?? panic("limit")), [String]{"tools:125", "core:40"})
+    assert_eq(watch_get<Int>(dear) ?? panic("filtered min"), [Int]{125})
+    assert_eq(watch_status<Group<String, Float>>(means).mode, "recomputed")
+    assert_eq(watch_get<Int>(doubled) ?? panic("map again"), [Int]{250, 80, 160, 180})
+    assert_eq(watch_status<Int>(doubled).recomputations, 0)
+    tracked_insert<QueryTestSale, Int>(tracked, QueryTestSale{item: "core", cents: 10}) ?? panic("insert")
+    tracked_remove<QueryTestSale, Int>(tracked, 125) ?? panic("remove")
+    assert_eq(watch_get<Int>(doubled) ?? panic("map after changes"), [Int]{80, 160, 180, 20})
+    assert_eq(watch_get<Int>(cheapest) ?? panic("min after changes"), [Int]{10})
+    grouped: watch_get<Group<String, Int>>(sums) ?? panic("sum after changes")
+    assert_eq(grouped.len(), 2)
+    assert_eq(grouped[1].key, "core")
+    assert_eq(grouped[1].value, 140)
+    assert_eq(watch_status<Group<String, Int>>(sums).mode, "incremental")
+    assert_eq((watch_get<Group<String, Float>>(means) ?? panic("mean after changes"))[1].value, 140.0 / 3.0)
+    assert_eq(watch_status<Group<String, Float>>(means).recomputations, 1)
+    assert_eq((watch_get<DataJoin<QueryTestSale, QueryTestSale>>(joined) ?? panic("join after changes")).len(), 3)
+    assert_eq(watch_status<DataJoin<QueryTestSale, QueryTestSale>>(joined).revision, 1)
+    assert_eq(__watch_test_items(watch_get<QueryTestSale>(first) ?? panic("limit after changes")), [String]{"core:40", "apps:80"})
+    if watch_get<Int>(dear) == .Ok(_) -> panic("no row is dear after the remove")
+    failed: watch_status<Int>(dear)
+    assert(failed.dirty)
+    assert(failed.error != "")
+    assert_eq(failed.revision, 0)
+    tracked_insert<QueryTestSale, Int>(tracked, QueryTestSale{item: "gear", cents: 300}) ?? panic("insert a dear row")
+    assert_eq(watch_get<Int>(dear) ?? panic("filtered min recovers"), [Int]{300})
+    recovered: watch_status<Int>(dear)
+    assert(!recovered.dirty)
+    assert_eq(recovered.error, "")
+    assert_eq(recovered.revision, 3)
+    watch_cancel<Int>(doubled)
+    canceled: watch_status<Int>(doubled)
+    assert(canceled.canceled)
+    assert(canceled.dirty)
+    assert_eq(canceled.generation, 2)
+    assert_eq(canceled.invalidation_cause, "canceled")
+    if watch_get<Int>(doubled) == .Ok(_) -> panic("a canceled watch fails")
+    if query_watch<Int>(__query_map<QueryTestSale, Int>(labels, fn(sale) { sale.cents })) == .Ok(_) -> panic("a map over plain rows is not maintained")
 }
 
 #Test("schema columns keep their order, nullability and column identity") {

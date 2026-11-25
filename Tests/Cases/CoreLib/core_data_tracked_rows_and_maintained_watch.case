@@ -1,0 +1,14 @@
+# data.track's insert/replace/remove and Query.watch's maintained DataWatch
+# (get/status/cancel) are Core methods; no Core.rows row routes them (#6999 B).
+# A get with no change runs no callback, and a get after edits applies them
+# to the kept rows (#2964), at every optimization level.
+fixture: Fixtures/CoreDataTrackedRowsAndMaintainedWatch
+step: jet run fixture.jet
+stdout: = core_data_tracked_rows_and_maintained_watch.out
+stderr: empty
+step: jet run -O1 fixture.jet
+stdout: = core_data_tracked_rows_and_maintained_watch.out
+stderr: empty
+step: jet run -O2 fixture.jet
+stdout: = core_data_tracked_rows_and_maintained_watch.out
+stderr: empty

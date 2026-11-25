@@ -6,6 +6,7 @@ use {
     build_crypto: core.crypto
     core.build.[BuildGraphNode]
     jet_foundation.[BuildSettingOverride, Span, build_option_accepts, build_option_argument, build_option_row, type_name]
+    jet_eval.[JetCompilerServicesTypeTable, jet_eval_compiler_services_type_table_empty]
 }
 
 BuildSessionPolicy: struct {
@@ -330,6 +331,10 @@ BuildSessionState: struct {
     // `at` is placed in its file's.
     build_file: String{""},
     lines: [String:[Int]]{[String:[Int]]{}},
+    // The type table the build's `Compiler` values make their TypeIds in:
+    // the one its checked program's TypeIds name, as that program's snapshot
+    // left it, and the rows the build's TypeIds added.
+    types: JetCompilerServicesTypeTable,
 }
 
 BuildSession: struct {
@@ -360,6 +365,7 @@ build_session_new: fn(session_id: Int, package: String, compiler_version: String
             args: [String]{},
             start: 0,
             end: 0,
+            types: jet_eval_compiler_services_type_table_empty(),
         }},
     }
 }
@@ -449,6 +455,12 @@ build_session_set_dependencies: fn(session: BuildSession, dependencies: [String:
 build_session_set_identity: fn(session: BuildSession, identity: String) Never! {
     permit := session.storage.guard_edit()
     permit.value.identity = identity.copy()
+}
+
+// The type table of the build's checked program (BuildSessionState.types).
+build_session_set_types: fn(session: BuildSession, types: ^^JetCompilerServicesTypeTable) Never! {
+    permit := session.storage.guard_edit()
+    permit.value.types = types.move()
 }
 
 // The build file's display path and source, whose lines the `site` of each

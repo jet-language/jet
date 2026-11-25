@@ -76,6 +76,8 @@ use {
         Span,
         SymbolID,
         SymbolKind,
+        TComptimeField,
+        TComptimeValue,
         TFuncKind,
         TGenericParam,
         Type,
@@ -83,12 +85,15 @@ use {
         body_codec_get_count,
         body_codec_get_list_type,
         body_codec_get_fnbody,
+        body_codec_get_tcomptimevalue,
         body_codec_get_string,
         body_codec_out,
         body_codec_put_count,
         body_codec_put_fnbody,
+        body_codec_put_tcomptimevalue,
         body_codec_put_string,
         compiler_threads_single,
+        comptime_type_id_row,
         effect_vocabulary_module,
         jet_target_machine_hosted,
         module_intern,
@@ -316,6 +321,31 @@ body_codec_packets: fn(failures: ^[String]) -> [SemaParallelBody] {
     if failures.len() > 0 {
         panic("BodyCodec collected {failures.len()} failures:\n{failures.join("\n")}")
     }
+}
+
+// A TypeId whose handle names `handle`, of the compile's own table.
+body_codec_type_id: fn(handle: Int) -> TComptimeValue {
+    TComptimeValue.Struct{type_name: "TypeId", fields: [TComptimeField]{
+        TComptimeField{name: "identity", value: TComptimeValue.String{value: "geo.Point"}},
+        TComptimeField{name: "handle", value: TComptimeValue.Int{value: handle}},
+        TComptimeField{name: "table", value: TComptimeValue.Int{value: 0}},
+    }}
+}
+
+#Test("a TypeId's handle is written as a type and reads back as the reader's row of it") {
+    out := body_codec_out()
+    body_codec_put_tcomptimevalue(out, body_codec_type_id(40))
+    listed: if out.types.len() == 1 -> Int{out.types[0].id} else -> -1
+    if listed != 40 -> panic("the handle was not listed as a type: {out.types:Debug}")
+    input := BodyCodecIn{at: 0, end: out.bytes.len(), failed: false, symbols: [SymbolID]{}, decls: [DeclID]{}, modules: [ModuleID]{}, types: [TypeID]{TypeID{id: U32{7}}}}
+    read: body_codec_get_tcomptimevalue(out.bytes, input)
+    if input.failed || input.at != input.end -> panic("the TypeId did not read back")
+    row: comptime_type_id_row(read) ?? panic("the TypeId read back names no row")
+    read_row: Int{row.id}
+    if read_row != 7 -> panic("the TypeId read back names row {read_row}, not the reader's row 7")
+    unheld := body_codec_out()
+    body_codec_put_tcomptimevalue(unheld, body_codec_type_id(0))
+    if unheld.types.len() != 0 -> panic("a TypeId with no handle listed a type")
 }
 
 #Test("a checked body read cut short fails and ends") {

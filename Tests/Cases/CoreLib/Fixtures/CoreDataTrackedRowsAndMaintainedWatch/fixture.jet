@@ -1,0 +1,62 @@
+// data.track's keyed edits and a query's maintained watch: the DataTracked
+// and DataWatch methods and Query.watch are Core methods (#6999 B n=19). A
+// get with no change answers the kept rows without running the filter, and
+// a get after edits runs it only on the rows they changed (#2964).
+use data: core.data
+
+Sale: struct {
+    id: Int,
+    cents: Int,
+}
+
+show: fn(rows: [Sale]) {
+    line := "rows:"
+    loop row in rows -> line = "{line} {row.id}={row.cents}"
+    print(line)
+}
+
+show_cents: fn(values: [Int]) {
+    line := "doubled:"
+    loop value in values -> line = "{line} {value}"
+    print(line)
+}
+
+failure: fn(result: Unit data.DataError!) {
+    if result == {
+        .Ok(_) -> print("ok")
+        .Err(err) -> print("{err}")
+    }
+}
+
+run: fn() {
+    if data.track([Sale]{Sale{id: 1, cents: 1}, Sale{id: 1, cents: 2}}, fn(sale: Sale) { sale.id }) == .Err(err) -> print("{err}")
+    sales: data.track([Sale]{Sale{id: 3, cents: 300}, Sale{id: 1, cents: 125}}, fn(sale: Sale) { sale.id }) ?? panic("track: {err}")
+    calls: Shared{0}
+    counted: calls.copy()
+    big: sales.query().filter(fn(sale: Sale) {
+        counted.guard_edit().value += 1
+        sale.cents > 150
+    }).watch() ?? panic("watch: {err}")
+    doubled: sales.query().map(fn(sale: Sale) { sale.cents * 2 }).watch() ?? panic("map watch: {err}")
+    show(big.get() ?? panic("get: {err}"))
+    show(big.get() ?? panic("get again: {err}"))
+    print("filter calls: {calls.guard_read().value}")
+    print(big.status())
+    show_cents(doubled.get() ?? panic("map get: {err}"))
+    failure(sales.insert(Sale{id: 2, cents: 200}))
+    failure(sales.insert(Sale{id: 2, cents: 999}))
+    failure(sales.replace(1, Sale{id: 1, cents: 175}))
+    failure(sales.replace(4, Sale{id: 4, cents: 1}))
+    failure(sales.replace(3, Sale{id: 5, cents: 1}))
+    failure(sales.remove(3))
+    failure(sales.remove(3))
+    show(sales.query().collect() ?? panic("collect: {err}"))
+    show(big.get() ?? panic("get after edits: {err}"))
+    print("filter calls: {calls.guard_read().value}")
+    print(big.status())
+    show_cents(doubled.get() ?? panic("map get after edits: {err}"))
+    big.cancel()
+    if big.get() == .Err(err) -> print("{err}")
+    print(big.status())
+    if data.query([Sale]{Sale{id: 9, cents: 9}}).watch() == .Err(err) -> print("{err}")
+}
