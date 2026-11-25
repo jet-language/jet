@@ -113,18 +113,20 @@ sema_expr_number_constant_refused: fn(name: String, required: Type, environment:
 // literal doesn't fit there either: the caller reads the name as usual and
 // reports the mismatch. `noted` when the caller already read the name at
 // `span` (an operator's left operand, read before its right one is known).
-sema_expr_number_name_read: fn(name: String, span: Span, index: Int, expected: Type?, noted: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> SemaNumberNameRead {
+sema_expr_number_name_read: fn(name: String, span: Span, index: Int, expected: Type?, noted: Bool, check: ^SemaBodyCheck) -> SemaNumberNameRead {
     unhandled: SemaNumberNameRead{handled: false, value: None}
     wanted: expected ?? return unhandled
     // copy: the scope row keeps its literal for the name's other uses.
     literal: (check.scopes.bindings[index].number_literal ?? return unhandled).copy()
-    own: sema_scope_binding_type(environment, check.scopes, index) ?? return unhandled
+    own: sema_scope_binding_type(check.environment.*, check.scopes, index) ?? return unhandled
     // A use the name's own type serves, or widens into, reads the name.
-    required: sema_call_resolved_type(wanted, environment, program)
-    if sema_call_type_assignable(required, own, environment, program) ?? true -> return unhandled
+    required: sema_call_resolved_type(wanted, check.environment.*, check.program.*)
+    if sema_call_type_assignable(required, own, check.environment.*, check.program.*) ?? true {
+        return unhandled
+    }
     if sema_expr_numeric_widening_to(own, required) == (Val(true)) -> return unhandled
     trial := [Diagnostic]{}
-    fitted := sema_probe_expression(literal, expected, environment, program, check, trial) ?? return sema_expr_number_unfit(name, span, required, literal, trial, check.diagnostics)
+    fitted := sema_probe_expression(literal, expected, check, trial) ?? return sema_expr_number_unfit(name, span, required, literal, trial, check.diagnostics)
     if sema_has_error_since(trial, 0) {
         return sema_expr_number_unfit(name, span, required, literal, trial, check.diagnostics)
     }
@@ -132,7 +134,7 @@ sema_expr_number_name_read: fn(name: String, span: Span, index: Int, expected: T
     if check.scopes.bindings[index].mutable {
         loop decided in check.context.number_retypes_known {
             if sema_expr_number_same_binding(decided.binding, binding) {
-                check.diagnostics.push(sema_expr_number_retype_conflict(name, decided, fitted.ty, span, environment))
+                check.diagnostics.push(sema_expr_number_retype_conflict(name, decided, fitted.ty, span, check.environment.*))
                 return SemaNumberNameRead{handled: true, value: None}
             }
         }
@@ -141,12 +143,12 @@ sema_expr_number_name_read: fn(name: String, span: Span, index: Int, expected: T
         return unhandled
     }
     if !noted {
-        check.context.name_references.push(sema_name_reference(span, sema_scope_binding_symbol(environment, check.scopes, index), Val(SymbolKind.Local)))
+        check.context.name_references.push(sema_name_reference(span, sema_scope_binding_symbol(check.environment.*, check.scopes, index), Val(SymbolKind.Local)))
         if !sema_ownership_note_reference(check.state, name, span, check.scopes, AccessConvention.Read) {
             return SemaNumberNameRead{handled: true, value: None}
         }
     }
-    value := sema_check_expression(literal, expected, environment, program, check) ?? return SemaNumberNameRead{handled: true, value: None}
+    value := sema_check_expression(literal, expected, check) ?? return SemaNumberNameRead{handled: true, value: None}
     value.span = span
     SemaNumberNameRead{handled: true, value: Val(value)}
 }
@@ -156,10 +158,10 @@ sema_expr_number_name_read: fn(name: String, span: Span, index: Int, expected: T
 // the reference. Not handled for a constant of another module, one with a
 // written type, a mutable, `#Persist` or comptime one, or one whose value is
 // not a literal.
-sema_expr_number_constant_read: fn(name: String, span: Span, index: Int, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> SemaNumberNameRead {
-    read: sema_expr_number_constant_reread(name, span, index, expected, environment, program, check)
+sema_expr_number_constant_read: fn(name: String, span: Span, index: Int, expected: Type?, check: ^SemaBodyCheck) -> SemaNumberNameRead {
+    read: sema_expr_number_constant_reread(name, span, index, expected, check)
     if read.value != None {
-        check.context.name_references.push(sema_name_reference(span, sema_scope_binding_symbol(environment, check.scopes, index), Val(SymbolKind.Constant)))
+        check.context.name_references.push(sema_name_reference(span, sema_scope_binding_symbol(check.environment.*, check.scopes, index), Val(SymbolKind.Constant)))
     }
     read
 }
@@ -167,22 +169,24 @@ sema_expr_number_constant_read: fn(name: String, span: Span, index: Int, expecte
 // sema_expr_number_constant_read without noting the reference: the caller
 // already read the name at `span` (an operator's left operand, read before
 // its right one is known).
-sema_expr_number_constant_reread: fn(name: String, span: Span, index: Int, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> SemaNumberNameRead {
+sema_expr_number_constant_reread: fn(name: String, span: Span, index: Int, expected: Type?, check: ^SemaBodyCheck) -> SemaNumberNameRead {
     unhandled: SemaNumberNameRead{handled: false, value: None}
     wanted: expected ?? return unhandled
-    symbol: sema_scope_binding_symbol(environment, check.scopes, index)
-    if symbol.module_identity != environment.module_identity -> return unhandled
-    own: sema_scope_binding_type(environment, check.scopes, index) ?? return unhandled
-    required: sema_call_resolved_type(wanted, environment, program)
-    if sema_call_type_assignable(required, own, environment, program) ?? true -> return unhandled
+    symbol: sema_scope_binding_symbol(check.environment.*, check.scopes, index)
+    if symbol.module_identity != check.environment.module_identity -> return unhandled
+    own: sema_scope_binding_type(check.environment.*, check.scopes, index) ?? return unhandled
+    required: sema_call_resolved_type(wanted, check.environment.*, check.program.*)
+    if sema_call_type_assignable(required, own, check.environment.*, check.program.*) ?? true {
+        return unhandled
+    }
     if sema_expr_numeric_widening_to(own, required) == (Val(true)) -> return unhandled
-    literal: sema_expr_number_constant_literal(symbol, program) ?? return unhandled
+    literal: sema_expr_number_constant_literal(symbol, check.program.*) ?? return unhandled
     trial := [Diagnostic]{}
-    _: sema_probe_expression(literal, expected, environment, program, check, trial) ?? return sema_expr_number_unfit(name, span, required, literal, trial, check.diagnostics)
+    _: sema_probe_expression(literal, expected, check, trial) ?? return sema_expr_number_unfit(name, span, required, literal, trial, check.diagnostics)
     if sema_has_error_since(trial, 0) {
         return sema_expr_number_unfit(name, span, required, literal, trial, check.diagnostics)
     }
-    value := sema_check_expression(literal, expected, environment, program, check) ?? return SemaNumberNameRead{handled: true, value: None}
+    value := sema_check_expression(literal, expected, check) ?? return SemaNumberNameRead{handled: true, value: None}
     value.span = span
     SemaNumberNameRead{handled: true, value: Val(value)}
 }
@@ -270,20 +274,18 @@ sema_expr_number_name_operand: fn(expr: Expr, environment: SemaScopeEnvironment,
 // sema_expr_number_constant_read): `price * rate` with `price: Float` and
 // `rate: 0.5` multiplies two Floats, as does `price * RATE` with a module
 // constant `RATE: 0.5`, and `total + price` makes a `:=` name `total` a Float.
-sema_expr_number_operand_read: fn(operand: Expr, other: Type, noted: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> SemaNumberNameRead {
+sema_expr_number_operand_read: fn(operand: Expr, other: Type, noted: Bool, check: ^SemaBodyCheck) -> SemaNumberNameRead {
     unhandled: SemaNumberNameRead{handled: false, value: None}
     if operand == .Ident(name, span, _) {
         index: sema_scope_resolve_index(check.scopes, name) ?? return unhandled
-        own: sema_scope_binding_type(environment, check.scopes, index) ?? return unhandled
+        own: sema_scope_binding_type(check.environment.*, check.scopes, index) ?? return unhandled
         if !sema_expr_number_types_refused(own, other) -> return unhandled
         if check.scopes.bindings[index].number_literal != None {
-            return sema_expr_number_name_read(name, span, index, Val(other), noted, environment, program, check)
+            return sema_expr_number_name_read(name, span, index, Val(other), noted, check)
         }
         if check.scopes.bindings[index].symbol.kind != SymbolKind.Constant -> return unhandled
-        if noted {
-            return sema_expr_number_constant_reread(name, span, index, Val(other), environment, program, check)
-        }
-        return sema_expr_number_constant_read(name, span, index, Val(other), environment, program, check)
+        if noted -> return sema_expr_number_constant_reread(name, span, index, Val(other), check)
+        return sema_expr_number_constant_read(name, span, index, Val(other), check)
     }
     unhandled
 }
@@ -315,7 +317,7 @@ sema_expr_number_target_value_typed: fn(expr: Expr, environment: SemaScopeEnviro
 // at scope row `index` (sema_expr_number_target_open), whose value has the
 // type `offered` that the name's own type refuses, is a use of that type:
 // when the name's literal takes it, the next pass declares the name at it.
-sema_expr_number_target_retype: fn(index: Int, offered: Type, name_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) {
+sema_expr_number_target_retype: fn(index: Int, offered: Type, name_span: Span, check: ^SemaBodyCheck) {
     if !sema_expr_number_target_open(index, check.scopes, check.context) {
         return
     }
@@ -326,7 +328,7 @@ sema_expr_number_target_retype: fn(index: Int, offered: Type, name_span: Span, e
     // copy: the scope row keeps its literal for the name's other uses.
     literal: (check.scopes.bindings[index].number_literal ?? return).copy()
     trial := [Diagnostic]{}
-    fitted := sema_probe_expression(literal, Val(offered), environment, program, check, trial) ?? return
+    fitted := sema_probe_expression(literal, Val(offered), check, trial) ?? return
     if sema_has_error_since(trial, 0) {
         return
     }

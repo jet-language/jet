@@ -143,11 +143,11 @@ sema_link_static_call: fn(result_ty: Type, op: String, inner_ty: Type, args: [TC
 }
 
 // Typecheck `@expr` / `@Struct{...}` (`Call{name: "__jet_link", args: [operand]}`).
-sema_link_check_creation: fn(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> TExpr? {
+sema_link_check_creation: fn(call: Call, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
     operand: call.args[0].expr
     span: Span{start: call.name_span.start, end: expr_span(operand).end}
     inner_expected: if expected == .Val(exp) -> foundation_link_inner(exp) else -> None
-    checked: sema_check_expression(operand, inner_expected, environment, program, check) ?? return None
+    checked: sema_check_expression(operand, inner_expected, check) ?? return None
     is_place: sema_link_expr_is_place(operand)
     link_ty: foundation_link_type(checked.ty)
     // A fresh object literal (`@Node{...}`) is always kept counted storage;
@@ -165,23 +165,23 @@ sema_link_check_creation: fn(call: Call, expected: Type?, environment: SemaScope
         _ := sema_ownership_check_use(check.state, operand, check.scopes, check.diagnostics)
         if plan.lifetime == SemaLinkLifetime.Brief {
             borrowed: sema_tree_node(link_ty, TExprKind.Borrow{place: checked, access: AccessConvention.Read}, span)
-            return sema_expr_expected(borrowed, expected, environment, program, check.diagnostics)
+            return sema_expr_expected(borrowed, expected, check.environment.*, check.program.*, check.diagnostics)
         }
     }
     arg: sema_link_call_arg(checked, is_place)
     built: sema_link_static_call(link_ty, plan.core_call_name, checked.ty, [TCallArg]{arg}, span)
-    sema_expr_expected(built, expected, environment, program, check.diagnostics)
+    sema_expr_expected(built, expected, check.environment.*, check.program.*, check.diagnostics)
 }
 
 // Typecheck `a.same(b)` on `@T` live links: compares link identity (`Bool`),
 // whereas `a == b` compares target values.
-sema_link_check_same: fn(receiver_value: TExpr, inner_ty: Type, args: [CallArg], method_span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> TExpr? {
+sema_link_check_same: fn(receiver_value: TExpr, inner_ty: Type, args: [CallArg], method_span: Span, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
     if args.len() != 1 {
         check.diagnostics.push(sema_error("E0104", method_span, "`.same(...)` expects 1 argument, got {args.len()}", "`.same(other)` compares whether two live links point at the same target", "call `a.same(b)` with one `@T` link"))
         return None
     }
     link_ty: foundation_link_type(inner_ty)
-    other: sema_check_expression(args[0].expr, Val(link_ty), environment, program, check) ?? return None
+    other: sema_check_expression(args[0].expr, Val(link_ty), check) ?? return None
     if foundation_link_inner(other.ty) == None {
         check.diagnostics.push(sema_error("E0108", args[0].span, "`.same(...)` expects a live link `@{type_name(inner_ty)}`, got `{type_name(other.ty)}`", "`.same(other)` compares link identity between two `@T` links", "pass a `@{type_name(inner_ty)}` link, or use `==` to compare values"))
         return None
@@ -192,7 +192,7 @@ sema_link_check_same: fn(receiver_value: TExpr, inner_ty: Type, args: [CallArg],
         sema_link_call_arg(other, true),
     }
     compared: sema_link_static_call(Type.Bool, "same", inner_ty, call_args, span)
-    sema_expr_expected(compared, expected, environment, program, check.diagnostics)
+    sema_expr_expected(compared, expected, check.environment.*, check.program.*, check.diagnostics)
 }
 
 #Test("live link classification enforces lifetime, task-crossing sharing, local pin, and container item rules") {

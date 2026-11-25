@@ -55,16 +55,16 @@ sema_call_http_static_tree_arg: fn(value: TExpr, argument: CallArg) -> TCallArg 
     }
 }
 
-sema_call_http_check_value: fn(argument: CallArg, required: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> TExpr? {
-    checked: sema_check_expression(argument.expr, Val(required), environment, program, check) ?? return None
+sema_call_http_check_value: fn(argument: CallArg, required: Type, check: ^SemaBodyCheck) -> TExpr? {
+    checked: sema_check_expression(argument.expr, Val(required), check) ?? return None
     if type_identity_equal(checked.ty, required) -> return Val(checked)
-    compatible: sema_call_type_assignable(required, checked.ty, environment, program) ?? return None
+    compatible: sema_call_type_assignable(required, checked.ty, check.environment.*, check.program.*) ?? return None
     if compatible -> return Val(checked)
     if sema_expr_numeric_value_widening(checked, required) == (.Val(true)) {
-        line: sema_source_line_at(environment.source_segments, checked.span) ?? 0
+        line: sema_source_line_at(check.environment.source_segments, checked.span) ?? 0
         return sema_expr_numeric_literal_conversion(checked, required, checked.span, line, check.diagnostics)
     }
-    check.diagnostics.push(sema_type_mismatch(required, checked.ty, argument.span, program))
+    check.diagnostics.push(sema_type_mismatch(required, checked.ty, argument.span, check.program.*))
     None
 }
 
@@ -142,24 +142,22 @@ sema_call_http_check_middleware_callback: fn(value: TExpr, environment: SemaScop
     true
 }
 
-sema_call_http_middleware: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
+sema_call_http_middleware: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
     updated_args := args
     if updated_args.len() != 1 {
         check.diagnostics.push(sema_call_arity_diagnostic("middleware", 1, updated_args.len(), false, span))
-        loop argument in updated_args {
-            _ := sema_check_expression(argument.expr, None, environment, program, check)
-        }
+        loop argument in updated_args -> _ := sema_check_expression(argument.expr, None, check)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    handler_ty: sema_call_resolved_type(Type.Named{name: "HTTPHandler"}, environment, program)
+    handler_ty: sema_call_resolved_type(Type.Named{name: "HTTPHandler"}, check.environment.*, check.program.*)
     callback_type := Type.Fn{params: [Type]{handler_ty}, ret: Val(handler_ty), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
-    callback: sema_check_expression_with_lambda_escapes(updated_args[0].expr, Val(callback_type), environment, program, check, Val(true)) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    compatible: sema_call_type_assignable(callback_type, callback.ty, environment, program) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    callback: sema_check_expression_with_lambda_escapes(updated_args[0].expr, Val(callback_type), check, Val(true)) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    compatible: sema_call_type_assignable(callback_type, callback.ty, check.environment.*, check.program.*) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     if !compatible {
-        check.diagnostics.push(sema_type_mismatch(callback_type, callback.ty, updated_args[0].span, program))
+        check.diagnostics.push(sema_type_mismatch(callback_type, callback.ty, updated_args[0].span, check.program.*))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    if !sema_call_http_check_middleware_callback(callback, environment, program, check.scopes, check.state, check.context, check.diagnostics) {
+    if !sema_call_http_check_middleware_callback(callback, check.environment.*, check.program.*, check.scopes, check.state, check.context, check.diagnostics) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     updated_args[0].convention = AccessConvention.Move
@@ -168,7 +166,7 @@ sema_call_http_middleware: fn(receiver: Expr, receiver_value: TExpr, args: [Call
     if !ownership.accepted || !ownership.complete {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    sema_call_http_mux_source_call(receiver_value, "__http_middleware", [TCallArg]{sema_call_http_static_tree_arg(callback, updated_args[0])}, span, expected, environment, program, check)
+    sema_call_http_mux_source_call(receiver_value, "__http_middleware", [TCallArg]{sema_call_http_static_tree_arg(callback, updated_args[0])}, span, expected, check)
 }
 
 // A route registration lowers to its receiver's own source method (an App's
@@ -178,12 +176,12 @@ sema_call_http_middleware: fn(receiver: Expr, receiver_value: TExpr, args: [Call
 // the method): the place of this call, as at any call. An App method (the
 // server's or the app graph's) returns the App, so registrations chain; a
 // router's registers Net.
-sema_call_http_mux_source_call: fn(receiver_value: TExpr, method: String, args: ^^[TCallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
+sema_call_http_mux_source_call: fn(receiver_value: TExpr, method: String, args: ^^[TCallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
     owner: sema_call_http_nominal_leaf(receiver_value.ty)
     // Snapshot: a mux method resolves only against a registered owner.
-    if program.registration_graph.mode == .Snapshot -> return sema_call_http_mux_unavailable(check.context, "`{owner}.{method}` has no registration graph to resolve it in")
-    graph: program.registration_graph
-    candidates := sema_expr_registration_method_candidates(graph, environment.module_identity, receiver_value.ty, method, [Type]{}, [Type]{}, span, environment, program, check.diagnostics)
+    if check.program.registration_graph.mode == .Snapshot -> return sema_call_http_mux_unavailable(check.context, "`{owner}.{method}` has no registration graph to resolve it in")
+    graph: check.program.registration_graph
+    candidates := sema_expr_registration_method_candidates(graph, check.environment.module_identity, receiver_value.ty, method, [Type]{}, [Type]{}, span, check.environment.*, check.program.*, check.diagnostics)
     candidate := candidates.pop() ?? return sema_call_http_mux_unavailable(check.context, "`{owner}.{method}` is not registered")
     params: sema_call_params_from_type_after(candidate.signature, candidate.receiver_offset) ?? return sema_call_http_mux_unavailable(check.context, "`{owner}.{method}` has no parameter list")
     filled := args.move()
@@ -197,16 +195,16 @@ sema_call_http_mux_source_call: fn(receiver_value: TExpr, method: String, args: 
             return sema_call_http_mux_unavailable(check.context, "`{owner}.{method}` parameter `{params[index].name}` has a default other than `#caller`")
         }
         declared_ty: params[index].ty ?? return sema_call_http_mux_unavailable(check.context, "`{owner}.{method}` parameter `{params[index].name}` has no type")
-        location: sema_check_expression(sema_site_location_expr("", environment, program, check.scopes, span), Val(sema_call_resolved_type(declared_ty, environment, program)), environment, program, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+        location: sema_check_expression(sema_site_location_expr("", check.environment.*, check.program.*, check.scopes, span), Val(sema_call_resolved_type(declared_ty, check.environment.*, check.program.*)), check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         filled.push(sema_call_http_static_tree_arg(location, sema_call_http_core_synthetic_arg(declared, span)))
     }
-    app: sema_app_is_route_table(receiver_value.ty, environment, program) || sema_app_is_graph(receiver_value.ty, environment, program)
+    app: sema_app_is_route_table(receiver_value.ty, check.environment.*, check.program.*) || sema_app_is_graph(receiver_value.ty, check.environment.*, check.program.*)
     result_type: if app -> receiver_value.ty.copy() else -> Type.Named{name: "Unit"}
     built := sema_tree_node(result_type, TExprKind.MethodCall{receiver: receiver_value, method: candidate.method.move(), type_args: [Type]{}, args: filled.move()}, span)
     if !app {
-        sema_call_http_record_effect("Net", "{owner}.{method}", built.ty, span, environment, program, check.scopes, check.context, check.diagnostics)
+        sema_call_http_record_effect("Net", "{owner}.{method}", built.ty, span, check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics)
     }
-    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(built, expected, environment, program, check.diagnostics)}
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(built, expected, check.environment.*, check.program.*, check.diagnostics)}
 }
 
 // A route registration whose Core source method this checker can't resolve
@@ -270,12 +268,12 @@ sema_call_http_core_form_descriptor: fn(field: Field, value_variant: String, con
 // markers hear the call before it is checked (Calls/CheckRules.jet), as
 // `form` called on the model with the action alone: Core's `#Web.Form`
 // rejects an action that does not take the model.
-sema_call_try_web_form: fn(module_name: String, member: String, alias: String, alias_span: Span, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> SemaDirectSpecialCheck {
+sema_call_try_web_form: fn(module_name: String, member: String, alias: String, alias_span: Span, args: [CallArg], type_args: [Type], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaDirectSpecialCheck {
     if module_name != SEMA_WEB_MARKER_MODULE || member != "form" {
         return SemaDirectSpecialCheck{handled: false, value: None}
     }
-    imported: sema_call_core_import_target(environment, program, alias) ?? return SemaDirectSpecialCheck{handled: false, value: None}
-    if !sema_call_core_record_import_reference(environment, program, check.scopes, imported, alias_span, check.context) {
+    imported: sema_call_core_import_target(check.environment.*, check.program.*, alias) ?? return SemaDirectSpecialCheck{handled: false, value: None}
+    if !sema_call_core_record_import_reference(check.environment.*, check.program.*, check.scopes, imported, alias_span, check.context) {
         return SemaDirectSpecialCheck{handled: false, value: None}
     }
     rules := [SemaCallRule]{}
@@ -283,32 +281,30 @@ sema_call_try_web_form: fn(module_name: String, member: String, alias: String, a
     if args.len() == 2 && args[0].label == .Val(label) && label.name == "action" -> action_index = 0
     model_index: 1 - action_index
     model := Type.Named{name: ""}
-    graph: program.registration_graph
+    graph: check.program.registration_graph
     if sema_call_rules_heard_here(check.scopes) && args.len() == 2 && args[model_index].expr == .Ident(name, _, _) {
         model = Type.Named{name: name}
-        rules = sema_call_rules_of_type(graph, model, environment.module_row)
+        rules = sema_call_rules_of_type(graph, model, check.environment.module_row)
     }
-    if rules.len() == 0 -> return sema_call_http_web_form(args, type_args, span, expected, environment, program, check)
-    hearing: sema_call_rules_hear(rules, None, member, span, [CallArg]{args[action_index]}, None, Val(model), None, args[model_index].span, None, "", check.scopes.current, environment, program, check)
+    if rules.len() == 0 -> return sema_call_http_web_form(args, type_args, span, expected, check)
+    hearing: sema_call_rules_hear(rules, None, member, span, [CallArg]{args[action_index]}, None, Val(model), None, args[model_index].span, None, "", check.scopes.current, check)
     if hearing.rejected -> return SemaDirectSpecialCheck{handled: true, value: None}
-    if !hearing.staged -> return sema_call_http_web_form(args, type_args, span, expected, environment, program, check)
+    if !hearing.staged -> return sema_call_http_web_form(args, type_args, span, expected, check)
     held := [Diagnostic]{}
     sema_body_check_swap_diagnostics(check, held)
-    checked: sema_call_http_web_form(args, type_args, span, expected, environment, program, check)
+    checked: sema_call_http_web_form(args, type_args, span, expected, check)
     sema_body_check_swap_diagnostics(check, held)
     if sema_call_rules_hold(hearing, held, check.context, check.diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
     checked
 }
 
-sema_call_http_web_form: fn(args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> SemaDirectSpecialCheck Never! {
+sema_call_http_web_form: fn(args: [CallArg], type_args: [Type], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaDirectSpecialCheck Never! {
     if !sema_call_core_check_type_args(SEMA_WEB_MARKER_MODULE, "form", 0, false, type_args, span, check.diagnostics) {
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
     if args.len() != 2 {
         check.diagnostics.push(sema_call_arity_diagnostic("form", 2, args.len(), false, span))
-        loop argument in args {
-            _ := sema_check_expression(argument.expr, None, environment, program, check)
-        }
+        loop argument in args -> _ := sema_check_expression(argument.expr, None, check)
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
     action_index := 1
@@ -319,22 +315,20 @@ sema_call_http_web_form: fn(args: [CallArg], type_args: [Type], span: Span, expe
         .Ident(name, _, _) -> name
         .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {
             check.diagnostics.push(sema_error("E2474", args[model_index].span, "web.form needs a named model type", "the form field set is derived from one declared struct, so a runtime value cannot provide its schema", "pass the struct name as the first argument: `web.form(Checkout, action: submit)`"))
-            loop argument in args {
-                _ := sema_check_expression(argument.expr, None, environment, program, check)
-            }
+            loop argument in args -> _ := sema_check_expression(argument.expr, None, check)
             return SemaDirectSpecialCheck{handled: true, value: None}
         }
     }
-    definition: sema_http_route_find_struct(environment, program, Type.Named{name: model_name}, environment.module_identity) ?? {
+    definition: sema_http_route_find_struct(check.environment.*, check.program.*, Type.Named{name: model_name}, check.environment.module_identity) ?? {
         check.diagnostics.push(sema_error("E2474", args[model_index].span, "web.form model `{model_name}` is not a declared struct", "the form field set must come from the model's declared fields", "declare `{model_name}: struct {{ ... }}` before constructing the form"))
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
-    if !sema_web_type_marked(Type.Named{name: model_name}, SEMA_WEB_MARKER_FORM, environment, program) {
+    if !sema_web_type_marked(Type.Named{name: model_name}, SEMA_WEB_MARKER_FORM, check.environment.*, check.program.*) {
         check.diagnostics.push(sema_error("E2474", args[model_index].span, "the web.form model `{model_name}` is not marked `#Web.Form`", "a form derives its fields only from a model struct the web module's `#Form` marks", "mark the model: `#Web.Form {model_name}: struct {{ ... }}`"))
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
-    graph: program.registration_graph
-    model_row: sema_type_resolve_nominal_row(graph, Type.Named{name: model_name}, environment.module_identity) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    graph: check.program.registration_graph
+    model_row: sema_type_resolve_nominal_row(graph, Type.Named{name: model_name}, check.environment.module_identity) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     model_module_identity := graph.modules[model_row.module_index].module_identity
     action_name: if args[action_index].expr == {
         .Ident(name, _, _) -> name
@@ -352,7 +346,7 @@ sema_call_http_web_form: fn(args: [CallArg], type_args: [Type], span: Span, expe
         check.diagnostics.push(sema_error("E2474", args[action_index].span, "web.form action must be a named function", "the action is registered through the existing typed server-function boundary", "pass a named action function: `web.form({model_name}, action: submit)`"))
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
-    if sema_http_route_find_function(environment, program, check.scopes, action_name) == None {
+    if sema_http_route_find_function(check.environment.*, check.program.*, check.scopes, action_name) == None {
         check.diagnostics.push(sema_error("E2474", args[action_index].span, "form action `{action_name}` does not accept `{model_name}`", "the form derives its fields from the model and the one server-function action must receive that exact input type", "change `{action_name}` to accept `{model_name}` as its only parameter"))
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
@@ -388,7 +382,7 @@ sema_call_http_web_form: fn(args: [CallArg], type_args: [Type], span: Span, expe
             }
         }
         descriptor := sema_call_http_core_form_descriptor(field, value_variant, control_variant)
-        descriptor_value: sema_check_expression(descriptor, Val(Type.Named{name: "WebFormFieldSpec"}), environment, program, check) ?? {
+        descriptor_value: sema_check_expression(descriptor, Val(Type.Named{name: "WebFormFieldSpec"}), check) ?? {
             valid = false
             next
         }
@@ -397,17 +391,17 @@ sema_call_http_web_form: fn(args: [CallArg], type_args: [Type], span: Span, expe
     if !valid -> return SemaDirectSpecialCheck{handled: true, value: None}
 
     input_values := [TExpr]{sema_call_http_core_string(model_name, span), sema_tree_node(Type.List{element: Type.Named{name: "WebFormFieldSpec"}}, TExprKind.ListLit{values: descriptor_values}, span)}
-    input_call: sema_call_core_source_declared("core.web.forms", "input", [Type]{}, input_values, span, environment, program, check.diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-    input := sema_call_http_core_unwrap_result(input_call, Type.Named{name: "WebFormInput"}, "web.form could not construct its derived input", span, environment, program, check.scopes)
+    input_call: sema_call_core_source_declared("core.web.forms", "input", [Type]{}, input_values, span, check.environment.*, check.program.*, check.diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    input := sema_call_http_core_unwrap_result(input_call, Type.Named{name: "WebFormInput"}, "web.form could not construct its derived input", span, check.environment.*, check.program.*, check.scopes)
 
     // `typed<Model>` is generic in the model only: the form it returns is
     // a `WebFormTyped<Model>`, whose field-naming methods take
     // `FieldRef<Model, T>`. The call reads its type arguments, so the
     // form type takes the same list.
-    model_args: [Type]{sema_expr_expected_type(Type.Named{name: model_name}, environment, program)}
-    typed_call: sema_call_core_source_declared("core.web.forms", "typed", model_args, [TExpr]{input, sema_call_http_core_string(action_name, span)}, span, environment, program, check.diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-    form_type: Type.Apply{name: sema_core_source_type_name(program, "core.web.forms", "WebFormTyped"), args: model_args}
-    result := sema_call_http_core_unwrap_result(typed_call, form_type, "web.form could not register its typed action", span, environment, program, check.scopes)
-    return SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(result, expected, environment, program, check.diagnostics)}
+    model_args: [Type]{sema_expr_expected_type(Type.Named{name: model_name}, check.environment.*, check.program.*)}
+    typed_call: sema_call_core_source_declared("core.web.forms", "typed", model_args, [TExpr]{input, sema_call_http_core_string(action_name, span)}, span, check.environment.*, check.program.*, check.diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    form_type: Type.Apply{name: sema_core_source_type_name(check.program.*, "core.web.forms", "WebFormTyped"), args: model_args}
+    result := sema_call_http_core_unwrap_result(typed_call, form_type, "web.form could not register its typed action", span, check.environment.*, check.program.*, check.scopes)
+    return SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(result, expected, check.environment.*, check.program.*, check.diagnostics)}
 }
 

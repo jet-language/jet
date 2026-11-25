@@ -99,7 +99,7 @@ sema_failure_marks_written: fn(value: Expr, conversion: TryConvert, note: Expr?,
 
 // A call written `call()?`: under the policy it checks as the unmarked call
 // does, which owes no mark; outside it the `?` is refused.
-sema_failure_marks_check_written: fn(value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> TExpr? {
+sema_failure_marks_check_written: fn(value: Expr, span: Span, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
     if !check.scopes.failures_explicit {
         mark: Span{start: span.end - 1, end: span.end}
         check.diagnostics.push(sema_error("E-ERR-PROPAGATE", mark, "A bare `?` has no meaning.", "Fallible calls propagate automatically; `?(text)` is reserved for adding one failure-context frame.", "remove the trailing `?`, or write `?(text)` to add one context frame."))
@@ -107,7 +107,7 @@ sema_failure_marks_check_written: fn(value: Expr, span: Span, expected: Type?, e
     }
     previous: check.context.failure_mark_written
     check.context.failure_mark_written = expr_node_id(value)
-    checked: sema_check_expression(value, expected, environment, program, check)
+    checked: sema_check_expression(value, expected, check)
     check.context.failure_mark_written = previous
     checked
 }

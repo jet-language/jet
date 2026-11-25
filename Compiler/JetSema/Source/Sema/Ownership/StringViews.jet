@@ -217,23 +217,23 @@ sema_string_view_check_read: fn(name: String, span: Span, scopes: SemaScopeTable
 
 // A string view, or a read view local, read at an owning destination is
 // materialized into an owned copy.
-sema_string_view_materialize: fn(name: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> TExpr? {
+sema_string_view_materialize: fn(name: String, span: Span, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
     previous_borrow := check.context.borrow_ctx
     previous_read := check.context.allow_string_view_read
     check.context.borrow_ctx = true
     check.context.allow_string_view_read = true
-    checked_value := sema_expr_check_identifier(name, span, None, environment, program, check)
+    checked_value := sema_expr_check_identifier(name, span, None, check)
     check.context.borrow_ctx = previous_borrow
     check.context.allow_string_view_read = previous_read
     checked: checked_value ?? return None
-    facts := sema_copy_classify(checked.ty, SemaCopyIntent.Materialize, environment, program, check.context.generic_params, true)
+    facts := sema_copy_classify(checked.ty, SemaCopyIntent.Materialize, check.environment.*, check.program.*, check.context.generic_params, true)
     if !facts.accepted {
-        return sema_expr_expected(checked, expected, environment, program, check.diagnostics)
+        return sema_expr_expected(checked, expected, check.environment.*, check.program.*, check.diagnostics)
     }
     if sema_copy_effect_name(facts) != None || sema_copy_memory_operation(facts) != None {
         check.context.copy_events.push(SemaCopyEvent{span: span, facts: facts})
     }
-    sema_expr_expected_owned(sema_tree_node(facts.target, TExprKind.MaterializeView{value: checked}, span), expected, environment, program, check.diagnostics)
+    sema_expr_expected_owned(sema_tree_node(facts.target, TExprKind.MaterializeView{value: checked}, span), expected, check.environment.*, check.program.*, check.diagnostics)
 }
 
 // The owning `String` destinations that materialize a string view.
@@ -272,10 +272,10 @@ sema_string_view_stable_owner: fn(scopes: SemaScopeTable, state: SemaOwnershipSt
 // A declared `View<str>` struct field takes a live string view with a stable
 // owner, or a `trim`/`after`/`before` call on a `String` name. An owned
 // `String` is not a view.
-sema_string_view_check_field: fn(value: Expr, field_ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> TExpr? {
+sema_string_view_check_field: fn(value: Expr, field_ty: Type, check: ^SemaBodyCheck) -> TExpr? {
     previous_read := check.context.allow_string_view_read
     check.context.allow_string_view_read = true
-    checked_value := sema_check_expression_with_lambda_escapes(value, None, environment, program, check, Val(true))
+    checked_value := sema_check_expression_with_lambda_escapes(value, None, check, Val(true))
     check.context.allow_string_view_read = previous_read
     checked: checked_value ?? return None
     if checked.ty != Type.String -> return Val(checked)
@@ -314,10 +314,10 @@ sema_string_view_return_source: fn(value: Expr, scopes: SemaScopeTable, state: ^
     sema_string_view_call_sources(value, scopes, state).len() > 0
 }
 
-sema_string_view_return_value: fn(value: Expr, success: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> TExpr? {
+sema_string_view_return_value: fn(value: Expr, success: Type, check: ^SemaBodyCheck) -> TExpr? {
     previous_read := check.context.allow_string_view_read
     check.context.allow_string_view_read = true
-    checked_value := sema_check_expression(value, None, environment, program, check)
+    checked_value := sema_check_expression(value, None, check)
     check.context.allow_string_view_read = previous_read
     checked: checked_value ?? return None
     if checked.ty != Type.String -> return Val(checked)

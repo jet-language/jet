@@ -622,18 +622,18 @@ sema_copy_site_check_field: fn(value: Expr, environment: SemaScopeEnvironment, p
 // else a clone refuses) is never copied into the field
 // (sema_copy_site_refuse_copy). `consumer` names the literal in the report.
 // False when the move is invalid.
-sema_copy_site_record_move: fn(value: Expr, consumer: String, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> Bool {
+sema_copy_site_record_move: fn(value: Expr, consumer: String, check: ^SemaBodyCheck) -> Bool {
     payload: sema_copy_site_payload(value)
     site: sema_copy_site_owned_ident(payload, check.scopes, check.context) ?? return true
     if site.borrowed || sema_ownership_name_live_after(site.name, check.tail_store, check.context) {
         // `copies: .Explicit` already reported this copy site (E0120).
         if check.scopes.copies_explicit -> return true
-        return sema_copy_site_refuse_copy(payload, site, consumer, environment, program, check.scopes, check.state, check.context, check.diagnostics)
+        return sema_copy_site_refuse_copy(payload, site, consumer, check.environment.*, check.program.*, check.scopes, check.state, check.context, check.diagnostics)
     }
     // A Copy value (`Complex`, `Range`, a `Ptr`) copies at its last use as at
     // any other: nothing moves, so nothing repeats on a loop's next iteration
     // either. (A share site never takes a Copy type: sema_function_accept_share_sites.)
-    facts: sema_copy_classify(site.ty, SemaCopyIntent.Clone, environment, program, check.context.generic_params, false)
+    facts: sema_copy_classify(site.ty, SemaCopyIntent.Clone, check.environment.*, check.program.*, check.context.generic_params, false)
     if facts.complete && facts.copyable -> return true
     first: check.state.moved.len()
     moved: sema_ownership_mark_unmarked_move(check.state, payload, check.scopes, consumer, check.diagnostics)

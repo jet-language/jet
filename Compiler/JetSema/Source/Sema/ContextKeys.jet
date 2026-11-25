@@ -233,7 +233,7 @@ sema_context_root: fn(root: String, root_span: Span, environment: SemaScopeEnvir
 // and a `#Memo` key holds the value (Effects/Checks.jet
 // sema_effect_context_reach), compared by the type's equality.
 // Unhandled unless the receiver names the task context (sema_context_root).
-sema_context_get: fn(receiver: Expr, method: String, method_span: Span, args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> SemaDirectSpecialCheck {
+sema_context_get: fn(receiver: Expr, method: String, method_span: Span, args: [CallArg], expected: Type?, check: ^SemaBodyCheck) -> SemaDirectSpecialCheck {
     unhandled: SemaDirectSpecialCheck{handled: false, value: None}
     root := ""
     root_span := Span{start: 0, end: 0}
@@ -241,7 +241,7 @@ sema_context_get: fn(receiver: Expr, method: String, method_span: Span, args: [C
         root = name
         root_span = name_span
     }
-    if root == "" || !sema_context_root(root, root_span, environment, program, check.scopes, check.context) {
+    if root == "" || !sema_context_root(root, root_span, check.environment.*, check.program.*, check.scopes, check.context) {
         return unhandled
     }
     failed: SemaDirectSpecialCheck{handled: true, value: None}
@@ -256,26 +256,26 @@ sema_context_get: fn(receiver: Expr, method: String, method_span: Span, args: [C
     }
     name := ""
     if args[0].expr == .Ident(written, _, _) -> name = written
-    resolved: if name == "" -> SemaContextKey?{None} else -> sema_context_key_resolve(name, environment, program, check.scopes)
+    resolved: if name == "" -> SemaContextKey?{None} else -> sema_context_key_resolve(name, check.environment.*, check.program.*, check.scopes)
     found: resolved ?? {
         // A constant whose value is still being computed while building has
         // no type yet, so it can't be read as a key; reading the name records
         // the wait, and the check runs again once the value lands
         // (sema_check_comptime_function).
-        if name != "" && sema_context_key_waits(name, environment, check.scopes) {
-            _ := sema_check_expression(args[0].expr, None, environment, program, check)
+        if name != "" && sema_context_key_waits(name, check.environment.*, check.scopes) {
+            _ := sema_check_expression(args[0].expr, None, check)
             return failed
         }
         check.diagnostics.push(sema_error("E0761", expr_span(args[0].expr), "`context.get` needs a context key", "only a constant declared with `#ContextKey` names a context value", "declare a snake_case key such as `#ContextKey frame_index: 0` and pass its name"))
         return failed
     }
-    default: sema_check_expression(args[0].expr, None, environment, program, check) ?? return failed
-    if !sema_effect_record_intrinsic_effects(environment, program, check.scopes, check.context, "context.get", span, [EffectRowEntry]{}, check.diagnostics) {
+    default: sema_check_expression(args[0].expr, None, check) ?? return failed
+    if !sema_effect_record_intrinsic_effects(check.environment.*, check.program.*, check.scopes, check.context, "context.get", span, [EffectRowEntry]{}, check.diagnostics) {
         return failed
     }
-    equatable: sema_type_equatable(environment, program, found.ty)
+    equatable: sema_type_equatable(check.environment.*, check.program.*, found.ty)
     read: sema_tree_node(found.ty, TExprKind.HostCall{call: THostCall.ContextGet{key: found.key, default: default, equatable: equatable}}, span)
-    SemaDirectSpecialCheck{handled: true, value: sema_expr_expected_owned(read, expected, environment, program, check.diagnostics)}
+    SemaDirectSpecialCheck{handled: true, value: sema_expr_expected_owned(read, expected, check.environment.*, check.program.*, check.diagnostics)}
 }
 
 // Whether `name` binds a constant whose type a value computed while building

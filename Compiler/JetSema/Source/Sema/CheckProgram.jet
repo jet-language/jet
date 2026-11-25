@@ -1751,7 +1751,7 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
         graph: program.registration_graph
         sema_scope_bind_definition_site(scopes, graph, func)
     }
-    check := sema_body_check_init()
+    check := sema_body_check_init(@program, @updated)
     sema_body_check_swap_diagnostics(check, diagnostics)
     sema_body_check_swap_scopes(check, scopes)
     check.state.fixed_length_write_params = updated.fixed_length_write_params
@@ -1946,7 +1946,7 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
             sema_site_here_default_check(declared_default, check.diagnostics)
             caller_default: if declared_default == .Ident(_, caller_span, _) && sema_site_is_caller(declared_default) -> Val(sema_site_location_expr("", updated, program, check.scopes, caller_span)) else -> Expr?{None}
             sema_body_check_swap_context(check, default_context)
-            checked_default: sema_check_expression(caller_default ?? declared_default, Val(parameter_ty), updated, program, check)
+            checked_default: sema_check_expression(caller_default ?? declared_default, Val(parameter_ty), check)
             sema_body_check_swap_context(check, default_context)
             sema_check_delta_pass(default_context.type_delta, check.context.type_delta)
             default_arena: check.context.arena
@@ -2025,14 +2025,14 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     // `#Deadline` block around it would.
     marker_position_free: check.scopes.position_free
     check.scopes.position_free = true
-    markers_valid: sema_marker_rules_check_function_markers(func, updated, program, check)
+    markers_valid: sema_marker_rules_check_function_markers(func, check)
     deadline_guards := [TContextGuard]{}
     loop marker in func.markers {
         if stand_in != None || !markers_valid || !sema_marker_is_hook(marker, MarkerHook.Deadline) || marker.negated || marker.args.len() != 1 {
             next
         }
         if marker.args[0] == .Expr(value) {
-            limit: sema_check_expression(value, None, updated, program, check) ?? next
+            limit: sema_check_expression(value, None, check) ?? next
             deadline_guards.push(sema_stmt_deadline_guard(limit, marker.span))
         }
     }
@@ -2063,7 +2063,7 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
         }
     }
     if func.is_unsafe && unsafe_gate_valid -> check.context.unsafe_depth = 1
-    contract: sema_contract_check_function(func, updated, program, check)
+    contract: sema_contract_check_function(func, check)
     if !contract.complete -> complete = false
 
     body := [TStmt]{}
@@ -2098,7 +2098,7 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
         if returns_value {
             sema_stmt_value_block_tail_lints(func.body, !func.compiler_generated && !module_is_core(updated.module_identity), updated, program, check.context.fallback_tables, check.diagnostics)
         }
-        statements := sema_check_statements(func.body, Val(effective_return), updated, program, check, 0)
+        statements := sema_check_statements(func.body, Val(effective_return), check, 0)
         // The caller's group joins every task this body spawned into a `Group`
         // parameter, so those handles owe no `join` here.
         sema_taskgroup_mark_spawns_owned(check.context, SemaTaskGroupOrigin.Parameter, check.scopes, check.state, check.diagnostics)

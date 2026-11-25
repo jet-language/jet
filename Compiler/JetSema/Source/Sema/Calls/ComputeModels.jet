@@ -181,7 +181,7 @@ sema_call_compute_explicit_type_args: fn(member: String, type_args: [Type], expe
 // `compute.vec` / `compute.matrix` check through their Core source
 // constructors; the Tensor result takes the Vec/Matrix alias type, which
 // carries the literal extents as shape facts.
-sema_call_try_compute_alias: fn(module_name: String, member: String, target: SemaCallDirectTarget, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> SemaComputeModelsSpecialCheck {
+sema_call_try_compute_alias: fn(module_name: String, member: String, target: SemaCallDirectTarget, type_args: [Type], args: [CallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaComputeModelsSpecialCheck {
     if module_name != "core.compute" || (member != "vec" && member != "matrix") {
         return SemaComputeModelsSpecialCheck{handled: false, value: None}
     }
@@ -191,19 +191,17 @@ sema_call_try_compute_alias: fn(module_name: String, member: String, target: Sem
     }
     arity := if member == "vec" -> 2 else -> 3
     if args.len() != arity {
-        loop argument in args {
-            _ := sema_check_expression(argument.expr, None, environment, program, check)
-        }
+        loop argument in args -> _ := sema_check_expression(argument.expr, None, check)
         sema_call_compute_arity_error(member, arity, args.len(), span, check.diagnostics)
         return SemaComputeModelsSpecialCheck{handled: true, value: None}
     }
     check.scopes.ownership_call_depth += 1
-    value := sema_call_core_check_source_owned(target, "core.compute.{member}", [Type]{}, args, span, None, environment, program, check)
+    value := sema_call_core_check_source_owned(target, "core.compute.{member}", [Type]{}, args, span, None, check)
     check.scopes.ownership_call_depth -= 1
     checked := value ?? return SemaComputeModelsSpecialCheck{handled: true, value: None}
     checked.ty = sema_call_compute_alias_type(member, args) ?? panic("core.compute.{member} has an alias type")
     checked.type_id = type_none()
-    return SemaComputeModelsSpecialCheck{handled: true, value: sema_expr_expected(checked, expected, environment, program, check.diagnostics)}
+    return SemaComputeModelsSpecialCheck{handled: true, value: sema_expr_expected(checked, expected, check.environment.*, check.program.*, check.diagnostics)}
 }
 
 sema_call_compute_wrt_name: fn(item: Expr) -> String? {
@@ -291,8 +289,8 @@ sema_call_compute_function_identity: fn(expression: Expr, scopes: SemaScopeTable
     }
 }
 
-sema_call_compute_tensor_value: fn(argument: CallArg, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> TExpr? {
-    value: sema_check_expression(argument.expr, None, environment, program, check) ?? return None
+sema_call_compute_tensor_value: fn(argument: CallArg, check: ^SemaBodyCheck) -> TExpr? {
+    value: sema_check_expression(argument.expr, None, check) ?? return None
     if !is_compute_tensor_family(value.ty) {
         check.diagnostics.push(sema_error("E0112", argument.span, "this autodiff argument should be `Tensor`", "autodiff transforms record Tensor values, not scalar policy arguments", "pass a Tensor value"))
         return None
@@ -300,7 +298,7 @@ sema_call_compute_tensor_value: fn(argument: CallArg, environment: SemaScopeEnvi
     Val(value)
 }
 
-sema_call_compute_transform: fn(member: String, alias: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> SemaComputeModelsSpecialCheck {
+sema_call_compute_transform: fn(member: String, alias: String, args: [CallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaComputeModelsSpecialCheck {
     if args.len() == 0 {
         sema_call_compute_arity_error(member, 1, 0, span, check.diagnostics)
         return SemaComputeModelsSpecialCheck{handled: true, value: None}
@@ -315,10 +313,8 @@ sema_call_compute_transform: fn(member: String, alias: String, args: [CallArg], 
     }
     direct := value_indexes.len() > 0
     if member == "jvp" && direct {
-        _ := sema_check_expression_with_lambda_escapes(args[0].expr, None, environment, program, check, Val(false))
-        loop index in value_indexes {
-            _ := sema_check_expression(args[index].expr, None, environment, program, check)
-        }
+        _ := sema_check_expression_with_lambda_escapes(args[0].expr, None, check, Val(false))
+        loop index in value_indexes -> _ := sema_check_expression(args[index].expr, None, check)
         check.diagnostics.push(sema_error("E0112", span, "`compute.jvp` is a function transform, not a direct call", "the ratified JVP surface returns a callable that accepts primal and tangent values", "bind `d_f: compute.jvp(f)`, then call `d_f(primal..., tangent...)`"))
         return SemaComputeModelsSpecialCheck{handled: true, value: None}
     }
@@ -333,10 +329,8 @@ sema_call_compute_transform: fn(member: String, alias: String, args: [CallArg], 
         check.diagnostics.push(sema_error("E0112", expr_span(wrt_expression ?? Expr.Unit{span: span, id: AST_NODE_GENERATED}), "`wrt:` for `compute.{member}` must list parameter names", "the differentiation target is selected by the function parameter name", "write `wrt: [parameter]`"))
         valid = false
     }
-    function_value: sema_check_expression_with_lambda_escapes(args[0].expr, None, environment, program, check, Val(!direct)) ?? {
-        loop index in value_indexes {
-            _ := sema_check_expression(args[index].expr, None, environment, program, check)
-        }
+    function_value: sema_check_expression_with_lambda_escapes(args[0].expr, None, check, Val(!direct)) ?? {
+        loop index in value_indexes -> _ := sema_check_expression(args[index].expr, None, check)
         return SemaComputeModelsSpecialCheck{handled: true, value: None}
     }
     is_function := if function_value.ty == {
@@ -345,9 +339,7 @@ sema_call_compute_transform: fn(member: String, alias: String, args: [CallArg], 
     }
     if !is_function {
         check.diagnostics.push(sema_error("E0112", span, "`compute.{member}` expects a function value", "autodiff transforms differentiate a function over Tensor arguments", "bind a Tensor function before passing it to the transform"))
-        loop index in value_indexes {
-            _ := sema_check_expression(args[index].expr, None, environment, program, check)
-        }
+        loop index in value_indexes -> _ := sema_check_expression(args[index].expr, None, check)
         return SemaComputeModelsSpecialCheck{handled: true, value: None}
     }
     params := [Type]{}
@@ -395,17 +387,13 @@ sema_call_compute_transform: fn(member: String, alias: String, args: [CallArg], 
     names_value := sema_call_compute_function_names(args[0].expr, function_value.ty, check.scopes)
     if names_value == None {
         check.diagnostics.push(sema_error("E0112", span, "`compute.{member}` needs named Tensor parameters", "named gradient fields come from the differentiated function signature", "pass a named Tensor function or lambda"))
-        loop index in value_indexes {
-            _ := sema_check_expression(args[index].expr, None, environment, program, check)
-        }
+        loop index in value_indexes -> _ := sema_check_expression(args[index].expr, None, check)
         return SemaComputeModelsSpecialCheck{handled: true, value: None}
     }
     names: names_value ?? [String]{}
     if names.len() != params.len() {
         check.diagnostics.push(sema_error("E0112", span, "`compute.{member}` needs named Tensor parameters", "named gradient fields come from the differentiated function signature", "pass a callable with named Tensor parameters"))
-        loop index in value_indexes {
-            _ := sema_check_expression(args[index].expr, None, environment, program, check)
-        }
+        loop index in value_indexes -> _ := sema_check_expression(args[index].expr, None, check)
         return SemaComputeModelsSpecialCheck{handled: true, value: None}
     }
     if direct {
@@ -418,9 +406,7 @@ sema_call_compute_transform: fn(member: String, alias: String, args: [CallArg], 
     }
     if direct {
         loop index in value_indexes {
-            if sema_call_compute_tensor_value(args[index], environment, program, check) == None {
-                valid = false
-            }
+            if sema_call_compute_tensor_value(args[index], check) == None -> valid = false
         }
     }
     selected := [Int]{}
@@ -517,32 +503,32 @@ sema_call_compute_transform: fn(member: String, alias: String, args: [CallArg], 
     }
     values := [CallArg]{}
     loop index in value_indexes -> values.push(args[index])
-    helpers: sema_call_compute_tape_roles(span, program, check.diagnostics) ?? return SemaComputeModelsSpecialCheck{handled: true, value: None}
+    helpers: sema_call_compute_tape_roles(span, check.program.*, check.diagnostics) ?? return SemaComputeModelsSpecialCheck{handled: true, value: None}
     tape: sema_call_compute_tape(member, alias, helpers, args[0].expr, params, names, selected, output_fields, gradient_type, fallible, values, span)
     // The callable is checked against the transform's signature, so it
     // keeps the differentiated function's parameter names (they name the
     // gradients of a transform over it) and calling conventions.
     tape_expected: if direct -> Type?{None} else -> Val(result_type)
-    checked: sema_check_expression_with_lambda_escapes(tape, tape_expected, environment, program, check, Val(!direct)) ?? return SemaComputeModelsSpecialCheck{handled: true, value: None}
-    SemaComputeModelsSpecialCheck{handled: true, value: sema_expr_expected(checked, expected, environment, program, check.diagnostics)}
+    checked: sema_check_expression_with_lambda_escapes(tape, tape_expected, check, Val(!direct)) ?? return SemaComputeModelsSpecialCheck{handled: true, value: None}
+    SemaComputeModelsSpecialCheck{handled: true, value: sema_expr_expected(checked, expected, check.environment.*, check.program.*, check.diagnostics)}
 }
 
 // `compute.gradient`, `value_and_gradient`, `vjp` and `jvp` have no Core row:
 // sema types the transform after the import resolves, before the registry route.
-sema_call_try_compute_transform: fn(module_name: String, member: String, alias: String, alias_span: Span, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> SemaDirectSpecialCheck {
+sema_call_try_compute_transform: fn(module_name: String, member: String, alias: String, alias_span: Span, args: [CallArg], type_args: [Type], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaDirectSpecialCheck {
     if module_name != "core.compute" -> return SemaDirectSpecialCheck{handled: false, value: None}
     if member != "gradient" && member != "value_and_gradient" && member != "vjp" && member != "jvp" {
         return SemaDirectSpecialCheck{handled: false, value: None}
     }
-    imported: sema_call_core_import_target(environment, program, alias) ?? return SemaDirectSpecialCheck{handled: false, value: None}
-    if !sema_call_core_record_import_reference(environment, program, check.scopes, imported, alias_span, check.context) {
+    imported: sema_call_core_import_target(check.environment.*, check.program.*, alias) ?? return SemaDirectSpecialCheck{handled: false, value: None}
+    if !sema_call_core_record_import_reference(check.environment.*, check.program.*, check.scopes, imported, alias_span, check.context) {
         return SemaDirectSpecialCheck{handled: false, value: None}
     }
     check.context.compute_calls.push(SemaComputeCallFact{method: member, span: span})
     if !sema_call_core_check_type_args("core.compute", member, 0, false, type_args, span, check.diagnostics) {
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
-    checked: sema_call_compute_transform(member, alias, args, span, expected, environment, program, check)
+    checked: sema_call_compute_transform(member, alias, args, span, expected, check)
     SemaDirectSpecialCheck{handled: true, value: checked.value}
 }
 

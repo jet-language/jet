@@ -1175,8 +1175,14 @@ SemaCheckContext: struct {
 // (`check.state`) to a helper that takes only those. An entry lent its
 // caller's findings list or scope table swaps it into `diagnostics` or
 // `scopes` for the check and back after (sema_body_check_swap_diagnostics,
-// sema_body_check_swap_scopes).
+// sema_body_check_swap_scopes). `program` and `environment` link the
+// entry's read parameters: a checker reads `check.program.x`, and hands the
+// target on as `check.program.*`. A check in another environment (a default
+// in its owner module's) runs on a record of its own, made where that
+// environment lives (sema_body_check_swap_tail_store).
 SemaBodyCheck: struct {
+    program: @SemaProgramTables,
+    environment: @SemaScopeEnvironment,
     state: SemaOwnershipState,
     tail_store: SemaStatementTailStore,
     context: SemaCheckContext,
@@ -1774,8 +1780,8 @@ sema_check_context_init: fn() -> SemaCheckContext Never! {
     }
 }
 
-sema_body_check_init: fn() -> SemaBodyCheck Never! {
-    SemaBodyCheck{state: sema_ownership_state_init(), tail_store: sema_statement_tail_store_init(), context: sema_check_context_init(), diagnostics: [Diagnostic]{}, scopes: sema_scope_init(module_none())}
+sema_body_check_init: fn(program: @SemaProgramTables, environment: @SemaScopeEnvironment) -> SemaBodyCheck Never! {
+    SemaBodyCheck{program: program, environment: environment, state: sema_ownership_state_init(), tail_store: sema_statement_tail_store_init(), context: sema_check_context_init(), diagnostics: [Diagnostic]{}, scopes: sema_scope_init(module_none())}
 }
 
 // A check on another ownership state (a snapshot, a lambda's, a default's
@@ -1817,6 +1823,16 @@ sema_body_check_swap_scopes: fn(check: ^SemaBodyCheck, scopes: ^SemaScopeTable) 
     held: check.scopes
     check.scopes = scopes
     scopes = held
+}
+
+// sema_body_check_swap_state for the tail store. A default checks in its
+// owner module's environment on a record made at the default's site, lent
+// the caller's context and tail store for the check and given them back
+// after.
+sema_body_check_swap_tail_store: fn(check: ^SemaBodyCheck, tail_store: ^SemaStatementTailStore) Never! {
+    held: check.tail_store
+    check.tail_store = tail_store
+    tail_store = held
 }
 
 // `recorded` holds the ids `spans` set, in order: a rollback clears the ones

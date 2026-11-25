@@ -183,10 +183,8 @@ sema_plugin_result_descriptor: fn(graph: SemaRegistrationGraph, environment: Sem
     Val(ComponentTypeDescriptor.Record{name: "", fields: fields})
 }
 
-sema_plugin_infer_args: fn(args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) Never! {
-    loop argument in args {
-        _ := sema_check_expression(argument.expr, None, environment, program, check)
-    }
+sema_plugin_infer_args: fn(args: [CallArg], check: ^SemaBodyCheck) Never! {
+    loop argument in args -> _ := sema_check_expression(argument.expr, None, check)
 }
 
 sema_plugin_method_diagnostic: fn(method: String, interface: SemaPluginInterface?, span: Span, diagnostics: ^[Diagnostic]) {
@@ -232,26 +230,26 @@ sema_plugin_unsupported_export_diagnostic: fn(export: SemaPluginInterfaceExport,
     diagnostics.push(sema_error("E1260", span, "plugin export `{export.name}` uses unsupported Component value `{export.unsupported}`", "plugin parameters and results must use Component Model shapes with a Jet spelling", "export it with Int, Float, Bool, String, or a list/option/result of them"))
 }
 
-sema_call_try_plugin_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, facts: SemaPluginInterfaceFacts, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
-    identity: sema_plugin_handle_identity(receiver_value.ty, environment, program) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+sema_call_try_plugin_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, facts: SemaPluginInterfaceFacts, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
+    identity: sema_plugin_handle_identity(receiver_value.ty, check.environment.*, check.program.*) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     if !sema_ownership_check_call_receiver(check.state, receiver, AccessConvention.Read, check.scopes, span, check.diagnostics) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     if method == "call" || method == "call_int" || method == "call_bool" || method == "call_text" {
-        if !sema_plugin_record_exec(method, Type.Named{name: "Unit"}, span, environment, program, check.scopes, check.context, check.diagnostics) {
+        if !sema_plugin_record_exec(method, Type.Named{name: "Unit"}, span, check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics) {
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
         sema_plugin_retired_method_diagnostic(method, span, check.diagnostics)
-        sema_plugin_infer_args(args, environment, program, check)
+        sema_plugin_infer_args(args, check)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     interface := sema_plugin_interface_by_identity(facts, identity)
     interface_value: interface ?? {
-        if !sema_plugin_record_exec(method, Type.Named{name: "Unit"}, span, environment, program, check.scopes, check.context, check.diagnostics) {
+        if !sema_plugin_record_exec(method, Type.Named{name: "Unit"}, span, check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics) {
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
         sema_plugin_method_diagnostic(method, None, span, check.diagnostics)
-        sema_plugin_infer_args(args, environment, program, check)
+        sema_plugin_infer_args(args, check)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     found_export := SemaPluginInterfaceExport?{None}
@@ -262,31 +260,31 @@ sema_call_try_plugin_method: fn(receiver: Expr, receiver_value: TExpr, method: S
         }
     }
     export_value: found_export ?? {
-        if !sema_plugin_record_exec(method, Type.Named{name: "Unit"}, span, environment, program, check.scopes, check.context, check.diagnostics) {
+        if !sema_plugin_record_exec(method, Type.Named{name: "Unit"}, span, check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics) {
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
         sema_plugin_method_diagnostic(method, Val(interface_value), span, check.diagnostics)
-        sema_plugin_infer_args(args, environment, program, check)
+        sema_plugin_infer_args(args, check)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     if export_value.unsupported != "" {
-        if !sema_plugin_record_exec(method, Type.Named{name: "Unit"}, span, environment, program, check.scopes, check.context, check.diagnostics) {
+        if !sema_plugin_record_exec(method, Type.Named{name: "Unit"}, span, check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics) {
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
         sema_plugin_unsupported_export_diagnostic(export_value, span, check.diagnostics)
-        sema_plugin_infer_args(args, environment, program, check)
+        sema_plugin_infer_args(args, check)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     result_type := Type.Named{name: "Unit"}
     if export_value.return_type == .Val(value) {
-        result_type = sema_call_resolved_type(value, environment, program)
+        result_type = sema_call_resolved_type(value, check.environment.*, check.program.*)
     }
-    if !sema_plugin_record_exec(method, result_type, span, environment, program, check.scopes, check.context, check.diagnostics) {
+    if !sema_plugin_record_exec(method, result_type, span, check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     if args.len() != export_value.params.len() {
         check.diagnostics.push(sema_call_arity_diagnostic(export_value.name, export_value.params.len(), args.len(), false, span))
-        sema_plugin_infer_args(args, environment, program, check)
+        sema_plugin_infer_args(args, check)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     params := [SemaCallParam]{}
@@ -296,16 +294,16 @@ sema_call_try_plugin_method: fn(receiver: Expr, receiver_value: TExpr, method: S
     }
     checked_args := args
     binding: sema_call_bind_args("Plugin.{method}", params, checked_args, span, check.diagnostics) ?? {
-        sema_plugin_infer_args(args, environment, program, check)
+        sema_plugin_infer_args(args, check)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    graph: program.registration_graph
+    graph: check.program.registration_graph
     supported := true
     component_params := [ComponentTypeDescriptor]{}
     loop index in 0..<export_value.params.len() {
         parameter := export_value.params[index]
-        required := sema_type_resolve_declared(graph, parameter.ty, environment.module_identity)
-        descriptor := sema_plugin_component_descriptor(graph, environment, program, required, [String]{})
+        required := sema_type_resolve_declared(graph, parameter.ty, check.environment.module_identity)
+        descriptor := sema_plugin_component_descriptor(graph, check.environment.*, check.program.*, required, [String]{})
         if {
             descriptor == None -> {
                 sema_plugin_unsupported_component_diagnostic(export_value.name, required, checked_args[index].span, check.diagnostics)
@@ -316,7 +314,7 @@ sema_call_try_plugin_method: fn(receiver: Expr, receiver_value: TExpr, method: S
             }
         }
     }
-    typed: sema_call_typecheck_bound_arguments("Plugin.{method}", params, None, false, binding, checked_args, environment, program, check, span, true) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    typed: sema_call_typecheck_bound_arguments("Plugin.{method}", params, None, false, binding, checked_args, check, span, true) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     ownership := sema_ownership_check_call_arguments(check.state, "Plugin.{method}", params, checked_args, check.scopes, check.diagnostics)
     if !ownership.accepted || !ownership.complete {
         return SemaMethodSpecialCheck{handled: true, value: None}
@@ -334,9 +332,9 @@ sema_call_try_plugin_method: fn(receiver: Expr, receiver_value: TExpr, method: S
         if !found -> return SemaMethodSpecialCheck{handled: true, value: None}
     }
     if export_value.return_type != None {
-        result_type = sema_type_resolve_declared(graph, export_value.return_type ?? Type.Named{name: "Unit"}, environment.module_identity)
+        result_type = sema_type_resolve_declared(graph, export_value.return_type ?? Type.Named{name: "Unit"}, check.environment.module_identity)
     }
-    result_descriptor := sema_plugin_result_descriptor(graph, environment, program, result_type, export_value.result_order)
+    result_descriptor := sema_plugin_result_descriptor(graph, check.environment.*, check.program.*, result_type, export_value.result_order)
     if result_descriptor == None {
         sema_plugin_unsupported_component_diagnostic(export_value.name, result_type, span, check.diagnostics)
         supported = false
@@ -345,5 +343,5 @@ sema_call_try_plugin_method: fn(receiver: Expr, receiver_value: TExpr, method: S
     signature := ComponentSignatureDescriptor{params: component_params, result: result_descriptor ?? return SemaMethodSpecialCheck{handled: true, value: None}}
     result := Type.Result{ok: result_type, err: Type.Named{name: "PluginError"}}
     value := sema_tree_node(result, TExprKind.HandleMethod{receiver: receiver_value, operation: BodyHandleOp.PluginInvoke{export_name: export_value.name, signature: signature}, args: values}, span)
-    return SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, environment, program, check.context, check.diagnostics)}
+    return SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, check.environment.*, check.program.*, check.context, check.diagnostics)}
 }

@@ -106,26 +106,26 @@ sema_live_member: fn(module_name: String, member: String) -> Bool Never! {
 }
 
 // A live-binding call through a Core module alias (`use app`).
-sema_call_try_live: fn(module_name: String, member: String, alias: String, alias_span: Span, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> SemaDirectSpecialCheck {
+sema_call_try_live: fn(module_name: String, member: String, alias: String, alias_span: Span, args: [CallArg], type_args: [Type], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaDirectSpecialCheck {
     if !sema_live_member(module_name, member) -> return sema_live_unhandled()
     // A nested module path (`alias.leaf.member`) names another module.
-    imported_module: sema_call_core_import_module(environment, program, alias) ?? return sema_live_unhandled()
+    imported_module: sema_call_core_import_module(check.environment.*, check.program.*, alias) ?? return sema_live_unhandled()
     if imported_module != module_name -> return sema_live_unhandled()
-    imported: sema_call_core_import_target(environment, program, alias) ?? return sema_live_unhandled()
-    if !sema_call_core_record_import_reference(environment, program, check.scopes, imported, alias_span, check.context) {
+    imported: sema_call_core_import_target(check.environment.*, check.program.*, alias) ?? return sema_live_unhandled()
+    if !sema_call_core_record_import_reference(check.environment.*, check.program.*, check.scopes, imported, alias_span, check.context) {
         return sema_live_unhandled()
     }
-    sema_call_live(member, alias, args, type_args, span, expected, environment, program, check)
+    sema_call_live(member, alias, args, type_args, span, expected, check)
 }
 
 // `alias.member(source, args...)`, where `alias` names `app`
 // and the import is already recorded.
-sema_call_live: fn(member: String, alias: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> SemaDirectSpecialCheck {
+sema_call_live: fn(member: String, alias: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaDirectSpecialCheck {
     if member == {
-        "enqueue" -> return sema_call_enqueue(alias, args, span, expected, environment, program, check)
-        "endpoints" -> return sema_call_app_endpoints(alias, type_args, args, span, expected, environment, program, check)
-        "url_of" | "presence" | "notify" | "go" -> return sema_call_app_address(member, alias, args, type_args, span, expected, environment, program, check)
-        "current" -> return sema_call_app_current(alias, args, type_args, span, expected, environment, program, check)
+        "enqueue" -> return sema_call_enqueue(alias, args, span, expected, check)
+        "endpoints" -> return sema_call_app_endpoints(alias, type_args, args, span, expected, check)
+        "url_of" | "presence" | "notify" | "go" -> return sema_call_app_address(member, alias, args, type_args, span, expected, check)
+        "current" -> return sema_call_app_current(alias, args, type_args, span, expected, check)
         else -> {}
     }
     callee: "{alias}.{member}"
@@ -156,7 +156,7 @@ sema_call_live: fn(member: String, alias: String, args: [CallArg], type_args: [T
         return sema_live_rejected()
     }
     source_span: expr_span(positional[0].expr)
-    found: if member == "live" && sema_live_is_closure(positional[0].expr) -> sema_live_remote_source(positional[0].expr, positional.len() - 1, environment, program, check.scopes, check.diagnostics) else -> sema_live_source(positional[0].expr, member, environment, program, check.scopes, check.diagnostics)
+    found: if member == "live" && sema_live_is_closure(positional[0].expr) -> sema_live_remote_source(positional[0].expr, positional.len() - 1, check.environment.*, check.program.*, check.scopes, check.diagnostics) else -> sema_live_source(positional[0].expr, member, check.environment.*, check.program.*, check.scopes, check.diagnostics)
     source: found ?? return sema_live_rejected()
     // A closure's one call gives the arguments; a named source's follow it.
     first := 1
@@ -174,7 +174,7 @@ sema_call_live: fn(member: String, alias: String, args: [CallArg], type_args: [T
         check.diagnostics.push(sema_call_arity_diagnostic(source.name, source.params.len(), supplied, false, source_span))
         return sema_live_rejected()
     }
-    graph: program.registration_graph
+    graph: check.program.registration_graph
     role: if member == {
         "live" -> "LiveBind"
         "subscribe" -> "LivePoll"
@@ -194,7 +194,7 @@ sema_call_live: fn(member: String, alias: String, args: [CallArg], type_args: [T
     keeps_run: member == "live" || member == "subscribe"
     loop index in 0..<supplied {
         argument: positional[index + first]
-        encodes: sema_type_bound_satisfied(graph, source.params[index], "Encode", environment.module_identity) == (Val(true))
+        encodes: sema_type_bound_satisfied(graph, source.params[index], "Encode", check.environment.module_identity) == (Val(true))
         borrowed: sema_copy_site_borrowed_param(argument.expr, check.scopes) != None
         given: argument.expr.copy()  // copy: `positional` keeps its argument
         param_ty: source.params[index].copy()  // copy: the source signature keeps its parameter types
@@ -206,7 +206,7 @@ sema_call_live: fn(member: String, alias: String, args: [CallArg], type_args: [T
         init: if borrowed -> Expr.Copy{value: given, span: argument.span, id: AST_NODE_GENERATED} else -> given
         binding := ast_binding(local_name, argument.span, false, init, None)
         binding.ty = Val(param_ty)
-        statement: sema_stmt_check_binding(binding, None, environment, program, check) ?? {
+        statement: sema_stmt_check_binding(binding, None, check) ?? {
             sema_single_use_leave_scope(check.scopes, check.state, check.diagnostics)
             return sema_live_rejected()
         }
@@ -225,7 +225,7 @@ sema_call_live: fn(member: String, alias: String, args: [CallArg], type_args: [T
     key_binding := ast_binding(key_name, span, false, Expr.ListLit{elements: keys, span: span, id: AST_NODE_GENERATED}, None)
     key_binding.ty = Val(Type.List{element: Type.String})
     if !whole_source {
-        key_statement: sema_stmt_check_binding(key_binding, None, environment, program, check) ?? {
+        key_statement: sema_stmt_check_binding(key_binding, None, check) ?? {
             sema_single_use_leave_scope(check.scopes, check.state, check.diagnostics)
             return sema_live_rejected()
         }
@@ -239,7 +239,7 @@ sema_call_live: fn(member: String, alias: String, args: [CallArg], type_args: [T
         value_name: "__jet_live_{span.start}_value"
         value_binding := ast_binding(value_name, expr_span(given), false, given.copy(), None)  // copy: `value` keeps the caller's expression
         value_binding.ty = Val(source.ok.copy())  // copy: the source signature keeps its value type
-        value_statement: sema_stmt_check_binding(value_binding, None, environment, program, check) ?? {
+        value_statement: sema_stmt_check_binding(value_binding, None, check) ?? {
             sema_single_use_leave_scope(check.scopes, check.state, check.diagnostics)
             return sema_live_rejected()
         }
@@ -256,7 +256,7 @@ sema_call_live: fn(member: String, alias: String, args: [CallArg], type_args: [T
         "push" -> sema_live_module_call(alias, lowered_member, [Type]{source.ok.move()}, [CallArg]{sema_live_arg(wire, span), sema_live_arg(key, span), sema_live_arg(pushed ?? panic("push value was checked above"), span)}, span)
         else -> if whole_source -> sema_live_module_call(alias, lowered_member, [Type]{}, [CallArg]{sema_live_arg(wire, span)}, span) else -> sema_live_module_call(alias, lowered_member, [Type]{}, [CallArg]{sema_live_arg(wire, span), sema_live_arg(key, span)}, span)
     }
-    checked: sema_check_expression(lowered, None, environment, program, check) ?? {
+    checked: sema_check_expression(lowered, None, check) ?? {
         sema_single_use_leave_scope(check.scopes, check.state, check.diagnostics)
         return sema_live_rejected()
     }
@@ -264,7 +264,7 @@ sema_call_live: fn(member: String, alias: String, args: [CallArg], type_args: [T
     body.push(TStmt.ExprStmt{value: checked, span: span})
     sema_single_use_leave_scope(check.scopes, check.state, check.diagnostics)
     lowered_value: sema_tree_node(result_type, TExprKind.InlineBlock{body: body}, span)
-    SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(lowered_value, expected, environment, program, check.diagnostics)}
+    SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(lowered_value, expected, check.environment.*, check.program.*, check.diagnostics)}
 }
 
 sema_live_shape: fn(member: String) -> String Never! {

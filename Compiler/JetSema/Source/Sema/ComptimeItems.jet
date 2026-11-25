@@ -1749,7 +1749,7 @@ sema_check_comptime_item_in: fn(environment: SemaScopeEnvironment, program: Sema
     // The build edge carries the implicit `Err!` rail of `run: fn()`
     // so a fallible call here propagates to the build.
     comptime_scopes.slots[at].table.failure_carrier = Val(sema_failure_carrier(None))
-    check := sema_body_check_init()
+    check := sema_body_check_init(@program, @environment)
     check.context.host_hooks = comptime_scopes.host_hooks
     check.context.compiler_records = sema_call_rule_batch_item(source)
     // A module value's checks run inside its own owner frame, so its
@@ -1770,7 +1770,7 @@ sema_check_comptime_item_in: fn(environment: SemaScopeEnvironment, program: Sema
     first_finding: diagnostics.len()
     sema_body_check_swap_diagnostics(check, diagnostics)
     sema_body_check_swap_scopes(check, comptime_scopes.slots[at].table)
-    checked := if source.kind == SemaComptimeItemKind.TypeLevel -> sema_comptime_check_discriminant(source, environment, program, check) else -> sema_check_expression(source.expression, source.expected_type, environment, program, check)
+    checked := if source.kind == SemaComptimeItemKind.TypeLevel -> sema_comptime_check_discriminant(source, check) else -> sema_check_expression(source.expression, source.expected_type, check)
     sema_body_check_swap_scopes(check, comptime_scopes.slots[at].table)
     sema_body_check_swap_diagnostics(check, diagnostics)
     // A rule batch's loop is parsed text (sema_call_rule_batch_expression),
@@ -1852,10 +1852,10 @@ sema_check_comptime_item_in: fn(environment: SemaScopeEnvironment, program: Sema
 // An enum case number (`First = expr`) is part of the type layout, so a
 // value the compiler can't compute or an operand that isn't `Int` is E0035 at
 // the number, in place of the expression's own diagnostics.
-sema_comptime_check_discriminant: fn(source: SemaComptimeItemSource, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> TExpr? {
+sema_comptime_check_discriminant: fn(source: SemaComptimeItemSource, check: ^SemaBodyCheck) -> TExpr? {
     attempt := [Diagnostic]{}
     sema_body_check_swap_diagnostics(check, attempt)
-    checked: sema_check_expression(source.expression, None, environment, program, check)
+    checked: sema_check_expression(source.expression, None, check)
     sema_body_check_swap_diagnostics(check, attempt)
     if sema_has_error_since(attempt, 0) {
         check.diagnostics.push(sema_error("E0035", source.span, "an enum discriminant must be computable at compile time", "the enum number is part of the type layout and must be known before code generation", "use an integer literal, a `NAME: #run value` constant, or another compile-time expression"))
