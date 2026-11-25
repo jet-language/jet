@@ -3662,7 +3662,7 @@ mark, matching the fresh-argument rule; read calls stay unmarked. Sema checks
 each mark against the resolved receiver
 convention of user methods, trait dispatch, and builtin receivers: a missing,
 extra (E0225) or wrong mark is an error with a machine-applicable
-fix. A line that starts with `^name` or `^name` begins a new statement.
+fix. A line that starts with a marked name (`^name`) begins a new statement.
 Integer bits use the sigils of D-BIT-SIGILS1=A and power uses `pow`
 (D-SIGIL-ALGEBRA1=B). `^place` window lifetimes are
 unchanged; calls through a stored write window mark the window name. Lookup,

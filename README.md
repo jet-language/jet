@@ -110,7 +110,7 @@ Error: Jet.ImmutableAssignment: `total` was made with `:`, so it can't change
     |
   3 |     loop n in 1..3 -> total = total + n
     |                       ^^^^^
- Why: Only `:=` bindings and parameters declared with the write mark `&` can be changed
+ Why: Only `:=` bindings and parameters declared with the write mark `^` can be changed
  Fix: Declare it with `total := ...` instead
 More: jet-lang.dev/e/Jet.ImmutableAssignment
 ```

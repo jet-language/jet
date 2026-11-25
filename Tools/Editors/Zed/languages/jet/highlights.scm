@@ -106,7 +106,7 @@
 [
   "!" "!=" "%" "%%" "%%=" "%=" "&" "&&" "&=" "*" "*=" "+" "+=" "-" "-=" "->"
   ".." "..." "..<" "/" "/%" "/%=" "/=" "::" ":=" ":>" "<" "<:" "<<" "<<="
-  "<=" "<=>" "<>" "=" "==" "=>" ">" ">=" ">>" ">>=" "?" "?." "??" "^" "^=" "|"
+  "<=" "<=>" "<>" "=" "==" "=>" ">" ">=" ">>" ">>=" "?" "?." "??" "^" "^^" "^=" "|"
   "|=" "|>" "||" "~" "~|" "~|=" "#" "$" "@"
 ] @operator
 
@@ -123,12 +123,11 @@
   "#[" @attribute
   "]" @attribute)
 
-; The take mark `&&` (D-MOVE-SIGIL1=A) in a parameter list or function type
-; (`file: &&GzFile`, `fn(&&Map)`) and right after a control word
-; (`task &&job`) is an ownership word, apart from logical and: a control
-; word is never the left operand of `&&`.
-(parameters "&&" @keyword)
-((control_keyword) . "&&" @keyword)
+; The take mark `^^` in a parameter list or function type
+; (`file: ^^GzFile`, `fn(^^Map)`) and right after a control word
+; (`task ^^job`) is an ownership word, colored apart from the write mark `^`.
+(parameters "^^" @keyword)
+((control_keyword) . "^^" @keyword)
 
 ; `{expr}` inside a string is live Jet: the braces are delimiters and the
 ; expression keeps its own colors.
