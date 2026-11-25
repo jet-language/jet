@@ -1688,7 +1688,7 @@ jet_cli_debug_eval_held_of: fn(compile: ^^JetDriverCompileResult, stamp: ^^JetCL
         return JetCLIDebugEvalHeldOpen{held: None, missed: Val(stamp.move())}
     }
     opened: jet_driver_held_eval_open(state.move(), result.compiler_threads) ?? return JetCLIDebugEvalHeldOpen{held: None, missed: Val(stamp.move())}
-    graph: opened.eval.probe.program.registration_graph ?? return JetCLIDebugEvalHeldOpen{held: None, missed: Val(stamp.move())}
+    graph: opened.eval.probe.program.registration_graph
     ir: jet_cli_debug_eval_held_ir(result, opened.inputs.move(), graph.decls, opened.types.move(), options, runtime)
     JetCLIDebugEvalHeldOpen{held: Val(JetCLIDebugEvalHeld{eval: opened.eval.move(), ir: ir.move(), stamp: stamp.move()}), missed: None}
 }

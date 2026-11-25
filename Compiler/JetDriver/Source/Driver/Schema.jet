@@ -2,8 +2,8 @@
 use {
     schema_files: core.files
     schema_sys: core.sys
-    jet_sema.[SchemaSnapshot, SchemaSnapshotError, SemaRegistrationGraph, SemaGraphResult, check_schema_migrations, sema_check_schema_migration_graph, sema_schema_published, sema_program_tables_init]
-    jet_foundation.[Diagnostic, ENV_JET_SCHEMA_CACHE_DIR, Item, TTypeDef, type_name]
+    jet_sema.[SchemaSnapshot, SchemaSnapshotError, SemaRegistrationGraph, SemaGraphResult, check_schema_migrations, sema_check_schema_migration_graph, sema_schema_published, sema_program_tables_snapshot]
+    jet_foundation.[Diagnostic, ENV_JET_SCHEMA_CACHE_DIR, Item, type_name]
 }
 
 // Only the schema inputs the populated checker actually reads. An absent,
@@ -113,7 +113,7 @@ save_snapshot: fn(root: String, snapshot: SchemaSnapshot) -[FS]> SchemaSnapshotE
 // registry. The loader's failure is handled by caller.
 jet_driver_schema_pending_breaks: fn(modules: [[Item]], snapshots: [String:SchemaSnapshot]) -> [String] Never! {
     names := [String]{}
-    program: sema_program_tables_init(None, [TTypeDef]{})
+    program: sema_program_tables_snapshot()
     loop items in modules {
         diagnostics: check_schema_migrations(items, snapshots, None, program)
         if diagnostics.len() == 0 -> next
