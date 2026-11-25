@@ -1,0 +1,15 @@
+// A parameter default written `Type{#run value}` is computed for each call
+// while building, from the arguments that call passes before it. `doubled`
+// is a `#run fn`, which only code that runs while building may call.
+#run doubled: fn(value: Int) -> Int {
+    value * 2
+}
+
+scaled: fn(width: Int, twice: Int{#run doubled(width)}) -> Int {
+    twice + 1
+}
+
+run: fn() {
+    print(scaled(20))
+    print(scaled(4))
+}

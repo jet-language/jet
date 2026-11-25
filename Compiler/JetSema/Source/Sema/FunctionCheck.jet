@@ -797,8 +797,9 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
         }
         ^default_expr: TExpr?{None}
         // A script variable's default names a variable of the calling script
-        // lines, which each call checks where it is made.
-        if func.params[param_index].default != None && !func.params[param_index].script_variable && !forward_defaults.contains(param_index) {
+        // lines, and a `#run` default reads the arguments each call's build
+        // knows; each call checks either where it is made.
+        if func.params[param_index].default != None && !func.params[param_index].script_variable && !func.params[param_index].default_run && !forward_defaults.contains(param_index) {
             ^default_context: sema_check_context_init()
             default_context.is_snapshot = true
             default_context.unsafe_depth = check.context.unsafe_depth

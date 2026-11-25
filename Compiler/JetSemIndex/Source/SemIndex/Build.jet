@@ -244,9 +244,11 @@ semindex_call_label: fn(parameter: Param) -> String Never! {
 }
 
 // A script variable's parameter defaults to the variable; its generated
-// default is spanned at the function's name, so its text is the name.
+// default is spanned at the function's name, so its text is the name. A
+// `#run` default's span is its operand's, and its text keeps the `#run`.
 semindex_default_text: fn(parameter: Param, source: String, span: Span) -> String {
     if parameter.script_variable -> return parameter.name
+    if parameter.default_run -> return "#run {semindex_source_text(source, span)}"
     semindex_source_text(source, span)
 }
 

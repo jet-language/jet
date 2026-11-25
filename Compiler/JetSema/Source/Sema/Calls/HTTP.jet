@@ -192,7 +192,7 @@ sema_call_http_mux_source_call: fn(receiver_value: TExpr, method: String, args: 
     }
     loop index in filled.len()..<params.len() {
         reference: params[index].default_ref ?? return sema_call_http_mux_unavailable(check.context, "`{owner}.{method}` parameter `{params[index].name}` has no default")
-        declared: sema_registration_resolve_default(graph, reference) ?? return sema_call_http_mux_unavailable(check.context, "`{owner}.{method}` parameter `{params[index].name}` lost its default")
+        declared: (sema_registration_resolve_default(graph, reference) ?? return sema_call_http_mux_unavailable(check.context, "`{owner}.{method}` parameter `{params[index].name}` lost its default")).expression
         if !sema_site_is_caller(declared) {
             return sema_call_http_mux_unavailable(check.context, "`{owner}.{method}` parameter `{params[index].name}` has a default other than `#caller`")
         }

@@ -2160,9 +2160,11 @@ jfmt_fmt_param: fn(f: ^JetFmt, p: Param) {
             }
         }
     }
-    // A trailing parameter may carry a `{default}` value.
+    // A trailing parameter may carry a `{default}` value, which `#run`
+    // computes for each call while building.
     if p.default == .Val(default) {
         jfmt_write(f, "{{")
+        if p.default_run -> jfmt_write(f, "#run ")
         jfmt_fmt_expr(f, default, JFMT_PREC_OR_FALLBACK)
         jfmt_write(f, "}}")
     }

@@ -501,6 +501,8 @@ SemaRegistrationParameter: struct {
     variadic: Bool,
     default: Expr?,
     default_ref: FunctionDefaultRef?,
+    // A default written `Type{#run value}` (Param.default_run).
+    default_run: Bool{false},
 }
 
 SemaRegistrationCallableABI: struct {
@@ -1764,6 +1766,7 @@ sema_registration_function_parameters: fn(func: Func, signature: Type) -> [SemaR
                 variadic: parameter.variadic,
                 default: parameter.default,
                 default_ref: default_ref,
+                default_run: parameter.default_run,
             },
         )
     }
@@ -2853,6 +2856,7 @@ sema_registration_trait_method: fn(method: TraitMethodSig, module_identity: Stri
                 variadic: parameter.variadic,
                 default: parameter.default,
                 default_ref: default_ref,
+                default_run: parameter.default_run,
             },
         )
     }
@@ -7413,10 +7417,10 @@ sema_registration_core_unit_index: fn(graph: SemaRegistrationGraph, module_name:
     None
 }
 
-// The default expression `reference` names. Its owner is one keyed callable
-// lookup; trait method declarations, which are not callable rows, are searched
-// only when the owner is not one.
-sema_registration_resolve_default: fn(graph: SemaRegistrationGraph, reference: FunctionDefaultRef) -> Expr? {
+// The default `reference` names. Its owner is one keyed callable lookup;
+// trait method declarations, which are not callable rows, are searched only
+// when the owner is not one.
+sema_registration_resolve_default: fn(graph: SemaRegistrationGraph, reference: FunctionDefaultRef) -> SemaCallDefaultValue? {
     if sema_registration_callable_row(graph, reference.owner_key) == .Val(row) {
         if row == {
             .Function(module_index, index) -> {
@@ -7444,11 +7448,12 @@ sema_registration_resolve_default: fn(graph: SemaRegistrationGraph, reference: F
     None
 }
 
-sema_registration_parameter_default: fn(parameters: [SemaRegistrationParameter], reference: FunctionDefaultRef) -> Expr? {
+sema_registration_parameter_default: fn(parameters: [SemaRegistrationParameter], reference: FunctionDefaultRef) -> SemaCallDefaultValue? {
     if reference.parameter_index < 0 || reference.parameter_index >= parameters.len() -> return None
     parameter: parameters[reference.parameter_index]
     if parameter.default_ref != reference -> return None
-    parameter.default
+    expression: parameter.default ?? return None
+    Val(SemaCallDefaultValue{reference: reference, expression: expression, run: parameter.default_run})
 }
 
 sema_registration_apply_graph_module: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, scopes: ^SemaScopeTable, diagnostics: ^[Diagnostic]) -> Bool {
