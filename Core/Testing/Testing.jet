@@ -502,8 +502,9 @@ suite_row_field: fn(text: String) -> String Never! {
 /// ```
 impl Test {
     /// Runs the package's `#Test` blocks on the harness this value carries
-    /// and answers the failure count.
-    run: fn(self) -> Int { world_rt.suite_run(self) }
+    /// and answers the failure count. The run reports each test as it goes,
+    /// so `suite.run()` on its own line runs the suite and drops the count.
+    run: fn(self) -[IO]> Int { world_rt.suite_run(self) }
 
     /// `t.suite(name, body)`: run `body` when this run is the profile child
     /// of the code suite `name` (JET_TEST_SUITE), recording its rows in

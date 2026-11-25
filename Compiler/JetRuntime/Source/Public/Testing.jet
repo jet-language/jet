@@ -22,8 +22,10 @@ testing: module {
     #Import(c) priv suite_snapshot: fn() -> Test = "jet_test_suite_new"
 
     // `t.run()` in a `test: fn`: runs the package's `#Test` blocks on the
-    // harness `suite` carries and answers the failure count.
-    #Import(c) priv suite_run: fn(suite: Test) -> Int = "jet_test_suite_run"
+    // harness `suite` carries and answers the failure count. The run reports
+    // each test as it goes, so the call is IO: a `test: fn` that drops the
+    // count still ran the suite.
+    #Import(c) priv suite_run: fn(suite: Test) -[IO]> Int = "jet_test_suite_run"
 
     // `t.<setting>(…)` (Registry/TestSettings.jet): appends `line`
     // (`name<TAB>value<NL>`) to the plan file the environment variable `key`
