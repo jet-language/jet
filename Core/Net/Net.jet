@@ -654,8 +654,16 @@ unix_accept: fn(listener: UnixListener) -[Net, Time.Wait]> UnixStream NetError! 
     rt.unix_accept(listener)
 }
 
-// The checked `unix_connect` rows run these entries, picked by argument
-// count; their zones are the calls' label rules.
+/// A stream connected to the Unix socket at `path`, waiting at most
+/// `deadline` when one is given.
+unix_connect: fn(path: String, /, *, deadline: Duration?{None}) -[Net, Time.Wait]> UnixStream NetError! {
+    if deadline == .Val(limit) -> return rt.unix_connect_deadline_host(path, limit.ns)
+    rt.unix_connect_host(path)
+}
+
+// A compiler that still checks `unix_connect` through its dispatcher row
+// runs these entries, picked by argument count; their zones are the calls'
+// label rules.
 #Builtin.Role(.UnixConnect) priv __unix_connect_entry: fn(path: String, /) -[Net, Time.Wait]> UnixStream NetError! {
     rt.unix_connect_host(path)
 }

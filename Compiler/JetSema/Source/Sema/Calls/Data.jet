@@ -18,7 +18,6 @@ use jet_foundation.[
     TypeTupleField,
     AST_EMPTY_CALL_ARG_FLAGS,
     core_call_role_receiver,
-    core_receiver_method,
     expr_source_span,
     expr_span,
     type_name,
@@ -689,14 +688,8 @@ sema_data_group_sum_role: fn(value: Type) -> String Never! {
     }
 }
 
-// The compiler-owned receiver key of the checked-SQL list door; it has no
-// source spelling.
-sema_data_list_query_handle: fn() -> String Never! {
-    String.from_bytes([U8]{U8{0}, U8{106}, U8{101}, U8{116}, U8{46}, U8{113}, U8{117}, U8{101}, U8{114}, U8{121}, U8{46}, U8{108}, U8{105}, U8{115}, U8{116}}) ?? ""
-}
-
 // (`[T].query(sql)`): an in-memory row list runs one checked SQL query into the
-// deferred `Query<T>` carrier. The call lowers onto the list-query receiver row
+// deferred `Query<T>` carrier, through the Core function that fills ListQuery
 // with the list as its first argument.
 sema_data_check_list_query: fn(receiver: Expr, receiver_value: TExpr, row: Type, args: [CallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
     if args.len() != 1 {
@@ -707,10 +700,7 @@ sema_data_check_list_query: fn(receiver: Expr, receiver_value: TExpr, row: Type,
     sema_data_check_analytics_sql_schema(row, args[0].expr, expr_span(args[0].expr), check)
     sql: Type.Named{name: "SQL"}
     query: sema_data_expect_core_arg("query", 0, sql, args[0], check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    record: core_receiver_method(sema_data_list_query_handle(), "query") ?? {
-        check.diagnostics.push(sema_error("E0003", span, "checked query method `query` has no canonical receiver Core row", "every checked query method lowers onto its receiver Core row", "repair the Core registry receiver rows"))
-        return SemaMethodSpecialCheck{handled: true, value: None}
-    }
+    record: sema_data_role_record("List", "query", "ListQuery", [Type]{row}, span, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     source_args := [CallArg]{CallArg{convention: AccessConvention.Read, expr: receiver, span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}}
     loop argument in args -> source_args.push(argument.copy())
     result_type: Type.Result{ok: Type.Apply{name: sema_data_source_type_name(check, "Query"), args: [Type]{row}}, err: sema_data_decode_error()}
@@ -1323,53 +1313,58 @@ sema_data_check_analytics_sql_schema: fn(row: Type, query: Expr, span: Span, che
     }
 }
 
-sema_call_try_data_core_call: fn(module_name: String, member: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaDirectSpecialCheck {
-    if module_name == "core.data" && member == "query" {
-        if type_args.len() != 0 {
-            sema_data_check_explicit_type_args("{module_name}.{member}", type_args, 0, span, check.diagnostics)
-            sema_data_check_discarded_arguments(args, check)
-            return SemaDirectSpecialCheck{handled: true, value: None}
-        }
-        if args.len() != 1 {
-            sema_data_arity_diagnostic("{module_name}.{member}", 1, args.len(), span, check.diagnostics)
-            sema_data_check_discarded_arguments(args, check)
-            return SemaDirectSpecialCheck{handled: true, value: None}
-        }
-        first: sema_check_expression(args[0].expr, None, check) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-        row := Type?{None}
-        query_source := String?{None}
-        query_type_args := [Type]{}
-        first_expected: first.ty
-        if first.ty == {
-            .List(element) -> { row = Val(element) }
-            .Apply(name, parameters) -> {
-                if {
-                    sema_data_nominal_is(name, "DataTracked") && parameters.len() == 2 -> {
-                        row = Val(parameters[0])
-                        query_source = Val("QueryTracked")
-                        query_type_args = [Type]{parameters[0], parameters[1]}
-                    }
-                    sema_data_nominal_is(name, "DataStream") && parameters.len() == 1 -> {
-                        row = Val(parameters[0])
-                        query_source = Val("QueryStream")
-                    }
+// `data.query(source)` through a Core module alias, `core.data.query` under
+// `use core` included, checked before any route: a typed row list runs
+// core.data's own `query`, a tracked source or a stream the Core function
+// that fills QueryTracked or QueryStream.
+sema_call_try_data_query: fn(module_name: String, member: String, alias: String, alias_span: Span, args: [CallArg], type_args: [Type], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaDirectSpecialCheck {
+    unhandled: SemaDirectSpecialCheck{handled: false, value: None}
+    if module_name != "core.data" || member != "query" -> return unhandled
+    imported: sema_call_core_import_target(check.environment.*, check.program.*, alias) ?? return unhandled
+    if !sema_call_core_import_is_unshadowed(check.environment.*, check.program.*, check.scopes, imported) -> return unhandled
+    if !sema_call_core_record_import_reference(check, imported, alias_span) -> return unhandled
+    rejected: SemaDirectSpecialCheck{handled: true, value: None}
+    if type_args.len() != 0 {
+        sema_data_check_explicit_type_args("{module_name}.{member}", type_args, 0, span, check.diagnostics)
+        sema_data_check_discarded_arguments(args, check)
+        return rejected
+    }
+    if args.len() != 1 {
+        sema_data_arity_diagnostic("{module_name}.{member}", 1, args.len(), span, check.diagnostics)
+        sema_data_check_discarded_arguments(args, check)
+        return rejected
+    }
+    first: sema_check_expression(args[0].expr, None, check) ?? return rejected
+    row := Type?{None}
+    query_source := String?{None}
+    query_type_args := [Type]{}
+    first_expected: first.ty
+    if first.ty == {
+        .List(element) -> { row = Val(element) }
+        .Apply(name, parameters) -> {
+            if {
+                sema_data_nominal_is(name, "DataTracked") && parameters.len() == 2 -> {
+                    row = Val(parameters[0])
+                    query_source = Val("QueryTracked")
+                    query_type_args = [Type]{parameters[0], parameters[1]}
+                }
+                sema_data_nominal_is(name, "DataStream") && parameters.len() == 1 -> {
+                    row = Val(parameters[0])
+                    query_source = Val("QueryStream")
                 }
             }
-            .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
         }
-        row_type: row ?? {
-            check.diagnostics.push(sema_error("E0112", args[0].span, "`data.query` needs `[Row]`, `DataTracked<Row, Key>`, or `DataStream<Row>`, not `{type_name(first.ty)}`", "a query keeps one typed row shape", "pass a typed row list, tracked source, or stream"))
-            return SemaDirectSpecialCheck{handled: true, value: None}
-        }
-        if query_type_args.len() == 0 -> query_type_args = [Type]{row_type}
-        result_type: Type.Apply{name: sema_data_source_type_name(check, "Query"), args: [Type]{row_type}}
-        record := sema_call_core_record(module_name, member, args.len(), span, check.diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-        // A tracked source or a stream enters the query through its own source.
-        if query_source == .Val(role) -> record.source_role = Val(role)
-        typed: [TExpr]{first}
-        argument_types: [Type]{first_expected}
-        result: sema_data_core_emit(record, "{module_name}.{member}", args, argument_types, typed, query_type_args, result_type, span, expected, check) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-        return SemaDirectSpecialCheck{handled: true, value: Val(result)}
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }
-    SemaDirectSpecialCheck{handled: false, value: None}
+    row_type: row ?? {
+        check.diagnostics.push(sema_error("E0112", args[0].span, "`data.query` needs `[Row]`, `DataTracked<Row, Key>`, or `DataStream<Row>`, not `{type_name(first.ty)}`", "a query keeps one typed row shape", "pass a typed row list, tracked source, or stream"))
+        return rejected
+    }
+    if query_type_args.len() == 0 -> query_type_args = [Type]{row_type}
+    result_type: Type.Apply{name: sema_data_source_type_name(check, "Query"), args: [Type]{row_type}}
+    record: sema_call_core_function_record(module_name, member, query_source, query_type_args, span, check) ?? return rejected
+    typed: [TExpr]{first}
+    argument_types: [Type]{first_expected}
+    result: sema_data_core_emit(record, "{module_name}.{member}", args, argument_types, typed, query_type_args, result_type, span, expected, check) ?? return rejected
+    SemaDirectSpecialCheck{handled: true, value: Val(result)}
 }

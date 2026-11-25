@@ -1,8 +1,8 @@
 // `jet.runtime.crypto` (#6615): the host steps core.crypto reaches, in Jet
 // types with their effect rows. Each member is a runtime binding (Guest.jet
 // sema_guest_runtime_binding) of the runtime export that is its one body
-// (CryptoEntropy.jet, Secret.jet, SHA256.jet, CryptoAES.jet). Each is
-// `priv`: only core.crypto calls them.
+// (CryptoEntropy.jet, Secret.jet, SHA256.jet, CryptoAES.jet, VaultGet.jet).
+// Each is `priv`: only core.crypto and its submodules call them.
 crypto: module {
     // `count` bytes from one OS CSPRNG fill; None when the provider refuses.
     #Import(c) priv os_entropy: fn(count: Int) -[Rand]> [U8]? = "jet_random_os_entropy"
@@ -23,4 +23,8 @@ crypto: module {
     #Import(c) priv aes_blocks: fn(keys: [U8], rounds: Int, op: Int, iv: ^[U8], src: [U8], offset: Int, count: Int, out: ^[U8]) -> Bool = "jet_crypto_aes_blocks"
 
     #Import(c) priv ghash_blocks: fn(h: [U8], y: ^[U8], data: [U8], offset: Int, count: Int) -> Bool = "jet_crypto_ghash_blocks"
+
+    // The repository secret store's value for `name`; None when it holds none
+    // (VaultGet.jet).
+    #Import(c) priv vault_get: fn(name: String) -[Secret]> String? = "jet_vault_get_impl"
 }

@@ -7842,10 +7842,10 @@ failure precedence and caller-name context. Public signatures and unsupported
 tier behavior are unchanged; raw leaves keep the same `Net` and `Time.Wait`
 requirements as their public operations.
 
-`unix_connect` retains the native entry so its ratified `deadline:` overload is
-not narrowed to a path-only source wrapper. Unix and TLS byte/text wrappers use
-the native access contract: reads and writes borrow the named stream with `^`,
-not a copied local handle.
+`unix_connect(path, deadline: d)` is the same Core function as
+`unix_connect(path)`: its `deadline:` parameter defaults to no deadline. Unix
+and TLS byte/text wrappers use the native access contract: reads and writes
+borrow the named stream with `^`, not a copied local handle.
 
 ### `core.net.ip` — IPv4/IPv6 values and address classes
 

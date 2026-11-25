@@ -4238,6 +4238,8 @@ sema_expr_core_module_method_checked: fn(receiver: Expr, method: String, method_
         live := sema_call_try_live(module_name, method, alias, alias_span, args, type_args, method_span, expected, check)
         if live.handled -> return SemaMethodSpecialCheck{handled: true, value: live.value}
     }
+    data_query: sema_call_try_data_query(module_name, method, alias, alias_span, args, type_args, method_span, expected, check)
+    if data_query.handled -> return SemaMethodSpecialCheck{handled: true, value: data_query.value}
     // `reactive.signal/derived/computed/autorun` have no Core call record:
     // they check here, not by route.
     if module_name == "core.reactive" && (method == "signal" || method == "derived" || method == "computed" || method == "autorun") {
@@ -4250,7 +4252,12 @@ sema_expr_core_module_method_checked: fn(receiver: Expr, method: String, method_
     if sema_call_core_vault_build_time_gate(module_name, method, method_span, check) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    if !nested && sema_call_core_variadic_print(check, alias, method, args.len(), alias_span) {
+    variadic: if nested -> None else -> sema_call_core_variadic_term(check, alias, method, args.len(), alias_span)
+    if variadic == .Val(variadic_member) {
+        if variadic_member == "progress" {
+            described: sema_call_check_term_progress_iter(args, method_span, expected, check)
+            return SemaMethodSpecialCheck{handled: true, value: described.value}
+        }
         printed := sema_call_check_ambient_print(Call{name: "{alias}.{method}", name_span: method_span, type_args: type_args, args: args}, check)
         return SemaMethodSpecialCheck{handled: true, value: printed.value}
     }

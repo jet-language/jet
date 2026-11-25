@@ -37,6 +37,7 @@ use jet_foundation.[
     core_call_accepts_arity,
     core_call_coverage_contains,
     core_call_source_member,
+    core_call_source_function,
     core_call_source_role,
     core_call_projection,
     core_module_export,
@@ -627,8 +628,7 @@ sema_call_core_record: fn(module_name: String, member: String, actual_arity: Int
 sema_call_core_configured_client: fn(args: [CallArg]) -> Bool Never! { args.len() >= 3 }
 
 sema_call_core_native_resource_consumer: fn(module_name: String, member: String, configured_client: Bool) -> Bool Never! {
-    (module_name == "core.net.tls" && member == "client" && configured_client) || (module_name == "core.service" && member == "worker")
-    // Worker alone keeps checked fn() inference; its source slot is opaque.
+    module_name == "core.net.tls" && member == "client" && configured_client
 }
 
 sema_call_core_has_explicit_source_target: fn(module_name: String, member: String) -> Bool Never! {
@@ -729,9 +729,9 @@ sema_call_core_resolve_import_route: fn(check: ^SemaBodyCheck, alias: String, re
         return sema_call_core_typed_decode_route(check, imported.module_name, role, type_args, span)
     }
     diagnostic_count := check.diagnostics.len()
-    // `core.term` owns only the one-argument print, eprint
-    // and progress wrappers; other arities keep the fixed Core route.
-    variadic_term: imported.module_name == "core.term" && (member == "print" || member == "eprint" || member == "progress") && actual_arity != 1
+    // `core.term` owns only the one-argument print and eprint wrappers; other
+    // arities keep the fixed Core route.
+    variadic_term: imported.module_name == "core.term" && (member == "print" || member == "eprint") && actual_arity != 1
     source_identity: if variadic_term || sema_call_core_has_explicit_source_target(imported.module_name, member) || sema_call_core_native_resource_consumer(imported.module_name, member, configured_client) -> None else -> sema_call_core_import_source_identity(check.environment.*, check.program.*, imported)
     source: if source_identity == {
         .Val(identity) -> sema_call_core_source_target(check.environment.*, check.program.*, identity, member, type_args, span, false, check.diagnostics)
@@ -765,20 +765,23 @@ sema_call_core_resolve_import_path_route: fn(check: ^SemaBodyCheck, alias: Strin
     sema_call_core_resolve_route(check, module_name, member, type_args, actual_arity, configured_client, span)
 }
 
-// `("core.term", "print")`: an imported `core.term` print with other than one
-// argument is the qualified twin of the ambient variadic `print`, checked and
-// lowered exactly like it. True when this alias call is that print; the alias
-// reference is then recorded.
-sema_call_core_variadic_print: fn(check: ^SemaBodyCheck, alias: String, requested_member: String, actual_arity: Int, alias_span: Span) -> Bool Never! {
-    if actual_arity == 1 -> return false
-    imported: sema_call_core_import_target(check.environment.*, check.program.*, alias) ?? return false
-    if imported.module_name != "core.term" -> return false
+// `("core.term", "print")` and `("core.term", "progress")`: an imported
+// `core.term` print with other than one argument is the qualified twin of the
+// ambient variadic `print`, checked and lowered exactly like it, and a
+// progress with more than one argument is the described progress over its
+// items (sema_call_check_term_progress_iter). The member when this alias call
+// is either form; the alias reference is then recorded.
+sema_call_core_variadic_term: fn(check: ^SemaBodyCheck, alias: String, requested_member: String, actual_arity: Int, alias_span: Span) -> String? Never! {
+    if actual_arity == 1 -> return None
+    imported: sema_call_core_import_target(check.environment.*, check.program.*, alias) ?? return None
+    if imported.module_name != "core.term" -> return None
     if !sema_call_core_import_is_unshadowed(check.environment.*, check.program.*, check.scopes, imported) {
-        return false
+        return None
     }
-    member: sema_call_core_import_member(imported, requested_member) ?? return false
-    if member != "print" -> return false
-    sema_call_core_record_import_reference(check, imported, alias_span)
+    member: sema_call_core_import_member(imported, requested_member) ?? return None
+    if member != "print" && (member != "progress" || actual_arity == 0) -> return None
+    if !sema_call_core_record_import_reference(check, imported, alias_span) -> return None
+    Val(member)
 }
 
 // Registry access metadata is incomplete for optional slots; return None rather
@@ -1050,14 +1053,11 @@ sema_call_core_math_exact_crossing: fn(module_name: String, member: String, args
     Val(crossed)
 }
 
-// A `net.unix_connect` and a `tls.client` run the Core function that fills the
-// role of their arity and arguments; a stream moved into a two-argument
-// `tls.client` is the stream form, else it is the `(host, port)` one.
+// A `tls.client` runs the Core function that fills the role of its arity and
+// arguments; a stream moved into a two-argument `tls.client` is the stream
+// form, else it is the `(host, port)` one.
 sema_call_core_arity_source_record: fn(record: CoreCallRecord, args: [CallArg]) -> CoreCallRecord Never! {
     normalized := record
-    if record.symbol == CoreCallSymbol.SourceOwned && record.module_name == "core.net" && record.member == "unix_connect" {
-        normalized.source_role = Val(if args.len() == 1 -> "UnixConnect" else -> "UnixConnectDeadline")
-    }
     if record.symbol == CoreCallSymbol.SourceOwned && record.module_name == "core.net.tls" && record.member == "client" {
         if args.len() == 4 -> normalized.source_role = Val("TLSClientConfigDeadline") else if args.len() == 3 {
             normalized.source_role = Val("TLSClientDeadline")
@@ -1208,6 +1208,26 @@ sema_call_core_role_target: fn(role: String, type_args: [Type], span: Span, envi
         return None
     }
     sema_call_core_source_target(environment, program, filler.module_identity, filler.name, type_args, span, true, diagnostics)
+}
+
+// The checked record of the Core module call `module_name.member` whose call
+// runs the Core function that fills `role`, else the module's own `member`,
+// instantiated with `type_args`. Each argument is read or taken as that
+// function's parameter declares.
+sema_call_core_function_record: fn(module_name: String, member: String, role: String?, type_args: [Type], span: Span, check: ^SemaBodyCheck) -> CoreCallRecord? {
+    target: sema_call_core_function_target(module_name, member, role, type_args, span, check) ?? return None
+    params: sema_call_params_from_type(target.signature) ?? return None
+    borrowed: loop param in params -> param.convention != AccessConvention.Move
+    Val(core_call_source_function(module_name, member, role, borrowed))
+}
+
+sema_call_core_function_target: fn(module_name: String, member: String, role: String?, type_args: [Type], span: Span, check: ^SemaBodyCheck) -> SemaCallDirectTarget? {
+    if role == .Val(name) -> return sema_call_core_role_target(name, type_args, span, check.environment.*, check.program.*, check.diagnostics)
+    identity: sema_call_core_module_identity(check.environment.*, check.program.*, module_name) ?? {
+        check.diagnostics.push(sema_error("E0902", span, "source-owned Core module `{module_name}` is not loaded", "this declaration has no host implementation route", "load the owning Core source package"))
+        return None
+    }
+    sema_call_core_source_target(check.environment.*, check.program.*, identity, member, type_args, span, true, check.diagnostics)
 }
 
 // The call sema_call_core_source makes, of `member` of the Core module `identity`.
