@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7038,
-    "rev": 114271,
+    "rev": 114275,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -25319,6 +25319,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-24T02:27:00.751Z"
+        },
+        {
+          "n": 39,
+          "text": "A denial in a block list works as the spec says (Docs/Spec/spec.md:2905-2908, `!E` denies inside `#FX(...)`): today `#FX(!FS) { … }` fails with Jet.MarkerArgumentMismatch (\"#FX arguments do not match FX(Effect...)\") because the marker is `FX: struct { grant: [Effect] }` (Compiler/Prelude/Markers.jet:574-580), while `#FX(IO) { }` works (probed on jet a0.0.46 by the D-EFFECT-TRAIT1 review, 2026-11-25). Proof: a case with `#FX(!FS) { files.read(...) }` refused by the denial and a clean `#FX(!FS)` block that runs, on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T21:50:27.682Z"
         }
       ],
       "refs": [
@@ -25351,9 +25360,9 @@
       "parentId": "c02lvwje",
       "needsAcceptance": false,
       "created": "2026-09-15T00:27:21.584Z",
-      "updated": "2026-11-24T02:27:00.751Z",
-      "updatedBy": "Orchestrator",
-      "criteriaLastN": 38
+      "updated": "2026-11-25T21:50:27.682Z",
+      "updatedBy": "Pip",
+      "criteriaLastN": 39
     },
     {
       "id": "c01dyqov",
@@ -77316,7 +77325,7 @@
       "id": "c0on1be8",
       "num": 7030,
       "title": "An effect is its provider trait: one name per service in effect rows, manifests, contexts and tests",
-      "body": "Owner asked on 2026-11-25 for greenfield proposal item P3 to go to ballot D-EFFECT-TRAIT1. Today a service has two names: the effect in rows, manifests and --allow/--deny (FS.Read, Net, DB.Write; Compiler/Prelude/Effects.jet, Core/Effects/Effects.jet) and the provider trait D-CORE-PROVIDER1=A ratified for #Context blocks, boards and tests (mostly unbuilt: Allocator and Scheduler are traits, Clock is a struct). The ballot decides whether the provider trait becomes the effect. Source: Docs/Proposals/2026-11-24-greenfield-language.md, Part 2, item P3 (master checkout, not yet on dev).",
+      "body": "Owner asked on 2026-11-25 for greenfield proposal item P3 to go to ballot D-EFFECT-TRAIT1. Today a service has two names: the effect in rows, manifests and --allow/--deny (FS.Read, Net, DB.Write; Compiler/Prelude/Effects.jet, Core/Effects/Effects.jet) and the provider trait D-CORE-PROVIDER1=A ratified for #Context blocks, boards and tests (mostly unbuilt: Allocator and Scheduler are traits, Clock is a struct). The ballot decides whether the provider trait becomes the effect. Source: Docs/Proposals/2026-11-24-greenfield-language.md, Part 2, item P3 (master checkout, not yet on dev). Ballot D-EFFECT-TRAIT1 posted 2026-11-25 (reviewed by ReviewEffectTrait1); its review is Docs/Audits/2026-11-25-effect-trait-review.md (in the master checkout, to land on dev). If ratified, the build adds a paired benchmark cell comparing a direct provider call with an installed one.",
       "kind": "feature",
       "track": "epoch",
       "epoch": "G1",
@@ -77329,7 +77338,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-25",
+          "by": "Pip",
+          "text": "Posted D-EFFECT-TRAIT1 to the owner."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -77373,7 +77388,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-25T17:58:57.851Z",
-      "updated": "2026-11-25T17:58:57.851Z",
+      "updated": "2026-11-25T21:50:30.141Z",
       "updatedBy": "Pip"
     },
     {
@@ -140736,6 +140751,357 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-25T21:41:59.890Z"
+    },
+    {
+      "id": "D-EFFECT-TRAIT1",
+      "cardId": "c0on1be8",
+      "group": "language",
+      "title": "An effect is its provider trait: one name per service in rows, manifests, contexts and tests",
+      "situation": "Jet names each outside service twice. Effect rows, manifests and the run flags say FS, Net or Time, while the code that does the work, and any test fake, is a separate type with its own name. Few services have a provider type at all: the allocator, the task queue, the database driver and the compute device do, and the clock is a plain struct. A fake reached through a trait still counts as touching the disk, so a test with a fake file store can't deny file access. The ratified provider plan would add Clock, Files and Transport traits beside the effects, keeping two names. This ballot decides whether each service is declared once, as a trait that is also its effect. The row, the grant, the context slot and the fake would then share one name.",
+      "gist": "Should each service, such as files or the clock, be declared once as a trait whose name is also its effect, context slot and fake's target?",
+      "lesson": "An effect says which outside service a function uses. A provider is the code that does that service's work: the real disk, or a fake one in a test. When the two share one declaration, the row, the grant, the context slot and the fake all use one name, and installing a fake removes the effect it replaces.",
+      "explainer": "Today a function that writes a file says -[FS.Write]> in its signature. A test that wants a fake disk has nowhere to put one. There is no files slot in #Context, and a fake reached through a trait still counts as writing to the disk.\n\nUnder the recommended design FS is a trait of the disk's basic operations. The real disk and every fake implement it, and #Context(fs: testing.MemoryFS{}) swaps one in for a block. Rows, --allow and package.jet keep the names they use today.",
+      "story": "Ravi writes a small tool that stamps a note with the time and saves it. His test should check the saved text without touching his disk or depending on the clock. He wants his test's helper to say -[!FS]>, so a slip that reaches his real files fails the build.\n\nToday he can't. The clock is a struct he has to pass into every function by hand. There is no slot for a fake file store, and the compiler rejects #Context(clock: …). If he writes his own Store trait and a memory fake, a call through the trait still charges its -[FS.Write]> bound.\n\nUnder A he writes #Context(fs: testing.MemoryFS{}, time: testing.FixedTime{unix_ms: 0}) around the call. The block's file and clock calls reach only the fakes, so its row holds neither FS nor Time, and the -[!FS]> helper builds. His production code is unchanged: files.write and time.now_utc call whatever provider the context holds.\n\nA program that installs nothing calls the real disk and clock directly, as today. The denial covers Core's file functions. A child process he starts is checked as Exec, and foreign code as FFI.",
+      "inWild": "// Flix: Fs.FileSystem is an effect with operations and a default handler; withInMemoryFS handles it and drops it from the signature.\n// https://doc.flix.dev/filesystem.html and https://doc.flix.dev/library-effects.html\nrun { FileSystem.write(str = \"hi\", \"/note.txt\") } with FileSystem.withInMemoryFS\n\n// Koka: an effect is a set of operations; a handler gives them meaning and removes the effect from the type.\n// https://koka-lang.github.io/koka/doc/book.html#sec-handlers\nwith fun now() { 0 }   // stamp() runs here without the clock effect\n\n// Swift, Point-Free swift-dependencies: one key per dependency, overridden for a scope in tests.\n// https://github.com/pointfreeco/swift-dependencies\nwithDependencies { $0.continuousClock = ImmediateClock() } operation: { model.start() }\n\n// Go: io/fs.FS is the file-system interface; testing/fstest.MapFS is the in-memory fake.\n// https://pkg.go.dev/io/fs and https://pkg.go.dev/testing/fstest\nfsys := fstest.MapFS{\"note.txt\": {Data: []byte(\"hi\")}}\n\n// Scala ZIO 2: Clock, Console, Random and System left the environment type; ZIO.withClock overrides one for a scope.\n// https://zio.dev/guides/migrate/zio-2.x-migration-guide/ and https://zio.dev/reference/test/services/clock/\nZIO.withClock(testClock)(program)",
+      "detail": "What this decides. Card #7030 carries greenfield proposal item P3 (Docs/Proposals/2026-11-24-greenfield-language.md, Part 2 lines 279-296 and Part 3.6). Every outside service has one effect name in rows, manifests, --allow and --deny, and a separate provider type for the work and for test fakes. This ballot decides whether the provider trait becomes the effect, so one declaration holds the operations, the effect name, its leaves and facts, its fakes' target and its context slot.\n\nToday the same service's facts live in up to ten places, and most are written by hand. The table lists them for three services in the dev tree at 35cc4235d3b.\n\n```text\nFact                     FS                                   Time                                 Mem.Alloc and the allocator\neffect and leaves        Prelude/Effects.jet:27-34            Prelude/Effects.jet:40-44            Prelude/Effects.jet:116-123 (deny-only)\noperations               Core/Files/Files.jet:1185-1228,      Core/Time/Time.jet:2759-2791,        runtime\n                         calling rt.*_os directly             calling the runtime directly\nprovider type            none                                 Clock struct, Time.jet:75-177        mem.Allocator trait, Mem.jet:326\nsecond provider stores   none                                 runtime World, controlled monotonic  none\n                                                              clock, wall and replay overrides\ncontext slot             none, E0761                          none, E0761                          allocator field, Prelude/Markers.jet:612-619\ntarget profile fact      MachineFacts.files: String           wall_clock, monotonic_clock, sleep   allocator: String\ntarget capability lists  Prelude/Facts.jet:358-504 and JetFoundation Target/TargetMachine.jet:7-43 (machine services)\nprofile to denial        hand map, Core/Target/Target.jet:62-83 (every service)\ntest fake or fault       41 \"FS.Read\"/\"FS.Write\" checks in     testing.fake_clock,                  any mem.Allocator value\n                         Files.jet; Sealed.jet partial faults Core/Testing/Testing.jet:282\nplain words              hand map, Compiler/JetFoundation/Source/Policy/Authority.jet:288-321 (every effect)\n```\n\nFour Core traits already pair a provider with an effect under a second name. The Prelude's Driver (Compiler/Prelude/Traits.jet:267-276) is the database driver for DB. Accelerator (Core/Compute/Compute.jet:472-481) is the compute device for GPU. mem.Allocator serves Mem.Alloc, and Scheduler (Core/Tasks/Tasks.jet:100-114) is the run queue, which needs no effect.\n\nTime already has three provider stores besides Clock. The runtime World (Compiler/JetRuntime/Source/World.jet:1-110) supplies a virtual clock, seeded random numbers and environment. testing.world and DeterministicWorld drive it (Core/Testing/Testing.jet:1685-1708).\n\nA controlled monotonic clock sits on thread-local state (World.jet:88-100). Wall-time and replay overrides come from the environment (Compiler/JetRuntime/Source/HostTime.jet:183-200 and Compiler/JetCLI/Source/CLI/ProveReplay.jet:153-164). Core/Time/Time.jet:2771-2791 consults them all before the host clock.\n\nFault injection is another store. The runtime schedule (Compiler/JetRuntime/Source/FaultSchedule.jet) is keyed by strings such as \"FS.Write\" and \"Net.Accept\". Its hooks appear 98 times in 29 files across the runtime, Core/Files, Core/Term and Core/Crypto/Random.jet. Core/Files/Sealed.jet:282-323 also injects short reads, early ends and interruptions.\n\nThe gap shows on jet a0.0.46. A static call charges the implementation's own row, so a concrete fake written -[]> passes a -[!FS]> caller today. The gap is calls through the trait. A generic <S: Store> call, or a call on a Store value, charges the trait's -[FS.Write]> bound even when the fake writes nothing (E0749).\n\nA fake that prints is refused against the bound (E0742). #Context(clock: …) is refused as an unknown context field (E0761), while a #ContextKey of a struct works. A trait operation with a default body and a wrapper holding an inner Store both check and run. The CLI prints these as Jet.ProhibitedEffectReached, Jet.ImplEffectBoundExceeded and Jet.UnknownContextField.\n\nThe recommended design, in two paragraphs. A service effect is a trait that implements Effect. Its body lists its leaves as an enum lists cases, then its basic operations, each with a row naming the leaf it performs, then its impl Effect facts. The real provider and every fake implement the trait, and each must fit every operation's row (E0742).\n\ncontext.fs reads the current provider, and #Context(fs: v) installs one for a block. Inside the block a call that reaches the fs slot is charged v's own row, so a memory fake removes FS. Every other path keeps its effect. A target profile names each machine's provider by the same slot name. Effects that are facts, not services, stay structs and enums.\n\nWhat does not change. Every effect row, package.jet authority list, grant line, --allow and --deny value and run notice keeps its spelling. A function's row still names FS.Read or Time. Core's public functions keep their names and rows: files.read stays files.read. Only the line inside it changes, from a direct runtime call to a call on context.fs. Deny-only effects, effect scopes such as FS.Read(\"assets/\"), and the runtime's path checks stay where they are.\n\nCutover under A, one change, no aliases:\n\n```text\nSite (dev tree)                                           Today                                   Under A\nCompiler/Prelude/Effects.jet:21-63                        Net, FS, IO, Time, Rand, Env, Exec      traits with leaf cases and operations\nCompiler/Prelude/Effects.jet:65-67, Compute.jet:472       GPU effect + Accelerator trait          one GPU trait; device handles implement it\nCompiler/Prelude/Effects.jet:73-132                       FFI, Browser, Panic, Mem, Unsafe        unchanged, no operations, no slot\nCore/Effects/Effects.jet:10-26, Prelude/Traits.jet:269    DB effect + Driver trait; Log; Secret   DB trait (Driver deleted); Log and Secret traits\nCore/Time/Time.jet:75-177                                 Clock struct; 358 Clock matches         Time providers; every use rewritten\nCore/Time/Time.jet:2771-2791, JetRuntime World.jet        world, controlled and override checks   one path: the current Time provider\nJetRuntime HostTime.jet:183-200, CLI ProveReplay.jet      environment wall and replay overrides   recording and replaying providers\nCore/Testing/Testing.jet:282-288, 1685-1708               fake_clock, fake_rng (38 uses), world   FixedTime, SeededRand; world installs providers\nCore/Log/Log.jet:606-636                                  Handler struct, #ContextKey logger      Log providers; logger to log (14 uses)\nPrelude/Markers.jet:612-619, ContextBlocks.jet:31-117     fixed allocator/logger menu, E0761 text generated from effect traits + non-effect fields\nCoreSurface.jet:906-918                                   CTX_FIELD_LOGGER row                    deleted; slot rule row added\nSpellings.jet:83 and 280, spec.md:4704-4706               trait rows; reserved context names      case-line and in-trait impl Effect rows; slot names\nCore/Target/Target.jet:29-84                              String services, hand row()             provider per slot; denial generated\nPrelude/Facts.jet:358-504, Target/TargetMachine.jet:7-43  hand capability lists                   service rows generated from effect traits\nJetRuntime FaultSchedule.jet, 98 hooks in 29 files        string-keyed fault checks               generated failing providers; allocation faults stay\nCore/Files/Sealed.jet:282-323                             short, eof and interrupted fault keys   modes of the generated failing FS provider\nCore service bodies (files, time, net, env, exec, io)     direct rt.* calls                       calls on context.<slot>\nRegistry/EffectVocabulary.jet:264-462                     enum and struct effects                 also reads the trait form and provider:\nDriver/SchedulerProvider.jet:1-17, 105-135                weak scheduler hooks bound at link      same binding for each slot operation's hook\nRows, package.jet authority, --allow, --deny              12,521 rows in 2,392 .jet files         unchanged spelling\njet inspect rights, run notice                            sema rows                               also list each install and its provider\nDocs/Spec/spec.md:2926-3163, 3471-3530, 4686-4778         two-name text                           one-name text; syntax-decisions regenerated\n```\n\nCounts are git-tracked .jet matches in the dev tree. The word Clock has 358 matches in 107 files; Clock.new has 91 in 60 files and Clock.system 26 in 24. fake_clock has 23, fake_rng 15, #Context(logger 8 and context.logger 6. testing.world( has 12. The faults: [ spelling, 100 uses in 48 files, stays. The word Driver has 151 matches in 59 files, some unrelated.\n\nHow it combines with D-EFFECT-CLASS1. That ballot puts an access fact (Reads, Adds or Replaces) on each leaf and splits FS, DB, Net and Env leaves to match. If both are ratified, the split leaves are the cases at the top of those traits. Each operation's row names the one split leaf that ballot gives the Core function calling it. Its access and irreversible facts sit unchanged in each trait's impl Effect block.\n\n#Repeatable stays on Core's public functions, as that ballot writes, and also sits on each trait operation they call. A provider's version of a #Repeatable operation is checked as a #Repeatable function is. The Net trait has one exchange operation per access leaf beside its socket operations, so client.get calls a Net.Read operation and E0742 stops a fake from widening it.\n\nIf only this ballot is ratified, the leaves stay Read and Write. If only that one is, the enums take its split exactly as it writes them.\n\nDecisions this amends, each by name. D-CORE-PROVIDER1 keeps its outcome but loses its stated reason that effects stay separate: its Clock, Files, Transport and LogSink traits become Time, FS, Net and Log. D-EFFECT-HANDLE1 keeps one task-local slot per service. Its keys http, fs and process become net, fs and exec, and its traits become Net, FS and Exec.\n\nD-EFFECT-HANDLE1's rule that authority stays orthogonal to providers changes: an install now narrows the block's row. Its reason that leaves are permission names, not operations, still holds, since several operations name FS.Read. D-JAI-CONTEXT1's logger field becomes the Log effect's log slot. D-DECL-TYPES1 gains the trait form.\n\nD-EFF3 changes for effect traits only: inside an install, a slot call is charged the installed provider's row. D-DET1's injected Clock becomes an installed Time provider. D-FREESTAND-FACTS1 keeps its typed fact menu, but its service rows are generated from the effect traits. The spec's sentence that declarations have no runtime representation (spec.md:2982) gains the slot as its exception. Nothing else is re-decided.\n\nNot decided here: the full list of operations in each trait, which the build card writes from today's runtime rows. Plain-word descriptions stay in Authority.jet's table, which covers every effect, not only services; moving them is outside this ballot.",
+      "options": [
+        {
+          "key": "A",
+          "name": "One declaration: a service effect is a trait whose implementations are its providers",
+          "detail": "A service effect is declared once, as a trait that implements Effect. Its leaves are listed at the top like enum cases. Its basic operations follow, each row naming the leaf it performs, then the impl Effect facts. Every effect name stays as it is. The real provider for each machine, every fake, and the failing provider a #Test(faults:) list installs all implement that trait. Each must fit every operation's row (E0742).\n\nThe context slot is the effect's name in snake case: context.fs, context.time, context.net. #Context(fs: v) installs a provider for a block and the tasks it starts, and nested blocks restore the outer one. Inside the block a file call is charged v's own row, so a memory fake removes FS and a -[!FS]> row passes. A read-only wrapper leaves FS.Read, and a provider that forwards everything keeps FS.\n\nServices with many live instances, such as databases and compute devices, have no ambient slot. Their handles are values of the effect trait, passed as today: DB replaces Driver, and GPU replaces Accelerator. Effects that are facts about code (Panic, Mem, Unsafe) or calls across a language bridge (FFI, Browser) keep their struct or enum declarations and have no operations or slot. The allocator stays a context field that is not an effect, because allocation needs no grant.\n\nBeginners write nothing new: files.read, rows and --allow are unchanged, and their first fake is one #Context line. Experts implement a trait to write a provider, wrap one to narrow it, pass one as a generic value, or declare a library service effect with a default provider.",
+          "technical": "Grammar and registry (I7). Two forms are new, and both fail to parse on a0.0.46: case lines at the top of a trait body, and an impl Effect block inside one. Both are allowed only in a trait that implements Effect. This ballot ratifies them as syntax rows in Compiler/JetFoundation/Data/Syntax/Spellings.jet beside the trait rows (line 83). No keyword or marker is added, and recognition stays D-DECL-TYPES1's rule: an impl Effect block.\n\nSlots. A machine effect's slot default comes from the target profile. A library effect trait gets a slot when its impl Effect names a default provider, as provider: StripePay, the same shape as parent:. Without one, its providers are passed as values, as DB handles are. The scanner must learn that fact, since Registry/EffectVocabulary.jet:264-462 refuses other bodies today (E3010).\n\nSlot names follow the snake_case rule for context keys (Spellings.jet:280) and join the reserved context names (spec.md:4704-4706), and E0761's text names them. CoreSurface.jet:906-918 drops its CTX_FIELD_LOGGER row. The allocator stays a field, and #Context(allocator:) keeps today's runtime call.\n\nOne list. The vocabulary scanner learns the trait form. From it the build generates the context slot names, the Context marker's fields (Prelude/Markers.jet:612-619 and Sema/Statements/ContextBlocks.jet:31-117) and the target profile's service keys. The service rows of Prelude/Facts.jet:358-504 and Target/TargetMachine.jet:7-43 come from it too, and so does the failing provider #Test(faults:) installs. A trait's leaf cases and operation rows are the only home of which operation needs which leaf.\n\nRows. Each provider's operation fits that operation's declared row (E0742 stays), counting a service effect's #FX list inside it (spec.md:2944-2949). Inside #Context(fs: v), a call that reaches the fs slot is charged the row of v's own operation. That row fits the bound, so an install can only narrow. Any other path keeps its effect: a direct runtime call, FFI, an open-world call, or a call through an unknown function value.\n\nWhen v is a trait value, such as a parameter of type FS, its calls count with each operation's declared row (spec.md:3518-3522), so FS stays. A static call on a provider value charges that type's own row, as it does on a0.0.46. A call through a trait value or a generic bound charges the trait's bound, also as today. Generic code bounded by a trait is unchanged.\n\nKeeping E0742 is what makes the narrowing sound. files.write declares -[FS.Write]>, and every check made on its row assumes it, including !IO rows, #Transact bodies and access checks. A provider that also printed would break those checks wherever it is installed. A fake that serves recorded files reads them before the block. A file system over the network is passed as a value of its own trait, as Go code passes an fs.FS.\n\nDenials. A function's own denial is checked without knowing its caller's install. So a slot call there counts every provider the build can put in that slot: the target's, plus each type installed there anywhere in the program. That is the sealed set an executable build already uses for trait calls (spec.md:2698-2704). A -[!FS]> function that calls log.info keeps building, as it does today.\n\nSummaries record slot calls as slot calls, so an executable build resolves a dependency's slot calls with its own sealed set and rechecks the denials they reach. An install that breaks a denial elsewhere is an error that names the install.\n\nBinding (performance gate). Prelude and Core are compiled once per Jet version (D-EXEC1), so Core cannot be specialized per program. Each slot operation in Core calls one hook symbol that the static link binds, as Compiler/JetDriver/Source/Driver/SchedulerProvider.jet binds the scheduler's weak hooks today. With no install of that slot in the image, the hook is the target provider's function: the same direct call files.write makes now.\n\nWith an install, the hook is a generated dispatcher. It loads the context record's provider word and calls the current provider: two loads and one indirect call more per operation. The task record grows by that one word, which points to a shared, unchanging provider set, so spawn copies one word. Each install pushes and restores the word, as deadline blocks do.\n\nRelease profiles can refuse installs under D-EFFECT-HANDLE1's .Deny policy, so their hooks are always direct. Two builds always use the dispatcher: --linkage dynamic (D-LINK-MODEL1), and jet dev, whose live replacement can add an install later. WASM plugins are their own images with their own providers: a host install never reaches into one, and a call into a plugin keeps its effects.\n\nThe build card adds a paired two-program cell, direct against installed, for the files and time operations. The peer-floor cells must not move, since they install nothing.\n\nForwarding. A provider's operations may not reach their own effect's slot, and the build refuses one that does. A wrapper holds the provider it forwards to, read before the block, as ReadOnlyFS{inner: context.fs}. So a dispatched call needs no slot swap around it, and a provider can never call itself through the slot.\n\nState. context.fs returns a copy of the current provider value, as context.get does (spec.md:4697). Operations take self, so a fake keeps what it records in a Shared cell, and the copy the block installs shares it with the test's value (spec.md:2513-2520). Providers are not lent by reference as allocators are, because tasks keep their provider after the block ends.\n\nEdges. A task started inside an install keeps its provider, and its body is charged as the block is. A closure called after the block sees the provider current at the call and is charged where it is called. A C callback reads no context, so it can't reach a provider (E3218, E3203 unchanged). Code run while building reads the build host's providers, as Core calls do today.\n\nHost reads keep their rows. The reads Docs/Spec/Reference/host-reads.md lists under another effect, such as name resolution reading /etc/hosts under Net, stay with that effect's provider. A denial covers what Core's file functions do. A child process is checked as Exec, and foreign code as FFI.\n\nTarget profiles. MachineFacts (Core/Target/Target.jet:29-84) names one provider per effect slot: fs, net, io, time, rand, env, exec. It names them as it names its scheduler today, so one link-time binding serves the scheduler, the allocator and every slot. Panic, ffi and browser remain facts. The hand map row() (62-83) is deleted: an absent slot denies its root, and a provider that lacks a leaf lists it.\n\nSecond stores. testing.world and DeterministicWorld install Time, Rand and Env providers, and the runtime World keeps only the timer and idle hooks those providers call. The controlled monotonic clock and the replay and wall overrides become providers the harness installs, so now_utc keeps one path. Slot faults, including Sealed.jet's short reads and interruptions, become modes of the generated failing provider. Allocation faults stay with the allocator.\n\nOperations may have default bodies, as trait members can today (Spellings.jet:83). Each defaults to failing with its error, so a fake writes only the operations its test reaches.",
+          "code": "// Compiler/Prelude/Effects.jet under A (new spelling)\nFS: trait {\n    Read,\n    Write,\n\n    read_bytes: fn(self, path: String) -[FS.Read]> [U8] IOError!,\n    write_bytes: fn(self, path: String, data: [U8]) -[FS.Write]> IOError!,\n\n    impl Effect {\n        irreversible: fn(self) -> Bool { self == .Write }\n    }\n}\n\nTime: trait {\n    Wait,\n\n    now_ns: fn(self) -[Time]> Int,\n    sleep_ns: fn(self, ns: Int) -[Time.Wait]>,\n\n    impl Effect {}\n}\n\n// Core/Files/Files.jet under A: the name and row stay; the body asks the provider\nwrite: fn(path: Path | String, text: String) -[FS.Write]> IOError! {\n    context.fs.write_bytes(path_text(path), text.bytes())\n}\n\n// The program, unchanged from today\nuse {\n    files: core.files\n    time: core.time\n}\n\nstamp: fn(text: String) -[FS.Write, Time]> IOError! {\n    files.write(\"note.txt\", \"{time.now_utc()}: {text}\")\n}\n\n// The helper denies the disk and the clock and still builds: both fakes are installed\nwrite_note: fn(disk: testing.MemoryFS) -[!FS, !Time]> {\n    #Context(fs: disk, time: testing.FixedTime{unix_ms: 0}) {\n        stamp(\"hi\") ?? return\n    }\n}\n\n#Test(\"stamp writes the fixed time\") {\n    disk: testing.MemoryFS{}   // files sit in a Shared cell, so every copy sees them\n    write_note(disk)\n    assert_eq(disk.text(\"note.txt\"), \"1970-01-01T00:00:00Z: hi\")\n}\n\n// An expert's wrapper: reads forward to the provider it holds, writes fail\nReadOnlyFS: struct {\n    inner: FS,\n\n    impl FS {\n        read_bytes: fn(self, path: String) -[FS.Read]> [U8] IOError! { self.inner.read_bytes(path) }\n        write_bytes: fn(self, path: String, _data: [U8]) -[]> IOError! { Err(read_only(path)) }\n    }\n}\n\naudit: fn() -[!FS.Write]> {\n    #Context(fs: ReadOnlyFS{inner: context.fs}) {\n        report() ?? return   // reads real files; its writes fail and charge nothing\n    }\n}"
+        },
+        {
+          "key": "B",
+          "name": "Two names, linked by one declared fact",
+          "detail": "Effects stay as today's structs and enums, and D-CORE-PROVIDER1's provider traits are built as ratified: Clock, Files, Transport, LogSink and the rest. Each provider trait names its effect once, in a trait constant, so the compiler can check the link and generate the key list. The context key is the provider's name in snake case (clock, files, transport), while rows, manifests and --allow keep the effect's name (Time, FS, Net).\n\nInstalling a fake can still remove its effect from a block's row, because the link tells the compiler which effect a provider serves. Beginners see two words for one service: they grant FS and install files. Experts read two declarations to learn one service.",
+          "technical": "A trait constant (Spellings.jet:89, name: Type{default}) such as effect: Effect{FS} sits on each provider trait. The scanner reads it, and the same generated list that A builds feeds #Context fields, target keys and fault providers. Leaves come from each provider operation's row, as in A. The same row, cost and target rules as A apply, so the performance and soundness work is the same. The difference is the second declaration and the second name in every test and profile.",
+          "code": "// Prelude: the effect, unchanged\nFS: enum {\n    Read,\n    Write,\n\n    impl Effect {\n        irreversible: fn(self) -> Bool { self == .Write }\n    }\n}\n\n// Core: the provider trait, linked to its effect (new spelling)\nFiles: trait {\n    effect: Effect{FS},\n    read_bytes: fn(self, path: String) -[FS.Read]> [U8] IOError!,\n    write_bytes: fn(self, path: String, data: [U8]) -[FS.Write]> IOError!,\n}\n\nwrite_note: fn(disk: testing.MemoryFiles) -[!FS, !Time]> {\n    #Context(files: disk, clock: testing.FixedClock{unix_ms: 0}) {\n        stamp(\"hi\") ?? return   // denies FS, installed as files\n    }\n}"
+        },
+        {
+          "key": "C",
+          "name": "The proposal's literal form: #Effect on any trait, called through the trait name",
+          "detail": "Any trait marked #Effect is an effect. Rows name the trait, such as -[Clock]>, and code calls an operation through the trait's name, Clock.now(), which reaches the provider the context holds. #Context(Clock: FixedClock{…}) installs one. Leaves become sub-traits, and the effect names become the provider names the proposal's examples use, such as Clock.\n\nIt reads well in small examples. It adds a second way to say a type is an effect, a context label in the type's casing, and a new meaning for a call on a trait name. Every operation goes through the context at run time.",
+          "technical": "The #Effect marker sits beside D-DECL-TYPES1's impl Effect recognition, so there are two ways to declare an effect (I8).\n\nA PascalCase #Context label breaks the registry's snake_case rule for context keys (Spellings.jet:280). Leaves as sub-traits have no spelling: a dotted declaration is not Jet syntax (Spellings.jet:18), and a user module that could hold them must be snake_case. Its compile table (proposal lines 1521-1530) makes a runtime-chosen handler one indirect call, with no program-wide check that keeps today's direct calls when nothing is installed. Renaming Time to Clock reopens D-EFFECT-ROOT-WORDS1.",
+          "code": "// Proposal Part 3.6 spelling (new; does not parse today)\n#Effect Clock: trait {\n    now: fn(self) -> Time,\n}\n\nelapsed: fn(start: Time) -[Clock]> Duration { Clock.now() - start }\n\n#Test(\"elapsed\") {\n    #Context(Clock: FixedClock{at: start}) {\n        assert_eq(elapsed(start), 0s)\n    }\n}"
+        },
+        {
+          "key": "D",
+          "name": "Keep today's two names and build D-CORE-PROVIDER1 as ratified",
+          "detail": "Nothing about effects changes. The provider traits D-CORE-PROVIDER1 ratified are added beside them with their own names and keys, and each place that relates a provider to an effect keeps its own hand-written copy. That covers the target profile's denial map, the target capability lists, the world, replay and fault stores, and the plain words.\n\nIt costs least now. A fake reached through its trait keeps charging the effect it replaces, so a test can't deny the disk it never touches. Two words stay for one service, and every new service adds entries to several hand maps.",
+          "technical": "The probe in the detail is this option on a0.0.46. A memory Store called through the trait, generically or as a Store value, still charges FS.Write to a -[!FS]> caller (E0749). Called on its own type, it is charged its own row. The closest working spelling for a context-held service is a #ContextKey of a struct, which checks and runs today. A key's value has one fixed type, so a fake must be the same type as the real provider.\n\nMachineFacts.row(), the Facts.jet and TargetMachine.jet capability lists, the fault strings, the world and replay checks in Time.jet, and Authority.jet's words stay hand-kept copies.",
+          "code": "// Checks and runs on jet a0.0.46\nStore: trait {\n    save: fn(self, path: String, text: String) -[FS.Write]> IOError!,\n}\n\nMemory: struct {\n    impl Store {\n        save: fn(self, _path: String, _text: String) -[FS.Write]> IOError! { Ok() }\n    }\n}\n\nFixed: struct { at: Int }\n#ContextKey clock: Fixed{at: 0}\n\nstamp: fn() -[]> String { \"t={context.get(clock).at}\" }\n\nrun: fn() {\n    #Context(clock: Fixed{at: 5}) {\n        print(stamp())   // t=5\n    }\n    Memory{}.save(\"note.txt\", \"hi\") ?? return   // charged FS.Write: its own row says so\n}"
+        },
+        {
+          "key": "E",
+          "name": "Capabilities as values only, with no ambient services",
+          "detail": "Every function that uses a service takes it as a parameter, as Go and Swift code does with dependency injection, Rust with generics, or Scala ZIO with an environment. A function's effects are the provider types it receives, so rows follow from parameters. There is no context slot and no #Context install.\n\nIt makes every dependency visible and every fake a plain argument. It also makes files.read(path) need an fs argument at every call, threaded through every caller up to run. That is the opposite of a small beginner surface.",
+          "technical": "Each Core service function gains a provider parameter, and every call chain threads it. D-EFFECT-HANDLE1's ratified service slots lose their role. D-CONTEXT-EFFECT1's implicit context stays, but it carries no services. Static dispatch through generics is free, as in Rust, but a dynamic provider costs one indirect call. Rows and grants still need effect names, so a provider type would still map to an effect, which brings back B's link.",
+          "code": "// New spelling: no ambient service\nstamp: fn<F: FS, T: Time>(fs: F, time: T, text: String) IOError! {\n    fs.write_bytes(\"note.txt\", \"{time.now_ns()}: {text}\".bytes())\n}\n\nrun: fn() {\n    stamp(machine.fs, machine.time, \"hi\") ?? return\n}\n\n#Test(\"stamp\") {\n    stamp(testing.MemoryFS{}, testing.FixedTime{unix_ms: 0}, \"hi\") ?? return\n}"
+        },
+        {
+          "key": "F",
+          "name": "One declaration, but an install leaves the row unchanged",
+          "detail": "Effects become traits as in A, with the same names, slots, generated lists, binding and second-store cutover. An install swaps the provider at run time but leaves the block's row as it was. That is D-EFFECT-HANDLE1's ratified rule that authority stays orthogonal to providers.\n\nIt needs no new row rule and no sealed set for slot denials. A test with a memory fake still counts as writing files, so it can't deny the disk, which is the gap the card names.",
+          "technical": "A's grammar, one list, slots, binding, forwarding, state, edges and target sections all apply. A's Rows and Denials sections drop: a slot call is charged its operation's declared row everywhere, and E0742 still bounds providers. Code that must prove it touches no disk passes a fake of a concrete type as a value, whose own row a static call charges, as E does.",
+          "code": "// New spelling: as A, but the row keeps FS and Time\nwrite_note: fn(disk: testing.MemoryFS) -[!FS, !Time]> {\n    #Context(fs: disk, time: testing.FixedTime{unix_ms: 0}) {\n        stamp(\"hi\") ?? return   // error E0749: reaches FS.Write\n    }\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Flix",
+          "note": "Flix's standard library declares Fs.FileSystem, Time.Clock, Net.Http and others as effects with operations, each with a default handler, so main needs no setup. withInMemoryFS fully handles FileSystem and drops it from the signature, though it adds Clock for timestamps. Middleware such as withReadOnly and withChroot forward to the real effect. Flix is the closest peer to A; Jet adds grants and denials over the same names. Sources: https://doc.flix.dev/filesystem.html and https://doc.flix.dev/library-effects.html",
+          "code": "use Fs.FileSystem\n\ndef main(): Unit \\ { Clock, IO } =\n    run {\n        let r = FileSystem.write(str = \"Hello\", \"/data/hello.txt\");\n        println(r)\n    } with FileSystem.withInMemoryFS   // FileSystem handled; Clock added"
+        },
+        {
+          "lang": "Koka",
+          "note": "An effect declares its operations, and a handler gives them meaning. A function's type lists the effects it may perform, and a handler removes its effect from the type of the code it wraps. Evidence passing compiles common handlers to fast calls (Xie and Leijen, ICFP 2021). A follows this: the trait is the effect, a provider is the handler, and an install drops the effect from the block's row. Source: https://koka-lang.github.io/koka/doc/book.html#sec-handlers",
+          "code": "effect clock {\n  fun now() : int\n}\nfun stamp() : clock string { \"t=\" ++ show(now()) }\nfun test() : string {\n  with fun now() { 0 }\n  stamp()   // clock handled here\n}"
+        },
+        {
+          "lang": "Effekt",
+          "note": "Effects are interfaces, and a try block with a handler supplies an implementation; the compiler passes handlers as capabilities. Brachthaeuser and others, Effects as Capabilities, OOPSLA 2020. Effekt shows an effect can be an interface with operations, handled lexically and compiled without a global lookup. Source: https://effekt-lang.org/docs/",
+          "code": "interface Clock { def now(): Int }\ndef stamp(): String / Clock = \"t=\" ++ show(do now())\ndef test() = try { stamp() } with Clock { def now() = resume(0) }"
+        },
+        {
+          "lang": "Unison",
+          "note": "An ability declares operations; a function's type lists the abilities it needs, and a handler interprets them. IO and Exception are built-in abilities the runtime handles. Unison has no ability hierarchy, so a partial grant like read-only files has to be a separate ability. Source: https://www.unison-lang.org/docs/fundamentals/abilities/",
+          "code": "unique ability Clock where now : {Clock} Nat\nstamp : '{Clock} Text\nstamp _ = \"t=\" ++ Nat.toText Clock.now"
+        },
+        {
+          "lang": "OCaml 5",
+          "note": "Effects are declared operations with deep and shallow handlers, but the type system does not track them. An effect nobody handles fails at run time with Effect.Unhandled. Handlers there are a control mechanism, not a permission system; Jet keeps rows checked while building. Source: https://ocaml.org/manual/5.2/effects.html",
+          "code": "type _ Effect.t += Now : int Effect.t\nlet stamp () = \"t=\" ^ string_of_int (Effect.perform Now)"
+        },
+        {
+          "lang": "Scala ZIO and Kyo",
+          "note": "ZIO's ZIO[R, E, A] lists required services in R, and services are traits provided by layers. ZIO 2 took its built-in Clock, Console, Random and System out of R; ZIO.withClock overrides one for a scope, much as A's install does, and TestClock replaces it in tests. Those built-ins are no longer tracked in the type, while A keeps them in rows. Kyo tracks pending effects in a type and handles them one by one. Sources: https://zio.dev/guides/migrate/zio-2.x-migration-guide/ and https://getkyo.io",
+          "code": "val stamp: ZIO[Any, Nothing, String] =\n  Clock.currentDateTime.map(t => s\"t=$t\")\n// test: TestClock.setTime(Instant.EPOCH) *> stamp"
+        },
+        {
+          "lang": "Haskell mtl and effectful",
+          "note": "mtl uses type classes such as MonadReader; effectful lists effects in Eff es a and interprets a dynamic effect by a handler, with static effects for speed. Both make the effect and its interface one declaration, as A does. Source: https://hackage.haskell.org/package/effectful",
+          "code": "data Clock :: Effect where Now :: Clock m Int\ntype instance DispatchOf Clock = Dynamic\nstamp :: Clock :> es => Eff es String\nstamp = (\"t=\" ++) . show <$> send Now"
+        },
+        {
+          "lang": "Rust",
+          "note": "A trait with a generic parameter gives a static, monomorphized provider; dyn Trait gives one indirect call. Rust does not track effects, and cap-std removes ambient file access by passing directory handles. E follows Rust; A keeps Rust's static calls when nothing is installed. Source: https://docs.rs/cap-std",
+          "code": "trait Clock { fn now(&self) -> u64; }\nfn stamp<C: Clock>(c: &C) -> String { format!(\"t={}\", c.now()) }"
+        },
+        {
+          "lang": "Swift",
+          "note": "Protocols with dependency injection; Point-Free's swift-dependencies keeps one key per dependency and overrides it for a scope with withDependencies, close to A's #Context install. Nothing tracks which code uses a dependency. Source: https://github.com/pointfreeco/swift-dependencies",
+          "code": "@Dependency(\\.continuousClock) var clock\nwithDependencies { $0.continuousClock = ImmediateClock() } operation: { model.start() }"
+        },
+        {
+          "lang": "Go",
+          "note": "io/fs.FS is a one-method interface (Open), os.DirFS is the real disk and testing/fstest.MapFS is the fake. Code that wants a fake must take an fs.FS argument, which is E's model; os.ReadFile ignores it. Sources: https://pkg.go.dev/io/fs and https://pkg.go.dev/testing/fstest",
+          "code": "func stamp(fsys fs.FS) ([]byte, error) { return fs.ReadFile(fsys, \"note.txt\") }\nstamp(fstest.MapFS{\"note.txt\": {Data: []byte(\"hi\")}})"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A gives each service one declaration and one name, and the row, the grant, the context slot, the target profile and the fake all read it. It fixes the real gap: a fake no longer charges the effect it replaces, so a test can deny the disk. Keeping E0742 makes that sound, since an install can only narrow a row. It changes no row, manifest or flag spelling. A program that installs nothing keeps today's direct calls, because the static link binds each operation's hook as it binds the scheduler's.",
+        "tradeoff": "One name, honest fakes and generated lists. The price is a new trait-body form, a Core rewrite of each service and its second stores, and a dispatcher per operation in builds that install a provider.",
+        "gains": [
+          "One declaration per service holds its operations, effect name, leaves, facts and context slot.",
+          "Installing a fake narrows its effect, so a test helper can say -[!FS]> and build.",
+          "Target denials, capability rows, #Context fields and fault providers are generated, deleting the hand maps.",
+          "The world, replay and override stores become providers, so the clock has one path.",
+          "No effect row, manifest, grant or flag changes spelling."
+        ],
+        "losses": [
+          {
+            "loss": "Effects get a second declaration shape: a trait with leaf cases and operations, beside struct and enum effects. Both parts are new syntax rows.",
+            "mitigation": "One rule covers both: an effect is a type that implements Effect, and a trait effect is one with operations. Only Core and library authors declare effects, and the registry rows land before the parser accepts the form."
+          },
+          {
+            "loss": "Core is rewritten once. Service functions call their slots, every Clock use (358 matches in 107 files) moves to Time providers, and the world, replay and fault stores become providers. Driver, Accelerator and the logger key are renamed.",
+            "mitigation": "One language rewrite moves them together. Public Core function names and rows stay, so user programs that call files.read or time.now_utc are untouched."
+          },
+          {
+            "loss": "A build that installs a provider pays two loads and an indirect call per operation of that service, and every task record grows by one word.",
+            "mitigation": "Only builds with an install pay, mostly tests. The others bind each hook to the real provider at link time. A paired two-program cell measures both, and the peer-floor cells install nothing."
+          },
+          {
+            "loss": "A provider must fit each operation's row, so a fake can't read fixtures from disk inside the block, and a network file system can't be installed as fs.",
+            "mitigation": "A fake loads its fixtures before the block. A network file system is passed as a value of its own trait, as Go passes an fs.FS."
+          },
+          {
+            "loss": "A denial on code that calls a slot counts every provider the program installs there, so adding an install can fail a denial elsewhere.",
+            "mitigation": "This is the sealed-set rule executable builds already use for trait calls, and the error names the install."
+          },
+          {
+            "loss": "A test with fakes no longer exercises the real grant checks for the effects it replaces.",
+            "mitigation": "That is the point of a fake, and a fake that forwards to the real provider keeps the effect. A direct runtime call, FFI, an open-world call or an unknown function value keeps its effect even inside an install."
+          },
+          {
+            "loss": "Seven ratified decisions are amended: D-CORE-PROVIDER1, D-EFFECT-HANDLE1, D-JAI-CONTEXT1, D-DECL-TYPES1, D-EFF3, D-DET1 and D-FREESTAND-FACTS1. D-EFFECT-HANDLE1 loses its rule that authority stays orthogonal to providers.",
+            "mitigation": "Each keeps its outcome except the parts the detail names. The ballot lists every amendment, so the owner votes them together."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B gets A's generated keys and narrowing but keeps two names for one service. A user grants FS and installs files, and a reader must find two declarations to learn one service. It saves no work, since the link fact needs the same scanner and rules."
+          },
+          {
+            "key": "C",
+            "reason": "C adds a second way to declare an effect, a context label against the snake_case rule, and leaves with no spelling. It renames Time to Clock against D-EFFECT-ROOT-WORDS1. It also sends every operation through the context with no rule that keeps today's direct calls."
+          },
+          {
+            "key": "D",
+            "reason": "D leaves the gap the probe shows: a fake reached through its trait still charges the effect it replaces. It also keeps two names per service and the hand maps in MachineFacts.row(), the capability lists, the fault strings, the clock's second stores and the context field menu."
+          },
+          {
+            "key": "E",
+            "reason": "E makes every file read take a provider argument threaded from run, which fails the small beginner surface. It drops the ratified context slot, and it still needs effect names for grants, which brings back the link B writes."
+          },
+          {
+            "key": "F",
+            "reason": "F gets A's one name and generated lists but keeps the gap the card names: a fake still charges the effect it replaces, so a test can't deny the disk. The row rule it avoids is the part that makes fakes honest, and A keeps that rule sound by keeping E0742."
+          }
+        ]
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: ReviewEffectTrait1. The review probed the draft on jet a0.0.46, kept E0742 so an install only narrows a row, and fixed the call rules, link binding and store list. It added option F and Flix as a peer; see Docs/Audits/2026-11-25-effect-trait-review.md."
+      },
+      "checkInstructions": "On dev, read Compiler/Prelude/Effects.jet and Core/Effects/Effects.jet for today's effects. Read Compiler/Prelude/Traits.jet:267-276, Core/Compute/Compute.jet:472-481, Core/Mem/Mem.jet:321-330 and Core/Tasks/Tasks.jet:100-114 for the four provider traits. Read Core/Time/Time.jet:75-177 for the Clock struct and Core/Testing/Testing.jet:280-290 for fake_clock and fake_rng.\n\nFor the second stores, read Compiler/JetRuntime/Source/World.jet:1-110 and Core/Testing/Testing.jet:1685-1708. Then read Compiler/JetRuntime/Source/HostTime.jet:183-200, Compiler/JetCLI/Source/CLI/ProveReplay.jet:153-164 and Core/Time/Time.jet:2771-2791. For faults, read Compiler/JetRuntime/Source/FaultSchedule.jet, Core/Files/Files.jet:1157-1228 and Core/Files/Sealed.jet:282-323.\n\nFor the hand copies, read Core/Target/Target.jet:26-84, Compiler/Prelude/Facts.jet:358-504 and Compiler/JetFoundation/Source/Target/TargetMachine.jet:1-43. Read Compiler/Prelude/Markers.jet:612-619 and Compiler/JetSema/Source/Sema/Statements/ContextBlocks.jet:31-117 for the fixed #Context menu. Read Core/Log/Log.jet:600-640 for the logger key and Policy/Authority.jet:288-321 for the plain words.\n\nFor the binding, read Compiler/JetDriver/Source/Driver/SchedulerProvider.jet:1-17 and 105-135 and the D-EXEC1 and D-LINK-MODEL1 outcomes. Read Compiler/JetRuntime/Source/Context.jet:1-35 for the context record.\n\nFor the rules, read Docs/Spec/spec.md:2698-2704 (sealed sets), 2926-3163 (effect declarations), 3471-3530 (trait effects, E0742 and the dynamic-call rule) and 4686-4778 (context keys). Check Compiler/JetFoundation/Data/Syntax/Spellings.jet:18, 83, 89 and 280, and CoreSurface.jet:906-918.\n\nTo reproduce the probes, run jet check on jet a0.0.46. A Store fake written -[]> passes a -[!FS]> caller on a static call. A generic <S: Store> call fails E0749 (Jet.ProhibitedEffectReached), and a fake that prints fails E0742 (Jet.ImplEffectBoundExceeded).\n\n#Context(clock: …) fails as Jet.UnknownContextField. Option D's code prints t=5. A trait with case lines, or with impl Effect inside it, fails to parse. A trait operation with a default body, and a wrapper struct holding an inner trait value, check and run.\n\nRead Tower decisions D-CORE-PROVIDER1, D-EFFECT-HANDLE1, D-JAI-CONTEXT1, D-DECL-TYPES1, D-EFF3, D-DET1 and D-FREESTAND-FACTS1 for the amended text.",
+      "surface": {
+        "gist": "Should each service, like files or the clock, be one trait that is also its effect?",
+        "lesson": "Effects name outside services; providers do their work, real or fake. Today they are separate, so a fake still counts as touching the disk. Joining them gives each service one name everywhere, and installing a fake removes the effect it replaces.",
+        "trio": {
+          "current": {
+            "note": "A fake behind a trait still counts as the disk; no slot holds a fake clock.",
+            "code": "Store: trait {\n    save: fn(self, path: String, text: String) -[FS.Write]> IOError!,\n}\nMemory: struct { impl Store { save: fn(self, _p: String, _t: String) -[]> IOError! { Ok() } } }\nnote: fn<S: Store>(s: S, text: String) IOError! { s.save(\"note.txt\", text) }\n\ncheck_note: fn() -[!FS]> {\n    note(Memory{}, \"hi\") ?? return   // error E0749: reaches FS.Write\n}\n\n#Context(clock: Fixed{at: 5}) { … }   // error E0761: not a context field"
+          },
+          "wild": {
+            "lang": "Koka",
+            "note": "An effect is its operations; a handler supplies them and removes the effect.",
+            "code": "effect clock {\n  fun now() : int\n}\nfun test() : string {\n  with fun now() { 0 }\n  stamp()   // clock handled here\n}"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "The trait is the effect",
+            "gist": "FS is a trait; the disk and every fake implement it; #Context(fs:) installs one.",
+            "proposed": {
+              "code": "FS: trait {\n    Read,\n    Write,\n    read_bytes: fn(self, path: String) -[FS.Read]> [U8] IOError!,\n    write_bytes: fn(self, path: String, data: [U8]) -[FS.Write]> IOError!,\n    impl Effect { irreversible: fn(self) -> Bool { self == .Write } }\n}\n\nwrite_note: fn(disk: testing.MemoryFS) -[!FS, !Time]> {\n    #Context(fs: disk, time: testing.FixedTime{unix_ms: 0}) {\n        stamp(\"hi\") ?? return   // builds: both fakes installed\n    }\n}"
+            },
+            "gains": [
+              "One name per service in rows, slots, profiles and fakes.",
+              "Fakes remove their effect, so tests can deny the disk."
+            ],
+            "losses": [
+              "A new trait form with leaf cases.",
+              "Core's services are rewritten once.",
+              "Builds with fakes pay a dispatch per call."
+            ]
+          },
+          {
+            "key": "B",
+            "name": "Two names, linked",
+            "gist": "Provider traits name their effect once; keys keep provider names.",
+            "proposed": {
+              "code": "Files: trait {\n    effect: Effect{FS},\n    write_bytes: fn(self, path: String, data: [U8]) -[FS.Write]> IOError!,\n}\n\n#Context(files: testing.MemoryFiles{}) { stamp(\"hi\") ?? return }"
+            },
+            "gains": [
+              "Effects keep today's declarations."
+            ],
+            "losses": [
+              "Grant FS, install files: two words.",
+              "Two declarations per service."
+            ]
+          },
+          {
+            "key": "C",
+            "name": "The proposal's #Effect traits",
+            "gist": "Any #Effect trait is an effect, called as Clock.now().",
+            "proposed": {
+              "code": "#Effect Clock: trait {\n    now: fn(self) -> Time,\n}\nelapsed: fn(start: Time) -[Clock]> Duration { Clock.now() - start }"
+            },
+            "gains": [
+              "Short to read."
+            ],
+            "losses": [
+              "Two ways to declare an effect.",
+              "Every call goes through the context."
+            ]
+          },
+          {
+            "key": "D",
+            "name": "Keep two names",
+            "gist": "Build the ratified provider traits beside the effects.",
+            "proposed": {
+              "code": "#Context(files: testing.MemoryFiles{}) {\n    stamp(\"hi\") ?? return   // still charged FS.Write\n}"
+            },
+            "gains": [
+              "No language change."
+            ],
+            "losses": [
+              "Fakes still charge the effect.",
+              "Hand maps grow per service."
+            ]
+          },
+          {
+            "key": "E",
+            "name": "Pass every service",
+            "gist": "No ambient services; each function takes its providers as parameters.",
+            "proposed": {
+              "code": "stamp: fn<F: FS, T: Time>(fs: F, time: T, text: String) IOError! {\n    fs.write_bytes(\"note.txt\", \"{time.now_ns()}: {text}\".bytes())\n}"
+            },
+            "gains": [
+              "Every dependency is visible."
+            ],
+            "losses": [
+              "Every file read needs a passed provider."
+            ]
+          },
+          {
+            "key": "F",
+            "name": "One name, rows unchanged",
+            "gist": "As A, but installing a fake leaves the effect in the row.",
+            "proposed": {
+              "code": "write_note: fn(disk: testing.MemoryFS) -[!FS, !Time]> {\n    #Context(fs: disk, time: testing.FixedTime{unix_ms: 0}) {\n        stamp(\"hi\") ?? return   // error E0749: reaches FS.Write\n    }\n}"
+            },
+            "gains": [
+              "One name, with no new row rule."
+            ],
+            "losses": [
+              "Fakes still charge the disk."
+            ]
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "One declaration and one name per service, and fakes that really remove their effect. No spelling changes; builds without fakes keep direct calls.",
+          "tradeoff": "One name and honest fakes, for a new trait form and a one-time Core rewrite.",
+          "gains": [
+            "One name in rows, slots, profiles and fakes.",
+            "Tests with fakes can deny the disk.",
+            "Hand maps become generated lists."
+          ],
+          "losses": [
+            {
+              "loss": "A new trait form for effects.",
+              "mitigation": "Only Core and library authors declare effects; users never write one."
+            },
+            {
+              "loss": "Core's services, Clock uses and test stores are rewritten.",
+              "mitigation": "One language rewrite; public function names and rows stay."
+            },
+            {
+              "loss": "Builds with fakes pay a dispatch per call.",
+              "mitigation": "Builds without fakes keep direct calls, measured on a paired cell."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Same work as A, but two names stay."
+            },
+            {
+              "key": "C",
+              "reason": "Two ways to declare effects, and every call goes through the context."
+            },
+            {
+              "key": "D",
+              "reason": "Fakes keep charging the disk."
+            },
+            {
+              "key": "E",
+              "reason": "Every caller must pass providers."
+            },
+            {
+              "key": "F",
+              "reason": "One name, but fakes still charge the disk."
+            }
+          ]
+        }
+      },
+      "reports": [
+        {
+          "title": "Greenfield language proposal",
+          "path": "Docs/Proposals/2026-11-24-greenfield-language.md",
+          "note": "Item P3 (lines 279-296) states the idea; Part 3.6 (lines 1345-1555) sketches handlers, the compile table and FFI callbacks; Part 3.19 line 2348 lists the effect declaration as a planned difference."
+        },
+        {
+          "title": "Effect trait review",
+          "path": "Docs/Audits/2026-11-25-effect-trait-review.md",
+          "note": "Fresh adversarial review of this ballot: the strongest existing solutions, each claim attacked with a verdict, probe results on jet a0.0.46, the gaps that remain, and the cutover count."
+        }
+      ],
+      "draftedBy": "Pip",
+      "reviewedBy": "ReviewEffectTrait1",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-25T21:50:13.266Z"
     }
   ],
   "questions": [
@@ -142978,6 +143344,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-25T21:50:30.142Z",
+      "by": "Pip",
+      "action": "card.update",
+      "ref": "c0on1be8",
+      "note": "body,logEntry"
+    },
+    {
+      "at": "2026-11-25T21:50:27.682Z",
+      "by": "Pip",
+      "action": "card.over-limit",
+      "ref": "c05efrmn",
+      "note": "36 criteria, soft limit 6: Defect found by the D-EFFECT-TRAIT1 review; this card owns negative effect ceilings (row 4)"
+    },
+    {
+      "at": "2026-11-25T21:50:27.682Z",
+      "by": "Pip",
+      "action": "card.criteria-add",
+      "ref": "c05efrmn",
+      "note": "#39 A denial in a block list works as the spec says (Docs/Spec/s"
+    },
+    {
+      "at": "2026-11-25T21:50:14.161Z",
+      "by": "Pip",
+      "action": "decision.post",
+      "ref": "D-EFFECT-TRAIT1",
+      "note": "reviewed by ReviewEffectTrait1"
+    },
+    {
+      "at": "2026-11-25T21:50:13.266Z",
+      "by": "Pip",
+      "action": "decision.add",
+      "ref": "D-EFFECT-TRAIT1",
+      "note": "An effect is its provider trait: one name per service in rows, manifests, contexts and tests (draft)"
+    },
     {
       "at": "2026-11-25T21:42:16.061Z",
       "by": "Orchestrator",
