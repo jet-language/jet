@@ -429,6 +429,15 @@ WinSize: struct {
     h: Int,
 }
 
+// `progress(items, description, template)` (JetSema
+// sema_call_check_term_progress_iter): the items, handed on as the loop
+// pulls them, each reported under the description in the template's shape.
+// The compiler lowers each call to the runtime's progress Iter
+// (InlineIterProgress); it takes the items over.
+#Builtin.Role(.InlineIterProgress) priv __progress_items: fn<T>(items: ^^Iter<T>, description: String, template: String) -[IO]> Iter<T> Never! {
+    __progress_items<T>(items, description, template)
+}
+
 progress: fn(label: String) -[IO, Time.Wait]> IOError! {
     if rt.terminal8_machine_output() -> return Ok()
     // Without a terminal on stderr the label is a plain stdout line, so a
