@@ -196,6 +196,61 @@ GrammarLexer: struct {
     accept: [Int],
 }
 
+/// What a field of a generated type holds: the text of a token, a literal
+/// or a choice of them (`String`), a value of rule `rule`'s type, or
+/// whether an optional literal was there (`Bool`).
+GrammarFieldKind: enum {
+    Text,
+    Rule,
+    Flag,
+}
+
+/// One field of a generated type: `name`, what it holds, and whether it is
+/// optional (`T?`) or a list (`[T]`). `nodes` are the elements that set it.
+GrammarField: struct {
+    name: String,
+    kind: GrammarFieldKind,
+    rule: Int,
+    optional: Bool,
+    list: Bool,
+    nodes: [Int],
+}
+
+/// One case of a generated enum: `name`, the alternative `alt` it parses
+/// and its `fields`. `wraps` is the rule of a `Name(Rule)` case (-1
+/// otherwise); a case with neither fields nor a wrapped rule is a unit
+/// case.
+GrammarCase: struct {
+    name: String,
+    alt: Int,
+    fields: [GrammarField],
+    wraps: Int,
+}
+
+/// The type parser rule `rule` generates, named `name`: an enum of
+/// `cases` when `is_enum`, else a struct of `fields`.
+GrammarShape: struct {
+    rule: Int,
+    name: String,
+    is_enum: Bool,
+    fields: [GrammarField],
+    cases: [GrammarCase],
+}
+
+/// How values print. A token no field keeps prints as `texts[kind]`, its
+/// literal or the first fixed text its rule matches ("" when it has none).
+/// A token of kind `b` right after one of kind `a` is preceded by
+/// `separator` when bit `a * kinds + b` of `glue` is set, because the two
+/// could lex as one. `groups[rule]` is the grouping alternative (`open
+/// label=rule close`) of an operator rule, which parenthesizes an operand
+/// that binds looser than its place (-1 for none).
+GrammarPrinter: struct {
+    texts: [String],
+    separator: String,
+    glue: [Int],
+    groups: [Int],
+}
+
 /// A checked grammar: what a generated parser and printer run from.
 /// `start` is the start rule (-1: any parser rule may start a parse).
 /// `parent` is each node's parent in the parsed structure (-1 at a rule
@@ -209,4 +264,6 @@ GrammarPlan: struct {
     tokens: [GrammarToken],
     decisions: [GrammarDecision],
     lexer: GrammarLexer,
+    shapes: [GrammarShape],
+    printer: GrammarPrinter,
 }

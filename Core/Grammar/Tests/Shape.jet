@@ -1,0 +1,170 @@
+// Generated types: a struct per one-alternative rule, an enum per rule of
+// several, the field each label or lone rule reference makes, and the
+// refusals: a field set twice or of two types, and a rule with no end.
+use {
+    core.grammar.[analyze]
+    core.grammar.error.[GrammarFault, GrammarFaultKind]
+    core.grammar.plan.[GrammarField, GrammarPlan, GrammarShape, GrammarSource]
+}
+
+plan_of: fn(text: String) -> GrammarPlan Never! {
+    if analyze(text, "", [GrammarSource]{}) == {
+        .Ok(plan) -> plan
+        .Err(error) -> panic("{error}")
+    }
+}
+
+faults_of: fn(text: String) -> [GrammarFault] Never! {
+    if analyze(text, "", [GrammarSource]{}) == {
+        .Ok(_) -> [GrammarFault]{}
+        .Err(error) -> error.faults
+    }
+}
+
+/// A field as it would be declared.
+show_field: fn(plan: GrammarPlan, field: GrammarField) -> String Never! {
+    base := "String"
+    if field.kind == .Flag -> base = "Bool"
+    loop shape in plan.shapes {
+        if field.kind == .Rule && shape.rule == field.rule -> base = shape.name.copy()
+    }
+    if field.list -> return "{field.name}: [{base}]"
+    if field.optional -> return "{field.name}: {base}?"
+    "{field.name}: {base}"
+}
+
+show_fields: fn(plan: GrammarPlan, fields: [GrammarField]) -> String Never! {
+    parts := [String]{}
+    loop field in fields -> parts.push(show_field(plan, field))
+    "{{{parts.join(", ")}}}"
+}
+
+/// A shape as it would be declared: `Name{fields}` for a struct, or
+/// `Name = A(Rule) | B{fields} | C` for an enum.
+show: fn(plan: GrammarPlan, shape: GrammarShape) -> String Never! {
+    if !shape.is_enum -> return "{shape.name}{show_fields(plan, shape.fields)}"
+    cases := [String]{}
+    loop case in shape.cases {
+        text := case.name.copy()
+        loop wrapped in plan.shapes {
+            if wrapped.rule == case.wraps -> text = "{case.name}({wrapped.name})"
+        }
+        if case.fields.len() > 0 -> text = "{case.name}{show_fields(plan, case.fields)}"
+        cases.push(text)
+    }
+    "{shape.name} = {cases.join(" | ")}"
+}
+
+shapes_of: fn(text: String) -> [String] Never! {
+    plan: plan_of(text)
+    shown := [String]{}
+    loop shape in plan.shapes -> shown.push(show(plan, shape))
+    shown
+}
+
+only_fault: fn(text: String) -> GrammarFault Never! {
+    faults: faults_of(text)
+    assert_eq(faults.len(), 1)
+    assert_eq(faults[0].kind, GrammarFaultKind.FieldShape)
+    faults[0]
+}
+
+#Test("an INI grammar gives a struct per rule of one alternative and an enum per rule of several") {
+    grammar: [String]{
+        "ini     : lines+=line (EOL lines+=line)* ;",
+        "line    : section | entry | blank ;",
+        "section : '[' name=KEY ']' ;",
+        "entry   : name=KEY SEP value? ;",
+        "blank   : ;",
+        "value   : text=QUOTED # Quoted | text=BARE # Bare ;",
+        "KEY     : [A-Za-z0-9_.\\-]+ ;",
+        "SEP     : '=' | ':' ;",
+        "QUOTED  : '\"' [^\"\\r\\n]* '\"' ;",
+        "BARE    : [^ \\t\\r\\n;#\"'] [^\\r\\n;#]* ;",
+        "EOL     : '\\r'? '\\n' ;",
+        "WS      : [ \\t]+ -> skip ;",
+        "COMMENT : [;#] [^\\r\\n]* -> skip ;",
+    }
+    assert_eq(shapes_of(grammar.join("\n")), [String]{
+        "Ini{{lines: [Line]}}",
+        "Line = Section(Section) | Entry(Entry) | Blank(Blank)",
+        "Section{{name: String}}",
+        "Entry{{name: String, value: Value?}}",
+        "Blank{{}}",
+        "Value = Quoted{{text: String}} | Bare{{text: String}}",
+    })
+}
+
+#Test("an operator rule's written alternatives are its cases") {
+    grammar: [String]{
+        "calc : body=expr ;",
+        "expr : operand=expr '(' (args+=expr (',' args+=expr)*)? ')' # Call",
+        "     | <assoc=right> left=expr '^' right=expr # Pow",
+        "     | '-' operand=expr # Neg",
+        "     | left=expr op=('*' | '/' | '%') right=expr # Mul",
+        "     | left=expr op=('+' | '-') right=expr # Add",
+        "     | value=NUM # Num",
+        "     | name=IDENT # Var",
+        "     | '(' inner=expr ')' # Group",
+        "     ;",
+        "NUM   : [0-9]+ ('.' [0-9]+)? ;",
+        "IDENT : [A-Za-z_] [A-Za-z0-9_]* ;",
+        "WS    : [ \\t\\r\\n]+ -> skip ;",
+    }
+    shown: shapes_of(grammar.join("\n"))
+    assert_eq(shown[0], "Calc{{body: Expr}}")
+    assert_eq(shown[1], "Expr = Call{{operand: Expr, args: [Expr]}} | Pow{{left: Expr, right: Expr}} | Neg{{operand: Expr}} | Mul{{left: Expr, op: String, right: Expr}} | Add{{left: Expr, op: String, right: Expr}} | Num{{value: String}} | Var{{name: String}} | Group{{inner: Expr}}")
+}
+
+#Test("an alternative with no fields is a unit case") {
+    shown: shapes_of("level : 'TRACE' # Trace | 'INFO' # Info | 'WARN' # Warn ;")
+    assert_eq(shown, [String]{"Level = Trace | Info | Warn"})
+}
+
+#Test("unnamed alternatives of one token each are a choice of tokens") {
+    shown: shapes_of("word : 'abort'i | 'action'i | NAME ;\nNAME : [a-z]+ ;")
+    assert_eq(shown, [String]{"Word{{text: String}}"})
+}
+
+#Test("a labeled optional literal is a flag, and an unlabeled rule is a field named for it") {
+    shown: shapes_of("order : column descending='DESC'i? ;\ncolumn : name=NAME ;\nNAME : [a-z]+ ;\nWS : ' '+ -> skip ;")
+    assert_eq(shown, [String]{"Order{{column: Column, descending: Bool}}", "Column{{name: String}}"})
+}
+
+#Test("a field every group alternative sets is required; one only some set is optional") {
+    shown: shapes_of("v : (n=NUM | n=NAME) (a=NUM | b=NAME) ;\nNUM : [0-9]+ ;\nNAME : [a-z]+ ;\nWS : ' '+ -> skip ;")
+    assert_eq(shown, [String]{"V{{n: String, a: String?, b: String?}}"})
+}
+
+#Test("a rule may hold itself through an optional field or a list") {
+    shown: shapes_of("chain : head=NUM ('->' rest=chain)? ;\ntree : '(' kids+=tree* ')' ;\nNUM : [0-9]+ ;")
+    assert_eq(shown, [String]{"Chain{{head: String, rest: Chain?}}", "Tree{{kids: [Tree]}}"})
+}
+
+#Test("a rule used twice without labels is refused") {
+    fault: only_fault("pair : item '=' item ;\nitem : NAME ;\nNAME : [a-z]+ ;")
+    assert_eq(fault.message, "the rule `item` appears twice in this alternative without labels")
+    assert_eq(fault.at.offset, 16)
+}
+
+#Test("a label set twice, or of two types, is refused") {
+    assert_eq(only_fault("p : x=NUM x=NAME ;\nNUM : [0-9]+ ;\nNAME : [a-z]+ ;").message, "the label `x` is set twice in this alternative")
+    assert_eq(only_fault("p : x=NUM x=q ;\nq : NAME ;\nNUM : [0-9]+ ;\nNAME : [a-z]+ ;").message, "the field `x` holds both `String` and `Q`")
+    assert_eq(only_fault("p : x=NUM x+=NAME ;\nNUM : [0-9]+ ;\nNAME : [a-z]+ ;").message, "the field `x` is set both with `x=` and with `x+=`")
+    assert_eq(only_fault("p : (x=NUM)* ;\nNUM : [0-9]+ ;").message, "`x=` inside a repeat keeps only the last one")
+}
+
+#Test("unnamed alternatives must each be one rule reference or one token") {
+    fault: only_fault("v : NUM NAME | NAME ;\nNUM : [0-9]+ ;\nNAME : [a-z]+ ;")
+    assert_eq(fault.message, "the rule `v` has several alternatives without `# Name`, so each must be one rule reference, or each one token")
+}
+
+#Test("a labeled group must be a choice of single tokens") {
+    fault: only_fault("p : g=(NUM NAME | NAME) ;\nNUM : [0-9]+ ;\nNAME : [a-z]+ ;")
+    assert_eq(fault.message, "the labeled group `g` holds more than a choice of single tokens")
+}
+
+#Test("a rule no finite text can build is refused") {
+    fault: only_fault("a : '(' a ')' ;")
+    assert_eq(fault.message, "the rule `a` cannot end: every alternative of it needs a rule that needs it again")
+}

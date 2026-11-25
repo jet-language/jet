@@ -19,7 +19,7 @@ decision_at: fn(plan: GrammarPlan, node: Int) -> GrammarDecision Never! {
 }
 
 #Test("token kinds: end of input, token rules, then literals and holes") {
-    plan: plan_of("a : '(' a ')' # Group | NAME # Name | HOLE<slot=Value> # Hole ;\nNAME : [a-z]+ ;\nWS : ' '+ -> skip ;", "")
+    plan: plan_of("a : '(' a ')' # Group | name=NAME # Name | HOLE<slot=Value> # Hole ;\nNAME : [a-z]+ ;\nWS : ' '+ -> skip ;", "")
     assert_eq(plan.tokens.len(), 6)
     assert_eq(plan.tokens[0].name, "end of input")
     assert_eq(plan.tokens[1].name, "NAME")
@@ -33,7 +33,7 @@ decision_at: fn(plan: GrammarPlan, node: Int) -> GrammarDecision Never! {
 }
 
 #Test("a literal that a token rule spells lexes as that token") {
-    plan: plan_of("sum : NUM PLUS NUM | NUM '+' '+' ;\nNUM : [0-9]+ ;\nPLUS : '+' ;", "")
+    plan: plan_of("sum : left=NUM PLUS right=NUM # Plus | value=NUM '+' '+' # Twice ;\nNUM : [0-9]+ ;\nPLUS : '+' ;", "")
     assert_eq(plan.tokens.len(), 3)
     alts: plan.tree.nodes[plan.tree.rules[0].body].children
     lit: plan.tree.nodes[plan.tree.nodes[alts[1]].children[1]]
@@ -41,7 +41,7 @@ decision_at: fn(plan: GrammarPlan, node: Int) -> GrammarDecision Never! {
 }
 
 #Test("a choice decided by its first token") {
-    plan: plan_of("v : NUM # Num | NAME # Name | '(' v ')' # Group ;\nNUM : [0-9]+ ;\nNAME : [a-z]+ ;", "")
+    plan: plan_of("v : value=NUM # Num | name=NAME # Name | '(' v ')' # Group ;\nNUM : [0-9]+ ;\nNAME : [a-z]+ ;", "")
     decision: decision_at(plan, plan.tree.rules[0].body)
     assert_eq(decision.depth, 1)
     assert_eq(decision.fallback, -1)
@@ -71,7 +71,7 @@ decision_at: fn(plan: GrammarPlan, node: Int) -> GrammarDecision Never! {
 }
 
 #Test("an operator loop repeats on an operator and stops on anything else") {
-    plan: plan_of("e : e '*' e # Mul | e '+' e # Add | NUM # Num ;\nNUM : [0-9]+ ;", "E")
+    plan: plan_of("e : left=e '*' right=e # Mul | left=e '+' right=e # Add | value=NUM # Num ;\nNUM : [0-9]+ ;", "E")
     decision: decision_at(plan, plan.operators[0].repeat)
     assert_eq(decision.fallback, 1)
     assert_eq(decision.steps[0].kinds, [Int]{2, 3})

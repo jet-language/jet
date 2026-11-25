@@ -11,6 +11,8 @@ use {
     __core_grammar_analyze.[mark_nullable, mark_parents, report_left_recursion, resolve, split_operators]
     __core_grammar_lookahead.[assign_tokens, plan_decisions, plan_sets]
     __core_grammar_precedence.[plan_precedence, report_empty_repeats]
+    __core_grammar_print.[plan_printer]
+    __core_grammar_shape.[plan_shapes]
     __core_grammar_tokens.[plan_tokens]
 }
 
@@ -32,5 +34,9 @@ analyze: fn(text: String, start: String, imports: [GrammarSource]) -> GrammarPla
     plan_decisions(work)
     lexer: plan_tokens(work)
     if work.faults.len() > 0 -> return Err(grammar_faults(work.faults))
-    Ok(GrammarPlan{tree: work.tree, start: work.start, parent: work.parent, nullable: work.nullable, operators: work.operators, tokens: work.tokens, decisions: work.decisions, lexer: lexer})
+    shapes: plan_shapes(work)
+    if work.faults.len() > 0 -> return Err(grammar_faults(work.faults))
+    printer: plan_printer(work, lexer, shapes)
+    if work.faults.len() > 0 -> return Err(grammar_faults(work.faults))
+    Ok(GrammarPlan{tree: work.tree, start: work.start, parent: work.parent, nullable: work.nullable, operators: work.operators, tokens: work.tokens, decisions: work.decisions, lexer: lexer, shapes: shapes, printer: printer})
 }

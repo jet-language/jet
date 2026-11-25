@@ -29,7 +29,7 @@ only_fault: fn(text: String) -> GrammarFault Never! {
 }
 
 #Test("associativity marks the alternative it starts") {
-    tree: tree_of("e : <assoc=right> '^' e | <assoc=left> '-' e | NUM ;\nNUM : [0-9]+ ;")
+    tree: tree_of("e : <assoc=right> '^' e # Up | <assoc=left> '-' e # Down | value=NUM # Num ;\nNUM : [0-9]+ ;")
     body: tree.nodes[tree.rules[0].body]
     assert(tree.nodes[body.children[0]].right)
     assert(!tree.nodes[body.children[1]].right)
@@ -45,7 +45,7 @@ only_fault: fn(text: String) -> GrammarFault Never! {
 
 #Test("imports list the grammars they name, in order") {
     sources: [GrammarSource]{GrammarSource{name: "Lexical", text: "NAME : [a-z]+ ;"}, GrammarSource{name: "Common", text: "SEMI : ';' ;"}, GrammarSource{name: "Extra", text: "X : 'x' ;"}}
-    if analyze("import Lexical ;\nimport Common, Extra ;\nfile : NAME ;", "", sources) == {
+    if analyze("import Lexical ;\nimport Common, Extra ;\nfile : name=NAME ;", "", sources) == {
         .Ok(plan) -> {
             assert_eq(plan.tree.imports.len(), 3)
             assert_eq(plan.tree.imports[0].name, "Lexical")

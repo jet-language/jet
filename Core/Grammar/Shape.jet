@@ -1,0 +1,259 @@
+// core.grammar shapes: the type each parser rule generates.
+//
+// A rule of one alternative is a struct of its fields; a rule of several
+// is an enum, a case per alternative. A field comes from a label, or from
+// a parser rule used once without one; groups are flattened, `x?` makes a
+// field optional, a repeat or `+=` makes it a list, and a labeled optional
+// literal is a `Bool`. A field set twice, or holding two types, is
+// refused, as is a rule no finite parse can build.
+use {
+    core.grammar.error.[grammar_fault]
+    core.grammar.plan.[GrammarCase, GrammarField, GrammarFieldKind, GrammarShape]
+    __core_grammar_analyze.[GrammarWork, pascal_name]
+}
+
+/// How a field is reached: plainly, under `?` or a group alternative, or
+/// inside a repeat.
+SHAPE_PLAIN: 0
+
+SHAPE_OPTIONAL: 1
+
+SHAPE_REPEAT: 2
+
+/// Whether node `n` references a parser rule.
+is_rule_ref: fn(work: GrammarWork, n: Int) -> Bool Never! {
+    node: work.tree.nodes[n]
+    node.kind == .Ref && node.rule >= 0 && work.tree.rules[node.rule].kind == .Parser
+}
+
+/// Whether node `n` is one token: a literal or a token rule reference.
+is_token_atom: fn(work: GrammarWork, n: Int) -> Bool Never! {
+    node: work.tree.nodes[n]
+    node.kind == .Literal || node.kind == .Hole || (node.kind == .Ref && !is_rule_ref(work, n))
+}
+
+/// The type a field shows as in a refusal.
+field_type: fn(work: GrammarWork, field: GrammarField) -> String Never! {
+    base := "String"
+    if field.kind == .Rule -> base = pascal_name(work.tree.rules[field.rule].name)
+    if field.kind == .Flag -> base = "Bool"
+    if field.list -> return "[{base}]"
+    if field.optional -> return "{base}?"
+    base
+}
+
+same_type: fn(a: GrammarField, b: GrammarField) -> Bool Never! {
+    a.kind == b.kind && a.rule == b.rule
+}
+
+/// Adds `field` after the fields an alternative already sets: a second
+/// `+=` extends a list; any other second use of a name is refused.
+add_field: fn(work: ^GrammarWork, out: ^[GrammarField], field: GrammarField) Never! {
+    loop i in 0..<out.len() {
+        if out[i].name != field.name -> next
+        at: work.tree.nodes[field.nodes[0]].at
+        name: field.name
+        if !same_type(out[i], field) {
+            work.faults.push(grammar_fault(.FieldShape, at, "the field `{name}` holds both `{field_type(work, out[i])}` and `{field_type(work, field)}`", "Give each its own label"))
+        } else if out[i].list && field.list {
+            loop n in field.nodes -> out[i].nodes.push(n)
+        } else if out[i].list || field.list {
+            work.faults.push(grammar_fault(.FieldShape, at, "the field `{name}` is set both with `{name}=` and with `{name}+=`", "Write `{name}+=` at each use to keep every one"))
+        } else if work.tree.nodes[field.nodes[0]].label == "" {
+            work.faults.push(grammar_fault(.FieldShape, at, "the rule `{name}` appears twice in this alternative without labels", "Label each use, as `left={name} … right={name}`"))
+        } else {
+            work.faults.push(grammar_fault(.FieldShape, at, "the label `{name}` is set twice in this alternative", "Write `{name}+=` to keep every one, or give each its own label"))
+        }
+        return
+    }
+    out.push(field.copy())
+}
+
+/// The field atom `n` sets, reached the way `mode` says, if any.
+atom_field: fn(work: ^GrammarWork, n: Int, mode: Int, out: ^[GrammarField]) Never! {
+    node: work.tree.nodes[n]
+    name := node.label.copy()
+    kind := GrammarFieldKind.Text
+    rule := -1
+    if is_rule_ref(work, n) {
+        kind = .Rule
+        rule = node.rule
+        if name == "" -> name = work.tree.rules[node.rule].name.copy()
+    }
+    if name == "" -> return
+    if mode == SHAPE_REPEAT && node.label != "" && !node.append {
+        work.faults.push(grammar_fault(.FieldShape, node.at, "`{name}=` inside a repeat keeps only the last one", "Write `{name}+=` to keep each one"))
+        return
+    }
+    list: node.append || mode == SHAPE_REPEAT
+    add_field(work, out, GrammarField{name: name, kind: kind, rule: rule, optional: !list && mode == SHAPE_OPTIONAL, list: list, nodes: [Int]{n}})
+}
+
+/// Adds the fields node `n` of an alternative sets to `out`.
+collect_fields: fn(work: ^GrammarWork, n: Int, mode: Int, out: ^[GrammarField]) Never! {
+    node: work.tree.nodes[n]
+    kind: node.kind
+    if kind == .Alt {
+        loop child in node.children -> collect_fields(work, child, mode, out)
+    } else if kind == .Choice && node.label != "" {
+        loop alt in node.children {
+            kids: work.tree.nodes[alt].children
+            if kids.len() != 1 || !is_token_atom(work, kids[0]) {
+                work.faults.push(grammar_fault(.FieldShape, node.at, "the labeled group `{node.label}` holds more than a choice of single tokens", "Label a choice of tokens, as `op=('*' | '/')`, or label the parts inside the group"))
+                return
+            }
+        }
+        list: node.append || mode == SHAPE_REPEAT
+        if mode == SHAPE_REPEAT && !node.append {
+            work.faults.push(grammar_fault(.FieldShape, node.at, "`{node.label}=` inside a repeat keeps only the last one", "Write `{node.label}+=` to keep each one"))
+            return
+        }
+        add_field(work, out, GrammarField{name: node.label.copy(), kind: .Text, rule: -1, optional: !list && mode == SHAPE_OPTIONAL, list: list, nodes: [Int]{n}})
+    } else if kind == .Choice {
+        collect_branches(work, node.children, mode, out)
+    } else if kind == .Optional {
+        child: work.tree.nodes[node.children[0]]
+        if child.kind == .Literal && child.label != "" && !child.append && mode != SHAPE_REPEAT {
+            add_field(work, out, GrammarField{name: child.label.copy(), kind: .Flag, rule: -1, optional: false, list: false, nodes: [Int]{node.children[0]}})
+            return
+        }
+        inner := SHAPE_OPTIONAL
+        if mode == SHAPE_REPEAT -> inner = SHAPE_REPEAT
+        collect_fields(work, node.children[0], inner, out)
+    } else if kind == .Star || kind == .Plus {
+        collect_fields(work, node.children[0], SHAPE_REPEAT, out)
+    } else if kind == .Ref || kind == .Literal || kind == .Hole {
+        atom_field(work, n, mode, out)
+    }
+}
+
+/// Adds the fields of a group's alternatives: a field every alternative
+/// sets keeps its shape; one only some set is optional.
+collect_branches: fn(work: ^GrammarWork, alts: [Int], mode: Int, out: ^[GrammarField]) Never! {
+    merged := [GrammarField]{}
+    counts := [Int]{}
+    loop alt in alts {
+        branch := [GrammarField]{}
+        collect_fields(work, alt, mode, branch)
+        loop field in branch {
+            found := -1
+            loop (i, have) in merged {
+                if have.name == field.name -> found = i
+            }
+            if found < 0 {
+                merged.push(field.copy())
+                counts.push(1)
+            } else if !same_type(merged[found], field) || merged[found].list != field.list {
+                work.faults.push(grammar_fault(.FieldShape, work.tree.nodes[field.nodes[0]].at, "the field `{field.name}` holds both `{field_type(work, merged[found])}` and `{field_type(work, field)}`", "Give each its own label"))
+            } else {
+                counts[found] = counts[found] + 1
+                if field.optional -> merged[found].optional = true
+                loop n in field.nodes -> merged[found].nodes.push(n)
+            }
+        }
+    }
+    loop (i, field) in merged {
+        shaped := field.copy()
+        if counts[i] < alts.len() && !shaped.list && shaped.kind != .Flag -> shaped.optional = true
+        add_field(work, out, shaped)
+    }
+}
+
+/// Whether some finite parse builds each parser rule.
+productive_rules: fn(work: GrammarWork) -> [Bool] Never! {
+    productive := [Bool]{}
+    loop rule in work.tree.rules -> productive.push(rule.kind != .Parser)
+    grew := true
+    loop grew {
+        grew = false
+        loop (r, rule) in work.tree.rules {
+            if !productive[r] && node_productive(work, productive, rule.body) {
+                productive[r] = true
+                grew = true
+            }
+        }
+    }
+    productive
+}
+
+node_productive: fn(work: GrammarWork, productive: [Bool], n: Int) -> Bool Never! {
+    node: work.tree.nodes[n]
+    kind: node.kind
+    if kind == .Ref -> return node.rule < 0 || productive[node.rule]
+    if kind == .Optional || kind == .Star -> return true
+    if kind == .Choice {
+        loop child in node.children {
+            if node_productive(work, productive, child) -> return true
+        }
+        return false
+    }
+    if kind == .Alt || kind == .Plus {
+        loop child in node.children {
+            if !node_productive(work, productive, child) -> return false
+        }
+    }
+    true
+}
+
+/// The type of parser rule `r`.
+rule_shape: fn(work: ^GrammarWork, r: Int) -> GrammarShape Never! {
+    rule: work.tree.rules[r]
+    alts := work.tree.nodes[rule.body].children.copy()
+    if work.operator_of[r] >= 0 -> alts = work.operators[work.operator_of[r]].alts.copy()
+    shape := GrammarShape{rule: r, name: pascal_name(rule.name), is_enum: alts.len() > 1, fields: [GrammarField]{}, cases: [GrammarCase]{}}
+    if alts.len() == 1 {
+        collect_fields(work, alts[0], SHAPE_PLAIN, shape.fields)
+        return shape
+    }
+    named: work.tree.nodes[alts[0]].text != ""
+    // Unnamed alternatives that are each one token make a choice of
+    // tokens, as a labeled group does: a struct of its `text`.
+    tokens := [Int]{}
+    loop alt in alts {
+        kids: work.tree.nodes[alt].children
+        if kids.len() == 1 && is_token_atom(work, kids[0]) && work.tree.nodes[kids[0]].label == "" -> tokens.push(kids[0])
+    }
+    if !named && tokens.len() == alts.len() {
+        shape.is_enum = false
+        shape.fields.push(GrammarField{name: "text", kind: .Text, rule: -1, optional: false, list: false, nodes: tokens})
+        return shape
+    }
+    loop alt in alts {
+        node: work.tree.nodes[alt]
+        kids: node.children
+        wraps := -1
+        if kids.len() == 1 && is_rule_ref(work, kids[0]) && work.tree.nodes[kids[0]].label == "" -> wraps = work.tree.nodes[kids[0]].rule
+        name := node.text.copy()
+        if !named {
+            if wraps < 0 {
+                work.faults.push(grammar_fault(.FieldShape, node.at, "the rule `{rule.name}` has several alternatives without `# Name`, so each must be one rule reference, or each one token", "Name every alternative with `# Name`"))
+                return shape
+            }
+            name = pascal_name(work.tree.rules[wraps].name)
+        }
+        taken := false
+        loop case in shape.cases {
+            if case.name == name -> taken = true
+        }
+        if taken {
+            work.faults.push(grammar_fault(.FieldShape, node.at, "two alternatives of `{rule.name}` are both `{name}`", "Name every alternative with its own `# Name`"))
+            next
+        }
+        fields := [GrammarField]{}
+        if wraps < 0 -> collect_fields(work, alt, SHAPE_PLAIN, fields)
+        shape.cases.push(GrammarCase{name: name, alt: alt, fields: fields, wraps: wraps})
+    }
+    shape
+}
+
+/// The type of every parser rule, in rule order, with the refusals.
+plan_shapes: fn(work: ^GrammarWork) -> [GrammarShape] Never! {
+    productive: productive_rules(work)
+    shapes := [GrammarShape]{}
+    loop (r, rule) in work.tree.rules {
+        if rule.kind != .Parser -> next
+        if !productive[r] -> work.faults.push(grammar_fault(.FieldShape, rule.at, "the rule `{rule.name}` cannot end: every alternative of it needs a rule that needs it again", "Add an alternative that ends the recursion, or make the recursive part optional"))
+        shapes.push(rule_shape(work, r))
+    }
+    shapes
+}

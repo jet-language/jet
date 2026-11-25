@@ -21,14 +21,14 @@ faults_of: fn(text: String) -> [GrammarFault] Never! {
 }
 
 #Test("a rule that can match nothing is nullable") {
-    plan: plan_of("list : item* ;\nitem : 'x' ;\npair : item item? ;")
+    plan: plan_of("list : item* ;\nitem : 'x' ;\npair : first=item second=item? ;")
     assert(plan.nullable[plan.tree.rules[0].body])
     assert(!plan.nullable[plan.tree.rules[1].body])
     assert(!plan.nullable[plan.tree.rules[2].body])
 }
 
 #Test("an operator rule is split into operands and operator tails") {
-    plan: plan_of("expr : expr '*' expr # Mul | expr '+' expr # Add | '-' expr # Neg | call '(' ')' # Call | NUM # Num ;\ncall : call '.' NAME # Field | NAME # Name ;\nNUM : [0-9]+ ;\nNAME : [a-z]+ ;")
+    plan: plan_of("expr : left=expr '*' right=expr # Mul | left=expr '+' right=expr # Add | '-' expr # Neg | call '(' ')' # Call | value=NUM # Num ;\ncall : call '.' name=NAME # Field | name=NAME # Name ;\nNUM : [0-9]+ ;\nNAME : [a-z]+ ;\nWS : ' '+ -> skip ;")
     assert_eq(plan.operators.len(), 2)
     expr: plan.operators[0]
     assert_eq(expr.rule, 0)

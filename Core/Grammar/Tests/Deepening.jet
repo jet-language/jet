@@ -28,7 +28,7 @@ decision_at: fn(plan: GrammarPlan, node: Int) -> GrammarDecision Never! {
 }
 
 #Test("a second token decides what the first cannot") {
-    plan: plan_of("s : ID '=' e # Assign | ID '(' ')' # Call ;\ne : ID ;\nID : [a-z]+ ;")
+    plan: plan_of("s : target=ID '=' e # Assign | callee=ID '(' ')' # Call ;\ne : name=ID ;\nID : [a-z]+ ;")
     decision: decision_at(plan, plan.tree.rules[0].body)
     assert_eq(decision.depth, 2)
     assert_eq(decision.steps.len(), 2)
@@ -39,7 +39,7 @@ decision_at: fn(plan: GrammarPlan, node: Int) -> GrammarDecision Never! {
 }
 
 #Test("the third token decides through rule references") {
-    plan: plan_of("s : p '=' ID # Assign | p '.' ID # Field ;\np : ID ID ;\nID : [a-z]+ ;")
+    plan: plan_of("s : p '=' name=ID # Assign | p '.' name=ID # Field ;\np : first=ID second=ID ;\nID : [a-z]+ ;\nWS : ' '+ -> skip ;")
     decision: decision_at(plan, plan.tree.rules[0].body)
     assert_eq(decision.depth, 3)
     assert_eq(decision.steps.len(), 3)

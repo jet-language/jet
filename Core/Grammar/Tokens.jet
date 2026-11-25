@@ -65,14 +65,14 @@ in_token_rule: fn(work: GrammarWork, n: Int) -> Bool Never! {
 }
 
 /// The columns of the grammar: interval starts bounded by every class
-/// range and token literal code point, and by the ASCII property changes
-/// when a class uses a property.
+/// range and literal code point, and by the ASCII property changes when a
+/// class uses a property. Parser literals bound columns too, so the
+/// printer can tell their characters apart.
 column_bounds: fn(work: GrammarWork) -> GrammarLexer Never! {
     points := [Int]{0}
     masked := false
     loop (n, node) in work.tree.nodes {
-        if !in_token_rule(work, n) -> next
-        if node.kind == .Class {
+        if node.kind == .Class && in_token_rule(work, n) {
             class: work.tree.classes[node.class]
             if class.properties.len() > 0 -> masked = true
             k := 0
@@ -81,7 +81,7 @@ column_bounds: fn(work: GrammarWork) -> GrammarLexer Never! {
                 points.push(class.ranges[k + 1] + 1)
                 k += 2
             }
-        } else if node.kind == .Literal {
+        } else if node.kind == .Literal && work.owner[n] >= 0 {
             loop c in code_points(node.text) {
                 loop f in folded_cases(c, node.fold) {
                     points.push(f)

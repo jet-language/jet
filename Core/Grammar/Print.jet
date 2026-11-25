@@ -1,0 +1,384 @@
+// core.grammar printer: how values print.
+//
+// A token no field keeps prints as its literal, or as the first fixed text
+// its token rule matches. Two tokens are separated where they could lex as
+// one: where a token the lexer may try there can run on from the first
+// into the character the second starts with. They are also separated where
+// a word character meets a word character, so `SELECT id` stays apart for
+// lexers that are not contextual. The separator is a space, or a newline
+// or tab, that a `skip` token matches. An operator rule's grouping
+// alternative parenthesizes a hand-built operand that binds looser than
+// its place. A token that prints nothing, and two tokens nothing can keep
+// apart, are refused.
+use {
+    core.grammar.error.[grammar_fault]
+    core.grammar.plan.[GrammarField, GrammarLexer, GrammarPrinter, GrammarShape]
+    core.grammar.runtime.[code_point_at, fold_code_point, lexer_match]
+    __core_grammar_analyze.[GrammarWork]
+    __core_grammar_lookahead.[empty_set, is_terminal, parsed, set_add, set_has, set_items, set_meets, set_union, set_words]
+    __core_grammar_tokens.[char_columns, code_points, interval_end]
+}
+
+/// The texts a separator may be, in the order they are tried.
+SEPARATORS: [" ", "\n", "\t"]
+
+/// The first fixed text node `n` of a token rule matches: its literals,
+/// with optional and repeated parts left out, from the first alternative
+/// that has one. None where a class or `.` stands in the way.
+fixed_text: fn(work: GrammarWork, n: Int) -> String? Never! {
+    node: work.tree.nodes[n]
+    kind: node.kind
+    if kind == .Literal -> return Val(node.text.copy())
+    if kind == .Optional || kind == .Star -> return Val("")
+    if kind == .Plus -> return fixed_text(work, node.children[0])
+    if kind == .Ref -> return fixed_text(work, work.tree.rules[node.rule].body)
+    if kind == .Choice {
+        loop alt in node.children {
+            text: fixed_text(work, alt) ?? next
+            return Val(text)
+        }
+        return None
+    }
+    if kind == .Alt {
+        parts := [String]{}
+        loop child in node.children -> parts.push(fixed_text(work, child) ?? return None)
+        return Val(parts.join(""))
+    }
+    None
+}
+
+/// The text token `kind` prints as when no field keeps it, or "".
+token_text: fn(work: GrammarWork, lexer: GrammarLexer, kind: Int) -> String Never! {
+    token: work.tokens[kind]
+    if kind == 0 || token.hole != "" -> return ""
+    if token.rule < 0 -> return token.text.copy()
+    text: fixed_text(work, work.tree.rules[token.rule].body) ?? return ""
+    if text == "" || lexer_match(lexer, kind, text.bytes(), 0) != text.bytes().len() -> return ""
+    text
+}
+
+/// Whether token `kind` is text a printer writes: not the end of input
+/// and not a hole.
+printed_kind: fn(work: GrammarWork, kind: Int) -> Bool Never! {
+    kind > 0 && work.tokens[kind].hole == ""
+}
+
+/// Whether token `kind` is a literal rather than a token rule.
+literal_kind: fn(work: GrammarWork, kind: Int) -> Bool Never! {
+    printed_kind(work, kind) && work.tokens[kind].rule < 0
+}
+
+/// The DFA states `states` lead to on any column of the set `columns`;
+/// a state that ends its token leads nowhere.
+dfa_step: fn(lexer: GrammarLexer, states: [Int], columns: [Int]) -> [Int] Never! {
+    out := [Int]{}
+    loop s in states {
+        if lexer.accept[s] == 2 -> next
+        loop column in set_items(columns) {
+            to: lexer.next[s * lexer.columns + column]
+            if to < 0 -> next
+            fresh := true
+            loop have in out {
+                if have == to -> fresh = false
+            }
+            if fresh -> out.push(to)
+        }
+    }
+    out
+}
+
+/// The set of columns some state of `states` can read on.
+live_columns: fn(lexer: GrammarLexer, states: [Int]) -> [Int] Never! {
+    set := empty_set(set_words(lexer.columns))
+    loop s in states {
+        if lexer.accept[s] == 2 -> next
+        loop column in 0..<lexer.columns {
+            if lexer.next[s * lexer.columns + column] >= 0 -> set_add(set, column)
+        }
+    }
+    set
+}
+
+accepting: fn(lexer: GrammarLexer, states: [Int]) -> Bool Never! {
+    loop s in states {
+        if lexer.accept[s] > 0 -> return true
+    }
+    false
+}
+
+/// Adds to `ext` each column token `k` can read right after a text of
+/// token `a`, both read from the same start: a character that would run a
+/// text of `a` on into a longer token.
+run_on: fn(work: ^GrammarWork, lexer: GrammarLexer, points: [[Int]], a: Int, k: Int, ext: ^[Int]) Never! {
+    work.steps += 1
+    ta: work.tokens[a]
+    tk: work.tokens[k]
+    if literal_kind(work, a) && literal_kind(work, k) {
+        ca: points[a]
+        ck: points[k]
+        if ck.len() <= ca.len() -> return
+        fold: ta.fold || tk.fold
+        loop i in 0..<ca.len() {
+            x := ca[i]
+            y := ck[i]
+            if fold {
+                x = fold_code_point(x)
+                y = fold_code_point(y)
+            }
+            if x != y -> return
+        }
+        _: set_union(ext, char_columns(lexer, ck[ca.len()], tk.fold))
+    } else if literal_kind(work, a) {
+        states := [Int]{lexer.starts[k]}
+        loop c in points[a] {
+            work.steps += 1
+            states = dfa_step(lexer, states, char_columns(lexer, c, ta.fold))
+            if states.len() == 0 -> return
+        }
+        _: set_union(ext, live_columns(lexer, states))
+    } else if literal_kind(work, k) {
+        ck: points[k]
+        states := [Int]{lexer.starts[a]}
+        loop i in 0..<ck.len() {
+            work.steps += 1
+            columns: char_columns(lexer, ck[i], tk.fold)
+            if i > 0 && accepting(lexer, states) -> _: set_union(ext, columns)
+            states = dfa_step(lexer, states, columns)
+            if states.len() == 0 -> return
+        }
+    } else {
+        count: lexer.accept.len()
+        first: lexer.starts[a] * count + lexer.starts[k]
+        seen := [Int:Bool]{}
+        _: seen.add(first, true)
+        queue := [Int]{first}
+        at := 0
+        loop at < queue.len() {
+            pair: queue[at]
+            at += 1
+            sa: pair /% count
+            sk: pair % count
+            if pair != first && lexer.accept[sa] > 0 -> _: set_union(ext, live_columns(lexer, [Int]{sk}))
+            if lexer.accept[sa] == 2 || lexer.accept[sk] == 2 -> next
+            loop column in 0..<lexer.columns {
+                work.steps += 1
+                na: lexer.next[sa * lexer.columns + column]
+                nk: lexer.next[sk * lexer.columns + column]
+                if na < 0 || nk < 0 -> next
+                to: na * count + nk
+                if seen.get(to) ?? false -> next
+                _: seen.add(to, true)
+                queue.push(to)
+            }
+        }
+    }
+}
+
+/// Marks node `n` and everything under it as kept by a field.
+mark_kept: fn(work: GrammarWork, kept: ^[Bool], n: Int) Never! {
+    kept[n] = true
+    loop child in work.tree.nodes[n].children -> mark_kept(work, kept, child)
+}
+
+mark_fields: fn(work: GrammarWork, kept: ^[Bool], fields: [GrammarField]) Never! {
+    loop field in fields {
+        loop n in field.nodes -> mark_kept(work, kept, n)
+    }
+}
+
+/// Refuses each token reference no field keeps whose token has no fixed
+/// text to print.
+report_textless: fn(work: ^GrammarWork, shapes: [GrammarShape], texts: [String]) Never! {
+    kept := [Bool]{}
+    loop _ in work.tree.nodes -> kept.push(false)
+    loop shape in shapes {
+        mark_fields(work, kept, shape.fields)
+        loop case in shape.cases -> mark_fields(work, kept, case.fields)
+    }
+    reported := [Bool]{}
+    loop _ in work.tokens -> reported.push(false)
+    loop n in 0..<work.tree.nodes.len() {
+        node: work.tree.nodes[n]
+        if node.kind != .Ref || kept[n] || !parsed(work, n) || !is_terminal(work, n) -> next
+        kind: node.token
+        if !printed_kind(work, kind) || texts[kind] != "" || reported[kind] -> next
+        reported[kind] = true
+        work.faults.push(grammar_fault(.Unprintable, node.at, "the token `{node.text}` is kept in no field and has no fixed text, so a value cannot print it", "Label it, as `value={node.text}`, so the value keeps the text it matched"))
+    }
+}
+
+/// Whether node `n` is a token that prints the same text every time.
+fixed_token: fn(work: GrammarWork, texts: [String], n: Int) -> Bool Never! {
+    node: work.tree.nodes[n]
+    node.label == "" && is_terminal(work, n) && printed_kind(work, node.token) && texts[node.token] != ""
+}
+
+/// The grouping alternative of each operator rule, `open label=rule
+/// close`, by rule (-1 for none).
+plan_groups: fn(work: GrammarWork, texts: [String]) -> [Int] Never! {
+    groups := [Int]{}
+    loop _ in work.tree.rules -> groups.push(-1)
+    loop op in work.operators {
+        loop alt in op.alts {
+            operator := false
+            loop o in op.operators {
+                if o.alt == alt -> operator = true
+            }
+            kids: work.tree.nodes[alt].children
+            if operator || kids.len() != 3 || groups[op.rule] >= 0 -> next
+            inner: work.tree.nodes[kids[1]]
+            if inner.kind == .Ref && inner.rule == op.rule && inner.label != "" && !inner.append && fixed_token(work, texts, kids[0]) && fixed_token(work, texts, kids[2]) -> groups[op.rule] = alt
+        }
+    }
+    groups
+}
+
+/// For each token kind, the kinds the lexer may try where it lexes one:
+/// every kind that can come where it can, and the skipped ones. A skipped
+/// kind's own set is the skipped kinds.
+viable_kinds: fn(work: GrammarWork) -> [[Int]] Never! {
+    words: set_words(work.tokens.len())
+    skips := empty_set(words)
+    loop (k, token) in work.tokens {
+        if token.skip -> set_add(skips, k)
+    }
+    viable := [[Int]]{}
+    loop _ in work.tokens -> viable.push(skips.copy())
+    loop n in 0..<work.tree.nodes.len() {
+        if !parsed(work, n) || !is_terminal(work, n) -> next
+        loop a in set_items(work.follow[n]) {
+            if a < work.tokens.len() -> _: set_union(viable[a], work.follow[n])
+        }
+    }
+    loop (r, rule) in work.tree.rules {
+        if rule.kind != .Parser || (work.start >= 0 && work.start != r) -> next
+        opening: work.first[rule.body]
+        loop a in set_items(opening) {
+            if a < work.tokens.len() -> _: set_union(viable[a], opening)
+        }
+    }
+    viable
+}
+
+/// The set of columns that can hold a word character: an ASCII letter,
+/// digit or `_`, or a code point past ASCII that may be a letter or digit.
+word_columns: fn(lexer: GrammarLexer) -> [Int] Never! {
+    set := empty_set(set_words(lexer.columns))
+    width := 1
+    if lexer.masked -> width = 8
+    loop i in 0..<lexer.bounds.len() {
+        low: lexer.bounds[i]
+        high: interval_end(lexer, i)
+        ascii: (low <= 57 && high >= 48) || (low <= 90 && high >= 65) || (low <= 95 && high >= 95) || (low <= 122 && high >= 97)
+        loop bits in 0..<width {
+            if ascii || (high >= 128 && (!lexer.masked || (bits & 3) != 0)) -> set_add(set, i * width + bits)
+        }
+    }
+    set
+}
+
+/// Whether a text of token `a` can end in a word character.
+ends_in_word: fn(work: GrammarWork, lexer: GrammarLexer, points: [[Int]], word: [Int], a: Int) -> Bool Never! {
+    if literal_kind(work, a) {
+        text: points[a]
+        if text.len() == 0 -> return false
+        return set_meets(char_columns(lexer, text[text.len() - 1], false), word)
+    }
+    seen := [Int:Bool]{}
+    _: seen.add(lexer.starts[a], true)
+    queue := [Int]{lexer.starts[a]}
+    at := 0
+    loop at < queue.len() {
+        s: queue[at]
+        at += 1
+        if lexer.accept[s] == 2 -> next
+        loop column in 0..<lexer.columns {
+            to: lexer.next[s * lexer.columns + column]
+            if to < 0 -> next
+            if lexer.accept[to] > 0 && set_has(word, column) -> return true
+            if seen.get(to) ?? false -> next
+            _: seen.add(to, true)
+            queue.push(to)
+        }
+    }
+    false
+}
+
+/// The printer table, with the refusals: a token no field keeps that has
+/// no fixed text, and two tokens that can come together, lex as one, and
+/// that no separator keeps apart. Two tokens are also separated where one
+/// ends and the next starts with a word character, so text other lexers
+/// read stays apart, when the separator cannot run on into either.
+plan_printer: fn(work: ^GrammarWork, lexer: GrammarLexer, shapes: [GrammarShape]) -> GrammarPrinter Never! {
+    kinds: work.tokens.len()
+    texts := [String]{}
+    points := [[Int]]{}
+    loop k in 0..<kinds {
+        texts.push(token_text(work, lexer, k))
+        if literal_kind(work, k) -> points.push(code_points(work.tokens[k].text)) else -> points.push([Int]{})
+    }
+    report_textless(work, shapes, texts)
+    viable: viable_kinds(work)
+    words: set_words(lexer.columns)
+    runs := [[Int]]{}
+    starts := [[Int]]{}
+    loop a in 0..<kinds {
+        run := empty_set(words)
+        start := empty_set(words)
+        if printed_kind(work, a) {
+            loop k in set_items(viable[a]) {
+                if k < kinds && printed_kind(work, k) -> run_on(work, lexer, points, a, k, run)
+            }
+            if literal_kind(work, a) && points[a].len() > 0 {
+                start = char_columns(lexer, points[a][0], work.tokens[a].fold)
+            } else if !literal_kind(work, a) {
+                start = live_columns(lexer, [Int]{lexer.starts[a]})
+            }
+        }
+        runs.push(run)
+        starts.push(start)
+    }
+    separator := ""
+    spacer := -1
+    loop text in SEPARATORS {
+        loop (s, token) in work.tokens {
+            if separator == "" && token.skip && lexer_match(lexer, s, text.bytes(), 0) == 1 {
+                separator = text.copy()
+                spacer = s
+            }
+        }
+    }
+    separator_columns := empty_set(words)
+    if separator != "" -> separator_columns = char_columns(lexer, code_point_at(separator.bytes(), 0), false)
+    word: word_columns(lexer)
+    glue := empty_set(set_words(kinds * kinds))
+    loop a in 0..<kinds {
+        if !printed_kind(work, a) -> next
+        apart: separator != "" && !set_meets(runs[a], separator_columns)
+        ends: ends_in_word(work, lexer, points, word, a)
+        loop b in 0..<kinds {
+            if !printed_kind(work, b) -> next
+            words_meet: ends && apart && set_meets(starts[b], word) && !set_meets(runs[spacer], starts[b])
+            if words_meet || set_meets(runs[a], starts[b]) -> set_add(glue, a * kinds + b)
+        }
+    }
+    reported := [Int:Bool]{}
+    loop n in 0..<work.tree.nodes.len() {
+        if !parsed(work, n) || !is_terminal(work, n) -> next
+        a: work.tree.nodes[n].token
+        if !printed_kind(work, a) -> next
+        loop b in set_items(work.follow[n]) {
+            if b >= kinds || !printed_kind(work, b) || !set_meets(runs[a], starts[b]) -> next
+            if reported.get(a * kinds + b) ?? false -> next
+            names: "{work.tokens[a].name} and {work.tokens[b].name}"
+            if separator == "" {
+                _: reported.add(a * kinds + b, true)
+                work.faults.push(grammar_fault(.Unprintable, work.tree.nodes[n].at, "the tokens {names} can come one after the other and lex as one, and no `skip` token matches a space to keep them apart", "Add a skip token, such as `WS : [ \\t\\r\\n]+ -> skip ;`"))
+            } else if set_meets(runs[a], separator_columns) || set_meets(runs[spacer], starts[b]) {
+                _: reported.add(a * kinds + b, true)
+                work.faults.push(grammar_fault(.Unprintable, work.tree.nodes[n].at, "the tokens {names} can come one after the other and lex as one, and the separator between them would run on into them too", "Make one of them stop before the other, or before whitespace"))
+            }
+        }
+    }
+    GrammarPrinter{texts: texts, separator: separator, glue: glue, groups: plan_groups(work, texts)}
+}

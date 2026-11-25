@@ -29,7 +29,7 @@ rule_named: fn(plan: GrammarPlan, name: String) -> Int Never! {
 }
 
 #Test("a reference is bound to the rule it names") {
-    plan: plan_of("pair : key '=' value ;\nkey : NAME ;\nvalue : NAME ;\nNAME : [a-z]+ ;", "", [GrammarSource]{})
+    plan: plan_of("pair : key '=' value ;\nkey : text=NAME ;\nvalue : text=NAME ;\nNAME : [a-z]+ ;", "", [GrammarSource]{})
     pair: plan.tree.rules[rule_named(plan, "pair")]
     alt: plan.tree.nodes[plan.tree.nodes[pair.body].children[0]]
     assert_eq(plan.tree.nodes[alt.children[0]].rule, rule_named(plan, "key"))
@@ -48,7 +48,7 @@ rule_named: fn(plan: GrammarPlan, name: String) -> Int Never! {
 
 #Test("an import merges the rules this grammar does not define") {
     base: GrammarSource{name: "Base", text: "value : NUMBER | NAME ;\nNUMBER : [0-9]+ ;\nNAME : [a-z]+ ;"}
-    plan: plan_of("import Base ;\nentry : NAME '=' value ;\nNAME : [a-z_]+ ;", "", [GrammarSource]{base})
+    plan: plan_of("import Base ;\nentry : key=NAME '=' value ;\nNAME : [a-z_]+ ;", "", [GrammarSource]{base})
     assert_eq(plan.tree.rules.len(), 4)
     name: plan.tree.rules[rule_named(plan, "NAME")]
     assert_eq(name.source, "")
@@ -67,7 +67,7 @@ rule_named: fn(plan: GrammarPlan, name: String) -> Int Never! {
 }
 
 #Test("the start rule is the one the binding names in PascalCase") {
-    text: "key_value : KEY '=' KEY ;\nsql_stmt : KEY ;\nKEY : [a-z]+ ;"
+    text: "key_value : key=KEY '=' value=KEY ;\nsql_stmt : name=KEY ;\nKEY : [a-z]+ ;"
     assert_eq(plan_of(text, "KeyValue", [GrammarSource]{}).start, 0)
     assert_eq(plan_of(text, "SQLStmt", [GrammarSource]{}).start, 1)
     assert_eq(plan_of(text, "", [GrammarSource]{}).start, -1)

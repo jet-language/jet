@@ -35,7 +35,7 @@ tree_of: fn(text: String) -> RuleTree Never! {
 }
 
 #Test("suffixes wrap the element they follow") {
-    tree: tree_of("list : item* tail? NUM+ ;\nitem : NAME ;\ntail : ';' ;\nNAME : [a-z]+ ;\nNUM : [0-9]+ ;")
+    tree: tree_of("list : item* tail? nums+=NUM+ ;\nitem : text=NAME ;\ntail : ';' ;\nNAME : [a-z]+ ;\nNUM : [0-9]+ ;\nWS : ' '+ -> skip ;")
     alt: tree.nodes[tree.nodes[tree.rules[0].body].children[0]]
     star: tree.nodes[alt.children[0]]
     assert(star.kind == .Star)
