@@ -145,6 +145,45 @@ effect_vocabulary_strays: fn(found: [String], known: [String]) -> [String] {
     out
 }
 
+// The cases of `<type_name>: enum { … }` in `text` written one case to a
+// line, with or without a payload: each line's name up to its payload's `(`
+// or `{` or its comma, up to the first blank line or the closing brace.
+// None when `text` declares no such enum.
+effect_vocabulary_enum_case_heads: fn(text: String, type_name: String) -> [String]? {
+    head: "{type_name}: enum {{"
+    cases := [String]{}
+    inside := false
+    loop line in text.split("\n") {
+        if inside {
+            if line == "}}" || line.trim() == "" -> return Val(cases)
+            trimmed: line.trim()
+            if trimmed.starts_with("//") -> next
+            loop word in effect_vocabulary_words(trimmed.replace("(", " ").replace("{{", " ")) {
+                cases.push(word)
+                break
+            }
+            next
+        }
+        if line == head -> inside = true
+    }
+    if inside -> Val(cases) else -> None
+}
+
+// The number of cases of the view enum `view_name` in `view` (the file
+// `view_file`), once each case `outside` does not name is a case of the
+// enum `vocabulary_name` in `vocabulary` (the file `vocabulary_file`); else
+// the build stops naming the strays. A view so checked picks from its
+// vocabulary instead of being a second home of the same names.
+effect_vocabulary_view_count: fn(view_file: String, view: String, view_name: String, vocabulary_file: String, vocabulary: String, vocabulary_name: String, outside: [String]) -> Int {
+    cases: effect_vocabulary_enum_case_heads(view, view_name) ?? build_time_refused("{view_file} declares no `{view_name}: enum {{ … }}`")
+    known: effect_vocabulary_enum_case_heads(vocabulary, vocabulary_name) ?? build_time_refused("{vocabulary_file} declares no `{vocabulary_name}: enum {{ … }}`")
+    strays: effect_vocabulary_strays(effect_vocabulary_strays(cases, known), outside)
+    if strays.len() > 0 {
+        build_time_refused("{view_file}: {view_name} names cases that `{vocabulary_name}` in {vocabulary_file} does not declare: {strays.join(", ")}")
+    }
+    cases.len()
+}
+
 // The words of `text`, split at whitespace and at the commas that end enum
 // cases.
 effect_vocabulary_words: fn(text: String) -> [String] {
