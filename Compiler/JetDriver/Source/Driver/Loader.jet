@@ -14,7 +14,7 @@ use {
         BUILTIN_METHOD_ROWS,
         BUILTIN_STATIC_ROWS,
         CORE_BUILTINS_MODULE,
-        CORE_CALLS,
+        core_module_enum_cases,
         CORE_MODULE_EXPORTS,
         CORE_BARE_SOURCE_MODULES,
         CORE_RECORD_SOURCE_DEMANDS,
@@ -341,13 +341,12 @@ jet_driver_authority_ffi_library: fn(name: String) -> String? {
     None
 }
 
-jet_driver_is_ui_capability: fn(name: String) -> Bool Never! {
-    loop call in CORE_CALLS {
-        loop capability in call.ui_capabilities {
-            if capability == name -> return true
-        }
-    }
-    false
+// Whether `name` is a UI capability: `UI.` and a case of core.ui.host's
+// UICapability (`UI.Clipboard`).
+jet_driver_is_ui_capability: fn(name: String) -> Bool {
+    if !name.starts_with("UI.") -> return false
+    cases: core_module_enum_cases("core.ui.host", "UICapability") ?? return false
+    cases.contains(name.slice(3, name.len()))
 }
 
 jet_driver_parse_authority_needs: fn(source: String, tokens: [Token], tables: TokenTables, open_index: Int, close_index: Int, span: Span, diagnostics: ^[Diagnostic]) -> [String] {

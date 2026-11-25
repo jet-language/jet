@@ -850,7 +850,7 @@ sema_finalize_program: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail
     // A UI host service needs its capability in the package's
     // `authority.needs` (E2937).
     ui_index: sema_core_ui_index(final_graph, core_usage.modules)
-    if ui_index.any_ui_modules {
+    if ui_index.capabilities.len() > 0 {
         loop module_index in 0..<modules.len() {
             usage_index: sema_registration_module_index(final_graph, modules[module_index].module_identity) ?? next
             source_module: final_graph.modules[usage_index]
