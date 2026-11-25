@@ -25,10 +25,11 @@ Every brief, and every message that revives a worker, carries these rules:
    `BLOCKED.md` in the worker's lane (what blocks it, where, what was tried,
    what to try next). The worker tells the orchestrator in one line and moves
    on. The orchestrator routes every blocker to one expert pass.
-3. The worker never waits and never parks. Inside approved scope it decides,
-   records the decision in the submission's `msg`, and continues. Only an
-   owner gate goes to the orchestrator, as ballot facts, while the worker
-   goes on with other criteria. It never ends its turn to wait on its own job.
+3. The worker never waits and never parks. Inside approved scope it makes the
+   implementation choices the approved contract covers and continues. A choice
+   the contract does not cover is a decision: the worker sends it to the
+   orchestrator as ballot facts and goes on with other criteria. No decision is
+   ever written on a card. It never ends its turn to wait on its own job.
 4. Proof before submitting is narrow: the cases the criterion names and the
    checks of the touched files, with the batch compiler the orchestrator last
    announced. The batch runs the guards and suites once for everyone.

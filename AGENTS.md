@@ -323,10 +323,17 @@ outcome stays in force until the owner changes it.
 This is a standing owner order, repeated hundreds of times: no agent asks the
 owner questions. No questions in chat, none as card logs, notes or "owner
 question" entries, and none that hold work. Within approved scope, the agent
-decides, records the decision as fact on the card, and keeps working. An
-owner-only choice goes on a ballot and the work moves to independent criteria
-meanwhile. Workers send their questions to the orchestrator, and it answers them
-the same way.
+makes the implementation choices the approved contract already covers and
+keeps working; those are not decisions and are recorded nowhere but the code.
+
+This is a standing owner order, repeated many times: decisions go only on
+ballots, never on cards. No card log, criterion, body, plan or note records a
+decision, ruling, chosen design or "decided" approach, and no agent writes
+one there to stand in for a ballot. A choice the approved contract does not
+already cover is a decision: it goes on a ballot, and the work it governs
+stops (nothing that depends on it lands) while the agents move to independent
+criteria. Workers send their questions to the orchestrator, which answers
+from the approved contract or puts the choice on a ballot.
 
 The orchestrator works the open epochs in the owner's epoch order, which Tower
 records as each epoch's `order`, until every criterion is met. This is a
