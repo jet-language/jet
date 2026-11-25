@@ -1,8 +1,9 @@
 // `jet.runtime.rt` (#6615): the start, observations and cancellation of a
-// core.rt realtime callback stream, in Jet types, and the coded stop of a
-// Core library. Each member is a runtime binding (Guest.jet
-// sema_guest_runtime_binding) of the runtime export that is its one body
-// (Realtime.jet, Trap.jet). Each is `priv`: only Core calls them.
+// core.rt realtime callback stream, in Jet types, and the coded and the
+// arithmetic stop of a Core library. Each member is a runtime binding
+// (Guest.jet sema_guest_runtime_binding) of the runtime export that is its
+// one body (Realtime.jet, Trap.jet, RouteAMath.jet). Each is `priv`: only
+// Core calls them.
 rt: module {
     // Starts a stream that calls `callback` with each buffer of
     // `frames_per_buffer` frames at `rate_hz`; the stream holds the callback
@@ -25,4 +26,9 @@ rt: module {
     // the row's `what`, and the runtime adds the row's Why/Fix and gives
     // the stop its exit status.
     #Import(c) priv coded_stop: fn(code: String, message: String) -> Never = "jet_rt_coded_stop"
+
+    // Stops the program with the E3010 arithmetic stop and `message`, as an
+    // exact or lane operation that has no answer does (core.math
+    // __numeric_stop).
+    #Import(c) priv numeric_stop: fn(message: String) -> Never = "jet_numeric_stop"
 }
