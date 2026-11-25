@@ -525,6 +525,12 @@ sema_comptime_reads_runtime_value: fn(name: String, span: Span) -> Diagnostic {
     sema_error("E0640", span, row.what.replace("{{name}}", name), row.why.replace("{{name}}", name), row.fix.replace("{{name}}", name))
 }
 
+// E0642: a call writes an argument for a parameter whose default is `#run`.
+sema_run_default_written: fn(name: String, span: Span) -> Diagnostic {
+    row: sema_diagnostic_row("E0642")
+    sema_error("E0642", span, row.what.replace("{{name}}", name), row.why.replace("{{name}}", name), row.fix.replace("{{name}}", name))
+}
+
 // E1018: a compile-time value named `name` holds the runtime handle `handle`
 // (sema_comptime_value_runtime_handle).
 sema_comptime_runtime_handle_diagnostic: fn(name: String, handle: String, span: Span) -> Diagnostic {

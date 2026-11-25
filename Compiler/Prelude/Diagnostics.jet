@@ -9499,6 +9499,32 @@ CompileTimeReadsRuntimeValue: struct {
     }
 }
 
+RunDefaultWritten: struct {
+    name: String,
+
+    impl Diagnostic {
+        code: "E0642",
+        safety_class: .Soundness,
+        safety_reason: "The build computes the value from this call's own arguments, so a written value could describe other arguments than the ones passed.",
+        expert_path: "forward a parameter of your own function whose default is the same `#run` default",
+        stage: [.Comptime],
+        meaning: "A call passes its own value for a parameter the build computes per call",
+        fix_next: "Leave the argument out, so the build computes it.",
+
+        what: fn(self) -> String {
+            "This call passes `{self.name}`, which the build computes for each call"
+        }
+
+        why: fn(self) -> String {
+            "The default of `{self.name}` is written `#run`, so its value comes from this call's other arguments while building, and a written value could disagree with them."
+        }
+
+        fix: fn(self) -> String {
+            "Leave `{self.name}` out, or pass a parameter of your own function whose default is the same `#run` default."
+        }
+    }
+}
+
 ModuleFileItemMember: struct {
     name: String,
     member: String,

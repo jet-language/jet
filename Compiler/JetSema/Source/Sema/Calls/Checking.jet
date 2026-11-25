@@ -626,6 +626,14 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
         // call while building (sema_call_run_default); code that already runs
         // while building computes it as it runs.
         run_default: is_default && args[index].flags.run_default && sema_expr_runtime_body_owner(check) != None
+        // A written argument for a `#run` default would stand in for the value
+        // the build computes from this call's arguments (E0642); forwarding
+        // the caller's own parameter with the same default keeps it.
+        if !is_default && parameter.default_ref == .Val(reference) && sema_call_run_default_refused(args[index].expr, reference, check) {
+            check.diagnostics.push(sema_run_default_written(parameter.name, expr_span(args[index].expr)))
+            complete = false
+            next
+        }
         if is_default {
             // A `#caller` default is the place of this call.
             if sema_site_is_caller(args[index].expr) {
@@ -1407,6 +1415,50 @@ sema_call_run_default_function: fn(ty: Type, slot: Int, args: [CallArg], binding
         }
     }
     None
+}
+
+// Whether the written argument `argument`, for a parameter whose default is
+// `reference`, is refused: that default is a `#run` one, and the argument is
+// not the name of a parameter of the function being checked whose own
+// default is a `#run` default of the same source text.
+sema_call_run_default_refused: fn(argument: Expr, reference: FunctionDefaultRef, check: SemaBodyCheck) -> Bool Never! {
+    graph: check.program.registration_graph
+    callee: sema_registration_resolve_default(graph, reference) ?? return false
+    if !callee.run -> return false
+    if argument == .Ident(name, _, _) {
+        index: sema_scope_resolve_index(check.scopes, name) ?? return true
+        if check.scopes.bindings[index].symbol.kind != SymbolKind.Parameter -> return true
+        own: sema_call_own_run_default(graph, sema_scope_function_owner_key(check.scopes), name) ?? return true
+        written: sema_call_default_ref_text(check.program.*, reference) ?? return true
+        return sema_call_default_ref_text(check.program.*, own) != Val(written)
+    }
+    true
+}
+
+// The default of the `#run`-defaulted parameter `name` of the callable keyed
+// `owner_key`. None when it has no such parameter.
+sema_call_own_run_default: fn(graph: SemaRegistrationGraph, owner_key: String, name: String) -> FunctionDefaultRef? {
+    row: sema_registration_callable_row(graph, owner_key) ?? return None
+    if row == {
+        .Function(module_index, index) -> sema_call_run_default_named(graph.modules[module_index].functions[index].parameters, name)
+        .NominalMethod(module_index, owner, index) -> sema_call_run_default_named(graph.modules[module_index].nominals[owner].methods[index].parameters, name)
+        .ImplMethod(module_index, owner, index) -> sema_call_run_default_named(graph.modules[module_index].impls[owner].methods[index].parameters, name)
+        .Foreign(_, _) -> None
+    }
+}
+
+sema_call_run_default_named: fn(parameters: [SemaRegistrationParameter], name: String) -> FunctionDefaultRef? {
+    loop parameter in parameters {
+        if parameter.name == name && parameter.default_run -> return parameter.default_ref
+    }
+    None
+}
+
+// The source text of the default `reference` names, in its declaring module.
+sema_call_default_ref_text: fn(program: SemaProgramTables, reference: FunctionDefaultRef) -> String? {
+    graph: program.registration_graph
+    module_index: sema_registration_module_index(graph, sema_call_default_ref_module(program, reference) ?? return None) ?? return None
+    sema_stmt_source_text(graph.modules[module_index].source.bytes(), reference.span)
 }
 
 // The declaring module's scope for a default argument this call takes, when
