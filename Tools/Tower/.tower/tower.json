@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7000,
-    "rev": 114075,
+    "rev": 114100,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -24141,6 +24141,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-25",
+          "by": "Orchestrator",
+          "text": "n=42 diagnosis (batch 44, 2026-11-25): Terminal/error_report_matrix_tty_pipe_no_color_and_narrow_widths fails two steps. (1) narrow: jet_error_report (Compiler/JetRuntime/Source/JourneyTLS.jet:147) renders the root with jet_render_err (ErrReport.jet:70), which has no width. So the kept context lines (owner answer q07mphiy, group A) are never cut to COLUMNS=40: '  context (error_context.jet:12): loading config app.toml' is 57 columns. The hop lines are cut by jet_journey_render_styled with the '…' convention. Fix: pass journey_stderr_columns(tty) into the root render and cut each context, conversion and cause line the same way. (2) ansi: the visible text equals error_report_tty_ansi.txt, so only the SGR bytes differ; diff the raw escapes. Queued for the next free G2 worker."
+        },
+        {
           "at": "2026-11-22",
           "by": "Main",
           "text": "Handover 2026-11-21 20:40: every criterion is met except c13, which needs the compiler session protocol (#5050, unbuilt; its session criterion moved to #6960 on e24). Nothing of this card is unlanded; resume when #5050 is built."
@@ -24623,7 +24628,7 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-09-12T14:11:42.570Z",
-      "updated": "2026-11-24T02:28:18.438Z",
+      "updated": "2026-11-25T13:16:20.060Z",
       "updatedBy": "Orchestrator",
       "workOrder": 19,
       "criteriaLastN": 42
@@ -56294,6 +56299,21 @@
         {
           "at": "2026-11-25",
           "by": "Orchestrator",
+          "text": "c7: G1Checkers found and fixed the root of release and hardened builds dropping Core check rules. Lazy Core restore counted a marker check that held only the parser-appended None as non-blank, so every lazily loaded Core rule ran as { None }. The fix is jet_driver_core_body_blank in JetDriver CoreInterface.jet, with the DeclaredCallChecks golden (o0/o1/o2) and the case expiring_force_is_rejected_on_the_release_and_hardened_profiles. It goes in batch 45; o0/o1 already pass on the batch-44 compiler. c3/c5 finding: the remaining TimeHandles, StreamHandles, ProcessHandles, UIHandles and HTTP checks aren't rule moves. They type compiler-built handle types that Core doesn't declare, so c5 first needs those types declared in Core with ordinary Core functions. HTTP forms/E2411, StreamHandles E0904 and Geometry E2521 wait on criterion 35 (D-RULE-TYPEARGS1=A build), which G1Checkers takes next."
+        },
+        {
+          "at": "2026-11-25",
+          "by": "Orchestrator",
+          "text": "Three ballots posted after two Opus adversarial review rounds (r1 and r2 reviews in the orchestrator's ballot notes): D-PROCESS-BUILDER-RECEIVER1 (c5 ProcessHandles), D-SERVICE-SHAPES1 (c4 Services; option E was probed and found to need three missing language features) and D-RULE-DISPATCH-BUDGET1 (n=22; recommends moving n=22 unchanged to #6798, which owns the dispatch work). c4, c5 and n=22 wait on them. Independent work continues on c3, c5's other files, c6 and c7 (G1Checkers)."
+        },
+        {
+          "at": "2026-11-25",
+          "by": "Orchestrator",
+          "text": "Adversarial review 2026-11-25 (Orchestrator, fresh) of the three draft ballots: D-PROCESS-BUILDER-RECEIVER1, D-RULE-DISPATCH-BUDGET1 and D-SERVICE-SHAPES1. All are rejected for revision. PROCESS-BUILDER: the share is Jet's general unmarked-owning-position law (Ownership/Checks.jet:3634), not a ProcessSpec privilege. Options are missing (the general law applied to receivers; mutate in place), the Rust comparison is wrong (Command takes &mut self), and the count of reuse callers is missing. DISPATCH-BUDGET: A's new card breaks the follow-up-as-criterion order, the 15 µs is a projection (15-20), and the cost against the 30M lines/s target is missing. SERVICE-SHAPES: an option is missing, one generic Core worker that picks its form by compile-time #if over the handler's reflect() (G1's own a79988747df), which keeps every spelling and meets c4 as written. Findings are with the author, G1Generation-2."
+        },
+        {
+          "at": "2026-11-25",
+          "by": "Orchestrator",
           "text": "Defect found in batch 44, c6 Data: a collecting-loop lambda inside a generic body's #run, e.g. `names: #run (loop field in T.reflect().fields -> field.name)` within `#if schema_record(TypeId{T})`, fails at comptime.bodies with E0107 'Nothing named `T` exists here' (repro: Core/Data/Data.jet:1654 of the land/6851-c6-data-c-schema-b44 patch, stage-44c compiler). data-c-schema-r2 works around it with `fields: #run T.reflect().fields` and builds the columns at run time. The compiler gap stays open under c6: T must be in scope in every #run of a generic body, lambdas and loops included."
         },
         {
@@ -56935,8 +56955,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:07.534Z",
-      "updated": "2026-11-25T13:10:57.936Z",
-      "updatedBy": "Orchestrator",
+      "updated": "2026-11-25T15:26:24.258Z",
+      "updatedBy": "owner",
       "criteriaLastN": 39
     },
     {
@@ -56957,6 +56977,21 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-25",
+          "by": "Orchestrator",
+          "text": "D-FALLIBLE-CLOSE1 posted, after a fresh Opus adversarial review (one revision: option A was added after finding that TCP and Unix close duplicate shutdown(.Both)). Until it is ratified, TCPStream, UnixStream, TLSStream and WsConn stay resources through one Core-identity row in Ownership/Copy.jet. The other eight Core resources (FileReader, FileWriter, FileLock, FileScope, Arena, Bump, Pool, Fixed) get empty impl Close in TypeIDSlice3-3's part 2. c1/c2 are met only after the ballot's cutover removes that row. Part 1 (#MoveOnly, #Local on types) is in the batch-44 rebuild."
+        },
+        {
+          "at": "2026-11-25",
+          "by": "Orchestrator",
+          "text": "Correction to the previous entry: D-DECL-FACTS1 is ratified with option A. It is the ballot c1/c2 waited on, so they are unblocked. Build A: `#MoveOnly` joins the prelude marker registry as a field-less Type-site marker beside SingleUse. The `Local` marker gains the Type site (its values never leave the thread that made them). `#SingleUse` goes on Task (join or detach exactly once). Resource types keep their declared Close. The ten undeclared carriers get arity-only Core declarations. The name lists in Ownership/Copy.jet, Ownership/Crossings.jet and Typestate.jet are deleted. Assigned to TypeIDSlice3-3."
+        },
+        {
+          "at": "2026-11-25",
+          "by": "Orchestrator",
+          "text": "Orchestrator decision 2026-11-25: c1/c2 need no new ballot. Each fact already has a declared mechanism. Resource (closed once, never copied): an `impl Close` in the type's declaration (Close trait, Compiler/Prelude/Traits.jet:251), which sema_copy_nominal_close already reads for user types. A one-duty value: the `#SingleUse` type marker (Ownership/SingleUse.jet). Typestate: declared state types. Work: the 12 names in Ownership/Copy.jet sema_copy_named_is_builtin_resource (FileReader, FileWriter, FileScope, FileLock, TLSStream, TCPStream, UnixStream, WsConn, Arena, Bump, Pool, Fixed; none declares impl Close today), the Pool/KeyRef/Rotation/View facts and sema_copy_apply_is_noncloneable in sema_copy_apply_facts, Crossings.jet:150 and 352 (core.mem Arena/Bump/Pool; Task, Receiver, Sender) and Typestate.jet:19 SEMA_STATE_TASK move onto those declarations in Core, and the name lists are deleted. Proof c2: Tests/Cases declared_copy_resource_typestate_facts (a user type declared the same way gets the same facts). Queued to TypeIDSlice3-3 after #6999 D's last 16 lists."
+        },
         {
           "at": "2026-11-24",
           "by": "Orchestrator",
@@ -57212,6 +57247,19 @@
             "profile": "ui",
             "filter": "codec_impl_"
           }
+        },
+        {
+          "n": 16,
+          "text": "core.mem's allocators are declared in Core and sema_call_try_memory_static (Sema/Calls/Memory.jet:307) is deleted. Today it types mem.{Arena,Bump,Pool,Fixed}.new as bare Type.Named, so the slot allocator mem.Pool.new(slots:) (jet_pool_with_slots, mixed types, no T) shares the name Pool with the generational arena Pool<T> (jet_std.JetPool). That clash caused the batch-44 Pool<T> close ICE. Fixed.new keeps a call-site intrinsic (caller frame storage, comptime size) through the jet_builtins door (#6851 c13), not a sema name test. The two Pools get distinct names through ballot D-MEM-POOL-NAME1, since the allocator's Pool is spec surface; once that is built, ir_close_method's empty-close skip for a bare generic row is deleted. Found by TypeIDSlice3-3, 2026-11-25.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T15:17:58.960Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "generic_resource_closes_once"
+          }
         }
       ],
       "refs": [],
@@ -57222,9 +57270,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:08.392Z",
-      "updated": "2026-11-25T06:37:00.036Z",
+      "updated": "2026-11-25T15:46:55.793Z",
       "updatedBy": "Orchestrator",
-      "criteriaLastN": 15
+      "criteriaLastN": 16
     },
     {
       "id": "c06r6neu",
@@ -62991,6 +63039,19 @@
               "Tools/Agent/FmtLossless.jet"
             ]
           }
+        },
+        {
+          "n": 21,
+          "text": "jet fmt on Compiler/JetIR/Source/BuildExpr.jet and BuildTypes.jet (dev ac1a90232bc, batch-44 compiler) rewraps many unrelated lines, so it can't serve as a touched-file check; every formatted repository file must be a fixed point of jet fmt (found by C16Perf, 2026-11-25).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T14:46:14.426Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "fmt_repository_fixed_point"
+          }
         }
       ],
       "refs": [],
@@ -63001,9 +63062,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:52:54.075Z",
-      "updated": "2026-11-24T01:03:47.885Z",
+      "updated": "2026-11-25T14:46:14.426Z",
       "updatedBy": "Orchestrator",
-      "criteriaLastN": 20
+      "criteriaLastN": 21
     },
     {
       "id": "c0aha21c",
@@ -73957,6 +74018,45 @@
             "profile": "cases",
             "filter": "program_owned_main_print_writes_whole_buffers"
           }
+        },
+        {
+          "n": 42,
+          "text": "jet perf run --help and jet perf view --help print only Usage, with no flag list (found by C16Perf, 2026-11-25, profiling CoreMathPair on the batch-44 compiler).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T14:46:10.406Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "perf_help_lists_flags"
+          }
+        },
+        {
+          "n": 43,
+          "text": "jet perf view --instructions with no argument shows only the hottest function; --instructions=<fn> works but is undocumented, and --frames accepts only jet or all, so a native function's samples (e.g. jet_rt_alloc_value_8) are reachable only through --json plus jq (found by C16Perf, 2026-11-25).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T14:46:11.818Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "perf_view_native_frames"
+          }
+        },
+        {
+          "n": 44,
+          "text": "jet perf run takes only a .jet source, not a built binary, and comparing traces from two compilers needs --override-identity; profiling a built artifact and diffing two compilers' traces should work directly (found by C16Perf, 2026-11-25).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T14:46:13.091Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "perf_run_built_binary"
+          }
         }
       ],
       "refs": [],
@@ -73964,9 +74064,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-20T00:56:36.847Z",
-      "updated": "2026-11-25T13:10:58.921Z",
+      "updated": "2026-11-25T14:46:13.091Z",
       "updatedBy": "Orchestrator",
-      "criteriaLastN": 41
+      "criteriaLastN": 44
     },
     {
       "id": "c0clt9eg",
@@ -74265,6 +74365,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-25",
+          "by": "Orchestrator",
+          "text": "Correction: criterion 18 (a '??' fallback in an intrinsic argument never runs) was added from a diagnosis C16Perf has since withdrawn, and is removed. The probe used stage44f-exp's Core, where from_bits is wrapping(I64{bits}). The batch-44 tip's Core uses checked(..) ?? core.math.__numeric_stop(..). Its IR keeps the stop call, and FloatBitsRangeStop exits 70 natively. The batch-44 rebuild's golden run checks the remaining tiers."
+        },
         {
           "at": "2026-11-25",
           "by": "Orchestrator",
@@ -74758,6 +74863,51 @@
               "fix"
             ]
           }
+        },
+        {
+          "n": 19,
+          "text": "B leaves: the 8 receiver dispatcher rows whose symbol has no runtime C export (DataTracked insert/replace/remove, Query watch, DataWatch get/status/cancel, RNG int; the plan's native receivers) each get a runtime export and a leaf or a Jet body, and leave Core.rows (found by C16Perf on the batch-44 tree ac1a90232bc, 2026-11-25).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T14:49:55.902Z",
+          "proof": {
+            "profile": "cmd",
+            "args": [
+              "Tests/Guards/CoreDeclarations"
+            ]
+          }
+        },
+        {
+          "n": 20,
+          "text": "The compiler-data ratchet passes on dev (jet Tools/Agent/CompilerData.jet --check, which LaneCheck runs). On dev 70ff64f2288 it refuses 3 rises: Loader.jet 2 payload enums over its row's 1 (the c13 typed-decode/input work, 2026-11-25), and BodyPasses.jet 2 payload enums over 1 and 49 Shared cells over 48 (the G keep-going work, 2026-11-24). Batch 44 adds CoreUsage.jet 2 text-keyed lookups over 0 (cc495b15196, the UI capability index). Each is keyed by an id, as Docs/Spec/compiler-data.md requires, not met by raising its row.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T15:39:29.618Z",
+          "proof": {
+            "profile": "cmd",
+            "args": [
+              "Tests/Guards",
+              "--filter",
+              "compiler_data"
+            ]
+          }
+        },
+        {
+          "n": 21,
+          "text": "DataWatchStatus.freshness_ms reports a real age again (now minus the last fresh publish, as the Rust runtime did: LiveLifecycle.rs:124, tracked.rs:828). After n19a's Core port it reads 0, because status and get are effect-free and can't read the clock. Restoring it needs either an effect on status (public API, so an owner ballot) or a design that keeps status effect-free (e.g. the status carries the publish instant and the age is read where Time is held); choose by ballot if it changes the surface (found by C16Perf, 2026-11-25).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T15:42:10.753Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "core_data_tracked_rows_and_maintained_watch"
+          }
         }
       ],
       "refs": [],
@@ -74765,9 +74915,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-24T17:01:07.086Z",
-      "updated": "2026-11-25T12:01:57.115Z",
+      "updated": "2026-11-25T15:42:10.753Z",
       "updatedBy": "Orchestrator",
-      "criteriaLastN": 17
+      "criteriaLastN": 21
     }
   ],
   "decisions": [
@@ -134477,6 +134627,1285 @@
       "created": "2026-11-24T14:37:32.873Z",
       "outcome": "A",
       "ratifiedAt": "2026-11-25"
+    },
+    {
+      "id": "D-FALLIBLE-CLOSE1",
+      "cardId": "c0sdz4q0",
+      "group": "language",
+      "title": "How a stream whose close can fail also closes itself at the end of its scope",
+      "situation": "The declared-facts ballot (ratified, option A) moves the copy and resource facts onto declarations so the compiler's name lists can go. In its cutover every Core resource gets an `impl Close`. Eight of them (Arena, Bump, Pool, Fixed, FileScope, FileLock, FileReader and FileWriter) take an empty one, because their runtime handle's drop already releases them. Four can't: TCPStream, UnixStream, TLSStream and WsConn each declare a public fallible `close`. A type can't hold a `close` method beside an `impl Close` whose method is also `close` (Jet.DuplicateDefinition, as Tests/UI/member_namespace_operator_hook_method.stderr shows). Until this ballot is decided, the four stay resources through one Core-identity row in Ownership/Copy.jet, the only resource name list left. This ballot decides how they leave it.",
+      "gist": "TCPStream, UnixStream, TLSStream and WsConn each have a public `close` that can fail, so none of them can implement the infallible `Close`. How should they become resources declared like every other one?",
+      "lesson": "A resource in Jet implements `Close`: it never copies and closes exactly once, by `close(x)` or at its scope end. `Close.close` can't fail, because a scope end has nowhere to send an error. Four Core streams also have a goodbye that can fail, and each calls it `close`, the name `Close` needs. For TCP and Unix streams that goodbye is a full shutdown. For TLS it is a close_notify alert, and for WebSocket a close frame.",
+      "explainer": "Hotel key cards have to come back exactly once, and the hotel collects them when you leave even if you forget. Some guests also want a printed checkout receipt. Today the key-return desk and the receipt printer share one name, so the hotel can't put up a single sign saying 'every key comes back here'. This ballot decides which of the two gets the name.",
+      "story": "Ravi writes `Conn`, a socket type for his game server. He gives it a `close` that reports whether the goodbye reached the client. He wants `Conn` to be a resource like Core's `TCPStream`, which never copies and always closes. But writing `impl Close` beside his `close` defines `close` twice. Core's `TCPStream` has the same clash, and it escapes only because the compiler keeps its name on a list. Ravi can't join that list.",
+      "inWild": "// Rust: a Drop can't fail. BufWriter's Drop attempts a flush and loses its\n// error; a caller who needs the error flushes first.\nlet mut w = BufWriter::new(file);\nw.flush()?;          // the fallible goodbye\n// drop(w): a best-effort flush, then release; errors are lost\n\n// Rust: TcpStream has no close method. shutdown(Both) is the fallible\n// goodbye, and the drop closes the fd and ignores errors.\nstream.shutdown(Shutdown::Both)?;",
+      "detail": "Sites at 4f02506163e.\n\nThe trait. Compiler/Prelude/Traits.jet 250-255: `Close: trait { close: fn(^^self) Never! }`, described as 'Consuming, infallible cleanup'.\n\nThe four closes.\n\n- Core/Net/Net.jet 132: `TCPStream.close: fn(self) -[Net]> NetError! { rt.tcp_close(self) }`. Its route, jet_net_tcp_close (JetRuntime NetHandleRoutes.jet 564-575), is `shutdown(fd, SHUT_RDWR)` plus a closed mark, and its only error is a failed shutdown other than ENOTCONN. TCPStream already has `shutdown(how: NetShutdown)` at Net.jet 120, so `close` is `shutdown(.Both)` under a second name.\n\n- Net.jet 196: `UnixStream.close` is the same over jet_net_unix_close (NetUnix.jet 214).\n\n- Core/Net/TLS.jet 184-192: `TLSStream.close: fn(self) -[Net, Time.Wait]> IOError!` sends close_notify, shuts the write side and releases the engine. Closing a closed stream succeeds.\n\n- Core/Net/Ws.jet 41: `WsConn.close: fn(self, code: Int, reason: String) -[Net]> WsError!` sends a close frame, then shuts the connection.\n\n- Free functions mirror three of them: `net.tcp_close` (Net.jet 509), `net.unix_close` (711) and `tls.close` (TLS.jet 426).\n\nWhat the drop does today. At a scope end and at `close(x)`, the IR runs the type's Close glue and then its Drop (JetIR BuildExpr.jet 119-140). The Close method's receiver is lent to it, and the scope still owns the drop. Each of the four is a runtime handle registered without `clone`, so its drop releases the socket once.\n\nNo drop sends a goodbye:\n\n- WsConn's drop (JetRuntime WsRoutes.jet 120-128) drops the stream and frees the buffers without a close frame, so the peer sees 1006, abnormal closure.\n\n- TLSStream's state drop (TLS.jet 237-246) frees the engine and wipes the buffers without close_notify, so the peer can't tell a clean end from a truncation (RFC 8446 section 6.1).\n\n- TCP and Unix drops close the fd.\n\nThe close routes are idempotent, so an explicit goodbye followed by the drop never closes twice (the TCP route checks its closed mark; Compiler/JetRuntime/Tests/TCPRoutesWitness.c 191-192 witnesses it).\n\nClose glue carries no effects, since `Close.close` is `Never!` with an empty effect row, so a scope end needs no `Net` or `Time.Wait` authority.\n\nThe name `finish`. Core already uses `finish` for 'complete and flush, fallibly, consuming the work'. Examples are `Zstd.finish: fn(self) ZstdFileError!` (Core/Archive/Zstd.jet 378) and the CBOR and CBORStream encoders' `finish`. `Actor.finish` (Core/Actor/Actor.jet 113) is another.\n\nScale, with the commands in checkInstructions. 230 lines hold `impl Close`. 73 lines spell `tcp_close(` or `unix_close(` and 2 spell `tls.close(`. Method calls `.close()` on a stream are typed calls that grep can't separate from other `close` methods; 28 lines call a two-argument `.close(…, …)`, the WsConn form.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Delete the TCP and Unix closes; TLS and WebSocket rename theirs to `finish`",
+          "detail": "TCPStream and UnixStream lose their `close` method, because it is `shutdown(.Both)`, which both already spell. Their fallible goodbye is `shutdown(.Both)`, and the drop releases the fd. TLSStream and WsConn, the two with a protocol goodbye, rename theirs to `finish`. Then all four implement `Close` with an empty body, so `close(stream)` and the scope end release the stream and can't fail.\n\nBeginner path: write nothing, and the stream closes when its scope ends, as a file does. Expert path: call `stream.shutdown(.Both)` on a TCP or Unix stream, or `finish()` on TLS (`finish(code, reason)` on WebSocket), and handle the error.",
+          "technical": "TCPStream and UnixStream add `impl Close { close: fn(^^self) {} }`, with a comment that the drop releases the fd. Their `close` methods and `net.tcp_close` and `net.unix_close` are deleted, and their callers write `shutdown(.Both)` or nothing. NetShutdown gains no new member. TLSStream and WsConn rename `close` to `finish` with unchanged signatures and bodies, `tls.close` becomes `tls.finish`, and both add the empty `impl Close`. The Core-identity row in Copy.jet goes.\n\nEdge cases:\n- A failed `shutdown` or `finish` leaves the handle open, and the drop still releases it once.\n- `finish` on a finished TLS stream succeeds, as `close` does today.\n- `close(x)` after `finish` is a move of a handle that is already closed.\n- A stream held in a struct is released when the struct drops, with no goodbye. Code that needs the goodbye calls `finish` before the struct goes.",
+          "code": "reply: fn(stream: net.TCPStream, timeout: Duration) -[Net, Time.Wait]> NetError! {\n    stream.write_bytes(\"ok\\n\".bytes(), deadline: timeout) ?? return Err(err)\n    stream.shutdown(.Both) ?? return Err(err)   // the fallible goodbye\n}                                                 // the scope end releases once\n\nbye: fn(conn: ws.WsConn) -[Net]> WsError! {\n    conn.finish(1000, \"done\")                     // sends the close frame\n}"
+        },
+        {
+          "key": "B",
+          "name": "Rename all four goodbyes to `finish`",
+          "detail": "Each of the four renames its fallible method to `finish`, so `close` is free for `impl Close`. `stream.finish()` performs the goodbye and reports its error. `close(stream)` and the scope end release the stream and can't fail.",
+          "technical": "The same as A, except TCPStream and UnixStream keep a fallible goodbye under the name `finish`, beside `shutdown(how)`. `net.tcp_close` and `net.unix_close` become `net.tcp_finish` and `net.unix_finish`. On those two types `finish()` and `shutdown(.Both)` are then the same call under two names.",
+          "code": "reply: fn(stream: net.TCPStream, timeout: Duration) -[Net, Time.Wait]> NetError! {\n    stream.write_bytes(\"ok\\n\".bytes(), deadline: timeout) ?? return Err(err)\n    stream.finish() ?? return Err(err)   // the same call as shutdown(.Both)\n}"
+        },
+        {
+          "key": "C",
+          "name": "A Close whose close can fail",
+          "detail": "`Close` takes an error type, so a stream implements `Close<NetError>` and keeps the name `close`. `close(stream)` returns the error. When the scope ends instead, the error is discarded, because a scope end has nowhere to send it.",
+          "technical": "Jet traits take type parameters (spec.md 1128) but have no associated types, so this is `Close<E>: trait { close: fn(^^self) E! }`, where today's Close is `Close<Never>`. Every `T: Close` bound has to accept any E: Calls/Direct.jet 488, Statements/Assignments.jet 785, Statements/Bindings.jet 313, and TypeRelations.jet 2605 and 2780.\n\nThe 230 `impl Close` sites either migrate or rely on a default. The close bodies also carry effects (`-[Net]`, `-[Net, Time.Wait]`). So either the glue a scope end runs needs those effects too, and every scope that drops a stream gains them. Or the scope end runs a different, effect-free release than `close(x)` runs, and the two paths differ. A discarded error at a scope end is silent unless the language adds a lint for it.",
+          "code": "TCPStream: struct {\n    priv handle: Int,\n    impl Close<NetError> {\n        close: fn(^^self) -[Net]> NetError! { rt.tcp_close(self) }\n    }\n}\n\nreply: fn(stream: net.TCPStream, timeout: Duration) -[Net, Time.Wait]> NetError! {\n    stream.write_bytes(\"ok\\n\".bytes(), deadline: timeout) ?? return Err(err)\n    close(stream) ?? return Err(err)\n}"
+        },
+        {
+          "key": "D",
+          "name": "Close's method takes another name",
+          "detail": "`Close`'s one method becomes `release`. The four streams keep their public fallible `close` and add `impl Close { release: fn(^^self) {} }`. Every other resource renames its Close method.",
+          "technical": "Prelude/Traits.jet's `Close.close` becomes `Close.release`. All 230 `impl Close` sites and the FFI `#Close(close)` form (spec.md 5180) migrate. The builtin `close(x)` either becomes `release(x)` or keeps its name and calls `release`. In the second case `close(stream)` and `stream.close()` do different things on the same value: one releases infallibly, the other sends a fallible goodbye.",
+          "code": "TCPStream: struct {\n    priv handle: Int,\n    close: fn(self) -[Net]> NetError! { rt.tcp_close(self) }\n    impl Close {\n        release: fn(^^self) {}\n    }\n}\n\nreply: fn(stream: net.TCPStream, timeout: Duration) -[Net, Time.Wait]> NetError! {\n    stream.write_bytes(\"ok\\n\".bytes(), deadline: timeout) ?? return Err(err)\n    stream.close() ?? return Err(err)\n}"
+        },
+        {
+          "key": "E",
+          "name": "Keep the Core-identity row",
+          "detail": "Nothing changes for callers. The four stay resources because the compiler finds them by their Core identity in one named row. A package type with a fallible `close` can't be a resource without renaming its method.",
+          "technical": "Copy.jet keeps `sema_copy_fallible_close_stream`, which matches core.net's TCPStream, UnixStream, TLSStream and WsConn by declaring identity. It is the one resource name list left after the declared-facts cutover. The closed-list guard keeps it as a kernel row with a reason, and #6852 c1 is met for every list but this one. Under the greenfield cutover rule in AGENTS.md, migration cost counts for little against having one canonical form, which leaves the row's only argument weak.",
+          "code": "// Compiler row; a package type can't join it\nsema_copy_fallible_close_stream: fn(graph, nominal) -> Bool {\n    core_identity_is(key, \"core.net\", \"TCPStream\") || ...\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "A Drop can't fail. BufWriter's Drop attempts a flush and loses its error, so code that needs the error calls `flush()` first. TcpStream has no close method: `shutdown(Both)` is its fallible goodbye, and the drop closes the fd and ignores errors, which is option A for TCP.",
+          "code": "w.flush()?;                        // fallible goodbye\nstream.shutdown(Shutdown::Both)?;  // TCP's goodbye\n}   // the drops release; their errors are lost"
+        },
+        {
+          "lang": "Go",
+          "note": "io.Closer's Close returns an error. A deferred Close usually throws it away, and code that cares calls Close explicitly and checks it.",
+          "code": "defer conn.Close()      // error dropped\nif err := w.Close(); err != nil { return err }"
+        },
+        {
+          "lang": "Swift",
+          "note": "A noncopyable type's deinit can't throw. Swift System's FileDescriptor has a separate throwing close() that the caller invokes.",
+          "code": "struct Socket: ~Copyable {\n  consuming func shutdown() throws { ... }\n  deinit { release(fd) }\n}"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A gives `close` one meaning: consume the value and release it, without failing, for every resource and at every scope end. Each fallible goodbye has exactly one name: `shutdown(.Both)`, which TCP and Unix already have, and `finish` for the two protocol goodbyes, the word Core already uses for a fallible flush-and-complete.\n\nThe four streams then declare `impl Close` like every other resource, the last resource name list goes, and a package stream can follow the same pattern. B does the same but leaves `finish` and `shutdown(.Both)` as two names for one call on TCP and Unix.",
+        "gains": [
+          "Every resource, in Core or in a package, is declared by `impl Close`, and the last resource name list goes.",
+          "`close(x)` means the same thing on every resource and never needs an effect or an error path.",
+          "Every fallible goodbye stays, under one name each: `shutdown(.Both)` for TCP and Unix, and `finish` for TLS and WebSocket, matching Zstd, CBOR and Actor.",
+          "Only two types gain a new method name."
+        ],
+        "losses": [
+          {
+            "loss": "A WsConn that is never finished sends no close frame, so the peer sees 1006. A TLSStream that is never finished sends no close_notify, so the peer can't tell a clean end from a truncation.",
+            "mitigation": "This is today's behavior too: the drops skip both goodbyes now (WsRoutes.jet 120-128, TLS.jet 237-246), so A changes nothing at run time. The doc comments on TLSStream and WsConn say to call `finish` for a clean end. A later hint can flag a TLSStream or WsConn that reaches its scope end without `finish`."
+          },
+          {
+            "loss": "Callers of the TCP and Unix closes and of `net.tcp_close` and `net.unix_close` migrate: 73 lines spell the free functions, and the method calls come on top.",
+            "mitigation": "The type checker finds every one, since the methods no longer exist. Each becomes `shutdown(.Both)`, keeping the error, or is deleted where the scope end already closes the stream."
+          },
+          {
+            "loss": "`finish` is a new word on the net surface.",
+            "mitigation": "It is Core's existing word for a fallible flush-and-complete (Zstd, CBOR, Actor), and it appears only on the two types with a protocol goodbye."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It gives TCP and Unix two names for `shutdown(.Both)`."
+          },
+          {
+            "key": "C",
+            "reason": "A scope end has nowhere to send the error, and the close bodies carry `Net` and `Time.Wait` effects. So either every scope that drops a stream gains those effects, or the scope end and `close(x)` run different code. It also widens every `T: Close` bound."
+          },
+          {
+            "key": "D",
+            "reason": "It renames all 230 Close impls and the FFI form to spare four methods, and it leaves `close(x)` and `x.close()` doing different things on the same stream."
+          },
+          {
+            "key": "E",
+            "reason": "It keeps a name list the declared-facts ballot set out to remove, so a package type with a fallible goodbye still can't be a resource without renaming its method."
+          }
+        ],
+        "tradeoff": "Two types gain `finish`, two lose a duplicate `close`, and their callers migrate. In return, `close` has one meaning across every resource and each goodbye has one name."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: Main. The review (review-2026-11-25-D-FALLIBLE-CLOSE1.md) added option A after finding TCP and Unix close duplicate shutdown(.Both), and named the scope-end goodbye cost."
+      },
+      "checkInstructions": "Check the trait at Compiler/Prelude/Traits.jet 250-255 and the four methods at Core/Net/Net.jet 132 and 196, Core/Net/TLS.jet 184-192 and Core/Net/Ws.jet 41. Check TCPStream's `shutdown(how)` at Net.jet 120.\n\nCheck the close routes at Compiler/JetRuntime/Source/NetHandleRoutes.jet 564-575 and NetUnix.jet 214, the WsConn drop at WsRoutes.jet 120-128, and the TLS state drop at TLS.jet 237-246. Check the close-then-drop order at Compiler/JetIR BuildExpr.jet 119-140 and the idempotent close at Compiler/JetRuntime/Tests/TCPRoutesWitness.c 191-192.\n\nCheck the duplicate-definition refusal in Tests/UI/member_namespace_operator_hook_method.stderr. Check trait type parameters at spec.md 1128 and the FFI `#Close(close)` form at spec.md 5180. Check the `finish` precedent at Core/Archive/Zstd.jet 378 and Core/Actor/Actor.jet 113, and the CBOR encoders.\n\nThe counts are `git grep -cE PATTERN 4f02506163e -- Core Compiler Tests Examples Jetpack Tools Docs`, summed over files:\n- 'impl Close' gives 230.\n- '\\b(tcp_close|unix_close)\\(' gives 73.\n- '\\btls\\.close\\(' gives 2.\n- '\\.close\\([^)]*,' gives 28 (the two-argument WsConn form, an upper bound).\nNo build, test or probe was run for this draft.\n\nAfter ratification, one card does the cutover. It deletes the TCP and Unix closes and their free functions and migrates their callers to `shutdown(.Both)`. It renames the TLS and WebSocket closes to `finish`, adds the empty `impl Close` to all four, and deletes the Core-identity row in Ownership/Copy.jet. Proof: the closed-list guard passes with the row gone. A case shows that a TCPStream copy is refused (E0211), and that `finish` on a WsConn followed by the scope end closes it once.",
+      "surface": {
+        "gist": "Four Core streams name their fallible goodbye `close`, which clashes with the infallible `Close`. Which one keeps the name?",
+        "lesson": "A resource implements `Close`, whose `close` consumes the value and can't fail, because a scope end has nowhere to send an error. TCPStream, UnixStream, TLSStream and WsConn each have a fallible `close`, so they can't implement `Close`; they stay resources through a compiler list instead. For TCP and Unix, that `close` is just `shutdown(.Both)`.",
+        "trio": {
+          "current": {
+            "note": "The four streams are resources by a Core-identity row.",
+            "code": "core_identity_is(key, \"core.net\", \"TCPStream\") || core_identity_is(key, \"core.net\", \"UnixStream\") || ..."
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "TcpStream has no close; shutdown is the goodbye and the drop releases.",
+            "code": "stream.shutdown(Shutdown::Both)?;\n}   // the drop closes the fd"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Shutdown, and `finish` for protocols",
+            "gist": "TCP and Unix drop their duplicate `close`; TLS and WebSocket rename theirs to `finish`.",
+            "gains": [
+              "`close` means one thing on every resource.",
+              "Each goodbye has one name."
+            ],
+            "losses": [
+              "An unfinished TLS or WebSocket stream sends no goodbye, as it doesn't today."
+            ],
+            "proposed": {
+              "code": "stream.shutdown(.Both) ?? return Err(err)\nconn.finish(1000, \"done\")"
+            }
+          },
+          {
+            "key": "B",
+            "name": "`finish` on all four",
+            "gist": "All four rename their fallible close to `finish`.",
+            "gains": [
+              "One name for the goodbye on every stream."
+            ],
+            "losses": [
+              "TCP and Unix get two names for `shutdown(.Both)`."
+            ],
+            "proposed": {
+              "code": "stream.finish() ?? return Err(err)"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Fallible Close",
+            "gist": "`Close<E>` lets `close` return an error.",
+            "gains": [
+              "No renames on the four."
+            ],
+            "losses": [
+              "The scope end drops the error and needs the close's effects."
+            ],
+            "proposed": {
+              "code": "impl Close<NetError> {\n    close: fn(^^self) -[Net]> NetError! { rt.tcp_close(self) }\n}"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Rename Close's method",
+            "gist": "`Close.close` becomes `Close.release`.",
+            "gains": [
+              "The four keep `close`."
+            ],
+            "losses": [
+              "230 Close impls are renamed, and `close(x)` and `x.close()` differ."
+            ],
+            "proposed": {
+              "code": "impl Close {\n    release: fn(^^self) {}\n}"
+            }
+          },
+          {
+            "key": "E",
+            "name": "Keep the row",
+            "gist": "The four stay resources by Core identity.",
+            "gains": [
+              "No change."
+            ],
+            "losses": [
+              "A name list stays, and package streams can't follow."
+            ],
+            "proposed": {
+              "code": "core_identity_is(key, \"core.net\", \"TCPStream\")"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "One meaning for `close` across every resource; each fallible goodbye keeps one name.",
+          "gains": [
+            "Every resource is declared by `impl Close`.",
+            "`close(x)` never fails and needs no effects."
+          ],
+          "losses": [
+            {
+              "loss": "An unfinished TLS or WebSocket stream sends no goodbye.",
+              "mitigation": "Today's drop sends none either; the docs and a later hint point to `finish`."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Two names for `shutdown(.Both)`."
+            },
+            {
+              "key": "C",
+              "reason": "A scope end can't report the error or carry its effects."
+            },
+            {
+              "key": "D",
+              "reason": "230 renames to spare four, and two closes that differ."
+            },
+            {
+              "key": "E",
+              "reason": "A name list stays."
+            }
+          ],
+          "tradeoff": "One new method name on two types, for one meaning of `close`."
+        }
+      },
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "Main",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-25T13:54:16.868Z"
+    },
+    {
+      "id": "D-PROCESS-BUILDER-RECEIVER1",
+      "cardId": "c0e6znz4",
+      "group": "library",
+      "title": "When a ProcessSpec builder takes a named spec that is used again, is that an error, a silent copy, or a copy on every step",
+      "situation": "Card #6851 c5 asks that ProcessHandles.jet move to Core declarations and be deleted. The launch steps (`plan`, `run`, `run_checked`, `spawn`) already moved to `impl ProcessSpec` without a behavior change, since they only read the spec.\n\nThat leaves 22 receivers: the 21 builders such as `cwd`, `arg` and `env`, and `keep_open`'s receiver. Today the compiler checks them with Jet's law for an unmarked owning position (Ownership/Checks.jet:3701). A bare name there moves at its last use, and a later use becomes a share, materialized as a copy.\n\nD-CALLSITE-MARK2=A rules the opposite for calls: a value passed to a take parameter and used again is an error, and a call never copies on its own. All 108 `fn(^^self` methods in Core obey it. A declared builder `fn(^^self, …)` therefore turns a later use into E0209, as a probe with a `^^ProcessSpec` parameter confirms.",
+      "gist": "When a builder takes a named spec that is used again, what happens? A: E0209 with a `.copy()` fix. B: a silent copy for ProcessSpec only. C: a copy on every step. D: a silent copy for every take receiver. E: a change in place.",
+      "lesson": "Rust's `Command` changes the command in place (`&mut self`), and Rust builders that take `self` need an explicit `.clone()` to keep the original. Swift value types copy only when a shared value is changed.",
+      "explainer": "A recipe card: writing a change on it uses up the card. Today a clerk photocopies the card first whenever you look at the old one again, but only at the process desk. The shop has five choices. It can stop that clerk and ask you to photocopy on purpose (A), or keep the clerk at that desk only (B). It can always photocopy before every change (C), hire the clerk for every desk (D), or write the change on the card itself (E).",
+      "story": "Ana scripts a checkout of each branch:\n\n```\nbase: process.cmd([\"git\"]).cwd(repo)\nloop name in branches {\n    base.arg(\"checkout\").arg(name).run_checked() ?? return\n}\n```\n\nUnder A, `base.arg` is E0209 (\"`ProcessSpec.arg` takes `base`, but `base` is used again later\"), because the loop's next pass reads `base` again. The fix in the error is `base.copy().arg(\"checkout\")`. Under B and D her loop stays, and each pass copies `base` without showing it. Under C it stays too, and each pass copies twice, once per builder. Under E the first pass runs `git checkout main`, and the second runs `git checkout main dev`, because the args pile up on `base`.",
+      "inWild": "// Rust: Command builders take &mut self, so a reused base keeps earlier args.\nlet mut base = Command::new(\"git\"); base.arg(\"status\"); base.arg(\"log\"); // git status log\n// Rust: builders that take self need .clone() to keep the original.\nlet status = base.clone().name(\"status\".into());\n// Swift: value types copy on write, without a mark.\nvar status = base; status.arguments.append(\"status\")",
+      "detail": "Census (git grep plus a scan, on 4b640637407). The scan walks every tracked .jet file and follows each name bound to a ProcessSpec. Such a name comes from `cmd(…)`, from one of the 78 functions that return ProcessSpec, from a ProcessSpec parameter, or from a builder on such a name. It reports a builder whose receiver is read again later in the function, or in a loop the name was bound outside of. It found 106 builder sites on a named spec.\n\n99 of them are the rebinding form `spec = spec.env(…)`, which every option keeps. 5 sit on branches that never meet (TestReuse.jet:85/93, CacheEndpoints.jet:463/464, ShellEnv.jet:158/159, CensusSnap2.jet:196, Regression.jet:200/202).\n\nTwo read a spec again after a builder:\n- Compiler/JetCLI/Source/CLI/NativeTests.jet:544 then :569, where `clean` feeds `alone` and then `batch_spec`.\n- Core/Process/Process.jet:839 then :842, which is Core's own test of the share.\n\nThe loop case that the ProcessHandles comment names (`clean.env(…).run()` in a loop) is already written `alone.copy().env(…)` at NativeTests.jet:626 and :659. No Docs or guide sample reuses a spec; the two in core-library.md (:3102, :3333) chain on a fresh `process.cmd(…)`.\n\nThe 21 builders are `cwd`, `arg`, `args_extend`, `env`, `env_remove`, `env_clear`, `output_limit`, `memory_limit`, `memory_scope`, `open_file_limit` and `cpu_affinity`. The others are `io_priority`, `io_idle`, `detached`, `terminal`, `under`, `stdin`, `stdout`, `stderr`, `timeout` and `cpu_time_limit`. Their share calls sit at ProcessHandles.jet:233-236 and :339-342, and the 108 `fn(^^self` methods are in 43 Core files.\n\nBeginner path: chain builders on `process.cmd(…)` and run. Every option keeps that form. A beginner meets the choice only when one base serves two runs, as in the story. Under A, E0209 names the call and the `.copy()` fix. Under B and D nothing is shown. Under E the mistake is silent.\n\nExpert path: build one spec and launch it many times in a hot loop. Under A the copy is written at the one place it happens. Under B and D it is hidden. Under C it is paid on every step, also when the spec is never reused.\n\nWhole mechanism: sema_ownership_mark_unmarked_move has nine callers. Six are owning positions under the general law: Checks.jet:3912 and :7378, CopySites.jet:631 and :684, Views.jet:31, and Calls/Checking.jet:1567 (a variadic list element). Every option keeps those.\n\nThree are calls: ProcessHandles.jet:234 (the 21 builders), ProcessHandles.jet:340 (keep_open's receiver) and Calls/Static.jet:974. Static.jet:974 covers a builtin static with no declared conventions, `Shared.new(x)`; `Shared{x}` is a field position. A and C delete the two ProcessHandles calls. D replaces them with one general receiver rule. B keeps them. Static.jet:974 is outside c5 and follows the chosen law when `Shared` is declared in Core.\n\nThe runtime leaves (`rt.spec_cwd(spec: ^^ProcessSpec, …)`) take the spec, so a Core body that only reads `self` must copy before the leaf (C).\n\nRelated ratified decisions, checked: D-CORE-PROCFILE1 (`.stdout(.File(^stdout))`), D-CORE-PROCINHERIT1 (`.keep_open(^tool, at: 3)`), D-CORE-PROCGROUP1, D-CORE-PROCIDENT1 and D-CORE-PROCSIGNAL1. They fix builder and launch spellings, never the receiver or a reuse after a builder. Their samples chain on a fresh `process.cmd(…)` temporary, so A, B, C and D leave them unchanged. E breaks them unless its builders return a copy (see E). D-CALLSITE-MARK2=A (\"a call never copies on its own\") is the law that B keeps an exception to, and that D amends.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Builders take the spec (`fn(^^self, …)`); a reuse writes `.copy()`",
+          "amends": [],
+          "detail": "Each builder is a Core method over its jet.runtime.process leaf, like ArgsSpec's and the other 108 take receivers. A reuse after a builder is E0209, with the `.copy()` fix. The two repository reuses (NativeTests.jet:569 and Core's Process test at :839) are migrated in the same patch. c5 is met.",
+          "technical": "impl ProcessSpec gains the 21 builders as `fn(^^self, …)` and keep_open's receiver becomes `^^self`. sema_process_spec_method's builder path, the two mark_unmarked_move calls (ProcessHandles.jet:234 and :340), the role bodies and their RoleKind variants are deleted.",
+          "code": "status: base.copy().arg(\"status\")\nlog: base.arg(\"log\")"
+        },
+        {
+          "key": "B",
+          "name": "Keep the owning-position share for ProcessSpec receivers only",
+          "amends": [],
+          "detail": "Programs stay. The 22 receivers keep an exception to D-CALLSITE-MARK2's \"a call never copies on its own\" that no other Core receiver has. The receiver check moves to a language-owned home outside Sema/Calls, so card #6851 c5 is amended.",
+          "technical": "The builder path of ProcessHandles.jet moves to a language-owned file with its two mark_unmarked_move calls. c5's text changes.",
+          "code": "status: base.arg(\"status\")\nlog: base.arg(\"log\")"
+        },
+        {
+          "key": "C",
+          "name": "Builders read the spec and copy it inside Core",
+          "amends": [],
+          "detail": "Each builder is `fn(self, …)`, and its body passes `self.copy()` to the leaf. Programs stay and ProcessHandles.jet goes. But every builder step copies the argv, the environment and the limits, also when the spec is never reused: a five-step chain copies five times.",
+          "technical": "22 new `.copy()` sites in Core/Process, so the copy ratchet rises by 22.",
+          "code": "cwd: fn(self, path: String) -> ProcessSpec Never! { rt.spec_cwd(self.copy(), path) }"
+        },
+        {
+          "key": "D",
+          "name": "Every take receiver is an unmarked owning position",
+          "amends": [
+            "D-CALLSITE-MARK2"
+          ],
+          "detail": "Builders are `fn(^^self, …)` as in A. The general receiver check then gives every `^^self` receiver on a bare name the owning-position law: it moves at its last use, and a later use shares, materialized as a copy. That covers ProcessSpec, the 108 other Core take receivers and every user one. Programs stay, a chain on a temporary copies nothing, and c5 is met because the law lives in the general receiver path.\n\nA value that can't be copied (a resource with Close, a #SingleUse value) still fails at the later use, as at any owning position (CopySites.jet:334). But `buf.seal()` followed by a read of `buf` now copies the whole buffer without a word where it was an error. D-CALLSITE-MARK2's \"a call never copies on its own\" becomes \"a call never copies an argument on its own\".",
+          "technical": "The method-receiver path of the ownership check calls sema_ownership_mark_unmarked_move for a bare-name `^^self` receiver instead of sema_ownership_mark_move. ProcessHandles.jet's builder path goes as in A. Every case that pins E0209 on a take receiver (Tests/UI and Tests/Cases) changes to a share.",
+          "code": "status: base.arg(\"status\")  // copies base, read below\nlog: base.arg(\"log\")"
+        },
+        {
+          "key": "E",
+          "name": "Builders change the spec in place (`fn(^self, …)`)",
+          "amends": [
+            "D-CORE-PROCFILE1",
+            "D-CORE-PROCINHERIT1",
+            "D-CORE-PROCGROUP1",
+            "D-CORE-PROCIDENT1",
+            "D-CORE-PROCSIGNAL1"
+          ],
+          "detail": "This is the shape of Rust's `Command`. Jet has no write borrow as a return value: no Core function returns `^T`, and Spellings has no form for one. A builder that changes `self` in place can't hand the same spec back for the next link of a chain.\n\nIt must either return nothing, which breaks every chain on `process.cmd(…)` in the five ratified samples, or return a copy, which copies on every step as in C. Either way, `status: base.arg(\"status\")` followed by `log: base.arg(\"log\")` silently runs `git status log`, because both args land on `base`.",
+          "technical": "22 builders become `fn(^self, …) Never!`, and every chain is respelled as statements on a `:=` binding.",
+          "code": "spec := process.cmd([\"git\"])\nspec.arg(\"status\")\nspec.run()"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "`std::process::Command` builders take `&mut self` and change the command in place (E's shape), so a base reused for two runs carries both runs' args unless the program clones it first. Builders that take `self`, such as `std::thread::Builder::name`, need an explicit `.clone()` to keep the original. That is A's shape.",
+          "code": "let status = base.clone().name(\"status\".into());"
+        },
+        {
+          "lang": "Swift",
+          "note": "Value types copy on write: changing a value that is still shared copies it first, without a mark. That is B's and D's behavior. Jet materializes the copy at the share site.",
+          "code": "var status = base; status.arguments.append(\"status\")"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A gives these 22 receivers the law D-CALLSITE-MARK2 ratified for every call and the 108 other Core take receivers follow: a call never copies on its own. It meets c5 by deleting the builder path and migrates the 2 repository reuses. E0209 names the beginner's one mistake and shows `.copy()`. D also gives one law and meets c5, but it adds hidden copies at every take receiver in Jet. That reverses a ratified decision for 108 Core methods and all user code, to spare 2 call sites.",
+        "gains": [
+          "One law for every call: a take receiver never copies on its own.",
+          "ProcessHandles.jet's builder path and its two share calls are deleted (c5).",
+          "No copy unless the program writes one; chains on `process.cmd(…)` copy nothing."
+        ],
+        "losses": [
+          {
+            "loss": "A spec read again after a builder is E0209: 2 sites in the repository (NativeTests.jet:569, Core's Process test at :839) and any user script that reuses a base.",
+            "mitigation": "E0209 names the call and shows `base.copy().arg(…)`. The slice migrates both repository sites."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It keeps the only Core call receivers that copy on their own, as an exception to D-CALLSITE-MARK2, and it amends c5 to keep that exception in the compiler."
+          },
+          {
+            "key": "C",
+            "reason": "It copies the spec on every builder step, also on the common chain that never reuses it, and raises the copy ratchet by 22."
+          },
+          {
+            "key": "D",
+            "reason": "It amends D-CALLSITE-MARK2 for 108 Core take receivers and all user code: a read after `seal`, `close` or `finish` silently copies the value where today it is an error. All that to spare 2 sites in the repository."
+          },
+          {
+            "key": "E",
+            "reason": "Jet can't return the receiver as a write borrow, so either every ratified chain sample breaks or every step copies. A reused base also silently piles up args."
+          }
+        ],
+        "tradeoff": "An explicit `.copy()` at the 2 known reuse sites and in any user script that reuses a base, for one call law and no hidden copies."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: Main. Main's fresh re-review of r2 (review-2026-11-25-6851-ballots-r2.md) found that the content holds, with no new findings."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "A builder takes a named spec that is used again: an error, a hidden copy, or a change in place?",
+        "lesson": "Rust's `Command` changes the command in place, so a reused base keeps its old args unless it is cloned. Rust builders that take `self` need an explicit `.clone()`. Swift value types copy only when a shared value changes.",
+        "trio": {
+          "current": {
+            "note": "Today only ProcessSpec builders copy a named spec on their own when it is read again.",
+            "code": "base: process.cmd([\"git\"])\nstatus: base.arg(\"status\")  // copies base\nlog: base.arg(\"log\")"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "`Command` builders change the command in place, so a reused base keeps every earlier arg.",
+            "code": "let mut base = Command::new(\"git\");\nbase.arg(\"status\");\nbase.arg(\"log\"); // runs `git status log`"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "An error with a `.copy()` fix",
+            "gist": "Builders take the spec; a reuse is E0209, whose fix shows `.copy()`.",
+            "gains": [
+              "One rule for every call: no hidden copies.",
+              "ProcessHandles.jet's builder path is deleted."
+            ],
+            "losses": [
+              "Two repository sites and reusing scripts add `.copy()`."
+            ],
+            "proposed": {
+              "code": "status: base.copy().arg(\"status\")\nlog: base.arg(\"log\")"
+            }
+          },
+          {
+            "key": "B",
+            "name": "A hidden copy for ProcessSpec only",
+            "gist": "Programs stay; ProcessSpec keeps its exception to the call rule.",
+            "gains": [
+              "No program changes."
+            ],
+            "losses": [
+              "The only Core receivers that copy on their own.",
+              "c5 is amended to keep the check in the compiler."
+            ],
+            "proposed": {
+              "code": "status: base.arg(\"status\")  // copies base\nlog: base.arg(\"log\")"
+            }
+          },
+          {
+            "key": "C",
+            "name": "A copy inside every builder",
+            "gist": "Builders read the spec and copy it before the runtime call.",
+            "gains": [
+              "No program changes.",
+              "ProcessHandles.jet is deleted."
+            ],
+            "losses": [
+              "Every builder step copies, even when nothing is reused."
+            ],
+            "proposed": {
+              "code": "cwd: fn(self, path: String) -> ProcessSpec Never! {\n    rt.spec_cwd(self.copy(), path)\n}"
+            }
+          },
+          {
+            "key": "D",
+            "name": "A hidden copy for every take receiver",
+            "gist": "Every `^^self` receiver on a name copies when the name is read again.",
+            "gains": [
+              "No program changes.",
+              "One rule, and ProcessHandles.jet is deleted."
+            ],
+            "losses": [
+              "A read after `seal` or `close` silently copies instead of failing.",
+              "A ratified call rule changes for all code."
+            ],
+            "proposed": {
+              "code": "status: base.arg(\"status\")  // copies base\nlog: base.arg(\"log\")"
+            }
+          },
+          {
+            "key": "E",
+            "name": "Change the spec in place",
+            "gist": "Builders take `^self` and change the spec where it is.",
+            "gains": [
+              "The shape of Rust's `Command`."
+            ],
+            "losses": [
+              "Chains break, or every step copies.",
+              "A reused base silently piles up args."
+            ],
+            "proposed": {
+              "code": "spec := process.cmd([\"git\"])\nspec.arg(\"status\")\nspec.run()"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A gives these builders the rule every other call follows: a call never copies on its own. It deletes the builder path and migrates the two reuses.",
+          "gains": [
+            "One rule for every call.",
+            "No copy unless the program writes one."
+          ],
+          "losses": [
+            {
+              "loss": "A spec reused after a builder becomes an error.",
+              "mitigation": "The error shows the `.copy()` fix, and both repository sites are migrated."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "It keeps a hidden-copy exception for one Core type."
+            },
+            {
+              "key": "C",
+              "reason": "It copies on every builder step."
+            },
+            {
+              "key": "D",
+              "reason": "It adds hidden copies to every take receiver in Jet to spare two sites."
+            },
+            {
+              "key": "E",
+              "reason": "Chains break or every step copies, and a reused base piles up args."
+            }
+          ],
+          "tradeoff": "An explicit `.copy()` where a base is reused, for one call rule and no hidden copies."
+        }
+      },
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "Main",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-25T14:02:42.165Z"
+    },
+    {
+      "id": "D-RULE-DISPATCH-BUDGET1",
+      "cardId": "c0e6znz4",
+      "group": "compiler",
+      "title": "How does card #6851 meet D-CORE-CHECK1's budget of 1 µs per heard call?",
+      "situation": "D-CORE-CHECK1 says rule calls go to the build-time process in batches, within 1 µs per call. Card #6851 criterion n=22 holds rule dispatch to that budget. One more heard call costs at most 1 µs, measured as (time with 20000 heard calls − time with one) / 19999. A module's first heard call, which builds and runs the rule program, costs at most 25 ms.\n\nMeasured on stage44e518, which carries all four c21 dispatch slices, one more heard call costs about 19.8 µs. That is the median of the paired per-run marginals; 7 interleaved runs and 8 quiet runs both give 19.4 to 19.8 µs. About 10 µs is sema hearing the call, and 9 to 10 µs is the rule run in the compile-time child. The rule body costs about 43 ns at O0. The first heard call's rule run takes 28 to 31 ms. So n=22 is not met at either bound, and the gap is dispatch, not the rule.\n\nThe work that reaches 1 µs is the compile-time child's: one warm child per compile, values through shared memory, no program compiled per batch. Card #6798 owns it; its c2 is open, and its burn-down estimate is weeks.",
+      "gist": "Today's n=22 bounds are not met: one more heard call costs about 19.8 µs against 1 µs, and the first heard call 28 to 31 ms against 25 ms. B would relax the 25 ms first-call target to 35 ms. Should n=22 move unchanged to #6798 (A), close at 25 µs and 35 ms with steps on #6798 (B), or hold #6851 open (C)?",
+      "lesson": "The rule's own work is about 43 ns per call at O0. The microseconds go to hearing the call and carrying it to the child and its answer back, and Jet's invariants fix that the child is a separate native process.",
+      "explainer": "A post office promised to sort each letter in one second. Stamping takes a twentieth of a second. The rest is walking each sack to a back room. The building crew already plans a faster back room for every department. The office can hand the one-second promise itself to the crew (A), or count today's walk as done and add the promise to the crew's plan (B). It can wait for the crew (C), change the promise (D), or sort letters at the counter, which the office's rules forbid (E).",
+      "story": "A package with 20000 calls to a `#Lit` function checks about 0.4 s slower than the same package with an unmarked function (19.8 µs × 20000). At 1 µs it would be 0.02 s slower. Its first heard call adds about 30 ms whatever the count.",
+      "inWild": "// Zig: comptime code runs in the compiler's own interpreter, with no separate process.\ncomptime { if (args.len == 0) @compileError(\"computed\"); }\n// Rust: Clippy lints run in-process over the checked HIR.\nimpl LateLintPass for MyLint { fn check_expr(&mut self, cx: &LateContext, e: &Expr) { … } }\n// rust-analyzer: proc macros run in a long-lived server process, one request per expansion.",
+      "detail": "Evidence. All runs use stage44e518 = $JET_SCRATCH_ROOT/tmp/orch/stage44e518-chain/s1/jet, built from the tree $JET_SCRATCH_ROOT/tmp/orch/stage44e518-exp. That tree carries the four c21 slices (`git apply --check -R` returns 0 for each). It also carries #6798's Pillar 3 fast-O0 stubs and shared-memory batch load, on dev bf843c6d0b6.\n\nThe probe is the n=22 rule-dispatch probe. It has a `priv Lit` Marker whose `check` rejects a computed first argument (E0635), `#Lit f: fn(x: Int) -> Int`, and a `main` of 20000 `t += …(i)` lines. n20k calls `f` on every line; n1 calls `f` once and an unmarked `g` on the rest; n0 is n1 without `#Lit`.\n\nThe files have the same 20028 lines, so line cost cancels. An unmarked control pair, n1 and n20k with the `#Lit` line removed, differs by −2.8 to 0 µs per call in 6 of 7 runs.\n\n1. `jet perf run -A wrap.jet --out … -- $J <probe>/main.jet` and `jet perf compare`, 5 runs each at load 43 on 32 cores. Wall n0: 712 to 971 ms; n1: 813 to 896 ms; n20k: 1214 to 1354 ms. Paired marginal: 15.9, 18.1, 20.3, 20.8, 23.8 µs. `jet perf compare n1 n20k` reports wall 1064 → 1470 ms, a 3803 bp regression. The wrapper's samples don't see the child compiler's functions, so the split comes from spans.\n\n2. `jet check --trace=FILE` spans, B/E events paired per thread. Eight quiet pairs earlier: marginal 14.0 to 22.0 µs, median 19.4 (two runs during load spikes read 59 and 62 and are left out). Seven interleaved runs today at load 26 to 28: paired marginal 16.9, 19.3, 19.3, 19.8, 25.4, 25.8, 32.9 µs, median 19.8.\n\nSplit of the marginal (medians): sema.bodies is about 10 to 11 µs, which is hearing the call. The marker's check span is about 9 to 10 µs. Of that, comptime.bodies is 8 to 8.4 µs and comptime.body.pending 1.2 to 1.4 µs. comptime.land.open is about 0.55 µs and sema.facts about 0.21 µs.\n\n3. The fixed half, re-measured. On n1 the marker's check span takes 28 to 31 ms over the quiet runs (comptime.bodies 18 to 19 ms of it). The whole-run difference n1 − n0 has a median of about 16 ms over quiet pairs. But single pairs spread from −68 to +63 ms at load 26, wider than the bound itself, so only the span can prove a bound. Runs at load 65 to 98 were discarded.\n\nCost against the compile-speed target. #5479's target is 30M lines/s from cold, about 33 ns per line. 19.8 µs is about 600 lines' worth, a 25 µs bound about 760, and 1 µs about 30. At one heard call per 1000 lines, 19.8 µs adds about 20 ns per line, 60% of the whole budget; 1 µs adds 1 ns (3%). At one per 100 lines it is 198 ns per line (6× the budget) against 10 ns.\n\nA 1000-line router with 200 heard route registrations [INFERENCE: each route line is a heard call] costs about 4 ms against its 33 µs budget (120×). At 1 µs it costs 0.2 ms (6×). The first heard call's 30 ms is about 900k lines' worth. A 100k-line program with one heard rule spends about 9× its whole budget on it, and 25 ms is still 7.6×. Rule-heavy programs (routers, services, data schemas) pay both halves.\n\nWhy only a child. AGENTS.md I9: compile-time code runs natively at O0 in a child of the compiler, and no interpreter or second code generator serves any tier. D-EXEC2=A makes the child live only for one compile. So the in-process shape of Zig's comptime or Rust's Clippy is not open to Jet without an I9 exception (option E). The path to 1 µs is the warm per-compile child #6798 c2 builds, plus cheaper hearing.\n\nThe r1 claim that the rule program is compiled at O1 or O2 and stays resident was wrong. Under I9 it runs at O0, and nothing survives the compile.\n\nThe steps to 1 µs, each with the span it removes today:\n1. Hearing (sema.bodies, about 10 µs): sema hears each call into compact rows, with no probe, key text or source row per call.\n2. Batch (comptime.bodies, about 8 µs): rows reach the warm child as bytes through #6798's shared region, with no data literal compiled and loaded per batch.\n\n3. Program (part of the fixed 28 to 31 ms): one rule program per rule set is compiled once per compile at O0 on the copy-and-patch path (#6795). It stays in the warm child for that compile.\n4. Landing (comptime.body.pending and comptime.land.open, about 1.9 µs): a batch lands as one value that its sites read by row.\n\nWho carries the steps. Under A, n=22 itself moves to #6798 unchanged, and the four steps are the plan for meeting it. Under B the four steps and an end criterion become #6798 criteria. Owner-only choice inside B: the hearing step goes on #6798, not on #5479. It is paid only by heard calls and exists only to feed the child. #5479's sema.bodies phase root (c16) is measured on gate programs with no heard calls, so a #5479 criterion could not show it.\n\nOwner order. A follow-up goes on the card that owns the area. The remaining n=22 work is the compile-time child's, which #6798 owns. A follows that order whole: the criterion moves with its bounds to the card that does the work and proves it. B splits it: #6851 keeps a relaxed bound, and #6798 gets five criteria that restate n=22's goal. So the owner order favors A.\n\nA against B. B ships a bound that is enforced now: dispatch can't regress past 25 µs or 35 ms while #6798 works. A enforces nothing until #6798 lands its steps, but it weakens no bound. B also relaxes the 25 ms first-call target, which today's runs don't meet, to 35 ms.\n\nBeginner path: nothing to write. A beginner meets rules only through markers a package ships, and sees the same errors under every option. Under A to D they pay about 20 µs per heard call until #6798 lands its steps; only E removes the cost without #6798.\n\nExpert path: a package author who ships a `check` rule. Under A they see the 1 µs and 25 ms goal on #6798. Under B they see the bound #6851 proves, with 1 µs tracked on #6798. Under D, 25 µs becomes the language's promise, so a rule-heavy package plans around it.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Move n=22 unchanged to #6798",
+          "amends": [],
+          "detail": "n=22 moves to #6798 with its bounds unchanged: at most 1 µs marginal per heard call and at most 25 ms for a module's first heard call, on the same probe. #6798 then owns both the work and the proof. #6851 closes with no bound weakened. No new criteria restate n=22's goal; the four steps in the detail are the plan for meeting it.\n\nUntil #6798 lands its steps, nothing enforces a dispatch bound: today's 19.8 µs and 28 to 31 ms are recorded, not held. D-CORE-CHECK1 keeps 1 µs.",
+          "technical": "`tower card criteria 6851 --move 22 --to 6798`. No card text changes, and no code changes beyond the queued c21 slices.",
+          "code": "tower card criteria 6851 --move 22 --to 6798\n// #6798 n=22: <= 1 µs marginal, <= 25 ms first heard call"
+        },
+        {
+          "key": "B",
+          "name": "Close n=22 at the measured bound; the 1 µs steps become criteria on #6798",
+          "amends": [],
+          "detail": "n=22's bounds become the ones the c21 slices are measured to reach, with room for the measured spread. The marginal bound is at most 25 µs per heard call (measured 19.4 and 19.8). It is the median of the paired per-run marginals over 7 or more interleaved n1/n20k `jet check --trace` runs. The first-call bound is at most 35 ms for the first heard call's rule run (measured 28 to 31 ms). It is the marker's check span on n1, median over 7 or more runs.\n\nToday's 25 ms first-call target is not met, and B relaxes it to 35 ms. If dev reads above either bound, n=22 stays open and the next #6798 step closes it.\n\nD-CORE-CHECK1 keeps 1 µs. Card #6798 gains five criteria: the four steps in the detail, each proved by its span on the n=22 probe. The fifth is an end criterion that the n=22 probe reads at most 1 µs marginal and 25 ms first-call. No new card is filed.",
+          "technical": "Card text of #6851 n=22 changes from 1 µs and 25 ms to 25 µs and 35 ms, with the measuring rule above. #6798 gains c6 to c10. No code changes beyond the queued c21 slices.",
+          "code": "marginal = median over runs of (t(n20k) - t(n1)) / 19999\n// #6851 n=22: <= 25 µs marginal, <= 35 ms first heard call\n// #6798 c6..c9: one per step; c10: <= 1 µs and <= 25 ms on the same probe"
+        },
+        {
+          "key": "C",
+          "name": "Keep n=22 at 1 µs and 25 ms; #6851 stays open until #6798 lands the steps",
+          "amends": [],
+          "detail": "The four steps land on #6798, as under B, and #6851 waits for them. On today's probe they must remove about 19 µs per call and 5 or more ms of first-call cost. #6798's c2 is open and its burn-down estimate is weeks, so G1's metaprogramming card stays open for compile-speed work that changes nothing rules can say.",
+          "technical": "No text changes. #6798 gains the same step criteria as B; #6851 n=22 closes when its probe reads 1 µs.",
+          "code": "marginal = median over runs of (t(n20k) - t(n1)) / 19999\n// #6851 n=22: <= 1 µs, <= 25 ms"
+        },
+        {
+          "key": "D",
+          "name": "Restate D-CORE-CHECK1's budget as 25 µs per heard call",
+          "amends": [
+            "D-CORE-CHECK1"
+          ],
+          "detail": "The decision's budget changes from 1 µs to 25 µs per heard call, and n=22 closes on the same slices and bounds as B. No card carries 1 µs; #6798 keeps only its own criteria.",
+          "technical": "The decision text and the card text of #6851 n=22 change.",
+          "code": "marginal = median over runs of (t(n20k) - t(n1)) / 19999\n// budget: <= 25 µs"
+        },
+        {
+          "key": "E",
+          "name": "Run check rules in the compiler, by an I9 exception",
+          "amends": [
+            "AGENTS.md I9"
+          ],
+          "detail": "An owner-ratified I9 exception lets check rules, and only they, run in-process in an evaluator inside the compiler, as Zig's comptime and Rust's Clippy do. A heard call becomes a function call with no child, batch or landing. The exception must name the tier it excludes: check rules would have a second meaning path besides the native O0 child every other compile-time function uses.",
+          "technical": "New: an evaluator for the check-rule subset in JetSema or JetEval, with its own parity tests against the native child. #6798's child work stays for every other compile-time function.",
+          "code": "// a rule's check runs in the compiler's evaluator\n// n=22: <= 1 µs reachable without #6798"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Zig",
+          "note": "comptime code runs in the compiler's own interpreter, so a call's check is a function call. Jet's I9 forbids an interpreter, so this is option E's shape, not the child shape of A to D.",
+          "code": "comptime { if (args.len == 0) @compileError(\"computed\"); }"
+        },
+        {
+          "lang": "Rust (Clippy)",
+          "note": "Lints run in-process over the checked HIR, with no process per call. Also option E's shape; not open under I9.",
+          "code": "impl LateLintPass for MyLint { fn check_expr(&mut self, cx: &LateContext, e: &Expr) { … } }"
+        },
+        {
+          "lang": "Rust (rust-analyzer)",
+          "note": "Procedural macros run in a separate proc-macro server process that the IDE keeps for its session and sends requests to. That is the shape Jet allows: #6798's warm child, kept for one compile, with values through shared memory instead of serialized messages.",
+          "code": "// rust-analyzer spawns `rust-analyzer proc-macro` once and sends\n// ExpandMacro requests to it over a pipe for every macro call"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The owner order puts a follow-up on the card that owns the area, and the remaining n=22 work is the child work #6798 owns. A moves n=22 there unchanged, so #6798 owns both the work and the proof. #6851 closes now with no bound weakened and no criteria restating n=22's goal. B ships an enforced 25 µs bound, but it relaxes the unmet 25 ms target and splits one goal across two cards.",
+        "gains": [
+          "The 1 µs and 25 ms bounds stay whole, on the card that owns the child.",
+          "#6851 closes now, so weeks of compile-speed work don't hold G1.",
+          "Each step has its span on the same probe, so progress shows per step."
+        ],
+        "losses": [
+          {
+            "loss": "Until #6798 lands the steps, a heard call costs about 20 µs (600 lines' worth at 30M lines/s). A module's first heard call costs about 30 ms. Rule-heavy programs such as routers pay that many times over the speed budget.",
+            "mitigation": "Only calls a marker's `check` rule hears pay it. #6798 cuts the cost in order of size: hearing (10 µs) and batch (8 µs) first."
+          },
+          {
+            "loss": "No dispatch bound is enforced until #6798 lands its steps, so dispatch could regress unseen.",
+            "mitigation": "Today's 19.8 µs and 28 to 31 ms are recorded here. #6798 measures every step on the same n=22 probe, so a regression shows at its next step."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Its enforced bound is a real gain, but it relaxes the unmet 25 ms target to 35 ms and restates n=22's goal as five criteria on #6798. Its 25 µs margin is also thin: single runs read up to 32.9 µs under load. The owner order puts the whole criterion on the owning card."
+          },
+          {
+            "key": "C",
+            "reason": "It keeps G1 open for weeks on #6798's child work, which changes nothing rules can say."
+          },
+          {
+            "key": "D",
+            "reason": "It drops a goal the 43 ns rule body shows is reachable, and makes 600 lines' worth per heard call the language's promise against a 30M lines/s target."
+          },
+          {
+            "key": "E",
+            "reason": "It reverses I9 for one feature: check rules would get a second meaning path and their own parity tests, while #6798's child serves every other compile-time function anyway."
+          }
+        ],
+        "tradeoff": "About 20 µs per heard call and 30 ms per first heard call, with no enforced bound, until #6798 lands its steps. In return G1 closes now, and n=22 stays whole on the card that owns the work."
+      },
+      "hybrid": "A now, with E held back: if #6798's steps stall above a few µs, an I9 exception for check rules alone can be balloted then with #6798's measured floor in hand.",
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: Main. Main's re-review of r2 (review-2026-11-25-6851-ballots-r2.md) asked for the move option, which this revision adds and recommends under the owner order."
+      },
+      "checkInstructions": "Rerun the probe in $JET_SCRATCH_ROOT/tmp/g1gen2/probe/c21 (n0, n1, n20k; p1 and p20k are the unmarked control). Use `jet check --trace=FILE` on stage44e518, interleaved, 7 or more runs at low load, and pair B/E spans per thread. The traces and wrap.jet are in probe/c21/m45. Check `jet perf compare` output in probe/c21/m45/cmp-n1-n20k.txt.\n\nThe 43 ns rule-body figure comes from probe/c21/body/main.jet. It times a body shaped like `Lit.check` over 20000 calls whose rows are decoded from packed words, as the child does per batch. Run `jet run -O0 -A main.jet` there with stage44e518 and JET_TOOLCHAIN_ROOT set to stage44e518-exp, and read per_call_ns. Five runs on 2026-11-25 at load 80 read 51, 43, 43, 42 and 43 ns (median 43). Three runs with -O2 read 19, 19 and 23 ns.\n\nRead #6851 n=22, #6798 c2 and its burn-down log, #5479 c11 and c16, D-CORE-CHECK1, D-EXEC2, AGENTS.md I9 (:202-214), and Docs/Audits/2026-11-23-d-rule-typeargs1-review.md for the probe.",
+      "surface": {
+        "gist": "Move n=22 unchanged to #6798, or close it at 25 µs and 35 ms with the steps on #6798?",
+        "lesson": "The rule's own work is about 43 ns per call at O0. The microseconds go to hearing the call and carrying it to the compile-time child and back. Jet's invariants fix that the child is a separate native process. Today's bounds are not met: about 20 µs against 1 µs, and 28 to 31 ms against 25 ms.",
+        "trio": {
+          "current": {
+            "note": "Heard calls are batched, and each batch is compiled into a program run in the compile-time child.",
+            "code": "batch := sema_call_rule_batches(registration, pending, pass, body_sources)\nrun := jet_driver_run_comptime(registration, …, body_sources, values, …)"
+          },
+          "wild": {
+            "lang": "Rust (rust-analyzer)",
+            "note": "Proc macros run in one long-lived server process that answers a request per expansion, the shape I9 leaves Jet.",
+            "code": "// rust-analyzer spawns `rust-analyzer proc-macro` once and sends ExpandMacro requests"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Move n=22 to #6798",
+            "gist": "n=22 keeps 1 µs and 25 ms and moves to #6798, which owns the work and the proof.",
+            "gains": [
+              "No bound is weakened.",
+              "#6851 closes now, with no restated criteria."
+            ],
+            "losses": [
+              "No dispatch bound is enforced until #6798 lands its steps."
+            ],
+            "proposed": {
+              "code": "tower card criteria 6851 --move 22 --to 6798"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Close at 25 µs; steps on #6798",
+            "gist": "n=22 closes at 25 µs and 35 ms, relaxing the unmet 25 ms; #6798 gains five criteria.",
+            "gains": [
+              "A 25 µs bound is enforced now.",
+              "1 µs is tracked step by step where the work is."
+            ],
+            "losses": [
+              "The 25 ms first-call target is relaxed to 35 ms.",
+              "Heard calls cost about 20 µs until #6798 lands."
+            ],
+            "proposed": {
+              "code": "// #6851 n=22: <= 25 µs, <= 35 ms\n// #6798 c10: <= 1 µs, <= 25 ms"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Keep 1 µs on n=22",
+            "gist": "#6851 stays open until #6798 lands the steps.",
+            "gains": [
+              "The budget holds within this card."
+            ],
+            "losses": [
+              "G1 waits weeks on child work."
+            ],
+            "proposed": {
+              "code": "// #6851 n=22: <= 1 µs, <= 25 ms"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Restate the budget as 25 µs",
+            "gist": "D-CORE-CHECK1's budget becomes 25 µs, and no card carries 1 µs.",
+            "gains": [
+              "One number, met now."
+            ],
+            "losses": [
+              "A reachable goal is dropped."
+            ],
+            "proposed": {
+              "code": "// budget: <= 25 µs"
+            }
+          },
+          {
+            "key": "E",
+            "name": "Rules in the compiler",
+            "gist": "An I9 exception runs check rules in an in-process evaluator.",
+            "gains": [
+              "1 µs without the child."
+            ],
+            "losses": [
+              "A second meaning path for rules."
+            ],
+            "proposed": {
+              "code": "// check rules run in the compiler's evaluator"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A follow-up goes on the card that owns the area. The remaining work is #6798's child, so n=22 moves there whole and #6851 closes with no bound weakened.",
+          "gains": [
+            "1 µs and 25 ms stay whole on the owning card.",
+            "G1 closes now."
+          ],
+          "losses": [
+            {
+              "loss": "No dispatch bound is enforced until #6798 lands.",
+              "mitigation": "#6798 measures each step on the same probe, so a regression shows."
+            },
+            {
+              "loss": "Heard calls cost about 20 µs for a while.",
+              "mitigation": "Only heard calls pay it, and #6798 cuts the largest steps first."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "It relaxes 25 ms and restates n=22 as five criteria."
+            },
+            {
+              "key": "C",
+              "reason": "It holds G1 for weeks on child work."
+            },
+            {
+              "key": "D",
+              "reason": "It drops a reachable goal."
+            },
+            {
+              "key": "E",
+              "reason": "It reverses I9 for one feature."
+            }
+          ],
+          "tradeoff": "No enforced bound for a while, so G1 closes now and n=22 stays whole on #6798."
+        }
+      },
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "Main",
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-11-25T14:02:51.078Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-25"
+    },
+    {
+      "id": "D-SERVICE-SHAPES1",
+      "cardId": "c0e6znz4",
+      "group": "library",
+      "title": "Who picks the form behind `tree.worker`, `tree.send` and `tree.call` when one name covers several Core functions",
+      "situation": "Card #6851 c4 asks that the compiler's service checker (Sema/Calls/Services.jet) move to Core declarations and be deleted. Five ratified decisions fix the spellings it serves. D-SERVICE-WORKER1 says `tree.worker` takes an ordinary function and returns `Endpoint<Email>`. D-SERVICE-REPLY1 says `tree.call(pricing, quote)` waits for the answer. D-SERVICE-KEEP1 puts `state:` on the worker line, and D-SERVICE-BATCH1 puts `batch:` and `wait:` there. D-SERVICE-CURRENT1 says a typed address reaches the current route on every call.\n\nSo one name, `tree.worker`, stands for seven Core functions: `worker` (the String mailbox, `fn()`), `typed_worker` (`fn(Q) -> R`), `stateful_worker` (`fn(^S, Q) -> R`) and `batched_worker` (`fn([Q])`). Each typed one has a durable form, taken when Q implements Decode. The handler's shape and the labels pick one. `tree.send` and `tree.send_durable` take a String address or a typed `Endpoint<Q, R>`, and the message type follows the address. Jet gives each name one declaration. A check rule can refuse a call but can't send it to another function.",
+      "gist": "Does the compiler keep picking the service form behind one name, or do the ratified service spellings change, or does the language grow the features one generic Core worker would need?",
+      "lesson": "Languages without overloading, such as Go, Zig and Rust, give each shape its own name or make the shape a type parameter. Languages with overloading, such as Swift, C++ and Kotlin, let one name cover several declarations. C++ also lets one template pick its form with `if constexpr`, because it checks each instance's taken branch separately. Jet checks a generic body once, both `#if` arms included.",
+      "explainer": "A shop has one counter sign, Orders. Behind it, a clerk sends each customer to the right desk by what they carry. The shop can keep the clerk (A), put a sign on every desk (B), or merge the desks (C). It can teach the building to route people itself (D), or hire one clerk from the shop's own staff who can read every customer's parcel (E). That last clerk needs eyes the staff don't have yet.",
+      "story": "Ana writes `pricing: tree.worker(\"pricing\", price, capacity: 8)` and then `tree.call(pricing, 2)`, as the service guide shows. Ben writes `tree.worker(\"cart\", add_item, state: Cart{}, capacity: 8)`. Under A, D and E their programs and errors stay the same. Under B both respell their worker lines, and Ana's call becomes `pricing.call(tree, 2)`. Under C Ben's line becomes `tree.stateful_worker(…)`.",
+      "inWild": "// Swift: one name, several declarations, chosen by argument types\nfunc worker<Q>(_ name: String, _ h: @escaping (Q) -> Void) -> Endpoint<Q>\nfunc worker<S, Q>(_ name: String, _ h: @escaping (inout S, Q) -> Void, state: S) -> Endpoint<Q>\n// Go: one name per shape\nfunc NewWorker[Q any](name string, h func(Q)) *Endpoint[Q]\nfunc NewStatefulWorker[S, Q any](name string, h func(*S, Q), state S) *Endpoint[Q]\n// C++: one template, the taken branch checked per instance\ntemplate <class H> auto worker(std::string name, H h) { if constexpr (std::is_invocable_v<H, State&, Msg>) { /* … */ } }",
+      "detail": "Services.jet holds 616 lines. Each part left picks a callee or a result type by an argument's type. sema_services_typed_worker (:297) picks one of the six typed workers by the handler's shape, the labels, and whether the message type meets Decode (sema_services_type_meets, :383). It also writes the handler's name into the call as a String argument.\n\nsema_services_typed_delivery (:398) sends a typed address to typed_send, call or typed_send_durable. sema_check_service_tree_method (:436) keeps the String `worker`. sema_call_try_job_queue_method (:561) does the same for #Job queues.\n\nWhy two declarations of `send` don't work. Batch 21's first cut of #6851 c4 (land/6851-c4-services-a.patch) made Core declare `ServiceTree.send(&self, endpoint: ServiceEndpoint, message: String)` and `send_durable(…, *, key: String)`. A declared method is checked before the special routes, so the typed route never ran.\n\nExamples/Concurrency/ServiceWorkers and ServiceWorkersInMemory (O0/O1/O2) stopped on \"Jet.ValueTypeMismatch: `send` wants `ServiceEndpoint` for argument 1, but this is `Endpoint<Email, Unit>`\". So did the cases Concurrency/durable_typed_receipts_cross_a_handoff and typed_workers_take_the_worker_methods. `send_durable` failed the same way with `Endpoint<Int, Int>`. The UI tests service_send_wrong_message and service_send_replying_endpoint lost their texts.\n\nOne generic `send<E>(endpoint: E, message: …)` can't help either. Its message type would have to come from E, and Jet has no associated types, while a trait bound with a type-parameter argument is E0104. The r2 patch (land/6851-c4-services-a-r2.msg) therefore runs the typed route ahead of the declared method.\n\nWhy one generic Core worker doesn't work today (option E). G1 shipped compile-time `#if` over `T.reflect()` per generic instance (a79988747df, a5b846f8878, f0a643aec2d). So a generic Core `worker<H>(name, handler: H, *, state:, batch:, wait:, capacity:)` could in principle pick its form by reflecting on H. Probes in $JET_SCRATCH_ROOT/tmp/g1gen2/probe/svc, checked with the stage44e518 compiler, show where it stops.\n\n1. p1: calling the handler in the taken arm, `#if is_function(TypeId{H}) { return handler(message) }`, fails with \"Jet.CalledNonFunction: `handler` is H, not a function\". Jet checks both arms against the generic H (metaprogramming.md section 2), and no bound makes H callable.\n\n2. p2: a type table can't name a function-type arm, let alone bind Q and R from it. `if H == { fn(Q) -> R -> … }` fails with \"Jet.InvalidStatement: Expected `{` to open the lambda body, found `->`\". A parenthesized arm fails the same way.\n\n3. p3: the result `Endpoint<Q, R>` can't come from H. A computed type alias over a type parameter, `MessageOf<H>: Message #run { if H == Int -> Quote else -> Order }`, fails with \"Jet.UnsupportedCompileTimeValue: This condition isn't a `Bool` decided while building\". A computed alias chooses only by its number parameters and the module's constants.\n\n4. p4: one parameter type covering `fn(Q) -> R` and `fn(^S, Q) -> R` fails with \"Jet.InvalidUnionMember: `fn(S, Q) -> R` can't be a union member\". Anonymous unions hold no function types or type parameters.\n\n5. p5: the ratified handler-name capture, `handler_name: String{#run handler.reflect().name}`, fails with \"Jet.UnsupportedCompileTimeValue: `#run value` is used inside a larger value, which this compiler does not support yet\". D-RULE-REWRITE1=A ratified it, but it is not built.\n\nThe labels themselves are expressible as optional parameters (`state: S?{None}`, `batch: Int?{None}`, `wait: Duration?{None}`). What can't be said is that S is the handler's first parameter type, which is item 2 again.\n\nA pick works in Core today when the shape is fixed and only a type parameter inside it varies. p6, a generic `stamp_of<T>(row: Int, callback: fn(Int) -> T)` with `if T == { Int -> … Stamp -> … else -> 0 }`, runs and prints 5 and 4000. The worker and send picks vary the outer shape (one, two or a list of parameters, a String or a typed address), which is the case above.\n\nWhole-mechanism inventory: every place the compiler picks one of several Core forms behind one name. There are three groups, and the language's own syntax is a fourth case that no option changes.\n\nFirst group: the outer shape varies, and Core has no mechanism for it today.\n- `tree.worker`: Compiler/JetSema/Source/Sema/Calls/Services.jet: sema_check_service_tree_method (:436), sema_services_typed_worker (:297), sema_services_worker_shape (:237), sema_services_type_meets (:383). Calls/Core.jet:670 is the core.service `worker` route. In Core/Service/Service.jet: worker (:5249), typed_worker (:5328), stateful_worker (:5334), batched_worker (:5341), durable_worker (:5348), durable_stateful_worker (:5352), durable_batched_worker (:5356).\n\n- `tree.send`, `tree.call`, `tree.send_durable`: Services.jet sema_services_typed_delivery (:398), called from Sema/Expressions.jet:5016 in sema_expr_check_method_on. In Service.jet: typed_send (:5573), call (:5583), typed_send_durable (:5594), ServiceTree.send (:678) and send_durable (:680).\n- #Job queues: Services.jet sema_job_queue_function (:534) and sema_call_try_job_queue_method (:561), which write the handler's name as the worker path does.\n\n- `data.query` over `[Row]`, `DataTracked<Row, Key>` or `DataStream<Row>`: Calls/Data.jet:1363-1391 (query_source role). Row sits inside a varying outer type, so it is the same case. This ballot decides only the service sites; `data.query` meets the same fence rule if its own criterion keeps its spelling.\n\nSecond group: a fixed shape with one varying type parameter. A type table serves it in Core today, as p6 shows, and A's fence does not cover these.\n- grouped `sum` by its value's number type: Calls/Data.jet:624 and sema_data_group_sum_role (:708).\n- `Stream.with_event_time` by the callback's result, Int or DateTime: Calls/Data.jet:657-701.\n\nThird group: arity picks. One Core declaration with an optional parameter serves them, and A's fence does not cover these.\n- `net.unix_connect` and `tls.client`: Calls/Core.jet sema_call_core_normalized_source_record (:1089) and :664-670.\n- `ProcessSpec.terminal`: Calls/ProcessHandles.jet:266.\n- the inline channel's new or bounded form: Calls/StreamHandles.jet:558.\n- `live.invalidate` of one key or the whole source: Calls/Live.jet:178-182.\n\nLanguage syntax, not Core forms: the task forms (JetFoundation AST/Expressions.jet TaskForm :625 and task_form_of :680; Sema/Ownership/TaskGroups.jet). They are named spellings of the language, as `#if` is, so no option here changes them.\n\nUnder A, the fence admits only the first group: a ratified spelling that puts several outer shapes under one name. The other two groups leave the compiler under the criteria that own their files, with a type table or an optional parameter. Under D or E the first group could leave as well.\n\nBeginner path: write `tree.worker(\"name\", handler, capacity: 8)` with any handler shape, then `tree.send` or `tree.call` with the address. That is unchanged under A, D and E. Under B the beginner must learn six worker names first, and under C two. Errors under A stay the ones the service guide shows.\n\nExpert path: a package author who wants their own `worker`-like API with the same pick. Under A they can't write it today; they write one function per shape, as B does. Under D they declare an overload set. Under E they write one generic function with reflection.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Keep every ratified spelling; the compiler keeps the pick for outer-shape picks only",
+          "amends": [],
+          "detail": "This amends no decision. It amends card #6851 c4, which isn't met as written: the service pick is language-owned under the five spelling decisions, as the task forms are. Services.jet moves out of Sema/Calls to a language-owned home, and the fence admits only picks whose outer shape varies under one ratified name (the first inventory group).\n\nThe shape refusals become Core check rules where a rule can say them: the worker name, the capacity, the batch size and the handler's identity, read through the argument's FunctionInfo. The rest of the pick stays in the compiler.",
+          "technical": "Sema/Calls/Services.jet moves to Sema/Services/Workers.jet. ServiceTree gains `#ServiceWorkerShape`, as `#ServiceGroupShape` exists. c4's text changes to: its refusals move to Core rules; its dispatch is language-owned. Fixed-shape and arity picks are not fenced and leave under their own criteria.",
+          "code": "// Unchanged user code\npricing: tree.worker(\"pricing\", price, capacity: 8) ?? return\ncart: tree.worker(\"cart\", add_item, state: Cart{}, capacity: 8) ?? return\ntotal: tree.call(pricing, 2) ?? return"
+        },
+        {
+          "key": "B",
+          "name": "One Core method per shape, named for the shape",
+          "amends": [
+            "D-SERVICE-WORKER1",
+            "D-SERVICE-REPLY1",
+            "D-SERVICE-KEEP1",
+            "D-SERVICE-BATCH1",
+            "D-SERVICE-CURRENT1"
+          ],
+          "detail": "This amends D-SERVICE-WORKER1, D-SERVICE-REPLY1, D-SERVICE-KEEP1, D-SERVICE-BATCH1 and D-SERVICE-CURRENT1, whose spellings it changes.\n\nCore declares `typed_worker`, `stateful_worker`, `batched_worker` and three durable forms on ServiceTree. A typed address carries its own `send`, `call` and `send_durable`. The handler's name becomes a per-call parameter computed while building (D-RULE-REWRITE1), once that is built.",
+          "technical": "Needs D-RULE-REWRITE1=A built for `handler_name` (probe p5 shows it is not). The refusals use c30 and D-RULE-TYPEARGS1.",
+          "code": "pricing: tree.typed_worker(\"pricing\", price, capacity: 8) ?? return\ncart: tree.stateful_worker(\"cart\", add_item, state: Cart{}, capacity: 8) ?? return\ntotal: pricing.call(tree, 2) ?? return"
+        },
+        {
+          "key": "C",
+          "name": "One typed worker; the String mailbox worker goes",
+          "amends": [
+            "D-SERVICE-KEEP1",
+            "D-SERVICE-BATCH1"
+          ],
+          "detail": "This amends D-SERVICE-KEEP1 and D-SERVICE-BATCH1. `tree.worker` keeps only the `fn(Q) -> R` shape and returns `Endpoint<Q, R>`. The old `fn()` worker that reads a String mailbox is retired, and its runtime moves onto the typed inbox, so one generic `send`, `call` and `send_durable` serve every address.\n\nWorkers that keep state or take batches still need their own names, so `state:` and `batch:` leave the worker line. The durable form still needs a pick on Q: Decode.",
+          "technical": "Rewrites the channel-backed TreeWorker path onto the typed inbox. Needs D-RULE-REWRITE1=A built for `handler_name`.",
+          "code": "pricing: tree.worker(\"pricing\", price, capacity: 8) ?? return\ncart: tree.stateful_worker(\"cart\", add_item, state: Cart{}, capacity: 8) ?? return\ntotal: tree.call(pricing, 2) ?? return"
+        },
+        {
+          "key": "D",
+          "name": "A language overload set picks the form",
+          "amends": [],
+          "detail": "This keeps every ratified service spelling but adds a language feature that needs its own language ballot. A declaration may join an overload set. The call picks the one member whose parameters accept its arguments, and a bound such as `Q: Decode` ranks a member higher.\n\nEvery tool must learn overload sets: the language server, the formatter, docs, reflection and check rules. It reopens one declaration per name.",
+          "technical": "New: overload sets with ranking by bounds. Needs D-RULE-REWRITE1=A built for `handler_name`.",
+          "code": "#Overload worker: fn<Q, R>(^self, name: String, handler: ^^fn(Q) -> R Err!, *, capacity: Int) -> Endpoint<Q, R> ServiceError!\n#Overload worker: fn<S, Q, R>(^self, name: String, handler: ^^fn(^S, Q) -> R Err!, *, state: ^^S, capacity: Int) -> Endpoint<Q, R> ServiceError!"
+        },
+        {
+          "key": "E",
+          "name": "One generic Core worker that reflects on its handler",
+          "amends": [],
+          "detail": "This keeps every ratified service spelling and one declaration per name. Core declares one `worker<H>` whose body picks the form with a compile-time `#if` over `H.reflect()`, as G1's per-instance `#if` allows, and one `send` and `call` likewise.\n\nIt needs three language features that Jet doesn't have, each its own language ballot (probes p1 to p4 in the detail). First, the taken arm of a generic `#if` is checked per instance, so it can call `handler` at its real type. Today both arms are checked against H (metaprogramming.md section 2).\n\nSecond, a type pattern binds Q, R and S from a function type. Third, a result type is computed from a type parameter, so the worker returns `Endpoint<Q, R>`. Today a computed alias reads only number parameters and constants. It also needs D-RULE-REWRITE1=A built for `handler_name`.",
+          "technical": "Amends the spec rule that a generic `#if` checks both arms, and the computed-alias rule in Spellings.jet. Each instance's taken arm becomes a template-style check, which costs a check per instance.",
+          "code": "// PROPOSED, needs three new language features\nworker: fn<H>(^self, name: String, handler: ^^H, *, state: StateOf<H>?{None}, batch: Int?{None}, wait: Duration?{None}, capacity: Int, handler_name: String{#run handler.reflect().name}) -> EndpointOf<H> ServiceError! {\n    #if takes_state(H.reflect()) { … }\n    …\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Swift",
+          "note": "Overloads share a name and are picked by argument types. That is D's shape.",
+          "code": "func worker<Q>(_ name: String, _ h: @escaping (Q) -> Void) -> Endpoint<Q>\nfunc worker<S, Q>(_ name: String, _ h: @escaping (inout S, Q) -> Void, state: S) -> Endpoint<Q>"
+        },
+        {
+          "lang": "Go",
+          "note": "Go has no overloading, so each shape has its own name. That is B's shape.",
+          "code": "func NewStatefulWorker[S, Q any](name string, h func(*S, Q), state S) *Endpoint[Q]"
+        },
+        {
+          "lang": "C++",
+          "note": "One template picks its form with `if constexpr`, and only the taken branch is checked per instance; `std::invoke_result_t` computes the result type. That is E's shape, and it needs exactly the features E names.",
+          "code": "template <class H> auto worker(std::string name, H h) {\n    if constexpr (std::is_invocable_v<H, State&, Msg>) { /* stateful */ }\n    else { /* typed */ }\n}"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Five ratified decisions fix these spellings, and a ratified decision outranks a card criterion. A keeps every program, guide and error as it is and still moves the refusals into Core rules. The same-program route, one generic Core worker (E), was probed and stops at three missing language features. So every alternative today either changes a spelling (B, C) or adds a language feature (D, E).",
+        "gains": [
+          "No user program, example, guide page or error text changes.",
+          "Services.jet leaves Sema/Calls, and its shape refusals become Core check rules.",
+          "The fence is narrow: fixed-shape and arity picks still leave the compiler, and D or E can still come later through a language ballot without changing a spelling."
+        ],
+        "losses": [
+          {
+            "loss": "The service pick stays a compiler privilege: a package can't declare its own `worker` with the same pick.",
+            "mitigation": "The privilege is fenced in one language-owned file and limited to outer-shape picks under a ratified name; D or E can remove it later."
+          },
+          {
+            "loss": "Card #6851 c4 is amended and isn't met as written.",
+            "mitigation": "The authority order puts the ratified decisions first, and the amended text names what moved and what stays."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It breaks the spellings of five ratified decisions, with their guide pages, examples and both beginner and expert paths, for a compiler cleanup."
+          },
+          {
+            "key": "C",
+            "reason": "It rewrites the String mailbox runtime and still breaks the KEEP1 and BATCH1 spellings, and the durable pick stays."
+          },
+          {
+            "key": "D",
+            "reason": "A new language feature that every tool must learn, which needs its own language ballot first."
+          },
+          {
+            "key": "E",
+            "reason": "Three missing language features (per-instance checking of a taken `#if` arm, function-type patterns, computed result types), each its own language ballot; probes p1 to p4 fail today."
+          }
+        ],
+        "tradeoff": "One narrow fenced compiler privilege kept, for no change to any ratified spelling and no new language feature."
+      },
+      "hybrid": "A now and D or E later is the natural mix: the refusals move to Core rules now, and a language ballot for overload sets (D) or for per-instance arm checking, function-type patterns and computed result types (E) can remove the compiler pick without changing a spelling.",
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: Main. Main's re-review of r2 (review-2026-11-25-6851-ballots-r2.md) found that the content holds, with no new findings."
+      },
+      "checkInstructions": "Run the probes in $JET_SCRATCH_ROOT/tmp/g1gen2/probe/svc/p1..p6 with `jet check` (p5 and p6 with `jet run`) on the stage44e518 compiler. p1 to p5 fail with the diagnostics quoted in the detail, and p6 prints 5 and 4000.\n\nCheck Compiler/JetSema/Source/Sema/Calls/Services.jet: sema_services_worker_shape (:237), sema_services_typed_worker (:297), sema_services_type_meets (:383) and sema_services_typed_delivery (:398). Also check sema_check_service_tree_method (:436), sema_job_queue_function (:534), sema_call_try_job_queue_method (:561) and Sema/Expressions.jet:5016.\n\nCheck Core/Service/Service.jet worker (:5249), the six typed workers (:5328-5356), typed_send, call and typed_send_durable (:5573-5594), and ServiceTree.send and send_durable (:678, :680).\n\nCheck the inventory's other sites: Calls/Data.jet:624, :657-701, :708, :1363-1391; Calls/Core.jet:664-670, :1089; Calls/ProcessHandles.jet:266; Calls/StreamHandles.jet:558. Also check Calls/Live.jet:178-182 and JetFoundation AST/Expressions.jet:625, :680.\n\nRead land/6851-c4-services-a-r2.msg (the batch 21 failure), Docs/Spec/Reference/metaprogramming.md section 2, and the computed-alias row of Compiler/JetFoundation/Data/Syntax/Spellings.jet. Read D-SERVICE-WORKER1, D-SERVICE-REPLY1, D-SERVICE-KEEP1, D-SERVICE-BATCH1, D-SERVICE-CURRENT1 and D-RULE-REWRITE1.",
+      "surface": {
+        "gist": "Does the compiler keep picking the service form, do ratified spellings change, or does the language grow what a generic worker needs?",
+        "lesson": "Languages without overloading give each shape its own name. Languages with overloading let one name cover several declarations, and C++ templates pick inside one body. Jet has one declaration per name and checks a generic body once, and its ratified service spellings use one name for several shapes.",
+        "trio": {
+          "current": {
+            "note": "The compiler picks the Core function from the handler's type and labels.",
+            "code": "pricing: tree.worker(\"pricing\", price, capacity: 8) ?? return\ntotal: tree.call(pricing, 2) ?? return"
+          },
+          "wild": {
+            "lang": "Go",
+            "note": "Without overloading, each shape gets its own name.",
+            "code": "func NewStatefulWorker[S, Q any](name string, h func(*S, Q), state S) *Endpoint[Q]"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Keep spellings",
+            "gist": "The compiler keeps the outer-shape pick in one language-owned file; the refusals become Core rules.",
+            "gains": [
+              "No program or guide changes.",
+              "Refusals move to Core rules."
+            ],
+            "losses": [
+              "The service pick stays a compiler privilege."
+            ],
+            "proposed": {
+              "code": "pricing: tree.worker(\"pricing\", price, capacity: 8) ?? return\ntotal: tree.call(pricing, 2) ?? return"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Name per shape",
+            "gist": "Core declares one method per worker shape; a typed address carries its own call.",
+            "gains": [
+              "Plain Core declarations.",
+              "Packages can copy the API."
+            ],
+            "losses": [
+              "Breaks five ratified spellings.",
+              "Every typed worker call is respelled."
+            ],
+            "proposed": {
+              "code": "pricing: tree.typed_worker(\"pricing\", price, capacity: 8) ?? return\ntotal: pricing.call(tree, 2) ?? return"
+            }
+          },
+          {
+            "key": "C",
+            "name": "One typed worker",
+            "gist": "The String mailbox worker goes; stateful and batched workers get their own names.",
+            "gains": [
+              "One generic send and call."
+            ],
+            "losses": [
+              "Breaks the KEEP1 and BATCH1 spellings.",
+              "Rewrites the mailbox runtime."
+            ],
+            "proposed": {
+              "code": "cart: tree.stateful_worker(\"cart\", add_item, state: Cart{}, capacity: 8) ?? return"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Overload sets",
+            "gist": "A language feature lets several declarations share one name.",
+            "gains": [
+              "Keeps every spelling.",
+              "Packages can copy the API."
+            ],
+            "losses": [
+              "A new language feature.",
+              "Every tool must learn it."
+            ],
+            "proposed": {
+              "code": "#Overload worker: fn<Q, R>(^self, name: String, handler: ^^fn(Q) -> R Err!, *, capacity: Int) -> Endpoint<Q, R> ServiceError!"
+            }
+          },
+          {
+            "key": "E",
+            "name": "One reflecting worker",
+            "gist": "One generic Core `worker<H>` picks its form by reflecting on H.",
+            "gains": [
+              "Keeps every spelling and one declaration per name.",
+              "Packages can copy the API."
+            ],
+            "losses": [
+              "Needs three new language features; probes fail today.",
+              "Each instance's taken arm is checked again."
+            ],
+            "proposed": {
+              "code": "worker: fn<H>(^self, name: String, handler: ^^H, *, state: StateOf<H>?{None}, capacity: Int) -> EndpointOf<H> ServiceError!"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Ratified spellings outrank the card. A keeps them all and still moves the refusals into Core; the same-program route (E) stops at three missing language features.",
+          "gains": [
+            "No user-visible change.",
+            "Refusals become Core rules."
+          ],
+          "losses": [
+            {
+              "loss": "The service pick stays a compiler privilege.",
+              "mitigation": "It is fenced in one file for outer-shape picks only; D or E can remove it later."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Breaks five ratified spellings and their guides."
+            },
+            {
+              "key": "C",
+              "reason": "Rewrites the mailbox runtime and breaks two spellings."
+            },
+            {
+              "key": "D",
+              "reason": "Needs its own language ballot first."
+            },
+            {
+              "key": "E",
+              "reason": "Needs three language features, each its own ballot."
+            }
+          ],
+          "tradeoff": "A narrow fenced privilege, for unchanged spellings."
+        }
+      },
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "Main",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-25T14:02:52.051Z"
+    },
+    {
+      "id": "D-MEM-POOL-NAME1",
+      "cardId": "c0sdz4q0",
+      "group": "language",
+      "title": "Which of the two things called Pool keeps the name",
+      "situation": "Jet has two different things called Pool. The first is a store of values, like a coat check. You hand in a value and get a ticket (an ID). The ticket gets the value back, and it stops working once the value is taken out. The second is a memory allocator, a box with a fixed number of slots that get reused. Sharing one name confuses readers, and one shared compiler entry for both crashes the compiler today. Beginners meet the store first, and only experts use the allocator. You are asked whether one of them gets a new name, or both keep it with separate entries. We recommend renaming the allocator to `mem.SlotPool`, because if both keep the name, importing the allocator hides the store.",
+      "gist": "Jet has two different things named Pool: a store of values found by ID, and a memory allocator. One of them needs a new name.",
+      "lesson": "`Pool<T>` is a store for many values of one type. You add a value and get back an ID ticket; the ticket finds the value later and goes stale once the value is removed. `mem.Pool.new(slots: N)` is something else: an allocator, a box with N slots. Each slot holds one value of any type and gets reused after a reset. The two share a name, a Core declaration and a compiler handle row.",
+      "explainer": "Today a program can use both, and both say Pool:\n\n```jet\nuse core.mem\n\nPlayer: struct { name: String, hp: Int }\n\nrun: fn() {\n    world := Pool<Player>.new()          // the store: values found by ID\n    kai: world.add(Player{name: \"Kai\", hp: 100})\n    world[kai].hp -= 10\n\n    scratch: mem.Pool.new(slots: 8)      // the allocator: 8 reusable slots\n    hp: scratch.alloc(world[kai].hp)\n    print(hp)\n    close(scratch)\n}\n```\n\nAt the batch-44 tip this program stops with an internal compiler error, because the store picks up the allocator's close. Every option below writes this same program. A, B, C, D and E change the spelling of one Pool line, and F changes neither.",
+      "story": "A beginner reads the spec chapter on pools and writes `world := Pool<Player>.new()`. Later they open the allocator example, see `pool: mem.Pool.new(slots: 8)`, and try `pool.add(...)`, which doesn't exist. Inside the compiler, the same mix-up is real: one Core declaration, `core.mem.Pool`, stands for the allocator but takes the store's type parameter. When that declaration gained an empty close, the store `Pool<T>` was treated as if it closed, and the build crashed.",
+      "inWild": "Elsewhere, pool usually means an allocator that reuses slots. Examples are C++'s `std::pmr::unsynchronized_pool_resource`, Boost.Pool and Zig's `std.heap.MemoryPool`. A store of values reached by ticket is usually called a slot map or an arena. Examples are Rust's `slotmap::SlotMap` and the `generational_arena` crate's `Arena`. Game engines also say entity pool or object pool for the store.",
+      "detail": "Facts at the batch-44 tip 6cd78ce0aaf, which includes the #6852 p2a change that gave the allocators `impl Close`.\n\nThe store, `Pool<T>` and `ID<T>`, is specified in spec.md 2618-2646 (D-POOLID-API1). It is an ambient name that needs no `use`, from BuiltinStatics.jet 120 (owner Pool, method new, lowered as `jet_std.JetPool.new`). Nothing in Core declares it. IR knows it by name and lays it out as a list of entries (BuildPools.jet 1-63, `ir_pool_new`). Its inventory rows are CoreSurfaceInventory.rows 59-60.\n\nThe allocator, `mem.Pool.new(slots: N)`, is specified in spec.md 3813-3817 (Allocator families), 3869 and 4673-4676 (`#Context(allocator:)`). core-library.md 7409 also lists it, wrongly as `Pool.new<T>(slots: Int)`. Sema builds it in `sema_call_try_memory_static` (Sema/Calls/Memory.jet 196-314) and types it as the bare `Pool` (line 307). IR lowers it to `jet_pool_with_slots` (BuildCoreClosures.jet 428-483).\n\nThe allocator's runtime is MemStorage.jet 346-440. Its handle drop is `jet_rt_handle_drop_jet_pool`, and its exhaustion panic reads \"Pool allocator exhausted its slab slots\".\n\nWhere the two collide:\n- Core/Mem/Mem.jet 51 declares `Pool: struct<T>` with an empty `impl Close`. It has the store's type parameter but stands for the allocator. Compiler/Prelude/Core.rows 163 exports it.\n- RuntimeHandles.jet 238 (`<corelib>/core.mem.Pool`) and 491 (bare `Pool`) both map to the allocator's runtime handle `JetPool`.\n\nThe crash was probed with the batch-44 compiler, with the tip as toolchain root. `jet run` of the explainer program reports \"ir.build unlowered: close [function:<corelib>/core.mem.type:<corelib>/core.mem.Pool.close]: method receiver type <corelib>/core.mem.Pool<T>\". The queued p2b1 change works around it in `ir_close_method` by skipping an empty close on a bare generic row. That skip goes once each Pool has its own declaration.\n\nMember imports were probed the same way. Start a file with `use core.mem.Pool` or `use core.mem.[Pool]`, and `Pool<Player>.new()` reports `Jet.UnknownMethod: Pool has no matching static method new`. The import binds `Pool` to the allocator and hides the store, and nothing reports it at the import.\n\nUsage, lines/files at the tip:\n- Store (`Pool<` or `ID<`): Core 0, Examples 14/7, Tests 66/30, Docs/Spec 11/3, Compiler 21/10.\n- Allocator (`mem.Pool.new(slots:`): Core 0, Examples 1/1 (Memory/Allocation/Arena.jet 25), Tests 6/6, Compiler 2/2, plus the spec prose above.\n- All four allocator constructors (`mem.Arena|Bump|Fixed|Pool.new|over`): Examples 16/8, Tests 139/96, Docs/Spec 6/3, Compiler 16/7.\n\nBeginner path: the store, with no import, as in spec.md 2636. Expert path: `use core.mem`, then an allocator, optionally passed to `#Context(allocator:)`.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Rename the allocator to `mem.SlotPool`",
+          "detail": "The store keeps `Pool<T>` and `ID<T>`. The allocator becomes `mem.SlotPool.new(slots: N)`. The name still says what it is, a pool allocator of slots, as C++ and Zig use the word, and it no longer matches the store's name.\n\nBeginner path: unchanged, `world := Pool<Player>.new()`. Expert path: `scratch: mem.SlotPool.new(slots: 8)`, and `#Context(allocator: scratch)` as before.",
+          "technical": "Core/Mem/Mem.jet 51 becomes `SlotPool: struct {}` without a type parameter, since it holds values of mixed types, and keeps the allocator's `impl Close`. Core.rows exports SlotPool instead of Pool. RuntimeHandles rows 238 and 491 become `<corelib>/core.mem.SlotPool` and `SlotPool`. The allocator name check (Memory.jet 81-89), its arity fix text, and the IR comment at BuildCoreClosures.jet 428 say SlotPool. The runtime panic says \"SlotPool exhausted its slots\".\n\nThe store gets one declaration of its own, as an ambient type with its own type parameter, and the queued `ir_close_method` bare-generic skip is deleted. Migration covers 1 example, 6 tests and the spec lines 3813-3817, 3869 and 4673-4676. It also covers core-library.md 7409, where the stray `<T>` is dropped.\n\nEdge cases:\n- `mem.Pool.new(slots: 8)` after the change is an unknown member of `core.mem`, reported the way any missing Core name is.\n- `use core.mem.SlotPool` binds a name the store doesn't use, so no import can hide the store.\n- `Pool<T>` without an import still means the store. With `use core.mem` in scope, `mem.Pool` names nothing.\n- `#Context(allocator:)` accepts a SlotPool wherever it accepted the allocator Pool.",
+          "code": "use core.mem\n\nPlayer: struct { name: String, hp: Int }\n\nrun: fn() {\n    world := Pool<Player>.new()          // the store keeps its name\n    kai: world.add(Player{name: \"Kai\", hp: 100})\n    world[kai].hp -= 10\n\n    scratch: mem.SlotPool.new(slots: 8)  // the allocator is renamed\n    hp: scratch.alloc(world[kai].hp)\n    print(hp)\n    close(scratch)\n}"
+        },
+        {
+          "key": "B",
+          "name": "Rename the store to `Slots<T>`",
+          "detail": "The allocator keeps `mem.Pool.new(slots: N)`. The store becomes `Slots<T>`, with `ID<T>` unchanged. This matches how C++ and Zig use pool, and it pairs with Core's `Rows<T>` table.\n\nBeginner path: `world := Slots<Player>.new()`, still with no import. Expert path: unchanged, `scratch: mem.Pool.new(slots: 8)`.",
+          "technical": "The ambient static owner (BuiltinStatics.jet 120), the inventory rows, the IR pool routes and the spec chapter at 2618-2646 are renamed. The store gets a declaration of its own, `Slots: struct<T>`. Core/Mem's `Pool` loses its type parameter. Migration covers 7 examples, 30 test files, 3 spec files and 10 compiler files that name the store, including UI stderr goldens, the REPL transcript and pool_handle_word_cased_id.\n\nEdge cases:\n- `Pool<Player>.new()` after the change is an unknown name, with a rename hint.\n- `Slots` and the allocator's `slots:` label share a word, so `mem.Pool.new(slots: 8)` and `Slots<T>` read alike in prose.",
+          "code": "use core.mem\n\nPlayer: struct { name: String, hp: Int }\n\nrun: fn() {\n    world := Slots<Player>.new()         // the store is renamed\n    kai: world.add(Player{name: \"Kai\", hp: 100})\n    world[kai].hp -= 10\n\n    scratch: mem.Pool.new(slots: 8)      // the allocator keeps its name\n    hp: scratch.alloc(world[kai].hp)\n    print(hp)\n    close(scratch)\n}"
+        },
+        {
+          "key": "C",
+          "name": "Keep both names; move the allocators to `core.mem.alloc`",
+          "detail": "Both stay Pool, but in different modules. The store is `core.mem.Pool<T>`, still ambient. Arena, Bump, Pool and Fixed move to `core.mem.alloc`, so the allocator is `alloc.Pool`.\n\nBeginner path: unchanged. Expert path: `use core.mem.alloc`, then `alloc.Pool.new(slots: 8)`.",
+          "technical": "A new Core module `core.mem.alloc` declares the four allocators. Sema's allocator check keys on that module instead of `core.mem`. `core.mem.Pool` becomes the store's declaration. Migration covers every allocator constructor: 16 lines in 8 examples, 139 lines in 96 test files, 6 spec lines and 16 compiler lines. The handle rows split by module path, but a bare `Pool` in an error message, a type display or the docs index still means either one.\n\nEdge cases:\n- A file that imports both `core.mem` and `core.mem.alloc` sees `Pool<T>` and `alloc.Pool` side by side.\n- Diagnostics have to print the module path to tell the two apart.",
+          "code": "use core.mem.alloc\n\nPlayer: struct { name: String, hp: Int }\n\nrun: fn() {\n    world := Pool<Player>.new()          // the store, core.mem.Pool\n    kai: world.add(Player{name: \"Kai\", hp: 100})\n    world[kai].hp -= 10\n\n    scratch: alloc.Pool.new(slots: 8)    // the allocator, core.mem.alloc.Pool\n    hp: scratch.alloc(world[kai].hp)\n    print(hp)\n    close(scratch)\n}"
+        },
+        {
+          "key": "D",
+          "name": "Rename the allocator to `mem.Slab`",
+          "detail": "Like A, but the allocator takes the systems name slab, which the runtime's panic text already uses (\"slab slots\"). No part of the name is shared with the store.\n\nBeginner path: unchanged. Expert path: `scratch: mem.Slab.new(slots: 8)`.",
+          "technical": "Same changes as A, with `Slab` in place of `SlotPool`.\n\nEdge cases:\n- Rust's `slab::Slab<T>` is a store reached by key, which is the store's meaning, not the allocator's. Rust readers would expect `add` and indexing on it.",
+          "code": "use core.mem\n\nPlayer: struct { name: String, hp: Int }\n\nrun: fn() {\n    world := Pool<Player>.new()          // the store keeps its name\n    kai: world.add(Player{name: \"Kai\", hp: 100})\n    world[kai].hp -= 10\n\n    scratch: mem.Slab.new(slots: 8)      // the allocator is renamed\n    hp: scratch.alloc(world[kai].hp)\n    print(hp)\n    close(scratch)\n}"
+        },
+        {
+          "key": "E",
+          "name": "Retire the slot allocator",
+          "detail": "Delete the allocator Pool. Its users switch to `mem.Bump`, which is also bounded but counts bytes instead of slots, or to `mem.Arena`. The store keeps `Pool<T>` alone.\n\nBeginner path: unchanged. Expert path: `scratch: mem.Bump.new(capacity: 256)`.",
+          "technical": "The runtime pool storage (MemStorage.jet 346-440), its witness tests and routes, the `.Pool` allocator constructor case, and the spec and #Context rows for it are deleted. The 6 tests and the one example move to Bump.\n\nEdge cases:\n- Bounded reuse by count, where many resets and allocations fill the same slots, has no replacement. Bump bounds bytes and reuses nothing until reset.",
+          "code": "use core.mem\n\nPlayer: struct { name: String, hp: Int }\n\nrun: fn() {\n    world := Pool<Player>.new()          // the only Pool\n    kai: world.add(Player{name: \"Kai\", hp: 100})\n    world[kai].hp -= 10\n\n    scratch: mem.Bump.new(capacity: 256) // no slot allocator any more\n    hp: scratch.alloc(world[kai].hp)\n    print(hp)\n    close(scratch)\n}"
+        },
+        {
+          "key": "F",
+          "name": "Keep both spellings; give each its own declaration",
+          "detail": "Nothing is renamed. The store `Pool<T>` and `ID<T>` get one declaration of their own as an ambient type, next to the other names a program can use without `use`. The allocator stays `core.mem.Pool`, with no type parameter. Each gets its own Core.rows and handle row. The crash came from one declaration and one handle row serving both, not from the spelling, so this fixes it, and nothing migrates.\n\nBeginner path: unchanged, `world := Pool<Player>.new()`. Expert path: unchanged, `scratch: mem.Pool.new(slots: 8)`.",
+          "technical": "The store's ambient declaration takes over BuiltinStatics.jet 120 and the inventory rows. Core/Mem/Mem.jet 51 `Pool: struct<T>` drops its type parameter and stays the allocator. RuntimeHandles row 491 (bare `Pool`) goes, so a bare `Pool` inside the compiler no longer names the allocator.\n\nThe import F needs a rule for: spec.md 4067-4073 lets a file import one member, as `use core.mem.Pool` or `use core.mem.[Pool]`. That binds `Pool` to the allocator for the whole file and hides the store, with no diagnostic at the import. A probe at the batch-44 tip shows it. With `use core.mem.Pool` at the top, `world := Pool<Player>.new()` reports `Jet.UnknownMethod: Pool has no matching static method new`. `use core.mem.[Pool]` does the same.\n\nspec.md 605-606 says language-owned built-in names stay reserved, but the probe shows `Pool` is not one of them. F therefore needs a new rule: a member import that would hide an ambient built-in name is an error whose fix is to write `mem.Pool`.\n\nEdge cases:\n- A program's own `Pool` declaration hides the store under every option, as any declaration hides an ambient name (probe: `Pool: struct { n: Int }` then `Pool<Player>.new()` is Jet.UnknownMethod). Only the import case is new to F.\n- Messages and type displays have to print `mem.Pool` for the allocator to tell it from the store.",
+          "code": "use core.mem\n\nPlayer: struct { name: String, hp: Int }\n\nrun: fn() {\n    world := Pool<Player>.new()          // the store, its own declaration\n    kai: world.add(Player{name: \"Kai\", hp: 100})\n    world[kai].hp -= 10\n\n    scratch: mem.Pool.new(slots: 8)      // the allocator, core.mem.Pool\n    hp: scratch.alloc(world[kai].hp)\n    print(hp)\n    close(scratch)\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "C++",
+          "note": "The standard library's pool is an allocator that keeps pools of blocks by size and reuses them, close to Jet's slot allocator. Value stores reached by handle aren't in the standard library.",
+          "code": "std::pmr::unsynchronized_pool_resource pool;\nstd::pmr::vector<int> v{&pool};   // allocates from the pool"
+        },
+        {
+          "lang": "Zig",
+          "note": "MemoryPool(T) is a typed pool allocator: `create` hands out a slot, and `destroy` returns it for reuse.",
+          "code": "var pool = std.heap.MemoryPool(Node).init(allocator);\ndefer pool.deinit();\nconst n = try pool.create();"
+        },
+        {
+          "lang": "Rust",
+          "note": "The generational store is a crate, called SlotMap or Arena, not Pool. Its keys go stale on removal, like Jet's ID<T>.",
+          "code": "let mut world = SlotMap::new();\nlet kai = world.insert(Player { hp: 100 });\nworld[kai].hp -= 10;"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A renames the side with fewer users and keeps the word pool where other languages use it, as an allocator with slots. The store keeps the name beginners already learn from the spec and examples. One example and six tests migrate. F came close: it fixes the crash with no migration. But under F, importing the allocator by name hides the store, so F needs a new import rule. A needs no new rule.",
+        "gains": [
+          "Each name has one meaning: `Pool<T>` is the store and `mem.SlotPool` is the allocator.",
+          "Core can declare each with its own shape: the store with a type parameter, the allocator without one.",
+          "Every import form stays safe: `use core.mem.SlotPool` binds a name that can't hide the store.",
+          "The compiler's special skip for an empty close on a bare generic type is deleted.",
+          "The beginner path doesn't change at all."
+        ],
+        "losses": [
+          {
+            "loss": "Seven call sites and the allocator spec text change spelling.",
+            "mitigation": "All seven move in the same change as the rename, and the allocator's arity error's fix text names `mem.SlotPool.new(slots: N)`."
+          },
+          {
+            "loss": "C++ or Zig readers might take `Pool<T>` for an allocator.",
+            "mitigation": "`Pool<T>` takes a type and returns ID tickets, and the allocator next to it is named SlotPool, so the docs show the contrast at first sight."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It renames the beginner-facing side, about 50 files and a spec chapter, to spare 7 expert call sites."
+          },
+          {
+            "key": "C",
+            "reason": "Two types keep one bare name, so messages and docs stay ambiguous, and 111 files move to a new module."
+          },
+          {
+            "key": "D",
+            "reason": "Slab means a keyed store in Rust, which is the store's meaning, not the allocator's."
+          },
+          {
+            "key": "E",
+            "reason": "It removes bounded slot reuse that Bump and Arena don't provide."
+          },
+          {
+            "key": "F",
+            "reason": "A file that imports the allocator by name, `use core.mem.Pool`, hides the store, and today nothing reports it (probe p_member). F needs a new import rule for that one collision, and readers still meet two Pools."
+          }
+        ],
+        "tradeoff": "A changes 7 expert call sites to give each Pool one meaning. F changes none but needs a new import rule and keeps two Pools. B and C cost far more migration, D trades one ambiguity for another, and E drops a feature."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: Main. The review added option F and probed member imports, which hide the ambient store."
+      },
+      "checkInstructions": "All lines are at the batch-44 tip 6cd78ce0aaf. Check the store at spec.md 2618-2646, BuiltinStatics.jet 120 and BuildPools.jet 1-63. Check the allocator at spec.md 3813-3817 and 4673-4676, core-library.md 7409, Sema/Calls/Memory.jet 196-314 (the bare `Pool` type at 307), BuildCoreClosures.jet 428-483 and MemStorage.jet 346-440.\n\nCheck the shared rows at Core/Mem/Mem.jet 51 and RuntimeHandles.jet 238 and 491. Check member imports at spec.md 4067-4073 and reserved names at 605-606.\n\nRerun the probes with the batch-44 compiler and the tip as toolchain root. `jet run` of the explainer program gives the close ICE. A file that starts with `use core.mem.Pool` and calls `Pool<Player>.new()` gives Jet.UnknownMethod.\n\nCount call sites with `git grep -P 'mem\\.Pool\\.new\\(slots'` and `git grep -P '(?<![\\w.])Pool<|\\bID<'` over Core, Examples, Tests, Docs/Spec and Compiler.",
+      "surface": {
+        "gist": "A store of values found by ID and an allocator are both named Pool. Is one renamed, or do both keep it?",
+        "lesson": "`Pool<T>` stores values of one type and gives you an ID ticket for each. `mem.Pool.new(slots: N)` is an allocator with N reusable slots. They share one name and one Core declaration, which already caused a compiler crash.",
+        "trio": {
+          "current": {
+            "note": "Both are spelled Pool.",
+            "code": "world := Pool<Player>.new()\nscratch: mem.Pool.new(slots: 8)"
+          },
+          "wild": {
+            "lang": "Zig",
+            "note": "In Zig, the pool is the allocator.",
+            "code": "var pool = std.heap.MemoryPool(Node).init(allocator);"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Allocator becomes SlotPool",
+            "gist": "The store keeps `Pool<T>`, and the allocator is `mem.SlotPool`.",
+            "gains": [
+              "Beginners see no change.",
+              "Only seven call sites move."
+            ],
+            "losses": [
+              "Seven call sites change spelling."
+            ],
+            "proposed": {
+              "code": "world := Pool<Player>.new()\nscratch: mem.SlotPool.new(slots: 8)"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Store becomes Slots",
+            "gist": "The store is `Slots<T>`, and the allocator keeps `mem.Pool`.",
+            "gains": [
+              "Pool means an allocator, as in C++ and Zig."
+            ],
+            "losses": [
+              "About 50 files and a spec chapter change."
+            ],
+            "proposed": {
+              "code": "world := Slots<Player>.new()\nscratch: mem.Pool.new(slots: 8)"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Separate modules",
+            "gist": "Both keep Pool, and the allocators move to `core.mem.alloc`.",
+            "gains": [
+              "No type is renamed."
+            ],
+            "losses": [
+              "Messages still say Pool for both.",
+              "111 files move."
+            ],
+            "proposed": {
+              "code": "world := Pool<Player>.new()\nscratch: alloc.Pool.new(slots: 8)"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Allocator becomes Slab",
+            "gist": "Like A, but the allocator is `mem.Slab`.",
+            "gains": [
+              "No shared word."
+            ],
+            "losses": [
+              "In Rust, Slab means a keyed store."
+            ],
+            "proposed": {
+              "code": "world := Pool<Player>.new()\nscratch: mem.Slab.new(slots: 8)"
+            }
+          },
+          {
+            "key": "E",
+            "name": "Retire the allocator",
+            "gist": "Delete the slot allocator and use Bump instead.",
+            "gains": [
+              "One Pool, and less runtime code."
+            ],
+            "losses": [
+              "Bounded slot reuse is gone."
+            ],
+            "proposed": {
+              "code": "world := Pool<Player>.new()\nscratch: mem.Bump.new(capacity: 256)"
+            }
+          },
+          {
+            "key": "F",
+            "name": "Keep both, separate declarations",
+            "gist": "Both stay Pool, and each gets its own declaration.",
+            "gains": [
+              "Nothing migrates."
+            ],
+            "losses": [
+              "`use core.mem.Pool` hides the store, so a new import rule is needed."
+            ],
+            "proposed": {
+              "code": "world := Pool<Player>.new()\nscratch: mem.Pool.new(slots: 8)"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Rename the side with fewer users; the beginner name stays, and no import can hide it.",
+          "gains": [
+            "Each Pool name has one meaning.",
+            "The compiler's crash workaround goes."
+          ],
+          "losses": [
+            {
+              "loss": "Seven call sites change spelling.",
+              "mitigation": "All seven move in the same change."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "It renames the beginner side, about 50 files."
+            },
+            {
+              "key": "C",
+              "reason": "The bare name stays ambiguous."
+            },
+            {
+              "key": "D",
+              "reason": "Slab means a keyed store in Rust."
+            },
+            {
+              "key": "E",
+              "reason": "It drops bounded slot reuse."
+            },
+            {
+              "key": "F",
+              "reason": "Importing the allocator by name hides the store."
+            }
+          ],
+          "tradeoff": "Seven expert call sites move so that each name has one meaning and no import can hide the store."
+        }
+      },
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "Main",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-25T15:46:55.793Z"
     }
   ],
   "questions": [
@@ -136719,6 +138148,244 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-25T15:46:55.793Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-MEM-POOL-NAME1",
+      "note": "Which of the two things called Pool keeps the name"
+    },
+    {
+      "at": "2026-11-25T15:42:10.753Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c0mhrplj",
+      "note": "20 criteria, soft limit 6: regression from this card's B n19 port"
+    },
+    {
+      "at": "2026-11-25T15:42:10.753Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0mhrplj",
+      "note": "#21 DataWatchStatus.freshness_ms reports a real age again (now m"
+    },
+    {
+      "at": "2026-11-25T15:39:29.618Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c0mhrplj",
+      "note": "19 criteria, soft limit 6: regressions found by the batch-44 sweep belong on the card whose work caused them"
+    },
+    {
+      "at": "2026-11-25T15:39:29.618Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0mhrplj",
+      "note": "#20 The compiler-data ratchet passes on dev (jet Tools/Agent/Com"
+    },
+    {
+      "at": "2026-11-25T15:26:24.258Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-RULE-DISPATCH-BUDGET1",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-25T15:17:58.960Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0sdz4q0",
+      "note": "#16: premise corrected: core.mem holds two different Pool types; renaming one is an owner ballot; was: mem.Arena/Bump/Pool/Fixed .new are declared in Core with their real types (Pool<T>, not a bare Pool), sema_call_try_memory_static (Sema/Calls/Memory.jet:307, which types them as Type.Named{name}) is d"
+    },
+    {
+      "at": "2026-11-25T15:15:09.246Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c0sdz4q0",
+      "note": "16 criteria, soft limit 6: root-cause follow-up of this card's own p2a work"
+    },
+    {
+      "at": "2026-11-25T15:15:09.246Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0sdz4q0",
+      "note": "#16 mem.Arena/Bump/Pool/Fixed .new are declared in Core with the"
+    },
+    {
+      "at": "2026-11-25T14:49:55.902Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c0mhrplj",
+      "note": "18 criteria, soft limit 6: follow-up of B belongs on its owning card"
+    },
+    {
+      "at": "2026-11-25T14:49:55.902Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0mhrplj",
+      "note": "#19 B leaves: the 8 receiver dispatcher rows whose symbol has no"
+    },
+    {
+      "at": "2026-11-25T14:46:14.426Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c0t5gnhs",
+      "note": "21 criteria, soft limit 6: friction and defect findings go on their owning card the same hour (AGENTS.md)"
+    },
+    {
+      "at": "2026-11-25T14:46:14.426Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0t5gnhs",
+      "note": "#21 jet fmt on Compiler/JetIR/Source/BuildExpr.jet and BuildType"
+    },
+    {
+      "at": "2026-11-25T14:46:13.091Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c00ni11n",
+      "note": "42 criteria, soft limit 6: friction and defect findings go on their owning card the same hour (AGENTS.md)"
+    },
+    {
+      "at": "2026-11-25T14:46:13.091Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c00ni11n",
+      "note": "#44 jet perf run takes only a .jet source, not a built binary, a"
+    },
+    {
+      "at": "2026-11-25T14:46:11.818Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c00ni11n",
+      "note": "41 criteria, soft limit 6: friction and defect findings go on their owning card the same hour (AGENTS.md)"
+    },
+    {
+      "at": "2026-11-25T14:46:11.818Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c00ni11n",
+      "note": "#43 jet perf view --instructions with no argument shows only the"
+    },
+    {
+      "at": "2026-11-25T14:46:10.407Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c00ni11n",
+      "note": "40 criteria, soft limit 6: friction and defect findings go on their owning card the same hour (AGENTS.md)"
+    },
+    {
+      "at": "2026-11-25T14:46:10.406Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c00ni11n",
+      "note": "#42 jet perf run --help and jet perf view --help print only Usag"
+    },
+    {
+      "at": "2026-11-25T14:33:00.414Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0e6znz4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-25T14:02:52.051Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-SERVICE-SHAPES1",
+      "note": "Who picks the form behind `tree.worker`, `tree.send` and `tree.call` when one name covers several Core functions"
+    },
+    {
+      "at": "2026-11-25T14:02:51.078Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-RULE-DISPATCH-BUDGET1",
+      "note": "How does card #6851 meet D-CORE-CHECK1's budget of 1 µs per heard call?"
+    },
+    {
+      "at": "2026-11-25T14:02:46.596Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0e6znz4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-25T14:02:42.165Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-PROCESS-BUILDER-RECEIVER1",
+      "note": "When a ProcessSpec builder takes a named spec that is used again, is that an error, a silent copy, or a copy on every step"
+    },
+    {
+      "at": "2026-11-25T13:54:23.012Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0sdz4q0",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-25T13:54:16.868Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-FALLIBLE-CLOSE1",
+      "note": "How a stream whose close can fail also closes itself at the end of its scope"
+    },
+    {
+      "at": "2026-11-25T13:32:42.913Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0mhrplj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-25T13:32:41.733Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-remove",
+      "ref": "c0mhrplj",
+      "note": "#18: Withdrawn: there is no intrinsic-argument defect. The probe ran against an older Core whose from_bits wraps on purpose. With the tip's Core, jet emit --ir shows the __numeric_stop call inside the bit-copy argument, and FloatBitsRangeStop stops with exit 70 natively.; was [open]: A '??' fallback in an intrinsic call's argument runs like one in an ordinary call's argument. Found by B: math.from_bits(1 << 70) returned 0.0 and did not stop, because the fallback of __from_bits_i64"
+    },
+    {
+      "at": "2026-11-25T13:29:28.765Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c0mhrplj",
+      "note": "18 criteria, soft limit 6: The owner order puts a follow-up on the card whose work found it; B's Core bodies exposed this defect"
+    },
+    {
+      "at": "2026-11-25T13:29:28.765Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0mhrplj",
+      "note": "#18 A '??' fallback in an intrinsic call's argument runs like on"
+    },
+    {
+      "at": "2026-11-25T13:16:20.060Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0dktg7a",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-25T13:14:52.854Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0e6znz4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-25T13:13:14.374Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0sdz4q0",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-25T13:12:40.762Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0sdz4q0",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-25T13:10:58.921Z",
       "by": "Orchestrator",
