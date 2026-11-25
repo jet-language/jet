@@ -14,6 +14,7 @@ use jet_foundation.[
     Item,
     Marker,
     MarkerDecl,
+    NameVisibility,
     NodeKind,
     PatSlot,
     Span,
@@ -27,12 +28,14 @@ use jet_foundation.[
     TComptimeEnumArg,
     TComptimeField,
     TComptimeValue,
+    TConstantDef,
     TFieldRef,
     TIntegerWidth,
     TPatternBindingFact,
     TargetMachine,
     TextEdit,
     Type,
+    TYPE_REFLECTION_TRAIT,
     TypeTupleField,
     TypedLitBody,
     UnitScaleProvenance,
@@ -52,6 +55,7 @@ use jet_foundation.[
     fact_read_reflection_kind,
     ModuleID,
     module_is_core,
+    type_reflection_constant_key,
 ]
 
 SemaFactReadCheck: struct {
@@ -1188,6 +1192,61 @@ sema_fact_type_info: fn(symbol: Symbol?, name: String, args: [Type], check: Sema
     }
     row: sema_type_resolve_nominal_row(graph, Type.Named{name: name}, check.environment.module_identity) ?? return None
     sema_comptime_reflection_type_info(graph, graph.modules[row.module_index].module_identity, graph.modules[row.module_index].nominals[row.row].symbol.name, catalog, args)
+}
+
+// The TypeInfo record `ty.reflect()` folds to, `ty` a type a checked body
+// names in module `module_identity`: its nominal's, a generic one's at its
+// type arguments, else a builtin number's. It is the record an instance of a
+// `T.reflect()` read takes when `ty` fills `T` (sema_effect_type_reflections),
+// folded by the builders a written `X.reflect()` folds by.
+sema_fact_type_info_of: fn(graph: SemaRegistrationGraph, ty: Type, module_identity: ModuleID) -> TComptimeValue? {
+    plain: sema_expr_unwrap_tag(ty)
+    if graph.mode != .Snapshot {
+        if sema_fact_nominal_row_of(graph, plain, module_identity) == .Val(row) {
+            catalog: TAppliedRuleCatalog{rows: [TAppliedRule]{}, argument_menus: [TAppliedRuleArgumentMenu]{}}
+            args: if plain == .Apply(_, values) -> values else -> [Type]{}
+            return sema_comptime_reflection_type_info(graph, graph.modules[row.module_index].module_identity, graph.modules[row.module_index].nominals[row.row].symbol.name, catalog, args)
+        }
+    }
+    sema_comptime_reflection_builtin_type_info(graph, type_name(plain))
+}
+
+// The nominal row of the declared type `ty` names: the row a checked type
+// spells canonically (sema_registration_nominal_spelling), which an instance
+// carries from the module that wrote it, else the row its name resolves to
+// from module `module_identity`.
+sema_fact_nominal_row_of: fn(graph: SemaRegistrationGraph, ty: Type, module_identity: ModuleID) -> SemaRegistrationRowRef? {
+    name: sema_type_graph_base_name(ty) ?? return None
+    loop module_index in 0..<graph.modules.len() {
+        loop row in 0..<graph.modules[module_index].nominals.len() {
+            at: SemaRegistrationRowRef{module_index: module_index, row: row}
+            if sema_registration_nominal_spelling(graph, at) == name -> return Val(at)
+        }
+    }
+    sema_type_resolve_nominal_row(graph, ty, module_identity)
+}
+
+// The constant row of each type an instance of a `T.reflect()` read fills
+// `T` with (sema_effect_type_reflections): its TypeInfo record, under the
+// key the instance reads it by (type_reflection_constant_key). The program
+// holds these rows, never a module: which rows there are depends on every
+// instance the program builds. A type no `X.reflect()` folds for is E0302
+// at the read.
+sema_fact_type_reflection_rows: fn(graph: SemaRegistrationGraph, reflections: [SemaTypeReflection], diagnostics: ^[Diagnostic]) -> [TConstantDef] {
+    rows := [TConstantDef]{}
+    loop reflection in reflections {
+        if sema_fact_type_info_of(graph, reflection.ty, reflection.module_identity) == .Val(info) {
+            rows.push(TConstantDef{module_identity: reflection.read_module_identity, key: type_reflection_constant_key(reflection.ty), name: TYPE_REFLECTION_TRAIT, span: reflection.span, visibility: NameVisibility.Public, ty: sema_fact_named("TypeInfo"), is_comptime: true, is_storage: false, value: sema_fact_declared_value(info)})
+            next
+        }
+        shown: type_name(reflection.ty)
+        located := [Diagnostic]{sema_error("E0302", reflection.span, "`T.reflect()` has no TypeInfo record for `{shown}`, which fills `T` here", "a TypeInfo record describes a declared type or a builtin number, and `{shown}` is neither", "call the generic function with a declared type or a builtin number for `T`")}
+        if sema_registration_module_index(graph, reflection.read_module_identity) == .Val(index) {
+            sema_attach_diagnostic_source_locations(located, 0, graph.modules[index].source_segments)
+        }
+        diagnostics.push(located[0])
+    }
+    rows
 }
 
 // `FunctionInfo` for a declared function (`f.reflect()`): its source shape,

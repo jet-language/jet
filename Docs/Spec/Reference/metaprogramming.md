@@ -526,6 +526,10 @@ Jet has two related reflection paths:
 2. `T.reflect()` returns the aggregate `TypeInfo` record computed while
    compiling. It reads the same in a marker body, a `#run` value,
    `build: fn` and ordinary code; in the running program it is a constant.
+   In a generic body it is the record of the type each instance fills `T`
+   with, the record `X.reflect()` gives for that type: a program builds one
+   for each type its calls fill `T` with, and a generic function no call
+   reaches builds none.
    `reflect.of(value)` returns the runtime reflection floor for a value.
 
 Each struct field's `FieldInfo` carries its `type`, a TypeId (below), its

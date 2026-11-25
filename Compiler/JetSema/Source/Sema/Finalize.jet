@@ -707,6 +707,11 @@ sema_finalize_program: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail
     core_seal: if final_graph.core_seal -> sema_core_seal_lines(final_graph, seal_failure, effects.core_seal) else -> [String]{}
     loop diagnostic in effects.diagnostics -> diagnostics.push(diagnostic)
     if !effects.complete -> complete = false
+    // The TypeInfo record of each type a `T.reflect()` read is built at: a
+    // constant row of the program.
+    reflection_reports: diagnostics.len()
+    type_reflections: sema_fact_type_reflection_rows(final_graph, effects.type_reflections, diagnostics)
+    if diagnostics.len() > reflection_reports -> complete = false
     if stood_in > 0 && rerun == "" && effects.walks -> rerun = "walks"
     // `sema.late`: the partition, target and compute checks that read the
     // solved effects, and the publish of those effects.
@@ -995,6 +1000,7 @@ sema_finalize_program: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail
         memory_declarations: effects.memory_declarations.move(),
         memory_projections: effects.memory_projections.move(),
         eval_answers: eval_answers,
+        type_reflections: type_reflections,
     }
     SemaFinalized{result: result.move(), graph: final_graph.move()}
 }

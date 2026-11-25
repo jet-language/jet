@@ -1,0 +1,23 @@
+# A generic body reads its type parameter's TypeInfo record in ordinary code:
+# `T.reflect()` in `shapes.describe` gives, for each type a call fills `T`
+# with (directly or through `describe_again`), the record a concrete
+# `X.reflect()` gives, on every tier. Two programs share `shapes` and fill
+# `T` with different types; each builds its own records, and
+# `never_described`, which no program calls, builds none and reports nothing.
+fixture: AGenericBodyReadsItsTypeParametersTypeInfo.fixture
+env: NO_COLOR=1
+step o0: jet run -O0 wide.jet
+exit: 0
+stdout: = a_generic_body_reads_its_type_parameters_type_info.stdout.expected
+step o1: jet run -O1 wide.jet
+exit: 0
+stdout: == o0
+step o2: jet run -O2 wide.jet
+exit: 0
+stdout: == o0
+step narrow0: jet run -O0 narrow.jet
+exit: 0
+stdout: = "Score size=8 fields=[points]\nScore size=8 fields=[points]\n"
+step narrow2: jet run -O2 narrow.jet
+exit: 0
+stdout: == narrow0

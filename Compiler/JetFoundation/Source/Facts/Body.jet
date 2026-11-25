@@ -313,6 +313,19 @@ CONTEXT_ON_STOP_KEY: "context:on_stop"
 // constant's (BuildTransact.jet ir_context_key_word).
 CONTEXT_PRINT_KEY: "context:print"
 
+// The trait name of a TraitConst node that reads `T.reflect()` over a type
+// parameter `T`. No declared trait is spelled in lower case, so no trait
+// constant shares it. Each instance reads the TypeInfo record of the type
+// that fills `T`; the program publishes that record as the constant row
+// type_reflection_constant_key names.
+TYPE_REFLECTION_TRAIT: "reflect"
+
+// The constant key of the TypeInfo record `concrete.reflect()` folds to,
+// which a `T.reflect()` read at an instance whose `T` is `concrete` reads.
+type_reflection_constant_key: fn(concrete: Type) -> String Never! {
+    "reflect:{type_carrier_identity(concrete)}"
+}
+
 NodeKind: enum {
     IntLit(value: Int, width: TIntegerWidth?),
     FloatLit(value: Float),

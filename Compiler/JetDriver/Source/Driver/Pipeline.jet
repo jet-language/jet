@@ -5541,6 +5541,9 @@ JetDriverLoweringInputs: struct {
     // The Core library's check: the Core function checks as captured, which
     // the Core library writes as the bodies file (JetSema CoreBodies.jet).
     core_bodies: SemaCoreCaptures{SemaCoreCaptures{bodies: [SemaCoreBody]{}, context: ""}},
+    // The program's constant row of each type a `T.reflect()` read is built
+    // at (JetSema SemaGraphResult.type_reflections).
+    type_reflections: [TConstantDef]{[TConstantDef]{}},
 }
 
 JetDriverLoweringInputsResult: struct {
@@ -5629,6 +5632,7 @@ jet_driver_checked_declarations: fn(checked: ^JetDriverLoweringInputs) -> JetDri
         compiler_transfer_rows<TConstantDef>(constants, checked.modules[index].declarations.constants)
         compiler_transfer_rows<SemaCheckedForeignFunction>(foreign, checked.modules[index].foreign_functions)
     }
+    compiler_transfer_rows<TConstantDef>(constants, checked.type_reflections)
     JetDriverCheckedDeclarations{type_defs: type_defs.move(), impls: impls.move(), constants: constants.move(), foreign: foreign.move()}
 }
 
@@ -7047,7 +7051,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: ^JetD
             registration_graph.symbols = SymbolTable{ranges: [SymbolKeys]{}}
             interner := registration_graph.interner.move()
             registration_graph.interner = interner_empty()
-            capture.lowering_inputs = Val(JetDriverLoweringInputs{functions: checked_functions.move(), modules: runtime_semantic_modules.move(), decls: decls.move(), symbols: symbols.move(), interner: interner.move(), sources: sources.move(), entry_module_identity: load.entry_module_identity, canonical_effect_module_identity: canonical_effect_module_identity, module_table: load.module_table.copy(), entry_key: check_entry.move(), core_seal: checked_graph.core_seal.move(), core_bodies: checked_graph.core_bodies.move()})
+            capture.lowering_inputs = Val(JetDriverLoweringInputs{functions: checked_functions.move(), modules: runtime_semantic_modules.move(), decls: decls.move(), symbols: symbols.move(), interner: interner.move(), sources: sources.move(), entry_module_identity: load.entry_module_identity, canonical_effect_module_identity: canonical_effect_module_identity, module_table: load.module_table.copy(), entry_key: check_entry.move(), core_seal: checked_graph.core_seal.move(), core_bodies: checked_graph.core_bodies.move(), type_reflections: compiler_take_rows<TConstantDef>(checked_graph.type_reflections)})
             jet_driver_trace_step_end(request.trace_sink, "driver.check.capture", -1)
             if request.release_state_aside {
                 // The lowering inputs took the Core seal and captures.
@@ -7282,7 +7286,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: ^JetD
     if capture.stop_before_lowering {
         jet_driver_trace_step_begin(request.trace_sink, "driver.result.capture")
         sources := ir_source_texts(load.source_files)
-        capture.lowering_inputs = Val(JetDriverLoweringInputs{functions: sema_functions.move(), modules: runtime_semantic_modules.move(), decls: decls.move(), symbols: symbols.move(), interner: interner.move(), sources: sources.move(), entry_module_identity: load.entry_module_identity, canonical_effect_module_identity: canonical_effect_module_identity, module_table: load.module_table.copy(), entry_key: entry_key, tests: tests.move(), output_checks: output_checks.move(), c_exports: c_export_rows.move(), jobs: job_rows.move(), deep_checks: deep_kept.selected.copy()})
+        capture.lowering_inputs = Val(JetDriverLoweringInputs{functions: sema_functions.move(), modules: runtime_semantic_modules.move(), decls: decls.move(), symbols: symbols.move(), interner: interner.move(), sources: sources.move(), entry_module_identity: load.entry_module_identity, canonical_effect_module_identity: canonical_effect_module_identity, module_table: load.module_table.copy(), entry_key: entry_key, tests: tests.move(), output_checks: output_checks.move(), c_exports: c_export_rows.move(), jobs: job_rows.move(), deep_checks: deep_kept.selected.copy(), type_reflections: compiler_take_rows<TConstantDef>(checked_graph.type_reflections)})
         jet_driver_trace_step_end(request.trace_sink, "driver.result.capture", -1)
     } else if request.mode == JetDriverCompileMode.Doc {
         doc_interner = Val(interner.move())

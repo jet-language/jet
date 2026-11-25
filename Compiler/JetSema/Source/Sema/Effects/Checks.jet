@@ -136,6 +136,10 @@ use jet_foundation.[
     module_none,
     module_text,
     foundation_byte_text,
+    TYPE_REFLECTION_TRAIT,
+    name_count,
+    type_carrier_identity,
+    type_reflection_constant_key,
 ]
 
 SemaEffectFunctionSource: struct {
@@ -244,6 +248,9 @@ SemaEffectGraphResult: struct {
     // out: each e3401 on a `-[]>` function outside Core, which reads that
     // function's own body and the solved rows of what it calls.
     exact_errors: Int{0},
+    // Each type an instance of a `T.reflect()` read fills `T` with, once
+    // (sema_effect_type_reflections).
+    type_reflections: [SemaTypeReflection]{[SemaTypeReflection]{}},
     // The run's symbol table the check borrowed, handed back to its graph.
     symbols: SymbolTable,
     interner: Interner,
@@ -370,6 +377,32 @@ SemaEffectInstantiation: struct {
     label: String,
     span: Span,
     callee_node: Int{-1},
+}
+
+// A `T.reflect()` read a generic body makes: `owner` names the type
+// parameter it reflects, `span` the read.
+SemaEffectTypeRead: struct {
+    owner: Type,
+    span: Span,
+}
+
+// A type some instance of a `T.reflect()` read fills `T` with: the concrete
+// type, the module of the non-generic function whose calls build that
+// instance, which names the type, and the read and its module
+// (sema_effect_type_reflections).
+SemaTypeReflection: struct {
+    ty: Type,
+    module_identity: ModuleID,
+    span: Span,
+    read_module_identity: ModuleID,
+}
+
+// One instance the reflection walk visits: node `node` at type arguments
+// `args` (by its `type_params`), reached from non-generic node `origin`.
+SemaEffectReflectionInstance: struct {
+    node: Int,
+    args: [Type],
+    origin: Int,
 }
 
 // A call site that binds callee parameter vertex `to` to a larger type
@@ -527,6 +560,9 @@ SemaEffectNodeRare: struct {
     // argument is in `bare_scope_callees`, and reaches it bare as well.
     scoped_calls: [SemaEffectScopedCall]{[SemaEffectScopedCall]{}},
     bare_scope_callees: [String]{[String]{}},
+    // The `T.reflect()` reads this body makes over its type parameters
+    // (sema_effect_type_reflections).
+    type_reads: [SemaEffectTypeRead]{[SemaEffectTypeRead]{}},
 }
 
 // The rare rows of a node that fills none of them.
@@ -3825,6 +3861,88 @@ sema_effect_queue_reached: fn(reached: ^[Bool], queue: ^[Int], target: Int) Neve
     queue.push(target)
 }
 
+// How many instances the reflection walk visits at most: a chain that nests
+// its types one level deeper on every call never ends (E0909).
+SEMA_EFFECT_REFLECTION_INSTANCES: 65536
+
+// How many `T.reflect()` reads `node`'s body makes.
+sema_effect_node_type_reads: fn(node: SemaEffectNode) -> Int Never! {
+    rare: node.rare ?? return 0
+    rare.type_reads.len()
+}
+
+// Each type an instance of a `T.reflect()` read (SemaEffectNodeRare.type_reads)
+// fills `T` with, once. The walk starts at each non-generic node that leads
+// to a read and follows every instantiation site to a callee that leads to
+// one too, binding the callee's type parameters (sema_effect_param_binding)
+// to the site's type arguments at the caller's instance, substituted as
+// JetIR substitutes an instance's facts (ir_fact_type). The rows depend on
+// every instance of the program, so the program publishes them and no body
+// holds one.
+sema_effect_type_reflections: fn(nodes: [SemaEffectNode]) -> [SemaTypeReflection] {
+    found := [SemaTypeReflection]{}
+    leads := (loop node in nodes -> sema_effect_node_type_reads(node) > 0)
+    reads := 0
+    loop lead in leads {
+        if lead -> reads += 1
+    }
+    if reads == 0 -> return found
+    changed := true
+    loop changed {
+        changed = false
+        loop index in 0..<nodes.len() {
+            if leads[index] -> next
+            loop site in nodes[index].instantiations {
+                if site.callee_node >= 0 && leads[site.callee_node] {
+                    leads[index] = true
+                    changed = true
+                    break
+                }
+            }
+        }
+    }
+    queue := [SemaEffectReflectionInstance]{}
+    loop index in 0..<nodes.len() {
+        if leads[index] && nodes[index].type_params.len() == 0 {
+            queue.push(SemaEffectReflectionInstance{node: index, args: [Type]{}, origin: index})
+        }
+    }
+    visited := name_table_sized(64)
+    types := name_table_sized(16)
+    cursor := 0
+    loop cursor < queue.len() && cursor < SEMA_EFFECT_REFLECTION_INSTANCES {
+        current: cursor
+        at: queue[current].node
+        origin: queue[current].origin
+        cursor += 1
+        if nodes[at].rare == .Val(rare) {
+            loop read in rare.type_reads {
+                concrete: sema_expr_unwrap_tag(sema_inference_substitute_type(read.owner, nodes[at].type_params, queue[current].args))
+                before: name_count(types)
+                _ := name_intern(types, type_reflection_constant_key(concrete))
+                if name_count(types) == before -> next
+                found.push(SemaTypeReflection{ty: concrete, module_identity: nodes[origin].module_identity, span: read.span, read_module_identity: nodes[at].module_identity})
+            }
+        }
+        loop site in nodes[at].instantiations {
+            callee: site.callee_node
+            if callee < 0 || !leads[callee] -> next
+            bound := [Type]{}
+            loop param in nodes[callee].type_params {
+                binding: sema_effect_param_binding(nodes[callee], site, param) ?? break
+                bound.push(sema_inference_substitute_type(binding, nodes[at].type_params, queue[current].args))
+            }
+            if bound.len() != nodes[callee].type_params.len() -> next
+            shown: (loop ty in bound -> type_carrier_identity(ty)).join(",")
+            before: name_count(visited)
+            _ := name_intern(visited, "{callee}<{shown}>")
+            if name_count(visited) == before -> next
+            queue.push(SemaEffectReflectionInstance{node: callee, args: bound.move(), origin: origin})
+        }
+    }
+    found
+}
+
 // The instance reaches of `node` with each target's solved row.
 sema_effect_instance_notes: fn(nodes: [SemaEffectNode], solved: [[String]], node: SemaEffectNode) -> [SemaEffectInstanceNote] Never! {
     rare: node.rare ?? return [SemaEffectInstanceNote]{}
@@ -4213,7 +4331,17 @@ sema_effect_walk_expr_enter: fn(nodes: ^[SemaEffectNode], node_index: Int, tree:
         .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .Local(_) | .Unit | .Uninit | .Absent | .NumberParam(_) | .TypePath(_) | .CopyPhase(_, _, _, _) -> {
             return false
         }
-        .TraitConst(_, _, _) | .InvariantViolation(_, _) | .SelectStart | .TypeTest(_, _) -> {
+        .TraitConst(owner, trait_name, _) -> {
+            sema_effect_walk_record_exact_fact(nodes, node_index, tree, node, facts, module_facts, diagnostics, caller)
+            if trait_name == TYPE_REFLECTION_TRAIT {
+                sema_effect_node_rare_open(nodes[node_index])
+                if ^nodes[node_index].rare == .Val(rare) {
+                    rare.type_reads.push(SemaEffectTypeRead{owner: owner, span: node.span})
+                }
+            }
+            return false
+        }
+        .InvariantViolation(_, _) | .SelectStart | .TypeTest(_, _) -> {
             sema_effect_walk_record_exact_fact(nodes, node_index, tree, node, facts, module_facts, diagnostics, caller)
             return false
         }
@@ -6792,6 +6920,7 @@ sema_effects_check_modules: fn(modules: ^[SemaGraphModuleResult], inputs: [SemaE
     sema_effect_resolve_type_params(nodes, calls)
     sema_effect_resolve_edges(nodes, calls, threads)
     sema_effect_check_expanding_instances(nodes, inputs, diagnostics)
+    type_reflections := sema_effect_type_reflections(nodes)
     sema_effect_trace_step(trace_sink, "sema.effects.resolve", "sema.effects.solve")
     callers: sema_effect_callers(nodes, table)
     solved: sema_effect_solve(nodes, callers)
@@ -7095,7 +7224,7 @@ sema_effects_check_modules: fn(modules: ^[SemaGraphModuleResult], inputs: [SemaE
     core_seal: if seal -> sema_effect_core_seal_rows(nodes.move(), solved, table) else -> [SemaCoreSealEffects]{}
     sema_effect_trace_step(trace_sink, "sema.effects.pure", "")
     complete: !sema_has_error_since(diagnostics, 0)
-    SemaEffectGraphResult{diagnostics: diagnostics.move(), complete: complete, memory_declarations: memory_facts.declarations.move(), memory_projections: memory_facts.projections.move(), core_seal: core_seal, walks: walks, exact_errors: exact_errors, symbols: calls.symbols.move(), interner: calls.interner.move()}
+    SemaEffectGraphResult{diagnostics: diagnostics.move(), complete: complete, memory_declarations: memory_facts.declarations.move(), memory_projections: memory_facts.projections.move(), core_seal: core_seal, walks: walks, exact_errors: exact_errors, type_reflections: type_reflections.move(), symbols: calls.symbols.move(), interner: calls.interner.move()}
 }
 
 // Ends the effect pass's step `ended` and begins `begun` (either may be
