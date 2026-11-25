@@ -9,8 +9,9 @@ use jet_foundation.[
     TraitImplBlock,
     Type,
     VariantPayload,
-    name_count,
-    name_find,
+    name_pair_find_slot,
+    name_pair_slot,
+    name_table_sized,
     owned_trait_requested,
     type_name,
 ]
@@ -85,13 +86,26 @@ sema_type_metadata_has_trait_block: fn(blocks: [TraitImplBlock], trait_name: Str
     false
 }
 
-sema_type_metadata_impl_key: fn(type_name: String, trait_name: String) -> String Never! {
-    "{type_name.len()}:{type_name}:{trait_name}"
+// One module's top-level trait impl declarations: each (type, trait) pair's
+// name_pair_slot over `names`.
+SemaDeclaredTraitImpls: struct {
+    names: NameTable,
+    pairs: [Int:Bool],
 }
 
-sema_type_metadata_has_explicit_impl: fn(declared_trait_impls: NameTable, type_name: String, trait_name: String) -> Bool Never! {
-    if name_count(declared_trait_impls) <= 1 -> return false
-    name_find(declared_trait_impls, sema_type_metadata_impl_key(type_name, trait_name)) != None
+sema_type_metadata_declared_new: fn() -> SemaDeclaredTraitImpls Never! {
+    SemaDeclaredTraitImpls{names: name_table_sized(4), pairs: [Int:Bool]{}}
+}
+
+sema_type_metadata_declare_impl: fn(declared: ^SemaDeclaredTraitImpls, type_name: String, trait_name: String) Never! {
+    slot: name_pair_slot(declared.names, type_name, trait_name)
+    declared.pairs[slot] = true
+}
+
+sema_type_metadata_has_explicit_impl: fn(declared_trait_impls: SemaDeclaredTraitImpls, type_name: String, trait_name: String) -> Bool Never! {
+    if declared_trait_impls.pairs.len() == 0 -> return false
+    slot: name_pair_find_slot(declared_trait_impls.names, type_name, trait_name) ?? return false
+    declared_trait_impls.pairs.get(slot) != None
 }
 
 sema_type_metadata_select_trait: fn(markers: [Marker], package_default: Bool, structurally_eligible: Bool, explicit_block: Bool, explicit_impl: Bool, trait_name: String) -> Bool Never! {
@@ -103,7 +117,7 @@ sema_type_metadata_select_trait: fn(markers: [Marker], package_default: Bool, st
 // that same module's top-level trait impl declarations (see
 // `sema_registration_push_declaration`), so unrelated modules cannot suppress
 // this type's selection.
-sema_type_metadata_auto_derives: fn(definition: Item, declared_trait_impls: NameTable) -> SemaTypeMetadataAutoDerives Never! {
+sema_type_metadata_auto_derives: fn(definition: Item, declared_trait_impls: SemaDeclaredTraitImpls) -> SemaTypeMetadataAutoDerives Never! {
     if definition == {
         .Struct(value) -> {
             eligible: sema_type_metadata_struct_auto_ok(value)

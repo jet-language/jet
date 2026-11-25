@@ -809,9 +809,10 @@ SemaRegistrationModule: struct {
     // (sema_registration_import_binding_at).
     import_binding_names: NameTable,
     import_binding_values: [Int],
-    // `{type}:{trait}` for every trait impl among `declarations`, so auto-derive
-    // metadata asks once per query instead of rescanning the declarations.
-    declared_trait_impls: NameTable,
+    // The (type, trait) pair of every trait impl among `declarations`, so
+    // auto-derive metadata asks once per query instead of rescanning the
+    // declarations.
+    declared_trait_impls: SemaDeclaredTraitImpls,
     // The module's package namespace (loader key, "" outside
     // one) and its `namespace_tables` slot (-1 outside one), what the loader
     // recorded for it, the position in `imports` where the package names
@@ -3487,7 +3488,7 @@ sema_registration_add_root: fn(module_row: ^SemaRegistrationModule, module_text:
 sema_registration_push_declaration: fn(module_row: ^SemaRegistrationModule, item: Item) Never! {
     if item == .Impl(definition) {
         if definition.trait_name == .Val(trait_name) {
-            _ := name_intern(module_row.declared_trait_impls, sema_type_metadata_impl_key(definition.type_name, trait_name))
+            sema_type_metadata_declare_impl(module_row.declared_trait_impls, definition.type_name, trait_name)
         }
         if definition.is_generated_serde -> return
     }
@@ -4156,7 +4157,7 @@ sema_registration_prepare_module_row: fn(input: ^^SemaRegistrationModuleInput, m
         exports: [SemaRegistrationExport]{},
         import_binding_names: name_table_sized(16),
         import_binding_values: [Int]{-1},
-        declared_trait_impls: name_table_sized(4),
+        declared_trait_impls: sema_type_metadata_declared_new(),
         namespace: owned.namespace,
         namespace_names: owned.namespace_names,
         namespace_private: owned.namespace_private,
