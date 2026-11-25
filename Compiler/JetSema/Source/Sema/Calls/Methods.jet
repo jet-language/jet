@@ -1873,9 +1873,6 @@ sema_call_try_app_method: fn(receiver: Expr, receiver_value: TExpr, method: Stri
     arity: sema_app_handler_arity(method, args.len())
     if arity < 0 -> return SemaMethodSpecialCheck{handled: false, value: None}
     graph: check.program.registration_graph
-    if (method == "route" || method == "page" || method == "layout") && args.len() > 0 {
-        ^_: sema_http_route_check_literal(args[0], check)
-    }
     if args.len() != arity {
         check.diagnostics.push(sema_call_arity_diagnostic(method, arity, args.len(), false, span))
         return SemaMethodSpecialCheck{handled: true, value: None}

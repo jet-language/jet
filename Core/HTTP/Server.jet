@@ -1420,6 +1420,74 @@ priv __route_pattern_shape: fn(pattern: String) -> String? Never! {
     Val(route_shape(parsed.segments))
 }
 
+// The first defect of route `pattern` the build refuses (E2805), or None for
+// a route of the one canonical grammar: it starts with `/`, has no empty
+// segment, names each `:name` and final `*name` once, and each static
+// segment percent-decodes to one safe UTF-8 segment. The HTTP StaticRoutes
+// rule reports it at a registration whose path the build knows.
+priv __route_pattern_error: fn(pattern: String) -> String? Never! {
+    if !pattern.starts_with("/") -> return Val("routes must start with `/`")
+    segments: pattern.split("/").to_list()
+    loop index in 1..<segments.len() {
+        segment: segments[index]
+        if segment == "" {
+            if pattern == "/" && segments.len() == 2 -> next
+            return Val("empty path segments are not allowed")
+        }
+        if segment.contains("{{") || segment.contains("}}") {
+            return Val("use `:name` or final `*name`; braces are not route markers")
+        }
+        if segment == "*" -> return Val("write a named catch-all such as `*wildcard`")
+        if !segment.starts_with(":") && !segment.starts_with("*") {
+            if route_segment_error(segment.bytes()) == .Val(reason) -> return Val(reason)
+            next
+        }
+        catch_all: segment.starts_with("*")
+        if catch_all && index != segments.len() - 1 -> return Val("`*name` catch-all must be final")
+        name: route_segment_name(segment)
+        if !route_name_ok(name.bytes()) {
+            marker: if catch_all -> "catch-all" else -> "parameter"
+            return Val("{marker} names must match `[A-Za-z_][A-Za-z0-9_]*`")
+        }
+        loop prior in 1..<index {
+            earlier: segments[prior]
+            if (earlier.starts_with(":") || earlier.starts_with("*")) && route_segment_name(earlier) == name {
+                return Val("duplicate parameter `{name}`")
+            }
+        }
+    }
+    None
+}
+
+// The name a `:name` or `*name` segment gives, without its marker.
+priv route_segment_name: fn(segment: String) -> String Never! {
+    String.from_bytes(segment.bytes().slice(1, segment.bytes().len())) ?? ""
+}
+
+// The first defect of one static route segment, or None when it
+// percent-decodes to one safe UTF-8 segment, as segment_decode reads it.
+priv route_segment_error: fn(raw: [U8]) -> String? Never! {
+    ^decoded: [U8]{}
+    ^i: 0
+    loop i < raw.len() {
+        if raw[i] != (U8{37}) {
+            decoded.push(raw[i])
+            i += 1
+            next
+        }
+        hi: if i + 1 < raw.len() -> http.from_hex(raw[i + 1]) else -> -1
+        lo: if i + 2 < raw.len() -> http.from_hex(raw[i + 2]) else -> -1
+        if hi < 0 || lo < 0 -> return Val("invalid percent escape")
+        value: hi * 16 + lo
+        if value == 47 -> return Val("encoded slash is ambiguous")
+        decoded.push(U8{value})
+        i += 3
+    }
+    text: String.from_bytes(decoded) ?? return Val("route segment is not valid UTF-8")
+    if text == "." || text == ".." -> return Val("dot traversal segment is not allowed")
+    None
+}
+
 // The OpenAPI path of a parsed route: static segments percent-encoded,
 // parameters as `{name}` (jet_http_route_openapi_path).
 priv route_openapi_path: fn(segments: [HTTPSegment]) -> String Never! {
