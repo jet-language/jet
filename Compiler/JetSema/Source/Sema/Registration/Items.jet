@@ -162,6 +162,7 @@ use {
         interner,
         TCompilerBuiltin,
         foundation_byte_text,
+        jet_target_machine_hosted,
     ]
     jet_parser.[
         jfmt_decode_shapes,
@@ -972,6 +973,17 @@ SemaLookupCounts: struct {
     scope_compares: Int,
 }
 
+// What the program tables' registration graph stands for. A Program graph is
+// the one a registered build made. A Snapshot graph is the empty one given
+// to a check of one program alone (check_program) or to a schema read: it
+// registers nothing, so every lookup in it misses. The few checks that
+// resolve a snapshot's own declarations without a registration branch on
+// `.Snapshot`, each with a line saying why.
+SemaTablesMode: enum {
+    Program,
+    Snapshot,
+}
+
 SemaRegistrationGraph: struct {
     package_identity: String,
     entry_module_identity: ModuleID,
@@ -1239,6 +1251,43 @@ SemaRegistrationGraph: struct {
     // Keep Local/Parameter name reference facts across functions only when
     // name facts, programs, or Core bodies are being built.
     keep_local_name_references: Bool{true},
+    // Snapshot for the empty graph of a lone program's check
+    // (sema_registration_graph_snapshot).
+    mode: SemaTablesMode{SemaTablesMode.Program},
+}
+
+// The empty graph of a snapshot check (SemaTablesMode.Snapshot): no modules,
+// symbols or rows, and a fresh interner. It keeps local name references, as
+// a check of one program always did.
+sema_registration_graph_snapshot: fn() -> SemaRegistrationGraph Never! {
+    SemaRegistrationGraph{
+        package_identity: "",
+        entry_module_identity: module_none(),
+        canonical_effect_module_identity: module_none(),
+        target_machine: jet_target_machine_hosted("", ""),
+        build_facts: SemaBuildFacts{package_name: "", package_version: "", os: "", profile: "", stamp_git: None, stamp_dirty: false, stamp_toolchain: "", stamp_at: ""},
+        modules: [SemaRegistrationModule]{},
+        module_table: ModuleTable{identities: name_table()},
+        module_rows: [Int]{},
+        symbols: symbol_table_of([SymbolKeys]{symbol_builtin_keys()}),
+        edges: [SemaRegistrationImportEdge]{},
+        foreign_providers: [SemaForeignProviderInput]{},
+        core_builtin_owner_facts: [SemaRegistrationCoreBuiltinOwnerFact]{},
+        imports: [SemaRegistrationImport]{},
+        unit_facts: [SemaRegistrationUnitFact]{},
+        lookup_counters: Shared{SemaLookupCounters{module_lookups: 0, name_lookups: 0, scope_lookups: 0, scope_compares: 0}},
+        counting: false,
+        internal_problem: None,
+        diagnostics: [Diagnostic]{},
+        complete: true,
+        nominal_row_buckets: [[SemaRegistrationRowRef]]{[SemaRegistrationRowRef]{}},
+        impl_row_buckets: [[SemaRegistrationRowRef]]{[SemaRegistrationRowRef]{}},
+        nominal_symbol_rows: [U32:SemaRegistrationRowRef]{},
+        codec_demand: Shared{sema_codec_demand_new()},
+        derive_demand: Shared{sema_derive_demand_new()},
+        interner: interner(),
+        mode: SemaTablesMode.Snapshot,
+    }
 }
 
 // `{module_name}.{name}` of every nominal row registered by the end of graph

@@ -8,10 +8,10 @@ use {
         SchemaSnapshot,
         SnapshotField,
         check_schema_migrations,
-        sema_program_tables_init,
+        sema_program_tables_snapshot,
         snapshot_from_struct,
     ]
-    jet_foundation.[Diagnostic, Item, TTypeDef]
+    jet_foundation.[Diagnostic, Item]
 }
 
 schema_require: fn(ok: Bool, detail: String) Never! {
@@ -59,7 +59,7 @@ schema_has: fn(diagnostics: [Diagnostic], text: String) Never! {
         if SchemaSnapshot.parse(raw) == .Err(_) -> invalid = true
         schema_require(invalid, "malformed snapshot")
     }
-    program: sema_program_tables_init(None, [TTypeDef]{})
+    program: sema_program_tables_snapshot()
     baseline: schema_baseline([SnapshotField]{SnapshotField{name: "name", ty: "String"}})
     current: schema_items("#Codable(published) Account: struct {{ name: String, verified: Bool }}")
     added: check_schema_migrations(current, baseline, None, program)

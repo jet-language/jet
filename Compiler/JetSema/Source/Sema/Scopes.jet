@@ -33,14 +33,12 @@ use jet_foundation.[
     Symbol,
     SymbolID,
     SymbolKind,
-    SymbolTable,
     TextEdit,
     symbol_find,
     symbol_is_local,
     symbol_key_text,
     symbol_local_keys_intern,
     symbol_local_keys_text,
-    symbol_table,
     symbol_table_key,
     TComptimeValue,
     TEXPR_FIRST_LOCAL_ID,
@@ -73,12 +71,10 @@ use jet_foundation.[
     name_intern,
     name_table_sized,
     name_text_hash,
-    Interner,
     InternerDelta,
     TypeID,
     TypeKind,
     interner,
-    interner_delta_empty,
     interner_fork_delta,
     type_none,
     type_id_well_known,
@@ -821,10 +817,8 @@ SemaScopeEnvironment: struct {
 // never refused. User bodies consume the selected machine fact, never a host
 // OS guess. A function body is checked with the graph in the program tables.
 sema_scope_environment_no_os: fn(environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
-    if program.registration_graph == .Val(graph) {
-        return graph.target_machine.no_os && environment.package_identity == graph.package_identity
-    }
-    false
+    graph: program.registration_graph
+    graph.target_machine.no_os && environment.package_identity == graph.package_identity
 }
 
 // The declaration scopes of the modules compile-time checks (item checks,
@@ -1344,7 +1338,7 @@ SemaScopeHardwareFacts: struct {
 // landing writes it. The tables own the graph they are given: callers hand
 // over one graph rather than a read value the constructor would copy again.
 SemaProgramTables: struct {
-    registration_graph: SemaRegistrationGraph?,
+    registration_graph: SemaRegistrationGraph,
     checked_types: [TTypeDef],
     // Every `checked_types` row of a bare name in order, by the name's id in
     // `checked_type_names`. The first row of a module among them is that
@@ -1360,23 +1354,14 @@ SemaProgramTables: struct {
     // copy facts, walked once per tables. Landing comptime values never
     // changes a nominal's members, so these stay true.
     copy_facts: SemaCopyFactsTable,
-    // The run's symbols of a check with no registration graph (one program,
-    // check_program); a graph's own table (SemaRegistrationGraph.symbols)
-    // is the run's otherwise.
-    symbols: SymbolTable{symbol_table()},
-    // True if any struct declaration may have a computed field (or when no
-    // registration graph is present); lets field reads skip computed-field
-    // symbol lookups in O(1) when false.
+    // True if any struct declaration may have a computed field (always for a
+    // snapshot check, whose graph registers none); lets field reads skip
+    // computed-field symbol lookups in O(1) when false.
     has_computed_fields: Bool{true},
-    // Fallback type/name interner when `registration_graph` is None; when a
-    // graph is present, its `graph.interner` is read directly.
-    interner: Interner?{None},
 }
 
 sema_program_fork_delta: fn(program: SemaProgramTables) -> InternerDelta Never! {
-    if program.registration_graph == .Val(graph) -> return interner_fork_delta(graph.interner)
-    if program.interner == .Val(fallback) -> return interner_fork_delta(fallback)
-    interner_delta_empty()
+    interner_fork_delta(program.registration_graph.interner)
 }
 
 // Looks up `ty` in the program's immutable shared `Interner` with zero heap
@@ -1385,26 +1370,12 @@ sema_program_fork_delta: fn(program: SemaProgramTables) -> InternerDelta Never! 
 sema_intern_type: fn(program: SemaProgramTables, context: ^SemaCheckContext, ty: Type) -> TypeID Never! {
     wk: type_id_well_known(ty)
     if wk.id != 0 -> return wk
-    if program.registration_graph == .Val(graph) {
-        shared: type_find_syntax(graph.interner, ty)
-        if shared.id != 0 -> return shared
-    } else if program.interner == .Val(fallback) {
-        shared: type_find_syntax(fallback, ty)
-        if shared.id != 0 -> return shared
-    }
+    graph: program.registration_graph
+    shared: type_find_syntax(graph.interner, ty)
+    if shared.id != 0 -> return shared
     if context.is_snapshot -> return type_none()
-    if context.type_delta.len() == 0 && (program.registration_graph != None || program.interner != None) {
-        context.type_delta.push(sema_program_fork_delta(program))
-    }
-    if context.type_delta.len() > 0 {
-        if program.registration_graph == .Val(graph) {
-            return delta_type_intern_syntax(graph.interner, context.type_delta[0], ty)
-        }
-        if program.interner == .Val(fallback) {
-            return delta_type_intern_syntax(fallback, context.type_delta[0], ty)
-        }
-    }
-    type_none()
+    if context.type_delta.len() == 0 -> context.type_delta.push(sema_program_fork_delta(program))
+    delta_type_intern_syntax(graph.interner, context.type_delta[0], ty)
 }
 
 // Always interns `ty` into a non-zero TypeID in `(program, context.type_delta)`,
@@ -1412,66 +1383,38 @@ sema_intern_type: fn(program: SemaProgramTables, context: ^SemaCheckContext, ty:
 sema_intern_type_force: fn(program: SemaProgramTables, context: ^SemaCheckContext, ty: Type) -> TypeID Never! {
     wk: type_id_well_known(ty)
     if wk.id != 0 -> return wk
-    if program.registration_graph == .Val(graph) {
-        shared: type_find_syntax(graph.interner, ty)
-        if shared.id != 0 -> return shared
-    } else if program.interner == .Val(fallback) {
-        shared: type_find_syntax(fallback, ty)
-        if shared.id != 0 -> return shared
-    }
-    if context.type_delta.len() == 0 && (program.registration_graph != None || program.interner != None) {
-        context.type_delta.push(sema_program_fork_delta(program))
-    }
-    if context.type_delta.len() > 0 {
-        if program.registration_graph == .Val(graph) {
-            return delta_type_intern_syntax(graph.interner, context.type_delta[0], ty)
-        }
-        if program.interner == .Val(fallback) {
-            return delta_type_intern_syntax(fallback, context.type_delta[0], ty)
-        }
-    }
-    panic("sema_intern_type_force: no Interner available on SemaProgramTables")
+    graph: program.registration_graph
+    shared: type_find_syntax(graph.interner, ty)
+    if shared.id != 0 -> return shared
+    if context.type_delta.len() == 0 -> context.type_delta.push(sema_program_fork_delta(program))
+    delta_type_intern_syntax(graph.interner, context.type_delta[0], ty)
 }
 
 // Written form of `id` in `(program, context.type_delta)`.
 sema_type_syntax_in: fn(program: SemaProgramTables, context: SemaCheckContext, id: TypeID) -> Type Never! {
-    if context.type_delta.len() > 0 {
-        if program.registration_graph == .Val(graph) -> return delta_type_syntax(graph.interner, context.type_delta[0], id)
-        if program.interner == .Val(fallback) -> return delta_type_syntax(fallback, context.type_delta[0], id)
-    }
-    if program.registration_graph == .Val(graph) -> return type_syntax(graph.interner, id)
-    if program.interner == .Val(fallback) -> return type_syntax(fallback, id)
-    panic("sema_type_syntax_in: no Interner available on SemaProgramTables")
+    graph: program.registration_graph
+    if context.type_delta.len() > 0 -> return delta_type_syntax(graph.interner, context.type_delta[0], id)
+    type_syntax(graph.interner, id)
 }
 
 // Kind byte of `id` in `(program, context.type_delta)` without allocating a Type.
 sema_type_kind_in: fn(program: SemaProgramTables, context: SemaCheckContext, id: TypeID) -> TypeKind Never! {
-    if context.type_delta.len() > 0 {
-        if program.registration_graph == .Val(graph) -> return delta_type_kind(graph.interner, context.type_delta[0], id)
-        if program.interner == .Val(fallback) -> return delta_type_kind(fallback, context.type_delta[0], id)
-    }
-    if program.registration_graph == .Val(graph) -> return type_kind(graph.interner, id)
-    if program.interner == .Val(fallback) -> return type_kind(fallback, id)
-    TypeKind.Int
+    graph: program.registration_graph
+    if context.type_delta.len() > 0 -> return delta_type_kind(graph.interner, context.type_delta[0], id)
+    type_kind(graph.interner, id)
 }
 
 // O(1) identity equality on interned TypeIDs (using canonical columns).
 sema_type_id_equal: fn(program: SemaProgramTables, context: SemaCheckContext, left: TypeID, right: TypeID) -> Bool Never! {
     if left.id == right.id -> return true
-    if context.type_delta.len() > 0 {
-        if program.registration_graph == .Val(graph) -> return delta_type_id_identity_equal(graph.interner, context.type_delta[0], left, right)
-        if program.interner == .Val(fallback) -> return delta_type_id_identity_equal(fallback, context.type_delta[0], left, right)
-        return false
-    }
-    if program.registration_graph == .Val(graph) -> return type_id_identity_equal(graph.interner, left, right)
-    if program.interner == .Val(fallback) -> return type_id_identity_equal(fallback, left, right)
-    false
+    graph: program.registration_graph
+    if context.type_delta.len() > 0 -> return delta_type_id_identity_equal(graph.interner, context.type_delta[0], left, right)
+    type_id_identity_equal(graph.interner, left, right)
 }
 
 // The run-wide id of `key`, if a registration holds it.
 sema_symbol_find: fn(program: SemaProgramTables, key: String) -> SymbolID? Never! {
-    if program.registration_graph == .Val(graph) -> return symbol_find(graph.symbols, key)
-    symbol_find(program.symbols, key)
+    symbol_find(program.registration_graph.symbols, key)
 }
 
 // The id of the declaration with this kind, module, owner and name: the
@@ -1505,8 +1448,7 @@ sema_symbol_key: fn(program: SemaProgramTables, context: SemaCheckContext, id: S
 // The key text of the run-wide `id`.
 sema_program_symbol_key: fn(program: SemaProgramTables, id: SymbolID) -> String Never! {
     if symbol_is_local(id) -> panic("a body's own symbol has no run-wide key")
-    if program.registration_graph == .Val(graph) -> return symbol_table_key(graph.symbols, id)
-    symbol_table_key(program.symbols, id)
+    symbol_table_key(program.registration_graph.symbols, id)
 }
 
 // The DeclID a direct call to the registered callable `symbol` names (Cutover
@@ -1514,10 +1456,9 @@ sema_program_symbol_key: fn(program: SemaProgramTables, id: SymbolID) -> String 
 // no row (a body's own symbol has none) is a compiler bug, reported rather
 // than lowered to a guessed callee.
 sema_call_callee_decl: fn(program: SemaProgramTables, symbol: SymbolID, span: Span, diagnostics: ^[Diagnostic]) -> DeclID? Never! {
-    if program.registration_graph == .Val(graph) {
-        if !symbol_is_local(symbol) && sema_registration_callable_id(graph, symbol) == .Val(id) {
-            return Val(id)
-        }
+    graph: program.registration_graph
+    if !symbol_is_local(symbol) && sema_registration_callable_id(graph, symbol) == .Val(id) {
+        return Val(id)
     }
     key: if symbol_is_local(symbol) -> "" else -> sema_program_symbol_key(program, symbol)
     diagnostics.push(sema_error("E0003", span, "the call target `{key}` is not a registered callable", "every direct call names the DeclID its callable registered", "report this compiler bug with the source that triggers it"))
@@ -1527,24 +1468,31 @@ sema_call_callee_decl: fn(program: SemaProgramTables, symbol: SymbolID, span: Sp
 // The key text of the registered declaration `id` (diagnostics, call facts,
 // effect node keys). A DeclID is only minted from a graph's table.
 sema_program_decl_key: fn(program: SemaProgramTables, id: DeclID) -> String Never! {
-    if program.registration_graph == .Val(graph) {
-        return decl_table_key(graph.decls, graph.symbols, id)
-    }
-    panic("a DeclID outlived its registration graph")
+    graph: program.registration_graph
+    decl_table_key(graph.decls, graph.symbols, id)
 }
 
-sema_program_tables_init: fn(graph: ^^SemaRegistrationGraph?, checked_types: [TTypeDef]) -> SemaProgramTables Never! {
-    boxed_edges := sema_scope_environment_boxed_edges(graph)
+sema_program_tables_init: fn(graph: ^^SemaRegistrationGraph, checked_types: [TTypeDef]) -> SemaProgramTables Never! {
+    boxed_edges := sema_checked_program_boxed_edges(graph)
     copy_facts := sema_copy_facts_table(graph)
     sema_program_tables_with(graph, checked_types, boxed_edges, copy_facts)
 }
 
+// The tables of a snapshot check: its empty graph
+// (sema_registration_graph_snapshot) and no checked types. With no
+// registered struct to rule one out, any struct may have a computed field.
+sema_program_tables_snapshot: fn() -> SemaProgramTables Never! {
+    tables := sema_program_tables_init(sema_registration_graph_snapshot(), [TTypeDef]{})
+    tables.has_computed_fields = true
+    tables
+}
+
 // The tables over `graph` whose boxed edges and copy facts were already
-// computed from it (sema_scope_environment_boxed_edges, sema_copy_facts_table).
-sema_program_tables_with: fn(graph: ^^SemaRegistrationGraph?, checked_types: [TTypeDef], boxed_edges: ^^[U32:[String]], copy_facts: ^^SemaCopyFactsTable) -> SemaProgramTables Never! {
+// computed from it (sema_checked_program_boxed_edges, sema_copy_facts_table).
+sema_program_tables_with: fn(graph: ^^SemaRegistrationGraph, checked_types: [TTypeDef], boxed_edges: ^^[U32:[String]], copy_facts: ^^SemaCopyFactsTable) -> SemaProgramTables Never! {
     names := name_table_sized(checked_types.len() * 2 + 2)
     name_rows := [[Int]]{[Int]{}}
-    has_computed := graph == None
+    has_computed := false
     loop (index, definition) in checked_types {
         id: name_index(name_intern(names, definition.name))
         if id == name_rows.len() -> name_rows.push([Int]{})
@@ -1558,7 +1506,6 @@ sema_program_tables_with: fn(graph: ^^SemaRegistrationGraph?, checked_types: [TT
             }
         }
     }
-    graphless: graph == None
     SemaProgramTables{
         registration_graph: graph,
         checked_types: checked_types,
@@ -1567,7 +1514,6 @@ sema_program_tables_with: fn(graph: ^^SemaRegistrationGraph?, checked_types: [TT
         boxed_edges: boxed_edges,
         copy_facts: copy_facts,
         has_computed_fields: has_computed,
-        interner: if graphless -> Val(interner()) else -> None,
     }
 }
 
@@ -1590,31 +1536,27 @@ sema_scope_environment_init: fn(module_identity: ModuleID, package_identity: Str
 }
 
 // The identity text of the environment's module: its graph's spelling, or the
-// module name a graphless snapshot check names its module by.
+// module name a snapshot check names its module by.
 sema_scope_environment_module_text: fn(environment: SemaScopeEnvironment, program: SemaProgramTables) -> String Never! {
-    if program.registration_graph == .Val(graph) {
-        return module_text(graph.module_table, environment.module_identity)
-    }
-    environment.module_name
+    graph: program.registration_graph
+    // Snapshot: the empty graph holds no module; a lone program is named by
+    // the name its check was given.
+    if graph.mode == .Snapshot -> return environment.module_name
+    module_text(graph.module_table, environment.module_identity)
 }
 
 // The identity text of module `module_identity` as the environment's checks
 // spell it (sema_scope_environment_module_text); "" for another module of a
-// graphless check, which has none.
+// snapshot check, which has none.
 sema_scope_module_text: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_identity: ModuleID) -> String Never! {
-    if program.registration_graph == .Val(graph) {
-        return module_text(graph.module_table, module_identity)
+    graph: program.registration_graph
+    // Snapshot: the empty graph holds no module; only the lone program's own
+    // has a name, the one its check was given.
+    if graph.mode == .Snapshot {
+        if module_identity == environment.module_identity -> return environment.module_name
+        return ""
     }
-    if module_identity == environment.module_identity -> return environment.module_name
-    ""
-}
-
-// The boxed field edges of `graph`, read in place through the `.Val(…)`
-// pattern on the parameter; binding `value: graph ?? …` copies the whole
-// graph.
-sema_scope_environment_boxed_edges: fn(graph: SemaRegistrationGraph?) -> [U32:[String]] Never! {
-    if graph == .Val(value) -> return sema_checked_program_boxed_edges(value)
-    [U32:[String]]{}
+    module_text(graph.module_table, module_identity)
 }
 
 // The first checked declaration of `name` owned by `module_identity`.
@@ -1626,11 +1568,9 @@ sema_scope_checked_type_row: fn(environment: SemaScopeEnvironment, program: Sema
 sema_scope_checked_type_row_qualified: fn(program: SemaProgramTables, qualified: String) -> Int? {
     parts: qualified.split(".").to_list()
     if parts.len() < 2 -> return None
-    if program.registration_graph == .Val(graph) {
-        owner: module_find(graph.module_table, parts.slice(0, parts.len() - 1).join(".")) ?? return None
-        return sema_scope_checked_type_row_in(program, owner, parts[parts.len() - 1])
-    }
-    None
+    graph: program.registration_graph
+    owner: module_find(graph.module_table, parts.slice(0, parts.len() - 1).join(".")) ?? return None
+    sema_scope_checked_type_row_in(program, owner, parts[parts.len() - 1])
 }
 
 // The first row named `name` among `checked_types` that `module_identity` owns.
@@ -1661,25 +1601,22 @@ sema_scope_checked_type_name_rows: fn(environment: SemaScopeEnvironment, program
 // Retarget scope facts while the program tables retain their one graph owner.
 // No field is taken from a borrowed environment or program parameter.
 sema_scope_environment_enter_module: fn(environment: ^SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, comptime_body_values: ^^SemaComptimeBodyValues) Never! {
-    if program.registration_graph == .Val(graph) {
-        environment.module_identity = graph.modules[module_index].module_identity
-        environment.module_row = module_index
-        environment.package_identity = graph.modules[module_index].package_identity
-        environment.module_name = graph.modules[module_index].module_name
-        environment.declared_module = graph.modules[module_index].declared_module
-        environment.source_file = graph.modules[module_index].source_file
-        environment.source_origin = graph.modules[module_index].source_origin
-        environment.source_segments = graph.modules[module_index].source_segments
-        environment.declarations = [SemaScopeDeclaration]{}
-        environment.generic_params = [TGenericParam]{}
-        environment.comptime_body_values = comptime_body_values.move()
-        environment.else_arms = graph.modules[module_index].program.else_arms
-        environment.debug_sites = graph.modules[module_index].program.debug_sites
-        environment.tables = graph.modules[module_index].program.tables
-        environment.function_name = ""
-        return
-    }
-    panic("an owning registered-module pass lost its registration graph")
+    graph: program.registration_graph
+    environment.module_identity = graph.modules[module_index].module_identity
+    environment.module_row = module_index
+    environment.package_identity = graph.modules[module_index].package_identity
+    environment.module_name = graph.modules[module_index].module_name
+    environment.declared_module = graph.modules[module_index].declared_module
+    environment.source_file = graph.modules[module_index].source_file
+    environment.source_origin = graph.modules[module_index].source_origin
+    environment.source_segments = graph.modules[module_index].source_segments
+    environment.declarations = [SemaScopeDeclaration]{}
+    environment.generic_params = [TGenericParam]{}
+    environment.comptime_body_values = comptime_body_values.move()
+    environment.else_arms = graph.modules[module_index].program.else_arms
+    environment.debug_sites = graph.modules[module_index].program.debug_sites
+    environment.tables = graph.modules[module_index].program.tables
+    environment.function_name = ""
 }
 
 // A comptime check borrows the program graph and replaces only scope facts.
@@ -1688,26 +1625,24 @@ sema_scope_environment_enter_module: fn(environment: ^SemaScopeEnvironment, prog
 // text and carries its E3405 unwrap edit as a run-time one does.
 // False when the graph has no such module.
 sema_scope_environment_enter_comptime_module: fn(environment: ^SemaScopeEnvironment, program: SemaProgramTables, module_identity: ModuleID, comptime_body_values: ^^SemaComptimeBodyValues) -> Bool Never! {
-    if program.registration_graph == .Val(graph) {
-        module_index: sema_registration_module_index(graph, module_identity) ?? return false
-        environment.module_identity = graph.modules[module_index].module_identity
-        environment.module_row = module_index
-        environment.package_identity = graph.modules[module_index].package_identity
-        environment.module_name = graph.modules[module_index].module_name
-        environment.declared_module = graph.modules[module_index].declared_module
-        environment.source_file = graph.modules[module_index].source_file
-        environment.source_origin = graph.modules[module_index].source_origin
-        environment.source_segments = graph.modules[module_index].source_segments
-        environment.declarations = [SemaScopeDeclaration]{}
-        environment.generic_params = [TGenericParam]{}
-        environment.comptime_body_values = comptime_body_values.move()
-        environment.else_arms = [ElseArmSpan]{}
-        environment.debug_sites = graph.modules[module_index].program.debug_sites
-        environment.tables = graph.modules[module_index].program.tables
-        environment.function_name = ""
-        return true
-    }
-    false
+    graph: program.registration_graph
+    module_index: sema_registration_module_index(graph, module_identity) ?? return false
+    environment.module_identity = graph.modules[module_index].module_identity
+    environment.module_row = module_index
+    environment.package_identity = graph.modules[module_index].package_identity
+    environment.module_name = graph.modules[module_index].module_name
+    environment.declared_module = graph.modules[module_index].declared_module
+    environment.source_file = graph.modules[module_index].source_file
+    environment.source_origin = graph.modules[module_index].source_origin
+    environment.source_segments = graph.modules[module_index].source_segments
+    environment.declarations = [SemaScopeDeclaration]{}
+    environment.generic_params = [TGenericParam]{}
+    environment.comptime_body_values = comptime_body_values.move()
+    environment.else_arms = [ElseArmSpan]{}
+    environment.debug_sites = graph.modules[module_index].program.debug_sites
+    environment.tables = graph.modules[module_index].program.tables
+    environment.function_name = ""
+    true
 }
 
 // The registration row of the environment's module: the row module entry
@@ -1732,32 +1667,29 @@ sema_scope_caller_index: fn(environment: SemaScopeEnvironment, graph: SemaRegist
 // registers the module.
 sema_scope_module_tables: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_identity: ModuleID) -> ASTTables? Never! {
     if module_identity == environment.module_identity -> return Val(environment.tables)
-    if program.registration_graph == .Val(graph) {
-        module_index: sema_registration_module_index(graph, module_identity) ?? return None
-        return Val(graph.modules[module_index].program.tables)
-    }
-    None
+    graph: program.registration_graph
+    module_index: sema_registration_module_index(graph, module_identity) ?? return None
+    Val(graph.modules[module_index].program.tables)
 }
 
 sema_scope_environment_boxed_edge: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, owner: SymbolID, edge: String) -> Bool Never! {
-    if program.registration_graph == .Val(graph) {
-        row: sema_type_graph_nominal_row(graph, owner) ?? return false
-        module_identity: graph.modules[row.module_index].module_identity
-        if sema_scope_checked_type_row(environment, program, module_identity, graph.modules[row.module_index].nominals[row.row].symbol.name) == .Val(checked_row) {
-            return sema_checked_type_has_boxed_edge(program.checked_types[checked_row], edge)
+    graph: program.registration_graph
+    row: sema_type_graph_nominal_row(graph, owner) ?? return false
+    module_identity: graph.modules[row.module_index].module_identity
+    if sema_scope_checked_type_row(environment, program, module_identity, graph.modules[row.module_index].nominals[row.row].symbol.name) == .Val(checked_row) {
+        return sema_checked_type_has_boxed_edge(program.checked_types[checked_row], edge)
+    }
+    // Matched in place: a pattern on the indexed path copies the whole item.
+    nominal: graph.modules[row.module_index].nominals[row.row]
+    if nominal.source == .SourceAST(definition) {
+        // The declaration's own name resolves to this nominal in its own
+        // module, so its edges are the ones keyed by the owner (what
+        // sema_checked_boxed_edges looks up after resolving that name).
+        if sema_registration_root_name(definition) == nominal.symbol.name {
+            edges: program.boxed_edges.get(owner.id) ?? return false
+            return edges.contains(edge)
         }
-        // Matched in place: a pattern on the indexed path copies the whole item.
-        nominal: graph.modules[row.module_index].nominals[row.row]
-        if nominal.source == .SourceAST(definition) {
-            // The declaration's own name resolves to this nominal in its own
-            // module, so its edges are the ones keyed by the owner (what
-            // sema_checked_boxed_edges looks up after resolving that name).
-            if sema_registration_root_name(definition) == nominal.symbol.name {
-                edges: program.boxed_edges.get(owner.id) ?? return false
-                return edges.contains(edge)
-            }
-            return sema_checked_boxed_edges(graph, program.boxed_edges, module_identity, definition).contains(edge)
-        }
+        return sema_checked_boxed_edges(graph, program.boxed_edges, module_identity, definition).contains(edge)
     }
     false
 }
@@ -3017,12 +2949,10 @@ sema_scope_counted: fn(table: SemaScopeTable, compares: Int, found: ^^Int?) -> I
 sema_scope_build_time: fn(table: SemaScopeTable, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     if table.comptime_execution_depth > 0 -> return true
     if (table.location_function ?? environment.function_name) != "build" -> return false
-    // Read in place through the pattern: a `??` binding copies the graph.
-    if program.registration_graph == .Val(graph) {
-        module_index: sema_scope_caller_index(environment, graph) ?? return false
-        loop item in graph.modules[module_index].program.items {
-            if item == .Func(function) && function.name == "build" -> return sema_function_is_build_entry(function)
-        }
+    graph: program.registration_graph
+    module_index: sema_scope_caller_index(environment, graph) ?? return false
+    loop item in graph.modules[module_index].program.items {
+        if item == .Func(function) && function.name == "build" -> return sema_function_is_build_entry(function)
     }
     false
 }
@@ -3786,25 +3716,24 @@ SemaScopeDeclarationSite: enum {
 }
 
 sema_scope_declaration_site: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> SemaScopeDeclarationSite? {
-    if program.registration_graph == .Val(graph) {
-        // The first function and nominal rows by key replace the module scan
-        // (earlier modules first, functions before nominals in one module).
-        function_module := -1
-        function_row := -1
-        if sema_registration_callable_row_of(graph, id) == .Val(callable) {
-            if callable == .Function(module_index, row) {
-                function_module = module_index
-                function_row = row
-            }
+    graph: program.registration_graph
+    // The first function and nominal rows by key replace the module scan
+    // (earlier modules first, functions before nominals in one module).
+    function_module := -1
+    function_row := -1
+    if sema_registration_callable_row_of(graph, id) == .Val(callable) {
+        if callable == .Function(module_index, row) {
+            function_module = module_index
+            function_row = row
         }
-        if graph.nominal_symbol_rows.get(id.id) == .Val(nominal) {
-            if function_module < 0 || nominal.module_index < function_module {
-                return Val(SemaScopeDeclarationSite.Nominal{module_index: nominal.module_index, row: nominal.row})
-            }
+    }
+    if graph.nominal_symbol_rows.get(id.id) == .Val(nominal) {
+        if function_module < 0 || nominal.module_index < function_module {
+            return Val(SemaScopeDeclarationSite.Nominal{module_index: nominal.module_index, row: nominal.row})
         }
-        if function_module >= 0 {
-            return Val(SemaScopeDeclarationSite.Function{module_index: function_module, row: function_row})
-        }
+    }
+    if function_module >= 0 {
+        return Val(SemaScopeDeclarationSite.Function{module_index: function_module, row: function_row})
     }
     loop index in 0..<environment.declarations.len() {
         if environment.declarations[index].symbol_id == id {
@@ -3817,13 +3746,12 @@ sema_scope_declaration_site: fn(environment: SemaScopeEnvironment, program: Sema
 sema_scope_resolve_declaration: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> Item? {
     site: sema_scope_declaration_site(environment, program, id) ?? return None
     if site == .Local(index) -> return Val(environment.declarations[index].item)
-    if program.registration_graph == .Val(graph) {
-        if site == .Function(module_index, row) {
-            return Val(Item.Func{value: graph.modules[module_index].functions[row].declaration})
-        }
-        if site == .Nominal(module_index, row) {
-            return sema_registration_nominal_source_item(graph.modules[module_index].nominals[row].source)
-        }
+    graph: program.registration_graph
+    if site == .Function(module_index, row) {
+        return Val(Item.Func{value: graph.modules[module_index].functions[row].declaration})
+    }
+    if site == .Nominal(module_index, row) {
+        return sema_registration_nominal_source_item(graph.modules[module_index].nominals[row].source)
     }
     None
 }
@@ -3854,9 +3782,8 @@ sema_scope_declaration_kind: fn(environment: SemaScopeEnvironment, program: Sema
     }
     if site == .Function(_, _) -> return Val(SemaScopeDeclarationKind.Func)
     if site == .Nominal(module_index, row) {
-        if program.registration_graph == .Val(graph) {
-            return sema_scope_nominal_kind(graph, module_index, row)
-        }
+        graph: program.registration_graph
+        return sema_scope_nominal_kind(graph, module_index, row)
     }
     None
 }
@@ -3896,9 +3823,8 @@ sema_scope_declaration_struct: fn(environment: SemaScopeEnvironment, program: Se
     site: sema_scope_declaration_site(environment, program, id) ?? return None
     if site == .Local(index) -> return sema_scope_item_struct(environment.declarations[index].item)
     if site == .Nominal(module_index, row) {
-        if program.registration_graph == .Val(graph) {
-            return sema_scope_nominal_struct(graph, module_index, row)
-        }
+        graph: program.registration_graph
+        return sema_scope_nominal_struct(graph, module_index, row)
     }
     None
 }
@@ -3921,10 +3847,9 @@ sema_scope_declaration_struct_states: fn(environment: SemaScopeEnvironment, prog
         return sema_scope_item_struct_states(environment.declarations[index].item)
     }
     if site == .Nominal(module_index, row) {
-        if program.registration_graph == .Val(graph) {
-            if graph.modules[module_index].nominals[row].source == .SourceAST(item) {
-                return sema_scope_item_struct_states(item)
-            }
+        graph: program.registration_graph
+        if graph.modules[module_index].nominals[row].source == .SourceAST(item) {
+            return sema_scope_item_struct_states(item)
         }
     }
     None
@@ -3959,9 +3884,8 @@ sema_scope_declaration_enum: fn(environment: SemaScopeEnvironment, program: Sema
     site: sema_scope_declaration_site(environment, program, id) ?? return None
     if site == .Local(index) -> return sema_scope_item_enum(environment.declarations[index].item)
     if site == .Nominal(module_index, row) {
-        if program.registration_graph == .Val(graph) {
-            return sema_scope_nominal_enum(graph, module_index, row)
-        }
+        graph: program.registration_graph
+        return sema_scope_nominal_enum(graph, module_index, row)
     }
     None
 }
@@ -3989,9 +3913,8 @@ sema_scope_declaration_enum_declares: fn(environment: SemaScopeEnvironment, prog
         return sema_scope_item_enum_declares(environment.declarations[index].item, variant)
     }
     if site == .Nominal(module_index, row) {
-        if program.registration_graph == .Val(graph) {
-            return sema_scope_nominal_enum_declares(graph, module_index, row, variant)
-        }
+        graph: program.registration_graph
+        return sema_scope_nominal_enum_declares(graph, module_index, row, variant)
     }
     false
 }
@@ -4017,9 +3940,8 @@ sema_scope_declaration_distinct: fn(environment: SemaScopeEnvironment, program: 
         return sema_scope_item_distinct(environment.declarations[index].item)
     }
     if site == .Nominal(module_index, row) {
-        if program.registration_graph == .Val(graph) {
-            return sema_scope_nominal_distinct(graph, module_index, row)
-        }
+        graph: program.registration_graph
+        return sema_scope_nominal_distinct(graph, module_index, row)
     }
     None
 }
@@ -4043,13 +3965,12 @@ sema_scope_declaration_function_type_params: fn(environment: SemaScopeEnvironmen
     if site == .Local(index) {
         return sema_scope_item_function_type_params(environment.declarations[index].item)
     }
-    if program.registration_graph == .Val(graph) {
-        if site == .Function(module_index, row) {
-            return graph.modules[module_index].functions[row].declaration.type_params
-        }
-        if site == .Nominal(module_index, row) {
-            return sema_scope_nominal_function_type_params(graph, module_index, row)
-        }
+    graph: program.registration_graph
+    if site == .Function(module_index, row) {
+        return graph.modules[module_index].functions[row].declaration.type_params
+    }
+    if site == .Nominal(module_index, row) {
+        return sema_scope_nominal_function_type_params(graph, module_index, row)
     }
     [TypeParam]{}
 }
@@ -4070,10 +3991,9 @@ sema_scope_declaration_function_params: fn(environment: SemaScopeEnvironment, pr
         if environment.declarations[index].item == .Func(func) -> return Val(func.params.copy())
         return None
     }
-    if program.registration_graph == .Val(graph) {
-        if site == .Function(module_index, row) {
-            return Val(graph.modules[module_index].functions[row].declaration.params.copy())
-        }
+    graph: program.registration_graph
+    if site == .Function(module_index, row) {
+        return Val(graph.modules[module_index].functions[row].declaration.params.copy())
     }
     None
 }
