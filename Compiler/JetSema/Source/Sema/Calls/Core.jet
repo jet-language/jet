@@ -1406,8 +1406,8 @@ sema_call_core_posix_control: fn(member: String) -> Bool Never! {
 
 // The Core declaration a native Core row's call is checked against: the
 // function of the same name in the row's module, the wrapper whose body makes
-// that native call (`vault.get`, `net.sendfile`). None when the module is not
-// loaded or declares no such function.
+// that native call (`plugin.load`). None when the module is not loaded or
+// declares no such function.
 sema_call_core_declared_target: fn(record: CoreCallRecord, span: Span, check: ^SemaBodyCheck) -> SemaCallDirectTarget? {
     identity: sema_call_core_module_identity(check.environment.*, check.program.*, record.module_name) ?? return None
     sema_call_core_source_target(check.environment.*, check.program.*, identity, record.member, [Type]{}, span, true, check.diagnostics)
@@ -1435,8 +1435,7 @@ sema_call_core_no_fixed_contract: fn(api: String, span: Span, diagnostics: ^[Dia
 
 // A native Core call's result: its declaration's return, where `T Never!` is
 // the infallible spelling of a plain `T`, the value the runtime route
-// marshals (`vault.get`'s `String? Never!` returns a `String?`). A diverging
-// `Never Never!` keeps its carrier.
+// marshals. A diverging `Never Never!` keeps its carrier.
 sema_call_core_native_return: fn(signature: Type) -> Type? {
     returned: sema_call_signature_return(signature) ?? return None
     if returned == .Result(ok, err) && err == (Type.Named{name: "Never"}) {

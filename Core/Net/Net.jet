@@ -597,7 +597,7 @@ sendfile: fn(stream: ^TCPStream, path: String) -[Net, Time.Wait]> Int NetError! 
     if !valid_text(path) {
         return Err(net_err("sendfile", path, "path is empty or contains control bytes"))
     }
-    core.net.sendfile(stream, path)
+    rt.sendfile(stream, path)
 }
 
 udp_bind: fn(addr: String) -[Net]> UDPSocket NetError! {
@@ -655,17 +655,6 @@ unix_accept: fn(listener: UnixListener) -[Net, Time.Wait]> UnixStream NetError! 
 unix_connect: fn(path: String, /, *, deadline: Duration?{None}) -[Net, Time.Wait]> UnixStream NetError! {
     if deadline == .Val(limit) -> return rt.unix_connect_deadline_host(path, limit.ns)
     rt.unix_connect_host(path)
-}
-
-// A compiler that still checks `unix_connect` through its dispatcher row
-// runs these entries, picked by argument count; their zones are the calls'
-// label rules.
-#Builtin.Role(.UnixConnect) priv __unix_connect_entry: fn(path: String, /) -[Net, Time.Wait]> UnixStream NetError! {
-    rt.unix_connect_host(path)
-}
-
-#Builtin.Role(.UnixConnectDeadline) priv __unix_connect_deadline_entry: fn(path: String, /, *, deadline: Duration) -[Net, Time.Wait]> UnixStream NetError! {
-    rt.unix_connect_deadline_host(path, deadline.ns)
 }
 
 unix_read: fn(stream: ^UnixStream) -[Net, Time.Wait]> String NetError! { rt.unix_read(stream) }
