@@ -1744,180 +1744,6 @@ body_codec_get_toriginprojection: fn(bytes: [U8], input: ^BodyCodecIn) -> TOrigi
     TOriginProjection{receiver: f0, span: f1, value: f2}
 }
 
-body_codec_put_list_u8: fn(out: ^BodyCodecOut, values: [U8]) Never! {
-    body_codec_put_count(out, values.len())
-    loop value in values -> body_codec_put_u8(out, value)
-}
-
-body_codec_get_list_u8: fn(bytes: [U8], input: ^BodyCodecIn) -> [U8] Never! {
-    count: body_codec_get_count(bytes, input, 1)
-    values := [U8]{}
-    loop _ in 0..<count -> values.push(body_codec_get_u8(bytes, input))
-    values
-}
-
-body_codec_put_tcomptimemapentry: fn(out: ^BodyCodecOut, value: TComptimeMapEntry) Never! {
-    body_codec_put_tcomptimekey(out, value.key)
-    body_codec_put_tcomptimevalue(out, value.value)
-}
-
-body_codec_get_tcomptimemapentry: fn(bytes: [U8], input: ^BodyCodecIn) -> TComptimeMapEntry Never! {
-    f0: body_codec_get_tcomptimekey(bytes, input)
-    f1: body_codec_get_tcomptimevalue(bytes, input)
-    TComptimeMapEntry{key: f0, value: f1}
-}
-
-body_codec_put_list_tcomptimekeyfield: fn(out: ^BodyCodecOut, values: [TComptimeKeyField]) Never! {
-    body_codec_put_count(out, values.len())
-    loop value in values -> body_codec_put_tcomptimekeyfield(out, value)
-}
-
-body_codec_get_list_tcomptimekeyfield: fn(bytes: [U8], input: ^BodyCodecIn) -> [TComptimeKeyField] Never! {
-    count: body_codec_get_count(bytes, input, 1)
-    values := [TComptimeKeyField]{}
-    loop _ in 0..<count -> values.push(body_codec_get_tcomptimekeyfield(bytes, input))
-    values
-}
-
-body_codec_put_tcomptimekey: fn(out: ^BodyCodecOut, value: TComptimeKey) Never! {
-    if value == {
-        .Int(p0) -> {
-            body_codec_put_tag(out, 0)
-            body_codec_put_int(out, p0)
-        }
-        .BigInt(p0) -> {
-            body_codec_put_tag(out, 1)
-            body_codec_put_string(out, p0)
-        }
-        .String(p0) -> {
-            body_codec_put_tag(out, 2)
-            body_codec_put_string(out, p0)
-        }
-        .Bool(p0) -> {
-            body_codec_put_tag(out, 3)
-            body_codec_put_bool(out, p0)
-        }
-        .Char(p0) -> {
-            body_codec_put_tag(out, 4)
-            body_codec_put_int(out, p0)
-        }
-        .Tuple(p0) -> {
-            body_codec_put_tag(out, 5)
-            body_codec_put_list_tcomptimekeyfield(out, p0)
-        }
-        .Struct(p0, p1) -> {
-            body_codec_put_tag(out, 6)
-            body_codec_put_string(out, p0)
-            body_codec_put_list_tcomptimekeyfield(out, p1)
-        }
-        .Enum(p0, p1) -> {
-            body_codec_put_tag(out, 7)
-            body_codec_put_string(out, p0)
-            body_codec_put_string(out, p1)
-        }
-    }
-}
-
-body_codec_get_tcomptimekey: fn(bytes: [U8], input: ^BodyCodecIn) -> TComptimeKey Never! {
-    position: body_codec_get_tag(bytes, input, 8, 0)
-    if position == {
-        1 -> {
-            f0: body_codec_get_string(bytes, input)
-            TComptimeKey.BigInt{decimal: f0}
-        }
-        2 -> {
-            f0: body_codec_get_string(bytes, input)
-            TComptimeKey.String{value: f0}
-        }
-        3 -> {
-            f0: body_codec_get_bool(bytes, input)
-            TComptimeKey.Bool{value: f0}
-        }
-        4 -> {
-            f0: body_codec_get_int(bytes, input)
-            TComptimeKey.Char{value: f0}
-        }
-        5 -> {
-            f0: body_codec_get_list_tcomptimekeyfield(bytes, input)
-            TComptimeKey.Tuple{fields: f0}
-        }
-        6 -> {
-            f0: body_codec_get_string(bytes, input)
-            f1: body_codec_get_list_tcomptimekeyfield(bytes, input)
-            TComptimeKey.Struct{type_name: f0, fields: f1}
-        }
-        7 -> {
-            f0: body_codec_get_string(bytes, input)
-            f1: body_codec_get_string(bytes, input)
-            TComptimeKey.Enum{type_name: f0, variant: f1}
-        }
-        else -> {
-            f0: body_codec_get_int(bytes, input)
-            TComptimeKey.Int{value: f0}
-        }
-    }
-}
-
-body_codec_put_tcomptimekeyfield: fn(out: ^BodyCodecOut, value: TComptimeKeyField) Never! {
-    body_codec_put_string(out, value.name)
-    body_codec_put_tcomptimekey(out, value.key)
-}
-
-body_codec_get_tcomptimekeyfield: fn(bytes: [U8], input: ^BodyCodecIn) -> TComptimeKeyField Never! {
-    f0: body_codec_get_string(bytes, input)
-    f1: body_codec_get_tcomptimekey(bytes, input)
-    TComptimeKeyField{name: f0, key: f1}
-}
-
-body_codec_put_tcomptimefield: fn(out: ^BodyCodecOut, value: TComptimeField) Never! {
-    body_codec_put_string(out, value.name)
-    body_codec_put_tcomptimevalue(out, value.value)
-}
-
-body_codec_get_tcomptimefield: fn(bytes: [U8], input: ^BodyCodecIn) -> TComptimeField Never! {
-    f0: body_codec_get_string(bytes, input)
-    f1: body_codec_get_tcomptimevalue(bytes, input)
-    TComptimeField{name: f0, value: f1}
-}
-
-body_codec_put_tcomptimeenumarg: fn(out: ^BodyCodecOut, value: TComptimeEnumArg) Never! {
-    body_codec_put_opt_string(out, value.name)
-    body_codec_put_tcomptimevalue(out, value.value)
-}
-
-body_codec_get_tcomptimeenumarg: fn(bytes: [U8], input: ^BodyCodecIn) -> TComptimeEnumArg Never! {
-    f0: body_codec_get_opt_string(bytes, input)
-    f1: body_codec_get_tcomptimevalue(bytes, input)
-    TComptimeEnumArg{name: f0, value: f1}
-}
-
-body_codec_put_tcomptimereport: fn(out: ^BodyCodecOut, value: TComptimeReport) Never! {
-    if value == {
-        .Clean(p0) -> {
-            body_codec_put_tag(out, 0)
-            body_codec_put_type(out, p0)
-        }
-        .Told(p0) -> {
-            body_codec_put_tag(out, 1)
-            body_codec_put_tcomptimevalue(out, p0)
-        }
-    }
-}
-
-body_codec_get_tcomptimereport: fn(bytes: [U8], input: ^BodyCodecIn) -> TComptimeReport Never! {
-    position: body_codec_get_tag(bytes, input, 2, 0)
-    if position == {
-        1 -> {
-            f0: body_codec_get_tcomptimevalue(bytes, input)
-            TComptimeReport.Told{value: f0}
-        }
-        else -> {
-            f0: body_codec_get_type(bytes, input)
-            TComptimeReport.Clean{ty: f0}
-        }
-    }
-}
-
 body_codec_put_ttypedgoal: fn(out: ^BodyCodecOut, value: TTypedGoal) Never! {
     body_codec_put_span(out, value.span)
     body_codec_put_string(out, value.expected)
@@ -6242,6 +6068,18 @@ body_codec_get_ttextpatternpart: fn(bytes: [U8], input: ^BodyCodecIn) -> TTextPa
     }
 }
 
+body_codec_put_list_u8: fn(out: ^BodyCodecOut, values: [U8]) Never! {
+    body_codec_put_count(out, values.len())
+    loop value in values -> body_codec_put_u8(out, value)
+}
+
+body_codec_get_list_u8: fn(bytes: [U8], input: ^BodyCodecIn) -> [U8] Never! {
+    count: body_codec_get_count(bytes, input, 1)
+    values := [U8]{}
+    loop _ in 0..<count -> values.push(body_codec_get_u8(bytes, input))
+    values
+}
+
 body_codec_put_tbinarypatternpart: fn(out: ^BodyCodecOut, value: TBinaryPatternPart) Never! {
     if value == {
         .Literal(p0) -> {
@@ -8546,4 +8384,166 @@ body_codec_get_bodyexpr: fn(bytes: [U8], input: ^BodyCodecIn) -> BodyExpr Never!
     f0: body_codec_get_int(bytes, input)
     f1: body_codec_get_bodytree(bytes, input)
     BodyExpr{root: f0, tree: f1}
+}
+
+body_codec_put_tcomptimefield: fn(out: ^BodyCodecOut, value: TComptimeField) Never! {
+    body_codec_put_string(out, value.name)
+    body_codec_put_tcomptimevalue(out, value.value)
+}
+
+body_codec_get_tcomptimefield: fn(bytes: [U8], input: ^BodyCodecIn) -> TComptimeField Never! {
+    f0: body_codec_get_string(bytes, input)
+    f1: body_codec_get_tcomptimevalue(bytes, input)
+    TComptimeField{name: f0, value: f1}
+}
+
+body_codec_put_tcomptimemapentry: fn(out: ^BodyCodecOut, value: TComptimeMapEntry) Never! {
+    body_codec_put_tcomptimekey(out, value.key)
+    body_codec_put_tcomptimevalue(out, value.value)
+}
+
+body_codec_get_tcomptimemapentry: fn(bytes: [U8], input: ^BodyCodecIn) -> TComptimeMapEntry Never! {
+    f0: body_codec_get_tcomptimekey(bytes, input)
+    f1: body_codec_get_tcomptimevalue(bytes, input)
+    TComptimeMapEntry{key: f0, value: f1}
+}
+
+body_codec_put_list_tcomptimekeyfield: fn(out: ^BodyCodecOut, values: [TComptimeKeyField]) Never! {
+    body_codec_put_count(out, values.len())
+    loop value in values -> body_codec_put_tcomptimekeyfield(out, value)
+}
+
+body_codec_get_list_tcomptimekeyfield: fn(bytes: [U8], input: ^BodyCodecIn) -> [TComptimeKeyField] Never! {
+    count: body_codec_get_count(bytes, input, 1)
+    values := [TComptimeKeyField]{}
+    loop _ in 0..<count -> values.push(body_codec_get_tcomptimekeyfield(bytes, input))
+    values
+}
+
+body_codec_put_tcomptimekey: fn(out: ^BodyCodecOut, value: TComptimeKey) Never! {
+    if value == {
+        .Int(p0) -> {
+            body_codec_put_tag(out, 0)
+            body_codec_put_int(out, p0)
+        }
+        .BigInt(p0) -> {
+            body_codec_put_tag(out, 1)
+            body_codec_put_string(out, p0)
+        }
+        .String(p0) -> {
+            body_codec_put_tag(out, 2)
+            body_codec_put_string(out, p0)
+        }
+        .Bool(p0) -> {
+            body_codec_put_tag(out, 3)
+            body_codec_put_bool(out, p0)
+        }
+        .Char(p0) -> {
+            body_codec_put_tag(out, 4)
+            body_codec_put_int(out, p0)
+        }
+        .Tuple(p0) -> {
+            body_codec_put_tag(out, 5)
+            body_codec_put_list_tcomptimekeyfield(out, p0)
+        }
+        .Struct(p0, p1) -> {
+            body_codec_put_tag(out, 6)
+            body_codec_put_string(out, p0)
+            body_codec_put_list_tcomptimekeyfield(out, p1)
+        }
+        .Enum(p0, p1) -> {
+            body_codec_put_tag(out, 7)
+            body_codec_put_string(out, p0)
+            body_codec_put_string(out, p1)
+        }
+    }
+}
+
+body_codec_get_tcomptimekey: fn(bytes: [U8], input: ^BodyCodecIn) -> TComptimeKey Never! {
+    position: body_codec_get_tag(bytes, input, 8, 0)
+    if position == {
+        1 -> {
+            f0: body_codec_get_string(bytes, input)
+            TComptimeKey.BigInt{decimal: f0}
+        }
+        2 -> {
+            f0: body_codec_get_string(bytes, input)
+            TComptimeKey.String{value: f0}
+        }
+        3 -> {
+            f0: body_codec_get_bool(bytes, input)
+            TComptimeKey.Bool{value: f0}
+        }
+        4 -> {
+            f0: body_codec_get_int(bytes, input)
+            TComptimeKey.Char{value: f0}
+        }
+        5 -> {
+            f0: body_codec_get_list_tcomptimekeyfield(bytes, input)
+            TComptimeKey.Tuple{fields: f0}
+        }
+        6 -> {
+            f0: body_codec_get_string(bytes, input)
+            f1: body_codec_get_list_tcomptimekeyfield(bytes, input)
+            TComptimeKey.Struct{type_name: f0, fields: f1}
+        }
+        7 -> {
+            f0: body_codec_get_string(bytes, input)
+            f1: body_codec_get_string(bytes, input)
+            TComptimeKey.Enum{type_name: f0, variant: f1}
+        }
+        else -> {
+            f0: body_codec_get_int(bytes, input)
+            TComptimeKey.Int{value: f0}
+        }
+    }
+}
+
+body_codec_put_tcomptimekeyfield: fn(out: ^BodyCodecOut, value: TComptimeKeyField) Never! {
+    body_codec_put_string(out, value.name)
+    body_codec_put_tcomptimekey(out, value.key)
+}
+
+body_codec_get_tcomptimekeyfield: fn(bytes: [U8], input: ^BodyCodecIn) -> TComptimeKeyField Never! {
+    f0: body_codec_get_string(bytes, input)
+    f1: body_codec_get_tcomptimekey(bytes, input)
+    TComptimeKeyField{name: f0, key: f1}
+}
+
+body_codec_put_tcomptimeenumarg: fn(out: ^BodyCodecOut, value: TComptimeEnumArg) Never! {
+    body_codec_put_opt_string(out, value.name)
+    body_codec_put_tcomptimevalue(out, value.value)
+}
+
+body_codec_get_tcomptimeenumarg: fn(bytes: [U8], input: ^BodyCodecIn) -> TComptimeEnumArg Never! {
+    f0: body_codec_get_opt_string(bytes, input)
+    f1: body_codec_get_tcomptimevalue(bytes, input)
+    TComptimeEnumArg{name: f0, value: f1}
+}
+
+body_codec_put_tcomptimereport: fn(out: ^BodyCodecOut, value: TComptimeReport) Never! {
+    if value == {
+        .Clean(p0) -> {
+            body_codec_put_tag(out, 0)
+            body_codec_put_type(out, p0)
+        }
+        .Told(p0) -> {
+            body_codec_put_tag(out, 1)
+            body_codec_put_tcomptimevalue(out, p0)
+        }
+    }
+}
+
+body_codec_get_tcomptimereport: fn(bytes: [U8], input: ^BodyCodecIn) -> TComptimeReport Never! {
+    position: body_codec_get_tag(bytes, input, 2, 0)
+    if position == {
+        1 -> {
+            f0: body_codec_get_tcomptimevalue(bytes, input)
+            TComptimeReport.Told{value: f0}
+        }
+        else -> {
+            f0: body_codec_get_type(bytes, input)
+            TComptimeReport.Clean{ty: f0}
+        }
+    }
 }
