@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7000,
-    "rev": 114000,
+    "rev": 114007,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -28957,6 +28957,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-25",
+          "by": "Orchestrator",
+          "text": "c11 status: submission 4500-c11-link-through-call (queued for batch 42, stacked on c10 and c9) refuses a callee's store of a link parameter (E0232), push(@x) (E0232) and returning a link to a local (E2305, reused), with four UI snapshots under the link_through_call filter. Still open under c11: a call through a trait method or a function value has no body facts, so a store it makes of a place link is not seen. The I1 hole remains there until such calls are proven or refused."
+        },
+        {
           "at": "2026-11-22",
           "by": "Orchestrator",
           "text": "Added executable golden example Examples/Memory/LiveLinks.jet + LiveLinks.out (dev 7039da106b, I5): 3/3 PASS across o0, o1, o2 under jet test Compiler --profile=golden --filter=Memory/LiveLinks; jet fmt --check, tree_sitter_parses_every_example, docs_links_resolve, and all 11 example guards PASS."
@@ -29149,7 +29154,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-04T00:21:42.477Z",
-      "updated": "2026-11-25T04:19:32.635Z",
+      "updated": "2026-11-25T04:41:52.616Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 13
     },
@@ -64162,7 +64167,7 @@
       "track": "epoch",
       "epoch": "G2",
       "milestoneId": null,
-      "phase": "done",
+      "phase": "ready",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -64171,6 +64176,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-25",
+          "by": "Orchestrator",
+          "text": "Reopened: Tests/known-failing.tsv still names #6902 for two completion cases (Core member docs, package discovery index), and Tests/Guards/known_failing_owner.jet requires that the owning card be open. The two cases are now criteria on this card. The earlier criteria stay met."
+        },
         {
           "at": "2026-11-25",
           "by": "Orchestrator",
@@ -64318,6 +64328,32 @@
           "verifiedBy": null,
           "evidence": "On a compiler built from landed dev 6ab0b5a5c8 (tip20), run in an export of that commit: cases LSP/lsp_checked_text_contract_survives_editor_navigation; PASS 1/1; not in known-failing",
           "at": "2026-11-24T08:33:10.428Z"
+        },
+        {
+          "n": 13,
+          "text": "Completion shows Core member docs: `jet self lsp` completion on a builtin member offers the shared semantic symbol's docs. Tests/known-failing.tsv carries this case under #6902; this criterion owns it.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T04:48:38.335Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "lsp_builtin_member_completion_uses_shared_semantic_symbol_docs"
+          }
+        },
+        {
+          "n": 14,
+          "text": "Completion reads the package discovery index: `jet self lsp` completion offers packages and options from the local discovery index. Tests/known-failing.tsv carries this case under #6902; this criterion owns it.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T04:48:39.349Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "lsp_completion_uses_local_discovery_index_for_packages_and_options"
+          }
         }
       ],
       "refs": [],
@@ -64328,10 +64364,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:55:51.221Z",
-      "updated": "2026-11-25T03:18:12.514Z",
+      "updated": "2026-11-25T04:48:41.173Z",
       "updatedBy": "Orchestrator",
-      "criteriaLastN": 12,
-      "completedAt": "2026-11-25T03:18:12.514Z"
+      "criteriaLastN": 14
     },
     {
       "id": "c0mbiq9g",
@@ -74883,6 +74918,11 @@
         {
           "at": "2026-11-25",
           "by": "Orchestrator",
+          "text": "Batch 41 landed on dev e128950680d with the caret-marks docs and audit, the syntax-decisions record, the CaretMarks fixture and the dead-key E0119 type snapshot. On the rebuilt compiler, cases --filter CaretMarks passes 1/1 and ui --filter dead_key_circumflex passes 1/1. c6 stays open for the unknown-name and parameter diagnostics."
+        },
+        {
+          "at": "2026-11-25",
+          "by": "Orchestrator",
           "text": "c6 finding from the dead-key UI snapshot (Tests/UI/dead_key_circumflex_type.stderr, batch 41): when a parameter type is a dead-key composite such as `x: Înt`, the write mark is lost, so `x += 1` in the body also reports Jet.ImmutableAssignment. That follow-on error says \"`x` was made with `:`\" and suggests `x := ...`, which is wrong for a parameter. The c6 work should suppress this follow-on after a dead-key E0119 and correct the parameter wording, then update the snapshot."
         },
         {
@@ -74981,7 +75021,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-24T13:44:02.626Z",
-      "updated": "2026-11-25T03:26:03.163Z",
+      "updated": "2026-11-25T04:57:44.096Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 6
     },
@@ -75003,6 +75043,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-25",
+          "by": "Orchestrator",
+          "text": "Batch 41 landed on dev e128950680d (36 commits, merged into master). It carries the stage 1-3 jet.runtime bindings, stop-dotenv, E-3 record links and the caret-marks docs. Five fixes found by the batch-41 suite land with it: (1) env.decode now reaches FS.Read through jet.runtime.sys.dotenv_read, so ShapeProjection, AppConfig, the env_config UI fixtures and the EnvOverlay decode fixture list FS.Read; (2) chunks(size) names its Core bodies by role (ProcessStdoutChunks/ProcessStderrChunks), which the door fix had missed; (3) the build_time guard sliced lines by bytes; (4) kernel.tsv gains the circumflex lists; (5) runtime_leaf_exports reads a Never result as no word. On the rebuilt compiler, every row batch 41 lost passes, and Tests/Guards gives 236 passed, 0 failed."
+        },
         {
           "at": "2026-11-25",
           "by": "Orchestrator",
@@ -75403,11 +75448,11 @@
         {
           "n": 17,
           "text": "F fixer correctness: jet fix's safe class never deletes a function that is still called, and its rollback guard compares error identities, not counts. Found by the #6999 F sweep on Compiler/JetRuntime with the batch 38 compiler: the safe-class dry run blanked 8 called helpers in Source/Alloc.jet (alloc_unlink, alloc_slab_return, alloc_check_* and others). The guard let it through because the net error count fell: the 27 standalone E0102 os_load/os_store errors disappeared with the deleted bodies, while 2 new errors appeared. Done when (1) the fix that blanked them is corrected at its root (a removal is decided on complete reference facts, and a fix is never applied to a body whose references the check could not resolve), (2) the rollback refuses any run that introduces a diagnostic identity not present before, whatever the total, and (3) a regression test fixes a package shaped like Alloc.jet (standalone errors plus called helpers) and asserts every helper survives. No landed or queued fix sweep removed a function; checked over every F-fix commit in batches 38 and 39 and the queued JetCanvas patch.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T00:27:30.172Z",
+          "evidence": "Landed on dev as 17ae5413901 (batch 41). jet test Compiler/JetCLI --filter fix on the batch-41 compiler built from dev e128950680d: 1 passed, 0 failed, 0 skipped. cases --filter d_key_traits1: 4 pass, d_key_traits1_fix included.",
+          "at": "2026-11-25T04:57:42.064Z",
           "proof": {
             "profile": "cmd",
             "args": [
@@ -75423,7 +75468,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-24T17:01:07.086Z",
-      "updated": "2026-11-25T03:20:25.307Z",
+      "updated": "2026-11-25T04:57:42.898Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 17
     }
@@ -138754,6 +138799,69 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-25T04:57:44.096Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0jjynlr",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-25T04:57:42.898Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0mhrplj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-25T04:57:42.064Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0mhrplj",
+      "note": "#17"
+    },
+    {
+      "at": "2026-11-25T04:48:41.173Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c06tzcrf",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-25T04:48:39.349Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c06tzcrf",
+      "note": "14 criteria, soft limit 6: Known-failing rows owned by this card"
+    },
+    {
+      "at": "2026-11-25T04:48:39.349Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c06tzcrf",
+      "note": "#14 Completion reads the package discovery index: `jet self lsp`"
+    },
+    {
+      "at": "2026-11-25T04:48:38.335Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c06tzcrf",
+      "note": "13 criteria, soft limit 6: Known-failing rows owned by this card"
+    },
+    {
+      "at": "2026-11-25T04:48:38.335Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c06tzcrf",
+      "note": "#13 Completion shows Core member docs: `jet self lsp` completion"
+    },
+    {
+      "at": "2026-11-25T04:41:52.616Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0s8gang",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-25T04:19:32.635Z",
       "by": "Orchestrator",
