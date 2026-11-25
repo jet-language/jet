@@ -1244,12 +1244,26 @@ SemaInstanceConstants: struct {
 // generic body (`modules`' sources that sema_comptime_generic_site marks)
 // has the value its instance's copy (sema_comptime_generic_site_instance)
 // landed with among `values` (comptime_site_constant_key); a copy not landed
-// yet is a source to stage. The program holds these rows, never a module:
-// which rows there are depends on every instance the program builds.
+// yet is a source to stage. An instance read under guards
+// (SemaTypeReflection.guards) counts only once every guard's site value has
+// landed and takes its arm: one in an arm its instance does not take has no
+// row, no E0302 and nothing staged, as JetIR never builds that arm. The
+// program holds these rows, never a module: which rows there are depends on
+// every instance the program builds.
 sema_fact_instance_constants: fn(graph: SemaRegistrationGraph, modules: ^[SemaGraphModuleResult], reflections: [SemaTypeReflection], values: [SemaComptimeItemValue], diagnostics: ^[Diagnostic]) -> SemaInstanceConstants {
     rows := [TConstantDef]{}
     sources := [SemaComptimeBodySource]{}
+    // The value each reflection's site took at its instance, once the
+    // instance's copy has landed, by reflection.
+    known := [Bool?]{}
+    loop reflection in reflections -> known.push(sema_fact_site_holds(modules, values, reflection))
+    // Whether each reflection counts: the first of its key whose guards all
+    // hold.
+    taken := [Bool]{}
     loop reflection in reflections {
+        counts: !sema_fact_key_taken(reflection.key, reflections, taken) && sema_fact_guards_hold(reflection.guards, reflections, known)
+        taken.push(counts)
+        if !counts -> next
         caller: sema_registration_module_index(graph, reflection.module_identity) ?? -1
         if reflection.type_id {
             rows.push(TConstantDef{module_identity: reflection.read_module_identity, key: reflection.key, name: TYPE_ID_TRAIT, span: reflection.span, visibility: NameVisibility.Public, ty: Type.Named{name: "TypeId"}, is_comptime: true, is_storage: false, value: sema_comptime_reflection_type_id(graph, caller, reflection.ty)})
@@ -1264,6 +1278,10 @@ sema_fact_instance_constants: fn(graph: SemaRegistrationGraph, modules: ^[SemaGr
             next
         }
         site: sema_fact_generic_site(modules, reflection.site) ?? next
+        if sema_fact_site_landed(values, site, reflection.ty) == .Val(row) {
+            rows.push(TConstantDef{module_identity: reflection.read_module_identity, key: reflection.key, name: COMPTIME_SITE_TRAIT, span: reflection.span, visibility: NameVisibility.Public, ty: values[row].ty, is_comptime: true, is_storage: false, value: values[row].value})
+            next
+        }
         args: if reflection.ty == .Apply(_, filled) -> filled else -> [Type]{}
         if args.len() != reflection.params.len() -> next
         // Each type has a TypeId; a type with no TypeInfo record binds none,
@@ -1274,12 +1292,7 @@ sema_fact_instance_constants: fn(graph: SemaRegistrationGraph, modules: ^[SemaGr
             ids.push(sema_comptime_reflection_type_id(graph, caller, arg))
             infos.push(if sema_fact_type_info_of(graph, arg, reflection.module_identity) == .Val(info) -> Val(sema_fact_declared_value(info)) else -> None)
         }
-        instance: sema_comptime_generic_site_instance(site, reflection.params, ids, infos, type_carrier_identity(reflection.ty))
-        row: sema_fact_landed_value(values, instance.module_identity, instance.key) ?? {
-            sources.push(instance)
-            next
-        }
-        rows.push(TConstantDef{module_identity: reflection.read_module_identity, key: reflection.key, name: COMPTIME_SITE_TRAIT, span: reflection.span, visibility: NameVisibility.Public, ty: values[row].ty, is_comptime: true, is_storage: false, value: values[row].value})
+        sources.push(sema_comptime_generic_site_instance(site, reflection.params, ids, infos, type_carrier_identity(reflection.ty)))
     }
     SemaInstanceConstants{rows: rows, sources: sources}
 }
@@ -1294,6 +1307,50 @@ sema_fact_landed_value: fn(values: [SemaComptimeItemValue], module_identity: Mod
     None
 }
 
+// The index in `values` of the value generic site `site` landed with at the
+// instance whose type parameters it reads are the arguments of `concrete`:
+// its instance copy's (sema_comptime_generic_site_instance).
+sema_fact_site_landed: fn(values: [SemaComptimeItemValue], site: SemaComptimeBodySource, concrete: Type) -> Int? Never! {
+    sema_fact_landed_value(values, site.module_identity, "{site.key}#{type_carrier_identity(concrete)}")
+}
+
+// The Bool `reflection`'s site took at its instance, once the instance's
+// copy has landed among `values`.
+sema_fact_site_holds: fn(modules: ^[SemaGraphModuleResult], values: [SemaComptimeItemValue], reflection: SemaTypeReflection) -> Bool? {
+    if reflection.site == "" -> return None
+    site: sema_fact_generic_site(modules, reflection.site) ?? return None
+    row: sema_fact_site_landed(values, site, reflection.ty) ?? return None
+    if values[row].value == .Bool(holds) -> return Val(holds)
+    None
+}
+
+// Whether every guard's site value is known (`known`, by reflection of
+// `reflections`) and is the one its arm takes.
+sema_fact_guards_hold: fn(guards: [SemaTypeReflectionGuard], reflections: [SemaTypeReflection], known: [Bool?]) -> Bool Never! {
+    loop guard in guards {
+        value: sema_fact_known_value(guard.key, reflections, known) ?? return false
+        if value != guard.holds -> return false
+    }
+    true
+}
+
+// The value `known` holds for a reflection of `reflections` keyed `key`.
+sema_fact_known_value: fn(key: String, reflections: [SemaTypeReflection], known: [Bool?]) -> Bool? Never! {
+    loop index in 0..<known.len() {
+        if reflections[index].key == key {
+            if known[index] == .Val(holds) -> return Val(holds)
+        }
+    }
+    None
+}
+
+// Whether a reflection of `reflections` keyed `key` is `taken` already.
+sema_fact_key_taken: fn(key: String, reflections: [SemaTypeReflection], taken: [Bool]) -> Bool Never! {
+    loop index in 0..<taken.len() {
+        if taken[index] && reflections[index].key == key -> return true
+    }
+    false
+}
 // The generic site of `modules` whose key is `key`.
 sema_fact_generic_site: fn(modules: ^[SemaGraphModuleResult], key: String) -> SemaComptimeBodySource? {
     loop module_result in modules {

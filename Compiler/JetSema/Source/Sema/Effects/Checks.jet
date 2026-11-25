@@ -372,7 +372,8 @@ SemaEffectParamDispatch: struct {
 // A call into a generic function or a generic type's method, with the type
 // arguments it binds: the owner type's, then the function's own.
 // `callee_node` is the callee's node once the graph's edges are final
-// (sema_effect_resolve_edges).
+// (sema_effect_resolve_edges). `guards` are those of the arms the call is
+// written in (SemaEffectGuard).
 SemaEffectInstantiation: struct {
     callee: String,
     owner_args: [Type],
@@ -381,26 +382,48 @@ SemaEffectInstantiation: struct {
     label: String,
     span: Span,
     callee_node: Int{-1},
+    guards: [SemaEffectGuard]{[SemaEffectGuard]{}},
+}
+
+// An arm of an `if` whose condition is the value compile-time site `site`
+// of a generic body takes (a TraitConst of COMPTIME_SITE_TRAIT over
+// `owner`): what the arm reads or calls happens only at the instances where
+// that value is `holds`, the then arm's true and the else arm's false.
+SemaEffectGuard: struct {
+    owner: Type,
+    site: String,
+    holds: Bool,
 }
 
 // A read a generic body makes that each instance answers on its own: a
 // `T.reflect()` read, or a `TypeId{T}` read (`type_id`), where `owner` names
 // the type parameter it reads, or the value of a compile-time site (`site`,
 // its key), where `owner` applies COMPTIME_SITE_TRAIT to the type
-// parameters the site reads. `span` is the read.
+// parameters the site reads. `span` is the read, and `guards` are those of
+// the arms it is written in (SemaEffectGuard).
 SemaEffectTypeRead: struct {
     owner: Type,
     span: Span,
     site: String{""},
     type_id: Bool{false},
+    guards: [SemaEffectGuard]{[SemaEffectGuard]{}},
+}
+
+// A condition one instance of a read holds under: the site value whose
+// constant row is `key` (comptime_site_constant_key) is `holds`.
+SemaTypeReflectionGuard: struct {
+    key: String,
+    holds: Bool,
 }
 
 // One instance of a read (SemaEffectTypeRead): `ty` the read's owner there,
 // the module of the non-generic function whose calls build that instance,
 // which names its types, the read and its module, the constant row `key` it
 // reads (sema_effect_type_reflections), the site a site's read names,
-// whether it reads a TypeId, and the type parameters the read's owner
-// names, which `ty` fills in order.
+// whether it reads a TypeId, the type parameters the read's owner names,
+// which `ty` fills in order, and the site values the instance is read under
+// (`guards`): every arm it sits in, in its body and in each call that leads
+// to it.
 SemaTypeReflection: struct {
     ty: Type,
     module_identity: ModuleID,
@@ -410,14 +433,17 @@ SemaTypeReflection: struct {
     site: String{""},
     type_id: Bool{false},
     params: [String]{[String]{}},
+    guards: [SemaTypeReflectionGuard]{[SemaTypeReflectionGuard]{}},
 }
 
 // One instance the reflection walk visits: node `node` at type arguments
-// `args` (by its `type_params`), reached from non-generic node `origin`.
+// `args` (by its `type_params`), reached from non-generic node `origin`
+// under the site values `guards`.
 SemaEffectReflectionInstance: struct {
     node: Int,
     args: [Type],
     origin: Int,
+    guards: [SemaTypeReflectionGuard]{[SemaTypeReflectionGuard]{}},
 }
 
 // A call site that binds callee parameter vertex `to` to a larger type
@@ -575,13 +601,23 @@ SemaEffectNodeRare: struct {
     // argument is in `bare_scope_callees`, and reaches it bare as well.
     scoped_calls: [SemaEffectScopedCall]{[SemaEffectScopedCall]{}},
     bare_scope_callees: [String]{[String]{}},
-    // The `T.reflect()` reads this body makes over its type parameters
-    // (sema_effect_type_reflections).
+    // The reads each instance answers that this body makes over its type
+    // parameters (sema_effect_type_reflections).
     type_reads: [SemaEffectTypeRead]{[SemaEffectTypeRead]{}},
+    // While the walk collects this body: the guards of the arms of
+    // compile-time site conditions it is in, outermost first
+    // (sema_effect_guard_open).
+    guards: [SemaEffectGuard]{[SemaEffectGuard]{}},
 }
 
 // The rare rows of a node that fills none of them.
 SEMA_EFFECT_NODE_NO_RARE: SemaEffectNodeRare{}
+
+// The guards of the arms the walk collecting `node` is in.
+sema_effect_open_guards: fn(node: SemaEffectNode) -> [SemaEffectGuard] Never! {
+    rare: node.rare ?? return [SemaEffectGuard]{}
+    rare.guards
+}
 
 // Opens `node`'s rare rows (SemaEffectNode.rare) for a write.
 sema_effect_node_rare_open: fn(node: ^SemaEffectNode) Never! {
@@ -3640,7 +3676,7 @@ sema_effect_record_instantiation: fn(nodes: ^[SemaEffectNode], node_index: Int, 
         name: symbol_key_leaf(symbol_key(symbols, tree.symbols, callee))
         label = if owner_label == "" -> "{name}<{shown}>" else -> "{owner_label}.{name}<{shown}>"
     }
-    nodes[node_index].instantiations.push(SemaEffectInstantiation{callee: symbol_key(symbols, tree.symbols, callee), owner_args: owner_args, type_args: type_args, label: label, span: fact.span})
+    nodes[node_index].instantiations.push(SemaEffectInstantiation{callee: symbol_key(symbols, tree.symbols, callee), owner_args: owner_args, type_args: type_args, label: label, span: fact.span, guards: sema_effect_open_guards(nodes[node_index])})
 }
 
 // The owner type's parameters of a method, in the order a receiver's type
@@ -3894,9 +3930,12 @@ sema_effect_node_type_reads: fn(node: SemaEffectNode) -> Int Never! {
 // instantiation site to a callee that leads to one too, binding the callee's
 // type parameters (sema_effect_param_binding)
 // to the site's type arguments at the caller's instance, substituted as
-// JetIR substitutes an instance's facts (ir_fact_type). The rows depend on
-// every instance of the program, so the program publishes them and no body
-// holds one.
+// JetIR substitutes an instance's facts (ir_fact_type). Each instance
+// carries the site values it is read under (SemaTypeReflection.guards), so
+// one read in an arm an instance does not take builds nothing there
+// (sema_fact_instance_constants); the same read under other guards is
+// another instance. The rows depend on every instance of the program, so
+// the program publishes them and no body holds one.
 sema_effect_type_reflections: fn(nodes: [SemaEffectNode]) -> [SemaTypeReflection] {
     found := [SemaTypeReflection]{}
     leads := (loop node in nodes -> sema_effect_node_type_reads(node) > 0)
@@ -3941,11 +3980,12 @@ sema_effect_type_reflections: fn(nodes: [SemaEffectNode]) -> [SemaTypeReflection
                     read.type_id -> type_id_constant_key(concrete)
                     else -> type_reflection_constant_key(concrete)
                 }
+                guards: sema_effect_instance_guards(queue[current].guards, read.guards, nodes[at].type_params, queue[current].args)
                 before: name_count(types)
-                _ := name_intern(types, key)
+                _ := name_intern(types, "{key}{sema_effect_guards_shown(guards)}")
                 if name_count(types) == before -> next
                 params: if read.owner == .Apply(_, written) -> (loop param in written -> type_name(param)) else -> [String]{type_name(read.owner)}
-                found.push(SemaTypeReflection{ty: concrete, module_identity: nodes[origin].module_identity, span: read.span, read_module_identity: nodes[at].module_identity, key: key, site: read.site, type_id: read.type_id, params: params})
+                found.push(SemaTypeReflection{ty: concrete, module_identity: nodes[origin].module_identity, span: read.span, read_module_identity: nodes[at].module_identity, key: key, site: read.site, type_id: read.type_id, params: params, guards: guards})
             }
         }
         loop site in nodes[at].instantiations {
@@ -3957,14 +3997,34 @@ sema_effect_type_reflections: fn(nodes: [SemaEffectNode]) -> [SemaTypeReflection
                 bound.push(sema_inference_substitute_type(binding, nodes[at].type_params, queue[current].args))
             }
             if bound.len() != nodes[callee].type_params.len() -> next
+            guards: sema_effect_instance_guards(queue[current].guards, site.guards, nodes[at].type_params, queue[current].args)
             shown: (loop ty in bound -> type_carrier_identity(ty)).join(",")
             before: name_count(visited)
-            _ := name_intern(visited, "{callee}<{shown}>")
+            _ := name_intern(visited, "{callee}<{shown}>{sema_effect_guards_shown(guards)}")
             if name_count(visited) == before -> next
-            queue.push(SemaEffectReflectionInstance{node: callee, args: bound.move(), origin: origin})
+            queue.push(SemaEffectReflectionInstance{node: callee, args: bound.move(), origin: origin, guards: guards})
         }
     }
     found
+}
+
+// The guards an instance whose type parameters `params` are `args`, reached
+// under `outer`, reads or calls under: `outer`, then each of the `written`
+// guards of the arms the read or call sits in, as the constant row of the
+// site value it names there (comptime_site_constant_key).
+sema_effect_instance_guards: fn(outer: [SemaTypeReflectionGuard], written: [SemaEffectGuard], params: [String], args: [Type]) -> [SemaTypeReflectionGuard] {
+    guards := outer
+    loop guard in written {
+        concrete: sema_expr_unwrap_tag(sema_inference_substitute_type(guard.owner, params, args))
+        guards.push(SemaTypeReflectionGuard{key: comptime_site_constant_key(guard.site, concrete), holds: guard.holds})
+    }
+    guards
+}
+
+// The text that tells apart the instances of one read or call under
+// different `guards`.
+sema_effect_guards_shown: fn(guards: [SemaTypeReflectionGuard]) -> String Never! {
+    (loop guard in guards -> if guard.holds -> "&{guard.key}" else -> "&!{guard.key}").join("")
 }
 
 // The instance reaches of `node` with each target's solved row.
@@ -4361,7 +4421,7 @@ sema_effect_walk_expr_enter: fn(nodes: ^[SemaEffectNode], node_index: Int, tree:
                 site: if trait_name == COMPTIME_SITE_TRAIT -> name else -> ""
                 sema_effect_node_rare_open(nodes[node_index])
                 if ^nodes[node_index].rare == .Val(rare) {
-                    rare.type_reads.push(SemaEffectTypeRead{owner: owner, span: node.span, site: site, type_id: trait_name == TYPE_ID_TRAIT})
+                    rare.type_reads.push(SemaEffectTypeRead{owner: owner, span: node.span, site: site, type_id: trait_name == TYPE_ID_TRAIT, guards: rare.guards})
                 }
             }
             return false
@@ -8377,10 +8437,13 @@ sema_effect_walk_expr_children: fn(walk: SemaEffectWalk, nodes: ^[SemaEffectNode
         }
         .IfExpr(cond, then_body, then_value, else_body, else_value) -> {
             sema_effect_walk_if_cond_children(walk, nodes, facts, module_facts, diagnostics, caller, tree, cond)
+            guarded: sema_effect_guard_open(walk, nodes, tree, cond)
             sema_effect_walk_stmt_list_children(walk, nodes, facts, module_facts, diagnostics, caller, tree, then_body)
             sema_effect_walk_visit(walk, nodes, facts, module_facts, diagnostics, caller, tree, then_value)
+            if guarded -> sema_effect_guard_else(walk, nodes)
             sema_effect_walk_stmt_list_children(walk, nodes, facts, module_facts, diagnostics, caller, tree, else_body)
             sema_effect_walk_visit(walk, nodes, facts, module_facts, diagnostics, caller, tree, else_value)
+            if guarded -> sema_effect_guard_close(walk, nodes)
         }
         .OrFallback(value, fallback, _) -> {
             sema_effect_walk_visit(walk, nodes, facts, module_facts, diagnostics, caller, tree, value)
@@ -8536,10 +8599,13 @@ sema_effect_walk_stmt_children: fn(walk: SemaEffectWalk, nodes: ^[SemaEffectNode
         // tree_else_children_into's order.
         .If(condition, then_body, else_body, _, _) -> {
             sema_effect_walk_if_cond_children(walk, nodes, facts, module_facts, diagnostics, caller, tree, condition)
+            guarded: sema_effect_guard_open(walk, nodes, tree, condition)
             sema_effect_walk_stmt_list_children(walk, nodes, facts, module_facts, diagnostics, caller, tree, then_body)
+            if guarded -> sema_effect_guard_else(walk, nodes)
             if else_body == .Val(else_statements) {
                 sema_effect_walk_stmt_list_children(walk, nodes, facts, module_facts, diagnostics, caller, tree, else_statements)
             }
+            if guarded -> sema_effect_guard_close(walk, nodes)
         }
         .Loop(_, body, _) -> {
             sema_effect_walk_stmt_list_children(walk, nodes, facts, module_facts, diagnostics, caller, tree, body)
@@ -8670,6 +8736,39 @@ sema_effect_walk_stmt_children: fn(walk: SemaEffectWalk, nodes: ^[SemaEffectNode
 sema_effect_walk_stmt_list_children: fn(walk: SemaEffectWalk, nodes: ^[SemaEffectNode], facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], diagnostics: ^[Diagnostic], caller: SemaEffectCaller, tree: BodyTree, statements: [Int]) {
     loop statement in statements {
         sema_effect_walk_stmt_children(walk, nodes, facts, module_facts, diagnostics, caller, tree, tree.stmts[statement])
+    }
+}
+
+// Opens the guard of an `if` whose condition is the value of a compile-time
+// site of a generic body (SemaEffectGuard) while the walk collects a node:
+// the then arm's reads and instantiations hold where the site's value is
+// true. JetIR builds only the arm the instance's value takes
+// (ir_folded_type_test), so the other arm's reads need no row there. True
+// when it opened one.
+sema_effect_guard_open: fn(walk: SemaEffectWalk, nodes: ^[SemaEffectNode], tree: BodyTree, condition: BodyIfCond) -> Bool {
+    if walk == .Collect(node_index) && condition == .Plain(value) {
+        if tree.nodes[body_node_index(tree, value)].kind == .TraitConst(owner, trait_name, name) && trait_name == COMPTIME_SITE_TRAIT {
+            sema_effect_node_rare_open(nodes[node_index])
+            if ^nodes[node_index].rare == .Val(rare) {
+                rare.guards.push(SemaEffectGuard{owner: owner, site: name, holds: true})
+                return true
+            }
+        }
+    }
+    false
+}
+
+// Turns the innermost guard (sema_effect_guard_open) to its else arm.
+sema_effect_guard_else: fn(walk: SemaEffectWalk, nodes: ^[SemaEffectNode]) {
+    if walk == .Collect(node_index) && ^nodes[node_index].rare == .Val(rare) {
+        rare.guards[rare.guards.len() - 1].holds = false
+    }
+}
+
+// Closes the innermost guard (sema_effect_guard_open).
+sema_effect_guard_close: fn(walk: SemaEffectWalk, nodes: ^[SemaEffectNode]) {
+    if walk == .Collect(node_index) && ^nodes[node_index].rare == .Val(rare) {
+        _ := rare.guards.pop()
     }
 }
 

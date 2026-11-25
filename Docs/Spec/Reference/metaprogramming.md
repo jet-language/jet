@@ -535,7 +535,10 @@ Jet has two related reflection paths:
    E0302 at the read. Compile-time code in a generic body that reads
    `T.reflect()` or `TypeId{T}`, a `#if` condition or a `name: #run value`,
    runs once for each of those types, and each instance reads its own
-   answer. Such a `#if` checks both arms in the generic body, and such a
+   answer. Such a `#if` checks both arms in the generic body, while each
+   instance builds only the arm it takes: a `T.reflect()` read that only the
+   other arm makes, written there or reached through a call made there,
+   builds no record and reports nothing for that instance. Such a
    `name: #run value` is an ordinary local that holds the instance's answer.
    `reflect.of(value)` returns the runtime reflection floor for a value.
 
