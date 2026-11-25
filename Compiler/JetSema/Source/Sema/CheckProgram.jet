@@ -4396,7 +4396,7 @@ sema_check_item_kind_label: fn(item: Item) -> String Never! {
 // graph and its checked-type indexes; `fixed_length_write_params` were
 // computed from that graph. The pass reads fields of every registered struct,
 // not only its checked types, so it never skips the computed-field lookup.
-sema_check_pass_environment: fn(program: ^SemaProgramTables, fixed_length_write_params: ^^[String], body_values: ^^SemaComptimeBodyValues) -> SemaScopeEnvironment Never! {
+sema_check_pass_environment: fn(program: ^SemaProgramTables, fixed_length_write_params: ^^[SemaWindowParam], body_values: ^^SemaComptimeBodyValues) -> SemaScopeEnvironment Never! {
     program.has_computed_fields = true
     environment := sema_scope_environment_init(module_none(), "", "", "", SemaSourceOrigin.Snapshot, [SemaSourceSegment]{}, [SemaScopeDeclaration]{})
     // Every module's functions, so the length-preserving fact covers calls
@@ -4426,7 +4426,7 @@ SEMA_PASS_FACT_JOBS: 4
 
 SemaPassFacts: struct {
     memory_plan: SemaFunctionMemoryPlan,
-    fixed_length_write_params: [String],
+    fixed_length_write_params: [SemaWindowParam],
     boxed_edges: [U32:[String]],
     copy_facts: SemaCopyFactsTable,
 }
@@ -4438,7 +4438,7 @@ SemaPassFact: struct {
 }
 
 sema_pass_facts_new: fn() -> SemaPassFacts Never! {
-    SemaPassFacts{memory_plan: sema_function_memory_plan_new(), fixed_length_write_params: [String]{}, boxed_edges: [U32:[String]]{}, copy_facts: sema_copy_facts_table_empty()}
+    SemaPassFacts{memory_plan: sema_function_memory_plan_new(), fixed_length_write_params: [SemaWindowParam]{}, boxed_edges: [U32:[String]]{}, copy_facts: sema_copy_facts_table_empty()}
 }
 
 // Fills the fields of jobs 0..<`jobs` of `facts` from `graph`, on threads

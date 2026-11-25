@@ -307,9 +307,9 @@ SemaOwnershipState: struct {
     // `#Reactive` bodies checked so far: their writes land on the
     // registration's clones, not on the enclosing lambda's captures.
     reactive_bodies: [Span]{[Span]{}},
-    // `function#parameter` keys of list write parameters
-    // proven length-preserving (sema_fixed_length_write_params).
-    fixed_length_write_params: [String],
+    // The list write parameters proven length-preserving
+    // (sema_fixed_length_write_params).
+    fixed_length_write_params: [SemaWindowParam],
     // E0420: `Type{ uninit }` bindings not yet
     // definitely written on every path reaching this point.
     uninit: [SemaOwnershipUninitFact],
@@ -537,7 +537,7 @@ sema_ownership_state_init: fn() -> SemaOwnershipState Never! {
         receiver_frames: [SemaReceiverMarkFrame]{},
         share_known: [Span]{},
         share_found: [SemaOwnershipShareSite]{},
-        fixed_length_write_params: [String]{},
+        fixed_length_write_params: [SemaWindowParam]{},
         uninit: [SemaOwnershipUninitFact]{},
         static_roots: [SymbolID]{},
         persist_roots: [SymbolID]{},
@@ -4043,7 +4043,7 @@ sema_ownership_check_call_arguments_with_accesses: fn(state: ^SemaOwnershipState
         if arg.convention == AccessConvention.Write && write_place_ok {
             if arg.expr == {
                 .Slice(_, _, _, _, _, _) -> {
-                    if !sema_window_contains(state.fixed_length_write_params, sema_window_callee_key(callee, param.name)) {
+                    if !sema_window_contains(state.fixed_length_write_params, callee, param.name) {
                         accepted = false
                         write_place_ok = false
                         diagnostics.push(sema_ownership_call_diag_write_range_window(arg.span))

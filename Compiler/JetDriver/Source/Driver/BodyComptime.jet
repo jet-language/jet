@@ -33,6 +33,7 @@ use {
         SemaLocalSpliceInto,
         SemaPassFacts,
         SemaRegistrationGraph,
+        SemaWindowParam,
         sema_call_rule_batches,
         sema_call_rule_batches_land,
         sema_call_rules_held,
@@ -953,13 +954,13 @@ jet_driver_land_local_values: fn(
 JetDriverLentFacts: struct {
     memory_plan: [SemaFunctionMemoryPlan],
     graph_facts: SemaComptimeGraphFacts?,
-    fixed_length_write_params: [String],
+    fixed_length_write_params: [SemaWindowParam],
 }
 
 // Moves the facts out of `carried` (sema_finalize_pass_close) for a
 // comptime run. An empty `carried` lends nothing: an empty slot and None.
 jet_driver_carried_lend: fn(carried: ^[SemaPassFacts]) -> JetDriverLentFacts Never! {
-    lent := JetDriverLentFacts{memory_plan: [SemaFunctionMemoryPlan]{}, graph_facts: None, fixed_length_write_params: [String]{}}
+    lent := JetDriverLentFacts{memory_plan: [SemaFunctionMemoryPlan]{}, graph_facts: None, fixed_length_write_params: [SemaWindowParam]{}}
     facts: carried.pop() ?? return lent
     lent.memory_plan.push(facts.memory_plan.move())
     lent.graph_facts = Val(SemaComptimeGraphFacts{boxed_edges: facts.boxed_edges.move(), copy_facts: facts.copy_facts.move()})

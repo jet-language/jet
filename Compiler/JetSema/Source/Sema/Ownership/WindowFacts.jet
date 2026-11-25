@@ -1,7 +1,7 @@
 // A range write window has a fixed length, so it may fill a
 // list write parameter only when the callee keeps that list's length.
 //
-// sema_fixed_length_write_params returns a key `function#parameter` for every
+// sema_fixed_length_write_params returns a SemaWindowParam for every
 // list write parameter proven length-preserving: the body never resizes or
 // reassigns it and passes it onward only to write parameters that are proven
 // themselves. Calls are written plain, so the scan reads
@@ -43,9 +43,20 @@ SemaWindowScan: struct {
     onward: [SemaWindowEdge],
 }
 
+// A list write parameter not yet known to resize: parameter `param` of the
+// function in census row `row`, and the parameters it is passed onward to,
+// each as its sema_window_param_slot (-1: one of an ambiguous callee).
 SemaWindowCandidate: struct {
-    key: String,
-    onward: [String],
+    row: Int,
+    param: Int,
+    onward: [Int],
+}
+
+// A list write parameter proven length-preserving: its function's plain
+// name and its own name, which a call site matches.
+SemaWindowParam: struct {
+    function: String,
+    param: String,
 }
 
 // One declared function's name, parameter names and which parameters write,
@@ -57,13 +68,13 @@ SemaWindowFunctionRow: struct {
     writes: [Bool],
 }
 
-// The proven-set key of the callee parameter an onward pass reaches. Calls
+// The proven-set slot of the callee parameter an onward pass reaches. Calls
 // name a function by its plain name, optionally module-qualified; a name
-// declared more than once in the bundle is ambiguous and is never proven. A
-// parameter every declaration of the name reads cannot resize the list: no
-// key (`""`). A callee the bundle does not declare (a built-in such as
-// `print`) takes no write parameter, so it reads the list too.
-sema_window_edge_key: fn(rows: [SemaWindowFunctionRow], positions: SemaWindowPositions, edge: SemaWindowEdge) -> String Never! {
+// declared more than once in the bundle is ambiguous and is never proven
+// (-1). A parameter every declaration of the name reads cannot resize the
+// list: no slot (None). A callee the bundle does not declare (a built-in such
+// as `print`) takes no write parameter, so it reads the list too.
+sema_window_edge_slot: fn(rows: [SemaWindowFunctionRow], positions: SemaWindowPositions, edge: SemaWindowEdge) -> Int? Never! {
     id: sema_window_position_id(positions, sema_window_plain_name(edge.callee))
     writer := -1
     loop index in positions.rows[id] {
@@ -71,12 +82,13 @@ sema_window_edge_key: fn(rows: [SemaWindowFunctionRow], positions: SemaWindowPos
             writer = index
         }
     }
-    if writer < 0 -> return ""
-    if positions.rows[id].len() > 1 -> return "#unknown"
-    sema_window_param_key(rows[writer].name, rows[writer].params[edge.index])
+    if writer < 0 -> return None
+    if positions.rows[id].len() > 1 -> return Val(-1)
+    Val(sema_window_param_slot(writer, edge.index))
 }
 
-sema_window_param_key: fn(function: String, param: String) -> String Never! { "{function}#{param}" }
+// Parameter `param` of the function in census row `row`, as one Int.
+sema_window_param_slot: fn(row: Int, param: Int) -> Int Never! { (row << 32) | param }
 
 // The plain function name a possibly module-qualified callee spelling names.
 sema_window_plain_name: fn(callee: String) -> String Never! {
@@ -84,9 +96,13 @@ sema_window_plain_name: fn(callee: String) -> String Never! {
     if parts.len() > 0 -> parts[parts.len() - 1] else -> callee
 }
 
-// The proven-set key a call site checks for parameter `param` of `callee`.
-sema_window_callee_key: fn(callee: String, param: String) -> String Never! {
-    sema_window_param_key(sema_window_plain_name(callee), param)
+// Whether `params` holds parameter `param` of `callee`, as a call spells it.
+sema_window_contains: fn(params: [SemaWindowParam], callee: String, param: String) -> Bool Never! {
+    function: sema_window_plain_name(callee)
+    loop proven in params {
+        if proven.function == function && proven.param == param -> return true
+    }
+    false
 }
 
 sema_window_collect_rows: fn(items: [Item], rows: ^[SemaWindowFunctionRow]) {
@@ -146,13 +162,13 @@ sema_window_position_id: fn(positions: SemaWindowPositions, name: String) -> Int
 
 // `items` holds every module of the bundle, so the fact covers calls into
 // other modules, inline or file, bundle-wide.
-sema_fixed_length_write_params: fn(items: [Item]) -> [String] Never! {
+sema_fixed_length_write_params: fn(items: [Item]) -> [SemaWindowParam] Never! {
     rows := [SemaWindowFunctionRow]{}
     sema_window_collect_rows(items, rows)
     positions: sema_window_positions(rows)
     candidates := [SemaWindowCandidate]{}
     sema_window_collect_candidates(items, rows, positions, candidates)
-    sema_window_fixed_length_params(candidates)
+    sema_window_fixed_length_params(rows, candidates)
 }
 
 // The same bundle-wide fact over every module of `graph`, in module order:
@@ -160,7 +176,7 @@ sema_fixed_length_write_params: fn(items: [Item]) -> [String] Never! {
 // bundle list.
 SEMA_WINDOW_MIN_BYTES_PER_THREAD: 131072
 
-sema_fixed_length_write_params_in_graph: fn(graph: SemaRegistrationGraph) -> [String] Never! {
+sema_fixed_length_write_params_in_graph: fn(graph: SemaRegistrationGraph) -> [SemaWindowParam] Never! {
     rows := [SemaWindowFunctionRow]{}
     loop module_index in 0..<graph.modules.len() {
         sema_window_collect_rows(graph.modules[module_index].program.items, rows)
@@ -170,10 +186,10 @@ sema_fixed_length_write_params_in_graph: fn(graph: SemaRegistrationGraph) -> [St
     loop module_index in 0..<graph.modules.len() {
         sema_window_collect_candidates(graph.modules[module_index].program.items, rows, positions, candidates)
     }
-    sema_window_fixed_length_params(candidates)
+    sema_window_fixed_length_params(rows, candidates)
 }
 
-sema_fixed_length_write_params_in_graph_threads: fn(graph: SemaRegistrationGraph, threads: CompilerThreads) -> [String] Never! {
+sema_fixed_length_write_params_in_graph_threads: fn(graph: SemaRegistrationGraph, threads: CompilerThreads) -> [SemaWindowParam] Never! {
     rows := [SemaWindowFunctionRow]{}
     weights := [Int]{}
     work := 0
@@ -198,7 +214,7 @@ sema_fixed_length_write_params_in_graph_threads: fn(graph: SemaRegistrationGraph
             candidates.extend(part.move())
         }
     }
-    sema_window_fixed_length_params(candidates)
+    sema_window_fixed_length_params(rows, candidates)
 }
 
 sema_window_collect_candidate_parts: fn(graph: SemaRegistrationGraph, rows: [SemaWindowFunctionRow], positions: SemaWindowPositions, bounds: [Int], at: Int) -> [[SemaWindowCandidate]] Never! {
@@ -228,9 +244,11 @@ sema_window_collect_candidate_range: fn(graph: SemaRegistrationGraph, rows: [Sem
 }
 
 sema_window_function_candidates: fn(func: Func, rows: [SemaWindowFunctionRow], positions: SemaWindowPositions, candidates: ^[SemaWindowCandidate]) {
-    if positions.rows[sema_window_position_id(positions, func.name)].len() > 1 {
+    id: sema_window_position_id(positions, func.name)
+    if positions.rows[id].len() != 1 {
         return
     }
+    row: positions.rows[id][0]
     loop param_index in 0..<func.params.len() {
         if func.params[param_index].convention != AccessConvention.Write -> next
         is_list := if func.params[param_index].ty == {
@@ -241,34 +259,31 @@ sema_window_function_candidates: fn(func: Func, rows: [SemaWindowFunctionRow], p
         scan := SemaWindowScan{resizes: false, onward: [SemaWindowEdge]{}}
         sema_window_scan_body(func.body, func.params[param_index].name, scan)
         if scan.resizes -> next
-        onward := [String]{}
+        onward := [Int]{}
         loop edge in scan.onward {
-            key: sema_window_edge_key(rows, positions, edge)
-            if key != "" -> onward.push(key)
+            slot: sema_window_edge_slot(rows, positions, edge) ?? next
+            onward.push(slot)
         }
-        candidates.push(SemaWindowCandidate{key: sema_window_param_key(func.name, func.params[param_index].name), onward: onward})
+        candidates.push(SemaWindowCandidate{row: row, param: param_index, onward: onward})
     }
 }
 
-sema_window_fixed_length_params: fn(candidates: [SemaWindowCandidate]) -> [String] Never! {
+sema_window_fixed_length_params: fn(rows: [SemaWindowFunctionRow], candidates: [SemaWindowCandidate]) -> [SemaWindowParam] Never! {
     // Greatest fixed point by worklist: a candidate falls once an onward
     // target is not proven, and each fall revisits only the candidates that
     // pass onward to it, instead of rechecking every candidate per round.
-    // Each key's first candidate by key id (-1: none; id 0, the empty key,
-    // names none).
-    keys := name_table_sized(candidates.len() * 2 + 2)
-    first := [Int]{-1}
+    // Each slot's first candidate.
+    first := [Int:Int]{}
     loop (index, candidate) in candidates {
-        id: name_index(name_intern(keys, candidate.key))
-        if id == first.len() -> first.push(index)
+        slot: sema_window_param_slot(candidate.row, candidate.param)
+        if first.get(slot) == None -> first[slot] = index
     }
     proven := (loop _ in candidates -> true)
     dependents := (loop _ in candidates -> [Int]{})
     pending := [Int]{}
     loop (index, candidate) in candidates {
         loop target in candidate.onward {
-            slot: sema_window_slot(keys, first, target)
-            if slot >= 0 {
+            if first.get(target) == .Val(slot) {
                 dependents[slot].push(index)
                 next
             }
@@ -287,24 +302,13 @@ sema_window_fixed_length_params: fn(candidates: [SemaWindowCandidate]) -> [Strin
             }
         }
     }
-    result := [String]{}
+    result := [SemaWindowParam]{}
     loop (index, candidate) in candidates {
-        if proven[index] -> result.push(candidate.key)
+        if proven[index] {
+            result.push(SemaWindowParam{function: rows[candidate.row].name, param: rows[candidate.row].params[candidate.param]})
+        }
     }
     result
-}
-
-// The first candidate whose key is `key`, or -1.
-sema_window_slot: fn(keys: NameTable, first: [Int], key: String) -> Int Never! {
-    found: name_find(keys, key) ?? return -1
-    first[name_index(found)]
-}
-
-sema_window_contains: fn(keys: [String], key: String) -> Bool Never! {
-    loop candidate in keys {
-        if candidate == key -> return true
-    }
-    false
 }
 
 // Length-preserving list methods edit elements in place and keep the length.
