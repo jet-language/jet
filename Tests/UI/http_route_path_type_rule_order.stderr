@@ -1,0 +1,43 @@
+Error: Jet.ValueTypeMismatch: `1.5` isn't a whole number, so `Int` can't hold it exactly
+  --> http_route_path_type_rule_order.jet:40:16
+    |
+ 40 |     first: Int{1.5}
+    |                ^^^
+ Why: An integer typed literal converts a Float only when no rounding is needed; it never picks a rounding for you
+ Fix: Round it first, as in `Int{math.trunc(value)}`, or with `math.floor`, `math.ceil`, `math.round` or `math.round_even`
+More: jet-lang.dev/e/Jet.ValueTypeMismatch
+
+Error: Jet.RouteMethodTokenRefused: HTTPRouter custom route method must be a static String
+  --> http_route_path_type_rule_order.jet:45:19
+    |
+ 45 |     router.custom(verb, "/files/:name", named)
+    |                   ^^^^
+ Why: Router and `#Server.Custom` routes are fully checked while building; only an App takes a run-time method, checked when it registers
+ Fix: Use a literal or compile-time String constant, or register the route on a `web.app()`
+More: jet-lang.dev/e/Jet.RouteMethodTokenRefused
+
+Error: Jet.ValueTypeMismatch: `2.5` isn't a whole number, so `Int` can't hold it exactly
+  --> http_route_path_type_rule_order.jet:46:17
+    |
+ 46 |     second: Int{2.5}
+    |                 ^^^
+ Why: An integer typed literal converts a Float only when no rounding is needed; it never picks a rounding for you
+ Fix: Round it first, as in `Int{math.trunc(value)}`, or with `math.floor`, `math.ceil`, `math.round` or `math.round_even`
+More: jet-lang.dev/e/Jet.ValueTypeMismatch
+
+Error: http_route_path_type_rule_order.Fraction: A gauge reads whole numbers
+  --> http_route_path_type_rule_order.jet:49:22
+    |
+ 49 |     print(gauge.read(2.5))
+    |                      ^^^
+ Why: The gauge rule hears each argument's type
+ Fix: Pass an Int
+
+Error: Jet.ValueTypeMismatch: `3.5` isn't a whole number, so `Int` can't hold it exactly
+  --> http_route_path_type_rule_order.jet:50:16
+    |
+ 50 |     third: Int{3.5}
+    |                ^^^
+ Why: An integer typed literal converts a Float only when no rounding is needed; it never picks a rounding for you
+ Fix: Round it first, as in `Int{math.trunc(value)}`, or with `math.floor`, `math.ceil`, `math.round` or `math.round_even`
+More: jet-lang.dev/e/Jet.ValueTypeMismatch
