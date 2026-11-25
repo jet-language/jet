@@ -1540,7 +1540,7 @@ sema_comptime_reflection_type_id: fn(graph: SemaRegistrationGraph, caller: Int, 
 // `geo.Point`, the `Transform` of `Transform<Screen, World>`), as the module
 // that writes it resolves it: the head as `written`; its `identity`, the
 // declaring module's path to it (sema_comptime_reflection_declared_identity);
-// the `name` a TypeId shows for it (sema_comptime_reflection_shown_name); its
+// the `name` a TypeId shows for it (sema_comptime_reflection_root_name); its
 // declaration's type parameter names; its TypeKind variant, Builtin when no
 // struct, enum, distinct type or trait answers; and a distinct type's `base`
 // binding, read where the type is declared. A head no declared type answers
@@ -1614,12 +1614,14 @@ sema_comptime_reflection_type_head_add: fn(graph: SemaRegistrationGraph, caller:
 
 // The head `written`, as module row `caller` resolves it.
 sema_comptime_reflection_type_head: fn(graph: SemaRegistrationGraph, caller: Int, written: String) -> SemaTypeIDHead {
-    head := SemaTypeIDHead{written: written, identity: written, name: sema_comptime_reflection_shown_name(graph, caller, type_unqualified_text(written, true)), params: [String]{}, kind: "Builtin", bindings: [TComptimeValue]{}}
+    head := SemaTypeIDHead{written: written, identity: written, name: type_unqualified_text(written, true), params: [String]{}, kind: "Builtin", bindings: [TComptimeValue]{}}
     row: sema_type_resolve_nominal_row_at(graph, Type.Named{name: written}, caller) ?? return head
     declaring: graph.modules[row.module_index]
     nominal: declaring.nominals[row.row]
     if !sema_comptime_reflection_bare_module(declaring) {
         head.identity = sema_comptime_reflection_declared_identity(declaring, nominal.symbol.name)
+        // copy: the head keeps its identity, which also names a type its root module can't name
+        head.name = sema_comptime_reflection_root_name(graph, row, nominal.symbol.name) ?? head.identity.copy()
     }
     head.params = loop param in nominal.generic_params -> param.name
     head.kind = if nominal.kind == {
@@ -1938,14 +1940,33 @@ sema_comptime_reflection_declared_identity: fn(declaring: SemaRegistrationModule
     sema_name_type_path(declaring.module_name, declaring.program.items, name)
 }
 
-// The name a TypeId shows for the type head `name`: a type lifted from an
-// inline module reads by its path inside its module (`M3GeoPoint` is
-// `geo.Point`), any other name as written.
-sema_comptime_reflection_shown_name: fn(graph: SemaRegistrationGraph, caller: Int, name: String) -> String {
-    lifted: if sema_name_generated_shape(name.bytes(), 0, name.bytes().len()) -> sema_comptime_reflection_module_declared_row(graph, caller, name) else -> None
-    row: lifted ?? return name
-    declaring: graph.modules[row.module_index]
-    sema_name_lifted_spelling(declaring.program.items, declaring.nominals[row.row].symbol.name) ?? name
+// The name a TypeId shows for the type `symbol` that row `row` declares:
+// the spelling the root module writes for it, so one type shows one name
+// wherever it is reflected. That is its leaf (`Point`) when the leaf names
+// this very type from the root module; else the first that does of its path
+// inside its module (`geo.Point`) and the leaf or path under an alias the
+// root module imports (`http.Request`). None for a type the root module
+// can't name, which shows its identity.
+sema_comptime_reflection_root_name: fn(graph: SemaRegistrationGraph, row: SemaRegistrationRowRef, symbol: String) -> String? {
+    path: sema_name_lifted_spelling(graph.modules[row.module_index].program.items, symbol) ?? "{symbol}"
+    leaf: if path.cut_last(".") == .Val(parts) -> "{parts.after}" else -> "{path}"
+    root: sema_registration_module_index(graph, graph.entry_module_identity) ?? return Val(path)
+    if sema_comptime_reflection_names_row(graph, root, row, leaf) -> return Val(leaf)
+    if path != leaf && sema_comptime_reflection_names_row(graph, root, row, path) -> return Val(path)
+    loop import in graph.modules[root].program.imports {
+        if import.alias == "" -> next
+        aliased_leaf: "{import.alias}.{leaf}"
+        if sema_comptime_reflection_names_row(graph, root, row, aliased_leaf) -> return Val(aliased_leaf)
+        aliased_path: "{import.alias}.{path}"
+        if path != leaf && sema_comptime_reflection_names_row(graph, root, row, aliased_path) -> return Val(aliased_path)
+    }
+    None
+}
+
+// Whether `spelling` names the type at `row` from module row `from`.
+sema_comptime_reflection_names_row: fn(graph: SemaRegistrationGraph, from: Int, row: SemaRegistrationRowRef, spelling: String) -> Bool {
+    found: sema_type_resolve_nominal_row_at(graph, Type.Named{name: spelling}, from) ?? return false
+    found.module_index == row.module_index && found.row == row.row
 }
 
 // Whether module row `declaring` is the compiler's own prelude, whose types
