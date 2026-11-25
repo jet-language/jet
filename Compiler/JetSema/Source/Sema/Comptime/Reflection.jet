@@ -1857,7 +1857,7 @@ sema_comptime_reflection_binding_info: fn(name: String, ty: TComptimeValue, size
 // The TypeId record of an `identity`, the `name` it prints as, its
 // `signature` value (a `CallableSignature?`), its `generic_bindings` (a
 // `[GenericBindingInfo]`) and its `kind` (a TypeKind value).
-sema_comptime_reflection_type_id_signed: fn(identity: String, name: String, signature: TComptimeValue, bindings: TComptimeValue, kind: TComptimeValue) -> TComptimeValue {
+priv sema_comptime_reflection_type_id_signed: fn(identity: String, name: String, signature: TComptimeValue, bindings: TComptimeValue, kind: TComptimeValue) -> TComptimeValue {
     sema_comptime_reflection_struct(
         "TypeId",
         [SemaComptimeReflectionField]{
@@ -2759,17 +2759,14 @@ sema_comptime_reflection_enum_case_info: fn(registration: SemaRegistrationGraph,
 }
 
 // A variant's payload type as a TypeId: `Unit` for none, the payload type for
-// one, and the written record `{name: Type, ...}` for named fields, each
-// field type qualified in `identity` as a TypeId's is.
+// one, and for named fields the record `{name: Type, ...}`, a tuple whose
+// bindings name each field, all made by the one maker.
 sema_comptime_reflection_variant_type_id: fn(registration: SemaRegistrationGraph, caller: Int, payload: VariantPayload) -> TComptimeValue Never! {
     if payload == {
         .Unit -> sema_comptime_reflection_type_id(registration, caller, Type.Named{name: "Unit"})
         .Single(ty, _) -> sema_comptime_reflection_type_id(registration, caller, ty)
-        .Named(fields) -> {
-            identities: loop field in fields -> "{field.name}: {type_name(sema_comptime_reflection_named_type(registration, caller, field.ty, qualified: true))}"
-            names: loop field in fields -> "{field.name}: {type_name(field.ty)}"
-            sema_comptime_reflection_type_id_signed("{{{identities.join(", ")}}}", "{{{names.join(", ")}}}", sema_comptime_reflection_none(Type.Named{name: "CallableSignature"}), TComptimeValue.List{values: [TComptimeValue]{}}, sema_comptime_reflection_kind("Tuple"))
-        }
+        // copy: the record type owns its field types; the payload keeps its own.
+        .Named(fields) -> sema_comptime_reflection_type_id(registration, caller, Type.Tuple{fields: loop field in fields -> TypeTupleField{name: field.name, ty: field.ty.copy()}})
     }
 }
 

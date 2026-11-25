@@ -2294,20 +2294,21 @@ sema_derive_ct_str: fn(name: String, value: String) -> NamedCtValue {
     NamedCtValue{name: name, value: CtValue.Str{value: value}}
 }
 
-// A payload type reads as its written name; a nominal applied to no arguments
-// is the nominal itself.
-sema_derive_type_text: fn(ty: Type) -> String {
-    if ty == .Apply(name, args) {
-        if args.len() == 0 -> return name
-    }
-    type_name(ty)
+// The TypeId of a type a builtin derive provider reads, made by the one
+// TypeId maker (sema_comptime_reflection_type_id_headed) from the heads
+// `heads` holds. The providers read the partial TypeInfo before its item is
+// placed in a module, so no other head resolves through a module: it keeps
+// its written spelling as its identity, as the record's `path` does. A
+// nominal applied to no arguments is the nominal itself.
+sema_derive_type_id_value: fn(heads: [SemaTypeIDHead], ty: Type) -> TComptimeValue {
+    if ty == .Apply(name, args) && args.len() == 0 -> return sema_comptime_reflection_type_id_headed(heads, Type.Named{name: name})
+    sema_comptime_reflection_type_id_headed(heads, ty)
 }
 
-// The TypeId of a type as the partial TypeInfo names it. The builtin derive
-// providers read that record before its item is placed in a module, so a
-// TypeId's identity is the type as written, as the record's `path` is.
-sema_derive_type_id: fn(text: String) -> CtValue {
-    sema_derive_ct_struct("TypeId", [NamedCtValue]{sema_derive_ct_str("identity", text), sema_derive_ct_str("name", text)})
+// That TypeId as the template value the providers read; a TypeId holds no
+// function or character, so it always has one.
+sema_derive_type_id: fn(heads: [SemaTypeIDHead], ty: Type) -> CtValue {
+    sema_user_template_ct_value(sema_derive_type_id_value(heads, ty)) ?? CtValue.Failed{report: CtReport.Clean{ty: Type.Named{name: "TypeId"}}}
 }
 
 // A field row; `default` is where the field's written default expression
@@ -2320,23 +2321,17 @@ sema_derive_field_info: fn(name: String, ty: Type, is_pub: Bool, default: Span?)
         span: sema_derive_ct_struct("SourceSpan", [NamedCtValue]{sema_derive_ct_str("file", ""), NamedCtValue{name: "start", value: CtValue.Int{value: source.start}}, NamedCtValue{name: "end", value: CtValue.Int{value: source.end}}})
         default_info = CtValue.Present{value: sema_derive_ct_struct("DefaultInfo", [NamedCtValue]{NamedCtValue{name: "source", value: span}})}
     }
-    sema_derive_ct_struct("FieldInfo", [NamedCtValue]{sema_derive_ct_str("name", name), NamedCtValue{name: "type", value: sema_derive_type_id(sema_derive_type_text(ty))}, NamedCtValue{name: "is_pub", value: CtValue.Bool{value: is_pub}}, NamedCtValue{name: "default", value: default_info}})
+    sema_derive_ct_struct("FieldInfo", [NamedCtValue]{sema_derive_ct_str("name", name), NamedCtValue{name: "type", value: sema_derive_type_id([SemaTypeIDHead]{}, ty)}, NamedCtValue{name: "is_pub", value: CtValue.Bool{value: is_pub}}, NamedCtValue{name: "default", value: default_info}})
 }
 
-// The partial TypeInfo a builtin derive provider reads. Its `identity` says
-// what the type is: its `kind` (a TypeKind variant), and a distinct type's
-// `base` binding (`bindings`). Its `methods` lists only those a provider
-// asks after (`has_method`).
-sema_derive_type_info: fn(name: String, kind: String, fields: [CtValue], cases: [CtValue], methods: [CtValue], bindings: [CtValue]) -> CtValue {
-    identity: sema_derive_ct_struct(
-        "TypeId",
-        [NamedCtValue]{
-            sema_derive_ct_str("identity", name),
-            sema_derive_ct_str("name", name),
-            NamedCtValue{name: "generic_bindings", value: CtValue.List{values: bindings}},
-            NamedCtValue{name: "kind", value: CtValue.Enum{type_name: "TypeKind", variant: kind, args: [CtEnumArg]{}}},
-        },
-    )
+// The partial TypeInfo a builtin derive provider reads. Its `identity` is
+// the type's TypeId, made by the one maker from the type's own head: its
+// `kind` (a TypeKind variant), and a distinct type's `base` binding
+// (`bindings`). Its `methods` lists only those a provider asks after
+// (`has_method`).
+sema_derive_type_info: fn(name: String, kind: String, fields: [CtValue], cases: [CtValue], methods: [CtValue], bindings: [TComptimeValue]) -> CtValue {
+    own: SemaTypeIDHead{written: name, identity: name, name: name, params: [String]{}, kind: kind, bindings: bindings}
+    identity: sema_derive_type_id([SemaTypeIDHead]{own}, Type.Named{name: name})
     sema_derive_ct_struct(
         "TypeInfo",
         [NamedCtValue]{
@@ -2360,7 +2355,7 @@ sema_derive_struct_type_info: fn(definition: StructDef) -> CtValue {
         }
         fields.push(sema_derive_field_info(definition.fields[field_index].name, definition.fields[field_index].ty, definition.fields[field_index].is_pub, default))
     }
-    sema_derive_type_info(definition.name, "Struct", fields, [CtValue]{}, [CtValue]{}, [CtValue]{})
+    sema_derive_type_info(definition.name, "Struct", fields, [CtValue]{}, [CtValue]{}, [TComptimeValue]{})
 }
 
 // A KeyBy type's derive input, `kind` its Struct or Enum: its members
@@ -2368,7 +2363,7 @@ sema_derive_struct_type_info: fn(definition: StructDef) -> CtValue {
 // cases.
 sema_derive_key_type_info: fn(name: String, kind: String) -> CtValue {
     key: sema_derive_ct_struct("MethodInfo", [NamedCtValue]{sema_derive_ct_str("name", "key")})
-    sema_derive_type_info(name, kind, [CtValue]{}, [CtValue]{}, [CtValue]{key}, [CtValue]{})
+    sema_derive_type_info(name, kind, [CtValue]{}, [CtValue]{}, [CtValue]{key}, [TComptimeValue]{})
 }
 
 // An enum lists its leaf cases as CaseInfo rows under `cases`, as the
@@ -2379,7 +2374,7 @@ sema_derive_enum_type_info: fn(definition: EnumDef) -> CtValue {
     loop (index, variant) in definition.variants {
         payload: if variant.payload == {
             .Unit -> CtValue.Enum{type_name: "CasePayload", variant: "Unit", args: [CtEnumArg]{}}
-            .Single(payload_type, _) -> CtValue.Enum{type_name: "CasePayload", variant: "Single", args: [CtEnumArg]{CtEnumArg{label: None, value: sema_derive_type_id(sema_derive_type_text(payload_type))}}}
+            .Single(payload_type, _) -> CtValue.Enum{type_name: "CasePayload", variant: "Single", args: [CtEnumArg]{CtEnumArg{label: None, value: sema_derive_type_id([SemaTypeIDHead]{}, payload_type)}}}
             .Named(named) -> {
                 fields: loop field in named -> sema_derive_field_info(field.name, field.ty, definition.is_pub, None)
                 CtValue.Enum{type_name: "CasePayload", variant: "Named", args: [CtEnumArg]{CtEnumArg{label: None, value: CtValue.List{values: fields}}}}
@@ -2398,13 +2393,13 @@ sema_derive_enum_type_info: fn(definition: EnumDef) -> CtValue {
             ),
         )
     }
-    sema_derive_type_info(definition.name, "Enum", [CtValue]{}, cases, [CtValue]{}, [CtValue]{})
+    sema_derive_type_info(definition.name, "Enum", [CtValue]{}, cases, [CtValue]{}, [TComptimeValue]{})
 }
 
 // A distinct type binds its base type as `base`, as its TypeId does.
 sema_derive_distinct_type_info: fn(definition: DistinctDef) -> CtValue {
-    base: sema_derive_ct_struct("GenericBindingInfo", [NamedCtValue]{sema_derive_ct_str("name", "base"), NamedCtValue{name: "type", value: sema_derive_type_id(sema_derive_type_text(definition.base))}})
-    sema_derive_type_info(definition.name, "Distinct", [CtValue]{}, [CtValue]{}, [CtValue]{}, [CtValue]{base})
+    base: sema_comptime_reflection_binding_info("base", sema_derive_type_id_value([SemaTypeIDHead]{}, definition.base), sema_comptime_reflection_none(Type.Int))
+    sema_derive_type_info(definition.name, "Distinct", [CtValue]{}, [CtValue]{}, [CtValue]{}, [TComptimeValue]{base})
 }
 
 sema_derive_replace_provider_type: fn(ty: Type, type_param: String, owner_type: Type) -> Type Never! {
