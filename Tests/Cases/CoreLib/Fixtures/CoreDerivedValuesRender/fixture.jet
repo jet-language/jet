@@ -1,0 +1,36 @@
+// Core values that show through their structural derive, with no Display
+// impl and no runtime show hook: a terminal Key, a Solver and a compiled
+// Regex print and interpolate bare, inside a list and an Option, and as a
+// field of a program struct that derives its own rendering from them.
+use {
+    term: core.term
+    solve: core.compute.solve
+    regex: core.regex
+}
+
+Binding: struct {
+    key: term.Key,
+    pattern: regex.Regex,
+}
+
+run: fn() {
+    enter: term.Key.Enter
+    typed: term.Key.Char('q')
+    print(enter)
+    print("{typed}")
+    print("{typed:Debug}")
+    keys: [term.Key]{enter, typed}
+    print(keys)
+    pending: term.Key?{Val(typed)}
+    print("{pending}")
+    solver := solve.Solver.new(7)
+    solver.require(true)
+    print(solver)
+    print("{solver:Debug}")
+    pattern: regex.compile("a+") ?? panic("pattern")
+    shown: "{pattern}"
+    print(shown.starts_with("Regex"))
+    binding: Binding{key: typed, pattern: pattern}
+    rendered: "{binding}"
+    print(rendered.starts_with("Binding") && rendered.contains("Char(q)"))
+}

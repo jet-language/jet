@@ -726,7 +726,7 @@ sema_serde_items_struct_encode_body: fn(definition: StructDef, stored: Bool, spa
     codec: if stored -> "encode_stored" else -> "encode"
     pairs: "jet_serde_pairs"
     pairs_type: sema_data_object_pairs_type()
-    pair_type: if pairs_type == .List(element) -> element.copy() else -> panic("the ordered Object payload is a list")
+    pair_type: sema_data_object_pair_type()
     body := [Stmt]{sema_serde_items_binding(pairs, Val(pairs_type), Expr.ListLit{elements: [Expr]{}, span: span, id: AST_NODE_GENERATED}, true, span)}
     loop field in definition.fields {
         if field.computed != None || sema_serde_items_drops(field, stored) -> next
@@ -1363,7 +1363,7 @@ sema_serde_items_migration_walk_body: fn(definition: StructDef, blocks: [Migrati
                 }
                 .Add(field, _, _, _, _, _, _) -> {
                     value: sema_serde_items_method_call(sema_serde_items_free_call(sema_serde_items_migration_op_name("add", definition, block_index, field), [Expr]{}, span), encode, [Expr]{}, span)
-                    ops.push(sema_serde_items_push_pair(entries, sema_migration_json_key(definition, style, field), value, sema_serde_items_pair_type(), span))
+                    ops.push(sema_serde_items_push_pair(entries, sema_migration_json_key(definition, style, field), value, sema_data_object_pair_type(), span))
                 }
                 .Change(field, _, from_ty, _, _, _, _, _, _) -> {
                     ops.push(sema_serde_items_migration_change(entries, sema_migration_json_key(definition, style, field), from_ty, sema_serde_items_migration_op_name("conv", definition, block_index, field), stored, span))
@@ -1416,22 +1416,15 @@ sema_serde_items_migration_unmatched: fn(span: Span) -> Stmt Never! {
     sema_serde_items_return(Expr.Err{value: Expr.ListLit{elements: [Expr]{}, span: span, id: AST_NODE_GENERATED}, span: span, id: AST_NODE_GENERATED}, span)
 }
 
-sema_serde_items_pair_type: fn() -> Type Never! {
-    if sema_data_object_pairs_type() == {
-        .List(element) -> element
-        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> panic("the ordered Object payload is a list")
-    }
-}
-
 // One `rename` (`to` present) or `remove` over the entry list: rebuild it with
 // the `key` entry renamed to `to` or dropped.
 sema_serde_items_migration_rekey: fn(entries: String, key: String, to: String?, span: Span) -> Stmt Never! {
     next_entries: "jet_serde_next"
-    keep: sema_serde_items_push_row(next_entries, sema_serde_items_copy(sema_serde_items_field_read("jet_serde_pair", "key", span), span), sema_serde_items_copy(sema_serde_items_field_read("jet_serde_pair", "value", span), span), sema_serde_items_pair_type(), span)
+    keep: sema_serde_items_push_row(next_entries, sema_serde_items_copy(sema_serde_items_field_read("jet_serde_pair", "key", span), span), sema_serde_items_copy(sema_serde_items_field_read("jet_serde_pair", "value", span), span), sema_data_object_pair_type(), span)
     is_key: Expr.Binary{op: BinOp.Eq, left: sema_serde_items_field_read("jet_serde_pair", "key", span), right: sema_serde_items_string(key, span), span: span, id: AST_NODE_GENERATED}
     visit: if to == {
         .Val(renamed) -> {
-            row: sema_serde_items_push_pair(next_entries, renamed, sema_serde_items_copy(sema_serde_items_field_read("jet_serde_pair", "value", span), span), sema_serde_items_pair_type(), span)
+            row: sema_serde_items_push_pair(next_entries, renamed, sema_serde_items_copy(sema_serde_items_field_read("jet_serde_pair", "value", span), span), sema_data_object_pair_type(), span)
             Stmt.Switch{subject: Expr.Bool{value: true, span: span, id: AST_NODE_GENERATED}, arms: [SwitchArm]{SwitchArm{cond: is_key, body: [Stmt]{row}, span: span}}, else_body: Val([Stmt]{keep}), span: span}
         }
         .None -> sema_serde_items_if(sema_serde_items_not(is_key, span), [Stmt]{keep}, span)
@@ -1445,13 +1438,13 @@ sema_serde_items_migration_rekey: fn(entries: String, key: String, to: String?, 
 // fails the walk with its errors under `key`.
 sema_serde_items_migration_change: fn(entries: String, key: String, from_ty: Type, converter: String, stored: Bool, span: Span) -> Stmt Never! {
     changed: "jet_serde_changed"
-    keep: sema_serde_items_push_row(changed, sema_serde_items_copy(sema_serde_items_field_read("jet_serde_pair", "key", span), span), sema_serde_items_copy(sema_serde_items_field_read("jet_serde_pair", "value", span), span), sema_serde_items_pair_type(), span)
+    keep: sema_serde_items_push_row(changed, sema_serde_items_copy(sema_serde_items_field_read("jet_serde_pair", "key", span), span), sema_serde_items_copy(sema_serde_items_field_read("jet_serde_pair", "value", span), span), sema_data_object_pair_type(), span)
     encode: if stored -> "encode_stored" else -> "encode"
     decode: if stored -> "decode_stored" else -> "decode"
     converted: sema_serde_items_method_call(sema_serde_items_free_call(converter, [Expr]{sema_serde_items_copy(sema_serde_items_ident("jet_serde_old_value", span), span)}, span), encode, [Expr]{}, span)
     convert: [Stmt]{
         sema_serde_items_binding("jet_serde_old", None, sema_serde_items_under(key, sema_serde_items_codec_call(sema_serde_items_copy(sema_serde_items_field_read("jet_serde_pair", "value", span), span), decode, from_ty, span), span), false, span),
-        sema_serde_items_result_switch(sema_serde_items_ident("jet_serde_old", span), "jet_serde_old_value", [Stmt]{sema_serde_items_push_pair(changed, key, converted, sema_serde_items_pair_type(), span)}, "jet_serde_change_errors", [Stmt]{sema_serde_items_return(Expr.Err{value: sema_serde_items_ident("jet_serde_change_errors", span), span: span, id: AST_NODE_GENERATED}, span)}, span),
+        sema_serde_items_result_switch(sema_serde_items_ident("jet_serde_old", span), "jet_serde_old_value", [Stmt]{sema_serde_items_push_pair(changed, key, converted, sema_data_object_pair_type(), span)}, "jet_serde_change_errors", [Stmt]{sema_serde_items_return(Expr.Err{value: sema_serde_items_ident("jet_serde_change_errors", span), span: span, id: AST_NODE_GENERATED}, span)}, span),
     }
     is_key: Expr.Binary{op: BinOp.Eq, left: sema_serde_items_field_read("jet_serde_pair", "key", span), right: sema_serde_items_string(key, span), span: span, id: AST_NODE_GENERATED}
     visit: Stmt.Switch{subject: Expr.Bool{value: true, span: span, id: AST_NODE_GENERATED}, arms: [SwitchArm]{SwitchArm{cond: is_key, body: convert, span: span}}, else_body: Val([Stmt]{keep}), span: span}

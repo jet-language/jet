@@ -1597,7 +1597,9 @@ quoted_after: fn(text: String, marker: String) -> [String] Never! {
 #Test("a route carrying a List of schema records is a reviewed handle-buffer route") {
     path: "Compiler/JetIR/Source/RuntimeRoutes.jet"
     routes: files.read(path) ?? panic("{path} did not read: {err}")
-    schemas: quoted_after(routes, "IRRecordSchema{{jet_name: \"")
+    layouts_path: "Compiler/JetFoundation/Source/Registry/RuntimeLayouts.jet"
+    layouts: files.read(layouts_path) ?? panic("{layouts_path} did not read: {err}")
+    schemas: quoted_after(layouts, "IRRecordSchema{{jet_name: \"")
     found := [String]{}
     loop line in routes.lines() {
         symbols: quoted_after(line, "IRRoute{{symbol: \"")

@@ -2213,10 +2213,16 @@ jfmt_bind_keeps_colon_eq: fn(f: JetFmt, mutable: Bool, sigil: Span?) -> Bool Nev
 }
 
 // The prepared value of a compile-time binding keeps the spelling the author
-// wrote: `#run { value }` stays braced, and `#run value` stays bare when the
-// value is one postfix operand (a name, a call, a member, an index, a slice
-// or a literal). Any other value takes the braces.
+// wrote: `#run { value }` stays braced, `#run { a: 1, b: 2 }` keeps its
+// fields, and `#run value` stays bare when the value is one postfix operand
+// (a name, a call, a member, an index, a slice or a literal). Any other value
+// takes the braces.
 jfmt_fmt_prepared_value: fn(f: ^JetFmt, value: Expr) {
+    if jfmt_is_record_body(f, value) {
+        jfmt_write(f, "#run {{")
+        jfmt_fmt_record_body(f, value)
+        return
+    }
     if jfmt_prepared_operand(value) && !jfmt_value_was_braced(f, value) {
         jfmt_write(f, "#run ")
         jfmt_fmt_expr(f, value, JFMT_PREC_OR_FALLBACK)

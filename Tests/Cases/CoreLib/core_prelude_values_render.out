@@ -1,0 +1,15 @@
+CPU
+ComputeDevice { name: "CPU" }
+SyncText { atoms: [SyncTextAtom { replica: a, counter: 1, after: , scalar: h, deleted: false }, SyncTextAtom { replica: a, counter: 2, after: 1:a:1, scalar: i, deleted: false }], valid: true }
+SyncCounter { counts: [a: CounterCount { positive: 3, negative: 0 }], valid: true }
+SyncMap { entries: [k: LWW { value: v, clock: 1, writer: local, deleted: false }], valid: true }
+SyncList { items: [RGAItem { replica: "a", value: "x" }], valid: true }
+OneForAll
+DurableAtLeastOnce
+ServiceRuntime(store=store, retention_ms=1000)
+ServiceStateStore(state)
+RNG { .. }
+RNG { state: 7 }
+[OneForOne, RestForOne]
+Hold { device: ComputeDevice { name: CPU }, counter: SyncCounter { counts: [a: CounterCount { positive: 3, negative: 0 }], valid: true }, restart: OneForOne, delivery: AtMostOnce, store: ServiceStateStore(state) }
+Hold { device: ComputeDevice { name: "CPU" }, counter: SyncCounter { counts: ["a": CounterCount { positive: 3, negative: 0 }], valid: true }, restart: OneForOne, delivery: AtMostOnce, store: ServiceStateStore { path: "state" } }

@@ -28,10 +28,10 @@ use jet_foundation.[
     perf_report_array,
     perf_report_boolean,
     perf_report_evidence_enum,
+    perf_report_find,
     perf_report_frame,
     perf_report_hex64,
     perf_report_history_ids,
-    perf_report_index,
     perf_report_integer,
     perf_report_nullable,
     perf_report_object,
@@ -95,7 +95,7 @@ br_set: fn(value: CanonicalJSON, key: String, replacement: CanonicalJSON) -> Can
 }
 
 br_get: fn(value: CanonicalJSON, key: String) -> CanonicalJSON Never! {
-    if value == .Object(f) -> return f[perf_report_index(f, key)].value.copy()
+    if value == .Object(f) -> return f[perf_report_find(f, key) ?? panic("test key required")].value.copy()
     panic("test object required")
 }
 

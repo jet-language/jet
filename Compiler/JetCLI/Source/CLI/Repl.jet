@@ -54,7 +54,7 @@ use {
         type_name,
         type_unqualified_nominals,
     ]
-    jet_lexer.[TOKEN_COLON, TOKEN_DOT, TOKEN_IDENT, TOKEN_KW_FN, lex]
+    jet_lexer.[TOKEN_COLON, TOKEN_DOT, TOKEN_IDENT, TOKEN_KW_FN, lex, statement_starts]
     jet_parser.[parse_source]
     jet_pkg_model.[JET_VERSION]
     jet_repl.[repl_classify, repl_reanchor]
@@ -230,14 +230,6 @@ jet_cli_repl_after: fn(text: String, needle: String) -> String? Never! {
     at: text.find(needle)
     if at < 0 -> return None
     Val(jet_cli_repl_bytes(text, at + needle.count_bytes(), text.count_bytes()))
-}
-
-jet_cli_repl_trim_semicolons: fn(text: String) -> String Never! {
-    trimmed := text.trim_end().copy()
-    loop trimmed.ends_with(";") {
-        trimmed = jet_cli_repl_bytes(trimmed, 0, trimmed.count_bytes() - 1).trim_end().copy()
-    }
-    trimmed
 }
 
 jet_cli_repl_line_count: fn(text: String) -> Int Never! {
@@ -889,12 +881,15 @@ jet_cli_repl_is_string: fn(ty: Type?) -> Bool Never! {
 
 // `run_stmts_turn`: compile the statements after the replayed ones, with the
 // lines that show this turn's values, in one program; run it and keep what
-// the statements bind.
+// the statements bind. An echo binds the last statement, the one after the
+// last line break or `;` the parser ends a statement at, so `a(); b` echoes
+// `b`.
 jet_cli_repl_stmts: fn(session: ^JetCLIReplSession, tables: ASTTables, body: [StmtNode], suppress: Bool, echo: Bool, check_source: String) -> JetCLIReplTurnResult {
     echo_name: "jet_repl_echo_{session.nonce}_{session.step}"
-    plain: jet_cli_repl_trim_semicolons(check_source)
+    starts: statement_starts(lex(check_source.bytes()).tokens)
+    last: starts[starts.len() - 1]
     prefix: if echo -> "{echo_name}: " else -> ""
-    statement: "{prefix}{plain}"
+    statement: "{jet_cli_repl_bytes(check_source, 0, last)}{prefix}{jet_cli_repl_bytes(check_source, last, check_source.count_bytes())}"
     moved: jet_cli_repl_moves(session, tables, body)
     // This turn's new bindings, the last of a name winning; the compile gives
     // their types.

@@ -1,5 +1,5 @@
 use {
-    jet_foundation.[Diagnostic, DiagnosticFixApplicability, Expr, Program, Span, TextEdit]
+    jet_foundation.[Diagnostic, DiagnosticFixApplicability, Expr, Program, TextEdit]
     jet_lexer.[lex]
     jet_parser.[parse_tokens]
 }
@@ -153,13 +153,15 @@ value_block_binding_init: fn(program: Program, function_name: String) -> Expr {
     )
 }
 
-#Test("value_block_rejects_authored_semicolon_and_incomplete_input") {
-    diagnostics: value_block_rejected("\nrun: fn() {{\n    result: if ready -> {{\n        1;\n    }} else -> 0\n}}\n")
-    found := false
-    loop diagnostic in diagnostics {
-        if diagnostic.code == "E0114" -> found = true
+// A `;` after a value branch's last value is the line break it means, so the
+// branch keeps its value; an unclosed branch is still refused.
+#Test("value_block_reads_an_authored_semicolon_as_a_line_break_and_rejects_incomplete_input") {
+    program: value_block_parsed("\nrun: fn(ready: Bool) {{\n    result: if ready -> {{\n        1;\n    }} else -> 0\n}}\n")
+    if value_block_binding_init(program, "run") == .If(_, _, then_value, _, _, _, _) {
+        assert(then_value == .Int(_, _, _, _, _), "the branch keeps its value")
+    } else {
+        panic("the binding is an if")
     }
-    assert(found, "authored semicolon must keep the value-tail rejection")
     incomplete: value_block_rejected("\nrun: fn() {{\n    result: if ready -> {{\n        1\n    }} else -> {{\n        0\n")
     rejected := false
     loop diagnostic in incomplete {
@@ -267,20 +269,12 @@ value_block_binding_init: fn(program: Program, function_name: String) -> Expr {
     )
 }
 
-// An authored `;` after nested control in a fallback block is not a synthetic
-// terminator: it is reported as the explicit-semicolon diagnostic E0373 at
-// exactly that `;`.
-#Test("fallback_block_rejects_authored_semicolon_after_nested_control") {
+// An authored `;` after nested control in a fallback block is the line break
+// it stands for: the block still ends in its value.
+#Test("fallback_block_reads_authored_semicolon_after_nested_control_as_a_line_break") {
     source: "\nrun: fn(value: Int?) {{\n    result: value ?? {{\n        loop {{\n            break\n        }};\n        1\n    }}\n}}\n"
-    diagnostics: value_block_rejected(source)
-    semicolon: parser_test_find(source, "}};")
-    found := false
-    loop diagnostic in diagnostics {
-        if diagnostic.code == "E0373" && diagnostic.span == (Val(Span{start: semicolon + 1, end: semicolon + 2})) {
-            found = true
-        }
-    }
-    assert(found, "authored semicolon must not be treated as a synthetic terminator")
+    program: value_block_parsed(source)
+    assert_eq(program.items.len(), 1)
 }
 
 arm_table_checked: fn(source: String) -> [Diagnostic] {

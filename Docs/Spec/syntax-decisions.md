@@ -94,7 +94,7 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, then rer
 | `^self.field / ^self.[a, b]` | stated receiver field footprint: the record fields a method may read or change, checked against its body (E0231) and published in the API snapshot; reuses member spread `.[` |
 | `T{expr}` | field default |
 | `Name{"…"}` | checked text head |
-| `{ … }` | record, the unnamed struct: `{x: 1, y: 2}` as a value, `{min: Int, max: Int}` as a type, `{min, max}: bounds` as a destructure; braces hold a record when every entry is a field or a pun and a colon or comma appears, so `{x}` is a block, `{x, y}` and `{x: x}` are records and `{}` is a block; where a struct type is expected the same braces build it; braces after a signature, a control head or a block marker hold code, and a paren tuple `(x: 1)` is not Jet syntax |
+| `{ … }` | record, the unnamed struct: `{x: 1, y: 2}` as a value, `{min: Int, max: Int}` as a type, `{min, max}: bounds` as a destructure; braces hold a record when every entry is a field or a pun and a colon or comma appears, so `{x}` is a block, `{x, y}` and `{x: x}` are records and `{}` is a block; where a struct type is expected the same braces build it; a value body (after a signature with a result, a lambda head, an arm's arrow, or a value-giving marker block such as `#run`) holds a record when a comma separates field or pun members at its top level, or when its declared result carries a value and its only line is `name: value` whose value does not start with `loop`; otherwise it holds code, and braces after a control head hold code; a paren tuple `(x: 1)` is not Jet syntax |
 | `loop x in xs -> item / Head{loop x in xs -> item}` | yielding loop: in value position a finite loop yields one item per accepted pass, in loop order; a bare one builds a List and ignores the expected type; a typed set or map head holding one loop in place of its items builds that collection, a map loop yielding `key: value` where a later key replaces an earlier one; items beside a loop in one head are a build error |
 | <code>`</code> | raw ordinary String fence |
 | `"""` | multi-line string; only spaces or tabs on the delimiter lines (raw foreign bodies excepted) |
@@ -986,7 +986,7 @@ values: loop item in items -> item.value
 left to right; a dynamic nonpositive stride raises E0123 before the first pull.
 Stride N visits source indexes 0, N, 2N; exhaustion while advancing is normal.
 `in` joins a source binding to its source. Commas separate later loop header
-clauses. Semicolons remain statement boundaries only.
+clauses; a `;` there is E0373, as it only separates statements.
 A pattern test in a conditional loop binds its names for the body of each
 pass, as in an `if` condition: `loop cur == .Val(c) { …; cur = next(c) }`
 runs once per `Val` and stops at the first `None`, and `c` is not visible
@@ -1665,7 +1665,7 @@ declare. To order by another member first, use `sort_by` (example:
 `Examples/Collections/NamedTupleOrder.jet`).
 
 **D-RECORD-BRACE1=A — a record is written in braces** *(ratified 2026-11-06,
-card #6251)*: braces after a signature, a control head or a block marker hold
+card #6251; amended by D-BODY-RECORD1=A)*: braces after a signature, a control head or a block marker hold
 code, and braces after `struct`, `enum`, `trait`, `module` or `impl` hold
 members. Anywhere else braces hold a record, the unnamed struct, when every
 entry is a field or a pun and at least one colon or comma appears: `{x}` is a
@@ -1674,6 +1674,29 @@ empty block. A paren tuple is not Jet syntax. Destructuring is a brace pattern
 followed by `:` or `:=` (`{min, max}: bounds`). The `paren-tuple1` rewrite
 (D-LANG-MIGRATE1) moves paren records, types, patterns and destructures to
 braces.
+
+**D-BODY-RECORD1=A — a value body written as fields builds the record**
+*(ratified 2026-11-25, card c0yuue6m; amends D-RECORD-BRACE1 and narrows
+S29-FLUSH)*: a value body — after a signature with a result, a lambda head, an
+arm's arrow, or a value-giving marker block such as `#run` — holds a record when
+a comma separates field or pun members at its top level, the rule arm bodies
+already used: `mk: fn(w: Int, h: Int) -> Rect { width: w, height: h }`,
+`rows.map(fn(r) { name: r.name, total: r.total })`, `X: #run { a: 1, b: 2 }`.
+When the declared result carries a value (not Unit and not a unit-fallible
+`E!`), a body whose only line is `name: value` builds the record too, unless
+that value starts with `loop`: `-> Int { outer: loop { … } }` stays a labeled
+loop. A lambda with no declared result keeps one field as a binding, which
+Jet.UnusedLocalBinding reports with the `{ {name: value} }` fix. `{x}` and `{}`
+stay blocks, a decision table is not fields, and control heads keep code. The
+test is syntactic; a `<…>` argument list is one member value where the
+generic-head test holds, so `{a: 1, q: Pair<Int, Int>{first: 1, second: 2}}`
+is two fields and `{ok: MAX < n, big: m > LIMIT}` two comparisons. Body braces
+never convert: the record is checked against the declared result. After a
+signature's arrow a result type touching `{` ends there and the brace opens
+the body, so `sq: fn(n: Int) -> Int{n * n}` keeps its result and `jet fmt`
+prints `-> Int { n * n }`; E0080 fires only for a real arrow body such as
+`-> n * n` and `jet fmt` no longer rewrites it. A record body where no value is
+expected is Jet.ValueThrownAway in a lambda as in a named function.
 
 **D-BRACE-LAYOUT1=A — commas separate data members** *(ratified 2026-11-06,
 card #6251)*: commas separate the data members of a braced list: struct
@@ -1694,7 +1717,9 @@ D-LIT-DOT1=B)*: named struct and typed-literal heads touch their braces:
 **`Type{ field: expr, … }`**. An anonymous record is **`{ … }`**. The leading
 dot remains only for enum unit/payload selectors such as `.Tls13` and
 `.Password{ username: u }`. Dotted literal heads are E0320. Every field
-exactly once, any order; flush style `Point{x: 3.0, y: 4.0}` (S29-FLUSH).
+exactly once, any order; flush style `Point{x: 3.0, y: 4.0}` (S29-FLUSH;
+after a signature's arrow a type touching `{` is the result type and the brace
+opens the body, D-BODY-RECORD1).
 Qualified generic heads retain their arguments too:
 `library.Record<T>{ field: expr }` has the same construction meaning as
 `Record<T>{ field: expr }`; the adjacent `<…>{` is not a comparison chain.
@@ -5064,12 +5089,14 @@ The registry spellings are `COMMENT_PREFIX`, `DOC_COMMENT_PREFIX`,
 `Data/Syntax/CoreSurface.jet`, and the lexer and the tools that scan for
 comments read them.
 
-**S6 — No visible semicolons** *(S6-R, amended by D-LOOP-COMMA1=A)*: statements end at line end; the
+**S6 — Statements end at line end** *(S6-R, amended by D-LOOP-COMMA1=A and D-SEMI-LINE1=A)*: statements end at line end; the
 lexer inserts Go-style terminators after any line whose last token can end a
 statement. Layout rules: `-> Type` and `{` stay on the closing-`)` line; a
 terminator is suppressed when the next non-blank line starts with `.` (chain)
-or a binary/logical operator. Loop header clauses use commas; the retired
-semicolon spelling is E0373. New terminal tokens must be added to `ends_statement`.
+or a binary/logical operator. A `;` is that terminator written on one line: it
+stands only where a line break would end the statement (E0447 elsewhere, E0448
+after a one-line arm with code following), and `jet fmt` writes the line break.
+Loop header clauses use commas, and a `;` there is E0373. New terminal tokens must be added to `ends_statement`.
 
 **S44 — Formatter** *(D-FMT1, D-FMTPARENS1, D-NARG2, D-BRACE1=A, D-FMTCOLLAPSE1=B)*: one style, zero
 config — 4-space indent, same-line `{`, width 100, spaced binary operators.
@@ -9402,8 +9429,10 @@ a REPL cell and a notebook cell obey one rule.
 every value-expected function, method, lambda, and value block gives its
 expected type to the sole final expression. That expression is the block value;
 it is not rewritten into a source `return`. Explicit `return` remains an early
-exit. A semicolon-terminated expression, assignment, declaration, or other
-statement tail produces unit and is diagnosed when a value is required. The
+exit. An assignment, declaration, or other statement tail produces unit and is
+diagnosed when a value is required; a `;` after the final expression is the
+line break it means, so `{ 5; }` is `{ 5 }` (D-SEMI-LINE1 retired the
+semicolon clause). The
 same law applies to value arm tables and fallback blocks. A final audited
 `#Unsafe("reason") { … }` region forwards the value expectation to its own
 tail without relaxing the lexical unsafe gate. Engines lower the checked value
@@ -10680,15 +10709,23 @@ after the last item counts as part of the multi-line form. **Technical:** Parser
 same
 optional-final-comma rule; formatter list renderers use source delimiters and comments to choose multiline
 layout. 
-- **D-SEMI1=A —** An explicit semicolon is the ratified E0373 with a
-  behavior-preserving edit: a line break when code follows on the same line,
-  removal at line end. The parser keeps a boundary at the same position so one
-  file reports once and parsing resumes at the next statement. Explicit and
-  inserted terminators share `TOKEN_SEMI`; the diagnostic dispatches on a
-  non-empty source span, and the E0373 row carries `fix_edits`.
-  The Jet parser contract fixtures in
-  `Compiler/JetParser/Tests/ContractFixtures.fixture/ContractFixtures.jet` pin both edits and statement
-  recovery through the production parser.
+- **D-SEMI1=A —** *(superseded by D-SEMI-LINE1=A)* An explicit semicolon was
+  E0373 with a behavior-preserving edit: a line break when code follows on the
+  same line, removal at line end.
+- **D-SEMI-LINE1=A —** *(ratified, card c090agiq; reopens D-SEMI1)*
+  A `;` between statements or items means a line break, in files, `jet eval`
+  and the REPL alike. The lexer accepts it only where its own line-break test
+  (`line_break_event`, Terminators.jet) would end the statement, and lands it
+  as the zero-width terminator that line break would be; anywhere else it is
+  E0447. Right after a one-line `if`, `else` or `loop` arm, or a `return`,
+  `break` or `next` arm, a `;` with code after it on the same line is E0448:
+  whether that code belongs to the arm is not something a `;` decides. Inside
+  a decision table a `;` ends a row. A trailing or doubled `;` is accepted.
+  Inside a member list, an argument list, a type, a loop header or an
+  interpolation hole a `;` separates nothing and stays E0373, whose edit writes
+  the `,` a member or argument list takes. `jet fmt` prints one statement per
+  line and drops every `;`. `jet eval` and the REPL part their one line by the
+  terminators the parser ends statements at (`statement_starts`).
 - **D-MARKERSHAPE1=B —** One bare rule, one list for several, E0999 with the
   rewrite otherwise. The audit found no new evidence; the surface does not
   change.

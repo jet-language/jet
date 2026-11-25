@@ -1511,6 +1511,24 @@ sema_call_check_default_err: fn(call: Call, expected: Type?, check: ^SemaBodyChe
     sema_expr_expected(value, expected, check.environment.*, check.program.*, check.diagnostics)
 }
 
+// The defaults a call to `target` takes for the parameters it leaves
+// unwritten: a lone Snapshot program's come from its own declarations, the
+// rest from Registration.
+sema_call_target_default_values: fn(target: SemaCallDirectTarget, binding: SemaCallBinding, span: Span, check: ^SemaBodyCheck) -> [SemaCallDefaultValue]? {
+    if check.program.registration_graph.mode == .Snapshot {
+        local_defaults: sema_call_local_default_values(target, binding, check) ?? {
+            check.diagnostics.push(sema_error("E0906", span, "a default argument for this call could not be resolved", "callable defaults retain their owning declaration and source identity", "make the owning declaration available to Registration before checking this call"))
+            return None
+        }
+        return Val(local_defaults)
+    }
+    registered_defaults: sema_call_registration_defaults(check.program.registration_graph, binding) ?? {
+        check.diagnostics.push(sema_error("E0906", span, "a default argument for this call could not be resolved", "registered callable defaults retain their graph identity and source location", "make the bound default available to Registration before checking this call"))
+        return None
+    }
+    Val(registered_defaults)
+}
+
 sema_call_local_default_values: fn(target: SemaCallDirectTarget, binding: SemaCallBinding, check: ^SemaBodyCheck) -> [SemaCallDefaultValue]? {
     if binding.default_refs.len() == 0 -> return Val([SemaCallDefaultValue]{})
     declaration: sema_scope_resolve_declaration(check.environment.*, check.program.*, target.symbol.id) ?? return None
@@ -2003,24 +2021,7 @@ sema_call_direct_checked_resolved: fn(check: ^SemaBodyCheck, candidate: SemaCall
     if binding.default_refs.len() > 0 {
         resolved_defaults := defaults
         if resolved_defaults.len() == 0 {
-            if {
-                // Snapshot: a lone program's defaults are its own declarations' (sema_call_local_default_values).
-                check.program.registration_graph.mode == .Snapshot -> {
-                    local_defaults: sema_call_local_default_values(candidate, binding, check) ?? {
-                        check.diagnostics.push(sema_error("E0906", call.name_span, "a default argument for this call could not be resolved", "callable defaults retain their owning declaration and source identity", "make the owning declaration available to Registration before checking this call"))
-                        return None
-                    }
-                    resolved_defaults = local_defaults
-                }
-                else -> {
-                    graph: check.program.registration_graph
-                    registered_defaults: sema_call_registration_defaults(graph, binding) ?? {
-                        check.diagnostics.push(sema_error("E0906", call.name_span, "a default argument for this call could not be resolved", "registered callable defaults retain their graph identity and source location", "make the bound default available to Registration before checking this call"))
-                        return None
-                    }
-                    resolved_defaults = registered_defaults
-                }
-            }
+            resolved_defaults = sema_call_target_default_values(candidate, binding, call.name_span, check) ?? return None
         }
         resolved: sema_call_materialize_defaults(params, binding, args, resolved_defaults, call.name_span, check.diagnostics) ?? return None
         binding = resolved

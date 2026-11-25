@@ -119,18 +119,13 @@ inline_assembly_contract: fn(function: Func, target: String) -> InlineAsmContrac
                 Val(value) -> inline_assembly_return_destination(value, params, target, target_supported)
             }
             if {
-                checked_destination != None -> {
-                    destination: checked_destination ?? panic("checked assembly return destination disappeared")
-                    if {
-                        return_destination != None -> {
-                            bad = Val("an assembly body can have only one checked return destination")
-                        }
-                        else -> { return_destination = Val(destination) }
-                    }
-                }
-                else -> {
+                checked_destination == None -> {
                     bad = Val("a value-returning assembly body needs a named output operand or an explicit audited target register")
                 }
+                return_destination != None -> {
+                    bad = Val("an assembly body can have only one checked return destination")
+                }
+                else -> { return_destination = checked_destination.move() }
             }
         }
 

@@ -1,0 +1,15 @@
+# Core's linear-algebra values and SIMD lanes (math.Vec2, Vec3, Vec4, Mat3,
+# F64x4, F32x4, I32x4) are plain records admitted by their structural
+# derive: print, `{value}` and `{value:Debug}`, bare, in a list and as a
+# program struct's fields, at every optimization level. F64x4 copies and
+# compares as a value.
+fixture: Fixtures/CoreMathValuesRender
+step: jet run fixture.jet
+stdout: = core_math_values_render.out
+stderr: empty
+step: jet run -O1 fixture.jet
+stdout: = core_math_values_render.out
+stderr: empty
+step: jet run -O2 fixture.jet
+stdout: = core_math_values_render.out
+stderr: empty

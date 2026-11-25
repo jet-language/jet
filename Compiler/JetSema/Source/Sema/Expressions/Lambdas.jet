@@ -8,6 +8,7 @@ use jet_foundation.[
     CallablePolicy,
     CallablePolicyChain,
     Diagnostic,
+    diagnostic_with_edit,
     diagnostic_with_label,
     EffectRowEntry,
     effect_scope_descriptor,
@@ -31,6 +32,7 @@ use jet_foundation.[
     TEffectFacts,
     TEffectSpan,
     TFailureCarrier,
+    TextEdit,
     TLocal,
     TTryConvert,
     Type,
@@ -2142,6 +2144,25 @@ sema_expression_lambda_value_expected: fn(value: Expr, body_expected: Type?, exp
     body_expected.copy()
 }
 
+// The record a lambda with no written result ends its body in, such as
+// `fn(r) { n: r, sq: r * r }`; None for any other body.
+sema_expression_lambda_record_tail: fn(lambda: Lambda) -> Span? Never! {
+    if lambda.result != None -> return None
+    if lambda.body == .Block(statements) && statements.len() > 0 && statements[statements.len() - 1] == .Expr(last) && last == .StructLit(type_name, _, _, _, _, _, span, _) && type_name == "" {
+        return Val(span)
+    }
+    None
+}
+
+// In a slot that takes nothing back, that record is thrown away (L0508), as a
+// named function's last line is when it writes no result, and the body gives
+// back nothing.
+sema_expression_lambda_drop_record_tail: fn(lambda: ^Lambda, diagnostics: ^[Diagnostic]) {
+    span: sema_expression_lambda_record_tail(lambda) ?? return
+    diagnostics.push(sema_lint("L0508", span, "this record is thrown away", "this callback gives back nothing, so the record its body ends in is lost", "write the callback where its caller takes a value back, or write `.drop(\"reason\")` to discard the record on purpose"))
+    if ^lambda.body == .Block(statements) -> statements.push(Stmt.Expr{expr: Expr.Unit{span: span, id: AST_NODE_GENERATED}})
+}
+
 // (E0113): an expression body whose own check rejected it against the expected
 // return with the generic E0108 is the lambda's return mismatch, reported on
 // the lambda with the body's own type.
@@ -2217,6 +2238,17 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, o
     // function's is; the expected callable type is checked against it below.
     if lambda.result == .Val(written) {
         expected_ret = Val(sema_expr_expected_type(written, check.environment.*, check.program.*))
+    }
+    // A slot whose callable type gives back nothing (`fn(Int)`) takes no
+    // record from a body that ends in one.
+    if !inline_loop && !open_result && !host_callback && expected != None && (expected_ret == None || expected_ret == .Val(Type.Named{name: "Unit"})) {
+        sema_expression_lambda_drop_record_tail(lambda_work, check.diagnostics)
+    }
+    // A body whose only line binds a name (`fn(r) { name: r.name }`) never
+    // reads it; a record that line meant to give back takes inner braces.
+    if !inline_loop && lambda_work.body == .Block(statements) && statements.len() == 1 && statements[0] == .Val(binding) && !binding.mutable && binding.pattern == None && !binding.name.starts_with("_") {
+        unread: sema_lint("L0101", binding.name_span, "Local binding `{binding.name}` is never read.", "A binding that no later expression reads adds dead code and may hide a computed result that should have been used.", "To give back a record, write `{{ {{{binding.name}: value}} }}`; otherwise remove the binding, or rename `{binding.name}` to `_{binding.name}` when the value must be computed.")
+        check.diagnostics.push(diagnostic_with_edit(unread, TextEdit{span: binding.name_span, new_text: "_{binding.name}"}))
     }
     // The arity mismatch is reported and the lambda is still checked under its
     // own parameters, so the caller sees its real type and reports the argument

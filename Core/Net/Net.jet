@@ -33,9 +33,25 @@ ws: module
 
 ip: module
 
+// The runtime keeps a native address (family, octets, port, flow, scope);
+// `host` and `port` read through socket_host/socket_port, and only core.net
+// builds one. It renders as the `host:port` text socket_to_string spells, in
+// every mode.
 SocketAddr: struct {
-    host: String,
-    port: Int,
+    priv host: String,
+    priv port: Int,
+
+    impl Display {
+        display: fn(self) -> String { socket_to_string_impl(self) }
+    }
+
+    impl Printable {
+        show: fn(self) -> String { socket_to_string_impl(self) }
+    }
+
+    impl Debug {
+        debug: fn(^^self) -> String { socket_to_string_impl(self) }
+    }
 }
 
 NetReady: struct {
@@ -263,12 +279,32 @@ net_error_text: fn(err: NetError) -> String Never! {
     assert(net_error_text(NetError.Closed(detail)) == "closed")
 }
 
+// A received datagram. The runtime record also holds the sender's native
+// address, so only core.net's receives build one. It renders as its size
+// and sender, in every mode.
 UDPPacket: struct {
     data: [U8],
     host: String,
     port: Int,
     original_len: Int,
     truncated: Bool,
+    priv addr: SocketAddr,
+
+    impl Display {
+        display: fn(self) -> String { udp_packet_text(self) }
+    }
+
+    impl Printable {
+        show: fn(self) -> String { udp_packet_text(self) }
+    }
+
+    impl Debug {
+        debug: fn(^^self) -> String { udp_packet_text(self) }
+    }
+}
+
+priv udp_packet_text: fn(packet: UDPPacket) -> String Never! {
+    "UDPPacket({packet.data.len()} bytes from {socket_to_string_impl(udp_packet_addr(packet))})"
 }
 
 SRVRecord: struct {
@@ -618,13 +654,13 @@ unix_accept: fn(listener: UnixListener) -[Net, Time.Wait]> UnixStream NetError! 
     rt.unix_accept(listener)
 }
 
-// Existing Core arity rows retain the public `deadline:` label and target
-// these ordinary source entry points without changing user call syntax.
-#Builtin.Role(.UnixConnect) priv __unix_connect_entry: fn(path: String) -[Net, Time.Wait]> UnixStream NetError! {
+// The checked `unix_connect` rows run these entries, picked by argument
+// count; their zones are the calls' label rules.
+#Builtin.Role(.UnixConnect) priv __unix_connect_entry: fn(path: String, /) -[Net, Time.Wait]> UnixStream NetError! {
     rt.unix_connect_host(path)
 }
 
-#Builtin.Role(.UnixConnectDeadline) priv __unix_connect_deadline_entry: fn(path: String, deadline: Duration) -[Net, Time.Wait]> UnixStream NetError! {
+#Builtin.Role(.UnixConnectDeadline) priv __unix_connect_deadline_entry: fn(path: String, /, *, deadline: Duration) -[Net, Time.Wait]> UnixStream NetError! {
     rt.unix_connect_deadline_host(path, deadline.ns)
 }
 

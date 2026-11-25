@@ -1,13 +1,11 @@
 // Core.rows's declarations as the compiler build reads them
 // (Compiler/JetFoundation/Source/CoreDeclarations): CORE_CALLS is the
-// dispatcher rows then CORE_CALL_EXTENSIONS, a dispatcher row's Rust
-// constructor chain evaluates to its CoreCallRecord facts, and a broken
-// declaration is refused with what is wrong. Assemble with the canonical
-// Compiler unit, replacing its host entry.
+// dispatcher rows, a dispatcher row's Rust constructor chain evaluates to its
+// CoreCallRecord facts, and a broken declaration is refused with what is
+// wrong. Assemble with the canonical Compiler unit, replacing its host entry.
 use {
     core_declarations_files: core.files
     jet_foundation.[
-        CORE_CALL_EXTENSIONS,
         CORE_CALLS,
         CORE_DECLARATIONS,
         CORE_DECLARATIONS_CORE_PATH,
@@ -126,18 +124,13 @@ core_declarations_stray: fn(kind: String, module_name: String, member: String, e
 
 #Test("core_call_rows") {
     dispatchers: CORE_DECLARATIONS.dispatchers
-    assert_eq(CORE_CALLS.len(), dispatchers.len() + CORE_CALL_EXTENSIONS.len())
+    assert_eq(CORE_CALLS.len(), dispatchers.len())
     core_keys := [String]{}
     loop (index, row) in dispatchers {
         key: core_call_key(row.record)
         assert_eq(core_call_key(CORE_CALLS[index]), key)
         assert(!core_keys.contains(key), "the Core.rows row {key} repeats another")
         core_keys.push(key)
-    }
-    loop (index, row) in CORE_CALL_EXTENSIONS {
-        key: core_call_key(row)
-        assert_eq(core_call_key(CORE_CALLS[dispatchers.len() + index]), key)
-        assert(!core_keys.contains(key), "the extension row {key} repeats a Core.rows row")
     }
 }
 

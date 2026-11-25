@@ -1,0 +1,23 @@
+// Values the checker owns with no source declaration print through their
+// runtime handle row's display or show form: bare, interpolated and in a list.
+use files: core.files
+
+run: fn() -[FS, IO]> {
+    bits := Bits.new()
+    bits.add(1)
+    bits.add(4)
+    print(bits)
+    print("bits {bits}")
+    span: 2..<5
+    print(span)
+    print("span {span}")
+    print([span, 0..<1])
+    if files.open("/nonexistent/jet-runtime-shown") == {
+        .Ok(_) -> print("opened")
+        .Err(error) -> {
+            print(error)
+            print("error {error}")
+            print([error])
+        }
+    }
+}

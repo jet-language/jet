@@ -1,0 +1,21 @@
+# A socket address and a received UDP packet render through core.net's
+# Display, Printable and Debug impls in every mode: print, `{value}`,
+# `{value:Debug}`, in a list, in an Option and as a program struct's field,
+# with no runtime show hook. O0 (`jet run`) at each level prints the same
+# lines.
+requires: os-name:linux
+fixture: CoreNetAddressesAndPacketsRender.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step none: jet run -O0 main.jet
+exit: 0
+stdout: = core_net_addresses_and_packets_render.out
+stderr: empty
+step basic: jet run -O1 main.jet
+exit: 0
+stdout: = core_net_addresses_and_packets_render.out
+stderr: empty
+step full: jet run -O2 main.jet
+exit: 0
+stdout: = core_net_addresses_and_packets_render.out
+stderr: empty

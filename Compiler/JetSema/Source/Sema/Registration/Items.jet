@@ -5990,7 +5990,10 @@ sema_registration_resolve_export_indirect: fn(graph: SemaRegistrationGraph, modu
                     return None
                 }
                 module_row_text: module_text(graph.module_table, module_row.module_identity)
-                id: symbol_find(graph.symbols, symbol_key_text(SymbolKind.Import, module_row_text, module_text(graph.module_table, import.target_module_identity), name)) ?? panic("the module import `{name}` of `{module_row_text}` has no symbol (sema_registration_mint_module_imports)")
+                // sema_registration_mint_module_imports minted every module's
+                // import bindings before any export resolves; one it did not
+                // mint binds nothing.
+                id: symbol_find(graph.symbols, symbol_key_text(SymbolKind.Import, module_row_text, module_text(graph.module_table, import.target_module_identity), name)) ?? return None
                 symbol: Symbol{id: id, kind: SymbolKind.Import, name: name.copy(), module_identity: module_row.module_identity, owner: None, span: import.declaration.alias_span, ty: None, visibility: visibility}
                 return Val(SemaRegistrationExport{name: name.copy(), symbol: symbol.move(), declaration_position: None, source_module_identity: import.target_module_identity, visibility: visibility})
             }

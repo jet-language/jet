@@ -2,8 +2,9 @@
 # a final `if` with `->` branches or a final dispatch is that value,
 # though the body of `run: fn` reads such an `if` as a statement elsewhere; a
 # statement `if` and a unit value print nothing more; a List prints one item
-# per line and a String prints without quotes. A value `if` before the last
-# statement is still the unused value it is (E0003).
+# per line and a String prints without quotes. A `;` is the line break it
+# means, so a value `if` whose last arm a `;` follows on the same line is
+# refused (E0448), as in a file.
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: XDG_CACHE_HOME={work}/xdg
@@ -28,4 +29,17 @@ stdout: = "a b\n"
 step value_if_not_last: jet eval 'if 1 > 0 -> "a" else -> "b"; print(1)'
 exit: 1
 stdout: = ""
-stderr: ~ "Jet.InvalidStatement" # a value-producing `if` that is not last computes a value nothing uses
+stderr: ~ "Jet.SemicolonAfterArm" # the `;` after a one-line arm could end the arm or the `if`
+step negative_after_semicolon: jet eval 'x := 1; -1; print(x)'
+exit: 1
+stdout: = ""
+stderr: ~ "Jet.SemicolonWithoutLineBreak" # a line break before `-1` would continue the statement
+step statements: jet eval 'total: 2 + 3; print(total)'
+exit: 0
+stdout: = "5\n"
+step trailing_semicolon: jet eval 'print(7);'
+exit: 0
+stdout: = "7\n"
+step item_then_statements: jet eval 'S: struct { a: Int }; s: S{a: 1}; print(s.a)'
+exit: 0
+stdout: = "1\n"

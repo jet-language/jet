@@ -16,7 +16,11 @@
 // resolve through the dynamic linker for hosted C platform imports. Jet
 // runtime leaves and OS boundaries are compiled from this source tree. See
 // Docs/Research/jet-backend-design-2026-10-01.md.
-use core.mem
+//
+// core.mem is bound as `core_mem`, not `mem`: the runtime's one-namespace unit
+// carries this source beside the runtime leaf `mem: module`
+// (JetRuntime/Source/Public/Mem.jet), and a Core import there is the unit's.
+use core_mem: core.mem
 
 OS_SYS_READ: 0
 
@@ -225,12 +229,12 @@ os_map: fn(size: Int, protection: Int) -> Int {
 // `offset` (-1 and 0: anonymous memory). Returns the address, or -errno.
 // With os_map and os_unmap, the tracked form of the kernel's one way to map
 // and unmap memory: under the memory sentry the pages it maps are live
-// storage until os_unmap takes them out (mem.mapped), so a checked access
+// storage until os_unmap takes them out (core.mem.mapped), so a checked access
 // into them passes and one after the unmap stops.
 os_map_with: fn(address: Int, size: Int, protection: Int, flags: Int, fd: Int, offset: Int) -> Int {
     #Unsafe("the caller owns `address .. address + size` when it names one, so a fixed mapping replaces only its own pages; the pages mapped are the caller's alone") {
         mapped: Int{os_map_untracked_i64(I64{address}, I64{os_page_round(size)}, I64{protection}, I64{flags}, I64{fd}, I64{offset})}
-        if !os_failed(mapped) -> mem.mapped(mapped, size)
+        if !os_failed(mapped) -> core_mem.mapped(mapped, size)
         mapped
     }
 }
@@ -243,10 +247,10 @@ os_protect: fn(address: Int, size: Int, protection: Int) -> Int {
 }
 
 // munmap(2) of the whole pages in `address .. address + size`; under the
-// memory sentry they leave the live storage first (mem.unmapping).
+// memory sentry they leave the live storage first (core.mem.unmapping).
 os_unmap: fn(address: Int, size: Int) -> Int {
     #Unsafe("the caller owns the mapping and nothing uses it any more") {
-        mem.unmapping(address, size)
+        core_mem.unmapping(address, size)
         Int{os_unmap_untracked_i64(I64{address}, I64{os_page_round(size)})}
     }
 }
@@ -556,8 +560,8 @@ os_copy_in: fn(address: Int, bytes: [U8]) { os_copy_in_range(address, bytes, 0, 
 // one fill.
 #Unsafe("the caller owns `count` rounded up to 8 bytes at `address`")
 os_copy_in_range: fn(address: Int, bytes: [U8], start: Int, count: Int) {
-    mem.list_copy<U8>(mem.Ptr<U8>.from_addr(address), bytes, start, count)
-    mem.fill<U8>(mem.Ptr<U8>.from_addr(address + count), U8{0}, (count + 7) /% 8 * 8 - count)
+    core_mem.list_copy<U8>(core_mem.Ptr<U8>.from_addr(address), bytes, start, count)
+    core_mem.fill<U8>(core_mem.Ptr<U8>.from_addr(address + count), U8{0}, (count + 7) /% 8 * 8 - count)
 }
 
 // The call-code-address primitive: call the System V function at `address`

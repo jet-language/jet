@@ -600,6 +600,12 @@ open: fn(path: Path | String, links: LinkPolicy{.Follow}) -[FS.Read]> FileReader
     rt.open_reader(-1, path_text(path), link_code(links))
 }
 
+/// Open `path` for reading without waiting: a FIFO with no writer opens at
+/// once instead of blocking until one arrives. Every handle is close-on-exec.
+open_nonblocking: fn(path: Path | String) -[FS.Read]> FileReader IOError! {
+    rt.open_reader_nonblocking(path_text(path))
+}
+
 /// Open `path` for writing from empty. `if_exists:
 /// .Refuse` creates exclusively; `mode` sets a new file's permission bits
 /// before the process umask and leaves an existing file's bits alone.

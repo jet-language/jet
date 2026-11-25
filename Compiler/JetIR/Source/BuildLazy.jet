@@ -1049,7 +1049,8 @@ ir_lazy_closure_receiver: fn(receiver_ty: Type, operation: TClosureOp) -> Bool N
 // adapter nor a pull loop of its own (ir_lazy_searches).
 ir_iter_walks: fn(receiver_ty: Type, operation: TClosureOp) -> Bool Never! {
     if ir_iter_element(receiver_ty) == None || ir_lazy_searches(operation) -> return false
-    symbol: ir_closure_route(operation, receiver_ty).symbol
+    route: ir_closure_route(operation, receiver_ty) ?? return false
+    symbol: route.symbol
     symbol != "jet_iter_scan" && !ir_lazy_callback_route(symbol)
 }
 
@@ -1122,7 +1123,7 @@ ir_lazy_closure_method: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, checked_ty
             return ir_lazy_search(m, p, b, checked_ty, receiver, operation, args, span)
         }
     }
-    route: ir_closure_route(operation, receiver_ty)
+    route: ir_closure_route(operation, receiver_ty) ?? return ir_fail_slot(b, span, "closure method {ir_closure_op_name(operation)} on {ir_type_name(receiver_type)}")
     symbol: route.symbol
     scans: symbol == "jet_iter_scan"
     list_source: ir_lazy_list_callback_route(symbol) || (symbol == "jet_iter_is_sorted_by" && ir_iter_element(receiver_ty) == None)

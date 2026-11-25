@@ -1,0 +1,35 @@
+use math: core.math
+
+Body: struct {
+    pos: math.Vec2,
+    lanes: math.F64x4,
+}
+
+run: fn() {
+    v2: math.Vec2.new(1.5, -2.0)
+    v3: math.Vec3.new(1.0, 2.0, 3.0)
+    v4: math.Vec4.new(1.0, 2.0, 3.0, 4.0)
+    m3: math.Mat3.identity()
+    f4: math.F64x4.new(1.25, 0.00001, 1.0e20, -0.5)
+    f32: math.F32x4.splat(F32{1.5})
+    i4: math.I32x4.splat(I32{7})
+    print(v2)
+    print("{v3}")
+    print("{v4:Debug}")
+    print(m3)
+    print(f4)
+    print("{f4}")
+    print("{f4:Debug}")
+    print(f32)
+    print("{i4:Debug}")
+    print([math.Vec2]{v2})
+    print([math.F64x4]{f4})
+    // F64x4 is a plain value: it copies and compares lane by lane.
+    g: f4.copy()
+    print(f4 == g)
+    print(f4 + math.F64x4.splat(1.0) == f4)
+    b: Body{pos: v2, lanes: f4}
+    print(b)
+    print("{b}")
+    print("{b:Debug}")
+}

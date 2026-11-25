@@ -884,12 +884,15 @@ jet (`#!/usr/bin/env jet`). It is Jet source whatever its name, since the
 kernel runs it with jet.
 
 `jet -e CODE [args...]` runs CODE as the body of `run: fn`: `jet -e 'print(1 + 2)'`
-prints 3. A `;` between statements stands for the line break a file would
-have (`jet -e 'name := 1; print(name)'`). When the last statement is an
+prints 3. A `;` between statements is the line break it means, in CODE as in
+a file (`jet -e 'name := 1; print(name)'`), so CODE splits where the parser
+ends statements, never inside a string, and a `;` where a line break would
+continue the statement is E0447. When the last statement is an
 expression, its value is shown, as `node -p` shows it: `jet -e '1 + 2'` prints
 3, a final `if` with `->` branches or a final dispatch is the value
 (`jet -e 'if 1 > 0 -> "yes" else -> "no"'` prints `yes`; the same `if`
-before the last statement is an unused value, E0003), a String prints without
+before the last statement is an unused value, E0003, and a `;` right after
+its one-line arm with code after it is E0448), a String prints without
 quotes, a List or an Iter prints one item per line (`jet -e '"a b".words()'`
 prints `a` and `b`), and a unit value (`print(…)`, an `if` without `else`)
 prints nothing more. A value that has no display is refused with E0112, as `print`
@@ -902,7 +905,7 @@ runs the same way, and so does `jet eval CODE [args...]`, whose flags between
 `eval` and CODE are the run's (`jet eval -A 'input.to_list().len()' log.txt`).
 A `-e` after the program (`jet run hello.jet -e …`) is
 refused with E2104, and so is `jet dev -e`. As a REPL cell does, CODE
-may declare: a line of it (between `;`s) that is a declaration alone, such as
+may declare: a statement of it that is a declaration alone, such as
 a type, a function, an `impl` or a `use`, goes above `run: fn`, so
 `jet -e 'S: struct { amount: Float }; input.csv<S>().map(fn(s) { s.amount }).sum()' sales.csv`
 prints the column's sum. A binding such as `x: 1` stays in the body. A Core

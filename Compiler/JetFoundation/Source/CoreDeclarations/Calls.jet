@@ -334,15 +334,6 @@ core_decl_rust_strings: fn(expression: String, context: String, constants: CoreD
     Ok(out)
 }
 
-// `Some(<string>)`'s string.
-core_decl_rust_some_string: fn(expression: String, context: String, constants: CoreDeclTexts) -> String CoreDeclarationError! {
-    call: core_decl_whole_call(expression, context, "optional Rust string") ?? return Err(err)
-    if call.name != "Some" || call.args.len() != 1 {
-        return Err(core_decl_fail("unsupported optional Rust string in {context}: {expression.trim()}"))
-    }
-    core_decl_rust_string(call.args[0], context, constants)
-}
-
 // The CoreCallPureRoute a `CoreCallPureRoute.<Rust variant>` names: Jet
 // spells acronyms in caps; the retired Rust enum kept its Rust variant names.
 core_decl_pure_route: fn(expression: String, context: String) -> CoreCallPureRoute CoreDeclarationError! {
@@ -421,21 +412,6 @@ core_decl_capability: fn(expression: String, context: String, constants: CoreDec
     Err(core_decl_fail("unsupported CoreCapabilityContract in {context}: {call.name}"))
 }
 
-core_decl_marker: fn(expression: String, context: String, constants: CoreDeclTexts) -> CoreMarkerApplication CoreDeclarationError! {
-    call: core_decl_whole_call(expression, context, "CoreMarkerApplication") ?? return Err(err)
-    if call.name != "CoreMarkerApplication.deprecated" || call.args.len() != 4 {
-        return Err(core_decl_fail("unsupported CoreMarkerApplication in {context}"))
-    }
-    Ok(
-        CoreMarkerApplication{
-            member: core_decl_rust_string(call.args[0], context, constants) ?? return Err(err),
-            since: core_decl_rust_string(call.args[1], context, constants) ?? return Err(err),
-            replacement: core_decl_rust_string(call.args[2], context, constants) ?? return Err(err),
-            removed_in: if call.args[3].trim() == "None" -> None else -> Val(core_decl_rust_some_string(call.args[3], context, constants) ?? return Err(err)),
-        },
-    )
-}
-
 // ---- Core call facts ----------------------------------------------------
 // The effect root and effect leaf of a plain Core call, keyed by module and
 // then member: an adapter row's effects. A source-owned row's come from its
@@ -499,7 +475,8 @@ core_decl_call_effect: fn(module_name: String, member: String) -> String? Never!
             "register_user" | "password_login" | "session_validate" | "magic_link_issue" | "magic_link_consume" | "oauth_begin" | "oauth_finish" | "tokens_login" | "tokens_refresh" | "devices" | "revoke_device" -> Val("DB")
             else -> None
         }
-        "core.plugin" -> Val("Exec")
+        // The plugin boundary's Authority-to-wire conversion runs nothing.
+        "core.plugin" -> if member == "__authority_to_wire" -> None else -> Val("Exec")
         "core.browser.host" | "core.browser.storage.local" | "core.browser.storage.session" -> Val("Browser")
         "core.crypto.vault" -> if member == {
             "get" | "current" | "versions" | "load" | "status" | "prepare_generate" | "prepare_store" | "prepare_rotate" | "prepare_retire" | "prepare_revoke" | "authorize_write" | "commit_generate" | "commit_store" | "commit_rotate" | "commit_retire" | "commit_revoke" | "export_to_recipients" | "export_to_passphrase" | "prepare_import_wrapped" | "authorize_wrapped_import" | "commit_import_wrapped" | "prepare_import_signing" | "prepare_import_x25519" | "commit_import_signing" | "commit_import_x25519" -> Val("Secret")
@@ -525,6 +502,7 @@ core_decl_call_effect_leaf: fn(module_name: String, member: String) -> String? N
             "run" -> Val("Time.Wait")
             else -> None
         }
+        "core.net" -> if member == "sendfile" -> Val("Time.Wait") else -> None
         "core.service" -> if member == "state_store" -> Val("FS.Read") else -> None
         "core.time" -> if member == {
             "zone" | "parse_zoned" -> Val("FS.Read")
@@ -532,9 +510,8 @@ core_decl_call_effect_leaf: fn(module_name: String, member: String) -> String? N
             else -> None
         }
         "core.files" -> if member == {
-            "scope" | "read" | "read_bytes" | "read_at" | "read_link" | "map" | "open" | "exists" | "is_dir" | "is_fifo" | "is_socket" | "space" | "can_read" | "can_write" | "can_execute" | "stat" | "lstat" | "list_dir" | "walk" | "walk_files" | "glob" | "canonicalize" | "absolute" | "__list_directory" | "__directory_fd" | "__walk_parallel_raw" | "jet_std_files_open_reader_nonblocking" -> Val("FS.Read")
+            "scope" | "read" | "read_bytes" | "read_at" | "read_link" | "map" | "open" | "exists" | "is_dir" | "is_fifo" | "is_socket" | "space" | "can_read" | "can_write" | "can_execute" | "stat" | "lstat" | "list_dir" | "walk" | "walk_files" | "glob" | "canonicalize" | "absolute" | "__list_directory" | "__directory_fd" | "__walk_parallel_raw" -> Val("FS.Read")
             // #3593 provider leaves behind Core/Files/files.jet.
-            // The compiler-private non-blocking open only reads (RawHostKeys.jet).
             "write" | "write_bytes" | "write_at" | "write_atomic" | "append_all" | "create" | "append" | "fsync" | "remove" | "remove_dir" | "remove_all" | "create_dir_all" | "rename" | "symlink" | "hard_link" | "chown" | "set_mode" | "mkdtemp" | "mktemp" | "temp_dir" | "temp_file" | "lock" | "try_lock" -> Val("FS.Write")
             else -> None
         }
@@ -568,7 +545,7 @@ core_decl_plain_record: fn(module_name: String, member: String, symbol: String, 
     }
     if leaf != "" -> effects.push(leaf)
     arity: mask.len()
-    CoreCallRecord{module_name: module_name, member: member, receiver_types: [String]{}, signature: CoreCallSignature{arity: arity, max_arity: arity, borrow_mask: mask}, fallibility: CoreCallFallibility.Sema, effects: effects, capability: capability, pure_route: CoreCallPureRoute.NoPureRoute, symbol: CoreCallSymbol.Prelude{name: symbol}, source_target: None, coverage: CoreCallCoverage{bits: CORE_CALL_COVERAGE_KNOWN}, aot_direct: true, marker: None, authority: None}
+    CoreCallRecord{module_name: module_name, member: member, receiver_types: [String]{}, signature: CoreCallSignature{arity: arity, max_arity: arity, borrow_mask: mask}, fallibility: CoreCallFallibility.Sema, effects: effects, capability: capability, pure_route: CoreCallPureRoute.NoPureRoute, symbol: CoreCallSymbol.Prelude{name: symbol}, source_target: None, coverage: CoreCallCoverage{bits: CORE_CALL_COVERAGE_KNOWN}, aot_direct: true, authority: None}
 }
 
 // A record the Jet source of its module defines: no Prelude symbol, no
@@ -625,7 +602,7 @@ core_decl_constructor_record: fn(call: CoreDeclRustCall, context: String, consta
             core_decl_require_jet_route(call.args[3], context) ?? return Err(err)
             mask: core_decl_rust_bools(call.args[4], context) ?? return Err(err)
             arity: mask.len()
-            Ok(CoreCallRecord{module_name: "", member: core_decl_rust_string(call.args[1], context, constants) ?? return Err(err), receiver_types: core_decl_rust_strings(call.args[0], context, constants) ?? return Err(err), signature: CoreCallSignature{arity: arity, max_arity: arity, borrow_mask: mask}, fallibility: CoreCallFallibility.Sema, effects: [String]{}, capability: core_decl_pure_capability(), pure_route: CoreCallPureRoute.NoPureRoute, symbol: CoreCallSymbol.Prelude{name: core_decl_rust_string(call.args[2], context, constants) ?? return Err(err)}, source_target: None, coverage: CoreCallCoverage{bits: CORE_CALL_COVERAGE_KNOWN}, aot_direct: false, marker: None, authority: None})
+            Ok(CoreCallRecord{module_name: "", member: core_decl_rust_string(call.args[1], context, constants) ?? return Err(err), receiver_types: core_decl_rust_strings(call.args[0], context, constants) ?? return Err(err), signature: CoreCallSignature{arity: arity, max_arity: arity, borrow_mask: mask}, fallibility: CoreCallFallibility.Sema, effects: [String]{}, capability: core_decl_pure_capability(), pure_route: CoreCallPureRoute.NoPureRoute, symbol: CoreCallSymbol.Prelude{name: core_decl_rust_string(call.args[2], context, constants) ?? return Err(err)}, source_target: None, coverage: CoreCallCoverage{bits: CORE_CALL_COVERAGE_KNOWN}, aot_direct: false, authority: None})
         }
         else -> Err(core_decl_fail("unsupported CoreCallRecord constructor in {context}: {call.name}"))
     }
@@ -650,7 +627,6 @@ core_decl_apply_builder: fn(record: CoreCallRecord, call: CoreDeclRustCall, cont
         "with_capability" -> built.capability = core_decl_capability(argument, context, constants) ?? return Err(err)
         "with_source_target" -> built.source_target = Val(core_decl_rust_string(argument, context, constants) ?? return Err(err))
         "with_source_role" -> built.source_role = Val(core_decl_rust_string(argument, context, constants) ?? return Err(err))
-        "with_marker" -> built.marker = Val(core_decl_marker(argument, context, constants) ?? return Err(err))
         else -> return Err(core_decl_fail("unsupported CoreCallRecord builder in {context}: {call.name}"))
     }
     Ok(built)

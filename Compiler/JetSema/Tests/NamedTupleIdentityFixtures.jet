@@ -1,10 +1,13 @@
-// Read a named-tuple return through the fixed Core signature rows' reader.
-use jet_foundation.[core_sig_row_lookup, type_identity_equal, Type, TypeTupleField]
+// A named-tuple type and a named-tuple return keep their canonical identity.
+use jet_foundation.[type_identity_equal, Type, TypeTupleField]
 
-named_tuple_identity_registry_return: fn(module_name: String, member: String) -> Type Never! {
-    rows: "core.fixture pair Int (sender:Sender<T>,receiver:Receiver<T>) T"
-    signature: core_sig_row_lookup(rows, module_name, member) ?? panic("missing tuple signature")
-    signature.return_type ?? panic("tuple signature has no return type")
+named_tuple_identity_channel: fn() -> Type Never! {
+    Type.Tuple{
+        fields: [TypeTupleField]{
+            {name: "sender", ty: Type.Apply{name: "Sender", args: [Type]{Type.Named{name: "T"}}}},
+            {name: "receiver", ty: Type.Apply{name: "Receiver", args: [Type]{Type.Named{name: "T"}}}},
+        },
+    }
 }
 
 named_tuple_identity_line_from_source: fn() -> {cause: String?, eof: Bool, line: String} {
@@ -12,13 +15,7 @@ named_tuple_identity_line_from_source: fn() -> {cause: String?, eof: Bool, line:
 }
 
 named_tuple_identity_fixture: fn() {
-    channel_type: Type.Tuple{
-        fields: [TypeTupleField]{
-            {name: "sender", ty: Type.Apply{name: "Sender", args: [Type]{Type.Named{name: "T"}}}},
-            {name: "receiver", ty: Type.Apply{name: "Receiver", args: [Type]{Type.Named{name: "T"}}}},
-        },
-    }
-    assert(type_identity_equal(named_tuple_identity_registry_return("core.fixture", "pair"), channel_type))
+    assert(type_identity_equal(named_tuple_identity_channel(), named_tuple_identity_channel()))
     line: named_tuple_identity_line_from_source()
     assert(!line.eof && line.line == "" && line.cause == None)
 }

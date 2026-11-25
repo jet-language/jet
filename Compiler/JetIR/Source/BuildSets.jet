@@ -175,11 +175,12 @@ ir_set_empty_like: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, set_row: Int, l
     target
 }
 
-// The id of Set helper `name` of the Set type row `set_row`, built on first use.
-ir_set_helper: fn(m: ^IRModule, p: IRProgram, set_row: Int, name: String) -> Int Never! {
+// The id of Set helper `name` of the Set type row `set_row`, built on first
+// use; None for a row with no Set shape.
+ir_set_helper: fn(m: ^IRModule, p: IRProgram, set_row: Int, name: String) -> Int? Never! {
     key: "{name}<{type_carrier_identity(ir_row_ty(m, p, set_row))}>"
-    if ir_keyed_function(m, key) == .Val(known) -> return known
-    shape: ir_set_shape(m, p, set_row) ?? panic("Set helper {name} of a type without a Set shape")
+    if ir_keyed_function(m, key) == .Val(known) -> return Val(known)
+    shape: ir_set_shape(m, p, set_row) ?? return None
     id: m.functions.len()
     symbol: if name == "set.find" -> "find" else if name == "set.insert" -> "insert" else if name == "set.take" -> "take" else if name == "set.remove" -> "remove" else -> "equal"
     m.functions.push(ir_hashed_function(name, key, "jet_ir_set_{symbol}_", "", 0))
@@ -207,12 +208,12 @@ ir_set_helper: fn(m: ^IRModule, p: IRProgram, set_row: Int, name: String) -> Int
     }
     ir_resolve_deferred(m, p, a)
     m.functions[id] = a.f.move()
-    id
+    Val(id)
 }
 
 // A call of Set helper `name` with result row `result` (-1: none).
 ir_set_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, set_row: Int, name: String, args: [Int], result: Int) -> Int Never! {
-    callee: ir_set_helper(m, p, set_row, name)
+    callee: ir_set_helper(m, p, set_row, name) ?? return ir_fail_slot(b, Span{start: 0, end: 0}, "Set helper {name} of {ir_type_name(ir_row_ty(m, p, set_row))}, which has no Set shape")
     dst: if result >= 0 -> ir_fresh_temp(m, b, result) else -> -1
     operands: ir_args(b.f, args)
     ir_emit(b.f, IROp.Call, dst, callee, operands, args.len(), b.line)

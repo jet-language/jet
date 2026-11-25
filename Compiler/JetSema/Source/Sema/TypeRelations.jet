@@ -92,6 +92,7 @@ use jet_foundation.[
     core_enum_payload_variants,
     ir_host_value_name,
     ir_runtime_handle_row,
+    builtin_carrier_declaration,
 ]
 
 sema_type_arguments_have_open_shape: fn(types: [Type]) -> Bool Never! {
@@ -1240,22 +1241,52 @@ sema_type_compiler_owned_name: fn(name: String) -> Bool {
 // The runtime handles (IR_RUNTIME_HANDLES) a program may write as a type with
 // no import: the solver variables and constraints, the module grant handle,
 // the text-width and log-span handles, the realtime receipt, a closed
-// channel's marker and the FFI callback registration. The other handles are
-// reached through their Core module's export or are the runtime's own.
-// SEMA_TYPE_NAMEABLE_HANDLES_CHECKED holds the view to IR_RUNTIME_HANDLES.
+// channel's marker, the FFI callback registration, and the checker-owned
+// values of the error, HTTP, game, process, socket and test surfaces. The
+// other handles are reached through their Core module's export or are the
+// runtime's own. SEMA_TYPE_NAMEABLE_HANDLES_CHECKED holds the view to
+// IR_RUNTIME_HANDLES.
 SEMA_TYPE_NAMEABLE_HANDLES: [String]{
     "Closed",
     "Constraint",
+    "DNSSRV",
     "FfiCallbackRegistration",
+    "FieldError",
+    "GameAssets",
+    "GameBackend",
+    "GameFrame",
+    "GameImage",
+    "GameInputMap",
+    "GameInputSnapshot",
+    "GameReplay",
+    "GameScene",
+    "GameSound",
+    "HTTPHeaderName",
+    "HTTPHeaderValue",
+    "HTTPMethod",
+    "HTTPStatus",
+    "HTTPVersion",
     "HVar",
+    "IOError",
+    "IPAddr",
     "LengthVar",
     "LogSpan",
     "Mod",
+    "ProcessReceipt",
+    "ProcessResult",
+    "ProcessSpec",
     "RealtimeReceipt",
+    "TcpListener",
+    "TcpStream",
+    "Test",
+    "TextError",
     "TextWidth",
     "TextWidthAmbiguous",
     "TextWidthControls",
+    "UTF8Error",
+    "UdpSocket",
     "VVar",
+    "Value",
 }
 
 SEMA_TYPE_NAMEABLE_HANDLES_CHECKED: #run sema_type_nameable_handles_checked(SEMA_TYPE_NAMEABLE_HANDLES)
@@ -2250,6 +2281,10 @@ sema_type_graph_scan_type_owners: fn(graph: SemaRegistrationGraph, caller_index:
         if caller_is_core && !module_is_core(owner_row.module_identity) -> next
         nominal: owner_row.nominals[owner.row]
         if nominal.symbol.name != name -> next
+        // A carrier's declaration (`priv ProcessChild: struct {}` in Core's
+        // builtins door) is never what its bare name means: the checker types
+        // the carrier itself (builtin_carrier_declaration).
+        if module_is_core(owner_row.module_identity) && builtin_carrier_declaration(owner_row.module_name, sema_name_visibility(nominal.symbol.visibility)) -> next
         // A bare unapplied `Group` is the task group (sema_type_graph_resolve_named),
         // so only a generic `Group<K, V>` (core.data's) can own the bare applied
         // spelling; core.sys's and core.ui.xkb's records never compete for it.
@@ -2439,7 +2474,7 @@ sema_type_graph_is_checked_text_impl: fn(graph: SemaRegistrationGraph, implement
     }
     trait_symbol: resolved ?? return false
     if trait_symbol.kind != SymbolKind.Trait || trait_symbol.name != "CheckedText" -> return false
-    owner: sema_registration_module_index(graph, trait_symbol.module_identity) ?? panic("checked trait identity has no registered owner module")
+    owner: sema_registration_module_index(graph, trait_symbol.module_identity) ?? return false
     graph.modules[owner].module_name == "core.prelude"
 }
 

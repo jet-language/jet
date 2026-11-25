@@ -10,6 +10,7 @@ use jet_foundation.[
     Expr,
     InternalTag,
     IR_PRELUDE_MARKER_RECORD,
+    IR_RUNTIME_HANDLES,
     MarkerDecl,
     MarkerHook,
     ParamZone,
@@ -19,6 +20,7 @@ use jet_foundation.[
     Type,
     TypeParam,
     core_identity_in_module,
+    ir_runtime_handle_row,
     symbol_key_leaf,
     type_carrier_identity,
     type_name,
@@ -393,7 +395,7 @@ sema_call_reflection_named_displayable: fn(name: String, ty: Type, environment: 
     if sema_call_reflection_core_shown(name) || sema_call_reflection_leaf_name(name) == "Err" {
         return true
     }
-    if sema_call_reflection_synthetic_printable(name) -> return true
+    if sema_call_reflection_synthetic_printable(name) || sema_call_reflection_runtime_shown(name, ty, environment, program) -> return true
     if sema_call_reflection_bound(ty, "Display", environment, program) || sema_call_reflection_bound(ty, "Printable", environment, program) {
         return true
     }
@@ -406,14 +408,25 @@ sema_call_reflection_named_displayable: fn(name: String, ty: Type, environment: 
     false
 }
 
-// The Core values the trait registry admits as `Printable` with no source impl
-// (their Prelude `JetShow` hooks, every SIMD lane and the linear-algebra
-// values), and the Core types it registers a `Display` impl for.
+// A type the checker owns, with no source declaration where it is shown,
+// whose runtime handle row (IR_RUNTIME_HANDLES, keyed by its bare name) has a
+// display or show form: the runtime renders it (`IOError`, `TcpStream`,
+// `GameImage`). A program's own type of the same name is its declaration's.
+sema_call_reflection_runtime_shown: fn(name: String, ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
+    if !(ty == .Named(_)) -> return false
+    handle: IR_RUNTIME_HANDLES[ir_runtime_handle_row(name) ?? return false]
+    if !handle.display && !handle.show -> return false
+    graph: program.registration_graph
+    sema_type_resolve_nominal_row_at(graph, ty, sema_scope_caller_row(environment, graph)) == None
+}
+
+// The compiler-owned values the trait registry admits as `Printable` with no
+// source impl and no runtime handle row: the build error, a pool's `ID`, a
+// `JSON` tree and a `Cache`.
 sema_call_reflection_synthetic_printable: fn(name: String) -> Bool Never! {
     leaf: sema_call_reflection_leaf_name(name)
-    if sema_core_is_math_type(leaf) -> return true
     if leaf == {
-        "ArgsSpec" | "AriaRole" | "Bits" | "BuildError" | "BrowserError" | "Bytes" | "Clock" | "DataError" | "DataTracked" | "DataWatch" | "DataWatchStatus" | "Dyn" | "DBValue" | "DBLease" | "DBPoolReceipt" | "Date" | "DateTime" | "Decimal" | "FieldError" | "DirEntry" | "DNSSRV" | "Duration" | "EncodingError" | "EnvError" | "EventResult" | "Field" | "FileLock" | "GameAssets" | "GameBackend" | "GameFrame" | "GameImage" | "GameInputMap" | "GameInputSnapshot" | "GameReplay" | "GameScene" | "GameSound" | "HTTPError" | "HTTPHeaderName" | "HTTPHeaderValue" | "HTTPMethod" | "HTTPRequest" | "HTTPResponse" | "HTTPStatus" | "HTTPVersion" | "ID" | "Instant" | "IOError" | "IPAddr" | "JSON" | "Key" | "LocalDate" | "LocalTime" | "Cache" | "Measurement" | "MIME" | "NetError" | "ParsedArgs" | "Path" | "Period" | "Point" | "Pool" | "ProcessChild" | "ProcessReceipt" | "ProcessResult" | "ProcessSpec" | "Quat" | "Range" | "RangeError" | "Rect" | "ReflectField" | "ReflectValue" | "Regex" | "RegexFlags" | "RegexMatch" | "RNG" | "Size" | "SocketAddr" | "Solver" | "Stat" | "Stopwatch" | "Test" | "TcpListener" | "TcpStream" | "TempDir" | "TempFile" | "TextError" | "PluginError" | "TLSStream" | "TLSVersion" | "UDPPacket" | "UdpSocket" | "UnixListener" | "UnixStream" | "URL" | "UTF8Error" | "Value" | "Zone" | "ZonedDateTime" | "ComputeDevice" | "SyncText" | "SyncCounter" | "SyncMap" | "SyncList" | "ServiceRestart" | "ServiceDelivery" | "ServiceRuntime" | "ServiceStateStore" -> true
+        "BuildError" | "ID" | "JSON" | "Cache" -> true
         else -> false
     }
 }

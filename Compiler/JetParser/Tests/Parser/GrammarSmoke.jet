@@ -47,8 +47,7 @@ grammar_smoke_parsed: fn(source: String) -> Program { parser_test_program(source
 }
 
 // `[T]` and `[K:V]` are collection types and a list literal item may end at a
-// line boundary. Canonical Jet has no explicit semicolons (E0373, State.jet
-// `parser_report_explicit_semicolon`), so the item ends at the line break.
+// line boundary; the item ends at the line break.
 #Test("parse_bracket_collection_types_and_semicolon_list_items") {
     program: grammar_smoke_parsed("\nshell: fn() -> [JSON] {{\n    return [\n        JSON.Null\n    ]\n}}\n\nuse_collections: fn(items: [String], counts: [String:Int]) {{}}\n")
     shell: parser_test_function(program, "shell")

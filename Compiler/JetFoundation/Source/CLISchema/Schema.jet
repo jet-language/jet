@@ -187,9 +187,9 @@ JobRegistry: struct {
         cli_schema_job_enter(self.jobs, index, root, state, stack)
         rows := [View<JobFact>]{}
         loop stack.len() > 0 {
+            // A finish on a nonempty stack always pops a row.
             next_row: cli_schema_job_finish(self.jobs, index, state, stack)
-            row: next_row ?? panic("a nonempty job traversal lost its next row")
-            rows.push(self.jobs[row..<row + 1])
+            if next_row == .Val(row) -> rows.push(self.jobs[row..<row + 1])
         }
         Ok(rows)
     }
@@ -341,7 +341,9 @@ cli_schema_job_float_display: fn(value: Float) -> String Never! {
         return shown
     }
     mantissa: shown.slice(0..<exponent_at)
-    exponent: Int.parse(shown.slice(exponent_at + 1..<shown.len())) ?? panic("canonical Float exponent is not an integer")
+    // A text with an `e` but no integer after it is not exponent notation,
+    // so there is no notation to change.
+    exponent: Int.parse(shown.slice(exponent_at + 1..<shown.len())) ?? return shown
     negative: mantissa.starts_with("-")
     unsigned: if negative -> mantissa.slice(1..<mantissa.len()) else -> mantissa
     dot: unsigned.find(".")

@@ -1,0 +1,14 @@
+# A program struct whose fields are Core types with runtime handle rows that
+# keep their declared shape (EncodingLimits has a native type row, NetShutdown
+# a generated record schema) derives Printable and renders them structurally,
+# bare, interpolated and in a list, at every optimization level.
+fixture: Fixtures/CoreShapedHandleFieldsRender
+step: jet run fixture.jet
+stdout: = core_shaped_handle_fields_render.out
+stderr: empty
+step: jet run -O1 fixture.jet
+stdout: = core_shaped_handle_fields_render.out
+stderr: empty
+step: jet run -O2 fixture.jet
+stdout: = core_shaped_handle_fields_render.out
+stderr: empty

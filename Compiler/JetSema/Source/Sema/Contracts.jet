@@ -1275,7 +1275,10 @@ sema_contract_rule_hears: fn(marker: String, callee: String, answer: SemaContrac
     graph: check.program.registration_graph
     // Snapshot: a lone program's check hears no rule (see above).
     if answer.verdict == SemaContractVerdict.Fails && graph.mode == .Program {
-        rule: sema_contract_rule(graph, marker, callee, answer.condition, answer.reason)
+        rule: sema_contract_rule(graph, marker, callee, answer.condition, answer.reason) ?? {
+            check.context.incomplete_reasons.push("a failed `#run` {marker} clause has no checked Prelude/Rules.jet rule to reject it")
+            return false
+        }
         owner: sema_scope_function_owner_key(check.scopes)
         if sema_comptime_body_value_find(check.context, check.environment.module_identity, owner, rule.span, call_span) == .Val(landed) {
             return !sema_call_rule_rejects(landed.value, call_span, check.diagnostics)
@@ -1290,23 +1293,23 @@ sema_contract_rule_hears: fn(marker: String, callee: String, answer: SemaContrac
 // The rule of `marker` in the Prelude rule module, whose receiver is one
 // call's answer to `callee`'s clauses of that marker. The driver loads the
 // module into every program that declares a `#run { … }` clause
-// (JetDriver jet_driver_retain_prelude_modules), so a graph without it is a
-// driver fault.
-sema_contract_rule: fn(graph: SemaRegistrationGraph, marker: String, callee: String, condition: Bool?, reason: String) -> SemaCallRule {
+// (JetDriver jet_driver_retain_prelude_modules); None in a graph without it,
+// or when the module declares `marker` without a `check` rule.
+sema_contract_rule: fn(graph: SemaRegistrationGraph, marker: String, callee: String, condition: Bool?, reason: String) -> SemaCallRule? {
     loop rules in graph.modules {
         if rules.source_file != SEMA_PRELUDE_RULE_SOURCE_PATH -> next
         loop item in rules.program.items {
             if item == .MarkerDecl(declaration) && declaration.name == marker {
-                span: declaration.check ?? panic("Prelude/Rules.jet declares `{marker}` without a `check` rule")
+                span: declaration.check ?? return None
                 answer: if condition == .Val(value) -> sema_comptime_reflection_some(TComptimeValue.Bool{value: value}) else -> sema_comptime_reflection_none(Type.Bool)
                 fields: [TComptimeField]{
                     TComptimeField{name: "callee", value: TComptimeValue.String{value: callee}},
                     TComptimeField{name: "condition", value: answer},
                     TComptimeField{name: "reason", value: TComptimeValue.String{value: reason}},
                 }
-                return SemaCallRule{module_identity: rules.module_identity, marker: marker, span: span, value: TComptimeValue.Struct{type_name: marker, fields: fields}}
+                return Val(SemaCallRule{module_identity: rules.module_identity, marker: marker, span: span, value: TComptimeValue.Struct{type_name: marker, fields: fields}})
             }
         }
     }
-    panic("a `#run` contract clause failed in a program the driver did not load Prelude/Rules.jet into")
+    None
 }

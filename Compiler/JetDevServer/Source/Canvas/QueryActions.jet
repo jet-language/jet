@@ -19,7 +19,7 @@ use {
         span_json,
     ]
     jet_driver.[JetDriverSourceDocument, jet_driver_apply_edits, jet_driver_has_errors]
-    jet_foundation.[CORE_MODULE_EXPORTS, CoreTypedCallSignature, Span, TextEdit, core_call, core_call_typed_signature, diagnostic_render_all, type_name]
+    jet_foundation.[CORE_MODULE_EXPORTS, Span, TextEdit, diagnostic_render_all, type_name]
     jet_impact.[ImpactReport]
     jet_lsp.[LSPChecker]
     jet_pkg_model.[WorkspaceDeclarationCache, pkg_find_manifest_root_checked, pkg_package_facts_for_entry]
@@ -512,7 +512,7 @@ canvas_core_catalog_action_jsons: fn(src: String, authority: CanvasAuthority) ->
 core_catalog_action_json: fn(module_path: String, source_callee_prefix: String, member: CoreCatalogMember, exports: [CoreCatalogExport], authority: CanvasAuthority) -> String {
     action_id: "canvas.core_catalog:{module_path}:{member.name}"
     callee: "{source_callee_prefix}.{member.name}"
-    params: core_member_params(module_path, member.name, member.signature)
+    params: core_member_params(member.signature)
     status: core_member_status(module_path, member, exports)
     descriptor_id: insert_descriptor_id("insert_call", member.pure)
     rank_fields: palette_rank_fields(descriptor_id)
@@ -623,7 +623,7 @@ core_member_direct_exclusion: fn(module_path: String, member: CoreCatalogMember)
     if module_path == "core.event" && core_event_needs_type_arguments(member.name) {
         return Val(CoreMemberReason{code: "needs_signature", reason: "Needs explicit event type arguments and constructor inputs before Canvas can insert it."})
     }
-    params: core_member_params(module_path, member.name, member.signature)
+    params: core_member_params(member.signature)
     generated_signature: member.signature == "{module_path}.{member.name}"
     if generated_signature && params.len() == 0 {
         return Val(CoreMemberReason{code: "needs_signature", reason: "Needs parameter details before Canvas can insert it."})
@@ -689,7 +689,7 @@ core_member_unavailable_reason: fn(module_path: String, member: CoreCatalogMembe
 
 core_member_receiver_type: fn(module_path: String, member_name: String, signature: String) -> String {
     if module_path == "core.args" {
-        arity: core_member_params(module_path, member_name, signature).len()
+        arity: core_member_params(signature).len()
         if member_name == {
             "flag" | "option" | "option_int" | "option_float" | "positional" -> return if arity == 1 -> "ParsedArgs" else -> "ArgsSpec"
             "options" | "subcommand" -> return if arity <= 1 -> "ParsedArgs" else -> "ArgsSpec"
@@ -752,7 +752,7 @@ core_module_json: fn(src: String, module_ref: CoreCatalogModule, exports: [CoreC
 
 core_member_json: fn(src: String, module_path: String, member: CoreCatalogMember, exports: [CoreCatalogExport]) -> String {
     callee: "{core_source_callee(src, module_path)}.{member.name}"
-    params: core_member_params(module_path, member.name, member.signature)
+    params: core_member_params(member.signature)
     status: core_member_status(module_path, member, exports)
     descriptor_id: insert_descriptor_id("insert_call", member.pure)
     rank_fields: palette_rank_fields(descriptor_id)
@@ -797,31 +797,16 @@ canvas_builtin_action_json: fn(callee: String, title: String, params: [CanvasPar
     "{{\"action_id\":{json_str(action_id)},\"node_descriptor_id\":{json_str(descriptor_id)}{rank_fields},\"kind\":\"canvas.builtin\",\"title\":{json_str(title)},\"callee\":{json_str(callee)},\"insert_callee\":{json_str(callee)},\"module_path\":\"builtin\",\"insert_op\":\"insert_call\",\"pure\":false,\"engine\":\"checked+jit\",\"authority\":[{json_str(authority.grant)}],\"package_id\":{json_str(authority.package_id)},\"version\":{json_str(authority.version)},\"touched_files\":[{json_str(authority.touched_file)}],\"writes\":\"source_transaction_only\",\"audit\":[\"package_id\",\"version\",\"hash\",\"authority\",\"touched_files\",\"diff\",\"diagnostics\"],\"source_span\":null,\"ret\":{json_str(ret)},\"pins\":[{core_member_pins_json(params, "")}],\"default_args\":[{args.join(",")}]}}"
 }
 
-// The pins of a Core entry: its written parameters, else the checked
-// signature's parameters numbered `arg1`, `arg2`, ...
-core_member_params: fn(module_path: String, member_name: String, signature: String) -> [CanvasParam] {
-    if params_from_signature(signature) == .Val(params) -> return params
-    typed: core_member_signature(module_path, member_name) ?? return [CanvasParam]{}
-    loop at in 0..<typed.parameters.len() -> CanvasParam{name: "arg{at + 1}", ty: type_name(typed.parameters[at].ty)}
+// The pins of a Core entry: its written parameters.
+core_member_params: fn(signature: String) -> [CanvasParam] {
+    params_from_signature(signature) ?? [CanvasParam]{}
 }
 
+// A Core call's result type: its Core source declares it. The event
+// constructors that take no type arguments name their type.
 core_member_return_type: fn(module_path: String, member_name: String) -> String {
-    typed: core_member_signature(module_path, member_name) ?? return core_source_member_return_type(module_path, member_name)
-    ret: typed.return_type ?? return "Void"
-    type_name(ret)
-}
-
-// A source-owned Core call has no fixed signature: its Core source declares
-// it. The event constructors that take no type arguments name their type.
-core_source_member_return_type: fn(module_path: String, member_name: String) -> String {
     if module_path == "core.event" -> return constructor_type(member_name, "") ?? "Void"
     "Void"
-}
-
-// The checked signature of a Core call at its declared arity.
-core_member_signature: fn(module_path: String, member_name: String) -> CoreTypedCallSignature? {
-    row: core_call(module_path, member_name) ?? return None
-    core_call_typed_signature(module_path, member_name, row.signature.arity)
 }
 
 params_from_signature: fn(signature: String) -> [CanvasParam]? Never! {

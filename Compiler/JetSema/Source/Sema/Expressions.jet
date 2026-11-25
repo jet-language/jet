@@ -458,12 +458,15 @@ sema_expr_is_narrowing: fn(converted: TExpr) -> Bool Never! {
 
 // The narrowing conversion `converted` (sema_expr_is_narrowing) taking
 // `outcome` for a value that doesn't fit; `Absent` makes its type `T?`.
-sema_expr_narrowing_with: fn(converted: TExpr, outcome: TNarrowOutcome, line: Int) -> TExpr Never! {
+// None when `converted` is no narrowing numeric method: `try_int` already
+// carries its own outcome (sema_expression_typed_literal_precise_int).
+sema_expr_narrowing_with: fn(converted: TExpr, outcome: TNarrowOutcome, line: Int) -> TExpr? Never! {
+    if !sema_expr_is_narrowing(converted) -> return None
     ty: if outcome == TNarrowOutcome.Absent -> Type.Option{inner: converted.ty} else -> converted.ty
     if converted.kind == .NumericMethod(receiver, _) {
-        return TExpr{ty: ty, kind: TExprKind.NumericMethod{receiver: receiver, operation: TNumericOp.FixedNarrow{outcome: outcome, line: line}}, span: converted.span}
+        return Val(TExpr{ty: ty, kind: TExprKind.NumericMethod{receiver: receiver, operation: TNumericOp.FixedNarrow{outcome: outcome, line: line}}, span: converted.span})
     }
-    panic("sema_expr_narrowing_with: not a narrowing conversion")
+    None
 }
 
 sema_expr_integer_literal_value: fn(value: TExpr) -> Int? {

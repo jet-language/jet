@@ -1,0 +1,94 @@
+// A `;` separates statements and items on one line where a line
+// break would end one, and there it means exactly that line break. Where a
+// line break would continue the statement the lexer refuses it (E0447); right
+// after a one-line arm with code after it on the same line the parser refuses
+// it (E0448); inside a member list, an argument list, a type, a loop header or
+// an interpolation hole it separates nothing (E0373). `jet fmt` writes one
+// statement per line and drops every `;`.
+
+// The error codes of `source`, each with the offset of its span's start.
+semicolon_line_errors: fn(source: String) -> String {
+    found := [String]{}
+    loop diagnostic in parser_test_result(source).diagnostics {
+        if diagnostic.severity != 1 -> next
+        start: if diagnostic.span == .Val(span) -> span.start else -> -1
+        found.push("{diagnostic.code}@{start}")
+    }
+    found.join(" ")
+}
+
+#Test("a semicolon between statements is the line break it stands for") {
+    source: "run: fn() {{ a: 1; b: 2; print(a + b) }}\n"
+    run: parser_test_function(parser_test_program(source), "run")
+    assert_eq(run.body.len(), 3)
+    assert_eq(parser_test_stable(source), "run: fn() {{\n    a: 1\n    b: 2\n    print(a + b)\n}}\n")
+}
+
+#Test("a semicolon separates an item from the next item") {
+    source: "Point: struct {{ x: Int }}; origin: fn() -> Point {{ Point{{x: 0}} }}\n"
+    program: parser_test_program(source)
+    assert_eq(program.items.len(), 2)
+}
+
+#Test("a trailing or doubled semicolon is accepted and fmt drops it") {
+    source: "run: fn() {{\n    a: 1;;\n    print(a);\n}}\n"
+    assert_eq(semicolon_line_errors(source), "")
+    assert_eq(parser_test_stable(source), "run: fn() {{\n    a: 1\n    print(a)\n}}\n")
+}
+
+#Test("a value branch's last value may end with a semicolon") {
+    source: "run: fn(c: Bool) {{\n    x: if c -> {{ 5; }} else -> 6\n    print(x)\n}}\n"
+    assert_eq(semicolon_line_errors(source), "")
+}
+
+#Test("a semicolon where a line break would continue the statement is refused") {
+    joined: "run: fn() {{ x := 1; -1; print(x) }}\n"
+    joined_at: parser_test_find(joined, "; -")
+    assert_eq(semicolon_line_errors(joined), "E0447@{joined_at}")
+    dotted: "run: fn() {{ note(); .Red }}\n"
+    dotted_at: parser_test_find(dotted, "; .")
+    assert_eq(semicolon_line_errors(dotted), "E0447@{dotted_at}")
+    leading: "run: fn() {{ ; note() }}\n"
+    leading_at: parser_test_find(leading, ";")
+    assert_eq(semicolon_line_errors(leading), "E0447@{leading_at}")
+}
+
+#Test("a semicolon after a one-line arm with code after it is refused") {
+    statement: "run: fn() {{\n    if true -> print(1); print(2)\n}}\n"
+    statement_at: parser_test_find(statement, "; print(2)")
+    assert_eq(semicolon_line_errors(statement), "E0448@{statement_at}")
+    chained: "run: fn() {{\n    if 1 > 0 -> print(1) else -> print(2); print(3)\n}}\n"
+    chained_at: parser_test_find(chained, "; print(3)")
+    assert_eq(semicolon_line_errors(chained), "E0448@{chained_at}")
+    looped: "run: fn() {{\n    loop i in 0..<3 -> print(i); print(9)\n}}\n"
+    looped_at: parser_test_find(looped, "; print(9)")
+    assert_eq(semicolon_line_errors(looped), "E0448@{looped_at}")
+    exits: "run: fn(c: Bool) -> Int {{\n    v: if c -> 1 else -> return 0; print(v)\n    v\n}}\n"
+    exits_at: parser_test_find(exits, "; print(v)")
+    assert_eq(semicolon_line_errors(exits), "E0448@{exits_at}")
+}
+
+#Test("a semicolon ending a one-line arm before a line break or brace is accepted") {
+    assert_eq(semicolon_line_errors("run: fn() {{\n    if true -> print(1);\n    print(2)\n}}\n"), "")
+    assert_eq(semicolon_line_errors("run: fn() {{\n    if true {{ print(1) }}; print(2)\n}}\n"), "")
+    assert_eq(semicolon_line_errors("run: fn(c: Bool) {{\n    x: if c -> 1 else -> 2; print(x)\n}}\n"), "")
+}
+
+#Test("inside a decision table a semicolon ends a row") {
+    source: "run: fn(x: Int) {{\n    v: if x == {{ 1 -> \"one\"; 2 -> \"two\"; else -> \"many\" }}\n    print(v)\n}}\n"
+    assert_eq(semicolon_line_errors(source), "")
+}
+
+#Test("a semicolon in an argument list or loop header is E0373") {
+    call: "run: fn() {{ print(1; 2) }}\n"
+    call_at: parser_test_find(call, ";")
+    assert_eq(semicolon_line_errors(call), "E0373@{call_at}")
+    header: "run: fn() {{\n    loop item; [1, 2, 3] {{ print(item) }}\n}}\n"
+    header_at: parser_test_find(header, ";")
+    assert_eq(semicolon_line_errors(header), "E0373@{header_at}")
+}
+
+#Test("a semicolon before else ends the if") {
+    source: "run: fn(c: Bool) {{\n    if c {{ print(1) }}; else {{ print(2) }}\n}}\n"
+    assert(semicolon_line_errors(source) != "", "`}}; else` must be refused")
+}

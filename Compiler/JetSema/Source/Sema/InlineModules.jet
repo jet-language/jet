@@ -1181,8 +1181,8 @@ sema_inline_rewrite_expr: fn(rewrite: ^SemaInlineRewrite, expression: Expr) -> E
                 name_find(rewrite.siblings, call.name) != None -> {
                     updated.name = sema_inline_member_name(rewrite.sibling_module, call.name)
                 }
-                !sema_inline_is_local(rewrite, call.name) && sema_inline_binding_of(rewrite.imported, call.name) != None -> {
-                    updated.name = (sema_inline_binding_of(rewrite.imported, call.name) ?? panic("a bound inline import lost its row")).semantic_name
+                !sema_inline_is_local(rewrite, call.name) && sema_inline_binding_of(rewrite.imported, call.name) == .Val(binding) -> {
+                    updated.name = binding.semantic_name
                 }
                 else -> {}
             }

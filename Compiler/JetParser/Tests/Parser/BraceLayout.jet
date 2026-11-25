@@ -292,15 +292,18 @@ run: fn() {}
     )
 }
 
-// The parse reports its first authored `;` as the explicit semicolon; where
-// that `;` stands in a data member's comma, it is not reported again as a
-// missing comma. A later one is the missing comma.
-#Test("an authored semicolon between data members is reported once") {
+// A `;` only separates statements and items: each one where a
+// data member's comma goes is reported as the semicolon it is, with the comma
+// as its edit, and not again as a missing comma.
+#Test("an authored semicolon between data members is reported as itself") {
     codes := [String]{}
+    edits := [String]{}
     loop diagnostic in parser_test_errors("Mode: enum {{ Fast; Safe; Slow }}\n") {
         if diagnostic.severity == 1 -> codes.push(diagnostic.code)
+        if diagnostic.edit == .Val(edit) -> edits.push(edit.new_text)
     }
-    assert_eq(codes.join(" "), "E0373 E0003")
+    assert_eq(codes.join(" "), "E0373 E0373")
+    assert_eq(edits.join(" "), ", ,")
 }
 
 #Test("a comma ends a function-typed field before the next member") {

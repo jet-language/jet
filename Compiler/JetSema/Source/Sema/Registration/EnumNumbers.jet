@@ -51,7 +51,9 @@ sema_enum_numbers_expand: fn(items: ^[Item], source: String, diagnostics: ^[Diag
         if items[index] == .Enum(definition) {
             sema_enum_numbers_check_specified(definition, diagnostics)
             backing: jet_target_layout_enum_backing(definition) ?? next
-            numbers: sema_enum_numbers_checked(definition, backing, source, diagnostics) ?? next
+            // The backing is the `#Layout` marker's argument, so the marker is there.
+            layout: sema_enum_numbers_marker(definition.type_markers, "Layout") ?? next
+            numbers: sema_enum_numbers_checked(definition, layout, backing, source, diagnostics) ?? next
             methods: sema_enum_numbers_methods(definition, backing, numbers, diagnostics) ?? next
             updated := definition.copy()
             // The methods are the compiler's: they report at the enum, and
@@ -103,8 +105,8 @@ sema_enum_numbers_marker: fn(markers: [Marker], name: String) -> Marker? {
 }
 
 // Every case's number in declaration order, or None after a diagnostic.
-sema_enum_numbers_checked: fn(definition: EnumDef, backing: String, source: String, diagnostics: ^[Diagnostic]) -> [Int]? {
-    marker: sema_enum_numbers_layout_marker(definition)
+// `marker` is the enum's `#Layout` marker, which names `backing`.
+sema_enum_numbers_checked: fn(definition: EnumDef, marker: Marker, backing: String, source: String, diagnostics: ^[Diagnostic]) -> [Int]? {
     loop variant in definition.variants {
         if !(variant.payload == .Unit) {
             diagnostic := sema_error("E1120", marker.span, "`#Layout({backing})` backs only a payload-free enum, and case `{variant.name}` of `{definition.name}` carries a payload", "a backing type gives each case one number; a case with fields is more than a number", "remove the payload from `{variant.name}`, or remove `#Layout({backing})` and convert with your own methods")
@@ -202,13 +204,6 @@ sema_enum_numbers_marker_removal: fn(marker: Marker, source: String) -> TextEdit
     }
     if line_end >= raw.len() || raw[line_end] != (U8{10}) -> return None
     Val(TextEdit{span: Span{start: line_start, end: line_end + 1}, new_text: ""})
-}
-
-sema_enum_numbers_layout_marker: fn(definition: EnumDef) -> Marker Never! {
-    loop candidate in definition.type_markers {
-        if candidate.name == "Layout" -> return candidate
-    }
-    panic("a backed enum has a `#Layout` marker")
 }
 
 sema_enum_numbers_literal: fn(expression: Expr) -> Int? {

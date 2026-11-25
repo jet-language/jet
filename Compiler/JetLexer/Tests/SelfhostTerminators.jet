@@ -22,6 +22,17 @@ use {
     assert_eq(terminator_events_scanned("p *\ny".bytes(), false), [Int]{1, 3, 5})
 }
 
+// An authored `;` stands where a line break would end the
+// statement (event 3, the terminator at the `;`); a second `;` adds nothing
+// (5); anywhere else it is refused (4, E0447).
+#Test("an authored semicolon is a line break or refused") {
+    assert_eq(terminator_events_scanned("x; y".bytes(), false), [Int]{3, 1, 1, 1, 3, 4})
+    assert_eq(terminator_events_scanned("x;; y".bytes(), false), [Int]{3, 1, 1, 5, 2, 2, 1, 4, 5})
+    assert_eq(terminator_events_scanned("x;".bytes(), false), [Int]{3, 1, 1})
+    assert_eq(terminator_events_scanned("x; -1".bytes(), false), [Int]{4, 1, 1, 1, 4, 5})
+    assert_eq(terminator_events_scanned("; x".bytes(), false), [Int]{4, 0, 0, 1, 2, 3})
+}
+
 #Test("lexer interns repeated names and relocates literal tables") {
     result := lex_payload(`alpha alpha "{alpha}"`.bytes(), false)
     assert_eq(result.tokens[0].decoded.id == result.tokens[1].decoded.id, true)

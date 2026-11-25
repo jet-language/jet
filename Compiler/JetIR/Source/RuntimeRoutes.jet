@@ -3,7 +3,7 @@
 // (its last segment). This is authored Jet source and the routes' only home:
 // keep every row table sorted by hand. Each table's KEYS/KEY_ROWS lookup
 // index is computed from the table at build time (ir_key_index).
-use jet_foundation.[IRRuntimeHandle, IR_NATIVE_PROVIDER_HANDLES, IR_RUNTIME_HANDLES, RUNTIME_C_EXPORTS, ir_key_index, ir_key_index_keys, ir_key_row, ir_native_provider_handle_row, ir_runtime_handle_row]
+use jet_foundation.[IRRuntimeHandle, IR_GENERATED_RECORDS, IR_NATIVE_PROVIDER_HANDLES, IR_RUNTIME_HANDLES, RUNTIME_C_EXPORTS, ir_key_index, ir_key_index_keys, ir_key_row, ir_native_provider_handle_row, ir_runtime_handle_row]
 
 // The runtime ABI atom projection; nominal identities stay unchanged.
 runtime_abi_atom: fn(name: String) -> String Never! {
@@ -206,7 +206,6 @@ IR_RUNTIME_ROUTES: #run { [IRRoute]{
     IRRoute{symbol: "jet_dyn_int", export: "jet_dyn_int", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "Dyn"}}, result: IRRouteResult.Result{ok: IRRouteCarrier.Word, err: IRRouteCarrier.List{elem: IRRouteCarrier.Handle{name: "FieldError"}}}},
     IRRoute{symbol: "jet_dyn_text", export: "jet_dyn_text", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "Dyn"}}, result: IRRouteResult.Result{ok: IRRouteCarrier.Text, err: IRRouteCarrier.List{elem: IRRouteCarrier.Handle{name: "FieldError"}}}},
     IRRoute{symbol: "jet_dyn_to_text", export: "jet_dyn_to_text", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "Dyn"}}, result: IRRouteResult.Option{some: IRRouteCarrier.Text}},
-    IRRoute{symbol: "jet_enc_json_canonical", export: "jet_enc_json_canonical", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "Dyn"}, IRRouteCarrier.Handle{name: "EncodingLimits"}}, result: IRRouteResult.Result{ok: IRRouteCarrier.Text, err: IRRouteCarrier.Handle{name: "EncodingError"}}},
     IRRoute{symbol: "jet_enc_jsonl_writer_finish", export: "jet_enc_jsonl_writer_finish", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.HandleMut{name: "JSONLWriter"}}, result: IRRouteResult.Result{ok: IRRouteCarrier.Unit, err: IRRouteCarrier.Handle{name: "EncodingError"}}},
     IRRoute{symbol: "jet_enc_jsonl_writer_flush", export: "jet_enc_jsonl_writer_flush", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.HandleMut{name: "JSONLWriter"}}, result: IRRouteResult.Result{ok: IRRouteCarrier.Unit, err: IRRouteCarrier.Handle{name: "EncodingError"}}},
     IRRoute{symbol: "jet_enc_jsonl_writer_write", export: "jet_enc_jsonl_writer_write", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.HandleMut{name: "JSONLWriter"}, IRRouteCarrier.Handle{name: "Dyn"}}, result: IRRouteResult.Result{ok: IRRouteCarrier.Unit, err: IRRouteCarrier.Handle{name: "EncodingError"}}},
@@ -1351,190 +1350,6 @@ ir_handle_spelling_before: fn(a: String, b: String) -> Bool Never! {
     a < b
 }
 
-// Core records the runtime's generated record exports carry (Records.jet),
-// keyed by runtime type: a struct's fields in constructor order or an enum's
-// variants in index order, each `name=kind` when it carries a member (Text,
-// Int, U64, Flag, Float, Tag.<enum>, Rec.<record>, Opt<kind>; a variant's
-// named members joined by `+`). Every row is read: its key is a runtime
-// handle row's runtime type or a route carrier's, or a member of another
-// row; a Core type whose declaration moved to Core source keeps no row here.
-IR_GENERATED_RECORDS: #run { [IRRecordSchema]{
-    IRRecordSchema{jet_name: "AllocError", variants: "", fields: "requested_bytes=Int,allocator=Text"},
-    IRRecordSchema{jet_name: "CBORError", variants: "", fields: "kind=Tag.CBORErrorKind,byte_offset=Int,path=Text,reason=Text"},
-    IRRecordSchema{jet_name: "CBORErrorKind", variants: "Syntax,Truncated,Unsupported,Limit,TypeMismatch,TrailingData,NonCanonical", fields: ""},
-    IRRecordSchema{jet_name: "CBOROptions", variants: "", fields: "max_depth=Int,max_items=Int,max_bytes=Int,require_canonical=Flag"},
-    IRRecordSchema{jet_name: "Closed", variants: "Closed", fields: ""},
-    IRRecordSchema{jet_name: "CoreBody", variants: "Empty,Text=Text,Bytes=List.Byte", fields: ""},
-    IRRecordSchema{jet_name: "CoreCBORError", variants: "", fields: "kind=Rec.CoreCBORErrorKind,byte_offset=Int,path=Text,reason=Text"},
-    IRRecordSchema{jet_name: "CoreCBORErrorKind", variants: "Syntax,Truncated,Unsupported,Limit,TypeMismatch,TrailingData,NonCanonical", fields: ""},
-    IRRecordSchema{jet_name: "CoreCBOROptions", variants: "", fields: "max_depth=Int,max_items=Int,max_bytes=Int,require_canonical=Flag"},
-    IRRecordSchema{jet_name: "CoreDataError", variants: "", fields: "kind=Tag.DataErrorKind,operation=Text,row=OptInt,column=OptInt,index=OptInt,reason=Text,cause=OptRec.CoreEncodingError"},
-    IRRecordSchema{jet_name: "CoreDataLoaderStatus", variants: "", fields: "identity=Text,freshness=Tag.DataFreshness,invalidated_by=Tag.DataInvalidationCause,error=Text,cleanup=Text,buffered_bytes=Int,backpressure=Flag,last_good=Flag"},
-    IRRecordSchema{jet_name: "CoreDataStatus", variants: "", fields: "step=Text,path=Text,clone_value=Text,ownership=Text,trust=Text,fallback=Text,replacement=Text"},
-    IRRecordSchema{jet_name: "CoreDataSummary", variants: "", fields: "count=Int,sum=Float,mean=Float,min=Float,max=Float,median=Float,variance=Float,stddev=Float"},
-    IRRecordSchema{jet_name: "CoreDataWatchStatus", variants: "", fields: "mode=Text,revision=Int,retained_rows=Int,recomputations=Int,active=Flag,generation=Int,dirty=Flag,error=Text,freshness_ms=Int,invalidation_cause=Text,refreshing=Flag,canceled=Flag"},
-    IRRecordSchema{jet_name: "CoreDateTime", variants: "", fields: "secs=Int,nanos=Int,leap_second=Flag"},
-    IRRecordSchema{jet_name: "CoreDeliveryEvent", variants: "", fields: "sequence=Int,state=Tag.JetDeliveryState,attempts=Int,timestamp=Int,signature=Text"},
-    IRRecordSchema{jet_name: "CoreEncodingCause", variants: "", fields: "kind=Text,os_code=OptInt,message=Text"},
-    IRRecordSchema{jet_name: "CoreEncodingError", variants: "", fields: "format=Rec.CoreEncodingFormat,kind=Rec.CoreEncodingErrorKind,byte_offset=Int,line=OptInt,column=OptInt,path=Text,reason=Text,cause=OptRec.CoreEncodingCause"},
-    IRRecordSchema{jet_name: "CoreEncodingErrorKind", variants: "Syntax,Truncated,Unsupported,Limit,IO,State", fields: ""},
-    IRRecordSchema{jet_name: "CoreEncodingFormat", variants: "JSON,JSONL,CSV,TOML,YAML,XML,CBOR", fields: ""},
-    IRRecordSchema{jet_name: "CoreHeader", variants: "", fields: "name=Text,value=Text"},
-    IRRecordSchema{jet_name: "CoreInstant", variants: "", fields: "start_ns=Int"},
-    IRRecordSchema{jet_name: "CoreJetSQLAggregate", variants: "Count,Sum,Avg,Min,Max", fields: ""},
-    IRRecordSchema{jet_name: "CoreJetSQLValue", variants: "Null,Bool=Flag,Int=Int,Float=Float,Text=Text", fields: ""},
-    IRRecordSchema{jet_name: "CoreJobError", variants: "", fields: "type_id=Text,reason=Text,detail=OptText"},
-    IRRecordSchema{jet_name: "CoreJobPayload", variants: "", fields: "type_id=Text,bytes=List.Byte,publish=Flag"},
-    IRRecordSchema{jet_name: "CoreJobQueueClaim", variants: "", fields: "receipt=Rec.CoreJobQueueReceipt,payload=Rec.CoreJobPayload,worker=Text,lease_token=Text,lease_until_ms=Int"},
-    IRRecordSchema{jet_name: "CoreJobQueueDeliveryPolicy", variants: "AtLeastOnce", fields: ""},
-    IRRecordSchema{jet_name: "CoreJobQueueEvent", variants: "", fields: "sequence=Int,state=Rec.CoreJobQueueState,attempts=Int,timestamp_ms=Int,reason=OptText,duration_ms=OptInt,worker=OptText"},
-    IRRecordSchema{jet_name: "CoreJobQueueReceipt", variants: "", fields: "id=Text,authority=Text,queue=Text,job_type=Text,state=Rec.CoreJobQueueState,sequence=Int,attempts=Int,due_at_ms=Int,accepted_at_ms=Int,request_id=OptText,idempotency_key=OptText,lease_until_ms=OptInt,duration_ms=OptInt,error_reason=OptText,delivery=Rec.CoreJobQueueDeliveryPolicy,duplicate=Flag,signature=Text"},
-    IRRecordSchema{jet_name: "CoreJobQueueRecord", variants: "", fields: "receipt=Rec.CoreJobQueueReceipt,payload=OptRec.CoreJobPayload,result=OptRec.CoreJobResult,error=OptRec.CoreJobError,started_at_ms=OptInt,finished_at_ms=OptInt"},
-    IRRecordSchema{jet_name: "CoreJobQueueState", variants: "Queued,Running,Retrying,Completed,Failed,DeadLettered,Canceled", fields: ""},
-    IRRecordSchema{jet_name: "CoreJobQueueStatus", variants: "", fields: "queue=Text,authority=Text,queued=Int,running=Int,retrying=Int,completed=Int,failed=Int,dead_lettered=Int,canceled=Int,depth=Int,wait_ms=Int,throughput=Int,capacity=Int,paused=Flag,freshness_ms=Int"},
-    IRRecordSchema{jet_name: "CoreJobResult", variants: "", fields: "type_id=Text,bytes=List.Byte,publish=Flag"},
-    IRRecordSchema{jet_name: "CoreKeyStatus", variants: "Active,Retired,Revoked", fields: ""},
-    IRRecordSchema{jet_name: "CoreLocalDate", variants: "", fields: "date_y=Int,date_m=Int,date_d=Int"},
-    IRRecordSchema{jet_name: "CoreLocalTime", variants: "", fields: "hour_value=Int,minute_value=Int,second_value=Int,nanos=Int"},
-    IRRecordSchema{jet_name: "CoreModError", variants: "Denied=Text,NotFound=Text,Invalid=Text,Unsupported=Text", fields: ""},
-    IRRecordSchema{jet_name: "CorePeriod", variants: "", fields: "years_value=Int,months_value=Int,days_value=Int"},
-    IRRecordSchema{jet_name: "CoreProcessSignal", variants: "Hup,Int,Quit,Usr1,Usr2,Pipe,Alrm,Term,Chld,Cont,Tstp,Ttin,Ttou,Winch", fields: ""},
-    IRRecordSchema{jet_name: "CoreSRVRecord", variants: "", fields: "target=Text,port=Int,priority=Int,weight=Int"},
-    IRRecordSchema{jet_name: "CoreStopwatch", variants: "", fields: "start_ns=Int"},
-    IRRecordSchema{jet_name: "CoreTimeError", variants: "", fields: "reason=Text"},
-    IRRecordSchema{jet_name: "CoreTransformError", variants: "", fields: "message=Text"},
-    IRRecordSchema{jet_name: "CoreVaultError", variants: "InvalidName,NotFound,WrongType,Revoked,Locked,AuthorityDenied,Conflict,UnsupportedProvider,InvalidEncoding,DurabilityUnknown,Crypto=Tag.CryptoError,IO=Text+Text,Internal=Text", fields: ""},
-    IRRecordSchema{jet_name: "CoreWrappedVaultKey", variants: "", fields: "encoded=List.Byte,mode=Int,key_type=Int,origin_name=Text,origin_generation=Int,header_len=Int"},
-    IRRecordSchema{jet_name: "CoreXMLCanonicalMode", variants: "Inclusive11,Exclusive10", fields: ""},
-    IRRecordSchema{jet_name: "CoreXMLLimits", variants: "", fields: "max_depth=Int,max_nodes=Int,max_attributes_per_element=Int,max_name_bytes=Int,max_text_bytes=Int,max_entity_declarations=Int,max_entity_depth=Int,max_entity_replacement_bytes=Int"},
-    IRRecordSchema{jet_name: "DataAuthority", variants: "", fields: "scope=Text,revision=Text"},
-    IRRecordSchema{jet_name: "DataColumn", variants: "", fields: "id=Text,name=Text,type_name=Text,nullable=Flag"},
-    IRRecordSchema{jet_name: "DataError", variants: "", fields: "kind=Tag.DataErrorKind,operation=Text,row=OptInt,column=OptInt,index=OptInt,reason=Text,cause=OptRec.EncodingError"},
-    IRRecordSchema{jet_name: "DataErrorKind", variants: "Decode,Limit,IO,Empty,InvalidArgument,NonFinite,Overflow,State,Bridge,Unsupported,DuplicateKey,MissingKey,WrongOwner,StaleRevision,InvalidValue", fields: ""},
-    IRRecordSchema{jet_name: "DataFormat", variants: "CSV,JSON,JSONL,Parquet,Arrow", fields: ""},
-    IRRecordSchema{jet_name: "DataFreshness", variants: "Pending,Fresh,Stale,Error,Offline,Canceled", fields: ""},
-    IRRecordSchema{jet_name: "DataInvalidationCause", variants: "NoCause,Loader,Input,ArchiveMember,Parameters,Credential,Capability,Manual", fields: ""},
-    IRRecordSchema{jet_name: "DataLimits", variants: "", fields: "encoding=Rec.EncodingLimits,max_groups=Int,max_sort_rows=Int,max_join_rows=Int,max_output_rows=Int"},
-    IRRecordSchema{jet_name: "DataLoaderKind", variants: "File,URL,Database,Value", fields: ""},
-    IRRecordSchema{jet_name: "DataLoaderStatus", variants: "", fields: "identity=Text,freshness=Tag.DataFreshness,invalidated_by=Tag.DataInvalidationCause,error=Text,cleanup=Text,buffered_bytes=Int,backpressure=Flag,last_good=Flag"},
-    IRRecordSchema{jet_name: "DataPivotCell", variants: "", fields: "row_key=Text,column_key=Text,count=Int,sum=Float,mean=Float"},
-    IRRecordSchema{jet_name: "DataSnapshotIdentity", variants: "", fields: "id=Text,source=Text,content=Text,schema=Text,format=Tag.DataFormat"},
-    IRRecordSchema{jet_name: "DataStatus", variants: "", fields: "step=Text,path=Text,clone_value=Text,ownership=Text,trust=Text,fallback=Text,replacement=Text"},
-    IRRecordSchema{jet_name: "DataSummary", variants: "", fields: "count=Int,sum=Float,mean=Float,min=Float,max=Float,median=Float,variance=Float,stddev=Float"},
-    IRRecordSchema{jet_name: "DataWatchStatus", variants: "", fields: "mode=Text,revision=Int,retained_rows=Int,recomputations=Int,active=Flag,generation=Int,dirty=Flag,error=Text,freshness_ms=Int,invalidation_cause=Text,refreshing=Flag,canceled=Flag"},
-    IRRecordSchema{jet_name: "DirEntry", variants: "", fields: "name=Text,path=Text,is_dir=Flag"},
-    IRRecordSchema{jet_name: "Duration", variants: "", fields: "ns=Int"},
-    IRRecordSchema{jet_name: "EncodingCause", variants: "", fields: "kind=Text,os_code=OptInt,message=Text"},
-    IRRecordSchema{jet_name: "EncodingError", variants: "", fields: "format=Tag.EncodingFormat,kind=Tag.EncodingErrorKind,byte_offset=Int,line=OptInt,column=OptInt,path=Text,reason=Text,cause=OptRec.EncodingCause"},
-    IRRecordSchema{jet_name: "EncodingErrorKind", variants: "Syntax,Truncated,Unsupported,Limit,IO,State", fields: ""},
-    IRRecordSchema{jet_name: "EncodingFormat", variants: "JSON,JSONL,CSV,TOML,YAML,XML,CBOR", fields: ""},
-    IRRecordSchema{jet_name: "EncodingLimits", variants: "", fields: "buffer_bytes=Int,max_depth=Int,max_item_bytes=Int,max_total_bytes=OptInt,max_expansion_depth=Int,max_expansion_bytes=Int"},
-    IRRecordSchema{jet_name: "EnvError", variants: "InvalidName,InvalidValue,NonUnicode", fields: ""},
-    IRRecordSchema{jet_name: "FieldError", variants: "", fields: "path=Text,reason=Text"},
-    IRRecordSchema{jet_name: "IOContext", variants: "", fields: "operation=Tag.IOOperation,resource=OptText,os_code=OptInt,cause=OptText"},
-    IRRecordSchema{jet_name: "IOError", variants: "InvalidInput=Rec.IOContext,NotFound=Rec.IOContext,PermissionDenied=Rec.IOContext,TimedOut=Rec.IOContext,Canceled=Rec.IOContext,Closed=Rec.IOContext,Protocol=Rec.IOContext,Other=Rec.IOContext,ResourceLimit=Tag.ProcessResourceLimit,AlreadyExists=Rec.IOContext,Unsupported=Rec.IOContext", fields: ""},
-    IRRecordSchema{jet_name: "IOOperation", variants: "Read,Write,Flush,Connect,Accept,Close,Resolve,Codec", fields: ""},
-    IRRecordSchema{jet_name: "Jet__ResolveError", variants: "", fields: "kind=Int,has_os_code=Flag,os_code=Int,message=Text"},
-    IRRecordSchema{jet_name: "JetAsyncPolicy", variants: "", fields: "capacity=Int,overflow=Tag.JetEventOverflow"},
-    IRRecordSchema{jet_name: "JetComplex", variants: "", fields: "real=Float,imaginary=Float"},
-    IRRecordSchema{jet_name: "JetCoord2", variants: "", fields: "x=Float,y=Float,frame_id=Int"},
-    IRRecordSchema{jet_name: "JetCryptoJetcRaw", variants: "", fields: "value=Int,errno=Int,bytes=List.Byte,linux=Flag"},
-    IRRecordSchema{jet_name: "JetCryptoJetcStat", variants: "", fields: "status=Int,errno=Int,dev=Int,ino=Int,len=Int,mtime=Int,mtime_ns=Int,nlink=Int,is_file=Flag,is_dir=Flag"},
-    IRRecordSchema{jet_name: "JetDate", variants: "", fields: "year=Int,month=Int,day=Int"},
-    IRRecordSchema{jet_name: "JetDeliveryEvent", variants: "", fields: "sequence=Int,state=Tag.JetDeliveryState,attempts=Int,timestamp=Int,signature=Text"},
-    IRRecordSchema{jet_name: "JetDeliveryState", variants: "Pending,Accepted,Delivering,Delivered,DeadLettered,Canceled", fields: ""},
-    IRRecordSchema{jet_name: "JetDispatchState", variants: "Delivered,HandlerFailed,DroppedNewest,DroppedOldest,Closed,Canceled,DeadlineExceeded", fields: ""},
-    IRRecordSchema{jet_name: "JetDNSSrv", variants: "", fields: "priority=Int,weight=Int,port=Int,target=Text"},
-    IRRecordSchema{jet_name: "JetEventConfigError", variants: "InvalidCapacity", fields: ""},
-    IRRecordSchema{jet_name: "JetEventOverflow", variants: "Block,DropNewest,DropOldest", fields: ""},
-    IRRecordSchema{jet_name: "JetFailurePolicy", variants: "StopFirst,Collect,Log,Ignore", fields: ""},
-    IRRecordSchema{jet_name: "JetFsLockCall", variants: "", fields: "value=Int,errno=Int,platform=Int"},
-    IRRecordSchema{jet_name: "JetFsLockIdentity", variants: "", fields: "device=Int,low=Int,high=Int,regular=Flag,reparse=Flag,errno=Int,platform=Int"},
-    IRRecordSchema{jet_name: "JetFsLockWait", variants: "", fields: "acquired=Flag,timed_out=Flag,errno=Int,platform=Int,deadline_ns=Int"},
-    IRRecordSchema{jet_name: "JetHookPolicy", variants: "FirstCancelElseTransform", fields: ""},
-    IRRecordSchema{jet_name: "JetHTTPOperation", variants: "ClientConnect,ServerBind,ServeListener", fields: ""},
-    IRRecordSchema{jet_name: "JetHTTPServerTls", variants: "", fields: "cert_pem=Text,key_pem=Text"},
-    IRRecordSchema{jet_name: "JetHTTPVersion", variants: "HTTP10,HTTP11,HTTP2", fields: ""},
-    IRRecordSchema{jet_name: "JetInputEvent", variants: "Key,Resize", fields: ""},
-    IRRecordSchema{jet_name: "JetInstant", variants: "", fields: "start_ns=Int"},
-    IRRecordSchema{jet_name: "JetJobError", variants: "", fields: "type_id=Text,reason=Text,detail=OptText"},
-    IRRecordSchema{jet_name: "JetJobPayload", variants: "", fields: "type_id=Text,bytes=List.Byte,publish=Flag"},
-    IRRecordSchema{jet_name: "JetJobQueueDeliveryPolicy", variants: "AtLeastOnce", fields: ""},
-    IRRecordSchema{jet_name: "JetJobQueueState", variants: "Queued,Running,Retrying,Completed,Failed,DeadLettered,Canceled", fields: ""},
-    IRRecordSchema{jet_name: "JetJobResult", variants: "", fields: "type_id=Text,bytes=List.Byte,publish=Flag"},
-    IRRecordSchema{jet_name: "JetMemoStats", variants: "", fields: "hits=Int,misses=Int,size=Int,bound=Text"},
-    IRRecordSchema{jet_name: "JetNetDNSError", variants: "NotFound=Text,Failure=Text", fields: ""},
-    IRRecordSchema{jet_name: "JetNetError", variants: "InvalidInput=Rec.JetNetErrorDetail,PermissionDenied=Rec.JetNetErrorDetail,AddressInUse=Rec.JetNetErrorDetail,AddressUnavailable=Rec.JetNetErrorDetail,ConnectionRefused=Rec.JetNetErrorDetail,ConnectionReset=Rec.JetNetErrorDetail,NotConnected=Rec.JetNetErrorDetail,Closed=Rec.JetNetErrorDetail,Timeout=Rec.JetNetErrorDetail,Canceled=Rec.JetNetErrorDetail,Unsupported=Rec.JetNetErrorDetail,TLS=Rec.JetNetErrorDetail,Protocol=Rec.JetNetErrorDetail,Other=Rec.JetNetErrorDetail,DNS=Rec.JetNetDNSError", fields: ""},
-    IRRecordSchema{jet_name: "JetNetErrorDetail", variants: "", fields: "operation=Text,address=OptText,name=OptText,message=Text,os_code=OptInt"},
-    IRRecordSchema{jet_name: "JetNetReady", variants: "", fields: "readable=Flag,writable=Flag"},
-    IRRecordSchema{jet_name: "JetNetReadyInterest", variants: "Read,Write,ReadWrite", fields: ""},
-    IRRecordSchema{jet_name: "JetNetShutdown", variants: "Read,Write,Both", fields: ""},
-    IRRecordSchema{jet_name: "JetPatternCapture", variants: "Text=Text,Int=Int,Float=Float,Bool=Flag,Bytes=List.Byte", fields: ""},
-    IRRecordSchema{jet_name: "JetPeriod", variants: "", fields: "years=Int,months=Int,days=Int"},
-    IRRecordSchema{jet_name: "JetPoint", variants: "", fields: "x=Float,y=Float"},
-    IRRecordSchema{jet_name: "JetRange", variants: "", fields: "start=Int,end=Int,exclusive=Flag"},
-    IRRecordSchema{jet_name: "JetRay2", variants: "", fields: "origin=Rec.JetCoord2,direction=Rec.JetCoord2"},
-    IRRecordSchema{jet_name: "JetRealtimeReceipt", variants: "", fields: "requested_rate_hz=Int,requested_frames=Int,completed_callbacks=Int,completed_frames=Int,missed=Int,max_lateness_ns=Int,start_identity=Int,end_identity=Int"},
-    IRRecordSchema{jet_name: "JetRect", variants: "", fields: "x=Float,y=Float,width=Float,height=Float"},
-    IRRecordSchema{jet_name: "JetReflectCase", variants: "", fields: "name=Text,path=Text,fields=List.Rec.JetReflectField"},
-    IRRecordSchema{jet_name: "JetReflectField", variants: "", fields: "name=Text,value=Rec.JetReflectValue"},
-    IRRecordSchema{jet_name: "JetReflectValue", variants: "", fields: "type_name=Text,path=Text,display=Text,fields=List.Rec.JetReflectField"},
-    IRRecordSchema{jet_name: "JetServiceDelivery", variants: "AtMostOnce,DurableAtLeastOnce", fields: ""},
-    IRRecordSchema{jet_name: "JetServiceError", variants: "Full=Text,Ambiguous=Text,Unknown=Text,NotStarted=Text,Policy=Text,Unavailable=Text,Partitioned=Text,Revoked=Text,Stale=Text,Expired=Text", fields: ""},
-    IRRecordSchema{jet_name: "JetServiceRestart", variants: "OneForOne,OneForAll,RestForOne", fields: ""},
-    IRRecordSchema{jet_name: "JetServiceRuntime", variants: "", fields: "store=Text,retention_ms=Int"},
-    IRRecordSchema{jet_name: "JetServiceStateStore", variants: "", fields: "path=Text"},
-    IRRecordSchema{jet_name: "JetSize", variants: "", fields: "width=Float,height=Float"},
-    IRRecordSchema{jet_name: "JetSizeConstraint", variants: "", fields: "min_width=Float,min_height=Float,max_width=Float,max_height=Float"},
-    IRRecordSchema{jet_name: "JetTaskFailure", variants: "Canceled,DeadlineBlown,Panicked=Text", fields: ""},
-    IRRecordSchema{jet_name: "JetTaskStatus", variants: "Running,Paused,CancelRequested", fields: ""},
-    IRRecordSchema{jet_name: "JetTestingEvidenceRead", variants: "", fields: "ok=Flag,text=Text,missing=Flag"},
-    IRRecordSchema{jet_name: "JetTestingTempCreate", variants: "", fields: "ok=Flag,cause=Text"},
-    IRRecordSchema{jet_name: "JetTestingTempFacts", variants: "", fields: "pid=U64,thread=Text"},
-    IRRecordSchema{jet_name: "JetTestingTempPath", variants: "", fields: "path=List.Byte,text=Text"},
-    IRRecordSchema{jet_name: "JetTestingTempRemove", variants: "", fields: "ok=Flag,missing=Flag,cause=Text"},
-    IRRecordSchema{jet_name: "JetTransform2", variants: "", fields: "m00=Float,m01=Float,m10=Float,m11=Float,tx=Float,ty=Float,from_frame=Int,to_frame=Int"},
-    IRRecordSchema{jet_name: "JetUiAccessibility", variants: "", fields: "name=OptText,description=OptText,states=List.Rec.JetUiAccessibilityState"},
-    IRRecordSchema{jet_name: "JetUiAccessibilityState", variants: "Disabled,Busy,Expanded=Flag,Checked=Flag,Selected=Flag,Required,Value=Text", fields: ""},
-    IRRecordSchema{jet_name: "JetUiAriaRole", variants: "Button,TextInput,Label,Container", fields: ""},
-    IRRecordSchema{jet_name: "JetUiShortcut", variants: "", fields: "key=Text,modifiers=Rec.JetUiShortcutModifiers"},
-    IRRecordSchema{jet_name: "JetUiShortcutModifiers", variants: "", fields: "bits=Int"},
-    IRRecordSchema{jet_name: "JetWebMutationStatus", variants: "Idle,Pending,Success,Error,Settled", fields: ""},
-    IRRecordSchema{jet_name: "JetWebQueryNetworkMode", variants: "Online,Always,OfflineFirst", fields: ""},
-    IRRecordSchema{jet_name: "JetWebQueryStatus", variants: "Pending,Fresh,Stale,Fetching,Error,Offline", fields: ""},
-    IRRecordSchema{jet_name: "JetWebTableFilter", variants: "", fields: "column=Text,value=Text"},
-    IRRecordSchema{jet_name: "JetWebTablePageMode", variants: "Client,Server", fields: ""},
-    IRRecordSchema{jet_name: "JetWebTableSortDirection", variants: "Ascending,Descending", fields: ""},
-    IRRecordSchema{jet_name: "JetWsError", variants: "InvalidURL,InvalidHandshake,Protocol,Timeout,Closed,Canceled,UnsupportedTarget,MessageTooLarge=Int,IO=Text", fields: ""},
-    IRRecordSchema{jet_name: "LogField", variants: "", fields: "key=Text,value=Text,kind=Text,redacted=Flag"},
-    IRRecordSchema{jet_name: "LogSpan", variants: "", fields: "id=Int,name=Text"},
-    IRRecordSchema{jet_name: "PluginFault", variants: "", fields: "export=Text,message=Text,frames=List.Rec.PluginFrame"},
-    IRRecordSchema{jet_name: "PluginFrame", variants: "", fields: "function=Text,component=Text,offset=Int"},
-    IRRecordSchema{jet_name: "PluginLimit", variants: "Fuel,Memory,Table,Time,Wire", fields: ""},
-    IRRecordSchema{jet_name: "ProcessResourceLimit", variants: "WallTime,CPUTime,Memory,OpenFiles,Output", fields: ""},
-    IRRecordSchema{jet_name: "ProcessStreamMode", variants: "Stream,Inherit,Capture,Stdout", fields: ""},
-    IRRecordSchema{jet_name: "RangeError", variants: "", fields: "reason=Text"},
-    IRRecordSchema{jet_name: "TerminalMode", variants: "Raw,Cooked", fields: ""},
-    IRRecordSchema{jet_name: "TerminalPolicy", variants: "", fields: "size=Rec.TerminalSize,mode=Tag.TerminalMode"},
-    IRRecordSchema{jet_name: "TerminalSize", variants: "", fields: "cols=Int,rows=Int"},
-    IRRecordSchema{jet_name: "TextError", variants: "", fields: "message=Text"},
-    IRRecordSchema{jet_name: "TextWidth", variants: "", fields: "ambiguous=Tag.TextWidthAmbiguous,controls=Tag.TextWidthControls"},
-    IRRecordSchema{jet_name: "TextWidthAmbiguous", variants: "Narrow,Wide", fields: ""},
-    IRRecordSchema{jet_name: "TextWidthControls", variants: "Zero,Reject", fields: ""},
-    IRRecordSchema{jet_name: "UTF8Error", variants: "", fields: "message=Text"},
-    IRRecordSchema{jet_name: "WalkEntry", variants: "", fields: "path=Text,relative=Text,is_dir=Flag,depth=Int"},
-    IRRecordSchema{jet_name: "WatchDomain", variants: "File,Process,Port", fields: ""},
-    IRRecordSchema{jet_name: "WatchEvent", variants: "", fields: "domain=Tag.WatchDomain,kind=Tag.WatchKind,path=Text,detail=Text,pid=Int,port=Int"},
-    IRRecordSchema{jet_name: "WatchKind", variants: "Created,Modified,Removed,Error,Exited,Ready", fields: ""},
-    IRRecordSchema{jet_name: "XMLCanonicalMode", variants: "Inclusive11,Exclusive10", fields: ""},
-    IRRecordSchema{jet_name: "XMLEncoding", variants: "UTF8,UTF8BOM,UTF16LE,UTF16BE", fields: ""},
-    IRRecordSchema{jet_name: "XMLError", variants: "", fields: "kind=Tag.XMLReason,byte_offset=OptInt,line=OptInt,column=OptInt,path=Text,reason=Text"},
-    IRRecordSchema{jet_name: "XMLLexicalPolicy", variants: "PreserveValid,Deterministic", fields: ""},
-    IRRecordSchema{jet_name: "XMLLimits", variants: "", fields: "max_depth=Int,max_nodes=Int,max_attributes_per_element=Int,max_name_bytes=Int,max_text_bytes=Int,max_entity_declarations=Int,max_entity_depth=Int,max_entity_replacement_bytes=Int"},
-    IRRecordSchema{jet_name: "XMLReason", variants: "InvalidEncoding,Malformed,MismatchedTag,InvalidName,Namespace,DuplicateAttribute,Entity,EntityCycle,Limit,Canonicalization,Shape,Unsupported", fields: ""},
-    IRRecordSchema{jet_name: "XMLRenderOptions", variants: "", fields: "encoding=Tag.XMLEncoding,lexical=Tag.XMLLexicalPolicy"},
-} }
-
 // Declaration-proven scalar records; the IR builder still proves the actual native field.
 IRRuntimeWordRecord: struct {
     runtime: String,
@@ -1543,9 +1358,7 @@ IRRuntimeWordRecord: struct {
 
 IR_WORD_RECORDS: #run { [IRRuntimeWordRecord]{
     IRRuntimeWordRecord{runtime: "CoreInstant", field: "start_ns"},
-    IRRuntimeWordRecord{runtime: "CoreStopwatch", field: "start_ns"},
     IRRuntimeWordRecord{runtime: "Duration", field: "ns"},
-    IRRuntimeWordRecord{runtime: "JetInstant", field: "start_ns"},
 } }
 
 // Fields of runtime handle structs readable in place (Places.jet):
@@ -1581,7 +1394,6 @@ IR_HANDLE_FIELDS: #run { [IRHandleField]{
     IRHandleField{runtime: "DataStream", field: "eof", kind: "Flag", header_bytes: 0},
     IRHandleField{runtime: "DataStream", field: "canceled", kind: "Flag", header_bytes: 0},
     IRHandleField{runtime: "JetCursor", field: "buf", kind: "Text", header_bytes: 0},
-    IRHandleField{runtime: "JetDateTime", field: "leap_second", kind: "Flag", header_bytes: 0},
     IRHandleField{runtime: "JetErr", field: "message", kind: "Text", header_bytes: 0},
     IRHandleField{runtime: "JetFileLockOwner", field: "stored_path", kind: "Text", header_bytes: 0},
     IRHandleField{runtime: "JetFileReader", field: "stored_path", kind: "Text", header_bytes: 0},
@@ -1616,13 +1428,8 @@ IR_HANDLE_FIELDS: #run { [IRHandleField]{
     IRHandleField{runtime: "JetUDPPacket", field: "port", kind: "Handle.JetInt", header_bytes: 0},
     IRHandleField{runtime: "JetUDPPacket", field: "original_len", kind: "Handle.JetInt", header_bytes: 0},
     IRHandleField{runtime: "JetUiClipboardText", field: "text", kind: "Text", header_bytes: 0},
-    IRHandleField{runtime: "JetUiShortcutBinding", field: "shortcut", kind: "Handle.JetUiShortcut", header_bytes: 0},
-    IRHandleField{runtime: "JetUiShortcutBinding", field: "action", kind: "Text", header_bytes: 0},
     IRHandleField{runtime: "JetWebQuery", field: "key", kind: "Text", header_bytes: 0},
     IRHandleField{runtime: "JetWebQuery", field: "footprint", kind: "Text", header_bytes: 0},
-    IRHandleField{runtime: "JetZone", field: "name", kind: "Text", header_bytes: 0},
-    IRHandleField{runtime: "JetZonedDateTime", field: "instant", kind: "Handle.JetDateTime", header_bytes: 0},
-    IRHandleField{runtime: "JetZonedDateTime", field: "zone", kind: "Handle.JetZone", header_bytes: 0},
     IRHandleField{runtime: "JSONLReader", field: "json", kind: "Handle.JSONReader", header_bytes: 0},
     IRHandleField{runtime: "JSONLWriter", field: "json", kind: "Handle.JSONWriter", header_bytes: 0},
     IRHandleField{runtime: "JSONLWriter", field: "finished", kind: "Flag", header_bytes: 0},
@@ -1713,119 +1520,6 @@ ir_environment_route: fn(symbol: String) -> IREnvironmentRoute? {
     None
 }
 
-// Candidate source identities; the backend validates against the actual native layout.
-IRNativeType: struct {
-    jet_name: String,
-    declaration: String,
-    arguments: String,
-}
-
-IR_NATIVE_TYPES: #run { [IRNativeType]{
-    IRNativeType{jet_name: "<corelib>/core.crypto.vault.ExpiryCloseProbe", declaration: "<corelib>/core.crypto.vault.ExpiryCloseProbe", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.crypto.vault.KeyRef", declaration: "<corelib>/core.crypto.vault.KeyRef", arguments: "T"},
-    IRNativeType{jet_name: "<corelib>/core.crypto.vault.KeyStatus", declaration: "<corelib>/core.crypto.vault.KeyStatus", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.crypto.vault.VaultError", declaration: "<corelib>/core.crypto.vault.VaultError", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.crypto.vault.WrappedVaultKey", declaration: "<corelib>/core.crypto.vault.WrappedVaultKey", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.data.DataError", declaration: "<corelib>/core.data.DataError", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.data.DataLoaderStatus", declaration: "<corelib>/core.data.DataLoaderStatus", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.data.DataStatus", declaration: "<corelib>/core.data.DataStatus", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.data.DataSummary", declaration: "<corelib>/core.data.DataSummary", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.data.DataWatchStatus", declaration: "<corelib>/core.data.DataWatchStatus", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.db.sql.JetSQLAggregate", declaration: "<corelib>/core.db.sql.JetSQLAggregate", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.db.sql.JetSQLGroupKey", declaration: "<corelib>/core.db.sql.JetSQLGroupKey", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.db.sql.JetSQLQuery", declaration: "<corelib>/core.db.sql.JetSQLQuery", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.db.sql.JetSQLResultRow", declaration: "<corelib>/core.db.sql.JetSQLResultRow", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.db.sql.JetSQLSelectItem", declaration: "<corelib>/core.db.sql.JetSQLSelectItem", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.db.sql.JetSQLValue", declaration: "<corelib>/core.db.sql.JetSQLValue", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.encoding.cbor.CBORError", declaration: "<corelib>/core.encoding.cbor.CBORError", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.encoding.cbor.CBORErrorKind", declaration: "<corelib>/core.encoding.cbor.CBORErrorKind", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.encoding.cbor.CBOROptions", declaration: "<corelib>/core.encoding.cbor.CBOROptions", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.encoding.DataEvent", declaration: "<corelib>/core.encoding.DataEvent", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.encoding.EncodingCause", declaration: "<corelib>/core.encoding.EncodingCause", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.encoding.EncodingError", declaration: "<corelib>/core.encoding.EncodingError", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.encoding.EncodingErrorKind", declaration: "<corelib>/core.encoding.EncodingErrorKind", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.encoding.EncodingFormat", declaration: "<corelib>/core.encoding.EncodingFormat", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.encoding.EncodingLimits", declaration: "<corelib>/core.encoding.EncodingLimits", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.encoding.xml.XMLCanonical", declaration: "<corelib>/core.encoding.xml.XMLCanonical", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.encoding.xml.XMLCanonicalMode", declaration: "<corelib>/core.encoding.xml.XMLCanonicalMode", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.encoding.xml.XMLEncoding", declaration: "<corelib>/core.encoding.xml.XMLEncoding", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.encoding.xml.XMLEntityPolicy", declaration: "<corelib>/core.encoding.xml.XMLEntityPolicy", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.encoding.xml.XMLError", declaration: "<corelib>/core.encoding.xml.XMLError", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.encoding.xml.XMLLexicalPolicy", declaration: "<corelib>/core.encoding.xml.XMLLexicalPolicy", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.encoding.xml.XMLLimits", declaration: "<corelib>/core.encoding.xml.XMLLimits", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.encoding.xml.XMLParseOptions", declaration: "<corelib>/core.encoding.xml.XMLParseOptions", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.encoding.xml.XMLReason", declaration: "<corelib>/core.encoding.xml.XMLReason", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.encoding.xml.XMLRenderOptions", declaration: "<corelib>/core.encoding.xml.XMLRenderOptions", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.http.Body", declaration: "<corelib>/core.http.Body", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.http.Header", declaration: "<corelib>/core.http.Header", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.http.Headers", declaration: "<corelib>/core.http.Headers", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.http.Query", declaration: "<corelib>/core.http.Query", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.jobs.JobError", declaration: "<corelib>/core.jobs.JobError", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.jobs.JobPayload", declaration: "<corelib>/core.jobs.JobPayload", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.jobs.JobQueue", declaration: "<corelib>/core.jobs.JobQueue", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.jobs.JobQueueClaim", declaration: "<corelib>/core.jobs.JobQueueClaim", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.jobs.JobQueueDeliveryPolicy", declaration: "<corelib>/core.jobs.JobQueueDeliveryPolicy", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.jobs.JobQueueEvent", declaration: "<corelib>/core.jobs.JobQueueEvent", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.jobs.JobQueueReceipt", declaration: "<corelib>/core.jobs.JobQueueReceipt", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.jobs.JobQueueRecord", declaration: "<corelib>/core.jobs.JobQueueRecord", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.jobs.JobQueueState", declaration: "<corelib>/core.jobs.JobQueueState", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.jobs.JobQueueStatus", declaration: "<corelib>/core.jobs.JobQueueStatus", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.jobs.JobResult", declaration: "<corelib>/core.jobs.JobResult", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.math.CameraDelta", declaration: "<corelib>/core.math.CameraDelta", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.math.CameraPoint", declaration: "<corelib>/core.math.CameraPoint", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.math.Complex", declaration: "<corelib>/core.math.Complex", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.math.Decimal", declaration: "<corelib>/core.math.Decimal", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.math.DeviceDelta", declaration: "<corelib>/core.math.DeviceDelta", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.math.DevicePoint", declaration: "<corelib>/core.math.DevicePoint", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.math.F64x4", declaration: "<corelib>/core.math.F64x4", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.math.Fraction", declaration: "<corelib>/core.math.Fraction", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.math.Mat3", declaration: "<corelib>/core.math.Mat3", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.math.Mat4", declaration: "<corelib>/core.math.Mat4", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.math.ScreenDelta", declaration: "<corelib>/core.math.ScreenDelta", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.math.ScreenPoint", declaration: "<corelib>/core.math.ScreenPoint", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.math.TransformError", declaration: "<corelib>/core.math.TransformError", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.math.Vec2", declaration: "<corelib>/core.math.Vec2", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.math.Vec3", declaration: "<corelib>/core.math.Vec3", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.math.Vec4", declaration: "<corelib>/core.math.Vec4", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.math.ViewDelta", declaration: "<corelib>/core.math.ViewDelta", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.math.ViewPoint", declaration: "<corelib>/core.math.ViewPoint", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.math.WorldDelta", declaration: "<corelib>/core.math.WorldDelta", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.math.WorldPoint", declaration: "<corelib>/core.math.WorldPoint", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.mod.ModError", declaration: "<corelib>/core.mod.ModError", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.net.mime.MIME", declaration: "<corelib>/core.net.mime.MIME", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.net.SRVRecord", declaration: "<corelib>/core.net.SRVRecord", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.net.url.URL", declaration: "<corelib>/core.net.url.URL", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.process.ProcessSignal", declaration: "<corelib>/core.process.ProcessSignal", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.service.DeliveryEvent", declaration: "<corelib>/core.service.DeliveryEvent", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.sync.RowPolicy", declaration: "<corelib>/core.sync.RowPolicy", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.testing.Fake", declaration: "<corelib>/core.testing.Fake", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.time.Clock", declaration: "<corelib>/core.time.Clock", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.time.DateTime", declaration: "<corelib>/core.time.DateTime", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.time.Instant", declaration: "<corelib>/core.time.Instant", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.time.LocalDate", declaration: "<corelib>/core.time.LocalDate", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.time.LocalTime", declaration: "<corelib>/core.time.LocalTime", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.time.Period", declaration: "<corelib>/core.time.Period", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.time.Stopwatch", declaration: "<corelib>/core.time.Stopwatch", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.time.TimeError", declaration: "<corelib>/core.time.TimeError", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.time.Zone", declaration: "<corelib>/core.time.Zone", arguments: ""},
-    IRNativeType{jet_name: "<corelib>/core.time.ZonedDateTime", declaration: "<corelib>/core.time.ZonedDateTime", arguments: ""},
-} }
-
-ir_native_type_keys: fn() -> [String] Never! {
-    loop row in IR_NATIVE_TYPES -> row.jet_name.copy()  // copy: the global native type table can't be moved from
-}
-
-IR_NATIVE_TYPE_KEY_ROWS: #run ir_key_index(ir_native_type_keys())
-
-IR_NATIVE_TYPE_KEYS: #run ir_key_index_keys(ir_native_type_keys(), IR_NATIVE_TYPE_KEY_ROWS)
-
-ir_native_type: fn(name: String) -> IRNativeType? {
-    position: ir_key_row(IR_NATIVE_TYPE_KEYS, IR_NATIVE_TYPE_KEY_ROWS, name) ?? return None
-    // copy: the caller gets an owned type row, while the row stays in the global IR_NATIVE_TYPES
-    // table, which can't be moved from.
-    Val(IR_NATIVE_TYPES[position].copy())
-}
-
 // The names a generated record row can be read by: a route carrier's
 // handle or tag, and its members'.
 ir_route_carrier_names: fn(carrier: IRRouteCarrier, out: ^[String]) Never! {
@@ -1894,12 +1588,12 @@ ir_route_carrier_names: fn(carrier: IRRouteCarrier, out: ^[String]) Never! {
 }
 
 // A Core declaration takes a runtime handle only through a row under its own
-// key: the generic Point2 has one, while the Group structs of core.data,
+// key: core.math's Fraction has one, while the Group structs of core.data,
 // core.sys and core.ui.xkb have none, so the bare `Group` row stays the task
 // group's alone.
 #Test("a Core declaration takes a runtime handle only through its own key") {
-    point: ir_runtime_handle("<corelib>/core.math.Point2") ?? panic("core.math's Point2 lost its handle")
-    assert_eq(point.runtime, "JetCoord2")
+    fraction: ir_runtime_handle("<corelib>/core.math.Fraction") ?? panic("core.math's Fraction lost its handle")
+    assert_eq(fraction.runtime, "JetFraction")
     assert(ir_runtime_handle("<corelib>/core.data.Group") == None)
     assert(ir_runtime_handle("<corelib>/core.sys.Group") == None)
     assert(ir_runtime_handle("<corelib>/core.ui.xkb.Group") == None)

@@ -1,0 +1,39 @@
+use compute: core.compute
+use random: core.math.random
+use service: core.service
+use sync: core.sync
+
+Hold: struct {
+    device: compute.ComputeDevice,
+    counter: sync.SyncCounter,
+    restart: service.ServiceRestart,
+    delivery: service.ServiceDelivery,
+    store: service.ServiceStateStore,
+}
+
+run: fn() {
+    device: compute.device_cpu()
+    print(device)
+    print("{device:Debug}")
+    text: sync.text_new("a", "hi")
+    print(text)
+    counter: sync.counter_new("a", 3)
+    print("{counter}")
+    map: sync.map_set(sync.map_new(), "k", "v")
+    print(map)
+    list: sync.list_push(sync.list_new(), "a", "x")
+    print("{list:Debug}")
+    print(service.ServiceRestart.OneForAll)
+    print("{service.delivery_durable()}")
+    runtime: service.runtime("store", retention: 1000ms)
+    print(runtime)
+    store: service.ServiceStateStore{path: "state"}
+    print(store)
+    rng: random.rng(7)
+    print(rng)
+    print("{rng:Debug}")
+    print([service.ServiceRestart]{.OneForOne, .RestForOne})
+    hold: Hold{device: device, counter: counter, restart: .OneForOne, delivery: service.delivery_at_most_once(), store: store}
+    print(hold)
+    print("{hold:Debug}")
+}

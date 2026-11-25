@@ -17,6 +17,7 @@ use jet_foundation.[
     Type,
     TypeTupleField,
     AST_EMPTY_CALL_ARG_FLAGS,
+    core_call_role_receiver,
     core_receiver_method,
     expr_source_span,
     expr_span,
@@ -25,6 +26,7 @@ use jet_foundation.[
     core_identity_in_module,
     module_text,
     module_is_core,
+    sema_casing_pascal_words,
 ]
 
 sema_dyn_type: fn() -> Type Never! { Type.Named{name: "Dyn"} }
@@ -436,9 +438,10 @@ sema_data_group_sum_numeric: fn(value: Type?) -> Bool Never! {
 // deferred carrier and only `collect` turns it back into a list. `group_by`
 // yields the internal `DataGroupedQuery<T, K>` carrier whose reducers return
 // `Query<Group<K, V>>`; keys and values keep the callback result types, never a
-// String/Float projection. Every call lowers onto its receiver Core row with
-// the receiver as the first argument. `Query.watch` and the `DataTracked` and
-// `DataWatch` methods are ordinary Core methods.
+// String/Float projection. Every call runs the Core function that fills its
+// role (sema_data_query_role), with the receiver as the first argument.
+// `Query.watch` and the `DataTracked` and `DataWatch` methods are ordinary
+// Core methods.
 sema_data_try_query_method: fn(receiver: Expr, receiver_value: TExpr, name: String, parameters: [Type], method: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
     receiver_type: sema_data_query_receiver(name, parameters, method)
     if receiver_type == "" -> return SemaMethodSpecialCheck{handled: false, value: None}
@@ -582,20 +585,30 @@ sema_data_try_query_method: fn(receiver: Expr, receiver_value: TExpr, name: Stri
         result_type = Type.Apply{name: query_name, args: [Type]{Type.Apply{name: sema_data_source_type_name(check, "Group"), args: [Type]{key, value_type}}}}
     }
     if !complete -> return SemaMethodSpecialCheck{handled: true, value: None}
-    record := core_receiver_method(receiver_type, method) ?? {
-        check.diagnostics.push(sema_error("E0003", span, "checked query method `{method}` has no canonical receiver Core row", "every checked query method lowers onto its receiver Core row", "repair the Core registry receiver rows"))
-        return SemaMethodSpecialCheck{handled: true, value: None}
-    }
-    // A grouped sum runs the source reducer of its value's numeric type.
-    if receiver_type == "DataGroupedQuery" && method == "sum" {
-        record.source_role = Val(sema_data_group_sum_role(sum_value))
-    }
-    // A filter passes its predicate as SQL before the predicate.
-    if receiver_type == "Query" && method == "filter" {
-        record.signature = CoreCallSignature{arity: 4, max_arity: 4, borrow_mask: [Bool]{true, true, true, false}}
-    }
+    role: sema_data_query_role(receiver_type, method, sum_value)
+    record: sema_data_role_record(receiver_type, method, role, call_type_args, span, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     value: sema_data_core_emit(record, "{receiver_type}.{method}", source_args, argument_types, typed, call_type_args, result_type, span, expected, check)
     SemaMethodSpecialCheck{handled: true, value: value}
+}
+
+// The jet_builtins role of the Core function a Query stage or grouped reducer
+// runs: the receiver's role prefix and then the method's words (`sort_by` is
+// QuerySortBy, a grouped `count` is GroupCount). A grouped sum runs the
+// reducer for its value's numeric type.
+sema_data_query_role: fn(receiver_type: String, method: String, sum_value: Type) -> String Never! {
+    if receiver_type == "Query" -> return "Query{sema_casing_pascal_words(method)}"
+    if method == "sum" -> return sema_data_group_sum_role(sum_value)
+    "Group{sema_casing_pascal_words(method)}"
+}
+
+// The checked record of `receiver_type`'s method `method` whose call runs the
+// Core function that fills `role`, instantiated with `type_args`. Each
+// argument is read or taken as that function's parameter declares.
+sema_data_role_record: fn(receiver_type: String, method: String, role: String, type_args: [Type], span: Span, check: ^SemaBodyCheck) -> CoreCallRecord? {
+    target: sema_call_core_role_target(role, type_args, span, check.environment.*, check.program.*, check.diagnostics) ?? return None
+    params: sema_call_params_from_type(target.signature) ?? return None
+    borrowed: loop param in params -> param.convention != AccessConvention.Move
+    Val(core_call_role_receiver(receiver_type, method, role, borrowed))
 }
 
 sema_data_event_time_callback: fn(method: String, element: Type, argument: CallArg, check: ^SemaBodyCheck) -> SemaDataQueryCallback {
@@ -646,25 +659,21 @@ sema_data_try_event_time_method: fn(receiver: Expr, receiver_value: TExpr, name:
     source_args := [CallArg]{CallArg{convention: AccessConvention.Move, expr: receiver, span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}}
     argument_types := [Type]{receiver_value.ty}
     typed := [TExpr]{receiver_value}
-    target := String?{None}
+    role := "StreamWithEventTime"
     callback: sema_data_event_time_callback(method, element, args[0], check)
     if !sema_data_query_push_argument(args[0], callback.value, source_args, argument_types, typed) {
         complete = false
     }
     if callback.result == .Val(stamp) {
         if sema_data_event_time_is_datetime(stamp) {
-            target = Val("StreamWithEventDatetime")
+            role = "StreamWithEventDatetime"
         } else if stamp != Type.Int {
             check.diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`with_event_time` wants the callback to return `Int` Unix seconds or a `DateTime`, but it returns {sema_type_show(stamp)}", "the result is the element's event time", "return the element's timestamp as Unix seconds or a `DateTime`"))
             complete = false
         }
     }
     if !complete -> return SemaMethodSpecialCheck{handled: true, value: None}
-    record := core_receiver_method("Stream", method) ?? {
-        check.diagnostics.push(sema_error("E0003", span, "event-time method `{method}` has no canonical receiver Core row", "every event-time stage lowers onto its receiver Core row", "repair the Core registry receiver rows"))
-        return SemaMethodSpecialCheck{handled: true, value: None}
-    }
-    if target == .Val(found) -> record.source_role = Val(found)
+    record: sema_data_role_record("Stream", method, role, [Type]{element}, span, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     result_type: Type.Apply{name: sema_data_source_type_name(check, "StreamEventTime"), args: [Type]{element}}
     value: sema_data_core_emit(record, "Stream.{method}", source_args, argument_types, typed, [Type]{element}, result_type, span, expected, check)
     SemaMethodSpecialCheck{handled: true, value: value}
@@ -806,7 +815,12 @@ sema_data_literal_expected: fn(ty: Type, variant: String) -> Type? {
 // list type, or a local of that type is handed over in list order; anything
 // else is a `[String: Dyn]` Map, which hands over its sorted order.
 sema_data_object_pairs_type: fn() -> Type Never! {
-    Type.List{element: Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "key", ty: Type.String}, TypeTupleField{name: "value", ty: sema_dyn_type()}}}}
+    Type.List{element: sema_data_object_pair_type()}
+}
+
+// One `{key, value}` entry of the object pair list.
+sema_data_object_pair_type: fn() -> Type Never! {
+    Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "key", ty: Type.String}, TypeTupleField{name: "value", ty: sema_dyn_type()}}}
 }
 
 sema_data_object_pairs_argument: fn(argument: Expr, scopes: SemaScopeTable) -> Bool {

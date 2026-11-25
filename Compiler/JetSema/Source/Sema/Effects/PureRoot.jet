@@ -27,11 +27,6 @@ SemaPureRootPosition: struct {
     function_index: Int,
 }
 
-sema_pure_root_position: fn(calls: SemaEffectCallIndex, places: [SemaPureRootPosition], key: String) -> SemaPureRootPosition? Never! {
-    at: sema_effect_node_index(calls.node_by_key, key) ?? return None
-    Val(places[at])
-}
-
 sema_pure_root_diagnostic: fn(root: String, call: String, path: [String], span: Span) -> Diagnostic {
     why: if path.len() == 0 -> "`{call}` is impure, but `{root}` declares `-[]>`" else -> "{path.join(" → ")} calls `{call}`, which is impure — the whole call chain must be pure inside `{root}`"
     chain := [String]{root}
@@ -43,12 +38,12 @@ sema_pure_root_diagnostic: fn(root: String, call: String, path: [String], span: 
     diagnostic_with_rights(sema_error("E3401", span, "`{root}` calls the impure function `{call}`", why, fix), "pure", chain, [String]{}, None)
 }
 
-sema_pure_root_expr: fn(root: String, modules: [SemaGraphModuleResult], decls: DeclTable, symbols: SymbolTable, places: [SemaPureRootPosition], calls: SemaEffectCallIndex, owner: FnBody, expression: Int, shallow: Bool, visited: ^[Bool], path: ^[String]) -> Diagnostic? Never! {
+// `module_index` is the module of `owner`, whose call facts the walk reads.
+sema_pure_root_expr: fn(root: String, modules: [SemaGraphModuleResult], decls: DeclTable, symbols: SymbolTable, places: [SemaPureRootPosition], calls: SemaEffectCallIndex, owner: FnBody, module_index: Int, expression: Int, shallow: Bool, visited: ^[Bool], path: ^[String]) -> Diagnostic? Never! {
     node: body_node(owner.tree, expression)
     pure_builtin := false
     if node.kind == .BuiltinMethod(_, op, _) -> pure_builtin = !sema_effect_builtin_may_have_effect(op)
     if !pure_builtin && sema_effect_is_call(node.kind) {
-        module_index: (sema_pure_root_position(calls, places, owner.key) ?? panic("a pure-root walk reached an unindexed function")).module_index
         // The call fact is read in place from its module (the call index
         // keeps positions in the same order as `call_facts`).
         fact: sema_effect_find_fact(calls, modules[module_index].call_facts, sema_effect_caller_slot(calls, module_index, owner.key), node.span)
@@ -61,10 +56,11 @@ sema_pure_root_expr: fn(root: String, modules: [SemaGraphModuleResult], decls: D
         if key == "" && node.kind == .Call(callee, _, _) {
             key = decl_table_key(decls, symbols, callee)
         }
-        if sema_pure_root_position(calls, places, key) == .Val(position) {
+        if sema_effect_node_index(calls.node_by_key, key) == .Val(callee_at) {
+            position: places[callee_at]
             callee_body: modules[position.module_index].functions[position.function_index]
             if !shallow {
-                found: sema_pure_root_function(root, modules, decls, symbols, places, calls, callee_body, true, shallow, visited, path)
+                found: sema_pure_root_function(root, modules, decls, symbols, places, calls, callee_body, callee_at, true, shallow, visited, path)
                 if found != None -> return found
             } else {
                 // A callee outside the checked modules (a Core body or
@@ -114,16 +110,16 @@ sema_pure_root_expr: fn(root: String, modules: [SemaGraphModuleResult], decls: D
         }
     }
     found := Diagnostic?{None}
-    body_each_expr_child(owner.tree, node, fn(child: Int) { sema_pure_root_visit(root, modules, decls, symbols, places, calls, owner, child, shallow, visited, path, found) })
+    body_each_expr_child(owner.tree, node, fn(child: Int) { sema_pure_root_visit(root, modules, decls, symbols, places, calls, owner, module_index, child, shallow, visited, path, found) })
     found
 }
 
 // One child of a pure-root walk; stops descending once a diagnostic is found.
 // The visitor closures stay expression-bodied: they only re-borrow the walk's
 // write parameters, the shape every other body child visitor uses.
-sema_pure_root_visit: fn(root: String, modules: [SemaGraphModuleResult], decls: DeclTable, symbols: SymbolTable, places: [SemaPureRootPosition], calls: SemaEffectCallIndex, owner: FnBody, child: Int, shallow: Bool, visited: ^[Bool], path: ^[String], found: ^Diagnostic?) Never! {
+sema_pure_root_visit: fn(root: String, modules: [SemaGraphModuleResult], decls: DeclTable, symbols: SymbolTable, places: [SemaPureRootPosition], calls: SemaEffectCallIndex, owner: FnBody, module_index: Int, child: Int, shallow: Bool, visited: ^[Bool], path: ^[String], found: ^Diagnostic?) Never! {
     if found == None {
-        found = sema_pure_root_expr(root, modules, decls, symbols, places, calls, owner, child, shallow, visited, path)
+        found = sema_pure_root_expr(root, modules, decls, symbols, places, calls, owner, module_index, child, shallow, visited, path)
     }
 }
 
@@ -132,22 +128,21 @@ sema_pure_root_visit: fn(root: String, modules: [SemaGraphModuleResult], decls: 
 // visitor closure's write captures (`visited`, `path`) end with this call: the
 // next iteration's closure and the `path.pop()` after the loop are not
 // rejected (E0499), because the walk is the last use of those parameters.
-sema_pure_root_statement: fn(root: String, modules: [SemaGraphModuleResult], decls: DeclTable, symbols: SymbolTable, places: [SemaPureRootPosition], calls: SemaEffectCallIndex, function: FnBody, statement: Int, shallow: Bool, visited: ^[Bool], path: ^[String]) -> Diagnostic? Never! {
+sema_pure_root_statement: fn(root: String, modules: [SemaGraphModuleResult], decls: DeclTable, symbols: SymbolTable, places: [SemaPureRootPosition], calls: SemaEffectCallIndex, function: FnBody, module_index: Int, statement: Int, shallow: Bool, visited: ^[Bool], path: ^[String]) -> Diagnostic? Never! {
     found := Diagnostic?{None}
-    body_each_stmt_child(function.tree, function.tree.stmts[statement], fn(expression: Int) { sema_pure_root_visit(root, modules, decls, symbols, places, calls, function, expression, shallow, visited, path, found) })
+    body_each_stmt_child(function.tree, function.tree.stmts[statement], fn(expression: Int) { sema_pure_root_visit(root, modules, decls, symbols, places, calls, function, module_index, expression, shallow, visited, path, found) })
     found
 }
 
-// `visited` marks the place (sema_pure_root_position) of each function key
-// the walk entered; every function it enters has one. Only the root is not
-// `nested`: every other function is entered from a call in a walked body.
-sema_pure_root_function: fn(root: String, modules: [SemaGraphModuleResult], decls: DeclTable, symbols: SymbolTable, places: [SemaPureRootPosition], calls: SemaEffectCallIndex, function: FnBody, nested: Bool, shallow: Bool, visited: ^[Bool], path: ^[String]) -> Diagnostic? Never! {
-    at: sema_effect_node_index(calls.node_by_key, function.key) ?? panic("a pure-root walk reached an unindexed function")
+// `at` is the function's row in `places`, which `visited` marks once the
+// walk enters it. Only the root is not `nested`: every other function is
+// entered from a call in a walked body.
+sema_pure_root_function: fn(root: String, modules: [SemaGraphModuleResult], decls: DeclTable, symbols: SymbolTable, places: [SemaPureRootPosition], calls: SemaEffectCallIndex, function: FnBody, at: Int, nested: Bool, shallow: Bool, visited: ^[Bool], path: ^[String]) -> Diagnostic? Never! {
     if visited[at] -> return None
     visited[at] = true
     if nested -> path.push(function.name)
     loop statement in function.body {
-        found: sema_pure_root_statement(root, modules, decls, symbols, places, calls, function, statement, shallow, visited, path)
+        found: sema_pure_root_statement(root, modules, decls, symbols, places, calls, function, places[at].module_index, statement, shallow, visited, path)
         if found != None -> return found
     }
     if nested -> _: path.pop()
@@ -179,9 +174,9 @@ sema_pure_root_find: fn(entry_key: String, modules: [SemaGraphModuleResult], dec
     }
     // One call index serves every module; each lookup names its module.
     calls: SemaEffectCallIndex{modules: loop module_row in modules -> sema_effect_module_calls(module_row.call_facts), node_by_key: node_by_key, interner: interner_empty()}
-    position: sema_pure_root_position(calls, places, entry_key) ?? return None
-    root: modules[position.module_index].functions[position.function_index]
+    at: sema_effect_node_index(calls.node_by_key, entry_key) ?? return None
+    root: modules[places[at].module_index].functions[places[at].function_index]
     visited := loop _ in places -> false
     path := [String]{}
-    sema_pure_root_function(root.name, modules, decls, symbols, places, calls, root, false, shallow, visited, path)
+    sema_pure_root_function(root.name, modules, decls, symbols, places, calls, root, at, false, shallow, visited, path)
 }

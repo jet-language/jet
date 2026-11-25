@@ -9151,7 +9151,8 @@ ir_comptime: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, value: TCom
             // A U64 beyond the exact-Int range keeps its decimal; its word
             // destination takes the bit pattern (ir_constant_u64_bits).
             if m.types[row].kind == .Word {
-                return ir_int_constant(m, b, row, ir_constant_u64_bits(decimal))
+                bits: ir_constant_u64_bits(decimal) ?? return ir_fail_slot(b, span, "U64 constant `{decimal}` that is not a decimal")
+                return ir_int_constant(m, b, row, bits)
             }
             slot: ir_fresh_temp(m, b, row)
             ir_emit(b.f, IROp.ConstBigInt, slot, ir_intern_name(m, decimal), -1, -1, b.line)

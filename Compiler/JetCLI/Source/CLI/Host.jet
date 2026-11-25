@@ -4745,11 +4745,11 @@ JET_CLI_COMPLETION_PROGRAM_MAX: 536870912
 JET_CLI_COMPLETION_READ_CHUNK: 16777216
 
 // `jet self completions <shell> --for <program>`: one non-blocking open
-// (compiler-private raw leaf `core.files.jet_std_files_open_reader_nonblocking`, so a FIFO never
+// (`core.files.open_nonblocking`, so a FIFO never
 // waits for a writer), then that same handle's metadata and a bounded read.
 // The program is never run.
 jet_cli_completion_program: fn(shell: String, program: String, name: String) -> JetCLIPlan {
-    reader := cli_files.jet_std_files_open_reader_nonblocking(program) ?? return jet_cli_program_completion_error(program, "the program could not be opened ({jet_cli_io_error_text(err)})")
+    reader := cli_files.open(program) ?? return jet_cli_program_completion_error(program, "the program could not be opened ({jet_cli_io_error_text(err)})")
     metadata: reader.stat() ?? return jet_cli_program_completion_error(program, "the opened program could not be inspected ({jet_cli_io_error_text(err)})")
     if !metadata.is_file {
         return jet_cli_program_completion_error(program, "the program is not a regular file")

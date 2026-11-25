@@ -588,7 +588,10 @@ ir_static_word: fn(m: ^IRModule, p: IRProgram, s: ^IRStaticBuild, ty: Type, row:
             return Val(IRStaticWord{word: 0, target: ir_intern_text(m, text), text: true})
         }
         .BigInt(decimal) -> {
-            if kind == .Word -> return Val(IRStaticWord{word: ir_constant_u64_bits(decimal)})
+            if kind == .Word {
+                bits: ir_constant_u64_bits(decimal) ?? return None
+                return Val(IRStaticWord{word: bits})
+            }
             if kind != .Int -> return None
             number: Int.parse(decimal) ?? return None
             if ir_int_inline(number) -> return Val(IRStaticWord{word: number})

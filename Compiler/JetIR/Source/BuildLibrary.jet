@@ -1129,14 +1129,14 @@ ir_export_native_type: fn(ty: Type) -> String? Never! {
 // primitive or void result. Every problem of the signature is listed. Sema
 // refuses every export that can fail (E3203: sema_guest_check_surfaces for
 // a declared carrier, sema_guest_check_export_failures for an inferred one),
-// so a carrier here is a compiler defect.
+// so the build lists a carrier only if a refusal was missed.
 ir_export_signature_problems: fn(function: FnBody) -> [String] Never! {
     problems := [String]{}
     if !ir_top_level(function) || function.generic_params.len() != 0 {
         problems.push("is not a monomorphic top-level function")
     }
     if !ir_infallible(function) {
-        panic("checked C export `{function.name}` has a failure carrier; sema refuses it with E3203")
+        problems.push("has a failure carrier; a C export cannot fail")
     }
     loop param in function.params {
         if param.convention == AccessConvention.Write {

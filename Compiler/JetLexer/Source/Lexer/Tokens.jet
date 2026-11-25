@@ -99,6 +99,20 @@ token_synthetic: fn(kind: Int, span: Span) -> Token Never! {
     Token{kind: kind, span: span, text: name_empty(), decoded: name_empty(), literal: -1}
 }
 
+// An accepted authored `;` lands as the zero-width terminator a
+// line break leaves, at the `;` itself, marked by literal -2 so the parser
+// can tell it from a line break's with no source at hand.
+token_authored_semicolon: fn(at: Int) -> Token Never! {
+    Token{kind: TOKEN_SEMI, span: Span{start: at, end: at}, text: name_empty(), decoded: name_empty(), literal: -2}
+}
+
+// Whether `token` is an authored `;`: an accepted one (above), or the
+// full-width `;` of a source lexed with no terminator pass (an interpolation
+// hole).
+token_is_authored_semicolon: fn(token: Token) -> Bool Never! {
+    token.kind == TOKEN_SEMI && (token.literal == -2 || token.span.start < token.span.end)
+}
+
 token_text: fn(tables: TokenTables, token: Token) -> String Never! {
     name_text(tables.names, token.text)
 }

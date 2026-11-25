@@ -15,11 +15,9 @@ typedef struct { int64_t length,capacity; unsigned char *data; } Bytes;
 typedef struct { int64_t kind,limit; Text *operation; } WsError;
 typedef struct { int64_t kind; union { Text *text; Bytes *bytes; int64_t code; } payload; Text *reason; } Message;
 typedef struct { int64_t kind; Text *reason; } Failure;
-typedef struct { double lanes[4]; } Lane;
 _Static_assert(sizeof(WsError)==24 && offsetof(WsError,operation)==16,"WsABI error");
 _Static_assert(sizeof(Message)==24 && offsetof(Message,reason)==16,"WsABI message");
 _Static_assert(sizeof(Failure)==16 && offsetof(Failure,reason)==8,"CoreEnumABI TASK_FAILURE");
-_Static_assert(sizeof(Lane)==32,"SimdLaneABI");
 extern void jet_rt_alloc_init(void);
 extern void *jet_rt_alloc(int64_t,int64_t);
 extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
@@ -55,12 +53,6 @@ extern bool jet_rt_handle_eq_jet_task_failure(Failure *,Failure *);
 extern Text *jet_rt_handle_show_jet_task_failure(Failure *);
 extern Text *jet_rt_handle_debug_jet_task_failure(Failure *);
 extern Text *jet_rt_handle_display_jet_task_failure(Failure *);
-extern Lane *jet_rt_handle_clone_f64x4(Lane *);
-extern void jet_rt_handle_drop_f64x4(Lane *);
-extern bool jet_rt_handle_eq_f64x4(Lane *,Lane *);
-extern Text *jet_rt_handle_show_f64x4(Lane *);
-extern Text *jet_rt_handle_debug_f64x4(Lane *);
-extern Text *jet_rt_handle_display_f64x4(Lane *);
 static struct { void *pointer; int64_t size,align; unsigned frees; } watched[32];
 static size_t count;
 static unsigned intercepted;
@@ -153,20 +145,6 @@ static void failure_cases(void) {
     }
     jet_rt_handle_drop_jet_task_failure(NULL);
 }
-static Lane *lane(const uint64_t bits[4]) { Lane *result=jet_rt_alloc(32,8);memcpy(result->lanes,bits,32);return result; }
-static void lane_cases(void) {
-    const uint64_t words[]={0,UINT64_C(0x8000000000000000),UINT64_C(0x7ff8000000000001),UINT64_C(0x7ff0000000000000)};
-    Lane *a=lane(words),*b=jet_rt_handle_clone_f64x4(a);assert(a!=b && memcmp(a,b,32)==0 && !jet_rt_handle_eq_f64x4(a,a) && !jet_rt_handle_eq_f64x4(a,b));
-    // Exact pinned rustc debug_tuple/array oracle.
-    expect(jet_rt_handle_debug_f64x4(a),"F64x4([0.0, -0.0, NaN, inf])");
-    watch(a,32,8);watch(b,32,8);unsigned before=intercepted;jet_rt_handle_drop_f64x4(a);jet_rt_handle_drop_f64x4(b);freed(before);
-    a=jet_rt_alloc(32,8);a->lanes[0]=1.25;a->lanes[1]=1e-5;a->lanes[2]=1e20;a->lanes[3]=-1e-10;b=jet_rt_handle_clone_f64x4(a);
-    assert(jet_rt_handle_eq_f64x4(a,a) && jet_rt_handle_eq_f64x4(a,b));
-    expect(jet_rt_handle_show_f64x4(a),"F64x4([1.25, 1e-5, 1e20, -1e-10])");expect(jet_rt_handle_display_f64x4(a),"F64x4([1.25, 1e-5, 1e20, -1e-10])");
-    for(size_t i=0;i<4;++i) { double old=b->lanes[i];b->lanes[i]=2.0;assert(!jet_rt_handle_eq_f64x4(a,b));b->lanes[i]=old; }
-    a->lanes[0]=0.0;b->lanes[0]=-0.0;assert(jet_rt_handle_eq_f64x4(a,b));
-    watch(a,32,8);watch(b,32,8);before=intercepted;jet_rt_handle_drop_f64x4(a);jet_rt_handle_drop_f64x4(b);freed(before);jet_rt_handle_drop_f64x4(NULL);
-}
 int main(int argc,char **argv) {
     assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init();
@@ -174,5 +152,5 @@ int main(int argc,char **argv) {
     const char *env[]={"invalid environment variable name","invalid environment variable value","environment contains a name or value that is not valid Unicode"},*status[]={"Running","Paused","CancelRequested"};
     unit_cases(env,3,jet_rt_handle_clone_env_error,jet_rt_handle_drop_env_error,jet_rt_handle_eq_env_error,jet_rt_handle_show_env_error,jet_rt_handle_debug_env_error,jet_rt_handle_display_env_error);
     unit_cases(status,3,jet_rt_handle_clone_jet_task_status,jet_rt_handle_drop_jet_task_status,jet_rt_handle_eq_jet_task_status,jet_rt_handle_show_jet_task_status,jet_rt_handle_debug_jet_task_status,jet_rt_handle_display_jet_task_status);
-    ws_error_cases();ws_message_cases();failure_cases();lane_cases();puts("handle-families witness OK");return 0;
+    ws_error_cases();ws_message_cases();failure_cases();puts("handle-families witness OK");return 0;
 }

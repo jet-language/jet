@@ -353,7 +353,11 @@ jet_eval_ir_type_handle: fn(types: ^IRModule, p: IRProgram, s: ^JetEvalIRState, 
         jet_eval_ir_host_unwritable(s, value, ir_row_ty(types, p, row))
         return None
     }
-    address: jet_eval_native_alloc(s, ir_struct_size(types, members), 8) ?? return None
+    size: ir_struct_size(types, members) ?? {
+        jet_eval_ir_host_unwritable(s, value, ir_row_ty(types, p, row))
+        return None
+    }
+    address: jet_eval_native_alloc(s, size, 8) ?? return None
     name_column_set(s.type_row_keys, s.type_rows, key, address)
     if !jet_eval_ir_host_fill(types, p, s, value, row, address) -> return None
     Val(address)

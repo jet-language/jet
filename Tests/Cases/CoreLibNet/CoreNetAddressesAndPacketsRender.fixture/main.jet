@@ -1,0 +1,34 @@
+use net: core.net
+
+Peer: struct {
+    name: String,
+    addr: net.SocketAddr,
+}
+
+run: fn() -[IO, Net, Time.Wait]> {
+    v4: net.socket_addr_parse("127.0.0.1:8080") ?? panic("v4")
+    v6: net.socket_addr_parse("[::1]:443") ?? panic("v6")
+    print(v4)
+    print("{v6}")
+    print("{v4:Debug}")
+    print("{v4.host} {v4.port}")
+    print([net.SocketAddr]{v4, v6})
+    print("{[net.SocketAddr]{v4, v6}:Debug}")
+    found: net.SocketAddr?{Val(v6)}
+    print("{found}")
+    peer: Peer{name: "local", addr: v4}
+    print(peer)
+    print("{peer:Debug}")
+    // The sender's port is the kernel's pick, so the packet lines check the
+    // text up to it.
+    receiver: net.udp_bind_addr(net.socket_addr_parse("127.0.0.1:0") ?? panic("receiver address")) ?? panic("receiver bind")
+    target: net.udp_local_addr(receiver) ?? panic("local address")
+    sender: net.udp_bind_addr(net.socket_addr_parse("127.0.0.1:0") ?? panic("sender address")) ?? panic("sender bind")
+    _: net.udp_send_bytes_to(sender, [U8]{65, 66, 67}, target) ?? panic("send")
+    packet: net.udp_receive(receiver, 16) ?? panic("receive")
+    from: "UDPPacket(3 bytes from 127.0.0.1:"
+    print("{packet}".starts_with(from))
+    print("{packet:Debug}".starts_with(from))
+    print("{[net.UDPPacket]{packet}}".starts_with("[{from}"))
+    print("{packet.host} {packet.data.len()} {packet.truncated}")
+}

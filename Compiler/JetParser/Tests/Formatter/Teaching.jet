@@ -10,9 +10,7 @@ use {
 
 #Test("each parse diagnostic fmt repairs has its rewrite sentence in the spec") {
     sentences: [[String]]{
-        {"E0080", "arrow reports **E0080**; `jet fmt` rewrites it to `{{ expr }}`"},
         {"E0082", "are E0082, whose Safe edit\ninserts the parentheses precedence already implies"},
-        {"E0373", "canonical: E0373 supplies the behavior-preserving line-break or end-of-line\nfix."},
         {"E0386", "E0386, a registered diagnostic\nwith a machine-applicable fixit, inserts the grouping the desugar already uses."},
         {"E0992", "`if subject {{ arm -> … }}` is E0992, auto-fixed)."},
         {"E0999", "A one-item list or adjacent bare stack is E0999 with\nthe canonical rewrite. `jet fmt` performs that rewrite and preserves order."},
@@ -45,18 +43,29 @@ use {
 
 // A parse error with no ratified fmt fix leaves the source as written: a
 // field's `priv(package)` (E0417), a comma before a loop guard (E0379), a
-// dotless variant pattern (E0367). A lex error, such as a `->` split from
-// its `)` (E0986), refuses before the parse.
+// dotless variant pattern (E0367), a named function body after an arrow
+// (E0080), whose result type only the author can write. A lex error, such as
+// a `->` split from its `)` (E0986), refuses before the parse.
 #Test("a format refuses a parse error with no ratified fix") {
     refused: [String]{
         "S: struct {{\n    priv(package) value: Int,\n}}\n",
         "run: fn() {{\n    values: loop u in [1, 2, 3], if u > 1 -> u\n    print(values)\n}}\n",
         "run: fn() {{\n    x: 1\n    if x == {{\n        A(v) -> print(v)\n        else -> print(0)\n    }}\n}}\n",
         "f: fn()\n-> Int {{\n    1\n}}\n",
+        "double: fn(value: Int) -> Int -> value * 2\n",
+        "sq: fn(n: Int) -> n * n\n",
     }
     loop source in refused {
         formatted: jet_format_source(source, false)
         assert(!formatted.ok, "fmt rewrote {source}")
         assert(formatted.diagnostics.len() > 0)
     }
+}
+
+// A result type touching the body's `{` ends at it, so a format keeps the
+// result and writes the space.
+#Test("a format keeps a result type that touches the body brace") {
+    formatted: jet_format_source("sq: fn(n: Int) -> Int{{n * n}}\n", false)
+    assert(formatted.ok)
+    assert_eq(formatted.text, "sq: fn(n: Int) -> Int {{ n * n }}\n")
 }

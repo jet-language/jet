@@ -69,28 +69,13 @@ pc_binding_values: fn(parsed: ParseResult) -> [Int] {
     values
 }
 
-pc_semicolon: fn(source: String, replacement: String) {
+// A `;` between statements is a line break, so the source
+// parses with no report and binds what the same lines would.
+pc_semicolon: fn(source: String) {
     parsed: parse_source(source.bytes())
-    pc_require(parsed.diagnostics.len() == 1, "one diagnostic for all semicolons in one file")
-    diagnostic: parsed.diagnostics[0]
-    pc_require(diagnostic.code == "E0373", "registered semicolon diagnostic")
-    edit: diagnostic.edit ?? panic("E0373 has no edit")
-    pc_require(edit.new_text == replacement, "behavior-preserving newline/removal edit")
-    pc_require(source.slice(edit.span.start, edit.span.end) == ";", "edit covers only the authored semicolon")
-    pc_require(pc_binding_names(parsed) == [String]{"first", "second", "third"}, "parser resumes at every next statement")
-    pc_require(pc_binding_values(parsed) == [Int]{1, 2, 3}, "recovered statements keep their original values")
-    // Apply the one-per-file repair repeatedly; no boundary may swallow a name.
-    repaired := source
-    loop _ in 0..<3 {
-        checked: parse_source(repaired.bytes())
-        if checked.diagnostics.len() == 0 -> break
-        repair: checked.diagnostics[0].edit ?? panic("repair lost its edit")
-        repaired = "{repaired.slice(0, repair.span.start)}{repair.new_text}{repaired.slice(repair.span.end, repaired.len())}"
-    }
-    checked: parse_source(repaired.bytes())
-    pc_require(checked.diagnostics.len() == 0, "all suggested repairs parse canonically")
-    pc_require(pc_binding_names(checked) == pc_binding_names(parsed), "repair preserves statement order and bindings")
-    pc_require(pc_binding_values(checked) == pc_binding_values(parsed), "repair preserves values as well as boundaries")
+    pc_require(parsed.diagnostics.len() == 0, "a semicolon between statements is a line break")
+    pc_require(pc_binding_names(parsed) == [String]{"first", "second", "third"}, "each semicolon ends its statement")
+    pc_require(pc_binding_values(parsed) == [Int]{1, 2, 3}, "statements keep their values")
 }
 
 pc_module_markers: fn() {
@@ -451,8 +436,8 @@ pc_allow_and_fact_roots: fn() {
 run: fn() {
     canonical: parse_source("run: fn() {{\n values: [JSON]{{JSON.Null}}\n print(values.len())\n}}\n".bytes())
     pc_require(canonical.diagnostics.len() == 0, "canonical newline collection consumer")
-    pc_semicolon("run: fn() {{ first: 1; second: 2; third: 3\n}}\n", "\n")
-    pc_semicolon("run: fn() {{\n first: 1;\n second: 2;\n third: 3\n}}\n", "")
+    pc_semicolon("run: fn() {{ first: 1; second: 2; third: 3\n}}\n")
+    pc_semicolon("run: fn() {{\n first: 1;\n second: 2;;\n third: 3;\n}}\n")
     pc_module_markers()
     pc_named_struct_pattern_rhs()
     pc_lexical_and_parser_diagnostics()

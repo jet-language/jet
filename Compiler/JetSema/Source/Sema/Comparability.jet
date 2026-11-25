@@ -17,6 +17,7 @@ use jet_foundation.[
     Item,
     TraitImplBlock,
     IR_RUNTIME_HANDLES,
+    ir_handle_laid_opaque,
     ir_runtime_handle_row,
     diagnostic_registry_with_edit_grade,
     owned_trait_implies,
@@ -223,8 +224,7 @@ sema_comparability_auto_blocked_named: fn(graph: SemaRegistrationGraph, module_i
     // A Core type renders through the library's own forms, except a runtime
     // handle registered under its declaration key that has none.
     if trait_name != "Equatable" && module_is_core(resolved.target_module_identity) {
-        key: "{module_text(graph.module_table, resolved.target_module_identity)}.{sema_resolved_name(graph, resolved)}"
-        return sema_comparability_core_handle_unrendered(graph, module_identity, ty, ir_runtime_handle_row(key) ?? return false, trait_name)
+        return sema_comparability_core_declaration_unrendered(graph, module_identity, ty, resolved, trait_name)
     }
     row: sema_type_graph_resolved_nominal_row(graph, resolved) ?? return false
     if !sema_comparability_first_visit(visited, row.module_index, row.row) -> return false
@@ -294,23 +294,34 @@ sema_comparability_handle_without_eq: fn(name: String) -> Bool Never! {
 
 // The Core runtime handle (`FileReader`) at IR_RUNTIME_HANDLES row `row`, a
 // row keyed by its Core declaration, that no tier renders for `trait_name`,
-// `Printable` or `Debug`: its registration has no such form and the library
+// `Printable` or `Debug`: the IR lays it out as the runtime's opaque handle
+// (ir_handle_laid_opaque), its registration has no such form and the library
 // neither shows it nor implements the trait. Nothing holding one derives it.
-// A Core declaration a bare table row also names (`UIAccessibility`) renders
-// as its declared shape.
+// A handle whose declaration keeps its declared shape (a record schema, a
+// native type row, a Core source declaration: `EncodingLimits`) renders as
+// that shape, and so does a Core declaration a bare table row also names
+// (`UIAccessibility`).
 sema_comparability_core_handle_unrendered: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, ty: Type, row: Int, trait_name: String) -> Bool Never! {
     handle: IR_RUNTIME_HANDLES[row]
+    if !ir_handle_laid_opaque(handle, handle.jet_name, handle.jet_name, true) -> return false
     name: handle.jet_name
     leaf: symbol_key_leaf(name)
     if trait_name == "Debug" {
         if handle.debug -> return false
     } else {
         if handle.display || handle.show -> return false
-        if sema_call_reflection_synthetic_printable(name) -> return false
         if sema_type_bound_satisfied(graph, ty, "Display", module_identity) == (Val(true)) -> return false
     }
     if sema_call_reflection_core_shown(name) || sema_derive_builtin_supports(leaf, trait_name) -> return false
     sema_type_bound_satisfied(graph, ty, trait_name, module_identity) != (Val(true))
+}
+
+// sema_comparability_core_handle_unrendered for the Core declaration
+// `resolved`, by the handle row its declaration key registers; false when it
+// registers none.
+sema_comparability_core_declaration_unrendered: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, ty: Type, resolved: SemaRegistrationResolvedSymbol, trait_name: String) -> Bool Never! {
+    key: "{module_text(graph.module_table, resolved.target_module_identity)}.{sema_resolved_name(graph, resolved)}"
+    sema_comparability_core_handle_unrendered(graph, module_identity, ty, ir_runtime_handle_row(key) ?? return false, trait_name)
 }
 
 // The IR_RUNTIME_HANDLES row keyed by the Core declaration named `name`

@@ -267,25 +267,21 @@ sema_schema_unknown: fn(name: String, field: String, verb: String, span: Span) -
     sema_error("E0910", span, "the `{verb} {field}` migration on `{name}` names a field that doesn't exist", "a migration op must reference a field of this record — either its published shape or its current one", "check the spelling of `{field}`, or remove the `{verb}` op")
 }
 
+// Enters module `module_index` in the pass's scope environment; with none
+// there is no module scope to enter.
 sema_schema_enter_registered_module: fn(environment: ^SemaScopeEnvironment?, program: SemaProgramTables, module_index: Int) Never! {
     if ^environment == .Val(scope) {
         sema_scope_environment_enter_module(scope, program, module_index, SemaComptimeBodyValues{})
-        return
     }
-    panic("an owning schema pass lost its scope environment")
 }
 
 sema_schema_check_registered_module: fn(environment: SemaScopeEnvironment?, program: SemaProgramTables, module_index: Int, snapshots: [String:SchemaSnapshot], diagnostics: ^[Diagnostic]) Never! {
-    if environment != None {
-        graph: program.registration_graph
-        start: diagnostics.len()
-        loop diagnostic in check_schema_migrations(graph.modules[module_index].program.items, snapshots, environment, program) {
-            diagnostics.push(diagnostic)
-        }
-        sema_attach_diagnostic_source_locations(diagnostics, start, graph.modules[module_index].source_segments)
-        return
+    graph: program.registration_graph
+    start: diagnostics.len()
+    loop diagnostic in check_schema_migrations(graph.modules[module_index].program.items, snapshots, environment, program) {
+        diagnostics.push(diagnostic)
     }
-    panic("an owning schema pass lost its registration graph")
+    sema_attach_diagnostic_source_locations(diagnostics, start, graph.modules[module_index].source_segments)
 }
 
 // Module entry borrows the schema pass's one program graph; it only replaces

@@ -1,0 +1,17 @@
+Error: Jet.PrivateItem: `host` is private to its module
+  --> Tests/UI/NetAddressLiteralIsPrivate/run.jet:8:26
+    |
+  8 |     addr: net.SocketAddr{host: "127.0.0.1", port: 8080}
+    |                          ^^^^
+ Why: A `priv module` is usable only by its enclosing module (`priv(package)`: by its package), and a `priv` field only by its type's module
+ Fix: Use `host` from inside its module, or remove `priv` from its module or field
+More: jet-lang.dev/e/Jet.PrivateItem
+
+Error: Jet.PrivateItem: `UDPPacket` can't be built here: its field `addr` is private to its module
+  --> Tests/UI/NetAddressLiteralIsPrivate/run.jet:9:13
+    |
+  9 |     packet: net.UDPPacket{data: [U8]{1}, host: "127.0.0.1", port: 53, original_len: 1, truncated: false}
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ Why: A `priv module` is usable only by its enclosing module (`priv(package)`: by its package), and a `priv` field only by its type's module
+ Fix: Get a `UDPPacket` from a function of its module, or remove `priv` from `addr`
+More: jet-lang.dev/e/Jet.PrivateItem

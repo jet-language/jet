@@ -532,7 +532,10 @@ lex_payload_from_facts_range: fn(source: [U8], facts: [Int], events: [Int], conf
     event_index := 0
     source_len: source.len()
     loop index < fact_count {
+        // An authored `;` lands as its terminator event, never as itself.
+        taken := false
         if event_index < event_count && events[event_index * 3 + 1] == index {
+            taken = terminator_events_take_fact(events, event_index, index)
             event_index = terminator_events_apply(facts, events, event_index, index, tokens, terminator_diagnostics)
         }
         base: index * 4
@@ -555,6 +558,7 @@ lex_payload_from_facts_range: fn(source: [U8], facts: [Int], events: [Int], conf
             }
         }
         if {
+            taken -> {}
             fixed_spelling_kind(kind) -> {
                 text: intern_token_source(tables, kind, source, start, end)
                 tokens.push(Token{kind: kind, span: Span{start: start, end: end}, text: text, decoded: text, literal: -1})

@@ -391,7 +391,7 @@ build_stream_file_digest: fn(base: String, path: String, limit: Int, *, shown: S
     directory: build_held_parent(base, parts) ?? return Err(err)
     name: parts[parts.len() - 1]
     entry: build_regular_entry(directory, name, limit, shown: label) ?? return Err(err)
-    reader := files.jet_std_files_open_reader_nonblocking(files.join(directory.path, name)) ?? return Err(BuildIOError.from(err))
+    reader := files.open(files.join(directory.path, name)) ?? return Err(BuildIOError.from(err))
     info: reader.stat() ?? return Err(BuildIOError.from(err))
     if !info.is_file {
         return Err(BuildIOError.new(.PermissionDenied, "cache entry is not a regular file"))
@@ -446,7 +446,7 @@ build_secure_read_file: fn(base: String, path: String, limit: Int) -[FS]> [U8] B
     directory: build_held_parent(base, parts) ?? return Err(err)
     name: parts[parts.len() - 1]
     entry: build_regular_entry(directory, name, limit, shown: path) ?? return Err(err)
-    reader := files.jet_std_files_open_reader_nonblocking(files.join(directory.path, name)) ?? return Err(BuildIOError.from(err))
+    reader := files.open(files.join(directory.path, name)) ?? return Err(BuildIOError.from(err))
     info: reader.stat() ?? return Err(BuildIOError.from(err))
     if !info.is_file {
         return Err(BuildIOError.new(.PermissionDenied, "cache entry is not a regular file"))
@@ -554,7 +554,7 @@ build_atomic_stream_copy: fn(work: String, from: String, base: String, path: Str
     source_name: source_parts[source_parts.len() - 1]
     label: if shown != "" -> shown else -> from
     entry: build_regular_entry(source_dir, source_name, limit, shown: label) ?? return Err(err)
-    reader := files.jet_std_files_open_reader_nonblocking(files.join(source_dir.path, source_name)) ?? return Err(BuildIOError.from(err))
+    reader := files.open(files.join(source_dir.path, source_name)) ?? return Err(BuildIOError.from(err))
     info: reader.stat() ?? return Err(BuildIOError.from(err))
     if !info.is_file {
         return Err(BuildIOError.new(.PermissionDenied, "cache entry is not a regular file"))

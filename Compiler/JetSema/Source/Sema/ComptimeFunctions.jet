@@ -559,8 +559,7 @@ sema_check_comptime_function: fn(graph: SemaRegistrationGraph, environment: ^Sem
             conversions.push(bodies.pop() ?? break)
         }
         conversions.reverse()
-        function := bodies.pop() ?? panic("a checked body lost its function")
-        checked.value = Val(function.move())
+        checked.value = bodies.pop()
     }
     // This body runs while building, but it is checked as the run-time code
     // it also is, so its calls of a `#Runtime(.Only)` function are refused

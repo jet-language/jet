@@ -1,6 +1,6 @@
 // Complete checked top-level functions into backend-neutral IR.
 use {
-    jet_foundation.[AccessConvention, Interner, CORE_CALLS, CallablePolicy, CallablePolicyChain, CoreCallRecord, CoreCapabilityContract, CoreMarkerApplication, FunctionCallMetadata, FunctionDefaultRef, AuthorityDecision, ModuleID, NameVisibility, Span, TEffectFacts, TEffectSpan, TFailureCarrier, FnBody, TFuncKind, TGenericParam, BodyLambda, BodyParameter, TWebParamReconstruction, Type, body_tree_new, core_call_key, type_identity_key, body_type]
+    jet_foundation.[AccessConvention, Interner, CORE_CALLS, CallablePolicy, CallablePolicyChain, CoreCallRecord, CoreCapabilityContract, FunctionCallMetadata, FunctionDefaultRef, AuthorityDecision, ModuleID, NameVisibility, Span, TEffectFacts, TEffectSpan, TFailureCarrier, FnBody, TFuncKind, TGenericParam, BodyLambda, BodyParameter, TWebParamReconstruction, Type, body_tree_new, core_call_key, type_identity_key, body_type]
     jet_sema.[
         SemaComptimeItemRequest,
     ]
@@ -56,16 +56,6 @@ ir_bool_rows_equal: fn(left: [Bool], right: [Bool]) -> Bool Never! {
     true
 }
 
-ir_core_markers_equal: fn(left: CoreMarkerApplication?, right: CoreMarkerApplication?) -> Bool Never! {
-    if left == {
-        None -> right == None
-        Val(first) -> if right == {
-            None -> false
-            Val(second) -> first.member == second.member && first.since == second.since && first.replacement == second.replacement && first.removed_in == second.removed_in
-        }
-    }
-}
-
 ir_core_capability_equal: fn(left: CoreCapabilityContract, right: CoreCapabilityContract) -> Bool Never! {
     left.kind == right.kind && left.provider == right.provider && left.fallback == right.fallback && left.failure == right.failure
 }
@@ -91,30 +81,26 @@ ir_core_records_match: fn(left: CoreCallRecord, right: CoreCallRecord) -> Bool N
     if left.pure_route != right.pure_route || left.symbol != right.symbol -> return false
     if left.coverage.bits != right.coverage.bits || left.aot_direct != right.aot_direct -> return false
     if !ir_core_capability_equal(left.capability, right.capability) -> return false
-    ir_authority_decisions_equal(left.authority, right.authority) && ir_core_markers_equal(left.marker, right.marker)
+    ir_authority_decisions_equal(left.authority, right.authority)
 }
 
-ir_canonical_core_record: fn(record: CoreCallRecord) -> CoreCallRecord Never! {
+ir_canonical_core_record: fn(record: CoreCallRecord) -> CoreCallRecord? Never! {
     ir_canonical_core_record_in(CORE_CALLS, record)
 }
 
 // The registry is a read parameter, so the scan reads its rows in place.
 // CORE_CALLS holds one row per key (core_call_rows), so the scan stops at
-// the first.
-ir_canonical_core_record_in: fn(rows: [CoreCallRecord], record: CoreCallRecord) -> CoreCallRecord Never! {
+// the first. None when no row has the record's key or its row disagrees
+// with the record.
+ir_canonical_core_record_in: fn(rows: [CoreCallRecord], record: CoreCallRecord) -> CoreCallRecord? Never! {
     key := core_call_key(record)
-    found := CoreCallRecord?{None}
     loop candidate in rows {
         if core_call_key(candidate) == key {
-            found = Val(candidate)
-            break
+            if !ir_core_records_match(candidate, record) -> return None
+            return Val(candidate)
         }
     }
-    canonical: found ?? panic("checked Core-call record is absent from the canonical registry")
-    if !ir_core_records_match(canonical, record) {
-        panic("checked Core-call metadata disagrees with the canonical registry")
-    }
-    canonical
+    None
 }
 
 ir_lambda_function_type: fn(lambda: BodyLambda) -> Type Never! {

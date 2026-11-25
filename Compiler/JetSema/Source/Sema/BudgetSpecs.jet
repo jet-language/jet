@@ -449,6 +449,7 @@ sema_budget_fail: fn(diagnostic: Diagnostic) -> BudgetSpecError Never! {
 sema_budget_elaborate: fn(role: String, entry: BudgetDecl, workloads: [String:CompileWorkloadFact]) -> BudgetSpec BudgetSpecError! {
     span: entry.span
     map := [String:BudgetFieldEntry]{}
+    field_spans := [String:Span]{}
     loop field in entry.fields {
         if !BUDGET_SPEC_FIELDS.contains(field.name) {
             return Err(sema_budget_fail(sema_budget_invalid("entry", "`{field.name}` is not a Budget field", "use one of: {BUDGET_SPEC_FIELDS.join(", ")}", field.name_span)))
@@ -457,6 +458,7 @@ sema_budget_elaborate: fn(role: String, entry: BudgetDecl, workloads: [String:Co
             return Err(sema_budget_fail(sema_budget_invalid("entry", "`{field.name}` is written more than once", "keep one value for this field", field.name_span)))
         }
         map[field.name] = BudgetFieldEntry{value: field.value, span: field.name_span}
+        field_spans[field.name] = field.name_span
     }
     name_entry: sema_budget_required(map, "name", span)
     name: sema_budget_string_value(name_entry.value) ?? return Err(sema_budget_fail(sema_budget_invalid("entry", "`name` must be constant quoted text", "write `name: \"lowercase-kebab-name\"`", expr_span(name_entry.value))))
@@ -545,10 +547,6 @@ sema_budget_elaborate: fn(role: String, entry: BudgetDecl, workloads: [String:Co
         }
     }
     sema_budget_validate_scope_provider_pair(name, metric_variant, scope, provider, span)
-    field_spans := [String:Span]{}
-    loop key in map.keys() {
-        field_spans[key] = (map.get(key) ?? panic("written budget field")).span
-    }
     Ok(
         BudgetSpec{
             role: role,
@@ -996,7 +994,7 @@ sema_budget_normalize_limit: fn(name: String, metric: String, limit: String, exp
     unit_error: sema_budget_fail(sema_budget_invalid(name, "`{metric}` requires one of these units: {allowed.join(", ")}", "write the limit with a {allowed[0]} suffix", expr_span(value)))
     if value == .UnitLit(raw, _, _, suffix, _, _, _) {
         if !allowed.contains(suffix) -> return Err(unit_error)
-        multiplier: sema_budget_unit_scale(suffix) ?? panic("allowed normalized unit")
+        multiplier: sema_budget_unit_scale(suffix) ?? return Err(unit_error)
         range_error: sema_budget_fail(sema_budget_invalid(name, "limit value is not a nonnegative integer in range", "write a nonnegative whole value that fits the normalized unit", expr_span(value)))
         whole: sema_budget_parse_u128(raw) ?? return Err(range_error)
         base: sema_budget_checked_mul(whole, multiplier) ?? return Err(range_error)

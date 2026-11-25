@@ -9,8 +9,8 @@
 use {
     jet_lexer.[lex_generated]
     jet_parser.[parse_lexed_with_source, parser_line_starts]
-    jet_ir.[IRCompilerOwnedCore, IRRecordSchema, IR_RECORD_SCHEMAS, IR_GENERATED_RECORDS, ir_route_symbol, ir_route_builder_lowered, ir_environment_route, ir_runtime_route, ir_runtime_handle, ir_runtime_handle_field, ir_compiler_owned_core_fields, ir_compiler_owned_record_fields, ir_compiler_owned_type_rows]
-    jet_foundation.[CORE_SOURCE_OWNED_ROWS, CORE_MODULE_EXPORTS, CORE_CALLS, CORE_RECORD_FIELD_ROWS, CORE_CALL_COVERAGE_AOT, AccessConvention, CoreCallSignatureRequest, CoreCallSymbol, Type, core_call, core_call_coverage_contains, core_sig_fixed, core_enum_cases, ir_host_value_name, ir_runtime_handle_row]
+    jet_ir.[IRCompilerOwnedCore, ir_route_symbol, ir_route_builder_lowered, ir_environment_route, ir_runtime_route, ir_runtime_handle, ir_runtime_handle_field, ir_compiler_owned_core_fields, ir_compiler_owned_record_fields, ir_compiler_owned_type_rows]
+    jet_foundation.[CORE_SOURCE_OWNED_ROWS, CORE_MODULE_EXPORTS, CORE_CALLS, CORE_RECORD_FIELD_ROWS, CORE_CALL_COVERAGE_AOT, CoreCallSymbol, IRRecordSchema, IR_GENERATED_RECORDS, IR_RECORD_SCHEMAS, Type, core_call, core_call_coverage_contains, core_enum_cases, ir_host_value_name, ir_runtime_handle_row]
     jet_eval.[jet_eval_compiler_value_method_record]
 }
 
@@ -24,7 +24,7 @@ RUNTIME_ROUTES_PATH: "Compiler/JetIR/Source/RuntimeRoutes.jet"
 
 RUNTIME_HANDLES_PATH: "Compiler/JetFoundation/Source/Registry/RuntimeHandles.jet"
 
-RUNTIME_RECORDS_PATH: "Compiler/JetIR/Source/RuntimeRecords.jet"
+RUNTIME_LAYOUTS_PATH: "Compiler/JetFoundation/Source/Registry/RuntimeLayouts.jet"
 
 COMPILER_OWNED_PATH: "Compiler/JetIR/Source/CompilerOwned.jet"
 
@@ -401,35 +401,15 @@ module_call_row: fn(id: String, module_name: String, member: String, core: Parse
         place: owned_path ?? "its Core source"
         return unrouted(id, "module_call", module_name, member, "`{place}` owns `{member}` but declares no top-level `{target}: fn`", declared_aot: declared_aot)
     }
-    // The typed signature the checker uses for this call, at any arity: the
-    // result type does not depend on how many optional arguments are passed.
-    fixed: core_sig_fixed(CoreCallSignatureRequest{module_name: module_name.copy(), member: member.copy(), actual_arity: -1, actual_accesses: [AccessConvention]{}, type_args: [Type]{}})
-    signature := fixed
-    if fixed == .Val(found) && (found.module_name != module_name || found.member != member) {
-        signature = None
-    }
-    ty := Type?{None}
-    if signature == .Val(found) -> ty = found.return_type.copy()
-    shown: if {
-        ty == .Val(t) -> type_text(t)
-        signature == None -> ""
-        else -> "Unit"
-    }
-    class: if signature == None -> "unknown" else -> result_class(ty.copy(), core)
+    // A row no Core source owns has no declared result type.
     if record == .Val(found) {
         name: symbol_name(found.symbol)
         if ir_route(name, route_files) == .Val(route) {
-            return SurfaceRow{id: id.copy(), kind: "module_call", owner: module_name.copy(), member: member.copy(), route: Val(route.copy()), problem: "", declared_aot: declared_aot, result_type: shown, result_class: class}
+            return SurfaceRow{id: id.copy(), kind: "module_call", owner: module_name.copy(), member: member.copy(), route: Val(route.copy()), problem: "", declared_aot: declared_aot, result_type: "", result_class: "unknown"}
         }
-        out := unrouted(id, "module_call", module_name, member, "registry symbol `{name}` has no IR dispatcher arm", declared_aot: declared_aot)
-        out.result_type = shown.copy()
-        out.result_class = class.copy()
-        return out
+        return unrouted(id, "module_call", module_name, member, "registry symbol `{name}` has no IR dispatcher arm", declared_aot: declared_aot)
     }
-    out := unrouted(id, "module_call", module_name, member, "`{module_name}` exports `{member}` but no Core source owns it and CORE_CALLS has no row", declared_aot: declared_aot)
-    out.result_type = shown.copy()
-    out.result_class = class.copy()
-    out
+    unrouted(id, "module_call", module_name, member, "`{module_name}` exports `{member}` but no Core source owns it and CORE_CALLS has no row", declared_aot: declared_aot)
 }
 
 // `target` is a source-owned registry record's Core function, by its
@@ -480,10 +460,10 @@ field_dispatch: fn(owner: String, field: String, route_files: [SourceFile]) -> R
             return Val(Route{kind: "ir-handle-field", path: RUNTIME_ROUTES_PATH, line: file_line(route_files, RUNTIME_ROUTES_PATH, "\"{handle.runtime}\""), symbol: "{handle.runtime}.{field}"})
         }
     }
-    if schema_route(IR_RECORD_SCHEMAS, RUNTIME_RECORDS_PATH, owner, field, route_files) == .Val(route) {
+    if schema_route(IR_RECORD_SCHEMAS, RUNTIME_LAYOUTS_PATH, owner, field, route_files) == .Val(route) {
         return Val(route.copy())
     }
-    if schema_route(IR_GENERATED_RECORDS, RUNTIME_ROUTES_PATH, owner, field, route_files) == .Val(route) {
+    if schema_route(IR_GENERATED_RECORDS, RUNTIME_LAYOUTS_PATH, owner, field, route_files) == .Val(route) {
         return Val(route.copy())
     }
     if ir_host_value_name(owner) && jet_eval_compiler_value_method_record(owner, field) {

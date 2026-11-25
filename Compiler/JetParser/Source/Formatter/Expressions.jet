@@ -1125,6 +1125,14 @@ jfmt_fmt_struct_lit_body: fn(f: ^JetFmt, fields: [ExprField], span: Span) {
         jfmt_newline(f)
         f.indent += 1
     }
+    jfmt_fmt_record_fields(f, fields, span, multiline)
+    jfmt_write(f, "}}")
+}
+
+// A literal's members, `name: value` or a bare name: comma-separated on
+// one line, or one per line with a trailing comma, each line's comments kept.
+// A multiline list ends at the start of a line one indent out.
+jfmt_fmt_record_fields: fn(f: ^JetFmt, fields: [ExprField], span: Span, multiline: Bool) {
     loop (index, field) in fields {
         if index > 0 {
             if multiline -> jfmt_newline(f) else -> jfmt_write(f, ", ")
@@ -1146,6 +1154,30 @@ jfmt_fmt_struct_lit_body: fn(f: ^JetFmt, fields: [ExprField], span: Span) {
         f.indent -= 1
         if !f.at_line_start -> jfmt_newline(f)
     }
+}
+
+// A value body written as fields, `{ width: w, height: h }`: the body's one
+// line `value` is an unnamed record whose braces are the body's own, with no
+// `{` of a block before it.
+jfmt_is_record_body: fn(f: JetFmt, value: Expr) -> Bool Never! {
+    if value == .StructLit(type_name, _, _, _, _, inferred, _, _) -> return inferred && type_name == "" && !jfmt_value_was_braced(f, value)
+    false
+}
+
+// Writes a record body after the caller's ` {`: `{ a: 1, b: 2 }` on one line
+// when the author wrote it on one and it fits, else one field per line.
+jfmt_fmt_record_body: fn(f: ^JetFmt, record: Expr) {
+    record == .StructLit(_, _, _, _, fields, _, span, _) ?? return
+    if !jfmt_source_span_multiline(f, span) {
+        mark: jfmt_one_line_trial_begin(f)
+        jfmt_write(f, " ")
+        jfmt_fmt_record_fields(f, fields, span, false)
+        jfmt_write(f, " }}")
+        if jfmt_one_line_trial_end(f, mark) -> return
+    }
+    jfmt_newline(f)
+    f.indent += 1
+    jfmt_fmt_record_fields(f, fields, span, true)
     jfmt_write(f, "}}")
 }
 
@@ -2328,6 +2360,11 @@ jfmt_fmt_lambda: fn(f: ^JetFmt, lambda: Lambda) {
     empty_block: if lambda.body == .Block(body) -> body.len() == 0 else -> false
     if empty_block && !jfmt_source_span_multiline(f, lambda.span) {
         jfmt_write(f, " {{}}")
+        return
+    }
+    if statements.len() == 1 && statements[0] == .Expr(value) && jfmt_is_record_body(f, value) {
+        jfmt_write(f, " {{")
+        jfmt_fmt_record_body(f, value)
         return
     }
     // A one-line lambda of one value or one assignment keeps its line:

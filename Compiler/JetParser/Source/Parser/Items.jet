@@ -146,6 +146,7 @@ use {
         TOKEN_TRUE,
         TOKEN_UNIFIED_ARROW,
         Token,
+        token_is_authored_semicolon,
     ]
 }
 
@@ -1189,7 +1190,7 @@ parser_parse_function: fn(state: ^JetParserState, modifiers: ParsedItemModifiers
             outer_markers: state.inbody_markers.copy()
             state.inbody_marker_depth = state.block_depth + 1
             state.inbody_markers = [Marker]{}
-            body: parser_parse_callable_body(state, parser_return_type_has_value(return_type))
+            body: parser_parse_callable_body(state, parser_return_type_has_value(return_type), parser_return_type_has_value(return_type))
             inside: state.inbody_markers.copy()
             state.inbody_marker_depth = outer_depth
             state.inbody_markers = outer_markers
@@ -1584,10 +1585,12 @@ parser_parse_unit_fallible_return: fn(state: ^JetParserState) -> ParsedType? {
 
 // A result after `->` or `-[E]>` is a type only when a
 // declaration-body boundary follows it, so `-> n * 2` stays an expression.
-// A `{…}` there is a record type when it parses as one and a body, a
-// contract or another result part follows it; before the end of a line or
-// a list it is a record type only when each member's type starts as a type
-// does, so a one-line body `{ x: count }` stays a body.
+// A `{` right after the type, touching or not, ends it and opens the body:
+// `-> Int{n * n}` is `-> Int { n * n }`. A `{…}` there is a record type
+// when it parses as one and a body, a contract or another result part
+// follows it; before the end of a line or a list it is a record type only
+// when each member's type starts as a type does, so a one-line body
+// `{ x: count }` stays a body.
 parser_result_type_follows_arrow: fn(state: ^JetParserState) -> Bool {
     record: parser_current_kind(state) == TOKEN_LBRACE
     if record {
@@ -1602,19 +1605,17 @@ parser_result_type_follows_arrow: fn(state: ^JetParserState) -> Bool {
     saved_else_arms: state.else_arms.len()
     saved_type_gt: state.pending_type_gt
     saved_type_gt_span: Span{start: state.pending_type_gt_span.start, end: state.pending_type_gt_span.end}
-    saved_semicolon: state.explicit_semicolon_reported
-    parsed: parser_parse_type(state, 0)
+    _ := parser_parse_type(state, 0)
     clean: !record || state.diagnostics.len() == saved_diagnostics
     failed: parser_aborting(state) && state.abort_mark > saved_diagnostics
     next: parser_current(state)
     kind: next.kind
     // `-> T -[E]>` also ends the result: a second (effect) arrow. A one-line
     // trait slot ends at the enclosing `}`.
-    boundary: kind == TOKEN_COLON || kind == TOKEN_EQ || kind == TOKEN_UNIFIED_ARROW || kind == TOKEN_SEMI || kind == TOKEN_COMMA || kind == TOKEN_RPAREN || (kind == TOKEN_LBRACE && parsed.span.end < next.span.start) || (kind == TOKEN_IDENT && parser_value(state, next) == "from") || (kind == TOKEN_MINUS && parser_kind_at(state, 1) == TOKEN_LBRACKET) || kind == TOKEN_RBRACE
+    boundary: kind == TOKEN_COLON || kind == TOKEN_EQ || kind == TOKEN_UNIFIED_ARROW || kind == TOKEN_SEMI || kind == TOKEN_COMMA || kind == TOKEN_RPAREN || kind == TOKEN_LBRACE || (kind == TOKEN_IDENT && parser_value(state, next) == "from") || (kind == TOKEN_MINUS && parser_kind_at(state, 1) == TOKEN_LBRACKET) || kind == TOKEN_RBRACE
     parser_rewind(state, saved_position, saved_diagnostics, saved_blocks, saved_else_arms)
     state.pending_type_gt = saved_type_gt
     state.pending_type_gt_span = saved_type_gt_span
-    state.explicit_semicolon_reported = saved_semicolon
     clean && !failed && boundary
 }
 
@@ -1676,9 +1677,10 @@ parser_parse_function_body_marker: fn(state: ^JetParserState, guest_import: Bool
     true
 }
 
-// (card #4512): E0080 for a named function body after an arrow.
+// E0080 for a named function body after an arrow, such as `-> n * n`. No
+// edit is offered: the body's result type is the author's to write.
 parser_report_arrow_function_body: fn(state: ^JetParserState, span: Span) {
-    parser_add_error_code(state, "E0080", span, "This named function body follows an arrow instead of braces.", "A named function has one arrow, `->` or `-[Effects]>`, followed by its optional return type; the body always sits in braces: `name: fn(...) -> Type {{ … }}`.", "Replace `-> expr` with `{{ expr }}`; `jet fmt` applies this fix.")
+    parser_add_error_code(state, "E0080", span, "This named function body follows an arrow instead of braces.", "A named function has one arrow, `->` or `-[Effects]>`, followed by its optional return type; the body always sits in braces: `name: fn(...) -> Type {{ … }}`.", "Write the result type after the arrow and the body in braces: `-> Type {{ expr }}`.")
 }
 
 // (card #501): a `#FFI(<lang>) fn` body is exactly one
@@ -2605,11 +2607,12 @@ parser_finish_data_member: fn(state: ^JetParserState, what: String) -[]> {
     ahead := 0
     loop parser_kind_at(state, ahead) == TOKEN_SEMI -> ahead += 1
     closer: parser_kind_at(state, ahead)
-    // An authored `;` where the comma goes is already the parse's explicit
-    // semicolon report (parser_bump): that one character is reported once.
+    // An authored `;` where the comma goes is its own report (E0373), whose
+    // edit writes the comma.
     next_token: parser_current(state)
-    authored_semicolon: next_token.kind == TOKEN_SEMI && next_token.span.start < next_token.span.end && !state.explicit_semicolon_reported
-    if closer != TOKEN_RBRACE && closer != TOKEN_EOF && !authored_semicolon {
+    if token_is_authored_semicolon(next_token) {
+        parser_report_explicit_semicolon(state, next_token.span, true)
+    } else if closer != TOKEN_RBRACE && closer != TOKEN_EOF {
         end: parser_data_member_end(state)
         parser_add_report(state, diagnostic_from_registry("E0003", Val(Span{start: end, end: end}), "expected `,` after this {what}", "the data members of a brace body are separated by commas, on one line or many", "add `,` after the {what}"))
     }
@@ -3288,7 +3291,7 @@ parser_parse_impl: fn(state: ^JetParserState, modifiers: ParsedItemModifiers) ->
         }
         // A conversion body is a callable body with a declared result: its
         // last line may be the bare converted value.
-        body: parser_parse_callable_body(state, true)
+        body: parser_parse_callable_body(state, true, true)
         return Item.ErrorConv{value: ErrorConvDef{from_ty: type_name, from_span: type_span, to_ty: to_ty, to_span: target.span, body: body.statements, body_span: body.span, markers: modifiers.markers}}
     }
     operator_rhs: parser_parse_operator_rhs(state, trait_name, Val(type_name.copy()), Val(type_span))

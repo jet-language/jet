@@ -174,8 +174,11 @@ ir_ssa_out: fn(m: IRModule, f: ^IRFunction, s: IRSsa, stress: Bool) -> IRSsaOutS
         item_inst.push(at)
         item_edge.push(-1)
     }
+    // A function with more positions than a range key holds keeps its own
+    // code: the round trip only checks (stress, verify) and changes nothing
+    // the build needs.
     if 4 * item_inst.len() + 4 >= IR_SSA_POSITION_LIMIT {
-        panic("ir_ssa_out: {f.key} has too many instructions")
+        return IRSsaOutStats{changed: false, moves: 0, fresh: 0}
     }
     // Each block's first and last item. An If's false-edge moves belong to
     // none: they run in no block's straight line.

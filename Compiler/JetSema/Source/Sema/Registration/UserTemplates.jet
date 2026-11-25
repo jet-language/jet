@@ -382,26 +382,25 @@ sema_derive_expand_family_impls: fn(items: ^^[Item], imports: [ImportDecl], diag
 
 SEMA_FAMILY_IMPLS_TRAIT: "Halve: trait {{\n    halved: fn(self) -> Self Never!,\n}}\n\n"
 
-// The items of `source` after the family impl expansion, which reports
-// nothing.
-sema_family_impls_expanded: fn(source: String) -> [Item] {
+// The items of `source` after the family impl expansion; None when the
+// source does not parse or the expansion reports anything.
+sema_family_impls_expanded: fn(source: String) -> [Item]? {
     parsed := parse_source(source.bytes())
-    if sema_has_error_since(parsed.diagnostics, 0) {
-        panic("the source does not parse: {parsed.diagnostics:Debug}")
-    }
+    if sema_has_error_since(parsed.diagnostics, 0) -> return None
     diagnostics := [Diagnostic]{}
     items: sema_derive_expand_family_impls(parsed.program.items.move(), parsed.program.imports, diagnostics)
-    if diagnostics.len() > 0 -> panic("the expansion reported {diagnostics:Debug}")
-    items
+    if diagnostics.len() > 0 -> return None
+    Val(items)
 }
 
-// Each impl of `items` as `target -> return type of its first method`.
+// Each impl of `items` as `target -> return type of its first method`
+// (`none` when it has none).
 sema_family_impls_rows: fn(items: [Item]) -> [String] {
     rows := [String]{}
     loop item in items {
         if item == .Impl(definition) {
-            returned: definition.methods[0].return_type ?? panic("`{definition.type_name}.halved` has no return type")
-            rows.push("{definition.type_name} -> {type_name(returned)}")
+            returned: if definition.methods[0].return_type == .Val(ty) -> type_name(ty) else -> "none"
+            rows.push("{definition.type_name} -> {returned}")
         }
     }
     rows
@@ -409,7 +408,7 @@ sema_family_impls_rows: fn(items: [Item]) -> [String] {
 
 #Test("a number family's impl becomes one impl per standard size with Self written as the size") {
     source: "{SEMA_FAMILY_IMPLS_TRAIT}impl Signed.Halve {{\n    halved: fn(self) -> Self Never! {{ Self{{self}} }}\n}}\n\nimpl IEEE.Halve {{\n    halved: fn(self) -> Self Never! {{ self }}\n}}\n"
-    items: sema_family_impls_expanded(source)
+    items: sema_family_impls_expanded(source) ?? panic("the family impls do not expand cleanly")
     rows: sema_family_impls_rows(items)
     assert_eq(rows.len(), 6)
     loop row in ["I8 -> I8 Never!", "I16 -> I16 Never!", "I32 -> I32 Never!", "I64 -> I64 Never!", "F32 -> F32 Never!", "Float -> Float Never!"] {
@@ -422,7 +421,8 @@ sema_family_impls_rows: fn(items: [Item]) -> [String] {
 
 #Test("a module's own type of a family's name keeps its family impl") {
     source: "{SEMA_FAMILY_IMPLS_TRAIT}Signed: struct {{\n    bits: Int,\n}}\n\nimpl Signed.Halve {{\n    halved: fn(self) -> Self Never! {{ self }}\n}}\n"
-    rows: sema_family_impls_rows(sema_family_impls_expanded(source))
+    items: sema_family_impls_expanded(source) ?? panic("the family impls do not expand cleanly")
+    rows: sema_family_impls_rows(items)
     assert_eq(rows, ["Signed -> Self Never!"])
 }
 

@@ -62,10 +62,11 @@ lint_name_for_code: fn(code: String) -> String? Never! {
     row.lint_name
 }
 
-// The reserved auto-derive policy entry.
-lint_auto_derive_name: fn() -> String Never! {
-    row: lint_by_name("auto_derive") ?? panic("auto_derive must stay registered")
-    row.lint_name ?? panic("lint rows have names")
+// The reserved auto-derive policy entry: the registered lint of that name.
+lint_auto_derive_name: fn() -> String Never! { "auto_derive" }
+
+#Test("the reserved auto-derive policy entry is a registered lint") {
+    assert(lint_by_name(lint_auto_derive_name()) != None)
 }
 
 // The registered refusal for a lint selector that used a rendered
@@ -166,11 +167,11 @@ lint_parse_name_list: fn(value: String) -> [String] LintPolicyError! {
     Ok(names)
 }
 
+// The names `policy.lints.deny` takes: lint_by_name finds only a named row.
 lint_known_policy_names: fn() -> String Never! {
     names := [String]{}
     loop row in lint_registered_lints() {
-        name: row.lint_name ?? panic("lint rows have names")
-        names.push("`{name}`")
+        if row.lint_name == .Val(name) -> names.push("`{name}`")
     }
     names.join(", ")
 }
