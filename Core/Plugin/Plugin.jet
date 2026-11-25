@@ -19,6 +19,15 @@ package: {
 // compiler-owned `PluginFault { export, message, frames }` whose frames are
 // `PluginFrame { function, component, offset }`.
 
+// Loads the WebAssembly Component at `path` under `authority`, which must
+// hold FS.Read and bounds the host imports the guest reaches, and `limits`.
+// A literal `path`, from the package root, embeds the artifact and gives the
+// handle its Component's interface: its exports are its methods. A path known
+// only at run time names no embedded artifact, so its calls fail as `Guest`.
+load: fn(path: String, authority: Authority, /, *, limits: Limits{Limits{}}) -[Exec]> Plugin {
+    core.plugin.load(path, authority, limits: limits)
+}
+
 // The budgets one loaded component runs under, `load`'s `limits:` label; a
 // load without it takes these defaults. Fuel and the timeout refill before
 // each export call; memory and table elements cap the component for its
