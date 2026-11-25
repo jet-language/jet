@@ -1,0 +1,55 @@
+use {
+    fs: core.files
+    watcher: core.watcher
+}
+
+domain_text: fn(domain: WatchDomain) -> String {
+    if domain == {
+        .File -> "file"
+        .Process -> "process"
+        .Port -> "port"
+    }
+}
+
+kind_text: fn(kind: WatchKind) -> String {
+    if kind == {
+        .Created -> "created"
+        .Modified -> "modified"
+        .Removed -> "removed"
+        .Error -> "error"
+        .Exited -> "exited"
+        .Ready -> "ready"
+    }
+}
+
+// Every WatchEvent field, read one by one, so a field read at another
+// field's offset shows up as a wrong value.
+fields: fn(event: WatchEvent) -> String {
+    "{domain_text(event.domain)} {kind_text(event.kind)} path={event.path} detail={event.detail} pid={event.pid} port={event.port}"
+}
+
+run: fn() {
+    // A constructed event, read directly and after a trip through a list.
+    built: WatchEvent{domain: WatchDomain.Port, kind: WatchKind.Ready, path: "built/path", detail: "built detail", pid: 41, port: 8086}
+    print(fields(built))
+    held: [WatchEvent]{built, WatchEvent{domain: WatchDomain.Process, kind: WatchKind.Exited, path: "", detail: "second", pid: 7, port: 0}}
+    loop event in held -> print(fields(event))
+    print(held[0] == built)
+    // A runtime process event: no process has this id, so the first poll
+    // reports it exited, with the watched pid.
+    process: watcher.process_pid(2147483646)
+    loop event in process.poll() -> print(fields(event))
+    process.cancel()
+    // A runtime file event: the watched directory, fresh on every step,
+    // gains a file.
+    if fs.exists("watched") -> fs.remove_all("watched") ?? panic("cleanup failed")
+    fs.create_dir_all("watched") ?? panic("mkdir failed")
+    files: watcher.files("watched") ?? panic("watch failed")
+    fs.write("watched/note.txt", "hello") ?? panic("write failed")
+    loop event in files.poll() {
+        if event.path.ends_with("note.txt") {
+            print("{domain_text(event.domain)} {kind_text(event.kind)} note={event.path.ends_with("watched/note.txt")} detail={event.detail} pid={event.pid} port={event.port}")
+        }
+    }
+    files.cancel()
+}
