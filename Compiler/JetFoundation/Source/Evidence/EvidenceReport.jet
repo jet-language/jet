@@ -299,12 +299,6 @@ evidence_report_try_from_records: fn(report_id: String, records: ^^[EvidenceReco
     Ok(report)
 }
 
-// Infallible construction is an assertion, not a fabricated empty report or a
-// swallowed merge error.
-evidence_report_from_records: fn(report_id: String, records: ^^[EvidenceRecord]) -> EvidenceReport Never! {
-    evidence_report_try_from_records(report_id, records, [DerivationRecord]{}) ?? panic("evidence records in one report must share report identity")
-}
-
 evidence_report_is_complete: fn(report: EvidenceReport) -> Bool Never! {
     if report.completeness != EvidenceCompleteness.Complete -> return false
     loop record in report.records {

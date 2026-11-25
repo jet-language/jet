@@ -49,8 +49,8 @@ perf_report_find: fn(fields: [CanonicalJSONField], key: String) -> Int? Never! {
     None
 }
 
-perf_report_index: fn(fields: [CanonicalJSONField], key: String) -> Int Never! {
-    perf_report_find(fields, key) ?? panic("validated object key is absent")
+perf_report_index: fn(fields: [CanonicalJSONField], key: String) -> Int PerfBudgetError! {
+    Ok(perf_report_find(fields, key) ?? return Err(perf_error("object has no `{key}` field")))
 }
 
 perf_report_text: fn(value: CanonicalJSON, name: String) -> String PerfBudgetError! {
@@ -123,7 +123,7 @@ perf_validate_rational: fn(value: CanonicalJSON, quantity: Bool, name: String) -
         }
         return Ok(reduced)
     }
-    panic("validated rational object")
+    Err(perf_error("{name} is not an object"))
 }
 
 perf_validate_policy: fn(value: CanonicalJSON) PerfBudgetError! {

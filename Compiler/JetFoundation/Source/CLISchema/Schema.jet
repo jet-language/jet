@@ -187,9 +187,9 @@ JobRegistry: struct {
         cli_schema_job_enter(self.jobs, index, root, state, stack)
         rows := [View<JobFact>]{}
         loop stack.len() > 0 {
+            // A finish on a nonempty stack always pops a row.
             next_row: cli_schema_job_finish(self.jobs, index, state, stack)
-            row: next_row ?? panic("a nonempty job traversal lost its next row")
-            rows.push(self.jobs[row..<row + 1])
+            if next_row == .Val(row) -> rows.push(self.jobs[row..<row + 1])
         }
         Ok(rows)
     }

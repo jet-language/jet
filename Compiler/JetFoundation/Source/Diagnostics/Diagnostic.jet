@@ -255,7 +255,8 @@ diagnostic_order_root_first: fn(diagnostics: ^^[Diagnostic]) -> [Diagnostic] Nev
             loop rest in pending -> ordered.push(rest.copy())
             break
         }
-        root: pending.remove(next, .Slot) ?? panic("root-first ordering selected a pending diagnostic")
+        // `next` indexes `pending`, so its slot is always there to take.
+        root: pending.remove(next, .Slot) ?? break
         ordered.push(root)
     }
     ordered

@@ -12,11 +12,11 @@ jettrace_keys_match: fn(fields: View<CanonicalJSONField>, keys: [String]) -> Boo
 }
 
 // Return only an index; callers project directly from the retained node.
-jettrace_get: fn(fields: View<CanonicalJSONField>, key: String) -> Int Never! {
+jettrace_get: fn(fields: View<CanonicalJSONField>, key: String) -> Int JetTraceError! {
     loop index in 0..<fields.len() {
-        if fields[index].key == key -> return index
+        if fields[index].key == key -> return Ok(index)
     }
-    panic("checked jettrace key missing: {key}")
+    Err(jettrace_error("jettrace key `{key}` is missing"))
 }
 
 jettrace_wrapper_fields: fn(value: CanonicalJSON) -> View<CanonicalJSONField> JetTraceError! from value {

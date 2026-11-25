@@ -337,7 +337,7 @@ cli_schema_put_wasm_leb: fn(out: ^[U8], input: Int) Never! {
         byte := value & 127
         value = value >> 7
         if value != 0 -> byte |= 128
-        out.push(checked(U8{byte}) ?? panic("a LEB group is one byte"))
+        out.push(wrapping(U8{byte}))
         if value == 0 -> break
     }
 }
