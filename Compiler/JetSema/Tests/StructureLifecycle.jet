@@ -1,7 +1,7 @@
 // Assemble with the sema/foundation test unit: these exercise the production
 // lifecycle collector, including the dormant and expired edition boundaries.
 use {
-    jet_sema.[SemaLifecycleResult, sema_lifecycle_edition_label, sema_lifecycle_record]
+    jet_sema.[SemaKeyRows, SemaLifecycleResult, sema_lifecycle_edition_label, sema_lifecycle_record]
     jet_foundation.[
         CoreMarkerApplication,
         DIAGNOSTIC_ERROR,
@@ -18,7 +18,7 @@ structure_lifecycle_require: fn(ok: Bool, message: String) Never! {
 
 #Test("structure_lifecycle") {
     result := SemaLifecycleResult{diagnostics: [Diagnostic]{}, facts: [StructureFact]{}}
-    seen := [String:Bool]{}
+    seen := SemaKeyRows{}
     payload: CoreMarkerApplication{member: "old", since: "2027", replacement: "cbor.to_bytes", removed_in: Val("2028")}
     span: Span{start: 10, end: 13}
     // One language edition: a `since:` label later than the package edition
