@@ -1,4 +1,5 @@
 use jet_devserver.[plan_current_eviction, plan_eviction, plan_eviction_inner]
+use jet_pkg_model.[DevCaptureSetting]
 
 // Pure C1 boundaries against actual policy/planner, no compiler/runtime mock.
 // CLI perf_run_records_capture_allowlist_and_source_maps,
@@ -76,12 +77,12 @@ capture_test_error: fn(budget: CaptureBudget, records: [CaptureTestRecord], inco
     default: PackageCapturePolicy.default()
     assert_eq(default.budget.max_bytes, U64{268435456})
     assert(default.allows_development_capture())
-    assert(default.with_capture(PackageCaptureSetting.On).allows_development_capture())
+    assert(default.with_capture(DevCaptureSetting.On).allows_development_capture())
     assert(!PackageCapturePolicy.off().allows_development_capture())
-    assert(!default.with_capture(PackageCaptureSetting.Off).allows_development_capture())
+    assert(!default.with_capture(DevCaptureSetting.Off).allows_development_capture())
     small: CaptureBudget.new(U64{1}) ?? panic("budget")
     changed: default.with_budget(small)
-    assert_eq(changed.capture, PackageCaptureSetting.Default)
+    assert_eq(changed.capture, DevCaptureSetting.Default)
     assert_eq(changed.budget.max_bytes, U64{1})
     assert(NoCaptureOverrideFact.explicit().is_active())
     assert(!NoCaptureOverrideFact.none().is_active())

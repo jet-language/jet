@@ -4,6 +4,7 @@
 use {
     paused_json: core.encoding.json
     jet_foundation.[foundation_json_escape, foundation_json_integer, sha256_hex]
+    jet_debug.[DebugAggregateKind, DebugValue]
 }
 
 PAUSED_EVALUATE_PROTOCOL: "jet.devtools.v1"
@@ -84,76 +85,58 @@ Publication: enum {
     }
 }
 
-AggregateKind: enum {
-    Record,
-    List,
-    Map,
-    Set,
-    Tuple,
-    Variant,
-
-    as_str: fn(self) -> String Never! {
-        if self == {
-            .Record -> "record"
-            .List -> "list"
-            .Map -> "map"
-            .Set -> "set"
-            .Tuple -> "tuple"
-            .Variant -> "variant"
-        }
+// The protocol name of an aggregate's shape.
+paused_aggregate_name: fn(kind: DebugAggregateKind) -> String Never! {
+    if kind == {
+        .Record -> "record"
+        .List -> "list"
+        .Map -> "map"
+        .Set -> "set"
+        .Tuple -> "tuple"
+        .Variant -> "variant"
     }
 }
 
-// FloatBits is the exact IEEE-754 bit pattern; Bytes are length plus SHA-256.
-TypedValue: enum {
-    Unit,
-    Bool(value: Bool),
-    Int(value: Int),
-    FloatBits(bits: Int),
-    Text(text: String),
-    Bytes(length: Int, sha256: String),
-    Aggregate(kind: AggregateKind, length: Int),
-
-    validate: fn(self) PausedEvaluateError! {
-        if self == {
-            .Text(text) -> { valid_text(text, "typed text", MAX_VALUE_BYTES) }
-            .Bytes(_, sha256) -> {
-                if sha256.len() != 64 || !paused_is_hex(sha256) {
-                    return Err(paused_error("typed bytes must carry a 64-character SHA-256 digest"))
-                }
+paused_value_validate: fn(value: DebugValue) PausedEvaluateError! {
+    if value == {
+        .Text(text) -> { valid_text(text, "typed text", MAX_VALUE_BYTES) }
+        .Bytes(_, sha256) -> {
+            if sha256.len() != 64 || !paused_is_hex(sha256) {
+                return Err(paused_error("typed bytes must carry a 64-character SHA-256 digest"))
             }
-            .Unit | .Bool(_) | .Int(_) | .FloatBits(_) | .Aggregate(_, _) -> {}
         }
-        Ok()
+        .Unit | .Bool(_) | .Int(_) | .FloatBits(_) | .Aggregate(_, _) -> {}
     }
+    Ok()
+}
 
-    json: fn(self) -> String Never! {
-        if self == {
-            .Unit -> "{{\"kind\":\"unit\"}}"
-            .Bool(value) -> "{{\"kind\":\"bool\",\"value\":{value}}}"
-            .Int(value) -> "{{\"kind\":\"int\",\"value\":{value}}}"
-            .FloatBits(bits) -> "{{\"kind\":\"float_bits\",\"bits\":{bits}}}"
-            .Text(text) -> "{{\"kind\":\"text\",\"value\":\"{foundation_json_escape(text)}\"}}"
-            .Bytes(length, sha256) -> "{{\"kind\":\"bytes\",\"length\":{length},\"sha256\":\"{foundation_json_escape(sha256)}\"}}"
-            .Aggregate(kind, length) -> "{{\"kind\":\"{kind.as_str()}\",\"length\":{length}}}"
-        }
+paused_value_json: fn(value: DebugValue) -> String Never! {
+    if value == {
+        .Unit -> "{{\"kind\":\"unit\"}}"
+        .Bool(flag) -> "{{\"kind\":\"bool\",\"value\":{flag}}}"
+        .Int(number) -> "{{\"kind\":\"int\",\"value\":{number}}}"
+        .FloatBits(bits) -> "{{\"kind\":\"float_bits\",\"bits\":{bits}}}"
+        .Text(text) -> "{{\"kind\":\"text\",\"value\":\"{foundation_json_escape(text)}\"}}"
+        .Bytes(length, sha256) -> "{{\"kind\":\"bytes\",\"length\":{length},\"sha256\":\"{foundation_json_escape(sha256)}\"}}"
+        .Aggregate(kind, length) -> "{{\"kind\":\"{paused_aggregate_name(kind)}\",\"length\":{length}}}"
     }
+}
 
-    bytes: fn(self) -> Int Never! {
-        if self == {
-            .Unit -> 1
-            .Bool(_) -> 1
-            .Text(text) -> text.len()
-            .Bytes(_, _) -> 32
-            .Int(_) | .FloatBits(_) | .Aggregate(_, _) -> 8
-        }
+// The bytes a value's payload counts against the evaluation budget.
+paused_value_bytes: fn(value: DebugValue) -> Int Never! {
+    if value == {
+        .Unit -> 1
+        .Bool(_) -> 1
+        .Text(text) -> text.len()
+        .Bytes(_, _) -> 32
+        .Int(_) | .FloatBits(_) | .Aggregate(_, _) -> 8
     }
+}
 
-    is_aggregate: fn(self) -> Bool Never! {
-        if self == {
-            .Aggregate(_, _) -> true
-            .Unit | .Bool(_) | .Int(_) | .FloatBits(_) | .Text(_) | .Bytes(_, _) -> false
-        }
+paused_value_is_aggregate: fn(value: DebugValue) -> Bool Never! {
+    if value == {
+        .Aggregate(_, _) -> true
+        .Unit | .Bool(_) | .Int(_) | .FloatBits(_) | .Text(_) | .Bytes(_, _) -> false
     }
 }
 
@@ -383,7 +366,7 @@ ValueProjection: struct {
     type_name: String,
     source: SourceLocation,
     publication: Publication,
-    value: TypedValue?,
+    value: DebugValue?,
     children: [ValueProjection],
     truncated: Bool,
 
@@ -412,7 +395,7 @@ ValueProjection: struct {
     json: fn(self) -> String? Never! {
         if self.publication == .Absent -> return None
         value: if self.value == {
-            .Val(typed) -> ",\"value\":{typed.json()}"
+            .Val(typed) -> ",\"value\":{paused_value_json(typed)}"
             .None -> ""
         }
         children := [String]{}
@@ -423,11 +406,11 @@ ValueProjection: struct {
     }
 }
 
-value_projection: fn(id: String, name: String, type_name: String, source: SourceLocation, publication: Publication, value: TypedValue?) -> ValueProjection Never! {
+value_projection: fn(id: String, name: String, type_name: String, source: SourceLocation, publication: Publication, value: DebugValue?) -> ValueProjection Never! {
     ValueProjection{id: id, name: name, type_name: type_name, source: source, publication: publication, value: value, children: [ValueProjection]{}, truncated: false}
 }
 
-value_projection_published: fn(id: String, name: String, type_name: String, source: SourceLocation, value: TypedValue) -> ValueProjection Never! {
+value_projection_published: fn(id: String, name: String, type_name: String, source: SourceLocation, value: DebugValue) -> ValueProjection Never! {
     value_projection(id, name, type_name, source, Publication.Published, Val(value))
 }
 
@@ -463,8 +446,8 @@ validate_projection: fn(value: ValueProjection, identity: SessionIdentity?, dept
     if {
         value.publication == .Published -> {
             typed: value.value ?? return Err(paused_error("published value is missing its typed payload"))
-            typed.validate()
-            if !typed.is_aggregate() && value.children.len() > 0 {
+            paused_value_validate(typed)
+            if !paused_value_is_aggregate(typed) && value.children.len() > 0 {
                 return Err(paused_error("only aggregate values may carry projected children"))
             }
         }
@@ -482,7 +465,7 @@ measure_projection: fn(value: ValueProjection, depth: Int, usage: ^EvaluationUsa
     if depth > usage.depth -> usage.depth = depth
     usage.nodes += 1
     payload: if value.value == {
-        .Val(typed) -> typed.bytes()
+        .Val(typed) -> paused_value_bytes(typed)
         .None -> 0
     }
     usage.bytes += value.metadata_bytes() + payload
@@ -1208,7 +1191,7 @@ project_node: fn(value: ValueProjection, identity: SessionIdentity, budget: Eval
     projected.truncated = value.truncated || !metadata_fits
     if value.publication == .Published {
         if value.value == .Val(typed) {
-            payload: typed.bytes()
+            payload: paused_value_bytes(typed)
             if {
                 metadata_fits && payload <= budget.max_bytes - stats.usage.bytes -> {
                     stats.usage.bytes += payload

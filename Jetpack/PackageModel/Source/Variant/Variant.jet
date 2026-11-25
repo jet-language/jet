@@ -8,6 +8,7 @@
 // (`VariantSelectError.Ambiguous`), never a silent pick.
 // Selected variants enter action keys and the semantic lock. Provider facts
 // influence selection only through explicit `variant_map` entries.
+use sys: core.sys
 
 // Dependency / build graph role (Nix-style build/host/target).
 VariantRole: enum {
@@ -56,6 +57,41 @@ VariantOS: enum {
     }
 
     from_platform_os: fn(os: String) -> VariantOS Never! { VariantOS.parse(os) ?? VariantOS.Linux }
+
+    // The operating system this process runs on.
+    current: fn() -[Env]> VariantOS Never! {
+        if pkg_ascii_lower(sys.name()) == {
+            "macos" | "darwin" | "osx" -> VariantOS.MacOS
+            "windows" -> VariantOS.Windows
+            else -> VariantOS.Linux
+        }
+    }
+
+    // `lib<name>.so` / `.dylib` / the Windows DLL spelling.
+    shared_library: fn(self, stem: String, windows: String) -> String Never! {
+        if self == {
+            .Linux -> "lib{stem}.so"
+            .MacOS -> "lib{stem}.dylib"
+            .Windows -> windows
+        }
+    }
+
+    shared_ext: fn(self) -> String Never! {
+        if self == {
+            .Linux -> ".so"
+            .MacOS -> ".dylib"
+            .Windows -> ".dll"
+        }
+    }
+
+    // The JDK's platform include directory (`include/<os>`).
+    java_include: fn(self) -> String Never! {
+        if self == {
+            .Linux -> "linux"
+            .MacOS -> "darwin"
+            .Windows -> "win32"
+        }
+    }
 }
 
 VariantArch: enum {

@@ -72,47 +72,6 @@ pkg_binder_after_last: fn(line: String, separator: String) -> String Never! {
 // (Rust `cfg!(unix)`).
 pkg_binder_host_is_unix: fn() -[Env]> Bool { sys.family() == "unix" }
 
-// The host operating system in the binder's shared-library vocabulary.
-BinderHostOS: enum {
-    Linux,
-    MacOS,
-    Windows,
-
-    current: fn() -[Env]> BinderHostOS Never! {
-        if pkg_ascii_lower(sys.name()) == {
-            "macos" | "darwin" | "osx" -> BinderHostOS.MacOS
-            "windows" -> BinderHostOS.Windows
-            else -> BinderHostOS.Linux
-        }
-    }
-
-    // `lib<name>.so` / `.dylib` / the Windows DLL spelling.
-    shared_library: fn(self, stem: String, windows: String) -> String Never! {
-        if self == {
-            .Linux -> "lib{stem}.so"
-            .MacOS -> "lib{stem}.dylib"
-            .Windows -> windows
-        }
-    }
-
-    shared_ext: fn(self) -> String Never! {
-        if self == {
-            .Linux -> ".so"
-            .MacOS -> ".dylib"
-            .Windows -> ".dll"
-        }
-    }
-
-    // The JDK's platform include directory (`include/<os>`).
-    java_include: fn(self) -> String Never! {
-        if self == {
-            .Linux -> "linux"
-            .MacOS -> "darwin"
-            .Windows -> "win32"
-        }
-    }
-}
-
 // The registered descriptor for the language rooted at `root`; `label`
 // names it in the error.
 pkg_binder_descriptor_for: fn(root: String, label: String) -> BinderDescriptor ForeignBindError! {

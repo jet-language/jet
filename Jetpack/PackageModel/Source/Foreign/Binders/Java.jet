@@ -112,7 +112,7 @@ pkg_java_bind: fn(source_path: String, source: String, lib: String, cache: Strin
     javap: pkg_binder_run_reporting_detail([String]{"javap", "-s", "-public", "-classpath", classes, class}, "javap", PKG_JAVA_TOOL_ACTION)
     surface: pkg_java_parse_javap(class, String.from_bytes_lossy(javap.stdout))
     java_home: sys.get("JAVA_HOME") ?? return Err(ForeignBindError.ToolMissing("JAVA_HOME"))
-    host: BinderHostOS.current()
+    host: VariantOS.current()
     jvm_dir: files.join(java_home, "lib/server")
     if !files.is_file(files.join(jvm_dir, host.shared_library("jvm", "jvm.dll"))) {
         return Err(ForeignBindError.Source("provisioned OpenJDK has no embedded libjvm runtime"))

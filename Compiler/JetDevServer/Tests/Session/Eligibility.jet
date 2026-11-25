@@ -1,4 +1,5 @@
 use jet_devserver.[CapturePolicy]
+use jet_pkg_model.[DevCaptureSetting]
 
 // C3A focused pure-policy boundary claims. Live routine/browser/attach tests
 // need C3B's real Session/index owner, and JetTrace capture policy is a
@@ -30,7 +31,7 @@ capture_eligibility_assert_skip: fn(outcome: CaptureEligibility, reason: Capture
 #Test("capture_policy_precedence_override_package_release_before_consent") {
     loop release in ([Bool]{false, true}) {
         loop setting in
-            ([PackageCaptureSetting]{PackageCaptureSetting.Default, PackageCaptureSetting.On, PackageCaptureSetting.Off}) {
+            ([DevCaptureSetting]{DevCaptureSetting.Default, DevCaptureSetting.On, DevCaptureSetting.Off}) {
             loop override_active in ([Bool]{false, true}) {
                 loop explicit_capture in ([Bool]{false, true}) {
                     loop terminal_available in ([Bool]{false, true}) {
@@ -41,7 +42,7 @@ capture_eligibility_assert_skip: fn(outcome: CaptureEligibility, reason: Capture
                         outcome: policy.eligibility(attempt)
                         if override_active {
                             capture_eligibility_assert_skip(outcome, CaptureSkipReason.NoCaptureOverride, terminal_available)
-                        } else if setting == PackageCaptureSetting.Off {
+                        } else if setting == DevCaptureSetting.Off {
                             capture_eligibility_assert_skip(outcome, CaptureSkipReason.PackagePolicy, terminal_available)
                         } else if release && !explicit_capture {
                             capture_eligibility_assert_skip(outcome, CaptureSkipReason.ReleaseMode, terminal_available)
@@ -59,7 +60,7 @@ capture_eligibility_assert_skip: fn(outcome: CaptureEligibility, reason: Capture
 
 #Test("capture_package_on_does_not_enable_release_without_explicit_capture") {
     policy := CapturePolicy.release()
-    policy.package.capture = PackageCaptureSetting.On
+    policy.package.capture = DevCaptureSetting.On
     attempt: CaptureAttempt.safe_clock(capture_eligibility_test_identity())
     capture_eligibility_assert_skip(policy.eligibility(attempt), CaptureSkipReason.ReleaseMode, true)
     policy.explicit_capture = true
@@ -226,7 +227,7 @@ capture_eligibility_assert_skip: fn(outcome: CaptureEligibility, reason: Capture
     loop deny in 0..<3 {
         policy := CapturePolicy.release()
         if deny == 0 -> policy.no_capture = NoCaptureOverrideFact.explicit()
-        if deny <= 1 -> policy.package.capture = PackageCaptureSetting.Off
+        if deny <= 1 -> policy.package.capture = DevCaptureSetting.Off
         start: policy.start_fact(attempt)
         reason: if deny == 0 -> CaptureSkipReason.NoCaptureOverride else if deny == 1 -> CaptureSkipReason.PackagePolicy else -> CaptureSkipReason.ReleaseMode
         capture_eligibility_assert_skip(start.eligibility, reason, false)

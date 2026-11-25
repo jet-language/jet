@@ -314,7 +314,7 @@ pkg_ada_params_c: fn(params: [AdaParam]) -> String Never! {
 // GNAT runtime.
 pkg_ada_gnat_runtime_dir: fn() -[FS, Env, Exec, Time.Wait]> String ForeignBindError! {
     output: pkg_ada_capture([String]{"gnatls", "-v"}, None, "gnatls")
-    runtime_name: BinderHostOS.current().shared_library("gnat", "libgnat.so")
+    runtime_name: VariantOS.current().shared_library("gnat", "libgnat.so")
     loop line in pkg_binder_lines(String.from_bytes_lossy(output)) {
         candidate: pkg_binder_trim_end_matches(line.trim(), "/")
         if candidate.ends_with("/adalib") && files.is_abs(candidate) && files.is_file(files.join(candidate, runtime_name)) {

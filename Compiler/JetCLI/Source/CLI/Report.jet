@@ -13,7 +13,6 @@ use {
         DiagnosticCause,
         DiagnosticCryptoMisuseReason,
         DiagnosticMoment,
-        DiagnosticNoFixReasonKind,
         DiagnosticOrigin,
         DiagnosticRecord,
         DiagnosticRecordOrigin,
@@ -21,6 +20,7 @@ use {
         DiagnosticSourceTexts,
         diagnostic_from_registry,
         diagnostic_display_name,
+        diagnostic_no_fix_kind_word,
         diagnostic_record,
         diagnostic_repair_paths,
         diagnostic_source_column,
@@ -165,14 +165,6 @@ jet_cli_report_moment: fn(moment: DiagnosticMoment) -> String Never! {
         .Run -> "run"
         .Test -> "test"
         .Tool -> "tool"
-    }
-}
-
-jet_cli_report_no_fix_kind: fn(kind: DiagnosticNoFixReasonKind) -> String Never! {
-    if kind == {
-        .Behavior -> "behavior"
-        .Design -> "design"
-        .Ambiguous -> "ambiguous"
     }
 }
 
@@ -424,7 +416,7 @@ jet_cli_report_json_with: fn(diagnostic: Diagnostic, base: JetCLIReportBase?, fi
         else -> { out = "{out},\"line\":null,\"col\":null" }
     }
     if diagnostic.no_fix_reason == .Val(reason) {
-        out = "{out},\"no_fix_reason\":{{\"kind\":{jet_cli_json_string(jet_cli_report_no_fix_kind(reason.kind))},\"next\":{jet_cli_json_string(reason.next)}}}"
+        out = "{out},\"no_fix_reason\":{{\"kind\":{jet_cli_json_string(diagnostic_no_fix_kind_word(reason.kind))},\"next\":{jet_cli_json_string(reason.next)}}}"
     }
     // A cause names its own file and text, as the record does: its origin,
     // else the batch's when it has a span; one with no location names none.

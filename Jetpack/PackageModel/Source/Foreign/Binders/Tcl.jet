@@ -23,7 +23,7 @@ pkg_tcl_bind: fn(source: String, lib: String, cache: String) -[FS, Env, Exec, Ti
     root: pkg_binder_tool_root(tclsh) ?? return Err(ForeignBindError.ToolMissing("tclsh"))
     include: files.join(root, "include")
     lib_dir: files.join(root, "lib")
-    library: BinderHostOS.current().shared_library("tcl", "tcl86.dll")
+    library: VariantOS.current().shared_library("tcl", "tcl86.dll")
     if !files.is_file(files.join(include, "tcl.h")) || !files.is_file(files.join(lib_dir, library)) {
         return Err(ForeignBindError.Source("the provisioned Tcl runtime has no embeddable headers or shared library"))
     }

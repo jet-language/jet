@@ -10,7 +10,7 @@ use {
     files: core.files
     sys: core.sys
     crypto: core.crypto
-    jet_foundation.[diagnostic_display_name]
+    jet_foundation.[DiagnosticFixSafety, DiagnosticNoFixReasonKind, diagnostic_display_name, diagnostic_fix_safety_word, diagnostic_no_fix_kind_word]
 }
 
 REPORT_NAME: "jet.report"
@@ -75,41 +75,16 @@ report_texts: fn(values: [String]) -> Dyn Never! {
     Dyn.Array(items)
 }
 
-// Why a diagnostic has no machine-applicable edit. The next action is part
-// of the value, never inferred from the kind.
-NoFixReasonKind: enum {
-    Behavior,
-    Design,
-    Ambiguous,
-
-    as_str: fn(self) -> String Never! {
-        if self == {
-            .Behavior -> "behavior"
-            .Design -> "design"
-            .Ambiguous -> "ambiguous"
-        }
-    }
-
-    parse: fn(value: String) -> NoFixReasonKind ReportError! {
-        if value == {
-            "behavior" -> Ok(NoFixReasonKind.Behavior)
-            "design" -> Ok(NoFixReasonKind.Design)
-            "ambiguous" -> Ok(NoFixReasonKind.Ambiguous)
-            else -> Err(ReportError.new("unknown no-fix reason kind `{value}`"))
-        }
-    }
-}
-
 // A reviewed action for a diagnostic that cannot carry an automatic edit.
 NoFixReason: struct {
-    kind: NoFixReasonKind,
+    kind: DiagnosticNoFixReasonKind,
     next: String,
 
-    new: fn(kind: NoFixReasonKind, next: String) -> NoFixReason Never! {
+    new: fn(kind: DiagnosticNoFixReasonKind, next: String) -> NoFixReason Never! {
         NoFixReason.try_new(kind, next) ?? panic("NoFixReason::new requires a reviewed next action")
     }
 
-    try_new: fn(kind: NoFixReasonKind, next: String) -> NoFixReason ReportError! {
+    try_new: fn(kind: DiagnosticNoFixReasonKind, next: String) -> NoFixReason ReportError! {
         reason: NoFixReason{kind: kind, next: next}
         reason.validate()
         Ok(reason)
@@ -273,32 +248,6 @@ report_render_status_with_reports: fn(action: String, ok: Bool, reports: [Report
     envelope.json()
 }
 
-// Closed safety classes for machine edits.
-FixSafety: enum {
-    Formatting,
-    BehaviorPreserving,
-    APIChanging,
-    TargetChanging,
-    NeedsReview,
-
-    as_str: fn(self) -> String Never! {
-        if self == {
-            .Formatting -> "formatting"
-            .BehaviorPreserving -> "behavior-preserving"
-            .APIChanging -> "api-changing"
-            .TargetChanging -> "target-changing"
-            .NeedsReview -> "needs-review"
-        }
-    }
-
-    auto_apply: fn(self) -> Bool Never! {
-        if self == {
-            .Formatting | .BehaviorPreserving -> true
-            .APIChanging | .TargetChanging | .NeedsReview -> false
-        }
-    }
-}
-
 // The promise attached to a machine-applicable edit.
 FixApplicability: enum {
     Safe,
@@ -434,9 +383,9 @@ ReportCause: struct {
 ReportEdit: struct {
     span: ReportSpan,
     new_text: String,
-    safety: FixSafety,
+    safety: DiagnosticFixSafety,
 
-    new: fn(span: ReportSpan, new_text: String, safety: FixSafety) -> ReportEdit Never! {
+    new: fn(span: ReportSpan, new_text: String, safety: DiagnosticFixSafety) -> ReportEdit Never! {
         ReportEdit{span: span, new_text: new_text, safety: safety}
     }
 
@@ -444,7 +393,7 @@ ReportEdit: struct {
         object := [String:Dyn]{}
         object["span"] = self.span.to_tree()
         object["new_text"] = Dyn.Text(self.new_text.copy())
-        object["safety"] = Dyn.Text(self.safety.as_str())
+        object["safety"] = Dyn.Text(diagnostic_fix_safety_word(self.safety))
         Dyn.Object(object)
     }
 }
@@ -603,7 +552,7 @@ ReportEnvelope: struct {
         object["col"] = report_optional_int(self.col)
         if self.no_fix_reason == .Val(reason) {
             no_fix := [String:Dyn]{}
-            no_fix["kind"] = Dyn.Text(reason.kind.as_str())
+            no_fix["kind"] = Dyn.Text(diagnostic_no_fix_kind_word(reason.kind))
             no_fix["next"] = Dyn.Text(reason.next)
             object["no_fix_reason"] = Dyn.Object(no_fix)
         }

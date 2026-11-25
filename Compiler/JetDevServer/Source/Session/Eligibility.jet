@@ -2,6 +2,8 @@
 // Capture/Consent facts; resident Session/index adapters are C3B. Full
 // composition inherits #4433/#4403/#4393 and #4437/#4444/#4446/#4449; keep the
 // real APIs, never replace consent or Attempt with reduced carriers.
+use jet_pkg_model.[DevCaptureSetting]
+
 CapturePolicy: struct {
     mode: CaptureMode,
     package: PackageCapturePolicy,
@@ -15,11 +17,11 @@ CapturePolicy: struct {
     }
 
     development: fn() -> CapturePolicy Never! {
-        CapturePolicy.new(CaptureMode.Development, PackageCapturePolicy.new(PackageCaptureSetting.Default, CaptureBudget.new_unchecked(DEFAULT_CAPTURE_BUDGET_BYTES)), NoCaptureOverrideFact.none())
+        CapturePolicy.new(CaptureMode.Development, PackageCapturePolicy.new(DevCaptureSetting.Default, CaptureBudget.new_unchecked(DEFAULT_CAPTURE_BUDGET_BYTES)), NoCaptureOverrideFact.none())
     }
 
     release: fn() -> CapturePolicy Never! {
-        CapturePolicy.new(CaptureMode.Release, PackageCapturePolicy.new(PackageCaptureSetting.Default, CaptureBudget.new_unchecked(DEFAULT_CAPTURE_BUDGET_BYTES)), NoCaptureOverrideFact.none())
+        CapturePolicy.new(CaptureMode.Release, PackageCapturePolicy.new(DevCaptureSetting.Default, CaptureBudget.new_unchecked(DEFAULT_CAPTURE_BUDGET_BYTES)), NoCaptureOverrideFact.none())
     }
 
     budget: fn(self) -> CaptureBudget Never! { self.package.budget }
@@ -36,7 +38,7 @@ CapturePolicy: struct {
         if self.no_capture.active {
             return CaptureEligibility.Skipped{skip: CaptureSkip{reason: CaptureSkipReason.NoCaptureOverride, terminal_available: attempt.terminal_available}}
         }
-        if self.package.capture == PackageCaptureSetting.Off {
+        if self.package.capture == DevCaptureSetting.Off {
             return CaptureEligibility.Skipped{skip: CaptureSkip{reason: CaptureSkipReason.PackagePolicy, terminal_available: attempt.terminal_available}}
         }
         if self.mode.is_release() && !self.explicit_capture {

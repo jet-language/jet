@@ -131,7 +131,7 @@ ComSchema: struct {
 // Inspect the type library on a Windows host, build the automation bridge
 // archive, and render the Jet surface with its provenance record.
 pkg_com_bind: fn(input: ComTypeLibraryInput, lib: String, cache: String) -[FS, Env, Exec, Time, Time.Wait]> ComBindResult ForeignBindError! {
-    if BinderHostOS.current() != BinderHostOS.Windows {
+    if VariantOS.current() != VariantOS.Windows {
         return Err(ForeignBindError.UnsupportedHost("COM type libraries and IDispatch require a Windows host"))
     }
     if !pkg_binder_is_ident(lib) {
