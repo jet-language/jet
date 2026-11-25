@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7038,
-    "rev": 114215,
+    "rev": 114217,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -74398,6 +74398,11 @@
         {
           "at": "2026-11-25",
           "by": "Orchestrator",
+          "text": "n=22, revised 2026-11-25: the opaque-handle print crash comes from the structural derive admitting a Core handle that IR lays out opaque (FileReader too, which is not on the list), not from the list. About 70 Core handle types print correctly through their record schema or native type row, so the refusal keys on IR's own fact: a carried handle with no record schema, native type or Core-owned shape. That fact moves to JetFoundation with IR_NATIVE_TYPES and IR_RECORD_SCHEMAS as one source, which IR, Comparability and the derive all read. This also fixes a false refusal of printing a struct whose fields are printable handles (Hold{limits: EncodingLimits, how: NetShutdown})."
+        },
+        {
+          "at": "2026-11-25",
+          "by": "Orchestrator",
           "text": "n=22, decided 2026-11-25: TempDir, TempFile, FileLock, UnixListener, UnixStream, Pool, TLSStream, HTTPRequest and HTTPResponse are on sema's synthetic Printable list, but showing any of them is an internal compiler error (display of core.files.TempFile, display of Shared<…>). They leave the list. The structural derive refuses a Core type whose own handle row has no render form, through the existing derive-refusal diagnostic with a UI snapshot. They never printed, so no feature is removed, and no output format is invented. Giving these types a Display text would be a public product choice, made only by a ballot."
         },
         {
@@ -74988,7 +74993,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-24T17:01:07.086Z",
-      "updated": "2026-11-25T18:17:09.526Z",
+      "updated": "2026-11-25T18:18:52.886Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 22
     },
@@ -77265,7 +77270,7 @@
       "id": "c0clpv28",
       "num": 7031,
       "title": "Handles that read like links: relationships held as pool IDs with short, checked navigation instead of stored @T links",
-      "body": "Owner asked on 2026-11-25 for greenfield proposal item P9 as a ballot of the best-of-both design, with every downside engineered away: keep handles (Pool<T> with generational ID<T>) and views as the one way to hold a relationship, and make navigating them as short as a link. It reopens D-MEMREF1 (live links @T, unbuilt: #4500, #4756). Owner bar: Jet must be able to do everything any other language can as an end result, easy to reason about and use, with friction in proportion to how often a thing is done. Source: Docs/Proposals/2026-11-24-greenfield-language.md, Part 2, item P9 (master checkout, not yet on dev).",
+      "body": "Owner asked on 2026-11-25 for greenfield proposal item P9 as a ballot of the best-of-both design, with every downside engineered away: keep handles (Pool<T> with generational ID<T>) and views as the one way to hold a relationship, and make navigating them as short as a link. It reopens D-MEMREF1 (live links @T, already built on dev: Spellings.jet:31, Sema/Links.jet, JetIR BuildLinks.jet, runtime Links.jet, Examples/Memory/LiveLinks.jet, and used by the compiler's SemaBodyCheck; open cards #4500, #4756). Owner bar: Jet must be able to do everything any other language can as an end result, easy to reason about and use, with friction in proportion to how often a thing is done. Source: Docs/Proposals/2026-11-24-greenfield-language.md, Part 2, item P9 (master checkout, not yet on dev).",
       "kind": "feature",
       "track": "epoch",
       "epoch": "G4",
@@ -77278,7 +77283,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-25",
+          "by": "Pip",
+          "text": "Corrected: @T live links are built on dev, not unbuilt (found by the D-HANDLE-NAV1 draft)."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -77331,7 +77342,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-25T17:58:59.300Z",
-      "updated": "2026-11-25T17:58:59.300Z",
+      "updated": "2026-11-25T18:19:34.527Z",
       "updatedBy": "Pip"
     },
     {
@@ -141558,6 +141569,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-25T18:19:34.527Z",
+      "by": "Pip",
+      "action": "card.update",
+      "ref": "c0clpv28",
+      "note": "body,logEntry"
+    },
+    {
+      "at": "2026-11-25T18:18:52.887Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0mhrplj",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-25T18:17:12.350Z",
       "by": "Pip",
