@@ -60,7 +60,13 @@ runtime_duration_scale: fn(unit_int: I64) -> I64 {
 
 // CAbiRoutes:31752 source duration addition: raw i64 words, saturating.
 #Export(c) jet_i64_saturating_add: fn(left: I64, right: I64) -> I64 {
-    datetime_saturating_add(left, right)
+    if (right > I64{0} && left > I64{9223372036854775807} - right) {
+        return I64{9223372036854775807}
+    }
+    if (right < I64{0} && left < I64{-9223372036854775808} - right) {
+        return I64{-9223372036854775808}
+    }
+    left + right
 }
 
 // An integral Float inside [-2^63, 2^63) as its I64.

@@ -93,8 +93,7 @@ extern int64_t jet_rt_record_new_duration(int64_t);
 extern int64_t jet_rt_record_new_encoding_limits(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t);
 extern int64_t jet_rt_record_new_data_limits(int64_t, int64_t, int64_t, int64_t, int64_t);
 extern int64_t jet_rt_record_new_io_context(int64_t, int64_t, int64_t, int64_t);
-extern int64_t jet_rt_record_new_jet_date(int64_t, int64_t, int64_t);
-extern int64_t jet_rt_record_new_jet_period(int64_t, int64_t, int64_t);
+extern int64_t jet_rt_record_new_alloc_error(int64_t, int64_t);
 extern int64_t jet_rt_record_new_jet_memo_stats(int64_t, int64_t, int64_t, int64_t);
 extern int64_t jet_rt_record_new_encoding_limits(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t);
 extern int64_t jet_rt_record_new_log_span(int64_t, int64_t);
@@ -228,7 +227,7 @@ static void run_int_stop(int64_t test) {
     } else if (test >= 19 && test <= 21) {
         assert(jet_loop_range_init(test == 20 ? big : 0, test == 21 ? big : 1, test == 19 ? big : 1, 1, 0) == 0);
     } else if (test == 22) assert(jet_rt_record_new_jet_async_policy(big, 0) == 0);
-    else if (test == 23) assert(jet_rt_record_new_jet_period(big, 1, 1) == 0);
+    else if (test == 23) assert(jet_rt_record_new_jet_memo_stats(1, big, 1, 0) == 0);
     else if (test == 24) {
         /* Canonical Dyn keeps large exact Int instead of narrowing it. */
         int64_t tree = jet_rt_record_new_dyn_int(big);
@@ -259,8 +258,8 @@ static void run_int_stop(int64_t test) {
     } else if (test == 40) assert(jet_rt_record_new_io_context(0, 0, WORD(&big), 0) == 0);
     else if (test == 41) jet_socket_stream_timeout_set_raw(0, 1, big);
     else if (test == 42) jet_udp_socket_timeout_set_raw(0, big);
-    else if (test == 43) assert(jet_rt_record_new_jet_date(2026, 10, big) == 0);
-    else if (test == 44) assert(jet_rt_record_new_jet_period(1, 1, big) == 0);
+    else if (test == 43) assert(jet_rt_record_new_terminal_size(big, 24) == 0);
+    else if (test == 44) assert(jet_rt_record_new_alloc_error(big, WORD(&key)) == 0);
     else if (test == 45) assert(jet_rt_record_new_jet_memo_stats(big, 1, 1, 0) == 0);
     else if (test == 46) assert(jet_rt_record_new_jet_memo_stats(1, 1, big, 0) == 0);
     else if (test == 47) assert(jet_rt_record_new_encoding_limits(1, 1, 1, WORD(&one), 1, big) == 0);
