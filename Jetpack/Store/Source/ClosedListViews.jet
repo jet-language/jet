@@ -1,0 +1,15 @@
+// Checks for the Store closed-list views whose vocabulary is in a sibling
+// directory. An embed path may not contain `..`, so a view in Seal/ cannot
+// embed its vocabulary from Archive/. This file sits above both and holds each
+// such check. Each constant stops the build and names any view case its
+// vocabulary lacks, apart from the cases listed in `outside`.
+use jet_foundation.[effect_vocabulary_view_count]
+
+// BuildIOKind picks from StoreError: the action cache branches on the store's
+// own failure kinds. `NotADirectory` is the cache's own kind, for a path that
+// must be a directory and is not.
+BUILD_IO_KIND_COUNT: #run effect_vocabulary_view_count("Build/Cache.jet", embed_file("Build/Cache.jet"), "BuildIOKind", "Hangar/StoreError.jet", embed_file("Hangar/StoreError.jet"), "StoreError", [String]{"NotADirectory"})
+
+// SealRootKind picks from HangarArchiveNodeKind: every node a seal names is
+// one an archive holds.
+SEAL_ROOT_KIND_COUNT: #run effect_vocabulary_view_count("Seal/SealRecord.jet", embed_file("Seal/SealRecord.jet"), "SealRootKind", "Archive/HangarArchiveFormat.jet", embed_file("Archive/HangarArchiveFormat.jet"), "HangarArchiveNodeKind", [String]{})

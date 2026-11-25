@@ -5,7 +5,7 @@
 // for explanation. It lives beside the §6 merge engine because it carries
 // compiler spans and diagnostics, which the compiler-free Foundation area may
 // not reference.
-use jet_foundation.[Diagnostic, Item, PolicyValue, Span, diagnostic_from_registry, overflow_mode_name]
+use jet_foundation.[Diagnostic, Item, PolicyValue, Span, diagnostic_from_registry, effect_vocabulary_view_count, overflow_mode_name]
 
 // The six lexical source rungs used by every build fact. Package is the
 // outermost source and Item is the nearest source.
@@ -40,6 +40,12 @@ SourceScope: enum {
         }
     }
 }
+
+// SourceScope picks from the Prelude's Site, the places a marker is written,
+// plus `Item`, the nearest rung, which stands for any item a fact sits on.
+// While the compiler builds, SOURCE_SCOPE_COUNT stops the build naming any
+// other case Site lacks.
+SOURCE_SCOPE_COUNT: #run effect_vocabulary_view_count("Merge/FactLaw.jet", embed_file("FactLaw.jet"), "SourceScope", "Prelude.jet", embed_file("toolchain:Core/Prelude/Prelude.jet"), "Site", [String]{"Item"})
 
 // Contribution layers are ordered from least to most explicit. A later layer
 // may replace an earlier layer; two different values at one deciding layer

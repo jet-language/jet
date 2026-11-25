@@ -3,6 +3,8 @@
 // `report_json_string`). Producers build typed values; only this file turns
 // them into JSON bytes.
 
+use jet_foundation.[effect_vocabulary_view_count]
+
 JET_CLI_STATUS_SCHEMA: "jet.status/v1"
 
 // A typed JSON value accepted as an action-specific status field; `Float`
@@ -16,6 +18,12 @@ JetCLIStatusValue: enum {
     Array(values: [JetCLIStatusValue]),
     Object(fields: [JetCLIStatusField]),
 }
+
+// JetCLIStatusValue picks from SerdeWireShape, the JSON value shapes; its
+// `Integer` is the wire shape's `Int`. While the compiler builds,
+// JET_CLI_STATUS_VALUE_COUNT stops the build naming any other case
+// SerdeWireShape lacks.
+JET_CLI_STATUS_VALUE_COUNT: #run effect_vocabulary_view_count("CLI/Status.jet", embed_file("Status.jet"), "JetCLIStatusValue", "AST/Items.jet", embed_file("toolchain:Compiler/JetFoundation/Source/AST/Items.jet"), "SerdeWireShape", [String]{"Integer"})
 
 // One ordered, uniquely named field of a status object.
 JetCLIStatusField: struct {

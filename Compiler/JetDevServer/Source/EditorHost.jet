@@ -5,7 +5,7 @@
 use {
     editor_json: core.encoding.json
     core.encoding.[Dyn]
-    jet_foundation.[foundation_json_append, foundation_json_integer, foundation_json_quote, foundation_parse_protocol_json_with_limit]
+    jet_foundation.[effect_vocabulary_view_count, foundation_json_append, foundation_json_integer, foundation_json_quote, foundation_parse_protocol_json_with_limit]
 }
 
 EDITOR_PROTOCOL_VERSION: U32{1}
@@ -176,6 +176,12 @@ EditorFactValue: enum {
         }
     }
 }
+
+// EditorFactValue picks from SerdeWireShape, the JSON value shapes; its
+// `Integer` is the wire shape's `Int`. While the compiler builds,
+// EDITOR_FACT_VALUE_COUNT stops the build naming any other case
+// SerdeWireShape lacks.
+EDITOR_FACT_VALUE_COUNT: #run effect_vocabulary_view_count("EditorHost.jet", embed_file("EditorHost.jet"), "EditorFactValue", "AST/Items.jet", embed_file("toolchain:Compiler/JetFoundation/Source/AST/Items.jet"), "SerdeWireShape", [String]{"Integer"})
 
 EditorStreamEvent: struct {
     sequence: U64,

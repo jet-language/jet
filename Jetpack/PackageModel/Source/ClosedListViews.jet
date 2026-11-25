@@ -1,0 +1,10 @@
+// Checks for the PackageModel closed-list views whose vocabulary is in a
+// sibling directory. An embed path may not contain `..`, so a view in
+// Manifest/ cannot embed its vocabulary from Lock/. This file sits above both
+// and holds each such check. Each constant stops the build and names any view
+// case its vocabulary lacks, apart from the cases listed in `outside`.
+use jet_foundation.[effect_vocabulary_view_count]
+
+// DepSpec picks from LockSource: each source a manifest names for a dependency
+// is a source the lock records.
+DEP_SPEC_COUNT: #run effect_vocabulary_view_count("Manifest/Manifest.jet", embed_file("Manifest/Manifest.jet"), "DepSpec", "Lock/Schema.jet", embed_file("Lock/Schema.jet"), "LockSource", [String]{})
