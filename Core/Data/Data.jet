@@ -595,7 +595,7 @@ DataGroupedQuery: struct<T, K> {
 // `data.track(rows, key)`: owned rows with unique keys, changed in place by
 // `insert`, `replace` and `remove`. The table is shared, so a query over it
 // reads the rows as they are when it runs, and a watch of that query
-// maintains its result from the table's changes (D-QUERY-LIVE1).
+// maintains its result from the table's changes.
 DataTracked: struct<T, K: Comparable> {
     __table: Shared<TrackedTable<T, K>>,
 
@@ -660,7 +660,7 @@ priv TrackedDelta: struct<T> {
     changes: [TrackedChange<T>],
 }
 
-// How a watch maintains a query's rows (D-QUERY-LIVE1, #2964). A query over
+// How a watch maintains a query's rows. A query over
 // a tracked table that only filters and sorts has the table's `reader` and
 // its `steps`, and a watch applies each change to the rows it holds
 // (watch_tracked); a grouped reducer over such a query maintains its groups
@@ -2124,7 +2124,7 @@ priv group_total: fn<V>(values: [V], add: Shared<QueryAddCell<V>>) -> V DataErro
     query_live<Group<K, Float>>(averaged, live)
 }
 
-// ---- maintained queries (QueryLive, D-QUERY-LIVE1, #2964) ----
+// ---- maintained queries (QueryLive) ----
 
 priv query_maintained: fn<T>(query: Query<T>) -> Bool Never! {
     _: query.__live.copy() ?? return false
@@ -2608,8 +2608,8 @@ priv watch_group_view: fn<T, K: Comparable, V>(reduced: ^^GroupWatchState<K, V>,
     Ok(WatchView<Group<K, V>>{entries: entries, revision: revision, mode: mode.copy(), recomputed: recomputed, changed: true, retained_rows: retained_rows, commit: fn() { target.guard_edit().value = published.copy() }})
 }
 
-// `query.watch()` (DataWatch): no maintained source is Unsupported, the
-// fallback #2964 gives a query it cannot maintain.
+// `query.watch()` (DataWatch): a query with no maintained source is
+// Unsupported.
 priv query_watch: fn<T>(query: Query<T>) -> DataWatch<T> DataError! {
     source: query_watch_source<T>(query) ?? return Err(data_error(DataErrorKind.Unsupported, "watch requires a maintained data.track source", "query.watch"))
     view: source.initial() ?? return Err(err)
