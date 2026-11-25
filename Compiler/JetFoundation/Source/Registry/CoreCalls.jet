@@ -14,12 +14,6 @@ CoreCallFallibility: enum {
     Sema,
 }
 
-CoreCallCompletionKind: enum {
-    Synchronous,
-    Pending,
-    Event,
-}
-
 CoreCapabilityKind: enum {
     Pure,
     NativeRequired,
@@ -58,17 +52,6 @@ CoreCallCoverage: struct {
     bits: Int,
 }
 
-CoreCallResourceAccess: struct {
-    argument: Int,
-    mode: AccessConvention,
-}
-
-CoreCallCompletion: struct {
-    kind: CoreCallCompletionKind,
-    token: String?,
-    provider: String,
-}
-
 CoreCapabilityContract: struct {
     kind: CoreCapabilityKind,
     provider: String?,
@@ -88,8 +71,6 @@ CoreCallRecord: struct {
     member: String,
     receiver_types: [String],
     signature: CoreCallSignature,
-    frame_accesses: [CoreCallResourceAccess],
-    frame_completion: CoreCallCompletion?,
     fallibility: CoreCallFallibility,
     // An adapter row's effects (`Net`, `Time.Wait`), named as
     // EFFECT_VOCABULARY_ROOTS names them: a root, unless one of its leaves

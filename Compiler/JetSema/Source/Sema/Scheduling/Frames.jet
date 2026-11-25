@@ -4,8 +4,6 @@
 use jet_foundation.[
     AccessConvention,
     CallArg,
-    CoreCallCompletion,
-    CoreCallCompletionKind,
     CoreCallRecord,
     DerivationPayload,
     DerivationRecord,
@@ -63,53 +61,13 @@ SemaFrameOperationFact: struct {
     error: String?,
 }
 
-// Project the registered Core access contract onto checked argument places.
-// The caller supplies the canonical call name and source byte index.
-sema_frame_core_call_operation: fn(record: CoreCallRecord, name: String, args: [CallArg], source_index: Int) -> SemaFrameOperationFact Never! {
-    accesses := [ResourceAccess]{}
-    loop access in record.frame_accesses {
-        if access.argument < 0 || access.argument >= args.len() -> next
-        identity: sema_frame_resource_identity(args[access.argument].expr) ?? next
-        accesses.push(
-            ResourceAccess{
-                resource: identity,
-                mode: access.mode,
-                region: ResourceRegion.Whole,
-                layout: None,
-                temporary: false,
-            },
-        )
-    }
-    completion := FrameCompletion.Synchronous
-    completion_provider := String?{None}
-    if record.frame_completion == {
-        .Val(_) -> {
-            metadata: record.frame_completion ?? CoreCallCompletion{kind: CoreCallCompletionKind.Synchronous, token: None, provider: ""}
-            completion_provider = Val(metadata.provider)
-            if metadata.kind == {
-                .Synchronous -> {}
-                .Pending -> {
-                    token: metadata.token ?? return SemaFrameOperationFact{operation: None, error: Val("core frame primitive `{name}` has pending completion without a checked token")}
-                    completion = FrameCompletion.Pending{token: token}
-                }
-                .Event -> {
-                    token: metadata.token ?? return SemaFrameOperationFact{operation: None, error: Val("core frame primitive `{name}` has event completion without a checked token")}
-                    completion = FrameCompletion.Event{token: token}
-                }
-            }
-        }
-        .None -> {
-            if accesses.len() > 0 {
-                return SemaFrameOperationFact{operation: None, error: Val("core frame primitive `{name}` has resource accesses but no checked completion metadata")}
-            }
-        }
-    }
-    external_effect := record.effects.len() > 0
-    if !external_effect && accesses.len() == 0 {
-        return SemaFrameOperationFact{operation: None, error: None}
-    }
+// A Core call row as a frame operation: an external effect that completes
+// synchronously. The caller supplies the canonical call name and source byte
+// index.
+sema_frame_core_call_operation: fn(record: CoreCallRecord, name: String, source_index: Int) -> SemaFrameOperationFact Never! {
+    if record.effects.len() == 0 -> return SemaFrameOperationFact{operation: None, error: None}
     SemaFrameOperationFact{
-        operation: Val(FrameOperation{name: name, source_index: source_index, accesses: accesses, completion: completion, completion_provider: completion_provider, external_effect: external_effect}),
+        operation: Val(FrameOperation{name: name, source_index: source_index, accesses: [ResourceAccess]{}, completion: FrameCompletion.Synchronous, completion_provider: None, external_effect: true}),
         error: None,
     }
 }

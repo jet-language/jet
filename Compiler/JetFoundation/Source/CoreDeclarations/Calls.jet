@@ -401,38 +401,6 @@ core_decl_coverage: fn(expression: String, context: String) -> CoreCallCoverage 
     Ok(CoreCallCoverage{bits: bits})
 }
 
-core_decl_resource_access: fn(expression: String, context: String) -> CoreCallResourceAccess CoreDeclarationError! {
-    call: core_decl_whole_call(expression, context, "CoreCallResourceAccess") ?? return Err(err)
-    if call.args.len() != 1 {
-        return Err(core_decl_fail("unsupported CoreCallResourceAccess in {context}"))
-    }
-    mode: if call.name == {
-        "CoreCallResourceAccess.read" -> AccessConvention.Read
-        "CoreCallResourceAccess.write" -> AccessConvention.Write
-        "CoreCallResourceAccess.move_" -> AccessConvention.Move
-        else -> {
-            return Err(core_decl_fail("unsupported CoreCallResourceAccess in {context}: {call.name}"))
-        }
-    }
-    Ok(CoreCallResourceAccess{argument: core_decl_rust_int(call.args[0], context) ?? return Err(err), mode: mode})
-}
-
-core_decl_completion: fn(expression: String, context: String, constants: CoreDeclTexts) -> CoreCallCompletion CoreDeclarationError! {
-    call: core_decl_whole_call(expression, context, "CoreCallCompletion") ?? return Err(err)
-    kind: if call.name == {
-        "CoreCallCompletion.synchronous" -> if call.args.len() == 1 -> Val(CoreCallCompletionKind.Synchronous) else -> None
-        "CoreCallCompletion.pending" -> if call.args.len() == 2 -> Val(CoreCallCompletionKind.Pending) else -> None
-        "CoreCallCompletion.event" -> if call.args.len() == 2 -> Val(CoreCallCompletionKind.Event) else -> None
-        else -> None
-    }
-    done: kind ?? return Err(core_decl_fail("unsupported CoreCallCompletion in {context}: {call.name}"))
-    provider: core_decl_rust_string(call.args[call.args.len() - 1], context, constants) ?? return Err(err)
-    if call.args.len() == 1 {
-        return Ok(CoreCallCompletion{kind: done, token: None, provider: provider})
-    }
-    Ok(CoreCallCompletion{kind: done, token: Val(core_decl_rust_string(call.args[0], context, constants) ?? return Err(err)), provider: provider})
-}
-
 core_decl_pure_capability: fn() -> CoreCapabilityContract Never! {
     CoreCapabilityContract{kind: CoreCapabilityKind.Pure, provider: None, fallback: None, failure: None}
 }
@@ -601,7 +569,7 @@ core_decl_plain_record: fn(module_name: String, member: String, symbol: String, 
     }
     if leaf != "" -> effects.push(leaf)
     arity: mask.len()
-    CoreCallRecord{module_name: module_name, member: member, receiver_types: [String]{}, signature: CoreCallSignature{arity: arity, max_arity: arity, borrow_mask: mask}, frame_accesses: [CoreCallResourceAccess]{}, frame_completion: None, fallibility: CoreCallFallibility.Sema, effects: effects, capability: capability, pure_route: CoreCallPureRoute.NoPureRoute, symbol: CoreCallSymbol.Prelude{name: symbol}, source_target: None, coverage: CoreCallCoverage{bits: CORE_CALL_COVERAGE_KNOWN}, aot_direct: true, native_int_result: false, ui_capabilities: [String]{}, marker: None, authority: None}
+    CoreCallRecord{module_name: module_name, member: member, receiver_types: [String]{}, signature: CoreCallSignature{arity: arity, max_arity: arity, borrow_mask: mask}, fallibility: CoreCallFallibility.Sema, effects: effects, capability: capability, pure_route: CoreCallPureRoute.NoPureRoute, symbol: CoreCallSymbol.Prelude{name: symbol}, source_target: None, coverage: CoreCallCoverage{bits: CORE_CALL_COVERAGE_KNOWN}, aot_direct: true, native_int_result: false, ui_capabilities: [String]{}, marker: None, authority: None}
 }
 
 // A record the Jet source of its module defines: no Prelude symbol, no
@@ -658,7 +626,7 @@ core_decl_constructor_record: fn(call: CoreDeclRustCall, context: String, consta
             core_decl_require_jet_route(call.args[3], context) ?? return Err(err)
             mask: core_decl_rust_bools(call.args[4], context) ?? return Err(err)
             arity: mask.len()
-            Ok(CoreCallRecord{module_name: "", member: core_decl_rust_string(call.args[1], context, constants) ?? return Err(err), receiver_types: core_decl_rust_strings(call.args[0], context, constants) ?? return Err(err), signature: CoreCallSignature{arity: arity, max_arity: arity, borrow_mask: mask}, frame_accesses: [CoreCallResourceAccess]{}, frame_completion: None, fallibility: CoreCallFallibility.Sema, effects: [String]{}, capability: core_decl_pure_capability(), pure_route: CoreCallPureRoute.NoPureRoute, symbol: CoreCallSymbol.Prelude{name: core_decl_rust_string(call.args[2], context, constants) ?? return Err(err)}, source_target: None, coverage: CoreCallCoverage{bits: CORE_CALL_COVERAGE_KNOWN}, aot_direct: false, native_int_result: false, ui_capabilities: [String]{}, marker: None, authority: None})
+            Ok(CoreCallRecord{module_name: "", member: core_decl_rust_string(call.args[1], context, constants) ?? return Err(err), receiver_types: core_decl_rust_strings(call.args[0], context, constants) ?? return Err(err), signature: CoreCallSignature{arity: arity, max_arity: arity, borrow_mask: mask}, fallibility: CoreCallFallibility.Sema, effects: [String]{}, capability: core_decl_pure_capability(), pure_route: CoreCallPureRoute.NoPureRoute, symbol: CoreCallSymbol.Prelude{name: core_decl_rust_string(call.args[2], context, constants) ?? return Err(err)}, source_target: None, coverage: CoreCallCoverage{bits: CORE_CALL_COVERAGE_KNOWN}, aot_direct: false, native_int_result: false, ui_capabilities: [String]{}, marker: None, authority: None})
         }
         else -> Err(core_decl_fail("unsupported CoreCallRecord constructor in {context}: {call.name}"))
     }
@@ -681,14 +649,6 @@ core_decl_apply_builder: fn(record: CoreCallRecord, call: CoreDeclRustCall, cont
     if call.name == {
         "with_max_arity" -> built.signature.max_arity = core_decl_rust_int(argument, context) ?? return Err(err)
         "with_pure_route" -> built.pure_route = core_decl_pure_route(argument, context) ?? return Err(err)
-        "with_frame_accesses" -> {
-            accesses := [CoreCallResourceAccess]{}
-            loop item in core_decl_rust_slice(argument, context) ?? return Err(err) {
-                accesses.push(core_decl_resource_access(item, context) ?? return Err(err))
-            }
-            built.frame_accesses = accesses
-        }
-        "with_frame_completion" -> built.frame_completion = Val(core_decl_completion(argument, context, constants) ?? return Err(err))
         "with_capability" -> built.capability = core_decl_capability(argument, context, constants) ?? return Err(err)
         "with_ui_capabilities" -> built.ui_capabilities = core_decl_rust_strings(argument, context, constants) ?? return Err(err)
         "with_source_target" -> built.source_target = Val(core_decl_rust_string(argument, context, constants) ?? return Err(err))

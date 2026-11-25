@@ -4784,34 +4784,6 @@ body_codec_get_bodyplace: fn(bytes: [U8], input: ^BodyCodecIn) -> BodyPlace Neve
     }
 }
 
-body_codec_put_list_corecallresourceaccess: fn(out: ^BodyCodecOut, values: [CoreCallResourceAccess]) Never! {
-    body_codec_put_count(out, values.len())
-    loop value in values -> body_codec_put_corecallresourceaccess(out, value)
-}
-
-body_codec_get_list_corecallresourceaccess: fn(bytes: [U8], input: ^BodyCodecIn) -> [CoreCallResourceAccess] Never! {
-    count: body_codec_get_count(bytes, input, 1)
-    values := [CoreCallResourceAccess]{}
-    loop _ in 0..<count -> values.push(body_codec_get_corecallresourceaccess(bytes, input))
-    values
-}
-
-body_codec_put_opt_corecallcompletion: fn(out: ^BodyCodecOut, value: CoreCallCompletion?) Never! {
-    if value == .Val(inner) {
-        body_codec_put_bool(out, true)
-        body_codec_put_corecallcompletion(out, inner)
-        return
-    }
-    body_codec_put_bool(out, false)
-}
-
-body_codec_get_opt_corecallcompletion: fn(bytes: [U8], input: ^BodyCodecIn) -> CoreCallCompletion? Never! {
-    if body_codec_get_bool(bytes, input) {
-        return Val(body_codec_get_corecallcompletion(bytes, input))
-    }
-    None
-}
-
 body_codec_put_opt_coremarkerapplication: fn(out: ^BodyCodecOut, value: CoreMarkerApplication?) Never! {
     if value == .Val(inner) {
         body_codec_put_bool(out, true)
@@ -4849,8 +4821,6 @@ body_codec_put_corecallrecord: fn(out: ^BodyCodecOut, value: CoreCallRecord) Nev
     body_codec_put_string(out, value.member)
     body_codec_put_list_string(out, value.receiver_types)
     body_codec_put_corecallsignature(out, value.signature)
-    body_codec_put_list_corecallresourceaccess(out, value.frame_accesses)
-    body_codec_put_opt_corecallcompletion(out, value.frame_completion)
     body_codec_put_corecallfallibility(out, value.fallibility)
     body_codec_put_list_string(out, value.effects)
     body_codec_put_corecapabilitycontract(out, value.capability)
@@ -4871,22 +4841,20 @@ body_codec_get_corecallrecord: fn(bytes: [U8], input: ^BodyCodecIn) -> CoreCallR
     f1: body_codec_get_string(bytes, input)
     f2: body_codec_get_list_string(bytes, input)
     f3: body_codec_get_corecallsignature(bytes, input)
-    f4: body_codec_get_list_corecallresourceaccess(bytes, input)
-    f5: body_codec_get_opt_corecallcompletion(bytes, input)
-    f6: body_codec_get_corecallfallibility(bytes, input)
-    f7: body_codec_get_list_string(bytes, input)
-    f8: body_codec_get_corecapabilitycontract(bytes, input)
-    f9: body_codec_get_corecallpureroute(bytes, input)
-    f10: body_codec_get_corecallsymbol(bytes, input)
-    f11: body_codec_get_opt_string(bytes, input)
-    f12: body_codec_get_opt_string(bytes, input)
-    f13: body_codec_get_corecallcoverage(bytes, input)
-    f14: body_codec_get_bool(bytes, input)
-    f15: body_codec_get_bool(bytes, input)
-    f16: body_codec_get_list_string(bytes, input)
-    f17: body_codec_get_opt_coremarkerapplication(bytes, input)
-    f18: body_codec_get_opt_authoritydecision(bytes, input)
-    CoreCallRecord{module_name: f0, member: f1, receiver_types: f2, signature: f3, frame_accesses: f4, frame_completion: f5, fallibility: f6, effects: f7, capability: f8, pure_route: f9, symbol: f10, source_target: f11, source_role: f12, coverage: f13, aot_direct: f14, native_int_result: f15, ui_capabilities: f16, marker: f17, authority: f18}
+    f4: body_codec_get_corecallfallibility(bytes, input)
+    f5: body_codec_get_list_string(bytes, input)
+    f6: body_codec_get_corecapabilitycontract(bytes, input)
+    f7: body_codec_get_corecallpureroute(bytes, input)
+    f8: body_codec_get_corecallsymbol(bytes, input)
+    f9: body_codec_get_opt_string(bytes, input)
+    f10: body_codec_get_opt_string(bytes, input)
+    f11: body_codec_get_corecallcoverage(bytes, input)
+    f12: body_codec_get_bool(bytes, input)
+    f13: body_codec_get_bool(bytes, input)
+    f14: body_codec_get_list_string(bytes, input)
+    f15: body_codec_get_opt_coremarkerapplication(bytes, input)
+    f16: body_codec_get_opt_authoritydecision(bytes, input)
+    CoreCallRecord{module_name: f0, member: f1, receiver_types: f2, signature: f3, fallibility: f4, effects: f5, capability: f6, pure_route: f7, symbol: f8, source_target: f9, source_role: f10, coverage: f11, aot_direct: f12, native_int_result: f13, ui_capabilities: f14, marker: f15, authority: f16}
 }
 
 body_codec_put_corecallsignature: fn(out: ^BodyCodecOut, value: CoreCallSignature) Never! {
@@ -4900,47 +4868,6 @@ body_codec_get_corecallsignature: fn(bytes: [U8], input: ^BodyCodecIn) -> CoreCa
     f1: body_codec_get_int(bytes, input)
     f2: body_codec_get_list_bool(bytes, input)
     CoreCallSignature{arity: f0, max_arity: f1, borrow_mask: f2}
-}
-
-body_codec_put_corecallresourceaccess: fn(out: ^BodyCodecOut, value: CoreCallResourceAccess) Never! {
-    body_codec_put_int(out, value.argument)
-    body_codec_put_accessconvention(out, value.mode)
-}
-
-body_codec_get_corecallresourceaccess: fn(bytes: [U8], input: ^BodyCodecIn) -> CoreCallResourceAccess Never! {
-    f0: body_codec_get_int(bytes, input)
-    f1: body_codec_get_accessconvention(bytes, input)
-    CoreCallResourceAccess{argument: f0, mode: f1}
-}
-
-body_codec_put_corecallcompletion: fn(out: ^BodyCodecOut, value: CoreCallCompletion) Never! {
-    body_codec_put_corecallcompletionkind(out, value.kind)
-    body_codec_put_opt_string(out, value.token)
-    body_codec_put_string(out, value.provider)
-}
-
-body_codec_get_corecallcompletion: fn(bytes: [U8], input: ^BodyCodecIn) -> CoreCallCompletion Never! {
-    f0: body_codec_get_corecallcompletionkind(bytes, input)
-    f1: body_codec_get_opt_string(bytes, input)
-    f2: body_codec_get_string(bytes, input)
-    CoreCallCompletion{kind: f0, token: f1, provider: f2}
-}
-
-body_codec_put_corecallcompletionkind: fn(out: ^BodyCodecOut, value: CoreCallCompletionKind) Never! {
-    if value == {
-        .Synchronous -> { body_codec_put_tag(out, 0) }
-        .Pending -> { body_codec_put_tag(out, 1) }
-        .Event -> body_codec_put_tag(out, 2)
-    }
-}
-
-body_codec_get_corecallcompletionkind: fn(bytes: [U8], input: ^BodyCodecIn) -> CoreCallCompletionKind Never! {
-    position: body_codec_get_tag(bytes, input, 3, 0)
-    if position == {
-        1 -> CoreCallCompletionKind.Pending
-        2 -> CoreCallCompletionKind.Event
-        else -> CoreCallCompletionKind.Synchronous
-    }
 }
 
 body_codec_put_corecallfallibility: fn(out: ^BodyCodecOut, value: CoreCallFallibility) Never! {
