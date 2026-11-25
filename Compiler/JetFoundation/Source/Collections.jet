@@ -22,7 +22,7 @@ compiler_transfer_rows: fn<T>(to: ^[T], from: ^[T]) Never! {
     to.try_reserve(from.len()) ?? ()
     from.reverse()
     loop {
-        row := from.pop() ?? break
+        row: from.pop() ?? break
         to.push(row)
     }
     from = [T]{}
@@ -55,12 +55,12 @@ compiler_apply_order: fn<T>(rows: ^[T], order: [Int]) Never! {
     loop index in 0..<count -> destinations[order[index]] = index
     loop rows.len() > 0 {
         original: rows.len() - 1
-        row := rows.pop() ?? break
+        row: rows.pop() ?? break
         slots[count - 1 - destinations[original]] = Val(row.move())
     }
     loop {
-        slot := slots.pop() ?? break
-        row := slot.move() ?? panic("a compiler row permutation left an empty slot")
+        slot: slots.pop() ?? break
+        row: slot.move() ?? panic("a compiler row permutation left an empty slot")
         rows.push(row)
     }
 }
@@ -74,7 +74,7 @@ compiler_take_rows: fn<T>(rows: ^[T]) -> [T] Never! {
     taken := [T]{}
     taken.try_reserve(rows.len()) ?? ()
     loop {
-        row := rows.pop() ?? break
+        row: rows.pop() ?? break
         taken.push(row)
     }
     rows = [T]{}
@@ -832,7 +832,7 @@ sema_collection_method_contract_fast: fn(receiver: Type, kind: SemaCollectionKin
 // receiver-specific access and callback positions resolved.
 sema_collection_method_contract: fn(receiver: Type, method: String) -> SemaCollectionMethodContract? {
     kind: sema_collection_kind(receiver) ?? return None
-    family := sema_collection_family(kind)
+    family: sema_collection_family(kind)
     if sema_collection_method_contract_fast(receiver, kind, family, method) == .Val(fast) {
         return Val(fast)
     }
@@ -842,7 +842,7 @@ sema_collection_method_contract: fn(receiver: Type, method: String) -> SemaColle
 // The table is a read parameter, so the scan reads its rows in place.
 sema_collection_method_contract_in: fn(rows: [CollectionOperationRow], receiver: Type, method: String) -> SemaCollectionMethodContract? {
     kind: sema_collection_kind(receiver) ?? return None
-    family := sema_collection_family(kind)
+    family: sema_collection_family(kind)
     loop row in rows {
         if row.name == method && row.status != CollectionStatus.Proposed && (collection_receivers_accept(row.receivers, family) || collection_window_write(receiver, row)) {
             callbacks := [Int]{}
@@ -889,8 +889,8 @@ sema_collection_same_kind: fn(kind: SemaCollectionKind, element: Type) -> Type N
 
 sema_collection_method_argument_type: fn(contract: SemaCollectionMethodContract, index: Int, seed: Type?, comparator: Bool) -> Type? {
     if index < 0 || index >= contract.row.args.len() -> return None
-    element := sema_collection_kind_element(contract.kind)
-    key := sema_collection_kind_key(contract.kind)
+    element: sema_collection_kind_element(contract.kind)
+    key: sema_collection_kind_key(contract.kind)
     seed_ty: seed ?? Type.Int
     if contract.row.args[index] == {
         .Element | .Value -> Val(element)
@@ -930,10 +930,10 @@ sema_collection_method_argument_type: fn(contract: SemaCollectionMethodContract,
 // Option payload stays an Option), and a Result callback ends a map at its
 // first error. Everywhere else the callback's type is the value's type.
 sema_collection_method_result_type: fn(contract: SemaCollectionMethodContract, callback_return: Type?, seed: Type?) -> Type? {
-    element := sema_collection_kind_element(contract.kind)
-    key := sema_collection_kind_key(contract.kind)
-    family := sema_collection_family(contract.kind)
-    eager := family == CollectionReceivers.List || family == CollectionReceivers.View
+    element: sema_collection_kind_element(contract.kind)
+    key: sema_collection_kind_key(contract.kind)
+    family: sema_collection_family(contract.kind)
+    eager: family == CollectionReceivers.List || family == CollectionReceivers.View
     callback: callback_return ?? Type.Named{name: "Unit"}
     if contract.row.result == {
         // A Result callback's first error ends a sequence `each` (`Unit E!`).
@@ -986,7 +986,7 @@ sema_collection_method_result_type: fn(contract: SemaCollectionMethodContract, c
             .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> Val(if eager -> Type.List{element: callback} else -> sema_collection_output_iter(contract, callback))
         }
         .Filtered -> {
-            filtered := if eager -> Type.List{element: element} else -> sema_collection_output_iter(contract, element)
+            filtered: if eager -> Type.List{element: element} else -> sema_collection_output_iter(contract, element)
             sema_collection_filtered(filtered, callback)
         }
         .ListMapped -> if callback == {
@@ -1064,16 +1064,16 @@ sema_collection_filtered: fn(filtered: Type, callback: Type) -> Type? {
 // `literal_remove_mode` is the removal mode a literal `RemoveBy` selector fixed;
 // only a run-time selector keeps the dynamic two-kernel removal.
 sema_collection_method_operation: fn(contract: SemaCollectionMethodContract, argument_count: Int, literal_remove_mode: TListRemoveMode?, line: Int, callback_return: Type?, callback_mutable: Bool, comparator: Bool) -> SemaCollectionOperation Never! {
-    element := sema_collection_kind_element(contract.kind)
-    is_view := sema_collection_family(contract.kind) == CollectionReceivers.View
-    is_float := element == Type.Float || element == Type.Float32
-    is_f32 := element == Type.Float32
+    element: sema_collection_kind_element(contract.kind)
+    is_view: sema_collection_family(contract.kind) == CollectionReceivers.View
+    is_float: element == Type.Float || element == Type.Float32
+    is_f32: element == Type.Float32
     callback: callback_return ?? Type.Named{name: "Unit"}
-    fallible := if callback == {
+    fallible: if callback == {
         .Result(_, error) -> error != Type.Named{name: "Never"}
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
-    remove_mode := if argument_count == 1 -> TListRemoveMode.Value else -> literal_remove_mode ?? TListRemoveMode.Dynamic
+    remove_mode: if argument_count == 1 -> TListRemoveMode.Value else -> literal_remove_mode ?? TListRemoveMode.Dynamic
     if contract.row.op == {
         // copy: `op` is a payload of read parameter `contract`, which keeps the original; field `operation` of the new SemaCollectionOperation.Builtin owns this one
         .Builtin(op) -> SemaCollectionOperation.Builtin{operation: op.copy()}

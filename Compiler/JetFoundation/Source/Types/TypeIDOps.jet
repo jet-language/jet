@@ -117,16 +117,19 @@ type_id_fixed_list: fn(table: ^Interner, elem: TypeID, len: Measure) -> TypeID N
 }
 
 type_id_int_n: fn(table: ^Interner, signed: Bool, bits: Int) -> TypeID Never! {
-    if signed {
-        if bits == 8 -> return TYPE_ID_I8
-        if bits == 16 -> return TYPE_ID_I16
-        if bits == 32 -> return TYPE_ID_I32
-        if bits == 64 -> return TYPE_ID_I64
-    } else {
-        if bits == 8 -> return TYPE_ID_U8
-        if bits == 16 -> return TYPE_ID_U16
-        if bits == 32 -> return TYPE_ID_U32
-        if bits == 64 -> return TYPE_ID_U64
+    if {
+        signed -> {
+            if bits == 8 -> return TYPE_ID_I8
+            if bits == 16 -> return TYPE_ID_I16
+            if bits == 32 -> return TYPE_ID_I32
+            if bits == 64 -> return TYPE_ID_I64
+        }
+        else -> {
+            if bits == 8 -> return TYPE_ID_U8
+            if bits == 16 -> return TYPE_ID_U16
+            if bits == 32 -> return TYPE_ID_U32
+            if bits == 64 -> return TYPE_ID_U64
+        }
     }
     type_intern_scalar(table, TypeKind.IntN, if signed -> U32{1} else -> U32{0}, U32{bits}, U32{0})
 }
@@ -492,8 +495,8 @@ type_id_name: fn(table: Interner, id: TypeID) -> String Never! {
             loop i in 0..<type_child_count(table, id) -> names.push(type_id_name(table, type_child_type(table, id, i)))
             out := "fn({names.join(", ")})"
             ret: type_a_type(table, id)
-            shown_ret := if !type_is_none(ret) && !type_id_is_unit_callable_return(table, ret) -> ret else -> type_none()
-            unit_fallible := !type_is_none(shown_ret) && type_kind(table, shown_ret) == TypeKind.Result && type_a_type(table, shown_ret).id == TYPE_ID_UNIT.id
+            shown_ret: if !type_is_none(ret) && !type_id_is_unit_callable_return(table, ret) -> ret else -> type_none()
+            unit_fallible: !type_is_none(shown_ret) && type_kind(table, shown_ret) == TypeKind.Result && type_a_type(table, shown_ret).id == TYPE_ID_UNIT.id
             if !type_is_none(shown_ret) && !unit_fallible -> out = "{out} ->"
             if !type_is_none(shown_ret) -> out = "{out} {type_id_name(table, shown_ret)}"
             out
@@ -599,13 +602,16 @@ type_id_union_member_identity_tag: fn(table: Interner, id: TypeID) -> String Nev
     hex: "0123456789abcdef".bytes()
     bytes := [U8]{73, 95}
     loop byte in type_id_name(table, id).bytes() {
-        value := Int{byte}
-        if (value >= 48 && value <= 57) || (value >= 65 && value <= 90) || (value >= 97 && value <= 122) {
-            bytes.push(byte)
-        } else {
-            bytes.push(U8{95})
-            bytes.push(hex[value /% 16])
-            bytes.push(hex[value % 16])
+        value: Int{byte}
+        if {
+            (value >= 48 && value <= 57) || (value >= 65 && value <= 90) || (value >= 97 && value <= 122) -> {
+                bytes.push(byte)
+            }
+            else -> {
+                bytes.push(U8{95})
+                bytes.push(hex[value /% 16])
+                bytes.push(hex[value % 16])
+            }
         }
     }
     String.from_bytes(bytes) ?? "I_"
@@ -629,14 +635,14 @@ type_id_union_member_payload: fn(table: Interner, id: TypeID) -> TypeID Never! {
 
 type_id_union_order_key: fn(table: Interner, id: TypeID) -> String Never! {
     if type_kind(table, id) == {
-        .Named -> return type_union_unqualified(type_id_named_text(table, id))
+        .Named -> type_union_unqualified(type_id_named_text(table, id))
         .Apply -> {
             name: type_id_named_text(table, id)
             full: type_id_name(table, id)
             if full.starts_with(name) {
                 return "{type_union_unqualified(name)}{full.slice(name.len(), full.len())}"
             }
-            return full
+            full
         }
         .Int | .Float | .Bool | .String | .Char | .List | .Map | .Shared | .Option | .Result | .Fn | .TraitObject | .Tuple | .FixedList | .IntN | .InlineRange | .Float32 | .Tagged | .Union | .Case | .Quantity | .Measure -> type_id_name(table, id)
     }
@@ -647,8 +653,8 @@ type_id_union_sort: fn(table: Interner, members: ^[TypeID]) Never! {
     keys := loop m in members -> type_id_union_order_key(table, m)
     index := 1
     loop index < members.len() {
-        current := members[index]
-        current_key := keys[index]
+        current: members[index]
+        current_key: keys[index]
         insertion := index - 1
         loop insertion >= 0 && (keys[insertion] > current_key || (keys[insertion] == current_key && type_id_name(table, members[insertion]) > type_id_name(table, current))) {
             members[insertion + 1] = members[insertion]
@@ -768,12 +774,15 @@ type_id_nominals_unqualified: fn(table: ^Interner, id: TypeID, identities_only: 
             children := [U32]{}
             loop i in 0..<count {
                 word: type_child(table, id, i)
-                if i % 2 == 1 {
-                    mapped: type_id_nominals_unqualified(table, TypeID{id: word}, identities_only)
-                    if mapped.id != word -> changed = true
-                    children.push(mapped.id)
-                } else {
-                    children.push(word)
+                if {
+                    i % 2 == 1 -> {
+                        mapped: type_id_nominals_unqualified(table, TypeID{id: word}, identities_only)
+                        if mapped.id != word -> changed = true
+                        children.push(mapped.id)
+                    }
+                    else -> {
+                        children.push(word)
+                    }
                 }
             }
             if !changed -> return TypeID{id: id.id}
@@ -892,12 +901,15 @@ type_id_with_effective_fn_returns: fn(table: ^Interner, id: TypeID) -> TypeID Ne
             children := [U32]{}
             loop i in 0..<type_child_count(table, id) {
                 word: type_child(table, id, i)
-                if i % 2 == 1 {
-                    mapped: type_id_with_effective_fn_returns(table, TypeID{id: word})
-                    if mapped.id != word -> changed = true
-                    children.push(mapped.id)
-                } else {
-                    children.push(word)
+                if {
+                    i % 2 == 1 -> {
+                        mapped: type_id_with_effective_fn_returns(table, TypeID{id: word})
+                        if mapped.id != word -> changed = true
+                        children.push(mapped.id)
+                    }
+                    else -> {
+                        children.push(word)
+                    }
                 }
             }
             if !changed -> return TypeID{id: id.id}
@@ -1040,12 +1052,15 @@ type_id_substitute: fn(table: ^Interner, id: TypeID, names: [String], actuals: [
             children := [U32]{}
             loop i in 0..<type_child_count(table, id) {
                 word: type_child(table, id, i)
-                if i % 2 == 1 {
-                    mapped: type_id_substitute(table, TypeID{id: word}, names, actuals)
-                    if mapped.id != word -> changed = true
-                    children.push(mapped.id)
-                } else {
-                    children.push(word)
+                if {
+                    i % 2 == 1 -> {
+                        mapped: type_id_substitute(table, TypeID{id: word}, names, actuals)
+                        if mapped.id != word -> changed = true
+                        children.push(mapped.id)
+                    }
+                    else -> {
+                        children.push(word)
+                    }
                 }
             }
             if !changed -> return TypeID{id: id.id}
@@ -1280,16 +1295,19 @@ delta_merge_delta: fn(shared: Interner, into: ^InternerDelta, from: ^InternerDel
             .Int | .Float | .Bool | .String | .Char | .List | .Shared | .Option | .Result | .Named | .Apply | .TraitObject | .Tuple | .IntN | .Float32 | .Union | .Case -> side
         }
         count: from.types.count[row]
-        if count == 0 {
-            remap.types.push(delta_type_intern_scalar(shared, into, kind, a, b, merged_side))
-        } else {
-            children := [U32]{}
-            first: from.types.first[row]
-            loop index in 0..<count {
-                child: from.types.children[first + index]
-                children.push(if type_child_is_type(kind, index) -> type_merged_type(remap, child) else -> type_merged_name(remap, child))
+        if {
+            count == 0 -> {
+                remap.types.push(delta_type_intern_scalar(shared, into, kind, a, b, merged_side))
             }
-            remap.types.push(delta_type_intern(shared, into, kind, a, b, merged_side, children))
+            else -> {
+                children := [U32]{}
+                first: from.types.first[row]
+                loop index in 0..<count {
+                    child: from.types.children[first + index]
+                    children.push(if type_child_is_type(kind, index) -> type_merged_type(remap, child) else -> type_merged_name(remap, child))
+                }
+                remap.types.push(delta_type_intern(shared, into, kind, a, b, merged_side, children))
+            }
         }
     }
     remap

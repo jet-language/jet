@@ -32,17 +32,20 @@ jettrace_validate_instructions: fn(value: CanonicalJSON, label: String) JetTrace
         if symbol.len() == 0 -> return Err(jettrace_error("{at}.symbol is empty"))
         size: jettrace_unsigned(item[jettrace_get(item, "size")].value, "{at}.size")
         code: jettrace_text(item[jettrace_get(item, "code")].value, "{at}.code")
-        if jettrace_bool(item[jettrace_get(item, "cut")].value, "{at}.cut") {
-            if code.len() != 0 -> return Err(jettrace_error("{at}.code is kept for a cut function"))
-            held_cut += U64{1}
-        } else {
-            digits: U64{code.len()}
-            wanted: size * U64{2}
-            if digits != wanted || !jettrace_lower_hex(code) {
-                return Err(jettrace_error("{at}.code is not lowercase hex of its {size} bytes"))
+        if {
+            jettrace_bool(item[jettrace_get(item, "cut")].value, "{at}.cut") -> {
+                if code.len() != 0 -> return Err(jettrace_error("{at}.code is kept for a cut function"))
+                held_cut += U64{1}
             }
-            held += size
-            held_kept += U64{1}
+            else -> {
+                digits: U64{code.len()}
+                wanted: size * U64{2}
+                if digits != wanted || !jettrace_lower_hex(code) {
+                    return Err(jettrace_error("{at}.code is not lowercase hex of its {size} bytes"))
+                }
+                held += size
+                held_kept += U64{1}
+            }
         }
         events: jettrace_counts(item[jettrace_get(item, "events")].value, "{at}.events", counters.len())
         samples: jettrace_unsigned(item[jettrace_get(item, "samples")].value, "{at}.samples")

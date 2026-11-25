@@ -46,8 +46,8 @@ jettrace_field: fn(key: String, value: ^^CanonicalJSON) -> CanonicalJSONField Ne
 
 jettrace_object: fn(fields: [CanonicalJSONField]) -> CanonicalJSON JetTraceError! {
     if canonical_json_object(fields) == {
-        .Ok(value) -> return Ok(value)
-        .Err(error) -> return Err(jettrace_error(error.message))
+        .Ok(value) -> Ok(value)
+        .Err(error) -> Err(jettrace_error(error.message))
     }
 }
 

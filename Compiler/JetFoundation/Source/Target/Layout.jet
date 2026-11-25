@@ -662,7 +662,12 @@ jet_target_layout_native_type: fn(engine: TargetLayoutEngine, ty: Type, owner_qu
         .Float32 -> Val(jet_target_layout_scalar(4))
         .IntN(_, bits) -> {
             if bits < 1 || bits > 64 -> return None
-            Val(jet_target_layout_scalar(if bits <= 8 -> 1 else if bits <= 16 -> 2 else if bits <= 32 -> 4 else -> 8))
+            Val(jet_target_layout_scalar(if {
+                bits <= 8 -> 1
+                bits <= 16 -> 2
+                bits <= 32 -> 4
+                else -> 8
+            }))
         }
         .List(_) -> Val(ByteLayout{size: 24, alignment: 8, stride: 24})
         .InlineRange(base, _, _) | .Tagged(_, base) | .Quantity(base, _) -> jet_target_layout_native_type(engine, base, owner_qualified_name, query)
@@ -787,7 +792,7 @@ jet_target_layout_enum_facts_inner_named: fn(engine: TargetLayoutEngine, definit
     facts := [FieldLayoutFacts]{}
     index := 0
     loop index < definition.variants.len() {
-        variant := definition.variants[index]
+        variant: definition.variants[index]
         if payloads[index] == {
             Val(payload) -> {
                 facts.push(FieldLayoutFacts{name: variant.name, offset: Val(payload_offset), size: Val(payload.size), alignment: Val(payload.alignment), stride: Val(payload.stride)})
@@ -870,9 +875,9 @@ jet_target_layout_aggregate: fn(engine: TargetLayoutEngine, names: [String], typ
     facts := [FieldLayoutFacts]{}
     index := 0
     loop index < names.len() {
-        name := names[index]
-        layout := jet_target_layout_type_inner(engine, types[index], owner_qualified_name, query)
-        offset := jet_target_layout_field_offset(cursor, layout)
+        name: names[index]
+        layout: jet_target_layout_type_inner(engine, types[index], owner_qualified_name, query)
+        offset: jet_target_layout_field_offset(cursor, layout)
         if layout == {
             Val(value) -> {
                 if offset == {
@@ -967,8 +972,11 @@ jet_target_layout_atomic_layout: fn(engine: TargetLayoutEngine, args: [Type]) ->
 // type parameters.
 jet_target_layout_bit_set: fn(engine: TargetLayoutEngine, name: String, args: [Type], owner_qualified_name: String) -> Bool Never! {
     if name != "Set" || args.len() != 1 -> return false
-    element: if args[0] == .Named(element_name) -> element_name.copy() else -> {
-        return false
+    element: if {
+        args[0] == .Named(element_name) -> element_name.copy()
+        else -> {
+            return false
+        }
     }
     resolved: jet_target_layout_resolved_name(engine, owner_qualified_name, element)
     if resolved == element && name_column_get(engine.item_keys, engine.item_positions, element) == .Val(position) {

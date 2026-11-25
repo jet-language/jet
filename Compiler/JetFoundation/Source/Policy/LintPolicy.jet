@@ -115,22 +115,27 @@ lint_strip_comments: fn(value: String) -> String Never! {
     at := 0
     loop at < raw.len() {
         code: Int{raw[at]}
-        if quoted {
-            out.push(raw[at])
-            if {
-                escaped -> escaped = false
-                code == 92 -> escaped = true
-                code == 34 -> quoted = false
-                else -> {}
+        if {
+            quoted -> {
+                out.push(raw[at])
+                if {
+                    escaped -> escaped = false
+                    code == 92 -> escaped = true
+                    code == 34 -> quoted = false
+                    else -> {}
+                }
             }
-        } else if code == 34 {
-            quoted = true
-            out.push(raw[at])
-        } else if code == 47 && at + 1 < raw.len() && (Int{raw[at + 1]}) == 47 {
-            at += 2
-            loop at < raw.len() && (Int{raw[at]}) != 10 -> at += 1
-            if at < raw.len() -> out.push(raw[at])
-        } else { out.push(raw[at]) }
+            code == 34 -> {
+                quoted = true
+                out.push(raw[at])
+            }
+            code == 47 && at + 1 < raw.len() && (Int{raw[at + 1]}) == 47 -> {
+                at += 2
+                loop at < raw.len() && (Int{raw[at]}) != 10 -> at += 1
+                if at < raw.len() -> out.push(raw[at])
+            }
+            else -> { out.push(raw[at]) }
+        }
         at += 1
     }
     // Valid UTF-8: `value`'s own bytes in order, less each `//` comment cut from its ASCII `/` to the ASCII newline, so the lossy decode keeps every byte.
@@ -248,16 +253,21 @@ lint_balanced: fn(raw: [U8]) -> String Never! {
     at := 1
     loop at < raw.len() {
         code: Int{raw[at]}
-        if quoted {
-            if {
-                escaped -> escaped = false
-                code == 92 -> escaped = true
-                code == 34 -> quoted = false
-                else -> {}
+        if {
+            quoted -> {
+                if {
+                    escaped -> escaped = false
+                    code == 92 -> escaped = true
+                    code == 34 -> quoted = false
+                    else -> {}
+                }
             }
-        } else if code == 34 { quoted = true } else if code == 123 { depth += 1 } else if code == 125 {
-            depth -= 1
-            if depth == 0 -> return foundation_byte_text(raw, 1, at)
+            code == 34 -> { quoted = true }
+            code == 123 -> { depth += 1 }
+            code == 125 -> {
+                depth -= 1
+                if depth == 0 -> return foundation_byte_text(raw, 1, at)
+            }
         }
         at += 1
     }

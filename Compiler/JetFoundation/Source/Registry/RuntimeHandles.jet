@@ -39,12 +39,15 @@ ir_key_order: fn(keys: [String]) -> [Int] Never! {
             left := start
             right := middle
             loop left < middle || right < end {
-                if right >= end || (left < middle && !(keys[order[right]] < keys[order[left]])) {
-                    merged.push(order[left])
-                    left += 1
-                } else {
-                    merged.push(order[right])
-                    right += 1
+                if {
+                    right >= end || (left < middle && !(keys[order[right]] < keys[order[left]])) -> {
+                        merged.push(order[left])
+                        left += 1
+                    }
+                    else -> {
+                        merged.push(order[right])
+                        right += 1
+                    }
                 }
             }
             start = end

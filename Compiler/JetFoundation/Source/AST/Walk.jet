@@ -48,11 +48,14 @@ ast_visit_expr: fn(tables: ASTTables, expression: ExprNode, visitor: fn(ExprNode
             rights := [ExprNode]{right}
             operand := left
             loop {
-                if ast_expr(tables, operand) == .Binary(_, inner_left, inner_right, _, _) {
-                    visitor(operand)
-                    rights.push(inner_right)
-                    operand = inner_left
-                } else { break }
+                if {
+                    ast_expr(tables, operand) == .Binary(_, inner_left, inner_right, _, _) -> {
+                        visitor(operand)
+                        rights.push(inner_right)
+                        operand = inner_left
+                    }
+                    else -> { break }
+                }
             }
             ast_visit_expr(tables, operand, visitor)
             index := rights.len() - 1
@@ -137,10 +140,13 @@ expr_binary_operands: fn(tables: ASTTables, left: ExprNode, right: ExprNode) -> 
     operands := [ExprNode]{right}
     operand := left
     loop {
-        if ast_expr(tables, operand) == .Binary(_, inner_left, inner_right, _, _) {
-            operands.push(inner_right)
-            operand = inner_left
-        } else { break }
+        if {
+            ast_expr(tables, operand) == .Binary(_, inner_left, inner_right, _, _) -> {
+                operands.push(inner_right)
+                operand = inner_left
+            }
+            else -> { break }
+        }
     }
     operands.push(operand)
     operands.reverse()

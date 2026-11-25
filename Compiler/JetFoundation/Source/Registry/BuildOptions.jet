@@ -766,7 +766,7 @@ build_options_identity: fn(options: BuildOptions) -> String Never! {
 // The stock options of `command`: no profile, no flag.
 build_options_stock: fn(command: String) -> BuildOptions Never! {
     if build_options_resolve(command, "", [BuildOptionChoice]{}) == {
-        .Resolved(options, _) -> return options
+        .Resolved(options, _) -> options
         .Refused(_, what, _) -> panic("the stock build options refused: {what}")
     }
 }
@@ -821,7 +821,7 @@ build_option_flags: fn(argv: [String]) -> BuildOptionsResolved Never! {
     flags := [BuildOptionChoice]{}
     loop argument in argv {
         if argument == "--" -> break
-        row := build_option_flag_row(argument) ?? next
+        row: build_option_flag_row(argument) ?? next
         level: row.kind == BuildOptionKind.Level
         flag: if level -> build_option_level_flags_text(row) else -> build_option_flag(row.name)
         bare: argument == flag && row.kind == BuildOptionKind.Bool

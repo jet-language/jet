@@ -77,20 +77,20 @@ TRACE_COUNTERS: [TraceCounterName]{.L1dMisses, .LlcMisses, .DtlbMisses, .PageFau
 
 trace_counter_name: fn(name: TraceCounterName) -> String Never! {
     if name == {
-        .L1dMisses -> return "l1d_misses"
-        .LlcMisses -> return "llc_misses"
-        .DtlbMisses -> return "dtlb_misses"
-        .PageFaults -> return "page_faults"
+        .L1dMisses -> "l1d_misses"
+        .LlcMisses -> "llc_misses"
+        .DtlbMisses -> "dtlb_misses"
+        .PageFaults -> "page_faults"
     }
 }
 
 // The key of the counter `name`'s count in a profile row.
 trace_counter_key: fn(name: TraceCounterName) -> String Never! {
     if name == {
-        .L1dMisses -> return "l1d_miss_count"
-        .LlcMisses -> return "llc_miss_count"
-        .DtlbMisses -> return "dtlb_miss_count"
-        .PageFaults -> return "page_fault_count"
+        .L1dMisses -> "l1d_miss_count"
+        .LlcMisses -> "llc_miss_count"
+        .DtlbMisses -> "dtlb_miss_count"
+        .PageFaults -> "page_fault_count"
     }
 }
 
@@ -361,14 +361,14 @@ TraceSkeleton: struct {
 jettrace_uint: fn(value: U64) -> CanonicalJSON Never! { CanonicalJSON.Integer("{value}") }
 
 jettrace_optional_uint: fn(value: U64?) -> CanonicalJSON Never! {
-    return if value == {
+    if value == {
         .Val(number) -> jettrace_uint(number)
         .None -> CanonicalJSON.Null
     }
 }
 
 jettrace_optional_text: fn(value: String?) -> CanonicalJSON Never! {
-    return if value == {
+    if value == {
         .Val(text) -> CanonicalJSON.String(text.copy())
         .None -> CanonicalJSON.Null
     }

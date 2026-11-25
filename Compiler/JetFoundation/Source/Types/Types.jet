@@ -95,10 +95,13 @@ foundation_number_family_rows: fn(text: String) -> [String] {
 foundation_family_sizes: fn(args: [Type]) -> [Int]? Never! {
     sizes := [Int]{}
     loop arg in args {
-        if arg == .Measure(measure) && measure == .Literal(_, value) {
-            sizes.push(value)
-        } else {
-            return None
+        if {
+            arg == .Measure(measure) && measure == .Literal(_, value) -> {
+                sizes.push(value)
+            }
+            else -> {
+                return None
+            }
         }
     }
     Val(sizes)
@@ -378,13 +381,16 @@ dimension_combine: fn(left: Dimension, right: Dimension, subtract: Bool) -> Dime
         if found -> current = measure_signed_value(axes[index].exponent) ?? return None
         next: current + delta
         if next < -2147483648 || next > 2147483647 -> return None
-        if found {
-            if next == 0 -> _ := axes.remove(index, .Slot) else {
-                axes[index].exponent = Measure.SignedLiteral{kind: "dimension", value: next}
+        if {
+            found -> {
+                if next == 0 -> _ := axes.remove(index, .Slot) else {
+                    axes[index].exponent = Measure.SignedLiteral{kind: "dimension", value: next}
+                }
             }
-        } else {
-            if next != 0 {
-                axes.push(DimensionAxis{name: axis.name, exponent: Measure.SignedLiteral{kind: "dimension", value: next}})
+            else -> {
+                if next != 0 {
+                    axes.push(DimensionAxis{name: axis.name, exponent: Measure.SignedLiteral{kind: "dimension", value: next}})
+                }
             }
         }
     }
@@ -1518,10 +1524,13 @@ type_name: fn(ty: Type) -> String Never! {
             if shown_ret == .Val(value) {
                 if value == .Result(ok, _) -> unit_fallible = ok == Type.Named{name: "Unit"}
             }
-            if effect_bound == .Val(rows) {
-                effect_names: loop row in rows -> row.name
-                out = "{out} -[{effect_names.join(", ")}]>"
-            } else if shown_ret != None && !unit_fallible { out = "{out} ->" }
+            if {
+                effect_bound == .Val(rows) -> {
+                    effect_names: loop row in rows -> row.name
+                    out = "{out} -[{effect_names.join(", ")}]>"
+                }
+                shown_ret != None && !unit_fallible -> { out = "{out} ->" }
+            }
             if shown_ret == .Val(value) -> out = "{out} {type_name(value)}"
             out
         }
@@ -1614,13 +1623,16 @@ type_union_member_identity_tag: fn(ty: Type) -> String Never! {
     hex: "0123456789abcdef".bytes()
     bytes := [U8]{73, 95}
     loop byte in type_name(ty).bytes() {
-        value := Int{byte}
-        if (value >= 48 && value <= 57) || (value >= 65 && value <= 90) || (value >= 97 && value <= 122) {
-            bytes.push(byte)
-        } else {
-            bytes.push(U8{95})
-            bytes.push(hex[value /% 16])
-            bytes.push(hex[value % 16])
+        value: Int{byte}
+        if {
+            (value >= 48 && value <= 57) || (value >= 65 && value <= 90) || (value >= 97 && value <= 122) -> {
+                bytes.push(byte)
+            }
+            else -> {
+                bytes.push(U8{95})
+                bytes.push(hex[value /% 16])
+                bytes.push(hex[value % 16])
+            }
         }
     }
     String.from_bytes(bytes) ?? "I_"
@@ -1648,8 +1660,8 @@ type_union_sort: fn(members: ^[Type]) -[]> {
     loop member in members -> keys.push(type_union_order_key(member))
     index := 1
     loop index < members.len() {
-        current := members[index]
-        current_key := keys[index]
+        current: members[index]
+        current_key: keys[index]
         insertion := index - 1
         loop insertion >= 0 && type_union_member_after(keys[insertion], members[insertion], current_key, current) {
             members[insertion + 1] = members[insertion]
@@ -1696,7 +1708,7 @@ type_union_unqualified: fn(name: String) -[]> String {
 type_union_member_tag_name: fn(raw: String) -> String Never! {
     safe := true
     loop byte in raw.bytes() {
-        value := Int{byte}
+        value: Int{byte}
         if !((value >= 48 && value <= 57) || (value >= 65 && value <= 90) || (value >= 97 && value <= 122) || value == 95) {
             safe = false
             break
@@ -1705,7 +1717,7 @@ type_union_member_tag_name: fn(raw: String) -> String Never! {
     if safe && raw.len() > 0 -> return raw.copy()
     bytes := [U8]{77, 95}
     loop byte in raw.bytes() {
-        value := Int{byte}
+        value: Int{byte}
         if {
             (value >= 48 && value <= 57) || (value >= 65 && value <= 90) || (value >= 97 && value <= 122) -> {
                 bytes.push(byte)
@@ -1893,7 +1905,7 @@ type_identity_equal: fn(left: Type, right: Type) -> Bool Never! {
         }
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }
-    same := if left == {
+    same: if left == {
         .Int -> right == Type.Int
         .Float -> right == Type.Float
         .Bool -> right == Type.Bool
@@ -2047,7 +2059,7 @@ type_with_effective_fn_returns: fn(ty: Type) -> Type Never! {
         .Fn(params, ret, effect_bound, param_contract, call_metadata, return_view_provenance) -> {
             normalized_params := [Type]{}
             loop param in params -> normalized_params.push(type_with_effective_fn_returns(param))
-            normalized_ret := ret.map(fn(value) { effective_callable_return(type_with_effective_fn_returns(value)) })
+            normalized_ret: ret.map(fn(value) { effective_callable_return(type_with_effective_fn_returns(value)) })
             Type.Fn{params: normalized_params, ret: normalized_ret, effect_bound: effect_bound, param_contract: param_contract, call_metadata: call_metadata, return_view_provenance: return_view_provenance}
         }
         .Apply(name, args) -> {
@@ -2088,7 +2100,7 @@ type_with_effective_parameter_fn_return: fn(ty: Type) -> Type Never! {
     if ty == {
         .Fn(params, ret, effect_bound, param_contract, call_metadata, return_view_provenance) -> {
             normalized_params: loop param in params -> type_with_effective_parameter_fn_return(param)
-            normalized_ret := ret.map(fn(value) { effective_callable_return(value) })
+            normalized_ret: ret.map(fn(value) { effective_callable_return(value) })
             Type.Fn{params: normalized_params, ret: normalized_ret, effect_bound: effect_bound, param_contract: param_contract, call_metadata: call_metadata, return_view_provenance: return_view_provenance}
         }
         // copy: `marker` and `inner` are payloads of read parameter `ty`, which keeps the originals; the new Type.Tagged's fields own `marker` and `inner`

@@ -305,35 +305,38 @@ diagnostic_identity_push: fn(bytes: [U8], index: Int, found: ^[DiagnosticIdentit
     loop end < bytes.len() && !diagnostic_identity_ends(diagnostic_byte_at(bytes, end)) -> end += 1
     leaf := -1
     qualifier := ""
-    if module_form {
-        stem_start := path_start
-        loop at in path_start..<end {
-            if diagnostic_byte_at(bytes, at) == 47 -> stem_start = at + 1
+    if {
+        module_form -> {
+            stem_start := path_start
+            loop at in path_start..<end {
+                if diagnostic_byte_at(bytes, at) == 47 -> stem_start = at + 1
+            }
+            at := stem_start
+            loop leaf < 0 && at + 5 < end {
+                if diagnostic_bytes_at(bytes, at, ".jet.") -> leaf = at + 5
+                at += 1
+            }
+            if leaf < 0 -> return -1
+            qualifier = foundation_byte_text(bytes, stem_start, leaf - 5)
         }
-        at := stem_start
-        loop leaf < 0 && at + 5 < end {
-            if diagnostic_bytes_at(bytes, at, ".jet.") -> leaf = at + 5
-            at += 1
+        else -> {
+            path: foundation_byte_text(bytes, path_start, end)
+            // Not a Core module: the module is the path before its last `.`.
+            module_name := core_path_module(path) ?? ""
+            if module_name == "" {
+                dot := end - 1
+                loop dot >= path_start && diagnostic_byte_at(bytes, dot) != 46 -> dot -= 1
+                if dot < path_start -> return -1
+                module_name = foundation_byte_text(bytes, path_start, dot)
+            }
+            module_end: path_start + module_name.count_bytes()
+            leaf = module_end + 1
+            qualifier_start := module_end
+            loop qualifier_start > path_start && diagnostic_byte_at(bytes, qualifier_start - 1) != 46 {
+                qualifier_start -= 1
+            }
+            qualifier = foundation_byte_text(bytes, qualifier_start, module_end)
         }
-        if leaf < 0 -> return -1
-        qualifier = foundation_byte_text(bytes, stem_start, leaf - 5)
-    } else {
-        path: foundation_byte_text(bytes, path_start, end)
-        // Not a Core module: the module is the path before its last `.`.
-        module_name := core_path_module(path) ?? ""
-        if module_name == "" {
-            dot := end - 1
-            loop dot >= path_start && diagnostic_byte_at(bytes, dot) != 46 -> dot -= 1
-            if dot < path_start -> return -1
-            module_name = foundation_byte_text(bytes, path_start, dot)
-        }
-        module_end: path_start + module_name.count_bytes()
-        leaf = module_end + 1
-        qualifier_start := module_end
-        loop qualifier_start > path_start && diagnostic_byte_at(bytes, qualifier_start - 1) != 46 {
-            qualifier_start -= 1
-        }
-        qualifier = foundation_byte_text(bytes, qualifier_start, module_end)
     }
     if leaf >= end -> return -1
     head_end := leaf

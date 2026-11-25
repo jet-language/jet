@@ -304,33 +304,36 @@ interner_marks: fn(table: Interner) -> InternerMarks Never! {
 // `type_none()` for every other type.
 type_id_well_known: fn(ty: Type) -> TypeID Never! {
     if ty == {
-        .Int -> return TYPE_ID_INT
-        .Float -> return TYPE_ID_FLOAT
-        .Bool -> return TYPE_ID_BOOL
-        .String -> return TYPE_ID_STRING
-        .Char -> return TYPE_ID_CHAR
-        .Float32 -> return TYPE_ID_FLOAT32
+        .Int -> TYPE_ID_INT
+        .Float -> TYPE_ID_FLOAT
+        .Bool -> TYPE_ID_BOOL
+        .String -> TYPE_ID_STRING
+        .Char -> TYPE_ID_CHAR
+        .Float32 -> TYPE_ID_FLOAT32
         .Named(name) -> {
             if name == "Unit" -> return TYPE_ID_UNIT
             if name == "Never" -> return TYPE_ID_NEVER
             if name == "Pointer" -> return TYPE_ID_POINTER
-            return type_none()
+            type_none()
         }
         .IntN(signed, bits) -> {
-            if signed {
-                if bits == 8 -> return TYPE_ID_I8
-                if bits == 16 -> return TYPE_ID_I16
-                if bits == 32 -> return TYPE_ID_I32
-                if bits == 64 -> return TYPE_ID_I64
-            } else {
-                if bits == 8 -> return TYPE_ID_U8
-                if bits == 16 -> return TYPE_ID_U16
-                if bits == 32 -> return TYPE_ID_U32
-                if bits == 64 -> return TYPE_ID_U64
+            if {
+                signed -> {
+                    if bits == 8 -> return TYPE_ID_I8
+                    if bits == 16 -> return TYPE_ID_I16
+                    if bits == 32 -> return TYPE_ID_I32
+                    if bits == 64 -> return TYPE_ID_I64
+                }
+                else -> {
+                    if bits == 8 -> return TYPE_ID_U8
+                    if bits == 16 -> return TYPE_ID_U16
+                    if bits == 32 -> return TYPE_ID_U32
+                    if bits == 64 -> return TYPE_ID_U64
+                }
             }
-            return type_none()
+            type_none()
         }
-        .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> return type_none()
+        .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> type_none()
     }
 }
 
@@ -520,39 +523,39 @@ type_canonical_word: fn(table: Interner, word: U32) -> U32 Never! {
 type_compute_canonical: fn(table: ^Interner, row: Int, kind: TypeKind, a: U32, b: U32, side: U32) -> U32 Never! {
     none: U32{0}
     if kind == {
-        .Int | .Float | .Bool | .String | .Char | .Float32 | .IntN | .Named | .Measure | .TraitObject -> return U32{row}
+        .Int | .Float | .Bool | .String | .Char | .Float32 | .IntN | .Named | .Measure | .TraitObject -> U32{row}
         .List | .Shared | .Option -> {
             ca: type_canonical_word(table, a)
             if ca == a -> return U32{row}
-            return type_intern_scalar(table, kind, ca, none, none).id
+            type_intern_scalar(table, kind, ca, none, none).id
         }
         .Result -> {
             ca: type_canonical_word(table, a)
             cb: type_canonical_word(table, b)
             if ca == a && cb == b -> return U32{row}
-            return type_intern_scalar(table, kind, ca, cb, none).id
+            type_intern_scalar(table, kind, ca, cb, none).id
         }
         .Case -> {
             cb: type_canonical_word(table, b)
             if cb == b -> return U32{row}
-            return type_intern_scalar(table, kind, a, cb, none).id
+            type_intern_scalar(table, kind, a, cb, none).id
         }
         .Map -> {
             ca: type_canonical_word(table, a)
             cb: type_canonical_word(table, b)
             if side == none && ca == a && cb == b -> return U32{row}
-            return type_intern_scalar(table, TypeKind.Map, ca, cb, none).id
+            type_intern_scalar(table, TypeKind.Map, ca, cb, none).id
         }
         .Tagged -> {
             ca: type_canonical_word(table, a)
             if side != none && !tag_is_identity_bearing(table.tags.rows[Int{side} - 1]) -> return ca
             if ca == a -> return U32{row}
-            return type_intern_scalar(table, TypeKind.Tagged, ca, none, side).id
+            type_intern_scalar(table, TypeKind.Tagged, ca, none, side).id
         }
         .FixedList | .InlineRange | .Quantity -> {
             ca: type_canonical_word(table, a)
             if ca == a -> return U32{row}
-            return type_intern_scalar(table, kind, ca, none, side).id
+            type_intern_scalar(table, kind, ca, none, side).id
         }
         .Apply | .Union -> {
             first: table.types.first[row]
@@ -568,7 +571,7 @@ type_compute_canonical: fn(table: ^Interner, row: Int, kind: TypeKind, a: U32, b
             if !changed -> return U32{row}
             children := [U32]{}
             loop index in 0..<count -> children.push(type_canonical_word(table, table.types.children[first + index]))
-            return type_intern(table, kind, a, none, none, children).id
+            type_intern(table, kind, a, none, none, children).id
         }
         .Tuple -> {
             first: table.types.first[row]
@@ -589,7 +592,7 @@ type_compute_canonical: fn(table: ^Interner, row: Int, kind: TypeKind, a: U32, b
                 child: table.types.children[first + index]
                 children.push(if index % 2 == 1 -> type_canonical_word(table, child) else -> child)
             }
-            return type_intern(table, kind, none, none, none, children).id
+            type_intern(table, kind, none, none, none, children).id
         }
         .Fn -> {
             first: table.types.first[row]
@@ -617,7 +620,7 @@ type_compute_canonical: fn(table: ^Interner, row: Int, kind: TypeKind, a: U32, b
             if !changed -> return U32{row}
             children := [U32]{}
             loop index in 0..<count -> children.push(type_canonical_word(table, table.types.children[first + index]))
-            return type_intern(table, TypeKind.Fn, ca, none, canon_side, children).id
+            type_intern(table, TypeKind.Fn, ca, none, canon_side, children).id
         }
     }
 }
@@ -934,16 +937,19 @@ type_intern_syntax: fn(table: ^Interner, ty: Type) -> TypeID Never! {
             type_intern_scalar(table, TypeKind.FixedList, elem_id.id, none, side)
         }
         .IntN(signed, bits) -> {
-            if signed {
-                if bits == 8 -> return TYPE_ID_I8
-                if bits == 16 -> return TYPE_ID_I16
-                if bits == 32 -> return TYPE_ID_I32
-                if bits == 64 -> return TYPE_ID_I64
-            } else {
-                if bits == 8 -> return TYPE_ID_U8
-                if bits == 16 -> return TYPE_ID_U16
-                if bits == 32 -> return TYPE_ID_U32
-                if bits == 64 -> return TYPE_ID_U64
+            if {
+                signed -> {
+                    if bits == 8 -> return TYPE_ID_I8
+                    if bits == 16 -> return TYPE_ID_I16
+                    if bits == 32 -> return TYPE_ID_I32
+                    if bits == 64 -> return TYPE_ID_I64
+                }
+                else -> {
+                    if bits == 8 -> return TYPE_ID_U8
+                    if bits == 16 -> return TYPE_ID_U16
+                    if bits == 32 -> return TYPE_ID_U32
+                    if bits == 64 -> return TYPE_ID_U64
+                }
             }
             type_intern_scalar(table, TypeKind.IntN, if signed -> U32{1} else -> none, U32{bits}, none)
         }
@@ -1344,39 +1350,39 @@ delta_a_in_shared: fn(kind: TypeKind, a: U32, base: InternerMarks) -> Bool Never
 delta_compute_canonical: fn(shared: Interner, delta: ^InternerDelta, own_row: Int, full_id: U32, kind: TypeKind, a: U32, b: U32, side: U32) -> U32 Never! {
     none: U32{0}
     if kind == {
-        .Int | .Float | .Bool | .String | .Char | .Float32 | .IntN | .Named | .Measure | .TraitObject -> return full_id
+        .Int | .Float | .Bool | .String | .Char | .Float32 | .IntN | .Named | .Measure | .TraitObject -> full_id
         .List | .Shared | .Option -> {
             ca: delta_type_canonical_word(shared, delta, a)
             if ca == a -> return full_id
-            return delta_type_intern_scalar(shared, delta, kind, ca, none, none).id
+            delta_type_intern_scalar(shared, delta, kind, ca, none, none).id
         }
         .Result -> {
             ca: delta_type_canonical_word(shared, delta, a)
             cb: delta_type_canonical_word(shared, delta, b)
             if ca == a && cb == b -> return full_id
-            return delta_type_intern_scalar(shared, delta, kind, ca, cb, none).id
+            delta_type_intern_scalar(shared, delta, kind, ca, cb, none).id
         }
         .Case -> {
             cb: delta_type_canonical_word(shared, delta, b)
             if cb == b -> return full_id
-            return delta_type_intern_scalar(shared, delta, kind, a, cb, none).id
+            delta_type_intern_scalar(shared, delta, kind, a, cb, none).id
         }
         .Map -> {
             ca: delta_type_canonical_word(shared, delta, a)
             cb: delta_type_canonical_word(shared, delta, b)
             if side == none && ca == a && cb == b -> return full_id
-            return delta_type_intern_scalar(shared, delta, TypeKind.Map, ca, cb, none).id
+            delta_type_intern_scalar(shared, delta, TypeKind.Map, ca, cb, none).id
         }
         .Tagged -> {
             ca: delta_type_canonical_word(shared, delta, a)
             if side != none && !tag_is_identity_bearing(delta_tag_row(shared, delta, side)) -> return ca
             if ca == a -> return full_id
-            return delta_type_intern_scalar(shared, delta, TypeKind.Tagged, ca, none, side).id
+            delta_type_intern_scalar(shared, delta, TypeKind.Tagged, ca, none, side).id
         }
         .FixedList | .InlineRange | .Quantity -> {
             ca: delta_type_canonical_word(shared, delta, a)
             if ca == a -> return full_id
-            return delta_type_intern_scalar(shared, delta, kind, ca, none, side).id
+            delta_type_intern_scalar(shared, delta, kind, ca, none, side).id
         }
         .Apply | .Union -> {
             first: delta.types.first[own_row]
@@ -1392,7 +1398,7 @@ delta_compute_canonical: fn(shared: Interner, delta: ^InternerDelta, own_row: In
             if !changed -> return full_id
             children := [U32]{}
             loop index in 0..<count -> children.push(delta_type_canonical_word(shared, delta, delta.types.children[first + index]))
-            return delta_type_intern(shared, delta, kind, a, none, none, children).id
+            delta_type_intern(shared, delta, kind, a, none, none, children).id
         }
         .Tuple -> {
             first: delta.types.first[own_row]
@@ -1413,7 +1419,7 @@ delta_compute_canonical: fn(shared: Interner, delta: ^InternerDelta, own_row: In
                 child: delta.types.children[first + index]
                 children.push(if index % 2 == 1 -> delta_type_canonical_word(shared, delta, child) else -> child)
             }
-            return delta_type_intern(shared, delta, kind, none, none, none, children).id
+            delta_type_intern(shared, delta, kind, none, none, none, children).id
         }
         .Fn -> {
             first: delta.types.first[own_row]
@@ -1441,7 +1447,7 @@ delta_compute_canonical: fn(shared: Interner, delta: ^InternerDelta, own_row: In
             if !changed -> return full_id
             children := [U32]{}
             loop index in 0..<count -> children.push(delta_type_canonical_word(shared, delta, delta.types.children[first + index]))
-            return delta_type_intern(shared, delta, TypeKind.Fn, ca, none, canon_side, children).id
+            delta_type_intern(shared, delta, TypeKind.Fn, ca, none, canon_side, children).id
         }
     }
 }
@@ -1585,16 +1591,19 @@ delta_type_intern_syntax: fn(shared: Interner, delta: ^InternerDelta, ty: Type) 
             delta_type_intern_scalar(shared, delta, TypeKind.FixedList, elem_id.id, none, side)
         }
         .IntN(signed, bits) -> {
-            if signed {
-                if bits == 8 -> return TYPE_ID_I8
-                if bits == 16 -> return TYPE_ID_I16
-                if bits == 32 -> return TYPE_ID_I32
-                if bits == 64 -> return TYPE_ID_I64
-            } else {
-                if bits == 8 -> return TYPE_ID_U8
-                if bits == 16 -> return TYPE_ID_U16
-                if bits == 32 -> return TYPE_ID_U32
-                if bits == 64 -> return TYPE_ID_U64
+            if {
+                signed -> {
+                    if bits == 8 -> return TYPE_ID_I8
+                    if bits == 16 -> return TYPE_ID_I16
+                    if bits == 32 -> return TYPE_ID_I32
+                    if bits == 64 -> return TYPE_ID_I64
+                }
+                else -> {
+                    if bits == 8 -> return TYPE_ID_U8
+                    if bits == 16 -> return TYPE_ID_U16
+                    if bits == 32 -> return TYPE_ID_U32
+                    if bits == 64 -> return TYPE_ID_U64
+                }
             }
             delta_type_intern_scalar(shared, delta, TypeKind.IntN, if signed -> U32{1} else -> none, U32{bits}, none)
         }
@@ -1642,7 +1651,11 @@ delta_type_syntax: fn(shared: Interner, delta: InternerDelta, id: TypeID) -> Typ
         .Float32 -> Type.Float32
         .List -> Type.List{element: delta_type_syntax(shared, delta, TypeID{id: delta_type_a(shared, delta, id)})}
         .Map -> {
-            key_span: if side == 0 -> Span?{None} else if side <= delta.base.key_spans -> Val(shared.key_spans.rows[side - 1]) else -> Val(delta.key_spans.rows[side - delta.base.key_spans - 1])
+            key_span: if {
+                side == 0 -> Span?{None}
+                side <= delta.base.key_spans -> Val(shared.key_spans.rows[side - 1])
+                else -> Val(delta.key_spans.rows[side - delta.base.key_spans - 1])
+            }
             Type.Map{key: delta_type_syntax(shared, delta, TypeID{id: delta_type_a(shared, delta, id)}), key_span: key_span, value: delta_type_syntax(shared, delta, TypeID{id: delta_type_b(shared, delta, id)})}
         }
         .Shared -> Type.Shared{inner: delta_type_syntax(shared, delta, TypeID{id: delta_type_a(shared, delta, id)})}
@@ -1724,16 +1737,19 @@ interner_merge_delta: fn(into: ^Interner, delta: ^InternerDelta) -> InternerRema
             .Int | .Float | .Bool | .String | .Char | .List | .Shared | .Option | .Result | .Named | .Apply | .TraitObject | .Tuple | .IntN | .Float32 | .Union | .Case -> side
         }
         count: delta.types.count[row]
-        if count == 0 {
-            remap.types.push(type_intern_scalar(into, kind, a, b, merged_side))
-        } else {
-            children := [U32]{}
-            first: delta.types.first[row]
-            loop index in 0..<count {
-                child: delta.types.children[first + index]
-                children.push(if type_child_is_type(kind, index) -> type_merged_type(remap, child) else -> type_merged_name(remap, child))
+        if {
+            count == 0 -> {
+                remap.types.push(type_intern_scalar(into, kind, a, b, merged_side))
             }
-            remap.types.push(type_intern(into, kind, a, b, merged_side, children))
+            else -> {
+                children := [U32]{}
+                first: delta.types.first[row]
+                loop index in 0..<count {
+                    child: delta.types.children[first + index]
+                    children.push(if type_child_is_type(kind, index) -> type_merged_type(remap, child) else -> type_merged_name(remap, child))
+                }
+                remap.types.push(type_intern(into, kind, a, b, merged_side, children))
+            }
         }
     }
     remap

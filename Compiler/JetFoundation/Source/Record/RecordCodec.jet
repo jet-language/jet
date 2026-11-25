@@ -351,9 +351,12 @@ record_canonical_value: fn(value: RecordValue, problems: ^[String]) -> RecordVal
             loop field in fields {
                 canonical.push(RecordField{name: field.name, value: record_canonical_value(field.value, problems)})
                 names.push(field.name.bytes())
-                if seen.get(field.name) != None {
-                    problems.push("record map key `{field.name}` is duplicated")
-                } else { seen[field.name] = true }
+                if {
+                    seen.get(field.name) != None -> {
+                        problems.push("record map key `{field.name}` is duplicated")
+                    }
+                    else -> { seen[field.name] = true }
+                }
             }
             sorted: loop index in record_sorted_order(names) -> canonical[index]
             RecordValue.Map{fields: sorted}
@@ -376,12 +379,15 @@ record_sorted_order: fn(names: [[U8]]) -> [Int] Never! {
             left := start
             right := middle
             loop left < middle || right < end {
-                if right >= end || (left < middle && !record_bytes_before(names[order[right]], names[order[left]])) {
-                    merged.push(order[left])
-                    left += 1
-                } else {
-                    merged.push(order[right])
-                    right += 1
+                if {
+                    right >= end || (left < middle && !record_bytes_before(names[order[right]], names[order[left]])) -> {
+                        merged.push(order[left])
+                        left += 1
+                    }
+                    else -> {
+                        merged.push(order[right])
+                        right += 1
+                    }
                 }
             }
             start = end
@@ -482,12 +488,15 @@ record_section_order: fn(ids: [Int]) -> [Int] Never! {
             left := start
             right := middle
             loop left < middle || right < end {
-                if right >= end || (left < middle && !(ids[order[right]] < ids[order[left]])) {
-                    merged.push(order[left])
-                    left += 1
-                } else {
-                    merged.push(order[right])
-                    right += 1
+                if {
+                    right >= end || (left < middle && !(ids[order[right]] < ids[order[left]])) -> {
+                        merged.push(order[left])
+                        left += 1
+                    }
+                    else -> {
+                        merged.push(order[right])
+                        right += 1
+                    }
                 }
             }
             start = end
@@ -747,7 +756,7 @@ record_open_schema_trusted: fn(bytes: [U8], schema: String) -> RecordReaderResul
 }
 
 record_schema_check: fn(opened: ^^RecordReaderResult, schema: String) -> RecordReaderResult Never! {
-    result := opened.move()
+    result: opened.move()
     if result.reader == .Val(reader) {
         if reader.schema != schema {
             return record_reader_failure("record schema is `{reader.schema}`, expected `{schema}`")

@@ -1,21 +1,21 @@
 // The audited register sets per target, shared by sema's contract check and
 // the foreign bridge.
 inline_assembly_target_supported: fn(target: String) -> Bool Never! {
-    parts := target.split("-").to_list()
-    arch := if parts.len() > 0 -> parts[0] else -> ""
+    parts: target.split("-").to_list()
+    arch: if parts.len() > 0 -> parts[0] else -> ""
     arch == "x86_64" || arch == "i386" || arch == "i586" || arch == "i686" || arch == "x86" || arch == "aarch64" || arch == "arm" || arch == "armv7" || arch.starts_with("thumb") || arch.starts_with("riscv64")
 }
 
 inline_assembly_normalize_register: fn(register: String) -> String Never! {
     raw := register
     if raw.starts_with("%") {
-        bytes := raw.bytes()
+        bytes: raw.bytes()
         raw = String.from_bytes(bytes.slice(1, bytes.len())) ?? ""
     }
     bytes := raw.bytes()
     index := 0
     loop index < bytes.len() {
-        code := Int{bytes[index]}
+        code: Int{bytes[index]}
         if code >= 65 && code <= 90 -> bytes[index] = U8{code + 32}
         index += 1
     }
@@ -24,24 +24,24 @@ inline_assembly_normalize_register: fn(register: String) -> String Never! {
 
 inline_assembly_register_number: fn(register: String, prefix: String, lo: Int, hi: Int) -> Bool Never! {
     if !register.starts_with(prefix) -> return false
-    bytes := register.bytes()
-    prefix_len := prefix.bytes().len()
+    bytes: register.bytes()
+    prefix_len: prefix.bytes().len()
     if bytes.len() <= prefix_len -> return false
     index := prefix_len
     loop index < bytes.len() {
-        code := Int{bytes[index]}
+        code: Int{bytes[index]}
         if code < 48 || code > 57 -> return false
         index += 1
     }
-    suffix := String.from_bytes(bytes.slice(prefix_len, bytes.len())) ?? ""
-    number := Int.parse(suffix) ?? return false
+    suffix: String.from_bytes(bytes.slice(prefix_len, bytes.len())) ?? ""
+    number: Int.parse(suffix) ?? return false
     number >= lo && number <= hi
 }
 
 inline_assembly_register_known: fn(target: String, register: String) -> Bool Never! {
-    parts := target.split("-").to_list()
-    arch := if parts.len() > 0 -> parts[0] else -> ""
-    name := inline_assembly_normalize_register(register)
+    parts: target.split("-").to_list()
+    arch: if parts.len() > 0 -> parts[0] else -> ""
+    name: inline_assembly_normalize_register(register)
     if arch == "x86_64" {
         // SSE2 is baseline on x86-64; every SysV vector register is caller-saved.
         if name == "xmm0" || name == "xmm1" || name == "xmm2" || name == "xmm3" || name == "xmm4" || name == "xmm5" || name == "xmm6" || name == "xmm7" || name == "xmm8" || name == "xmm9" || name == "xmm10" || name == "xmm11" || name == "xmm12" || name == "xmm13" || name == "xmm14" || name == "xmm15" {
@@ -77,23 +77,23 @@ inline_assembly_contract: fn(function: Func, target: String) -> InlineAsmContrac
     inline: function.inline_foreign ?? return InlineAsmContractCheck.NotAssembly
     if inline.lang != "asm" -> return InlineAsmContractCheck.NotAssembly
 
-    params := function.params
+    params: function.params
     used := [String]{}
     clobbers := [String]{}
     seen_clobbers := [String]{}
     return_anchors := 0
     return_destination := InlineAsmOutput?{None}
     bad := String?{None}
-    target_supported := inline_assembly_target_supported(target)
+    target_supported: inline_assembly_target_supported(target)
 
     loop raw_line in inline.source.split("\n") {
         line := raw_line.trim()
         if line.starts_with("; clobbers ") {
-            prefix_len := "; clobbers ".bytes().len()
-            bytes := line.bytes()
-            rest := String.from_bytes(bytes.slice(prefix_len, bytes.len())) ?? ""
+            prefix_len: "; clobbers ".bytes().len()
+            bytes: line.bytes()
+            rest: String.from_bytes(bytes.slice(prefix_len, bytes.len())) ?? ""
             loop raw in inline_assembly_clobber_tokens(rest) {
-                register := inline_assembly_normalize_register(raw)
+                register: inline_assembly_normalize_register(raw)
                 if {
                     !target_supported || !inline_assembly_register_known(target, register) -> {
                         bad = Val("`{raw}` isn't an audited register on this target")
@@ -112,8 +112,8 @@ inline_assembly_contract: fn(function: Func, target: String) -> InlineAsmContrac
 
         if line.contains("; -> return") {
             return_anchors += 1
-            parts := line.split("; -> return").to_list()
-            operand := if parts.len() > 0 -> inline_assembly_first_operand(parts[0].trim()) else -> None
+            parts: line.split("; -> return").to_list()
+            operand: if parts.len() > 0 -> inline_assembly_first_operand(parts[0].trim()) else -> None
             checked_destination := if operand == {
                 None -> None
                 Val(value) -> inline_assembly_return_destination(value, params, target, target_supported)
@@ -136,7 +136,7 @@ inline_assembly_contract: fn(function: Func, target: String) -> InlineAsmContrac
 
         rest := line
         loop {
-            bytes := rest.bytes()
+            bytes: rest.bytes()
             open := -1
             index := 0
             loop index < bytes.len() {
@@ -160,7 +160,7 @@ inline_assembly_contract: fn(function: Func, target: String) -> InlineAsmContrac
                 bad = Val("an assembly operand has an unmatched `{{`")
                 break
             }
-            name := String.from_bytes(bytes.slice(open + 1, close)) ?? ""
+            name: String.from_bytes(bytes.slice(open + 1, close)) ?? ""
             parameter_index := -1
             index = 0
             loop index < params.len() {
@@ -220,13 +220,13 @@ inline_assembly_contract: fn(function: Func, target: String) -> InlineAsmContrac
 }
 
 inline_assembly_ascii_whitespace: fn(byte: U8) -> Bool Never! {
-    code := Int{byte}
+    code: Int{byte}
     code == 32 || (code >= 9 && code <= 13)
 }
 
 inline_assembly_clobber_tokens: fn(text: String) -> [String] Never! {
     tokens := [String]{}
-    bytes := text.bytes()
+    bytes: text.bytes()
     start := 0
     index := 0
     loop index < bytes.len() {
@@ -241,7 +241,7 @@ inline_assembly_clobber_tokens: fn(text: String) -> [String] Never! {
 }
 
 inline_assembly_first_operand: fn(line: String) -> String? {
-    bytes := line.bytes()
+    bytes: line.bytes()
     separator := -1
     index := 0
     loop index < bytes.len() {
@@ -252,17 +252,17 @@ inline_assembly_first_operand: fn(line: String) -> String? {
         index += 1
     }
     if separator < 0 -> return None
-    operands := String.from_bytes(bytes.slice(separator + 1, bytes.len())) ?? ""
-    fields := operands.split(",").to_list()
+    operands: String.from_bytes(bytes.slice(separator + 1, bytes.len())) ?? ""
+    fields: operands.split(",").to_list()
     if fields.len() == 0 -> return None
-    operand := fields[0].trim()
+    operand: fields[0].trim()
     if operand == "" -> None else -> Val(operand)
 }
 
 inline_assembly_return_destination: fn(operand: String, params: [Param], target: String, target_supported: Bool) -> InlineAsmOutput? {
-    bytes := operand.bytes()
+    bytes: operand.bytes()
     if operand.starts_with("{{") && operand.ends_with("}}") {
-        name := String.from_bytes(bytes.slice(1, bytes.len() - 1)) ?? ""
+        name: String.from_bytes(bytes.slice(1, bytes.len() - 1)) ?? ""
         index := 0
         loop index < params.len() {
             if params[index].name == name -> return Val(InlineAsmOutput.Parameter{index: index})
@@ -270,7 +270,7 @@ inline_assembly_return_destination: fn(operand: String, params: [Param], target:
         }
         return None
     }
-    register := inline_assembly_normalize_register(operand)
+    register: inline_assembly_normalize_register(operand)
     if target_supported && inline_assembly_register_known(target, register) {
         return Val(InlineAsmOutput.Register{name: register})
     }
@@ -361,25 +361,25 @@ InlineAsmUnencoded: struct {
 // line and a numeric label such as `1:` hold no instruction.
 inline_assembly_x64_unencoded: fn(body: String) -> [InlineAsmUnencoded] Never! {
     found := [InlineAsmUnencoded]{}
-    bytes := body.bytes()
+    bytes: body.bytes()
     index := 0
     loop index < bytes.len() {
         if inline_assembly_ascii_whitespace(bytes[index]) {
             index += 1
             next
         }
-        start := index
+        start: index
         loop index < bytes.len() {
             if (Int{bytes[index]}) == 59 || inline_assembly_ascii_whitespace(bytes[index]) -> break
             index += 1
         }
-        end := index
+        end: index
         loop index < bytes.len() {
             if (Int{bytes[index]}) == 10 -> break
             index += 1
         }
         if end == start || inline_assembly_x64_label(bytes, start, end) -> next
-        word := String.from_bytes(bytes.slice(start, end)) ?? ""
+        word: String.from_bytes(bytes.slice(start, end)) ?? ""
         if INLINE_ASSEMBLY_X64_MNEMONICS.contains(word) || INLINE_ASSEMBLY_X64_RAIL_MNEMONICS.contains(word) {
             next
         }
@@ -393,7 +393,7 @@ inline_assembly_x64_label: fn(bytes: [U8], start: Int, end: Int) -> Bool Never! 
     if end - start < 2 || (Int{bytes[end - 1]}) != 58 -> return false
     index := start
     loop index < end - 1 {
-        code := Int{bytes[index]}
+        code: Int{bytes[index]}
         if code < 48 || code > 57 -> return false
         index += 1
     }

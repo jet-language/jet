@@ -354,7 +354,7 @@ JetLibReader: struct {
     }
 
     take_string: fn(^self, what: String) -> String Err! {
-        raw := self.take_field(what) ?? return Err(err)
+        raw: self.take_field(what) ?? return Err(err)
         text: String.from_bytes(raw) ?? return Err(jetlib_parse_message(JetLibParseFailure{kind: JetLibParseKind.UTF8, field: what}, self.loader))
         Ok(text)
     }
@@ -379,20 +379,23 @@ JetLibReader: struct {
 
 jetlib_parse_message: fn(failure: JetLibParseFailure, loader: Bool) -> String Never! {
     field: failure.field
-    if loader {
-        return if failure.kind == {
-            .Length -> "truncated .jetlib header ({field} length)"
-            .Field -> "truncated .jetlib header ({field})"
-            .TooLarge -> ".jetlib header {field} is too large"
-            .UTF8 -> ".jetlib header {field} is not UTF-8"
+    if {
+        loader -> {
+            return if failure.kind == {
+                .Length -> "truncated .jetlib header ({field} length)"
+                .Field -> "truncated .jetlib header ({field})"
+                .TooLarge -> ".jetlib header {field} is too large"
+                .UTF8 -> ".jetlib header {field} is not UTF-8"
+            }
         }
-    } else {
-        suffix: if field == "effect" -> "" else -> " ({field})"
-        return if failure.kind == {
-            .Length -> "truncated .jetlib header (length prefix){suffix}"
-            .Field -> "truncated .jetlib header (field bytes){suffix}"
-            .TooLarge -> ".jetlib header field is too large{suffix}"
-            .UTF8 -> if field == "effect" -> "effect name is not UTF-8" else -> "{field} is not UTF-8"
+        else -> {
+            suffix: if field == "effect" -> "" else -> " ({field})"
+            return if failure.kind == {
+                .Length -> "truncated .jetlib header (length prefix){suffix}"
+                .Field -> "truncated .jetlib header (field bytes){suffix}"
+                .TooLarge -> ".jetlib header field is too large{suffix}"
+                .UTF8 -> if field == "effect" -> "effect name is not UTF-8" else -> "{field} is not UTF-8"
+            }
         }
     }
 }

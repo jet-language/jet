@@ -341,14 +341,17 @@ jettrace_validate_spans: fn(value: CanonicalJSON, tasks: [U64:JetTraceTaskFact],
                 if symbol != task_fact.symbol {
                     return Err(jettrace_error("{label}.symbol does not match its task"))
                 }
-                if task_fact.parent == (U64{0}) {
-                    if fields[jettrace_get(fields, "parent_task_id")].value != CanonicalJSON.Null {
-                        return Err(jettrace_error("{label} root span must not claim a parent"))
+                if {
+                    task_fact.parent == (U64{0}) -> {
+                        if fields[jettrace_get(fields, "parent_task_id")].value != CanonicalJSON.Null {
+                            return Err(jettrace_error("{label} root span must not claim a parent"))
+                        }
                     }
-                } else {
-                    parent: jettrace_unsigned(fields[jettrace_get(fields, "parent_task_id")].value, "{label}.parent_task_id")
-                    if parent != task_fact.parent || !tasks.has_key(parent) {
-                        return Err(jettrace_error("{label}.parent_task_id does not match its task"))
+                    else -> {
+                        parent: jettrace_unsigned(fields[jettrace_get(fields, "parent_task_id")].value, "{label}.parent_task_id")
+                        if parent != task_fact.parent || !tasks.has_key(parent) {
+                            return Err(jettrace_error("{label}.parent_task_id does not match its task"))
+                        }
                     }
                 }
                 if reason.len() != 0 {

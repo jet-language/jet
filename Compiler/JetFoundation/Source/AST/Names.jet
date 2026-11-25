@@ -268,9 +268,12 @@ name_pool_adopt: fn(table: ^NameTable, shared: NameTable, own: ^NameTable) Never
         }
         slot: name_slot(own, hash, table.bytes, start, end)
         own_entry: own.slots[slot]
-        if own_entry == 0 {
-            _ := name_insert(own, slot, hash, table.bytes, start, end, name_text(table, Name{id: U32{id}}))
-        } else { table.texts[id] = name_text(own, Name{id: U32{(own_entry & 0xffffffff) - 1}}) }
+        if {
+            own_entry == 0 -> {
+                _ := name_insert(own, slot, hash, table.bytes, start, end, name_text(table, Name{id: U32{id}}))
+            }
+            else -> { table.texts[id] = name_text(own, Name{id: U32{(own_entry & 0xffffffff) - 1}}) }
+        }
     }
 }
 

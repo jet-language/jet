@@ -138,8 +138,8 @@ marker_source_list: fn(value: String) -> [String] Never! {
 
 marker_source_flag: fn(value: String, line: String) -> Bool Never! {
     if value == {
-        "true" -> return true
-        "false" -> return false
+        "true" -> true
+        "false" -> false
         else -> build_time_refused("a marker fact reads `true` or `false`, found `{value}` in {line}")
     }
 }
@@ -430,13 +430,16 @@ marker_decl_signature: fn(declaration: MarkerDecl, source: String) -> String Nev
     settings := [String]{}
     loop parameter in declaration.params {
         value: if parameter.value == .Val(expression) -> marker_decl_signature_source(source, expr_span(expression)) else -> "…"
-        if parameter.ty == .Val(ty) {
-            shown: if parameter.variadic -> "[{type_name(ty)}]" else -> type_name(ty)
-            default: if parameter.value != None -> "{{{value}}}" else -> ""
-            parts.push("{parameter.name}: {shown}{default}")
-        } else {
-            key: if parameter.name.starts_with("$") -> foundation_byte_text(parameter.name.bytes(), 1, parameter.name.count_bytes()) else -> parameter.name.copy()
-            settings.push("{key}: {value}")
+        if {
+            parameter.ty == .Val(ty) -> {
+                shown: if parameter.variadic -> "[{type_name(ty)}]" else -> type_name(ty)
+                default: if parameter.value != None -> "{{{value}}}" else -> ""
+                parts.push("{parameter.name}: {shown}{default}")
+            }
+            else -> {
+                key: if parameter.name.starts_with("$") -> foundation_byte_text(parameter.name.bytes(), 1, parameter.name.count_bytes()) else -> parameter.name.copy()
+                settings.push("{key}: {value}")
+            }
         }
     }
     block: if settings.len() == 0 -> "impl Marker {{}}" else -> "impl Marker {{ {settings.join(", ")} }}"

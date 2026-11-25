@@ -41,12 +41,15 @@ core_sig_row_lookup: fn(rows: String, module_name: String, member: String) -> Co
                 bytes: text.bytes()
                 access := AccessConvention.Read
                 start := 0
-                if core_sig_row_code(bytes, 0) == 94 && core_sig_row_code(bytes, 1) == 94 {
-                    access = AccessConvention.Move
-                    start = 2
-                } else if core_sig_row_code(bytes, 0) == 94 {
-                    access = AccessConvention.Write
-                    start = 1
+                if {
+                    core_sig_row_code(bytes, 0) == 94 && core_sig_row_code(bytes, 1) == 94 -> {
+                        access = AccessConvention.Move
+                        start = 2
+                    }
+                    core_sig_row_code(bytes, 0) == 94 -> {
+                        access = AccessConvention.Write
+                        start = 1
+                    }
                 }
                 parameters.push(core_sig_positional(core_sig_row_type(text, start), access))
             }
@@ -189,18 +192,21 @@ core_sig_row_atom_at: fn(bytes: [U8], start: Int) -> CoreSigRowType Never! {
         done := core_sig_row_code(bytes, next) == 41
         if done -> next += 1
         loop !done {
-            if core_sig_row_code(bytes, next) == 59 {
-                result: core_sig_row_type_at(bytes, next + 1)
-                ret = Val(result.ty)
-                next = result.next + 1
-                done = true
-            } else {
-                param: core_sig_row_type_at(bytes, next)
-                params.push(param.ty)
-                code: core_sig_row_code(bytes, param.next)
-                done = code == 41
-                next = if code == 44 -> param.next + 1 else -> param.next
-                if done -> next += 1
+            if {
+                core_sig_row_code(bytes, next) == 59 -> {
+                    result: core_sig_row_type_at(bytes, next + 1)
+                    ret = Val(result.ty)
+                    next = result.next + 1
+                    done = true
+                }
+                else -> {
+                    param: core_sig_row_type_at(bytes, next)
+                    params.push(param.ty)
+                    code: core_sig_row_code(bytes, param.next)
+                    done = code == 41
+                    next = if code == 44 -> param.next + 1 else -> param.next
+                    if done -> next += 1
+                }
             }
         }
         return CoreSigRowType{ty: Type.Fn{params: params, ret: ret, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}, next: next}

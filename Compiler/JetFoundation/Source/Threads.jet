@@ -188,12 +188,15 @@ compiler_threads_heaviest_first: fn(weights: [Int]) -> [Int] Never! {
             right := middle
             out := start
             loop left < middle && right < end {
-                if weights[order[right]] > weights[order[left]] {
-                    scratch[out] = order[right]
-                    right += 1
-                } else {
-                    scratch[out] = order[left]
-                    left += 1
+                if {
+                    weights[order[right]] > weights[order[left]] -> {
+                        scratch[out] = order[right]
+                        right += 1
+                    }
+                    else -> {
+                        scratch[out] = order[left]
+                        left += 1
+                    }
                 }
                 out += 1
             }
