@@ -9,7 +9,7 @@
 //    `priv module`s;
 // 2. a module's member functions, top-level or nested, lift under
 //    `sema_inline_member_name` (`bank.open` -> `__jet_bank_dopen`,
-//    `bank.audit.log` -> `__jet_bank_daudit_dlog`; `sema_inline_generated_path`
+//    `bank.audit.log` -> `__jet_bank_daudit_dlog`; `ast_comptime_generated_path`
 //    escapes every non-alphanumeric byte, `.` as `_d` and `_` as `_u`) with
 //    their sibling calls renamed, so registration, body checking and lowering
 //    see ordinary functions;
@@ -103,6 +103,7 @@ use {
         measure_kind,
         measure_literal_value,
         ast_func,
+        ast_comptime_generated_path,
         ast_const,
         core_module_export,
         diagnostic_with_label,
@@ -343,33 +344,6 @@ sema_inline_is_alphanumeric: fn(code: Int) -> Bool Never! {
     (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
 }
 
-sema_inline_generated_path: fn(path: String) -> String Never! {
-    hex: "0123456789abcdef"
-    out := [U8]{}
-    loop byte in path.bytes() {
-        code: Int{byte}
-        if sema_inline_is_alphanumeric(code) {
-            out.push(byte)
-            next
-        }
-        out.push(U8{95})
-        if {
-            code == 95 -> out.push(U8{117})
-            code == 46 -> out.push(U8{100})
-            code == 58 -> out.push(U8{99})
-            code == 47 -> out.push(U8{115})
-            code == 92 -> out.push(U8{98})
-            code == 45 -> out.push(U8{104})
-            else -> {
-                out.push(U8{120})
-                out.push(hex.bytes()[code /% 16])
-                out.push(hex.bytes()[code % 16])
-            }
-        }
-    }
-    "__jet_{String.from_bytes(out) ?? ""}"
-}
-
 sema_inline_hex_value: fn(code: Int) -> Int Never! {
     if {
         code >= 48 && code <= 57 -> code - 48
@@ -416,7 +390,7 @@ sema_inline_decode_generated_suffix: fn(suffix: String) -> String? Never! {
 sema_inline_member_name: fn(module_path: String, name: String) -> String Never! {
     stripped: if module_path.starts_with("__jet_") -> String.from_bytes(module_path.bytes()[6..<module_path.bytes().len()]) ?? module_path.copy() else -> module_path.copy()
     decoded: sema_inline_decode_generated_suffix(stripped) ?? stripped
-    sema_inline_generated_path("{decoded}.{name}")
+    ast_comptime_generated_path("{decoded}.{name}")
 }
 
 // The source name of a lifted member function (`__jet_bank_dopen` -> `open`),
@@ -426,7 +400,7 @@ sema_inline_member_name: fn(module_path: String, name: String) -> String Never! 
 sema_inline_member_source_name: fn(name: String) -> String Never! {
     if !name.starts_with("__jet_") -> return name.copy()
     decoded: sema_inline_decode_generated_suffix(String.from_bytes(name.bytes()[6..<name.bytes().len()]) ?? "") ?? return name.copy()
-    if !decoded.contains(".") || sema_inline_generated_path(decoded) != name -> return name.copy()
+    if !decoded.contains(".") || ast_comptime_generated_path(decoded) != name -> return name.copy()
     segments: decoded.split(".").to_list()
     member: segments[segments.len() - 1]
     if member == "" -> return name.copy()
@@ -538,13 +512,13 @@ sema_inline_module_aliased: fn(declaration: ImportDecl, file_imports: [ImportDec
 // The generated file-level alias a lifted body of module `path` reads that
 // module's own import `alias` through.
 sema_inline_module_alias: fn(path: String, alias: String) -> String Never! {
-    sema_inline_generated_path("import.{path}.{alias}")
+    ast_comptime_generated_path("import.{path}.{alias}")
 }
 
 // Whether `declaration` is a generated alias sema_inline_alias_imports added;
 // registration binds it through the import edge of the declaration it copies.
 sema_inline_module_alias_import: fn(declaration: ImportDecl) -> Bool Never! {
-    declaration.alias.starts_with(sema_inline_generated_path("import."))
+    declaration.alias.starts_with(ast_comptime_generated_path("import."))
 }
 
 // The aliases the lifted bodies of `definition` (module `path`) read: its own
@@ -589,7 +563,7 @@ sema_inline_core_member: fn(path: String) -> SemaInlineTarget? Never! {
 
 // The file-level alias of a Core module that lowered members read.
 sema_inline_core_alias: fn(module_path: String) -> String Never! {
-    sema_inline_generated_path("use.{module_path}")
+    ast_comptime_generated_path("use.{module_path}")
 }
 
 // Whether `declaration` is the file-level Core alias sema_inline_core_imports

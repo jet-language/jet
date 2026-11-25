@@ -93,6 +93,7 @@ use {
         Stmt,
         VariantPayload,
         ast_program,
+        ast_comptime_generated_path,
         compiler_apply_order,
         compiler_threads_admit,
         compiler_threads_joined,
@@ -3021,7 +3022,7 @@ sema_registration_original_error_module: fn(module_table: ^ModuleTable) -> SemaR
     SemaRegistrationModuleInput{
         package_identity: "jet:canonical-prelude",
         module_identity: module_intern(module_table, path),
-        module_name: sema_inline_generated_path(path),
+        module_name: ast_comptime_generated_path(path),
         core_source_alias: "",
         module_path: "Prelude/Errors.jet",
         source_file: path,
@@ -3059,7 +3060,7 @@ sema_registration_rule_module: fn(module_table: ^ModuleTable) -> SemaRegistratio
     SemaRegistrationModuleInput{
         package_identity: "jet:canonical-prelude",
         module_identity: module_intern(module_table, path),
-        module_name: sema_inline_generated_path(path),
+        module_name: ast_comptime_generated_path(path),
         core_source_alias: "",
         module_path: "Prelude/Rules.jet",
         source_file: path,
@@ -3078,7 +3079,7 @@ sema_registration_rule_module: fn(module_table: ^ModuleTable) -> SemaRegistratio
 // trusted.
 sema_registration_retain_original_error_module: fn(inputs: ^[SemaRegistrationModuleInput], module_table: ^ModuleTable, diagnostics: ^[Diagnostic]) {
     path: SEMA_PRELUDE_ERROR_SOURCE_PATH
-    alias: sema_inline_generated_path(path)
+    alias: ast_comptime_generated_path(path)
     owners := 0
     loop input in inputs {
         retained := false
