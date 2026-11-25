@@ -1,4 +1,5 @@
 use {
+    builtin: jet_builtins
     core: core
     core.ui.[UINode]
     core.ui.host.[UIAccessibility, UIAccessibilityProjection, UIHostError, UINodeID]
@@ -8,14 +9,14 @@ use {
 // core.ui.host.accessibility — node metadata on the canonical UINode, once the
 // provider reports accessibility available (capability code 5). There is no
 // second provider tree.
-attach: fn(node: UINode, metadata: UIAccessibility) -[IO, Browser]> UINode UIHostError! {
+#Builtin.Needs("UI.Accessibility") attach: fn(node: UINode, metadata: UIAccessibility) -[IO, Browser]> UINode UIHostError! {
     if !rt.capability(5) {
         return Err(UIHostError.CapabilityUnavailable{capability: "Accessibility"})
     }
     Ok(core.ui.node_accessibility(node, metadata))
 }
 
-project: fn(node: UINode, node_id: UINodeID) -[IO]> UIAccessibilityProjection? UIHostError! {
+#Builtin.Needs("UI.Accessibility") project: fn(node: UINode, node_id: UINodeID) -[IO]> UIAccessibilityProjection? UIHostError! {
     if !rt.capability(5) {
         return Err(UIHostError.CapabilityUnavailable{capability: "Accessibility"})
     }

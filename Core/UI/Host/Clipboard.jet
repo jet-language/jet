@@ -1,4 +1,5 @@
 use {
+    builtin: jet_builtins
     core: core
     core.ui.host.[UIClipboardText, UIClipboardWrite, UIHostError]
     rt: jet.runtime.ui
@@ -8,7 +9,7 @@ use {
 // clipboard text primitives (capability code 1). On the web, read_text answers
 // the clipboard text the page last observed (a paste, copy or cut, or its own
 // write_text); a browser lends the live clipboard only to a user gesture.
-read_text: fn() -[IO]> UIClipboardText UIHostError! {
+#Builtin.Needs("UI.Clipboard") read_text: fn() -[IO]> UIClipboardText UIHostError! {
     if !rt.capability(1) {
         return Err(UIHostError.CapabilityUnavailable{capability: "Clipboard"})
     }
@@ -16,7 +17,7 @@ read_text: fn() -[IO]> UIClipboardText UIHostError! {
     Ok(UIClipboardText{text: text, selection: None})
 }
 
-write_text: fn(text: String) -[IO]> UIClipboardWrite UIHostError! {
+#Builtin.Needs("UI.Clipboard") write_text: fn(text: String) -[IO]> UIClipboardWrite UIHostError! {
     if !rt.capability(1) {
         return Err(UIHostError.CapabilityUnavailable{capability: "Clipboard"})
     }
@@ -30,6 +31,6 @@ write_text: fn(text: String) -[IO]> UIClipboardWrite UIHostError! {
     Ok(UIClipboardWrite{characters: characters})
 }
 
-clear: fn() -[IO]> UIClipboardWrite UIHostError! { write_text("") }
+#Builtin.Needs("UI.Clipboard") clear: fn() -[IO]> UIClipboardWrite UIHostError! { write_text("") }
 
-is_empty: fn() -[IO]> Bool UIHostError! { read_text().text.len() == 0 }
+#Builtin.Needs("UI.Clipboard") is_empty: fn() -[IO]> Bool UIHostError! { read_text().text.len() == 0 }
