@@ -694,7 +694,7 @@ ir_lazy_symbol: fn(symbol: String, source_ty: Type) -> Bool Never! {
     }
     if symbol == "jet_list_try_collect" && ir_untag(source_ty) == .List(_) -> return true
     if ir_iter_element(source_ty) == None -> return false
-    symbol == "jet_list_sum" || symbol == "jet_list_sum_fixed_f64" || symbol == "jet_list_product" || ir_lazy_plain(symbol) || ir_lazy_counted(symbol) || ir_lazy_nested(symbol) || ir_lazy_compared(symbol) || symbol == "jet_std_io_progress_iter" || symbol == "jet_list_try_collect" || symbol == "jet_iter_split_at"
+    symbol == "jet_list_sum" || symbol == "jet_list_sum_fixed_f64" || symbol == "jet_list_product" || ir_lazy_plain(symbol) || ir_lazy_counted(symbol) || ir_lazy_nested(symbol) || ir_lazy_compared(symbol) || symbol == "jet_iter_progress" || symbol == "jet_list_try_collect" || symbol == "jet_iter_split_at"
 }
 
 // A static Core call of an Iter route: its arguments as checked, without the
@@ -716,7 +716,7 @@ ir_lazy_core_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, symbol: String,
 // InlineIterProgress): the progress route over its items, description and
 // template, an Iter of type `ty` that takes the items over.
 ir_lazy_progress: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, args: [Int], span: Span) -> Int Never! {
-    ir_lazy_core_call(m, p, b, "jet_std_io_progress_iter", ty, args, span) ?? ir_fail_slot(b, span, "progress source over no checked Iter")
+    ir_lazy_core_call(m, p, b, "jet_iter_progress", ty, args, span) ?? ir_fail_slot(b, span, "progress source over no checked Iter")
 }
 
 // Iter builtins lowered over the List under them rather than through an
@@ -1003,7 +1003,7 @@ ir_lazy_route: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, symbol: String, ty:
         _: ir_lazy_runtime(m, b, "jet_rt_native_iter_split_at", call_args, -1, handle)
         return out
     }
-    runtime: if symbol == "jet_std_io_progress_iter" -> "jet_rt_native_iter_progress" else if collects -> "jet_rt_native_iter_try_collect" else -> ir_lazy_runtime_symbol(symbol)
+    runtime: if collects -> "jet_rt_native_iter_try_collect" else -> ir_lazy_runtime_symbol(symbol)
     out := -1
     if symbol == "jet_iter_len" || symbol == "jet_iter_compare" {
         native: ir_lazy_runtime(m, b, runtime, call_args, word_row, handle)

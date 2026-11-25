@@ -944,60 +944,42 @@ sema_call_check_term_readline: fn(record: CoreCallRecord, args: [CallArg], span:
 
 // `("core.term", "progress")` over a sequence: a List or Iter source with a
 // description and an optional template is a call of the core.term function
-// filling InlineIterProgress (sema_call_term_progress_source), which hands
-// the items on as the loop pulls them; the `progress_iter` row while Core
-// fills no such role. A List is read through its `lazy()` iterator; a
-// missing template is empty.
+// filling InlineIterProgress, which hands the items on as the loop pulls
+// them. A List is read through its `lazy()` iterator; a missing template is
+// empty. The function's declaration types the arguments (the items move in)
+// and its effect row is the call's.
 sema_call_check_term_progress_iter: fn(args: [CallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaDirectSpecialCheck {
-    filler: sema_core_role_function(check.program.registration_graph, "InlineIterProgress")
-    record: core_call("core.term", "progress_iter")
-    if filler == None && record == None {
-        return SemaDirectSpecialCheck{handled: false, value: None}
-    }
+    rejected: SemaDirectSpecialCheck{handled: true, value: None}
     if args.len() > 3 {
         check.diagnostics.push(sema_error("E0104", span, "`progress` expects at most 3 arguments, got {args.len()}", "a progress source takes its items, a description and a template", "check the call to `progress`"))
-        return SemaDirectSpecialCheck{handled: true, value: None}
+        return rejected
     }
-    source: sema_check_expression(args[0].expr, None, check) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    filler: sema_core_role_function(check.program.registration_graph, "InlineIterProgress") ?? {
+        check.diagnostics.push(sema_missing_core_role("InlineIterProgress", span))
+        return rejected
+    }
+    source: sema_check_expression(args[0].expr, None, check) ?? return rejected
     items: sema_call_collections_list_as_iter(source, span)
     is_iter: if items.ty == .Apply(name, _) -> name == "Iter" else -> false
     if !is_iter {
         check.diagnostics.push(sema_error("E0108", expr_span(args[0].expr), "`progress` with a description reads a List or an Iter, not `{type_name(items.ty)}`", "the described progress form reports each item the loop pulls", "pass the items to report, or call `progress(label)` alone"))
-        return SemaDirectSpecialCheck{handled: true, value: None}
+        return rejected
     }
+    element: sema_call_eval_show_item(items.ty) ?? return rejected
+    if !sema_stmt_move_direct(args[0].expr, check, "`progress`") -> return rejected
     result: items.ty
-    if !sema_stmt_move_direct(args[0].expr, check, "`progress`") {
-        return SemaDirectSpecialCheck{handled: true, value: None}
-    }
     values := [TExpr]{items}
     loop index in 1..<args.len() {
-        text: sema_check_expression(args[index].expr, Val(Type.String), check) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+        text: sema_check_expression(args[index].expr, Val(Type.String), check) ?? return rejected
         values.push(text)
     }
     loop values.len() < 3 {
         values.push(sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{}}, span))
     }
-    if filler == .Val(function) {
-        return sema_call_term_progress_source(function, values, result, span, expected, check)
-    }
-    row: record ?? return SemaDirectSpecialCheck{handled: true, value: None}
-    if !sema_call_core_record_effects(row, span, [Type]{}, result, TFailureCarrier.Infallible, [FunctionDefaultRef]{}, check) {
-        return SemaDirectSpecialCheck{handled: true, value: None}
-    }
-    value: sema_call_core_tree(row, values, span, [Type]{}, [Bool]{false, false, false}, result, TFailureCarrier.Infallible, None, check) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-    SemaDirectSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, check)}
-}
-
-// The described progress source as a call of `source`, the Core function
-// filling InlineIterProgress, at the items' element type: its declaration
-// types the arguments (the items move in) and its effect row is the call's.
-sema_call_term_progress_source: fn(source: SemaCoreRoleFunction, values: [TExpr], result: Type, span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaDirectSpecialCheck {
-    rejected: SemaDirectSpecialCheck{handled: true, value: None}
-    element: sema_call_eval_show_item(result) ?? return rejected
     declared_effects := [String]{}
-    if !sema_call_core_function_effects(source, check, declared_effects) -> return rejected
+    if !sema_call_core_function_effects(filler, check, declared_effects) -> return rejected
     effects: loop name in declared_effects -> EffectRowEntry{name: name, span: span}
-    target: sema_call_core_source_target(check.environment.*, check.program.*, source.module_identity, source.name, [Type]{element}, span, true, check.diagnostics) ?? return rejected
+    target: sema_call_core_source_target(check.environment.*, check.program.*, filler.module_identity, filler.name, [Type]{element}, span, true, check.diagnostics) ?? return rejected
     returned: sema_call_signature_return(target.signature) ?? return rejected
     facts: SemaCallFacts{return_type: returned, failure_carrier: TFailureCarrier.Infallible, effect_bound: Val(effects), type_args: [Type]{}, default_refs: [FunctionDefaultRef]{}}
     if !sema_effect_record_intrinsic_fact(check.environment.*, check.program.*, check.scopes, check.context, "core.term.progress", span, facts, check.diagnostics) {
