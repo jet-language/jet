@@ -903,6 +903,8 @@ SEMA_CALL_RULE_F32_MAX: Float{340282346638528859811704183484516925440.0}
 // a Map.
 sema_rule_value_dyn: fn(graph: SemaRegistrationGraph, caller: Int, ty: Type, value: TComptimeValue, depth: Int) -> TComptimeValue? {
     if depth > SEMA_CALL_RULE_VALUE_DEPTH -> return None
+    // An Int the build holds in a word is its own Dyn payload: no fold.
+    if ty == Type.Int && value == .Int(small) && sema_comptime_fold_small_int(small) -> return Val(sema_rule_dyn("Int", TComptimeValue.Int{value: small}))
     if ty == Type.Int || ty == .IntN(_, _) {
         number := Int?{None}
         if value == .Int(small) -> number = Val(small)

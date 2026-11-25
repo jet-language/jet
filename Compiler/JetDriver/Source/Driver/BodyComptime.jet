@@ -40,7 +40,6 @@ use {
         sema_comptime_body_item_source,
         sema_comptime_generic_site,
         sema_comptime_key_set_add,
-        sema_comptime_key_set_has,
         sema_comptime_function_diagnostics,
         sema_comptime_local_values_ahead,
         sema_comptime_graph_apply_values,
@@ -252,20 +251,20 @@ jet_driver_pending_comptime_body_rows: fn(
     modules: [SemaGraphModuleResult],
     values: [SemaComptimeItemValue],
 ) -> [JetDriverBodySourceRow] Never! {
-    // The module and key of every staged body value, collected once rather
-    // than rescanning every value per source.
-    present := SemaComptimeKeySet{}
+    // One set holds the module and key of every staged body value, then of
+    // each source as it is read: a source is new when it adds its pair, so
+    // a staged value's source and a later source of the same pair are not.
+    keys := SemaComptimeKeySet{}
     loop value in values {
         if value.kind == SemaComptimeItemKind.BodyExpression {
-            _ := sema_comptime_key_set_add(present, value.module_identity, value.key)
+            _ := sema_comptime_key_set_add(keys, value.module_identity, value.key)
         }
     }
     rows := [JetDriverBodySourceRow]{}
-    seen := SemaComptimeKeySet{}
     loop (owner, graph_module) in modules {
         loop (row, source) in graph_module.comptime_body_sources {
-            if !sema_comptime_key_set_add(seen, source.module_identity, source.key) || sema_comptime_generic_site(source) -> next
-            if !sema_comptime_key_set_has(present, source.module_identity, source.key) -> rows.push(JetDriverBodySourceRow{owner: owner, row: row})
+            if !sema_comptime_key_set_add(keys, source.module_identity, source.key) || sema_comptime_generic_site(source) -> next
+            rows.push(JetDriverBodySourceRow{owner: owner, row: row})
         }
     }
     rows
@@ -839,6 +838,10 @@ jet_driver_land_local_values: fn(
             landing.stopped = false
             break
         }
+        // A site that is neither a local value nor a `name: #run value`
+        // local ends the landing before any source is copied or marked
+        // tried.
+        if !jet_driver_local_sources_only(bodies.modules, rows) -> break
         // A site pending again ends the landing, so it ends.
         again := false
         loop at in rows {
@@ -846,9 +849,6 @@ jet_driver_land_local_values: fn(
             if !sema_comptime_key_set_add(tried, site.module_identity, site.key) -> again = true
         }
         if again -> break
-        // A site that is neither a local value nor a `name: #run value`
-        // local ends the landing before any source is copied.
-        if !jet_driver_local_sources_only(bodies.modules, rows) -> break
         pending: jet_driver_comptime_body_sources_at(bodies.modules, rows)
         // The sites whose values the comptime phase computed ahead land
         // those (sema_comptime_local_values_ahead); a run computes the rest,
