@@ -2708,15 +2708,116 @@ priv watch_cancel: fn<T>(watch: DataWatch<T>) Never! {
     state.value.publications += 1
 }
 
-// `data.schema(rows)`: sema passes the checked row type's column names and
-// type spellings (a scalar row is one `value` column), so empty rows still
-// describe their columns.
-#Builtin.Role(.DataSchema) priv __schema: fn<T>(_rows: [T], names: [String], types: [String]) -> [DataColumn] Never! {
-    columns := [DataColumn]{}
-    loop index in 0..<names.len() {
-        columns.push(DataColumn{id: column_identity(names[index], types[index]), name: names[index].copy(), type_name: types[index].copy(), nullable: types[index].ends_with("?")})
+// `data.schema(rows)`: the columns of the row type `T`, read while compiling,
+// so empty rows still describe theirs. A record row (schema_record) is one
+// column per stored field, named and typed as the field declares it; any
+// other row is one `value` column of the row's type. Column types drop module
+// qualifiers, and a `?` type is a nullable column. A call whose `rows` are
+// not a list is refused where they are written (SchemaRows).
+#SchemaRows
+schema: fn<T>(_rows: [T]) -> [DataColumn] Never! {
+    #if schema_record(TypeId{T}) {
+        fields: #run T.reflect().fields
+        columns := [DataColumn]{}
+        loop field in fields -> columns.push(schema_column(field.name, field.type.name))
+        return columns
     }
-    columns
+    type_name: #run schema_type_name(TypeId{T})
+    [DataColumn]{schema_column("value", type_name)}
+}
+
+// Whether rows of type `id` are records: a struct, other than an exact number
+// (`Decimal`, `Fraction`, `Complex`), which is one value like a Float.
+priv schema_record: fn(id: TypeId) -> Bool Never! {
+    if id.kind == .Struct {
+        return !schema_same(id, math.Decimal) && !schema_same(id, math.Fraction) && !schema_same(id, math.Complex)
+    }
+    false
+}
+
+priv schema_same: fn(id: TypeId, other: TypeId) -> Bool Never! {
+    id.identity == other.identity
+}
+
+// The name a column shows for type `id`.
+priv schema_type_name: fn(id: TypeId) -> String Never! {
+    id.name
+}
+
+// The column named `name` whose type is `type`, shown without module
+// qualifiers.
+priv schema_column: fn(name: String, type: String) -> DataColumn Never! {
+    type_name: schema_unqualified(type)
+    DataColumn{id: column_identity(name, type_name), name: name.copy(), type_name: type_name, nullable: type_name.ends_with("?")}
+}
+
+// `name` without module qualifiers: `geo.Point` reads `Point` and
+// `[geo.Point]` reads `[Point]`. A word that starts with a letter and runs
+// into `.` is a qualifier; a number's `.` stays.
+priv schema_unqualified: fn(name: String) -> String Never! {
+    out := [U8]{}
+    word := [U8]{}
+    loop byte in name.bytes() {
+        if schema_word_byte(byte) {
+            word.push(byte)
+            next
+        }
+        if byte == 46 && word.len() > 0 && !(word[0] >= 48 && word[0] <= 57) {
+            word = [U8]{}
+            next
+        }
+        loop kept in word -> out.push(kept)
+        word = [U8]{}
+        out.push(byte)
+    }
+    loop kept in word -> out.push(kept)
+    String.from_bytes(out) ?? ""
+}
+
+// Whether `byte` continues a word of a type's name: an ASCII letter, digit or
+// `_`, or a byte of a non-ASCII character.
+priv schema_word_byte: fn(byte: U8) -> Bool Never! {
+    (byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || byte == 95 || byte >= 128
+}
+
+// `data.schema` reads its columns from the row type of a list, so `rows` that
+// are not a list are refused where they are written.
+priv SchemaRows: struct {
+    impl Marker {
+        sites: [.Function],
+
+        check: fn(self, call: CompilerCall) {
+            if call.args.len() != 1 || call.args[0].type.kind == .List || call.args[0].type.name == "_" -> return None
+            reject(SchemaNeedsRows{shown: schema_shown(call.args[0].type.name)}, at: call.args[0])
+        }
+    }
+}
+
+priv SchemaNeedsRows: struct {
+    shown: String,
+
+    impl Diagnostic {
+        code: "E0112",
+
+        what: fn(self) -> String { "`data.schema` needs a typed row list, not {self.shown}" }
+
+        why: fn(self) -> String { "core.data schema reads column names and types from ordinary rows" }
+
+        fix: fn(self) -> String { "pass a `[T]` value" }
+    }
+}
+
+// A type's name as an error shows it, a builtin with what it holds.
+priv schema_shown: fn(name: String) -> String Never! {
+    if name == {
+        "Int" -> "Int (a whole number)"
+        "Float" -> "Float (an approximate binary number)"
+        "Bool" -> "Bool (true or false)"
+        "String" -> "String (text)"
+        "Char" -> "Char (one character)"
+        "Decimal" -> "Decimal (an exact base-10 number)"
+        else -> "`{name}`"
+    }
 }
 
 // A column identity: FNV-1a 64 over the key `<name length>:<name>:<type>`,
@@ -2922,7 +3023,7 @@ priv __watch_test_items: fn(rows: [QueryTestSale]) -> [String] Never! {
 }
 
 #Test("schema columns keep their order, nullability and column identity") {
-    columns: __schema<Int>([Int]{}, [String]{"team", "minutes", "value", "scale"}, [String]{"String", "Float", "Int?", "Int?"})
+    columns: schema_columns([String]{"team", "minutes", "value", "scale"}, [String]{"String", "Float", "Int?", "Int?"})
     assert_eq(columns.len(), 4)
     assert_eq(columns[0].id, "column-2bbfce4600e4d781")
     assert_eq(columns[1].id, "column-52872214ed09d45d")
@@ -2930,6 +3031,13 @@ priv __watch_test_items: fn(rows: [QueryTestSale]) -> [String] Never! {
     assert(columns[3].id != columns[2].id)
     assert(!columns[1].nullable)
     assert(columns[2].nullable)
+}
+
+#Test("schema column types drop module qualifiers but keep a number's point") {
+    assert_eq(schema_unqualified("geo.Point"), "Point")
+    assert_eq(schema_unqualified("[geo.Point]?"), "[Point]?")
+    assert_eq(schema_unqualified("Box<geo.Point, shapes.Line>"), "Box<Point, Line>")
+    assert_eq(schema_unqualified("Int(1..10)"), "Int(1..10)")
 }
 
 file: fn<T>(path: String, format: String, limits: DataLimits) -> DataLoader<T> DataError! {
