@@ -169,19 +169,31 @@ effect_vocabulary_enum_case_heads: fn(text: String, type_name: String) -> [Strin
     if inside -> Val(cases) else -> None
 }
 
-// The number of cases of the view enum `view_name` in `view` (the file
-// `view_file`), once each case `outside` does not name is a case of the
-// enum `vocabulary_name` in `vocabulary` (the file `vocabulary_file`); else
-// the build stops naming the strays. A view so checked picks from its
-// vocabulary instead of being a second home of the same names.
-effect_vocabulary_view_count: fn(view_file: String, view: String, view_name: String, vocabulary_file: String, vocabulary: String, vocabulary_name: String, outside: [String]) -> Int {
-    cases: effect_vocabulary_enum_case_heads(view, view_name) ?? build_time_refused("{view_file} declares no `{view_name}: enum {{ … }}`")
-    known: effect_vocabulary_enum_case_heads(vocabulary, vocabulary_name) ?? build_time_refused("{vocabulary_file} declares no `{vocabulary_name}: enum {{ … }}`")
-    strays: effect_vocabulary_strays(effect_vocabulary_strays(cases, known), outside)
+// The number of names in `view`, the list `view_name` in the file
+// `view_file`, once each name `outside` does not hold is one of
+// `vocabulary`, the list `vocabulary_name`; else the build stops naming the
+// strays. A view so checked picks from its vocabulary instead of being a
+// second home of the same names.
+effect_vocabulary_list_view_count: fn(view_file: String, view: [String], view_name: String, vocabulary: [String], vocabulary_name: String, outside: [String]) -> Int {
+    strays: effect_vocabulary_strays(effect_vocabulary_strays(view, vocabulary), outside)
     if strays.len() > 0 {
-        build_time_refused("{view_file}: {view_name} names cases that `{vocabulary_name}` in {vocabulary_file} does not declare: {strays.join(", ")}")
+        build_time_refused("{view_file}: {view_name} names {strays.join(", ")}, which {vocabulary_name} does not hold")
     }
-    cases.len()
+    view.len()
+}
+
+// effect_vocabulary_list_view_count over the cases of the view enum
+// `view_name` in `view`, the text of the file `view_file`.
+effect_vocabulary_enum_view_count: fn(view_file: String, view: String, view_name: String, vocabulary: [String], vocabulary_name: String, outside: [String]) -> Int {
+    cases: effect_vocabulary_enum_case_heads(view, view_name) ?? build_time_refused("{view_file} declares no `{view_name}: enum {{ … }}`")
+    effect_vocabulary_list_view_count(view_file, cases, view_name, vocabulary, vocabulary_name, outside)
+}
+
+// effect_vocabulary_enum_view_count against the cases of the enum
+// `vocabulary_name` in `vocabulary`, the text of the file `vocabulary_file`.
+effect_vocabulary_view_count: fn(view_file: String, view: String, view_name: String, vocabulary_file: String, vocabulary: String, vocabulary_name: String, outside: [String]) -> Int {
+    known: effect_vocabulary_enum_case_heads(vocabulary, vocabulary_name) ?? build_time_refused("{vocabulary_file} declares no `{vocabulary_name}: enum {{ … }}`")
+    effect_vocabulary_enum_view_count(view_file, view, view_name, known, "`{vocabulary_name}` in {vocabulary_file}", outside)
 }
 
 // The words of `text`, split at whitespace and at the commas that end enum

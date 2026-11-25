@@ -44,9 +44,9 @@ CLOSED_LIST_BLOCK_END: "// END GENERATED"
 // duplicate baseline row also records how many members its pair shares, and
 // that count only shrinks. A duplicate row may give a reason the guard checks
 // (CLOSED_LIST_PAIR_REASONS); the ceiling counts the open rows, those without.
-CLOSED_LIST_BASELINE: 149
+CLOSED_LIST_BASELINE: 134
 
-CLOSED_LIST_DUPLICATE_BASELINE: 125
+CLOSED_LIST_DUPLICATE_BASELINE: 93
 
 // The reasons a list may stay closed. Each kernel ledger row names one.
 CLOSED_LIST_REASONS: [String]{"grammar", "soundness", "ir", "kernel", "protocol", "fixed-standard"}
@@ -815,27 +815,31 @@ closed_list_mirror_problems: fn(findings: [ClosedListFinding], rows: [[String]],
 }
 
 // A subset ledger row names a checked subset view of one vocabulary: view
-// file, view name, the `#run` constant in that file whose check stops the
-// build when a member names nothing in the vocabulary, and the vocabulary
-// constant that check reads. The view is derived, not a second home: its
+// file, view name, the `#run` constant whose check stops the build when a
+// member names nothing in the vocabulary, the vocabulary constant that check
+// reads, and, when the check is not in the view file, the file that holds it.
+// jet embeds a file only from the embedding file's directory down, so a view
+// whose vocabulary sits in a sibling directory is checked from a file above
+// both, which must name the view. The view is derived, not a second home: its
 // duplicate pairs are the vocabulary's, and it leaves the baseline. `texts`
-// holds each view file's source. Returns the views' keys.
+// holds each view or check file's source. Returns the views' keys.
 closed_list_subset_problems: fn(findings: [ClosedListFinding], rows: [[String]], texts: [String:String], problems: ^[String]) -> [String] {
     known := [String:Bool]{}
     loop finding in findings -> known[closed_list_key(finding.path, finding.name)] = true
     views := [String]{}
     loop row in rows {
-        if row.len() != 4 || row[2].trim() == "" || row[3].trim() == "" {
-            problems.push("subset ledger row needs view file, view name, check constant and vocabulary constant: {row.join("\t")}")
+        if (row.len() != 4 && row.len() != 5) || row[2].trim() == "" || row[3].trim() == "" {
+            problems.push("subset ledger row needs view file, view name, check constant, vocabulary constant and an optional check file: {row.join("\t")}")
             next
         }
         if !(known.get(closed_list_key(row[0], row[1])) ?? false) {
             problems.push("subset ledger row {row.join(" ")} names a list that is gone; delete the row")
             next
         }
-        text: texts.get(row[0]) ?? ""
-        if !text.contains("\n{row[2]}: #run ") || !text.contains(row[3]) {
-            problems.push("{row[0]} {row[1]} is in the subset ledger, but {row[0]} has no `{row[2]}: #run …` check reading {row[3]}; the check is what makes the view derived")
+        holder: if row.len() == 5 -> row[4] else -> row[0]
+        text: texts.get(holder) ?? ""
+        if !text.contains("\n{row[2]}: #run ") || !text.contains(row[3]) || (holder != row[0] && !text.contains("\"{row[1]}\"")) {
+            problems.push("{row[0]} {row[1]} is in the subset ledger, but {holder} has no `{row[2]}: #run …` check of {row[1]} reading {row[3]}; the check is what makes the view derived")
             next
         }
         views.push(closed_list_key(row[0], row[1]))
@@ -1245,6 +1249,7 @@ closed_list_duplicate_problems: fn(findings: [ClosedListFinding], copies: [Strin
     texts := [String:String]{}
     loop row in subset_rows {
         if row.len() > 0 -> texts[row[0]] = closed_list_files.read(row[0]) ?? ""
+        if row.len() == 5 -> texts[row[4]] = closed_list_files.read(row[4]) ?? ""
     }
     loop view in closed_list_subset_problems(findings, subset_rows, texts, problems) {
         copies.push(view)
@@ -1275,10 +1280,20 @@ closed_list_duplicate_problems: fn(findings: [ClosedListFinding], copies: [Strin
     assert_eq(clean.len(), 0)
     unchecked := [String]{}
     assert_eq(closed_list_subset_problems([ClosedListFinding]{view.copy()}, rows, [String:String]{"v.jet": "View: enum {{ Net, FS, DB }}\n"}, unchecked).len(), 0)
-    assert(unchecked[0].contains("has no `VIEW_COUNT: #run …` check reading ROOTS"))
+    assert(unchecked[0].contains("v.jet has no `VIEW_COUNT: #run …` check of View reading ROOTS"))
     gone := [String]{}
     closed_list_subset_problems([ClosedListFinding]{}, rows, checked, gone)
     assert(gone[0].contains("names a list that is gone"))
+    // A check above the view's directory holds only while it names the view.
+    above: [[String]]{[String]{"a/v.jet", "View", "VIEW_COUNT", "ROOTS", "c.jet"}}
+    held: [String:String]{"c.jet": "use {{ x.[ROOTS] }}\nVIEW_COUNT: #run x(\"a/v.jet\", embed_file(\"a/v.jet\"), \"View\", ROOTS)\n"}
+    placed := [String]{}
+    housed: ClosedListFinding{path: "a/v.jet", name: "View", members: [String]{"net", "fs", "db"}}
+    assert_eq(closed_list_subset_problems([ClosedListFinding]{housed.copy()}, above, held, placed).join(","), "a/v.jet\tView")
+    assert_eq(placed.len(), 0)
+    unnamed := [String]{}
+    closed_list_subset_problems([ClosedListFinding]{housed.copy()}, above, [String:String]{"c.jet": "use {{ x.[ROOTS] }}\nVIEW_COUNT: #run x(ROOTS)\n"}, unnamed)
+    assert(unnamed[0].contains("c.jet has no `VIEW_COUNT: #run …` check of View reading ROOTS"))
     // A view's duplicate pairs are its vocabulary's, so they leave the duplicate ledger.
     assert(closed_list_mirror_pair("h.jet\tHOME\tv.jet\tView", [String]{"v.jet\tView"}))
 }

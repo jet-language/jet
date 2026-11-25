@@ -12,11 +12,13 @@
 use jet_foundation.[
     CompilerThreads,
     Diagnostic,
+    JET_KEYWORD_NAMES,
     Name,
     compiler_threads_admit,
     compiler_threads_joined,
     compiler_threads_taken,
     compiler_transfer_rows,
+    effect_vocabulary_list_view_count,
     name_index,
     name_table_merge,
 ]
@@ -145,6 +147,12 @@ lexer_line_starts: fn(source: [U8], from: Int, to: Int, first: Bool) -> [Int] Ne
 // (parser_chunk_head_at), every one a keyword the scanner reads without
 // context.
 LEXER_CHUNK_HEAD_WORDS: [String]{"fn", "priv", "struct", "enum", "impl", "trait", "use", "extern", "module", "const"}
+
+// LEXER_CHUNK_HEAD_WORDS picks from the keyword list, plus `const`, which the
+// scanner still reads as an item head. While the compiler builds,
+// LEXER_CHUNK_HEAD_WORDS_COUNT stops the build naming any other word
+// JET_KEYWORD_NAMES lacks.
+LEXER_CHUNK_HEAD_WORDS_COUNT: #run effect_vocabulary_list_view_count("Lexer/Chunks.jet", LEXER_CHUNK_HEAD_WORDS, "LEXER_CHUNK_HEAD_WORDS", JET_KEYWORD_NAMES, "JET_KEYWORD_NAMES", [String]{"const"})
 
 // The byte offset of the column-0 `}` immediately before `cut` (`\n}\n` or
 // `\n}\r\n`), or -1 when `cut` does not sit right after a column-0 `}` line.

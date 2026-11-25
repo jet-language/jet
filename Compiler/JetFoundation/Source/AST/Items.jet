@@ -1198,6 +1198,12 @@ CEnumTag: enum {
     I64,
 }
 
+// CEnumTag picks from the built-in type catalog: a C enum's tag is a fixed
+// width Jet integer type, or `CInt`, the C compiler's own `int`. While the
+// compiler builds, C_ENUM_TAG_COUNT stops the build naming any other case
+// JET_TYPE_NAMES lacks.
+C_ENUM_TAG_COUNT: #run effect_vocabulary_enum_view_count("AST/Items.jet", embed_file("Items.jet"), "CEnumTag", JET_TYPE_NAMES, "JET_TYPE_NAMES", [String]{"CInt"})
+
 TypeAliasDef: struct {
     is_pub: Bool,
     is_package_pub: Bool,

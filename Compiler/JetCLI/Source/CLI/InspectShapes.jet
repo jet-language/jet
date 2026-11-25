@@ -31,6 +31,7 @@ use {
         Type,
         ast_expr,
         diagnostic_from_registry,
+        effect_vocabulary_view_count,
         type_name,
     ]
     jet_sema.[sema_checked_rename_case, sema_checked_wire_case, sema_registration_cli_arg_text, sema_serde_items_skips]
@@ -67,6 +68,13 @@ JetCLIShapeType: enum {
     Object(source: String, type_name: String),
     Unknown(name: String),
 }
+
+// JetCLIShapeType picks from SerdeWireShape, the shapes a field takes on the
+// wire, plus `Bytes`, `Optional` and `Unknown`, which inspection reports
+// without a wire shape of their own. While the compiler builds,
+// JET_CLI_SHAPE_TYPE_COUNT stops the build naming any other case
+// SerdeWireShape lacks.
+JET_CLI_SHAPE_TYPE_COUNT: #run effect_vocabulary_view_count("CLI/InspectShapes.jet", embed_file("InspectShapes.jet"), "JetCLIShapeType", "AST/Items.jet", embed_file("toolchain:Compiler/JetFoundation/Source/AST/Items.jet"), "SerdeWireShape", [String]{"Bytes", "Optional", "Unknown"})
 
 // `default` is the status value of the typed `ShapeDefault`.
 JetCLIShapeField: struct {

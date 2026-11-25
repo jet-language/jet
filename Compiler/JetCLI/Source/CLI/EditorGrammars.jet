@@ -11,7 +11,7 @@ use {
     cli_files: core.files
     cli_grammar_json: core.encoding.json
     jet_driver.[JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
-    jet_foundation.[COMMENT_PREFIX, foundation_json_quote]
+    jet_foundation.[COMMENT_PREFIX, JET_KEYWORD_NAMES, effect_vocabulary_list_view_count, foundation_json_quote]
 }
 
 JET_CLI_GRAMMAR_SYNTAX_DIR: "Compiler/JetFoundation/Data/Syntax"
@@ -91,6 +91,12 @@ JET_CLI_GRAMMAR_GLOBAL_KEYWORDS: [String]{
     "extern",
     "module",
 }
+
+// The global keywords pick from the keyword list, plus the words the lexer
+// still reserves outside it (`mutate`, `move`, `copy`, `null`, `const`).
+// While the compiler builds, JET_CLI_GRAMMAR_GLOBAL_KEYWORDS_COUNT stops the
+// build naming any other word JET_KEYWORD_NAMES lacks.
+JET_CLI_GRAMMAR_GLOBAL_KEYWORDS_COUNT: #run effect_vocabulary_list_view_count("CLI/EditorGrammars.jet", JET_CLI_GRAMMAR_GLOBAL_KEYWORDS, "JET_CLI_GRAMMAR_GLOBAL_KEYWORDS", JET_KEYWORD_NAMES, "JET_KEYWORD_NAMES", [String]{"mutate", "move", "copy", "null", "const"})
 
 JetCLIGrammarToken: struct {
     text: String,
