@@ -6609,7 +6609,7 @@ unresolved name's quick-fix writes through. A code action request whose
 The VS Code/Cursor client in `Tools/Editors/Vscode/` provides the TextMate grammar
 and LSP transport. `install.sh` packages the extension. Server discovery uses
 `jet.executablePath`, then the legacy `jet.languageServerPath`, then `jet` on
-`PATH`; `jet self lsp` does not invoke `rustc`.
+`PATH`.
 
 ### Hand-rolled parser contracts
 

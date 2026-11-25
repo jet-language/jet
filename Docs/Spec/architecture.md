@@ -947,7 +947,7 @@ view to those parameters still materializes it.
 
 ### One reflection model
 
-`StructDef::reflection_fields()` is the declaration-owned stored-field-row source for
+A struct declaration's `StructDef.fields` are the declaration-owned stored-field-row source for
 comptime `TypeInfo`, runtime `reflect.of`, and generated field projection.
 Comptime reads facts from those rows; runtime wraps each projected field in a
 typed `Value` and adds display text only as a view. Every back end therefore
@@ -965,7 +965,7 @@ snapshot, not a dynamic type registry.
 ### Structure fact plane
 
 D-STRUCT-PLANE1=A puts liveness, lifecycle, and import-edge observations in the
-same `StructureFact` shape in `jet-foundation::Names`, with one registry row per
+same `StructureFact` shape (`Compiler/JetFoundation/Source/Names/NameFacts.jet`), with one registry row per
 kind. Each row carries its safe direction and gate. Sema writes the facts while
 it checks names, lifecycle markers, and resolved imports; `GateLedger` projects
 each gate-bearing fact once with its source span and provenance. The CLI command
@@ -1354,10 +1354,11 @@ environment writer, never a second OS-environment mutation path. Terminal
 sessions retain the same native child descriptor owner and resize its held PTY
 under the child lock, validating dimensions before the ioctl.
 
-Package-to-JetOS projection stays on this split. jet-pkg-model reads the
+Package-to-JetOS projection stays on this split. `Jetpack/PackageModel` reads the
 canonical Package outputs and computes the semantic graph identity.
-jet-env-model::ModuleEval::project_package_outputs lowers System and Fleet
-payloads into SystemPlan and FleetPlan, including service open-record fields.
+`envmodel_project_package_outputs` (`Jetpack/EnvModel/Source/ModuleEval/PackageOutput.jet`)
+lowers System and Fleet payloads into SystemPlan and FleetPlan, including service
+open-record fields.
 jetpack loads that plan for jet os plan and the existing generation writer
 carries the same identity and service facts into plan.json and the source proof.
 Hangar realization and atomic generation
@@ -1377,8 +1378,9 @@ writers and path escapes.
 Host extraction keeps the checked System Output intact and binds the sole-host
 Fleet to that System's name, not to its output-map key.
 
-Environment OCI projection follows the same split. `jet-env-model` owns the
-pure `ImagePlan`; `jetpack::Image` is the one deterministic OCI realization
+Environment OCI projection follows the same split. `Jetpack/EnvModel` owns the
+pure `ImagePlan` (`ModuleEval/Plans.jet`); `Jetpack/Image/Source/OCI` is the one
+deterministic OCI realization
 path. A successful environment projection writes `projection.json`,
 `plan.json`, and `dossier.json` as secret-free, atomically recovered read-only
 views. Hangar owns content, cache, archive, signing, and publish; `.jet/lock` owns locked
@@ -1538,7 +1540,7 @@ Stable exit codes and the JSON codec live in dependency-free `JetFoundation`.
 ### Browser automation protocol core
 
 D-BROWSER-AUTO1=A puts the portable automation API in `core.browser`. The
-generated runtime uses the existing std-only WebSocket and strict JSON codecs
+generated runtime uses the existing WebSocket and strict JSON codecs
 to speak WebDriver BiDi. It does not require Node, Playwright, or a Canvas
 facade. Browser installation is Jetpack work: `jetpack browser lock|provision`
 writes `[[browser]]` entries into `.jet/lock`, and `browser.locked(engine)`
@@ -1644,7 +1646,7 @@ transport.
 ### FFI bridge boundary
 
 Foreign dependencies stay behind the runtime boundary; they never become
-dependencies of compiler workspace crates. A bridge starts from a ratified
+dependencies of the compiler's packages. A bridge starts from a ratified
 interop surface and dependency approval, and declarations are parsed and
 checked by the ordinary front end before codegen.
 
@@ -1940,24 +1942,29 @@ receipts index, reports, build outputs, and logs. Packages never get their own
 `.jet/` folder, and code that creates `.jet/` paths resolves the workspace root
 first (owner ruling, 2026-09-30). The
 content-addressed records stay in the machine-wide `jet-store`, shared across
-workspaces (D-BUILD-STORE1=E; record kinds in `jet_store::records`), and use
-one std-only binary codec with a trailing SHA-256
-(`jet_foundation::RecordCodec`). A missing or corrupt record is a miss, never
-an error.
+workspaces (D-BUILD-STORE1=E). A record kind is the `schema` name the host's
+`JetDriverRecordStore` takes (`jet.pkg-check/v1`, `jet.iface/v1`, ...), and every
+record uses one binary codec with a trailing SHA-256
+(`Compiler/JetFoundation/Source/Record/RecordCodec.jet`). A missing or corrupt
+record is a miss, never an error.
 
 **Sealed reads.** Every file, directory listing, and environment variable that
-loading, sema, or compile-time evaluation reads while checking goes through
-`jet_foundation::CheckReads`. A recorded result declares those reads with
+loading, sema, or compile-time evaluation reads while checking goes through one
+sealed reader; files and listings reach it through the host's
+`JetDriverBuildInputs` transport (`Compiler/JetDriver/Source/Driver/Identity.jet`).
+A recorded result declares those reads with
 their digests and re-verifies them before reuse; a read that changed during
 the check, or a network input, leaves the result unrecorded. The read audit
 (`JET_CHECK_READS_AUDIT`) proves the declaration complete: a verified record
 does not replay, the program is checked fresh, and any read of the fresh
 check that the record does not declare with the same digest fails as an
 internal compiler error. `JET_CHECK_READS_INJECT` injects one undeclared read
-so tests can show the audit catches it.
+so tests can show the audit catches it. The audit is not ported yet: its proof,
+`Tests/Cases/BuildEntry/check_inputs_are_all_declared.case`, is a known failure
+(card #6967).
 
-**Self-hosted compiler.** JetFoundation implements that codec
-(`Record/RecordCodec.jet`) and the key framing (`Record/PackageIdentity.jet`).
+**Self-hosted compiler.** JetFoundation frames the record keys
+(`Record/PackageIdentity.jet`).
 JetDriver reaches the store only through the typed `JetDriverRecordStore`
 the host passes in the compile request. Without a store every lookup is a
 miss and the package is checked.
@@ -2153,7 +2160,7 @@ The host does not load PATH-discovered `jet-*` helpers or application
 
 `analyze` carries opaque `list<u8>` payloads. Host-owned wire format is UTF-8
 JSON with lexicographic key order and no insignificant whitespace
-(`CompilerExtension::{TypedSnapshot,AnalyzeResponse}`).
+(`TypedSnapshot` and `AnalyzeResponse` in `CompilerExtension.jet`).
 
 **Snapshot** (`protocol=1`, `stage="typed"`, `trust="untrusted"`):
 
@@ -2193,7 +2200,7 @@ may accept; guests never mutate compiler facts (I2/I3).
   `close(close_guest)` invokes the host's guest closer so guest
   memory is dropped.
   Uncommitted work never reaches sema or codegen.
-- **Process IPC:** when configured, `jet-driver` resolves `jetpack` only beside
+- **Process IPC:** when configured, the compiler resolves `jetpack` only beside
   the current Jet executable (never PATH), invokes hidden versioned verb
   `__compiler-extension-v1`, writes at most `16 MiB` of snapshot bytes to
   stdin, and accepts at most the snapshot's `max_response_bytes` on stdout.
@@ -2207,9 +2214,11 @@ may accept; guests never mutate compiler facts (I2/I3).
   guest runs.
 - **Post-sema driver wire:** when `JET_COMPILER_EXTENSION` names a component
   path (expert env registration — no new user syntax until a spelling ballot),
-  `jet-driver::CompilerExtensionHook` freezes a typed snapshot after sema,
-  exchanges it with the sibling host, then maps validated findings to `L1401`
-  and fails closed on host/process failures (card #6516).
+  the compiler freezes a typed snapshot after sema, exchanges it with the
+  sibling host, then maps validated findings to `L1401` and fails closed on
+  host/process failures (card #6516). JetDriver has no such hook yet, so no
+  compiler reads `JET_COMPILER_EXTENSION` and this wire and the process IPC
+  above are the contract the port must meet.
 
 ## Rules
 

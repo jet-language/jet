@@ -155,7 +155,7 @@ is bound as `name: comptime { value }`. See D-PREP-SURFACE2=A.
 **S66 — Standard acronyms fully capitalized** *(D-ACRONYM-CANON1; applied by
 D-ACRO-CASE1=A + D-ACRO-LEX1=A)*: initials-formed names stay all-caps inside
 PascalCase — `JSON`, `TOML`, `YAML`, `CSV`, `HTTP`, `CLI`, `SQL`, `IOError`,
-`UTF8Error`, `U8`, `MacOS`, and the closed lexicon in `Syntax::ACRONYMS`
+`UTF8Error`, `U8`, `MacOS`, and the closed lexicon in `ACRONYMS` (`Compiler/JetFoundation/Data/Syntax/Acronyms.jet`)
 (mirrored by `SEMA_CASING_ACRONYMS` in the Jet compiler). Owner rule
 (2026-09-30): the rule covers every word of every type-like name, not only a
 leading word — `MIRType`, `TIRExpr`, `SourceAST`, `TaskID`, `UINode`.
@@ -3051,7 +3051,7 @@ before `@` and its source after it. A leading `@Rule` in marker position produce
 with the canonical `#Rule` fix.
 
 **`#` disambiguation** *(D-ONCE-HASH1=B, ratified 2026-08-07)*: `#` lexes to
-one `TokKind::Hash` and carries three jobs, told apart by parser position
+one `TOKEN_HASH` token and carries three jobs, told apart by parser position
 alone, never lookahead heuristics. At a declaration, statement, or expression
 target it is the rule prefix (D-VERDICT-732-1): `#Rule`, `#[A, B]`. Inside a
 bracketed type, `[T#N]`, it is the fixed-size-list separator (S76/D-FIXARR1).
@@ -3567,7 +3567,7 @@ calls write back identically in every build tier. **S3 shipped
 (2026-07-04)**: `-> ^T` returns and `^T` fields are gone from the grammar
 (ordinary syntax errors); `#Ref`/E0207/E0427 deleted outright. **S4 shipped
 (2026-07-04)**: `copy x` (D-CAP2) is the one copy verb — a real prefix-verb
-expression (`Expr::Copy`), parses on any expression, formatter round-trips
+expression (`Expr.Copy`), parses on any expression, formatter round-trips
 it. `.clone()` is not user-typable Jet syntax — `clone` falls through to the
 ordinary "no such method" path (I8). `copy x` on a non-cloneable type is
 E0211; on a scalar it's legal but redundant (already `Copy`). Every fix-it
@@ -4258,7 +4258,7 @@ D-CONTRACTCASE1.
 **D-PERSIST1**: `#Persist` module binding survives `jet dev` hot reload;
 identity = module path + name; layout change re-decodes Codable-style, falls
 back to reinit + warning. Dev-tier only. Values live in the shared
-`jet_foundation::Persist` store at the runtime-heap boundary (tier-0 and
+store at the runtime-heap boundary (tier-0 and
 tier-1); not inside one JIT module. *(rides JIT hot-reload runtime)*
 
 **D-EFFBUDGET1 — Package effect budget**: every build prints a one-line
@@ -5375,7 +5375,7 @@ is the top-level `pub fn` items of its entry file; each parameter and the
 result is `Int`, `Float`, `Bool`, `Text`, or a recursively closed `#Codable`
 Component shape, independently per position (E1260; owner ruling 2026-10-09
 superseded the v1 homogeneous-scalar rule), named by the manifest `export:` field (defaults to the package
-name) and frozen via `Sema::ApiFreeze`'s pub-metadata semver snapshot
+name) and frozen via the package's public API snapshot (`sema_public_api`, kept by `Jetpack/PackageModel/Source/Store/CapabilityDigest.jet`)
 (re-grounded off the retired D-CAP4 `api: stable` machinery, which D-MEM1/S2
 deleted — same intent, the still-live mechanism); the `.wit` world is
 generated from those signatures — no new in-source keyword (I8).
@@ -6519,7 +6519,7 @@ greeter: Package: {
 
 There is no package-only identity wrapper and no untyped, dotless identity
 record. This decision reuses ordinary `{ ... }` and
-`Type{ ... }` construction; it adds no `Syntax.rs` entry, token, parser
+`Type{ ... }` construction; it adds no `Compiler/JetFoundation/Data/Syntax` entry, token, parser
 production, formatter form, editor grammar, snapshot, or executable example.
 
 #560 owns all runtime enforcement and acceptance work: parser, sema, IR builder,
@@ -6581,7 +6581,7 @@ There is no per-kind parser or evaluator. Package and role declarations are
 replaced only after #560 lands the source gate; ordinary Jet modules remain
 ordinary modules and are unchanged. #560 owns parser, sema, IR builder, formatter,
 hover, inspection, Canvas, templates, migration, editor support, and acceptance
-for this shape. D-ECO-DECL1 adds no keyword, sigil, `Syntax.rs` constant,
+for this shape. D-ECO-DECL1 adds no keyword, sigil, `Compiler/JetFoundation/Data/Syntax` constant,
 parser production, grammar form, diagnostic, snapshot, or executable example
 by itself.
 
@@ -6603,7 +6603,7 @@ This decision does not choose the aggregate graph's name or boundary, any
 project-part type name, declaration shape, file path, or source spelling; #532
 and #615 remain gates for those questions. Executable enforcement and
 conformance tests remain downstream under #560 or a dedicated graph
-implementation card. #611 itself adds no `Syntax.rs` entry, parser or runtime
+implementation card. #611 itself adds no `Compiler/JetFoundation/Data/Syntax` entry, parser or runtime
 behavior, diagnostic, grammar, snapshot, or executable example.
 
 **D-ECO-COMPOSE2=A — Safe additions combine; disagreements stop**: composition
@@ -6622,7 +6622,7 @@ D-ECO-COMPOSE2 ratifies no source type, file layout, or source spelling.
 Executable implementation and conformance tests remain downstream. #560 owns
 language-wide shape enforcement; if project-graph composition is outside that
 program, a dedicated implementation card must own it before this law ships.
-#605 itself adds no `Syntax.rs` entry, grammar, snapshot, parser, sema, runtime
+#605 itself adds no `Compiler/JetFoundation/Data/Syntax` entry, grammar, snapshot, parser, sema, runtime
 behavior, diagnostic, or executable example.
 
 **D-SHAPE-MERGEPROVENANCE1=A — Complete successful merge history lives in
@@ -6654,7 +6654,7 @@ successful inputs, an artifact for failed conflicts, signature/receipt/
 generation schemas, audit transport, or inspection CLI spelling. #560 owns
 implementation and every generated view. The graph, composition, and receipt
 decisions on #532, #605, and #608 remain gates. D-SHAPE-MERGEPROVENANCE1 adds
-no `Syntax.rs` entry, parser or runtime behavior, CLI, grammar, snapshot, or
+no `Compiler/JetFoundation/Data/Syntax` entry, parser or runtime behavior, CLI, grammar, snapshot, or
 executable example by itself.
 
 **D-ECO-RECEIPT2=A — One connected record spans realization through
@@ -6719,7 +6719,7 @@ project graph, composition, and receipt decisions on #532, #605, and #608.
 
 D-ECO-ENV1 does not choose the tool inventory or `Environment` field schema,
 service/task/CI mappings, hook or shell spelling, source placement or
-composition, receipts, or lifecycle behavior. It adds no token, `Syntax.rs`
+composition, receipts, or lifecycle behavior. It adds no token, `Compiler/JetFoundation/Data/Syntax`
 entry, parser or runtime behavior, grammar rule, diagnostic, snapshot, or
 executable example by itself.
 
@@ -6954,7 +6954,7 @@ AST mutation enters compilation (universal under D-META-RECONCILE1=A: an
 approved root's change sets are checked Jet code, never compiler nodes).
 D-DSLBLOCK1=A: stdlib-only PascalCase
 directive DSL blocks such as `#SQL(Row) { ... }` and `#HTML { ... }` are a
-fixed whitelist in `Syntax.rs`; third-party grammar mutation is rejected.
+fixed set, each declared in `Compiler/Prelude/Markers.jet`; third-party grammar mutation is rejected.
 D-METAMUTATE1=A: Jai-style AST mutation/message loop/user macros are rejected;
 the power surface is additive generated modules/overlays, registered
 targets/actions, read-only program/build graph enforcement, DSL blocks, and
@@ -7772,9 +7772,10 @@ owner 2026-07-12, card #508)*: the root crate reduces to `main.rs` plus
 `CmdCompile.rs` (the R5 rustc/ICE edge). New seam crates under the same
 I6/path-dependency law: `jet-cli` (verb registry, dispatch, help,
 completions, greeting), `jet-repl`, `jet-debug`; dev-server glue joins
-`jet-driver`/`jet-cli`. tests/workspace_crates.rs and truthfulness.rs
-extend to the new members. Landing order: interactive tiers first, CLI
-next, architecture.md updated last, when it is true.
+`jet-driver`/`jet-cli`. Landing order: interactive tiers first, CLI
+next, architecture.md updated last, when it is true. *(Rust era: the Jet
+compiler's packages under `Compiler/`, such as `JetCLI`, `JetDebug` and
+`JetDriver`, replaced these crates.)*
 
 **D-LINTPOLICY1=A — the override law** *(ratified by owner 2026-07-11,
 card #505)*: binding on every current and future expert gate.
@@ -7797,7 +7798,7 @@ and audit become uniform.
 **D-LSP1 / D-LSP2**: LSP v2 uses one incremental compiler-service query cache
 (`Compiler/JetQueries`) shared by editor requests, with full applicable LSP
 3.17 coverage. Every advertised capability must have a named test in
-`tests/lsp.rs`.
+`Compiler/JetLSP/Tests/LSP/Protocol.jet`.
 
 **D-HL1**: highlighting is generated lexical base plus semantic overlay.
 The syntax registry owns all user-typeable tokens;
@@ -8804,9 +8805,9 @@ superseded by the entries above; law as written in this file is final.
 
 ## Enforcement
 
-`tests/decisions.rs` checks ratification tags from the canonical `Syntax.rs`
-sources, rejects provisional source flags and missing keyword/sigil decision
-adjacency, and requires superseded IDs to retain tombstone provenance.
+`Tests/Guards/decisions.jet` requires superseded IDs to retain tombstone
+provenance and keeps decision IDs out of Compiler, Core and Jetpack source,
+which states each rule itself.
 
 
 
@@ -9318,7 +9319,7 @@ clauses such as `loop i in 0..10, 2`. This adds no token or second loop mechanis
 
 **2026-08-20 — D-LOOP-SUBJECT1=A** *(card #1417)*: a one-source loop may omit
 its binding when the source is a collection. The source item is the implicit
-subject, represented by `Syntax::KW_IT`; bare `.member` in the guard or body
+subject, represented by `KW_IT` (`Compiler/JetFoundation/Data/Syntax/EffectsSurface.jet`); bare `.member` in the guard or body
 reads that subject. The guard keeps the comma-less form, for example
 `loop users if .active -> .name`. Scalar sources still require `name in source`,
 and `(key, value)` sources always keep both names. Nested bindingless loops
@@ -10451,8 +10452,8 @@ structure-program-is-a-value slate. They are ratified law.
   is retiring, and removal is a named delta; `removed_in:` waits for editions
   and is warn-only before then. The consumer warning carries the replacement,
   `jet fix` handles a plain rename, and the duplicated Core-only deprecation
-  rows in `jet-pkg-model/Manifest.rs` and `Sema/Edition.rs` are replaced by
-  ordinary markers using the existing L2001/E2002 path.
+  rows the package model and Sema kept are replaced by ordinary markers using
+  the existing L2001/E2002 path (`Compiler/JetSema/Source/Sema/Edition.jet`).
 - **D-STRUCT-EDGE1=A — manifest-owned import boundaries.** A package may write
   `boundaries: { deny: [{ from: "app.ui", to: "app.db" }] }`; each side may
   have one trailing `*` subtree wildcard. Rules govern the declaring package's
@@ -10488,16 +10489,16 @@ fact instances of one checked program, and the evidence records of one run. One 
 three. Every projection (check, test, prove, inspect, dev, receipts) uses it. Evidence grade lives on claims
 only; rights keep their gate kind and provenance and never receive a grade. Time is a value on the query, not
 a column on the schema. **Technical:** Amends D-FACT-LAW1=B by adding the evidence clause for claims and the
-shared-query clause for tools. Does not fold FactRegistry (Facts.rs:337-494) into Registry.rs; both stay
-behind the contract. Registration rows stay &'static. A parity test proves that every existing tool answer can
+shared-query clause for tools. Does not fold the fact registry (`SemaCompilerFactRegistryRow`, `Compiler/JetSema/Source/Sema/SemanticIndex.jet`) into the registration rows (`Compiler/JetFoundation/Source/Registry`); both stay
+behind the contract. Registration rows stay static. A parity test proves that every existing tool answer can
 be reproduced through the contract before any tool switches. 
 - **D-RIGHTS1=C —** Purity is the empty row. #Replayable lowers to the row that excludes Time, Rand, Net, and
 IO. A compile-time block holds the row that allows only Mem. Every spelling stays and one walker checks them.
 The transaction rule stays its own checker because it is a duty: an irreversible effect owes an undo. Which
 effects count as irreversible becomes a declared fact that checker reads. The command-line spelling is decided
-in D-RIGHTS-CLI1, not here. **Technical:** Deletes Sema/Purity.rs:77-99 and the replayable walker at
-Sema/Effects.rs:1480-1565. The comptime purity stage split and its impure_builtin leaf table
-(crates/jet-comptime/src/Comptime/Purity.rs:78-123) become one row read by the shared walk. Amends D-REPLAY1
+in D-RIGHTS-CLI1, not here. **Technical:** Deletes the purity walker and the replayable walker in Sema.
+The comptime purity stage split and its impure-builtin leaf table
+(`IMPURE_BUILTINS`, `Compiler/JetFoundation/Data/Syntax/PackageFiles.jet`) become one row read by the shared walk. Amends D-REPLAY1
 and D-SHAPE8 as lowerings. D-TXN1-4 and D-BOUND-UNDO1 unchanged. Precondition: a differential matrix runs
 purity, replayable, comptime, and invocation cases through both the old walkers and the row walker and shows
 identical verdicts before the old walkers are deleted. 
@@ -10663,7 +10664,7 @@ ordinary spelling `""`, because adjacent backticks merge into one opening group.
 stays carriage return plus line feed. The result is the same ordinary `String` as `""`, with every String
 operation, including joining with a normal string. The lexer, the part of the compiler that splits source into
 tokens, only looks for the closing backtick group; a backslash never starts an escape. **Technical:** New
-token in Lexer/Tokens.rs; Syntax.rs entry with this decision ID (I7). Amends S8 (interpolation off inside) and
+token in `Compiler/JetLexer/Source/Lexer/Tokens.jet`; a `Compiler/JetFoundation/Data/Syntax` entry with this decision ID (I7). Amends S8 (interpolation off inside) and
 S20 (escapes off inside); S70's multi-line trimming does not apply inside a fence. Fence rule: the opening
 fence is the maximal contiguous run of N backticks at the token start. The literal ends at the next maximal
 contiguous run whose length is exactly N; runs of any other length are content. Padding rule: when the content
@@ -10683,7 +10684,7 @@ layout.
   behavior-preserving edit: a line break when code follows on the same line,
   removal at line end. The parser keeps a boundary at the same position so one
   file reports once and parsing resumes at the next statement. Explicit and
-  inserted terminators share `TokKind::Semi`; the diagnostic dispatches on a
+  inserted terminators share `TOKEN_SEMI`; the diagnostic dispatches on a
   non-empty source span, and the E0373 row carries `fix_edits`.
   The Jet parser contract fixtures in
   `Compiler/JetParser/Tests/ContractFixtures.fixture/ContractFixtures.jet` pin both edits and statement
