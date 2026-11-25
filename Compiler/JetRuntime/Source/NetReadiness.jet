@@ -1,31 +1,32 @@
-// Ready16 owns normalized Bool words; enum8 owns raw declaration-order tags.
+// NetReady (CoreLayoutABI NET_READY) owns normalized Bool words; enum8 owns raw
+// declaration-order tags.
 // Shared scalar enum ownership comes from EncodingErrors.jet e1306aee0.
 net_ready_bool: fn(word: I64) -> Bool { (word & I64{255}) != I64{0} }
 
 #Export(c) jet_rt_record_new_jet_net_ready: fn(readable: U8, writable: U8) -> I64 {
-    value: jet_rt_alloc(I64{16}, I64{8})
-    rt_text_store(value, if (readable != U8{0}) -> I64{1} else -> I64{0})
-    rt_text_store(wrapping(value + I64{8}), if (writable != U8{0}) -> I64{1} else -> I64{0})
+    value: jet_rt_alloc(NET_READY_BYTES, I64{8})
+    rt_text_store(wrapping(value + NET_READY_READABLE), if (readable != U8{0}) -> I64{1} else -> I64{0})
+    rt_text_store(wrapping(value + NET_READY_WRITABLE), if (writable != U8{0}) -> I64{1} else -> I64{0})
     value
 }
 
 #Export(c) jet_rt_record_get_jet_net_ready_readable: fn(value: I64) -> Bool {
-    net_ready_bool(rt_text_word(value))
+    net_ready_bool(rt_text_word(wrapping(value + NET_READY_READABLE)))
 }
 
 #Export(c) jet_rt_record_get_jet_net_ready_writable: fn(value: I64) -> Bool {
-    net_ready_bool(rt_text_word(wrapping(value + I64{8})))
+    net_ready_bool(rt_text_word(wrapping(value + NET_READY_WRITABLE)))
 }
 
 #Export(c) jet_rt_handle_clone_jet_net_ready: fn(value: I64) -> I64 {
-    result: jet_rt_alloc(I64{16}, I64{8})
-    rt_text_store(result, if jet_rt_record_get_jet_net_ready_readable(value) -> I64{1} else -> I64{0})
-    rt_text_store(wrapping(result + I64{8}), if jet_rt_record_get_jet_net_ready_writable(value) -> I64{1} else -> I64{0})
+    result: jet_rt_alloc(NET_READY_BYTES, I64{8})
+    rt_text_store(wrapping(result + NET_READY_READABLE), if jet_rt_record_get_jet_net_ready_readable(value) -> I64{1} else -> I64{0})
+    rt_text_store(wrapping(result + NET_READY_WRITABLE), if jet_rt_record_get_jet_net_ready_writable(value) -> I64{1} else -> I64{0})
     result
 }
 
 #Export(c) jet_rt_handle_drop_jet_net_ready: fn(value: I64) {
-    if (value != I64{0}) { jet_rt_free(value, I64{16}, I64{8}) }
+    if (value != I64{0}) { jet_rt_free(value, NET_READY_BYTES, I64{8}) }
 }
 
 #Export(c) jet_rt_handle_eq_jet_net_ready: fn(left: I64, right: I64) -> Bool {
