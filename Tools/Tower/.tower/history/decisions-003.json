@@ -80119,6 +80119,822 @@
       "outcome": "A",
       "ratifiedAt": "2026-10-29",
       "retiredAt": "2026-11-25T11:15:32.051Z"
+    },
+    {
+      "id": "D-MACHINE1",
+      "cardId": "c06he0ee",
+      "group": "language",
+      "title": "State machines v4: one readable state list for structs and enums, with moves named by their types",
+      "situation": "You said v3 was confusing, and that the v2 state list was easier to reason about but needed tweaks. This version keeps the v2 list of states and moves. The same `state { }` block now works in structs and enums, and each method's types name the states it moves between. The `#State` and `#Transition` markers retire. It replaces v3 and folds in D-STATE-PARAM1.",
+      "gist": "Should state machines keep v2's readable state list, as one block for structs and enums, with moves named by their types?",
+      "lesson": "A state machine is a value that is always in exactly one state, plus rules for which state may come next. Writing the rules as one short list makes the machine easy to read. Writing each move's states in its types lets the compiler check every call.",
+      "explainer": "",
+      "story": "Mia reads `Draft -> Confirmed, Cancelled` at the top of Order and knows the whole machine. She writes `confirm :: fn(self: ^Order.Draft) -> Order.Confirmed`. When she ships a draft, the error lists the moves a draft allows, and her editor offers them as she types.",
+      "inWild": "// Kotlin: states are types, so a move's parameter says where it starts.\nsealed interface Stage { object Draft : Stage; object Confirmed : Stage }\nfun confirm(s: Stage.Draft): Stage.Confirmed = Stage.Confirmed",
+      "detail": "What you asked. The v3 enum design was hard to reason about. The v2 list was clear but felt disconnected from structs and enums, and its marker was a second syntax. You asked for tweaks that keep the list and make it cohesive and easy to discover.\n\nWhat changes from v2. One `state { }` block, valid in a struct or an enum, holds every state and arrow. A method's parameter and result types name its states, as in `Order.Draft` to `Order.Confirmed`. That replaces the `#State(-> X)` marker, so states are spelled one way everywhere.\n\nWhat stays from v2. The `state` word, already ratified for typestate in D-STATE1. The arrow lines, the `Open :: Draft | Confirmed` group line, wrong-state error E0150, and erasure: a struct's state costs nothing when the program runs.\n\nHow it serves philosophy.md. Beginner experience (priority 2): one list reads like a diagram, and errors list the legal moves. One mechanism (priority 4): structs and enums share one block and one spelling. Runtime performance (priority 3): struct states are erased.\n\nDiscovery in normal use. Hover on a type shows its state list. Typing `o.` lists the moves allowed from o's state first. `jet inspect structure --machines` prints every list with the method on each arrow. Errors name the move, the state needed, the state found and the moves allowed.",
+      "options": [
+        {
+          "key": "A",
+          "name": "One state list for structs and enums; each method's types name its move",
+          "detail": "A type lists its states and moves once, in a `state { }` block: `Draft -> Confirmed, Cancelled`. The same block works in a struct and in an enum. In a struct, the states are names the compiler tracks and then erases. In an enum, the states are its cases, with their data.\n\nA move is an ordinary method whose types name its states: `confirm :: fn(self: ^Order.Draft) -> Order.Confirmed`. The build checks that every such method matches an arrow in the list. A constructor's result type names the start state.\n\nParameters use the same spelling: `Order.Shipped` for one state, `Order.Draft | Order.Confirmed` for a set, and a group such as `Order.Open` from the list. A plain `Order` means any state.\n\nFor a value whose state is known only at run time, an enum table narrows it: inside the `.Locked` arm, `door` is a `Door.Locked`. The `#State` and `#Transition` markers retire.",
+          "technical": "Parsing: `state { }` becomes legal in an enum body, where its names must be cases. A type path `T.State` or `T.Group` is a state type, and `|` joins them. No new token or keyword.\n\nSema keeps one arrow set per type. A method whose self or result is a state type is a move. Its start and end states must be an arrow, or the build fails naming the missing arrow. Calls are checked as D-STATE1 does today (E0150), and enum arms narrow the tested value.\n\nStruct states erase in codegen, as today. `jet fix` rewrites the 68 files that use the markers.",
+          "code": "// ===== Simple program =====\n// Simple: a lamp. The state list says what can happen; each method says what it does.\nLamp :: struct {\n    state {\n        Off -> On\n        On -> Off\n    }\n    watts: Int\n\n    new :: fn(watts: Int) -> Lamp.Off { Lamp{watts: watts} }       // starts Off\n    turn_on :: fn(self: ^Lamp.Off) -> Lamp.On { self }\n    turn_off :: fn(self: ^Lamp.On) -> Lamp.Off { self }\n}\n\nrun :: fn() {\n    lamp :: Lamp.new(60).turn_on()\n    print(lamp.watts)                   // 60\n}\n// lamp.turn_on()    error E0150: turn_on needs Lamp.Off, but lamp is Lamp.On.\n//                   Moves from On: turn_off.\n\n// ===== Complex program =====\n// Complex: one order machine, groups, an enum machine, and run-time events.\nOrder :: struct {\n    state {\n        Draft -> Confirmed, Cancelled\n        Confirmed -> Shipped, Cancelled\n        Shipped\n        Cancelled\n        Open :: Draft | Confirmed               // a named group of states\n    }\n    id: Int\n\n    start :: fn(id: Int) -> Order.Draft { Order{id: id} }\n    confirm :: fn(self: ^Order.Draft) -> Order.Confirmed { self }\n    ship :: fn(self: ^Order.Confirmed) -> Order.Shipped { self }\n    cancel :: fn(self: ^Order.Open) -> Order.Cancelled { self }\n}\n\n// Parameters name a state, a set, or a group, spelled like any other type.\nreceipt :: fn(order: Order.Shipped) -> String { \"shipped {order.id}\" }\nedit :: fn(order: Order.Draft | Order.Confirmed) -> String { \"edit {order.id}\" }\nremind :: fn(order: Order.Open) -> String { \"order {order.id} is open\" }\n\n// The same block in an enum: its states are the cases, with their data.\nDoor :: enum {\n    Shut\n    Open\n    Locked(code: Int)\n    state {\n        Shut -> Open, Locked\n        Open -> Shut\n        Locked -> Shut\n    }\n\n    open :: fn(self: Door.Shut) -> Door.Open { .Open }\n    lock :: fn(self: Door.Shut, code: Int) -> Door.Locked { .Locked(code: code) }\n    unlock :: fn(self: Door.Locked, key: Int) -> Door.Shut | Door.Locked {\n        if self.code == key -> .Shut else -> self      // staying put is not a move\n    }\n}\n\n// A value whose state is known only at run time: an arm narrows it.\npress :: fn(door: Door, key: Int) -> Door {\n    if door == {\n        .Shut -> door.open()                    // door is Door.Shut here\n        .Open -> door\n        .Locked -> door.unlock(key)             // door is Door.Locked here\n    }\n}\n\nrun :: fn() {\n    o :: Order.start(1)\n    print(remind(o))                            // Draft is in Open\n    shipped :: o.confirm().ship()\n    print(receipt(shipped))                     // shipped 1\n    print(press(Door.Shut.lock(7), 7))          // Shut\n}\n\n// What the build checks:\n// receipt(o)          E0150 receipt needs Order.Shipped, but o is Order.Draft.\n//                     Moves from Draft: confirm, cancel.\n// ship :: fn(self: ^Order.Draft) -> Order.Shipped\n//                     error: Order's state list has no Draft -> Shipped.\n//                     Add the arrow, or start from Order.Confirmed.\n// Editor: typing \"o.\" lists confirm and cancel first; hover on Order shows the list.\n// $ jet inspect structure --machines    prints each state list with the method on every arrow\n\n// ===== Best competitor equivalent =====\n// Rust: typestate needs one type per state and a trait per set; enum moves are unchecked.\nstruct Order<S> { id: u32, _s: PhantomData<S> }\nstruct Draft; struct Confirmed; struct Shipped;\nimpl Order<Draft> { fn confirm(self) -> Order<Confirmed> { Order { id: self.id, _s: PhantomData } } }\nimpl Order<Confirmed> { fn ship(self) -> Order<Shipped> { Order { id: self.id, _s: PhantomData } } }\ntrait Open {} impl Open for Draft {} impl Open for Confirmed {}   // a group is a hand-made trait\nfn remind<S: Open>(o: &Order<S>) -> String { format!(\"order {} open\", o.id) }\n// No list of moves exists to read or draw."
+        },
+        {
+          "key": "B",
+          "name": "The enum is the machine; `#Pre` says where a move starts (v3)",
+          "detail": "The previous version of this ballot. States are enum cases, moves are methods, and `#Pre(self == .Shut)` names where each move may start. The compiler reads the graph from the method bodies.\n\nThere is no list of moves to read. A guarded machine needs a `priv` field and a computed read, and you found it hard to reason about.",
+          "technical": "No parser change. Sema tracks which enum cases a value can be in and proves `#Pre` state conditions at build time. The `state` section and both markers retire.",
+          "code": "// ===== Simple program =====\n// Simple: the enum is the machine; #Pre says where a move starts.\nLamp :: enum {\n    Off\n    On\n\n    #Pre(self == .Off)\n    turn_on :: fn(self: ^Lamp) -> Lamp { .On }\n\n    #Pre(self == .On)\n    turn_off :: fn(self: ^Lamp) -> Lamp { .Off }\n}\n\nrun :: fn() {\n    lamp :: Lamp.Off.turn_on()\n    print(lamp)                         // On\n}\n// lamp.turn_on()    error E0150: turn_on needs Off, but lamp is On.\n\n// ===== Complex program =====\n// Complex: states are enum cases; a struct guards them with a priv field.\nStage :: enum {\n    Open {\n        Draft\n        Confirmed\n    }\n    Shipped(tracking: String)\n    Cancelled\n}\n\nOrder :: struct {\n    id: Int\n    priv current: Stage\n    stage: Stage -> current\n\n    start :: fn(id: Int) -> Order { Order{id: id, current: .Open.Draft} }\n\n    #Pre(self.stage == .Open.Draft)\n    confirm :: fn(&self) { self.current = .Open.Confirmed }\n\n    #Pre(self.stage == .Open.Confirmed)\n    ship :: fn(&self, tracking: String) { self.current = .Shipped(tracking: tracking) }\n\n    #Pre(self.stage == .Open)\n    cancel :: fn(&self) { self.current = .Cancelled }\n}\n\n#Pre(order.stage == .Shipped)\nreceipt :: fn(order: Order) -> String { \"shipped {order.id}\" }\n\nrun :: fn() {\n    order := Order.start(1)\n    &order.confirm()\n    &order.ship(\"ZX9\")\n    print(receipt(order))\n}\n// The moves are read from the method bodies; no list of them is written anywhere.\n\n// ===== Best competitor equivalent =====\n// Rust: typestate needs one type per state and a trait per set; enum moves are unchecked.\nstruct Order<S> { id: u32, _s: PhantomData<S> }\nstruct Draft; struct Confirmed; struct Shipped;\nimpl Order<Draft> { fn confirm(self) -> Order<Confirmed> { Order { id: self.id, _s: PhantomData } } }\nimpl Order<Confirmed> { fn ship(self) -> Order<Shipped> { Order { id: self.id, _s: PhantomData } } }\ntrait Open {} impl Open for Draft {} impl Open for Confirmed {}   // a group is a hand-made trait\nfn remind<S: Open>(o: &Order<S>) -> String { format!(\"order {} open\", o.id) }\n// No list of moves exists to read or draw."
+        },
+        {
+          "key": "C",
+          "name": "The v2 declaration as reviewed, with `#State` markers",
+          "detail": "The state list as in A, but methods and parameters name states with a `#State(…)` marker, and enums put arrows on their case lines.\n\nStates are spelled two ways, as markers on signatures and as types elsewhere, and an enum machine reads differently from a struct machine.",
+          "technical": "Parsing: an enum case line or a `state { }` line may end in `-> To, To`. `#State(-> B)` takes its start set from the lines that list B.",
+          "code": "// ===== Simple program =====\n// Simple: the v2 form as reviewed. Markers name the end state.\nLamp :: struct {\n    state {\n        Off -> On\n        On -> Off\n    }\n    watts: Int\n\n    #State(-> Off) new :: fn(watts: Int) -> Lamp { Lamp{watts: watts} }\n    #State(-> On) turn_on :: fn(self: ^Lamp) -> Lamp { self }       // from Off\n    #State(-> Off) turn_off :: fn(self: ^Lamp) -> Lamp { self }     // from On\n}\n\nrun :: fn() {\n    lamp :: Lamp.new(60).turn_on()\n    print(lamp.watts)\n}\n\n// ===== Complex program =====\n// Complex: v2 as reviewed; enums put arrows on their case lines.\nOrder :: struct {\n    state {\n        Draft -> Confirmed, Cancelled\n        Confirmed -> Shipped, Cancelled\n        Shipped\n        Cancelled\n        Open :: Draft | Confirmed\n    }\n    id: Int\n\n    #State(-> Draft) start :: fn(id: Int) -> Order { Order{id: id} }\n    #State(-> Confirmed) confirm :: fn(self: ^Order) -> Order { self }\n    #State(-> Shipped) ship :: fn(self: ^Order) -> Order { self }\n    #State(-> Cancelled) cancel :: fn(self: ^Order) -> Order { self }\n}\n\nreceipt :: fn(order: #State(Shipped) Order) -> String { \"shipped {order.id}\" }\naudit :: fn(order: #State(!Cancelled) Order) -> String { \"live {order.id}\" }\n\nDoor :: enum {\n    Shut -> Open, Locked\n    Open -> Shut\n    Locked(Int) -> Shut\n}\n\n// ===== Best competitor equivalent =====\n// Rust: typestate needs one type per state and a trait per set; enum moves are unchecked.\nstruct Order<S> { id: u32, _s: PhantomData<S> }\nstruct Draft; struct Confirmed; struct Shipped;\nimpl Order<Draft> { fn confirm(self) -> Order<Confirmed> { Order { id: self.id, _s: PhantomData } } }\nimpl Order<Confirmed> { fn ship(self) -> Order<Shipped> { Order { id: self.id, _s: PhantomData } } }\ntrait Open {} impl Open for Draft {} impl Open for Confirmed {}   // a group is a hand-made trait\nfn remind<S: Open>(o: &Order<S>) -> String { format!(\"order {} open\", o.id) }\n// No list of moves exists to read or draw."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Typestate is one type per state, and a set needs a hand-written trait; enum moves are unchecked. Source: doc.rust-lang.org/book ch17-03.",
+          "code": "// Simple\nenum Door { Shut, Open, Locked(u32) }\nfn open(d: Door) -> Door { match d { Door::Shut => Door::Open, other => other } }\n\n// Complex\nstruct Order<S> { id: u32, _s: PhantomData<S> }\nimpl Order<Draft> { fn confirm(self) -> Order<Confirmed> { Order { id: self.id, _s: PhantomData } } }\ntrait Open {} impl Open for Draft {} impl Open for Confirmed {}\nfn remind<S: Open>(o: &Order<S>) -> String { format!(\"order {} open\", o.id) }"
+        },
+        {
+          "lang": "Swift",
+          "note": "An enum with mutating methods; a wrong state is found when it runs, by a guard. Source: docs.swift.org, Enumerations.",
+          "code": "// Simple\nenum Door { case shut, open, locked(code: Int)\n  mutating func open() { guard case .shut = self else { return }; self = .open } }\n\n// Complex\nenum Stage { case draft, confirmed, shipped(tracking: String), cancelled }\nstruct Order { let id: Int; private(set) var stage: Stage = .draft\n  mutating func confirm() throws {\n    guard case .draft = stage else { throw OrderError.wrongStage }\n    stage = .confirmed } }"
+        },
+        {
+          "lang": "XState",
+          "note": "States and moves are declared once as a readable table and drawn by tools; illegal events are ignored when they run. Source: stately.ai/docs.",
+          "code": "// Simple\ncreateMachine({ initial: 'off', states: {\n  off: { on: { TOGGLE: 'on' } },\n  on: { on: { TOGGLE: 'off' } } } })\n\n// Complex\ncreateMachine({ id: 'order', initial: 'open', states: {\n  open: { initial: 'draft', on: { CANCEL: 'cancelled' }, states: {\n    draft: { on: { CONFIRM: 'confirmed' } },\n    confirmed: { on: { SHIP: '#order.shipped' } } } },\n  shipped: { type: 'final' }, cancelled: { type: 'final' } } })"
+        },
+        {
+          "lang": "Kotlin",
+          "note": "A sealed hierarchy holds the states, so a move's parameter type says where it starts; there is no list of moves. Source: kotlinlang.org, sealed classes.",
+          "code": "// Simple\nsealed interface Lamp { object Off : Lamp; object On : Lamp }\nfun turnOn(l: Lamp.Off): Lamp.On = Lamp.On\n\n// Complex\nsealed interface Stage\nsealed interface Open : Stage\nobject Draft : Open; object Confirmed : Open\nobject Shipped : Stage; object Cancelled : Stage\nfun ship(s: Confirmed): Shipped = Shipped\nfun remind(s: Open) = \"open\""
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A keeps the readable v2 list and makes it one block for structs and enums. States are spelled as types everywhere, and errors and completion show the legal moves. That serves beginner experience and one mechanism.",
+        "gains": [
+          "The whole machine reads as one short list.",
+          "Structs and enums share one block and one spelling.",
+          "Errors and completion show the legal moves."
+        ],
+        "losses": [],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B has no list of moves to read and adds concepts, which you found hard to reason about."
+          },
+          {
+            "key": "C",
+            "reason": "C spells states two ways and declares enum machines differently from struct machines."
+          }
+        ],
+        "tradeoff": "Each move method writes its start and end states in its types, which also documents it."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: CardClose-1. Adversarial self-pass checked that A adds no keyword beyond the ratified `state`, that every check names its rule, and that the struct and enum blocks mean the same thing."
+      },
+      "checkInstructions": "Ratified basis: D-STATE1 typestate and its `state` section (Docs/spec/syntax-decisions.md:1497), and Examples/features/types/typestate.jet. Declaration forms follow D-DECL-BINDING1 B. Philosophy priorities are in Docs/spec/philosophy.md:26-46. `git grep -l -E '#Transition\\(|#State\\(' -- '*.jet'` lists the files to migrate.",
+      "surface": {
+        "gist": "Should state machines keep v2's readable state list, as one block for structs and enums, with moves named by their types?",
+        "lesson": "A state machine is a value that is always in exactly one state, plus rules for which state may come next. Writing the rules as one short list makes the machine easy to read. Writing each move's states in its types lets the compiler check every call.",
+        "trio": {
+          "current": {
+            "note": "Today typestate is a struct-only `state { }` section with `#State` and `#Transition` markers.",
+            "code": "// Today (D-STATE1): a struct-only state section and two markers.\nReservation :: struct {\n    state { Pending, Confirmed, CheckedIn }\n    guest: String\n\n    #Transition(_, Pending) book :: fn(guest: String) -> Reservation { {guest: guest.copy()} }\n    #Transition(Pending, Confirmed) pay :: fn(self: ^Reservation) -> Reservation { self }\n}"
+          },
+          "wild": {
+            "lang": "Kotlin",
+            "note": "Kotlin names states as types, so a move's signature says where it starts and ends.",
+            "code": "sealed interface Stage { object Draft : Stage; object Confirmed : Stage }\nfun confirm(s: Stage.Draft): Stage.Confirmed = Stage.Confirmed"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "One state list for structs and enums; each method's types name its move",
+            "gist": "Keep v2's state list, use it in structs and enums, and let each method's types name its move.",
+            "gains": [
+              "The whole machine reads as one short list.",
+              "Structs and enums share one block and one spelling.",
+              "Errors and completion show the legal moves."
+            ],
+            "losses": [],
+            "proposed": {
+              "code": "Order :: struct {\n    state {\n        Draft -> Confirmed, Cancelled\n        Confirmed -> Shipped, Cancelled\n        Open :: Draft | Confirmed\n    }\n    id: Int\n}\nconfirm :: fn(self: ^Order.Draft) -> Order.Confirmed { self }\nremind :: fn(order: Order.Open) -> String"
+            }
+          },
+          {
+            "key": "B",
+            "name": "The enum is the machine; `#Pre` says where a move starts (v3)",
+            "gist": "States are enum cases and `#Pre` guards each move.",
+            "gains": [
+              "No `state` block."
+            ],
+            "losses": [
+              "No single list of moves to read.",
+              "More concepts for one machine."
+            ],
+            "proposed": {
+              "code": "#Pre(self == .Shut)\nlock :: fn(self: ^Door, code: Int) -> Door { .Locked(code: code) }"
+            }
+          },
+          {
+            "key": "C",
+            "name": "The v2 declaration as reviewed, with `#State` markers",
+            "gist": "The v2 list with a separate marker for states.",
+            "gains": [
+              "Every move is listed in one place."
+            ],
+            "losses": [
+              "A second spelling for states.",
+              "Enums and structs declare machines differently."
+            ],
+            "proposed": {
+              "code": "#State(-> Shipped) ship :: fn(self: ^Order) -> Order { self }\nreceipt :: fn(order: #State(Shipped) Order) -> String"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A keeps the readable v2 list and makes it one block for structs and enums. States are spelled as types everywhere, and errors and completion show the legal moves. That serves beginner experience and one mechanism.",
+          "gains": [
+            "The whole machine reads as one short list.",
+            "Structs and enums share one block and one spelling.",
+            "Errors and completion show the legal moves."
+          ],
+          "losses": [],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B has no list of moves to read and adds concepts, which you found hard to reason about."
+            },
+            {
+              "key": "C",
+              "reason": "C spells states two ways and declares enum machines differently from struct machines."
+            }
+          ],
+          "tradeoff": "Each move method writes its start and end states in its types, which also documents it."
+        }
+      },
+      "designAway": [
+        {
+          "loss": "Writing states in every move signature is more typing than a marker.",
+          "attempts": [
+            "Infer states from bodies: rejected, that is the v3 design you found hard to read."
+          ],
+          "result": "The types replace the marker, so a move costs the same words. The signature now says what the move does, which a reader needs anyway."
+        },
+        {
+          "loss": "The list and the methods could disagree.",
+          "attempts": [
+            "Generate methods from the list: rejected, it hides code."
+          ],
+          "result": "The build checks each move method against the list. A missing arrow stops the build, naming the arrow and both fixes."
+        },
+        {
+          "loss": "A struct's state is erased, so it cannot be tested when the program runs.",
+          "attempts": [
+            "Store a hidden tag in every struct: rejected, it adds cost to every machine."
+          ],
+          "result": "A state the program must test at run time belongs in an enum, using the same block. Its arms narrow the value to a state type."
+        },
+        {
+          "loss": "A beginner may not know the `state` block exists.",
+          "attempts": [
+            "A separate machine keyword: rejected, it is a new word."
+          ],
+          "result": "Hover, completion and errors all show the list. The enum and struct guides teach the block, and `jet inspect structure --machines` lists every machine."
+        },
+        {
+          "loss": "Sixty-eight files use `#State` or `#Transition` today.",
+          "attempts": [
+            "Keep both forms: rejected, two ways to say one thing."
+          ],
+          "result": "`jet fix` rewrites each marker into the state types it names, and the old marker rows retire."
+        }
+      ],
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-30T16:25:55.918Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-01",
+      "retiredAt": "2026-11-25T11:41:17.092Z"
+    },
+    {
+      "id": "D-GUARD-LINT1",
+      "cardId": "c06he0ee",
+      "group": "syntax",
+      "title": "Single-case checks stay free; wider enum decisions require named cases or a marked fallback",
+      "situation": "An enum has named cases, such as Circle, Square, Line and Dot. Jet currently rejects even a one-case table with else, while an equivalent if/else-if chain runs. A fallback can hide a case added later, but listing every case makes small checks noisy. The owner wants single-case checks free and incomplete wider decisions rejected unless their fallback explicitly opts in. r4 (owner, 2026-11-18): the owner rejected #Unlisted, #Others and #AnyOther as poor names and asked for a much better set. The rule is unchanged; A to E differ only in the marker word, and F keeps named-only coverage. No candidate collides with a registered marker (Compiler/Prelude/Markers.jet).",
+      "gist": "Should wider enum decisions require named cases or a marked fallback, and what should the marker be called?",
+      "lesson": "A single-case check asks about one enum case. A wider decision tests at least two distinct cases of the same enum value. Naming the remaining cases makes enum growth request review; #CatchAll deliberately accepts future cases too.",
+      "explainer": "One case stays easy. Two or more distinct cases require complete coverage, or a marked fallback; this is a hard error before execution, not a tidy check reserved for shipping.",
+      "story": "Area handles circles and squares and deliberately returns zero for every other shape. Saving must handle each shape by name. Adding Triangle must stop saving, but may use area's explicitly marked fallback.",
+      "inWild": "Odin documents #partial switch as an explicit escape from exhaustive enum checking. That is a precedent for explicit intent, not identical placement or semantics.",
+      "detail": "r4 renames the marker only. Each word sits after the final else arm's body, like the existing arm marker #Through. The word must tell a reader that this arm also takes cases nobody listed, including ones added later.\n- #CatchAll: the everyday word for an arm that takes everything.\n- #Open: the decision stays open to growth.\n- #Partial: Odin's word for the same escape.\n- #Fallback: the arm's role, but true of every else.\n- #Wildcard: the pattern word for matching anything.\n\nr2 corrects r1's violation of BRIEF.md: 'tidy error, still runs' weakens the owner's default ERROR. The proposed error stops run, dev, test, check and build, cannot be downgraded by lint policy, and offers both repairs. D-NO-WARNINGS1 only categorizes lint checks; it does not require semantic errors to become tidy errors. Earlier answers proposing unrestricted else or shipping-only checks are superseded by the latest owner direction. A remains A; B retains named-only coverage; the old permissive option is removed because it does not implement the requested default.\n\nReplayed on gate-p275 with nice -n 19. The probe review-single.jet fails E0641 and names .Square(_) | .Line | .Dot. The probe e2.jet fails E0641 for multi-arm and or-pattern fallbacks. The probe e3.jet shows the coarse nested .Val(_) | .None repair. The probe review-chain.jet runs and prints 0.\n\nprobes/t1.jet runs, while check exits 1 with L0101, demonstrating why the tidy tier is not this contract. These observations establish the present discrepancy, not the proposed behavior. The author's e1.jet has main rather than run and cannot establish its claimed output.\n\nMarker audit: Compiler/Prelude/Markers.jet registers Through at the Arm site; Compiler/JetFoundation/Data/Syntax/Markers.jet delegates marker names to that registry. Compiler/JetParser/Source/Parser/Statements.jet:1098-1103 requires an arrow immediately after else, and :1125-1140 recognizes #Through after the arm body. Neither 'else #CatchAll ->' nor a post-body #CatchAll is accepted today: the isolated review-marker probes fail E0003.\n\nUse the existing #Name vocabulary and post-body Arm position: 'else -> { body } #CatchAll'. Register CatchAll with site Arm, legal only on a final else; generalize the existing arm-marker reader instead of adding a special else-head grammar. Regular chain tails use the same post-body attachment. Both parser paths and the registry fixture are required implementation work, not an existing feature.\n\nThe research report Docs/Research/2026-11-16-enum-branching-in-real-code.md uses heuristic scans, not a reproduced frequency measurement. It distinguishes short tests from longer fallbacks; Java/TypeScript/Go and Jet/Rust do not have the same distribution. This recommendation follows the owner's distinction, not a claim that single checks dominate every corpus. Odin's official overview, #partial-switch, documents an explicit exhaustive-check escape. Swift @unknown default is not a synonym for silently accepting unlisted known and future cases, so that comparison is removed.\n\nD-IFHOLE2's once-evaluated table subject stays intact. D-LANG-MIGRATE1 requires behavior-preserving registered edits. Chains are checked in place: no rewrite may cache a repeatedly read mutable subject merely to enable this check.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Free single checks; fallback marked #CatchAll",
+          "detail": "One distinct case needs no marker. A decision testing two or more distinct cases must cover the enum, or mark its final else with #CatchAll. An unmarked incomplete decision is a hard error, even when only one case remains. #CatchAll is the common word for an arm that takes everything, so a reader sees that every unlisted case lands here, now or later.",
+          "technical": "Counting: count distinct discriminants, not arm count. '.A | .B' tests two cases; '.A(0) | .A(1)' tests one. Guards do not make partially covered payloads complete. Evaluate nested coverage at each enum projection actually tested: .Val(.A) and .Val(.B) test two inner cases, not merely one outer Val.\n\nUnmentioned deeper payloads remain wildcards; this is a finite pattern-coverage analysis, not infinite expansion of recursive data. More than one tested case at a projection requires exhaustive residual coverage there, including unmatched payloads and failed guards. Explicit residual patterns retain their original ordered position; repeated discriminants with wildcard payloads cover residual guarded values without re-evaluating guards.\n\nThe rule applies to subject tables and a single syntactic if/else-if chain repeatedly testing the same resolved local, parameter or field place. Include chains with no final else: a wider incomplete chain still errors; offer an explicit final else with #CatchAll or explicit residual arms. Independent if statements and early-return guards are never grouped by proximity.\n\nTests of different subjects are not one decision. Compare resolved places, not identifier text. Mutable places still get the syntactic audit, but its guarantee is case visibility, not that intervening effects cannot change the value. Preserve every read, guard, mutation and evaluation order; never silently turn such a chain into a once-read table.\n\nSingle-case checks may omit else in statement position; value-producing forms keep ordinary result completeness rules. A plain else after two tested cases errors even if it covers exactly one case; this avoids changing policy as the enum grows. Unreachable else remains an ordinary reachability issue.\n\nBool, Int, ranges and non-enum subjects do not acquire enum rules. Imported closed enums use their visible case set. Where a boundary deliberately withholds cases, a wider decision must use #CatchAll for that unnameable remainder; do not fabricate case names or claim an exhaustive named repair exists.\n\nDiagnostics show the residual cases and both choices. For closed, visible enums, a coverage trie derives a named residual pattern at every tested enum projection, keeping nested distinctions rather than .Val(_) shortcuts that hide growth. Patterns not expressible as a compact complement are safely covered by repeating the relevant full discriminant/payload wildcard AFTER the previous ordered arms, preserving fallthrough.\n\nThe marker repair changes only the final else attachment and accepts current plus future remainder. Both are explicit selectable Safe repairs: current inputs, effects and evaluation order are unchanged. Default jet fix chooses naming, never silently chooses future catch-all intent. For chains with no else, adding an empty statement fallback preserves current behavior; do not invent a result for value expressions. Where no behavior-preserving repair exists, present a manual diagnostic, not a fake Safe edit.\n\nRest is a registered zero-argument Arm marker, final else only, after a braced body. It neither suppresses other errors nor creates wildcard-pattern aliases. Reject it on ordinary named arms, declarations, a non-enum fallback or a single-case fallback where no opt-in is needed. Check identical semantics in every execution tier.\n\nHover on #CatchAll lists the cases it covers today, so the deliberate fallback stays reviewable as the enum grows.",
+          "code": "// PROPOSED: Shape has Circle, Square, Line and Dot.\nif shape == {\n    .Circle(r) -> 3 * r * r\n    .Square(s) -> s * s\n    else -> { 0 } #CatchAll\n}"
+        },
+        {
+          "key": "B",
+          "name": "The same rule; fallback marked #Open",
+          "detail": "One distinct case needs no marker. A decision testing two or more distinct cases must cover the enum, or mark its final else with #Open. An unmarked incomplete decision is a hard error, even when only one case remains. #Open names the trade itself: the decision stays open to cases added later, instead of closed against them.",
+          "technical": "Counting: count distinct discriminants, not arm count. '.A | .B' tests two cases; '.A(0) | .A(1)' tests one. Guards do not make partially covered payloads complete. Evaluate nested coverage at each enum projection actually tested: .Val(.A) and .Val(.B) test two inner cases, not merely one outer Val.\n\nUnmentioned deeper payloads remain wildcards; this is a finite pattern-coverage analysis, not infinite expansion of recursive data. More than one tested case at a projection requires exhaustive residual coverage there, including unmatched payloads and failed guards. Explicit residual patterns retain their original ordered position; repeated discriminants with wildcard payloads cover residual guarded values without re-evaluating guards.\n\nThe rule applies to subject tables and a single syntactic if/else-if chain repeatedly testing the same resolved local, parameter or field place. Include chains with no final else: a wider incomplete chain still errors; offer an explicit final else with #Open or explicit residual arms. Independent if statements and early-return guards are never grouped by proximity.\n\nTests of different subjects are not one decision. Compare resolved places, not identifier text. Mutable places still get the syntactic audit, but its guarantee is case visibility, not that intervening effects cannot change the value. Preserve every read, guard, mutation and evaluation order; never silently turn such a chain into a once-read table.\n\nSingle-case checks may omit else in statement position; value-producing forms keep ordinary result completeness rules. A plain else after two tested cases errors even if it covers exactly one case; this avoids changing policy as the enum grows. Unreachable else remains an ordinary reachability issue.\n\nBool, Int, ranges and non-enum subjects do not acquire enum rules. Imported closed enums use their visible case set. Where a boundary deliberately withholds cases, a wider decision must use #Open for that unnameable remainder; do not fabricate case names or claim an exhaustive named repair exists.\n\nDiagnostics show the residual cases and both choices. For closed, visible enums, a coverage trie derives a named residual pattern at every tested enum projection, keeping nested distinctions rather than .Val(_) shortcuts that hide growth. Patterns not expressible as a compact complement are safely covered by repeating the relevant full discriminant/payload wildcard AFTER the previous ordered arms, preserving fallthrough.\n\nThe marker repair changes only the final else attachment and accepts current plus future remainder. Both are explicit selectable Safe repairs: current inputs, effects and evaluation order are unchanged. Default jet fix chooses naming, never silently chooses future catch-all intent. For chains with no else, adding an empty statement fallback preserves current behavior; do not invent a result for value expressions. Where no behavior-preserving repair exists, present a manual diagnostic, not a fake Safe edit.\n\nRest is a registered zero-argument Arm marker, final else only, after a braced body. It neither suppresses other errors nor creates wildcard-pattern aliases. Reject it on ordinary named arms, declarations, a non-enum fallback or a single-case fallback where no opt-in is needed. Check identical semantics in every execution tier.\n\nHover on #Open lists the cases it covers today, so the deliberate fallback stays reviewable as the enum grows.",
+          "code": "// PROPOSED: Shape has Circle, Square, Line and Dot.\nif shape == {\n    .Circle(r) -> 3 * r * r\n    .Square(s) -> s * s\n    else -> { 0 } #Open\n}"
+        },
+        {
+          "key": "C",
+          "name": "The same rule; fallback marked #Partial",
+          "detail": "One distinct case needs no marker. A decision testing two or more distinct cases must cover the enum, or mark its final else with #Partial. An unmarked incomplete decision is a hard error, even when only one case remains. #Partial follows Odin, whose #partial switch is the same deliberate escape from listing every case.",
+          "technical": "Counting: count distinct discriminants, not arm count. '.A | .B' tests two cases; '.A(0) | .A(1)' tests one. Guards do not make partially covered payloads complete. Evaluate nested coverage at each enum projection actually tested: .Val(.A) and .Val(.B) test two inner cases, not merely one outer Val.\n\nUnmentioned deeper payloads remain wildcards; this is a finite pattern-coverage analysis, not infinite expansion of recursive data. More than one tested case at a projection requires exhaustive residual coverage there, including unmatched payloads and failed guards. Explicit residual patterns retain their original ordered position; repeated discriminants with wildcard payloads cover residual guarded values without re-evaluating guards.\n\nThe rule applies to subject tables and a single syntactic if/else-if chain repeatedly testing the same resolved local, parameter or field place. Include chains with no final else: a wider incomplete chain still errors; offer an explicit final else with #Partial or explicit residual arms. Independent if statements and early-return guards are never grouped by proximity.\n\nTests of different subjects are not one decision. Compare resolved places, not identifier text. Mutable places still get the syntactic audit, but its guarantee is case visibility, not that intervening effects cannot change the value. Preserve every read, guard, mutation and evaluation order; never silently turn such a chain into a once-read table.\n\nSingle-case checks may omit else in statement position; value-producing forms keep ordinary result completeness rules. A plain else after two tested cases errors even if it covers exactly one case; this avoids changing policy as the enum grows. Unreachable else remains an ordinary reachability issue.\n\nBool, Int, ranges and non-enum subjects do not acquire enum rules. Imported closed enums use their visible case set. Where a boundary deliberately withholds cases, a wider decision must use #Partial for that unnameable remainder; do not fabricate case names or claim an exhaustive named repair exists.\n\nDiagnostics show the residual cases and both choices. For closed, visible enums, a coverage trie derives a named residual pattern at every tested enum projection, keeping nested distinctions rather than .Val(_) shortcuts that hide growth. Patterns not expressible as a compact complement are safely covered by repeating the relevant full discriminant/payload wildcard AFTER the previous ordered arms, preserving fallthrough.\n\nThe marker repair changes only the final else attachment and accepts current plus future remainder. Both are explicit selectable Safe repairs: current inputs, effects and evaluation order are unchanged. Default jet fix chooses naming, never silently chooses future catch-all intent. For chains with no else, adding an empty statement fallback preserves current behavior; do not invent a result for value expressions. Where no behavior-preserving repair exists, present a manual diagnostic, not a fake Safe edit.\n\nRest is a registered zero-argument Arm marker, final else only, after a braced body. It neither suppresses other errors nor creates wildcard-pattern aliases. Reject it on ordinary named arms, declarations, a non-enum fallback or a single-case fallback where no opt-in is needed. Check identical semantics in every execution tier.\n\nHover on #Partial lists the cases it covers today, so the deliberate fallback stays reviewable as the enum grows.",
+          "code": "// PROPOSED: Shape has Circle, Square, Line and Dot.\nif shape == {\n    .Circle(r) -> 3 * r * r\n    .Square(s) -> s * s\n    else -> { 0 } #Partial\n}"
+        },
+        {
+          "key": "D",
+          "name": "The same rule; fallback marked #Fallback",
+          "detail": "One distinct case needs no marker. A decision testing two or more distinct cases must cover the enum, or mark its final else with #Fallback. An unmarked incomplete decision is a hard error, even when only one case remains. #Fallback names the arm by its role, in a word every programmer knows.",
+          "technical": "Counting: count distinct discriminants, not arm count. '.A | .B' tests two cases; '.A(0) | .A(1)' tests one. Guards do not make partially covered payloads complete. Evaluate nested coverage at each enum projection actually tested: .Val(.A) and .Val(.B) test two inner cases, not merely one outer Val.\n\nUnmentioned deeper payloads remain wildcards; this is a finite pattern-coverage analysis, not infinite expansion of recursive data. More than one tested case at a projection requires exhaustive residual coverage there, including unmatched payloads and failed guards. Explicit residual patterns retain their original ordered position; repeated discriminants with wildcard payloads cover residual guarded values without re-evaluating guards.\n\nThe rule applies to subject tables and a single syntactic if/else-if chain repeatedly testing the same resolved local, parameter or field place. Include chains with no final else: a wider incomplete chain still errors; offer an explicit final else with #Fallback or explicit residual arms. Independent if statements and early-return guards are never grouped by proximity.\n\nTests of different subjects are not one decision. Compare resolved places, not identifier text. Mutable places still get the syntactic audit, but its guarantee is case visibility, not that intervening effects cannot change the value. Preserve every read, guard, mutation and evaluation order; never silently turn such a chain into a once-read table.\n\nSingle-case checks may omit else in statement position; value-producing forms keep ordinary result completeness rules. A plain else after two tested cases errors even if it covers exactly one case; this avoids changing policy as the enum grows. Unreachable else remains an ordinary reachability issue.\n\nBool, Int, ranges and non-enum subjects do not acquire enum rules. Imported closed enums use their visible case set. Where a boundary deliberately withholds cases, a wider decision must use #Fallback for that unnameable remainder; do not fabricate case names or claim an exhaustive named repair exists.\n\nDiagnostics show the residual cases and both choices. For closed, visible enums, a coverage trie derives a named residual pattern at every tested enum projection, keeping nested distinctions rather than .Val(_) shortcuts that hide growth. Patterns not expressible as a compact complement are safely covered by repeating the relevant full discriminant/payload wildcard AFTER the previous ordered arms, preserving fallthrough.\n\nThe marker repair changes only the final else attachment and accepts current plus future remainder. Both are explicit selectable Safe repairs: current inputs, effects and evaluation order are unchanged. Default jet fix chooses naming, never silently chooses future catch-all intent. For chains with no else, adding an empty statement fallback preserves current behavior; do not invent a result for value expressions. Where no behavior-preserving repair exists, present a manual diagnostic, not a fake Safe edit.\n\nRest is a registered zero-argument Arm marker, final else only, after a braced body. It neither suppresses other errors nor creates wildcard-pattern aliases. Reject it on ordinary named arms, declarations, a non-enum fallback or a single-case fallback where no opt-in is needed. Check identical semantics in every execution tier.\n\nHover on #Fallback lists the cases it covers today, so the deliberate fallback stays reviewable as the enum grows.",
+          "code": "// PROPOSED: Shape has Circle, Square, Line and Dot.\nif shape == {\n    .Circle(r) -> 3 * r * r\n    .Square(s) -> s * s\n    else -> { 0 } #Fallback\n}"
+        },
+        {
+          "key": "E",
+          "name": "The same rule; fallback marked #Wildcard",
+          "detail": "One distinct case needs no marker. A decision testing two or more distinct cases must cover the enum, or mark its final else with #Wildcard. An unmarked incomplete decision is a hard error, even when only one case remains. #Wildcard borrows the pattern-matching word for a pattern that matches anything, like _.",
+          "technical": "Counting: count distinct discriminants, not arm count. '.A | .B' tests two cases; '.A(0) | .A(1)' tests one. Guards do not make partially covered payloads complete. Evaluate nested coverage at each enum projection actually tested: .Val(.A) and .Val(.B) test two inner cases, not merely one outer Val.\n\nUnmentioned deeper payloads remain wildcards; this is a finite pattern-coverage analysis, not infinite expansion of recursive data. More than one tested case at a projection requires exhaustive residual coverage there, including unmatched payloads and failed guards. Explicit residual patterns retain their original ordered position; repeated discriminants with wildcard payloads cover residual guarded values without re-evaluating guards.\n\nThe rule applies to subject tables and a single syntactic if/else-if chain repeatedly testing the same resolved local, parameter or field place. Include chains with no final else: a wider incomplete chain still errors; offer an explicit final else with #Wildcard or explicit residual arms. Independent if statements and early-return guards are never grouped by proximity.\n\nTests of different subjects are not one decision. Compare resolved places, not identifier text. Mutable places still get the syntactic audit, but its guarantee is case visibility, not that intervening effects cannot change the value. Preserve every read, guard, mutation and evaluation order; never silently turn such a chain into a once-read table.\n\nSingle-case checks may omit else in statement position; value-producing forms keep ordinary result completeness rules. A plain else after two tested cases errors even if it covers exactly one case; this avoids changing policy as the enum grows. Unreachable else remains an ordinary reachability issue.\n\nBool, Int, ranges and non-enum subjects do not acquire enum rules. Imported closed enums use their visible case set. Where a boundary deliberately withholds cases, a wider decision must use #Wildcard for that unnameable remainder; do not fabricate case names or claim an exhaustive named repair exists.\n\nDiagnostics show the residual cases and both choices. For closed, visible enums, a coverage trie derives a named residual pattern at every tested enum projection, keeping nested distinctions rather than .Val(_) shortcuts that hide growth. Patterns not expressible as a compact complement are safely covered by repeating the relevant full discriminant/payload wildcard AFTER the previous ordered arms, preserving fallthrough.\n\nThe marker repair changes only the final else attachment and accepts current plus future remainder. Both are explicit selectable Safe repairs: current inputs, effects and evaluation order are unchanged. Default jet fix chooses naming, never silently chooses future catch-all intent. For chains with no else, adding an empty statement fallback preserves current behavior; do not invent a result for value expressions. Where no behavior-preserving repair exists, present a manual diagnostic, not a fake Safe edit.\n\nRest is a registered zero-argument Arm marker, final else only, after a braced body. It neither suppresses other errors nor creates wildcard-pattern aliases. Reject it on ordinary named arms, declarations, a non-enum fallback or a single-case fallback where no opt-in is needed. Check identical semantics in every execution tier.\n\nHover on #Wildcard lists the cases it covers today, so the deliberate fallback stays reviewable as the enum grows.",
+          "code": "// PROPOSED: Shape has Circle, Square, Line and Dot.\nif shape == {\n    .Circle(r) -> 3 * r * r\n    .Square(s) -> s * s\n    else -> { 0 } #Wildcard\n}"
+        },
+        {
+          "key": "F",
+          "name": "Always name every case",
+          "detail": "Keep the table's strict named-case rule and extend it consistently to wider chains. This exposes future additions without a marker escape, but even a one-case table must list its remainder.",
+          "technical": "Strongest benefit: every exhaustive table is reviewed after enum growth and there is no new marker. Single-case ordinary if checks remain ordinary control flow, but tables retain today's E0641 restriction. This does not meet the owner's requested free one-case table and deliberate inclusive fallback.",
+          "code": "// Existing named-case form; executed in probes/e2fix.jet.\nif shape == {\n    .Circle(r) -> 3 * r * r\n    .Square(s) -> s * s\n    .Line | .Dot -> 0\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Odin",
+          "note": "Explicit #partial switch relaxes enum exhaustiveness; it is not Jet's marker grammar.",
+          "source": "https://odin-lang.org/docs/overview/#partial-switch"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Free single checks, error by default, and the marker word most programmers already read as \"takes everything\", which covers cases added later. The other words each lose something: overloaded, about the decision rather than the arm, true of every else, or jargon.",
+        "gains": [
+          "Single-case checks stay free; alternatives cannot bypass the wider-case rule.",
+          "Named cases force review; one registered marker expresses deliberate future fallback."
+        ],
+        "losses": [
+          {
+            "loss": "A wider inclusive fallback needs a visible marker.",
+            "mitigation": "One selectable local edit adds it; named repair is the default. No repeated guards or subject evaluation are introduced."
+          },
+          {
+            "loss": "#CatchAll gives up future-case review at that site, by design.",
+            "mitigation": "That is the owner's requested meaning. jet fix defaults to naming the cases, and hover on #CatchAll lists every case it covers today."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "#Open is short but overloaded; readers must learn this meaning."
+          },
+          {
+            "key": "C",
+            "reason": "#Partial describes the decision, not the arm, and reads like unfinished code."
+          },
+          {
+            "key": "D",
+            "reason": "#Fallback fits every else, so it does not signal future cases."
+          },
+          {
+            "key": "E",
+            "reason": "#Wildcard is jargon and does not stress future cases."
+          },
+          {
+            "key": "F",
+            "reason": "Cannot express the requested deliberate fallback."
+          }
+        ],
+        "tradeoff": "#CatchAll deliberately forgoes future-case review at that site; it is never inserted without choosing that intent.",
+        "rec": "A"
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: BallotReview. It found the contract ready to post; r3 and r4 (Main, 2026-11-18) rename the marker only, answering owner questions q6eygb5d and q11zs39j, with names checked against Markers.jet."
+      },
+      "checkInstructions": "Implementation acceptance, not run in this review. Registry and parser fixtures cover #CatchAll on tables and chains. The error is hard in every command. Fixtures cover alternatives, guards, nested and imported coverage, one-remaining-case and missing-else chains, and mutable reads. Selectable Safe edits preserve output and effects. No benchmark claim is made.",
+      "surface": {
+        "gist": "Should wider enum decisions require named cases or a marked fallback, and what should the marker be called?",
+        "lesson": "An enum has named cases. A one-case check stays free. Testing two or more distinct cases requires complete coverage; a marked fallback deliberately accepts future cases too.",
+        "trio": {
+          "current": {
+            "note": "Executed: a one-case enum table with else fails E0641; an equivalent chain runs.",
+            "code": "// probes/review-single.jet and review-chain.jet"
+          },
+          "wild": {
+            "lang": "Odin",
+            "note": "#partial switch explicitly relaxes enum coverage.",
+            "code": "#partial switch f {\ncase .A: fmt.println(\"A\")\n}"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "#CatchAll fallback",
+            "gist": "Wider incomplete decisions are a hard error before execution.",
+            "gains": [
+              "Names force review after enum growth.",
+              "The everyday word for an arm that takes everything."
+            ],
+            "losses": [
+              "A selectable edit adds the marker.",
+              "\"Catch\" may recall exception handling."
+            ],
+            "proposed": {
+              "code": "// PROPOSED post-body marker; registration/parser work required.\nelse -> { 0 } #CatchAll"
+            }
+          },
+          {
+            "key": "B",
+            "name": "#Open fallback",
+            "gist": "Wider incomplete decisions are a hard error before execution.",
+            "gains": [
+              "Names force review after enum growth.",
+              "One short word naming the trade."
+            ],
+            "losses": [
+              "A selectable edit adds the marker.",
+              "\"Open\" already means files and types."
+            ],
+            "proposed": {
+              "code": "// PROPOSED post-body marker; registration/parser work required.\nelse -> { 0 } #Open"
+            }
+          },
+          {
+            "key": "C",
+            "name": "#Partial fallback",
+            "gist": "Wider incomplete decisions are a hard error before execution.",
+            "gains": [
+              "Names force review after enum growth.",
+              "Odin uses it for this escape."
+            ],
+            "losses": [
+              "A selectable edit adds the marker.",
+              "Describes the decision, not the arm."
+            ],
+            "proposed": {
+              "code": "// PROPOSED post-body marker; registration/parser work required.\nelse -> { 0 } #Partial"
+            }
+          },
+          {
+            "key": "D",
+            "name": "#Fallback fallback",
+            "gist": "Wider incomplete decisions are a hard error before execution.",
+            "gains": [
+              "Names force review after enum growth.",
+              "Plain and familiar."
+            ],
+            "losses": [
+              "A selectable edit adds the marker.",
+              "Every else is a fallback; new cases go unsaid."
+            ],
+            "proposed": {
+              "code": "// PROPOSED post-body marker; registration/parser work required.\nelse -> { 0 } #Fallback"
+            }
+          },
+          {
+            "key": "E",
+            "name": "#Wildcard fallback",
+            "gist": "Wider incomplete decisions are a hard error before execution.",
+            "gains": [
+              "Names force review after enum growth.",
+              "Precise for pattern-matching readers."
+            ],
+            "losses": [
+              "A selectable edit adds the marker.",
+              "Jargon for beginners."
+            ],
+            "proposed": {
+              "code": "// PROPOSED post-body marker; registration/parser work required.\nelse -> { 0 } #Wildcard"
+            }
+          },
+          {
+            "key": "F",
+            "name": "Always name every case",
+            "gist": "Keep strict named tables; no inclusive marker escape.",
+            "gains": [
+              "Every new case forces review."
+            ],
+            "losses": [
+              "No deliberate future fallback; one-case tables remain noisy."
+            ],
+            "proposed": {
+              "code": ".Line | .Dot -> 0"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Free single checks, error by default, and the marker word most programmers already read as \"takes everything\", which covers cases added later.",
+          "gains": [
+            "Same rule for tables and wider chains; no adjacency guesses."
+          ],
+          "losses": [
+            {
+              "loss": "#CatchAll gives up future-case review at that site, by design.",
+              "mitigation": "Naming cases stays the default repair; #CatchAll appears only where a writer chose it, and hover lists the cases it covers."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "#Open is short but overloaded; readers must learn this meaning."
+            },
+            {
+              "key": "C",
+              "reason": "#Partial describes the decision, not the arm, and reads like unfinished code."
+            },
+            {
+              "key": "D",
+              "reason": "#Fallback fits every else, so it does not signal future cases."
+            },
+            {
+              "key": "E",
+              "reason": "#Wildcard is jargon and does not stress future cases."
+            },
+            {
+              "key": "F",
+              "reason": "Cannot express the requested deliberate fallback."
+            }
+          ],
+          "tradeoff": "Named cases for review, #CatchAll for a deliberate inclusive fallback."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-11-13T06:10:18.821Z",
+      "designAway": [
+        "Never downgrade the required default error to a lint.",
+        "Reuse the registered marker mechanism and post-body Arm position; do not pretend CatchAll already parses.",
+        "Count discriminants and preserve nested residual coverage.",
+        "Check chains without changing repeated reads or grouping separate guards.",
+        "Hover on #CatchAll lists the cases it covers; jet fix defaults to naming them."
+      ],
+      "outcome": "A",
+      "ratifiedAt": "2026-11-18",
+      "retiredAt": "2026-11-25T11:41:17.092Z"
+    },
+    {
+      "id": "D-CONFIG-EXPORT1",
+      "cardId": "c098yuyt",
+      "group": "tooling",
+      "title": "Export a typed Jet config as JSON, YAML or TOML",
+      "situation": "Many tools read their settings from JSON, YAML or TOML files. Jet lets a project write configuration in ordinary typed Jet, and can already produce a JSON Schema from a type. Copying those settings into other files by hand repeats them, and the copies drift. The owner decides whether Jet gets a command that writes a checked Jet config value out in those formats. We recommend the command, since the library alone leaves each project writing its own small exporter.",
+      "gist": "Should Jet get a command that writes a typed Jet config value out as JSON, YAML or TOML?",
+      "lesson": "Configuration is the settings a program or tool reads when it starts. Jet lets you write them as typed Jet values, so mistakes fail early. Other tools need JSON, YAML or TOML files. An export command turns the checked value into those files, so the settings are written once.",
+      "explainer": "",
+      "story": "Noor keeps a typed Jet config for her service, then hand-copies it into a YAML file for her deployment tool. The copies drift apart.",
+      "inWild": "$ pkl eval -f yaml config.pkl\nport: 8080\nhosts:\n- a.example.com\n# Pkl evaluates typed config and renders JSON, YAML or other formats from its command line. Source: https://pkl-lang.org/main/current/pkl-cli/index.html",
+      "detail": "FutureAudit 2026-10-28, FUTURE.md T23. Settled and not reopened: D-CONF-PLANE1=A and D-CONF-KEY1=A (one plane of typed facts), D-CORE-JSON-SCHEMA1=A (schema export from codec metadata, #3238), D-SHAPE-ONE1. This ballot is only the command; its spelling is illustrative and counts against the surface budget (D-SURFACE-BUDGET1). Not hosted on #4275, whose ratified scope forbids new ballots. Effect-free, terminating config evaluation is assumed from the comptime rules [INFERENCE].",
+      "options": [
+        {
+          "key": "A",
+          "name": "Export command",
+          "detail": "One command evaluates a typed config value and writes it as JSON, YAML or TOML. Gains: Settings are written once, in typed Jet. The same output on every project. Losses: One more command.",
+          "technical": "Evaluates a named config value at compile time and encodes it with core.encoding; a schema option writes the JSON Schema from the same codec metadata.",
+          "code": "$ jet config export app.jet --format yaml\nport: 8080\nhosts:\n- a.example.com"
+        },
+        {
+          "key": "B",
+          "name": "Library only",
+          "detail": "Projects call the encoders themselves; no new command. Gains: No new command. Losses: Every project writes its own small exporter.",
+          "technical": "Status quo.",
+          "code": "fn run() {\n    print(yaml.encode(app_config())?)\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Pkl",
+          "note": "Pkl evaluates typed config and renders JSON, YAML or other formats from its command line. Source: https://pkl-lang.org/main/current/pkl-cli/index.html",
+          "code": "$ pkl eval -f yaml config.pkl\nport: 8080\nhosts:\n- a.example.com"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A shared command removes a small program every project would otherwise write, and keeps typed Jet the single source of settings.",
+        "gains": [
+          "Typed settings feed any tool without hand copies."
+        ],
+        "losses": [
+          {
+            "loss": "One more command to learn.",
+            "mitigation": "It has one job, and its help shows a one-line example."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Each project would write and maintain the same small exporter."
+          }
+        ],
+        "tradeoff": "One more command in exchange for writing settings once."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 4,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should Jet get a command that writes a typed Jet config value out as JSON, YAML or TOML?",
+        "lesson": "Configuration is the settings a program or tool reads when it starts. Jet lets you write them as typed Jet values, so mistakes fail early. Other tools need JSON, YAML or TOML files. An export command turns the checked value into those files, so the settings are written once.",
+        "trio": {
+          "current": {
+            "note": "Each project writes its own exporter.",
+            "code": "fn run() {\n    print(yaml.encode(app_config())?)   // hand-written per project\n}"
+          },
+          "wild": {
+            "lang": "Pkl",
+            "note": "Pkl evaluates typed config and renders JSON, YAML or other formats from its command line. Source: https://pkl-lang.org/main/current/pkl-cli/index.html",
+            "code": "$ pkl eval -f yaml config.pkl\nport: 8080\nhosts:\n- a.example.com"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Export command",
+            "gist": "One command evaluates a typed config value and writes it as JSON, YAML or TOML.",
+            "gains": [
+              "Settings are written once, in typed Jet.",
+              "The same output on every project."
+            ],
+            "losses": [
+              "One more command."
+            ],
+            "proposed": {
+              "code": "$ jet config export app.jet --format yaml\nport: 8080\nhosts:\n- a.example.com"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Library only",
+            "gist": "Projects call the encoders themselves; no new command.",
+            "gains": [
+              "No new command."
+            ],
+            "losses": [
+              "Every project writes its own small exporter."
+            ],
+            "proposed": {
+              "code": "fn run() {\n    print(yaml.encode(app_config())?)\n}"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A shared command removes a small program every project would otherwise write, and keeps typed Jet the single source of settings.",
+          "gains": [
+            "Typed settings feed any tool without hand copies."
+          ],
+          "losses": [
+            {
+              "loss": "One more command to learn.",
+              "mitigation": "It has one job, and its help shows a one-line example."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Each project would write and maintain the same small exporter."
+            }
+          ],
+          "tradeoff": "One more command in exchange for writing settings once."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-28T11:58:02.953Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-10-28",
+      "retiredAt": "2026-11-25T13:10:56.609Z"
+    },
+    {
+      "id": "D-CORE-TARGET1",
+      "cardId": "c0q31aks",
+      "group": "language",
+      "title": "Programs for machines without an operating system: how the compiler checks the Core code they call",
+      "situation": "Some programs run on a bare chip with no operating system and often no memory heap, the pool that growing lists draw from. The compiler refuses a list the program builds itself there, but it skips Core, the standard library, by name. So a program that calls a Core function which grows a list passes the check and then fails on the chip. Jet already has a check that proves a function never uses the heap, and it already looks inside Core. You are asked how code the program does not write is checked for such a chip. We recommend running that one existing proof from the program's start, for Core and every package alike, and showing each problem on the program's own line.",
+      "gist": "On a chip with no heap, how should the compiler check the Core and package code a program calls?",
+      "lesson": "A heap is the memory pool a program borrows from when a list grows. A chip with no heap is like a kitchen with no fridge: a recipe that needs one cannot work. Jet can already prove that a function never touches the heap. Today that proof is only used when a programmer asks for it. This vote decides who gets checked on a chip without a heap, and where the warning appears.",
+      "explainer": "Words used here. A heap is the memory a program asks for while it runs, for example when a list grows. A no-OS machine is a chip with no operating system, such as a microcontroller board; it may have no heap unless the program brings one. Core is Jet's standard library; it ships with the compiler. A package is any other library a program uses. A function is reached when the program's run function can call it, directly or through other functions.\n\nThe heap proof is the check behind -[!Mem.Alloc]>, a mark a programmer can put on a function today to promise it never uses the heap. The compiler then follows every call from that function, into Core and packages too, and refuses the first one that allocates.",
+      "story": "Mia writes firmware for a sensor board with no heap. Her total function calls combo.count_from(0, 2, n), which grows a list. Today the check passes, and the board has nothing to grow the list into. Under A the check stops on her count_from call. The note shows the path total, then count_from, and the line inside count_from that grows the list. Under B the error appears inside Core's own file, which she cannot edit. Under C nothing is reported, as today.",
+      "inWild": "// Swift: an API the platform lacks is refused at the caller's line.\n// https://docs.swift.org/swift-book/documentation/the-swift-programming-language/attributes/#available\n@available(macOS 13, *)\nfunc render() {}\n\nfunc main() {\n    render()  // error: 'render()' is only available in macOS 13 or newer\n}",
+      "detail": "What this ballot decides. How a no-OS machine's missing heap and missing OS services apply to code the program does not write: Core, and other packages. The card's criterion is that Compiler/JetSema/Source/Sema/Scopes.jet no longer tests for Core.\n\nWhat changed since the first version. The first A added a second, new walk that summed up what each function needs. Probing showed Jet already has that walk: the heap proof behind -[!Mem.Alloc]> (Effects/Checks.jet:3984, sema_effect_memory_search). It already enters Core bodies. So the new A adds no walk. It runs the existing proof from the program's start, closes two gaps in that proof, and fixes where its message points.\n\nToday, as the code reads at a03eea6ac0. sema_scope_environment_no_os (Scopes.jet:561) returns false for every Core module (module_is_core, line 562). E3303 refuses each list and map literal written in a non-Core body (Expressions/Literals.jet:485 and :607). E3301 refuses an OS-only Core module call (Calls/Core.jet:675) and #Live (Statements.jet:10239). TargetDenials.jet skips Core functions at line 74 and reports a Core callee's denied effect at the caller at line 91 (E1123).\n\nProbe results on the batch 3b compiler (2d2afdbb12 plus 8ed9de963c), target board.sensor_v1. Probe user_list: a list the program writes is E3303 at main.jet:2. Probe core_call: total calling combo.count_from prints ok, though count_from grows a list (Core/Math/Combinatorics.jet).\n\nThe heap proof today. Probe deny_alloc_core marks a function -[!Mem.Alloc]> and calls core.compute.profile_f32_strict, whose text template allocates. The check refuses it with E0921 and the path main.label -> core.compute.profile_f32_strict, so the proof enters Core. Its caret lands on main.jet:10:1, past the end of the 9-line file, because the Core file's position is shown in the program's file. Probe deny_alloc_user finds a list built in a helper, with the path main.total -> main.helper.\n\nTwo gaps in the proof. First, its events are list and map literals with items, text templates, arena and Shared construction (Checks.jet:3370-3418). An empty list that then grows by push is not an event, so probe deny_alloc_direct (out := [Int]{}, out.push(n)) passes -[!Mem.Alloc]>. That is the count_from shape. The proof also skips nothing by name, so no Core test is needed there.\n\nThe second gap refuses too much. A generic call whose type argument is known still counts its bound method as open dispatch. Probe deny_alloc_round marks total -[!Mem.Alloc]> and calls math.round(x) on a Float: E0921, though Float's rounding never allocates. A trait-value call is refused the same way, even when its only implementation is heap-free (probe deny_alloc_trait_free). A function passed as a value is followed (probe deny_alloc_value).\n\nA, in full. A no-OS machine whose profile has no allocator puts an implied heap denial on the program's roots: run and each function an Output links, the roots TargetDenials uses. The heap proof runs once from each root. The per-literal E3303 check in Literals.jet is deleted, so only reached code is judged. Growth operations become heap events: list push, insert and append, map insertion, and text building.\n\nA also seals dispatch, as the stack proof already does in a program build: a trait-value call may run any implementation the program holds, so the proof walks each one. Probe stack_trait_seal shows that seal naming the one implementation. A generic call on a known type walks just that type's method. Only a library checked alone stays open, and it gets no implied denial.\n\nPlacement under A. A finding inside the program's own package is shown at its own line, as today. A finding inside Core or another package is shown at the program's call where the path leaves the program's package. The note lists the path and the file and line that allocate. The same rule replaces both module_is_core tests in TargetDenials.jet (lines 74 and 91), so E1123 and E3301 place the same way. E3311 (capability rows) is outside this decision.\n\nCost. The proof is a breadth-first search that visits each reached function once (Checks.jet:3984-4011). Probe cost: a run that calls five core.math functions, checked six times with and without -[!Mem.Alloc]> on run and score. Both took about 240 ms each time (236 to 325 ms with the mark, 237 to 404 ms without), so no difference shows above noise.\n\nB checks Core in place. The Core test is deleted. Core bodies the compile checks get E3303 and E3301 in Core's own files. Bodies checked up front (trait impls, close methods) are judged whether reached or not. Bodies taken from the stored Core record were checked without a machine, so B also needs that record split per machine.\n\nC keeps the skip and publishes it. The Core test becomes a package-level field any package may set, for example target_neutral: true in package.jet, and Core sets it. Such packages are never checked against the selected machine.\n\nScale. Core has 205 panic lines whose message is a text template, out of 1272 panic lines; none are in Core/Math. Under A, a reached template allocates, so a heapless program that reaches one is refused at its own call. That is the truthful answer: on the chip the message could not be built.",
+      "options": [
+        {
+          "key": "A",
+          "name": "One heap proof for every package, shown on the program's own line",
+          "detail": "A chip with no heap means the program promises not to use the heap, the same promise -[!Mem.Alloc]> makes. The compiler runs that existing proof from the program's start. It follows calls into Core and packages alike, with no exception by name.\n\nA problem in the program's own code shows on its line, as today. A problem inside Core or a package shows on the program's call that leads there. The note shows each step of the path and the exact line that uses the heap.\n\nBeginner path: nothing to write; the error names the call to change. Expert path: the same mark, -[!Mem.Alloc]>, proves any one function heap-free on any machine.",
+          "technical": "Delete the module_is_core test from sema_scope_environment_no_os and the per-literal E3303 checks in Literals.jet. When the selected machine is no-OS with no allocator fact, add an implied Mem.Alloc denial to each root (entry run and Output-linked functions) and run sema_effect_memory_project from it.\n\nReport E3303 for that implied denial, and E0921 for a written one. Add heap events for growth: list push, insert and append, map insertion, and text building. In a program build, let sema_effect_memory_search take the targets sema_effect_stack_seal computes, and follow a node's instance_reaches, so no dispatch with known targets counts as open. The note names the implementation that uses the heap.\n\nPlace a finding whose owner is outside the entry package at the entry package's last call on the path, with a note naming the path and the event's file and line. Replace module_is_core at TargetDenials.jet:74 and :91 with the same entry-package test. UI snapshots: freestanding_core_reach_e3303 and memory_denial_core_path_e0921.",
+          "code": "// Built for a board with no heap and no operating system.\nuse combo: core.math.combinatorics\n\ntotal: fn(n: Int) -> Int {\n    // A: E3303 here. Note: total -> count_from; count_from\n    //    grows a list at Core/Math/Combinatorics.jet (out.push(v)).\n    combo.count_from(0, 2, n).len()\n}\n\nrun: fn() {\n    _: total(4)\n}"
+        },
+        {
+          "key": "B",
+          "name": "Check Core in place, like another package today",
+          "detail": "The Core skip is deleted. Each Core body the compile checks gets the same per-line errors a package body gets, shown inside Core's source.",
+          "technical": "Delete the module_is_core test from sema_scope_environment_no_os. Core bodies checked for the program's machine report E3303 and E3301 in Core files. Bypass the stored Core record on no-OS builds, or keep one record per machine, so stored bodies are checked too. TargetDenials and the heap proof are unchanged.",
+          "code": "// Built for a board with no heap and no operating system.\nuse combo: core.math.combinatorics\n\ntotal: fn(n: Int) -> Int {\n    // B: no error on this line.\n    combo.count_from(0, 2, n).len()\n}\n\nrun: fn() {\n    _: total(4)\n}\n// B: E3303 inside Core/Math/Combinatorics.jet, at out := [Int]{}"
+        },
+        {
+          "key": "C",
+          "name": "Keep the skip and let any package claim it",
+          "detail": "Core keeps its skip, now as a package setting any package may claim. Packages that claim it are never checked against the selected machine.",
+          "technical": "Replace module_is_core in sema_scope_environment_no_os with a package flag read from package.jet (target_neutral: true). Core's package row sets it. Document the field in the package manifest reference.",
+          "code": "// Built for a board with no heap and no operating system.\nuse combo: core.math.combinatorics\n\ntotal: fn(n: Int) -> Int {\n    // C: no error anywhere, as today.\n    combo.count_from(0, 2, n).len()\n}\n\nrun: fn() {\n    _: total(4)\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Swift",
+          "note": "An API marked @available for newer systems is refused at the caller's line, not inside the library. Source: https://docs.swift.org/swift-book/documentation/the-swift-programming-language/attributes/#available",
+          "code": "render()  // error: 'render()' is only available in macOS 13 or newer"
+        },
+        {
+          "lang": "Rust",
+          "note": "A no_std crate cannot name std; a dependency that uses std fails while that dependency compiles, inside its own source. Source: https://docs.rust-embedded.org/book/intro/no-std.html",
+          "code": "#![no_std]\nextern crate alloc; // only with a #[global_allocator]"
+        },
+        {
+          "lang": "Zig",
+          "note": "Functions that allocate take an Allocator argument, so the caller sees the need at its call. Source: https://ziglang.org/documentation/master/#Memory",
+          "code": "const list = try countFrom(allocator, 0, 2, n);"
+        },
+        {
+          "lang": "C",
+          "note": "A freestanding build has no malloc; a call to it fails only at link time, with no source line. Source: https://gcc.gnu.org/onlinedocs/gcc/C-Dialect-Options.html",
+          "code": "// cc -ffreestanding -nostdlib main.c  -> undefined reference to `malloc'"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A uses the heap proof Jet already has, for Core and packages alike, so no code is exempt by name and nothing new is walked. Each error lands where the programmer can act, with the full path.",
+        "gains": [
+          "No exception for Core: Core is checked by the same proof as every package.",
+          "No new walk: the existing heap proof runs once per root, with no measurable cost (about 240 ms with or without it).",
+          "Errors land on the programmer's own line, and the note keeps the exact line that uses the heap.",
+          "Only reached code is judged, so an unused Core function never fails a build.",
+          "The written -[!Mem.Alloc]> mark gets the same fixes: growing lists count, generic and trait-value calls with heap-free targets pass, and its message points at a real line."
+        ],
+        "losses": [
+          {
+            "loss": "A package's heap or OS error is shown at the calling program's line instead of inside the package.",
+            "mitigation": "The note lists the path and the package's own line, and checking the package itself shows the error in place."
+          },
+          {
+            "loss": "Counting list growth can refuse an existing -[!Mem.Alloc]> function that grows a list.",
+            "mitigation": "Each one breaks a promise it already made; the cutover fixes every such function in the repository."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B shows errors inside Core files the programmer cannot edit, judges Core code the program never reaches, and needs a stored Core copy per machine."
+          },
+          {
+            "key": "C",
+            "reason": "C keeps the hole: a heapless program can call code that needs a heap and hear nothing until it fails on the chip."
+          }
+        ],
+        "tradeoff": "A package's error moves to the caller's line with the full path, and broken heap promises now fail, in exchange for one proof that checks every package the same way."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": "In the Jet repository at a03eea6ac0, read Compiler/JetSema/Source/Sema/Scopes.jet:561-562, Expressions/Literals.jet:485 and :607, and TargetDenials.jet:26-110 (Core tests at lines 74 and 91). Read the heap proof in Effects/Checks.jet: events at 3370-3418, sema_effect_memory_search at 3984-4011 and E0921 at 4924-4939.\n\nProbes are in $JET_SCRATCH_ROOT/lanes/G3Core2/probe/b6144/. They are user_list, core_call, cost and eight heap probes: deny_alloc_core, _user, _direct, _value, _generic, _round, _trait_free, and stack_trait_seal. Run each with jet check main.jet. Add --target=board.sensor_v1 for user_list and core_call. The last five heap probes ran on the batch 8 compiler (a03eea6ac0). Validate this payload with Tools/agent/ballots/Validate.jet --update.",
+      "surface": {
+        "gist": "On a chip with no heap, should one heap proof check Core and packages alike, with errors on the program's line?",
+        "lesson": "A heap is the memory a list grows into. Some chips have none. Jet refuses the program's own lists there but skips Core by name. Jet already has a proof that a function never uses the heap, and it already looks inside Core. Whichever option wins, Core functions that grow lists stay unusable on such chips.",
+        "trio": {
+          "current": {
+            "note": "The program's own list is refused; the list count_from grows passes silently.",
+            "code": "total: fn(n: Int) -> Int {\n    combo.count_from(0, 2, n).len()  // ok today\n}"
+          },
+          "wild": {
+            "lang": "Swift",
+            "note": "A missing platform API is refused on the caller's line. Source: Swift book, @available.",
+            "code": "render()  // error: only available in macOS 13 or newer"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "One proof, error at the call",
+            "gist": "The existing heap proof checks everything reached; errors show on the program's line.",
+            "gains": [
+              "No exception for Core.",
+              "No new walk; no measured cost.",
+              "Error at your call, path in the note."
+            ],
+            "losses": [
+              "Package errors move to the caller's line.",
+              "Some heap-free marks now fail."
+            ],
+            "proposed": {
+              "code": "total: fn(n: Int) -> Int {\n    combo.count_from(0, 2, n).len()\n    // E3303 here. Note: count_from grows\n    // a list at Combinatorics.jet\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Check Core in place",
+            "gist": "Delete the skip; errors show inside Core's files.",
+            "gains": [
+              "No placement change for packages."
+            ],
+            "losses": [
+              "Errors in files nobody can edit.",
+              "Unreached Core code can fail a build."
+            ],
+            "proposed": {
+              "code": "// E3303 inside Core/Math/Combinatorics.jet"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Publish the skip",
+            "gist": "Any package may claim the skip that Core has.",
+            "gains": [
+              "No behavior change."
+            ],
+            "losses": [
+              "Heap use inside libraries still goes unreported."
+            ],
+            "proposed": {
+              "code": "// package.jet: target_neutral: true"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "One existing proof checks Core and packages alike, costs nothing measurable, and puts each error on the programmer's own line with the full path.",
+          "gains": [
+            "No exception for Core.",
+            "No new walk.",
+            "Unreached code never fails a build."
+          ],
+          "losses": [
+            {
+              "loss": "Package errors move to the caller's line.",
+              "mitigation": "The note keeps the package's line; checking the package itself shows it in place."
+            },
+            {
+              "loss": "Some heap-free marks now fail.",
+              "mitigation": "Each one was a broken promise; the cutover fixes every one."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Errors inside Core files, even unreached ones."
+            },
+            {
+              "key": "C",
+              "reason": "Keeps the silent gap."
+            }
+          ],
+          "tradeoff": "Package errors move to the call, for one proof everywhere."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-11-13T21:17:18.682Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-14",
+      "retiredAt": "2026-11-25T13:10:56.609Z"
     }
   ]
 }

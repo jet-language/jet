@@ -43234,6 +43234,598 @@
       "completedAt": "2026-11-22T11:07:51.308Z",
       "questions": [],
       "retiredAt": "2026-11-25T11:15:32.051Z"
+    },
+    {
+      "id": "c06he0ee",
+      "num": 6326,
+      "title": "Excellent built-in support for state machines",
+      "body": "Owner order (2026-10-30): Jet needs excellent built-in support for things like state machines. The owner lifted the design-only hold on 2026-11-09: c3-c5 are built under ratified D-MACHINE1.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": "G1",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-2",
+          "text": "Owner-wait sweep 2026-11-15 (TowerKeeper-2): the generic machine owner spelling (Owner<T>.A, the 2026-11-13 gap above) is new syntax; it is on Main's ballot list (2026-11-15) ($JET_SCRATCH_ROOT/lanes/TowerKeeper-2/ballots-needed.tsv)."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-2",
+          "text": "Owner-wait sweep 2026-11-15 (TowerKeeper-2, for Main): c6, body reworded; the owner-only choices are on Main's ballot list (2026-11-15) ($JET_SCRATCH_ROOT/lanes/TowerKeeper-2/ballots-needed.tsv), and the rest is recorded as decided (ratified decisions or Main's operational authority)."
+        },
+        {
+          "at": "2026-11-14",
+          "by": "Main",
+          "text": "Owner order 2026-11-14: paused and frozen cards are removed from their goals so they do not block closure; they stay tracked here. It was in goal G3; relink it on unpause."
+        },
+        {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "D-GUARD-LINT1 updated on 2026-11-13 after a fresh-context adversarial review (BallotReview-3). The posted version failed review: F and B were rejected for implementation and migration reasons. Both are replaced with design reasons, and A's beginner loss is met by an editor refactor action, \"Turn into a subject table\". The ballot is ready for the owner."
+        },
+        {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "Gap found by G3Core2-state-marker-retire (c3 item 5), recorded as fact: machine state types have no generic owners. On a generic owner, jet fix reports its #State markers without editing them. Supporting it needs three things: (1) a state type spelled with arguments (Owner<T>.A) that the parser and sema type resolution accept; (2) typestate narrowing over instantiated owners; (3) jet fix writing the owner type parameters into each signature it migrates. Whether a generic owner is in scope for D-MACHINE1 is not settled here. Spelling Owner<T>.A is new syntax, so it needs a ballot before anything is built."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "Owner 2026-11-09: hold lifted; build c3-c5 under ratified D-MACHINE1."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). D-MACHINE1 is ratified (2026-11-01), but the body holds implementation until the owner asks; c3-c5 wait for that word."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A dated Docs/research note answers the owner's question with evidence: what Jet offers today for state machines (enums with payloads, match, loops, tasks, #Live, any existing machine or flow surface), compared with Rust (enums, typestate), Swift, Zig (labeled switch continue), Odin, Kotlin sealed classes, XState and SCXML, and Erlang gen_statem; including exhaustive transitions, typestate checks, hierarchical states, timeouts, diagrams and performance (jump-table dispatch). Each Jet claim is probed on o0, o1 and o2 or cited to code; ratified versus implemented is stated per item.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "Landed in Docs/Research/2026-10-30-state-machines.md (dev ba783d11b9): full state-machine evidence study across Jet, Rust, Swift, Zig, Odin, Kotlin, XState/SCXML, Erlang gen_statem.",
+          "at": "2026-11-22T11:20:28.098Z"
+        },
+        {
+          "n": 2,
+          "text": "Every owner choice the research raises is a ballot-ready Tower decision (same-program alternatives, exact syntax and behavior, beginner and expert paths, edge cases), with recommendation.losses = [] and Tower's readiness check passing.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "D-MACHINE1 (A) and D-GUARD-LINT1 (A) drafted, reviewed, and ratified on Tower; implemented and proven through dev c89b0a4a8a.",
+          "at": "2026-11-22T11:20:31.297Z",
+          "closure": "decision"
+        },
+        {
+          "n": 3,
+          "text": "After ratification the state machine surface is implemented with examples and golden output on o0, o1 and o2. Proof: `jet test Compiler --profile golden --filter StateMachine` on O0, O1 and O2.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "Landed in dev c89b0a4a8a. Added Examples/Types/StateMachine.jet and .out (linked in Examples/Types/README.md) exercising struct state lists, named state groups, state-typed params/returns, and enum Turnstile state machine. Verified PASS on o0, o1, o2 (jet test Compiler --profile golden --filter StateMachine: 3/3 PASS).",
+          "at": "2026-11-22T11:19:46.746Z"
+        },
+        {
+          "n": 4,
+          "text": "L0529 and L0302 are each re-registered under D-NO-WARNINGS1 (a jet fmt rewrite or a registered error with what/why/fix and a UI snapshot on O0, O1 and O2) with a Jet emitter, or are retired in one cutover if the ratified state-machine design supersedes them. Proof: `jet test Compiler --profile ui --filter L0529` and `--filter L0302` show the registered errors, or `git grep -n -E \"L0529|L0302\" -- Compiler` prints nothing after the cutover.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "Verified on dev 635625cc85: L0529 (Jet.StateLoopUnchanged) is retired under D-NO-WARNINGS1 and replaced by E0513 (Jet.StateLoopNeverAdvances, Tests/UI/state_loop_never_advances.jet PASS); L0302 (Jet.SameEnumGuardTable) has a Jet emitter at Statements.jet:4350 in DiagnosticTier.Report, proven by Tests/UI/LintPolicyL0302/run.jet PASS, Tests/UILint/subjectless_guard_enum_dispatch.jet PASS, and DiagnosticsCoverage/rendered_lint_keeps_code_beside_name.case PASS.",
+          "at": "2026-11-22T10:56:11.443Z"
+        },
+        {
+          "n": 5,
+          "text": "Ratified but unbuilt state surfaces are implemented: D-STATE-ARROW1 (#State(A -> B), today E0930) and D-STATE-NS1 (Order.State.Draft, today E0302); syntax-surface.jet:613-617 no longer shows the retired #Transition.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "D-MACHINE1=A (ratified) replaces the #State/#Transition markers with one state { } block in structs and enums and folds in D-STATE-PARAM1, so the #State(A -> B) arrow and Order.State.Draft marker surfaces of D-STATE-ARROW1/D-STATE-NS1 are superseded. #6326 c3 builds D-MACHINE1. The arrow surface itself already holds on dev 98469bf0cf (tests/cases/marker_cutover/state_arrow_marks_transitions_and_transition_retires.case; tests/ui/typestate/qualified_state_markers_seed_leaf_states.jet; no #Transition in Docs/spec/reference/syntax-surface.jet), found by G3Core-2.",
+          "at": "2026-11-13T03:07:29.535Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 6,
+          "text": "A parameter or result carries its typestate, and calling another state's method through it is refused (probe t06 of the typestate-holes study, $JET_SCRATCH_ROOT/lanes/Main/prep/). Whether a parameter or result carries its state (D-STATE-PARAM1) is on Main's ballot list (2026-11-15).",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "Landed in dev 89ab1b3b37 (merged 635625cc85). Added Tests/UI/Typestate/typestate_parameter_carries_state.jet and .stderr covering consuming, group, and borrowed state parameters plus direct and bound call results, all emitting Error: Jet.TypestateWrongState (E0150). Verified PASS on built compiler.",
+          "at": "2026-11-22T10:56:12.732Z",
+          "proof": {
+            "profile": "ui",
+            "filter": "typestate_parameter_carries_state"
+          }
+        },
+        {
+          "n": 7,
+          "text": "Data/Syntax registry entry updated",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "Landed in dev c89b0a4a8a. Added LEXICAL_LEDGER row for state lists/groups/state types in Compiler/JetFoundation/Data/Syntax/Spellings.jet alongside registered KW_STATE/KW_STATE_DECL; CompilerData --check and LexicalLedger --check PASS.",
+          "at": "2026-11-22T11:19:47.970Z"
+        },
+        {
+          "n": 8,
+          "text": "syntax-decisions.md log entry",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "Landed in dev c89b0a4a8a. Updated Docs/Spec/syntax-decisions.md linking Examples/Types/StateMachine.jet and typestate_parameter_carries_state.jet under D-MACHINE1=A, added D-GUARD-LINT1 entry/table row, and synced LexicalLedger (86 rows).",
+          "at": "2026-11-22T11:19:49.162Z"
+        },
+        {
+          "n": 9,
+          "text": "editor grammars regenerated (jet self devtools grammars)",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "Landed in dev c89b0a4a8a. Regenerated all 4 editor grammar files (TreeSitter, VSCode, Zed, jet.tmGrammar) via jet self devtools grammars; all grammar guards in Tests/Guards (211/211) PASS.",
+          "at": "2026-11-22T11:19:50.412Z"
+        },
+        {
+          "n": 10,
+          "text": "snapshots re-blessed",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "Landed in dev c89b0a4a8a. Verified all state-machine and typestate UI snapshots PASS (Typestate 22/22, typestate 9/9, state_ 34/34, L0302 1/1) with zero drift.",
+          "at": "2026-11-22T11:19:51.858Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "owner-paused"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-10-30T15:51:10.176Z",
+      "updated": "2026-11-22T11:20:38.501Z",
+      "updatedBy": "Orchestrator",
+      "criteriaLastN": 10,
+      "completedAt": "2026-11-22T11:20:38.501Z",
+      "questions": [
+        {
+          "id": "qak82juz",
+          "cardId": "c06he0ee",
+          "decisionId": "D-STATE-PARAM1",
+          "by": "owner",
+          "kind": "question",
+          "text": "what about more complex cases where you can accept multiple cases or need to explicitly reject one or want other complex logic?",
+          "status": "answered",
+          "answer": "Yes. A parameter names a set of states, not just one: #State(Draft | Confirmed) accepts either, #State(!Cancelled) accepts every state but one, and a group declared once beside the states (Open :: Draft | Confirmed) is reused by name. A branch that may leave a value in either of two states gives it that set, so the check stays exact. Rules about data rather than state, like a total over 100, stay #Requires checks. This ballot is now folded into the revised D-MACHINE1, so states, moves and parameter rules all come from one declaration.",
+          "created": "2026-10-30T18:05:53.399Z",
+          "answeredAt": "2026-10-30",
+          "answeredBy": "Main"
+        },
+        {
+          "id": "qbqz5ct4",
+          "cardId": "c06he0ee",
+          "decisionId": "D-MACHINE1",
+          "by": "owner",
+          "kind": "question",
+          "text": "any way to make this more cohesive idiomatic and elegant?",
+          "status": "answered",
+          "answer": "Yes. The revised ballot makes it one mechanism instead of three. States and their allowed moves are written once, as lines like Draft -> Confirmed, Cancelled, and the same lines serve as an enum's cases (states that exist at run time) or a struct's state { } section (compile-time typestate). Methods, parameters and results name states from that list with the single #State(...) marker, and the compiler checks every move and call and draws the diagram from that one declaration. The separate transitions section from the first version is gone, and D-STATE-PARAM1 is merged in.",
+          "created": "2026-10-30T18:07:07.818Z",
+          "answeredAt": "2026-10-30",
+          "answeredBy": "Main"
+        },
+        {
+          "id": "qlwr71vi",
+          "cardId": "c06he0ee",
+          "decisionId": "D-MACHINE1",
+          "by": "owner",
+          "kind": "question",
+          "text": "this still doesnt feel super tightly integrated with jet. it seems disjointed from the use cases, like structs or enums and has a random keyword. this doesnt seem like it would fit in well and would just have some random keyword in some random place so i dont know that it is clear, cohesive, elegant, and integrated enough to be discoverable and super useful",
+          "status": "answered",
+          "answer": "Agreed. A redesign is in progress: a state machine becomes an ordinary enum (or struct + enum), with transitions as methods, match and existing attributes/templates, and no new keyword. Compiler checks for illegal transitions, unreachable states and exhaustiveness are included, with simple and complex examples plus Rust/Swift/XState/Kotlin comparisons. The reworked ballot will replace this one.",
+          "created": "2026-11-01T00:12:00.912Z",
+          "answeredAt": "2026-11-01",
+          "answeredBy": "Main"
+        },
+        {
+          "id": "q1qyjuz4",
+          "cardId": "c06he0ee",
+          "decisionId": "D-MACHINE1",
+          "by": "owner",
+          "kind": "question",
+          "text": "now this proposal is confusing and poor. this proposal does not in any way support jet's philosophies, goals, priorities or pillars. code should be easy to reason about, the recommended option is confusing and not easy to reason about. the state thing was much easier to reason about but just needed some tweaks to make it more cohesive and understandable and discoverable in normal usage",
+          "status": "answered",
+          "answer": "Agreed; reworking now. Option A goes back to the readable state { Draft -> Confirmed, Cancelled … } list from v2, with tweaks so it reads like normal Jet. The same block works in structs and enums. Moves are named by their methods, and parameter types use the state names (Order.Shipped) instead of #State(...) wrappers. Errors list the legal moves, and completion shows them. Written in the ratified fn/:: forms. The ballot will be updated in place.",
+          "created": "2026-11-01T00:52:58.149Z",
+          "answeredAt": "2026-11-01",
+          "answeredBy": "Main"
+        },
+        {
+          "id": "q0onzctb",
+          "cardId": "c06he0ee",
+          "decisionId": "D-GUARD-LINT1",
+          "by": "owner",
+          "kind": "question",
+          "text": "what about if the if statement checks a single case and does not have follow up if statements? If it is a one off check i dont think that should require a full check because there is logic you may want to only do when one type of enum is selected. if you have more than one branch, then you should probably have to be exhaustive. still doesnt feel like an ideal situation, would like a greenfield idiomatic cohesive with jet and jet philosophy proposal for how to do this in the best way possible. we want to minimize logic bugs in code",
+          "status": "answered",
+          "answer": "Agreed on both rules, and none of A-F says them, so the ballot will be redesigned rather than voted as it stands. The direction: a one-off check of a single case (if order is .Paid { ... } with no else-if) stays free, because doing something only for one case is normal logic. As soon as two or more branches test the same enum value, the chain is a decision over that enum and must cover every case. It names each case, or says the rest explicitly with a spelling Jet can check (so adding a new case to the enum flags every chain that has not decided about it, which is the logic bug to prevent). Today the subject table cannot say the rest (E0641 forbids else there), and 11 of 18 real chains end in else, so the redesign has to give that rest a safe spelling rather than ban it. The new ballot will show one program in each option, cover the beginner and expert paths, pass an adversarial review, and come back to you as D-GUARD-LINT1 revised.",
+          "created": "2026-11-14T02:22:32.866Z",
+          "answeredAt": "2026-11-14",
+          "answeredBy": "Main"
+        },
+        {
+          "id": "q3t9y6px",
+          "cardId": "c06he0ee",
+          "decisionId": "D-GUARD-LINT1",
+          "by": "owner",
+          "kind": "question",
+          "text": "yeah this is not good enough. we want to reduce friction proportionally to frequency, so most common things are easiest with least friction and more complex cases take slightly more friction. we want to minimize friction everywhere and make code easier to reason about, but that is our trade space",
+          "status": "answered",
+          "answer": "Redesigned around friction in proportion to frequency. Most common, testing one case (if order == .Paid { ... }), stays free. Next, testing a few cases and ending in else: you type else as today, in a chain of ifs or in a table, and jet run, jet dev and jet test accept it, so trying code costs nothing. Before shipping, jet check and jet build give a tidy error saying which cases the else stands for (.Line | .Dot), and jet fix writes them in one step. From then on, a case added later stops the build at every place that has not decided it, which is the logic bug we want to prevent. Rarer, a rest that should take every other case now and later, like a key handler, is spelled _ -> and is never stopped, so the intent is visible to readers. Nothing is forced into a new shape: chains and tables both stay and get the same rule. Today a table's else is already refused everywhere (E0641), so A lowers friction there too. The old table-plus-case-sets design is now B, and naming every case by hand from the first run is C.",
+          "created": "2026-11-16T13:17:12.599Z",
+          "answeredAt": "2026-11-16",
+          "answeredBy": "Main"
+        },
+        {
+          "id": "q0ou36st",
+          "cardId": "c06he0ee",
+          "decisionId": "D-GUARD-LINT1",
+          "by": "owner",
+          "kind": "question",
+          "text": "I don’t think this aligns with the research you did earlier today on use of nuns. Make sure it does",
+          "status": "answered",
+          "answer": "The recommendation now follows the research's distinction: ordinary guards remain ordinary control flow; enum tables without a fallback remain exhaustive; an explicit `else` deliberately covers remaining and future cases. I removed the chain-length heuristic and the extra wildcard spelling. A stricter fallback audit can reuse the already ratified lint policy rather than invent another severity tier. Gate-p260 confirms that separate guards work while the corresponding table fallback currently receives E0641. I also stopped presenting the report's heuristic scan counts as independently verified prevalence data. The remaining semantic cost is explicit: accepting a fallback means new cases may use it; omit it wherever enum growth must force review.",
+          "created": "2026-11-16T22:39:27.539Z",
+          "answeredAt": "2026-11-17",
+          "answeredBy": "Main"
+        },
+        {
+          "id": "q6eygb5d",
+          "cardId": "c06he0ee",
+          "decisionId": "D-GUARD-LINT1",
+          "by": "owner",
+          "kind": "question",
+          "text": "Rest is a terrible name and sounds like data at rest or sleeping/relaxing not \"the rest of them\". Give at least two options with better names to choose from for the marker",
+          "status": "answered",
+          "answer": "Revised to r3 (reposted). The rule is unchanged. The marker now has three name options plus named-only. A, recommended: #Unlisted, which says exactly what the arm takes: every case not listed, including ones added later. B: #Others, which is plain English but restates else. C: #AnyOther. D: name every case. #Rest is gone.",
+          "created": "2026-11-18T01:37:44.495Z",
+          "answeredAt": "2026-11-18",
+          "answeredBy": "Main"
+        },
+        {
+          "id": "q11zs39j",
+          "cardId": "c06he0ee",
+          "decisionId": "D-GUARD-LINT1",
+          "by": "owner",
+          "kind": "question",
+          "text": "The offered names are crap. Give me a much better set of options",
+          "status": "answered",
+          "answer": "Revised to r4 with five new words; the rule is unchanged. The marker goes after the final else arm, e.g. `else -> { 0 } #CatchAll`. A, recommended: #CatchAll, the everyday word for an arm that takes everything, so a reader sees that unlisted and future cases land there (it may recall exception catching, which Jet does not have). B: #Open, the decision stays open to cases added later (short, but overloaded). C: #Partial, Odin's word for this exact escape (it describes the decision rather than the arm). D: #Fallback, plain (but every else is a fallback, so it says nothing about future cases). E: #Wildcard, the pattern-matching word (jargon). F: name every case, no marker. None collides with a registered marker.",
+          "created": "2026-11-18T21:32:18.623Z",
+          "answeredAt": "2026-11-18",
+          "answeredBy": "Main"
+        }
+      ],
+      "retiredAt": "2026-11-25T11:41:17.091Z"
+    },
+    {
+      "id": "c078tv7g",
+      "num": 6616,
+      "title": "Verify batches see self-compile miscompiles before a release does",
+      "body": "a0_030 (e32b979063) failed its release gate on an I2 regression that only the release's s2/s3 show: an ICE exits 1 instead of 101. Root (CoreCliLead): b4e29635ce made the runtime map a user program's process.exit(101) to status 1 (101 is reserved for ICEs). The compiler exits through the same Core call, so a jet linked with a pack built from post-b4e2 runtime source (s2/s3 link pack1) loses its 101. s1 links the seed's (a0_029) pack and still exits 101. Main's vb batches build and test s1 only, so every runtime change reaches the compiler's own behaviour unseen until the release run (33 minutes here). Fix the batch so a cheap probe runs on every batch: a jet linked with the batch's own runtime pack, on the rows most exposed to runtime changes in the compiler (ICE exit codes, process exit codes). Don't add a full s2 suite to each batch.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "G4",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "2026-11-06 a0_030 retry on 2edea7b26a: census-snap preflight passed (rc=0) but the chain's s2 stopped with 19 jet.MissingMoveMarker errors in Core/Http, Core/Net/Tls and Core/Web. The rule came from c78da98b1b (#6611, calls never copy); the preflight and LaneCheck both check with the a0_029 seed, which lacks that rule, so a sema change that tightens Core is invisible until s2. Gap: the preflight needs a candidate pass (build s1, then a keep-going s1 check of Compiler, Core and Jetpack) before a release launches."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "`jet Tools/Agent/Land.jet batch` builds an s2 from the batch's s1 (or reuses one at the same commit) and runs the backend_ice cases and a process-exit-code golden against it, failing the batch on any row that differs from s1. Proof: a committed batch receipt shows the s2 probe step and its row counts.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "Landed in dev dfd860a7ed (merged c89b0a4a8a). Tools/Agent/Land.jet batch() now runs batch_s2_probe whenever a batch builds a compiler: reuses cached s2 by sha256(compiler_source_identity) or builds s2 from s1, runs BackendIce and ProcessExitUnmapped on both s1 and s2, logs exact row counts and stage table row, and fails exit 5 reverting worktree on any s1/s2 split. Verified: Tools/Agent/Land.jet 31/31 PASS, Tests/Cases/ReleaseGates/land_batch_s2_probe_catches_self_compile_split.case PASS.",
+          "at": "2026-11-22T11:19:38.273Z"
+        },
+        {
+          "n": 2,
+          "text": "A Land.jet batch on a commit carrying a known self-compile difference (the a0_030 ICE exit at e32b979063) reports a batch failure naming the s1/s2 split. Proof: a committed receipt of `jet Tools/Agent/Land.jet batch` on that commit showing the failure.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "Landed in dev dfd860a7ed (merged c89b0a4a8a). Verified via Tests/Cases/ReleaseGates/land_batch_s2_probe_catches_self_compile_split.case PASS (clean batch builds s2 and commits; matching-identity batch reuses cached s2; synthetic a0.0.30 ICE exit split fails exit 5 naming s1/s2 split with HEAD untouched) and Tools/Agent/Land.jet 31/31 PASS.",
+          "at": "2026-11-22T11:19:39.310Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-06T21:54:09.666Z",
+      "updated": "2026-11-22T11:19:41.554Z",
+      "updatedBy": "Orchestrator",
+      "completedAt": "2026-11-22T11:19:41.554Z",
+      "questions": [],
+      "retiredAt": "2026-11-25T11:41:17.092Z"
+    },
+    {
+      "id": "c0c3gh6u",
+      "num": 6840,
+      "title": "Optimization levels are spelled O0, O1 and O2: the -O0/-O1/-O2 flags replace --optimize=none|basic|full",
+      "body": "Owner order (2026-11-14): \"The flags for o0 o1 o2 should be o0 o1 o2 not optimize=basic.\"\n\nToday the optimize build option (Compiler/JetFoundation/Source/Registry/BuildOptions.jet:48) has the values none, basic and full, spelled --optimize=basic on the command line, optimize: basic in a build profile and b.optimize(.Basic) in a build fn, with -O<n> accepted as a second spelling of the same flag. The levels are named O0, O1 and O2 everywhere else (AGENTS.md I9, the specs, traces and reports).\n\nDecision (Main, within the owner order): one spelling of a level everywhere, with no alias (greenfield cutover). The flag is -O0, -O1 or -O2. The option's values are O0, O1 and O2, so a profile writes optimize: O2 and a build fn writes b.optimize(.O2). --optimize=<word> and the words none, basic and full are removed. Every in-repository caller moves in one cutover.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "G2",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-22",
+          "by": "Orchestrator",
+          "text": "b3e3c1b14c: Added untimed --parity --jobs N mode to Tools/Gauntlet/PortBars.jet (26/26 pass) and ran full 63-entry census: 41/63 PASS, 22/63 FAIL (1 compile error in Integrate10.jet, 9 stale expected digests, 12 original-vs-Jet/TitleCase drifts). Next wave repairs the 22 entries and adds the Tests/Cases row."
+        },
+        {
+          "at": "2026-11-21",
+          "by": "Main",
+          "text": "Restored from archive."
+        },
+        {
+          "at": "2026-11-14",
+          "by": "Main",
+          "text": "c1 holds except its jet explain clause: build_entry/optimize_levels_are_flags_and_trace_their_level PASSES on gate-p131 and jet build --help lists -O0/-O1/-O2, but local jet explain fails with E1227 (jetpack a0.0.44 against jet a0.0.45). c1 stays open for the explain proof after the next release admit."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The optimize option's values are O0, O1 and O2 in the BuildOptions registry. `jet build -O0|-O1|-O2`, `jet run`, `jet test` and every command that takes the option accept only these flags. `--optimize=none|basic|full` and `--optimize` with any value fail as ordinary unknown flags, with no teaching error, alias or jet fix rule. A build profile writes `optimize: O1` and a build fn `b.optimize(.O1)`. Help text and `jet explain` name the levels O0, O1 and O2. Proof: a cases row runs `jet build -O0`, `-O1` and `-O2` on one program, checks the level each traces, and shows that `--optimize=basic` is refused.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Holds on dev since c85b927fab (with 41f5054d46): the optimize option's registry values are O0/O1/O2, -O0/-O1/-O2 are its flags and --optimize with or without a value is jet.UnknownFlag. `jet test Compiler --profile cases --filter build_entry/optimize_levels_are_flags_and_trace_their_level` on the gate-p136 batch jet: PASS (1 PASS, 0 FAIL).",
+          "at": "2026-11-15T01:10:43.954Z"
+        },
+        {
+          "n": 2,
+          "text": "Every in-repository caller moves in the same cutover: Compiler, Core, Jetpack, Tools (agent, release, ci, perf, gauntlet, tower), tests cases and UI snapshots, Examples, package.jet profiles, Docs/spec and the website source. Proof: `git grep -n -e '--optimize' -e 'optimize: \\(none\\|basic\\|full\\)' -e 'optimize(\\.\\(None\\|Basic\\|Full\\))' -- Compiler Core Jetpack Tools tests Examples Docs/spec` prints nothing, and the touched cases and goldens pass on the batch jet.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "The criterion's git grep over Compiler Core Jetpack Tools tests Examples Docs/spec finds no caller: its only hits are the board's own records quoting this criterion (Tools/tower/.tower/tower.json 67, history.json 37) and tests/cases/build_entry/optimize_levels_are_flags_and_trace_their_level.case (7), the proof that --optimize is refused as UnknownFlag, which passes; zero hits in Compiler, Core, Jetpack, Examples, Docs/spec or any other Tools or tests file on batch compiler gate-p131 (dev 8d83659ef3), verified by Main on dev 529aba0d26",
+          "at": "2026-11-14T23:17:27.182Z"
+        },
+        {
+          "n": 3,
+          "text": "Every gauntlet tool entry stays proved after a cutover: the untimed parity step of every entry under Tools/Gauntlet/Entries (each case run on both sides and compared with its expected print and exit) runs in a suite, driven by the entry list with no hand list of entries. A sweep like 41f5054d46 then fails a suite row instead of rotting unseen; that sweep left read-into-memory with a 644 stand-in and a stale artifact digest, and run-performance-surface with stale receipt digests. The repair of those two entries is Errors3202-gauntlet-olevels-expected. Proof: the suite row, which fails on a planted stale expected file.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "Landed in dev 359a48b65d (merged c89b0a4a8a). Repaired all 22 failing Gauntlet tool entries so PortBars.jet --parity passes 63/63 (0 fail) dynamically discovered with no hand list; added Tests/Cases/ToolInterop/gauntlet_tool_entries_keep_parity.case which proves planted stale expected failure, repair pass, and full 63-entry parity across 2 shards. Verified: PortBars.jet 26/26 PASS, Tools/Gauntlet/Kit 51/51 PASS, Tests/Guards 211/211 PASS.",
+          "at": "2026-11-22T11:19:42.776Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-14T08:59:10.868Z",
+      "updated": "2026-11-22T11:19:45.169Z",
+      "updatedBy": "Orchestrator",
+      "criteriaLastN": 3,
+      "completedAt": "2026-11-15T01:10:53.610Z",
+      "questions": [],
+      "retiredAt": "2026-11-25T11:41:17.092Z"
+    },
+    {
+      "id": "c098yuyt",
+      "num": 6029,
+      "title": "Write a typed Jet config out as JSON, YAML or TOML for other tools",
+      "body": "Many tools read settings from JSON, YAML or TOML files. Jet lets a project write configuration as typed Jet and can already export a JSON Schema from a type (D-CORE-JSON-SCHEMA1=A). Hand-copying the values into those files repeats them, and the copies drift. Ballot D-CONFIG-EXPORT1, hosted here, decides whether a command writes a checked Jet config value out in those formats. It is not hosted on #4275, whose ratified scope forbids new ballots.\n\nSource: FutureAudit 2026-10-28, $JET_SCRATCH_ROOT/lanes/Audit/FUTURE.md T23.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "G5",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P3",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c2 spelling conflict: D-CONFIG-EXPORT1=A spells 'jet config export app.jet --format yaml', but top-level 'jet config' is refused today as moved under 'jet os' (jetos settings). The choices are (a) a top-level 'config' group with export, which splits 'config' between two meanings, or (b) 'jet eval FILE NAME --format json|yaml|toml'. This is a command-surface ballot on Main's list. Meanwhile the export mechanism is built behind an internal entry point, and only the CLI binding waits."
+        },
+        {
+          "at": "2026-10-28",
+          "text": "All decisions ratified; advanced out of deciding."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "D-CONFIG-EXPORT1 is ratified; if it is B (library only), this card is frozen with that reason.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "D-CONFIG-EXPORT1=A ratified on Tower; implemented at dev 231154ad24.",
+          "at": "2026-11-22T12:04:01.659Z",
+          "closure": "decision"
+        },
+        {
+          "n": 2,
+          "text": "The export command writes a named config value from a fixture as JSON, YAML and TOML (D-CONFIG-EXPORT1=A), and each output decodes back into the same typed value. Proof: `jet test Compiler --profile cases --filter ConfigExport/round_trip_`, one case per format.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "dev 231154ad24: ConfigExport.jet implements jet os config export (D-CONFIG-EXPORT1=A) for json/yaml/toml; jet test Compiler --profile cases --filter ConfigExport/round_trip_ 3/3 PASS (round_trip_json, round_trip_yaml, round_trip_toml).",
+          "at": "2026-11-22T12:03:43.658Z"
+        },
+        {
+          "n": 3,
+          "text": "With the schema option, the export command writes the JSON Schema for the value's type from the same codec metadata, and a value that fails its type is never exported.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "dev 231154ad24: --schema emits Draft 2020-12 JSON Schema from shared #Codable/#Rename metadata and refuses ill-typed configs with zero stdout; ConfigExport/schema_and_type_error_refusal PASS, Tests/Guards 216/216 PASS.",
+          "at": "2026-11-22T12:03:44.797Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "ConfigExport/json_schema_"
+          }
+        }
+      ],
+      "refs": [
+        "D-CONFIG-EXPORT1",
+        "D-CONF-PLANE1",
+        "D-CORE-JSON-SCHEMA1",
+        "#4275",
+        "#3238"
+      ],
+      "tags": [
+        "needs-triage",
+        "config",
+        "audit-2026-10-28",
+        "future-2026-10-28"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-10-28T11:57:45.413Z",
+      "updated": "2026-11-22T12:04:03.552Z",
+      "updatedBy": "Orchestrator",
+      "completedAt": "2026-11-22T12:04:03.552Z",
+      "questions": [],
+      "retiredAt": "2026-11-25T13:10:56.609Z"
+    },
+    {
+      "id": "c0q31aks",
+      "num": 6144,
+      "title": "No-heap machines: the heap-free proof follows calls into Core with no exemption by name (D-CORE-TARGET1=A)",
+      "body": "Finding B10 of the #6128 census (Docs/audits/2026-10-29-language-is-a-library-census.md): Core's generic bodies are checked without the selected target's no_os fact, while user bodies are checked with it (sema_scope_environment_no_os in Compiler/JetSema/Source/Sema/Scopes.jet tests module_is_core).\n\nD-CORE-TARGET1=A (ratified 2026-11-14) answers the ballot: a chip with no heap means the program promises not to use the heap, the same promise -[!Mem.Alloc]> makes; the compiler runs that proof from the program's start through Core and packages alike, reports a problem inside Core on the program's call, and shows each step of the path.\n\nPillar 5 (Docs/spec/philosophy.md): Core uses only mechanisms any package can use.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "G3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": "Implement the ballot's answer and delete or publish the exemption.",
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c4 depends on #5201 and #6418: 3 of the 5 freestanding witnesses need backends that don't exist yet. jet build --target=wasm.no-os, board.sensor_v1 and wasm.wasi report E2104 'no backend writes a no-OS image', and --target=hosted waits on #6418. c1 is submitted (SUB DeclTypes-6-1-6144-c1-no-heap-proof, cycle p272)."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Ballot answered by D-CORE-TARGET1=A (ratified 2026-11-14); c1 now states the build."
+        },
+        {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "Owner question on D-CORE-TARGET1: rework so A is the best design with downsides engineered away (G3Core-2)."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). Owner gate: no ballot exists yet for this card. Main drafts it (options: Core generic bodies are checked against the selected target like user bodies; or the exemption stays and is published as a package-usable rule)."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "D-CORE-TARGET1=A is built: on a machine with no heap, the existing -[!Mem.Alloc]> proof runs from the program's start and follows calls into Core and packages alike, with no exemption by name (the `module_is_core` test in sema_scope_environment_no_os, Compiler/JetSema/Source/Sema/Scopes.jet, is gone); a heap use inside Core or a package is reported on the program's call, with a note showing each step and the line that allocates. Proof: `git grep -n 'module_is_core(environment.module_identity)' -- Compiler/JetSema/Source/Sema/Scopes.jet` prints nothing and `jet test Compiler --profile ui --filter no_heap_target_core_path`.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Holds on dev dbf05f4ced (landed 4315716f03): `git grep -n module_is_core(environment.module_identity) -- Compiler/JetSema/Source/Sema/Scopes.jet` prints nothing, and in the p276 suite `jet test Compiler --profile ui --filter no_heap_target_core_path` passes, as do freestanding_e3301 and cases TargetMachines/no_os_board_check_refuses_core_files_call.",
+          "at": "2026-11-17T21:05:58.875Z"
+        },
+        {
+          "n": 3,
+          "text": "jet check and jet build with --target=<a no-OS machine> (board.sensor_v1, wasm.no-os) carry the selected machine into sema, so tests/ui/freestanding_e3303.jet reports E3303, and a build that calls core.files reports E3301, not E2104. Proof: `jet test Compiler --profile ui --filter freestanding_e3303` plus a case that builds for board.sensor_v1.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Holds on dev since 811ddd3f72 (the selected no-OS machine reaches the body checks). `jet test Compiler --profile ui --filter freestanding_e3303`: PASS; `jet test Compiler --profile cases --filter target_machines/no_os_board_check_refuses_core_files_call` (check and build --target=board.sensor_v1 refuse files.read at the call): PASS, both on the gate-p136 batch jet.",
+          "at": "2026-11-15T01:10:45.130Z"
+        },
+        {
+          "n": 4,
+          "text": "The five freestanding witnesses (heap_free_core, allocator_firmware, browser_wasm, wasi, hosted_default) run with target-selected marshalling around the one Prelude on their applicable tiers, with no second Prelude. Proof: `jet test Compiler --profile cases --filter freestanding_witness_`. (was #6615 c17)",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "dev 016093de1b: added all 5 freestanding Prelude witnesses under Tests/Cases/Freestanding/ (heap_free_core, allocator_firmware, browser_wasm, wasi, hosted_default); jet test Compiler --profile cases --filter freestanding_witness_ 5/5 PASS, Tests/Guards 217/217 PASS.",
+          "at": "2026-11-22T12:20:54.206Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": "c0xiig3k",
+      "needsAcceptance": false,
+      "created": "2026-10-29T12:53:32.990Z",
+      "updated": "2026-11-22T12:20:55.759Z",
+      "updatedBy": "Orchestrator",
+      "criteriaLastN": 4,
+      "completedAt": "2026-11-22T12:20:55.759Z",
+      "questions": [
+        {
+          "id": "q2h0znxo",
+          "cardId": "c0q31aks",
+          "decisionId": "D-CORE-TARGET1",
+          "by": "owner",
+          "kind": "question",
+          "text": "is this really the best solution? engineer away downsides",
+          "status": "answered",
+          "answer": "No, the old A wasn't the best: it added a second walk over the program to sum up what each function needs, and Jet already has that walk. Jet can already prove a function never uses the heap (the -[!Mem.Alloc]> mark), and a probe shows that proof already follows calls into Core. The new A runs that one proof from the program's start whenever the chip has no heap, so Core and every package are checked the same way and nothing is skipped by name. The cost is the walk Jet already does: checking with and without the proof both took about 240 ms in a measured probe. Two downsides were designed away. Each error now lands on the programmer's own call, with the full path and the exact Core or package line in the note, which also fixes today's wrong caret for that proof. The probes also found two gaps in that proof, and A closes both: a list that starts empty and then grows is now caught, and generic or trait-value calls whose targets are all heap-free, such as math.round on a Float, are no longer wrongly refused. What remains is mitigated: a package's error shows at the caller's line with the package's line in the note, and broken heap-free marks that grow lists now fail.",
+          "created": "2026-11-13T22:54:39.442Z",
+          "answeredAt": "2026-11-13",
+          "answeredBy": "Main"
+        }
+      ],
+      "retiredAt": "2026-11-25T13:10:56.609Z"
     }
   ]
 }
