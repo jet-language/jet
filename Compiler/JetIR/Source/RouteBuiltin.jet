@@ -573,7 +573,7 @@ ir_builtin_string_method_route: fn(symbol: String) -> IRBuiltinRoute? Never! {
 // borrowed (an index or count is read from its exact Int) but a written
 // scalar, which the runtime takes by value.
 ir_builtin_byte_buffer_route: fn(symbol: String) -> IRBuiltinRoute? Never! {
-    row: builtin_byte_buffer_row(symbol)
+    row: builtin_byte_buffer_row(symbol) ?? return None
     mask := [Bool]{true}
     writes := false
     if row.lowering == .Builtin(operation) && operation == .ByteBufferWrite(_) -> writes = true

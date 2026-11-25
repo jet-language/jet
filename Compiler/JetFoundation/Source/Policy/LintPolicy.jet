@@ -63,10 +63,10 @@ lint_name_for_code: fn(code: String) -> String? Never! {
 }
 
 // The reserved auto-derive policy entry: the registered lint of that name.
-lint_auto_derive_name: fn() -> String Never! {
-    name: "auto_derive"
-    if lint_by_name(name) == None -> panic("auto_derive must stay registered")
-    name
+lint_auto_derive_name: fn() -> String Never! { "auto_derive" }
+
+#Test("the reserved auto-derive policy entry is a registered lint") {
+    assert(lint_by_name(lint_auto_derive_name()) != None)
 }
 
 // The registered refusal for a lint selector that used a rendered

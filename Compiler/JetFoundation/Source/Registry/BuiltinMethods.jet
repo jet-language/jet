@@ -407,15 +407,16 @@ builtin_method_row_in: fn(rows: [BuiltinMethodRow], receiver: Type, method: Stri
 }
 
 // The Bytes row whose lowering names the runtime symbol `symbol`: the row
-// a checked ByteBufferMethod or ByteBufferWrite came from.
-builtin_byte_buffer_row: fn(symbol: String) -> BuiltinMethodRow Never! {
+// a checked ByteBufferMethod or ByteBufferWrite came from. None for a symbol
+// no row names.
+builtin_byte_buffer_row: fn(symbol: String) -> BuiltinMethodRow? Never! {
     loop row in BUILTIN_METHOD_ROWS {
         if row.lowering == .Builtin(operation) {
-            if operation == .ByteBufferMethod(row_symbol) && row_symbol == symbol -> return row
-            if operation == .ByteBufferWrite(row_symbol) && row_symbol == symbol -> return row
+            if operation == .ByteBufferMethod(row_symbol) && row_symbol == symbol -> return Val(row)
+            if operation == .ByteBufferWrite(row_symbol) && row_symbol == symbol -> return Val(row)
         }
     }
-    panic("checked Bytes builtin `{symbol}` has no row in BUILTIN_METHOD_ROWS")
+    None
 }
 
 // Replace the `Self` and `T` placeholders with the receiver's types.
