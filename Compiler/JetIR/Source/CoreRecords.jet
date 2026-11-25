@@ -84,27 +84,23 @@ ir_core_records_match: fn(left: CoreCallRecord, right: CoreCallRecord) -> Bool N
     ir_authority_decisions_equal(left.authority, right.authority)
 }
 
-ir_canonical_core_record: fn(record: CoreCallRecord) -> CoreCallRecord Never! {
+ir_canonical_core_record: fn(record: CoreCallRecord) -> CoreCallRecord? Never! {
     ir_canonical_core_record_in(CORE_CALLS, record)
 }
 
 // The registry is a read parameter, so the scan reads its rows in place.
 // CORE_CALLS holds one row per key (core_call_rows), so the scan stops at
-// the first.
-ir_canonical_core_record_in: fn(rows: [CoreCallRecord], record: CoreCallRecord) -> CoreCallRecord Never! {
+// the first. None when no row has the record's key or its row disagrees
+// with the record.
+ir_canonical_core_record_in: fn(rows: [CoreCallRecord], record: CoreCallRecord) -> CoreCallRecord? Never! {
     key := core_call_key(record)
-    found := CoreCallRecord?{None}
     loop candidate in rows {
         if core_call_key(candidate) == key {
-            found = Val(candidate)
-            break
+            if !ir_core_records_match(candidate, record) -> return None
+            return Val(candidate)
         }
     }
-    canonical: found ?? panic("checked Core-call record is absent from the canonical registry")
-    if !ir_core_records_match(canonical, record) {
-        panic("checked Core-call metadata disagrees with the canonical registry")
-    }
-    canonical
+    None
 }
 
 ir_lambda_function_type: fn(lambda: BodyLambda) -> Type Never! {

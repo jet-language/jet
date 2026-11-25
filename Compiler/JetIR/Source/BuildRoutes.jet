@@ -6592,7 +6592,7 @@ ir_core_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, record: Co
 }
 
 ir_core_call_routed: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, record: CoreCallRecord, args: [Int], type_args: [Type], widen: [Bool], split_armed: Bool, span: Span) -> Int Never! {
-    canonical: ir_canonical_core_record(record)
+    canonical: ir_canonical_core_record(record) ?? return ir_fail_slot(b, span, "Core call {record.module_name}.{record.member}, which the canonical registry does not hold as checked")
     if canonical.module_name == "core.crypto.vault" && canonical.member == "current" {
         return ir_core_vault_current(m, p, b, ty, args, type_args, span)
     }

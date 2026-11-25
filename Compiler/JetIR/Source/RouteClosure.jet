@@ -14,8 +14,10 @@ IRClosureRoute: struct {
     effect_kind: Effect?,
 }
 
-ir_closure_route_row: fn(module_name: String, member: String, symbol: String, arity: Int, borrow_mask: [Bool], route_effect: Effect?) -> IRClosureRoute Never! {
-    IRClosureRoute{module_name: module_name, member: member, symbol: symbol, arity: arity, borrow_mask: borrow_mask, effect_kind: route_effect}
+// A route, as the route tables below return it (a receiver with no route
+// returns None).
+ir_closure_route_row: fn(module_name: String, member: String, symbol: String, arity: Int, borrow_mask: [Bool], route_effect: Effect?) -> IRClosureRoute? Never! {
+    Val(IRClosureRoute{module_name: module_name, member: member, symbol: symbol, arity: arity, borrow_mask: borrow_mask, effect_kind: route_effect})
 }
 
 ir_closure_receiver_kind: fn(receiver: Type) -> String? {
@@ -36,8 +38,10 @@ ir_closure_receiver_kind: fn(receiver: Type) -> String? {
     }
 }
 
-ir_collection_closure_route: fn(operation: TClosureOp, receiver: Type) -> IRClosureRoute Never! {
-    kind: ir_closure_receiver_kind(receiver) ?? panic("checked closure operation has an unsupported receiver type")
+// The canonical Prelude route of a collection closure operation on
+// `receiver`; None when its receiver has none.
+ir_collection_closure_route: fn(operation: TClosureOp, receiver: Type) -> IRClosureRoute? Never! {
+    kind: ir_closure_receiver_kind(receiver) ?? return None
     if operation == {
         .Map -> {
             // #4566 slice 5: the eager list map kernels borrow their source.
@@ -196,10 +200,10 @@ ir_collection_closure_route: fn(operation: TClosureOp, receiver: Type) -> IRClos
         }
         .EditDisjoint | .EachMap | .MapAny | .MapAll | .MapFilter | .MapMap | .MapFold | .MapFlatMap | .ListBinarySearchBy | .ListMinMaxBy | .CountWhere | .SortBy | .SortByDesc | .TrySortBy | .TrySortByDesc | .SortByCompare | .Fold | .UpdateFirst | .Partition | .DedupBy | .IsSortedBy | .ChunkWhile | .ParaMap | .ParaFilter | .ParaPartition | .ParaFold | .ViewFold | .ViewMap -> {}
     }
-    panic("checked closure operation has no canonical Prelude route for its receiver")
+    None
 }
 
-ir_closure_route: fn(operation: TClosureOp, receiver: Type) -> IRClosureRoute Never! {
+ir_closure_route: fn(operation: TClosureOp, receiver: Type) -> IRClosureRoute? Never! {
     if operation == {
         .EditDisjoint -> return ir_closure_route_row("core.collections", "edit_disjoint", "jet_edit_disjoint", 3, [Bool]{true, true, false}, None)
         .EachMap -> return ir_closure_route_row("core.map", "each", "jet_map_each", 2, [Bool]{false, false}, None)
