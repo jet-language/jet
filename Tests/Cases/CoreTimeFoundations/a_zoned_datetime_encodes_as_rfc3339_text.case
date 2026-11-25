@@ -1,0 +1,18 @@
+# A ZonedDateTime encodes as the Dyn.DateTime payload: RFC 3339 text with its
+# nanoseconds, alone and as a field, and its own Decode reads that text back
+# to an equal value. The same output on O0, O1 and O2.
+fixture: AZonedDateTimeEncodesAsRFC3339Text.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run -O0 main.jet
+exit: 0
+stdout: = "\"2023-11-14T22:13:20.123456789Z\"\ntrue\n{\"at\":\"2023-11-14T22:13:20.123456789Z\",\"count\":3}\ntrue\n"
+stderr: empty
+step: jet run -O1 main.jet
+exit: 0
+stdout: = "\"2023-11-14T22:13:20.123456789Z\"\ntrue\n{\"at\":\"2023-11-14T22:13:20.123456789Z\",\"count\":3}\ntrue\n"
+stderr: empty
+step: jet run -O2 main.jet
+exit: 0
+stdout: = "\"2023-11-14T22:13:20.123456789Z\"\ntrue\n{\"at\":\"2023-11-14T22:13:20.123456789Z\",\"count\":3}\ntrue\n"
+stderr: empty

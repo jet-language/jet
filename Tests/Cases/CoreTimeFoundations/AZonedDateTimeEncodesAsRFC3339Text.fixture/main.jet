@@ -1,0 +1,20 @@
+use json: core.encoding.json
+use time: core.time
+
+#Codable
+Stamp: struct {
+    at: ZonedDateTime,
+    count: Int,
+}
+
+run: fn() {
+    zoned: time.zoned(time.from_unix_nanoseconds(1700000000123456789), time.utc())
+    text: json.to_string(zoned) ?? panic("encode: {err}")
+    print(text)
+    back: (json.parse(text) ?? panic("parse: {err}")).decode<ZonedDateTime>() ?? panic("decode: {err}")
+    print(back == zoned)
+    stamp: json.to_string(Stamp{at: zoned, count: 3}) ?? panic("encode: {err}")
+    print(stamp)
+    again: (json.parse(stamp) ?? panic("parse: {err}")).decode<Stamp>() ?? panic("decode: {err}")
+    print(again.at == zoned && again.count == 3)
+}

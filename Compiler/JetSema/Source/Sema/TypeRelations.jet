@@ -86,6 +86,7 @@ use jet_foundation.[
     CORE_RECORD_LITERAL_ROWS,
     CoreRecordFieldRow,
     CoreRecordLiteralRow,
+    IR_RUNTIME_HANDLES,
     IR_MARKER_ARG_VALUE,
     IR_PRELUDE_MARKER_RECORD,
     TYPE_NAMES,
@@ -2937,6 +2938,8 @@ sema_type_bound_satisfied_at: fn(graph: SemaRegistrationGraph, actual: Type, bou
     // structural bound, their demand-checked derived methods.
     if owned_trait_codec(bound_name) -> sema_codec_demand_type(graph, bound_name, actual_resolved)
     if owned_trait_structural(bound_name) -> sema_derive_demand_type(graph, actual_resolved)
+    dyn_bound: sema_type_dyn_bound(graph, actual_resolved, bound_name, caller)
+    if dyn_bound != None -> return dyn_bound
     structural: sema_type_codec_structural_bound(graph, actual_resolved, bound_name, caller, generic_params)
     if structural != None -> return structural
     // A compiler-owned type (`Bytes`) has no row to carry an impl, so one
@@ -2988,8 +2991,7 @@ sema_type_bound_satisfied_at: fn(graph: SemaRegistrationGraph, actual: Type, bou
 
 // A list, fixed array, or optional value is codable exactly when its element
 // is, a map when its key and value are, and an anonymous union when every
-// member is (it codes through its structural enum); the dynamic `Dyn` is the
-// codec tree itself.
+// member is (it codes through its structural enum).
 sema_type_codec_structural_bound: fn(graph: SemaRegistrationGraph, actual_resolved: Type, bound_name: String, caller: Int, generic_params: [TGenericParam]) -> Bool? {
     if !owned_trait_through_elements(bound_name) -> return None
     if actual_resolved == {
@@ -3009,14 +3011,35 @@ sema_type_codec_structural_bound: fn(graph: SemaRegistrationGraph, actual_resolv
             }
             return Val(true)
         }
-        .Named(name) -> {
-            if name == "Dyn" || name == "DateTime" || name == "ZonedDateTime" || name == "JSON" || name == "TOML" || name == "YAML" || name == "CSV" {
-                return Val(true)
-            }
-        }
-        .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
+        .Named(_) | .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }
     None
+}
+
+// `Dyn`, the data tree the checker owns, and the data format names that spell
+// it (sema_data_is_json_name: `JSON`, `TOML`, `YAML`, `CSV`) have no source
+// declaration. Dyn shows as its runtime renders it, so its runtime row
+// (IR_RUNTIME_HANDLES) answers Display and Debug; Core's impls written for it
+// by name (`impl Dyn.Decode`, `impl Dyn.Encode`) answer the codec traits.
+// None for any other type, a program's own type of one of those names, or a
+// bound that is not met through elements.
+sema_type_dyn_bound: fn(graph: SemaRegistrationGraph, actual_resolved: Type, bound_name: String, caller: Int) -> Bool? {
+    if !owned_trait_through_elements(bound_name) -> return None
+    ^spelled: false
+    if actual_resolved == .Named(name) -> spelled = sema_data_is_json_name(name)
+    if !spelled || sema_type_resolve_nominal_row_at(graph, actual_resolved, caller) != None -> return None
+    handle: IR_RUNTIME_HANDLES[ir_runtime_handle_row("Dyn") ?? return None]
+    if bound_name == "Display" -> return Val(handle.display)
+    if bound_name == "Debug" -> return Val(handle.debug)
+    loop module_index in 0..<graph.modules.len() {
+        loop impl_index in 0..<graph.modules[module_index].impls.len() {
+            if graph.modules[module_index].impls[impl_index].target_type_name != "Dyn" -> next
+            trait_name: graph.modules[module_index].impls[impl_index].trait_name ?? next
+            if sema_serde_named_leaf(trait_name) == bound_name -> return Val(true)
+        }
+    }
+    if !graph.complete -> return None
+    Val(false)
 }
 
 sema_type_bound_satisfied: fn(graph: SemaRegistrationGraph, actual: Type, bound_name: String, caller_module_identity: ModuleID) -> Bool? {

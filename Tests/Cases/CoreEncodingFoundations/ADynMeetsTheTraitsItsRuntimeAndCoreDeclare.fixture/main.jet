@@ -1,0 +1,23 @@
+use json: core.encoding.json
+
+shown: fn<T: Display>(value: T) -> String { "{value}" }
+debugged: fn<T: Debug>(value: T) -> String { "{value:Debug}" }
+encoded: fn<T: Encode>(value: T) -> String { json.to_string(value) ?? "not encoded: {err}" }
+decoded: fn<T: Decode>(tree: Dyn) -> T [FieldError]! {
+    value: tree.decode<T>() ?? return Err(err)
+    Ok(value)
+}
+
+// A JSON binding is a spelling of Dyn: it meets the same traits.
+spelled: fn(document: JSON) -> String {
+    "{document} {document:Debug} {shown(document)} {debugged(document)} {encoded(document)}"
+}
+
+run: fn() {
+    tree: json.parse("[1, \"a\", {{\"k\": true}}]") ?? panic("parse: {err}")
+    print(shown(tree))
+    print(debugged(tree))
+    print(encoded(tree))
+    same: decoded<Dyn>(tree) ?? panic("decode: {err}")
+    print(same == tree)
+}
