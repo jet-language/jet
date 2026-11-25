@@ -252,7 +252,7 @@ ir_static_literal_encode: fn(out: ^[U8], value: TComptimeValue) Never! {
         .Bytes(raw) -> {
             out.push(U8{8})
             ir_static_literal_word(out, raw.len())
-            loop byte in raw -> out.push(byte)
+            out.extend(raw[0..<raw.len()])
         }
         .List(values) -> {
             out.push(U8{9})
