@@ -35,8 +35,8 @@ JET_CLI_GRAMMAR_TREE_SITTER: "Tools/Editors/TreeSitter/grammar.js"
 JET_CLI_GRAMMAR_ZED: "Tools/Editors/Zed/languages/jet/highlights.scm"
 
 // One HighlightClass, in emission order: the take mark before sigils and
-// sigils before operators, so `&&` in a parameter list is the take mark and a
-// sigil wins over an operator it starts with.
+// sigils before operators, so `^^` in a parameter list is the take mark, not
+// two write marks, and a sigil wins over an operator it starts with.
 JetCLIGrammarClass: struct {
     name: String,
     textmate: String,
@@ -578,7 +578,7 @@ jet_cli_grammar_render_vscode: fn(tokens: [JetCLIGrammarToken]) -> String Never!
 
 // The pattern for one symbol of class `class_index`. TextMate takes the first
 // pattern that matches, so a symbol refuses to start a longer symbol of a later
-// class: the sigil `&` is not the first half of logical and `&&`.
+// class.
 jet_cli_grammar_symbol_pattern: fn(tokens: [JetCLIGrammarToken], class_index: Int, text: String) -> String Never! {
     rests := [String]{}
     loop (index, later) in JET_CLI_GRAMMAR_CLASSES {
