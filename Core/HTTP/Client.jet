@@ -812,7 +812,7 @@ jet_http_build_get: fn(host: String, authority: String, target: String, secure: 
     if secure {
         remaining: end_ns - rt.clock_mono_ns()
         if remaining <= 0 -> return Err(build_fail("timed out"))
-        stream := build_tls.__client_deadline_entry(tcp, host, Duration{ns: remaining}) ?? return Err(build_fail("{err}"))
+        stream := build_tls.__client_deadline_entry(tcp, server_name: host, deadline: Duration{ns: remaining}) ?? return Err(build_fail("{err}"))
         wire.tls = Val(stream)
     } else { wire.tcp = Val(tcp) }
     request: "GET {target} HTTP/1.1\r\nHost: {authority}\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n"
@@ -2002,7 +2002,7 @@ priv client_dial: fn(wire: ^BuildWire, url: ClientURL, phases: ClientPhases, pro
             wire.ending = "timed_out"
             return Err(.Timeout{phase: "transport"})
         }
-        stream := build_tls.__client_config_deadline_entry(tcp, url.host, tls, Duration{ns: remaining}) ?? {
+        stream := build_tls.__client_config_deadline_entry(tcp, server_name: url.host, config: tls, deadline: Duration{ns: remaining}) ?? {
             if rt.clock_mono_ns() >= tls_end {
                 wire.ending = "timed_out"
                 return Err(.Timeout{phase: "transport"})

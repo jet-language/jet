@@ -632,13 +632,12 @@ sema_call_core_record: fn(module_name: String, member: String, actual_arity: Int
     }
 }
 
-sema_call_core_typed_signature: fn(record: CoreCallRecord, actual_arity: Int, actual_accesses: [AccessConvention], type_args: [Type]) -> CoreTypedCallSignature? {
+sema_call_core_typed_signature: fn(record: CoreCallRecord, actual_arity: Int, type_args: [Type]) -> CoreTypedCallSignature? {
     core_call_typed_signature_for(
         CoreCallSignatureRequest{
             module_name: record.module_name,
             member: record.member,
             actual_arity: actual_arity,
-            actual_accesses: actual_accesses,
             type_args: type_args,
         },
     )
@@ -1090,8 +1089,9 @@ sema_call_core_math_exact_crossing: fn(module_name: String, member: String, args
 }
 
 // A `net.unix_connect` and a `tls.client` run the Core function that fills the
-// role of their arity and arguments.
-sema_call_core_normalized_source_record: fn(record: CoreCallRecord, args: [TExpr]) -> CoreCallRecord Never! {
+// role of their arity and arguments; a stream moved into a two-argument
+// `tls.client` is the stream form, else it is the `(host, port)` one.
+sema_call_core_arity_source_record: fn(record: CoreCallRecord, args: [CallArg]) -> CoreCallRecord Never! {
     normalized := record
     if record.symbol == CoreCallSymbol.SourceOwned && record.module_name == "core.net" && record.member == "unix_connect" {
         normalized.source_role = Val(if args.len() == 1 -> "UnixConnect" else -> "UnixConnectDeadline")
@@ -1099,7 +1099,7 @@ sema_call_core_normalized_source_record: fn(record: CoreCallRecord, args: [TExpr
     if record.symbol == CoreCallSymbol.SourceOwned && record.module_name == "core.net.tls" && record.member == "client" {
         if args.len() == 4 -> normalized.source_role = Val("TLSClientConfigDeadline") else if args.len() == 3 {
             normalized.source_role = Val("TLSClientDeadline")
-        } else if args.len() == 2 && args[0].ty != Type.String {
+        } else if args.len() == 2 && args[0].convention == AccessConvention.Move {
             normalized.source_role = Val("TLSClientStream")
         } else { normalized.source_target = Val("client") }
     }
@@ -1176,8 +1176,7 @@ sema_call_core_tree_checked: fn(record: CoreCallRecord, args: [TExpr], span: Spa
         check.diagnostics.push(sema_error("E0104", span, "`{record.module_name}.{record.member}` expects {range} argument(s), got {args.len()}", "the registered Core call arity is fixed", "provide the registered number of arguments"))
         return None
     }
-    normalized: sema_call_core_normalized_source_record(record, args)
-    if core_call_source_role(normalized) == .Val(role) {
+    if core_call_source_role(record) == .Val(role) {
         graph: check.program.registration_graph
         filler: sema_core_role_function(graph, role) ?? {
             check.diagnostics.push(sema_missing_core_role(role, span))
@@ -1185,7 +1184,7 @@ sema_call_core_tree_checked: fn(record: CoreCallRecord, args: [TExpr], span: Spa
         }
         return sema_call_core_run_source(record, filler.module_identity, filler.name, args, span, type_args, result_type, expected, check)
     }
-    if core_call_source_member(normalized) == .Val(member) {
+    if core_call_source_member(record) == .Val(member) {
         path: sema_call_core_source_path(record.module_name, member) ?? return None
         identity: sema_call_core_module_identity(check.environment.*, check.program.*, path.module_name) ?? {
             check.diagnostics.push(sema_error("E0902", span, "source-owned Core module `{path.module_name}` is not loaded", "this declaration has no host implementation route", "load the owning Core source package"))
@@ -1506,18 +1505,18 @@ sema_call_core_check_fixed_record: fn(record: CoreCallRecord, args: [CallArg], t
     if canonical_record.module_name == "core.sys" && check.context.unsafe_depth == 0 && sema_call_core_posix_control(canonical_record.member) {
         check.diagnostics.push(sema_error("E3101", span, "`core.sys.{canonical_record.member}` requires an audited `#Unsafe` region", "POSIX process and session control can change credentials, signals, and process topology", "wrap the call in `#Unsafe(\"posix {canonical_record.member}: …\") {{ … }}` and gate the host OS with `#if #build.target.os` / `#Target(OS.*)`"))
     }
-    actual_accesses: loop argument in args -> argument.convention
-    table_signature: sema_call_core_typed_signature(canonical_record, args.len(), actual_accesses, [Type]{})
+    table_signature: sema_call_core_typed_signature(canonical_record, args.len(), [Type]{})
     if table_signature == None && canonical_record.symbol == CoreCallSymbol.SourceOwned {
         // A source-owned row with no fixed table entry is checked against the
         // Core declaration it runs: the function that fills its role, else
         // the one its source target or member names.
-        role: core_call_source_role(canonical_record)
+        routed: sema_call_core_arity_source_record(canonical_record, args)
+        role: core_call_source_role(routed)
         if role == .Val(filled) && sema_call_core_role_target(filled, type_args, span, check.environment.*, check.program.*, check.diagnostics) == .Val(target) {
             return sema_call_core_check_source_owned(target, "{canonical_record.module_name}.{canonical_record.member}", type_args, args, span, expected, check)
         }
         if role == None && sema_call_core_module_identity(check.environment.*, check.program.*, canonical_record.module_name) == .Val(identity) {
-            declared_member: canonical_record.source_target ?? canonical_record.member
+            declared_member: routed.source_target ?? canonical_record.member
             if sema_call_core_source_target(check.environment.*, check.program.*, identity, declared_member, type_args, span, true, check.diagnostics) == .Val(target) {
                 return sema_call_core_check_source_owned(target, "{canonical_record.module_name}.{declared_member}", type_args, args, span, expected, check)
             }

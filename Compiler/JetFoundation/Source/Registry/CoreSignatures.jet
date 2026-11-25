@@ -1,7 +1,6 @@
-// The typed call contracts of the Core calls no Core declaration types: the
-// compiler-owned plugin handle's `plugin.load` and the arity-picked network
-// forms of `tls.client` and `net.unix_connect`. Every other Core row's call
-// is checked against its Core declaration (sema_call_core_check_fixed_record).
+// The typed call contract of the one Core call no Core declaration types: the
+// compiler-owned plugin handle's `plugin.load`. Every other Core row's call is
+// checked against its Core declaration (sema_call_core_check_fixed_record).
 
 // The one argument default a typed Core parameter carries: the parameter's
 // struct type built from its declared field defaults.
@@ -37,7 +36,6 @@ CoreCallSignatureRequest: struct {
     module_name: String,
     member: String,
     actual_arity: Int,
-    actual_accesses: [AccessConvention],
     type_args: [Type],
 }
 
@@ -47,10 +45,6 @@ core_sig_parameter: fn(name: String, label: String, zone: ParamZone, access: Acc
 
 core_sig_positional: fn(ty: Type, access: AccessConvention) -> CoreCallTypedParameter Never! {
     core_sig_parameter("", "", ParamZone.PositionalOnly, access, ty, None)
-}
-
-core_sig_param_type: fn(name: String, label: String, zone: ParamZone, ty: Type) -> CoreCallTypedParameter Never! {
-    core_sig_parameter(name, label, zone, AccessConvention.Read, ty, None)
 }
 
 core_sig: fn(module_name: String, member: String, parameters: [CoreCallTypedParameter], return_type: Type?) -> CoreTypedCallSignature Never! {
@@ -63,55 +57,6 @@ core_sig: fn(module_name: String, member: String, parameters: [CoreCallTypedPara
         return_type: return_type,
         type_parameters: [CoreCallTypeParameter]{},
     }
-}
-
-core_sig_result: fn(ok: Type, err: Type) -> Type Never! { Type.Result{ok: ok, err: err} }
-
-core_sig_named: fn(name: String) -> Type Never! { foundation_named_type(name) }
-
-core_sig_network: fn(request: CoreCallSignatureRequest) -> CoreTypedCallSignature? {
-    read: AccessConvention.Read
-    if request.module_name == "core.net.tls" && request.member == "client" && request.actual_arity == 2 {
-        if request.actual_accesses.len() > 0 && request.actual_accesses[0] == AccessConvention.Move {
-            return Val(core_sig(
-                request.module_name,
-                request.member,
-                [CoreCallTypedParameter]{
-                    core_sig_positional(core_sig_named("TCPStream"), AccessConvention.Move),
-                    core_sig_positional(Type.String, read),
-                },
-                Val(core_sig_result(core_sig_named("TLSStream"), core_sig_named("IOError"))),
-            ))
-        }
-        return Val(core_sig(
-            request.module_name,
-            request.member,
-            [CoreCallTypedParameter]{
-                core_sig_positional(Type.String, read),
-                core_sig_positional(Type.Int, read),
-            },
-            Val(core_sig_result(core_sig_named("TLSStream"), core_sig_named("IOError"))),
-        ))
-    }
-    if request.module_name == "core.net.tls" && request.member == "client" && (request.actual_arity == 3 || request.actual_arity == 4) {
-        parameters := [CoreCallTypedParameter]{
-            core_sig_positional(core_sig_named("TCPStream"), AccessConvention.Move),
-            core_sig_param_type("server_name", "server_name", ParamZone.LabelOnly, Type.String),
-        }
-        if request.actual_arity == 4 {
-            parameters.push(core_sig_param_type("config", "config", ParamZone.LabelOnly, core_sig_named("ClientConfig")))
-        }
-        parameters.push(core_sig_param_type("deadline", "deadline", ParamZone.LabelOnly, core_sig_named("Duration")))
-        return Val(core_sig(request.module_name, request.member, parameters, Val(core_sig_result(core_sig_named("TLSStream"), core_sig_named("NetError")))))
-    }
-    if request.module_name == "core.net" && request.member == "unix_connect" && (request.actual_arity == 1 || request.actual_arity == 2) {
-        parameters := [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}
-        if request.actual_arity == 2 {
-            parameters.push(core_sig_param_type("deadline", "deadline", ParamZone.LabelOnly, core_sig_named("Duration")))
-        }
-        return Val(core_sig(request.module_name, request.member, parameters, Val(core_sig_result(core_sig_named("UnixStream"), core_sig_named("NetError")))))
-    }
-    None
 }
 
 // `plugin.load(path, authority, limits: …)`: its result is the
@@ -131,7 +76,6 @@ core_sig_plugin_load: fn(request: CoreCallSignatureRequest) -> CoreTypedCallSign
 }
 
 core_sig_fixed: fn(request: CoreCallSignatureRequest) -> CoreTypedCallSignature? {
-    if core_sig_network(request) == Val(network) -> return Val(network)
     core_sig_plugin_load(request)
 }
 
@@ -154,7 +98,6 @@ core_call_typed_signature: fn(module_name: String, member: String, actual_arity:
             module_name: module_name,
             member: member,
             actual_arity: actual_arity,
-            actual_accesses: [AccessConvention]{},
             type_args: [Type]{},
         },
     )
