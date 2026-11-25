@@ -11,6 +11,7 @@
 // named place; it is not a read borrow and is never silently downgraded to
 // Read.
 use jet_foundation.[
+    effect_vocabulary_view_count,
     AST_NODE_GENERATED,
     AccessConvention,
     Binding,
@@ -70,6 +71,12 @@ SemaOwnershipProjection: enum {
     Fresh(span: Span),
     Deref(span: Span),
 }
+
+// SemaOwnershipProjection picks from Expr: a place steps through the field,
+// index, range and dereference expressions that project it. `Fresh` marks a
+// fresh view made from the place (a fresh-view fact or the task's scratch
+// arena), which no expression spells.
+SEMA_OWNERSHIP_PROJECTION_COUNT: #run effect_vocabulary_view_count("Sema/Ownership/Checks.jet", embed_file("Checks.jet"), "SemaOwnershipProjection", "AST/Expressions.jet", embed_file("toolchain:Compiler/JetFoundation/Source/AST/Expressions.jet"), "Expr", [String]{"Fresh"})
 
 SemaOwnershipPlace: struct {
     root: String,
