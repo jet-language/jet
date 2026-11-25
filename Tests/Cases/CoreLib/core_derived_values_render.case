@@ -1,0 +1,14 @@
+# Core values with neither a Display impl nor a runtime show hook (a
+# terminal Key, a Solver, a compiled Regex) are admitted by their structural
+# derive: print, `{value}` and `{value:Debug}`, bare, in a list, in an
+# Option and as a program struct's field, at every optimization level.
+fixture: Fixtures/CoreDerivedValuesRender
+step: jet run fixture.jet
+stdout: = core_derived_values_render.out
+stderr: empty
+step: jet run -O1 fixture.jet
+stdout: = core_derived_values_render.out
+stderr: empty
+step: jet run -O2 fixture.jet
+stdout: = core_derived_values_render.out
+stderr: empty
