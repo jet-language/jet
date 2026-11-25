@@ -1,11 +1,11 @@
-// Token automata: longest match, non-greedy repeats, fragments, Unicode
-// properties, and the refusals: token clashes where both tokens can come
-// next, tokens that match no text, and tokens that name themselves.
+// Token refusals: a non-greedy repeat that ends no token, token clashes
+// where both tokens can come next, tokens that match no text, and tokens
+// that name themselves. What the automata match is tested in Grammar.jet,
+// the Core source that can reach the run-time lexer.
 use {
     core.grammar.[analyze]
     core.grammar.error.[GrammarFault, GrammarFaultKind]
     core.grammar.plan.[GrammarPlan, GrammarSource]
-    core.grammar.runtime.[lexer_match]
 }
 
 plan_of: fn(text: String) -> GrammarPlan Never! {
@@ -22,43 +22,12 @@ faults_of: fn(text: String) -> [GrammarFault] Never! {
     }
 }
 
-#Test("a token matches its longest text") {
-    plan: plan_of("a : value=NUM ;\nNUM : [0-9]+ ('.' [0-9]+)? ;")
-    assert_eq(lexer_match(plan.lexer, 1, "12.5x".bytes(), 0), 4)
-    assert_eq(lexer_match(plan.lexer, 1, "12.x".bytes(), 0), 2)
-    assert_eq(lexer_match(plan.lexer, 1, "a1".bytes(), 0), -1)
-    assert_eq(lexer_match(plan.lexer, 1, "a1".bytes(), 1), 2)
-}
-
-#Test("fragments are matched inside the tokens that name them") {
-    plan: plan_of("a : value=NUM ;\nNUM : DIGIT+ ;\nfragment DIGIT : [0-9] ;")
-    assert_eq(lexer_match(plan.lexer, 1, "123;".bytes(), 0), 3)
-}
-
-#Test("a non-greedy repeat stops at the literal after it") {
-    plan: plan_of("a : COMMENT ;\nCOMMENT : '/*' .*? '*/' ;")
-    assert_eq(lexer_match(plan.lexer, 1, "/* a */ b */".bytes(), 0), 7)
-    assert_eq(lexer_match(plan.lexer, 1, "/* open".bytes(), 0), -1)
-}
-
 #Test("a non-greedy repeat must come just before the literal that ends its token") {
     faults: faults_of("a : C ;\nC : '/*' .*? ;")
     assert_eq(faults.len(), 1)
     assert_eq(faults[0].kind, GrammarFaultKind.Notation)
     assert_eq(faults[0].message, "a non-greedy repeat must come just before the literal that ends its token")
     assert_eq(faults[0].at.offset, 18)
-}
-
-#Test("Unicode property classes match by property") {
-    plan: plan_of("a : word=WORD ;\nWORD : \\p{{L}}+ ;")
-    assert(plan.lexer.masked)
-    assert_eq(lexer_match(plan.lexer, 1, "héllo1".bytes(), 0), 6)
-    assert_eq(lexer_match(plan.lexer, 1, "1a".bytes(), 0), -1)
-}
-
-#Test("a literal and a token class that match the same text are no clash") {
-    plan: plan_of("s : 'select'i name=NAME ;\nNAME : [a-z]+ ;\nWS : ' '+ -> skip ;")
-    assert_eq(lexer_match(plan.lexer, 1, "select".bytes(), 0), 6)
 }
 
 #Test("two token classes the parser can take at one point may not match the same text") {

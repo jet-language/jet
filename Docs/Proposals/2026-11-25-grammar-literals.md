@@ -1164,14 +1164,16 @@ Conventions:
 | G-A7 | Empty repeats; precedence levels, associativity, the middle-operand rule, operator checks | `Core/Grammar/Precedence.jet`, `Tests/Precedence.jet` | 2 | G-A6 | `core Precedence` |
 | G-A8 | FIRST_1/FOLLOW_1 over contextual alphabets; LL(1) decisions | `Core/Grammar/Lookahead.jet`, `Tests/Lookahead.jet` | 2 | G-A6 | `core Lookahead` |
 | G-A9 | Lazy SLL(k ≤ 3) deepening at conflicts, the 4,096-sequence cap, the shortest shared sample | `Lookahead.jet`, `Tests/Deepening.jet` | 2 | G-A8 | `core Deepening` |
-| G-A10 | Tokens: contextual viability, literal-wins, longest match, non-greedy before a literal, clashes | `Core/Grammar/Tokens.jet`, `Tests/Tokens.jet` | 2 | G-A8 | `core Tokens` |
+| G-A10 | Tokens: contextual viability, literal-wins, longest match, non-greedy before a literal, clashes | `Core/Grammar/Tokens.jet`, `Tests/Tokens.jet`, `Grammar.jet` (the automata's matches) | 2 | G-A8 | `core Tokens` + `core Grammar` |
 | G-A11 | Shapes: types, cases and fields per §4 | `Core/Grammar/Shape.jet`, `Tests/Shape.jet` | 2 | G-A5 | `core Shape` |
 | G-A12 | Printer table: separators, canonical token text, grouping alternative | `Core/Grammar/Print.jet`, `Tests/Print.jet` | 2 | G-A10, G-A7 | `core Print` |
-| G-A13 | `GrammarPlan` as compile-time-representable data: class tables, decision tables | `Plan.jet`, `Tests/Plan.jet` | 2 | G-A9, G-A10 | `core Plan` |
-| G-A14 | Keyword perfect hash built into the plan | `Core/Grammar/Keywords.jet`, `Tests/Keywords.jet` | 2 | G-A13 | `core Keywords` |
-| G-A15 | Run-time support: cursor, class runs, keyword lookup, `GRAMMAR_MAX_DEPTH`, error text, `line:column` on error, resync bookkeeping | `Core/Grammar/Runtime.jet`, `Tests/Runtime.jet` | 2 | G-A1 | `core Runtime` |
+| G-A13 | `GrammarPlan` as compile-time-representable data: class tables, decision tables | `Plan.jet`, `Tests/Plan.jet`, `Grammar.jet` (the class table's columns) | 2 | G-A9, G-A10 | `core Plan` + `core Grammar` |
+| G-A14 | Keyword perfect hash built into the plan | `Core/Grammar/Keywords.jet`, `Grammar.jet` (the keyword lookups) | 2 | G-A13 | `core Grammar` |
+| G-A15 | Run-time support: cursor, class runs, keyword lookup, `GRAMMAR_MAX_DEPTH`, error text, `line:column` on error, resync bookkeeping | `Core/Grammar/Runtime.jet`, `Grammar.jet` (the run-time tests) | 2 | G-A1 | `core Grammar` |
 | G-A16 | Budget test: a generated 400-rule grammar analyzes, and its step count is recorded against 10,000,000 | `Tests/Budget.jet` | 2 | G-A9..A14 | `core Budget` |
 | G-A17 | `Grammar` implements `CheckedText`: `check` = analyze → `Checked<GrammarPlan, Never>`; `accepts` refuses every hole | `Grammar.jet`, `Tests/Head.jet` | 2 | G-A16, G-B1 | `core Head` |
+
+A test that calls `core.grammar.runtime` is an in-module `#Test` in `Grammar.jet`. The runtime unit is private to Core, and `Grammar.jet` is the Core source that both analyzes a grammar and imports it.
 
 ### Phase B: the compiler
 
