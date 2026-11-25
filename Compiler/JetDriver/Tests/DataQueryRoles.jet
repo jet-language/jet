@@ -1,0 +1,94 @@
+// Assemble with the Compiler source unit. Each Query stage, grouped reducer
+// and event-time stage runs the Core function that fills its role. Every
+// argument is read or taken as that function declares, through the real
+// loader and checker over the tree's Core. The Query checker's own findings
+// still come first.
+use {
+    jet_driver.[
+        JetDriverAuthorizedSourceFile,
+        JetDriverAuthorizedSourceRoot,
+        JetDriverAuthorizedSourceSnapshot,
+        JetDriverCompileMode,
+        JetDriverCoreSource,
+        JetDriverLoweringInputsResult,
+        jet_driver_has_errors,
+        jet_driver_lowering_inputs,
+    ]
+    jet_cli.[jet_cli_driver_request]
+    jet_sema.[SchemaSnapshot]
+}
+
+DATA_QUERY_ROLES_SOURCE: `use data: core.data
+
+Ticket: struct {
+    team: String,
+    minutes: Float,
+    seats: Int,
+}
+
+Owner: struct {
+    team: String,
+    name: String,
+}
+
+Event: struct {
+    key: String,
+    timestamp: Int,
+}
+
+timed: fn(stream: ^^Stream<Event>) {
+    _ := stream.with_event_time(fn(event: Event) { event.timestamp })
+}
+
+run: fn() {
+    rows: [Ticket]{Ticket{team: "Core", minutes: 4.0, seats: 2}, Ticket{team: "Tools", minutes: 5.0, seats: 3}}
+    owners: [Owner]{Owner{team: "Core", name: "Ada"}}
+    kept: data.query(rows).filter(fn(t) { t.minutes >= 5.0 }).sort_by(fn(t) { t.team }).collect() ?? panic("kept")
+    seats: data.query(rows).map(fn(t) { t.seats }).collect() ?? panic("seats")
+    least: data.query(rows).min(fn(t) { t.seats }).collect() ?? panic("min")
+    most: data.query(rows).max(fn(t) { t.minutes }).collect() ?? panic("max")
+    inner: data.query(rows).inner_join(data.query(owners), fn(t) { t.team }, fn(o) { o.team }).collect() ?? panic("inner")
+    outer: data.query(rows).left_join(data.query(owners), fn(t) { t.team }, fn(o) { o.team }).collect() ?? panic("left")
+    counts: data.query(rows).group_by(fn(t) { t.team }).count().collect() ?? panic("count")
+    seat_sums: data.query(rows).group_by(fn(t) { t.team }).sum(fn(t) { t.seats }).collect() ?? panic("sum")
+    minute_sums: data.query(rows).group_by(fn(t) { t.team }).sum(fn(t) { t.minutes }).collect() ?? panic("float sum")
+    means: data.query(rows).group_by(fn(t) { t.team }).mean(fn(t) { t.minutes }).collect() ?? panic("mean")
+    print("{kept.len()} {seats.len()} {least.len()} {most.len()} {inner.len()} {outer.len()} {counts.len()} {seat_sums.len()} {minute_sums.len()} {means.len()}")
+}
+`
+
+data_query_roles_front: fn(source: String) -> JetDriverLoweringInputsResult {
+    snapshot: JetDriverAuthorizedSourceSnapshot{
+        roots: [JetDriverAuthorizedSourceRoot]{
+            JetDriverAuthorizedSourceRoot{
+                canonical_path: "/data-query-roles",
+                identity: "data-query-roles-root",
+                allow_hardlinks: false,
+                files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: "/data-query-roles/main.jet", relative_path: "main.jet", identity: "data-query-roles-file", source: source}},
+                foreign_cache_files: [JetDriverAuthorizedSourceFile]{},
+            },
+        },
+        entry_root_identity: "data-query-roles-root",
+        entry_path: "/data-query-roles/main.jet",
+    }
+    request := jet_cli_driver_request(snapshot, [JetDriverCoreSource]{}, Val(1), JetDriverCompileMode.Program)
+    request.schema_snapshots = Val([String:SchemaSnapshot]{})
+    jet_driver_lowering_inputs(request, None)
+}
+
+data_query_roles_findings: fn(front: JetDriverLoweringInputsResult) -> [String] {
+    loop diagnostic in front.compile.diagnostics -> "{diagnostic.code} {diagnostic.what}"
+}
+
+#Test("query stages, grouped reducers and event time run their Core role functions") {
+    front: data_query_roles_front(DATA_QUERY_ROLES_SOURCE)
+    assert(front.compile.complete && front.compile.internal_problem == None && !jet_driver_has_errors(front.compile.diagnostics), "{front.compile.internal_problem:Debug} {data_query_roles_findings(front)}")
+    assert(front.inputs != None, "the checked program reaches lowering")
+}
+
+#Test("a grouped sum over text keeps its Query checker finding") {
+    source: DATA_QUERY_ROLES_SOURCE.replace("sum(fn(t) {{ t.seats }})", "sum(fn(t) {{ t.team }})")
+    front: data_query_roles_front(source)
+    findings: data_query_roles_findings(front)
+    assert(findings.any(fn(row) { row.starts_with("E0112 `sum` wants an Int") }), "{findings}")
+}
