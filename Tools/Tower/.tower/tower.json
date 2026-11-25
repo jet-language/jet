@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 7000,
-    "rev": 114119,
+    "nextNum": 7003,
+    "rev": 114125,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -74686,12 +74686,12 @@
         },
         {
           "n": 5,
-          "text": "E. Sema architecture: one checking-context record replaces the threaded environment/program/scopes/state/tail_store/context/diagnostics bundle; CheckProgram.jet and Statements.jet are split by concern; string-built lookup keys become typed keys. Its adversarial review audit in Docs/Audits passes first.",
+          "text": "E. Sema architecture, as narrowed by its adversarial review (Docs/Audits/2026-11-24-sema-check-context-review.md, verdict: fails as proposed, holds narrowed): one body-check record (SemaBodyCheck) carries the three parts each body check creates for itself (ownership state, statement tail store, check context), while environment and program stay read parameters and scopes and diagnostics stay ^ parameters; CheckProgram.jet and Statements.jet are split by concern; string-built lookup keys become typed keys (name pair slots, SemaKeyRows, row slots, struct keys).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-24T17:01:45.802Z",
+          "at": "2026-11-25T16:28:45.744Z",
           "proof": {
             "profile": "cmd",
             "args": [
@@ -74732,11 +74732,11 @@
         {
           "n": 8,
           "text": "H. Tools in other languages are kept (owner order: not removed yet) but deduplicated and organized: the roots table has one data home that roots.sh, roots.mjs and the Jet Roots tools all read; the Roots.jet copies that tools in separate folders need stay byte-identical; duplicated tool scripts are merged; the guard Tests/Guards/tool_roots.jet checks that every reader and every copy agree.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T03:08:48.877Z",
+          "evidence": "dev 930090f78c8: jet test Tests/Guards (tool_roots.jet included) 240 passed on the batch-44 compiler. One roots table Tools/Agent/roots.env read by roots.sh, roots.mjs and Roots.jet (482b00956af); every Jet tool reads Roots.jet, byte-identical copies checked by the guard (53df482bf6b); the duplicate-scripts sweep in 53df482bf6b's message (byte-identical groups and near-identical pairs under Tools) found no two tools doing the same job, each pair dispositioned; the other-language tools are kept per the owner's order.",
+          "at": "2026-11-25T16:28:23.590Z",
           "proof": {
             "profile": "cmd",
             "args": [
@@ -74932,9 +74932,90 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-24T17:01:07.086Z",
-      "updated": "2026-11-25T15:53:24.126Z",
+      "updated": "2026-11-25T16:28:45.744Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 21
+    },
+    {
+      "id": "c0t3jsi0",
+      "num": 7000,
+      "title": "Changeable names are written ^name: value instead of name := value",
+      "body": "Owner ask 2026-11-25: respell the changeable binding with Jet's write mark on the name (^count: 0), retire :=, and give write windows their own spelling so a misplaced ^ can never turn a copy into a window. Ballot D-BIND-MARK1. Review: Docs/Audits/2026-11-25-binding-and-body-syntax-review.md (idea 1b).",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "G2",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-25T16:20:15.096Z",
+      "updated": "2026-11-25T16:20:15.096Z",
+      "updatedBy": "Pip"
+    },
+    {
+      "id": "c0yuue6m",
+      "num": 7001,
+      "title": "Function and lambda bodies build a record from fields, as arm bodies do",
+      "body": "Owner ask 2026-11-25: a function or lambda body written as comma-separated fields builds the record or the declared struct, using the rule arm bodies already use, so -> Rect { width: w, height: h } needs no inner braces; -> Int{n * n} reads as the result type and a body. Ballot D-BODY-RECORD1. Review: Docs/Audits/2026-11-25-binding-and-body-syntax-review.md (idea 4).",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "G2",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-25T16:20:17.621Z",
+      "updated": "2026-11-25T16:40:35.824Z",
+      "updatedBy": "Pip"
+    },
+    {
+      "id": "c090agiq",
+      "num": 7002,
+      "title": "A semicolon separates statements on one line, with the meaning of a line break",
+      "body": "Owner ask 2026-11-25: accept ; between statements in files as jet eval already does, refuse it right after a one-line arm, and keep jet fmt printing one statement per line. Ballot D-SEMI-LINE1. Review: Docs/Audits/2026-11-25-binding-and-body-syntax-review.md (idea 5).",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "G2",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-25T16:20:20.411Z",
+      "updated": "2026-11-25T16:20:20.411Z",
+      "updatedBy": "Pip"
     }
   ],
   "decisions": [
@@ -135923,6 +136004,184 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-25T15:46:55.793Z"
+    },
+    {
+      "id": "D-BODY-RECORD1",
+      "cardId": "c0yuue6m",
+      "group": "language",
+      "title": "A function or lambda body written as fields builds the record, as an arm body already does",
+      "situation": "After an arm's arrow, Jet already reads `{a: 1, b: 2}` as a record, because statements never form a comma-separated list of fields. After a function signature or a lambda head, the same braces are always code, by a rule ratified this month. So returning a struct takes two pairs of braces, and a lambda that returns fields is a syntax error, which data code meets whenever it maps rows to records. The vote decides whether body braces follow the arm rule; we recommend yes, with no type needed to decide.",
+      "gist": "Should a function or lambda body written as fields build the record, as an arm body already does?",
+      "lesson": "A record is a struct without a name, written `{x: 1, y: 2}`; where a struct type is expected the same braces build that struct. In a body, Jet tells a record from code by a top-level comma between fields. Arm bodies use that rule today; function and lambda bodies don't, so they need inner braces. After a declared result, one field is enough.",
+      "explainer": "",
+      "story": "Priya turns sales rows into report lines: `rows.map(fn(r) { name: r.name, total: r.qty * r.price })`. Jet stops at the first comma with a syntax error. She adds a second pair of braces, then writes the same double braces in `new: fn(w: Float, h: Float) -> Rect { {width: w, height: h} }`. Her `if` arms took the single-brace form without complaint.",
+      "inWild": "// JavaScript: an arrow body that should return an object needs parentheses,\n// or the braces are read as a block and the result is undefined.\n// https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/Arrow_functions#function_body\nrows.map(r => ({ name: r.name, total: r.qty * r.price }))\n\n// Rust: the body braces and the struct braces both appear.\nfn new(w: f64, h: f64) -> Rect { Rect { width: w, height: h } }",
+      "detail": "Sites are at dev 930090f78c8 (2026-11-25), probed with the installed compiler a0.0.46.\n\nWhat Jet has today. D-RECORD-BRACE1=A (ratified 2026-11-06) moved records to braces and set the brace rule that Spellings.jet row 78 records: braces hold a record when every entry is a field or a pun and a colon or comma appears; where a struct type is expected the same braces build it; braces after a signature, a control head or a block marker hold code. Its detail says 'Function bodies always hold code. Returning a record needs inner braces, even for one member.' Arm bodies already read a comma record: parser_brace_record_value_at (Compiler/JetParser/Source/Parser/Expressions.jet:1553-1601), called from DecisionTables.jet:507, ExpressionForms/Loops.jet:432, Expressions.jet:2594 and Statements.jet:994 and 1013. S29-FLUSH (syntax-decisions.md:1692-1700, D-DOTCTOR3) makes a type name touching its brace, `Type{…}`, a construction.\n\nThis ballot amends D-RECORD-BRACE1's function-body sentence and narrows S29-FLUSH after a signature's arrow, where a touching `{` ends the result type and opens the body.\n\nProbes. `p: if c -> {a: 1, b: 2} else -> {a: 3, b: 4}` runs. `xs.map(fn(r) { n: r, sq: r * r })` fails with Jet.InvalidStatement at the comma; `xs.map(fn(r) { {n: r, sq: r * r} })` runs. `mk: fn(w: Float, h: Float) -> Rect { width: w, height: h }` fails at the comma; `-> Rect { {width: w, height: h} }` runs (Examples/Basics/Functions/NamedArgs.jet:11). `mk: fn(v: Int) -> Box { value: v }` is Jet.MissingBlockValue. `X: #run { a: 1, b: 2 }` fails at the comma; `X: #run { {a: 1, b: 2} }` runs. `sq: fn(n: Int) -> Int{n * n}` and `-> [Int]{[y]}` are Jet.ArrowFunctionBody (E0080).\n\nTwo defects this card also owns, fixed whatever the vote. First, `jet fmt` applies E0080's fix to `sq: fn(n: Int) -> Int{n * n}` and writes `sq: fn(n: Int) { Int{n * n} }`, a function with no result; the caller then fails with `print` can't show Unit (the fix is marked fmt-applied at Compiler/Prelude/Diagnostics.jet:1377-1380). Second, `xs.each(fn(r) { {n: r, sq: r * r} })` passes `jet check` and stops with SIGSEGV at run time, where a named function with the same body is Jet.ValueThrownAway.\n\nWhy no valid program changes meaning. Commas do appear at a block's top level, in generic arguments (`q: Pair<Int, Int>{first: 1, second: 2}`) and loop headers (`loop a in xs, b in ys`). A block is never read as a record because the rule needs every comma-separated member to be `name: value`, `name,` or `name}` (Expressions.jet:1577-1580), and no statement list has that shape. Every body the rule reads as a record is a syntax error today. The one-field extension below is safe for the same reason: when the declared result carries a value (parser_return_type_has_value, Items.jet:1841-1847: not Unit and not a unit-fallible `E!`), a body whose only line is `name: value` is an error today (Jet.MissingBlockValue, or NeverFunctionReachesEnd for `-> Never`), except a labeled loop, `outer: loop { … }`, which is a binding-as-label (D-LOOPLABEL4=A) and stays code. The rule is syntactic and needs no types.\n\nA gap in the shared helper. parser_brace_record_value_at doesn't skip a generic argument list, so `{a: 1, q: Pair<Int, Int>{first: 1, second: 2}}` fails after an arm today; reading lambdas with it would spread the failure to data code (`Group<K, V>{…}`). The helper learns to skip `<…>` where the parser's generic-head test holds: `<` touches the name and the matching `>` touches `{` or `(`.\n\nWhy braces never convert. `T{…}` converts in Jet: `U8{n}` stops at run time when `n` doesn't fit, `Int{t * 2.0}` stops on a fraction, and `[[Int]]{y}` wraps a list (D-ARRAY-CONVERT1). Body braces never take that role: the body's value is checked against the result type, so `-> U8 { n }` stays a compile error with its `checked(U8{value})` fix.\n\nCutover list.\n1. Spellings.jet row 78 and its rendered copy at syntax-decisions.md:97: a value body (after a signature with a result, a lambda head, an arm's arrow, or a value-giving marker block such as `#run`) holds a record when a comma separates field or pun members at its top level, or when its declared result carries a value and its only line is `name: value` whose value does not start with `loop`; otherwise it holds code. Control heads keep code.\n2. Parser: parser_parse_callable_body (Statements.jet:325) reads a record through parser_brace_record_value_at and returns it as the one value line. That covers its four callers: functions (Items.jet:1192), lambdas (Expressions.jet:1651), `impl A -> B` conversion bodies (Items.jet:3289) and collecting loops (Loops.jet:433), whose separate guard at Loops.jet:432 is deleted. The `#run` value block takes the same call. A second flag, one_field_record, admits the one-field form: functions pass parser_return_type_has_value(return_type), lambdas pass it for their declared result (false when none is declared), conversion bodies pass true, and collecting loops and `#run` pass false.\n3. parser_brace_record_value_at skips a `<…>` argument list only where the parser's generic-head test holds, `<` touching the name and the matching `>` touching `{` or `(` (S29, syntax-decisions.md:1698-1700), so `{ok: MAX < n, big: m > LIMIT}` still reads as comparisons; golden cases cover `Pair<Int, Int>{…}` fields, comparisons with capitalized constants, loop clauses, counted loops, and the unchanged bodies `-> Int { outer: loop { return n } }` and `fn() IOError! { x: n }`.\n4. `-> T{`: parser_result_type_follows_arrow (Items.jet:1591) drops the gap test at 1613, so any result type touching `{` (`Int`, `[Int]`, `Box<T>`, `{a: Int}`, after `->` or `-[E]>`) ends there and the brace opens the body; record result types keep their typed-member test at 1588-1597. Function-type defaults such as `f: fn(Int) -> Int{double}` use another path and are unaffected. `jet fmt` prints the space.\n5. E0080 then fires only for a real arrow body such as `-> n * n`. Its fix text (Items.jet:1681) says to write the result type and braces, and it stops being applied by the formatter: Compiler/Prelude/Diagnostics.jet:1369-1380 (structured_fix, fix_safety, fmt_applies_fix), the regenerated JetFoundation/Source/Registry/DiagnosticRows.jet:1392-1403, Formatter/Formatter.jet:2818, Formatter/Items.jet:2031-2034 and Compiler/JetParser/Tests/Formatter/Teaching.jet:13.\n6. A record body where no value is expected is Jet.ValueThrownAway in lambdas, as it is in functions; the SIGSEGV above is fixed first.\n7. Jet.UnusedLocalBinding, which today does not fire for `xs.map(fn(r) { name: r })` (that program checks clean and builds a list of Unit), fires for a lambda whose only line binds a name it never reads, and shows `{ {name: value} }` as its fix.\n8. The formatter prints a bare-record body without the inner braces: `{ {a: 1, b: 2} }` becomes `{ a: 1, b: 2 }`, about 130 sites.\n9. Editors: the tree-sitter `block` already accepts `,` (Tools/Editors/TreeSitter/grammar.js:107-148 and 372); corpus tests are added for comma bodies and `-> T{`, and the grammar changes only if one fails.\n10. Docs and examples: the record section of spec.md, Examples/Basics/Functions/NamedArgs.jet:11, and a new golden example with a function body, a one-field body, a lambda body, a `#run` body and an arm body that build records, run on every tier.\n\nEdge cases.\n- `{x}` (one pun) and `{}` stay blocks, as row 78 says today.\n- `{x, y}` builds a record from the locals `x` and `y`.\n- `rows.map(fn(r) { name: r.name })`, a lambda with no declared result and one field, stays a binding; write `{ {name: r.name} }` or declare the result.\n- `-> Int { x: 5 }` reads a record and fails the result type, as today it fails as a block.\n- A decision table inside braces (`{ a -> 1, b -> 2 }`) is not fields; the helper already returns false at `->`.\n- Lists keep `[…]`.\n\nBeginner path: write the fields; Jet builds the struct the signature names. Expert path: unchanged; `T{…}` still converts where a conversion is wanted.\n\nResearch. JavaScript's arrow function needs `({…})` to return an object, and without them returns undefined silently (MDN). Rust writes the type name inside the body braces. OCaml and F# write a record expression as the body, because their function bodies are expressions. Jet's rule matches the OCaml outcome without giving up braced bodies.\n\nThe adversarial review is Docs/Audits/2026-11-25-binding-and-body-syntax-review.md, section 'Idea 4'.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Fields build a record in every value body",
+          "detail": "A value body (after a signature, a lambda head, an arm's arrow or `#run`) builds a record when a comma separates field members at its top level, the rule arms use today. After a declared result that carries a value, a body of one `name: value` line builds it too (a labeled loop, `outer: loop {…}`, stays code). The record builds the declared struct. `-> Int{n * n}` reads as the result type and a body, and the formatter adds the space. Braces never convert a value.",
+          "technical": "parser_parse_callable_body calls parser_brace_record_value_at for all four of its callers. Purely syntactic: the declared result is already known at parse time and no type is inferred. Every program it reads as a record is an error today.",
+          "code": "new: fn(w: Float, h: Float) -> Rect { width: w, height: h }\nwrap: fn(v: Int) -> Box { value: v }\nreport: rows.map(fn(r) { name: r.name, total: r.qty * r.price })\nsq: fn(n: Int) -> Int{n * n}   // fmt prints `-> Int { n * n }`"
+        },
+        {
+          "key": "B",
+          "name": "The expected type decides",
+          "detail": "Body braces build the expected struct whenever it is a struct or record type, including a lambda whose result is only inferred from its call, so `rows.map(fn(r) { name: r.name })` builds a record too. Arm bodies keep their comma rule.",
+          "technical": "For lambdas with an inferred result the parser keeps the braces unread until sema infers the type, then reads them as fields or code. Two rules: arms by comma, bodies by type.",
+          "code": "wrap: fn(v: Int) -> Box { value: v }\nreport: rows.map(fn(r) { name: r.name })   // inferred record"
+        },
+        {
+          "key": "C",
+          "name": "Keep the inner braces",
+          "detail": "Function and lambda bodies stay code. A struct result is written `{ {…} }` or `{ T{…} }`, and a lambda that returns fields needs inner braces; forgetting them is a syntax error.",
+          "technical": "No change to the rule. The two defects (the formatter dropping a result type, the lambda crash) are fixed anyway.",
+          "code": "new: fn(w: Float, h: Float) -> Rect { {width: w, height: h} }\nreport: rows.map(fn(r) { {name: r.name, total: r.qty * r.price} })"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "JavaScript",
+          "note": "An arrow body returning an object needs parentheses; without them the braces are a block and the result is undefined. MDN, Arrow functions, Function body.",
+          "code": "rows.map(r => ({ name: r.name }))\nrows.map(r => { name: r.name })   // returns undefined"
+        },
+        {
+          "lang": "Rust",
+          "note": "The struct literal names its type inside the body braces.",
+          "code": "fn new(w: f64, h: f64) -> Rect { Rect { width: w, height: h } }"
+        },
+        {
+          "lang": "OCaml",
+          "note": "A function body is an expression, so a record is the body.",
+          "code": "let make w h = { width = w; height = h }"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A extends the rule arms already use, so the comma, or a declared result, decides every body before types, with no new meaning for any valid program. Lambdas get records too, the common case in data scripts.",
+        "gains": [
+          "Struct results and record-returning lambdas need one pair of braces.",
+          "One comma rule for every body; a declared result also admits one field. Row 78 loses an exception.",
+          "`-> Int{n * n}` is accepted, and the formatter no longer drops the result type."
+        ],
+        "losses": [
+          {
+            "loss": "A one-field lambda with no declared result still needs inner braces.",
+            "mitigation": "A new warning for that lambda's unread binding shows the `{ {name: value} }` fix."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It makes parsing wait on inferred types and gives arms and bodies different rules, to save braces in one-field untyped lambdas."
+          },
+          {
+            "key": "C",
+            "reason": "It keeps two pairs of braces for every struct result and a syntax error for record lambdas."
+          }
+        ],
+        "tradeoff": "One-field untyped lambdas keep inner braces; every other field body loses a pair."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: ReviewBodyRecord. Three passes on 2026-11-25. The first found two unnamed ratified rules (D-RECORD-BRACE1, S29-FLUSH), the shared callable-body helper with four callers and `#run`, generic arguments that defeat the comma test, a lambda record crash and the full E0080 site list, and proposed the one-field rule now in A. The second found the labeled-loop and unit-fallible counterexamples to that rule, a wrong flag, a missing warning and a comparison-swallowing skip. All were repaired; the third pass confirmed them."
+      },
+      "checkInstructions": "Check Spellings.jet row 78, D-RECORD-BRACE1 on the board, the arm helper parser_brace_record_value_at at Compiler/JetParser/Source/Parser/Expressions.jet:1553-1601, parser_parse_callable_body at Statements.jet:325 and its four callers, and parser_result_type_follows_arrow at Items.jet:1591-1613. Run the probes in detail with the installed compiler.",
+      "surface": {
+        "gist": "Should a function or lambda body written as fields build the record, as an arm body already does?",
+        "lesson": "A record is a struct without a name, written `{x: 1, y: 2}`; where a struct is expected, it builds that struct. In a body, Jet tells a record from code by a top-level comma between fields. Arm bodies use that rule; function and lambda bodies don't, so they need inner braces. After a declared result, one field is enough.",
+        "trio": {
+          "current": {
+            "note": "Function bodies need inner braces, and a lambda returning fields is a syntax error.",
+            "code": "new: fn(w: Float, h: Float) -> Rect { {width: w, height: h} }\nrows.map(fn(r) { name: r.name, total: r.total })\n// Jet.InvalidStatement: found `,`"
+          },
+          "wild": {
+            "lang": "JavaScript",
+            "note": "An arrow returning an object needs parentheses. Source: MDN, Arrow functions.",
+            "code": "rows.map(r => ({ name: r.name, total: r.total }))"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Fields build a record in every body",
+            "gist": "The arm rule extends to function, lambda and `#run` bodies.",
+            "gains": [
+              "One pair of braces for struct results and lambdas.",
+              "One rule for every body."
+            ],
+            "losses": [
+              "A one-field untyped lambda keeps inner braces."
+            ],
+            "proposed": {
+              "code": "new: fn(w: Float, h: Float) -> Rect { width: w, height: h }\nwrap: fn(v: Int) -> Box { value: v }\nrows.map(fn(r) { name: r.name, total: r.total })"
+            }
+          },
+          {
+            "key": "B",
+            "name": "The expected type decides",
+            "gist": "Braces build the expected struct, even an inferred one.",
+            "gains": [
+              "One-field untyped lambdas work too."
+            ],
+            "losses": [
+              "Parsing waits on inferred types; two rules."
+            ],
+            "proposed": {
+              "code": "rows.map(fn(r) { name: r.name })   // inferred record"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Keep the inner braces",
+            "gist": "Bodies stay code; struct results keep two pairs.",
+            "gains": [
+              "Nothing changes."
+            ],
+            "losses": [
+              "Struct results keep two pairs of braces.",
+              "Record lambdas need inner braces."
+            ],
+            "proposed": {
+              "code": "new: fn(w: Float, h: Float) -> Rect { {width: w, height: h} }"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A reuses the arm rule, so a comma or a declared result decides every body before types, and no valid program changes meaning.",
+          "gains": [
+            "Struct results and record lambdas need one pair of braces.",
+            "`-> Int{n * n}` is accepted, and fmt no longer breaks it."
+          ],
+          "losses": [
+            {
+              "loss": "A one-field untyped lambda keeps inner braces.",
+              "mitigation": "A new warning for that lambda shows the braced fix."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Parsing waits on inferred types, and arms and bodies get two rules."
+            },
+            {
+              "key": "C",
+              "reason": "Two pairs of braces stay, and record lambdas stay a syntax error."
+            }
+          ],
+          "tradeoff": "One-field untyped lambdas keep inner braces; all others lose a pair."
+        }
+      },
+      "draftedBy": "Pip",
+      "reviewedBy": null,
+      "draft": true,
+      "status": "open",
+      "created": "2026-11-25T16:40:35.824Z"
     }
   ],
   "questions": [
@@ -138165,6 +138424,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-25T16:40:35.824Z",
+      "by": "Pip",
+      "action": "decision.add",
+      "ref": "D-BODY-RECORD1",
+      "note": "A function or lambda body written as fields builds the record, as an arm body already does (draft)"
+    },
+    {
+      "at": "2026-11-25T16:28:45.744Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0mhrplj",
+      "note": "#5: The review showed a seven-part record copies the environment and program tables on every body check; its narrowed design is the one that holds, so the criterion names it.; was: E. Sema architecture: one checking-context record replaces the threaded environment/program/scopes/state/tail_store/context/diagnostics bundle; CheckProgram.jet and Statements.jet are split by concern"
+    },
+    {
+      "at": "2026-11-25T16:28:23.592Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0mhrplj",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-25T16:20:20.411Z",
+      "by": "Pip",
+      "action": "card.add",
+      "ref": "c090agiq",
+      "note": "A semicolon separates statements on one line, with the meaning of a line break"
+    },
+    {
+      "at": "2026-11-25T16:20:17.621Z",
+      "by": "Pip",
+      "action": "card.add",
+      "ref": "c0yuue6m",
+      "note": "Function and lambda bodies build a record from fields, as arm bodies do"
+    },
+    {
+      "at": "2026-11-25T16:20:15.096Z",
+      "by": "Pip",
+      "action": "card.add",
+      "ref": "c0t3jsi0",
+      "note": "Changeable names are written ^name: value instead of name := value"
+    },
     {
       "at": "2026-11-25T15:53:24.126Z",
       "by": "Orchestrator",
