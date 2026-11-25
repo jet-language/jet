@@ -3941,8 +3941,7 @@ ir_error_spelling: fn(p: IRProgram, ty: Type) -> String Never! {
 ir_error_spelling_name: fn(p: IRProgram, name: String) -> String Never! {
     if ir_type_def(p, name) == .Val(row) -> return p.types[row].name
     // The last dotted segment.
-    at: name.rfind(".")
-    if at < 0 -> name else -> name.slice(at + 1, name.len())
+    name.rpartition(".").tail
 }
 
 // The Err box the failure edge of `?` returns for the Err box `subject` under

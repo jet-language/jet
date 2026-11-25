@@ -546,7 +546,7 @@ classify: fn(path: String, read: [String:Bool]) -> Class Never! {
     }
     loop dir in FULL_DIRS {
         if path.starts_with(dir) {
-            return Class{level: "full", reason: "{dir.slice(0..<dir.count_bytes() - 1)} (code generation, runtime or runtime pack)"}
+            return Class{level: "full", reason: "{dir.removesuffix("/")} (code generation, runtime or runtime pack)"}
         }
     }
     if parts[0] == "Core" -> return Class{level: "check", reason: "Core library source"}
@@ -693,7 +693,7 @@ stage_key: fn(name: String) -> Bool Never! {
 // The `bytes=N` row of a store entry's meta, 0 when it has none.
 meta_bytes: fn(meta: String) -> Int Never! {
     loop line in meta.split("\n") {
-        if line.starts_with("bytes=") -> return Int.parse(line.slice(6..<line.count_bytes())) ?? 0
+        if line.starts_with("bytes=") -> return Int.parse(line.removeprefix("bytes=")) ?? 0
     }
     0
 }
@@ -791,7 +791,7 @@ roots: fn() -[Env, Exec, FS, IO]> Roots Never! {
 under: fn(path: String, dir: String) -> Bool Never! { path == dir || path.starts_with("{dir}/") }
 
 prefix: fn(text: String, count: Int) -> String Never! {
-    if text.count_bytes() <= count -> text.copy() else -> text.slice(0..<count).copy()
+    if text.len() <= count -> text.copy() else -> text.slice(0..<count).copy()
 }
 
 pad: fn(text: String, width: Int) -> String Never! {

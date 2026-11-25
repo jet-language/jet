@@ -148,7 +148,7 @@ jet_cli_perf_hex16: fn(value: Int) -> String Never! {
 // no wall-clock origin.
 jet_cli_perf_otlp: fn(trace: CanonicalJSON) -> String Never! {
     id: trace_id(trace) ?? ""
-    trace_hex: if id.count_bytes() >= 32 -> id.slice(0..<32) else -> "00000000000000000000000000000001"
+    trace_hex: if id.len() >= 32 -> id.slice(0..<32) else -> "00000000000000000000000000000001"
     spans := [perf_log.TraceSpan]{}
     rows := 0
     if jet_cli_perf_rows(trace, "spans") == .Ok(items) {

@@ -2027,12 +2027,11 @@ jet_cli_perf_sample_us: fn(trace: CanonicalJSON) -> Int? Never! {
 // holds its `Source/` directory, else the source's own directory, "." for
 // a path with none.
 jet_cli_perf_symbol_package: fn(symbol: String) -> String Never! {
-    hash: symbol.find("#")
-    path: if hash < 0 -> symbol else -> symbol.slice(0..<hash)
-    sources: path.find("/Source/")
-    if sources > 0 -> return path.slice(0..<sources)
-    slash: path.rfind("/")
-    if slash < 0 -> "." else -> path.slice(0..<slash)
+    path: symbol.partition("#").head
+    sources: path.partition("/Source/")
+    if sources.sep != "" && sources.head != "" -> return sources.head
+    slash: path.rpartition("/")
+    if slash.sep == "" -> "." else -> slash.head
 }
 
 // The line of a profile row whose source is one line.

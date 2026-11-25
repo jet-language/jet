@@ -1446,8 +1446,10 @@ cold_report: fn(score: Int) -> Dyn {
     end: capsule.find("\n## 7. Cold-agent rules")
     start: capsule.find("\n### 10. HTTP health endpoint")
     assert(start > 0 && end > start)
+    kept: capsule.partition("\n### 10. HTTP health endpoint").head
+    rules: capsule.partition("\n## 7. Cold-agent rules")
     loop broken in
-        [capsule.replace("`term.print`", "`term.removed`"), capsule.replace("run: fn() {{\n    print(\"Hello, Jet\")\n}}", "print(\"Hello, Jet\")"), "{capsule.slice(0, start)}{capsule.slice(end, capsule.len())}"] {
+        [capsule.replace("`term.print`", "`term.removed`"), capsule.replace("run: fn() {{\n    print(\"Hello, Jet\")\n}}", "print(\"Hello, Jet\")"), "{kept}{rules.sep}{rules.tail}"] {
         rejected: if validate_capsule(broken) == {
             .Ok(_) -> false
             .Err(failure) -> failure.kind == .Usage

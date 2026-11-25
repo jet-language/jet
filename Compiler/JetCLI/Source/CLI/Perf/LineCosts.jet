@@ -122,9 +122,9 @@ jet_cli_perf_site_source: fn(place: String, entry: String, named: [String:String
     if !place.starts_with("/") {
         dir := entry
         loop {
-            slash: dir.rfind("/")
-            if slash <= 0 -> break
-            dir = dir.slice(0..<slash)
+            slash: dir.rpartition("/")
+            if slash.head == "" -> break
+            dir = slash.head
             if perf_files.canonicalize("{dir}/{place}") == .Ok(canonical) && named.has_key(canonical) {
                 return canonical
             }

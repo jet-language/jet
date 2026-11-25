@@ -1120,17 +1120,17 @@ dev_url: fn(canvas_url: String, path: String) -> String {
 }
 
 url_origin: fn(url: String) -> String {
-    scheme_end: url.find("://")
-    if scheme_end < 0 -> return url.copy()
-    slash: url.slice(scheme_end + 3..<url.len()).find("/")
-    if slash < 0 -> return url.copy()
-    url.slice(0..<scheme_end + 3 + slash)
+    scheme: url.partition("://")
+    if scheme.sep == "" -> return url.copy()
+    host: scheme.tail.partition("/")
+    if host.sep == "" -> return url.copy()
+    "{scheme.head}://{host.head}"
 }
 
 url_param: fn(url: String, name: String) -> String {
-    query: url.find("?")
-    if query < 0 -> return ""
-    loop pair in url.slice(query + 1..<url.len()).split("&").to_list() {
+    query: url.partition("?")
+    if query.sep == "" -> return ""
+    loop pair in query.tail.split("&").to_list() {
         if pair.starts_with("{name}=") -> return pair.slice(name.len() + 1..<pair.len())
     }
     ""

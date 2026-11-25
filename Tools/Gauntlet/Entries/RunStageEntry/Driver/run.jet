@@ -93,9 +93,9 @@ without_notes: fn(text: String) -> String {
         line: part.find("\\n")
         quote: part.find("\"")
         out = if {
-            line >= 0 && (quote < 0 || line < quote) -> "{out}{part.slice(line + 2, part.len())}"
+            line >= 0 && (quote < 0 || line < quote) -> "{out}{part.partition("\\n").tail}"
             quote < 0 -> "{out}note: {part}"
-            else -> "{out}{part.slice(quote, part.len())}"
+            else -> "{out}\"{part.partition("\"").tail}"
         }
     }
     out

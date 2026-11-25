@@ -76,7 +76,7 @@ lsp_rename_row: fn(renames: [LSPFileRename], path: String) -> Int? Never! {
 
 // Where `path`, below the folder `rename` moves, is after it.
 lsp_moved_path: fn(rename: LSPFileRename, path: String) -> String Never! {
-    "{rename.to}{path.slice(rename.from.count_bytes(), path.count_bytes())}"
+    "{rename.to}{path.removeprefix(rename.from)}"
 }
 
 // A file that names a renamed file or folder in an import writes its last
@@ -172,7 +172,7 @@ lsp_relative_import: fn(from: String, to: String, extension: Bool{false}) -> Str
     joined: parts.join("/")
     stem: lsp_file_stem(to)
     if extension || stem.contains(".") -> return joined
-    joined.slice(0, joined.count_bytes() - 4)
+    joined.removesuffix(".jet")
 }
 
 // Whether a file import of `path` that writes no alias binds `name`: its

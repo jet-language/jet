@@ -45,6 +45,7 @@ use {
         jet_cli_perf_attach_closed,
         jet_cli_perf_attach_keep_window,
         jet_cli_perf_attach_zoned,
+        jet_cli_perf_bare_name,
         jet_cli_perf_browser_decode,
         jet_cli_perf_causal_section,
         jet_cli_perf_causal_tasks_section,
@@ -106,6 +107,7 @@ use {
         jet_cli_perf_source_position,
         jet_cli_perf_source_profile,
         jet_cli_perf_spans_window,
+        jet_cli_perf_symbol_package,
         jet_cli_perf_syscalls_section,
         jet_cli_perf_system_read,
         jet_cli_perf_tasks_section,
@@ -2363,4 +2365,16 @@ perf_counts_test_lines: fn(counted: X64Counted, paranoid: Int?) -> [String] {
     // The attach exits with the command's exit code, or 128 plus the signal that ended it.
     assert_eq(jet_cli_perf_counts_exit(3 << 8), 3)
     assert_eq(jet_cli_perf_counts_exit(9), 137)
+}
+
+// `find` and `rfind` answer byte offsets and `slice` counts characters, so a
+// cut at a separator after text past ASCII is made on the separator itself.
+#Test("a perf symbol's package, its bare name and a phase's name keep the characters before the cut") {
+    assert_eq(jet_cli_perf_symbol_package("/home/zoë/app/main.jet#run"), "/home/zoë/app")
+    assert_eq(jet_cli_perf_symbol_package("/home/zoë/app/Source/main.jet#run"), "/home/zoë/app")
+    assert_eq(jet_cli_perf_symbol_package("main.jet#run"), ".")
+    assert_eq(jet_cli_perf_bare_name("ĵson.spawn_pipe"), "spawn_pipe")
+    assert_eq(jet_cli_perf_bare_name("spawn_pipe"), "spawn_pipe")
+    opened: jet_cli_perf_outside_span(`{"name":"lädt","cat":"lädt","ph":"B","ts":1,"pid":7,"tid":1}`) ?? panic("a phase's begin opens a span")
+    assert_eq(opened.name, "lädt")
 }

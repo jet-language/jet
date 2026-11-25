@@ -1332,7 +1332,7 @@ core_bodies_counts: fn(text: String) -> CoreBodiesCounts Never! {
     mark: "JET_PHASE_COUNTERS "
     loop line in text.lines() {
         if !line.starts_with(mark) -> next
-        tree: json.parse(line.slice(mark.count_bytes()..<line.count_bytes())) ?? next
+        tree: json.parse(line.removeprefix(mark)) ?? next
         if text_field(tree, "phase") != "core" -> next
         if int_field(tree, "bodies_loaded") == .Val(value) -> counts.loaded = value
         if int_field(tree, "bodies_from_text") == .Val(value) -> counts.from_text = value

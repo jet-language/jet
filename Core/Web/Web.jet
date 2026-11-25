@@ -1444,9 +1444,9 @@ priv app_screen_response: fn(app: App, screen: calls.AppScreen, request: HTTPReq
         name: segment.removeprefix(":")
         fields[name] = request.param(name) ?? ""
     }
-    at: request.path.find("?")
-    if at >= 0 && screen.query.len() > 0 {
-        query: web_http.query_decode_strict(request.path.slice(at + 1, request.path.len())) ?? return app_not_found_response(app, request)
+    cut: request.path.partition("?")
+    if cut.sep != "" && screen.query.len() > 0 {
+        query: web_http.query_decode_strict(cut.tail) ?? return app_not_found_response(app, request)
         loop name in screen.query {
             if web_http.query_get(query, name) == .Val(value) -> fields[name] = value
         }
@@ -4751,11 +4751,9 @@ priv app_push_test_job_run: fn(key: String, order: [Int]) -[Net]> Never! {
 
 // The text of `seen` between the first `start` and the `end` after it.
 priv app_push_test_between: fn(seen: String, start: String, end: String) -> String Never! {
-    at: seen.find(start)
-    if at < 0 -> panic("`{start}` is not in:\n{seen}")
-    rest: seen.slice(at + start.len(), seen.len())
-    stop: rest.find(end)
-    rest.slice(0, if stop < 0 -> rest.len() else -> stop)
+    cut: seen.partition(start)
+    if cut.sep == "" -> panic("`{start}` is not in:\n{seen}")
+    cut.tail.partition(end).head
 }
 
 // The status a registration of `body` at `/__jet/push/devices` answers,

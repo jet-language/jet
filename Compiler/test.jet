@@ -1229,9 +1229,9 @@ fuzz_check_failure: fn(program: FuzzProgram, receipt: ProcessReceipt) -> String 
 // The code a FUZZ_REFUSED file's name gives: `<name>.<code>.jet`.
 fuzz_named_code: fn(name: String) -> String {
     stem: name.removesuffix(".jet")
-    at: stem.rfind(".")
-    if at <= 0 -> return "no named code"
-    stem.slice(at + 1, stem.len()).copy()  // copy: the code outlives the stem it is cut from
+    cut: stem.rpartition(".")
+    if cut.head == "" -> return "no named code"
+    cut.tail
 }
 
 // Why one run row fails; "" when it passes. The first level's run exits 0

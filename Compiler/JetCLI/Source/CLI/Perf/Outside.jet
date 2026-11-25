@@ -508,15 +508,13 @@ jet_cli_perf_outside_phases: fn(file: String) -[FS.Read]> [JetCLIPerfOutsidePhas
 jet_cli_perf_outside_span: fn(line: String) -> {name: String, begins: Bool}? Never! {
     lead: "{{\"name\":\""
     if !line.starts_with(lead) -> return None
-    rest: line.slice(lead.len(), line.len())
-    end: rest.find("\"")
-    if end <= 0 -> return None
-    name: rest.slice(0, end)
-    tail: rest.slice(end, rest.len())
-    if tail.starts_with("\",\"cat\":\"{name}\",\"ph\":\"B\"") {
+    cut: line.removeprefix(lead).partition("\"")
+    if cut.sep == "" || cut.head == "" -> return None
+    name: cut.head
+    if cut.tail.starts_with(",\"cat\":\"{name}\",\"ph\":\"B\"") {
         return Val({name: name, begins: true})
     }
-    if tail.starts_with("\",\"cat\":\"{name}\",\"ph\":\"E\"") {
+    if cut.tail.starts_with(",\"cat\":\"{name}\",\"ph\":\"E\"") {
         return Val({name: name, begins: false})
     }
     None
@@ -1038,9 +1036,9 @@ jet_cli_perf_outside_timeline: fn(fold: ^JetCLIPerfOutsideFold, origin_unix_ns: 
 // the first field after the command's closing parenthesis).
 jet_cli_perf_outside_exited: fn(pid: Int) -[FS.Read]> Bool Never! {
     stat: perf_files.read("/proc/{pid}/stat") ?? return true
-    close: stat.rfind(")")
-    if close < 0 || close + 3 > stat.len() -> return true
-    state: stat.slice((close + 2)..<(close + 3))
+    cut: stat.rpartition(")")
+    if cut.sep == "" || cut.tail.len() < 2 -> return true
+    state: cut.tail.slice(1..<2)
     state == "Z" || state == "X"
 }
 

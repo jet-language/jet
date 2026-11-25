@@ -1759,12 +1759,11 @@ priv(package) resume: module {
     // carries as the bindings of this task's caller, and gives how many it
     // stored.
     seed: fn(page: String) -> Int Never! {
-        start: page.find(RESUME_OPEN)
-        if start < 0 -> return 0
-        rest: page.slice(start + RESUME_OPEN.len(), page.len())
-        end: rest.find("</script>")
-        if end < 0 -> return 0
-        reads: live_json.decode<[AppResumed]>(rest.slice(0, end)) ?? return 0
+        open: page.partition(RESUME_OPEN)
+        if open.sep == "" -> return 0
+        script: open.tail.partition("</script>")
+        if script.sep == "" -> return 0
+        reads: live_json.decode<[AppResumed]>(script.head) ?? return 0
         caller: acting_tag(acting_now(tasks.current_task()))
         stored := 0
         loop read in reads {
@@ -2650,13 +2649,9 @@ App: struct {
     // is current, and `lost_link` gives the link. True when a screen opened.
     open_link: fn(self, link: String) -[Net, FS.Read]> Bool Never! {
         found: app_link_address(link) ?? return app_link_lost(link)
-        path := found
-        query := ""
-        mark: found.find("?")
-        if mark >= 0 {
-            path = found.slice(0, mark)
-            query = found.slice(mark + 1, found.len())
-        }
+        cut: found.partition("?")
+        path: cut.head
+        query: cut.tail
         loop screen in self.__screens() {
             fields: app_link_fields(screen, path, query) ?? next
             graph: app_graph_open(screen.state, fields.copy())
@@ -4115,14 +4110,12 @@ priv app_link_scheme_valid: fn(scheme: String) -> Bool Never! {
 // `https` link of one of its domains, with or without a port. None for any
 // other link.
 priv app_link_address: fn(link: String) -> String? Never! {
-    rest := link.copy()
-    hash: rest.find("#")
-    if hash >= 0 -> rest = rest.slice(0, hash)
+    rest: link.partition("#").head
     if rest.starts_with("/") && app_link_authority(rest) == None -> return Val(rest)
-    colon: rest.find(":")
-    if colon <= 0 -> return None
-    scheme: rest.slice(0, colon).lower()
-    after: rest.slice(colon + 1, rest.len())
+    cut: rest.partition(":")
+    if cut.sep == "" || cut.head == "" -> return None
+    scheme: cut.head.lower()
+    after: cut.tail
     held: APP_GRAPH.guard_read()
     if held.value.schemes.contains(scheme) {
         tail: app_link_authority(after) ?? after
@@ -4140,9 +4133,7 @@ priv app_link_address: fn(link: String) -> String? Never! {
         break
     }
     if authority.contains("@") -> return None
-    host := authority.lower()
-    port: host.find(":")
-    if port >= 0 -> host = host.slice(0, port)
+    host: authority.lower().partition(":").head
     if !held.value.link_domains.contains(host) -> return None
     Val(path)
 }
@@ -4820,8 +4811,8 @@ priv app_mimeapps_with: fn(text: String, schemes: [String], id: String) -> Strin
             }
             next
         }
-        at: trimmed.find("=")
-        if group && at > 0 && keys.contains(trimmed.slice(0, at).trim()) -> next
+        cut: trimmed.partition("=")
+        if group && cut.sep != "" && cut.head != "" && keys.contains(cut.head.trim()) -> next
         out.push(line.copy())
     }
     if !added {
@@ -9883,10 +9874,10 @@ SyncSession: struct {
 }
 
 sync_session_decode: fn(value: String) -> SyncSession? {
-    colon: value.find(":")
-    if colon < 0 -> return None
-    generation: Int.parse(value.slice(0, colon)) ?? return None
-    Val(SyncSession{generation: generation, document: value.slice(colon + 1, value.len())})
+    cut: value.partition(":")
+    if cut.sep == "" -> return None
+    generation: Int.parse(cut.head) ?? return None
+    Val(SyncSession{generation: generation, document: cut.tail})
 }
 
 // The canonical document `value` names, or None when it is malformed or not in

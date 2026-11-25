@@ -433,8 +433,8 @@ jet_cli_commit_fix: fn(file: String, before: [U8], staged: [U8], semantic_ops: ^
     lock: journal.transaction_lock()
     jet_cli_transaction_recover(project, journal)
     filename: jet_cli_file_name(path)
-    dot: filename.rfind(".")
-    stem: if dot > 0 -> filename.slice(0, dot) else -> filename
+    cut: filename.rpartition(".")
+    stem: if cut.head != "" -> cut.head else -> filename
     base: "Fix-{jet_cli_fix_name(stem)}"
     suffix := 0
     name := base
