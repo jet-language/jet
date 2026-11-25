@@ -128,20 +128,20 @@ sema_frame_module_call_operation: fn(receiver: Expr, method: String, args: [Call
             return Val(sema_frame_core_call_operation(record, "{module_name}.{method}", args, index))
         }
         // A Core function with no row is its registered declaration.
-        graph: program.registration_graph ?? return None
+        graph: program.registration_graph
         identity: sema_call_core_module_identity(environment, program, module_name) ?? return None
         module_index: sema_registration_module_index(graph, identity) ?? return None
         export: sema_registration_resolve_export(graph, module_index, method, environment.module_identity, environment.package_identity, [String]{}) ?? return None
         return Val(sema_frame_registered_call_operation("{module_name}.{method}", args, export.symbol.id, index, program))
     }
     if path.leaves.len() > 0 -> return None
-    graph: program.registration_graph ?? return None
+    graph: program.registration_graph
     resolved: sema_registration_lookup_qualified(graph, environment.module_identity, path.alias, method) ?? return None
     Val(sema_frame_registered_call_operation("{path.alias}.{method}", args, sema_resolved_id(graph, resolved), index, program))
 }
 
 sema_frame_registered_call_operation: fn(name: String, args: [CallArg], target: SymbolID, index: Int, program: SemaProgramTables) -> SemaFrameOperationFact {
-    graph: program.registration_graph ?? return sema_frame_checked_call_operation(name, args, None, false, true, index)
+    graph: program.registration_graph
     abi: sema_registration_callable_abi(graph, target) ?? return sema_frame_checked_call_operation(name, args, None, false, true, index)
     declaration: sema_registration_callable_declaration(graph, target) ?? return sema_frame_checked_call_operation(name, args, None, true, true, index)
     conventions: loop param in declaration.params -> param.convention

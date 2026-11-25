@@ -204,8 +204,7 @@ ir_comptime_item_shell: fn(module_identity: ModuleID, module_name: String, key: 
 // name and its key's prefix.
 ir_comptime_item_function: fn(interner: Interner, request: SemaComptimeItemRequest, module_name: String) -> FnBody {
     result_type := body_type(interner, request.expression.tree, request.expression.root)
-    if request.expected_type != None {
-        expected: request.expected_type ?? panic("checked comptime item lost its expected type")
+    if request.expected_type == .Val(expected) {
         if type_identity_key(expected) != type_identity_key(result_type) {
             panic("checked comptime item result disagrees with its expected type")
         }

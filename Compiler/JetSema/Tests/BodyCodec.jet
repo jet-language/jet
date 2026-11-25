@@ -51,12 +51,14 @@ use {
         sema_core_bodies_position,
         sema_core_bodies_problem,
         sema_core_bodies_read,
+        sema_core_bodies_unread,
         sema_core_bodies_record,
         sema_hardware_empty_use,
         sema_collect_comptime_declarations,
         sema_finalize_graph,
         sema_graph_trail_init,
         sema_has_error_since,
+        sema_host_hook_access,
         sema_registration_prepare_graph,
     ]
     jet_parser.[parse_source]
@@ -590,6 +592,14 @@ body_codec_packets: fn(failures: ^[String]) -> [SemaParallelBody] {
     body_codec_load("core", true, through_file: true)
 }
 
+// A record the Core library's check wrote that does not read is jet's own
+// defect, and its function is checked from text with the check the record
+// holds; the record is a row of the compile's census
+// (sema_core_bodies_unread).
+#Test("a Core function check whose record does not read is the check from text and a census row") {
+    body_codec_load("core", true, through_file: true, refused: true)
+}
+
 // Registration puts the compiler-owned nominals (`Ordering`) in the entry
 // module, and the Core library's check has an entry of its own; a Core
 // function that names one loads in a compile whose entry is another module.
@@ -607,13 +617,15 @@ body_codec_packets: fn(failures: ^[String]) -> [SemaParallelBody] {
 }
 
 // The records of a bodies file read from bytes of their own, as a host
-// reads them from its file (SemaCoreBodiesRecords).
+// reads them from its file (SemaCoreBodiesRecords); the read of the record
+// at byte `refused` fails.
 BodyCodecRecords: struct {
     bytes: [U8],
+    refused: Int{-1},
 
     impl SemaCoreBodiesRecords {
         read: fn(self, at: Int, size: Int) -[FS]> [U8]? {
-            if at < 0 || size < 0 || at + size > self.bytes.len() -> return None
+            if at == self.refused || at < 0 || size < 0 || at + size > self.bytes.len() -> return None
             record := [U8]{}
             loop index in at..<at + size -> record.push(self.bytes[index])
             Val(record)
@@ -671,12 +683,30 @@ body_codec_types_spelled: fn(text: String, interner: Interner) -> String {
 // `through_file`, the records are read through a host's read
 // (BodyCodecRecords) of the file a second check wrote, and the lent file's
 // records are blanked, so a record read from the lent bytes would not load.
-body_codec_load: fn(package: String, core: Bool, through_file: Bool{false}) {
+// With `refused` as well, the host's read of the first function record
+// fails: that function is checked from text, with the same result, and the
+// record is the compile's one census row (sema_core_bodies_unread).
+body_codec_load: fn(package: String, core: Bool, through_file: Bool{false}, refused: Bool{false}) {
     failures := [String]{}
     captured_run := body_codec_finalized(failures, package, body_codec_hooks(), core, "", false) ?? panic("BodyCodec could not check module `main`:\n{failures.join("\n")}")
     captured := captured_run.result.move()
     bodies := sema_core_bodies_read(body_codec_file(captured.core_bodies.move())) ?? panic("BodyCodec: the bodies file does not read back")
     count: bodies.head.count
+    refused_at := -1
+    refused_key := ""
+    refused_position := -1
+    if refused {
+        loop position in 0..<count {
+            key: body_codec_get_string(bodies.bytes, sema_core_bodies_record(bodies.bytes, sema_core_bodies_key_at(bodies.bytes, bodies.head, position)))
+            if key.starts_with("function:") {
+                refused_at = sema_core_bodies_offset(bodies.bytes, bodies.head, position)
+                refused_key = key
+                refused_position = position
+                break
+            }
+        }
+        if refused_at < 0 -> panic("BodyCodec: the bodies file holds no function record")
+    }
     file := [U8]{}
     if through_file {
         again := body_codec_check(failures, package, body_codec_hooks(), core) ?? panic("BodyCodec could not check module `main` again:\n{failures.join("\n")}")
@@ -688,17 +718,23 @@ body_codec_load: fn(package: String, core: Bool, through_file: Bool{false}) {
     hooks: Shared{SemaRegistrationHostHooks{numeric_unit_conversion_exact: None, core_bodies: Val(bodies)}}
     if through_file {
         edit: hooks.guard_edit()
-        edit.value.core_bodies_records = Val(BodyCodecRecords{bytes: file.move()})
+        edit.value.core_bodies_records = Val(BodyCodecRecords{bytes: file.move(), refused: refused_at})
     }
     loaded_run := body_codec_finalized(failures, package, hooks, core, "", false) ?? panic("BodyCodec could not load module `main`:\n{failures.join("\n")}")
     loaded := loaded_run.result.move()
+    census: sema_core_bodies_unread(loaded_run.graph, sema_host_hook_access(hooks))
+    expected_census: if refused -> [String]{"record {refused_position} of the Core bodies file does not read from the host's file"} else -> [String]{}
+    if census != expected_census {
+        failures.push("the census of records that do not read is {census:Debug}")
+    }
     permit: hooks.guard_read()
     loaded_count := 0
     loaded_keys: sema_core_bodies_loaded_keys(permit.value.core_bodies, permit.value.core_bodies_loaded)
     loop marked in permit.value.core_bodies_loaded {
         if marked -> loaded_count += 1
     }
-    if count < 6 || loaded_count != count {
+    expected_count: if refused -> count - 1 else -> count
+    if count < 6 || loaded_count != expected_count {
         failures.push("{count} function checks were captured and {loaded_count} loaded")
     }
     if loaded.core_bodies.bodies.len() > 0 {
@@ -716,7 +752,7 @@ body_codec_load: fn(package: String, core: Bool, through_file: Bool{false}) {
         row: loaded.modules[position]
         name: text.module_name
         loop function in text.functions {
-            if name_find(loaded_keys, function.key) == None {
+            if function.key != refused_key && name_find(loaded_keys, function.key) == None {
                 failures.push("{function.key}: checked from text, not loaded")
             }
         }
@@ -784,6 +820,7 @@ BODY_CODEC_AHEAD_RUNS: 160
         panic("BodyCodec: only {count} function checks were captured")
     }
     shared := BodyCodecIn{at: 0, end: 0, failed: false, symbols: [SymbolID]{}, decls: [DeclID]{}, modules: [ModuleID]{}}
+    unread := [String]{}
     loads := [String]{}
     total := 0
     type_delta := [InternerDelta]{}
@@ -791,12 +828,13 @@ BODY_CODEC_AHEAD_RUNS: 160
         at: sema_core_bodies_offset(bodies.bytes, bodies.head, position)
         end: if position + 1 < count -> sema_core_bodies_offset(bodies.bytes, bodies.head, position + 1) else -> bodies.bytes.len()
         // A record whose keys this graph does not resolve loads at no time.
-        load: sema_core_body_decode(bodies.bytes, at, graph, position, shared, type_delta)
+        load: sema_core_body_decode(bodies.bytes, at, graph, position, shared, type_delta, unread)
         if load == .Val(packet) {
             total += end - at
             loads.push("{packet:Debug}")
         } else { loads.push("") }
     }
+    if unread.len() > 0 -> panic("BodyCodec: records of the bodies file do not read: {unread:Debug}")
     if total < SEMA_CORE_BODIES_AHEAD_BYTES_PER_THREAD {
         panic("BodyCodec: the records that load hold {total} bytes, fewer than one read-ahead thread is worth ({SEMA_CORE_BODIES_AHEAD_BYTES_PER_THREAD})")
     }

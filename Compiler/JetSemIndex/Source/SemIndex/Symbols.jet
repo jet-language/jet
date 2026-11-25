@@ -688,9 +688,12 @@ semindex_symbol_source_docs_at: fn(bytes: [U8], def_start: Int) -> SemDocComment
     position := collected.len() - 1
     loop position >= 0 {
         line: collected[position]
-        if semindex_doc_strip_prefix(line, "Example:") == .Val(example) {
-            comment.examples.push(example.trim())
-        } else if comment.summary == "" && line != "" { comment.summary = line }
+        if {
+            semindex_doc_strip_prefix(line, "Example:") == .Val(example) -> {
+                comment.examples.push(example.trim())
+            }
+            comment.summary == "" && line != "" -> { comment.summary = line }
+        }
         position -= 1
     }
     comment

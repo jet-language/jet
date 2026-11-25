@@ -59,7 +59,7 @@ sema_call_enqueue: fn(alias: String, args: [CallArg], span: Span, expected: Type
         return sema_app_job_refused("its closure is not passed on its own", args[0].span, diagnostics)
     }
     job: sema_app_job_call(alias, args[0].expr, environment, program, scopes, diagnostics) ?? return sema_live_rejected()
-    graph: program.registration_graph ?? return sema_live_rejected()
+    graph: program.registration_graph
     filler: sema_core_role_function(graph, "AppEnqueue") ?? {
         diagnostics.push(sema_missing_core_role("AppEnqueue", span))
         return sema_live_rejected()
@@ -211,7 +211,7 @@ sema_app_job_method: fn(alias: String, call: Expr, span: Span, environment: Sema
 // each parameter type must be Encode and Decode. Each argument is encoded
 // by the `app` function that fills the LiveArg role.
 sema_app_job_endpoint: fn(alias: String, service: Type, method: String, method_span: Span, args: [CallArg], receiver_span: Span, receiver_id: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> SemaAppJob? {
-    graph: program.registration_graph ?? return None
+    graph: program.registration_graph
     row: sema_type_resolve_nominal_row(graph, service, environment.module_identity) ?? return sema_app_job_not_one("`self` is a {sema_type_show_quoted(service)}, not a service", receiver_span, diagnostics)
     service_module: graph.modules[row.module_index].module_identity
     service_name: graph.modules[row.module_index].nominals[row.row].symbol.name

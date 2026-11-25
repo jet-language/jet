@@ -93,7 +93,7 @@
 // the total is inline, so the Loop's one pass leaves by its exit test.
 use {
     jet_backend.[X64_INT_SUM_DECLINED, X64_R8, X64_RAX, X64_RCX, X64_RDI, X64_RDX, X64_RSI, x64_count_code, x64_fill_code, x64_int_sum_code]
-    jet_foundation.[CompilerThreads, compiler_take_rows, compiler_threads_admit, compiler_threads_partition]
+    jet_foundation.[CompilerThreads, compiler_take_rows, compiler_threads_admit, compiler_threads_joined, compiler_threads_partition]
 }
 
 // The leaves, as an IRReduceLoop's `kind`: the int sum; the counts of
@@ -202,7 +202,7 @@ ir_opt_reduce_module: fn(m: ^IRModule, functions: ^[IRFunction], threads: Compil
     slots.reverse()
     lent: ir_opt_lend(m)
     shared: Shared{IROptReduceView{views: [IRModule]{lent.move()}, word_row: word_row, leaves: [Int]{}, taken: [[IRReduceLoop]]{}}}
-    _: ir_opt_reducers(slots, shared, 0) ?? panic("the IR reduction threads failed")
+    _: ir_opt_reducers(slots, shared, 0)
     loop slot in slots {
         held := slot.guard_edit()
         taken.extend(compiler_take_rows<[IRReduceLoop]>(held.value.taken))
@@ -213,7 +213,7 @@ ir_opt_reduce_module: fn(m: ^IRModule, functions: ^[IRFunction], threads: Compil
     changed: ir_opt_reduce_changed(taken)
     if changed.len() > 0 {
         ir_opt_reduce_publish(shared, leaves, taken)
-        _: ir_opt_reducers(slots, shared, 0) ?? panic("the IR reduction threads failed")
+        _: ir_opt_reducers(slots, shared, 0)
     }
     loop slot in slots {
         held := slot.guard_edit()
@@ -246,13 +246,13 @@ IROptReduceView: struct {
 
 // Runs a reduction thread per slot from `at`; returns the functions they
 // read.
-ir_opt_reducers: fn(slots: [Shared<IROptReducePart>], shared: Shared<IROptReduceView>, at: Int) -> Int {
+ir_opt_reducers: fn(slots: [Shared<IROptReducePart>], shared: Shared<IROptReduceView>, at: Int) -> Int Never! {
     if at >= slots.len() -> return 0
     rows := 0
     task.group ir_opt_reduce_group {
         head: task ir_opt_reduce_part(slots[at], shared)
         rows = ir_opt_reducers(slots, shared, at + 1)
-        rows += head.join() ?? ir_opt_prepare_stopped(err)
+        rows += compiler_threads_joined(head)
     }
     rows
 }

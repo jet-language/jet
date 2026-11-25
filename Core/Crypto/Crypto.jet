@@ -18,6 +18,7 @@ use {
     hashes: __core_crypto_md
     byte_words.[load_le32, push_le32]
     chacha20_core.[chacha20_rounds, chacha20_state, chacha20_words]
+    crypto_rt: jet.runtime.crypto
 }
 
 // core.crypto - safe envelopes and expert primitives.
@@ -1591,7 +1592,7 @@ priv blake3_parent: fn(left: [U32], right: [U32], is_root: Bool) -> [U32] {
                 iv: [U32]{0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19}
                 fast := iv.copy()
                 scalar := iv.copy()
-                if !core.crypto.__sha256_blocks(fast, data, off, count) {
+                if !crypto_rt.sha256_blocks(fast, data, off, count) {
                     hashes.sha256_blocks(fast, data, off, count)
                 }
                 hashes.sha256_blocks(scalar, data, off, count)

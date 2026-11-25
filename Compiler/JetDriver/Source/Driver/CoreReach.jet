@@ -1526,7 +1526,8 @@ JetDriverReachHeldModule: struct {
 // their stubs' places (-1 when a parse failed: its diagnostics are in the
 // load's), how many ready parses it read, their bytes and the reads of the
 // interface it took, and the internal problem of a ready parse missing or
-// unreadable.
+// unreadable, or of a module's held declarations parsing as other than one
+// item each.
 JetDriverReachHeldParse: struct {
     count: Int,
     fragments: Int,
@@ -1636,7 +1637,8 @@ jet_driver_reach_parse_held: fn(request: JetDriverCompileRequest, reach: JetDriv
         }
         positions: parse.positions
         if parsed.program.items.len() != positions.len() {
-            panic("the {positions.len()} held declarations of {source_units[modules[loaded].source_unit_index].path} parsed as {parsed.program.items.len()} items")
+            done.problem = Val("the {positions.len()} held declarations of {source_units[modules[loaded].source_unit_index].path} parsed as {parsed.program.items.len()} items")
+            return done
         }
         loop (index, item) in parsed.program.items {
             modules[loaded].program.items[positions[index]] = item

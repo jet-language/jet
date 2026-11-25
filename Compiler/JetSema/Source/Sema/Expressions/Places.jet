@@ -336,13 +336,12 @@ sema_expression_tuple_field: fn(base: TExpr, member: String, span: Span, diagnos
 // fields resolve through the declaration.
 sema_expression_carrier_type_symbol: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, name: String) -> Symbol? {
     carrier: boundary_head_carrier_module(name) ?? return None
-    if program.registration_graph == .Val(graph) {
-        loop module_row_index in 0..<graph.modules.len() {
-            if graph.modules[module_row_index].module_name != carrier -> next
-            loop nominal_index in 0..<graph.modules[module_row_index].nominals.len() {
-                if graph.modules[module_row_index].nominals[nominal_index].symbol.name == name {
-                    return Val(graph.modules[module_row_index].nominals[nominal_index].symbol)
-                }
+    graph: program.registration_graph
+    loop module_row_index in 0..<graph.modules.len() {
+        if graph.modules[module_row_index].module_name != carrier -> next
+        loop nominal_index in 0..<graph.modules[module_row_index].nominals.len() {
+            if graph.modules[module_row_index].nominals[nominal_index].symbol.name == name {
+                return Val(graph.modules[module_row_index].nominals[nominal_index].symbol)
             }
         }
     }
@@ -374,7 +373,8 @@ sema_expression_shared_guard_value: fn(ty: Type) -> SemaCallMemoryGuard? {
 // resolves there (the owner's type parameters stay parameters) before the
 // owner's type arguments are substituted.
 sema_expression_field_owner_type: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, owner_module: ModuleID, declared: Type, generic_names: [String]) -> Type Never! {
-    if program.registration_graph == .Val(graph) && !module_is_none(owner_module) {
+    graph: program.registration_graph
+    if !module_is_none(owner_module) {
         generics: loop name in generic_names -> TGenericParam{name: name, bounds: [SymbolID]{}}
         return sema_type_resolve_declared_with_generics(graph, declared, owner_module, generics)
     }
@@ -397,11 +397,10 @@ sema_expression_field_visible: fn(is_pub: Bool, is_package_pub: Bool, owner_modu
     if is_pub -> return true
     owner_package := ""
     owner_id := module_none()
-    if program.registration_graph == .Val(graph) {
-        owner_id = owner_module
-        if sema_registration_module_index(graph, owner_id) == .Val(owner_index) {
-            owner_package = graph.modules[owner_index].package_identity
-        }
+    graph: program.registration_graph
+    owner_id = owner_module
+    if sema_registration_module_index(graph, owner_id) == .Val(owner_index) {
+        owner_package = graph.modules[owner_index].package_identity
     }
     visibility: if is_package_pub -> 1 else -> 0
     if !sema_registration_visible(visibility, environment.module_identity, environment.package_identity, owner_id, owner_package) {
@@ -420,13 +419,11 @@ sema_expression_field_visible: fn(is_pub: Bool, is_package_pub: Bool, owner_modu
 // build or rewrite a kernel owner around an address of its choosing.
 sema_expression_kernel_field_hidden: fn(owner_module: ModuleID, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     if environment.module_identity == owner_module -> return false
-    if program.registration_graph == .Val(graph) {
-        owner_index: sema_registration_module_index(graph, owner_module) ?? return false
-        if !graph.modules[owner_index].memory_kernel -> return false
-        user_index: sema_registration_module_index(graph, environment.module_identity) ?? return false
-        return !graph.modules[user_index].memory_kernel
-    }
-    false
+    graph: program.registration_graph
+    owner_index: sema_registration_module_index(graph, owner_module) ?? return false
+    if !graph.modules[owner_index].memory_kernel -> return false
+    user_index: sema_registration_module_index(graph, environment.module_identity) ?? return false
+    !graph.modules[user_index].memory_kernel
 }
 
 sema_expression_private_field_error: fn(member: String, span: Span) -> Diagnostic Never! {
@@ -663,11 +660,9 @@ sema_expression_as_field: fn(offered: Type, required: Type, use_span: Span, envi
 // registration graph in place (as sema_expression_type_symbol does without
 // a local binding).
 sema_expression_graph_type_symbol: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, name: String) -> Symbol? {
-    if program.registration_graph == .Val(graph) {
-        resolved: sema_type_graph_lookup_symbol_at(graph, sema_scope_caller_row(environment, graph), name) ?? return None
-        return if sema_resolved_kind(graph, resolved) == SymbolKind.Type -> Val(sema_resolved_symbol(graph, resolved)) else -> None
-    }
-    None
+    graph: program.registration_graph
+    resolved: sema_type_graph_lookup_symbol_at(graph, sema_scope_caller_row(environment, graph), name) ?? return None
+    if sema_resolved_kind(graph, resolved) == SymbolKind.Type -> Val(sema_resolved_symbol(graph, resolved)) else -> None
 }
 
 // Whether `member` is a field of a module's Module record `record`, so
@@ -1017,7 +1012,9 @@ sema_expression_context_allocator: fn(span: Span, expected: Type?, environment: 
     if !sema_effect_record_intrinsic_effects(environment, program, scopes, context, "context.allocator", span, [EffectRowEntry]{}, diagnostics) {
         return None
     }
-    graph: program.registration_graph ?? return None
+    graph: program.registration_graph
+    // Snapshot: a lone program loads no core.mem to fill the ContextAllocator role.
+    if graph.mode == .Snapshot -> return None
     filler: sema_core_role_function(graph, "ContextAllocator") ?? {
         diagnostics.push(sema_missing_core_role("ContextAllocator", span))
         return None
@@ -1175,30 +1172,30 @@ sema_expression_module_constant: fn(alias: String, member: String, member_span: 
     if scopes.bindings[index].symbol.kind != SymbolKind.Import {
         return SemaMethodSpecialCheck{handled: false, value: None}
     }
-    if program.registration_graph == .Val(graph) {
-        // An inline module of the imported file (`lib.inner`) is its record.
-        if sema_expression_module_nested_record(graph, alias, member, environment, program) == .Val(nested) {
-            return sema_expression_module_constant_read(graph, nested, "{alias}.{member}", span, expected, environment, program, context, diagnostics)
-        }
-        resolved: sema_registration_lookup_qualified(graph, environment.module_identity, alias, member) ?? {
-            if sema_registration_lookup_qualified(graph, environment.module_identity, alias, SEMA_MODULE_META) == .Val(record) {
-                read: sema_expression_module_constant_read(graph, record, alias, span, None, environment, program, context, diagnostics)
-                if read.value == .Val(value) && sema_expression_module_record_field(value, member, environment, program, scopes) {
-                    return SemaMethodSpecialCheck{handled: true, value: sema_expression_field_checked(value, member, span, expected, environment, program, scopes, context, diagnostics)}
-                }
-            }
-            unknown: sema_expression_module_member_unknown(graph, environment.module_identity, alias, member, member_span) ?? return SemaMethodSpecialCheck{handled: false, value: None}
-            diagnostics.push(unknown)
-            return SemaMethodSpecialCheck{handled: true, value: None}
-        }
-        unexposed: sema_expression_module_file_child(graph, resolved, alias, member, member_span)
-        if unexposed == .Val(diagnostic) {
-            diagnostics.push(diagnostic)
-            return SemaMethodSpecialCheck{handled: true, value: None}
-        }
-        return sema_expression_module_constant_read(graph, resolved, "{alias}.{member}", span, expected, environment, program, context, diagnostics)
+    // Snapshot: a module constant resolves only through registered imports.
+    if program.registration_graph.mode == .Snapshot -> return SemaMethodSpecialCheck{handled: false, value: None}
+    graph: program.registration_graph
+    // An inline module of the imported file (`lib.inner`) is its record.
+    if sema_expression_module_nested_record(graph, alias, member, environment, program) == .Val(nested) {
+        return sema_expression_module_constant_read(graph, nested, "{alias}.{member}", span, expected, environment, program, context, diagnostics)
     }
-    SemaMethodSpecialCheck{handled: false, value: None}
+    resolved: sema_registration_lookup_qualified(graph, environment.module_identity, alias, member) ?? {
+        if sema_registration_lookup_qualified(graph, environment.module_identity, alias, SEMA_MODULE_META) == .Val(record) {
+            read: sema_expression_module_constant_read(graph, record, alias, span, None, environment, program, context, diagnostics)
+            if read.value == .Val(value) && sema_expression_module_record_field(value, member, environment, program, scopes) {
+                return SemaMethodSpecialCheck{handled: true, value: sema_expression_field_checked(value, member, span, expected, environment, program, scopes, context, diagnostics)}
+            }
+        }
+        unknown: sema_expression_module_member_unknown(graph, environment.module_identity, alias, member, member_span) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+        diagnostics.push(unknown)
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    unexposed: sema_expression_module_file_child(graph, resolved, alias, member, member_span)
+    if unexposed == .Val(diagnostic) {
+        diagnostics.push(diagnostic)
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    sema_expression_module_constant_read(graph, resolved, "{alias}.{member}", span, expected, environment, program, context, diagnostics)
 }
 
 // The Module record of the inline module `member` that the file module
@@ -1246,16 +1243,14 @@ sema_expression_core_nested_constant: fn(alias: String, nested: String, member: 
     if target.item != None -> return unhandled
     module_name: "{target.module_name}.{nested}"
     module_identity: sema_call_core_module_identity(environment, program, module_name) ?? return unhandled
-    if program.registration_graph == .Val(graph) {
-        module_index: sema_registration_module_index(graph, module_identity) ?? return unhandled
-        export: sema_registration_resolve_export(graph, module_index, member, environment.module_identity, environment.package_identity, [String]{}) ?? {
-            diagnostics.push(sema_expression_core_member_unknown(graph.modules[module_index], member, member_span))
-            return SemaMethodSpecialCheck{handled: true, value: None}
-        }
-        resolved: SemaRegistrationResolvedSymbol{place: SemaRegistrationSymbolPlace.Detached{symbol: sema_registration_export_symbol(graph, export)}, source_module_identity: export.source_module_identity, target_module_identity: module_identity, visibility: export.visibility}
-        return sema_expression_module_constant_read(graph, resolved, "{alias}.{nested}.{member}", span, expected, environment, program, context, diagnostics)
+    graph: program.registration_graph
+    module_index: sema_registration_module_index(graph, module_identity) ?? return unhandled
+    export: sema_registration_resolve_export(graph, module_index, member, environment.module_identity, environment.package_identity, [String]{}) ?? {
+        diagnostics.push(sema_expression_core_member_unknown(graph.modules[module_index], member, member_span))
+        return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    unhandled
+    resolved: SemaRegistrationResolvedSymbol{place: SemaRegistrationSymbolPlace.Detached{symbol: sema_registration_export_symbol(graph, export)}, source_module_identity: export.source_module_identity, target_module_identity: module_identity, visibility: export.visibility}
+    sema_expression_module_constant_read(graph, resolved, "{alias}.{nested}.{member}", span, expected, environment, program, context, diagnostics)
 }
 
 // The read of a resolved module member: a constant is a ConstRef typed by its
@@ -1429,11 +1424,9 @@ sema_expression_bound_receiver_rooted: fn(expr: Expr) -> Bool Never! {
 // The methods `member` names on a value of type `receiver`; the lookup only
 // asks which exist, so its own reports are dropped.
 sema_expression_method_candidates: fn(receiver: Type, member: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> [SemaCallMethodCandidate] {
-    if program.registration_graph == .Val(graph) {
-        probe := [Diagnostic]{}
-        return sema_expr_registration_method_candidates(graph, environment.module_identity, receiver, member, [Type]{}, [Type]{}, span, environment, program, probe)
-    }
-    [SemaCallMethodCandidate]{}
+    graph: program.registration_graph
+    probe := [Diagnostic]{}
+    sema_expr_registration_method_candidates(graph, environment.module_identity, receiver, member, [Type]{}, [Type]{}, span, environment, program, probe)
 }
 
 // Whether the struct a value of type `receiver` is declares a field `member`.
@@ -1575,11 +1568,9 @@ sema_expression_swizzle_slots: fn(ty: Type, environment: SemaScopeEnvironment, p
         if length < 1 || length > 4 -> return None
         return Val(SemaSwizzleSlots{shown: type_name(ty), element: element, length: length, reach: length, lanes: false, declared: 0})
     }
-    if program.registration_graph == .Val(graph) {
-        row: sema_type_resolve_nominal_row(graph, ty, environment.module_identity) ?? return None
-        return sema_expression_swizzle_lane_slots(graph, graph.modules[row.module_index].nominals[row.row], ty)
-    }
-    None
+    graph: program.registration_graph
+    row: sema_type_resolve_nominal_row(graph, ty, environment.module_identity) ?? return None
+    sema_expression_swizzle_lane_slots(graph, graph.modules[row.module_index].nominals[row.row], ty)
 }
 
 // The lanes of a Core vector or lane type `nominal` declares, or None for any
@@ -1715,10 +1706,8 @@ sema_expression_numeric_bound_type: fn(base: Expr, member: String, environment: 
 // the spelling names (`U8`, `Int`).
 sema_expression_written_type: fn(name: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable) -> Type {
     if sema_expression_type_symbol(scopes, environment, program, name) == None -> return foundation_named_type(name)
-    if program.registration_graph == .Val(graph) {
-        return sema_type_graph_resolve_named(graph, name, sema_scope_caller_row(environment, graph))
-    }
-    Type.Named{name: name}
+    graph: program.registration_graph
+    sema_type_graph_resolve_named(graph, name, sema_scope_caller_row(environment, graph))
 }
 
 // Reading a secret-bearing value's raw bytes is an exposure.
@@ -1730,20 +1719,18 @@ sema_expression_secret_exposure_allowed: fn(ty: Type, member: String, span: Span
     if member != "bytes" || context.unsafe_depth > 0 || !sema_call_reflection_secret_bearing(ty) {
         return true
     }
-    if program.registration_graph == .Val(graph) {
-        caller_index: sema_scope_caller_index(environment, graph) ?? return true
-        if sema_expression_secret_declared_by(graph, ty, caller_index) -> return true
-        shown: type_name(ty)
-        exposure: if {
-            shown.ends_with("SigningKey") -> "signing_key_bytes"
-            shown.ends_with("X25519SecretKey") -> "x25519_secret_bytes"
-            shown.ends_with("SharedSecret") -> "shared_secret_bytes"
-            else -> "secret_bytes"
-        }
-        diagnostics.push(sema_error("E0510", span, "reading `{shown}.bytes` exposes secret key material", "secret-bearing values cannot be printed, interpolated, or read as raw bytes outside an audited expert gate", "keep the value inside `crypto` operations, or call `expert.{exposure}(value)` inside `#Unsafe(\"reason\") {{ … }}`"))
-        return false
+    graph: program.registration_graph
+    caller_index: sema_scope_caller_index(environment, graph) ?? return true
+    if sema_expression_secret_declared_by(graph, ty, caller_index) -> return true
+    shown: type_name(ty)
+    exposure: if {
+        shown.ends_with("SigningKey") -> "signing_key_bytes"
+        shown.ends_with("X25519SecretKey") -> "x25519_secret_bytes"
+        shown.ends_with("SharedSecret") -> "shared_secret_bytes"
+        else -> "secret_bytes"
     }
-    true
+    diagnostics.push(sema_error("E0510", span, "reading `{shown}.bytes` exposes secret key material", "secret-bearing values cannot be printed, interpolated, or read as raw bytes outside an audited expert gate", "keep the value inside `crypto` operations, or call `expert.{exposure}(value)` inside `#Unsafe(\"reason\") {{ … }}`"))
+    false
 }
 
 // Whether module row `caller` declares the secret type `ty` names: one of its

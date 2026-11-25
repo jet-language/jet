@@ -44,7 +44,7 @@ sema_registration_canonicalize_qualified_types: fn(graph: ^^SemaRegistrationGrap
     found_keys := sema_registration_qualified_take(keyed.found)
     loop found_keys.len() > 0 {
         found := found_keys.pop() ?? break
-        jobs.keys[keyed.rows[found_keys.len()]] = found.keys.move() ?? panic("a module's qualified scan found no keys")
+        jobs.keys[keyed.rows[found_keys.len()]] = compiler_threads_slot_taken(found.keys.move())
     }
     scan := sema_graph_scan_new(keyed.graph.move(), [SemaGraphModuleResult]{}, keyed.rows.move(), keyed.order.move())
     scan.qualified = Val(jobs.move())
@@ -92,7 +92,7 @@ sema_registration_qualified_take: fn(found: ^^[SemaGraphScanFound?]) -> [SemaQua
     loop slots.len() > 0 {
         slot := slots.pop() ?? break
         row := compiler_threads_slot_taken(slot)
-        taken.push(row.qualified.move() ?? panic("a qualified scan found nothing"))
+        taken.push(compiler_threads_slot_taken(row.qualified.move()))
     }
     taken
 }

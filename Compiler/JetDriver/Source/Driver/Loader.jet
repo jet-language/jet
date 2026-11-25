@@ -49,7 +49,7 @@ use {
         ast_program,
         compiler_threads_admit,
         compiler_threads_beside,
-        compiler_threads_failure_text,
+        compiler_threads_failed,
         compiler_threads_joined,
         compiler_threads_slot_taken,
         compiler_threads_taken,
@@ -5897,11 +5897,10 @@ JetDriverParseStreamJob: struct {
 }
 
 // A parse thread's answer: the unit at `position` of `pending`, parsed, or
-// why the thread stopped (`failure`, with no unit).
-JetDriverParseStreamed: struct {
-    position: Int,
-    unit: JetDriverParsedUnit?,
-    failure: String,
+// the failure that stopped the thread.
+JetDriverParseStreamed: enum {
+    Parsed(position: Int, unit: JetDriverParsedUnit),
+    Stopped(failure: TaskFailure),
 }
 
 // The load's parse stream (jet_driver_load_walk). Each turn of the load hands
@@ -5986,9 +5985,11 @@ jet_driver_parse_stream_send: fn(
         jet_driver_parse_stream_spawn(group, beside - stream.threads, claims, done)
         stream.threads = beside
     }
+    // The load holds a receiver of `jobs` itself, so a send is refused only
+    // when the load is canceled.
     loop index in 0..<count {
         job: batch.remove(index) ?? next
-        jobs.send(JetDriverParseStreamJob{position: first + index, job: job.move()}) ?? panic("the load's parse threads stopped before it sent them every unit")
+        jobs.send(JetDriverParseStreamJob{position: first + index, job: job.move()}) ?? compiler_threads_failed(TaskFailure.Canceled)
         stream.outstanding += 1
     }
 }
@@ -6006,25 +6007,21 @@ jet_driver_parse_stream_spawn: fn(group: Group, count: Int, claims: Receiver<Jet
 jet_driver_parse_stream_thread: fn(claims: ^^Receiver<JetDriverParseStreamJob>, done: ^^Sender<JetDriverParseStreamed>) {
     task.group jet_driver_parse_stream_guard {
         parses: task jet_driver_parse_stream_parse(claims.move(), done.copy())
-        failure: parses.join() ?? compiler_threads_failure_text(err)
-        if failure != "" {
-            jet_driver_parse_stream_answer(done, JetDriverParseStreamed{position: -1, unit: None, failure: failure}).drop("the load is gone")
-        }
+        // A refused answer means the load is gone, with no one left to tell.
+        parses.join() ?? jet_driver_parse_stream_answer(done, JetDriverParseStreamed.Stopped{failure: err}) ?? ()
     }
 }
 
 // Parses each unit it takes from `claims`, on one thread, until the load
-// closes the stream, and sends each back on `done`; no failure (""). The
-// units' spellings' Strings come from a pool of this thread's own
-// (name_pool_adopt).
-jet_driver_parse_stream_parse: fn(claims: ^^Receiver<JetDriverParseStreamJob>, done: ^^Sender<JetDriverParseStreamed>) -> String {
+// closes the stream, and sends each back on `done`. The units' spellings'
+// Strings come from a pool of this thread's own (name_pool_adopt).
+jet_driver_parse_stream_parse: fn(claims: ^^Receiver<JetDriverParseStreamJob>, done: ^^Sender<JetDriverParseStreamed>) {
     shared: name_table()
     own := name_table()
     loop {
         claimed: claims.receive() ?? break
-        jet_driver_parse_stream_answer(done, JetDriverParseStreamed{position: claimed.position, unit: Val(jet_driver_parse_unit(claimed.job, compiler_threads_single(), shared, own)), failure: ""}) ?? break
+        jet_driver_parse_stream_answer(done, JetDriverParseStreamed.Parsed{position: claimed.position, unit: jet_driver_parse_unit(claimed.job, compiler_threads_single(), shared, own)}) ?? break
     }
-    ""
 }
 
 // One answer to the load; a refused send means the load is gone.
@@ -6048,24 +6045,30 @@ jet_driver_parse_stream_take: fn(stream: ^JetDriverParseStream, finished: Receiv
             parsed = Val(jet_driver_parse_unit(job, if stream.outstanding > 0 -> compiler_threads_single() else -> request.compiler_threads, spellings, own))
             name_pool_fold(spellings, own)
         }
-        loop parsed == None {
-            streamed: finished.receive() ?? panic("the load's parse threads stopped before it took every unit")
-            if streamed.failure != "" -> panic(streamed.failure)
-            stream.outstanding -= 1
-            back: streamed.unit.move() ?? panic("a parse thread answered unit {streamed.position} without its parse")
-            if {
-                streamed.position == position -> parsed = Val(back.move())
-                else -> stream.arrived[streamed.position] = back.move()
-            }
-        }
     }
-    taken: parsed.move() ?? panic("the load took no parse for unit {position}")
+    taken: parsed.move() ?? jet_driver_parse_stream_receive(stream, finished, position)
     if request.trace_sink == .Val(sink) {
         if waited -> sink.end("parse", taken.parsed.program.items.len())
         load: stream.loads.remove(position) ?? JetDriverParseLoad{user: false, core_bytes: -1}
         jet_driver_parse_volume_add(stream.volume, load, taken)
     }
     taken
+}
+
+// The parse of the unit at `position`, received from the parse threads. The
+// units they send back first wait in `stream.arrived` for their turn. The load
+// holds a sender of `finished` itself, so a receive ends without an answer
+// only when the load is canceled.
+jet_driver_parse_stream_receive: fn(stream: ^JetDriverParseStream, finished: Receiver<JetDriverParseStreamed>, position: Int) -> JetDriverParsedUnit {
+    loop {
+        streamed: finished.receive() ?? compiler_threads_failed(TaskFailure.Canceled)
+        if streamed == .Stopped(failure) -> compiler_threads_failed(failure)
+        stream.outstanding -= 1
+        if streamed.move() == .Parsed(at, unit) {
+            if at == position -> return unit
+            stream.arrived[at] = unit
+        }
+    }
 }
 
 jet_driver_add_core_unit: fn(source_units: ^[JetDriverSourceUnit], queued: ^[Bool], generated: ^[SourceFile], module_name: String, relative_path: String, file_index: Int, source: String) -> Int {

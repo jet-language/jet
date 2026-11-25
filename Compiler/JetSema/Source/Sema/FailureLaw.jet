@@ -193,25 +193,24 @@ sema_error_source_reaches_err: fn(source: Type, environment: SemaScopeEnvironmen
 // Whether `ty` names a struct, enum or distinct type outside Core that is
 // declared `#Error`.
 sema_program_error_nominal: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
-    if program.registration_graph == .Val(graph) {
-        name: sema_type_graph_base_name(ty) ?? return false
-        resolved: sema_type_graph_lookup_symbol_at(graph, sema_scope_caller_row(environment, graph), name) ?? return false
-        if sema_resolved_kind(graph, resolved) != SymbolKind.Type || module_is_core(resolved.target_module_identity) {
-            return false
+    graph: program.registration_graph
+    name: sema_type_graph_base_name(ty) ?? return false
+    resolved: sema_type_graph_lookup_symbol_at(graph, sema_scope_caller_row(environment, graph), name) ?? return false
+    if sema_resolved_kind(graph, resolved) != SymbolKind.Type || module_is_core(resolved.target_module_identity) {
+        return false
+    }
+    row: sema_type_graph_resolved_nominal_row(graph, resolved) ?? return false
+    // Matched in place: a pattern on the indexed path copies the whole item.
+    nominal: graph.modules[row.module_index].nominals[row.row]
+    if nominal.source == .SourceAST(item) {
+        if item == .Enum(definition) {
+            return sema_failure_markers_name_error(definition.type_markers)
         }
-        row: sema_type_graph_resolved_nominal_row(graph, resolved) ?? return false
-        // Matched in place: a pattern on the indexed path copies the whole item.
-        nominal: graph.modules[row.module_index].nominals[row.row]
-        if nominal.source == .SourceAST(item) {
-            if item == .Enum(definition) {
-                return sema_failure_markers_name_error(definition.type_markers)
-            }
-            if item == .Struct(definition) {
-                return sema_failure_markers_name_error(definition.type_markers)
-            }
-            if item == .Distinct(definition) {
-                return sema_failure_markers_name_error(definition.type_markers)
-            }
+        if item == .Struct(definition) {
+            return sema_failure_markers_name_error(definition.type_markers)
+        }
+        if item == .Distinct(definition) {
+            return sema_failure_markers_name_error(definition.type_markers)
         }
     }
     false
@@ -456,7 +455,7 @@ sema_gone_failure_value_end: fn(then_body: [Stmt], then_value: Expr) -> Int Neve
 }
 
 sema_gone_failure_edit: fn(head: Span, arm: Span?, value_end: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TextEdit? {
-    graph: program.registration_graph ?? return None
+    graph: program.registration_graph
     caller: sema_scope_caller_index(environment, graph) ?? return None
     raw: graph.modules[caller].source.bytes()
     start: head.start
@@ -962,11 +961,9 @@ sema_prelude_error_conversion: fn(source: Type, diagnostics: ^[Diagnostic]) -> F
 }
 
 sema_module_no_prelude: fn(environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
-    if program.registration_graph == .Val(graph) {
-        module_index: sema_scope_caller_index(environment, graph) ?? return false
-        return graph.modules[module_index].program.no_prelude
-    }
-    false
+    graph: program.registration_graph
+    module_index: sema_scope_caller_index(environment, graph) ?? return false
+    graph.modules[module_index].program.no_prelude
 }
 
 // The route of one propagation site: a source that reaches the default `Err`
@@ -1244,37 +1241,34 @@ sema_failure_items_nominal_is_error: fn(items: [Item], module_identity: ModuleID
 // The declaration a qualified alias target names, resolved from the module
 // that declares the alias.
 sema_failure_alias_target_is_error: fn(target_name: String, module_identity: ModuleID, seen: [String], environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool? {
-    if program.registration_graph == .Val(graph) {
-        resolved: sema_type_graph_lookup_symbol(graph, module_identity, target_name) ?? return None
-        row: sema_type_graph_resolved_nominal_row(graph, resolved) ?? return None
-        home: graph.modules[row.module_index]
-        return sema_failure_items_nominal_is_error(home.program.items, home.module_identity, sema_error_conversion_leaf(target_name), seen, environment, program)
-    }
-    None
+    graph: program.registration_graph
+    resolved: sema_type_graph_lookup_symbol(graph, module_identity, target_name) ?? return None
+    row: sema_type_graph_resolved_nominal_row(graph, resolved) ?? return None
+    home: graph.modules[row.module_index]
+    sema_failure_items_nominal_is_error(home.program.items, home.module_identity, sema_error_conversion_leaf(target_name), seen, environment, program)
 }
 
 // The declaring module wins, then a name it imports
 // (`use core.encoding.[HexError]`); other graph modules supply the rest.
 sema_failure_nominal_is_error: fn(leaf: String, seen: [String], environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool? {
-    if program.registration_graph == .Val(graph) {
-        caller_index := -1
-        if sema_scope_caller_index(environment, graph) == .Val(module_index) {
-            caller_index = module_index
-            if sema_registration_lookup_name(graph, environment.module_identity, leaf) != None {
-                local: sema_failure_items_nominal_is_error(graph.modules[module_index].program.items, environment.module_identity, leaf, seen, environment, program)
-                if local != None -> return local
-            }
+    graph: program.registration_graph
+    caller_index := -1
+    if sema_scope_caller_index(environment, graph) == .Val(module_index) {
+        caller_index = module_index
+        if sema_registration_lookup_name(graph, environment.module_identity, leaf) != None {
+            local: sema_failure_items_nominal_is_error(graph.modules[module_index].program.items, environment.module_identity, leaf, seen, environment, program)
+            if local != None -> return local
         }
-        named: sema_failure_alias_target_is_error(leaf, environment.module_identity, seen, environment, program)
-        if named != None -> return named
-        last_module := -1
-        loop reference in sema_registration_nominal_rows_named(graph, leaf) {
-            module_row_index: reference.module_index
-            if module_row_index == caller_index || module_row_index == last_module -> next
-            last_module = module_row_index
-            imported: sema_failure_items_nominal_is_error(graph.modules[module_row_index].program.items, graph.modules[module_row_index].module_identity, leaf, seen, environment, program)
-            if imported != None -> return imported
-        }
+    }
+    named: sema_failure_alias_target_is_error(leaf, environment.module_identity, seen, environment, program)
+    if named != None -> return named
+    last_module := -1
+    loop reference in sema_registration_nominal_rows_named(graph, leaf) {
+        module_row_index: reference.module_index
+        if module_row_index == caller_index || module_row_index == last_module -> next
+        last_module = module_row_index
+        imported: sema_failure_items_nominal_is_error(graph.modules[module_row_index].program.items, graph.modules[module_row_index].module_identity, leaf, seen, environment, program)
+        if imported != None -> return imported
     }
     None
 }
@@ -1352,7 +1346,8 @@ sema_check_failure_contract_type: fn(ty: Type, span: Span, in_return: Bool, gene
         // An alias can hide a second optional layer: `Maybe<Int>?` where
         // `Maybe<T>: T?` is `Int??`, which has no meaning.
         .Option(inner) -> {
-            if program.registration_graph == .Val(graph) && !(inner == .Option(_)) {
+            graph: program.registration_graph
+            if !(inner == .Option(_)) {
                 resolved: sema_type_resolve_declared_recursive(graph, inner, sema_scope_caller_row(environment, graph), environment.generic_params)
                 if resolved == .Option(_) {
                     diagnostics.push(sema_error("E0309", span, "an optional type can't hold another optional type", "`{type_name(resolved)}?` isn't supported — use one `?` only", "drop the inner `?` or unwrap before wrapping again"))
@@ -1447,16 +1442,15 @@ sema_failure_union_names_generic: fn(members: [Type], generic_names: [String]) -
 // declaration `alias` keeps private.
 sema_check_private_module_type: fn(name: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) {
     qualified: name.split_once(".") ?? return
-    if program.registration_graph == .Val(graph) {
-        caller: sema_scope_caller_row(environment, graph)
-        if caller < 0 {
-            return
-        }
-        if sema_registration_private_module_path(graph, graph.modules[caller].module_identity, name) == .Val(path) {
-            diagnostics.push(sema_registration_private_module_error(path, span))
-        } else if !qualified.after.contains(".") && sema_registration_private_member(graph, graph.modules[caller].module_identity, qualified.before, qualified.after) {
-            diagnostics.push(sema_registration_private_member_error(qualified.after, qualified.before, span))
-        }
+    graph: program.registration_graph
+    caller: sema_scope_caller_row(environment, graph)
+    if caller < 0 {
+        return
+    }
+    if sema_registration_private_module_path(graph, graph.modules[caller].module_identity, name) == .Val(path) {
+        diagnostics.push(sema_registration_private_module_error(path, span))
+    } else if !qualified.after.contains(".") && sema_registration_private_member(graph, graph.modules[caller].module_identity, qualified.before, qualified.after) {
+        diagnostics.push(sema_registration_private_member_error(qualified.after, qualified.before, span))
     }
 }
 
@@ -1466,9 +1460,8 @@ sema_check_private_module_type: fn(name: String, span: Span, environment: SemaSc
 // declaration, so its member is resolved on its own.
 sema_check_expiring_secret_declared_type: fn(ty: Type, span: Span, generic_names: [String], environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) {
     resolved := ty
-    if program.registration_graph == .Val(graph) {
-        resolved = sema_type_resolve_declared_recursive(graph, ty, sema_scope_caller_row(environment, graph), environment.generic_params)
-    }
+    graph: program.registration_graph
+    resolved = sema_type_resolve_declared_recursive(graph, ty, sema_scope_caller_row(environment, graph), environment.generic_params)
     if resolved == .Apply(name, args) {
         if !sema_is_expiring_secret_name(name) {
             return
@@ -1477,14 +1470,12 @@ sema_check_expiring_secret_declared_type: fn(ty: Type, span: Span, generic_names
             if sema_is_expiring_secret_member_type(args[0]) {
                 return
             }
-            if program.registration_graph == .Val(graph) {
-                caller: sema_scope_caller_row(environment, graph)
-                if sema_is_expiring_secret_member_type(sema_type_resolve_declared_recursive(graph, args[0], caller, environment.generic_params)) {
-                    return
-                }
-                if args[0] == .Named(formal) && generic_names.contains(formal) && sema_expiring_secret_declared_by(graph, caller) {
-                    return
-                }
+            caller: sema_scope_caller_row(environment, graph)
+            if sema_is_expiring_secret_member_type(sema_type_resolve_declared_recursive(graph, args[0], caller, environment.generic_params)) {
+                return
+            }
+            if args[0] == .Named(formal) && generic_names.contains(formal) && sema_expiring_secret_declared_by(graph, caller) {
+                return
             }
         }
         diagnostics.push(sema_error("E0112", span, "`ExpiringSecret<T>` requires a secret type", "only Secret, SigningKey, and X25519SecretKey have the audited move-only zeroizing contract required by this wrapper", "use `ExpiringSecret<crypto.Secret>`, `ExpiringSecret<crypto.SigningKey>`, or `ExpiringSecret<crypto.X25519SecretKey>`"))
@@ -1564,10 +1555,8 @@ sema_type_declared_names: fn(graph: SemaRegistrationGraph, caller: Int) -> [Stri
 
 // The types the environment's module declares in the pass's graph.
 sema_failure_declared_type_names: fn(environment: SemaScopeEnvironment, program: SemaProgramTables) -> [String] {
-    if program.registration_graph == .Val(graph) {
-        return sema_type_declared_names(graph, sema_scope_caller_row(environment, graph))
-    }
-    [String]{}
+    graph: program.registration_graph
+    sema_type_declared_names(graph, sema_scope_caller_row(environment, graph))
 }
 
 // E0119 twice for `Name<…>` where `Name` names nothing: the missing type,
@@ -1585,10 +1574,8 @@ sema_unknown_generic_type_name: fn(name: String, span: Span, diagnostics: ^[Diag
 // Whether signature type name `name` names nothing (#6294), judged on the
 // pass's registration graph, which the program tables carry.
 sema_failure_written_name_unknown: fn(name: String, generic_names: [String], environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
-    if program.registration_graph == .Val(graph) {
-        return sema_type_written_name_unknown(graph, sema_scope_caller_row(environment, graph), name, generic_names)
-    }
-    false
+    graph: program.registration_graph
+    sema_type_written_name_unknown(graph, sema_scope_caller_row(environment, graph), name, generic_names)
 }
 
 // A member with an open shape, or a member that mentions one of the
@@ -1671,9 +1658,8 @@ sema_check_public_failure_carrier: fn(func: Func, environment: SemaScopeEnvironm
     }
     return_type: func.return_type ?? return
     if return_type == .Result(_, error_type) {
-        if program.registration_graph == .Val(graph) {
-            sema_check_public_failure_carrier_graph(func.name, error_type, graph, environment.module_identity, diagnostics)
-        }
+        graph: program.registration_graph
+        sema_check_public_failure_carrier_graph(func.name, error_type, graph, environment.module_identity, diagnostics)
     }
 }
 
@@ -1905,14 +1891,12 @@ sema_never_module_call_diverges: fn(receiver: Expr, method: String, arity: Int, 
         }
     }
     if module_is_none(module_identity) -> return false
-    if program.registration_graph == .Val(graph) {
-        module_index: sema_registration_module_index(graph, module_identity) ?? return false
-        export: sema_registration_resolve_export(graph, module_index, member, environment.module_identity, environment.package_identity, [String]{}) ?? return false
-        row: sema_call_export_function_row(environment, program, export) ?? return false
-        declared: graph.modules[row.module_index].functions[row.row].declaration.return_type ?? return false
-        return sema_never_callee_return_diverges(declared)
-    }
-    false
+    graph: program.registration_graph
+    module_index: sema_registration_module_index(graph, module_identity) ?? return false
+    export: sema_registration_resolve_export(graph, module_index, member, environment.module_identity, environment.package_identity, [String]{}) ?? return false
+    row: sema_call_export_function_row(environment, program, export) ?? return false
+    declared: graph.modules[row.module_index].functions[row.row].declaration.return_type ?? return false
+    sema_never_callee_return_diverges(declared)
 }
 
 // A function whose written success type is `Never`: bare, or as the success of a fallible return.
@@ -1948,12 +1932,9 @@ sema_lint_inferred_never_return: fn(func: Func, owner_key: String, environment: 
     if !func.is_pub || func.compiler_generated || sema_function_promises_never(func) || module_is_core(environment.module_identity) {
         return
     }
-    if program.registration_graph == .Val(graph) {
-        owner: symbol_find(graph.symbols, owner_key) ?? return
-        if !sema_divergence_function_diverges(graph, owner) {
-            return
-        }
-    } else {
+    graph: program.registration_graph
+    owner: symbol_find(graph.symbols, owner_key) ?? return
+    if !sema_divergence_function_diverges(graph, owner) {
         return
     }
     name: sema_inline_member_source_name(func.name)

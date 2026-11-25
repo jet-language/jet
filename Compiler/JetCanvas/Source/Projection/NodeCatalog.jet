@@ -83,7 +83,7 @@ descriptor_for_id: fn(id: String) -> NodeDescriptor Never! {
 }
 
 insert_descriptor_id: fn(transaction: String, pure: Bool) -> String Never! {
-    descriptor := if transaction == "insert_call" -> descriptor_for_id(if pure -> "function_pure" else -> "function_exec") else -> descriptor_for_transaction(transaction)
+    descriptor: if transaction == "insert_call" -> descriptor_for_id(if pure -> "function_pure" else -> "function_exec") else -> descriptor_for_transaction(transaction)
     if !descriptor.palette.insertable {
         panic("Canvas action descriptor `{descriptor.id}` is not insertable")
     }

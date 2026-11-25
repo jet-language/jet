@@ -50,7 +50,7 @@ reset_fidelity: fn() -[Env]> Never! { sys_rt.set_perf_bits(0) }
 /// Under `jet perf run --lens=alloc`, keeps a heap snapshot named `name`:
 /// the program's live blocks by the line that allocated them, which
 /// `jet perf view` lists. Any other run keeps nothing.
-heap_mark: fn(name: String) -[Env]> Never! { core.perf.__heap_mark(name) }
+heap_mark: fn(name: String) -[Env]> Never! { sys_rt.perf_heap_mark(name) }
 
 of: fn(fidelity: Float) -> Perf Never! {
     v := fidelity
@@ -80,28 +80,28 @@ Zone: struct {
     start: Int,
 
     impl Close {
-        close: fn(^^self) Never! { core.perf.__zone_close(self.name, self.start) }
+        close: fn(^^self) Never! { sys_rt.perf_zone_close(self.name, self.start) }
     }
 }
 
 /// Opens a zone named `name` that closes when the block holding it ends:
 /// `_z: perf.zone("broadphase")`. Outside `jet perf run` it records
 /// nothing.
-zone: fn(name: String) -> Zone Never! { Zone{name: name, start: core.perf.__zone_open_named(name)} }
+zone: fn(name: String) -> Zone Never! { Zone{name: name, start: sys_rt.perf_zone_open_named(name)} }
 
 /// Marks the end of one frame on the `jet perf run` timeline; `jet perf
 /// view` reports the frames' mean and longest interval.
-frame: fn() Never! { core.perf.__frame() }
+frame: fn() Never! { sys_rt.perf_frame() }
 
 /// Records `value` on the plot named `name` at this moment of the `jet
 /// perf run` timeline.
-plot: fn(name: String, value: Float) Never! { core.perf.__plot_float(name, value) }
+plot: fn(name: String, value: Float) Never! { sys_rt.perf_plot_float(name, value) }
 
 /// One pass of the progress point `name`: `jet perf run --lens=causal`
 /// predicts how much sooner each such pass comes if a line were faster, as
 /// it does for each closed zone and each finished task. Outside that lens
 /// it records nothing.
-progress: fn(name: String) Never! { core.perf.__progress(name) }
+progress: fn(name: String) Never! { sys_rt.perf_progress(name) }
 
 /// A marker for the functions to profile: `#Perf.Profiled` on a function or
 /// method, or on a package header to reach every function of the package.
@@ -162,4 +162,13 @@ profile: fn(meta: Compiler) {
     unchanged: fidelity() == 0.5
     reset_fidelity()
     assert(rejected && unchanged)
+}
+
+#Test("outside jet perf run a zone opens at 0 and every profiler mark records nothing") {
+    zone_start: zone("core.perf test").start
+    assert(zone_start == 0)
+    frame()
+    plot("core.perf test", 1.5)
+    progress("core.perf test")
+    heap_mark("core.perf test")
 }

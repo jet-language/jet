@@ -6790,10 +6790,18 @@ ir_route_call_args: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, symbol: String
     b.split_armed = false
     slots := [Int]{}
     loop (index, arg) in args {
-        slot: ir_expr(m, p, b, arg)
+        // A jet.runtime binding's ListMut parameter takes its argument as the
+        // write borrow a Core call's `^` argument is (ir_borrow).
+        list_mut := false
+        if declared == .Val(route) && index < route.params.len() {
+            if route.params[index] == .ListMut(_) -> list_mut = true
+        }
+        if ir_body_node(p, b, arg).kind == .Borrow(_, _) -> list_mut = false
+        slot: if list_mut -> ir_write_base(m, p, b, arg, span) else -> ir_expr(m, p, b, arg)
         if ir_failed(b) -> return -1
         // A route writes a `^` List argument's buffer in place: a buffer
         // another holder shares is first the argument's own.
+        if list_mut -> ir_make_unique(m, p, b, slot)
         if ir_body_node(p, b, arg).kind == .Borrow(_, access) {
             if access == .Write -> ir_make_unique(m, p, b, slot)
         }

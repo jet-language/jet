@@ -173,7 +173,8 @@ sema_call_debug_traceable: fn(ty: Type, environment: SemaScopeEnvironment, progr
             if name == "GameImage" || name == "GameSound" -> return true
             // A Clock's Debug form is its Show form, `Clock { now: N }`.
             if sema_call_is_clock_type(ty) -> return true
-            if program.registration_graph == .Val(graph) && sema_registration_unit_fact_for_type(graph, ty) != None {
+            graph: program.registration_graph
+            if sema_registration_unit_fact_for_type(graph, ty) != None {
                 return true
             }
             sema_comparability_implements(environment, program, ty, "Debug")
@@ -199,7 +200,7 @@ sema_call_debug_traceable: fn(ty: Type, environment: SemaScopeEnvironment, progr
             true
         }
         .TraitObject(bounds) -> {
-            graph: program.registration_graph ?? return false
+            graph: program.registration_graph
             holders: sema_call_reflection_trait_holders(graph, bounds) ?? return false
             loop reference in holders.impls {
                 if !sema_call_debug_traceable(graph.modules[reference.module_index].impls[reference.row].target_type, environment, program) {
@@ -288,7 +289,9 @@ sema_call_check_special_debug: fn(call: Call, expected: Type?, environment: Sema
     // The Core library's check (core_seal) refuses one too: the function
     // checks it captures (CoreBodies.jet) load in a `jet build` as well as in
     // a run, so no Core body may hold a trace either would refuse.
-    if program.registration_graph == .Val(graph) && (graph.core_seal || sema_build_facts_reject_debug_traces(graph.build_facts)) {
+    graph: program.registration_graph
+    // Snapshot: a lone program's check has no build to refuse a trace.
+    if graph.mode == .Program && (graph.core_seal || sema_build_facts_reject_debug_traces(graph.build_facts)) {
         diagnostic: sema_error("E3405", call.name_span, "A `debug` trace is left at `{site}`.", "`debug(value)` is a development trace: it prints while you run, test, or evaluate a program and adds no effect, so a shipped artifact (`jet build`) or a release-profile build must not contain it.", "Remove the `debug(…)` wrapper and keep the expression; `jet fix` applies this edit.")
         if unwrap == .Val(edit) -> diagnostics.push(diagnostic_with_edit(diagnostic, edit)) else {
             diagnostics.push(diagnostic)
@@ -425,12 +428,11 @@ sema_call_try_ambient_prelude: fn(call: Call, expected: Type?, environment: Sema
                 return SemaDirectSpecialCheck{handled: true, value: None}
             }
             // A math type Core's source declares builds through its own `new`.
-            if program.registration_graph == .Val(graph) {
-                if sema_type_source_owns_nominal(graph, call.name, sema_scope_caller_row(environment, graph)) {
-                    // copy: the generated call owns its arguments; `call` keeps the written ones.
-                    invocation: Expr.MethodCall{receiver: Expr.Ident{name: call.name, span: call.name_span, id: AST_NODE_GENERATED}, method: "new", method_span: call.name_span, owner_type_args: [Type]{}, type_args: [Type]{}, args: call.args.copy(), id: AST_NODE_GENERATED}
-                    return SemaDirectSpecialCheck{handled: true, value: sema_check_expression(invocation, expected, environment, program, scopes, check, diagnostics)}
-                }
+            graph: program.registration_graph
+            if sema_type_source_owns_nominal(graph, call.name, sema_scope_caller_row(environment, graph)) {
+                // copy: the generated call owns its arguments; `call` keeps the written ones.
+                invocation: Expr.MethodCall{receiver: Expr.Ident{name: call.name, span: call.name_span, id: AST_NODE_GENERATED}, method: "new", method_span: call.name_span, owner_type_args: [Type]{}, type_args: [Type]{}, args: call.args.copy(), id: AST_NODE_GENERATED}
+                return SemaDirectSpecialCheck{handled: true, value: sema_check_expression(invocation, expected, environment, program, scopes, check, diagnostics)}
             }
             components: loop _ in 0..<sema_call_math_arity(call.name) -> sema_call_math_scalar_type(call.name)
             sema_call_check_value_constructor(call, call.name, components, true, expected, environment, program, scopes, check, diagnostics)
@@ -476,19 +478,19 @@ sema_call_check_ambient_close: fn(call: Call, environment: SemaScopeEnvironment,
         diagnostics.push(sema_error("E0201", argument.span, "`close` takes ownership of its resource", "`Close.close(^^self)` takes its receiver, so cleanup runs on exactly one owner; `^` would only lend it", "write `close(resource)`"))
         return None
     }
-    if program.registration_graph == .Val(graph) {
-        // An undecided bound (a Core native carrier has no nominal row to
-        // carry a `Close` impl) is no `Close` implementation, and the user
-        // can't add one (#6120); nor can they for a type Core declares, whose
-        // impls of Core's `Close` live in Core.
-        decided: sema_type_bound_satisfied_at(graph, value.ty, "Close", sema_scope_caller_row(environment, graph), check.context.generic_params)
-        if decided != .Val(true) {
-            shown: type_name(value.ty)
-            addable: decided != None && !sema_call_close_declared_in_core(graph, environment, value.ty)
-            fix: if addable -> "write `impl {shown}.Close {{ … }}` with every required method" else -> "remove the `close` call; `{shown}` has no `Close` implementation to run"
-            diagnostics.push(sema_error("E0905", expr_span(argument.expr), "`{shown}` isn't `Close`", "`{shown}` would need to implement `Close` before it can be used here", fix))
-            return None
-        }
+    graph: program.registration_graph
+    // An undecided bound (a Core native carrier has no nominal row to
+    // carry a `Close` impl) is no `Close` implementation, and the user
+    // can't add one (#6120); nor can they for a type Core declares, whose
+    // impls of Core's `Close` live in Core.
+    // Snapshot: a lone program registers no `Close` impl, so its check takes the bound as met.
+    decided: if graph.mode == .Snapshot -> Val(true) else -> sema_type_bound_satisfied_at(graph, value.ty, "Close", sema_scope_caller_row(environment, graph), check.context.generic_params)
+    if decided != .Val(true) {
+        shown: type_name(value.ty)
+        addable: decided != None && !sema_call_close_declared_in_core(graph, environment, value.ty)
+        fix: if addable -> "write `impl {shown}.Close {{ … }}` with every required method" else -> "remove the `close` call; `{shown}` has no `Close` implementation to run"
+        diagnostics.push(sema_error("E0905", expr_span(argument.expr), "`{shown}` isn't `Close`", "`{shown}` would need to implement `Close` before it can be used here", fix))
+        return None
     }
     // `close(name)` consumes the owner exactly, like a `^^` argument: a later
     // use of `name` is E0121 and never turns the move into a hidden copy.
@@ -1166,7 +1168,7 @@ sema_call_check_expect_snapshot: fn(call: Call, args: [CallArg], type_args: [Typ
 // nominal operand (sema_expr_equality_resolution); None when the values
 // compare structurally, as a derived hook compares them.
 sema_call_assert_eq_hook: fn(left: TExpr, right: TExpr, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, diagnostics: ^[Diagnostic]) -> TMethodRef? {
-    graph: program.registration_graph ?? return None
+    graph: program.registration_graph
     if !sema_expr_has_numeric_overload(left.ty) -> return None
     resolved: sema_expr_equality_resolution(graph, BinOp.Eq, left.ty, right.ty, span, environment, program, scopes, diagnostics) ?? return None
     if !resolved.receiver_is_left || resolved.derived -> return None
@@ -1245,7 +1247,7 @@ sema_call_core_direct_checked: fn(call: Call, expected: Type?, environment: Sema
         alias = parts[0]
         member = parts[1]
     } else {
-        // A Core host-leaf item import (`use core.files.[__mkdtemp_raw]`,
+        // A Core host-leaf item import (`use core.files.[__directory_fd]`,
         // registered as a Foreign symbol: no Jet declaration) is called by
         // its local name; its member is the imported item.
         visible: sema_scope_resolve_index(scopes, call.name) ?? return SemaDirectSpecialCheck{handled: false, value: None}
@@ -1690,7 +1692,9 @@ sema_call_inference_failed_argument: fn(facts: SemaCallInferenceFacts, args: [Ca
 // own slot type parameter (`parts__Va0`). An argument whose type misses a
 // slot's bound is E1313 at that argument, before inference names the slot.
 sema_call_variadic_slot_bounds_met: fn(target: SemaCallDirectTarget, callee: String, params: [SemaCallParam], binding: SemaCallBinding, args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> Bool {
-    if program.registration_graph == None -> return true
+    // Snapshot: a slot's bound names a registered trait, and a lone program
+    // registers none.
+    if program.registration_graph.mode == .Snapshot -> return true
     loop index in 0..<args.len() {
         slot: if index < binding.slots.len() -> binding.slots[index] else -> -1
         if slot < 0 || slot >= params.len() -> next
@@ -1860,10 +1864,9 @@ sema_call_lambda_failure_facts: fn(facts: ^SemaCallInferenceFacts, generic_param
 }
 
 sema_call_direct_target_abi: fn(target: SemaCallDirectTarget, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaRegistrationCallableABI? {
-    if program.registration_graph == .Val(graph) {
-        abi := sema_registration_callable_abi(graph, target.symbol.id)
-        if abi != None -> return abi
-    }
+    graph: program.registration_graph
+    abi := sema_registration_callable_abi(graph, target.symbol.id)
+    if abi != None -> return abi
     declaration: sema_scope_resolve_declaration(environment, program, target.symbol.id) ?? return None
     if declaration == {
         .Func(func) -> Val(sema_registration_callable_abi_for_func(func))
@@ -1895,11 +1898,9 @@ sema_call_point_in_body: fn(target: SemaCallDirectTarget, environment: SemaScope
     if environment.function_name == "" || !module_is_core(target.symbol.module_identity) {
         return false
     }
-    if program.registration_graph == .Val(graph) {
-        row: sema_registration_callable_row_of(graph, target.symbol.id) ?? return false
-        return sema_core_point_constructor(graph, row)
-    }
-    false
+    graph: program.registration_graph
+    row: sema_registration_callable_row_of(graph, target.symbol.id) ?? return false
+    sema_core_point_constructor(graph, row)
 }
 
 // E0956 when `target` is a compiler or build service import (`#Import(jet.
@@ -1911,7 +1912,7 @@ sema_call_service_out_of_phase: fn(target: SemaCallDirectTarget, span: Span, env
     if module_is_core(environment.module_identity) || !module_is_core(target.symbol.module_identity) || sema_scope_build_time(scopes, environment, program) {
         return None
     }
-    graph: program.registration_graph ?? return None
+    graph: program.registration_graph
     row: sema_registration_callable_row_of(graph, target.symbol.id) ?? return None
     if row == .Function(declaring, index) {
         service: parser_service_import(graph.modules[declaring].functions[index].declaration) ?? return None
@@ -2002,20 +2003,22 @@ sema_call_direct_checked_resolved: fn(check: ^SemaBodyCheck, candidate: SemaCall
     if binding.default_refs.len() > 0 {
         resolved_defaults := defaults
         if resolved_defaults.len() == 0 {
-            if program.registration_graph == {
-                .Val(graph) -> {
-                    registered_defaults: sema_call_registration_defaults(graph, binding) ?? {
-                        diagnostics.push(sema_error("E0906", call.name_span, "a default argument for this call could not be resolved", "registered callable defaults retain their graph identity and source location", "make the bound default available to Registration before checking this call"))
-                        return None
-                    }
-                    resolved_defaults = registered_defaults
-                }
-                .None -> {
+            if {
+                // Snapshot: a lone program's defaults are its own declarations' (sema_call_local_default_values).
+                program.registration_graph.mode == .Snapshot -> {
                     local_defaults: sema_call_local_default_values(candidate, binding, environment, program, scopes) ?? {
                         diagnostics.push(sema_error("E0906", call.name_span, "a default argument for this call could not be resolved", "callable defaults retain their owning declaration and source identity", "make the owning declaration available to Registration before checking this call"))
                         return None
                     }
                     resolved_defaults = local_defaults
+                }
+                else -> {
+                    graph: program.registration_graph
+                    registered_defaults: sema_call_registration_defaults(graph, binding) ?? {
+                        diagnostics.push(sema_error("E0906", call.name_span, "a default argument for this call could not be resolved", "registered callable defaults retain their graph identity and source location", "make the bound default available to Registration before checking this call"))
+                        return None
+                    }
+                    resolved_defaults = registered_defaults
                 }
             }
         }
@@ -2026,32 +2029,29 @@ sema_call_direct_checked_resolved: fn(check: ^SemaBodyCheck, candidate: SemaCall
     callee_facts := SemaContractCalleeFacts?{None}
     callee_facts_resolved := false
     has_markers := true
-    if program.registration_graph == .Val(graph) {
-        if sema_registration_callable_row_of(graph, candidate.symbol.id) == .Val(row) {
-            callee_facts_resolved = true
-            if row == {
-                .Function(module_index, index) -> {
-                    abi = Val(graph.modules[module_index].functions[index].abi)
-                    callee_facts = sema_contract_call_site_facts_of_func(graph.modules[module_index].functions[index].declaration)
-                    has_markers = graph.modules[module_index].functions[index].declaration.markers.len() > 0
-                }
-                .NominalMethod(module_index, owner, index) -> {
-                    abi = Val(graph.modules[module_index].nominals[owner].methods[index].abi)
-                    callee_facts = sema_contract_call_site_facts_of_func(graph.modules[module_index].nominals[owner].methods[index].declaration)
-                    has_markers = graph.modules[module_index].nominals[owner].methods[index].declaration.markers.len() > 0
-                }
-                .ImplMethod(module_index, owner, index) -> {
-                    abi = Val(graph.modules[module_index].impls[owner].methods[index].abi)
-                    callee_facts = sema_contract_call_site_facts_of_func(graph.modules[module_index].impls[owner].methods[index].declaration)
-                    has_markers = graph.modules[module_index].impls[owner].methods[index].declaration.markers.len() > 0
-                }
-                .Foreign(module_index, index) -> {
-                    abi = Val(graph.modules[module_index].foreign_functions[index].abi)
-                    has_markers = false
-                }
+    graph: program.registration_graph
+    if sema_registration_callable_row_of(graph, candidate.symbol.id) == .Val(row) {
+        callee_facts_resolved = true
+        if row == {
+            .Function(module_index, index) -> {
+                abi = Val(graph.modules[module_index].functions[index].abi)
+                callee_facts = sema_contract_call_site_facts_of_func(graph.modules[module_index].functions[index].declaration)
+                has_markers = graph.modules[module_index].functions[index].declaration.markers.len() > 0
             }
-        } else {
-            abi = sema_call_direct_target_abi(candidate, environment, program)
+            .NominalMethod(module_index, owner, index) -> {
+                abi = Val(graph.modules[module_index].nominals[owner].methods[index].abi)
+                callee_facts = sema_contract_call_site_facts_of_func(graph.modules[module_index].nominals[owner].methods[index].declaration)
+                has_markers = graph.modules[module_index].nominals[owner].methods[index].declaration.markers.len() > 0
+            }
+            .ImplMethod(module_index, owner, index) -> {
+                abi = Val(graph.modules[module_index].impls[owner].methods[index].abi)
+                callee_facts = sema_contract_call_site_facts_of_func(graph.modules[module_index].impls[owner].methods[index].declaration)
+                has_markers = graph.modules[module_index].impls[owner].methods[index].declaration.markers.len() > 0
+            }
+            .Foreign(module_index, index) -> {
+                abi = Val(graph.modules[module_index].foreign_functions[index].abi)
+                has_markers = false
+            }
         }
     } else {
         abi = sema_call_direct_target_abi(candidate, environment, program)
@@ -2075,11 +2075,9 @@ sema_call_direct_checked_resolved: fn(check: ^SemaBodyCheck, candidate: SemaCall
     // C ABI marshaling for yet is refused by a compile that lowers the call,
     // instead of stopping inside the IR.
     if abi == .Val(callable_abi) && callable_abi.is_c_abi && !module_is_core(environment.module_identity) && sema_refuses_unbuilt(program) {
-        if program.registration_graph == .Val(graph) {
-            if sema_checked_foreign_c_marshal_gap(graph, candidate.symbol.id) == .Val(gap) {
-                diagnostics.push(sema_error("E2104", call.name_span, "calling `{call.name}` is not built yet", "This `jet` cannot yet {gap}, and no other `jet` can build it.", "Remove the `{call.name}` call for now; native C ABI marshaling for it needs its Jet implementation first."))
-                return None
-            }
+        if sema_checked_foreign_c_marshal_gap(graph, candidate.symbol.id) == .Val(gap) {
+            diagnostics.push(sema_error("E2104", call.name_span, "calling `{call.name}` is not built yet", "This `jet` cannot yet {gap}, and no other `jet` can build it.", "Remove the `{call.name}` call for now; native C ABI marshaling for it needs its Jet implementation first."))
+            return None
         }
     }
     contract_bindings := [TStmt]{}
@@ -2209,7 +2207,8 @@ sema_call_written_arg_for_slot: fn(slots: [Int], slot: Int) -> Int? Never! {
 // arguments bind (Calls/CheckRules.jet).
 sema_call_check_direct_target_owned: fn(check: ^SemaBodyCheck, target: SemaCallDirectTarget, call: Call, defaults: [SemaCallDefaultValue], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, diagnostics: ^[Diagnostic]) -> SemaCallChecked? {
     rules := [SemaCallRule]{}
-    if sema_call_rules_heard_here(scopes) && program.registration_graph == .Val(graph) -> rules = sema_call_rules_of_callee(graph, target.symbol.id)
+    graph: program.registration_graph
+    if sema_call_rules_heard_here(scopes) -> rules = sema_call_rules_of_callee(graph, target.symbol.id)
     if rules.len() == 0 -> return sema_call_direct_checked_from_target(check, target, call, defaults, expected, environment, program, scopes, diagnostics)
     hearing: sema_call_rules_hear(rules, Val(target.symbol.id), call.name, call.name_span, call.args, None, None, None, call.name_span, None, "", scopes.current, environment, program, scopes, check, diagnostics)
     if hearing.rejected -> return None

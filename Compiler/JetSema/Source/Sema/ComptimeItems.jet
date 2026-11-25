@@ -1332,8 +1332,7 @@ sema_collect_comptime_declarations: fn(graph: ^^SemaRegistrationGraph, package_p
     // Recover the original graph from its tables.
     sema_comptime_body_work_flush(pass_environment.comptime_body_publication, trace_sink, "sema.check")
     imports := sema_comptime_stage_imports(pass_program)
-    taken := pass_program.registration_graph.move()
-    pass_graph := taken.move() ?? panic("the declaration pass lost its registration graph")
+    pass_graph := pass_program.registration_graph.move()
     // The name facts only read the graph: the pass's facts of it stand.
     graph_facts := SemaComptimeGraphFacts{boxed_edges: pass_program.boxed_edges.move(), copy_facts: pass_program.copy_facts.move()}
     names := sema_name_facts_empty()
@@ -1361,14 +1360,13 @@ sema_collect_comptime_declarations: fn(graph: ^^SemaRegistrationGraph, package_p
 // payload borrows it, whereas binding it from the owned local would copy the
 // whole graph (every module's AST) natively, once per call.
 sema_comptime_trace_module_begin: fn(sink: CompilerTraceSink, program: SemaProgramTables, module_index: Int, module_count: Int) {
-    if program.registration_graph == .Val(registered) {
-        sink.begin("sema.module", registered.modules[module_index].module_path, module_index, module_count)
-    }
+    registered: program.registration_graph
+    sink.begin("sema.module", registered.modules[module_index].module_path, module_index, module_count)
 }
 
 sema_comptime_stage_imports: fn(program: SemaProgramTables) -> [SemaRegistrationImport] {
-    if program.registration_graph == .Val(registered) -> return registered.imports.copy()
-    panic("the declaration pass lost its registration graph")
+    registered: program.registration_graph
+    registered.imports.copy()
 }
 
 // Every module of the staging run's graph checked for its declarations under
@@ -1378,10 +1376,10 @@ sema_comptime_stage_imports: fn(program: SemaProgramTables) -> [SemaRegistration
 // share one environment that publishes `values` to comptime bodies; none
 // reads its entered module.
 sema_comptime_modules_with_values: fn(programs: ^[SemaProgramTables], values: [SemaComptimeItemValue], threads: CompilerThreads) -> [SemaGraphModuleResult] {
-    module_count: sema_comptime_staged_module_count(programs[0]) ?? panic("the staging run's program tables lost their registration graph")
+    module_count: programs[0].registration_graph.modules.len()
     environment := sema_scope_environment_init(module_none(), "", "", "", SemaSourceOrigin.Snapshot, [SemaSourceSegment]{}, [SemaScopeDeclaration]{})
     environment.comptime_body_publication = sema_comptime_body_values_freeze(sema_comptime_body_values_from_items(values), None, false)
-    program := programs.pop() ?? panic("the staging run's program tables left their slot")
+    program := compiler_threads_taken(programs)
     module_state: Shared{SemaCheckShared{environments: [SemaScopeEnvironment]{}, programs: [SemaProgramTables]{}, memory_plans: [SemaFunctionMemoryPlan]{}}}
     // A declaration check reads no memory plan.
     sema_check_shared_fill(module_state, environment, program, sema_function_memory_plan_new())
@@ -1396,13 +1394,6 @@ sema_comptime_modules_with_values: fn(programs: ^[SemaProgramTables], values: [S
         modules.push(check.module_result.move())
     }
     modules
-}
-
-// The number of modules of `program`'s registration graph, or None when it
-// has none.
-sema_comptime_staged_module_count: fn(program: SemaProgramTables) -> Int? {
-    if program.registration_graph == .Val(registered) -> return Val(registered.modules.len())
-    None
 }
 
 // A compiler thread is admitted for at least this many bytes of module item
@@ -1487,22 +1478,20 @@ sema_check_declaration_weights_in_shared: fn(shared_state: Shared<SemaCheckShare
 }
 
 sema_check_declaration_weights: fn(program: SemaProgramTables, modules: [Int], weights: ^[Int], scope_rows: ^Int) -> Int {
-    if program.registration_graph == .Val(graph) {
-        work := 0
-        loop module_index in modules {
-            weight := 0
-            loop item_index in 0..<graph.modules[module_index].program.items.len() {
-                span: sema_compiler_index_item_span(graph.modules[module_index].program.items[item_index])
-                weight += span.end - span.start
-            }
-            weights.push(weight)
-            work += weight
-            rows: sema_check_module_scope_rows(graph, module_index)
-            if rows > scope_rows -> scope_rows = rows
+    graph: program.registration_graph
+    work := 0
+    loop module_index in modules {
+        weight := 0
+        loop item_index in 0..<graph.modules[module_index].program.items.len() {
+            span: sema_compiler_index_item_span(graph.modules[module_index].program.items[item_index])
+            weight += span.end - span.start
         }
-        return work
+        weights.push(weight)
+        work += weight
+        rows: sema_check_module_scope_rows(graph, module_index)
+        if rows > scope_rows -> scope_rows = rows
     }
-    panic("the declaration pass lost its registration graph")
+    work
 }
 
 sema_check_declaration_module_in_shared: fn(shared_state: Shared<SemaCheckShared>, module_index: Int, position: Int, values: [SemaComptimeItemValue], foreign: Bool) -> SemaDeclarationCheck {
@@ -1516,7 +1505,7 @@ sema_check_shared_counting: fn(shared_state: Shared<SemaCheckShared>, counting: 
     permit: shared_state.guard_edit()
     program := compiler_threads_taken(permit.value.programs)
     old: sema_comptime_precheck_graph_counting(program)
-    program.registration_graph = sema_comptime_precheck_counting(program.registration_graph.move(), counting)
+    program.registration_graph.counting = counting
     permit.value.programs.push(program)
     old
 }
@@ -1644,8 +1633,8 @@ sema_comptime_environment_tables: fn(graph: ^^SemaRegistrationGraph, values: [Se
     resolved := graph.move()
     trail := sema_graph_trail_init()
     sema_comptime_graph_apply_values(resolved, values, trail)
-    facts := graph_facts.move() ?? return sema_program_tables_init(Val(resolved.move()), [TTypeDef]{})
-    sema_program_tables_with(Val(resolved.move()), [TTypeDef]{}, facts.boxed_edges.move(), facts.copy_facts.move())
+    facts := graph_facts.move() ?? return sema_program_tables_init(resolved.move(), [TTypeDef]{})
+    sema_program_tables_with(resolved.move(), [TTypeDef]{}, facts.boxed_edges.move(), facts.copy_facts.move())
 }
 
 // Only the staging producer lands rows from its authenticated item frontier.
@@ -1667,7 +1656,7 @@ sema_comptime_environment_publish_body_values: fn(environment: ^SemaScopeEnviron
 sema_comptime_program: fn(graph: ^^SemaRegistrationGraph, values: [SemaComptimeItemValue], trail: ^SemaGraphTrail) -> SemaProgramTables Never! {
     resolved := graph.move()
     sema_comptime_graph_apply_values(resolved, values, trail)
-    sema_program_tables_init(Val(resolved.move()), [TTypeDef]{})
+    sema_program_tables_init(resolved.move(), [TTypeDef]{})
 }
 
 // `environment` is the run's sema_comptime_environment and `program` its
@@ -1745,117 +1734,115 @@ sema_comptime_item_owner: fn(owner_key: String) -> Bool Never! { owner_key.ends_
 // rows, jet_driver_comptime_batch_add `needs_rows`); `waiting` is the part
 // `available` lacks.
 sema_check_comptime_item_in: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, comptime_scopes: ^SemaComptimeScopes, available: SemaComptimeAvailableConstants, source: SemaComptimeItemSource) -> SemaComptimeItemCheck {
-    if program.registration_graph == .Val(resolved_graph) {
-        sema_comptime_scopes_prepare(comptime_scopes, environment, program, sema_comptime_available_version(available))
-        at: comptime_scopes.current
-        diagnostics := comptime_scopes.slots[at].diagnostics.copy()
-        if !comptime_scopes.slots[at].applied {
-            return SemaComptimeItemCheck{request: None, dependencies: source.dependencies, waiting_dependencies: source.dependencies, diagnostics: diagnostics, complete: false}
-        }
-        mark: sema_scope_mark(comptime_scopes.slots[at].table)
-        // A runtime check reads the expression as ordinary code, not as
-        // compile-time execution.
-        comptime_scopes.slots[at].table.comptime_execution_depth = if source.runtime_check -> 0 else -> 1
-        // S57: `NAME: expr` fails the build when evaluation cannot complete.
-        // The build edge carries the implicit `Err!` rail of `run: fn()`
-        // so a fallible call here propagates to the build.
-        comptime_scopes.slots[at].table.failure_carrier = Val(sema_failure_carrier(None))
-        check := sema_body_check_init()
-        check.context.host_hooks = comptime_scopes.host_hooks
-        check.context.compiler_records = sema_call_rule_batch_item(source)
-        // A module value's checks run inside its own owner frame, so its
-        // intrinsic call sites are recorded (sema_effect_record_intrinsic_fact
-        // records only under an owner) and its purity can be read.
-        if source.module_value || source.runtime_check {
-            _ := sema_scope_enter(comptime_scopes.slots[at].table, check.state, sema_comptime_item_owner_key(source.key))
-        }
-        if source.prepared.len() > 0 {
-            sema_comptime_declare_prepared_locals(source, source.module_identity, module_text(resolved_graph.module_table, source.module_identity), program, check.context, comptime_scopes.slots[at].table, check.state)
-        }
-        // The prepared locals stand for bindings visible where the site was
-        // captured, but its expression may be written elsewhere (a contract
-        // condition above its function), so they resolve without the
-        // declared-before-use position rule.
-        comptime_scopes.slots[at].table.position_free = source.prepared.len() > 0
-        comptime_scopes.slots[at].table.comptime_runtime_locals = source.runtime_locals.copy()
-        first_finding: diagnostics.len()
-        checked := if source.kind == SemaComptimeItemKind.TypeLevel -> sema_comptime_check_discriminant(source, environment, program, comptime_scopes.slots[at].table, check, diagnostics) else -> sema_check_expression(source.expression, source.expected_type, environment, program, comptime_scopes.slots[at].table, check, diagnostics)
-        // A rule batch's loop is parsed text (sema_call_rule_batch_expression),
-        // whose offsets name no place in the rule's file, so a finding in it
-        // is placed at the batch's span, the rule's.
-        if check.context.compiler_records {
-            loop index in first_finding..<diagnostics.len() -> diagnostics[index].span = Val(source.span)
-        }
-        comptime_scopes.slots[at].table.comptime_runtime_locals = [String]{}
-        comptime_scopes.slots[at].table.position_free = false
-        sema_scope_rollback(comptime_scopes.slots[at].table, mark)
-        // A compile-time value never reads the clock or randomness, and
-        // reaches the network only through a pinned `fetch`; a module value
-        // that reaches the outside world is refused whole (E0643), its
-        // runtime check reads it as ordinary code, and an unevaluable field
-        // default lowers at construction instead.
-        if !source.module_value && !source.runtime_check && source.kind != SemaComptimeItemKind.FieldDefault {
-            loop fact in check.context.call_facts {
-                if !sema_effect_comptime_net_unavailable(fact, program, check.context, diagnostics) {
-                    sema_effect_comptime_nondeterministic(fact, program, check.context, diagnostics)
-                }
-            }
-        }
-        dependencies := sema_comptime_dependencies_from_references(resolved_graph, check.context.name_references, [SemaComptimeItemValue]{})
-        loop dependency in source.dependencies {
-            already := false
-            loop existing in dependencies {
-                if existing == dependency -> already = true
-            }
-            if !already -> dependencies.push(dependency.copy())
-        }
-        waiting := sema_comptime_waiting_dependencies(available, dependencies)
-        // A check that waits returns its request too: a batch that computes
-        // the constants it waits on, whose types landed ahead of their values,
-        // evaluates it in the same program (the driver's
-        // jet_driver_comptime_computed_waits); otherwise it is checked again
-        // once they land.
-        if waiting.len() > 0 && (checked == None || sema_has_error_since(diagnostics, 0)) {
-            return SemaComptimeItemCheck{request: None, dependencies: dependencies, waiting_dependencies: waiting, diagnostics: diagnostics, complete: !sema_has_error_since(diagnostics, 0)}
-        }
-        if checked == None {
-            return SemaComptimeItemCheck{request: None, dependencies: dependencies, waiting_dependencies: waiting, diagnostics: diagnostics, complete: false}
-        }
-        expression: checked ?? return SemaComptimeItemCheck{request: None, dependencies: dependencies, waiting_dependencies: waiting, diagnostics: diagnostics, complete: false}
-        // A module value is data the build keeps: a runtime handle has none.
-        if source.kind == SemaComptimeItemKind.Constant && !source.runtime_check {
-            if sema_comptime_value_runtime_handle(expression.ty, environment, program) == .Val(handle) {
-                diagnostics.push(sema_comptime_runtime_handle_diagnostic(source.name, handle, source.span))
-                return SemaComptimeItemCheck{request: None, dependencies: dependencies, waiting_dependencies: waiting, diagnostics: diagnostics, complete: true}
-            }
-        }
-        checked_expected := source.expected_type
-        if checked_expected != None {
-            required: checked_expected ?? expression.ty
-            if expression.ty != required -> checked_expected = None
-        }
-        published: sema_publish_expression(expression, program, check.context)
-        reachable := sema_comptime_reachable_function_keys(resolved_graph, check.context.call_facts)
-        sema_comptime_drop_close_keys(resolved_graph, check.context.type_delta, published.tree, source.module_identity, reachable)
-        request := SemaComptimeItemRequest{
-            module_identity: source.module_identity,
-            key: source.key,
-            destination_key: source.destination_key,
-            source_file: source.source_file,
-            kind: source.kind,
-            expression: published,
-            expected_type: checked_expected,
-            span: source.span,
-            dependencies: dependencies,
-            calls: check.context.comptime_requests,
-            hardware_use: sema_hardware_use_snapshot(check.context.hardware_use),
-            reachable_function_keys: reachable,
-            call_facts: if source.module_value || source.runtime_check -> check.context.call_facts else -> [SemaCallSiteFact]{},
-            effect_call: sema_effect_comptime_call_name(check.context.call_facts, program, check.context),
-        }
-        return SemaComptimeItemCheck{request: Val(request), dependencies: dependencies, waiting_dependencies: waiting, diagnostics: diagnostics, complete: !sema_has_error_since(diagnostics, 0), type_delta: check.context.type_delta.move()}
+    resolved_graph: program.registration_graph
+    sema_comptime_scopes_prepare(comptime_scopes, environment, program, sema_comptime_available_version(available))
+    at: comptime_scopes.current
+    diagnostics := comptime_scopes.slots[at].diagnostics.copy()
+    if !comptime_scopes.slots[at].applied {
+        return SemaComptimeItemCheck{request: None, dependencies: source.dependencies, waiting_dependencies: source.dependencies, diagnostics: diagnostics, complete: false}
     }
-    SemaComptimeItemCheck{request: None, dependencies: source.dependencies, waiting_dependencies: source.dependencies, diagnostics: [Diagnostic]{}, complete: false}
+    mark: sema_scope_mark(comptime_scopes.slots[at].table)
+    // A runtime check reads the expression as ordinary code, not as
+    // compile-time execution.
+    comptime_scopes.slots[at].table.comptime_execution_depth = if source.runtime_check -> 0 else -> 1
+    // S57: `NAME: expr` fails the build when evaluation cannot complete.
+    // The build edge carries the implicit `Err!` rail of `run: fn()`
+    // so a fallible call here propagates to the build.
+    comptime_scopes.slots[at].table.failure_carrier = Val(sema_failure_carrier(None))
+    check := sema_body_check_init()
+    check.context.host_hooks = comptime_scopes.host_hooks
+    check.context.compiler_records = sema_call_rule_batch_item(source)
+    // A module value's checks run inside its own owner frame, so its
+    // intrinsic call sites are recorded (sema_effect_record_intrinsic_fact
+    // records only under an owner) and its purity can be read.
+    if source.module_value || source.runtime_check {
+        _ := sema_scope_enter(comptime_scopes.slots[at].table, check.state, sema_comptime_item_owner_key(source.key))
+    }
+    if source.prepared.len() > 0 {
+        sema_comptime_declare_prepared_locals(source, source.module_identity, module_text(resolved_graph.module_table, source.module_identity), program, check.context, comptime_scopes.slots[at].table, check.state)
+    }
+    // The prepared locals stand for bindings visible where the site was
+    // captured, but its expression may be written elsewhere (a contract
+    // condition above its function), so they resolve without the
+    // declared-before-use position rule.
+    comptime_scopes.slots[at].table.position_free = source.prepared.len() > 0
+    comptime_scopes.slots[at].table.comptime_runtime_locals = source.runtime_locals.copy()
+    first_finding: diagnostics.len()
+    checked := if source.kind == SemaComptimeItemKind.TypeLevel -> sema_comptime_check_discriminant(source, environment, program, comptime_scopes.slots[at].table, check, diagnostics) else -> sema_check_expression(source.expression, source.expected_type, environment, program, comptime_scopes.slots[at].table, check, diagnostics)
+    // A rule batch's loop is parsed text (sema_call_rule_batch_expression),
+    // whose offsets name no place in the rule's file, so a finding in it
+    // is placed at the batch's span, the rule's.
+    if check.context.compiler_records {
+        loop index in first_finding..<diagnostics.len() -> diagnostics[index].span = Val(source.span)
+    }
+    comptime_scopes.slots[at].table.comptime_runtime_locals = [String]{}
+    comptime_scopes.slots[at].table.position_free = false
+    sema_scope_rollback(comptime_scopes.slots[at].table, mark)
+    // A compile-time value never reads the clock or randomness, and
+    // reaches the network only through a pinned `fetch`; a module value
+    // that reaches the outside world is refused whole (E0643), its
+    // runtime check reads it as ordinary code, and an unevaluable field
+    // default lowers at construction instead.
+    if !source.module_value && !source.runtime_check && source.kind != SemaComptimeItemKind.FieldDefault {
+        loop fact in check.context.call_facts {
+            if !sema_effect_comptime_net_unavailable(fact, program, check.context, diagnostics) {
+                sema_effect_comptime_nondeterministic(fact, program, check.context, diagnostics)
+            }
+        }
+    }
+    dependencies := sema_comptime_dependencies_from_references(resolved_graph, check.context.name_references, [SemaComptimeItemValue]{})
+    loop dependency in source.dependencies {
+        already := false
+        loop existing in dependencies {
+            if existing == dependency -> already = true
+        }
+        if !already -> dependencies.push(dependency.copy())
+    }
+    waiting := sema_comptime_waiting_dependencies(available, dependencies)
+    // A check that waits returns its request too: a batch that computes
+    // the constants it waits on, whose types landed ahead of their values,
+    // evaluates it in the same program (the driver's
+    // jet_driver_comptime_computed_waits); otherwise it is checked again
+    // once they land.
+    if waiting.len() > 0 && (checked == None || sema_has_error_since(diagnostics, 0)) {
+        return SemaComptimeItemCheck{request: None, dependencies: dependencies, waiting_dependencies: waiting, diagnostics: diagnostics, complete: !sema_has_error_since(diagnostics, 0)}
+    }
+    if checked == None {
+        return SemaComptimeItemCheck{request: None, dependencies: dependencies, waiting_dependencies: waiting, diagnostics: diagnostics, complete: false}
+    }
+    expression: checked ?? return SemaComptimeItemCheck{request: None, dependencies: dependencies, waiting_dependencies: waiting, diagnostics: diagnostics, complete: false}
+    // A module value is data the build keeps: a runtime handle has none.
+    if source.kind == SemaComptimeItemKind.Constant && !source.runtime_check {
+        if sema_comptime_value_runtime_handle(expression.ty, environment, program) == .Val(handle) {
+            diagnostics.push(sema_comptime_runtime_handle_diagnostic(source.name, handle, source.span))
+            return SemaComptimeItemCheck{request: None, dependencies: dependencies, waiting_dependencies: waiting, diagnostics: diagnostics, complete: true}
+        }
+    }
+    checked_expected := source.expected_type
+    if checked_expected != None {
+        required: checked_expected ?? expression.ty
+        if expression.ty != required -> checked_expected = None
+    }
+    published: sema_publish_expression(expression, program, check.context)
+    reachable := sema_comptime_reachable_function_keys(resolved_graph, check.context.call_facts)
+    sema_comptime_drop_close_keys(resolved_graph, check.context.type_delta, published.tree, source.module_identity, reachable)
+    request := SemaComptimeItemRequest{
+        module_identity: source.module_identity,
+        key: source.key,
+        destination_key: source.destination_key,
+        source_file: source.source_file,
+        kind: source.kind,
+        expression: published,
+        expected_type: checked_expected,
+        span: source.span,
+        dependencies: dependencies,
+        calls: check.context.comptime_requests,
+        hardware_use: sema_hardware_use_snapshot(check.context.hardware_use),
+        reachable_function_keys: reachable,
+        call_facts: if source.module_value || source.runtime_check -> check.context.call_facts else -> [SemaCallSiteFact]{},
+        effect_call: sema_effect_comptime_call_name(check.context.call_facts, program, check.context),
+    }
+    SemaComptimeItemCheck{request: Val(request), dependencies: dependencies, waiting_dependencies: waiting, diagnostics: diagnostics, complete: !sema_has_error_since(diagnostics, 0), type_delta: check.context.type_delta.move()}
 }
 
 // An enum case number (`First = expr`) is part of the type layout, so a

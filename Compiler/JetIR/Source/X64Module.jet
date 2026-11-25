@@ -997,7 +997,7 @@ ir_x64_compile_module_logged: fn(program: ^^IRModule, threads: CompilerThreads, 
     if trace_sink == .Val(sink) -> sink.end("ir.x64.select", count)
     if trace_sink == .Val(sink) -> sink.begin("ir.x64.scatter", "", -1, -1)
     shells := ir_x64_take_inputs(inputs)
-    program_back := shells.programs.pop() ?? panic("the x64 selection inputs lost the module")
+    program_back := compiler_threads_taken(shells.programs)
     tables := compiler_threads_taken(tables_box)
     if shells.fast.use_indexed_rt -> tables.runtime_symbols = shells.fast.runtime_symbols.move()
     has_stops: stops.len() == count
@@ -1577,7 +1577,7 @@ ir_x64_select_rows: fn(inputs: Shared<IRX64Inputs>, workers: Int, outputs: ^[IRX
     total: outputs.len()
     filled := 0
     loop {
-        parts := ir_x64_claimers(inputs, 0, workers, stops) ?? panic("the x64 selection threads failed")
+        parts := ir_x64_claimers(inputs, 0, workers, stops)
         loop parts.len() > 0 {
             part := parts.pop() ?? {
                 break
@@ -1621,7 +1621,7 @@ ir_x64_reclaim: fn(inputs: Shared<IRX64Inputs>, rows: ^^[Int]) {
 // Runs `tasks` claiming threads from seat `seat` on, one task each; returns
 // their selections. A stopped thread's function keeps its panic text in
 // `stops` (ir_x64_stopped).
-ir_x64_claimers: fn(inputs: Shared<IRX64Inputs>, seat: Int, tasks: Int, stops: ^[String]) -> [[IRX64Selected]] {
+ir_x64_claimers: fn(inputs: Shared<IRX64Inputs>, seat: Int, tasks: Int, stops: ^[String]) -> [[IRX64Selected]] Never! {
     if tasks <= 0 -> return [[IRX64Selected]]{}
     parts := [[IRX64Selected]]{}
     task.group ir_x64_threads {

@@ -1,8 +1,8 @@
 use net: core.net
 
+// A name with a control byte fails in core.net before any lookup, so the
+// NetError is the same on every host and needs no network.
 run: fn() {
-    #Deadline(0ms) {
-        result: net.dns_srv("_jet._tcp.example.test")
-        print(result.len())
-    }
+    result: net.dns_srv("_jet._tcp.example.test\n")
+    print(result.len())
 }

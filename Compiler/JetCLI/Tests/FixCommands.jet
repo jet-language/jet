@@ -4,6 +4,9 @@ use {
     jet_cli.[
         JetCLIFix,
         JetCLIFixFile,
+        JetCLISemOp,
+        JetCLISemOpFile,
+        JetCLISemOpTarget,
         jet_cli_fix_all,
         jet_cli_fix_apply_non_overlapping,
         jet_cli_safe_fixes,
@@ -119,5 +122,78 @@ cli_fix_fixture_fact: fn(name: String, signature: String, module_path: String) -
     different: cli_fix_fixture_fact("summarize", "sig2", "run.jet")
     if jet_cli_semantic_rename_ops([SemDefinitionFact]{old}, [SemDefinitionFact]{different}).len() != 0 {
         panic("signature change is not a rename")
+    }
+}
+
+// The rename receipts as the pairwise scan found them before the facts were
+// grouped: every fact before against every fact after.
+cli_fix_reference_rename_ops: fn(before: [SemDefinitionFact], after: [SemDefinitionFact]) -> [JetCLISemOp] Never! {
+    used := [Int]{}
+    operations := [JetCLISemOp]{}
+    loop (old_index, old) in before {
+        candidates := [Int]{}
+        loop (new_index, candidate) in after {
+            if !used.contains(new_index) && old.kind == candidate.kind && old.module_path == candidate.module_path && old.signature_id == candidate.signature_id && old.name != candidate.name {
+                candidates.push(new_index)
+            }
+        }
+        if candidates.len() != 1 -> next
+        index: candidates[0]
+        candidate: after[index]
+        reverse := 0
+        loop (other_index, other) in before {
+            if other_index == old_index || (other.kind == candidate.kind && other.module_path == candidate.module_path && other.signature_id == candidate.signature_id && other.name != candidate.name) {
+                reverse += 1
+            }
+        }
+        if reverse != 1 -> next
+        used.push(index)
+        target: JetCLISemOpTarget{stable_id: old.stable_id, before: old.human_identity, after: candidate.human_identity, kind: candidate.kind, module_path: candidate.module_path}
+        operations.push(JetCLISemOp{kind: "rename", rule_id: Val("jet-fix"), from: Val(old.name), to: Val(candidate.name), node: None, match_template: None, replace_template: None, targets: [JetCLISemOpTarget]{target}, files: [JetCLISemOpFile]{}})
+    }
+    operations
+}
+
+// Each rename receipt as one line: its names, and its target's identity
+// before and after.
+cli_fix_rename_rows: fn(operations: [JetCLISemOp]) -> [String] Never! {
+    loop operation in operations -> {
+        from: operation.from ?? ""
+        to: operation.to ?? ""
+        target: operation.targets[0]
+        "{from}>{to} {target.kind} {target.stable_id} {target.before}>{target.after}"
+    }
+}
+
+// Facts whose kinds, modules and signatures collide: the facts before are
+// `f<i>`; after, each third is renamed `g<i>`, each fifth is gone and each
+// seventh gains a twin `h<i>`, so the groups hold plain renames, renames
+// ambiguous either way and unchanged facts.
+#Test("keyed rename receipts match the pairwise scan") {
+    loop count in ([Int]{0, 1, 7, 12, 40, 120}) {
+        before := [SemDefinitionFact]{}
+        after := [SemDefinitionFact]{}
+        loop index in 0..<count {
+            module_path: "m{index % 4}.jet"
+            signature: "sig{index % 6}"
+            kind: if index % 9 < 3 -> "type" else -> "function"
+            fact := cli_fix_fixture_fact("f{index}", signature, module_path)
+            fact.kind = kind
+            before.push(fact)
+            if index % 5 == 4 -> next
+            moved := cli_fix_fixture_fact(if index % 3 == 0 -> "g{index}" else -> "f{index}", signature, module_path)
+            moved.kind = kind
+            after.push(moved)
+            if index % 7 == 6 {
+                twin := cli_fix_fixture_fact("h{index}", signature, module_path)
+                twin.kind = kind
+                after.push(twin)
+            }
+        }
+        keyed: cli_fix_rename_rows(jet_cli_semantic_rename_ops(before, after))
+        if keyed != cli_fix_rename_rows(cli_fix_reference_rename_ops(before, after)) {
+            panic("the keyed rename receipts differ from the pairwise scan's at {count} facts")
+        }
+        if count == 12 && keyed.len() < 2 -> panic("the fixture's plain renames are found")
     }
 }

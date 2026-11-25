@@ -24,7 +24,7 @@ use {
     ]
     jet_foundation.[ASTTables, EffectRowEntry, ExprNode, Func, Item, ModuleCap, Span, StmtNode, ast_expr, ast_stmt, ast_visit_body, diagnostic_line_at]
     jet_sema.[sema_inline_decode_generated_suffix]
-    jet_semindex.[SemSummary, semindex_module_alias, semindex_summaries, semindex_summary, semindex_witness]
+    jet_semindex.[SemSummary, SemWitnesses, semindex_module_alias, semindex_summaries, semindex_summary, semindex_witness, semindex_witnesses]
 }
 
 JET_CLI_EXPLAIN_EFFECTS_USAGE: "jet explain effects [<file>[:<line>]] [--caps] [--json]"
@@ -545,13 +545,13 @@ jet_cli_effects_reaches_sorted: fn(reaches: [JetCLIEffectsReach]) -> [JetCLIEffe
 
 // What the function `key` of `doc_module` reaches, each effect with its first
 // call chain (the semantic index witness E0749 and `jet inspect rights` name).
-jet_cli_effects_function_reaches: fn(doc_module: JetDriverDocModule, key: String, summaries: [SemSummary], modules: [JetDriverDocModule], reaches: ^[JetCLIEffectsReach]) {
+jet_cli_effects_function_reaches: fn(doc_module: JetDriverDocModule, key: String, summaries: [SemSummary], witnesses: SemWitnesses, reaches: ^[JetCLIEffectsReach]) {
     summary: semindex_summary(summaries, key) ?? return
     effects: if summary.solved.len() > 0 -> summary.solved else -> summary.direct
     loop name in effects {
         chain := [String]{key}
         site := ""
-        if semindex_witness(key, name, summaries, [String]{}, modules) == .Val(witness) {
+        if semindex_witness(witnesses, summaries, key, name) == .Val(witness) {
             if witness.path.len() > 0 -> chain = witness.path
             if witness.spans.len() > 0 && witness.spans[0].end > 0 {
                 site = jet_cli_effects_site(doc_module, witness.spans[0].start)
@@ -571,7 +571,7 @@ jet_cli_effects_raw_summary: fn(summaries: [SemSummary], raw_key: String) -> Sem
 // What part of a function reaches: its own `direct` effects, and through each
 // call in `edges` (a checked function key at its call span) whatever that
 // callee reaches.
-jet_cli_effects_part_reaches: fn(doc_module: JetDriverDocModule, owner: String, direct: [EffectRowEntry], edges: [EffectRowEntry], summaries: [SemSummary], modules: [JetDriverDocModule], reaches: ^[JetCLIEffectsReach]) {
+jet_cli_effects_part_reaches: fn(doc_module: JetDriverDocModule, owner: String, direct: [EffectRowEntry], edges: [EffectRowEntry], summaries: [SemSummary], witnesses: SemWitnesses, reaches: ^[JetCLIEffectsReach]) {
     loop entry in direct {
         jet_cli_effects_reach_add(reaches, entry.name, [String]{owner}, jet_cli_effects_site(doc_module, entry.span.start))
     }
@@ -579,7 +579,7 @@ jet_cli_effects_part_reaches: fn(doc_module: JetDriverDocModule, owner: String, 
         callee: jet_cli_effects_raw_summary(summaries, edge.name) ?? next
         loop name in callee.solved {
             chain := [String]{owner}
-            if semindex_witness(callee.key, name, summaries, [String]{}, modules) == .Val(witness) && witness.path.len() > 0 {
+            if semindex_witness(witnesses, summaries, callee.key, name) == .Val(witness) && witness.path.len() > 0 {
                 loop part in witness.path -> chain.push(part.copy())
             } else { chain.push(callee.key.copy()) }
             jet_cli_effects_reach_add(reaches, name, chain, jet_cli_effects_site(doc_module, edge.span.start))
@@ -589,7 +589,7 @@ jet_cli_effects_part_reaches: fn(doc_module: JetDriverDocModule, owner: String, 
 
 // A `#FX` block or comptime scope of the function `key`: the direct effects
 // and calls the checker recorded inside `span`.
-jet_cli_effects_span_reaches: fn(doc_module: JetDriverDocModule, key: String, span: Span, summaries: [SemSummary], modules: [JetDriverDocModule], reaches: ^[JetCLIEffectsReach]) {
+jet_cli_effects_span_reaches: fn(doc_module: JetDriverDocModule, key: String, span: Span, summaries: [SemSummary], witnesses: SemWitnesses, reaches: ^[JetCLIEffectsReach]) {
     summary: semindex_summary(summaries, key) ?? return
     direct := [EffectRowEntry]{}
     loop function in doc_module.functions {
@@ -612,7 +612,7 @@ jet_cli_effects_span_reaches: fn(doc_module: JetDriverDocModule, key: String, sp
         target: jet_driver_doc_callee_key(permit.value.symbols, fact) ?? next
         edges.push(EffectRowEntry{name: target, span: fact.span})
     }
-    jet_cli_effects_part_reaches(doc_module, key, direct, edges, summaries, modules, reaches)
+    jet_cli_effects_part_reaches(doc_module, key, direct, edges, summaries, witnesses, reaches)
 }
 
 // The span of the first call to `callee` inside `within`, else `within`.
@@ -679,6 +679,7 @@ jet_cli_explain_effects_report: fn(result: JetDriverCompileResult, job: JetCLIIn
     doc_module: modules[selected]
     alias: semindex_module_alias(doc_module)
     summaries: semindex_summaries(modules)
+    witnesses: semindex_witnesses(summaries, modules)
     offset := -1
     if job.line > 0 -> offset = jet_cli_effects_line_offset(doc_module.source, job.line)
     found := JetCLIEffectsSite{key: "", function: None, caps: [ModuleCap]{}}
@@ -714,21 +715,21 @@ jet_cli_explain_effects_report: fn(result: JetDriverCompileResult, job: JetCLIIn
             rungs.push(JetCLIEffectsRung{rung: "comptime", text: "Mem only; other effects need `#Impure(\"reason\")`", written: true, site: jet_cli_effects_site(doc_module, function.span.start)})
         }
         if ordered.len() == 0 {
-            jet_cli_effects_function_reaches(doc_module, found.key, summaries, modules, reaches)
+            jet_cli_effects_function_reaches(doc_module, found.key, summaries, witnesses, reaches)
         } else if ordered[0].lambda {
             lambda_span: ordered[0].span
             direct: loop name in ordered[0].direct -> EffectRowEntry{name: name, span: lambda_span}
             edges: loop edge in ordered[0].edges -> EffectRowEntry{name: edge.copy(), span: jet_cli_effects_call_span(doc_module, edge, lambda_span)}
-            jet_cli_effects_part_reaches(doc_module, found.key, direct, edges, summaries, modules, reaches)
+            jet_cli_effects_part_reaches(doc_module, found.key, direct, edges, summaries, witnesses, reaches)
         } else {
-            jet_cli_effects_span_reaches(doc_module, found.key, ordered[0].span, summaries, modules, reaches)
+            jet_cli_effects_span_reaches(doc_module, found.key, ordered[0].span, summaries, witnesses, reaches)
         }
     } else {
         // A line outside every function: what the module's functions reach.
         views := [JetCLICallableView]{}
         jet_cli_rights_collect(doc_module.items, alias, "", doc_module.path, views)
         loop view in jet_cli_rights_sorted(views) {
-            jet_cli_effects_function_reaches(doc_module, view.key, summaries, modules, reaches)
+            jet_cli_effects_function_reaches(doc_module, view.key, summaries, witnesses, reaches)
         }
     }
     // The trait and type rungs come before the module rungs; the file-head

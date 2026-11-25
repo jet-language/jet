@@ -292,7 +292,7 @@ sema_build_output_setting: fn(field: ExprField, declared: [SemaBuildSetting], en
 
 // The settings the checked module's package declares.
 sema_build_output_declared: fn(environment: SemaScopeEnvironment, program: SemaProgramTables) -> [SemaBuildSetting] Never! {
-    graph: program.registration_graph ?? return [SemaBuildSetting]{}
+    graph: program.registration_graph
     row: if sema_registration_module_index(graph, environment.module_identity) == .Val(index) -> graph.modules[index].settings_row else -> -1
     sema_build_facts_settings_at(graph.build_facts, row)
 }
@@ -349,7 +349,8 @@ sema_call_build_generate_code: fn(receiver: Expr, receiver_value: TExpr, args: [
 // module, read from the graph in the program tables.
 sema_build_compiler_site: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, span: Span, diagnostics: ^[Diagnostic]) -> Bool {
     root := ""
-    if program.registration_graph == .Val(graph) -> root = sema_build_root_package(graph)
+    graph: program.registration_graph
+    root = sema_build_root_package(graph)
     written: environment.source_origin == SemaSourceOrigin.Snapshot
     if written && root != "" && environment.package_identity == root -> return true
     row: sema_diagnostic_row("E0776")
@@ -703,28 +704,27 @@ sema_call_compiler_rewrite_body: fn(receiver: Expr, receiver_value: TExpr, args:
     }
     function := ""
     package := ""
-    if program.registration_graph == .Val(graph) {
-        resolved := SemaRegistrationResolvedSymbol?{None}
-        if args[0].expr == .Ident(name, _, _) {
-            // Only a body binding is a local; the root frame holds the
-            // module's items and imports.
-            local := false
-            if sema_scope_resolve_index(scopes, name) == .Val(index) {
-                local = scopes.frames[scopes.bindings[index].frame].parent >= 0
-            }
-            if !local {
-                resolved = sema_registration_lookup_name(graph, environment.module_identity, name)
-            }
-        } else if args[0].expr == .Field(base, member, _, _) && base == .Ident(alias, _, _) {
-            resolved = sema_registration_lookup_qualified(graph, environment.module_identity, alias, member)
+    graph: program.registration_graph
+    resolved := SemaRegistrationResolvedSymbol?{None}
+    if args[0].expr == .Ident(name, _, _) {
+        // Only a body binding is a local; the root frame holds the
+        // module's items and imports.
+        local := false
+        if sema_scope_resolve_index(scopes, name) == .Val(index) {
+            local = scopes.frames[scopes.bindings[index].frame].parent >= 0
         }
-        // The function's package goes by its identity, which a dependency
-        // checked as its own package gives the same as the root's check.
-        if resolved == .Val(symbol) && sema_resolved_kind(graph, symbol) == SymbolKind.Function {
-            if sema_registration_module_index(graph, symbol.source_module_identity) == .Val(module_index) {
-                function = sema_resolved_name(graph, symbol)
-                package = graph.modules[module_index].package_identity.copy()
-            }
+        if !local {
+            resolved = sema_registration_lookup_name(graph, environment.module_identity, name)
+        }
+    } else if args[0].expr == .Field(base, member, _, _) && base == .Ident(alias, _, _) {
+        resolved = sema_registration_lookup_qualified(graph, environment.module_identity, alias, member)
+    }
+    // The function's package goes by its identity, which a dependency
+    // checked as its own package gives the same as the root's check.
+    if resolved == .Val(symbol) && sema_resolved_kind(graph, symbol) == SymbolKind.Function {
+        if sema_registration_module_index(graph, symbol.source_module_identity) == .Val(module_index) {
+            function = sema_resolved_name(graph, symbol)
+            package = graph.modules[module_index].package_identity.copy()
         }
     }
     heard := TExpr?{None}
@@ -799,12 +799,11 @@ sema_call_compiler_allow_rewrite: fn(receiver: Expr, receiver_value: TExpr, args
     }
     root := ""
     known := false
-    if program.registration_graph == .Val(graph) {
-        root = sema_build_root_package(graph)
-        loop module_row in graph.modules {
-            if module_row.package_identity != root && sema_build_package_name(module_row.package_identity) == named {
-                known = true
-            }
+    graph: program.registration_graph
+    root = sema_build_root_package(graph)
+    loop module_row in graph.modules {
+        if module_row.package_identity != root && sema_build_package_name(module_row.package_identity) == named {
+            known = true
         }
     }
     if root != "" && sema_build_package_name(root) == named {
@@ -1145,7 +1144,7 @@ SemaCompilerReportRewrite: struct {
 // none.
 sema_compiler_report_facts: fn(ty: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaCompilerReportFacts? Never! {
     finding: ty ?? return None
-    graph: program.registration_graph ?? return None
+    graph: program.registration_graph
     owner: sema_type_resolve_nominal_row(graph, finding, environment.module_identity) ?? return None
     owner_module: graph.modules[owner.module_index].module_name
     owner_name: graph.modules[owner.module_index].nominals[owner.row].symbol.name
@@ -1357,7 +1356,9 @@ sema_compiler_events_call_target: fn(target: Expr, program: SemaProgramTables, s
         if sema_scope_resolve(scopes, name) == .Val(symbol) {
             if symbol.kind != SymbolKind.Function -> return None
             key: sema_scope_resolve_key(scopes, name) ?? return None
-            graph: program.registration_graph ?? return Val(key)
+            graph: program.registration_graph
+            // Snapshot: no registered module places the key; it reads as written.
+            if graph.mode == .Snapshot -> return Val(key)
             return Val(sema_compiler_identity(graph, key))
         }
         if SEMA_COMPILER_EVENTS_AMBIENT_CALLS.contains(name) -> return Val(name.copy())
@@ -1387,13 +1388,12 @@ sema_compiler_events_marker: fn(marked: Expr, environment: SemaScopeEnvironment,
         written = if import_ns == .Val(namespace) -> "{namespace}.{type_name}" else -> type_name.copy()
     } else if watched.ty == .Named(name) { written = name.copy() }
     declaration := MarkerDecl?{None}
-    if program.registration_graph == .Val(graph) {
-        if sema_type_resolve_nominal_row(graph, watched.ty, environment.module_identity) == .Val(row) {
-            declaration = sema_marker_module_declaration_by_span(graph.modules[row.module_index].program.items, graph.modules[row.module_index].nominals[row.row].symbol.span)
-        }
-        if declaration == None && written != "" {
-            declaration = sema_marker_module_resolve(graph, environment.module_identity, written).declaration
-        }
+    graph: program.registration_graph
+    if sema_type_resolve_nominal_row(graph, watched.ty, environment.module_identity) == .Val(row) {
+        declaration = sema_marker_module_declaration_by_span(graph.modules[row.module_index].program.items, graph.modules[row.module_index].nominals[row.row].symbol.span)
+    }
+    if declaration == None && written != "" {
+        declaration = sema_marker_module_resolve(graph, environment.module_identity, written).declaration
     }
     if declaration == None {
         shown: if written == "" -> "this value" else -> "`{written}`"

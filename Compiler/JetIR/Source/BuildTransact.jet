@@ -733,19 +733,17 @@ ir_effect_scope_frame: fn(m: ^IRModule, b: ^IRBuilder, descriptor: String) Never
 // an early exit (ir_tx_unwind) or a stop edge; any other region is its body.
 ir_effect_scope_region: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, body: [Int], span: Span) Never! {
     found := -1
-    if b.row >= 0 {
-        regions: p.functions[b.row].effect_scope_regions
-        loop index in 0..<regions.len() {
-            if regions[index].span.start == span.start && regions[index].span.end == span.end {
-                found = index
-            }
+    regions: ir_builder_body(p, b.row)[0].effect_scope_regions
+    loop index in 0..<regions.len() {
+        if regions[index].span.start == span.start && regions[index].span.end == span.end {
+            found = index
         }
     }
     if found < 0 {
         ir_stmts(m, p, b, body)
         return
     }
-    previous: ir_effect_scope_enter(m, b, p.functions[b.row].effect_scope_regions[found].descriptor, b.loops.len())
+    previous: ir_effect_scope_enter(m, b, regions[found].descriptor, b.loops.len())
     ir_stmts(m, p, b, body)
     if ir_failed(b) {
         return

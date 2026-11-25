@@ -451,7 +451,7 @@ ir_lint_module: fn(m: ^IRModule, pass: String, threads: CompilerThreads) -> [IRL
     compiler_transfer_rows<IRType>(view.types, m.types)
     compiler_transfer_rows<Interner>(view.interner, m.interner)
     reads: Shared{IRLintReads{views: [IRModule]{view.move()}, context: context.move(), pass: pass.copy()}}
-    _: ir_lint_threads(slots, reads, 0) ?? panic("the IR Lint threads failed")
+    _: ir_lint_threads(slots, reads, 0)
     loop slot in slots {
         held := slot.guard_edit()
         m.functions.extend(compiler_take_rows<IRFunction>(held.value.functions))
@@ -482,7 +482,7 @@ IRLintReads: struct {
 }
 
 // Runs a lint thread per slot from `at`; returns the functions checked.
-ir_lint_threads: fn(slots: [Shared<IRLintPart>], reads: Shared<IRLintReads>, at: Int) -> Int {
+ir_lint_threads: fn(slots: [Shared<IRLintPart>], reads: Shared<IRLintReads>, at: Int) -> Int Never! {
     if at >= slots.len() -> return 0
     checked := 0
     task.group ir_lint_group {

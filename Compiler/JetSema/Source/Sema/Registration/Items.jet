@@ -162,6 +162,7 @@ use {
         interner,
         TCompilerBuiltin,
         foundation_byte_text,
+        jet_target_machine_hosted,
     ]
     jet_parser.[
         jfmt_decode_shapes,
@@ -822,8 +823,11 @@ SemaRegistrationModule: struct {
     // The record of the derive templates' expansions the Core library's
     // check kept for this Core module (Derives.jet sema_derive_memo_capture),
     // at most one, which its bodies file holds (CoreBodies.jet
-    // sema_core_derive_bodies).
+    // sema_core_derive_bodies), and how many expansions of the record this
+    // module took did not read (SemaDeriveMemo.unread), a census row
+    // (CoreBodies.jet sema_core_bodies_unread).
     derive_captures: [SemaDeriveCapture]{[SemaDeriveCapture]{}},
+    derive_unread: Int{0},
     // True when any local symbol, import binding, or namespace entry visible
     // from this module contains `.`, so dotted canonical lookups must probe
     // local scope first (computed by sema_registration_index_canonical_nominals).
@@ -859,12 +863,15 @@ SemaRegistrationHostHooks: struct {
     // on compiler threads wait in `core_bodies_ahead`, by function symbol
     // id, for the wave's loads to take them, each leaving None in its place
     // (CoreBodies.jet sema_core_bodies_ahead, sema_core_body_ahead_take).
+    // A record that does not read is a row of `core_bodies_unread`, the
+    // compile's census of them (CoreBodies.jet sema_core_bodies_unread).
     core_bodies: SemaCoreBodies?{None},
     core_bodies_records: SemaCoreBodiesRecords?{None},
     core_bodies_loaded: [Bool]{[Bool]{}},
     core_bodies_read: Int{0},
     core_bodies_reader: BodyCodecIn{BodyCodecIn{at: 0, end: 0, failed: false, symbols: [SymbolID]{}, decls: [DeclID]{}, modules: [ModuleID]{}}},
     core_bodies_ahead: [U32:SemaCoreBodyAhead?]{[U32:SemaCoreBodyAhead?]{}},
+    core_bodies_unread: [String]{[String]{}},
 }
 
 // The folded build snapshot the driver seeds before checking. Sema folds
@@ -970,6 +977,17 @@ SemaLookupCounts: struct {
     name_lookups: Int,
     scope_lookups: Int,
     scope_compares: Int,
+}
+
+// What the program tables' registration graph stands for. A Program graph is
+// the one a registered build made. A Snapshot graph is the empty one given
+// to a check of one program alone (check_program) or to a schema read: it
+// registers nothing, so every lookup in it misses. The few checks that
+// resolve a snapshot's own declarations without a registration branch on
+// `.Snapshot`, each with a line saying why.
+SemaTablesMode: enum {
+    Program,
+    Snapshot,
 }
 
 SemaRegistrationGraph: struct {
@@ -1239,6 +1257,43 @@ SemaRegistrationGraph: struct {
     // Keep Local/Parameter name reference facts across functions only when
     // name facts, programs, or Core bodies are being built.
     keep_local_name_references: Bool{true},
+    // Snapshot for the empty graph of a lone program's check
+    // (sema_registration_graph_snapshot).
+    mode: SemaTablesMode{SemaTablesMode.Program},
+}
+
+// The empty graph of a snapshot check (SemaTablesMode.Snapshot): no modules,
+// symbols or rows, and a fresh interner. It keeps local name references, as
+// a check of one program always did.
+sema_registration_graph_snapshot: fn() -> SemaRegistrationGraph Never! {
+    SemaRegistrationGraph{
+        package_identity: "",
+        entry_module_identity: module_none(),
+        canonical_effect_module_identity: module_none(),
+        target_machine: jet_target_machine_hosted("", ""),
+        build_facts: SemaBuildFacts{package_name: "", package_version: "", os: "", profile: "", stamp_git: None, stamp_dirty: false, stamp_toolchain: "", stamp_at: ""},
+        modules: [SemaRegistrationModule]{},
+        module_table: ModuleTable{identities: name_table()},
+        module_rows: [Int]{},
+        symbols: symbol_table_of([SymbolKeys]{symbol_builtin_keys()}),
+        edges: [SemaRegistrationImportEdge]{},
+        foreign_providers: [SemaForeignProviderInput]{},
+        core_builtin_owner_facts: [SemaRegistrationCoreBuiltinOwnerFact]{},
+        imports: [SemaRegistrationImport]{},
+        unit_facts: [SemaRegistrationUnitFact]{},
+        lookup_counters: Shared{SemaLookupCounters{module_lookups: 0, name_lookups: 0, scope_lookups: 0, scope_compares: 0}},
+        counting: false,
+        internal_problem: None,
+        diagnostics: [Diagnostic]{},
+        complete: true,
+        nominal_row_buckets: [[SemaRegistrationRowRef]]{[SemaRegistrationRowRef]{}},
+        impl_row_buckets: [[SemaRegistrationRowRef]]{[SemaRegistrationRowRef]{}},
+        nominal_symbol_rows: [U32:SemaRegistrationRowRef]{},
+        codec_demand: Shared{sema_codec_demand_new()},
+        derive_demand: Shared{sema_derive_demand_new()},
+        interner: interner(),
+        mode: SemaTablesMode.Snapshot,
+    }
 }
 
 // `{module_name}.{name}` of every nominal row registered by the end of graph
@@ -2875,6 +2930,32 @@ sema_registration_nominal: fn(item: Item, module_id: ModuleID, module_identity: 
     }
 }
 
+// Why a Prelude text the compiler carries does not read: `file` is its
+// path and `line` the line of its first problem, None when the problem is
+// the text as a whole. Its readers run only in Compiler/Toolchain/PreludeRows
+// and JetParser Tests/PreludeBuildRows.jet, which report it and fail.
+#Error
+SemaPreludeTextError: struct {
+    file: String,
+    line: Int?,
+    message: String,
+}
+
+// The first of `diagnostics`, from parsing the Prelude text `source` at
+// `file`, as that text's error at its line.
+sema_prelude_text_error: fn(file: String, source: String, diagnostics: [Diagnostic]) -> SemaPreludeTextError Never! {
+    first: diagnostics[0]
+    message: "does not parse: {first.what}"
+    at: first.span ?? return SemaPreludeTextError{file: file, line: None, message: message}
+    bytes: source.bytes()
+    end: if at.start < bytes.len() -> at.start else -> bytes.len()
+    line := 1
+    loop byte in bytes[0..<end] {
+        if byte == 10 -> line += 1
+    }
+    SemaPreludeTextError{file: file, line: Val(line), message: message}
+}
+
 // The byte offset of each line of SEMA_PRELUDE_ERROR_SOURCE.
 SEMA_PRELUDE_ERROR_LINE_STARTS: #run parser_line_starts(SEMA_PRELUDE_ERROR_SOURCE.bytes())
 
@@ -2883,11 +2964,11 @@ SEMA_PRELUDE_ERROR_LINE_STARTS: #run parser_line_starts(SEMA_PRELUDE_ERROR_SOURC
 // is what this returns, written by Compiler/Toolchain/PreludeRows, so neither
 // a compile nor the compiler's build parses the error text; a text that does
 // not parse, or that does not hold seven declarations with exactly one marked
-// default error, stops that tool.
-sema_registration_original_error_program: fn() -> Program {
+// default error, is that tool's error.
+sema_registration_original_error_program: fn() -> Program SemaPreludeTextError! {
     parsed := parse_generated_source(SEMA_PRELUDE_ERROR_SOURCE.bytes())
     if parsed.diagnostics.len() > 0 {
-        panic("Prelude/Errors.jet does not parse: {parsed.diagnostics[0].what}")
+        return Err(sema_prelude_text_error("Prelude/Errors.jet", SEMA_PRELUDE_ERROR_SOURCE, parsed.diagnostics))
     }
     program := parsed.program.move()
     declarations := [Item]{}
@@ -2904,11 +2985,11 @@ sema_registration_original_error_program: fn() -> Program {
         }
     }
     if declarations.len() != 7 || marked != 1 {
-        panic("Prelude/Errors.jet must hold seven declarations and exactly one marked default error, `Err`")
+        return Err(SemaPreludeTextError{file: "Prelude/Errors.jet", line: None, message: "must hold seven declarations and exactly one marked default error, `Err`"})
     }
     declarations.reverse()
     program.items = declarations.move()
-    program
+    Ok(program)
 }
 
 sema_registration_original_error_module: fn(module_table: ^ModuleTable) -> SemaRegistrationModuleInput {
@@ -2935,13 +3016,13 @@ SEMA_PRELUDE_RULE_LINE_STARTS: #run parser_line_starts(SEMA_PRELUDE_RULE_SOURCE.
 // rules of the contract markers). SEMA_PRELUDE_RULE_PROGRAM (PreludeRows.jet)
 // is what this returns, written by Compiler/Toolchain/PreludeRows, so neither
 // a compile nor the compiler's build parses the rule text; a text that does
-// not parse stops that tool.
-sema_registration_rule_program: fn() -> Program {
+// not parse is that tool's error.
+sema_registration_rule_program: fn() -> Program SemaPreludeTextError! {
     parsed: parse_generated_source(SEMA_PRELUDE_RULE_SOURCE.bytes())
     if parsed.diagnostics.len() > 0 {
-        panic("Prelude/Rules.jet does not parse: {parsed.diagnostics[0].what}")
+        return Err(sema_prelude_text_error("Prelude/Rules.jet", SEMA_PRELUDE_RULE_SOURCE, parsed.diagnostics))
     }
-    parsed.program.move()
+    Ok(parsed.program.move())
 }
 
 // The Prelude rule module as one compiler-generated source module of the
@@ -4170,6 +4251,7 @@ sema_registration_prepare_module_row: fn(input: ^^SemaRegistrationModuleInput, m
     // bound to that Core takes them in place of expanding.
     derive_memo := owned.derive_memo.move()
     sema_derive_expand_builtin_items_with(module_row.program.items, diagnostics, derive_memo)
+    module_row.derive_unread = derive_memo.unread
     sema_derive_memo_capture(derive_memo.move(), module_row.derive_captures)
     // Explicit and structurally selected codecs
     // enter as ordinary generated `impl T.Encode`/`impl T.Decode` items.
@@ -6130,7 +6212,7 @@ sema_registration_populate_imports: fn(graph: ^SemaRegistrationGraph, module_ind
                         .None -> {
                             // A Core module's ledger member with no source
                             // declaration (a host leaf such as
-                            // `core.files.__mkdtemp_raw`) binds as a Core item
+                            // `core.files.__directory_fd`) binds as a Core item
                             // import, also inside its own module. Its symbol is
                             // Foreign (no Jet declaration); calls route through
                             // the module's Core call records (Calls/Direct.jet).

@@ -112,13 +112,12 @@ sema_receipt_schema_digest: fn(definition: StructDef) -> String Never! {
 
 // The struct declaration a checked payload type names.
 sema_receipt_payload_struct: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> StructDef? Never! {
-    if program.registration_graph == .Val(graph) {
-        row: sema_type_resolve_nominal_row(graph, ty, environment.module_identity) ?? return None
-        // Matched in place: a pattern on the indexed path copies the whole item.
-        nominal: graph.modules[row.module_index].nominals[row.row]
-        if nominal.source == .SourceAST(item) {
-            if item == .Struct(definition) -> return Val(definition)
-        }
+    graph: program.registration_graph
+    row: sema_type_resolve_nominal_row(graph, ty, environment.module_identity) ?? return None
+    // Matched in place: a pattern on the indexed path copies the whole item.
+    nominal: graph.modules[row.module_index].nominals[row.row]
+    if nominal.source == .SourceAST(item) {
+        if item == .Struct(definition) -> return Val(definition)
     }
     None
 }

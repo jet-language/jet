@@ -88,11 +88,9 @@ sema_expression_type_symbol: fn(scopes: ^SemaScopeTable, environment: SemaScopeE
             return Val(sema_scope_binding_symbol(environment, scopes, found))
         }
     }
-    if program.registration_graph == .Val(graph) {
-        resolved: sema_type_graph_lookup_symbol_at(graph, sema_scope_caller_row(environment, graph), name) ?? return None
-        return if sema_resolved_kind(graph, resolved) == SymbolKind.Type -> Val(sema_resolved_symbol(graph, resolved)) else -> None
-    }
-    None
+    graph: program.registration_graph
+    resolved: sema_type_graph_lookup_symbol_at(graph, sema_scope_caller_row(environment, graph), name) ?? return None
+    if sema_resolved_kind(graph, resolved) == SymbolKind.Type -> Val(sema_resolved_symbol(graph, resolved)) else -> None
 }
 
 // A type name that resolves to nothing. `Never` has no values, so naming it
@@ -103,18 +101,17 @@ sema_expression_type_symbol: fn(scopes: ^SemaScopeTable, environment: SemaScopeE
 // module `alias` keeps private, is E0605; anything else is an unknown name.
 sema_expression_unknown_type: fn(name: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Diagnostic {
     if name == "Never" -> return sema_never_as_value(span)
-    if program.registration_graph == .Val(graph) {
-        caller: sema_scope_caller_row(environment, graph)
-        if caller >= 0 && name.split_once(".") == .Val(qualified) {
-            if sema_registration_private_module_path(graph, graph.modules[caller].module_identity, name) == .Val(path) {
-                return sema_registration_private_module_error(path, span)
-            }
-            if sema_registration_core_private_qualified(graph, graph.modules[caller].module_identity, qualified.before, qualified.after) == .Val(module_name) {
-                return sema_registration_core_private_error(qualified.after, module_name, span)
-            }
-            if !qualified.after.contains(".") && sema_registration_private_member(graph, graph.modules[caller].module_identity, qualified.before, qualified.after) {
-                return sema_registration_private_member_error(qualified.after, qualified.before, span)
-            }
+    graph: program.registration_graph
+    caller: sema_scope_caller_row(environment, graph)
+    if caller >= 0 && name.split_once(".") == .Val(qualified) {
+        if sema_registration_private_module_path(graph, graph.modules[caller].module_identity, name) == .Val(path) {
+            return sema_registration_private_module_error(path, span)
+        }
+        if sema_registration_core_private_qualified(graph, graph.modules[caller].module_identity, qualified.before, qualified.after) == .Val(module_name) {
+            return sema_registration_core_private_error(qualified.after, module_name, span)
+        }
+        if !qualified.after.contains(".") && sema_registration_private_member(graph, graph.modules[caller].module_identity, qualified.before, qualified.after) {
+            return sema_registration_private_member_error(qualified.after, qualified.before, span)
         }
     }
     sema_unknown_name(name, span)
@@ -127,11 +124,9 @@ sema_expression_unknown_type: fn(name: String, span: Span, environment: SemaScop
 sema_expression_core_export_variants: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, symbol: Symbol) -> [String]? {
     if symbol.kind != SymbolKind.Type || !module_is_core(symbol.module_identity) -> return None
     if sema_scope_declaration_site(environment, program, symbol.id) != None -> return None
-    if program.registration_graph == .Val(graph) {
-        module_index: sema_registration_module_index(graph, symbol.module_identity) ?? return None
-        return core_module_enum_cases(graph.modules[module_index].module_name, symbol.name)
-    }
-    None
+    graph: program.registration_graph
+    module_index: sema_registration_module_index(graph, symbol.module_identity) ?? return None
+    core_module_enum_cases(graph.modules[module_index].module_name, symbol.name)
 }
 
 // `Name.Variant` reads a variant when `Name` is a declared enum, a
@@ -306,11 +301,9 @@ sema_expression_enum_declares_variant: fn(enum_name: String, variant: String, en
 // the same head.
 sema_expression_same_nominal_head: fn(left: String, right: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     if left == right -> return true
-    if program.registration_graph == .Val(graph) {
-        caller: sema_scope_caller_row(environment, graph)
-        return sema_type_graph_resolve_apply_name(graph, left, caller) == sema_type_graph_resolve_apply_name(graph, right, caller)
-    }
-    false
+    graph: program.registration_graph
+    caller: sema_scope_caller_row(environment, graph)
+    sema_type_graph_resolve_apply_name(graph, left, caller) == sema_type_graph_resolve_apply_name(graph, right, caller)
 }
 
 SemaExpressionResolvedType: struct {
@@ -409,11 +402,10 @@ sema_expression_struct_field_fact: fn(field: Field, owner: Symbol, names: [Strin
     owner_key: sema_program_symbol_key(program, owner.id)
     field_id: sema_symbol_id(program, context, SymbolKind.Field, sema_scope_module_text(environment, program, owner.module_identity), owner_key, field.name)
     symbol: Symbol{id: field_id, kind: SymbolKind.Field, name: field.name, module_identity: owner.module_identity, owner: Val(owner_key), span: field.name_span, ty: Val(field_ty), visibility: if field.is_pub -> 2 else if field.is_package_pub -> 1 else -> 0}
-    holds_view := false
-    if program.registration_graph == .Val(graph) {
-        seen := [U32:Bool]{}
-        holds_view = sema_check_type_contains_view(graph, owner.module_identity, field_ty, seen)
-    }
+    graph: program.registration_graph
+    seen := [U32:Bool]{}
+    // Snapshot: a lone program's check marks no field as holding a view.
+    holds_view: graph.mode == .Program && sema_check_type_contains_view(graph, owner.module_identity, field_ty, seen)
     SemaStructFieldFact{field_ty: field_ty, string_view: sema_stmt_string_view_type(field_ty), symbol: symbol, boxed: sema_scope_environment_boxed_edge(environment, program, owner.id, field.name), holds_view: holds_view}
 }
 
@@ -1527,7 +1519,7 @@ sema_expression_unknown_payload_label: fn(variant: String, label: String, declar
 // span when the label is written alone and the value is the name it stands
 // for. None when the source holds anything else there.
 sema_expression_payload_label_span: fn(label: String, value_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Span? {
-    graph: program.registration_graph ?? return None
+    graph: program.registration_graph
     caller: sema_scope_caller_index(environment, graph) ?? return None
     raw: graph.modules[caller].source.bytes()
     if value_span.start < 1 || value_span.end > raw.len() -> return None
@@ -1564,7 +1556,7 @@ sema_expression_uninferable_case: fn(variant: String, span: Span, expected: Type
     why: if single -> "a leading-dot variant needs a known enum type from context" else -> "a leading-dot case names one enum, and nothing here picks one of the enums that declare `{variant}`"
     fix: if single -> "write the full form {written[0]}" else -> "write the enum name: {written.join(" or ")}"
     diagnostic := sema_error("E0330", span, what, why, fix)
-    graph: program.registration_graph ?? return diagnostic
+    graph: program.registration_graph
     caller: sema_scope_caller_index(environment, graph) ?? return diagnostic
     raw: graph.modules[caller].source.bytes()
     if span.start < 0 || span.start >= raw.len() || raw[span.start] != (U8{46}) -> return diagnostic
@@ -1582,7 +1574,7 @@ sema_expression_uninferable_case: fn(variant: String, span: Span, expected: Type
 // is declared in another module, whose name this module may write otherwise.
 sema_expression_case_owners: fn(variant: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables) -> [String] {
     owners := [String]{}
-    graph: program.registration_graph ?? return owners
+    graph: program.registration_graph
     caller: sema_scope_caller_index(environment, graph) ?? return owners
     if expected == .Val(carrier) {
         if carrier == .Union(members) {
@@ -1642,10 +1634,8 @@ sema_expression_enum_payload_replace_mismatch: fn(enum_name: String, variant: St
 }
 
 sema_expression_typed_literal_printable_bound: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
-    if program.registration_graph == .Val(graph) {
-        return sema_type_bound_satisfied_at(graph, ty, "Printable", sema_scope_caller_row(environment, graph), environment.generic_params) ?? false
-    }
-    false
+    graph: program.registration_graph
+    sema_type_bound_satisfied_at(graph, ty, "Printable", sema_scope_caller_row(environment, graph), environment.generic_params) ?? false
 }
 
 // Whether a trait value prints when its box holds a `held`: a secret-bearing
@@ -1678,7 +1668,7 @@ sema_expression_typed_literal_printable: fn(ty: Type, environment: SemaScopeEnvi
             return true
         }
         .TraitObject(bounds) -> {
-            graph: program.registration_graph ?? return false
+            graph: program.registration_graph
             holders: sema_call_reflection_trait_holders(graph, bounds) ?? return false
             loop reference in holders.impls {
                 if !sema_expression_trait_held_printable(graph.modules[reference.module_index].impls[reference.row].target_type, environment, program) {
@@ -1694,7 +1684,8 @@ sema_expression_typed_literal_printable: fn(ty: Type, environment: SemaScopeEnvi
         }
         .Shared(_) | .Fn(_, _, _, _, _, _) | .Measure(_) -> return false
         .Named(name) -> {
-            if program.registration_graph == .Val(graph) && sema_registration_unit_fact_for_type(graph, ty) != None {
+            graph: program.registration_graph
+            if sema_registration_unit_fact_for_type(graph, ty) != None {
                 return true
             }
             loop row in sema_scope_checked_type_name_rows(environment, program, name) {
@@ -1748,75 +1739,74 @@ sema_expression_checked_text_target: fn(head: Type, environment: SemaScopeEnviro
             return None
         }
     }
-    if program.registration_graph == .Val(graph) {
-        owner := Symbol?{None}
-        owner_row := SemaRegistrationRowRef?{None}
-        identity_key := ""
-        string_backed := false
-        if sema_expression_type_symbol(scopes, environment, program, name) == .Val(symbol) {
-            if symbol.kind != SymbolKind.Type -> return None
-            if sema_type_graph_nominal_row(graph, symbol.id) == .Val(registered_row) {
-                registered: graph.modules[registered_row.module_index].nominals[registered_row.row]
-                owner = Val(registered.symbol)
-                owner_row = Val(SemaRegistrationRowRef{module_index: registered_row.module_index, row: registered_row.row})
-                identity_key = registered.identity_key
-                if registered.kind == SemaRegistrationNominalKind.Distinct {
-                    definition: sema_registration_nominal_source_item(registered.source) ?? return None
-                    if definition == .Distinct(value) -> string_backed = value.base == Type.String
-                }
+    graph: program.registration_graph
+    owner := Symbol?{None}
+    owner_row := SemaRegistrationRowRef?{None}
+    identity_key := ""
+    string_backed := false
+    if sema_expression_type_symbol(scopes, environment, program, name) == .Val(symbol) {
+        if symbol.kind != SymbolKind.Type -> return None
+        if sema_type_graph_nominal_row(graph, symbol.id) == .Val(registered_row) {
+            registered: graph.modules[registered_row.module_index].nominals[registered_row.row]
+            owner = Val(registered.symbol)
+            owner_row = Val(SemaRegistrationRowRef{module_index: registered_row.module_index, row: registered_row.row})
+            identity_key = registered.identity_key
+            if registered.kind == SemaRegistrationNominalKind.Distinct {
+                definition: sema_registration_nominal_source_item(registered.source) ?? return None
+                if definition == .Distinct(value) -> string_backed = value.base == Type.String
             }
         }
-        head_module: if owner == None -> boundary_head_owner_module(name) else -> None
-        if owner == None && head_module == None -> return None
-        if graph.impl_traits_indexed {
-            loop impl_row in graph.checked_text_impl_rows {
-                found: sema_expression_checked_text_impl_target(graph, impl_row.module_index, impl_row.row, owner, identity_key, name, head_module, string_backed) ?? next
+    }
+    head_module: if owner == None -> boundary_head_owner_module(name) else -> None
+    if owner == None && head_module == None -> return None
+    if graph.impl_traits_indexed {
+        loop impl_row in graph.checked_text_impl_rows {
+            found: sema_expression_checked_text_impl_target(graph, impl_row.module_index, impl_row.row, owner, identity_key, name, head_module, string_backed) ?? next
+            return Val(found)
+        }
+    } else {
+        loop graph_module_index in 0..<graph.modules.len() {
+            loop implementation_index in 0..<graph.modules[graph_module_index].impls.len() {
+                if !sema_type_graph_is_checked_text_impl(graph, graph.modules[graph_module_index].impls[implementation_index]) {
+                    next
+                }
+                found: sema_expression_checked_text_impl_target(graph, graph_module_index, implementation_index, owner, identity_key, name, head_module, string_backed) ?? next
                 return Val(found)
             }
-        } else {
-            loop graph_module_index in 0..<graph.modules.len() {
-                loop implementation_index in 0..<graph.modules[graph_module_index].impls.len() {
-                    if !sema_type_graph_is_checked_text_impl(graph, graph.modules[graph_module_index].impls[implementation_index]) {
-                        next
-                    }
-                    found: sema_expression_checked_text_impl_target(graph, graph_module_index, implementation_index, owner, identity_key, name, head_module, string_backed) ?? next
-                    return Val(found)
-                }
-            }
         }
-        // An `impl CheckedText { … }` block in the type's own body, whose
-        // methods the nominal registers, unless a user trait shares the name.
-        // A type with no such block is passed over without copying its blocks.
-        if owner_row == .Val(registered_row) {
-            registered: graph.modules[registered_row.module_index].nominals[registered_row.row]
-            if registered.source == .SourceAST(item) {
-                if !sema_registration_item_has_trait_block(item, "CheckedText") -> return None
-                loop block in sema_registration_item_trait_blocks(item) {
-                    if block.trait_name != "CheckedText" || sema_type_graph_trait_symbol(graph, graph.modules[registered_row.module_index].module_identity, "CheckedText") != None {
-                        next
+    }
+    // An `impl CheckedText { … }` block in the type's own body, whose
+    // methods the nominal registers, unless a user trait shares the name.
+    // A type with no such block is passed over without copying its blocks.
+    if owner_row == .Val(registered_row) {
+        registered: graph.modules[registered_row.module_index].nominals[registered_row.row]
+        if registered.source == .SourceAST(item) {
+            if !sema_registration_item_has_trait_block(item, "CheckedText") -> return None
+            loop block in sema_registration_item_trait_blocks(item) {
+                if block.trait_name != "CheckedText" || sema_type_graph_trait_symbol(graph, graph.modules[registered_row.module_index].module_identity, "CheckedText") != None {
+                    next
+                }
+                check := SemaRegistrationFunction?{None}
+                encode_hole := SemaRegistrationFunction?{None}
+                build := SemaRegistrationFunction?{None}
+                loop method in registered.methods {
+                    written := false
+                    loop declared in block.methods {
+                        if declared.span == method.declaration.span -> written = true
                     }
-                    check := SemaRegistrationFunction?{None}
-                    encode_hole := SemaRegistrationFunction?{None}
-                    build := SemaRegistrationFunction?{None}
-                    loop method in registered.methods {
-                        written := false
-                        loop declared in block.methods {
-                            if declared.span == method.declaration.span -> written = true
-                        }
-                        if !written -> next
-                        if method.symbol.name == "check" -> check = Val(method)
-                        if method.symbol.name == "encode_hole" -> encode_hole = Val(method)
-                        if method.symbol.name == "build" -> build = Val(method)
-                    }
-                    if check != None && encode_hole != None && (string_backed || build != None) {
-                        return Val(SemaExpressionCheckedTextTarget{
-                            owner: registered.symbol,
-                            implementation_module_identity: graph.modules[registered_row.module_index].module_identity,
-                            check: check ?? return None,
-                            encode_hole: encode_hole ?? return None,
-                            build: build,
-                        })
-                    }
+                    if !written -> next
+                    if method.symbol.name == "check" -> check = Val(method)
+                    if method.symbol.name == "encode_hole" -> encode_hole = Val(method)
+                    if method.symbol.name == "build" -> build = Val(method)
+                }
+                if check != None && encode_hole != None && (string_backed || build != None) {
+                    return Val(SemaExpressionCheckedTextTarget{
+                        owner: registered.symbol,
+                        implementation_module_identity: graph.modules[registered_row.module_index].module_identity,
+                        check: check ?? return None,
+                        encode_hole: encode_hole ?? return None,
+                        build: build,
+                    })
                 }
             }
         }
@@ -1894,7 +1884,9 @@ sema_expression_checked_text_static_method_call: fn(receiver: Expr, method_name:
         diagnostics.push(sema_error("E0907", method_span, "`{type_name}.{method_name}` must be pure", "CheckedText methods are evaluated through the canonical pure Source evaluator", "declare this CheckedText method pure"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    if program.registration_graph == None {
+    // Snapshot: a CheckedText method is evaluated from its registered
+    // callable, and a lone program registers none.
+    if program.registration_graph.mode == .Snapshot {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     direct: sema_call_direct_target_from_registration(function, program.registration_graph, environment.module_identity, environment.package_identity, environment.generic_params, type_args, method_span, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
@@ -2110,77 +2102,75 @@ sema_expression_checked_text_literal: fn(head: Type, source_head: Type?, body: T
         value: sema_expression_checked_text_runtime(head, target.owner.name, checked, span, environment, program, scopes) ?? return SemaExpressionCheckedTextLiteral{handled: true, value: None}
         return SemaExpressionCheckedTextLiteral{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
     }
-    if program.registration_graph == .Val(graph) {
-        // A check whose Error is Never cannot reject the body, so it is not run.
-        rejects: if checked.ty == .Result(_, failure) -> failure != (Type.Named{name: "Never"}) else -> true
-        if rejects {
-            functions := sema_comptime_reachable_function_keys(graph, check.context.call_facts)
-            reachable := [String]{}
-            loop key in functions {
-                id: symbol_find(graph.symbols, key) ?? next
-                fact_index := fact_start
-                loop fact_index < check.context.call_facts.len() {
-                    callee: check.context.call_facts[fact_index].callee
-                    if callee == .Val(symbol) && symbol == id {
-                        reachable.push(key)
-                        break
-                    }
-                    fact_index += 1
+    graph: program.registration_graph
+    // A check whose Error is Never cannot reject the body, so it is not run.
+    rejects: if checked.ty == .Result(_, failure) -> failure != (Type.Named{name: "Never"}) else -> true
+    if rejects {
+        functions := sema_comptime_reachable_function_keys(graph, check.context.call_facts)
+        reachable := [String]{}
+        loop key in functions {
+            id: symbol_find(graph.symbols, key) ?? next
+            fact_index := fact_start
+            loop fact_index < check.context.call_facts.len() {
+                callee: check.context.call_facts[fact_index].callee
+                if callee == .Val(symbol) && symbol == id {
+                    reachable.push(key)
+                    break
                 }
+                fact_index += 1
             }
-            loop method_key in
-                ([String]{symbol_table_key(graph.symbols, target.check.symbol.id), symbol_table_key(graph.symbols, target.encode_hole.symbol.id)}) {
-                if !reachable.contains(method_key) -> reachable.push(method_key)
+        }
+        loop method_key in
+            ([String]{symbol_table_key(graph.symbols, target.check.symbol.id), symbol_table_key(graph.symbols, target.encode_hole.symbol.id)}) {
+            if !reachable.contains(method_key) -> reachable.push(method_key)
+        }
+        dependencies := [String]{}
+        loop reference_index in reference_start..<check.context.name_references.len() {
+            reference := check.context.name_references[reference_index]
+            if reference.symbol.kind != SymbolKind.Constant -> next
+            dependency: sema_registration_symbol_key(graph, reference.symbol.id)
+            if dependency != "" && !dependencies.contains(dependency) {
+                dependencies.push(dependency)
             }
-            dependencies := [String]{}
-            loop reference_index in reference_start..<check.context.name_references.len() {
-                reference := check.context.name_references[reference_index]
-                if reference.symbol.kind != SymbolKind.Constant -> next
-                dependency: sema_registration_symbol_key(graph, reference.symbol.id)
-                if dependency != "" && !dependencies.contains(dependency) {
-                    dependencies.push(dependency)
-                }
-            }
-            source_file := sema_source_file_at(environment.source_segments, environment.source_file, environment.source_origin, span)
-            key: "{module_text(graph.module_table, environment.module_identity)}.checked-text.{symbol_table_key(graph.symbols, target.owner.id)}.{span.start}:{span.end}:{type_identity_key(head)}"
-            evaluation := SemaCheckedTextEvaluation{
-                module_identity: environment.module_identity,
-                key: key,
-                type_name: type_name,
-                source_file: source_file,
-                source_expression: Expr.TypedLit{head: source_head, body: body, span: span, id: AST_NODE_GENERATED},
-                expression: sema_publish_expression(checked, program, check.context),
-                ty: checked.ty,
-                hardware_use: TargetHardwareUse{
-                    register_accesses: loop index in register_access_start..<check.context.hardware_use.register_accesses.len() -> check.context.hardware_use.register_accesses[index],
-                    interrupt_handlers: loop index in interrupt_handler_start..<check.context.hardware_use.interrupt_handlers.len() -> check.context.hardware_use.interrupt_handlers[index],
-                    dma_operations: loop index in dma_operation_start..<check.context.hardware_use.dma_operations.len() -> check.context.hardware_use.dma_operations[index],
-                    unresolved_references: loop index in unresolved_hardware_start..<check.context.hardware_use.unresolved_references.len() -> check.context.hardware_use.unresolved_references[index],
-                },
-                reachable_function_keys: reachable,
-                dependencies: dependencies,
+        }
+        source_file := sema_source_file_at(environment.source_segments, environment.source_file, environment.source_origin, span)
+        key: "{module_text(graph.module_table, environment.module_identity)}.checked-text.{symbol_table_key(graph.symbols, target.owner.id)}.{span.start}:{span.end}:{type_identity_key(head)}"
+        evaluation := SemaCheckedTextEvaluation{
+            module_identity: environment.module_identity,
+            key: key,
+            type_name: type_name,
+            source_file: source_file,
+            source_expression: Expr.TypedLit{head: source_head, body: body, span: span, id: AST_NODE_GENERATED},
+            expression: sema_publish_expression(checked, program, check.context),
+            ty: checked.ty,
+            hardware_use: TargetHardwareUse{
+                register_accesses: loop index in register_access_start..<check.context.hardware_use.register_accesses.len() -> check.context.hardware_use.register_accesses[index],
+                interrupt_handlers: loop index in interrupt_handler_start..<check.context.hardware_use.interrupt_handlers.len() -> check.context.hardware_use.interrupt_handlers[index],
+                dma_operations: loop index in dma_operation_start..<check.context.hardware_use.dma_operations.len() -> check.context.hardware_use.dma_operations[index],
+                unresolved_references: loop index in unresolved_hardware_start..<check.context.hardware_use.unresolved_references.len() -> check.context.hardware_use.unresolved_references[index],
+            },
+            reachable_function_keys: reachable,
+            dependencies: dependencies,
+            span: span,
+            code: "E2712",
+            what: "this checked text type rejected its body",
+            fix: "fix the body so it satisfies the type's declared text grammar",
+        }
+        check.context.comptime_requests.push(
+            SemaComptimeRequest{
+                callee_key: symbol_table_key(graph.symbols, target.check.symbol.id),
+                module_identity: target.implementation_module_identity,
+                args: [TComptimeValue]{},
                 span: span,
-                code: "E2712",
-                what: "this checked text type rejected its body",
-                fix: "fix the body so it satisfies the type's declared text grammar",
-            }
-            check.context.comptime_requests.push(
-                SemaComptimeRequest{
-                    callee_key: symbol_table_key(graph.symbols, target.check.symbol.id),
-                    module_identity: target.implementation_module_identity,
-                    args: [TComptimeValue]{},
-                    span: span,
-                    checked_text: Val(evaluation),
-                },
-            )
-        }
-        if !building {
-            result := sema_tree_node(head, TExprKind.DistinctCtor{argument: text}, span)
-            return SemaExpressionCheckedTextLiteral{handled: true, value: sema_expr_expected(result, expected, environment, program, diagnostics)}
-        }
-        return SemaExpressionCheckedTextLiteral{handled: true, value: sema_expression_checked_text_build(type_name, parts, span, expected, environment, program, scopes, check, diagnostics)}
+                checked_text: Val(evaluation),
+            },
+        )
     }
-    SemaExpressionCheckedTextLiteral{handled: true, value: None}
+    if !building {
+        result := sema_tree_node(head, TExprKind.DistinctCtor{argument: text}, span)
+        return SemaExpressionCheckedTextLiteral{handled: true, value: sema_expr_expected(result, expected, environment, program, diagnostics)}
+    }
+    SemaExpressionCheckedTextLiteral{handled: true, value: sema_expression_checked_text_build(type_name, parts, span, expected, environment, program, scopes, check, diagnostics)}
 }
 
 // `Type.encode_hole(value)` for one interpolation hole.
@@ -2503,27 +2493,26 @@ sema_expression_field_is_shorthand: fn(field: ExprField) -> Bool Never! {
 sema_expression_conversion_head: fn(head: Type?, shorthand: String?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable) -> String? {
     written: head ?? return None
     if sema_expr_unwrap_tag(written) == .Named(written_name) {
-        if program.registration_graph == .Val(graph) {
-            symbol: sema_expression_type_symbol(scopes, environment, program, written_name) ?? return None
-            row: sema_type_graph_nominal_row(graph, symbol.id) ?? return None
-            nominal: graph.modules[row.module_index].nominals[row.row]
-            if shorthand == .Val(field_name) {
-                loop field in nominal.fields {
-                    if field.symbol.name == field_name -> return None
-                }
+        graph: program.registration_graph
+        symbol: sema_expression_type_symbol(scopes, environment, program, written_name) ?? return None
+        row: sema_type_graph_nominal_row(graph, symbol.id) ?? return None
+        nominal: graph.modules[row.module_index].nominals[row.row]
+        if shorthand == .Val(field_name) {
+            loop field in nominal.fields {
+                if field.symbol.name == field_name -> return None
             }
-            if nominal.source == .SourceAST(item) {
-                if sema_expression_item_has_conversion_block(item) {
-                    return Val(written_name.copy())
-                }
+        }
+        if nominal.source == .SourceAST(item) {
+            if sema_expression_item_has_conversion_block(item) {
+                return Val(written_name.copy())
             }
-            loop impl_row in sema_registration_impl_rows_named(graph, nominal.symbol.name) {
-                implementation: graph.modules[impl_row.module_index].impls[impl_row.row]
-                trait_name: implementation.trait_name ?? next
-                if !owned_trait_conversion(trait_name) -> next
-                if implementation.target_identity_key == nominal.identity_key || (!module_is_none(implementation.target_module_identity) && implementation.target_module_identity == nominal.symbol.module_identity && implementation.target_type_name == nominal.symbol.name) {
-                    return Val(written_name.copy())
-                }
+        }
+        loop impl_row in sema_registration_impl_rows_named(graph, nominal.symbol.name) {
+            implementation: graph.modules[impl_row.module_index].impls[impl_row.row]
+            trait_name: implementation.trait_name ?? next
+            if !owned_trait_conversion(trait_name) -> next
+            if implementation.target_identity_key == nominal.identity_key || (!module_is_none(implementation.target_module_identity) && implementation.target_module_identity == nominal.symbol.module_identity && implementation.target_type_name == nominal.symbol.name) {
+                return Val(written_name.copy())
             }
         }
     }
@@ -2571,23 +2560,22 @@ sema_expression_builtin_conversion_value: fn(head: Type, body: TypedLitBody, env
     }
     head_name: type_name(head)
     if sema_registration_builtin_scalar(head_name) == None -> return None
-    if program.registration_graph == .Val(graph) {
-        sources := [String]{}
-        loop impl_row in sema_registration_impl_rows_named(graph, head_name) {
-            implementation: graph.modules[impl_row.module_index].impls[impl_row.row]
-            trait_name: implementation.trait_name ?? next
-            if !owned_trait_conversion(trait_name) || !module_is_none(implementation.target_module_identity) {
-                next
-            }
-            source: implementation.declaration.operator_rhs ?? next
-            sources.push(sema_expression_type_leaf(type_name(source)))
+    graph: program.registration_graph
+    sources := [String]{}
+    loop impl_row in sema_registration_impl_rows_named(graph, head_name) {
+        implementation: graph.modules[impl_row.module_index].impls[impl_row.row]
+        trait_name: implementation.trait_name ?? next
+        if !owned_trait_conversion(trait_name) || !module_is_none(implementation.target_module_identity) {
+            next
         }
-        if sources.len() == 0 -> return None
-        probe_diagnostics := [Diagnostic]{}
-        probed: sema_probe_expression(value, None, environment, program, scopes, check, probe_diagnostics) ?? return None
-        if sources.contains(sema_expression_type_leaf(type_name(probed.ty))) {
-            return Val(value.copy())
-        }
+        source: implementation.declaration.operator_rhs ?? next
+        sources.push(sema_expression_type_leaf(type_name(source)))
+    }
+    if sources.len() == 0 -> return None
+    probe_diagnostics := [Diagnostic]{}
+    probed: sema_probe_expression(value, None, environment, program, scopes, check, probe_diagnostics) ?? return None
+    if sources.contains(sema_expression_type_leaf(type_name(probed.ty))) {
+        return Val(value.copy())
     }
     None
 }
@@ -2667,7 +2655,8 @@ sema_expression_typed_literal: fn(head: Type?, body: TypedLitBody, span: Span, e
     // that fails to match it, and so is a list or map head over one
     // (`[Nope]{14}`). A head naming a declared type or a Core record
     // (`IOContext`) is known whatever the written-name table says.
-    if head == .Val(written) && program.registration_graph == .Val(graph) {
+    graph: program.registration_graph
+    if head == .Val(written) {
         unwrapped: sema_expr_unwrap_tag(written)
         judged: if unwrapped == {
             .Named(written_name) -> sema_expression_type_symbol(scopes, environment, program, written_name) == None && sema_expression_core_record_name(written_name, [Type]{}, expected, environment, program, scopes) == None

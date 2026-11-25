@@ -1029,9 +1029,10 @@ sema_taint_validate_tag_graph: fn(tag_value: String, module_identity: ModuleID, 
 }
 
 sema_taint_validate_tag: fn(tag_value: String, env: SemaScopeEnvironment, program: SemaProgramTables, span: Span, diagnostics: ^[Diagnostic]) -> Bool {
-    if program.registration_graph == {
-        .Val(value) -> return sema_taint_validate_tag_graph(tag_value, env.module_identity, value, span, diagnostics)
-        .None -> {}
+    // Snapshot: a lone program's tags are only the built-in ones.
+    if program.registration_graph.mode != .Snapshot {
+        value: program.registration_graph
+            return sema_taint_validate_tag_graph(tag_value, env.module_identity, value, span, diagnostics)
     }
     if sema_taint_builtin_tag(tag_value) != None || tag_value == SEMA_TAINT_ORIGIN_NET || tag_value == SEMA_TAINT_ORIGIN_FS || tag_value == SEMA_TAINT_ORIGIN_ENV || tag_value == SEMA_TAINT_ORIGIN_PROCESS || tag_value == SEMA_TAINT_ORIGIN_FFI {
         return true

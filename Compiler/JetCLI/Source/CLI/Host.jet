@@ -174,7 +174,8 @@ use {
         compiler_event_json,
         compiler_event_record,
         CompilerEventRecord,
-        compiler_threads_failure_text,
+        compiler_threads_failed,
+        compiler_threads_joined,
         CompilerThreads,
         CompilerTraceSink,
         NameTable,
@@ -1206,7 +1207,7 @@ jet_cli_native_executable: fn(result: JetDriverCompileResult, inputs: ^^JetDrive
                     sink.begin("native.foreign", "", -1, -1)
                 }
                 objects.push(object)
-                closures.push(realizing.join() ?? panic(compiler_threads_failure_text(err)))
+                closures.push(compiler_threads_joined(realizing))
             }
         }
     }
@@ -4897,7 +4898,7 @@ jet_cli_compile_on_worker: fn(plan: ^^JetCLIPlan, discovery: ^WorkspaceDeclarati
         compiling: task jet_cli_execute_compiling(plan, recording, trace_sink)
         step: compiling.join() ?? {
             if trace_sink == .Val(sink) -> jet_cli_trace_finish(sink)
-            panic(compiler_threads_failure_text(err))
+            compiler_threads_failed(err)
         }
         if trace_sink == .Val(sink) -> jet_cli_trace_finish(sink)
         steps.push(step)

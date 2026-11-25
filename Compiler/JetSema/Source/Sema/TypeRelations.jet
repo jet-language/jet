@@ -891,6 +891,9 @@ sema_type_name_is_generic: fn(generic_params: [TGenericParam], name: String) -> 
 // caller by row: a lookup chain probes the String-keyed module map once, at
 // its entry, and never per name.
 sema_type_graph_resolve_named: fn(graph: SemaRegistrationGraph, name: String, caller: Int) -> Type Never! {
+    // Snapshot: a lone program declares no registered type; a name reads as
+    // written.
+    if graph.mode == .Snapshot -> return Type.Named{name: name}
     if name == "" || name == "Unit" || name == "Err" || name == "Never" {
         return Type.Named{name: name}
     }
@@ -1577,11 +1580,10 @@ sema_type_union_case_conflicts: fn(members: [Type], items: [Item], span: Span, d
 // sema_type_union_case_conflicts for a union written in the environment's
 // module, whose items name the types it lifted from inline modules.
 sema_type_union_case_conflicts_in: fn(members: [Type], environment: SemaScopeEnvironment, program: SemaProgramTables, span: Span, diagnostics: ^[Diagnostic]) {
-    if program.registration_graph == .Val(graph) {
-        if sema_scope_caller_index(environment, graph) == .Val(row) {
-            sema_type_union_case_conflicts(members, graph.modules[row].program.items, span, diagnostics)
-            return
-        }
+    graph: program.registration_graph
+    if sema_scope_caller_index(environment, graph) == .Val(row) {
+        sema_type_union_case_conflicts(members, graph.modules[row].program.items, span, diagnostics)
+        return
     }
     sema_type_union_case_conflicts(members, [Item]{}, span, diagnostics)
 }
@@ -1672,6 +1674,13 @@ sema_type_is_scalar_resolved: fn(ty: Type) -> Bool Never! {
 }
 
 sema_type_resolve_declared_recursive: fn(graph: SemaRegistrationGraph, ty: Type, caller: Int, generic_params: [TGenericParam]) -> Type Never! {
+    // Snapshot: a lone program declares no registered type; a type reads as
+    // written.
+    if graph.mode == .Snapshot -> ty else -> sema_type_resolve_declared_rows(graph, ty, caller, generic_params)
+}
+
+// sema_type_resolve_declared_recursive on a registered graph's rows.
+sema_type_resolve_declared_rows: fn(graph: SemaRegistrationGraph, ty: Type, caller: Int, generic_params: [TGenericParam]) -> Type Never! {
     if ty == {
         .Named(name) -> if sema_type_name_is_generic(generic_params, name) -> ty else -> sema_type_graph_resolve_named(graph, name, caller)
         .Apply(name, args) -> {
@@ -2045,13 +2054,9 @@ sema_type_core_pointer_name: fn(graph: SemaRegistrationGraph, name: String, call
 // resolved in the nominal's own module, where it is spelled: the module that
 // classifies a value of the nominal need not import its members' types. The
 // nominal's generic parameters stay open for the caller's bindings.
-sema_type_resolve_member_type: fn(graph: SemaRegistrationGraph?, nominal: SemaRegistrationNominal, ty: Type) -> Type Never! {
-    if graph == .Val(registered) {
-        owner_params: loop parameter in nominal.generic_params -> TGenericParam{name: parameter.name, bounds: [SymbolID]{}}
-        return sema_type_resolve_declared_with_generics(registered, ty, nominal.symbol.module_identity, owner_params)
-    }
-    // copy: `ty` is a read parameter; the caller keeps its own.
-    ty.copy()
+sema_type_resolve_member_type: fn(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal, ty: Type) -> Type Never! {
+    owner_params: loop parameter in nominal.generic_params -> TGenericParam{name: parameter.name, bounds: [SymbolID]{}}
+    sema_type_resolve_declared_with_generics(graph, ty, nominal.symbol.module_identity, owner_params)
 }
 
 // The registration row of module `identity`, or -1 when the graph holds no
@@ -2873,6 +2878,9 @@ sema_type_bound_satisfied_with_generics: fn(graph: SemaRegistrationGraph, actual
 
 // sema_type_bound_satisfied_with_generics from the caller module's row `caller`.
 sema_type_bound_satisfied_at: fn(graph: SemaRegistrationGraph, actual: Type, bound_name: String, caller: Int, generic_params: [TGenericParam]) -> Bool? {
+    // Snapshot: a bound names a registered trait, and a lone program
+    // registers none; whether it holds is unknown.
+    if graph.mode == .Snapshot -> return None
     actual_resolved: sema_type_resolve_declared_recursive(graph, actual, caller, generic_params)
     // Demand: a checked codec bound requires the codecs of the
     // types it is met at, so their generated bodies are checked; a
@@ -3030,6 +3038,9 @@ sema_type_same_named: fn(required: Type, offered: Type) -> Bool Never! {
 }
 
 sema_type_assignable_in_graph_with_generics: fn(graph: SemaRegistrationGraph, required: Type, offered: Type, caller_module_identity: ModuleID, generic_params: [TGenericParam]) -> Bool? {
+    // Snapshot: a lone program declares no registered type; types are
+    // assignable as written.
+    if graph.mode == .Snapshot -> return Val(sema_type_assignable(required, offered))
     if sema_type_same_named(required, offered) -> return Val(true)
     sema_type_assignable_in_graph_at(graph, required, offered, sema_type_module_row(graph, caller_module_identity), generic_params)
 }
@@ -3037,6 +3048,9 @@ sema_type_assignable_in_graph_with_generics: fn(graph: SemaRegistrationGraph, re
 // sema_type_assignable_in_graph_with_generics for a caller already resolved
 // to its registration row (-1: none).
 sema_type_assignable_in_graph_at: fn(graph: SemaRegistrationGraph, required: Type, offered: Type, caller: Int, generic_params: [TGenericParam]) -> Bool? {
+    // Snapshot: a lone program declares no registered type; types are
+    // assignable as written.
+    if graph.mode == .Snapshot -> return Val(sema_type_assignable(required, offered))
     if sema_type_same_named(required, offered) -> return Val(true)
     required_resolved: sema_type_resolve_declared_recursive(graph, required, caller, generic_params)
     offered_resolved: sema_type_resolve_declared_recursive(graph, offered, caller, generic_params)

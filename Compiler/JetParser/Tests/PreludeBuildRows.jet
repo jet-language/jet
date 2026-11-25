@@ -7,7 +7,7 @@
 use {
     cbor: core.encoding.cbor
     jet_foundation.[MARKER_SOURCE, registration_marker_rules]
-    jet_parser.[parser_line_starts]
+    jet_parser.[parse_generated_source, parser_line_starts]
     jet_sema.[
         SEMA_PRELUDE_DERIVE_PROVIDERS,
         SEMA_PRELUDE_DERIVE_WORDS,
@@ -24,6 +24,7 @@ use {
         sema_marker_module_prelude_decls,
         sema_marker_module_prelude_tags,
         sema_marker_rules_applied_row,
+        sema_prelude_text_error,
         sema_registration_derive_words,
         sema_registration_original_error_program,
         sema_registration_rule_program,
@@ -43,7 +44,7 @@ prelude_build_rows_same: fn<T: Encode>(built: T, read: T, what: String) {
 // applied-rule row, read from the parsed declaration, is the marker row the
 // registration table holds for it, in the same order.
 #Test("the build-time marker rows equal the marker source read now") {
-    declarations: sema_marker_module_prelude_decls()
+    declarations: sema_marker_module_prelude_decls() ?? panic("{err.file}: {err.message}")
     assert(declarations.len() > 20, "Prelude/Markers.jet declares no markers")
     prelude_build_rows_same(SEMA_PRELUDE_MARKER_DECLS, declarations, "marker declarations")
     rules: registration_marker_rules()
@@ -55,26 +56,28 @@ prelude_build_rows_same: fn<T: Encode>(built: T, read: T, what: String) {
 }
 
 #Test("the build-time value tags equal the marker source read now") {
-    tags: sema_marker_module_prelude_tags()
+    tags: sema_marker_module_prelude_tags() ?? panic("{err.file}: {err.message}")
     assert_eq(tags.len(), 4)
     prelude_build_rows_same(SEMA_PRELUDE_TAGS, tags, "value tags")
 }
 
 #Test("the build-time derive providers and words equal the derive source read now") {
-    providers: sema_derive_builtin_providers()
+    providers: sema_derive_builtin_providers() ?? panic("{err.file}: {err.message}")
     assert(providers.len() > 0, "Prelude/Derives.jet declares no provider")
     prelude_build_rows_same(SEMA_PRELUDE_DERIVE_PROVIDERS, providers, "derive providers")
     assert_eq(SEMA_PRELUDE_DERIVE_WORDS, sema_registration_derive_words())
 }
 
 #Test("the build-time original error module equals the error source read now") {
-    prelude_build_rows_same(SEMA_PRELUDE_ERROR_PROGRAM, sema_registration_original_error_program(), "original error program")
+    errors: sema_registration_original_error_program() ?? panic("{err.file}: {err.message}")
+    prelude_build_rows_same(SEMA_PRELUDE_ERROR_PROGRAM, errors, "original error program")
     assert_eq(SEMA_PRELUDE_ERROR_PROGRAM.items.len(), 7)
     assert_eq(SEMA_PRELUDE_ERROR_LINE_STARTS, parser_line_starts(SEMA_PRELUDE_ERROR_SOURCE.bytes()))
 }
 
 #Test("the build-time contract rule module equals the rule source read now") {
-    prelude_build_rows_same(SEMA_PRELUDE_RULE_PROGRAM, sema_registration_rule_program(), "contract rule program")
+    rules: sema_registration_rule_program() ?? panic("{err.file}: {err.message}")
+    prelude_build_rows_same(SEMA_PRELUDE_RULE_PROGRAM, rules, "contract rule program")
     markers := 0
     loop item in SEMA_PRELUDE_RULE_PROGRAM.items {
         if item == .MarkerDecl(_) -> markers += 1
@@ -84,7 +87,19 @@ prelude_build_rows_same: fn<T: Encode>(built: T, read: T, what: String) {
 }
 
 #Test("the build-time unit catalog equals the unit source read now") {
-    catalog: sema_units_catalog_read()
+    catalog: sema_units_catalog_read() ?? panic("{err.file}: {err.message}")
     assert_eq(catalog.len(), 34)
     prelude_build_rows_same(SEMA_UNITS_CATALOG, catalog, "unit catalog")
+}
+
+// A Prelude text that does not parse is its reader's error, naming the file
+// and the line of the first problem.
+#Test("a Prelude text that does not parse is an error at the line of its first problem") {
+    text: "Good: struct {{\n    a: Int,\n}}\n\nBad: struct {{\n    a: ,\n}}\n"
+    parsed: parse_generated_source(text.bytes())
+    assert(parsed.diagnostics.len() > 0, "the broken text parses")
+    error: sema_prelude_text_error("Prelude/Broken.jet", text, parsed.diagnostics)
+    assert_eq(error.file, "Prelude/Broken.jet")
+    assert_eq(error.line, Val(6))
+    assert(error.message.starts_with("does not parse: "), error.message)
 }

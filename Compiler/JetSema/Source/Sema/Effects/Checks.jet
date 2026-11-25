@@ -1012,16 +1012,14 @@ sema_effect_declarations_irreversible_fact: fn(declarations: [Item], effect_name
 // allowlist: changing an effect's `irreversible` method in
 // Prelude/Effects.jet changes this fact at the source boundary.
 sema_effect_canonical_irreversible_fact: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, effect_name: String) -> Bool? {
-    if program.registration_graph == .Val(graph) {
-        canonical_identity: graph.canonical_effect_module_identity
-        if module_is_none(canonical_identity) -> return None
-        module_index: sema_registration_module_index(graph, canonical_identity) ?? return None
-        if graph.modules[module_index].package_identity != JET_CANONICAL_EFFECT_PACKAGE_IDENTITY || graph.modules[module_index].module_path != JET_CANONICAL_EFFECT_MODULE_PATH {
-            return None
-        }
-        return sema_effect_declarations_irreversible_fact(graph.modules[module_index].program.items, effect_name)
+    graph: program.registration_graph
+    canonical_identity: graph.canonical_effect_module_identity
+    if module_is_none(canonical_identity) -> return None
+    module_index: sema_registration_module_index(graph, canonical_identity) ?? return None
+    if graph.modules[module_index].package_identity != JET_CANONICAL_EFFECT_PACKAGE_IDENTITY || graph.modules[module_index].module_path != JET_CANONICAL_EFFECT_MODULE_PATH {
+        return None
     }
-    None
+    sema_effect_declarations_irreversible_fact(graph.modules[module_index].program.items, effect_name)
 }
 
 sema_effect_is_irreversible: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, effect_name: String) -> Bool? {

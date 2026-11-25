@@ -40,6 +40,7 @@ use {
         compiler_take_rows,
         compiler_threads_failure_text,
         compiler_threads_join,
+        compiler_threads_joined,
         compiler_threads_leave,
         foundation_byte_text,
         foundation_json_quote,
@@ -528,7 +529,7 @@ jet_cli_library_ir: fn(checked: ^^JetDriverLoweringInputs, rows: [IRLibraryExpor
         task.group runtime_receipts {
             t_eval: task ir_eval_link_receipt(library.program, library.exports, units)
             receipt = ir_stop_exports(library.program, library.exports)
-            eval_receipt = t_eval.join() ?? panic(compiler_threads_failure_text(err))
+            eval_receipt = compiler_threads_joined(t_eval)
         }
     }
     if issues.len() == 0 {
@@ -893,7 +894,7 @@ jet_cli_source_key_parts: fn(root: String, paths: [String], bounds: [Int], at: I
     task.group jet_cli_source_key_threads {
         head: task jet_cli_source_key_part(root, paths, bounds[at], bounds[at + 1])
         rest: jet_cli_source_key_parts(root, paths, bounds, at + 1)
-        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        done.push(compiler_threads_joined(head))
         loop part in rest.move() -> done.push(part)
     }
     done

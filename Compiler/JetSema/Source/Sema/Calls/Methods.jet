@@ -533,10 +533,9 @@ sema_call_try_builtin_method: fn(receiver: Expr, receiver_value: TExpr, method: 
     if measurement.handled -> return measurement
     authority: sema_call_try_authority_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, check, diagnostics)
     if authority.handled -> return authority
-    if program.registration_graph == .Val(graph) {
-        plugin: sema_call_try_plugin_method(receiver, receiver_value, method, args, span, expected, graph.plugin_facts, environment, program, scopes, check, diagnostics)
-        if plugin.handled -> return plugin
-    }
+    graph: program.registration_graph
+    plugin: sema_call_try_plugin_method(receiver, receiver_value, method, args, span, expected, graph.plugin_facts, environment, program, scopes, check, diagnostics)
+    if plugin.handled -> return plugin
     transaction: sema_call_try_transaction_hook(receiver, receiver_value, method, args, span, expected, environment, program, scopes, check, diagnostics)
     if transaction.handled -> return transaction
     sema_call_try_builtin_host_route(receiver, receiver_value, method, args, span, expected, environment, program, scopes, check, diagnostics)
@@ -585,10 +584,9 @@ sema_call_try_type_param_hook_method: fn(receiver_value: TExpr, method: String, 
             }
             next
         }
-        if program.registration_graph == .Val(graph) {
-            row: sema_call_trait_row_for_symbol(graph, bound) ?? next
-            if sema_call_trait_row_declares(graph, row, method) -> return unhandled
-        }
+        graph: program.registration_graph
+        row: sema_call_trait_row_for_symbol(graph, bound) ?? next
+        if sema_call_trait_row_declares(graph, row, method) -> return unhandled
     }
     if hook_trait == None {
         missing: sema_call_type_param_method_trait(program, method) ?? return unhandled
@@ -626,19 +624,18 @@ sema_call_type_param_method_trait: fn(program: SemaProgramTables, method: String
         if best == .Val(current) && current <= owned.name -> next
         best = Val(owned.name)
     }
-    if program.registration_graph == .Val(graph) {
-        loop graph_module in graph.modules {
-            loop nominal in graph_module.nominals {
-                if nominal.kind != SemaRegistrationNominalKind.Trait -> next
-                declares: loop trait_method in nominal.trait_methods {
-                    if trait_method.declaration.name == method {
-                        break true
-                    }
-                } ?? false
-                if !declares -> next
-                if best == .Val(current) && current <= nominal.symbol.name -> next
-                best = Val(nominal.symbol.name)
-            }
+    graph: program.registration_graph
+    loop graph_module in graph.modules {
+        loop nominal in graph_module.nominals {
+            if nominal.kind != SemaRegistrationNominalKind.Trait -> next
+            declares: loop trait_method in nominal.trait_methods {
+                if trait_method.declaration.name == method {
+                    break true
+                }
+            } ?? false
+            if !declares -> next
+            if best == .Val(current) && current <= nominal.symbol.name -> next
+            best = Val(nominal.symbol.name)
         }
     }
     best
@@ -774,10 +771,9 @@ sema_call_method_function_for_symbol: fn(target: SymbolID, environment: SemaScop
 }
 
 sema_call_method_callable_abi: fn(candidate: SemaCallMethodCandidate, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaRegistrationCallableABI? {
-    if program.registration_graph == .Val(graph) {
-        abi: sema_registration_callable_abi(graph, candidate.method.symbol)
-        if abi != None -> return abi
-    }
+    graph: program.registration_graph
+    abi: sema_registration_callable_abi(graph, candidate.method.symbol)
+    if abi != None -> return abi
     func: sema_call_method_function_for_symbol(candidate.method.symbol, environment, program) ?? return None
     Val(sema_registration_callable_abi_for_func(func))
 }
@@ -831,10 +827,7 @@ sema_call_infer_method_candidate_from_types: fn(candidate: SemaCallMethodCandida
     if candidate.generic_params.len() == 0 -> return Val(candidate)
     return_type: sema_call_signature_return(candidate.signature) ?? return None
     caller_module: scopes.module_identity
-    caller_package: if program.registration_graph == {
-        .Val(graph) -> graph.package_identity
-        .None -> ""
-    }
+    caller_package: program.registration_graph.package_identity
     context := sema_inference_context(caller_module, caller_package, candidate.generic_params, environment.generic_params, expected)
     result: sema_infer_callable(program.registration_graph, context, parameter_types, return_type, arg_types, candidate.type_args, span, diagnostics) ?? return None
     sema_call_method_candidate_with_inference(candidate, result)
@@ -1016,7 +1009,9 @@ sema_call_builtin_trait: fn(graph: SemaRegistrationGraph, owner: SymbolID) -> Bo
 sema_call_method_checked_from_value: fn(check: ^SemaBodyCheck, receiver: Expr, receiver_value: TExpr, candidate: SemaCallMethodCandidate, args: [CallArg], defaults: [SemaCallDefaultValue], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, span: Span, diagnostics: ^[Diagnostic]) -> SemaCallChecked? {
     // Declaration existence selects the method namespace. Check the chosen
     // registered identity's visibility here, never while filtering candidates.
-    if program.registration_graph == .Val(graph) {
+    graph: program.registration_graph
+    // Snapshot: a lone program registers no callable, so a method keeps its own declaration's rules.
+    if graph.mode == .Program {
         visible := Bool?{None}
         if sema_registration_callable_row_of(graph, candidate.method.symbol) == .Val(row) {
             visible = Val(if row == {
@@ -1049,7 +1044,7 @@ sema_call_method_checked_from_value: fn(check: ^SemaBodyCheck, receiver: Expr, r
     // A method call hears the `check` rules of its method's markers before
     // its arguments bind (Calls/CheckRules.jet).
     rules := [SemaCallRule]{}
-    if sema_call_rules_heard_here(scopes) && program.registration_graph == .Val(graph) -> rules = sema_call_rules_of_callee(graph, candidate.method.symbol)
+    if sema_call_rules_heard_here(scopes) -> rules = sema_call_rules_of_callee(graph, candidate.method.symbol)
     if rules.len() == 0 -> return sema_call_method_checked_visible(check, receiver, receiver_value, candidate, args, defaults, expected, environment, program, scopes, span, diagnostics)
     hearing: sema_call_rules_hear(rules, Val(candidate.method.symbol), candidate.method.name, span, args, Val(receiver), Val(receiver_value.ty), sema_rule_known(receiver_value, program, check.context), receiver_value.span, None, "", scopes.current, environment, program, scopes, check, diagnostics)
     if hearing.rejected -> return None
@@ -1104,20 +1099,22 @@ sema_call_method_checked_visible: fn(check: ^SemaBodyCheck, receiver: Expr, rece
     resolved_defaults := defaults
     if binding.default_refs.len() > 0 {
         if resolved_defaults.len() == 0 {
-            if program.registration_graph == {
-                .Val(graph) -> {
-                    registered_defaults: sema_call_registration_defaults(graph, binding) ?? {
-                        diagnostics.push(sema_error("E0906", span, "a default argument for this method could not be resolved", "registered callable defaults retain their graph identity and source location", "make every bound default available to Registration before checking this method"))
-                        return None
-                    }
-                    resolved_defaults = registered_defaults
-                }
-                .None -> {
+            if {
+                // Snapshot: a lone program's defaults are its own declarations' (sema_call_local_method_defaults).
+                program.registration_graph.mode == .Snapshot -> {
                     local_defaults: sema_call_local_method_defaults(resolved_candidate, binding, environment, program) ?? {
                         diagnostics.push(sema_error("E0906", span, "a default argument for this method could not be resolved", "callable defaults retain their owning declaration and source identity", "resolve the declaration before checking this method"))
                         return None
                     }
                     resolved_defaults = local_defaults
+                }
+                else -> {
+                    graph: program.registration_graph
+                    registered_defaults: sema_call_registration_defaults(graph, binding) ?? {
+                        diagnostics.push(sema_error("E0906", span, "a default argument for this method could not be resolved", "registered callable defaults retain their graph identity and source location", "make every bound default available to Registration before checking this method"))
+                        return None
+                    }
+                    resolved_defaults = registered_defaults
                 }
             }
         }
@@ -1243,23 +1240,22 @@ sema_call_trait_dispatch_failure: fn(method: TMethodRef, result: Type, program: 
     if sema_expr_unwrap_tag(result) == .Result(_, _) {
         return
     }
-    if program.registration_graph == .Val(graph) {
-        trait_row: sema_type_graph_nominal_row(graph, owner) ?? return
-        loop trait_method in graph.modules[trait_row.module_index].nominals[trait_row.row].trait_methods {
-            if trait_method.symbol.id != method.symbol -> next
-            if trait_method.signature == .Fn(_, ret, _, _, _, _) {
-                if ret == .Val(returned) {
-                    if sema_expr_unwrap_tag(returned) == .Result(_, error) {
-                        if sema_expr_unwrap_tag(error) == (Type.Named{name: "Never"}) {
-                            return
-                        }
-                        sema_failure_record_edge(None, context)
-                        sema_failure_union_record_propagation(None, error, context)
+    graph: program.registration_graph
+    trait_row: sema_type_graph_nominal_row(graph, owner) ?? return
+    loop trait_method in graph.modules[trait_row.module_index].nominals[trait_row.row].trait_methods {
+        if trait_method.symbol.id != method.symbol -> next
+        if trait_method.signature == .Fn(_, ret, _, _, _, _) {
+            if ret == .Val(returned) {
+                if sema_expr_unwrap_tag(returned) == .Result(_, error) {
+                    if sema_expr_unwrap_tag(error) == (Type.Named{name: "Never"}) {
+                        return
                     }
+                    sema_failure_record_edge(None, context)
+                    sema_failure_union_record_propagation(None, error, context)
                 }
             }
-            return
         }
+        return
     }
 }
 
@@ -1293,10 +1289,9 @@ sema_call_check_method: fn(check: ^SemaBodyCheck, receiver: Expr, method: String
     receiver_value: sema_check_expression(receiver, None, environment, program, scopes, check, diagnostics) ?? return None
     routed_method: core_source_receiver_method(if core_source_receiver_method_routes(method, args.len()) -> sema_expr_receiver_nominal_identity(environment, program, receiver_value.ty) else -> type_name(receiver_value.ty), method, args.len())
     candidates := sema_call_local_method_candidates(environment, program, routed_method, owner_type_args, type_args)
-    if program.registration_graph == .Val(graph) {
-        trait_candidates: sema_call_trait_method_candidates(graph, receiver_value.ty, routed_method, type_args, environment.module_identity, environment.package_identity, environment.generic_params, method_span, diagnostics)
-        if trait_candidates.len() > 0 -> candidates = trait_candidates
-    }
+    graph: program.registration_graph
+    trait_candidates: sema_call_trait_method_candidates(graph, receiver_value.ty, routed_method, type_args, environment.module_identity, environment.package_identity, environment.generic_params, method_span, diagnostics)
+    if trait_candidates.len() > 0 -> candidates = trait_candidates
     candidate: sema_call_resolve_method(receiver_value.ty, routed_method, args, method_span, candidates, environment, program, diagnostics) ?? return None
     checked: sema_call_method_checked_from_value(check, receiver, receiver_value, candidate, args, [SemaCallDefaultValue]{}, expected, environment, program, scopes, span, diagnostics) ?? return None
     Val(checked.value)
@@ -1716,7 +1711,7 @@ sema_app_routes_overlap: fn(left_path: String, right_path: String) -> Bool {
 // reported.
 sema_call_app_route_registrations: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> Bool {
     if !sema_app_is_route_table(receiver_value.ty, environment, program) -> return false
-    graph: program.registration_graph ?? return false
+    graph: program.registration_graph
     sema_app_check_route_registrations(receiver, method, args, span, environment, graph, diagnostics)
 }
 
@@ -1728,12 +1723,11 @@ sema_call_app_route_registrations: fn(receiver: Expr, receiver_value: TExpr, met
 sema_call_app_route_root: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) Never! {
     if args.len() != 1 || !sema_app_is_route_table(receiver_value.ty, environment, program) -> return
     text: sema_app_literal_text(args[0].expr) ?? return
-    if program.registration_graph == .Val(graph) {
-        unreported := [Diagnostic]{}
-        loop registration in sema_app_expand_route_root(sema_app_route_roots(environment, graph), text, span, unreported) {
-            path: sema_http_mount_arg(Expr.Str{parts: [StrPart]{StrPart.Lit{text: registration.path}}, span: span, id: AST_NODE_GENERATED}, span)
-            _ := sema_call_rules_hear_stand_in(receiver, receiver_value, "page", span, [CallArg]{path}, Val(registration.provenance), "routes.{registration.provenance}", scopes.current, environment, program, scopes, check, diagnostics)
-        }
+    graph: program.registration_graph
+    unreported := [Diagnostic]{}
+    loop registration in sema_app_expand_route_root(sema_app_route_roots(environment, graph), text, span, unreported) {
+        path: sema_http_mount_arg(Expr.Str{parts: [StrPart]{StrPart.Lit{text: registration.path}}, span: span, id: AST_NODE_GENERATED}, span)
+        _ := sema_call_rules_hear_stand_in(receiver, receiver_value, "page", span, [CallArg]{path}, Val(registration.provenance), "routes.{registration.provenance}", scopes.current, environment, program, scopes, check, diagnostics)
     }
 }
 
@@ -1745,18 +1739,16 @@ sema_app_is_route_table: fn(ty: Type, environment: SemaScopeEnvironment, program
 
 // Whether `ty` is a struct that carries the web marker `name`.
 sema_web_type_marked: fn(ty: Type, name: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
-    // Read in place through the pattern: a `??` binding copies the graph.
-    if program.registration_graph == .Val(graph) {
-        resolved: sema_call_resolved_type(ty, environment, program)
-        row: sema_type_resolve_nominal_row(graph, resolved, environment.module_identity) ?? return false
-        nominal: graph.modules[row.module_index].nominals[row.row]
-        if nominal.kind != SemaRegistrationNominalKind.Struct -> return false
-        item: sema_registration_nominal_source_item(nominal.source) ?? return false
-        if item == .Struct(definition) {
-            loop marker in definition.type_markers {
-                if sema_web_marker_is(marker, graph, graph.modules[row.module_index].module_identity, name) {
-                    return true
-                }
+    graph: program.registration_graph
+    resolved: sema_call_resolved_type(ty, environment, program)
+    row: sema_type_resolve_nominal_row(graph, resolved, environment.module_identity) ?? return false
+    nominal: graph.modules[row.module_index].nominals[row.row]
+    if nominal.kind != SemaRegistrationNominalKind.Struct -> return false
+    item: sema_registration_nominal_source_item(nominal.source) ?? return false
+    if item == .Struct(definition) {
+        loop marker in definition.type_markers {
+            if sema_web_marker_is(marker, graph, graph.modules[row.module_index].module_identity, name) {
+                return true
             }
         }
     }
@@ -1770,16 +1762,14 @@ sema_call_app_browser_feature: fn(receiver_value: TExpr, method: String, span: S
     if !sema_app_is_route_table(receiver_value.ty, environment, program) {
         return
     }
-    // Read in place through the pattern: a `??` binding copies the graph.
-    if program.registration_graph == .Val(graph) {
-        target: sema_app_feature_target(environment, graph, function_name)
-        if target == "" || target == "JS" || target == "Web" {
-            return
-        }
-        entry: sema_diagnostic_row("E-APP-TARGET-FEATURE")
-        what: entry.what.replace("{{feature}}", method).replace("{{required}}", "JS").replace("{{target}}", target)
-        diagnostics.push(sema_error("E-APP-TARGET-FEATURE", span, what, entry.why, entry.fix.replace("{{feature}}", method)))
+    graph: program.registration_graph
+    target: sema_app_feature_target(environment, graph, function_name)
+    if target == "" || target == "JS" || target == "Web" {
+        return
     }
+    entry: sema_diagnostic_row("E-APP-TARGET-FEATURE")
+    what: entry.what.replace("{{feature}}", method).replace("{{required}}", "JS").replace("{{target}}", target)
+    diagnostics.push(sema_error("E-APP-TARGET-FEATURE", span, what, entry.why, entry.fix.replace("{{feature}}", method)))
 }
 
 // The App capability check for native background work: a browser runs
@@ -1790,18 +1780,16 @@ sema_call_app_native_feature: fn(receiver_value: TExpr, method: String, span: Sp
     if !sema_app_is_graph(receiver_value.ty, environment, program) {
         return
     }
-    // Read in place through the pattern: a `??` binding copies the graph.
-    if program.registration_graph == .Val(graph) {
-        target: sema_app_feature_target(environment, graph, function_name)
-        if target == "" {
-            return
-        }
-        entry: sema_diagnostic_row("E-APP-TARGET-FEATURE")
-        what: entry.what.replace("{{feature}}", method).replace("{{required}}", "native").replace("{{target}}", target)
-        why: "A browser runs nothing for a page that is closed, so the web output has no `.{method}` work to keep; dropping it silently would lose the work."
-        fix: "Run the work on the server: a service method marked `#App.Every(cron: …)` is a server job that runs on its schedule whether or not a page is open, and `#App.Job` is one a call queues; keep `.{method}` for a native build."
-        diagnostics.push(sema_error("E-APP-TARGET-FEATURE", span, what, why, fix))
+    graph: program.registration_graph
+    target: sema_app_feature_target(environment, graph, function_name)
+    if target == "" {
+        return
     }
+    entry: sema_diagnostic_row("E-APP-TARGET-FEATURE")
+    what: entry.what.replace("{{feature}}", method).replace("{{required}}", "native").replace("{{target}}", target)
+    why: "A browser runs nothing for a page that is closed, so the web output has no `.{method}` work to keep; dropping it silently would lose the work."
+    fix: "Run the work on the server: a service method marked `#App.Every(cron: …)` is a server job that runs on its schedule whether or not a page is open, and `#App.Job` is one a call queues; keep `.{method}` for a native build."
+    diagnostics.push(sema_error("E-APP-TARGET-FEATURE", span, what, why, fix))
 }
 
 // The web target an App feature resolves to inside `function_name`: the
@@ -1863,18 +1851,16 @@ sema_call_app_device: fn(module_name: String, member: String, alias: String, spa
 // checks (sema_call_app_device) its qualified spelling gets; None for a
 // name no member import of `app` binds.
 sema_app_imported_member: fn(name: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String? Never! {
-    // Read in place through the pattern: a `??` binding copies the graph.
-    if program.registration_graph == .Val(graph) {
-        module_index: sema_scope_caller_index(environment, graph) ?? return None
-        loop registration in graph.modules[module_index].imports {
-            loop binding in registration.bindings {
-                if binding.local != name || (binding.declaration_position == None && binding.symbol.kind == SymbolKind.Import) {
-                    next
-                }
-                target_index: binding.target_module_index ?? next
-                if graph.modules[target_index].module_name != SEMA_APP_MARKER_MODULE -> next
-                return Val(binding.original)
+    graph: program.registration_graph
+    module_index: sema_scope_caller_index(environment, graph) ?? return None
+    loop registration in graph.modules[module_index].imports {
+        loop binding in registration.bindings {
+            if binding.local != name || (binding.declaration_position == None && binding.symbol.kind == SymbolKind.Import) {
+                next
             }
+            target_index: binding.target_module_index ?? next
+            if graph.modules[target_index].module_name != SEMA_APP_MARKER_MODULE -> next
+            return Val(binding.original)
         }
     }
     None
@@ -1884,18 +1870,16 @@ sema_app_imported_member: fn(name: String, environment: SemaScopeEnvironment, pr
 // notification on this device in an app whose resolved target is the web
 // output is refused, never dropped.
 sema_call_app_device_target: fn(member: String, alias: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, function_name: String, diagnostics: ^[Diagnostic]) {
-    // Read in place through the pattern: a `??` binding copies the graph.
-    if program.registration_graph == .Val(graph) {
-        target: sema_app_feature_target(environment, graph, function_name)
-        if target == "" {
-            return
-        }
-        entry: sema_diagnostic_row("E-APP-TARGET-FEATURE")
-        what: entry.what.replace("{{feature}}", member).replace("{{required}}", "native").replace("{{target}}", target)
-        why: "A browser shows a page's notification only while the page is open, so the web output has no `{alias}.notify` for this device; one for a closed page would be lost."
-        fix: "Send it from the server: `{alias}.notify(to:, title:, body:, open:)` reaches each browser the account registered, through Web Push. Keep `{alias}.notify(title:, body:, open:)` for a native build."
-        diagnostics.push(sema_error("E-APP-TARGET-FEATURE", span, what, why, fix))
+    graph: program.registration_graph
+    target: sema_app_feature_target(environment, graph, function_name)
+    if target == "" {
+        return
     }
+    entry: sema_diagnostic_row("E-APP-TARGET-FEATURE")
+    what: entry.what.replace("{{feature}}", member).replace("{{required}}", "native").replace("{{target}}", target)
+    why: "A browser shows a page's notification only while the page is open, so the web output has no `{alias}.notify` for this device; one for a closed page would be lost."
+    fix: "Send it from the server: `{alias}.notify(to:, title:, body:, open:)` reaches each browser the account registered, through Web Push. Keep `{alias}.notify(title:, body:, open:)` for a native build."
+    diagnostics.push(sema_error("E-APP-TARGET-FEATURE", span, what, why, fix))
 }
 
 // A device call needs the purpose of each device permission it may ask
@@ -1905,29 +1889,27 @@ sema_call_app_device_target: fn(member: String, alias: String, span: Span, envir
 // package's `purposes:` doesn't name fails the build at `span`, naming the
 // call and the missing keys.
 sema_call_app_permission_purpose: fn(member: String, alias: String, named: String?, span: Span, program: SemaProgramTables, diagnostics: ^[Diagnostic]) {
-    // Read in place through the pattern: a `??` binding copies the graph.
-    if program.registration_graph == .Val(graph) {
-        variants: core_enum_cases("Permission") ?? return
-        missing := [String]{}
-        loop variant in variants {
-            if named == .Val(only) && only != variant -> next
-            key: variant.lower()
-            if !graph.build_facts.purposes.contains(key) -> missing.push(key)
-        }
-        if missing.len() == 0 {
-            return
-        }
-        listed := ""
-        loop i in 0..<missing.len() {
-            if i > 0 -> listed = if i == missing.len() - 1 -> "{listed} and " else -> "{listed}, "
-            listed = "{listed}`{missing[i]}`"
-        }
-        noun: if missing.len() == 1 -> "permission" else -> "permissions"
-        lines: loop key in missing -> "{key}: \"…\""
-        entry: sema_diagnostic_row("E-APP-PERMISSION-PURPOSE")
-        what: entry.what.replace("{{call}}", "{alias}.{member}").replace("{{permissions}}", "the {listed} {noun}")
-        diagnostics.push(sema_error("E-APP-PERMISSION-PURPOSE", span, what, entry.why, entry.fix.replace("{{lines}}", lines.join(", "))))
+    graph: program.registration_graph
+    variants: core_enum_cases("Permission") ?? return
+    missing := [String]{}
+    loop variant in variants {
+        if named == .Val(only) && only != variant -> next
+        key: variant.lower()
+        if !graph.build_facts.purposes.contains(key) -> missing.push(key)
     }
+    if missing.len() == 0 {
+        return
+    }
+    listed := ""
+    loop i in 0..<missing.len() {
+        if i > 0 -> listed = if i == missing.len() - 1 -> "{listed} and " else -> "{listed}, "
+        listed = "{listed}`{missing[i]}`"
+    }
+    noun: if missing.len() == 1 -> "permission" else -> "permissions"
+    lines: loop key in missing -> "{key}: \"…\""
+    entry: sema_diagnostic_row("E-APP-PERMISSION-PURPOSE")
+    what: entry.what.replace("{{call}}", "{alias}.{member}").replace("{{permissions}}", "the {listed} {noun}")
+    diagnostics.push(sema_error("E-APP-PERMISSION-PURPOSE", span, what, entry.why, entry.fix.replace("{{lines}}", lines.join(", "))))
 }
 
 // The `Permission` case a literal argument names (`.Camera`,
@@ -2019,7 +2001,7 @@ sema_call_try_app_method: fn(receiver: Expr, receiver_value: TExpr, method: Stri
     }
     arity: sema_app_handler_arity(method, args.len())
     if arity < 0 -> return SemaMethodSpecialCheck{handled: false, value: None}
-    graph: program.registration_graph ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    graph: program.registration_graph
     if (method == "route" || method == "page" || method == "layout") && args.len() > 0 {
         _ := sema_http_route_check_literal(args[0], environment, program, scopes, diagnostics)
     }
@@ -2183,24 +2165,23 @@ sema_call_builtin_method_names: fn(receiver: Type) -> [String] Never! {
 sema_call_declared_method_names: fn(receiver: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> [String] Never! {
     names := [String]{}
     base_name: sema_expr_type_base_name(sema_expr_unwrap_tag(receiver)) ?? return names
-    if program.registration_graph == .Val(graph) {
-        if sema_registration_source_impl_owners(graph, base_name) == .Val(owner_modules) {
-            loop owner_index in owner_modules {
-                loop implementation in graph.modules[owner_index].impls {
-                    if implementation.target_type_name != base_name -> next
-                    loop function in implementation.methods {
-                        if function.parameters.len() > 0 && !names.contains(function.symbol.name) {
-                            names.push(function.symbol.name.copy())
-                        }
+    graph: program.registration_graph
+    if sema_registration_source_impl_owners(graph, base_name) == .Val(owner_modules) {
+        loop owner_index in owner_modules {
+            loop implementation in graph.modules[owner_index].impls {
+                if implementation.target_type_name != base_name -> next
+                loop function in implementation.methods {
+                    if function.parameters.len() > 0 && !names.contains(function.symbol.name) {
+                        names.push(function.symbol.name.copy())
                     }
                 }
             }
         }
-        loop nominal_row in sema_registration_nominal_rows_named(graph, sema_expr_operator_row_name(base_name)) {
-            loop function in graph.modules[nominal_row.module_index].nominals[nominal_row.row].methods {
-                if function.parameters.len() > 0 && !names.contains(function.symbol.name) {
-                    names.push(function.symbol.name.copy())
-                }
+    }
+    loop nominal_row in sema_registration_nominal_rows_named(graph, sema_expr_operator_row_name(base_name)) {
+        loop function in graph.modules[nominal_row.module_index].nominals[nominal_row.row].methods {
+            if function.parameters.len() > 0 && !names.contains(function.symbol.name) {
+                names.push(function.symbol.name.copy())
             }
         }
     }
@@ -2214,24 +2195,23 @@ sema_call_declared_method_names: fn(receiver: Type, environment: SemaScopeEnviro
 // receiver) in its own or impl blocks.
 sema_call_declares_static_method: fn(receiver: Type, method: String, program: SemaProgramTables) -> Bool Never! {
     base_name: sema_expr_type_base_name(sema_expr_unwrap_tag(receiver)) ?? return false
-    if program.registration_graph == .Val(graph) {
-        if sema_registration_source_impl_owners(graph, base_name) == .Val(owner_modules) {
-            loop owner_index in owner_modules {
-                loop implementation in graph.modules[owner_index].impls {
-                    if implementation.target_type_name != base_name -> next
-                    loop function in implementation.methods {
-                        if function.symbol.name == method && (function.parameters.len() == 0 || function.parameters[0].name != "self") {
-                            return true
-                        }
+    graph: program.registration_graph
+    if sema_registration_source_impl_owners(graph, base_name) == .Val(owner_modules) {
+        loop owner_index in owner_modules {
+            loop implementation in graph.modules[owner_index].impls {
+                if implementation.target_type_name != base_name -> next
+                loop function in implementation.methods {
+                    if function.symbol.name == method && (function.parameters.len() == 0 || function.parameters[0].name != "self") {
+                        return true
                     }
                 }
             }
         }
-        loop nominal_row in sema_registration_nominal_rows_named(graph, sema_expr_operator_row_name(base_name)) {
-            loop function in graph.modules[nominal_row.module_index].nominals[nominal_row.row].methods {
-                if function.symbol.name == method && (function.parameters.len() == 0 || function.parameters[0].name != "self") {
-                    return true
-                }
+    }
+    loop nominal_row in sema_registration_nominal_rows_named(graph, sema_expr_operator_row_name(base_name)) {
+        loop function in graph.modules[nominal_row.module_index].nominals[nominal_row.row].methods {
+            if function.symbol.name == method && (function.parameters.len() == 0 || function.parameters[0].name != "self") {
+                return true
             }
         }
     }
@@ -2242,17 +2222,15 @@ sema_call_declares_static_method: fn(receiver: Type, method: String, program: Se
 // module (such as `core.db`), so its method surface is Core's to change.
 sema_call_core_nominal: fn(receiver: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     base_name: sema_expr_type_base_name(sema_expr_unwrap_tag(receiver)) ?? return false
-    if program.registration_graph == .Val(graph) {
-        rows: sema_registration_nominal_rows_named(graph, sema_expr_operator_row_name(base_name))
-        if rows.len() == 0 -> return false
-        loop nominal_row in rows {
-            if !sema_module_is_core_source(sema_scope_module_text(environment, program, graph.modules[nominal_row.module_index].nominals[nominal_row.row].symbol.module_identity)) {
-                return false
-            }
+    graph: program.registration_graph
+    rows: sema_registration_nominal_rows_named(graph, sema_expr_operator_row_name(base_name))
+    if rows.len() == 0 -> return false
+    loop nominal_row in rows {
+        if !sema_module_is_core_source(sema_scope_module_text(environment, program, graph.modules[nominal_row.module_index].nominals[nominal_row.row].symbol.module_identity)) {
+            return false
         }
-        return true
     }
-    false
+    true
 }
 
 sema_call_local_method_names: fn(environment: SemaScopeEnvironment, owner: String) -> [String] Never! {
@@ -2293,12 +2271,11 @@ sema_call_method_owners: fn(environment: SemaScopeEnvironment, program: SemaProg
     loop declaration_index in 0..<environment.declarations.len() {
         sema_call_item_method_owner(environment.declarations[declaration_index].item, name, owners)
     }
-    if program.registration_graph == .Val(graph) {
-        row: sema_app_module_row(environment, graph)
-        if row >= 0 {
-            loop item in graph.modules[row].program.items {
-                sema_call_item_method_owner(item, name, owners)
-            }
+    graph: program.registration_graph
+    row: sema_app_module_row(environment, graph)
+    if row >= 0 {
+        loop item in graph.modules[row].program.items {
+            sema_call_item_method_owner(item, name, owners)
         }
     }
     owners
@@ -2352,7 +2329,7 @@ sema_call_free_function_root: fn(environment: SemaScopeEnvironment, program: Sem
         root: sema_call_item_free_function_root(environment.declarations[declaration_index].item, name)
         if root != None -> return root
     }
-    graph: program.registration_graph ?? return None
+    graph: program.registration_graph
     row: sema_app_module_row(environment, graph)
     if row < 0 -> return None
     loop item in graph.modules[row].program.items {
@@ -2484,7 +2461,7 @@ sema_span_source_row: fn(graph: SemaRegistrationGraph, row: Int) -> Int {
 // at `after`, read from the checked module's source. None when that source
 // is not the text the spans index, or the next mark is not `)`.
 sema_call_close_paren_end: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, after: Int) -> Int? {
-    graph: program.registration_graph ?? return None
+    graph: program.registration_graph
     row: sema_call_span_source_row(environment, graph)
     if row < 0 -> return None
     bytes: graph.modules[row].source.bytes()
@@ -2498,7 +2475,7 @@ sema_call_close_paren_end: fn(environment: SemaScopeEnvironment, program: SemaPr
 // module's source: `Pont` in `Pont{x: 1}`. The span itself when it is the
 // word alone; None when the source there spells something else.
 sema_call_source_word_span: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, span: Span, word: String) -> Span? {
-    graph: program.registration_graph ?? return sema_type_name_span(word, span)
+    graph: program.registration_graph
     sema_source_word_span(graph, sema_scope_caller_row(environment, graph), span, word)
 }
 
@@ -2639,7 +2616,7 @@ sema_call_missing_instance_method: fn(method: String, receiver: Type, actual: In
 // its Option or Result) declares it.
 sema_call_method_reached_through: fn(method: String, receiver: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String? {
     base_name: sema_expr_type_base_name(sema_expr_unwrap_tag(receiver)) ?? return None
-    graph: program.registration_graph ?? return None
+    graph: program.registration_graph
     loop nominal_row in sema_registration_nominal_rows_named(graph, sema_expr_operator_row_name(base_name)) {
         loop function in graph.modules[nominal_row.module_index].nominals[nominal_row.row].methods {
             if function.parameters.len() == 0 -> next

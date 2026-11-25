@@ -79,16 +79,15 @@ sema_stream_handle_is_canonical: fn(ty: Type, owner: String, environment: SemaSc
     // module: a program's own `Sender` or `Receiver` is spelled by its
     // owner, never bare (sema_type_is_builtin_handle).
     if owner == "Sender" || owner == "Receiver" -> return sema_type_is_builtin_handle(ty, owner)
-    if program.registration_graph == .Val(graph) {
-        resolved: sema_type_graph_lookup_symbol(graph, environment.module_identity, actual)
-        if resolved == .Val(row) {
-            owner_module := sema_stream_handle_owner_module(owner)
-            // A declared or imported type named like a module-less built-in
-            // (`Path`) shadows it; the two never share an identity.
-            return sema_resolved_kind(graph, row) == SymbolKind.Type && owner_module != "" && (sema_registration_module_name(graph, sema_resolved_module_identity(graph, row)) ?? "") == owner_module
-        }
-        return true
-    } else { return true }
+    graph: program.registration_graph
+    resolved: sema_type_graph_lookup_symbol(graph, environment.module_identity, actual)
+    if resolved == .Val(row) {
+        owner_module := sema_stream_handle_owner_module(owner)
+        // A declared or imported type named like a module-less built-in
+        // (`Path`) shadows it; the two never share an identity.
+        return sema_resolved_kind(graph, row) == SymbolKind.Type && owner_module != "" && (sema_registration_module_name(graph, sema_resolved_module_identity(graph, row)) ?? "") == owner_module
+    }
+    return true
 }
 
 // Core's `StdinHandle` is a source-declared record whose only source method is
@@ -435,9 +434,8 @@ sema_stream_handle_static_owner_is_canonical: fn(owner: String, scopes: ^SemaSco
     if symbol.kind != SymbolKind.Type -> return false
     owner_module := sema_stream_handle_owner_module(owner)
     if owner_module == "" -> return false
-    if program.registration_graph == .Val(graph) {
-        return (sema_registration_module_name(graph, symbol.module_identity) ?? "") == owner_module
-    } else { return false }
+    graph: program.registration_graph
+    return (sema_registration_module_name(graph, symbol.module_identity) ?? "") == owner_module
 }
 
 // Static reserved constructors. Callers must still prefer a shadowing user type.

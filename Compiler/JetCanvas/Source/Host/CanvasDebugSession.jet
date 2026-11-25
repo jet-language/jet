@@ -289,8 +289,11 @@ CanvasDebugSessions: struct {
         // The task list is the console's `tasks`; a program whose registry
         // can't be read shows none.
         listed := ""
-        if dump -> listed = native_dump_task_list(session.live, session.jet_file) else if session.live.tasks_text() == .Ok(text) {
-            listed = text
+        if {
+            dump -> listed = native_dump_task_list(session.live, session.jet_file)
+            session.live.tasks_text() == .Ok(text) -> {
+                listed = text
+            }
         }
         tasks := [String]{}
         loop line in listed.split("\n").to_list() {
@@ -481,7 +484,7 @@ canvas_debug_open_dump: fn(file: String, source_id: String, revision: String, na
         return Err(canvas_debug_error("bad_request", "Canvas debug `dump` must be a path ending with .jetdump"))
     }
     path: session_files.join(session_files.dirname(file), named)
-    opened := native_dump_open(path) ?? return Err(canvas_debug_unavailable(err))
+    opened: native_dump_open(path) ?? return Err(canvas_debug_unavailable(err))
     live := opened.session.move()
     entry: live.entry_source()
     changed: native_dump_sources(path, live.image).changed.contains("{entry}")

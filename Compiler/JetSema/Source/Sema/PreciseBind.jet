@@ -56,27 +56,26 @@ SemaPreciseFillers: struct {
 // Rewrites each precise operation of the finished body `tree` whose role a
 // core.math function fills into a direct call of that function.
 sema_precise_bind: fn(tree: ^BodyTree, program: SemaProgramTables) Never! {
-    if program.registration_graph == .Val(graph) {
-        // Most bodies hold no precise operation: core.math is looked up at
-        // the first one.
-        first := -1
-        loop index in 0..<tree.nodes.len() {
-            if sema_precise_operation(tree.nodes[index].kind) != None {
-                first = index
-                break
-            }
+    graph: program.registration_graph
+    // Most bodies hold no precise operation: core.math is looked up at
+    // the first one.
+    first := -1
+    loop index in 0..<tree.nodes.len() {
+        if sema_precise_operation(tree.nodes[index].kind) != None {
+            first = index
+            break
         }
-        if first < 0 -> return
-        math: sema_precise_math_module(graph) ?? return
-        fillers: sema_precise_fillers(graph, math)
-        loop index in first..<tree.nodes.len() {
-            operation: sema_precise_operation(tree.nodes[index].kind) ?? next
-            row: name_column_get(fillers.roles, fillers.rows, operation.role) ?? next
-            export: sema_registration_direct_symbol(graph.modules[math], graph.modules[math].functions[row].declaration.name) ?? next
-            callee: sema_registration_callable_id(graph, export.symbol.id) ?? next
-            args: loop argument in operation.args -> BodyCallArg{value: argument, template_items: [SymbolID]{}, borrow: false, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
-            tree.nodes[index].kind = NodeKind.Call{callee: callee, type_args: [Type]{}, args: args}
-        }
+    }
+    if first < 0 -> return
+    math: sema_precise_math_module(graph) ?? return
+    fillers: sema_precise_fillers(graph, math)
+    loop index in first..<tree.nodes.len() {
+        operation: sema_precise_operation(tree.nodes[index].kind) ?? next
+        row: name_column_get(fillers.roles, fillers.rows, operation.role) ?? next
+        export: sema_registration_direct_symbol(graph.modules[math], graph.modules[math].functions[row].declaration.name) ?? next
+        callee: sema_registration_callable_id(graph, export.symbol.id) ?? next
+        args: loop argument in operation.args -> BodyCallArg{value: argument, template_items: [SymbolID]{}, borrow: false, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
+        tree.nodes[index].kind = NodeKind.Call{callee: callee, type_args: [Type]{}, args: args}
     }
 }
 

@@ -23,7 +23,7 @@ fixture_run: fn() -> ProcessReceipt {
     address: net.socket_to_string(net.udp_local_addr(socket) ?? panic("UDP address"))
     fixture_build(address)
     observed: fixture_run()
-    net.udp_close(socket) ?? panic("drop socket")
+    socket.close() ?? panic("drop socket")
     assert(observed.code == 0, "guest exit")
     assert(observed.output == "network operation canceled during DNS lookup for `service.example.test`\n", "original typed cancellation")
 }

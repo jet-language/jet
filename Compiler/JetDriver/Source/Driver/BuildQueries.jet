@@ -703,8 +703,8 @@ jet_driver_query_build_plan: fn(owned_request: ^^JetDriverCompileRequest, scope:
     // `ran` owns the reported diagnostic: the error moves out of `evaluated`,
     // whose internal_problem/complete checks below never read it.
     if evaluated.error.move() == .Val(error) -> ran.push(error.diagnostic.move())
-    returned: evaluated.value
-    if evaluated.internal_problem != None || !evaluated.complete || returned == None {
+    returned: if evaluated.internal_problem == None && evaluated.complete -> evaluated.value.move() else -> None
+    data: returned ?? {
         build_session_abort(session)
         problem: if evaluated.internal_problem == .Val(internal) -> {
             Val("the native run of the build entry failed internally: {internal.message}")
@@ -716,13 +716,13 @@ jet_driver_query_build_plan: fn(owned_request: ^^JetDriverCompileRequest, scope:
         }
         return jet_driver_build_query_stopped(request, errors, ran, staged_failed, build_session_refused(session), problem)
     }
-    if returned == .Val(data) && jet_driver_build_failed_diagnostic(data, span) == .Val(diagnostic) {
+    if jet_driver_build_failed_diagnostic(data, span) == .Val(diagnostic) {
         build_session_abort(session)
         ran.push(diagnostic)
         checked: jet_driver_build_promise_reports(request, errors, staged_failed, generated_only, session, sources.modules)
         return jet_driver_build_query_failed(request, errors, ran, staged_failed || checked)
     }
-    value: jet_driver_build_session_input(returned ?? panic("checked return lost its data")) ?? {
+    value: jet_driver_build_session_input(data) ?? {
         build_session_abort(session)
         ran.push(jet_driver_diagnostic_without_span("E3502", "`build: fn` returns nothing", "a build is the graph its Build context describes", "remove the returned value; configure `b` instead"))
         checked: jet_driver_build_promise_reports(request, errors, staged_failed, generated_only, session, sources.modules)

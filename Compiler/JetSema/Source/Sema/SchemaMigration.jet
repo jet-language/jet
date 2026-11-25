@@ -277,14 +277,13 @@ sema_schema_enter_registered_module: fn(environment: ^SemaScopeEnvironment?, pro
 
 sema_schema_check_registered_module: fn(environment: SemaScopeEnvironment?, program: SemaProgramTables, module_index: Int, snapshots: [String:SchemaSnapshot], diagnostics: ^[Diagnostic]) Never! {
     if environment != None {
-        if program.registration_graph == .Val(graph) {
-            start: diagnostics.len()
-            loop diagnostic in check_schema_migrations(graph.modules[module_index].program.items, snapshots, environment, program) {
-                diagnostics.push(diagnostic)
-            }
-            sema_attach_diagnostic_source_locations(diagnostics, start, graph.modules[module_index].source_segments)
-            return
+        graph: program.registration_graph
+        start: diagnostics.len()
+        loop diagnostic in check_schema_migrations(graph.modules[module_index].program.items, snapshots, environment, program) {
+            diagnostics.push(diagnostic)
         }
+        sema_attach_diagnostic_source_locations(diagnostics, start, graph.modules[module_index].source_segments)
+        return
     }
     panic("an owning schema pass lost its registration graph")
 }
@@ -301,14 +300,12 @@ sema_check_schema_migration_graph: fn(registration: ^^SemaRegistrationGraph, che
         loop definition in module_row.declarations.type_defs -> types.push(definition.copy())
     }
     fixed_length_write_params: sema_fixed_length_write_params_in_graph(registration)
-    program := sema_program_tables_init(Val(registration.move()), types)
+    program := sema_program_tables_init(registration.move(), types)
     environment := Val(sema_check_pass_environment(program, fixed_length_write_params, SemaComptimeBodyValues{}))
     diagnostics := [Diagnostic]{}
     loop module_index in 0..<module_count {
         sema_schema_enter_registered_module(environment, program, module_index)
         sema_schema_check_registered_module(environment, program, module_index, snapshots, diagnostics)
     }
-    graph_out := program.registration_graph.move()
-    restored: graph_out.move() ?? panic("a completed schema pass lost its registration graph")
-    {diagnostics: diagnostics.move(), registration: restored.move()}
+    {diagnostics: diagnostics.move(), registration: program.registration_graph.move()}
 }

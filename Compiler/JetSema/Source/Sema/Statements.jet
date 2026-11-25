@@ -897,7 +897,7 @@ sema_stmt_value_block_tail_lints: fn(statements: [Stmt], lint: Bool, environment
                 // cannot read is not reported. Only a reported table copies the
                 // module's bytes.
                 if lint {
-                    graph: program.registration_graph ?? next
+                    graph: program.registration_graph
                     caller: sema_scope_caller_index(environment, graph) ?? next
                     edit: parser_else_arm_edit(graph.modules[caller].source.bytes(), table, tail.returns, tail.keyword, tail.default) ?? next
                     lint_row: sema_lint("L0513", table, "this arm table is followed by a default return that can be its explicit `else` arm", "the value-table form keeps all outcomes together and lets the block return its final expression", "replace the table and fallback with an explicit `else` arm")
@@ -2215,15 +2215,13 @@ sema_stmt_context_allocator_type: fn(ty: Type) -> Bool Never! {
 // Whether `ty` names a type that implements core.mem's `Allocator`, as the
 // user writes it (a type parameter is not one).
 sema_stmt_context_user_allocator: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
-    if program.registration_graph == .Val(graph) {
-        identity: sema_call_core_module_identity(environment, program, "core.mem") ?? return false
-        caller: sema_scope_caller_row(environment, graph)
-        actual: sema_type_resolve_declared_recursive(graph, ty, caller, environment.generic_params)
-        nominal_row: sema_type_resolve_nominal_row_at(graph, actual, caller) ?? return false
-        trait_symbol: sema_type_graph_trait_symbol_at(graph, sema_type_module_row(graph, identity), "Allocator") ?? return false
-        return sema_type_bound_satisfied_nominal(graph, graph.modules[nominal_row.module_index].nominals[nominal_row.row], trait_symbol, "Allocator", actual, environment.generic_params) == Val(true)
-    }
-    false
+    graph: program.registration_graph
+    identity: sema_call_core_module_identity(environment, program, "core.mem") ?? return false
+    caller: sema_scope_caller_row(environment, graph)
+    actual: sema_type_resolve_declared_recursive(graph, ty, caller, environment.generic_params)
+    nominal_row: sema_type_resolve_nominal_row_at(graph, actual, caller) ?? return false
+    trait_symbol: sema_type_graph_trait_symbol_at(graph, sema_type_module_row(graph, identity), "Allocator") ?? return false
+    sema_type_bound_satisfied_nominal(graph, graph.modules[nominal_row.module_index].nominals[nominal_row.row], trait_symbol, "Allocator", actual, environment.generic_params) == Val(true)
 }
 
 // A `#Context(allocator: a)` block over a user allocator: the guard's value
@@ -2234,7 +2232,7 @@ sema_stmt_context_user_allocator: fn(ty: Type, environment: SemaScopeEnvironment
 // Ownership/Checks.jet SemaOwnershipBlockAllocator).
 sema_stmt_context_allocator_handler: fn(field: ContextField, ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> TExpr? {
     if sema_call_core_module_identity(environment, program, "core.mem") == None -> return None
-    graph: program.registration_graph ?? return None
+    graph: program.registration_graph
     filler: sema_core_role_function(graph, "AllocatorHandler") ?? {
         diagnostics.push(sema_missing_core_role("AllocatorHandler", field.span))
         return None
@@ -2442,10 +2440,12 @@ sema_stmt_check_prep_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [St
         return false
     }
     active := ""
-    if program.registration_graph == .Val(graph) -> active = graph.build_facts.os else {
+    // Snapshot: a lone program's check has no build facts to fold on.
+    if program.registration_graph.mode == .Snapshot {
         sema_check_unsupported(check.context, "the `#if #build.target.os` dispatch at offset {span.start} has no build facts to fold on")
         return false
     }
+    active = program.registration_graph.build_facts.os
     oses: loop os in TARGET_OS_ALL -> target_os_name(os)
     seen := [String]{}
     selects := [Bool]{}

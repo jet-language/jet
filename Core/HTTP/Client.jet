@@ -860,8 +860,8 @@ priv __build_socket: fn(address: [U8], port: Int) -> SocketAddr Never! {
     octets := [U8]{}
     loop byte in address -> octets.push(byte)
     #Unsafe("checked resolver octets and port transferred into the socket carrier") {
-        ip: core.net.__ip_from_bytes(octets)
-        return core.net.__socket_from_parts(ip, U16{port}, U32{0}, U32{0})
+        ip: net_rt.ip_from_bytes(octets)
+        return net_rt.socket_from_parts(ip, U16{port}, U32{0}, U32{0})
     }
 }
 

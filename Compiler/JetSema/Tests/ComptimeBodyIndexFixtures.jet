@@ -48,7 +48,7 @@ use {
         sema_expression_lambda_merge_context_facts,
         sema_graph_trail_init,
         sema_has_error_since,
-        sema_program_tables_init,
+        sema_program_tables_snapshot,
         sema_registration_module_index,
         sema_registration_prepare_graph,
         sema_scope_environment_enter_comptime_module,
@@ -66,7 +66,6 @@ use {
         SymbolKind,
         TComptimeValue,
         TConstantDef,
-        TTypeDef,
         Type,
         compiler_threads_single,
         jet_target_machine_hosted,
@@ -168,7 +167,7 @@ body_index_query: fn(context: SemaCheckContext, module_identity: String, functio
 
 body_index_source_identity: fn() {
     environment := body_index_environment("mod.one", "identity.jet")
-    program: sema_program_tables_init(None, [TTypeDef]{})
+    program: sema_program_tables_snapshot()
     scopes: body_index_scopes("function.one")
     other_scopes: body_index_scopes("function.two")
     source: Span{start: 10, end: 20}
@@ -193,7 +192,7 @@ body_index_source_identity: fn() {
 
 body_index_identity_and_lifecycle: fn() {
     environment := body_index_environment("mod.one", "first.jet")
-    program: sema_program_tables_init(None, [TTypeDef]{})
+    program: sema_program_tables_snapshot()
     scopes: body_index_scopes("function.one")
     source: Span{start: 10, end: 20}
     site: Span{start: 3, end: 7}
@@ -287,7 +286,7 @@ body_index_identity_and_lifecycle: fn() {
 // events, not these fixture loop iterations or the deliberately linear oracle.
 body_index_size: fn(size: Int) {
     environment: body_index_environment("scale.module", "scale.jet")
-    program: sema_program_tables_init(None, [TTypeDef]{})
+    program: sema_program_tables_snapshot()
     scopes: body_index_scopes("scale.function")
     context := sema_check_context_init()
     values := [SemaComptimeBodyValue]{}
@@ -422,7 +421,7 @@ body_index_publication_lifecycle: fn() {
     next_site: Span{start: 30, end: 31}
     second: body_index_value("mod.one", "function.one", span, next_site, 9)
     landed: SemaComptimeItemValue{module_identity: second.module_identity, key: second.key, destination_key: second.destination_key, kind: SemaComptimeItemKind.BodyExpression, value: second.value, ty: second.ty, place: second.place}
-    body_index_require(jet_driver_comptime_apply_landed(environment, program, available, sites, [SemaComptimeItemValue]{initial, landed}, 1, trail, None), "the authentic staging producer appends a body-only batch")
+    jet_driver_comptime_apply_landed(environment, program, available, sites, [SemaComptimeItemValue]{initial, landed}, 1, trail, None)
     body_index_require(environment.comptime_body_values.length == 1 && environment.comptime_body_publication.length == 2 && prior.length == 1, "append preserves the old selected view and old captured prefix")
     body_index_require(body_index_values_debug(prior) == "{[SemaComptimeBodyValue]{first}:Debug}", "an older prefix cannot see later appended rows")
     if prior.facts == .Val(old_facts) {
@@ -436,11 +435,11 @@ body_index_publication_lifecycle: fn() {
     body_index_require(sema_comptime_body_value_find(context, body_index_module("mod.one"), "function.one", span, site) == Val((first)) && sema_comptime_body_value_find(context, body_index_module("mod.one"), "function.one", span, next_site) == Val((second)), "the new function sees the entire ordered updated publication")
     body_index_require(body_index_values_debug(environment.comptime_body_values) == "{[SemaComptimeBodyValue]{first, second}:Debug}", "the next full view sees the newly published row order")
     nonbody: body_index_item(second, SemaComptimeItemKind.MarkerArgument)
-    body_index_require(jet_driver_comptime_apply_landed(environment, program, available, sites, [SemaComptimeItemValue]{initial, landed, nonbody}, 2, trail, None), "the authentic staging producer advances a nonconstant nonbody batch")
+    jet_driver_comptime_apply_landed(environment, program, available, sites, [SemaComptimeItemValue]{initial, landed, nonbody}, 2, trail, None)
     body_index_require(environment.comptime_body_publication.item_frontier == 3 && environment.comptime_body_publication.length == 2, "a nonbody batch advances the authenticated item frontier without projecting or indexing body rows")
     third: body_index_value("mod.one", "function.one", span, Span{start: 40, end: 41}, 11)
     next_item: body_index_item(third, SemaComptimeItemKind.BodyExpression)
-    body_index_require(jet_driver_comptime_apply_landed(environment, program, available, sites, [SemaComptimeItemValue]{initial, landed, nonbody, next_item}, 3, trail, None), "the authentic staging producer appends after a mixed-kind frontier")
+    jet_driver_comptime_apply_landed(environment, program, available, sites, [SemaComptimeItemValue]{initial, landed, nonbody, next_item}, 3, trail, None)
     body_index_require(environment.comptime_body_publication.item_frontier == 4 && environment.comptime_body_publication.length == 3 && environment.comptime_body_values.length == 2, "the next body batch projects only its new row after a mixed-kind frontier")
 }
 

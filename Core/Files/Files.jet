@@ -20,6 +20,7 @@ use {
     access_codes.[access_check, advice_code, map_advice_code]
     raw_names.[raw_held_name]
     scope_reads.[scope_roots, scope_has_parent, scope_part_name, scope_input_error, scope_read_at]
+    process_rt: jet.runtime.process
 }
 
 // core.files — one filesystem surface.
@@ -394,7 +395,7 @@ priv LockFd: struct {
     fd: Int,
 
     impl Close {
-        close: fn(^^self) { _: builtin.lock_close(self.fd) }
+        close: fn(^^self) { _: rt.lock_close(self.fd) }
     }
 }
 
@@ -821,7 +822,7 @@ process_directory: fn(spec: ProcessSpec, directory: Directory, child_fd: Int, as
     held: core.files.__directory_fd(directory.handle)
     if !held.available -> return Err(IOError.Unsupported(context))
     if !held.held -> return Err(IOError.Closed(context))
-    row: core.process.__keep_open_raw(spec, held.fd, child_fd, as_cwd)
+    row: process_rt.keep_open_raw(spec.copy(), held.fd, child_fd, as_cwd)
     if !row.available -> return Err(IOError.Unsupported(context))
     if row.errno != 0 {
         return Err(
@@ -873,7 +874,7 @@ priv __spec_keep_open: fn(spec: ProcessSpec, handle: ^^Directory | FileLock | Fi
     }
     slot: at ?? fd
     child: if slot < 3 || slot > 2147483646 -> -1 else -> slot
-    core.process.__keep_open_raw(spec, fd, child, false).spec
+    process_rt.keep_open_raw(spec.copy(), fd, child, false).spec
 }
 
 #Test("compiler process directories retain authority after rename and close") {
@@ -2447,13 +2448,13 @@ glob: fn(pattern: Path | String) -[FS]> [String] IOError! {
 temp_dir: fn(prefix: String) -[FS]> TempDir IOError! {
     path: files_temp_path(prefix)
     files8_preflight("FS.Write", .Write, path)
-    core.files.__temp_dir_raw(path)
+    rt.temp_dir_raw(path)
 }
 
 mkdtemp: fn(prefix: String) -[FS]> String IOError! {
     path: files_temp_path(prefix)
     files8_preflight("FS.Write", .Write, path)
-    core.files.__mkdtemp_raw(path)
+    rt.mkdtemp_raw(path)
 }
 
 files_temp_path: fn(prefix: String) -[FS]> String Never! {
@@ -2467,7 +2468,7 @@ files_temp_path: fn(prefix: String) -[FS]> String Never! {
 temp_file: fn(prefix: String) -[FS]> TempFile IOError! {
     path: files_temp_path(prefix)
     files8_preflight("FS.Write", .Write, path)
-    core.files.__temp_file_raw(path)
+    rt.temp_file_raw(path)
 }
 
 /// Wait for an exclusive operating-system lock. A missing
@@ -2484,7 +2485,7 @@ lock: fn(path: Path | String, timeout: Duration?{None}) -[FS, Env]> FileLock IOE
     deadline := 0
     loop {
         fd := lock_open(text)
-        waited: builtin.lock_wait(fd.fd, ns, bounded, deadline)
+        waited: rt.lock_wait(fd.fd, ns, bounded, deadline)
         deadline = waited.deadline_ns
         if waited.timed_out -> return Err(lock_timeout(text))
         if !waited.acquired -> return Err(lock_errno(text, waited.errno, waited.platform))
@@ -2502,7 +2503,7 @@ try_lock: fn(path: Path | String) -[FS, Env]> FileLock? IOError! {
     lock_path(text)
     loop {
         fd := lock_open(text)
-        result: builtin.lock_try(fd.fd)
+        result: rt.lock_try(fd.fd)
         if result.value != 0 {
             if lock_contended(result.errno, result.platform) -> return Ok(None)
             return Err(lock_errno(text, result.errno, result.platform))
@@ -2585,10 +2586,10 @@ lock_errno: fn(path: String, code: Int, platform: Int) -> IOError Never! {
 }
 
 lock_open: fn(path: String) -[FS, Env]> LockFd IOError! {
-    opened: builtin.lock_open(path)
+    opened: rt.lock_open(path)
     if opened.value < 0 -> return Err(lock_errno(path, opened.errno, opened.platform))
     fd: LockFd{fd: opened.value}
-    identity: builtin.lock_fd_identity(fd.fd)
+    identity: rt.lock_fd_identity(fd.fd)
     if identity.errno != 0 -> return Err(lock_errno(path, identity.errno, identity.platform))
     if !identity.regular || identity.reparse {
         return Err(IOError.InvalidInput(lock_context(path, None, "the lock path must name a regular file, not a directory or link")))
@@ -2597,9 +2598,9 @@ lock_open: fn(path: String) -[FS, Env]> LockFd IOError! {
 }
 
 lock_current: fn(path: String, fd: Int) -[FS, Env]> Bool IOError! {
-    held: builtin.lock_fd_identity(fd)
+    held: rt.lock_fd_identity(fd)
     if held.errno != 0 -> return Err(lock_errno(path, held.errno, held.platform))
-    current: builtin.lock_path_identity(path)
+    current: rt.lock_path_identity(path)
     // Disappearance and replacement release and reopen. Other lookup failures
     // are real errors, never mistaken for contention or an absent attribute.
     if current.errno != 0 {

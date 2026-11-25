@@ -421,12 +421,11 @@ SemaCoreStandIn: struct {
 // demand (CoreDemand.jet sema_core_stand_in_flush), whose bodies all have
 // stand-in lines in the run's seal (graph.core_stand_ins).
 sema_core_stand_in: fn(program: SemaProgramTables, key: String, span: Span) -> SemaCoreStandIn? Never! {
-    if program.registration_graph == .Val(graph) {
-        if !graph.core_stand_in_wave || name_find(graph.core_wave_rows, key) == None -> return None
-        if graph.core_stand_ins == .Val(seal) {
-            line: sema_core_seal_stand_in(seal, key) ?? return None
-            return Val(SemaCoreStandIn{effects: sema_core_seal_stand_in_effects(line, key, span), failure: sema_core_seal_stand_in_failure(line, key)})
-        }
+    graph: program.registration_graph
+    if !graph.core_stand_in_wave || name_find(graph.core_wave_rows, key) == None -> return None
+    if graph.core_stand_ins == .Val(seal) {
+        line: sema_core_seal_stand_in(seal, key) ?? return None
+        return Val(SemaCoreStandIn{effects: sema_core_seal_stand_in_effects(line, key, span), failure: sema_core_seal_stand_in_failure(line, key)})
     }
     None
 }

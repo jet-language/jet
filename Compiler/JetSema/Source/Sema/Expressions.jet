@@ -626,6 +626,8 @@ SemaExprOperatorResolution: struct {
 // `Ordering.Equal`, answers beside a derived `equal`, or alone when authored:
 // a derived order never gives `==` to a type that refused `Equatable`.
 sema_expr_equality_resolution: fn(graph: SemaRegistrationGraph, op: BinOp, lhs: Type, rhs: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, diagnostics: ^[Diagnostic]) -> SemaExprOperatorResolution? {
+    // Snapshot: equality resolves through registered impls, and a lone program registers none.
+    if graph.mode == .Snapshot -> return None
     comparable: sema_expr_registration_operator_candidates(graph, lhs, rhs, "Comparable", "compare", false, span, environment, program, scopes, diagnostics)
     equatable: sema_expr_registration_operator_candidates(graph, lhs, rhs, "Equatable", "equal", false, span, environment, program, scopes, diagnostics)
     if equatable.len() == 1 && !equatable[0].derived -> return Val(equatable[0])
@@ -638,7 +640,7 @@ sema_expr_equality_resolution: fn(graph: SemaRegistrationGraph, op: BinOp, lhs: 
 // `signature` is `function`'s signature specialized to the receiver; the
 // registered row itself is only read. `receiver_type` is the owner as its own
 // module names it, while the operator identity keeps the declared owner.
-sema_expr_operator_candidate_from_function: fn(function: SemaRegistrationFunction, signature: Type, graph: SemaRegistrationGraph?, owner_type: Type, receiver_type: Type, trait_symbol: Symbol?, trait_name: String, method: String, rhs: Type, span: Span, caller_module: ModuleID, caller_package: String, lexical_generic_params: [TGenericParam], diagnostics: ^[Diagnostic]) -> SemaCallMethodCandidate? {
+sema_expr_operator_candidate_from_function: fn(function: SemaRegistrationFunction, signature: Type, graph: SemaRegistrationGraph, owner_type: Type, receiver_type: Type, trait_symbol: Symbol?, trait_name: String, method: String, rhs: Type, span: Span, caller_module: ModuleID, caller_package: String, lexical_generic_params: [TGenericParam], diagnostics: ^[Diagnostic]) -> SemaCallMethodCandidate? {
     if function.symbol.name != method || function.parameters.len() == 0 -> return None
     // The arithmetic hook traits (`Add`, `Sub`, `Mul`, `Div`) are
     // compiler-owned and no source module declares them, so a hook's trait
@@ -670,24 +672,23 @@ sema_expr_operator_reader_type: fn(graph: SemaRegistrationGraph, ty: Type, owner
 sema_expr_operator_resolution: fn(op: BinOp, lhs: Type, rhs: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, diagnostics: ^[Diagnostic]) -> SemaExprOperatorResolution? {
     trait_name: sema_expr_operator_trait(op) ?? return None
     method: sema_expr_operator_method(op) ?? return None
-    if program.registration_graph == .Val(graph) {
-        direct := sema_expr_registration_operator_candidates(graph, lhs, rhs, trait_name, method, false, span, environment, program, scopes, diagnostics)
-        if direct.len() > 1 {
-            diagnostics.push(sema_error("E0772", span, "this operator matches more than one callable body", "operator dispatch requires one exact registered trait implementation", "remove the duplicate operator implementation or make the right-hand type unambiguous"))
+    graph: program.registration_graph
+    direct := sema_expr_registration_operator_candidates(graph, lhs, rhs, trait_name, method, false, span, environment, program, scopes, diagnostics)
+    if direct.len() > 1 {
+        diagnostics.push(sema_error("E0772", span, "this operator matches more than one callable body", "operator dispatch requires one exact registered trait implementation", "remove the duplicate operator implementation or make the right-hand type unambiguous"))
+        return None
+    }
+    if direct.len() == 1 -> return Val(direct[0])
+    if sema_expr_operator_commutative(op) {
+        reverse := sema_expr_registration_operator_candidates(graph, rhs, lhs, trait_name, method, true, span, environment, program, scopes, diagnostics)
+        if reverse.len() > 1 {
+            diagnostics.push(sema_error("E0772", span, "this operator matches more than one callable body", "commutative operator dispatch requires one exact registered trait implementation", "remove the duplicate operator implementation or make the right-hand type unambiguous"))
             return None
         }
-        if direct.len() == 1 -> return Val(direct[0])
-        if sema_expr_operator_commutative(op) {
-            reverse := sema_expr_registration_operator_candidates(graph, rhs, lhs, trait_name, method, true, span, environment, program, scopes, diagnostics)
-            if reverse.len() > 1 {
-                diagnostics.push(sema_error("E0772", span, "this operator matches more than one callable body", "commutative operator dispatch requires one exact registered trait implementation", "remove the duplicate operator implementation or make the right-hand type unambiguous"))
-                return None
-            }
-            if reverse.len() == 1 {
-                result := reverse[0]
-                result.receiver_is_left = false
-                return Val(result)
-            }
+        if reverse.len() == 1 {
+            result := reverse[0]
+            result.receiver_is_left = false
+            return Val(result)
         }
     }
     None
@@ -713,13 +714,7 @@ sema_expr_check_operator: fn(op: BinOp, left: Expr, right: Expr, lhs: TExpr, rhs
     resolution := SemaExprOperatorResolution?{None}
     if {
         op == BinOp.Eq || op == BinOp.Ne -> {
-            // Read in place through the pattern: a `??` binding copies the graph.
-            if program.registration_graph == {
-                .Val(graph) -> {
-                    resolution = sema_expr_equality_resolution(graph, op, lhs.ty, rhs.ty, span, environment, program, scopes, diagnostics)
-                }
-                .None -> return None
-            }
+            resolution = sema_expr_equality_resolution(program.registration_graph, op, lhs.ty, rhs.ty, span, environment, program, scopes, diagnostics)
         }
         else -> {
             resolution = sema_expr_operator_resolution(op, lhs.ty, rhs.ty, span, environment, program, scopes, diagnostics)
@@ -864,7 +859,7 @@ sema_expr_operator_nominal_candidates: fn(graph: SemaRegistrationGraph, nominal:
     owner_module: graph.modules[module_index].module_identity
     inference_ty := nominal.ty
     if receiver_canonical {
-        inference_ty = sema_type_resolve_member_type(Val(graph), nominal, nominal.ty)
+        inference_ty = sema_type_resolve_member_type(graph, nominal, nominal.ty)
     }
     // Every registered nominal of the receiver's name is a candidate owner
     // (a user `Transform` beside `core.math`'s `Transform<From, To>`); one
@@ -955,7 +950,7 @@ sema_expr_operator_block_methods: fn(graph: SemaRegistrationGraph, nominal: Sema
     }
     // The authored right-hand type resolves in the owner's module, like the
     // impl rows, with the owner's parameters kept.
-    block_rhs: sema_inference_substitute_type_bindings(sema_type_resolve_member_type(Val(graph), nominal, block.operator_rhs ?? nominal.ty), substitutions)
+    block_rhs: sema_inference_substitute_type_bindings(sema_type_resolve_member_type(graph, nominal, block.operator_rhs ?? nominal.ty), substitutions)
     if !sema_expr_operator_rhs_matches(Val(block_rhs), rhs_type) {
         return
     }
@@ -1155,29 +1150,21 @@ sema_expr_byte_text: fn(value: U8) -> String Never! {
 }
 
 sema_expr_expected_type: fn(value: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Type Never! {
-    if program.registration_graph == .Val(graph) {
-        return sema_type_resolve_declared_recursive(graph, value, sema_scope_caller_row(environment, graph), environment.generic_params)
-    }
-    // copy: the expected type is a new owned Type. When nothing resolves it equals `value`, the
-    // caller's expectation (a read parameter), which the caller keeps.
-    value.copy()
+    graph: program.registration_graph
+    sema_type_resolve_declared_recursive(graph, value, sema_scope_caller_row(environment, graph), environment.generic_params)
 }
 
 // A Core row's type (a builtin Core record's field, a fixed Core call's
 // parameter or result) as the caller's module reads it: its bare nominals
 // stay Core's (sema_type_core_row_form).
 sema_expr_core_row_type: fn(value: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Type Never! {
-    if program.registration_graph == {
-        .Val(graph) -> sema_type_core_row_form(graph, value, sema_scope_caller_row(environment, graph))
-        .None -> value
-    }
+    graph: program.registration_graph
+    sema_type_core_row_form(graph, value, sema_scope_caller_row(environment, graph))
 }
 
 sema_expr_expected_assignable: fn(required: Type, offered: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool? {
-    if program.registration_graph == .Val(graph_value) {
-        return sema_type_assignable_in_graph_at(graph_value, required, offered, sema_scope_caller_row(environment, graph_value), environment.generic_params)
-    }
-    Val(sema_type_assignable(required, offered))
+    graph_value: program.registration_graph
+    sema_type_assignable_in_graph_at(graph_value, required, offered, sema_scope_caller_row(environment, graph_value), environment.generic_params)
 }
 
 sema_expr_expected_trait_coercion: fn(value: ^^TExpr, required: Type, offered: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TExpr Never! {
@@ -1237,13 +1224,12 @@ sema_expr_nominal_can_hold_none: fn(ty: Type, environment: SemaScopeEnvironment,
             return true
         }
     }
-    if program.registration_graph == .Val(graph) {
-        row: sema_type_resolve_nominal_row_at(graph, ty, sema_scope_caller_row(environment, graph)) ?? return true
-        kind: sema_scope_nominal_kind(graph, row.module_index, row.row) ?? return true
-        if kind == {
-            .Struct | .Enum | .Distinct -> return false
-            .Func | .Other -> return true
-        }
+    graph: program.registration_graph
+    row: sema_type_resolve_nominal_row_at(graph, ty, sema_scope_caller_row(environment, graph)) ?? return true
+    kind: sema_scope_nominal_kind(graph, row.module_index, row.row) ?? return true
+    if kind == {
+        .Struct | .Enum | .Distinct -> return false
+        .Func | .Other -> return true
     }
     true
 }
@@ -1849,10 +1835,8 @@ sema_expr_quantity_raw_base: fn(ty: Type, environment: SemaScopeEnvironment, pro
     owner: sema_expression_type_symbol(scopes, environment, program, name) ?? return None
     definition_value: sema_scope_declaration_distinct(environment, program, owner.id) ?? return None
     if definition_value.quantity == None -> return None
-    if program.registration_graph == .Val(graph) {
-        return Val(sema_type_resolve_declared(graph, definition_value.base, owner.module_identity))
-    }
-    Val(definition_value.base)
+    graph: program.registration_graph
+    Val(sema_type_resolve_declared(graph, definition_value.base, owner.module_identity))
 }
 
 sema_expr_distinct_facts: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable) -> SemaExprDistinctFacts? {
@@ -1873,9 +1857,8 @@ sema_expr_declared_distinct_facts: fn(ty: Type, admit_quantity: Bool, environmen
     if definition_value.quantity != None && !admit_quantity -> return None
     // Imported projections retain nominal bases from the declaring module.
     base := definition_value.base
-    if program.registration_graph == .Val(graph) {
-        base = sema_type_resolve_declared(graph, base, owner.module_identity)
-    }
+    graph: program.registration_graph
+    base = sema_type_resolve_declared(graph, base, owner.module_identity)
     numeric := false
     loop marker in definition_value.derives {
         if marker.name == MARKER_NUMERIC -> numeric = true
@@ -1925,10 +1908,8 @@ sema_expr_check_distinct_binary: fn(op: BinOp, lhs: TExpr, rhs: TExpr, span: Spa
 }
 
 sema_expr_unit_fact: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaRegistrationUnitFact? {
-    if program.registration_graph == .Val(graph) {
-        return sema_registration_unit_fact_for_type(graph, ty)
-    }
-    None
+    graph: program.registration_graph
+    sema_registration_unit_fact_for_type(graph, ty)
 }
 
 sema_expr_unit_ratio_sub: fn(left: UnitRatio, right: UnitRatio) -> UnitRatio Never! {
@@ -2058,7 +2039,8 @@ sema_expr_unit_local_magnitude: fn(name: String, scopes: SemaScopeTable) -> Floa
 }
 
 sema_expr_unit_exact_proof: fn(concrete: Float, source: SemaRegistrationUnitFact, destination: SemaRegistrationUnitFact, environment: SemaScopeEnvironment, program: SemaProgramTables, context: SemaCheckContext) -> Bool? {
-    if program.registration_graph == None -> return None
+    // Snapshot: a unit conversion is proved only between registered units.
+    if program.registration_graph.mode == .Snapshot -> return None
     scale: sema_expr_unit_ratio_div(source.scale, destination.scale) ?? return Val(false)
     offset: sema_expr_unit_ratio_div(sema_expr_unit_ratio_sub(source.offset, destination.offset), destination.scale) ?? return Val(false)
     proof := sema_numeric_unit_conversion_exact(context.host_hooks, concrete, scale, offset)
@@ -2215,11 +2197,10 @@ sema_expr_unit_dimension: fn(ty: Type, environment: SemaScopeEnvironment, progra
 }
 
 sema_expr_unit_counterpart: fn(fact: SemaRegistrationUnitFact, kind: QuantityKind, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaRegistrationUnitFact? {
-    if program.registration_graph == .Val(graph) {
-        loop candidate_index in 0..<graph.unit_facts.len() {
-            if graph.unit_facts[candidate_index].package == fact.package && graph.unit_facts[candidate_index].family == fact.family && graph.unit_facts[candidate_index].member == fact.member && graph.unit_facts[candidate_index].kind == kind {
-                return Val(graph.unit_facts[candidate_index])
-            }
+    graph: program.registration_graph
+    loop candidate_index in 0..<graph.unit_facts.len() {
+        if graph.unit_facts[candidate_index].package == fact.package && graph.unit_facts[candidate_index].family == fact.family && graph.unit_facts[candidate_index].member == fact.member && graph.unit_facts[candidate_index].kind == kind {
+            return Val(graph.unit_facts[candidate_index])
         }
     }
     None
@@ -2840,7 +2821,8 @@ sema_expr_check_unit_selector: fn(checked: ^^TExpr, selector: StrSelector, envir
     ty: checked.ty
     unit_type := sema_expr_scalable_unit_type(ty, environment, program)
     if !unit_type {
-        if program.registration_graph == .Val(graph) -> unit_type = sema_registration_unit_member_type(graph, ty)
+        graph: program.registration_graph
+        unit_type = sema_registration_unit_member_type(graph, ty)
     }
     if !unit_type {
         diagnostics.push(sema_error("E0112", checked.span, "{sema_type_show(ty)} can't use `:Unit(…)`", "unit formatting needs a quantity or a `#UnitFamily` value", "use bare interpolation, or pass a value that has a unit"))
@@ -2937,7 +2919,9 @@ sema_expr_check_format_style: fn(value: Expr, checked: TExpr, selector: StrSelec
     label: sema_expr_selector_label(selector)
     base: sema_expr_numeric_base(checked.ty)
     ints := [Bool]{}
-    if program.registration_graph == .Val(graph) {
+    graph: program.registration_graph
+    // Snapshot: a lone program registers no selector trait, so the selector goes unchecked.
+    if graph.mode == .Program {
         caller: sema_scope_caller_row(environment, graph)
         trait_id: if sema_type_trait_identity(graph, caller, style.trait_name) == {
             .Val(found) -> found
@@ -3041,23 +3025,28 @@ sema_expr_comptime_local_method_target: fn(environment: SemaScopeEnvironment, pr
 }
 
 sema_expr_comptime_target: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, symbol: SymbolID) -> SemaExprComptimeTarget? {
-    if program.registration_graph == .Val(graph) {
-        // One keyed callable lookup: top-level functions and nominal methods
-        // are compile-time targets.
-        row: sema_registration_callable_row_of(graph, symbol) ?? return None
-        if row == {
-            .Function(module_index, index) -> return Val(SemaExprComptimeTarget{module_identity: graph.modules[module_index].module_identity, declaration: graph.modules[module_index].functions[index].declaration, path: graph.modules[module_index].functions[index].symbol.name, kind: "function"})
-            .NominalMethod(module_index, owner, index) -> return Val(SemaExprComptimeTarget{module_identity: graph.modules[module_index].module_identity, declaration: graph.modules[module_index].nominals[owner].methods[index].declaration, path: "{graph.modules[module_index].nominals[owner].symbol.name}.{graph.modules[module_index].nominals[owner].methods[index].symbol.name}", kind: "method"})
-            .Foreign(_, _) | .ImplMethod(_, _, _) -> return None
-        }
+    graph: program.registration_graph
+    // Snapshot: a lone program's compile-time targets are its own
+    // declarations in scope.
+    if graph.mode == .Snapshot -> return sema_expr_comptime_local_target(environment, program, scopes, symbol)
+    // One keyed callable lookup: top-level functions and nominal methods
+    // are compile-time targets.
+    row: sema_registration_callable_row_of(graph, symbol) ?? return None
+    if row == {
+        .Function(module_index, index) -> Val(SemaExprComptimeTarget{module_identity: graph.modules[module_index].module_identity, declaration: graph.modules[module_index].functions[index].declaration, path: graph.modules[module_index].functions[index].symbol.name, kind: "function"})
+        .NominalMethod(module_index, owner, index) -> Val(SemaExprComptimeTarget{module_identity: graph.modules[module_index].module_identity, declaration: graph.modules[module_index].nominals[owner].methods[index].declaration, path: "{graph.modules[module_index].nominals[owner].symbol.name}.{graph.modules[module_index].nominals[owner].methods[index].symbol.name}", kind: "method"})
+        .Foreign(_, _) | .ImplMethod(_, _, _) -> None
     }
+}
+
+// A lone program's compile-time target `symbol`: a function declaration in
+// scope is the checked module's own, since no import resolves.
+sema_expr_comptime_local_target: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, symbol: SymbolID) -> SemaExprComptimeTarget? {
     declaration: sema_scope_resolve_declaration(environment, program, symbol) ?? {
         target: sema_expr_comptime_local_method_target(environment, program, symbol) ?? return None
         return Val(target)
     }
     if declaration == {
-        // Without a graph (the only way here) no import resolves, so a
-        // function declaration in scope is the checked module's own.
         .Func(func) -> return Val(SemaExprComptimeTarget{module_identity: scopes.module_identity, declaration: func, path: func.name, kind: "function"})
         .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
     }
@@ -3067,16 +3056,19 @@ sema_expr_comptime_target: fn(environment: SemaScopeEnvironment, program: SemaPr
 // Whether sema_expr_comptime_target's target for `symbol` is declared
 // `#run`, read in place from the graph rows.
 sema_expr_comptime_target_declared: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, symbol: SymbolID) -> Bool {
-    if program.registration_graph == .Val(graph) {
-        row: sema_registration_callable_row_of(graph, symbol) ?? return false
-        return if row == {
-            .Function(module_index, index) -> graph.modules[module_index].functions[index].declaration.is_comptime
-            .NominalMethod(module_index, owner, index) -> graph.modules[module_index].nominals[owner].methods[index].declaration.is_comptime
-            .Foreign(_, _) | .ImplMethod(_, _, _) -> false
-        }
+    graph: program.registration_graph
+    // Snapshot: a lone program's compile-time targets are its own
+    // declarations in scope.
+    if graph.mode == .Snapshot {
+        target: sema_expr_comptime_local_target(environment, program, scopes, symbol) ?? return false
+        return target.declaration.is_comptime
     }
-    target: sema_expr_comptime_target(environment, program, scopes, symbol) ?? return false
-    target.declaration.is_comptime
+    row: sema_registration_callable_row_of(graph, symbol) ?? return false
+    if row == {
+        .Function(module_index, index) -> graph.modules[module_index].functions[index].declaration.is_comptime
+        .NominalMethod(module_index, owner, index) -> graph.modules[module_index].nominals[owner].methods[index].declaration.is_comptime
+        .Foreign(_, _) | .ImplMethod(_, _, _) -> false
+    }
 }
 
 sema_expr_comptime_value: fn(value: TExpr, context: SemaCheckContext) -> TComptimeValue? {
@@ -3190,7 +3182,7 @@ sema_expr_record_call_fact: fn(environment: SemaScopeEnvironment, program: SemaP
     if scopes.comptime_execution_depth > 0 {
         // Compile-time code never runs a `#Runtime(.Only)` function: the
         // mark keeps it to the running program.
-        graph: program.registration_graph ?? return true
+        graph: program.registration_graph
         row: sema_registration_callable_row_of(graph, symbol) ?? return true
         if sema_callable_runtime_only(graph, row) {
             diagnostics.push(sema_runtime_only_build_time_diagnostic("Compile-time code calls `{sema_effect_comptime_callee_name(symbol_table_key(graph.symbols, symbol))}`", span))
@@ -3238,25 +3230,23 @@ sema_expr_in_hole_header: fn(scopes: SemaScopeTable, span: Span) -> Bool Never! 
 // `FFI.C`.
 sema_expr_call_foreign_effect_root: fn(program: SemaProgramTables, callee: SymbolID?) -> String? {
     symbol: callee ?? return None
-    if program.registration_graph == .Val(graph) {
-        abi: sema_registration_callable_abi(graph, symbol) ?? return None
-        if !abi.is_extern -> return None
-        core: sema_expr_call_core_binding(graph, symbol)
-        root := abi.foreign_effect_root ?? ""
-        if root == "" {
-            if !abi.is_c_abi || core -> return None
-            root = "FFI.C"
-        }
-        if (root != "FFI.C" && root != "FFI") || core -> return Val(root)
-        if sema_registration_callable_row_of(graph, symbol) == .Val(.Foreign(module_index, index)) {
-            library: graph.modules[module_index].foreign_functions[index].foreign_library
-            if graph.modules[module_index].foreign_functions[index].owner == SemaRegistrationForeignOwner.CModule && effect_scope_argument_valid(library) {
-                return Val(effect_scope_name("FFI.C", library))
-            }
-        }
-        return Val(root)
+    graph: program.registration_graph
+    abi: sema_registration_callable_abi(graph, symbol) ?? return None
+    if !abi.is_extern -> return None
+    core: sema_expr_call_core_binding(graph, symbol)
+    root := abi.foreign_effect_root ?? ""
+    if root == "" {
+        if !abi.is_c_abi || core -> return None
+        root = "FFI.C"
     }
-    None
+    if (root != "FFI.C" && root != "FFI") || core -> return Val(root)
+    if sema_registration_callable_row_of(graph, symbol) == .Val(.Foreign(module_index, index)) {
+        library: graph.modules[module_index].foreign_functions[index].foreign_library
+        if graph.modules[module_index].foreign_functions[index].owner == SemaRegistrationForeignOwner.CModule && effect_scope_argument_valid(library) {
+            return Val(effect_scope_name("FFI.C", library))
+        }
+    }
+    Val(root)
 }
 
 // Whether `callee` is a C binding whose row no descriptor owns (a written
@@ -3264,11 +3254,9 @@ sema_expr_call_foreign_effect_root: fn(program: SemaProgramTables, callee: Symbo
 // the call is open-world.
 sema_expr_call_foreign_opaque: fn(program: SemaProgramTables, callee: SymbolID?) -> Bool {
     symbol: callee ?? return false
-    if program.registration_graph == .Val(graph) {
-        abi: sema_registration_callable_abi(graph, symbol) ?? return false
-        return abi.is_extern && abi.is_c_abi && abi.foreign_effect_root == None && !sema_expr_call_core_binding(graph, symbol)
-    }
-    false
+    graph: program.registration_graph
+    abi: sema_registration_callable_abi(graph, symbol) ?? return false
+    abi.is_extern && abi.is_c_abi && abi.foreign_effect_root == None && !sema_expr_call_core_binding(graph, symbol)
 }
 
 // Whether `symbol` is declared in Core: Core's own bindings (the Jet SQLite engine, TLS) are
@@ -3285,15 +3273,13 @@ sema_expr_call_core_binding: fn(graph: SemaRegistrationGraph, symbol: SymbolID) 
 // row) whose binding declares no `#Undo(inverse)`.
 sema_expr_call_foreign_without_undo: fn(program: SemaProgramTables, callee: SymbolID?) -> Bool {
     symbol: callee ?? return false
-    if program.registration_graph == .Val(graph) {
-        row: sema_registration_callable_row_of(graph, symbol) ?? return false
-        if row == {
-            .Function(module_index, index) -> return graph.modules[module_index].functions[index].abi.is_extern && graph.modules[module_index].functions[index].declaration.undo == None
-            .Foreign(module_index, index) -> return graph.modules[module_index].foreign_functions[index].declaration.undo == None
-            .NominalMethod(_, _, _) | .ImplMethod(_, _, _) -> return false
-        }
+    graph: program.registration_graph
+    row: sema_registration_callable_row_of(graph, symbol) ?? return false
+    if row == {
+        .Function(module_index, index) -> graph.modules[module_index].functions[index].abi.is_extern && graph.modules[module_index].functions[index].declaration.undo == None
+        .Foreign(module_index, index) -> graph.modules[module_index].foreign_functions[index].declaration.undo == None
+        .NominalMethod(_, _, _) | .ImplMethod(_, _, _) -> false
     }
-    false
 }
 
 // Whether renaming this call to its declared callee's `#Deprecated(use:)`
@@ -3302,19 +3288,18 @@ sema_expr_call_foreign_without_undo: fn(program: SemaProgramTables, callee: Symb
 // or an import of it, is the rename).
 sema_expr_call_replacement_hidden: fn(program: SemaProgramTables, scopes: SemaScopeTable, callee: SymbolID?, span: Span) -> Bool {
     symbol: callee ?? return false
-    if program.registration_graph == .Val(graph) {
-        row: sema_registration_callable_row_of(graph, symbol) ?? return false
-        if row == .Function(module_index, index) {
-            if graph.modules[module_index].functions[index].declaration.markers.len() == 0 {
-                return false
-            }
-            payload: sema_lifecycle_marker(graph.modules[module_index].functions[index].declaration.markers, "") ?? return false
-            parts: payload.replacement.split(".").to_list()
-            leaf: parts[parts.len() - 1].trim()
-            binding: sema_scope_resolve_index_at(scopes, leaf, span) ?? return true
-            kind: scopes.bindings[binding].symbol.kind
-            return kind == SymbolKind.Local || kind == SymbolKind.Parameter
+    graph: program.registration_graph
+    row: sema_registration_callable_row_of(graph, symbol) ?? return false
+    if row == .Function(module_index, index) {
+        if graph.modules[module_index].functions[index].declaration.markers.len() == 0 {
+            return false
         }
+        payload: sema_lifecycle_marker(graph.modules[module_index].functions[index].declaration.markers, "") ?? return false
+        parts: payload.replacement.split(".").to_list()
+        leaf: parts[parts.len() - 1].trim()
+        binding: sema_scope_resolve_index_at(scopes, leaf, span) ?? return true
+        kind: scopes.bindings[binding].symbol.kind
+        return kind == SymbolKind.Local || kind == SymbolKind.Parameter
     }
     false
 }
@@ -3325,11 +3310,10 @@ sema_expr_call_replacement_hidden: fn(program: SemaProgramTables, scopes: SemaSc
 sema_expr_call_unsafe_foreign_name: fn(program: SemaProgramTables, callee: SymbolID?, foreign_effect_root: String?) -> String? {
     if foreign_effect_root == None -> return None
     symbol: callee ?? return None
-    if program.registration_graph == .Val(graph) {
-        declaration: sema_registration_callable_declaration(graph, symbol) ?? return None
-        if declaration.inline_foreign != None && declaration.is_unsafe {
-            return Val(declaration.name)
-        }
+    graph: program.registration_graph
+    declaration: sema_registration_callable_declaration(graph, symbol) ?? return None
+    if declaration.inline_foreign != None && declaration.is_unsafe {
+        return Val(declaration.name)
     }
     None
 }
@@ -3340,17 +3324,16 @@ sema_expr_call_unsafe_foreign_name: fn(program: SemaProgramTables, callee: Symbo
 // binding is callable directly; None for any other callee.
 sema_expr_call_foreign_capability: fn(program: SemaProgramTables, callee: SymbolID?) -> SemaForeignCapability? {
     symbol: callee ?? return None
-    if program.registration_graph == .Val(graph) {
-        row: sema_registration_callable_row_of(graph, symbol) ?? return None
-        if row == .Foreign(module_index, index) {
-            if graph.modules[module_index].foreign_functions[index].owner != SemaRegistrationForeignOwner.ExternRust || graph.modules[module_index].foreign_functions[index].declaration.generated {
-                return None
-            }
-            loop parameter in graph.modules[module_index].foreign_functions[index].declaration.params {
-                sigil: access_sigil(parameter.convention)
-                if sigil != "" {
-                    return Val(SemaForeignCapability{name: graph.modules[module_index].foreign_functions[index].declaration.name.copy(), sigil: sigil})
-                }
+    graph: program.registration_graph
+    row: sema_registration_callable_row_of(graph, symbol) ?? return None
+    if row == .Foreign(module_index, index) {
+        if graph.modules[module_index].foreign_functions[index].owner != SemaRegistrationForeignOwner.ExternRust || graph.modules[module_index].foreign_functions[index].declaration.generated {
+            return None
+        }
+        loop parameter in graph.modules[module_index].foreign_functions[index].declaration.params {
+            sigil: access_sigil(parameter.convention)
+            if sigil != "" {
+                return Val(SemaForeignCapability{name: graph.modules[module_index].foreign_functions[index].declaration.name.copy(), sigil: sigil})
             }
         }
     }
@@ -3426,7 +3409,7 @@ sema_expr_registration_method_candidates: fn(graph: SemaRegistrationGraph, calle
         found_owner = true
         inference_ty := nominal.ty
         if receiver_canonical {
-            inference_ty = sema_type_resolve_member_type(Val(graph), nominal, nominal.ty)
+            inference_ty = sema_type_resolve_member_type(graph, nominal, nominal.ty)
         }
         // A same-named nominal that cannot own the receiver is skipped, not
         // reported (see sema_expr_operator_nominal_candidates).
@@ -3585,23 +3568,21 @@ sema_expr_receiver_nominal_identity: fn(environment: SemaScopeEnvironment, progr
     // A builtin handle is its own identity, whatever program type shares its
     // name (sema_type_is_builtin_handle).
     if sema_type_is_builtin_handle(receiver_type, base_name) -> return base_name
-    if program.registration_graph == .Val(graph) {
-        if sema_type_resolve_nominal_row_at(graph, receiver_type, sema_scope_caller_row(environment, graph)) == .Val(row) {
-            nominal: graph.modules[row.module_index].nominals[row.row]
-            return "{module_text(graph.module_table, nominal.symbol.module_identity)}.{nominal.symbol.name}"
-        }
-        found := String?{None}
-        loop row in sema_registration_nominal_rows_named(graph, sema_expr_operator_row_name(base_name)) {
-            nominal: graph.modules[row.module_index].nominals[row.row]
-            if nominal.kind == SemaRegistrationNominalKind.TypeAlias -> next
-            identity: "{module_text(graph.module_table, nominal.symbol.module_identity)}.{nominal.symbol.name}"
-            if base_name.contains(".") && base_name != identity -> next
-            if found != None -> return base_name
-            found = Val(identity)
-        }
-        return found ?? base_name
+    graph: program.registration_graph
+    if sema_type_resolve_nominal_row_at(graph, receiver_type, sema_scope_caller_row(environment, graph)) == .Val(row) {
+        nominal: graph.modules[row.module_index].nominals[row.row]
+        return "{module_text(graph.module_table, nominal.symbol.module_identity)}.{nominal.symbol.name}"
     }
-    base_name
+    found := String?{None}
+    loop row in sema_registration_nominal_rows_named(graph, sema_expr_operator_row_name(base_name)) {
+        nominal: graph.modules[row.module_index].nominals[row.row]
+        if nominal.kind == SemaRegistrationNominalKind.TypeAlias -> next
+        identity: "{module_text(graph.module_table, nominal.symbol.module_identity)}.{nominal.symbol.name}"
+        if base_name.contains(".") && base_name != identity -> next
+        if found != None -> return base_name
+        found = Val(identity)
+    }
+    found ?? base_name
 }
 
 // True only when a declared nominal method collides with a builtin handle
@@ -3609,49 +3590,48 @@ sema_expr_receiver_nominal_identity: fn(environment: SemaScopeEnvironment, progr
 // spelled like a handle carrier); every other declared method keeps the
 // special routes.
 sema_expr_declares_nominal_method: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, receiver_type: Type, method: String, needs_receiver: Bool) -> Bool Never! {
-    if program.registration_graph == .Val(graph) {
-        // A resolved receiver carries its canonical identity (`module.URL`).
-        base_name: sema_expr_type_base_name(sema_expr_unwrap_tag(receiver_type)) ?? return false
-        // A builtin handle declares no methods; a program type of its name is
-        // spelled by its owner (sema_type_is_builtin_handle).
-        if sema_type_is_builtin_handle(receiver_type, base_name) -> return false
-        if sema_registration_source_impl_owners(graph, base_name) == .Val(owner_modules) {
-            loop owner_index in owner_modules {
-                loop implementation_index in 0..<graph.modules[owner_index].impls.len() {
-                    if graph.modules[owner_index].impls[implementation_index].target_type_name != base_name {
-                        next
-                    }
-                    loop function_index in 0..<graph.modules[owner_index].impls[implementation_index].methods.len() {
-                        if graph.modules[owner_index].impls[implementation_index].methods[function_index].symbol.name == method && (!needs_receiver || sema_expr_function_takes_self(graph.modules[owner_index].impls[implementation_index].methods[function_index])) {
-                            return true
-                        }
-                    }
+    graph: program.registration_graph
+    // A resolved receiver carries its canonical identity (`module.URL`).
+    base_name: sema_expr_type_base_name(sema_expr_unwrap_tag(receiver_type)) ?? return false
+    // A builtin handle declares no methods; a program type of its name is
+    // spelled by its owner (sema_type_is_builtin_handle).
+    if sema_type_is_builtin_handle(receiver_type, base_name) -> return false
+    if sema_registration_source_impl_owners(graph, base_name) == .Val(owner_modules) {
+        loop owner_index in owner_modules {
+            loop implementation_index in 0..<graph.modules[owner_index].impls.len() {
+                if graph.modules[owner_index].impls[implementation_index].target_type_name != base_name {
+                    next
                 }
-            }
-        }
-        receiver_name: sema_expr_operator_row_name(base_name)
-        caller: sema_scope_caller_row(environment, graph)
-        source_declaration := sema_type_source_owns_nominal(graph, base_name, caller)
-        if sema_type_resolve_nominal_row_at(graph, sema_expr_unwrap_tag(receiver_type), caller) == .Val(owner) {
-            module_row: graph.modules[owner.module_index]
-            if module_is_core(module_row.module_identity) {
-                loop row in CORE_SOURCE_OWNED_ROWS {
-                    if row.module_name == module_row.module_name && row.alias == module_row.core_source_alias {
-                        source_declaration = true
+                loop function_index in 0..<graph.modules[owner_index].impls[implementation_index].methods.len() {
+                    if graph.modules[owner_index].impls[implementation_index].methods[function_index].symbol.name == method && (!needs_receiver || sema_expr_function_takes_self(graph.modules[owner_index].impls[implementation_index].methods[function_index])) {
+                        return true
                     }
                 }
             }
         }
-        if !source_declaration {
-            return false
-        }
-        loop nominal_row in sema_registration_nominal_rows_named(graph, receiver_name) {
-            methods: graph.modules[nominal_row.module_index].nominals[nominal_row.row].methods
-            loop method_index in 0..<methods.len() {
-                function: methods[method_index]
-                if function.symbol.name == method && (!needs_receiver || sema_expr_function_takes_self(function)) {
-                    return true
+    }
+    receiver_name: sema_expr_operator_row_name(base_name)
+    caller: sema_scope_caller_row(environment, graph)
+    source_declaration := sema_type_source_owns_nominal(graph, base_name, caller)
+    if sema_type_resolve_nominal_row_at(graph, sema_expr_unwrap_tag(receiver_type), caller) == .Val(owner) {
+        module_row: graph.modules[owner.module_index]
+        if module_is_core(module_row.module_identity) {
+            loop row in CORE_SOURCE_OWNED_ROWS {
+                if row.module_name == module_row.module_name && row.alias == module_row.core_source_alias {
+                    source_declaration = true
                 }
+            }
+        }
+    }
+    if !source_declaration {
+        return false
+    }
+    loop nominal_row in sema_registration_nominal_rows_named(graph, receiver_name) {
+        methods: graph.modules[nominal_row.module_index].nominals[nominal_row.row].methods
+        loop method_index in 0..<methods.len() {
+            function: methods[method_index]
+            if function.symbol.name == method && (!needs_receiver || sema_expr_function_takes_self(function)) {
+                return true
             }
         }
     }
@@ -3672,28 +3652,27 @@ sema_expr_function_takes_self: fn(function: SemaRegistrationFunction) -> Bool Ne
 // own: it declares the type's parameters as its own (codec_params), which no
 // receiver binds, while the contract route codes the receiver's instance.
 sema_expr_declares_own_method: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, receiver_type: Type, method: String) -> Bool Never! {
-    if program.registration_graph == .Val(graph) {
-        base_name: sema_expr_type_base_name(sema_expr_unwrap_tag(receiver_type)) ?? return false
-        if sema_registration_source_impl_owners(graph, base_name) == .Val(owner_modules) {
-            loop owner_index in owner_modules {
-                loop implementation in graph.modules[owner_index].impls {
-                    if implementation.target_type_name != base_name || sema_derive_is_codec_trait(implementation.trait_name ?? "") {
-                        next
-                    }
-                    loop function in implementation.methods {
-                        if function.symbol.name == method && function.parameters.len() > 0 {
-                            return true
-                        }
+    graph: program.registration_graph
+    base_name: sema_expr_type_base_name(sema_expr_unwrap_tag(receiver_type)) ?? return false
+    if sema_registration_source_impl_owners(graph, base_name) == .Val(owner_modules) {
+        loop owner_index in owner_modules {
+            loop implementation in graph.modules[owner_index].impls {
+                if implementation.target_type_name != base_name || sema_derive_is_codec_trait(implementation.trait_name ?? "") {
+                    next
+                }
+                loop function in implementation.methods {
+                    if function.symbol.name == method && function.parameters.len() > 0 {
+                        return true
                     }
                 }
             }
         }
-        caller: sema_type_module_row(graph, environment.module_identity)
-        owner: sema_type_resolve_nominal_row_at(graph, sema_expr_unwrap_tag(receiver_type), caller) ?? return false
-        loop function in graph.modules[owner.module_index].nominals[owner.row].methods {
-            if function.declaration.compiler_generated && function.generic_params.len() > 0 -> next
-            if function.symbol.name == method && function.parameters.len() > 0 -> return true
-        }
+    }
+    caller: sema_type_module_row(graph, environment.module_identity)
+    owner: sema_type_resolve_nominal_row_at(graph, sema_expr_unwrap_tag(receiver_type), caller) ?? return false
+    loop function in graph.modules[owner.module_index].nominals[owner.row].methods {
+        if function.declaration.compiler_generated && function.generic_params.len() > 0 -> next
+        if function.symbol.name == method && function.parameters.len() > 0 -> return true
     }
     false
 }
@@ -4511,7 +4490,8 @@ sema_expr_try_method_special_routes: fn(receiver: Expr, receiver_value: TExpr, m
             return SemaMethodSpecialCheck{handled: false, value: None}
         }
         .Named(name) -> {
-            if program.registration_graph == .Val(graph) && sema_registration_is_ordinary_user_type(graph, name) {
+            graph: program.registration_graph
+            if sema_registration_is_ordinary_user_type(graph, name) {
                 if method == "encode" || method == "encode_stored" {
                     data := sema_call_try_data_method(receiver, receiver_value, method, args, type_args, span, expected, environment, program, scopes, check, diagnostics)
                     if data.handled -> return data
@@ -4654,40 +4634,8 @@ sema_expr_function_field: fn(receiver: Type, name: String, method_name: String, 
     if sema_expr_declares_nominal_method(environment, program, sema_expr_unwrap_tag(receiver), method_name, false) {
         return false
     }
-    if program.registration_graph == .Val(graph) {
-        if sema_type_resolve_nominal_row_at(graph, receiver, sema_scope_caller_row(environment, graph)) == .Val(row) {
-            nominal: graph.modules[row.module_index].nominals[row.row]
-            loop method in nominal.methods {
-                if method.symbol.name == method_name -> return false
-            }
-            loop implementation_row in sema_registration_impl_rows_named(graph, nominal.symbol.name) {
-                implementation: graph.modules[implementation_row.module_index].impls[implementation_row.row]
-                if implementation.target_identity_key != nominal.identity_key -> next
-                loop method in implementation.methods {
-                    if method.symbol.name == method_name -> return false
-                }
-                trait_symbol: implementation.trait_symbol ?? next
-                trait_row: sema_call_trait_row_for_symbol(graph, trait_symbol.id) ?? next
-                trait_nominal: graph.modules[trait_row.module_index].nominals[trait_row.row]
-                loop method in trait_nominal.trait_methods {
-                    if method.declaration.name == method_name && (implementation.delegation_field != None || method.declaration.default_body != None) {
-                        return false
-                    }
-                }
-            }
-            if nominal.source == .SourceAST(item) {
-                loop block in sema_registration_item_trait_blocks(item) {
-                    trait_row: sema_checked_trait_nominal_row(graph, graph.modules[row.module_index].module_identity, block.trait_name) ?? next
-                    trait_nominal: graph.modules[trait_row.module_index].nominals[trait_row.row]
-                    loop method in trait_nominal.trait_methods {
-                        if method.declaration.name == method_name && (block.delegation_field != None || method.declaration.default_body != None) {
-                            return false
-                        }
-                    }
-                }
-            }
-        }
-    } else {
+    // Snapshot: a lone program's methods are its own declarations'.
+    if program.registration_graph.mode == .Snapshot {
         type_name: sema_type_graph_base_name(sema_expr_unwrap_tag(receiver)) ?? return false
         definition: sema_serde_type_definition(environment, program, type_name) ?? return false
         loop declaration_index in 0..<environment.declarations.len() {
@@ -4710,6 +4658,40 @@ sema_expr_function_field: fn(receiver: Type, name: String, method_name: String, 
                     }
                 }
                 .Func(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+            }
+        }
+        return true
+    }
+    graph: program.registration_graph
+    if sema_type_resolve_nominal_row_at(graph, receiver, sema_scope_caller_row(environment, graph)) == .Val(row) {
+        nominal: graph.modules[row.module_index].nominals[row.row]
+        loop method in nominal.methods {
+            if method.symbol.name == method_name -> return false
+        }
+        loop implementation_row in sema_registration_impl_rows_named(graph, nominal.symbol.name) {
+            implementation: graph.modules[implementation_row.module_index].impls[implementation_row.row]
+            if implementation.target_identity_key != nominal.identity_key -> next
+            loop method in implementation.methods {
+                if method.symbol.name == method_name -> return false
+            }
+            trait_symbol: implementation.trait_symbol ?? next
+            trait_row: sema_call_trait_row_for_symbol(graph, trait_symbol.id) ?? next
+            trait_nominal: graph.modules[trait_row.module_index].nominals[trait_row.row]
+            loop method in trait_nominal.trait_methods {
+                if method.declaration.name == method_name && (implementation.delegation_field != None || method.declaration.default_body != None) {
+                    return false
+                }
+            }
+        }
+        if nominal.source == .SourceAST(item) {
+            loop block in sema_registration_item_trait_blocks(item) {
+                trait_row: sema_checked_trait_nominal_row(graph, graph.modules[row.module_index].module_identity, block.trait_name) ?? next
+                trait_nominal: graph.modules[trait_row.module_index].nominals[trait_row.row]
+                loop method in trait_nominal.trait_methods {
+                    if method.declaration.name == method_name && (block.delegation_field != None || method.declaration.default_body != None) {
+                        return false
+                    }
+                }
             }
         }
     }
@@ -4756,17 +4738,19 @@ sema_expr_allocator_view_receiver: fn(receiver: Expr, method: String, environmen
 
 sema_expr_receiver_has_method_footprint: fn(receiver: Expr, method: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Bool {
     ty: sema_stmt_return_known_type(receiver, environment, scopes) ?? return false
-    if program.registration_graph == .Val(graph) {
-        dummy_diags := [Diagnostic]{}
-        candidates: sema_expr_registration_method_candidates(graph, environment.module_identity, ty, method, [Type]{}, [Type]{}, expr_span(receiver), environment, program, dummy_diags)
-        loop candidate in candidates {
-            if candidate.receiver_footprint != None -> return true
-        }
-    } else {
+    // Snapshot: a lone program's methods are its own declarations' (sema_call_local_method_candidates).
+    if program.registration_graph.mode == .Snapshot {
         candidates: sema_call_local_method_candidates(environment, program, method, [Type]{}, [Type]{})
         loop candidate in candidates {
             if candidate.method.name == method && candidate.receiver_footprint != None -> return true
         }
+        return false
+    }
+    graph: program.registration_graph
+    dummy_diags := [Diagnostic]{}
+    candidates: sema_expr_registration_method_candidates(graph, environment.module_identity, ty, method, [Type]{}, [Type]{}, expr_span(receiver), environment, program, dummy_diags)
+    loop candidate in candidates {
+        if candidate.receiver_footprint != None -> return true
     }
     false
 }
@@ -4867,7 +4851,8 @@ sema_expr_check_method_call: fn(receiver: Expr, method: String, method_span: Spa
     // A method call on a struct or enum that carries a marker hears that
     // marker's `check` rule before the method resolves (Calls/CheckRules.jet).
     rules := [SemaCallRule]{}
-    if sema_call_rules_heard_here(scopes) && program.registration_graph == .Val(graph) -> rules = sema_call_rules_of_type(graph, receiver_value.ty, environment.module_row)
+    graph: program.registration_graph
+    if sema_call_rules_heard_here(scopes) -> rules = sema_call_rules_of_type(graph, receiver_value.ty, environment.module_row)
     if rules.len() == 0 -> return sema_expr_check_method_on(receiver, receiver_value, method, method_span, owner_type_args, type_args, args, expected, environment, program, scopes, check, diagnostics)
     hearing: sema_call_rules_hear(rules, None, method, method_span, args, Val(receiver), Val(receiver_value.ty), sema_rule_known(receiver_value, program, check.context), receiver_value.span, None, "", scopes.current, environment, program, scopes, check, diagnostics)
     if hearing.rejected -> return None
@@ -5066,17 +5051,16 @@ sema_expr_check_declared_method: fn(receiver: Expr, receiver_value: TExpr, metho
     }
     candidates := [SemaCallMethodCandidate]{}
     if args.len() == 1 && operator_trait == .Val(trait_name) {
-        if argument_types[0] == .Val(rhs) && program.registration_graph == .Val(graph) {
+        graph: program.registration_graph
+        if argument_types[0] == .Val(rhs) {
             loop resolution in sema_expr_registration_operator_candidates(graph, receiver_value.ty, rhs, trait_name, method, false, method_span, environment, program, scopes, diagnostics) {
                 candidates.push(resolution.candidate)
             }
         }
     }
     if candidates.len() == 0 {
-        candidates = if program.registration_graph == {
-            .Val(graph) -> sema_expr_registration_method_candidates(graph, environment.module_identity, receiver_value.ty, routed_method, owner_type_args, type_args, method_span, environment, program, diagnostics)
-            .None -> sema_call_local_method_candidates(environment, program, routed_method, owner_type_args, type_args)
-        }
+        // Snapshot: a lone program's methods are its own declarations'.
+        candidates = if program.registration_graph.mode == .Snapshot -> sema_call_local_method_candidates(environment, program, routed_method, owner_type_args, type_args) else -> sema_expr_registration_method_candidates(program.registration_graph, environment.module_identity, receiver_value.ty, routed_method, owner_type_args, type_args, method_span, environment, program, diagnostics)
     }
     candidate: sema_call_resolve_method_with_inference(receiver_value.ty, routed_method, args, argument_types, expected, candidates, environment, program, scopes, method_span, diagnostics) ?? return None
     if receiver_value.kind == .Deref(_) && candidate.receiver_convention == AccessConvention.Write {
@@ -5304,11 +5288,10 @@ sema_expr_check_identifier: fn(name: String, span: Span, expected: Type?, enviro
     if unresolved_index == .Val(alias_index) {
         alias_kind: scopes.bindings[alias_index].symbol.kind
         if alias_kind == SymbolKind.Module || alias_kind == SymbolKind.Import {
-            if program.registration_graph == .Val(graph) {
-                if sema_registration_lookup_qualified(graph, environment.module_identity, name, SEMA_MODULE_META) == .Val(record) {
-                    read: sema_expression_module_constant_read(graph, record, name, span, expected, environment, program, check.context, diagnostics)
-                    if read.handled -> return read.value
-                }
+            graph: program.registration_graph
+            if sema_registration_lookup_qualified(graph, environment.module_identity, name, SEMA_MODULE_META) == .Val(record) {
+                read: sema_expression_module_constant_read(graph, record, name, span, expected, environment, program, check.context, diagnostics)
+                if read.handled -> return read.value
             }
         }
     }
@@ -5582,7 +5565,8 @@ sema_expr_marked_function_value: fn(name: String, id: SymbolID, span: Span, expe
 // known only once every body is solved, so the effect phase holds the
 // function to it then (E0747), not the type check.
 sema_function_value_type: fn(program: SemaProgramTables, ty: Type, module_identity: ModuleID, expected: Type?) -> Type Never! {
-    resolved: if program.registration_graph == .Val(graph) -> sema_type_resolve_declared(graph, ty, module_identity) else -> ty.copy()
+    graph: program.registration_graph
+    resolved: sema_type_resolve_declared(graph, ty, module_identity)
     if expected == .Val(required) && required == .Fn(_, _, bound, _, _, _) && bound == .Val(row) {
         open: loop entry in row {
             if entry.name.starts_with("..") {
@@ -5913,7 +5897,7 @@ sema_expr_generic_bound_operator: fn(op: BinOp, lhs: TExpr, rhs: TExpr, span: Sp
         return None
     }
     trait_name: sema_expr_operator_trait(op) ?? return None
-    graph: program.registration_graph ?? return None
+    graph: program.registration_graph
     bound: sema_type_bound_satisfied_at(graph, lhs.ty, trait_name, sema_scope_caller_row(environment, graph), environment.generic_params) ?? return None
     if !bound -> return None
     // A fixed-width instantiation checks overflow as its concrete operator
@@ -6685,16 +6669,15 @@ sema_expr_check_binary_operands: fn(op: BinOp, left: Expr, right: Expr, span: Sp
     // plain operand's type.
     source_operator := false
     core_math_operand := false
-    if program.registration_graph == .Val(graph) {
-        if (sema_expr_precise_name(lhs.ty) == None) == (sema_expr_precise_name(rhs.ty) == None) {
-            left_name: sema_expr_type_base_name(lhs.ty) ?? ""
-            right_name: sema_expr_type_base_name(rhs.ty) ?? ""
-            caller: sema_scope_caller_row(environment, graph)
-            left_core: sema_type_source_owns_nominal(graph, left_name, caller)
-            right_core: sema_type_source_owns_nominal(graph, right_name, caller)
-            source_operator = left_core || right_core
-            core_math_operand = (left_core && sema_expr_math_leaf_name(lhs.ty) != None) || (right_core && sema_expr_math_leaf_name(rhs.ty) != None)
-        }
+    graph: program.registration_graph
+    if (sema_expr_precise_name(lhs.ty) == None) == (sema_expr_precise_name(rhs.ty) == None) {
+        left_name: sema_expr_type_base_name(lhs.ty) ?? ""
+        right_name: sema_expr_type_base_name(rhs.ty) ?? ""
+        caller: sema_scope_caller_row(environment, graph)
+        left_core: sema_type_source_owns_nominal(graph, left_name, caller)
+        right_core: sema_type_source_owns_nominal(graph, right_name, caller)
+        source_operator = left_core || right_core
+        core_math_operand = (left_core && sema_expr_math_leaf_name(lhs.ty) != None) || (right_core && sema_expr_math_leaf_name(rhs.ty) != None)
     }
     geometry_present: sema_expr_geometry_is_point(lhs.ty) || sema_expr_geometry_is_delta(lhs.ty) || sema_expr_geometry_is_point(rhs.ty) || sema_expr_geometry_is_delta(rhs.ty)
     // Equality on a secret-bearing crypto value takes no operator hook, the
@@ -7009,9 +6992,8 @@ sema_expr_copy_fork: fn(value: Expr, ty: Type, span: Span, expected: Type?, envi
     }
     key := type_name(ty)
     if row == .Val(found) {
-        if program.registration_graph == .Val(graph) {
-            key = "{graph.modules[found.module_index].nominals[found.row].identity_key}<{key}>"
-        }
+        graph: program.registration_graph
+        key = "{graph.modules[found.module_index].nominals[found.row].identity_key}<{key}>"
     }
     if check.context.fork_copy_rebuilding.contains(key) || check.context.fork_copy_rebuilding.len() >= FORK_COPY_DEPTH {
         diagnostics.push(sema_expr_copy_fork_refused(ty, span, "`{type_name(ty)}` holds a Clock through a part of its own type, and only a non-generic struct or enum that names the Clock in its own module gets the fork function that copies such a type"))
@@ -7034,7 +7016,7 @@ sema_expr_copy_fork: fn(value: Expr, ty: Type, span: Span, expected: Type?, envi
 // Whether the nominal `row` has its generated fork function.
 sema_expr_copy_fork_function: fn(row: SemaRegistrationRowRef?, program: SemaProgramTables) -> Bool Never! {
     found: row ?? return false
-    graph: program.registration_graph ?? return false
+    graph: program.registration_graph
     loop method in graph.modules[found.module_index].nominals[found.row].methods {
         if method.declaration.name == FORK_METHOD_NAME && method.declaration.compiler_generated {
             return true
@@ -7093,10 +7075,8 @@ sema_expr_copy_fork_body: fn(subject: Expr, ty: Type, row: SemaRegistrationRowRe
         .Union(members) -> Val(sema_expr_copy_fork_union(subject, members, depth, span))
         .Named(_) | .Apply(_, _) -> {
             found: row ?? return None
-            if program.registration_graph == .Val(graph) {
-                return Val(sema_expr_copy_fork_nominal(subject, graph.modules[found.module_index].nominals[found.row], depth, span))
-            }
-            None
+            graph: program.registration_graph
+            return Val(sema_expr_copy_fork_nominal(subject, graph.modules[found.module_index].nominals[found.row], depth, span))
         }
         .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
     }
@@ -7221,22 +7201,21 @@ sema_expr_require_unsafe: fn(operation: String, span: Span, context: ^SemaCheckC
 }
 
 sema_expr_core_import_module: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, alias: String) -> String? {
-    if program.registration_graph == .Val(graph) {
-        module_index: sema_scope_caller_index(environment, graph) ?? return None
-        if sema_core_registration_import(graph.modules[module_index], graph.module_table, alias) == .Val(imported) {
-            target := sema_registration_module_index_text(graph, imported.module_name)
-            if target != None {
-                index: target ?? return None
-                return Val(graph.modules[index].module_name)
-            }
-            return Val(imported.module_name)
+    graph: program.registration_graph
+    module_index: sema_scope_caller_index(environment, graph) ?? return None
+    if sema_core_registration_import(graph.modules[module_index], graph.module_table, alias) == .Val(imported) {
+        target := sema_registration_module_index_text(graph, imported.module_name)
+        if target != None {
+            index: target ?? return None
+            return Val(graph.modules[index].module_name)
         }
-        if alias.contains(".") {
-            imports := [SemaCoreImport]{}
-            sema_core_registration_imports_into(graph.modules[module_index], graph.module_table, None, imports)
-            loop entry in imports {
-                if entry.module_name == alias -> return Val(entry.module_name)
-            }
+        return Val(imported.module_name)
+    }
+    if alias.contains(".") {
+        imports := [SemaCoreImport]{}
+        sema_core_registration_imports_into(graph.modules[module_index], graph.module_table, None, imports)
+        loop entry in imports {
+            if entry.module_name == alias -> return Val(entry.module_name)
         }
     }
     None
@@ -7440,21 +7419,20 @@ sema_expr_runtime_body_owner: fn(environment: SemaScopeEnvironment, program: Sem
 // `ty`, or an `impl Literal.Int` block in its body, read by the written
 // trait name.
 sema_expr_has_literal_hook: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type, capability: String) -> Bool Never! {
-    if program.registration_graph == .Val(graph) {
-        row: sema_type_resolve_nominal_row_at(graph, ty, sema_scope_caller_row(environment, graph)) ?? return false
-        key: graph.modules[row.module_index].nominals[row.row].identity_key
-        loop module_index in 0..<graph.modules.len() {
-            loop impl_index in 0..<graph.modules[module_index].impls.len() {
-                if graph.modules[module_index].impls[impl_index].target_identity_key != key -> next
-                if (graph.modules[module_index].impls[impl_index].declaration.trait_name ?? "") == capability {
-                    return true
-                }
+    graph: program.registration_graph
+    row: sema_type_resolve_nominal_row_at(graph, ty, sema_scope_caller_row(environment, graph)) ?? return false
+    key: graph.modules[row.module_index].nominals[row.row].identity_key
+    loop module_index in 0..<graph.modules.len() {
+        loop impl_index in 0..<graph.modules[module_index].impls.len() {
+            if graph.modules[module_index].impls[impl_index].target_identity_key != key -> next
+            if (graph.modules[module_index].impls[impl_index].declaration.trait_name ?? "") == capability {
+                return true
             }
         }
-        if graph.modules[row.module_index].nominals[row.row].source == .SourceAST(item) {
-            loop block in sema_registration_item_trait_blocks(item) {
-                if block.trait_name == capability -> return true
-            }
+    }
+    if graph.modules[row.module_index].nominals[row.row].source == .SourceAST(item) {
+        loop block in sema_registration_item_trait_blocks(item) {
+            if block.trait_name == capability -> return true
         }
     }
     false
@@ -7959,7 +7937,7 @@ sema_expr_check_list_literal: fn(elements: [Expr], span: Span, expected: Type?, 
 // and layout included, stays as written. A head written with anything but
 // blanks before its `{` (a comment, say) gets no edit.
 sema_expr_repeated_list_head_edit: fn(elements: [Expr], span: Span, head: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TextEdit? {
-    graph: program.registration_graph ?? return None
+    graph: program.registration_graph
     caller: sema_scope_caller_index(environment, graph) ?? return None
     raw: graph.modules[caller].source.bytes()
     if span.start < 0 || span.end > raw.len() || span.end - span.start < 2 -> return None
@@ -8200,7 +8178,9 @@ sema_expr_check_bare_member_chain: fn(expr: Expr, expected: Type?, environment: 
 // with the identity reflection gives the same type. None for any other
 // value, which checks as it is written, and for a program's own `TypeId`.
 sema_expr_type_id_written: fn(expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TExpr? {
-    graph: program.registration_graph ?? return None
+    graph: program.registration_graph
+    // Snapshot: a TypeId is a registered type's identity, and a lone program registers none.
+    if graph.mode == .Snapshot -> return None
     caller: sema_scope_caller_row(environment, graph)
     if sema_type_resolve_nominal_row_at(graph, Type.Named{name: "TypeId"}, caller) != None {
         return None

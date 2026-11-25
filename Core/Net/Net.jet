@@ -320,7 +320,7 @@ ip_addr: fn(text: String) -> IPAddr NetError! {
     }
     bytes: parse_ip_bytes(text) ?? return Err(net_err("parse IP address", text, "invalid IP address `{text}`: invalid IP address syntax"))
     #Unsafe("checked IPv4/IPv6 octets transferred into the native address carrier") {
-        return core.net.__ip_from_bytes(bytes)
+        return rt.ip_from_bytes(bytes)
     }
 }
 
@@ -353,7 +353,7 @@ resolve_socket_addrs: fn(operation: String, host: String, port: Int) -[Net, Time
     text: "{host_text}:{port}"
     if socket_addr_parse(text) == .Ok(address) -> return Ok([SocketAddr]{address})
     port16: U16{port}
-    if builtin.resolve_ordered(host_text, port16) == {
+    if rt.resolve_ordered(host_text, port16) == {
         .Ok(addresses) -> resolve_all(text, addresses)
         .Err(error) -> Err(resolve_error(text, error))
     }
@@ -391,8 +391,8 @@ socket_addr_parse: fn(text: String) -> SocketAddr NetError! {
     }
     port: parse_port(port_text) ?? return Err(invalid_socket(text))
     #Unsafe("validated IP octets, port and IPv6 numeric scope transferred into the socket carrier") {
-        ip: core.net.__ip_from_bytes(bytes)
-        return core.net.__socket_from_parts(ip, U16{port}, U32{0}, U32{scope})
+        ip: rt.ip_from_bytes(bytes)
+        return rt.socket_from_parts(ip, U16{port}, U32{0}, U32{scope})
     }
 }
 
@@ -1208,6 +1208,12 @@ slice_bytes: fn(raw: [U8], start: Int, end: Int) -> [U8] Never! {
         }
         .Ok(_) | .Err(_) -> assert(false)
     }
+}
+
+#Test("a host name resolves through the platform resolver to its addresses on the port") {
+    addresses: socket_addrs("localhost", 8080) ?? panic("resolve localhost: {err}")
+    assert(addresses.len() > 0)
+    loop address in addresses -> assert(socket_port(address) == 8080)
 }
 
 #Test("resolver error OS code presence is independent of its stored word") {

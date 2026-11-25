@@ -73,34 +73,32 @@ sema_http_route_find_function: fn(environment: SemaScopeEnvironment, program: Se
     index: sema_scope_resolve_index(scopes, name) ?? return None
     symbol := scopes.bindings[index].symbol
     if symbol.kind != SymbolKind.Function -> return None
-    if program.registration_graph == .Val(graph) {
-        if sema_registration_callable_row_of(graph, symbol.id) == .Val(.Function(module_row_index, function_index)) {
-            return Val(graph.modules[module_row_index].functions[function_index])
-        }
-        loop module_row_index in 0..<graph.modules.len() {
-            loop function_index in 0..<graph.modules[module_row_index].functions.len() {
-                if graph.modules[module_row_index].functions[function_index].symbol.id == symbol.id {
-                    return Val(graph.modules[module_row_index].functions[function_index])
-                }
+    graph: program.registration_graph
+    if sema_registration_callable_row_of(graph, symbol.id) == .Val(.Function(module_row_index, function_index)) {
+        return Val(graph.modules[module_row_index].functions[function_index])
+    }
+    loop module_row_index in 0..<graph.modules.len() {
+        loop function_index in 0..<graph.modules[module_row_index].functions.len() {
+            if graph.modules[module_row_index].functions[function_index].symbol.id == symbol.id {
+                return Val(graph.modules[module_row_index].functions[function_index])
             }
         }
-        return None
-    } else { return None }
+    }
+    return None
 }
 
 sema_http_route_find_struct: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type, module_identity: ModuleID) -> StructDef? {
-    if program.registration_graph == .Val(graph) {
-        nominal_row: sema_type_resolve_nominal_row(graph, ty, module_identity) ?? return None
-        nominal: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
-        if nominal.kind != SemaRegistrationNominalKind.Struct -> return None
-        item: sema_registration_nominal_source_item(nominal.source) ?? return None
-        if item == {
-            .Struct(definition) -> { return Val(definition) }
-            .Func(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {
-                return None
-            }
+    graph: program.registration_graph
+    nominal_row: sema_type_resolve_nominal_row(graph, ty, module_identity) ?? return None
+    nominal: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
+    if nominal.kind != SemaRegistrationNominalKind.Struct -> return None
+    item: sema_registration_nominal_source_item(nominal.source) ?? return None
+    if item == {
+        .Struct(definition) -> { return Val(definition) }
+        .Func(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {
+            return None
         }
-    } else { return None }
+    }
 }
 
 // `request_ty` (a mux route: its handler is `fn(HTTPRequest)`) types a
@@ -110,25 +108,24 @@ sema_http_route_shape: fn(expression: Expr, environment: SemaScopeEnvironment, p
         .Paren(inner, _, _) -> return sema_http_route_shape(inner, environment, program, scopes, request_ty)
         .Lambda(lambda, _) -> {
             if lambda.meta.http_route_source == .Val(source) {
-                if program.registration_graph == .Val(graph) {
-                    source_id: symbol_find(graph.symbols, source) ?? symbol_none()
-                    loop module_row_index in 0..<graph.modules.len() {
-                        loop nominal_index in 0..<graph.modules[module_row_index].nominals.len() {
-                            loop method_index in 0..<graph.modules[module_row_index].nominals[nominal_index].methods.len() {
-                                if graph.modules[module_row_index].nominals[nominal_index].methods[method_index].symbol.id != source_id {
-                                    next
-                                }
-                                params := [SemaHTTPRouteParameter]{}
-                                loop index in 1..<graph.modules[module_row_index].nominals[nominal_index].methods[method_index].declaration.params.len() {
-                                    parameter: graph.modules[module_row_index].nominals[nominal_index].methods[method_index].declaration.params[index]
-                                    params.push(SemaHTTPRouteParameter{name: parameter.name, ty: sema_type_resolve_declared(graph, parameter.ty, graph.modules[module_row_index].module_identity)})
-                                }
-                                return Val(SemaHTTPRouteShape{params: params, body: LambdaBody.Block{body: sema_registration_function_body(graph.modules[module_row_index], graph.modules[module_row_index].nominals[nominal_index].methods[method_index])}, module_identity: graph.modules[module_row_index].module_identity})
+                graph: program.registration_graph
+                source_id: symbol_find(graph.symbols, source) ?? symbol_none()
+                loop module_row_index in 0..<graph.modules.len() {
+                    loop nominal_index in 0..<graph.modules[module_row_index].nominals.len() {
+                        loop method_index in 0..<graph.modules[module_row_index].nominals[nominal_index].methods.len() {
+                            if graph.modules[module_row_index].nominals[nominal_index].methods[method_index].symbol.id != source_id {
+                                next
                             }
+                            params := [SemaHTTPRouteParameter]{}
+                            loop index in 1..<graph.modules[module_row_index].nominals[nominal_index].methods[method_index].declaration.params.len() {
+                                parameter: graph.modules[module_row_index].nominals[nominal_index].methods[method_index].declaration.params[index]
+                                params.push(SemaHTTPRouteParameter{name: parameter.name, ty: sema_type_resolve_declared(graph, parameter.ty, graph.modules[module_row_index].module_identity)})
+                            }
+                            return Val(SemaHTTPRouteShape{params: params, body: LambdaBody.Block{body: sema_registration_function_body(graph.modules[module_row_index], graph.modules[module_row_index].nominals[nominal_index].methods[method_index])}, module_identity: graph.modules[module_row_index].module_identity})
                         }
                     }
-                    return None
-                } else { return None }
+                }
+                return None
             }
             params := [SemaHTTPRouteParameter]{}
             loop parameter in lambda.params {
@@ -146,15 +143,14 @@ sema_http_route_shape: fn(expression: Expr, environment: SemaScopeEnvironment, p
         }
         .Ident(name, _, _) -> {
             function: sema_http_route_find_function(environment, program, scopes, name) ?? return None
-            if program.registration_graph == .Val(graph) {
-                params := [SemaHTTPRouteParameter]{}
-                loop parameter in function.declaration.params {
-                    resolved := sema_type_resolve_declared(graph, parameter.ty, function.symbol.module_identity)
-                    params.push(SemaHTTPRouteParameter{name: parameter.name, ty: resolved})
-                }
-                body: if sema_registration_module_index(graph, function.symbol.module_identity) == .Val(owner_row) -> sema_registration_function_body(graph.modules[owner_row], function) else -> function.declaration.body
-                return Val(SemaHTTPRouteShape{params: params, body: LambdaBody.Block{body: body}, module_identity: function.symbol.module_identity})
-            } else { return None }
+            graph: program.registration_graph
+            params := [SemaHTTPRouteParameter]{}
+            loop parameter in function.declaration.params {
+                resolved := sema_type_resolve_declared(graph, parameter.ty, function.symbol.module_identity)
+                params.push(SemaHTTPRouteParameter{name: parameter.name, ty: resolved})
+            }
+            body: if sema_registration_module_index(graph, function.symbol.module_identity) == .Val(owner_row) -> sema_registration_function_body(graph.modules[owner_row], function) else -> function.declaration.body
+            return Val(SemaHTTPRouteShape{params: params, body: LambdaBody.Block{body: body}, module_identity: function.symbol.module_identity})
         }
         .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return None
     }
@@ -219,17 +215,16 @@ sema_http_route_constant_string: fn(expression: Expr, environment: SemaScopeEnvi
                 }
             }
             if binding.symbol.kind != SymbolKind.Constant -> return None
-            if program.registration_graph == .Val(graph) {
-                loop module_row_index in 0..<graph.modules.len() {
-                    loop constant_index in 0..<graph.modules[module_row_index].constants.len() {
-                        if graph.modules[module_row_index].constants[constant_index].symbol.id != binding.symbol.id {
-                            next
-                        }
-                        return sema_http_route_module_constant(graph, module_row_index, constant_index, 0)
+            graph: program.registration_graph
+            loop module_row_index in 0..<graph.modules.len() {
+                loop constant_index in 0..<graph.modules[module_row_index].constants.len() {
+                    if graph.modules[module_row_index].constants[constant_index].symbol.id != binding.symbol.id {
+                        next
                     }
+                    return sema_http_route_module_constant(graph, module_row_index, constant_index, 0)
                 }
-                return None
-            } else { return None }
+            }
+            return None
         }
         // A `Path{…}` literal without holes is static text: Path keeps it,
         // only turning `\` into `/` (Path.from).
@@ -579,33 +574,32 @@ sema_http_route_schema_type: fn(ty: Type, environment: SemaScopeEnvironment, pro
             if sema_serde_type_is_admissible_in(environment, program, module_identity, ty, SemaSerdeDirection.Decode) == false {
                 return None
             }
-            if program.registration_graph == .Val(graph) {
-                nominal_row: sema_type_resolve_nominal_row(graph, ty, module_identity) ?? return None
-                nominal: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
-                if nominal.kind != SemaRegistrationNominalKind.Struct -> return None
-                loop previous in active {
-                    if previous == nominal.symbol.id -> return None
-                }
-                next_active := [SymbolID]{}
-                loop previous in active -> next_active.push(previous.copy())
-                next_active.push(nominal.symbol.id.copy())
-                // The fields are named as the struct's own module names them.
-                properties := [String]{}
-                required := [String]{}
-                loop field in nominal.fields {
-                    if field.symbol.visibility != 2 -> next
-                    field_schema: sema_http_route_schema_type(field.ty, environment, program, graph.modules[nominal_row.module_index].module_identity, next_active) ?? return None
-                    properties.push("{sema_http_route_json_quote(field.symbol.name)}:{field_schema}")
-                    if field.ty == {
-                        .Option(_) -> {}
-                        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {
-                            required.push(sema_http_route_json_quote(field.symbol.name))
-                        }
+            graph: program.registration_graph
+            nominal_row: sema_type_resolve_nominal_row(graph, ty, module_identity) ?? return None
+            nominal: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
+            if nominal.kind != SemaRegistrationNominalKind.Struct -> return None
+            loop previous in active {
+                if previous == nominal.symbol.id -> return None
+            }
+            next_active := [SymbolID]{}
+            loop previous in active -> next_active.push(previous.copy())
+            next_active.push(nominal.symbol.id.copy())
+            // The fields are named as the struct's own module names them.
+            properties := [String]{}
+            required := [String]{}
+            loop field in nominal.fields {
+                if field.symbol.visibility != 2 -> next
+                field_schema: sema_http_route_schema_type(field.ty, environment, program, graph.modules[nominal_row.module_index].module_identity, next_active) ?? return None
+                properties.push("{sema_http_route_json_quote(field.symbol.name)}:{field_schema}")
+                if field.ty == {
+                    .Option(_) -> {}
+                    .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {
+                        required.push(sema_http_route_json_quote(field.symbol.name))
                     }
                 }
-                required_json := if required.len() > 0 -> ",\"required\":[{required.join(",")}]" else -> ""
-                return Val("{{\"type\":\"object\",\"properties\":{{{properties.join(",")}}},\"additionalProperties\":false{required_json}}}")
-            } else { return None }
+            }
+            required_json := if required.len() > 0 -> ",\"required\":[{required.join(",")}]" else -> ""
+            return Val("{{\"type\":\"object\",\"properties\":{{{properties.join(",")}}},\"additionalProperties\":false{required_json}}}")
         }
         .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Measure(_) -> return None
     }
@@ -666,11 +660,30 @@ sema_http_route_response_status: fn(expression: Expr, environment: SemaScopeEnvi
             }
         }
         .Ident(name, _, _) -> {
-            if program.registration_graph == .Val(graph) {
-                if sema_registration_module_index(graph, module_identity) == .Val(module_index) {
-                    loop constant_index in 0..<graph.modules[module_index].constants.len() {
-                        if graph.modules[module_index].constants[constant_index].symbol.name == name {
-                            if graph.modules[module_index].constants[constant_index].declaration.ct == {
+            graph: program.registration_graph
+            if sema_registration_module_index(graph, module_identity) == .Val(module_index) {
+                loop constant_index in 0..<graph.modules[module_index].constants.len() {
+                    if graph.modules[module_index].constants[constant_index].symbol.name == name {
+                        if graph.modules[module_index].constants[constant_index].declaration.ct == {
+                            .Val(ct_value) -> {
+                                if ct_value == {
+                                    .Int(number) -> { return Val(number) }
+                                    .Float(_) | .Bool(_) | .Char(_) | .Str(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> {}
+                                }
+                            }
+                            .None -> {}
+                        }
+                    }
+                }
+            }
+            if module_identity != environment.module_identity -> return None
+            index := sema_scope_resolve_index(scopes, name)
+            if index == .Val(found) {
+                binding := scopes.bindings[found]
+                loop module_row_index in 0..<graph.modules.len() {
+                    loop constant_index in 0..<graph.modules[module_row_index].constants.len() {
+                        if graph.modules[module_row_index].constants[constant_index].symbol.id == binding.symbol.id {
+                            if graph.modules[module_row_index].constants[constant_index].declaration.ct == {
                                 .Val(ct_value) -> {
                                     if ct_value == {
                                         .Int(number) -> { return Val(number) }
@@ -682,28 +695,8 @@ sema_http_route_response_status: fn(expression: Expr, environment: SemaScopeEnvi
                         }
                     }
                 }
-                if module_identity != environment.module_identity -> return None
-                index := sema_scope_resolve_index(scopes, name)
-                if index == .Val(found) {
-                    binding := scopes.bindings[found]
-                    loop module_row_index in 0..<graph.modules.len() {
-                        loop constant_index in 0..<graph.modules[module_row_index].constants.len() {
-                            if graph.modules[module_row_index].constants[constant_index].symbol.id == binding.symbol.id {
-                                if graph.modules[module_row_index].constants[constant_index].declaration.ct == {
-                                    .Val(ct_value) -> {
-                                        if ct_value == {
-                                            .Int(number) -> { return Val(number) }
-                                            .Float(_) | .Bool(_) | .Char(_) | .Str(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> {}
-                                        }
-                                    }
-                                    .None -> {}
-                                }
-                            }
-                        }
-                    }
-                }
-                return None
-            } else { return None }
+            }
+            return None
         }
         .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return None
     }
@@ -751,15 +744,13 @@ sema_http_route_response_local_type: fn(expression: Expr, environment: SemaScope
             return None
         }
         .StructLit(type_name, _, _, _, _, _, _, _) -> {
-            if program.registration_graph == .Val(graph) {
-                return Val(sema_type_resolve_declared(graph, Type.Named{name: type_name}, module_identity))
-            } else { return None }
+            graph: program.registration_graph
+            return Val(sema_type_resolve_declared(graph, Type.Named{name: type_name}, module_identity))
         }
         .TypedLit(head, _, _, _) -> {
             written: head ?? return None
-            if program.registration_graph == .Val(graph) {
-                return Val(sema_type_resolve_declared(graph, written, module_identity))
-            } else { return None }
+            graph: program.registration_graph
+            return Val(sema_type_resolve_declared(graph, written, module_identity))
         }
         .TupleLit(_, _, tuple_ty, _) -> { return tuple_ty }
         .ListLit(items, _, _) -> {
@@ -773,41 +764,40 @@ sema_http_route_response_local_type: fn(expression: Expr, environment: SemaScope
 
 sema_http_route_response_adapter_returns_response: fn(method: String, args: [CallArg], type_args: [Type], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, module_identity: ModuleID) -> Bool Never! {
     updated_args := args
-    if program.registration_graph == .Val(graph) {
-        response_row: sema_type_resolve_nominal_row(graph, Type.Named{name: "HTTPResponse"}, module_identity) ?? return false
-        response_nominal: graph.modules[response_row.module_index].nominals[response_row.row]
-        routed: core_source_receiver_method("{module_text(graph.module_table, response_nominal.symbol.module_identity)}.{response_nominal.symbol.name}", method, updated_args.len())
-        probe_diagnostics := [Diagnostic]{}
-        candidates := sema_expr_registration_method_candidates(graph, module_identity, response_nominal.ty, routed, [Type]{}, type_args, span, environment, program, probe_diagnostics)
-        if candidates.len() == 0 -> return false
-        matched := false
-        all_return_response := true
-        loop candidate in candidates {
-            if sema_call_bind_method(routed, candidate.signature, candidate.receiver_offset, updated_args, span, probe_diagnostics) == None {
-                next
-            }
-            matched = true
-            result_type: sema_call_signature_return(candidate.signature) ?? {
-                all_return_response = false
-                next
-            }
-            owner_module: sema_http_route_method_owner_module(graph, candidate.method.symbol) ?? {
-                all_return_response = false
-                next
-            }
-            resolved_result := sema_type_resolve_declared(graph, result_type, owner_module)
-            result_row := sema_type_resolve_nominal_row(graph, resolved_result, owner_module)
-            if result_row == {
-                .Val(row) -> {
-                    if graph.modules[row.module_index].nominals[row.row].symbol.id != response_nominal.symbol.id {
-                        all_return_response = false
-                    }
-                }
-                .None -> { all_return_response = false }
-            }
+    graph: program.registration_graph
+    response_row: sema_type_resolve_nominal_row(graph, Type.Named{name: "HTTPResponse"}, module_identity) ?? return false
+    response_nominal: graph.modules[response_row.module_index].nominals[response_row.row]
+    routed: core_source_receiver_method("{module_text(graph.module_table, response_nominal.symbol.module_identity)}.{response_nominal.symbol.name}", method, updated_args.len())
+    probe_diagnostics := [Diagnostic]{}
+    candidates := sema_expr_registration_method_candidates(graph, module_identity, response_nominal.ty, routed, [Type]{}, type_args, span, environment, program, probe_diagnostics)
+    if candidates.len() == 0 -> return false
+    matched := false
+    all_return_response := true
+    loop candidate in candidates {
+        if sema_call_bind_method(routed, candidate.signature, candidate.receiver_offset, updated_args, span, probe_diagnostics) == None {
+            next
         }
-        return matched && all_return_response
-    } else { return false }
+        matched = true
+        result_type: sema_call_signature_return(candidate.signature) ?? {
+            all_return_response = false
+            next
+        }
+        owner_module: sema_http_route_method_owner_module(graph, candidate.method.symbol) ?? {
+            all_return_response = false
+            next
+        }
+        resolved_result := sema_type_resolve_declared(graph, result_type, owner_module)
+        result_row := sema_type_resolve_nominal_row(graph, resolved_result, owner_module)
+        if result_row == {
+            .Val(row) -> {
+                if graph.modules[row.module_index].nominals[row.row].symbol.id != response_nominal.symbol.id {
+                    all_return_response = false
+                }
+            }
+            .None -> { all_return_response = false }
+        }
+    }
+    return matched && all_return_response
 }
 
 sema_http_route_response_expr: fn(expression: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, locals: [SemaHTTPRouteParameter], aliases: [SemaHTTPRouteResponseAlias], module_identity: ModuleID) -> [SemaHTTPRouteResponse] {
@@ -895,7 +885,7 @@ sema_http_route_response_statements: fn(statements: [Stmt], environment: SemaSco
                     if local.name != binding.name -> next_local_types.push(local)
                 }
                 binding_type := if binding.ty == {
-                    .Val(declared) -> if program.registration_graph == .Val(graph) -> Val(sema_type_resolve_declared(graph, declared, module_identity)) else -> Val(declared)
+                    .Val(declared) -> Val(sema_type_resolve_declared(program.registration_graph, declared, module_identity))
                     .None -> sema_http_route_response_local_type(binding.init, environment, program, local_types, module_identity)
                 }
                 if binding_type == .Val(ty) {
@@ -1227,7 +1217,8 @@ sema_call_try_http_router: fn(receiver: Expr, receiver_value: TExpr, method: Str
     // valid route as a duplicate (E2804).
     if !dynamic && !literal.invalid && wire != "" {
         chained := false
-        if app && program.registration_graph == .Val(graph) {
+        graph: program.registration_graph
+        if app {
             chained = sema_app_check_route_registrations(receiver, method, args, span, environment, graph, diagnostics)
         }
         if !chained {

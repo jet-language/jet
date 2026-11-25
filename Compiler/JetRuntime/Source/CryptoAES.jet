@@ -1,5 +1,5 @@
-// AES-NI and PCLMULQDQ leaves behind core.crypto.__aes_blocks and
-// core.crypto.__ghash_blocks. Core/Crypto/Cipher.jet and Aead.jet run the
+// AES-NI and PCLMULQDQ leaves behind jet.runtime.crypto.aes_blocks and
+// jet.runtime.crypto.ghash_blocks. Core/Crypto/Cipher.jet and Aead.jet run the
 // same block operations portably (FIPS 197, NIST SP 800-38A/38D, IEEE
 // 1619-2007); these leaves are only their faster form on a host whose cpuid
 // reports AES-NI, PCLMULQDQ and SSSE3, so every tier keeps one meaning. A
@@ -31,7 +31,7 @@ aes_ni_present: fn() -> Bool {
     host_cpuid(I64{1}, I64{0}, HOST_CPUID_ECX) & I64{33554946} == I64{33554946}
 }
 
-// The core.crypto.__aes_blocks operations, as Cipher.jet numbers them.
+// The jet.runtime.crypto.aes_blocks operations, as Cipher.jet numbers them.
 RT_AES_ECB_ENC: I64{0}
 
 RT_AES_ECB_DEC: I64{1}
@@ -126,7 +126,7 @@ rt_aes_xts_double: fn(t: I64) {
     rt_text_store(wrapping(t + I64{8}), (hi << I64{1}) | rt_crypto_shr64(lo, I64{63}))
 }
 
-// core.crypto.__aes_blocks: the `count` whole blocks of the borrowed bytes
+// jet.runtime.crypto.aes_blocks: the `count` whole blocks of the borrowed bytes
 // (src, length) from `offset` under `op`, appended to the [U8] at
 // `out_header` (len, capacity, data) within its capacity, with the 16-byte
 // chaining [U8] at `iv_header` updated as Cipher.blocks does. `keys`
@@ -221,7 +221,7 @@ rt_aes_xts_double: fn(t: I64) {
     true
 }
 
-// core.crypto.__ghash_blocks: the `count` 16-byte blocks of the borrowed
+// jet.runtime.crypto.ghash_blocks: the `count` 16-byte blocks of the borrowed
 // bytes (data, length) from `offset` folded into the 16-byte [U8] at
 // `y_header` under the hash subkey (h, h_len): Y = (Y ^ X_i) * H in
 // GF(2^128) (NIST SP 800-38D section 6.4). Four blocks at a time use

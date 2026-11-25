@@ -183,7 +183,7 @@ sema_call_rules_hear: fn(
     if waiting.len() == 0 -> return hearing
     // A check without the registration graph (a compile-time run's own
     // program) hears no rule; the compile's own check of the same call does.
-    graph: program.registration_graph ?? return hearing
+    graph: program.registration_graph
     call := sema_rule_call_value(graph, callee, name, name_span, span, args, receiver_type, receiver_known, receiver_span, source, sema_rule_table_keys(table, frame, scopes), owner, environment, program, scopes, check)
     loop index in waiting {
         call.words[SEMA_CALL_RULE_PAIRED_WORD] = if rules[index].paired -> 1 else -> 0
@@ -216,12 +216,10 @@ sema_call_rules_hear_stand_in: fn(
     diagnostics: ^[Diagnostic],
 ) -> Bool {
     if !sema_call_rules_heard_here(scopes) -> return false
-    if program.registration_graph == .Val(graph) {
-        rules: sema_call_rules_of_type(graph, receiver_value.ty, environment.module_row)
-        if rules.len() == 0 -> return false
-        return sema_call_rules_hear(rules, None, name, name_span, args, Val(receiver), Val(receiver_value.ty), None, receiver_value.span, source, site, frame, environment, program, scopes, check, diagnostics).rejected
-    }
-    false
+    graph: program.registration_graph
+    rules: sema_call_rules_of_type(graph, receiver_value.ty, environment.module_row)
+    if rules.len() == 0 -> return false
+    sema_call_rules_hear(rules, None, name, name_span, args, Val(receiver), Val(receiver_value.ty), None, receiver_value.span, source, site, frame, environment, program, scopes, check, diagnostics).rejected
 }
 
 // The tables heard calls add rows to (SemaCheckContext.rule_tables). A
@@ -497,7 +495,7 @@ sema_rule_probe: fn(expression: Expr, environment: SemaScopeEnvironment, program
 // that shadows the function included.
 sema_rule_function_named: fn(expression: Expr, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> TComptimeValue? {
     if expression == .Ident(name, _, _) {
-        graph: program.registration_graph ?? return None
+        graph: program.registration_graph
         local: sema_scope_resolve_index(scopes, name)
         resolved: if local == .Val(index) -> sema_scope_binding_symbol(environment, scopes, index) else -> sema_resolved_symbol(graph, sema_type_graph_lookup_symbol(graph, environment.module_identity, name) ?? return None)
         if resolved.kind != SymbolKind.Function -> return None
@@ -653,12 +651,11 @@ sema_rule_known_row: fn(index: Int, program: SemaProgramTables, context: SemaChe
 // such constant of its module (sema_rule_known_written); None for a mutable
 // binding and for a function read as a value.
 sema_rule_known_constant: fn(symbol: SymbolID, program: SemaProgramTables) -> TComptimeValue? {
-    if program.registration_graph == .Val(graph) {
-        loop module_index in 0..<graph.modules.len() {
-            loop constant_index in 0..<graph.modules[module_index].constants.len() {
-                if graph.modules[module_index].constants[constant_index].symbol.id == symbol {
-                    return sema_rule_known_constant_at(graph, module_index, constant_index, 0)
-                }
+    graph: program.registration_graph
+    loop module_index in 0..<graph.modules.len() {
+        loop constant_index in 0..<graph.modules[module_index].constants.len() {
+            if graph.modules[module_index].constants[constant_index].symbol.id == symbol {
+                return sema_rule_known_constant_at(graph, module_index, constant_index, 0)
             }
         }
     }

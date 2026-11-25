@@ -1,0 +1,72 @@
+use snapshot_reasons_files: core.files
+
+// Every branch on the registration graph's mode states why a snapshot check
+// differs. A snapshot check (a lone program's check) runs on an empty graph,
+// and a `.Snapshot` or `.Program` test keeps the empty graph from changing
+// what the check would otherwise answer. A comment run directly above the
+// branch, or above the `if` whose condition holds the test, must have a line
+// that starts `// Snapshot:` and gives the reason.
+SNAPSHOT_REASONS_ROOT: "Compiler"
+
+SNAPSHOT_REASONS_MARK: "// Snapshot:"
+
+// Whether `line` branches on the graph mode.
+snapshot_reasons_branch: fn(line: String) -> Bool {
+    line.contains("mode == .Snapshot") || line.contains("mode == .Program") || line.contains("mode != .Snapshot") || line.contains("mode != .Program")
+}
+
+// The `path:line` of every mode branch in `text` whose comment run above
+// has no reason line.
+snapshot_reasons_missing: fn(path: String, text: String) -> [String] {
+    missing := [String]{}
+    lines: text.split("\n").to_list()
+    loop (index, line) in lines {
+        if line.trim().starts_with("//") || !snapshot_reasons_branch(line) -> next
+        reasoned := false
+        above := index - 1
+        loop above >= 0 && lines[above].trim().starts_with("//") {
+            if lines[above].trim().starts_with(SNAPSHOT_REASONS_MARK) {
+                reasoned = true
+                break
+            }
+            above -= 1
+        }
+        if !reasoned -> missing.push("{path}:{index + 1}")
+    }
+    missing
+}
+
+snapshot_reasons_scan: fn(path: String, missing: ^[String]) {
+    kind: snapshot_reasons_files.stat(path) ?? return
+    if kind.is_symlink {
+        return
+    }
+    if kind.is_dir {
+        loop child in (snapshot_reasons_files.list_dir(path) ?? panic("list {path}: {err}")) {
+            if child.name.starts_with(".") || child.name == "target" || child.name == "build" || child.name == "node_modules" {
+                next
+            }
+            snapshot_reasons_scan("{path}/{child.name}", missing)
+        }
+        return
+    }
+    if !path.ends_with(".jet") {
+        return
+    }
+    text: snapshot_reasons_files.read(path) ?? panic("read {path}: {err}")
+    loop row in snapshot_reasons_missing(path, text) -> missing.push(row)
+}
+
+#Test("every branch on the registration graph's mode gives its snapshot reason") {
+    guards_enter_root()
+    assert(snapshot_reasons_files.is_dir(SNAPSHOT_REASONS_ROOT), "the snapshot reasons root {SNAPSHOT_REASONS_ROOT} must exist")
+    missing := [String]{}
+    snapshot_reasons_scan(SNAPSHOT_REASONS_ROOT, missing)
+    missing.sort()
+    assert_eq(missing.join("\n"), "")
+}
+
+#Test("the snapshot reasons guard reads the comment run above a branch") {
+    text: "a\n// Snapshot: none registered.\nif graph.mode == .Snapshot -> return\n// Snapshot: the reason\n// runs on.\nif ok && graph.mode == .Program {{\n// unrelated\nif graph.mode == .Snapshot -> return\n// graph.mode == .Snapshot in a comment\n"
+    assert_eq(snapshot_reasons_missing("A.jet", text), [String]{"A.jet:8"})
+}

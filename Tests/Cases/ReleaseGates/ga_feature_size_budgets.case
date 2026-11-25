@@ -1,27 +1,32 @@
-# Port of tests/release_gates.rs::ga_feature_size_budgets; all original predicates, runtime UNRUN.
-mkdir: .jet/build
-step: jet build --small {root}/Examples/Basics/Hello.jet
+# Port of tests/release_gates.rs::ga_feature_size_budgets; all original predicates. Each example is built
+# from a copy in the work directory, since a file build writes beside its source.
+copy: {root}/Examples/Basics/Hello.jet Hello.jet
+copy: {root}/Examples/Systems/CLI/CLIArgs.jet CLIArgs.jet
+copy: {root}/Examples/Network/HTTP/HTTPServer.jet HTTPServer.jet
+copy: {root}/Examples/Modules/Library.jet Library.jet
+copy: {root}/Examples/LowLevel/LowLevel.jet LowLevel.jet
+copy: {root}/Examples/LowLevel/Freestanding.jet Freestanding.jet
+step: jet build --small Hello.jet
 exit: 0
 file: .jet/build/Hello size > 0
 file: .jet/build/Hello size <= 512000
-step: jet build --small {root}/Examples/Systems/CLI/CLIArgs.jet
+step: jet build --small CLIArgs.jet
 exit: 0
 file: .jet/build/CLIArgs size > 0
 file: .jet/build/CLIArgs size <= 524288
-step: jet build --small {root}/Examples/Network/HTTP/HTTPServer.jet
+step: jet build --small HTTPServer.jet
 exit: 0
 file: .jet/build/HTTPServer size > 0
 file: .jet/build/HTTPServer size <= 3145728
-step: jet build --small {root}/Examples/Modules/Library.jet
+step: jet build --small Library.jet
 exit: 0
 file: .jet/build/Library size > 0
 file: .jet/build/Library size <= 4194304
-step: jet build --small {root}/Examples/LowLevel/LowLevel.jet
+step: jet build --small LowLevel.jet
 exit: 0
 file: .jet/build/LowLevel size > 0
 file: .jet/build/LowLevel size <= 4194304
-step: jet build --small {root}/Examples/LowLevel/Freestanding.jet
+step: jet build --small Freestanding.jet
 exit: 0
 file: .jet/build/Freestanding size > 0
 file: .jet/build/Freestanding size <= 4194304
-

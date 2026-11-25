@@ -34,6 +34,7 @@ use {
         Type,
         Interner,
         InternerDelta,
+        body_node_index,
         checked_expr_type_id,
         delta_type_kind,
         delta_type_syntax,
@@ -347,6 +348,16 @@ sema_liveness_structure: fn(graph: SemaRegistrationGraph, modules: [SemaGraphMod
             break false
         }
     } ?? true
+    // An error leaves the reference facts incomplete (a misspelled call
+    // names no function; a body stopped at an unresolved name records none
+    // of its calls), so no function or export is known unreached, and none
+    // is offered for removal, while one of the program's own modules
+    // reports one.
+    references_known: loop (module_index, checked) in modules {
+        if graph.modules[module_index].source_origin == SemaSourceOrigin.Snapshot && sema_has_error_since(checked.diagnostics, 0) {
+            break false
+        }
+    } ?? true
     member_uses: if members_known -> sema_liveness_member_uses(graph, modules, threads) else -> SemaLivenessMemberUses.empty()
     application: sema_liveness_application(graph)
     foreign_aliases_by_module := [[String]]{}
@@ -364,6 +375,7 @@ sema_liveness_structure: fn(graph: SemaRegistrationGraph, modules: [SemaGraphMod
         sema_liveness_unused_imports(module_row.program, foreign_aliases_by_module[module_index], module_row.source_file, verdicts)
         sema_liveness_unused_bindings(modules[module_index].diagnostics, module_row.source_file, verdicts)
         loop function in module_row.functions {
+            if !references_known -> break
             symbol: function.symbol
             row: candidates.ids.get(symbol.id.id) ?? next
             candidate: candidates.rows[row]
@@ -378,6 +390,7 @@ sema_liveness_structure: fn(graph: SemaRegistrationGraph, modules: [SemaGraphMod
             }
         }
         loop constant in module_row.constants {
+            if !references_known -> break
             symbol: constant.symbol
             row: candidates.ids.get(symbol.id.id) ?? next
             if candidates.rows[row].module_index != module_index || candidates.reached[row] -> next
@@ -834,7 +847,7 @@ sema_liveness_member_body_uses: fn(interner: Interner, function: FnBody, uses: ^
         // prints those values, so it reads and builds them.
         if kind == .HandleMethod(_, operation, args) && (operation == .GameSceneComponent || operation == .GameSceneQuery) {
             loop arg in args {
-                if tree.nodes[sema_comptime_fold_node_row(tree, arg)].kind == .StrLit(parts) {
+                if tree.nodes[body_node_index(tree, arg)].kind == .StrLit(parts) {
                     loop part in parts {
                         if part == .Literal(text) {
                             loop name in text.split(",") {
@@ -1125,7 +1138,7 @@ sema_liveness_marked_signature_uses: fn(function: Func, markers: NameTable, uses
 // Whether node `id` is a value a local computed while compiling landed as
 // (sema_fact_prepared_expr): a literal holding no code.
 sema_liveness_landed_value: fn(tree: BodyTree, id: Int) -> Bool Never! {
-    row: sema_comptime_fold_node_row(tree, id)
+    row: body_node_index(tree, id)
     if tree.nodes[row].kind == .IntLit(_, _) || tree.nodes[row].kind == .BoolLit(_) || tree.nodes[row].kind == .CtLit(_) {
         return true
     }

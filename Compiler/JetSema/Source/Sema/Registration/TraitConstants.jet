@@ -510,10 +510,8 @@ sema_expression_trait_constant: fn(type_name: String, member: String, member_spa
         value: sema_node(context, sema_decode_env_names_type(), NodeKind.TraitConst{owner: Type.Named{name: type_name.copy()}, trait_name: "Decode", name: member.copy()}, span)
         return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
     }
-    if program.registration_graph == .Val(graph) {
-        return sema_expression_trait_constant_in(graph, type_name, member, member_span, span, expected, environment, program, scopes, context, diagnostics)
-    }
-    SemaMethodSpecialCheck{handled: false, value: None}
+    graph: program.registration_graph
+    sema_expression_trait_constant_in(graph, type_name, member, member_span, span, expected, environment, program, scopes, context, diagnostics)
 }
 
 // Whether `type_name` is one of the enclosing function's type parameters.

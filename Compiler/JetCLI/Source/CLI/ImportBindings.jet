@@ -118,12 +118,11 @@ jet_cli_import_javascript_doc_types: fn(lines: [String], at: Int) -> JetCLIImpor
         loop doc_tag in return_tags {
             position: jet_cli_import_find_bytes(line.bytes(), doc_tag, false) ?? next
             rest: jet_cli_import_byte_slice(line.bytes(), position + doc_tag.bytes().len(), line.bytes().len()).trim().copy()
-            close: jet_cli_import_find_bytes(rest.bytes(), "}}", false)
-            if !rest.starts_with("{{") || close == None {
+            close: if rest.starts_with("{{") -> jet_cli_import_find_bytes(rest.bytes(), "}}", false) else -> None
+            end: close ?? {
                 docs.error = Val("JavaScript return JSDoc needs a type")
                 break
             }
-            end: close ?? panic("known close")
             ty: jet_cli_import_byte_slice(rest.bytes(), 1, end).trim().copy()
             if jet_cli_import_map_javascript_doc_type(ty) == {
                 .Ok(mapped) -> { docs.result = Val(mapped) }

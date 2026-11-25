@@ -478,10 +478,7 @@ core_decl_marker: fn(expression: String, context: String, constants: CoreDeclTex
 core_decl_call_effect: fn(module_name: String, member: String) -> String? Never! {
     if module_name == CORE_BUILTINS_MODULE {
         return if member == {
-            "lock_open" | "lock_try" | "lock_wait" | "lock_close" | "lock_fd_identity" | "lock_path_identity" | "lock_owner" -> Val("FS")
-            "resolve_ordered" -> Val("Net")
-            "process_child_wait" | "process_child_exited" | "process_child_kill" | "process_child_terminate" | "process_child_interrupt" -> Val("Exec")
-            "process_spec_run" | "process_spec_run_checked" | "process_spec_spawn" -> Val("Exec")
+            "lock_owner" -> Val("FS")
             else -> None
         }
     }
@@ -495,7 +492,6 @@ core_decl_call_effect: fn(module_name: String, member: String) -> String? Never!
             else -> Val("Browser")
         }
         "core.process" -> if member == {
-            "__keep_open_raw" -> Val("FS")
             "status_ok" -> None
             else -> Val("Exec")
         }
@@ -511,7 +507,7 @@ core_decl_call_effect: fn(module_name: String, member: String) -> String? Never!
             "style_force" -> None
             else -> Val("IO")
         }
-        "core.net" -> if member == "__ip_from_bytes" || member == "__socket_from_parts" -> None else -> Val("Net")
+        "core.net" -> Val("Net")
         "core.watcher" -> if member == {
             "files" -> Val("FS")
             "process_pid" -> Val("Exec")
@@ -534,7 +530,7 @@ core_decl_call_effect: fn(module_name: String, member: String) -> String? Never!
         // Key generation draws from the OS generator, like crypto.random.bytes.
         "core.crypto" -> if member == "__x25519_generate" || member == "__signing_generate" -> Val("Rand") else -> None
         "core.perf" -> if member == {
-            "__heap_mark" | "fidelity" | "heap_mark" | "override_fidelity" | "reset_fidelity" -> Val("Env")
+            "fidelity" | "heap_mark" | "override_fidelity" | "reset_fidelity" -> Val("Env")
             else -> None
         }
         "core.sys" -> if member == "success" -> None else -> Val("Env")
@@ -561,8 +557,7 @@ core_decl_call_effect: fn(module_name: String, member: String) -> String? Never!
 core_decl_call_effect_leaf: fn(module_name: String, member: String) -> String? Never! {
     if module_name == CORE_BUILTINS_MODULE {
         return if member == {
-            "lock_open" | "lock_try" | "lock_wait" | "lock_close" | "lock_fd_identity" | "lock_path_identity" | "lock_owner" -> Val("FS.Write")
-            "resolve_ordered" -> Val("Time.Wait")
+            "lock_owner" -> Val("FS.Write")
             else -> None
         }
     }
@@ -573,7 +568,6 @@ core_decl_call_effect_leaf: fn(module_name: String, member: String) -> String? N
             else -> None
         }
         "core.process" -> if member == {
-            "__keep_open_raw" -> Val("FS.Read")
             "run" -> Val("Time.Wait")
             else -> None
         }
@@ -592,7 +586,7 @@ core_decl_call_effect_leaf: fn(module_name: String, member: String) -> String? N
             "scope" | "read" | "read_bytes" | "read_at" | "read_link" | "map" | "open" | "exists" | "is_dir" | "is_fifo" | "is_socket" | "space" | "can_read" | "can_write" | "can_execute" | "stat" | "lstat" | "list_dir" | "walk" | "walk_files" | "glob" | "canonicalize" | "absolute" | "__list_directory" | "__directory_fd" | "__walk_parallel_raw" | "jet_std_files_open_reader_nonblocking" -> Val("FS.Read")
             // #3593 provider leaves behind Core/Files/files.jet.
             // The compiler-private non-blocking open only reads (RawHostKeys.jet).
-            "write" | "write_bytes" | "write_at" | "write_atomic" | "append_all" | "create" | "append" | "fsync" | "remove" | "remove_dir" | "remove_all" | "create_dir_all" | "rename" | "symlink" | "hard_link" | "chown" | "set_mode" | "mkdtemp" | "mktemp" | "temp_dir" | "temp_file" | "lock" | "__mkdtemp_raw" | "__temp_dir_raw" | "__temp_file_raw" | "try_lock" -> Val("FS.Write")
+            "write" | "write_bytes" | "write_at" | "write_atomic" | "append_all" | "create" | "append" | "fsync" | "remove" | "remove_dir" | "remove_all" | "create_dir_all" | "rename" | "symlink" | "hard_link" | "chown" | "set_mode" | "mkdtemp" | "mktemp" | "temp_dir" | "temp_file" | "lock" | "try_lock" -> Val("FS.Write")
             else -> None
         }
         "core.term" -> if member == {

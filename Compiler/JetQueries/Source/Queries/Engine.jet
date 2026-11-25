@@ -177,15 +177,18 @@ QueryEngine: struct<T> {
         loop dep in frame.deps {
             if seen.has_key(dep) -> next
             seen[dep] = true
-            if dep.is_input {
-                input: InputKey{subject: dep.subject}
-                revision := Int?{None}
-                if self.inputs.get(input) == .Val(cell) -> revision = Val(cell.revision)
-                deps.push(QueryDep.Input{key: input, revision: revision})
-            } else {
-                query: QueryKey{kind: dep.kind, subject: dep.subject}
-                if self.memo.get(query) == .Val(entry) {
-                    deps.push(QueryDep.Query{key: query, generation: entry.generation})
+            if {
+                dep.is_input -> {
+                    input: InputKey{subject: dep.subject}
+                    revision := Int?{None}
+                    if self.inputs.get(input) == .Val(cell) -> revision = Val(cell.revision)
+                    deps.push(QueryDep.Input{key: input, revision: revision})
+                }
+                else -> {
+                    query: QueryKey{kind: dep.kind, subject: dep.subject}
+                    if self.memo.get(query) == .Val(entry) {
+                        deps.push(QueryDep.Query{key: query, generation: entry.generation})
+                    }
                 }
             }
         }

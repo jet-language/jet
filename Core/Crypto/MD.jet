@@ -15,9 +15,10 @@
 // mbedtls_md_free zeroizes, and `hash_clone` forks it (a TLS transcript hash
 // read mid-handshake). The compression functions keep the schedule in a
 // fixed stack array and the state in locals; SHA-256 takes the host's SHA
-// extensions through core.crypto.__sha256_blocks where they exist and runs
+// extensions through jet.runtime.crypto.sha256_blocks where they exist and runs
 // the same rounds in Jet everywhere else, so every tier computes one meaning.
 use core
+use crypto_rt: jet.runtime.crypto
 
 // SHA-224 and SHA-256 round constants (FIPS 180-4 section 4.2.2).
 C_SHA256_K: [U32]{
@@ -679,7 +680,7 @@ hash_with: fn<H: HashFamily>(family: H, md: Md, data: [U8]) -> [U8] Never! {
 /// Whether the host's SHA extensions compressed the blocks. The answer
 /// follows the host's instructions, never the state or the message.
 #Scrub(Secret) host_sha256_blocks: fn(s32: ^[U32], msg: [#Secret U8], off: Int, count: Int) -> Bool Never! {
-    core.crypto.__sha256_blocks(s32, msg, off, count)
+    crypto_rt.sha256_blocks(s32, msg, off, count)
 }
 
 /// Little-endian 64-bit word at `bytes[off]`.

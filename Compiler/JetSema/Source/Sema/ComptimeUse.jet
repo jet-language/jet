@@ -122,7 +122,7 @@ sema_comptime_use_check: fn(graph: ^^SemaRegistrationGraph, threads: CompilerThr
     loop found.len() > 0 {
         slot := found.pop() ?? break
         row := compiler_threads_slot_taken(slot)
-        module_found := row.comptime.move() ?? panic("a #run use scan found no module scan")
+        module_found := compiler_threads_slot_taken(row.comptime.move())
         loop diagnostic in module_found.diagnostics {
             sema_registration_push_graph_diagnostic(owned, module_found.module_index, diagnostic)
         }
@@ -200,7 +200,7 @@ sema_graph_scan: fn(scan: ^^SemaGraphScan, workers: Int) -> SemaGraphScanDone {
         loop position in 0..<owned.rows.len() {
             found[position] = Val(sema_graph_scan_row(owned, position))
         }
-        graph := owned.graphs.pop() ?? panic("the scanned graph left its scan")
+        graph := compiler_threads_taken(owned.graphs)
         return SemaGraphScanDone{graph: graph, modules: owned.modules.move(), rows: owned.rows.move(), order: owned.order.move(), found: found}
     }
     shared_state: Shared{owned.move()}
@@ -1049,13 +1049,12 @@ sema_comptime_use_build_only_shape: fn(graph: SemaRegistrationGraph, module_inde
 // shipped program has no such module to hold it.
 sema_comptime_use_value_read: fn(name: String, ty: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: ^[Diagnostic]) {
     if sema_scope_build_time(scopes, environment, program) -> return
-    if program.registration_graph == .Val(graph) {
-        if graph.comptime_use_targets.len() == 0 {
-            return
-        }
-        prefix: sema_comptime_use_value_prefix(graph, ty, environment.module_identity) ?? return
-        diagnostics.push(diagnostic_with_edit(sema_error("E0944", span, "`{name}` is a value computed while building, and its type comes from a `#run use` module", "A `#run use` module exists only while building, so the shipped program cannot hold a value of its types", "Import that module with plain `use`, or read `{name}` only in compile-time code"), TextEdit{span: prefix, new_text: ""}))
+    graph: program.registration_graph
+    if graph.comptime_use_targets.len() == 0 {
+        return
     }
+    prefix: sema_comptime_use_value_prefix(graph, ty, environment.module_identity) ?? return
+    diagnostics.push(diagnostic_with_edit(sema_error("E0944", span, "`{name}` is a value computed while building, and its type comes from a `#run use` module", "A `#run use` module exists only while building, so the shipped program cannot hold a value of its types", "Import that module with plain `use`, or read `{name}` only in compile-time code"), TextEdit{span: prefix, new_text: ""}))
 }
 
 sema_comptime_use_value_prefix: fn(graph: SemaRegistrationGraph, ty: Type, module_identity: ModuleID) -> Span? {

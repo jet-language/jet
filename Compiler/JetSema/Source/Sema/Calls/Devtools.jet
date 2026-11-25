@@ -88,26 +88,25 @@ sema_call_devtools_text_arg: fn(label: String, text: String, span: Span) -> Call
 // A panel of the calling module wins, otherwise exactly one panel of the
 // package must declare the field.
 sema_call_devtools_panel_for_field: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, field: String) -> SemaDevtoolsPanelIdentity? {
-    if program.registration_graph == .Val(graph) {
-        caller: sema_scope_caller_index(environment, graph) ?? return None
-        package: graph.modules[caller].package_identity
-        found := SemaDevtoolsPanelIdentity?{None}
-        count := 0
-        loop module_index in 0..<graph.modules.len() {
-            if graph.modules[module_index].package_identity != package -> next
-            loop item_index in 0..<graph.modules[module_index].program.items.len() {
-                if graph.modules[module_index].program.items[item_index] == .Func(function) {
-                    if !sema_call_devtools_marks_panel(function) -> next
-                    if !sema_call_devtools_state_declares(graph, package, function, field) -> next
-                    identity: SemaDevtoolsPanelIdentity{package: package.copy(), module_name: graph.modules[module_index].module_path, panel: function.name}
-                    if module_index == caller -> return Val(identity)
-                    count += 1
-                    found = Val(identity)
-                }
+    graph: program.registration_graph
+    caller: sema_scope_caller_index(environment, graph) ?? return None
+    package: graph.modules[caller].package_identity
+    found := SemaDevtoolsPanelIdentity?{None}
+    count := 0
+    loop module_index in 0..<graph.modules.len() {
+        if graph.modules[module_index].package_identity != package -> next
+        loop item_index in 0..<graph.modules[module_index].program.items.len() {
+            if graph.modules[module_index].program.items[item_index] == .Func(function) {
+                if !sema_call_devtools_marks_panel(function) -> next
+                if !sema_call_devtools_state_declares(graph, package, function, field) -> next
+                identity: SemaDevtoolsPanelIdentity{package: package.copy(), module_name: graph.modules[module_index].module_path, panel: function.name}
+                if module_index == caller -> return Val(identity)
+                count += 1
+                found = Val(identity)
             }
         }
-        if count == 1 -> return found
     }
+    if count == 1 -> return found
     None
 }
 
@@ -194,15 +193,14 @@ sema_devtools_panel_error: fn(code: String, panel: String, why: String, fix: Str
 
 // The struct `name` declared by a module of the caller's package.
 sema_devtools_package_struct: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, name: String) -> StructDef? {
-    if program.registration_graph == .Val(graph) {
-        caller: sema_scope_caller_index(environment, graph) ?? return None
-        package: graph.modules[caller].package_identity
-        loop module_index in 0..<graph.modules.len() {
-            if graph.modules[module_index].package_identity != package -> next
-            loop item_index in 0..<graph.modules[module_index].program.items.len() {
-                if graph.modules[module_index].program.items[item_index] == .Struct(definition) {
-                    if definition.name == name -> return Val(definition.copy())
-                }
+    graph: program.registration_graph
+    caller: sema_scope_caller_index(environment, graph) ?? return None
+    package: graph.modules[caller].package_identity
+    loop module_index in 0..<graph.modules.len() {
+        if graph.modules[module_index].package_identity != package -> next
+        loop item_index in 0..<graph.modules[module_index].program.items.len() {
+            if graph.modules[module_index].program.items[item_index] == .Struct(definition) {
+                if definition.name == name -> return Val(definition.copy())
             }
         }
     }

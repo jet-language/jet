@@ -166,7 +166,7 @@ digit_value: fn(value: Int) -> Int Never! {
 
 parse_integer_literal: fn(text: String) -> Int? {
     clean: strip_underscores(text)
-    raw := clean.bytes()
+    raw: clean.bytes()
     if raw.len() == 0 -> return None
     // value * radix + digit <= I64 max (2^63 - 1) exactly when value < limit,
     // or value == limit and digit <= rest, with limit = max /% radix and rest
@@ -448,8 +448,8 @@ has_ffi_marker: fn(source: [U8], facts: [Int], function_index: Int) -> Bool Neve
         }
         if kind == TOKEN_RPAREN {
             open: matching_open(facts, cursor, TOKEN_LPAREN, TOKEN_RPAREN)
-            marker := if open >= 0 -> previous_code_index(facts, open) else -> -1
-            hash := if marker >= 0 -> previous_code_index(facts, marker) else -> -1
+            marker: if open >= 0 -> previous_code_index(facts, open) else -> -1
+            hash: if marker >= 0 -> previous_code_index(facts, marker) else -> -1
             if marker >= 0 && hash >= 0 && kind_at(facts, marker) == TOKEN_IDENT && kind_at(facts, hash) == TOKEN_HASH {
                 if fact_text(source, facts, marker) == "FFI" -> return true
                 cursor = hash - 1
@@ -458,7 +458,7 @@ has_ffi_marker: fn(source: [U8], facts: [Int], function_index: Int) -> Bool Neve
         }
         if kind == TOKEN_RBRACKET {
             open: matching_open(facts, cursor, TOKEN_LBRACKET, TOKEN_RBRACKET)
-            hash := if open >= 0 -> previous_code_index(facts, open) else -> -1
+            hash: if open >= 0 -> previous_code_index(facts, open) else -> -1
             if hash >= 0 && kind_at(facts, hash) == TOKEN_HASH {
                 if group_has_ffi_marker(source, facts, hash, function_index) -> return true
                 cursor = hash - 1
@@ -503,7 +503,7 @@ shifted_diagnostic: fn(diagnostic: ^Diagnostic, offset: Int) Never! {
 // `terminator_diagnostics`.
 lex_payload_from_facts: fn(source: [U8], facts: [Int], events: [Int], config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, from: Int, to: Int, tables: ^TokenTables, terminator_diagnostics: ^[Diagnostic]) -> LexedTokens {
     bidi_diagnostics := [Diagnostic]{}
-    lexed := lex_payload_from_facts_range(source, facts, events, config_surface, allow_reserved_identifiers, depth, from, to, false, tables, terminator_diagnostics, bidi_diagnostics)
+    lexed: lex_payload_from_facts_range(source, facts, events, config_surface, allow_reserved_identifiers, depth, from, to, false, tables, terminator_diagnostics, bidi_diagnostics)
     if bidi_diagnostics.len() > 0 {
         diagnostics := lexed.diagnostics.move()
         diagnostics.extend(bidi_diagnostics)
@@ -554,21 +554,25 @@ lex_payload_from_facts_range: fn(source: [U8], facts: [Int], events: [Int], conf
                 gap_diagnostic(source, facts, cursor, start, config_surface, allow_reserved_identifiers, depth, tables, diagnostics)
             }
         }
-        if fixed_spelling_kind(kind) {
-            text: intern_token_source(tables, kind, source, start, end)
-            tokens.push(Token{kind: kind, span: Span{start: start, end: end}, text: text, decoded: text, literal: -1})
-        } else if kind == TOKEN_IDENT {
-            text: intern_source(tables, source, start, end)
-            if !allow_reserved_identifiers && end - start >= 2 && source[start] == (U8{95}) && source[start + 1] == (U8{95}) {
-                _ := identifier_respelling(source, start, end, allow_reserved_identifiers, diagnostics)
+        if {
+            fixed_spelling_kind(kind) -> {
+                text: intern_token_source(tables, kind, source, start, end)
+                tokens.push(Token{kind: kind, span: Span{start: start, end: end}, text: text, decoded: text, literal: -1})
             }
-            tokens.push(Token{kind: kind, span: Span{start: start, end: end}, text: text, decoded: text, literal: -1})
-        } else {
-            if kind == TOKEN_FENCE_OPEN || kind == TOKEN_FENCE_CLOSE -> tables.has_fences = true
-            text: intern_source(tables, source, start, end)
-            built: payload_for(kind, source, facts, index, text, config_surface, allow_reserved_identifiers, depth, tables, diagnostics)
-            if built.keep {
-                tokens.push(Token{kind: kind, span: Span{start: start, end: end}, text: text, decoded: built.decoded, literal: built.literal})
+            kind == TOKEN_IDENT -> {
+                text: intern_source(tables, source, start, end)
+                if !allow_reserved_identifiers && end - start >= 2 && source[start] == (U8{95}) && source[start + 1] == (U8{95}) {
+                    _ := identifier_respelling(source, start, end, allow_reserved_identifiers, diagnostics)
+                }
+                tokens.push(Token{kind: kind, span: Span{start: start, end: end}, text: text, decoded: text, literal: -1})
+            }
+            else -> {
+                if kind == TOKEN_FENCE_OPEN || kind == TOKEN_FENCE_CLOSE -> tables.has_fences = true
+                text: intern_source(tables, source, start, end)
+                built: payload_for(kind, source, facts, index, text, config_surface, allow_reserved_identifiers, depth, tables, diagnostics)
+                if built.keep {
+                    tokens.push(Token{kind: kind, span: Span{start: start, end: end}, text: text, decoded: built.decoded, literal: built.literal})
+                }
             }
         }
         cursor = end
@@ -635,14 +639,14 @@ lex_payload_at_depth: fn(source: [U8], config_surface: Bool, allow_reserved_iden
     lex_payload_from_facts(source, facts, [Int]{}, config_surface, allow_reserved_identifiers, depth, 0, source.len(), tables, unused)
 }
 
-lex_expression: fn(source: [U8], start: Int, end: Int, config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, span: Span, tables: ^TokenTables, diagnostics: ^[Diagnostic]) -> [Token] {
+lex_expression: fn(source: [U8], start: Int, end: Int, _config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, span: Span, tables: ^TokenTables, diagnostics: ^[Diagnostic]) -> [Token] {
     if depth >= MAX_INTERPOLATION_DEPTH {
         add_diagnostic(diagnostics, "E1403", span.start, span.end, "source nesting exceeds the supported limit", "interpolated expressions are lexed as nested Jet source", "pull inner parts out into named bindings or helper functions")
         return [Token]{}
     }
-    nested_source := source.slice(start, end)
+    nested_source: source.slice(start, end)
     nested := lex_payload_at_depth(nested_source, false, allow_reserved_identifiers, depth + 1, tables)
-    nested_diagnostics := nested.diagnostics.move()
+    nested_diagnostics: nested.diagnostics.move()
     loop source_diagnostic in nested_diagnostics.move() {
         diagnostic := source_diagnostic.move()
         shifted_diagnostic(diagnostic, start)
@@ -697,7 +701,7 @@ interpolation_end: fn(source: [U8], start: Int, limit: Int) -> Int Never! {
             next
         }
         if value == 34 {
-            triple := byte_at(source, cursor + 1) == 34 && byte_at(source, cursor + 2) == 34
+            triple: byte_at(source, cursor + 1) == 34 && byte_at(source, cursor + 2) == 34
             nested: if triple -> scan_triple_string_end(source, cursor, false) else -> scan_plain_string_end(source, cursor, false)
             if nested < 0 || nested > limit -> return -1
             cursor = nested
@@ -719,7 +723,7 @@ interpolation_end: fn(source: [U8], start: Int, limit: Int) -> Int Never! {
                     fence_end += 1
                     next
                 }
-                run_start := fence_end
+                run_start: fence_end
                 loop fence_end < limit && byte_at(source, fence_end) == 96 -> fence_end += 1
                 if fence_end - run_start == fence {
                     closed = true
@@ -862,7 +866,7 @@ decode_string_content: fn(source: [U8], start: Int, end: Int, triple: Bool, inde
             }
             escaped: escape_value(next_value)
             escape_width: utf8_width(source, cursor + 1)
-            escape_end := cursor + 1 + escape_width
+            escape_end: cursor + 1 + escape_width
             if {
                 escaped < 0 && defer_escapes -> {
                     escapes.push(TextEscape{span: Span{start: cursor, end: escape_end}, bytes: packed_bytes(source, cursor + 1, escape_end), before: diagnostics.len()})
@@ -930,8 +934,8 @@ decode_string_content: fn(source: [U8], start: Int, end: Int, triple: Bool, inde
                 append_text_part(parts, literal_start, cursor, name_intern_bytes(tables.names, literal, 0, literal.len()))
                 literal = [U8]{}
             }
-            expr_start := cursor + 1
-            part_span := Span{start: cursor, end: close + 1}
+            expr_start: cursor + 1
+            part_span: Span{start: cursor, end: close + 1}
             children: lex_expression(source, expr_start, close, config_surface, allow_reserved_identifiers, depth, part_span, tables, diagnostics)
             parts.push(
                 StringPart{
@@ -1021,13 +1025,13 @@ check_triple_delimiter_text: fn(source: [U8], begin: Int, end: Int, position: St
 // A reading the parser may not pick (`defer_escapes`) keeps the escapes it
 // doesn't know in `escapes` instead of reporting them (TextEscape).
 decode_string: fn(source: [U8], start: Int, end: Int, raw_head: Bool, byte_head: Bool, config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, tables: ^TokenTables, diagnostics: ^[Diagnostic], defer_escapes: Bool, escapes: ^[TextEscape]) -> {decoded: String, interpolations: Int, parts: [StringPart], valid: Bool} {
-    triple := byte_at(source, start) == 34 && byte_at(source, start + 1) == 34 && byte_at(source, start + 2) == 34
+    triple: byte_at(source, start) == 34 && byte_at(source, start + 1) == 34 && byte_at(source, start + 2) == 34
     content_start := start + 1
     content_end := end - 1
     indent := 0
     if triple {
-        open_end := start + 3
-        close := end - 3
+        open_end: start + 3
+        close: end - 3
         close_line_start := close
         loop close_line_start > open_end && byte_at(source, close_line_start - 1) != 10 {
             close_line_start -= 1
@@ -1153,13 +1157,13 @@ numeric_payload: fn(kind: Int, source: [U8], start: Int, end: Int, tables: ^Toke
     suffix := name_empty()
     if kind == TOKEN_UNIT_NUMBER -> suffix = intern_source(tables, source, bounded_end, end)
     marker: byte_at(source, start + 1)
-    radix := if marker == {
+    radix: if marker == {
         120 | 88 -> 16
         111 | 79 -> 8
         98 | 66 -> 2
         else -> 0
     }
-    base_prefix := byte_at(source, start) == 48 && radix > 0
+    base_prefix: byte_at(source, start) == 48 && radix > 0
     has_base_digit := false
     if base_prefix {
         cursor := start + 2
@@ -1173,7 +1177,7 @@ numeric_payload: fn(kind: Int, source: [U8], start: Int, end: Int, tables: ^Toke
         decoded: intern_source(tables, source, start, bounded_end)
         return {decoded: decoded, literal: literal_row(tables, number_literal(Val(0), None, name_empty()))}
     }
-    is_float := if kind == {
+    is_float: if kind == {
         TOKEN_FLOAT -> true
         TOKEN_UNIT_NUMBER -> numeric_is_float(source, start)
         else -> false
@@ -1279,7 +1283,7 @@ gap_diagnostic: fn(source: [U8], facts: [Int], start: Int, end: Int, config_surf
         }
         if value == 34 {
             index: fact_index_at(facts, cursor)
-            triple := byte_at(source, cursor + 1) == 34 && byte_at(source, cursor + 2) == 34
+            triple: byte_at(source, cursor + 1) == 34 && byte_at(source, cursor + 2) == 34
             if triple {
                 if {
                     raw_foreign_body_at(source, facts, index) -> {
@@ -1309,7 +1313,7 @@ gap_diagnostic: fn(source: [U8], facts: [Int], start: Int, end: Int, config_surf
         if value == 96 {
             fence := 0
             loop byte_at(source, cursor + fence) == 96 -> fence += 1
-            plural := if fence == 1 -> "" else -> "s"
+            plural: if fence == 1 -> "" else -> "s"
             add_diagnostic(diagnostics, "E0002", cursor, source.len(), "this raw text never gets a closing backtick fence", "a raw string closes with a backtick run that has the same length as its opening run", "add a closing fence of {fence} backtick{plural}")
             return
         }

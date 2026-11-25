@@ -951,33 +951,34 @@ sema_marker_module_check_builtin_sites: fn(catalog: SemaScopeMembersMarkerRegist
 // The marker declarations of the one marker vocabulary source.
 // SEMA_PRELUDE_MARKER_DECLS (PreludeRows.jet) is what this returns, written by
 // Compiler/Toolchain/PreludeRows, so neither a compile nor the compiler's build
-// parses the marker text; a text that does not parse stops that tool.
-sema_marker_module_prelude_decls: fn() -> [MarkerDecl] {
+// parses the marker text; a text that does not parse is that tool's error.
+sema_marker_module_prelude_decls: fn() -> [MarkerDecl] SemaPreludeTextError! {
     parsed: parse_generated_source(MARKER_SOURCE.bytes())
     if parsed.diagnostics.len() > 0 {
-        panic("Prelude/Markers.jet does not parse: {parsed.diagnostics[0].what}")
+        return Err(sema_prelude_text_error("Prelude/Markers.jet", MARKER_SOURCE, parsed.diagnostics))
     }
     declarations := [MarkerDecl]{}
     loop item in parsed.program.items {
         if item == .MarkerDecl(declaration) -> declarations.push(declaration)
     }
-    declarations
+    Ok(declarations)
 }
 
 // The value tags of the one marker vocabulary source (`Input`, `PII`,
 // `Secret`, `Credential`), as the parser reads each tag struct.
 // SEMA_PRELUDE_TAGS (PreludeRows.jet) is what this returns, written by
-// Compiler/Toolchain/PreludeRows.
-sema_marker_module_prelude_tags: fn() -> [TagDef] {
+// Compiler/Toolchain/PreludeRows; a text that does not parse is that tool's
+// error.
+sema_marker_module_prelude_tags: fn() -> [TagDef] SemaPreludeTextError! {
     parsed: parse_generated_source(MARKER_SOURCE.bytes())
     if parsed.diagnostics.len() > 0 {
-        panic("Prelude/Markers.jet does not parse: {parsed.diagnostics[0].what}")
+        return Err(sema_prelude_text_error("Prelude/Markers.jet", MARKER_SOURCE, parsed.diagnostics))
     }
     tags := [TagDef]{}
     loop item in parsed.program.items {
         if item == .Tag(declaration) -> tags.push(declaration)
     }
-    tags
+    Ok(tags)
 }
 
 // The Prelude marker declared as `name` in the one marker vocabulary source,

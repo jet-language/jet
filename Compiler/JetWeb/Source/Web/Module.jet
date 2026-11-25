@@ -274,21 +274,27 @@ web_module: fn(m: IRModule, app: Bool, layout: WebLayout, runtime: [String:Strin
     // then the helpers its calls named.
     names := [String]{}
     sigs := [String]{}
-    if app {
-        if m.entry < 0 || m.entry >= m.functions.len() {
-            st.errors.push("the program has no entry function")
-        } else {
-            bodies.push(web_run_body(st, m.entry))
-            names.push("jet_export_run")
-            sigs.push(":l")
+    if {
+        app -> {
+            if {
+                m.entry < 0 || m.entry >= m.functions.len() -> {
+                    st.errors.push("the program has no entry function")
+                }
+                else -> {
+                    bodies.push(web_run_body(st, m.entry))
+                    names.push("jet_export_run")
+                    sigs.push(":l")
+                }
+            }
         }
-    } else {
-        bodies.push(web_hooks_body(st, hooks, false))
-        names.push("jet_web_init")
-        sigs.push(":")
-        bodies.push(web_hooks_body(st, hooks, true))
-        names.push("jet_web_fini")
-        sigs.push(":")
+        else -> {
+            bodies.push(web_hooks_body(st, hooks, false))
+            names.push("jet_web_init")
+            sigs.push(":")
+            bodies.push(web_hooks_body(st, hooks, true))
+            names.push("jet_web_fini")
+            sigs.push(":")
+        }
     }
     glue: names.len()
     // Function indices: the imports in ref order, the IR functions, the glue,
@@ -298,14 +304,17 @@ web_module: fn(m: IRModule, app: Bool, layout: WebLayout, runtime: [String:Strin
     ref_index := [Int]{}
     import_count := 0
     loop ref in st.refs {
-        if ref.space != "" {
-            ref_index.push(import_count)
-            import_count += 1
-        } else {
-            ref_index.push(-1 - (m.functions.len() + names.len()))
-            bodies.push(web_helper_body(ref.name))
-            names.push(ref.name.copy())
-            sigs.push(ref.sig.copy())
+        if {
+            ref.space != "" -> {
+                ref_index.push(import_count)
+                import_count += 1
+            }
+            else -> {
+                ref_index.push(-1 - (m.functions.len() + names.len()))
+                bodies.push(web_helper_body(ref.name))
+                names.push(ref.name.copy())
+                sigs.push(ref.sig.copy())
+            }
         }
     }
     // Per table slot its function: the IR function, or the adapter of one
@@ -334,7 +343,7 @@ web_module: fn(m: IRModule, app: Bool, layout: WebLayout, runtime: [String:Strin
     loop ref in st.refs {
         if ref.space != "" -> import_sigs.push(ref.sig.copy())
     }
-    import_types := loop sig in import_sigs -> web_type_index(st, sig)
+    import_types: loop sig in import_sigs -> web_type_index(st, sig)
     out := [U8]{}
     wasm_put_fixed(out, 0x6d736100, 4)
     wasm_put_fixed(out, 1, 4)
@@ -462,7 +471,7 @@ web_module: fn(m: IRModule, app: Bool, layout: WebLayout, runtime: [String:Strin
         section.extend(module_name)
     }
     entries := [U8]{}
-    total := m.functions.len() + names.len()
+    total: m.functions.len() + names.len()
     loop row in 0..<total {
         wasm_put_unsigned(entries, defined_base + row)
         if row < m.functions.len() -> wat_put_name(entries, web_function_name(m.functions[row])) else {

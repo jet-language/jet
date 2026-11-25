@@ -643,6 +643,7 @@ CROSS_DOMAIN_DISTINCT: [String]{
     "reader",
     "readexactly",
     "readline",
+    "readtimeout",
     "readuntil",
     "recv",
     "reduceright",
@@ -765,6 +766,7 @@ CROSS_DOMAIN_DISTINCT: [String]{
     "writebyte",
     "writelines",
     "writer",
+    "writetimeout",
     "writeto",
     "xor",
     "zero",
@@ -1556,7 +1558,7 @@ SIZE_ALIAS_ROW: Regex{"^([A-Z][A-Za-z0-9]*): (Signed|Unsigned|IEEE)<([0-9, ]+)>$
 
 SEMA_LITERAL: Regex{"\x22([A-Za-z_][A-Za-z0-9_]*)\x22"}
 
-INVENTORY_ROW: Regex{"^(fixed_sig|receivers|methods)\s+(\S+)\s+\{{\s*([^{{}}]*?)\s*\}}$"}
+INVENTORY_ROW: Regex{"^(receivers|methods)\s+(\S+)\s+\{{\s*([^{{}}]*?)\s*\}}$"}
 
 RECEIVER_SOURCE: Regex{"^(builtin|collection|static|numeric|source|type):([A-Za-z_][A-Za-z0-9_.]*)$"}
 
@@ -1729,46 +1731,30 @@ core_type_methods: fn(root: String, paths: [String], type_name: String) -[FS]> [
     Ok(methods)
 }
 
-// The Core surface beyond Core.rows's module exports, from its one authored
-// home: `fixed_sig <module> { … }`, `receivers <Container> { … }` and
-// `methods <Container> { … }` lines. A receivers row names the Jet tables a
-// container's receiver methods come from; the method names are read from those
-// tables, so the inventory follows the compiler. A methods row names only the
-// methods sema checks in code with no table to read; each must be spelled in
-// sema and must not already come from the container's receivers.
-core_surface_inventory: fn(root: String, modules: [ModuleFact], module_paths: [String:[String]]) -[FS]> Inventory LedgerError! {
+// The Core surface beyond Core.rows's module exports: the members of the
+// compiler's non-receiver Core call records (`fixed_pairs`, from
+// core_call_pairs), and the containers' methods from the inventory's one
+// authored home, its `receivers <Container> { … }` and `methods <Container>
+// { … }` lines. A receivers row names the Jet tables a container's receiver
+// methods come from; the method names are read from those tables, so the
+// inventory follows the compiler. A methods row names only the methods sema
+// checks in code with no table to read; each must be spelled in sema and must
+// not already come from the container's receivers.
+core_surface_inventory: fn(root: String, module_paths: [String:[String]], fixed_pairs: [String]) -[FS]> Inventory LedgerError! {
     source: read_source(root, CORE_SURFACE_INVENTORY_PATH) ?? return Err(err)
-    known: loop entry in modules -> entry.name.copy()
     tables: jet_receiver_tables(root, module_paths) ?? return Err(err)
-    pairs := [String]{}
-    fixed_modules := [String]{}
     derived := [Collection]{}
     declared := [Collection]{}
     loop (index, raw) in split_lines(source) {
         line: raw.trim()
         if line == "" || line.starts_with("//") -> next
         context: "{CORE_SURFACE_INVENTORY_PATH} line {index + 1}"
-        row: INVENTORY_ROW.match(line.copy()) ?? return Err(fail("{context} is not a fixed_sig, receivers or methods row"))
+        row: INVENTORY_ROW.match(line.copy()) ?? return Err(fail("{context} is not a receivers or methods row"))
         kind: row.group(1) ?? ""
         name: row.group(2) ?? ""
         listed: loop item in (row.group(3) ?? "").split(",") -> item.trim()
         if listed.contains("") || sorted_unique(listed).len() != listed.len() {
             return Err(fail("{context} has an empty or repeated name"))
-        }
-        if kind == "fixed_sig" {
-            if !known.contains(name) {
-                return Err(fail("{context} names an unknown Core module: {name}"))
-            }
-            if fixed_modules.contains(name) -> return Err(fail("{context} repeats module {name}"))
-            fixed_modules.push(name.copy())
-            loop member in listed {
-                if !is_identifier(member) {
-                    return Err(fail("{context} has an invalid member: {member}"))
-                }
-                pair: "{name}.{member}"
-                if !pairs.contains(pair) -> pairs.push(pair)
-            }
-            next
         }
         into: if kind == "receivers" -> derived else -> declared
         loop entry in into {
@@ -1820,10 +1806,10 @@ core_surface_inventory: fn(root: String, modules: [ModuleFact], module_paths: [S
         }
         collections.push(entry.copy())
     }
-    if pairs.len() == 0 || collections.len() == 0 {
+    if collections.len() == 0 {
         return Err(fail("{CORE_SURFACE_INVENTORY_PATH} has an empty table"))
     }
-    sorted_pairs := pairs
+    sorted_pairs := fixed_pairs.copy()
     sorted_pairs.sort()
     loop at in 0..<collections.len() -> collections[at].methods.sort()
     order: collated(loop entry in collections -> entry.type_name)
@@ -3776,8 +3762,9 @@ core_api_gate: fn(root: String, rows: [Row], entries_in: [SurfaceEntry], surface
 // ---- Ledger -------------------------------------------------------------------
 
 // The compiler's Core structure (`jet inspect structure --core --json`, run by
-// $JET, else `jet` on PATH): Core.rows's modules and the Core sources the
-// compiler loads, as the build computed them.
+// $JET, else `jet` on PATH): Core.rows's modules, the compiler's non-receiver
+// Core call records and the Core sources the compiler loads, as the build
+// computed them.
 core_structure: fn() -[Env, Exec, FS, IO, Time, Time.Wait]> Dyn LedgerError! {
     jet: process.env_get_or("JET", process.which("jet") ?? "jet")
     argv: [String]{jet, "inspect", "structure", "--core", "--json"}
@@ -3790,10 +3777,21 @@ core_structure: fn() -[Env, Exec, FS, IO, Time, Time.Wait]> Dyn LedgerError! {
     }
     answer: json.parse(receipt.output) ?? return Err(fail("{argv.join(" ")} printed no JSON: {err}"))
     core: field(answer, "core")
-    if !has_field(core, "modules") || !has_field(core, "sources") {
-        return Err(fail("{argv.join(" ")} printed no Core modules and sources"))
+    if !has_field(core, "modules") || !has_field(core, "calls") || !has_field(core, "sources") {
+        return Err(fail("{argv.join(" ")} printed no Core modules, calls and sources"))
     }
     Ok(core)
+}
+
+// The `module.member` pair of each of the compiler's non-receiver Core call
+// records, once each.
+core_call_pairs: fn(core: Dyn) -> [String] Never! {
+    pairs := [String]{}
+    loop entry in items(field(core, "calls")) {
+        pair: "{text_field(entry, "module")}.{text_field(entry, "member")}"
+        if !pairs.contains(pair) -> pairs.push(pair)
+    }
+    pairs
 }
 
 // The ledger's module inventory: each Core.rows module with its members, its
@@ -3873,7 +3871,7 @@ build_ledger: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Built Ledg
     core: core_structure() ?? return Err(err)
     facts: core_module_inventory(core)
     modules: module_facts(facts)
-    inventory: core_surface_inventory(root, modules, core_module_paths(core)) ?? return Err(err)
+    inventory: core_surface_inventory(root, core_module_paths(core), core_call_pairs(core)) ?? return Err(err)
     bindings_source: read_source(root, CORE_CONFORMANCE_PATH) ?? return Err(err)
     bindings: fixture_bindings(bindings_source) ?? return Err(err)
     surfaces: index_surfaces(entries_in)

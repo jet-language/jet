@@ -77,19 +77,19 @@ sema_comparability_sealed_crypto_plan: fn(leaf: String) -> Bool Never! {
 // the program's types are (sema_comptime_environment_tables), so with no
 // checked types the registered declaration is checked here.
 sema_comparability_definition: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_identity: ModuleID, name: String) -> TTypeDef? {
-    if program.registration_graph == .Val(graph) {
-        resolved: sema_type_graph_lookup_symbol(graph, module_identity, name) ?? return None
-        if sema_resolved_kind(graph, resolved) != SymbolKind.Type -> return None
-        if program.checked_types.len() > 0 {
-            index: sema_scope_checked_type_row(environment, program, resolved.target_module_identity, sema_resolved_name(graph, resolved)) ?? return None
-            return Val(program.checked_types[index])
-        }
-        row: sema_type_graph_resolved_nominal_row(graph, resolved) ?? return None
-        // Its diagnostics are the program check's to report.
-        ignored := [Diagnostic]{}
-        return sema_checked_type_def(graph, program.boxed_edges, graph.modules[row.module_index], None, graph.modules[row.module_index].nominals[row.row], ignored)
+    graph: program.registration_graph
+    // Snapshot: a lone program's definitions are its checked types.
+    if graph.mode == .Snapshot -> return sema_serde_type_definition(environment, program, name)
+    resolved: sema_type_graph_lookup_symbol(graph, module_identity, name) ?? return None
+    if sema_resolved_kind(graph, resolved) != SymbolKind.Type -> return None
+    if program.checked_types.len() > 0 {
+        index: sema_scope_checked_type_row(environment, program, resolved.target_module_identity, sema_resolved_name(graph, resolved)) ?? return None
+        return Val(program.checked_types[index])
     }
-    sema_serde_type_definition(environment, program, name)
+    row: sema_type_graph_resolved_nominal_row(graph, resolved) ?? return None
+    // Its diagnostics are the program check's to report.
+    ignored := [Diagnostic]{}
+    sema_checked_type_def(graph, program.boxed_edges, graph.modules[row.module_index], None, graph.modules[row.module_index].nominals[row.row], ignored)
 }
 
 // A registered `trait_name` implementation, generic bound, or derive. An
@@ -102,40 +102,39 @@ sema_comparability_implements: fn(environment: SemaScopeEnvironment, program: Se
     if ty == .Named(carrier) {
         if sema_derive_builtin_supports(sema_serde_named_leaf(carrier), trait_name) -> return true
     }
-    if program.registration_graph == .Val(graph) {
-        bound := sema_type_bound_satisfied_at(graph, ty, trait_name, sema_scope_caller_row(environment, graph), environment.generic_params) ?? false
-        if bound -> return true
-        name: sema_type_graph_base_name(ty) ?? return false
-        resolved: sema_type_graph_lookup_symbol_at(graph, sema_scope_caller_row(environment, graph), name) ?? return false
-        if sema_resolved_kind(graph, resolved) != SymbolKind.Type -> return false
-        if sema_scope_checked_type_row(environment, program, resolved.target_module_identity, sema_resolved_name(graph, resolved)) == .Val(checked_row) {
-            if sema_serde_has_name(program.checked_types[checked_row].derives, trait_name) {
+    graph: program.registration_graph
+    bound := sema_type_bound_satisfied_at(graph, ty, trait_name, sema_scope_caller_row(environment, graph), environment.generic_params) ?? false
+    if bound -> return true
+    name: sema_type_graph_base_name(ty) ?? return false
+    resolved: sema_type_graph_lookup_symbol_at(graph, sema_scope_caller_row(environment, graph), name) ?? return false
+    if sema_resolved_kind(graph, resolved) != SymbolKind.Type -> return false
+    if sema_scope_checked_type_row(environment, program, resolved.target_module_identity, sema_resolved_name(graph, resolved)) == .Val(checked_row) {
+        if sema_serde_has_name(program.checked_types[checked_row].derives, trait_name) {
+            return true
+        }
+    }
+    // A KeyBy type is equal and ordered by its key.
+    if owned_trait_implies("KeyBy", trait_name) {
+        if sema_type_graph_resolved_nominal_row(graph, resolved) == .Val(key_row) {
+            if sema_comparability_nominal_key(graph, graph.modules[key_row.module_index].nominals[key_row.row]) != None {
                 return true
             }
         }
-        // A KeyBy type is equal and ordered by its key.
-        if owned_trait_implies("KeyBy", trait_name) {
-            if sema_type_graph_resolved_nominal_row(graph, resolved) == .Val(key_row) {
-                if sema_comparability_nominal_key(graph, graph.modules[key_row.module_index].nominals[key_row.row]) != None {
-                    return true
-                }
-            }
+    }
+    if trait_name != "Equatable" -> return false
+    module_index: sema_registration_module_index(graph, resolved.target_module_identity) ?? return false
+    row: sema_type_graph_resolved_nominal_row(graph, resolved) ?? return false
+    // Matched in place: a pattern on the indexed path copies the whole item.
+    nominal: graph.modules[row.module_index].nominals[row.row]
+    // An auto-derive that a field blocks has no compiler-generated
+    // `Equatable` block, and neither has any member of its recursive group
+    // or any type built on it.
+    if nominal.source == .SourceAST(item) {
+        if !sema_type_metadata_auto_derives(item, graph.modules[module_index].declared_trait_impls).equatable {
+            return false
         }
-        if trait_name != "Equatable" -> return false
-        module_index: sema_registration_module_index(graph, resolved.target_module_identity) ?? return false
-        row: sema_type_graph_resolved_nominal_row(graph, resolved) ?? return false
-        // Matched in place: a pattern on the indexed path copies the whole item.
-        nominal: graph.modules[row.module_index].nominals[row.row]
-        // An auto-derive that a field blocks has no compiler-generated
-        // `Equatable` block, and neither has any member of its recursive group
-        // or any type built on it.
-        if nominal.source == .SourceAST(item) {
-            if !sema_type_metadata_auto_derives(item, graph.modules[module_index].declared_trait_impls).equatable {
-                return false
-            }
-            visited := [[Bool]]{}
-            return !sema_comparability_auto_blocked(graph, resolved.target_module_identity, item, "Equatable", visited)
-        }
+        visited := [[Bool]]{}
+        return !sema_comparability_auto_blocked(graph, resolved.target_module_identity, item, "Equatable", visited)
     }
     false
 }
@@ -435,19 +434,18 @@ sema_comparability_named_fields: fn(environment: SemaScopeEnvironment, program: 
 // `auto_derive` without a `#Comparable` marker, refuses it, and a handwritten
 // implementation still wins.
 sema_comparability_ordering_selected: fn(program: SemaProgramTables, module_identity: ModuleID, name: String) -> Bool Never! {
-    if program.registration_graph == .Val(graph) {
-        resolved: sema_type_graph_lookup_symbol(graph, module_identity, name) ?? return true
-        if sema_resolved_kind(graph, resolved) != SymbolKind.Type -> return true
-        row: sema_type_graph_resolved_nominal_row(graph, resolved) ?? return true
-        // Matched in place: a pattern on the indexed path copies the whole item.
-        nominal: graph.modules[row.module_index].nominals[row.row]
-        if nominal.source == .SourceAST(item) {
-            declared: graph.modules[row.module_index].declared_trait_impls
-            if item == {
-                .Struct(value) -> return (owned_trait_requested(value.type_markers, "Comparable") ?? value.auto_derive_default) || sema_type_metadata_has_trait_block(value.trait_impls, "Comparable") || sema_type_metadata_has_explicit_impl(declared, value.name, "Comparable")
-                .Enum(value) -> return (owned_trait_requested(value.type_markers, "Comparable") ?? value.auto_derive_default) || sema_type_metadata_has_trait_block(value.trait_impls, "Comparable") || sema_type_metadata_has_explicit_impl(declared, value.name, "Comparable")
-                .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> return true
-            }
+    graph: program.registration_graph
+    resolved: sema_type_graph_lookup_symbol(graph, module_identity, name) ?? return true
+    if sema_resolved_kind(graph, resolved) != SymbolKind.Type -> return true
+    row: sema_type_graph_resolved_nominal_row(graph, resolved) ?? return true
+    // Matched in place: a pattern on the indexed path copies the whole item.
+    nominal: graph.modules[row.module_index].nominals[row.row]
+    if nominal.source == .SourceAST(item) {
+        declared: graph.modules[row.module_index].declared_trait_impls
+        if item == {
+            .Struct(value) -> return (owned_trait_requested(value.type_markers, "Comparable") ?? value.auto_derive_default) || sema_type_metadata_has_trait_block(value.trait_impls, "Comparable") || sema_type_metadata_has_explicit_impl(declared, value.name, "Comparable")
+            .Enum(value) -> return (owned_trait_requested(value.type_markers, "Comparable") ?? value.auto_derive_default) || sema_type_metadata_has_trait_block(value.trait_impls, "Comparable") || sema_type_metadata_has_explicit_impl(declared, value.name, "Comparable")
+            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> return true
         }
     }
     true
@@ -559,23 +557,22 @@ sema_comparability_stored_parameter: fn(item: Item, name: String) -> Bool Never!
 // The declaration-owned fields resolve here; absent metadata keeps the strict
 // rule.
 sema_comparability_equatable_arguments: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type, args: [Type]) -> Bool Never! {
-    if program.registration_graph == .Val(graph) {
-        name: sema_type_graph_base_name(ty) ?? ""
-        resolved: sema_type_graph_lookup_symbol(graph, environment.module_identity, name)
-        if resolved == .Val(symbol) {
-            row: sema_type_graph_resolved_nominal_row(graph, symbol)
-            if row == .Val(nominal_row) {
-                nominal: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
-                if nominal.source == .SourceAST(item) {
-                    if item == .Struct(_) || item == .Enum(_) {
-                        if nominal.generic_params.len() != args.len() -> return false
-                        loop (index, parameter) in nominal.generic_params {
-                            if sema_comparability_stored_parameter(item, parameter.name) && !sema_type_equatable(environment, program, args[index]) {
-                                return false
-                            }
+    graph: program.registration_graph
+    name: sema_type_graph_base_name(ty) ?? ""
+    resolved: sema_type_graph_lookup_symbol(graph, environment.module_identity, name)
+    if resolved == .Val(symbol) {
+        row: sema_type_graph_resolved_nominal_row(graph, symbol)
+        if row == .Val(nominal_row) {
+            nominal: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
+            if nominal.source == .SourceAST(item) {
+                if item == .Struct(_) || item == .Enum(_) {
+                    if nominal.generic_params.len() != args.len() -> return false
+                    loop (index, parameter) in nominal.generic_params {
+                        if sema_comparability_stored_parameter(item, parameter.name) && !sema_type_equatable(environment, program, args[index]) {
+                            return false
                         }
-                        return true
                     }
+                    return true
                 }
             }
         }
@@ -639,10 +636,9 @@ sema_type_equatable: fn(environment: SemaScopeEnvironment, program: SemaProgramT
 sema_comparability_bare_core_enum: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, name: String) -> Bool? Never! {
     leaf: sema_serde_named_leaf(name)
     cases: core_enum_cases(leaf) ?? core_enum_payload_variants(leaf) ?? return None
-    if program.registration_graph == .Val(graph) {
-        if sema_type_resolve_nominal_row(graph, Type.Named{name: name}, environment.module_identity) == .Val(row) {
-            if !graph.modules[row.module_index].nominals[row.row].compiler_owned -> return None
-        }
+    graph: program.registration_graph
+    if sema_type_resolve_nominal_row(graph, Type.Named{name: name}, environment.module_identity) == .Val(row) {
+        if !graph.modules[row.module_index].nominals[row.row].compiler_owned -> return None
     }
     loop case_name in cases {
         payload: core_enum_variant_payload(leaf, case_name) ?? return Val(false)
@@ -834,12 +830,10 @@ sema_comparability_definition_map_key: fn(environment: SemaScopeEnvironment, pro
 // The key type of a KeyBy type (the `Key` its `impl KeyBy` binds), or None
 // when `definition` implements no KeyBy.
 sema_comparability_key_type: fn(program: SemaProgramTables, definition: TTypeDef) -> Type? Never! {
-    if program.registration_graph == .Val(graph) {
-        caller: sema_type_module_row(graph, definition.module_identity)
-        row: sema_type_resolve_nominal_row_at(graph, Type.Named{name: definition.name}, caller) ?? return None
-        return sema_comparability_nominal_key(graph, graph.modules[row.module_index].nominals[row.row])
-    }
-    None
+    graph: program.registration_graph
+    caller: sema_type_module_row(graph, definition.module_identity)
+    row: sema_type_resolve_nominal_row_at(graph, Type.Named{name: definition.name}, caller) ?? return None
+    sema_comparability_nominal_key(graph, graph.modules[row.module_index].nominals[row.row])
 }
 
 // The `Key` a KeyBy implementation of `nominal` binds, written as its own
@@ -889,12 +883,10 @@ SemaWrittenOrder: struct {
 // walk keeps apart, so it is no Map key or Set element. None when every such
 // impl is derived.
 sema_comparability_written_order: fn(program: SemaProgramTables, definition: TTypeDef) -> SemaWrittenOrder? Never! {
-    if program.registration_graph == .Val(graph) {
-        caller: sema_type_module_row(graph, definition.module_identity)
-        row: sema_type_resolve_nominal_row_at(graph, Type.Named{name: definition.name}, caller) ?? return None
-        return sema_comparability_nominal_written_order(graph, row)
-    }
-    None
+    graph: program.registration_graph
+    caller: sema_type_module_row(graph, definition.module_identity)
+    row: sema_type_resolve_nominal_row_at(graph, Type.Named{name: definition.name}, caller) ?? return None
+    sema_comparability_nominal_written_order(graph, row)
 }
 
 sema_comparability_nominal_written_order: fn(graph: SemaRegistrationGraph, row: SemaRegistrationRowRef) -> SemaWrittenOrder? Never! {
@@ -950,13 +942,11 @@ sema_type_map_key_refusal: fn(environment: SemaScopeEnvironment, program: SemaPr
 // `error` with the `jet fix` that moves `written`, a type's written rule, to
 // KeyBy (sema_key_by_migration), when there is one.
 sema_key_by_migrated: fn(error: ^^Diagnostic, program: SemaProgramTables, written: SemaWrittenOrder) -> Diagnostic {
-    if program.registration_graph == .Val(graph) {
-        migration := sema_key_by_migration(graph, written) ?? return error
-        migrated := diagnostic_registry_with_edit_grade(error, migration.edit, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving)
-        migrated.fix_calls = migration.calls.move()
-        return migrated
-    }
-    error
+    graph: program.registration_graph
+    migration := sema_key_by_migration(graph, written) ?? return error
+    migrated := diagnostic_registry_with_edit_grade(error, migration.edit, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving)
+    migrated.fix_calls = migration.calls.move()
+    migrated
 }
 
 // The written Equatable or Comparable of the nominal `ty` names, when it has

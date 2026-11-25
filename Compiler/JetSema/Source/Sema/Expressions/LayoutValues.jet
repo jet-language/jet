@@ -362,30 +362,31 @@ sema_expr_layout_compare_literal: fn(op: BinOp, lhs: Type, right: Expr) -> Bool 
 }
 
 sema_expression_measurement_inner: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Type? {
-    if program.registration_graph == .Val(graph) {
-        resolved: sema_type_resolve_declared_with_generics(graph, ty, environment.module_identity, environment.generic_params)
-        name: if resolved == {
-            .Apply(name, args) -> if args.len() == 1 -> name else -> ""
-            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> ""
-        }
-        if name != "Measurement" && name != "core.units.Measurement" && !(core_source_owns_type(name) && core_identity_is(name, "core.units", "Measurement")) {
+    graph: program.registration_graph
+    // Snapshot: a lone program loads no core.units, so no type is a Measurement.
+    if graph.mode == .Snapshot -> return None
+    resolved: sema_type_resolve_declared_with_generics(graph, ty, environment.module_identity, environment.generic_params)
+    name: if resolved == {
+        .Apply(name, args) -> if args.len() == 1 -> name else -> ""
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> ""
+    }
+    if name != "Measurement" && name != "core.units.Measurement" && !(core_source_owns_type(name) && core_identity_is(name, "core.units", "Measurement")) {
+        return None
+    }
+    nominal_row: sema_type_resolve_nominal_row(graph, resolved, environment.module_identity)
+    if nominal_row == .Val(row) {
+        if graph.modules[row.module_index].module_name != "core.units" || graph.modules[row.module_index].nominals[row.row].symbol.name != "Measurement" {
             return None
         }
-        nominal_row: sema_type_resolve_nominal_row(graph, resolved, environment.module_identity)
-        if nominal_row == .Val(row) {
-            if graph.modules[row.module_index].module_name != "core.units" || graph.modules[row.module_index].nominals[row.row].symbol.name != "Measurement" {
-                return None
-            }
+    }
+    if nominal_row == None && name != "Measurement" && !core_source_owns_type(name) {
+        return None
+    }
+    if resolved == {
+        .Apply(_, args) -> {
+            if args.len() == 1 -> return Val(args[0])
         }
-        if nominal_row == None && name != "Measurement" && !core_source_owns_type(name) {
-            return None
-        }
-        if resolved == {
-            .Apply(_, args) -> {
-                if args.len() == 1 -> return Val(args[0])
-            }
-            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
-        }
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }
     None
 }
@@ -400,7 +401,7 @@ sema_expression_is_float_measurement: fn(ty: Type, environment: SemaScopeEnviron
 // never its name. E1015 when core.units is loaded and nothing fills `role`.
 sema_expression_measurement_source_call: fn(role: String, values: [TExpr], result_type: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> TExpr? {
     _ := sema_call_core_module_identity(environment, program, "core.units") ?? return None
-    graph: program.registration_graph ?? return None
+    graph: program.registration_graph
     helper: sema_core_role_function(graph, role) ?? {
         diagnostics.push(sema_missing_core_role(role, span))
         return None
@@ -414,14 +415,12 @@ sema_expression_measurement_source_call: fn(role: String, values: [TExpr], resul
 // the module where the call is checked has loaded.
 sema_expression_core_source_call: fn(module_name: String, function: String, values: [TExpr], result_type: Type, type_args: [Type], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TExpr? {
     source_identity: sema_call_core_module_identity(environment, program, module_name) ?? return None
-    if program.registration_graph == .Val(graph) {
-        source_index: sema_registration_module_index(graph, source_identity) ?? return None
-        callee: sema_registration_direct_symbol(graph.modules[source_index], function) ?? return None
-        callee_id: sema_registration_callable_id(graph, callee.symbol.id) ?? return None
-        arguments: loop value in values -> TCallArg{value: value.copy(), template_items: [SymbolID]{}, borrow: !sema_call_is_scalar(value.ty), mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
-        return Val(sema_tree_node(result_type, TExprKind.Call{callee: callee_id, type_args: type_args, args: arguments}, span))
-    }
-    None
+    graph: program.registration_graph
+    source_index: sema_registration_module_index(graph, source_identity) ?? return None
+    callee: sema_registration_direct_symbol(graph.modules[source_index], function) ?? return None
+    callee_id: sema_registration_callable_id(graph, callee.symbol.id) ?? return None
+    arguments: loop value in values -> TCallArg{value: value.copy(), template_items: [SymbolID]{}, borrow: !sema_call_is_scalar(value.ty), mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
+    Val(sema_tree_node(result_type, TExprKind.Call{callee: callee_id, type_args: type_args, args: arguments}, span))
 }
 
 sema_call_try_measurement_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {

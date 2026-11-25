@@ -102,7 +102,7 @@ SemaContextFieldKey: struct {
 // and defaulting to it.
 sema_context_field_key: fn(name: String, program: SemaProgramTables) -> SemaContextFieldKey? {
     module_name: sema_context_field_module(name) ?? return None
-    graph: program.registration_graph ?? return None
+    graph: program.registration_graph
     loop module_index in 0..<graph.modules.len() {
         if graph.modules[module_index].module_name != module_name -> next
         if name == "on_stop" {
@@ -183,12 +183,11 @@ sema_context_key_resolve: fn(name: String, environment: SemaScopeEnvironment, pr
 // Whether the constant `symbol` is declared with `#ContextKey`, read from
 // its declaring module's row.
 sema_context_key_symbol: fn(program: SemaProgramTables, symbol: Symbol) -> Bool Never! {
-    if program.registration_graph == .Val(graph) {
-        module_index: sema_registration_module_index(graph, symbol.module_identity) ?? return false
-        loop constant in graph.modules[module_index].constants {
-            if constant.symbol.id == symbol.id {
-                return sema_context_key_declared(constant.declaration)
-            }
+    graph: program.registration_graph
+    module_index: sema_registration_module_index(graph, symbol.module_identity) ?? return false
+    loop constant in graph.modules[module_index].constants {
+        if constant.symbol.id == symbol.id {
+            return sema_context_key_declared(constant.declaration)
         }
     }
     false

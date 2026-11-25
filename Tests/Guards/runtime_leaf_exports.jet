@@ -21,13 +21,19 @@
 //   own, or the one an RL_FIELD_WORDS row gives it;
 // - the ownership of each argument against a Core.rows dispatcher row that
 //   routes the same export: a binding crosses a Word as its native I64 and
-//   lends any other argument (JetIR BuildForeign.jet
-//   ir_runtime_binding_call), so a row that hands the export an exact Int or
-//   moves a value into it names an export the binding calls wrongly.
+//   a taken (`^^`) argument consumed, and lends any other argument (JetIR
+//   BuildForeign.jet ir_runtime_binding_call), so a row that hands the export
+//   an exact Int, or moves a value into it where the binding lends one, or
+//   lends one where the binding moves it, names an export the binding calls
+//   wrongly;
+// - each taken parameter of a runtime Public binding against its interface
+//   row, which must keep the `^^` the runtime pack renders (JetDriver
+//   RuntimeInterface.jet): a row that drops it lends what the export ends.
 use rl_files: core.files
 
 RL_INTERFACE_PATH: "Compiler/JetFoundation/Source/Registry/RuntimeInterface.jet"
 RL_RUNTIME_SOURCES: "Compiler/JetRuntime/Source"
+RL_PUBLIC_SOURCES: "Compiler/JetRuntime/Source/Public/"
 RL_CORE_ROWS_PATH: "Compiler/Prelude/Core.rows"
 
 // The integer types that cross as one native word.
@@ -44,6 +50,7 @@ RL_FIELD_WORDS: [String]{
     "jet_entries8_read_dir status=kind status_code=code status_reason=cause",
     "jet_fs_temp_path_sample_raw clock_available=available",
     "jet_log_span_allocate_raw id=item0 name=item1",
+    "jet_process_spec_keep_open_raw available=supported assigned_fd=assigned",
     "jet_process_signal_disposition_raw disposition=value",
     "jet_terminal8_key_bytes bytes=data",
     "jet_terminal8_line read_error=error",
@@ -86,7 +93,7 @@ RLField: struct {
 // The C side a binding's Jet signature projects: the type of each argument
 // word, the number of out words after them, the tuple fields among those,
 // the returned type ("" for none) and whether each Jet parameter is lent
-// (false: a Word crossing as its native I64).
+// (false: a Word crossing as its native I64, or a taken (`^^`) argument).
 RLShape: struct {
     inputs: [String],
     outs: Int,
@@ -289,10 +296,15 @@ rl_shape: fn(declaration: String) -> RLShape? Never! {
     loop param in rl_split(text.slice(open + 1, close), 44) {
         pair: param.split_once(": ") ?? return None
         ty := pair.after.trim()
-        written: ty.starts_with("^")
-        if written -> ty = ty.slice(1, ty.len())
+        taken: ty.starts_with("^^")
+        written: !taken && ty.starts_with("^")
+        if taken {
+            ty = ty.slice(2, ty.len())
+        } else if written {
+            ty = ty.slice(1, ty.len())
+        }
         carrier: rl_carrier(ty)
-        lent.push(carrier != "Word")
+        lent.push(carrier != "Word" && !taken)
         // Only a Word's mask changes its word, and only a Text, List,
         // handle or Option argument is a value a consuming export frees.
         owned.push(carrier != "Flag" && carrier != "Float")
@@ -458,6 +470,40 @@ rl_findings: fn(bindings: [RLBinding], exports: [String:RLExport], rows: [RLRow]
     findings
 }
 
+// The taken (`^^`) parameters of one Public source's bindings that the
+// interface `bindings` drop: each must keep its mark in its binding's row,
+// which the runtime pack renders from the declaration (JetDriver
+// RuntimeInterface.jet), or the call lends what the export ends.
+rl_taken_findings: fn(source: String, bindings: [RLBinding]) -> [String] Never! {
+    findings := [String]{}
+    module_name := ""
+    loop line in source.lines() {
+        if !line.starts_with(" ") && line.ends_with(": module {{") {
+            head: line.split_once(": module {{") ?? next
+            module_name = "jet.runtime.{head.before}"
+            next
+        }
+        text := line.trim()
+        if !text.starts_with("#Import(c) ") -> next
+        text = (text.slice("#Import(c) ".len(), text.len()).split_once(" = \"") ?? next).before
+        if text.starts_with("priv ") -> text = text.slice("priv ".len(), text.len())
+        parts: text.split_once(": fn(") ?? next
+        open: parts.before.len() + ": fn".len()
+        close: rl_close(text, open)
+        if close < 0 -> next
+        loop param in rl_split(text.slice(open + 1, close), 44) {
+            pair: param.split_once(": ") ?? next
+            if !pair.after.trim().starts_with("^^") -> next
+            kept := false
+            loop binding in bindings {
+                if binding.module_name == module_name && binding.member == parts.before && binding.declaration.contains(param) -> kept = true
+            }
+            if !kept -> findings.push("{module_name}.{parts.before} takes `{param}`, which its interface row does not declare; the interface keeps a taken parameter's `^^`")
+        }
+    }
+    findings
+}
+
 #Test("every jet.runtime binding crosses the words its runtime export reads") {
     guards_enter_root()
     bindings: rl_bindings(rl_files.read(RL_INTERFACE_PATH) ?? panic("read {RL_INTERFACE_PATH}: {err}"))
@@ -465,10 +511,20 @@ rl_findings: fn(bindings: [RLBinding], exports: [String:RLExport], rows: [RLRow]
     sources := [String]{}
     rl_walk(RL_RUNTIME_SOURCES, sources)
     exports := [String:RLExport]{}
-    loop path in sources -> rl_exports(rl_files.read(path) ?? panic("read {path}: {err}"), exports)
+    taken := [String]{}
+    loop path in sources {
+        text: rl_files.read(path) ?? panic("read {path}: {err}")
+        rl_exports(text, exports)
+        if path.starts_with(RL_PUBLIC_SOURCES) {
+            loop finding in rl_taken_findings(text, bindings) -> taken.push(finding)
+        }
+    }
     rows: rl_rows(rl_files.read(RL_CORE_ROWS_PATH) ?? panic("read {RL_CORE_ROWS_PATH}: {err}"))
-    assert(rows.len() > 100, "Core.rows has only {rows.len()} rows with an export")
+    // A parse that finds no row checks nothing. No fixed floor: the rows
+    // shrink as the Core API moves to Jet declarations.
+    assert(rows.len() > 0, "Core.rows has no rows with an export")
     assert_eq(rl_findings(bindings, exports, rows, RL_FIELD_WORDS).join("\n"), "")
+    assert_eq(taken.join("\n"), "")
 }
 
 #Test("a binding whose fields, words or ownership disagree with its export is named") {
@@ -490,4 +546,24 @@ rl_findings: fn(bindings: [RLBinding], exports: [String:RLExport], rows: [RLRow]
         "jet.runtime.process.spec_parent_death crosses &[true]; the Core.rows row core.process.__spec_parent_death gives jet_process_spec_parent_death &[false]",
         "jet.runtime.term.put crosses 3 argument and 1 out words, 4 in all; jet_put takes 3 (bytes, stderr, some)",
     }.join("\n"))
+}
+
+#Test("a taken parameter crosses consumed, and a row that lends it or an interface that drops it is named") {
+    interface: "    RuntimeInterfaceRow{{module_name: \"jet.runtime.process\", member: \"spec_parent_death\", declaration: \"priv spec_parent_death: fn(spec: ^^ProcessSpec) -[Exec]> ProcessSpec\", symbol: \"jet_process_spec_parent_death\"}},\n    RuntimeInterfaceRow{{module_name: \"jet.runtime.process\", member: \"spec_detached\", declaration: \"priv spec_detached: fn(spec: ^^ProcessSpec) -[Exec]> ProcessSpec\", symbol: \"jet_process_spec_detached\"}},\n    RuntimeInterfaceRow{{module_name: \"jet.runtime.process\", member: \"spec_clear_env\", declaration: \"\", symbol: \"jet_process_spec_clear_env\"}},\n"
+    runtime: "#Export(c) jet_process_spec_parent_death: fn(value: I64) -> I64 {{\n#Export(c) jet_process_spec_detached: fn(value: I64) -> I64 {{\n"
+    core_rows: "dispatcher_row plain core.process __spec_parent_death | CoreCallRecord.new(\"core.process\", \"__spec_parent_death\", \"jet_process_spec_parent_death\", true, &[false])\ndispatcher_row plain core.process __spec_detached | CoreCallRecord.new(\"core.process\", \"__spec_detached\", \"jet_process_spec_detached\", true, &[true])\n"
+    bindings: rl_bindings(interface)
+    assert_eq(bindings.len(), 3)
+    shape: rl_shape(bindings[0].declaration) ?? panic("the guard can't read {bindings[0].declaration}")
+    assert_eq(rl_mask_text(shape.lent), "&[false]")
+    exports := [String:RLExport]{}
+    rl_exports(runtime, exports)
+    rows: rl_rows(core_rows)
+    assert_eq(rows.len(), 2)
+    // The taken spec agrees with the row that consumes it; the row that
+    // lends its spec disagrees.
+    assert_eq(rl_findings([RLBinding]{bindings[0], bindings[1]}, exports, rows, [String]{}).join("\n"), "jet.runtime.process.spec_detached crosses &[false]; the Core.rows row core.process.__spec_detached gives jet_process_spec_detached &[true]")
+    // A Public binding's `^^` must stay in its interface row.
+    public: "process: module {{\n    #Import(c) priv spec_parent_death: fn(spec: ^^ProcessSpec) -[Exec]> ProcessSpec = \"jet_process_spec_parent_death\"\n    #Import(c) priv spec_clear_env: fn(spec: ^^ProcessSpec) -> ProcessSpec = \"jet_process_spec_clear_env\"\n}}\n"
+    assert_eq(rl_taken_findings(public, bindings).join("\n"), "jet.runtime.process.spec_clear_env takes `spec: ^^ProcessSpec`, which its interface row does not declare; the interface keeps a taken parameter's `^^`")
 }

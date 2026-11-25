@@ -22,7 +22,7 @@ use {
         Item,
         Span,
     ]
-    jet_semindex.[semindex_module_alias, semindex_summaries, semindex_summary, semindex_witness]
+    jet_semindex.[semindex_module_alias, semindex_summaries, semindex_summary, semindex_witness, semindex_witnesses]
 }
 
 JetCLIRightsProvenance: struct {
@@ -340,6 +340,7 @@ jet_cli_inspect_rights: fn(result: JetDriverCompileResult, project: Bool, target
     }
     callables: jet_cli_rights_sorted(views)
     summaries: semindex_summaries(modules)
+    witnesses: semindex_witnesses(summaries, modules)
     application: jet_cli_rights_authority(result)
     scope_chain: [JetCLIScopeFrame]{JetCLIScopeFrame{scope: "package", name: application.authority, grants: jet_cli_rights_normalize(application.granted), provenance: JetCLIRightsProvenance{source: application.authority, reason: "selected application authority"}}}
     scope_name: if project -> "project" else -> "explicit-file"
@@ -376,7 +377,7 @@ jet_cli_inspect_rights: fn(result: JetDriverCompileResult, project: Bool, target
         call_chain := [String]{view.key}
         if summary == .Val(found) {
             loop effect_name in found.solved {
-                witness: semindex_witness(view.key, effect_name, summaries, [String]{}, modules) ?? next
+                witness: semindex_witness(witnesses, summaries, view.key, effect_name) ?? next
                 if witness.path.len() > 0 -> call_chain = witness.path
                 break
             }
@@ -393,7 +394,7 @@ jet_cli_inspect_rights: fn(result: JetDriverCompileResult, project: Bool, target
             spans := [JetCLIStatusValue]{}
             if summary == .Val(found) {
                 if found.solved.contains(denial.right) {
-                    if semindex_witness(view.key, denial.right, summaries, [String]{}, modules) == .Val(witness) {
+                    if semindex_witness(witnesses, summaries, view.key, denial.right) == .Val(witness) {
                         loop span in witness.spans {
                             spans.push(jet_cli_rights_span_value(view.source, span.start, span.end))
                         }

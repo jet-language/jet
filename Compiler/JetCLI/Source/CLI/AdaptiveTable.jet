@@ -111,8 +111,8 @@ jet_cli_table: fn(input_columns: ^^[JetCLITableColumn], input_rows: ^^[JetCLITab
     // cloning, or repeated tail shifts are needed.
     normalized_columns := [JetCLITableColumn]{}
     columns.reverse()
-    loop columns.len() > 0 {
-        column := columns.pop() ?? panic("nonempty table column owner disappeared")
+    loop columns.pop() == .Val(popped) {
+        column := popped
         kind: column.kind
         alignment: column.alignment
         // Construct the replacement while the old record is fully owned;
@@ -126,14 +126,13 @@ jet_cli_table: fn(input_columns: ^^[JetCLITableColumn], input_rows: ^^[JetCLITab
     columns = normalized_columns.move()
     normalized_rows := [JetCLITableRow]{}
     rows.reverse()
-    loop rows.len() > 0 {
-        row := rows.pop() ?? panic("nonempty table row owner disappeared")
+    loop rows.pop() == .Val(popped) {
+        row := popped
         if row.cells.len() > columns.len() -> truncated = true
         loop row.cells.len() > columns.len() -> _: row.cells.pop()
         normalized_cells := [JetCLITableCell]{}
         row.cells.reverse()
-        loop row.cells.len() > 0 {
-            cell: row.cells.pop() ?? panic("nonempty table cell owner disappeared")
+        loop row.cells.pop() == .Val(cell) {
             normalized: jet_cli_table_normalize_cell(cell)
             normalized_cells.push(normalized)
         }

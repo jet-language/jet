@@ -3,7 +3,7 @@
 // types the script's own statements give them, which only a check of the
 // generated `run: fn` (sema_script_entry) knows, and a parameter is `^` when
 // a check of the function's body finds it written.
-use jet_foundation.[AST_NODE_GENERATED, ASTTables, AccessConvention, BodyTree, DIAGNOSTIC_ERROR, DeclID, Diagnostic, Expr, ExprNode, FnBody, Func, Interner, Item, ModuleID, Span, Symbol, SymbolKind, TEffectSpan, TFuncKind, TLocal, TTypeDef, TypeKind, Type, ast_expr, ast_visit_body, body_node, body_stmt, body_tree_remap_types, body_type_id, checked_builtin_mutates_receiver, compiler_transfer_rows, decl_table_add, decl_table_index, delta_has_rows, diagnostic_with_label, interner_empty, interner_merge_delta, module_text, symbol_is_local, symbol_key_text, symbol_local_keys_text, type_kind]
+use jet_foundation.[AST_NODE_GENERATED, ASTTables, AccessConvention, BodyTree, DIAGNOSTIC_ERROR, DeclID, Diagnostic, Expr, ExprNode, FnBody, Func, Interner, Item, ModuleID, Span, Symbol, SymbolKind, TEffectSpan, TFuncKind, TLocal, TTypeDef, TypeKind, Type, ast_expr, ast_visit_body, body_node, body_stmt, body_tree_remap_types, body_type_id, checked_builtin_mutates_receiver, compiler_transfer_rows, decl_table_add, decl_table_index, delta_has_rows, diagnostic_with_label, interner_merge_delta, module_text, symbol_is_local, symbol_key_text, symbol_local_keys_text, type_kind]
 
 // A script variable as the script's own statements bind it: its checked type,
 // and whether it is a `:=` binding a function may change.
@@ -79,7 +79,7 @@ sema_script_probe_over: fn(graph: ^^SemaRegistrationGraph, modules: ^[SemaGraphM
         compiler_transfer_rows<TTypeDef>(types, modules[row].declarations.type_defs)
     }
     fixed_length_write_params: sema_fixed_length_write_params_in_graph(graph)
-    program := sema_program_tables_init(Val(graph.move()), types)
+    program := sema_program_tables_init(graph.move(), types)
     environment := sema_check_pass_environment(program, fixed_length_write_params, SemaComptimeBodyValues{})
     scopes := sema_check_module_summary_scope_init(environment, program, module_index)
     sema_scope_environment_enter_module(environment, program, module_index, SemaComptimeBodyValues{})
@@ -90,9 +90,8 @@ sema_script_probe_over: fn(graph: ^^SemaRegistrationGraph, modules: ^[SemaGraphM
 // checks read: false when its graph has no such module.
 sema_script_probe_enter: fn(probe: ^SemaScriptProbe, module_identity: ModuleID) -> Bool {
     found := Int?{None}
-    if probe.program.registration_graph == .Val(graph) {
-        found = sema_registration_module_index(graph, module_identity)
-    }
+    graph: probe.program.registration_graph
+    found = sema_registration_module_index(graph, module_identity)
     module_index: found ?? return false
     if module_index == probe.module_index -> return true
     probe.scopes = sema_check_module_summary_scope_init(probe.environment, probe.program, module_index)
@@ -103,7 +102,7 @@ sema_script_probe_enter: fn(probe: ^SemaScriptProbe, module_identity: ModuleID) 
 
 // The checked body of the entry's top-level function `name`.
 sema_script_probe_check: fn(probe: ^SemaScriptProbe, name: String) -> FnBody? {
-    graph: probe.program.registration_graph ?? return None
+    graph: probe.program.registration_graph
     item_index: sema_script_entry_function_item(graph.modules[probe.module_index].program.items, name) ?? return None
     job: SemaBodyJob.TopLevel{item_index: item_index}
     owner_id: sema_check_registered_function_id(job, probe.module_index, probe.environment, probe.program)
@@ -122,11 +121,10 @@ sema_script_probe_check: fn(probe: ^SemaScriptProbe, name: String) -> FnBody? {
 // `function`, that check's body, renumbered to name them there.
 sema_script_probe_merge_types: fn(probe: ^SemaScriptProbe, function: ^FnBody) Never! {
     delta := probe.scopes.type_delta.pop() ?? return
-    if ^probe.program.registration_graph == .Val(graph) {
-        if delta_has_rows(delta) {
-            remap: interner_merge_delta(graph.interner, delta.move())
-            body_tree_remap_types(function.tree, remap)
-        }
+    graph: ^probe.program.registration_graph
+    if delta_has_rows(delta) {
+        remap: interner_merge_delta(graph.interner, delta.move())
+        body_tree_remap_types(function.tree, remap)
     }
 }
 
@@ -187,17 +185,11 @@ sema_script_probe_check_func: fn(probe: ^SemaScriptProbe, func: Func) -> SemaScr
 // answers.
 sema_script_probe_answer: fn(probe: ^SemaScriptProbe, plan: SemaFunctionMemoryPlan, at: Int, expression: ^^Expr) -> SemaEvalProbeAnswer? {
     module_index: probe.module_index
-    found := SemaBodyJob?{None}
-    if probe.program.registration_graph == .Val(graph) {
-        found = sema_script_probe_job(graph, module_index, at)
-    }
-    job: found ?? return None
-    if ^probe.program.registration_graph == .Val(graph) {
-        asked := SemaEvalProbe{module_identity: graph.modules[module_index].module_identity, offset: at, expressions: [Expr]{expression.move()}}
-        graph.eval_probes = Val(sema_eval_probes([SemaEvalProbe]{asked.move()}))
-    }
+    job: sema_script_probe_job(probe.program.registration_graph, module_index, at) ?? return None
+    asked := SemaEvalProbe{module_identity: probe.program.registration_graph.modules[module_index].module_identity, offset: at, expressions: [Expr]{expression.move()}}
+    probe.program.registration_graph.eval_probes = Val(sema_eval_probes([SemaEvalProbe]{asked.move()}))
     checked := sema_script_probe_recheck(probe, plan, job)
-    if ^probe.program.registration_graph == .Val(graph) -> graph.eval_probes = None
+    probe.program.registration_graph.eval_probes = None
     chosen := SemaEvalProbeAnswer?{None}
     loop answer in checked.eval_answers.move() {
         if chosen == None || answer.exact -> chosen = Val(answer)
@@ -336,22 +328,21 @@ sema_script_probe_append: fn(probe: ^SemaScriptProbe, item: ^^Item, functions: [
     // union does (sema_failure_union_mint).
     mark := SemaGraphModuleMark?{None}
     item_index := -1
-    if ^probe.program.registration_graph == .Val(graph) {
-        // A call names the declaration row its callable row shares
-        // (sema_registration_index_callables).
-        if graph.decls.rows.len() != graph.callables.len() -> return None
-        marked: sema_graph_module_mark(graph.modules[module_index])
-        registered := [Diagnostic]{}
-        registered_module: module_text(graph.module_table, graph.modules[module_index].module_identity)
-        added: sema_registration_add_root(graph.modules[module_index], registered_module, graph.symbols, taken, probe.environment.source_file, probe.environment.source_origin, probe.environment.source_segments, registered)
-        if !added || registered.len() > 0 {
-            sema_graph_module_rollback(graph.modules[module_index], marked, name)
-            return None
-        }
-        graph.modules[module_index].program.items.push(taken.move())
-        item_index = graph.modules[module_index].program.items.len() - 1
-        mark = Val(marked)
+    graph: ^probe.program.registration_graph
+    // A call names the declaration row its callable row shares
+    // (sema_registration_index_callables).
+    if graph.decls.rows.len() != graph.callables.len() -> return None
+    marked: sema_graph_module_mark(graph.modules[module_index])
+    registered := [Diagnostic]{}
+    registered_module: module_text(graph.module_table, graph.modules[module_index].module_identity)
+    added: sema_registration_add_root(graph.modules[module_index], registered_module, graph.symbols, taken, probe.environment.source_file, probe.environment.source_origin, probe.environment.source_segments, registered)
+    if !added || registered.len() > 0 {
+        sema_graph_module_rollback(graph.modules[module_index], marked, name)
+        return None
     }
+    graph.modules[module_index].program.items.push(taken.move())
+    item_index = graph.modules[module_index].program.items.len() - 1
+    mark = Val(marked)
     mark_at: mark ?? return None
     job: SemaBodyJob.TopLevel{item_index: item_index}
     owner_id: sema_check_registered_function_id(job, module_index, probe.environment, probe.program)
@@ -374,25 +365,15 @@ sema_script_probe_append: fn(probe: ^SemaScriptProbe, item: ^^Item, functions: [
     }
     sema_script_probe_call_effects(probe.program, function, calls)
     sema_eval_held_failure_settle(function, candidate, checked.failure.move(), functions, by_key)
-    pure := false
-    if probe.program.registration_graph == .Val(graph_ro) {
-        pure = sema_script_probe_pure(graph_ro.interner, function, functions, by_key)
-    } else if probe.program.interner == .Val(fallback) {
-        pure = sema_script_probe_pure(fallback, function, functions, by_key)
-    } else {
-        pure = sema_script_probe_pure(interner_empty(), function, functions, by_key)
-    }
+    pure: sema_script_probe_pure(probe.program.registration_graph.interner, function, functions, by_key)
     if (candidate && function.failure_carrier != .Infallible) || !pure {
         return sema_script_probe_unappend(probe, module_index, mark_at, scope_mark, name)
     }
-    decl := DeclID?{None}
-    if ^probe.program.registration_graph == .Val(held) {
-        row: held.modules[module_index].functions.len() - 1
-        decl = Val(decl_table_add(held.decls, held.modules[module_index].functions[row].symbol))
-        decl_table_index(held.decls)
-        held.callables.push(SemaRegistrationCallableRow.Function{module_index: module_index, row: row})
-    }
-    id: decl ?? panic("a probe's append lost its registration")
+    held: ^probe.program.registration_graph
+    row: held.modules[module_index].functions.len() - 1
+    id: decl_table_add(held.decls, held.modules[module_index].functions[row].symbol)
+    decl_table_index(held.decls)
+    held.callables.push(SemaRegistrationCallableRow.Function{module_index: module_index, row: row})
     Val(SemaScriptProbeAppended{function: function.move(), decl: id})
 }
 
@@ -401,9 +382,8 @@ sema_script_probe_append: fn(probe: ^SemaScriptProbe, item: ^^Item, functions: [
 // `name` (sema_script_probe_append): None.
 sema_script_probe_unappend: fn(probe: ^SemaScriptProbe, module_index: Int, mark: SemaGraphModuleMark, scope_mark: SemaScopeMark, name: String) -> SemaScriptProbeAppended? {
     sema_scope_rollback(probe.scopes, scope_mark)
-    if ^probe.program.registration_graph == .Val(graph) {
-        sema_graph_module_rollback(graph.modules[module_index], mark, name)
-    }
+    graph: ^probe.program.registration_graph
+    sema_graph_module_rollback(graph.modules[module_index], mark, name)
     None
 }
 
@@ -626,7 +606,7 @@ sema_script_variable_read: fn(name: String, call_span: Span) -> Expr Never! {
 // which passes it by name. `declared` is the function's name, where its
 // parameter's default is spanned.
 sema_script_unbound_variable: fn(declared: Span, name: String, call_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Diagnostic {
-    graph: program.registration_graph ?? return sema_unknown_name_in(name, call_span, scopes)
+    graph: program.registration_graph
     module_index: sema_registration_module_index(graph, environment.module_identity) ?? return sema_unknown_name_in(name, call_span, scopes)
     items: graph.modules[module_index].program.items
     helper: sema_script_function_at(items, declared) ?? return sema_unknown_name_in(name, call_span, scopes)

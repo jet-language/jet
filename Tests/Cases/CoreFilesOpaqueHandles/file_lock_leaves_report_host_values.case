@@ -1,0 +1,10 @@
+# core.files' locks run on the jet.runtime.files lock leaves: a held lock
+# contends (lock_try's EWOULDBLOCK), a bounded wait on it times out
+# (lock_wait), a released lock (lock_close) is taken again, every claim
+# checks the descriptor and path identities, and a missing directory is
+# lock_open's ENOENT.
+fixture: FileLockLeavesReportHostValues.fixture
+env: NO_COLOR=1
+step: jet run run.jet
+exit: 0
+stdout: = "held true\ncontended true\ntimed out true\nreleased true\nwaited true\nmissing true\n"

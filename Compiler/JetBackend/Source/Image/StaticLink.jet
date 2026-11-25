@@ -3395,7 +3395,7 @@ link_emit_pieces: fn(c: ^^LinkContext, rows: [Int], threads: CompilerThreads) ->
         }
     }
     if parts.len() > 0 {
-        _ := link_emit_parts(inputs, parts, 0) ?? panic("the link emitting threads failed")
+        _ := link_emit_parts(inputs, parts, 0)
     }
     pieces := LinkPieces{bytes: [[U8]]{}, chunks: [[[U8]]]{}, errors: [[String]]{}}
     pieces.bytes.try_reserve(live) ?? ()
@@ -3427,7 +3427,7 @@ link_emit_pieces: fn(c: ^^LinkContext, rows: [Int], threads: CompilerThreads) ->
 
 // Builds `parts[from..]`, one task per part and the last part on this
 // thread; returns how many parts were built.
-link_emit_parts: fn(inputs: Shared<LinkEmitInputs>, parts: [Shared<LinkEmitPart>], from: Int) -> Int {
+link_emit_parts: fn(inputs: Shared<LinkEmitInputs>, parts: [Shared<LinkEmitPart>], from: Int) -> Int Never! {
     if from >= parts.len() - 1 -> return link_emit_part(inputs, parts[from])
     built := 0
     task.group link_emit_threads {

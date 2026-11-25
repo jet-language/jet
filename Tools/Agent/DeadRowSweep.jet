@@ -1,19 +1,18 @@
 #!/usr/bin/env jet
 // Dead row sweep: Core's call tables keep no row for a member nothing calls.
 //
-// Core.rows dispatcher rows, the typed host and platform signature rows
+// Core.rows dispatcher rows and the typed host and platform signature rows
 // (CoreHostSignatures.jet and CorePlatformSignatures.jet, in
-// JetFoundation's Registry) and the surface inventory's `fixed_sig` lists
-// each name a Core member. A member is dead when its name is a word of no
-// Jet source under Core, Compiler, Tools, Examples or Tests outside those
-// tables and the generated views, other than a line that declares it
-// (`name: fn`; a declaration under a marker such as `#Builtin.Role` counts
+// JetFoundation's Registry) each name a Core member. A member is dead when
+// its name is a word of no Jet source under Core, Compiler, Tools, Examples or
+// Tests outside those tables and the generated views, other than a line that
+// declares it (`name: fn`; a declaration under a marker such as `#Builtin.Role` counts
 // as a call), and no compiler source derives it: a string literal of the
 // compiler that opens with a name prefix and an interpolation
 // (`"process_spec_{leaf}"`) builds a host leaf's name from a method's, so
 // every member under that prefix is called. Each dead row is the member's
 // own: its dispatcher row and its name in its module's `exports` and `owns`
-// lists, in signature rows and in `fixed_sig` lists.
+// lists and in signature rows.
 // A signature row is also stale when its member has no Core call record (no
 // non-receiver dispatcher row and no CoreCallExtensions.jet row): the typed
 // signature lookup (core_call_typed_signature_for) and the native return
@@ -35,8 +34,6 @@ use {
 }
 
 CORE_ROWS: "Compiler/Prelude/Core.rows"
-
-INVENTORY_ROWS: "Compiler/Prelude/CoreSurfaceInventory.rows"
 
 EXTENSION_ROWS: "Compiler/JetFoundation/Source/Registry/CoreCallExtensions.jet"
 
@@ -198,30 +195,6 @@ signature_members: fn(path: String, text: String) -> [TableMember] Never! {
     members
 }
 
-// The `{ a, b }` list of `line` after `opening`, as its names.
-braced_names: fn(line: String, opening: String) -> [String] Never! {
-    after: line.split_once(opening) ?? return [String]{}
-    inside: after.after.split_once("}}") ?? return [String]{}
-    names := [String]{}
-    loop name in inside.before.split(",") {
-        if name.trim() != "" -> names.push(name.trim())
-    }
-    names
-}
-
-// The members of the surface inventory's `fixed_sig <module> { … }` lines.
-inventory_members: fn(text: String) -> [TableMember] Never! {
-    members := [TableMember]{}
-    loop (index, line) in text.split("\n").to_list() {
-        if !line.starts_with("fixed_sig ") -> next
-        fields: line.split(" ").to_list()
-        loop member in braced_names(line, "{{") {
-            members.push(TableMember{module_name: fields[1].copy(), member: member.copy(), place: "{INVENTORY_ROWS}:{index + 1}"})
-        }
-    }
-    members
-}
-
 // The `module member` keys of the non-receiver Core call records: Core.rows's
 // dispatcher rows (a receiver row's module is `-`) and CoreCallExtensions.jet's
 // rows (`module_name: "core.x", member: "name"`). Each maps to whether its
@@ -273,8 +246,6 @@ table_members: fn() -[FS]> [TableMember] DeadRowSweepError! {
     rows: files.read(CORE_ROWS) ?? return Err(sweep_fail("cannot read {CORE_ROWS}: {err}"))
     members := dispatcher_members(rows)
     members.extend(signature_table_members() ?? return Err(err))
-    inventory: files.read(INVENTORY_ROWS) ?? return Err(sweep_fail("cannot read {INVENTORY_ROWS}: {err}"))
-    members.extend(inventory_members(inventory))
     Ok(members)
 }
 
@@ -299,23 +270,19 @@ dead_members: fn(members: [TableMember]) -[Exec, FS, IO, Time.Wait]> [String:Boo
 }
 
 // `line` less the dead members of `module_name` in its `{ … }` list after
-// `opening`, unchanged when it names none; None when `drop_empty` and the
-// list is left empty.
-without_dead: fn(line: String, opening: String, module_name: String, dead: [String:Bool], drop_empty: Bool) -> String? Never! {
-    after: line.split_once(opening) ?? return Val(line.copy())
-    inside: after.after.split_once("}}") ?? return Val(line.copy())
+// `opening`, unchanged when it names none.
+without_dead: fn(line: String, opening: String, module_name: String, dead: [String:Bool]) -> String Never! {
+    after: line.split_once(opening) ?? return line.copy()
+    inside: after.after.split_once("}}") ?? return line.copy()
     kept := [String]{}
     removed := false
     loop name in inside.before.split(",") {
         if name.trim() == "" -> next
         if dead.get("{module_name} {name.trim()}") == None -> kept.push(name.trim()) else -> removed = true
     }
-    if !removed -> return Val(line.copy())
-    if kept.len() == 0 {
-        if drop_empty -> return None
-        return Val("{after.before}{opening} }}{inside.after}")
-    }
-    Val("{after.before}{opening} {kept.join(", ")} }}{inside.after}")
+    if !removed -> return line.copy()
+    if kept.len() == 0 -> return "{after.before}{opening} }}{inside.after}"
+    "{after.before}{opening} {kept.join(", ")} }}{inside.after}"
 }
 
 // Core.rows without the dead members' dispatcher rows and their names in
@@ -326,11 +293,11 @@ sweep_core_rows: fn(text: String, dead: [String:Bool]) -> String Never! {
         fields: line.split(" ").to_list()
         if fields.len() > 3 && fields[0] == "dispatcher_row" && dead.get("{fields[2]} {fields[3]}") != None -> next
         if fields.len() > 1 && fields[0] == "module" {
-            out.push(without_dead(line, "exports {{", fields[1], dead, false) ?? line.copy())
+            out.push(without_dead(line, "exports {{", fields[1], dead))
             next
         }
         if fields.len() > 1 && fields[0] == "source_module" {
-            out.push(without_dead(line, "owns {{", fields[1], dead, false) ?? line.copy())
+            out.push(without_dead(line, "owns {{", fields[1], dead))
             next
         }
         out.push(line.copy())
@@ -362,21 +329,6 @@ sweep_signature_table: fn(text: String, dead: [String:Bool]) -> String Never! {
             if index > 1 -> rest.push(field.copy())
         }
         out.push("{indent.before}{fields[0]} {kept.join("|")} {rest.join(" ")}")
-    }
-    out.join("\n")
-}
-
-// The surface inventory without the dead members in its `fixed_sig` lists,
-// and without a list left empty.
-sweep_inventory: fn(text: String, dead: [String:Bool]) -> String Never! {
-    out := [String]{}
-    loop line in text.split("\n") {
-        fields: line.split(" ").to_list()
-        if fields.len() > 1 && fields[0] == "fixed_sig" {
-            if without_dead(line, "{{", fields[1], dead, true) == .Val(kept) -> out.push(kept)
-            next
-        }
-        out.push(line.copy())
     }
     out.join("\n")
 }
@@ -432,8 +384,6 @@ dead_row_sweep_main: fn(args: [String]) -[Exec, FS, IO, Time.Wait]> String DeadR
         text: files.read(path) ?? return Err(sweep_fail("cannot read {path}: {err}"))
         if sweep_write(path, text, sweep_signature_table(text, unread)) ?? return Err(err) -> written += 1
     }
-    inventory: files.read(INVENTORY_ROWS) ?? return Err(sweep_fail("cannot read {INVENTORY_ROWS}: {err}"))
-    if sweep_write(INVENTORY_ROWS, inventory, sweep_inventory(inventory, dead)) ?? return Err(err) -> written += 1
     Ok("dead row sweep: deleted the rows of {dead.len()} dead member(s) and {stale.len()} stale signature member(s) from {written} file(s)")
 }
 
@@ -476,14 +426,12 @@ run: fn() {
     assert_eq(sweep_core_rows("module core.y exports {{  }}", dead), "module core.y exports {{  }}")
 }
 
-#Test("a dead member leaves its signature rows and fixed_sig lists, and an emptied row goes") {
+#Test("a dead member leaves its signature rows, and an emptied row goes") {
     dead := [String:Bool]{}
     dead["core.x gone"] = true
     dead["core.x lone"] = true
     table: "a: fn() {{\n    rows: \"\"\"\n    core.x gone|kept Int Int\n    core.x lone - Unit\n    core.y gone Int Int\n    \"\"\"\n}}\n"
     assert_eq(sweep_signature_table(table, dead), "a: fn() {{\n    rows: \"\"\"\n    core.x kept Int Int\n    core.y gone Int Int\n    \"\"\"\n}}\n")
-    inventory: "fixed_sig core.x {{ gone, kept }}\nfixed_sig core.x {{ lone }}\n"
-    assert_eq(sweep_inventory(inventory, dead), "fixed_sig core.x {{ kept }}\n")
 }
 
 #Test("a signature member without a non-receiver call record, or whose record's Core declaration types it, is stale") {

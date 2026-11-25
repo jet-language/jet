@@ -174,62 +174,61 @@ sema_stmt_transaction_rollback_methods: fn(ty: Type, environment: SemaScopeEnvir
         .Named(_) -> {}
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> return None
     }
-    if program.registration_graph == .Val(graph) {
-        nominal_row: sema_type_resolve_nominal_row_at(graph, ty, sema_scope_caller_row(environment, graph)) ?? return None
-        nominal: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
-        loop graph_module_index in 0..<graph.modules.len() {
-            loop implementation_index in 0..<graph.modules[graph_module_index].impls.len() {
-                trait_matches := graph.modules[graph_module_index].impls[implementation_index].trait_name == (Val("Rollback"))
-                if graph.modules[graph_module_index].impls[implementation_index].trait_symbol != None {
-                    trait_value: graph.modules[graph_module_index].impls[implementation_index].trait_symbol ?? return None
-                    trait_matches = trait_value.name == "Rollback"
+    graph: program.registration_graph
+    nominal_row: sema_type_resolve_nominal_row_at(graph, ty, sema_scope_caller_row(environment, graph)) ?? return None
+    nominal: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
+    loop graph_module_index in 0..<graph.modules.len() {
+        loop implementation_index in 0..<graph.modules[graph_module_index].impls.len() {
+            trait_matches := graph.modules[graph_module_index].impls[implementation_index].trait_name == (Val("Rollback"))
+            if graph.modules[graph_module_index].impls[implementation_index].trait_symbol != None {
+                trait_value: graph.modules[graph_module_index].impls[implementation_index].trait_symbol ?? return None
+                trait_matches = trait_value.name == "Rollback"
+            }
+            if !trait_matches || !(sema_type_graph_impl_matches_nominal(graph, graph.modules[graph_module_index].impls[implementation_index], nominal) ?? false) {
+                next
+            }
+            trait_owner := sema_stmt_transaction_rollback_trait_symbol(graph, graph.modules[graph_module_index].impls[implementation_index])
+            snapshot_method := TMethodRef?{None}
+            restore_method := TMethodRef?{None}
+            loop method_index in 0..<graph.modules[graph_module_index].impls[implementation_index].methods.len() {
+                method_ref := TMethodRef{symbol: graph.modules[graph_module_index].impls[implementation_index].methods[method_index].symbol.id, name: graph.modules[graph_module_index].impls[implementation_index].methods[method_index].symbol.name, mangled: false, trait_owner: trait_owner.map(fn(value) { value.id }), operator_identity: None}
+                if graph.modules[graph_module_index].impls[implementation_index].methods[method_index].symbol.name == "snapshot" {
+                    snapshot_method = Val(method_ref)
                 }
-                if !trait_matches || !(sema_type_graph_impl_matches_nominal(graph, graph.modules[graph_module_index].impls[implementation_index], nominal) ?? false) {
-                    next
-                }
-                trait_owner := sema_stmt_transaction_rollback_trait_symbol(graph, graph.modules[graph_module_index].impls[implementation_index])
-                snapshot_method := TMethodRef?{None}
-                restore_method := TMethodRef?{None}
-                loop method_index in 0..<graph.modules[graph_module_index].impls[implementation_index].methods.len() {
-                    method_ref := TMethodRef{symbol: graph.modules[graph_module_index].impls[implementation_index].methods[method_index].symbol.id, name: graph.modules[graph_module_index].impls[implementation_index].methods[method_index].symbol.name, mangled: false, trait_owner: trait_owner.map(fn(value) { value.id }), operator_identity: None}
-                    if graph.modules[graph_module_index].impls[implementation_index].methods[method_index].symbol.name == "snapshot" {
-                        snapshot_method = Val(method_ref)
-                    }
-                    if graph.modules[graph_module_index].impls[implementation_index].methods[method_index].symbol.name == "restore" {
-                        restore_method = Val(method_ref)
-                    }
-                }
-                if snapshot_method != None && restore_method != None {
-                    snapshot: snapshot_method ?? return None
-                    restore: restore_method ?? return None
-                    return Val(SemaStatementRollbackMethods{snapshot: snapshot, restore: restore})
+                if graph.modules[graph_module_index].impls[implementation_index].methods[method_index].symbol.name == "restore" {
+                    restore_method = Val(method_ref)
                 }
             }
-        }
-        // An `impl Rollback { … }` block in the type's own body, whose
-        // methods the nominal registers.
-        if nominal.source == .SourceAST(item) {
-            loop block in sema_registration_item_trait_blocks(item) {
-                if block.trait_name != "Rollback" -> next
-                resolved := sema_registration_lookup_name(graph, nominal.symbol.module_identity, "Rollback")
-                trait_owner := SymbolID?{None}
-                if resolved == .Val(found) && sema_resolved_kind(graph, found) == SymbolKind.Trait {
-                    trait_owner = Val(sema_resolved_symbol(graph, found).id)
-                }
-                snapshot_method := TMethodRef?{None}
-                restore_method := TMethodRef?{None}
-                loop method in nominal.methods {
-                    loop written in block.methods {
-                        if written.span != method.declaration.span -> next
-                        method_ref := TMethodRef{symbol: method.symbol.id, name: method.symbol.name, mangled: false, trait_owner: trait_owner, operator_identity: None}
-                        if method.symbol.name == "snapshot" -> snapshot_method = Val(method_ref)
-                        if method.symbol.name == "restore" -> restore_method = Val(method_ref)
-                    }
-                }
-                snapshot: snapshot_method ?? next
-                restore: restore_method ?? next
+            if snapshot_method != None && restore_method != None {
+                snapshot: snapshot_method ?? return None
+                restore: restore_method ?? return None
                 return Val(SemaStatementRollbackMethods{snapshot: snapshot, restore: restore})
             }
+        }
+    }
+    // An `impl Rollback { … }` block in the type's own body, whose
+    // methods the nominal registers.
+    if nominal.source == .SourceAST(item) {
+        loop block in sema_registration_item_trait_blocks(item) {
+            if block.trait_name != "Rollback" -> next
+            resolved := sema_registration_lookup_name(graph, nominal.symbol.module_identity, "Rollback")
+            trait_owner := SymbolID?{None}
+            if resolved == .Val(found) && sema_resolved_kind(graph, found) == SymbolKind.Trait {
+                trait_owner = Val(sema_resolved_symbol(graph, found).id)
+            }
+            snapshot_method := TMethodRef?{None}
+            restore_method := TMethodRef?{None}
+            loop method in nominal.methods {
+                loop written in block.methods {
+                    if written.span != method.declaration.span -> next
+                    method_ref := TMethodRef{symbol: method.symbol.id, name: method.symbol.name, mangled: false, trait_owner: trait_owner, operator_identity: None}
+                    if method.symbol.name == "snapshot" -> snapshot_method = Val(method_ref)
+                    if method.symbol.name == "restore" -> restore_method = Val(method_ref)
+                }
+            }
+            snapshot: snapshot_method ?? next
+            restore: restore_method ?? next
+            return Val(SemaStatementRollbackMethods{snapshot: snapshot, restore: restore})
         }
     }
     None
@@ -784,23 +783,21 @@ sema_stmt_check_defer_close: fn(close: Expr, span: Span, environment: SemaScopeE
             }
             value: resource_value ?? return None
             resource_id: sema_stmt_defer_close_resource(close, scopes) ?? return None
-            if program.registration_graph == .Val(graph) {
-                satisfies_close := sema_type_bound_satisfied_at(graph, value.ty, "Close", sema_scope_caller_row(environment, graph), check.context.generic_params)
-                if satisfies_close == None -> return None
-                close_valid := satisfies_close == (Val(true))
-                if !close_valid {
-                    shown := type_name(value.ty)
-                    diagnostics.push(sema_error("E0905", expr_span(argument.expr), "`{shown}` isn't `Close`", "`{shown}` would need to implement `Close` before it can be used here", "write `impl {shown}.Close {{ … }}` with every required method"))
-                }
-                moved_before := check.state.moved.len()
-                if !sema_stmt_move_direct(argument.expr, check.state, scopes, "the deferred `close`", diagnostics) || !close_valid {
-                    return None
-                }
-                sema_ownership_defer_moves(check.state, moved_before)
-                closed := sema_tree_node(Type.Named{name: "Unit"}, TExprKind.Close{value: value}, span)
-                return Val(TStmt.DeferClose{close: closed, resource: resource_id, span: span})
+            graph: program.registration_graph
+            satisfies_close := sema_type_bound_satisfied_at(graph, value.ty, "Close", sema_scope_caller_row(environment, graph), check.context.generic_params)
+            if satisfies_close == None -> return None
+            close_valid := satisfies_close == (Val(true))
+            if !close_valid {
+                shown := type_name(value.ty)
+                diagnostics.push(sema_error("E0905", expr_span(argument.expr), "`{shown}` isn't `Close`", "`{shown}` would need to implement `Close` before it can be used here", "write `impl {shown}.Close {{ … }}` with every required method"))
             }
-            None
+            moved_before := check.state.moved.len()
+            if !sema_stmt_move_direct(argument.expr, check.state, scopes, "the deferred `close`", diagnostics) || !close_valid {
+                return None
+            }
+            sema_ownership_defer_moves(check.state, moved_before)
+            closed := sema_tree_node(Type.Named{name: "Unit"}, TExprKind.Close{value: value}, span)
+            return Val(TStmt.DeferClose{close: closed, resource: resource_id, span: span})
         }
         .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> None
     }
@@ -976,7 +973,8 @@ sema_stmt_check_scope_member: fn(name: String, args: [Expr], args_span: Span?, b
         // A header the block's declared rule types as `Type` (`#SQL(Row)`) is
         // a declared type position: a name that resolves to no type is E0119
         // at the header.
-        if dsl_args_valid && type_header && args.len() == 1 && args[0] == .Ident(row_name, row_span, _) && program.registration_graph == .Val(graph) {
+        graph: program.registration_graph
+        if dsl_args_valid && type_header && args.len() == 1 && args[0] == .Ident(row_name, row_span, _) {
             generic_names: loop parameter in environment.generic_params -> parameter.name
             caller: sema_scope_caller_row(environment, graph)
             if sema_type_written_name_unknown(graph, caller, row_name, generic_names) {
@@ -1306,7 +1304,8 @@ sema_stmt_check_projected_assignment: fn(target: LValue, op: BinOp?, op_span: Sp
     }
     // A stored view field keeps the owner relationship it was constructed
     // with; assigning it a new view would change that public provenance.
-    if target == .Field(_, view_field, view_field_span) && program.registration_graph == .Val(view_graph) {
+    view_graph: program.registration_graph
+    if target == .Field(_, view_field, view_field_span) {
         seen := [U32:Bool]{}
         if sema_check_type_contains_view(view_graph, environment.module_identity, place.ty, seen) {
             diagnostics.push(sema_error("E2305", view_field_span, "view field `{view_field}` cannot be assigned a new source", "a stored view field has one stabilized owner relationship; overwriting it would erase or change that public provenance", "construct a new value with the new view, or keep the original field source unchanged"))
@@ -1637,14 +1636,12 @@ sema_stmt_compound_missing_struct_hook: fn(op: BinOp, place: Type, environment: 
     if op != BinOp.Add && op != BinOp.Sub && op != BinOp.Mul && op != BinOp.Div -> return false
     trait_name: sema_expr_operator_trait(op) ?? return false
     if !sema_stmt_compound_nominal(place) -> return false
-    if program.registration_graph == .Val(graph) {
-        row: sema_type_resolve_nominal_row(graph, place, environment.module_identity) ?? return false
-        if graph.modules[row.module_index].nominals[row.row].kind != SemaRegistrationNominalKind.Struct {
-            return false
-        }
-        return !sema_comparability_implements(environment, program, place, trait_name)
+    graph: program.registration_graph
+    row: sema_type_resolve_nominal_row(graph, place, environment.module_identity) ?? return false
+    if graph.modules[row.module_index].nominals[row.row].kind != SemaRegistrationNominalKind.Struct {
+        return false
     }
-    false
+    !sema_comparability_implements(environment, program, place, trait_name)
 }
 
 // Compound arithmetic is the same operator as its binary form, so on a place

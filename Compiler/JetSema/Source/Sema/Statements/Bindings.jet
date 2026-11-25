@@ -158,11 +158,8 @@ sema_stmt_contains_shared_guard: fn(ty: Type, environment: SemaScopeEnvironment,
 // parameters it reads instead of the whole environment: a nominal's fields are
 // checked in the nominal's module, and copying the environment per nominal to
 // change its module copied the whole registration graph each time.
-sema_stmt_type_contains_shared_guard: fn(ty: Type, graph: SemaRegistrationGraph?, module_identity: ModuleID, generic_params: [TGenericParam], seen: ^[String]) -> Bool Never! {
-    resolved := ty
-    if graph == .Val(registered) {
-        resolved = sema_type_resolve_declared_with_generics(registered, ty, module_identity, generic_params)
-    }
+sema_stmt_type_contains_shared_guard: fn(ty: Type, graph: SemaRegistrationGraph, module_identity: ModuleID, generic_params: [TGenericParam], seen: ^[String]) -> Bool Never! {
+    resolved: sema_type_resolve_declared_with_generics(graph, ty, module_identity, generic_params)
     if resolved == {
         .Apply(name, args) -> {
             if name == "SharedGuard" -> return true
@@ -204,34 +201,32 @@ sema_stmt_type_contains_shared_guard: fn(ty: Type, graph: SemaRegistrationGraph?
         }
         .Int | .Float | .Bool | .String | .Char | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Quantity(_, _) | .Measure(_) -> return false
     }
-    if graph == .Val(registered) {
-        nominal_row: sema_pattern_nominal_row(registered, module_identity, resolved) ?? return false
-        nominal: registered.modules[nominal_row.module_index].nominals[nominal_row.row]
-        key := symbol_table_key(registered.symbols, nominal.symbol.id)
-        if seen.contains(key) -> return false
-        seen.push(key)
-        generic_names := (loop parameter in nominal.generic_params -> parameter.name)
-        arguments := sema_pattern_subject_args(resolved)
-        owner_module: registered.modules[nominal_row.module_index].module_identity
-        loop field in nominal.fields {
-            field_type := sema_inference_substitute_type(field.ty, generic_names, arguments)
-            if sema_stmt_type_contains_shared_guard(field_type, graph, owner_module, generic_params, seen) {
-                return true
-            }
+    nominal_row: sema_pattern_nominal_row(graph, module_identity, resolved) ?? return false
+    nominal: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
+    key := symbol_table_key(graph.symbols, nominal.symbol.id)
+    if seen.contains(key) -> return false
+    seen.push(key)
+    generic_names := (loop parameter in nominal.generic_params -> parameter.name)
+    arguments := sema_pattern_subject_args(resolved)
+    owner_module: graph.modules[nominal_row.module_index].module_identity
+    loop field in nominal.fields {
+        field_type := sema_inference_substitute_type(field.ty, generic_names, arguments)
+        if sema_stmt_type_contains_shared_guard(field_type, graph, owner_module, generic_params, seen) {
+            return true
         }
-        loop variant in nominal.variants {
-            if variant.payload == {
-                .Unit -> {}
-                .Single(value, _) -> {
-                    if sema_stmt_type_contains_shared_guard(sema_inference_substitute_type(value, generic_names, arguments), graph, owner_module, generic_params, seen) {
-                        return true
-                    }
+    }
+    loop variant in nominal.variants {
+        if variant.payload == {
+            .Unit -> {}
+            .Single(value, _) -> {
+                if sema_stmt_type_contains_shared_guard(sema_inference_substitute_type(value, generic_names, arguments), graph, owner_module, generic_params, seen) {
+                    return true
                 }
-                .Named(fields) -> {
-                    loop field in fields {
-                        if sema_stmt_type_contains_shared_guard(sema_inference_substitute_type(field.ty, generic_names, arguments), graph, owner_module, generic_params, seen) {
-                            return true
-                        }
+            }
+            .Named(fields) -> {
+                loop field in fields {
+                    if sema_stmt_type_contains_shared_guard(sema_inference_substitute_type(field.ty, generic_names, arguments), graph, owner_module, generic_params, seen) {
+                        return true
                     }
                 }
             }
@@ -273,11 +268,10 @@ sema_stmt_destructure_init_is_temporary: fn(init: Expr) -> Bool Never! {
 // whole type again in the caller's scope would rebind a bare handle to a
 // program type that shares its name.
 sema_stmt_destructure_alias: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Type? {
-    if program.registration_graph == .Val(graph) {
-        row: sema_type_resolve_nominal_row_at(graph, ty, sema_scope_caller_row(environment, graph)) ?? return None
-        if graph.modules[row.module_index].nominals[row.row].kind == SemaRegistrationNominalKind.TypeAlias {
-            return Val(sema_expr_expected_type(ty, environment, program))
-        }
+    graph: program.registration_graph
+    row: sema_type_resolve_nominal_row_at(graph, ty, sema_scope_caller_row(environment, graph)) ?? return None
+    if graph.modules[row.module_index].nominals[row.row].kind == SemaRegistrationNominalKind.TypeAlias {
+        return Val(sema_expr_expected_type(ty, environment, program))
     }
     None
 }
@@ -300,73 +294,74 @@ sema_stmt_check_destructure: fn(binding: Binding, pattern: BindPattern, environm
     if pattern == {
         .Struct(written_type, type_span, selected, rest, pattern_span) -> {
             span = pattern_span
-            if program.registration_graph == .Val(graph) {
-                actual: sema_pattern_nominal_row(graph, environment.module_identity, ty)
-                actual_is_struct: if actual == {
-                    .Val(row) -> graph.modules[row.module_index].nominals[row.row].kind == SemaRegistrationNominalKind.Struct
-                    .None -> false
-                }
-                if !actual_is_struct {
-                    diagnostics.push(sema_error("E0313", type_span, "`{written_type} {{ … }}` can only destructure a `{written_type}` value, but this is {sema_type_show(ty)}", "destructuring with `{{ }}` pulls fields out of a struct value", "destructure a `{written_type}`, or bind the whole value with a name"))
-                    sema_stmt_destructure_recover(pattern, binding.mutable, environment, program, scopes, check.state, check.context, diagnostics)
-                    return None
-                }
-                nominal_row: actual ?? return None
-                nominal: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
-                plain_fields = !(sema_type_bound_satisfied_at(graph, ty, "Close", sema_scope_caller_row(environment, graph), check.context.generic_params) ?? true)
-                named: sema_pattern_nominal_row(graph, environment.module_identity, Type.Named{name: written_type})
-                named_matches: if named == {
-                    .Val(row) -> graph.modules[row.module_index].nominals[row.row].symbol.id == nominal.symbol.id
-                    .None -> false
-                }
-                if !named_matches {
-                    diagnostics.push(sema_error("E0313", type_span, "this value is a `{nominal.symbol.name}`, not a `{written_type}`", "the type named before `{{ }}` must match the value you destructure", "write `{nominal.symbol.name} {{ … }}` to match the value"))
-                    sema_stmt_destructure_recover(pattern, binding.mutable, environment, program, scopes, check.state, check.context, diagnostics)
-                    return None
-                }
-                generic_names := (loop parameter in nominal.generic_params -> parameter.name)
-                arguments := sema_pattern_subject_args(ty)
-                // A struct hoisted from an inline module keeps its `priv`
-                // fields to that module (sema_expression_field_visible).
-                inline_module := Span?{None}
-                if nominal.source == .SourceAST(item) {
-                    if item == .Struct(declared) -> inline_module = declared.inline_module
-                }
-                loop selected_field in selected {
-                    field_type := Type?{None}
-                    loop field in nominal.fields {
-                        if field.symbol.name == selected_field.name {
-                            if field.computed -> plain_fields = false
-                            if {
-                                sema_expression_field_visible(field.symbol.visibility == 2, field.symbol.visibility == 1, nominal.symbol.module_identity, inline_module, selected_field.span, check.context.compiler_generated, environment, program) -> {
-                                    field_type = Val(sema_inference_substitute_type(field.ty, generic_names, arguments))
-                                    check.context.name_references.push(sema_name_reference(selected_field.span, field.symbol, Val(SymbolKind.Field)))
-                                }
-                                else -> {
-                                    diagnostics.push(sema_expression_private_field_error(selected_field.name, selected_field.span))
-                                    field_type = Val(Type.Int)
-                                }
+            graph: program.registration_graph
+            // Snapshot: a destructure checks its struct's registered row, and a lone program registers none.
+            if graph.mode == .Snapshot -> return None
+            actual: sema_pattern_nominal_row(graph, environment.module_identity, ty)
+            actual_is_struct: if actual == {
+                .Val(row) -> graph.modules[row.module_index].nominals[row.row].kind == SemaRegistrationNominalKind.Struct
+                .None -> false
+            }
+            if !actual_is_struct {
+                diagnostics.push(sema_error("E0313", type_span, "`{written_type} {{ … }}` can only destructure a `{written_type}` value, but this is {sema_type_show(ty)}", "destructuring with `{{ }}` pulls fields out of a struct value", "destructure a `{written_type}`, or bind the whole value with a name"))
+                sema_stmt_destructure_recover(pattern, binding.mutable, environment, program, scopes, check.state, check.context, diagnostics)
+                return None
+            }
+            nominal_row: actual ?? return None
+            nominal: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
+            plain_fields = !(sema_type_bound_satisfied_at(graph, ty, "Close", sema_scope_caller_row(environment, graph), check.context.generic_params) ?? true)
+            named: sema_pattern_nominal_row(graph, environment.module_identity, Type.Named{name: written_type})
+            named_matches: if named == {
+                .Val(row) -> graph.modules[row.module_index].nominals[row.row].symbol.id == nominal.symbol.id
+                .None -> false
+            }
+            if !named_matches {
+                diagnostics.push(sema_error("E0313", type_span, "this value is a `{nominal.symbol.name}`, not a `{written_type}`", "the type named before `{{ }}` must match the value you destructure", "write `{nominal.symbol.name} {{ … }}` to match the value"))
+                sema_stmt_destructure_recover(pattern, binding.mutable, environment, program, scopes, check.state, check.context, diagnostics)
+                return None
+            }
+            generic_names := (loop parameter in nominal.generic_params -> parameter.name)
+            arguments := sema_pattern_subject_args(ty)
+            // A struct hoisted from an inline module keeps its `priv`
+            // fields to that module (sema_expression_field_visible).
+            inline_module := Span?{None}
+            if nominal.source == .SourceAST(item) {
+                if item == .Struct(declared) -> inline_module = declared.inline_module
+            }
+            loop selected_field in selected {
+                field_type := Type?{None}
+                loop field in nominal.fields {
+                    if field.symbol.name == selected_field.name {
+                        if field.computed -> plain_fields = false
+                        if {
+                            sema_expression_field_visible(field.symbol.visibility == 2, field.symbol.visibility == 1, nominal.symbol.module_identity, inline_module, selected_field.span, check.context.compiler_generated, environment, program) -> {
+                                field_type = Val(sema_inference_substitute_type(field.ty, generic_names, arguments))
+                                check.context.name_references.push(sema_name_reference(selected_field.span, field.symbol, Val(SymbolKind.Field)))
+                            }
+                            else -> {
+                                diagnostics.push(sema_expression_private_field_error(selected_field.name, selected_field.span))
+                                field_type = Val(Type.Int)
                             }
                         }
                     }
-                    if field_type == None {
-                        // The field-access E0302, nearest field suggested.
-                        suggestion: sema_suggest_field(selected_field.name, loop field in nominal.fields -> field.symbol.name)
-                        fix: if suggestion == .Val(candidate) -> "did you mean `{candidate}`?" else -> "check the field names on `{type_name(ty)}`"
-                        diagnostics.push(sema_error("E0302", selected_field.span, "`{type_name(ty)}` has no field `{selected_field.name}`", "field access only works on names declared in the struct", fix))
-                    }
-                    fields.push(TypeTupleField{name: selected_field.name, ty: field_type ?? Type.Int})
                 }
-                partial := selected.len() < nominal.fields.len()
-                if {
-                    partial && rest == None -> {
-                        diagnostics.push(sema_error("E0326", pattern_span, "this pattern leaves out fields of `{written_type}`", "a destructure that doesn't name every field must end with `..` so the skipped fields are visible at a glance", "add `, ..` before the closing `}}`, or name the remaining fields"))
-                    }
-                    !partial && rest != None -> {
-                        diagnostics.push(sema_error("E0327", rest, "`..` is redundant — this pattern already names every field of `{written_type}`", "a trailing `..` only makes sense when some fields are left unnamed", "remove the `..`"))
-                    }
+                if field_type == None {
+                    // The field-access E0302, nearest field suggested.
+                    suggestion: sema_suggest_field(selected_field.name, loop field in nominal.fields -> field.symbol.name)
+                    fix: if suggestion == .Val(candidate) -> "did you mean `{candidate}`?" else -> "check the field names on `{type_name(ty)}`"
+                    diagnostics.push(sema_error("E0302", selected_field.span, "`{type_name(ty)}` has no field `{selected_field.name}`", "field access only works on names declared in the struct", fix))
                 }
-            } else { return None }
+                fields.push(TypeTupleField{name: selected_field.name, ty: field_type ?? Type.Int})
+            }
+            partial := selected.len() < nominal.fields.len()
+            if {
+                partial && rest == None -> {
+                    diagnostics.push(sema_error("E0326", pattern_span, "this pattern leaves out fields of `{written_type}`", "a destructure that doesn't name every field must end with `..` so the skipped fields are visible at a glance", "add `, ..` before the closing `}}`, or name the remaining fields"))
+                }
+                !partial && rest != None -> {
+                    diagnostics.push(sema_error("E0327", rest, "`..` is redundant — this pattern already names every field of `{written_type}`", "a trailing `..` only makes sense when some fields are left unnamed", "remove the `..`"))
+                }
+            }
         }
         .List(elements, pattern_span) -> {
             span = pattern_span
@@ -776,7 +771,9 @@ sema_stmt_check_binding: fn(binding: Binding, lambda_escapes: Bool?, environment
     }
     // A name bound once to a lambda keeps its ClosureInfo for `name.reflect()`,
     // its types made by the one TypeId maker in the registration graph.
-    if !binding.mutable && init.kind == .Lambda(reflected_lambda) && program.registration_graph == .Val(graph) {
+    graph: program.registration_graph
+    // Snapshot: a ClosureInfo's types come from the registered TypeId maker, which a lone program lacks.
+    if !binding.mutable && init.kind == .Lambda(reflected_lambda) && graph.mode == .Program {
         closure_function: scopes.location_function ?? environment.function_name
         closure_location: sema_comptime_reflection_location(environment.source_segments, sema_site_module(environment, closure_function), Val(binding.name_span))
         sema_scope_mark_closure(scopes, binding.name, sema_comptime_reflection_closure_info(graph, environment.module_identity, binding.name, binding.name_span, reflected_lambda, closure_location, environment.source_file))
@@ -989,11 +986,9 @@ sema_stmt_uninit_plain_data: fn(ty: Type) -> Bool Never! {
 }
 
 sema_stmt_module_uses_core_mem: fn(environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
-    if program.registration_graph == .Val(graph) {
-        module_index: sema_scope_caller_index(environment, graph) ?? return false
-        return sema_function_header_inline_has_core_mem(graph.modules[module_index])
-    }
-    false
+    graph: program.registration_graph
+    module_index: sema_scope_caller_index(environment, graph) ?? return false
+    sema_function_header_inline_has_core_mem(graph.modules[module_index])
 }
 
 // Record one written slot of a fixed `Type{ uninit }` list. Only a
@@ -1483,15 +1478,14 @@ sema_stmt_module_storage_binding: fn(environment: SemaScopeEnvironment, program:
         }
         return None
     }
-    if program.registration_graph == .Val(graph) {
-        module_index: sema_scope_caller_index(environment, graph) ?? return None
-        loop constant_index in 0..<graph.modules[module_index].constants.len() {
-            if graph.modules[module_index].constants[constant_index].symbol.id != id -> next
-            if graph.modules[module_index].constants[constant_index].declaration.mutable && !graph.modules[module_index].constants[constant_index].declaration.is_comptime {
-                return Val(graph.modules[module_index].constants[constant_index].declaration.is_persist)
-            }
-            return None
+    graph: program.registration_graph
+    module_index: sema_scope_caller_index(environment, graph) ?? return None
+    loop constant_index in 0..<graph.modules[module_index].constants.len() {
+        if graph.modules[module_index].constants[constant_index].symbol.id != id -> next
+        if graph.modules[module_index].constants[constant_index].declaration.mutable && !graph.modules[module_index].constants[constant_index].declaration.is_comptime {
+            return Val(graph.modules[module_index].constants[constant_index].declaration.is_persist)
         }
+        return None
     }
     None
 }

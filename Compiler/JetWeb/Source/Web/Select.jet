@@ -88,13 +88,16 @@ web_layout_frame: fn(e: ^WebEmitter, m: IRModule, f: IRFunction) Never! {
         bytes := 0
         align := 8
         op: f.op[at]
-        if op == .StackAddress {
-            bytes = if f.a[at] > 0 -> f.a[at] else -> 8
-            align = web_clamp(f.b[at], 1, 16)
-        } else if (op == .Call || op == .CallRuntime || op == .CallIndirect) && f.dst[at] >= 0 && web_slot_kind(m, f, f.dst[at]) == .Aggregate {
-            ty: m.types[f.slot_type[f.dst[at]]]
-            bytes = if ty.size > 8 -> ty.size else -> 8
-            align = web_clamp(ty.align, 8, 16)
+        if {
+            op == .StackAddress -> {
+                bytes = if f.a[at] > 0 -> f.a[at] else -> 8
+                align = web_clamp(f.b[at], 1, 16)
+            }
+            (op == .Call || op == .CallRuntime || op == .CallIndirect) && f.dst[at] >= 0 && web_slot_kind(m, f, f.dst[at]) == .Aggregate -> {
+                ty: m.types[f.slot_type[f.dst[at]]]
+                bytes = if ty.size > 8 -> ty.size else -> 8
+                align = web_clamp(ty.align, 8, 16)
+            }
         }
         if bytes > 0 {
             size = web_align_up(size, align)
@@ -178,54 +181,59 @@ web_stop_point: fn(e: ^WebEmitter, st: ^WebState, m: IRModule, f: IRFunction, at
     wired: e.wired
     flag: e.flag
     e.wired = false
-    if f.a[at] == st.trap {
-        // Nothing before it can publish a stop: the edge is never taken.
-        if !wired -> return f.c[branch] + 1
-        web_get(e, flag)
-        web_op(e, 0xad)
-        web_store(e, stopped)
-        web_i32(e, 0)
-        web_set(e, flag)
-    } else if (f.a[at] == st.poll || (f.a[at] == st.turn && st.armed >= 0)) && at > 0 && web_call_reports(m, f, at - 1) {
-        web_global_get(e, WEB_GLOBAL_EDX)
-        web_op(e, 0xad)
-        web_store(e, stopped)
-        if f.a[at] == st.turn {
-            // A turn folded into the call's poll observes beyond the call
-            // only what another task asked for: while the armed word is 0
-            // and the call reported no stop, it calls nothing.
-            web_truth(e, stopped)
-            web_op(e, 0x45)
+    if {
+        f.a[at] == st.trap -> {
+            // Nothing before it can publish a stop: the edge is never taken.
+            if !wired -> return f.c[branch] + 1
+            web_get(e, flag)
+            web_op(e, 0xad)
+            web_store(e, stopped)
+            web_i32(e, 0)
+            web_set(e, flag)
+        }
+        (f.a[at] == st.poll || (f.a[at] == st.turn && st.armed >= 0)) && at > 0 && web_call_reports(m, f, at - 1) -> {
+            web_global_get(e, WEB_GLOBAL_EDX)
+            web_op(e, 0xad)
+            web_store(e, stopped)
+            if f.a[at] == st.turn {
+                // A turn folded into the call's poll observes beyond the call
+                // only what another task asked for: while the armed word is 0
+                // and the call reported no stop, it calls nothing.
+                web_truth(e, stopped)
+                web_op(e, 0x45)
+                web_i64(e, st.armed)
+                web_wrap(e)
+                web_mem(e, 0x29, 0)
+                web_op(e, 0x50)
+                web_op(e, 0x45)
+                web_op(e, 0x71)
+                web_if(e)
+                web_call(e, f.a[at])
+                web_store(e, stopped)
+                web_end(e)
+            }
+        }
+        st.armed >= 0 && !ir_opt_polls_checks_call(m, f, st.poll, st.trap, st.turn, at) -> {
+            // A poll that checks no call (a loop's own check, a recursive
+            // body's entry check) can observe only what another task asked for,
+            // which arms the runtime's word first (JetRuntime Scheduler.jet
+            // scheduler_checks_arm): while it is 0 the check calls nothing.
+            web_i64(e, 0)
+            web_store(e, stopped)
             web_i64(e, st.armed)
             web_wrap(e)
             web_mem(e, 0x29, 0)
             web_op(e, 0x50)
             web_op(e, 0x45)
-            web_op(e, 0x71)
             web_if(e)
             web_call(e, f.a[at])
             web_store(e, stopped)
             web_end(e)
         }
-    } else if st.armed >= 0 && !ir_opt_polls_checks_call(m, f, st.poll, st.trap, st.turn, at) {
-        // A poll that checks no call (a loop's own check, a recursive
-        // body's entry check) can observe only what another task asked for,
-        // which arms the runtime's word first (JetRuntime Scheduler.jet
-        // scheduler_checks_arm): while it is 0 the check calls nothing.
-        web_i64(e, 0)
-        web_store(e, stopped)
-        web_i64(e, st.armed)
-        web_wrap(e)
-        web_mem(e, 0x29, 0)
-        web_op(e, 0x50)
-        web_op(e, 0x45)
-        web_if(e)
-        web_call(e, f.a[at])
-        web_store(e, stopped)
-        web_end(e)
-    } else {
-        web_call(e, f.a[at])
-        web_store(e, stopped)
+        else -> {
+            web_call(e, f.a[at])
+            web_store(e, stopped)
+        }
     }
     web_truth(e, stopped)
     web_if(e)
@@ -418,17 +426,20 @@ web_select: fn(e: ^WebEmitter, st: ^WebState, m: IRModule, f: IRFunction, tables
             // (JetBackend Image/StaticLink.jet LINK_FAULT_REPORT) runs in a
             // signal handler; the web host delivers no signals (a fault is a
             // wasm trap the host reports), so reaching it is a trap.
-            if m.names[f.a[at]] == LINK_FAULT_REPORT {
-                web_op(e, 0x00)
-                web_call_result(e, st, m, f, at, "l")
-            } else {
-                letters: web_push_args(e, m, f, at)
-                resolved: web_symbol(st, m.names[f.a[at]], "{letters}:{web_site_result(e, m, f, dst)}")
-                if web_sig_params(resolved.sig) != letters {
-                    return web_fail(e, st, f, at, "`{m.names[f.a[at]]}` takes ({web_sig_params(resolved.sig)}), not ({letters})")
+            if {
+                m.names[f.a[at]] == LINK_FAULT_REPORT -> {
+                    web_op(e, 0x00)
+                    web_call_result(e, st, m, f, at, "l")
                 }
-                web_call(e, resolved.callee)
-                web_call_result(e, st, m, f, at, web_sig_result(resolved.sig))
+                else -> {
+                    letters: web_push_args(e, m, f, at)
+                    resolved: web_symbol(st, m.names[f.a[at]], "{letters}:{web_site_result(e, m, f, dst)}")
+                    if web_sig_params(resolved.sig) != letters {
+                        return web_fail(e, st, f, at, "`{m.names[f.a[at]]}` takes ({web_sig_params(resolved.sig)}), not ({letters})")
+                    }
+                    web_call(e, resolved.callee)
+                    web_call_result(e, st, m, f, at, web_sig_result(resolved.sig))
+                }
             }
         }
         .CallIndirect -> {
@@ -517,13 +528,17 @@ web_const: fn(e: ^WebEmitter, f: IRFunction, at: Int) Never! {
         return
     }
     ty: e.local_types[local]
-    if ty == WASM_F64 {
-        web_i64(e, f.a[at])
-        web_op(e, 0xbf)
-    } else if ty == WASM_F32 {
-        web_i32(e, f.a[at])
-        web_op(e, 0xbe)
-    } else { web_i64(e, f.a[at]) }
+    if {
+        ty == WASM_F64 -> {
+            web_i64(e, f.a[at])
+            web_op(e, 0xbf)
+        }
+        ty == WASM_F32 -> {
+            web_i32(e, f.a[at])
+            web_op(e, 0xbe)
+        }
+        else -> { web_i64(e, f.a[at]) }
+    }
     web_set(e, local)
 }
 
@@ -733,10 +748,16 @@ web_load_op: fn(e: ^WebEmitter, m: IRModule, f: IRFunction, at: Int) Never! {
     offset: web_address(e, base, f.b[at])
     width: web_value_width(ty)
     op := 0x29
-    if ty.kind == .Float -> op = 0x2b else if ty.kind == .Float32 -> op = 0x2a else if width == 1 {
-        op = if ty.kind == .Word && ty.signed -> 0x30 else -> 0x31
-    } else if width == 2 { op = if ty.kind == .Word && ty.signed -> 0x32 else -> 0x33 } else if width == 4 {
-        op = if ty.kind == .Word && ty.signed -> 0x34 else -> 0x35
+    if {
+        ty.kind == .Float -> op = 0x2b
+        ty.kind == .Float32 -> op = 0x2a
+        width == 1 -> {
+            op = if ty.kind == .Word && ty.signed -> 0x30 else -> 0x31
+        }
+        width == 2 -> { op = if ty.kind == .Word && ty.signed -> 0x32 else -> 0x33 }
+        width == 4 -> {
+            op = if ty.kind == .Word && ty.signed -> 0x34 else -> 0x35
+        }
     }
     web_mem(e, op, offset)
     web_set(e, local)
@@ -754,9 +775,15 @@ web_store_op: fn(e: ^WebEmitter, m: IRModule, f: IRFunction, at: Int) Never! {
     web_get(e, local)
     width: web_value_width(ty)
     op := 0x37
-    if ty.kind == .Float -> op = 0x39 else if ty.kind == .Float32 -> op = 0x38 else if width == 1 {
-        op = 0x3c
-    } else if width == 2 { op = 0x3d } else if width == 4 { op = 0x3e }
+    if {
+        ty.kind == .Float -> op = 0x39
+        ty.kind == .Float32 -> op = 0x38
+        width == 1 -> {
+            op = 0x3c
+        }
+        width == 2 -> { op = 0x3d }
+        width == 4 -> { op = 0x3e }
+    }
     web_mem(e, op, offset)
 }
 
@@ -838,16 +865,28 @@ web_exact_binary: fn(e: ^WebEmitter, st: ^WebState, f: IRFunction, tables: IRX64
         return web_store_truth(e, dst)
     }
     if op == .Add || op == .Sub || op == .Mul {
-        symbol: if op == .Add -> "jet_int_add" else if op == .Sub -> "jet_int_sub" else -> "jet_int_mul"
+        symbol: if {
+            op == .Add -> "jet_int_add"
+            op == .Sub -> "jet_int_sub"
+            else -> "jet_int_mul"
+        }
         return web_exact_arithmetic(e, st, f, at, op, left, right, dst, symbol)
     }
     if op == .BitAnd || op == .BitOr || op == .BitXor {
-        symbol: if op == .BitAnd -> "jet_int_bit_and" else if op == .BitOr -> "jet_int_bit_or" else -> "jet_int_bit_xor"
+        symbol: if {
+            op == .BitAnd -> "jet_int_bit_and"
+            op == .BitOr -> "jet_int_bit_or"
+            else -> "jet_int_bit_xor"
+        }
         web_both_inline(e, left, right)
         web_if(e)
         web_get(e, left)
         web_get(e, right)
-        web_op(e, if op == .BitAnd -> 0x83 else if op == .BitOr -> 0x84 else -> 0x85)
+        web_op(e, if {
+            op == .BitAnd -> 0x83
+            op == .BitOr -> 0x84
+            else -> 0x85
+        })
         web_store(e, dst)
         web_else(e)
         web_get(e, left)
@@ -870,7 +909,11 @@ web_exact_arithmetic: fn(e: ^WebEmitter, st: ^WebState, f: IRFunction, at: Int, 
     web_if(e)
     if left >= 0 -> web_get(e, left) else -> web_i64(e, 0)
     web_get(e, right)
-    web_op(e, if op == .Add -> 0x7c else if op == .Sub -> 0x7d else -> 0x7e)
+    web_op(e, if {
+        op == .Add -> 0x7c
+        op == .Sub -> 0x7d
+        else -> 0x7e
+    })
     web_set(e, t0)
     web_inline_test(e, t0)
     if op == .Mul {
@@ -925,15 +968,18 @@ web_exact_shift: fn(e: ^WebEmitter, st: ^WebState, f: IRFunction, tables: IRX64T
     web_get(e, right)
     web_op(e, if left_shift -> 0x86 else -> 0x87)
     web_set(e, t0)
-    if left_shift {
-        web_get(e, t0)
-        web_get(e, right)
-        web_op(e, 0x87)
-        web_get(e, left)
-        web_op(e, 0x51)
-        web_inline_test(e, t0)
-        web_op(e, 0x71)
-    } else { web_i32(e, 1) }
+    if {
+        left_shift -> {
+            web_get(e, t0)
+            web_get(e, right)
+            web_op(e, 0x87)
+            web_get(e, left)
+            web_op(e, 0x51)
+            web_inline_test(e, t0)
+            web_op(e, 0x71)
+        }
+        else -> { web_i32(e, 1) }
+    }
     web_set(e, ok)
     web_else(e)
     web_i32(e, 0)
@@ -1046,26 +1092,38 @@ web_word_binary: fn(e: ^WebEmitter, st: ^WebState, m: IRModule, f: IRFunction, t
     trap: f.c[at] != IR_OVERFLOW_WRAP
     unsigned: !ty.signed
     if op == .Add || op == .Sub || op == .Mul {
-        operation: if op == .Add -> "add" else if op == .Sub -> "sub" else -> "mul"
+        operation: if {
+            op == .Add -> "add"
+            op == .Sub -> "sub"
+            else -> "mul"
+        }
         message: ir_x64_overflow_message(operation)
         web_get(e, left)
         web_get(e, right)
-        web_op(e, if op == .Add -> 0x7c else if op == .Sub -> 0x7d else -> 0x7e)
+        web_op(e, if {
+            op == .Add -> 0x7c
+            op == .Sub -> 0x7d
+            else -> 0x7e
+        })
         t0: e.t0
         web_set(e, t0)
-        if bits == 64 {
-            if trap {
-                web_word_overflow(e, op, unsigned, left, right)
+        if {
+            bits == 64 -> {
+                if trap {
+                    web_word_overflow(e, op, unsigned, left, right)
+                    web_stop_if(e, st, f, tables, at, message)
+                }
+            }
+            trap -> {
+                web_get(e, t0)
+                web_out_of_range(e, ty)
                 web_stop_if(e, st, f, tables, at, message)
             }
-        } else if trap {
-            web_get(e, t0)
-            web_out_of_range(e, ty)
-            web_stop_if(e, st, f, tables, at, message)
-        } else {
-            web_get(e, t0)
-            web_narrow(e, ty.signed, bits)
-            web_set(e, t0)
+            else -> {
+                web_get(e, t0)
+                web_narrow(e, ty.signed, bits)
+                web_set(e, t0)
+            }
         }
         web_get(e, t0)
         return web_store(e, dst)
@@ -1106,10 +1164,13 @@ web_word_binary: fn(e: ^WebEmitter, st: ^WebState, m: IRModule, f: IRFunction, t
         }
         web_get(e, left)
         web_get(e, right)
-        if op == .Shl {
-            web_op(e, 0x86)
-            web_narrow(e, ty.signed, bits)
-        } else { web_op(e, if ty.signed -> 0x87 else -> 0x88) }
+        if {
+            op == .Shl -> {
+                web_op(e, 0x86)
+                web_narrow(e, ty.signed, bits)
+            }
+            else -> { web_op(e, if ty.signed -> 0x87 else -> 0x88) }
+        }
         return web_store(e, dst)
     }
     web_get(e, left)
@@ -1143,26 +1204,30 @@ web_const_value: fn(f: IRFunction, at: Int, slot: Int) -> Int? Never! {
 web_word_overflow: fn(e: ^WebEmitter, op: IROp, unsigned: Bool, left: Int, right: Int) Never! {
     t0: e.t0
     if unsigned {
-        if op == .Add {
-            web_get(e, t0)
-            web_get(e, left)
-            web_op(e, 0x54)
-        } else if op == .Sub {
-            web_get(e, left)
-            web_get(e, right)
-            web_op(e, 0x54)
-        } else {
-            web_get(e, right)
-            web_op(e, 0x50)
-            web_if_value(e, WASM_I32)
-            web_i32(e, 0)
-            web_else(e)
-            web_get(e, t0)
-            web_get(e, right)
-            web_op(e, 0x80)
-            web_get(e, left)
-            web_op(e, 0x52)
-            web_end(e)
+        if {
+            op == .Add -> {
+                web_get(e, t0)
+                web_get(e, left)
+                web_op(e, 0x54)
+            }
+            op == .Sub -> {
+                web_get(e, left)
+                web_get(e, right)
+                web_op(e, 0x54)
+            }
+            else -> {
+                web_get(e, right)
+                web_op(e, 0x50)
+                web_if_value(e, WASM_I32)
+                web_i32(e, 0)
+                web_else(e)
+                web_get(e, t0)
+                web_get(e, right)
+                web_op(e, 0x80)
+                web_get(e, left)
+                web_op(e, 0x52)
+                web_end(e)
+            }
         }
         return
     }
@@ -1243,37 +1308,43 @@ web_word_division: fn(e: ^WebEmitter, st: ^WebState, m: IRModule, f: IRFunction,
     web_if(e)
     web_numeric_stop(e, st, f, tables, at, IR_X64_DIVIDED_BY_ZERO)
     web_else(e)
-    if !ty.signed {
-        web_get(e, left)
-        web_get(e, right)
-        web_op(e, if remainder -> 0x82 else -> 0x80)
-        web_set(e, dst)
-    } else {
-        web_get(e, right)
-        web_i64(e, -1)
-        web_op(e, 0x51)
-        web_if(e)
-        if remainder {
-            web_i64(e, 0)
-            web_set(e, dst)
-        } else {
-            if trap {
-                web_get(e, left)
-                web_i64(e, web_signed_min(bits))
-                web_op(e, 0x51)
-                web_stop_if(e, st, f, tables, at, ir_x64_overflow_message("div"))
-            }
-            web_i64(e, 0)
+    if {
+        !ty.signed -> {
             web_get(e, left)
-            web_op(e, 0x7d)
-            web_narrow(e, true, bits)
+            web_get(e, right)
+            web_op(e, if remainder -> 0x82 else -> 0x80)
             web_set(e, dst)
         }
-        web_else(e)
-        web_divide(e, op, left, right)
-        web_get(e, quotient)
-        web_set(e, dst)
-        web_end(e)
+        else -> {
+            web_get(e, right)
+            web_i64(e, -1)
+            web_op(e, 0x51)
+            web_if(e)
+            if {
+                remainder -> {
+                    web_i64(e, 0)
+                    web_set(e, dst)
+                }
+                else -> {
+                    if trap {
+                        web_get(e, left)
+                        web_i64(e, web_signed_min(bits))
+                        web_op(e, 0x51)
+                        web_stop_if(e, st, f, tables, at, ir_x64_overflow_message("div"))
+                    }
+                    web_i64(e, 0)
+                    web_get(e, left)
+                    web_op(e, 0x7d)
+                    web_narrow(e, true, bits)
+                    web_set(e, dst)
+                }
+            }
+            web_else(e)
+            web_divide(e, op, left, right)
+            web_get(e, quotient)
+            web_set(e, dst)
+            web_end(e)
+        }
     }
     web_end(e)
 }
@@ -1360,17 +1431,20 @@ web_neg: fn(e: ^WebEmitter, st: ^WebState, m: IRModule, f: IRFunction, tables: I
                 web_stop_if(e, st, f, tables, at, message)
             }
             if trap && ty.signed {
-                if bits == 64 {
-                    web_get(e, value)
-                    web_i64(e, WEB_INT_MIN)
-                    web_op(e, 0x51)
-                    web_stop_if(e, st, f, tables, at, message)
-                } else {
-                    web_i64(e, 0)
-                    web_get(e, value)
-                    web_op(e, 0x7d)
-                    web_out_of_range(e, ty)
-                    web_stop_if(e, st, f, tables, at, message)
+                if {
+                    bits == 64 -> {
+                        web_get(e, value)
+                        web_i64(e, WEB_INT_MIN)
+                        web_op(e, 0x51)
+                        web_stop_if(e, st, f, tables, at, message)
+                    }
+                    else -> {
+                        web_i64(e, 0)
+                        web_get(e, value)
+                        web_op(e, 0x7d)
+                        web_out_of_range(e, ty)
+                        web_stop_if(e, st, f, tables, at, message)
+                    }
                 }
             }
             web_i64(e, 0)
@@ -1486,8 +1560,11 @@ web_convert: fn(e: ^WebEmitter, st: ^WebState, m: IRModule, f: IRFunction, at: I
     }
     if float_from && float_to {
         web_get(e, value)
-        if from.kind == .Float32 && to.kind == .Float -> web_op(e, 0xbb) else if from.kind == .Float && to.kind == .Float32 {
-            web_op(e, 0xb6)
+        if {
+            from.kind == .Float32 && to.kind == .Float -> web_op(e, 0xbb)
+            from.kind == .Float && to.kind == .Float32 -> {
+                web_op(e, 0xb6)
+            }
         }
         return web_store(e, dst)
     }

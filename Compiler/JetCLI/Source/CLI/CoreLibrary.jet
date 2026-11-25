@@ -349,7 +349,12 @@ jet_cli_core_interface_made: fn(prefix: String, compiler_threads: CompilerThread
     if trace_sink == .Val(sink) -> sink.begin("runtime.core.interface", "", -1, -1)
     rows := jet_cli_builtin_core_rows()
     rows.extend(jet_driver_runtime_interface_sources())
-    bytes: jet_driver_core_interface_bytes(jet_driver_core_interface_units(rows.move(), compiler_threads))
+    made: jet_driver_core_interface_units(rows.move(), compiler_threads)
+    if made.problem == .Val(problem) {
+        if trace_sink == .Val(sink) -> sink.end("runtime.core.interface", 0)
+        return "cannot make the Core interface: {problem}"
+    }
+    bytes: jet_driver_core_interface_bytes(made.units)
     if trace_sink == .Val(sink) -> sink.end("runtime.core.interface", bytes.len())
     core_library_files.write_bytes("{prefix}.interface", bytes) ?? return "cannot write the Core interface: {err}"
     ""

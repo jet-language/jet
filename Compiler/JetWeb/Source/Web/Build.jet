@@ -43,7 +43,7 @@ web_runtime_partition: fn(m: IRModule, exports: [IRLibraryExport], data: [X64Dat
             hooks.push(WebHook{row: row.function, priority: row.fini_priority, fini: true})
         }
     }
-    built := web_module(m, false, WebLayout{data_base: WEB_DATA_BASE, table_base: 0}, [String:String]{}, -1, web_host_functions(), rows, hooks)
+    built: web_module(m, false, WebLayout{data_base: WEB_DATA_BASE, table_base: 0}, [String:String]{}, -1, web_host_functions(), rows, hooks)
     lines := [String]{"layout\t{built.data_end}\t{built.slots}"}
     loop row in built.exports -> lines.push("export\t{row}")
     loop row in data {
@@ -79,13 +79,17 @@ web_program: fn(program: ^^IRModule, receipt: String) -> WebProgram Never! {
     runtime := [String:String]{}
     loop line in receipt.split("\n").to_list() {
         fields: line.split("\t").to_list()
-        if fields.len() == 3 && fields[0] == "layout" {
-            runtime_end = Int.parse(fields[1]) ?? -1
-            runtime_slots = Int.parse(fields[2]) ?? -1
-        } else if fields.len() == 3 && fields[0] == "export" {
-            runtime[fields[1].copy()] = fields[2].copy()
-        } else if fields.len() == 3 && fields[0] == "data" && fields[1] == IR_X64_CHECKS_ARMED_SYMBOL {
-            armed = Int.parse(fields[2]) ?? -1
+        if {
+            fields.len() == 3 && fields[0] == "layout" -> {
+                runtime_end = Int.parse(fields[1]) ?? -1
+                runtime_slots = Int.parse(fields[2]) ?? -1
+            }
+            fields.len() == 3 && fields[0] == "export" -> {
+                runtime[fields[1].copy()] = fields[2].copy()
+            }
+            fields.len() == 3 && fields[0] == "data" && fields[1] == IR_X64_CHECKS_ARMED_SYMBOL -> {
+                armed = Int.parse(fields[2]) ?? -1
+            }
         }
     }
     if runtime_end < 0 || runtime_slots < 0 {
@@ -94,7 +98,7 @@ web_program: fn(program: ^^IRModule, receipt: String) -> WebProgram Never! {
     m := program.move()
     web_lower(m)
     base: web_align_up(runtime_end, 16)
-    built := web_module(m, true, WebLayout{data_base: base, table_base: runtime_slots}, runtime, armed, web_host_functions(), [String:Int]{}, [WebHook]{})
+    built: web_module(m, true, WebLayout{data_base: base, table_base: runtime_slots}, runtime, armed, web_host_functions(), [String:Int]{}, [WebHook]{})
     partitions: web_manifest_partitions(runtime_end, runtime_slots, base, built.data_end, built.slots)
     sources := [String]{}
     source_rows := [String:Int]{}
@@ -193,7 +197,7 @@ web_vlq: fn(out: ^[U8], value: Int) Never! {
 web_source_name: fn(source: String, entry: String) -> String Never! {
     from := entry.split("/").to_list()
     _ := from.pop()
-    to := source.split("/").to_list()
+    to: source.split("/").to_list()
     common := 0
     loop common < from.len() && common + 1 < to.len() && from[common] == to[common] -> common += 1
     parts := [String]{}

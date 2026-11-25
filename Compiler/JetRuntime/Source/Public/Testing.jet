@@ -1,6 +1,7 @@
 // `jet.runtime.testing` (#6615): the running test's report cell and text
-// window that core.testing is built on, a deterministic World's own store
-// cells, and the World handle's clock, timers and history, in Jet types. Each
+// window that core.testing is built on, its evidence file reads and
+// temporary directories, a deterministic World's own store cells, and the
+// World handle's clock, timers and history, in Jet types. Each
 // member is a runtime binding (Guest.jet sema_guest_runtime_binding) of the
 // runtime export that is its one body (RouteTesting.jet, World.jet). Each is
 // `priv`: only Core calls them.
@@ -39,4 +40,16 @@ testing: module {
     #Import(c) priv world_wait_idle: fn(world: DeterministicWorld) = "jet_world_wait_idle"
 
     #Import(c) priv world_history: fn(world: DeterministicWorld) -> String = "jet_world_history"
+
+    // The test harness's evidence file reads and temporary directories
+    // (RouteTesting.jet), each answered as its jet_builtins record.
+    #Import(c) priv evidence_read: fn(path: String) -> EvidenceRead = "jet_testing_evidence_read_raw"
+
+    #Import(c) priv temp_facts: fn() -> TempFacts = "jet_testing_temp_facts_raw"
+
+    #Import(c) priv temp_join: fn(name: String) -> TempPath = "jet_testing_temp_join_raw"
+
+    #Import(c) priv temp_remove: fn(path: [U8]) -> TempRemove = "jet_testing_temp_remove_raw"
+
+    #Import(c) priv temp_create: fn(path: [U8]) -> TempCreate = "jet_testing_temp_create_raw"
 }

@@ -4,8 +4,9 @@
 // a runtime binding (Guest.jet sema_guest_runtime_binding) of the runtime
 // export that is its one body (RouteDns.jet, NetRoutes.jet,
 // NetHandleRoutes.jet, NetDatagramRoutes.jet, RouteNet.jet, NetUnix.jet,
-// NetUnixConnect.jet, HostNetAddress.jet, WsRoutes.jet, and for core.net.tls
-// CryptoEntropy.jet, CompilerFS.jet, HostHeldDirectory.jet, ProveJournal.jet).
+// NetUnixConnect.jet, HostNetAddress.jet, HostNetResolver.jet, WsRoutes.jet,
+// and for core.net.tls CryptoEntropy.jet, CompilerFS.jet,
+// HostHeldDirectory.jet, ProveJournal.jet).
 // A lookup answers `[T] Err!`: the records, or an Err whose message is the
 // lookup's failure reason (the export writes that text). `ms` is a timeout in
 // milliseconds; a negative lookup timeout fails. A member with no row is pure.
@@ -275,4 +276,15 @@ net: module {
     // answer says the stream is readable and bit 2 the wake descriptor; 0
     // says the time ran out.
     #Import(c) priv unix_wait_wake_raw: fn(stream: ^UnixStream, wake: Int, timeout: Int) -[Net, Time.Wait]> Int NetError! = "jet_net_unix_wait_wake_raw"
+
+    // The addresses `host` resolves to on `port`, in the order core.net
+    // connects to them (HostNetResolver.jet).
+    #Import(c) priv resolve_ordered: fn(host: String, port: U16) -[Net, Time.Wait]> [SocketAddr] ResolveError! = "jet_net_raw_resolve_ordered"
+
+    // The address of the 4 or 16 octets `bytes`, and the socket address of
+    // `ip` and `port` with an IPv6 address's `flow` and `scope`
+    // (HostNetAddress.jet). The exports copy their arguments.
+    #Import(c) priv ip_from_bytes: fn(bytes: [U8]) -> IPAddr = "jet_net_raw_ip_from_bytes"
+
+    #Import(c) priv socket_from_parts: fn(ip: IPAddr, port: U16, flow: U32, scope: U32) -> SocketAddr = "jet_net_raw_socket_from_parts"
 }

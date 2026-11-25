@@ -382,8 +382,7 @@ ir_test_property_reject: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int,
     }
     outer_row: b.row
     outer_bounds: b.bounds
-    b.row = row
-    b.bounds = ir_bounds_mode(p, row)
+    ir_builder_from(p, b, Val(row))
     mark: b.bindings.len()
     loop (index, param) in p.functions[row].params {
         symbol: if param.local.symbol_id == .Val(id) -> id else -> symbol_none()
@@ -803,7 +802,8 @@ ir_scope_member: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, statement: Int, k
         }
         .Measure -> { ir_measure_scope(m, p, b, body) }
         .Skip -> {
-            whole: b.row >= 0 && p.functions[b.row].body.len() > 0 && p.functions[b.row].body[0] == statement
+            checked: ir_builder_body(p, b.row)[0].body
+            whole: checked.len() > 0 && checked[0] == statement
             bool_row: ir_type_row(m, Type.Bool) ?? 0
             flag: ir_temp(m, b, bool_row)
             ir_emit(b.f, IROp.Const, flag, if whole -> 1 else -> 0, -1, -1, b.line)

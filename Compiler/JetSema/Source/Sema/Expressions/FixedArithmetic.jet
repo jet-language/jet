@@ -292,11 +292,9 @@ sema_expr_numeric_swizzle_slots: fn(ty: Type, environment: SemaScopeEnvironment,
         if length < 1 -> return None
         return Val(SemaSwizzleSlots{shown: type_name(ty), element: element, length: length, reach: length, lanes: false, declared: 0})
     }
-    if program.registration_graph == .Val(graph) {
-        row: sema_type_resolve_nominal_row(graph, ty, environment.module_identity) ?? return None
-        return sema_expression_swizzle_lane_slots(graph, graph.modules[row.module_index].nominals[row.row], ty)
-    }
-    None
+    graph: program.registration_graph
+    row: sema_type_resolve_nominal_row(graph, ty, environment.module_identity) ?? return None
+    sema_expression_swizzle_lane_slots(graph, graph.modules[row.module_index].nominals[row.row], ty)
 }
 
 // The legal result lane/vector type name for a numeric `.swizzle` of `count`
@@ -361,16 +359,15 @@ sema_expr_swizzle_const_int: fn(expr: Expr, environment: SemaScopeEnvironment, p
                     return sema_expr_swizzle_const_int(definition.value, environment, program, scopes, depth - 1)
                 }
             }
-            if program.registration_graph == .Val(graph) {
-                module_index: sema_registration_module_index(graph, symbol.module_identity) ?? return None
-                loop row in graph.modules[module_index].constants {
-                    if row.symbol.id != symbol.id -> next
-                    if row.declaration.mutable -> return None
-                    if row.declaration.ct == .Val(inner) && inner == .Int(number) {
-                        return Val(number)
-                    }
-                    return sema_expr_swizzle_const_int(row.declaration.value, environment, program, scopes, depth - 1)
+            graph: program.registration_graph
+            module_index: sema_registration_module_index(graph, symbol.module_identity) ?? return None
+            loop row in graph.modules[module_index].constants {
+                if row.symbol.id != symbol.id -> next
+                if row.declaration.mutable -> return None
+                if row.declaration.ct == .Val(inner) && inner == .Int(number) {
+                    return Val(number)
                 }
+                return sema_expr_swizzle_const_int(row.declaration.value, environment, program, scopes, depth - 1)
             }
             None
         }
@@ -426,7 +423,8 @@ sema_expr_try_numeric_swizzle: fn(receiver: Expr, receiver_value: TExpr, method:
     }
     if !valid -> return SemaMethodSpecialCheck{handled: true, value: None}
     if !slots.lanes {
-        caller: if program.registration_graph == .Val(graph) -> sema_type_module_row(graph, environment.module_identity) else -> -1
+        graph: program.registration_graph
+        caller: sema_type_module_row(graph, environment.module_identity)
         walk := sema_copy_walk()
         copy_facts: sema_copy_type_facts(slots.element, program.registration_graph, program.copy_facts, caller, check.context.generic_params, walk)
         if !copy_facts.copyable {

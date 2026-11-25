@@ -21,44 +21,17 @@ core_host_callback_type: fn() -> Type Never! {
 
 core_host_fixed_signature: fn(module_name: String, member: String) -> CoreTypedCallSignature? {
     rows: """
-    jet_builtins jetc_open_directory|jetc_open_source|jetc_create_named String JetcRaw
-    jet_builtins jetc_open_child_directory Int,String JetcRaw
-    jet_builtins jetc_tmpfile|jetc_fsync|jetc_close Int JetcRaw
-    jet_builtins jetc_read|jetc_seek Int,Int JetcRaw
-    jet_builtins jetc_write Int,[u8],Int,Int JetcRaw
-    jet_builtins jetc_stat Int JetcStat
-    jet_builtins jetc_link Int,Int,String JetcRaw
-    core.crypto __sha256_blocks ^[U32],[u8],Int,Int Bool
-    core.crypto __aes_blocks [u8],Int,Int,^[u8],[u8],Int,Int,^[u8] Bool
-    core.crypto __ghash_blocks [u8],^[u8],[u8],Int,Int Bool
     core.files jet_std_files_open_reader_nonblocking String Result<FileReader,IOError>
     core.files __list_directory Int Result<[[u8]],IOError>
     core.http.client jet_http_build_resolve String,Int Result<[[u8]],String>
     core.watcher __event WatchHandle Event<WatchEvent>
-    jet_builtins process_child_id ProcessChild Int
-    jet_builtins process_child_wait ProcessChild Result<ProcessReceipt,IOError>
-    jet_builtins process_child_exited ProcessChild Result<Bool,IOError>
-    jet_builtins process_child_kill|process_child_terminate|process_child_interrupt ProcessChild Result<Unit,IOError>
-    jet_builtins process_spec_cwd|process_spec_arg|process_spec_env_remove ProcessSpec,String ProcessSpec
-    jet_builtins process_spec_args_extend ProcessSpec,[String] ProcessSpec
-    jet_builtins process_spec_env ProcessSpec,String,String ProcessSpec
-    jet_builtins process_spec_env_clear|process_spec_io_idle|process_spec_detached|process_spec_terminal ProcessSpec ProcessSpec
     jet_builtins process_spec_stdin|process_spec_stdout|process_spec_stderr ProcessSpec,ProcessStreamMode ProcessSpec
     jet_builtins process_spec_timeout|process_spec_cpu_time_limit ProcessSpec,Duration ProcessSpec
-    jet_builtins process_spec_output_limit|process_spec_memory_limit|process_spec_memory_scope|process_spec_open_file_limit|process_spec_io_priority ProcessSpec,Int ProcessSpec
-    jet_builtins process_spec_cpu_affinity ProcessSpec,[Int] ProcessSpec
-    jet_builtins process_spec_terminal_with_policy ProcessSpec,TerminalPolicy ProcessSpec
-    jet_builtins process_spec_under ProcessSpec,Authority ProcessSpec
-    jet_builtins process_spec_plan ProcessSpec Result<ProcessPlan,IOError>
-    jet_builtins process_spec_run|process_spec_run_checked ProcessSpec Result<ProcessReceipt,IOError>
-    jet_builtins process_spec_spawn ProcessSpec Result<ProcessChild,IOError>
     core.term take Int Result<[u8],IOError>
     core.term stdout - Stdout
     core.term stderr - Stderr
     core.process __spec_fields [String],Bool,String,Bool,[String],[String],[String],Bool,ProcessStreamMode,ProcessStreamMode,ProcessStreamMode,Bool,Int,Bool,Int,Bool,Int,Bool,Int,Bool,Int,Bool,Bool,TerminalPolicy,Bool,String ProcessSpec
-    core.process __spec_parent_death ProcessSpec ProcessSpec
     core.files __directory_fd Int (available:Bool,held:Bool,fd:Int)
-    core.process __keep_open_raw ProcessSpec,Int,Int,Bool (spec:ProcessSpec,available:Bool,assigned_fd:Int,errno:Int)
     core.process __signal_add Int,Int,ProcessSignal (available:Bool,value:Int,errno:Int)
     core.process __signal_receiver Int Receiver<ProcessSignal>
     core.crypto.vault get String String?
@@ -67,11 +40,6 @@ core_host_fixed_signature: fn(module_name: String, member: String) -> CoreTypedC
     core.sync counter_inc SyncCounter,String,Int SyncCounter
     core.sync map_set SyncMap,String,String SyncMap
     core.testing fake_clock Int Clock
-    jet_builtins evidence_read String EvidenceRead
-    jet_builtins temp_facts - TempFacts
-    jet_builtins temp_join String TempPath
-    jet_builtins temp_remove [U8] TempRemove
-    jet_builtins temp_create [U8] TempCreate
     jet_builtins to_bits_f32 F32 Int
     jet_builtins from_bits_f32 Int F32
     core.testing world fn(DeterministicWorld;Unit) Unit
@@ -97,9 +65,6 @@ core_host_fixed_signature: fn(module_name: String, member: String) -> CoreTypedC
     core.tasks __channel_bounded Int (sender:Sender<T>,receiver:Receiver<T>) T
     core.prelude __receipt_attach T,String,String,String Unit T
     core.encoding.json canonical Dyn String
-    jet_builtins resolve_ordered String,U16 Result<[SocketAddr],ResolveError>
-    core.net __ip_from_bytes ^^[u8] IPAddr
-    core.net __socket_from_parts ^^IPAddr,U16,U32,U32 SocketAddr
     """
     core_sig_row_lookup(rows, module_name, member)
 }

@@ -329,8 +329,9 @@ behavior-preserving change. Exact duplicate edits apply once; overlapping
 edits are deferred and rechecked for at most sixteen rounds. Each round's
 edited files are checked again: when they have more errors than before
 `jet fix`, the fixes of each file are retried together on top of the ones
-kept (when the round edits more than one file), each edit of a file whose
-set adds an error is retried alone, and an edit that adds an error is rolled
+kept (when the round edits more than one file), a set that adds an error is
+retried by halves, so the checks grow with the edits rolled back rather than
+with every edit, and an edit that adds an error alone is rolled
 back and reported with that error and its file. One fix may carry several
 edits, some in other files of the program: they apply together or not at
 all. A fix whose edits overlap each other, or that names a file `jet fix`
@@ -356,8 +357,9 @@ instead: `fix.file`, `fix.dry_run`, `fix.applied` (the count), `fix.skipped`
 `fix.log` (the replay log, or null when nothing was written); machine mode
 does not create a fake fix receipt. Publication uses the held codemod transaction and its durable undo
 journal. Rename provenance comes from uniquely matched checked before/after
-definition facts; when those checks cannot establish a rename, the receipt
-records the exact changed byte region instead.
+definition facts: those of the first check `jet fix` runs, and those of one
+check of every file it changed. When those checks cannot establish a rename,
+the receipt records the exact changed byte region instead.
 
 `jet fix --pin-failures <file>` writes the failure contract the checker infers
 for each function into the file, so the inferred set becomes the written one.

@@ -9,6 +9,7 @@ use {
     core.prelude.[SourceLocation]
     rt: jet.runtime.time
     net_rt: jet.runtime.net
+    sys_rt: jet.runtime.sys
 }
 
 // core.http.server — HTTP/1.1 serving over core.net TCP, or over core.net.tls
@@ -1794,7 +1795,7 @@ priv serve_connection: fn(stream: HTTPConn, mux: HTTPMux, deadline: Duration?, s
     }
     // An answered request is a causal-profile progress point; outside
     // `--lens=causal` it records nothing.
-    if answered -> core.perf.__progress("request")
+    if answered -> sys_rt.perf_progress("request")
     // A TLS stream sends close_notify and closes the socket it owns.
     if stream.tls == .Val(secure) -> secure.close()
     lingers := false

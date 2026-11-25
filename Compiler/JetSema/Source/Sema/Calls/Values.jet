@@ -79,20 +79,22 @@ sema_call_value_checked_from_type: fn(check: ^SemaBodyCheck, callee: Expr, calle
     resolved_binding := binding
     if binding.default_refs.len() > 0 {
         if resolved_defaults.len() == 0 {
-            if program.registration_graph == {
-                .Val(graph) -> {
-                    registered_defaults: sema_call_registration_defaults(graph, binding) ?? {
-                        diagnostics.push(sema_error("E0906", span, "a default argument for this function value could not be resolved", "registered callable defaults retain their graph identity and source location", "make every bound default available to Registration before checking this call"))
-                        return None
-                    }
-                    resolved_defaults = registered_defaults
-                }
-                .None -> {
+            if {
+                // Snapshot: a lone program's defaults are its own declarations' (sema_call_local_value_defaults).
+                program.registration_graph.mode == .Snapshot -> {
                     local_defaults: sema_call_local_value_defaults(callee, binding, environment, program, scopes) ?? {
                         diagnostics.push(sema_error("E0906", span, "a default argument for this function value could not be resolved", "callable defaults retain their owning declaration and source identity", "resolve the owning declaration before calling this value"))
                         return None
                     }
                     resolved_defaults = local_defaults
+                }
+                else -> {
+                    graph: program.registration_graph
+                    registered_defaults: sema_call_registration_defaults(graph, binding) ?? {
+                        diagnostics.push(sema_error("E0906", span, "a default argument for this function value could not be resolved", "registered callable defaults retain their graph identity and source location", "make every bound default available to Registration before checking this call"))
+                        return None
+                    }
+                    resolved_defaults = registered_defaults
                 }
             }
         }

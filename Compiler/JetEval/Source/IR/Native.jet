@@ -376,7 +376,7 @@ jet_eval_native_start: fn(c: ^JetEvalNativeChild, session: JetEvalNativeSession,
     if c.stub.tail.len() == 0 {
         entry := jet_eval_native_entry_module()
         entry.fast_o0 = true
-        compiled := ir_x64_object(ir_x64_compile_module(entry, compiler_threads_single()), true)
+        compiled: ir_x64_object(ir_x64_compile_module(entry, compiler_threads_single()), true)
         if compiled.errors.len() > 0 {
             c.failure = "the comptime entry program doesn't compile: {compiled.errors.join("; ")}"
             return false
@@ -468,7 +468,7 @@ jet_eval_native_entry_module: fn() -> IRModule {
 
 // Adds `f` to `m`; its function id.
 jet_eval_native_add: fn(m: ^IRModule, f: ^^IRFunction) -> Int Never! {
-    owned := f.move()
+    owned: f.move()
     id: m.functions.len()
     ir_function_bind(m, owned.key, id)
     m.functions.push(owned)
@@ -484,9 +484,9 @@ jet_eval_native_add: fn(m: ^IRModule, f: ^^IRFunction) -> Int Never! {
 // (ir_x64_compile_module admits them by its instruction count): the code is
 // the same for any thread count.
 jet_eval_native_load: fn(built: ^^JetEvalIRComptime, config: JetEvalConfig, threads: CompilerThreads{compiler_threads_single()}) -> JetEvalNativeProgram {
-    owned := built.move()
+    owned: built.move()
     code := owned.code.move()
-    layouts := owned.layouts.move()
+    layouts: owned.layouts.move()
     pointer: ir_pointer_row(code)
     entries := [Int]{}
     results := [Int]{}
@@ -506,7 +506,7 @@ jet_eval_native_load: fn(built: ^^JetEvalIRComptime, config: JetEvalConfig, thre
         result: code.functions[id].result
         size: if result >= 0 && code.types[result].size > 8 -> code.types[result].size else -> 8
         name: "{JET_EVAL_NATIVE_PREFIX}item_{index}"
-        wrapper := jet_eval_native_wrapper(code, name, id, rows, result, pointer)
+        wrapper: jet_eval_native_wrapper(code, name, id, rows, result, pointer)
         _ := jet_eval_native_add(code, wrapper)
         results.push(result)
         sizes.push(size)
@@ -551,8 +551,8 @@ jet_eval_native_load: fn(built: ^^JetEvalIRComptime, config: JetEvalConfig, thre
     marked_report := ir_opt_report(0)
     ir_opt_inline_marked_module(code, marked_report, threads)
     // The rows outlive the code: values are read and written by them.
-    functions := compiler_take_rows<IRFunction>(code.functions)
-    data := compiler_take_rows<[U8]>(code.data)
+    functions: compiler_take_rows<IRFunction>(code.functions)
+    data: compiler_take_rows<[U8]>(code.data)
     program.types = Shared{code.copy()}
     code.functions = functions.move()
     code.data = data.move()
@@ -563,7 +563,11 @@ jet_eval_native_load: fn(built: ^^JetEvalIRComptime, config: JetEvalConfig, thre
     labels := [String]{}
     places := [String]{}
     loop function in code.functions {
-        id: name_index(name_intern(symbols, if function.symbol != "" -> function.symbol else if function.key != "" -> function.key else -> function.name))
+        id: name_index(name_intern(symbols, if {
+            function.symbol != "" -> function.symbol
+            function.key != "" -> function.key
+            else -> function.name
+        }))
         loop labels.len() <= id {
             labels.push("")
             places.push("")
@@ -669,11 +673,14 @@ jet_eval_native_wrapper: fn(code: ^IRModule, name: String, id: Int, params: [Int
         aggregate: code.types[row].kind == .Aggregate
         if listed >= 0 {
             address: ir_slot(w, if aggregate -> row else -> pointer, IRSlotKind.Temp, -1, 0)
-            if aggregate {
-                word: ir_slot(w, pointer, IRSlotKind.Temp, -1, 0)
-                _ := ir_emit(w, IROp.Load, word, listed, 8 * index, -1, 0)
-                _ := ir_emit(w, IROp.Offset, address, word, 0, -1, 0)
-            } else { _ := ir_emit(w, IROp.Load, address, listed, 8 * index, -1, 0) }
+            if {
+                aggregate -> {
+                    word: ir_slot(w, pointer, IRSlotKind.Temp, -1, 0)
+                    _ := ir_emit(w, IROp.Load, word, listed, 8 * index, -1, 0)
+                    _ := ir_emit(w, IROp.Offset, address, word, 0, -1, 0)
+                }
+                else -> { _ := ir_emit(w, IROp.Load, address, listed, 8 * index, -1, 0) }
+            }
             held.push(address)
             next
         }
@@ -691,14 +698,20 @@ jet_eval_native_wrapper: fn(code: ^IRModule, name: String, id: Int, params: [Int
         args.push(value)
     }
     start: ir_args(w, args)
-    if result < 0 || code.types[result].kind == .Unit {
-        _ := ir_emit(w, IROp.Call, -1, id, start, args.len(), 0)
-    } else {
-        value: ir_slot(w, result, IRSlotKind.Temp, -1, 0)
-        _ := ir_emit(w, IROp.Call, value, id, start, args.len(), 0)
-        if code.types[result].kind == .Aggregate {
-            _ := ir_emit(w, IROp.CopyBytes, -1, cell, value, code.types[result].size, 0)
-        } else { _ := ir_emit(w, IROp.Store, -1, cell, 0, value, 0) }
+    if {
+        result < 0 || code.types[result].kind == .Unit -> {
+            _ := ir_emit(w, IROp.Call, -1, id, start, args.len(), 0)
+        }
+        else -> {
+            value: ir_slot(w, result, IRSlotKind.Temp, -1, 0)
+            _ := ir_emit(w, IROp.Call, value, id, start, args.len(), 0)
+            if {
+                code.types[result].kind == .Aggregate -> {
+                    _ := ir_emit(w, IROp.CopyBytes, -1, cell, value, code.types[result].size, 0)
+                }
+                else -> { _ := ir_emit(w, IROp.Store, -1, cell, 0, value, 0) }
+            }
+        }
     }
     _ := ir_emit(w, IROp.Return, -1, -1, -1, -1, 0)
     w
@@ -779,7 +792,7 @@ jet_eval_native_missing: fn(code: ^IRModule, session: JetEvalNativeSession) {
         rows: loop arg in start..<(start + code.functions[id].c[at]) -> code.functions[id].slot_type[code.functions[id].args[arg]]
         dst: code.functions[id].dst[at]
         result: if dst >= 0 -> code.functions[id].slot_type[dst] else -> -1
-        stub := jet_eval_native_missing_stub(code, "{JET_EVAL_NATIVE_PREFIX}missing_{index /% 2}", symbol, rows, result)
+        stub: jet_eval_native_missing_stub(code, "{JET_EVAL_NATIVE_PREFIX}missing_{index /% 2}", symbol, rows, result)
         target: jet_eval_native_add(code, stub)
         code.functions[id].op[at] = IROp.Call
         code.functions[id].a[at] = target
@@ -840,10 +853,13 @@ jet_eval_native_run: fn(program: ^JetEvalNativeProgram, item: Int, args: [TCompt
         host_adapter: if config.build_host_adapter == .Val(installed) -> Val(installed.clone_adapter()) else -> None,
     }
     if program.failure != "" {
-        if program.missing {
-            jet_eval_ir_unsupported(s, "compile-time code without the runtime image (jet_runtime.image)")
-        } else {
-            jet_eval_ir_problem(s, "compile-time code doesn't run natively: {program.failure}")
+        if {
+            program.missing -> {
+                jet_eval_ir_unsupported(s, "compile-time code without the runtime image (jet_runtime.image)")
+            }
+            else -> {
+                jet_eval_ir_problem(s, "compile-time code doesn't run natively: {program.failure}")
+            }
         }
         return jet_eval_ir_result(s, None)
     }
@@ -1063,9 +1079,13 @@ jet_eval_native_overflow: fn(s: ^JetEvalIRState, report: String) -> Bool Never! 
         address := 0
         loop index in at + JET_EVAL_NATIVE_UNNAMED_AT.bytes().len()..<digits.len() {
             digit: Int{digits[index]}
-            if digit >= 48 && digit <= 57 -> address = address * 16 + digit - 48 else if digit >= 97 && digit <= 102 {
-                address = address * 16 + digit - 87
-            } else { break }
+            if {
+                digit >= 48 && digit <= 57 -> address = address * 16 + digit - 48
+                digit >= 97 && digit <= 102 -> {
+                    address = address * 16 + digit - 87
+                }
+                else -> { break }
+            }
         }
         s.overflow_at = address
     }
@@ -1125,11 +1145,14 @@ jet_eval_native_stop: fn(s: ^JetEvalIRState, kind: Int, a: Int, b: Int, c: Int, 
     // (`eval_entry`) is the program's own stop.
     if kind == X64_COMPTIME_STOP_REQUIRE {
         message := ""
-        if a == 1 {
-            right: jet_eval_ir_text(s, d) ?? return
-            left: jet_eval_ir_text(s, c) ?? return
-            message = "expected: {right}, got: {left}"
-        } else if b != 0 { message = jet_eval_ir_text(s, b) ?? return }
+        if {
+            a == 1 -> {
+                right: jet_eval_ir_text(s, d) ?? return
+                left: jet_eval_ir_text(s, c) ?? return
+                message = "expected: {right}, got: {left}"
+            }
+            b != 0 -> { message = jet_eval_ir_text(s, b) ?? return }
+        }
         if s.runtime_execution && s.eval_entry {
             jet_eval_ir_source_fail(s, message)
             return
@@ -1380,12 +1403,15 @@ jet_eval_ir_store_data: fn(s: ^JetEvalIRState, value: TComptimeValue, row: Int, 
         .List(values) -> {
             words := [U8]{}
             loop item in values {
-                if item == .String(text) {
-                    word: jet_eval_ir_store_text(s, text) ?? return None
-                    x64_comptime_put_word(words, word)
-                } else {
-                    jet_eval_ir_unsupported(s, "a comptime input list of {item}")
-                    return None
+                if {
+                    item == .String(text) -> {
+                        word: jet_eval_ir_store_text(s, text) ?? return None
+                        x64_comptime_put_word(words, word)
+                    }
+                    else -> {
+                        jet_eval_ir_unsupported(s, "a comptime input list of {item}")
+                        return None
+                    }
                 }
             }
             data := 0
@@ -1517,7 +1543,7 @@ jet_eval_native_page: fn(s: ^JetEvalIRState, page: Int) -> Int? {
         s.last_page_row = found
         return Val(found)
     }
-    bytes := x64_comptime_read_memory(s.child, page, JET_EVAL_NATIVE_PAGE) ?? {
+    bytes: x64_comptime_read_memory(s.child, page, JET_EVAL_NATIVE_PAGE) ?? {
         jet_eval_native_unreadable(s, page)
         return None
     }
@@ -1740,18 +1766,22 @@ jet_eval_ir_float32: fn(bits: Int) -> Float Never! {
     exponent: (bits >> 23) & 255
     fraction: bits & 8388607
     magnitude := math.from_bits(0)
-    if exponent == 255 {
-        if fraction != 0 {
-            nan: 9218868437227405312 | fraction << 29
-            return math.from_bits(if sign -> nan - 9223372036854775807 - 1 else -> nan)
+    if {
+        exponent == 255 -> {
+            if fraction != 0 {
+                nan: 9218868437227405312 | fraction << 29
+                return math.from_bits(if sign -> nan - 9223372036854775807 - 1 else -> nan)
+            }
+            magnitude = math.from_bits(9218868437227405312)
         }
-        magnitude = math.from_bits(9218868437227405312)
-    } else if exponent == 0 {
-        // Subnormal: fraction * 2^-149.
-        magnitude = Float.from_int(fraction) * math.from_bits(3936146074321813504)
-    } else {
-        wide: (exponent - 127 + 1023) << 52
-        magnitude = math.from_bits(wide | fraction << 29)
+        exponent == 0 -> {
+            // Subnormal: fraction * 2^-149.
+            magnitude = Float.from_int(fraction) * math.from_bits(3936146074321813504)
+        }
+        else -> {
+            wide: (exponent - 127 + 1023) << 52
+            magnitude = math.from_bits(wide | fraction << 29)
+        }
     }
     if sign -> return -magnitude
     magnitude

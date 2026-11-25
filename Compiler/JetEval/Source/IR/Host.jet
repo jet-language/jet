@@ -314,11 +314,14 @@ jet_eval_ir_host_store: fn(types: ^IRModule, p: IRProgram, s: ^JetEvalIRState, v
                 }
                 return jet_eval_ir_host_store(types, p, s, payload, inner_row, 0)
             }
-            if ir_enum_def(types, p, row) == .Val(definition) {
-                if value == .Enum(_, variant, _) {
-                    return jet_eval_ir_host_variant(s, p, definition, variant)
+            if {
+                ir_enum_def(types, p, row) == .Val(definition) -> {
+                    if value == .Enum(_, variant, _) {
+                        return jet_eval_ir_host_variant(s, p, definition, variant)
+                    }
                 }
-            } else if value == .Int(number) { return Val(number) }
+                value == .Int(number) -> { return Val(number) }
+            }
         }
         .Pointer -> return jet_eval_ir_host_box(types, p, s, value, row)
         .Aggregate -> {
@@ -387,9 +390,12 @@ jet_eval_ir_host_box: fn(types: ^IRModule, p: IRProgram, s: ^JetEvalIRState, val
         if value == .Failed(_) -> success = false
         payload: if value == {
             .Present(present) -> present
-            .Failed(report) -> if report == .Told(told) -> told else -> {
-                jet_eval_ir_host_unwritable(s, value, checked)
-                return None
+            .Failed(report) -> if {
+                report == .Told(told) -> told
+                else -> {
+                    jet_eval_ir_host_unwritable(s, value, checked)
+                    return None
+                }
             }
             .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Unit | .Function(_) -> value
         }
@@ -465,9 +471,12 @@ jet_eval_ir_host_fill: fn(types: ^IRModule, p: IRProgram, s: ^JetEvalIRState, va
     checked: ir_untag(ir_row_ty(types, p, row))
     if ir_fixed_shape(types, p, row) == .Val(shape) {
         // An inline `[T#N]` takes its N elements in place.
-        items: if value == .List(values) -> values else -> {
-            jet_eval_ir_host_unwritable(s, value, checked)
-            return false
+        items: if {
+            value == .List(values) -> values
+            else -> {
+                jet_eval_ir_host_unwritable(s, value, checked)
+                return false
+            }
         }
         if items.len() != shape.count {
             jet_eval_ir_host_unwritable(s, value, checked)
@@ -495,9 +504,12 @@ jet_eval_ir_host_fill: fn(types: ^IRModule, p: IRProgram, s: ^JetEvalIRState, va
             }
             return jet_eval_ir_write(s, address, 8, bytes.len()) && jet_eval_ir_write(s, address + 8, 8, bytes.len()) && jet_eval_ir_write(s, address + 16, 8, buffer)
         }
-        items: if value == .List(values) -> values else -> {
-            jet_eval_ir_host_unwritable(s, value, checked)
-            return false
+        items: if {
+            value == .List(values) -> values
+            else -> {
+                jet_eval_ir_host_unwritable(s, value, checked)
+                return false
+            }
         }
         data := 0
         if items.len() > 0 {
@@ -511,32 +523,38 @@ jet_eval_ir_host_fill: fn(types: ^IRModule, p: IRProgram, s: ^JetEvalIRState, va
         return jet_eval_ir_write(s, address, 8, items.len()) && jet_eval_ir_write(s, address + 8, 8, items.len()) && jet_eval_ir_write(s, address + 16, 8, data)
     }
     members := [IRMember]{}
-    if checked == .Tuple(tuple_fields) {
-        members = ir_tuple_members(types, p, tuple_fields) ?? {
-            jet_eval_ir_host_unwritable(s, value, checked)
-            return false
-        }
-    } else {
-        name: if checked == {
-            .Named(name) -> name
-            .Apply(name, _) -> name
-            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {
+    if {
+        checked == .Tuple(tuple_fields) -> {
+            members = ir_tuple_members(types, p, tuple_fields) ?? {
                 jet_eval_ir_host_unwritable(s, value, checked)
                 return false
             }
         }
-        definition: ir_type_def(p, name) ?? {
-            jet_eval_ir_host_unwritable(s, value, checked)
-            return false
-        }
-        members = ir_struct_members(types, p, definition, ir_type_args(checked)) ?? {
-            jet_eval_ir_host_unwritable(s, value, checked)
-            return false
+        else -> {
+            name: if checked == {
+                .Named(name) -> name
+                .Apply(name, _) -> name
+                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {
+                    jet_eval_ir_host_unwritable(s, value, checked)
+                    return false
+                }
+            }
+            definition: ir_type_def(p, name) ?? {
+                jet_eval_ir_host_unwritable(s, value, checked)
+                return false
+            }
+            members = ir_struct_members(types, p, definition, ir_type_args(checked)) ?? {
+                jet_eval_ir_host_unwritable(s, value, checked)
+                return false
+            }
         }
     }
-    fields: if value == .Struct(_, written) -> written else -> {
-        jet_eval_ir_host_unwritable(s, value, checked)
-        return false
+    fields: if {
+        value == .Struct(_, written) -> written
+        else -> {
+            jet_eval_ir_host_unwritable(s, value, checked)
+            return false
+        }
     }
     loop member in members {
         // A marker argument read back without its value (Values.jet

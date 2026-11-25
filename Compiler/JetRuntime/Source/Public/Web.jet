@@ -1,5 +1,5 @@
-// `jet.runtime.web` (#6615): app's live publish and leave signal and the
-// device store, in Jet types. Each member is a runtime binding (Guest.jet
+// `jet.runtime.web` (#6615): app's live publish, watch and leave signal and
+// the device store, in Jet types. Each member is a runtime binding (Guest.jet
 // sema_guest_runtime_binding) of the runtime export that is its one body
 // (WsRoutes.jet, World.jet). They are `priv`: only Core calls them; the live
 // registry, the notice list and the write queue are app's Jet source
@@ -21,4 +21,7 @@ web: module {
     // `replacement`, written through to the device; None when the program has
     // no device store.
     #Import(c) priv device_replace: fn(store: String, expected: [U8], replacement: [U8]) -> Bool? = "jet_rt_device_replace"
+
+    // Joins the connection `conn` to the live topic `topic`.
+    #Import(c) priv live_watch: fn(conn: WsConn, topic: String) -[Net, Time.Wait]> = "jet_web_live_watch"
 }

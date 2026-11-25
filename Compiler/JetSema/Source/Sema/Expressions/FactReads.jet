@@ -136,11 +136,10 @@ sema_fact_enum_menu: fn(ty: Type, environment: SemaScopeEnvironment, program: Se
     found := sema_fact_enum_variants(name)
     if found == None -> found = sema_compiler_enum_variants(name)
     variants: found ?? return None
-    if program.registration_graph == .Val(graph) {
-        declared: sema_type_resolve_nominal_row(graph, Type.Named{name: name}, environment.module_identity)
-        if declared == .Val(row) {
-            if !graph.modules[row.module_index].nominals[row.row].compiler_owned -> return None
-        }
+    graph: program.registration_graph
+    declared: sema_type_resolve_nominal_row(graph, Type.Named{name: name}, environment.module_identity)
+    if declared == .Val(row) {
+        if !graph.modules[row.module_index].nominals[row.row].compiler_owned -> return None
     }
     Val(variants)
 }
@@ -214,10 +213,9 @@ sema_fact_enum_pattern: fn(subject_ty: Type, variant: String, slots: [PatSlot], 
     // nominal, so codegen lowers the test like any declared enum's.
     enum_type := SymbolID?{None}
     if compiler_enum {
-        if program.registration_graph == .Val(graph) {
-            if sema_registration_compiler_builtin_row(graph, type_name(sema_expr_unwrap_tag(subject_ty))) == .Val(owner) {
-                enum_type = Val(graph.modules[owner.module_index].nominals[owner.row].symbol.id)
-            }
+        graph: program.registration_graph
+        if sema_registration_compiler_builtin_row(graph, type_name(sema_expr_unwrap_tag(subject_ty))) == .Val(owner) {
+            enum_type = Val(graph.modules[owner.module_index].nominals[owner.row].symbol.id)
         }
     }
     Val(SemaPatternValidation{shape: shape, enum_type: enum_type, bindings: [TPatternBindingFact]{}, complete: complete})
@@ -970,26 +968,25 @@ sema_fact_build_setting_value: fn(setting: SemaBuildSetting, span: Span, environ
     }
     variant := raw
     if raw.starts_with(".") -> variant = raw.slice(1, raw.len()).trim()
-    if program.registration_graph == .Val(graph) {
-        row: sema_type_resolve_nominal_row(graph, Type.Named{name: ty}, environment.module_identity) ?? {
-            diagnostics.push(sema_fact_build_setting_invalid(setting, "`{ty}` is not a declared fieldless enum", span))
-            return None
-        }
-        nominal: graph.modules[row.module_index].nominals[row.row]
-        if nominal.kind != SemaRegistrationNominalKind.Enum {
-            diagnostics.push(sema_fact_build_setting_invalid(setting, "settings use Bool, Int, Char, String, or a fieldless enum type", span))
-            return None
-        }
-        loop row_variant in nominal.variants {
-            if row_variant.symbol.name != variant -> next
-            if row_variant.payload == {
-                .Unit -> {}
-                .Single(_, _) | .Named(_) -> break
-            }
-            return Val(SemaFactReadValue{ty: Type.Named{name: ty}, value: TComptimeValue.Enum{type_name: ty, variant: variant, args: [TComptimeEnumArg]{}}})
-        }
-        diagnostics.push(sema_fact_build_setting_invalid(setting, "`{ty}` has no fieldless variant `{variant}`", span))
+    graph: program.registration_graph
+    row: sema_type_resolve_nominal_row(graph, Type.Named{name: ty}, environment.module_identity) ?? {
+        diagnostics.push(sema_fact_build_setting_invalid(setting, "`{ty}` is not a declared fieldless enum", span))
+        return None
     }
+    nominal: graph.modules[row.module_index].nominals[row.row]
+    if nominal.kind != SemaRegistrationNominalKind.Enum {
+        diagnostics.push(sema_fact_build_setting_invalid(setting, "settings use Bool, Int, Char, String, or a fieldless enum type", span))
+        return None
+    }
+    loop row_variant in nominal.variants {
+        if row_variant.symbol.name != variant -> next
+        if row_variant.payload == {
+            .Unit -> {}
+            .Single(_, _) | .Named(_) -> break
+        }
+        return Val(SemaFactReadValue{ty: Type.Named{name: ty}, value: TComptimeValue.Enum{type_name: ty, variant: variant, args: [TComptimeEnumArg]{}}})
+    }
+    diagnostics.push(sema_fact_build_setting_invalid(setting, "`{ty}` has no fieldless variant `{variant}`", span))
     None
 }
 
@@ -998,12 +995,11 @@ sema_fact_build_setting_value: fn(setting: SemaBuildSetting, span: Span, environ
 // (`settings: {{ key: Type = default }}`); a `build:` profile may set it. A
 // dependency reads its own settings, never the built package's.
 sema_fact_build_setting: fn(key: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> SemaFactReadValue? {
-    if program.registration_graph == .Val(graph) {
-        row: if sema_registration_module_index(graph, environment.module_identity) == .Val(index) -> graph.modules[index].settings_row else -> -1
-        loop setting in sema_build_facts_settings_at(graph.build_facts, row) {
-            if setting.name == key {
-                return sema_fact_build_setting_value(setting, span, environment, program, diagnostics)
-            }
+    graph: program.registration_graph
+    row: if sema_registration_module_index(graph, environment.module_identity) == .Val(index) -> graph.modules[index].settings_row else -> -1
+    loop setting in sema_build_facts_settings_at(graph.build_facts, row) {
+        if setting.name == key {
+            return sema_fact_build_setting_value(setting, span, environment, program, diagnostics)
         }
     }
     diagnostics.push(sema_fact_build_setting_undeclared(key, span))
@@ -1036,12 +1032,12 @@ sema_fact_build_read: fn(base: Expr, member: String, span: Span, expected: Type?
         prepared: sema_fact_prepared_expr(resolved.value, resolved.ty, span, environment, program, context) ?? return sema_fact_read_failed()
         return SemaFactReadCheck{handled: true, value: sema_expr_expected(prepared, expected, environment, program, diagnostics)}
     }
-    if program.registration_graph == .Val(graph) {
-        resolved: sema_fact_build_value(path, graph.build_facts, graph.target_machine) ?? return sema_fact_read_unhandled()
-        prepared: sema_fact_prepared_expr(resolved.value, resolved.ty, span, environment, program, context) ?? return sema_fact_read_failed()
-        return SemaFactReadCheck{handled: true, value: sema_expr_expected(prepared, expected, environment, program, diagnostics)}
-    }
-    sema_fact_read_unhandled()
+    // Snapshot: a lone program's check has no build facts to read.
+    if program.registration_graph.mode == .Snapshot -> return sema_fact_read_unhandled()
+    graph: program.registration_graph
+    resolved: sema_fact_build_value(path, graph.build_facts, graph.target_machine) ?? return sema_fact_read_unhandled()
+    prepared: sema_fact_prepared_expr(resolved.value, resolved.ty, span, environment, program, context) ?? return sema_fact_read_failed()
+    SemaFactReadCheck{handled: true, value: sema_expr_expected(prepared, expected, environment, program, diagnostics)}
 }
 
 // A prepared value as a checked expression: scalars keep their literal forms,
@@ -1183,15 +1179,15 @@ sema_fact_subject_item: fn(symbol: Symbol?, environment: SemaScopeEnvironment, p
 // (`Shelf<Int>.reflect()`, see sema_comptime_reflection_type_info).
 sema_fact_type_info: fn(symbol: Symbol?, name: String, args: [Type], environment: SemaScopeEnvironment, program: SemaProgramTables) -> TComptimeValue? {
     catalog: TAppliedRuleCatalog{rows: [TAppliedRule]{}, argument_menus: [TAppliedRuleArgumentMenu]{}}
-    if program.registration_graph == .Val(graph) {
-        if symbol == .Val(resolved) {
-            if resolved.kind != SymbolKind.Type -> return None
-            return sema_comptime_reflection_type_info(graph, resolved.module_identity, name, catalog, args)
-        }
-        row: sema_type_resolve_nominal_row(graph, Type.Named{name: name}, environment.module_identity) ?? return None
-        return sema_comptime_reflection_type_info(graph, graph.modules[row.module_index].module_identity, graph.modules[row.module_index].nominals[row.row].symbol.name, catalog, args)
+    // Snapshot: type info reads a registered declaration.
+    if program.registration_graph.mode == .Snapshot -> return None
+    graph: program.registration_graph
+    if symbol == .Val(resolved) {
+        if resolved.kind != SymbolKind.Type -> return None
+        return sema_comptime_reflection_type_info(graph, resolved.module_identity, name, catalog, args)
     }
-    None
+    row: sema_type_resolve_nominal_row(graph, Type.Named{name: name}, environment.module_identity) ?? return None
+    sema_comptime_reflection_type_info(graph, graph.modules[row.module_index].module_identity, graph.modules[row.module_index].nominals[row.row].symbol.name, catalog, args)
 }
 
 // `FunctionInfo` for a declared function (`f.reflect()`): its source shape,
@@ -1266,14 +1262,13 @@ sema_fact_answered_member: fn(type_name: String, field: String) -> Bool Never! {
 sema_fact_state_infos: fn(definition: StructDef, symbol: Symbol, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TComptimeValue? {
     if definition.state == None -> return None
     graph_fact := SemaStateGraphFact?{None}
-    if program.registration_graph == .Val(graph) {
-        module_index: sema_registration_module_index(graph, symbol.module_identity)
-        if module_index == .Val(index) {
-            loop fact in sema_state_graph_facts(graph.modules[index].program.items) {
-                if fact.type_name == definition.name {
-                    graph_fact = Val(fact)
-                    break
-                }
+    graph: program.registration_graph
+    module_index: sema_registration_module_index(graph, symbol.module_identity)
+    if module_index == .Val(index) {
+        loop fact in sema_state_graph_facts(graph.modules[index].program.items) {
+            if fact.type_name == definition.name {
+                graph_fact = Val(fact)
+                break
             }
         }
     }
@@ -1281,10 +1276,8 @@ sema_fact_state_infos: fn(definition: StructDef, symbol: Symbol, environment: Se
 }
 
 sema_fact_unit: fn(name: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaRegistrationUnitFact? {
-    if program.registration_graph == .Val(graph) {
-        return sema_registration_unit_fact_for_type(graph, Type.Named{name: name})
-    }
-    None
+    graph: program.registration_graph
+    sema_registration_unit_fact_for_type(graph, Type.Named{name: name})
 }
 
 // One subject named by a bare identifier that is not a local: a type, a
@@ -1295,7 +1288,8 @@ sema_fact_subject_value: fn(read: FactRead, name: String, symbol: Symbol?, envir
     declared: item != None || unit != None
     if read == FactRead.Layout || read == FactRead.Name || read == FactRead.Fields {
         // A builtin scalar has no declaration, only its fixed target layout.
-        if read == FactRead.Layout && symbol == None && program.registration_graph == .Val(graph) {
+        graph: program.registration_graph
+        if read == FactRead.Layout && symbol == None {
             if sema_comptime_reflection_builtin_layout(graph, name) == .Val(layout) {
                 return Val(SemaFactReadValue{ty: sema_fact_named("LayoutInfo"), value: sema_fact_declared_value(layout)})
             }
@@ -1401,7 +1395,7 @@ SemaFactUsesTarget: struct {
 // writes `M`, which no other package can see. `name` is the subject as
 // written (`Route`, `routes.Route`); `symbol` is what a bare name binds.
 sema_fact_uses_check: fn(name: String, symbol: Symbol?, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> SemaFactReadCheck {
-    graph: program.registration_graph ?? return sema_fact_read_no_value("$uses", span, diagnostics)
+    graph: program.registration_graph
     resolved: sema_fact_uses_marker(graph, environment.module_identity, name, symbol)
     marker: resolved.declaration ?? return sema_fact_read_no_value("$uses", span, diagnostics)
     reader: sema_registration_module_index(graph, environment.module_identity) ?? return sema_fact_read_no_value("$uses", span, diagnostics)

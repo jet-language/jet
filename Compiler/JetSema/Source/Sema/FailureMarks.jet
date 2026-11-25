@@ -150,7 +150,7 @@ sema_failure_marks_require: fn(expr: Expr, conversion: TTryConvert, callee: Sema
 // the `(`, to the `)`. A trailing block argument ends the call itself. None
 // when the source does not show the call there.
 sema_failure_marks_call_end: fn(expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Int? {
-    graph: program.registration_graph ?? return None
+    graph: program.registration_graph
     caller: sema_scope_caller_index(environment, graph) ?? return None
     raw: graph.modules[caller].source.bytes()
     from := expr_span(expr).end

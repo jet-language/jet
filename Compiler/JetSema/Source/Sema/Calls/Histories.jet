@@ -53,16 +53,15 @@ sema_call_histories_args: fn(args: [CallArg], type_args: [Type], span: Span, env
     package_digest := ""
     tool := ""
     target := ""
-    if program.registration_graph == .Val(graph) {
-        if sema_scope_caller_index(environment, graph) == .Val(caller) {
-            module_source = graph.modules[caller].source.copy()
-            package_digest = sema_call_histories_package_digest(graph, graph.modules[caller].package_identity)
-        }
-        if graph.build_facts.compiler_identity != "" {
-            tool = "typed-history-v1:{graph.build_facts.compiler_identity}"
-        }
-        if graph.target_machine.triple != "" -> target = sha256_hex(graph.target_machine.triple)
+    graph: program.registration_graph
+    if sema_scope_caller_index(environment, graph) == .Val(caller) {
+        module_source = graph.modules[caller].source.copy()
+        package_digest = sema_call_histories_package_digest(graph, graph.modules[caller].package_identity)
     }
+    if graph.build_facts.compiler_identity != "" {
+        tool = "typed-history-v1:{graph.build_facts.compiler_identity}"
+    }
+    if graph.target_machine.triple != "" -> target = sha256_hex(graph.target_machine.triple)
     roles: [String]{"actual", "model", "observe", "strategy"}
     identities := [String]{"", "", "", ""}
     has_strategy := false

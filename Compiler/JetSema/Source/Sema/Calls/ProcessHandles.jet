@@ -244,46 +244,59 @@ sema_process_spec_method: fn(receiver: Expr, receiver_value: TExpr, method: Stri
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
     }
-    // The report is the ordinary Core source body
-    // `core.process.__spec_abilities`, typed as the checked TerminalFact set,
-    // so every tier runs the same Jet code.
-    if method == "abilities" {
-        if !sema_process_record_intrinsic(result, "", "ProcessSpec.abilities", span, environment, program, scopes, check.context, diagnostics) {
-            return SemaMethodSpecialCheck{handled: true, value: None}
+    // The stream routes and the Duration limits are still the host leaves
+    // `jet_builtins.process_spec_<method>`: their Core call facts name the
+    // effects and their row names the runtime export every tier runs.
+    if method == "stdin" || method == "stdout" || method == "stderr" || method == "timeout" || method == "cpu_time_limit" {
+        rejected: SemaMethodSpecialCheck{handled: true, value: None}
+        record: core_call(CORE_BUILTINS_MODULE, "process_spec_{method}") ?? {
+            diagnostics.push(sema_error("E0003", span, "`ProcessSpec.{method}` has no host leaf `jet_builtins.process_spec_{method}`", "this ProcessSpec builder lowers onto its jet_builtins host leaf row", "restore the `process_spec_{method}` row in Compiler/Prelude/Core.rows"))
+            return rejected
         }
-        route: sema_call_core_resolve_route(environment, program, "core.process", "__spec_abilities", [Type]{}, 1, false, span, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-        target: if route == {
-            .Source(source) -> source
-            .Core(_) | .SharedSite(_) -> {
-                check.context.incomplete_reasons.push("ProcessSpec.abilities must resolve its canonical Jet source body")
-                return SemaMethodSpecialCheck{handled: true, value: None}
-            }
+        fallibility: sema_expression_failure_carrier(result)
+        if !sema_call_core_record_effects_as(record, "ProcessSpec.{method}", span, [Type]{}, result, fallibility, [FunctionDefaultRef]{}, scopes, check.context, environment, program, diagnostics) {
+            return rejected
         }
-        callee: sema_call_callee_decl(program, target.symbol.id, span, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-        value := sema_tree_node(result, TExprKind.Call{callee: callee, type_args: [Type]{}, args: [TCallArg]{sema_value_method_source_arg(receiver_value)}}, span)
+        call_args := [TExpr]{receiver_value}
+        widen := [Bool]{false}
+        loop argument in values {
+            call_args.push(argument)
+            widen.push(false)
+        }
+        value: sema_call_core_tree(record, call_args, span, [Type]{}, widen, result, fallibility, None, environment, program, diagnostics) ?? return rejected
         return SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, environment, program, check.context, diagnostics)}
     }
-    // Every other builder is the host leaf `jet_builtins.process_spec_<method>`
-    // (`terminal(policy)` is `process_spec_terminal_with_policy`): its Core
-    // call facts name the effects and its row names the runtime export every
-    // tier runs.
-    rejected: SemaMethodSpecialCheck{handled: true, value: None}
+    // Every other method is the ordinary Core source body
+    // `core.process.__spec_<method>` (`terminal(policy)` is
+    // `__spec_terminal_with_policy`; `abilities` reports the checked
+    // TerminalFact set), so every tier runs the same Jet code.
     leaf: if method == "terminal" && args.len() == 1 -> "terminal_with_policy" else -> method
-    record: core_call(CORE_BUILTINS_MODULE, "process_spec_{leaf}") ?? {
-        diagnostics.push(sema_error("E0003", span, "`ProcessSpec.{method}` has no host leaf `jet_builtins.process_spec_{leaf}`", "every ProcessSpec builder lowers onto its jet_builtins host leaf row", "restore the `process_spec_{leaf}` row in Compiler/Prelude/Core.rows"))
-        return rejected
-    }
-    fallibility: sema_expression_failure_carrier(result)
-    if !sema_call_core_record_effects_as(record, "ProcessSpec.{method}", span, [Type]{}, result, fallibility, [FunctionDefaultRef]{}, scopes, check.context, environment, program, diagnostics) {
-        return rejected
-    }
+    effect: if method == "run" || method == "run_checked" || method == "spawn" -> "Exec" else -> ""
     call_args := [TExpr]{receiver_value}
-    widen := [Bool]{false}
-    loop argument in values {
-        call_args.push(argument)
-        widen.push(false)
+    loop argument in values -> call_args.push(argument)
+    sema_process_source_call("__spec_{leaf}", "ProcessSpec.{method}", effect, call_args, result, span, expected, environment, program, scopes, check, diagnostics)
+}
+
+// `api` as a call of the Core source body `core.process.<member>` on `args`
+// (the receiver first), typed `result`, with the effect `effect_name` (none
+// when empty).
+sema_process_source_call: fn(member: String, api: String, effect_name: String, args: [TExpr], result: Type, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
+    rejected: SemaMethodSpecialCheck{handled: true, value: None}
+    if !sema_process_record_intrinsic(result, effect_name, api, span, environment, program, scopes, check.context, diagnostics) {
+        return rejected
     }
-    value: sema_call_core_tree(record, call_args, span, [Type]{}, widen, result, fallibility, None, environment, program, diagnostics) ?? return rejected
+    route: sema_call_core_resolve_route(environment, program, "core.process", member, [Type]{}, args.len(), false, span, diagnostics) ?? return rejected
+    target: if route == {
+        .Source(source) -> source
+        .Core(_) | .SharedSite(_) -> {
+            check.context.incomplete_reasons.push("{api} must resolve its canonical Jet source body")
+            return rejected
+        }
+    }
+    callee: sema_call_callee_decl(program, target.symbol.id, span, diagnostics) ?? return rejected
+    call_args := [TCallArg]{}
+    loop argument in args -> call_args.push(sema_value_method_source_arg(argument))
+    value: sema_tree_node(result, TExprKind.Call{callee: callee, type_args: [Type]{}, args: call_args}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, environment, program, check.context, diagnostics)}
 }
 
@@ -346,30 +359,34 @@ sema_process_spec_keep_open: fn(receiver: Expr, receiver_value: TExpr, args: [Ca
     SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, environment, program, check.context, diagnostics)}
 }
 
-// A child's methods (`child.wait()` and the rest) are the host leaves
-// `jet_builtins.process_child_<method>`: the leaf's signature row types the
-// call, its Core call facts name the effects, and its row names the runtime
-// export every tier runs. A method with no leaf is not one of them.
+// The result of a child's method (`child.wait()` and the rest); None for a
+// name that is not one of them.
+sema_process_child_result: fn(method: String) -> Type? Never! {
+    if method == {
+        "id" -> Val(Type.Int)
+        "wait" -> Val(sema_process_io_result(sema_process_named("ProcessReceipt")))
+        "exited" -> Val(sema_process_io_result(Type.Bool))
+        "kill" | "terminate" | "interrupt" -> Val(sema_process_io_result(sema_process_named("Unit")))
+        else -> None
+    }
+}
+
+// A child's methods are the ordinary Core source bodies
+// `core.process.__child_<method>`, which read the child; every one but `id`
+// is an Exec step.
 sema_process_child_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
-    unhandled: SemaMethodSpecialCheck{handled: false, value: None}
     rejected: SemaMethodSpecialCheck{handled: true, value: None}
-    record: core_call(CORE_BUILTINS_MODULE, "process_child_{method}") ?? return unhandled
-    signature: sema_call_core_typed_signature(record, record.signature.arity, [AccessConvention]{AccessConvention.Read}, [Type]{}) ?? return unhandled
-    if args.len() + 1 != signature.parameters.len() {
-        sema_process_wrong_arity(method, signature.parameters.len() - 1, args.len(), span, diagnostics)
+    result: sema_process_child_result(method) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    if args.len() != 0 {
+        sema_process_wrong_arity(method, 0, args.len(), span, diagnostics)
         sema_process_infer_args(args, environment, program, scopes, check, diagnostics)
         return rejected
     }
     if !sema_ownership_check_call_receiver(check.state, receiver, AccessConvention.Read, scopes, span, diagnostics) {
         return rejected
     }
-    result: sema_expr_core_row_type(signature.return_type ?? Type.Named{name: "Unit"}, environment, program)
-    fallibility: sema_expression_failure_carrier(result)
-    if !sema_call_core_record_effects_as(record, "ProcessChild.{method}", span, [Type]{}, result, fallibility, [FunctionDefaultRef]{}, scopes, check.context, environment, program, diagnostics) {
-        return rejected
-    }
-    value: sema_call_core_tree(record, [TExpr]{receiver_value}, span, [Type]{}, [Bool]{false}, result, fallibility, None, environment, program, diagnostics) ?? return rejected
-    SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, environment, program, check.context, diagnostics)}
+    effect: if method == "id" -> "" else -> "Exec"
+    sema_process_source_call("__child_{method}", "ProcessChild.{method}", effect, [TExpr]{receiver_value}, result, span, expected, environment, program, scopes, check, diagnostics)
 }
 
 sema_process_terminal_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
@@ -465,22 +482,9 @@ sema_process_stream_method: fn(receiver: Expr, receiver_value: TExpr, method: St
     // `size` bytes at a time, so every tier runs the same Jet code.
     if method == "chunks" {
         result: Type.Named{name: sema_core_module_nominal(program, "core.process", "ProcessChunks")}
-        if !sema_process_record_intrinsic(result, "Exec", api, span, environment, program, scopes, check.context, diagnostics) {
-            return SemaMethodSpecialCheck{handled: true, value: None}
-        }
         member: if stream_name == "ProcessStderrStream" -> "__stderr_chunks" else -> "__stdout_chunks"
-        route: sema_call_core_resolve_route(environment, program, "core.process", member, [Type]{}, 2, false, span, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-        target: if route == {
-            .Source(source) -> source
-            .Core(_) | .SharedSite(_) -> {
-                check.context.incomplete_reasons.push("{api} must resolve its canonical Jet source body")
-                return SemaMethodSpecialCheck{handled: true, value: None}
-            }
-        }
-        callee: sema_call_callee_decl(program, target.symbol.id, span, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         size: if values.len() == 1 -> values[0].copy() else -> sema_tree_node(Type.Int, TExprKind.IntLit{value: 65536, width: None}, span)
-        value := sema_tree_node(result, TExprKind.Call{callee: callee, type_args: [Type]{}, args: [TCallArg]{sema_value_method_source_arg(receiver_value), sema_value_method_source_arg(size)}}, span)
-        return SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, environment, program, check.context, diagnostics)}
+        return sema_process_source_call(member, api, "Exec", [TExpr]{receiver_value, size}, result, span, expected, environment, program, scopes, check, diagnostics)
     }
     sema_process_finish(receiver_value, BodyHandleOp.ProcessLines, [TExpr]{}, sema_process_named("ProcessLines"), "Exec", api, span, expected, environment, program, scopes, check.context, diagnostics)
 }

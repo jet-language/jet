@@ -162,9 +162,12 @@ next_function_start: fn(src: String, offset: Int) -> Int Never! {
         ident_end := start
         loop ident_end < line_end {
             b: Int{bytes[ident_end]}
-            if (b >= 48 && b <= 57) || (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 95 {
-                ident_end += 1
-            } else { break }
+            if {
+                (b >= 48 && b <= 57) || (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 95 -> {
+                    ident_end += 1
+                }
+                else -> { break }
+            }
         }
         if ident_end > start && ident_end + 4 <= line_end && bytes[ident_end] == (U8{58}) && bytes[ident_end + 1] == (U8{32}) && bytes[ident_end + 2] == (U8{102}) && bytes[ident_end + 3] == (U8{110}) {
             return start

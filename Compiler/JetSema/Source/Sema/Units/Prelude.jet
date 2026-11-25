@@ -9,19 +9,19 @@ use {
 // parsed (exact scales included) and its dimensions resolved here, and
 // SEMA_UNITS_CATALOG (PreludeRows.jet) is what this returns, written by
 // Compiler/Toolchain/PreludeRows, so neither a compile nor the compiler's
-// build parses or scans the catalog text; a text that does not parse stops
-// that tool.
-sema_units_catalog_read: fn() -> [UnitFamilyDef] {
+// build parses or scans the catalog text; a text that does not parse is that
+// tool's error.
+sema_units_catalog_read: fn() -> [UnitFamilyDef] SemaPreludeTextError! {
     parsed: parse_generated_source(SEMA_PRELUDE_UNITS_SOURCE.bytes())
     if parsed.diagnostics.len() > 0 {
-        panic("Prelude/Units.jet does not parse: {parsed.diagnostics[0].what}")
+        return Err(sema_prelude_text_error("Prelude/Units.jet", SEMA_PRELUDE_UNITS_SOURCE, parsed.diagnostics))
     }
     families := [UnitFamilyDef]{}
     loop item in parsed.program.items {
         if item == .UnitFamily(family) -> families.push(family)
     }
     sema_units_resolve_standard(families)
-    families
+    Ok(families)
 }
 
 // Integer scale of `suffix` inside catalog family `family_name`, or None when
