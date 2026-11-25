@@ -312,9 +312,10 @@ ir_live: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, body: [Int]) Never! {
 // early exit (ir_tx_unwind, ir_stop_return). A `#ContextKey` value, `logger`
 // included (core.log's key), moves into a node in front of the task's value
 // chain (ir_context_push_value), which jet_ctx_value_pop unlinks the same way.
-// A user allocator's guard value is its handler (Sema Statements.jet
-// sema_stmt_context_allocator_handler), a function value whose owner moves
-// to jet_ctx_push_allocator with the block's stack mark (Build.jet
+// A user allocator's guard value is its handler (Sema
+// Statements/ContextBlocks.jet sema_stmt_context_allocator_handler), a
+// function value whose owner moves to jet_ctx_push_allocator with the
+// block's stack mark (Build.jet
 // ir_stack_mark), pushed after the value nodes so they come from the heap;
 // jet_ctx_pop_allocator restores the enclosing carrier first when the block
 // ends. A `mem.Arena` value, or `context.scratch` (never evaluated: the
