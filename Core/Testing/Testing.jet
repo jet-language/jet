@@ -335,53 +335,56 @@ Fake: struct {
     }
 }
 
-FAKE_EN_FIRST: [String]{"Alice", "Bob", "Clara", "Diego"}
-
-FAKE_EN_LAST: [String]{"Smith", "Jones", "Taylor", "Brown"}
-
-FAKE_EN_HOSTS: [String]{"example.test", "mail.test", "demo.test"}
-
-FAKE_EN_STREETS: [String]{"Oak Street", "Pine Street", "Maple Street", "Cedar Street"}
-
-FAKE_EN_CITIES: [String]{"Austin", "Boston", "Denver", "Portland"}
-
-FAKE_DE_FIRST: [String]{"Anna", "Bruno", "Clara", "Dieter"}
-
-FAKE_DE_LAST: [String]{"Schmidt", "Fischer", "Weber", "Wagner"}
-
-FAKE_DE_HOSTS: [String]{"beispiel.test", "mail.test", "demo.test"}
-
-FAKE_DE_STREETS: [String]{"Bahnhofstraße", "Hauptstraße", "Lindenweg", "Gartenweg"}
-
-FAKE_DE_CITIES: [String]{"Berlin", "Bremen", "Dresden", "Hamburg"}
+// The words a `Fake` draws from, one row per locale: `locale_code` 1 is
+// German, any other English.
+FAKE_LOCALES: [{first: [String], last: [String], hosts: [String], streets: [String], cities: [String]}]{
+    {
+        first: [String]{"Alice", "Bob", "Clara", "Diego"},
+        last: [String]{"Smith", "Jones", "Taylor", "Brown"},
+        hosts: [String]{"example.test", "mail.test", "demo.test"},
+        streets: [String]{"Oak Street", "Pine Street", "Maple Street", "Cedar Street"},
+        cities: [String]{"Austin", "Boston", "Denver", "Portland"},
+    },
+    {
+        first: [String]{"Anna", "Bruno", "Clara", "Dieter"},
+        last: [String]{"Schmidt", "Fischer", "Weber", "Wagner"},
+        hosts: [String]{"beispiel.test", "mail.test", "demo.test"},
+        streets: [String]{"Bahnhofstraße", "Hauptstraße", "Lindenweg", "Gartenweg"},
+        cities: [String]{"Berlin", "Bremen", "Dresden", "Hamburg"},
+    },
+}
 
 fake_index: fn(state: ^U64, count: Int) -> Int Never! {
     core.math.random.__seeded_int(state, 0, count - 1) ?? panic("fake tables are nonempty")
 }
 
+fake_row: fn(locale: Int) -> Int Never! {
+    if locale == 1 -> 1 else -> 0
+}
+
 fake_first: fn(state: ^U64, locale: Int) -> String Never! {
     index: fake_index(state, 4)
-    if locale == 1 -> FAKE_DE_FIRST[index] else -> FAKE_EN_FIRST[index]
+    FAKE_LOCALES[fake_row(locale)].first[index]
 }
 
 fake_last: fn(state: ^U64, locale: Int) -> String Never! {
     index: fake_index(state, 4)
-    if locale == 1 -> FAKE_DE_LAST[index] else -> FAKE_EN_LAST[index]
+    FAKE_LOCALES[fake_row(locale)].last[index]
 }
 
 fake_host: fn(state: ^U64, locale: Int) -> String Never! {
     index: fake_index(state, 3)
-    if locale == 1 -> FAKE_DE_HOSTS[index] else -> FAKE_EN_HOSTS[index]
+    FAKE_LOCALES[fake_row(locale)].hosts[index]
 }
 
 fake_street: fn(state: ^U64, locale: Int) -> String Never! {
     index: fake_index(state, 4)
-    if locale == 1 -> FAKE_DE_STREETS[index] else -> FAKE_EN_STREETS[index]
+    FAKE_LOCALES[fake_row(locale)].streets[index]
 }
 
 fake_city: fn(state: ^U64, locale: Int) -> String Never! {
     index: fake_index(state, 4)
-    if locale == 1 -> FAKE_DE_CITIES[index] else -> FAKE_EN_CITIES[index]
+    FAKE_LOCALES[fake_row(locale)].cities[index]
 }
 
 #Test("Fake English draw order matches the shipped seed 42 corpus") {
