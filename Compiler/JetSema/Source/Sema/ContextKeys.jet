@@ -133,7 +133,7 @@ sema_context_role_field_key: fn(graph: SemaRegistrationGraph, role: String, key:
             id: sema_registration_callable_id(graph, function.symbol.id) ?? return None
             signature: sema_type_resolve_declared(graph, function.signature, module_row.module_identity)
             if !call -> return Val(SemaContextFieldKey{key: SemaContextKey{key: key, ty: signature}, default: SemaContextDefault.Function{function: id}})
-            returned: sema_call_signature_return(signature) ?? return None
+            returned: sema_fn_return_success(sema_call_signature_return(signature) ?? return None)
             return Val(SemaContextFieldKey{key: SemaContextKey{key: key, ty: returned}, default: SemaContextDefault.Call{function: id}})
         }
     }
