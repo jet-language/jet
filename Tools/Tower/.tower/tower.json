@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7038,
-    "rev": 114234,
+    "rev": 114236,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -77324,7 +77324,7 @@
       "id": "c0clpv28",
       "num": 7031,
       "title": "Handles that read like links: relationships held as pool IDs with short, checked navigation instead of stored @T links",
-      "body": "Owner asked on 2026-11-25 for greenfield proposal item P9 as a ballot of the best-of-both design, with every downside engineered away: keep handles (Pool<T> with generational ID<T>) and views as the one way to hold a relationship, and make navigating them as short as a link. It reopens D-MEMREF1 (live links @T, already built on dev: Spellings.jet:31, Sema/Links.jet, JetIR BuildLinks.jet, runtime Links.jet, Examples/Memory/LiveLinks.jet, and used by the compiler's SemaBodyCheck; open cards #4500, #4756). Owner bar: Jet must be able to do everything any other language can as an end result, easy to reason about and use, with friction in proportion to how often a thing is done. Source: Docs/Proposals/2026-11-24-greenfield-language.md, Part 2, item P9 (master checkout, not yet on dev).",
+      "body": "Owner asked on 2026-11-25 for greenfield proposal item P9 as a ballot of the best-of-both design, with every downside engineered away: keep handles (Pool<T> with generational ID<T>) and views as the one way to hold a relationship, and make navigating them as short as a link. It reopens D-MEMREF1 (live links @T, already built on dev: Spellings.jet:31, Sema/Links.jet, JetIR BuildLinks.jet, runtime Links.jet, Examples/Memory/LiveLinks.jet, and used by the compiler's SemaBodyCheck; open cards #4500, #4756). Owner bar: Jet must be able to do everything any other language can as an end result, easy to reason about and use, with friction in proportion to how often a thing is done. Source: Docs/Proposals/2026-11-24-greenfield-language.md, Part 2, item P9 (master checkout, not yet on dev). Owner direction (2026-11-25, second round): free `@` as a symbol for possible later use, and deliver the best of both worlds with the downsides engineered away; rewriting the compiler's own link code is acceptable (greenfield). Two downsides must be removed, not just mitigated: (1) sharing an object must not require the programmer to make a pool first (today's `alias: hero` case), and (2) a handle to a removed item must not be only a run-time stop. The paused fresh review's findings (in the drafting notes) are also to be engineered away: a handle layout fixed per type rather than by whole-program counting, assignment through `?.` treated as a new feature for every optional place, built-versus-design stated plainly, the superseded rules D-MEMREF1 replaced listed, and the blast radius of a second store of one type.",
       "kind": "feature",
       "track": "epoch",
       "epoch": "G4",
@@ -77338,6 +77338,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-25",
+          "by": "Pip",
+          "text": "Owner chose to free @ and require the two downsides engineered away."
+        },
         {
           "at": "2026-11-25",
           "by": "Pip",
@@ -77396,7 +77401,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-25T17:58:59.300Z",
-      "updated": "2026-11-25T18:19:34.527Z",
+      "updated": "2026-11-25T18:34:06.791Z",
       "updatedBy": "Pip"
     },
     {
@@ -77705,7 +77710,7 @@
       "id": "c0pej44b",
       "num": 7036,
       "title": "Grammar literals: one Core Grammar type gives typed trees, parse, print and build-time format errors, and serves the checked text heads",
-      "body": "Owner accepted greenfield proposal item P31 on 2026-11-25, low priority. `Grammar{\"\"\"…\"\"\"}` is a Core library type using the existing checked-literal form and compile-time code: its rules generate the result types, a parse function, a print function and positioned errors, and an ambiguous grammar is a build error. The owner asked whether it improves the existing checked text heads: today the `check` of SQL (Core/DB/DB.jet:330), Sh (Core/Process/Process.jet:142) and HTML (Core/Text/HTML.jet:115) accepts any text, so a misspelt query or broken markup is found only at run time, and every hole is stringified through Printable. Core holds 246 hand-written parse and lex functions in 104 files; the SQL parser alone is 2,162 lines (Core/DB/Engine/Parse.jet). Source: Docs/Proposals/2026-11-24-greenfield-language.md, Part 2, item P31 (master checkout, not yet on dev). Owner order (2026-11-25): build this immediately, ahead of the epoch order, both the Grammar feature and the grammars behind the existing DSL heads (SQL, HTML, Sh, URL, DateTime); approved directly by the owner in chat, so no ballot is needed. The design review (row 1) still comes first, per AGENTS.md.",
+      "body": "Owner accepted greenfield proposal item P31 on 2026-11-25, low priority. `Grammar{\"\"\"…\"\"\"}` is a Core library type using the existing checked-literal form and compile-time code: its rules generate the result types, a parse function, a print function and positioned errors, and an ambiguous grammar is a build error. The owner asked whether it improves the existing checked text heads: today the `check` of SQL (Core/DB/DB.jet:330), Sh (Core/Process/Process.jet:142) and HTML (Core/Text/HTML.jet:115) accepts any text, so a misspelt query or broken markup is found only at run time, and every hole is stringified through Printable. Core holds 246 hand-written parse and lex functions in 104 files; the SQL parser alone is 2,162 lines (Core/DB/Engine/Parse.jet). Source: Docs/Proposals/2026-11-24-greenfield-language.md, Part 2, item P31 (master checkout, not yet on dev). Owner order (2026-11-25): build this immediately, ahead of the epoch order, both the Grammar feature and the grammars behind the existing DSL heads (SQL, HTML, Sh, URL, DateTime); approved directly by the owner in chat, so no ballot is needed. The design review (row 1) still comes first, per AGENTS.md. Owner direction (2026-11-25): Pip's agent produces the design and the build plan only, with no implementation; the owner's orchestrator assigns the implementation.",
       "kind": "feature",
       "track": "epoch",
       "epoch": "G3",
@@ -77804,7 +77809,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-25T18:17:04.112Z",
-      "updated": "2026-11-25T18:23:33.538Z",
+      "updated": "2026-11-25T18:34:11.006Z",
       "updatedBy": "Pip",
       "criteriaLastN": 8
     },
@@ -141667,6 +141672,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-25T18:34:11.007Z",
+      "by": "Pip",
+      "action": "card.update",
+      "ref": "c0pej44b",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-25T18:34:06.791Z",
+      "by": "Pip",
+      "action": "card.update",
+      "ref": "c0clpv28",
+      "note": "body,logEntry"
+    },
     {
       "at": "2026-11-25T18:25:48.520Z",
       "by": "Pip",
