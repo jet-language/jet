@@ -24,14 +24,13 @@ reload_ask: fn(port: String) -> String? {
     request: "GET /__jet/reload HTTP/1.1{crlf}Host: localhost{crlf}Connection: close{crlf}Content-Length: 0{crlf}{crlf}"
     stream.write_bytes(request.bytes()) ?? return None
     net.tcp_shutdown(stream, NetShutdown.Write) ?? return None
-    net.set_read_timeout(stream, 5000) ?? panic("read timeout")
     bytes := [U8]{}
     loop {
-        part: net.tcp_read_bytes(stream, 8192) ?? return None
+        part: stream.read_bytes(8192, deadline: 5s) ?? return None
         if part.len() == 0 -> break
         loop byte in part -> bytes.push(byte)
     }
-    String.from_bytes(bytes)
+    Val(String.from_bytes(bytes) ?? return None)
 }
 
 // The `data:` value of an event-stream response.

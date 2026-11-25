@@ -137,10 +137,11 @@ use {
     assert_eq(text_string.trim(""), "")
 }
 
-// Retain the true borrowed contract while String.slice provenance is fixed.
+// The builtin `String.trim` reads its receiver: the view it gives copies out
+// the trimmed text.
 #Test("Unicode borrowed trim retains original parameter owner") {
-    source: " \tjet \n"
-    view: text_string.trim_view(source)
+    source: " \tjet \n"
+    view: source.trim()
     assert_eq(view.copy(), "jet")
 }
 
