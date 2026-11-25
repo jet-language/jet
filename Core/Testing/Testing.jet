@@ -335,17 +335,25 @@ Fake: struct {
     }
 }
 
-// The words a `Fake` draws from, one row per locale: `locale_code` 1 is
-// German, any other English.
-FAKE_LOCALES: [{first: [String], last: [String], hosts: [String], streets: [String], cities: [String]}]{
-    {
+// The words a `Fake` draws from for one locale.
+FakeLocale: struct {
+    first: [String],
+    last: [String],
+    hosts: [String],
+    streets: [String],
+    cities: [String],
+}
+
+// One row per locale: `locale_code` 1 is German, any other English.
+FAKE_LOCALES: [FakeLocale]{
+    FakeLocale{
         first: [String]{"Alice", "Bob", "Clara", "Diego"},
         last: [String]{"Smith", "Jones", "Taylor", "Brown"},
         hosts: [String]{"example.test", "mail.test", "demo.test"},
         streets: [String]{"Oak Street", "Pine Street", "Maple Street", "Cedar Street"},
         cities: [String]{"Austin", "Boston", "Denver", "Portland"},
     },
-    {
+    FakeLocale{
         first: [String]{"Anna", "Bruno", "Clara", "Dieter"},
         last: [String]{"Schmidt", "Fischer", "Weber", "Wagner"},
         hosts: [String]{"beispiel.test", "mail.test", "demo.test"},
