@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7000,
-    "rev": 114007,
+    "rev": 114023,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -57129,6 +57129,26 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-25",
+          "by": "Orchestrator",
+          "text": "Correction to the c34 entry above: no new ballot is needed. D-RULE-WRITTEN1 was ratified A on 2026-11-24: CompilerArg.written: [CompilerWrittenPart]? with CompilerWrittenPart: enum { Text(text: String), Hole(name: String?, span: SourceSpan) }. It is not yet built (absent from Docs/Spec and code on batch43). c34 is an unbuilt piece of that decision, assigned to G1Generation-2 to build as ratified. The template: String? shape is dropped."
+        },
+        {
+          "at": "2026-11-25",
+          "by": "Orchestrator",
+          "text": "c13: the old proof filter `jet test Tests/Guards --filter core_declarations` matched no test (that guard is the package Tests/Guards/CoreDeclarations). The proof now names the package and core_builtins_door's CBD_CEILING reaching 0. The ceiling is 66 on dev, and 63 with the c13 slice-1 patch queued in batch 43."
+        },
+        {
+          "at": "2026-11-25",
+          "by": "Orchestrator",
+          "text": "c34 needs a ballot. The ratified CompilerArg surface (label, type, value, function, span) cannot tell an interpolated String literal such as \"/users/{id}\" from a String known only at run time: both are heard as type String, value None, function None, and neither SourceSpan nor call.source carries source text. Shapes found: (A) CompilerArg gains `template: String?`, the written text with each hole as {name}, set only for a literal with at least one hole whose value the build does not know; (B) `interpolated: Bool`, which cannot rebuild the quoted pattern for E2805's message; (C) `written: String?` for every argument, which exposes syntax for all arguments; (D) a template Dyn inside value, which breaks the rule that value != None means known. The ballot record is being drafted. c19 and c33 held on dev and their tests are in batch 43."
+        },
+        {
+          "at": "2026-11-25",
+          "by": "Orchestrator",
+          "text": "Sweep on dev e128950680d: the snapshots ui http_route_path_type and http_route_invalid_literal pass, but c33 and c34 are not met: the route checks still come from Sema/Calls/HTTPRouting.jet (the 'brace interpolation is not allowed in route patterns' message at line 463), not from a Core check rule, so the snapshots do not prove rule ordering or the interpolated-literal fact. The c9 (core_construct_ordinary_visibility) and #6852 c2 (declared_copy_resource_typestate_facts) filters match no test yet. c9 is assigned to G1Generation-2."
+        },
+        {
           "at": "2026-11-24",
           "by": "Orchestrator",
           "text": "ContextOnStop o2 (batch 29 and 30 golden): it passes at o0, o1 and o2 in isolation on the batch 30 compiler (jet test Compiler --profile golden --filter=ContextOnStop, 3/3) and in two standalone jet builds. It fails only under the full suite's load, where the native compile-time run of core.files ReadOnlyHandle's marker check (Core/Files/Files.jet:427) returns no result and the compiler reports it as the user diagnostic Jet.InvalidStatement ('returned neither a value nor an explicit control result'). A compile-time child that ends without a result is a compiler or host failure, not a user error: under I2 it must not reach the user as a diagnostic. Open: find why the child returns empty under load (resource limit, timeout or crash) and report that cause instead."
@@ -57447,21 +57467,21 @@
         },
         {
           "n": 13,
-          "text": "Compiler-provided operations go through one private door named `jet_builtins` (D-CORE-BUILTINS1=A), and no other compiler-known Core entry remains. Proof: `jet test Tests/Guards --filter core_declarations` and a guard listing compiler-known Core names outside jet_builtins reports none. The frozen #4570 holds the original item.",
+          "text": "Compiler-provided operations go through one private door named `jet_builtins` (D-CORE-BUILTINS1=A), and no other compiler-known Core entry remains. Proof: `jet test Tests/Guards/CoreDeclarations` passes, and Tests/Guards/core_builtins_door.jet passes with CBD_CEILING at 0 (`jet test Tests/Guards --filter core_builtins_door`), so the guard listing compiler-known Core names outside jet_builtins reports none. The frozen #4570 holds the original item.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T13:06:47.345Z"
+          "at": "2026-11-25T05:28:21.690Z"
         },
         {
           "n": 14,
           "text": "Every `__`-prefixed item in Core is private to its package, and a public `__` name fails the build with a registered error.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T03:03:26.997Z",
+          "evidence": "On dev e128950680d with the batch-41 compiler ($JET_SCRATCH_ROOT/orch/batch41f-chain/s1/jet, toolchain root = the dev export): jet test Compiler --profile ui --filter public_dunder_name_is_an_error passes 1/1. Jet.PublicDunderName (E0645) refuses a public `__` Core item. Core builds clean under that check in batch 41's suite, so every `__` item in Core is `priv`.",
+          "at": "2026-11-25T05:04:18.031Z",
           "proof": {
             "profile": "ui",
             "filter": "public_dunder_name_is_an_error"
@@ -57601,11 +57621,11 @@
         {
           "n": 30,
           "text": "A check rule hears a call argument's declared function: CompilerArg.function carries the FunctionInfo (params and types) of a function-valued argument, not the hardcoded None at CheckRules.jet sema_rule_call_arg (probe rule2 on tip18).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-24T07:11:47.560Z",
+          "evidence": "On dev e128950680d with the batch-41 compiler ($JET_SCRATCH_ROOT/orch/batch41f-chain/s1/jet, toolchain root = the dev export): cases --filter Metaprogramming/check_rule_hears_argument_function passes 1/1 (jet check exits 0 with no known.Unheard; jet run prints '7 /item'). CheckRules.jet sema_rule_call_arg now takes `function: ^^TComptimeValue?` and pushes its FunctionInfo into heard.functions (no hardcoded None).",
+          "at": "2026-11-25T05:04:18.911Z",
           "proof": {
             "profile": "cases",
             "filter": "Metaprogramming/check_rule_hears_argument_function"
@@ -57614,11 +57634,11 @@
         {
           "n": 31,
           "text": "A check rule hears a type-name argument as a Type value (`web.form(Checkout, …)` is heard as type `_` with no value today; sema_rule_call_value probes it with no expected type; probe rule2 on tip18).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-24T07:11:48.932Z",
+          "evidence": "On dev e128950680d with the batch-41 compiler ($JET_SCRATCH_ROOT/orch/batch41f-chain/s1/jet, toolchain root = the dev export): cases --filter Metaprogramming/check_rule_hears_type_argument passes 1/1 (`form(Checkout, …)` is heard as a Type value whose value is the type path's Text; jet run prints 'true').",
+          "at": "2026-11-25T05:04:19.954Z",
           "proof": {
             "profile": "cases",
             "filter": "Metaprogramming/check_rule_hears_type_argument"
@@ -57717,7 +57737,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:07.534Z",
-      "updated": "2026-11-24T18:09:35.702Z",
+      "updated": "2026-11-25T05:33:37.710Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 39
     },
@@ -74918,6 +74938,16 @@
         {
           "at": "2026-11-25",
           "by": "Orchestrator",
+          "text": "Fresh-review findings for c6 and c4 (G1Generation-3-3, batch-42 compiler): the composed-letter hint covers type names only. A name such as `ŝelf` is told to write `ŝelf: Type`, and a parameter named `êntries` compiles silently. The lexer still has a `^=` token, so `a ^= 3` gets a misleading message. The comptime token names call the marks operator.caret and operator.caret_caret. The c4 grammar patch in batch 43 makes tree-sitter read ^^ as one token, colors the take mark in Zed (jet.wasm rebuilt), and flips the take_mark_is_colored_apart_from_logical_and guard to ^^; 7 guard filters pass on the batch-42 compiler."
+        },
+        {
+          "at": "2026-11-25",
+          "by": "Orchestrator",
+          "text": "D-MARK-CARET1: the fresh review by G1Generation-3-3 rewrote the record, which passes Tools/Agent/Ballots/Validate.jet. It was reviewed, posted and ratified A with the owner's two quotes from 2026-11-24. The review's addendum (Docs/Audits caret-marks review) and the c4 grammar patch (tree-sitter ^^ token, Zed take-mark queries) are queued in batch 43. Findings: the ĵson.Dyn panic and the silent ^^-to-^ dead-key collapse are now criteria; a stale `^=` token and the comptime names operator.caret/caret_caret belong to c4."
+        },
+        {
+          "at": "2026-11-25",
+          "by": "Orchestrator",
           "text": "Batch 41 landed on dev e128950680d with the caret-marks docs and audit, the syntax-decisions record, the CaretMarks fixture and the dead-key E0119 type snapshot. On the rebuilt compiler, cases --filter CaretMarks passes 1/1 and ui --filter dead_key_circumflex passes 1/1. c6 stays open for the unknown-name and parameter diagnostics."
         },
         {
@@ -75014,6 +75044,68 @@
             "profile": "ui",
             "filter": "dead_key_circumflex"
           }
+        },
+        {
+          "n": 7,
+          "text": "Data/Syntax registry entry updated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T05:31:24.319Z"
+        },
+        {
+          "n": 8,
+          "text": "syntax-decisions.md log entry",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T05:31:24.319Z"
+        },
+        {
+          "n": 9,
+          "text": "editor grammars regenerated (jet self devtools grammars)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T05:31:24.319Z"
+        },
+        {
+          "n": 10,
+          "text": "snapshots re-blessed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T05:31:24.319Z"
+        },
+        {
+          "n": 11,
+          "text": "A dead-key composed qualified type does not stop the compiler: `fn(x: ĵson.Dyn)` panics in Compiler/JetSema Items.jet sema_registration_unit_leaf_name, which slices a name by byte offsets with a character slice (fresh caret-marks review, 2026-11-25). The name gets the dead-key E0119 report or the ordinary unknown-name report, with exit 1, never a panic.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T05:31:39.690Z",
+          "proof": {
+            "profile": "ui",
+            "filter": "dead_key_circumflex"
+          }
+        },
+        {
+          "n": 12,
+          "text": "A take mark that a dead key collapsed is reported: on a dead-key layout, typing `^^self` can produce `^self`, and the program checks and runs silently (the review's probe printed '7 7'). Sema reports a write mark (^) on a parameter whose body never writes through it, so the lost take shows. If that report needs a new lint surface, the shape goes on a ballot first.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T05:31:41.164Z",
+          "proof": {
+            "profile": "ui",
+            "filter": "dead_key_take_collapse"
+          }
         }
       ],
       "refs": [],
@@ -75021,9 +75113,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-24T13:44:02.626Z",
-      "updated": "2026-11-25T04:57:44.096Z",
+      "updated": "2026-11-25T05:34:33.123Z",
       "updatedBy": "Orchestrator",
-      "criteriaLastN": 6
+      "criteriaLastN": 12
     },
     {
       "id": "c0mhrplj",
@@ -136164,42 +136256,230 @@
       "cardId": "c0jjynlr",
       "group": "syntax",
       "title": "Write and take marks are spelled ^ and ^^",
-      "situation": "D-CALLSITE-MARK2=A and D-MOVE-SIGIL1=A spell a write as &T and a take as &&T. The same symbols are bitwise and logical and between two values, so & and && each carry two meanings told apart by position. ^ has no grammar meaning today: infix ^ is a parse error and exclusive-or is ~ (MathLayout.jet OP_CARET, OP_TILDE).",
+      "situation": "Jet marks a parameter that a function may change with a write mark, and a parameter it keeps with a take mark. Until this change the marks were spelled `&T` and `&&T`. The same symbols are bitwise and and logical and between two values, so each carried two meanings told apart by position. The symbol `^` had no meaning in Jet, because infix `^` is a parse error and exclusive-or is `~`. The owner approved moving the marks to `^` and `^^`, and the cutover has shipped. This record states the alternatives, the costs a fresh review found, and the owner's ruling.",
       "gist": "Which symbols mark a write and a take: & and &&, or ^ and ^^?",
-      "lesson": "A mark that shares its symbol with an operator costs every reader a second look; a free symbol costs nothing to give a job.",
-      "explainer": "",
-      "story": "Ana reads fn fill(^buf: Buffer, n: Int) and a few lines down a && b. Each symbol now has one job, so she never stops to ask which one she is reading.",
-      "inWild": "Pascal and Odin read ^ as a reference. No common language uses ^^.",
-      "detail": "Owner ruling, 2026-11-24, given directly in session: \"I approve the & and && to ^ and ^^ conversion\". It followed the side-by-side comparison of today's and the converted spelling over 24 excerpts from dev and five whole files, in which links keep @. It amends the spelling of D-CALLSITE-MARK2=A and D-MOVE-SIGIL1=A only; what a write or a take means, and where a mark may appear, are unchanged. Because ^ now marks a write, links keep @ (D-MEMREF1=A) and the drafted link move D-LINK-CARET1 is withdrawn. Infix ^ stays a parse error and exclusive-or stays ~. After the cutover, prefix & and && are ordinary parse errors with no alias and no teaching diagnostic; & and && keep their operator meanings. Known cost, recorded from D-MOVE-SIGIL1: ^ is a dead key on German, French, Spanish, Portuguese, Swiss and Nordic layouts, now on the most common mark. Cutover on card #6998.",
+      "lesson": "A mark that shares its symbol with an operator costs every reader a second look. A free symbol costs nothing to give a job, but it can cost typing on keyboards where that symbol is a dead key.",
+      "explainer": "Think of a shared notebook passed around a table. A small mark beside a name says this person may write in it, and a double mark says this person keeps it. Jet used to draw those marks with `&` and `&&`, which also mean bitwise and and logical and. Now it draws them with `^` and `^^`, which mean nothing else in Jet. The catch is that some keyboards treat `^` as an accent key, so typing it takes care.",
+      "story": "Ana reads `fill: fn(values: ^[Int], n: Int)` and a few lines down `ready && count > 0`. Each symbol has one job, so she never stops to ask which one she is reading. Her colleague Jonas types the same code on a German keyboard, where `^` waits for the next letter. His `^^self` comes out as `^self`, and nothing tells him unless the body moves the receiver.",
+      "inWild": "Pascal and Odin write `^T` for a pointer type, and `p^` to read through it.\nGo reads a prefix `^x` as bitwise complement, and C, Go, Rust and Swift read infix `^` as exclusive-or.\nSwift marks a write with the word `inout` and a take with `consuming`; its call site writes `&values`.\nRust marks a write with `&mut T` and takes a plain `T` by value.\nC++ writes `T&` for a reference and `T&&` for a value it may move from.\nNo common language uses `^^`.",
+      "detail": "Ruling. The owner ruled for A directly in session on 2026-11-24, in two statements quoted word for word. First: \"I approve the & and && to ^ and ^^ conversion\". Second: \"Yes Im saying cancelling the ^ from @ conversion and use ^ in place of &\". The first followed a side-by-side comparison of the old and the converted spelling over 24 excerpts from dev and five whole files.\n\nScope. The ruling amends the spelling of D-CALLSITE-MARK2=A and D-MOVE-SIGIL1=A only. What a write or a take means, and where a mark may appear, are unchanged. Because `^` now marks a write, links keep `@` (D-MEMREF1=A), and the drafted link move D-LINK-CARET1 is withdrawn. Infix `^` stays a parse error, and exclusive-or stays `~`. Prefix `&` and `&&` are now ordinary parse errors with no alias and no teaching diagnostic.\n\nRegistry. Spellings.jet holds the mark rows and the migration plan mark-caret1, shipped with toolchain a0.0.47. CoreSurface.jet sets SIGIL_WRITE to `^` and SIGIL_MOVE to `^^`. MathLayout.jet says OP_CARET is the write mark and never an operator, and OP_AMP is bitwise and only. Step B rewrote 2,921 files in one commit, and the cutover runs on card #6998.\n\nReview, typing. On a dead-key layout, two presses of `^` compose to a single `^`. A probe wrote `redeem: fn(^self)` where `^^self` was meant, exactly as that collapse leaves it. It checked clean and redeemed the same ticket twice, printing `7 7`. The intended `^^self` program is refused with Jet.UseAfterMove. So a take can silently become a write, unless the body moves the receiver.\n\nReview, composed letters. E0119 explains a composed letter only in a type name such as `Înt`, and a bogus Jet.ImmutableAssignment follows it. A parameter named `êntries` compiles silently. `ŝelf` gets the advice to write `ŝelf: Type`, and `ĉounts` gets only a spelling suggestion. A qualified type written `ĵson.Dyn` panics the compiler in sema_registration_unit_leaf_name, which slices characters by byte offsets.\n\nReview, reading and tools. Go readers know a prefix `^x` as bitwise complement, so `edit: ^values[1..<3]` can read as a value. In Jet it opens a write window. `a ^= 3` is reported as a line that computes a value, because the lexer still makes a `^=` token. Regex and shell users must escape `^`. The diagnostic underline is also `^`, on its own gutter line under the marked code.\n\nReview, verdicts. Separation from operators holds: `&` and `&&` now have one meaning each. Reading holds within limits. Typing fails on dead-key layouts for the take mark, and the help covers only type names. Diff noise holds within limits, since `git blame --ignore-rev` skips the one migration commit. Tooling holds within limits: the Zed query still colored `&&` as the take mark, and tree-sitter split `^^` into two tokens.\n\nFollow-ups. The tree-sitter and Zed gaps, a README quote and a duplicated spec sentence are fixed in the criterion 4 patch. The compiler gaps go to the orchestrator: the `ĵson.Dyn` panic, the stale `^=` token, and the comptime token names operator.caret and operator.caret_caret. The proposed guard against the collapse flags a write-marked parameter or receiver that the body never writes. Jet.MutableNeverReassigned already does the same for a `:=` binding.",
       "options": [
         {
           "key": "A",
           "name": "Marks use ^ and ^^",
-          "detail": "fn bump(^self), edit: ^values[2..<3], first: ^counts[0], if ^shape == { … }, seal: fn(^^self), file: ^^GzFile, task ^^job { … }. & and && keep only their operator meanings."
+          "detail": "A write is `^T` or `^self`, a take is `^^T` or `^^self`, and a write window is `^values[1..<3]`. A task capture that takes is `task ^^job`. `&` stays bitwise and and `&&` stays logical and, each with no other meaning. This is the shipped spelling, and the program below runs on today's toolchain.",
+          "code": "Meter: struct {\n    hits: Int,\n}\nimpl Meter {\n    bump: fn(^self) { self.hits += 1 }\n    seal: fn(^^self) -> Int { self.hits }\n}\npeek: fn(m: Meter) -> Int { m.hits }\nfill: fn(values: ^[Int], n: Int) {\n    loop i in 0..<n -> values.push(i)\n}\nrun: fn() {\n    t := Meter{hits: 0}\n    t.bump()\n    values := [Int]{}\n    fill(values, 4)\n    edit: ^values[1..<3]\n    edit[0] = 9\n    ready: peek(t) > 0 && values[3] & 1 == 1\n    print(\"{ready} {values} {t.seal()}\")\n}",
+          "technical": "The lexer makes `^^` one token, TOKEN_CARET_CARET, as it makes `&&` one token. No grammar rule gives `^` an operator meaning, so a mark never needs position to tell it from an operator."
         },
         {
           "key": "B",
           "name": "Marks keep & and &&",
-          "detail": "No change: fn bump(&self), task &&job { … }. & and && keep two meanings each, told apart by position."
+          "detail": "No change from the former spelling: a write is `&T` or `&self`, and a take is `&&T` or `&&self`. `&` and `&&` keep two meanings each, a mark before a type or name and an operator between two values. The parser tells them apart by position.",
+          "code": "Meter: struct {\n    hits: Int,\n}\nimpl Meter {\n    bump: fn(&self) { self.hits += 1 }\n    seal: fn(&&self) -> Int { self.hits }\n}\npeek: fn(m: Meter) -> Int { m.hits }\nfill: fn(values: &[Int], n: Int) {\n    loop i in 0..<n -> values.push(i)\n}\nrun: fn() {\n    t := Meter{hits: 0}\n    t.bump()\n    values := [Int]{}\n    fill(values, 4)\n    edit: &values[1..<3]\n    edit[0] = 9\n    ready: peek(t) > 0 && values[3] & 1 == 1\n    print(\"{ready} {values} {t.seal()}\")\n}"
+        },
+        {
+          "key": "C",
+          "name": "Marks are words",
+          "detail": "A write is `mut T` or `mut self`, and a take is `take T` or `take self`, close to Swift's `inout` and `consuming`. A write window is `mut values[1..<3]`, and a task capture is `task take job`. Jet once spelled marks with these words; the lexer still reserves them, and the tools teach the symbols instead.",
+          "code": "Meter: struct {\n    hits: Int,\n}\nimpl Meter {\n    bump: fn(mut self) { self.hits += 1 }\n    seal: fn(take self) -> Int { self.hits }\n}\npeek: fn(m: Meter) -> Int { m.hits }\nfill: fn(values: mut [Int], n: Int) {\n    loop i in 0..<n -> values.push(i)\n}\nrun: fn() {\n    t := Meter{hits: 0}\n    t.bump()\n    values := [Int]{}\n    fill(values, 4)\n    edit: mut values[1..<3]\n    edit[0] = 9\n    ready: peek(t) > 0 && values[3] & 1 == 1\n    print(\"{ready} {values} {t.seal()}\")\n}"
+        },
+        {
+          "key": "D",
+          "name": "Rust's split",
+          "detail": "A read is `&T`, a write is `&mut T`, and a take is a plain `T`, as in Rust. This flips Jet's default: today a plain parameter is a read, and only a write or a take carries a mark. Every read of a value that does not copy would gain `&`.",
+          "code": "Meter: struct {\n    hits: Int,\n}\nimpl Meter {\n    bump: fn(&mut self) { self.hits += 1 }\n    seal: fn(self) -> Int { self.hits }\n}\npeek: fn(m: &Meter) -> Int { m.hits }\nfill: fn(values: &mut [Int], n: Int) {\n    loop i in 0..<n -> values.push(i)\n}\nrun: fn() {\n    t := Meter{hits: 0}\n    t.bump()\n    values := [Int]{}\n    fill(values, 4)\n    edit: &mut values[1..<3]\n    edit[0] = 9\n    ready: peek(t) > 0 && values[3] & 1 == 1\n    print(\"{ready} {values} {t.seal()}\")\n}"
         }
       ],
-      "comparisons": [],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Rust writes through `&mut` and takes by plain value, so a read carries `&` and a take carries nothing.",
+          "code": "impl Meter {\n    fn bump(&mut self) { self.hits += 1 }\n    fn seal(self) -> i64 { self.hits }\n}\nfn peek(m: &Meter) -> i64 { m.hits }\nfn fill(values: &mut Vec<i64>, n: i64) { for i in 0..n { values.push(i) } }"
+        },
+        {
+          "lang": "Swift",
+          "note": "Swift marks with words in the declaration and with `&` at the call site.",
+          "code": "struct Meter {\n    var hits = 0\n    mutating func bump() { hits += 1 }\n    consuming func seal() -> Int { hits }\n}\nfunc fill(_ values: inout [Int], _ n: Int) { for i in 0..<n { values.append(i) } }\nfill(&values, 4)"
+        },
+        {
+          "lang": "C++",
+          "note": "C++ shares `&` and `&&` between references and operators, the overlap B would keep.",
+          "code": "void fill(std::vector<int>& values, int n);\nint seal(Meter&& m);\nbool ready = peek(t) > 0 && (values[3] & 1) == 1;"
+        },
+        {
+          "lang": "Odin",
+          "note": "Odin reads `^T` as a pointer type and `p^` as reading through it, a reading A's readers may bring.",
+          "code": "bump :: proc(m: ^Meter) { m.hits += 1 }\nhits := m^.hits"
+        }
+      ],
       "rec": "A",
-      "recommendation": null,
+      "recommendation": {
+        "why": "The owner ruled for A in two statements: \"I approve the & and && to ^ and ^^ conversion\" and \"Yes Im saying cancelling the ^ from @ conversion and use ^ in place of &\". A gives every symbol one job at the same width as before. It has shipped, with the registry, checker and editor grammars spelling `^` and `^^`.",
+        "gains": [
+          "Each of `^`, `^^`, `&` and `&&` has one meaning.",
+          "Marks keep their width, so code stays aligned after the migration.",
+          "The marks were free, so no operator moved."
+        ],
+        "losses": [
+          {
+            "loss": "On dead-key layouts, two presses of `^` give one, so `^^self` can silently become `^self` and a take becomes a write.",
+            "mitigation": "Flag a write-marked parameter or receiver that the body never writes, as Jet.MutableNeverReassigned does for `:=`. This needs a new criterion."
+          },
+          {
+            "loss": "Composed letters outside type names get no dead-key hint, and a composed qualified type crashed the compiler.",
+            "mitigation": "Card #6998 criterion 6 owns the hints, and the crash in sema_registration_unit_leaf_name goes to the orchestrator as a defect."
+          },
+          {
+            "loss": "Readers from Go, Odin or Pascal bring other meanings for a prefix `^`, and `a ^= 3` gets a misleading message.",
+            "mitigation": "Jet has no `^` operator, the syntax dictionary explains both marks, and the stale `^=` token is reported for removal."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "`&` and `&&` keep two meanings each, the overlap the owner chose to end. The Zed query even colored logical and as the take mark."
+          },
+          {
+            "key": "C",
+            "reason": "Words lengthen every marked parameter, and Jet already retired these words in favor of symbols."
+          },
+          {
+            "key": "D",
+            "reason": "It flips the default, so most parameters gain a mark, and `&` would still be both a mark and an operator."
+          }
+        ],
+        "tradeoff": "One clear meaning per symbol, paid for with typing risk on dead-key keyboards that the checker only partly catches today."
+      },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: none yet. The owner ruled directly on 2026-11-24 after the side-by-side comparison; the adversarial audit of the cutover is the first criterion of card #6998."
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: G1Generation-3-3. Separation from operators and reading hold, but typing fails on dead-key layouts, where a probe's `^^self` silently became `^self`. A composed qualified type crashed the compiler, and the tree-sitter and Zed gaps are fixed in the criterion 4 patch."
       },
-      "checkInstructions": null,
-      "surface": null,
+      "checkInstructions": "Check the registry rows: Spellings.jet lines 72-75 and the mark-caret1 plan at line 121, CoreSurface.jet lines 369 and 371, and MathLayout.jet lines 468-482.\n\nCheck the dead-key help in FailureLaw.jet lines 1505-1549, and the byte-offset slice in Items.jet sema_registration_unit_leaf_name, lines 248-263.\n\nRerun the collapse probe: a struct with `redeem: fn(^self) -> Int { self.id }`, called twice in `run`, checks clean and prints `7 7`. With `^^self` it is refused with Jet.UseAfterMove.\n\nRerun the crash probe: `fill: fn(x: ĵson.Dyn)` after `use json: core.encoding.json` stops with Jet.Panic in sema_registration_unit_leaf_name.",
+      "surface": {
+        "gist": "Which symbols should mark a write and a take: & and &&, or ^ and ^^?",
+        "lesson": "Jet marks a parameter a function may change, and one it keeps. The marks were `&` and `&&`, which are also bitwise and logical and. They are now `^` and `^^`, which mean nothing else in Jet. The owner approved this, and it has shipped.",
+        "trio": {
+          "current": {
+            "note": "Shipped today: marks and operators no longer share a symbol.",
+            "code": "bump: fn(^self) { self.hits += 1 }\nseal: fn(^^self) -> Int { self.hits }\npeek: fn(m: Meter) -> Int { m.hits }\nfill: fn(values: ^[Int], n: Int) {\nedit: ^values[1..<3]\nready: peek(t) > 0 && values[3] & 1 == 1"
+          },
+          "wild": {
+            "lang": "Swift",
+            "note": "Swift marks a write and a take with words.",
+            "code": "mutating func bump() { hits += 1 }\nconsuming func seal() -> Int { hits }\nfunc fill(_ values: inout [Int], _ n: Int) { }"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Marks use ^ and ^^",
+            "gist": "A write is `^T`, a take is `^^T`, and `&` and `&&` are only operators.",
+            "gains": [
+              "Each symbol has one job.",
+              "Same width as before, so code stays aligned.",
+              "Shipped, and the tools already use it."
+            ],
+            "losses": [
+              "`^` is a dead key on many European keyboards.",
+              "There, `^^` can silently become `^`."
+            ],
+            "proposed": {
+              "code": "bump: fn(^self) { self.hits += 1 }\nseal: fn(^^self) -> Int { self.hits }\npeek: fn(m: Meter) -> Int { m.hits }\nfill: fn(values: ^[Int], n: Int) {\nedit: ^values[1..<3]\nready: peek(t) > 0 && values[3] & 1 == 1"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Marks keep & and &&",
+            "gist": "A write is `&T` and a take is `&&T`, beside bitwise and logical and.",
+            "gains": [
+              "No migration and nothing to relearn.",
+              "C++ and Rust readers know `&` as a reference."
+            ],
+            "losses": [
+              "`&` and `&&` each carry two meanings.",
+              "Editors mistook logical and for the take mark."
+            ],
+            "proposed": {
+              "code": "bump: fn(&self) { self.hits += 1 }\nseal: fn(&&self) -> Int { self.hits }\npeek: fn(m: Meter) -> Int { m.hits }\nfill: fn(values: &[Int], n: Int) {\nedit: &values[1..<3]\nready: peek(t) > 0 && values[3] & 1 == 1"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Marks are words",
+            "gist": "A write is `mut T` and a take is `take T`.",
+            "gains": [
+              "Words type the same on every keyboard.",
+              "No clash with any operator."
+            ],
+            "losses": [
+              "Every marked parameter grows longer.",
+              "Jet already retired these words for symbols."
+            ],
+            "proposed": {
+              "code": "bump: fn(mut self) { self.hits += 1 }\nseal: fn(take self) -> Int { self.hits }\npeek: fn(m: Meter) -> Int { m.hits }\nfill: fn(values: mut [Int], n: Int) {\nedit: mut values[1..<3]\nready: peek(t) > 0 && values[3] & 1 == 1"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Rust's split",
+            "gist": "A read is `&T`, a write is `&mut T`, and a take is a plain `T`.",
+            "gains": [
+              "Familiar to Rust readers."
+            ],
+            "losses": [
+              "Most parameters would gain a mark.",
+              "`&` stays both a mark and an operator."
+            ],
+            "proposed": {
+              "code": "bump: fn(&mut self) { self.hits += 1 }\nseal: fn(self) -> Int { self.hits }\npeek: fn(m: &Meter) -> Int { m.hits }\nfill: fn(values: &mut [Int], n: Int) {\nedit: &mut values[1..<3]\nready: peek(t) > 0 && values[3] & 1 == 1"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "The owner approved A, and it gives every symbol one job. Its real cost is typing on dead-key keyboards, which the checker only partly catches.",
+          "gains": [
+            "One job per symbol.",
+            "Already shipped and tooled."
+          ],
+          "losses": [
+            {
+              "loss": "Dead keys can turn `^^` into `^`.",
+              "mitigation": "Flag a write mark the body never uses; this needs a new criterion."
+            },
+            {
+              "loss": "Some composed letters get no hint.",
+              "mitigation": "Card #6998 already tracks these hints."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Two meanings per symbol, which the owner chose to end."
+            },
+            {
+              "key": "C",
+              "reason": "Longer lines, and the words were already retired."
+            },
+            {
+              "key": "D",
+              "reason": "Most parameters would gain a mark."
+            }
+          ],
+          "tradeoff": "Cleaner reading, for typing risk on some keyboards."
+        }
+      },
       "draftedBy": "Orchestrator",
-      "reviewedBy": null,
-      "draft": true,
-      "status": "open",
-      "created": "2026-11-24T14:10:00.279Z"
+      "reviewedBy": "G1Generation-3-3",
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-11-24T14:10:00.279Z",
+      "outcome": "A",
+      "comment": "Owner rulings on 2026-11-24, verbatim: \"Yes Im saying cancelling the ^ from @ conversion and use ^ in place of &\" (after \"what about ^ for edit permission and ^^ for move marking vs & and &&?\"), then \"I approve the & and && to ^ and ^^ conversion\" after the side-by-side comparison. Recorded on #6998's log the same day.",
+      "ratifiedAt": "2026-11-25"
     },
     {
       "id": "D-DECL-FACTS1",
@@ -138799,6 +139079,188 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-25T05:34:33.124Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0jjynlr",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-25T05:33:37.711Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0e6znz4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-25T05:31:42.687Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0jjynlr",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-25T05:31:41.164Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c0jjynlr",
+      "note": "12 criteria, soft limit 6: Gap found by the D-MARK-CARET1 fresh review"
+    },
+    {
+      "at": "2026-11-25T05:31:41.164Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0jjynlr",
+      "note": "#12 A take mark that a dead key collapsed is reported: on a dead"
+    },
+    {
+      "at": "2026-11-25T05:31:39.690Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c0jjynlr",
+      "note": "11 criteria, soft limit 6: Defect found by the D-MARK-CARET1 fresh review; owned by this card's dead-key work"
+    },
+    {
+      "at": "2026-11-25T05:31:39.690Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0jjynlr",
+      "note": "#11 A dead-key composed qualified type does not stop the compile"
+    },
+    {
+      "at": "2026-11-25T05:31:24.319Z",
+      "by": "Orchestrator",
+      "action": "decision.ratify",
+      "ref": "D-MARK-CARET1",
+      "note": "A (by Orchestrator, quoting owner: \"I approve the & and && to ^ and ^^ conversion\")"
+    },
+    {
+      "at": "2026-11-25T05:31:24.319Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c0jjynlr",
+      "note": "10 criteria, soft limit 6: the standard syntax ratification chores"
+    },
+    {
+      "at": "2026-11-25T05:31:24.319Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0jjynlr",
+      "note": "#10 snapshots re-blessed"
+    },
+    {
+      "at": "2026-11-25T05:31:24.319Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c0jjynlr",
+      "note": "9 criteria, soft limit 6: the standard syntax ratification chores"
+    },
+    {
+      "at": "2026-11-25T05:31:24.319Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0jjynlr",
+      "note": "#9 editor grammars regenerated (jet self devtools grammars)"
+    },
+    {
+      "at": "2026-11-25T05:31:24.319Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c0jjynlr",
+      "note": "8 criteria, soft limit 6: the standard syntax ratification chores"
+    },
+    {
+      "at": "2026-11-25T05:31:24.319Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0jjynlr",
+      "note": "#8 syntax-decisions.md log entry"
+    },
+    {
+      "at": "2026-11-25T05:31:24.319Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c0jjynlr",
+      "note": "7 criteria, soft limit 6: the standard syntax ratification chores"
+    },
+    {
+      "at": "2026-11-25T05:31:24.319Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0jjynlr",
+      "note": "#7 Data/Syntax registry entry updated"
+    },
+    {
+      "at": "2026-11-25T05:31:16.558Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-MARK-CARET1",
+      "note": "reviewed by G1Generation-3-3"
+    },
+    {
+      "at": "2026-11-25T05:31:14.987Z",
+      "by": "G1Generation-3-3",
+      "action": "decision.review",
+      "ref": "D-MARK-CARET1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-25T05:31:05.340Z",
+      "by": "Orchestrator",
+      "action": "decision.update",
+      "ref": "D-MARK-CARET1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-25T05:28:21.691Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0e6znz4",
+      "note": "#13: The proof filter core_declarations matched no test; the guard is the package Tests/Guards/CoreDeclarations, and core_builtins_door is the listing guard; was: Compiler-provided operations go through one private door named `jet_builtins` (D-CORE-BUILTINS1=A), and no other compiler-known Core entry remains. Proof: `jet test Tests/Guards --filter core_declarat"
+    },
+    {
+      "at": "2026-11-25T05:28:16.833Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0e6znz4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-25T05:22:27.618Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0e6znz4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-25T05:04:20.860Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0e6znz4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-25T05:04:19.954Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0e6znz4",
+      "note": "#31"
+    },
+    {
+      "at": "2026-11-25T05:04:18.912Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0e6znz4",
+      "note": "#30"
+    },
+    {
+      "at": "2026-11-25T05:04:18.031Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0e6znz4",
+      "note": "#14"
+    },
     {
       "at": "2026-11-25T04:57:44.096Z",
       "by": "Orchestrator",
