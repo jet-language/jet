@@ -446,7 +446,7 @@ X64ObjectTextRows: struct {
 
 // Builds `parts[from..]`, one task per part and the last part on this
 // thread; returns how many parts were built.
-x64_object_text_parts: fn(inputs: Shared<X64ObjectTextShared>, parts: [Shared<X64ObjectTextPart>], from: Int) -> Int {
+x64_object_text_parts: fn(inputs: Shared<X64ObjectTextShared>, parts: [Shared<X64ObjectTextPart>], from: Int) -> Int Never! {
     if from >= parts.len() - 1 -> return x64_object_text_part(inputs, parts[from])
     built := 0
     task.group x64_object_text_threads {
@@ -467,7 +467,7 @@ X64ObjectTextFinalize: struct {
 
 // Finalizes `items` (in reverse order, popped off the end so each task owns
 // its item without copying) in parallel and returns them in original order.
-x64_object_text_finalize_items: fn(items: ^^[X64ObjectTextFinalize]) -> [X64ObjectTextRows] {
+x64_object_text_finalize_items: fn(items: ^^[X64ObjectTextFinalize]) -> [X64ObjectTextRows] Never! {
     owned := items.move()
     head: owned.pop() ?? return [X64ObjectTextRows]{}
     if owned.len() == 0 -> return [X64ObjectTextRows]{x64_object_text_finalize_one(head)}
@@ -1266,7 +1266,7 @@ x64_object_lay: fn(program: X64ObjectModule, functions: [X64CompiledFunction], c
         parts.push(Shared{X64ObjectTextPart{start: bounds[part], end: bounds[part + 1], codes: mine.move(), outputs: [X64ObjectTextRows]{}}})
     }
     parts.reverse()
-    _ := x64_object_text_parts(inputs, parts, 0) ?? panic("the .text threads failed")
+    _ := x64_object_text_parts(inputs, parts, 0)
     // Without own sections: `.text` as each part's coalesced piece and
     // `.rela.text` as each part's, in function order (x64_object_file
     // writes them into the file).
@@ -1322,7 +1322,7 @@ x64_object_lay: fn(program: X64ObjectModule, functions: [X64CompiledFunction], c
         pending_finalize.push(X64ObjectTextFinalize{rows: rows.move(), globals: globals.move(), strtab_base: base})
     }
     pending_finalize.reverse()
-    finalized: x64_object_text_finalize_items(pending_finalize) ?? panic("the .text finalize threads failed")
+    finalized: x64_object_text_finalize_items(pending_finalize)
     loop rows in finalized.move() {
         errors.extend(rows.errors)
         symtab_at: symtab_size

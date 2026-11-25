@@ -225,13 +225,20 @@ compiler_threads_failure_text: fn(failure: TaskFailure) -> String Never! {
     }
 }
 
+// The one stop a compiler thread's failure takes. A worker that panicked,
+// passed its deadline or was canceled, and so the pool, lock wait or channel
+// that ended with it, ends the compile here, on the thread that ends the
+// compile, as one internal compiler error (exit 101) with the worker's own
+// text (compiler_threads_failure_text). This checks nothing about the input:
+// it only carries a stop that already happened on another thread back.
+compiler_threads_failed: fn(failure: TaskFailure) -> Never Never! {
+    panic(compiler_threads_failure_text(failure))
+}
+
 // Joins a compiler thread's task and returns its value. Every phase joins
-// through here. A failed join re-raises the worker's own failure on the
-// caller, with its text unchanged (compiler_threads_failure_text), as the same
-// internal error: this checks nothing about the input, it only carries a stop
-// that already happened on the worker back to the thread that ends the compile.
+// through here; a failed join ends the compile (compiler_threads_failed).
 compiler_threads_joined: fn<T>(handle: ^^Task<T>) -> T Never! {
-    handle.join() ?? panic(compiler_threads_failure_text(err))
+    handle.join() ?? compiler_threads_failed(err)
 }
 
 // Takes a value back from a handoff list: one in a phase's lock-guarded

@@ -8,7 +8,7 @@
 // content and numbers every row by first use in a walk from the jobs taken in
 // key order, so the module is the same whichever thread built a job and in
 // whatever order the jobs were built.
-use jet_foundation.[interner_empty, CompilerThreads, CompilerTraceSink, FnBody, NameTable, TConstantDef, TImplDef, TTypeDef, Type, compiler_take_rows, compiler_threads_failure_text, compiler_threads_joined, compiler_threads_taken, name_column, name_column_set, name_column_table, name_column_value, symbol_table]
+use jet_foundation.[interner_empty, CompilerThreads, CompilerTraceSink, FnBody, NameTable, TConstantDef, TImplDef, TTypeDef, Type, compiler_take_rows, compiler_threads_failed, compiler_threads_failure_text, compiler_threads_joined, compiler_threads_taken, name_column, name_column_set, name_column_table, name_column_value, symbol_table]
 
 // Building one checked function's body costs about this on one thread, so the
 // build admits threads by x64 selection admission (ir_x64_admit) with each
@@ -161,8 +161,8 @@ ir_build_waves_parted: fn(program: ^^IRProgram, roots: ^^[IRWaveJob], entry: Boo
     rooted: ir_build_queue_count(queue)
     inputs: Shared{IRWaveInputs{programs: [IRProgram]{p.move()}}}
     if trace_sink == .Val(sink) -> sink.begin("ir.build.parts", "", -1, count)
-    ended := ir_build_parts(inputs, slots, queue, bell, 0) ?? panic("the IR build threads failed")
-    if ended.stop != "" -> panic(ir_build_stop_text(ir_build_queue_jobs(queue), ended))
+    ended := ir_build_parts(inputs, slots, queue, bell, 0)
+    if ended.stop != "" -> compiler_threads_failed(TaskFailure.Panicked(ir_build_stop_text(ir_build_queue_jobs(queue), ended)))
     if trace_sink == .Val(sink) -> sink.end("ir.build.parts", ended.built)
     entry_root := IRMergeRoot{part: -1, local: -1}
     entry_failures := [IRBuildFailure]{}
@@ -181,12 +181,12 @@ ir_build_waves_parted: fn(program: ^^IRProgram, roots: ^^[IRWaveJob], entry: Boo
         entry_failures = compiler_take_rows<IRBuildFailure>(built.failures)
         reached := compiler_take_rows<IRWaveJob>(built.found)
         ir_build_queue_add(queue, reached)
-        ended = ir_build_parts(inputs, slots, queue, bell, 0) ?? panic("the IR build threads failed")
-        if ended.stop != "" -> panic(ir_build_stop_text(ir_build_queue_jobs(queue), ended))
+        ended = ir_build_parts(inputs, slots, queue, bell, 0)
+        if ended.stop != "" -> compiler_threads_failed(TaskFailure.Panicked(ir_build_stop_text(ir_build_queue_jobs(queue), ended)))
         if trace_sink == .Val(sink) -> sink.end("ir.build.entry", ended.built)
     }
     if trace_sink == .Val(sink) -> sink.begin("ir.build.glues", "", -1, -1)
-    glues: ir_waves_glues(inputs, slots, 0) ?? panic("the IR build threads failed")
+    glues: ir_waves_glues(inputs, slots, 0)
     if trace_sink == .Val(sink) -> sink.end("ir.build.glues", glues)
     jobs := ir_build_queue_jobs(queue)
     built_parts := [[IRWaveBuilt]]{}
@@ -420,7 +420,7 @@ ir_build_step: fn(queue: Shared<IRBuildQueue>, part: Int, busy: Bool, found: ^^[
 // of spinning forever. A build of one part runs it on the calling thread,
 // so a small program starts no thread; a failure there is the job's own
 // panic, which no watcher names.
-ir_build_parts: fn(inputs: Shared<IRWaveInputs>, slots: [Shared<IRWaveWorker>], queue: Shared<IRBuildQueue>, bell: Shared<IRBuildBell>, at: Int) -> IRBuildPartsEnd {
+ir_build_parts: fn(inputs: Shared<IRWaveInputs>, slots: [Shared<IRWaveWorker>], queue: Shared<IRBuildQueue>, bell: Shared<IRBuildBell>, at: Int) -> IRBuildPartsEnd Never! {
     if slots.len() == 1 && at == 0 -> return ir_build_part(inputs, slots[0], queue, bell, 0)
     ended := IRBuildPartsEnd{built: 0, stop: "", job: -1}
     if at >= slots.len() -> return ended
@@ -542,7 +542,7 @@ ir_wave_found: fn(m: IRModule, part: Int, before: Int) -> [IRWaveJob] Never! {
 // Describes every part's variant types (ir_debug_variants), builds their
 // drop glue (ir_drop_glues), then the part's merge input
 // (ir_merge_prepare), a task per part from `at` on.
-ir_waves_glues: fn(inputs: Shared<IRWaveInputs>, slots: [Shared<IRWaveWorker>], at: Int) -> Int {
+ir_waves_glues: fn(inputs: Shared<IRWaveInputs>, slots: [Shared<IRWaveWorker>], at: Int) -> Int Never! {
     if at >= slots.len() -> return 0
     if at == slots.len() - 1 -> return ir_wave_glues(inputs, slots[at])
     done := 0

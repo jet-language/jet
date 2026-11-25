@@ -15,7 +15,7 @@ use jet_foundation.[
     TComptimeValue,
     compiler_threads_admit,
     compiler_threads_limit,
-    compiler_threads_failure_text,
+    compiler_threads_failed,
     compiler_threads_joined,
     compiler_threads_slot_taken,
     compiler_threads_taken,
@@ -1404,7 +1404,7 @@ sema_comptime_walk_watched: fn(walk: SemaComptimeWalk) -> Int {
         thread: task sema_comptime_walk_claimed(walk)
         made = thread.join() ?? {
             sema_comptime_walk_fail(walk)
-            panic(compiler_threads_failure_text(err))
+            compiler_threads_failed(err)
         }
     }
     made
@@ -1474,7 +1474,7 @@ sema_comptime_walk_stop_step: fn() -> SemaComptimeWalkStep {
 
 sema_comptime_walk_next_step: fn(walk: SemaComptimeWalk, preferred_slot: Int) -> SemaComptimeWalkStep {
     permit: walk.queue.guard_edit()
-    permit.wait(walk.changed, fn(value) { value.unclaimed > 0 || value.prep_next < value.prep_slots.len() || value.closed }) ?? panic("a comptime walk thread could not wait for its queue")
+    permit.wait(walk.changed, fn(value) { value.unclaimed > 0 || value.prep_next < value.prep_slots.len() || value.closed }) ?? return sema_comptime_walk_stop_step()
     if preferred_slot >= 0 && preferred_slot < permit.value.slot_queues.len() && permit.value.slot_state[preferred_slot] == 2 && permit.value.pending[preferred_slot] > 0 {
         cursor := permit.value.slot_next[preferred_slot]
         limit: permit.value.slot_queues[preferred_slot].len()
@@ -1584,11 +1584,12 @@ sema_comptime_walk_finish: fn(walk: SemaComptimeWalk, job: SemaComptimeFunctionJ
 }
 
 // The checks the threads made since the last take, in the order they were
-// made, waiting for one; empty once every queued job is checked or a thread
-// failed, when the walk has nothing more unless the driver queues more.
+// made, waiting for one; empty once every queued job is checked, a thread
+// failed or the wait was canceled, when the walk has nothing more unless the
+// driver queues more.
 sema_comptime_walk_take: fn(walk: SemaComptimeWalk) -> [SemaComptimeWalkDone] {
     permit: walk.queue.guard_edit()
-    permit.wait(walk.done_changed, fn(value) { value.done.len() > 0 || value.failed || (value.unclaimed <= 0 && value.busy == 0 && value.prep_pending == 0) }) ?? panic("the comptime walk could not wait for its checks")
+    permit.wait(walk.done_changed, fn(value) { value.done.len() > 0 || value.failed || (value.unclaimed <= 0 && value.busy == 0 && value.prep_pending == 0) }) ?? return [SemaComptimeWalkDone]{}
     if permit.value.failed -> return [SemaComptimeWalkDone]{}
     taken := [SemaComptimeWalkDone]{}
     loop permit.value.done.len() > 0 {

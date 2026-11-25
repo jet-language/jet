@@ -1577,7 +1577,7 @@ ir_x64_select_rows: fn(inputs: Shared<IRX64Inputs>, workers: Int, outputs: ^[IRX
     total: outputs.len()
     filled := 0
     loop {
-        parts := ir_x64_claimers(inputs, 0, workers, stops) ?? panic("the x64 selection threads failed")
+        parts := ir_x64_claimers(inputs, 0, workers, stops)
         loop parts.len() > 0 {
             part := parts.pop() ?? {
                 break
@@ -1621,7 +1621,7 @@ ir_x64_reclaim: fn(inputs: Shared<IRX64Inputs>, rows: ^^[Int]) {
 // Runs `tasks` claiming threads from seat `seat` on, one task each; returns
 // their selections. A stopped thread's function keeps its panic text in
 // `stops` (ir_x64_stopped).
-ir_x64_claimers: fn(inputs: Shared<IRX64Inputs>, seat: Int, tasks: Int, stops: ^[String]) -> [[IRX64Selected]] {
+ir_x64_claimers: fn(inputs: Shared<IRX64Inputs>, seat: Int, tasks: Int, stops: ^[String]) -> [[IRX64Selected]] Never! {
     if tasks <= 0 -> return [[IRX64Selected]]{}
     parts := [[IRX64Selected]]{}
     task.group ir_x64_threads {

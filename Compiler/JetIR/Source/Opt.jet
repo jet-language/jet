@@ -49,7 +49,7 @@
 // Selection reads every operand of an instruction before it writes the
 // instruction's result (the builder already emits `add s <- s, one`), so a
 // pass may make a result slot equal to an operand slot.
-use jet_foundation.[CompilerThreads, Interner, NameTable, Type, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_joined, compiler_threads_taken, compiler_threads_heaviest_first, compiler_threads_partition, compiler_threads_single, compiler_transfer_rows, name_column_set, name_column_value]
+use jet_foundation.[CompilerThreads, Interner, NameTable, Type, compiler_take_rows, compiler_threads_admit, compiler_threads_joined, compiler_threads_taken, compiler_threads_heaviest_first, compiler_threads_partition, compiler_threads_single, compiler_transfer_rows, name_column_set, name_column_value]
 
 // What the optimizer runs: the level, whether inlining keeps to the O1
 // limits at any level (`small`, the build option), which callees inlining
@@ -510,7 +510,7 @@ ir_opt_bodies: fn(view: IRModule, functions: ^[IRFunction], work: IROptBodyWork,
         return
     }
     claims: IROptClaims{cells: ir_opt_cells(functions), order: compiler_threads_heaviest_first(weights), next: 0}
-    parts := ir_opt_body_claimers(view, claims, work, options, lint, pass, workers) ?? panic("the IR body threads failed")
+    parts := ir_opt_body_claimers(view, claims, work, options, lint, pass, workers)
     loop id in 0..<count -> functions.push(ir_opt_cell_take(claims.cells[id]))
     kept := [IROptBodyDone]{}
     loop at in 0..<parts.len() {
@@ -593,7 +593,7 @@ ir_opt_bodies_part_run: fn(view: IRModule, functions: ^^[IRFunction], work: IROp
 // Runs `tasks` claiming threads, one task each; returns each one's part.
 // Every thread reads the view, the claims, the context and the options in
 // place: nothing writes or moves them before the group joins.
-ir_opt_body_claimers: fn(view: IRModule, claims: IROptClaims, work: IROptBodyWork, options: IROptOptions, lint: IRLintContext, pass: String, tasks: Int) -> [IROptBodyPart] {
+ir_opt_body_claimers: fn(view: IRModule, claims: IROptClaims, work: IROptBodyWork, options: IROptOptions, lint: IRLintContext, pass: String, tasks: Int) -> [IROptBodyPart] Never! {
     parts := [IROptBodyPart]{}
     if tasks <= 0 -> return parts
     task.group ir_opt_body_threads {
@@ -948,7 +948,7 @@ ir_opt_prepare: fn(functions: ^[IRFunction], weights: [Int], glue: ^^[Int], ligh
     }
     slots.reverse()
     table: Shared{IROptGlue{table: glue.move(), light: light.move(), functions: count}}
-    direct: ir_opt_preparers(slots, table, 0) ?? panic("the IR preparing threads failed")
+    direct: ir_opt_preparers(slots, table, 0)
     loop slot in slots {
         held := slot.guard_edit()
         functions.extend(compiler_take_rows<IRFunction>(held.value.functions))
@@ -970,19 +970,15 @@ ir_opt_prepare_function: fn(f: ^IRFunction, glue: [Int], light: [Bool]) -> Int N
 }
 
 // Runs a preparing thread per slot from `at`; returns the direct calls made.
-ir_opt_preparers: fn(slots: [Shared<IROptPart>], table: Shared<IROptGlue>, at: Int) -> Int {
+ir_opt_preparers: fn(slots: [Shared<IROptPart>], table: Shared<IROptGlue>, at: Int) -> Int Never! {
     if at >= slots.len() -> return 0
     direct := 0
     task.group ir_opt_prepare_threads {
         head: task ir_opt_prepare_part(slots[at], table)
         direct = ir_opt_preparers(slots, table, at + 1)
-        direct += head.join() ?? ir_opt_prepare_stopped(err)
+        direct += compiler_threads_joined(head)
     }
     direct
-}
-
-ir_opt_prepare_stopped: fn(failure: TaskFailure) -> Int Never! {
-    panic(compiler_threads_failure_text(failure))
 }
 
 ir_opt_prepare_part: fn(slot: Shared<IROptPart>, table: Shared<IROptGlue>) -> Int {
@@ -1051,7 +1047,7 @@ ir_opt_split_module: fn(m: ^IRModule, functions: ^[IRFunction], threads: Compile
     compiler_transfer_rows<IRType>(view.types, m.types)
     compiler_transfer_rows<Interner>(view.interner, m.interner)
     types: Shared{IROptTypes{views: [IRModule]{view.move()}}}
-    _: ir_opt_splitters(slots, types, 0) ?? panic("the IR splitting threads failed")
+    _: ir_opt_splitters(slots, types, 0)
     loop slot in slots {
         held := slot.guard_edit()
         at: functions.len()
@@ -1078,13 +1074,13 @@ IROptTypes: struct {
 
 // Runs a splitting thread per slot from `at`; returns how many functions
 // they split.
-ir_opt_splitters: fn(slots: [Shared<IROptSplitPart>], types: Shared<IROptTypes>, at: Int) -> Int {
+ir_opt_splitters: fn(slots: [Shared<IROptSplitPart>], types: Shared<IROptTypes>, at: Int) -> Int Never! {
     if at >= slots.len() -> return 0
     split := 0
     task.group ir_opt_split_threads {
         head: task ir_opt_split_part(slots[at], types)
         split = ir_opt_splitters(slots, types, at + 1)
-        split += head.join() ?? ir_opt_prepare_stopped(err)
+        split += compiler_threads_joined(head)
     }
     split
 }
@@ -1447,7 +1443,7 @@ ir_opt_scheduled: fn(m: ^IRModule, functions: ^[IRFunction], keys: ^^[String], o
     cells: ir_opt_cells(functions)
     view: ir_opt_view(m, keys)
     graph: Shared{IROptGraph{views: [IRModule]{view.move()}, keys: keys.move(), recursive: order.recursive.copy(), sites: sites.move(), options: options.copy(), lint: lint.move(), cells: cells.move(), sizes: sizes.move(), pending: pending.move(), ranks: ranks.move(), callee_start: callee_start.move(), callees: callees.move(), caller_start: caller_start.move(), callers: callers.move(), queue: Shared{IROptQueue{heap: heap.move(), claimed: 0, count: count, failed: false}}, changed: Condition.new()}}
-    parts := ir_opt_schedulers(graph, workers) ?? panic("the IR optimizing threads failed")
+    parts := ir_opt_schedulers(graph, workers)
     loop at in 0..<parts.len() -> ir_opt_report_add(report, parts[at])
     held := graph.guard_edit()
     bodies := [[IRFunction]]{}
@@ -1460,21 +1456,16 @@ ir_opt_scheduled: fn(m: ^IRModule, functions: ^[IRFunction], keys: ^^[String], o
 }
 
 // Runs `tasks` optimizing threads, one task each; returns each one's report.
-ir_opt_schedulers: fn(graph: Shared<IROptGraph>, tasks: Int) -> [IROptReport] {
+ir_opt_schedulers: fn(graph: Shared<IROptGraph>, tasks: Int) -> [IROptReport] Never! {
     if tasks <= 0 -> return [IROptReport]{}
     parts := [IROptReport]{}
     task.group ir_opt_threads {
         head: task ir_opt_scheduled_thread(graph)
         parts = ir_opt_schedulers(graph, tasks - 1)
-        part: head.join() ?? ir_opt_stopped(err)
+        part: compiler_threads_joined(head)
         parts.push(part)
     }
     parts
-}
-
-// A stopped optimizing thread: its panic text, re-raised unchanged.
-ir_opt_stopped: fn(failure: TaskFailure) -> IROptReport Never! {
-    panic(compiler_threads_failure_text(failure))
 }
 
 // One thread: claims the ready function of the highest rank until every

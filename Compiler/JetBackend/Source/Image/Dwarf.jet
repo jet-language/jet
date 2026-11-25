@@ -1043,7 +1043,7 @@ dwarf_info: fn(sections: ^X64DwarfSections, program: X64ObjectModule, functions:
         bounds: compiler_threads_partition(weights, workers)
         inputs: Shared{DwarfInfoShared{program: program, functions: functions, debug: debug, offsets: offsets, sizes: sizes, type_offsets: type_offsets, symbols: symbols, widths: widths}}
         parts: loop part in 0..<(bounds.len() - 1) -> Shared{DwarfInfoPart{start: bounds[part], end: bounds[part + 1], outputs: [DwarfInfoRows]{}}}
-        _ := dwarf_info_parts(inputs, parts, 0) ?? panic("the DWARF info threads failed")
+        _ := dwarf_info_parts(inputs, parts, 0)
         loop part in parts -> taken.push(dwarf_info_part_take(part))
     }
     // The unit's length counts every part and its closing null entry; an
@@ -1260,7 +1260,7 @@ DwarfInfoRows: struct {
 
 // Builds `parts[from..]`, one task per part and the last part on this
 // thread; returns how many parts were built.
-dwarf_info_parts: fn(inputs: Shared<DwarfInfoShared>, parts: [Shared<DwarfInfoPart>], from: Int) -> Int {
+dwarf_info_parts: fn(inputs: Shared<DwarfInfoShared>, parts: [Shared<DwarfInfoPart>], from: Int) -> Int Never! {
     if from >= parts.len() - 1 -> return dwarf_info_part(inputs, parts[from])
     built := 0
     task.group dwarf_info_threads {

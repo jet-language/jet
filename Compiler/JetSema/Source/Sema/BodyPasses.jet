@@ -24,7 +24,7 @@ use jet_foundation.[
     compiler_take_rows,
     compiler_threads_admit,
     compiler_threads_limit,
-    compiler_threads_failure_text,
+    compiler_threads_failed,
     compiler_threads_joined,
     compiler_threads_taken,
     symbol_table_key,
@@ -687,10 +687,10 @@ sema_check_body_stream_end: fn(handle: SemaStreamHandle, failed: Bool) {
 }
 
 // Waits until stream module `stream_module`'s jobs are all published; false
-// when a stream thread failed first.
+// when a stream thread failed first, or the wait was canceled.
 sema_check_body_stream_await: fn(cells: SemaStreamCells, stream_module: Int, changed: Condition) -> Bool {
     held: cells.outs[stream_module].guard_edit()
-    held.wait(changed, fn(value) { value.ready || value.failed }) ?? panic("a body stream's lead could not wait for its threads")
+    held.wait(changed, fn(value) { value.ready || value.failed }) ?? return false
     !held.value.failed
 }
 
@@ -1058,7 +1058,7 @@ sema_check_body_stream_parts: fn(shared: Shared<SemaCheckShared>, cells: SemaStr
                 thread: task sema_check_body_stream_part(shared, cells, handle, args, kind)
                 _ := thread.join() ?? {
                     sema_check_body_stream_stop(cells, handle, true)
-                    panic(compiler_threads_failure_text(err))
+                    compiler_threads_failed(err)
                 }
             }
         }
@@ -1682,10 +1682,11 @@ sema_check_body_stream_queue_lead: fn(handle: SemaStreamHandle, stream_module: I
 
 // A body stream thread's next step: it prioritizes finalizing a module whose
 // body jobs are done (releasing scopes early), else preparing an admitted
-// module, else claiming the next open body job; stops once the stream stops.
+// module, else claiming the next open body job; stops once the stream stops
+// or its wait is canceled.
 sema_check_body_stream_next: fn(handle: SemaStreamHandle, preferred: Int) -> SemaStreamStep {
     held: handle.stream.guard_edit()
-    held.wait(handle.work, fn(value) { sema_check_body_stream_has_step(value) }) ?? panic("a body stream's thread could not wait for its work")
+    held.wait(handle.work, fn(value) { sema_check_body_stream_has_step(value) }) ?? return sema_check_body_stream_step(SemaStreamAction.Stop)
     if held.value.failed || held.value.finished {
         return sema_check_body_stream_step(SemaStreamAction.Stop)
     }
@@ -1706,7 +1707,7 @@ sema_check_body_stream_next: fn(handle: SemaStreamHandle, preferred: Int) -> Sem
 
 sema_check_body_stream_lead_parallel_step: fn(handle: SemaStreamHandle, preferred: Int) -> SemaStreamStep {
     held: handle.stream.guard_edit()
-    held.wait(handle.work, fn(value) { sema_check_body_stream_lead_has_step(value) }) ?? panic("a body stream's lead could not wait for its work")
+    held.wait(handle.work, fn(value) { sema_check_body_stream_lead_has_step(value) }) ?? return sema_check_body_stream_step(SemaStreamAction.Stop)
     if held.value.failed || held.value.finished {
         return sema_check_body_stream_step(SemaStreamAction.Stop)
     }
@@ -1794,7 +1795,7 @@ sema_check_body_stream_open_module: fn(stream: SemaBodyStream, preferred: Int) -
 // job, else wait for its claimed jobs.
 sema_check_body_stream_lead_step: fn(handle: SemaStreamHandle, stream_module: Int) -> SemaStreamStep {
     held: handle.stream.guard_edit()
-    held.wait(handle.work, fn(value) { value.failed || value.stages[stream_module] != SemaStreamStage.Preparing }) ?? panic("a body stream's lead could not wait for its threads")
+    held.wait(handle.work, fn(value) { value.failed || value.stages[stream_module] != SemaStreamStage.Preparing }) ?? return sema_check_body_stream_step(SemaStreamAction.Stop)
     if held.value.failed -> return sema_check_body_stream_step(SemaStreamAction.Stop)
     if held.value.stages[stream_module] == SemaStreamStage.Waiting {
         held.value.prep_next = stream_module + 1

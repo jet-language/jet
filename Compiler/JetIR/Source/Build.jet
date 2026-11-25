@@ -1051,7 +1051,7 @@ ir_program_declared: fn(type_defs: ^^[TTypeDef], impl_defs: ^^[TImplDef], consta
 // implementation methods and trait method tables that name function rows.
 // `decls` is the run's declaration table their direct calls name.
 // The declarations stay, so one declared program serves many builds.
-ir_program_bind_parallel: fn(p: ^IRProgram, owned: [FnBody], decls: DeclTable, workers: Int, threads: CompilerThreads) -> IRBodyScanPart {
+ir_program_bind_parallel: fn(p: ^IRProgram, owned: [FnBody], decls: DeclTable, workers: Int, threads: CompilerThreads) -> IRBodyScanPart Never! {
     symbols_ref: p.symbols
     interner_ref: p.interner
     type_rows_keys_ref: p.type_rows_keys
@@ -1163,7 +1163,7 @@ ir_program_bind: fn(p: ^IRProgram, functions: ^^[FnBody], decls: DeclTable, thre
     if !skip_signature_unions -> ir_add_signature_union_types(p.types, p.type_rows_keys, p.type_rows, owned, p.interner)
     workers: compiler_threads_admit(threads, owned.len(), owned.len(), 1024, 0, 0)
     if workers > 1 {
-        scanned := ir_program_bind_parallel(p, owned, decls, workers, threads) ?? panic("the IR program bind threads failed")
+        scanned := ir_program_bind_parallel(p, owned, decls, workers, threads)
         p.functions = owned.move()
         p.quiet_points = ir_quiet_points(p)
         ir_program_scan_bodies_apply(p, scanned.spawns, scanned.boxed, scanned.print)
@@ -1379,7 +1379,7 @@ ir_bind_decl_range: fn(functions: [FnBody], decls: DeclTable, symbols: SymbolTab
     IRBindDeclPart{decl_indices: decl_indices.move(), fn_rows: fn_rows.move()}
 }
 
-ir_bind_decl_threads: fn(functions: [FnBody], decls: DeclTable, symbols: SymbolTable, starts: [Int], ends: [Int], at: Int) -> [IRBindDeclPart] {
+ir_bind_decl_threads: fn(functions: [FnBody], decls: DeclTable, symbols: SymbolTable, starts: [Int], ends: [Int], at: Int) -> [IRBindDeclPart] Never! {
     if at >= starts.len() -> return [IRBindDeclPart]{}
     if at + 1 == starts.len() {
         return [IRBindDeclPart]{ir_bind_decl_range(functions, decls, symbols, starts[at], ends[at])}
@@ -1394,7 +1394,7 @@ ir_bind_decl_threads: fn(functions: [FnBody], decls: DeclTable, symbols: SymbolT
     out
 }
 
-ir_bind_decl_parts: fn(functions: [FnBody], decls: DeclTable, symbols: SymbolTable, workers: Int) -> [IRBindDeclPart] {
+ir_bind_decl_parts: fn(functions: [FnBody], decls: DeclTable, symbols: SymbolTable, workers: Int) -> [IRBindDeclPart] Never! {
     count: functions.len()
     starts := [Int]{}
     ends := [Int]{}
@@ -1576,7 +1576,7 @@ ir_body_scan_range: fn(functions: [FnBody], check_boxed: [Bool], interner: Inter
     IRBodyScanPart{spawns: spawns.move(), boxed: boxed.move(), print: print}
 }
 
-ir_body_scan_parts: fn(functions: [FnBody], check_boxed: [Bool], interner: Interner, bounds: [Int], part: Int) -> [IRBodyScanPart] {
+ir_body_scan_parts: fn(functions: [FnBody], check_boxed: [Bool], interner: Interner, bounds: [Int], part: Int) -> [IRBodyScanPart] Never! {
     if part >= bounds.len() - 2 {
         return [IRBodyScanPart]{ir_body_scan_range(functions, check_boxed, interner, bounds[part], bounds[part + 1])}
     }
@@ -1620,7 +1620,7 @@ ir_body_scan_collect: fn(functions: [FnBody], check_boxed: [Bool], interner: Int
         }
     } else {
         bounds: compiler_threads_partition(weights, workers)
-        parts := ir_body_scan_parts(functions, check_boxed, interner, bounds, 0) ?? panic("the IR body scan threads failed")
+        parts := ir_body_scan_parts(functions, check_boxed, interner, bounds, 0)
         loop part in parts.move() {
             loop s in part.spawns -> spawns.push(s)
             loop c in part.boxed.move() -> candidates.push(c)
