@@ -1,7 +1,8 @@
 // `jet.runtime.rt` (#6615): the observations and cancellation of a core.rt
-// realtime callback stream, in Jet types. Each member is a runtime binding
-// (Guest.jet sema_guest_runtime_binding) of the runtime export that is its one
-// body (Realtime.jet). Each is `priv`: only core.rt calls them.
+// realtime callback stream, in Jet types, and the coded stop of a Core
+// library. Each member is a runtime binding (Guest.jet
+// sema_guest_runtime_binding) of the runtime export that is its one body
+// (Realtime.jet, Trap.jet). Each is `priv`: only Core calls them.
 rt: module {
     // The stream's completed-callback facts.
     #Import(c) priv receipt: fn(stream: RealtimeStream) -> RealtimeReceipt = "jet_rt_receipt"
@@ -14,4 +15,9 @@ rt: module {
 
     // When the stream's next callback is due.
     #Import(c) priv next_deadline: fn(stream: RealtimeStream) -> Instant = "jet_rt_next_deadline"
+
+    // Stops the program with the registered row `code`: `message` renders
+    // the row's `what`, and the runtime adds the row's Why/Fix and gives
+    // the stop its exit status.
+    #Import(c) priv coded_stop: fn(code: String, message: String) -> Never = "jet_rt_coded_stop"
 }
