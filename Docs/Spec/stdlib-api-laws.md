@@ -540,8 +540,9 @@ every manifest entry.
 
 ### Resident environment column transport
 
-The interpreter and resident host bind the canonical `core.sys.__env_columns`
-and `__startup_env_columns` leaves, not the retired count/name/value transport.
+The interpreter and resident host bind the canonical `jet.runtime.sys`
+`env_columns` and `startup_env_columns` leaves, not the retired
+count/name/value transport.
 Logical columns come from one snapshot under the existing logical-cell lock;
 startup columns cache immutable host `vars_os` separately. Both preserve
 platform encoded name/value bytes and let source `env_columns` pair them.

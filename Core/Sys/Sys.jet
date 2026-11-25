@@ -61,7 +61,7 @@ usize_max: fn() -> U64 Never! { SYS_TARGET_USIZE_MAX }
 
 // Source owns validation, Unicode policy and child overlays. The existing
 // process cell remains the sole writer until the pinned Shared root lands.
-get: fn(name: String) -[Env]> String? Never! { decode_host_env(core.sys.__env_value(name)) }
+get: fn(name: String) -[Env]> String? Never! { decode_host_env(sys_rt.env_value(name)) }
 
 set: fn(name: String, value: String) -[Env]> Never! {
     if validate_env_name(name) == {
@@ -100,13 +100,13 @@ environment: fn() -[Env]> [String:String] Never! {
 
 // Immutable host bytes are not the logical process environment.
 priv __startup_env: fn() -> [{name: [U8], value: [U8]}] Never! {
-    env_columns(core.sys.__startup_env_columns())
+    env_columns(sys_rt.startup_env_columns())
 }
 
 // Snapshot once, under the existing host cell's lock. No per-name rereads.
-priv __env_snapshot: fn() -> [{name: [U8], value: [U8]}] Never! { env_columns(core.sys.__env_columns()) }
+priv __env_snapshot: fn() -> [{name: [U8], value: [U8]}] Never! { env_columns(sys_rt.env_columns()) }
 
-priv __env_present: fn(name: String) -[Env]> Bool Never! { core.sys.__env_value(name) != None }
+priv __env_present: fn(name: String) -[Env]> Bool Never! { sys_rt.env_value(name) != None }
 
 env_columns: fn(columns: [[U8]]) -> [{name: [U8], value: [U8]}] Never! {
     entries := [{name: [U8], value: [U8]}]{}
@@ -178,7 +178,7 @@ validate_env_name: fn(name: String) EnvError! {
 }
 
 env_key_compare: fn(left: [U8], right: [U8]) -> Int Never! {
-    core.sys.__env_key_compare(left, right)
+    sys_rt.env_key_compare(left, right)
 }
 
 entry_index: fn(entries: [{name: [U8], value: [U8]}], key: [U8]) -> Int Never! {

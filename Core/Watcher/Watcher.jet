@@ -199,7 +199,7 @@ impl WatchHandle {
         number: rt.number(self)
         pid: if target == 1 -> number else -> 0
         port: if target == 2 -> number else -> 0
-        bus: core.watcher.__event(self)
+        bus: rt.event(self)
         out := [WatchEvent]{}
         at := 0
         loop at + 2 < texts.len() {
@@ -214,11 +214,11 @@ impl WatchHandle {
     events: fn(self) -[IO]> [WatchEvent] Never! { self.poll() }
 
     on: fn(self, scope: EventScope, handler: fn(WatchEvent)) -> Subscription Never! {
-        core.watcher.__event(self).on(scope, handler)
+        rt.event(self).on(scope, handler)
     }
 
     once: fn(self, scope: EventScope, handler: fn(WatchEvent)) -> Subscription Never! {
-        core.watcher.__event(self).once(scope, handler)
+        rt.event(self).once(scope, handler)
     }
 
     cancel: fn(self) -[IO]> Never! { rt.cancel(self) }

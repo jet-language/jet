@@ -57,14 +57,14 @@ signals: fn(kinds: [ProcessSignal]) -[Exec]> SignalSubscription IOError! {
     }
     id: rt.signal_open(false)
     loop kind in kinds {
-        added: core.process.__signal_add(id, signal_number(kind), kind)
+        added: rt.signal_add(id, signal_number(kind), kind)
         if !added.available || added.errno != 0 {
             rt.signal_close(id)
             if !added.available -> return Err(IOError.Unsupported(context))
             return Err(IOError.Other(IOContext{operation: .Resolve, resource: Val("process.signals"), os_code: Val(added.errno), cause: Val("the host refused the signal handler")}))
         }
     }
-    Ok(SignalSubscription{id: id, receiver: core.process.__signal_receiver(id)})
+    Ok(SignalSubscription{id: id, receiver: rt.signal_receiver(id)})
 }
 
 // An argv-safe shell command. `Sh{"cmd {value}"}` splits its literal text on
@@ -237,7 +237,7 @@ cmd: fn(argv: [String]) -[Exec]> ProcessSpec Never! {
     has_stdin: if fields.stdin == .Val(_) -> true else -> false
     has_terminal: if fields.terminal == .Val(_) -> true else -> false
     #Unsafe("transfer a fully initialized Jet process plan into the temporary native ProcessSpec carrier; paired environment columns have equal length") {
-        return core.process.__spec_fields(
+        return rt.spec_fields(
             fields.argv,
             fields.cwd != None,
             fields.cwd ?? "",
@@ -356,7 +356,7 @@ exit_unmapped: fn(code: Int) -[Exec.Exit]> Never Never! {
 /// the program drains to its end. `signals` takes a signal as a value instead.
 on_signal: fn(signal: ProcessSignal) -[Exec]> Never! {
     id: rt.signal_open(true)
-    added: core.process.__signal_add(id, signal_number(signal), signal)
+    added: rt.signal_add(id, signal_number(signal), signal)
     if !added.available -> panic("core.process.on_signal: signals are unsupported on this host")
     if added.errno != 0 {
         panic("core.process.on_signal: the host refused the signal handler (os error {added.errno})")
@@ -922,11 +922,11 @@ default_fields: fn(argv: [String]) -> ProcessFields Never! {
 // `loop line in child.stdout.lines()` calls for each line. They wait on the
 // child execution boundary, not FS.
 #Builtin.Role(.ProcessStdoutLine) priv stdout_next_line: fn(stream: ProcessStdoutStream) -[Exec, Time.Wait]> String? IOError! {
-    pipe_line(core.process.__stdout_line_bytes(stream))
+    pipe_line(rt.stdout_line_bytes(stream))
 }
 
 #Builtin.Role(.ProcessStderrLine) priv stderr_next_line: fn(stream: ProcessStderrStream) -[Exec, Time.Wait]> String? IOError! {
-    pipe_line(core.process.__stderr_line_bytes(stream))
+    pipe_line(rt.stderr_line_bytes(stream))
 }
 
 /// A child's output pipe read in pieces: `loop chunk in child.stdout.chunks(size)`
