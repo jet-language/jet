@@ -183,14 +183,14 @@ realtime_join: fn(stream: I64) {
 
 #Export(c) jet_rt_receipt: fn(stream: I64) -> I64 {
     receipt: jet_rt_alloc(RT_RECEIPT_BYTES, I64{8})
-    sync_store(receipt, sync_load(wrapping(stream + RT_RATE)))
-    sync_store(wrapping(receipt + I64{8}), sync_load(wrapping(stream + RT_FRAMES)))
-    sync_store(wrapping(receipt + I64{16}), sync_load(wrapping(stream + RT_CALLBACKS)))
-    sync_store(wrapping(receipt + I64{24}), sync_load(wrapping(stream + RT_COMPLETED_FRAMES)))
-    sync_store(wrapping(receipt + I64{32}), sync_load(wrapping(stream + RT_MISSED)))
-    sync_store(wrapping(receipt + I64{40}), sync_load(wrapping(stream + RT_MAX_LATENESS)))
-    sync_store(wrapping(receipt + I64{48}), sync_load(wrapping(stream + RT_START_IDENTITY)))
-    sync_store(wrapping(receipt + I64{56}), sync_load(wrapping(stream + RT_END)))
+    sync_store(wrapping(receipt + RT_RECEIPT_REQUESTED_RATE_HZ), sync_load(wrapping(stream + RT_RATE)))
+    sync_store(wrapping(receipt + RT_RECEIPT_REQUESTED_FRAMES), sync_load(wrapping(stream + RT_FRAMES)))
+    sync_store(wrapping(receipt + RT_RECEIPT_COMPLETED_CALLBACKS), sync_load(wrapping(stream + RT_CALLBACKS)))
+    sync_store(wrapping(receipt + RT_RECEIPT_COMPLETED_FRAMES), sync_load(wrapping(stream + RT_COMPLETED_FRAMES)))
+    sync_store(wrapping(receipt + RT_RECEIPT_MISSED), sync_load(wrapping(stream + RT_MISSED)))
+    sync_store(wrapping(receipt + RT_RECEIPT_MAX_LATENESS_NS), sync_load(wrapping(stream + RT_MAX_LATENESS)))
+    sync_store(wrapping(receipt + RT_RECEIPT_START_IDENTITY), sync_load(wrapping(stream + RT_START_IDENTITY)))
+    sync_store(wrapping(receipt + RT_RECEIPT_END_IDENTITY), sync_load(wrapping(stream + RT_END)))
     receipt
 }
 
@@ -383,45 +383,45 @@ rt_realtime_worker_address: fn() -> I64 {
     g: jet_int_owned_to_i64(start)
     h: jet_int_owned_to_i64(end)
     receipt: jet_rt_alloc(RT_RECEIPT_BYTES, I64{8})
-    sync_store(receipt, a)
-    sync_store(wrapping(receipt + I64{8}), b)
-    sync_store(wrapping(receipt + I64{16}), c)
-    sync_store(wrapping(receipt + I64{24}), d)
-    sync_store(wrapping(receipt + I64{32}), e)
-    sync_store(wrapping(receipt + I64{40}), f)
-    sync_store(wrapping(receipt + I64{48}), g)
-    sync_store(wrapping(receipt + I64{56}), h)
+    sync_store(wrapping(receipt + RT_RECEIPT_REQUESTED_RATE_HZ), a)
+    sync_store(wrapping(receipt + RT_RECEIPT_REQUESTED_FRAMES), b)
+    sync_store(wrapping(receipt + RT_RECEIPT_COMPLETED_CALLBACKS), c)
+    sync_store(wrapping(receipt + RT_RECEIPT_COMPLETED_FRAMES), d)
+    sync_store(wrapping(receipt + RT_RECEIPT_MISSED), e)
+    sync_store(wrapping(receipt + RT_RECEIPT_MAX_LATENESS_NS), f)
+    sync_store(wrapping(receipt + RT_RECEIPT_START_IDENTITY), g)
+    sync_store(wrapping(receipt + RT_RECEIPT_END_IDENTITY), h)
     receipt
 }
 
 #Export(c) jet_rt_record_get_jet_realtime_receipt_requested_rate_hz: fn(receipt: I64) -> I64 {
-    jet_int_owned_from_i64(sync_load(receipt))
+    jet_int_owned_from_i64(sync_load(wrapping(receipt + RT_RECEIPT_REQUESTED_RATE_HZ)))
 }
 
 #Export(c) jet_rt_record_get_jet_realtime_receipt_requested_frames: fn(receipt: I64) -> I64 {
-    jet_int_owned_from_i64(sync_load(wrapping(receipt + I64{8})))
+    jet_int_owned_from_i64(sync_load(wrapping(receipt + RT_RECEIPT_REQUESTED_FRAMES)))
 }
 
 #Export(c) jet_rt_record_get_jet_realtime_receipt_completed_callbacks: fn(receipt: I64) -> I64 {
-    jet_int_owned_from_i64(sync_load(wrapping(receipt + I64{16})))
+    jet_int_owned_from_i64(sync_load(wrapping(receipt + RT_RECEIPT_COMPLETED_CALLBACKS)))
 }
 
 #Export(c) jet_rt_record_get_jet_realtime_receipt_completed_frames: fn(receipt: I64) -> I64 {
-    jet_int_owned_from_i64(sync_load(wrapping(receipt + I64{24})))
+    jet_int_owned_from_i64(sync_load(wrapping(receipt + RT_RECEIPT_COMPLETED_FRAMES)))
 }
 
 #Export(c) jet_rt_record_get_jet_realtime_receipt_missed: fn(receipt: I64) -> I64 {
-    jet_int_owned_from_i64(sync_load(wrapping(receipt + I64{32})))
+    jet_int_owned_from_i64(sync_load(wrapping(receipt + RT_RECEIPT_MISSED)))
 }
 
 #Export(c) jet_rt_record_get_jet_realtime_receipt_max_lateness_ns: fn(receipt: I64) -> I64 {
-    jet_int_owned_from_i64(sync_load(wrapping(receipt + I64{40})))
+    jet_int_owned_from_i64(sync_load(wrapping(receipt + RT_RECEIPT_MAX_LATENESS_NS)))
 }
 
 #Export(c) jet_rt_record_get_jet_realtime_receipt_start_identity: fn(receipt: I64) -> I64 {
-    jet_int_owned_from_i64(sync_load(wrapping(receipt + I64{48})))
+    jet_int_owned_from_i64(sync_load(wrapping(receipt + RT_RECEIPT_START_IDENTITY)))
 }
 
 #Export(c) jet_rt_record_get_jet_realtime_receipt_end_identity: fn(receipt: I64) -> I64 {
-    jet_int_owned_from_i64(sync_load(wrapping(receipt + I64{56})))
+    jet_int_owned_from_i64(sync_load(wrapping(receipt + RT_RECEIPT_END_IDENTITY)))
 }
