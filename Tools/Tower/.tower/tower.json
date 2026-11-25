@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7000,
-    "rev": 113995,
+    "rev": 114000,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -29101,6 +29101,45 @@
             "profile": "ui",
             "filter": "link_field_outlives_place"
           }
+        },
+        {
+          "n": 11,
+          "text": "Safety (I1): a link to a place handed through a call cannot outlive that place. Three cases are accepted today with no check, and each leaves a dangling link in safe code: a callee storing a link parameter into another parameter's record (attach(r: ^Rec, e: @Env) { r.env = e } called as attach(r, @local)); a link pushed into a collection that outlives its place (list.push(@x) through a ^[@T] parameter or an outer list); and returning a link to a local (return @local). Sema must track which parameters each function's links flow into (per-function link facts), so that every such flow is proven or refused with a registered diagnostic and a UI snapshot per case. Found by the c10 work (4500-c10-link-outlives-place, which closes only plain stores).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T03:52:10.365Z",
+          "proof": {
+            "profile": "ui",
+            "filter": "link_through_call"
+          }
+        },
+        {
+          "n": 12,
+          "text": "Cost: a kept link that never crosses a task pays no atomic reference counting. After c9 (4500-c9-link-record-crosses-task), every kept link takes the atomic rc_* path on each retain and release, including single-threaded code. Each link block must pay atomic operations only once it crosses, either through a promotion bit in the link block header (BuildLinks.jet in JetIR, Links.jet in JetRuntime) or through a static proof of no crossing. A paired two-program cell shows single-threaded link retain/release at the plain-RC cost and a crossing program still correct on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T04:19:31.738Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "live_link_promotion"
+          }
+        },
+        {
+          "n": 13,
+          "text": "Diagnostics: detaching a task that captured a live link reports link wording, not E1106's \"captured a `view` borrow\". This means a link variant of the E1106 text, or a separate registered code, with what/why/fix and a UI snapshot.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T04:19:32.635Z",
+          "proof": {
+            "profile": "ui",
+            "filter": "link_capture_detach"
+          }
         }
       ],
       "refs": [],
@@ -29110,9 +29149,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-04T00:21:42.477Z",
-      "updated": "2026-11-25T03:12:04.824Z",
+      "updated": "2026-11-25T04:19:32.635Z",
       "updatedBy": "Orchestrator",
-      "criteriaLastN": 10
+      "criteriaLastN": 13
     },
     {
       "id": "c0p6h37r",
@@ -74842,6 +74881,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-25",
+          "by": "Orchestrator",
+          "text": "c6 finding from the dead-key UI snapshot (Tests/UI/dead_key_circumflex_type.stderr, batch 41): when a parameter type is a dead-key composite such as `x: Înt`, the write mark is lost, so `x += 1` in the body also reports Jet.ImmutableAssignment. That follow-on error says \"`x` was made with `:`\" and suggests `x := ...`, which is wrong for a parameter. The c6 work should suppress this follow-on after a dead-key E0119 and correct the parameter wording, then update the snapshot."
+        },
+        {
           "at": "2026-11-24",
           "by": "Orchestrator",
           "text": "Correction: the migration commit on dev is f5d6176d36."
@@ -74937,7 +74981,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-24T13:44:02.626Z",
-      "updated": "2026-11-25T01:35:24.603Z",
+      "updated": "2026-11-25T03:26:03.163Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 6
     },
@@ -74959,6 +75003,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-25",
+          "by": "Orchestrator",
+          "text": "H (c8) status on dev cba553447ac: the table Tools/Agent/roots.env, its three readers and the three byte-identical Roots.jet copies under Tools/Agent hold, and Tests/Guards/tool_roots.jet passes. It only scans Tools/Agent, though. Outside it, about 20 sites in 18 Jet tools still restate the defaults (jet-dev, jet-seeds): Tools/CI/{AgentWorkloads,CompiledWorkloadPeerLauncher,CompiledWorkloadPeerLauncherCheck,CompiledWorkloads}.jet; Tools/Gauntlet/PortBars.jet; Tools/Gauntlet/Kit/Source/PerformanceSurface.jet; Tools/Gauntlet/Entries/CoreLibCompare/check.jet; Tools/JetpackInfra/TestToolchainUpdate.jet; Tools/Perf/{CodegenCeiling,WebBundleCheck}.jet; Tools/Perf/Scaling/Gate/Source/Gate.jet; Tools/Perf/Selfhost/Run/run.jet; Tools/Perf/{CoreLibCompare,EnumCodecBench}/run.jet; and shell text in Tools/Perf/{CoreActivation,EnumCodec/JetAdapter,EnumsetBench,FunctionBoundary/Run,HelloCompile/Bench,JetcProfile/Live}/run.jet; plus Tools/Release/Seed.jet and Tools/AgentEval/RunColdContext.jet. c8 stays open until they read the table and the guard covers all of Tools/. The duplicated-scripts part of c8 has no recorded sweep yet. The shebang import defect (a #! first line breaks sibling file imports) is still open."
+        },
         {
           "at": "2026-11-25",
           "by": "Orchestrator",
@@ -75374,7 +75423,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-24T17:01:07.086Z",
-      "updated": "2026-11-25T03:08:49.889Z",
+      "updated": "2026-11-25T03:20:25.307Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 17
     }
@@ -138705,6 +138754,62 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-25T04:19:32.635Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c0s8gang",
+      "note": "12 criteria, soft limit 6: Wording follow-up of c9 in the same link area"
+    },
+    {
+      "at": "2026-11-25T04:19:32.635Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0s8gang",
+      "note": "#13 Diagnostics: detaching a task that captured a live link repo"
+    },
+    {
+      "at": "2026-11-25T04:19:31.738Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c0s8gang",
+      "note": "11 criteria, soft limit 6: Cost follow-up of c9 in the same link area; the follow-up rule puts it on the owning card"
+    },
+    {
+      "at": "2026-11-25T04:19:31.738Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0s8gang",
+      "note": "#12 Cost: a kept link that never crosses a task pays no atomic r"
+    },
+    {
+      "at": "2026-11-25T03:52:10.365Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c0s8gang",
+      "note": "10 criteria, soft limit 6: Follow-up of c10 in the same link-safety area; the follow-up rule puts it on the owning card"
+    },
+    {
+      "at": "2026-11-25T03:52:10.365Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0s8gang",
+      "note": "#11 Safety (I1): a link to a place handed through a call cannot "
+    },
+    {
+      "at": "2026-11-25T03:26:03.163Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0jjynlr",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-25T03:20:25.307Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0mhrplj",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-25T03:18:12.515Z",
       "by": "Orchestrator",
