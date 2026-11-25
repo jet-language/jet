@@ -3777,10 +3777,10 @@ sema_effect_check_expanding_instances: fn(nodes: [SemaEffectNode], inputs: [Sema
         }
     }
     seen := (loop _ in 0..<vertices -> false)
-    reported := [String]{}
+    reported := SemaKeyRows{}
     loop row in expanding {
-        key: "{row.node}:{row.site}"
-        if reported.contains(key) -> next
+        key: sema_key_pair(reported, row.node, row.site)
+        if reported.seen.has_key(key) -> next
         // Whether the expanding edge's target leads back to its source.
         touched := [Int]{row.to}
         seen[row.to] = true
@@ -3801,7 +3801,7 @@ sema_effect_check_expanding_instances: fn(nodes: [SemaEffectNode], inputs: [Sema
         }
         loop vertex in touched -> seen[vertex] = false
         if !cycle -> next
-        reported.push(key)
+        reported.seen[key] = true
         site: nodes[row.node].instantiations[row.site]
         function: symbol_key_leaf(site.callee)
         batch := [Diagnostic]{sema_error("E0909", site.span, "Calling `{function}` through `{site.label}` here needs a deeper instance every time, so building it never ends", "Each instance of a generic function is built for its own types, and this call leads back to it with its type nested one level deeper", "Simplify the generic nesting or split the instantiation into smaller bounds.")}
@@ -5164,7 +5164,7 @@ sema_effect_memory_found: fn(nodes: [SemaEffectNode], parents: [Int], owner: Int
 // that allocates. An open dispatch is no allocation the proof finds: a
 // foreign body runs on the machine's own memory, not the program's heap.
 sema_effect_check_heap_free: fn(nodes: [SemaEffectNode], inputs: [SemaEffectModuleInput], own_modules: [Bool], calls: SemaEffectCallIndex, entries: [String], machine: String, diagnostics: ^[Diagnostic]) Never! {
-    reported := [String]{}
+    reported := SemaKeyRows{}
     loop key in entries {
         root: sema_effect_node_index(calls.node_by_key, key) ?? next
         found: sema_effect_memory_search(nodes, root, "alloc", opens: false) ?? next
@@ -5187,9 +5187,9 @@ sema_effect_check_heap_free: fn(nodes: [SemaEffectNode], inputs: [SemaEffectModu
                 }
             }
         }
-        at: "{nodes[caller].module_index}:{span.start}:{span.end}"
-        if reported.contains(at) -> next
-        reported.push(at)
+        at: sema_key_span(reported, Val(span))
+        site_key: sema_key_pair(reported, nodes[caller].module_index, at)
+        if !sema_key_first(reported, site_key) -> next
         heap_diagnostics: [Diagnostic]{sema_effect_heap_free_diagnostic(nodes, inputs, found, event, own, span, machine)}
         sema_effect_publish_diagnostics(diagnostics, inputs[nodes[caller].module_index].source_segments, heap_diagnostics)
     }

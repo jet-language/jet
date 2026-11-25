@@ -11,10 +11,6 @@ use jet_foundation.[
     symbol_local_row,
     symbol_table_key,
     authority_grantable_roots,
-    name_column,
-    name_column_get,
-    name_column_set,
-    name_column_table,
     name_find,
     name_index,
     name_intern,
@@ -919,8 +915,8 @@ SemaCompilerIndexWalkState: struct {
     arithmetic: [TComptimeValue],
     parents: [Int],
     // The next ordinal of each (parent, slot) pair, keyed by sema_compiler_index_ordinal_key.
-    ordinal_keys: NameTable{name_column_table()},
-    ordinals: [Int]{name_column()},
+    ordinal_keys: SemaKeyRows{SemaKeyRows{}},
+    ordinals: [Int:Int]{[Int:Int]{}},
     slot: String,
     slot_is_list: Bool,
     // The source file and the name of the module being walked.
@@ -933,8 +929,8 @@ sema_compiler_index_walk_state: fn() -> SemaCompilerIndexWalkState Never! {
         nodes: [TComptimeValue]{},
         arithmetic: [TComptimeValue]{},
         parents: [Int]{},
-        ordinal_keys: name_column_table(),
-        ordinals: name_column(),
+        ordinal_keys: SemaKeyRows{},
+        ordinals: [Int:Int]{},
         slot: "root",
         slot_is_list: true,
         file: "",
@@ -1130,19 +1126,20 @@ sema_compiler_index_stmt_span: fn(statement: Stmt) -> Span {
     }
 }
 
-// One (parent, slot) pair as a map key: a node id never contains `:`.
-sema_compiler_index_ordinal_key: fn(parent: Int?, slot: String) -> String Never! {
-    if parent == .Val(id) -> return "{id}:{slot}"
-    "-:{slot}"
+// The row of one (parent, slot) pair in `keys`; the root's parent is none.
+sema_compiler_index_ordinal_key: fn(keys: ^SemaKeyRows, parent: Int?, slot: String) -> Int Never! {
+    slot_id: sema_key_text(keys, slot)
+    if parent == .Val(id) -> return sema_key_pair(keys, id, slot_id)
+    sema_key_pair(keys, SEMA_KEY_NONE, slot_id)
 }
 
 sema_compiler_index_walk_node: fn(state: ^SemaCompilerIndexWalkState, class: String, shape: String, span: Span) -> Int? {
     if span.end < span.start -> return None
     parent := Int?{None}
     if state.parents.len() > 0 -> parent = Val(state.parents[state.parents.len() - 1])
-    key: sema_compiler_index_ordinal_key(parent, state.slot)
-    ordinal: name_column_get(state.ordinal_keys, state.ordinals, key) ?? 0
-    name_column_set(state.ordinal_keys, state.ordinals, key, ordinal + 1)
+    key: sema_compiler_index_ordinal_key(state.ordinal_keys, parent, state.slot)
+    ordinal: state.ordinals.get(key) ?? 0
+    state.ordinals[key] = ordinal + 1
     id := state.nodes.len()
     slot_kind := if state.slot_is_list -> "list" else -> "scalar"
     state.nodes.push(

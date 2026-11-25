@@ -93,16 +93,17 @@ sema_function_header_normalize_external_methods: fn(program: ^Program, in_packag
         name: sema_registration_root_name(item)
         if name != "" -> declared[name] = true
     }
-    seen := [String:Bool]{}
+    seen := SemaKeyRows{}
     items := [Item]{}
     loop item in program.items {
         if item == .Func(function) && function.external_type == .Val(target) {
-            key: "{target.name}.{function.name}"
-            if seen.get(key) != None {
+            target_id: sema_key_text(seen, target.name)
+            function_id: sema_key_text(seen, function.name)
+            key: sema_key_pair(seen, target_id, function_id)
+            if !sema_key_first(seen, key) {
                 diagnostics.push(sema_defined_twice(function.name, "module declarations share one namespace", function.name_span))
                 next
             }
-            seen[key] = true
             if in_package || imported || target.name.contains(".") || declared.get(target.name) != None {
                 items.push(sema_function_header_normalize_external_method(function))
                 next
