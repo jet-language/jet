@@ -972,11 +972,11 @@ priv ProcessChunkCursor: struct {
 
 // The loop sources `child.stdout.chunks(size)` and `child.stderr.chunks(size)`
 // check to (Sema ProcessHandles).
-priv __stdout_chunks: fn(stream: ProcessStdoutStream, size: Int) -> ProcessChunks Never! {
+#Builtin.Role(.ProcessStdoutChunks) priv __stdout_chunks: fn(stream: ProcessStdoutStream, size: Int) -> ProcessChunks Never! {
     ProcessChunks{__stdout: Val(stream), __size: size}
 }
 
-priv __stderr_chunks: fn(stream: ProcessStderrStream, size: Int) -> ProcessChunks Never! {
+#Builtin.Role(.ProcessStderrChunks) priv __stderr_chunks: fn(stream: ProcessStderrStream, size: Int) -> ProcessChunks Never! {
     ProcessChunks{__stderr: Val(stream), __size: size}
 }
 

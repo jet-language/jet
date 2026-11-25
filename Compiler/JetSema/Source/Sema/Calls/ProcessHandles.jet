@@ -518,14 +518,14 @@ sema_process_stream_method: fn(receiver: Expr, receiver_value: TExpr, method: St
         operation: if stream_name == "ProcessStderrStream" -> BodyHandleOp.ProcessStderrRead else -> BodyHandleOp.ProcessStdoutRead
         return sema_process_finish(receiver_value, operation, values, sema_process_io_result(Type.List{element: Type.IntN{signed: false, bits: 8}}), "Exec", api, span, expected, check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics)
     }
-    // `chunks(size)`: the Core source body `core.process.__stdout_chunks` /
-    // `__stderr_chunks` builds the loop source, whose Iterable reads the pipe
+    // `chunks(size)`: the Core source body filling ProcessStdoutChunks /
+    // ProcessStderrChunks builds the loop source, whose Iterable reads the pipe
     // `size` bytes at a time, so every tier runs the same Jet code.
     if method == "chunks" {
         result: Type.Named{name: sema_core_module_nominal(check.program.*, "core.process", "ProcessChunks")}
-        member: if stream_name == "ProcessStderrStream" -> "__stderr_chunks" else -> "__stdout_chunks"
+        role: if stream_name == "ProcessStderrStream" -> "ProcessStderrChunks" else -> "ProcessStdoutChunks"
         size: if values.len() == 1 -> values[0].copy() else -> sema_tree_node(Type.Int, TExprKind.IntLit{value: 65536, width: None}, span)
-        return sema_process_source_call(member, api, "Exec", [TExpr]{receiver_value, size}, result, span, expected, check)
+        return sema_process_source_call(role, api, "Exec", [TExpr]{receiver_value, size}, result, span, expected, check)
     }
     sema_process_finish(receiver_value, BodyHandleOp.ProcessLines, [TExpr]{}, sema_process_named("ProcessLines"), "Exec", api, span, expected, check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics)
 }
