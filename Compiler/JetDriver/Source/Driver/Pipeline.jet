@@ -2421,10 +2421,9 @@ jet_driver_comptime_wait_cycle_from: fn(key: String, rows: [JetDriverComptimeWai
             }
         }
     }
-    // The key pushed above leaves the path for the finished list. Unreachable
-    // pop failure: each nested call that returns false pops its own key, so
-    // this call's key is on top.
-    finished.push(path.pop() ?? panic("a wait-cycle path lost its key"))
+    // The key pushed above leaves the path for the finished list: each nested
+    // call that returns false pops its own key, so this call's key is on top.
+    if path.pop() == .Val(done) -> finished.push(done)
     false
 }
 

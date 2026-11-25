@@ -15,7 +15,9 @@ jet_driver_rust_foreign_rust_type: fn(ty: Type, user_types: [String]) -> String 
         .Shared(inner) -> "std::sync::Arc<{jet_driver_rust_foreign_rust_type(inner, user_types)}>"
         .Option(inner) -> "Option<{jet_driver_rust_foreign_rust_type(inner, user_types)}>"
         .Result(ok, err) -> "Result<{jet_driver_rust_foreign_rust_type(ok, user_types)}, {jet_driver_rust_foreign_rust_type(err, user_types)}>"
-        .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) -> "Box<dyn std::any::Any>"
+        // A type with no Rust spelling crosses as an opaque box. FFI sema
+        // refuses an anonymous union, and a type measure is no FFI surface type.
+        .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .Union(_) | .Case(_, _) | .Measure(_) -> "Box<dyn std::any::Any>"
         .Named(name) -> {
             if name == "Error" -> return "String"
             if user_types.contains(name) -> return ast_comptime_generated_path(name)
@@ -28,8 +30,6 @@ jet_driver_rust_foreign_rust_type: fn(ty: Type, user_types: [String]) -> String 
             "{ast_comptime_generated_path(name)}<{types.join(", ")}>"
         }
         .FixedList(elem, len) -> "[{jet_driver_rust_foreign_rust_type(elem, user_types)}; {measure_expression(len)}]"
-        .Union(_) | .Case(_, _) -> panic("anonymous unions are rejected by FFI sema")
-        .Measure(_) -> panic("type measure is not a C-FFI surface type")
     }
 }
 

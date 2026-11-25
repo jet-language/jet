@@ -225,11 +225,12 @@ POLICY_RULES: #run { [PolicyRule]{
     {key: PolicyKey.Runtime, scopes: POLICY_BODY_SCOPES, combine: PolicyCombine.Tighten},
 } }
 
-policy_rule: fn(key: PolicyKey) -> PolicyRule Never! {
+// The rule POLICY_RULES gives `key`, or none for a key it leaves out.
+policy_rule: fn(key: PolicyKey) -> PolicyRule? Never! {
     loop row in POLICY_RULES {
-        if row.key == key -> return row
+        if row.key == key -> return Val(row)
     }
-    panic("registered policy key")
+    None
 }
 
 EffectivePolicy: struct {
@@ -369,7 +370,9 @@ policy_resolve: fn(key: PolicyKey, declarations: [PolicyDeclaration]) -> Effecti
             }
         }
     }
-    registry: policy_rule(key)
+    // A key with no rule is allowed at no scope, so its first declaration is
+    // refused (ProhibitedScope).
+    registry: policy_rule(key) ?? PolicyRule{key: key, scopes: [PolicyScope]{}, combine: PolicyCombine.Tighten}
     chain := [PolicyDeclaration]{}
     effective := PolicyValue?{None}
     loop declaration in ordered {

@@ -2021,11 +2021,9 @@ sema_expression_checked_text_raw: fn(target: SemaExpressionCheckedTextTarget, ty
 }
 
 sema_expression_checked_text_literal: fn(head: Type, source_head: Type?, body: TypedLitBody, span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaExpressionCheckedTextLiteral {
+    // Only a named head has a checked text target (sema_expression_checked_text_target).
+    type_name: if head == .Named(name) -> name else -> return SemaExpressionCheckedTextLiteral{handled: false, value: None}
     target: sema_expression_checked_text_target(head, check.environment.*, check.program.*, check.scopes) ?? return SemaExpressionCheckedTextLiteral{handled: false, value: None}
-    type_name := if head == {
-        .Named(name) -> name
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> panic("checked text target lost its named owner")
-    }
     // A type with `build` is also an ordinary record: only a quoted body is
     // its checked literal, and `Query{text: …}` stays a struct literal.
     building: target.build != None

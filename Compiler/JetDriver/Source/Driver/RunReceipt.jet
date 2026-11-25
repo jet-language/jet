@@ -208,9 +208,10 @@ jet_driver_run_receipt_uint: fn(out: ^[U8], number: Int, width: Int) Never! {
     value := number
     digits := [U8]{}
     loop _ in 0..<width {
-        // Unreachable: every caller passes a length, the version 1 or an exit
-        // status already moved into 0..<2^32, so `value` stays nonnegative.
-        digits.push(checked(U8{value % 256}) ?? panic("unsigned wire byte"))
+        // Every caller passes a length, the version 1 or an exit status
+        // already moved into 0..<2^32, so `value` stays nonnegative and its
+        // low byte is `value % 256`.
+        digits.push(U8{value & 255})
         value /%= 256
     }
     loop index in 0..<width -> out.push(digits[width - index - 1])
