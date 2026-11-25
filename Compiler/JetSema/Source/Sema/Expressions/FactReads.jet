@@ -1203,6 +1203,8 @@ sema_fact_type_info: fn(symbol: Symbol?, name: String, args: [Type], check: Sema
 // folded by the builders a written `X.reflect()` folds by.
 sema_fact_type_info_of: fn(graph: SemaRegistrationGraph, ty: Type, module_identity: ModuleID) -> TComptimeValue? {
     plain: sema_expr_unwrap_tag(ty)
+    // Snapshot: a nominal's record reads a registered declaration; a builtin
+    // number's needs none.
     if graph.mode != .Snapshot {
         if sema_fact_nominal_row_of(graph, plain, module_identity) == .Val(row) {
             catalog: TAppliedRuleCatalog{rows: [TAppliedRule]{}, argument_menus: [TAppliedRuleArgumentMenu]{}}
