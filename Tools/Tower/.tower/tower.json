@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7030,
-    "rev": 114197,
+    "rev": 114200,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -74398,6 +74398,11 @@
         {
           "at": "2026-11-25",
           "by": "Orchestrator",
+          "text": "B (n=2) scope, decided 2026-11-25: Core.rows rendered by the compiler from hand-written CoreCallRecord rows (CoreCalls.jet, CoreCallRows.jet) is a second source of truth and does not meet n=2. Plan, largest first, G1Checkers: (1) field-default params on the declared-signature path; (2) plugin.load moves to a Core declaration with a body over a jet.runtime.plugin binding, in two seed stages, which deletes CoreSignatures.jet (p5 leaves plugin.load as its only row); (3) the dispatcher rows migrate family by family to Core-declared forms, and CoreCalls.jet and CoreCallRows.jet are deleted with the last family. Any form not already registered goes to a ballot first."
+        },
+        {
+          "at": "2026-11-25",
+          "by": "Orchestrator",
           "text": "Batch 45 landed: dev 4b48f2bc485, master 2df1af6a626 (22 commits). Met A (n=1), n=19, H (n=8); E (n=5) reworded to its review's narrowed design, proof JetSema/Tests pending. Suite regressions routed as batch-46 fixes: c36B TypeId handle crash (~110 rows, c36B-fix3), Atomic miscompile (p2b2a1-atomic), related_rows effects and the Data.jet citations (watch-effects-fix-r2), copy ratchet (c36B-fix2). coremath-residual second program at -O1: 0.358 s -> 0.170 s (ratio 0.473), same output. The CoreMathPair gate script built its rows side against dev's Core, so it gave no result; it gets fixed before the n=16 rerun."
         },
         {
@@ -74948,6 +74953,19 @@
             "profile": "cases",
             "filter": "core_data_tracked_rows_and_maintained_watch"
           }
+        },
+        {
+          "n": 22,
+          "text": "B leaves: sema's synthetic Printable list is deleted; every type it named (Point, Rect, Size, the core.net SocketAddr and UDPPacket and the rest) prints and Debug-renders through Core impls or the derive, so print(v), \"{v}\" and \"{v:Debug}\" give the same output at O0, O1 and O2 with no runtime show glue linked. Today Point/Rect/Size and SocketAddr stop with an internal compiler error (a stale show=true handle row with no runtime export), and so do SocketAddr/UDPPacket struct literals. Found by C16Perf on batch 45, 2026-11-25.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T17:58:43.235Z",
+          "proof": {
+            "profile": "golden",
+            "filter": "Geometry"
+          }
         }
       ],
       "refs": [],
@@ -74955,9 +74973,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-24T17:01:07.086Z",
-      "updated": "2026-11-25T17:38:45.806Z",
+      "updated": "2026-11-25T17:58:43.235Z",
       "updatedBy": "Orchestrator",
-      "criteriaLastN": 21
+      "criteriaLastN": 22
     },
     {
       "id": "c0t3jsi0",
@@ -140913,6 +140931,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-25T17:58:43.235Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0mhrplj",
+      "note": "#22: SocketAddr/UDPPacket ICEs found by the same slice; was: B leaves: sema's synthetic Printable list is deleted; Point, Rect and Size (and any other type it names) print and Debug-render through Core impls, so print(p), \"{p}\" and \"{p:Debug}\" give the same out"
+    },
+    {
+      "at": "2026-11-25T17:55:09.546Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0mhrplj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-25T17:45:34.351Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c0mhrplj",
+      "note": "21 criteria, soft limit 6: B's leaves are criteria on the pillars card by the owner's one-card-per-stream order"
+    },
+    {
+      "at": "2026-11-25T17:45:34.351Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0mhrplj",
+      "note": "#22 B leaves: sema's synthetic Printable list is deleted; Point,"
+    },
     {
       "at": "2026-11-25T17:40:01.398Z",
       "by": "Pip",
