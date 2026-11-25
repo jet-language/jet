@@ -4,7 +4,7 @@
 // published cache carries enough identity to reject a stale or hand-edited
 // bridge before the linker consumes it.
 use {
-    jet_foundation.[JET_TYPE_NAMES]
+    jet_foundation.[TYPE_NAMES]
     jetpack_foundation.[COM_MODULE_ROOT, JET_KEYWORD_LIST, TYPE_ERR]
     files: core.files
     sys: core.sys
@@ -672,7 +672,7 @@ pkg_com_render_c: fn(lib: String, schema: ComSchema) -> String Never! {
 // type names are refused (except the contextual `Err`).
 pkg_com_project: fn(value: String) -> String ForeignBindError! {
     out: value.replace("-", "_")
-    if !pkg_binder_is_ident(out) || JET_KEYWORD_LIST.contains(out) || (JET_TYPE_NAMES.contains(out) && out != TYPE_ERR) {
+    if !pkg_binder_is_ident(out) || JET_KEYWORD_LIST.contains(out) || (TYPE_NAMES.contains(out) && out != TYPE_ERR) {
         return Err(ForeignBindError.Source("COM name `{value}` cannot be projected as a Jet identifier"))
     }
     Ok(out)

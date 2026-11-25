@@ -229,7 +229,7 @@ jet_cli_new_app_plan: fn(kind: String, jet_argv: [String], args: [String], color
     }
     words: jet_cli_new_app_words(name)
     if kind == "route" && address == "" -> address = "/{words.join("-")}"
-    if kind == "job" && JET_CLI_GRAMMAR_GLOBAL_KEYWORDS.contains(words.join("_")) {
+    if kind == "job" && CLI_GRAMMAR_GLOBAL_KEYWORDS.contains(words.join("_")) {
         return jet_cli_fail("E2104", "`{name}` can't name a job: its method `{words.join("_")}` would be a Jet keyword", jet_cli_why("E2104"), "choose another name, such as `Run{jet_cli_new_app_pascal(words)}`", color, JET_DRIVER_EXIT_USAGE)
     }
     remove: jet_argv.contains("--remove")

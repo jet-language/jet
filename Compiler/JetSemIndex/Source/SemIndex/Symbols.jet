@@ -14,8 +14,8 @@ use {
         BUILTIN_NUMERIC_SOURCES,
         DOC_COMMENT_PREFIX,
         ImportDecl,
-        JET_KEYWORD_NAMES,
-        JET_TYPE_NAMES,
+        KEYWORD_NAMES,
+        TYPE_NAMES,
         Item,
         Span,
         Type,
@@ -194,11 +194,11 @@ semindex_symbol_is_result: fn(ty: Type?) -> Bool Never! {
 semindex_language_symbols: fn() -> [SemSymbol] Never! {
     symbols := [SemSymbol]{}
     no_examples: [String]{}
-    loop ty in JET_TYPE_NAMES {
+    loop ty in TYPE_NAMES {
         symbols.push(semindex_symbol_builtin("builtin:type:{ty}", ty, ty, None, "core", SemSymbolKind.Type, "type {ty}", "Built-in Jet type.", no_examples))
     }
     symbols.push(semindex_symbol_builtin("builtin:fact:$origin", "$origin", "$origin", None, "compiler", SemSymbolKind.Member, "$origin: OriginInfo?", "Compiler-owned typed fact.", no_examples))
-    loop keyword in JET_KEYWORD_NAMES {
+    loop keyword in KEYWORD_NAMES {
         symbols.push(semindex_symbol_builtin("builtin:keyword:{keyword}", keyword, keyword, None, "syntax", SemSymbolKind.Keyword, keyword, "Jet keyword.", no_examples))
     }
     loop row in SEMINDEX_SYMBOL_BUILTIN_METHODS {

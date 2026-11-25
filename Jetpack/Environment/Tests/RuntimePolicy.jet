@@ -3,7 +3,7 @@
 // that need a second thread or a re-spawned test binary are not claimed here.
 use {
     jetpack_foundation.[
-        JETPACK_VERBS,
+        PACKAGE_MANAGER_VERBS,
         RUNTIME_LOCK_DIR,
         RUNTIME_LOCK_OWNER_FILE,
         SOURCE_ROOT_DIR,
@@ -31,7 +31,7 @@ env_rt_test_is_timeout: fn(error: IOError) -> Bool {
 
 #Test("every verb is daemonless and needs no root") {
     policies: env_all_verb_policies()
-    assert_eq(policies.len(), JETPACK_VERBS.len())
+    assert_eq(policies.len(), PACKAGE_MANAGER_VERBS.len())
     loop policy in policies {
         assert(!policy.resident_daemon)
         assert(!policy.requires_root)

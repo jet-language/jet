@@ -28,7 +28,7 @@ use {
         dead_key_circumflex_base,
         dead_key_circumflex_fix,
         dead_key_circumflex_why,
-        JET_TYPE_NAMES,
+        TYPE_NAMES,
         MARKER_ERROR,
         Marker,
         PatSlot,
@@ -1513,7 +1513,7 @@ sema_type_hole: fn(span: Span) -> Diagnostic {
 // base names a Jet type or one the module declares; the edit writes the mark.
 sema_dead_key_type_name: fn(name: String, span: Span, declared: [String], name_span: Span?) -> Diagnostic? Never! {
     base: dead_key_circumflex_base(name) ?? return None
-    if !JET_TYPE_NAMES.contains(base) && !declared.contains(base) -> return None
+    if !TYPE_NAMES.contains(base) && !declared.contains(base) -> return None
     dead: sema_error("E0119", span, "there's no type called `{name}`", dead_key_circumflex_why(name, "^{base}"), dead_key_circumflex_fix("^{base}"))
     if name_span == .Val(written) -> return Val(diagnostic_with_edit(dead, TextEdit{span: written, new_text: "^{base}"}))
     Val(dead)
@@ -1540,7 +1540,7 @@ sema_unknown_type_name: fn(name: String, span: Span, declared: [String], name_sp
     }
     if sema_casing_acronym_diagnostic(name, span) == .Val(acronym) -> return acronym
     candidates := [String]{}
-    loop known in JET_TYPE_NAMES {
+    loop known in TYPE_NAMES {
         if known != "()" && !known.contains(".") -> candidates.push(known.copy())
     }
     loop own in declared -> candidates.push(own.copy())

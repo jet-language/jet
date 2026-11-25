@@ -10,14 +10,14 @@ cli_usage_test_scratch: fn(label: String) -[FS]> String {
 }
 
 #Test("cli usage doctor is in the canonical route registry and help") {
-    assert(JETPACK_VERBS.contains("doctor"))
-    assert(JETPACK_VERBS.contains("hangar"))
+    assert(PACKAGE_MANAGER_VERBS.contains("doctor"))
+    assert(PACKAGE_MANAGER_VERBS.contains("hangar"))
     assert(cli_usage_with_color(false).contains("jetpack doctor [--online]"))
     assert_eq(env_verb_policy("doctor").verb, "doctor")
 }
 
 #Test("cli usage import is in the canonical route registry and help") {
-    assert(JETPACK_VERBS.contains(JETPACK_IMPORT_VERB))
+    assert(PACKAGE_MANAGER_VERBS.contains(JETPACK_IMPORT_VERB))
     assert(cli_usage_with_color(false).contains("jetpack import"))
     assert_eq(env_verb_policy(JETPACK_IMPORT_VERB).verb, JETPACK_IMPORT_VERB)
 }
@@ -45,7 +45,7 @@ cli_usage_test_scratch: fn(label: String) -[FS]> String {
 }
 
 #Test("cli usage tool is in the canonical route registry and help") {
-    assert(JETPACK_VERBS.contains(TOOL_SUBCOMMAND))
+    assert(PACKAGE_MANAGER_VERBS.contains(TOOL_SUBCOMMAND))
     help: cli_usage_with_color(false)
     assert(help.contains("tool install"))
     assert(help.contains("env <name>"))
@@ -54,7 +54,7 @@ cli_usage_test_scratch: fn(label: String) -[FS]> String {
 }
 
 #Test("cli usage package generation route is canonical and in help") {
-    assert(JETPACK_VERBS.contains(PROFILE_SUBCOMMAND))
+    assert(PACKAGE_MANAGER_VERBS.contains(PROFILE_SUBCOMMAND))
     help: cli_usage_with_color(false)
     assert(help.contains("profile plan"))
     assert(help.contains("profile build"))
@@ -65,7 +65,7 @@ cli_usage_test_scratch: fn(label: String) -[FS]> String {
 }
 
 #Test("cli usage browser is in the canonical route registry and help") {
-    assert(JETPACK_VERBS.contains(BROWSER_SUBCOMMAND))
+    assert(PACKAGE_MANAGER_VERBS.contains(BROWSER_SUBCOMMAND))
     assert(cli_usage_with_color(false).contains("browser lock"))
     assert(cli_usage_with_color(false).contains("browser provision"))
     assert_eq(env_verb_policy(BROWSER_SUBCOMMAND).verb, BROWSER_SUBCOMMAND)

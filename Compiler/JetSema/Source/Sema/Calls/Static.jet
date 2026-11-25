@@ -3,7 +3,7 @@
 // arguments stay separate through inference and checked-tree construction.
 use jet_foundation.[
     BodyHandleOp,
-    JET_TYPE_NAMES,
+    TYPE_NAMES,
     effect_vocabulary_list_view_count,
     AccessConvention,
     BuiltinStaticOwnerRule,
@@ -151,11 +151,11 @@ sema_call_core_free_twin: fn(module_name: String, owner: String, method: String)
 }
 
 // The scalar types a static call may name as its owner: a subset view of the
-// built-in type catalog (JET_TYPE_NAMES), which SEMA_CALL_SCALAR_OWNERS_CHECKED
+// built-in type catalog (TYPE_NAMES), which SEMA_CALL_SCALAR_OWNERS_CHECKED
 // holds it to.
 SEMA_CALL_SCALAR_OWNERS: [String]{"Int", "Float", "Bool", "String", "Char", "F32", "F64", "I8", "I16", "I32", "I64", "U8", "U16", "U32", "U64"}
 
-SEMA_CALL_SCALAR_OWNERS_CHECKED: #run effect_vocabulary_list_view_count("Sema/Calls/Static.jet", SEMA_CALL_SCALAR_OWNERS, "SEMA_CALL_SCALAR_OWNERS", JET_TYPE_NAMES, "the built-in type catalog JET_TYPE_NAMES", [String]{})
+SEMA_CALL_SCALAR_OWNERS_CHECKED: #run effect_vocabulary_list_view_count("Sema/Calls/Static.jet", SEMA_CALL_SCALAR_OWNERS, "SEMA_CALL_SCALAR_OWNERS", TYPE_NAMES, "the built-in type catalog TYPE_NAMES", [String]{})
 
 // `Owner.method(...)` where `Owner` is a registered type no scope binding
 // shadows and no static route resolved: the type exists, so the missing
