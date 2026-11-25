@@ -22,8 +22,8 @@ question it answers.
 
 The scheduler's internal I/O-quiescence predicate is not a census of every
 host operation. It tests `active == 0 && allocated == retired` for the IOCP
-owners (`Prelude/Observe.rs`, with writes confined to Windows `run_iocp` in
-`Prelude/Scheduler.rs`). On Linux these three facts remain zero: the Jet
+owners (`jet_rt_observe_io_quiescent` in `Compiler/JetRuntime/Source/HostIO.jet`;
+only a Windows IOCP loop writes them). On Linux these three facts remain zero: the Jet
 `HostIO.jet` provider therefore returns true both at idle and while a pipe
 read is blocked. Linux descriptor operations must not update those facts.
 `Compiler/JetRuntime/Tests/HostIOQuiescentTests.c` witnesses that distinction

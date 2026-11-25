@@ -1442,7 +1442,7 @@ snapshots):
   guards across task, channel, `Shared<T>`, and parallel boundaries.
 - `Signal<T>`, `Derived<T>`, and `Computed<T>` use lock-ordered `Arc` storage
   with the same public API. A handle may cross a task, task group, channel, or
-  parallel adapter without a data race and without a rustc `Send` ICE.
+  parallel adapter without a data race.
 - `#Local` pins the fast one-thread form; a crossing is E1102.
 - `#Shared` pins the synchronized form (today every reactive box already uses
   that form). Crossing sites are recorded for the upgrade report.
@@ -1875,9 +1875,11 @@ process signals, thread creation, and isolation for a failing call.
 | Panic containment | A panic cannot unwind into C. The boundary emits `Stop: Jet.Panic` and terminates the calling process with status `70`; it never fabricates a scalar success value. | Expect an error return or continued execution in the same process. | The process exits `70`; a host that must continue forks the call and checks the child status. |
 | Repeated load/unload | A host may repeat map → resolve → call → free → join → unmap when every cycle obeys the rows above. | Reuse function pointers or `JetText` after unmapping. | Behavior is invalid C/loader use, not a recoverable Jet call. |
 
-The executable proof in `tests/library_outputs.rs` exercises two concurrent
-threads, nested `#Import(c)` re-entry, signal preservation, allocator release,
-three load/unload cycles, and a forked panic call whose parent continues.
+The executable proof,
+`Tests/Cases/LibraryOutputs/guest_embedding_contract_covers_lifecycle_threads_reentry_and_panic.case`,
+exercises two concurrent threads, nested `#Import(c)` re-entry, signal
+preservation, allocator release, three load/unload cycles, and a forked panic
+call whose parent continues.
 
 ### Incremental Compiler Service
 
@@ -1954,9 +1956,8 @@ check that the record does not declare with the same digest fails as an
 internal compiler error. `JET_CHECK_READS_INJECT` injects one undeclared read
 so tests can show the audit catches it.
 
-**Self-hosted compiler.** JetFoundation implements the same codec
-(`Record/RecordCodec.jet`) and key framing (`Record/PackageIdentity.jet`);
-`tests/record_conformance.rs` holds both implementations to identical bytes.
+**Self-hosted compiler.** JetFoundation implements that codec
+(`Record/RecordCodec.jet`) and the key framing (`Record/PackageIdentity.jet`).
 JetDriver reaches the store only through the typed `JetDriverRecordStore`
 the host passes in the compile request. Without a store every lookup is a
 miss and the package is checked.
@@ -2171,7 +2172,7 @@ Edits are `{span_id, replacement, rationale}`. V1 requires `artifacts: []`.
 Unknown keys are rejected. Span/type refs must resolve. Findings need
 `emit_finding`; edits need `propose_edit`. Counts and raw byte length must
 fit `limits`. Successful validation **stages** output only — the host alone
-may accept; guests never mutate compiler facts or expose rustc (I2/I3).
+may accept; guests never mutate compiler facts (I2/I3).
 
 ### Limits, trust, lifecycle, rollback
 
@@ -2183,8 +2184,8 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
 - **Deterministic sandbox (D-DX5-HOOK1):** the host registers no
   imports, so guests get no ambient clock, random, filesystem, network, or
   process. Components that declare any host import (for example WASI random
-  or clocks) fail closed at load — a Jet-owned message, no session commit,
-  no rustc leak. Pure guests over a frozen snapshot are the only admitted
+  or clocks) fail closed at load with a Jet-owned message and no session
+  commit. Pure guests over a frozen snapshot are the only admitted
   shape; the host never supplies nondeterminism sources.
 - **Lifecycle:** `ExtensionSession` Idle → Loaded → Closed. `stage_response`
   validates without commit; `rollback` discards staged output only (an
@@ -2291,10 +2292,10 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   file, but no generation path may inject unchecked AST or source text past the
   sema gatekeeper (R2). The guarantee that buys:
   generated code is trustworthy-by-construction (R1 codegen-dumb, R2
-  sema-gatekeeper, R5/I2 rustc-never-speaks all keep holding through
+  sema-gatekeeper, R5/I2 hidden-backend all keep holding through
   generation), and any error in generated output surfaces as a **real sema
   diagnostic pinned to the user's trigger site** — the struct, field, or derive
-  marker that caused it — never as raw rustc output. The `#Codable` derive
+  marker that caused it — never as a back-end failure. The `#Codable` derive
   follows this shape for derives and build-time steps (S56 user derives,
   comptime).
   (D-META-CODE1/D-META-BODY1 supersede the old source-reparse route.)

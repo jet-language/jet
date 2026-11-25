@@ -7306,7 +7306,7 @@ Each server-mode `page_state` call passes the current requested boundary to
 that loader, validates its row keys and boundary, and preserves the remote
 `total_rows` instead of filtering or paginating the returned page again.
 Explicit `#Target(JS)` functions and their nested closures are excluded from
-native Rust artifacts; their browser callbacks remain in the web partition.
+native artifacts; their browser callbacks remain in the web partition.
 
 ### `core.web.store` — transaction history
 
@@ -8162,9 +8162,9 @@ native-driver admission; this changes neither public signatures nor engine
 identity. Pool `max` remains a required labeled argument. Transaction and
 migration retain both `DB` and `Time.Wait`, including at the provider boundary.
 
-The existing registered Rust SQLite bridge remains the raw host boundary under
-the Jet source policy until runtime cutover. The separate CFFI `DBDriver`
-adapter is held; it is not part of this source-owned Core integration.
+`core.db` is plain Core source over the Jet SQLite engine: its private driver
+holds the only engine connection. The separate CFFI `DBDriver` adapter is
+held; it is not part of this source-owned Core integration.
 
 ### `core.db.sql` — pure SQL grammar and row selection
 
@@ -8355,7 +8355,7 @@ in-process), validates before entropy/allocation/publication, and supplies
 every worker seed. Failure retains declaration-order group scope, strict
 `at > saturating_sub(now, per_ms)` windows, reverse authority rollback,
 escalation, durable-mailbox preservation and partition reassertion in the
-original write order (`Services.rs:2917–3078`, restart helper `1983–2012`).
+one fixed write order (`fail_worker` in `Core/Service/Service.jet`).
 The restart helper replaces the worker's mailbox, so a restarted worker's new
 channel is the one its registry entry publishes and endpoint sends reach. The
 depth and count readers deliberately retain the weaker name/tree match after
@@ -8461,8 +8461,7 @@ names; and a known workflow version is positive.
 ### `core.archive` — byte containers and checksummed compression
 
 `core.archive` contains bounded archive and compression primitives. The Jet
-implementation lives under [`Core/Archive/`](../../../Core/Archive/); it is not
-the retired Rust `corelib/core.archive` path. Archive output is capped at
+implementation lives under [`Core/Archive/`](../../../Core/Archive/). Archive output is capped at
 67,108,864 bytes and archive entry counts at 4,096; file-oriented gzip and
 zstd helpers use their own 64 MiB output cap.
 Each codec has one public home. Compose a container and a stream codec explicitly for `tar.gz`: build TAR bytes with `core.archive`, then compress those bytes with `core.archive.gzip` (`D-CORE-COMPRESS1=A`).
