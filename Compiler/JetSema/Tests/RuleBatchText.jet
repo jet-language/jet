@@ -1,18 +1,34 @@
 // The collecting loop of a rule batch is generated Jet text. It must parse
-// with no error, and a lint it might raise must never stop the compiler.
+// with no error, and a lint it might raise must never stop the compiler. The
+// loop a compile uses is the build-time row of that parse
+// (SEMA_CALL_RULE_BATCH_LOOP, SEMA_CALL_RULE_BATCH_PAIRED_LOOP), which must
+// equal what the reader gives when it runs now, byte for byte in CBOR.
 use {
+    cbor: core.encoding.cbor
     jet_foundation.[Span, module_none]
-    jet_sema.[SemaCallRuleBatch, SemaCallRuleBatchSite, sema_call_rule_batch_expression]
+    jet_sema.[SemaCallRuleBatch, SemaCallRuleBatchSite, sema_call_rule_batch_expression, sema_call_rule_batch_read]
 }
 
 rule_batch_text_batch: fn(paired: Bool) -> SemaCallRuleBatch {
     SemaCallRuleBatch{module_identity: module_none(), marker: "Rule", span: Span{start: 0, end: 0}, key: "rules", paired: paired, sites: [SemaCallRuleBatchSite]{}, rows: [Int]{}}
 }
 
-#Test("a heard call's rule batch text parses with no error") {
-    if sema_call_rule_batch_expression(rule_batch_text_batch(paired: false)) == .Unit(_, _) -> panic("the batch expression is empty")
+// The loop read now parses with no error, and the build-time row a batch
+// uses is that same loop.
+rule_batch_text_same: fn(paired: Bool) {
+    read: sema_call_rule_batch_read(paired: paired) ?? panic("{err.file}: {err.message}")
+    if read == .Unit(_, _) -> panic("the batch expression is empty")
+    built_bytes: cbor.to_bytes(sema_call_rule_batch_expression(rule_batch_text_batch(paired: paired))) ?? panic("the build-time batch loop does not encode: {err}")
+    read_bytes: cbor.to_bytes(read) ?? panic("the batch loop read now does not encode: {err}")
+    if built_bytes != read_bytes {
+        panic("the build-time batch loop ({built_bytes.len()} CBOR bytes) differs from the loop read now ({read_bytes.len()} bytes); from the checkout root, run jet Compiler/Toolchain/PreludeRows/Main.jet --write")
+    }
 }
 
-#Test("a paired rule's batch text parses with no error") {
-    if sema_call_rule_batch_expression(rule_batch_text_batch(paired: true)) == .Unit(_, _) -> panic("the paired batch expression is empty")
+#Test("a heard call's rule batch text parses with no error, and its build-time row is that parse") {
+    rule_batch_text_same(paired: false)
+}
+
+#Test("a paired rule's batch text parses with no error, and its build-time row is that parse") {
+    rule_batch_text_same(paired: true)
 }

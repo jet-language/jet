@@ -1151,28 +1151,43 @@ sema_call_rule_batch_item: fn(source: SemaComptimeItemSource) -> Bool Never! {
     source.prepared.len() > 0 && source.prepared[0].name == SEMA_CALL_RULE_RULES_LOCAL
 }
 
-// The collecting loop a batch runs, parsed as the language writes it, as
-// one ordered arm table so the text raises no lint. It reads each prepared
+// The collecting loop a batch runs, parsed from sema_call_rule_batch_text.
+// SEMA_CALL_RULE_BATCH_LOOP and SEMA_CALL_RULE_BATCH_PAIRED_LOOP
+// (PreludeRows.jet) are what sema_call_rule_batch_read returns for each,
+// written by Compiler/Toolchain/PreludeRows, so a compile never parses the
+// text.
+sema_call_rule_batch_expression: fn(batch: SemaCallRuleBatch) -> Expr Never! {
+    if batch.paired -> SEMA_CALL_RULE_BATCH_PAIRED_LOOP else -> SEMA_CALL_RULE_BATCH_LOOP
+}
+
+// The text of the collecting loop, as the language writes it, as one
+// ordered arm table so the text raises no lint. It reads each prepared
 // column once, into a local: a read of a prepared local carries its whole
 // value into the checked body and the IR. Each call's CompilerCall is built
-// from its row of words. The batch of a paired rule first finds each call's
-// row (its marker's `row`) and the first earlier call with that row under
-// one of its table's keys, then checks each call with that call, or None.
-// Only an error stops it; a lint never does.
-sema_call_rule_batch_expression: fn(batch: SemaCallRuleBatch) -> Expr {
+// from its row of words. The batch of a `paired` rule first finds each
+// call's row (its marker's `row`) and the first earlier call with that row
+// under one of its table's keys, then checks each call with that call, or
+// None.
+sema_call_rule_batch_text: fn(paired: Bool{false}) -> String Never! {
     w: "__jet_w"
     t: "__jet_t"
     call: sema_call_rule_call_text("row")
-    checks: if batch.paired -> "        __jet_first := [Int]{{}}\n        __jet_seen := [String: Int]{{}}\n        loop row in __jet_rows {{\n            first := -1\n            if __jet_r[{w}[row]].row({call}) == .Val(key) {{\n                at: row + {SEMA_CALL_RULE_ARGS_WORD} + {SEMA_CALL_RULE_ARG_WORDS} * {w}[row + {SEMA_CALL_RULE_COUNT_WORD}]\n                loop k in 1..<{w}[at] + 1 {{\n                    if __jet_seen.get(\"{{{t}[{w}[at + k]]}}|{{key}}\") == .Val(earlier) && (first < 0 || earlier < first) -> first = earlier\n                }}\n                own: \"{{{t}[{w}[at + {w}[at]]]}}|{{key}}\"\n                if __jet_seen.get(own) == None -> __jet_seen[own] = row\n            }}\n            __jet_first.push(first)\n        }}\n        loop (at, row) in __jet_rows -> __jet_r[{w}[row]].check({call}, if __jet_first[at] < 0 -> None else -> Val({sema_call_rule_call_text("__jet_first[at]")}))\n" else -> "        loop row in __jet_rows -> __jet_r[{w}[row]].check({call})\n"
-    text: "RULE_BATCH: if {{\n    true -> {{\n        __jet_r: {SEMA_CALL_RULE_RULES_LOCAL}\n        __jet_rows: {SEMA_CALL_RULE_ROWS_LOCAL}\n        {w}: {SEMA_CALL_RULE_WORDS_LOCAL}\n        {t}: {SEMA_CALL_RULE_TEXTS_LOCAL}\n        __jet_y: {SEMA_CALL_RULE_TYPES_LOCAL}\n        __jet_v: {SEMA_CALL_RULE_VALUES_LOCAL}\n        __jet_f: {SEMA_CALL_RULE_FUNCTIONS_LOCAL}\n{checks}    }}\n    else -> [CompilerRejection?]{{}}\n}}\n"
+    checks: if paired -> "        __jet_first := [Int]{{}}\n        __jet_seen := [String: Int]{{}}\n        loop row in __jet_rows {{\n            first := -1\n            if __jet_r[{w}[row]].row({call}) == .Val(key) {{\n                at: row + {SEMA_CALL_RULE_ARGS_WORD} + {SEMA_CALL_RULE_ARG_WORDS} * {w}[row + {SEMA_CALL_RULE_COUNT_WORD}]\n                loop k in 1..<{w}[at] + 1 {{\n                    if __jet_seen.get(\"{{{t}[{w}[at + k]]}}|{{key}}\") == .Val(earlier) && (first < 0 || earlier < first) -> first = earlier\n                }}\n                own: \"{{{t}[{w}[at + {w}[at]]]}}|{{key}}\"\n                if __jet_seen.get(own) == None -> __jet_seen[own] = row\n            }}\n            __jet_first.push(first)\n        }}\n        loop (at, row) in __jet_rows -> __jet_r[{w}[row]].check({call}, if __jet_first[at] < 0 -> None else -> Val({sema_call_rule_call_text("__jet_first[at]")}))\n" else -> "        loop row in __jet_rows -> __jet_r[{w}[row]].check({call})\n"
+    "RULE_BATCH: if {{\n    true -> {{\n        __jet_r: {SEMA_CALL_RULE_RULES_LOCAL}\n        __jet_rows: {SEMA_CALL_RULE_ROWS_LOCAL}\n        {w}: {SEMA_CALL_RULE_WORDS_LOCAL}\n        {t}: {SEMA_CALL_RULE_TEXTS_LOCAL}\n        __jet_y: {SEMA_CALL_RULE_TYPES_LOCAL}\n        __jet_v: {SEMA_CALL_RULE_VALUES_LOCAL}\n        __jet_f: {SEMA_CALL_RULE_FUNCTIONS_LOCAL}\n{checks}    }}\n    else -> [CompilerRejection?]{{}}\n}}\n"
+}
+
+// The collecting loop of a `paired` or unpaired rule batch, parsed from its
+// text. Only an error makes it the tool's error; a lint never does.
+sema_call_rule_batch_read: fn(paired: Bool{false}) -> Expr SemaPreludeTextError! {
+    file: "the rule batch loop"
+    text: sema_call_rule_batch_text(paired: paired)
     parsed: parse_generated_source(text.bytes())
-    loop diagnostic in parsed.diagnostics {
-        if diagnostic.severity == DIAGNOSTIC_ERROR -> panic("the rule batch loop does not parse: {diagnostic.code} {diagnostic.what}")
-    }
+    errors: loop diagnostic in parsed.diagnostics if diagnostic.severity == DIAGNOSTIC_ERROR -> diagnostic
+    if errors.len() > 0 -> return Err(sema_prelude_text_error(file, text, errors))
     if parsed.program.items.len() == 1 {
-        if parsed.program.items[0] == .Const(definition) -> return definition.value
+        if parsed.program.items[0] == .Const(definition) -> return Ok(definition.value)
     }
-    panic("the rule batch loop does not parse")
+    Err(SemaPreludeTextError{file: file, line: None, message: "is not one constant"})
 }
 
 // The CompilerCall whose row starts at the word `row`.
