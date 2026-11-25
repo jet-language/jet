@@ -270,12 +270,7 @@ ir_map_tag: fn(m: ^IRModule, a: ^IRBuilder, shape: IRMapShape, key: Int) -> Int 
     bits: ir_load_word(m, a, cell, 0)
     word := bits
     if shape.kind == "int" {
-        // Inline when bits 62 and 63 agree (int_inline).
-        sixty_two: ir_word_const(m, a, 62)
-        sixty_three: ir_word_const(m, a, 63)
-        top: ir_word_op(m, a, IROp.Shr, bits, sixty_two)
-        sign: ir_word_op(m, a, IROp.Shr, bits, sixty_three)
-        fits: ir_bool_op(m, a, IROp.Eq, top, sign)
+        fits: ir_int_word_inline(m, a, bits)
         word = ir_temp(m, a, word_row)
         ir_emit(a.f, IROp.Copy, word, zero, -1, -1, a.line)
         ir_open_if(a.f, fits, a.line)
