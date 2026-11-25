@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7000,
-    "rev": 114051,
+    "rev": 114060,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -34479,190 +34479,6 @@
       "criteriaLastN": 7
     },
     {
-      "id": "c0hnphts",
-      "num": 5068,
-      "title": "jet build Compiler/ --trace just works: native multi-package builds, build-entry resolution, self-contained install",
-      "body": "## Owner intent (2026-10-18 14:20)\nFrom the repo root, `jet build Compiler/` (optionally with `--trace`) builds the compiler using the `jet` on PATH. It needs no .mjs assembler, no --runtime-dir, no env vars and no prlimit. The NixOS `jet` points at the latest approved or released compiler.\n\n## Owner rulings (this session; recorded as ratified)\n- **`--trace`** prints the live phase trace to stdout/stderr. Each phase prints as it ends (wall, CPU s, cores busy, memory), with a summary at the end.\n- **`--trace=<file>`** writes the trace to `<file>` as Chrome trace events, readable in Perfetto.\n- **`Compiler/` becomes a package root.** Add `Compiler/package.jet` as a workspace whose members are the compiler packages.\n- **`jet build <dir>` runs the package's BUILD entry,** `fn build(...) -> ... { ... }` (the build script), not `run.jet`, which is the executable entry point.\n  - The Compiler workspace's build entry builds the `jet` CLI executable from Compiler/JetCli.\n  - Research the existing build-entry convention first and follow it: Project.jet already recognizes `@build.jet`, and `build.jet` is a project marker in ReceiptIdentity.jet.\n  - Anything not yet ratified goes on a ballot.\n\n## Gaps measured 2026-10-18 with the round-D compiler (dev bc5e44948)\n1. **Multi-package builds with path deps.** `jet build Compiler/JetCli/run.jet` reads every dependency package (after 4 stray hard links were broken), then fails module resolution:\n   - E0610 \"No module named `jet_sema`/`jet_driver`/`jet_foundation` in scope\";\n   - E0603 \"the imported dependency module is not present in its authorized package root\";\n   - 3,474 stderr lines in total.\n\n   Port package-graph module resolution (transitive path deps) to the Jet driver. Then retire the Tools/agent/native-compiler.mjs assembly for the self-build (greenfield cutover: one mechanism).\n2. **`jet build <directory>`.** The Jet CLI refuses it (\"not part of the Jet-hosted CLI yet\", Front.jet:583 jet_cli_not_ported). Port the resolution from directory to package.jet or workspace to build entry.\n3. **Stack.** The compiler needs a 1 GiB stack (prlimit or ulimit). Run the compiler's main on a large stack inside the runtime or CLI.\n4. **Toolchain root and identity** come from env vars (JET_TOOLCHAIN_ROOT, JET_COMPILER_IDENTITY). Default both from the install layout (the binary's directory); inside a Jet checkout, use that checkout. The interim launcher does this today.\n5. **C toolchain** for the native link and foreign C. Today it comes from Tools/agent/jet-env (nix develop; ~3-4 s per command). The NixOS package should provide cc/ld directly.\n6. **`--trace` and `--trace=<file>`** as above. Today only the JET_TRACE_FILE env var exists.\n7. **The `jet` on PATH was the Rust implementation.** ~/nixos/modules/apps/dev/jetlang.nix execs the newest cargo target, and the cargo targets were removed in the 2026-10-18 cleanup.\n\n## Interim (in place 2026-10-18 14:15)\n- `~/.local/share/jet-seeds/current` points to `round-d/`, which holds `jet`, `jet-runtime/`, `toolchain/` (an export of bc5e44948), `IDENTITY` and `SOURCE`.\n- The launcher `~/.local/share/jet-seeds/bin/jet` supplies the stack, the toolchain and identity defaults, and jet-env.\n- It is linked as `$JET_STATE_ROOT/targets/approved/release/jet`, which the existing NixOS wrapper scans, so `jet` on PATH runs the approved compiler without a rebuild.\n- Approving a new compiler means repointing `current`.\n- Follow-up: change jetlang.nix to exec the launcher directly (one nixos-rebuild) and drop the cargo scan.\n\n## Acceptance\n- In a clean checkout, `jet build Compiler/` builds a jet CLI identical to chain s2 for the same SHA.\n- `jet build Compiler/ --trace` shows the live phases.\n- It works with only the approved `jet` on PATH.\n- Collect-all diagnostics.\n- Examples and UI snapshots cover the new CLI behaviour (I4/I5).",
-      "kind": "feature",
-      "track": "epoch",
-      "epoch": "G2",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": "## Track B plan (owner order A → B → C → E → D)\n\n### B1. Entry-point cutover (D-ENTRY-CTX1, D-ENTRY-RUN1). One commit.\n- **Types:** BuildContext → Build, TestSuite → Test, a new Dev context. BenchSuite and the bench command are removed (benchmarks are measurement tests).\n- **Build:** `fn build(b: Build)` returns nothing. The driver takes the plan from the Build session after the call (BuildQueries.jet currently demands a returned BuildPlan, E3502). `b.plan()` stays only as an introspection query for graph/receipt_diff.\n- **Run:** `fn run()` returns nothing; `-> App` programs call `.serve()`. The runtime host owns serve, and dev hot swap hooks it.\n- **Sites:** sema Calls/BuildContext.jet, CheckProgram entry selection, eval BuildServices/CompilerServices, driver BuildAdapter/BuildQueries, codegen BuildMethods, Liveness, CoreRecordRows, the E3502 row text, the Host.jet @build.jet scaffold, Core/build, Jetpack (36/44 refs), Examples (9) and tests (~96).\n- **Proof:** census, then a chain.\n\n### B2. `jet build Compiler/`\n- Compiler/package.jet becomes a workspace of the compiler packages, with one `fn build(b: Build)` that builds the jet CLI from Compiler/JetCli.\n- It replaces sources.list, Compiler/Bootstrap/assemble.mjs (which still writes edition 2028), native-compiler.mjs --assemble-only, the shell chain, prlimit and env.\n- `--trace` / `--trace=<file>` as already ruled.\n- Gaps measured 2026-10-18 (module resolution across path deps) are fixed in the driver.\n- **Proof:** `jet build Compiler/` reproduces the assembled compiler; then the release proof (stage 1/2/3 fixed point) moves into `jet build Compiler/ --release` or a `fn test`.\n\n### B3. Generators become comptime (`prep` over source data)\n- **Order:** prelude markers/derives/units, Core rows (CoreCallRows, CoreRecordRows, CoreEnumRows, CoreSourceOwned, CoreSources), runtime message tables, unicode chunks, C-ABI routes last (it needs the runtime emit).\n- Each step deletes the generator and its committed output.\n\n### B4. Checks become tests\n- The ~60 `--check` scripts become `fn test(t: Test)` / #Test.\n- The fixture gate becomes `jet test tests/ui`, with blessing through `jet test --bless`.\n\n### B5. Remaining tooling ported by area (#5072); Tower last.",
-      "checkSteps": null,
-      "probe": "jet build Examples/features/packages/build_contribution",
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-10-22",
-          "by": "agent",
-          "text": "Seed a0_009 promoted 20:35 (current -> ~/.local/share/jet-seeds/a0_009): release bc-rel6 of dev 83ba0cbba, identity jet@0.0.1#d50144769fe353b66d10486a38f2736061a64c2365adfbbdeebeabffaf2298ad, jet sha256 dc558226743b04cf. Evidence: s1/s2 rows 0, s3 rc 0 rows 0 with fixed point s2 == s3 (jet and jet.o byte-identical), fixture gate 1 and gate 2 each 85 pass 14 skip. Speed rows accepted by the owner during the IR cutover (allowlist $JET_SCRATCH_ROOT/discovery/perf/bc-rel6/phase-allow.tsv; #5090). Smoke: loop_forms and errors goldens match."
-        },
-        {
-          "at": "2026-10-21",
-          "by": "agent",
-          "text": "B2 DONE (2026-10-21 ~13:55): 148a22db3 retires Compiler/Bootstrap/assemble.mjs and native-compiler.mjs; the compiler builds only in package form (jet build Compiler); every repo caller migrated (116 files incl. the Rust Tests.rs/common readers); chain tooling (selfhost-chain3, cycle, precommit, census, native-preflight, require-receipt, probe-s1) switched to package form. Proof on seed a0_008 (chain b950b0f76): s1 rc=0 rows=0, s2 rc=0 rows=0, receipt admitted; earlier: package-form fixed point and cross-check vs the assembled unit byte-identical; path-independent artifacts (8c9bec28a). B3: cdccf0a99 native C policy rows from comptime (generators replaced by hand-written Jet in 3d5483819, core-sources off Rust tables in 008702e82). Open: expect-producer .expect_fail MIR shape check (old backend, moved to the single-IR lanes); B4 test packages continue."
-        },
-        {
-          "at": "2026-10-21",
-          "by": "agent",
-          "text": "Owner directive 2026-10-21 ~08:00: no caller switches to a Jet script until that script is proven correct (identical behavior on every mode/flag/error path vs the original) AND faster than the original - owner expects Jet to beat JS/bash by a lot (orders of magnitude where feasible). Already-switched tools get their originals restored and callers repointed until each passes. PortReview measured the current ports 5.6-13x SLOWER than the originals on text-heavy work (Census, DecisionIndex, AgentDocFlags, UnicodeNameAsset, MakeFixtures); lane TextPerf is root-causing in Core/runtime/codegen. Owner also ordered a full collect-all golden+UI run on the latest compiler (chain m-8 at HEAD, then fixture-gate over every Examples and tests/ui case) to fix all failures in one sweep."
-        },
-        {
-          "at": "2026-10-21",
-          "by": "agent",
-          "text": "Owner directive 2026-10-21: B5 order is PORT FIRST with accuracy (identical outputs/exit codes/files/messages per mode), THEN a separate pass making every Jet script idiomatic. Script mode landed (7714b9b23: a #!/ file is a script, runs as -A, jet <file> args). Lanes PortLaneA (fold existing multi-file ports into single #! files, then Tools/agent, ci, agent-eval, skills, misc) and PortLaneB (Compiler/JetRuntime, JetBackend, other Compiler, Jetpack/Bootstrap, Tools/perf, packaging) port the 260 remaining port rows. Evidence for the idiomatic phase: ScriptErgonomics measured literal ports at 2.6-3.3x the originals vs idiomatic Jet today at 0.7-1.1x (TestShards 109 orig / 100 literal / 42 idiomatic lines; WebBundleCheck 83/246/78; LexerKeywordRows 100/318/106; Lifecycle 52/170/52)."
-        },
-        {
-          "at": "2026-10-21",
-          "by": "agent",
-          "text": "Owner directives 2026-10-21 ~06:40 (verbatim intent): (1) scripts are ONE file named for what they do (e.g. Tools/perf/WebBundleCheck.jet) - no package.jet, no directories; (2) scripts run regardless of effects, no authority block; (3) a #! first line makes a .jet file directly executable; (4) owner-selected flag: -A / --allow-all (Deno's spelling; --allow with every right); a #! script runs as if -A were given; (5) every generated HTML page is dark mode, never light. Lane ScriptMode implements 2-4 as one mechanism (plus a build cache so unchanged scripts don't recompile); the ported multi-file tools get folded into single files afterwards."
-        },
-        {
-          "at": "2026-10-21",
-          "by": "agent",
-          "text": "Correction to the 05:50 log: the reference E2805 text is 'Invalid HTTP route /users/{id}: brace interpolation is not allowed in route patterns' (the route literal was lost to shell quoting in that entry)."
-        },
-        {
-          "at": "2026-10-21",
-          "by": "agent",
-          "text": "05:50 release-blocker batch progress: 611259cc4 fixes core_imported_rect_identity_ok (Core/Ui and Core/Tui called core.tui.display_width / core.sys.usize_max by full path - E1004 - and built Int{float}; now imports + Int.from_float). Remaining for gate 1: http_route_invalid_literal (port gap: Calls/HttpRouting.jet:927-931 gives the generic 'route path must be a static String' for an interpolated literal and for a prep constant; the reference reports 'Invalid HTTP route : brace interpolation ...' and resolves the prep constant to check its text, line 299 message; its snapshot also recorded Core Http.jet E0302 rows that 329eb6590 legitimately removed), crypto_secret_reflect (E0904 core.reflect.of contract), data_event_payload_types (E0108 payload text), taint/auth_token_keeps_credential_leak_protection (E0722/E0766), secrets_expiry ..._4 (E0113/E0201), task_capture_member_types ICE (copy of captured Holder incomplete), plus 7 never-ported cases to mark report-only."
-        },
-        {
-          "at": "2026-10-21",
-          "by": "agent",
-          "text": "05:45 final state for the owner. RELEASE (B+C, bc-rel3 at 1d7ddb1ba) blocked at fixture gate 1, 18 UNRESOLVED UI rows. Since then: 70a45709f (E0112 secret-bearing by canonical core.crypto identity) fixes crypto_secret_debug, crypto_file_open_bool, crypto_file_seal_bool; serde_derived_decode_keeps_field_results_ok now passes. Remaining blockers (verified on b2-w, 70a45709f): crypto_secret_reflect (E0904 core.reflect.of contract instead of E0112), data_event_payload_types (E0108 payload message lost Core owner text), http_route_invalid_literal (E0302 rows missing), core_imported_rect_identity_ok (new E1004 core.tui display_width position), taint/auth_token_keeps_credential_leak_protection (E0722/E0766 missing), secrets_expiry ..._4 (E0113/E0201 missing), task_capture_member_types_resolve_in_their_module (ICE: copy of captured Holder incomplete - b38921a48's defect-2 fix is incomplete), 7 web_app_*/app_capability_target cases on never-ported program forms (default target, applied rules, #Target marker). Next: fix the 6 regressions + task_capture as one batch, mark the 7 never-ported cases report-only with their cards, rerun the release, promote the seed, then switch chain tooling to jet build Compiler and retire the assemblers."
-        },
-        {
-          "at": "2026-10-21",
-          "by": "agent",
-          "text": "05:37 B2 PROVEN: fixed point in package form. Chain: compiler of 7eae2d7d6 (pstdin-1 s2) -> jet build Compiler -> J1 (rc 0, 132 s; runs programs) -> J1 jet build Compiler -> J2 (rc 0, 141 s) -> J2 jet build Compiler in the same tree -> J3 (rc 0, 154 s): J2 == J3 byte-identical (jet 281847832 bytes and jet.o). No assembler, no generated selfhost unit. Remaining for B2 closure: switch the chain/preflight tooling from native-compiler.mjs assembly to jet build Compiler and retire assemble.mjs/native-compiler.mjs once a seed that can build in package form is promoted (the B+C release, blocked at fixture gate 1 - see previous log)."
-        },
-        {
-          "at": "2026-10-21",
-          "by": "agent",
-          "text": "05:35 B2 MILESTONE: jet build Compiler completes in package form (no assembler): rc=0, 132 s, on the compiler of 7eae2d7d6 (chain pstdin-1). The package-built jet runs programs ('hello from the package-built jet') and rebuilds Compiler/ again (rc=0, 141 s); a same-directory fixed point (j2 -> j3) is running. Root fixes since 05:22: 7eae2d7d6 native process stdin streaming (ProcessChild.stdin, jet_process_stdin_write/close; the last lowering row). B+C release bc-rel3 at 1d7ddb1ba: receipt admitted (11 rows dispositioned), STOPPED at fixture gate 1: 18 UNRESOLVED UI rows (baseline gives no verdict): (a) 7 cases on features the self-hosted checker never supported (web_app_* default target/applied rules program forms, #Target marker) - pre-existing ports; (b) 11 snapshot mismatches, rooted in C step 1 (e728574fa) hand-rewritten snapshots + a lost E0112 secret-bearing check: the CoreCryptoNominal tag (Calls/Reflection.jet:34 sema_call_reflection_secret_bearing) is no longer applied to core.crypto types after the identity change; (c) tests/ui/task_capture_member_types_resolve_in_their_module ICE (SemaRecheck regression case). Fix batch, then rerun release."
-        },
-        {
-          "at": "2026-10-21",
-          "by": "agent",
-          "text": "05:22 B2: jet build Compiler is down to ONE native-lowering row. Fixed tonight (all on dev): 63f7afdc6 variant payload bindings typed in the enum's module; fe36808fb codegen nested-pattern payload types qualified in the enum's module (131 -> 13 -> 1 rows). Last row: native process stdin streaming is missing from the Jet runtime entirely (jet_process_stdin_write/close routes, ProcessChild stdin/stdout/stderr field projections, ProcessStdin handle) - an I9 gap in a Core API for every program, reached by jet_env_model CompilerService.jet. Lane ProcessStdin is porting it. Repro: single-file process.cmd(..).stdin(.Stream).spawn(); child.stdin.write(..)."
-        },
-        {
-          "at": "2026-10-21",
-          "by": "agent",
-          "text": "05:45 state. B+C release chain bc-rel2 at 8c9af2c36: s1/pack/s2 green, preflight receipt running, then gates/s3/fixed point (~06:15). B2: jet build Compiler now passes ALL of sema in package form (fixes dfa1e34ef module bindings, 020d8527e no-body=no-effects, 268ed43ea..2cb2a393c close effects + Test.run, b38921a48/311c47897 codec carriers + member types, 9da18e369 Core calls without facts keep their record row). Remaining B2 blocker: native lowering, 131 rows 'type X without a definition' - dependency types reached as field/payload types of imported types keep their bare spelling in TIR; assigned to SemaRecheck (apply sema_type_resolve_member_type where member types become value/binding types). B3: #5003 done (4acdbf51 CoreHost adapter, ha-1 proven: prep 1+2, Core string call, embed.jet golden); generator conversions blocked: comptime evaluator lacks split/&list.push; Prelude units/derives sources unreachable without '..'; core-sources reads Rust tables. B4: jet test entry + dispatch landed (c3abb2275, f72d8b102); acceptance needs the fixed compiler (release). B5: 12 scripts retired byte-identically + ToolPorts2 continuing; census Tools/script-census.tsv. E: ledger 7aff95cf5 + reintegration 6620e62fb; non-deleting cutover commits landed (e0b4ab119, 32d50e292, 13bff4d7c); Rust removal held: gate not met (6052 items / 3078 tests unexplained; samples show ~30% matcher misses)."
-        },
-        {
-          "at": "2026-10-21",
-          "by": "agent",
-          "text": "Progress 04:55: B2 root causes fixed on dev: (1) dfa1e34ef module-level bindings visible everywhere (sema_scope_resolve_index_at hid an imported/staged constant whose span came from another file: jet build dropped envmodel_collect_comptime_globals silently -> 14 E0712); (2) 020d8527e owner ruling: a callee with no body has no effects; (3) 268ed43ea/aa3e6868e/64d9e7c0e/2cb2a393c close(^value) carries the owner type's close-method effects (MIR lint effect.row PreparedRuntime.close->ArtifactLease.close) and Test.run() handle dispatch (E0311 in every fn test entry). With (1)+(2) jet build Compiler passes all of sema; b2-t (2cb2a393c) is building to clear the last MIR lint. Lanes: HostAdapter landed #5003 (4acdbf51a in-process CoreHost adapter + embed_file base dir), ha-1 green; TestGate landed B4 entry/dispatch (c3abb2275, f72d8b102) - acceptance waits on SemaRecheck (codec bodies compiler_generated exemption; task-in-group); NativeRoutes landed native Dyn reads (c83f1f866, d2020a802 + accessor batch); ToolPorts retired 12 scripts byte-identically (census Tools/script-census.tsv: 241 to port, ToolPorts2 continuing); RustExit committed the parity ledger (7aff95cf5) and reintegration view (6620e62fb): gate NOT met (6052 Rust items / 3078 tests unexplained); port/main areas are re-homed on dev (JetPkgModel->Jetpack/PackageModel, JetStore->Jetpack/Store)."
-        },
-        {
-          "at": "2026-10-21",
-          "by": "agent",
-          "text": "Owner ruling 2026-10-21 03:45 (verbatim): 'If a function has no body, it should have no effects.' Applied in sema effects (Effects/Checks.jet): a named callee with no body in the program contributes only its declared row; it no longer makes the caller's row maximal. Unknown/dynamic callees with no resolved callee stay maximal. Owner also ordered B, C and E fully done by 06:00 and authorized up to 5 Opus subagents plus Haiku helpers: lanes HostAdapter (#5003 + B3), TestGate (B4), RustExit (E + C step 2), ToolPorts (B5), NativeRoutes (native HTTP client / Dyn routes for Jet tooling); orchestrator owns B2, integration and release."
-        },
-        {
-          "at": "2026-10-21",
-          "by": "agent",
-          "text": "Correction + exact repro. (a) Retracted: Jetpack/Foundation/Source/Syntax.jet is not a removable duplicate - Compiler/JetFoundation/Data/Syntax is registry data, not compiled into the jet closure (absent from sources.list, not exported by jet_foundation in package form), so the Jetpack mirror is the compiled home of those spellings; an attempted cutover was reverted before commit. (b) The B2 blocker is a compiler defect with a minimal repro (scratch fxprobe/P6 vs P7): package A declares COMPTIME_MARK :: prep { \"$\" }; package App does m[name.removeprefix(COMPTIME_MARK)] = 1. jet check passes; jet build drops the function silently in comptime.bodies (body recheck): 'the assignment ... checked to no statement without a report'. It depends ONLY on the constant's byte offset in its defining file: offset 0 builds (P6), after 6 KB of other prep constants it fails (P7). Binding the key first, or reading the constant into a local first, avoids it; a literal prefix avoids it. So a span from the constant's defining module leaks into the user module's statement check during the recheck. Instrumenting the silent exits of assignment checking (place / value / source line) to name the site."
-        },
-        {
-          "at": "2026-10-21",
-          "by": "agent",
-          "text": "B2 blocker, root-cause narrowing (b2-m = 7edb7c133): jet build Compiler fails with 14 E0712 (jet_cli authority exceeded by a maximal row). New instrumentation (7edb7c133: chains name the unknown callee and why) shows the maximal source: function envmodel_collect_comptime_globals (jet_env_model ModuleEval.jet) 'has no body in this program' - sema produced no TFunc for it, silently. Facts: (1) jet check Compiler/JetCli/run.jet passes with 0 errors (rc 0) - the drop is build-only, i.e. on the comptime-evaluation path; (2) inspect rights does not reproduce either; (3) making jetpack_foundation COMPTIME_MARK a plain literal does not fix the build (still 14 E0712), so it is not that constant specifically; (4) minimal cross-package prep-constant repros do not reproduce. Suspect: a function whose final TFunc comes from the comptime run's cached/staged module check (CheckProgram sema_comptime_append_checked_function / Pipeline staging 'declared' modules joined with value rows) is never rechecked after its constants land. Separate one-home defect found on the way: Jetpack/Foundation/Source/Syntax.jet re-declares registry spellings as prep constants (COMPTIME_MARK, DEFAULT_SOURCE, REF_PROVIDER_AT, TYPE_STRING ...) that jet_foundation's Data/Syntax already owns (I7/I8). Also: jet build --json ICEs with no cause (defect #6 class)."
-        },
-        {
-          "at": "2026-10-21",
-          "by": "agent",
-          "text": "B5 (tooling in Jet), first batches on dev: 697f84338 LexerKeywordRows.jet replaces lexer-keyword-rows.mjs (+test as #Test; --check passes, byte-identical); 9b78d300e Tools/agent/RuntimeGenerators package replaces gen-runtime-trap/scheduler/observe/test/services-messages generators (Words/Registry/Trap/Messages modules; all six outputs byte-identical except the Generated-by line; --check collect-all; 3 #Test). gen-runtime.mjs and s5 gates run them via $JET. Found and fixed: core.http failed to check for every program (E1004 Http.jet full-path core.http.server.response; E0902 Server.jet unimported core.encoding.json) -> 329eb6590. GAP (blocks porting gen-runtime-host-errors): the native Jet backend has no C-ABI route for the HTTP client (jet_http_client_get; HTTPError has no native enum layout) nor for Dyn get_key (jet_dyn_get_key), so a Jet program that reads JSON through Dyn or fetches over HTTP does not build natively (E2104). Parked port at scratch parked/HostErrors.jet. Tools needing JSON/HTTP wait on those routes; no hand-rolled JSON parser substitutes. Seed note: Jet tools need a compiler built from current sources (seed reads the old lowercase Core layout) until the B+C release is promoted; gates take it from $JET."
-        },
-        {
-          "at": "2026-10-21",
-          "by": "agent",
-          "text": "B2 2026-10-21 ~00:15: Jetpack package boundaries follow real use. The compiler's assembled unit (Compiler/Bootstrap/sources.list) is a proven-sufficient closure; Jetpack files outside it that depend (transitively) on owner-gated Core APIs moved to Jetpack-only packages that jet does not depend on: Jetpack/Integrations (jetpack_integrations: C++/Dart/Lua/Octave/Perl/PHP/PowerShell/R/Ruby binders, the Rust FFI bridge incl. RuntimeProviders/WrapperEmit/Externs/BuildBridge, MCP, compiler extensions, provider facts JSON, bounded JSON, renderer registry, C artifact validation/import assembly) and Jetpack/Secrets (jetpack_secrets: RepoSecrets). They are still checked and their errors reported; they no longer block building jet. OWNER-GATED (new public Core API, not worked around in Jetpack): (1) core.encoding.json parse with caller limits (json.parse(text, limits:)) used by JsonBounded; (2) core.crypto.vault recipient API (create_identity, add_recipient, recipients, add, remove, names) used by RepoSecrets. Integrations also carries the RustBridge embed_file paths into crates/ (E0957, escapes project) which the E relocation (D-FFI-RUST1=A, as on cutover-ready Runtime/*.rs) resolves."
-        },
-        {
-          "at": "2026-10-20",
-          "by": "Main",
-          "text": "B2 progress (dev up to 6e355545b): Authority.jet moved into jet_foundation (broke the jet_foundation<->Jetpack/Foundation cycle). Jetpack model groups are packages (jetpack_foundation, jetpack_trust_root, jet_pkg_model, jet_env_model, jetpack_trust, jetpack_artifact_store) with acyclic layering; 330 files got explicit cross-package imports (1600 names, declared-dep edges only; generator $JET_STATE_ROOT/scratch/Main/b2-imports.mjs). Tests dirs (compiler + Jetpack) are <pkg>_tests packages with ../../<Dir> deps. Sema: dependency imports resolve names declared in any member file (namespace table); module constants are public by default (S18) and resolve own declarations before export copies (the earlier attempt broke self-compile: qualified const reads lost staged values; fixed in 6e355545b, pending self-compile proof). Known interim: in package form jet_env_model uses its own subprocess comptime_evaluate (jet __jetpack) instead of jet_cli's in-process one — same evaluator, extra process; an injected evaluator can replace it later. Jetpack/Bootstrap/assemble.mjs already fails at a0_007 (Threads.jet slice drift) — it retires with B2/B5. Next: package census with a 6e355545b-built compiler, fix the remaining per-package errors in one batch, then jet build Compiler/JetCli."
-        },
-        {
-          "at": "2026-10-20",
-          "by": "Main",
-          "text": "B2 package-graph findings (2026-10-20, from checking each Compiler/<Pkg> as a real package with the b2 install). Fixed and committed: loader namespace fallback cascade; missing package deps (jet_cli→jet_optimizer/jet_sema, jet_sema→jet_lexer, compiler_bootstrap→its host imports); Tests/ dirs are own <pkg>_tests packages (≈190 test programs with fn run had joined the namespaces); self-imports removed; Data/ registries are own data packages; codegen nominal scope across namespace member files and across package imports (SIGILL 'fallback value disagrees with its joined type'); sema imports resolve through namespace members (E0611/E0107 on jet_lexer TOKEN_*). Remaining structural work: the assembled compiler is ONE namespace that inlines 100 Jetpack files (Foundation 5, PackageModel 65, Store 6, Trust 3, EnvModel 21) and Jetpack's own unit inlines 94 Compiler files. As real packages these form cycles: (1) jet_foundation ↔ Jetpack/Foundation (compiler used authority_holds/authority_parse_right; Jetpack/Foundation TreeHash uses mir_sha256_*) — broken by moving Authority.jet (self-contained, 402 lines) into jet_foundation Policy/; (2) Jetpack/PackageModel and EnvModel use jet_foundation/jet_lexer/jet_parser (AST, CtValue, lex, parse_lexed, record codec, sha256) while jet_cli/jet_driver/jet_semindex/jet_devserver use PackageModel/EnvModel/Store/Trust; EnvModel calls jet_cli's in-process comptime_evaluate. Plan: Jetpack model groups become packages that depend on jet_foundation/jet_lexer/jet_parser (downward only); jet_driver/jet_cli depend on them; EnvModel's comptime_evaluate becomes an injected callback (the jet_cli implementation passed in), removing the EnvModel→jet_cli edge. Then jet build Compiler/JetCli."
-        },
-        {
-          "at": "2026-10-20",
-          "by": "Main",
-          "text": "Owner ruling 2026-10-20 (in session), Dev context surface: jet dev is the rapid-prototyping loop (web server to view/test a web app; hot reload for games/engines). fn dev(d: Dev) configures it with d.watch(path) (extra watched files/dirs), d.serve(port) (dev web server with browser live reload), d.reload(.Restart | .Hot). Stock defaults: watching on and hot reload (.Hot), so scripts rerun live and web apps rerun or hot reload. Owner quote: 'i guess all three is fine, the default should probably be hot reload and watching so even scripts can rerun live, then web apps can be rerun/hot reloaded without issue'. Implementation note: in-process code swap (.Hot) is engine work tracked separately; until it lands the loop restarts and says so."
-        },
-        {
-          "at": "2026-10-20",
-          "by": "Main",
-          "text": "B1 landed on dev (33f199a4a, c824a74d2, 727bd9080, 97db9a33a, f3e31ad82, 69d368600, faaca1841). fn build(b: Build) returns nothing, b.default(target); Test context; fn run() serves apps (D-ENTRY-RUN1). Stock jet dev (build, run, watch, rebuild on change, errors wait for the next change) and jet test for packages/dirs ported to the Jet CLI; fn test(t: Test) runs before the stock harness. Native test harness now links on the Jet toolchain (TestHarness.jet replaces the Rust-only jet_rt_test_unit/spawn/join and fs/eprint symbols). Runtime defects found and fixed: rt_text_ascii rewrote shared strings in place (process worker lowercased static env literals, so reused ProcessSpecs lost variables); ProcessSpec env/env_remove ordering; test setup print trapped; test report hidden by capture policy; tests from other package member files not collected. Probes on faaca1841 (s2 1:51.70): package tests 2/2, fn test override, sibling-file tests, failing test exits 1 with the report, jet dev rerun on edit and recovery after a syntax error, spec reuse keeps env. Open: fn dev(d: Dev) context not built (needs the same compile-time evaluator host path as fn build; moves with B2); failing-test report prints the stop twice and no per-test fail line. Release chain b1-m running."
-        },
-        {
-          "at": "2026-10-20",
-          "by": "Main",
-          "text": "Correction to the D-ENTRY-CTX1 ratification comment: `fn run(r: Run)` there is Main's extrapolation, not the owner's words. The owner named Build, Dev and Test. Whether `fn run` also takes a Run context (replacing D-ENTRY-VALUE1's `fn run() -> App`) is open and goes to the owner."
-        },
-        {
-          "at": "2026-10-20",
-          "by": "Main",
-          "text": "D-ENTRY-CTX1 ratified (A, amended): `fn build(b: Build)`, `fn dev(d: Dev)`, `fn test(t: Test)`, with no return types. Each entry configures the context it receives, and the command uses that context implicitly. There is no bench command or Bench context; benchmarks are measurement-style tests within `jet test`. The cutover retires BuildContext/BuildPlan returns, TestSuite and BenchSuite, migrates every in-repo caller and example, and revisits D-CONF-ENTRY1/D-CMD-OVERRIDE1 wording. The Compiler workspace fn build is the first user."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "From the repository root, `jet build Compiler/` with the `jet` on PATH builds the compiler with no .mjs assembler, no --runtime-dir, no environment variables and no prlimit. Proof: from a clean checkout, `jet build Compiler/` exits 0 with a scrubbed environment (`env -i PATH=$PATH HOME=$HOME`), and the built jet passes `jet test Compiler --profile cases --filter CLICommands/`.",
-          "status": "met",
-          "metBy": "Orchestrator",
-          "verifiedBy": null,
-          "evidence": "1dc9c80bf4: scrubbed env -i PATH=<built-jet-dir>:$PATH HOME=$HOME jet build Compiler/ exited 0 (wall 62.02s, no .mjs, no --runtime-dir, no env vars, no prlimit); rebuilt jet passed Tests/Cases/CLICommands/ (28 PASS, 0 FAIL, 1 pre-existing KNOWN-FAILING #6418)",
-          "at": "2026-11-22T09:55:59.805Z"
-        },
-        {
-          "n": 2,
-          "text": "`--trace` prints each phase as it ends (wall, CPU s, cores busy, memory) with a summary; `--trace=<file>` writes Chrome trace events Perfetto reads. Proof: `jet test Compiler --profile cases --filter CLICommands/build_trace_phases` and `--filter cli_commands/build_trace_file_is_chrome_trace`.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Holds on dev 72f6b3bb9c: on batch compiler p275, `jet test Compiler --profile cases --filter CLICommands/build_trace` passes 2 of 2, build_trace_phases and build_trace_file_is_chrome_trace (proof row sp-trace in cycle p275).",
-          "at": "2026-11-17T20:34:13.580Z"
-        },
-        {
-          "n": 3,
-          "text": "Root of c1: with the store off, the hermetic executor applies the store s byte limits (BUILD_MAX_ACTION_FILE_BYTES 512 MiB, BUILD_MAX_ACTION_TOTAL_BYTES 1 GiB, Jetpack/Store/Source/Build/Cache.jet) to plain work: build_move_output refuses an output over 512 MiB before renaming it, although it reads no byte, and build_snapshot_declared_inputs and build_stage_inputs read every input whole into memory to stage a copy. The compiler build s core-embed output jet is 528,605,260 B on p325, 8 MB under the limit; the scrubbed build fails there with E3505 \"cache entry exceeds its byte limit\". Fix: the limits bound only bytes held for the store when it is on; publication renames (the cross-device fallback streams the copy); inputs are hashed by streaming and staged by link or read-only bind, not held in memory; a refusal names the action, the file and its size. Proof: an executor test publishing and staging a sparse file over 1 GiB with the store off, plus the c1 scrubbed build, with build peak RSS before and after.",
-          "status": "met",
-          "metBy": "Orchestrator",
-          "verifiedBy": null,
-          "evidence": "1dc9c80bf4: Jetpack/Store/Source/Build/{Cache,Executor}.jet + Jetpack/Foundation/Source/NativeSandbox.jet + RuntimePack.jet: store byte limits apply only when store is on; inputs stream-hashed in 1 MiB chunks and staged by read-only bwrap bind mount on Linux (streaming copy fallback); outputs renamed with streaming atomic fallback; refusals name action, file and size. Executor unit test stages & publishes >1 GiB (1.1e9 B) sparse files with store off and verifies store-on refusal naming action/file/size (1/1 PASS); jet build -O1 --threads 12 Compiler wall 62.43s -> 56.03s (-10.3%), peak_rss 5290.8 MiB -> 5542.3 MiB (parent compile peak); scrubbed build peak_rss 6289.7 MiB; Tests/Guards 211/211 PASS",
-          "at": "2026-11-22T09:56:00.626Z"
-        }
-      ],
-      "refs": [],
-      "tags": [
-        "cli",
-        "build",
-        "packaging",
-        "ux",
-        "wayfinder:task"
-      ],
-      "parentId": "c0fqk5ka",
-      "needsAcceptance": false,
-      "created": "2026-10-18T18:18:42.399Z",
-      "updated": "2026-11-22T09:56:02.144Z",
-      "updatedBy": "Orchestrator",
-      "criteriaLastN": 3,
-      "completedAt": "2026-11-22T09:56:02.144Z"
-    },
-    {
       "id": "c00ys8fj",
       "num": 5085,
       "title": "Scripting ergonomics ballots B1-B10 (list +, slot +=, char-index find, write, top-level statements, fail, Match.named, is_executable, Path.script_dir, Regex lint)",
@@ -52952,130 +52768,6 @@
       "criteriaLastN": 3
     },
     {
-      "id": "c051j6ab",
-      "num": 6809,
-      "title": "App lifecycle events (start, foreground, background, suspend, terminate) and saved screen state on Linux and the web",
-      "body": "Gap card for #6792 c6/c7 (owner order 2026-11-13: one cohesive package covering everything a web app and a native app need, with styling far better than HTML and CSS). D-WEBAPP-SHAPE1=A (ratified 2026-11-13) governs this card; the examples/*.jet and crewboard/* paths name the programs in Docs/proposals/2026-11-13-web-app-framework-shape.md. Its criteria are written from the ratified shape and from the matching example in Docs/proposals/2026-11-13-web-app-framework-shape.md (key G11).",
-      "kind": "feature",
-      "track": "epoch",
-      "epoch": "G6",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-17",
-          "by": "Main",
-          "text": "c4 module-event seed landed 60ce51d3bb (p273). The ModuleStorage case fails at O0 with E0643 (Event<Int> not materialized); returned to IfHole. core-lifecycle.r3 is queued for p275 on p274's compiler."
-        },
-        {
-          "at": "2026-11-17",
-          "by": "Main",
-          "text": "c2 depends on #6447/#6821: ui.saved needs screen-local state (ui.local/ui.saved over a ui.Node identity), which isn't built yet; screens render as String today. The web halves of c1, c3 and c4 wait on #6556 c9, which IfHole now owns starting with the page-runtime promise wait. c4's native half and its module-event seed are queued for p273 and p274."
-        },
-        {
-          "at": "2026-11-17",
-          "by": "Main",
-          "text": "c3 Linux half landed: b5a27a16a4 (p266). Case NativeApp/resume_resubscribes_and_drains_the_queue_on_linux passes on batch compiler p266. The web half waits on #6556 c9."
-        },
-        {
-          "at": "2026-11-17",
-          "by": "Main",
-          "text": "c3 resume (Linux): rebased files in $JET_SCRATCH_ROOT/lanes/Speed-3-3/merge/rb/c3 (on drop_zone) and the case NativeApp/resume_resubscribes_and_drains_the_queue_on_linux in drafts/c3. Not run yet; stage in stage/6809-c3-resume. Paused with Speed-3-3 for ballot rework."
-        },
-        {
-          "at": "2026-11-17",
-          "by": "Main",
-          "text": "c1 Linux half landed: dev dea923069c (Speed-3-3-6809-c1-lifecycle, cycle p259), graph.lifecycle(on_resume:) -> App. On batch compiler p259: cases NativeApp/lifecycle_events_reach_the_app_on_linux 1/0, NativeApp 21/0, Core/App/App.jet PASS. The browser half (Page Lifecycle) and the every_target case remain."
-        },
-        {
-          "at": "2026-11-17",
-          "by": "Main",
-          "text": "Decided (Main, within ratified scope): native.lifecycle(on_resume:) from the framework-shape proposal is spelled graph.lifecycle(on_resume:) -> App, an App method like the landed .tray, .menu_bar and .background. No native module and no app.Plugin/App.with registration mechanism is added (I8). Its meaning is unchanged: a failed on_resume shows its notice at the top of the window that came back. Start, foreground, background, suspend and terminate stay internal. A public app.phase() is on the morning ballot list as D-LIFECYCLE-PHASE1."
-        },
-        {
-          "at": "2026-11-16",
-          "by": "Main",
-          "text": "Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. macOS, Windows, iOS and Android work moved to #6991 (G13)."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "start, foreground, background, suspend and terminate reach the app through window and session events on the Linux desktop and the Page Lifecycle API on the web. native.lifecycle(on_resume:) runs on resume. Proof: `jet test Compiler --profile cases --filter NativeApp/lifecycle_events_reach_the_app_on_every_target` on Linux and the web.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed in b230a9b63e and 7ae60a532b (p280). On the p280 batch compiler 412b58dbb6, `jet test Compiler --profile cases --filter NativeApp/lifecycle_events_reach_the_app_on_every_target` passes 1/1, with Linux steps and the web page steps through the Page Lifecycle API.",
-          "at": "2026-11-17T23:03:09.466Z"
-        },
-        {
-          "n": 2,
-          "text": "ui.saved state, such as the half-typed comment in comment_box, survives a reload on the web and a restart of the Linux app.",
-          "status": "met",
-          "metBy": "Orchestrator",
-          "verifiedBy": null,
-          "evidence": "9d77f4df8b: ui.saved/ui.local in Core/UI/UI.jet + Core/App/App.jet screen-scoped persistence on Linux and Web; Tests/Cases/NativeApp/saved_state_survives_a_restart_or_reload.case PASS, Core/UI 16/16, Core/App 36/36, Tests/Guards 211/211",
-          "at": "2026-11-22T09:34:38.852Z",
-          "proof": {
-            "profile": "cases",
-            "filter": "NativeApp/saved_state_survives_a_restart_or_reload"
-          }
-        },
-        {
-          "n": 3,
-          "text": "On resume, live queries resubscribe and the offline queue sends with no app code, on Linux (resume after the machine sleeps) and the web. Proof: `jet test Compiler --profile cases --filter NativeApp/resume_resubscribes_and_drains_the_queue` on Linux and the web.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed in 169b2d64ab (p282). On the p282 batch compiler bd564de961, `jet test Compiler --profile cases --filter NativeApp/resume_resubscribes_and_drains_the_queue` passes 1/1 on Linux and in a page (remote_at goes through fetch).",
-          "at": "2026-11-17T23:46:33.979Z"
-        },
-        {
-          "n": 4,
-          "text": "D-LIFECYCLE-PHASE1=A is built: app.phase() -> Phase? (None without an initialized app; Phase carries instance identity, observation sequence, visibility Visible/Hidden/Unknown and execution Running/Suspending/Unknown, aggregated over app-owned windows natively and over the document on the web) and app.LIFECYCLE as Event<LifecycleEvent>. Proof: a NativeApp case and a WebBuild case print the phase sequence across hide, show and suspend.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed in 7ae60a532b (p280). On the p280 batch compiler 412b58dbb6, the cases NativeApp/the_phase_follows (1/1) and WebBuild/the_phase_follows_hide_show_and_suspend_in_a_page (1/1) print the phase sequence across hide, show and suspend.",
-          "at": "2026-11-17T23:03:12.062Z"
-        },
-        {
-          "n": 5,
-          "text": "A core.ui text input reports what is typed: a change handler on text_input, carried as a compiler-registered slot role like TextInputDrop (sema CoreRoles/UIHandles, the JetRuntime UIBackends slot table, the native __input path and the web host reading the input's value). It is the step c2 needs below ui.saved, and its name follows the existing core.ui handler naming. Proof: a NativeApp case where typing into a text input runs the handler with the typed text, on Linux and in a page.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed in f06fc960b6 (compiler side, p285) and 2b5d9776a0 (Core use, p286). On the p286 batch compiler ed2b81d713: `jet test Compiler --profile cases --filter NativeApp/typing_in_a_text_input_runs_its_change_handler` passes 1/1 on Linux and in a page, and `jet test Core/UI/UI.jet` passes.",
-          "at": "2026-11-18T01:27:05.396Z"
-        },
-        {
-          "n": 6,
-          "text": "An App screen renders in a page: launch on the web draws the app's screens through the client render, where today it draws nothing. c2's web half needs it. Proof: a WebBuild case whose page shows an App screen's text after launch.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed in 2b5d9776a0 (p286). On the p286 batch compiler ed2b81d713: `jet test Compiler --profile cases --filter WebBuild/an_app_screen_renders_in_a_page` passes 1/1, the screen redrawing after each handler, and `jet test Core/App/App.jet` passes.",
-          "at": "2026-11-18T01:27:07.803Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "parentId": "c0snkbac",
-      "needsAcceptance": false,
-      "created": "2026-11-13T15:13:53.581Z",
-      "updated": "2026-11-22T09:34:40.590Z",
-      "updatedBy": "Orchestrator",
-      "criteriaLastN": 6,
-      "completedAt": "2026-11-22T09:34:40.590Z"
-    },
-    {
       "id": "c0s5hn28",
       "num": 6810,
       "title": "Desktop install, auto-update and signing on Linux: AppImage and Flatpak, with signed delta updates",
@@ -57145,6 +56837,11 @@
         {
           "at": "2026-11-25",
           "by": "Orchestrator",
+          "text": "Correction: my earlier note on 'c20' (core_lower_entry_roots has no case) concerns the D-CORE-LOWER1 entry-half criterion. Earlier meets used list positions; they are corrected (n=18, 32, 38 reopened; n=19, 34, 39 met; n=33 re-evidenced)."
+        },
+        {
+          "at": "2026-11-25",
+          "by": "Orchestrator",
           "text": "c20 sweep (batch 43): the four SelfhostTerminators jet_lexer cases that had turned the ffi and export lines red now pass. But the named proof, cases --filter core_lower_entry_roots, matches no case. No Tests/Cases file covers the root kinds yet, so c20 needs one case per root kind (job, C export, CLI command, callback, other roots): each proves the root is kept and an unreached entry function has no lowered body (IR or symbol listing). Queued for the next free G1 implementer."
         },
         {
@@ -57547,20 +57244,20 @@
         {
           "n": 18,
           "text": "Every Core member that has a CORE_CALLS row is declared in Core source, and the compiler's twin of Core's API is deleted in one cutover: Compiler/Prelude/Core.jet's member rows and Registry/CoreCalls.jet, CoreCallRows.jet, CoreCallExtensions.jet, CoreSignatures.jet, CorePlatformSignatures.jet, CoreHostSignatures.jet and CoreValueSignatures.jet (census F4, F19). Proof: `git ls-files Compiler/JetFoundation/Source/Registry | grep -E 'Core(Calls|CallRows|CallExtensions|[A-Za-z]*Signatures)\\.jet'` prints nothing and `jet test Tests/Guards --filter core_declarations` passes. (was #6151 c2)",
-          "status": "met",
-          "metBy": "Orchestrator",
-          "verifiedBy": null,
-          "evidence": "batch 43 (dev 70ff64f2288, master 911872e93df), run43d on the batch compiler built from that tree: cases Tests/Cases/RuntimeInterface/host_leaf_user_and_core_lower_alike.case PASS (IR dump comparison; commit 6722dc76ef2 lands it).",
-          "at": "2026-11-25T09:31:00.671Z"
-        },
-        {
-          "n": 19,
-          "text": "A user call and a Core call to the same jet.runtime host leaf lower to the same IR shape. Proof: `jet test Compiler --profile cases --filter host_leaf_user_and_core_lower_alike` (an IR dump comparison). (was #6151 c12)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:13:56.333Z"
+          "at": "2026-11-25T10:45:16.710Z"
+        },
+        {
+          "n": 19,
+          "text": "A user call and a Core call to the same jet.runtime host leaf lower to the same IR shape. Proof: `jet test Compiler --profile cases --filter host_leaf_user_and_core_lower_alike` (an IR dump comparison). (was #6151 c12)",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "batch 43 (dev 70ff64f2288, master 911872e93df), run43d on the batch compiler built from that tree: cases Tests/Cases/RuntimeInterface/host_leaf_user_and_core_lower_alike.case PASS (IR dump comparison; landed with 6722dc76ef2).",
+          "at": "2026-11-25T10:45:25.208Z"
         },
         {
           "n": 20,
@@ -57686,11 +57383,11 @@
         {
           "n": 32,
           "text": "A check rule hears a module constant (including a constant naming a constant) and a `Path{…}` literal as known values, as sema_rule_known_row's doc comment states; today only plain literal rows are heard (probe rule3 on tip18), so a static-path rule would wrongly reject router.get(CACHE_PATH, …) and router.custom(BAN, …).",
-          "status": "met",
-          "metBy": "Orchestrator",
+          "status": "open",
+          "metBy": null,
           "verifiedBy": null,
-          "evidence": "batch 43 (dev 70ff64f2288, master 911872e93df), run43d on the batch compiler built from that tree: ui Tests/UI/MarkerDeclarations/check_rule_rejection_keeps_its_source_place.jet PASS: a module mixing check-rule rejections and ordinary errors prints them in source order (a91ab9c80d0).",
-          "at": "2026-11-25T09:31:02.351Z",
+          "evidence": "",
+          "at": "2026-11-25T10:45:18.479Z",
           "proof": {
             "profile": "cases",
             "filter": "Metaprogramming/check_rule_hears_constants_and_path_literals"
@@ -57702,8 +57399,8 @@
           "status": "met",
           "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "batch 43 (dev 70ff64f2288, master 911872e93df), run43d on the batch compiler built from that tree: CompilerArg.written lets a check rule hear the parts an interpolated String literal spells (cf8002af184); core.http's StaticRoutes rule refuses an interpolated route from them (8d188f26848, Core/HTTP/HTTP.jet:816). ui Tests/UI/http_route_invalid_literal.jet PASS, still printing 'brace interpolation is not allowed in route patterns'. No new surface beyond the CompilerCall facts.",
-          "at": "2026-11-25T09:31:04.604Z",
+          "evidence": "batch 43 (dev 70ff64f2288, master 911872e93df), run43d on the batch compiler built from that tree: ui Tests/UI/MarkerDeclarations/check_rule_rejection_keeps_its_source_place.jet PASS: a module mixing check-rule rejections and ordinary errors prints them in source order (a91ab9c80d0).",
+          "at": "2026-11-25T10:45:32.402Z",
           "proof": {
             "profile": "ui",
             "filter": "http_route_path_type"
@@ -57712,11 +57409,11 @@
         {
           "n": 34,
           "text": "A check rule can tell an interpolated String literal from a value known only at run time (both are heard as value == None today, probe rule on tip18), through a fact within D-CORE-CHECK1's CompilerCall surface, so a Core static-route rule keeps http_route_invalid_literal's 'brace interpolation is not allowed in route patterns' message. If no ratified surface can carry it, the shape goes on a ballot first.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-24T07:11:52.323Z",
+          "evidence": "batch 43 (dev 70ff64f2288, master 911872e93df), run43d on the batch compiler built from that tree: CompilerArg.written lets a check rule hear the parts an interpolated String literal spells (cf8002af184); core.http's StaticRoutes rule refuses an interpolated route from them (8d188f26848, Core/HTTP/HTTP.jet:816). ui Tests/UI/http_route_invalid_literal.jet PASS, still printing 'brace interpolation is not allowed in route patterns'. No new surface beyond the CompilerCall facts.",
+          "at": "2026-11-25T10:45:28.134Z",
           "proof": {
             "profile": "ui",
             "filter": "http_route_invalid_literal"
@@ -57752,20 +57449,20 @@
         {
           "n": 38,
           "text": "D-FORM-FIELD1=A is built: Prelude declares FieldRef<Model, T> (only the compiler builds one); where FieldRef<M, T> is expected, a bare .name checks name against M's visible stored fields and unifies T with its type, an unknown name is Jet.UnknownField at the selector listing M's fields, and a chain, payload or upper-case selector is refused; web.form(Model, …) returns WebFormTyped<Model>; validate, set, blur and focus take FieldRef; inside a binding-less loop .name still reads the loop item and the error names the loop binding; forms.typed<Model> refuses an unknown name at run time with WebFormError.Missing. Proof: golden Examples/Web forms example passes on o0/o1/o2 and new ui snapshots for the unknown field and the loop case pass.",
-          "status": "met",
-          "metBy": "Orchestrator",
-          "verifiedBy": null,
-          "evidence": "batch 43 (dev 70ff64f2288, master 911872e93df), run43d on the batch compiler built from that tree, O0: ui PASS for the review's probes: Tests/UI/template_paste_dunder_member.jet (template declares and calls #{hook} = __hidden_hook, refused), Tests/UI/template_paste_core_dunder_call.jet (args.#{hook} = __cli_is_int, refused), Tests/UI/template_paste_core_trait_dunder_member.jet and Tests/UI/core_trait_dunder_member_user_impl.jet (non-Core impl of a Core trait's __ member, refused).",
-          "at": "2026-11-25T09:31:06.284Z"
-        },
-        {
-          "n": 39,
-          "text": "A user marker template cannot paste a reserved `__` name. Fresh review (G1Generation-2, 2026-11-24) found that on tip23 a user template can declare and call `#{hook}` with hook `__hidden_hook` (prints `reached the hook`), and can call Core's `args.#{hook}(\"42\")` with hook `__cli_is_int` (prints `true`): Items.jet:1443-1449 gives Core `__` items visibility 2 for any generated code. The `#code` paste already refuses `__pasted_hook`. Pasted names are user-written, so E0067 applies to them: one diagnostic for both paste doors; only Core's own templates may paste a `__` name; and a non-Core impl may not define a Core trait's `__` member. Proof: UI snapshots for both refusals, from the probes in the review (d1_template_dunder.jet, d3b.jet), at O0, on a batch compiler.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-24T13:22:58.856Z"
+          "at": "2026-11-25T10:45:19.499Z"
+        },
+        {
+          "n": 39,
+          "text": "A user marker template cannot paste a reserved `__` name. Fresh review (G1Generation-2, 2026-11-24) found that on tip23 a user template can declare and call `#{hook}` with hook `__hidden_hook` (prints `reached the hook`), and can call Core's `args.#{hook}(\"42\")` with hook `__cli_is_int` (prints `true`): Items.jet:1443-1449 gives Core `__` items visibility 2 for any generated code. The `#code` paste already refuses `__pasted_hook`. Pasted names are user-written, so E0067 applies to them: one diagnostic for both paste doors; only Core's own templates may paste a `__` name; and a non-Core impl may not define a Core trait's `__` member. Proof: UI snapshots for both refusals, from the probes in the review (d1_template_dunder.jet, d3b.jet), at O0, on a batch compiler.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "batch 43 (dev 70ff64f2288, master 911872e93df), run43d on the batch compiler built from that tree, O0: ui PASS for the review's probes: Tests/UI/template_paste_dunder_member.jet (#{hook} = __hidden_hook, refused), Tests/UI/template_paste_core_dunder_call.jet (args.#{hook} = __cli_is_int, refused), Tests/UI/template_paste_core_trait_dunder_member.jet and Tests/UI/core_trait_dunder_member_user_impl.jet (non-Core impl of a Core trait's __ member, refused).",
+          "at": "2026-11-25T10:45:29.541Z"
         }
       ],
       "refs": [],
@@ -57776,7 +57473,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:07.534Z",
-      "updated": "2026-11-25T09:34:39.718Z",
+      "updated": "2026-11-25T10:45:41.408Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 39
     },
@@ -98388,262 +98085,6 @@
       "ratifiedAt": "2026-10-18"
     },
     {
-      "id": "D-ENTRY-CTX1",
-      "cardId": "c0hnphts",
-      "group": "tooling",
-      "title": "Command entry functions take one context named after the command",
-      "situation": "A Jet package can replace what a command does by writing a function named after it, such as fn build or fn test. Today each one takes a differently named context: BuildContext for build, TestSuite for test, and nothing at all for dev. The compiler build is about to become the first large fn build, so the shape should be settled first. We recommend one rule where every entry takes a context named after its command.",
-      "gist": "What parameter should each command entry function take?",
-      "lesson": "A command entry is a function the toolchain calls for a command, like fn build for jet build. Its parameter is the handle it uses to do the work.",
-      "explainer": "",
-      "story": "The Jet compiler will build itself with jet build Compiler/, which runs fn build in the compiler workspace instead of a separate script.",
-      "inWild": "Zig: `pub fn build(b: *std.Build) void` takes a handle named after the command.",
-      "detail": "Ratified today: D-CONF-ENTRY1 (one fn build(b: BuildContext) -> BuildPlan per package), D-CMD-OVERRIDE1 (fn test(suite: TestSuite), fn bench(suite: BenchSuite)), D-ENTRY-VALUE1 (fn run() -> App; fn dev() replaces the dev default). This ballot only renames the parameter types and gives dev and run a context.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Named after the command",
-          "detail": "Every command entry has the same shape: the function is named after the command and takes one context value named after it. Build returns its plan; the others return nothing or their result. A no-parameter override still replaces the default, as ratified.",
-          "technical": "Rename BuildContext to Build, TestSuite to Test, BenchSuite to Bench; add Dev and Run contexts carrying the watch, reload and argument surfaces. One cutover migrates every in-repo caller.",
-          "code": "fn build(b: Build) -> BuildPlan { b.plan() }\nfn dev(d: Dev) { d.watch(\"src/\"); d.serve() }\nfn test(t: Test) { t.run() }\nfn bench(b: Bench) { b.run() }"
-        },
-        {
-          "key": "B",
-          "name": "Keep current names",
-          "detail": "Keep the ratified signatures: `fn build(b: BuildContext) -> BuildPlan`, `fn test(suite: TestSuite)`, `fn bench(suite: BenchSuite)`, and a parameterless `fn dev()` override.",
-          "technical": "No change.",
-          "code": "fn build(b: BuildContext) -> BuildPlan { b.plan() }\nfn test(suite: TestSuite) { suite.run() }\nfn dev() { … }"
-        }
-      ],
-      "comparisons": [],
-      "rec": "A",
-      "recommendation": {
-        "why": "One shape for every command entry is easier to learn and lets dev receive a context like the others.",
-        "gains": [
-          "A beginner learns one rule that covers build, dev, test, bench and run."
-        ],
-        "losses": [
-          {
-            "loss": "Existing build and test entries are renamed.",
-            "mitigation": "One cutover migrates every in-repo caller; the compiler build is the first user."
-          }
-        ],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "B keeps three naming styles for one idea and leaves dev without a context."
-          }
-        ],
-        "tradeoff": "A one-time rename in exchange for one uniform entry rule."
-      },
-      "hybrid": null,
-      "ballotMode": "short",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 4,
-      "reviewPasses": null,
-      "checkInstructions": null,
-      "surface": {
-        "gist": "What parameter should each command entry function take?",
-        "lesson": "A command entry is a function the toolchain calls for a command, like fn build for jet build. Its parameter is the handle it uses to do the work.",
-        "trio": {
-          "current": {
-            "note": "Today the build entry takes a BuildContext, the test entry a TestSuite, and the dev entry nothing.",
-            "code": "fn build(b: BuildContext) -> BuildPlan {\n    b.contribute(\"cache_slots\", 4)\n    return b.plan()\n}"
-          },
-          "wild": {
-            "lang": "Zig",
-            "note": "Zig build scripts take one handle named after the build system: `std.Build`.",
-            "code": "pub fn build(b: *std.Build) void {\n    const exe = b.addExecutable(.{ .name = \"app\" });\n    b.installArtifact(exe);\n}"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Named after the command",
-            "gist": "Each entry takes one context named after its command.",
-            "gains": [
-              "One rule for every command entry.",
-              "The parameter type names the command that calls it."
-            ],
-            "losses": [
-              "Existing `BuildContext`, `TestSuite` and `BenchSuite` callers are renamed in one cutover."
-            ],
-            "proposed": {
-              "code": "fn build(b: Build) -> BuildPlan { b.plan() }\nfn dev(d: Dev) { d.watch(\"src/\"); d.serve() }\nfn test(t: Test) { t.run() }\nfn bench(b: Bench) { b.run() }"
-            }
-          },
-          {
-            "key": "B",
-            "name": "Keep current names",
-            "gist": "Keep BuildContext, TestSuite and BenchSuite; dev takes nothing.",
-            "gains": [
-              "No rename; ratified decisions stand as written."
-            ],
-            "losses": [
-              "Three naming styles for one idea, and `fn dev` cannot receive a context."
-            ],
-            "proposed": {
-              "code": "fn build(b: BuildContext) -> BuildPlan { b.plan() }\nfn test(suite: TestSuite) { suite.run() }\nfn dev() { … }"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "One shape for every command entry is easier to learn and lets dev receive a context like the others.",
-          "gains": [
-            "A beginner learns one rule that covers build, dev, test, bench and run."
-          ],
-          "losses": [
-            {
-              "loss": "Existing build and test entries are renamed.",
-              "mitigation": "One cutover migrates every in-repo caller; the compiler build is the first user."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "B keeps three naming styles for one idea and leaves dev without a context."
-            }
-          ],
-          "tradeoff": "A one-time rename in exchange for one uniform entry rule."
-        }
-      },
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-10-20T18:01:04.436Z",
-      "outcome": "A",
-      "comment": "Ratified A, amended by the owner: entry functions take their context and return nothing. fn build(b: Build), fn dev(d: Dev), fn test(t: Test), fn run(r: Run). The function configures the context it receives, and the toolchain uses that context directly, so there is no BuildPlan return. There is no bench command and no Bench context: benchmarks are measurement-style tests inside test. BuildContext, TestSuite and BenchSuite are retired in one cutover.",
-      "ratifiedAt": "2026-10-20"
-    },
-    {
-      "id": "D-ENTRY-RUN1",
-      "cardId": "c0hnphts",
-      "group": "tooling",
-      "title": "fn run() has no return type; apps serve themselves",
-      "situation": "Jet programs start in fn run. Today an app is written as fn run() returning an App value, which the runtime then serves, and jet dev adds hot reload around it. The command entries just moved to taking a context and returning nothing. This decision makes run match: an app is ordinary logic that calls serve() inside run.",
-      "gist": "Should fn run return the app, or should the app serve itself?",
-      "lesson": "A long-running app keeps the program alive by serving requests; a script finishes and exits. Either can be told apart by what run does, not by its return type.",
-      "explainer": "",
-      "story": "Owner ruling 2026-10-20 after D-ENTRY-CTX1 removed return types from build, dev and test entries.",
-      "inWild": "Go: func main() { http.ListenAndServe(\":8080\", mux) } serves from inside main.",
-      "detail": "Supersedes D-ENTRY-VALUE1 (fn run() -> App). Arguments still reach run as D-APP-ARGS1 ratified. fn dev(d: Dev) remains the override for the dev loop.",
-      "options": [
-        {
-          "key": "A",
-          "name": "App is logic in run",
-          "detail": "fn run() is plain logic with no return type. A long-lived app starts itself by calling serve(), so the program keeps running until stopped, while a script returns and exits. In jet dev the runtime host intercepts serve(), keeps the listener open and swaps handlers on change.",
-          "technical": "serve() registers the app with the runtime host; the dev host owns hot swap at that call. Supersedes D-ENTRY-VALUE1.",
-          "code": "fn run() {\n    web.app()\n        .route(\"/\", home)\n        .serve()\n}"
-        },
-        {
-          "key": "B",
-          "name": "Run returns the app",
-          "detail": "Keep the ratified D-ENTRY-VALUE1 shape where the returned App value is served by the runtime.",
-          "technical": "No change.",
-          "code": "fn run() -> App {\n    return web.app().route(\"/\", home)\n}"
-        }
-      ],
-      "comparisons": [],
-      "rec": "A",
-      "recommendation": {
-        "why": "Entry functions never return values, so an app is ordinary logic that serves itself.",
-        "gains": [
-          "One entry shape for scripts and apps."
-        ],
-        "losses": [
-          {
-            "loss": "Existing fn run() -> App programs are rewritten.",
-            "mitigation": "The entry-point cutover under #5068 migrates every in-repo program."
-          }
-        ],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "B keeps a return-type exception to the no-return entry rule."
-          }
-        ],
-        "tradeoff": "A small migration for one uniform entry rule."
-      },
-      "hybrid": null,
-      "ballotMode": "short",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 4,
-      "reviewPasses": null,
-      "checkInstructions": null,
-      "surface": {
-        "gist": "Should fn run return the app, or should the app serve itself?",
-        "lesson": "A long-running app keeps the program alive by serving requests; a script finishes and exits. Either can be told apart by what run does, not by its return type.",
-        "trio": {
-          "current": {
-            "note": "Today an app returns its App value from run.",
-            "code": "fn run() -> App {\n    return web.app().route(\"/\", home)\n}"
-          },
-          "wild": {
-            "lang": "Go",
-            "note": "Go programs serve from inside main; main returns nothing.",
-            "code": "func main() {\n    http.ListenAndServe(\":8080\", mux)\n}"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "App is logic in run",
-            "gist": "fn run() has no return type; an app starts itself with serve().",
-            "gains": [
-              "Entry functions never return values.",
-              "Scripts and apps share one entry shape."
-            ],
-            "losses": [
-              "Apps written as fn run() -> App are migrated."
-            ],
-            "proposed": {
-              "code": "fn run() {\n    web.app()\n        .route(\"/\", home)\n        .serve()\n}"
-            }
-          },
-          {
-            "key": "B",
-            "name": "Run returns the app",
-            "gist": "Keep fn run() -> App from D-ENTRY-VALUE1.",
-            "gains": [
-              "No migration."
-            ],
-            "losses": [
-              "One entry keeps a return type when the others do not."
-            ],
-            "proposed": {
-              "code": "fn run() -> App {\n    return web.app().route(\"/\", home)\n}"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "Entry functions never return values, so an app is ordinary logic that serves itself.",
-          "gains": [
-            "One entry shape for scripts and apps."
-          ],
-          "losses": [
-            {
-              "loss": "Existing fn run() -> App programs are rewritten.",
-              "mitigation": "The entry-point cutover under #5068 migrates every in-repo program."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "B keeps a return-type exception to the no-return entry rule."
-            }
-          ],
-          "tradeoff": "A small migration for one uniform entry rule."
-        }
-      },
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-10-20T18:05:45.985Z",
-      "outcome": "A",
-      "comment": "Ratified by the owner in chat. Supersedes D-ENTRY-VALUE1: fn run() has no return type; an app is logic in run that calls serve(); jet dev hot swap hooks serve() in the runtime host.",
-      "ratifiedAt": "2026-10-20"
-    },
-    {
       "id": "D-PERSIST-BORROW1",
       "cardId": "c07kbx9u",
       "group": "language",
@@ -124197,187 +123638,6 @@
       "ratifiedAt": "2026-11-17"
     },
     {
-      "id": "D-LIFECYCLE-PHASE1",
-      "cardId": "c051j6ab",
-      "group": "application",
-      "title": "Expose lifecycle observations without promising invisible platform events",
-      "situation": "The app framework can invoke a resume callback, while its foreground and suspension bookkeeping remains internal. Applications may also need to inspect whether their UI is visible and respond to observable lifecycle transitions. Browsers and operating systems do not guarantee a final callback before termination, and hidden does not mean suspended. We recommend a typed observable snapshot and transition event, using the existing event mechanism rather than inventing a second callback registry.",
-      "gist": "Should app lifecycle expose observable state, or remain resume-callback only?",
-      "lesson": "Visibility is not focus, and hidden is not suspended. Lifecycle APIs must distinguish what the platform observed from what it cannot promise.",
-      "explainer": "Beginner: app.phase reads the last observed snapshot, not guaranteed present physical state. Expert: visibility and execution are separate; the resume adapter preserves its existing focus/wake trigger and asynchronous Notice handling through the same event point.",
-      "story": "Bo stops expensive redraws when no app window is visible. He still saves changes as they happen, because a browser or process can disappear without a termination event.",
-      "inWild": "document.addEventListener(\"visibilitychange\", () => {\n    if (document.visibilityState === \"hidden\") save();\n});",
-      "detail": "Core/App/App.jet:2422-2426 stores graph.lifecycle(on_resume:). Its :3722-3762 tracks focus/sleep moments, tests away-to-back and launches the resume task asynchronously. That implementation is not already an Event subscription. Focus regain is not proof of visibility change, and a public snapshot cannot silently redefine the existing resume trigger.\n\nOn gate-p261, probes2/lifecycle-config.jet registers a callback and prints resume configured without opening a UI. probes2/app-phase.jet rejects app.phase with E0102. These probes establish registration and missing API only, not observed transitions, Linux coverage or browser behavior. Card #6809 describes Linux work and an unfinished browser half; those reports are context, not this review's executed platform verification.\n\nMDN Page Visibility distinguishes visibility from focus and documents background throttling. MDN unload warns about missed delivery and back/forward-cache effects. Both invalidate guaranteed final callbacks and hidden-equals-suspended reasoning. Native window mapped/minimized observations also do not prove compositor occlusion. The public contract must describe last observations, unknowns, source loss and app-instance ownership, not promise continuously current physical state.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Observed snapshot and one typed event",
-          "detail": "Add app.phase() -> Phase? and app.LIFECYCLE as Event<LifecycleEvent> over separate visibility/execution observations.",
-          "technical": "None means no active initialized app instance, including after disposal. Phase carries app-instance identity, observation sequence, visibility (Visible/Hidden/Unknown) and execution (Running/Suspending/Unknown). It is the last published observation, not guaranteed current physical state. Native visibility aggregates app-owned mapped/non-minimized windows, not compositor occlusion; browser visibility follows the document. With several windows, any known visible means Visible; all known hidden means Hidden; otherwise Unknown. Focus is never substituted.\n\nLifecycleEvent carries instance identity, ordered observation sequence, reason and before/after Phase. Reasons distinguish visibility change, sleep preparation, wake, focus regain and observed closing. Suspending means observed preparation, not proof the process is frozen. Closing is best effort, never a persistence guarantee. Unknown covers unsupported/lost observation sources. Ignore events from disposed instances. A new instance starts with its own sequence and fresh observations; subscriptions are scoped to the live app lifetime.\n\nSerialize platform observations on the app dispatcher, publish the snapshot before Event handlers, and queue reentrant publication. Order is observed arrival, not a reconstructed global OS clock. Coalesce duplicate state observations without suppressing distinct wake/focus recovery reasons. Both Linux and browser adapters must supply this contract, including source failure/Unknown and multiwindow cases. Observation cannot stay gated solely on registering the old resume helper.\n\nMigrate graph.lifecycle into an adapter on that one event identity. Preserve its existing away-to-back predicate, focus/wake behavior, asynchronous task launch and Notice handling; do not redefine resume as Hidden-to-Visible. Multiple tasks retain existing semantics rather than adding serialization accidentally. Remove the separate resume registration storage after the adapter cutover. Use ordinary Event scopes/order/inspection, not another callback list. Save incrementally; no implementation can dispatch after forced death or guarantee a callback before every freeze.",
-          "code": "phase: app.phase()\nif phase != None {\n    if phase.visibility == .Hidden -> pause_redraws()\n}\napp.LIFECYCLE.on(scope, observe_lifecycle)"
-        },
-        {
-          "key": "B",
-          "name": "Keep resume-only public API",
-          "detail": "Keep the existing comeback callback and no public snapshot/general transition point.",
-          "technical": "This is the smallest implementation and API surface. Preserve current asynchronous Notice-producing recovery after focus/sleep away-to-back; do not falsely describe it as visibility observation. Apps needing only recovery avoid a new public state model.\n\nIt does not serve visibility-aware redraw/polling needs through the app API. Those requirements would remain unsatisfied rather than silently receiving a separate target-specific lifecycle registry. No claimed frontend completeness or final-callback guarantee follows from keeping the helper.",
-          "code": "graph.lifecycle(on_resume: recover)"
-        },
-        {
-          "key": "C",
-          "name": "One primary phase enum",
-          "detail": "Expose a best-effort Start/Foreground/Background/Suspended/Terminating label plus Unknown and typed transitions.",
-          "technical": "Define a primary label, not a mandatory ordered lifetime. Terminating has highest precedence, then observed sleep preparation, then known visibility; Start lasts until initial observation and Unknown represents source loss. Foreground means visible, not focused. Suspended must be documented as the last preparation observation, not proof that code currently cannot run.\n\nThis is a compact, discoverable state readout. It uses the same app identity, typed event, scope, arrival ordering and resume adapter as A; no reduced notification workload is used to make it look cheaper. The single label loses visibility information while reporting sleep/shutdown, and its Suspended spelling needs careful documentation. Never use Terminating as the sole save point.",
-          "code": "phase: app.phase()\n// Primary label, not guaranteed transition order:\n// Start | Foreground | Background | Suspended | Terminating | Unknown"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Web Page Visibility",
-          "note": "Visibilitychange reports visibility, not focus or guaranteed termination.",
-          "code": "document.addEventListener(\"visibilitychange\", () => {\n    if (document.visibilityState === \"hidden\") save();\n});",
-          "source": "https://developer.mozilla.org/en-US/docs/Web/API/Page_Visibility_API"
-        },
-        {
-          "lang": "Web unload",
-          "note": "Unload is not reliably delivered; it cannot be the sole save contract.",
-          "code": "// Save incrementally; do not rely only on unload.",
-          "source": "https://developer.mozilla.org/en-US/docs/Web/API/Window/unload_event"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "why": "Separate observations answer visibility/recovery needs without conflating focus, execution and shutdown. One existing event mechanism can also preserve the resume helper's behavior.",
-        "gains": [
-          "Independent, explicit observation axes.",
-          "No second lifecycle callback registry."
-        ],
-        "losses": [
-          {
-            "loss": "Observations can be stale, unknown or undelivered before death.",
-            "mitigation": "Expose last-observed meaning and source loss; save incrementally and never require a final callback."
-          },
-          {
-            "loss": "Linux/browser observation and resume-adapter migration are substantial platform work.",
-            "mitigation": "Require both adapters, multiwindow/source-loss cases and unchanged focus/wake/Notice behavior before declaring implementation complete."
-          }
-        ],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "Best for recovery-only applications, but leaves visibility-aware work unsupported."
-          },
-          {
-            "key": "C",
-            "reason": "A compact primary status, but necessarily hides independent visibility during sleep/shutdown and needs a potentially misleading Suspended label."
-          }
-        ],
-        "tradeoff": "Richer truthful observations, not universal platform guarantees."
-      },
-      "hybrid": null,
-      "ballotMode": "full",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": {
-        "adversarial": "Author model family: OpenAI GPT. Adversarial model family: OpenAI GPT. Fresh agent: BallotReview2. Separated registration probes from untested platform coverage and corrected current callback versus proposed Event implementation. Added last-observed/source-loss semantics, app identity, multiwindow visibility, exact event access, ordering and preservation of existing asynchronous focus/wake recovery."
-      },
-      "checkInstructions": "Gate-p261 probes establish callback registration and rejection of app.phase only. Source/MDN checks establish framing; no real UI/platform run is claimed. Acceptance requires Linux and browser observation, source loss, multiwindow aggregation, disposed/new app identity, sequence/order, reentrant events, scoped cleanup, focus versus visibility, unchanged async Notice behavior and no fabricated termination guarantees.",
-      "surface": {
-        "gist": "Expose last-observed lifecycle snapshots and typed transitions, or retain only resume recovery?",
-        "lesson": "Visibility differs from focus and suspension. Snapshots can be stale, sources can disappear, and final callbacks are not guaranteed.",
-        "trio": {
-          "current": {
-            "note": "Resume registration works; app.phase is rejected. No real UI transition was tested.",
-            "code": "graph.lifecycle(on_resume: recover)\n// app.phase() produces E0102."
-          },
-          "wild": {
-            "lang": "Web",
-            "note": "Visibilitychange reports visibility; unload is unreliable.",
-            "code": "document.addEventListener(\"visibilitychange\", save);"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Snapshot and typed event",
-            "gist": "Expose independent observations through app.phase and the existing Event mechanism.",
-            "gains": [
-              "Visibility/execution stay separate; resume adapter shares one point."
-            ],
-            "losses": [
-              "Stale/unknown observations and substantial platform migration."
-            ],
-            "proposed": {
-              "code": "phase: app.phase()\nif phase != None {\n    if phase.visibility == .Hidden -> pause_redraws()\n}\napp.LIFECYCLE.on(scope, observe_lifecycle)"
-            }
-          },
-          {
-            "key": "B",
-            "name": "Resume-only API",
-            "gist": "Keep the current asynchronous focus/wake comeback helper.",
-            "gains": [
-              "Small public contract for recovery-only apps."
-            ],
-            "losses": [
-              "Visibility-aware work remains unsupported."
-            ],
-            "proposed": {
-              "code": "graph.lifecycle(on_resume: recover)"
-            }
-          },
-          {
-            "key": "C",
-            "name": "Primary phase enum",
-            "gist": "Expose one best-effort primary label and the same typed transitions.",
-            "gains": [
-              "Compact readout with defined precedence."
-            ],
-            "losses": [
-              "Sleep/shutdown labels hide independent visibility."
-            ],
-            "proposed": {
-              "code": "phase: app.phase()\n// Includes Unknown; no guaranteed transition order."
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "Expose independent observations without changing existing resume semantics or adding another event system.",
-          "gains": [
-            "Honest visibility and recovery contract."
-          ],
-          "losses": [
-            {
-              "loss": "Observations may be stale or absent.",
-              "mitigation": "Report Unknown/source loss and save incrementally."
-            },
-            {
-              "loss": "Platform and adapter work is real.",
-              "mitigation": "Require Linux/browser cases and unchanged asynchronous focus/wake Notice behavior."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "Sufficient for recovery, not visibility-aware work."
-            },
-            {
-              "key": "C",
-              "reason": "Simpler display, but loses independent state information."
-            }
-          ],
-          "tradeoff": "Portable meaning, not universal observation."
-        }
-      },
-      "draftedBy": "Main",
-      "reviewedBy": "BallotReview2",
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-11-17T12:31:18.894Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-11-17"
-    },
-    {
       "id": "D-HOST-CALLBACK1",
       "cardId": "c0sdz4q0",
       "group": "language",
@@ -139178,6 +138438,69 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-25T10:45:41.409Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0e6znz4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-25T10:45:32.402Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0e6znz4",
+      "note": "#33"
+    },
+    {
+      "at": "2026-11-25T10:45:30.504Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-reopen",
+      "ref": "c0e6znz4",
+      "note": "#33: Re-met with the right evidence (it carried another criterion's)."
+    },
+    {
+      "at": "2026-11-25T10:45:29.541Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0e6znz4",
+      "note": "#39"
+    },
+    {
+      "at": "2026-11-25T10:45:28.134Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0e6znz4",
+      "note": "#34"
+    },
+    {
+      "at": "2026-11-25T10:45:25.208Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0e6znz4",
+      "note": "#19"
+    },
+    {
+      "at": "2026-11-25T10:45:19.499Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-reopen",
+      "ref": "c0e6znz4",
+      "note": "#38: Met by mistake: the orchestrator used list positions instead of criterion numbers. This criterion is not proven."
+    },
+    {
+      "at": "2026-11-25T10:45:18.479Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-reopen",
+      "ref": "c0e6znz4",
+      "note": "#32: Met by mistake: the orchestrator used list positions instead of criterion numbers. This criterion is not proven."
+    },
+    {
+      "at": "2026-11-25T10:45:16.710Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-reopen",
+      "ref": "c0e6znz4",
+      "note": "#18: Met by mistake: the orchestrator used list positions instead of criterion numbers. This criterion is not proven."
+    },
     {
       "at": "2026-11-25T09:34:39.718Z",
       "by": "Orchestrator",

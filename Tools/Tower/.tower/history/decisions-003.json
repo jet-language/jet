@@ -79492,6 +79492,446 @@
       "outcome": "A",
       "ratifiedAt": "2026-10-29",
       "retiredAt": "2026-11-25T02:21:36.969Z"
+    },
+    {
+      "id": "D-ENTRY-CTX1",
+      "cardId": "c0hnphts",
+      "group": "tooling",
+      "title": "Command entry functions take one context named after the command",
+      "situation": "A Jet package can replace what a command does by writing a function named after it, such as fn build or fn test. Today each one takes a differently named context: BuildContext for build, TestSuite for test, and nothing at all for dev. The compiler build is about to become the first large fn build, so the shape should be settled first. We recommend one rule where every entry takes a context named after its command.",
+      "gist": "What parameter should each command entry function take?",
+      "lesson": "A command entry is a function the toolchain calls for a command, like fn build for jet build. Its parameter is the handle it uses to do the work.",
+      "explainer": "",
+      "story": "The Jet compiler will build itself with jet build Compiler/, which runs fn build in the compiler workspace instead of a separate script.",
+      "inWild": "Zig: `pub fn build(b: *std.Build) void` takes a handle named after the command.",
+      "detail": "Ratified today: D-CONF-ENTRY1 (one fn build(b: BuildContext) -> BuildPlan per package), D-CMD-OVERRIDE1 (fn test(suite: TestSuite), fn bench(suite: BenchSuite)), D-ENTRY-VALUE1 (fn run() -> App; fn dev() replaces the dev default). This ballot only renames the parameter types and gives dev and run a context.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Named after the command",
+          "detail": "Every command entry has the same shape: the function is named after the command and takes one context value named after it. Build returns its plan; the others return nothing or their result. A no-parameter override still replaces the default, as ratified.",
+          "technical": "Rename BuildContext to Build, TestSuite to Test, BenchSuite to Bench; add Dev and Run contexts carrying the watch, reload and argument surfaces. One cutover migrates every in-repo caller.",
+          "code": "fn build(b: Build) -> BuildPlan { b.plan() }\nfn dev(d: Dev) { d.watch(\"src/\"); d.serve() }\nfn test(t: Test) { t.run() }\nfn bench(b: Bench) { b.run() }"
+        },
+        {
+          "key": "B",
+          "name": "Keep current names",
+          "detail": "Keep the ratified signatures: `fn build(b: BuildContext) -> BuildPlan`, `fn test(suite: TestSuite)`, `fn bench(suite: BenchSuite)`, and a parameterless `fn dev()` override.",
+          "technical": "No change.",
+          "code": "fn build(b: BuildContext) -> BuildPlan { b.plan() }\nfn test(suite: TestSuite) { suite.run() }\nfn dev() { … }"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "One shape for every command entry is easier to learn and lets dev receive a context like the others.",
+        "gains": [
+          "A beginner learns one rule that covers build, dev, test, bench and run."
+        ],
+        "losses": [
+          {
+            "loss": "Existing build and test entries are renamed.",
+            "mitigation": "One cutover migrates every in-repo caller; the compiler build is the first user."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B keeps three naming styles for one idea and leaves dev without a context."
+          }
+        ],
+        "tradeoff": "A one-time rename in exchange for one uniform entry rule."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 4,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "What parameter should each command entry function take?",
+        "lesson": "A command entry is a function the toolchain calls for a command, like fn build for jet build. Its parameter is the handle it uses to do the work.",
+        "trio": {
+          "current": {
+            "note": "Today the build entry takes a BuildContext, the test entry a TestSuite, and the dev entry nothing.",
+            "code": "fn build(b: BuildContext) -> BuildPlan {\n    b.contribute(\"cache_slots\", 4)\n    return b.plan()\n}"
+          },
+          "wild": {
+            "lang": "Zig",
+            "note": "Zig build scripts take one handle named after the build system: `std.Build`.",
+            "code": "pub fn build(b: *std.Build) void {\n    const exe = b.addExecutable(.{ .name = \"app\" });\n    b.installArtifact(exe);\n}"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Named after the command",
+            "gist": "Each entry takes one context named after its command.",
+            "gains": [
+              "One rule for every command entry.",
+              "The parameter type names the command that calls it."
+            ],
+            "losses": [
+              "Existing `BuildContext`, `TestSuite` and `BenchSuite` callers are renamed in one cutover."
+            ],
+            "proposed": {
+              "code": "fn build(b: Build) -> BuildPlan { b.plan() }\nfn dev(d: Dev) { d.watch(\"src/\"); d.serve() }\nfn test(t: Test) { t.run() }\nfn bench(b: Bench) { b.run() }"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Keep current names",
+            "gist": "Keep BuildContext, TestSuite and BenchSuite; dev takes nothing.",
+            "gains": [
+              "No rename; ratified decisions stand as written."
+            ],
+            "losses": [
+              "Three naming styles for one idea, and `fn dev` cannot receive a context."
+            ],
+            "proposed": {
+              "code": "fn build(b: BuildContext) -> BuildPlan { b.plan() }\nfn test(suite: TestSuite) { suite.run() }\nfn dev() { … }"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "One shape for every command entry is easier to learn and lets dev receive a context like the others.",
+          "gains": [
+            "A beginner learns one rule that covers build, dev, test, bench and run."
+          ],
+          "losses": [
+            {
+              "loss": "Existing build and test entries are renamed.",
+              "mitigation": "One cutover migrates every in-repo caller; the compiler build is the first user."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B keeps three naming styles for one idea and leaves dev without a context."
+            }
+          ],
+          "tradeoff": "A one-time rename in exchange for one uniform entry rule."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-20T18:01:04.436Z",
+      "outcome": "A",
+      "comment": "Ratified A, amended by the owner: entry functions take their context and return nothing. fn build(b: Build), fn dev(d: Dev), fn test(t: Test), fn run(r: Run). The function configures the context it receives, and the toolchain uses that context directly, so there is no BuildPlan return. There is no bench command and no Bench context: benchmarks are measurement-style tests inside test. BuildContext, TestSuite and BenchSuite are retired in one cutover.",
+      "ratifiedAt": "2026-10-20",
+      "retiredAt": "2026-11-25T10:45:16.823Z"
+    },
+    {
+      "id": "D-ENTRY-RUN1",
+      "cardId": "c0hnphts",
+      "group": "tooling",
+      "title": "fn run() has no return type; apps serve themselves",
+      "situation": "Jet programs start in fn run. Today an app is written as fn run() returning an App value, which the runtime then serves, and jet dev adds hot reload around it. The command entries just moved to taking a context and returning nothing. This decision makes run match: an app is ordinary logic that calls serve() inside run.",
+      "gist": "Should fn run return the app, or should the app serve itself?",
+      "lesson": "A long-running app keeps the program alive by serving requests; a script finishes and exits. Either can be told apart by what run does, not by its return type.",
+      "explainer": "",
+      "story": "Owner ruling 2026-10-20 after D-ENTRY-CTX1 removed return types from build, dev and test entries.",
+      "inWild": "Go: func main() { http.ListenAndServe(\":8080\", mux) } serves from inside main.",
+      "detail": "Supersedes D-ENTRY-VALUE1 (fn run() -> App). Arguments still reach run as D-APP-ARGS1 ratified. fn dev(d: Dev) remains the override for the dev loop.",
+      "options": [
+        {
+          "key": "A",
+          "name": "App is logic in run",
+          "detail": "fn run() is plain logic with no return type. A long-lived app starts itself by calling serve(), so the program keeps running until stopped, while a script returns and exits. In jet dev the runtime host intercepts serve(), keeps the listener open and swaps handlers on change.",
+          "technical": "serve() registers the app with the runtime host; the dev host owns hot swap at that call. Supersedes D-ENTRY-VALUE1.",
+          "code": "fn run() {\n    web.app()\n        .route(\"/\", home)\n        .serve()\n}"
+        },
+        {
+          "key": "B",
+          "name": "Run returns the app",
+          "detail": "Keep the ratified D-ENTRY-VALUE1 shape where the returned App value is served by the runtime.",
+          "technical": "No change.",
+          "code": "fn run() -> App {\n    return web.app().route(\"/\", home)\n}"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "Entry functions never return values, so an app is ordinary logic that serves itself.",
+        "gains": [
+          "One entry shape for scripts and apps."
+        ],
+        "losses": [
+          {
+            "loss": "Existing fn run() -> App programs are rewritten.",
+            "mitigation": "The entry-point cutover under #5068 migrates every in-repo program."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B keeps a return-type exception to the no-return entry rule."
+          }
+        ],
+        "tradeoff": "A small migration for one uniform entry rule."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 4,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should fn run return the app, or should the app serve itself?",
+        "lesson": "A long-running app keeps the program alive by serving requests; a script finishes and exits. Either can be told apart by what run does, not by its return type.",
+        "trio": {
+          "current": {
+            "note": "Today an app returns its App value from run.",
+            "code": "fn run() -> App {\n    return web.app().route(\"/\", home)\n}"
+          },
+          "wild": {
+            "lang": "Go",
+            "note": "Go programs serve from inside main; main returns nothing.",
+            "code": "func main() {\n    http.ListenAndServe(\":8080\", mux)\n}"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "App is logic in run",
+            "gist": "fn run() has no return type; an app starts itself with serve().",
+            "gains": [
+              "Entry functions never return values.",
+              "Scripts and apps share one entry shape."
+            ],
+            "losses": [
+              "Apps written as fn run() -> App are migrated."
+            ],
+            "proposed": {
+              "code": "fn run() {\n    web.app()\n        .route(\"/\", home)\n        .serve()\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Run returns the app",
+            "gist": "Keep fn run() -> App from D-ENTRY-VALUE1.",
+            "gains": [
+              "No migration."
+            ],
+            "losses": [
+              "One entry keeps a return type when the others do not."
+            ],
+            "proposed": {
+              "code": "fn run() -> App {\n    return web.app().route(\"/\", home)\n}"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Entry functions never return values, so an app is ordinary logic that serves itself.",
+          "gains": [
+            "One entry shape for scripts and apps."
+          ],
+          "losses": [
+            {
+              "loss": "Existing fn run() -> App programs are rewritten.",
+              "mitigation": "The entry-point cutover under #5068 migrates every in-repo program."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B keeps a return-type exception to the no-return entry rule."
+            }
+          ],
+          "tradeoff": "A small migration for one uniform entry rule."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-20T18:05:45.985Z",
+      "outcome": "A",
+      "comment": "Ratified by the owner in chat. Supersedes D-ENTRY-VALUE1: fn run() has no return type; an app is logic in run that calls serve(); jet dev hot swap hooks serve() in the runtime host.",
+      "ratifiedAt": "2026-10-20",
+      "retiredAt": "2026-11-25T10:45:16.823Z"
+    },
+    {
+      "id": "D-LIFECYCLE-PHASE1",
+      "cardId": "c051j6ab",
+      "group": "application",
+      "title": "Expose lifecycle observations without promising invisible platform events",
+      "situation": "The app framework can invoke a resume callback, while its foreground and suspension bookkeeping remains internal. Applications may also need to inspect whether their UI is visible and respond to observable lifecycle transitions. Browsers and operating systems do not guarantee a final callback before termination, and hidden does not mean suspended. We recommend a typed observable snapshot and transition event, using the existing event mechanism rather than inventing a second callback registry.",
+      "gist": "Should app lifecycle expose observable state, or remain resume-callback only?",
+      "lesson": "Visibility is not focus, and hidden is not suspended. Lifecycle APIs must distinguish what the platform observed from what it cannot promise.",
+      "explainer": "Beginner: app.phase reads the last observed snapshot, not guaranteed present physical state. Expert: visibility and execution are separate; the resume adapter preserves its existing focus/wake trigger and asynchronous Notice handling through the same event point.",
+      "story": "Bo stops expensive redraws when no app window is visible. He still saves changes as they happen, because a browser or process can disappear without a termination event.",
+      "inWild": "document.addEventListener(\"visibilitychange\", () => {\n    if (document.visibilityState === \"hidden\") save();\n});",
+      "detail": "Core/App/App.jet:2422-2426 stores graph.lifecycle(on_resume:). Its :3722-3762 tracks focus/sleep moments, tests away-to-back and launches the resume task asynchronously. That implementation is not already an Event subscription. Focus regain is not proof of visibility change, and a public snapshot cannot silently redefine the existing resume trigger.\n\nOn gate-p261, probes2/lifecycle-config.jet registers a callback and prints resume configured without opening a UI. probes2/app-phase.jet rejects app.phase with E0102. These probes establish registration and missing API only, not observed transitions, Linux coverage or browser behavior. Card #6809 describes Linux work and an unfinished browser half; those reports are context, not this review's executed platform verification.\n\nMDN Page Visibility distinguishes visibility from focus and documents background throttling. MDN unload warns about missed delivery and back/forward-cache effects. Both invalidate guaranteed final callbacks and hidden-equals-suspended reasoning. Native window mapped/minimized observations also do not prove compositor occlusion. The public contract must describe last observations, unknowns, source loss and app-instance ownership, not promise continuously current physical state.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Observed snapshot and one typed event",
+          "detail": "Add app.phase() -> Phase? and app.LIFECYCLE as Event<LifecycleEvent> over separate visibility/execution observations.",
+          "technical": "None means no active initialized app instance, including after disposal. Phase carries app-instance identity, observation sequence, visibility (Visible/Hidden/Unknown) and execution (Running/Suspending/Unknown). It is the last published observation, not guaranteed current physical state. Native visibility aggregates app-owned mapped/non-minimized windows, not compositor occlusion; browser visibility follows the document. With several windows, any known visible means Visible; all known hidden means Hidden; otherwise Unknown. Focus is never substituted.\n\nLifecycleEvent carries instance identity, ordered observation sequence, reason and before/after Phase. Reasons distinguish visibility change, sleep preparation, wake, focus regain and observed closing. Suspending means observed preparation, not proof the process is frozen. Closing is best effort, never a persistence guarantee. Unknown covers unsupported/lost observation sources. Ignore events from disposed instances. A new instance starts with its own sequence and fresh observations; subscriptions are scoped to the live app lifetime.\n\nSerialize platform observations on the app dispatcher, publish the snapshot before Event handlers, and queue reentrant publication. Order is observed arrival, not a reconstructed global OS clock. Coalesce duplicate state observations without suppressing distinct wake/focus recovery reasons. Both Linux and browser adapters must supply this contract, including source failure/Unknown and multiwindow cases. Observation cannot stay gated solely on registering the old resume helper.\n\nMigrate graph.lifecycle into an adapter on that one event identity. Preserve its existing away-to-back predicate, focus/wake behavior, asynchronous task launch and Notice handling; do not redefine resume as Hidden-to-Visible. Multiple tasks retain existing semantics rather than adding serialization accidentally. Remove the separate resume registration storage after the adapter cutover. Use ordinary Event scopes/order/inspection, not another callback list. Save incrementally; no implementation can dispatch after forced death or guarantee a callback before every freeze.",
+          "code": "phase: app.phase()\nif phase != None {\n    if phase.visibility == .Hidden -> pause_redraws()\n}\napp.LIFECYCLE.on(scope, observe_lifecycle)"
+        },
+        {
+          "key": "B",
+          "name": "Keep resume-only public API",
+          "detail": "Keep the existing comeback callback and no public snapshot/general transition point.",
+          "technical": "This is the smallest implementation and API surface. Preserve current asynchronous Notice-producing recovery after focus/sleep away-to-back; do not falsely describe it as visibility observation. Apps needing only recovery avoid a new public state model.\n\nIt does not serve visibility-aware redraw/polling needs through the app API. Those requirements would remain unsatisfied rather than silently receiving a separate target-specific lifecycle registry. No claimed frontend completeness or final-callback guarantee follows from keeping the helper.",
+          "code": "graph.lifecycle(on_resume: recover)"
+        },
+        {
+          "key": "C",
+          "name": "One primary phase enum",
+          "detail": "Expose a best-effort Start/Foreground/Background/Suspended/Terminating label plus Unknown and typed transitions.",
+          "technical": "Define a primary label, not a mandatory ordered lifetime. Terminating has highest precedence, then observed sleep preparation, then known visibility; Start lasts until initial observation and Unknown represents source loss. Foreground means visible, not focused. Suspended must be documented as the last preparation observation, not proof that code currently cannot run.\n\nThis is a compact, discoverable state readout. It uses the same app identity, typed event, scope, arrival ordering and resume adapter as A; no reduced notification workload is used to make it look cheaper. The single label loses visibility information while reporting sleep/shutdown, and its Suspended spelling needs careful documentation. Never use Terminating as the sole save point.",
+          "code": "phase: app.phase()\n// Primary label, not guaranteed transition order:\n// Start | Foreground | Background | Suspended | Terminating | Unknown"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Web Page Visibility",
+          "note": "Visibilitychange reports visibility, not focus or guaranteed termination.",
+          "code": "document.addEventListener(\"visibilitychange\", () => {\n    if (document.visibilityState === \"hidden\") save();\n});",
+          "source": "https://developer.mozilla.org/en-US/docs/Web/API/Page_Visibility_API"
+        },
+        {
+          "lang": "Web unload",
+          "note": "Unload is not reliably delivered; it cannot be the sole save contract.",
+          "code": "// Save incrementally; do not rely only on unload.",
+          "source": "https://developer.mozilla.org/en-US/docs/Web/API/Window/unload_event"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Separate observations answer visibility/recovery needs without conflating focus, execution and shutdown. One existing event mechanism can also preserve the resume helper's behavior.",
+        "gains": [
+          "Independent, explicit observation axes.",
+          "No second lifecycle callback registry."
+        ],
+        "losses": [
+          {
+            "loss": "Observations can be stale, unknown or undelivered before death.",
+            "mitigation": "Expose last-observed meaning and source loss; save incrementally and never require a final callback."
+          },
+          {
+            "loss": "Linux/browser observation and resume-adapter migration are substantial platform work.",
+            "mitigation": "Require both adapters, multiwindow/source-loss cases and unchanged focus/wake/Notice behavior before declaring implementation complete."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Best for recovery-only applications, but leaves visibility-aware work unsupported."
+          },
+          {
+            "key": "C",
+            "reason": "A compact primary status, but necessarily hides independent visibility during sleep/shutdown and needs a potentially misleading Suspended label."
+          }
+        ],
+        "tradeoff": "Richer truthful observations, not universal platform guarantees."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: OpenAI GPT. Adversarial model family: OpenAI GPT. Fresh agent: BallotReview2. Separated registration probes from untested platform coverage and corrected current callback versus proposed Event implementation. Added last-observed/source-loss semantics, app identity, multiwindow visibility, exact event access, ordering and preservation of existing asynchronous focus/wake recovery."
+      },
+      "checkInstructions": "Gate-p261 probes establish callback registration and rejection of app.phase only. Source/MDN checks establish framing; no real UI/platform run is claimed. Acceptance requires Linux and browser observation, source loss, multiwindow aggregation, disposed/new app identity, sequence/order, reentrant events, scoped cleanup, focus versus visibility, unchanged async Notice behavior and no fabricated termination guarantees.",
+      "surface": {
+        "gist": "Expose last-observed lifecycle snapshots and typed transitions, or retain only resume recovery?",
+        "lesson": "Visibility differs from focus and suspension. Snapshots can be stale, sources can disappear, and final callbacks are not guaranteed.",
+        "trio": {
+          "current": {
+            "note": "Resume registration works; app.phase is rejected. No real UI transition was tested.",
+            "code": "graph.lifecycle(on_resume: recover)\n// app.phase() produces E0102."
+          },
+          "wild": {
+            "lang": "Web",
+            "note": "Visibilitychange reports visibility; unload is unreliable.",
+            "code": "document.addEventListener(\"visibilitychange\", save);"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Snapshot and typed event",
+            "gist": "Expose independent observations through app.phase and the existing Event mechanism.",
+            "gains": [
+              "Visibility/execution stay separate; resume adapter shares one point."
+            ],
+            "losses": [
+              "Stale/unknown observations and substantial platform migration."
+            ],
+            "proposed": {
+              "code": "phase: app.phase()\nif phase != None {\n    if phase.visibility == .Hidden -> pause_redraws()\n}\napp.LIFECYCLE.on(scope, observe_lifecycle)"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Resume-only API",
+            "gist": "Keep the current asynchronous focus/wake comeback helper.",
+            "gains": [
+              "Small public contract for recovery-only apps."
+            ],
+            "losses": [
+              "Visibility-aware work remains unsupported."
+            ],
+            "proposed": {
+              "code": "graph.lifecycle(on_resume: recover)"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Primary phase enum",
+            "gist": "Expose one best-effort primary label and the same typed transitions.",
+            "gains": [
+              "Compact readout with defined precedence."
+            ],
+            "losses": [
+              "Sleep/shutdown labels hide independent visibility."
+            ],
+            "proposed": {
+              "code": "phase: app.phase()\n// Includes Unknown; no guaranteed transition order."
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Expose independent observations without changing existing resume semantics or adding another event system.",
+          "gains": [
+            "Honest visibility and recovery contract."
+          ],
+          "losses": [
+            {
+              "loss": "Observations may be stale or absent.",
+              "mitigation": "Report Unknown/source loss and save incrementally."
+            },
+            {
+              "loss": "Platform and adapter work is real.",
+              "mitigation": "Require Linux/browser cases and unchanged asynchronous focus/wake Notice behavior."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Sufficient for recovery, not visibility-aware work."
+            },
+            {
+              "key": "C",
+              "reason": "Simpler display, but loses independent state information."
+            }
+          ],
+          "tradeoff": "Portable meaning, not universal observation."
+        }
+      },
+      "draftedBy": "Main",
+      "reviewedBy": "BallotReview2",
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-11-17T12:31:18.894Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-17",
+      "retiredAt": "2026-11-25T10:45:16.823Z"
     }
   ]
 }
