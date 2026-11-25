@@ -101,6 +101,10 @@
 // core.web's reads of the platform's JET_APP_PORT (AppPortEnv), JET_DEV
 // (AppDevEnv) and OTEL_* variables (AppTraceEnv) charge no package Env: the
 // driver's effect walk leaves out the functions that fill those roles.
+// The ambient `input` is the reader the core.term function filling
+// InputLines makes, and `input.edit(change)`, `input.csv<Row>()` and
+// `input.json<Row>()` call the core.term, core.encoding.csv and
+// core.encoding.json functions filling InputEdit, InputCsv and InputJson.
 // The core.mem and
 // core.math operations the compiler builds inline at each call, never as a
 // call (a raw List's capacity, a pointer step, a block copy, a bit copy and
@@ -207,6 +211,7 @@ RoleKind: enum {
     DataSchema,
     ContextOnStop,
     ContextTrace,
+    InputCsv,
     ReceiptAttach,
     DecodeUnder,
     DecodeList,
@@ -215,6 +220,7 @@ RoleKind: enum {
     DecodeOption,
     DecodeMap,
     JSONTypedDecode,
+    InputJson,
     TOMLTypedDecode,
     YAMLTypedDecode,
     EventPoint,
@@ -392,6 +398,8 @@ RoleKind: enum {
     StringMatch,
     StringHasLine,
     TermTake,
+    InputLines,
+    InputEdit,
     TestSuiteRun,
     StringTrimNewlines,
     StringFirstLines,

@@ -325,17 +325,39 @@ core_bare_source_module_in: fn(rows: [CoreBareSourceModule], keys: [String], key
     Val(rows[row].module_name)
 }
 
-// `input.<method>(…)`, a method the ambient `input` (Iter<String>) lacks, is
-// the Core function `__input_<method>` (core_input_method_member) of the first
-// of these modules that declares it: core.term, else the encoding module the
-// method names (`input.csv<Row>()` is core.encoding.csv `__input_csv`). The
-// Loader loads the encoding module where the source spells the call; Sema
-// checks the call as that function's, with `input` as its first argument.
-core_input_method_modules: fn(method: String) -> [String] Never! {
-    [String]{"core.term", "core.encoding.{method}"}
+// `input.<method>(…)`, a method the ambient `input` (Iter<String>) lacks: the
+// Core function filling the row's jet_builtins role in the row's module
+// (`input.csv<Row>()` is core.encoding.csv's InputCsv). The Loader loads the
+// module where the source spells the call; Sema checks the call as that
+// function's, with `input` as its first argument.
+CoreInputMethod: struct {
+    method: String,
+    role: String,
+    module_name: String,
 }
 
-core_input_method_member: fn(method: String) -> String Never! { "__input_{method}" }
+CORE_INPUT_METHODS: [CoreInputMethod]{
+    {method: "csv", role: "InputCsv", module_name: "core.encoding.csv"},
+    {method: "json", role: "InputJson", module_name: "core.encoding.json"},
+    {method: "edit", role: "InputEdit", module_name: "core.term"},
+}
+
+// The role that `input.<method>` calls, when `method` is one of these methods.
+core_input_method_role: fn(method: String) -> String? Never! {
+    loop row in CORE_INPUT_METHODS {
+        if row.method == method -> return Val(row.role)
+    }
+    None
+}
+
+// The Core module that declares `input.<method>`, when `method` is one of
+// these methods.
+core_input_method_module: fn(method: String) -> String? Never! {
+    loop row in CORE_INPUT_METHODS {
+        if row.method == method -> return Val(row.module_name)
+    }
+    None
+}
 
 // The Core type a prelude rename spells bare (`Date` -> `LocalDate`), when
 // `name` is one.

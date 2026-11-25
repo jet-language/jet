@@ -1746,7 +1746,7 @@ ir_line_next_body: fn(m: ^IRModule, p: IRProgram, a: ^IRBuilder, handle_ty: Type
         }
     }
     // So does the ambient `input` while it names no files.
-    if ir_line_reader_owner(handle_ty) == "__InputLines" {
+    if ir_input_lines_handle(p, handle_ty) {
         if !ir_input_stdin_line_next(m, p, a, payload, output, row, span) {
             return
         }
@@ -1837,6 +1837,16 @@ ir_line_word_error: fn(m: ^IRModule, p: IRProgram, reader: Int) -> Type? Never! 
         if m.types[error_row].kind != .Aggregate -> return Val(failure_ty)
     }
     None
+}
+
+// Whether `handle_ty` is the ambient `input`'s reader: the type the core.term
+// function filling InputLines returns.
+ir_input_lines_handle: fn(p: IRProgram, handle_ty: Type) -> Bool Never! {
+    row: ir_core_role_row(p, "InputLines") ?? return false
+    returned: ir_executable_return(p.functions[row]) ?? return false
+    owner := ir_line_reader_owner(returned)
+    if ir_untag(returned) == .Result(ok, _) -> owner = ir_line_reader_owner(ok)
+    owner != "" && owner == ir_line_reader_owner(handle_ty)
 }
 
 // The ambient `input`'s line_next (core.term __InputLines in `payload`, its

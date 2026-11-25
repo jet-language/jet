@@ -32,8 +32,8 @@ use jet_foundation.[
     expr_span,
     AST_EMPTY_CALL_ARG_FLAGS,
     checked_generated_local,
-    core_input_method_member,
-    core_input_method_modules,
+    core_input_method_module,
+    core_input_method_role,
     type_identity_equal,
     type_name,
     Func,
@@ -796,9 +796,9 @@ sema_call_eval_show_text: fn(value: TExpr, environment: SemaScopeEnvironment, pr
 
 // The ambient `input`: every line of the program's input, a lazy
 // `Iter<String>` over the files its arguments name, in order, else standard
-// input. It checks as the line source (BodyHandleOp.LinesIter) of
-// `core.term.__input_lines()` (__InputLines), whose `read_line` each pull
-// calls: one meaning on every tier. The names are the arguments (Exec.Args).
+// input. It checks as the line source (BodyHandleOp.LinesIter) of the
+// core.term function filling InputLines, whose reader's `read_line` each
+// pull calls: one meaning on every tier. The names are the arguments (Exec.Args).
 // Reading the files they name needs no FS.Read grant: the person who ran the
 // program designated them on its command line (typed paths are granted), as
 // awk's and perl's `<>` operands are. A user
@@ -812,17 +812,13 @@ sema_call_check_ambient_input: fn(span: Span, expected: Type?, environment: Sema
     if !sema_effect_record_intrinsic_fact(environment, program, scopes, context, "input", span, facts, diagnostics) {
         return None
     }
-    unavailable: sema_error("E0906", span, "the source `core.term.__input_lines` declaration for `input` is unavailable", "the ambient `input` reads through the Core terminal source", "restore the `core.term` source module")
-    identity: sema_call_core_module_identity(environment, program, "core.term") ?? {
-        diagnostics.push(unavailable)
+    if sema_call_core_module_identity(environment, program, "core.term") == None {
+        diagnostics.push(sema_error("E0906", span, "the Core terminal source for `input` is unavailable", "the ambient `input` reads through the Core terminal source", "restore the `core.term` source module"))
         return None
     }
-    target: sema_call_core_source_target(environment, program, identity, "__input_lines", [Type]{}, span, true, diagnostics) ?? {
-        diagnostics.push(unavailable)
-        return None
-    }
+    target: sema_call_core_role_target("InputLines", [Type]{}, span, environment, program, diagnostics) ?? return None
     callee: sema_call_callee_decl(program, target.symbol.id, span, diagnostics) ?? return None
-    // `__input_lines` cannot fail (`__InputLines Never!`): the call is the reader.
+    // The InputLines function cannot fail (`Never!`): the call is the reader.
     returned: sema_call_signature_return(target.signature) ?? return None
     reader: if returned == .Result(ok, _) -> ok.copy() else -> returned
     receiver: sema_tree_node(reader, TExprKind.Call{callee: callee, type_args: [Type]{}, args: [TCallArg]{}}, span)
@@ -841,12 +837,12 @@ sema_call_check_ambient_input_call: fn(call: Call, check: ^SemaBodyCheck) -> Sem
 
 // `input.csv<Row>()`, `input.json<Row>()`, `input.edit(change)`: a method of
 // the ambient `input` that is not an Iter<String> method is the Core function
-// `__input_<method>` of core.term, else of the encoding module the method
-// names (core_input_method_modules), and is checked as a call of it whose
-// first argument is the ambient `input` itself. The call so charges what
-// `input` charges and what the function declares. Unhandled when a binding
-// shadows `input` or no module declares the function: `input` is then the
-// Iter<String> receiver as usual.
+// filling the method's role in the module that declares it
+// (core_input_method_role, core_input_method_module), and is checked as a
+// call of it whose first argument is the ambient `input` itself. The call so
+// charges what `input` charges and what the function declares. Unhandled
+// when a binding shadows `input` or the module is not loaded: `input` is
+// then the Iter<String> receiver as usual.
 sema_call_try_ambient_input_method: fn(receiver: Expr, method: String, method_span: Span, type_args: [Type], args: [CallArg], expected: Type?, check: ^SemaBodyCheck) -> SemaDirectSpecialCheck {
     unhandled: SemaDirectSpecialCheck{handled: false, value: None}
     receiver_span := Span{start: 0, end: 0}
@@ -860,18 +856,16 @@ sema_call_try_ambient_input_method: fn(receiver: Expr, method: String, method_sp
     if sema_scope_resolve_index(check.scopes, "input") != None || sema_module_no_prelude(check.environment.*, check.program.*) {
         return unhandled
     }
-    member: core_input_method_member(method)
-    loop module_name in core_input_method_modules(method) {
-        identity: sema_call_core_module_identity(check.environment.*, check.program.*, module_name) ?? next
-        target: sema_call_core_source_target(check.environment.*, check.program.*, identity, member, type_args, method_span, true, check.diagnostics) ?? next
-        call_args := [CallArg]{CallArg{convention: AccessConvention.Read, expr: receiver.copy(), span: receiver_span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}}  // copy: the method call keeps its receiver.
-        loop argument in args -> call_args.push(argument.copy())  // copy: the method call keeps its arguments.
-        check.scopes.ownership_call_depth += 1
-        value := sema_call_core_check_source_owned(target, "input.{method}", type_args, call_args, method_span, expected, check)
-        check.scopes.ownership_call_depth -= 1
-        return SemaDirectSpecialCheck{handled: true, value: value}
-    }
-    unhandled
+    module_name: core_input_method_module(method) ?? return unhandled
+    role: core_input_method_role(method) ?? return unhandled
+    if sema_call_core_module_identity(check.environment.*, check.program.*, module_name) == None -> return unhandled
+    target: sema_call_core_role_target(role, type_args, method_span, check.environment.*, check.program.*, check.diagnostics) ?? return unhandled
+    call_args := [CallArg]{CallArg{convention: AccessConvention.Read, expr: receiver.copy(), span: receiver_span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}}  // copy: the method call keeps its receiver.
+    loop argument in args -> call_args.push(argument.copy())  // copy: the method call keeps its arguments.
+    check.scopes.ownership_call_depth += 1
+    value := sema_call_core_check_source_owned(target, "input.{method}", type_args, call_args, method_span, expected, check)
+    check.scopes.ownership_call_depth -= 1
+    SemaDirectSpecialCheck{handled: true, value: value}
 }
 
 // `("core.term", "eprint")` / `("core.term", "readline")`: fixed rows with no typed Source

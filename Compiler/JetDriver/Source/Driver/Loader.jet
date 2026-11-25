@@ -58,7 +58,7 @@ use {
         compiler_threads_single,
         core_bare_source_module,
         boundary_head_owner_module,
-        core_input_method_modules,
+        core_input_method_module,
         core_module_export,
         core_module_has_member,
         lint_auto_derive_name,
@@ -4367,8 +4367,8 @@ JetDriverCoreIdentifierDemand: struct {
     // when `<head>` aliases `core`.
     core_paths: [String],
     // The method of each `input.<method>` call the source spells (`input`
-    // not itself a member): `input.csv<Row>()` is core.encoding.csv
-    // `__input_csv` (core_input_method_modules), so the encoding module the
+    // not itself a member): `input.csv<Row>()` is core.encoding.csv's
+    // InputCsv (core_input_method_module), so the encoding module the
     // method names loads when it is one.
     input_methods: [String]{[String]{}},
 }
@@ -6985,24 +6985,23 @@ jet_driver_load_walk: fn(
                 }
             }
         }
-        // `input.csv<Row>()`: the encoding module an ambient `input` method
-        // names owns its `__input_<method>` (core_input_method_modules).
+        // `input.csv<Row>()`: the module an ambient `input` method names
+        // declares the function filling its role (core_input_method_module).
         if !embedded {
             loop method in demand.input_methods {
-                loop module_name in core_input_method_modules(method) {
-                    sourced := false
-                    loop row in request.core_sources {
-                        if row.owner == "" && row.module_name == module_name && !row.runtime {
-                            sourced = true
-                        }
+                module_name: core_input_method_module(method) ?? next
+                sourced := false
+                loop row in request.core_sources {
+                    if row.owner == "" && row.module_name == module_name && !row.runtime {
+                        sourced = true
                     }
-                    if !sourced -> next
-                    input_index: jet_driver_core_unit(source_units, queued, pending, generated_records, request.core_sources, module_name, false, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, diagnostics)
-                    if input_index == .Val(index) {
-                        if !queued[index] {
-                            queued[index] = true
-                            pending.push(index)
-                        }
+                }
+                if !sourced -> next
+                input_index: jet_driver_core_unit(source_units, queued, pending, generated_records, request.core_sources, module_name, false, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, diagnostics)
+                if input_index == .Val(index) {
+                    if !queued[index] {
+                        queued[index] = true
+                        pending.push(index)
                     }
                 }
             }

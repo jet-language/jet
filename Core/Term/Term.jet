@@ -339,7 +339,7 @@ stdin: fn() -> StdinHandle Never! { StdinHandle{fd: 0} }
 
 // What the ambient `input` reads (__InputLines): the program's arguments name
 // its files; none means standard input.
-priv __input_lines: fn() -[Exec.Args]> __InputLines Never! {
+#Builtin.Role(.InputLines) priv __input_lines: fn() -[Exec.Args]> __InputLines Never! {
     __InputLines{paths: core.process.args(), at: 0, open: [FileReader]{}}
 }
 
@@ -351,7 +351,7 @@ priv __input_lines: fn() -[Exec.Args]> __InputLines Never! {
 // named, the lines of `lines` (standard input) are printed changed. A file
 // that cannot be read or replaced stops the edit with its IOError; the files
 // before it stay edited.
-priv __input_edit: fn(lines: ^^Iter<String>, change: fn(String) -> String Never!) -[IO, FS.Read, FS.Write, Exec.Args, Time.Wait]> IOError! {
+#Builtin.Role(.InputEdit) priv __input_edit: fn(lines: ^^Iter<String>, change: fn(String) -> String Never!) -[IO, FS.Read, FS.Write, Exec.Args, Time.Wait]> IOError! {
     paths: core.process.args()
     if paths.len() == 0 {
         loop line in lines -> print(change(line))
