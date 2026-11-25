@@ -733,7 +733,7 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
         diagnostic_start: check.diagnostics.len()
         lambda_escapes: if apply_lambda_escape_override -> sema_call_lambda_escape_policy(parameter, abi) else -> check.context.lambda_escapes
         checked_argument: if {
-            run_default -> sema_call_run_default(args[index], values, slots, binder_keys, argument_expected, check, span)
+            run_default -> sema_call_run_default(args[index], values, slots, binder_keys, args, binding, argument_expected, check, span)
             default_in_owner -> sema_call_check_owner_default(owner_scope, args[index], argument_expected, parameter, abi, apply_lambda_escape_override, check, span, binder_keys)
             apply_lambda_escape_override -> sema_check_expression_with_lambda_escapes(args[index].expr, argument_expected, check, lambda_escapes)
             else -> sema_check_expression(args[index].expr, argument_expected, check)
@@ -1356,18 +1356,20 @@ sema_call_binder_refs_read: fn(ids: [SymbolID], start: Int, context: SemaCheckCo
 
 // A `Type{#run value}` default this call computes while building. The
 // earlier parameters' binder slots, open in the scope, hold the values the
-// build knows of their checked arguments; a slot whose argument is known
-// only when the program runs stays a run-time local, which the staged check
-// refuses (E0640). The one staged-value evaluator computes the default once
-// per call: the first check stages it, the checked default stands in until
-// the value lands, and the check after reads the value.
-sema_call_run_default: fn(argument: CallArg, values: [TExpr], slots: [Int], binder_keys: [SymbolID], expected: Type?, check: ^SemaBodyCheck, call_span: Span) -> TExpr? {
+// build knows of their checked arguments, and a function-typed one holds the
+// FunctionInfo of the function its argument names or writes, which the
+// default reads as `name.reflect()`. A slot whose argument is known only when
+// the program runs stays a run-time local, which the staged check refuses
+// (E0640). The one staged-value evaluator computes the default once per
+// call: the first check stages it, the checked default stands in until the
+// value lands, and the check after reads the value.
+sema_call_run_default: fn(argument: CallArg, values: [TExpr], slots: [Int], binder_keys: [SymbolID], args: [CallArg], binding: SemaCallBinding, expected: Type?, check: ^SemaBodyCheck, call_span: Span) -> TExpr? {
     owner_key: sema_expr_runtime_body_owner(check) ?? return sema_check_expression(argument.expr, expected, check)
     loop (ref_index, reference) in argument.flags.binder_refs {
         if ref_index >= binder_keys.len() -> break
         loop value_index in 0..<values.len() {
             if slots[value_index] != reference.slot -> next
-            known: sema_expr_comptime_value(values[value_index], check.context) ?? sema_fact_constant_path_value(values[value_index], check.context) ?? break
+            known: sema_expr_comptime_value(values[value_index], check.context) ?? sema_fact_constant_path_value(values[value_index], check.context) ?? sema_call_run_default_function(values[value_index].ty, reference.slot, args, binding, check) ?? break
             loop binding_index in 0..<check.scopes.bindings.len() {
                 if check.scopes.bindings[binding_index].symbol.id == binder_keys[ref_index] {
                     sema_scope_note_binding_edit(check.scopes, binding_index)
@@ -1391,6 +1393,21 @@ sema_call_run_default: fn(argument: CallArg, values: [TExpr], slots: [Int], bind
     }
     value: sema_fact_prepared_expr(landed.value, landed.ty, call_span, check.environment.*, check.program.*, check.context) ?? return None
     sema_expr_expected_owned(value, expected, check.environment.*, check.program.*, check.diagnostics)
+}
+
+// The FunctionInfo of the function the argument bound to `slot`, of the
+// function type `ty`, names or writes (sema_rule_function_of). None for an
+// argument of another type, or one that is neither a declared function nor a
+// lambda.
+sema_call_run_default_function: fn(ty: Type, slot: Int, args: [CallArg], binding: SemaCallBinding, check: ^SemaBodyCheck) -> TComptimeValue? {
+    if ty == .Fn(_, _, _, _, _, _) {
+        loop index in 0..<args.len() {
+            if sema_call_bound_slot(binding, binding.sources[index], args[index]) != slot -> next
+            function: sema_rule_function_of(args[index].expr, ty, args[index].span, check) ?? return None
+            return Val(function.info)
+        }
+    }
+    None
 }
 
 // The declaring module's scope for a default argument this call takes, when

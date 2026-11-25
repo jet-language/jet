@@ -5281,6 +5281,13 @@ sema_expr_check_identifier: fn(name: String, span: Span, expected: Type?, check:
                     sema_check_unsupported(check.context, "prepared local `{name}` (read at offset {span.start}) has no checked type")
                     return None
                 }
+                // A function-typed local holding its function's FunctionInfo
+                // (sema_call_run_default) is read only through `.reflect()`;
+                // the function itself runs when the program does.
+                if prepared_ty == .Fn(_, _, _, _, _, _) && known == .Struct(_, _) {
+                    check.diagnostics.push(sema_comptime_reads_runtime_value(name, span))
+                    return None
+                }
                 check.context.name_references.push(sema_name_reference(span, prepared_binding.symbol, Val(SymbolKind.Local)))
                 if !sema_ownership_note_reference(check.state, name, span, check.scopes, AccessConvention.Read) {
                     return None

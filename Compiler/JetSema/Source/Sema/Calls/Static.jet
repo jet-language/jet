@@ -1344,7 +1344,9 @@ sema_call_static_reflect_bound: fn(name: String, span: Span, expected: Type?, ch
 
 // `f.reflect()` on a declared function: its FunctionInfo record, computed
 // while compiling, as `T.reflect()` is for a type; on a local bound once to a
-// lambda, the lambda's ClosureInfo. `f.reflect(types: [Int])` reflects the
+// lambda, the lambda's ClosureInfo; on a function-typed parameter a `#run`
+// default reads, the FunctionInfo of the function its argument names or
+// writes (sema_call_run_default). `f.reflect(types: [Int])` reflects the
 // specialization of a generic function by those type arguments, in
 // declaration order. None when `name` binds neither (another local of that
 // name shadows the function) or `args` is not that one `types:` list.
@@ -1359,6 +1361,15 @@ sema_call_static_reflect_function: fn(name: String, args: [CallArg], span: Span,
             // copy: the binding keeps its record for every later read.
             closure_info: sema_tree_node(sema_fact_named("ClosureInfo"), TExprKind.CtLit{value: closure.copy()}, span)
             return Val(SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(closure_info, expected, check.environment.*, check.program.*, check.diagnostics)})
+        }
+    }
+    // A function-typed local holding a FunctionInfo record reflects as it.
+    if args.len() == 0 && local == .Val(info_index) && check.scopes.bindings[info_index].prepared != None {
+        info_binding: sema_scope_binding_row(check.environment.*, check.scopes, info_index)
+        if info_binding.symbol.ty == .Val(local_ty) && local_ty == .Fn(_, _, _, _, _, _) && info_binding.prepared == .Val(prepared) && prepared == .Struct(_, _) {
+            // copy: the binding keeps its record for every later read.
+            function_info: sema_tree_node(sema_fact_named("FunctionInfo"), TExprKind.CtLit{value: prepared.copy()}, span)
+            return Val(SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(function_info, expected, check.environment.*, check.program.*, check.diagnostics)})
         }
     }
     graph: check.program.registration_graph

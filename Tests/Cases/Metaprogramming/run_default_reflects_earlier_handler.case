@@ -1,0 +1,12 @@
+# A `#run` parameter default reads an earlier function-typed argument as its
+# FunctionInfo, for a named function and for a lambda, once per call.
+fixture: RunDefaultReflectsEarlierHandler.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 0 # `handler.reflect()` reads the argument's FunctionInfo while building
+stderr: !~ "E0640" # the handler is not read as a run-time value
+step: jet run main.jet
+exit: 0
+stdout: = "show(id: Int) -> item 7\n(count: Int) -> 7 items\n" # each call's default reflects its own handler
