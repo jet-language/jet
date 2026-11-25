@@ -369,7 +369,7 @@ sema_copy_site_owned_root: fn(value: TExpr, check: SemaBodyCheck) -> TExpr? {
 // still owns the payload, so taking it out is written with `.move()`. A payload of
 // a temporary subject (`if open(path) == { .Ok(file) -> file … }`) is the
 // only owner once the temporary ends, as a call result is (spec.md:1199).
-sema_copy_site_payload_of_named_subject: fn(state: SemaOwnershipState, key: String) -> Bool Never! {
+sema_copy_site_payload_of_named_subject: fn(state: SemaOwnershipState, key: SemaPatternSourceKey) -> Bool Never! {
     sources: state.pattern_sources.get(key) ?? return false
     loop source in sources {
         if sema_copy_site_source_is_named(state, source) -> return true
@@ -404,8 +404,8 @@ sema_copy_site_note_subject: fn(state: ^SemaOwnershipState, name: String, span: 
     state.pattern_sources[sema_copy_site_subject_key(name, span)] = [Expr]{subject}
 }
 
-sema_copy_site_subject_key: fn(name: String, span: Span) -> String Never! {
-    "{name}@{span.start}-{span.end}"
+sema_copy_site_subject_key: fn(name: String, span: Span) -> SemaPatternSourceKey Never! {
+    SemaPatternSourceKey{name: name, start: span.start, end: span.end}
 }
 
 // `root.a.b` for a field chain, the name for a local.

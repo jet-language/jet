@@ -261,6 +261,16 @@ SemaOwnershipCloseOwner: struct {
     ty: Type,
 }
 
+// A key of `pattern_sources`. A match payload binding is its name at its
+// declaration's start, with no end (-1); a reused name in another arm is a
+// different binding. A compiler-held match local is its name over its whole
+// span, the subject's (sema_copy_site_subject_key).
+SemaPatternSourceKey: struct {
+    name: String,
+    start: Int,
+    end: Int,
+}
+
 SemaOwnershipState: struct {
     scope_depth: Int,
     next_seq: Int,
@@ -331,7 +341,7 @@ SemaOwnershipState: struct {
     // places their payload is read from (Expressions/Control.jet
     // sema_expression_pattern_binding_sources): an explicit `p.move()` takes the
     // payload out of that subject (sema_ownership_move_pattern_payload).
-    pattern_sources: [String:[Expr]]{[String:[Expr]]{}},
+    pattern_sources: [SemaPatternSourceKey:[Expr]]{[SemaPatternSourceKey:[Expr]]{}},
     // Spans of the windows whose overlap is judged where the value lands —
     // a binding statement's whole initializer, the elements of a `ViewMut`
     // list literal (sema_ownership_view_open_deferred).
@@ -1915,9 +1925,10 @@ sema_ownership_element_places: fn(collection: Expr, span: Span, check: ^SemaBody
     elements
 }
 
-// One match payload binding: its name at its declaration (a reused name in
-// another arm is a different binding).
-sema_ownership_payload_key: fn(name: String, span: Span) -> String Never! { "{name}@{span.start}" }
+// One match payload binding's key in `pattern_sources`.
+sema_ownership_payload_key: fn(name: String, span: Span) -> SemaPatternSourceKey Never! {
+    SemaPatternSourceKey{name: name, start: span.start, end: -1}
+}
 
 sema_ownership_note_pattern_sources: fn(state: ^SemaOwnershipState, symbol: Symbol, sources: ^^[Expr]) Never! {
     state.pattern_sources[sema_ownership_payload_key(symbol.name, symbol.span)] = sources.move()
