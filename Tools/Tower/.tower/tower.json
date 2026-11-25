@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7000,
-    "rev": 114060,
+    "rev": 114070,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -38007,92 +38007,6 @@
       "criteriaLastN": 13
     },
     {
-      "id": "c0qz3x03",
-      "num": 6041,
-      "title": "Config precedence (D-LADDER-LAW1=A): Policy Tighten, the BuildOptions pin and FactLaw .Force share one rung set",
-      "body": "From the ladder audit (Docs/audits/ladder-audit-2026-10-28.md, finding L-02; dev d9bed7c), philosophy pillar 4, \"Ladders, Not Cliffs\", tempered by pillar 2.\n\nFinding: Three precedence engines (Policy Tighten, BuildOptions pin/E2113, FactLaw .Force/E3521) with different rung sets; D-CONF-MERGE1/D-SETTING-ORDER1 index-only\n\nEvidence: Policy.jet:99-143; Statements.jet:65-120; BuildOptions.jet:371-393; FactLaw.jet:10-87; Merge.jet:175; SD:8684; SD:9661; build_fact_precedence.jet\n\nAudit action: unify names. D-LADDER-LAW1=A and D-STRICT-DIAL1=A (ratified) settle the spelling and behaviour (c2, c3).",
-      "kind": "task",
-      "track": "epoch",
-      "epoch": "G5",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-15",
-          "by": "TowerKeeper-2",
-          "text": "Owner-wait sweep 2026-11-15 (TowerKeeper-2, for Main): body reworded; the text waited on an owner answer that ratified decisions already give, or on a choice within ratified scope; it is recorded as decided (Main's operational authority) and nothing waits."
-        },
-        {
-          "at": "2026-10-29",
-          "text": "All decisions ratified; advanced out of deciding."
-        },
-        {
-          "at": "2026-10-28",
-          "by": "Main",
-          "text": "2026-10-28 absorbed #6054 (same ballot, Audit/drafts7)."
-        },
-        {
-          "at": "2026-10-28",
-          "by": "Main",
-          "text": "2026-10-28 absorbed #6053 (same ballot, Audit/drafts7)."
-        },
-        {
-          "at": "2026-10-28",
-          "by": "Main",
-          "text": "2026-10-28 absorbed #6045 (same ballot, Audit/drafts7)."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "An owner ballot on L-02 is ratified.",
-          "status": "met",
-          "metBy": "Orchestrator",
-          "verifiedBy": null,
-          "evidence": "D-LADDER-LAW1 ratified (A) and D-STRICT-DIAL1 ratified (A); both implemented in dev 635625cc85 and 38466ea3b7.",
-          "at": "2026-11-22T11:07:49.510Z",
-          "closure": "decision"
-        },
-        {
-          "n": 2,
-          "text": "D-LADDER-LAW1=A: a value forced by a host or fleet file refuses a conflicting flag as a pin does, with one registered error; Policy Tighten, the BuildOptions pin (E2113) and FactLaw .Force (E3521) share one rung set, and each rung has a golden or UI snapshot on O0, O1 and O2. Proof: `jet test Compiler --profile ui --filter ladder_law_` and `jet test Compiler --profile golden --filter LadderLaw`.",
-          "status": "met",
-          "metBy": "Orchestrator",
-          "verifiedBy": null,
-          "evidence": "Landed in dev 38466ea3b7 (merged e9f5a2f6e9). FactLaw.jet adds .Pin spelling and FactError.PinnedConflict (E2113) so conflicting higher-layer flags against a System or Fleet pin fail with E2113 while matching flags succeed; BuildFactChain.jet maps PinnedConflict to E2113; Policy Tighten, BuildOptions pin, and FactLaw share the rung ladder. Verified on built compiler: Jetpack/PackageModel/Tests/Merge.jet 481/481 PASS, Examples/Tooling/LadderLaw.jet PASS on O0/O1/O2, Tests/UI/LadderLaw/ladder_law_policy_widening.jet PASS, BuildEntry/build_options_layer_profile_code_and_flag PASS, Tests/Guards 211/211 PASS.",
-          "at": "2026-11-22T11:07:28.702Z"
-        },
-        {
-          "n": 3,
-          "text": "`strictness: .Script | .App | .Library | .Hardened` in package.jet is one table over the existing policy keys; `jet new` writes no strictness, and the cli and web templates write `.App` (D-STRICT-DIAL1=A). Proof: `jet test Compiler --profile cases --filter strictness_levels` (one case per level and one per template).",
-          "status": "met",
-          "metBy": "Orchestrator",
-          "verifiedBy": null,
-          "evidence": "Landed in dev 635625cc85. Added strictness: .Script | .App | .Library | .Hardened in Jetpack/PackageModel (PackageStrictness backed by single pkg_strictness_table(), requiring authority.allow on .App/.Library/.Hardened, bundling harden/sentries/unsafe and hardened test profile on .Hardened, refusing loosening) and Loader.jet; jet new writes no strictness, cli and web templates write strictness: .App; jet explain strictness prints the single table. Verified: Jetpack/PackageModel/Tests/Manifest.jet 481/481 PASS, Tests/Cases/Strictness/strictness_levels.case PASS, Tests/Guards 211/211 PASS.",
-          "at": "2026-11-22T10:56:13.931Z"
-        }
-      ],
-      "refs": [],
-      "tags": [
-        "ladder",
-        "config-settings"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-10-28T18:07:01.776Z",
-      "updated": "2026-11-22T11:07:51.308Z",
-      "updatedBy": "Orchestrator",
-      "criteriaLastN": 3,
-      "completedAt": "2026-11-22T11:07:51.308Z"
-    },
-    {
       "id": "c0mhdm27",
       "num": 6048,
       "title": "Typed service workers: build D-SERVICE-WORKER1, REPLY1, KEEP1 and BATCH1 (Ladder L-10)",
@@ -53598,86 +53512,6 @@
       "updated": "2026-11-24T02:28:22.378Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 13
-    },
-    {
-      "id": "c0w7y8wz",
-      "num": 6827,
-      "title": "db: full-text search index and relation loading on typed tables",
-      "body": "Gap card N4 from the #6792 r3 proposal (Docs/proposals/2026-11-13-web-app-framework-shape.md, section 4.2; crewboard/Logic/crew.jet search and my_projects). D-WEBAPP-SHAPE1=A (ratified 2026-11-13) governs this card; the examples/*.jet and crewboard/* paths name the programs in Docs/proposals/2026-11-13-web-app-framework-shape.md.",
-      "kind": "feature",
-      "track": "epoch",
-      "epoch": "G6",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-17",
-          "by": "Main",
-          "text": "c1 implementation decision (Main, within scope): Jet's own SQLite engine has no virtual tables, so the full-text index on the SQLite side is a plain inverted side table, kept in the same transaction as the row write, and not FTS5. Words are split by bytes after String.casefold, so core.db gains no core.text dependency. Table.search(words) matches every word under the row policy. SUB Speed-3-3-6827-c1-table-search (cycle p265). Postgres tsvector stays the Postgres half."
-        },
-        {
-          "at": "2026-11-17",
-          "by": "Main",
-          "text": "c1 Table.search drafted in $JET_SCRATCH_ROOT/lanes/Speed-3-3/drafts/fts, unchecked. Open point: its unicode (core.text) import is not in core.db's depends_on in Core.rows. Either add it there (needs a built compiler) or split words by bytes."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "store.table(..., search: fn) keeps a full-text index (SQLite FTS5, Postgres tsvector) and Table.search(words) returns rows that match every word, under the table's row policy.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 0393461c0c (p265): store.table(..., search: fn) keeps a full-text word index updated in the row's own write transaction, and Table.search(words) returns rows matching every word under the table's row policy. The case DB/search_index_matches_every_word_under_policy passes on batch compiler p265 (default, built and release). Jet's SQLite engine has no virtual tables, so the SQLite index is an inverted side table and not FTS5. Core.DB has no Postgres backend on dev (no Postgres store), so there is no tsvector half to build. p265 full suite: 0 new failures.",
-          "at": "2026-11-17T13:34:14.690Z",
-          "proof": {
-            "profile": "cases",
-            "filter": "DB/search_index_matches_every_word_under_policy"
-          }
-        },
-        {
-          "n": 2,
-          "text": "Rows.count_by(group) is one query (GROUP BY), and my_projects runs two queries whatever the number of projects, counting the policies' statements. A policy whose reads are key lookups compiles into the query as a join; other policies run per row, memoized per key in the transaction, and jet inspect choices names them.",
-          "status": "met",
-          "metBy": "Orchestrator",
-          "verifiedBy": null,
-          "evidence": "Landed in dev 89ab1b3b37 (merged 635625cc85). Query<T>.count_by(group) compiles to one SQL GROUP BY query with policy included; DBPolicySQL.jet compiles key-lookup row policies into EXISTS semi-joins and memoizes non-joinable policies per transaction; jet inspect choices reports joined and per-row policies. Verified on built compiler: Tests/Cases/DB/count_by_is_one_query.case PASS (O0, O1, O2, inspect choices), Core/Data 13/13 PASS, Core/DB 23/23 PASS, Tests/Guards 211/211 PASS.",
-          "at": "2026-11-22T10:55:30.884Z",
-          "proof": {
-            "profile": "cases",
-            "filter": "DB/count_by_is_one_query"
-          }
-        },
-        {
-          "n": 3,
-          "text": "A way to load a row's related rows in one query (a join or an IN list) exists and Crewboard's board uses it; the query count of board(), policies included, does not grow with the number of members, and limit counts rows after the policy.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 441eaeb490 (per-key policy memo plus Store.statements), 282522db5c (Table.get_many and Query.limit after the policy) and f06237367d (Crewboard's board() in the WebApp/crewboard_row_policies fixture loads assignees with get_many), all p266. On batch compiler p266, DB/related_rows_load_in_one_query PASS on O0, O1 and O2: a board of six members runs as many statements as one of two (policies included), reading each profile alone runs more, and the limit counts rows after the policy. WebApp/crewboard_row_policies PASS (statements unchanged from 2 to 4 members). Examples/Apps/Crewboard is in-memory with no DB, so the database Crewboard is the case fixture.",
-          "at": "2026-11-17T14:09:36.436Z",
-          "proof": {
-            "profile": "cases",
-            "filter": "DB/related_rows_load_in_one_query"
-          }
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "parentId": "c0snkbac",
-      "needsAcceptance": false,
-      "created": "2026-11-13T17:08:20.796Z",
-      "updated": "2026-11-22T10:56:10.399Z",
-      "updatedBy": "Orchestrator",
-      "criteriaLastN": 3,
-      "completedAt": "2026-11-22T10:56:10.399Z"
     },
     {
       "id": "c0e5gz4o",
@@ -74674,6 +74508,11 @@
         {
           "at": "2026-11-25",
           "by": "Orchestrator",
+          "text": "n=12 is open: probe on the batch-44 compiler, peek: fn(xs: ^[Int]) -> Int { xs.len() } and get: fn(^self) -> Int { self.n } check and run silently (2 2, 7 7). n=6 is open in part: Tests/UI/dead_key_circumflex_type.jet and _qualified_type.jet pass, but there is no ŝelf case, and the getting-started guide has no dead-key text (git grep nodeadkeys finds only Audits, Proposals and syntax-decisions)."
+        },
+        {
+          "at": "2026-11-25",
+          "by": "Orchestrator",
           "text": "Fresh-review findings for c6 and c4 (G1Generation-3-3, batch-42 compiler): the composed-letter hint covers type names only. A name such as `ŝelf` is told to write `ŝelf: Type`, and a parameter named `êntries` compiles silently. The lexer still has a `^=` token, so `a ^= 3` gets a misleading message. The comptime token names call the marks operator.caret and operator.caret_caret. The c4 grammar patch in batch 43 makes tree-sitter read ^^ as one token, colors the take mark in Zed (jet.wasm rebuilt), and flips the take_mark_is_colored_apart_from_logical_and guard to ^^; 7 guard filters pass on the batch-42 compiler."
         },
         {
@@ -74735,20 +74574,20 @@
         {
           "n": 2,
           "text": "Step A: the lexer and parser read ^T and ^^T as the write and take marks in every position & and && hold today (signatures, receivers, function types, windows, element marks, match subjects, receiver footprints, task captures), beside the old spelling, and the formatter prints ^ and ^^; a UI case covers each position, nested and layered (the Layers.jet program from the comparison runs and prints the same output in both spellings).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-24T14:10:55.105Z"
+          "evidence": "On dev 70ff64f2288 with the batch-43 compiler (full suite run): Tests/UI/caret_marks_every_position.jet PASS (every position), Tests/Cases/CaretMarks/caret_marks_layers.case PASS (Layers.jet: jet run, jet check and jet fmt --check in the caret spelling). The beside-the-old-spelling phase ended with step B (640f60846a6).",
+          "at": "2026-11-25T11:02:17.349Z"
         },
         {
           "n": 3,
           "text": "Step B: a jet fix migration plan (mark-caret1) rewrites every mark in Core, Compiler, Jetpack, Tools, Examples, Docs code blocks and every Tests tree, case fixture and template in one cutover; bitwise & and logical && are untouched (a sweep finds no operator rewritten and no & or && mark left); the parser stops reading & and && as marks, with no alias and no teaching diagnostic.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-24T14:10:55.950Z"
+          "evidence": "Step B commit 640f60846a6 on dev; Compiler/Migrations/MarkCaret1.jet with Spellings row mark-caret1; Tests/Cases/Migrations/mark_caret1_rewrites_every_mark.case PASS on the batch-43 run. Probe with the batch-44 compiler: fn(x: &Int) and fn(xs: &&[Int]) give Jet.InvalidStatement 'Expected a type, found &/&&' with no alias or teaching text. git grep for &/&& in mark positions across *.jet, *.md and *.case (excluding Audits/Proposals/Research) finds only Rust source strings, Rust-era comments and the migration case's input.",
+          "at": "2026-11-25T11:02:20.716Z"
         },
         {
           "n": 4,
@@ -74762,11 +74601,11 @@
         {
           "n": 5,
           "text": "The spec, the reference pages, the guides and LANGUAGE_REWRITES describe ^ and ^^ marks; D-CALLSITE-MARK2 and D-MOVE-SIGIL1 rationale in syntax-decisions.md records the respelling and its reason; no prose still teaches & or && as a mark.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-24T14:10:57.698Z"
+          "evidence": "On dev 70ff64f2288: Docs/Spec/syntax-decisions.md:3728-3739 records the respelling and its reason under D-CALLSITE-MARK2 and D-MOVE-SIGIL1 (commit 5b648982eb4); spec.md, safety.md and core-library.md teach ^/^^ (commit 33d4d021431); the LANGUAGE_REWRITES registry (Spellings.jet:111) lists mark-caret1. A git grep of Docs/Spec, the Site source and every *.md outside Audits/Proposals/Research finds no prose teaching & or && as a mark.",
+          "at": "2026-11-25T11:03:19.394Z"
         },
         {
           "n": 6,
@@ -74784,38 +74623,38 @@
         {
           "n": 7,
           "text": "Data/Syntax registry entry updated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T05:31:24.319Z"
+          "evidence": "Registry on dev 70ff64f2288: Compiler/JetFoundation/Data/Syntax/CoreSurface.jet SIGIL_WRITE \"^\" and SIGIL_MOVE \"^^\"; Spellings.jet migration row {name: \"mark-caret1\"}; MathLayout OP_CARET/OP_AMP are the operators only; step B commit 640f60846a6.",
+          "at": "2026-11-25T11:01:01.878Z"
         },
         {
           "n": 8,
           "text": "syntax-decisions.md log entry",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T05:31:24.319Z"
+          "evidence": "Docs/Spec/syntax-decisions.md caret respelling entry, commit 5b648982eb4 on dev.",
+          "at": "2026-11-25T11:01:03.867Z"
         },
         {
           "n": 9,
           "text": "editor grammars regenerated (jet self devtools grammars)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T05:31:24.319Z"
+          "evidence": "jet self devtools grammars (batch-43 compiler) on dev 70ff64f2288 rewrote the VS Code, TextMate, tree-sitter and Zed sections with no diff: the grammars are current. Their tokens come from Highlights.jet SIGIL_WRITE ^ / SIGIL_MOVE ^^.",
+          "at": "2026-11-25T11:02:54.443Z"
         },
         {
           "n": 10,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T05:31:24.319Z"
+          "evidence": "On dev 70ff64f2288: 81 Tests/UI snapshots name ^/^^ marks, and git grep finds no & or && mark in any Tests/UI .stderr/.stdout or in Compiler/Prelude/Diagnostics.jet. The ui suite on the batch-43 compiler: 3161 PASS with no new failure (the 4 FAIL rows are older and mark-unrelated).",
+          "at": "2026-11-25T11:02:56.091Z"
         },
         {
           "n": 11,
@@ -74849,7 +74688,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-24T13:44:02.626Z",
-      "updated": "2026-11-25T09:31:16.949Z",
+      "updated": "2026-11-25T11:03:19.394Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 12
     },
@@ -74871,6 +74710,16 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-25",
+          "by": "Orchestrator",
+          "text": "A facts (batch-44 tree): name_mangle is gone, but its scheme survives. RuntimeHandles.jet runtime symbols are still mangled (__jet__x3ccorelib_x3e_score_d…), ast_comptime builds \"__jet_{name}\" (Comptime.jet:826-834), and InlineModules.jet:370 encodes module paths the same way. __jet_ is also the general generated-name prefix (Predicates.jet GENERATED_NAME_PREFIX, Jetpack SyntaxRegistry copy) used by sema temporaries, CLI entry, link and panic edges. The criterion needs a ruling on scope: the mangled-symbol encoding goes, and generated temporaries keep a reserved prefix. Stale Rust prose still in Docs/Spec: Contributing/agent-engineering.md:36 (NativeTaskBody.rs), Contributing/bootstrap.md:145 (cargo build of the Rust jet), architecture.md R6 (line 2243), core-library.md:149-150 and 193, cli.md:1626 and 2051, canvas-parity.md:12, stdlib-api-laws.md:621."
+        },
+        {
+          "at": "2026-11-25",
+          "by": "Orchestrator",
+          "text": "D decision (orchestrator, within criterion n=4): a duplicates.tsv pair whose lists share variant names but carry different payload types (value-model enums such as the SQL, JSON, CLI and form scalar enums) or whose packages cannot reach each other (layer) is not a shared-member duplicate. The closed_lists guard derives both reasons from the checked source and refuses a row whose stated reason fails; no hand-written label counts. Every other pair collapses to one home."
+        },
         {
           "at": "2026-11-25",
           "by": "Orchestrator",
@@ -75356,7 +75205,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-24T17:01:07.086Z",
-      "updated": "2026-11-25T09:34:16.895Z",
+      "updated": "2026-11-25T11:15:31.935Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 17
     }
@@ -103438,192 +103287,6 @@
       "created": "2026-10-28T12:04:00.583Z",
       "outcome": "A",
       "ratifiedAt": "2026-10-28"
-    },
-    {
-      "id": "D-LADDER-LAW1",
-      "cardId": "c0qz3x03",
-      "group": "design",
-      "title": "A value forced by a host or fleet file refuses a conflicting flag, as a pin does",
-      "situation": "Jet has one law for settings. The nearest source wins, the most explicit run wins, and safety settings only tighten. Two words force a value against later writers. A pin in build code refuses a conflicting flag with an error. A force in a host or fleet file beats the flag with no message. No shipped tool writes host or fleet files yet. So the silent force runs only in tests. The vote decides how a forced host or fleet value treats a conflicting flag.",
-      "gist": "Should a host or fleet file that forces a value refuse a conflicting flag?",
-      "lesson": "Yes: forcing is pinning, everywhere, and a conflicting flag is an error that names the pin.",
-      "explainer": "",
-      "story": "An admin pins `optimize` to basic for the fleet. Dev types `--optimize=none` and gets an error naming the fleet file, not a silent build.",
-      "inWild": "Option          Conflicting flag    Message      Like\nA pin           refused             error        Firefox, Chrome\nB silent force  ignored             none         Nix mkForce\nC loud force    ignored             note         no close peer",
-      "detail": "WHAT WE BUILD\n- One resolver: policy (Policy.jet:89-138), BuildOptions (BuildOptions.jet:371-393, E2113) and FactLaw (layers with .Force and E3521) move onto the FactLaw contribution law. Required by D-CONF-MERGE1=A under every option.\n- Under A: ContributionLayer accepts .Pin at system and fleet layers; a conflicting later writer gets E2113. Two pins on one key at one layer stay E3521. Workspace lock publication checks force_pin for .Pin overlays.\n\n- `jet explain KEY FILE:LINE` prints sources outermost first and marks the winner (#6052 tracks file:line instead of byte spans, Policy.jet:162-169).\n- Migration: test fixtures respell .Force as .Pin (Jetpack Tests/Merge.jet:77, JetCli GateProjection fixture). No production writer exists.\n\nDEFECTS FIXED UNDER EVERY OPTION (no vote)\n- Sentries direction (#6053): .On is tighter; policy_widens (Policy.jet:286-290) treats .Off as tight, so an inner .On is E0355 today (probe r02).\n- Gates in source (#6051): D-GATE-LAW1=A (2026-10-04) supersedes D-ONCE-GATE1=A's five scopes; POLICY_RULES (Policy.jet:119-138) still lists them, and the marker row answers E0930 first (probe r03).\n\n- Two unsafe settings under one word (#6045): the org gate dial (Policy.jet:332-365) and the package path list (Blocks/Policy.jet:135-145). They split into `unsafe:` (dial) and `unsafe_paths: [...]`; .Deny becomes .Forbid. Amends D-TEAMPOLICY1=A's canonical field (SD:7604-7630).\n\nEVIDENCE (r14 jet, drafts7 probes)\n- r01: `b.pin(.optimize, .Full)` then `--optimize=none` gives E2113; `--optimize=size` gives E2104 (none, basic or full).\n- BuildOptions never reads FactLaw (BuildOptions.jet:371-393 uses Stock, Profile, Code, Flag).\n\nIDS\nUnder A amends D-CONF-MERGE1=A (host and fleet .Force becomes .Pin with E2113) and D-SETTING-ORDER1=A (pins also in host and fleet files). Keeps D-JOS-PRIORITY-SURFACE2=A's .Default and .Priority(n). Covers #6041 (L-02), #6045, #6051, #6053 and the force word of #6054.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Forcing is pinning",
-          "detail": "A host or fleet file forces with `.Pin`. A conflicting flag is the same error as a build-code pin. Gains: One word and one behavior for forcing. No flag is ever ignored silently. Losses: A pinned fleet setting can fail a script that passes a flag.",
-          "technical": "One resolver serves policy, build options and settings. Host and fleet layers accept `.Pin`. A later conflicting writer, the command line included, gets E2113 naming the pin. A flag with the same value does not conflict. `.Priority(n)` and `.Default` keep their quiet precedence. `jet explain KEY` lists every source, outermost first, and marks the winner.",
-          "code": "# A: a fleet pin refuses a conflicting flag\n# fleet file: optimize = { value: .Basic, priority: .Pin }\n$ jet build --optimize=none\nError [E2113]: `optimize` is pinned to `basic` by the fleet file"
-        },
-        {
-          "key": "B",
-          "name": "Silent force",
-          "detail": "Keep today's rule: a forced host or fleet value beats the flag. Only `jet explain` shows it. Gains: No ratified rule changes. Losses: A flag can be ignored with no message. Two words force, with two behaviors.",
-          "technical": "The same single resolver. Host and fleet `.Force` beats the command line; `jet explain` records the flag as shadowed.",
-          "code": "# B: a fleet force wins with no message\n# fleet file: optimize = { value: .Basic, priority: .Force }\n$ jet build --optimize=none\nok   # built at basic; only jet explain shows why"
-        },
-        {
-          "key": "C",
-          "name": "Force wins with a note",
-          "detail": "The forced value wins, and the build prints a note naming the file that forced it. Gains: Builds never fail because of a host setting. Losses: A third behavior beside pin and silent force. Notes scroll past in CI logs.",
-          "technical": "As B, but each overridden flag prints one note line naming the forcing source.",
-          "code": "# C: the force wins and says so\n$ jet build --optimize=none\nnote: `optimize` is forced to `basic` by the fleet file\nok"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Nix",
-          "note": "mkForce wins silently; a separate query shows which file set it. Source: https://nixos.org/manual/nixos/stable/#sec-option-definitions-setting-priorities",
-          "code": "# Nix\nservices.nginx.enable = lib.mkForce false;\n# another file setting true silently loses"
-        },
-        {
-          "lang": "Firefox",
-          "note": "A locked policy cannot be changed by the user, and shows as locked. Source: https://mozilla.github.io/policy-templates/",
-          "code": "// policies.json\n\"Preferences\": { \"browser.startup.homepage\":\n  { \"Value\": \"https://intranet\", \"Status\": \"locked\" } }"
-        },
-        {
-          "lang": "Chrome",
-          "note": "Mandatory policies override user settings; chrome://policy lists them. Source: https://chromeenterprise.google/policies/",
-          "code": "# Chrome: managed policy (Linux)\n/etc/opt/chrome/policies/managed/home.json\n{ \"HomepageLocation\": \"https://intranet\" }"
-        },
-        {
-          "lang": "Git",
-          "note": "System, global and repo config layer; a later layer always wins, with no force. Source: https://git-scm.com/docs/git-config",
-          "code": "# Git\n$ git config --system core.autocrlf false\n$ git -c core.autocrlf=true commit   # the flag wins"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "rec": "A",
-        "why": "Jet already refuses a flag that conflicts with a pin. Forcing from a host file is the same act, so it should behave the same.",
-        "gains": [
-          "One word, one behavior, at every level.",
-          "Every ignored flag becomes a visible error.",
-          "Settled before the first writer ships, so no one breaks."
-        ],
-        "losses": [
-          {
-            "loss": "A pinned fleet setting can fail a script that passes a flag.",
-            "mitigation": "The error names the pin, and a flag with the same value passes."
-          }
-        ],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "A flag the user typed can be ignored without a word."
-          },
-          {
-            "key": "C",
-            "reason": "It adds a third forcing behavior, and notes are easy to miss."
-          }
-        ],
-        "tradeoff": "An occasional hard stop, for no flag ever ignored in silence."
-      },
-      "hybrid": null,
-      "ballotMode": "full",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": {
-        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: BallotReview. I attacked the peer rows and whether a hard stop is worse than a note. Chrome shows forced policies as managed and blocks user changes, so it sits beside Firefox under A, not with silent force; A still wins."
-      },
-      "checkInstructions": null,
-      "surface": {
-        "gist": "Should a host or fleet file that forces a value refuse a conflicting flag?",
-        "lesson": "Yes: forcing is pinning, everywhere, and a conflicting flag is an error that names the pin.",
-        "trio": {
-          "current": {
-            "note": "Today: a build-code pin refuses a flag; a fleet force would win silently.",
-            "code": "# Today: two kinds of force\n# @build.jet: b.pin(.optimize, .Full)\n$ jet build --optimize=none\nError [E2113]: `optimize` is pinned to `full` at @build.jet:3\n# fleet file .Force: beats the flag with no message (tests only)"
-          },
-          "wild": {
-            "lang": "Firefox",
-            "note": "An enterprise policy can lock a preference; the user sees it is locked.",
-            "code": "// Firefox policies.json\n\"Preferences\": { \"browser.startup.homepage\": {\n    \"Value\": \"https://intranet\", \"Status\": \"locked\" } }\n// the setting shows as locked in the browser"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Forcing is pinning",
-            "gist": "A host or fleet file forces with `.Pin`. A conflicting flag is the same error as a build-code pin.",
-            "gains": [
-              "One word and one behavior for forcing.",
-              "No flag is ever ignored silently."
-            ],
-            "losses": [
-              "A pinned fleet setting can fail a script that passes a flag."
-            ],
-            "proposed": {
-              "code": "# A: a fleet pin refuses a conflicting flag\n# fleet file: optimize = { value: .Basic, priority: .Pin }\n$ jet build --optimize=none\nError [E2113]: `optimize` is pinned to `basic` by the fleet file"
-            }
-          },
-          {
-            "key": "B",
-            "name": "Silent force",
-            "gist": "Keep today's rule: a forced host or fleet value beats the flag. Only `jet explain` shows it.",
-            "gains": [
-              "No ratified rule changes."
-            ],
-            "losses": [
-              "A flag can be ignored with no message.",
-              "Two words force, with two behaviors."
-            ],
-            "proposed": {
-              "code": "# B: a fleet force wins with no message\n# fleet file: optimize = { value: .Basic, priority: .Force }\n$ jet build --optimize=none\nok   # built at basic; only jet explain shows why"
-            }
-          },
-          {
-            "key": "C",
-            "name": "Force wins with a note",
-            "gist": "The forced value wins, and the build prints a note naming the file that forced it.",
-            "gains": [
-              "Builds never fail because of a host setting."
-            ],
-            "losses": [
-              "A third behavior beside pin and silent force.",
-              "Notes scroll past in CI logs."
-            ],
-            "proposed": {
-              "code": "# C: the force wins and says so\n$ jet build --optimize=none\nnote: `optimize` is forced to `basic` by the fleet file\nok"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "Jet already refuses a flag that conflicts with a pin. Forcing from a host file is the same act, so it should behave the same.",
-          "gains": [
-            "One word, one behavior, at every level.",
-            "Every ignored flag becomes a visible error.",
-            "Settled before the first writer ships, so no one breaks."
-          ],
-          "losses": [
-            {
-              "loss": "A pinned fleet setting can fail a script that passes a flag.",
-              "mitigation": "The error names the pin, and a flag with the same value passes."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "A flag the user typed can be ignored without a word."
-            },
-            {
-              "key": "C",
-              "reason": "It adds a third forcing behavior, and notes are easy to miss."
-            }
-          ],
-          "tradeoff": "An occasional hard stop, for no flag ever ignored in silence."
-        }
-      },
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-10-29T01:55:06.809Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-10-29"
     },
     {
       "id": "D-REPL-PKG1",
@@ -138438,6 +138101,76 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-25T11:15:31.935Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0mhrplj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-25T11:03:19.395Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0jjynlr",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-25T11:02:56.091Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0jjynlr",
+      "note": "#10"
+    },
+    {
+      "at": "2026-11-25T11:02:54.443Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0jjynlr",
+      "note": "#9"
+    },
+    {
+      "at": "2026-11-25T11:02:23.774Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0jjynlr",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-25T11:02:20.716Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0jjynlr",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-25T11:02:17.349Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0jjynlr",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-25T11:01:03.868Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0jjynlr",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-25T11:01:01.878Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0jjynlr",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-25T10:55:19.502Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0mhrplj",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-25T10:45:41.409Z",
       "by": "Orchestrator",

@@ -43064,6 +43064,176 @@
       "completedAt": "2026-11-22T09:34:40.590Z",
       "questions": [],
       "retiredAt": "2026-11-25T10:45:16.823Z"
+    },
+    {
+      "id": "c0w7y8wz",
+      "num": 6827,
+      "title": "db: full-text search index and relation loading on typed tables",
+      "body": "Gap card N4 from the #6792 r3 proposal (Docs/proposals/2026-11-13-web-app-framework-shape.md, section 4.2; crewboard/Logic/crew.jet search and my_projects). D-WEBAPP-SHAPE1=A (ratified 2026-11-13) governs this card; the examples/*.jet and crewboard/* paths name the programs in Docs/proposals/2026-11-13-web-app-framework-shape.md.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "G6",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c1 implementation decision (Main, within scope): Jet's own SQLite engine has no virtual tables, so the full-text index on the SQLite side is a plain inverted side table, kept in the same transaction as the row write, and not FTS5. Words are split by bytes after String.casefold, so core.db gains no core.text dependency. Table.search(words) matches every word under the row policy. SUB Speed-3-3-6827-c1-table-search (cycle p265). Postgres tsvector stays the Postgres half."
+        },
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c1 Table.search drafted in $JET_SCRATCH_ROOT/lanes/Speed-3-3/drafts/fts, unchecked. Open point: its unicode (core.text) import is not in core.db's depends_on in Core.rows. Either add it there (needs a built compiler) or split words by bytes."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "store.table(..., search: fn) keeps a full-text index (SQLite FTS5, Postgres tsvector) and Table.search(words) returns rows that match every word, under the table's row policy.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 0393461c0c (p265): store.table(..., search: fn) keeps a full-text word index updated in the row's own write transaction, and Table.search(words) returns rows matching every word under the table's row policy. The case DB/search_index_matches_every_word_under_policy passes on batch compiler p265 (default, built and release). Jet's SQLite engine has no virtual tables, so the SQLite index is an inverted side table and not FTS5. Core.DB has no Postgres backend on dev (no Postgres store), so there is no tsvector half to build. p265 full suite: 0 new failures.",
+          "at": "2026-11-17T13:34:14.690Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "DB/search_index_matches_every_word_under_policy"
+          }
+        },
+        {
+          "n": 2,
+          "text": "Rows.count_by(group) is one query (GROUP BY), and my_projects runs two queries whatever the number of projects, counting the policies' statements. A policy whose reads are key lookups compiles into the query as a join; other policies run per row, memoized per key in the transaction, and jet inspect choices names them.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "Landed in dev 89ab1b3b37 (merged 635625cc85). Query<T>.count_by(group) compiles to one SQL GROUP BY query with policy included; DBPolicySQL.jet compiles key-lookup row policies into EXISTS semi-joins and memoizes non-joinable policies per transaction; jet inspect choices reports joined and per-row policies. Verified on built compiler: Tests/Cases/DB/count_by_is_one_query.case PASS (O0, O1, O2, inspect choices), Core/Data 13/13 PASS, Core/DB 23/23 PASS, Tests/Guards 211/211 PASS.",
+          "at": "2026-11-22T10:55:30.884Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "DB/count_by_is_one_query"
+          }
+        },
+        {
+          "n": 3,
+          "text": "A way to load a row's related rows in one query (a join or an IN list) exists and Crewboard's board uses it; the query count of board(), policies included, does not grow with the number of members, and limit counts rows after the policy.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 441eaeb490 (per-key policy memo plus Store.statements), 282522db5c (Table.get_many and Query.limit after the policy) and f06237367d (Crewboard's board() in the WebApp/crewboard_row_policies fixture loads assignees with get_many), all p266. On batch compiler p266, DB/related_rows_load_in_one_query PASS on O0, O1 and O2: a board of six members runs as many statements as one of two (policies included), reading each profile alone runs more, and the limit counts rows after the policy. WebApp/crewboard_row_policies PASS (statements unchanged from 2 to 4 members). Examples/Apps/Crewboard is in-memory with no DB, so the database Crewboard is the case fixture.",
+          "at": "2026-11-17T14:09:36.436Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "DB/related_rows_load_in_one_query"
+          }
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": "c0snkbac",
+      "needsAcceptance": false,
+      "created": "2026-11-13T17:08:20.796Z",
+      "updated": "2026-11-22T10:56:10.399Z",
+      "updatedBy": "Orchestrator",
+      "criteriaLastN": 3,
+      "completedAt": "2026-11-22T10:56:10.399Z",
+      "questions": [],
+      "retiredAt": "2026-11-25T11:01:02.011Z"
+    },
+    {
+      "id": "c0qz3x03",
+      "num": 6041,
+      "title": "Config precedence (D-LADDER-LAW1=A): Policy Tighten, the BuildOptions pin and FactLaw .Force share one rung set",
+      "body": "From the ladder audit (Docs/audits/ladder-audit-2026-10-28.md, finding L-02; dev d9bed7c), philosophy pillar 4, \"Ladders, Not Cliffs\", tempered by pillar 2.\n\nFinding: Three precedence engines (Policy Tighten, BuildOptions pin/E2113, FactLaw .Force/E3521) with different rung sets; D-CONF-MERGE1/D-SETTING-ORDER1 index-only\n\nEvidence: Policy.jet:99-143; Statements.jet:65-120; BuildOptions.jet:371-393; FactLaw.jet:10-87; Merge.jet:175; SD:8684; SD:9661; build_fact_precedence.jet\n\nAudit action: unify names. D-LADDER-LAW1=A and D-STRICT-DIAL1=A (ratified) settle the spelling and behaviour (c2, c3).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "G5",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-2",
+          "text": "Owner-wait sweep 2026-11-15 (TowerKeeper-2, for Main): body reworded; the text waited on an owner answer that ratified decisions already give, or on a choice within ratified scope; it is recorded as decided (Main's operational authority) and nothing waits."
+        },
+        {
+          "at": "2026-10-29",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "Main",
+          "text": "2026-10-28 absorbed #6054 (same ballot, Audit/drafts7)."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "Main",
+          "text": "2026-10-28 absorbed #6053 (same ballot, Audit/drafts7)."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "Main",
+          "text": "2026-10-28 absorbed #6045 (same ballot, Audit/drafts7)."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "An owner ballot on L-02 is ratified.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "D-LADDER-LAW1 ratified (A) and D-STRICT-DIAL1 ratified (A); both implemented in dev 635625cc85 and 38466ea3b7.",
+          "at": "2026-11-22T11:07:49.510Z",
+          "closure": "decision"
+        },
+        {
+          "n": 2,
+          "text": "D-LADDER-LAW1=A: a value forced by a host or fleet file refuses a conflicting flag as a pin does, with one registered error; Policy Tighten, the BuildOptions pin (E2113) and FactLaw .Force (E3521) share one rung set, and each rung has a golden or UI snapshot on O0, O1 and O2. Proof: `jet test Compiler --profile ui --filter ladder_law_` and `jet test Compiler --profile golden --filter LadderLaw`.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "Landed in dev 38466ea3b7 (merged e9f5a2f6e9). FactLaw.jet adds .Pin spelling and FactError.PinnedConflict (E2113) so conflicting higher-layer flags against a System or Fleet pin fail with E2113 while matching flags succeed; BuildFactChain.jet maps PinnedConflict to E2113; Policy Tighten, BuildOptions pin, and FactLaw share the rung ladder. Verified on built compiler: Jetpack/PackageModel/Tests/Merge.jet 481/481 PASS, Examples/Tooling/LadderLaw.jet PASS on O0/O1/O2, Tests/UI/LadderLaw/ladder_law_policy_widening.jet PASS, BuildEntry/build_options_layer_profile_code_and_flag PASS, Tests/Guards 211/211 PASS.",
+          "at": "2026-11-22T11:07:28.702Z"
+        },
+        {
+          "n": 3,
+          "text": "`strictness: .Script | .App | .Library | .Hardened` in package.jet is one table over the existing policy keys; `jet new` writes no strictness, and the cli and web templates write `.App` (D-STRICT-DIAL1=A). Proof: `jet test Compiler --profile cases --filter strictness_levels` (one case per level and one per template).",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "Landed in dev 635625cc85. Added strictness: .Script | .App | .Library | .Hardened in Jetpack/PackageModel (PackageStrictness backed by single pkg_strictness_table(), requiring authority.allow on .App/.Library/.Hardened, bundling harden/sentries/unsafe and hardened test profile on .Hardened, refusing loosening) and Loader.jet; jet new writes no strictness, cli and web templates write strictness: .App; jet explain strictness prints the single table. Verified: Jetpack/PackageModel/Tests/Manifest.jet 481/481 PASS, Tests/Cases/Strictness/strictness_levels.case PASS, Tests/Guards 211/211 PASS.",
+          "at": "2026-11-22T10:56:13.931Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "ladder",
+        "config-settings"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-10-28T18:07:01.776Z",
+      "updated": "2026-11-22T11:07:51.308Z",
+      "updatedBy": "Orchestrator",
+      "criteriaLastN": 3,
+      "completedAt": "2026-11-22T11:07:51.308Z",
+      "questions": [],
+      "retiredAt": "2026-11-25T11:15:32.051Z"
     }
   ]
 }

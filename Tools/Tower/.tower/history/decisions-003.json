@@ -79932,6 +79932,193 @@
       "outcome": "A",
       "ratifiedAt": "2026-11-17",
       "retiredAt": "2026-11-25T10:45:16.823Z"
+    },
+    {
+      "id": "D-LADDER-LAW1",
+      "cardId": "c0qz3x03",
+      "group": "design",
+      "title": "A value forced by a host or fleet file refuses a conflicting flag, as a pin does",
+      "situation": "Jet has one law for settings. The nearest source wins, the most explicit run wins, and safety settings only tighten. Two words force a value against later writers. A pin in build code refuses a conflicting flag with an error. A force in a host or fleet file beats the flag with no message. No shipped tool writes host or fleet files yet. So the silent force runs only in tests. The vote decides how a forced host or fleet value treats a conflicting flag.",
+      "gist": "Should a host or fleet file that forces a value refuse a conflicting flag?",
+      "lesson": "Yes: forcing is pinning, everywhere, and a conflicting flag is an error that names the pin.",
+      "explainer": "",
+      "story": "An admin pins `optimize` to basic for the fleet. Dev types `--optimize=none` and gets an error naming the fleet file, not a silent build.",
+      "inWild": "Option          Conflicting flag    Message      Like\nA pin           refused             error        Firefox, Chrome\nB silent force  ignored             none         Nix mkForce\nC loud force    ignored             note         no close peer",
+      "detail": "WHAT WE BUILD\n- One resolver: policy (Policy.jet:89-138), BuildOptions (BuildOptions.jet:371-393, E2113) and FactLaw (layers with .Force and E3521) move onto the FactLaw contribution law. Required by D-CONF-MERGE1=A under every option.\n- Under A: ContributionLayer accepts .Pin at system and fleet layers; a conflicting later writer gets E2113. Two pins on one key at one layer stay E3521. Workspace lock publication checks force_pin for .Pin overlays.\n\n- `jet explain KEY FILE:LINE` prints sources outermost first and marks the winner (#6052 tracks file:line instead of byte spans, Policy.jet:162-169).\n- Migration: test fixtures respell .Force as .Pin (Jetpack Tests/Merge.jet:77, JetCli GateProjection fixture). No production writer exists.\n\nDEFECTS FIXED UNDER EVERY OPTION (no vote)\n- Sentries direction (#6053): .On is tighter; policy_widens (Policy.jet:286-290) treats .Off as tight, so an inner .On is E0355 today (probe r02).\n- Gates in source (#6051): D-GATE-LAW1=A (2026-10-04) supersedes D-ONCE-GATE1=A's five scopes; POLICY_RULES (Policy.jet:119-138) still lists them, and the marker row answers E0930 first (probe r03).\n\n- Two unsafe settings under one word (#6045): the org gate dial (Policy.jet:332-365) and the package path list (Blocks/Policy.jet:135-145). They split into `unsafe:` (dial) and `unsafe_paths: [...]`; .Deny becomes .Forbid. Amends D-TEAMPOLICY1=A's canonical field (SD:7604-7630).\n\nEVIDENCE (r14 jet, drafts7 probes)\n- r01: `b.pin(.optimize, .Full)` then `--optimize=none` gives E2113; `--optimize=size` gives E2104 (none, basic or full).\n- BuildOptions never reads FactLaw (BuildOptions.jet:371-393 uses Stock, Profile, Code, Flag).\n\nIDS\nUnder A amends D-CONF-MERGE1=A (host and fleet .Force becomes .Pin with E2113) and D-SETTING-ORDER1=A (pins also in host and fleet files). Keeps D-JOS-PRIORITY-SURFACE2=A's .Default and .Priority(n). Covers #6041 (L-02), #6045, #6051, #6053 and the force word of #6054.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Forcing is pinning",
+          "detail": "A host or fleet file forces with `.Pin`. A conflicting flag is the same error as a build-code pin. Gains: One word and one behavior for forcing. No flag is ever ignored silently. Losses: A pinned fleet setting can fail a script that passes a flag.",
+          "technical": "One resolver serves policy, build options and settings. Host and fleet layers accept `.Pin`. A later conflicting writer, the command line included, gets E2113 naming the pin. A flag with the same value does not conflict. `.Priority(n)` and `.Default` keep their quiet precedence. `jet explain KEY` lists every source, outermost first, and marks the winner.",
+          "code": "# A: a fleet pin refuses a conflicting flag\n# fleet file: optimize = { value: .Basic, priority: .Pin }\n$ jet build --optimize=none\nError [E2113]: `optimize` is pinned to `basic` by the fleet file"
+        },
+        {
+          "key": "B",
+          "name": "Silent force",
+          "detail": "Keep today's rule: a forced host or fleet value beats the flag. Only `jet explain` shows it. Gains: No ratified rule changes. Losses: A flag can be ignored with no message. Two words force, with two behaviors.",
+          "technical": "The same single resolver. Host and fleet `.Force` beats the command line; `jet explain` records the flag as shadowed.",
+          "code": "# B: a fleet force wins with no message\n# fleet file: optimize = { value: .Basic, priority: .Force }\n$ jet build --optimize=none\nok   # built at basic; only jet explain shows why"
+        },
+        {
+          "key": "C",
+          "name": "Force wins with a note",
+          "detail": "The forced value wins, and the build prints a note naming the file that forced it. Gains: Builds never fail because of a host setting. Losses: A third behavior beside pin and silent force. Notes scroll past in CI logs.",
+          "technical": "As B, but each overridden flag prints one note line naming the forcing source.",
+          "code": "# C: the force wins and says so\n$ jet build --optimize=none\nnote: `optimize` is forced to `basic` by the fleet file\nok"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Nix",
+          "note": "mkForce wins silently; a separate query shows which file set it. Source: https://nixos.org/manual/nixos/stable/#sec-option-definitions-setting-priorities",
+          "code": "# Nix\nservices.nginx.enable = lib.mkForce false;\n# another file setting true silently loses"
+        },
+        {
+          "lang": "Firefox",
+          "note": "A locked policy cannot be changed by the user, and shows as locked. Source: https://mozilla.github.io/policy-templates/",
+          "code": "// policies.json\n\"Preferences\": { \"browser.startup.homepage\":\n  { \"Value\": \"https://intranet\", \"Status\": \"locked\" } }"
+        },
+        {
+          "lang": "Chrome",
+          "note": "Mandatory policies override user settings; chrome://policy lists them. Source: https://chromeenterprise.google/policies/",
+          "code": "# Chrome: managed policy (Linux)\n/etc/opt/chrome/policies/managed/home.json\n{ \"HomepageLocation\": \"https://intranet\" }"
+        },
+        {
+          "lang": "Git",
+          "note": "System, global and repo config layer; a later layer always wins, with no force. Source: https://git-scm.com/docs/git-config",
+          "code": "# Git\n$ git config --system core.autocrlf false\n$ git -c core.autocrlf=true commit   # the flag wins"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "Jet already refuses a flag that conflicts with a pin. Forcing from a host file is the same act, so it should behave the same.",
+        "gains": [
+          "One word, one behavior, at every level.",
+          "Every ignored flag becomes a visible error.",
+          "Settled before the first writer ships, so no one breaks."
+        ],
+        "losses": [
+          {
+            "loss": "A pinned fleet setting can fail a script that passes a flag.",
+            "mitigation": "The error names the pin, and a flag with the same value passes."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A flag the user typed can be ignored without a word."
+          },
+          {
+            "key": "C",
+            "reason": "It adds a third forcing behavior, and notes are easy to miss."
+          }
+        ],
+        "tradeoff": "An occasional hard stop, for no flag ever ignored in silence."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: BallotReview. I attacked the peer rows and whether a hard stop is worse than a note. Chrome shows forced policies as managed and blocks user changes, so it sits beside Firefox under A, not with silent force; A still wins."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should a host or fleet file that forces a value refuse a conflicting flag?",
+        "lesson": "Yes: forcing is pinning, everywhere, and a conflicting flag is an error that names the pin.",
+        "trio": {
+          "current": {
+            "note": "Today: a build-code pin refuses a flag; a fleet force would win silently.",
+            "code": "# Today: two kinds of force\n# @build.jet: b.pin(.optimize, .Full)\n$ jet build --optimize=none\nError [E2113]: `optimize` is pinned to `full` at @build.jet:3\n# fleet file .Force: beats the flag with no message (tests only)"
+          },
+          "wild": {
+            "lang": "Firefox",
+            "note": "An enterprise policy can lock a preference; the user sees it is locked.",
+            "code": "// Firefox policies.json\n\"Preferences\": { \"browser.startup.homepage\": {\n    \"Value\": \"https://intranet\", \"Status\": \"locked\" } }\n// the setting shows as locked in the browser"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Forcing is pinning",
+            "gist": "A host or fleet file forces with `.Pin`. A conflicting flag is the same error as a build-code pin.",
+            "gains": [
+              "One word and one behavior for forcing.",
+              "No flag is ever ignored silently."
+            ],
+            "losses": [
+              "A pinned fleet setting can fail a script that passes a flag."
+            ],
+            "proposed": {
+              "code": "# A: a fleet pin refuses a conflicting flag\n# fleet file: optimize = { value: .Basic, priority: .Pin }\n$ jet build --optimize=none\nError [E2113]: `optimize` is pinned to `basic` by the fleet file"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Silent force",
+            "gist": "Keep today's rule: a forced host or fleet value beats the flag. Only `jet explain` shows it.",
+            "gains": [
+              "No ratified rule changes."
+            ],
+            "losses": [
+              "A flag can be ignored with no message.",
+              "Two words force, with two behaviors."
+            ],
+            "proposed": {
+              "code": "# B: a fleet force wins with no message\n# fleet file: optimize = { value: .Basic, priority: .Force }\n$ jet build --optimize=none\nok   # built at basic; only jet explain shows why"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Force wins with a note",
+            "gist": "The forced value wins, and the build prints a note naming the file that forced it.",
+            "gains": [
+              "Builds never fail because of a host setting."
+            ],
+            "losses": [
+              "A third behavior beside pin and silent force.",
+              "Notes scroll past in CI logs."
+            ],
+            "proposed": {
+              "code": "# C: the force wins and says so\n$ jet build --optimize=none\nnote: `optimize` is forced to `basic` by the fleet file\nok"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Jet already refuses a flag that conflicts with a pin. Forcing from a host file is the same act, so it should behave the same.",
+          "gains": [
+            "One word, one behavior, at every level.",
+            "Every ignored flag becomes a visible error.",
+            "Settled before the first writer ships, so no one breaks."
+          ],
+          "losses": [
+            {
+              "loss": "A pinned fleet setting can fail a script that passes a flag.",
+              "mitigation": "The error names the pin, and a flag with the same value passes."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "A flag the user typed can be ignored without a word."
+            },
+            {
+              "key": "C",
+              "reason": "It adds a third forcing behavior, and notes are easy to miss."
+            }
+          ],
+          "tradeoff": "An occasional hard stop, for no flag ever ignored in silence."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-29T01:55:06.809Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-10-29",
+      "retiredAt": "2026-11-25T11:15:32.051Z"
     }
   ]
 }
