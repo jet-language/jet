@@ -6857,9 +6857,11 @@ ir_route_of_signature: fn(symbol: String, params: [Type], writes: [Bool], return
     Val(IRRoute{symbol: symbol.copy(), export: symbol.copy(), native_lists: true, params: carriers, result: result})
 }
 
+// A binding's result route: Unit for none, Unit or `Never` (an export that
+// stops), and for `T E!` the success carrier with the error's.
 ir_route_result_of: fn(returned: Type?) -> IRRouteResult? Never! {
     ty: returned ?? return Val(IRRouteResult.Plain{carrier: IRRouteCarrier.Unit})
-    if ir_unit_type(ty) -> return Val(IRRouteResult.Plain{carrier: IRRouteCarrier.Unit})
+    if ir_unit_type(ty) || ir_never_type(ty) -> return Val(IRRouteResult.Plain{carrier: IRRouteCarrier.Unit})
     if ir_untag(ty) == .Result(ok, err) {
         if err == (Type.Named{name: "Never"}) -> return ir_route_result_of(Val(ok))
         // The default Err crosses as its message text (ir_route_result
@@ -6988,6 +6990,12 @@ ir_route_carrier_of: fn(ty: Type) -> IRRouteCarrier? Never! {
     if ir_route_of_signature("jet_raw_probe", [Type]{instant}, [Bool]{true}, None) == .Val(_) {
         panic("a written Instant crossed")
     }
+}
+
+// A binding that stops (`-> Never`) routes as a Unit result.
+#Test("a binding's Never result routes") {
+    stop: ir_route_of_signature("jet_raw_probe", [Type]{Type.String, Type.String}, [Bool]{false, false}, Val(Type.Named{name: "Never"})) ?? panic("no Never route")
+    assert(stop.result == IRRouteResult.Plain{carrier: IRRouteCarrier.Unit})
 }
 
 // `core.mem.stream_store<T>(dst, value)`: `dst = value`, the value written

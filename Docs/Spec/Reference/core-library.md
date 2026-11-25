@@ -286,9 +286,11 @@ native provider row such as `ProcessStdoutStream`; a word record such as
 `Instant` crosses as its word), and a `List` of those or of such Lists
 (`[[U8]]`); a result may also be an `Option` of one of those or of a tuple,
 a tuple whose items are those or an `Option` of one, whose items the export
-writes in the tuple's written order, or a `Receiver<T>` or `Event<T>`, which
-crosses as the runtime's one handle. A read parameter may also be a
-payload-free Core enum (`ProcessSignal`), which crosses as its tag word. A
+writes in the tuple's written order, a `Receiver<T>` or `Event<T>`, which
+crosses as the runtime's one handle, `Never` for an export that stops, or a
+fallible `T E!` whose error is the default `Err` or a handle. A read
+parameter may also be a payload-free Core enum (`ProcessSignal`), which
+crosses as its tag word. A
 written (`^`) parameter is a handle or a List of scalars the export changes
 in place; a taken (`^^`) one is any carried value, handed to the export,
 which ends it (the caller does not). A binding parameter or result outside
