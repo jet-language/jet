@@ -286,6 +286,9 @@ sema_stmt_for_in_iterable_fact: fn(check: ^SemaBodyCheck, collection_type: Type,
         converted: sema_expression_propagation_conversion(Type.Result{ok: Type.Option{inner: item}, err: error}, Val(step_call), Val(callee), span, true, check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics)
         routed = converted != None
         failure = converted ?? TTryConvert.Never
+        if converted == .Val(conversion) && check.scopes.failures_explicit {
+            sema_failure_marks_require_loop_step(span, conversion, Val(callee), check.scopes, check.context, check.diagnostics)
+        }
     }
     Val(SemaForInIterableFact{
         method_kind: TForInMethod.Iterable{coll_type: collection_identity, iter_type: iterator_identity, iter_symbol: iter_key, next_symbol: next_key, item_type: item, failure: failure},

@@ -1,0 +1,81 @@
+#Policy(failures: .Explicit)
+
+#Error
+StepError: enum {
+    Broken,
+}
+
+FailingIter: struct {
+    left: Int,
+
+    impl Iterator {
+        Item: Int,
+        Error: StepError,
+
+        next: fn(^self) -> Int? StepError! {
+            if self.left <= 0 -> return Ok(None)
+            self.left -= 1
+            Ok(Val(self.left))
+        }
+    }
+}
+
+FailingSource: struct {
+    n: Int,
+
+    impl Iterable {
+        Iter: FailingIter,
+
+        iter: fn(^^self) -> FailingIter Never! {
+            FailingIter{left: self.n}
+        }
+    }
+}
+
+OkIter: struct {
+    left: Int,
+
+    impl Iterator {
+        Item: Int,
+        Error: Never,
+
+        next: fn(^self) -> Int? Never! {
+            if self.left <= 0 -> return None
+            self.left -= 1
+            Val(self.left)
+        }
+    }
+}
+
+OkSource: struct {
+    n: Int,
+
+    impl Iterable {
+        Iter: OkIter,
+
+        iter: fn(^^self) -> OkIter Never! {
+            OkIter{left: self.n}
+        }
+    }
+}
+
+sum_failing: fn(source: FailingSource) -> Int StepError! {
+    ^total: 0
+    loop item in source {
+        total += item
+    }
+    Ok(total)
+}
+
+sum_ok: fn(source: OkSource) -> Int Never! {
+    ^total: 0
+    loop item in source {
+        total += item
+    }
+    total
+}
+
+run: fn() {
+    print(sum_failing(FailingSource{n: 2}) ?? 0)
+    print(sum_ok(OkSource{n: 2}))
+}

@@ -1,0 +1,53 @@
+#Policy(failures: .Explicit)
+
+#Error
+MarkFail: enum {
+    Empty,
+}
+
+BoxCount: struct {
+    count: Int,
+}
+
+parse_one: fn(s: String) -> Int MarkFail! {
+    if s == "" -> return Err(MarkFail.Empty)
+    Ok(s.len())
+}
+
+each_size: fn(items: [String]) -> Int MarkFail! {
+    if items.len() == 0 -> return Err(MarkFail.Empty)
+    Ok(items.len())
+}
+
+apply_all: fn(items: [String], f: fn(String) -> Int MarkFail!) -> Int MarkFail! {
+    ^sum: 0
+    loop item in items {
+        sum += f(item)?
+    }
+    Ok(sum)
+}
+
+inner: fn(s: String) -> Int Never! { s.len() }
+
+with_tricky: fn(a: String, b: String) -> Int MarkFail! {
+    if a == "" && b == "" -> return Err(MarkFail.Empty)
+    Ok(a.len() + b.len())
+}
+
+make_box: fn(items: [String]) -> BoxCount MarkFail! {
+    if items.len() == 0 -> return Err(MarkFail.Empty)
+    Ok(BoxCount{count: items.len()})
+}
+
+compute: fn() -> Int MarkFail! {
+    a: each_size([String]{"a", "bb"})
+    b: apply_all([String]{"a"}, fn(s: String) -> Int MarkFail! { parse_one(s)? })
+    c: with_tricky("a ) {inner(")")}", `raw )`)
+    d: make_box([String]{"x"}).count
+    e: parse_one("z")
+    Ok(a + b + c + d + e)
+}
+
+run: fn() {
+    print(compute() ?? 0)
+}
