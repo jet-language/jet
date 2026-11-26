@@ -3211,7 +3211,14 @@ set because the checker cannot inspect its body. This keeps inference sound
 without attempting to read foreign code. Deterministic constructors such as a
 seeded `Clock` or `RNG` carry no ambient effect; reading ambient time or
 randomness still does, except where the runtime or Core reads the host under
-another effect's row.
+another effect's row. Keyed splitting on a seeded `RNG` (`rng.split(key…)` or
+`random.rng(seed, key…)`) is likewise pure (`Never!`, no `Rand` effect): the
+derived child stream depends solely on the parent's root seed and the ordered
+key sequence, never on call order, prior draws, task scheduling, or compilation
+tier, and folding keys one step at a time makes nested splits associative
+(`r.split("a", "b")` equals `r.split("a").split("b")`). Keyed splits use
+ordinary method and variadic call syntax, so existing editor grammars
+(`Tools/Editors/jet.tmGrammar`) cover them without new keywords.
 [Host reads under another effect](Reference/host-reads.md) lists each such
 read. One example is the resolver's `/etc/hosts` read under `Net`. The page
 also says how each read is classified, and a row or a denial covers a read

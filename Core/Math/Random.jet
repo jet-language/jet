@@ -28,15 +28,52 @@ C_BASE63: 9223372036854775808
 
 C_BASE53_FLOAT: 9007199254740992.0
 
+// Stafford variant 13 (SplitMix64 finalizer): full 64-bit avalanche shared by
+// sequential draws and keyed splits.
+priv mix64: fn(z: U64) -> U64 Never! {
+    ^word: z
+    word = wrapping((word ~ (word >> 30)) * U64{13787848793156543929})
+    word = wrapping((word ~ (word >> 27)) * U64{10723151780598845931})
+    word ~ (word >> 31)
+}
+
 // Caller-owned capabilities use SplitMix64, not the ambient xorshift stream.
 // Keep state transitions in explicitly wrapping sized words. Jet's exact Int
 // holds the bounded draw's full 64-by-64 product without a new scalar carrier.
 seeded_next: fn(state: ^U64) -> U64 Never! {
     state = wrapping(state + U64{11400714819323198485})
-    ^word: U64{state}
-    word = wrapping((word ~ (word >> 30)) * U64{13787848793156543929})
-    word = wrapping((word ~ (word >> 27)) * U64{10723151780598845931})
-    word ~ (word >> 31)
+    mix64(U64{state})
+}
+
+// One keyed-split transition from `seed` and `key`: domain-separated from the
+// parent seed, length-prefixed so `"a", "bc"` and `"ab", "c"` never collide,
+// and folded in 8-byte little-endian lanes through full-avalanche SplitMix64
+// mixing. Folding keys one at a time makes nested splits associative:
+// `r.split("a", "b")` equals `r.split("a").split("b")`.
+priv split_key_step: fn(seed: U64, key: String) -> U64 Never! {
+    raw: key.bytes()
+    ^acc: mix64(wrapping(seed + U64{11400714819323198485}) ~ U64{raw.len()})
+    ^lane: U64{0}
+    ^shift: 0
+    loop b in raw {
+        lane |= U64{Int{b}} << shift
+        shift += 8
+        if shift == 64 {
+            acc = mix64(wrapping(acc + U64{11400714819323198485}) ~ lane)
+            lane = U64{0}
+            shift = 0
+        }
+    }
+    if shift > 0 {
+        acc = mix64(wrapping(acc + U64{11400714819323198485}) ~ lane)
+    }
+    mix64(wrapping(acc + U64{7640891576956012809}))
+}
+
+priv derive_split_seed: fn(parent_seed: U64, keys: [String]) -> U64 Never! {
+    ^derived: parent_seed
+    loop key in keys -> derived = split_key_step(derived, key)
+    derived
 }
 
 // A zero bound denotes the full 2^64 domain. Lemire rejection retains the
@@ -66,10 +103,13 @@ priv __seeded_int: fn(state: ^U64, low: Int, high: Int) -> Int? Never! {
 
 seeded_unit: fn(state: ^U64) -> Float Never! { Float{seeded_next(state) >> 11} / C_BASE53_FLOAT }
 
-/// Deterministic caller-owned capability. Drawing edits this owner's one word;
-/// an explicit clone duplicates its state, never a process-global stream.
+/// Deterministic caller-owned capability. Drawing edits this owner's `state`;
+/// keyed `split(keys...)` derives child streams purely from `root_seed` and
+/// `keys` without mutating `state` or depending on call order. An explicit
+/// clone duplicates its state, never a process-global stream.
 RNG: struct {
     state: U64,
+    root_seed: U64,
 
     int: fn(^self, low: Int, high: Int) -> Int Never! {
         lower: Int{I64{low}}
@@ -117,7 +157,20 @@ RNG: struct {
         out
     }
 
-    split: fn(^self) -> RNG Never! { RNG{state: seeded_next(self.state)} }
+    /// Split a child RNG from this generator.
+    ///
+    /// With one or more string `keys`, the child stream depends only on this
+    /// generator's parent seed and `keys`, never on call order or prior draws,
+    /// and `self.state` is not mutated. With no keys, advances `self.state` by
+    /// one sequential SplitMix64 step.
+    split: fn(^self, keys: ...String) -> RNG Never! {
+        if keys.len() == 0 {
+            next: seeded_next(self.state)
+            return RNG{state: next, root_seed: next}
+        }
+        derived: derive_split_seed(self.root_seed, keys)
+        RNG{state: derived, root_seed: derived}
+    }
 
     pick: fn<T>(^self, items: [T]) -> T? Never! {
         if items.len() == 0 -> return None
@@ -237,9 +290,14 @@ normalize_angle: fn(angle: Float) -> Float Never! {
 /// Install `value` as the deterministic stream seed.
 seed: fn(value: Int) -[Rand]> Never! { rt.seed(value) }
 
-/// Construct a deterministic, caller-owned RNG capability.
-rng: fn(seed_value: Int) -> RNG Never! {
-    RNG{state: U64{Int{I64{seed_value}} & 18446744073709551615}}
+/// Construct a deterministic, caller-owned RNG capability from `seed_value`.
+/// Passing optional string `keys` derives the same order-independent child
+/// stream as `rng(seed_value).split(keys...)` without needing a mutable parent.
+rng: fn(seed_value: Int, keys: ...String) -> RNG Never! {
+    base: U64{Int{I64{seed_value}} & 18446744073709551615}
+    if keys.len() == 0 -> return RNG{state: base, root_seed: base}
+    derived: derive_split_seed(base, keys)
+    RNG{state: derived, root_seed: derived}
 }
 
 /// Construct a deterministic child capability from `seed_value` while mixing
@@ -735,3 +793,105 @@ RNGAnswer: struct {
     }
     assert_eq(stream.state, U64{14334736817860870858})
 }
+
+#Test("keyed split depends only on parent seed and keys, never on call order or draws") {
+    ^forward: rng(42)
+    ^f_alpha: forward.split("alpha")
+    ^f_beta: forward.split("beta")
+    ^f_gamma: forward.split("gamma", "0")
+    // Keyed split never mutates the parent stream.
+    assert_eq(forward.state, U64{42})
+
+    ^reverse: rng(42)
+    // Interleave draws on the parent before and between keyed splits.
+    ^_: reverse.int(1, 100)
+    ^r_gamma: reverse.split("gamma", "0")
+    ^_: reverse.float()
+    ^r_beta: reverse.split("beta")
+    ^_: reverse.bytes(8)
+    ^r_alpha: reverse.split("alpha")
+
+    assert_eq(f_alpha.state, r_alpha.state)
+    assert_eq(f_beta.state, r_beta.state)
+    assert_eq(f_gamma.state, r_gamma.state)
+    loop _ in 0..<16 {
+        assert_eq(f_alpha.int(-1000000, 1000000), r_alpha.int(-1000000, 1000000))
+        assert_eq(f_beta.float(), r_beta.float())
+        assert_eq(f_gamma.bool(), r_gamma.bool())
+    }
+}
+
+#Test("keyed split is associative across nested splits and matches rng(seed, keys...)") {
+    ^root: rng(2026)
+    ^direct: root.split("world", "chunk", "12", "34")
+    ^via_seed: rng(2026, "world", "chunk", "12", "34")
+    ^world: root.split("world")
+    // Drawing from an intermediate split must not affect its own keyed children.
+    ^_: world.int(1, 1000)
+    ^_: world.float()
+    ^chunk: world.split("chunk")
+    ^nested: chunk.split("12", "34")
+    ^step1: world.split("chunk")
+    ^step2: step1.split("12")
+    ^step_by_step: step2.split("34")
+
+    assert_eq(direct.state, via_seed.state)
+    assert_eq(direct.state, nested.state)
+    assert_eq(direct.state, step_by_step.state)
+    loop _ in 0..<8 {
+        want: direct.int(0, 1000000)
+        assert_eq(via_seed.int(0, 1000000), want)
+        assert_eq(nested.int(0, 1000000), want)
+        assert_eq(step_by_step.int(0, 1000000), want)
+    }
+}
+
+#Test("keyed split preserves domain separation and statistical independence across keys") {
+    ^root: rng(42)
+    // Length prefixing and step finalizers prevent concatenation collisions.
+    assert(root.split("a", "bc").state != root.split("ab", "c").state)
+    assert(root.split("a", "bc").state != root.split("abc").state)
+    assert(root.split("").state != root.state)
+    assert(root.split("a", "").state != root.split("a").state)
+    assert(root.split("", "a").state != root.split("a").state)
+    assert(root.split("a", "").state != root.split("", "a").state)
+    // Different parent seeds with identical keys produce distinct streams.
+    ^other_root: rng(43)
+    assert(root.split("worker", "0").state != other_root.split("worker", "0").state)
+    // Multi-word keys (> 8 bytes) fold every byte cleanly.
+    assert(root.split("simulation-worker-00000001").state != root.split("simulation-worker-00000002").state)
+
+    // 64 distinct keys yield 64 distinct seeds with strong pairwise bit diffusion
+    // (Stafford-13 avalanche) and distinct draw sequences.
+    popcount: fn(v: U64) -> Int Never! {
+        ^x: v
+        ^n: 0
+        loop x != (U64{0}) {
+            if (x & U64{1}) == (U64{1}) -> n += 1
+            x = x >> 1
+        }
+        n
+    }
+    ^seeds: [U64]{}
+    ^first_draws: [Int]{}
+    loop i in 0..<64 {
+        ^child: root.split("worker", "{i}")
+        seeds.push(child.state)
+        first_draws.push(child.int(0, 1000000000))
+    }
+    ^pair_count: 0
+    ^hamming_sum: 0
+    loop i in 0..<seeds.len() {
+        loop j in (i + 1)..<seeds.len() {
+            assert(seeds[i] != seeds[j])
+            assert(first_draws[i] != first_draws[j])
+            dist: popcount(seeds[i] ~ seeds[j])
+            assert(dist >= 12)
+            hamming_sum += dist
+            pair_count += 1
+        }
+    }
+    mean_hamming: Float{hamming_sum} / Float{pair_count}
+    assert(mean_hamming > 28.0 && mean_hamming < 36.0)
+}
+

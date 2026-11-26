@@ -1,0 +1,67 @@
+package: {
+    name: "math_splittable_random"
+    version: "0.1.0"
+    authority: { allow: [IO, Mem.Alloc, Time.Wait] }
+}
+
+// Keyed splittable randomness: a child RNG derived from a parent seed and keys
+// depends only on that seed and those keys, never on split order, prior draws,
+// task scheduling, or compilation tier.
+use random: core.math.random
+
+draw_summary: fn(seed: Int, role: String, id: String) -> String {
+    ^stream: random.rng(seed, role, id)
+    a: stream.int(1, 1000)
+    b: stream.int(1, 1000)
+    coin: stream.bool()
+    "{role}/{id}: {a} {b} {coin}"
+}
+
+run: fn() {
+    // 1. Order-independence and draw-independence.
+    ^forward: random.rng(42)
+    ^f_alpha: forward.split("alpha")
+    ^f_beta: forward.split("beta")
+
+    ^reverse: random.rng(42)
+    ^_: reverse.int(1, 100)
+    ^r_beta: reverse.split("beta")
+    ^_: reverse.float()
+    ^r_alpha: reverse.split("alpha")
+
+    print("order independent: {f_alpha.int(1, 1000) == r_alpha.int(1, 1000) && f_beta.int(1, 1000) == r_beta.int(1, 1000)}")
+
+    // 2. Hierarchical path associativity: multi-key split equals nested splits
+    //    and equals pure seed-plus-keys construction.
+    ^root: random.rng(2026)
+    ^flat: root.split("world", "chunk", "0")
+    ^world: root.split("world")
+    ^_: world.int(1, 100)
+    ^nested: world.split("chunk", "0")
+    ^from_seed: random.rng(2026, "world", "chunk", "0")
+
+    flat_draw: flat.int(1, 1000000)
+    nested_draw: nested.int(1, 1000000)
+    seed_draw: from_seed.int(1, 1000000)
+    print("associative: {flat_draw == nested_draw && flat_draw == seed_draw} ({flat_draw})")
+
+    // 3. Domain separation: distinct key splits never collide on concatenation.
+    ^ab_c: root.split("ab", "c")
+    ^a_bc: root.split("a", "bc")
+    print("domain separated: {ab_c.int(1, 1000000) != a_bc.int(1, 1000000)}")
+
+    // 4. Task-independence: concurrent tasks derive identical streams in any order.
+    fwd_tasks: task.all {
+        draw_summary(42, "worker", "0"),
+        draw_summary(42, "worker", "1"),
+        draw_summary(42, "worker", "2"),
+    } ?? panic("forward task.all failed")
+    rev_tasks: task.all {
+        draw_summary(42, "worker", "2"),
+        draw_summary(42, "worker", "1"),
+        draw_summary(42, "worker", "0"),
+    } ?? panic("reverse task.all failed")
+
+    print("tasks agree: {fwd_tasks[0] == rev_tasks[2] && fwd_tasks[1] == rev_tasks[1] && fwd_tasks[2] == rev_tasks[0]}")
+    loop line in fwd_tasks -> print(line)
+}
