@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7042,
-    "rev": 114750,
+    "rev": 114758,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -44332,7 +44332,7 @@
       "track": "epoch",
       "epoch": "G3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -44340,7 +44340,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-26",
+          "by": "Orchestrator",
+          "text": "All 6/6 criteria honestly verified and met on Batch 68 (dev f203e7064d5, master 74401bb336c)."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -44376,11 +44382,11 @@
         {
           "n": 4,
           "text": "Time zone and calendar data: a lookup resolves a zone, a DST gap and an overlap resolve as core-library.md states, and a missing zone database is a typed error, not a crash.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:07:43.019Z",
+          "evidence": "dev 36c1542540e (Batch 68 s1 55714cf732f65f1b): zone lookup, DST gap/overlap disambiguation, and missing zone DB typed TimeError documented in core-library.md and verified via Core/Time/Time.jet 26/26 PASS plus CoreTimeFoundations/core_time_zone_dst_and_missing_db_are_typed_on_every_tier.case PASS 1/1 across O0/O1/O2.",
+          "at": "2026-11-26T09:26:27.063Z",
           "proof": {
             "profile": "cases",
             "filter": "Time/zone_data_"
@@ -44389,11 +44395,11 @@
         {
           "n": 5,
           "text": "UTC leap-second parsing, formatting and ordering live in Core time (23:59:60 is accepted and labelled), and checked Civil and Period methods route through one core.time method identity on O0, O1, O2 and web. Proof: `jet test Compiler --profile golden --filter Time/LeapSeconds` and its UI snapshots.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:07:44.005Z"
+          "evidence": "dev 36c1542540e (Batch 68 s1 55714cf732f65f1b): UTC leap second 23:59:60 parsing, formatting, ordering, and checked Civil/Period routing verified via Examples/Systems/Time/LeapSeconds.{jet,out} exact match on O0/O1/O2, Tests/UI/time_leap_second_invalid_date_refused.jet PASS 1/1, and CoreDeclarations 6/6 PASS.",
+          "at": "2026-11-26T09:26:27.879Z"
         },
         {
           "n": 6,
@@ -44413,9 +44419,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:03:08.645Z",
-      "updated": "2026-11-26T09:26:25.882Z",
+      "updated": "2026-11-26T09:26:29.496Z",
       "updatedBy": "Orchestrator",
-      "criteriaLastN": 6
+      "criteriaLastN": 6,
+      "completedAt": "2026-11-26T09:26:29.496Z"
     },
     {
       "id": "c0qpy1t3",
@@ -62467,7 +62474,7 @@
       "track": "epoch",
       "epoch": "G2",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -62475,43 +62482,49 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-26",
+          "by": "Orchestrator",
+          "text": "All 4/4 criteria honestly verified and met on Batch 68 (dev f203e7064d5, master 74401bb336c)."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "Design review: a dated audit in Docs/Audits attacks the whole mechanism of proposal item P23: it names every place the same fact or operation lives today, the exact cutover list and the copies it deletes, and passes; every gap it finds becomes a row here or a ballot.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T17:39:07.143Z"
+          "evidence": "dev f1332cbae50 (Batch 68 s1 55714cf732f65f1b): Docs/Audits/2026-11-26-crossed-argument-names-review.md attacks P23 against Calls/Binder.jet and Calls/Checking.jet with empirical 500k+ LOC V1 vs V2 comparison and cutover checklist.",
+          "at": "2026-11-26T09:26:30.315Z"
         },
         {
           "n": 2,
           "text": "A positional argument whose name exactly matches a different parameter of the same call with the same type is refused with a registered diagnostic and a fix that swaps or labels the arguments.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T17:39:07.143Z"
+          "evidence": "dev f1332cbae50 + f203e7064d5 (Batch 68 s1 55714cf732f65f1b): E0773 Jet.CrossedArgumentNames registered in Diagnostics.jet + DiagnosticRows + census + baseline; sema_call_check_crossed_arguments in Checking.jet; CrossedArgumentFixtures.jet 4/4 PASS, Tests/UI/crossed_argument_names.jet PASS 1/1, diagnostics_coverage 8/8 PASS, diagnostic_registry_ratchet 2/2 PASS.",
+          "at": "2026-11-26T09:26:31.191Z"
         },
         {
           "n": 3,
           "text": "A sweep of every Jet source in the repository finds and fixes every hit in the same submission, and the false-positive rate is recorded.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T17:39:07.143Z"
+          "evidence": "dev f1332cbae50 + f203e7064d5 (Batch 68 s1 55714cf732f65f1b): empirical sweep recorded V1 (228 hits, ~90% false positives) vs V2 directed permutation cycle >= 2 (38 hits across 21 files, 0% false positives); all 38 sites labeled, live jet check Core 0 errors, self-hosted S1 build clean, copy_ratchet 2/2 PASS.",
+          "at": "2026-11-26T09:26:32.061Z"
         },
         {
           "n": 4,
           "text": "An executable example with golden output proves the feature on every applicable tier, and the spec, reference pages and editor grammars describe it.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T17:39:07.143Z"
+          "evidence": "dev f1332cbae50 (Batch 68 s1 55714cf732f65f1b): Examples/Basics/CrossedArgumentNames.{jet,out} exact match on O0, O1, and O2; Docs/Spec/spec.md updated; doc_evidence_links 3/3 PASS.",
+          "at": "2026-11-26T09:26:32.872Z"
         }
       ],
       "refs": [],
@@ -62519,8 +62532,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-25T17:39:07.143Z",
-      "updated": "2026-11-25T17:39:07.143Z",
-      "updatedBy": "Pip"
+      "updated": "2026-11-26T09:26:34.375Z",
+      "updatedBy": "Orchestrator",
+      "completedAt": "2026-11-26T09:26:34.375Z"
     },
     {
       "id": "c0vdpcu6",
@@ -129254,6 +129268,62 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-26T09:26:34.375Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0oi3k2t",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-26T09:26:32.872Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0oi3k2t",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-26T09:26:32.061Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0oi3k2t",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-26T09:26:31.191Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0oi3k2t",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-26T09:26:30.315Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0oi3k2t",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-26T09:26:29.496Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0blttm0",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-26T09:26:27.879Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0blttm0",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-26T09:26:27.063Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0blttm0",
+      "note": "#4"
+    },
     {
       "at": "2026-11-26T09:26:25.882Z",
       "by": "Orchestrator",
