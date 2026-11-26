@@ -1,14 +1,14 @@
 // Schedule-as-code.
 // `#Job(every: …)` gives a job its schedule: one
-// declaration feeds `jet dev` (runs due jobs in the dev loop), the service
-// runtime, and a jetos timer projection. `every: 2h` takes a
+// declaration feeds `jet dev` (runs due jobs in the dev loop) and the service
+// runtime. `every: 2h` takes a
 // duration literal from the canonical Time family (`ns`/`us`/`ms`/`s`/`min`/`h`/`d`);
 // `every: "03:00"` takes a daily UTC wall-clock time. A `#Job fn` with no `every:` is a plain
 // manually-invoked job (`jet run <this-file> -- manual_only`).
 //
 // Calling a `#Job fn` directly remains an ordinary function call; the schedule
-// only changes when a runtime consumer invokes it automatically. The service
-// runtime and jetos consumers use the same checked schedule metadata.
+// only changes when a runtime consumer invokes it automatically. The dev loop
+// and the service runtime use the same checked schedule metadata.
 #Job(.Dev, every: 5min) prune_sessions: fn() { print("pruning sessions") }
 
 #Job(.Dev, every: 2h) refresh_indexes: fn() { print("refreshing indexes") }

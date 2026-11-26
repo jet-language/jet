@@ -299,9 +299,6 @@ SYSTEM_LIB_TARGET: "system"
 /// 9: the Jetpack package-manager binary name.
 JETPACK_BINARY_NAME: "jetpack"
 
-/// Direct jetos system-tool binary name.
-JETOS_BINARY_NAME: "jetos"
-
 /// U1 U10 the Jet **package manifest** is `pkg.jet`
 /// (`PAYLOAD_FILE`; Cargo.toml analog, replaces `jet.toml`). Prior filenames
 /// (pack.jet, the U10 interim name) were retired (clean break, no alias).
@@ -415,8 +412,7 @@ TRANSITION_FOLD_VERB: "fold"
 
 TRANSITION_FLAG_CHECK: "--check"
 
-/// Every Jetpack verb, in dispatch order. JetOS's `os` verb (OS_SUBCOMMAND)
-/// routes through its own dispatcher and is not listed.
+/// Every Jetpack verb, in dispatch order.
 PACKAGE_MANAGER_VERBS: [String]{
     // `doctor` reports Jetpack's health.
     "doctor",
@@ -436,14 +432,12 @@ PACKAGE_MANAGER_VERBS: [String]{
     JETPACK_IMPORT_VERB,
     "logs",
     "override",
-    "push",
     TRUST_SUBCOMMAND,
     CONFIG_SUBCOMMAND,
     BRIDGE_SUBCOMMAND,
     SERVICES_SUBCOMMAND,
     SECRETS_SUBCOMMAND,
     IMAGE_SUBCOMMAND,
-    USER_SUBCOMMAND,
     TOOL_SUBCOMMAND,
     PROFILE_SUBCOMMAND,
     BROWSER_SUBCOMMAND,
@@ -494,7 +488,7 @@ BRIDGE_SUBCOMMAND: "bridge"
 
 BRIDGE_VERB_FLAKE: "flake"
 
-/// U16: foreign dev-shell descriptor filenames `jet env`/`jet os bridge flake`
+/// U16: foreign dev-shell descriptor filenames `jet env`/`jet bridge flake`
 /// look for. `jet env` only auto-detects one of these when the project's own
 /// manifest declares no `env.*` module; `--flake` forces it either way.
 FOREIGN_FLAKE_FILE: "flake.nix"
@@ -578,15 +572,13 @@ ENV_HOOK_OLD_PATH_VAR: "JETPACK_ENV_OLD_PATH"
 /// project's dev `services:` processes under `.jet/services/<name>/` —
 /// `up`/`down` start/stop the enabled set (or one named service), `health`
 /// one-shot probes readiness, `logs` prints a service's captured
-/// stdout/stderr. Distinct from the jetos `system.*.services` tier (Phase D,
-/// untouched): this dev tier runs plain child processes via `std::process`,
-/// never a system service manager.
+/// stdout/stderr. This dev tier runs plain child processes via
+/// `std::process`, never a system service manager.
 SERVICES_SUBCOMMAND: "services"
 
 /// (=A, ratified 2026-07-01, c9jetpackgates): `jet image <name>`
 /// builds the named `image.<name>` module contribution into a hangar OCI
-/// layout (the `.Oci` kind only — `.Iso` rides the jetos installer tier,
-/// Phase D, owner-gated, untouched). `--push <ref>` is honestly gated (E1268)
+/// layout (the `.Oci` kind). `--push <ref>` is honestly gated (E1268)
 /// until TLS support lands for registry pushes.
 IMAGE_SUBCOMMAND: "image"
 

@@ -1,7 +1,7 @@
 # Two compatible reports decide one budget differently: the less favorable wins.
 # The fixture holds the passing report of prove_projects_matching_budget_reports
 # and the same report re-measured over its limit (samples, decision, summary and
-# both ids recomputed). The failing report's id sorts first, so a "last file
+# both ids recomputed). The failing report's id sorts last, so a "first file
 # wins" rule would pick the pass; a failure must never hide behind it.
 fixture: ProveReportsTheLessFavorableOfTwoReportsOfOneBudget.fixture
 # The reports hash the bytes of src/run.jet, so the source is kept as `.txt`,
@@ -11,8 +11,8 @@ step: jet prove src/run.jet --json
 limit: time=120
 exit: 1
 stdout: ~ "\"deterministicBudget\":{\"failed\":1,\"met\":0,\"selected\":1,\"skipped\":0,\"unavailable\":0}" # one budget, failed
-stdout: ~ "\"reportId\":\"26c46c12214aae8d42822dfaa814a05a2d44b5014370d3988bd439691e69917d\"" # the failing report decides
-stdout: !~ "dd98acd936402c0c088fa4873be7bb044e30a83e241c0623fe987acacd46b08e" # the passing report does not
+stdout: ~ "\"reportId\":\"a32811be25ded3ad8fbc4820bb98207542ffd5774da4dfd787f593aac3607d6a\"" # the failing report decides
+stdout: !~ "47556ea9aff03eb60cca063062b156b8408bf2399b7e758c5f7f3497f75954a5" # the passing report does not
 stdout: ~ "\"kind\":\"deterministic_budget\",\"outcome\":\"failed\",\"producer\":\"jet-budget\"" # the engine's recorded outcome
 stdout: ~ "\"result\":\"fail\"" # a failed budget fails the run
 step: jet prove src/run.jet

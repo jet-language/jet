@@ -465,10 +465,7 @@ Contribution: struct {
 ContribValue: enum {
     Expr(value: Expr),
     Env(value: EnvLit),
-    System(value: SystemLit),
     Image(value: ImageLit),
-    Fleet(value: FleetLit),
-    VMTest(value: VMTestLit),
     Profile(value: ProfileLit),
     Perf(value: PerfLit),
 }
@@ -513,40 +510,11 @@ EnvLit: struct {
     span: Span,
 }
 
-SystemLit: struct {
-    explicit_type: Span?,
-    fields: [SystemField],
-    span: Span,
-}
-
-SystemField: struct {
-    name: String,
-    name_span: Span,
-    value: SystemFieldValue,
-    span: Span,
-}
-
-SystemFieldValue: enum {
-    Platform(os: String, arch: String, span: Span),
-    Packages(value: Expr),
-    Services(entries: [ServiceEntry]),
-    Options(entries: [OptionEntry]),
-    Other(value: Expr),
-}
-
 ServiceEntry: struct {
     name: String,
     name_span: Span,
     explicit_type: Span?,
     fields: [NamedExpr],
-    span: Span,
-}
-
-OptionEntry: struct {
-    key: String,
-    key_span: Span,
-    value: Expr,
-    value_span: Span,
     span: Span,
 }
 
@@ -564,70 +532,19 @@ ImageField: struct {
 }
 
 ImageFromRef: enum {
-    System(name: String),
     Package(name: String),
     Environment(name: String),
 }
 
 ImageFieldValue: enum {
     From(source: ImageFromRef, span: Span),
-    Format(word: String, span: Span),
     Platform(os: String, arch: String, span: Span),
-    Other(value: Expr),
-}
-
-FleetLit: struct {
-    explicit_type: Span?,
-    fields: [FleetField],
-    span: Span,
-}
-
-FleetField: struct {
-    name: String,
-    name_span: Span,
-    value: FleetFieldValue,
-    span: Span,
-}
-
-FleetFieldValue: enum {
-    Hosts(entries: [HostEntry]),
-    Other(value: Expr),
-}
-
-HostEntry: struct {
-    name: String,
-    name_span: Span,
-    system: String,
-    system_span: Span,
-    overrides: Span?,
-    span: Span,
-}
-
-VMTestLit: struct {
-    explicit_type: Span?,
-    fields: [VMTestField],
-    span: Span,
-}
-
-VMTestField: struct {
-    name: String,
-    name_span: Span,
-    value: VMTestFieldValue,
-    span: Span,
-}
-
-VMTestFieldValue: enum {
-    Hosts(entries: [HostEntry]),
-    Run(span: Span),
     Other(value: Expr),
 }
 
 Namespace: enum {
     Env,
-    System,
     Image,
-    Fleet,
-    VMTest,
     Perf,
     Profile,
 }
@@ -1519,8 +1436,6 @@ OutputKind: enum {
     Environment,
     Image,
     Bundle,
-    System,
-    Fleet,
 
     // The variant name, as `package.jet` spells it after the dot.
     debug_name: fn(self) -> String Never! {
@@ -1532,8 +1447,6 @@ OutputKind: enum {
             .Environment -> "Environment"
             .Image -> "Image"
             .Bundle -> "Bundle"
-            .System -> "System"
-            .Fleet -> "Fleet"
         }
     }
 }

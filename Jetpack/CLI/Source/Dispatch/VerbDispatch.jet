@@ -1,7 +1,6 @@
 // The jetpack verb dispatcher, ported from jetpack::CLI::parse::main. It
 // refuses any flag the verb does not take, runs the user-tools drift check
-// before mutating commands, and routes one typed verb to its command. The
-// JetOS verbs `user`, `studio` and `push` are not part of this port.
+// before mutating commands, and routes one typed verb to its command.
 use term: core.term
 
 // Every verb this dispatcher routes.
@@ -36,7 +35,6 @@ JetpackVerb: enum {
     Browser,
     Split,
     Fold,
-    OS,
     Help,
 
     parse: fn(text: String) -> JetpackVerb? Never! {
@@ -71,7 +69,6 @@ JetpackVerb: enum {
             BROWSER_SUBCOMMAND -> Val(JetpackVerb.Browser)
             TRANSITION_SPLIT_VERB -> Val(JetpackVerb.Split)
             TRANSITION_FOLD_VERB -> Val(JetpackVerb.Fold)
-            OS_SUBCOMMAND -> Val(JetpackVerb.OS)
             "help" | "--help" | "-h" -> Val(JetpackVerb.Help)
             else -> None
         }
@@ -80,8 +77,8 @@ JetpackVerb: enum {
 
 // JetpackVerb, in lower case, picks from PACKAGE_MANAGER_VERBS: each verb this
 // dispatcher routes is a listed Jetpack verb, apart from the hidden `__dev`
-// and `__service-probe`, JetOS's `os`, and `help`, which the list leaves out.
-PACKAGE_MANAGER_VERB_COUNT: #run effect_vocabulary_list_view_count("Dispatch/VerbDispatch.jet", effect_vocabulary_lowered(effect_vocabulary_enum_names("Dispatch/VerbDispatch.jet", embed_file("VerbDispatch.jet"), "JetpackVerb")), "JetpackVerb", PACKAGE_MANAGER_VERBS, "PACKAGE_MANAGER_VERBS", [String]{"dev", "serviceprobe", "os", "help"})
+// and `__service-probe` and from `help`, which the list leaves out.
+PACKAGE_MANAGER_VERB_COUNT: #run effect_vocabulary_list_view_count("Dispatch/VerbDispatch.jet", effect_vocabulary_lowered(effect_vocabulary_enum_names("Dispatch/VerbDispatch.jet", embed_file("VerbDispatch.jet"), "JetpackVerb")), "JetpackVerb", PACKAGE_MANAGER_VERBS, "PACKAGE_MANAGER_VERBS", [String]{"dev", "serviceprobe", "help"})
 
 // Read-only commands observe state without repairing or migrating it: a
 // `hangar list` must not create its profile lock or rewrite a drifted pin.
@@ -175,7 +172,6 @@ cli_dispatch_verb: fn(verification: StoreVerification, verb: JetpackVerb, theme:
         .Browser -> cli_cmd_browser(verification, theme, parsed)
         .Split -> cli_cmd_split(theme, parsed)
         .Fold -> cli_cmd_fold(theme, parsed)
-        .OS -> cli_cmd_os(theme, parsed)
         .Help -> {
             help_theme: Theme.resolve_for(color, term.stdout().is_tty())
             print(cli_usage_with_color(help_theme.color))

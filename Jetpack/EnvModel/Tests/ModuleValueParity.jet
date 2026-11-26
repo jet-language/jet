@@ -1,12 +1,10 @@
-// One source revision, every module-value consumer: environment fields,
-// image fields and fleet host overrides read the same top-level value through
-// the one evaluator, in the same dependency order with the same provenance,
+// One source revision, every module-value consumer: environment fields and
+// image fields read the same top-level value through the one evaluator, in
+// the same dependency order with the same provenance,
 // and a permuted copy of the revision plans identically (#4276 c39).
 use {
     jet_env_model.[
         ENVMODEL_ENVIRONMENT_SCHEMA,
-        FleetPlan,
-        OptionPlan,
         PromptPathMode,
         ReloadPolicy,
         SecretGenerator,
@@ -42,27 +40,11 @@ image.server: module {
     from: packages.app,
     expose: [PORT],
 }
-
-system.web: module { target: linux.x64, options: [tuning.port: PORT + 1, network.hostName: web-east, services.desktop.profile: .Default] }
-
-fleet.prod: module {
-    hosts: {
-        web1: system.web{ port: PORT, region: port + 1, options: [tuning.port: PORT + 1, network.hostName: web1] }
-    }
-}
 `
 
 // The same revision with its declarations and sibling fields reordered: the
 // value is declared after its readers and every chain is written backwards.
 MODULE_VALUE_SOURCE_PERMUTED: `
-fleet.prod: module {
-    hosts: {
-        web1: system.web{ options: [tuning.port: PORT + 1, network.hostName: web1], region: port + 1, port: PORT }
-    }
-}
-
-system.web: module { target: linux.x64, options: [tuning.port: PORT + 1, network.hostName: web-east, services.desktop.profile: .Default] }
-
 image.server: module {
     expose: [PORT],
     from: packages.app,
@@ -143,44 +125,6 @@ module_values_as_the_program_prints_them: fn(source: String) -[FS, Env, Exec, Ti
     assert_eq(envmodel_test_setting_value(entry, "port"), Val(FactValue.Text{value: "8001"}))
     assert_eq(envmodel_test_setting_value(entry, "label"), Val(FactValue.Text{value: "ready"}))
     assert_eq(plan.images[0].expose, [Int]{8001})
-    // A system option reading the value is evaluated; literal atoms keep their spelling.
-    assert_eq(
-        plan.systems[0].options,
-        [OptionPlan]{
-            OptionPlan{key: "tuning.port", value: "8002"},
-            OptionPlan{key: "network.hostName", value: "web-east"},
-            OptionPlan{key: "services.desktop.profile", value: ".Default"},
-        },
-    )
-    ^fleets: [FleetPlan]{}
-    loop evaluated in modules {
-        loop fleet in evaluated.fleets -> fleets.push(fleet)
-    }
-    assert_eq(fleets.len(), 1)
-    overrides: fleets[0].hosts[0].overrides ?? panic("web1 has an override")
-    ^values: [String:CtValue]{}
-    ^host_options: [OptionPlan]{}
-    loop field in overrides.fields {
-        if field.value == {
-            .Value(value) -> { values[field.name] = value }
-            .Options(options) -> host_options = options
-            .Platform(_) | .Packages(_) | .Services(_) -> {}
-        }
-    }
-    // The host override evaluates the same option the same way the system does.
-    assert_eq(host_options, [OptionPlan]{OptionPlan{key: "tuning.port", value: "8002"}, OptionPlan{key: "network.hostName", value: "web1"}})
-    assert_eq(values.get("port"), Val(CtValue.Int{value: 8001}))
-    assert_eq(values.get("region"), Val(CtValue.Int{value: 8002}))
-    ^found: false
-    loop row in overrides.provenance {
-        if row.field == "region" {
-            assert_eq(row.dependencies, [String]{"port"})
-            assert(row.pure)
-            found = true
-        }
-        if row.field == "port" -> assert_eq(row.dependencies, [String]{})
-    }
-    assert(found, "region provenance names its sibling")
     files.remove_all(dir) ?? return
 }
 
@@ -208,7 +152,7 @@ module_values_as_the_program_prints_them: fn(source: String) -[FS, Env, Exec, Ti
 }
 
 #Test("module_value_multi_node_cycle_is_reported_before_any_consumer") {
-    source: "FIRST: #run {{ SECOND + 1 }}\nSECOND: #run {{ FIRST + 1 }}\nsystem.web: module {{ target: linux.x64, options: [tuning.port: FIRST] }}\n"
+    source: "FIRST: #run {{ SECOND + 1 }}\nSECOND: #run {{ FIRST + 1 }}\ndev: module {{ env.dev: Env{{ port: FIRST }} }}\n"
     error: envmodel_test_env_error(envmodel_evaluate_env(source, envmodel_test_base_dir()))
     assert_eq(error.code, "E0338")
     assert(error.what.contains("FIRST -> SECOND -> FIRST"), error.what)

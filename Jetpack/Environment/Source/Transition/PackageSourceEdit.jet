@@ -179,33 +179,6 @@ env_transition_field_value: fn(raw: String, field: String) -> String? Never! {
     Val(parts.after.trim())
 }
 
-// A System extraction must name an authored Output exactly once, whether the
-// author used the outputs record or the canonical standalone Output binding.
-env_transition_require_output_declaration: fn(entries: [TransitionSourceEntry], name: String, path: String) EnvironmentError! {
-    loop entry in entries {
-        if entry.field != Val("outputs") -> next
-        value: env_transition_field_value(entry.raw, "outputs") ?? return Err(env_transition_error("outputs has no value in {path}"))
-        body: env_transition_record_body(value) ?? return Err(env_transition_error("outputs in {path} is not a record"))
-        matches: loop child in env_transition_source_entries(body) if child.field == Val((name)) -> child
-        if matches.len() != 1 {
-            return Err(env_transition_error("outputs.{name} must be declared exactly once in {path}"))
-        }
-        _: env_transition_field_value(matches[0].raw, name) ?? return Err(env_transition_error("outputs.{name} has no value in {path}"))
-        return
-    }
-    ^count: 0
-    loop entry in entries {
-        if entry.field != Val(name) -> next
-        value: env_transition_field_value(entry.raw, name) ?? next
-        if env_transition_config_value(value).starts_with("Output.") || value.trim_start().starts_with("Output: ") {
-            count += 1
-        }
-    }
-    if count != 1 {
-        return Err(env_transition_error("outputs.{name} must be declared exactly once in {path}"))
-    }
-}
-
 // The body of an inline `name: Config{...}` entry.
 env_transition_config_body: fn(raw: String) -> String? Never! {
     clean: env_transition_mask_comments(raw).bytes()
@@ -340,10 +313,6 @@ env_transition_add_member_reference: fn(source: String, existing: [MemberRef], d
 env_transition_render_config: fn(name: String, field: String, value: String) -> String Never! {
     if field == "raw" -> return "{name}: Config{{\n{value.trim()}\n}}\n"
     "{name}: Config{{\n    {field}: {value.trim()}\n}}\n"
-}
-
-env_transition_render_fleet_config: fn(host: String, system: String) -> String Never! {
-    "home: Config{{\n    outputs: {{\n        home: Fleet{{\n            name: \"home\",\n            hosts: {{ {host}: system.{system} }},\n        }},\n    }},\n}}\n"
 }
 
 env_transition_render_member_package: fn(name: String, body: String) -> String Never! {

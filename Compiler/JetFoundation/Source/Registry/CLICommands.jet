@@ -85,7 +85,7 @@ JetCLIActionSpec: struct {
 // One top-level command: a bare leaf (`build`) or a group with nested
 // actions (`registry`).
 // `exhaustive` (groups only) means every subword is modeled by `actions`;
-// `os`, `env`, and `db` expose a wider downstream verb surface.
+// `env` and `db` expose a wider downstream verb surface.
 // `usage` is the positional shape; None renders the generic `[args]`.
 JetCLICommandSpec: struct {
     name: String,
@@ -124,10 +124,6 @@ JET_CLI_HANDLERS: #run { [JetCLIHandlerSpec]{
     {key: "Outdated", dispatch_word: "outdated", keeps_group: false},
     {key: "GcReport", dispatch_word: "gc", keeps_group: true},
     {key: "ProjectParts", dispatch_word: "parts", keeps_group: false},
-    {key: "Push", dispatch_word: "push", keeps_group: false},
-    {key: "Bridge", dispatch_word: "bridge", keeps_group: false},
-    {key: "Services", dispatch_word: "services", keeps_group: false},
-    {key: "Config", dispatch_word: "config", keeps_group: false},
     {key: "Toolchain", dispatch_word: "toolchain", keeps_group: false},
     {key: "SelfUpdate", dispatch_word: "self-update", keeps_group: false},
     {key: "Doctor", dispatch_word: "doctor", keeps_group: false},
@@ -539,8 +535,6 @@ JET_CLI_COMMANDS: #run { [JetCLICommandSpec]{
         usage: None,
         actions: [JetCLIActionSpec]{},
     },
-    // #1659 criterion 1: `push`/`bridge`/`services` are `jet os` nested
-    // actions (see OS_ACTIONS below) — declared once there, not here too.
     {
         name: "trust",
         summary: "Review or change trusted authority",
@@ -558,21 +552,28 @@ JET_CLI_COMMANDS: #run { [JetCLICommandSpec]{
         actions: [JetCLIActionSpec]{},
     },
     {
-        name: "os",
-        summary: "Manage Jetos machines and images",
+        name: "services",
+        summary: "Manage development services",
         frequency_rank: 12,
         exhaustive: false,
         usage: None,
-        // `push`/`bridge`/`services`/`config` move under `jet os`.
-        // This group is *not* exhaustive (see `CommandSpec.exhaustive`) — jetos's
-        // own native verbs (`check`/`build`/`switch`/…) stay entirely
-        // owned by the `jet os` dispatcher and are not modeled here.
-        actions: [JetCLIActionSpec]{
-            {name: "push", usage: "push", summary: "Deploy one or more Jetos machines", handler: "Push", also_canonical_top_level: false},
-            {name: "bridge", usage: "bridge", summary: "Convert an existing system configuration to Jet", handler: "Bridge", also_canonical_top_level: false},
-            {name: "services", usage: "services", summary: "Manage development services", handler: "Services", also_canonical_top_level: false},
-            {name: "config", usage: "config", summary: "Manage Jet settings and trust", handler: "Config", also_canonical_top_level: false},
-        },
+        actions: [JetCLIActionSpec]{},
+    },
+    {
+        name: "bridge",
+        summary: "Convert an existing Nix flake to Jet",
+        frequency_rank: 61,
+        exhaustive: false,
+        usage: None,
+        actions: [JetCLIActionSpec]{},
+    },
+    {
+        name: "config",
+        summary: "Manage Jet settings and trust",
+        frequency_rank: 62,
+        exhaustive: false,
+        usage: None,
+        actions: [JetCLIActionSpec]{},
     },
     {
         name: "add",
@@ -646,7 +647,6 @@ JET_CLI_COMMANDS: #run { [JetCLICommandSpec]{
         usage: None,
         actions: [JetCLIActionSpec]{},
     },
-    // #1659 criterion 1: `config` is a `jet os` nested action (OS_ACTIONS).
     {
         name: "gc",
         summary: "Show values moved into automatic memory management",
@@ -763,7 +763,6 @@ JET_CLI_FORMS: #run { [JetCLIFormSpec]{
     {form: "self lsp", ported: true, card: 0, argv: [String]{"self", "lsp"}},
     {form: "self exec", ported: false, card: 6418, argv: [String]{"self", "exec"}},
     {form: "self devtools bless", ported: false, card: 5454, argv: [String]{"self", "devtools", "bless"}},
-    {form: "os push", ported: false, card: 6604, argv: [String]{"os", "push"}},
     {form: "registry publish --to", ported: false, card: 6632, argv: [String]{"registry", "publish", "--to", "x"}},
     {form: "new service", ported: true, card: 0, argv: [String]{"new", "service", "x"}},
     {form: "new route", ported: true, card: 0, argv: [String]{"new", "route", "x"}},

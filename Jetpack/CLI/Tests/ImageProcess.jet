@@ -599,15 +599,3 @@ cli_test_image_projection_block: fn(stderr: String) -> String {
     assert(out.errors.contains("server"), "lists declared images: {out.errors}")
     files.remove_all(scratch).drop("scratch cleanup is best-effort")
 }
-
-// A `.Iso` disk image gets a friendly pointer at the jetos installer tier;
-// `jet image` never mis-treats it as a container.
-#Test("image of iso kind is friendly not built") {
-    scratch: cli_test_image_scratch("iso-not-built")
-    files.write(files.join(scratch, "env.jet"), "system.web: module {{ target: linux.x64 }}\nimage.installer: module {{ from: system.web }}\n") ?? panic("write env.jet")
-    out: cli_test_image_jetpack(scratch, [String]{"image", "installer"}).run() ?? panic("run jetpack image")
-    assert_eq(out.code, 2)
-    assert(out.errors.contains("disk image, not a container"), out.errors)
-    assert(out.errors.contains("Phase D"), out.errors)
-    files.remove_all(scratch).drop("scratch cleanup is best-effort")
-}

@@ -1,4 +1,4 @@
-// Typed Jet config export (`jet os config export <file.jet> [<name>]
+// Typed Jet config export (`jet config export <file.jet> [<name>]
 // [--format json|yaml|toml] [--schema]`): evaluates a named config value
 // through the compiler's one comptime path (`JetDriverCompileMode.Comptime`),
 // encodes it with `core.encoding.{json,yaml,toml}` using the checked `#Codable`
@@ -55,7 +55,7 @@ CONFIG_EXPORT_TYPED_NAME: "CONFIG_EXPORT_TYPED_VALUE"
 
 CONFIG_EXPORT_SCHEMA_URI: "https://json-schema.org/draft/2020-12/schema"
 
-CONFIG_EXPORT_HELP: "Usage: jet os config export <file.jet> [<name>] [--format json|yaml|toml] [--schema]\n\nEvaluate a checked Jet config value at compile time and write it as JSON, YAML, or TOML,\nor write the JSON Schema for its type with `--schema`.\n\nOptions:\n  --format <json|yaml|toml>  Output format (default: json)\n  --value <name>             Named constant or zero-argument function to export\n  --schema                   Write the JSON Schema for the value's checked type\n\nExample:\n  jet os config export app.jet APP_CONFIG --format yaml\n"
+CONFIG_EXPORT_HELP: "Usage: jet config export <file.jet> [<name>] [--format json|yaml|toml] [--schema]\n\nEvaluate a checked Jet config value at compile time and write it as JSON, YAML, or TOML,\nor write the JSON Schema for its type with `--schema`.\n\nOptions:\n  --format <json|yaml|toml>  Output format (default: json)\n  --value <name>             Named constant or zero-argument function to export\n  --schema                   Write the JSON Schema for the value's checked type\n\nExample:\n  jet config export app.jet APP_CONFIG --format yaml\n"
 
 JetCLIConfigExportSpec: struct {
     name: String?,
@@ -68,9 +68,9 @@ JetConfigExportTarget: enum {
     Missing(what: String, fix: String),
 }
 
-// Parse `jet os config export ...` arguments and plan host execution.
+// Parse `jet config export ...` arguments and plan host execution.
 jet_cli_config_export: fn(jet_argv: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
-    usage: "run `jet os config export <file.jet> [<name>] [--format json|yaml|toml] [--schema]`"
+    usage: "run `jet config export <file.jet> [<name>] [--format json|yaml|toml] [--schema]`"
     ^file: ""
     ^name: String?{None}
     ^format: "json"
@@ -138,7 +138,7 @@ jet_cli_config_export: fn(jet_argv: [String], color: Bool, json: Bool) -[FS, Env
         }
         if word.starts_with("--color=") -> next
         if word.starts_with("-") {
-            return jet_cli_fail("E2104", "`jet os config export` takes no `{word}`", jet_cli_why("E2104"), usage, color, JET_DRIVER_EXIT_USAGE)
+            return jet_cli_fail("E2104", "`jet config export` takes no `{word}`", jet_cli_why("E2104"), usage, color, JET_DRIVER_EXIT_USAGE)
         }
         if file == "" {
             file = "{word}"
@@ -148,7 +148,7 @@ jet_cli_config_export: fn(jet_argv: [String], color: Bool, json: Bool) -[FS, Env
             name = Val("{word}")
             next
         }
-        return jet_cli_fail("E2104", "unexpected argument `{word}` to `jet os config export`", jet_cli_why("E2104"), usage, color, JET_DRIVER_EXIT_USAGE)
+        return jet_cli_fail("E2104", "unexpected argument `{word}` to `jet config export`", jet_cli_why("E2104"), usage, color, JET_DRIVER_EXIT_USAGE)
     }
     if expect_format {
         return jet_cli_fail("E2104", "`--format` needs one of `json`, `yaml`, or `toml`", jet_cli_why("E2104"), usage, color, JET_DRIVER_EXIT_USAGE)
@@ -157,7 +157,7 @@ jet_cli_config_export: fn(jet_argv: [String], color: Bool, json: Bool) -[FS, Env
         return jet_cli_fail("E2104", "`--value` needs a config value name", jet_cli_why("E2104"), usage, color, JET_DRIVER_EXIT_USAGE)
     }
     if file == "" {
-        return jet_cli_fail("E2104", "`jet os config export` needs a `.jet` file", jet_cli_why("E2104"), usage, color, JET_DRIVER_EXIT_USAGE)
+        return jet_cli_fail("E2104", "`jet config export` needs a `.jet` file", jet_cli_why("E2104"), usage, color, JET_DRIVER_EXIT_USAGE)
     }
     if schema && format_explicit && format != "json" {
         return jet_cli_fail("E2104", "`--schema` writes JSON Schema and cannot be combined with `--format {format}`", jet_cli_why("E2104"), "omit `--format` or pass `--format json` with `--schema`", color, JET_DRIVER_EXIT_USAGE)
@@ -239,7 +239,7 @@ jet_config_export_failure: fn(code: String, what: String, why: String, fix: Stri
     JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems("", "", [Diagnostic]{report}, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR}
 }
 
-// Host execution of `jet os config export`: checks and evaluates the config
+// Host execution of `jet config export`: checks and evaluates the config
 // file through `JetDriverCompileMode.Comptime`, refusing any type or check
 // error before writing any output.
 jet_cli_config_export_host: fn(file: String, source: String, base_dir: String, name: String?, format: String, schema: Bool, color: Bool, _json: Bool) -> JetDriverVerbOutput {

@@ -4433,7 +4433,7 @@ UntranslatedFlakeField: struct {
         severity: .Lint,
         lint_name: "untranslated_flake_field",
         stage: [.Jet],
-        meaning: "A `flake.nix`/`devenv.nix` field `jet os bridge flake` couldn't translate into `env.*` form (U16)",
+        meaning: "A `flake.nix`/`devenv.nix` field `jet bridge flake` couldn't translate into `env.*` form (U16)",
         detail: true,
         no_fix: .Ambiguous,
         fix_next: "Review the generated shim and add the field effect by hand if needed.",
@@ -4443,7 +4443,7 @@ UntranslatedFlakeField: struct {
         }
 
         why: fn(self) -> String {
-            "`jet os bridge flake` (U16) is a best-effort translator; some `flake.nix`/`devenv.nix` fields (`shellHook`, multiple named devShells, `buildInputs` vs `nativeBuildInputs`) have no ratified `env.*` spelling."
+            "`jet bridge flake` (U16) is a best-effort translator; some `flake.nix`/`devenv.nix` fields (`shellHook`, multiple named devShells, `buildInputs` vs `nativeBuildInputs`) have no ratified `env.*` spelling."
         }
 
         fix: fn(self) -> String {
@@ -14998,7 +14998,7 @@ ReservedContributionNamespace: struct {
         safety_reason: "A contribution outside the reserved namespaces names nothing the merge combines.",
         expert_path: "none: contributions name a reserved namespace",
         stage: [.Parse],
-        meaning: "A module contribution, image source, fleet host, or VM-test run names something other than its namespace",
+        meaning: "A module contribution or image source names something other than its namespace",
         no_fix: .Ambiguous,
 
         what: fn(self) -> String {
@@ -15006,7 +15006,7 @@ ReservedContributionNamespace: struct {
         }
 
         why: fn(self) -> String {
-            "A module contributes to one of the reserved namespaces `env`, `system`, `image`, `fleet`, `vmtest`, `profile`, or `perf`; an image source, a fleet host, and a VM-test run each name theirs the same way."
+            "A module contributes to one of the reserved namespaces `env`, `image`, `profile`, or `perf`; an image source names `packages` or `env` the same way."
         }
 
         fix: fn(self) -> String {
@@ -15253,7 +15253,7 @@ InvalidModuleContribution: struct {
         safety_reason: "The merge reads a contribution as its namespace's type, so another value would be combined as the wrong type.",
         expert_path: "none: the contribution is a struct literal of its namespace's type",
         stage: [.Jetpack],
-        meaning: "Module contribution value isn't a struct literal of its namespace's type (`Env`/`System`/`Image`)",
+        meaning: "Module contribution value isn't a struct literal of its namespace's type (`Env`/`Image`)",
         detail: true,
         no_fix: .Behavior,
 
@@ -15391,31 +15391,6 @@ NestedDiscoveredImports: struct {
     }
 }
 
-UnknownSystemField: struct {
-    impl Diagnostic {
-        code: "E0972",
-        safety_class: .Soundness,
-        safety_reason: "The record defines no such field, so the value has nowhere to go.",
-        expert_path: "none: the record's fields are its declared set",
-        stage: [.Jetpack],
-        meaning: "Unknown field on a frozen `System`, active `Image`, or dev `Service` record",
-        detail: true,
-        no_fix: .Ambiguous,
-
-        what: fn(self) -> String {
-            "A `System` / `Image` / `Service` record has a field it doesn't define."
-        }
-
-        why: fn(self) -> String {
-            "These records have decision-owned field sets; an unknown field is usually a typo or a value that belongs elsewhere."
-        }
-
-        fix: fn(self) -> String {
-            "Remove the field, or use one of the known fields named in the error."
-        }
-    }
-}
-
 UnknownPlatform: struct {
     impl Diagnostic {
         code: "E0973",
@@ -15436,27 +15411,6 @@ UnknownPlatform: struct {
         }
 
         fix: fn(self) -> String { "Write `target: linux.x64` or `target: linux.arm64`." }
-    }
-}
-
-MissingSystemTarget: struct {
-    impl Diagnostic {
-        code: "E0974",
-        safety_class: .Soundness,
-        safety_reason: "A `System` with no `target` has no platform to build for.",
-        expert_path: "none: every `System` names its target",
-        stage: [.Jetpack],
-        meaning: "A frozen `System` has no `target`",
-        detail: true,
-        no_fix: .Behavior,
-
-        what: fn(self) -> String { "A `System` has no `target`." }
-
-        why: fn(self) -> String {
-            "The captured `System` schema requires every machine to name its typed `target`."
-        }
-
-        fix: fn(self) -> String { "Add `target: linux.x64` (or `linux.arm64`)." }
     }
 }
 
@@ -15483,144 +15437,25 @@ InvalidServiceEnable: struct {
     }
 }
 
-FrozenImageFormat: struct {
-    impl Diagnostic {
-        code: "E0976",
-        safety_class: .Soundness,
-        safety_reason: "Jetpack builds no frozen disk-image format, so the image has no builder.",
-        expert_path: "none: active images are `.Oci`",
-        stage: [.Jetpack],
-        meaning: "An `Image` uses a frozen disk-image format",
-        detail: true,
-        no_fix: .Behavior,
-
-        what: fn(self) -> String { "An `Image` uses a frozen disk-image format." }
-
-        why: fn(self) -> String {
-            "`iso`, `qcow`, and `raw` disk images are jetos research capture; Jetpack only builds `.Oci` images today. A `jet image` run reports this image declaration error."
-        }
-
-        fix: fn(self) -> String {
-            "Use `kind: .Oci` for an active image, or keep disk-image notes in the jetos research appendix."
-        }
-    }
-}
-
 InvalidImageFrom: struct {
     impl Diagnostic {
         code: "E0977",
         safety_class: .Soundness,
-        safety_reason: "An image with no active `from` has no base to build from, and a restated frozen field has no active meaning.",
+        safety_reason: "An image with no `from` has no base to build from.",
         expert_path: "none: images are built `from: packages.<name>`",
         stage: [.Jetpack],
-        meaning: "An `Image` has no active `from`, or restates a frozen system field",
+        meaning: "An `Image` has no `from`",
         detail: true,
         no_fix: .Behavior,
 
-        what: fn(self) -> String {
-            "An `Image` has no active `from`, or restates a frozen system-inherited field."
-        }
+        what: fn(self) -> String { "An `Image` has no `from`." }
 
         why: fn(self) -> String {
-            "Active Jetpack images are OCI containers built `from: packages.<name>`; `system.*` disk images are frozen jetos research. A `jet image` run reports this image declaration error."
+            "Jetpack images are OCI containers built `from: packages.<name>`. A `jet image` run reports this image declaration error."
         }
 
         fix: fn(self) -> String {
-            "Add `from: packages.<name>` for an `.Oci` image, or remove fields inherited from frozen `system.*` research."
-        }
-    }
-}
-
-UnknownImageSystem: struct {
-    impl Diagnostic {
-        code: "E0978",
-        safety_class: .Soundness,
-        safety_reason: "The referenced system is frozen or unknown, so the image has no active base.",
-        expert_path: "none: images are built `from: packages.<name>`",
-        stage: [.Jetpack],
-        meaning: "An `Image` `from:` references a frozen/unknown `System`",
-        detail: true,
-        no_fix: .Ambiguous,
-
-        what: fn(self) -> String { "An `Image` `from:` references a frozen/unknown system." }
-
-        why: fn(self) -> String {
-            "`from: system.<name>` is frozen jetos disk-image research; Jetpack's active image path uses `from: packages.<name>`. A `jet image` run reports this image declaration error."
-        }
-
-        fix: fn(self) -> String {
-            "Use `from: packages.<name>` for an `.Oci` image, or keep the system image as research capture."
-        }
-    }
-}
-
-MissingOsHost: struct {
-    impl Diagnostic {
-        code: "E0979",
-        safety_class: .Soundness,
-        safety_reason: "A target with no host, or with an empty half of `host@root`, selects no system.",
-        expert_path: "none: the target names a host, and both halves of `host@root`",
-        stage: [.Jetpack],
-        meaning: "A `jet os` target has no host, or its `host@root` selector has an empty half",
-        detail: true,
-        no_fix: .Behavior,
-
-        what: fn(self) -> String {
-            "A `jet os` target has no host, or its `host@root` selector has an empty half."
-        }
-
-        why: fn(self) -> String {
-            "A bare host selects `system.<host>` in `./config.jet`; both halves of `host@root` are required for an external root."
-        }
-
-        fix: fn(self) -> String {
-            "Write `jet os switch laptop` or `jet os switch laptop@../machines`."
-        }
-    }
-}
-
-UnknownOsHost: struct {
-    impl Diagnostic {
-        code: "E0980",
-        safety_class: .Soundness,
-        safety_reason: "The config defines no system of that name, so the host selects nothing.",
-        expert_path: "none: the host names a system in `config.jet`",
-        stage: [.Jetpack],
-        meaning: "A `jet os` host names a `System` the config doesn't define",
-        detail: true,
-        no_fix: .Behavior,
-
-        what: fn(self) -> String { "A `jet os` host names a system the config doesn't define." }
-
-        why: fn(self) -> String {
-            "The host selects one `system.<host>` contribution in `config.jet`."
-        }
-
-        fix: fn(self) -> String {
-            "Define `system.<host>: {{ … }}`, or select one of the systems the config already defines."
-        }
-    }
-}
-
-OsConfigNotFound: struct {
-    impl Diagnostic {
-        code: "E0981",
-        safety_class: .Soundness,
-        safety_reason: "The config file does not exist, so there is no system to build.",
-        expert_path: "none: the config file exists where the host selects it",
-        stage: [.Jetpack],
-        meaning: "A `jet os` config file doesn't exist",
-        detail: true,
-        no_fix: .Behavior,
-
-        what: fn(self) -> String { "The `jet os` config file doesn't exist." }
-
-        why: fn(self) -> String {
-            "A bare host loads `./config.jet`; `host@root` loads `root/config.jet` when `root` is a directory, or the file named by `root`."
-        }
-
-        fix: fn(self) -> String {
-            "Create it with `jet os init <host>`, or pass an external root as `host@root`."
+            "Add `from: packages.<name>` to the image."
         }
     }
 }
@@ -16499,7 +16334,7 @@ InvalidOutput: struct {
         }
 
         why: fn(self) -> String {
-            "`Output` has nine closed kinds; runnable entries are checked function references. Executables take zero or one CLI-derived parameter, Services and Checks take none, and all return `()` or `!`. A singular run without `run: fn` also needs one unambiguous Executable."
+            "`Output` has seven closed kinds; runnable entries are checked function references. Executables take zero or one CLI-derived parameter, Services and Checks take none, and all return `()` or `!`. A singular run without `run: fn` also needs one unambiguous Executable."
         }
 
         fix: fn(self) -> String {
@@ -18315,7 +18150,7 @@ EngineProtocolMismatch: struct {
         safety_class: .Soundness,
         safety_reason: "A version-skewed engine may not understand what `jet` sends it, so it would act on requests it reads wrong.",
         expert_path: "none: `jet` and its engines come from one toolchain",
-        meaning: "`jet` and the `jetpack`/`jetos` engine binary disagree on protocol version",
+        meaning: "`jet` and the `jetpack` engine binary disagree on protocol version",
         detail: true,
         no_fix: .Behavior,
         fix_next: "Use matching `jet` and engine versions from one installed toolchain.",
@@ -18325,7 +18160,7 @@ EngineProtocolMismatch: struct {
         }
 
         why: fn(self) -> String {
-            "`jet` and its engine binaries (`jetpack`, `jetos`) ship as one toolchain and must match exactly — a version-skewed engine may not understand what `jet` sends it. `jet` checks this with an `--engine-protocol` handshake before running any engine verb. A `jet os` or `jet image` dispatch reports this engine error."
+            "`jet` and its engine binary (`jetpack`) ship as one toolchain and must match exactly — a version-skewed engine may not understand what `jet` sends it. `jet` checks this with an `--engine-protocol` handshake before running any engine verb. A `jet image` or `jet trust` dispatch reports this engine error."
         }
 
         fix: fn(self) -> String {
@@ -18344,7 +18179,7 @@ MissingEngine: struct {
         safety_reason: "The verb runs in its engine, so without the engine there is nothing to run.",
         expert_path: "none: install the engine with the toolchain",
         stage: [.Jet],
-        meaning: "An engine verb needs an engine binary (`jetpack`/`jetos`) that isn't installed",
+        meaning: "An engine verb needs an engine binary (`jetpack`) that isn't installed",
         detail: true,
         no_fix: .Behavior,
         fix_next: "Install the matching Jet toolchain so its engine binary ships with `jet`.",
@@ -18354,7 +18189,7 @@ MissingEngine: struct {
         }
 
         why: fn(self) -> String {
-            "`{self.verb}` is an engine verb — `jet` execs `{self.engine}` for it rather than linking package-manager/OS logic into the compiler binary. A `jet os` or `jet image` dispatch reports this engine error."
+            "`{self.verb}` is an engine verb — `jet` execs `{self.engine}` for it rather than linking package-manager logic into the compiler binary. A `jet image` or `jet trust` dispatch reports this engine error."
         }
 
         fix: fn(self) -> String {
@@ -18665,83 +18500,6 @@ MissingRustToolchain: struct {
     }
 }
 
-UnknownFleetSystem: struct {
-    fleet: String,
-    host: String,
-    system: String,
-
-    impl Diagnostic {
-        code: "E1242",
-        safety_class: .Soundness,
-        safety_reason: "The host names no captured system, so the fleet plan has no system to place there.",
-        expert_path: "none: hosts name a captured system",
-        stage: [.Jet],
-        meaning: "A captured `fleet.<name>` host references an unknown captured `system.<name>`",
-        detail: true,
-        no_fix: .Ambiguous,
-        fix_next: "Define the captured system or point the host at an existing captured system.",
-
-        what: fn(self) -> String {
-            "The fleet `{self.fleet}` host `{self.host}` names an unknown captured system `{self.system}`."
-        }
-
-        why: fn(self) -> String {
-            "Fleets are frozen jetos research capture; captured hosts must still point at a captured system so the plan is coherent."
-        }
-
-        fix: fn(self) -> String {
-            "Define captured `system.{self.system}: {{ … }}`, or point the host at an existing captured system."
-        }
-    }
-}
-
-UnknownFleetField: struct {
-    field: String,
-
-    impl Diagnostic {
-        code: "E1244",
-        safety_class: .Soundness,
-        safety_reason: "A captured `Fleet` has only `hosts`, so another field has nowhere to go.",
-        expert_path: "none: a captured fleet states its `hosts`",
-        stage: [.Jet],
-        meaning: "An unknown field on a captured `Fleet` record",
-        detail: true,
-        no_fix: .Ambiguous,
-        fix_next: "Remove the unknown field; captured fleets use the `hosts` field.",
-
-        what: fn(self) -> String { "`{self.field}` isn't a captured `Fleet` field." }
-
-        why: fn(self) -> String {
-            "Fleet deployment remains frozen jetos research; only `hosts` is captured for planning."
-        }
-
-        fix: fn(self) -> String { "Remove `{self.field}`; captured fleets use `hosts: {{ … }}`." }
-    }
-}
-
-MissingFleetHosts: struct {
-    impl Diagnostic {
-        code: "E1245",
-        safety_class: .Soundness,
-        safety_reason: "A fleet with no hosts has nothing to plan.",
-        expert_path: "none: a captured fleet names its hosts",
-        stage: [.Jet],
-        meaning: "A captured `Fleet` with no `hosts:` map",
-        detail: true,
-        no_fix: .Behavior,
-
-        what: fn(self) -> String { "This captured `Fleet` has no `hosts`." }
-
-        why: fn(self) -> String {
-            "Fleet deployment is frozen jetos research, but captured fleets still name hosts for later planning."
-        }
-
-        fix: fn(self) -> String {
-            "Add `hosts: {{ web1: system.<name> }}` if this is research capture."
-        }
-    }
-}
-
 InvalidPackageSignature: struct {
     name: String,
     version: String,
@@ -19024,7 +18782,7 @@ EnvironmentNotProjectable: struct {
         }
 
         fix: fn(self) -> String {
-            "Use the supported literal devShell fields, run `jet os bridge flake` for the loss report, or declare the environment in `env.*`."
+            "Use the supported literal devShell fields, run `jet bridge flake` for the loss report, or declare the environment in `env.*`."
         }
     }
 }
@@ -19148,7 +18906,7 @@ UnknownServiceField: struct {
         }
 
         why: fn(self) -> String {
-            "A dev-supervised `Service` stays the one ratified open record (U12) at parse time, but jetpack's dev-runtime tier is the only consumer of a dev service's fields — unlike the jetos `system.*.services` capture, nothing downstream forwards unread metadata, so an unrecognized key here is almost always a typo. A `jetpack services` run reports this service declaration error."
+            "A dev-supervised `Service` stays the one ratified open record (U12) at parse time, but jetpack's dev-runtime tier is the only consumer of a dev service's fields — nothing downstream forwards unread metadata, so an unrecognized key here is almost always a typo. A `jetpack services` run reports this service declaration error."
         }
 
         fix: fn(self) -> String {
@@ -19586,24 +19344,20 @@ InvalidImageKind: struct {
     impl Diagnostic {
         code: "E1266",
         safety_class: .Soundness,
-        safety_reason: "The kind is no active image kind, or contradicts `from:`, so the image has no builder.",
-        expert_path: "none: active images are `.Oci`",
+        safety_reason: "The kind is no image kind Jetpack builds, so the image has no builder.",
+        expert_path: "none: images are `.Oci`",
         stage: [.Jet],
-        meaning: "An `Image`'s `kind:` isn't active `.Oci`, or disagrees with what `from:` names",
+        meaning: "An `Image`'s `kind:` isn't `.Oci`",
         detail: true,
         no_fix: .Behavior,
 
-        what: fn(self) -> String {
-            "`` `<word>` isn't an active image kind `` (or `` `kind: .<word>` doesn't match this image's `from:` ``)."
-        }
+        what: fn(self) -> String { "`` `<word>` isn't an image kind Jetpack builds ``." }
 
         why: fn(self) -> String {
-            "Active Jetpack images use `.Oci`; `.Iso` disk images are frozen jetos research capture. A `jet image` run reports this image declaration error."
+            "Jetpack images are OCI containers, written `kind: .Oci`. A `jet image` run reports this image declaration error."
         }
 
-        fix: fn(self) -> String {
-            "Write `kind: .Oci` for active Jetpack images, or keep `.Iso` only as research capture."
-        }
+        fix: fn(self) -> String { "Write `kind: .Oci`." }
     }
 }
 
@@ -19853,303 +19607,6 @@ OfflineNeedsNetwork: struct {
     }
 }
 
-RetiredJetosNamespace: struct {
-    impl Diagnostic {
-        code: "E1277",
-        status: .Retired,
-        meaning: "A jetos option key uses a retired namespace",
-        detail: true,
-        no_fix: None,
-
-        what: fn(self) -> String { "A jetos option key uses a retired namespace." }
-
-        why: fn(self) -> String {
-            "A jetos option key starts with a full-word namespace: `filesystem`, `network`, `packages`, `services`, `users`, `groups`, `secrets`, `boot`, `kernel`, `init`, or `health`."
-        }
-
-        fix: fn(self) -> String {
-            "Rename the option namespace, for example `net.hostName` becomes `network.hostName`."
-        }
-    }
-}
-
-IncompleteActivationProof: struct {
-    impl Diagnostic {
-        code: "E1278",
-        safety_class: .Soundness,
-        safety_reason: "Switching generations without the full proof could leave the machine in a state with no proved rollback.",
-        expert_path: "none: the activation proof is completed first",
-        stage: [.Jetpack],
-        meaning: "A jetos activation proof is incomplete",
-        detail: true,
-        no_fix: .Behavior,
-        fix_next: "Rebuild the generation so the proof artifacts are regenerated, or discard a hand-edited generation.",
-
-        what: fn(self) -> String { "A jetos activation proof is incomplete." }
-
-        why: fn(self) -> String {
-            "Jet requires `jet os switch` to prove the plan, risk class, generated service artifacts, and rollback evidence before changing the active generation pointers."
-        }
-
-        fix: fn(self) -> String {
-            "Run `jet os switch` to regenerate the proof artifacts, or delete the hand-edited generation before retrying."
-        }
-    }
-}
-
-MissingVmProofTools: struct {
-    impl Diagnostic {
-        code: "E1279",
-        safety_class: .Soundness,
-        safety_reason: "Without its pinned tools the VM proof cannot run, so nothing proves the install.",
-        expert_path: "none: the pinned proof tools are installed",
-        stage: [.Jetpack],
-        meaning: "VM/media proof tools are missing",
-        detail: true,
-        no_fix: .Behavior,
-
-        what: fn(self) -> String { "Jetos VM proof tools are missing." }
-
-        why: fn(self) -> String {
-            "Jet requires pinned QEMU, firmware, ISO, bootloader, filesystem, EFI image, and initrd compression tools before install/reboot proof can run."
-        }
-
-        fix: fn(self) -> String {
-            "Realize or expose the required tools, then rerun `jet os vm prove <host> --disk <disk>`."
-        }
-    }
-}
-
-MissingKernelPackage: struct {
-    impl Diagnostic {
-        code: "E1280",
-        safety_class: .Soundness,
-        safety_reason: "The generation has no kernel package, so it has nothing to boot.",
-        expert_path: "none: the first-party kernel package is present",
-        stage: [.Jetpack],
-        meaning: "The first-party CachyOS kernel package is missing",
-        detail: true,
-        no_fix: .Ambiguous,
-
-        what: fn(self) -> String { "The jetos CachyOS kernel package is missing." }
-
-        why: fn(self) -> String {
-            "`.CachyOS` resolves to a first-party `cachyos-kernel` package with boot artifacts and provenance."
-        }
-
-        fix: fn(self) -> String {
-            "Declare a first-party source that provides `cachyos-kernel`, or select a different ratified kernel."
-        }
-    }
-}
-
-MissingInitPackage: struct {
-    impl Diagnostic {
-        code: "E1281",
-        safety_class: .Soundness,
-        safety_reason: "The generation has no init package, so the booted system has nothing to start.",
-        expert_path: "none: the first-party `systemd` package is present",
-        stage: [.Jetpack],
-        meaning: "The first-party systemd init package is missing",
-        detail: true,
-        no_fix: .Behavior,
-
-        what: fn(self) -> String { "The jetos systemd init package is missing." }
-
-        why: fn(self) -> String {
-            "The default jetos init path is systemd, so the generation needs a first-party `systemd` package with bootable init artifacts."
-        }
-
-        fix: fn(self) -> String {
-            "Declare a first-party source that provides `systemd`, or select a ratified init override."
-        }
-    }
-}
-
-MissingBootArtifacts: struct {
-    impl Diagnostic {
-        code: "E1282",
-        safety_class: .Soundness,
-        safety_reason: "The kernel package has no bootable image and initrd, so the generation cannot boot.",
-        expert_path: "none: the kernel package provides its boot artifacts",
-        stage: [.Jetpack],
-        meaning: "The first-party CachyOS kernel package lacks bootable kernel/initrd artifacts",
-        detail: true,
-        no_fix: .Ambiguous,
-
-        what: fn(self) -> String { "The jetos CachyOS boot artifacts are missing." }
-
-        why: fn(self) -> String {
-            "The first-party `cachyos-kernel` package must provide a Linux kernel image and initrd with bootable file headers so the generation and installer can boot the same payload."
-        }
-
-        fix: fn(self) -> String {
-            "Add `boot/vmlinuz-cachyos` and `boot/initrd-cachyos` with real boot payloads, or select a different ratified kernel."
-        }
-    }
-}
-
-MissingInitArtifacts: struct {
-    impl Diagnostic {
-        code: "E1283",
-        safety_class: .Soundness,
-        safety_reason: "The init package has no bootable init binary, so the system has nothing to run as `/sbin/init`.",
-        expert_path: "none: the init package provides its binary",
-        stage: [.Jetpack],
-        meaning: "The first-party systemd package lacks init artifacts",
-        detail: true,
-        no_fix: .Behavior,
-
-        what: fn(self) -> String { "The jetos systemd init artifact is missing." }
-
-        why: fn(self) -> String {
-            "The first-party `systemd` package must provide a bootable init binary for `/sbin/init`."
-        }
-
-        fix: fn(self) -> String {
-            "Add `bin/systemd`, `lib/systemd/systemd`, or `sbin/init` to the package output, or select a ratified init override."
-        }
-    }
-}
-
-MissingKernelRecipe: struct {
-    impl Diagnostic {
-        code: "E1284",
-        safety_class: .Soundness,
-        safety_reason: "Without its source recipe the kernel's boot artifacts have no provenance.",
-        expert_path: "none: the kernel package carries its source recipe",
-        stage: [.Jetpack],
-        meaning: "The first-party CachyOS kernel package lacks source-built recipe/builder provenance",
-        detail: true,
-        no_fix: .Behavior,
-
-        what: fn(self) -> String { "The jetos CachyOS source recipe is missing." }
-
-        why: fn(self) -> String {
-            "The first-party `cachyos-kernel` package must carry source-built recipe, builder, config, patch, and initrd-input provenance beside the boot artifacts."
-        }
-
-        fix: fn(self) -> String {
-            "Add `source/recipe.jet`, `source/build.sh`, `source/config`, `source/patches.manifest`, and `source/initrd-inputs.manifest` to the package output."
-        }
-    }
-}
-
-VmProofNotRun: struct {
-    impl Diagnostic {
-        code: "E1285",
-        safety_class: .Soundness,
-        safety_reason: "Nothing has proved that the system installs and boots, so using it would trust an unproved generation.",
-        expert_path: "none: `jet os vm prove` runs first",
-        stage: [.Jetpack],
-        meaning: "The VM install/reboot harness exists but no guest proof has run",
-        detail: true,
-        no_fix: .Behavior,
-
-        what: fn(self) -> String { "The jetos VM guest proof has not run." }
-
-        why: fn(self) -> String {
-            "JetOS requires `jet os vm prove` to record an actual installer boot, disk install, reboot, serial guest verification, and graphical desktop verification before claiming proof. A written harness is not proof, and a guest proof must match the host, generation, disk, media proof, tool hashes, and terminal/desktop/graphical guest assertions."
-        }
-
-        fix: fn(self) -> String {
-            "Inspect the VM run logs, fix the boot/install path, then rerun `jet os vm prove` to capture a guest proof marker."
-        }
-    }
-}
-
-KernelBuildFailed: struct {
-    impl Diagnostic {
-        code: "E1286",
-        safety_class: .Soundness,
-        safety_reason: "The kernel's source build failed, so the generation has no boot artifacts.",
-        expert_path: "none: the source build succeeds",
-        stage: [.Jetpack],
-        meaning: "The first-party CachyOS kernel source recipe failed to build boot artifacts",
-        detail: true,
-        no_fix: .Behavior,
-
-        what: fn(self) -> String { "The jetos CachyOS source build failed." }
-
-        why: fn(self) -> String {
-            "Jet requires the first-party `cachyos-kernel` package to build boot artifacts from its recorded source recipe before VM/install proof can claim the selected `.CachyOS` kernel."
-        }
-
-        fix: fn(self) -> String {
-            "Check the first-party `cachyos-kernel` source recipe and rerun `jet os build`."
-        }
-    }
-}
-
-MissingInstalledDisk: struct {
-    impl Diagnostic {
-        code: "E1287",
-        safety_class: .Soundness,
-        safety_reason: "There is no proved installed disk, so the VM would open a disk nothing has verified.",
-        expert_path: "none: `jet os vm prove` installs and proves the disk first",
-        stage: [.Jetpack],
-        meaning: "`jet os vm run` needs a proved installed disk",
-        detail: true,
-        no_fix: .Behavior,
-
-        what: fn(self) -> String { "Jetos VM run needs a proved installed disk." }
-
-        why: fn(self) -> String {
-            "Jet keeps `jet os vm run` on the same proof-before-use path as `jet os vm prove`: an interactive VM may open only the latest generation's disk after a matching guest-passed proof binds host, generation, disk, media proof, tool hashes, and assertions."
-        }
-
-        fix: fn(self) -> String {
-            "Run `jet os vm prove <host> --disk <disk>` first, then rerun `jet os vm run`."
-        }
-    }
-}
-
-MissingDesktopPackage: struct {
-    impl Diagnostic {
-        code: "E1288",
-        safety_class: .Soundness,
-        safety_reason: "The generation has no desktop package, so the default desktop profile has nothing to start.",
-        expert_path: "none: the first-party desktop packages are present",
-        stage: [.Jetpack],
-        meaning: "The GNOME desktop package is missing",
-        detail: true,
-        no_fix: .Behavior,
-
-        what: fn(self) -> String { "The jetos GNOME desktop package is missing." }
-
-        why: fn(self) -> String {
-            "Jet makes the default desktop profile GNOME-on-Wayland with terminal fallback, so the generation must include first-party `gdm`, `gnome-session`, and `gnome-shell` commands."
-        }
-
-        fix: fn(self) -> String {
-            "Declare first-party packages for `gdm`, `gnome-session`, and `gnome-shell`, or select a ratified non-GNOME desktop profile."
-        }
-    }
-}
-
-NixosImportFailed: struct {
-    impl Diagnostic {
-        code: "E1289",
-        safety_class: .Soundness,
-        safety_reason: "The NixOS configuration could not be imported, so there are no system facts to build from.",
-        expert_path: "none: the configuration uses the surface the importer reads",
-        stage: [.Jetpack],
-        meaning: "A NixOS import failed or would overwrite output",
-        detail: true,
-        no_fix: .Behavior,
-
-        what: fn(self) -> String { "Jetos could not import a NixOS configuration." }
-
-        why: fn(self) -> String {
-            "JetOS imports semantic NixOS, flake-parts, and Home Manager facts into JetOS source and records unsupported facts in an audit report instead of pretending conversion was complete."
-        }
-
-        fix: fn(self) -> String {
-            "Pass a flake/root with `jetos-import-facts.json`, rerun with `--facts-only` for an audited scan draft, or choose a fresh `--out` path when writing."
-        }
-    }
-}
-
 UnknownJob: struct {
     name: String,
 
@@ -20169,54 +19626,6 @@ UnknownJob: struct {
 
         fix: fn(self) -> String {
             "Mark a function `#Job`, or check the spelling; the diagnostic lists declared jobs."
-        }
-    }
-}
-
-FakeVmTools: struct {
-    impl Diagnostic {
-        code: "E1290",
-        safety_class: .Soundness,
-        safety_reason: "Fake tools prove nothing about a real guest, so a proof built on them would claim readiness nobody showed.",
-        expert_path: "none: the real VM tools are installed",
-        stage: [.Jetpack],
-        meaning: "Real JetOS replacement proof was requested with fake/script VM tools",
-        detail: true,
-        no_fix: .Behavior,
-
-        what: fn(self) -> String { "Jetos real VM proof needs real tools." }
-
-        why: fn(self) -> String {
-            "Jet requires actual installed-guest behavior before JetOS can claim NixOS replacement readiness. Script fixtures and fake QEMU tools may test harness plumbing, but they cannot close replacement acceptance."
-        }
-
-        fix: fn(self) -> String {
-            "Rerun without `--real` for plumbing tests, or put real QEMU/image/media tools on PATH before claiming replacement proof."
-        }
-    }
-}
-
-UnmappedNixosOption: struct {
-    impl Diagnostic {
-        code: "E1291",
-        safety_class: .Soundness,
-        safety_reason: "A declaration the backend cannot translate would be silently dropped from the built system.",
-        expert_path: "none: the declaration uses options the backend maps",
-        stage: [.Jetpack],
-        meaning: "A jetos real-tier system option/service/package has no NixOS mapping",
-        detail: true,
-        no_fix: .Behavior,
-
-        what: fn(self) -> String {
-            "Jetos real tier could not map every system declaration to NixOS."
-        }
-
-        why: fn(self) -> String {
-            "JetOS generates a hidden NixOS backend from the checked `SystemPlan` and refuses to silently drop an option, service, or package it cannot translate — every unmapped declaration is listed together, before `nix` ever runs. A `jet os` run reports this JetOS mapping error."
-        }
-
-        fix: fn(self) -> String {
-            "Rename or drop the unmapped keys/packages/services, or map them to the nearest supported real-tier option (see the option/service/package mapping table for `--real`)."
         }
     }
 }

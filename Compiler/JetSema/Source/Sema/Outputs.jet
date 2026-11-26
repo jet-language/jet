@@ -50,8 +50,6 @@ sema_output_kind: fn(name: String) -> OutputKind? Never! {
         "Environment" -> Val(OutputKind.Environment)
         "Image" -> Val(OutputKind.Image)
         "Bundle" -> Val(OutputKind.Bundle)
-        "System" -> Val(OutputKind.System)
-        "Fleet" -> Val(OutputKind.Fleet)
         else -> None
     }
 }
@@ -65,8 +63,6 @@ sema_output_kind_name: fn(kind: OutputKind) -> String Never! {
         .Environment -> "Environment"
         .Image -> "Image"
         .Bundle -> "Bundle"
-        .System -> "System"
-        .Fleet -> "Fleet"
     }
 }
 
@@ -468,7 +464,7 @@ sema_output_resolve: fn(graph: ^SemaRegistrationGraph, intent: SemaOutputIntent,
                 if definition.ty != (Val(Type.Named{name: "Output"})) -> next
                 if definition.value == .EnumLit(_, variant, _, args, _, span, _) {
                     kind: sema_output_kind(variant) ?? {
-                        diagnostics.push(sema_output_error(span, "`{variant}` is not an Output kind", "Output has exactly nine ratified kinds", "use one of: Library, Executable, Service, Check, Environment, Image, Bundle, System, Fleet"))
+                        diagnostics.push(sema_output_error(span, "`{variant}` is not an Output kind", "Output has exactly seven ratified kinds", "use one of: Library, Executable, Service, Check, Environment, Image, Bundle"))
                         next
                     }
                     fields: sema_output_fields(args, span, diagnostics) ?? next
@@ -508,7 +504,7 @@ sema_output_resolve: fn(graph: ^SemaRegistrationGraph, intent: SemaOutputIntent,
                     ^resolved: sema_output_fact(graph, module_index, definition.name, kind, output_name, entry, diagnostics) ?? next
                     rows.push(SemaOutputRow{module_index: module_index, item_index: item_index, fact: resolved.fact.move(), references: resolved.references.move()})
                 } else {
-                    diagnostics.push(sema_output_error(expr_span(definition.value), "Output needs one closed kind", "Output is the closed sum of the nine ratified kinds", "write `.Executable.{{ ... }}`, `.Service.{{ ... }}`, or another Output kind"))
+                    diagnostics.push(sema_output_error(expr_span(definition.value), "Output needs one closed kind", "Output is the closed sum of the seven ratified kinds", "write `.Executable.{{ ... }}`, `.Service.{{ ... }}`, or another Output kind"))
                 }
             }
         }
