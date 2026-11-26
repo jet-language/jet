@@ -1,0 +1,121 @@
+// Generated grammar items:
+// - hole-bearing grammars emit `parse_parts(parts: [String]) -> T GrammarError!`
+//   alongside `check_parts`, while hole-free grammars omit both;
+// - generated print and walk helpers return `Bool Never!` (infallible);
+// - generated enum parse helpers end with an explicit `return None` after their
+//   branch switch so Jet does not reject them with `Jet.MissingBlockValue`.
+use {
+    jet_sema.[sema_grammar_items_expand]
+    jet_parser.[parse_source]
+    jet_foundation.[CtEnumArg, CtValue, Diagnostic, Item, NamedCtValue, Stmt, Type]
+}
+
+priv make_node: fn(kind: String, children: [Int], label: String, rule: Int, token: Int) -> CtValue {
+    CtValue.Struct{type_name: "GrammarNode", fields: [NamedCtValue]{
+        NamedCtValue{name: "kind", value: CtValue.Enum{type_name: "GrammarNodeKind", variant: kind, args: [CtEnumArg]{}}},
+        NamedCtValue{name: "children", value: CtValue.List{values: loop c in children -> CtValue.Int{value: c}}},
+        NamedCtValue{name: "label", value: CtValue.Str{value: label}},
+        NamedCtValue{name: "rule", value: CtValue.Int{value: rule}},
+        NamedCtValue{name: "token", value: CtValue.Int{value: token}},
+    }}
+}
+
+priv make_plan: fn(with_hole: Bool, is_enum: Bool) -> CtValue {
+    // Rule 0 (`item`): node 0 = Choice[1], node 1 = Alt[2], node 2 = Ref(token=1)
+    rule0: CtValue.Struct{type_name: "GrammarRule", fields: [NamedCtValue]{
+        NamedCtValue{name: "name", value: CtValue.Str{value: "item"}},
+        NamedCtValue{name: "kind", value: CtValue.Enum{type_name: "GrammarRuleKind", variant: "Parser", args: [CtEnumArg]{}}},
+        NamedCtValue{name: "body", value: CtValue.Int{value: 0}},
+    }}
+    tree: CtValue.Struct{type_name: "RuleTree", fields: [NamedCtValue]{
+        NamedCtValue{name: "rules", value: CtValue.List{values: [CtValue]{rule0}}},
+        NamedCtValue{name: "nodes", value: CtValue.List{values: [CtValue]{
+            make_node("Choice", [Int]{1}, "", -1, -1),
+            make_node("Alt", [Int]{2}, "", -1, -1),
+            make_node("Ref", [Int]{}, "", -1, 1),
+        }}},
+    }}
+    case0: CtValue.Struct{type_name: "GrammarCase", fields: [NamedCtValue]{
+        NamedCtValue{name: "name", value: CtValue.Str{value: "Only"}},
+        NamedCtValue{name: "alt", value: CtValue.Int{value: 1}},
+        NamedCtValue{name: "fields", value: CtValue.List{values: [CtValue]{}}},
+        NamedCtValue{name: "wraps", value: CtValue.Int{value: -1}},
+    }}
+    cases: if is_enum -> [CtValue]{case0} else -> [CtValue]{}
+    shape: CtValue.Struct{type_name: "GrammarShape", fields: [NamedCtValue]{
+        NamedCtValue{name: "rule", value: CtValue.Int{value: 0}},
+        NamedCtValue{name: "name", value: CtValue.Str{value: "Item"}},
+        NamedCtValue{name: "is_enum", value: CtValue.Bool{value: is_enum}},
+        NamedCtValue{name: "fields", value: CtValue.List{values: [CtValue]{}}},
+        NamedCtValue{name: "cases", value: CtValue.List{values: cases}},
+    }}
+    hole_slot: if with_hole -> "Val" else -> ""
+    token_name: if with_hole -> "HoleVal" else -> "Word"
+    tokens: [CtValue]{
+        CtValue.Struct{type_name: "GrammarToken", fields: [NamedCtValue]{NamedCtValue{name: "hole", value: CtValue.Str{value: ""}}}},
+        CtValue.Struct{type_name: "GrammarToken", fields: [NamedCtValue]{NamedCtValue{name: "hole", value: CtValue.Str{value: hole_slot}}}},
+    }
+    printer: CtValue.Struct{type_name: "GrammarPrinter", fields: [NamedCtValue]{
+        NamedCtValue{name: "groups", value: CtValue.List{values: [CtValue]{CtValue.Int{value: -1}}}},
+    }}
+    CtValue.Struct{type_name: "GrammarPlan", fields: [NamedCtValue]{
+        NamedCtValue{name: "tree", value: tree},
+        NamedCtValue{name: "shapes", value: CtValue.List{values: [CtValue]{shape}}},
+        NamedCtValue{name: "kind_names", value: CtValue.List{values: [CtValue]{CtValue.Str{value: "Eof"}, CtValue.Str{value: token_name}}}},
+        NamedCtValue{name: "tokens", value: CtValue.List{values: tokens}},
+        NamedCtValue{name: "decision_of", value: CtValue.List{values: [CtValue]{CtValue.Int{value: 0}, CtValue.Int{value: -1}, CtValue.Int{value: -1}}}},
+        NamedCtValue{name: "operators", value: CtValue.List{values: [CtValue]{}}},
+        NamedCtValue{name: "printer", value: printer},
+    }}
+}
+
+priv expand_items: fn(with_hole: Bool, is_enum: Bool) -> [Item] {
+    src: "Item: Grammar{{\"\"\"\n    item : WORD ;\n    WORD : [a-z]+ ;\n    \"\"\"}}\n"
+    parsed: parse_source(src.bytes())
+    assert_eq(parsed.diagnostics.len(), 0)
+    ^program: parsed.program
+    ^diagnostics: [Diagnostic]{}
+    sema_grammar_items_expand(program, [NamedCtValue]{NamedCtValue{name: "Item", value: make_plan(with_hole, is_enum)}}, diagnostics)
+    assert_eq(diagnostics.len(), 0)
+    program.items
+}
+
+#Test("hole-bearing grammar generates parse_parts and check_parts while hole-free grammar omits both") {
+    with_holes_items: expand_items(true, false)
+    ^with_holes: [String]{}
+    ^checked_helpers: 0
+    bool_never: Val(Type.Result{ok: Type.Bool, err: Type.Named{name: "Never"}})
+    loop item in with_holes_items {
+        if item == .Struct(def) && def.name == "Item" {
+            loop method in def.methods -> with_holes.push(method.name.copy())
+        }
+        if item == .Func(func) {
+            if func.name.ends_with("_print") || func.name.ends_with("_into") || func.name.ends_with("_check") {
+                assert_eq("{func.return_type:Debug}", "{bool_never:Debug}")
+                checked_helpers += 1
+            }
+        }
+    }
+    assert(with_holes.contains("parse"))
+    assert(with_holes.contains("parse_parts"))
+    assert(with_holes.contains("check_parts"))
+    assert_eq(checked_helpers, 3)
+
+    without_holes_items: expand_items(false, true)
+    ^without_holes: [String]{}
+    ^enum_parse_ends_with_return: false
+    loop item in without_holes_items {
+        if item == .Enum(def) && def.name == "Item" {
+            loop method in def.methods -> without_holes.push(method.name.copy())
+        }
+        if item == .Func(func) && func.name == "__jet_grammar_Item_item" {
+            if func.body.len() > 0 && func.body[func.body.len() - 1] == .Return(_, _) {
+                enum_parse_ends_with_return = true
+            }
+        }
+    }
+    assert(without_holes.contains("parse"))
+    assert(!without_holes.contains("parse_parts"))
+    assert(!without_holes.contains("check_parts"))
+    assert(enum_parse_ends_with_return)
+}

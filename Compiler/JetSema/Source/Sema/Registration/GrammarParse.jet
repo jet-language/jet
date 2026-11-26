@@ -209,6 +209,11 @@ sema_grammar_scanner_param: fn(span: Span) -> Param Never! {
     sema_serde_items_param(SEMA_GRAMMAR_SCANNER, Type.Named{name: "{sema_grammar_alias(SEMA_GRAMMAR_PLAN_MODULE)}.GrammarScanner"}, span)
 }
 
+// `Bool Never!`, the infallible return type of generated print and walk helpers.
+sema_grammar_bool_never: fn() -> Type Never! {
+    Type.Result{ok: Type.Bool, err: Type.Named{name: "Never"}}
+}
+
 // A generated free function, private to the module.
 sema_grammar_free_function: fn(name: String, params: [Param], return_type: Type, body: ^^[Stmt], span: Span) -> Item Never! {
     ^function: sema_serde_items_method(name, [TypeParam]{}, params, return_type, span)
@@ -449,6 +454,7 @@ sema_grammar_rule_functions: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan,
             arms.push(arm)
         }
         body.push(sema_grammar_branches(branch, arms.move(), span))
+        body.push(sema_grammar_return_none(span))
     } else {
         field_of: sema_grammar_field_of(plan, shape.fields)
         sema_grammar_locals(gen, shape.fields, body)
@@ -519,21 +525,21 @@ sema_grammar_operator_body: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan, 
     body
 }
 
-// `parse(text) -> T GrammarError!` of rule `shape.rule`'s type: its
-// function from the start of `text`, then the end of the input. A rule
-// function returns None only once an error is recorded, so the end check
-// fails first.
-sema_grammar_parse_method: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan, shape: SemaGrammarShape, is_pub: Bool, is_package_pub: Bool) -> Func Never! {
+// `name(param_name: param_type) -> T GrammarError!` of rule `shape.rule`'s
+// type, starting its cursor through `cursor_fn` (`cursor_of` or
+// `cursor_of_parts`). A rule function returns None only once an error is
+// recorded, so the end check fails first.
+sema_grammar_parse_method_of: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan, shape: SemaGrammarShape, name: String, param_name: String, param_type: Type, cursor_fn: String, offset: Int, is_pub: Bool, is_package_pub: Bool) -> Func Never! {
     span: gen.span
     scanner: sema_grammar_scanner_constant(gen)
     value: "__jet_value"
-    start: sema_grammar_core_call(SEMA_GRAMMAR_RUNTIME_MODULE, "cursor_of", [Expr]{sema_serde_items_ident("text", span)}, span)
+    start: sema_grammar_core_call(SEMA_GRAMMAR_RUNTIME_MODULE, cursor_fn, [Expr]{sema_serde_items_ident(param_name, span)}, span)
     built: sema_serde_items_free_call(sema_grammar_function(gen, plan, shape.rule), [Expr]{sema_serde_items_ident(SEMA_GRAMMAR_CURSOR, span), sema_serde_items_ident(scanner, span)}, span)
     ended: sema_grammar_core_call(SEMA_GRAMMAR_RUNTIME_MODULE, "parse_end", [Expr]{sema_serde_items_ident(SEMA_GRAMMAR_CURSOR, span), sema_serde_items_ident(scanner, span)}, span)
     failed: Expr.Err{value: sema_grammar_core_call(SEMA_GRAMMAR_RUNTIME_MODULE, "parse_error", [Expr]{sema_serde_items_ident(SEMA_GRAMMAR_CURSOR, span)}, span), span: span, id: AST_NODE_GENERATED}
     parsed: Expr.OrFallback{value: sema_serde_items_take(value, span), fallback: OrFallback.Return{value: Val(failed.copy()), span: span}, is_option: true, span: span, id: AST_NODE_GENERATED}
     result: Type.Result{ok: Type.Named{name: shape.name.copy()}, err: Type.Named{name: "{sema_grammar_alias(SEMA_GRAMMAR_ERROR_MODULE)}.GrammarError"}}
-    ^method: sema_serde_items_method("parse", [TypeParam]{}, [Param]{sema_serde_items_param("text", Type.String, span)}, result, Span{start: span.start, end: span.start})
+    ^method: sema_serde_items_method(name, [TypeParam]{}, [Param]{sema_serde_items_param(param_name, param_type, span)}, result, Span{start: span.start + offset, end: span.start + offset})
     method.is_pub = is_pub
     method.is_package_pub = is_package_pub
     method.body = [Stmt]{
@@ -543,6 +549,18 @@ sema_grammar_parse_method: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan, s
         sema_serde_items_return(Expr.Ok{value: parsed, span: span, id: AST_NODE_GENERATED}, span),
     }
     method
+}
+
+// `parse(text) -> T GrammarError!` of rule `shape.rule`'s type.
+sema_grammar_parse_method: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan, shape: SemaGrammarShape, is_pub: Bool, is_package_pub: Bool) -> Func Never! {
+    sema_grammar_parse_method_of(gen, plan, shape, "parse", "text", Type.String, "cursor_of", 0, is_pub, is_package_pub)
+}
+
+// `parse_parts(parts) -> T GrammarError!` of rule `shape.rule`'s type, for a
+// grammar with holes: parses the literal parts with a hole between each two
+// into the rule's generated value.
+sema_grammar_parse_parts_method: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan, shape: SemaGrammarShape, is_pub: Bool, is_package_pub: Bool) -> Func Never! {
+    sema_grammar_parse_method_of(gen, plan, shape, "parse_parts", "parts", Type.List{element: Type.String}, "cursor_of_parts", 5, is_pub, is_package_pub)
 }
 
 // ---------------------------------------------------------------------------

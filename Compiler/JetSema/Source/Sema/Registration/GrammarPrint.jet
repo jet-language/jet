@@ -449,7 +449,7 @@ sema_grammar_print_functions: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan
     if operator_index >= 0 && shape.is_enum {
         top: SemaGrammarPlace{level: sema_grammar_number(0, span), follow: sema_grammar_number(-1, span)}
         ^body: [Stmt]{sema_serde_items_return(sema_grammar_print_call(gen, plan, r, sema_serde_items_ident(SEMA_GRAMMAR_VALUE, span), Val(top), span), span)}
-        items.push(sema_grammar_free_function(sema_grammar_print_function(gen, plan, r), sema_grammar_print_params(gen, r, span), Type.Bool, body.move(), sema_grammar_span_at(gen, 2 * rules + r)))
+        items.push(sema_grammar_free_function(sema_grammar_print_function(gen, plan, r), sema_grammar_print_params(gen, r, span), sema_grammar_bool_never(), body.move(), sema_grammar_span_at(gen, 2 * rules + r)))
         op_rule: plan.operators[operator_index]
         ^arms: [[Stmt]]{}
         loop case in shape.cases {
@@ -466,7 +466,7 @@ sema_grammar_print_functions: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan
         level_params.push(sema_serde_items_param(SEMA_GRAMMAR_LEVEL, Type.Int, span))
         level_params.push(sema_serde_items_param(SEMA_GRAMMAR_FOLLOW, Type.Int, span))
         ^level_body: [Stmt]{sema_grammar_print_cases(shape, arms.move(), span)}
-        items.push(sema_grammar_free_function(sema_grammar_print_level_function(gen, plan, r), level_params, Type.Bool, level_body.move(), sema_grammar_span_at(gen, 3 * rules + r)))
+        items.push(sema_grammar_free_function(sema_grammar_print_level_function(gen, plan, r), level_params, sema_grammar_bool_never(), level_body.move(), sema_grammar_span_at(gen, 3 * rules + r)))
         return
     }
     ^body: [Stmt]{}
@@ -484,7 +484,7 @@ sema_grammar_print_functions: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan
         sema_grammar_print_element(gen, plan, scope, plan.rules[r].body, body)
         sema_grammar_print_done(scope, body, span)
     }
-    items.push(sema_grammar_free_function(sema_grammar_print_function(gen, plan, r), sema_grammar_print_params(gen, r, span), Type.Bool, body.move(), sema_grammar_span_at(gen, 2 * rules + r)))
+    items.push(sema_grammar_free_function(sema_grammar_print_function(gen, plan, r), sema_grammar_print_params(gen, r, span), sema_grammar_bool_never(), body.move(), sema_grammar_span_at(gen, 2 * rules + r)))
 }
 
 // ---------------------------------------------------------------------------

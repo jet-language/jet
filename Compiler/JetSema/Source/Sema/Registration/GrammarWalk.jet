@@ -123,11 +123,11 @@ sema_grammar_walk_check: fn(walk: SemaGrammarWalk, taken: Expr, span: Span) -> S
     sema_serde_items_if(sema_serde_items_not(taken, span), [Stmt]{sema_grammar_walk_refuse(walk, span)}, span)
 }
 
-// `function(cursor, scanner, args…, sink or slots)`.
+// `function(cursor, scanner, sink or slots, args…)`.
 sema_grammar_walk_call: fn(walk: SemaGrammarWalk, function: String, args: ^^[Expr], span: Span) -> Expr Never! {
     ^all: [Expr]{sema_serde_items_ident(SEMA_GRAMMAR_CURSOR, span), sema_serde_items_ident(SEMA_GRAMMAR_SCANNER, span)}
-    loop arg in args.move() -> all.push(arg)
     if walk.check -> all.push(sema_serde_items_ident(SEMA_GRAMMAR_SLOTS, span)) else -> all.push(sema_serde_items_ident(SEMA_GRAMMAR_SINK, span))
+    loop arg in args.move() -> all.push(arg)
     sema_serde_items_free_call(function, all, span)
 }
 
@@ -362,7 +362,7 @@ sema_grammar_walk_finish: fn(walk: SemaGrammarWalk, rule: Int, body: ^[Stmt], sp
 // A generated walk function, private to the module: generic over the sink
 // into a sink.
 sema_grammar_walk_free_function: fn(walk: SemaGrammarWalk, name: String, params: [Param], body: ^^[Stmt], span: Span) -> Item Never! {
-    ^function: sema_serde_items_method(name, sema_grammar_walk_type_params(walk, span), params, Type.Bool, span)
+    ^function: sema_serde_items_method(name, sema_grammar_walk_type_params(walk, span), params, sema_grammar_bool_never(), span)
     function.body = body.move()
     Item.Func{value: function}
 }

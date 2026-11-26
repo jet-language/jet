@@ -210,7 +210,10 @@ sema_grammar_items: fn(definition: ConstDef, plan: SemaGrammarItemsPlan, value: 
             methods.push(sema_grammar_parse_method(gen, plan, shape, definition.is_pub, definition.is_package_pub))
             sema_grammar_print_methods(gen, plan, shape, definition.is_pub, definition.is_package_pub, methods)
             methods.push(sema_grammar_into_method(gen, plan, shape, definition.is_pub, definition.is_package_pub))
-            if holes -> methods.push(sema_grammar_check_method(gen, plan, shape, definition.is_pub, definition.is_package_pub))
+            if holes {
+                methods.push(sema_grammar_parse_parts_method(gen, plan, shape, definition.is_pub, definition.is_package_pub))
+                methods.push(sema_grammar_check_method(gen, plan, shape, definition.is_pub, definition.is_package_pub))
+            }
         }
         if shape.is_enum {
             ^variants: [Variant]{}
