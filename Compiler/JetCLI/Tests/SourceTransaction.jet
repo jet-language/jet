@@ -4,6 +4,7 @@ use {
     jet_cli.[
         JetCLIFix,
         JetCLIFixFile,
+        JetCLIFixMode,
         JetCLIFixSkip,
         JetCLISemOp,
         JetCLISourceChange,
@@ -14,6 +15,7 @@ use {
         jet_cli_fix_errors,
         jet_cli_fix_log,
         jet_cli_fix_rewrite,
+        jet_cli_fix_run,
         jet_cli_transaction_relative,
         jet_cli_undo_source_changes,
     ]
@@ -140,7 +142,7 @@ JetCLITransactionFixtureRoot: struct {
     cli_files.write(file, source) ?? panic("run source")
     if jet_cli_fix_collect(file, source, [JetCLIFixFile]{}, [String?]{}, false, "") == {
         .Refused(_) -> { panic("the compiler refused the fixture") }
-        .Fixes(fixes, errors, _, _) -> {
+        .Fixes(fixes, errors, _, _, _) -> {
             assert(errors.len() >= 2)
             loop fix in fixes {
                 if fix.edit.span.start < helpers.len() -> panic("a fix edits a helper: {fix.title}")
@@ -162,7 +164,7 @@ JetCLITransactionFixtureRoot: struct {
     cli_files.write(file, source) ?? panic("run source")
     if jet_cli_fix_collect(file, source, [JetCLIFixFile]{}, [String?]{}, false, "") == {
         .Refused(_) -> { panic("the compiler refused the fixture") }
-        .Fixes(fixes, errors, _, _) -> {
+        .Fixes(fixes, errors, _, _, _) -> {
             assert(errors.len() >= 2)
             loop fix in fixes {
                 if fix.edit.new_text.starts_with("_") || fix.edit.new_text == ":" {
@@ -188,7 +190,7 @@ JetCLITransactionFixtureRoot: struct {
     cli_files.write(file, source) ?? panic("run source")
     if jet_cli_fix_collect(file, source, [JetCLIFixFile]{}, [String?]{}, false, "") == {
         .Refused(_) -> { panic("the compiler refused the fixture") }
-        .Fixes(_, errors, repairs, _) -> {
+        .Fixes(_, errors, repairs, _, _) -> {
             assert(errors.len() >= 1 && repairs.len() >= 1)
             ^rejected: [JetCLIFixSkip]{}
             ^refused: [JetCLIFixSkip]{}
@@ -199,4 +201,45 @@ JetCLITransactionFixtureRoot: struct {
             assert(jet_cli_fix_errors(file, checked.source, [JetCLIFixFile]{}, [String?]{}, "").len() == 0)
         }
     }
+}
+
+// A fix in one file that introduces a compile error in an unedited sibling
+// file of the same package is rolled back and reported.
+#Test("fix_sibling_error_rolls_back") {
+    root: "{cli_sys.temp_dir()}/jet-fix-sibling-{cli_process.current_pid()}"
+    cli_files.create_dir_all("{root}/Source") ?? panic("test project")
+    owner: JetCLITransactionFixtureRoot{path: root}
+    defer close(owner)
+    cli_files.write("{root}/package.jet", "name: \"sibling_demo\"\nversion: \"0.1.0\"\n") ?? panic("package")
+    main_file: "{root}/Source/Main.jet"
+    main_source: "helper: fn(x: Int) -> Int {{ x + 1 }}\n\nrun: fn() {{\n    print(caller())\n}}\n"
+    cli_files.write(main_file, main_source) ?? panic("main source")
+    cli_files.write("{root}/Source/Caller.jet", "caller: fn() -> Int {{ helper(1) }}\n") ?? panic("caller source")
+    baseline: jet_cli_fix_errors(main_file, main_source, [JetCLIFixFile]{}, [String?]{}, "")
+    assert(baseline.len() == 0)
+    breaks_sibling: JetCLIFix{title: "rename helper", edit: TextEdit{span: Span{start: 0, end: "helper".len()}, new_text: "renamed"}, applicability: .Safe, safety: .BehaviorPreserving}
+    ^rejected: [JetCLIFixSkip]{}
+    ^refused: [JetCLIFixSkip]{}
+    checked: jet_cli_fix_checked(main_file, main_source, [JetCLIFixFile]{}, [JetCLIFix]{breaks_sibling}, baseline, rejected, refused, "")
+    assert(checked.source == main_source && checked.applied == 0)
+    assert(rejected.len() == 1 && refused.len() == 0)
+    assert(rejected[0].reason.starts_with("the edited file no longer checks: ") && rejected[0].reason.contains("helper"), rejected[0].reason)
+}
+
+// `jet fix` on a file that does not parse reports the parse error and exits
+// non-zero instead of printing `no changes made`.
+#Test("fix_unparseable_reports_parse_error") {
+    root: "{cli_sys.temp_dir()}/jet-fix-parse-err-{cli_process.current_pid()}"
+    cli_files.create_dir_all(root) ?? panic("test project")
+    owner: JetCLITransactionFixtureRoot{path: root}
+    defer close(owner)
+    file: "{root}/broken.jet"
+    cli_files.write(file, "run: fn() {{\n    x: (\n}}\n") ?? panic("broken source")
+    text_out: jet_cli_fix_run(file, true, false, "", JetCLIFixMode.Suggestions, false, false, false)
+    assert(text_out.exit_code != 0)
+    assert(!text_out.stderr.contains("no changes made"), text_out.stderr)
+    assert(text_out.stderr.contains("Error: Jet.InvalidStatement:"), text_out.stderr)
+    json_out: jet_cli_fix_run(file, true, false, "", JetCLIFixMode.Suggestions, false, false, true)
+    assert(json_out.exit_code != 0)
+    assert(json_out.stdout.contains("\"ok\":false") && json_out.stdout.contains("Jet.InvalidStatement"), json_out.stdout)
 }

@@ -2,11 +2,18 @@
 // Publication uses the canonical held codemod transaction.
 use {
     cli_files: core.files
-    jet_driver.[JetDriverBuildQueryScope, JetDriverCompileMode, JetDriverSourceDocument, JetDriverVerbOutput, jet_driver_entry_package_has_build, jet_driver_present_diagnostics, jet_driver_query_build_plan, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
+    jet_driver.[JetDriverBuildQueryScope, JetDriverCompileMode, JetDriverSourceDocument, JetDriverStage, JetDriverVerbOutput, jet_driver_entry_package_has_build, jet_driver_present_diagnostics, jet_driver_query_build_plan, jet_driver_report_problems, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
     jet_foundation.[Diagnostic, DiagnosticFixApplicability, DiagnosticFixSafety, SourceFile, Span, TextEdit, DIAGNOSTIC_ERROR, diagnostic_headline, foundation_byte_text]
     jet_lexer.[lex, Token, TOKEN_BLOCK_COMMENT, TOKEN_COLON, TOKEN_EQ, TOKEN_IDENT, TOKEN_LBRACE, TOKEN_LINE_COMMENT, TOKEN_RBRACE, TOKEN_SEMI]
     jet_parser.[jet_format_unified_diff, parser_marker_placement_edits]
     jet_semindex.[SemDefinitionFact]
+}
+
+// Rendered parse failure captured when a `jet fix` check stops at Parse, so
+// an unparseable target reports its parse error instead of `no changes made`.
+JetCLIFixParseError: struct {
+    report: String,
+    reports: [String],
 }
 
 // `errors`: the file's errors, each `CODE: what` (jet_cli_fix_checked
@@ -15,7 +22,7 @@ use {
 // compile's definition facts when the query asked for them
 // (jet_cli_fix_result_facts), which the fix receipt's renames start from.
 JetCLIFixQuery: enum {
-    Fixes(fixes: [JetCLIFix], errors: [String], repairs: [JetCLIFix], definitions: [SemDefinitionFact]?),
+    Fixes(fixes: [JetCLIFix], errors: [String], repairs: [JetCLIFix], definitions: [SemDefinitionFact]?, parse_error: JetCLIFixParseError?),
     Refused(output: JetDriverVerbOutput),
 }
 
@@ -74,18 +81,21 @@ jet_cli_fix_overlay: fn(path: String, text: String) -> JetDriverSourceDocument N
 // The fixes of `file` with `source` as its text and the file table `files`
 // with `texts` (jet_cli_fix_compile): the compiler's own, and the
 // `syntax.rewrite` edits of the findings the entry package's build raises
-// in it (jet_cli_fix_build_findings). `errors` count the table's files'
-// errors too, so a fix that breaks one is rolled back. `scope`, the folder
-// of a package `jet fix` sweeps ("" when it fixes one file), adds the fixes
-// and errors of each source file under it (jet_cli_fix_swept). With `facts`
-// the query keeps the compile's definition facts too. `repairs` repair only
-// the errors `fresh_against`, the errors before the fixes, does not hold
+// in it (jet_cli_fix_build_findings). `errors` count every error the compile
+// reports in any loaded file, so a fix that breaks the fixed file or a
+// sibling file is rolled back. `scope`, the folder of a package `jet fix`
+// sweeps ("" when it fixes one file), adds the fixes and errors of each
+// source file under it (jet_cli_fix_swept). With `facts` the query keeps the
+// compile's definition facts too. `repairs` repair only the errors
+// `fresh_against`, the errors before the fixes, does not hold
 // (jet_cli_fix_new_errors); every error's when it is empty.
-jet_cli_fix_collect: fn(file: String, source: String, files: [JetCLIFixFile], texts: [String?], all: Bool, scope: String, facts: Bool{false}, fresh_against: [String]{[String]{}}) -> JetCLIFixQuery {
+jet_cli_fix_collect: fn(file: String, source: String, files: [JetCLIFixFile], texts: [String?], all: Bool, scope: String, facts: Bool{false}, fresh_against: [String]{[String]{}}, color: Bool{false}, parse_json: Bool{false}) -> JetCLIFixQuery {
     ^diagnostics: [Diagnostic]{}
     ^swept: [Diagnostic]{}
     ^errors: [String]{}
     ^definitions: [SemDefinitionFact]?{None}
+    ^parse_failed: false
+    ^parse_other: [Diagnostic]{}
     canonical: jet_cli_overlay_path(file)
     if jet_cli_fix_compile(file, source, files, texts) == {
         .Refused(output) -> return JetCLIFixQuery.Refused{output: output}
@@ -93,6 +103,7 @@ jet_cli_fix_collect: fn(file: String, source: String, files: [JetCLIFixFile], te
             if result.internal_problem == .Val(problem) {
                 return JetCLIFixQuery.Refused{output: jet_cli_ice(problem)}
             }
+            parse_failed = result.failed_stage == Val(JetDriverStage.Parse)
             if facts -> definitions = jet_cli_fix_result_facts(result)
             // The advice (JetDriverCompileResult.advice) carries fixes too.
             ^found: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
@@ -102,10 +113,12 @@ jet_cli_fix_collect: fn(file: String, source: String, files: [JetCLIFixFile], te
             loop diagnostic in found.move() {
                 if jet_cli_fix_elsewhere(diagnostic, canonical, source) {
                     in_scope: jet_cli_fix_swept(scope, diagnostic, result.generated_source_files)
-                    if !in_scope && diagnostic.severity == DIAGNOSTIC_ERROR && jet_cli_fix_names_file(files, diagnostic) {
+                    if !in_scope && diagnostic.severity == DIAGNOSTIC_ERROR {
                         errors.push(jet_cli_fix_error(diagnostic, canonical))
+                        if parse_failed -> parse_other.push(diagnostic)
+                    } else if in_scope {
+                        swept.push(diagnostic)
                     }
-                    if in_scope -> swept.push(diagnostic)
                     next
                 }
                 diagnostics.push(diagnostic)
@@ -128,6 +141,14 @@ jet_cli_fix_collect: fn(file: String, source: String, files: [JetCLIFixFile], te
             failed.push(diagnostic)
         }
     }
+    ^parse_error: JetCLIFixParseError?{None}
+    if parse_failed {
+        if failed.len() > 0 {
+            parse_error = Val(JetCLIFixParseError{report: jet_driver_report_problems(file, source, failed, color, false), reports: if parse_json -> jet_cli_reports_json(jet_cli_report_base(file), file, source, failed) else -> [String]{}})
+        } else if parse_other.len() > 0 {
+            parse_error = Val(JetCLIFixParseError{report: jet_driver_report_problems(file, source, parse_other, color, false), reports: if parse_json -> jet_cli_reports_json(jet_cli_report_base(file), file, source, parse_other) else -> [String]{}})
+        }
+    }
     offset: errors.len() - failed.len()
     ^repairs: jet_cli_fixes_from_diagnostics(jet_cli_fix_fresh(failed.move(), jet_cli_fix_new_errors(errors, fresh_against), offset))
     ^fixes: jet_cli_fixes_from_diagnostics(diagnostics.move())
@@ -136,7 +157,7 @@ jet_cli_fix_collect: fn(file: String, source: String, files: [JetCLIFixFile], te
         fixes.push(jet_cli_fix_retired_run(site))
         repairs.push(jet_cli_fix_retired_run(site))
     }
-    JetCLIFixQuery.Fixes{fixes: if all -> fixes else -> jet_cli_safe_fixes(fixes), errors: errors.move(), repairs: if all -> repairs else -> jet_cli_safe_fixes(repairs), definitions: definitions.move()}
+    JetCLIFixQuery.Fixes{fixes: if all -> fixes else -> jet_cli_safe_fixes(fixes), errors: errors.move(), repairs: if all -> repairs else -> jet_cli_safe_fixes(repairs), definitions: definitions.move(), parse_error: parse_error.move()}
 }
 
 // The diagnostics of `failed` whose errors are new: by `fresh`, which marks
@@ -255,16 +276,6 @@ jet_cli_fix_error: fn(diagnostic: Diagnostic, canonical: String) -> String Never
     headline
 }
 
-// Whether the file table `files` holds the file `diagnostic` reports in.
-jet_cli_fix_names_file: fn(files: [JetCLIFixFile], diagnostic: Diagnostic) -> Bool Never! {
-    if diagnostic.origin == .Val(origin) {
-        loop other in files {
-            if other.path == origin.path && other.before != None -> return true
-        }
-    }
-    false
-}
-
 // The `.Tidy` findings a package lint raises (`meta.report`) when the entry
 // package's `build: fn` runs with `file` reading `source`, presented in
 // their files; none when the package has no build or it fails. A finding's
@@ -289,7 +300,7 @@ jet_cli_fix_build_findings: fn(file: String, source: String) -> [Diagnostic] {
 // (jet_cli_fix_collect); a file the compiler refuses is one error.
 jet_cli_fix_errors: fn(file: String, source: String, files: [JetCLIFixFile], texts: [String?], scope: String) -> [String] {
     if jet_cli_fix_collect(file, source, files, texts, false, scope) == {
-        .Fixes(_, errors, _, _) -> errors
+        .Fixes(_, errors, _, _, _) -> errors
         .Refused(_) -> [String]{"the compiler refused the edited file"}
     }
 }
@@ -482,7 +493,7 @@ jet_cli_fix_chain: fn(trial: ^JetCLIFixTrial, files: [JetCLIFixFile], fixes: [Je
     loop round <= JET_CLI_FIX_CHAIN_ROUNDS {
         if jet_cli_fix_collect(trial.file, source, files, first.texts, false, trial.scope, fresh_against: baseline) == {
             .Refused(_) -> return false
-            .Fixes(_, errors, repairs, _) -> {
+            .Fixes(_, errors, repairs, _, _) -> {
                 if jet_cli_fix_added(errors, baseline) == None {
                     chain: JetCLIFixApply{source: source.move(), applied: applied, deferred: trial.result.deferred, texts: first.texts.move(), fixes: first.fixes.move()}
                     if !jet_cli_fix_differs(chain, trial.result) -> return false
@@ -732,12 +743,14 @@ jet_cli_fix_run: fn(target: String, dry_run: Bool, all: Bool, markers: String, m
     ^baseline: [String]{}
     // The definition facts the write's rename receipt starts from.
     ^before_facts: [SemDefinitionFact]?{None}
-    if jet_cli_fix_collect(file, before, [JetCLIFixFile]{}, [String?]{}, true, scope, facts: !dry_run) == {
-        .Fixes(found, errors, repairs, definitions) -> {
+    ^parse_error: JetCLIFixParseError?{None}
+    if jet_cli_fix_collect(file, before, [JetCLIFixFile]{}, [String?]{}, true, scope, facts: !dry_run, color: color, parse_json: json) == {
+        .Fixes(found, errors, repairs, definitions, parsed) -> {
             all_fixes = found
             baseline = errors
             all_repairs = repairs
             before_facts = definitions
+            parse_error = parsed
         }
         .Refused(output) -> { return output }
     }
@@ -805,7 +818,7 @@ jet_cli_fix_run: fn(target: String, dry_run: Bool, all: Bool, markers: String, m
             ^round: 1
             loop round < 16 && (applied.deferred > 0 || held) {
                 next: if jet_cli_fix_collect(file, applied.source, files, [String?]{}, all, scope) == {
-                    .Fixes(found, _, repairs, _) -> jet_cli_fix_round(found, if stalled -> [JetCLIFix]{} else -> repairs, true)
+                    .Fixes(found, _, repairs, _, _) -> jet_cli_fix_round(found, if stalled -> [JetCLIFix]{} else -> repairs, true)
                     .Refused(output) -> {
                         return output
                     }
@@ -843,6 +856,12 @@ jet_cli_fix_run: fn(target: String, dry_run: Bool, all: Bool, markers: String, m
     }
     ^status: ""
     if applied.source == before && !jet_cli_fix_touched(files) {
+        if parse_error == .Val(parsed) {
+            if json {
+                return JetDriverVerbOutput{stdout: jet_cli_fix_status_failed(target, dry_run, 0, skips, parsed.reports), stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+            }
+            return JetDriverVerbOutput{stdout: "", stderr: "{rolled}{parsed.report}", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+        }
         if json {
             return JetDriverVerbOutput{stdout: jet_cli_fix_status(target, dry_run, 0, skips, None), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
         }
@@ -984,4 +1003,25 @@ jet_cli_fix_status: fn(file: String, dry_run: Bool, count: Int, skips: [JetCLIFi
         },
     )
     "{jet_cli_status_render("fix", true, [JetCLIStatusField]{jet_cli_status_field("fix", fix)})}\n"
+}
+
+jet_cli_fix_status_failed: fn(file: String, dry_run: Bool, count: Int, skips: [JetCLIFixSkip], reports: [String]) -> String Never! {
+    skipped: loop skip in skips -> jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("title", jet_cli_status_text(skip.title)),
+            jet_cli_status_field("reason", jet_cli_status_text(skip.reason)),
+            jet_cli_status_field("span", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("start", jet_cli_status_int(skip.edit.span.start)), jet_cli_status_field("end", jet_cli_status_int(skip.edit.span.end))})),
+            jet_cli_status_field("new_text", jet_cli_status_text(skip.edit.new_text)),
+        },
+    )
+    fix: jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("file", jet_cli_status_text(file)),
+            jet_cli_status_field("dry_run", jet_cli_status_bool(dry_run)),
+            jet_cli_status_field("applied", jet_cli_status_int(count)),
+            jet_cli_status_field("skipped", jet_cli_status_array(skipped)),
+            jet_cli_status_field("log", jet_cli_status_optional_text(None)),
+        },
+    )
+    "{jet_cli_status_render_with_reports("fix", false, reports, [JetCLIStatusField]{jet_cli_status_field("fix", fix)})}\n"
 }

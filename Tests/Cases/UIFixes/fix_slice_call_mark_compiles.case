@@ -1,0 +1,14 @@
+# The call-mark fix for a slice argument inserts `^` before the slice target
+# (`sort_part(xs[0..2])` -> `sort_part(^xs[0..2])`) so the fixed file compiles
+# and runs cleanly.
+fixture: FixSliceCallMarkCompiles.fixture
+env: NO_COLOR=1
+step fix: jet fix run.jet
+exit: 0
+stderr: ~ "applied 1 fix" # the slice call-mark edit is applied
+file: run.jet = fix_slice_call_mark_compiles.fixed
+step check: jet check run.jet
+exit: 0
+step run: jet run run.jet
+exit: 0
+stdout: = "9\n"

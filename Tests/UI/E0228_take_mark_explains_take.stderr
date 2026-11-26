@@ -1,0 +1,17 @@
+Error: Jet.CallMarkRequired: `^^` cannot mark a part of `st`
+  --> Tests/UI/E0228_take_mark_explains_take.jet:19:10
+    |
+ 19 |     seal(^^st.buf)
+    |          ^^
+ Why: `seal: fn(xs: ^^[Int])` takes this input, but a `^^` call mark applies only to a whole named value, not a field or indexed part
+ Fix: Remove `^^`, or write `.move()` on the part if you intend to move it out
+More: jet-lang.dev/e/Jet.CallMarkRequired
+
+Error: Jet.CallMarkRequired: `n` is a copied type, so `take_n` takes no `^^`
+  --> Tests/UI/E0228_take_mark_explains_take.jet:21:12
+    |
+ 21 |     take_n(^^n)
+    |            ^^
+ Why: `take_n: fn(n: ^^Int)` takes this input by value, which copies `n` instead of moving it, so `n` stays usable after the call
+ Fix: Remove the `^^`
+More: jet-lang.dev/e/Jet.CallMarkRequired

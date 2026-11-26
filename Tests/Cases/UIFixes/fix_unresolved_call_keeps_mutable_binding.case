@@ -1,0 +1,8 @@
+# `jet fix` must not drop `^` from a mutable binding while a call that may
+# mutate it is unresolved because of a missing parameter type.
+fixture: FixUnresolvedCallKeepsMutableBinding.fixture
+env: NO_COLOR=1
+step fix: jet fix run.jet
+exit: 0
+stderr: ~ "no changes made" # unresolved call prevents rewriting `^k` to `k`
+file: run.jet ~ "^k: 2" # mutable binding stays mutable
