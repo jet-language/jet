@@ -1,0 +1,327 @@
+use {
+    args: core.args
+    core.args.[CLIErrorReport]
+    core.archive.[ArchiveError]
+    core.auth.[AuthError]
+    core.crypto.[CryptoError, FileCryptoError]
+    core.crypto.uuid.[UUIDError]
+    core.data.[DataError, DataErrorKind]
+    core.db.[DBError]
+    core.encoding.[EncodingError, EncodingErrorKind, EncodingFormat, FormatError, HexError]
+    core.event.[EventConfigError]
+    files: core.files
+    core.git.[GitError]
+    core.http.[FormDecodeError, HTTPError, HTTPRequest]
+    core.http.server.[HTTPErrorRecord]
+    core.image.[ImageError]
+    core.jobs.[JobError]
+    core.mem.[AllocError]
+    core.mod.[ModError]
+    net: core.net
+    core.net.[NetError, NetErrorDetail]
+    core.net.mime.[MIMEError]
+    core.net.url.[URLError]
+    core.net.ws.[WsError]
+    core.regex.[RegexError]
+    core.service.[ServiceError, ToolErrorReport]
+    core.sys.[EnvError]
+    core.time.[TimeError]
+    web: core.web
+}
+
+SECRET_PATH: "/etc/jet-secret/prod-vault.key"
+SECRET_SQL: "SELECT api_secret FROM tenant_credentials WHERE id = 42"
+SECRET_HOST: "10.20.30.40:5432"
+
+assert_no_leaks: fn(label: String, text: String) Never! {
+    assert(!text.contains(SECRET_PATH), "{label} leaked file path: {text}")
+    assert(!text.contains("prod-vault.key"), "{label} leaked file name: {text}")
+    assert(!text.contains("SELECT"), "{label} leaked SQL: {text}")
+    assert(!text.contains("api_secret"), "{label} leaked secret column: {text}")
+    assert(!text.contains("tenant_credentials"), "{label} leaked table name: {text}")
+    assert(!text.contains(SECRET_HOST), "{label} leaked internal host: {text}")
+    assert(!text.contains("caused by:"), "{label} leaked cause chain: {text}")
+    assert(!text.contains("EACCES"), "{label} leaked OS error code: {text}")
+}
+
+raw_http_get: fn(addr: String, path: String) -[Net]> String NetError! {
+    stream: net.tcp_connect(addr)
+    crlf: "\r\n"
+    stream.write_bytes("GET {path} HTTP/1.1{crlf}Host: localhost{crlf}Connection: close{crlf}{crlf}".bytes())
+    ^parts: [String]{}
+    loop {
+        chunk: stream.read(8192)
+        if chunk == "" -> break
+        parts.push(chunk)
+    }
+    Ok(parts.join(""))
+}
+
+split_http_wire: fn(wire: String) -> {head: String, body: String} Never! {
+    sep: "\r\n\r\n"
+    found: wire.split_once(sep) ?? panic("missing HTTP header/body separator")
+    {head: found.before, body: found.after}
+}
+
+boom_page: fn() -> web.WebPage Err! {
+    inner_cause: Err("open {SECRET_PATH}: EACCES")
+    Err(Err("query {SECRET_SQL} on {SECRET_HOST} failed", code: "ERR_DB_500", cause: inner_cause))
+}
+
+prove_http_500: fn() -[FS.Read, Net, Time]> (HTTPError | NetError | TaskFailure)! {
+    captured: Shared{[HTTPErrorRecord]{}}
+    sink_ref: captured.copy()
+    app: web.app()
+    _: app.on_error(fn(rec: HTTPErrorRecord) {
+        ^guard: sink_ref.guard_edit()
+        guard.value.push(rec.copy())
+    })
+
+    io_op: "open {SECRET_PATH}: EACCES"
+    panic_msg: "panic at {SECRET_PATH} running {SECRET_SQL}"
+    _: app.get("/boom-http", fn(_req: HTTPRequest) {
+        Err(HTTPError.IO{operation: io_op.copy()})
+    })
+    _: app.route("/boom-page", boom_page)
+    _: app.get("/boom-panic", fn(_req: HTTPRequest) {
+        panic(panic_msg.copy())
+    })
+
+    listening: app.bind("127.0.0.1:0")
+    addr: listening.local_addr()
+    serving: task {
+        listening.serve() ?? panic("serve failed: {err}")
+    }
+
+    wire1: raw_http_get(addr, "/boom-http")
+    parts1: split_http_wire(wire1)
+    assert(parts1.head.starts_with("HTTP/1.1 500 "), "expected 500 status line: {parts1.head}")
+    assert_no_leaks("http /boom-http headers", parts1.head)
+    assert_no_leaks("http /boom-http body", parts1.body)
+    assert_eq(parts1.body, "Internal Server Error.")
+
+    wire2: raw_http_get(addr, "/boom-page")
+    parts2: split_http_wire(wire2)
+    assert(parts2.head.starts_with("HTTP/1.1 500 "), "expected 500 status line: {parts2.head}")
+    assert_no_leaks("http /boom-page headers", parts2.head)
+    assert_no_leaks("http /boom-page body", parts2.body)
+    assert(parts2.body.contains("Request failed (ERR_DB_500)."), "expected public message in /boom-page body: {parts2.body}")
+
+    wire3: raw_http_get(addr, "/boom-panic")
+    parts3: split_http_wire(wire3)
+    assert(parts3.head.starts_with("HTTP/1.1 500 "), "expected 500 status line: {parts3.head}")
+    assert_no_leaks("http /boom-panic headers", parts3.head)
+    assert_no_leaks("http /boom-panic body", parts3.body)
+    assert_eq(parts3.body, "An internal error occurred.")
+
+    _: listening.shutdown(grace: 2s)
+    _: serving.join()
+
+    records: app.error_records()
+    assert_eq(records.len(), 3)
+    assert_eq(records[0].status, 500)
+    assert_eq(records[0].path, "/boom-http")
+    assert_eq(records[0].public_message, "Internal Server Error.")
+    assert(records[0].detail.contains(SECRET_PATH), "operator record 0 missing path")
+    assert(records[0].detail.contains("EACCES"), "operator record 0 missing OS code")
+
+    assert_eq(records[1].status, 500)
+    assert_eq(records[1].path, "/boom-page")
+    assert_eq(records[1].public_message, "Request failed (ERR_DB_500).")
+    assert(records[1].detail.contains("[ERR_DB_500]"), "operator record 1 missing code")
+    assert(records[1].detail.contains(SECRET_SQL), "operator record 1 missing SQL")
+    assert(records[1].detail.contains(SECRET_HOST), "operator record 1 missing host")
+    assert(records[1].detail.contains("caused by:"), "operator record 1 missing cause chain")
+    assert(records[1].detail.contains(SECRET_PATH), "operator record 1 missing cause path")
+
+    assert_eq(records[2].status, 500)
+    assert_eq(records[2].path, "/boom-panic")
+    assert_eq(records[2].public_message, "An internal error occurred.")
+    assert(records[2].detail.contains(SECRET_PATH), "operator record 2 missing panic path")
+    assert(records[2].detail.contains(SECRET_SQL), "operator record 2 missing panic SQL")
+
+    sink_guard: captured.guard_read()
+    assert_eq(sink_guard.value.len(), 3)
+    assert_eq(sink_guard.value[1].detail, records[1].detail)
+    Ok()
+}
+
+prove_jobs_boundary: fn() Never! {
+    cause: Err("open {SECRET_PATH}: EACCES")
+    wrapped: Err("query {SECRET_SQL} failed", code: "ERR_JOB_500", cause: cause)
+    job_err: JobError.from_describe("SyncJobError", wrapped)
+    assert_eq(job_err.type_id, "SyncJobError")
+    assert_eq(job_err.reason, "Request failed (ERR_JOB_500).")
+    assert_no_leaks("JobError.reason", job_err.reason)
+    op_detail: job_err.detail ?? panic("missing JobError.detail")
+    assert(op_detail.contains("[ERR_JOB_500]"), "job operator detail missing code")
+    assert(op_detail.contains(SECRET_SQL), "job operator detail missing SQL")
+    assert(op_detail.contains("caused by:"), "job operator detail missing cause chain")
+    assert(op_detail.contains(SECRET_PATH), "job operator detail missing cause path")
+
+    db_job_err: JobError.from_describe("DBError", DBError.Failed("{SECRET_SQL} at {SECRET_PATH}"))
+    assert_no_leaks("DBError JobError.reason", db_job_err.reason)
+    db_detail: db_job_err.detail ?? panic("missing DBError JobError.detail")
+    assert(db_detail.contains(SECRET_SQL), "DBError job detail missing SQL")
+}
+
+prove_cli_and_mcp_boundaries: fn() Never! {
+    cause: Err("open {SECRET_PATH}: EACCES")
+    wrapped: Err("query {SECRET_SQL} on {SECRET_HOST}", code: "ERR_BOUNDARY", cause: cause)
+
+    cli_rep: CLIErrorReport.from_error(wrapped)
+    assert_eq(cli_rep.exit_code, 1)
+    assert_eq(cli_rep.public_message, "Request failed (ERR_BOUNDARY).")
+    assert_no_leaks("CLIErrorReport.public_message", cli_rep.public_message)
+    assert(cli_rep.detail.contains(SECRET_SQL))
+    assert(cli_rep.detail.contains("caused by:"))
+    assert(cli_rep.detail.contains(SECRET_PATH))
+
+    spec_rep: args.spec().report_error(wrapped, 1)
+    assert_eq(spec_rep.public_message, "Request failed (ERR_BOUNDARY).")
+    assert_no_leaks("ArgsSpec.report_error.public_message", spec_rep.public_message)
+
+    tool_rep: ToolErrorReport.from_error("query_secrets", wrapped)
+    assert(tool_rep.is_error)
+    assert_eq(tool_rep.public_content, "Request failed (ERR_BOUNDARY).")
+    assert_no_leaks("ToolErrorReport.public_content", tool_rep.public_content)
+    caller_wire: tool_rep.caller_json()
+    assert_eq(caller_wire, "{{\"isError\":true,\"content\":[{{\"type\":\"text\",\"text\":\"Request failed (ERR_BOUNDARY).\"}}]}}")
+    assert_no_leaks("ToolErrorReport.caller_json", caller_wire)
+    assert(tool_rep.operator_detail.contains(SECRET_SQL))
+    assert(tool_rep.operator_detail.contains("caused by:"))
+    assert(tool_rep.operator_detail.contains(SECRET_PATH))
+}
+
+prove_core_errors: fn() -[FS.Read]> Never! {
+    // Untyped Err with unsafe path stuffed into code:
+    bad_code: Err("open {SECRET_PATH}: EACCES", code: SECRET_PATH)
+    assert_eq(bad_code.public(), "An internal error occurred.")
+    assert_no_leaks("Err(unsafe code).public()", bad_code.public())
+    assert(bad_code.detail().contains(SECRET_PATH))
+
+    // Real IOError from missing secret path implementing Describe directly
+    if files.read(SECRET_PATH) == {
+        .Ok(_) -> panic("unexpected read of secret path")
+        .Err(io_err) -> {
+            assert_no_leaks("IOError.public()", io_err.public())
+            assert(io_err.detail().contains(SECRET_PATH), "IOError.detail() missing path: {io_err.detail()}")
+            io_cli: CLIErrorReport.from_error(io_err)
+            assert_no_leaks("CLIErrorReport(IOError).public_message", io_cli.public_message)
+            assert(io_cli.detail.contains(SECRET_PATH), "CLIErrorReport(IOError).detail missing path")
+        }
+    }
+
+    // Real UTF8Error from invalid bytes implementing Describe directly
+    if String.from_bytes([U8]{255, 254}) == {
+        .Ok(_) -> panic("unexpected UTF-8 decode of invalid bytes")
+        .Err(utf8_err) -> {
+            assert_eq(utf8_err.public(), "Invalid UTF-8 text.")
+            assert(utf8_err.detail().len() > 0)
+        }
+    }
+
+    // RangeError (ambient runtime error implementing Describe directly)
+    if Duration.seconds(9223372036854775807) == {
+        .Ok(_) -> panic("unexpected overflowing duration")
+        .Err(range_err) -> {
+            assert_no_leaks("RangeError.public()", range_err.public())
+            assert(range_err.detail().len() > 0)
+        }
+    }
+
+    // DBError
+    db_err: DBError.Failed("{SECRET_SQL} at {SECRET_PATH}")
+    assert_no_leaks("DBError.public()", db_err.public())
+    assert(db_err.detail().contains(SECRET_SQL))
+
+    // HTTPError
+    http_err: HTTPError.Connect{address: SECRET_HOST}
+    assert_no_leaks("HTTPError.public()", http_err.public())
+    assert(http_err.detail().contains(SECRET_HOST))
+
+    // NetError
+    net_err: NetError.ConnectionRefused(NetErrorDetail{operation: "connect", address: SECRET_HOST, name: "", message: "refused", os_code: Val(111)})
+    assert_no_leaks("NetError.public()", net_err.public())
+    assert(net_err.detail().contains(SECRET_HOST))
+
+    // AuthError
+    auth_err: AuthError.WrongAudience{expected: "internal-api-{SECRET_HOST}", actual: "public"}
+    assert_no_leaks("AuthError.public()", auth_err.public())
+    assert(auth_err.detail().contains(SECRET_HOST))
+
+    // ServiceError
+    svc_err: ServiceError.Revoked("worker at {SECRET_HOST} revoked")
+    assert_no_leaks("ServiceError.public()", svc_err.public())
+    assert(svc_err.detail().contains(SECRET_HOST))
+
+    // Core-declared DataError, ImageError, EventConfigError
+    data_err: DataError{kind: DataErrorKind.Decode, operation: "select", row: Val(1), column: Val(2), index: None, reason: SECRET_SQL, cause: None}
+    assert_no_leaks("DataError.public()", data_err.public())
+    assert(data_err.detail().contains(SECRET_SQL))
+
+    assert(ImageError.Malformed.public().len() > 0)
+    assert(EventConfigError.InvalidCapacity.public().len() > 0)
+
+    // TaskFailure
+    tf: TaskFailure.Panicked("panic at {SECRET_PATH}: {SECRET_SQL}")
+    assert_no_leaks("TaskFailure.public()", tf.public())
+    assert(tf.detail().contains(SECRET_PATH))
+
+    // ParseError
+    if Int.parse("secret-token-{SECRET_PATH}") == {
+        .Ok(_) -> panic("unexpected int parse")
+        .Err(pe) -> {
+            assert_no_leaks("ParseError.public()", pe.public())
+            assert(pe.detail().contains(SECRET_PATH))
+        }
+    }
+
+    // EncodingError, FormatError, HexError
+    enc_err: EncodingError.new(EncodingFormat.JSON, EncodingErrorKind.Syntax, 12, Val(1), Val(13), SECRET_PATH, SECRET_SQL)
+    assert_no_leaks("EncodingError.public()", enc_err.public())
+    assert(enc_err.detail().contains(SECRET_PATH))
+    fmt_err: FormatError{format: "json", reason: SECRET_SQL}
+    assert_no_leaks("FormatError.public()", fmt_err.public())
+    assert(fmt_err.detail().contains(SECRET_SQL))
+    hex_err: HexError.new("bad byte at {SECRET_PATH}")
+    assert_no_leaks("HexError.public()", hex_err.public())
+
+    // AllocError, RegexError, TimeError, EnvError, URLError, MIMEError, WsError, ArchiveError, CryptoError, UUIDError, ModError, GitError, FormDecodeError
+    alloc_err: AllocError{requested_bytes: 999999999, allocator: SECRET_PATH}
+    assert_no_leaks("AllocError.public()", alloc_err.public())
+    assert(!alloc_err.public().contains("999999999"))
+    assert(alloc_err.detail().contains("999999999"))
+
+    rx_err: RegexError{offset: 4, reason: SECRET_SQL}
+    assert_no_leaks("RegexError.public()", rx_err.public())
+    tm_err: TimeError.new(SECRET_PATH)
+    assert_no_leaks("TimeError.public()", tm_err.public())
+    assert(EnvError.InvalidName.public().len() > 0)
+    assert(URLError.Syntax.public().len() > 0)
+    assert(MIMEError.Syntax.public().len() > 0)
+    ws_err: WsError.IO{operation: SECRET_PATH}
+    assert_no_leaks("WsError.public()", ws_err.public())
+    assert(ArchiveError.Checksum.public().len() > 0)
+    assert(CryptoError.VerifyFailed.public().len() > 0)
+    assert(FileCryptoError.OpenFailed.public().len() > 0)
+    uuid_err: UUIDError{reason: SECRET_PATH}
+    assert_no_leaks("UUIDError.public()", uuid_err.public())
+    mod_err: ModError.NotFound(SECRET_PATH)
+    assert_no_leaks("ModError.public()", mod_err.public())
+    assert(GitError.NoApply.public().len() > 0)
+    assert(FormDecodeError.Escape.public().len() > 0)
+}
+
+run: fn() (HTTPError | IOError | NetError | ServiceError | TaskFailure)! {
+    prove_http_500()
+    print("http_500_ok")
+    prove_jobs_boundary()
+    print("jobs_ok")
+    prove_cli_and_mcp_boundaries()
+    print("cli_ok")
+    print("mcp_ok")
+    prove_core_errors()
+    print("core_errors_ok")
+    Ok()
+}

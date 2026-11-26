@@ -2,6 +2,7 @@
 // cursor handle operations. The backend owns the fixed ABI routes;
 // this module checks their public types, ownership, and effects.
 use jet_foundation.[
+    AST_NODE_GENERATED,
     BodyHandleOp,
     AccessConvention,
     Call,
@@ -10,11 +11,14 @@ use jet_foundation.[
     EffectRowEntry,
     Expr,
     FunctionDefaultRef,
+    InternalTag,
     NodeKind,
     ParamZone,
     Span,
     SymbolKind,
+    TERMINAL_FACTS,
     TMethodRef,
+    TagMarker,
     Type,
     TypeTupleField,
     UnOp,
@@ -392,8 +396,145 @@ sema_stream_handle_lines_value: fn(receiver: TExpr, owner: String, span: Span, e
     SemaMethodSpecialCheck{handled: true, value: Val(checked)}
 }
 
+sema_stream_handle_receiver_leaf: fn(ty: Type) -> String Never! {
+    if ty == {
+        .Named(name) -> name
+        .Tagged(_, inner) -> sema_stream_handle_receiver_leaf(inner)
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> ""
+    }
+}
+
+// A child's `terminal` is optional: its session methods need the handle
+// unwrapped first (E0311).
+sema_stream_handle_terminal_resize: fn(receiver_value: TExpr, args: [CallArg], span: Span, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
+    if receiver_value.ty == .Option(inner) && sema_stream_handle_receiver_leaf(inner) == "TerminalSession" {
+        check.diagnostics.push(sema_error("E0311", span, "`.resize()` needs `TerminalSession`, not `TerminalSession?`", "a child has a terminal session only when a terminal-backed launch succeeds", "unwrap the optional handle first, then call `session.resize(size)`"))
+        sema_stream_handle_infer_args(args, check)
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    SemaMethodSpecialCheck{handled: false, value: None}
+}
+
+sema_stream_handle_process_spec_keep_open: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
+    rejected: SemaMethodSpecialCheck{handled: true, value: None}
+    if args.len() != 1 && args.len() != 2 {
+        check.diagnostics.push(sema_error("E0104", span, "`keep_open` expects 1 or 2 arguments, got {args.len()}", "`keep_open(handle)` keeps the handle at its own descriptor number; `keep_open(handle, at: slot)` keeps it at `slot`", "pass the handle, then optionally `at:` and a descriptor slot"))
+        sema_stream_handle_infer_args(args, check)
+        return rejected
+    }
+    loop (index, argument) in args {
+        if argument.label == .Val(label) {
+            if index == 1 && label.name == "at" -> next
+            check.diagnostics.push(sema_error("E0764", label.span, "`ProcessSpec.keep_open` has no parameter labeled `{label.name}`", "a label binds an argument to the parameter of that name", "pass the handle without a label, then the slot as `at:`"))
+            sema_stream_handle_infer_args(args, check)
+            return rejected
+        }
+    }
+    if sema_call_core_no_os_refused(check, "core.files", "keep_open", span) -> return rejected
+    target: sema_call_core_role_target("ProcessSpecKeepOpen", [Type]{}, span, check.environment.*, check.program.*, check.diagnostics) ?? {
+        check.context.incomplete_reasons.push("ProcessSpec.keep_open must resolve its canonical Jet source body")
+        return rejected
+    }
+    params: if target.signature == {
+        .Fn(params, _, _, _, _, _) -> params
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {
+            check.context.incomplete_reasons.push("ProcessSpec.keep_open's source body has a function type")
+            return rejected
+        }
+    }
+    handle_type: sema_call_resolved_type(params[1], check.environment.*, check.program.*)
+    slot_type: sema_call_resolved_type(params[2], check.environment.*, check.program.*)
+    handle_checked: sema_check_expression(args[0].expr, Val(handle_type), check) ?? return rejected
+    handle_value: sema_expr_expected_owned(handle_checked, Val(handle_type), check.environment.*, check.program.*, check.diagnostics) ?? return rejected
+    slot_expr: if args.len() == 2 -> args[1].expr else -> Expr.Absent{span: span, id: AST_NODE_GENERATED}
+    slot_checked: sema_check_expression(slot_expr, Val(slot_type), check) ?? return rejected
+    slot_value: sema_expr_expected_owned(slot_checked, Val(slot_type), check.environment.*, check.program.*, check.diagnostics) ?? return rejected
+    ^taken: sema_call_marked_move_place(args[0].expr, handle_value)
+    if taken && sema_ownership_binding_for_expr(check.state, args[0].expr, check.scopes) == .Val(root) {
+        taken = !sema_ownership_binding_is_borrowed_param(root)
+    }
+    stored: sema_call_marked_move_value(check, taken, args[0].expr, handle_value) ?? return rejected
+    ^updated_args: args
+    ^call_params: [SemaCallParam]{sema_stream_handle_param("arg0", handle_type, AccessConvention.Move)}
+    if args.len() == 2 {
+        call_params.push(sema_stream_handle_param("arg1", slot_type, AccessConvention.Read))
+    }
+    ^ownership: sema_ownership_check_method_call(check, "ProcessSpec.keep_open", receiver, AccessConvention.Move, call_params, updated_args, span)
+    if !ownership.accepted || !ownership.complete -> return rejected
+    result: Type.Named{name: "ProcessSpec"}
+    if !sema_stream_handle_effect_fact(check, "ProcessSpec.keep_open", span, result, "FS") {
+        return rejected
+    }
+    callee: sema_call_callee_decl(check.program.*, target.symbol.id, span, check.diagnostics) ?? return rejected
+    ^handle_arg: sema_value_method_source_arg(stored)
+    handle_arg.widen_to_union = sema_call_widen_union(handle_type, stored.ty)
+    ^value: sema_tree_node(result, TExprKind.Call{callee: callee, type_args: [Type]{}, args: [TCallArg]{sema_value_method_source_arg(receiver_value), handle_arg, sema_value_method_source_arg(slot_value)}}, span)
+    SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, check)}
+}
+
+sema_stream_handle_process_spec_abilities: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
+    rejected: SemaMethodSpecialCheck{handled: true, value: None}
+    if args.len() != 0 {
+        check.diagnostics.push(sema_call_core_arity_diagnostic("abilities", 0, args.len(), span))
+        sema_stream_handle_infer_args(args, check)
+        return rejected
+    }
+    ^updated_args: args
+    ^ownership: sema_ownership_check_method_call(check, "ProcessSpec.abilities", receiver, AccessConvention.Read, [SemaCallParam]{}, updated_args, span)
+    if !ownership.accepted || !ownership.complete -> return rejected
+    result: Type.Tagged{marker: TagMarker.Internal{internal_tag: InternalTag.TerminalFactSet}, inner: Type.Apply{name: "Set", args: [Type]{Type.String}}}
+    if !sema_stream_handle_effect_fact(check, "ProcessSpec.abilities", span, result, "") {
+        return rejected
+    }
+    filler: sema_core_role_function(check.program.registration_graph, "ProcessSpecAbilities") ?? {
+        check.diagnostics.push(sema_missing_core_role("ProcessSpecAbilities", span))
+        return rejected
+    }
+    target: sema_call_core_source_target(check.environment.*, check.program.*, filler.module_identity, filler.name, [Type]{}, span, true, check.diagnostics) ?? {
+        check.context.incomplete_reasons.push("ProcessSpec.abilities must resolve its canonical Jet source body")
+        return rejected
+    }
+    callee: sema_call_callee_decl(check.program.*, target.symbol.id, span, check.diagnostics) ?? return rejected
+    value: sema_tree_node(result, TExprKind.Call{callee: callee, type_args: [Type]{}, args: [TCallArg]{sema_value_method_source_arg(receiver_value)}}, span)
+    SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, check)}
+}
+
 // Called before ordinary method lookup for canonical Core handle types.
 sema_call_try_stream_handle_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
+    // A string key one or two edits from a stable terminal fact is a typo of
+    // that fact; any other string key stays an open preview fact.
+    if method == "has" && args.len() == 1 && receiver_value.ty == .Tagged(marker, _) && marker == (TagMarker.Internal{internal_tag: InternalTag.TerminalFactSet}) {
+        if args[0].expr == .Str(parts, key_span, _) && parts.len() == 1 && parts[0] == .Lit(key) {
+            if sema_suggest_field(key, TERMINAL_FACTS) == .Val(fact) {
+                check.diagnostics.push(sema_error("E0302", key_span, "terminal fact key `{key}` looks like `{fact}`", "preview string keys stay open, but close spellings of stable facts are probably typos", "write `TerminalFact.{fact}`"))
+                sema_stream_handle_infer_args(args, check)
+                return SemaMethodSpecialCheck{handled: true, value: None}
+            }
+        }
+    }
+    leaf: sema_stream_handle_receiver_leaf(receiver_value.ty)
+    if leaf == "ProcessSpec" {
+        if method == "keep_open" {
+            return sema_stream_handle_process_spec_keep_open(receiver, receiver_value, args, span, expected, check)
+        }
+        if method == "abilities" {
+            return sema_stream_handle_process_spec_abilities(receiver, receiver_value, args, span, expected, check)
+        }
+    }
+    if (leaf == "ProcessStdoutStream" || leaf == "ProcessStderrStream") && method == "lines" {
+        if args.len() != 0 {
+            check.diagnostics.push(sema_call_core_arity_diagnostic(method, 0, args.len(), span))
+            sema_stream_handle_infer_args(args, check)
+            return SemaMethodSpecialCheck{handled: true, value: None}
+        }
+        api: "{leaf}.lines"
+        ^updated_args: args
+        ^ownership: sema_ownership_check_method_call(check, api, receiver, AccessConvention.Read, [SemaCallParam]{}, updated_args, span)
+        if !ownership.accepted || !ownership.complete {
+            return SemaMethodSpecialCheck{handled: true, value: None}
+        }
+        return sema_stream_handle_finish(receiver_value, BodyHandleOp.ProcessLines, [TExpr]{}, Type.Named{name: "ProcessLines"}, "Exec", api, span, expected, check)
+    }
     source_lines: sema_stream_handle_source_lines_owner(receiver_value.ty, method)
     ^owner: source_lines ?? ""
     if source_lines == None {

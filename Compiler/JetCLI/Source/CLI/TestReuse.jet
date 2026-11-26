@@ -75,7 +75,7 @@ JetCLITestReuseHow: enum {
 // `reuse` has them and its reads are unchanged, else a run whose reads are
 // logged for jet_cli_test_reuse_keep. No `reuse` runs the tests plainly. A
 // records file the run can't create, write or read sets `fault`.
-jet_cli_test_reuse_run: fn(reuse: JetCLITestReuse?, how: ^JetCLITestReuseHow, spec: ProcessSpec, tests: [JetNativeTestCase], check_names: [String], unrun_check_report: fn() -> String Never!, serial: Bool, records_path: String, time_limit: Duration?, fault: ^JetNativeTestRecordsFault?) -> JetNativeTestOutcomes Err! {
+jet_cli_test_reuse_run: fn(reuse: JetCLITestReuse?, how: ^JetCLITestReuseHow, spec: ^^ProcessSpec, tests: [JetNativeTestCase], check_names: [String], unrun_check_report: fn() -> String Never!, serial: Bool, records_path: String, time_limit: Duration?, fault: ^JetNativeTestRecordsFault?) -> JetNativeTestOutcomes Err! {
     if reuse == .Val(store) {
         if jet_cli_test_reuse_lookup(store) == .Val(kept) {
             how = .Reused

@@ -264,11 +264,43 @@ store_nix_cas_validate_platform: fn(value: String) StoreError! {
     }
 }
 
+// Select the Hangar entry to export as a Nix CAS bundle. Exact entry ids win
+// immediately; when `target` is a shared output digest, reference, or
+// `name@version`, prefer an index-backed Nix realization entry carrying
+// `nix.index.revision` and `nix.cache.key` over raw cache-admission entries
+// that share the same output hash.
+store_nix_cas_select_entry_unlocked: fn(verification: StoreVerification, roots: HangarRoots, target: String) -> StoreEntry StoreError! {
+    store_migrate_closure_graph_unlocked(verification, roots)
+    entries: store_list_unlocked(roots)
+    loop entry in entries {
+        if entry.id == target -> return Ok(entry)
+    }
+    ^fallback: StoreEntry?{None}
+    loop entry in entries {
+        if entry.reference == target || entry.envelope.output_hash == target || "{entry.name}@{entry.version}" == target {
+            if store_nix_cas_entry_has_locked_facts(entry) -> return Ok(entry)
+            if fallback == {
+                .None -> { fallback = Val(entry) }
+                .Val(_) -> {}
+            }
+        }
+    }
+    if fallback == {
+        .Val(entry) -> Ok(entry)
+        .None -> Err(StoreError.InvalidData("no Hangar entry matches `{target}`"))
+    }
+}
+
+store_nix_cas_entry_has_locked_facts: fn(entry: StoreEntry) -> Bool Never! {
+    producer: ProducerRecord.decode(entry.producer_record) ?? return false
+    producer.provider == "nix" && producer.facts.has_key("nix.index.revision") && producer.facts.has_key("nix.cache.key")
+}
+
 // Build the bundle for a Nix-produced entry: its metadata-free closure
 // objects, rooted at the output digest, with a manifest built from the
 // closure graph and the producer's locked index facts.
 store_nix_cas_build_unlocked: fn(verification: StoreVerification, roots: HangarRoots, target: String) -> HangarArchive StoreError! {
-    entry: store_archive_select_entry_unlocked(verification, roots, target)
+    entry: store_nix_cas_select_entry_unlocked(verification, roots, target)
     producer: ProducerRecord.decode(entry.producer_record) ?? return Err(StoreError.InvalidData("Nix CAS export has invalid producer record: {err.message()}"))
     if producer.provider != "nix" {
         return Err(StoreError.InvalidData("Nix CAS export requires a Nix producer record; generic Hangar entries use generic archives"))
@@ -287,7 +319,7 @@ store_nix_cas_build_unlocked: fn(verification: StoreVerification, roots: HangarR
     }
     graph: store_closure_graph_structure_unlocked(verification, roots)
     root_digest: entry.envelope.output_hash
-    full: store_archive_build_unlocked(verification, roots, target, true, true)
+    full: store_archive_build_unlocked(verification, roots, entry.id, true, true)
     ^objects: [HangarArchiveObject]{}
     ^has_output: false
     loop object in full.objects {

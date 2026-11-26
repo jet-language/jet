@@ -32,6 +32,26 @@ ModError: enum {
     NotFound(String),
     Invalid(String),
     Unsupported(String),
+
+    impl Describe {
+        public: fn(self) -> String Never! {
+            if self == {
+                .Denied(_) -> "Module access denied."
+                .NotFound(_) -> "Module not found."
+                .Invalid(_) -> "Invalid module."
+                .Unsupported(_) -> "Unsupported module operation."
+            }
+        }
+
+        detail: fn(self) -> String Never! {
+            if self == {
+                .Denied(reason) -> "module denied: {reason}"
+                .NotFound(reason) -> "module not found: {reason}"
+                .Invalid(reason) -> "module invalid: {reason}"
+                .Unsupported(reason) -> "module unsupported: {reason}"
+            }
+        }
+    }
 }
 
 priv LoadContext: struct {

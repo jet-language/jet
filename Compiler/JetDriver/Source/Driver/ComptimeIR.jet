@@ -101,7 +101,9 @@ JetDriverInvocationRun: struct {
 jet_driver_invocation_run: fn(inputs: ^^JetDriverLoweringInputs, args: [TComptimeValue], config: JetEvalConfig, span: Span) -> JetDriverInvocationRun {
     ^checked: inputs.move()
     ^keys: [String]{}
-    if checked.entry_key == .Val(key) -> keys.push(key.copy())
+    entry_key: checked.entry_key.move()
+    checked.entry_key = None
+    if entry_key == .Val(key) -> keys.push(key)
     if keys.len() == 0 {
         return JetDriverInvocationRun{result: None, problem: Val("the checked invocation lost its entry function")}
     }

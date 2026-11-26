@@ -368,7 +368,6 @@ sema_call_try_builtin_collections: fn(receiver: Expr, receiver_value: TExpr, met
             comparator = true
             required = sema_collection_method_argument_type(contract, index, seed, true) ?? required
         }
-        required_types.push(required.copy())
         // A slot the row stores owns what it receives (#6611,
         // collection_row_takes_argument), so an unmarked name there is the
         // call's take exactly as at a `^^` parameter (Calls/Checking.jet): a
@@ -385,6 +384,7 @@ sema_call_try_builtin_collections: fn(receiver: Expr, receiver_value: TExpr, met
                 noted_take = true
             } else { updated_args[index].convention = AccessConvention.Move }
         }
+        required_types.push(required)
         // A taken argument keeps the exact-place move an ordinary consuming
         // argument gets, so the stored value moves out of its owner instead
         // of materializing a copy. A bare name of a read parameter is reported
@@ -547,12 +547,11 @@ sema_call_try_builtin_collections: fn(receiver: Expr, receiver_value: TExpr, met
 sema_call_set_bits_ready: fn(element: Type, callee: String, span: Span, check: ^SemaBodyCheck) -> Bool {
     element_name: type_name(element)
     refused: sema_error("E1133", span, "`{callee}` needs a Set stored as bits, and `Set<{element_name}>` is not one", "only a Set of an enum with 1 to 64 cases, no payloads and no type parameters is stored as one bit per case", "use such an enum as the element, or read the Set with `to_list()`")
-    named: if element == .Named(name) -> name.copy() else -> ""
-    definition: sema_serde_type_definition(check.environment.*, check.program.*, named) ?? {
+    definition: (if element == .Named(name) && name != "" -> sema_serde_type_definition(check.environment.*, check.program.*, name) else -> None) ?? {
         check.diagnostics.push(refused)
         return false
     }
-    ^ready: named != "" && definition.generic_params.len() == 0
+    ^ready: definition.generic_params.len() == 0
     if definition.kind == .Enum(variants, _) {
         if variants.len() == 0 || variants.len() > 64 -> ready = false
         loop variant in variants {

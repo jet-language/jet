@@ -3447,7 +3447,7 @@ jet_cli_test_result: fn(file: String, source: String, doctests: [JetCLIDoctestFi
     }
     ^how: JetCLITestReuseHow.Plain
     ^records_fault: JetNativeTestRecordsFault?{None}
-    run: jet_cli_test_reuse_run(reuse, how, spec, native_tests, check_names, jet_cli_native_test_unrun_check_report, options.serial, records_path, time_limit, records_fault) ?? {
+    run: jet_cli_test_reuse_run(reuse, how, spec.copy(), native_tests, check_names, jet_cli_native_test_unrun_check_report, options.serial, records_path, time_limit, records_fault) ?? {
         cli_files.remove(binary).drop("the native run already failed")
         if coverage -> cli_files.remove(coverage_path).drop("the native run already failed")
         if records_fault == .Val(fault) -> return jet_cli_test_records_failed(fault, color)
@@ -3470,7 +3470,10 @@ jet_cli_test_result: fn(file: String, source: String, doctests: [JetCLIDoctestFi
                 cli_files.remove(binary).drop("the native run already failed")
                 return jet_cli_ice(err.message)
             }
-            if mismatches.len() > 0 -> claims[index].mismatch = Val(mismatches[0].copy())
+            if mismatches.len() > 0 {
+                mismatches.reverse()
+                if mismatches.pop() == .Val(mismatch) -> claims[index].mismatch = Val(mismatch)
+            }
         }
         if rewrites.len() > 0 {
             cli_files.write(doctest_file.path, jet_cli_doctest_rewrite(doctest_file.source, rewrites)) ?? {

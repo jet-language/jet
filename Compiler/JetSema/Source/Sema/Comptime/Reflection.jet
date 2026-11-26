@@ -2802,15 +2802,18 @@ sema_comptime_reflection_binding_infos: fn(registration: SemaRegistrationGraph, 
 }
 
 // Record `info` with field `name` holding `value` instead.
-sema_comptime_reflection_with_field: fn(info: TComptimeValue, name: String, value: TComptimeValue) -> TComptimeValue Never! {
+sema_comptime_reflection_with_field: fn(info: ^^TComptimeValue, name: String, value: ^^TComptimeValue) -> TComptimeValue Never! {
     if info == .Struct(record, fields) {
-        // copy: the new record owns its fields; `info` keeps its own, and `value` fills the one named field.
-        replaced: loop field in fields -> TComptimeField{name: field.name.copy(), value: if field.name == name -> value.copy() else -> field.value.copy()}
-        // copy: the new record owns its type name.
-        return TComptimeValue.Struct{type_name: record.copy(), fields: replaced}
+        ^updated: fields
+        loop index in 0..<updated.len() {
+            if updated[index].name == name {
+                updated[index].value = value
+                break
+            }
+        }
+        return TComptimeValue.Struct{type_name: record, fields: updated}
     }
-    // copy: a value that is no record has no field to replace.
-    info.copy()
+    info
 }
 
 // CallableSignature `signature` with the specialization `bindings` it was
@@ -3038,7 +3041,7 @@ sema_comptime_reflection_trait_contracts_from_items: fn(
                     duplicate: loop current in contracts {
                         matched: if current == {
                             .Struct(_, fields) -> (loop field in fields {
-                                if field.name == "name" && field.value == (TComptimeValue.String{value: trait_name.copy()}) {
+                                if field.name == "name" && field.value == .String(existing_name) && existing_name == trait_name {
                                     break true
                                 }
                             } ?? false)

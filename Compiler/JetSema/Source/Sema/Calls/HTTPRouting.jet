@@ -337,7 +337,6 @@ sema_http_route_path_fields: fn(pattern: String) -> [SemaHTTPRoutePathField]? {
     if !pattern.starts_with("/") -> return None
     ^segments: pattern.split("/").to_list()
     if segments.len() < 2 -> return None
-    ^names: [String]{}
     ^fields: [SemaHTTPRoutePathField]{}
     loop index in 1..<segments.len() {
         ^segment: segments[index]
@@ -353,10 +352,9 @@ sema_http_route_path_fields: fn(pattern: String) -> [SemaHTTPRoutePathField]? {
                 if catch_all && index != segments.len() - 1 -> return None
                 ^field_name: String.from_bytes(segment.bytes().slice(1, segment.bytes().len())) ?? return None
                 if !sema_http_route_name_is_valid(field_name) -> return None
-                loop existing in names {
-                    if existing == field_name -> return None
+                loop existing in fields {
+                    if existing.name == field_name -> return None
                 }
-                names.push(field_name.copy())
                 fields.push(SemaHTTPRoutePathField{name: field_name, catch_all: catch_all})
             }
             else -> {
@@ -473,26 +471,32 @@ sema_http_route_json_quote: fn(value: String) -> String Never! {
 // The JSON schema of `ty` as module `module_identity` names it; generic
 // parameters are `check.environment`'s.
 sema_http_route_schema_type: fn(ty: Type, check: SemaBodyCheck, module_identity: ModuleID, active: [SymbolID]) -> String? {
+    ^stack: [U32]{}
+    loop previous in active -> stack.push(previous.id)
+    sema_http_route_schema_type_in(ty, check, module_identity, stack)
+}
+
+priv sema_http_route_schema_type_in: fn(ty: Type, check: SemaBodyCheck, module_identity: ModuleID, active: ^[U32]) -> String? {
     if ty == {
         .Int | .IntN(_, _) -> return Val("{{\"type\":\"integer\",\"format\":\"int64\"}}")
         .Float | .Float32 -> return Val("{{\"type\":\"number\",\"format\":\"double\"}}")
         .Bool -> return Val("{{\"type\":\"boolean\"}}")
         .String | .Char -> return Val("{{\"type\":\"string\"}}")
         .List(inner) | .FixedList(inner, _) -> {
-            item: sema_http_route_schema_type(inner, check, module_identity, active) ?? return None
+            item: sema_http_route_schema_type_in(inner, check, module_identity, active) ?? return None
             return Val("{{\"type\":\"array\",\"items\":{item}}}")
         }
         .Option(inner) -> {
-            item: sema_http_route_schema_type(inner, check, module_identity, active) ?? return None
+            item: sema_http_route_schema_type_in(inner, check, module_identity, active) ?? return None
             return Val("{{\"anyOf\":[{item},{{\"type\":\"null\"}}]}}")
         }
-        .Result(ok, _) | .Shared(ok) | .Tagged(_, ok) | .Case(_, ok) | .Quantity(ok, _) | .InlineRange(ok, _, _) -> return sema_http_route_schema_type(ok, check, module_identity, active)
+        .Result(ok, _) | .Shared(ok) | .Tagged(_, ok) | .Case(_, ok) | .Quantity(ok, _) | .InlineRange(ok, _, _) -> return sema_http_route_schema_type_in(ok, check, module_identity, active)
         .Map(_, _, _) -> return Val("{{\"type\":\"object\",\"properties\":{{}},\"additionalProperties\":true}}")
         .Tuple(fields) -> {
             ^properties: [String]{}
             ^required: [String]{}
             loop field in fields {
-                field_schema: sema_http_route_schema_type(field.ty, check, module_identity, active) ?? return None
+                field_schema: sema_http_route_schema_type_in(field.ty, check, module_identity, active) ?? return None
                 properties.push("{sema_http_route_json_quote(field.name)}:{field_schema}")
                 required.push(sema_http_route_json_quote(field.name))
             }
@@ -501,7 +505,7 @@ sema_http_route_schema_type: fn(ty: Type, check: SemaBodyCheck, module_identity:
         .Union(members) -> {
             ^schemas: [String]{}
             loop member in members {
-                schemas.push(sema_http_route_schema_type(member, check, module_identity, active) ?? return None)
+                schemas.push(sema_http_route_schema_type_in(member, check, module_identity, active) ?? return None)
             }
             return Val("{{\"oneOf\":[{schemas.join(",")}]}}")
         }
@@ -525,17 +529,19 @@ sema_http_route_schema_type: fn(ty: Type, check: SemaBodyCheck, module_identity:
             nominal: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
             if nominal.kind != SemaRegistrationNominalKind.Struct -> return None
             loop previous in active {
-                if previous == nominal.symbol.id -> return None
+                if previous == nominal.symbol.id.id -> return None
             }
-            ^next_active: [SymbolID]{}
-            loop previous in active -> next_active.push(previous.copy())
-            next_active.push(nominal.symbol.id.copy())
+            active.push(nominal.symbol.id.id)
             // The fields are named as the struct's own module names them.
             ^properties: [String]{}
             ^required: [String]{}
+            ^failed: false
             loop field in nominal.fields {
                 if field.symbol.visibility != 2 -> next
-                field_schema: sema_http_route_schema_type(field.ty, check, graph.modules[nominal_row.module_index].module_identity, next_active) ?? return None
+                field_schema: sema_http_route_schema_type_in(field.ty, check, graph.modules[nominal_row.module_index].module_identity, active) ?? {
+                    failed = true
+                    break
+                }
                 properties.push("{sema_http_route_json_quote(field.symbol.name)}:{field_schema}")
                 if field.ty == {
                     .Option(_) -> {}
@@ -544,6 +550,8 @@ sema_http_route_schema_type: fn(ty: Type, check: SemaBodyCheck, module_identity:
                     }
                 }
             }
+            ^_: active.pop()
+            if failed -> return None
             ^required_json: if required.len() > 0 -> ",\"required\":[{required.join(",")}]" else -> ""
             return Val("{{\"type\":\"object\",\"properties\":{{{properties.join(",")}}},\"additionalProperties\":false{required_json}}}")
         }
@@ -1004,16 +1012,10 @@ sema_http_route_stage_token_check: fn(token: String, argument: CallArg, environm
     context.comptime_requests.push(SemaComptimeRequest{callee_key: key, module_identity: identity, args: [TComptimeValue]{}, span: span, checked_text: Val(evaluation)})
 }
 
-// The method part of a route's operation id: the lower-case verb of a
-// standard method, or `custom_` and the exact token (web.openapi's
-// __openapi_operation_method).
-sema_http_route_operation_method: fn(method: String, wire: String) -> String Never! {
-    if method == sema_http_route_custom_verb() -> return "custom_{wire}"
-    method.copy()
-}
-
-sema_http_route_operation_id: fn(method: String, path: String) -> String Never! {
-    ^output: "jet_{method}_"
+// The operation id of a route: `jet_<verb>_<path>`, or `jet_custom_<wire>_<path>`
+// for a custom verb (web.openapi's __openapi_operation_method).
+sema_http_route_operation_id: fn(method: String, wire: String, path: String) -> String Never! {
+    ^output: if method == sema_http_route_custom_verb() -> "jet_custom_{wire}_" else -> "jet_{method}_"
     loop byte in path.bytes() {
         ^code: Int{byte}
         if {
@@ -1091,7 +1093,7 @@ sema_http_route_contract: fn(method: String, wire: String, pattern: String, path
     }
     if response_json.len() == 0 && !is_mux -> return None
     ^source: if check.environment.source_file == "" -> "<source>" else -> check.environment.source_file
-    Val("{{\"method\":{sema_http_route_json_quote(wire)},\"pattern\":{sema_http_route_json_quote(pattern)},\"path\":{sema_http_route_json_quote(canonical)},\"operation_id\":{sema_http_route_json_quote(sema_http_route_operation_id(sema_http_route_operation_method(method, wire), canonical))},\"summary\":null,\"parameters\":[{params.join(",")}],\"request_body\":{request_body},\"responses\":[{response_json.join(",")}],\"security\":[],\"provenance\":{sema_http_route_json_quote("{source}:{line}")}}}")
+    Val("{{\"method\":{sema_http_route_json_quote(wire)},\"pattern\":{sema_http_route_json_quote(pattern)},\"path\":{sema_http_route_json_quote(canonical)},\"operation_id\":{sema_http_route_json_quote(sema_http_route_operation_id(method, wire, canonical))},\"summary\":null,\"parameters\":[{params.join(",")}],\"request_body\":{request_body},\"responses\":[{response_json.join(",")}],\"security\":[],\"provenance\":{sema_http_route_json_quote("{source}:{line}")}}}")
 }
 
 sema_call_try_http_router: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
@@ -1118,8 +1120,9 @@ sema_call_try_http_router: fn(receiver: Expr, receiver_value: TExpr, method: Str
     }
     ^token_argument: CallArg?{None}
     if custom {
-        token_argument = Val(updated_args[0].copy())
-        updated_args = [CallArg]{updated_args[1].copy(), updated_args[2].copy()}
+        updated_args.reverse()
+        token_argument = updated_args.pop()
+        updated_args.reverse()
     }
     // A path the build knows that the route grammar refuses is refused by
     // core.http's StaticRoutes rule, whose rejection replaces these checks.
@@ -1364,10 +1367,13 @@ sema_http_mux_route_handler: fn(handler: Expr, params: [SemaHTTPRouteParameter],
         return Expr.Lambda{lambda: Lambda{take_names: lambda.take_names, params: [LambdaParam]{request_param}, effects: lambda.effects, body: LambdaBody.Block{body: body}, span: lambda.span, meta: lambda.meta}, id: AST_NODE_GENERATED}
     }
     callee: sema_http_mux_callee(handler) ?? panic("HTTP mux route handler is neither a lambda nor a named function")
-    args: loop parameter in params -> {
-        ^name: parameter.name
-        if request_names.contains(parameter.name) -> name = request.copy()
-        CallArg{convention: AccessConvention.Read, expr: sema_http_mux_ident(name, span), span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}
+    args: loop parameter in params -> CallArg{
+        convention: AccessConvention.Read,
+        expr: sema_http_mux_ident(if request_names.contains(parameter.name) -> request else -> parameter.name, span),
+        span: span,
+        flags: AST_EMPTY_CALL_ARG_FLAGS,
+        label: None,
+        spread: false,
     }
     body.push(Stmt.Expr{expr: Expr.Call{call: Call{name: callee, name_span: span, type_args: [Type]{}, args: args}, id: AST_NODE_GENERATED}})
     Expr.Lambda{lambda: Lambda{take_names: [NamedSpan]{}, params: [LambdaParam]{request_param}, effects: None, body: LambdaBody.Block{body: body}, span: span, meta: ast_empty_lambda_meta()}, id: AST_NODE_GENERATED}

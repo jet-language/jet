@@ -127,6 +127,22 @@ Repo: struct {
 GitError: enum {
     NoApply,
     NoCommit,
+
+    impl Describe {
+        public: fn(self) -> String Never! {
+            if self == {
+                .NoApply -> "Patch could not be applied."
+                .NoCommit -> "Repository commit failed."
+            }
+        }
+
+        detail: fn(self) -> String Never! {
+            if self == {
+                .NoApply -> "git apply refused the patch"
+                .NoCommit -> "git commit failed or had nothing to commit"
+            }
+        }
+    }
 }
 
 /// The patch does not apply to the tree.

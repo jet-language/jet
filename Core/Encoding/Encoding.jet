@@ -173,6 +173,21 @@ EncodingError: struct {
         debug: fn(^^self) -> String { self.display_text() }
     }
 
+    impl Describe {
+        public: fn(self) -> String Never! {
+            if self.kind == {
+                .Syntax -> "Invalid encoded syntax."
+                .Truncated -> "Input is incomplete."
+                .Unsupported -> "Unsupported encoding format."
+                .Limit -> "Input exceeds size limits."
+                .IO -> "An I/O error occurred."
+                .State -> "Invalid encoder state."
+            }
+        }
+
+        detail: fn(self) -> String Never! { self.display_text() }
+    }
+
     new: fn(format: EncodingFormat, kind: EncodingErrorKind, byte_offset: Int, line: Int?, column: Int?, path: String, reason: String) -> EncodingError Never! {
         EncodingError{format: format, kind: kind, byte_offset: byte_offset, line: line, column: column, path: path, reason: reason, cause: None}
     }
@@ -234,6 +249,12 @@ FormatError: struct {
     impl Debug {
         debug: fn(^^self) -> String { "{self.format}: {self.reason}" }
     }
+
+    impl Describe {
+        public: fn(self) -> String Never! { "Invalid formatted input." }
+
+        detail: fn(self) -> String Never! { "{self.format}: {self.reason}" }
+    }
 }
 
 /// Error returned by the root hexadecimal decoder.
@@ -247,6 +268,12 @@ HexError: struct {
 
     impl Debug {
         debug: fn(^^self) -> String { self.reason }
+    }
+
+    impl Describe {
+        public: fn(self) -> String Never! { "Invalid hexadecimal input." }
+
+        detail: fn(self) -> String Never! { self.reason.copy() }
     }
 
     new: fn(reason: String) -> HexError Never! { HexError{reason: reason} }

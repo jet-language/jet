@@ -1126,7 +1126,7 @@ sema_call_method_checked_visible: fn(check: ^SemaBodyCheck, receiver: Expr, rece
     abi: sema_call_method_callable_abi(resolved_candidate, check)
     host_stored: sema_shared_access_is_shared_type(receiver_value.ty) && resolved_candidate.method.name == "edit" && check.scopes.transaction_depth > 0
     typed_option: if host_method -> sema_call_typecheck_host_bound_arguments(resolved_candidate.method.name, params, abi, true, resolved_binding, checked_args, check, span, sema_shared_access_host_method_writes(receiver_value.ty, resolved_candidate.method.name), host_stored) else -> sema_call_typecheck_bound_arguments(resolved_candidate.method.name, params, abi, true, resolved_binding, checked_args, check, span, false)
-    typed: typed_option ?? {
+    ^typed: typed_option ?? {
         if resolved_candidate.receiver_convention == AccessConvention.Write {
             sema_ownership_note_possible_write(check.state, receiver, check.scopes)
         }
@@ -1152,7 +1152,7 @@ sema_call_method_checked_visible: fn(check: ^SemaBodyCheck, receiver: Expr, rece
     if typed.pin_arguments {
         access: resolved_candidate.receiver_convention
         borrowed: access != AccessConvention.Move && sema_ownership_places_from_expr_in_state(receiver, check.scopes, check.state).len() > 0
-        pin_slot: -typed.values.len() - 1
+        pin_slot: -lowered.len() - 1
         owner: sema_scope_function_owner_key(check.scopes)
         symbol: sema_call_binder_ref_symbol(check.environment.*, check.program.*, check.context, owner, typed.binder_site, pin_slot, "receiver", receiver_value.ty, span)
         ^local: checked_symbol_local("binder_ref_{typed.binder_site}_{pin_slot}", span, symbol.id, receiver_value.ty)

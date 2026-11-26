@@ -577,29 +577,27 @@ jet_driver_query_build_plan: fn(owned_request: ^^JetDriverCompileRequest, scope:
         return jet_driver_build_query_empty(request, sources.diagnostics.move(), false, Val("loaded build query has no exact entry module"))
     }
     package: sources.modules[sources.entry_module_index].package_identity
-    ^selected: String?{None}
+    ^selected_index: -1
     ^selected_site: ""
     ^span: Span{start: 0, end: 0}
-    loop loaded_module in sources.modules {
+    loop module_index in 0..<sources.modules.len() {
+        loaded_module: sources.modules[module_index]
         if loaded_module.package_identity != package -> next
         loop item in loaded_module.program.items {
             if item == .Func(function) && jet_driver_item_is_build_entry(item) {
                 site: jet_driver_build_entry_site(loaded_module.path, loaded_module.source, function.span.start)
-                if selected != None {
+                if selected_index >= 0 {
                     ^errors: sources.diagnostics.move()
                     errors.push(jet_driver_diagnostic_at_source("E3520", Val(function.name_span), loaded_module.path, 0, "Two build entries for one package: {selected_site} and {site}.", "One package has one build authority, so policy and provenance have one auditable home.", "Keep one `build: fn` and remove every other entry."))
                     return jet_driver_build_query_empty(request, errors, false, None)
                 }
-                // copy: `sources` keeps its module rows: on a duplicate build entry it returns
-                // `sources.diagnostics`. The selected path moves into
-                // jet_driver_compile_selection, which takes ownership of the entry path.
-                selected = Val(loaded_module.physical_path.copy())
+                selected_index = module_index
                 selected_site = site
                 span = function.span
             }
         }
     }
-    path: selected ?? {
+    if selected_index < 0 {
         // No build entry still has an ordinary checked source projection.
         // Loader-only success must not hide type errors in the package.
         // The plan reads only the user modules' diagnostics and build nodes
@@ -644,6 +642,7 @@ jet_driver_query_build_plan: fn(owned_request: ^^JetDriverCompileRequest, scope:
         }
         return result
     }
+    path: sources.modules[selected_index].physical_path
     // Handwritten code may use what `build: fn` generates: build entries and
     // generated modules share one checked expansion pass. A staging check
     // that fails still evaluates `build: fn`, with each failed function
@@ -743,12 +742,10 @@ jet_driver_query_build_plan: fn(owned_request: ^^JetDriverCompileRequest, scope:
     // The selected generated modules, owned by the build's package: the
     // final checked bundle below and every target compile of the plan
     // (the response's `generated`) load them beside the package's sources.
-    selected_generated: build_plan_selected_generated(plan)
     ^generated: [JetDriverGeneratedModule]{}
-    loop generated_row in selected_generated {
+    loop generated_row in build_plan_selected_generated(plan) {
         row: jet_driver_build_generated_row(generated_row, package, sources.modules) ?? {
-            function: generated_row.rewrites ?? ""
-            ran.push(jet_driver_diagnostic_without_span("E3502", "`meta.rewrite_body` names `{function}`, which is no function of its package with a braced body", "a body rewrite replaces the body of one top-level function its package declares", "pass a top-level function with a `{{ … }}` body"))
+            ran.push(jet_driver_diagnostic_without_span("E3502", "`meta.rewrite_body` names `{err.name}`, which is no function of its package with a braced body", "a body rewrite replaces the body of one top-level function its package declares", "pass a top-level function with a `{{ … }}` body"))
             next
         }
         generated.push(row)
@@ -774,9 +771,6 @@ jet_driver_query_build_plan: fn(owned_request: ^^JetDriverCompileRequest, scope:
     original_generated_count: request.generated_modules.len()
     selected_outputs: request.build_output_names.len() == 0
     if selected_outputs -> request.build_output_names = jet_driver_build_selected_output_names(plan)
-    // copy: the request gets temporary generated-module rows for the checked recompile, popped
-    // right after; `generated` stays whole for the response.
-    loop generated_row in generated -> request.generated_modules.push(generated_row.copy())
     // A selected target that lists the entry file joins the bundle with its
     // other listed sources, as its compile loads them (jet_cli_compile_target).
     // A target of other files is its own program: its compile checks it, so
@@ -811,6 +805,9 @@ jet_driver_query_build_plan: fn(owned_request: ^^JetDriverCompileRequest, scope:
             return jet_driver_build_query_planned(request, plan, generated, staged_nodes, errors, compiled.authority_policy.move(), tidy)
         }
     }
+    // Generated rows join the request for the checked compile alone, and move
+    // back out of it for the response.
+    loop generated_row in generated.move() -> request.generated_modules.push(generated_row)
     // As above: the plan reads the user modules' diagnostics and build nodes
     // alone, so Core bodies are checked on demand.
     ^demand_core: request.doc_core_on_demand
@@ -819,21 +816,26 @@ jet_driver_query_build_plan: fn(owned_request: ^^JetDriverCompileRequest, scope:
     checked: jet_driver_compile_selection(request, JetDriverCompileMode.Doc, None, None, false, true)
     jet_driver_trace_step_end(request.trace_sink, "build.plan.check", checked.diagnostics.len())
     request.doc_core_on_demand = demand_core
+    ^restored_generated: [JetDriverGeneratedModule]{}
     loop request.generated_modules.len() > original_generated_count {
-        _: request.generated_modules.pop()
+        if request.generated_modules.pop() == .Val(row) -> restored_generated.push(row)
+    }
+    ^kept_generated: [JetDriverGeneratedModule]{}
+    loop restored_generated.len() > 0 {
+        if restored_generated.pop() == .Val(row) -> kept_generated.push(row)
     }
     request.target_sources = [String]{}
     if selected_outputs -> request.build_output_names = [String]{}
     loop error in checked.diagnostics -> errors.push(error)
     if !checked.complete || checked.internal_problem != None || jet_driver_has_errors(errors) {
-        jet_driver_build_generated_notes(errors, package, selected_generated)
+        jet_driver_build_generated_notes(errors, package, build_plan_selected_generated(plan))
         ^failed: jet_driver_build_query_empty(request, errors, false, checked.internal_problem.move())
         failed.query.generated_source_files = checked.generated_source_files.move()
         return failed
     }
     // The nodes move out of the checked result: a `:` read of the field would copy them at `nodes.move()`.
     nodes: checked.build_nodes.move() ?? return jet_driver_build_query_empty(request, errors, false, Val("completed build query lost its compiler node identities"))
-    jet_driver_build_query_planned(request, plan, generated, nodes, errors, compiled.authority_policy.move(), tidy)
+    jet_driver_build_query_planned(request, plan, kept_generated, nodes, errors, compiled.authority_policy.move(), tidy)
 }
 
 // The completed build query: `plan` with `nodes` installed, and its graph.
@@ -1046,27 +1048,32 @@ jet_driver_build_consumer: fn(diagnostic: Diagnostic, modules: [JetDriverSourceQ
 // import too, which its file need not hold. A line `#{f.body}` of the new
 // body is the original body, at that line's indentation. None when the
 // package declares no top-level function of that name with a braced body.
-jet_driver_build_generated_row: fn(row: BuildSessionGeneratedModule, package: String, modules: [JetDriverSourceQueryModule]) -> JetDriverGeneratedModule? {
-    // copy: each row's texts are views of the plan, which stays whole.
-    function: row.rewrites ?? return Val(JetDriverGeneratedModule{package_identity: package.copy(), name: row.name.copy(), relative_path: row.path.copy(), source: row.source.copy(), authority: (row.authority ?? "").copy(), consent: (row.consent ?? "").copy()})
-    owner: row.package ?? package
+#Error
+JetDriverRewriteMissing: struct {
+    name: String,
+}
+
+jet_driver_build_generated_row: fn(row: ^^BuildSessionGeneratedModule, package: String, modules: [JetDriverSourceQueryModule]) -> JetDriverGeneratedModule JetDriverRewriteMissing! {
+    ^owned: row.move()
+    function: owned.rewrites.move() ?? return Ok(JetDriverGeneratedModule{package_identity: package.copy(), name: owned.name.move(), relative_path: owned.path.move(), source: owned.source.move(), authority: owned.authority.move() ?? "", consent: owned.consent.move() ?? ""})
+    owner: owned.package.move() ?? package.copy()
     loop module_row in modules {
         if module_row.package_identity != owner -> next
         loop item in module_row.program.items {
             if item == .Func(declared) && declared.name == function {
                 bytes: module_row.source.bytes()
-                open: jet_driver_function_body_open(bytes, declared.name_span.end, declared.span.end) ?? return None
-                head: String.from_bytes(bytes[declared.span.start..<open]) ?? return None
-                ^lines: row.source.split("\n").to_list()
+                open: jet_driver_function_body_open(bytes, declared.name_span.end, declared.span.end) ?? return Err(JetDriverRewriteMissing{name: function})
+                head: String.from_bytes(bytes[declared.span.start..<open]) ?? return Err(JetDriverRewriteMissing{name: function})
+                ^lines: owned.source.split("\n").to_list()
                 loop lines.len() > 0 && lines[lines.len() - 1].trim() == "" -> _: lines.pop()
                 paste: "#{{{function}.body}}"
                 ^text: ""
                 loop import in module_row.program.imports {
                     if import.is_pub || import.is_package_pub || import.kind == .File(_, _) -> next
                     start: (import.comptime_span ?? import.span).start
-                    text = "{text}{String.from_bytes(bytes[start..<import.span.end]) ?? return None}\n"
+                    text = "{text}{String.from_bytes(bytes[start..<import.span.end]) ?? return Err(JetDriverRewriteMissing{name: function})}\n"
                 }
-                if row.source.contains("{JET_DRIVER_PROFILED_ALIAS}.") && !text.contains(JET_DRIVER_PROFILED_IMPORT) {
+                if owned.source.contains("{JET_DRIVER_PROFILED_ALIAS}.") && !text.contains(JET_DRIVER_PROFILED_IMPORT) {
                     text = "{text}{JET_DRIVER_PROFILED_IMPORT}\n"
                 }
                 if text != "" -> text = "{text}\n"
@@ -1080,11 +1087,11 @@ jet_driver_build_generated_row: fn(row: BuildSessionGeneratedModule, package: St
                     } else { text = "{text}    {line}\n" }
                 }
                 text = "{text}}}\n"
-                return Val(JetDriverGeneratedModule{package_identity: owner.copy(), name: row.name.copy(), relative_path: row.path.copy(), source: text, replaces: Val(JetDriverReplacedFunction{path: module_row.physical_path.copy(), start: declared.span.start, end: declared.span.end}), authority: (row.authority ?? "").copy(), consent: (row.consent ?? "").copy()})
+                return Ok(JetDriverGeneratedModule{package_identity: owner, name: owned.name.move(), relative_path: owned.path.move(), source: text, replaces: Val(JetDriverReplacedFunction{path: module_row.physical_path.copy(), start: declared.span.start, end: declared.span.end}), authority: owned.authority.move() ?? "", consent: owned.consent.move() ?? ""})
             }
         }
     }
-    None
+    Err(JetDriverRewriteMissing{name: function})
 }
 
 // The lines of a function's original body, between its braces at `open` and
@@ -1339,7 +1346,7 @@ jet_driver_build_profiled: fn(request: ^JetDriverCompileRequest, scope: ^JetDriv
     plan: finished.plan.move() ?? return stopped
     loop generated_row in build_plan_selected_generated(plan) {
         row: jet_driver_build_generated_row(generated_row, package, sources.modules) ?? {
-            stopped.diagnostics.push(jet_driver_diagnostic_without_span("E3502", "`#Perf.Profiled` marks `{generated_row.rewrites ?? ""}`, which is no function of its package with a braced body", "the marker's handler replaces the body of one top-level function its package declares", "mark a top-level function with a `{{ … }}` body"))
+            stopped.diagnostics.push(jet_driver_diagnostic_without_span("E3502", "`#Perf.Profiled` marks `{err.name}`, which is no function of its package with a braced body", "the marker's handler replaces the body of one top-level function its package declares", "mark a top-level function with a `{{ … }}` body"))
             next
         }
         stopped.generated.push(row)

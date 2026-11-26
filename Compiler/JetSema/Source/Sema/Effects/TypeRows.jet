@@ -189,10 +189,14 @@ sema_effect_type_add_named: fn(graph: SemaRegistrationGraph, module_identity: Mo
     sources.push(SemaEffectTypeSource{kind: "field type", label: label.copy(), effects: [String]{}, type_key: key, span: span})
 }
 
-sema_effect_type_row_add: fn(row: ^SemaEffectTypeRow, effect_name: String, source: Int) -> Bool Never! {
-    if !sema_effect_set_add(row.effects, effect_name) -> return false
-    row.reaches.push(SemaEffectTypeReach{name: effect_name.copy(), source: source})
+priv sema_effect_type_row_add_parts: fn(effects: ^[String], reaches: ^[SemaEffectTypeReach], effect_name: String, source: Int) -> Bool Never! {
+    if !sema_effect_set_add(effects, effect_name) -> return false
+    reaches.push(SemaEffectTypeReach{name: effect_name.copy(), source: source})
     true
+}
+
+sema_effect_type_row_add: fn(row: ^SemaEffectTypeRow, effect_name: String, source: Int) -> Bool Never! {
+    sema_effect_type_row_add_parts(row.effects, row.reaches, effect_name, source)
 }
 
 // Where a function's solved row is published:
@@ -216,25 +220,30 @@ sema_effect_graph_type_rows: fn(graph: SemaRegistrationGraph, modules: [SemaGrap
     ^index: [String:Int]{}
     ^rows: [SemaEffectTypeRow]{}
     loop source_module in graph.modules {
-        loop shape in sema_effect_type_shapes(graph, source_module) {
+        ^shapes: sema_effect_type_shapes(graph, source_module)
+        shapes.reverse()
+        loop shapes.len() > 0 {
+            ^shape: shapes.pop() ?? break
+            ^sources: shape.sources.move()
             at: index.get(shape.key) ?? {
                 index[shape.key] = rows.len()
                 rows.push(SemaEffectTypeRow{key: shape.key, span: shape.span, sources: [SemaEffectTypeSource]{}, effects: [String]{}, reaches: [SemaEffectTypeReach]{}})
                 rows.len() - 1
             }
-            loop source in shape.sources -> rows[at].sources.push(source.copy())
+            rows[at].sources.extend(sources.move())
         }
     }
     loop row_index in 0..<rows.len() {
         loop position in 0..<rows[row_index].sources.len() {
-            source: rows[row_index].sources[position]
-            ^own: source.effects.copy()
-            if source.function_key != "" {
-                found: solved_at.get(source.function_key) ?? next
-                own = modules[found.module_row].functions[found.function_row].effects.solved.copy()
-            }
-            loop effect_name in own {
-                ^_: sema_effect_type_row_add(rows[row_index], effect_name, position)
+            if rows[row_index].sources[position].function_key != "" {
+                found: solved_at.get(rows[row_index].sources[position].function_key) ?? next
+                loop effect_name in modules[found.module_row].functions[found.function_row].effects.solved {
+                    ^_: sema_effect_type_row_add_parts(rows[row_index].effects, rows[row_index].reaches, effect_name, position)
+                }
+            } else {
+                loop effect_index in 0..<rows[row_index].sources[position].effects.len() {
+                    ^_: sema_effect_type_row_add_parts(rows[row_index].effects, rows[row_index].reaches, rows[row_index].sources[position].effects[effect_index], position)
+                }
             }
         }
     }

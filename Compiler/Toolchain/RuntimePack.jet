@@ -563,7 +563,7 @@ built_version: fn(jet: String) -> String {
 }
 
 // A command that must exit 0; its stdout.
-output_of: fn(spec: ProcessSpec, what: String) -> String {
+output_of: fn(spec: ^^ProcessSpec, what: String) -> String {
     receipt: spec.output_limit(268435456).run() ?? fail("{what} could not start: {err}")
     if receipt.code != 0 || receipt.signal != None {
         fail("{what} failed ({receipt.code}):\n{receipt.errors}")

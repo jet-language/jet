@@ -330,99 +330,92 @@ sema_marker_module_visible_declarations: fn(graph: SemaRegistrationGraph, module
     declarations
 }
 
-sema_marker_module_bind_marker: fn(marker: Marker, bindings: [SemaMarkerModuleBinding]) -> Marker Never! {
-    ^value: marker
+sema_marker_module_bind_marker: fn(marker: ^Marker, bindings: [SemaMarkerModuleBinding]) Never! {
     loop binding in bindings {
         if binding.name == marker.name && binding.application_span.start == marker.name_span.start && binding.application_span.end == marker.name_span.end {
-            value.declaration_module = Val(binding.module_identity)
-            value.declaration_span = Val(binding.declaration_span)
+            marker.declaration_module = Val(binding.module_identity)
+            marker.declaration_span = Val(binding.declaration_span)
             break
         }
     }
-    value
 }
 
-sema_marker_module_bind_markers: fn(markers: [Marker], bindings: [SemaMarkerModuleBinding]) -> [Marker] Never! {
-    bound: loop marker in markers -> sema_marker_module_bind_marker(marker, bindings)
-    bound
-}
-
-sema_marker_module_bind_functions: fn(functions: [Func], bindings: [SemaMarkerModuleBinding]) -> [Func] Never! {
-    bound: loop function in functions -> {
-        ^value: function.copy()
-        value.markers = sema_marker_module_bind_markers(function.markers, bindings)
-        value
+sema_marker_module_bind_markers: fn(markers: ^[Marker], bindings: [SemaMarkerModuleBinding]) Never! {
+    loop index in 0..<markers.len() {
+        sema_marker_module_bind_marker(markers[index], bindings)
     }
-    bound
 }
 
-sema_marker_module_bind_items: fn(items: [Item], bindings: [SemaMarkerModuleBinding]) -> [Item] Never! {
-    ^bound: [Item]{}
-    loop item in items {
-        ^value: item.copy()
-        if item == {
+sema_marker_module_bind_functions: fn(functions: ^[Func], bindings: [SemaMarkerModuleBinding]) Never! {
+    loop index in 0..<functions.len() {
+        sema_marker_module_bind_markers(functions[index].markers, bindings)
+    }
+}
+
+sema_marker_module_bind_items: fn(items: ^[Item], bindings: [SemaMarkerModuleBinding]) Never! {
+    loop index in 0..<items.len() {
+        if items[index] == {
             .Func(function) -> {
                 ^row: function.copy()
-                row.markers = sema_marker_module_bind_markers(function.markers, bindings)
-                value = Item.Func{value: row}
+                sema_marker_module_bind_markers(row.markers, bindings)
+                items[index] = Item.Func{value: row}
             }
             .Struct(definition) -> {
                 ^row: definition.copy()
-                row.type_markers = sema_marker_module_bind_markers(definition.type_markers, bindings)
-                row.serde_markers = sema_marker_module_bind_markers(definition.serde_markers, bindings)
+                sema_marker_module_bind_markers(row.type_markers, bindings)
+                sema_marker_module_bind_markers(row.serde_markers, bindings)
                 loop field_index in 0..<row.fields.len() {
-                    row.fields[field_index].serde_markers = sema_marker_module_bind_markers(row.fields[field_index].serde_markers, bindings)
+                    sema_marker_module_bind_markers(row.fields[field_index].serde_markers, bindings)
                 }
-                row.methods = sema_marker_module_bind_functions(definition.methods, bindings)
+                sema_marker_module_bind_functions(row.methods, bindings)
                 loop impl_index in 0..<row.trait_impls.len() {
-                    row.trait_impls[impl_index].markers = sema_marker_module_bind_markers(row.trait_impls[impl_index].markers, bindings)
-                    row.trait_impls[impl_index].methods = sema_marker_module_bind_functions(row.trait_impls[impl_index].methods, bindings)
+                    sema_marker_module_bind_markers(row.trait_impls[impl_index].markers, bindings)
+                    sema_marker_module_bind_functions(row.trait_impls[impl_index].methods, bindings)
                 }
-                bound.push(Item.Struct{value: row})
-                next
+                items[index] = Item.Struct{value: row}
             }
             .Enum(definition) -> {
                 ^row: definition.copy()
-                row.type_markers = sema_marker_module_bind_markers(definition.type_markers, bindings)
-                row.serde_markers = sema_marker_module_bind_markers(definition.serde_markers, bindings)
+                sema_marker_module_bind_markers(row.type_markers, bindings)
+                sema_marker_module_bind_markers(row.serde_markers, bindings)
                 loop variant_index in 0..<row.variants.len() {
-                    row.variants[variant_index].serde_markers = sema_marker_module_bind_markers(row.variants[variant_index].serde_markers, bindings)
+                    sema_marker_module_bind_markers(row.variants[variant_index].serde_markers, bindings)
                 }
-                row.methods = sema_marker_module_bind_functions(definition.methods, bindings)
+                sema_marker_module_bind_functions(row.methods, bindings)
                 loop impl_index in 0..<row.trait_impls.len() {
-                    row.trait_impls[impl_index].markers = sema_marker_module_bind_markers(row.trait_impls[impl_index].markers, bindings)
-                    row.trait_impls[impl_index].methods = sema_marker_module_bind_functions(row.trait_impls[impl_index].methods, bindings)
+                    sema_marker_module_bind_markers(row.trait_impls[impl_index].markers, bindings)
+                    sema_marker_module_bind_functions(row.trait_impls[impl_index].methods, bindings)
                 }
-                value = Item.Enum{value: row}
+                items[index] = Item.Enum{value: row}
             }
             .Distinct(definition) -> {
                 ^row: definition.copy()
-                row.type_markers = sema_marker_module_bind_markers(definition.type_markers, bindings)
-                value = Item.Distinct{value: row}
+                sema_marker_module_bind_markers(row.type_markers, bindings)
+                items[index] = Item.Distinct{value: row}
             }
             .Impl(implementation) -> {
                 ^row: implementation.copy()
-                row.markers = sema_marker_module_bind_markers(implementation.markers, bindings)
-                row.methods = sema_marker_module_bind_functions(implementation.methods, bindings)
-                value = Item.Impl{value: row}
+                sema_marker_module_bind_markers(row.markers, bindings)
+                sema_marker_module_bind_functions(row.methods, bindings)
+                items[index] = Item.Impl{value: row}
             }
             .ErrorConv(conversion) -> {
                 ^row: conversion.copy()
-                row.markers = sema_marker_module_bind_markers(conversion.markers, bindings)
-                value = Item.ErrorConv{value: row}
+                sema_marker_module_bind_markers(row.markers, bindings)
+                items[index] = Item.ErrorConv{value: row}
             }
             .CodeModule(code_module) -> {
                 ^row: code_module.copy()
-                if code_module.body == .Val(body) {
-                    row.body = Val(sema_marker_module_bind_items(body, bindings))
+                if row.body != None {
+                    ^body: row.body ?? [Item]{}
+                    sema_marker_module_bind_items(body, bindings)
+                    row.body = Val(body)
                 }
-                value = Item.CodeModule{value: row}
+                items[index] = Item.CodeModule{value: row}
             }
             .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
-        bound.push(value)
     }
-    bound
 }
 
 // Both direct uses and replayed group members feed this single AST projection.
@@ -431,12 +424,12 @@ sema_marker_module_bind_program: fn(program: ^Program, bindings: [SemaMarkerModu
     if bindings.len() == 0 {
         return
     }
-    program.items = sema_marker_module_bind_items(program.items, bindings)
+    sema_marker_module_bind_items(program.items, bindings)
     loop index in 0..<program.rule_facts.len() {
-        program.rule_facts[index].marker = sema_marker_module_bind_marker(program.rule_facts[index].marker, bindings)
+        sema_marker_module_bind_marker(program.rule_facts[index].marker, bindings)
     }
     loop index in 0..<program.applied_rules.len() {
-        program.applied_rules[index].marker = sema_marker_module_bind_marker(program.applied_rules[index].marker, bindings)
+        sema_marker_module_bind_marker(program.applied_rules[index].marker, bindings)
     }
 }
 

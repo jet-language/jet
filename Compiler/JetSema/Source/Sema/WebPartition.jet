@@ -573,8 +573,9 @@ sema_web_push: fn(function: Func, owner: String?, file_ceiling: WebBucket?, modu
 }
 
 sema_web_ceiling_or: fn(first: WebBucket?, second: WebBucket?) -> WebBucket? Never! {
-    if first != None -> return first.copy()
-    second.copy()
+    if first == .Val(bucket) -> return Val(bucket)
+    if second == .Val(bucket) -> return Val(bucket)
+    None
 }
 
 // Whether `meta`'s checked body uses the `Browser` effect.
@@ -703,14 +704,24 @@ sema_web_codable_named: fn(name: String, args: [Type], types: SemaWebTypes) -> B
 // Whether the derives give the type every codec trait: each one named, or a
 // family marker (`Codable`) that derives them.
 sema_web_codable: fn(derives: [NamedSpan]) -> Bool Never! {
-    ^covered: [String]{}
+    codecs: owned_trait_codec_names()
+    ^covered: (loop _ in 0..<codecs.len() -> false)
     loop marker in derives {
         family: owned_trait_family(marker.name)
-        if family.len() == 0 -> covered.push(marker.name.copy())
-        loop member in family -> covered.push(member.copy())
+        if family.len() == 0 {
+            loop (index, codec) in codecs {
+                if codec == marker.name -> covered[index] = true
+            }
+        } else {
+            loop member in family {
+                loop (index, codec) in codecs {
+                    if codec == member -> covered[index] = true
+                }
+            }
+        }
     }
-    loop codec in owned_trait_codec_names() {
-        if !covered.contains(codec) -> return false
+    loop has in covered {
+        if !has -> return false
     }
     true
 }

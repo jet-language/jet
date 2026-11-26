@@ -201,8 +201,14 @@ sema_compiler_identity: fn(registration: SemaRegistrationGraph, key: String) -> 
     } else {
         head: foundation_byte_text(rest.bytes(), 0, name_start - 1)
         split: head.cut_last(".")
-        declaring = if split == .Val(parts) -> parts.before.copy() else -> head.copy()
-        owner = if split == .Val(parts) -> parts.after.copy() else -> ""
+        if split == .Val(_) {
+            parts: split ?? {before: "", after: ""}
+            declaring = parts.before
+            owner = parts.after
+        } else {
+            declaring = head
+            owner = ""
+        }
     }
     nested: owner.contains(":")
     word: if {
@@ -1968,14 +1974,15 @@ sema_compiler_index_derivation_push: fn(registration: SemaRegistrationGraph, reg
     ^signature_id: "sig:{sha256_hex(signature_key).slice(0, 16)}"
     ^normalized: sema_compiler_index_normalize_definition(definition_source)
     ^content_id: "sha256:{sha256_hex(normalized)}"
+    ^identity: derivation_identity(content_id, signature_id, "", registered_module.module_path)
     ^record: derivation_record(
         stable_id,
         sema_compiler_identity(registration, definition_key),
         "jet-sema",
         DerivationMethod.StaticDerivation,
         "checked-definition",
-        [String]{signature_id.copy(), content_id.copy()},
-        derivation_identity(content_id, signature_id, "", registered_module.module_path),
+        [String]{signature_id, content_id},
+        identity,
     )
     records.push(record)
 }
@@ -2193,14 +2200,18 @@ sema_compiler_semantic_index_from_checked: fn(registration: SemaRegistrationGrap
         }
         loop constant_index in 0..<registration.modules[registered_module_index].constants.len() {
             if registration.modules[registered_module_index].constants[constant_index].declaration.resolved_output == .Val(output) {
-                ^solved: output.copy()
-                loop fact in graph.outputs {
+                ^solved_index: -1
+                loop (fact_index, fact) in graph.outputs {
                     if fact.address == output.address && fact.module_id == output.module_id && fact.reference == output.reference {
-                        solved = fact
+                        solved_index = fact_index
                         break
                     }
                 }
-                outputs.push(sema_compiler_index_output_value(solved, registration.modules[registered_module_index].constants[constant_index].declaration, registration, registered_module_index))
+                if solved_index >= 0 {
+                    outputs.push(sema_compiler_index_output_value(graph.outputs[solved_index], registration.modules[registered_module_index].constants[constant_index].declaration, registration, registered_module_index))
+                } else {
+                    outputs.push(sema_compiler_index_output_value(output, registration.modules[registered_module_index].constants[constant_index].declaration, registration, registered_module_index))
+                }
             }
         }
         ^graph_facts: sema_state_graph_facts(registration.modules[registered_module_index].program.items)

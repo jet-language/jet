@@ -189,6 +189,18 @@ DBError: enum {
     impl Debug {
         debug: fn(^^self) -> String { self.message() }
     }
+
+    impl Describe {
+        public: fn(self) -> String Never! {
+            if self == {
+                .Failed(_) -> "A database error occurred."
+                .Exists -> "The record already exists."
+                .Denied -> "Permission denied."
+            }
+        }
+
+        detail: fn(self) -> String Never! { self.message() }
+    }
 }
 
 impl DBError -> Err { Err(self.message()) }

@@ -745,20 +745,20 @@ jet_driver_foreign_parse_provenance: fn(file: JetDriverAuthorizedSourceFile, lib
     ^valid: true
     loop line in file.source.split("\n") {
         if line == "" -> next
-        parts: jet_driver_foreign_line_parts(line)
+        ^parts: jet_driver_foreign_line_parts(line)
         if !parts.valid {
             jet_driver_foreign_provenance_error(file.path, "contains a malformed key/value row", diagnostics)
             valid = false
             next
         }
         name: parts.name
-        value: parts.value
+        value: parts.value.move()
         if name == {
             "schema" -> schema = value
             "language" -> {
                 if language == "" -> language = value
             }
-            "library" | "linked-library" -> direct_links.push(value.copy())
+            "library" | "linked-library" -> direct_links.push(value)
             "boundary-schema" -> boundary_schema = value
             "boundary-descriptor" -> descriptor = value
             "boundary-digest" -> boundary_digest = value
@@ -827,14 +827,14 @@ jet_driver_foreign_same_signature: fn(left: ExternFn, right: ExternFn) -> Bool N
 }
 
 jet_driver_foreign_parse_cache: fn(file: JetDriverAuthorizedSourceFile, diagnostics: ^[Diagnostic]) -> Program? {
-    lexed: lex_generated(file.source.bytes())
-    // copy: `lexed` still feeds jet_driver_has_errors and parse_lexed below, so it keeps its
-    // diagnostics. The caller's diagnostics list gets a copy of each, re-pathed to the authorized
-    // file.
-    loop diagnostic in lexed.diagnostics {
-        diagnostics.push(diagnostic_with_source_path(diagnostic.copy(), file.path, jet_driver_foreign_diagnostic_offset(diagnostic)))
+    ^lexed: lex_generated(file.source.bytes())
+    lex_failed: jet_driver_has_errors(lexed.diagnostics)
+    loop diagnostic in lexed.diagnostics.move() {
+        offset: jet_driver_foreign_diagnostic_offset(diagnostic)
+        diagnostics.push(diagnostic_with_source_path(diagnostic, file.path, offset))
     }
-    if jet_driver_has_errors(lexed.diagnostics) -> return None
+    lexed.diagnostics = [Diagnostic]{}
+    if lex_failed -> return None
     ^parsed: parse_lexed(lexed)
     parse_failed: jet_driver_has_errors(parsed.diagnostics)
     loop diagnostic in parsed.diagnostics.move() {
@@ -880,14 +880,14 @@ jet_driver_foreign_close_adapter_text: fn(handle: String, raw_function: String) 
 
 jet_driver_foreign_make_adapter_function: fn(handle: String, raw_function: String, origin_path: String, diagnostics: ^[Diagnostic]) -> Func? {
     source: jet_driver_foreign_close_adapter_text(handle, raw_function)
-    lexed: lex_generated(source.bytes())
-    // copy: `lexed` still feeds jet_driver_has_errors and parse_lexed below, so it keeps its
-    // diagnostics. The caller's diagnostics list gets a copy of each, re-pathed to the adapter
-    // origin.
-    loop diagnostic in lexed.diagnostics {
-        diagnostics.push(diagnostic_with_source_path(diagnostic.copy(), origin_path, jet_driver_foreign_diagnostic_offset(diagnostic)))
+    ^lexed: lex_generated(source.bytes())
+    lex_failed: jet_driver_has_errors(lexed.diagnostics)
+    loop diagnostic in lexed.diagnostics.move() {
+        offset: jet_driver_foreign_diagnostic_offset(diagnostic)
+        diagnostics.push(diagnostic_with_source_path(diagnostic, origin_path, offset))
     }
-    if jet_driver_has_errors(lexed.diagnostics) -> return None
+    lexed.diagnostics = [Diagnostic]{}
+    if lex_failed -> return None
     ^parsed: parse_lexed(lexed)
     parse_failed: jet_driver_has_errors(parsed.diagnostics)
     loop diagnostic in parsed.diagnostics.move() {
@@ -1242,7 +1242,7 @@ jet_driver_foreign_rewrite_module: fn(load: ^JetDriverLoadResult, surface: JetDr
     // jet_driver_core_source_unit and jet_driver_unit_module_identity set them.
     core_provider: surface.root_index < 0
     package: if core_provider -> aggregate_path.copy() else -> jet_driver_foreign_package_for_root(load, surface.root_index)
-    module_identity: module_intern(load.module_table, if core_provider -> aggregate_path.copy() else -> jet_driver_module_identity(package, aggregate_path))
+    module_identity: module_intern(load.module_table, if core_provider -> package else -> jet_driver_module_identity(package, aggregate_path))
     source_identity: jet_driver_source_identity(package, aggregate_path)
     ^synthetic_items: [Item]{}
     loop item in program.items {
@@ -1281,17 +1281,16 @@ jet_driver_foreign_remove_overlay_items: fn(load: ^JetDriverLoadResult) Never! {
             }
         }
         if !has_overlay -> next
-        ^items: [Item]{}
-        loop item_index in 0..<load.modules[index].program.items.len() {
-            item: load.modules[index].program.items[item_index]
-            if item == {
-                .CModule(_) -> {}
-                .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {
-                    items.push(item.copy())
-                }
-            }
+        ^reversed: [Item]{}
+        loop load.modules[index].program.items.len() > 0 {
+            item: load.modules[index].program.items.pop() ?? break
+            if item == .CModule(_) -> next
+            reversed.push(item)
         }
-        load.modules[index].program.items = items.move()
+        loop reversed.len() > 0 {
+            item: reversed.pop() ?? break
+            load.modules[index].program.items.push(item)
+        }
     }
 }
 

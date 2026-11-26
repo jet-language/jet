@@ -136,26 +136,28 @@ sema_compute_panic_memo: fn(memo: [SemaComputePanicMemo], function_key: String) 
     None
 }
 
-sema_compute_panic_sites_are_compute_failures: fn(function_key: String, modules: [SemaGraphModuleResult], index: SemaComputeIndex, visiting: ^[String], memo: ^[SemaComputePanicMemo], work: ^SemaComputeValidationWork) -> Bool Never! {
+sema_compute_panic_sites_are_compute_failures: fn(function_key: String, modules: [SemaGraphModuleResult], index: SemaComputeIndex, visiting: ^[SemaComputePosition], memo: ^[SemaComputePanicMemo], work: ^SemaComputeValidationWork) -> Bool Never! {
     if function_key == "__jet_panic__" -> return false
     if sema_compute_panic_memo(memo, function_key) == .Val(value) -> return value
-    loop active in visiting {
-        if active == function_key -> return false
-    }
     position: sema_compute_function_position(index, function_key, work) ?? {
         memo.push(SemaComputePanicMemo{function_key: function_key, safe: false})
         return false
     }
-    function: modules[position.module_index].functions[position.row_index]
+    loop active in visiting {
+        if active == position -> return false
+    }
+    module_index: position.module_index
+    row_index: position.row_index
+    function: modules[module_index].functions[row_index]
     ^body_facts: sema_compute_function_facts_position(index, function_key, work)
     ^local_safe_panic: if body_facts == .Val(row) -> modules[row.module_index].compute_facts[row.row_index].autodiff_safe_panic else -> false
     ^local_unsafe_panic: if body_facts == .Val(row) -> modules[row.module_index].compute_facts[row.row_index].autodiff_unsafe_panic else -> false
     ^local_panic: local_safe_panic || local_unsafe_panic
     ^safe: !local_panic || (local_safe_panic && !local_unsafe_panic)
     if sema_compute_has_panic_edge(function.effects.call_edges) && !local_panic -> safe = false
-    visiting.push(function_key.copy())
+    visiting.push(position)
     if safe {
-        loop edge in modules[position.module_index].functions[position.row_index].effects.call_edges {
+        loop edge in modules[module_index].functions[row_index].effects.call_edges {
             if edge == "__jet_panic__" -> next
             target_position: sema_compute_function_position(index, edge, work) ?? next
             // A core.compute operation is the compute capability itself (see
@@ -195,27 +197,39 @@ sema_compute_forbidden_effects: fn(effects: [String]) -> [String] Never! {
 // (the tape's lock and invariant stops) add no effect to the function it
 // differentiates.
 sema_compute_autodiff_reach: fn(index: SemaComputeIndex, modules: [SemaGraphModuleResult], function_key: String, solved: [String], work: ^SemaComputeValidationWork) -> [String] Never! {
-    ^reached: [String]{}
+    ^reached: (loop _ in 0..<solved.len() -> false)
     ^panics: false
-    ^visited: [String]{}
-    ^pending: [String]{function_key.copy()}
+    ^visited: [SemaComputePosition]{}
+    ^pending: [SemaComputePosition]{}
+    if sema_compute_function_position(index, function_key, work) == .Val(start) {
+        pending.push(start)
+    } else if function_key == "__jet_panic__" {
+        panics = true
+    }
     loop pending.len() > 0 {
-        key: pending.pop() ?? break
-        if visited.contains(key) -> next
-        visited.push(key.copy())
-        position: sema_compute_function_position(index, key, work) ?? {
-            if key == "__jet_panic__" -> panics = true
-            next
-        }
-        function: modules[position.module_index].functions[position.row_index]
+        position: pending.pop() ?? break
+        if visited.contains(position) -> next
+        module_index: position.module_index
+        row_index: position.row_index
+        visited.push(position)
+        function: modules[module_index].functions[row_index]
         if function.module_name == "core.compute" -> next
         effects: if function.effects.maximal -> function.effects.solved else -> function.effects.direct
         loop effect_name in effects {
-            if !reached.contains(effect_name) -> reached.push(effect_name.copy())
+            loop solved_index in 0..<solved.len() {
+                if !reached[solved_index] && solved[solved_index] == effect_name -> reached[solved_index] = true
+            }
         }
-        loop edge in function.effects.call_edges -> pending.push(edge.copy())
+        loop edge in function.effects.call_edges {
+            if edge == "__jet_panic__" {
+                panics = true
+                next
+            }
+            target_position: sema_compute_function_position(index, edge, work) ?? next
+            if !visited.contains(target_position) -> pending.push(target_position)
+        }
     }
-    result: loop effect_name in solved if reached.contains(effect_name) || (panics && sema_effect_root(effect_name) == "Panic") -> effect_name.copy()
+    result: loop (solved_index, effect_name) in solved if reached[solved_index] || (panics && sema_effect_root(effect_name) == "Panic") -> effect_name.copy()
     result
 }
 
@@ -258,7 +272,7 @@ sema_compute_validate_autodiff_purity: fn(modules: [SemaGraphModuleResult], work
                 target: modules[target_position.module_index].functions[target_position.row_index]
                 ^forbidden: sema_compute_forbidden_effects(sema_compute_autodiff_reach(index, modules, obligation.target, target.effects.solved, work))
                 ^panic_only: sema_compute_panic_only(forbidden)
-                if panic_only && sema_compute_panic_sites_are_compute_failures(obligation.target, modules, index, [String]{}, panic_memo, work) {
+                if panic_only && sema_compute_panic_sites_are_compute_failures(obligation.target, modules, index, [SemaComputePosition]{}, panic_memo, work) {
                     ^filtered: [String]{}
                     loop effect_name in forbidden {
                         if sema_effect_root(effect_name) != "Panic" -> filtered.push(effect_name)

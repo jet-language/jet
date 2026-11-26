@@ -108,9 +108,9 @@ sema_stmt_destructure_local: fn(name: BindName, ty: Type, binding_mutable: Bool,
 // A binding refused as a duplicate name (E0118) still names what was
 // written for the statements after it, so their uses check against the
 // value bound here instead of cascading from the name it failed to replace.
-sema_stmt_shadow_refused_binding: fn(symbol: Symbol, key: String, mutable: Bool, check: ^SemaBodyCheck) Never! {
+sema_stmt_shadow_refused_binding: fn(symbol: Symbol, key: ^^String, mutable: Bool, check: ^SemaBodyCheck) Never! {
     frame: check.scopes.current
-    sema_scope_push_binding(check.scopes, SemaScopeBinding{frame: frame, symbol: symbol, key: key.copy(), mutable: mutable, access: AccessConvention.Read, integer_bounds: None, string_view: false, compiler_builtin: false})
+    sema_scope_push_binding(check.scopes, SemaScopeBinding{frame: frame, symbol: symbol, key: key, mutable: mutable, access: AccessConvention.Read, integer_bounds: None, string_view: false, compiler_builtin: false})
     sema_ownership_declare_binding(check.state, symbol, false)
 }
 

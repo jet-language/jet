@@ -141,20 +141,20 @@ ShellEnv: struct {
     }
 
     // The composed environment over the caller's inherited PATH.
-    apply_to: fn(^self, spec: ProcessSpec) -[FS, Exec, Env]> ProcessSpec StoreError! {
+    apply_to: fn(^self, spec: ^^ProcessSpec) -[FS, Exec, Env]> ProcessSpec StoreError! {
         base: sys.get("PATH") ?? ""
         self.apply_to_base(spec, base)
     }
 
     // Only the declared environment and realized PATH. Callers clear the
     // child environment first for clean-shell checks and task probes.
-    apply_clean_to: fn(^self, spec: ProcessSpec) -[FS, Exec, Env]> ProcessSpec StoreError! {
+    apply_clean_to: fn(^self, spec: ^^ProcessSpec) -[FS, Exec, Env]> ProcessSpec StoreError! {
         self.apply_to_base(spec, env_shell_clean_path())
     }
 
     // `apply_clean_to` over a cleared child environment when `clean`, else
     // `apply_to`.
-    apply_in_mode: fn(^self, spec: ProcessSpec, clean: Bool) -[FS, Exec, Env]> ProcessSpec StoreError! {
+    apply_in_mode: fn(^self, spec: ^^ProcessSpec, clean: Bool) -[FS, Exec, Env]> ProcessSpec StoreError! {
         if clean -> return self.apply_clean_to(spec.env_clear())
         self.apply_to(spec)
     }
@@ -172,7 +172,7 @@ ShellEnv: struct {
     // descriptors (recording the process handoff), then render PATH and the
     // leased variables for exactly the descriptors this spec carries. The
     // only place leased text becomes a child's environment.
-    apply_to_base: fn(^self, spec: ProcessSpec, base_path: String) -[FS, Exec, Env]> ProcessSpec StoreError! {
+    apply_to_base: fn(^self, spec: ^^ProcessSpec, base_path: String) -[FS, Exec, Env]> ProcessSpec StoreError! {
         ^out: spec
         ^binding: LeaseBinding.empty()
         loop index in 0..<self.cache_leases.len() {

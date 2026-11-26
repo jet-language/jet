@@ -192,33 +192,38 @@ sema_call_live: fn(member: String, alias: String, args: [CallArg], type_args: [T
     // closure that re-runs the source owns a copy of it, and a call that runs
     // nothing later (`push`, `invalidate`) only reads it into the key.
     keeps_run: member == "live" || member == "subscribe"
+    positional.reverse()
+    loop _ in 0..<first -> _: positional.pop()
+    ^source_params: source.params.move()
+    source_params.reverse()
     loop index in 0..<supplied {
-        argument: positional[index + first]
-        encodes: sema_type_bound_satisfied(graph, source.params[index], "Encode", check.environment.module_identity) == (Val(true))
+        argument: positional.pop() ?? break
+        param_ty: source_params.pop() ?? break
+        encodes: sema_type_bound_satisfied(graph, param_ty, "Encode", check.environment.module_identity) == (Val(true))
         borrowed: sema_copy_site_borrowed_param(argument.expr, check.scopes) != None
-        given: argument.expr.copy()  // copy: `positional` keeps its argument
-        param_ty: source.params[index].copy()  // copy: the source signature keeps its parameter types
+        argument_span: argument.span
+        given: argument.expr.move()
         if borrowed && encodes && !keeps_run {
-            keys.push(sema_live_module_call(alias, arg_member, [Type]{param_ty}, [CallArg]{sema_live_arg(given, argument.span)}, argument.span))
+            keys.push(sema_live_module_call(alias, arg_member, [Type]{param_ty}, [CallArg]{sema_live_arg(given, argument_span)}, argument_span))
             next
         }
         local_name: "__jet_live_{span.start}_{index}"
-        init: if borrowed -> Expr.Copy{value: given, span: argument.span, id: AST_NODE_GENERATED} else -> given
-        ^binding: ast_binding(local_name, argument.span, false, init, None)
+        init: if borrowed -> Expr.Copy{value: given, span: argument_span, id: AST_NODE_GENERATED} else -> given
+        ^binding: ast_binding(local_name, argument_span, false, init, None)
         binding.ty = Val(param_ty)
         statement: sema_stmt_check_binding(binding, None, check) ?? {
             sema_single_use_leave_scope(check)
             return sema_live_rejected()
         }
         body.push(statement)
-        read: Expr.Ident{name: local_name, span: argument.span, id: AST_NODE_GENERATED}
+        read: Expr.Ident{name: local_name, span: argument_span, id: AST_NODE_GENERATED}
         // An argument with no encoding (a database scope, a handle) does not
         // tell bindings apart.
         if encodes {
-            keys.push(sema_live_module_call(alias, arg_member, [Type]{}, [CallArg]{sema_live_arg(read.copy(), argument.span)}, argument.span))
-        } else { keys.push(sema_live_string("_", argument.span)) }
-        reads.push(sema_live_arg(read, argument.span))
-        takes.push(NamedSpan{name: "{local_name}", span: argument.span})
+            keys.push(sema_live_module_call(alias, arg_member, [Type]{}, [CallArg]{sema_live_arg(read.copy(), argument_span)}, argument_span))
+        } else { keys.push(sema_live_string("_", argument_span)) }
+        reads.push(sema_live_arg(read, argument_span))
+        takes.push(NamedSpan{name: "{local_name}", span: argument_span})
     }
     wire: sema_live_string(source.wire, span)
     key_name: "__jet_live_{span.start}_key"
@@ -235,16 +240,18 @@ sema_call_live: fn(member: String, alias: String, args: [CallArg], type_args: [T
     // The pushed value is checked against the source's value type here, so a
     // mismatch names `push` rather than the call it lowers to.
     ^pushed: Expr?{None}
-    if value == .Val(given) {
+    if value != None {
+        given: value ?? Expr.Absent{span: span, id: AST_NODE_GENERATED}
+        given_span: expr_span(given)
         value_name: "__jet_live_{span.start}_value"
-        ^value_binding: ast_binding(value_name, expr_span(given), false, given.copy(), None)  // copy: `value` keeps the caller's expression
+        ^value_binding: ast_binding(value_name, given_span, false, given, None)
         value_binding.ty = Val(source.ok.copy())  // copy: the source signature keeps its value type
         value_statement: sema_stmt_check_binding(value_binding, None, check) ?? {
             sema_single_use_leave_scope(check)
             return sema_live_rejected()
         }
         body.push(value_statement)
-        pushed = Val(Expr.Ident{name: value_name, span: expr_span(given), id: AST_NODE_GENERATED})
+        pushed = Val(Expr.Ident{name: value_name, span: given_span, id: AST_NODE_GENERATED})
     }
     // A closure's call keeps its own node ids, so the Remote's receiver is
     // checked as the written call it is.
@@ -252,8 +259,8 @@ sema_call_live: fn(member: String, alias: String, args: [CallArg], type_args: [T
     run: Expr.Lambda{lambda: Lambda{take_names: takes, params: [LambdaParam]{}, effects: None, body: LambdaBody.Expr{value: invocation}, span: span, meta: ast_empty_lambda_meta()}, id: AST_NODE_GENERATED}
     // Only `push` takes a value, and a push without one was refused above.
     lowered: if {
-        member == "live" -> sema_live_module_call(alias, lowered_member, [Type]{source.ok.copy(), source.err.copy()}, [CallArg]{sema_live_arg(wire, span), sema_live_arg(key, span), sema_live_arg(run, span)}, span)
-        member == "subscribe" -> sema_live_module_call(alias, lowered_member, [Type]{source.ok.copy(), source.err.copy()}, [CallArg]{sema_live_arg(wire, span), sema_live_arg(key, span), sema_live_arg(every ?? Expr.Absent{span: span, id: AST_NODE_GENERATED}, span), sema_live_arg(run, span)}, span)
+        member == "live" -> sema_live_module_call(alias, lowered_member, [Type]{source.ok.move(), source.err.move()}, [CallArg]{sema_live_arg(wire, span), sema_live_arg(key, span), sema_live_arg(run, span)}, span)
+        member == "subscribe" -> sema_live_module_call(alias, lowered_member, [Type]{source.ok.move(), source.err.move()}, [CallArg]{sema_live_arg(wire, span), sema_live_arg(key, span), sema_live_arg(every ?? Expr.Absent{span: span, id: AST_NODE_GENERATED}, span), sema_live_arg(run, span)}, span)
         pushed == .Val(pushed_value) -> sema_live_module_call(alias, lowered_member, [Type]{source.ok.move()}, [CallArg]{sema_live_arg(wire, span), sema_live_arg(key, span), sema_live_arg(pushed_value, span)}, span)
         whole_source -> sema_live_module_call(alias, lowered_member, [Type]{}, [CallArg]{sema_live_arg(wire, span)}, span)
         else -> sema_live_module_call(alias, lowered_member, [Type]{}, [CallArg]{sema_live_arg(wire, span), sema_live_arg(key, span)}, span)
@@ -497,12 +504,11 @@ sema_live_subscribable: fn(name: String, effect_bound: [EffectRowEntry]?, span: 
 }
 
 sema_live_codable: fn(graph: SemaRegistrationGraph, name: String, role: String, ty: Type, check: ^SemaBodyCheck, span: Span) -> Bool {
-    missing: loop codec in owned_trait_codec_names() {
+    loop codec in owned_trait_codec_names() {
         if sema_type_bound_satisfied(graph, ty, codec, check.environment.module_identity) != (Val(true)) {
-            break codec.copy()
+            check.diagnostics.push(sema_error("E0112", span, "`{name}`'s {role} type {sema_type_show(ty)} isn't `{codec}`", "a live binding stores and sends its source's result and error as encoded data", "derive `Encode` and `Decode` for {sema_type_show(ty)}"))
+            return false
         }
-    } ?? ""
-    if missing == "" -> return true
-    check.diagnostics.push(sema_error("E0112", span, "`{name}`'s {role} type {sema_type_show(ty)} isn't `{missing}`", "a live binding stores and sends its source's result and error as encoded data", "derive `Encode` and `Decode` for {sema_type_show(ty)}"))
-    false
+    }
+    true
 }

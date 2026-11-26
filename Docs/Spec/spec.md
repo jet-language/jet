@@ -2184,6 +2184,56 @@ for the complete report shape and fixes. (S36)
 type expected at that expression. Native adapters pass those facts to the
 shared stop renderer; backend carrier names are not source type names.
 
+### Errors with two audiences (`Describe`)
+
+Every error crosses boundaries with two distinct audiences: external callers
+(HTTP clients, CLI users, job status pollers, MCP tool callers) and operators
+(logs, telemetry, incident records). The ambient Prelude trait `Describe`
+(`Core/Prelude/Prelude.jet`) separates the two texts:
+
+```jet
+Describe: trait {
+    public: fn(self) -> String Never!,
+    detail: fn(self) -> String Never!,
+}
+```
+
+- `public(self) -> String Never!` returns safe, caller-facing text. It must
+  never include causes, filesystem paths, stack or guest trap frames, SQL
+  queries, internal host addresses, OS error codes, or secret values.
+- `detail(self) -> String Never!` returns the full operator-facing diagnostic
+  description, including any cause chain.
+
+The default `Err` implements `Describe` with safe defaults: `Err.public()`
+never echoes `self.message` or `self.cause`; if `self.code` matches a safe
+opaque identifier token (`[A-Za-z0-9_-]`, 1 to 64 bytes), it returns
+`"Request failed (<code>)."`, otherwise `"An internal error occurred."`.
+`Err.detail()` returns `self.message` (prefixed with `[<code>] ` when present)
+followed by every nested `self.cause` as `\ncaused by: ...`.
+
+Core error types (`IOError`, `DBError`, `HTTPError`, `NetError`, `AuthError`,
+`ServiceError`, `PluginError`, `EncodingError`, `DataError`, `TaskFailure`,
+`ParseError`, `SendError`, `RangeError`, `AllocError`, and siblings) implement
+`Describe` so `public()` reports only a safe failure category while `detail()`
+retains full diagnostics. Each Core boundary chooses the audience automatically:
+
+- **HTTP (`core.http.server`, `core.web`):** `HTTPMux` and `web.App` answer
+  failed handlers and `respond_error` calls with `error.public()` while
+  recording `HTTPErrorRecord` (carrying `error.detail()`, request ID, method,
+  path, and status) to operator `on_error` sinks and `error_records()`.
+- **CLI (`core.args`):** `CLIErrorReport.from_error` and `ArgsSpec.report_error`
+  / `fail_described` write `error.public()` to stderr for the caller and
+  preserve/log `error.detail()` for operators.
+- **Jobs (`core.jobs`):** `JobError.from_describe` and
+  `JobQueue.fail_described` / `fail_described_logged` store `error.public()` on
+  caller-visible `JobQueueReceipt.error_reason` and `JobQueueEvent.reason`, and
+  `error.detail()` on operator-visible `JobQueueRecord.error.detail`.
+- **MCP / tool results (`core.service`):** `ToolErrorReport.from_error` renders
+  caller JSON (`caller_json()`) strictly from `error.public()` while keeping
+  `error.detail()` on `operator_detail` for operator logging.
+
+See `Examples/ErrorsAndEffects/Errors/TwoAudienceErrors.jet`.
+
 A function diverges when no path of its body returns to its caller: every
 path ends in `panic`, `#Todo`, a `loop` with no `break`, or a call of a
 function that diverges. The compiler decides this once per bundle as a least

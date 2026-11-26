@@ -8,6 +8,8 @@
 use jet_foundation.[
     access_sigil,
     ast_comptime_generated_path,
+    CallContractRow,
+    compute_shape_dimensions,
     dimension_identity,
     EnumDef,
     FnBody,
@@ -15,6 +17,7 @@ use jet_foundation.[
     ImportDecl,
     Item,
     MARKER_OPEN,
+    measure_expression,
     ModuleCap,
     Name,
     NameTable,
@@ -25,6 +28,7 @@ use jet_foundation.[
     name_table_sized,
     name_text,
     Param,
+    ParamZone,
     PublicAPIItem,
     Span,
     StructDef,
@@ -32,9 +36,9 @@ use jet_foundation.[
     TraitImplBlock,
     TraitMethodSig,
     Type,
+    type_is_unit_callable_return,
     type_name,
     TypeParam,
-    TypeTupleField,
     unit_family_distinct_defs,
     UnitFamilyDef,
 ]
@@ -258,21 +262,21 @@ sema_public_api_spelled: fn(spellings: SemaPublicAPISpellings, name: String) -> 
 // bare name, its own family row carrying its identity. A type an inline
 // module's lowering lifted reads as its source path (`bench.Report`).
 sema_public_api_spellings: fn(items: [Item], modules: [String:Bool], inherited: SemaPublicAPISpellings) -> SemaPublicAPISpellings Never! {
-    ^local: [String]{}
+    ^local: name_table_sized(items.len() + 2)
     loop item in items {
         if item == {
             .UnitFamily(definition) -> {
                 if definition.resolved_owner != Val("core.units") {
                     loop distinct in unit_family_distinct_defs(definition) {
-                        local.push(distinct.name)
+                        ^_: name_intern(local, distinct.name)
                     }
                 }
             }
-            .Struct(definition) -> { local.push(definition.name.copy()) }
-            .Enum(definition) -> { local.push(definition.name.copy()) }
-            .Distinct(definition) -> { local.push(definition.name.copy()) }
-            .TypeAlias(definition) -> { local.push(definition.name.copy()) }
-            .Trait(definition) -> local.push(definition.name.copy())
+            .Struct(definition) -> { ^_: name_intern(local, definition.name) }
+            .Enum(definition) -> { ^_: name_intern(local, definition.name) }
+            .Distinct(definition) -> { ^_: name_intern(local, definition.name) }
+            .TypeAlias(definition) -> { ^_: name_intern(local, definition.name) }
+            .Trait(definition) -> { ^_: name_intern(local, definition.name) }
             .Func(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
@@ -280,19 +284,21 @@ sema_public_api_spellings: fn(items: [Item], modules: [String:Bool], inherited: 
     loop (id, spelled) in inherited.spelled {
         if name_index(spelled) == 0 -> next
         name: inherited.names.texts[id]
-        if !local.contains(name) {
+        if name_find(local, name) == None {
             sema_public_api_respell(units, name, name_text(inherited.texts, spelled))
         }
     }
-    loop name in local {
-        if modules.len() == 0 -> break
-        spelled: sema_public_api_lifted_name(name, "", modules) ?? next
-        if spelled != name -> sema_public_api_respell(units, name, spelled)
+    if modules.len() > 0 {
+        loop id in 1..<local.texts.len() {
+            name: local.texts[id]
+            spelled: sema_public_api_lifted_name(name, "", modules) ?? next
+            if spelled != name -> sema_public_api_respell(units, name, spelled)
+        }
     }
     loop item in items {
         if item == .UnitFamily(definition) && definition.resolved_owner == Val("core.units") && definition.resolved_dimension == .Val(dimension) {
             loop distinct in unit_family_distinct_defs(definition) {
-                if !local.contains(distinct.name) {
+                if name_find(local, distinct.name) == None {
                     sema_public_api_respell(units, distinct.name, "{distinct.name}[{dimension_identity(dimension)}]")
                 }
             }
@@ -305,29 +311,98 @@ sema_public_api_spellings: fn(items: [Item], modules: [String:Bool], inherited: 
 // sema_public_api_spellings names in its public form.
 sema_public_api_type: fn(ty: Type, units: SemaPublicAPISpellings) -> String Never! {
     if units.spelled.len() <= 1 -> return type_name(ty)
-    type_name(sema_public_api_unit_types(ty, units))
+    sema_public_api_type_formatted(ty, units)
 }
 
-sema_public_api_unit_types: fn(ty: Type, units: SemaPublicAPISpellings) -> Type Never! {
+priv sema_public_api_marked_type: fn(ty: Type, units: SemaPublicAPISpellings) -> String Never! {
     if ty == {
-        .Named(name) -> Type.Named{name: sema_public_api_spelled(units, name) ?? name.copy()}
-        .Apply(name, args) -> Type.Apply{name: name.copy(), args: loop arg in args -> sema_public_api_unit_types(arg, units)}
-        .List(inner) -> Type.List{element: sema_public_api_unit_types(inner, units)}
-        .Shared(inner) -> Type.Shared{inner: sema_public_api_unit_types(inner, units)}
-        .Option(inner) -> Type.Option{inner: sema_public_api_unit_types(inner, units)}
-        .Map(key, key_span, value) -> Type.Map{key: sema_public_api_unit_types(key, units), key_span: key_span.copy(), value: sema_public_api_unit_types(value, units)}
-        .Result(ok, err) -> Type.Result{ok: sema_public_api_unit_types(ok, units), err: sema_public_api_unit_types(err, units)}
-        .FixedList(elem, len) -> Type.FixedList{elem: sema_public_api_unit_types(elem, units), len: len.copy()}
-        .Tagged(marker, inner) -> Type.Tagged{marker: marker.copy(), inner: sema_public_api_unit_types(inner, units)}
-        .Union(members) -> Type.Union{members: loop member in members -> sema_public_api_unit_types(member, units)}
-        .Case(name, payload) -> Type.Case{name: name.copy(), payload: sema_public_api_unit_types(payload, units)}
-        .Tuple(fields) -> Type.Tuple{fields: loop field in fields -> TypeTupleField{name: field.name.copy(), ty: sema_public_api_unit_types(field.ty, units)}}
-        .Fn(params, ret, effect_bound, param_contract, call_metadata, return_view_provenance) -> {
-            ^shown: Type?{None}
-            if ret == .Val(value) -> shown = Val(sema_public_api_unit_types(value, units))
-            Type.Fn{params: loop param in params -> sema_public_api_unit_types(param, units), ret: shown, effect_bound: effect_bound.copy(), param_contract: param_contract.copy(), call_metadata: call_metadata.copy(), return_view_provenance: return_view_provenance.copy()}
+        .Union(members) -> {
+            names: loop member in members -> sema_public_api_type_formatted(member, units)
+            "({names.join(" | ")})"
         }
-        .Int | .Float | .Bool | .String | .Char | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Quantity(_, _) | .Measure(_) -> ty.copy()
+        .Fn(_, _, _, _, _, _) | .Result(_, _) | .Tagged(_, _) -> "({sema_public_api_type_formatted(ty, units)})"
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Quantity(_, _) | .Measure(_) | .Case(_, _) -> sema_public_api_type_formatted(ty, units)
+    }
+}
+
+priv sema_public_api_fn_param_names: fn(params: [Type], param_contract: [CallContractRow]?, units: SemaPublicAPISpellings) -> String Never! {
+    ^names: [String]{}
+    contracts: param_contract ?? [CallContractRow]{}
+    ^star_done: false
+    loop (i, param) in params {
+        zone: if i < contracts.len() -> contracts[i].zone else -> ParamZone.Either
+        if zone == ParamZone.LabelOnly && !star_done {
+            names.push("*")
+            star_done = true
+        }
+        label: if i < contracts.len() -> contracts[i].label else -> ""
+        shown: sema_public_api_type_formatted(param, units)
+        if label == "" -> names.push(shown) else -> names.push("{label}: {shown}")
+        next_zone: if i + 1 < contracts.len() -> contracts[i + 1].zone else -> ParamZone.Either
+        if zone == ParamZone.PositionalOnly && next_zone != ParamZone.PositionalOnly {
+            names.push("/")
+        }
+    }
+    names.join(", ")
+}
+
+priv sema_public_api_type_formatted: fn(ty: Type, units: SemaPublicAPISpellings) -> String Never! {
+    if ty == {
+        .Named(name) -> sema_public_api_spelled(units, name) ?? name.copy()
+        .Apply(name, args) -> if {
+            name == "Ptr" && args.len() == 1 -> "*{sema_public_api_type_formatted(args[0], units)}"
+            name == "@" && args.len() == 1 -> "@{sema_public_api_type_formatted(args[0], units)}"
+            compute_shape_dimensions(ty) != None -> type_name(ty)
+            else -> {
+                shown: loop arg in args -> sema_public_api_type_formatted(arg, units)
+                "{name}<{shown.join(", ")}>"
+            }
+        }
+        .List(inner) -> "[{sema_public_api_type_formatted(inner, units)}]"
+        .Shared(inner) -> "Shared<{sema_public_api_type_formatted(inner, units)}>"
+        .Option(inner) -> "{sema_public_api_marked_type(inner, units)}?"
+        .Map(key, _, value) -> "[{sema_public_api_type_formatted(key, units)}:{sema_public_api_type_formatted(value, units)}]"
+        .Result(ok, err) -> {
+            if ok == (Type.Named{name: "Unit"}) -> return "{sema_public_api_marked_type(err, units)}!"
+            if err != (Type.Named{name: "Err"}) -> return "{sema_public_api_marked_type(ok, units)} {sema_public_api_marked_type(err, units)}!"
+            sema_public_api_type_formatted(ok, units)
+        }
+        .FixedList(elem, len) -> "[{sema_public_api_type_formatted(elem, units)}#{measure_expression(len)}]"
+        .Tagged(marker, inner) -> if marker == {
+            .User(name) -> "#{name} {sema_public_api_type_formatted(inner, units)}"
+            .Internal(_) -> sema_public_api_type_formatted(inner, units)
+        }
+        .Union(members) -> {
+            names: loop member in members -> sema_public_api_type_formatted(member, units)
+            names.join(" | ")
+        }
+        .Case(name, payload) -> "{name}({sema_public_api_type_formatted(payload, units)})"
+        .Tuple(fields) -> {
+            if fields.len() > 0 && fields[0].name == "" {
+                types: loop field in fields -> sema_public_api_type_formatted(field.ty, units)
+                return "({types.join(", ")})"
+            }
+            names: loop field in fields -> "{field.name}: {sema_public_api_type_formatted(field.ty, units)}"
+            "{{{names.join(", ")}}}"
+        }
+        .Fn(params, ret, effect_bound, param_contract, _, _) -> {
+            ^out: "fn({sema_public_api_fn_param_names(params, param_contract, units)})"
+            has_ret: if ret == .Val(value) -> !type_is_unit_callable_return(value) else -> false
+            ^unit_fallible: false
+            if has_ret && ret == .Val(value) {
+                if value == .Result(ok, _) -> unit_fallible = ok == Type.Named{name: "Unit"}
+            }
+            if {
+                effect_bound == .Val(rows) -> {
+                    effect_names: loop row in rows -> row.name
+                    out = "{out} -[{effect_names.join(", ")}]>"
+                }
+                has_ret && !unit_fallible -> { out = "{out} ->" }
+            }
+            if has_ret && ret == .Val(value) -> out = "{out} {sema_public_api_type_formatted(value, units)}"
+            out
+        }
+        .Int | .Float | .Bool | .String | .Char | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Quantity(_, _) | .Measure(_) -> type_name(ty)
     }
 }
 
@@ -450,17 +525,9 @@ sema_public_api_impls: fn(owner: String, blocks: [TraitImplBlock], rows: ^[Publi
 // Allowed effects sort first, then denials.
 sema_public_api_cap: fn(cap: ModuleCap?, name: String, rows: ^[PublicAPIItem]) Never! {
     if cap == .Val(written) {
-        ^allowed: [String]{}
-        ^denied: [String]{}
-        loop entry in written.entries {
-            if entry.name.starts_with("!") -> denied.push(entry.name.copy()) else {
-                allowed.push(entry.name.copy())
-            }
-        }
-        allowed.sort()
-        denied.sort()
-        allowed.extend(denied.move())
-        rows.push(PublicAPIItem{kind: "cap", name: name.copy(), signature: "cap {name} #FX({allowed.join(", ")})"})
+        ^entries: loop entry in written.entries -> entry.name.copy()
+        entries.sort_by(fn(a: String, b: String) { ((if a.starts_with("!") -> 1 else -> 0) <=> (if b.starts_with("!") -> 1 else -> 0)).then(a <=> b) })
+        rows.push(PublicAPIItem{kind: "cap", name: name.copy(), signature: "cap {name} #FX({entries.join(", ")})"})
     }
 }
 

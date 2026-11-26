@@ -411,7 +411,7 @@ sema_function_check_passes: fn(func: Func, owner_key: String, function_kind: TFu
         sema_scope_rollback(module_scopes, mark)
         loop answer in checked.eval_answers.move() -> sema_eval_answer_put(eval_answers, answer)
         shares: sema_function_accept_share_sites(share_known, share_found, environment, program)
-        retypes: sema_expr_number_accept_retypes(number_known, number_found)
+        retypes: sema_expr_number_accept_retypes(number_known, number_found.move())
         if !shares && !retypes {
             graph: program.registration_graph
             instance: sema_name_instance_span(graph, environment.module_identity, func.name)

@@ -371,8 +371,8 @@ sema_cli_entry_spec: fn(definition: StructDef, items: [Item], type_ref: String) 
     ^root: [SemaCLIInput]{}
     if standard {
         // `#CLI(Standard)` adds the shared verbosity, color and version inputs.
-        root.push(sema_cli_entry_input("verbose", "v", "print extra detail", true, Type.Bool, None, "", false, false))
-        root.push(sema_cli_entry_input("quiet", "q", "suppress normal output", true, Type.Bool, None, "", false, false))
+        root.push(SemaCLIInput{name: "verbose", short: "v", help: "print extra detail", meta: "", flag: true, kind: 4, choices: [String]{}, default: None, env: "", required: false, positional: false})
+        root.push(SemaCLIInput{name: "quiet", short: "q", help: "suppress normal output", meta: "", flag: true, kind: 4, choices: [String]{}, default: None, env: "", required: false, positional: false})
         root.push(SemaCLIInput{name: "color", short: "", help: "control terminal color", meta: "MODE", flag: false, kind: 3, choices: [String]{"auto", "always", "never"}, default: None, env: "", required: false, positional: false})
     }
     ^literal: [String]{}
@@ -384,8 +384,8 @@ sema_cli_entry_spec: fn(definition: StructDef, items: [Item], type_ref: String) 
         flag: sema_checked_field_shape_names(definition, field).args
         name: sema_cli_entry_text(flag)
         help: sema_cli_entry_doc(field.serde_markers) ?? "value for --{flag}"
-        short: sema_registration_cli_arg_text(field.serde_markers, "short") ?? ""
-        env: sema_registration_cli_arg_text(field.serde_markers, "env") ?? ""
+        short: sema_registration_cli_arg_text(field.serde_markers, "short")
+        env: sema_registration_cli_arg_text(field.serde_markers, "env")
         flag_only: sema_registration_cli_arg_flag_only(field.serde_markers)
         slot: root.len()
         source: if direct -> "__v{slot}" else -> "{sema_cli_call("CLIValue")}(__parsed, {name})"
@@ -533,15 +533,15 @@ sema_cli_entry_help: fn(description: String?, local: [SemaCLIInput], commands: [
             s = "{s}  {sema_cli_entry_pad(sema_cli_entry_label(input), 24)} {input.help}\n"
             next
         }
-        ^note: input.help.copy()
-        if input.required -> note = "{note} (required)"
+        ^suffix: ""
+        if input.required -> suffix = "{suffix} (required)"
         if input.default == .Val(value) {
-            note = "{note} [default: {value}]"
-            if input.env.bytes().len() > 0 -> note = "{note} [precedence: flag > env > default]"
+            suffix = "{suffix} [default: {value}]"
+            if input.env.bytes().len() > 0 -> suffix = "{suffix} [precedence: flag > env > default]"
         }
-        if input.env.bytes().len() > 0 -> note = "{note} [env: {input.env}]"
-        if input.kind == 3 -> note = "{note} [choices: {input.choices.join(", ")}]"
-        s = "{s}  {sema_cli_entry_pad(sema_cli_entry_label(input), 24)} {note}\n"
+        if input.env.bytes().len() > 0 -> suffix = "{suffix} [env: {input.env}]"
+        if input.kind == 3 -> suffix = "{suffix} [choices: {input.choices.join(", ")}]"
+        s = "{s}  {sema_cli_entry_pad(sema_cli_entry_label(input), 24)} {input.help}{suffix}\n"
     }
     loop command in commands {
         s = "{s}  {sema_cli_entry_pad(command.name, 24)} {command.description ?? ""}\n"
@@ -841,30 +841,34 @@ sema_cli_entry_next: fn(lines: ^[String]) {
 // `fallback` on any other. A word an earlier arm holds is dropped from a
 // later one, so the first input to name a word keeps it, as the first of a
 // chain of guards would. With no arm left, `fallback` runs unguarded.
-sema_cli_entry_table: fn(lines: ^[String], subject: String, arms: [SemaCLIArm], fallback: [String]) {
+sema_cli_entry_table: fn(lines: ^[String], subject: String, arms: ^^[SemaCLIArm], fallback: ^^[String]) {
     ^seen: [String]{}
     ^table: [String]{}
-    loop arm in arms {
-        patterns: loop pattern in arm.patterns -> {
+    ^remaining: arms
+    remaining.reverse()
+    loop remaining.len() > 0 {
+        ^arm: remaining.pop() ?? break
+        ^joined: ""
+        loop pattern in arm.patterns {
             if seen.contains(pattern) -> next
             seen.push(pattern.copy())
-            pattern.copy()
+            if joined.bytes().len() > 0 -> joined = "{joined} | {pattern}" else -> joined = "{pattern}"
         }
-        if patterns.len() == 0 -> next
-        table.push("    {patterns.join(" | ")} -> {{")
-        loop line in arm.body -> table.push(line.copy())
+        if joined.bytes().len() == 0 -> next
+        table.push("    {joined} -> {{")
+        table.extend(arm.body.move())
         table.push("    }}")
     }
     if table.len() == 0 {
-        loop line in fallback -> lines.push(line.copy())
-        return
+        lines.extend(fallback)
+    } else {
+        lines.push("    if {subject} == {{")
+        lines.extend(table.move())
+        lines.push("    else -> {{")
+        lines.extend(fallback)
+        lines.push("    }}")
+        lines.push("    }}")
     }
-    lines.push("    if {subject} == {{")
-    lines.extend(table.move())
-    lines.push("    else -> {{")
-    loop line in fallback -> lines.push(line.copy())
-    lines.push("    }}")
-    lines.push("    }}")
 }
 
 // The text expression `message` followed by the usage text.
@@ -912,7 +916,7 @@ sema_cli_entry_bind: fn(lines: ^[String], spec: SemaCLIEntrySpec, type_ref: Stri
 // The wrapper of `wrapped` over `definition`, which the entry file names
 // `type_ref`; `items` hold its bound functions.
 sema_cli_entry_source: fn(definition: StructDef, items: [Item], type_ref: String, wrapped: SemaCLIEntryTarget) -> String? {
-    spec: sema_cli_entry_spec(definition, items, type_ref) ?? return None
+    ^spec: sema_cli_entry_spec(definition, items, type_ref) ?? return None
     ^lines: [String]{}
     if spec.commands.len() == 0 {
         // The parser is a function of its own, so its locals end before the
@@ -926,21 +930,25 @@ sema_cli_entry_source: fn(definition: StructDef, items: [Item], type_ref: String
         // would be an immutable local whose call reaches only code
         // (LocalValues.jet), so every compile would stage it, fail to compute
         // it while building, and check the whole program again.
-        callee: if wrapped.module_alias == .Val(alias) -> "{alias}.{wrapped.function}" else -> wrapped.function.copy()
         parse: wrapped.wrapper.replace(SEMA_CLI_ENTRY_NAME, "__jet_cli_parse")
         sema_cli_entry_parse(lines, spec, "__jet_cli_process.exit(0)", false, false, true)
         sema_cli_entry_bind(lines, spec, type_ref)
         lines.push("    __args")
         copied: loop field in definition.fields if field.computed == None -> "{field.name}: __p.{field.name}"
-        return Val("{parse}: fn(__argv: [String]) -> {type_ref} {{\n{lines.join("\n")}\n}}\n\n{wrapped.wrapper}: fn() {{\n    __argv: {sema_cli_call("CLIArgv")}()\n    __p: {parse}(__argv)\n    {callee}({type_ref}{{{copied.join(", ")}}})\n}}\n")
+        callee_prefix: if wrapped.module_alias == .Val(alias) -> "{alias}." else -> ""
+        return Val("{parse}: fn(__argv: [String]) -> {type_ref} {{\n{lines.join("\n")}\n}}\n\n{wrapped.wrapper}: fn() {{\n    __argv: {sema_cli_call("CLIArgv")}()\n    __p: {parse}(__argv)\n    {callee_prefix}{wrapped.function}({type_ref}{{{copied.join(", ")}}})\n}}\n")
     }
     sema_cli_entry_parse(lines, spec, "return", false, false, false)
     sema_cli_entry_bind(lines, spec, type_ref)
     lines.push("    __command: {sema_cli_call("CLICommandName")}(__parsed)")
     // One ordered table, so a program with many commands reads as a dispatch
     // and no lint takes its arms for adjacent guards over one subject.
-    sema_cli_entry_table(lines, "__command", spec.commands, ["    return"])
+    sema_cli_entry_table(lines, "__command", sema_cli_entry_spec_commands(spec.move()), ["    return"])
     Val("{wrapped.wrapper}: fn() {{\n{lines.join("\n")}\n}}\n")
+}
+
+priv sema_cli_entry_spec_commands: fn(spec: ^^SemaCLIEntrySpec) -> [SemaCLIArm] Never! {
+    spec.commands
 }
 
 // `args.decode<T>()` and `T.merge(args, settings)` for each `#CLI` struct
@@ -1029,22 +1037,23 @@ sema_cli_entry_command: fn(command: String, description: String?, params: [Param
             labeled = true
         }
         flag: label.replace("_", "-")
+        flag_text: sema_cli_entry_text(flag)
         help: "value for --{flag}"
         ^value: ""
         if param.ty == .Bool {
-            inputs.push(sema_cli_entry_input(flag, "", help, true, Type.Bool, None, "", false, false))
-            value = "{sema_cli_call("CLIFlag")}(__parsed, {sema_cli_entry_text(flag)})"
+            inputs.push(sema_cli_entry_input(flag, None, help, true, Type.Bool, None, None, false, false))
+            value = "{sema_cli_call("CLIFlag")}(__parsed, {flag_text})"
         } else if param.ty == .Option(inner) {
-            inputs.push(sema_cli_entry_input(flag, "", help, false, inner, None, "", false, false))
-            value = sema_cli_entry_optional(inner, "{sema_cli_call("CLIValue")}(__parsed, {sema_cli_entry_text(flag)})") ?? return None
+            inputs.push(sema_cli_entry_input(flag, None, help, false, inner, None, None, false, false))
+            value = sema_cli_entry_optional(inner, "{sema_cli_call("CLIValue")}(__parsed, {flag_text})") ?? return None
         } else {
             ^default: String?{None}
             if param.default == .Val(expr) {
                 default = Val(sema_cli_entry_default(expr) ?? return None)
             }
             required: default == None
-            inputs.push(sema_cli_entry_input(flag, "", help, false, param.ty, default, "", required, required))
-            value = sema_cli_entry_value(param.ty, "{sema_cli_call("CLIValue")}(__parsed, {sema_cli_entry_text(flag)})") ?? return None
+            inputs.push(sema_cli_entry_input(flag, None, help, false, param.ty, default, None, required, required))
+            value = sema_cli_entry_value(param.ty, "{sema_cli_call("CLIValue")}(__parsed, {flag_text})") ?? return None
         }
         if labeled -> arguments.push("{label}: {value}") else -> arguments.push(value)
     }
@@ -1053,11 +1062,12 @@ sema_cli_entry_command: fn(command: String, description: String?, params: [Param
 }
 
 // One spec input. A presence flag takes no value, default or variable.
-sema_cli_entry_input: fn(flag: String, short: String, help: String, is_flag: Bool, ty: Type, default: String?, env: String, required: Bool, positional: Bool) -> SemaCLIInput Never! {
+sema_cli_entry_input: fn(flag: ^^String, short: ^^String?, help: ^^String, is_flag: Bool, ty: Type, default: ^^String?, env: ^^String?, required: Bool, positional: Bool) -> SemaCLIInput Never! {
     if is_flag {
-        return SemaCLIInput{name: flag.copy(), short: short.copy(), help: help.copy(), meta: "", flag: true, kind: 4, choices: [String]{}, default: None, env: "", required: false, positional: false}
+        return SemaCLIInput{name: flag, short: short ?? "", help: help, meta: "", flag: true, kind: 4, choices: [String]{}, default: None, env: "", required: false, positional: false}
     }
-    SemaCLIInput{name: flag.copy(), short: short.copy(), help: help.copy(), meta: unicode.upper(flag.replace("-", "_")), flag: false, kind: sema_cli_entry_kind(ty), choices: [String]{}, default: default.copy(), env: env.copy(), required: required, positional: positional}
+    meta: unicode.upper(flag.replace("-", "_"))
+    SemaCLIInput{name: flag, short: short ?? "", help: help, meta: meta, flag: false, kind: sema_cli_entry_kind(ty), choices: [String]{}, default: default, env: env ?? "", required: required, positional: positional}
 }
 
 // `core.args` CLI_TEXT 0, CLI_INT 1, CLI_FLOAT 2, CLI_BOOL 4.

@@ -97,8 +97,7 @@ sema_authority_expr_escape: fn(expr: Expr, handle: String) -> Span? {
             if found != None -> return found
             sema_authority_exprs_escape(loop step in steps -> step.value, handle)
         }
-        // copy: `left` and `right` are payloads of read parameter `expr`, which keeps the originals; the list literal owns `left` and `right`
-        .Binary(_, left, right, _, _) -> sema_authority_exprs_escape([Expr]{left.copy(), right.copy()}, handle)
+        .Binary(_, left, right, _, _) -> if sema_authority_expr_escape(left, handle) == .Val(found) -> Val(found) else -> sema_authority_expr_escape(right, handle)
         .CompareChain(operands, _, _, _, _) -> sema_authority_exprs_escape(operands, handle)
         .Call(call, _) -> sema_authority_args_escape(call.args, handle, true)
         .CallValue(callee, args, _, _) -> {
@@ -112,8 +111,7 @@ sema_authority_expr_escape: fn(expr: Expr, handle: String) -> Span? {
             if range == .Val(value) -> return sema_authority_expr_escape(value, handle)
             sema_authority_exprs_escape([Expr]{start, end}, handle)
         }
-        // copy: `start` and `end` are payloads of read parameter `expr`, which keeps the originals; the list literal owns `start` and `end`
-        .Range(start, end, _, _, _) -> sema_authority_exprs_escape([Expr]{start.copy(), end.copy()}, handle)
+        .Range(start, end, _, _, _) -> if sema_authority_expr_escape(start, handle) == .Val(found) -> Val(found) else -> sema_authority_expr_escape(end, handle)
         .ListLit(elements, _, _) -> sema_authority_exprs_escape(elements, handle)
         .TupleLit(fields, _, _, _) -> sema_authority_exprs_escape((loop field in fields -> field.value), handle)
         .MapLit(entries, _, _) -> {
@@ -374,10 +372,8 @@ sema_authority_value_escape: fn(expr: Expr, handle: String, aliases: [String]) -
             sema_authority_value_args_escape(args, handle, aliases)
         }
         .Field(inner, _, _, _) | .OptField(inner, _, _, _, _, _) | .Deref(inner, _, _) | .Unary(_, inner, _, _) | .RawOf(inner, _, _) | .Copy(inner, _, _) | .Place(inner, _, _, _) | .Tainted(inner, _, _, _) | .Present(inner, _, _) | .Ok(inner, _, _) | .Err(inner, _, _) | .MemberSpread(inner, _, _, _) | .Paren(inner, _, _) | .Spread(inner, _, _) | .Try(inner, _, _, _, _) | .PatternTest(inner, _, _, _) -> sema_authority_value_escape(inner, handle, aliases)
-        // copy: `left` and `right` are payloads of read parameter `expr`, which keeps the originals; the list literal owns `left` and `right`
-        .Binary(_, left, right, _, _) -> sema_authority_values_escape([Expr]{left.copy(), right.copy()}, handle, aliases)
-        // copy: `base` and `index` are payloads of read parameter `expr`, which keeps the originals; the list literal owns `base` and `index`
-        .Index(base, index, _, _, _) -> sema_authority_values_escape([Expr]{base.copy(), index.copy()}, handle, aliases)
+        .Binary(_, left, right, _, _) -> if sema_authority_value_escape(left, handle, aliases) == .Val(found) -> Val(found) else -> sema_authority_value_escape(right, handle, aliases)
+        .Index(base, index, _, _, _) -> if sema_authority_value_escape(base, handle, aliases) == .Val(found) -> Val(found) else -> sema_authority_value_escape(index, handle, aliases)
         .CompareChain(operands, _, _, _, _) | .ListLit(operands, _, _) -> sema_authority_values_escape(operands, handle, aliases)
         .TupleLit(fields, _, _, _) -> sema_authority_values_escape((loop field in fields -> field.value), handle, aliases)
         .StructLit(_, _, _, _, fields, _, _, _) -> sema_authority_values_escape((loop field in fields -> field.value), handle, aliases)
@@ -389,8 +385,11 @@ sema_authority_value_escape: fn(expr: Expr, handle: String, aliases: [String]) -
             }
             None
         }
-        // copy: `condition`, `then_value` and `else_value` are payloads of read parameter `expr`, which keeps the originals; the list literal owns `condition`, `then_value` and `else_value`
-        .If(condition, _, then_value, _, else_value, _, _) -> sema_authority_values_escape([Expr]{condition.copy(), then_value.copy(), else_value.copy()}, handle, aliases)
+        .If(condition, _, then_value, _, else_value, _, _) -> if {
+            sema_authority_value_escape(condition, handle, aliases) == .Val(found) -> Val(found)
+            sema_authority_value_escape(then_value, handle, aliases) == .Val(found) -> Val(found)
+            else -> sema_authority_value_escape(else_value, handle, aliases)
+        }
         .Lambda(lambda, _) -> {
             loop alias in aliases {
                 if sema_ownership_last_use_expr(expr, alias) -> return Val(lambda.span)

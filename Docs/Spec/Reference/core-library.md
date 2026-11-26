@@ -520,6 +520,17 @@ storage, and mutating a sketch uses its `^self` receiver with an explicit `^` ca
 
 Core's built-in checked-text heads (`SQL`, `HTML`, `Sh`, `URL`, `DateTime`, `Path`, `Regex`) and format parsers keep their grammars in private `Syntax/` parts under their owning packages so the grammars are checked during builds and deferred unless the owning surface is used. See [`Examples/Text/Grammar/`](../../../Examples/Text/Grammar/) (`Ini.jet`, `Calc.jet`, `LogLine.jet`, `Heads.jet`).
 
+### Two-audience error boundaries (`Describe`)
+
+The ambient Prelude trait `Describe` (`public() -> String Never!` and `detail() -> String Never!`) is implemented on `Err` and Core's own error types (`IOError`, `DBError`, `HTTPError`, `NetError`, `AuthError`, `ServiceError`, `PluginError`, `EncodingError`, `DataError`, `TaskFailure`, `ParseError`, `SendError`, `RangeError`, `TextError`, `UTF8Error`, `EnvError`, `AllocError`, `RegexError`, `TimeError`, `URLError`, `MIMEError`, `WsError`, `ArchiveError`, `CryptoError`, `FileCryptoError`, `UUIDError`, `ModError`, `GitError`, `EventConfigError`, `ImageError`, `AppError`, `CallError`, `Notice`, `BlobError`). Every Core boundary routes `public()` to external callers and `detail()` (with cause chains) to operators:
+
+- `core.http.server` / `core.web`: `HTTPErrorRecord`, `HTTPMux.on_error`, `HTTPMux.error_records`, `HTTPMux.respond_error`, `HTTPServer.on_error`, `HTTPServer.error_records`, `App.on_error`, `App.error_records`, `App.respond_error`.
+- `core.args`: `CLIErrorReport` (`from_error`, `log`, `emit`, `exit`), `ArgsSpec.report_error`, `ArgsSpec.fail_described`.
+- `core.jobs`: `JobError.from_describe`, `JobQueue.fail_described`, `JobQueue.fail_described_logged`.
+- `core.service`: `ToolErrorReport` (`ok`, `from_error`, `caller_json`, `log`).
+
+See [`Examples/ErrorsAndEffects/Errors/TwoAudienceErrors.jet`](../../../Examples/ErrorsAndEffects/Errors/TwoAudienceErrors.jet).
+
 ### Writing Core in Jet
 
 Jet source packages under [`Core/`](../../../Core/) are compiled by the Jet
@@ -534,10 +545,12 @@ list are the executable authority; this reference explains the durable rules
 and points to those files instead of duplicating their generated details.
 The audited intrinsic/ABI kernel is the only provider seam; ordinary Core packages remain Jet source. Archive byte-format calls cross that seam only where the source implementation requires them.
 
-The overloaded Unix connect and TLS client calls retain their checked public
-argument forms before forwarding into their owning Jet entry points. An App's
-route, mount and middleware registrations lower to its Jet `__http_*` methods
-after the existing escaping-callback admission. The original effects and
+`core.net.tls` separates `tls.connect(host, port)` (which dials TCP and runs a
+TLS client handshake) from `tls.client(stream, server_name:, config:, deadline:)`
+(which wraps an existing `TCPStream`), and `core.term` exposes `take_bytes`
+directly, all as ordinary Jet declarations in `Core/` without dispatcher rows.
+An App's route, mount and middleware registrations lower to its Jet `__http_*`
+methods after the existing escaping-callback admission. The original effects and
 resource conventions remain in force.
 
 ### Database crash consistency and storage model

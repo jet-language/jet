@@ -82,4 +82,32 @@ PluginError: enum {
     Denied(PluginFault),
     Budget(limit: PluginLimit, fault: PluginFault),
     Defect(PluginFault),
+
+    impl Describe {
+        public: fn(self) -> String Never! {
+            if self == {
+                .Guest(_) -> "Plugin execution failed."
+                .Denied(_) -> "Plugin action denied."
+                .Budget(_, _) -> "Plugin resource limit exceeded."
+                .Defect(_) -> "An internal plugin error occurred."
+            }
+        }
+
+        detail: fn(self) -> String Never! {
+            if self == {
+                .Guest(fault) -> plugin_fault_detail("guest fault", fault)
+                .Denied(fault) -> plugin_fault_detail("denied", fault)
+                .Budget(limit, fault) -> plugin_fault_detail("budget exceeded ({limit})", fault)
+                .Defect(fault) -> plugin_fault_detail("host defect", fault)
+            }
+        }
+    }
+}
+
+priv plugin_fault_detail: fn(kind: String, fault: PluginFault) -> String Never! {
+    ^out: "plugin {kind} in `{fault.export}`: {fault.message}"
+    loop frame in fault.frames {
+        out = "{out}\n  at {frame.function} ({frame.component}+0x{frame.offset})"
+    }
+    out
 }

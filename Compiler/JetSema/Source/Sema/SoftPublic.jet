@@ -115,9 +115,8 @@ sema_check_module_value_consumers: fn(program: SemaProgramTables, module_index: 
     if candidates.len() < 2 || !sema_module_value_reads_failed(candidates, raw, module_result.diagnostics) {
         return
     }
-    bodies: sema_module_value_bodies(graph.modules[module_index].declarations)
     reads: loop candidate in candidates -> {
-        consumer: sema_module_value_consumer(bodies, candidate.span) ?? next
+        consumer: sema_module_value_consumer(graph.modules[module_index].declarations, candidate.span) ?? next
         SemaModuleValueRead{key: candidate.key, name: candidate.name, consumer: consumer, span: candidate.span}
     }
     if reads.len() < 2 {
@@ -128,7 +127,8 @@ sema_check_module_value_consumers: fn(program: SemaProgramTables, module_index: 
         failed: sema_module_value_failed_read(reads, raw, segments, diagnostic) ?? next
         read: reads[failed]
         agreeing: reads[sema_module_value_agreeing_read(reads, module_result.diagnostics, raw, segments, read) ?? next]
-        constant: sema_module_value_constant(graph.modules[module_index].constants, read.key) ?? next
+        constant_index: sema_module_value_constant(graph.modules[module_index].constants, read.key) ?? next
+        constant: graph.modules[module_index].constants[constant_index]
         shown: if constant.ty == .Val(ty) -> " as {sema_module_value_type_show(ty)}" else -> ""
         ^updated: diagnostic.copy()
         // The value's name is located afresh: it may sit in another file of
@@ -163,53 +163,41 @@ sema_module_value_type_show: fn(ty: Type) -> String Never! {
     sema_type_show(ty)
 }
 
-sema_module_value_constant: fn(constants: [SemaRegistrationConstant], key: SymbolID) -> SemaRegistrationConstant? {
-    loop row in constants {
-        if row.symbol.id == key -> return Val(row.copy())
+sema_module_value_constant: fn(constants: [SemaRegistrationConstant], key: SymbolID) -> Int? {
+    loop (index, row) in constants {
+        if row.symbol.id == key -> return Val(index)
     }
     None
 }
 
-// A function or method of a module's declarations and its text's span.
-SemaModuleValueBody: struct {
-    name: String,
-    span: Span,
+priv sema_module_value_method_consumer: fn(methods: [Func], span: Span) -> String? Never! {
+    loop method in methods {
+        if method.span.start <= span.start && span.end <= method.span.end {
+            return Val(method.name.copy())
+        }
+    }
+    None
 }
 
-// The functions and methods of `declarations`, in declaration order.
-sema_module_value_bodies: fn(declarations: [Item]) -> [SemaModuleValueBody] {
-    ^bodies: [SemaModuleValueBody]{}
+// The first function or method of `declarations` whose text holds `span`.
+sema_module_value_consumer: fn(declarations: [Item], span: Span) -> String? Never! {
     loop item in declarations {
         if item == {
             .Func(function) -> {
-                bodies.push(SemaModuleValueBody{name: function.name.copy(), span: function.span})
+                if function.span.start <= span.start && span.end <= function.span.end {
+                    return Val(function.name.copy())
+                }
             }
             .Impl(implementation) -> {
-                loop method in implementation.methods {
-                    bodies.push(SemaModuleValueBody{name: method.name.copy(), span: method.span})
-                }
+                if sema_module_value_method_consumer(implementation.methods, span) == .Val(name) -> return Val(name)
             }
             .Struct(definition) -> {
-                loop method in definition.methods {
-                    bodies.push(SemaModuleValueBody{name: method.name.copy(), span: method.span})
-                }
+                if sema_module_value_method_consumer(definition.methods, span) == .Val(name) -> return Val(name)
             }
             .Enum(definition) -> {
-                loop method in definition.methods {
-                    bodies.push(SemaModuleValueBody{name: method.name.copy(), span: method.span})
-                }
+                if sema_module_value_method_consumer(definition.methods, span) == .Val(name) -> return Val(name)
             }
             .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
-        }
-    }
-    bodies
-}
-
-// The first function or method of `bodies` whose text holds `span`.
-sema_module_value_consumer: fn(bodies: [SemaModuleValueBody], span: Span) -> String? {
-    loop body in bodies {
-        if body.span.start <= span.start && span.end <= body.span.end {
-            return Val(body.name.copy())
         }
     }
     None

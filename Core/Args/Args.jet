@@ -12,6 +12,7 @@ package: {
 use {
     core: core
     builtin: jet_builtins
+    log: core.log
     rt: jet.runtime.process
 }
 
@@ -1363,6 +1364,19 @@ ArgsSpec: struct {
         }
         out
     }
+
+    // Formats any `Describe` failure into a two-audience CLI report: callers
+    // receive `error.public()` (plus usage when exit_code == 2), while operators
+    // receive `error.detail()` with its full cause chain.
+    report_error: fn<E: Describe>(self, error: E, exit_code: Int{1}) -> CLIErrorReport Never! {
+        public_text: if exit_code == 2 -> "{error.public()}\n\n{args_help(self, 0)}" else -> error.public()
+        CLIErrorReport{exit_code: exit_code, public_message: public_text, detail: error.detail()}
+    }
+
+    // Logs `error.detail()` for operators and exits with `error.public()` on stderr.
+    fail_described: fn<E: Describe>(self, error: E, exit_code: Int{1}) -[Exec, IO, Log, Time.Wait]> Never! {
+        self.report_error(error, exit_code).exit()
+    }
 }
 
 // A parse's result: each option's values (`option_values`) and the command
@@ -1406,6 +1420,40 @@ ParsedArgs: struct {
     }
 
     subcommand: fn(self) -> String? Never! { self.command.copy() }
+}
+
+// Two-audience CLI failure report: `public_message` is safe to print to the
+// caller on stderr, while `detail` preserves the full diagnostic text and
+// cause chain for operator logs.
+CLIErrorReport: struct {
+    exit_code: Int,
+    public_message: String,
+    detail: String,
+
+    from_error: fn<E: Describe>(error: E, exit_code: Int{1}) -> CLIErrorReport Never! {
+        CLIErrorReport{exit_code: exit_code, public_message: error.public(), detail: error.detail()}
+    }
+
+    log: fn(self) -[Log]> Never! {
+        log.error_fields(
+            "cli command failed",
+            [log.LogField]{
+                log.int("exit_code", self.exit_code),
+                log.field("public", self.public_message),
+                log.field("detail", self.detail),
+            },
+        )
+    }
+
+    emit: fn(self) -[IO, Log]> Never! {
+        self.log()
+        core.term.eprint(self.public_message)
+    }
+
+    exit: fn(self) -[Exec, IO, Log, Time.Wait]> Never! {
+        self.log()
+        core.process.fail(self.exit_code, self.public_message)
+    }
 }
 
 spec: fn() -> ArgsSpec Never! {

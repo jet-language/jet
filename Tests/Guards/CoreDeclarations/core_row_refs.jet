@@ -162,9 +162,6 @@ crr_table: fn(declared: CoreDeclarations) -[FS]> CRRTable {
         loop leaf in entry.types -> crr_add(table, entry.name, leaf.name)
     }
     loop name in declared.namespace_only -> crr_module(table, name)
-    loop row in declared.dispatchers {
-        if row.module_name != "" -> crr_add(table, row.module_name, row.member)
-    }
     ^sources: [CoreDeclarationSource]{}
     loop row in declared.source_rows -> sources.push(row.copy())
     loop row in declared.parts -> sources.push(row.copy())

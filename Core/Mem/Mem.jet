@@ -22,6 +22,14 @@ scope: module
 AllocError: struct {
     requested_bytes: Int,
     allocator: String,
+
+    impl Describe {
+        public: fn(self) -> String Never! { "Memory allocation failed." }
+
+        detail: fn(self) -> String Never! {
+            "memory allocation of {self.requested_bytes} bytes refused by allocator `{self.allocator}`"
+        }
+    }
 }
 
 // Allocator and pointer values are compiler-owned nominal surfaces. Their

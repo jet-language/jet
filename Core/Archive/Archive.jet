@@ -28,6 +28,26 @@ ArchiveError: enum {
     Unsupported,
     Checksum,
     NotFound,
+
+    impl Describe {
+        public: fn(self) -> String Never! {
+            if self == {
+                .Malformed -> "Invalid archive data."
+                .Unsupported -> "Unsupported archive format."
+                .Checksum -> "Archive integrity check failed."
+                .NotFound -> "Archive entry not found."
+            }
+        }
+
+        detail: fn(self) -> String Never! {
+            if self == {
+                .Malformed -> "archive malformed"
+                .Unsupported -> "archive format or compression unsupported"
+                .Checksum -> "archive checksum mismatch"
+                .NotFound -> "archive entry not found"
+            }
+        }
+    }
 }
 
 gzip: module

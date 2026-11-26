@@ -310,38 +310,28 @@ C_SEED_BYTES: 48
 
 C_TRUNCATION: "TLS protocol truncation: peer closed connection without sending TLS close_notify"
 
-// The two-argument native leaf consumes a connected TCPStream and a server
-// name. Do not manufacture a descriptor or call the leaf with host/port text:
-// the transport and TLS capabilities are separate typed boundaries.
-client: fn(host: String, port: Int) -[Net, Time.Wait]> TLSStream IOError! {
+// Dials a TCP connection to `host:port` and runs a TLS client handshake
+// verifying `host` with default client settings.
+connect: fn(host: String, port: Int) -[Net, Time.Wait]> TLSStream IOError! {
     if !valid_host(host) {
-        return Err(tls_error("client", host, "host is empty or contains invalid endpoint syntax"))
+        return Err(tls_error("connect", host, "host is empty or contains invalid endpoint syntax"))
     }
     if port <= 0 || port > 65535 {
-        return Err(tls_error("client", host, "port must be in 1..=65535"))
+        return Err(tls_error("connect", host, "port must be in 1..=65535"))
     }
     ^tcp: if net.tcp_connect(format_host_port(host, port)) == {
         .Ok(stream) -> stream
         .Err(_) -> {
-            return Err(tls_error("client", host, "transport connect failed"))
+            return Err(tls_error("connect", host, "transport connect failed"))
         }
     }
-    __client_stream_entry(tcp, host)
-}
-
-// Checked Core call rows keep the moved-stream and labeled handshake forms
-// of `client`; Sema selects one of these by argument count, and their zones
-// are the calls' label rules.
-#Builtin.Role(.TLSClientStream) priv __client_stream_entry: fn(stream: ^^TCPStream, server_name: String, /) -[Net, Time.Wait]> TLSStream IOError! {
-    ^tls: client_connect(stream, server_name, ClientConfig{}, forever()) ?? return Err(net_to_io(err))
+    ^tls: client_connect(tcp, host, ClientConfig{}, forever()) ?? return Err(net_to_io(err))
     Ok(tls)
 }
 
-#Builtin.Role(.TLSClientDeadline) priv __client_deadline_entry: fn(stream: ^^TCPStream, /, *, server_name: String, deadline: Duration) -[Net, Time.Wait]> TLSStream NetError! {
-    client_connect(stream, server_name, ClientConfig{}, deadline)
-}
-
-#Builtin.Role(.TLSClientConfigDeadline) priv __client_config_deadline_entry: fn(stream: ^^TCPStream, /, *, server_name: String, config: ClientConfig, deadline: Duration) -[Net, Time.Wait]> TLSStream NetError! {
+// Consumes a connected TCP stream and runs a TLS client handshake verifying
+// `server_name` against `config` within `deadline`.
+client: fn(stream: ^^TCPStream, /, *, server_name: String, config: ClientConfig{ClientConfig{}}, deadline: Duration{Duration{ns: C_NO_DEADLINE}}) -[Net, Time.Wait]> TLSStream NetError! {
     client_connect(stream, server_name, config, deadline)
 }
 
@@ -559,7 +549,7 @@ tls_error: fn(operation: String, address: String, message: String) -> IOError Ne
         if is_unsupported -> return IOError.Other(context)
         return IOError.InvalidInput(context)
     }
-    if operation == "client" || operation == "connect_host" {
+    if operation == "connect" || operation == "client" || operation == "connect_host" {
         ^context: IOContext{operation: .Connect, resource: Val(address.copy()), os_code: None, cause: Val(message.copy())}
         if is_unsupported -> return IOError.Other(context)
         return IOError.InvalidInput(context)

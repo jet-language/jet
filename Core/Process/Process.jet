@@ -263,7 +263,7 @@ check: fn(receipt: ProcessReceipt) IOError! {
 }
 
 stdin_text: fn(spec: ProcessSpec, text: String) -[Exec, Time.Wait]> IOError! {
-    child: spec.stdin(.Stream).spawn()
+    child: spec.copy().stdin(.Stream).spawn()
     child.stdin.write_bytes(text.bytes())
     child.stdin.close()
     receipt: child.wait()
@@ -285,10 +285,10 @@ shell: fn(line: String) -[Exec, Env]> ProcessSpec Never! {
     cmd([String]{"sh", "-c", line})
 }
 
-arg: fn(spec: ProcessSpec, extra: String) -> ProcessSpec Never! { spec.arg(extra) }
+arg: fn(spec: ProcessSpec, extra: String) -> ProcessSpec Never! { spec.copy().arg(extra) }
 
 args_extend: fn(spec: ProcessSpec, extra: [String]) -> ProcessSpec Never! {
-    spec.args_extend(extra)
+    spec.copy().args_extend(extra)
 }
 
 cmd: fn(argv: [String]) -[Exec]> ProcessSpec Never! {
@@ -330,10 +330,10 @@ cmd: fn(argv: [String]) -[Exec]> ProcessSpec Never! {
 
 current_pid: fn() -[Env]> Int Never! { core.sys.getpid() }
 
-cwd: fn(spec: ProcessSpec, path: String) -> ProcessSpec Never! { spec.cwd(path) }
+cwd: fn(spec: ProcessSpec, path: String) -> ProcessSpec Never! { spec.copy().cwd(path) }
 
 env: fn(spec: ProcessSpec, key: String, value: String) -> ProcessSpec Never! {
-    spec.env(key, value)
+    spec.copy().env(key, value)
 }
 
 env_get: fn(name: String) -[Env]> String? Never! { core.sys.get(name) }
@@ -501,105 +501,83 @@ run_all_canceled: fn() -> IOError Never! {
 }
 
 // The compiler's `ProcessSpec`: an opaque runtime handle over a command, its
-// environment, streams and limits. Every builder copies the spec it reads and
-// answers the changed copy through its `jet.runtime.process` leaf; each launch
-// step reads the spec directly.
+// environment, streams and limits. Every builder takes `^^self` by move and
+// hands the spec directly to its `jet.runtime.process` leaf without copying;
+// each launch step reads the spec directly.
 impl ProcessSpec {
     /// Sets the child's working directory.
-    cwd: fn(self, path: String) -> ProcessSpec Never! { rt.spec_cwd(self.copy(), path) }
+    cwd: fn(^^self, path: String) -> ProcessSpec Never! { rt.spec_cwd(self, path) }
 
     /// Appends one argument to the child's command vector.
-    arg: fn(self, extra: String) -> ProcessSpec Never! { rt.spec_arg(self.copy(), extra) }
+    arg: fn(^^self, extra: String) -> ProcessSpec Never! { rt.spec_arg(self, extra) }
 
     /// Appends each argument in `extra` to the child's command vector.
-    args_extend: fn(self, extra: [String]) -> ProcessSpec Never! {
-        rt.spec_args_extend(self.copy(), extra)
+    args_extend: fn(^^self, extra: [String]) -> ProcessSpec Never! {
+        rt.spec_args_extend(self, extra)
     }
 
     /// Sets environment variable `name` to `value` for the child.
-    env: fn(self, name: String, value: String) -> ProcessSpec Never! {
-        rt.spec_env(self.copy(), name, value)
+    env: fn(^^self, name: String, value: String) -> ProcessSpec Never! {
+        rt.spec_env(self, name, value)
     }
 
     /// Removes environment variable `name` from the child's environment.
-    env_remove: fn(self, name: String) -> ProcessSpec Never! {
-        rt.spec_env_remove(self.copy(), name)
-    }
+    env_remove: fn(^^self, name: String) -> ProcessSpec Never! { rt.spec_env_remove(self, name) }
 
     /// Clears all inherited environment variables for the child.
-    env_clear: fn(self) -> ProcessSpec Never! { rt.spec_env_clear(self.copy()) }
+    env_clear: fn(^^self) -> ProcessSpec Never! { rt.spec_env_clear(self) }
 
     /// Limits captured stdout and stderr bytes at `limit`.
-    output_limit: fn(self, limit: Int) -> ProcessSpec Never! {
-        rt.spec_output_limit(self.copy(), limit)
-    }
+    output_limit: fn(^^self, limit: Int) -> ProcessSpec Never! { rt.spec_output_limit(self, limit) }
 
     /// Limits the child's address space at `limit` bytes.
-    memory_limit: fn(self, limit: Int) -> ProcessSpec Never! {
-        rt.spec_memory_limit(self.copy(), limit)
-    }
+    memory_limit: fn(^^self, limit: Int) -> ProcessSpec Never! { rt.spec_memory_limit(self, limit) }
 
     /// Runs the child and its descendants in a memory scope capped at `bytes`.
-    memory_scope: fn(self, bytes: Int) -> ProcessSpec Never! {
-        rt.spec_memory_scope(self.copy(), bytes)
-    }
+    memory_scope: fn(^^self, bytes: Int) -> ProcessSpec Never! { rt.spec_memory_scope(self, bytes) }
 
     /// Limits the child's open file descriptors at `limit`.
-    open_file_limit: fn(self, limit: Int) -> ProcessSpec Never! {
-        rt.spec_open_file_limit(self.copy(), limit)
+    open_file_limit: fn(^^self, limit: Int) -> ProcessSpec Never! {
+        rt.spec_open_file_limit(self, limit)
     }
 
     /// Pins the child to the listed CPU indices.
-    cpu_affinity: fn(self, cpus: [Int]) -> ProcessSpec Never! {
-        rt.spec_cpu_affinity(self.copy(), cpus)
-    }
+    cpu_affinity: fn(^^self, cpus: [Int]) -> ProcessSpec Never! { rt.spec_cpu_affinity(self, cpus) }
 
     /// Sets the child's best-effort I/O scheduling priority level.
-    io_priority: fn(self, level: Int) -> ProcessSpec Never! {
-        rt.spec_io_priority(self.copy(), level)
-    }
+    io_priority: fn(^^self, level: Int) -> ProcessSpec Never! { rt.spec_io_priority(self, level) }
 
     /// Places the child in the idle I/O scheduling class.
-    io_idle: fn(self) -> ProcessSpec Never! { rt.spec_io_idle(self.copy()) }
+    io_idle: fn(^^self) -> ProcessSpec Never! { rt.spec_io_idle(self) }
 
     /// Runs the child detached from this process.
-    detached: fn(self) -> ProcessSpec Never! { rt.spec_detached(self.copy()) }
+    detached: fn(^^self) -> ProcessSpec Never! { rt.spec_detached(self) }
 
     /// Runs the child attached to a pseudo-terminal, using portable defaults
     /// when `policy` is `None`.
-    terminal: fn(self, policy: TerminalPolicy?{None}) -> ProcessSpec Never! {
-        if policy == .Val(configured) -> return rt.spec_terminal_with_policy(self.copy(), configured)
-        rt.spec_terminal(self.copy())
+    terminal: fn(^^self, policy: TerminalPolicy?{None}) -> ProcessSpec Never! {
+        if policy == .Val(configured) -> return rt.spec_terminal_with_policy(self, configured)
+        rt.spec_terminal(self)
     }
 
     /// Delegates an authority policy to the child launch plan.
-    under: fn(self, authority: Authority) -> ProcessSpec Never! {
-        rt.spec_under(self.copy(), authority)
-    }
+    under: fn(^^self, authority: Authority) -> ProcessSpec Never! { rt.spec_under(self, authority) }
 
     /// Configures the child's standard input stream mode.
-    stdin: fn(self, mode: ProcessStreamMode) -> ProcessSpec Never! {
-        rt.spec_stdin(self.copy(), mode)
-    }
+    stdin: fn(^^self, mode: ProcessStreamMode) -> ProcessSpec Never! { rt.spec_stdin(self, mode) }
 
     /// Configures the child's standard output stream mode.
-    stdout: fn(self, mode: ProcessStreamMode) -> ProcessSpec Never! {
-        rt.spec_stdout(self.copy(), mode)
-    }
+    stdout: fn(^^self, mode: ProcessStreamMode) -> ProcessSpec Never! { rt.spec_stdout(self, mode) }
 
     /// Configures the child's standard error stream mode.
-    stderr: fn(self, mode: ProcessStreamMode) -> ProcessSpec Never! {
-        rt.spec_stderr(self.copy(), mode)
-    }
+    stderr: fn(^^self, mode: ProcessStreamMode) -> ProcessSpec Never! { rt.spec_stderr(self, mode) }
 
     /// Limits the child's wall-clock run time at `limit`.
-    timeout: fn(self, limit: Duration) -> ProcessSpec Never! {
-        rt.spec_timeout(self.copy(), limit.ns)
-    }
+    timeout: fn(^^self, limit: Duration) -> ProcessSpec Never! { rt.spec_timeout(self, limit.ns) }
 
     /// Limits the child's CPU time at `limit`.
-    cpu_time_limit: fn(self, limit: Duration) -> ProcessSpec Never! {
-        rt.spec_cpu_time_limit(self.copy(), limit.ns)
+    cpu_time_limit: fn(^^self, limit: Duration) -> ProcessSpec Never! {
+        rt.spec_cpu_time_limit(self, limit.ns)
     }
 
     /// The checked launch plan, without launching. A spec resolves a plan
@@ -665,7 +643,9 @@ impl ProcessStdoutStream {
     read_bytes: fn(self, max: Int) -[Exec]> [U8] IOError! { rt.stdout_read(self, max) }
 
     /// The output as a loop source of pieces of at most `size` bytes.
-    chunks: fn(self, size: Int{65536}) -> ProcessChunks Never! { ProcessChunks{__stdout: Val(self), __size: size} }
+    chunks: fn(self, size: Int{65536}) -> ProcessChunks Never! {
+        ProcessChunks{__stdout: Val(self), __size: size}
+    }
 }
 
 // A started child's error-output pipe, read as its output pipe is.
@@ -674,7 +654,9 @@ impl ProcessStderrStream {
     read_bytes: fn(self, max: Int) -[Exec]> [U8] IOError! { rt.stderr_read(self, max) }
 
     /// The error output as a loop source of pieces of at most `size` bytes.
-    chunks: fn(self, size: Int{65536}) -> ProcessChunks Never! { ProcessChunks{__stderr: Val(self), __size: size} }
+    chunks: fn(self, size: Int{65536}) -> ProcessChunks Never! {
+        ProcessChunks{__stderr: Val(self), __size: size}
+    }
 }
 
 // A terminal child's session.
@@ -761,7 +743,7 @@ env_nonempty: fn(name: String) -[Env]> String? Never! {
 env_keys: fn() -[Env]> [String] EnvError! { core.sys.vars() }
 
 env_set: fn(spec: ProcessSpec, key: String, value: String) -> ProcessSpec Never! {
-    spec.env(key, value)
+    spec.copy().env(key, value)
 }
 
 env_truthy: fn(name: String) -[Env]> Bool Never! {
@@ -1012,10 +994,10 @@ args_from_argv: fn(values: [String]) -> [String] Never! {
 }
 
 #Test("the spec builders, launch steps and child steps run their Core bodies") {
-    // A builder takes its spec and answers it changed; a named spec read
-    // again after a builder keeps its own value and ends once.
+    // A builder takes its spec by move and answers it changed; a named spec
+    // kept for a later run copies explicitly before handing a spec to a builder.
     base: cmd(["sh", "-c", "printf '%s %s|%s|%s|%s' \"$1\" \"$2\" \"$JET_LEAF_A\" \"${{JET_LEAF_B-unset}}\" \"$(pwd)\"", "sh"])
-    built: base.arg("first").args_extend([String]{"second"}).env("JET_LEAF_A", "a").env("JET_LEAF_B", "b").env_remove("JET_LEAF_B").cwd("/")
+    built: base.copy().arg("first").args_extend([String]{"second"}).env("JET_LEAF_A", "a").env("JET_LEAF_B", "b").env_remove("JET_LEAF_B").cwd("/")
     limited: built.output_limit(1 << 20).memory_limit(1 << 30).open_file_limit(256).cpu_affinity([Int]{0}).io_priority(4)
     assert_eq((limited.run() ?? panic("the built spec did not run: {err}")).output, "first second|a|unset|/")
     assert_eq((base.run() ?? panic("the base spec did not run: {err}")).output, " ||unset|{core.sys.current_dir() ?? ""}")
@@ -1225,14 +1207,18 @@ trim_pipe_line: fn(bytes: ^[U8]) Never! {
     assert_eq(glued.args(), [String]{"echo", "aMIDb"})
     blank: Sh{"printf %s {empty} end"}
     assert_eq(blank.args(), [String]{"printf", "%s", "", "end"})
-    quoted: Sh{"""
+    quoted: Sh{
+        """
         echo 'a  b' "c d" "say \"hi\"" \$raw
-        """}
+        """
+    }
     assert_eq(quoted.args(), [String]{"echo", "a  b", "c d", "say \"hi\"", "$raw"})
-    cont: Sh{"""
+    cont: Sh{
+        """
         echo \
         continued
-        """}
+        """
+    }
     assert_eq(cont.args(), [String]{"echo", "continued"})
     piped_quoted: Sh{"grep 'a|b' '*.jet'"}
     assert_eq(piped_quoted.args(), [String]{"grep", "a|b", "*.jet"})

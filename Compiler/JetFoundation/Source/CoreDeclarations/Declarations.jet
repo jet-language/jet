@@ -1,10 +1,9 @@
 // What Compiler/Prelude/Core.rows declares, read while the compiler builds
 // (CORE_DECLARATIONS): its closed line grammar of `bootstrap`, `root_types`,
-// `namespace_only`, `error_types`, `format_row`, `dispatcher_row`,
-// `source_module` and `module` lines, the private parts of
-// Compiler/Prelude/CoreSourceParts.tsv and the runtime units
-// (`Core/<area>/Runtime/**/<Unit>.jet`). The Core tables
-// (CORE_SOURCE_OWNED_ROWS, CORE_CALLS, CORE_MODULE_EXPORTS, CORE_ENUM_CASE_ROWS,
+// `namespace_only`, `error_types`, `format_row`, `source_module` and `module`
+// lines, the private parts of Compiler/Prelude/CoreSourceParts.tsv and the
+// runtime units (`Core/<area>/Runtime/**/<Unit>.jet`). The Core tables
+// (CORE_SOURCE_OWNED_ROWS, CORE_MODULE_EXPORTS, CORE_ENUM_CASE_ROWS,
 // CORE_MODULE_DECLARATIONS) are computed from it; nothing else in the compiler
 // reads Core.rows.
 // A declaration that breaks the grammar or the checks below stops the build,
@@ -70,18 +69,6 @@ CoreDeclarationSource: struct {
     line: Int,
 }
 
-// One `dispatcher_row`: its kind, its module ("" for `-`) and member, its
-// Core.rows line, the Rust constructor its expression starts with and the
-// record the expression builds.
-CoreDeclarationDispatcher: struct {
-    kind: String,
-    module_name: String,
-    member: String,
-    line: Int,
-    constructor: String,
-    record: CoreCallRecord,
-}
-
 // One `format_row <Variant> <module> <Label>` line.
 CoreDeclarationFormat: struct {
     variant: String,
@@ -101,7 +88,6 @@ CoreDeclarations: struct {
     root_types: [String],
     namespace_only: [String],
     error_types: [String],
-    dispatchers: [CoreDeclarationDispatcher],
     formats: [CoreDeclarationFormat],
 }
 
@@ -369,18 +355,6 @@ core_decl_format_line: fn(line: String, at: Int) -> {variant: String, module_nam
     Val({variant: variant.text, module_name: module_name.text, label: label.text})
 }
 
-// `dispatcher_row <plain|adapter|receiver> <module> <member> | <expression>`.
-core_decl_dispatcher_line: fn(line: String, at: Int) -> [String]? Never! {
-    kind: core_decl_take_word(line, at) ?? return None
-    if kind.text != "plain" && kind.text != "adapter" && kind.text != "receiver" -> return None
-    module_name: core_decl_take_word(line, kind.end) ?? return None
-    member: core_decl_take_word(line, module_name.end) ?? return None
-    bar: core_decl_take_keyword(line, member.end, "|") ?? return None
-    start: core_decl_after_space(line.bytes(), bar)
-    if start < 0 || start >= core_decl_len(line) -> return None
-    Val([String]{kind.text, module_name.text, member.text, core_decl_tail(line, start)})
-}
-
 // `source_module NAME path PATH alias ALIAS owns { … } [types { … }] [impls { … }]`.
 core_decl_source_line: fn(line: String, at: Int) -> {module_name: String, path: String, alias: String, owns: String, types: String, impls: String}? Never! {
     name: core_decl_take_word(line, at) ?? return None
@@ -559,42 +533,6 @@ core_decl_resolve_type: fn(modules: [CoreDeclarationModule], module_name: String
     Err(core_decl_fail("unknown Core type reference `{leaf.from_module}.{leaf.name}`"))
 }
 
-// A `dispatcher_row`'s module or member may name a Syntax constant.
-core_decl_dispatcher_member: fn(member: String, constants: CoreDeclTexts) -> String Never! {
-    if core_decl_is_constant(member) {
-        if core_decl_text_of(constants, member) == .Val(value) && value != "" -> return value
-    }
-    member.copy()
-}
-
-// `dispatcher_row <kind> <module|-> <member> | <expression>`, evaluated. The
-// record must carry the identity the row's labels name; a receiver row's
-// label is its method or one of its receiver types.
-core_decl_dispatcher: fn(groups: [String], expression: String, number: Int, constants: CoreDeclTexts) -> CoreDeclarationDispatcher CoreDeclarationError! {
-    kind: groups[0]
-    written_module: groups[1]
-    member: groups[2]
-    module_name: if written_module == "-" -> "" else -> written_module.copy()
-    if kind == "receiver" && written_module != "-" {
-        return Err(core_decl_fail("receiver dispatcher row must use `-` for its module"))
-    }
-    if kind != "receiver" && !core_decl_is_name(module_name, ".") {
-        return Err(core_decl_fail("invalid dispatcher module `{module_name}`"))
-    }
-    if !core_decl_is_name(member, "!?") {
-        return Err(core_decl_fail("invalid dispatcher member `{member}`"))
-    }
-    evaluated: core_decl_call_record(expression, "Core.rows line {number}", constants) ?? return Err(err)
-    expected: core_decl_dispatcher_member(member, constants)
-    matches: if module_name != "" -> evaluated.record.module_name == module_name && evaluated.record.member == expected else -> evaluated.record.module_name == "" && (evaluated.record.member == expected || evaluated.record.receiver_types.contains(member) || evaluated.record.receiver_types.contains(expected))
-    if !matches {
-        shown: if module_name == "" -> "-" else -> module_name
-        emitted: if evaluated.record.module_name == "" -> "-" else -> evaluated.record.module_name
-        return Err(core_decl_fail("dispatcher row identity disagrees with emitted adapter: DSL {shown}.{member} vs {evaluated.constructor} {emitted}.{evaluated.record.member}"))
-    }
-    Ok(CoreDeclarationDispatcher{kind: kind.copy(), module_name: module_name, member: member.copy(), line: number, constructor: evaluated.constructor.move(), record: evaluated.record})
-}
-
 core_decl_position: fn(values: [String], value: String) -> Int Never! {
     loop (index, item) in values {
         if item == value -> return index
@@ -643,25 +581,6 @@ core_decl_problem: fn(declared: CoreDeclarations) -> String Never! {
             return "{CORE_DECLARATIONS_CORE_PATH}:{format.line}: encoding format row names missing Core module `{format.module_name}`"
         }
     }
-    loop row in declared.dispatchers {
-        if row.kind == "receiver" -> next
-        if row.constructor == "CoreCallRecord.source_owned" {
-            ^owned: false
-            loop source in declared.source_rows {
-                if source.module_name == row.module_name && source.members.contains(row.record.member) {
-                    owned = true
-                }
-            }
-            if !owned {
-                return "{CORE_DECLARATIONS_CORE_PATH}:{row.line}: source-owned dispatcher row has no owning source_module: {row.module_name}.{row.member}"
-            }
-        }
-        if row.kind == "adapter" -> next
-        owner: core_declarations_module(declared.modules, row.module_name) ?? return "{CORE_DECLARATIONS_CORE_PATH}:{row.line}: dispatcher row names missing Core module `{row.module_name}`"
-        if row.kind == "plain" && !owner.members.contains(row.member) {
-            return "{CORE_DECLARATIONS_CORE_PATH}:{row.line}: dispatcher row is not declared by Core.rows exports: {row.module_name}.{row.member}"
-        }
-    }
     loop at in 0..<declared.namespace_only.len() {
         namespace: declared.namespace_only[at]
         if declared.namespace_only.slice(0, at).contains(namespace) {
@@ -677,155 +596,6 @@ core_decl_problem: fn(declared: CoreDeclarations) -> String Never! {
         }
     }
     ""
-}
-
-// ---- Public dispatcher rows -----------------------------------------------
-// Every CoreCallRecord constructor and web-call adapter of a dispatcher row
-// is accountable to the module inventory that feeds the surface ledger;
-// otherwise a stale adapter spelling can become user-visible without a
-// source declaration.
-
-CoreDeclPublic: struct {
-    module_name: String,
-    member: String,
-    line: Int,
-}
-
-// The byte offsets of `CoreCallRecord.new(` and
-// `CoreCallRecord.new_with_coverage(` in `expression`.
-core_decl_constructor_offsets: fn(expression: String) -> [Int] Never! {
-    head: "CoreCallRecord.new"
-    bytes: expression.bytes()
-    ^out: [Int]{}
-    ^start: 0
-    loop {
-        found: core_decl_tail(expression, start).find(head)
-        if found < 0 -> return out
-        at: start + found
-        start = at + 1
-        if at > 0 && core_decl_word(Int{bytes[at - 1]}) -> next
-        ^rest: core_decl_tail(expression, at + core_decl_len(head))
-        if rest.starts_with("_with_coverage") {
-            rest = core_decl_tail(rest, core_decl_len("_with_coverage"))
-        }
-        if rest.trim().starts_with("(") -> out.push(at)
-    }
-}
-
-// The quoted text at byte `at` of `bytes` with no `\` in it, and the byte
-// after its closing quote; None when none is there.
-core_decl_plain_quoted: fn(text: String, at: Int) -> CoreDeclTake? Never! {
-    bytes: text.bytes()
-    if at >= bytes.len() || (Int{bytes[at]}) != 34 -> return None
-    ^end: at + 1
-    loop end < bytes.len() {
-        code: Int{bytes[end]}
-        if code == 92 -> return None
-        if code == 34 {
-            return Val(CoreDeclTake{text: foundation_byte_text(bytes, at + 1, end), end: end + 1})
-        }
-        end += 1
-    }
-    None
-}
-
-// The module and member of every `sema_web_call("<module>", "<member>"`
-// in `expression`.
-core_decl_web_calls: fn(expression: String) -> [{module_name: String, member: String}] Never! {
-    head: "sema_web_call"
-    bytes: expression.bytes()
-    ^out: [{module_name: String, member: String}]{}
-    ^start: 0
-    loop {
-        found: core_decl_tail(expression, start).find(head)
-        if found < 0 -> return out
-        at: start + found
-        start = at + 1
-        if at > 0 && core_decl_word(Int{bytes[at - 1]}) -> next
-        open: core_decl_skip_space(bytes, at + core_decl_len(head))
-        if open >= bytes.len() || (Int{bytes[open]}) != 40 -> next
-        module_name: core_decl_plain_quoted(expression, core_decl_skip_space(bytes, open + 1)) ?? next
-        comma: core_decl_skip_space(bytes, module_name.end)
-        if comma >= bytes.len() || (Int{bytes[comma]}) != 44 -> next
-        member: core_decl_plain_quoted(expression, core_decl_skip_space(bytes, comma + 1)) ?? next
-        out.push({module_name: module_name.text, member: member.text})
-        start = member.end
-    }
-}
-
-// A public member: a Core name, or a `\0`-prefixed compiler-private path.
-core_decl_public_member: fn(member: String) -> Bool Never! {
-    if core_decl_is_name(member, "!?") -> return true
-    bytes: member.bytes()
-    if bytes.len() > 0 && (Int{bytes[0]}) == 0 {
-        return core_decl_is_name(core_decl_tail(member, 1), ".")
-    }
-    member.starts_with("\\0") && core_decl_is_name(core_decl_tail(member, 2), ".")
-}
-
-core_decl_register_public: fn(rows: [CoreDeclPublic], module_name: String, member: String, line: Int) -> String Never! {
-    if !core_decl_is_name(module_name, ".") || !core_decl_public_member(member) {
-        return "{CORE_DECLARATIONS_CORE_PATH}:{line}: malformed CoreCall dispatcher row: invalid module/member"
-    }
-    loop seen in rows {
-        if seen.module_name == module_name && seen.member == member {
-            return "{CORE_DECLARATIONS_CORE_PATH}:{line}: duplicate public dispatcher row `{module_name}.{member}` (also at line {seen.line})"
-        }
-    }
-    ""
-}
-
-// What is wrong with the public dispatcher rows, or "". `expressions` are
-// the dispatcher rows' expressions, in row order.
-core_decl_public_problem: fn(declared: CoreDeclarations, expressions: [String], constants: CoreDeclTexts) -> String CoreDeclarationError! {
-    ^rows: [CoreDeclPublic]{}
-    loop (index, row) in declared.dispatchers {
-        expression: expressions[index]
-        context: "Core.rows line {row.line}"
-        loop offset in core_decl_constructor_offsets(expression) {
-            call: core_decl_read_call(expression, offset, context) ?? return Err(core_decl_at(row.line, err))
-            if call.args.len() < 2 {
-                return Ok("{CORE_DECLARATIONS_CORE_PATH}:{row.line}: malformed CoreCall dispatcher row: invalid module/member")
-            }
-            module_name: core_decl_rust_string(call.args[0], context, constants) ?? return Err(core_decl_at(row.line, err))
-            member: core_decl_rust_string(call.args[1], context, constants) ?? return Err(core_decl_at(row.line, err))
-            problem: core_decl_register_public(rows, module_name, member, row.line)
-            if problem != "" -> return Ok(problem)
-            rows.push(CoreDeclPublic{module_name: module_name, member: member, line: row.line})
-        }
-    }
-    loop (index, row) in declared.dispatchers {
-        loop found in core_decl_web_calls(expressions[index]) {
-            problem: core_decl_register_public(rows, found.module_name, found.member, row.line)
-            if problem != "" -> return Ok(problem)
-            rows.push(CoreDeclPublic{module_name: found.module_name, member: found.member, line: row.line})
-        }
-    }
-    ^adapter_keys: [String]{}
-    loop row in declared.dispatchers {
-        if row.kind == "adapter" {
-            adapter_keys.push("{row.module_name}.{core_decl_dispatcher_member(row.member, constants)}")
-        }
-    }
-    ^unknown_modules: [String]{}
-    ^undeclared: [String]{}
-    loop row in rows {
-        key: "{row.module_name}.{row.member}"
-        if adapter_keys.contains(key) -> next
-        if core_declarations_module(declared.modules, row.module_name) == {
-            .Val(owner) -> {
-                if !owner.members.contains(row.member) -> undeclared.push(key)
-            }
-            None -> unknown_modules.push(key)
-        }
-    }
-    if unknown_modules.len() > 0 {
-        return Ok("{CORE_DECLARATIONS_CORE_PATH}: public dispatcher row names a non-ledger module: {unknown_modules.join(", ")}")
-    }
-    if undeclared.len() > 0 {
-        return Ok("{CORE_DECLARATIONS_CORE_PATH}: public dispatcher row is not declared by Core.rows: {undeclared.join(", ")}")
-    }
-    Ok("")
 }
 
 // ---- Effect, task, core.mem and core.compiler.lang checks ---------------
@@ -1148,9 +918,6 @@ core_declarations_read: fn(core: String, parts: String, syntax: [CoreDeclaration
     ^root_types: [String]{}
     ^namespace_only: [String]{}
     ^error_types: [String]{}
-    ^dispatchers: [CoreDeclarationDispatcher]{}
-    ^expressions: [String]{}
-    ^dispatcher_keys: [String]{}
     ^formats: [CoreDeclarationFormat]{}
     lines: core.split("\n").to_list()
     loop index in 0..<lines.len() {
@@ -1200,21 +967,6 @@ core_declarations_read: fn(core: String, parts: String, syntax: [CoreDeclaration
                     }
                 }
                 formats.push(format)
-            }
-            "dispatcher_row" -> {
-                groups: core_decl_dispatcher_line(line, head_end) ?? return Err(core_decl_unrecognized(number, line))
-                ^expression: groups[3].trim()
-                if expression.ends_with(",") {
-                    expression = foundation_byte_text(expression.bytes(), 0, core_decl_len(expression) - 1)
-                }
-                row: core_decl_dispatcher(groups, expression, number, constants) ?? return Err(core_decl_at(number, err))
-                key: if row.kind == "receiver" -> "receiver@{number}" else -> "{row.module_name}.{row.member}"
-                if dispatcher_keys.contains(key) {
-                    return Err(core_decl_fail_at(number, "duplicate Core dispatcher row `{key}`"))
-                }
-                dispatcher_keys.push(key)
-                dispatchers.push(row)
-                expressions.push(expression)
             }
             "source_module" -> {
                 groups: core_decl_source_line(line, head_end) ?? return Err(core_decl_unrecognized(number, line))
@@ -1273,11 +1025,10 @@ core_declarations_read: fn(core: String, parts: String, syntax: [CoreDeclaration
         at -= 1
         modules[at].types = resolved_types.pop() ?? [CoreDeclarationType]{}
     }
-    declared: CoreDeclarations{source_rows: rows, parts: core_decl_parts(parts) ?? return Err(err), runtime: core_decl_runtime_units(runtime) ?? return Err(err), modules: modules, bootstraps: bootstraps, root_types: root_types, namespace_only: namespace_only, error_types: error_types, dispatchers: dispatchers, formats: formats}
+    declared: CoreDeclarations{source_rows: rows, parts: core_decl_parts(parts) ?? return Err(err), runtime: core_decl_runtime_units(runtime) ?? return Err(err), modules: modules, bootstraps: bootstraps, root_types: root_types, namespace_only: namespace_only, error_types: error_types, formats: formats}
     roots: effect_vocabulary_names(effects, false)
     problems: [String]{
         core_decl_problem(declared),
-        core_decl_public_problem(declared, expressions, constants) ?? return Err(err),
         core_decl_effect_roots_problem(effects),
         core_decl_names_problem(declared),
         core_decl_mem_problem(declared, syntax, constants) ?? return Err(err),

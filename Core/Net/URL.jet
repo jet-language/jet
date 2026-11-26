@@ -18,6 +18,17 @@ use {
 URLError: enum {
     Syntax,
     Percent,
+
+    impl Describe {
+        public: fn(self) -> String Never! { "Invalid URL." }
+
+        detail: fn(self) -> String Never! {
+            if self == {
+                .Syntax -> "invalid URL syntax"
+                .Percent -> "invalid URL percent-encoding"
+            }
+        }
+    }
 }
 
 URLPart: struct {

@@ -508,7 +508,7 @@ sema_expression_struct_field_view_escape: fn(field_value: Expr, check: ^SemaBody
 // The owner's type arguments as far as `bindings` has inferred them; an
 // unbound parameter stays itself.
 sema_expression_struct_inferred_args: fn(names: [String], bindings: [SemaInferenceBinding]) -> [Type] Never! {
-    args: loop name in names -> (sema_inference_binding_at(bindings, name) ?? SemaInferenceBinding{name: name.copy(), ty: Type.Named{name: name}, source: ""}).ty
+    args: loop name in names -> (sema_inference_binding_at(bindings, name) ?? SemaInferenceBinding{name: "", ty: Type.Named{name: name}, source: ""}).ty
     args
 }
 
@@ -2901,7 +2901,7 @@ sema_expression_typed_literal_regex: fn(value: Expr, span: Span, expected: Type?
         check.diagnostics.push(sema_error("E0152", expr_span(value), "this regex pattern is invalid at position {err.offset}", err.reason, "fix the pattern at that position; a `\\` before ASCII punctuation matches it literally"))
         return None
     }
-    route: sema_call_core_resolve_route(check, "core.regex", "compile", [Type]{}, 1, false, span) ?? return None
+    route: sema_call_core_resolve_route(check, "core.regex", "compile", [Type]{}, 1, span) ?? return None
     if route == {
         .Source(target) -> {
             argument: CallArg{convention: AccessConvention.Read, expr: Expr.Str{parts: [StrPart]{StrPart.Lit{text: pattern}}, span: expr_span(value), id: AST_NODE_GENERATED}, span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}

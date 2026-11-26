@@ -80,6 +80,7 @@ Run a lesson from the repository root, for example `jet run Examples/ErrorsAndEf
 - [ResultTable](Errors/ResultTable.jet) — A result's outcomes are handled by the ordinary pattern table, `if value == { … }`, with one arm per case; a one-line table separates its arms with commas.
 - [RollbackTrait](Errors/RollbackTrait.jet)
 - [Transact](Errors/Transact.jet)
+- [TwoAudienceErrors](Errors/TwoAudienceErrors.jet) — Two-audience errors via `Describe`: callers receive `public()` while operators receive `detail()` with full diagnostics and cause chains across `Err`, Core errors, CLI, job reports, and MCP tool results.
 - [TypedErrorFamilies](Errors/TypedErrorFamilies.jet)
 - [UnionErrorContract](Errors/UnionErrorContract.jet) — A whole-union error contract `T (E1 | E2)!` lets one callable fail with any listed error domain.
 - [UnitFailureContract](Errors/UnitFailureContract.jet)

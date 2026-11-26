@@ -393,7 +393,7 @@ provider_record_nix_lock_after_store: fn(verification: StoreVerification, ctx: P
         refreshed: store_refresh_lock_digest(verification, roots, locked_entry, published_digest) ?? return Err(ProviderError.BadOutput(err.message()))
         return Ok(refreshed)
     }
-    project_cas_bundle: store_publish_nix_cas_bundle(verification, project, roots, entry.envelope.output_hash) ?? return Err(ProviderError.BadOutput("could not publish portable Nix CAS bundle: {err.message()}"))
+    project_cas_bundle: store_publish_nix_cas_bundle(verification, project, roots, entry.id) ?? return Err(ProviderError.BadOutput("could not publish portable Nix CAS bundle: {err.message()}"))
     nix_closure: provider_nix_closure_record(entry, producer, project_cas_bundle)
     local_import: producer.facts.has_key("nix.fallback.provenance")
     catalog_tier: producer.facts.get("nix.index.tier") ?? (if local_import -> "local-import" else -> "")

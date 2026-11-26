@@ -1026,7 +1026,11 @@ build_session_set_option: fn(state: ^BuildSessionState, args: [BuildSessionValue
         if state.options[index].pinned && !pinned {
             return BuildSessionReply.Value{value: BuildSessionValue.Unit}
         }
-        state.options[index] = BuildSessionOption{name: name.copy(), value: value.copy(), pinned: pinned, start: start, end: end, file: state.file}
+        state.options[index].value = value
+        state.options[index].pinned = pinned
+        state.options[index].start = start
+        state.options[index].end = end
+        state.options[index].file = state.file
         return BuildSessionReply.Value{value: BuildSessionValue.Unit}
     }
     state.options.push(BuildSessionOption{name: name, value: value, pinned: pinned, start: start, end: end, file: state.file})

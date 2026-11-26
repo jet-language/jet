@@ -537,15 +537,6 @@ core_declarations_source_problems: fn(declared: CoreDeclarations, sources: [Core
             problems.push("{CORE_DECLARATIONS_CORE_PATH}: error_types lists {name}, which is no Core type leaf a source of its module declares #Error; drop it or mark its declaration #Error")
         }
     }
-    // Each source-owned row's function, by name; "" for a row a role routes,
-    // whose function the role table checks (E1014, E1015), not this one.
-    ^targets: CoreDeclTexts{}
-    loop row in declared.dispatchers {
-        if row.kind == "receiver" || row.constructor != "CoreCallRecord.source_owned" -> next
-        target: if row.record.source_role != None -> "" else -> row.record.source_target ?? row.record.member
-        core_decl_text_put(targets, "{row.module_name}.{row.record.member}", target)
-    }
-    units: loop row in declared.runtime -> row.module_name
     loop row in declared.source_rows {
         found: core_decl_source_text(sources, row.path)
         if found == None {
@@ -556,32 +547,14 @@ core_declarations_source_problems: fn(declared: CoreDeclarations, sources: [Core
         lines: core_decl_source_lines(text)
         functions: loop line in lines if core_decl_member_fn_name(line) != "" -> core_decl_member_fn_name(line)
         loop member in row.members {
-            target: core_decl_text_of(targets, "{row.module_name}.{member}") ?? member
-            if target == "" -> next
-            if !functions.contains(target) {
-                problems.push("{CORE_DECLARATIONS_CORE_PATH}:{row.line}: Core source module does not define owned member `{row.module_name}.{member}` target `{target}` in {row.path}")
+            if !functions.contains(member) {
+                problems.push("{CORE_DECLARATIONS_CORE_PATH}:{row.line}: Core source module does not define owned member `{row.module_name}.{member}` target `{member}` in {row.path}")
             }
         }
         types: loop line in lines if core_decl_type_name(line) != "" -> core_decl_type_name(line)
         loop leaf in row.owned_types {
             if !types.contains(leaf) {
                 problems.push("{CORE_DECLARATIONS_CORE_PATH}:{row.line}: Core source module does not declare owned type `{row.module_name}.{leaf}` in {row.path}")
-            }
-        }
-        // Cutover end state: once an owned wrapper calls a runtime unit
-        // instead of its `core.<module>.<member>` provider, the dispatcher
-        // row (and the symbol it names) is dead and must go in the same change.
-        locals: core_decl_source_locals(lines, units)
-        loop dispatcher in declared.dispatchers {
-            if dispatcher.kind == "receiver" || dispatcher.module_name != row.module_name || !row.members.contains(dispatcher.member) {
-                next
-            }
-            if core_decl_first_owner(declared.source_rows, dispatcher.module_name, dispatcher.member) != row.line {
-                next
-            }
-            unit: core_decl_wrapper_unit(lines, locals, row.module_name, dispatcher.member)
-            if unit != "" {
-                problems.push("{CORE_DECLARATIONS_CORE_PATH}:{dispatcher.line}: dispatcher row `{dispatcher.module_name}.{dispatcher.member}` is dead: its owned wrapper `{dispatcher.member}: fn` in {row.path} (owns at line {row.line}) calls runtime unit `{unit}` instead of the provider; delete the row and the symbol it names")
             }
         }
         // A Core.rows enum leaf of this module that the source defines lists

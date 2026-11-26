@@ -64,7 +64,14 @@ PathLiteralError: struct {
 
         fix: fn(self) -> String { "fix the body so it satisfies the type's declared text grammar" }
     }
+
+    impl Describe {
+        public: fn(self) -> String Never! { "Invalid path syntax." }
+
+        detail: fn(self) -> String Never! { self.reason.copy() }
+    }
 }
+
 
 // The checked `Path{…}` literal: each hole's display text is one percent-
 // encoded path component, so its slashes and dot segments never become path
@@ -614,7 +621,7 @@ FileWriter: struct {
     }
 }
 
-scope: fn(authority: Authority) -[FS]> FileScope Never! { {authority: authority} }
+scope: fn(authority: Authority) -[FS]> FileScope Never! { authority: authority }
 
 /// Open `path` for reading. `links: .Refuse` refuses a
 /// path that ends in a symbolic link. Every handle is close-on-exec.
@@ -915,7 +922,7 @@ process_directory: fn(spec: ProcessSpec, directory: Directory, child_fd: Int, as
 // spec already keeps is IOError.InvalidInput, and a failed duplication is
 // IOError.Other. A kept FileLock's duplicate shares its lock, so the lock
 // stays held while the child (or anything it starts) keeps the descriptor.
-#Builtin.Role(.ProcessSpecKeepOpen) priv __spec_keep_open: fn(spec: ProcessSpec, handle: ^^Directory | FileLock | FileReader | FileWriter, at: Int?{None}) -[FS]> ProcessSpec Never! {
+#Builtin.Role(.ProcessSpecKeepOpen) priv __spec_keep_open: fn(spec: ^^ProcessSpec, handle: ^^Directory | FileLock | FileReader | FileWriter, at: Int?{None}) -[FS]> ProcessSpec Never! {
     fd: if handle == {
         .FileReader(reader) -> rt.reader_fd(reader) ?? -1
         .FileWriter(writer) -> rt.writer_fd(writer) ?? -1
@@ -927,7 +934,7 @@ process_directory: fn(spec: ProcessSpec, directory: Directory, child_fd: Int, as
     }
     slot: at ?? fd
     child: if slot < 3 || slot > 2147483646 -> -1 else -> slot
-    process_rt.keep_open_raw(spec.copy(), fd, child, false).spec
+    process_rt.keep_open_raw(spec, fd, child, false).spec
 }
 
 #Test("compiler process directories retain authority after rename and close") {
@@ -1938,7 +1945,7 @@ BestEffort: struct {
 }
 
 /// A new, empty best-effort record: `^done: files.best_effort()`.
-best_effort: fn() -> BestEffort Never! { {failures: [IOError]{}} }
+best_effort: fn() -> BestEffort Never! { failures: [IOError]{} }
 
 hard_link: fn(original: Path | String, link: Path | String) -[FS.Write]> IOError! {
     source: path_text(original)
@@ -2893,7 +2900,8 @@ splitext: fn(path: String) -> {ext: String, root: String} Never! {
 }
 
 split: fn(path: String) -> {dir: String, name: String} Never! {
-    {dir: dirname(path), name: basename(path)}
+    dir: dirname(path),
+    name: basename(path),
 }
 
 normpath: fn(path: String) -> String Never! { collapse(path) }

@@ -387,17 +387,22 @@ sema_stmt_check_unit_if_arms: fn(
     // to the fork (sema_ownership_fork), and their paths join after.
     fork: sema_ownership_fork(check.state)
     then_mark: sema_scope_mark(check.scopes)
-    ^then_return: return_type.copy()
+    ^then_return_substituted: Type?{None}
     if type_param == .Val(param) && type_target == .Val(target) {
-        names: [String]{param.copy()}
-        actuals: [Type]{target.copy()}
         if return_type == .Val(declared) {
-            then_return = Val(sema_inference_substitute_type(declared, names, actuals))
+            names: [String]{param.copy()}
+            actuals: [Type]{target.copy()}
+            then_return_substituted = Val(sema_inference_substitute_type(declared, names, actuals))
         }
         // After the mark, so the rollback below puts the rebound rows back.
         sema_stmt_type_switch_rebind(check.scopes, param, target)
     }
-    then_result: sema_stmt_check_unit_branch(then_body, then_value, condition_bindings, then_return, check, "if.then@{span.start}", loop_depth)
+    ^then_result: SemaStatementResult{value: [TStmt]{}, complete: false}
+    if then_return_substituted == .Val(_) {
+        then_result = sema_stmt_check_unit_branch(then_body, then_value, condition_bindings, then_return_substituted, check, "if.then@{span.start}", loop_depth)
+    } else {
+        then_result = sema_stmt_check_unit_branch(then_body, then_value, condition_bindings, return_type, check, "if.then@{span.start}", loop_depth)
+    }
     then_path: sema_ownership_fork_path(check.state, fork)
     sema_ownership_fork_rollback(check.state, fork)
     sema_scope_rollback(check.scopes, then_mark)
@@ -561,29 +566,27 @@ sema_stmt_check_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?,
         ^arm_bindings: [SemaConditionBinding]{}
         // A type-table arm checks its body with `T` read as the arm's type
         // (sema_stmt_type_switch_rebind after the branch mark below).
-        ^arm_target: Type?{None}
+        ^has_arm_target: false
         ^arm_return: Type?{None}
         ^caught: SemaCatchAllErr?{None}
         // A guard arm `T == Int` (the one-arm `if T == Int { … }`, or an
         // `else if` link) is the same type test.
-        ^arm_param: type_param.copy()
-        if subject_is_true && !readiness {
-            arm_param = sema_expression_type_table_param(arms[arm_index].cond, check)
-        }
+        guard_param: if subject_is_true && !readiness -> sema_expression_type_table_param(arms[arm_index].cond, check) else -> None
         if readiness {
             if sema_readiness_check_head(arms[arm_index].cond, readiness_table, check) == .Val(binding) {
                 arm_bindings.push(binding)
             }
             if readiness_table.arms[arm_index] == None -> complete = false
-        } else if arm_param == .Val(param) {
-            ^target: sema_stmt_type_switch_target(param, arms[arm_index].cond, type_arms, check.environment.*, check.program.*, check.scopes, check.diagnostics)
-            if target == .Val(arm_type) {
+        } else if (if subject_is_true -> guard_param else -> type_param) == .Val(param) {
+            target: sema_stmt_type_switch_target(param, arms[arm_index].cond, type_arms, check.environment.*, check.program.*, check.scopes, check.diagnostics)
+            if target == .Val(_) {
+                arm_type: target ?? Type.Named{name: "Unit"}
                 if return_type == .Val(declared) {
                     arm_return = Val(sema_inference_substitute_type(declared, [String]{param.copy()}, [Type]{arm_type.copy()}))
                 }
-                type_arms.push(arm_type.copy())
-                arm_target = Val(arm_type)
                 conditions.push(Val(sema_stmt_type_test_condition(param, arm_type, expr_span(arms[arm_index].cond), check.context)))
+                type_arms.push(arm_type)
+                has_arm_target = true
             } else {
                 complete = false
                 conditions.push(None)
@@ -599,8 +602,10 @@ sema_stmt_check_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?,
         }
         branch_mark: sema_scope_mark(check.scopes)
         // After the mark, so the rollback below puts the rebound rows back.
-        if arm_param == .Val(param) && arm_target == .Val(arm_type) {
-            sema_stmt_type_switch_rebind(check.scopes, param, arm_type)
+        if has_arm_target {
+            if (if subject_is_true && !readiness -> guard_param else -> type_param) == .Val(param) {
+                sema_stmt_type_switch_rebind(check.scopes, param, type_arms[type_arms.len() - 1])
+            }
         }
         branch_fork: sema_ownership_fork(check.state)
         sema_scope_enter(check.scopes, check.state, "if.arm@{arms[arm_index].span.start}")
@@ -916,19 +921,21 @@ sema_stmt_type_switch_resolve: fn(name: String, environment: SemaScopeEnvironmen
 // of that element type.
 sema_stmt_type_switch_target: fn(param: String, condition: Expr, earlier: [Type], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: ^[Diagnostic]) -> Type? {
     element: sema_stmt_type_switch_list_element(param, condition)
+    is_list: element == .Val(_)
     head: element ?? (sema_stmt_type_switch_head(param, condition) ?? {
         diagnostics.push(sema_error("E0119", sema_stmt_type_switch_head_span(condition), "a type-table arm must name a type", "`if {param} == {{ … }}` compares the type `{param}`, not a value", "write a type such as `Int`, or `else`"))
         return None
     })
-    written: if element != None -> "[{head.name}]" else -> head.name.copy()
     resolved: sema_stmt_type_switch_resolve(head.name, environment, program) ?? {
+        written: if is_list -> "[{head.name}]" else -> head.name
         diagnostics.push(sema_error("E0119", head.span, "`{written}` isn't a known type", "a type-table arm names one type: a primitive, a declared type, or an imported one", "check the spelling, or import the type"))
         return None
     }
-    target: if element != None -> Type.List{element: resolved} else -> resolved
+    target: if is_list -> Type.List{element: resolved} else -> resolved
     identity: type_carrier_identity(target)
     loop seen in earlier {
         if type_carrier_identity(seen) == identity {
+            written: if is_list -> "[{head.name}]" else -> head.name
             diagnostics.push(sema_error("E0365", head.span, "arm `{written}` is unreachable — that type is already handled", "an earlier arm already names the same type", "remove this arm or merge it with the one above"))
             return None
         }

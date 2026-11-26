@@ -74,6 +74,51 @@ HTTPError: enum {
     ResourceUnavailable(resource: String),
     Internal(incident_id: String),
     UnsupportedTarget(operation: HTTPOperation),
+
+    impl Describe {
+        public: fn(self) -> String Never! {
+            if self == {
+                .InvalidMethod -> "Invalid HTTP method."
+                .InvalidURL -> "Invalid URL."
+                .InvalidHeader -> "Invalid HTTP header."
+                .InvalidStatus -> "Invalid HTTP status."
+                .BodyConsumed -> "Request body was already consumed."
+                .InvalidFraming -> "Bad Request."
+                .UnsupportedEncoding -> "Unsupported Media Type."
+                .Canceled -> "Request canceled."
+                .BodyTooLarge(_) -> "Payload Too Large."
+                .Timeout(_) -> "Request timed out."
+                .ResourceUnavailable(_) -> "Service temporarily unavailable."
+                .Resolve(_) | .Connect(_) | .TLS(_) | .Proxy(_) | .Redirect(_) | .Protocol(_) | .IO(_) | .Policy(_) | .Internal(_) | .UnsupportedTarget(_) -> "Internal Server Error."
+            }
+        }
+
+        detail: fn(self) -> String Never! {
+            if self == {
+                .InvalidMethod -> "invalid HTTP method"
+                .InvalidURL -> "invalid HTTP URL"
+                .InvalidHeader -> "invalid HTTP header"
+                .InvalidStatus -> "invalid HTTP status"
+                .BodyConsumed -> "HTTP body already consumed"
+                .InvalidFraming -> "invalid HTTP framing"
+                .UnsupportedEncoding -> "unsupported HTTP content encoding"
+                .Canceled -> "HTTP request canceled"
+                .BodyTooLarge(limit) -> "HTTP body exceeded limit of {limit} bytes"
+                .Resolve(host) -> "HTTP DNS resolution failed for `{host}`"
+                .Connect(address) -> "HTTP connection failed to `{address}`"
+                .TLS(stage) -> "HTTP TLS failed at stage `{stage}`"
+                .Timeout(phase) -> "HTTP timed out during `{phase}`"
+                .Proxy(stage) -> "HTTP proxy failed at stage `{stage}`"
+                .Redirect(reason) -> "HTTP redirect failed: {reason}"
+                .Protocol(version) -> "HTTP protocol error ({version})"
+                .IO(operation) -> "HTTP I/O error: {operation}"
+                .Policy(reason) -> "HTTP policy error: {reason}"
+                .ResourceUnavailable(resource) -> "HTTP resource unavailable: {resource}"
+                .Internal(incident_id) -> "HTTP internal error ({incident_id})"
+                .UnsupportedTarget(operation) -> "HTTP operation unsupported on target: {operation}"
+            }
+        }
+    }
 }
 
 Method: enum {
@@ -1814,6 +1859,24 @@ FormDecodeError: enum {
     Escape,
     UTF8,
     TooLarge,
+
+    impl Describe {
+        public: fn(self) -> String Never! {
+            if self == {
+                .Escape -> "Invalid form encoding."
+                .UTF8 -> "Invalid UTF-8 in form data."
+                .TooLarge -> "Form payload too large."
+            }
+        }
+
+        detail: fn(self) -> String Never! {
+            if self == {
+                .Escape -> "form decode failed: invalid percent-escape sequence"
+                .UTF8 -> "form decode failed: decoded bytes are not valid UTF-8"
+                .TooLarge -> "form decode failed: payload exceeded maximum size"
+            }
+        }
+    }
 }
 
 // A % not followed by two hex digits.

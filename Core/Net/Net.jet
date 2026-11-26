@@ -258,6 +258,32 @@ NetError: enum {
     impl Debug {
         debug: fn(^^self) -> String { net_error_text(self) }
     }
+
+    impl Describe {
+        public: fn(self) -> String Never! {
+            if self == {
+                .InvalidInput(_) -> "Invalid network input."
+                .PermissionDenied(_) -> "Network permission denied."
+                .Timeout(_) -> "Network operation timed out."
+                .Canceled(_) -> "Network operation canceled."
+                .Closed(_) | .NotConnected(_) -> "Network connection closed."
+                .Unsupported(_) -> "Unsupported network operation."
+                .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> "Network service unavailable."
+            }
+        }
+
+        detail: fn(self) -> String Never! {
+            if self == .DNS(_) -> return net_error_text(self)
+            d: error_detail(self) ?? return net_error_text(self)
+            ^parts: [String]{}
+            if d.operation != "" -> parts.push("op={d.operation}")
+            if d.address == .Val(addr) && addr != "" -> parts.push("address={addr}")
+            if d.name == .Val(name) && name != "" -> parts.push("name={name}")
+            if d.os_code == .Val(code) -> parts.push("os_code={code}")
+            if parts.len() == 0 -> return d.message.copy()
+            "{d.message} ({parts.join(", ")})"
+        }
+    }
 }
 
 // Every ordinary variant displays its detail message; DNS NotFound alone adds

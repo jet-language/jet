@@ -123,9 +123,13 @@ sema_site_module: fn(environment: SemaScopeEnvironment, function: String) -> Str
 // a lone file's own module name, as neither has a `package:` identity), then
 // its `name: module` path.
 sema_site_file_module: fn(package_identity: String, module_name: String, declared_module: String) -> String Never! {
-    parts: package_identity.split(":").to_list()
-    root: if parts.len() >= 3 && parts[0] == "package" -> parts[2].copy() else -> module_name.copy()
-    if declared_module == "" -> root else -> "{root}.{declared_module}"
+    ^parts: package_identity.split(":").to_list()
+    if parts.len() >= 3 && parts[0] == "package" {
+        if declared_module != "" -> return "{parts[2]}.{declared_module}"
+        loop parts.len() > 3 -> _: parts.pop()
+        return parts.pop() ?? ""
+    }
+    if declared_module == "" -> module_name.copy() else -> "{module_name}.{declared_module}"
 }
 
 // A parameter default that names the call site.
@@ -462,12 +466,12 @@ sema_expression_try_union_conversion: fn(target: Type, source: Type, environment
                 return Val(TTryConvert.RewidenUnion{enum_name: enum_name})
             }
             resolved: sema_expr_expected_type(source, environment, program)
-            found: loop member in members {
+            loop (index, member) in members {
                 if type_identity_equal(member, source) || type_identity_equal(sema_expr_expected_type(member, environment, program), resolved) {
-                    break member.copy()
+                    return Val(TTryConvert.WidenUnion{enum_name: enum_name, tag: tags[index]})
                 }
-            } ?? return None
-            Val(TTryConvert.WidenUnion{enum_name: enum_name, tag: type_name(found)})
+            }
+            None
         }
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
     }
@@ -1145,13 +1149,18 @@ sema_failure_no_carrier: fn(error: Type, span: Span, implicit: Bool) -> Diagnost
 
 sema_failure_no_default_conversion: fn(error: Type, span: Span, implicit: Bool) -> Diagnostic {
     name: type_name(error)
-    // An impl of a generic type names the type bare, so `Unsent<Int>` is
-    // converted by `impl Err.From(Unsent)`.
-    ^written: name.copy()
-    if sema_expr_unwrap_tag(error) == .Apply(head, _) -> written = sema_error_conversion_leaf(head)
     // A written conversion source is one named type, so a list or a union of
     // errors has no `impl Err.From(…)` to suggest.
     listed: sema_failure_unnamed_domain(error)
+    // An impl of a generic type names the type bare, so `Unsent<Int>` is
+    // converted by `impl Err.From(Unsent)`.
+    if sema_expr_unwrap_tag(error) == .Apply(head, _) {
+        return sema_failure_no_default_conversion_with(name, sema_error_conversion_leaf(head), listed, span, implicit)
+    }
+    sema_failure_no_default_conversion_with(name, name, listed, span, implicit)
+}
+
+priv sema_failure_no_default_conversion_with: fn(name: String, written: String, listed: Bool, span: Span, implicit: Bool) -> Diagnostic {
     route: if listed -> "a conversion source is one named type, so `{name}` has no `impl Err.From(…)`" else -> "`{name}` can reach `Err` only through `impl Err.From({written})`"
     conversion: if listed -> "" else -> ", add `impl Err.From({written}) {{ … }}`"
     if implicit {

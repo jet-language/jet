@@ -240,8 +240,7 @@ sema_stmt_return_if_mixes_carrier: fn(value: Expr, return_type: Type?, check: Se
 // The table with every plain arm that reaches the merge written as `Ok(arm)`.
 sema_stmt_return_lift_if_arms: fn(value: Expr, return_type: Type?, check: SemaBodyCheck) -> Expr {
     if value == {
-        // copy: `inner` is a payload of read parameter `value`, which keeps the original; the new Expr.Paren owns the lifted one
-        .Paren(inner, span, node) -> return Expr.Paren{value: sema_stmt_return_lift_if_arms(inner.copy(), return_type, check), span: span, id: node}
+        .Paren(inner, span, node) -> return Expr.Paren{value: sema_stmt_return_lift_if_arms(inner, return_type, check), span: span, id: node}
         .If(cond, then_body, then_value, else_body, else_value, span, node) -> {
             then_lifted: sema_stmt_return_lift_arm(then_body, then_value, return_type, check)
             else_lifted: sema_stmt_return_lift_arm(else_body, else_value, return_type, check)
@@ -332,6 +331,16 @@ sema_stmt_returns_module_call: fn(value: Expr, check: SemaBodyCheck) -> Bool Nev
     }
 }
 
+priv sema_stmt_check_ok_view_payload: fn(ok_value: Expr, return_type: Type?, check: ^SemaBodyCheck) -> {handled: Bool, value: TExpr?} {
+    if sema_stmt_is_bare_range_place(ok_value, check.scopes, check.state) {
+        return {handled: true, value: sema_stmt_check_returned_value(Expr.Place{value: ok_value, access: PlaceAccess.Read, span: expr_span(ok_value), id: AST_NODE_GENERATED}, return_type, check)}
+    }
+    if sema_stmt_whole_list_window(ok_value, check) == .Val(window) {
+        return {handled: true, value: sema_stmt_check_returned_value(window, return_type, check)}
+    }
+    {handled: false, value: None}
+}
+
 // A returned value (a `return` or a value tail) with its ownership and view
 // obligations: the value moves out and its views must outlive the call.
 sema_stmt_check_returned_value: fn(value: Expr, return_type: Type?, check: ^SemaBodyCheck) -> TExpr? {
@@ -372,21 +381,12 @@ sema_stmt_check_returned_value: fn(value: Expr, return_type: Type?, check: ^Sema
     // lifted into the success rail like any plain success value, so the payload
     // never materializes the view.
     if sema_stmt_return_is_view_boundary(return_type) && sema_stmt_return_type_is_result(return_type) {
-        ^payload: Expr?{None}
-        // copy: `ok_value` is a payload of read parameter `value`, which keeps the original; the local `payload` owns this one
-        if value == .Ok(ok_value, _, _) -> payload = Val(ok_value.copy())
-        if value == .Call(ok_call, _) {
-            if ok_call.name == "Ok" && ok_call.args.len() == 1 {
-                payload = Val(ok_call.args[0].expr)
-            }
-        }
-        if payload == .Val(ok_value) {
-            if sema_stmt_is_bare_range_place(ok_value, check.scopes, check.state) {
-                return sema_stmt_check_returned_value(Expr.Place{value: ok_value, access: PlaceAccess.Read, span: expr_span(ok_value), id: AST_NODE_GENERATED}, return_type, check)
-            }
-            if sema_stmt_whole_list_window(ok_value, check) == .Val(window) {
-                return sema_stmt_check_returned_value(window, return_type, check)
-            }
+        if value == .Ok(ok_value, _, _) {
+            ok_checked: sema_stmt_check_ok_view_payload(ok_value, return_type, check)
+            if ok_checked.handled -> return ok_checked.value
+        } else if value == .Call(ok_call, _) && ok_call.name == "Ok" && ok_call.args.len() == 1 {
+            ok_checked: sema_stmt_check_ok_view_payload(ok_call.args[0].expr, return_type, check)
+            if ok_checked.handled -> return ok_checked.value
         }
     }
     diagnostics_before: check.diagnostics.len()
@@ -703,10 +703,8 @@ sema_stmt_return_call_widening: fn(value: Expr, success: Type, check: ^SemaBodyC
 // widened call (`sema_stmt_return_call_widening`) is checked on its own success
 // type.
 sema_stmt_check_return_payload: fn(value: Expr, success: Type, call_type: Type?, check: ^SemaBodyCheck) -> TExpr? {
-    ^known: sema_stmt_return_numeric_source(value, check)
-    // copy: `call_type` is the caller's read parameter, which keeps its value
-    if call_type == .Val(own) -> known = Val(own.copy())
-    if known == .Val(source) && sema_expr_is_numeric(success) && !type_identity_equal(source, success) && sema_expr_numeric_widening_to(source, success) != None {
+    numeric_source: if call_type == None -> sema_stmt_return_numeric_source(value, check) else -> None
+    if (if call_type == .Val(_) -> call_type else -> numeric_source) == .Val(source) && sema_expr_is_numeric(success) && !type_identity_equal(source, success) && sema_expr_numeric_widening_to(source, success) != None {
         checked: sema_check_expression(value, call_type, check) ?? return None
         line: sema_source_line_at(check.environment.source_segments, checked.span) ?? 0
         return sema_expr_numeric_literal_conversion(checked, success, checked.span, line, check.diagnostics)

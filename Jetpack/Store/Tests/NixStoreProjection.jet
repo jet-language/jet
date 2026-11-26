@@ -256,3 +256,65 @@ store_test_register_conflict: fn(verification: StoreVerification, roots: HangarR
     assert(!proof.trusted())
     store_test_drop_roots(roots)
 }
+
+store_test_admit_signed_closure_with_bin_symlinks: fn(verification: StoreVerification, roots: HangarRoots, leaf_tool_body: String) -> AdmittedNixClosure Never! {
+    source: files.join(roots.root, "nix-projection-symlinks-source")
+    files.create_dir_all(files.join(source, "root/bin")) ?? panic("root dir")
+    files.create_dir_all(files.join(source, "leaf/bin")) ?? panic("leaf dir")
+    files.write(files.join(source, "root/bin/rg"), "#!/bin/sh\necho rg\n") ?? panic("rg")
+    files.set_mode(files.join(source, "root/bin/rg"), 493) ?? panic("chmod rg")
+    files.write(files.join(source, "leaf/bin/leaf-tool"), leaf_tool_body) ?? panic("leaf tool")
+    files.set_mode(files.join(source, "leaf/bin/leaf-tool"), 493) ?? panic("chmod leaf tool")
+    files.symlink("{STORE_TEST_PROJECTION_LEAF}/bin/leaf-tool", files.join(source, "root/bin/projected-tool")) ?? panic("projected symlink")
+    files.symlink("/nix/store/22222222222222222222222222222222-missing-gdb/bin/gdb", files.join(source, "root/bin/rust-gdb")) ?? panic("dangling nix symlink")
+    files.symlink("../libexec/missing-helper", files.join(source, "root/bin/dangling-rel")) ?? panic("dangling rel symlink")
+    root_nar: (store_write_nar(files.join(source, "root")) ?? panic("root nar")).bytes
+    leaf_nar: (store_write_nar(files.join(source, "leaf")) ?? panic("leaf nar")).bytes
+    ^seed: [U8]{}
+    loop _ in 0..<32 -> seed.push(U8{9})
+    key_id: "jetpack-projection-test-1"
+    routes: [String:[U8]]{
+        "/nix-cache-info": "StoreDir: /nix/store\nWantMassQuery: 1\n".bytes(),
+        "/00000000000000000000000000000000.narinfo": store_test_signed_narinfo(STORE_TEST_PROJECTION_ROOT, "root.nar", root_nar, [String]{STORE_TEST_PROJECTION_LEAF}, key_id, seed).bytes(),
+        "/11111111111111111111111111111111.narinfo": store_test_signed_narinfo(STORE_TEST_PROJECTION_LEAF, "leaf.nar", leaf_nar, [String]{}, key_id, seed).bytes(),
+        "/nar/root.nar": root_nar,
+        "/nar/leaf.nar": leaf_nar,
+    }
+    cache: store_test_start_cache_server(roots, routes)
+    files.create_dir_all(files.join(roots.root, "config")) ?? panic("config dir")
+    files.create_dir_all(files.join(roots.root, "trust")) ?? panic("trust dir")
+    files.write(files.join(roots.root, "config/nix-cache-v1.endpoint"), cache.endpoint) ?? panic("endpoint")
+    public_key: crypto.SigningKey{bytes: seed}.public_key().bytes
+    files.write(files.join(roots.root, "trust/nix-cache-v1.ed25519.pub"), "{key_id}:{base64.encode(public_key)}\n") ?? panic("trust key")
+    admitted: store_admit_nix_closure(verification, roots, [NixOutputRequest]{NixOutputRequest{name: "out", store_path: STORE_TEST_PROJECTION_ROOT}}, false) ?? panic("admit closure")
+    store_test_stop_cache_server(cache)
+    admitted
+}
+
+#Test("store nix store projection leases bin symlinks across projections and skips dangling links") {
+    ^verification: StoreVerification.new()
+    roots: store_test_temp_roots()
+    leaf_tool_body: "#!/bin/sh\necho leaf-tool\n"
+    admitted: store_test_admit_signed_closure_with_bin_symlinks(verification, roots, leaf_tool_body)
+    entries: store_test_canonicalize_admitted_records(verification, roots, admitted)
+    root_path: (admitted.outputs.get("out") ?? panic("out output")).store_path
+    ^entry: store_test_find_entry(entries, root_path)
+    entry.bin = files.join(entry.out, "bin")
+    entry.receipt = ""
+    ^with_bin: [StoreEntry]{entry}
+    store_test_register_canonical(verification, roots, with_bin)
+    ^lease: store_snapshot_lease(verification, roots, with_bin[0]) ?? panic("lease with bin symlinks must succeed")
+    lease.validate() ?? panic("lease must validate")
+    assert(lease.executable("rg") != None)
+    assert(lease.executable("projected-tool") != None)
+    assert(lease.executable("rust-gdb") == None)
+    assert(lease.executable("dangling-rel") == None)
+    digest: if lease.executable_digest_for_command("projected-tool") == {
+        .Val(value) -> value
+        .None -> panic("projected-tool digest missing")
+        .Err(error) -> panic("projected-tool digest failed: {error}")
+    }
+    assert_eq(digest, store_sha256_hex(leaf_tool_body.bytes()))
+    lease.release()
+    store_test_drop_roots(roots)
+}

@@ -340,6 +340,86 @@ store_test_assert_nothing_published: fn(verification: StoreVerification, roots: 
     store_test_drop_roots(source_roots)
 }
 
+#Test("store nix cas bundle prefers index-backed entry over raw cache admission with shared output hash") {
+    ^verification: StoreVerification.new()
+    roots: store_test_temp_roots()
+    project: files.join(roots.root, "project")
+    files.create_dir_all(project) ?? panic("project dir")
+    base: store_test_ingest_fixture(verification, roots, "shared-nix-output", [String:String]{"out": "portable"}, [String]{}).entry
+    assert(store_remove_closure_record(verification, roots, base.id) ?? panic("remove base record"))
+
+    revision: store_test_repeat("a", 40)
+    signed_manifest: store_test_repeat("b", 64)
+    derivation: store_test_repeat("c", 64)
+    nar_hash: "sha256:{store_test_repeat("d", 64)}"
+    upstream_proof: "sha256-{store_test_repeat("e", 64)}"
+    cache_key: store_test_repeat("f", 64)
+    system: pkg_host_platform()
+
+    // Raw Nix cache admission entry: shares the output digest and sorts first
+    // by id, but carries no locked index revision or cache identity key.
+    ^raw: base.copy()
+    raw.name = "000-raw-admission"
+    raw.version = "0"
+    raw.reference = "000-raw-admission@nixpkgs"
+    raw.id = store_entry_id(raw.name, raw.version, raw.reference, raw.out)
+    ^raw_producer: ProducerRecord.decode(base.producer_record) ?? panic("raw producer")
+    raw_producer.provider = "nix"
+    raw_producer.immutable_source = "nix-cache-raw"
+    raw_producer.source_digest = raw.envelope.output_hash
+    raw_producer.facts["nix.store-path"] = "/nix/store/00000000000000000000000000000000-shared"
+    raw_producer.facts["nix.output.out"] = raw.out
+    raw.producer_record = raw_producer.encode()
+
+    // Index-backed Nix realization entry: same output digest, later id, with
+    // locked index revision and cache key.
+    ^realized: base.copy()
+    realized.name = "zzz-locked-realization"
+    realized.version = "1"
+    realized.reference = "zzz-locked-realization@nixpkgs"
+    realized.id = store_entry_id(realized.name, realized.version, realized.reference, realized.out)
+    ^realized_producer: ProducerRecord.decode(base.producer_record) ?? panic("realized producer")
+    realized_producer.provider = "nix"
+    realized_producer.immutable_source = "nix-source-locked"
+    realized_producer.source_digest = realized.envelope.output_hash
+    extra: [String:String]{
+        "nix.index.channel": "nixpkgs-unstable",
+        "nix.index.revision": revision,
+        "nix.index.system": system,
+        "nix.index.manifest.sha256": signed_manifest,
+        "nix.derivation.sha256": derivation,
+        "nix.output.out": realized.out,
+        "nix.store-path": "/nix/store/00000000000000000000000000000000-shared",
+        "nix.proof": upstream_proof,
+        "nix.nar-hash": nar_hash,
+        "nix.nar-size": "1",
+        "nix.compression": "none",
+        "nix.cache.key": cache_key,
+    }
+    loop fact in extra -> realized_producer.facts[fact.key] = fact.value
+    realized.producer_record = realized_producer.encode()
+
+    assert(raw.id < realized.id)
+    assert_eq(raw.envelope.output_hash, realized.envelope.output_hash)
+    store_test_register_admitted(verification, roots, raw)
+    store_test_register_admitted(verification, roots, realized)
+
+    by_id: store_publish_nix_cas_bundle(verification, project, roots, realized.id) ?? panic("publish by entry id")
+    by_hash: store_publish_nix_cas_bundle(verification, project, roots, realized.envelope.output_hash) ?? panic("publish by shared output hash")
+    assert_eq(by_id, by_hash)
+
+    // Explicitly targeting the raw admission entry by exact id still fails closed.
+    if store_publish_nix_cas_bundle(verification, project, roots, raw.id) == {
+        .Ok(_) -> {
+            panic("raw admission entry without locked index revision must not export by exact id")
+        }
+        .Err(error) -> {
+            assert(error.message().contains("Nix CAS export has no locked index revision"))
+        }
+    }
+    store_test_drop_roots(roots)
+}
+
 // Register admitted Nix entries under the Hangar lock.
 store_test_register_admitted: fn(verification: StoreVerification, roots: HangarRoots, entry: StoreEntry) Never! {
     _hangar_lock: env_runtime_lock(roots.root, "hangar") ?? panic("hangar lock")

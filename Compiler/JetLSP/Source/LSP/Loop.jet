@@ -49,7 +49,8 @@ lsp_input: fn() -> LSPInput Never! {
 
 // Waits for input, then frames what came.
 lsp_read_waiting: fn(input: ^LSPInput) -[IO, Time.Wait]> {
-    bytes: lsp_loop_term.take(LSP_READ_BYTES) ?? return lsp_read_failed(input, err)
+    ^stdin: lsp_loop_term.stdin()
+    bytes: stdin.read_bytes(LSP_READ_BYTES) ?? return lsp_read_failed(input, err)
     lsp_take_in(input, bytes)
 }
 

@@ -1,0 +1,71 @@
+// Errors with two audiences: `Describe` separates caller-safe `public()` text
+// from operator-facing `detail()` text (including cause chains), and each Core
+// boundary (HTTP, CLI, jobs, MCP tool results) chooses `public()` for callers
+// and `detail()` for operators.
+use {
+    args: core.args
+    core.args.[CLIErrorReport]
+    core.auth.[AuthError]
+    core.db.[DBError]
+    core.http.[HTTPError]
+    core.jobs.[JobError]
+    core.service.[ServiceError, ToolErrorReport]
+}
+
+#Error
+StorageError: struct {
+    path: String,
+    sql: String,
+    cause_text: String,
+
+    impl Describe {
+        public: fn(self) -> String Never! { "Storage request failed." }
+
+        detail: fn(self) -> String Never! {
+            "storage failed at `{self.path}` running `{self.sql}`\ncaused by: {self.cause_text}"
+        }
+    }
+}
+
+boundary_summary: fn<E: Describe>(label: String, error: E) -> String Never! {
+    "{label} public={error.public()} | detail={error.detail()}"
+}
+
+run: fn() {
+    custom: StorageError{
+        path: "/etc/jet-secret/vault.db",
+        sql: "SELECT token FROM sessions",
+        cause_text: "permission denied",
+    }
+    print(boundary_summary("custom", custom))
+
+    inner: Err("open /etc/jet-secret/vault.db: permission denied")
+    outer: Err("query SELECT token FROM sessions failed", code: "ERR_STORAGE", cause: inner)
+    print("err.public={outer.public()}")
+    print("err.detail={outer.detail()}")
+
+    unsafe_code: Err("raw secret", code: "/etc/passwd")
+    print("unsafe_code.public={unsafe_code.public()}")
+
+    db_err: DBError.Failed("UNIQUE constraint failed: users.email at /var/db/prod.sqlite")
+    http_err: HTTPError.IO{operation: "open /etc/secret/cert.pem: EACCES"}
+    auth_err: AuthError.WrongAudience{expected: "api.internal", actual: "public.web"}
+    svc_err: ServiceError.Revoked("worker `billing-7` authority revoked")
+    print("db.public={db_err.public()}")
+    print("http.public={http_err.public()}")
+    print("auth.public={auth_err.public()}")
+    print("service.public={svc_err.public()}")
+
+    cli_report: CLIErrorReport.from_error(outer)
+    cli_spec: args.spec()
+    cli_spec_report: cli_spec.report_error(custom)
+    print("cli.public={cli_report.public_message}")
+    print("cli_spec.public={cli_spec_report.public_message}")
+
+    job_err: JobError.from_describe("StorageError", outer)
+    print("job.reason={job_err.reason}")
+    print("job.has_detail={job_err.detail != None}")
+
+    tool_report: ToolErrorReport.from_error("query_vault", outer)
+    print("mcp.caller={tool_report.caller_json()}")
+}

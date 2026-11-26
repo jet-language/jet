@@ -166,6 +166,17 @@ DebugItem: struct {
     value: String,
 }
 
+// Errors with two audiences: `public()` returns caller-safe text that never
+// exposes causes, file paths, stack or guest trap frames, SQL queries, internal
+// addresses, OS error codes, or secret values; `detail()` returns the full
+// operator-facing diagnostic text including any cause chain. Every Core boundary
+// (HTTP, CLI, jobs, MCP tool results) chooses `public()` for external callers
+// and records/logs `detail()` for operators.
+Describe: trait {
+    public: fn(self) -> String Never!,
+    detail: fn(self) -> String Never!,
+}
+
 // A type as a value. Where a `Type` is expected a type name is one
 // (`counts[Position] = 2`, `if t == { Position -> … }`); `Type{Rock}` names
 // one explicitly, and `type_of(p)` is the static type of a name or field
@@ -204,6 +215,12 @@ FieldRef: struct<Model, T> {
 #Error
 SendError: struct<T> {
     value: T,
+
+    impl Describe {
+        public: fn(self) -> String Never! { "Channel is closed." }
+
+        detail: fn(self) -> String Never! { "send on a closed channel" }
+    }
 }
 
 // How a task's join fails: the task was canceled, ran past its deadline, or
@@ -217,6 +234,24 @@ TaskFailure: enum {
     Canceled,
     DeadlineBlown,
     Panicked(String),
+
+    impl Describe {
+        public: fn(self) -> String Never! {
+            if self == {
+                .Canceled -> "Request was canceled."
+                .DeadlineBlown -> "Request timed out."
+                .Panicked(_) -> "An internal error occurred."
+            }
+        }
+
+        detail: fn(self) -> String Never! {
+            if self == {
+                .Canceled -> "task canceled"
+                .DeadlineBlown -> "task deadline exceeded"
+                .Panicked(message) -> "task panicked: {message}"
+            }
+        }
+    }
 }
 
 // Why a text did not parse as a number: `Int.parse`, `Float.parse`,
@@ -232,6 +267,78 @@ ParseError: struct {
     impl Display {
         display: fn(self) -> String { self.message.copy() }
     }
+
+    impl Describe {
+        public: fn(self) -> String Never! { "Invalid numeric input." }
+
+        detail: fn(self) -> String Never! { self.message.copy() }
+    }
+}
+
+impl Err.Describe {
+    public: fn(self) -> String Never! {
+        if self.code == .Val(code) {
+            raw: code.bytes()
+            if raw.len() > 0 && raw.len() <= 64 {
+                ^safe: true
+                loop byte in raw {
+                    n: Int{byte}
+                    ok: (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || (n >= 48 && n <= 57) || n == 95 || n == 45
+                    if !ok {
+                        safe = false
+                        break
+                    }
+                }
+                if safe -> return "Request failed ({code})."
+            }
+        }
+        "An internal error occurred."
+    }
+
+    detail: fn(self) -> String Never! {
+        head: if self.code == .Val(code) && code.bytes().len() > 0 -> "[{code}] {self.message}" else -> "{self.message}"
+        if self.cause == .Val(inner) {
+            return "{head}\ncaused by: {inner.detail()}"
+        }
+        head
+    }
+}
+
+impl IOError.Describe {
+    public: fn(self) -> String Never! {
+        if self == {
+            .InvalidInput(_) -> "Invalid input."
+            .NotFound(_) -> "Resource not found."
+            .PermissionDenied(_) -> "Permission denied."
+            .TimedOut(_) -> "Operation timed out."
+            .Canceled(_) -> "Operation canceled."
+            .Closed(_) -> "Resource is closed."
+            .AlreadyExists(_) -> "Resource already exists."
+            .Unsupported(_) -> "Operation is not supported."
+            .ResourceLimit(_) -> "Resource limit exceeded."
+            .Protocol(_) | .Other(_) -> "An I/O error occurred."
+        }
+    }
+
+    detail: fn(self) -> String Never! { "{self}" }
+}
+
+impl RangeError.Describe {
+    public: fn(self) -> String Never! { "Value out of range." }
+
+    detail: fn(self) -> String Never! { self.reason.copy() }
+}
+
+impl TextError.Describe {
+    public: fn(self) -> String Never! { "Invalid text format." }
+
+    detail: fn(self) -> String Never! { self.message.copy() }
+}
+
+impl UTF8Error.Describe {
+    public: fn(self) -> String Never! { "Invalid UTF-8 text." }
+
+    detail: fn(self) -> String Never! { self.message.copy() }
 }
 
 // What a `CheckedText` type's `check` learned from a literal's parts:

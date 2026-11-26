@@ -2005,13 +2005,15 @@ jet_driver_reach_strip: fn(reach: JetDriverReach, modules: ^[JetDriverLoadedModu
     loop unit in 0..<reach.units.len() {
         loaded: reach.units[unit].loaded
         if dead_imports[unit].len() > 0 {
-            ^imports: [ImportDecl]{}
-            loop declaration in modules[loaded].program.imports {
-                if !dead_imports[unit].contains(declaration.span) {
-                    imports.push(declaration.copy())
-                }
+            ^reversed: [ImportDecl]{}
+            loop modules[loaded].program.imports.len() > 0 {
+                declaration: modules[loaded].program.imports.pop() ?? break
+                if !dead_imports[unit].contains(declaration.span) -> reversed.push(declaration)
             }
-            modules[loaded].program.imports = imports.move()
+            loop reversed.len() > 0 {
+                declaration: reversed.pop() ?? break
+                modules[loaded].program.imports.push(declaration)
+            }
         }
         if drop[unit].len() == 0 && cut[unit].len() == 0 && blocks[unit].len() == 0 -> next
         loop position in 0..<cut[unit].len() {
@@ -2039,20 +2041,30 @@ jet_driver_reach_strip: fn(reach: JetDriverReach, modules: ^[JetDriverLoadedModu
 jet_driver_reach_cut: fn(items: ^[Item], position: Int, names: [String]) Never! {
     if items[position] == .Struct(value) {
         ^updated: value
-        updated.methods = jet_driver_reach_kept_methods(value.methods, names)
+        methods: updated.methods.move()
+        updated.methods = [Func]{}
+        updated.methods = jet_driver_reach_kept_methods(methods, names)
         items[position] = Item.Struct{value: updated}
     } else if items[position] == .Enum(value) {
         ^updated: value
-        updated.methods = jet_driver_reach_kept_methods(value.methods, names)
+        methods: updated.methods.move()
+        updated.methods = [Func]{}
+        updated.methods = jet_driver_reach_kept_methods(methods, names)
         items[position] = Item.Enum{value: updated}
     }
 }
 
-jet_driver_reach_kept_methods: fn(methods: [Func], names: [String]) -> [Func] Never! {
+jet_driver_reach_kept_methods: fn(methods: ^^[Func], names: [String]) -> [Func] Never! {
+    ^source: methods.move()
+    ^reversed: [Func]{}
+    loop source.len() > 0 {
+        method: source.pop() ?? break
+        if !names.contains(method.name) -> reversed.push(method)
+    }
     ^kept: [Func]{}
-    loop method in methods {
-        // copy: the item keeps its methods until the cut item replaces it.
-        if !names.contains(method.name) -> kept.push(method.copy())
+    loop reversed.len() > 0 {
+        method: reversed.pop() ?? break
+        kept.push(method)
     }
     kept
 }
@@ -2062,22 +2074,32 @@ jet_driver_reach_kept_methods: fn(methods: [Func], names: [String]) -> [Func] Ne
 jet_driver_reach_cut_blocks: fn(items: ^[Item], position: Int, traits: [String]) Never! {
     if items[position] == .Struct(value) {
         ^updated: value
-        updated.trait_impls = jet_driver_reach_kept_blocks(value.trait_impls, traits)
+        trait_impls: updated.trait_impls.move()
+        updated.trait_impls = [TraitImplBlock]{}
+        updated.trait_impls = jet_driver_reach_kept_blocks(trait_impls, traits)
         items[position] = Item.Struct{value: updated}
     } else if items[position] == .Enum(value) {
         ^updated: value
-        updated.trait_impls = jet_driver_reach_kept_blocks(value.trait_impls, traits)
+        trait_impls: updated.trait_impls.move()
+        updated.trait_impls = [TraitImplBlock]{}
+        updated.trait_impls = jet_driver_reach_kept_blocks(trait_impls, traits)
         items[position] = Item.Enum{value: updated}
     }
 }
 
-jet_driver_reach_kept_blocks: fn(blocks: [TraitImplBlock], traits: [String]) -> [TraitImplBlock] Never! {
-    ^kept: [TraitImplBlock]{}
-    loop block in blocks {
-        // copy: the item keeps its blocks until the cut item replaces it.
+jet_driver_reach_kept_blocks: fn(blocks: ^^[TraitImplBlock], traits: [String]) -> [TraitImplBlock] Never! {
+    ^source: blocks.move()
+    ^reversed: [TraitImplBlock]{}
+    loop source.len() > 0 {
+        block: source.pop() ?? break
         if !jet_driver_reach_lazy_block(block) || !traits.contains(block.trait_name) {
-            kept.push(block.copy())
+            reversed.push(block)
         }
+    }
+    ^kept: [TraitImplBlock]{}
+    loop reversed.len() > 0 {
+        block: reversed.pop() ?? break
+        kept.push(block)
     }
     kept
 }

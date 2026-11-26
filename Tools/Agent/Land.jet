@@ -935,7 +935,7 @@ run_logged: fn(dir: String, argv: [String], env: [Setting], log: String) -[Exec,
     run_spec(process.cmd(argv), argv[0], dir, env, log)
 }
 
-run_spec: fn(base: ProcessSpec, program: String, dir: String, env: [Setting], log: String) -[Exec, FS, Time.Wait]> Int Never! {
+run_spec: fn(base: ^^ProcessSpec, program: String, dir: String, env: [Setting], log: String) -[Exec, FS, Time.Wait]> Int Never! {
     ^spec: base.cwd(dir).output_limit(1073741824)
     loop setting in env -> spec = spec.env(setting.name, setting.value)
     results: process.run_all([ProcessSpec]{spec}, 1) ?? {

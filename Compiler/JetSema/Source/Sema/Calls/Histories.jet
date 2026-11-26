@@ -20,8 +20,6 @@ use {
         CallLabel,
         Expr,
         Span,
-        TTypeDef,
-        TVariant,
         Type,
         type_name,
         AST_EMPTY_CALL_ARG_FLAGS,
@@ -49,13 +47,12 @@ sema_call_histories_args: fn(args: [CallArg], type_args: [Type], span: Span, che
     ^written: ""
     if type_args.len() == 1 && type_args[0] == .Named(name) -> written = name.copy()
     command_type: sema_serde_named_leaf(written)
-    ^module_source: ""
+    graph: check.program.registration_graph
+    caller_index: sema_scope_caller_index(check.environment.*, graph)
     ^package_digest: ""
     ^tool: ""
     ^target: ""
-    graph: check.program.registration_graph
-    if sema_scope_caller_index(check.environment.*, graph) == .Val(caller) {
-        module_source = graph.modules[caller].source.copy()
+    if caller_index == .Val(caller) {
         package_digest = sema_call_histories_package_digest(graph, graph.modules[caller].package_identity)
     }
     if graph.build_facts.compiler_identity != "" {
@@ -69,8 +66,8 @@ sema_call_histories_args: fn(args: [CallArg], type_args: [Type], span: Span, che
         ^label: sema_call_devtools_label(args[index])
         if label == "" -> label = sema_call_histories_position_label(index)
         loop role in 0..<roles.len() {
-            if roles[role] == label {
-                identities[role] = foundation_byte_text(module_source.bytes(), args[index].span.start, args[index].span.end)
+            if roles[role] == label && caller_index == .Val(caller) {
+                identities[role] = foundation_byte_text(graph.modules[caller].source.bytes(), args[index].span.start, args[index].span.end)
             }
         }
         if label == "strategy" && !sema_call_histories_is_none(args[index].expr) {
@@ -175,6 +172,15 @@ sema_call_histories_unsupported: fn(reason: String) -> SemaHistoriesDerived Neve
     SemaHistoriesDerived{variants: [String]{}, make: "", unsupported: reason}
 }
 
+priv sema_call_histories_push_field: fn(ty: Type, kinds: ^[String], values: ^[String], counts: ^[Int]) -> Bool Never! {
+    kind: sema_call_histories_kind(ty)
+    if kind < 0 -> return false
+    kinds.push([String]{"i", "b", "s"}[kind])
+    values.push("{[String]{"__ints", "__bools", "__texts"}[kind]}[{counts[kind]}]")
+    counts[kind] = counts[kind] + 1
+    true
+}
+
 // The derived strategy of an ordinary enum whose variant payloads are `Int`,
 // `Bool` or `String` values: one `name:kinds` row per variant (its wire name,
 // then `i`, `b` or `s` per payload field) and the source of the lambda that
@@ -184,56 +190,46 @@ sema_call_histories_derive: fn(written: String, command_type: String, check: Sem
     if written == "" -> return sema_call_histories_unsupported(no_schema)
     definition: sema_serde_type_definition(check.environment.*, check.program.*, written) ?? return sema_call_histories_unsupported(no_schema)
     if definition.generic_params.len() > 0 -> return sema_call_histories_unsupported(no_schema)
-    variants: sema_call_histories_enum_variants(definition) ?? return sema_call_histories_unsupported(no_schema)
-    if variants.len() == 0 -> return sema_call_histories_unsupported(no_schema)
-    ^rows: [String]{}
-    arms: loop position in 0..<variants.len() -> {
-        variant: variants[position]
-        unsupported: sema_call_histories_unsupported("core.testing.histories command type `{command_type}` has unsupported variant `{variant.name}`: no type-valid scalar generator/codec")
-        if variant.wire_name == "" || variant.wire_name.contains(":") || variant.wire_name.contains("\"") || variant.wire_name.contains("\\") || variant.wire_name.contains("{") || variant.wire_name.contains("}") {
-            return unsupported
-        }
-        ^kinds: [String]{}
-        ^values: [String]{}
-        ^counts: [Int]{0, 0, 0}
-        ^fields: [Type]{}
-        ^names: [String]{}
-        if variant.payload == {
-            .Unit -> {}
-            .Single(ty) -> { fields.push(ty.copy()) }
-            .Named(declared) -> {
-                loop field in declared {
-                    fields.push(field.ty.copy())
-                    names.push(field.name.copy())
+    if definition.kind == .Enum(variants, _) {
+        if variants.len() == 0 -> return sema_call_histories_unsupported(no_schema)
+        ^rows: [String]{}
+        arms: loop position in 0..<variants.len() -> {
+            variant: variants[position]
+            unsupported: sema_call_histories_unsupported("core.testing.histories command type `{command_type}` has unsupported variant `{variant.name}`: no type-valid scalar generator/codec")
+            if variant.wire_name == "" || variant.wire_name.contains(":") || variant.wire_name.contains("\"") || variant.wire_name.contains("\\") || variant.wire_name.contains("{") || variant.wire_name.contains("}") {
+                return unsupported
+            }
+            ^kinds: [String]{}
+            ^values: [String]{}
+            ^counts: [Int]{0, 0, 0}
+            ^constructor: "{written}.{variant.name}"
+            if variant.payload == {
+                .Unit -> {}
+                .Single(ty) -> {
+                    if !sema_call_histories_push_field(ty, kinds, values, counts) -> return unsupported
+                    constructor = "{constructor}({values[0]})"
+                }
+                .Named(declared) -> {
+                    ^labeled: [String]{}
+                    loop field in declared {
+                        if !sema_call_histories_push_field(field.ty, kinds, values, counts) -> return unsupported
+                        labeled.push("{field.name}: {values[values.len() - 1]}")
+                    }
+                    constructor = "{constructor}{{{labeled.join(", ")}}}"
                 }
             }
+            rows.push(if kinds.len() == 0 -> variant.wire_name.copy() else -> "{variant.wire_name}:{kinds.join(":")}")
+            constructor
         }
-        loop field in fields {
-            kind: sema_call_histories_kind(field)
-            if kind < 0 -> return unsupported
-            kinds.push([String]{"i", "b", "s"}[kind])
-            values.push("{[String]{"__ints", "__bools", "__texts"}[kind]}[{counts[kind]}]")
-            counts[kind] = counts[kind] + 1
+        ^body: arms[arms.len() - 1]
+        if arms.len() > 1 {
+            ^cases: [String]{}
+            loop index in 0..<(arms.len() - 1) -> cases.push("        {index} -> {arms[index]}\n")
+            body = "if __variant == {{\n{cases.join("")}        else -> {arms[arms.len() - 1]}\n    }}"
         }
-        rows.push(if kinds.len() == 0 -> variant.wire_name.copy() else -> "{variant.wire_name}:{kinds.join(":")}")
-        ^constructor: "{written}.{variant.name}"
-        if variant.payload == {
-            .Unit -> {}
-            .Single(_) -> { constructor = "{constructor}({values[0]})" }
-            .Named(_) -> {
-                labeled: loop index in 0..<names.len() -> "{names[index]}: {values[index]}"
-                constructor = "{constructor}{{{labeled.join(", ")}}}"
-            }
-        }
-        constructor
+        return SemaHistoriesDerived{variants: rows, make: sema_call_histories_make_text(body), unsupported: ""}
     }
-    ^body: arms[arms.len() - 1]
-    if arms.len() > 1 {
-        ^cases: [String]{}
-        loop index in 0..<(arms.len() - 1) -> cases.push("        {index} -> {arms[index]}\n")
-        body = "if __variant == {{\n{cases.join("")}        else -> {arms[arms.len() - 1]}\n    }}"
-    }
-    SemaHistoriesDerived{variants: rows, make: sema_call_histories_make_text(body), unsupported: ""}
+    sema_call_histories_unsupported(no_schema)
 }
 
 // The source of the derived `__make` list: one lambda that builds a command
@@ -246,11 +242,6 @@ sema_call_histories_make_text: fn(body: String) -> String Never! {
     body: "if __variant == {{\n        0 -> Command.Reset\n        else -> Command.Add(__ints[0])\n    }}"
     assert(sema_call_histories_parse_expr(sema_call_histories_make_text(body), 1) != None, "the derived constructor lambda is current lambda syntax")
     assert(sema_call_histories_parse_expr("[String]{{}}", 0) != None, "the empty variant rows parse")
-}
-
-sema_call_histories_enum_variants: fn(definition: TTypeDef) -> [TVariant]? Never! {
-    if definition.kind == .Enum(rows, _) -> return Val(rows.copy())
-    None
 }
 
 // 0 for `Int`, 1 for `Bool`, 2 for `String`, -1 for a payload the derived

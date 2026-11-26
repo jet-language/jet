@@ -514,35 +514,37 @@ sema_error_conversion_path_exists: fn(edges: [SemaErrorConversionEdge], from_ty:
     ^seen: [String]{}
     loop pending.len() > 0 {
         current: pending.pop() ?? break
-        ^already: false
-        loop visited in seen {
-            if visited == current -> already = true
-        }
-        if already -> next
-        seen.push(current.copy())
+        if seen.contains(current) -> next
         loop edge in edges {
             if edge.source != current -> next
             if edge.target == to_ty -> return true
             pending.push(edge.target)
         }
+        seen.push(current)
     }
     false
 }
 
-sema_error_conversion_path_count: fn(edges: [SemaErrorConversionEdge], from_ty: String, to_ty: String, visiting: [String]) -> Int Never! {
-    if from_ty == to_ty -> return 1
-    loop name in visiting {
-        if name == from_ty -> return 0
+priv sema_error_conversion_node_index: fn(nodes: [String], name: String) -> Int Never! {
+    loop (index, node) in nodes {
+        if node == name -> return index
     }
-    ^inner: visiting
-    inner.push(from_ty.copy())
+    -1
+}
+
+priv sema_error_conversion_path_count_nodes: fn(edges: [SemaErrorConversionEdge], nodes: [String], from_index: Int, to_index: Int, visiting: ^[Int]) -> Int Never! {
+    if from_index == to_index -> return 1
+    if from_index < 0 || visiting.contains(from_index) -> return 0
+    visiting.push(from_index)
     ^paths: 0
     loop edge in edges {
-        if edge.source != from_ty -> next
-        paths += sema_error_conversion_path_count(edges, edge.target, to_ty, inner)
-        if paths >= 2 -> return 2
+        if edge.source != nodes[from_index] -> next
+        next_index: sema_error_conversion_node_index(nodes, edge.target)
+        paths += sema_error_conversion_path_count_nodes(edges, nodes, next_index, to_index, visiting)
+        if paths >= 2 -> break
     }
-    paths
+    ^_: visiting.pop()
+    if paths >= 2 -> 2 else -> paths
 }
 
 sema_error_conversion_add_node: fn(nodes: ^[String], name: String) Never! {
@@ -571,11 +573,12 @@ sema_error_conversion_ambiguous_pair: fn(edges: [SemaErrorConversionEdge]) -> Se
         nodes[insertion + 1] = current
         index += 1
     }
-    loop source in nodes {
-        loop target in nodes {
-            if source == target -> next
-            if sema_error_conversion_path_count(edges, source, target, [String]{}) > 1 {
-                return Val(SemaErrorConversionEdge{source: source, target: target})
+    ^visiting: [Int]{}
+    loop source_index in 0..<nodes.len() {
+        loop target_index in 0..<nodes.len() {
+            if source_index == target_index -> next
+            if sema_error_conversion_path_count_nodes(edges, nodes, source_index, target_index, visiting) > 1 {
+                return Val(SemaErrorConversionEdge{source: nodes[source_index], target: nodes[target_index]})
             }
         }
     }
@@ -635,9 +638,7 @@ sema_error_conversion_items: fn(items: ^[Item], facts: ^[AppliedRuleApplication]
     if !has_conversion {
         return
     }
-    ^local_types: sema_error_conversion_local_types(items)
     declared_types: sema_error_conversion_local_types(items)
-    loop name in package_types -> local_types.push(name.copy())
     // A conversion from a generic type this file declares is generic over
     // that type's own parameters, so it converts every instantiation; one
     // entry per conversion, in file order, a type's nested ones after it.
@@ -658,22 +659,20 @@ sema_error_conversion_items: fn(items: ^[Item], facts: ^[AppliedRuleApplication]
     // Each item moves from `items` into `output`, in order; a conversion is
     // replaced by its checked routine or dropped.
     items.reverse()
-    ^converted: 0
+    conversion_params.reverse()
     loop items.len() > 0 {
         ^item: items.pop() ?? break
         if item == .ErrorConv(definition) {
             loop marker in definition.markers {
                 facts.push(AppliedRuleApplication{marker: marker, target: Val(definition.from_span), site: Val(RuleSite.Impl)})
             }
-            type_params: conversion_params[converted]
-            converted += 1
-            ^routine: sema_error_conversion_routine(definition, "self", AccessConvention.Move, type_params, local_types, edges, diagnostics) ?? next
+            type_params: conversion_params.pop() ?? [TypeParam]{}
+            ^routine: sema_error_conversion_routine(definition, "self", AccessConvention.Move, type_params, declared_types, package_types, edges, diagnostics) ?? next
             output.push(routine)
             next
         }
         if sema_error_conversion_from_route(plain_types, item) == .Val(route) {
-            type_params: conversion_params[converted]
-            converted += 1
+            type_params: conversion_params.pop() ?? [TypeParam]{}
             // A target this file declares keeps its impl, so `AppErr.from(e)`
             // and `AppErr{e}` call the hook, whose body becomes a call of the
             // route's routine: the hook's own body is checked once, as the
@@ -689,10 +688,10 @@ sema_error_conversion_items: fn(items: ^[Item], facts: ^[AppliedRuleApplication]
                         facts.push(AppliedRuleApplication{marker: marker, target: Val(route.from_span), site: Val(RuleSite.Impl)})
                     }
                 }
-                ^routine: sema_error_conversion_routine(route, param_name, convention, type_params, local_types, edges, diagnostics) ?? next
+                ^routine: sema_error_conversion_routine(route, param_name, convention, type_params, declared_types, package_types, edges, diagnostics) ?? next
                 if kept {
                     ^hooked: definition.copy()
-                    hooked.methods[0].body = sema_error_conversion_hook_body(route, definition.methods[0])
+                    hooked.methods[0].body = sema_error_conversion_hook_body(route, hooked.methods[0])
                     output.push(Item.Impl{value: hooked})
                 }
                 output.push(routine)
@@ -710,9 +709,8 @@ sema_error_conversion_items: fn(items: ^[Item], facts: ^[AppliedRuleApplication]
         ^routines: [Item]{}
         ^dropped: [Int]{}
         loop nested in nested_routes {
-            type_params: conversion_params[converted]
-            converted += 1
-            routine: sema_error_conversion_routine(nested.route, nested.param_name, nested.convention, type_params, local_types, edges, diagnostics) ?? {
+            type_params: conversion_params.pop() ?? [TypeParam]{}
+            routine: sema_error_conversion_routine(nested.route, nested.param_name, nested.convention, type_params, declared_types, package_types, edges, diagnostics) ?? {
                 dropped.push(nested.index)
                 next
             }
@@ -892,16 +890,12 @@ sema_error_conversion_type_params: fn(items: [Item], name: String) -> [TypeParam
 // rejected; an accepted conversion's route joins `edges`. The routine takes
 // its source as `param_name`, by `convention`. A source with `type_params`
 // makes the routine generic over them (`value: Unsent<T>`).
-sema_error_conversion_routine: fn(definition: ErrorConvDef, param_name: String, convention: AccessConvention, type_params: [TypeParam], local_types: [String], edges: ^[SemaErrorConversionEdge], diagnostics: ^[Diagnostic]) -> Item? {
+sema_error_conversion_routine: fn(definition: ErrorConvDef, param_name: String, convention: AccessConvention, type_params: ^^[TypeParam], local_types: [String], package_types: [String], edges: ^[SemaErrorConversionEdge], diagnostics: ^[Diagnostic]) -> Item? {
     from_ty: definition.from_ty
     to_ty: definition.to_ty
     span: definition.from_span
-    ^from_local: false
-    ^to_local: false
-    loop name in local_types {
-        if name == from_ty -> from_local = true
-        if name == to_ty -> to_local = true
-    }
+    from_local: local_types.contains(from_ty) || package_types.contains(from_ty)
+    to_local: local_types.contains(to_ty) || package_types.contains(to_ty)
     if to_ty != "Err" && !from_local && !to_local {
         diagnostics.push(sema_error("E2406", span, "can't declare `impl {to_ty}.From({from_ty})` — neither type is defined in this program", "typed-target error conversions obey the same orphan rule as trait impls (S28); only the default `Err` target may name a foreign source", "define one of these types locally, or convert the foreign source into `Err`"))
         return None
@@ -940,7 +934,7 @@ sema_error_conversion_routine: fn(definition: ErrorConvDef, param_name: String, 
     source: if type_params.len() == 0 -> foundation_named_type(from_ty) else -> sema_derive_owner_type(from_ty, type_params)
     ^routine: sema_error_conversion_function(sema_error_conversion_routine_name(definition), param_name, definition.from_span, to_ty, definition.to_span, source, definition.body, definition.body_span)
     routine.params[0].convention = convention
-    routine.type_params = type_params.copy()
+    routine.type_params = type_params
     Val(Item.Func{value: routine})
 }
 
@@ -1538,6 +1532,38 @@ sema_dead_key_type_name: fn(name: String, span: Span, declared: [String], name_s
 // (sema_type_core_path_import). Any other near miss of a Jet
 // type or of a `declared` type (`Strng`) is suggested by name, and renamed
 // in place when the caller knows `name_span`, where the name alone is written.
+priv sema_unknown_type_suggestion: fn(name: String, declared: [String]) -> String? Never! {
+    ^best: ""
+    ^best_distance: 3
+    ^ambiguous: false
+    loop known in TYPE_NAMES {
+        if known == "()" || known.contains(".") -> next
+        distance: sema_taint_edit_distance(name, known)
+        if distance == 0 || distance > 2 -> next
+        if {
+            distance < best_distance -> {
+                best = known
+                best_distance = distance
+                ambiguous = false
+            }
+            distance == best_distance && best != known -> { ambiguous = true }
+        }
+    }
+    loop own in declared {
+        distance: sema_taint_edit_distance(name, own)
+        if distance == 0 || distance > 2 -> next
+        if {
+            distance < best_distance -> {
+                best = own
+                best_distance = distance
+                ambiguous = false
+            }
+            distance == best_distance && best != own -> { ambiguous = true }
+        }
+    }
+    if best == "" || ambiguous -> None else -> Val(best)
+}
+
 sema_unknown_type_name: fn(name: String, span: Span, declared: [String], name_span: Span?) -> Diagnostic {
     if name == "Text" {
         return sema_error("E0119", span, "there's no type called `Text`", "Jet's text type is `String`", "write `String` instead of `Text`")
@@ -1550,19 +1576,14 @@ sema_unknown_type_name: fn(name: String, span: Span, declared: [String], name_sp
         return sema_error("E0119", span, "there's no type called `{name}`", "a type path does not reach a Core module through `core`; a file names a Core type through the module it imports", "write `use {import.module_name}` and name the type `{import.written}`")
     }
     if sema_casing_acronym_diagnostic(name, span) == .Val(acronym) -> return acronym
-    ^candidates: [String]{}
-    loop known in TYPE_NAMES {
-        if known != "()" && !known.contains(".") -> candidates.push(known.copy())
-    }
-    loop own in declared -> candidates.push(own.copy())
     // A short name needs a closer match: one edit per three letters.
     limit: if name.count_bytes() /% 3 > 1 -> name.count_bytes() /% 3 else -> 1
     ^fix: "check the spelling, or define the struct or enum first"
     ^suggested: String?{None}
-    if sema_suggest_field(name, candidates) == .Val(near) {
+    if sema_unknown_type_suggestion(name, declared) == .Val(near) {
         if sema_taint_edit_distance(name, near) <= limit {
             fix = "did you mean `{near}`?"
-            suggested = Val("{near}")
+            suggested = Val(near)
         }
     }
     unknown: sema_error("E0119", span, "there's no type called `{name}`", "the types are `Int`, `Float`, `Bool`, and `String` (plus types you define)", fix)

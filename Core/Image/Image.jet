@@ -39,6 +39,24 @@ ImageError: enum {
     Malformed,
     Unsupported,
     TooLarge,
+
+    impl Describe {
+        public: fn(self) -> String Never! {
+            if self == {
+                .Malformed -> "Invalid image data."
+                .Unsupported -> "Unsupported image format."
+                .TooLarge -> "Image exceeds size limits."
+            }
+        }
+
+        detail: fn(self) -> String Never! {
+            if self == {
+                .Malformed -> "image decode failed: malformed image bytes"
+                .Unsupported -> "image decode failed: unsupported format or color type"
+                .TooLarge -> "image decode failed: dimensions or bytes exceed limit"
+            }
+        }
+    }
 }
 
 // The bytes are not a well-formed image of their format.

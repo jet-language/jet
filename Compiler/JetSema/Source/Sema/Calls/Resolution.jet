@@ -151,22 +151,45 @@ SEMA_CALL_PRELUDE_NAMES: [String]{"print", "panic", "assert", "assert_eq", "debu
 // function or prelude name within two edits and offering the rename as an edit.
 sema_call_unknown_function_in: fn(name: String, span: Span, scopes: SemaScopeTable, no_prelude: Bool) -> Diagnostic {
     if name == "reject" -> return sema_call_reject_outside_template(span)
-    ^candidates: [String]{}
+    ^best: ""
+    ^best_distance: 3
+    ^ambiguous: false
     ^frame: scopes.current
     loop frame >= 0 {
         loop binding in scopes.bindings {
             if binding.frame != frame || binding.symbol.kind != SymbolKind.Function -> next
-            if binding.symbol.name.starts_with("__") || binding.symbol.name.starts_with("@") -> next
-            candidates.push(binding.symbol.name.copy())
+            candidate: binding.symbol.name
+            if candidate.starts_with("__") || candidate.starts_with("@") -> next
+            distance: sema_taint_edit_distance(name, candidate)
+            if distance == 0 || distance > 2 -> next
+            if {
+                distance < best_distance -> {
+                    best = candidate
+                    best_distance = distance
+                    ambiguous = false
+                }
+                distance == best_distance && best != candidate -> { ambiguous = true }
+            }
         }
         frame = scopes.frames[frame].parent
     }
     if !no_prelude {
-        loop prelude in SEMA_CALL_PRELUDE_NAMES -> candidates.push(prelude.copy())
+        loop prelude in SEMA_CALL_PRELUDE_NAMES {
+            distance: sema_taint_edit_distance(name, prelude)
+            if distance == 0 || distance > 2 -> next
+            if {
+                distance < best_distance -> {
+                    best = prelude
+                    best_distance = distance
+                    ambiguous = false
+                }
+                distance == best_distance && best != prelude -> { ambiguous = true }
+            }
+        }
     }
-    near: sema_suggest_field(name, candidates) ?? return sema_call_unknown_function(name, span)
-    diagnostic: sema_error("E0102", span, "nothing named `{name}` exists here", "only functions that have been defined (or built in, like `print` / `panic`) can be called", "did you mean `{near}`?")
-    diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: near})
+    if best == "" || ambiguous -> return sema_call_unknown_function(name, span)
+    diagnostic: sema_error("E0102", span, "nothing named `{name}` exists here", "only functions that have been defined (or built in, like `print` / `panic`) can be called", "did you mean `{best}`?")
+    diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: best})
 }
 
 // E0311 for `name(value, …)` when `name` is only a method of a type this module
@@ -473,12 +496,12 @@ sema_call_method_shape_matches: fn(candidate: SemaCallMethodCandidate, method: S
 }
 
 sema_call_resolve_method: fn(receiver_type: Type, method: String, args: [CallArg], span: Span, candidates: [SemaCallMethodCandidate], check: ^SemaBodyCheck) -> SemaCallMethodCandidate? {
-    ^receiver_matches: [SemaCallMethodCandidate]{}
-    loop candidate in candidates {
+    ^receiver_matches: [Int]{}
+    loop (index, candidate) in candidates {
         if candidate.method.name == method {
             if sema_call_method_receiver_candidate_type(candidate) == .Val(expected) {
                 compatible: sema_call_type_assignable(expected, receiver_type, check) ?? false
-                if compatible -> receiver_matches.push(candidate.copy())
+                if compatible -> receiver_matches.push(index)
             }
         }
     }
@@ -486,14 +509,14 @@ sema_call_resolve_method: fn(receiver_type: Type, method: String, args: [CallArg
         check.diagnostics.push(sema_call_missing_method_diagnostic(receiver_type, method, args.len(), span, check.environment.*, check.program.*))
         return None
     }
-    shape_matches: loop candidate in receiver_matches if sema_call_method_shape_matches(candidate, method, args, span) -> candidate
+    shape_matches: loop index in receiver_matches if sema_call_method_shape_matches(candidates[index], method, args, span) -> index
     if {
-        shape_matches.len() == 1 -> Val(shape_matches[0])
+        shape_matches.len() == 1 -> Val(candidates[shape_matches[0]])
         shape_matches.len() > 1 -> {
             check.diagnostics.push(sema_error("E0772", span, "this call to `{method}` matches more than one callable body", "overload resolution requires one candidate after receiver and argument shape filtering", "add an explicit type argument or make the argument labels/types select one method"))
             None
         }
-        receiver_matches.len() == 1 -> Val(receiver_matches[0])
+        receiver_matches.len() == 1 -> Val(candidates[receiver_matches[0]])
         else -> {
             check.diagnostics.push(sema_error("E0772", span, "this call to `{method}` matches more than one callable body", "the receiver candidates disagree about this call's argument shape", "add labels or type arguments that select one method"))
             None
@@ -522,14 +545,14 @@ sema_call_trait_row_for_symbol: fn(graph: SemaRegistrationGraph, symbol: SymbolI
     Val(row)
 }
 
-sema_call_trait_rows_push: fn(graph: SemaRegistrationGraph, rows: ^[SemaRegistrationRowRef], row: SemaRegistrationRowRef) Never! {
+sema_call_trait_rows_push: fn(graph: SemaRegistrationGraph, rows: ^[SemaRegistrationRowRef], row: ^^SemaRegistrationRowRef) Never! {
     id: graph.modules[row.module_index].nominals[row.row].symbol.id
     loop existing in rows {
         if graph.modules[existing.module_index].nominals[existing.row].symbol.id == id {
             return
         }
     }
-    rows.push(row.copy())
+    rows.push(row)
 }
 
 sema_call_generic_receiver_name: fn(ty: Type) -> String? {

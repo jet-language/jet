@@ -69,7 +69,7 @@ StdinHandle: struct {
     impl Reader {
         read_bytes: fn(^self, limit: Int) -[IO, Time.Wait]> [U8] IOError! {
             if limit <= 0 -> return Err(terminal_invalid("the read limit must be positive"))
-            __take_bytes(limit)
+            take_bytes(limit)
         }
 
         read_into: fn(^self, buffer: ^[U8], limit: Int) -[IO, Time.Wait]> Int IOError! {
@@ -208,6 +208,104 @@ PrintStyle: struct {
 // one (sema ContextKeys.jet sema_context_field_key).
 #Builtin.Role(.ContextPrint) priv __print_style: fn() -> PrintStyle Never! { PrintStyle{} }
 
+/// The interaction provider trait: handles interactive prompts and progress
+/// updates (`ask`, `choose`, `confirm`, `secret`, and `progress`).
+///
+/// The default provider is `TerminalInteraction`, which reads and writes the
+/// connected terminal. Install an alternative provider (GUI dialog, agent
+/// tool-call bridge, or scripted test harness) for a lexical scope and every
+/// task spawned inside it via `#Context(interaction: provider) { ... }`, and
+/// read the active provider through `context.interaction`.
+Interaction: trait {
+    ask: fn(self, prompt: String) -[IO, Time.Wait]> String IOError!,
+    choose: fn(self, prompt: String, options: [String]) -[IO, Time.Wait]> String IOError!,
+    confirm: fn(self, prompt: String) -[IO, Time.Wait]> Bool Never!,
+    secret: fn(self, prompt: String) -[IO, Time.Wait]> String IOError!,
+    progress: fn(self, label: String) -[IO, Time.Wait]> IOError!,
+}
+
+/// The default terminal `Interaction` provider. Reads answers from stdin,
+/// disables echo for `secret`, and writes progress lines to stderr (or stdout
+/// when stderr is not a terminal).
+TerminalInteraction: struct {
+    impl Interaction {
+        ask: fn(self, prompt: String) -[IO, Time.Wait]> String IOError! {
+            terminal_prompt(prompt, false)
+            line: terminal_line()
+            Ok(line ?? "")
+        }
+
+        choose: fn(self, prompt: String, options: [String]) -[IO, Time.Wait]> String IOError! {
+            if options.len() == 0 -> return Err(terminal_invalid("choose needs at least one item"))
+            terminal_prompt(choose_menu(prompt, options), true)
+            loop _attempt in 0..<11 {
+                terminal_prompt("> ", true)
+                read: terminal_line()
+                answer: read ?? return Err(terminal_invalid("the input stream closed before a choice arrived"))
+                index: choose_index(answer)
+                if index != None {
+                    n: index
+                    if n > 0 && n <= options.len() -> return Ok(options[n - 1])
+                }
+                terminal_prompt("Enter a number from 1 to {options.len()}.\n", true)
+            }
+            Err(terminal_invalid("no valid choice after 10 retries"))
+        }
+
+        confirm: fn(self, prompt: String) -[IO, Time.Wait]> Bool Never! {
+            terminal_prompt("{prompt} [y/N] ", false) ?? return false
+            answer: terminal_line() ?? ""
+            confirm_answer(answer)
+        }
+
+        secret: fn(self, prompt: String) -[IO, Time.Wait]> String IOError! {
+            if !rt.terminal8_stdin_tty() || !rt.terminal8_stdout_tty() {
+                return Err(terminal_invalid("secret input needs a terminal"))
+            }
+            cause: terminal_secret_write(prompt)
+            if cause != None -> return Err(terminal_other(.Flush, Val("stdout"), cause))
+            if !rt.terminal8_mode_enter(false) {
+                _: terminal_secret_write("\n")
+                return Err(terminal_other(.Read, Val("stdin"), "could not disable terminal echo"))
+            }
+            result: terminal_secret_read()
+            _: terminal_secret_write("\n")
+            if result.cause != None {
+                return Err(terminal_other(.Read, Val("stdin"), result.cause ?? ""))
+            }
+            if result.eof {
+                return Err(terminal_other(.Read, Val("stdin"), "the input stream closed before the secret arrived"))
+            }
+            Ok(chomp(result.line))
+        }
+
+        progress: fn(self, label: String) -[IO, Time.Wait]> IOError! {
+            if rt.terminal8_machine_output() -> return Ok()
+            // Without a terminal on stderr the label is a plain stdout line, so a
+            // piped run still records its progress.
+            if !rt.terminal8_stderr_tty() {
+                terminal_write_preflight("stdout")
+                line_cause: rt.terminal8_write_stdout("{label}\n", true)
+                if line_cause != None {
+                    return Err(terminal_other(.Flush, Val("stdout"), line_cause))
+                }
+                return Ok()
+            }
+            terminal_write_preflight("stderr")
+            carriage_return: "\r"
+            cause: rt.terminal8_write_stderr("{carriage_return}{label}", true)
+            if cause != None -> return Err(terminal_other(.Flush, Val("stderr"), cause))
+            Ok()
+        }
+    }
+}
+
+// The provider `context.interaction` reads where no `#Context(interaction: …)`
+// block set one (sema ContextKeys.jet sema_context_field_key).
+#Builtin.Role(.ContextInteraction) priv __interaction_provider: fn() -> Interaction Never! {
+    TerminalInteraction{}
+}
+
 print: fn(text: String) -[IO, Time.Wait]> Never! {
     ^out: stdout()
     out.write_line(text).drop("stdout write")
@@ -223,31 +321,35 @@ eprint: fn(text: String) -[IO, Time.Wait]> Never! {
     _: rt.stdio_put_text("{text}\n", false, true)
 }
 
+ask: fn(prompt: String{""}) -[IO, Time.Wait]> String IOError! { TerminalInteraction{}.ask(prompt) }
+
 // jet_std_io_input: the prompt is written and stdout flushed, then one line
 // is read without its line ending; a closed stream reads as "".
 readline: fn(prompt: String{""}) -[IO, Time.Wait]> String IOError! {
-    terminal_prompt(prompt, false)
-    line: terminal_line()
-    Ok(line ?? "")
+    TerminalInteraction{}.ask(prompt)
+}
+
+secret: fn(prompt: String) -[IO, Time.Wait]> String IOError! {
+    TerminalInteraction{}.secret(prompt)
 }
 
 input_secret: fn(prompt: String) -[IO, Time.Wait]> String IOError! {
-    if !rt.terminal8_stdin_tty() || !rt.terminal8_stdout_tty() {
-        return Err(terminal_invalid("secret input needs a terminal"))
+    TerminalInteraction{}.secret(prompt)
+}
+
+// Guided prompt for a missing required CLI input: returns `None` when running
+// non-interactively on the default terminal provider (preserving exit-2 CLI
+// refusals), otherwise delegates to the active `Interaction` provider.
+prompt_guided: fn(name: String, help: String, choices: [String]) -[IO, Time.Wait]> String? IOError! {
+    if !rt.terminal8_stdin_tty() || !rt.terminal8_stdout_tty() -> return Ok(None)
+    label: if help.is_empty() -> "{name}: " else -> "{name} ({help}): "
+    if choices.len() > 0 {
+        chosen: TerminalInteraction{}.choose(label, choices)
+        return Ok(Val(chosen))
     }
-    cause: terminal_secret_write(prompt)
-    if cause != None -> return Err(terminal_other(.Flush, Val("stdout"), cause))
-    if !rt.terminal8_mode_enter(false) {
-        _: terminal_secret_write("\n")
-        return Err(terminal_other(.Read, Val("stdin"), "could not disable terminal echo"))
-    }
-    result: terminal_secret_read()
-    _: terminal_secret_write("\n")
-    if result.cause != None -> return Err(terminal_other(.Read, Val("stdin"), result.cause ?? ""))
-    if result.eof {
-        return Err(terminal_other(.Read, Val("stdin"), "the input stream closed before the secret arrived"))
-    }
-    Ok(chomp(result.line))
+    answer: TerminalInteraction{}.ask(label)
+    if answer.trim().is_empty() -> return Ok(None)
+    Ok(Val(answer))
 }
 
 read_all_input: fn() -[IO, Time.Wait]> String IOError! {
@@ -269,7 +371,8 @@ read_until: fn(delimiter: String) -[IO, Time.Wait]> String IOError! {
     Ok(result.input)
 }
 
-#Builtin.Role(.TermTake) priv __take_bytes: fn(n: Int) -[IO, Time.Wait]> [U8] IOError! {
+// Up to `n` stdin bytes, waiting until stdin has bytes or ends; [] at EOF.
+take_bytes: fn(n: Int) -[IO, Time.Wait]> [U8] IOError! {
     if n < 0 -> return Err(terminal_other(.Read, Val("stdin"), "negative take"))
     terminal_read_preflight()
     result: rt.terminal8_take(n)
@@ -311,27 +414,10 @@ binwrite: fn(path: String, bytes: [U8]) -[FS, IO, Time.Wait]> IOError! {
     core.files.write_bytes(path, bytes)
 }
 
-confirm: fn(prompt: String) -[IO, Time.Wait]> Bool Never! {
-    terminal_prompt("{prompt} [y/N] ", false) ?? return false
-    answer: terminal_line() ?? ""
-    confirm_answer(answer)
-}
+confirm: fn(prompt: String) -[IO, Time.Wait]> Bool Never! { TerminalInteraction{}.confirm(prompt) }
 
 choose: fn(prompt: String, options: [String]) -[IO, Time.Wait]> String IOError! {
-    if options.len() == 0 -> return Err(terminal_invalid("choose needs at least one item"))
-    terminal_prompt(choose_menu(prompt, options), true)
-    loop _attempt in 0..<11 {
-        terminal_prompt("> ", true)
-        read: terminal_line()
-        answer: read ?? return Err(terminal_invalid("the input stream closed before a choice arrived"))
-        index: choose_index(answer)
-        if index != None {
-            n: index
-            if n > 0 && n <= options.len() -> return Ok(options[n - 1])
-        }
-        terminal_prompt("Enter a number from 1 to {options.len()}.\n", true)
-    }
-    Err(terminal_invalid("no valid choice after 10 retries"))
+    TerminalInteraction{}.choose(prompt, options)
 }
 
 stdin: fn() -> StdinHandle Never! { StdinHandle{fd: 0} }
@@ -438,22 +524,7 @@ WinSize: struct {
     __progress_items<T>(items, description, template)
 }
 
-progress: fn(label: String) -[IO, Time.Wait]> IOError! {
-    if rt.terminal8_machine_output() -> return Ok()
-    // Without a terminal on stderr the label is a plain stdout line, so a
-    // piped run still records its progress.
-    if !rt.terminal8_stderr_tty() {
-        terminal_write_preflight("stdout")
-        line_cause: rt.terminal8_write_stdout("{label}\n", true)
-        if line_cause != None -> return Err(terminal_other(.Flush, Val("stdout"), line_cause))
-        return Ok()
-    }
-    terminal_write_preflight("stderr")
-    carriage_return: "\r"
-    cause: rt.terminal8_write_stderr("{carriage_return}{label}", true)
-    if cause != None -> return Err(terminal_other(.Flush, Val("stderr"), cause))
-    Ok()
-}
+progress: fn(label: String) -[IO, Time.Wait]> IOError! { TerminalInteraction{}.progress(label) }
 
 decode_key: fn(raw: [U8], platform: Int) -> Key Never! {
     if platform == 0 || raw.len() == 0 -> return .Unknown
@@ -863,7 +934,7 @@ stdio_flush: fn(stderr: Bool) -[IO]> IOError! {
 }
 
 #Test("negative byte take fails before reading stdin") {
-    if __take_bytes(-1) == {
+    if take_bytes(-1) == {
         .Err(_) -> {}
         .Ok(_) -> panic("a negative take must fail")
     }

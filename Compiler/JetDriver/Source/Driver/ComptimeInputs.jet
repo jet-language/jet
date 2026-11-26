@@ -270,16 +270,17 @@ jet_driver_comptime_find: fn(adapter: JetDriverComptimeInputs, base_dir: String,
         .HostRequest(_, _) -> return Err(jet_driver_comptime_input_fail("`find` can't walk `{prefix}{glob}`", "the comptime input host is unavailable", "build the program with `jet build` or `jet run`", span))
         .Value(_) -> {}
     }
-    found: jet_driver_comptime_find_members(reply) ?? [String]{}
+    ^found: jet_driver_comptime_find_members(reply) ?? [String]{}
+    digest: if adapter.log != None -> jet_driver_comptime_members_digest(found) else -> ""
     ^strings: [TComptimeValue]{}
-    loop relative in found {
+    loop relative in found.move() {
         bytes: adapter.inputs.read_rooted(base_dir, relative, JET_DRIVER_BUILD_MAX_FILE_BYTES) ?? return Err(jet_driver_comptime_input_fail("`find` can't open `{prefix}{relative}`", "{err.message} (matched while expanding `{prefix}{glob}`)", "check the glob — it is relative to the directory it walks", span))
         jet_driver_comptime_input_record(adapter.log, base_dir, prefix, relative, bytes)
-        strings.push(TComptimeValue.String{value: relative.copy()})
+        strings.push(TComptimeValue.String{value: relative})
     }
     if adapter.log == .Val(log) {
         permit: log.guard_edit()
-        permit.value.records.push(JetDriverComptimeInputRecord{path: "{prefix}{glob}", file: "{base_dir}/{glob}", sha256: jet_driver_comptime_members_digest(found), glob: glob.copy()})
+        permit.value.records.push(JetDriverComptimeInputRecord{path: "{prefix}{glob}", file: "{base_dir}/{glob}", sha256: digest, glob: glob.copy()})
     }
     Ok(TComptimeValue.List{values: strings})
 }

@@ -64,13 +64,11 @@ SemaFailureCase: struct {
 }
 
 SemaFailureUnionRow: struct {
-    key: String,
-    name: String,
+    result_index: Int,
+    fact_index: Int,
     module_index: Int,
     members: [Type],
     general: Bool,
-    edges: [String],
-    cases: [SemaFailureCase],
     // Position of the function's registry row in its module's `functions`.
     function_row: Int,
 }
@@ -272,21 +270,21 @@ sema_failure_union_marker: fn(name: String, span: Span) -> Marker Never! {
 // replaced module row and (before the first mint) the nominal indexes are
 // recorded on `trail`. Each case creation a report here covers is listed on
 // `settled`.
-sema_failure_union_mint: fn(graph: ^SemaRegistrationGraph, row: SemaFailureUnionRow, diagnostics: ^[Diagnostic], trail: ^SemaGraphTrail, settled: ^[SemaFailureSettledCase]) -> Type? {
-    if row.cases.len() == 0 -> return None
-    name: row.name
+sema_failure_union_mint: fn(graph: ^SemaRegistrationGraph, row: SemaFailureUnionRow, cases: [SemaFailureCase], diagnostics: ^[Diagnostic], trail: ^SemaGraphTrail, settled: ^[SemaFailureSettledCase]) -> Type? {
+    if cases.len() == 0 -> return None
+    name: graph.modules[row.module_index].functions[row.function_row].declaration.name
     owned: sema_failure_union_type_name(name)
     ^segments: graph.modules[row.module_index].source_segments
     ^clash: sema_registration_module_has_name(graph.modules[row.module_index], owned) || sema_registration_module_has_import_name(graph.modules[row.module_index], owned) || sema_registration_namespace_owner(graph, row.module_index, owned) != None
     start: diagnostics.len()
     if clash {
-        diagnostics.push(sema_error("E0105", row.cases[0].span, "`{name}` creates error cases, but the type `{owned}` already exists", "cases written as `Err(.Case(…))` in `{name}` form its own error type, named `{owned}` after the function", "write the failure contract of `{name}` (for example `-> T {owned}!`), or rename the declared `{owned}`"))
+        diagnostics.push(sema_error("E0105", cases[0].span, "`{name}` creates error cases, but the type `{owned}` already exists", "cases written as `Err(.Case(…))` in `{name}` form its own error type, named `{owned}` after the function", "write the failure contract of `{name}` (for example `-> T {owned}!`), or rename the declared `{owned}`"))
         sema_attach_diagnostic_source_locations(diagnostics, start, segments)
-        sema_failure_union_settle_untyped(row, settled)
+        sema_failure_union_settle_untyped(row.module_index, cases, settled)
         return None
     }
     ^variants: [Variant]{}
-    loop case_row in row.cases {
+    loop case_row in cases {
         payload: sema_failure_union_case_payload(case_row)
         ^existing_index: -1
         loop (index, variant) in variants {
@@ -318,15 +316,15 @@ sema_failure_union_mint: fn(graph: ^SemaRegistrationGraph, row: SemaFailureUnion
         sema_graph_module_rollback(graph.modules[module_index], mark, owned)
         loop diagnostic in register_diagnostics -> diagnostics.push(diagnostic)
         sema_attach_diagnostic_source_locations(diagnostics, start, segments)
-        sema_failure_union_settle_untyped(row, settled)
+        sema_failure_union_settle_untyped(module_index, cases, settled)
         return None
     }
     graph.modules[module_index].program.items.push(item.move())
     // copy: the export row stores its own symbol, while the registered symbol row stays in the
     // module, and `graph` is written (exports.push) while it is live.
-    symbol: graph.modules[module_index].symbols[graph.modules[module_index].symbols.len() - 1].copy()
-    module_identity: graph.modules[module_index].module_identity.copy()
-    if symbol.visibility > 0 {
+    if graph.modules[module_index].symbols[graph.modules[module_index].symbols.len() - 1].visibility > 0 {
+        symbol: graph.modules[module_index].symbols[graph.modules[module_index].symbols.len() - 1].copy()
+        module_identity: graph.modules[module_index].module_identity.copy()
         graph.modules[module_index].exports.push(SemaRegistrationExport{name: symbol.name, symbol: symbol, declaration_position: sema_registration_declaration_position(graph.modules[module_index], symbol), source_module_identity: module_identity, visibility: symbol.visibility})
     }
     trail.entries.push(SemaGraphUndo.ModuleAppend{module_index: module_index, mark: mark, name: owned})
@@ -341,9 +339,9 @@ sema_failure_union_mint: fn(graph: ^SemaRegistrationGraph, row: SemaFailureUnion
 
 // A refused mint leaves every case `row` creates without a type; its report
 // covers them all.
-sema_failure_union_settle_untyped: fn(row: SemaFailureUnionRow, settled: ^[SemaFailureSettledCase]) Never! {
-    loop case_row in row.cases {
-        settled.push(SemaFailureSettledCase{module_index: row.module_index, site: case_row.span, arguments: [Span]{}})
+sema_failure_union_settle_untyped: fn(module_index: Int, cases: [SemaFailureCase], settled: ^[SemaFailureSettledCase]) Never! {
+    loop case_row in cases {
+        settled.push(SemaFailureSettledCase{module_index: module_index, site: case_row.span, arguments: [Span]{}})
     }
 }
 
@@ -544,7 +542,8 @@ sema_failure_union_infer: fn(graph: ^SemaRegistrationGraph, modules: [SemaGraphM
     }
     if rows.len() == 0 -> return projected
     loop row_index in 0..<rows.len() {
-        minted: sema_failure_union_mint(graph, rows[row_index], diagnostics, trail, projected.settled) ?? next
+        cases: modules[rows[row_index].result_index].failure_facts[rows[row_index].fact_index].union_cases
+        minted: sema_failure_union_mint(graph, rows[row_index], cases, diagnostics, trail, projected.settled) ?? next
         rows[row_index].members.push(minted)
         projected.modules.push(rows[row_index].module_index)
         projected.minted = true
@@ -552,33 +551,36 @@ sema_failure_union_infer: fn(graph: ^SemaRegistrationGraph, modules: [SemaGraphM
     // Edge targets resolve through one key -> row map (the last row of a key,
     // as the per-edge scan found), not a scan of every row per edge.
     ^row_slots: [String:Int]{}
-    loop (row_index, row) in rows -> row_slots[row.key] = row_index
+    loop (row_index, row) in rows -> row_slots[modules[row.result_index].failure_facts[row.fact_index].function_key] = row_index
     ^settled: false
     ^round: 0
     loop round < JET_FAILURE_UNION_JOIN_ROUND_CAP {
         ^changed: false
         loop row_index in 0..<rows.len() {
-            ^edges: rows[row_index].edges.copy()
-            key: rows[row_index].key
-            loop edge in edges {
-                if edge == key -> next
-                ^incoming: [Type]{}
-                ^incoming_general: true
+            facts: modules[rows[row_index].result_index].failure_facts[rows[row_index].fact_index]
+            loop edge in facts.union_edges {
+                if edge == facts.function_key -> next
                 if row_slots.get(edge) == .Val(other) {
-                    incoming = rows[other].members.copy()
-                    incoming_general = rows[other].general
-                }
-                loop member in incoming {
-                    ^known: false
-                    loop existing in rows[row_index].members {
-                        if type_identity_equal(existing, member) -> known = true
+                    if other != row_index {
+                        loop member_index in 0..<rows[other].members.len() {
+                            ^known: false
+                            loop existing in rows[row_index].members {
+                                if type_identity_equal(existing, rows[other].members[member_index]) {
+                                    known = true
+                                    break
+                                }
+                            }
+                            if !known {
+                                rows[row_index].members.push(rows[other].members[member_index].copy())
+                                changed = true
+                            }
+                        }
                     }
-                    if !known {
-                        rows[row_index].members.push(member)
+                    if rows[other].general && !rows[row_index].general {
+                        rows[row_index].general = true
                         changed = true
                     }
-                }
-                if incoming_general && !rows[row_index].general {
+                } else if !rows[row_index].general {
                     rows[row_index].general = true
                     changed = true
                 }
@@ -591,23 +593,24 @@ sema_failure_union_infer: fn(graph: ^SemaRegistrationGraph, modules: [SemaGraphM
         round += 1
     }
     ^projections: [SemaFailureProjection]{}
-    loop row in rows {
-        typed: loop member in row.members {
+    loop row_index in 0..<rows.len() {
+        typed: loop member in rows[row_index].members {
             if sema_failure_union_typed(member) {
                 break true
             }
         } ?? false
         if !typed -> next
-        function_row: sema_failure_function_row(graph, row.module_index, row.key)
+        key: modules[rows[row_index].result_index].failure_facts[rows[row_index].fact_index].function_key
+        module_index: rows[row_index].module_index
+        function_row: sema_failure_function_row(graph, module_index, key)
         if function_row < 0 -> next
-        ^members: row.members.copy()
-        if row.general || !settled -> members.push(Type.Named{name: "Err"})
-        contract: Type.Result{ok: sema_failure_union_success(graph.modules[row.module_index].functions[row.function_row].declaration), err: sema_failure_union_canonical(members)}
-        projections.push(SemaFailureProjection{key: row.key, module_index: row.module_index, row: function_row, return_type: contract})
-        projected.keys.push(row.key)
-        projected.modules.push(row.module_index)
+        if rows[row_index].general || !settled -> rows[row_index].members.push(Type.Named{name: "Err"})
+        contract: Type.Result{ok: sema_failure_union_success(graph.modules[module_index].functions[rows[row_index].function_row].declaration), err: sema_failure_union_canonical(rows[row_index].members)}
+        projections.push(SemaFailureProjection{key: key, module_index: module_index, row: function_row, return_type: contract})
+        projected.modules.push(module_index)
     }
     sema_failure_project_returns(graph, projections, trail)
+    projected.keys = loop projection in projections -> projection.key
     projected
 }
 
@@ -636,7 +639,7 @@ sema_failure_union_row_part: fn(graph: SemaRegistrationGraph, modules: [SemaGrap
     ^rows: [SemaFailureUnionRow]{}
     loop at in from..<to {
         module_index: sema_registration_module_index(graph, modules[at].module_identity) ?? next
-        loop facts in modules[at].failure_facts {
+        loop (fact_index, facts) in modules[at].failure_facts {
             function_row: sema_failure_function_row(graph, module_index, facts.function_key)
             if function_row < 0 || !sema_failure_inference_candidate(graph.modules[module_index].functions[function_row].declaration) {
                 next
@@ -647,7 +650,7 @@ sema_failure_union_row_part: fn(graph: SemaRegistrationGraph, modules: [SemaGrap
             if module_index == entry_index && graph.modules[module_index].functions[function_row].declaration.name == "run" {
                 next
             }
-            rows.push(SemaFailureUnionRow{key: facts.function_key.copy(), name: graph.modules[module_index].functions[function_row].declaration.name.copy(), module_index: module_index, members: facts.union_members.copy(), general: facts.union_general, edges: facts.union_edges.copy(), cases: facts.union_cases.copy(), function_row: function_row})
+            rows.push(SemaFailureUnionRow{result_index: at, fact_index: fact_index, module_index: module_index, members: facts.union_members.copy(), general: facts.union_general, function_row: function_row})
         }
     }
     rows

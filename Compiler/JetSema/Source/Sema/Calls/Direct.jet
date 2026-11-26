@@ -247,10 +247,10 @@ sema_call_debug_site: fn(call: Call, check: SemaBodyCheck) -> String Never! {
 // The traced expression on one line: each authored line trimmed, blank
 // lines dropped, joined by one space.
 sema_call_debug_expression_text: fn(text: String) -> String Never! {
-    ^lines: [String]{}
-    loop line in text.split("\n").to_list() {
-        trimmed: line.trim().copy()
-        if trimmed != "" -> lines.push(trimmed)
+    lines: loop line in text.split("\n").to_list() -> {
+        trimmed: line.trim()
+        if trimmed == "" -> next
+        trimmed
     }
     lines.join(" ")
 }
@@ -668,7 +668,10 @@ sema_call_check_ambient_print: fn(call: Call, check: ^SemaBodyCheck) -> SemaDire
             complete = false
             next
         }
-        formatted: if checked.ty == (Type.Apply{name: "Measurement", args: [Type]{Type.Float}}) -> sema_expression_measurement_source_call("MeasurementShow", [TExpr]{checked.copy()}, Type.String, checked.span, check) ?? return SemaDirectSpecialCheck{handled: true, value: None} else -> checked
+        formatted: if checked.ty == (Type.Apply{name: "Measurement", args: [Type]{Type.Float}}) -> {
+            checked_span: checked.span
+            sema_expression_measurement_source_call("MeasurementShow", [TExpr]{checked}, Type.String, checked_span, check) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+        } else -> checked
         values.push(formatted)
     }
     if !complete -> return SemaDirectSpecialCheck{handled: true, value: None}
@@ -803,7 +806,7 @@ sema_call_check_ambient_input: fn(span: Span, expected: Type?, check: ^SemaBodyC
     if sema_marker_rules_no_prelude_input(span, check) -> return None
     lines: Type.Apply{name: "Iter", args: [Type]{Type.String}}
     effects: [EffectRowEntry]{EffectRowEntry{name: "IO", span: span}, EffectRowEntry{name: "Exec.Args", span: span}, EffectRowEntry{name: "Time.Wait", span: span}}
-    facts: SemaCallFacts{return_type: lines.copy(), failure_carrier: TFailureCarrier.Infallible, effect_bound: Val(effects), type_args: [Type]{}, default_refs: [FunctionDefaultRef]{}}
+    facts: SemaCallFacts{return_type: lines, failure_carrier: TFailureCarrier.Infallible, effect_bound: Val(effects), type_args: [Type]{}, default_refs: [FunctionDefaultRef]{}}
     if !sema_effect_record_intrinsic_fact(check.environment.*, check.program.*, check.scopes, check.context, "input", span, facts, check.diagnostics) {
         return None
     }
@@ -815,9 +818,8 @@ sema_call_check_ambient_input: fn(span: Span, expected: Type?, check: ^SemaBodyC
     callee: sema_call_callee_decl(check.program.*, target.symbol.id, span, check.diagnostics) ?? return None
     // The InputLines function cannot fail (`Never!`): the call is the reader.
     returned: sema_call_signature_return(target.signature) ?? return None
-    reader: if returned == .Result(ok, _) -> ok.copy() else -> returned
-    receiver: sema_tree_node(reader, TExprKind.Call{callee: callee, type_args: [Type]{}, args: [TCallArg]{}}, span)
-    value: sema_tree_node(lines, TExprKind.HandleMethod{receiver: receiver, operation: BodyHandleOp.LinesIter, args: [TExpr]{}}, span)
+    receiver: if returned == .Result(ok, _) -> sema_tree_node(ok, TExprKind.Call{callee: callee, type_args: [Type]{}, args: [TCallArg]{}}, span) else -> sema_tree_node(returned, TExprKind.Call{callee: callee, type_args: [Type]{}, args: [TCallArg]{}}, span)
+    value: sema_tree_node(facts.return_type, TExprKind.HandleMethod{receiver: receiver, operation: BodyHandleOp.LinesIter, args: [TExpr]{}}, span)
     sema_expr_expected_owned(value, expected, check.environment.*, check.program.*, check.diagnostics)
 }
 
@@ -1077,7 +1079,7 @@ sema_call_check_expect_snapshot: fn(call: Call, args: [CallArg], type_args: [Typ
     value_span: expr_span(call.args[0].expr)
     text: Expr.Str{parts: [StrPart]{StrPart.Interp{expr: call.args[0].expr, format: None}}, span: value_span, id: AST_NODE_GENERATED}
     checked_text: sema_check_expression(text, Val(Type.String), check) ?? return None
-    route: sema_call_core_resolve_route(check, "core.testing", "snap", [Type]{}, 2, false, call.name_span) ?? return None
+    route: sema_call_core_resolve_route(check, "core.testing", "snap", [Type]{}, 2, call.name_span) ?? return None
     target: if route == {
         .Source(source) -> source
         .Core(_) | .SharedSite(_) -> {
@@ -1227,7 +1229,7 @@ sema_call_core_direct_checked: fn(call: Call, expected: Type?, check: ^SemaBodyC
         return sema_call_check_ambient_print(call, check)
     }
     ^diagnostics_before: check.diagnostics.len()
-    ^route: sema_call_core_resolve_import_route(check, alias, member, call.type_args, call.args.len(), sema_call_core_configured_client(call.args), call.name_span, call.name_span)
+    ^route: sema_call_core_resolve_import_route(check, alias, member, call.type_args, call.args.len(), call.name_span, call.name_span)
     route_value: route ?? {
         if check.diagnostics.len() != diagnostics_before {
             return SemaDirectSpecialCheck{handled: true, value: None}
@@ -1652,16 +1654,17 @@ sema_call_variadic_slot_bounds_met: fn(target: SemaCallDirectTarget, callee: Str
         required: sema_call_argument_parameter_type(params[slot], args[index]) ?? next
         if required == .Named(slot_type) {
             parameter_name: sema_variadic_bound_slot_parameter(slot_type) ?? next
-            ^bounds: [String]{}
-            loop parameter in target.generic_params {
+            ^param_index: -1
+            loop (gp_index, parameter) in target.generic_params {
                 if parameter.name == slot_type {
-                    bounds = parameter.bounds.copy()
+                    param_index = gp_index
                     break
                 }
             }
+            if param_index < 0 -> next
             ^probe_diagnostics: [Diagnostic]{}
             checked: sema_probe_expression(args[index].expr, None, check, probe_diagnostics) ?? next
-            loop bound in bounds {
+            loop bound in target.generic_params[param_index].bounds {
                 if sema_call_variadic_bound_met(bound, checked.ty, check) != (Val(false)) -> next
                 check.diagnostics.push(sema_call_variadic_bound_unmet(type_name(checked.ty), parameter_name, bound, callee, expr_span(args[index].expr)))
                 return false

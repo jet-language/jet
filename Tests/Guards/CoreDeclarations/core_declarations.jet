@@ -6,6 +6,7 @@
 // disagrees with its declarations is refused.
 use {
     jet_foundation.[
+        CORE_CALLS,
         CORE_DECLARATIONS,
         CORE_DECLARATIONS_CORE_PATH,
         CORE_DECLARATIONS_ENCODING_PATH,
@@ -58,7 +59,7 @@ core_guard_sources: fn(declared: CoreDeclarations) -[FS]> [CoreDeclarationFile] 
 #Test("the declarations the build reads pass every check against the checkout") {
     guards_enter_root()
     declared: core_guard_declared() ?? panic("Core.rows was refused: {err.message}")
-    assert_eq(declared.dispatchers.len(), CORE_DECLARATIONS.dispatchers.len())
+    assert_eq(CORE_CALLS.len(), 0)
     sources: core_guard_sources(declared)
     assert_eq(core_declarations_source_problems(declared, sources).join("\n"), "")
     constants: core_decl_syntax_constants(CORE_DECLARATIONS_SYNTAX_FILES) ?? panic("the Syntax constants did not read: {err.message}")
@@ -67,6 +68,26 @@ core_guard_sources: fn(declared: CoreDeclarations) -[FS]> [CoreDeclarationFile] 
     assert_eq(core_decl_lang_type_problem(CORE_DECLARATIONS, "Effect", EFFECT_VOCABULARY_ROOTS, "the effect vocabulary's roots"), "")
     assert(core_decl_lang_type_problem(CORE_DECLARATIONS, "Effect", [String]{"Net", "Rand"}, "the effect vocabulary's roots").ends_with("; write `Effect:plain(Net|Rand)`"))
     assert(core_decl_lang_type_problem(CORE_DECLARATIONS, "SideEffect", [String]{"C"}, "the cases").contains("has no `SideEffect:plain(…)` type"))
+}
+
+#Test("Core.rows has zero dispatcher_row lines and refuses any") {
+    guards_enter_root()
+    source: core_guard_files.read(CORE_DECLARATIONS_CORE_PATH) ?? panic("{CORE_DECLARATIONS_CORE_PATH} did not read")
+    parts: core_guard_files.read(CORE_DECLARATIONS_PARTS_PATH) ?? panic("{CORE_DECLARATIONS_PARTS_PATH} did not read")
+    ^dispatcher_lines: [String]{}
+    loop line in source.lines() {
+        trimmed: line.trim()
+        if trimmed.starts_with("dispatcher_row ") || trimmed == "dispatcher_row" {
+            dispatcher_lines.push(trimmed.copy())
+        }
+    }
+    assert(dispatcher_lines.len() == 0, "{CORE_DECLARATIONS_CORE_PATH} must have 0 dispatcher_row lines, found: {dispatcher_lines.join("\n")}")
+    assert_eq(CORE_CALLS.len(), 0)
+    injected: "{source}\ndispatcher_row plain core.term take | CoreCallRecord.source_owned(\"core.term\", \"take\", &[false])\n"
+    if core_declarations_read(injected, parts, CORE_DECLARATIONS_SYNTAX_FILES, CORE_DECLARATIONS_RUNTIME_FILES, EFFECT_VOCABULARY_ROWS) == {
+        .Ok(_) -> panic("Core.rows accepted a retired dispatcher_row line")
+        .Err(error) -> assert(error.message.contains("unrecognized Core declaration: dispatcher_row"))
+    }
 }
 
 // test.jet's `t.<setting>(…)` calls are core.testing's `impl Test` methods:
