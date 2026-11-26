@@ -84,7 +84,7 @@ static void journey_goldens(void) {
         "\033[2;37m  2. load_config (…/errors/error_context.jet:12) — loading config app.toml\033[0m\n"
         "\033[2;37m  3. run (…/errors/error_context.jet:16)\033[0m\n");
     equal(jet_journey_render_styled(&journey,false,40),
-        "  failed here: read_raw (error_context.jet:4)\n"
+        "  failed: read_raw (error_context.jet:4)\n"
         " Trail (3 calls):\n"
         "  1. parse_config (error_context.jet:7)\n"
         "  2. load_config (error_context.jet:12)\n"

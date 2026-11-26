@@ -151,12 +151,13 @@ journey_trim_newlines: fn(text: I64) -> I64 {
         report = jet_error_report_json(error, journey)
         rt_text_push_scalar(report, I64{10})
     } else {
-        root: jet_render_err(error)
+        tty: host_is_tty(I64{2})
+        width: journey_stderr_columns(tty)
+        root: err_render_width(error, width)
         report = journey_trim_newlines(root)
         jet_rt_string_drop(root)
         rt_text_push_scalar(report, I64{10})
-        tty: host_is_tty(I64{2})
-        trail: jet_journey_render_styled(journey, journey_auto_color(tty), journey_stderr_columns(tty))
+        trail: jet_journey_render_styled(journey, journey_auto_color(tty), width)
         err_append(report, trail)
         jet_rt_string_drop(trail)
     }
