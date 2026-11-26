@@ -1868,7 +1868,7 @@ sema_checked_foreign_row: fn(graph: SemaRegistrationGraph, module_row: SemaRegis
         abi: sema_checked_foreign_abi_name(registered.abi),
         language: if rust_owner -> "rust:{registered.foreign_library}" else -> "c",
         effect_root: registered.abi.foreign_effect_root,
-        callback_transport: registered.abi.callback_transport,
+        callback_transport: if registered.declaration.generated -> registered.abi.callback_transport else -> None,
         callback_plan_digest: registered.abi.callback_plan_digest,
         callback_identity: registered.abi.callback_identity,
         link_key: link_key,
