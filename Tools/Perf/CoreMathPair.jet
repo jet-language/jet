@@ -243,6 +243,7 @@ run: fn() {
     if rows_jet == "" {
         fail("--rows names the compiler that still routes core.math's Float leaves through its rows")
     }
+    rows_cmd: [String]{rows_jet}
     n_text: argument(argv, "--n", DEFAULT_N)
     n: count(n_text, "--n")
     trials: count(argument(argv, "--trials", DEFAULT_TRIALS), "--trials")
@@ -254,7 +255,7 @@ run: fn() {
     ^loss: false
     loop level in LEVELS {
         bodies: build(root, jet, 0, level, files.join(scratch, "bodies{level}"))
-        rows: build(root, [String]{rows_jet}, 1, level, files.join(scratch, "rows{level}"))
+        rows: build(root, rows_cmd, 1, level, files.join(scratch, "rows{level}"))
         measured: level_of(launch, scratch, bodies, rows, level, n_text, trials)
         print("{level} {line_of("wall_ns", measured.wall_ns)}")
         if measured.cycles_u == .Val(cycles) -> print("{level} {line_of("cycles_u", cycles)}")
