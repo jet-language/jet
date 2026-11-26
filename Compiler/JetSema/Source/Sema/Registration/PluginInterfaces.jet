@@ -45,14 +45,14 @@ SemaPluginInterfaceFacts: struct {
     digest: String,
 }
 
-sema_plugin_put_export: fn(exports: ^[SemaPluginInterfaceExport], export: SemaPluginInterfaceExport) Never! {
+sema_plugin_put_export: fn(exports: ^[SemaPluginInterfaceExport], export: ^^SemaPluginInterfaceExport) Never! {
     loop index in 0..<exports.len() {
         if exports[index].name == export.name {
             exports[index] = export
             return
         }
     }
-    exports.push(export.copy())
+    exports.push(export)
 }
 
 sema_plugin_export_after: fn(left: SemaPluginInterfaceExport, right: SemaPluginInterfaceExport) -> Bool Never! {
@@ -87,14 +87,14 @@ sema_plugin_sort_interfaces: fn(interfaces: ^[SemaPluginInterface]) Never! {
     }
 }
 
-sema_plugin_put_interface: fn(interfaces: ^[SemaPluginInterface], interface: SemaPluginInterface) Never! {
+sema_plugin_put_interface: fn(interfaces: ^[SemaPluginInterface], interface: ^^SemaPluginInterface) Never! {
     loop index in 0..<interfaces.len() {
         if interfaces[index].identity == interface.identity {
             interfaces[index] = interface
             return
         }
     }
-    interfaces.push(interface.copy())
+    interfaces.push(interface)
 }
 
 sema_plugin_normalize_artifact: fn(raw: String) -> String? {

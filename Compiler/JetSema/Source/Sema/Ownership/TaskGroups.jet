@@ -1479,11 +1479,12 @@ sema_readiness_tree: fn(table: ^^SemaReadinessTable, branches: ^^[SemaStatementR
         ^branch: owned_branches.pop() ?? return None
         ^body: [TStmt]{}
         ^selected: 0
-        if arm == {
+        if arm.move() == {
             .Receive(local, receiver, ordinal) -> {
                 selected = ordinal
+                local_span: local.span
                 payload: sema_tree_node(element, TExprKind.HostCall{call: THostCall.OptionProbe{inner: sema_readiness_result_field(result_local, result_ty, 1, payload_ty, span), kind: TOptionProbe.Unwrap}}, span)
-                body.push(TStmt.Let{local: local.copy(), let_ty: TLetTy.Annotated{ty: element.copy(), wrapper: TLetWrapper.Plain}, init: payload, gc_promotion: None, gc_transferred: false, span: local.span})
+                body.push(TStmt.Let{local: local, let_ty: TLetTy.Annotated{ty: element.copy(), wrapper: TLetWrapper.Plain}, init: payload, gc_promotion: None, gc_transferred: false, span: local_span})
                 builder = sema_tree_node(builder_ty, TExprKind.SelectRecv{builder: builder.move(), channel: receiver}, span)
             }
             .After(duration, ordinal) -> {

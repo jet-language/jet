@@ -40,8 +40,9 @@ sema_call_reflection_leaf_name: fn(name: String) -> String Never! { symbol_key_l
 // value's copy gate (a secret-bearing field also makes its value one owner's).
 sema_call_reflection_name_args: fn(ty: Type, span: Span, value_span: Span, check: ^SemaBodyCheck) -> [TExpr]? {
     ^args: [TExpr]{}
+    ^open: [String]{}
     sema_call_reflection_names(ty, span, check, args)
-    if !sema_call_reflection_level_args(ty, span, value_span, check, [String]{}, args) {
+    if !sema_call_reflection_level_args(ty, span, value_span, check, open, args) {
         return None
     }
     ^held: ""
@@ -114,26 +115,27 @@ sema_call_reflection_declared_impls: fn(bounds: [String], span: Span, program: S
 // then its cases (sema_call_reflection_case_args). A type already open on the
 // way down lists no fields or cases again: its level is two zero counts.
 // False after reporting the first part that can't be captured.
-sema_call_reflection_level_args: fn(ty: Type, span: Span, value_span: Span, check: ^SemaBodyCheck, open: [String], args: ^[TExpr]) -> Bool {
+sema_call_reflection_level_args: fn(ty: Type, span: Span, value_span: Span, check: ^SemaBodyCheck, open: ^[String], args: ^[TExpr]) -> Bool {
     path: sema_call_reflection_type_names(ty, check.environment.*, check.program.*).path
     if sema_call_reflection_has_name(open, path) {
         args.push(sema_tree_node(Type.Int, TExprKind.IntLit{value: 0, width: None}, span))
         args.push(sema_tree_node(Type.Int, TExprKind.IntLit{value: 0, width: None}, span))
         return true
     }
-    ^inner: [String]{path}
-    loop name in open -> inner.push(name.copy())
-    if !sema_call_reflection_field_args(ty, span, value_span, check, inner, args) -> return false
-    sema_call_reflection_case_args(ty, path, span, value_span, check, inner, args)
+    open.push(path)
+    ^ok: sema_call_reflection_field_args(ty, span, value_span, check, open, args)
+    if ok -> ok = sema_call_reflection_case_args(ty, open.len() - 1, span, value_span, check, open, args)
+    ^_: open.pop()
+    ok
 }
 
 // The fields half of one level: the count of `ty`'s stored struct fields,
 // then each field's name, its names (sema_call_reflection_names) and its own level, so a
-// nested struct field reflects its fields too; `inner` holds `ty` and the
+// nested struct field reflects its fields too; `open` holds `ty` and the
 // types open above it. False after reporting the first stored field whose
 // type is unknown or can't be reflected the way the value itself is
 // (sema_call_reflection_validate_value).
-sema_call_reflection_field_args: fn(ty: Type, span: Span, value_span: Span, check: ^SemaBodyCheck, inner: [String], args: ^[TExpr]) -> Bool {
+sema_call_reflection_field_args: fn(ty: Type, span: Span, value_span: Span, check: ^SemaBodyCheck, open: ^[String], args: ^[TExpr]) -> Bool {
     count_at: args.len()
     args.push(sema_tree_node(Type.Int, TExprKind.IntLit{value: 0, width: None}, span))
     definition: sema_http_route_find_struct(check, ty, check.environment.module_identity) ?? return true
@@ -154,7 +156,7 @@ sema_call_reflection_field_args: fn(ty: Type, span: Span, value_span: Span, chec
         }
         args.push(sema_call_reflection_text(field.name, span))
         sema_call_reflection_names(field_ty, span, check, args)
-        if !sema_call_reflection_level_args(field_ty, span, value_span, check, inner, args) {
+        if !sema_call_reflection_level_args(field_ty, span, value_span, check, open, args) {
             return false
         }
         count += 1
@@ -164,7 +166,7 @@ sema_call_reflection_field_args: fn(ty: Type, span: Span, value_span: Span, chec
 }
 
 // The cases half of one level: the count of `ty`'s cases when it is a
-// declared enum at `path` or an outcome type (sema_call_reflection_outcome_cases;
+// declared enum at `open[path_index]` or an outcome type (sema_call_reflection_outcome_cases;
 // 0 for any other type), then each case's name (a grouped case's last
 // segment) and `module.Enum.Case` path, then its payload as a field list: the
 // member count, then each member's name (a lone unnamed payload is `value`),
@@ -172,18 +174,18 @@ sema_call_reflection_field_args: fn(ty: Type, span: Span, value_span: Span, chec
 // listed, not just the one a value holds, so a payload no case could capture
 // refuses the value whichever case it holds. False after reporting the first
 // payload member that can't be reflected.
-sema_call_reflection_case_args: fn(ty: Type, path: String, span: Span, value_span: Span, check: ^SemaBodyCheck, inner: [String], args: ^[TExpr]) -> Bool {
+sema_call_reflection_case_args: fn(ty: Type, path_index: Int, span: Span, value_span: Span, check: ^SemaBodyCheck, open: ^[String], args: ^[TExpr]) -> Bool {
     count_at: args.len()
     args.push(sema_tree_node(Type.Int, TExprKind.IntLit{value: 0, width: None}, span))
     if sema_call_reflection_outcome_cases(ty) == .Val(cases) {
         loop case in cases {
             args.push(sema_call_reflection_text(case.name, span))
-            args.push(sema_call_reflection_text("{path}.{case.name}", span))
+            args.push(sema_call_reflection_text("{open[path_index]}.{case.name}", span))
             ^members: 0
             if case.payload != None -> members = 1
             args.push(sema_tree_node(Type.Int, TExprKind.IntLit{value: members, width: None}, span))
             if case.payload == .Val(member_ty) {
-                if !sema_call_reflection_case_member(ty, case.name, "value", member_ty, span, value_span, check, inner, args) {
+                if !sema_call_reflection_case_member(ty, case.name, "value", member_ty, span, value_span, check, open, args) {
                     return false
                 }
             }
@@ -205,10 +207,10 @@ sema_call_reflection_case_args: fn(ty: Type, path: String, span: Span, value_spa
         }
         members: sema_pattern_variant_types(check.program.registration_graph, variant.payload, nominal, ty)
         args.push(sema_call_reflection_text(leaf, span))
-        args.push(sema_call_reflection_text("{path}.{declared}", span))
+        args.push(sema_call_reflection_text("{open[path_index]}.{declared}", span))
         args.push(sema_tree_node(Type.Int, TExprKind.IntLit{value: members.len(), width: None}, span))
         loop (index, member_ty) in members {
-            if !sema_call_reflection_case_member(ty, leaf, labels[index], member_ty, span, value_span, check, inner, args) {
+            if !sema_call_reflection_case_member(ty, leaf, labels[index], member_ty, span, value_span, check, open, args) {
                 return false
             }
         }
@@ -220,7 +222,7 @@ sema_call_reflection_case_args: fn(ty: Type, path: String, span: Span, value_spa
 // One payload member `label` of case `leaf` of `ty`: its name, its names and
 // its own level pushed onto `args`. False after reporting a member that holds
 // a secret or doesn't show the way `"{x}"` interpolation does.
-sema_call_reflection_case_member: fn(ty: Type, leaf: String, label: String, member_ty: Type, span: Span, value_span: Span, check: ^SemaBodyCheck, inner: [String], args: ^[TExpr]) -> Bool {
+sema_call_reflection_case_member: fn(ty: Type, leaf: String, label: String, member_ty: Type, span: Span, value_span: Span, check: ^SemaBodyCheck, open: ^[String], args: ^[TExpr]) -> Bool {
     if sema_call_reflection_secret_bearing(member_ty) {
         check.diagnostics.push(sema_error("E0112", value_span, "case `{leaf}` of {sema_type_show(ty)} holds secret-bearing {sema_type_show(member_ty)} in `{label}`, which can't be reflected", "`reflect.of` captures every case payload the value could hold or refuses the value, and this payload would expose a cryptographic secret", "reflect a value whose cases hold no secret instead"))
         return false
@@ -231,7 +233,7 @@ sema_call_reflection_case_member: fn(ty: Type, leaf: String, label: String, memb
     }
     args.push(sema_call_reflection_text(label, span))
     sema_call_reflection_names(member_ty, span, check, args)
-    sema_call_reflection_level_args(member_ty, span, value_span, check, inner, args)
+    sema_call_reflection_level_args(member_ty, span, value_span, check, open, args)
 }
 
 // The built-in cases of an outcome type, in the order its patterns name them,

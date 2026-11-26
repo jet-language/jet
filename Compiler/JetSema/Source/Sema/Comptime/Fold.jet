@@ -73,7 +73,7 @@ sema_comptime_fold: fn(interner: Interner, tree: BodyTree, expression: Int, valu
     // Passed straight through: a local binding of a row would copy it.
     tid: body_type_id(tree, expression)
     ty: if type_delta.len() > 0 -> delta_type_syntax(interner, type_delta[0], tid) else -> type_syntax(interner, tid)
-    sema_comptime_fold_node(interner, tree, expression, tree.nodes[body_node_index(tree, expression)].kind, ty, values, symbols, type_delta)
+    sema_comptime_fold_node(interner, tree, expression, tree.nodes[body_node_index(tree, expression)].kind, ty.move(), values, symbols, type_delta)
 }
 
 // The payload node of a module `Shared{X}` holder: `expression` is the
@@ -145,7 +145,7 @@ sema_comptime_point_type: fn(ty: Type) -[]> Bool {
     false
 }
 
-sema_comptime_fold_node: fn(interner: Interner, tree: BodyTree, expression: Int, kind: NodeKind, expression_ty: Type, values: [SemaComptimeItemValue], symbols: SymbolTable, type_delta: [InternerDelta]) -> TComptimeValue? Never! {
+sema_comptime_fold_node: fn(interner: Interner, tree: BodyTree, expression: Int, kind: NodeKind, expression_ty: ^^Type, values: [SemaComptimeItemValue], symbols: SymbolTable, type_delta: [InternerDelta]) -> TComptimeValue? Never! {
     if kind == {
         .IntLit(value, _) -> return sema_comptime_fold_int(value, expression_ty)
         .FloatLit(value) -> {
@@ -211,9 +211,8 @@ sema_comptime_fold_node: fn(interner: Interner, tree: BodyTree, expression: Int,
             }
         }
         .Absent -> {
-            // copy: `inner` is a payload of read parameter `expression_ty`, which keeps the original; field `ty` of the new TComptimeReport.Clean owns this one
-            if expression_ty == .Option(inner) {
-                return Val(TComptimeValue.Failed{report: TComptimeReport.Clean{ty: inner.copy()}})
+            if expression_ty.move() == .Option(inner) {
+                return Val(TComptimeValue.Failed{report: TComptimeReport.Clean{ty: inner}})
             }
         }
         // `x ?? fallback`: a present value is itself, an absent one takes a
@@ -412,10 +411,9 @@ sema_comptime_fold_from_bytes: fn(interner: Interner, tree: BodyTree, value: Int
         if operation != TBuiltinOp.StringFromBytes || args.len() != 0 -> return None
         folded: sema_comptime_fold(interner, tree, receiver, values, symbols, type_delta) ?? return None
         ^bytes: [U8]{}
-        if folded == {
+        if folded.move() == {
             // A checked `[U8]{"…"}` byte value folds to its bytes.
-            // copy: `values_bytes` is a payload of `folded`, which keeps the original
-            .Bytes(values_bytes) -> bytes = values_bytes.copy()
+            .Bytes(values_bytes) -> bytes = values_bytes
             .List(items) -> {
                 loop item in items {
                     if item == .Int(number) -> bytes.push(checked(U8{number}) ?? return None) else {

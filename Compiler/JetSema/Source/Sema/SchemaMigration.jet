@@ -1,7 +1,7 @@
 // 2: E0910 diff, independent of I/O. None is the status command's deliberately
 // empty advisory registry; builds supply the canonical populated scope
 // environment after type registration.
-use jet_foundation.[Diagnostic, Item, MigrationOp, Span, StructDef, Type, owned_trait_conversion, type_name, TTypeDef]
+use jet_foundation.[Diagnostic, Item, Span, StructDef, Type, owned_trait_conversion, type_name, TTypeDef]
 
 sema_schema_published: fn(definition: StructDef) -> Bool Never! { definition.is_published_schema }
 
@@ -40,19 +40,19 @@ sema_schema_decodable: fn(ty: Type, environment: SemaScopeEnvironment?, program:
 
 check_schema_migrations: fn(items: [Item], snapshots: [String:SchemaSnapshot], environment: SemaScopeEnvironment?, program: SemaProgramTables) -> [Diagnostic] Never! {
     ^diagnostics: [Diagnostic]{}
-    ^migrations: [String:[MigrationOp]]{}
+    ^migration_items: [String:[Int]]{}
     ^conversions: [{from_ty: String, to_ty: String}]{}
     // A checked program holds each accepted top-level conversion into a
     // failure domain as its lowered routine (sema_error_conversion_items); a
     // parsed one, a nested one and every value conversion
     // (`impl Label.From(String)`) still hold the item.
     ^functions: [String]{}
-    loop item in items {
+    loop (item_index, item) in items {
         if item == {
             .Migration(migration) -> {
-                ^operations: migrations.get(migration.type_name) ?? [MigrationOp]{}
-                loop operation in migration.ops -> operations.push(operation.copy())
-                migrations[migration.type_name] = operations.move()
+                ^indices: migration_items.get(migration.type_name) ?? [Int]{}
+                indices.push(item_index)
+                migration_items[migration.type_name] = indices.move()
             }
             .ErrorConv(conversion) -> {
                 conversions.push({from_ty: conversion.from_ty, to_ty: conversion.to_ty})
@@ -91,54 +91,61 @@ check_schema_migrations: fn(items: [Item], snapshots: [String:SchemaSnapshot], e
             ^old: [String:String]{}
             loop field in definition.fields -> current[field.name] = type_name(field.ty)
             loop field in baseline.fields -> old[field.name] = field.ty
-            operations: migrations.get(definition.name) ?? [MigrationOp]{}
+            indices: migration_items.get(definition.name) ?? [Int]{}
             name: definition.name
-            loop operation in operations {
-                if operation == {
-                    .Remove(field, _) -> {
-                        if {
-                            current.get(field) != None -> {
-                                diagnostics.push(sema_schema_remove_present(name, field, span))
-                            }
-                            old.get(field) == None -> {
-                                diagnostics.push(sema_schema_unknown(name, field, "remove", span))
-                            }
-                        }
-                    }
-                    .Add(field, _, ty, _, _, _, _) -> {
-                        declared: type_name(ty)
-                        if {
-                            old.get(field) != None -> {
-                                diagnostics.push(sema_schema_add_old(name, field, span))
-                            }
-                            current.get(field) == .Val(actual) -> {
+            loop migration_index in indices {
+                if items[migration_index] == .Migration(migration) {
+                    loop operation in migration.ops {
+                        if operation == {
+                            .Remove(field, _) -> {
                                 if {
-                                    actual != declared -> {
-                                        diagnostics.push(sema_schema_add_mismatch(name, field, declared, actual, span))
+                                    current.get(field) != None -> {
+                                        diagnostics.push(sema_schema_remove_present(name, field, span))
                                     }
-                                    sema_schema_codec(definition, "Decode", environment, program) && !sema_schema_codec(definition, "Encode", environment, program) -> {
-                                        loop added in definition.fields {
-                                            if added.name == field && !sema_schema_decodable(added.ty, environment, program) {
-                                                diagnostics.push(sema_schema_add_decode(name, field, actual, span))
-                                            }
-                                        }
+                                    old.get(field) == None -> {
+                                        diagnostics.push(sema_schema_unknown(name, field, "remove", span))
                                     }
                                 }
                             }
-                            else -> diagnostics.push(sema_schema_unknown(name, field, "add", span))
-                        }
-                    }
-                    .Change(field, _, from, _, to, _, _, _, _) -> {
-                        old_type: old.get(field)
-                        new_type: current.get(field)
-                        if {
-                            old_type == .Val(old_ty) -> {
+                            .Add(field, _, ty, _, _, _, _) -> {
+                                declared: type_name(ty)
                                 if {
-                                    new_type == .Val(new_ty) -> {
-                                        declared_from: type_name(from)
-                                        declared_to: type_name(to)
-                                        if old_ty != declared_from || new_ty != declared_to {
-                                            diagnostics.push(sema_schema_change_mismatch(name, field, declared_from, declared_to, old_ty, new_ty, span))
+                                    old.get(field) != None -> {
+                                        diagnostics.push(sema_schema_add_old(name, field, span))
+                                    }
+                                    current.get(field) == .Val(actual) -> {
+                                        if {
+                                            actual != declared -> {
+                                                diagnostics.push(sema_schema_add_mismatch(name, field, declared, actual, span))
+                                            }
+                                            sema_schema_codec(definition, "Decode", environment, program) && !sema_schema_codec(definition, "Encode", environment, program) -> {
+                                                loop added in definition.fields {
+                                                    if added.name == field && !sema_schema_decodable(added.ty, environment, program) {
+                                                        diagnostics.push(sema_schema_add_decode(name, field, actual, span))
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    else -> diagnostics.push(sema_schema_unknown(name, field, "add", span))
+                                }
+                            }
+                            .Change(field, _, from, _, to, _, _, _, _) -> {
+                                old_type: old.get(field)
+                                new_type: current.get(field)
+                                if {
+                                    old_type == .Val(old_ty) -> {
+                                        if {
+                                            new_type == .Val(new_ty) -> {
+                                                declared_from: type_name(from)
+                                                declared_to: type_name(to)
+                                                if old_ty != declared_from || new_ty != declared_to {
+                                                    diagnostics.push(sema_schema_change_mismatch(name, field, declared_from, declared_to, old_ty, new_ty, span))
+                                                }
+                                            }
+                                            else -> {
+                                                diagnostics.push(sema_schema_unknown(name, field, "change", span))
+                                            }
                                         }
                                     }
                                     else -> {
@@ -146,28 +153,29 @@ check_schema_migrations: fn(items: [Item], snapshots: [String:SchemaSnapshot], e
                                     }
                                 }
                             }
-                            else -> {
-                                diagnostics.push(sema_schema_unknown(name, field, "change", span))
-                            }
+                            .Rename(_, _, _, _) -> {}
                         }
                     }
-                    .Rename(_, _, _, _) -> {}
                 }
             }
             loop field in baseline.fields {
                 if current.get(field.name) != None -> next
                 ^bridged: false
-                loop operation in operations {
-                    if operation == {
-                        .Rename(from, _, to, _) -> {
-                            if current.get(to) == .Val(actual) {
-                                if from == field.name && actual == field.ty -> bridged = true
+                loop migration_index in indices {
+                    if items[migration_index] == .Migration(migration) {
+                        loop operation in migration.ops {
+                            if operation == {
+                                .Rename(from, _, to, _) -> {
+                                    if current.get(to) == .Val(actual) {
+                                        if from == field.name && actual == field.ty -> bridged = true
+                                    }
+                                }
+                                .Remove(removed, _) -> {
+                                    if removed == field.name -> bridged = true
+                                }
+                                .Add(_, _, _, _, _, _, _) | .Change(_, _, _, _, _, _, _, _, _) -> {}
                             }
                         }
-                        .Remove(removed, _) -> {
-                            if removed == field.name -> bridged = true
-                        }
-                        .Add(_, _, _, _, _, _, _) | .Change(_, _, _, _, _, _, _, _, _) -> {}
                     }
                 }
                 if !bridged {
@@ -179,13 +187,18 @@ check_schema_migrations: fn(items: [Item], snapshots: [String:SchemaSnapshot], e
                 new_ty: type_name(field.ty)
                 if old_ty == new_ty -> next
                 ^converter: Bool?{None}
-                loop operation in operations {
-                    if operation == .Change(changed, _, from, _, to, _, via, _, _) {
-                        if changed == field.name && type_name(from) == old_ty && type_name(to) == new_ty {
-                            converter = Val(via != None)
-                            break
+                loop migration_index in indices {
+                    if items[migration_index] == .Migration(migration) {
+                        loop operation in migration.ops {
+                            if operation == .Change(changed, _, from, _, to, _, via, _, _) {
+                                if changed == field.name && type_name(from) == old_ty && type_name(to) == new_ty {
+                                    converter = Val(via != None)
+                                    break
+                                }
+                            }
                         }
                     }
+                    if converter != None -> break
                 }
                 if converter == {
                     .Val(has_converter) -> {
@@ -209,15 +222,19 @@ check_schema_migrations: fn(items: [Item], snapshots: [String:SchemaSnapshot], e
             loop field in definition.fields {
                 if old.get(field.name) != None -> next
                 ^supplied: false
-                loop operation in operations {
-                    if operation == {
-                        .Rename(_, _, to, _) -> {
-                            if to == field.name -> supplied = true
+                loop migration_index in indices {
+                    if items[migration_index] == .Migration(migration) {
+                        loop operation in migration.ops {
+                            if operation == {
+                                .Rename(_, _, to, _) -> {
+                                    if to == field.name -> supplied = true
+                                }
+                                .Add(added, _, _, _, _, _, _) -> {
+                                    if added == field.name -> supplied = true
+                                }
+                                .Remove(_, _) | .Change(_, _, _, _, _, _, _, _, _) -> {}
+                            }
                         }
-                        .Add(added, _, _, _, _, _, _) -> {
-                            if added == field.name -> supplied = true
-                        }
-                        .Remove(_, _) | .Change(_, _, _, _, _, _, _, _, _) -> {}
                     }
                 }
                 if !supplied -> diagnostics.push(sema_schema_added(name, field.name, span))
