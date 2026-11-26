@@ -2042,7 +2042,6 @@ JetCLIReviewDiagnosticSide: struct {
 
 JetCLIReviewDiagnosticLoaded: enum {
     Loaded(side: JetCLIReviewDiagnosticSide),
-    Failed(message: String),
     Refused(output: JetDriverVerbOutput),
 }
 
@@ -2077,13 +2076,11 @@ jet_cli_review_diagnostics: fn(argv: [String], json: Bool, color: Bool) -> JetDr
     }
     base: jet_cli_review_diagnostic_load(paths[0])
     if base == {
-        .Failed(message) -> return jet_cli_review_input_error(paths[0], message, color, json)
         .Refused(output) -> return output.move()
         .Loaded(_) -> {}
     }
     head: jet_cli_review_diagnostic_load(paths[1])
     if head == {
-        .Failed(message) -> return jet_cli_review_input_error(paths[1], message, color, json)
         .Refused(output) -> return output.move()
         .Loaded(_) -> {}
     }
