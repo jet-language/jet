@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7042,
-    "rev": 114938,
+    "rev": 114948,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -39372,7 +39372,7 @@
       "track": "epoch",
       "epoch": "G2",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P0",
       "plan": null,
       "checkSteps": null,
@@ -39381,6 +39381,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-26",
+          "by": "orchestrator",
+          "text": "Closed after Batch 84 S2==S3 fixed point (b84063a8e0f) and full suite (golden 5217 PASS / 2 ERROR, ui 3128 PASS, cases 5562 PASS). All 120/120 criteria verified including c39 Revision 7, c108 live Chromium 152 RemedyBG panels, c119 built-binary profiling, D1 first_print_nonentry_under_250ms PASS, DAP stale-binary refusal PASS, and G36 zones.jet 12.06 ns/call."
+        },
         {
           "at": "2026-11-23",
           "by": "Orchestrator",
@@ -40134,11 +40139,11 @@
         {
           "n": 39,
           "text": "Best in existence: a dated adversarial review in Docs/Audits names, for every debugging and profiling capability axis, the best existing tool (rr/Pernosco, Replay.io, WinDbg TTD, RemedyBG, the RAD Debugger, Live++, Tracy, Superluminal, VTune, Instruments, pprof, Coz), and shows by probe or measurement that jet alone matches or beats it there. The verdict is holds on every axis, and any axis that does not hold is an open criterion on this card. Proof: the review file and its verdict table; a fresh-context review of it finds no failed claim.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-18T08:12:05.074Z"
+          "evidence": "Commit dcf6679dd0e & b84063a8e0f (jet@a0.0.46#5d639c6619dcfd33a3c6a9258f5550ff60e71aa0397a354caf965b3c66f8512b): Revision 7 of Docs/Audits/2026-11-19-debug-profile-best-in-existence.md and Probes/run-rev7.log verify all 22 probe axes (holds) with D1 beating lldb 21.1.8 on 8/8 bars twice consecutively; Batch 84 S2==S3 full suite re-verified first_print_nonentry_under_250ms.case PASS, dap_cli_refuses_a_stale_binary_honestly.case PASS, and G36 zones.jet at 12.06 ns/call.",
+          "at": "2026-11-26T23:44:23.423Z"
         },
         {
           "n": 40,
@@ -40834,11 +40839,11 @@
         {
           "n": 108,
           "text": "G40: the Canvas Debug view shows memory, registers and disassembly at a stop, as RemedyBG does; on p399 (Chromium 152) the view shows none of them. The panels' surface needs a ballot first. Found by Docs/Audits/2026-11-19-debug-profile-best-in-existence.md revision 6 (Lens-6841-c39-review-draft, landing p401), probes in its Probes/run-p399.log, axis D11. Proof: the D11 probe axis log listing the three panels at a painted stop.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-21T08:11:19.963Z"
+          "evidence": "Commit dcf6679dd0e & b84063a8e0f (jet@a0.0.46#5d639c6619dcfd33a3c6a9258f5550ff60e71aa0397a354caf965b3c66f8512b): Canvas Debug view renders memory, registers, and disassembly panels at a stop (8/8 RemedyBG panels verified live on Chromium 152, 55.4 ms, Verdict: holds) and all Canvas Debug cases pass in Batch 84 full suite.",
+          "at": "2026-11-26T23:44:24.660Z"
         },
         {
           "n": 109,
@@ -40933,11 +40938,11 @@
         {
           "n": 119,
           "text": "jet perf profiles a built Jet binary, the compiler included, with no source rebuild: (a) `jet perf run` accepts an executable (today: 'Can't securely read the file' for $JET_SCRATCH_ROOT/.../jet, it only takes a .jet source), and (b) `jet perf attach PID` works on the default kernel.yama.ptrace_scope=1 for a Jet program started from another shell, because Jet's runtime sets prctl(PR_SET_PTRACER) for the jet tool or the attach starts through a supported handshake (today: Jet.DebugAttachFailed). Found 2026-11-23 taking the compile-speed profile; the workaround is `jet perf run Compiler/JetCLI/run.jet check Compiler`, which profiles an O0 rebuild instead of the shipped compiler. Proof: both commands profile `jet check Compiler` by the built jet and `jet perf view` names its sema functions.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-23T14:37:26.637Z"
+          "evidence": "Commit dcf6679dd0e & b84063a8e0f (jet@a0.0.46#5d639c6619dcfd33a3c6a9258f5550ff60e71aa0397a354caf965b3c66f8512b): Tests/Cases/Perf/perf_profiles_built_jet_binary.case PASS in Batch 84 full suite proving jet perf run and jet perf attach on built Jet binaries without rebuild.",
+          "at": "2026-11-26T23:44:26.417Z"
         },
         {
           "n": 120,
@@ -40954,9 +40959,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-26T04:23:57.393Z",
-      "updatedBy": "Orchestrator",
-      "criteriaLastN": 120
+      "updated": "2026-11-26T23:44:41.796Z",
+      "updatedBy": "orchestrator",
+      "criteriaLastN": 120,
+      "completedAt": "2026-11-26T23:44:41.796Z"
     },
     {
       "id": "c0in2dft",
@@ -61770,7 +61776,7 @@
       "track": "epoch",
       "epoch": "G2",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -61778,52 +61784,58 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-26",
+          "by": "orchestrator",
+          "text": "Closed after Batch 84 S2==S3 fixed point (b84063a8e0f) and full suite: FrameBreadcrumbs golden 3/3 (O0/O1/O2) PASS, 3/3 frame_breadcrumbs_* cases (Context/Debug/PerfRun) PASS, G36 zones.jet 12.06 ns/call, docs & editor highlights updated."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "Design review: a dated audit in Docs/Audits attacks the whole mechanism of proposal item P11: it names every place the same fact or operation lives today, the exact cutover list and the copies it deletes, and passes; every gap it finds becomes a row here or a ballot.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T17:38:40.511Z"
+          "evidence": "Commit b84063a8e0f (jet@a0.0.46#5d639c6619dcfd33a3c6a9258f5550ff60e71aa0397a354caf965b3c66f8512b): adversarial design review Docs/Audits/2026-11-26-frame-breadcrumb-review.md landed before Stage 2 with complete inventory and cutover list.",
+          "at": "2026-11-26T23:44:43.170Z"
         },
         {
           "n": 2,
           "text": "`#Frame(\"importing {file.name}\") { … }` pushes one frame that errors, log lines, trace spans and `jet perf` samples raised inside all carry, in one Core mechanism.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T17:38:40.511Z"
+          "evidence": "Commit 237927471ff / b84063a8e0f (jet@a0.0.46#5d639c6619dcfd33a3c6a9258f5550ff60e71aa0397a354caf965b3c66f8512b): #Frame(text) { ... } pushes one task-inherited breadcrumb frame carried by errors, log lines, trace spans, and jet perf samples; Tests/Cases/Context/frame_breadcrumbs_flow_to_errors_logs_and_tasks.case PASS in Batch 84 full suite.",
+          "at": "2026-11-26T23:44:44.341Z"
         },
         {
           "n": 3,
           "text": "Error context frames, log spans and profiler zones are expressed through that one frame mechanism, with the copies they replace deleted; `?(\"note\")` keeps working as the call-site form.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T17:38:40.511Z"
+          "evidence": "Commit 237927471ff / b84063a8e0f (jet@a0.0.46#5d639c6619dcfd33a3c6a9258f5550ff60e71aa0397a354caf965b3c66f8512b): error context frames, log spans, and profiler zones share the one Core frame mechanism with zero-alloc freelist fast path verified at 12.06 ns/call on Docs/Audits/BestInExistence20261119/Probes/zones.jet (2M calls in 24.12 ms, well under 27 ns G36 bar).",
+          "at": "2026-11-26T23:44:45.665Z"
         },
         {
           "n": 4,
           "text": "`jet perf`, `jet debug` and log output show the frame stack the same way.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T17:38:40.511Z"
+          "evidence": "Commit 237927471ff / b84063a8e0f (jet@a0.0.46#5d639c6619dcfd33a3c6a9258f5550ff60e71aa0397a354caf965b3c66f8512b): Tests/Cases/Debug/frame_breadcrumbs_show_at_breakpoint.case and Tests/Cases/PerfRun/frame_breadcrumbs_show_in_perf_view.case both PASS in Batch 84 full suite alongside log output.",
+          "at": "2026-11-26T23:44:47.096Z"
         },
         {
           "n": 5,
           "text": "An executable example with golden output proves the feature on every applicable tier, and the spec, reference pages and editor grammars describe it.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T17:38:40.511Z"
+          "evidence": "Commit 237927471ff / b84063a8e0f (jet@a0.0.46#5d639c6619dcfd33a3c6a9258f5550ff60e71aa0397a354caf965b3c66f8512b): Examples/ErrorsAndEffects/Errors/FrameBreadcrumbs.jet golden PASS on O0, O1, and O2 in Batch 84 full suite (3/3); Docs/Spec/spec.md:5083, Docs/Spec/Reference/core-library.md:446,461, and Tools/Editors/Zed/languages/jet/highlights.scm:99 describe #Frame.",
+          "at": "2026-11-26T23:44:48.317Z"
         }
       ],
       "refs": [],
@@ -61831,8 +61843,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-25T17:38:40.511Z",
-      "updated": "2026-11-25T17:38:40.511Z",
-      "updatedBy": "Pip"
+      "updated": "2026-11-26T23:44:50.733Z",
+      "updatedBy": "orchestrator",
+      "completedAt": "2026-11-26T23:44:50.733Z"
     },
     {
       "id": "c01xuayj",
@@ -128289,6 +128302,76 @@
   ],
   "events": [
     {
+      "at": "2026-11-26T23:44:50.733Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0g2flly",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-26T23:44:48.317Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0g2flly",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-26T23:44:47.096Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0g2flly",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-26T23:44:45.665Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0g2flly",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-26T23:44:44.341Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0g2flly",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-26T23:44:43.170Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0g2flly",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-26T23:44:41.797Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0nwrfck",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-26T23:44:26.417Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#119"
+    },
+    {
+      "at": "2026-11-26T23:44:24.660Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#108"
+    },
+    {
+      "at": "2026-11-26T23:44:23.423Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#39"
+    },
+    {
       "at": "2026-11-26T21:30:41.169Z",
       "by": "orchestrator",
       "action": "card.update",
@@ -131773,721 +131856,6 @@
       "action": "card.delete",
       "ref": "c0v77oqp",
       "note": "jet deploy: per-host proof and durable rollout report"
-    },
-    {
-      "at": "2026-11-26T00:55:05.408Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0kwrsnd",
-      "note": "jet deploy: canary and wave rollout"
-    },
-    {
-      "at": "2026-11-26T00:55:03.011Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c04phsyd",
-      "note": "jetos Studio: generation history and rollback"
-    },
-    {
-      "at": "2026-11-26T00:55:02.022Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0zbbsy1",
-      "note": "jetos Studio: apply progress and failure recovery"
-    },
-    {
-      "at": "2026-11-26T00:55:01.034Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0ttmmhd",
-      "note": "jetos Studio: typed option search and editing"
-    },
-    {
-      "at": "2026-11-26T00:54:52.176Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0yry94n",
-      "note": "jetos VM tests: shared boot harness with typed assertions and failure artifacts"
-    },
-    {
-      "at": "2026-11-26T00:54:49.294Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c03asgps",
-      "note": "jetos users: typed user environment model"
-    },
-    {
-      "at": "2026-11-26T00:54:48.416Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0kbaab0",
-      "note": "jetos owner-config native acceptance (supersedes the #337 bar)"
-    },
-    {
-      "at": "2026-11-26T00:54:45.748Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0hzhedp",
-      "note": "jetos milestone proof: GNOME baseline via substitution only; swap matrix green"
-    },
-    {
-      "at": "2026-11-26T00:54:40.959Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0eli2fh",
-      "note": "jetos graphical substrate: session registry and logind seats"
-    },
-    {
-      "at": "2026-11-26T00:54:39.862Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0dhzann",
-      "note": "jetos milestone proof: native terminal baseline boots in QEMU with zero nix"
-    },
-    {
-      "at": "2026-11-26T00:54:36.846Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0b698t4",
-      "note": "jetos boot: native initrd builder"
-    },
-    {
-      "at": "2026-11-26T00:54:35.881Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0a11ldt",
-      "note": "jetos systemd: upstream unit composition, drop-ins, and masks"
-    },
-    {
-      "at": "2026-11-26T00:54:34.954Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c08vpj75",
-      "note": "jetos composition: D-Bus generators"
-    },
-    {
-      "at": "2026-11-26T00:54:34.068Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c07p2e72",
-      "note": "jetos PAM: typed stack rule model"
-    },
-    {
-      "at": "2026-11-26T00:54:31.643Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c05iu605",
-      "note": "jetos live switch: semantic unit diff and action plan"
-    },
-    {
-      "at": "2026-11-26T00:54:29.824Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c04de5hj",
-      "note": "jetos activation: ordered activation snippets"
-    },
-    {
-      "at": "2026-11-26T00:54:26.710Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0233d1b",
-      "note": "jetos profiles: deterministic symlink union and collision policy"
-    },
-    {
-      "at": "2026-11-26T00:54:20.868Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c038yftr",
-      "note": "jetos desktop breadth: audio"
-    },
-    {
-      "at": "2026-11-26T00:53:51.098Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-11-26T00:53:51.098Z"
-    },
-    {
-      "at": "2026-11-26T00:52:52.286Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c08lw188",
-      "note": "tests/jetpack_jetos writes 24G into /tmp and trips the memory guard"
-    },
-    {
-      "at": "2026-11-26T00:51:11.851Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0ufxh06",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-26T00:51:09.001Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0ake1k7",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-26T00:51:06.237Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0yncw8c",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-26T00:51:03.963Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0za6zza",
-      "note": "#22"
-    },
-    {
-      "at": "2026-11-26T00:50:06.012Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0mhrplj",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-26T00:50:05.200Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0e6znz4",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-26T00:50:04.357Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0mhrplj",
-      "note": "#22"
-    },
-    {
-      "at": "2026-11-26T00:46:50.359Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0gac1l5",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-26T00:46:48.471Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0gac1l5",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-26T00:46:47.357Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c09brw5t",
-      "note": "#7: Folds in #4565 n1's remaining detail (kernel number, call-site expansion, instruction marker, compiler keeps only the kernel) so #4565 closes as its duplicate; was: Chip knowledge lives in Core (D-CORE-BOUNDARY1=A): typed instruction entries (chip feature, encoding, plain Jet body checked against the chip) are Core declarations, and a new chip entry lands as a Co; proof: jet test Compiler --profile cases --filter Hw/chip_entry_is_a_core_change"
-    },
-    {
-      "at": "2026-11-26T00:45:13.948Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0mhrplj",
-      "note": "#20"
-    },
-    {
-      "at": "2026-11-26T00:38:46.621Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-11-26T00:38:46.621Z"
-    },
-    {
-      "at": "2026-11-26T00:26:21.262Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c090agiq",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-26T00:26:11.440Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c090agiq",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-26T00:26:10.477Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c090agiq",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-26T00:26:09.186Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0yuue6m",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-26T00:26:08.162Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0yuue6m",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-26T00:19:53.073Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0e6znz4",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-26T00:17:10.713Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0e6znz4",
-      "note": "#7"
-    },
-    {
-      "at": "2026-11-25T23:55:39.364Z",
-      "by": "Pip",
-      "action": "card.update",
-      "ref": "c05bs1oq",
-      "note": "body,logEntry"
-    },
-    {
-      "at": "2026-11-25T23:55:35.262Z",
-      "by": "Pip",
-      "action": "decision.post",
-      "ref": "D-FAIL-VISIBLE2",
-      "note": "reviewed by ReviewFailVisible3"
-    },
-    {
-      "at": "2026-11-25T23:55:33.674Z",
-      "by": "Pip",
-      "action": "decision.add",
-      "ref": "D-FAIL-VISIBLE2",
-      "note": "Calls that pass a failure up are written with ?, and jet fmt writes the marks (draft)"
-    },
-    {
-      "at": "2026-11-25T23:47:44.659Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c03y4hd0",
-      "note": "#10: Owner 2026-11-25 G7 regrouping: the study's timing cells live on #6959 c10, not the stale G11 pointer; was: The 2026-11-04 study (Docs/Research/2026-11-04-jet-dev-vs-incumbents.md) is rerun on the built framework against Vite, Bun, Next.js, Deno, Astro, Rsbuild and Parcel; every gap it lists is closed or ex"
-    },
-    {
-      "at": "2026-11-25T23:47:02.581Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0pej44b",
-      "note": "#4: Owner 2026-11-25: its performance half moved to G7 (#6957); the feature half stays here; was: Every hand-written text-format parser in Core that a grammar can express is replaced by its grammar, with equal or better parse speed shown by a paired benchmark."
-    },
-    {
-      "at": "2026-11-25T23:47:01.129Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0drsy4b",
-      "note": "20 criteria, soft limit 6: Owner 2026-11-25 G7 regrouping: performance criteria gathered on their G7 home card"
-    },
-    {
-      "at": "2026-11-25T23:47:01.129Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0drsy4b",
-      "note": "#20 Each Core text-format parser replaced by a grammar (#7036 c4"
-    },
-    {
-      "at": "2026-11-25T23:46:57.069Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0r8fk73",
-      "note": "#3: Owner 2026-11-25: its performance half moved to G7 (#6957); the feature half stays here; was: Sema refuses a read of the write copy or a write to the read copy inside a step, and a benchmark shows the swap costs no more than hand-written double buffering."
-    },
-    {
-      "at": "2026-11-25T23:46:55.597Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0drsy4b",
-      "note": "19 criteria, soft limit 6: Owner 2026-11-25 G7 regrouping: performance criteria gathered on their G7 home card"
-    },
-    {
-      "at": "2026-11-25T23:46:55.597Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0drsy4b",
-      "note": "#19 `#Layout(double)`: the step-boundary swap costs no more than"
-    },
-    {
-      "at": "2026-11-25T23:46:51.540Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c038h2n6",
-      "note": "#7: Owner 2026-11-25: its performance half moved to G7 (#6958); the feature half stays here; was: core.log records can carry optional, versioned source-site metadata: identity, content hash and relative file, line and column, with a known, redacted or unavailable state, kept separate from the emit"
-    },
-    {
-      "at": "2026-11-25T23:46:50.107Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0st48tc",
-      "note": "14 criteria, soft limit 6: Owner 2026-11-25 G7 regrouping: performance criteria gathered on their G7 home card"
-    },
-    {
-      "at": "2026-11-25T23:46:50.107Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0st48tc",
-      "note": "#14 Disabled core.log logging, source-site metadata included, co"
-    },
-    {
-      "at": "2026-11-25T23:46:45.960Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0zutf08",
-      "note": "#28: Owner 2026-11-25: its performance half moved to G7 (#6957); the feature half stays here; was: Exclusion keeps exact numbers and custom or renamed field meaning without a JSON round trip, and its allocations are measured against an equivalent application projection. Proof: `jet test Compiler --"
-    },
-    {
-      "at": "2026-11-25T23:46:44.453Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0drsy4b",
-      "note": "18 criteria, soft limit 6: Owner 2026-11-25 G7 regrouping: performance criteria gathered on their G7 home card"
-    },
-    {
-      "at": "2026-11-25T23:46:44.453Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0drsy4b",
-      "note": "#18 JSON exclusion's allocations are measured against an equival"
-    },
-    {
-      "at": "2026-11-25T23:46:40.309Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0ct4a0i",
-      "note": "#16: Owner 2026-11-25: its performance half moved to G7 (#6957 c13); the feature half stays here; was: `Columns<T>` selects struct-of-arrays per collection, with literal, push, index, len, row iteration and `.field` views (D-ARRAY-COLUMNS1=A); the same struct is stored as AoS and as SoA in one program;"
-    },
-    {
-      "at": "2026-11-25T23:46:38.792Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0za6zza",
-      "note": "#21: Owner 2026-11-25: its performance half moved to G7 (#7038); the feature half stays here; was: Implement ratified D-GPU-INDEXED-RESOURCE1=A (checked multi-write kernel results), after its paired strict-candidate vs plain performance cell wins per the AGENTS performance gate"
-    },
-    {
-      "at": "2026-11-25T23:46:37.282Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0wnhask",
-      "note": "#4 D-GPU-INDEXED-RESOURCE1=A (checked multi-write kernel result"
-    },
-    {
-      "at": "2026-11-25T23:46:35.841Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0za6zza",
-      "note": "#14: Owner 2026-11-25: its performance half moved to G7 (#7038); the feature half stays here; was: [#3215] Public `Tile<F32>` plus five collectives (D-GPU-TILE-SCOPE1=B). Every stage error is preserved, a collective failure is uniform, and the 2x2 bias/clamp case passes with a matched fused benchma"
-    },
-    {
-      "at": "2026-11-25T23:46:34.363Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0wnhask",
-      "note": "#3 The 2x2 bias/clamp `Tile<F32>` case (D-GPU-TILE-SCOPE1=B, #3"
-    },
-    {
-      "at": "2026-11-25T23:45:35.225Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-remove",
-      "ref": "c0wtvbj7",
-      "note": "#5: Merged into #6543 c4 (owner 2026-11-25 G7 regrouping): c4 now carries the 9-turn under-1-GiB requirement and its Repl/repl_turn_memory_flat proof; was [open]: jet repl does not keep every turn's compile in memory (Repl.jet:338-348 held 773 MiB at 1 turn and 5.6 GiB at 9 on 2026-11-04). Memory per turn stays flat: 9 turns of repl_core_data_query_plans_and_ty"
-    },
-    {
-      "at": "2026-11-25T23:45:33.691Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-remove",
-      "ref": "c0hsgoa6",
-      "note": "#5: Merged into #6082 c1 (owner 2026-11-25 G7 regrouping): c1 now carries its no-DataTree, byte-identical-failure and allocation-count requirements; was [open]: Typed JSON decode allocates no DataTree, and its failure values and messages are byte-identical to the DataTree path on every fixture. Proof: `jet test Compiler --profile golden --filter Serde/TypedJS"
-    },
-    {
-      "at": "2026-11-25T23:45:20.513Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0a4g5k6",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-25T23:45:14.796Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0wtvbj7",
-      "note": "#4: Owner 2026-11-25 G7 regrouping: merged with the duplicate moved here (c5, from #6567); was: `jet repl` peak memory grows by less than 1 MiB per turn over 30 one-line turns (gate-p64 measured about 2.3 MiB per turn). Proof: `jet test Compiler --profile cases --filter Repl/peak_growth_per_turn; proof: jet test Compiler --profile cases --filter Repl/peak_growth_per_turn"
-    },
-    {
-      "at": "2026-11-25T23:45:08.353Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0hsgoa6",
-      "note": "#1: Owner 2026-11-25 G7 regrouping: merged with the duplicate moved here (c5, from #6877); was: `json.decode<T>(text)` parses straight into typed records with no `Dyn` tree and accepts input over 16 MiB, so the 44 MB w06 file allocates no per-node Dyn value.; proof: jet test Compiler --profile cases --filter JSON/typed_decode_large_input_no_dyn"
-    },
-    {
-      "at": "2026-11-25T23:44:23.470Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0wnhask",
-      "note": "#2 moved from #4731 c3"
-    },
-    {
-      "at": "2026-11-25T23:44:23.470Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-move",
-      "ref": "c0li0kor",
-      "note": "#3 → #7038 c2: Owner 2026-11-25: GPU path performance cells grouped on the G7 GPU performance card"
-    },
-    {
-      "at": "2026-11-25T23:44:22.020Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0rlf3o2",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-25T23:44:19.134Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0o73jj4",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-25T23:44:16.202Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0z3nduz",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-25T23:44:13.335Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0wnhask",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-25T23:44:10.183Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0jxsy7l",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-25T23:44:07.137Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0d4kf8m",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-25T23:44:03.806Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0xphd0i",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-25T23:43:42.308Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0jxsy7l",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-25T23:43:39.639Z",
-      "by": "Orchestrator",
-      "action": "card.split",
-      "ref": "c0jxsy7l",
-      "refs": [
-        "c0jxsy7l",
-        "c0rlf3o2"
-      ],
-      "note": "c11, c12, c13, c14 → #7041 Zero unjustified copies: every written and implicit copy is "
-    },
-    {
-      "at": "2026-11-25T23:43:39.639Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0rlf3o2",
-      "note": "#4 moved from #3836 c14"
-    },
-    {
-      "at": "2026-11-25T23:43:39.639Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-move",
-      "ref": "c0jxsy7l",
-      "note": "#14 → #7041 c4: split into #7041"
-    },
-    {
-      "at": "2026-11-25T23:43:39.639Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0rlf3o2",
-      "note": "#3 moved from #3836 c13"
-    },
-    {
-      "at": "2026-11-25T23:43:39.639Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-move",
-      "ref": "c0jxsy7l",
-      "note": "#13 → #7041 c3: split into #7041"
-    },
-    {
-      "at": "2026-11-25T23:43:39.639Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0rlf3o2",
-      "note": "#2 moved from #3836 c12"
-    },
-    {
-      "at": "2026-11-25T23:43:39.639Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-move",
-      "ref": "c0jxsy7l",
-      "note": "#12 → #7041 c2: split into #7041"
-    },
-    {
-      "at": "2026-11-25T23:43:39.639Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0rlf3o2",
-      "note": "#1 moved from #3836 c11"
-    },
-    {
-      "at": "2026-11-25T23:43:39.639Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-move",
-      "ref": "c0jxsy7l",
-      "note": "#11 → #7041 c1: split into #7041"
-    },
-    {
-      "at": "2026-11-25T23:43:39.639Z",
-      "by": "Orchestrator",
-      "action": "card.add",
-      "ref": "c0rlf3o2",
-      "note": "Zero unjustified copies: every written and implicit copy is removed or justified in the ledger, ceilings never rise, and copy removal never slows Jet"
-    },
-    {
-      "at": "2026-11-25T23:43:38.038Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0d4kf8m",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-25T23:43:35.080Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0o73jj4",
-      "note": "8 criteria, soft limit 6: Owner 2026-11-25 G7 regrouping: performance criteria gathered on their G7 home card"
-    },
-    {
-      "at": "2026-11-25T23:43:35.080Z",
-      "by": "Orchestrator",
-      "action": "card.split",
-      "ref": "c0d4kf8m",
-      "refs": [
-        "c0d4kf8m",
-        "c0o73jj4"
-      ],
-      "note": "c1, c2, c3, c6, c7, c8, c11, c12 → #7040 Moves never copy: field, parameter, pattern and destructure "
-    },
-    {
-      "at": "2026-11-25T23:43:35.080Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0o73jj4",
-      "note": "#8 moved from #6923 c12"
-    },
-    {
-      "at": "2026-11-25T23:43:35.080Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-move",
-      "ref": "c0d4kf8m",
-      "note": "#12 → #7040 c8: split into #7040"
-    },
-    {
-      "at": "2026-11-25T23:43:35.080Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0o73jj4",
-      "note": "#7 moved from #6923 c11"
-    },
-    {
-      "at": "2026-11-25T23:43:35.080Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-move",
-      "ref": "c0d4kf8m",
-      "note": "#11 → #7040 c7: split into #7040"
-    },
-    {
-      "at": "2026-11-25T23:43:35.080Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0o73jj4",
-      "note": "#6 moved from #6923 c8"
-    },
-    {
-      "at": "2026-11-25T23:43:35.080Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-move",
-      "ref": "c0d4kf8m",
-      "note": "#8 → #7040 c6: split into #7040"
-    },
-    {
-      "at": "2026-11-25T23:43:35.080Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0o73jj4",
-      "note": "#5 moved from #6923 c7"
-    },
-    {
-      "at": "2026-11-25T23:43:35.080Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-move",
-      "ref": "c0d4kf8m",
-      "note": "#7 → #7040 c5: split into #7040"
-    },
-    {
-      "at": "2026-11-25T23:43:35.080Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0o73jj4",
-      "note": "#4 moved from #6923 c6"
-    },
-    {
-      "at": "2026-11-25T23:43:35.080Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-move",
-      "ref": "c0d4kf8m",
-      "note": "#6 → #7040 c4: split into #7040"
-    },
-    {
-      "at": "2026-11-25T23:43:35.080Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0o73jj4",
-      "note": "#3 moved from #6923 c3"
-    },
-    {
-      "at": "2026-11-25T23:43:35.080Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-move",
-      "ref": "c0d4kf8m",
-      "note": "#3 → #7040 c3: split into #7040"
-    },
-    {
-      "at": "2026-11-25T23:43:35.080Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0o73jj4",
-      "note": "#2 moved from #6923 c2"
     }
   ],
   "nextNum": 368,
