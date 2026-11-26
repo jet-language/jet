@@ -114,7 +114,7 @@ ir_assert_type_renderable: fn(m: ^IRModule, p: IRProgram, ty: Type, depth: Int) 
         .Option(inner) -> return ir_assert_type_renderable(m, p, inner, depth + 1)
         .Result(ok_ty, err_ty) -> return ir_assert_type_renderable(m, p, ok_ty, depth + 1) && ir_assert_type_renderable(m, p, err_ty, depth + 1)
         .List(elem) -> return ir_assert_type_renderable(m, p, elem, depth + 1)
-        .Map(k, v, _) -> return ir_assert_type_renderable(m, p, k, depth + 1) && ir_assert_type_renderable(m, p, v, depth + 1)
+        .Map(k, _, v) -> return ir_assert_type_renderable(m, p, k, depth + 1) && ir_assert_type_renderable(m, p, v, depth + 1)
         .Tuple(fields) -> {
             loop f in fields {
                 if !ir_assert_type_renderable(m, p, f.ty, depth + 1) -> return false
@@ -124,20 +124,27 @@ ir_assert_type_renderable: fn(m: ^IRModule, p: IRProgram, ty: Type, depth: Int) 
         .Named(_) | .Apply(_, _) -> {
             if ir_carrier_type(ty) -> return true
             if ir_enum_def(m, p, row) == .Val(def_row) {
-                loop variant_index in 0..<p.types[def_row].variants.len() {
-                    if ir_variant_members(m, p, def_row, ir_type_args(ty), variant_index) == .Val(v_members) {
-                        loop vm in v_members {
-                            if !ir_assert_type_renderable(m, p, vm.ty, depth + 1) -> return false
+                if p.types[def_row].kind == .Enum(variants, methods) {
+                    if ir_render_hook(methods) -> return false
+                    loop (variant_index, _) in variants {
+                        if ir_variant_members(m, p, def_row, ir_type_args(ty), variant_index) == .Val(v_members) {
+                            loop vm in v_members {
+                                vm_ty: ir_row_ty(m, p, vm.ty)
+                                if !ir_assert_type_renderable(m, p, vm_ty, depth + 1) -> return false
+                            }
                         }
                     }
+                    return true
                 }
-                return true
+                return false
             }
             if ir_nominal_name(ty) == .Val(name) {
                 if ir_type_def(p, name) == .Val(def_row) {
+                    if p.types[def_row].kind == .Struct(_, methods) && ir_render_hook(methods) -> return false
                     members: ir_struct_members(m, p, def_row, ir_type_args(ty)) ?? return false
                     loop member in members {
-                        if !ir_assert_type_renderable(m, p, member.ty, depth + 1) -> return false
+                        member_ty: ir_row_ty(m, p, member.ty)
+                        if !ir_assert_type_renderable(m, p, member_ty, depth + 1) -> return false
                     }
                     return true
                 }
