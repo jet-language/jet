@@ -1,0 +1,22 @@
+// Two grammar-declaring bindings, one head an imported item and one through
+// a module alias, beside an ordinary constant and a function.
+use core.grammar.[Grammar]
+use rules: core.grammar
+
+LIMIT: 3
+
+Pair: Grammar{"""
+    pair : key=WORD '=' value=WORD ;
+    WORD : [a-z]+ ;
+    WS : [ \t]+ -> skip ;
+    """}
+
+Words: rules.Grammar{"""
+    words : WORD+ ;
+    WORD : [a-z]+ ;
+    WS : [ \t]+ -> skip ;
+    """}
+
+count: fn(text: String) -> Int {
+    text.len() + LIMIT
+}

@@ -7528,24 +7528,39 @@ SEMA_GRAMMAR_HEAD: "core.grammar.Grammar"
 // module declares included, declares nothing.
 sema_grammar_declaring_binding: fn(imports: [ImportDecl], definition: ConstDef) -> Bool Never! {
     if definition.mutable -> return false
-    if definition.value == .TypedLit(written, body, _, _) && written == .Val(head) && head == .Named(name) && body == .Value(_) {
-        if sema_grammar_head_path(imports, name) == .Val(path) -> return path == SEMA_GRAMMAR_HEAD
-    }
+    name: sema_grammar_written_head(definition.value) ?? return false
+    if sema_grammar_head_path(imports, name) == .Val(path) -> return path == SEMA_GRAMMAR_HEAD
     false
 }
 
-// The full path head `name` names through the `use` table `imports`: the
-// imported module or item its first segment binds, then its other segments.
-// None when no import binds it. A `#run use` row names compile-time code
-// only, never a module binding's head.
+// The head `Head{"…"}` writes, when `value` is a checked text literal under a
+// named head.
+sema_grammar_written_head: fn(value: Expr) -> String? Never! {
+    if value == .TypedLit(written, body, _, _) && written == .Val(head) && head == .Named(name) && body == .Value(_) {
+        return Val(name)
+    }
+    None
+}
+
+// The full path head `name` names through the `use` table `imports`. None
+// when no import binds it. A `#run use` row names compile-time code only,
+// never a module binding's head.
 sema_grammar_head_path: fn(imports: [ImportDecl], name: String) -> String? Never! {
     loop declaration in imports {
         if declaration.comptime_span != None -> next
-        loop binding in import_walk_bindings(declaration) {
-            target: if binding.original == .Val(original) -> "{binding.module_alias}.{original}" else -> binding.module_alias.copy()
-            if name == binding.local -> return Val(target)
-            if name.starts_with("{binding.local}.") -> return Val("{target}{name.slice(binding.local.len(), name.len())}")
-        }
+        if sema_grammar_head_target(declaration, name) == .Val(path) -> return Val(path)
+    }
+    None
+}
+
+// The full path head `name` names through the one import row
+// `declaration`: the imported module or item its first segment binds, then
+// its other segments. None when the row binds no such name.
+sema_grammar_head_target: fn(declaration: ImportDecl, name: String) -> String? Never! {
+    loop binding in import_walk_bindings(declaration) {
+        target: if binding.original == .Val(original) -> "{binding.module_alias}.{original}" else -> binding.module_alias.copy()
+        if name == binding.local -> return Val(target)
+        if name.starts_with("{binding.local}.") -> return Val("{target}{name.slice(binding.local.len(), name.len())}")
     }
     None
 }

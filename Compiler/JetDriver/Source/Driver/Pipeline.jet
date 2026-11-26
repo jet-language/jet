@@ -43,6 +43,9 @@ use {
         SemaRegistrationModuleInput,
         SemaRegistrationPackagePolicy,
         SemaRootLoopValue,
+        sema_grammar_declaring_binding,
+        sema_grammar_head_target,
+        sema_grammar_written_head,
         sema_derive_template_loop_landed,
         sema_derive_template_loop_waits,
         SemaPackageSettings,
@@ -239,6 +242,15 @@ use {
         Func,
         Item,
         NamedCtValue,
+        CtValue,
+        ImportDecl,
+        Program,
+        Stmt,
+        FencedStatement,
+        PolicyDeclaration,
+        UserPolicyDecl,
+        AppliedRuleApplication,
+        ASTTables,
         Marker,
         name_ledger_from_facts,
         SourceFile,
@@ -5959,6 +5971,10 @@ jet_driver_compile_stages: fn(request: JetDriverCompileRequest, preloaded: ^[Jet
     // compile, and the check also reports every Core body's errors.
     ^layer_diagnostics: [Diagnostic]{}
     jet_driver_check_core_layers(request, load.source_units, layer_diagnostics)
+    // Registration makes a grammar's items from its plan, so the plan of
+    // every grammar a module binding declares is computed first, by one
+    // compile of those bindings alone (jet_driver_grammar_plans).
+    _: jet_driver_grammar_plans(request, load)
     // A root `#loop` over a module value computed while building (`#loop
     // row in ROWS` over `ROWS: #run rows()`) waits on that value. A first
     // pass registers the program without such loops and computes the
@@ -5971,7 +5987,7 @@ jet_driver_compile_stages: fn(request: JetDriverCompileRequest, preloaded: ^[Jet
     if loop_values.len() > 0 {
         ^probe_log: jet_driver_keep_going_log(None)
         ^probe_capture: JetDriverCheckedProjectionCapture{}
-        probe: jet_driver_compile_loaded_stages(request, probe_log, load, checked_projection, probe_capture, loop_values.move(), true)
+        probe: jet_driver_compile_loaded_stages(request, probe_log, load, checked_projection, probe_capture, loop_values.move(), JetDriverStagesPass.LoopProbe)
         if request.trace_sink == .Val(sink) -> sink.begin("load", "", -1, -1)
         load = jet_driver_load_reach(request, !kg.enabled && !request.every_core_body && request.core_tests == "")
         if request.trace_sink == .Val(sink) -> sink.end("load", load.modules.len())
@@ -5980,7 +5996,7 @@ jet_driver_compile_stages: fn(request: JetDriverCompileRequest, preloaded: ^[Jet
         loop_values = probe.root_loop_values.move() ?? jet_driver_root_loop_waits(load)
     }
     ^events: if request.compiler_events -> jet_driver_load_events(load) else -> [CompilerEventRecord]{}
-    ^result: jet_driver_compile_loaded_stages(request, kg, load, checked_projection, capture, loop_values, false)
+    ^result: jet_driver_compile_loaded_stages(request, kg, load, checked_projection, capture, loop_values, JetDriverStagesPass.Compile)
     if request.compiler_events {
         finished: jet_driver_finished_event(result)
         loop event in result.events.move() -> events.push(event)
@@ -6006,6 +6022,160 @@ jet_driver_root_loop_waits: fn(load: JetDriverLoadResult) -> [SemaRootLoopValue]
         }
     }
     waits
+}
+
+// The plans of the grammars `load`'s modules declare
+// (sema_grammar_declaring_binding), by module and binding; None for a plan
+// the batch could not compute. One compile of the loaded Core modules and
+// of each declaring module cut down to its declaring bindings
+// (jet_driver_grammar_load) evaluates every declaring literal at once,
+// before the program registers. Its reports are dropped: the compile proper
+// checks each literal again and reports its faults. A Core module's grammars
+// come from the Core library's own check, not from here.
+jet_driver_grammar_plans: fn(request: JetDriverCompileRequest, load: JetDriverLoadResult) -> [SemaRootLoopValue] {
+    waits: jet_driver_grammar_waits(load)
+    if waits.len() == 0 || !load.complete || jet_driver_has_errors(load.diagnostics) -> return waits
+    if request.trace_sink == .Val(sink) -> sink.begin("grammar", "", -1, -1)
+    batch_load: jet_driver_grammar_load(load, waits)
+    ^batch_log: jet_driver_keep_going_log(None)
+    ^batch_capture: JetDriverCheckedProjectionCapture{}
+    batch: jet_driver_compile_loaded_stages(request, batch_log, batch_load, false, batch_capture, waits.move(), JetDriverStagesPass.GrammarBatch)
+    // A batch that stopped before computing the values hands back none.
+    ^plans: batch.root_loop_values.move() ?? jet_driver_grammar_waits(load)
+    ^landed: 0
+    loop index in 0..<plans.len() {
+        plans[index].value = jet_driver_grammar_plan_of(plans[index].value)
+        if plans[index].value != None {
+            landed += 1
+            if request.trace_sink == .Val(sink) {
+                sink.begin("grammar.plan", plans[index].name, -1, -1)
+                sink.end("grammar.plan", 1)
+            }
+        }
+    }
+    if request.trace_sink == .Val(sink) -> sink.end("grammar", landed)
+    plans
+}
+
+// The grammar-declaring bindings of `load`'s modules outside Core, none
+// computed yet.
+jet_driver_grammar_waits: fn(load: JetDriverLoadResult) -> [SemaRootLoopValue] {
+    ^waits: [SemaRootLoopValue]{}
+    loop loaded in load.modules {
+        if module_is_core(loaded.module_identity) -> next
+        loop item in loaded.program.items {
+            if item == .Const(definition) && sema_grammar_declaring_binding(loaded.program.imports, definition) {
+                waits.push(SemaRootLoopValue{module_identity: module_text(load.module_table, loaded.module_identity), name: definition.name.copy(), value: None})
+            }
+        }
+    }
+    waits
+}
+
+// `load` cut down to the grammar batch's compile: every loaded Core module
+// whole, and each module declaring one of `waits` (the entry too, empty
+// when it declares none, so the compile has its entry) holding only those
+// bindings and the `use` rows that bind their heads, with the import edges
+// of those rows.
+jet_driver_grammar_load: fn(load: JetDriverLoadResult, waits: [SemaRootLoopValue]) -> JetDriverLoadResult {
+    ^modules: [JetDriverLoadedModule]{}
+    ^kept: [U32:Bool]{}
+    ^kept_rows: [U32:[Span]]{}
+    loop loaded in load.modules {
+        if module_is_core(loaded.module_identity) {
+            modules.push(loaded.copy())
+            kept[loaded.module_identity.id] = true
+            next
+        }
+        identity: module_text(load.module_table, loaded.module_identity)
+        ^items: [Item]{}
+        ^heads: [String]{}
+        loop item in loaded.program.items {
+            if item == .Const(definition) && jet_driver_grammar_waited(waits, identity, definition.name) {
+                heads.push(sema_grammar_written_head(definition.value) ?? "")
+                items.push(item.copy())
+            }
+        }
+        if items.len() == 0 && loaded.module_identity != load.entry_module_identity -> next
+        ^rows: [ImportDecl]{}
+        ^spans: [Span]{}
+        loop row in loaded.program.imports {
+            if row.comptime_span != None -> next
+            binds: loop head in heads {
+                if sema_grammar_head_target(row, head) != None -> break true
+            } ?? false
+            if binds {
+                spans.push(row.span)
+                rows.push(row.copy())
+            }
+        }
+        tables: if items.len() == 0 -> ASTTables{} else -> loaded.program.tables.copy()
+        program: Program{
+            imports: rows.move(),
+            items: items.move(),
+            script_body: [Stmt]{},
+            block_spans: [Span]{},
+            fenced_statements: [FencedStatement]{},
+            web_target_ceiling: None,
+            no_prelude: loaded.program.no_prelude,
+            default_target: None,
+            html_path: None,
+            policy_declarations: [PolicyDeclaration]{},
+            user_policy_declarations: [UserPolicyDecl]{},
+            applied_rules: [AppliedRuleApplication]{},
+            rule_facts: [AppliedRuleApplication]{},
+            tables: tables,
+        }
+        kept[loaded.module_identity.id] = true
+        kept_rows[loaded.module_identity.id] = spans.move()
+        modules.push(JetDriverLoadedModule{source_unit_index: loaded.source_unit_index, source_identity: loaded.source_identity.copy(), package_identity: loaded.package_identity.copy(), module_identity: loaded.module_identity, module_name: loaded.module_name.copy(), program: program, declared_module: loaded.declared_module.copy()})
+    }
+    ^imports: [SemaRegistrationImportEdge]{}
+    loop edge in load.imports {
+        if !(kept.get(edge.target_module_identity.id) ?? false) -> next
+        if module_is_core(edge.source_module_identity) {
+            imports.push(edge.copy())
+            next
+        }
+        spans: kept_rows.get(edge.source_module_identity.id) ?? next
+        if spans.contains(edge.declaration.span) -> imports.push(edge.copy())
+    }
+    JetDriverLoadResult{
+        package_identity: load.package_identity.copy(),
+        packages: load.packages.copy(),
+        source_units: load.source_units.copy(),
+        entry_source_identity: load.entry_source_identity.copy(),
+        entry_module_identity: load.entry_module_identity,
+        module_table: load.module_table.copy(),
+        modules: modules.move(),
+        imports: imports.move(),
+        source_files: load.source_files.copy(),
+        generated_source_files: load.generated_source_files.copy(),
+        diagnostics: [Diagnostic]{},
+        failed_stage: None,
+        complete: true,
+        names: load.names.copy(),
+        spells_program: load.spells_program,
+        typed_goals: load.typed_goals,
+    }
+}
+
+// Whether `waits` holds the binding `name` of the module `identity`.
+jet_driver_grammar_waited: fn(waits: [SemaRootLoopValue], identity: String, name: String) -> Bool Never! {
+    loop wait in waits {
+        if wait.module_identity == identity && wait.name == name -> return true
+    }
+    false
+}
+
+// The plan of a computed `core.grammar.Grammar` value: its `plan` field.
+jet_driver_grammar_plan_of: fn(value: CtValue?) -> CtValue? Never! {
+    if value == .Val(grammar) && grammar == .Struct(_, fields) {
+        loop field in fields {
+            if field.name == "plan" -> return Val(field.value.copy())
+        }
+    }
+    None
 }
 
 // The function keys each registration module declares: `modules` binds a
@@ -6192,12 +6362,28 @@ jet_driver_finalize_program: fn(
     sema_finalize_program(demand_graph, trail, stage, values, functions, request.eval_config.host_hooks, request.compiler_threads, request.trace_sink, bodies)
 }
 
+// Which pass of a compile jet_driver_compile_loaded_stages runs. The two
+// first passes stop once the module values their waits name are computed,
+// handing them back in `root_loop_values`, and their reports are dropped.
+JetDriverStagesPass: enum {
+    // The compile proper.
+    Compile,
+    // The first pass of a program whose root `#loop` waits on a module
+    // value (jet_driver_compile_stages).
+    LoopProbe,
+    // The grammar batch (jet_driver_grammar_plans): it checks its cut-down
+    // modules only, whatever the request builds, runs or asks.
+    GrammarBatch,
+}
+
 // The checked front-end stages every compile runs. `owned_loop_values` are
 // the module values root `#loop` declarations wait on
-// (jet_driver_compile_stages): on the first pass (`loop_probe`) the loops are
-// left out and the compile stops once the values are computed, handing them
-// back in `root_loop_values`; on the second the loops expand over them.
-jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: ^JetDriverKeepGoingLog, owned_load: ^^JetDriverLoadResult, checked_projection: Bool, capture: ^JetDriverCheckedProjectionCapture, owned_loop_values: ^^[SemaRootLoopValue], loop_probe: Bool) -> JetDriverCompileResult {
+// (jet_driver_compile_stages): on a first pass (`pass`) the loops are left
+// out and the compile stops once the values are computed, handing them back
+// in `root_loop_values`; on the compile proper the loops expand over them.
+jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: ^JetDriverKeepGoingLog, owned_load: ^^JetDriverLoadResult, checked_projection: Bool, capture: ^JetDriverCheckedProjectionCapture, owned_loop_values: ^^[SemaRootLoopValue], pass: JetDriverStagesPass) -> JetDriverCompileResult {
+    loop_probe: pass != JetDriverStagesPass.Compile
+    grammar_batch: pass == JetDriverStagesPass.GrammarBatch
     ^load: owned_load.move()
     ^loop_values: owned_loop_values.move()
     ^trace: jet_driver_empty_compile_trace()
@@ -6308,7 +6494,8 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: ^JetD
     ^registration_module_count: registration_inputs.len()
     package_policies: jet_driver_registration_package_policies(request, load)
     plugin_facts: jet_driver_plugin_facts(request, registration_inputs, load.package_identity)
-    eval_probes: jet_driver_eval_probes(request.eval_ask, registration_inputs)
+    ^eval_probes: SemaEvalProbes?{None}
+    if !grammar_batch -> eval_probes = jet_driver_eval_probes(request.eval_ask, registration_inputs)
     ^registration_graph: sema_registration_prepare_graph(
         registration_inputs,
         load.imports,
@@ -6331,8 +6518,13 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: ^JetD
     if eval_probes != None -> registration_graph.eval_probes = eval_probes
     registration_graph.entry_run_module = load.entry_run_module
     compiler_transfer_rows<StructureFact>(registration_graph.boundary_facts, load.boundary_facts)
-    output_intent: if request.mode == JetDriverCompileMode.Test -> SemaOutputIntent.Test else -> request.output_intent
-    output_diagnostics: sema_output_resolve(registration_graph, output_intent, request.output_address, jet_driver_entry_selection(load) != None)
+    output_intent: if {
+        grammar_batch -> SemaOutputIntent.Check
+        request.mode == JetDriverCompileMode.Test -> SemaOutputIntent.Test
+        else -> request.output_intent
+    }
+    output_address: if grammar_batch -> None else -> request.output_address.copy()
+    output_diagnostics: sema_output_resolve(registration_graph, output_intent, output_address, jet_driver_entry_selection(load) != None)
     loop diagnostic in output_diagnostics -> registration_graph.diagnostics.push(diagnostic)
     if jet_driver_has_errors(output_diagnostics) -> registration_graph.complete = false
     // The legacy `run: fn` contract fails the check without stopping it.
@@ -6353,7 +6545,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: ^JetD
     if kg.enabled -> registration_graph.keep_going = true
     // Under `jet test` each law of a trait a type of the package implements
     // is a test of that type (TraitLaws.jet).
-    if request.mode == JetDriverCompileMode.Test {
+    if request.mode == JetDriverCompileMode.Test && !grammar_batch {
         registration_graph.test_mode = true
         sema_trait_laws_add(registration_graph)
     }
