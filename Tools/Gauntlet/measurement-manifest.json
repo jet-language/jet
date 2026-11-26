@@ -349,6 +349,28 @@
       }
     ]
   },
+  "grammar_pairs": {
+    "schema": "jet.perf.grammar-pairs.v1",
+    "version": 1,
+    "rule": "The hand arm runs the hand-written Core parser a grammar replaces; the grammar arm reads the same corpus through a Grammar literal into the same value and prints the same output. Both are built with --release at each level, and the grammar arm must not be slower or bigger: no metric's paired-bootstrap 95% lower bound of grammar/hand above 1. A hand parser is deleted only in the landing whose pair passes.",
+    "pairs": [
+      {
+        "id": "ini",
+        "replaces": "core.encoding.ini parse (Core/Encoding/Ini.jet)",
+        "work": ["parse", "fold into core.encoding.ini.Ini"],
+        "hand": "Tools/Perf/GrammarPair/Ini/Hand",
+        "grammar": "Tools/Perf/GrammarPair/Ini/Grammar",
+        "corpus": "Tools/Perf/GrammarPair/Ini/corpus.ini",
+        "expected_output": "Tools/Perf/GrammarPair/Ini/expected.out",
+        "n": 2000,
+        "levels": ["-O1", "-O2"],
+        "command": "jet Tools/Perf/GrammarPair.jet --pair ini --output Tools/Perf/GrammarPair/Ini/evidence.json",
+        "metrics": ["wall_ns", "cycles_u", "peak_rss_kb"],
+        "trials": 100,
+        "evidence_file": "Tools/Perf/GrammarPair/Ini/evidence.json"
+      }
+    ]
+  },
   "profile_overhead_pairs": {
     "schema": "jet.perf.profile-overhead-pairs.v1",
     "version": 1,

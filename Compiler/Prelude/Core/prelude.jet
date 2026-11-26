@@ -55,15 +55,28 @@ Date: time.LocalDate
 Path: path.Path
 
 // Checked text is an ordinary nominal type with one ordinary CheckedText
-// implementation. The trait has one associated check error, one pure
-// complete-text checker, and one pure generic hole encoder. A String-backed
-// `distinct` type needs nothing more: its literal is the joined text. A type
-// whose holes stay values also binds `Hole: T`, the encoder's result, and
-// declares `build: fn(parts: [String], holes: [Hole]) -[]> Owner`; its literal
-// is `Owner.build(parts, holes)` after `check` accepts the parts joined by `{}`.
+// implementation. `check` receives the literal's parts (the text between its
+// holes, never joined) and returns `Checked{shape, slots}`: `shape` is what
+// it learned, computed once while building, and `slots[i]` the kind of
+// position hole `i` sits in. `encode_hole` encodes one hole for its slot.
+// The compiler-owned contract reads an unbound `Slot` as `TextSlot`, an
+// unbound `Shape` as `[String]` and an unbound `Hole` as `String`.
+//
+// A String-backed `distinct` type needs nothing more: it returns
+// `Checked{shape: parts.copy(), slots: [TextSlot]{}}` for the joined text, and its
+// literal is that text. A type whose holes stay values also binds `Hole: T`
+// and declares `build: fn(shape: Shape, holes: [Hole]) -[]> Self`; its
+// literal is `Self.build(shape, holes)` with the shape `check` returned for
+// the literal's parts. `accepts`, when declared, refuses a hole's type for
+// its slot with a reason; undeclared, every type is accepted.
 // A user trait can declare the same shape (Examples/Types/Traits/UserCheckedTextShape.jet).
 CheckedText: trait {
     Error: type,
-    check: fn(text: String) -[]> Error!,
-    encode_hole: fn<T: Printable>(value: T) -[]> String,
+    Hole: type,
+    Slot: type,
+    Shape: type,
+    check: fn(parts: [String]) -[]> Checked<Shape, Slot> Error!,
+    accepts: fn(slot: Slot, hole: TypeId) -[]> String?,
+    encode_hole: fn<T: Printable>(value: T, slot: Slot) -[]> Hole,
+    build: fn(shape: Shape, holes: [Hole]) -[]> Self,
 }

@@ -1,0 +1,49 @@
+// The hand arm of the ini grammar pair (Tools/Perf/GrammarPair.jet): Core's
+// hand-written INI reader, core.encoding.ini's `parse`, run N times over the
+// pair's corpus. Grammar/main.jet reads the same corpus through a `Grammar`
+// literal into the same `Ini`, and both print the same digest.
+use {
+    files: core.files
+    ini: core.encoding.ini
+}
+
+#CLI
+Args: struct {
+    corpus: String,
+    n: Int,
+}
+
+// A polynomial hash of one text's bytes, folded into `hash`, with a
+// separator so that adjacent texts cannot trade bytes.
+mix: fn(hash: Int, text: String) -> Int {
+    ^h: hash
+    loop b in text.bytes() -> h = (h * 31 + Int{b}) %% 4294967296
+    (h * 31 + 256) %% 4294967296
+}
+
+digest: fn(doc: ini.Ini) -> String {
+    ^pairs: 0
+    ^hash: 7
+    loop section in doc.sections {
+        hash = mix(hash, section.name)
+        loop pair in section.pairs {
+            pairs += 1
+            hash = mix(mix(hash, pair.key), pair.value)
+        }
+    }
+    "sections {doc.sections.len()} pairs {pairs} hash {hash}"
+}
+
+// Every parse counts its sections, so none is dead work; the digest is
+// taken once, so the timed work is the parse.
+run: fn(args: Args) {
+    text: files.read(args.corpus) ?? panic("{args.corpus}: {err}")
+    first: ini.parse(text) ?? panic("the corpus does not parse: line {err.line}: {err.reason}")
+    ^sections: first.sections.len()
+    loop _ in 1..<args.n {
+        doc: ini.parse(text) ?? panic("the corpus does not parse: line {err.line}: {err.reason}")
+        sections += doc.sections.len()
+    }
+    if sections != first.sections.len() * args.n -> panic("a parse read another document")
+    print(digest(first))
+}

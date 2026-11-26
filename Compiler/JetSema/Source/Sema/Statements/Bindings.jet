@@ -799,7 +799,6 @@ sema_stmt_check_binding: fn(binding: Binding, lambda_escapes: Bool?, check: ^Sem
     }
     sema_stmt_track_origin(binding, check)
     sema_stmt_note_normalized_path_text(binding, init, check.scopes)
-    ^_: sema_hardware_bind_pending_dma_transfer(binding_expr, symbol, key, check.scopes)
     view_diagnostics_before: check.diagnostics.len()
     // An owning copy of a read view (`^entries: stream.object_entries(tree)`)
     // is new storage: the binding holds no window into the view's source.
@@ -1402,9 +1401,6 @@ sema_stmt_check_local_assignment: fn(name: String, name_span: Span, op: BinOp?, 
         if !sema_ownership_check_use(check.state, Expr.Ident{name: name, span: name_span, id: AST_NODE_GENERATED}, check.scopes, check.diagnostics) {
             return None
         }
-    }
-    if !sema_hardware_note_cpu_use(Expr.Ident{name: name, span: name_span, id: AST_NODE_GENERATED}, check) {
-        return None
     }
     required: binding.symbol.ty ?? Type.Named{name: "Unit"}
     ^expected: Type?{None}

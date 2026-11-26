@@ -113,12 +113,14 @@ HTML: struct {
     // is and any other value as its text-escaped display text. `build` then
     // escapes a hole inside an attribute value for that value (html_value_hole).
     impl CheckedText {
-        Error: Never,
+        Error: HTMLLiteralError,
         Hole: String,
 
-        check: fn(_text: String) -[]> Never! { return Ok() }
+        check: fn(parts: [String]) -[]> Checked<[String], TextSlot> HTMLLiteralError! {
+            Ok(Checked{shape: parts.copy(), slots: loop _ in 1..<parts.len() -> TextSlot.Text})
+        }
 
-        encode_hole: fn<T: Printable>(value: T) -[]> String {
+        encode_hole: fn<T: Printable>(value: T, _slot: TextSlot) -[]> String {
             if T == {
                 HTML -> value.markup.copy()
                 else -> text_escape("{value}")
@@ -141,6 +143,23 @@ HTML: struct {
             }
             HTML{markup: markup}
         }
+    }
+}
+
+// Why a checked HTML literal was rejected: the compiler reports it under the
+// checked text rejection's code with this reason as its Why.
+#Error
+HTMLLiteralError: struct {
+    reason: String,
+
+    impl Diagnostic {
+        code: "E2712",
+
+        what: fn(self) -> String { "this checked text type rejected its body" }
+
+        why: fn(self) -> String { "{self.reason}" }
+
+        fix: fn(self) -> String { "fix the body so it satisfies the type's declared text grammar" }
     }
 }
 
@@ -185,7 +204,7 @@ priv html_space: fn(b: Int) -> Bool Never! { b == 32 || b == 9 || b == 10 || b =
 
 // A hole inside an attribute value: its quotes and angle brackets become
 // entities, and in an unquoted value its whitespace, `=` and backtick too,
-// so the hole stays inside the one value. An `^` is left as it is: a text
+// so the hole stays inside the one value. An `&` is left as it is: a text
 // hole's was already escaped, and an HTML hole's starts an entity.
 priv html_value_hole: fn(hole: String, unquoted: Bool) -> String Never! {
     ^out: [U8]{}

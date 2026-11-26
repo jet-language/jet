@@ -15,7 +15,7 @@ lock: fn(name: String) -[FS, Env]> FileLock { files.lock(name) ?? panic("lock {n
 
 consume_lock: fn(l: ^^FileLock) -[FS]> Int { held() }
 
-// The test after `^^` runs only where the pattern matched: where `n` is
+// The test after `&&` runs only where the pattern matched: where `n` is
 // absent the parameter still owns the lock, which closes as this returns.
 pattern_and: fn(l: ^^FileLock, n: Int?) -[FS]> Int {
     ^result: 0

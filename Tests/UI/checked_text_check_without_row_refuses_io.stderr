@@ -1,7 +1,7 @@
 Error: Jet.ImplEffectBoundExceeded: This `check` impl uses the effect `IO`, which the trait doesn't allow
   --> Tests/UI/checked_text_check_without_row_refuses_io.jet:11:5
     |
- 11 |     check: fn(text: String) TokenError! {
+ 11 |     check: fn(parts: [String]) -> Checked<[String], TextSlot> TokenError! {
     |     ^^^^^
  Why: `CheckedText` bounds `check` to `-[]>`, so impls must be pure; `IO` is outside that bound
  Fix: Remove the `IO` work from this impl, or widen the bound on the trait method

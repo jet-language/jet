@@ -1058,10 +1058,22 @@ version_parse: fn(token: String) -> Version Never! {
     }
 }
 
-// Why a custom route method token was refused.
+// Why a custom route method token was refused: a refused static token
+// reports under its route-method code with this reason as its Why.
 #Error
 priv __MethodTokenError: struct {
+    method: String,
     reason: String,
+
+    impl Diagnostic {
+        code: "E2808",
+
+        what: fn(self) -> String { "HTTP route method `{self.method}` is refused" }
+
+        why: fn(self) -> String { "{self.reason}" }
+
+        fix: fn(self) -> String { "Register a standard method with its own verb (`mux.get`), and give `custom` any other token of letters, digits and !#$%&'*+-.^_`|~." }
+    }
 }
 
 // The one check of a custom route method token (`mux.custom(token, …)`,
@@ -1072,11 +1084,11 @@ priv __MethodTokenError: struct {
 // its own verb.
 #Builtin.Role(.HTTPMethodTokenCheck) priv __method_token_check: fn(token: String) -[]> __MethodTokenError! {
     if !valid_method(token) {
-        return Err(__MethodTokenError{reason: "`{token}` is not an HTTP method token: a method is one or more letters, digits or characters of !#$%&'*+-.^_`|~"})
+        return Err(__MethodTokenError{method: token.copy(), reason: "`{token}` is not an HTTP method token: a method is one or more letters, digits or characters of !#$%&'*+-.^_`|~"})
     }
     standard: method_parse(token)
     if standard != Method.Custom(token.copy()) && method_text(standard) == token {
-        return Err(__MethodTokenError{reason: "`{token}` is a standard method, which registers with its own verb `{token.lower()}`"})
+        return Err(__MethodTokenError{method: token.copy(), reason: "`{token}` is a standard method, which registers with its own verb `{token.lower()}`"})
     }
     Ok()
 }

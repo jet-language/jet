@@ -1,0 +1,520 @@
+// The walks of a grammar's rules that build no value (GrammarItems.jet).
+// Each parser rule's type gets `parse_into(text, sink) -> Int
+// GrammarError!` and, when the grammar has holes, `check_parts(parts) ->
+// Checked<[String], <Start>Slot> [GrammarError]!`, each run by a private
+// function per parser rule. That function walks the rule body as the
+// parser does (GrammarParse.jet), deciding by the same plan decisions.
+//
+// Into a sink, it sends `open(rule)` and `close(rule)` around the rule and
+// each token as it is taken, the skipped tokens before it first
+// (core.grammar.runtime `into_token`), so nothing is allocated per token.
+// An operator rule opens once for each level it is parsed at: its primary,
+// then each tail, which applies to everything before it in that rule; an
+// operand that binds tighter is a rule of its own inside. The returned
+// offset is the end of the last token taken, so a grammar whose start rule
+// does not end at EOF parses a prefix. The parse stops at its first error.
+//
+// Checking a literal's parts, it takes the hole between two parts where
+// the grammar has a `HOLE<slot=…>` and records that slot. A refusal inside
+// a repeat with a separator or a closing token resynchronizes there
+// (`check_resync`) and the walk goes on, so a literal reports one error per
+// resync point; the check is refused when any error was recorded.
+use {
+    jet_foundation.[
+        AST_NODE_GENERATED,
+        AccessConvention,
+        BinOp,
+        EnumLitArg,
+        Expr,
+        ExprField,
+        Func,
+        Item,
+        NamedSpan,
+        Param,
+        Span,
+        Stmt,
+        SwitchArm,
+        Type,
+        TypeParam,
+    ]
+}
+
+// The sink parameter of the generated functions and its type parameter.
+SEMA_GRAMMAR_SINK: "__jet_sink"
+
+SEMA_GRAMMAR_SINK_TYPE: "__JetSink"
+
+// The slots a check records, and the depth of the rule a check is in.
+SEMA_GRAMMAR_SLOTS: "__jet_slots"
+
+SEMA_GRAMMAR_DEPTH: "__jet_depth"
+
+// Whether the start rule's check ran to its end.
+SEMA_GRAMMAR_RAN: "__jet_ran"
+
+// How a walk is generated: into a sink, or checking a literal's parts
+// (`check`). `refuse` is the label of the loop a refusal leaves: the try of
+// the nearest repeat that resynchronizes, or "" to return false.
+SemaGrammarWalk: struct {
+    check: Bool,
+    refuse: String,
+}
+
+// The walk function of rule `rule`.
+sema_grammar_walk_function: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan, walk: SemaGrammarWalk, rule: Int) -> String Never! {
+    if walk.check -> return "__jet_grammar_{gen.start}_{plan.rules[rule].name}_check"
+    "__jet_grammar_{gen.start}_{plan.rules[rule].name}_into"
+}
+
+// The walk function of operator rule `rule` that walks at a level.
+sema_grammar_walk_level_function: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan, walk: SemaGrammarWalk, rule: Int) -> String Never! {
+    "{sema_grammar_walk_function(gen, plan, walk, rule)}_at"
+}
+
+// The type of a grammar's slots: one case per hole kind.
+sema_grammar_slot_type: fn(gen: SemaGrammarGen) -> String Never! { "{gen.start}Slot" }
+
+// The slot case of hole kind `kind`: its name past a leading `Hole`.
+sema_grammar_slot_name: fn(plan: SemaGrammarItemsPlan, kind: Int) -> String Never! {
+    name: plan.kind_names[kind]
+    if name.starts_with("Hole") && name.len() > 4 -> return name.slice(4, name.len())
+    name.copy()
+}
+
+// Whether the grammar takes holes: some token kind is one.
+sema_grammar_has_holes: fn(plan: SemaGrammarItemsPlan) -> Bool Never! {
+    loop hole in plan.holes {
+        if hole != "" -> return true
+    }
+    false
+}
+
+// `<__JetSink: GrammarSink>` into a sink; none for a check.
+sema_grammar_walk_type_params: fn(walk: SemaGrammarWalk, span: Span) -> [TypeParam] Never! {
+    if walk.check -> return [TypeParam]{}
+    [TypeParam]{TypeParam{name: SEMA_GRAMMAR_SINK_TYPE, name_span: span, bounds: [String]{"{sema_grammar_alias(SEMA_GRAMMAR_SINK_MODULE)}.GrammarSink"}, prep: None}}
+}
+
+// `^name: __JetSink`.
+sema_grammar_into_sink_param: fn(name: String, span: Span) -> Param Never! {
+    ^param: sema_serde_items_param(name, Type.Named{name: SEMA_GRAMMAR_SINK_TYPE}, span)
+    param.convention = AccessConvention.Write
+    param
+}
+
+// The walk's own parameter: `^__jet_sink: __JetSink`, or
+// `^__jet_slots: [<Start>Slot]`.
+sema_grammar_walk_param: fn(gen: SemaGrammarGen, walk: SemaGrammarWalk, span: Span) -> Param Never! {
+    if !walk.check -> return sema_grammar_into_sink_param(SEMA_GRAMMAR_SINK, span)
+    ^param: sema_serde_items_param(SEMA_GRAMMAR_SLOTS, Type.List{element: Type.Named{name: sema_grammar_slot_type(gen)}}, span)
+    param.convention = AccessConvention.Write
+    param
+}
+
+// `return false`, or `break(try)` out of the try of the nearest repeat that
+// resynchronizes.
+sema_grammar_walk_refuse: fn(walk: SemaGrammarWalk, span: Span) -> Stmt Never! {
+    if walk.refuse == "" -> return sema_serde_items_return(sema_grammar_flag(false, span), span)
+    // copy: the statement names the label apart from the walk
+    Stmt.BreakLabel{name: walk.refuse.copy(), span: span}
+}
+
+// `if !taken -> refuse`.
+sema_grammar_walk_check: fn(walk: SemaGrammarWalk, taken: Expr, span: Span) -> Stmt Never! {
+    sema_serde_items_if(sema_serde_items_not(taken, span), [Stmt]{sema_grammar_walk_refuse(walk, span)}, span)
+}
+
+// `function(cursor, scanner, args…, sink or slots)`.
+sema_grammar_walk_call: fn(walk: SemaGrammarWalk, function: String, args: ^^[Expr], span: Span) -> Expr Never! {
+    ^all: [Expr]{sema_serde_items_ident(SEMA_GRAMMAR_CURSOR, span), sema_serde_items_ident(SEMA_GRAMMAR_SCANNER, span)}
+    loop arg in args.move() -> all.push(arg)
+    if walk.check -> all.push(sema_serde_items_ident(SEMA_GRAMMAR_SLOTS, span)) else -> all.push(sema_serde_items_ident(SEMA_GRAMMAR_SINK, span))
+    sema_serde_items_free_call(function, all, span)
+}
+
+// `sink.event(rule)`, sent into a sink only.
+sema_grammar_walk_event: fn(walk: SemaGrammarWalk, event: String, rule: Int, body: ^[Stmt], span: Span) Never! {
+    if walk.check -> return
+    body.push(Stmt.Expr{expr: sema_serde_items_method_call(sema_serde_items_ident(SEMA_GRAMMAR_SINK, span), event, [Expr]{sema_grammar_number(rule, span)}, span)})
+}
+
+// `if name < 0 -> refuse`.
+sema_grammar_walk_failed: fn(walk: SemaGrammarWalk, name: String, span: Span) -> Stmt Never! {
+    sema_serde_items_if(sema_grammar_compare(.Lt, sema_serde_items_ident(name, span), sema_grammar_number(0, span), span), [Stmt]{sema_grammar_walk_refuse(walk, span)}, span)
+}
+
+// `if { name == 0 -> arms[0] … else -> refuse }`.
+sema_grammar_walk_branches: fn(walk: SemaGrammarWalk, name: String, arms: ^^[[Stmt]], span: Span) -> Stmt Never! {
+    ^switch_arms: [SwitchArm]{}
+    loop (i, arm) in arms.move() {
+        switch_arms.push(SwitchArm{cond: sema_grammar_compare(.Eq, sema_serde_items_ident(name, span), sema_grammar_number(i, span), span), body: arm, span: span})
+    }
+    Stmt.Switch{subject: sema_grammar_flag(true, span), arms: switch_arms, else_body: Val([Stmt]{sema_grammar_walk_refuse(walk, span)}), span: span}
+}
+
+// `if !cursor_enter(cursor) -> return false`: the depth bound. A check
+// then keeps the depth its repeats resynchronize to.
+sema_grammar_walk_enter: fn(walk: SemaGrammarWalk, body: ^[Stmt], span: Span) Never! {
+    body.push(sema_grammar_walk_check(walk, sema_grammar_core_call(SEMA_GRAMMAR_RUNTIME_MODULE, "cursor_enter", [Expr]{sema_serde_items_ident(SEMA_GRAMMAR_CURSOR, span)}, span), span))
+    if !walk.check -> return
+    depth: sema_grammar_core_call(SEMA_GRAMMAR_RUNTIME_MODULE, "cursor_depth", [Expr]{sema_serde_items_ident(SEMA_GRAMMAR_CURSOR, span)}, span)
+    body.push(sema_serde_items_binding(SEMA_GRAMMAR_DEPTH, None, depth, false, span))
+}
+
+// Takes token kind `kind`: into the sink, or, checking, recording its slot
+// when it is a hole.
+sema_grammar_walk_token: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan, walk: SemaGrammarWalk, kind: Int, body: ^[Stmt]) Never! {
+    span: gen.span
+    if !walk.check {
+        args: [Expr]{sema_serde_items_ident(SEMA_GRAMMAR_CURSOR, span), sema_serde_items_ident(SEMA_GRAMMAR_SCANNER, span), sema_grammar_number(kind, span), sema_serde_items_ident(SEMA_GRAMMAR_SINK, span)}
+        body.push(sema_grammar_walk_check(walk, sema_grammar_core_call(SEMA_GRAMMAR_RUNTIME_MODULE, "into_token", args, span), span))
+        return
+    }
+    body.push(sema_grammar_walk_check(walk, sema_grammar_runtime_call("parse_token", [Expr]{sema_grammar_number(kind, span)}, span), span))
+    if kind >= plan.holes.len() || plan.holes[kind] == "" -> return
+    slot: Expr.EnumLit{type_name: sema_grammar_slot_type(gen), variant: sema_grammar_slot_name(plan, kind), variant_span: None, args: [EnumLitArg]{}, leading_dot: false, span: span, id: AST_NODE_GENERATED}
+    body.push(Stmt.Expr{expr: sema_serde_items_method_call(sema_serde_items_ident(SEMA_GRAMMAR_SLOTS, span), "push", [Expr]{slot}, span)})
+}
+
+// ---------------------------------------------------------------------------
+// Resynchronization.
+
+// The token kind element `n` is, when it is one token (-1 otherwise).
+sema_grammar_walk_token_of: fn(plan: SemaGrammarItemsPlan, n: Int) -> Int Never! {
+    node: plan.nodes[n]
+    one: node.kind == "Literal" || node.kind == "End" || (node.kind == "Ref" && node.token >= 0)
+    if one -> node.token else -> -1
+}
+
+// The token repeat `repeat`'s body starts with, its separator (-1 for
+// none).
+sema_grammar_walk_separator: fn(plan: SemaGrammarItemsPlan, repeat: Int) -> Int Never! {
+    ^at: plan.nodes[repeat].children[0]
+    loop {
+        node: plan.nodes[at]
+        one_choice: node.kind == "Choice" && node.children.len() == 1
+        if !one_choice && !(node.kind == "Alt" && node.children.len() > 0) -> break
+        at = node.children[0]
+    }
+    sema_grammar_walk_token_of(plan, at)
+}
+
+// The token after repeat `repeat` in its alternative, closing it (-1 for
+// none).
+sema_grammar_walk_closing: fn(plan: SemaGrammarItemsPlan, repeat: Int) -> Int Never! {
+    loop node in plan.nodes {
+        if node.kind != "Alt" -> next
+        loop (k, child) in node.children {
+            if child != repeat -> next
+            if k + 1 < node.children.len() -> return sema_grammar_walk_token_of(plan, node.children[k + 1])
+            return -1
+        }
+    }
+    -1
+}
+
+// Where a refusal inside repeat `repeat` resynchronizes: its separator and
+// its closing token, each when it has one.
+sema_grammar_walk_stops: fn(plan: SemaGrammarItemsPlan, repeat: Int) -> [Int] Never! {
+    ^stops: [Int]{}
+    separator: sema_grammar_walk_separator(plan, repeat)
+    if separator >= 0 -> stops.push(separator)
+    closing: sema_grammar_walk_closing(plan, repeat)
+    if closing >= 0 && closing != separator -> stops.push(closing)
+    stops
+}
+
+// `if !check_resync(cursor, scanner, depth, [stops…], separator) -> break`:
+// the repeat goes on at its separator and ends anywhere else.
+sema_grammar_walk_resync: fn(plan: SemaGrammarItemsPlan, repeat: Int, span: Span) -> Stmt Never! {
+    listed: loop stop in sema_grammar_walk_stops(plan, repeat) -> sema_grammar_number(stop, span)
+    args: [Expr]{sema_serde_items_ident(SEMA_GRAMMAR_DEPTH, span), Expr.ListLit{elements: listed, span: span, id: AST_NODE_GENERATED}, sema_grammar_number(sema_grammar_walk_separator(plan, repeat), span)}
+    resynced: sema_grammar_runtime_call("check_resync", args, span)
+    sema_serde_items_if(sema_serde_items_not(resynced, span), [Stmt]{Stmt.Break{span: span}}, span)
+}
+
+// A checked repeat that resynchronizes. Each iteration runs in a try loop
+// a refusal inside it breaks out of; a refused iteration, or a decision
+// that leads nowhere, resynchronizes:
+//
+//     loop {
+//         b: decide              // Star: decide first
+//         if b < 0 { resync; next }
+//         if b == 1 -> break
+//         ^ok: false
+//         try: loop { element; ok = true; break }
+//         if !ok -> resync       // Plus: `{ resync; next }`, then decide
+//     }
+sema_grammar_walk_repeat: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan, n: Int) -> Stmt Never! {
+    span: gen.span
+    node: plan.nodes[n]
+    branch: "__jet_branch_{n}"
+    ok: "__jet_ok_{n}"
+    label: "__jet_try_{n}"
+    ^attempt: [Stmt]{}
+    sema_grammar_walk_element(gen, plan, SemaGrammarWalk{check: true, refuse: label.copy()}, node.children[0], attempt)
+    attempt.push(sema_serde_items_assign_local(ok, sema_grammar_flag(true, span), span))
+    attempt.push(Stmt.Break{span: span})
+    started: sema_serde_items_binding(ok, None, sema_grammar_flag(false, span), true, span)
+    tried: Stmt.Loop{body: attempt, span: span, arrow_body: false, label: Val(NamedSpan{name: label, span: span})}
+    refused: sema_serde_items_not(sema_serde_items_ident(ok, span), span)
+    decided: sema_grammar_decide(branch, plan.decision_of[n], span)
+    lost: sema_grammar_compare(.Lt, sema_serde_items_ident(branch, span), sema_grammar_number(0, span), span)
+    resynced: sema_serde_items_if(lost, [Stmt]{sema_grammar_walk_resync(plan, n, span), Stmt.Continue{span: span}}, span)
+    done: sema_grammar_when(branch, 1, [Stmt]{Stmt.Break{span: span}}, span)
+    if node.kind == "Star" {
+        after: sema_serde_items_if(refused, [Stmt]{sema_grammar_walk_resync(plan, n, span)}, span)
+        return Stmt.Loop{body: [Stmt]{decided, resynced, done, started, tried, after}, span: span, arrow_body: false, label: None}
+    }
+    after: sema_serde_items_if(refused, [Stmt]{sema_grammar_walk_resync(plan, n, span), Stmt.Continue{span: span}}, span)
+    Stmt.Loop{body: [Stmt]{started, tried, after, decided, resynced, done}, span: span, arrow_body: false, label: None}
+}
+
+// ---------------------------------------------------------------------------
+// Elements and rules.
+
+// Walks element `n`.
+sema_grammar_walk_element: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan, walk: SemaGrammarWalk, n: Int, body: ^[Stmt]) Never! {
+    span: gen.span
+    node: plan.nodes[n]
+    branch: "__jet_branch_{n}"
+    if node.kind == {
+        "Alt" -> loop child in node.children -> sema_grammar_walk_element(gen, plan, walk, child, body)
+        "Choice" -> {
+            if node.children.len() == 1 {
+                sema_grammar_walk_element(gen, plan, walk, node.children[0], body)
+                return
+            }
+            body.push(sema_grammar_decide(branch, plan.decision_of[n], span))
+            ^arms: [[Stmt]]{}
+            loop alt in node.children {
+                ^arm: [Stmt]{}
+                sema_grammar_walk_element(gen, plan, walk, alt, arm)
+                arms.push(arm)
+            }
+            body.push(sema_grammar_walk_branches(walk, branch, arms.move(), span))
+        }
+        "Optional" -> {
+            body.push(sema_grammar_decide(branch, plan.decision_of[n], span))
+            body.push(sema_grammar_walk_failed(walk, branch, span))
+            ^taken: [Stmt]{}
+            sema_grammar_walk_element(gen, plan, walk, node.children[0], taken)
+            body.push(sema_grammar_when(branch, 0, taken, span))
+        }
+        "Star" -> {
+            if walk.check && sema_grammar_walk_stops(plan, n).len() > 0 {
+                body.push(sema_grammar_walk_repeat(gen, plan, n))
+                return
+            }
+            ^repeat: [Stmt]{sema_grammar_decide(branch, plan.decision_of[n], span), sema_grammar_walk_failed(walk, branch, span), sema_grammar_when(branch, 1, [Stmt]{Stmt.Break{span: span}}, span)}
+            sema_grammar_walk_element(gen, plan, walk, node.children[0], repeat)
+            body.push(Stmt.Loop{body: repeat, span: span, arrow_body: false, label: None})
+        }
+        "Plus" -> {
+            if walk.check && sema_grammar_walk_stops(plan, n).len() > 0 {
+                body.push(sema_grammar_walk_repeat(gen, plan, n))
+                return
+            }
+            ^repeat: [Stmt]{}
+            sema_grammar_walk_element(gen, plan, walk, node.children[0], repeat)
+            repeat.push(sema_grammar_decide(branch, plan.decision_of[n], span))
+            repeat.push(sema_grammar_walk_failed(walk, branch, span))
+            repeat.push(sema_grammar_when(branch, 1, [Stmt]{Stmt.Break{span: span}}, span))
+            body.push(Stmt.Loop{body: repeat, span: span, arrow_body: false, label: None})
+        }
+        "Ref" -> {
+            if node.token >= 0 {
+                sema_grammar_walk_token(gen, plan, walk, node.token, body)
+                return
+            }
+            body.push(sema_grammar_walk_check(walk, sema_grammar_walk_call(walk, sema_grammar_walk_function(gen, plan, walk, node.rule), [Expr]{}, span), span))
+        }
+        "Literal" -> sema_grammar_walk_token(gen, plan, walk, node.token, body)
+        "Hole" -> sema_grammar_walk_token(gen, plan, walk, node.token, body)
+        "End" -> sema_grammar_walk_token(gen, plan, walk, node.token, body)
+        // A class or `.` is a token rule's alone: no parser rule holds one.
+        else -> {}
+    }
+}
+
+// Walks the elements of alternative `alt` from element `from` on. An
+// element `operands` gives a level (an operator rule's operand) is walked
+// at that level.
+sema_grammar_walk_alt: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan, walk: SemaGrammarWalk, rule: Int, alt: Int, operands: [Int], from: Int, body: ^[Stmt]) Never! {
+    span: gen.span
+    kids: plan.nodes[alt].children
+    loop k in from..<kids.len() {
+        if k < operands.len() && operands[k] >= 0 {
+            body.push(sema_grammar_walk_check(walk, sema_grammar_walk_call(walk, sema_grammar_walk_level_function(gen, plan, walk, rule), [Expr]{sema_grammar_number(operands[k], span)}, span), span))
+            next
+        }
+        sema_grammar_walk_element(gen, plan, walk, kids[k], body)
+    }
+}
+
+// Ends a rule's walk function: leaves the rule, closes it in a sink, and
+// returns true.
+sema_grammar_walk_finish: fn(walk: SemaGrammarWalk, rule: Int, body: ^[Stmt], span: Span) Never! {
+    body.push(sema_grammar_leave(span))
+    sema_grammar_walk_event(walk, "close", rule, body, span)
+    body.push(sema_serde_items_return(sema_grammar_flag(true, span), span))
+}
+
+// A generated walk function, private to the module: generic over the sink
+// into a sink.
+sema_grammar_walk_free_function: fn(walk: SemaGrammarWalk, name: String, params: [Param], body: ^^[Stmt], span: Span) -> Item Never! {
+    ^function: sema_serde_items_method(name, sema_grammar_walk_type_params(walk, span), params, Type.Bool, span)
+    function.body = body.move()
+    Item.Func{value: function}
+}
+
+// An operator rule's level function: a primary, then each tail whose
+// operator binds at least as tightly as `__jet_level`.
+sema_grammar_walk_operator_body: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan, walk: SemaGrammarWalk, rule: Int, op_rule: SemaGrammarOperatorRule) -> [Stmt] Never! {
+    span: gen.span
+    ^body: [Stmt]{}
+    sema_grammar_walk_enter(walk, body, span)
+    sema_grammar_walk_event(walk, "open", rule, body, span)
+    primary: plan.nodes[op_rule.primary]
+    ^primary_arms: [[Stmt]]{}
+    single_primary: primary.children.len() == 1
+    loop alt in primary.children {
+        ^operands: [Int]{}
+        loop op in op_rule.operators {
+            if op.alt == alt -> operands = op.operands.copy()
+        }
+        ^arm: [Stmt]{}
+        if single_primary -> sema_grammar_walk_alt(gen, plan, walk, rule, alt, operands, 0, body) else -> sema_grammar_walk_alt(gen, plan, walk, rule, alt, operands, 0, arm)
+        primary_arms.push(arm)
+    }
+    if !single_primary {
+        body.push(sema_grammar_decide("__jet_branch", plan.decision_of[op_rule.primary], span))
+        body.push(sema_grammar_walk_branches(walk, "__jet_branch", primary_arms.move(), span))
+    }
+    more: "__jet_more"
+    ^repeat: [Stmt]{sema_grammar_decide(more, plan.decision_of[op_rule.repeat], span)}
+    repeat.push(sema_serde_items_if(sema_grammar_compare(.Ne, sema_serde_items_ident(more, span), sema_grammar_number(0, span), span), [Stmt]{Stmt.Break{span: span}}, span))
+    tails_node: plan.nodes[op_rule.repeat].children[0]
+    single_tail: plan.nodes[tails_node].children.len() == 1
+    ^tail_arms: [[Stmt]]{}
+    loop tail in plan.nodes[tails_node].children {
+        ^arm: [Stmt]{}
+        loop op in op_rule.operators {
+            if op.tail != tail -> next
+            looser: sema_grammar_compare(.Lt, sema_grammar_number(op.level, span), sema_serde_items_ident(SEMA_GRAMMAR_LEVEL, span), span)
+            stop: sema_serde_items_if(looser, [Stmt]{Stmt.Break{span: span}}, span)
+            if single_tail {
+                repeat.push(stop)
+                sema_grammar_walk_alt(gen, plan, walk, rule, op.alt, op.operands, 1, repeat)
+            } else {
+                arm.push(stop)
+                sema_grammar_walk_alt(gen, plan, walk, rule, op.alt, op.operands, 1, arm)
+            }
+        }
+        tail_arms.push(arm)
+    }
+    if !single_tail {
+        repeat.push(sema_grammar_decide("__jet_tail", plan.decision_of[tails_node], span))
+        repeat.push(sema_grammar_walk_branches(walk, "__jet_tail", tail_arms.move(), span))
+    }
+    body.push(Stmt.Loop{body: repeat, span: span, arrow_body: false, label: None})
+    sema_grammar_walk_finish(walk, rule, body, span)
+    body
+}
+
+// The walk function of rule `shape.rule`, with the operator rule's level
+// function when it is one. Past the parse and print functions' spans, rule
+// r's sink function sits at `4 * rules + r` and its level function at
+// `5 * rules + r`; its check function at `6 * rules + r` and level
+// function at `7 * rules + r`.
+sema_grammar_walk_functions: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan, walk: SemaGrammarWalk, shape: SemaGrammarShape, items: ^[Item]) Never! {
+    span: gen.span
+    r: shape.rule
+    rules: plan.rules.len()
+    first: if walk.check -> 6 * rules + r else -> 4 * rules + r
+    params: [Param]{sema_grammar_cursor_param(span), sema_grammar_scanner_param(span), sema_grammar_walk_param(gen, walk, span)}
+    loop op_rule in plan.operators {
+        if op_rule.rule != r || !shape.is_enum -> next
+        ^body: [Stmt]{sema_serde_items_return(sema_grammar_walk_call(walk, sema_grammar_walk_level_function(gen, plan, walk, r), [Expr]{sema_grammar_number(0, span)}, span), span)}
+        items.push(sema_grammar_walk_free_function(walk, sema_grammar_walk_function(gen, plan, walk, r), params.copy(), body.move(), sema_grammar_span_at(gen, first)))
+        ^level_params: params.copy()
+        level_params.push(sema_serde_items_param(SEMA_GRAMMAR_LEVEL, Type.Int, span))
+        ^level_body: sema_grammar_walk_operator_body(gen, plan, walk, r, op_rule)
+        items.push(sema_grammar_walk_free_function(walk, sema_grammar_walk_level_function(gen, plan, walk, r), level_params, level_body.move(), sema_grammar_span_at(gen, first + rules)))
+        return
+    }
+    ^body: [Stmt]{}
+    sema_grammar_walk_enter(walk, body, span)
+    sema_grammar_walk_event(walk, "open", r, body, span)
+    sema_grammar_walk_element(gen, plan, walk, plan.rules[r].body, body)
+    sema_grammar_walk_finish(walk, r, body, span)
+    items.push(sema_grammar_walk_free_function(walk, sema_grammar_walk_function(gen, plan, walk, r), params, body.move(), sema_grammar_span_at(gen, first)))
+}
+
+// `parse_into<S: GrammarSink>(text, ^sink: S) -> Int GrammarError!` of rule
+// `shape.rule`'s type: its sink function from the start of `text`, then the
+// end of the last token taken or the first error.
+sema_grammar_into_method: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan, shape: SemaGrammarShape, is_pub: Bool, is_package_pub: Bool) -> Func Never! {
+    span: gen.span
+    walk: SemaGrammarWalk{check: false, refuse: ""}
+    start: sema_grammar_core_call(SEMA_GRAMMAR_RUNTIME_MODULE, "cursor_of", [Expr]{sema_serde_items_ident("text", span)}, span)
+    run: sema_serde_items_free_call(sema_grammar_walk_function(gen, plan, walk, shape.rule), [Expr]{sema_serde_items_ident(SEMA_GRAMMAR_CURSOR, span), sema_serde_items_ident(sema_grammar_scanner_constant(gen), span), sema_serde_items_ident("sink", span)}, span)
+    result: sema_grammar_core_call(SEMA_GRAMMAR_RUNTIME_MODULE, "into_result", [Expr]{sema_serde_items_ident(SEMA_GRAMMAR_CURSOR, span)}, span)
+    failed: Expr.Err{value: sema_grammar_core_call(SEMA_GRAMMAR_RUNTIME_MODULE, "parse_error", [Expr]{sema_serde_items_ident(SEMA_GRAMMAR_CURSOR, span)}, span), span: span, id: AST_NODE_GENERATED}
+    returned: Type.Result{ok: Type.Int, err: Type.Named{name: "{sema_grammar_alias(SEMA_GRAMMAR_ERROR_MODULE)}.GrammarError"}}
+    params: [Param]{sema_serde_items_param("text", Type.String, span), sema_grammar_into_sink_param("sink", span)}
+    ^method: sema_serde_items_method("parse_into", sema_grammar_walk_type_params(walk, span), params, returned, Span{start: span.start + 3, end: span.start + 3})
+    method.is_pub = is_pub
+    method.is_package_pub = is_package_pub
+    method.body = [Stmt]{
+        sema_serde_items_binding(SEMA_GRAMMAR_CURSOR, None, start, true, span),
+        sema_serde_items_if(sema_serde_items_not(run, span), [Stmt]{sema_serde_items_return(failed, span)}, span),
+        sema_serde_items_return(result, span),
+    }
+    method
+}
+
+// `check_parts(parts) -> Checked<[String], <Start>Slot> [GrammarError]!` of
+// rule `shape.rule`'s type: its check function over the parts joined with
+// a hole between each two, then every error recorded, or the parts and the
+// slot of each hole.
+sema_grammar_check_method: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan, shape: SemaGrammarShape, is_pub: Bool, is_package_pub: Bool) -> Func Never! {
+    span: gen.span
+    walk: SemaGrammarWalk{check: true, refuse: ""}
+    scanner: sema_grammar_scanner_constant(gen)
+    errors: "__jet_errors"
+    start: sema_grammar_core_call(SEMA_GRAMMAR_RUNTIME_MODULE, "cursor_of_parts", [Expr]{sema_serde_items_ident("parts", span)}, span)
+    run: sema_serde_items_free_call(sema_grammar_walk_function(gen, plan, walk, shape.rule), [Expr]{sema_serde_items_ident(SEMA_GRAMMAR_CURSOR, span), sema_serde_items_ident(scanner, span), sema_serde_items_ident(SEMA_GRAMMAR_SLOTS, span)}, span)
+    recorded: sema_grammar_core_call(SEMA_GRAMMAR_RUNTIME_MODULE, "check_errors", [Expr]{sema_serde_items_ident(SEMA_GRAMMAR_CURSOR, span), sema_serde_items_ident(scanner, span), sema_serde_items_ident(SEMA_GRAMMAR_RAN, span)}, span)
+    refused: sema_grammar_compare(.Gt, sema_serde_items_method_call(sema_serde_items_ident(errors, span), "len", [Expr]{}, span), sema_grammar_number(0, span), span)
+    failed: Expr.Err{value: sema_serde_items_ident(errors, span), span: span, id: AST_NODE_GENERATED}
+    slots: Type.List{element: Type.Named{name: sema_grammar_slot_type(gen)}}
+    type_args: [Type]{Type.List{element: Type.String}, Type.Named{name: sema_grammar_slot_type(gen)}}
+    // copy: the shape keeps the parts apart from the caller's
+    checked_fields: [ExprField]{ExprField{name: "shape", name_span: span, value: sema_serde_items_copy(sema_serde_items_ident("parts", span), span)}, ExprField{name: "slots", name_span: span, value: sema_serde_items_take(SEMA_GRAMMAR_SLOTS, span)}}
+    checked: Expr.Ok{value: sema_serde_items_struct_literal("Checked", type_args.copy(), checked_fields, span), span: span, id: AST_NODE_GENERATED}
+    returned: Type.Result{ok: Type.Apply{name: "Checked", args: type_args}, err: Type.List{element: Type.Named{name: "{sema_grammar_alias(SEMA_GRAMMAR_ERROR_MODULE)}.GrammarError"}}}
+    params: [Param]{sema_serde_items_param("parts", Type.List{element: Type.String}, span)}
+    ^method: sema_serde_items_method("check_parts", [TypeParam]{}, params, returned, Span{start: span.start + 4, end: span.start + 4})
+    method.is_pub = is_pub
+    method.is_package_pub = is_package_pub
+    method.body = [Stmt]{
+        sema_serde_items_binding(SEMA_GRAMMAR_CURSOR, None, start, true, span),
+        sema_serde_items_binding(SEMA_GRAMMAR_SLOTS, Val(slots), Expr.ListLit{elements: [Expr]{}, span: span, id: AST_NODE_GENERATED}, true, span),
+        sema_serde_items_binding(SEMA_GRAMMAR_RAN, None, run, false, span),
+        sema_serde_items_binding(errors, None, recorded, false, span),
+        sema_serde_items_if(refused, [Stmt]{sema_serde_items_return(failed, span)}, span),
+        sema_serde_items_return(checked, span),
+    }
+    method
+}
+
+// The walk functions of a grammar: each parser rule's sink function and,
+// when the grammar has holes, its check function.
+sema_grammar_walk_items: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan, items: ^[Item]) Never! {
+    into: SemaGrammarWalk{check: false, refuse: ""}
+    loop shape in plan.shapes -> sema_grammar_walk_functions(gen, plan, into, shape, items)
+    if !sema_grammar_has_holes(plan) -> return
+    check: SemaGrammarWalk{check: true, refuse: ""}
+    loop shape in plan.shapes -> sema_grammar_walk_functions(gen, plan, check, shape, items)
+}

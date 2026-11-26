@@ -48,10 +48,21 @@ use {
 // Directory copies preserve that boundary: only regular files are copied;
 // symlink and other special entries are never dereferenced.
 
-// Why a checked Path literal was rejected.
+// Why a checked Path literal was rejected: the compiler reports it under the
+// checked text rejection's code with this reason as its Why.
 #Error
 PathLiteralError: struct {
     reason: String,
+
+    impl Diagnostic {
+        code: "E2712",
+
+        what: fn(self) -> String { "this checked text type rejected its body" }
+
+        why: fn(self) -> String { "{self.reason}" }
+
+        fix: fn(self) -> String { "fix the body so it satisfies the type's declared text grammar" }
+    }
 }
 
 // The checked `Path{…}` literal: each hole's display text is one percent-
@@ -61,14 +72,16 @@ impl Path.CheckedText {
     Error: PathLiteralError,
     Hole: String,
 
-    check: fn(text: String) -[]> PathLiteralError! {
-        if text.bytes().contains(U8{0}) {
-            return Err(PathLiteralError{reason: "a Path cannot contain a NUL character"})
+    check: fn(parts: [String]) -[]> Checked<[String], TextSlot> PathLiteralError! {
+        loop part in parts {
+            if part.bytes().contains(U8{0}) {
+                return Err(PathLiteralError{reason: "a Path cannot contain a NUL character"})
+            }
         }
-        return Ok()
+        Ok(Checked{shape: parts.copy(), slots: loop _ in 1..<parts.len() -> TextSlot.Text})
     }
 
-    encode_hole: fn<T: Printable>(value: T) -[]> String { "{value}" }
+    encode_hole: fn<T: Printable>(value: T, _slot: TextSlot) -[]> String { "{value}" }
 
     build: fn(parts: [String], holes: [String]) -[]> Path {
         ^text: parts[0].copy()

@@ -237,10 +237,8 @@ sema_budget_attachment_catalog: fn(tables: ASTTables, items: [Item]) -> BudgetAt
                 loop contribution in declaration.contributions {
                     if contribution.namespace == {
                         .Env -> sema_budget_set_insert(catalog.envs, contribution.path)
-                        .System | .Image -> {
-                            sema_budget_set_insert(catalog.targets, contribution.path)
-                        }
-                        .Fleet | .VMTest | .Perf | .Profile -> {}
+                        .Image -> sema_budget_set_insert(catalog.targets, contribution.path)
+                        .Perf | .Profile -> {}
                     }
                     if contribution.value == {
                         .Env(env) -> {
@@ -248,16 +246,7 @@ sema_budget_attachment_catalog: fn(tables: ASTTables, items: [Item]) -> BudgetAt
                                 sema_budget_set_insert(catalog.services, service.name)
                             }
                         }
-                        .System(system) -> {
-                            loop field in system.fields {
-                                if field.value == .Services(services) {
-                                    loop service in services {
-                                        sema_budget_set_insert(catalog.services, service.name)
-                                    }
-                                }
-                            }
-                        }
-                        .Expr(_) | .Image(_) | .Fleet(_) | .VMTest(_) | .Profile(_) | .Perf(_) -> {}
+                        .Expr(_) | .Image(_) | .Profile(_) | .Perf(_) -> {}
                     }
                 }
             }
@@ -422,7 +411,7 @@ sema_budget_validate_module: fn(declaration: ModuleDecl, specs: ^[BudgetSpec], d
     loop contribution in declaration.contributions {
         perf: if contribution.value == {
             .Perf(value) -> value
-            .Expr(_) | .Env(_) | .System(_) | .Image(_) | .Fleet(_) | .VMTest(_) | .Profile(_) -> {
+            .Expr(_) | .Env(_) | .Image(_) | .Profile(_) -> {
                 next
             }
         }

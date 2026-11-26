@@ -190,7 +190,7 @@ pc_formatter_edit_boundaries: fn() {
 // compile this fixture. Semantic Output field/binder checks belong to sema.
 pc_output_provider: fn() {
     loop kind in
-        ([String]{"Library", "Executable", "Service", "Check", "Environment", "Image", "Bundle", "System", "Fleet"}) {
+        ([String]{"Library", "Executable", "Service", "Check", "Environment", "Image", "Bundle"}) {
         source: "app: Output.{kind}{{ name: \"artifact\", entry: run }}\n"
         parsed: parse_source(source.bytes())
         pc_require(parsed.diagnostics.len() == 0 && parsed.program.script_body.len() == 0, "{kind} enters the item route before module bindings")

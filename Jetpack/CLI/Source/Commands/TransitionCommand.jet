@@ -1,4 +1,4 @@
-// `jet split env|package <name>|hosts <name> [--check]` and `jet fold <file>
+// `jet split env|package <name> [--check]` and `jet fold <file>
 // [--check]`: one reversible package source transition in the current
 // directory's Package root, planned and applied by Jetpack/Environment
 // Transition. `--check` previews the plan without writing; `--json` prints the
@@ -6,24 +6,19 @@
 
 cli_cmd_split: fn(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time, Time.Wait]> Int Never! {
     if parsed.positional.len() == 0 {
-        theme.error_coded("E2104", "`jet split` needs a target", "a split moves one named fact out of `package.jet`, so it has to know which one", "use `jet split env`, `jet split package <name>`, or `jet split hosts <name>`")
+        theme.error_coded("E2104", "`jet split` needs a target", "a split moves one named fact out of `package.jet`, so it has to know which one", "use `jet split env` or `jet split package <name>`")
         return EXIT_USAGE
     }
     kind: parsed.positional[0]
-    if kind != "env" && kind != "package" && kind != "hosts" {
-        theme.error_coded("E2101", "unknown split target `{kind}`", "`jet split` moves an environment, a member Package, or a host System out of `package.jet`", "use `jet split env`, `jet split package <name>`, or `jet split hosts <name>`")
+    if kind != "env" && kind != "package" {
+        theme.error_coded("E2101", "unknown split target `{kind}`", "`jet split` moves an environment or a member Package out of `package.jet`", "use `jet split env` or `jet split package <name>`")
         return EXIT_USAGE
     }
-    if kind != "env" && parsed.positional.len() < 2 {
-        role: if kind == "package" -> "a Package name" else -> "a host name"
-        theme.error_coded("E2104", "`jet split {kind}` needs {role}", "a split moves one named fact out of `package.jet`, so it has to know which one", "use `jet split {kind} <name>`")
+    if kind == "package" && parsed.positional.len() < 2 {
+        theme.error_coded("E2104", "`jet split package` needs a Package name", "a split moves one named fact out of `package.jet`, so it has to know which one", "use `jet split package <name>`")
         return EXIT_USAGE
     }
-    target: if kind == {
-        "env" -> SplitTarget.Environment
-        "package" -> SplitTarget.Package(parsed.positional[1])
-        else -> SplitTarget.Hosts(parsed.positional[1])
-    }
+    target: if kind == "env" -> SplitTarget.Environment else -> SplitTarget.Package(parsed.positional[1])
     check_only: parsed.flags.transition_check
     if env_transition_split(cli_current_dir(), target, check_only) == {
         .Ok(result) -> cli_transition_result(TRANSITION_SPLIT_VERB, result, check_only, parsed.flags.json)

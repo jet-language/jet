@@ -19,18 +19,20 @@ use {
         LambdaBody,
         LambdaParam,
         NamedSpan,
+        IndexKind,
         NodeKind,
         OrFallback,
         ExprField,
         ExprPair,
         Field,
-        TargetHardwareUse,
         ParamZone,
         PlaceAccess,
         Span,
         StrPart,
+        Stmt,
         Symbol,
         SymbolKind,
+        TComptimeReport,
         TComptimeValue,
         TFieldRef,
         TNarrowOutcome,
@@ -1703,13 +1705,15 @@ sema_expression_typed_literal_printable: fn(ty: Type, environment: SemaScopeEnvi
 
 // `build` is set when the type assembles its literal from the parts and the
 // encoded holes; without it the type is a `distinct String` and the literal
-// is the joined text.
+// is the joined text. `accepts` is set when the type judges each hole's type
+// for its slot; without it every hole is accepted.
 SemaExpressionCheckedTextTarget: struct {
     owner: Symbol,
     implementation_module_identity: ModuleID,
     check: SemaRegistrationFunction,
     encode_hole: SemaRegistrationFunction,
     build: SemaRegistrationFunction?,
+    accepts: SemaRegistrationFunction?,
 }
 
 SemaExpressionCheckedTextLiteral: struct {
@@ -1780,6 +1784,7 @@ sema_expression_checked_text_target: fn(head: Type, environment: SemaScopeEnviro
                 ^check: SemaRegistrationFunction?{None}
                 ^encode_hole: SemaRegistrationFunction?{None}
                 ^build: SemaRegistrationFunction?{None}
+                ^accepts: SemaRegistrationFunction?{None}
                 loop method in registered.methods {
                     ^written: false
                     loop declared in block.methods {
@@ -1789,6 +1794,7 @@ sema_expression_checked_text_target: fn(head: Type, environment: SemaScopeEnviro
                     if method.symbol.name == "check" -> check = Val(method)
                     if method.symbol.name == "encode_hole" -> encode_hole = Val(method)
                     if method.symbol.name == "build" -> build = Val(method)
+                    if method.symbol.name == "accepts" -> accepts = Val(method)
                 }
                 if check != None && encode_hole != None && (string_backed || build != None) {
                     return Val(SemaExpressionCheckedTextTarget{
@@ -1797,6 +1803,7 @@ sema_expression_checked_text_target: fn(head: Type, environment: SemaScopeEnviro
                         check: check ?? return None,
                         encode_hole: encode_hole ?? return None,
                         build: build,
+                        accepts: accepts,
                     })
                 }
             }
@@ -1824,6 +1831,7 @@ sema_expression_checked_text_impl_target: fn(graph: SemaRegistrationGraph, modul
     ^check: SemaRegistrationFunction?{None}
     ^encode_hole: SemaRegistrationFunction?{None}
     ^build: SemaRegistrationFunction?{None}
+    ^accepts: SemaRegistrationFunction?{None}
     loop method_index in 0..<graph.modules[module_index].impls[row].methods.len() {
         if graph.modules[module_index].impls[row].methods[method_index].symbol.name == "check" {
             check = Val(graph.modules[module_index].impls[row].methods[method_index])
@@ -1834,6 +1842,9 @@ sema_expression_checked_text_impl_target: fn(graph: SemaRegistrationGraph, modul
         if graph.modules[module_index].impls[row].methods[method_index].symbol.name == "build" {
             build = Val(graph.modules[module_index].impls[row].methods[method_index])
         }
+        if graph.modules[module_index].impls[row].methods[method_index].symbol.name == "accepts" {
+            accepts = Val(graph.modules[module_index].impls[row].methods[method_index])
+        }
     }
     if check == None || encode_hole == None || (!string_backed && build == None) -> return None
     Val(SemaExpressionCheckedTextTarget{
@@ -1842,6 +1853,7 @@ sema_expression_checked_text_impl_target: fn(graph: SemaRegistrationGraph, modul
         check: check ?? return None,
         encode_hole: encode_hole ?? return None,
         build: build,
+        accepts: accepts,
     })
 }
 
@@ -1855,15 +1867,22 @@ sema_expression_checked_text_static_method_call: fn(receiver: Expr, method_name:
     target: sema_expression_checked_text_target(Type.Named{name: type_name}, check.environment.*, check.program.*, check.scopes) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     // A type that assembles itself through `build` is no String wrapper:
     // its other statics (`SQL.raw`) are its own ordinary methods. `build`
-    // goes straight to the impl, which a runtime handle has no row to reach.
-    if target.build != None && method_name != "check" && method_name != "encode_hole" && method_name != "build" {
+    // and `accepts` go straight to the impl, which a runtime handle has no
+    // row to reach.
+    if target.build != None && method_name != "check" && method_name != "encode_hole" && method_name != "build" && method_name != "accepts" {
         return SemaMethodSpecialCheck{handled: false, value: None}
     }
     if method_name == "raw" {
         return sema_expression_checked_text_raw(target, type_name, method_span, args, expected, check)
     }
-    function: if method_name == "check" || method_name == "from" -> target.check else if method_name == "encode_hole" -> target.encode_hole else if method_name == "build" && target.build != None -> target.build ?? target.check else -> {
-        return SemaMethodSpecialCheck{handled: false, value: None}
+    function: if {
+        method_name == "check" || method_name == "from" -> target.check
+        method_name == "encode_hole" -> target.encode_hole
+        method_name == "build" && target.build != None -> target.build ?? target.check
+        method_name == "accepts" && target.accepts != None -> target.accepts ?? target.check
+        else -> {
+            return SemaMethodSpecialCheck{handled: false, value: None}
+        }
     }
     if owner_type_args.len() > 0 {
         check.diagnostics.push(sema_error("E0119", method_span, "`{type_name}.{method_name}` has no owner type parameters", "CheckedText implementations target one concrete string-backed distinct type", "remove the explicit owner type arguments"))
@@ -1881,11 +1900,21 @@ sema_expression_checked_text_static_method_call: fn(receiver: Expr, method_name:
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     direct: sema_call_direct_target_from_registration(function, check.program.registration_graph, check.environment.module_identity, check.environment.package_identity, check.environment.generic_params, type_args, method_span, check.diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    ^call_args: args
+    if method_name == "from" {
+        if args.len() != 1 {
+            check.diagnostics.push(sema_error("E0103", method_span, "`{type_name}.from` takes exactly one String", "a checked text boundary receives one complete text value", "write `{type_name}.from(text)`"))
+            loop argument in args -> ^_: sema_check_expression(argument.expr, None, check)
+            return SemaMethodSpecialCheck{handled: true, value: None}
+        }
+        // `from(text)` is `check([text])`: the whole text is the one part.
+        call_args = [CallArg]{sema_expression_checked_text_parts_arg([Expr]{args[0].expr.copy()}, args[0].span)}
+    }
     ^call: Call{
         name: "{type_name}.{method_name}",
         name_span: method_span,
         type_args: type_args,
-        args: args,
+        args: call_args,
     }
     checked: sema_call_check_direct_target_owned(check, direct, call, [SemaCallDefaultValue]{}, if method_name == "from" -> None else -> expected) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     // The registered signature keeps its declared spelling (`-[]> String`
@@ -1898,12 +1927,8 @@ sema_expression_checked_text_static_method_call: fn(receiver: Expr, method_name:
         check.diagnostics.push(sema_error("E0112", method_span, "a checked text hole encoder must return String", "every interpolation is passed through the type's pure `encode_hole` method before it reaches the checker", "make `encode_hole` return a String"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    check_returns_unit_result: if checked.value.ty == {
-        .Result(ok, _) -> ok == Type.Named{name: "Unit"}
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
-    }
-    if (method_name == "check" || method_name == "from") && !check_returns_unit_result {
-        check.diagnostics.push(sema_error("E0907", method_span, "`{type_name}.check` must return `Result<Unit, Error>`", "the canonical CheckedText contract reports rejection through its error result", "match the pure CheckedText.check signature"))
+    if (method_name == "check" || method_name == "from") && sema_expression_checked_text_result_types(checked.value.ty) == None {
+        check.diagnostics.push(sema_error("E0907", method_span, "`{type_name}.check` must return `Checked<Shape, Slot>` with the type's `Error`", "the canonical CheckedText contract returns what it learned from the parts and reports rejection through its error result", "match the pure CheckedText.check signature"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     check.context.call_return_views.push(SemaCallReturnView{span: method_span, facts: checked.return_view_facts})
@@ -1911,15 +1936,17 @@ sema_expression_checked_text_static_method_call: fn(receiver: Expr, method_name:
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     if method_name == "from" {
-        value: sema_expression_checked_text_from(target, type_name, checked.value, method_span) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+        value: sema_expression_checked_text_from(type_name, checked.value, method_span, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, check.environment.*, check.program.*, check.diagnostics)}
     }
     SemaMethodSpecialCheck{handled: true, value: Val(checked.value)}
 }
 
 // Preserve the ordinary checker error while moving the original text into the
-// nominal wrapper on success. The argument and the checker each execute once.
-sema_expression_checked_text_from: fn(target: SemaExpressionCheckedTextTarget, type_name: String, checked: TExpr, span: Span) -> TExpr? {
+// nominal wrapper on success. The argument and the checker each execute once:
+// `checked` is `Type.check([text])`, and the checker reads a copy of the
+// bound text as its one part.
+sema_expression_checked_text_from: fn(type_name: String, checked: TExpr, span: Span, check: ^SemaBodyCheck) -> TExpr? {
     error_type: if checked.ty == {
         .Result(_, error) -> error
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {
@@ -1929,18 +1956,7 @@ sema_expression_checked_text_from: fn(target: SemaExpressionCheckedTextTarget, t
     source_local: checked_generated_local("__checked_text_source_{span.start}", span, Type.String)
     error_local: checked_generated_local("__checked_text_error_{span.start}", span, error_type)
     source_value: sema_tree_node(Type.String, TExprKind.Local{local: source_local}, span)
-    ^original: TExpr?{None}
-    ^checker_call: TExpr?{None}
-    if checked.kind == .Call(callee, type_args, args) {
-        if args.len() == 1 {
-            original = Val(args[0].value)
-            ^checker_args: args
-            checker_args[0].value = source_value
-            checker_call = Val(sema_tree_node(checked.ty, TExprKind.Call{callee: callee, type_args: type_args, args: checker_args}, span))
-        }
-    }
-    source_init: original ?? return None
-    checker: checker_call ?? return None
+    split: sema_expression_checked_text_split(checked, source_value, span, check) ?? return None
     nominal: Type.Named{name: type_name}
     result_type: Type.Result{ok: nominal, err: error_type}
     wrapped: sema_tree_node(nominal, TExprKind.DistinctCtor{argument: sema_tree_node(Type.String, TExprKind.Move{value: source_value}, span)}, span)
@@ -1958,7 +1974,7 @@ sema_expression_checked_text_from: fn(target: SemaExpressionCheckedTextTarget, t
     outcome: sema_tree_node(
         result_type,
         TExprKind.IfExpr{
-            cond: TIfCond.IfLet{pattern: err_pattern, subj: checker},
+            cond: TIfCond.IfLet{pattern: err_pattern, subj: split.checker},
             then_body: [TStmt]{},
             then_value: sema_tree_node(result_type, TExprKind.Err{value: error_value}, span),
             else_body: [TStmt]{},
@@ -1970,7 +1986,7 @@ sema_expression_checked_text_from: fn(target: SemaExpressionCheckedTextTarget, t
         result_type,
         TExprKind.InlineBlock{
             body: [TStmt]{
-                TStmt.Let{local: source_local, let_ty: TLetTy.Annotated{ty: Type.String, wrapper: TLetWrapper.Plain}, init: source_init, gc_promotion: None, gc_transferred: false, span: span},
+                TStmt.Let{local: source_local, let_ty: TLetTy.Annotated{ty: Type.String, wrapper: TLetWrapper.Plain}, init: split.text, gc_promotion: None, gc_transferred: false, span: span},
                 TStmt.ExprStmt{value: outcome, span: span},
             },
         },
@@ -2037,50 +2053,66 @@ sema_expression_checked_text_literal: fn(head: Type, source_head: Type?, body: T
             return SemaExpressionCheckedTextLiteral{handled: true, value: None}
         }
     }
-    // The checker sees the complete text; a type with `build` sees its
-    // literal parts joined by `{}`, one per hole, since its holes stay values.
-    ^encoded_parts: [StrPart]{}
+    // The literal's pieces, the text between its holes (one more than the
+    // holes), and its holes.
+    ^pieces: [String]{}
+    ^holes: [Expr]{}
+    ^current: ""
     loop part in parts {
         if part == {
-            .Lit(_) -> { encoded_parts.push(part) }
-            .Byte(value) -> { encoded_parts.push(StrPart.Lit{text: sema_expr_byte_text(value)}) }
+            .Lit(text) -> { current = "{current}{text}" }
+            .Byte(value) -> { current = "{current}{sema_expr_byte_text(value)}" }
             .Interp(value, _) -> {
-                if building -> encoded_parts.push(StrPart.Lit{text: "{{}}"}) else {
-                    encoded_parts.push(StrPart.Interp{expr: sema_expression_checked_text_encoder(type_name, value), format: None})
+                pieces.push(current.copy())
+                current = ""
+                holes.push(value.copy())
+            }
+        }
+    }
+    pieces.push(current)
+    body_span: expr_span(body_value)
+    // A type with `build` checks the pieces, since its holes stay values. A
+    // text kind checks its complete text, each hole encoded in the one
+    // `TextSlot`, as its one part.
+    ^check_parts: [Expr]{}
+    if building {
+        loop piece in pieces -> check_parts.push(sema_expression_checked_text_piece(piece, body_span))
+    } else {
+        ^encoded_parts: [StrPart]{}
+        loop part in parts {
+            if part == {
+                .Lit(_) -> { encoded_parts.push(part) }
+                .Byte(value) -> { encoded_parts.push(StrPart.Lit{text: sema_expr_byte_text(value)}) }
+                .Interp(value, _) -> {
+                    encoded_parts.push(StrPart.Interp{expr: sema_expression_checked_text_encoder(type_name, value, sema_expression_checked_text_text_slot(expr_span(value))), format: None})
                 }
             }
         }
+        check_parts.push(Expr.Str{parts: encoded_parts, span: body_span, id: AST_NODE_GENERATED})
     }
-    ^encoded_body: Expr.Str{parts: encoded_parts, span: expr_span(body_value), id: AST_NODE_GENERATED}
-    ^check_argument: CallArg{convention: AccessConvention.Read, expr: encoded_body, span: expr_span(body_value), flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}
-    ^check_call: Expr.MethodCall{
-        receiver: Expr.Ident{name: type_name, span: span, id: AST_NODE_GENERATED},
-        method: "check",
-        method_span: span,
-        owner_type_args: [Type]{},
-        type_args: [Type]{},
-        args: [CallArg]{check_argument},
-        id: AST_NODE_GENERATED,
-    }
+    check_call: sema_expression_checked_text_check_call(type_name, check_parts, span)
+    runtime_owner: sema_expr_runtime_body_owner(check)
     ^fact_start: check.context.call_facts.len()
     ^reference_start: check.context.name_references.len()
-    ^register_access_start: check.context.hardware_use.register_accesses.len()
-    ^interrupt_handler_start: check.context.hardware_use.interrupt_handlers.len()
-    ^dma_operation_start: check.context.hardware_use.dma_operations.len()
-    ^unresolved_hardware_start: check.context.hardware_use.unresolved_references.len()
+    // A built literal's check runs only while building: in run-time code its
+    // pieces are constant, and the shape it returns lands as a value.
+    staged: building && runtime_owner != None
+    if staged -> check.scopes.comptime_execution_depth += 1
     // The literal consumes the checker's Result itself: the call root keeps
     // its carrier instead of propagating into the enclosing function.
-    checked: sema_check_expression_carrier(check_call, None, check) ?? return SemaExpressionCheckedTextLiteral{handled: true, value: None}
-    text: if checked.kind == {
-        .Call(_, _, args) -> if {
-            args.len() == 1 -> args[0].value
-            else -> {
-                check.diagnostics.push(sema_error("E0003", span, "the checked text checker call lost its complete body argument", "the staged checker evaluates the ordinary pure `CheckedText.check` method on the exact encoded body", "preserve the canonical static method call in the checked tree"))
-                return SemaExpressionCheckedTextLiteral{handled: true, value: None}
-            }
-        }
-        .IntLit(_, _) | .StrLit(_) | .Local(_) | .InlineBlock(_) | .CtLit(_) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) | .Flat(_) -> {
-            check.diagnostics.push(sema_error("E0003", span, "the checked text checker call did not lower as a direct static call", "CheckedText methods are ordinary registered pure functions", "preserve the canonical registered call target"))
+    checked_value: sema_check_expression_carrier(check_call, None, check)
+    if staged -> check.scopes.comptime_execution_depth -= 1
+    checked: checked_value ?? return SemaExpressionCheckedTextLiteral{handled: true, value: None}
+    ^direct: false
+    if checked.kind == .Call(_, _, _) -> direct = true
+    if !direct {
+        check.diagnostics.push(sema_error("E0003", span, "the checked text checker call did not lower as a direct static call", "CheckedText methods are ordinary registered pure functions", "preserve the canonical registered call target"))
+        return SemaExpressionCheckedTextLiteral{handled: true, value: None}
+    }
+    // In run-time code `accepts` judges each hole while building; a text
+    // kind's holes all sit in `.Text`, so its answers need no landed check.
+    if !building && runtime_owner == .Val(accepts_owner) {
+        if sema_expression_checked_text_refused(type_name, target, holes, [TComptimeValue]{}, None, accepts_owner, span, check) {
             return SemaExpressionCheckedTextLiteral{handled: true, value: None}
         }
     }
@@ -2091,6 +2123,28 @@ sema_expression_checked_text_literal: fn(head: Type, source_head: Type?, body: T
         value: sema_expression_checked_text_runtime(head, target.owner.name, checked, span, check) ?? return SemaExpressionCheckedTextLiteral{handled: true, value: None}
         return SemaExpressionCheckedTextLiteral{handled: true, value: sema_expr_expected(value, expected, check.environment.*, check.program.*, check.diagnostics)}
     }
+    // In run-time code the check is staged through the body comptime
+    // evaluator, as a `#run` value is, and what it returns replaces the
+    // check when the body is checked again.
+    if runtime_owner == .Val(owner_key) {
+        if sema_stmt_comptime_site_refused(check, fact_start) -> return SemaExpressionCheckedTextLiteral{handled: true, value: None}
+        landed: sema_comptime_body_value_find(check.context, check.environment.module_identity, owner_key, span, span) ?? {
+            _: sema_comptime_body_capture(check.context, check.environment.*, check.program.*, check.scopes, "{type_name} checked text literal", check_call, checked.ty, span, span)
+            // The literal stands in until the shape lands; nothing lowers it.
+            if !building -> return sema_expression_checked_text_distinct(head, checked, span, expected, check)
+            return SemaExpressionCheckedTextLiteral{handled: true, value: sema_expression_checked_text_inline(type_name, check_call, holes, span, expected, check)}
+        }
+        types: sema_expression_checked_text_result_types(checked.ty) ?? return SemaExpressionCheckedTextLiteral{handled: true, value: None}
+        hole_count: if building -> holes.len() else -> 0
+        shape: sema_expression_checked_text_landed(type_name, landed.value, checked.ty, hole_count, body_value, span, check) ?? return SemaExpressionCheckedTextLiteral{handled: true, value: None}
+        if !building -> return sema_expression_checked_text_distinct(head, checked, span, expected, check)
+        if sema_expression_checked_text_refused(type_name, target, holes, shape.slots, Val(types[1]), owner_key, span, check) {
+            return SemaExpressionCheckedTextLiteral{handled: true, value: None}
+        }
+        return SemaExpressionCheckedTextLiteral{handled: true, value: sema_expression_checked_text_prepared(type_name, shape, types, holes, owner_key, span, expected, check)}
+    }
+    // Code that runs while building calls the check as it runs; the staged
+    // request reports a rejection as E2712 at the literal.
     graph: check.program.registration_graph
     // A check whose Error is Never cannot reject the body, so it is not run.
     rejects: if checked.ty == .Result(_, failure) -> failure != (Type.Named{name: "Never"}) else -> true
@@ -2132,18 +2186,12 @@ sema_expression_checked_text_literal: fn(head: Type, source_head: Type?, body: T
             source_expression: Expr.TypedLit{head: source_head, body: body, span: span, id: AST_NODE_GENERATED},
             expression: sema_publish_expression(checked, check.program.*, check.context),
             ty: checked.ty,
-            hardware_use: TargetHardwareUse{
-                register_accesses: loop index in register_access_start..<check.context.hardware_use.register_accesses.len() -> check.context.hardware_use.register_accesses[index],
-                interrupt_handlers: loop index in interrupt_handler_start..<check.context.hardware_use.interrupt_handlers.len() -> check.context.hardware_use.interrupt_handlers[index],
-                dma_operations: loop index in dma_operation_start..<check.context.hardware_use.dma_operations.len() -> check.context.hardware_use.dma_operations[index],
-                unresolved_references: loop index in unresolved_hardware_start..<check.context.hardware_use.unresolved_references.len() -> check.context.hardware_use.unresolved_references[index],
-            },
             reachable_function_keys: reachable,
             dependencies: dependencies,
             span: span,
             code: "E2712",
-            what: "this checked text type rejected its body",
-            fix: "fix the body so it satisfies the type's declared text grammar",
+            what: SEMA_CHECKED_TEXT_REJECTED_WHAT,
+            fix: SEMA_CHECKED_TEXT_REJECTED_FIX,
         }
         check.context.comptime_requests.push(
             SemaComptimeRequest{
@@ -2155,24 +2203,544 @@ sema_expression_checked_text_literal: fn(head: Type, source_head: Type?, body: T
             },
         )
     }
-    if !building {
-        ^result: sema_tree_node(head, TExprKind.DistinctCtor{argument: text}, span)
-        return SemaExpressionCheckedTextLiteral{handled: true, value: sema_expr_expected(result, expected, check.environment.*, check.program.*, check.diagnostics)}
-    }
-    SemaExpressionCheckedTextLiteral{handled: true, value: sema_expression_checked_text_build(type_name, parts, span, expected, check)}
+    if !building -> return sema_expression_checked_text_distinct(head, checked, span, expected, check)
+    SemaExpressionCheckedTextLiteral{handled: true, value: sema_expression_checked_text_inline(type_name, check_call, holes, span, expected, check)}
 }
 
-// `Type.encode_hole(value)` for one interpolation hole.
-sema_expression_checked_text_encoder: fn(type_name: String, value: Expr) -> Expr Never! {
+// What a refused checked text literal reports (E2712) for an error that
+// implements no `Diagnostic` (sema_checked_text_reports): its Why is the
+// error when that is text, else this one.
+SEMA_CHECKED_TEXT_REJECTED_WHAT: "this checked text type rejected its body"
+SEMA_CHECKED_TEXT_REJECTED_WHY: "the type's pure `CheckedText.check` method must accept the complete literal body"
+SEMA_CHECKED_TEXT_REJECTED_FIX: "fix the body so it satisfies the type's declared text grammar"
+
+// The locals a built literal's landed shape and slots are read through.
+SEMA_CHECKED_TEXT_SHAPE_LOCAL: "__checked_text_shape"
+SEMA_CHECKED_TEXT_SLOT_LOCAL: "__checked_text_slot_"
+// The local an inline built literal binds its accepted check to.
+SEMA_CHECKED_TEXT_CHECKED_LOCAL: "__checked_text_checked"
+// The locals a hole's staged `accepts` reads its slot and its type through.
+SEMA_CHECKED_TEXT_ACCEPTS_SLOT_LOCAL: "__checked_text_accepts_slot"
+SEMA_CHECKED_TEXT_ACCEPTS_HOLE_LOCAL: "__checked_text_accepts_hole"
+// What a refused hole's report (E2715) asks for.
+SEMA_CHECKED_TEXT_HOLE_SLOT_FIX: "pass a value of a type this place accepts, or move the hole to a place that accepts its type"
+
+// What a refused check reports: its error, or each item of an error type
+// that is a list, at the spot its `at: TextSpot` names in the quoted body of
+// `literal` (sema_checked_text_spot_span), else at `span`. An item whose type
+// implements `Diagnostic`, each text one literal over `self` fields, reports
+// under the impl's code (sema_derive_report_diagnostic); an item of an enum
+// whose case holds one value whose type implements it reports that value so
+// (sema_checked_text_case_reports); any other reports `code` with `what` and
+// `fix`, its Why the item when that is text, else
+// SEMA_CHECKED_TEXT_REJECTED_WHY. `result` is the check's Result type.
+sema_checked_text_reports: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, result: Type, literal: Expr, report: TComptimeReport, span: Span, code: String, what: String, fix: String) -> [Diagnostic] Never! {
+    ^reports: [Diagnostic]{}
+    ^diagnostic: SemaDeriveReport?{None}
+    ^cases: [SemaCheckedTextCaseReport]{}
+    ^listed: false
+    if result == .Result(_, error_type) {
+        diagnostic = sema_type_diagnostic_report(graph, error_type, module_identity)
+        cases = sema_checked_text_case_reports(graph, error_type, module_identity)
+        if error_type == .List(item_type) {
+            listed = true
+            diagnostic = sema_type_diagnostic_report(graph, item_type, module_identity)
+            cases = sema_checked_text_case_reports(graph, item_type, module_identity)
+        }
+    }
+    if report == .Told(error) && listed && error == .List(items) {
+        loop item in items -> reports.push(sema_checked_text_item_report(graph, module_identity, diagnostic, cases, literal, item, span, code, what, fix))
+    }
+    if report == .Told(error) && !listed -> reports.push(sema_checked_text_item_report(graph, module_identity, diagnostic, cases, literal, error, span, code, what, fix))
+    if reports.len() == 0 -> reports.push(sema_error(code, span, what, SEMA_CHECKED_TEXT_REJECTED_WHY, fix))
+    reports
+}
+
+// The `Diagnostic` impl that reports the one value an error enum's case
+// `variant` holds.
+SemaCheckedTextCaseReport: struct {
+    variant: String,
+    report: SemaDeriveReport,
+}
+
+// For an enum `error_type` read from `module_identity`, the `Diagnostic`
+// impl of each case that holds one value of a type that has one; none for
+// any other type.
+sema_checked_text_case_reports: fn(graph: SemaRegistrationGraph, error_type: Type, module_identity: ModuleID) -> [SemaCheckedTextCaseReport] Never! {
+    ^cases: [SemaCheckedTextCaseReport]{}
+    owner: sema_type_resolve_nominal_row(graph, error_type, module_identity) ?? return cases
+    source: sema_registration_nominal_source_item(graph.modules[owner.module_index].nominals[owner.row].source) ?? return cases
+    if source == .Enum(definition) {
+        // A case's payload type resolves from the module that declares the enum.
+        declaring: graph.modules[owner.module_index].module_identity
+        loop variant in definition.variants {
+            if variant.payload == .Single(ty, _) {
+                report: sema_type_diagnostic_report(graph, ty, declaring) ?? next
+                cases.push(SemaCheckedTextCaseReport{variant: variant.name.copy(), report: report})
+            }
+        }
+    }
+    cases
+}
+
+// The report of one error `item` of a refused check (sema_checked_text_reports).
+sema_checked_text_item_report: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, diagnostic: SemaDeriveReport?, cases: [SemaCheckedTextCaseReport], literal: Expr, item: TComptimeValue, span: Span, code: String, what: String, fix: String) -> Diagnostic Never! {
+    if item == .Enum(_, variant, args) && args.len() == 1 {
+        loop case in cases {
+            if case.variant == variant {
+                return sema_checked_text_item_report(graph, module_identity, Val(case.report.copy()), [SemaCheckedTextCaseReport]{}, literal, args[0].value, span, code, what, fix)
+            }
+        }
+    }
+    at: sema_checked_text_spot_span(graph, module_identity, literal, item) ?? span
+    if diagnostic == .Val(found) && sema_user_template_ct_value(item) == .Val(value) {
+        ^texts: [String]{}
+        loop name in ([String]{"what", "why", "fix"}) {
+            if sema_derive_report_text(found.definition, name, value) == .Val(text) -> texts.push(text)
+        }
+        if texts.len() == 3 -> return sema_derive_report_diagnostic(found, at, texts)
+    }
+    why: if item == .String(text) -> text.copy() else -> SEMA_CHECKED_TEXT_REJECTED_WHY
+    sema_error(code, at, what, why, fix)
+}
+
+// The `Shape` and `Slot` of a check's `Checked<Shape, Slot> Error!` result,
+// or None when `ty` is not that result.
+sema_expression_checked_text_result_types: fn(ty: Type) -> [Type]? Never! {
+    if sema_expr_unwrap_tag(ty) == .Result(ok, _) {
+        if sema_expr_unwrap_tag(ok) == .Apply(name, args) {
+            if (name == "Checked" || name == "core.prelude.Checked" || name == "<corelib>/core.prelude.Checked") && args.len() == 2 -> return Val(args.copy())
+        }
+    }
+    None
+}
+
+// What a built literal's check returned: its shape and one slot per hole.
+SemaExpressionCheckedTextShape: struct {
+    shape: TComptimeValue,
+    slots: [TComptimeValue],
+}
+
+// The landed value of a literal's staged check: a rejection reports what
+// its error gives (sema_checked_text_reports); an accepted `Checked` record
+// gives its shape and its slots, one per hole. `result` is the check's
+// Result type and `literal` the literal's quoted body.
+sema_expression_checked_text_landed: fn(type_name: String, value: TComptimeValue, result: Type, hole_count: Int, literal: Expr, span: Span, check: ^SemaBodyCheck) -> SemaExpressionCheckedTextShape? {
+    if value == .Failed(report) {
+        check.diagnostics.extend(sema_checked_text_reports(check.program.registration_graph, check.environment.module_identity, result, literal, report, span, "E2712", SEMA_CHECKED_TEXT_REJECTED_WHAT, SEMA_CHECKED_TEXT_REJECTED_FIX))
+        return None
+    }
+    ^shape: TComptimeValue?{None}
+    ^slots: [TComptimeValue]?{None}
+    // An accepted check's `Ok` lands as `.Present`.
+    accepted: if value == .Present(inner) -> inner.copy() else -> value.copy()
+    if accepted == .Struct(_, fields) {
+        loop field in fields {
+            if field.name == "shape" -> shape = Val(field.value.copy())
+            if field.name == "slots" {
+                if field.value == .List(values) -> slots = Val(values.copy())
+            }
+        }
+    }
+    found_shape: shape ?? {
+        check.diagnostics.push(sema_error("E0003", span, "the staged `{type_name}.check` landed no `Checked` shape", "an accepted check returns `Checked{{shape, slots}}`", "preserve the check's landed value"))
+        return None
+    }
+    found_slots: slots ?? {
+        check.diagnostics.push(sema_error("E0003", span, "the staged `{type_name}.check` landed no `Checked` slots", "an accepted check returns `Checked{{shape, slots}}`", "preserve the check's landed value"))
+        return None
+    }
+    if found_slots.len() != hole_count {
+        check.diagnostics.push(sema_error("E2712", span, "`{type_name}.check` gave {found_slots.len()} slots for {hole_count} holes", "`check` returns one slot per hole, the kind of position the hole sits in", "return one slot in `Checked.slots` for each hole between the parts"))
+        return None
+    }
+    Val(SemaExpressionCheckedTextShape{shape: found_shape, slots: found_slots})
+}
+
+// A spot a check's error names in its literal: the body part it is in (0
+// for the first) and the byte offset inside that part's text.
+SemaCheckedTextSpot: struct {
+    part: Int,
+    offset: Int,
+}
+
+// The source span an error item of a check's refusal points at in its
+// literal: the item's `at: TextSpot` (core.grammar), read through the
+// written body of `literal` (`Type{"…"}`, or its quoted body) the way the
+// lexer reads a typed head's body. None when the item names no spot, the
+// module's source is not the text its spans index, or the spot is not in
+// the written text: a text kind's one part is its joined text, whose
+// offsets past its first hole count encoded hole text.
+sema_checked_text_spot_span: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, literal: Expr, item: TComptimeValue) -> Span? {
+    spot: sema_checked_text_spot(item) ?? return None
+    ^hole_ends: [Int]{}
+    body: sema_checked_text_quoted_body(literal, hole_ends) ?? return None
+    row: sema_registration_module_index(graph, module_identity) ?? return None
+    source_row: sema_span_source_row(graph, row)
+    if source_row < 0 -> return None
+    sema_checked_text_spot_at(graph.modules[source_row].source.bytes(), body, hole_ends, spot)
+}
+
+// The span of the quoted body of `literal`, with the end of each hole's
+// value pushed to `hole_ends`.
+sema_checked_text_quoted_body: fn(literal: Expr, hole_ends: ^[Int]) -> Span? Never! {
+    if literal == .TypedLit(_, written, _, _) && written == .Value(value) -> return sema_checked_text_quoted_body(value, hole_ends)
+    if literal == .Str(parts, span, _) {
+        loop part in parts {
+            if part == .Interp(value, _) -> hole_ends.push(expr_span(value).end)
+        }
+        return Val(span)
+    }
+    None
+}
+
+// The `at: TextSpot` of an error item.
+sema_checked_text_spot: fn(item: TComptimeValue) -> SemaCheckedTextSpot? Never! {
+    if item == .Struct(_, fields) {
+        loop field in fields {
+            if field.name != "at" -> next
+            if field.value == .Struct(spot_type, spot_fields) && (spot_type == "TextSpot" || spot_type.ends_with(".TextSpot")) {
+                ^part: -1
+                ^offset: -1
+                loop spot_field in spot_fields {
+                    if spot_field.name == "part" && spot_field.value == .Int(value) -> part = value
+                    if spot_field.name == "offset" && spot_field.value == .Int(value) -> offset = value
+                }
+                if part >= 0 && offset >= 0 -> return Val(SemaCheckedTextSpot{part: part, offset: offset})
+            }
+        }
+    }
+    None
+}
+
+// Byte `at` of `bytes`, -1 past either end.
+sema_checked_text_byte: fn(bytes: [U8], at: Int) -> Int Never! {
+    if at < 0 || at >= bytes.len() -> return -1
+    Int{bytes[at]}
+}
+
+// The span of `spot` in the quoted body written at `body` of `bytes`, whose
+// holes end where `hole_ends` say. It reads the body as the lexer reads a
+// typed head's (decode_string, decode_string_content): a triple-quoted
+// body drops its opening and closing lines and the closing line's indent
+// from each line, `{{` and `}}` are one brace, a backslash stays as
+// written, a `\${…}` payload is copied byte for byte, and a hole ends one
+// part, the next starting after its `}`.
+sema_checked_text_spot_at: fn(bytes: [U8], body: Span, hole_ends: [Int], spot: SemaCheckedTextSpot) -> Span? Never! {
+    if body.end > bytes.len() || body.end - body.start < 2 || sema_checked_text_byte(bytes, body.start) != 34 -> return None
+    triple: body.end - body.start >= 6 && sema_checked_text_byte(bytes, body.start + 1) == 34 && sema_checked_text_byte(bytes, body.start + 2) == 34
+    ^content_start: body.start + 1
+    ^content_end: body.end - 1
+    ^indent: 0
+    if triple {
+        open_end: body.start + 3
+        close: body.end - 3
+        ^close_line_start: close
+        loop close_line_start > open_end && sema_checked_text_byte(bytes, close_line_start - 1) != 10 -> close_line_start -= 1
+        ^only_indent: true
+        loop at in close_line_start..<close {
+            if sema_checked_text_byte(bytes, at) != 32 && sema_checked_text_byte(bytes, at) != 9 -> only_indent = false
+        }
+        if only_indent -> indent = close - close_line_start
+        content_start = open_end
+        ^line_end: open_end
+        loop line_end < close && sema_checked_text_byte(bytes, line_end) != 10 -> line_end += 1
+        if line_end < close -> content_start = line_end + 1
+        content_end = close_line_start
+        if content_end > content_start && sema_checked_text_byte(bytes, content_end - 1) == 10 -> content_end -= 1
+        if content_end < content_start -> content_end = content_start
+    }
+    ^cursor: content_start
+    ^at_line_start: triple
+    ^part: 0
+    ^offset: 0
+    ^hole: 0
+    ^payload: 0
+    loop cursor < content_end {
+        if at_line_start {
+            ^stripped: 0
+            loop stripped < indent && cursor < content_end && (sema_checked_text_byte(bytes, cursor) == 32 || sema_checked_text_byte(bytes, cursor) == 9) {
+                cursor += 1
+                stripped += 1
+            }
+            at_line_start = false
+            if cursor >= content_end -> break
+        }
+        if part == spot.part && offset == spot.offset -> return Val(sema_checked_text_spot_char(bytes, cursor, body.end))
+        value: sema_checked_text_byte(bytes, cursor)
+        following: sema_checked_text_byte(bytes, cursor + 1)
+        ^text_width: 1
+        ^source_width: 1
+        if {
+            payload > 0 -> {
+                if value == 123 -> payload += 1
+                if value == 125 -> payload -= 1
+            }
+            value == 10 -> {
+                if triple -> at_line_start = true
+            }
+            value == 92 && (following == 34 || following == 92) -> {
+                text_width = 2
+                source_width = 2
+            }
+            (value == 123 || value == 125) && following == value -> {
+                source_width = 2
+            }
+            value == 123 && sema_checked_text_byte(bytes, cursor - 1) == 36 && sema_checked_text_byte(bytes, cursor - 2) == 92 -> {
+                payload = 1
+            }
+            value == 123 -> {
+                if hole >= hole_ends.len() -> return None
+                ^close: hole_ends[hole]
+                loop close < content_end && sema_checked_text_byte(bytes, close) != 125 -> close += 1
+                hole += 1
+                part += 1
+                offset = 0
+                cursor = close + 1
+                next
+            }
+            else -> {}
+        }
+        if part == spot.part && spot.offset > offset && spot.offset < offset + text_width {
+            return Val(sema_checked_text_spot_char(bytes, cursor + spot.offset - offset, body.end))
+        }
+        offset += text_width
+        cursor += source_width
+    }
+    if part == spot.part && offset == spot.offset -> return Val(sema_checked_text_spot_char(bytes, cursor, body.end))
+    None
+}
+
+// The one character of `bytes` at `at` as a span, no further than `end`.
+sema_checked_text_spot_char: fn(bytes: [U8], at: Int, end: Int) -> Span Never! {
+    lead: sema_checked_text_byte(bytes, at)
+    width: if {
+        lead >= 240 -> 4
+        lead >= 224 -> 3
+        lead >= 192 -> 2
+        else -> 1
+    }
+    Span{start: at, end: if at + width > end -> end else -> at + width}
+}
+
+// `accepts`, when the literal's type declares it, judges each hole while
+// building: given the slot the hole sits in (`slots[i]`, or `.Text` for a
+// text kind, whose `slots` is empty) and the TypeId of the hole's type. Each
+// call is staged through the body comptime evaluator, as the check is, at
+// the hole's own place, with the slot and the TypeId as prepared locals; a
+// reason it gives is E2715 at the hole. True when an answer refused its
+// hole. A hole whose type names a type parameter is judged by no answer
+// here.
+sema_expression_checked_text_refused: fn(type_name: String, target: SemaExpressionCheckedTextTarget, holes: [Expr], slots: [TComptimeValue], slot_type: Type?, owner_key: String, span: Span, check: ^SemaBodyCheck) -> Bool {
+    if target.accepts == None -> return false
+    graph: check.program.registration_graph
+    module_name: sema_scope_environment_module_text(check.environment.*, check.program.*)
+    caller: sema_scope_caller_row(check.environment.*, graph)
+    ^refused: false
+    loop (index, hole) in holes {
+        hole_span: expr_span(hole)
+        if sema_comptime_body_value_find(check.context, check.environment.module_identity, owner_key, hole_span, span) == .Val(landed) {
+            if landed.value == .Present(answer) && answer == .String(reason) {
+                check.diagnostics.push(sema_error("E2715", hole_span, "`{type_name}` refuses this hole's type where it sits", reason, SEMA_CHECKED_TEXT_HOLE_SLOT_FIX))
+                refused = true
+            }
+            next
+        }
+        ^probe_diagnostics: [Diagnostic]{}
+        probed: sema_probe_expression(hole, None, check, probe_diagnostics) ?? next
+        if sema_ownership_type_mentions_generic(probed.ty, check.environment.generic_params) -> next
+        owner: "{owner_key}/checked-text-accepts@{hole_span.start}"
+        mark: sema_scope_mark(check.scopes)
+        sema_scope_enter(check.scopes, check.state, owner)
+        type_id: sema_comptime_reflection_type_id(graph, check.context.type_delta, caller, probed.ty)
+        ^declared: sema_expression_checked_text_prepare(SEMA_CHECKED_TEXT_ACCEPTS_HOLE_LOCAL, Type.Named{name: "TypeId"}, type_id, owner, module_name, hole_span, check)
+        ^slot: sema_expression_checked_text_text_slot(hole_span)
+        if index < slots.len() && slot_type == .Val(ty) {
+            if !sema_expression_checked_text_prepare(SEMA_CHECKED_TEXT_ACCEPTS_SLOT_LOCAL, ty, slots[index], owner, module_name, hole_span, check) -> declared = false
+            slot = Expr.Ident{name: SEMA_CHECKED_TEXT_ACCEPTS_SLOT_LOCAL, span: hole_span, id: AST_NODE_GENERATED}
+        }
+        if declared {
+            call: Expr.MethodCall{
+                receiver: Expr.Ident{name: type_name, span: hole_span, id: AST_NODE_GENERATED},
+                method: "accepts",
+                method_span: hole_span,
+                owner_type_args: [Type]{},
+                type_args: [Type]{},
+                args: [CallArg]{sema_expression_checked_text_arg(slot, hole_span), sema_expression_checked_text_arg(Expr.Ident{name: SEMA_CHECKED_TEXT_ACCEPTS_HOLE_LOCAL, span: hole_span, id: AST_NODE_GENERATED}, hole_span)},
+                id: AST_NODE_GENERATED,
+            }
+            _: sema_comptime_body_capture(check.context, check.environment.*, check.program.*, check.scopes, "{type_name} hole accepts", call, Type.Option{inner: Type.String}, hole_span, span)
+        }
+        sema_scope_leave(check.scopes, check.state)
+        sema_scope_rollback(check.scopes, mark)
+    }
+    refused
+}
+
+// A text kind's literal: its complete text, the one part of the checked
+// `Type.check([text])`, wrapped as the nominal type.
+sema_expression_checked_text_distinct: fn(head: Type, checked: TExpr, span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaExpressionCheckedTextLiteral {
+    text: sema_expression_checked_text_part(checked) ?? {
+        check.diagnostics.push(sema_error("E0003", span, "the checked text checker call lost its complete body argument", "the staged checker evaluates the ordinary pure `CheckedText.check` method on the exact encoded body", "preserve the canonical static method call in the checked tree"))
+        return SemaExpressionCheckedTextLiteral{handled: true, value: None}
+    }
+    result: sema_tree_node(head, TExprKind.DistinctCtor{argument: text}, span)
+    SemaExpressionCheckedTextLiteral{handled: true, value: sema_expr_expected(result, expected, check.environment.*, check.program.*, check.diagnostics)}
+}
+
+// The one part of the checked `Type.check([text])`.
+sema_expression_checked_text_part: fn(checked: TExpr) -> TExpr? {
+    if checked.kind == .Call(_, _, args) {
+        if args.len() == 1 {
+            if args[0].value.kind == .List(values, _) {
+                if values.len() == 1 -> return Val(values[0])
+            }
+        }
+    }
+    None
+}
+
+// The checked `Type.check([text])` split in two: `text`, which the caller
+// binds once as `source`, and `checker`, the same call on a copy of that
+// binding, so the text and the checker each run once.
+SemaExpressionCheckedTextSplit: struct {
+    text: TExpr,
+    checker: TExpr,
+}
+
+sema_expression_checked_text_split: fn(checked: TExpr, source: TExpr, span: Span, check: ^SemaBodyCheck) -> SemaExpressionCheckedTextSplit? {
+    if checked.kind == .Call(callee, type_args, args) {
+        if args.len() == 1 {
+            if args[0].value.kind == .List(values, trait_coercion) {
+                if values.len() == 1 {
+                    copied: sema_expr_check_copy_typed(source, span, None, check.environment.*, check.program.*, check.context, check.diagnostics, false, false) ?? return None
+                    ^checker_args: args
+                    checker_args[0].value = sema_tree_node(args[0].value.ty, TExprKind.List{values: [TExpr]{copied}, trait_coercion: trait_coercion}, span)
+                    return Val(SemaExpressionCheckedTextSplit{text: values[0], checker: sema_tree_node(checked.ty, TExprKind.Call{callee: callee, type_args: type_args, args: checker_args}, span)})
+                }
+            }
+        }
+    }
+    None
+}
+
+// A built literal whose check landed: its shape and slots are read through
+// prepared locals, as a `#run` value's are, in a frame of their own, so
+// `build` receives the shape as constant data and `check` never runs with
+// the program.
+sema_expression_checked_text_prepared: fn(type_name: String, landed: SemaExpressionCheckedTextShape, types: [Type], holes: [Expr], owner_key: String, span: Span, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
+    owner: "{owner_key}/checked-text@{span.start}"
+    module_name: sema_scope_environment_module_text(check.environment.*, check.program.*)
+    mark: sema_scope_mark(check.scopes)
+    sema_scope_enter(check.scopes, check.state, owner)
+    ^declared: sema_expression_checked_text_prepare(SEMA_CHECKED_TEXT_SHAPE_LOCAL, types[0], landed.shape, owner, module_name, span, check)
+    ^slots: [Expr]{}
+    loop (index, slot) in landed.slots {
+        name: "{SEMA_CHECKED_TEXT_SLOT_LOCAL}{index}"
+        if !sema_expression_checked_text_prepare(name, types[1], slot, owner, module_name, span, check) -> declared = false
+        slots.push(Expr.Ident{name: name, span: span, id: AST_NODE_GENERATED})
+    }
+    if !declared {
+        sema_scope_leave(check.scopes, check.state)
+        return None
+    }
+    value: sema_expression_checked_text_build(type_name, Expr.Ident{name: SEMA_CHECKED_TEXT_SHAPE_LOCAL, span: span, id: AST_NODE_GENERATED}, slots, holes, span, expected, check) ?? {
+        sema_scope_leave(check.scopes, check.state)
+        return None
+    }
+    sema_single_use_leave_scope(check)
+    sema_scope_rollback(check.scopes, mark)
+    Val(value)
+}
+
+// Declares the prepared local `name: ty` holding `value` in the current frame.
+sema_expression_checked_text_prepare: fn(name: String, ty: Type, value: TComptimeValue, owner: String, module_name: String, span: Span, check: ^SemaBodyCheck) -> Bool {
+    id: sema_symbol_id(check.program.*, check.context, SymbolKind.Local, module_name, owner, name)
+    symbol: Symbol{id: id, kind: SymbolKind.Local, name: name, module_identity: check.environment.module_identity, owner: Val(owner.copy()), span: span, ty: Val(ty), visibility: 0}
+    key: sema_symbol_key(check.program.*, check.context, id)
+    if !sema_scope_declare_local(check.scopes, symbol, key, false, AccessConvention.Read, None, false) -> return false
+    last: check.scopes.bindings.len() - 1
+    sema_scope_note_binding_edit(check.scopes, last)
+    check.scopes.bindings[last].prepared = Val(value)
+    sema_ownership_declare_binding(check.state, symbol, false)
+    true
+}
+
+// A built literal in code that runs while building, and the stand-in of
+// one in run-time code until its shape lands: the check runs as the code
+// does, bound once in a frame of its own, and `build` reads its shape and
+// slots, as `c: Type.check(pieces) ?? panic(…)` then
+// `Type.build(c.shape, [Type.encode_hole(h, c.slots[i]), …])`.
+sema_expression_checked_text_inline: fn(type_name: String, check_call: Expr, holes: [Expr], span: Span, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
+    accepted: sema_expression_checked_text_stops(check_call, "{type_name}.check rejected this {type_name} literal", span)
+    binding: sema_expr_pipe_binding(SEMA_CHECKED_TEXT_CHECKED_LOCAL, accepted, span)
+    shape: Expr.Field{base: sema_expression_checked_text_checked_ref(span), member: "shape", span: span, id: AST_NODE_GENERATED}
+    slots: loop index in 0..<holes.len() -> Expr.Index{base: Expr.Field{base: sema_expression_checked_text_checked_ref(span), member: "slots", span: span, id: AST_NODE_GENERATED}, index: Expr.Int{value: index, span: span, width: None, raw: None, id: AST_NODE_GENERATED}, span: span, kind: IndexKind.Unknown, id: AST_NODE_GENERATED}
+    return_type: check.scopes.return_type
+    mark: sema_scope_mark(check.scopes)
+    sema_scope_enter(check.scopes, check.state, "checked-text@{span.start}")
+    checked_bindings: sema_check_statements([Stmt]{binding}, return_type, check, check.scopes.loop_depth)
+    if !checked_bindings.complete {
+        sema_scope_leave(check.scopes, check.state)
+        return None
+    }
+    value: sema_expression_checked_text_build(type_name, shape, slots, holes, span, expected, check) ?? {
+        sema_scope_leave(check.scopes, check.state)
+        return None
+    }
+    sema_single_use_leave_scope(check)
+    sema_scope_rollback(check.scopes, mark)
+    ^body: checked_bindings.value
+    body.push(TStmt.ExprStmt{value: value, span: span})
+    Val(sema_tree_node(value.ty, TExprKind.InlineBlock{body: body}, span))
+}
+
+sema_expression_checked_text_checked_ref: fn(span: Span) -> Expr Never! {
+    Expr.Ident{name: SEMA_CHECKED_TEXT_CHECKED_LOCAL, span: span, id: AST_NODE_GENERATED}
+}
+
+// `Type.check([part, …])`.
+sema_expression_checked_text_check_call: fn(type_name: String, parts: [Expr], span: Span) -> Expr Never! {
+    Expr.MethodCall{
+        receiver: Expr.Ident{name: type_name, span: span, id: AST_NODE_GENERATED},
+        method: "check",
+        method_span: span,
+        owner_type_args: [Type]{},
+        type_args: [Type]{},
+        args: [CallArg]{sema_expression_checked_text_parts_arg(parts, span)},
+        id: AST_NODE_GENERATED,
+    }
+}
+
+// The parts list `[part, …]` as one read argument.
+sema_expression_checked_text_parts_arg: fn(parts: [Expr], span: Span) -> CallArg Never! {
+    sema_expression_checked_text_arg(Expr.ListLit{elements: parts.copy(), span: span, id: AST_NODE_GENERATED}, span)
+}
+
+sema_expression_checked_text_arg: fn(value: Expr, span: Span) -> CallArg Never! {
+    CallArg{convention: AccessConvention.Read, expr: value.copy(), span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}
+}
+
+// One literal piece as a String part.
+sema_expression_checked_text_piece: fn(text: String, span: Span) -> Expr Never! {
+    Expr.Str{parts: [StrPart]{StrPart.Lit{text: text.copy()}}, span: span, id: AST_NODE_GENERATED}
+}
+
+// `.Text`, the one slot of a text kind's holes.
+sema_expression_checked_text_text_slot: fn(span: Span) -> Expr Never! {
+    Expr.EnumLit{type_name: "", variant: "Text", variant_span: None, args: [EnumLitArg]{}, leading_dot: true, span: span, id: AST_NODE_GENERATED}
+}
+
+// `Type.encode_hole(value, slot)` for one interpolation hole.
+sema_expression_checked_text_encoder: fn(type_name: String, value: Expr, slot: Expr) -> Expr Never! {
     span: expr_span(value)
-    ^argument: CallArg{convention: AccessConvention.Read, expr: value.copy(), span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}
     Expr.MethodCall{
         receiver: Expr.Ident{name: type_name, span: span, id: AST_NODE_GENERATED},
         method: "encode_hole",
         method_span: span,
         owner_type_args: [Type]{},
         type_args: [Type]{},
-        args: [CallArg]{argument},
+        args: [CallArg]{sema_expression_checked_text_arg(value, span), sema_expression_checked_text_arg(slot, span)},
         id: AST_NODE_GENERATED,
     }
 }
@@ -2180,7 +2748,7 @@ sema_expression_checked_text_encoder: fn(type_name: String, value: Expr) -> Expr
 // `call ?? panic(message)`: a built checked text literal is a value and adds
 // no failure route to the function it is in. `encode_hole` and `build` are
 // written `-[]> T`, the default failure route, and `check` has already
-// accepted the text, so a failure of either stops the program at the
+// accepted the pieces, so a failure of either stops the program at the
 // literal, as a rejected run-time check does.
 sema_expression_checked_text_stops: fn(call: Expr, message: String, span: Span) -> Expr Never! {
     text: Expr.Str{parts: [StrPart]{StrPart.Lit{text: message}}, span: span, id: AST_NODE_GENERATED}
@@ -2189,36 +2757,19 @@ sema_expression_checked_text_stops: fn(call: Expr, message: String, span: Span) 
     Expr.OrFallback{value: call, fallback: OrFallback.Value{value: stop}, is_option: false, span: span, id: AST_NODE_GENERATED}
 }
 
-// A literal of a type with `build` is `Type.build(parts, holes)`: the literal
-// pieces around the holes, and each hole as `Type.encode_hole(value)`, so a
-// hole reaches the value as the type's `Hole`, never as spliced text.
-sema_expression_checked_text_build: fn(type_name: String, parts: [StrPart], span: Span, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
-    ^literal_exprs: [Expr]{}
-    ^hole_exprs: [Expr]{}
-    ^current: ""
-    loop part in parts {
-        if part == {
-            .Lit(text) -> { current = "{current}{text}" }
-            .Byte(value) -> { current = "{current}{sema_expr_byte_text(value)}" }
-            .Interp(value, _) -> {
-                literal_exprs.push(Expr.Str{parts: [StrPart]{StrPart.Lit{text: current}}, span: span, id: AST_NODE_GENERATED})
-                current = ""
-                hole_exprs.push(sema_expression_checked_text_stops(sema_expression_checked_text_encoder(type_name, value), "{type_name}.encode_hole failed on a hole of this {type_name} literal", expr_span(value)))
-            }
-        }
-    }
-    literal_exprs.push(Expr.Str{parts: [StrPart]{StrPart.Lit{text: current}}, span: span, id: AST_NODE_GENERATED})
-    ^args: [CallArg]{}
-    loop elements in ([[Expr]]{literal_exprs, hole_exprs}) {
-        args.push(CallArg{convention: AccessConvention.Read, expr: Expr.ListLit{elements: elements, span: span, id: AST_NODE_GENERATED}, span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false})
-    }
+// A literal of a type with `build` is `Type.build(shape, holes)`: the shape
+// `check` learned from the literal's pieces, and each hole as
+// `Type.encode_hole(value, slot)` for its slot, so a hole reaches the value
+// as the type's `Hole`, never as spliced text.
+sema_expression_checked_text_build: fn(type_name: String, shape: Expr, slots: [Expr], holes: [Expr], span: Span, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
+    hole_exprs: loop index in 0..<holes.len() -> sema_expression_checked_text_stops(sema_expression_checked_text_encoder(type_name, holes[index], slots[index]), "{type_name}.encode_hole failed on a hole of this {type_name} literal", expr_span(holes[index]))
     build_call: Expr.MethodCall{
         receiver: Expr.Ident{name: type_name, span: span, id: AST_NODE_GENERATED},
         method: "build",
         method_span: span,
         owner_type_args: [Type]{},
         type_args: [Type]{},
-        args: args,
+        args: [CallArg]{sema_expression_checked_text_arg(shape, span), sema_expression_checked_text_arg(Expr.ListLit{elements: hole_exprs, span: span, id: AST_NODE_GENERATED}, span)},
         id: AST_NODE_GENERATED,
     }
     built: sema_expression_checked_text_stops(build_call, "{type_name}.build failed on this {type_name} literal", span)
@@ -2253,8 +2804,8 @@ sema_expression_checked_text_constant: fn(value: Expr, scopes: SemaScopeTable) -
 // A checked text literal with a run-time hole: the encoded complete text is
 // bound once, the type's ordinary `check` runs on it, and a rejection stops
 // the program at the literal (E3001), so every value of the type passed its
-// checker. The checker call is `checked`, the static `Type.check(text)`.
-sema_expression_checked_text_runtime: fn(head: Type, head_name: String, checked: TExpr, span: Span, check: SemaBodyCheck) -> TExpr? {
+// checker. The checker call is `checked`, the static `Type.check([text])`.
+sema_expression_checked_text_runtime: fn(head: Type, head_name: String, checked: TExpr, span: Span, check: ^SemaBodyCheck) -> TExpr? {
     accepted_type: if checked.ty == {
         .Result(ok, _) -> ok
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {
@@ -2263,27 +2814,16 @@ sema_expression_checked_text_runtime: fn(head: Type, head_name: String, checked:
     }
     source_local: checked_generated_local("__checked_text_source_{span.start}", span, Type.String)
     source_value: sema_tree_node(Type.String, TExprKind.Local{local: source_local}, span)
-    ^original: TExpr?{None}
-    ^checker_call: TExpr?{None}
-    if checked.kind == .Call(callee, type_args, args) {
-        if args.len() == 1 {
-            original = Val(args[0].value)
-            ^checker_args: args
-            checker_args[0].value = source_value
-            checker_call = Val(sema_tree_node(checked.ty, TExprKind.Call{callee: callee, type_args: type_args, args: checker_args}, span))
-        }
-    }
-    source_init: original ?? return None
-    checker: checker_call ?? return None
+    split: sema_expression_checked_text_split(checked, source_value, span, check) ?? return None
     message: sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: "{head_name}.check rejected the complete text of this {head_name} literal"}}}, span)
     fallback: TOrFallback.Panic{message: message, location: sema_expression_panic_location(check.environment.*, check.program.*, check.scopes, span)}
-    accepted: sema_tree_node(accepted_type, TExprKind.OrFallback{value: checker, fallback: fallback, ambient_err: None}, span)
+    accepted: sema_tree_node(accepted_type, TExprKind.OrFallback{value: split.checker, fallback: fallback, ambient_err: None}, span)
     wrapped: sema_tree_node(head, TExprKind.DistinctCtor{argument: sema_tree_node(Type.String, TExprKind.Move{value: source_value}, span)}, span)
     Val(sema_tree_node(
         head,
         TExprKind.InlineBlock{
             body: [TStmt]{
-                TStmt.Let{local: source_local, let_ty: TLetTy.Annotated{ty: Type.String, wrapper: TLetWrapper.Plain}, init: source_init, gc_promotion: None, gc_transferred: false, span: span},
+                TStmt.Let{local: source_local, let_ty: TLetTy.Annotated{ty: Type.String, wrapper: TLetWrapper.Plain}, init: split.text, gc_promotion: None, gc_transferred: false, span: span},
                 TStmt.ExprStmt{value: accepted, span: span},
                 TStmt.ExprStmt{value: wrapped, span: span},
             },

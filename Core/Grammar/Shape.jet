@@ -5,11 +5,12 @@
 // a parser rule used once without one; groups are flattened, `x?` makes a
 // field optional, a repeat or `+=` makes it a list, and a labeled optional
 // literal is a `Bool`. A field set twice, or holding two types, is
-// refused, as is a rule no finite parse can build.
+// refused, as is a rule no finite parse can build. Each token kind also
+// gets the case name it has in the generated token-kind enum.
 use {
     core.grammar.error.[grammar_fault]
     core.grammar.plan.[GrammarCase, GrammarField, GrammarFieldKind, GrammarShape]
-    __core_grammar_analyze.[GrammarWork, pascal_name]
+    __core_grammar_analyze.[GrammarWork, is_digit, is_lower, is_upper, pascal_name]
 }
 
 /// How a field is reached: plainly, under `?` or a group alternative, or
@@ -260,4 +261,143 @@ plan_shapes: fn(work: ^GrammarWork) -> [GrammarShape] Never! {
         shapes.push(rule_shape(work, r))
     }
     shapes
+}
+
+/// `name` in TitleCase, as a generated case names it: `KEY` and `key` are
+/// `Key`, `QUOTED_ID` is `QuotedId`.
+title_name: fn(name: String) -> String Never! {
+    ^lower: [U8]{}
+    loop b in name.bytes() {
+        c: Int{b}
+        if is_upper(c) -> lower.push(U8{c + 32}) else -> lower.push(b)
+    }
+    pascal_name(String.from_bytes(lower) ?? name.copy())
+}
+
+/// The case-name word of one byte of a literal that is no letter, digit or
+/// `_`: a sign's name, "" for a space, and `X` with the byte in hex for any
+/// other.
+sign_name: fn(c: Int) -> String Never! {
+    if c == {
+        9 -> "Tab"
+        10 -> "Newline"
+        13 -> "Return"
+        32 -> ""
+        33 -> "Bang"
+        34 -> "Quote"
+        35 -> "Hash"
+        36 -> "Dollar"
+        37 -> "Percent"
+        38 -> "Amp"
+        39 -> "Apostrophe"
+        40 -> "LeftParen"
+        41 -> "RightParen"
+        42 -> "Star"
+        43 -> "Plus"
+        44 -> "Comma"
+        45 -> "Minus"
+        46 -> "Dot"
+        47 -> "Slash"
+        58 -> "Colon"
+        59 -> "Semicolon"
+        60 -> "Less"
+        61 -> "Equals"
+        62 -> "Greater"
+        63 -> "Question"
+        64 -> "At"
+        91 -> "LeftBracket"
+        92 -> "Backslash"
+        93 -> "RightBracket"
+        94 -> "Caret"
+        96 -> "Backtick"
+        123 -> "LeftBrace"
+        124 -> "Pipe"
+        125 -> "RightBrace"
+        126 -> "Tilde"
+        else -> {
+            ^hex: [U8]{U8{88}}
+            loop d in [c >> 4, c & 15] {
+                if d < 10 -> hex.push(U8{48 + d}) else -> hex.push(U8{55 + d})
+            }
+            String.from_bytes(hex) ?? "X"
+        }
+    }
+}
+
+/// A literal's case name: each run of letters, digits and `_` in
+/// TitleCase (a run of `_` alone is `Underscore`), and each other byte by
+/// `sign_name` (`'<='` is `LessEquals`, `'IS NOT'i` is `IsNot`). A literal
+/// of spaces is `Space`, and a name that would start with a digit starts
+/// with `Literal`.
+literal_case: fn(text: String) -> String Never! {
+    ^out: ""
+    ^word: [U8]{}
+    // A space past the end closes the last word.
+    ^bytes: text.bytes()
+    bytes.push(U8{32})
+    loop b in bytes {
+        c: Int{b}
+        if is_lower(c) || is_upper(c) || is_digit(c) || c == 95 {
+            word.push(b)
+            next
+        }
+        if word.len() > 0 {
+            piece: title_name(String.from_bytes(word) ?? "")
+            if piece == "" -> out = "{out}Underscore" else -> out = "{out}{piece}"
+            word = [U8]{}
+        }
+        out = "{out}{sign_name(c)}"
+    }
+    if out == "" -> return "Space"
+    if is_digit(Int{out.bytes()[0]}) -> return "Literal{out}"
+    out
+}
+
+/// Where token kind `k` is written: its token rule, or the first literal
+/// or hole of that kind.
+kind_at: fn(work: GrammarWork, k: Int) -> Int Never! {
+    rule: work.tokens[k].rule
+    if rule >= 0 -> return work.tree.rules[rule].at
+    loop node in work.tree.nodes {
+        if node.token == k -> return node.at
+    }
+    0
+}
+
+/// The case each token kind has in the generated token-kind enum, in kind
+/// order: `Eof` for the end of the input, a token rule's name in TitleCase
+/// (`QUOTED_ID` is `QuotedId`), `Hole` and the slot for a hole
+/// (`HoleValue`), and a literal by `literal_case`. A kind whose name an
+/// earlier kind has takes the first free number after it (`'select'i` and
+/// `'SELECT'` are `Select` and `Select2`). A kind named as a rule's type is
+/// refused.
+plan_kind_names: fn(work: ^GrammarWork, shapes: [GrammarShape]) -> [String] Never! {
+    ^types: [String:Int]{}
+    loop (s, shape) in shapes -> _: types.add(shape.name.copy(), s)
+    ^seen: [String:Int]{}
+    ^names: [String]{}
+    loop (k, token) in work.tokens {
+        ^name: "Eof"
+        if token.rule >= 0 {
+            name = title_name(work.tree.rules[token.rule].name)
+        } else if token.hole != "" {
+            name = "Hole{pascal_name(token.hole)}"
+        } else if k > 0 {
+            name = literal_case(token.text)
+        }
+        if (seen.get(name) ?? -1) >= 0 {
+            ^n: 2
+            loop 0 <= (seen.get("{name}{n}") ?? -1) {
+                n += 1
+            }
+            name = "{name}{n}"
+        }
+        _: seen.add(name.copy(), k)
+        shape: types.get(name) ?? -1
+        if shape >= 0 {
+            work.faults.push(grammar_fault(.FieldShape, kind_at(work, k), "the token {token.name} and the rule `{work.tree.rules[shapes[shape].rule].name}` would both be named `{name}`", "Rename the token rule or the parser rule"))
+        }
+        names.push(name)
+    }
+    names
 }

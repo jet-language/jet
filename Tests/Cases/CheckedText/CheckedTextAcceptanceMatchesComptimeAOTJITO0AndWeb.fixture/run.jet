@@ -8,12 +8,13 @@ Pattern: distinct String
 impl Pattern.CheckedText {
     Error: TextError,
 
-    check: fn(text: String) -[]> TextError! {
-        if text == "hello [1]" || text == "ok" -> return Ok()
+    check: fn(parts: [String]) -[]> Checked<[String], TextSlot> TextError! {
+        text: parts.join("")
+        if text == "hello [1]" || text == "ok" -> return Ok(Checked{shape: parts.copy(), slots: [TextSlot]{}})
         return Err(TextError.Bad)
     }
 
-    encode_hole: fn<T: Printable>(value: T) -[]> String { return "[1]" }
+    encode_hole: fn<T: Printable>(value: T, _slot: TextSlot) -[]> String { return "[1]" }
 }
 
 accepts: fn(text: String) -[]> Bool {

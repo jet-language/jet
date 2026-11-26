@@ -6,11 +6,6 @@ mkdir: env
 mkdir: pkg
 mkdir: stale
 mkdir: duplicate
-mkdir: hosts
-mkdir: unknown
-mkdir: stale-hosts
-mkdir: ambiguous
-mkdir: invalid
 step: jet split env --check
 cwd: env
 exit: 0
@@ -59,38 +54,4 @@ exit: 1
 stderr: ~ "Member Package name `app` is declared more than once" # original contains predicate, in the sentence-case headline
 file: duplicate/package.jet = package_transition_cli_covers_split_fold_init_restore_and_failures.duplicate.expected
 file: duplicate/packages/app/package.jet absent
-step: jet split hosts server
-cwd: hosts
-exit: 0
-file: hosts/package/fleet.jet is-file
-step: jet fold package/fleet.jet
-cwd: hosts
-exit: 0
-step: jet split hosts missing
-cwd: unknown
-exit: 1
-stderr: ~ "outputs.missing" # original contains predicate
-file: unknown/package/fleet.jet absent
-step: jet split hosts server
-cwd: stale-hosts
-exit: 0
-append: stale-hosts/package/fleet.jet "// changed after the plan\n"
-step: jet fold package/fleet.jet
-cwd: stale-hosts
-exit: 1
-stderr: ~ "stale transition" # original contains predicate
-step: jet split hosts server
-cwd: ambiguous
-exit: 0
-capture: journal = first-entry ambiguous/.jet/package-transition
-copy: {cap:journal} ambiguous/.jet/package-transition/duplicate-journal
-step: jet fold package/fleet.jet
-cwd: ambiguous
-exit: 1
-stderr: ~ "found 2" # original contains predicate
-step: jet split hosts server/name
-cwd: invalid
-exit: 1
-stderr: ~ "Jet.InvalidPackageManifest" # original contains predicate
-file: invalid/package/fleet.jet absent
 

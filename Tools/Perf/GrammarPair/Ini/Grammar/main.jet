@@ -1,0 +1,138 @@
+// The grammar arm of the ini grammar pair (Tools/Perf/GrammarPair.jet): the
+// pair's corpus read N times through a `Grammar` literal, then folded into
+// core.encoding.ini's `Ini` by the steps its hand-written `parse` takes: a
+// header makes its section if it is new, an entry sets its key in the
+// current section (DEFAULT before the first header), a value is trimmed and a
+// quoted one unquoted. Hand/main.jet runs that `parse`, and both print the
+// same digest.
+use {
+    core.grammar.[Grammar]
+    files: core.files
+    ini: core.encoding.ini
+}
+
+Document: Grammar{"""
+    document : lines+=line (EOL lines+=line)* ;
+    line     : section | entry | blank ;
+    section  : '[' name=KEY ']' ;
+    entry    : name=KEY SEP value? ;
+    blank    : ;
+    value    : text=QUOTED   # Quoted
+             | text=BARE     # Bare
+             ;
+    KEY      : [A-Za-z0-9_.\-]+ ;
+    SEP      : '=' | ':' ;
+    QUOTED   : '"' ([^"\\\r\n] | '\\' .)* '"' | '\'' [^'\r\n]* '\'' ;
+    BARE     : [^ \t\r\n;#"'] [^\r\n;#]* ;
+    EOL      : '\r'? '\n' ;
+    WS       : [ \t]+ -> skip ;
+    COMMENT  : [;#] [^\r\n]* -> skip ;
+"""}
+
+#CLI
+Args: struct {
+    corpus: String,
+    n: Int,
+}
+
+// copy: Core/Encoding/Ini.jet `ensure_section`, which the module keeps
+// private.
+ensure_section: fn(doc: ini.Ini, name: String) -> ini.Ini {
+    if ini.has_section(doc, name) -> return doc.copy()
+    ^sections: [ini.Section]{}
+    loop s in doc.sections -> sections.push(s.copy())
+    sections.push(ini.Section{name: name, pairs: [ini.Pair]{}})
+    ini.Ini{sections: sections}
+}
+
+// A bare value ends at a comment or the line's end, so only its end can hold
+// the spaces and tabs the hand reader trims.
+trim_end: fn(text: String) -> String {
+    raw: text.bytes()
+    ^end: raw.len()
+    loop end > 0 && (raw[end - 1] == (U8{32}) || raw[end - 1] == (U8{9})) {
+        end -= 1
+    }
+    String.from_bytes(raw.slice(0, end)) ?? ""
+}
+
+// The hand reader's unquote: the quotes go, and inside them `\n`, `\r` and
+// `\t` are their characters and a backslash before any other byte is that
+// byte.
+unquote: fn(text: String) -> String {
+    raw: text.bytes()
+    ^body: [U8]{}
+    ^at: 1
+    loop at < raw.len() - 1 {
+        if raw[at] == (U8{92}) && at + 1 < raw.len() - 1 {
+            at += 1
+            body.push(if {
+                raw[at] == (U8{110}) -> U8{10}
+                raw[at] == (U8{114}) -> U8{13}
+                raw[at] == (U8{116}) -> U8{9}
+                else -> raw[at]
+            })
+        } else {
+            body.push(raw[at])
+        }
+        at += 1
+    }
+    String.from_bytes(body) ?? text.copy()
+}
+
+value_of: fn(value: Value?) -> String {
+    held: value ?? return ""
+    if held == {
+        .Quoted(text) -> unquote(text)
+        .Bare(text) -> trim_end(text)
+    }
+}
+
+read: fn(text: String) -> ini.Ini {
+    document: Document.parse(text) ?? panic("the corpus does not parse: {err}")
+    ^doc: ini.empty()
+    ^current: "DEFAULT"
+    loop line in document.lines {
+        if line == {
+            .Section(section) -> {
+                current = section.name.copy()
+                doc = ensure_section(doc, current)
+            }
+            .Entry(entry) -> doc = ini.set(doc, current, entry.name, value_of(entry.value))
+            .Blank(_) -> {}
+        }
+    }
+    doc
+}
+
+// copy: Hand/main.jet `mix` and `digest`.
+mix: fn(hash: Int, text: String) -> Int {
+    ^h: hash
+    loop b in text.bytes() -> h = (h * 31 + Int{b}) %% 4294967296
+    (h * 31 + 256) %% 4294967296
+}
+
+digest: fn(doc: ini.Ini) -> String {
+    ^pairs: 0
+    ^hash: 7
+    loop section in doc.sections {
+        hash = mix(hash, section.name)
+        loop pair in section.pairs {
+            pairs += 1
+            hash = mix(mix(hash, pair.key), pair.value)
+        }
+    }
+    "sections {doc.sections.len()} pairs {pairs} hash {hash}"
+}
+
+// copy: Hand/main.jet `run`, with `read` for `ini.parse`.
+run: fn(args: Args) {
+    text: files.read(args.corpus) ?? panic("{args.corpus}: {err}")
+    first: read(text)
+    ^sections: first.sections.len()
+    loop _ in 1..<args.n {
+        sections += read(text).sections.len()
+    }
+    if sections != first.sections.len() * args.n -> panic("a parse read another document")
+    print(digest(first))
+}

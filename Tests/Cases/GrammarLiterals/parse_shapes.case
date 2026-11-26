@@ -1,0 +1,17 @@
+# A grammar's types parse text: sequences, choices, an optional flag, repeats
+# of zero or more and one or more, list labels and the end of input, each
+# through the decision the plan computed. A keyword stays a name where no
+# keyword may stand. The first error is reported at its line and column, and
+# nesting past the depth bound is an error, not a crash, at every tier.
+fixture: ParseShapes.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 0
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = "[]\n[let x = #5 | show! x, -#3, +#4 | do [let letter = y; show letter]]\n[do [do [show end]]]\nerror 1:5: expected NAME, found \"=\"\n[let end = #1]\nerror 1:7: expected \";\" or \",\", found end of input\nerror 1:9: expected end of input, \"let\", \"show\" or \"do\", found \";\"\nerror 1:14997: unexpected nesting deeper than 10000 rules\nerror 1:8: expected \";\" or \",\", found \"2\"\n"
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: == o0

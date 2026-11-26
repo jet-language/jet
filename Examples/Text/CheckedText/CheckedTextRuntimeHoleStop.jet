@@ -11,13 +11,14 @@ Token: distinct String
 impl Token.CheckedText {
     Error: TokenError,
 
-    check: fn(text: String) -[]> TokenError! {
+    check: fn(parts: [String]) -[]> Checked<[String], TextSlot> TokenError! {
+        text: parts.join("")
         if text == "" -> return Err(TokenError.Empty)
         if text.len() > 10 -> return Err(TokenError.TooLong)
-        return Ok()
+        Ok(Checked{shape: parts.copy(), slots: [TextSlot]{}})
     }
 
-    encode_hole: fn<T: Printable>(value: T) -[]> String { return "[{value}]" }
+    encode_hole: fn<T: Printable>(value: T, _slot: TextSlot) -[]> String { return "[{value}]" }
 }
 
 show: fn(value: Token) {

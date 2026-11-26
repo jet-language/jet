@@ -25,13 +25,13 @@ Token: distinct String
 impl Token.CheckedText {
     Error: TokenError,
 
-    check: fn(text: String) TokenError! {
-        if text == "" -> return Err(TokenError.Empty)
-        if text.len() > 20 -> return Err(TokenError.TooLong)
-        return Ok()
+    check: fn(parts: [String]) -> Checked<[String], TextSlot> TokenError! {
+        if parts.join("") == "" -> return Err(TokenError.Empty)
+        if parts.join("").len() > 20 -> return Err(TokenError.TooLong)
+        return Ok(Checked{shape: parts.copy(), slots: [TextSlot]{}})
     }
 
-    encode_hole: fn<T: Printable>(value: T) -> String { return "[{value}]" }
+    encode_hole: fn<T: Printable>(value: T, _slot: TextSlot) -> String { return "[{value}]" }
 }
 
 reveal: fn(value: Token) {

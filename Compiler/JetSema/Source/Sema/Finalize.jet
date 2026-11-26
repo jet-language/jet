@@ -870,7 +870,6 @@ sema_finalize_program: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail
     if trace_sink == .Val(sink) -> sink.begin("sema.facts", "", -1, -1)
     keep_flat_calls: final_graph.retain_programs || held.build_names
     ^call_facts: [SemaCallSiteFact]{}
-    ^hardware_use: sema_hardware_empty_use()
     ^comptime_requests: [SemaComptimeRequest]{}
     ^comptime_body_sources: [SemaComptimeBodySource]{}
     ^compute_facts: [SemaComputeFunctionFacts]{}
@@ -879,7 +878,6 @@ sema_finalize_program: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail
         if keep_flat_calls {
             loop fact in module_result.call_facts -> call_facts.push(fact.copy())
         }
-        sema_hardware_use_merge(hardware_use, sema_hardware_use_snapshot(module_result.hardware_use))
         loop request in module_result.comptime_requests -> comptime_requests.push(request.copy())
         loop source in module_result.comptime_body_sources {
             comptime_body_sources.push(source.copy())
@@ -973,7 +971,7 @@ sema_finalize_program: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail
     }
     // The Core library encodes the captures (sema_core_bodies_bytes) beside
     // its IR build, not here on the finalization's thread.
-    if final_graph.core_seal -> sema_core_derive_bodies(final_graph, core_bodies)
+    if final_graph.core_seal -> sema_core_module_bodies(final_graph, core_bodies)
     captures: if final_graph.core_seal -> SemaCoreCaptures{bodies: core_bodies.move(), context: sema_core_bodies_context(final_graph)} else -> SemaCoreCaptures{bodies: [SemaCoreBody]{}, context: ""}
     eval_answers: sema_eval_probe_answers(modules)
     result: SemaGraphResult{
@@ -984,7 +982,6 @@ sema_finalize_program: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail
         package_policies: stage.package_policies,
         core_usage: core_usage,
         call_facts: call_facts,
-        hardware_use: hardware_use,
         comptime_requests: comptime_requests,
         comptime_body_sources: comptime_body_sources,
         compute_facts: compute_facts,

@@ -1,5 +1,6 @@
 // GrammarError: its line:column display and the code-point column count.
-use core.grammar.error.[GrammarError, grammar_error_at, text_place]
+// GrammarReport: one case per fault kind, carrying the fault whole.
+use core.grammar.error.[GrammarError, GrammarFault, GrammarFaultKind, TextSpot, grammar_error_at, grammar_report, text_place]
 
 #Test("an error shows line:column, what was expected and what was found") {
     error: GrammarError{line: 3, column: 14, offset: 40, expected: ["\"]\""], found: "end of line"}
@@ -47,4 +48,19 @@ use core.grammar.error.[GrammarError, grammar_error_at, text_place]
     assert_eq(error.column, 5)
     assert_eq(error.offset, 8)
     assert_eq("{error}", "2:5: expected \";\", found \"three\"")
+}
+
+#Test("a fault reports under its kind's case and keeps its spot and texts") {
+    kinds: [GrammarFaultKind]{.Notation, .UndefinedRule, .StartRule, .LeftRecursive, .Ambiguous, .TooComplex, .EmptyRepeat, .TokenClash, .FieldShape, .Unprintable}
+    loop kind in kinds {
+        fault: GrammarFault{kind: kind, at: TextSpot{part: 1, offset: 7}, message: "what went wrong", fix: "what to do"}
+        back: grammar_report(fault).fault()
+        assert_eq(back.kind, kind)
+        assert_eq(back.at.part, 1)
+        assert_eq(back.at.offset, 7)
+        assert_eq(back.message, "what went wrong")
+        assert_eq(back.fix, "what to do")
+    }
+    left: grammar_report(GrammarFault{kind: .LeftRecursive, at: TextSpot{part: 0, offset: 0}, message: "m", fix: "f"})
+    if left == .LeftRecursive(found) -> assert_eq(found.remedy, "f") else -> panic("a left recursion reported under another case")
 }

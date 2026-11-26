@@ -737,11 +737,23 @@ totime: fn(dt: DateTime) -> LocalTime Never! { time_of(dt) }
 }
 
 // Civil carriers own their validation and arithmetic here, not in an emitter.
+// A refused `DateTime{…}` literal reports its error under the checked text
+// rejection's code with this reason as its Why.
 #Error
 TimeError: struct {
     reason: String,
 
     new: fn(reason: String) -> TimeError Never! { TimeError{reason: reason} }
+
+    impl Diagnostic {
+        code: "E2712",
+
+        what: fn(self) -> String { "this checked text type rejected its body" }
+
+        why: fn(self) -> String { "{self.reason}" }
+
+        fix: fn(self) -> String { "fix the body so it satisfies the type's declared text grammar" }
+    }
 }
 
 LocalDate: struct {
@@ -1195,15 +1207,15 @@ DateTime: struct {
         Error: TimeError,
         Hole: String,
 
-        check: fn(text: String) -[]> TimeError! {
-            if text.contains("{{}}") {
+        check: fn(parts: [String]) -[]> Checked<[String], TextSlot> TimeError! {
+            if parts.len() > 1 {
                 return Err(TimeError{reason: "a `DateTime` literal cannot contain interpolation"})
             }
-            _: parse_rfc3339(text)
-            return Ok()
+            _: parse_rfc3339(parts.join(""))
+            Ok(Checked{shape: parts.copy(), slots: [TextSlot]{}})
         }
 
-        encode_hole: fn<T: Printable>(value: T) -[]> String { "{value}" }
+        encode_hole: fn<T: Printable>(value: T, _slot: TextSlot) -[]> String { "{value}" }
 
         build: fn(parts: [String], _holes: [String]) -[]> DateTime {
             parse_rfc3339(parts.join("")) ?? panic("a checked DateTime literal became invalid")

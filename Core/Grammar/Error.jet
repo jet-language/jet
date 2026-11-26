@@ -8,7 +8,9 @@
 // succeeds never counts lines.
 //
 // `GrammarFault` is the build-time refusal of a grammar literal: what is wrong
-// with the grammar itself, at a `TextSpot` of the literal, with the fix.
+// with the grammar itself, at a `TextSpot` of the literal, with the fix. The
+// build reports it as a `GrammarReport`, whose case for each kind is a type
+// with that kind's own diagnostic code.
 
 /// A spot in a checked literal: the body part it is in (0 for the first
 /// part) and the byte offset inside that part.
@@ -166,4 +168,234 @@ grammar_faults: fn(faults: [GrammarFault]) -> GrammarFaults Never! {
 fault_after: fn(a: GrammarFault, b: GrammarFault) -> Bool Never! {
     if a.at.part != b.at.part -> return a.at.part > b.at.part
     a.at.offset > b.at.offset
+}
+
+/// A grammar fault as the build reports it: one case per kind, each
+/// reported under that kind's own diagnostic code. A grammar literal's check
+/// fails with these; `grammar_report` builds one from a `GrammarFault`.
+#Error
+GrammarReport: enum {
+    Notation(NotationFault),
+    UndefinedRule(UndefinedRuleFault),
+    StartRule(StartRuleFault),
+    LeftRecursive(LeftRecursiveFault),
+    Ambiguous(AmbiguousFault),
+    TooComplex(TooComplexFault),
+    EmptyRepeat(EmptyRepeatFault),
+    TokenClash(TokenClashFault),
+    FieldShape(FieldShapeFault),
+    Unprintable(UnprintableFault),
+
+    /// The fault this reports.
+    fault: fn(self) -> GrammarFault Never! {
+        if self == {
+            .Notation(found) -> reported_fault(.Notation, found.at, found.message, found.remedy)
+            .UndefinedRule(found) -> reported_fault(.UndefinedRule, found.at, found.message, found.remedy)
+            .StartRule(found) -> reported_fault(.StartRule, found.at, found.message, found.remedy)
+            .LeftRecursive(found) -> reported_fault(.LeftRecursive, found.at, found.message, found.remedy)
+            .Ambiguous(found) -> reported_fault(.Ambiguous, found.at, found.message, found.remedy)
+            .TooComplex(found) -> reported_fault(.TooComplex, found.at, found.message, found.remedy)
+            .EmptyRepeat(found) -> reported_fault(.EmptyRepeat, found.at, found.message, found.remedy)
+            .TokenClash(found) -> reported_fault(.TokenClash, found.at, found.message, found.remedy)
+            .FieldShape(found) -> reported_fault(.FieldShape, found.at, found.message, found.remedy)
+            .Unprintable(found) -> reported_fault(.Unprintable, found.at, found.message, found.remedy)
+        }
+    }
+}
+
+priv reported_fault: fn(kind: GrammarFaultKind, at: TextSpot, message: String, remedy: String) -> GrammarFault Never! {
+    GrammarFault{kind: kind, at: TextSpot{part: at.part, offset: at.offset}, message: message.copy(), fix: remedy.copy()}
+}
+
+/// The report of `fault`, under its kind's code.
+grammar_report: fn(fault: GrammarFault) -> GrammarReport Never! {
+    at: TextSpot{part: fault.at.part, offset: fault.at.offset}
+    message: fault.message.copy()
+    remedy: fault.fix.copy()
+    if fault.kind == {
+        .Notation -> GrammarReport.Notation(NotationFault{at: at, message: message, remedy: remedy})
+        .UndefinedRule -> GrammarReport.UndefinedRule(UndefinedRuleFault{at: at, message: message, remedy: remedy})
+        .StartRule -> GrammarReport.StartRule(StartRuleFault{at: at, message: message, remedy: remedy})
+        .LeftRecursive -> GrammarReport.LeftRecursive(LeftRecursiveFault{at: at, message: message, remedy: remedy})
+        .Ambiguous -> GrammarReport.Ambiguous(AmbiguousFault{at: at, message: message, remedy: remedy})
+        .TooComplex -> GrammarReport.TooComplex(TooComplexFault{at: at, message: message, remedy: remedy})
+        .EmptyRepeat -> GrammarReport.EmptyRepeat(EmptyRepeatFault{at: at, message: message, remedy: remedy})
+        .TokenClash -> GrammarReport.TokenClash(TokenClashFault{at: at, message: message, remedy: remedy})
+        .FieldShape -> GrammarReport.FieldShape(FieldShapeFault{at: at, message: message, remedy: remedy})
+        .Unprintable -> GrammarReport.Unprintable(UnprintableFault{at: at, message: message, remedy: remedy})
+    }
+}
+
+// One type per fault kind, each a registered diagnostic (Jet.Grammar<Kind>):
+// its What is the fault's message, its Fix the fault's remedy, and its Why
+// the reason grammars of that kind are refused.
+
+/// A `.Notation` fault as the build reports it.
+NotationFault: struct {
+    at: TextSpot,
+    message: String,
+    remedy: String,
+
+    impl Diagnostic {
+        code: "E2716",
+
+        what: fn(self) -> String { "{self.message}" }
+
+        why: fn(self) -> String { "a grammar literal is rules in the form `name : alternatives ;`, read like ANTLR 4 notation, and this text breaks that form" }
+
+        fix: fn(self) -> String { "{self.remedy}" }
+    }
+}
+
+/// An `.UndefinedRule` fault as the build reports it.
+UndefinedRuleFault: struct {
+    at: TextSpot,
+    message: String,
+    remedy: String,
+
+    impl Diagnostic {
+        code: "E2717",
+
+        what: fn(self) -> String { "{self.message}" }
+
+        why: fn(self) -> String { "each name an alternative uses must be a rule the parser can take, defined in this grammar or in a grammar it imports" }
+
+        fix: fn(self) -> String { "{self.remedy}" }
+    }
+}
+
+/// A `.StartRule` fault as the build reports it.
+StartRuleFault: struct {
+    at: TextSpot,
+    message: String,
+    remedy: String,
+
+    impl Diagnostic {
+        code: "E2718",
+
+        what: fn(self) -> String { "{self.message}" }
+
+        why: fn(self) -> String { "the binding's name picks the rule a parse starts from: the rule whose name in PascalCase it is" }
+
+        fix: fn(self) -> String { "{self.remedy}" }
+    }
+}
+
+/// A `.LeftRecursive` fault as the build reports it.
+LeftRecursiveFault: struct {
+    at: TextSpot,
+    message: String,
+    remedy: String,
+
+    impl Diagnostic {
+        code: "E2719",
+
+        what: fn(self) -> String { "{self.message}" }
+
+        why: fn(self) -> String { "a generated parser reads from the left, so a rule that can begin with itself would call itself forever; only a rule's own operator alternatives may begin with it" }
+
+        fix: fn(self) -> String { "{self.remedy}" }
+    }
+}
+
+/// An `.Ambiguous` fault as the build reports it.
+AmbiguousFault: struct {
+    at: TextSpot,
+    message: String,
+    remedy: String,
+
+    impl Diagnostic {
+        code: "E2720",
+
+        what: fn(self) -> String { "{self.message}" }
+
+        why: fn(self) -> String { "a generated parser picks a way by the next three tokens at most, with no backtracking, so two ways that can begin alike leave it no choice" }
+
+        fix: fn(self) -> String { "{self.remedy}" }
+    }
+}
+
+/// A `.TooComplex` fault as the build reports it.
+TooComplexFault: struct {
+    at: TextSpot,
+    message: String,
+    remedy: String,
+
+    impl Diagnostic {
+        code: "E2721",
+
+        what: fn(self) -> String { "{self.message}" }
+
+        why: fn(self) -> String { "the build searches the tokens that can come next at one decision only up to a fixed number of token sequences, so that checking a grammar stays fast" }
+
+        fix: fn(self) -> String { "{self.remedy}" }
+    }
+}
+
+/// An `.EmptyRepeat` fault as the build reports it.
+EmptyRepeatFault: struct {
+    at: TextSpot,
+    message: String,
+    remedy: String,
+
+    impl Diagnostic {
+        code: "E2722",
+
+        what: fn(self) -> String { "{self.message}" }
+
+        why: fn(self) -> String { "a repeat goes on while its item matches, and an item that matches no text matches forever" }
+
+        fix: fn(self) -> String { "{self.remedy}" }
+    }
+}
+
+/// A `.TokenClash` fault as the build reports it.
+TokenClashFault: struct {
+    at: TextSpot,
+    message: String,
+    remedy: String,
+
+    impl Diagnostic {
+        code: "E2723",
+
+        what: fn(self) -> String { "{self.message}" }
+
+        why: fn(self) -> String { "the lexer reads only the tokens the parser can take next, and where two of them match the same text it cannot tell which one the text is" }
+
+        fix: fn(self) -> String { "{self.remedy}" }
+    }
+}
+
+/// A `.FieldShape` fault as the build reports it.
+FieldShapeFault: struct {
+    at: TextSpot,
+    message: String,
+    remedy: String,
+
+    impl Diagnostic {
+        code: "E2724",
+
+        what: fn(self) -> String { "{self.message}" }
+
+        why: fn(self) -> String { "each parser rule becomes a type, so its labels and alternatives must give every field one name and one type, and every case its own name" }
+
+        fix: fn(self) -> String { "{self.remedy}" }
+    }
+}
+
+/// An `.Unprintable` fault as the build reports it.
+UnprintableFault: struct {
+    at: TextSpot,
+    message: String,
+    remedy: String,
+
+    impl Diagnostic {
+        code: "E2725",
+
+        what: fn(self) -> String { "{self.message}" }
+
+        why: fn(self) -> String { "a grammar's `print` writes a value as text that parses back to the same value, and here no text it could write would" }
+
+        fix: fn(self) -> String { "{self.remedy}" }
+    }
 }

@@ -1,4 +1,4 @@
-// `jet os services`, the internal ServiceProbe transport, declared-secret
+// `jet services`, the internal ServiceProbe transport, declared-secret
 // activation checks, and environment lifecycle hooks, ported from
 // jetpack::CLI::services_secrets_config.
 use {
@@ -22,7 +22,7 @@ SERVICES_HEALTH_TIMEOUT_SECONDS: 15
 
 SERVICES_PROBE_SAMPLES: 20
 
-// The `jet os services` verbs.
+// The `jet services` verbs.
 ServicesVerb: enum {
     Up,
     Down,
@@ -176,7 +176,7 @@ cli_report_service_start_error: fn(theme: Theme, title: String, error: String) -
         if cli_strip_prefix(error, "service `") == .Val(rest) {
             name = rest.split_once("`")?.before ?? "unknown"
         }
-        theme.error_coded("E1261", "service `{name}` never became healthy", "jet waited for the service's typed readiness contract and it did not pass in time.", "inspect `jet os services logs {name}` and fix the service's run or readiness declaration.")
+        theme.error_coded("E1261", "service `{name}` never became healthy", "jet waited for the service's typed readiness contract and it did not pass in time.", "inspect `jet services logs {name}` and fix the service's run or readiness declaration.")
         return
     }
     theme.error(title, error, "inspect the service logs and readiness declarations before retrying.")
@@ -354,13 +354,13 @@ SERVICES_ORDER_FIX_DECLARE: "declare each dependency once, keep it enabled, and 
 
 SERVICES_ORDER_FIX_CYCLES: "remove dependency cycles and unknown dependencies."
 
-// `jet os services up|down|health|logs|wait|restart|watch [<name>]` (U12).
+// `jet services up|down|health|logs|wait|restart|watch [<name>]` (U12).
 // With no `<name>` every declared dev service is targeted; `logs` requires
 // exactly one name.
 cli_cmd_services: fn(verification: StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     ^cache: WorkspaceDeclarationCache.new()
     verb_word: parsed.positional.get(0) ?? {
-        theme.error("`jet os services` needs a verb", "known verbs: {SERVICES_VERBS.join(", ")}.", "try `jet os services up`.")
+        theme.error("`jet services` needs a verb", "known verbs: {SERVICES_VERBS.join(", ")}.", "try `jet services up`.")
         return EXIT_USAGE
     }
     name: parsed.positional.get(1)
@@ -397,7 +397,7 @@ cli_cmd_services: fn(verification: StoreVerification, theme: Theme, parsed: CLIP
         return EXIT_USAGE
     }
     known: verb ?? {
-        theme.error("`{verb_word}` is not a `jet os services` verb", "known verbs: {SERVICES_VERBS.join(", ")}.", "try `jet os services up`.")
+        theme.error("`{verb_word}` is not a `jet services` verb", "known verbs: {SERVICES_VERBS.join(", ")}.", "try `jet services up`.")
         return EXIT_USAGE
     }
     if known == {
@@ -413,7 +413,7 @@ cli_cmd_services: fn(verification: StoreVerification, theme: Theme, parsed: CLIP
 
 cli_services_logs: fn(theme: Theme, project_dir: String, name: String?) -[IO, FS, Env, Time.Wait]> Int Never! {
     service: name ?? {
-        theme.error("`jet os services logs` needs a service name", "logs are per service.", "try `jet os services logs <name>`.")
+        theme.error("`jet services logs` needs a service name", "logs are per service.", "try `jet services logs <name>`.")
         return EXIT_USAGE
     }
     ^stdout_handle: term.stdout()
@@ -518,7 +518,7 @@ cli_services_wait: fn(verification: StoreVerification, theme: Theme, parsed: CLI
     loop index in order {
         svc: plan.dev_services[index]
         if !services_wait_healthy(project_dir, env, svc, cli_service_health_timeout()) {
-            theme.error_coded("E1261", "service `{svc.name}` is not ready", "jet waited for the service's typed readiness contract and it did not pass.", "start it with `jet os services up {svc.name}` or inspect its logs.")
+            theme.error_coded("E1261", "service `{svc.name}` is not ready", "jet waited for the service's typed readiness contract and it did not pass.", "start it with `jet services up {svc.name}` or inspect its logs.")
             return EXIT_USER_ERROR
         }
         theme.ok("service `{svc.name}` is ready")

@@ -1,0 +1,40 @@
+// A log line as a grammar: a time stamp, a level, the target that logged it
+// and the rest of the line. The rule `log_line` gives way to the struct
+// `LogLine`, and the labeled alternatives of `level` to the cases of the enum
+// `Level`. A level the grammar does not name is refused at its line and
+// column. Tokens are read in context, so `INFO` inside the message stays
+// text: after the `:` only the message can come.
+use core.grammar.[Grammar]
+
+LogLine: Grammar{"""
+    log_line : at=STAMP level target=PATH ':' message=REST ;
+    level    : 'TRACE' # Trace | 'DEBUG' # Debug | 'INFO' # Info | 'WARN' # Warn | 'ERROR' # Error ;
+    STAMP    : [0-9]+ '-' [0-9]+ '-' [0-9]+ 'T' [0-9]+ ':' [0-9]+ ':' [0-9]+ ('.' [0-9]+)? ('Z' | [+\-] [0-9]+ ':' [0-9]+) ;
+    PATH     : [a-z_] [a-z0-9_.]* ;
+    REST     : [^ \n] [^\n]* ;
+    WS       : ' '+ -> skip ;
+"""}
+
+level_name: fn(level: Level) -> String {
+    if level == {
+        .Trace -> "trace"
+        .Debug -> "debug"
+        .Info -> "info"
+        .Warn -> "warn"
+        .Error -> "error"
+    }
+}
+
+report: fn(text: String) {
+    if LogLine.parse(text) == {
+        .Ok(line) -> print("{level_name(line.level)} from {line.target} at {line.at}: {line.message}")
+        .Err(error) -> print("error: {error}")
+    }
+}
+
+run: fn() {
+    report("2026-11-25T10:15:00Z INFO  http.server: GET /index 200")
+    report("2026-11-25T10:15:01.250+01:00 WARN db.pool: INFO is only a word here")
+    report("2026-11-25T10:15:02Z NOTE cache: miss")
+    report("2026-11-25T10:15:03Z ERROR cache:")
+}

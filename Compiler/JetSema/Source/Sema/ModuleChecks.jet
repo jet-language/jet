@@ -11,7 +11,6 @@ use jet_foundation.[
     module_text,
     Func,
     Item,
-    TargetHardwareUse,
     NameTable,
     name_count,
     name_find,
@@ -87,7 +86,6 @@ sema_check_registration_module_start: fn(environment: SemaScopeEnvironment, prog
         foreign_providers: [SemaCheckedForeignProvider]{},
         foreign_functions: [SemaCheckedForeignFunction]{},
         call_facts: [SemaCallSiteFact]{},
-        hardware_use: sema_hardware_empty_use(),
         name_references: [SemaNameReferenceFact]{},
         comptime_requests: [SemaComptimeRequest]{},
         comptime_body_sources: [SemaComptimeBodySource]{},
@@ -633,7 +631,6 @@ sema_check_registration_top_level_declared: fn(declaration: Func, module_index: 
                 }
             }
             result.exact_int_reachable = result.exact_int_reachable || checked_function.exact_int_reachable
-            sema_hardware_use_merge(result.hardware_use, sema_hardware_use_snapshot(checked_function.hardware_use))
             loop event in checked_function.copy_events -> result.copy_events.push(event)
             loop answer in checked_function.eval_answers -> result.eval_answers.push(answer)
             if !sema_comptime_append_checked_function(checked_function, result.functions, result.call_facts, result.comptime_requests, result.name_references) {
@@ -698,7 +695,6 @@ sema_check_registration_top_level_declared: fn(declaration: Func, module_index: 
                 checked = sema_core_body_capture(program, owner_id, checked, scopes.type_delta, result.diagnostics, check_diagnostic_start, function_call_facts, function_comptime_requests, function_name_references, result.core_bodies)
             }
             sema_drain_scope_delta(program, result.type_delta, scopes, checked.value, function_comptime_requests, 0)
-            sema_hardware_use_merge(result.hardware_use, sema_hardware_use_snapshot(checked.hardware_use))
             result.comptime_body_sources.extend(checked.comptime_body_sources.move())
             result.compute_facts.push(checked.compute_facts)
             if checked.failure == .Val(facts) -> result.failure_facts.push(facts.copy())
@@ -758,7 +754,7 @@ sema_check_registration_top_level_declared: fn(declaration: Func, module_index: 
 
 // `declaration`: the method row's declaration, which `method` names
 // (sema_check_apply_method_job).
-sema_check_registration_method: fn(method: SemaMethodJob, declaration: Func, module_index: Int, memory_plan: SemaFunctionMemoryPlan, ready: ^[SemaParallelBody], ready_deltas: ^[InternerDelta?], ordinal: Int, scopes: ^SemaScopeTable, environment: ^SemaScopeEnvironment, program: SemaProgramTables, host_hooks: SemaHostHookAccess?, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: SemaComptimeFunctionRows, diagnostics: ^[Diagnostic], functions: ^[FnBody], prelude_demands: ^[Int:[SemaPreludeConversionDemand]], type_delta: ^[InternerDelta], call_facts: ^[SemaCallSiteFact], hardware_use: ^TargetHardwareUse, comptime_requests: ^[SemaComptimeRequest], name_references: ^[SemaNameReferenceFact], comptime_body_sources: ^[SemaComptimeBodySource], compute_facts: ^[SemaComputeFunctionFacts], failure_facts: ^[SemaFunctionFailureFacts], exact_int_reachable: ^Bool, copy_events: ^[SemaCopyEvent], eval_answers: ^[SemaEvalProbeAnswer], core_bodies: ^[SemaCoreBody], reasons: ^[String], keep_going: Bool, pending_obligations: Bool) -> Bool {
+sema_check_registration_method: fn(method: SemaMethodJob, declaration: Func, module_index: Int, memory_plan: SemaFunctionMemoryPlan, ready: ^[SemaParallelBody], ready_deltas: ^[InternerDelta?], ordinal: Int, scopes: ^SemaScopeTable, environment: ^SemaScopeEnvironment, program: SemaProgramTables, host_hooks: SemaHostHookAccess?, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: SemaComptimeFunctionRows, diagnostics: ^[Diagnostic], functions: ^[FnBody], prelude_demands: ^[Int:[SemaPreludeConversionDemand]], type_delta: ^[InternerDelta], call_facts: ^[SemaCallSiteFact], comptime_requests: ^[SemaComptimeRequest], name_references: ^[SemaNameReferenceFact], comptime_body_sources: ^[SemaComptimeBodySource], compute_facts: ^[SemaComputeFunctionFacts], failure_facts: ^[SemaFunctionFailureFacts], exact_int_reachable: ^Bool, copy_events: ^[SemaCopyEvent], eval_answers: ^[SemaEvalProbeAnswer], core_bodies: ^[SemaCoreBody], reasons: ^[String], keep_going: Bool, pending_obligations: Bool) -> Bool {
     job: sema_method_body_job(method)
     label: sema_check_registered_method_label(method, module_index, environment, program)
     owner_id: sema_check_registered_function_id(job, declaration, module_index, environment, program)
@@ -768,7 +764,6 @@ sema_check_registration_method: fn(method: SemaMethodJob, declaration: Func, mod
     if cached == {
         .Val(checked_function) -> {
             exact_int_reachable = exact_int_reachable || checked_function.exact_int_reachable
-            sema_hardware_use_merge(hardware_use, sema_hardware_use_snapshot(checked_function.hardware_use))
             loop event in checked_function.copy_events -> copy_events.push(event)
             loop answer in checked_function.eval_answers -> eval_answers.push(answer)
             loop source in checked_function.comptime_body_sources {
@@ -869,7 +864,6 @@ sema_check_registration_method: fn(method: SemaMethodJob, declaration: Func, mod
     scopes.location_function = previous_location
     environment.generic_params = base_generic_params.move()
     exact_int_reachable = exact_int_reachable || checked.exact_int_reachable
-    sema_hardware_use_merge(hardware_use, sema_hardware_use_snapshot(checked.hardware_use))
     copy_events.extend(checked.copy_events.move())
     eval_answers.extend(checked.eval_answers.move())
     call_facts.extend(function_call_facts)

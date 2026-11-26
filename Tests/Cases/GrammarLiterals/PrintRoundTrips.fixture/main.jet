@@ -1,0 +1,111 @@
+// A parsed value prints back to text its grammar parses to the same value,
+// and that text prints again unchanged. Tokens are separated only where they
+// would run together, a token with no field prints its first spelling, an
+// absent optional part prints nothing, and a keyword-shaped name stays a
+// name. `print_into` appends to the bytes it is given.
+use core.grammar.[Grammar]
+
+Calc: Grammar{"""
+    calc : body=expr ;
+    expr : operand=expr '(' (args+=expr (',' args+=expr)*)? ')'   # Call
+         | <assoc=right> left=expr '^' right=expr                 # Pow
+         | '-' operand=expr                                       # Neg
+         | left=expr op=('*' | '/' | '%') right=expr              # Mul
+         | left=expr op=('+' | '-') right=expr                    # Add
+         | value=NUM                                              # Num
+         | name=IDENT                                             # Var
+         | '(' inner=expr ')'                                     # Group
+         ;
+    NUM   : [0-9]+ ('.' [0-9]+)? ;
+    IDENT : [A-Za-z_] [A-Za-z0-9_]* ;
+    WS    : [ \t\r\n]+ -> skip ;
+"""}
+
+Ini: Grammar{"""
+    ini     : lines+=line (EOL lines+=line)* ;
+    line    : section | entry | blank ;
+    section : '[' name=KEY ']' ;
+    entry   : name=KEY SEP value? ;
+    blank   : ;
+    value   : text=QUOTED   # Quoted
+            | text=BARE     # Bare
+            ;
+    KEY     : [A-Za-z0-9_.\-]+ ;
+    SEP     : '=' | ':' ;
+    QUOTED  : '"' ([^"\\\r\n] | '\\' .)* '"' | '\'' [^'\r\n]* '\'' ;
+    BARE    : [^ \t\r\n;#"'] [^\r\n;#]* ;
+    EOL     : '\r'? '\n' ;
+    WS      : [ \t]+ -> skip ;
+    COMMENT : [;#] [^\r\n]* -> skip ;
+"""}
+
+Script: Grammar{"""
+    script     : items+=item* EOF ;
+    item       : assignment | display | block ;
+    assignment : 'let' name=NAME '=' value=term ';' ;
+    display    : 'show' loud='!'? values+=term (',' values+=term)* ';' ;
+    block      : 'do' items+=item+ 'end' ;
+    term       : text=NAME # Name | text=NUMBER # Number | sign=('+' | '-') digits=NUMBER # Signed ;
+    NAME       : [a-z]+ ;
+    NUMBER     : [0-9]+ ;
+    WS         : [ \t\n]+ -> skip ;
+"""}
+
+show: fn(expr: Expr) -> String {
+    if expr == {
+        .Call(operand, args) -> {
+            ^parts: [String]{}
+            loop arg in args -> parts.push(show(arg))
+            "{show(operand)}({parts.join(", ")})"
+        }
+        .Pow(left, right) -> "Pow({show(left)}, {show(right)})"
+        .Neg(operand) -> "Neg({show(operand)})"
+        .Mul(left, op, right) -> "Mul({show(left)} {op} {show(right)})"
+        .Add(left, op, right) -> "Add({show(left)} {op} {show(right)})"
+        .Num(value) -> value
+        .Var(name) -> name
+        .Group(inner) -> "({show(inner)})"
+    }
+}
+
+calc_round: fn(source: String) {
+    calc: Calc.parse(source) ?? return print("{source}: no parse")
+    printed: calc.print() ?? return print("{source}: no print")
+    again: Calc.parse(printed) ?? return print("{printed}: no reparse")
+    print("{printed} {if show(again.body) == show(calc.body) -> "same" else -> "different"}")
+}
+
+ini_round: fn(source: String) {
+    ini: Ini.parse(source) ?? return print("no parse")
+    printed: ini.print() ?? return print("no print")
+    again: Ini.parse(printed) ?? return print("{printed}: no reparse")
+    reprinted: again.print() ?? ""
+    print(printed)
+    print("{again.lines.len()} lines, {if reprinted == printed -> "stable" else -> "unstable"}")
+}
+
+script_round: fn(script: Script) {
+    printed: script.print() ?? return print("no print")
+    again: Script.parse(printed) ?? return print("{printed}: no reparse")
+    reprinted: again.print() ?? ""
+    print("[{printed}] {if reprinted == printed -> "same" else -> "different"}")
+}
+
+num: fn(text: String) -> Expr { Expr.Num{value: text} }
+
+run: fn() {
+    loop source in ["1 + 2 * 3", "2 ^ 3 ^ 2", "-2 ^ 2", "f(1, x)(2) - (3 - 4) % 5", "a - -b", "g()"] {
+        calc_round(source)
+    }
+    ini_round("[server]\nport = 8080\nname: \"web one\" ; the display name\n\n[client]\nretry =\n")
+    parsed: Script.parse("let x = 5; show! x, -3, +4;\ndo let letter = y; show letter; end let end = 1;") ?? return print("no script")
+    script_round(parsed)
+    script_round(Script{items: [Item]{}})
+    script_round(Script{items: [Item]{Item.Assignment(Assignment{name: "let", value: Term.Number{text: "12"}})}})
+    ^out: [U8]{}
+    loop b in "> ".bytes() -> out.push(b)
+    if Calc{body: Expr.Add{left: num("1"), op: "+", right: num("2")}}.print_into(out) == {
+        .Ok(_) -> print("into {String.from_bytes(out) ?? ""}")
+        .Err(error) -> print("into error {error}")
+    }
+}

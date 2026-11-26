@@ -22,17 +22,23 @@
 // operand: a signature row's first parameter
 // (`core.files reader_line &FileReader [u8]`). A Markdown file's ```jet
 // fences are read whole and its prose by code spans; a case file's comment
-// lines are read by code spans and its other lines whole; any other text,
-// such as an expected output or a diagnostic snapshot, is read whole. A run
-// of three or more signs, an HTML entity (`&amp;`, `&{name};`) and Rust's
-// `&mut` stay as written.
+// lines and the ` # ` comment that ends an assertion line are read by code
+// spans and its other lines whole; any other text, such as an expected
+// output or a diagnostic snapshot, is read whole. A run of three or more
+// signs, an HTML entity (`&amp;`, `&{name};`), a foreign `&mut`, a query
+// field (`&line={line}`), a YAML anchor whose alias the same file names
+// (`base: &b` with `*b`), a code span after a foreign language's name, and
+// a sign alone in a code span whose line speaks of operators, markup or
+// separators stay as written.
 use jet_lexer.[lex_generated, TOKEN_AMP, TOKEN_AND_AND, TOKEN_BLOCK_COMMENT, TOKEN_LINE_COMMENT, TOKEN_RAW_STRING, TOKEN_STRING]
 
 // The words after which a sign starts an operand rather than continuing one.
 MARK_CARET1_KEYWORDS: [String]{"task", "if", "return", "in", "else", "match", "yield", "then", "for", "while", "and", "or", "not", "break", "defer"}
 
-// Text that only C or Rust quoted in a string or a code span holds.
-MARK_CARET1_FOREIGN: [String]{"#include", "#[", "(void)", "int64_t", "static ", "pthread_", "memcpy(", "::", "let mut ", "&str", "JNIEnv"}
+// Text that only foreign code quoted in a string or a code span holds: a
+// statement that ends in a call (`f(&x);`), a jump, a COM interface name and
+// a COM variant tag.
+MARK_CARET1_FOREIGN: [String]{"#include", "#[", "(void)", "int64_t", "static ", "pthread_", "memcpy(", "::", "let mut ", "&str", "JNIEnv", ");", "goto ", "IID_", "VT_"}
 
 // Text that makes a quoted string Jet even though it holds MARK_CARET1_FOREIGN
 // text: a Jet extern block, whose link names are Rust or C paths.
@@ -96,16 +102,19 @@ mark_caret1_quoted: fn(bytes: ^[U8], start: Int, end: Int) -> Int {
 }
 
 // Quoted text from `lo` to `hi` read whole, unless it quotes C or Rust
-// outside a Jet extern block; `spaced` as in mark_caret1_text.
+// outside a Jet extern block; `spaced` as in mark_caret1_text. Outside a
+// triple-quoted table of rows, a lowercase `[u8` is a foreign byte slice.
 mark_caret1_quoted_jet: fn(bytes: ^[U8], lo: Int, hi: Int, spaced: Bool) -> Int {
     contents: mark_caret1_word(bytes, lo, hi)
     jet: MARK_CARET1_JET_FOREIGN.any(fn(text) { contents.contains(text) })
     if !jet && MARK_CARET1_FOREIGN.any(fn(foreign) { contents.contains(foreign) }) -> return 0
+    if !spaced && contents.contains("[u8") -> return 0
     mark_caret1_text(bytes, lo, hi, spaced)
 }
 
 // A case file line by line: a `#` comment line by its code spans, any other
-// line whole.
+// line whole up to the ` # ` comment that ends it, and that comment by its
+// code spans.
 mark_caret1_case: fn(bytes: ^[U8]) -> Int {
     ^count: 0
     ^start: 0
@@ -113,7 +122,15 @@ mark_caret1_case: fn(bytes: ^[U8]) -> Int {
         ^end: start
         loop end < bytes.len() && bytes[end] != 10 -> end += 1
         comment: mark_caret1_word(bytes, start, end).trim_start().starts_with("#")
-        count += if comment -> mark_caret1_spans(bytes, start, end) else -> mark_caret1_quoted_jet(bytes, start, end, false)
+        if comment {
+            count += mark_caret1_spans(bytes, start, end)
+        } else {
+            ^tail: start
+            loop tail + 2 < end && !(bytes[tail] == 32 && bytes[tail + 1] == 35 && bytes[tail + 2] == 32) -> tail += 1
+            if tail + 2 >= end -> tail = end
+            count += mark_caret1_quoted_jet(bytes, start, tail, false)
+            count += mark_caret1_spans(bytes, tail, end)
+        }
         start = end + 1
     }
     count
@@ -133,13 +150,30 @@ mark_caret1_text: fn(bytes: ^[U8], lo: Int, hi: Int, spaced: Bool) -> Int {
         ^run: index
         loop run < hi && bytes[run] == 38 -> run += 1
         width: run - index
-        if width <= 2 && mark_caret1_is_mark(bytes, index, width, lo, hi, spaced) {
+        if width <= 2 && mark_caret1_is_mark(bytes, index, width, lo, hi, spaced) && !mark_caret1_anchor(bytes, run) {
             loop at in index..<run -> bytes[at] = U8{94}
             count += 1
         }
         index = run
     }
     count
+}
+
+// Whether the name at `at` follows a YAML anchor's `&`: it starts with a
+// lowercase letter and the file names it as an alias (`*name`) too, in the
+// same text or in another string the text interpolates.
+mark_caret1_anchor: fn(bytes: [U8], at: Int) -> Bool {
+    if at >= bytes.len() || bytes[at] < 97 || bytes[at] > 122 -> return false
+    ^end: at
+    loop end < bytes.len() && mark_caret1_name_byte(bytes[end]) -> end += 1
+    width: end - at
+    loop star in 0..<(bytes.len() - width) {
+        if bytes[star] != 42 -> next
+        after: star + 1 + width
+        if after < bytes.len() && mark_caret1_name_byte(bytes[after]) -> next
+        if mark_caret1_word(bytes, star + 1, after) == mark_caret1_word(bytes, at, end) -> return true
+    }
+    false
 }
 
 // Whether the sign of `width` at `at` is a mark: a name, `[`, `(`, `@`,
@@ -171,25 +205,31 @@ mark_caret1_is_mark: fn(bytes: [U8], at: Int, width: Int, lo: Int, hi: Int, spac
     if !mark_caret1_name_byte(next_byte) || (next_byte >= 48 && next_byte <= 57) -> return false
     ^word_end: after
     loop word_end < hi && mark_caret1_name_byte(bytes[word_end]) -> word_end += 1
-    // An HTML entity (`&amp;`) and Rust's `&mut` are not Jet.
+    // An HTML entity (`&amp;`), a query field (`&line=1`) and a foreign `&mut`
+    // are not Jet.
     if word_end < hi && bytes[word_end] == 59 -> return false
+    if word_end < hi && bytes[word_end] == 61 && (word_end + 1 >= hi || bytes[word_end + 1] != 61) -> return false
     if mark_caret1_word(bytes, after, word_end) == "mut" -> return false
     mark_caret1_starts_operand(bytes, at, lo, spaced)
 }
 
 // The words of a line that names `&` or `&&` as an operator rather than as
 // a mark.
-MARK_CARET1_OPERATOR_WORDS: [String]{"`||`", "`|`", "`&~`", "`!`", "logical", "bit", "Bit", "operator", "condition", "comparison", "joined", "short-circuit", "AND", "conjunction", "Bool", "chain"}
+MARK_CARET1_OPERATOR_WORDS: [String]{"`||`", "`|`", "`&~`", "`!`", "logical", "bit", "Bit", "operator", "condition", "comparison", "joined", "short-circuit", "AND", "conjunction", "Bool", "chain", "side of", "left side", "right of", "operand", "runs only", "guards", "continuation", "may reach", "atoms", "later tests"}
+
+// The words of a line that names `&` as markup, a separator or a shell
+// symbol rather than as a mark.
+MARK_CARET1_TEXT_WORDS: [String]{"`<`", "entit", "escape", "separate", "`;;", "left as it is"}
 
 // Whether a sign alone in a code span at `at` is a mark: its line names no
-// operator.
+// operator, markup, separator or shell symbol.
 mark_caret1_bare_mark: fn(bytes: [U8], at: Int) -> Bool {
     ^start: at
     loop start > 0 && bytes[start - 1] != 10 -> start -= 1
     ^end: at
     loop end < bytes.len() && bytes[end] != 10 -> end += 1
     line: mark_caret1_word(bytes, start, end)
-    !MARK_CARET1_OPERATOR_WORDS.any(fn(word) { line.contains(word) })
+    !MARK_CARET1_OPERATOR_WORDS.any(fn(word) { line.contains(word) }) && !MARK_CARET1_TEXT_WORDS.any(fn(word) { line.contains(word) })
 }
 
 // Whether a sign at `at` starts an operand: the line before it, back to
@@ -266,10 +306,22 @@ mark_caret1_spans: fn(bytes: ^[U8], lo: Int, hi: Int) -> Int {
             index = close
             next
         }
-        count += mark_caret1_quoted_jet(bytes, index + 1, close, false)
+        if !mark_caret1_after_foreign_word(bytes, index, lo) {
+            count += mark_caret1_quoted_jet(bytes, index + 1, close, false)
+        }
         index = close + 1
     }
     count
+}
+
+// Whether the backtick at `at` follows a foreign language's name (`C`) and a
+// space, so its span quotes that language.
+mark_caret1_after_foreign_word: fn(bytes: [U8], at: Int, lo: Int) -> Bool {
+    if at < lo + 2 || bytes[at - 1] != 32 -> return false
+    ^start: at - 1
+    loop start > lo && mark_caret1_name_byte(bytes[start - 1]) -> start -= 1
+    word: mark_caret1_word(bytes, start, at - 1)
+    word == "Rust" || word == "C"
 }
 
 // A Markdown file: each ```jet fence is read whole and each line of prose by

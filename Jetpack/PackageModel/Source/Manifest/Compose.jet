@@ -89,8 +89,6 @@ pkg_intent_accepts_kind: fn(intent: String, kind: OutputKind) -> Bool Never! {
         "test" | "check" -> kind == OutputKind.Check
         "dev" | "enter" -> kind == OutputKind.Environment
         "publish" -> kind == OutputKind.Library || kind == OutputKind.Executable || kind == OutputKind.Service
-        "deploy" | "fleet" -> kind == OutputKind.Fleet
-        "activate" | "activation" -> kind == OutputKind.System || kind == OutputKind.Fleet
         else -> false
     }
 }
@@ -101,15 +99,13 @@ pkg_intent_kind_description: fn(intent: String) -> String Never! {
         "test" | "check" -> "Check"
         "dev" | "enter" -> "Environment"
         "publish" -> "Library, Executable, or Service"
-        "deploy" | "fleet" -> "Fleet"
-        "activate" | "activation" -> "System or Fleet"
         else -> "a compatible"
     }
 }
 
 pkg_validate_intent: fn(intent: String) ComposeError! {
     if intent == {
-        "run" | "test" | "check" | "dev" | "enter" | "publish" | "deploy" | "fleet" | "activate" | "activation" -> {}
+        "run" | "test" | "check" | "dev" | "enter" | "publish" -> {}
         else -> return Err(ComposeError.UnknownIntent{intent: intent})
     }
 }
@@ -308,7 +304,7 @@ pkg_merge_output_fields: fn(current: ^[String:String], incoming: [String:String]
 
 pkg_output_structured_field: fn(field: String) -> Bool Never! {
     if field == {
-        "modules" | "tools" | "services" | "secrets" | "from" | "kind" | "environment" | "members" | "packages" | "options" | "hosts" -> true
+        "modules" | "tools" | "services" | "secrets" | "from" | "kind" | "environment" | "members" -> true
         else -> false
     }
 }

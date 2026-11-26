@@ -3,11 +3,11 @@ Pattern: distinct String
 impl Pattern.CheckedText {
     Error: Error,
 
-    check: fn(text: String) -[]> Error! {
-        return
+    check: fn(parts: [String]) -[]> Checked<[String], TextSlot> Error! {
+        return Ok(Checked{shape: parts.copy(), slots: [TextSlot]{}})
     }
 
-    encode_hole: fn<T: Printable>(value: T) -[]> String { return "" }
+    encode_hole: fn<T: Printable>(value: T, _slot: TextSlot) -[]> String { return "" }
 }
 
 run: fn() {

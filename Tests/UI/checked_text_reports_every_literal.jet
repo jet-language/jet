@@ -1,0 +1,51 @@
+// Every malformed checked text literal reports in one build, and a check
+// whose error is a list reports each item under its own `Diagnostic` code,
+// at the spot its `at: TextSpot` names.
+use core.grammar.error.[TextSpot]
+
+// One `!` a tag list holds. A list of errors is the check's failure, so each
+// item is an error type.
+#Error
+Fault: struct {
+    at: TextSpot,
+    found: String,
+
+    impl Diagnostic {
+        what: fn(self) -> String { "a tag list holds `{self.found}`" }
+
+        why: fn(self) -> String { "tags are words separated by spaces" }
+
+        fix: fn(self) -> String { "remove the `{self.found}`" }
+    }
+}
+
+Tags: struct {
+    text: String,
+
+    impl CheckedText {
+        Error: [Fault],
+        Hole: String,
+
+        check: fn(parts: [String]) -[]> Checked<[String], TextSlot> [Fault]! {
+            ^faults: [Fault]{}
+            loop (part, piece) in parts {
+                loop (offset, byte) in piece.bytes() {
+                    if byte == 33 -> faults.push(Fault{at: TextSpot{part: part, offset: offset}, found: "!"})
+                }
+            }
+            if faults.len() > 0 -> return Err(faults)
+            return Ok(Checked{shape: parts.copy(), slots: loop _ in 1..<parts.len() -> TextSlot.Text})
+        }
+
+        encode_hole: fn<T: Printable>(value: T, _slot: TextSlot) -[]> String { "{value}" }
+
+        build: fn(shape: [String], holes: [String]) -[]> Tags { Tags{text: "{shape.join(" ")}{holes.len()}"} }
+    }
+}
+
+run: fn() {
+    first: Tags{"red ! green !"}
+    second: Tags{"blue"}
+    third: Tags{"amber!"}
+    print("{first.text} {second.text} {third.text}")
+}

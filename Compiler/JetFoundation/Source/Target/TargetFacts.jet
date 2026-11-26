@@ -52,29 +52,9 @@ TargetRegisterBlockFact: struct {
     registers: [TargetRegisterFact],
 }
 
-TargetRegisterOperation: enum {
-    Read,
-    Write,
-}
-
-TargetRegisterAccessFact: struct {
-    block: String,
-    register: String,
-    operation: TargetRegisterOperation,
-    width: RegisterWidth,
-}
-
 TargetInterruptFact: struct {
     name: String,
     vector: Int,
-    forbidden_effects: [String],
-    bounded: Bool,
-}
-
-TargetInterruptHandlerFact: struct {
-    interrupt: String,
-    handler: String,
-    effects: [String],
     forbidden_effects: [String],
     bounded: Bool,
 }
@@ -92,29 +72,9 @@ TargetDMAChannelFact: struct {
     max_transfer_bytes: Int?,
 }
 
-TargetDMAOperation: enum {
-    Start,
-    Wait,
-    UseBuffer,
-}
-
 TargetDMAOwner: enum {
     CPU,
     Device,
-}
-
-TargetDMAOperationFact: struct {
-    channel: String,
-    buffer: String,
-    operation: TargetDMAOperation,
-    owner: TargetDMAOwner,
-}
-
-TargetHardwareUnresolvedReference: enum {
-    RegisterBlock(block: String),
-    Register(block: String, register: String),
-    DMAChannel(channel: String),
-    Interrupt(interrupt: String),
 }
 
 TargetHardwareFacts: struct {
@@ -122,13 +82,6 @@ TargetHardwareFacts: struct {
     register_blocks: [TargetRegisterBlockFact],
     interrupts: [TargetInterruptFact],
     dma_channels: [TargetDMAChannelFact],
-}
-
-TargetHardwareUse: struct {
-    register_accesses: [TargetRegisterAccessFact],
-    interrupt_handlers: [TargetInterruptHandlerFact],
-    dma_operations: [TargetDMAOperationFact],
-    unresolved_references: [TargetHardwareUnresolvedReference],
 }
 
 TargetProgrammerAdapter: enum {

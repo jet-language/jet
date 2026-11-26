@@ -105,6 +105,25 @@ s5_grammar_slice_bytes: fn(text: String, start: Int, end: Int) -> String {
     assert(config.contains("\"blockComment\": [\"/*\", \"*/\"]"), "the VSCode language configuration must name the block comment pair")
 }
 
+// A `Grammar{"""…"""}` body is rule notation: each TextMate grammar colors
+// it with the notation rules, which the top level must try before quoted
+// text, or the body would be one string.
+#Test("textmate_grammar_bodies_are_rule_notation") {
+    guards_enter_root()
+    paths: [String]{"Tools/Editors/Vscode/Syntaxes/jet.tmLanguage.json", "Tools/Editors/jet.tmGrammar"}
+    loop path in paths {
+        grammar: files.read(path) ?? panic("read {path}")
+        notation: s5_grammar_find(grammar, "{{ \"include\": \"#grammar-literals\" }}", 0)
+        strings: s5_grammar_find(grammar, "{{ \"include\": \"#strings\" }}", 0)
+        assert(notation >= 0 && notation < strings, "{path}: the top level must include #grammar-literals before #strings")
+        rule: s5_grammar_find(grammar, "\"grammar-literals\": {{", 0)
+        assert(rule >= 0, "{path} has no grammar-literals rule")
+        body: s5_grammar_slice_bytes(grammar, rule, s5_grammar_find(grammar, "\n    }},", rule))
+        assert(body.contains("\"begin\": \"\\\\b(Grammar)(\\\\{{)(\\\"\\\"\\\")\""), "{path}: the grammar-literals rule must open at `Grammar{{\"\"\"`")
+        assert(body.contains("{{ \"include\": \"#grammar-notation\" }}"), "{path}: the grammar-literals rule must color its body as rule notation")
+    }
+}
+
 s5_grammar_first_quoted: fn(text: String, start: Int) -> String? {
     first: s5_grammar_find(text, "\"", start)
     if first < 0 -> return None

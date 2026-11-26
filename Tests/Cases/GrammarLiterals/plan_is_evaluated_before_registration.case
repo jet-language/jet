@@ -1,0 +1,43 @@
+# A grammar's plan is computed before the program registers: one compile of
+# the declaring bindings alone, cut from their modules, evaluates every
+# declaring literal at once, and the trace names each plan it computed. The
+# rest of the program (its other bindings, functions and statements) is not
+# part of that compile. Every tier computes the plans so, and the program
+# then runs the same at O0, O1 and O2 and as a built binary. A literal the
+# grammar check refuses computes no plan, and its faults are reported once,
+# by the compile proper.
+fixture: PlanIsEvaluatedBeforeRegistration.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check --trace=good.json good/main.jet
+exit: 0
+file: good.json ~ "{\"name\":\"Pair\",\"cat\":\"grammar.plan\"" # the imported-item head's plan
+file: good.json ~ "{\"name\":\"Words\",\"cat\":\"grammar.plan\"" # the module-alias head's plan
+file: good.json !~ "{\"name\":\"LIMIT\",\"cat\":\"grammar.plan\"" # an ordinary constant is no grammar
+step o0: jet run -O0 --trace=o0.json good/main.jet
+exit: 0
+stdout: = "5\n"
+file: o0.json ~ "{\"name\":\"Pair\",\"cat\":\"grammar.plan\""
+file: o0.json ~ "{\"name\":\"Words\",\"cat\":\"grammar.plan\""
+step o1: jet run -O1 --trace=o1.json good/main.jet
+exit: 0
+stdout: == o0
+file: o1.json ~ "{\"name\":\"Pair\",\"cat\":\"grammar.plan\""
+file: o1.json ~ "{\"name\":\"Words\",\"cat\":\"grammar.plan\""
+step o2: jet run -O2 --trace=o2.json good/main.jet
+exit: 0
+stdout: == o0
+file: o2.json ~ "{\"name\":\"Pair\",\"cat\":\"grammar.plan\""
+file: o2.json ~ "{\"name\":\"Words\",\"cat\":\"grammar.plan\""
+step build: jet build -O2 --trace=build.json good/main.jet
+exit: 0
+file: build.json ~ "{\"name\":\"Pair\",\"cat\":\"grammar.plan\""
+file: build.json ~ "{\"name\":\"Words\",\"cat\":\"grammar.plan\""
+step aot: built
+exit: 0
+stdout: == o0
+step: jet check --json --trace=bad.json bad/main.jet
+exit: nonzero
+file: bad.json !~ "\"cat\":\"grammar.plan\"" # the refused literal has no plan
+json: stdout doc $.reports[?code="E2717"] #= 1 # its fault is reported once, under its kind's code

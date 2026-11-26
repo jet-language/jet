@@ -1,8 +1,9 @@
 // A checked text type whose holes stay values. `Hole: Param` is what each
-// interpolation encodes to, and `build` assembles the literal from its parts
-// and those holes: `Query{"… {age} …"}` is `Query.build(parts, holes)`, so a
-// hole never becomes query text. `check` runs once, before the program runs,
-// on the literal parts joined by `{}`.
+// interpolation encodes to, and `build` assembles the literal from the shape
+// `check` returned and those holes: `Query{"… {age} …"}` is
+// `Query.build(shape, holes)`, so a hole never becomes query text. `check`
+// runs once, before the program runs, on the literal's parts: the text
+// between its holes.
 
 #Error
 QueryError: enum {
@@ -22,29 +23,31 @@ Query: struct {
         Error: QueryError,
         Hole: Param,
 
-        check: fn(text: String) -[]> QueryError! {
+        check: fn(parts: [String]) -[]> Checked<[String], TextSlot> QueryError! {
             ^depth: 0
-            loop byte in text.bytes() {
-                if byte == (U8{40}) -> depth += 1
-                if byte == (U8{41}) {
-                    if depth == 0 -> return Err(QueryError.Unbalanced)
-                    depth -= 1
+            loop part in parts {
+                loop byte in part.bytes() {
+                    if byte == (U8{40}) -> depth += 1
+                    if byte == (U8{41}) {
+                        if depth == 0 -> return Err(QueryError.Unbalanced)
+                        depth -= 1
+                    }
                 }
             }
             if depth != 0 -> return Err(QueryError.Unbalanced)
-            return Ok()
+            Ok(Checked{shape: parts.copy(), slots: loop _ in 1..<parts.len() -> TextSlot.Text})
         }
 
-        encode_hole: fn<T: Printable>(value: T) -[]> Param {
+        encode_hole: fn<T: Printable>(value: T, _slot: TextSlot) -[]> Param {
             if T == {
                 Int -> Param.Number(value)
                 else -> Param.Word("{value}")
             }
         }
 
-        build: fn(parts: [String], holes: [Param]) -[]> Query {
-            ^text: parts[0].copy()
-            loop index in 0..<holes.len() -> text = "{text}${index + 1}{parts[index + 1]}"
+        build: fn(shape: [String], holes: [Param]) -[]> Query {
+            ^text: shape[0].copy()
+            loop index in 0..<holes.len() -> text = "{text}${index + 1}{shape[index + 1]}"
             Query{text: text, params: holes.copy()}
         }
     }

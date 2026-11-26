@@ -154,9 +154,18 @@ amendments in `syntax-decisions.md` (R-H1).
 4. **Core's own grammars come from the Core bodies record** (R-C1).
    - This is the existing pattern for Core derive expansions
      (`CoreBodies.jet:960-1052`).
-   - The Core library's check keeps each Core module's plan and generated
-     items under a new record key. A compile bound to that Core reads them
-     from the record.
+   - The Core library's check keeps each Core module's plans under the
+     record key `#grammar <module>` (`SEMA_CORE_GRAMMAR_KEY`,
+     `sema_core_grammar_capture`). A compile bound to that Core reads them
+     from the record (`sema_core_grammar_plans`) in place of the batch, and
+     registration builds the items from them as from computed plans. Plans,
+     not items, are recorded: the items are a pure function of the plan, and
+     the plan holds no compile-numbered rows.
+   - The batch still computes a Core module's plans when no record is lent
+     (the Core library's own check, a compile against Core source). It then
+     leaves out every Core module importing a declaring one, so a Core module
+     that declares a grammar must not be imported, directly or through
+     others, by `core.grammar` or the Prelude.
    - A program that uses `SQL{…}` therefore never runs the SQL grammar
      analysis.
    - Whether the performance gate counts this toolchain record as a "compile
@@ -166,7 +175,8 @@ amendments in `syntax-decisions.md` (R-H1).
    `Compiler/JetSema/Source/Sema/Registration/GrammarItems.jet` and makes:
    - structs and enums;
    - a `<Start>Slot` enum when the grammar has holes;
-   - rule-id constants;
+   - `<Start>Rule` and `<Start>Token` enums, which number the rules and
+     token kinds a sink receives;
    - `impl` blocks for `parse`, `print`, `print_into`, `parse_into` and
      `check_parts`.
 
@@ -208,7 +218,7 @@ Why this and not the alternatives:
 
 ```jet
 CheckedText: trait {
-    Error: type                       // as today; may be a list whose items implement Diagnostic
+    Error: type                       // as today; may be a list of error types
     Hole: type{String}                // as today
     Slot: type{TextSlot}              // new: the kind of position a hole sits in
     Shape: type{[String]}             // new: what check learned; embedded as constant data
@@ -237,6 +247,8 @@ How each part is used:
 - **`Error` may be a list.** Each item that implements `Diagnostic` is
   reported under its own registered code, at the span its `at: TextSpot`
   maps to. This replaces the field sniffing in `jet_driver_checked_text_reason`.
+  A list of error types (`#Error`) is a failure domain like `[FieldError]`, so
+  `[GrammarFault]!` passes E2417.
 
 Paths the first draft left undefined (R-C2):
 
@@ -405,6 +417,19 @@ Rules:
   (`Examples/Types/RecursiveEnum.jet`). A struct that holds itself, such as
   `list : head=item (',' rest=list)? ;`, is [INFERENCE]. G-A11 makes the
   builder emit such a rule as a single-case enum if structs cannot recurse.
+- Each grammar also declares `<Start>Rule` and `<Start>Token`, named after
+  the binding. They are `#Layout(U32)` enums, so `from_int` and `to_int`
+  convert a sink's numbers. `<Start>Rule` has a case per rule type, numbered
+  by rule. `<Start>Token` has a case per token kind, numbered by kind, with
+  the names in `GrammarPlan.kind_names`:
+  - `Eof`;
+  - a token rule in TitleCase (`QUOTED_ID` is `QuotedId`);
+  - `Hole` and the slot (`HoleValue`);
+  - a literal by its words and signs (`'<='` is `LessEquals`, `'IS NOT'i` is
+    `IsNot`).
+  A kind whose name an earlier kind already has takes the next free number
+  (`Select2`). A kind named like a rule type is `Jet.GrammarFieldShape`.
+  When the grammar has holes, `<Start>Slot` has a case per slot.
 
 Members on each rule type `R`:
 
@@ -414,7 +439,7 @@ Members on each rule type `R`:
 | `print` | `r.print() -> String GrammarError!` and `r.print_into(^out: [U8]) -> Unit GrammarError!` (R-H5) |
 | `parse_into` | `R.parse_into<S: GrammarSink>(text: String, ^sink: S) -> Int GrammarError!`. Allocation-free. It emits `open(rule)`, `close(rule)` and `token(kind, start, end)` events, and returns the end offset |
 | `check_parts` | `R.check_parts(parts: [String]) -> Checked<[String], <Start>Slot> [GrammarError]!`. Only on grammars that use `HOLE`; the head impls call it |
-| Constants | `R.RULE: Int`, and token-kind constants for sinks |
+| Enums | `<Start>Rule` and `<Start>Token` (above); a sink matches `PairRule.from_int(rule)` |
 
 Core types in `core.grammar` (B4, owner-approved): `Grammar`, `GrammarPlan`,
 `GrammarError{line, column, offset, expected: [String], found: String}` (shown
@@ -1199,7 +1224,7 @@ G-B1 to G-B3g land as one change (§11 item 1).
 | G-B8a | Pre-registration batch: gather declaring literals after load; one compile-time request over the `core.grammar` closure; plans back as values. **If the child cannot serve a request before registration, stop and return the design to review** | `Pipeline.jet`, `ComptimeFunctions.jet`, `Tests/Cases/GrammarLiterals/plan_is_evaluated_before_registration.case` + fixture | 2 | G-B7 | `jet test Compiler --profile cases --filter Tests/Cases/GrammarLiterals/plan_is_evaluated_before_registration` |
 | G-B8b | `grammar_plans` in `SemaRegistrationModuleInput`, handed to registration | `Sema/Registration/Items.jet`, `Pipeline.jet` | 2 | G-B8a | same case, extended to O0/O1/O2 and `jet build` steps |
 | G-B8c | Core modules' plans and items recorded in and read from the Core bodies file under a new key | `Sema/CoreBodies.jet`, `Tests/Cases/GrammarLiterals/core_grammar_plan_comes_from_the_core_record.case` | 2 | G-B9 | `jet test Compiler --profile cases --filter Tests/Cases/GrammarLiterals/core_grammar_plan_comes_from_the_core_record` |
-| G-B9 | `GrammarItems`: types (structs, enums, Slot enum, constants) with the binding's visibility, through `sema_user_rule_accept` | `Sema/Registration/GrammarItems.jet`, `Tests/Cases/GrammarLiterals/types_are_generated.case` | 2 | G-B8b, G-A11 | `jet test Compiler --profile cases --filter Tests/Cases/GrammarLiterals/types_are_generated` |
+| G-B9 | `GrammarItems`: types (structs, enums, the `<Start>Slot`, `<Start>Rule` and `<Start>Token` enums) with the binding's visibility, through `sema_user_rule_accept` | `Sema/Registration/GrammarItems.jet`, `Tests/Cases/GrammarLiterals/types_are_generated.case` | 2 | G-B8b, G-A11 | `jet test Compiler --profile cases --filter Tests/Cases/GrammarLiterals/types_are_generated` |
 | G-B10a | `GrammarItems`: sequence, choice, optional, repeat and list labels, calling `Runtime.jet` | `GrammarItems.jet`, `Tests/Cases/GrammarLiterals/parse_shapes.case` | 2 | G-B9, G-A15 | `jet test Compiler --profile cases --filter Tests/Cases/GrammarLiterals/parse_shapes` |
 | G-B10b | `GrammarItems`: contextual token dispatch, keyword lookup, `EOF`, depth guard, errors; the INI golden example | `GrammarItems.jet`, `Examples/Text/Grammar/Ini.jet` (+ `.out`) | 2, 5 | G-B10a, G-A14 | `jet test Compiler --profile golden Examples/Text/Grammar/Ini` |
 | G-B11 | `GrammarItems`: precedence climbing; the Calc golden example | `GrammarItems.jet`, `Examples/Text/Grammar/Calc.jet` (+ `.out`) | 2, 5 | G-B10b, G-A7 | `jet test Compiler --profile golden Examples/Text/Grammar/Calc` |

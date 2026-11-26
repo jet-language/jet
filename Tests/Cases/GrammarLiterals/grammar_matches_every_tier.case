@@ -1,0 +1,30 @@
+# One grammar with holes means the same at every tier: a literal's checked
+# parts, a parse into a sink and a parse printed back give the same lines at
+# O0, O1 and O2, from a built binary and on the web.
+fixture: GrammarMatchesEveryTier.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step: jet check main.jet
+exit: 0
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = "ok: 3 parts, slots [Value, Item]\nrefused\n  1:7: expected NAME, NUMBER or a `Value` hole, found \"+\"\n  2:5: expected \",\" or \")\", found \"y\"\n(list '[' (item 'f' '(' (arg '1' arg) ',' (arg ' ' 'y' arg) ')' item) ']' '' list) => 9\n[f(1,y),g(2)] same\n"
+step o1: jet run -O1 main.jet
+exit: 0
+stdout: == o0
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: == o0
+step build: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: == o0
+step: jet build --target web main.jet
+exit: 0
+step web: node app.js
+cwd: .jet/build
+exit: 0
+stdout: == o0

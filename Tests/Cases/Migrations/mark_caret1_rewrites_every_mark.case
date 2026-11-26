@@ -13,8 +13,12 @@
 # code spans of a diagnostic. The bit and logical operators (`a & b`, `a&b`,
 # `ok &&done` in code and in a plain string, `&=`, `&~=`, comparisons joined
 # with `&&`), HTML entities (`&amp;`, `&{name};`, `&...;`), a query string's
-# `{s}&{piece}`, Rust's `&mut`, a string quoting C, a run of three signs,
-# other fences and prose outside code spans stay as written.
+# `{s}&{piece}` and `&line={line}`, Rust's `&mut`, a string quoting C, Zig
+# or COM (`goto `, a call ending `);`, `IID_`), a lowercase `[u8` slice, a
+# code span after the word C, a YAML anchor whose alias the text names, a
+# sign alone in a code span on a line about a separator, markup or the side
+# of a logical `&&`, a run of three signs, other fences and prose outside
+# code spans stay as written.
 # A second run finds nothing left to rewrite.
 fixture: MarkCaret1RewritesEveryMark/Input
 step: jet run {root}/Compiler/Migrations/Migrate.jet -- mark-caret1 --write before.jet guide.md notes.txt

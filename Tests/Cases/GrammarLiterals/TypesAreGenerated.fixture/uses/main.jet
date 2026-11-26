@@ -1,0 +1,41 @@
+// The types rules.jet's `Ini` grammar declares, built and matched in another
+// module: a struct per rule of one alternative, an enum per rule of several,
+// and the numbered rule, token and slot enums.
+use rules.[Blank, Entry, Ini, IniRule, IniSlot, IniToken, Line, Section, Value, level_numbers]
+
+rules: module
+
+value_text: fn(value: Value?) -> String {
+    held: value ?? return "none"
+    if held == {
+        .Bare(text) -> text
+        .Quoted(text) -> "'{text}'"
+        .Spliced -> "hole"
+    }
+}
+
+describe: fn(line: Line) -> String {
+    if line == {
+        .Section(section) -> "section {section.name}"
+        .Entry(entry) -> "entry {entry.name} = {value_text(entry.value)}"
+        .Blank(_) -> "blank"
+    }
+}
+
+run: fn() {
+    ini: Ini{lines: [Line]{
+        Line.Section(Section{name: "core"}),
+        Line.Entry(Entry{name: "x", value: Val(Value.Bare{text: "y"})}),
+        Line.Entry(Entry{name: "z", value: None}),
+        Line.Blank(Blank{}),
+    }}
+    loop line in ini.lines -> print(describe(line))
+    rule: IniRule.from_int(2) ?? IniRule.Ini
+    print(rule == IniRule.Section)
+    print(IniRule.Value.to_int())
+    print(IniToken.Eof.to_int())
+    print(IniToken.HoleValue.to_int())
+    slot: IniSlot.Value
+    print(slot == IniSlot.Value)
+    print(level_numbers())
+}

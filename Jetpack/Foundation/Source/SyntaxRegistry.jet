@@ -277,8 +277,7 @@ TRANSITION_FOLD_VERB: "fold"
 
 TRANSITION_FLAG_CHECK: "--check"
 
-/// Every Jetpack verb, in dispatch order. JetOS's `os` verb (OS_SUBCOMMAND)
-/// routes through its own dispatcher and is not listed.
+/// Every Jetpack verb, in dispatch order.
 PACKAGE_MANAGER_VERBS: [String]{
     // `doctor` reports Jetpack's health.
     "doctor",
@@ -298,14 +297,12 @@ PACKAGE_MANAGER_VERBS: [String]{
     JETPACK_IMPORT_VERB,
     "logs",
     "override",
-    "push",
     TRUST_SUBCOMMAND,
     CONFIG_SUBCOMMAND,
     BRIDGE_SUBCOMMAND,
     SERVICES_SUBCOMMAND,
     SECRETS_SUBCOMMAND,
     IMAGE_SUBCOMMAND,
-    USER_SUBCOMMAND,
     TOOL_SUBCOMMAND,
     PROFILE_SUBCOMMAND,
     BROWSER_SUBCOMMAND,
@@ -346,7 +343,7 @@ BRIDGE_SUBCOMMAND: "bridge"
 
 BRIDGE_VERB_FLAKE: "flake"
 
-/// U16: foreign dev-shell descriptor filenames `jet env`/`jet os bridge flake`
+/// U16: foreign dev-shell descriptor filenames `jet env`/`jet bridge flake`
 /// look for. `jet env` only auto-detects one of these when the project's own
 /// manifest declares no `env.*` module; `--flake` forces it either way.
 FOREIGN_FLAKE_FILE: "flake.nix"
@@ -422,15 +419,13 @@ ENV_HOOK_OLD_PATH_VAR: "JETPACK_ENV_OLD_PATH"
 /// project's dev `services:` processes under `.jet/services/<name>/` —
 /// `up`/`down` start/stop the enabled set (or one named service), `health`
 /// one-shot probes readiness, `logs` prints a service's captured
-/// stdout/stderr. Distinct from the jetos `system.*.services` tier (Phase D,
-/// untouched): this dev tier runs plain child processes via `std::process`,
-/// never a system service manager.
+/// stdout/stderr. This dev tier runs plain child processes via
+/// `std::process`, never a system service manager.
 SERVICES_SUBCOMMAND: "services"
 
 /// (=A, ratified 2026-07-01, c9jetpackgates): `jet image <name>`
 /// builds the named `image.<name>` module contribution into a hangar OCI
-/// layout (the `.Oci` kind only — `.Iso` rides the jetos installer tier,
-/// Phase D, owner-gated, untouched). `--push <ref>` is honestly gated (E1268)
+/// layout (the `.Oci` kind). `--push <ref>` is honestly gated (E1268)
 /// until TLS support lands for registry pushes.
 IMAGE_SUBCOMMAND: "image"
 
@@ -707,7 +702,7 @@ TRUST_BYPASS_FLAG: "--trust"
 TRUST_FILE: "trust"
 
 /// (A1, card c9jetpackgates): `jet` execs the engine
-/// binary (`jetpack`, later `jetos`) for every engine verb instead of linking
+/// binary (`jetpack`) for every engine verb instead of linking
 /// it in-process — git/kubectl-style dispatch by executable name. Before
 /// exec-ing the real command, `jet` runs `<engine> --engine-protocol`, a
 /// hidden handshake flag every engine binary answers with its own
@@ -763,8 +758,6 @@ TYPE_PROFILE: "Profile"
 /// Structured prompt config inside an `Env` contribution.
 TYPE_PROMPT: "Prompt"
 
-TYPE_SYSTEM: "System"
-
 /// A Library may declare a `.jetlib` loadable artifact.
 OUTPUT_FIELD_LOADABLE: "loadable"
 
@@ -773,12 +766,6 @@ OUTPUT_FIELD_NATIVE: "native"
 
 /// Names the foreign binding generators to run.
 OUTPUT_FIELD_BINDINGS: "bindings"
-
-/// Frozen jetos sketch fields kept only for legacy
-/// parser/evaluator coverage while `system.*` is outside current syntax law.
-SYSTEM_FIELD_TARGET: "target"
-
-SYSTEM_FIELD_PACKAGES: "packages"
 
 /// Package-generation fields. `profile.<name>` declarations
 /// are source-backed package sets; generation switching belongs to the shared
@@ -795,8 +782,8 @@ SERVICE_FIELD_ENABLE: "enable"
 /// (supervised-services slice, card c9jetpackgates):
 /// the recognized fields of a **dev-supervised** `Service` (an entry under an
 /// `env.<name>` role-module's `services:` map). `Service` stays the one
-/// ratified open record either way (same grammar as `system.*.services`,
-/// `SYSTEM_FIELD_SERVICES`/`SERVICE_FIELD_ENABLE` reused verbatim) — only the
+/// ratified open record either way (the same grammar for every `services:`
+/// map, `SERVICE_FIELD_ENABLE` reused verbatim) — only the
 /// dev-runtime tier (`Jetpack.Services`) interprets these particular keys,
 /// to start/probe/stop the supervised process: `ports` (the `[Int]` TCP ports
 /// it listens on), `run` (the executable plus argv that starts it), `shutdown`
@@ -826,8 +813,8 @@ DEV_SERVICE_FIELD_BEFORE_START: "before_start"
 
 DEV_SERVICE_FIELD_SOCKETS: "sockets"
 
-/// The typed platform values a `System.target` (and a
-/// cross-compile `Image.target`) may hold — `linux.x64` / `linux.arm64`. Written
+/// The typed platform values a cross-compile `Image.target`
+/// may hold — `linux.x64` / `linux.arm64`. Written
 /// as a dotted typed value (an OS namespace `.` an arch), never a quoted string.
 PLATFORM_OS_LINUX: "linux"
 
@@ -835,22 +822,9 @@ PLATFORM_ARCH_X64: "x64"
 
 PLATFORM_ARCH_ARM64: "arm64"
 
-IMAGE_FIELD_FORMAT: "format"
-
-/// The disk-image formats — `iso` (default) / `qcow` /
-/// `raw`.
-IMAGE_FORMAT_ISO: "iso"
-
-IMAGE_FORMAT_QCOW: "qcow"
-
-IMAGE_FORMAT_RAW: "raw"
-
-/// An `Image`'s optional `kind:` — a leading-dot enum literal
-/// (`.Oci`/`.Iso`) picking which referent `from:` names. Omitted,
-/// it infers from `from:` itself (`system.*` → Iso, `packages.*` → Oci); written,
-/// it must agree with `from:` or name a real kind (E1266 `image-unknown-kind`).
-IMAGE_KIND_ISO: "Iso"
-
+/// An `Image`'s optional `kind:` — a leading-dot enum literal (`.Oci`).
+/// Omitted, the image is `.Oci`; written, it must be `.Oci`
+/// (E1266 `image-unknown-kind`).
 IMAGE_KIND_OCI: "Oci"
 
 /// The `.Oci`-only fields — exposed TCP ports (`[Int]`), env vars
@@ -879,11 +853,14 @@ IMAGE_FIELD_ENTRYPOINT: "entrypoint"
 
 IMAGE_FIELD_USER: "user"
 
+/// An environment image's cross-compile platform (`target: linux.arm64`).
+IMAGE_FIELD_TARGET: "target"
+
 /// The `oci(...)` call name inside `base: oci("<ref>")`.
 IMAGE_BASE_FN: "oci"
 
 /// U3 (ratified 2026-06-16): project environment file (`env` namespace) and the
-/// master jetos system config (`system`/`image` namespaces, default dir ~/.jet/).
+/// user config file (default dir ~/.jet/).
 ENV_FILE: "env.jet"
 
 CONFIG_FILE: "config.jet"
@@ -908,85 +885,11 @@ WORKSPACE_OVERLAY: "overlay"
 /// expression that evaluates to the list of member package paths.
 MODULE_FIELD_MEMBERS: "members"
 
-/// (ratified 2026-07-06): the public jetos CLI surface is
-/// `jet os <verb>`. The engine still executes in the `jetpack` process via
-/// But users type `jet os`, not `jetpack os`.
-OS_SUBCOMMAND: "os"
-
-/// Public jetos verbs.
-OS_VERB_CHECK: "check"
-
-OS_VERB_INIT: "init"
-
-OS_VERB_SWITCH: "switch"
-
-OS_VERB_BUILD: "build"
-
-/// Read the exact checked plan without building.
-OS_VERB_PLAN: "plan"
-
-/// Read proof/provenance artifacts for the latest generation.
-OS_VERB_PROOF: "proof"
-
-OS_VERB_ROLLBACK: "rollback"
-
-OS_VERB_GENERATIONS: "generations"
-
-OS_VERB_LIFT: "lift"
-
-/// Import semantic NixOS/flake-parts/Home Manager facts.
-OS_VERB_IMPORT: "import"
-
-/// Explicit access to migration-only backends.
-OS_VERB_MIGRATE: "migrate"
-
-OS_VERB_IMAGE: "image"
-
-/// `jet os vm prove` runs installer/reboot proof.
-OS_VERB_VM: "vm"
-
-/// `jet os push <host>`: the CLI registry's push action under `os`.
-OS_VERB_PUSH: "push"
-
-/// `jetos studio`.
-STUDIO_SUBCOMMAND: "studio"
-
-/// Standalone user-profile management entrypoint.
-USER_SUBCOMMAND: "user"
-
-/// Every `jet os` verb: the jetos dispatcher's own verbs, then the actions the
-/// CLI registry routes under `os`.
-OS_VERBS: [String]{
-    OS_VERB_CHECK,
-    OS_VERB_INIT,
-    OS_VERB_PLAN,
-    OS_VERB_PROOF,
-    OS_VERB_BUILD,
-    OS_VERB_SWITCH,
-    OS_VERB_ROLLBACK,
-    OS_VERB_GENERATIONS,
-    OS_VERB_LIFT,
-    OS_VERB_IMPORT,
-    OS_VERB_MIGRATE,
-    OS_VERB_IMAGE,
-    OS_VERB_VM,
-    STUDIO_SUBCOMMAND,
-    USER_SUBCOMMAND,
-    OS_VERB_PUSH,
-    BRIDGE_SUBCOMMAND,
-    SERVICES_SUBCOMMAND,
-    CONFIG_SUBCOMMAND,
-}
-
-/// This rule amends a bare host discovers `system.<host>` in
-/// the current repo; `host@root` selects an exact external repo/config root.
-OS_HOST_SELECTOR: "@"
-
 /// Current-repo/external-root config filename.
 CONFIG_DEFAULT_DIR: ".jet"
 
-/// Switch may override the generated generation name.
-OS_FLAG_NAME: "--name"
+/// Hangar names the store item it records.
+HANGAR_FLAG_NAME: "--name"
 
 /// Consequence-scaled CLI output accepts both spellings for
 /// bypassing mutation confirmation gates.
@@ -1026,6 +929,9 @@ ENV_INTEGRATION_VAULT: "env.security.vault"
 /// that bare packages and `default.ripgrep` sugar resolve against. Not a
 /// reserved keyword — just the well-known name `jetpack` falls back to.
 DEFAULT_SOURCE: "default"
+
+/// The `Env` contribution field listing the packages it adds.
+ENV_FIELD_PACKAGES: "packages"
 
 /// U3/U8: the `Env` contribution field carrying the shell prompt label.
 ENV_FIELD_PROMPT: "prompt"

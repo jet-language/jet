@@ -1,0 +1,28 @@
+# A grammar binding gives way to the types its plan describes: a struct per
+# rule of one alternative, an enum per rule of several, and the `<Start>Rule`,
+# `<Start>Token` and `<Start>Slot` enums, the first two numbered. Another
+# module builds and matches them like written types, at every tier. The types
+# take the binding's visibility. A token kind and a rule type with one name
+# refuse the grammar, and a generated name the module already declares is a
+# duplicate definition.
+fixture: TypesAreGenerated.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check uses/main.jet
+exit: 0
+step o0: jet run -O0 uses/main.jet
+exit: 0
+stdout: = "section core\nentry x = y\nentry z = none\nblank\ntrue\n5\n0\n8\ntrue\ntrue 2 0\n"
+step o2: jet run -O2 uses/main.jet
+exit: 0
+stdout: == o0
+step: jet check --json uses/private.jet
+exit: nonzero # `priv Level` keeps its types private
+json: stdout doc $.reports[?code="E0605"] #>= 1
+step: jet check --json clash/main.jet
+exit: nonzero # the token NAME and the rule `name` are both `Name`
+json: stdout doc $.reports[?code="E2724"] #= 1
+step: jet check --json duplicate/main.jet
+exit: nonzero # `PairRule` is written and generated
+json: stdout doc $.reports[?code="E0105"] #>= 1

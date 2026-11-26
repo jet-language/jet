@@ -4435,23 +4435,6 @@ sema_expr_try_method_static_routes: fn(receiver: Expr, method: String, method_sp
     SemaMethodSpecialCheck{handled: false, value: None}
 }
 
-sema_expr_record_hardware_result: fn(result: SemaHardwareMethodCheck, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck Never! {
-    sema_hardware_use_merge(check.context.hardware_use, sema_hardware_use_snapshot(result.hardware_use))
-    // copy: `fact` is a payload of read parameter `result`, which keeps the original; the pushed list `scopes.hardware_pending_transfers` owns this one
-    if result.dma_transfer == .Val(fact) && result.check.value != None {
-        check.scopes.hardware_pending_transfers.push(fact.copy())
-    }
-    result.check
-}
-
-sema_expr_try_hardware_pre_receiver: fn(receiver: Expr, method: String, args: [CallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck Never! {
-    ^hardware: sema_call_try_hardware_pre_receiver(receiver, method, args, None, span, expected, check)
-    if hardware == .Val(result) && result.check.handled {
-        return sema_expr_record_hardware_result(result, check)
-    }
-    SemaMethodSpecialCheck{handled: false, value: None}
-}
-
 sema_expr_try_method_special_routes: fn(receiver: Expr, receiver_value: TExpr, method: String, owner_type_args: [Type], type_args: [Type], args: [CallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
     // A secret-bearing crypto value is move-only and exposes no clone, encode,
     // hash, debug or display method.
@@ -4586,13 +4569,6 @@ sema_expr_try_method_special_routes: fn(receiver: Expr, receiver_value: TExpr, m
     if method == "swizzle" {
         ^swizzle: sema_expr_try_numeric_swizzle(receiver, receiver_value, method, type_args, args, span, expected, check)
         if swizzle.handled -> return swizzle
-    }
-    if method == "wait" || method == "start" || method == "read" || method == "write" || method == "set" || method == "clear" {
-        ^transfer_fact: sema_hardware_transfer_fact_for_expr(receiver, check)
-        ^hardware: sema_call_try_hardware_method(receiver, receiver_value, method, args, transfer_fact, span, expected, check)
-        if hardware == .Val(result) && result.check.handled {
-            return sema_expr_record_hardware_result(result, check)
-        }
     }
     ^memory: sema_call_try_memory_method(receiver, receiver_value, method, args, span, expected, check)
     if memory.handled -> return memory
@@ -4818,8 +4794,6 @@ sema_expr_check_method_call: fn(receiver: Expr, method: String, method_span: Spa
     if receipt_attach.handled -> return receipt_attach.value
     ^pre_receiver: sema_expr_try_method_static_routes(receiver, method, method_span, owner_type_args, type_args, args, expected, check)
     if pre_receiver.handled -> return pre_receiver.value
-    ^hardware_pre_receiver: sema_expr_try_hardware_pre_receiver(receiver, method, args, method_span, expected, check)
-    if hardware_pre_receiver.handled -> return hardware_pre_receiver.value
     memo_stats: sema_function_header_memo_stats(receiver, method, args, method_span, check)
     if memo_stats.handled -> return memo_stats.value
     ^root_call: sema_root_call_try(receiver, method, method_span, type_args, args, expected, check)
@@ -5358,7 +5332,6 @@ sema_expr_check_identifier: fn(name: String, span: Span, expected: Type?, check:
     }
     use_checked: if check.context.suppress_partial_move_root_read -> sema_ownership_check_root_base_use(check, expr) else -> sema_ownership_check_use(check.state, expr, check.scopes, check.diagnostics)
     if !use_checked -> return None
-    if !sema_hardware_note_cpu_use(expr, check) -> return None
     sema_string_view_check_read(name, span, check)
     binding_index: unresolved_index ?? return Val(value)
     sema_expr_note_name_reference(span, binding_index, check)

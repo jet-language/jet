@@ -1,0 +1,40 @@
+// A check's error that names where the body went wrong, as `at: TextSpot`,
+// puts E2712 at that line and column of the literal: here the part after a
+// hole, inside a triple-quoted body whose lines lose their indent.
+use core.grammar.error.[TextSpot]
+
+#Error
+SpotError: struct {
+    at: TextSpot,
+}
+
+Spot: struct {
+    text: String,
+
+    impl CheckedText {
+        Error: SpotError,
+        Hole: String,
+
+        check: fn(parts: [String]) -[]> Checked<[String], TextSlot> SpotError! {
+            loop (part, piece) in parts {
+                loop (offset, byte) in piece.bytes() {
+                    if byte == 33 -> return Err(SpotError{at: TextSpot{part: part, offset: offset}})
+                }
+            }
+            return Ok(Checked{shape: parts.copy(), slots: loop _ in 1..<parts.len() -> TextSlot.Text})
+        }
+
+        encode_hole: fn<T: Printable>(value: T, _slot: TextSlot) -[]> String { "{value}" }
+
+        build: fn(shape: [String], holes: [String]) -[]> Spot { Spot{text: "{shape.join("*")}{holes.len()}"} }
+    }
+}
+
+run: fn() {
+    id: 7
+    spot: Spot{"""
+        first line
+        second {id} then ! here
+        """}
+    print(spot.text)
+}

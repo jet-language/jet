@@ -217,11 +217,17 @@ GrammarKeywords: struct {
     next: [Int],
 }
 
-/// What a generated parser lexes with: the plan's `lexer` and `keywords`
-/// and, for each token kind, how an error names it (`names`), its literal
-/// text ("" for a kind that is no literal), whether it compares ignoring
-/// ASCII case (`folds`) and whether it is a keyword (`words`). `skips` are
-/// the kinds skipped between tokens and `holes` the hole kinds.
+/// What a generated parser lexes and decides with: the plan's `lexer` and
+/// `keywords` and, for each token kind, how an error names it (`names`),
+/// its literal text ("" for a kind that is no literal), whether it compares
+/// ignoring ASCII case (`folds`) and whether it is a keyword (`words`).
+/// `skips` are the kinds skipped between tokens, `holes` the hole kinds and
+/// `alone[kind]` the one-kind list `[kind]`. The decisions' steps are
+/// numbered in a row: `first_steps[decision]` is a decision's first step,
+/// `step_kinds[step]` the kinds a step reads, and `routes[step][kind]`
+/// where a token of that kind leads: a branch (`>= 0`), the step `s` to
+/// read next (`-(s + 2)`) or nowhere (-1), when the decision takes
+/// `fallbacks[decision]` if that is a branch.
 GrammarScanner: struct {
     lexer: GrammarLexer,
     keywords: GrammarKeywords,
@@ -231,6 +237,11 @@ GrammarScanner: struct {
     words: [Bool],
     skips: [Int],
     holes: [Int],
+    alone: [[Int]],
+    first_steps: [Int],
+    fallbacks: [Int],
+    step_kinds: [[Int]],
+    routes: [[Int]],
 }
 
 /// What a field of a generated type holds: the text of a token, a literal
@@ -293,6 +304,8 @@ GrammarPrinter: struct {
 /// `parent` is each node's parent in the parsed structure (-1 at a rule
 /// body, -2 for a node no parse reaches). `decision_of[node]` is the
 /// decision taken at that node, an index into `decisions` (-1 for none).
+/// `kind_names[k]` is token kind `k`'s case in the generated token-kind
+/// enum.
 GrammarPlan: struct {
     tree: RuleTree,
     start: Int,
@@ -305,5 +318,6 @@ GrammarPlan: struct {
     lexer: GrammarLexer,
     keywords: GrammarKeywords,
     shapes: [GrammarShape],
+    kind_names: [String],
     printer: GrammarPrinter,
 }

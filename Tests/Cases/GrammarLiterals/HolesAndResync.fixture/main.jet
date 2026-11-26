@@ -1,0 +1,45 @@
+// A grammar with holes checks a literal's parts: each hole the grammar
+// takes is recorded in its slot, in order. A refused literal reports one
+// error per resync point: after an error inside a repeat the check passes
+// tokens up to the repeat's separator or closing token and goes on. An error
+// outside any repeat, or one no stop follows, ends the check.
+use {
+    core.grammar.[Grammar]
+}
+
+List: Grammar{"""
+    list   : '[' items+=item (',' items+=item)* ']' EOF ;
+    item   : name=NAME '(' args+=arg (',' args+=arg)* ')' # Call | HOLE<slot=Item> # Spliced ;
+    arg    : value=NUMBER # Number | name=NAME # Name | HOLE<slot=Value> # Hole ;
+    NAME   : [a-z]+ ;
+    NUMBER : [0-9]+ ;
+    WS     : [ \n]+ -> skip ;
+"""}
+
+slot_name: fn(slot: ListSlot) -> String {
+    if slot == {
+        .Item -> "Item"
+        .Value -> "Value"
+    }
+}
+
+report: fn(parts: [String]) {
+    if List.check_parts(parts) == {
+        .Ok(checked) -> {
+            names: loop slot in checked.slots -> slot_name(slot)
+            print("ok: {checked.shape.len()} parts, slots {names}")
+        }
+        .Err(errors) -> {
+            print("refused")
+            loop error in errors -> print("  {error}")
+        }
+    }
+}
+
+run: fn() {
+    report([String]{"[f(1, ", "), ", "]"})
+    report([String]{"[f(1, +),\ng(x y), ", "]"})
+    report([String]{"(", "]"})
+    report([String]{"[f(1)", "]"})
+    report([String]{"[f(1, 2"})
+}

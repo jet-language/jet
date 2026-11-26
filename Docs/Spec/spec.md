@@ -93,7 +93,7 @@ vocabulary](vocabulary.md).
   engine. In `Sh`, literal words become argv items and each hole becomes one
   argv item; no word splitting, glob expansion, or shell parsing is applied to
   a hole. In `HTML`, a hole typed `HTML` composes as markup, and any other
-  hole is escaped for where it sits: in text `^`, `<` and `>`; inside an
+  hole is escaped for where it sits: in text `&`, `<` and `>`; inside an
   attribute value its quotes as well, and inside an unquoted value its
   whitespace, `=` and backtick too. Converting a runtime `String` to checked
   text is E0149; the audited
@@ -102,16 +102,39 @@ vocabulary](vocabulary.md).
   D-UNIFYLIT1=A). Jet has no string prefixes: a name written against quoted
   text, such as the retired `sql"…"`, `html"…"` and `sh"…"`, is E0003, and
   the retired three name their `SQL{"…"}`, `HTML{"…"}` or `Sh{"…"}` head.
-- A checked text type is any nominal with one `CheckedText` impl. A
-  `distinct String` type's literal is the joined text, with each hole passed
-  through `encode_hole`. A type that binds `Hole: T` and declares
-  `build: fn(parts: [String], holes: [Hole]) -[]> Owner` keeps its holes as
-  values: `Owner{"a {x} b"}` is `Owner.build(["a ", " b"],
-  [Owner.encode_hole(x)])`, and `check` accepts the parts joined by `{}`
-  before the program runs, or the literal is E2712. Such a literal adds no
-  failure route to the function it is in: a failure of `encode_hole` or
-  `build` stops the program at the literal, as a rejected run-time check
-  does. `Hole` without `build` is E0907 (D-TEXTHEAD-HOLES1=A;
+- A checked text type is any nominal with one `CheckedText` impl. Its
+  `check: fn(parts: [String]) -[]> Checked<Shape, Slot> Error!` receives the
+  literal's parts, the text between its holes and never the joined text, and
+  returns `Checked{shape, slots}`: `shape` is what it learned, computed once
+  before the program runs and embedded as constant data, and `slots[i]` the
+  kind of position hole `i` sits in. `Shape` defaults to `[String]` and
+  `Slot` to `TextSlot`. The check always runs, even for an `Error: Never`
+  type, and a failure is E2712, at the line and column of the literal its
+  error names with an `at: TextSpot` field (`TextSpot{part, offset}`, the
+  byte offset in part `part`), else at the literal. An `Error` that is a
+  list of error types (`[GrammarReport]`) reports each item that way. An
+  error whose type implements
+  `Diagnostic` reports under that impl's code and texts, and an error
+  enum's case that holds one value whose type implements it reports that
+  value so; any other gives
+  E2712, whose Why is the error when it is a `String`. Every refused
+  literal reports in one build. A `distinct String`
+  type's literal is the joined text, with each hole passed through
+  `encode_hole(value, slot)`, and its `check` sees that one text. A type
+  that binds `Hole: T` and declares
+  `build: fn(shape: Shape, holes: [Hole]) -[]> Owner` keeps its holes as
+  values: `Owner{"a {x} b"}` is `Owner.build(shape,
+  [Owner.encode_hole(x, slots[0])])` with the shape and slots `check`
+  returned for `["a ", " b"]`, so `build` never parses again at run time.
+  `Owner.from(text)` is `check([text])`. Such a literal adds no failure route
+  to the function it is in: a failure of `encode_hole` or `build` stops the
+  program at the literal, as a rejected run-time check does. A type that
+  declares `accepts: fn(slot: Slot, hole: TypeId) -[]> String?` judges each
+  hole of run-time code's literals before the program runs, given the slot
+  the hole sits in and its type's TypeId; a reason it gives is E2715 at the
+  hole, and a type without `accepts` accepts every hole. `Hole` without
+  `build` is E0907, as is a `check` that does not return `Checked<Shape,
+  Slot>` with the type's `Error` (D-TEXTHEAD-HOLES1=A;
   Examples/Text/CheckedText/CheckedTextBoundHoles.jet).
 - A marker is a struct whose fields are its arguments, with one
   `impl Marker { … }` block in its body. `Marker` is a Core trait
@@ -491,7 +514,12 @@ global starts from a fresh carrier made at its first use. A point's name may
 be snake_case or ALL_CAPS, and its constructor is refused anywhere else
 (E0644). `NAME: event.new<T>()` still declares an event point while Core's
 own `app.LIFECYCLE` is written that way. Any other global holding an event is
-E0643. Only an explicit
+E0643. A global `Name: Grammar{"""…"""}` declares a grammar when its head
+resolves through the file's `use` table to `core.grammar.Grammar`, through an
+imported item or a module alias, never by its spelling: its name is the
+PascalCase name of the start rule, not an ALL_CAPS constant (E0357), and a
+head that resolves anywhere else, a type the file names `Grammar` included,
+declares nothing. Only an explicit
 `#run { … }` reads build
 inputs. Both globals are visible to functions in the file; only the mutable
 form may be assigned after initialization. A local value whose call reads a

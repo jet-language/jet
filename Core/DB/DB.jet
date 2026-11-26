@@ -304,6 +304,23 @@ priv db_error: fn(message: String) -> DBError Never! { DBError.Failed(message.co
 
 priv db_closed: fn() -> DBError Never! { db_error("database connection is closed") }
 
+// Why a checked SQL literal was rejected: the compiler reports it under the
+// checked text rejection's code with this reason as its Why.
+#Error
+SQLLiteralError: struct {
+    reason: String,
+
+    impl Diagnostic {
+        code: "E2712",
+
+        what: fn(self) -> String { "this checked text type rejected its body" }
+
+        why: fn(self) -> String { "{self.reason}" }
+
+        fix: fn(self) -> String { "fix the body so it satisfies the type's declared text grammar" }
+    }
+}
+
 // Checked SQL: the template text with `?` placeholders plus its bound values.
 // `SQL{"… {value} …"}` is a checked text literal whose holes stay values: each
 // becomes one bound DBValue, never query text.
@@ -323,15 +340,17 @@ SQL: struct {
     }
 
     impl CheckedText {
-        Error: Never,
+        Error: SQLLiteralError,
         Hole: DBValue,
 
         // Every SQL text is accepted; its holes are what keeps a query safe.
-        check: fn(_text: String) -[]> Never! { return Ok() }
+        check: fn(parts: [String]) -[]> Checked<[String], TextSlot> SQLLiteralError! {
+            Ok(Checked{shape: parts.copy(), slots: loop _ in 1..<parts.len() -> TextSlot.Text})
+        }
 
         // A DBValue binds as-is; Int, Float, Bool and byte lists bind as their own
         // variant; anything else binds its display text.
-        encode_hole: fn<T: Printable>(value: T) -[]> DBValue {
+        encode_hole: fn<T: Printable>(value: T, _slot: TextSlot) -[]> DBValue {
             if T == {
                 DBValue -> value.copy()
                 Int -> DBValue.Int(value)
@@ -342,7 +361,7 @@ SQL: struct {
             }
         }
 
-        build: fn(parts: [String], holes: [DBValue]) -[]> SQL { __sql_literal(parts, holes) }
+        build: fn(shape: [String], holes: [DBValue]) -[]> SQL { __sql_literal(shape, holes) }
     }
 }
 

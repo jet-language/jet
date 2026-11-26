@@ -78,8 +78,7 @@ ASSEMBLED_PACKAGES: [String]{"Compiler/JetRuntime", "Compiler/Prelude"}
 
 // The tests.list sections whose areas have no package.jet: Store, Provider
 // and Recipe (`Engine`, one dependency cycle), Services, Image and CLI. Their
-// claims run as one unit Jetpack/Bootstrap/Assemble.jet assembles. JetOS is
-// frozen and stays out.
+// claims run as one unit Jetpack/Bootstrap/Assemble.jet assembles.
 JETPACK_ENGINE_SECTIONS: "Engine,Services,Image,CLI"
 
 // Where the engine unit and the hosted engine are assembled, from the checkout.
@@ -224,9 +223,7 @@ package_suite_rows: fn(rows: TestRows) {
     // its #Tests, a run of its own beside the packages.
     ^candidates: packages.copy()
     loop source in sources {
-        if source.script && test_frozen_tree(source.path) == "" {
-            candidates.push(source.path.copy())
-        }
+        if source.script -> candidates.push(source.path.copy())
     }
     ^runs: [String]{}
     loop run in candidates {
@@ -300,11 +297,10 @@ package_suite_rows: fn(rows: TestRows) {
 }
 
 // The #Test names of each run's sources: a script's are its own, any other
-// source's its owner's (test_owner). Frozen trees hold none a run makes.
+// source's its owner's (test_owner).
 test_names_by_run: fn(setup: SuiteSetup, sources: [TestSource]) -> [String:[String]] {
     ^held: [String:[String]]{}
     loop source in sources {
-        if test_frozen_tree(source.path) != "" -> next
         run: if source.script -> source.path.copy() else -> test_owner(setup.checkout, source.path)
         if run == "" -> next
         ^names: held.get(run) ?? [String]{}
@@ -342,7 +338,7 @@ engine_selected: fn(rows: TestRows, sources: [TestSource]) -> Bool {
     if rows.filter == "" -> return true
     sections: JETPACK_ENGINE_SECTIONS.split(",").to_list()
     loop source in sources {
-        if !source.path.starts_with("Jetpack/") || test_frozen_tree(source.path) != "" -> next
+        if !source.path.starts_with("Jetpack/") -> next
         loop name in source.names {
             if sections.any(fn(section) { rows.selects("Jetpack/{section}: {name}") }) {
                 return true
@@ -635,10 +631,6 @@ package_rows: fn(rows: TestRows, package: String, receipt: ProcessReceipt) -> [S
     Val(names)
 }
 
-// The frozen trees: owner-frozen, so no gate runs their #Tests and none
-// deletes them. The coverage check reports each as one skipped row.
-FROZEN_TREES: [String]{"Jetpack/JetOS"}
-
 COVERAGE_ROW: "#Test coverage"
 
 // A .jet file under COVERAGE_TREES that declares #Tests: its path
@@ -697,18 +689,12 @@ TestRuns: struct {
 // source's are its owner's, the nearest directory with a package.jet, or the
 // engine unit's when the unit's source map lists the file. A run whose own
 // row failed stands for all its sources, and an engine unit that didn't run
-// for the Jetpack sources no package owns. FROZEN_TREES are named skipped
-// rows. Every #Test no run reports is named in the failing row: a package no
+// for the Jetpack sources no package owns. Every #Test no run reports is
+// named in the failing row: a package no
 // gate should run is deleted, not left unrun.
 test_coverage_rows: fn(rows: TestRows, setup: SuiteSetup, members: [String], sources: [TestSource], runs: TestRuns) {
     ^problems: [String]{}
-    ^frozen: [String:Int]{}
     loop source in sources {
-        tree: test_frozen_tree(source.path)
-        if tree != "" {
-            frozen[tree] = (frozen.get(tree) ?? 0) + 1
-            next
-        }
         owner: if source.script -> source.path.copy() else -> test_owner(setup.checkout, source.path)
         if members.contains(owner) || runs.broke.contains(owner) -> next
         in_unit: runs.unit.files.contains(source.path)
@@ -740,21 +726,9 @@ test_coverage_rows: fn(rows: TestRows, setup: SuiteSetup, members: [String], sou
             }
         }
     }
-    loop tree in FROZEN_TREES {
-        count: frozen.get(tree) ?? 0
-        if count > 0 -> rows.skip(tree, "owner-frozen: no gate runs its {count} #Test files")
-    }
     if problems.len() == 0 -> rows.pass(COVERAGE_ROW) else {
         rows.fail(COVERAGE_ROW, "{problems.len()} #Tests no suite runs: {problems.join("; ")}")
     }
-}
-
-// The FROZEN_TREES entry holding a checkout path, else "".
-test_frozen_tree: fn(path: String) -> String {
-    loop tree in FROZEN_TREES {
-        if path.starts_with("{tree}/") -> return tree.copy()
-    }
-    ""
 }
 
 // The nearest directory above a checkout path with a package.jet, else "".

@@ -1,0 +1,54 @@
+// A `Grammar` literal declares a parser. The rules are checked where they are
+// written, each parser rule gives way to a type, and `Ini.parse` reads a
+// document into those types or reports the first error by line and column.
+// Tokens are read in context: a line starts with a key, the value after `=`
+// or `:` runs to the end of the line, and a comment is skipped.
+use core.grammar.[Grammar]
+
+Ini: Grammar{"""
+    ini     : lines+=line (EOL lines+=line)* ;
+    line    : section | entry | blank ;
+    section : '[' name=KEY ']' ;
+    entry   : name=KEY SEP value? ;
+    blank   : ;
+    value   : text=QUOTED   # Quoted
+            | text=BARE     # Bare
+            ;
+    KEY     : [A-Za-z0-9_.\-]+ ;
+    SEP     : '=' | ':' ;
+    QUOTED  : '"' ([^"\\\r\n] | '\\' .)* '"' | '\'' [^'\r\n]* '\'' ;
+    BARE    : [^ \t\r\n;#"'] [^\r\n;#]* ;
+    EOL     : '\r'? '\n' ;
+    WS      : [ \t]+ -> skip ;
+    COMMENT : [;#] [^\r\n]* -> skip ;
+"""}
+
+value_text: fn(value: Value?) -> String {
+    held: value ?? return "nothing"
+    if held == {
+        .Quoted(text) -> "quoted {text}"
+        .Bare(text) -> "bare {text}"
+    }
+}
+
+describe: fn(line: Line) -> String {
+    if line == {
+        .Section(section) -> "section {section.name}"
+        .Entry(entry) -> "entry {entry.name} = {value_text(entry.value)}"
+        .Blank(_) -> "blank"
+    }
+}
+
+run: fn() {
+    source: "[server]\nport = 8080\nname: \"web one\" ; the display name\n\n[client]\nretry =\n"
+    if Ini.parse(source) == {
+        .Ok(doc) -> loop line in doc.lines -> print(describe(line))
+        .Err(error) -> print("error: {error}")
+    }
+    loop broken in ["[server\nport = 1", "port = 1\n= 2"] {
+        if Ini.parse(broken) == {
+            .Ok(_) -> print("parsed")
+            .Err(error) -> print("error: {error}")
+        }
+    }
+}

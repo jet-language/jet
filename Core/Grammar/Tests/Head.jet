@@ -1,0 +1,79 @@
+// `Grammar` is a checked head: its literal's plan is the plan `analyze`
+// builds, its check reports every fault of a refused grammar at its spot,
+// each under its kind's case, and it refuses every hole.
+use {
+    core.grammar.[Grammar, analyze]
+    core.grammar.error.[GrammarFaultKind]
+    core.grammar.plan.[GrammarSource]
+}
+
+PAIR: "pair : key=WORD '=' value=WORD ;\nWORD : [a-z]+ ;\nWS : [ \\t]+ -> skip ;\n"
+
+#Test("a grammar literal keeps the plan analyze builds while building") {
+    grammar: Grammar{"""
+        pair : key=WORD '=' value=WORD ;
+        WORD : [a-z]+ ;
+        WS : [ \t]+ -> skip ;
+        """}
+    if analyze(PAIR, "", [GrammarSource]{}) == {
+        .Ok(plan) -> {
+            assert_eq(grammar.plan.tree.rules.len(), plan.tree.rules.len())
+            assert_eq(grammar.plan.tree.nodes.len(), plan.tree.nodes.len())
+            assert_eq(grammar.plan.tokens.len(), plan.tokens.len())
+            assert_eq(grammar.plan.decision_of, plan.decision_of)
+            assert_eq(grammar.plan.shapes.len(), plan.shapes.len())
+        }
+        .Err(faults) -> panic("{faults}")
+    }
+}
+
+#Test("check is analyze over the one part, every parser rule a start") {
+    two: "a : x=WORD ;\nb : y=WORD WORD ;\nWORD : [a-z]+ ;\n"
+    if Grammar.check([String]{two}) == {
+        .Ok(checked) -> {
+            assert_eq(checked.slots.len(), 0)
+            if analyze(two, "", [GrammarSource]{}) == {
+                .Ok(plan) -> {
+                    assert_eq(checked.shape.start, plan.start)
+                    assert_eq(checked.shape.tree.rules.len(), plan.tree.rules.len())
+                    assert_eq(checked.shape.decision_of, plan.decision_of)
+                }
+                .Err(faults) -> panic("{faults}")
+            }
+        }
+        .Err(faults) -> panic("{faults.len()} faults")
+    }
+}
+
+#Test("check reports every fault of a refused grammar, ordered by spot") {
+    if Grammar.check([String]{"a : b ;\nc : d ;\n"}) == {
+        .Ok(_) -> panic("a grammar naming undefined rules was accepted")
+        .Err(reports) -> {
+            assert_eq(reports.len(), 2)
+            first: reports[0].fault()
+            second: reports[1].fault()
+            assert_eq(first.kind, GrammarFaultKind.UndefinedRule)
+            assert_eq(second.kind, GrammarFaultKind.UndefinedRule)
+            assert_eq(first.at.part, 0)
+            assert(first.at.offset < second.at.offset)
+            if reports[0] == .UndefinedRule(found) -> assert_eq(found.at.offset, first.at.offset) else -> panic("an undefined rule reported under another case")
+        }
+    }
+}
+
+#Test("check refuses every hole, at the place it opens") {
+    if Grammar.check([String]{"a : ", " ", " ;"}) == {
+        .Ok(_) -> panic("a grammar with holes was accepted")
+        .Err(reports) -> {
+            assert_eq(reports.len(), 2)
+            first: reports[0].fault()
+            second: reports[1].fault()
+            assert_eq(first.kind, GrammarFaultKind.Notation)
+            assert_eq(first.at.part, 0)
+            assert_eq(first.at.offset, 4)
+            assert_eq(second.at.part, 1)
+            assert_eq(second.at.offset, 1)
+            assert_eq(first.message, "a grammar literal has no holes")
+        }
+    }
+}

@@ -51,6 +51,7 @@ use {
         FunctionDefaultRef,
         ImplDef,
         ImportDecl,
+        import_walk_bindings,
         ImportedItem,
         ImportKind,
         InternalTag,
@@ -112,6 +113,7 @@ use {
         expr_span,
         core_bare_source_module,
         ir_runtime_handle_row,
+        ir_native_provider_handle_row,
         builtin_codec_trait_ref,
         ModuleID,
         ModuleTable,
@@ -739,6 +741,16 @@ SemaRegistrationModuleInput: struct {
     // Set on that first pass: a root `#loop` over a value not computed yet
     // is left out, without a report, until the value is known.
     loop_values_pending: Bool{false},
+    // The plans of the grammars this module's bindings declare
+    // (sema_grammar_declaring_binding), each the `plan` of the binding's
+    // checked value, by binding name: the driver computes them in one batch
+    // before registration, or reads a Core module's from the record the
+    // Core library's check made of them (CoreBodies.jet
+    // sema_core_grammar_plans), and registration replaces each binding with
+    // the items its plan describes (GrammarItems.jet). A binding whose
+    // literal the grammar check refused has none and stays; the compile
+    // proper reports the literal.
+    grammar_plans: [NamedCtValue]{[NamedCtValue]{}},
 }
 
 SemaForeignImportBinding: struct {
@@ -841,11 +853,15 @@ SemaRegistrationModule: struct {
     // The record of the derive templates' expansions the Core library's
     // check kept for this Core module (Derives.jet sema_derive_memo_capture),
     // at most one, which its bodies file holds (CoreBodies.jet
-    // sema_core_derive_bodies), and how many expansions of the record this
+    // sema_core_module_bodies), and how many expansions of the record this
     // module took did not read (SemaDeriveMemo.unread), a census row
     // (CoreBodies.jet sema_core_bodies_unread).
     derive_captures: [SemaDeriveCapture]{[SemaDeriveCapture]{}},
     derive_unread: Int{0},
+    // The record of the plans of the grammars this Core module declares,
+    // as the Core library's check took them (CoreBodies.jet
+    // sema_core_grammar_capture), at most one, which its bodies file holds.
+    grammar_captures: [SemaDeriveCapture]{[SemaDeriveCapture]{}},
     // The owned traits whose defaults did not parse in this module, so its
     // impls of them gained none (TraitImpls.jet SemaTraitDefaultsUnread), a
     // census row (sema_trait_defaults_unread).
@@ -3913,10 +3929,11 @@ sema_registration_source_owns_impl: fn(module_row: SemaRegistrationModule, name:
     false
 }
 
-// A runtime handle belongs to the Core module that exports it or, for a bare
-// prelude spelling (`Path`), to the module that declares that spelling.
+// A runtime handle, or a native provider handle (a child's pipes), belongs to
+// the Core module that exports it or, for a bare prelude spelling (`Path`),
+// to the module that declares that spelling.
 sema_registration_core_handle_owner: fn(module_name: String, name: String) -> Bool Never! {
-    if ir_runtime_handle_row(name) == None -> return false
+    if ir_runtime_handle_row(name) == None && ir_native_provider_handle_row(name) == None -> return false
     core_module_has_type(module_name, name) || core_bare_source_module(name) == Val((module_name))
 }
 
@@ -4269,6 +4286,13 @@ sema_registration_prepare_module_row: fn(input: ^^SemaRegistrationModuleInput, m
     // Root `#loop` declarations expand first, so every
     // generated impl, conversion, and test registers as a written item.
     sema_derive_expand_template_loops(module_row.program.items, owned.loop_values.move(), owned.loop_values_pending, module_is_core(module_row.module_identity), diagnostics)
+    // A grammar binding gives way to the types, rule and token enums its
+    // plan describes (GrammarItems.jet), before the enums are numbered. The
+    // Core library's check, which keeps a Core module's derive expansions,
+    // keeps its plans too; a compile bound to that Core reads them in place
+    // of computing them (CoreBodies.jet sema_core_grammar_plans).
+    if owned.derive_memo.capture == .Val(_) -> sema_core_grammar_capture(owned.grammar_plans, module_row.grammar_captures)
+    sema_grammar_items_expand(module_row.program, owned.grammar_plans.move(), diagnostics)
     // A number family's impl becomes one impl per standard size, after the
     // root `#loop`s so a family impl one generates expands too.
     module_row.program.items = sema_derive_expand_family_impls(module_row.program.items.move(), module_row.program.imports, diagnostics)
@@ -6853,14 +6877,15 @@ sema_registration_prepare_graph: fn(inputs: ^^[SemaRegistrationModuleInput], edg
     }
     // A lowered inline module's Core member import reads a file-level Core
     // alias that shares the scoped declaration's span (InlineModules.jet
-    // sema_inline_core_imports), and a module's Module record reads core.meta
-    // through its generated alias (ModuleMeta.jet); each alias binds the
-    // loaded Core module it names.
+    // sema_inline_core_imports), a module's Module record reads core.meta
+    // through its generated alias (ModuleMeta.jet), and a grammar's parser
+    // reads core.grammar's modules through theirs (GrammarParse.jet); each
+    // alias binds the loaded Core module it names.
     ^hoisted_names: name_table_sized(2)
     ^hoisted_rows: [Int]{-1}
     ^hoisted_indexed: false
     loop hoisted_module in 0..<graph.modules.len() {
-        hoisted: loop declaration in graph.modules[hoisted_module].program.imports if sema_inline_core_alias_import(declaration) || sema_module_meta_import(declaration) -> declaration
+        hoisted: loop declaration in graph.modules[hoisted_module].program.imports if sema_inline_core_alias_import(declaration) || sema_module_meta_import(declaration) || sema_grammar_items_import(declaration) -> declaration
         if hoisted.len() == 0 -> next
         if !hoisted_indexed {
             hoisted_indexed = true
@@ -6939,7 +6964,7 @@ sema_registration_prepare_graph: fn(inputs: ^^[SemaRegistrationModuleInput], edg
         loop import_index in 0..<import_count {
             ^declaration: graph.modules[module_index].program.imports[import_index]
             found: edge_spans[module_index].get(sema_registration_span_key(declaration.span)) != None
-            if !found && !sema_module_meta_import(declaration) {
+            if !found && !sema_module_meta_import(declaration) && !sema_grammar_items_import(declaration) {
                 sema_registration_push_graph_diagnostic(graph, module_index, sema_error("E0003", declaration.span, "an import declaration has no resolved graph edge", "semantic preparation never resolves private or dependency imports by bare name", "provide the loader-resolved target module identity"))
             }
         }
@@ -7510,4 +7535,54 @@ sema_registration_apply_namespace: fn(graph: SemaRegistrationGraph, module_index
         }
     }
     complete
+}
+
+// The Core type whose literal, as a module binding's value, declares the
+// items of a grammar.
+SEMA_GRAMMAR_HEAD: "core.grammar.Grammar"
+
+// Whether module binding `definition` declares a grammar: an immutable
+// `Name: Head{"…"}` whose head resolves through the module's `use` table
+// `imports` to `core.grammar.Grammar`, by an imported item
+// (`use core.grammar.[Grammar]`) or through an imported module's name
+// (`use g: core.grammar`, then `g.Grammar{"…"}`). The spelling never
+// decides: a head that resolves elsewhere, a type named `Grammar` the
+// module declares included, declares nothing.
+sema_grammar_declaring_binding: fn(imports: [ImportDecl], definition: ConstDef) -> Bool Never! {
+    if definition.mutable -> return false
+    name: sema_grammar_written_head(definition.value) ?? return false
+    if sema_grammar_head_path(imports, name) == .Val(path) -> return path == SEMA_GRAMMAR_HEAD
+    false
+}
+
+// The head `Head{"…"}` writes, when `value` is a checked text literal under a
+// named head.
+sema_grammar_written_head: fn(value: Expr) -> String? Never! {
+    if value == .TypedLit(written, body, _, _) && written == .Val(head) && head == .Named(name) && body == .Value(_) {
+        return Val(name)
+    }
+    None
+}
+
+// The full path head `name` names through the `use` table `imports`. None
+// when no import binds it. A `#run use` row names compile-time code only,
+// never a module binding's head.
+sema_grammar_head_path: fn(imports: [ImportDecl], name: String) -> String? Never! {
+    loop declaration in imports {
+        if declaration.comptime_span != None -> next
+        if sema_grammar_head_target(declaration, name) == .Val(path) -> return Val(path)
+    }
+    None
+}
+
+// The full path head `name` names through the one import row
+// `declaration`: the imported module or item its first segment binds, then
+// its other segments. None when the row binds no such name.
+sema_grammar_head_target: fn(declaration: ImportDecl, name: String) -> String? Never! {
+    loop binding in import_walk_bindings(declaration) {
+        target: if binding.original == .Val(original) -> "{binding.module_alias}.{original}" else -> binding.module_alias.copy()
+        if name == binding.local -> return Val(target)
+        if name.starts_with("{binding.local}.") -> return Val("{target}{name.slice(binding.local.len(), name.len())}")
+    }
+    None
 }

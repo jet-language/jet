@@ -1,8 +1,8 @@
 // Captured plans (derive-only data) produced by module evaluation: the
-// per-module `EvaluatedModule`, system and image plans, dev-supervised
-// services, typed secret declarations, and the runnable `EnvPlan`.
+// per-module `EvaluatedModule`, image plans, dev-supervised services, typed
+// secret declarations, and the runnable `EnvPlan`.
 use {
-    jet_foundation.[CtValue, Namespace]
+    jet_foundation.[Namespace]
     jet_pkg_model.[BuildRecipe, EntryContribution, Pkg, SourceTable]
 }
 
@@ -189,11 +189,6 @@ ModuleEntry: struct {
 EvaluatedModule: struct {
     name: String,
     entries: [ModuleEntry],
-    // U11: ordered system contributions for the shared JetOS engine.
-    systems: [SystemPlan]{[SystemPlan]{}},
-    // U15: `fleet.<name>:` and `vmtest.<name>:` host captures.
-    fleets: [FleetPlan]{[FleetPlan]{}},
-    vmtests: [FleetPlan]{[FleetPlan]{}},
     // U14: `image.<name>:` contributions.
     images: [ImagePlan],
     // Environment-scoped facts. Source evaluation selects one name before
@@ -205,46 +200,6 @@ EvaluatedModule: struct {
     // Source-backed package generation declarations. These
     // are not environment presets and never affect shell selection.
     package_profiles: [PackageProfileSpec],
-}
-
-// U15: one captured host of a fleet or vmtest and the system it runs.
-HostPlan: struct {
-    name: String,
-    system: String,
-    // Typed copy-with-update facts and exact record text; source is provenance,
-    // never deferred evaluation.
-    overrides: HostOverride?,
-    override_source: String?,
-}
-
-// Preserve source order and the System field shapes; generic host-local fields
-// use the shared comptime values.
-HostOverride: struct {
-    fields: [{name: String, value: HostOverrideValue}],
-    source: String,
-    provenance: [HostOverrideProvenance],
-}
-
-HostOverrideProvenance: struct {
-    field: String,
-    dependencies: [String],
-    pure: Bool,
-    source: String,
-}
-
-HostOverrideValue: enum {
-    Platform(value: String),
-    Packages(values: [Pkg]),
-    Services(values: [ServicePlan]),
-    Options(values: [OptionPlan]),
-    Value(value: CtValue),
-}
-
-// U15: a `fleet.<name>:` (or `vmtest.<name>:`) capture; frozen jetos
-// research whose hosts are still cross-checked against the known systems.
-FleetPlan: struct {
-    name: String,
-    hosts: [HostPlan],
 }
 
 // U20: an ad-hoc adapter package declared with `Pkg.adapt(...)`.
@@ -266,35 +221,6 @@ AdapterRecipe: enum {
 // `Recipe.prebuilt(bin: "...", as: "...")`: install one executable under
 // `bin/<as>`.
 // `Recipe.build(steps: […])`: a finite, digestable executable action graph.
-
-// The checked system contribution.
-// Realization belongs to JetOS; these carriers preserve the evaluator's
-// source-qualified packages, ordered services, and ordered option facts.
-SystemPlan: struct {
-    name: String,
-    target: String,
-    packages: [Pkg],
-    services: [ServicePlan],
-    options: [OptionPlan],
-}
-
-// Open service fields retain their source order and text.
-ServicePlan: struct {
-    name: String,
-    enable: Bool,
-    extra: [ServicePlanExtra],
-}
-
-ServicePlanExtra: struct {
-    key: String,
-    value: String,
-}
-
-// One dotted option key and its rendered display value.
-OptionPlan: struct {
-    key: String,
-    value: String,
-}
 
 // U12: one captured dev-supervised `Service` record under an `env.<name>`
 // role-module's `services:` map. Jetpack's dev-runtime tier owns and
@@ -369,30 +295,18 @@ ShutdownPolicy: enum {
 // Send TERM, wait up to `grace_ms`, then use the bounded KILL fallback.
 // Skip the graceful signal and terminate the verified process group.
 
-// The referent selects the realization tier. ISO disk images
-// inherit system facts; OCI images project a package or environment.
-ImageKind: enum {
-    Iso,
-    OCI,
-}
-
-// U14 one checked image contribution. ISO inherits its
-// system's packages/services/options; OCI supplies container projection facts.
+// U14 one checked OCI image contribution.
 ImagePlan: struct {
     // The contribution path — the `<name>` in `image.<name>`.
     name: String,
-    // Which referent `from:` names, and which tier realizes this image.
-    kind: ImageKind,
-    // The source system, package, or environment's contribution name.
+    // The source package or environment's contribution name.
     from: String,
-    // ISO disk-image format; empty for an OCI projection.
-    format: String{""},
     // True when `from:` projects an `env.<name>` into an OCI
     // shell image. The source kind stays explicit in the plan so realization
     // cannot confuse an environment with an executable package.
     from_environment: Bool,
-    // An explicit target platform; ISO inherits it through its system,
-    // while an OCI environment records it for the image realization path.
+    // An explicit target platform an OCI environment records for the image
+    // realization path.
     target: String?,
     // `expose: [Int]` — TCP ports recorded as `ExposedPorts` in the OCI image
     // config. Sorted + deduped for reproducibility.
@@ -423,8 +337,8 @@ ImageEnvVar: struct {
     value: String,
 }
 
-// The runnable environment plan, sharing captured system/image declarations
-// with the JetOS tier rather than maintaining another evaluator model.
+// The runnable environment plan, sharing captured image declarations with
+// the evaluator rather than maintaining another model.
 EnvPlan: struct {
     table: SourceTable,
     // The source files that contributed to this graph, relative to the
@@ -440,8 +354,6 @@ EnvPlan: struct {
     // U20 adapter packages declared in `packages:`. Kept separate from refs
     // because they have inline build identity and no provider selector.
     adapters: [AdapterPlan],
-    // U11: checked system contributions, in source/discovery order.
-    systems: [SystemPlan]{[SystemPlan]{}},
     prompt: String?,
     prompt_path: PromptPathMode,
     prompt_strip: PromptStripMode,

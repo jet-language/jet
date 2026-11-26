@@ -41,7 +41,6 @@ check_program: fn(input: Program, module_name: String, source_file: String, sour
     sema_marker_rules_validate_allow(source_program, diagnostics)
     ^functions: [FnBody]{}
     ^call_facts: [SemaCallSiteFact]{}
-    ^hardware_use: sema_hardware_empty_use()
     ^name_references: [SemaNameReferenceFact]{}
     ^comptime_requests: [SemaComptimeRequest]{}
     ^comptime_body_sources: [SemaComptimeBodySource]{}
@@ -123,7 +122,6 @@ check_program: fn(input: Program, module_name: String, source_file: String, sour
                         sema_remap_comptime_requests_from(function_comptime_requests, 0, remap)
                     }
                 }
-                sema_hardware_use_merge(hardware_use, sema_hardware_use_snapshot(checked.hardware_use))
                 comptime_body_sources.extend(checked.comptime_body_sources.move())
                 compute_facts.push(checked.compute_facts)
                 exact_int_reachable = exact_int_reachable || checked.exact_int_reachable
@@ -143,7 +141,7 @@ check_program: fn(input: Program, module_name: String, source_file: String, sour
     // failure-domain obligation is emitted as reported.
     if sema_failure_settle_obligations(diagnostics, name_table_sized(4)) -> complete = false
     sema_attach_diagnostic_source_locations(diagnostics, 0, source_segments)
-    SemaResult{module_name: module_name, functions: functions, call_facts: call_facts, hardware_use: hardware_use, comptime_requests: comptime_requests, comptime_body_sources: comptime_body_sources, compute_facts: compute_facts, name_references: name_references, exact_int_reachable: exact_int_reachable, copy_events: copy_events, diagnostics: diagnostics, complete: complete, interner: program.registration_graph.interner.move()}
+    SemaResult{module_name: module_name, functions: functions, call_facts: call_facts, comptime_requests: comptime_requests, comptime_body_sources: comptime_body_sources, compute_facts: compute_facts, name_references: name_references, exact_int_reachable: exact_int_reachable, copy_events: copy_events, diagnostics: diagnostics, complete: complete, interner: program.registration_graph.interner.move()}
 }
 
 // The environment of a pass over `program`, whose tables keep the pass's one
@@ -488,7 +486,7 @@ sema_check_registration_module_tail: fn(owned_run: ^^SemaModuleCheckRun, environ
             generated: sema_check_generated_method_author_span(job, module_index, environment, program) != None || sema_check_generated_codec_method(job, module_index, program)
             references_from: module_result.name_references.len()
             calls_from: module_result.call_facts.len()
-            if !sema_check_apply_method_job(module_index, memory_plan, job, method_ready.bodies, method_ready.body_deltas, scopes, environment, program, host_hooks, comptime_functions, comptime_rows, module_result.diagnostics, module_result.functions, prelude_demands, module_result.type_delta, module_result.call_facts, module_result.hardware_use, module_result.comptime_requests, module_result.name_references, module_result.comptime_body_sources, module_result.compute_facts, module_result.failure_facts, module_result.exact_int_reachable, module_result.copy_events, module_result.eval_answers, module_result.core_bodies, module_result.incomplete_reasons, run.keep_going, pending_obligations) {
+            if !sema_check_apply_method_job(module_index, memory_plan, job, method_ready.bodies, method_ready.body_deltas, scopes, environment, program, host_hooks, comptime_functions, comptime_rows, module_result.diagnostics, module_result.functions, prelude_demands, module_result.type_delta, module_result.call_facts, module_result.comptime_requests, module_result.name_references, module_result.comptime_body_sources, module_result.compute_facts, module_result.failure_facts, module_result.exact_int_reachable, module_result.copy_events, module_result.eval_answers, module_result.core_bodies, module_result.incomplete_reasons, run.keep_going, pending_obligations) {
                 module_result.complete = false
             }
             if generated {

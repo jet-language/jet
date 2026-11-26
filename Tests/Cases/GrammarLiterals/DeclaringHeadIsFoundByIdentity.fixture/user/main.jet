@@ -1,0 +1,21 @@
+// A checked head the module declares under the name `Grammar`: the spelling
+// matches, the identity does not, so the binding declares nothing and is an
+// ordinary constant held to ALL_CAPS.
+Grammar: struct {
+    text: String,
+
+    impl CheckedText {
+        Error: String,
+        Hole: String,
+
+        check: fn(parts: [String]) -[]> Checked<[String], TextSlot> String! {
+            Ok(Checked{shape: parts.copy(), slots: loop _ in 1..<parts.len() -> TextSlot.Text})
+        }
+
+        encode_hole: fn<T: Printable>(value: T, _slot: TextSlot) -[]> String { "{value}" }
+
+        build: fn(shape: [String], holes: [String]) -[]> Grammar { Grammar{text: "{shape.join(" ")}{holes.len()}"} }
+    }
+}
+
+Pair: Grammar{"pair : key=WORD ;"}

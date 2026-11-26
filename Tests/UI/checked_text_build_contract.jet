@@ -12,9 +12,9 @@ impl Loose.CheckedText {
     Error: TextError,
     Hole: Int,
 
-    check: fn(text: String) -[]> TextError! { return Ok() }
+    check: fn(parts: [String]) -[]> Checked<[String], TextSlot> TextError! { return Ok(Checked{shape: parts.copy(), slots: [TextSlot]{}}) }
 
-    encode_hole: fn<T: Printable>(value: T) -[]> Int { 0 }
+    encode_hole: fn<T: Printable>(value: T, _slot: TextSlot) -[]> Int { 0 }
 }
 
 Record: struct {
@@ -24,11 +24,11 @@ Record: struct {
         Error: TextError,
         Hole: Int,
 
-        check: fn(text: String) -[]> TextError! { return Ok() }
+        check: fn(parts: [String]) -[]> Checked<[String], TextSlot> TextError! { return Ok(Checked{shape: parts.copy(), slots: [TextSlot]{}}) }
 
-        encode_hole: fn<T: Printable>(value: T) -[]> Int { 0 }
+        encode_hole: fn<T: Printable>(value: T, _slot: TextSlot) -[]> Int { 0 }
 
-        build: fn(parts: [String], holes: [String]) -[]> String { parts.join("") }
+        build: fn(shape: [String], holes: [String]) -[]> String { shape.join("") }
     }
 }
 

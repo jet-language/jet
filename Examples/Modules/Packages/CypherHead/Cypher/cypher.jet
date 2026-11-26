@@ -3,9 +3,21 @@
 // `$2`, … in the query text, and `check` rejects unbalanced brackets before
 // the program runs.
 
+// A refused query reports under the checked text rejection's code, with the
+// package's reason as its Why.
 #Error
 CypherError: struct {
     reason: String,
+
+    impl Diagnostic {
+        code: "E2712",
+
+        what: fn(self) -> String { "this checked text type rejected its body" }
+
+        why: fn(self) -> String { "{self.reason}" }
+
+        fix: fn(self) -> String { "fix the body so it satisfies the type's declared text grammar" }
+    }
 }
 
 Param: enum {
@@ -21,31 +33,33 @@ Cypher: struct {
         Error: CypherError,
         Hole: Param,
 
-        check: fn(text: String) -[]> CypherError! {
+        check: fn(parts: [String]) -[]> Checked<[String], TextSlot> CypherError! {
             ^depth: 0
-            loop byte in text.bytes() {
-                if byte == (U8{40}) || byte == (U8{91}) -> depth += 1
-                if byte == (U8{41}) || byte == (U8{93}) {
-                    if depth == 0 {
-                        return Err(CypherError{reason: "a Cypher query closes a bracket it never opened"})
+            loop part in parts {
+                loop byte in part.bytes() {
+                    if byte == (U8{40}) || byte == (U8{91}) -> depth += 1
+                    if byte == (U8{41}) || byte == (U8{93}) {
+                        if depth == 0 {
+                            return Err(CypherError{reason: "a Cypher query closes a bracket it never opened"})
+                        }
+                        depth -= 1
                     }
-                    depth -= 1
                 }
             }
             if depth != 0 -> return Err(CypherError{reason: "a Cypher query leaves a bracket open"})
-            return Ok()
+            Ok(Checked{shape: parts.copy(), slots: loop _ in 1..<parts.len() -> TextSlot.Text})
         }
 
-        encode_hole: fn<T: Printable>(value: T) -[]> Param {
+        encode_hole: fn<T: Printable>(value: T, _slot: TextSlot) -[]> Param {
             if T == {
                 Int -> Param.Number(value)
                 else -> Param.Word("{value}")
             }
         }
 
-        build: fn(parts: [String], holes: [Param]) -[]> Cypher {
-            ^text: parts[0].copy()
-            loop index in 0..<holes.len() -> text = "{text}${index + 1}{parts[index + 1]}"
+        build: fn(shape: [String], holes: [Param]) -[]> Cypher {
+            ^text: shape[0].copy()
+            loop index in 0..<holes.len() -> text = "{text}${index + 1}{shape[index + 1]}"
             Cypher{text: text, params: holes.copy()}
         }
     }

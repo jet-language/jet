@@ -16,7 +16,6 @@ use jet_foundation.[
     TFailureCarrier,
     TagMarker,
     Type,
-    expr_span,
 ]
 
 sema_process_named: fn(name: String) -> Type Never! { Type.Named{name: name} }
@@ -30,12 +29,6 @@ sema_process_handle_type: fn(name: String) -> Bool Never! {
         "ProcessChild" | "ProcessPlan" | "ProcessStdin" | "ProcessStdoutStream" | "ProcessStderrStream" | "ProcessLines" | "TerminalPolicy" | "TerminalSize" | "TerminalSession" -> true
         else -> false
     }
-}
-
-sema_process_result: fn(ok: Type, err: Type) -> Type Never! { Type.Result{ok: ok, err: err} }
-
-sema_process_io_result: fn(ok: Type) -> Type Never! {
-    sema_process_result(ok, Type.Named{name: "IOError"})
 }
 
 sema_process_infer_args: fn(args: [CallArg], check: ^SemaBodyCheck) Never! {
@@ -349,102 +342,18 @@ sema_process_spec_keep_open: fn(receiver: Expr, receiver_value: TExpr, args: [Ca
     SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, check)}
 }
 
-sema_process_terminal_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
-    if method != "resize" -> return SemaMethodSpecialCheck{handled: false, value: None}
-    if args.len() != 1 {
-        sema_process_wrong_arity(method, 1, args.len(), span, check.diagnostics)
-        sema_process_infer_args(args, check)
-        return SemaMethodSpecialCheck{handled: true, value: None}
-    }
-    ^required: [Type]{sema_process_named("TerminalSize")}
-    values: sema_process_check_args(args, required, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    if !sema_process_check_method_ownership(receiver, "TerminalSession.resize", args, required, [Bool]{}, AccessConvention.Read, span, check) {
-        return SemaMethodSpecialCheck{handled: true, value: None}
-    }
-    sema_process_finish(receiver_value, BodyHandleOp.TerminalSessionResize, values, sema_process_io_result(Type.Named{name: "Unit"}), "IO", "TerminalSession.resize", span, expected, check)
-}
-
-sema_process_stdin_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
-    // `write(text)` and `write_bytes(bytes)` write every byte; `write_some(bytes)`
-    // is one partial write that reports the count taken.
-    if method != "write" && method != "write_some" && method != "write_bytes" && method != "close" {
-        return SemaMethodSpecialCheck{handled: false, value: None}
-    }
-    required_arity: if method == "close" -> 0 else -> 1
-    if args.len() != required_arity {
-        sema_process_wrong_arity(method, required_arity, args.len(), span, check.diagnostics)
-        sema_process_infer_args(args, check)
-        return SemaMethodSpecialCheck{handled: true, value: None}
-    }
-    if method == "write" && sema_process_byte_write(args, check) {
-        return SemaMethodSpecialCheck{handled: true, value: None}
-    }
-    required: if method == {
-        "write" -> [Type]{Type.String}
-        "write_some" | "write_bytes" -> [Type]{Type.List{element: Type.IntN{signed: false, bits: 8}}}
-        else -> [Type]{}
-    }
-    values: sema_process_check_args(args, required, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    if !sema_process_check_method_ownership(receiver, "ProcessStdin.{method}", args, required, [Bool]{}, AccessConvention.Read, span, check) {
-        return SemaMethodSpecialCheck{handled: true, value: None}
-    }
-    result: if method == {
-        "write_some" -> sema_process_io_result(Type.Int)
-        "close" -> Type.Named{name: "Unit"}
-        else -> sema_process_io_result(Type.Named{name: "Unit"})
-    }
-    operation: if method == {
-        "write" -> BodyHandleOp.ProcessStdinWriteText
-        "write_some" -> BodyHandleOp.ProcessStdinWrite
-        "write_bytes" -> BodyHandleOp.ProcessStdinWriteAll
-        else -> BodyHandleOp.ProcessStdinClose
-    }
-    sema_process_finish(receiver_value, operation, values, result, "Exec", "ProcessStdin.{method}", span, expected, check)
-}
-
-// A `[U8]` given to the text `write` is the argument mismatch whose fix names
-// `write_bytes`.
-sema_process_byte_write: fn(args: [CallArg], check: ^SemaBodyCheck) -> Bool {
-    if args[0].label != None -> return false
-    ^probe_diagnostics: [Diagnostic]{}
-    probed: sema_probe_expression(args[0].expr, None, check, probe_diagnostics) ?? return false
-    offered: sema_expr_unwrap_tag(probed.ty)
-    if offered != (Type.List{element: Type.IntN{signed: false, bits: 8}}) -> return false
-    check.diagnostics.push(sema_call_argument_mismatch("write", 0, Type.String, None, offered, args[0].expr, expr_span(args[0].expr), check.program.*))
-    true
-}
-
+// `lines()` on a child's output or error output: the lazy line walk the loop
+// lowering reads. Their other methods are core.process's.
 sema_process_stream_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
-    if method != "lines" && method != "read_bytes" && method != "chunks" {
-        return SemaMethodSpecialCheck{handled: false, value: None}
-    }
-    required_arity: if method == "lines" -> 0 else if method == "chunks" && args.len() == 0 -> 0 else -> 1
-    if args.len() != required_arity {
-        sema_process_wrong_arity(method, required_arity, args.len(), span, check.diagnostics)
+    if method != "lines" -> return SemaMethodSpecialCheck{handled: false, value: None}
+    if args.len() != 0 {
+        sema_process_wrong_arity(method, 0, args.len(), span, check.diagnostics)
         sema_process_infer_args(args, check)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    ^stream_name: sema_process_handle_receiver_name(receiver_value.ty)
-    ^api: "{stream_name}.{method}"
-    required: if required_arity == 1 -> [Type]{Type.Int} else -> [Type]{}
-    values: sema_process_check_args(args, required, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    if !sema_process_check_method_ownership(receiver, api, args, required, [Bool]{}, AccessConvention.Read, span, check) {
+    api: "{sema_process_handle_receiver_name(receiver_value.ty)}.{method}"
+    if !sema_process_check_method_ownership(receiver, api, args, [Type]{}, [Bool]{}, AccessConvention.Read, span, check) {
         return SemaMethodSpecialCheck{handled: true, value: None}
-    }
-    // `read_bytes(max)`: Read::read on the pipe, up to `max` bytes, empty at
-    // EOF.
-    if method == "read_bytes" {
-        operation: if stream_name == "ProcessStderrStream" -> BodyHandleOp.ProcessStderrRead else -> BodyHandleOp.ProcessStdoutRead
-        return sema_process_finish(receiver_value, operation, values, sema_process_io_result(Type.List{element: Type.IntN{signed: false, bits: 8}}), "Exec", api, span, expected, check)
-    }
-    // `chunks(size)`: the Core source body filling ProcessStdoutChunks /
-    // ProcessStderrChunks builds the loop source, whose Iterable reads the pipe
-    // `size` bytes at a time, so every tier runs the same Jet code.
-    if method == "chunks" {
-        result: Type.Named{name: sema_core_module_nominal(check.program.*, "core.process", "ProcessChunks")}
-        role: if stream_name == "ProcessStderrStream" -> "ProcessStderrChunks" else -> "ProcessStdoutChunks"
-        size: if values.len() == 1 -> values[0].copy() else -> sema_tree_node(Type.Int, TExprKind.IntLit{value: 65536, width: None}, span)
-        return sema_process_source_call(role, api, "Exec", [TExpr]{receiver_value, size}, result, span, expected, check)
     }
     sema_process_finish(receiver_value, BodyHandleOp.ProcessLines, [TExpr]{}, sema_process_named("ProcessLines"), "Exec", api, span, expected, check)
 }
@@ -471,12 +380,6 @@ sema_call_try_process_handle_method: fn(receiver: Expr, receiver_value: TExpr, m
     receiver_name: sema_process_handle_receiver_name(receiver_value.ty)
     if receiver_name == "ProcessSpec" {
         return sema_process_spec_method(receiver, receiver_value, method, args, span, expected, check)
-    }
-    if receiver_name == "TerminalSession" {
-        return sema_process_terminal_method(receiver, receiver_value, method, args, span, expected, check)
-    }
-    if receiver_name == "ProcessStdin" {
-        return sema_process_stdin_method(receiver, receiver_value, method, args, span, expected, check)
     }
     if receiver_name == "ProcessStdoutStream" || receiver_name == "ProcessStderrStream" {
         return sema_process_stream_method(receiver, receiver_value, method, args, span, expected, check)

@@ -6539,14 +6539,12 @@ body_codec_put_outputkind: fn(out: ^BodyCodecOut, value: OutputKind) Never! {
         .Check -> { body_codec_put_tag(out, 3) }
         .Environment -> { body_codec_put_tag(out, 4) }
         .Image -> { body_codec_put_tag(out, 5) }
-        .Bundle -> { body_codec_put_tag(out, 6) }
-        .System -> { body_codec_put_tag(out, 7) }
-        .Fleet -> body_codec_put_tag(out, 8)
+        .Bundle -> body_codec_put_tag(out, 6)
     }
 }
 
 body_codec_get_outputkind: fn(bytes: [U8], input: ^BodyCodecIn) -> OutputKind Never! {
-    position: body_codec_get_tag(bytes, input, 9, 0)
+    position: body_codec_get_tag(bytes, input, 7, 0)
     if position == {
         1 -> OutputKind.Executable
         2 -> OutputKind.Service
@@ -6554,8 +6552,6 @@ body_codec_get_outputkind: fn(bytes: [U8], input: ^BodyCodecIn) -> OutputKind Ne
         4 -> OutputKind.Environment
         5 -> OutputKind.Image
         6 -> OutputKind.Bundle
-        7 -> OutputKind.System
-        8 -> OutputKind.Fleet
         else -> OutputKind.Library
     }
 }
@@ -6811,24 +6807,18 @@ body_codec_get_contribution: fn(bytes: [U8], input: ^BodyCodecIn) -> Contributio
 body_codec_put_namespace: fn(out: ^BodyCodecOut, value: Namespace) Never! {
     if value == {
         .Env -> { body_codec_put_tag(out, 0) }
-        .System -> { body_codec_put_tag(out, 1) }
-        .Image -> { body_codec_put_tag(out, 2) }
-        .Fleet -> { body_codec_put_tag(out, 3) }
-        .VMTest -> { body_codec_put_tag(out, 4) }
-        .Perf -> { body_codec_put_tag(out, 5) }
-        .Profile -> body_codec_put_tag(out, 6)
+        .Image -> { body_codec_put_tag(out, 1) }
+        .Perf -> { body_codec_put_tag(out, 2) }
+        .Profile -> body_codec_put_tag(out, 3)
     }
 }
 
 body_codec_get_namespace: fn(bytes: [U8], input: ^BodyCodecIn) -> Namespace Never! {
-    position: body_codec_get_tag(bytes, input, 7, 0)
+    position: body_codec_get_tag(bytes, input, 4, 0)
     if position == {
-        1 -> Namespace.System
-        2 -> Namespace.Image
-        3 -> Namespace.Fleet
-        4 -> Namespace.VMTest
-        5 -> Namespace.Perf
-        6 -> Namespace.Profile
+        1 -> Namespace.Image
+        2 -> Namespace.Perf
+        3 -> Namespace.Profile
         else -> Namespace.Env
     }
 }
@@ -6843,61 +6833,37 @@ body_codec_put_contribvalue: fn(out: ^BodyCodecOut, value: ContribValue) Never! 
             body_codec_put_tag(out, 1)
             body_codec_put_envlit(out, p0)
         }
-        .System(p0) -> {
-            body_codec_put_tag(out, 2)
-            body_codec_put_systemlit(out, p0)
-        }
         .Image(p0) -> {
-            body_codec_put_tag(out, 3)
+            body_codec_put_tag(out, 2)
             body_codec_put_imagelit(out, p0)
         }
-        .Fleet(p0) -> {
-            body_codec_put_tag(out, 4)
-            body_codec_put_fleetlit(out, p0)
-        }
-        .VMTest(p0) -> {
-            body_codec_put_tag(out, 5)
-            body_codec_put_vmtestlit(out, p0)
-        }
         .Profile(p0) -> {
-            body_codec_put_tag(out, 6)
+            body_codec_put_tag(out, 3)
             body_codec_put_profilelit(out, p0)
         }
         .Perf(p0) -> {
-            body_codec_put_tag(out, 7)
+            body_codec_put_tag(out, 4)
             body_codec_put_perflit(out, p0)
         }
     }
 }
 
 body_codec_get_contribvalue: fn(bytes: [U8], input: ^BodyCodecIn) -> ContribValue Never! {
-    position: body_codec_get_tag(bytes, input, 8, 0)
+    position: body_codec_get_tag(bytes, input, 5, 0)
     if position == {
         1 -> {
             f0: body_codec_get_envlit(bytes, input)
             ContribValue.Env{value: f0}
         }
         2 -> {
-            f0: body_codec_get_systemlit(bytes, input)
-            ContribValue.System{value: f0}
-        }
-        3 -> {
             f0: body_codec_get_imagelit(bytes, input)
             ContribValue.Image{value: f0}
         }
-        4 -> {
-            f0: body_codec_get_fleetlit(bytes, input)
-            ContribValue.Fleet{value: f0}
-        }
-        5 -> {
-            f0: body_codec_get_vmtestlit(bytes, input)
-            ContribValue.VMTest{value: f0}
-        }
-        6 -> {
+        3 -> {
             f0: body_codec_get_profilelit(bytes, input)
             ContribValue.Profile{value: f0}
         }
-        7 -> {
+        4 -> {
             f0: body_codec_get_perflit(bytes, input)
             ContribValue.Perf{value: f0}
         }
@@ -6975,130 +6941,6 @@ body_codec_get_serviceentry: fn(bytes: [U8], input: ^BodyCodecIn) -> ServiceEntr
     ServiceEntry{name: f0, name_span: f1, explicit_type: f2, fields: f3, span: f4}
 }
 
-body_codec_put_list_systemfield: fn(out: ^BodyCodecOut, values: [SystemField]) Never! {
-    body_codec_put_count(out, values.len())
-    loop value in values -> body_codec_put_systemfield(out, value)
-}
-
-body_codec_get_list_systemfield: fn(bytes: [U8], input: ^BodyCodecIn) -> [SystemField] Never! {
-    count: body_codec_get_count(bytes, input, 1)
-    ^values: [SystemField]{}
-    loop _ in 0..<count -> values.push(body_codec_get_systemfield(bytes, input))
-    values
-}
-
-body_codec_put_systemlit: fn(out: ^BodyCodecOut, value: SystemLit) Never! {
-    body_codec_put_opt_span(out, value.explicit_type)
-    body_codec_put_list_systemfield(out, value.fields)
-    body_codec_put_span(out, value.span)
-}
-
-body_codec_get_systemlit: fn(bytes: [U8], input: ^BodyCodecIn) -> SystemLit Never! {
-    f0: body_codec_get_opt_span(bytes, input)
-    f1: body_codec_get_list_systemfield(bytes, input)
-    f2: body_codec_get_span(bytes, input)
-    SystemLit{explicit_type: f0, fields: f1, span: f2}
-}
-
-body_codec_put_systemfield: fn(out: ^BodyCodecOut, value: SystemField) Never! {
-    body_codec_put_string(out, value.name)
-    body_codec_put_span(out, value.name_span)
-    body_codec_put_systemfieldvalue(out, value.value)
-    body_codec_put_span(out, value.span)
-}
-
-body_codec_get_systemfield: fn(bytes: [U8], input: ^BodyCodecIn) -> SystemField Never! {
-    f0: body_codec_get_string(bytes, input)
-    f1: body_codec_get_span(bytes, input)
-    f2: body_codec_get_systemfieldvalue(bytes, input)
-    f3: body_codec_get_span(bytes, input)
-    SystemField{name: f0, name_span: f1, value: f2, span: f3}
-}
-
-body_codec_put_list_optionentry: fn(out: ^BodyCodecOut, values: [OptionEntry]) Never! {
-    body_codec_put_count(out, values.len())
-    loop value in values -> body_codec_put_optionentry(out, value)
-}
-
-body_codec_get_list_optionentry: fn(bytes: [U8], input: ^BodyCodecIn) -> [OptionEntry] Never! {
-    count: body_codec_get_count(bytes, input, 1)
-    ^values: [OptionEntry]{}
-    loop _ in 0..<count -> values.push(body_codec_get_optionentry(bytes, input))
-    values
-}
-
-body_codec_put_systemfieldvalue: fn(out: ^BodyCodecOut, value: SystemFieldValue) Never! {
-    if value == {
-        .Platform(p0, p1, p2) -> {
-            body_codec_put_tag(out, 0)
-            body_codec_put_string(out, p0)
-            body_codec_put_string(out, p1)
-            body_codec_put_span(out, p2)
-        }
-        .Packages(p0) -> {
-            body_codec_put_tag(out, 1)
-            body_codec_put_expr(out, p0)
-        }
-        .Services(p0) -> {
-            body_codec_put_tag(out, 2)
-            body_codec_put_list_serviceentry(out, p0)
-        }
-        .Options(p0) -> {
-            body_codec_put_tag(out, 3)
-            body_codec_put_list_optionentry(out, p0)
-        }
-        .Other(p0) -> {
-            body_codec_put_tag(out, 4)
-            body_codec_put_expr(out, p0)
-        }
-    }
-}
-
-body_codec_get_systemfieldvalue: fn(bytes: [U8], input: ^BodyCodecIn) -> SystemFieldValue Never! {
-    position: body_codec_get_tag(bytes, input, 5, 0)
-    if position == {
-        1 -> {
-            f0: body_codec_get_expr(bytes, input)
-            SystemFieldValue.Packages{value: f0}
-        }
-        2 -> {
-            f0: body_codec_get_list_serviceentry(bytes, input)
-            SystemFieldValue.Services{entries: f0}
-        }
-        3 -> {
-            f0: body_codec_get_list_optionentry(bytes, input)
-            SystemFieldValue.Options{entries: f0}
-        }
-        4 -> {
-            f0: body_codec_get_expr(bytes, input)
-            SystemFieldValue.Other{value: f0}
-        }
-        else -> {
-            f0: body_codec_get_string(bytes, input)
-            f1: body_codec_get_string(bytes, input)
-            f2: body_codec_get_span(bytes, input)
-            SystemFieldValue.Platform{os: f0, arch: f1, span: f2}
-        }
-    }
-}
-
-body_codec_put_optionentry: fn(out: ^BodyCodecOut, value: OptionEntry) Never! {
-    body_codec_put_string(out, value.key)
-    body_codec_put_span(out, value.key_span)
-    body_codec_put_expr(out, value.value)
-    body_codec_put_span(out, value.value_span)
-    body_codec_put_span(out, value.span)
-}
-
-body_codec_get_optionentry: fn(bytes: [U8], input: ^BodyCodecIn) -> OptionEntry Never! {
-    f0: body_codec_get_string(bytes, input)
-    f1: body_codec_get_span(bytes, input)
-    f2: body_codec_get_expr(bytes, input)
-    f3: body_codec_get_span(bytes, input)
-    f4: body_codec_get_span(bytes, input)
-    OptionEntry{key: f0, key_span: f1, value: f2, value_span: f3, span: f4}
-}
-
 body_codec_put_list_imagefield: fn(out: ^BodyCodecOut, values: [ImageField]) Never! {
     body_codec_put_count(out, values.len())
     loop value in values -> body_codec_put_imagefield(out, value)
@@ -7146,26 +6988,21 @@ body_codec_put_imagefieldvalue: fn(out: ^BodyCodecOut, value: ImageFieldValue) N
             body_codec_put_imagefromref(out, p0)
             body_codec_put_span(out, p1)
         }
-        .Format(p0, p1) -> {
-            body_codec_put_tag(out, 1)
-            body_codec_put_string(out, p0)
-            body_codec_put_span(out, p1)
-        }
         .Platform(p0, p1, p2) -> {
-            body_codec_put_tag(out, 2)
+            body_codec_put_tag(out, 1)
             body_codec_put_string(out, p0)
             body_codec_put_string(out, p1)
             body_codec_put_span(out, p2)
         }
         .Other(p0) -> {
-            body_codec_put_tag(out, 3)
+            body_codec_put_tag(out, 2)
             body_codec_put_expr(out, p0)
         }
     }
 }
 
 body_codec_get_imagefieldvalue: fn(bytes: [U8], input: ^BodyCodecIn) -> ImageFieldValue Never! {
-    position: body_codec_get_tag(bytes, input, 4, 1)
+    position: body_codec_get_tag(bytes, input, 3, 1)
     if position == {
         0 -> {
             f0: body_codec_get_imagefromref(bytes, input)
@@ -7173,227 +7010,41 @@ body_codec_get_imagefieldvalue: fn(bytes: [U8], input: ^BodyCodecIn) -> ImageFie
             ImageFieldValue.From{source: f0, span: f1}
         }
         2 -> {
-            f0: body_codec_get_string(bytes, input)
-            f1: body_codec_get_string(bytes, input)
-            f2: body_codec_get_span(bytes, input)
-            ImageFieldValue.Platform{os: f0, arch: f1, span: f2}
-        }
-        3 -> {
             f0: body_codec_get_expr(bytes, input)
             ImageFieldValue.Other{value: f0}
         }
         else -> {
             f0: body_codec_get_string(bytes, input)
-            f1: body_codec_get_span(bytes, input)
-            ImageFieldValue.Format{word: f0, span: f1}
+            f1: body_codec_get_string(bytes, input)
+            f2: body_codec_get_span(bytes, input)
+            ImageFieldValue.Platform{os: f0, arch: f1, span: f2}
         }
     }
 }
 
 body_codec_put_imagefromref: fn(out: ^BodyCodecOut, value: ImageFromRef) Never! {
     if value == {
-        .System(p0) -> {
+        .Package(p0) -> {
             body_codec_put_tag(out, 0)
             body_codec_put_string(out, p0)
         }
-        .Package(p0) -> {
-            body_codec_put_tag(out, 1)
-            body_codec_put_string(out, p0)
-        }
         .Environment(p0) -> {
-            body_codec_put_tag(out, 2)
+            body_codec_put_tag(out, 1)
             body_codec_put_string(out, p0)
         }
     }
 }
 
 body_codec_get_imagefromref: fn(bytes: [U8], input: ^BodyCodecIn) -> ImageFromRef Never! {
-    position: body_codec_get_tag(bytes, input, 3, 0)
+    position: body_codec_get_tag(bytes, input, 2, 0)
     if position == {
         1 -> {
-            f0: body_codec_get_string(bytes, input)
-            ImageFromRef.Package{name: f0}
-        }
-        2 -> {
             f0: body_codec_get_string(bytes, input)
             ImageFromRef.Environment{name: f0}
         }
         else -> {
             f0: body_codec_get_string(bytes, input)
-            ImageFromRef.System{name: f0}
-        }
-    }
-}
-
-body_codec_put_list_fleetfield: fn(out: ^BodyCodecOut, values: [FleetField]) Never! {
-    body_codec_put_count(out, values.len())
-    loop value in values -> body_codec_put_fleetfield(out, value)
-}
-
-body_codec_get_list_fleetfield: fn(bytes: [U8], input: ^BodyCodecIn) -> [FleetField] Never! {
-    count: body_codec_get_count(bytes, input, 1)
-    ^values: [FleetField]{}
-    loop _ in 0..<count -> values.push(body_codec_get_fleetfield(bytes, input))
-    values
-}
-
-body_codec_put_fleetlit: fn(out: ^BodyCodecOut, value: FleetLit) Never! {
-    body_codec_put_opt_span(out, value.explicit_type)
-    body_codec_put_list_fleetfield(out, value.fields)
-    body_codec_put_span(out, value.span)
-}
-
-body_codec_get_fleetlit: fn(bytes: [U8], input: ^BodyCodecIn) -> FleetLit Never! {
-    f0: body_codec_get_opt_span(bytes, input)
-    f1: body_codec_get_list_fleetfield(bytes, input)
-    f2: body_codec_get_span(bytes, input)
-    FleetLit{explicit_type: f0, fields: f1, span: f2}
-}
-
-body_codec_put_fleetfield: fn(out: ^BodyCodecOut, value: FleetField) Never! {
-    body_codec_put_string(out, value.name)
-    body_codec_put_span(out, value.name_span)
-    body_codec_put_fleetfieldvalue(out, value.value)
-    body_codec_put_span(out, value.span)
-}
-
-body_codec_get_fleetfield: fn(bytes: [U8], input: ^BodyCodecIn) -> FleetField Never! {
-    f0: body_codec_get_string(bytes, input)
-    f1: body_codec_get_span(bytes, input)
-    f2: body_codec_get_fleetfieldvalue(bytes, input)
-    f3: body_codec_get_span(bytes, input)
-    FleetField{name: f0, name_span: f1, value: f2, span: f3}
-}
-
-body_codec_put_list_hostentry: fn(out: ^BodyCodecOut, values: [HostEntry]) Never! {
-    body_codec_put_count(out, values.len())
-    loop value in values -> body_codec_put_hostentry(out, value)
-}
-
-body_codec_get_list_hostentry: fn(bytes: [U8], input: ^BodyCodecIn) -> [HostEntry] Never! {
-    count: body_codec_get_count(bytes, input, 1)
-    ^values: [HostEntry]{}
-    loop _ in 0..<count -> values.push(body_codec_get_hostentry(bytes, input))
-    values
-}
-
-body_codec_put_fleetfieldvalue: fn(out: ^BodyCodecOut, value: FleetFieldValue) Never! {
-    if value == {
-        .Hosts(p0) -> {
-            body_codec_put_tag(out, 0)
-            body_codec_put_list_hostentry(out, p0)
-        }
-        .Other(p0) -> {
-            body_codec_put_tag(out, 1)
-            body_codec_put_expr(out, p0)
-        }
-    }
-}
-
-body_codec_get_fleetfieldvalue: fn(bytes: [U8], input: ^BodyCodecIn) -> FleetFieldValue Never! {
-    position: body_codec_get_tag(bytes, input, 2, 0)
-    if position == {
-        1 -> {
-            f0: body_codec_get_expr(bytes, input)
-            FleetFieldValue.Other{value: f0}
-        }
-        else -> {
-            f0: body_codec_get_list_hostentry(bytes, input)
-            FleetFieldValue.Hosts{entries: f0}
-        }
-    }
-}
-
-body_codec_put_hostentry: fn(out: ^BodyCodecOut, value: HostEntry) Never! {
-    body_codec_put_string(out, value.name)
-    body_codec_put_span(out, value.name_span)
-    body_codec_put_string(out, value.system)
-    body_codec_put_span(out, value.system_span)
-    body_codec_put_opt_span(out, value.overrides)
-    body_codec_put_span(out, value.span)
-}
-
-body_codec_get_hostentry: fn(bytes: [U8], input: ^BodyCodecIn) -> HostEntry Never! {
-    f0: body_codec_get_string(bytes, input)
-    f1: body_codec_get_span(bytes, input)
-    f2: body_codec_get_string(bytes, input)
-    f3: body_codec_get_span(bytes, input)
-    f4: body_codec_get_opt_span(bytes, input)
-    f5: body_codec_get_span(bytes, input)
-    HostEntry{name: f0, name_span: f1, system: f2, system_span: f3, overrides: f4, span: f5}
-}
-
-body_codec_put_list_vmtestfield: fn(out: ^BodyCodecOut, values: [VMTestField]) Never! {
-    body_codec_put_count(out, values.len())
-    loop value in values -> body_codec_put_vmtestfield(out, value)
-}
-
-body_codec_get_list_vmtestfield: fn(bytes: [U8], input: ^BodyCodecIn) -> [VMTestField] Never! {
-    count: body_codec_get_count(bytes, input, 1)
-    ^values: [VMTestField]{}
-    loop _ in 0..<count -> values.push(body_codec_get_vmtestfield(bytes, input))
-    values
-}
-
-body_codec_put_vmtestlit: fn(out: ^BodyCodecOut, value: VMTestLit) Never! {
-    body_codec_put_opt_span(out, value.explicit_type)
-    body_codec_put_list_vmtestfield(out, value.fields)
-    body_codec_put_span(out, value.span)
-}
-
-body_codec_get_vmtestlit: fn(bytes: [U8], input: ^BodyCodecIn) -> VMTestLit Never! {
-    f0: body_codec_get_opt_span(bytes, input)
-    f1: body_codec_get_list_vmtestfield(bytes, input)
-    f2: body_codec_get_span(bytes, input)
-    VMTestLit{explicit_type: f0, fields: f1, span: f2}
-}
-
-body_codec_put_vmtestfield: fn(out: ^BodyCodecOut, value: VMTestField) Never! {
-    body_codec_put_string(out, value.name)
-    body_codec_put_span(out, value.name_span)
-    body_codec_put_vmtestfieldvalue(out, value.value)
-    body_codec_put_span(out, value.span)
-}
-
-body_codec_get_vmtestfield: fn(bytes: [U8], input: ^BodyCodecIn) -> VMTestField Never! {
-    f0: body_codec_get_string(bytes, input)
-    f1: body_codec_get_span(bytes, input)
-    f2: body_codec_get_vmtestfieldvalue(bytes, input)
-    f3: body_codec_get_span(bytes, input)
-    VMTestField{name: f0, name_span: f1, value: f2, span: f3}
-}
-
-body_codec_put_vmtestfieldvalue: fn(out: ^BodyCodecOut, value: VMTestFieldValue) Never! {
-    if value == {
-        .Hosts(p0) -> {
-            body_codec_put_tag(out, 0)
-            body_codec_put_list_hostentry(out, p0)
-        }
-        .Run(p0) -> {
-            body_codec_put_tag(out, 1)
-            body_codec_put_span(out, p0)
-        }
-        .Other(p0) -> {
-            body_codec_put_tag(out, 2)
-            body_codec_put_expr(out, p0)
-        }
-    }
-}
-
-body_codec_get_vmtestfieldvalue: fn(bytes: [U8], input: ^BodyCodecIn) -> VMTestFieldValue Never! {
-    position: body_codec_get_tag(bytes, input, 3, 0)
-    if position == {
-        1 -> {
-            f0: body_codec_get_span(bytes, input)
-            VMTestFieldValue.Run{span: f0}
-        }
-        2 -> {
-            f0: body_codec_get_expr(bytes, input)
-            VMTestFieldValue.Other{value: f0}
-        }
-        else -> {
-            f0: body_codec_get_list_hostentry(bytes, input)
-            VMTestFieldValue.Hosts{entries: f0}
+            ImageFromRef.Package{name: f0}
         }
     }
 }

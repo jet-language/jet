@@ -1,0 +1,8 @@
+Error: Jet.GrammarAmbiguous: In `command`, alternatives 1 and 2 of this choice can both begin with "set" "the" "value": the parser cannot choose between these within 3 tokens
+  --> Tests/UI/grammar_ambiguous.jet:6:15
+    |
+  6 |     command : 'set' 'the' 'value' to=NAME # Name
+    |               ^
+ Why: A generated parser picks a way by the next three tokens at most, with no backtracking, so two ways that can begin alike leave it no choice
+ Fix: Factor the shared start out of the alternatives, or write operators in the operator form
+More: jet-lang.dev/e/Jet.GrammarAmbiguous

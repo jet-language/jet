@@ -2504,7 +2504,7 @@ sema_expression_check_condition_inner: fn(condition: Expr, check: ^SemaBodyCheck
                     loop binding in unchecked -> bindings.push(binding)
                     return sema_expression_condition_failed(bindings)
                 }
-                // The right side of `^^` reads the names the left side bound.
+                // The right side of `&&` reads the names the left side bound.
                 sema_expression_declare_condition_bindings(left_checked.bindings, check, false)
                 right_check: sema_expression_check_condition_inner(right, check)
                 ^bindings: left_checked.bindings
@@ -2670,7 +2670,7 @@ sema_expression_declare_condition_bindings: fn(bindings: [SemaConditionBinding],
         if track && binding.symbol.ty != None {
             sema_ownership_declare_binding(check.state, binding.symbol, false)
         }
-        // Also track the temporary `^^` bindings: later tests must resolve
+        // Also track the temporary `&&` bindings: later tests must resolve
         // their payload origin and reborrow ancestry, not a new local owner.
         ^_: sema_ownership_record_pattern_views(check, binding.symbol.name, binding.symbol.span, binding.sources, access)
         if track && !binding.window && !in_place && !sema_copy_site_payload_of_named_subject(check.state, sema_ownership_payload_key(binding.symbol.name, binding.symbol.span)) {

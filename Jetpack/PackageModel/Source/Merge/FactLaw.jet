@@ -1,10 +1,9 @@
 // The one contribution law for build facts (jet_foundation::Policy fact
 // resolution): every writer carries its layer, source scope, span, and source
-// label; the resolver orders them, rejects same-rung disagreement, honors
-// `.Force` pins at the system/fleet layers, and keeps the whole writer chain
-// for explanation. It lives beside the §6 merge engine because it carries
-// compiler spans and diagnostics, which the compiler-free Foundation area may
-// not reference.
+// label; the resolver orders them, rejects same-rung disagreement, and keeps
+// the whole writer chain for explanation. It lives beside the §6 merge engine
+// because it carries compiler spans and diagnostics, which the compiler-free
+// Foundation area may not reference.
 use jet_foundation.[Diagnostic, Item, PolicyValue, Span, diagnostic_from_registry, effect_vocabulary_view_count, overflow_mode_name]
 
 // The six lexical source rungs used by every build fact. Package is the
@@ -66,8 +65,6 @@ ContributionLayer: enum {
     Output,
     Workspace,
     Environment,
-    System,
-    Fleet,
     CommandLine,
 
     name: fn(self) -> String Never! {
@@ -79,8 +76,6 @@ ContributionLayer: enum {
             .Output -> "build output"
             .Workspace -> "workspace"
             .Environment -> "environment"
-            .System -> "system"
-            .Fleet -> "fleet"
             .CommandLine -> "command line"
         }
     }
@@ -94,16 +89,7 @@ ContributionLayer: enum {
             .Output -> 4
             .Workspace -> 5
             .Environment -> 6
-            .System -> 7
-            .Fleet -> 8
-            .CommandLine -> 9
-        }
-    }
-
-    can_force: fn(self) -> Bool Never! {
-        if self == {
-            .System | .Fleet -> true
-            .Declaration | .DependencyEntry | .RootEntry | .OptimizationBundle | .Output | .Workspace | .Environment | .CommandLine -> false
+            .CommandLine -> 7
         }
     }
 }
@@ -287,8 +273,6 @@ FactContribution: struct {
     // caller supplies this only when the writer is computed rather than a
     // manifest or command-line declaration.
     reason: String?{None},
-    force: Bool{false},
-    force_reason: String?{None},
     default: Bool{false},
 
     new: fn(key: String, value: FactValue, scope: SourceScope, layer: ContributionLayer, source: String) -> FactContribution Never! {
@@ -306,21 +290,6 @@ FactContribution: struct {
         updated.target = Val(target)
         updated
     }
-
-    force_with_reason: fn(^^self, reason: String) -> FactContribution Never! {
-        ^updated: self
-        updated.force = true
-        updated.force_reason = Val(reason)
-        updated
-    }
-
-    pinned_with_reason: fn(^^self, reason: String) -> FactContribution Never! {
-        self.force_with_reason(reason)
-    }
-
-    pinned: fn(^^self) -> FactContribution Never! { self.force_with_reason(".Pin") }
-
-    forced: fn(^^self) -> FactContribution Never! { self.force_with_reason(".Pin") }
 
     with_reason: fn(^^self, reason: String) -> FactContribution Never! {
         ^updated: self
@@ -340,26 +309,17 @@ EffectiveFact: struct {
     value: FactValue,
     provenance: [FactContribution],
     effective: Int,
-    forced: Bool,
 
     explain: fn(self) -> String Never! {
         ^out: "{self.key.name} = {self.value.display()}"
         loop index in 0..<self.provenance.len() {
             contribution: self.provenance[index]
-            status: if {
-                index == self.effective -> "effective"
-                contribution.force -> "pinned"
-                else -> "shadowed"
-            }
-            pin: if contribution.force_reason == {
-                .Val(text) -> " pin={text}"
-                .None -> ""
-            }
+            status: if index == self.effective -> "effective" else -> "shadowed"
             reason: if contribution.reason == {
                 .Val(text) -> " reason={text}"
                 .None -> ""
             }
-            out = "{out}\n  [{status}] {contribution.layer.name()} / {contribution.scope.name()} {contribution.value.display()} at {contribution.source}:{contribution.span.start}..{contribution.span.end}{pin}{reason}"
+            out = "{out}\n  [{status}] {contribution.layer.name()} / {contribution.scope.name()} {contribution.value.display()} at {contribution.source}:{contribution.span.start}..{contribution.span.end}{reason}"
         }
         out
     }
@@ -367,30 +327,24 @@ EffectiveFact: struct {
 
 #Error
 FactError: enum {
-    InvalidForce(key: String, layer: ContributionLayer, source: String),
     Conflict(key: String, layer: ContributionLayer, first: FactContribution, second: FactContribution),
-    PinnedConflict(key: String, pinned: FactContribution, conflicting: FactContribution),
     SafetyWidening(key: String, previous: FactContribution, next: FactContribution),
     SafetyIncomparable(key: String, previous: FactContribution, next: FactContribution),
 
     message: fn(self) -> String Never! {
         if self == {
-            .InvalidForce(key, layer, source) -> "fact `{key}` uses `.Pin` at the unsupported {layer.name()} layer ({source})"
             .Conflict(key, layer, first, second) -> "fact `{key}` has conflicting values at the {layer.name()} layer: {first.source}:{first.span.start} and {second.source}:{second.span.start}"
-            .PinnedConflict(key, pinned, conflicting) -> "`{key}` is pinned to `{pinned.value.display()}` at `{pinned.source}`, so `{conflicting.source}` (`{conflicting.value.display()}`) can't change it"
             .SafetyWidening(key, previous, next) -> "fact `{key}` widens from {previous.value.display()} at {previous.source} to {next.value.display()} at {next.source}"
             .SafetyIncomparable(key, previous, next) -> "fact `{key}` has unrelated safety values at {previous.source} and {next.source}"
         }
     }
 
     // The same typed conflict reaches the product diagnostic and names both
-    // written locations. A host or fleet pin refused by a conflicting later
-    // writer uses E2113, the same registered error as a build-code pin.
+    // written locations.
     diagnostic: fn(self) -> Diagnostic? Never! {
         if self == {
             .Conflict(key, layer, first, second) -> Val(diagnostic_from_registry("E3521", Val(second.span), "fact `{key}` has conflicting values at the {layer.name()} layer", "`{first.source}` writes {first.value.display()} at {first.span.start}:{first.span.end}; `{second.source}` writes {second.value.display()} at {second.span.start}:{second.span.end}.", "make same-layer writers agree, or move one value to a more explicit contribution layer"))
-            .PinnedConflict(key, pinned, conflicting) -> Val(diagnostic_from_registry("E2113", Val(conflicting.span), "`{key}` is pinned to `{pinned.value.display()}` at `{pinned.source}`, so `{conflicting.source}` can't change it", "`{pinned.source}` pins `{key}` at the {pinned.layer.name()} layer; a later writer may only match the pinned value.", "remove the conflicting `{conflicting.layer.name()}` override, or remove the pin at `{pinned.source}`"))
-            .InvalidForce(_, _, _) | .SafetyWidening(_, _, _) | .SafetyIncomparable(_, _, _) -> None
+            .SafetyWidening(_, _, _) | .SafetyIncomparable(_, _, _) -> None
         }
     }
 }
@@ -404,11 +358,9 @@ pkg_fact_precedes: fn(left: FactContribution, right: FactContribution) -> Bool N
     left.span.end < right.span.end
 }
 
-// Resolve one fact from every writer that names it: the most explicit
-// eligible layer and nearest scope decide, a System/Fleet `.Pin` refuses any
-// conflicting higher-layer writer with E2113 while allowing a matching value,
-// and a tighten-only key may never widen along the chain. None when nobody
-// writes the fact and the key has no default.
+// Resolve one fact from every writer that names it: the most explicit layer
+// and nearest scope decide, and a tighten-only key may never widen along the
+// chain. None when nobody writes the fact and the key has no default.
 pkg_fact_resolve: fn(key: FactKey, declarations: [FactContribution]) -> EffectiveFact? FactError! {
     ^chain: [FactContribution]{}
     loop declaration in declarations {
@@ -435,11 +387,6 @@ pkg_fact_resolve: fn(key: FactKey, declarations: [FactContribution]) -> Effectiv
         sorted.insert(index, declaration)
     }
     chain = sorted
-    loop declaration in chain {
-        if declaration.force && !declaration.layer.can_force() {
-            return Err(FactError.InvalidForce{key: key.name, layer: declaration.layer, source: declaration.source})
-        }
-    }
     // Same-rung writers must agree, except dependency entries: they stand
     // when a more explicit writer decides, and conflict below when their
     // layer is the one that decides.
@@ -453,30 +400,20 @@ pkg_fact_resolve: fn(key: FactKey, declarations: [FactContribution]) -> Effectiv
             return Err(FactError.Conflict{key: key.name, layer: declaration.layer, first: first, second: declaration})
         }
     }
-    ^force_layer: -1
-    loop declaration in chain {
-        if declaration.force && declaration.layer.rank() > force_layer {
-            force_layer = declaration.layer.rank()
-        }
-    }
-    ^eligible: [Int]{}
-    loop index in 0..<chain.len() {
-        if force_layer < 0 || chain[index].layer.rank() <= force_layer -> eligible.push(index)
-    }
     ^effective_layer: -1
-    loop index in eligible {
+    loop index in 0..<chain.len() {
         if chain[index].layer.rank() > effective_layer {
             effective_layer = chain[index].layer.rank()
         }
     }
     ^effective_scope: -1
-    loop index in eligible {
+    loop index in 0..<chain.len() {
         if chain[index].layer.rank() == effective_layer && chain[index].scope.rank() > effective_scope {
             effective_scope = chain[index].scope.rank()
         }
     }
     ^candidates: [Int]{}
-    loop index in eligible {
+    loop index in 0..<chain.len() {
         if chain[index].layer.rank() == effective_layer && chain[index].scope.rank() == effective_scope {
             candidates.push(index)
         }
@@ -488,18 +425,10 @@ pkg_fact_resolve: fn(key: FactKey, declarations: [FactContribution]) -> Effectiv
             return Err(FactError.Conflict{key: key.name, layer: first.layer, first: first, second: second})
         }
     }
-    if force_layer >= 0 {
-        loop index in 0..<chain.len() {
-            later: chain[index]
-            if later.layer.rank() > force_layer && later.value != first.value {
-                return Err(FactError.PinnedConflict{key: key.name, pinned: first.copy(), conflicting: later.copy()})
-            }
-        }
-    }
     if key.merge == FactMerge.TightenOnly {
-        loop position in 1..<eligible.len() {
-            previous: chain[eligible[position - 1]]
-            next_writer: chain[eligible[position]]
+        loop position in 1..<chain.len() {
+            previous: chain[position - 1]
+            next_writer: chain[position]
             if previous.value.safety_relation(next_writer.value) == {
                 .Same | .Tighten -> {}
                 .Widen -> {
@@ -515,6 +444,5 @@ pkg_fact_resolve: fn(key: FactKey, declarations: [FactContribution]) -> Effectiv
     // and the effective value (owner: the EffectiveFact) are both kept; a view of chain cannot
     // outlive that move.
     value: first.value.copy()
-    forced: first.force || force_layer >= 0
-    Ok(Val(EffectiveFact{key: key, value: value, provenance: chain, effective: candidates[0], forced: forced}))
+    Ok(Val(EffectiveFact{key: key, value: value, provenance: chain, effective: candidates[0]}))
 }

@@ -1912,7 +1912,7 @@ CaseState: enum {
 
 // The arms of the shell `case` blocks in `list` but the default `*)`: each
 // arm's `pattern)`, after its block's `in` or the terminator before it, one of
-// `;;`, `;&` and `;;&` (the symbols `;;`, or `;` or `;;` then `^`).
+// `;;`, `;&` and `;;&` (the symbols `;;`, or `;` or `;;` then `&`).
 shell_arms: fn(list: [Token]) -> Int Never! {
     ^states: [CaseState]{}
     ^pattern: ""
@@ -1944,7 +1944,7 @@ shell_arms: fn(list: [Token]) -> Int Never! {
                         pattern = ""
                         states[last] = .Body
                     }
-                    // A leading `(` and the `^` of a `;;&` are no pattern.
+                    // A leading `(` and the `&` of a `;;&` are no pattern.
                     !(symbol && pattern == "" && (token.text == "(" || (token.text == "&" && before == ";;"))) -> {
                         pattern = "{pattern}{token.text}"
                     }

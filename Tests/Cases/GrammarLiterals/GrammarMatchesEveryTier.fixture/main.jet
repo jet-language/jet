@@ -1,0 +1,85 @@
+// One grammar with holes, used every way its types allow: a literal's parts
+// checked (the slots of a taken literal, an error per resync point of a
+// refused one), a parse into a sink, and a parse printed back and parsed
+// again. Every tier prints the same lines.
+use {
+    core.grammar.[Grammar]
+    core.grammar.sink.[GrammarSink]
+}
+
+List: Grammar{"""
+    list   : '[' items+=item (',' items+=item)* ']' EOF ;
+    item   : name=NAME '(' args+=arg (',' args+=arg)* ')' # Call | HOLE<slot=Item> # Spliced ;
+    arg    : value=NUMBER # Number | name=NAME # Name | HOLE<slot=Value> # Hole ;
+    NAME   : [a-z]+ ;
+    NUMBER : [0-9]+ ;
+    WS     : [ \n]+ -> skip ;
+"""}
+
+slot_name: fn(slot: ListSlot) -> String {
+    if slot == {
+        .Item -> "Item"
+        .Value -> "Value"
+    }
+}
+
+rule_name: fn(rule: Int) -> String {
+    named: ListRule.from_int(rule) ?? return "?"
+    if named == {
+        .List -> "list"
+        .Item -> "item"
+        .Arg -> "arg"
+    }
+}
+
+/// Writes each event it hears: `(rule` and `rule)` around a rule, and each
+/// token's text, quoted.
+Events: struct {
+    text: String,
+    shown: String,
+}
+
+impl Events.GrammarSink {
+    open: fn(^self, rule: Int) Never! { self.shown = "{self.shown}({rule_name(rule)} " }
+    close: fn(^self, rule: Int) Never! { self.shown = "{self.shown}{rule_name(rule)}) " }
+    token: fn(^self, _kind: Int, start: Int, end: Int) Never! {
+        piece: self.text.slice(start, end).replace("\n", "\\n")
+        self.shown = "{self.shown}'{piece}' "
+    }
+}
+
+check: fn(parts: [String]) {
+    if List.check_parts(parts) == {
+        .Ok(checked) -> {
+            names: loop slot in checked.slots -> slot_name(slot)
+            print("ok: {checked.shape.len()} parts, slots {names}")
+        }
+        .Err(errors) -> {
+            print("refused")
+            loop error in errors -> print("  {error}")
+        }
+    }
+}
+
+events: fn(text: String) {
+    ^sink: Events{text: text, shown: ""}
+    if List.parse_into(text, sink) == {
+        .Ok(end) -> print("{sink.shown}=> {end}")
+        .Err(error) -> print("{sink.shown}=> error {error}")
+    }
+}
+
+round: fn(text: String) {
+    list: List.parse(text) ?? return print("{text}: no parse")
+    printed: list.print() ?? return print("{text}: no print")
+    again: List.parse(printed) ?? return print("{printed}: no reparse")
+    reprinted: again.print() ?? ""
+    print("{printed} {if reprinted == printed -> "same" else -> "different"}")
+}
+
+run: fn() {
+    check([String]{"[f(1, ", "), ", "]"})
+    check([String]{"[f(1, +),\ng(x y), ", "]"})
+    events("[f(1, y)]")
+    round("[f(1, y), g(2)]")
+}

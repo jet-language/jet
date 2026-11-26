@@ -136,16 +136,13 @@ core_declarations_stray: fn(kind: String, module_name: String, member: String, e
 
 // A route call lowers with one mask entry per operand, so every Core row's
 // borrow mask has one entry per required operand and its optional operands
-// come after them. The network routes are among the rows checked.
+// come after them.
 #Test("every core row masks each required operand") {
-    ^network: 0
     loop row in CORE_CALLS {
         key: core_call_key(row)
         assert(row.signature.borrow_mask.len() == row.signature.arity, "{key}: {row.signature.borrow_mask.len()} mask entries for arity {row.signature.arity}")
         assert(row.signature.max_arity >= row.signature.arity, "{key}: max arity {row.signature.max_arity} is below arity {row.signature.arity}")
-        if row.effects.contains("Net") -> network += 1
     }
-    assert(network > 0, "CORE_CALLS has no Net route row")
 }
 
 #Test("Core type references resolve to their defining type and refuse a missing or cyclic target") {

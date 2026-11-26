@@ -347,12 +347,12 @@ output_fixture_visibility_cases: fn(effects_source: String, failures: ^[String])
 
 output_fixture_run: fn(effects_source: String) Never! {
     ^failures: [String]{}
-    nine: "LIB: Output.Library{{name: \"lib\"}}\nAPP: Output.Executable{{name: \"app\", entry: launch}}\nRPC: Output.Service{{name: \"rpc\", entry: launch}}\nCHECK: Output.Check{{name: \"check\", entry: launch}}\nENV: Output.Environment{{name: \"env\"}}\nIMAGE: Output.Image{{name: \"image\"}}\nBUNDLE: Output.Bundle{{name: \"bundle\"}}\nSYSTEM: Output.System{{name: \"system\"}}\nFLEET: Output.Fleet{{name: \"fleet\"}}\nlaunch: fn() {{}}\n"
-    output_fixture_case("nine closed kinds/check projection", nine, effects_source, SemaOutputIntent.Check, None, [String]{}, [String]{}, failures)
-    output_fixture_case("nine kinds/test projection", nine, effects_source, SemaOutputIntent.Test, None, [String]{}, [String]{"CHECK"}, failures)
-    output_fixture_case("explicit Service", nine, effects_source, SemaOutputIntent.Run, Val("RPC"), [String]{}, [String]{"RPC"}, failures)
-    output_fixture_case("explicit incompatible Check", nine, effects_source, SemaOutputIntent.Run, Val("CHECK"), [String]{"E1321"}, [String]{}, failures)
-    output_fixture_case("missing address", nine, effects_source, SemaOutputIntent.Run, Val("MISSING"), [String]{"E1321"}, [String]{}, failures)
+    seven: "LIB: Output.Library{{name: \"lib\"}}\nAPP: Output.Executable{{name: \"app\", entry: launch}}\nRPC: Output.Service{{name: \"rpc\", entry: launch}}\nCHECK: Output.Check{{name: \"check\", entry: launch}}\nENV: Output.Environment{{name: \"env\"}}\nIMAGE: Output.Image{{name: \"image\"}}\nBUNDLE: Output.Bundle{{name: \"bundle\"}}\nlaunch: fn() {{}}\n"
+    output_fixture_case("seven closed kinds/check projection", seven, effects_source, SemaOutputIntent.Check, None, [String]{}, [String]{}, failures)
+    output_fixture_case("seven kinds/test projection", seven, effects_source, SemaOutputIntent.Test, None, [String]{}, [String]{"CHECK"}, failures)
+    output_fixture_case("explicit Service", seven, effects_source, SemaOutputIntent.Run, Val("RPC"), [String]{}, [String]{"RPC"}, failures)
+    output_fixture_case("explicit incompatible Check", seven, effects_source, SemaOutputIntent.Run, Val("CHECK"), [String]{"E1321"}, [String]{}, failures)
+    output_fixture_case("missing address", seven, effects_source, SemaOutputIntent.Run, Val("MISSING"), [String]{"E1321"}, [String]{}, failures)
     sole: "APP: Output.Executable{{name: \"app\", entry: launch}}\nlaunch: fn() {{}}\n"
     output_fixture_case("sole Executable", sole, effects_source, SemaOutputIntent.Run, None, [String]{}, [String]{"APP"}, failures)
     output_fixture_case("check does not select sole", sole, effects_source, SemaOutputIntent.Check, None, [String]{}, [String]{}, failures)

@@ -1,0 +1,141 @@
+// A value built by hand prints so that it parses back to itself: an operator
+// operand that binds looser than its place is parenthesized through the
+// rule's grouping alternative. A value the grammar cannot print is a
+// `GrammarError` at the line and column of the text printed so far: a text
+// field that is not one whole token of its kind, a missing or extra list
+// element, or a loose operand in a rule with no grouping alternative.
+// `print_into` leaves its output as it was.
+use {
+    core.grammar.[Grammar]
+    core.grammar.error.[GrammarError]
+}
+
+Calc: Grammar{"""
+    calc : body=expr ;
+    expr : operand=expr '(' (args+=expr (',' args+=expr)*)? ')'   # Call
+         | <assoc=right> left=expr '^' right=expr                 # Pow
+         | '-' operand=expr                                       # Neg
+         | left=expr op=('*' | '/' | '%') right=expr              # Mul
+         | left=expr op=('+' | '-') right=expr                    # Add
+         | value=NUM                                              # Num
+         | name=IDENT                                             # Var
+         | '(' inner=expr ')'                                     # Group
+         ;
+    NUM   : [0-9]+ ('.' [0-9]+)? ;
+    IDENT : [A-Za-z_] [A-Za-z0-9_]* ;
+    WS    : [ \t\r\n]+ -> skip ;
+"""}
+
+Script: Grammar{"""
+    script     : items+=item* EOF ;
+    item       : assignment | display | block ;
+    assignment : 'let' name=NAME '=' value=term ';' ;
+    display    : 'show' loud='!'? values+=term (',' values+=term)* ';' ;
+    block      : 'do' items+=item+ 'end' ;
+    term       : text=NAME # Name | text=NUMBER # Number | sign=('+' | '-') digits=NUMBER # Signed ;
+    NAME       : [a-z]+ ;
+    NUMBER     : [0-9]+ ;
+    WS         : [ \t\n]+ -> skip ;
+"""}
+
+Pair: Grammar{"""
+    pair : items+=NAME ',' items+=NAME ;
+    NAME : [a-z]+ ;
+    WS   : ' '+ -> skip ;
+"""}
+
+Sums: Grammar{"""
+    sums  : body=chain ;
+    chain : left=chain '*' right=chain # Times
+          | left=chain '+' right=chain # Plus
+          | value=NUM                  # Value
+          ;
+    NUM   : [0-9]+ ;
+    WS    : ' '+ -> skip ;
+"""}
+
+Ini: Grammar{"""
+    ini     : lines+=line (EOL lines+=line)* ;
+    line    : section | entry | blank ;
+    section : '[' name=KEY ']' ;
+    entry   : name=KEY SEP value? ;
+    blank   : ;
+    value   : text=QUOTED   # Quoted
+            | text=BARE     # Bare
+            ;
+    KEY     : [A-Za-z0-9_.\-]+ ;
+    SEP     : '=' | ':' ;
+    QUOTED  : '"' ([^"\\\r\n] | '\\' .)* '"' | '\'' [^'\r\n]* '\'' ;
+    BARE    : [^ \t\r\n;#"'] [^\r\n;#]* ;
+    EOL     : '\r'? '\n' ;
+    WS      : [ \t]+ -> skip ;
+    COMMENT : [;#] [^\r\n]* -> skip ;
+"""}
+
+show: fn(expr: Expr) -> String {
+    if expr == {
+        .Call(operand, args) -> {
+            ^parts: [String]{}
+            loop arg in args -> parts.push(show(arg))
+            "{show(operand)}({parts.join(", ")})"
+        }
+        .Pow(left, right) -> "Pow({show(left)}, {show(right)})"
+        .Neg(operand) -> "Neg({show(operand)})"
+        .Mul(left, op, right) -> "Mul({show(left)} {op} {show(right)})"
+        .Add(left, op, right) -> "Add({show(left)} {op} {show(right)})"
+        .Num(value) -> value
+        .Var(name) -> name
+        .Group(inner) -> "({show(inner)})"
+    }
+}
+
+built: fn(expr: Expr) {
+    if Calc{body: expr}.print() == {
+        .Ok(printed) -> {
+            again: Calc.parse(printed) ?? return print("{printed}: no reparse")
+            print("{printed} => {show(again.body)}")
+        }
+        .Err(error) -> print("error {error}")
+    }
+}
+
+num: fn(text: String) -> Expr { Expr.Num{value: text} }
+
+report: fn(printed: String GrammarError!) {
+    if printed == {
+        .Ok(text) -> print(text)
+        .Err(error) -> print("error {error}")
+    }
+}
+
+run: fn() {
+    built(Expr.Mul{left: Expr.Add{left: num("1"), op: "+", right: num("2")}, op: "*", right: num("3")})
+    built(Expr.Add{left: num("1"), op: "-", right: Expr.Add{left: num("2"), op: "-", right: num("3")}})
+    built(Expr.Pow{left: Expr.Pow{left: num("2"), right: num("3")}, right: num("2")})
+    built(Expr.Pow{left: Expr.Neg{operand: num("2")}, right: num("2")})
+    built(Expr.Call{operand: Expr.Neg{operand: Expr.Var{name: "f"}}, args: [Expr]{num("1")}})
+    built(Expr.Num{value: "x"})
+    built(Expr.Add{left: num("1"), op: "*", right: num("2")})
+    ^out: [U8]{}
+    loop b in "> ".bytes() -> out.push(b)
+    if Calc{body: Expr.Add{left: num("1"), op: "+", right: num("2")}}.print_into(out) == {
+        .Ok(_) -> print("into {String.from_bytes(out) ?? ""}")
+        .Err(error) -> print("into error {error}")
+    }
+    if Calc{body: Expr.Add{left: num("1"), op: "+", right: Expr.Var{name: "9"}}}.print_into(out) == {
+        .Ok(_) -> print("into {String.from_bytes(out) ?? ""}")
+        .Err(error) -> print("into error {error}, out {String.from_bytes(out) ?? ""}")
+    }
+    report(Script{items: [Item]{Item.Display(Display{loud: false, values: [Term]{}})}}.print())
+    report(Script{items: [Item]{Item.Block(Block{items: [Item]{}})}}.print())
+    report(Script{items: [Item]{Item.Display(Display{loud: true, values: [Term]{Term.Signed{sign: "*", digits: "1"}}})}}.print())
+    loop items in [[String]{"a", "b"}, [String]{"a", "b", "c"}, [String]{"a"}] {
+        report(Pair{items: items}.print())
+    }
+    one: Chain.Value{value: "1"}
+    two: Chain.Value{value: "2"}
+    loop chain in [Chain.Plus{left: Chain.Times{left: one, right: two}, right: one}, Chain.Times{left: Chain.Plus{left: one, right: two}, right: two}, Chain.Times{left: one, right: Chain.Plus{left: one, right: two}}] {
+        report(Sums{body: chain}.print())
+    }
+    report(Ini{lines: [Line]{Line.Section(Section{name: "a"}), Line.Entry(Entry{name: "a\n[admin]", value: None})}}.print())
+}

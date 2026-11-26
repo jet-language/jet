@@ -51,10 +51,14 @@
 // The file also holds, per Core module, the derive templates' expansions
 // the check's registration made (Registration/Derives.jet SemaDeriveMemo),
 // one record per module keyed SEMA_CORE_DERIVE_KEY and the module's text,
-// laid out as a function's record is: no symbol or declaration keys, its
-// module identities and strings, then its bytes (sema_core_derive_bodies).
-// A compile handed the file takes a module's expansions from its record in
-// place of expanding (sema_core_derives_attach).
+// and the plans of the grammars the module declares, one record keyed
+// SEMA_CORE_GRAMMAR_KEY and the module's text (sema_core_grammar_capture),
+// each laid out as a function's record is: no symbol or declaration keys,
+// its module identities and strings, then its bytes
+// (sema_core_module_bodies). A compile handed the file takes a module's
+// expansions from its record in place of expanding
+// (sema_core_derives_attach), and its grammars' plans in place of computing
+// them (sema_core_grammar_plans).
 use jet_foundation.[
     BodyCodecIn,
     BodyCodecOut,
@@ -64,14 +68,17 @@ use jet_foundation.[
     InternerDelta,
     ModuleID,
     NameTable,
+    NamedCtValue,
     SymbolID,
     Type,
     TypeID,
     body_codec_get_count,
+    body_codec_get_list_namedctvalue,
     body_codec_get_list_type,
     body_codec_get_string,
     body_codec_out,
     body_codec_put_count,
+    body_codec_put_list_namedctvalue,
     body_codec_put_list_type,
     body_codec_put_string,
     compiler_take_rows,
@@ -103,6 +110,10 @@ SEMA_CORE_BODIES_HEADER: "jet core bodies 7"
 // The start of the key of a Core module's derive record, which the
 // module's text ends. No function's key starts with it.
 SEMA_CORE_DERIVE_KEY: "#derive "
+
+// The start of the key of a Core module's grammar record, which the
+// module's text ends. No function's key starts with it.
+SEMA_CORE_GRAMMAR_KEY: "#grammar "
 
 // The width of an offset in a bodies file's table, in little-endian bytes.
 SEMA_CORE_BODIES_OFFSET_BYTES: 8
@@ -1038,15 +1049,105 @@ sema_core_derive_decode: fn(bytes: ^^[U8], table: ModuleTable, position: Int, un
     Val(memo)
 }
 
-// Puts into `bodies` the record of the derive templates' expansions each
-// Core module of `graph` kept (SemaRegistrationModule.derive_captures),
-// moved out of its row, keyed SEMA_CORE_DERIVE_KEY and the module's text.
-sema_core_derive_bodies: fn(graph: ^SemaRegistrationGraph, bodies: ^[SemaCoreBody]) {
+// Puts into `bodies` the records each Core module of `graph` kept, moved
+// out of its row: those of its derive templates' expansions
+// (SemaRegistrationModule.derive_captures), keyed SEMA_CORE_DERIVE_KEY and
+// the module's text, and of its grammars' plans (grammar_captures), keyed
+// SEMA_CORE_GRAMMAR_KEY and the module's text.
+sema_core_module_bodies: fn(graph: ^SemaRegistrationGraph, bodies: ^[SemaCoreBody]) {
     loop index in 0..<graph.modules.len() {
+        owner: module_text(graph.module_table, graph.modules[index].module_identity)
         loop capture in compiler_take_rows<SemaDeriveCapture>(graph.modules[index].derive_captures) {
-            key: "{SEMA_CORE_DERIVE_KEY}{module_text(graph.module_table, graph.modules[index].module_identity)}"
-            modules: loop id in capture.modules -> "{module_text(graph.module_table, id)}"
-            bodies.push(SemaCoreBody{key: key, bytes: capture.bytes.move(), symbols: [String]{}, decls: [String]{}, modules: modules, strings: capture.strings.move()})
+            sema_core_module_body(graph, "{SEMA_CORE_DERIVE_KEY}{owner}", capture.move(), bodies)
+        }
+        loop capture in compiler_take_rows<SemaDeriveCapture>(graph.modules[index].grammar_captures) {
+            sema_core_module_body(graph, "{SEMA_CORE_GRAMMAR_KEY}{owner}", capture.move(), bodies)
         }
     }
+}
+
+// Puts into `bodies` the record `capture` of a Core module, keyed `key`.
+sema_core_module_body: fn(graph: SemaRegistrationGraph, key: String, capture: ^^SemaDeriveCapture, bodies: ^[SemaCoreBody]) Never! {
+    ^held: capture.move()
+    modules: loop id in held.modules -> "{module_text(graph.module_table, id)}"
+    bodies.push(SemaCoreBody{key: key, bytes: held.bytes.move(), symbols: [String]{}, decls: [String]{}, modules: modules, strings: held.strings.move()})
+}
+
+// Pushes onto `captures` the record of the grammar plans `plans` a Core
+// module's registration takes in the Core library's check, by binding name,
+// in the codec's indexed form. Nothing when it has none, or when a plan
+// names a symbol, declaration, module or type row, which only a compile's
+// own tables number.
+sema_core_grammar_capture: fn(plans: [NamedCtValue], captures: ^[SemaDeriveCapture]) Never! {
+    if plans.len() == 0 -> return
+    ^out: body_codec_out()
+    out.indexed = true
+    body_codec_put_list_namedctvalue(out, plans)
+    if out.symbols.len() > 0 || out.decls.len() > 0 || out.modules.len() > 0 || out.types.len() > 0 -> return
+    captures.push(SemaDeriveCapture{bytes: out.bytes.move(), modules: [ModuleID]{}, strings: out.strings.move()})
+}
+
+// The plans of the grammars Core module `module_identity` declares, by
+// binding name, from the record the Core library's check made of them
+// (sema_core_grammar_capture) in the bodies file the host lends
+// (SemaRegistrationHostHooks.core_bodies); the record's bytes join
+// core_bodies_read. None when no file is lent or it holds no record for the
+// module, and when the record does not read, which is a row of
+// core_bodies_unread. A plan reads nothing but its literal's text and
+// `core.grammar`, so a record serves a compile in any context.
+sema_core_grammar_plans: fn(hooks: SemaHostHookAccess?, table: ModuleTable, module_identity: ModuleID) -> [NamedCtValue]? {
+    if sema_host_hook_callbacks(hooks) == .Val(shared) {
+        permit: shared.guard_edit()
+        key: "{SEMA_CORE_GRAMMAR_KEY}{module_text(table, module_identity)}"
+        position: sema_core_bodies_position(permit.value.core_bodies, key) ?? return None
+        return sema_core_grammar_read(permit.value.core_bodies, permit.value.core_bodies_records, position, permit.value.core_bodies_read, permit.value.core_bodies_unread)
+    }
+    None
+}
+
+// The plans of the grammar record at `position` of `bodies`, read through
+// `records` when the host hands that read, else from the lent bytes; its
+// bytes join `read`. None when the record does not read, which is a row of
+// `unread`: the Core library's build read the file back whole
+// (sema_core_bodies_problem), so that is jet's own defect, and the batch
+// computes the module's plans, as for a module with no record.
+sema_core_grammar_read: fn(bodies: SemaCoreBodies?, records: SemaCoreBodiesRecords?, position: Int, read: ^Int, unread: ^[String]) -> [NamedCtValue]? {
+    if bodies == .Val(file) {
+        at: sema_core_bodies_offset(file.bytes, file.head, position)
+        end: if position + 1 < file.head.count -> sema_core_bodies_offset(file.bytes, file.head, position + 1) else -> file.bytes.len()
+        read += end - at
+        if records == .Val(source) {
+            record: source.read(at, end - at) ?? {
+                sema_core_bodies_note_unread(unread, "the grammar record {position} of the Core bodies file does not read from the host's file")
+                return None
+            }
+            return sema_core_grammar_decode(record, position, unread)
+        }
+        return sema_core_grammar_decode(file.bytes.slice(at, end), position, unread)
+    }
+    None
+}
+
+// The plans of the grammar record `bytes`, record `position` of its bodies
+// file; None when it does not read, which is a row of `unread`.
+sema_core_grammar_decode: fn(bytes: [U8], position: Int, unread: ^[String]) -> [NamedCtValue]? {
+    ^input: sema_core_bodies_record(bytes, 0)
+    symbol_keys: sema_core_bodies_keys(bytes, input)
+    decl_keys: sema_core_bodies_keys(bytes, input)
+    module_keys: sema_core_bodies_keys(bytes, input)
+    ^strings: sema_core_bodies_keys(bytes, input)
+    _: body_codec_get_list_type(bytes, input)
+    size: body_codec_get_count(bytes, input, 1)
+    if input.failed || symbol_keys.len() > 0 || decl_keys.len() > 0 || module_keys.len() > 0 || input.at + size != bytes.len() {
+        sema_core_bodies_note_unread(unread, "the grammar record {position} of the Core bodies file does not read")
+        return None
+    }
+    input.strings = strings.move()
+    input.indexed = true
+    plans: body_codec_get_list_namedctvalue(bytes, input)
+    if input.failed || input.at != bytes.len() {
+        sema_core_bodies_note_unread(unread, "the grammar record {position} of the Core bodies file does not read")
+        return None
+    }
+    Val(plans)
 }

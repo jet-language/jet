@@ -324,30 +324,30 @@ store_test_register_locked: fn(verification: StoreVerification, roots: HangarRoo
     second_hash: second.entry.envelope.output_hash
     witness: "sha256-{store_test_repeat("1", 64)}"
     key: store_test_nul_join("host", "generation")
-    prepared: if store_reconcile_external_consumer_root(verification, roots, "jetos-generation", key, witness, [String]{first_hash}, 1) == {
+    prepared: if store_reconcile_external_consumer_root(verification, roots, "deploy-generation", key, witness, [String]{first_hash}, 1) == {
         .Ok(found) -> found
         .Err(error) -> panic("prepare")
     }
     assert(prepared != None)
-    resumed: if store_reconcile_external_consumer_root(verification, roots, "jetos-generation", key, witness, [String]{first_hash}, 9) == {
+    resumed: if store_reconcile_external_consumer_root(verification, roots, "deploy-generation", key, witness, [String]{first_hash}, 9) == {
         .Ok(found) -> found
         .Err(error) -> panic("resume")
     }
     store_commit_external_consumer_root(verification, roots, resumed ?? panic("resumed prepare"), 10) ?? panic("commit")
     assert(
-        (if store_reconcile_external_consumer_root(verification, roots, "jetos-generation", key, witness, [String]{first_hash}, 11) == {
+        (if store_reconcile_external_consumer_root(verification, roots, "deploy-generation", key, witness, [String]{first_hash}, 11) == {
             .Ok(found) -> found
             .Err(error) -> panic("retry")
         }) == None,
     )
-    assert(store_reconcile_external_consumer_root(verification, roots, "jetos-generation", key, "sha256-{store_test_repeat("2", 64)}", [String]{second_hash}, 12) == .Err(_))
-    assert(store_reconcile_external_consumer_root(verification, roots, "jetos-generation", store_test_nul_join("other-host", "generation"), witness, [String]{"/nix/store/not-a-hangar-object"}, 12) == .Err(_))
-    assert(store_reconcile_external_consumer_root(verification, roots, "jetos-generation", key, witness, [String]{second_hash}, 12) == .Err(_))
+    assert(store_reconcile_external_consumer_root(verification, roots, "deploy-generation", key, "sha256-{store_test_repeat("2", 64)}", [String]{second_hash}, 12) == .Err(_))
+    assert(store_reconcile_external_consumer_root(verification, roots, "deploy-generation", store_test_nul_join("other-host", "generation"), witness, [String]{"/nix/store/not-a-hangar-object"}, 12) == .Err(_))
+    assert(store_reconcile_external_consumer_root(verification, roots, "deploy-generation", key, witness, [String]{second_hash}, 12) == .Err(_))
     snapshot: store_lifecycle_snapshot(verification, roots) ?? panic("snapshot")
     root: snapshot.root_list()[0]
     assert(root.identity.kind == RootKind.ExternalConsumer)
-    assert_eq(root.identity.id.as_str(), "external-consumer:jetos-generation:{store_sha256_hex(key.bytes())}")
-    assert_eq(root.identity.producer.as_str(), "jetos-generation")
+    assert_eq(root.identity.id.as_str(), "external-consumer:deploy-generation:{store_sha256_hex(key.bytes())}")
+    assert_eq(root.identity.producer.as_str(), "deploy-generation")
     assert_eq(root.identity.incarnation.get(), 1)
     assert_eq(root.identity.witness.as_str(), witness)
     assert_eq(root.targets, [String]{first_hash})

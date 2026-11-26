@@ -5,16 +5,19 @@
 // ambiguity within 3 tokens, token clashes, unprintable token pairs and
 // field shapes are refusals) and returns its plan: the data a generated
 // parser and printer run from. Every refusal is a `GrammarFault`.
+// `Grammar` is the checked head: `Grammar{"""…"""}` runs `analyze` while
+// building and keeps the plan.
 use {
-    core.grammar.error.[GrammarFaults, grammar_faults]
+    core.grammar.error.[GrammarFault, GrammarFaultKind, GrammarFaults, GrammarReport, TextSpot, grammar_faults, grammar_report]
     core.grammar.plan.[GrammarKeywords, GrammarPlan, GrammarScanner, GrammarSource]
-    core.grammar.runtime.[GRAMMAR_MAX_DEPTH, NO_HOLE, NO_TOKEN, bounds_column, cursor_enter, cursor_expect, cursor_fail, cursor_leave, cursor_of, cursor_of_parts, cursor_resync, cursor_take, grammar_scanner, keyword_find, keyword_next, lexer_column, lexer_match, scan, scan_after, word_end, word_shaped]
+    core.grammar.runtime.[GRAMMAR_MAX_DEPTH, NO_HOLE, NO_TOKEN, bounds_column, check_errors, check_resync, cursor_depth, cursor_enter, cursor_expect, cursor_fail, cursor_leave, cursor_of, cursor_of_parts, cursor_resync, cursor_take, grammar_scanner, into_result, into_token, keyword_find, keyword_next, lexer_column, lexer_match, parse_decide, parse_end, parse_error, parse_text, parse_token, pen_of, print_error, print_result, print_text, print_text_in, print_token, scan, scan_after, word_end, word_shaped]
+    core.grammar.sink.[GrammarSink]
     __core_grammar_analyze.[mark_nullable, mark_parents, report_left_recursion, resolve, split_operators]
     __core_grammar_keywords.[plan_keywords]
     __core_grammar_lookahead.[assign_tokens, plan_decisions, plan_sets]
     __core_grammar_precedence.[plan_precedence, report_empty_repeats]
     __core_grammar_print.[plan_printer]
-    __core_grammar_shape.[plan_shapes]
+    __core_grammar_shape.[plan_kind_names, plan_shapes]
     __core_grammar_tokens.[plan_tokens]
 }
 
@@ -37,6 +40,7 @@ analyze: fn(text: String, start: String, imports: [GrammarSource]) -> GrammarPla
     lexer: plan_tokens(work)
     if work.faults.len() > 0 -> return Err(grammar_faults(work.faults))
     shapes: plan_shapes(work)
+    kind_names: plan_kind_names(work, shapes)
     if work.faults.len() > 0 -> return Err(grammar_faults(work.faults))
     printer: plan_printer(work, lexer, shapes)
     if work.faults.len() > 0 -> return Err(grammar_faults(work.faults))
@@ -44,7 +48,47 @@ analyze: fn(text: String, start: String, imports: [GrammarSource]) -> GrammarPla
     ^decision_of: [Int]{}
     loop _ in work.tree.nodes -> decision_of.push(-1)
     loop (d, decision) in work.decisions -> decision_of[decision.node] = d
-    Ok(GrammarPlan{tree: work.tree, start: work.start, parent: work.parent, nullable: work.nullable, operators: work.operators, tokens: work.tokens, decisions: work.decisions, decision_of: decision_of, lexer: lexer, keywords: keywords, shapes: shapes, printer: printer})
+    Ok(GrammarPlan{tree: work.tree, start: work.start, parent: work.parent, nullable: work.nullable, operators: work.operators, tokens: work.tokens, decisions: work.decisions, decision_of: decision_of, lexer: lexer, keywords: keywords, shapes: shapes, kind_names: kind_names, printer: printer})
+}
+
+/// A checked grammar: the plan of its literal's rule notation, built while
+/// building, with every parser rule a start. A refused grammar reports each
+/// fault at its spot in the literal, under its kind's code. A grammar
+/// literal has no holes.
+Grammar: struct {
+    plan: GrammarPlan,
+
+    impl CheckedText {
+        Error: [GrammarReport],
+        Hole: String,
+        Shape: GrammarPlan,
+
+        check: fn(parts: [String]) -[]> Checked<GrammarPlan, TextSlot> [GrammarReport]! {
+            if parts.len() > 1 -> return Err(grammar_hole_reports(parts))
+            if analyze(parts[0], "", [GrammarSource]{}) == {
+                .Ok(plan) -> Ok(Checked{shape: plan, slots: [TextSlot]{}})
+                .Err(faults) -> Err(loop fault in faults.faults -> grammar_report(fault))
+            }
+        }
+
+        accepts: fn(_slot: TextSlot, _hole: TypeId) -[]> String? { Val(GRAMMAR_HOLE_MESSAGE) }
+
+        encode_hole: fn<T: Printable>(value: T, _slot: TextSlot) -[]> String { "{value}" }
+
+        build: fn(shape: GrammarPlan, _holes: [String]) -[]> Grammar { Grammar{plan: shape} }
+    }
+}
+
+priv GRAMMAR_HOLE_MESSAGE: "a grammar literal has no holes"
+
+/// One report for each hole of a grammar literal's `parts`, at the place the
+/// hole opens: the end of the part before it.
+priv grammar_hole_reports: fn(parts: [String]) -> [GrammarReport] Never! {
+    ^reports: [GrammarReport]{}
+    loop part in 0..<parts.len() - 1 {
+        reports.push(grammar_report(GrammarFault{kind: GrammarFaultKind.Notation, at: TextSpot{part: part, offset: parts[part].len()}, message: GRAMMAR_HOLE_MESSAGE, fix: "write the grammar's text whole: it is read while building, so no value can fill a hole"}))
+    }
+    reports
 }
 
 // The run-time support over analyzed plans: keyword lookup, the class
@@ -357,6 +401,44 @@ priv LIST: "s : '[' items+=NAME (',' items+=NAME)* ']' ;\nNAME : [a-z]+ ;\nWS : 
     assert_eq(cursor.errors.len(), 1)
 }
 
+#Test("a check resyncs a repeat at its separator and its closing token, and keeps every error") {
+    scanner: grammar_scanner(plan_of(LIST))
+    open: scanner_kind(scanner, "\"[\"")
+    name: scanner_kind(scanner, "NAME")
+    comma: scanner_kind(scanner, "\",\"")
+    close: scanner_kind(scanner, "\"]\"")
+    ^cursor: cursor_of_parts(["[a %, b c]"])
+    _: cursor_expect(cursor, scanner, [open])
+    assert(cursor_enter(cursor))
+    depth: cursor_depth(cursor)
+    _: cursor_expect(cursor, scanner, [name])
+    assert(cursor_enter(cursor))
+    _: cursor_expect(cursor, scanner, [comma, close])
+    assert(check_resync(cursor, scanner, depth, [comma, close], comma))
+    assert_eq(cursor_depth(cursor), depth)
+    _: cursor_expect(cursor, scanner, [comma])
+    _: cursor_expect(cursor, scanner, [name])
+    _: cursor_expect(cursor, scanner, [comma, close])
+    assert(!check_resync(cursor, scanner, depth, [comma, close], comma))
+    _: cursor_expect(cursor, scanner, [close])
+    cursor_leave(cursor)
+    errors: check_errors(cursor, scanner, true)
+    assert_eq(errors.len(), 2)
+    assert_eq("{errors[0]}", "1:4: expected \",\" or \"]\", found \"%\"")
+    assert_eq("{errors[1]}", "1:9: expected \",\" or \"]\", found \"c\"")
+    ^trailing: cursor_of_parts(["[a b"])
+    _: cursor_expect(trailing, scanner, [open])
+    _: cursor_expect(trailing, scanner, [name])
+    left: check_errors(trailing, scanner, true)
+    assert_eq(left.len(), 1)
+    assert("{left[0]}".starts_with("1:4: expected end of input"))
+    ^whole: cursor_of_parts(["[a]"])
+    _: cursor_expect(whole, scanner, [open])
+    _: cursor_expect(whole, scanner, [name])
+    _: cursor_expect(whole, scanner, [close])
+    assert_eq(check_errors(whole, scanner, true).len(), 0)
+}
+
 #Test("a hole sits between parts, and no token runs across it") {
     scanner: grammar_scanner(plan_of("s : name=NAME HOLE<slot=Value> other=NAME ;\nNAME : [a-z]+ ;\nWS : ' '+ -> skip ;"))
     name: scanner_kind(scanner, "NAME")
@@ -388,4 +470,110 @@ priv LIST: "s : '[' items+=NAME (',' items+=NAME)* ']' ;\nNAME : [a-z]+ ;\nWS : 
     assert_eq("{cursor.errors[0]}", "1:1: unexpected nesting deeper than {GRAMMAR_MAX_DEPTH} rules")
     cursor_leave(cursor)
     assert_eq(cursor.depth, GRAMMAR_MAX_DEPTH)
+}
+
+#Test("a decision reads as far as it needs and takes no token") {
+    plan: plan_of("s : name=NAME '=' value=NAME # Set | name=NAME '(' ')' # Call ;\nNAME : [a-z]+ ;\nWS : ' '+ -> skip ;")
+    scanner: grammar_scanner(plan)
+    decision: plan.decision_of[plan.tree.rules[0].body]
+    ^set: cursor_of("a = b")
+    assert_eq(parse_decide(set, scanner, decision), 0)
+    assert_eq(set.at, 0)
+    ^call: cursor_of("a ( )")
+    assert_eq(parse_decide(call, scanner, decision), 1)
+    assert_eq(call.errors.len(), 0)
+    ^neither: cursor_of("a ;")
+    assert_eq(parse_decide(neither, scanner, decision), -1)
+    assert_eq(neither.errors.len(), 1)
+    assert("{neither.errors[0]}".starts_with("1:3: expected "))
+}
+
+#Test("a parse takes tokens by kind, reads their text and ends at the end of the input") {
+    scanner: grammar_scanner(plan_of("s : name=NAME '=' value=NAME ;\nNAME : [a-z]+ ;\nWS : ' '+ -> skip ;"))
+    name: scanner_kind(scanner, "NAME")
+    equals: scanner_kind(scanner, "\"=\"")
+    ^cursor: cursor_of("ab = cd")
+    assert_eq(parse_text(cursor, scanner, name) ?? "", "ab")
+    assert(parse_token(cursor, scanner, equals))
+    assert_eq(parse_text(cursor, scanner, name) ?? "", "cd")
+    assert(parse_end(cursor, scanner))
+    ^trailing: cursor_of("ab = cd ef")
+    _: parse_text(trailing, scanner, name)
+    _: parse_token(trailing, scanner, equals)
+    _: parse_text(trailing, scanner, name)
+    assert(!parse_end(trailing, scanner))
+    assert("{parse_error(trailing)}".starts_with("1:9: expected "))
+    ^wrong: cursor_of("ab cd")
+    _: parse_text(wrong, scanner, name)
+    assert(!parse_token(wrong, scanner, equals))
+    assert_eq(wrong.errors.len(), 1)
+    assert("{parse_error(wrong)}".starts_with("1:4: expected \"=\""))
+    assert(!parse_end(wrong, scanner))
+}
+
+#Test("a printer writes tokens apart only where they would run together") {
+    plan: plan_of("s : name=NAME '=' value=NAME ;\nNAME : [a-z]+ ;\nWS : ' '+ -> skip ;")
+    scanner: grammar_scanner(plan)
+    name: scanner_kind(scanner, "NAME")
+    equals: scanner_kind(scanner, "\"=\"")
+    ^out: [U8]{}
+    ^pen: pen_of(out)
+    assert(print_text(out, pen, scanner, plan.printer, "name", "ab", name))
+    print_token(out, pen, plan.printer, equals)
+    assert(print_text(out, pen, scanner, plan.printer, "value", "cd", name))
+    assert(print_text(out, pen, scanner, plan.printer, "value", "ef", name))
+    assert_eq(print_result(out), "ab=cd ef")
+}
+
+#Test("a field's text prints only as all of one token, and a refusal takes back the print") {
+    plan: plan_of("s : name=NAME op=('+' | '-') ;\nNAME : [a-z]+ ;\nWS : ' '+ -> skip ;")
+    scanner: grammar_scanner(plan)
+    name: scanner_kind(scanner, "NAME")
+    kinds: [Int]{scanner_kind(scanner, "\"+\""), scanner_kind(scanner, "\"-\"")}
+    ^out: [U8]{}
+    loop b in "> ".bytes() -> out.push(b)
+    ^pen: pen_of(out)
+    assert(print_text(out, pen, scanner, plan.printer, "name", "ab", name))
+    assert(print_text_in(out, pen, scanner, plan.printer, "op", "-", kinds))
+    assert(!print_text_in(out, pen, scanner, plan.printer, "op", "*", kinds))
+    assert(!print_text(out, pen, scanner, plan.printer, "name", "a b", name))
+    assert_eq("{print_error(out, pen)}", "1:4: expected \"+\" or \"-\" for `op`, found \"*\"")
+    assert_eq(print_result(out), "> ")
+    ^empty: [U8]{}
+    ^blank: pen_of(empty)
+    assert(!print_text(empty, blank, scanner, plan.printer, "name", "", name))
+    assert_eq("{print_error(empty, blank)}", "1:1: expected NAME for `name`, found \"\"")
+}
+
+/// A sink that writes each event it receives as text.
+priv EventText: struct {
+    text: String,
+}
+
+impl EventText.GrammarSink {
+    open: fn(^self, rule: Int) Never! { self.text = "{self.text}({rule} " }
+    close: fn(^self, rule: Int) Never! { self.text = "{self.text}{rule}) " }
+    token: fn(^self, kind: Int, start: Int, end: Int) Never! { self.text = "{self.text}{kind}:{start}-{end} " }
+}
+
+#Test("a parse into a sink sends the skipped tokens before each token it takes") {
+    scanner: grammar_scanner(plan_of(LIST))
+    open: scanner_kind(scanner, "\"[\"")
+    close: scanner_kind(scanner, "\"]\"")
+    name: scanner_kind(scanner, "NAME")
+    space: scanner_kind(scanner, "WS")
+    ^cursor: cursor_of(" [ ab x")
+    ^sink: EventText{text: ""}
+    assert(into_token(cursor, scanner, open, sink))
+    assert(into_token(cursor, scanner, name, sink))
+    if into_result(cursor) == {
+        .Ok(at) -> assert_eq(at, 5)
+        .Err(error) -> panic("{error}")
+    }
+    assert(!into_token(cursor, scanner, close, sink))
+    assert_eq(sink.text, "{space}:0-1 {open}:1-2 {space}:2-3 {name}:3-5 ")
+    if into_result(cursor) == {
+        .Ok(at) -> panic("ended at {at}")
+        .Err(error) -> assert("{error}".starts_with("1:7: expected \"]\""))
+    }
 }

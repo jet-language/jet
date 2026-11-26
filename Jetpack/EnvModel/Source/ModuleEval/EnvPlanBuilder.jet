@@ -377,31 +377,17 @@ envmodel_evaluate_env_with_source_loader: fn<L: SourceLoader>(src: String, base_
         }
     }
     integration_facts.validate() ?? return Err(envmodel_error("E1335", "environment integration lowering was lossy", err.message, "use named secret references and supported typed integration arguments", None))
-    ^systems: [SystemPlan]{}
-    loop evaluated in modules {
-        loop system in evaluated.systems -> systems.push(system)
-    }
-    ^system_names: [String]{}
-    loop system in systems -> system_names.push(system.name)
-    known_systems: if system_names.len() == 0 -> "no `system.<name>:` contribution is defined" else -> "known systems: {system_names.join(", ")}"
-    // An `.Oci` image's `from: packages.<name>` cross-checks
-    // against this project's own package manifest (E1267) — a different
-    // manifest than the environment this pass evaluates, so it is loaded here
-    // rather than threaded through as a plan field. An `.Iso` image names a
-    // captured system (E0978).
+    // A package image's `from: packages.<name>` cross-checks against this
+    // project's own package manifest (E1267) — a different manifest than the
+    // environment this pass evaluates, so it is loaded here rather than
+    // threaded through as a plan field.
     ^needs_package_facts: false
     loop image in images {
-        if image.kind == ImageKind.OCI && !image.from_environment -> needs_package_facts = true
+        if !image.from_environment -> needs_package_facts = true
     }
     ^manifest: PackageFacts?{None}
     if needs_package_facts -> manifest = loader.package_facts()
     loop image in images {
-        if image.kind == ImageKind.Iso {
-            if !system_names.contains(image.from) {
-                return Err(envmodel_error("E0978", "The image `{image.name}` is built from an unknown system `{image.from}`", "`from: system.<name>` is frozen jetos disk-image research; Jetpack's active image path uses `from: packages.<name>`", "Use `from: packages.<name>` for an `.Oci` image, or keep the system image as research capture ({known_systems})", None))
-            }
-            next
-        }
         if image.from_environment {
             if !environment_names.contains(image.from) {
                 return Err(envmodel_error("E1327", "the image `{image.name}` names unknown environment `{image.from}`", "an environment image projects one declared `env.<name>` fact graph into a runnable OCI image", "declare `env.{image.from}: module {{ … }}`, or point `from:` at an existing environment", None))
@@ -426,25 +412,6 @@ envmodel_evaluate_env_with_source_loader: fn<L: SourceLoader>(src: String, base_
         }
         if !is_executable {
             return Err(envmodel_oci_from_non_executable(image.name, image.from, is_library))
-        }
-    }
-    // U15: every fleet and vmtest host must reference a known system (E1242).
-    loop evaluated in modules {
-        loop group in evaluated.fleets {
-            loop host in group.hosts {
-                if !system_names.contains(host.system) {
-                    return Err(envmodel_fleet_unknown_system(group.name, host.name, host.system, known_systems))
-                }
-            }
-        }
-    }
-    loop evaluated in modules {
-        loop group in evaluated.vmtests {
-            loop host in group.hosts {
-                if !system_names.contains(host.system) {
-                    return Err(envmodel_fleet_unknown_system(group.name, host.name, host.system, known_systems))
-                }
-            }
         }
     }
     envmodel_validate_secret_graph(secrets, Span{start: 0, end: 0})
@@ -524,7 +491,6 @@ envmodel_evaluate_env_with_source_loader: fn<L: SourceLoader>(src: String, base_
             prompt: prompt,
             prompt_path: prompt_path,
             prompt_strip: prompt_strip,
-            systems: systems,
             images: images,
             dev_services: dev_services,
             secrets: secrets,

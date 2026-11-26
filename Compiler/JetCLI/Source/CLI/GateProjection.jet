@@ -2,9 +2,9 @@
 // sema; the CLI only selects checked rows and adapts the external writers.
 use {
     jet_driver.[JetDriverAuthorizedSourceSnapshot, JetDriverCompileResult]
-    jet_foundation.[GateEntry, GateKind, GateLedger, gate_source_entry, gate_ledger_push, gate_ledger_sort]
+    jet_foundation.[GateEntry, GateKind, GateLedger, gate_ledger_push]
     jet_foundation.[Span]
-    jet_pkg_model.[BuildGrant, EffectiveFact, PackageAuthority, PackageGrant, ServiceTrust, TrustDecision]
+    jet_pkg_model.[BuildGrant, PackageAuthority, PackageGrant, ServiceTrust, TrustDecision]
     jetpack_foundation.[UNIFIED_LOCK_FILE]
 }
 
@@ -25,18 +25,6 @@ jet_cli_gate_entries_at: fn(ledger: GateLedger, source: String, span: Span) -> [
         if span.start <= site.start && site.end <= span.end -> rows.push(entry.copy())
     }
     rows
-}
-
-// Project the provenance that the canonical fact resolver already settled.
-// A forced writer is one build gate, not a new build-fact policy mechanism.
-jet_cli_gate_append_build_facts: fn(ledger: ^GateLedger, facts: [EffectiveFact]) Never! {
-    loop fact in facts {
-        loop contribution in fact.provenance {
-            if !contribution.force -> next
-            gate_ledger_push(ledger, gate_source_entry(GateKind.BuildFlag, "build", contribution.layer.name(), contribution.source, contribution.span, fact.key.name, Val(contribution.force_reason ?? ".Force"), ".Force {contribution.value.display()}", "recorded"))
-        }
-    }
-    gate_ledger_sort(ledger)
 }
 
 // `append_package_writers`: the entry package's `authority:` block and

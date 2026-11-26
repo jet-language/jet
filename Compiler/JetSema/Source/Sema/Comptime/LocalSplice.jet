@@ -21,7 +21,7 @@
 // every row a module merges across its function checks (SemaModuleBodyRows)
 // must be the same in both checks, but for the landed sites that got values
 // leaving `comptime_body_sources` (one whose outcome is a run-time reason
-// stays): the call facts, hardware use, name references,
+// stays): the call facts, name references,
 // comptime requests, compute facts, `exact_int_reachable`, copy events,
 // `complete`, failure facts, incomplete reasons, injected functions and
 // their keys, and tests. The diagnostics are the same too, but for those
@@ -86,7 +86,6 @@ use jet_foundation.[
     name_pair_find_slot,
     name_table_sized,
     name_text,
-    TargetHardwareUse,
     TTestFact,
     Type,
     compiler_take_rows,
@@ -103,7 +102,6 @@ SemaModuleBodyRows: struct {
     module_index: Int,
     functions: [FnBody],
     call_facts: [SemaCallSiteFact],
-    hardware_use: TargetHardwareUse,
     name_references: [SemaNameReferenceFact],
     comptime_requests: [SemaComptimeRequest],
     comptime_body_sources: [SemaComptimeBodySource],
@@ -247,7 +245,6 @@ sema_module_body_rows_take: fn(modules: ^[SemaGraphModuleResult], indexes: [Int]
                     module_index: modules.len(),
                     functions: result.functions.move(),
                     call_facts: result.call_facts.move(),
-                    hardware_use: result.hardware_use.move(),
                     name_references: result.name_references.move(),
                     comptime_requests: result.comptime_requests.move(),
                     comptime_body_sources: result.comptime_body_sources.move(),
@@ -266,7 +263,6 @@ sema_module_body_rows_take: fn(modules: ^[SemaGraphModuleResult], indexes: [Int]
             )
             result.functions = [FnBody]{}
             result.call_facts = [SemaCallSiteFact]{}
-            result.hardware_use = sema_hardware_empty_use()
             result.name_references = [SemaNameReferenceFact]{}
             result.comptime_requests = [SemaComptimeRequest]{}
             result.comptime_body_sources = [SemaComptimeBodySource]{}
@@ -309,7 +305,6 @@ sema_module_body_rows_put: fn(modules: ^[SemaGraphModuleResult], rows: ^^[SemaMo
         if owned.len() > 0 && owned[owned.len() - 1].module_index == modules.len() && owned.pop() == .Val(put) {
             result.functions = put.functions.move()
             result.call_facts = put.call_facts.move()
-            result.hardware_use = put.hardware_use.move()
             result.name_references = put.name_references.move()
             result.comptime_requests = put.comptime_requests.move()
             result.comptime_body_sources = put.comptime_body_sources.move()
@@ -364,7 +359,6 @@ sema_local_splice_release: fn(aside: ^^SemaLocalSpliceAside, threads: CompilerTh
 // their texts cost seconds on the compiler's own pass.
 sema_module_body_rows_difference: fn(old: SemaModuleBodyRows, new: SemaModuleBodyRows) -> String? Never! {
     if old.call_facts != new.call_facts -> return Val("rows_calls")
-    if old.hardware_use != new.hardware_use -> return Val("rows_hardware")
     if old.name_references != new.name_references -> return Val("rows_names")
     if old.comptime_requests != new.comptime_requests -> return Val("rows_requests")
     if old.compute_facts != new.compute_facts -> return Val("rows_compute")

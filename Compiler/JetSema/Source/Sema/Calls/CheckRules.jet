@@ -602,7 +602,7 @@ sema_rule_function_of: fn(expression: Expr, ty: Type, span: Span, check: ^SemaBo
         local: sema_scope_resolve_index(check.scopes, name)
         resolved = Val(if local == .Val(index) -> sema_scope_binding_symbol(check.environment.*, check.scopes, index) else -> sema_resolved_symbol(graph, sema_type_graph_lookup_symbol(graph, check.environment.module_identity, name) ?? return None))
     }
-    if expression == .Field(base, member, _, _) && base == .Ident(alias, _, _) && sema_scope_resolve_index(check.scopes, alias) == None {
+    if expression == .Field(base, member, _, _) && base == .Ident(alias, _, _) && sema_rule_module_alias(alias, check) {
         resolved = Val(sema_resolved_symbol(graph, sema_registration_lookup_qualified(graph, check.environment.module_identity, alias, member) ?? return None))
     }
     symbol: resolved ?? return None
@@ -610,6 +610,14 @@ sema_rule_function_of: fn(expression: Expr, ty: Type, span: Span, check: ^SemaBo
     ^probe_diagnostics: [Diagnostic]{}
     info: sema_fact_function_info(symbol, graph, check.context.type_delta, None, span, probe_diagnostics) ?? return None
     Val(SemaRuleFunction{info: sema_fact_declared_value(info), source: SemaRuleFunctionSource{key: sema_symbol_key(check.program.*, check.context, symbol.id), within: None, returned: [Int]{}}})
+}
+
+// Whether `alias` names an imported module where the body is checked: the
+// import is a binding of the module's root frame, and a local of that name
+// shadows it.
+sema_rule_module_alias: fn(alias: String, check: SemaBodyCheck) -> Bool Never! {
+    index: sema_scope_resolve_index(check.scopes, alias) ?? return true
+    check.scopes.bindings[index].symbol.kind == SymbolKind.Import
 }
 
 // The FunctionInfo of a lambda written as an argument, of the probed type
