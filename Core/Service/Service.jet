@@ -22,6 +22,7 @@ use {
     service_files_rt: jet.runtime.files
     service_sys_rt: jet.runtime.sys
     service_time_rt: jet.runtime.time
+    record_syntax: __core_service_syntax_record
     core.prelude.[TaskFailure]
 }
 
@@ -4121,6 +4122,32 @@ authority_unhex: fn(text: String) -> [U8]? Never! {
 }
 
 authority_parse_record: fn(line: String) -> DeliveryRecord ServiceError! {
+    if record_syntax.parse_record(line) == .Val(rec) {
+        head: rec.op.bytes()
+        op: String.from_bytes(head.slice(0, 1)) ?? "?"
+        ^fields: [String]{}
+        ^ok: true
+        loop f in rec.fields {
+            length: service_parse_count(f.length) ?? {
+                ok = false
+                break
+            }
+            bytes: authority_unhex(f.hex) ?? {
+                ok = false
+                break
+            }
+            if bytes.len() != length {
+                ok = false
+                break
+            }
+            value: String.from_bytes(bytes) ?? {
+                ok = false
+                break
+            }
+            fields.push(value)
+        }
+        if ok -> return Ok(DeliveryRecord{op: op, fields: fields})
+    }
     parts: line.split("|").to_list()
     head: parts[0].bytes()
     if head.len() == 0 -> return Err(authority_error("service authority record has no operation"))
@@ -5041,6 +5068,12 @@ delivery_parse_state: fn(text: String) -> DeliveryState? Never! {
     assert(service_encoding.bytes_to_hex(delivery_signature_payload(fields)) == "0000000000000002cebb0000000000000000")
     assert(delivery_parse_state("Delivered") == (Val(DeliveryState.Delivered)))
     assert(delivery_parse_state("delivered") == None)
+    sample_rec: "A|4:74657374|0:"
+    rec: authority_parse_record(sample_rec) ?? panic("service authority record")
+    assert_eq(rec.op, "A")
+    assert_eq(rec.fields, [String]{"test", ""})
+    assert_eq(record_syntax.print_record(sample_rec), Val(sample_rec))
+    assert(record_syntax.parse_record("") == None)
 }
 
 // Independent node:crypto oracle: the generation key as captured in

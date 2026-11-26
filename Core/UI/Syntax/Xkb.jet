@@ -1,0 +1,56 @@
+// Private XKB text-v1 keymap grammar for `core.ui.xkb`.
+use {
+    core.grammar.[Grammar]
+}
+
+#Allow(Jet.RawMultilineHtml, "XKB grammar includes angle-bracket keyname tokens like <AD01>")
+priv KeymapFile: Grammar{"""
+    keymap_file : 'xkb_keymap' name=STR? '{{' sections+=section* '}}' ';' ;
+    section     : kind=SEC_KIND name=STR? '{{' items+=item* '}}' ';' ;
+    item        : parts+=atom+ ';' ;
+    atom        : '{{' body+=block_tok* '}}' # BraceGroup
+                | '[' body+=block_tok* ']'   # BracketGroup
+                | '(' body+=block_tok* ')'   # ParenGroup
+                | text=KEYNAME               # KeyName
+                | text=STR                   # StrVal
+                | text=NUM                   # NumVal
+                | text=IDENT                 # IdentVal
+                | text=OP                    # OpVal
+                ;
+    block_tok   : nested=atom                # Inner
+                | ';'                        # Semi
+                ;
+
+    SEC_KIND    : 'xkb_keycodes' | 'xkb_types' | 'xkb_compatibility' | 'xkb_symbols' | 'xkb_geometry' ;
+    KEYNAME     : '<' [A-Za-z0-9_+\-]+ '>' ;
+    STR         : '"' ([^"\\\r\n] | '\\' .)* '"' ;
+    NUM         : '0' [xX] [0-9A-Fa-f]+ | [0-9]+ ;
+    IDENT       : [A-Za-z_] [A-Za-z0-9_]* ;
+    OP          : [=,+.!\-~/*] ;
+    WS          : [ \t\r\n]+ -> skip ;
+    COMMENT     : ('//' | '#') [^\r\n]* -> skip ;
+    BCOMMENT    : '/*' ([^*] | '*' [^/])* '*/' -> skip ;
+"""}
+
+/// Parses an XKB text-v1 keymap and returns the number of top-level sections,
+/// or `None` when malformed.
+count_sections: fn(text: String) -> Int? Never! {
+    if KeymapFile.parse(text) == {
+        .Ok(km) -> Val(km.sections.len())
+        .Err(_) -> None
+    }
+}
+
+/// Parses an XKB text-v1 keymap and formats it back through the grammar's
+/// checked printer.
+print_keymap: fn(text: String) -> String? Never! {
+    if KeymapFile.parse(text) == {
+        .Ok(km) -> {
+            if km.print() == {
+                .Ok(printed) -> Val(printed)
+                .Err(_) -> None
+            }
+        }
+        .Err(_) -> None
+    }
+}
