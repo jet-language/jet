@@ -1,6 +1,6 @@
 // A Core module's derive templates' expansions, as the Core library's check
 // records them in its bodies file (Registration/Derives.jet SemaDeriveMemo,
-// CoreBodies.jet sema_core_derive_bodies), read back as the expansions
+// CoreBodies.jet sema_core_module_bodies), read back as the expansions
 // registration makes from the module's items. A module whose items a load
 // cut, or whose types differ from those the record was made from, takes
 // what the record holds of its types and expands the rest.
@@ -25,8 +25,8 @@ use {
         sema_core_bodies_position,
         sema_core_bodies_problem,
         sema_core_bodies_read,
-        sema_core_derive_bodies,
         sema_core_derive_read,
+        sema_core_module_bodies,
         sema_derive_expand_builtin_items,
         sema_derive_expand_builtin_items_with,
         sema_derive_memo_capture,
@@ -197,7 +197,7 @@ derive_record_graph: fn(hooks: SemaHostHookAccess?, capture: Bool{false}) -> Sem
 #Test("a Core module registered with its recorded derive expansions registers as one that expands them") {
     ^captured: derive_record_graph(None, capture: true)
     ^bodies: [SemaCoreBody]{}
-    sema_core_derive_bodies(captured, bodies)
+    sema_core_module_bodies(captured, bodies)
     assert(bodies.len() > 0)
     hooks: Shared{SemaRegistrationHostHooks{numeric_unit_conversion_exact: None, core_bodies: Val(derive_record_file(bodies.move()))}}
     loaded: derive_record_graph(sema_host_hook_access(hooks), capture: false)

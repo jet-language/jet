@@ -154,9 +154,18 @@ amendments in `syntax-decisions.md` (R-H1).
 4. **Core's own grammars come from the Core bodies record** (R-C1).
    - This is the existing pattern for Core derive expansions
      (`CoreBodies.jet:960-1052`).
-   - The Core library's check keeps each Core module's plan and generated
-     items under a new record key. A compile bound to that Core reads them
-     from the record.
+   - The Core library's check keeps each Core module's plans under the
+     record key `#grammar <module>` (`SEMA_CORE_GRAMMAR_KEY`,
+     `sema_core_grammar_capture`). A compile bound to that Core reads them
+     from the record (`sema_core_grammar_plans`) in place of the batch, and
+     registration builds the items from them as from computed plans. Plans,
+     not items, are recorded: the items are a pure function of the plan, and
+     the plan holds no compile-numbered rows.
+   - The batch still computes a Core module's plans when no record is lent
+     (the Core library's own check, a compile against Core source). It then
+     leaves out every Core module importing a declaring one, so a Core module
+     that declares a grammar must not be imported, directly or through
+     others, by `core.grammar` or the Prelude.
    - A program that uses `SQL{…}` therefore never runs the SQL grammar
      analysis.
    - Whether the performance gate counts this toolchain record as a "compile

@@ -744,10 +744,12 @@ SemaRegistrationModuleInput: struct {
     // The plans of the grammars this module's bindings declare
     // (sema_grammar_declaring_binding), each the `plan` of the binding's
     // checked value, by binding name: the driver computes them in one batch
-    // before registration, which replaces each binding with the items its
-    // plan describes (GrammarItems.jet). A binding whose literal the grammar
-    // check refused has none and stays; the compile proper reports the
-    // literal.
+    // before registration, or reads a Core module's from the record the
+    // Core library's check made of them (CoreBodies.jet
+    // sema_core_grammar_plans), and registration replaces each binding with
+    // the items its plan describes (GrammarItems.jet). A binding whose
+    // literal the grammar check refused has none and stays; the compile
+    // proper reports the literal.
     grammar_plans: [NamedCtValue]{[NamedCtValue]{}},
 }
 
@@ -851,11 +853,15 @@ SemaRegistrationModule: struct {
     // The record of the derive templates' expansions the Core library's
     // check kept for this Core module (Derives.jet sema_derive_memo_capture),
     // at most one, which its bodies file holds (CoreBodies.jet
-    // sema_core_derive_bodies), and how many expansions of the record this
+    // sema_core_module_bodies), and how many expansions of the record this
     // module took did not read (SemaDeriveMemo.unread), a census row
     // (CoreBodies.jet sema_core_bodies_unread).
     derive_captures: [SemaDeriveCapture]{[SemaDeriveCapture]{}},
     derive_unread: Int{0},
+    // The record of the plans of the grammars this Core module declares,
+    // as the Core library's check took them (CoreBodies.jet
+    // sema_core_grammar_capture), at most one, which its bodies file holds.
+    grammar_captures: [SemaDeriveCapture]{[SemaDeriveCapture]{}},
     // The owned traits whose defaults did not parse in this module, so its
     // impls of them gained none (TraitImpls.jet SemaTraitDefaultsUnread), a
     // census row (sema_trait_defaults_unread).
@@ -4281,7 +4287,11 @@ sema_registration_prepare_module_row: fn(input: ^^SemaRegistrationModuleInput, m
     // generated impl, conversion, and test registers as a written item.
     sema_derive_expand_template_loops(module_row.program.items, owned.loop_values.move(), owned.loop_values_pending, module_is_core(module_row.module_identity), diagnostics)
     // A grammar binding gives way to the types, rule and token enums its
-    // plan describes (GrammarItems.jet), before the enums are numbered.
+    // plan describes (GrammarItems.jet), before the enums are numbered. The
+    // Core library's check, which keeps a Core module's derive expansions,
+    // keeps its plans too; a compile bound to that Core reads them in place
+    // of computing them (CoreBodies.jet sema_core_grammar_plans).
+    if owned.derive_memo.capture == .Val(_) -> sema_core_grammar_capture(owned.grammar_plans, module_row.grammar_captures)
     sema_grammar_items_expand(module_row.program.items, owned.grammar_plans.move(), diagnostics)
     // A number family's impl becomes one impl per standard size, after the
     // root `#loop`s so a family impl one generates expands too.

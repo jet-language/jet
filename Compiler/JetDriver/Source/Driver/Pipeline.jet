@@ -129,6 +129,7 @@ use {
         sema_core_lint_dropped,
         sema_core_seal_offered,
         sema_core_bodies_unread,
+        sema_core_grammar_plans,
         sema_trait_defaults_unread,
         SemaLintAllowance,
         sema_lint_allowances,
@@ -5973,7 +5974,8 @@ jet_driver_compile_stages: fn(request: JetDriverCompileRequest, preloaded: ^[Jet
     jet_driver_check_core_layers(request, load.source_units, layer_diagnostics)
     // Registration makes a grammar's items from its plan, so the plan of
     // every grammar a module binding declares is computed first, by one
-    // compile of those bindings alone (jet_driver_grammar_plans), and each
+    // compile of those bindings alone, or read from the Core library's
+    // record for a Core module (jet_driver_grammar_plans), and each
     // registration of the program (a root `#loop`'s first pass too) takes
     // its module's plans.
     grammar_plans: jet_driver_grammar_plans(request, load)
@@ -6028,22 +6030,34 @@ jet_driver_root_loop_waits: fn(load: JetDriverLoadResult) -> [SemaRootLoopValue]
 
 // The plans of the grammars `load`'s modules declare
 // (sema_grammar_declaring_binding), by module and binding; None for a plan
-// the batch could not compute. One compile of the loaded Core modules and
-// of each declaring module cut down to its declaring bindings
-// (jet_driver_grammar_load) evaluates every declaring literal at once,
-// before the program registers. Its reports are dropped: the compile proper
-// checks each literal again and reports its faults. A Core module's grammars
-// come from the Core library's own check, not from here.
+// the batch could not compute. A Core module's plans come from the record
+// the Core library's check made of them when the compile is bound to the
+// Core built into jet (jet_driver_grammar_recorded). One compile of the
+// loaded Core modules and of each declaring module cut down to its declaring
+// bindings (jet_driver_grammar_load) evaluates every other declaring literal
+// at once, before the program registers; the Core modules whose grammars it
+// takes from the record register them from their plans. Its reports are
+// dropped: the compile proper checks each literal again and reports its
+// faults.
 jet_driver_grammar_plans: fn(request: JetDriverCompileRequest, load: JetDriverLoadResult) -> [SemaRootLoopValue] {
-    waits: jet_driver_grammar_waits(load)
+    ^waits: jet_driver_grammar_waits(load)
     if waits.len() == 0 || !load.complete || jet_driver_has_errors(load.diagnostics) -> return waits
+    if !request.core_seal -> jet_driver_grammar_recorded(request, load, waits)
+    ^known: [SemaRootLoopValue]{}
+    ^pending: [SemaRootLoopValue]{}
+    loop wait in waits.move() {
+        if wait.value == None -> pending.push(wait) else -> known.push(wait)
+    }
+    if pending.len() == 0 -> return known
     if request.trace_sink == .Val(sink) -> sink.begin("grammar", "", -1, -1)
-    batch_load: jet_driver_grammar_load(load, waits)
+    batch_load: jet_driver_grammar_load(load, pending)
     ^batch_log: jet_driver_keep_going_log(None)
     ^batch_capture: JetDriverCheckedProjectionCapture{}
-    batch: jet_driver_compile_loaded_stages(request, batch_log, batch_load, false, batch_capture, waits.move(), [SemaRootLoopValue]{}, JetDriverStagesPass.GrammarBatch)
+    // copy: a batch that stops hands back no values, so the result keeps the
+    // waits and the known plans the batch's registration takes
+    batch: jet_driver_compile_loaded_stages(request, batch_log, batch_load, false, batch_capture, pending.copy(), known.copy(), JetDriverStagesPass.GrammarBatch)
     // A batch that stopped before computing the values hands back none.
-    ^plans: batch.root_loop_values.move() ?? jet_driver_grammar_waits(load)
+    ^plans: batch.root_loop_values.move() ?? pending.move()
     ^landed: 0
     loop index in 0..<plans.len() {
         plans[index].value = jet_driver_grammar_plan_of(plans[index].value)
@@ -6056,15 +6070,14 @@ jet_driver_grammar_plans: fn(request: JetDriverCompileRequest, load: JetDriverLo
         }
     }
     if request.trace_sink == .Val(sink) -> sink.end("grammar", landed)
+    loop plan in known.move() -> plans.push(plan)
     plans
 }
 
-// The grammar-declaring bindings of `load`'s modules outside Core, none
-// computed yet.
+// The grammar-declaring bindings of `load`'s modules, none computed yet.
 jet_driver_grammar_waits: fn(load: JetDriverLoadResult) -> [SemaRootLoopValue] {
     ^waits: [SemaRootLoopValue]{}
     loop loaded in load.modules {
-        if module_is_core(loaded.module_identity) -> next
         loop item in loaded.program.items {
             if item == .Const(definition) && sema_grammar_declaring_binding(loaded.program.imports, definition) {
                 waits.push(SemaRootLoopValue{module_identity: module_text(load.module_table, loaded.module_identity), name: definition.name.copy(), value: None})
@@ -6074,22 +6087,63 @@ jet_driver_grammar_waits: fn(load: JetDriverLoadResult) -> [SemaRootLoopValue] {
     waits
 }
 
-// `load` cut down to the grammar batch's compile: every loaded Core module
+// Fills into `waits` the plans of the Core modules' grammars from the record
+// the Core library's check made of them, in the bodies file the host lends
+// a compile bound to the Core built into jet (JetSema CoreBodies.jet
+// sema_core_grammar_plans), each module's as one `grammar.record` span. A
+// Core module with no record keeps its waits, which the batch computes.
+jet_driver_grammar_recorded: fn(request: JetDriverCompileRequest, load: JetDriverLoadResult, waits: ^[SemaRootLoopValue]) {
+    hooks: sema_host_hook_access(request.eval_config.host_hooks)
+    loop loaded in load.modules {
+        if !module_is_core(loaded.module_identity) -> next
+        identity: module_text(load.module_table, loaded.module_identity)
+        if !jet_driver_grammar_declares(waits, identity) -> next
+        ^plans: sema_core_grammar_plans(hooks, load.module_table, loaded.module_identity) ?? next
+        if request.trace_sink == .Val(sink) -> sink.begin("grammar.record", identity, -1, -1)
+        ^filled: 0
+        loop plan in plans.move() {
+            loop index in 0..<waits.len() {
+                if waits[index].module_identity == identity && waits[index].name == plan.name {
+                    waits[index].value = Val(plan.value.move())
+                    filled += 1
+                    break
+                }
+            }
+        }
+        if request.trace_sink == .Val(sink) -> sink.end("grammar.record", filled)
+    }
+}
+
+// Whether `waits` holds a binding of the module `identity`.
+jet_driver_grammar_declares: fn(waits: [SemaRootLoopValue], identity: String) -> Bool Never! {
+    loop wait in waits {
+        if wait.module_identity == identity -> return true
+    }
+    false
+}
+
+// `load` cut down to the grammar batch's compile: each loaded Core module
 // whole, and each module declaring one of `waits` (the entry too, empty
 // when it declares none, so the compile has its entry) holding only those
 // bindings and the `use` rows that bind their heads, with the import edges
-// of those rows.
+// of those rows. A Core module that imports a cut one, directly or through
+// others, is left out: it names the types the cut module's grammars make,
+// which the batch doesn't make. So a Core module that declares a grammar
+// must not be imported, directly or through others, by the Prelude or
+// `core.grammar`, which the batch needs.
 jet_driver_grammar_load: fn(load: JetDriverLoadResult, waits: [SemaRootLoopValue]) -> JetDriverLoadResult {
     ^modules: [JetDriverLoadedModule]{}
     ^kept: [U32:Bool]{}
     ^kept_rows: [U32:[Span]]{}
+    cut: jet_driver_grammar_cut_core(load, waits)
     loop loaded in load.modules {
-        if module_is_core(loaded.module_identity) {
+        identity: module_text(load.module_table, loaded.module_identity)
+        if module_is_core(loaded.module_identity) && !jet_driver_grammar_declares(waits, identity) {
+            if cut.get(loaded.module_identity.id) ?? false -> next
             modules.push(loaded.copy())
             kept[loaded.module_identity.id] = true
             next
         }
-        identity: module_text(load.module_table, loaded.module_identity)
         ^items: [Item]{}
         ^heads: [String]{}
         loop item in loaded.program.items {
@@ -6134,12 +6188,12 @@ jet_driver_grammar_load: fn(load: JetDriverLoadResult, waits: [SemaRootLoopValue
     }
     ^imports: [SemaRegistrationImportEdge]{}
     loop edge in load.imports {
-        if !(kept.get(edge.target_module_identity.id) ?? false) -> next
-        if module_is_core(edge.source_module_identity) {
+        if !(kept.get(edge.target_module_identity.id) ?? false) || !(kept.get(edge.source_module_identity.id) ?? false) -> next
+        // A module kept whole keeps every edge.
+        spans: kept_rows.get(edge.source_module_identity.id) ?? {
             imports.push(edge.copy())
             next
         }
-        spans: kept_rows.get(edge.source_module_identity.id) ?? next
         if spans.contains(edge.declaration.span) -> imports.push(edge.copy())
     }
     JetDriverLoadResult{
@@ -6160,6 +6214,35 @@ jet_driver_grammar_load: fn(load: JetDriverLoadResult, waits: [SemaRootLoopValue
         spells_program: load.spells_program,
         typed_goals: load.typed_goals,
     }
+}
+
+// The Core modules the grammar batch leaves out (jet_driver_grammar_load),
+// by module id: those that import a Core module declaring one of `waits`,
+// directly or through others.
+jet_driver_grammar_cut_core: fn(load: JetDriverLoadResult, waits: [SemaRootLoopValue]) -> [U32:Bool] {
+    ^declaring: [U32:Bool]{}
+    ^cut: [U32:Bool]{}
+    ^any: false
+    loop loaded in load.modules {
+        if module_is_core(loaded.module_identity) && jet_driver_grammar_declares(waits, module_text(load.module_table, loaded.module_identity)) {
+            declaring[loaded.module_identity.id] = true
+            any = true
+        }
+    }
+    ^grew: any
+    loop grew {
+        grew = false
+        loop edge in load.imports {
+            source: edge.source_module_identity.id
+            if !module_is_core(edge.source_module_identity) || (cut.get(source) ?? false) || (declaring.get(source) ?? false) -> next
+            target: edge.target_module_identity.id
+            if (declaring.get(target) ?? false) || (cut.get(target) ?? false) {
+                cut[source] = true
+                grew = true
+            }
+        }
+    }
+    cut
 }
 
 // Whether `waits` holds the binding `name` of the module `identity`.
