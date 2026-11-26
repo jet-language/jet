@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7042,
-    "rev": 114802,
+    "rev": 114817,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -35611,7 +35611,7 @@
       "track": "epoch",
       "epoch": "G3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -35619,16 +35619,22 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-26",
+          "by": "Orchestrator",
+          "text": "Closed on Batch 76 S1 (dev fc4539b2d33 / master 3eedf702a5a) with bidirectional OpenSSL DTLS 1.2 interop, loopback interop, 3/3 unit tests, and O0/O1/O2 DTLSEcho golden."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "core.net.dtls exposes DTLS 1.2 client and server over UDP on the Jet TLS engine, in the core.net.tls shape (typed config, Result errors, Close), with interop cases against the vendored mbedtls DTLS peers and an example golden (owner ruling 2026-11-08, Q11 B). Proof: `jet test Compiler --profile cases --filter Net/dtls_interop_` and `jet test Compiler --profile golden --filter Net/DtlsEcho`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:04:06.411Z"
+          "evidence": "Verified on Batch 76 S1 (fc4539b2d33, jet 63200dda036de50c): Core/Net/DTLS.jet PASS 3/3, Tests/Cases/Net/dtls_interop_loopback.case PASS, Tests/Cases/Net/dtls_interop_openssl.case PASS (live bidirectional OpenSSL DTLS 1.2 ECDSA/RSA/ChaCha20/mTLS + clean Jet server exit 0), Examples/Network/DTLSEcho.jet golden PASS 3/3 (O0, O1, O2), architecture_rows PASS 1/1.",
+          "at": "2026-11-26T12:25:16.735Z"
         }
       ],
       "refs": [],
@@ -35636,9 +35642,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T15:59:02.674Z",
-      "updated": "2026-11-22T02:10:23.719Z",
-      "updatedBy": "owner",
-      "criteriaLastN": 1
+      "updated": "2026-11-26T12:25:18.543Z",
+      "updatedBy": "Orchestrator",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-26T12:25:18.543Z"
     },
     {
       "id": "c0pmy5fy",
@@ -60214,6 +60221,11 @@
         {
           "at": "2026-11-26",
           "by": "Orchestrator",
+          "text": "Batch 75/76 (dev fc4539b2d33 / master 3eedf702a5a): n2 retired all 14 hand Compiler/JetBackend/Source/*ABI.jet files with permanent CoreDeclarations guard PASS 7/7 and runtime_leaf_exports Core.rows export count ratcheted to 0 (only 2 dispatcher rows remain awaiting owner ballot); n6 removed 651 .copy() calls cumulatively across Batch 75 (-127: JetLSP/JetSemIndex -39, JetFoundation -88) and Batch 76 (-524: JetIR -85, JetParser -56, JetCLI -183, JetSema -200) with copy_ratchet PASS 2/2 and touched compiler unit tests green."
+        },
+        {
+          "at": "2026-11-26",
+          "by": "Orchestrator",
           "text": "Follow-up found by BallotCutover while proving n22: 36 RuntimeHandles flags say display/show/debug: true with no matching jet_rt_handle_* export (DataStatus, DataError, LogField, WalkEntry, HTTPRequest/Response show, DeliveryEvent and others). The probed ones render through their Core declarations, so the flags look stale; they go with n2's single source of truth for the Core API."
         },
         {
@@ -60824,7 +60836,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-24T17:01:07.086Z",
-      "updated": "2026-11-26T10:26:22.601Z",
+      "updated": "2026-11-26T12:25:19.389Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 22
     },
@@ -62199,7 +62211,7 @@
       "track": "epoch",
       "epoch": "G3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -62207,43 +62219,49 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-26",
+          "by": "Orchestrator",
+          "text": "Closed on Batch 76 S1 (dev fc4539b2d33 / master 3eedf702a5a) with full O0/O1/O2 golden, parallel isolation, EnvOverlay 9/9, and core_builtins_door=0 proof."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "Design review: a dated audit in Docs/Audits attacks the whole mechanism of proposal item P18: it names every place the same fact or operation lives today, the exact cutover list and the copies it deletes, and passes; every gap it finds becomes a row here or a ballot.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T17:38:56.080Z"
+          "evidence": "Dated whole-mechanism audit Docs/Audits/2026-11-26-context-dir-env-review.md merged at dev fc4539b2d33 / master 3eedf702a5a; names every cwd/env seam, cutover list, and deleted bypass.",
+          "at": "2026-11-26T12:24:59.833Z"
         },
         {
           "n": 2,
           "text": "`#Context(dir: build_root, env: {CC: \"clang\"}) { … }` sets the working directory and environment for the block, and relative paths, environment reads and spawned processes inside resolve against them.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T17:38:56.080Z"
+          "evidence": "#Context(dir:, env:) { } and context.dir/context.env verified on Batch 76 S1 (fc4539b2d33, jet 63200dda036de50c): Context/context_dir_env_scoping_and_parallel_isolation PASS 1/1; Core/Sys helpers live outside reserved __ namespace (core_builtins_door PASS 1/1, ceiling 0).",
+          "at": "2026-11-26T12:25:01.137Z"
         },
         {
           "n": 3,
           "text": "No Core API reads or changes the process-wide working directory or environment outside the context, and two tests that set different directories run in parallel without interference.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T17:38:56.080Z"
+          "evidence": "Verified on Batch 76 S1 (fc4539b2d33): EnvOverlay/ PASS 9/9 (including world_environment_never_reaches_process_default and eager_snapshot_and_host_getenv_isolation_run_in_process) and Context/context_dir_env_scoping_and_parallel_isolation PASS 1/1 proving parallel isolation.",
+          "at": "2026-11-26T12:25:02.469Z"
         },
         {
           "n": 4,
           "text": "An executable example with golden output proves the feature on every applicable tier, and the spec, reference pages and editor grammars describe it.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T17:38:56.080Z"
+          "evidence": "Verified on Batch 76 S1 (fc4539b2d33): Examples/Systems/Process/ContextDirEnv.jet golden PASS 3/3 (O0, O1, O2); Docs/Spec/spec.md, Docs/Spec/Reference/core-library.md, and editor grammars (editor_grammars_have_generated_sections + tree_sitter_parses_every_example_without_error_or_missing_nodes PASS).",
+          "at": "2026-11-26T12:25:03.438Z"
         }
       ],
       "refs": [],
@@ -62251,8 +62269,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-25T17:38:56.080Z",
-      "updated": "2026-11-25T17:38:56.080Z",
-      "updatedBy": "Pip"
+      "updated": "2026-11-26T12:25:05.420Z",
+      "updatedBy": "Orchestrator",
+      "completedAt": "2026-11-26T12:25:05.420Z"
     },
     {
       "id": "c0wdibsn",
@@ -62401,7 +62420,7 @@
       "track": "epoch",
       "epoch": "G5",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -62409,25 +62428,31 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-26",
+          "by": "Orchestrator",
+          "text": "Closed on Batch 76 S1 (dev fc4539b2d33 / master 3eedf702a5a): UI snapshot, multi-violation case, compiler-packages clean check, 6/6 PackageLayers unit tests, O0/O1/O2 golden, spec/reference/editor grammars all verified green."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "Design review: a dated audit in Docs/Audits attacks the whole mechanism of proposal item P22: it names every place the same fact or operation lives today, the exact cutover list and the copies it deletes, and passes; every gap it finds becomes a row here or a ballot. Proof: the audit's verdict reads holds, and its gap list maps to rows here or ballots.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T23:36:20.850Z"
+          "evidence": "Dated whole-mechanism audit Docs/Audits/2026-11-26-layer-rules-review.md merged at dev fc4539b2d33 / master 3eedf702a5a with holds verdict and complete cutover inventory.",
+          "at": "2026-11-26T12:25:06.630Z"
         },
         {
           "n": 2,
           "text": "The package file declares an ordered list of layers over the package's modules, and an import that points to a higher layer is refused with a registered diagnostic naming both modules and their layers. Proof: `jet test Compiler --profile ui --filter import_points_up_a_layer`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T23:36:22.067Z",
+          "evidence": "Verified on Batch 76 S1 (fc4539b2d33, jet 63200dda036de50c): Tests/UI/import_points_up_a_layer/run.jet PASS 1/1 and Compiler/JetDriver/Tests package_layers_ 6/6 PASS (Jet.ImportPointsUpALayer names both modules and layers).",
+          "at": "2026-11-26T12:25:07.505Z",
           "proof": {
             "profile": "ui",
             "filter": "import_points_up_a_layer"
@@ -62436,11 +62461,11 @@
         {
           "n": 3,
           "text": "`jet check` reports every layer violation in a package in one pass. Proof: `jet test Compiler --profile cases --filter Tests/Cases/Layers/check_reports_every_layer_violation_in_one_pass`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T23:36:23.642Z",
+          "evidence": "Verified on Batch 76 S1 (fc4539b2d33): Tests/Cases/Layers/check_reports_every_layer_violation_in_one_pass.case PASS 1/1.",
+          "at": "2026-11-26T12:25:08.794Z",
           "proof": {
             "profile": "cases",
             "filter": "Tests/Cases/Layers/check_reports_every_layer_violation_in_one_pass"
@@ -62449,11 +62474,11 @@
         {
           "n": 4,
           "text": "An executable example with golden output proves layer rules on every applicable tier. Proof: `jet test Compiler --profile golden --filter LayerRules`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T23:36:24.809Z",
+          "evidence": "Verified on Batch 76 S1 (fc4539b2d33): Examples/Modules/Packages/LayerRules/run.jet golden PASS 3/3 (O0, O1, O2).",
+          "at": "2026-11-26T12:25:10.208Z",
           "proof": {
             "profile": "golden",
             "filter": "LayerRules"
@@ -62462,11 +62487,11 @@
         {
           "n": 5,
           "text": "The compiler's own packages declare their layers, and `jet check Compiler` reports no layer violation. Proof: `jet test Compiler --profile cases --filter Tests/Cases/Layers/compiler_packages_declare_layers_and_check_clean`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T23:35:50.599Z",
+          "evidence": "Verified on Batch 76 S1 (fc4539b2d33): Tests/Cases/Layers/compiler_packages_declare_layers_and_check_clean.case PASS 1/1 across all 25 compiler package manifests with zero jet check Compiler errors.",
+          "at": "2026-11-26T12:25:11.607Z",
           "proof": {
             "profile": "cases",
             "filter": "Tests/Cases/Layers/compiler_packages_declare_layers_and_check_clean"
@@ -62475,11 +62500,11 @@
         {
           "n": 6,
           "text": "The spec, the reference pages and the editor grammars describe layers. Proof: the editor grammar generator's `--check` passes, and Docs/Spec/Reference documents the layers declaration.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T23:35:53.869Z"
+          "evidence": "Verified on Batch 76 S1 (fc4539b2d33): Docs/Spec/spec.md (Package layers + Core layers) and Docs/Spec/Reference/jetpack-epoch5.md document layers; editor_grammars_have_generated_sections and tree_sitter_parses_every_example_without_error_or_missing_nodes PASS.",
+          "at": "2026-11-26T12:25:12.830Z"
         }
       ],
       "refs": [],
@@ -62487,9 +62512,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-25T17:39:04.540Z",
-      "updated": "2026-11-25T23:36:24.809Z",
+      "updated": "2026-11-26T12:25:15.718Z",
       "updatedBy": "Orchestrator",
-      "criteriaLastN": 6
+      "criteriaLastN": 6,
+      "completedAt": "2026-11-26T12:25:15.718Z"
     },
     {
       "id": "c0oi3k2t",
@@ -128094,6 +128120,111 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-26T12:25:19.389Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0mhrplj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-26T12:25:18.543Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0qnrbr0",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-26T12:25:16.735Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0qnrbr0",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-26T12:25:15.719Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0hgn7y3",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-26T12:25:12.830Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0hgn7y3",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-26T12:25:11.607Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0hgn7y3",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-26T12:25:10.208Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0hgn7y3",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-26T12:25:08.794Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0hgn7y3",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-26T12:25:07.505Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0hgn7y3",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-26T12:25:06.630Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0hgn7y3",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-26T12:25:05.420Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0ljw5xu",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-26T12:25:03.439Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0ljw5xu",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-26T12:25:02.469Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0ljw5xu",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-26T12:25:01.137Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0ljw5xu",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-26T12:24:59.833Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0ljw5xu",
+      "note": "#1"
+    },
     {
       "at": "2026-11-26T10:56:06.325Z",
       "by": "Orchestrator",
