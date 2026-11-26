@@ -1586,8 +1586,31 @@ sema_marker_rules_item_applications: fn(item: Item, applications: ^[AppliedRuleA
     }
 }
 
-sema_marker_rules_applications: fn(program: Program) -> [AppliedRuleApplication] Never! {
+priv SemaOwnedRuleApplications: struct {
+    applications: [AppliedRuleApplication],
+    owners: [Int],
+}
+
+priv sema_marker_rules_owned_item_applications: fn(item: Item, next_owner: ^Int, applications: ^[AppliedRuleApplication], owners: ^[Int]) Never! {
+    owner: next_owner
+    next_owner += 1
+    if item == .CodeModule(code_module) {
+        before: applications.len()
+        sema_marker_rules_attach(sema_marker_rules_without_cap(code_module.markers), code_module.name_span, RuleSite.Module, applications)
+        loop _ in before..<applications.len() -> owners.push(owner)
+        if code_module.body == .Val(body) {
+            loop nested in body -> sema_marker_rules_owned_item_applications(nested, next_owner, applications, owners)
+        }
+        return
+    }
+    before: applications.len()
+    sema_marker_rules_item_applications(item, applications)
+    loop _ in before..<applications.len() -> owners.push(owner)
+}
+
+sema_marker_rules_owned_applications: fn(program: Program) -> SemaOwnedRuleApplications Never! {
     ^applications: program.rule_facts
+    ^owners: loop _ in 0..<applications.len() -> 0
     ^keys: SemaKeyRows{}
     ^recorded: [Int:Bool]{}
     loop fact in program.rule_facts {
@@ -1595,18 +1618,32 @@ sema_marker_rules_applications: fn(program: Program) -> [AppliedRuleApplication]
         recorded[key] = true
     }
     ^collected: [AppliedRuleApplication]{}
-    loop item in program.items -> sema_marker_rules_item_applications(item, collected)
-    loop application in collected {
-        key: sema_marker_rules_application_key(keys, application)
-        if !recorded.has_key(key) -> applications.push(application)
+    ^collected_owners: [Int]{}
+    ^next_owner: 1
+    loop item in program.items {
+        sema_marker_rules_owned_item_applications(item, next_owner, collected, collected_owners)
     }
-    if program.applied_rules.len() == 0 -> return applications
+    loop (index, application) in collected {
+        key: sema_marker_rules_application_key(keys, application)
+        if !recorded.has_key(key) {
+            applications.push(application)
+            owners.push(collected_owners[index])
+        }
+    }
+    if program.applied_rules.len() == 0 {
+        return SemaOwnedRuleApplications{applications: applications, owners: owners}
+    }
     loop application in applications -> ^_: sema_marker_rules_first_application(keys, application)
     loop application in program.applied_rules {
         if !sema_marker_rules_first_application(keys, application) -> next
         applications.push(application.copy())
+        owners.push(0)
     }
-    applications
+    SemaOwnedRuleApplications{applications: applications, owners: owners}
+}
+
+sema_marker_rules_applications: fn(program: Program) -> [AppliedRuleApplication] Never! {
+    sema_marker_rules_owned_applications(program).applications
 }
 
 // Marker name and name span -> the first of `applications` there, by the
@@ -1984,12 +2021,13 @@ sema_marker_rules_declared_kind: fn(ty: Type?) -> String? Never! {
 }
 
 sema_marker_rules_validate_repeatability: fn(registry: SemaScopeMembersMarkerRegistry, program: Program, diagnostics: ^[Diagnostic]) {
-    // Declaration, site and target span -> the first marker applied there,
-    // a row of `seen_markers`, by the key's row in `keys`.
+    // Declaration, site, owning item and target span -> the first marker
+    // applied there, a row of `seen_markers`, by the key's row in `keys`.
     ^keys: SemaKeyRows{}
     ^firsts: [Int:Int]{}
     ^seen_markers: [Marker]{}
-    loop application in sema_marker_rules_applications(program) {
+    owned: sema_marker_rules_owned_applications(program)
+    loop (at, application) in owned.applications {
         ^builtin_index: sema_marker_rules_builtin_index(registry, application.marker)
         ^repeatable: false
         if builtin_index == {
@@ -2009,18 +2047,18 @@ sema_marker_rules_validate_repeatability: fn(registry: SemaScopeMembersMarkerReg
             }
         }
         if repeatable -> next
-        // Same declaration on the same target: the same site at the same
+        // Same declaration on the same target: the same site, owning item and
         // span. An application with no target span, such as a marked block,
-        // has no identity to repeat on. A `#Memo` computed field and the
-        // helper method its formula becomes (Derives.jet
-        // sema_computed_field_memo_helper_func) share the field's span but
-        // are two targets, a Field and a Method.
+        // has no identity to repeat on. Two generated items (such as a grammar
+        // literal's `<Name>Rule` and `<Name>Token` enums, both `#Layout(U32)`)
+        // share the literal's span but have distinct owners.
         if application.target == None -> next
         site: if application.site == .Val(value) -> sema_marker_rules_site_name(value) else -> ""
         declaration: sema_marker_rules_declaration_key(keys, application.marker)
         site_id: sema_key_text(keys, site)
         declared_at: sema_key_pair(keys, declaration, site_id)
-        target: sema_key_span(keys, application.target)
+        target_span: sema_key_span(keys, application.target)
+        target: sema_key_pair(keys, target_span, owned.owners[at])
         key: sema_key_pair(keys, declared_at, target)
         if firsts.get(key) == .Val(first) {
             diagnostics.push(sema_marker_rules_repeated_error(application.marker, seen_markers[first], application.site))

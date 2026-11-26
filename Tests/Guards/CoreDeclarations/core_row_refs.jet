@@ -14,7 +14,7 @@
 // the checkout's files instead, so the miss fails here first.
 use {
     jet_foundation.[CoreDeclarationSource, CoreDeclarations]
-    jet_lexer.[lex, Token, TokenTables, token_decoded, TOKEN_COLON, TOKEN_COLON_EQ, TOKEN_COMMA, TOKEN_DOT, TOKEN_HASH, TOKEN_IDENT, TOKEN_KW_FN, TOKEN_KW_IN, TOKEN_KW_USE, TOKEN_LBRACE, TOKEN_LBRACKET, TOKEN_LPAREN, TOKEN_RBRACE, TOKEN_RBRACKET, TOKEN_RPAREN]
+    jet_lexer.[lex, Token, TokenTables, token_decoded, TOKEN_COLON, TOKEN_COMMA, TOKEN_DOT, TOKEN_HASH, TOKEN_IDENT, TOKEN_KW_FN, TOKEN_KW_IN, TOKEN_KW_USE, TOKEN_LBRACE, TOKEN_LBRACKET, TOKEN_LPAREN, TOKEN_RBRACE, TOKEN_RBRACKET, TOKEN_RPAREN]
     corpus_manifest.[guards_enter_root]
     crr_files: core.files
     crr_process: core.process
@@ -340,7 +340,7 @@ crr_findings: fn(table: CRRTable, path: String, text: String) -> [CRRMiss] Never
         opened: at > 1 && tokens[at - 1].kind == TOKEN_LPAREN && after == TOKEN_RPAREN
         parameter: opened && tokens[at - 2].kind == TOKEN_KW_FN
         payload: opened && at > 2 && tokens[at - 2].kind == TOKEN_IDENT && tokens[at - 3].kind == TOKEN_DOT
-        if after == TOKEN_COLON || after == TOKEN_COLON_EQ || after == TOKEN_KW_IN || parameter || payload {
+        if after == TOKEN_COLON || after == TOKEN_KW_IN || parameter || payload {
             name: token_decoded(tables, tokens[at])
             bound[name] = true
         }
