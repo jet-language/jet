@@ -37,6 +37,7 @@ use {
     base64: core.encoding.base64
     math: core.math
     stream: __core_encoding_stream
+    json_syntax: __core_encoding_syntax_json
 }
 
 syntax_error: fn(format: EncodingFormat, offset: Int, line: Int, column: Int, path: String, reason: String) -> EncodingError Never! {
@@ -1244,6 +1245,9 @@ parse_json: fn(text: String, allow_duplicates: Bool, limits: EncodingLimits) -> 
     if raw.len() > limits.max_item_bytes {
         return Err(limit_error(EncodingFormat.JSON, 0, "JSON input exceeds max_item_bytes ({limits.max_item_bytes})"))
     }
+    if json_syntax.json_parse_dyn(text, allow_duplicates, limits.max_depth) == .Val(value) {
+        return Ok(value)
+    }
     ^p: Parser.new(raw, allow_duplicates)
     p.exact_numbers = true
     p.max_depth = limits.max_depth
@@ -2382,3 +2386,50 @@ patch_step: fn(doc: Dyn, op: PatchOp) -> Dyn EncodingError! {
         }
     }
 }
+
+#Test("JSON grammar parses RFC 8259 values directly and rejects invalid syntax, lone surrogates, and disallowed duplicates") {
+    valid: [String]{
+        "null",
+        "true",
+        "false",
+        "0",
+        "-42",
+        "3.14159e-10",
+        "\"hello\\n\\t\\\"\\\\\\/\\u0041\\uD83D\\uDE00\"",
+        "[]",
+        "{{}}",
+        "{{\"a\":[1,2,3],\"b\":{{\"c\":true,\"d\":null}}}}",
+    }
+    loop text in valid {
+        if json_syntax.json_parse_dyn(text, false, 64) == None {
+            panic("expected JSON grammar to parse `{text}`")
+        }
+        _: parse(text) ?? panic("parse failed for `{text}`: {err.reason}")
+    }
+    assert(json_syntax.json_parse_dyn("{{\"a\":1,\"a\":2}}", false, 64) == None)
+    assert(json_syntax.json_parse_dyn("{{\"a\":1,\"a\":2}}", true, 64) != None)
+    assert(json_syntax.json_parse_dyn("[[1]]", false, 1) == None)
+    assert(json_syntax.json_parse_dyn("[[1]]", false, 2) != None)
+    invalid: [String]{
+        "",
+        "[1,]",
+        "{{\"a\":1,}}",
+        "01",
+        "+1",
+        ".5",
+        "NaN",
+        "Infinity",
+        "\"\\uD800\"",
+        "\"\\uDC00\"",
+        "\"unterminated",
+        "1 2",
+        "// comment\n1",
+    }
+    loop text in invalid {
+        if json_syntax.json_parse_dyn(text, false, 64) != None {
+            panic("expected JSON grammar to reject `{text}`")
+        }
+        if parse(text) == .Ok(_) -> panic("expected parse to reject `{text}`")
+    }
+}
+
