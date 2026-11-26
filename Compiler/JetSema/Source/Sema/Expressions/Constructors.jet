@@ -2240,30 +2240,69 @@ SEMA_CHECKED_TEXT_HOLE_SLOT_FIX: "pass a value of a type this place accepts, or 
 // that is a list, at the spot its `at: TextSpot` names in the quoted body of
 // `literal` (sema_checked_text_spot_span), else at `span`. An item whose type
 // implements `Diagnostic`, each text one literal over `self` fields, reports
-// under the impl's code (sema_derive_report_diagnostic); any other reports
-// `code` with `what` and `fix`, its Why the item when that is text, else
+// under the impl's code (sema_derive_report_diagnostic); an item of an enum
+// whose case holds one value whose type implements it reports that value so
+// (sema_checked_text_case_reports); any other reports `code` with `what` and
+// `fix`, its Why the item when that is text, else
 // SEMA_CHECKED_TEXT_REJECTED_WHY. `result` is the check's Result type.
 sema_checked_text_reports: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, result: Type, literal: Expr, report: TComptimeReport, span: Span, code: String, what: String, fix: String) -> [Diagnostic] Never! {
     ^reports: [Diagnostic]{}
     ^diagnostic: SemaDeriveReport?{None}
+    ^cases: [SemaCheckedTextCaseReport]{}
     ^listed: false
     if result == .Result(_, error_type) {
         diagnostic = sema_type_diagnostic_report(graph, error_type, module_identity)
+        cases = sema_checked_text_case_reports(graph, error_type, module_identity)
         if error_type == .List(item_type) {
             listed = true
             diagnostic = sema_type_diagnostic_report(graph, item_type, module_identity)
+            cases = sema_checked_text_case_reports(graph, item_type, module_identity)
         }
     }
     if report == .Told(error) && listed && error == .List(items) {
-        loop item in items -> reports.push(sema_checked_text_item_report(graph, module_identity, diagnostic, literal, item, span, code, what, fix))
+        loop item in items -> reports.push(sema_checked_text_item_report(graph, module_identity, diagnostic, cases, literal, item, span, code, what, fix))
     }
-    if report == .Told(error) && !listed -> reports.push(sema_checked_text_item_report(graph, module_identity, diagnostic, literal, error, span, code, what, fix))
+    if report == .Told(error) && !listed -> reports.push(sema_checked_text_item_report(graph, module_identity, diagnostic, cases, literal, error, span, code, what, fix))
     if reports.len() == 0 -> reports.push(sema_error(code, span, what, SEMA_CHECKED_TEXT_REJECTED_WHY, fix))
     reports
 }
 
+// The `Diagnostic` impl that reports the one value an error enum's case
+// `variant` holds.
+SemaCheckedTextCaseReport: struct {
+    variant: String,
+    report: SemaDeriveReport,
+}
+
+// For an enum `error_type` read from `module_identity`, the `Diagnostic`
+// impl of each case that holds one value of a type that has one; none for
+// any other type.
+sema_checked_text_case_reports: fn(graph: SemaRegistrationGraph, error_type: Type, module_identity: ModuleID) -> [SemaCheckedTextCaseReport] Never! {
+    ^cases: [SemaCheckedTextCaseReport]{}
+    owner: sema_type_resolve_nominal_row(graph, error_type, module_identity) ?? return cases
+    source: sema_registration_nominal_source_item(graph.modules[owner.module_index].nominals[owner.row].source) ?? return cases
+    if source == .Enum(definition) {
+        // A case's payload type resolves from the module that declares the enum.
+        declaring: graph.modules[owner.module_index].module_identity
+        loop variant in definition.variants {
+            if variant.payload == .Single(ty, _) {
+                report: sema_type_diagnostic_report(graph, ty, declaring) ?? next
+                cases.push(SemaCheckedTextCaseReport{variant: variant.name.copy(), report: report})
+            }
+        }
+    }
+    cases
+}
+
 // The report of one error `item` of a refused check (sema_checked_text_reports).
-sema_checked_text_item_report: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, diagnostic: SemaDeriveReport?, literal: Expr, item: TComptimeValue, span: Span, code: String, what: String, fix: String) -> Diagnostic Never! {
+sema_checked_text_item_report: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, diagnostic: SemaDeriveReport?, cases: [SemaCheckedTextCaseReport], literal: Expr, item: TComptimeValue, span: Span, code: String, what: String, fix: String) -> Diagnostic Never! {
+    if item == .Enum(_, variant, args) && args.len() == 1 {
+        loop case in cases {
+            if case.variant == variant {
+                return sema_checked_text_item_report(graph, module_identity, Val(case.report.copy()), [SemaCheckedTextCaseReport]{}, literal, args[0].value, span, code, what, fix)
+            }
+        }
+    }
     at: sema_checked_text_spot_span(graph, module_identity, literal, item) ?? span
     if diagnostic == .Val(found) && sema_user_template_ct_value(item) == .Val(value) {
         ^texts: [String]{}

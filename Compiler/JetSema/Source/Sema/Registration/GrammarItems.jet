@@ -15,8 +15,9 @@
 // receives. Each type takes the binding's visibility, and every name and
 // shape is the plan's (Core/Grammar/Shape.jet): this file only arranges the
 // plan as items. A binding whose literal the check refused has no plan and
-// stays, so the compile proper reports its faults. A plan read without its
-// rule tree describes the types alone.
+// stays, so the compile proper reports its faults; one whose name is no
+// parser rule's type stays too, and reports that it names no start rule. A
+// plan read without its rule tree describes the types alone.
 use {
     jet_foundation.[
         AST_NODE_GENERATED,
@@ -146,7 +147,9 @@ SemaGrammarItemsPlan: struct {
 
 // Replace each module binding `plans` names with the items its plan
 // describes, accepted as a rule's generated items (UserTemplates.jet
-// sema_user_rule_accept), and add the imports the parsers read.
+// sema_user_rule_accept), and add the imports the parsers read. A binding
+// whose name is no parser rule's type names no start rule: it stays, and
+// reports so.
 sema_grammar_items_expand: fn(program: ^Program, plans: ^^[NamedCtValue], diagnostics: ^[Diagnostic]) {
     ^parsers: false
     loop plan in plans.move() {
@@ -158,9 +161,13 @@ sema_grammar_items_expand: fn(program: ^Program, plans: ^^[NamedCtValue], diagno
             }
         }
         if index < 0 -> next
+        read: sema_grammar_items_plan(plan.value)
+        if program.items[index] == .Const(definition) && sema_grammar_start_report(definition, read) == .Val(report) {
+            diagnostics.push(report)
+            next
+        }
         removed: program.items.remove(index, .Slot) ?? next
         if removed == .Const(definition) {
-            read: sema_grammar_items_plan(plan.value)
             if read.rules.len() > 0 -> parsers = true
             ^expanded: sema_grammar_items(definition, read, plan.value)
             ^generated: [Item]{}
@@ -169,6 +176,18 @@ sema_grammar_items_expand: fn(program: ^Program, plans: ^^[NamedCtValue], diagno
         }
     }
     if parsers -> sema_grammar_imports(program.imports)
+}
+
+// The report of grammar binding `definition` when its name is no parser
+// rule's type in `plan`, so names no rule a parse starts from.
+sema_grammar_start_report: fn(definition: ConstDef, plan: SemaGrammarItemsPlan) -> Diagnostic? Never! {
+    if plan.shapes.len() == 0 -> return None
+    loop shape in plan.shapes {
+        if shape.name == definition.name -> return None
+    }
+    example: plan.shapes[0]
+    rule: if example.rule < plan.rules.len() -> "`{plan.rules[example.rule].name}`" else -> "its rule"
+    Val(sema_error("E2718", definition.name_span, "`{definition.name}` names no rule of its grammar", "The binding's name picks the rule a parse starts from: the rule whose name in PascalCase it is", "Name the binding for the rule a parse starts from, as `{example.name}` names {rule}"))
 }
 
 // The items of grammar binding `definition` with plan `plan`, computed as

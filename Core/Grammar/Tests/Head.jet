@@ -1,6 +1,6 @@
 // `Grammar` is a checked head: its literal's plan is the plan `analyze`
 // builds, its check reports every fault of a refused grammar at its spot,
-// and it refuses every hole.
+// each under its kind's case, and it refuses every hole.
 use {
     core.grammar.[Grammar, analyze]
     core.grammar.error.[GrammarFaultKind]
@@ -48,12 +48,15 @@ PAIR: "pair : key=WORD '=' value=WORD ;\nWORD : [a-z]+ ;\nWS : [ \\t]+ -> skip ;
 #Test("check reports every fault of a refused grammar, ordered by spot") {
     if Grammar.check([String]{"a : b ;\nc : d ;\n"}) == {
         .Ok(_) -> panic("a grammar naming undefined rules was accepted")
-        .Err(faults) -> {
-            assert_eq(faults.len(), 2)
-            assert_eq(faults[0].kind, GrammarFaultKind.UndefinedRule)
-            assert_eq(faults[1].kind, GrammarFaultKind.UndefinedRule)
-            assert_eq(faults[0].at.part, 0)
-            assert(faults[0].at.offset < faults[1].at.offset)
+        .Err(reports) -> {
+            assert_eq(reports.len(), 2)
+            first: reports[0].fault()
+            second: reports[1].fault()
+            assert_eq(first.kind, GrammarFaultKind.UndefinedRule)
+            assert_eq(second.kind, GrammarFaultKind.UndefinedRule)
+            assert_eq(first.at.part, 0)
+            assert(first.at.offset < second.at.offset)
+            if reports[0] == .UndefinedRule(found) -> assert_eq(found.at.offset, first.at.offset) else -> panic("an undefined rule reported under another case")
         }
     }
 }
@@ -61,13 +64,16 @@ PAIR: "pair : key=WORD '=' value=WORD ;\nWORD : [a-z]+ ;\nWS : [ \\t]+ -> skip ;
 #Test("check refuses every hole, at the place it opens") {
     if Grammar.check([String]{"a : ", " ", " ;"}) == {
         .Ok(_) -> panic("a grammar with holes was accepted")
-        .Err(faults) -> {
-            assert_eq(faults.len(), 2)
-            assert_eq(faults[0].at.part, 0)
-            assert_eq(faults[0].at.offset, 4)
-            assert_eq(faults[1].at.part, 1)
-            assert_eq(faults[1].at.offset, 1)
-            assert_eq(faults[0].message, "a grammar literal has no holes")
+        .Err(reports) -> {
+            assert_eq(reports.len(), 2)
+            first: reports[0].fault()
+            second: reports[1].fault()
+            assert_eq(first.kind, GrammarFaultKind.Notation)
+            assert_eq(first.at.part, 0)
+            assert_eq(first.at.offset, 4)
+            assert_eq(second.at.part, 1)
+            assert_eq(second.at.offset, 1)
+            assert_eq(first.message, "a grammar literal has no holes")
         }
     }
 }

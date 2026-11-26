@@ -1,0 +1,8 @@
+Error: Jet.GrammarLeftRecursive: Left recursion `expr -> term -> expr` is not the operator form
+  --> Tests/UI/grammar_left_recursive.jet:6:5
+    |
+  6 |     expr : term '+' NUM | NUM ;
+    |     ^
+ Why: A generated parser reads from the left, so a rule that can begin with itself would call itself forever; only a rule's own operator alternatives may begin with it
+ Fix: Factor the shared start out of these rules, or merge them into one rule in the operator form
+More: jet-lang.dev/e/Jet.GrammarLeftRecursive

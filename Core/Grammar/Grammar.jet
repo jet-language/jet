@@ -8,7 +8,7 @@
 // `Grammar` is the checked head: `Grammar{"""…"""}` runs `analyze` while
 // building and keeps the plan.
 use {
-    core.grammar.error.[GrammarFault, GrammarFaultKind, GrammarFaults, TextSpot, grammar_faults]
+    core.grammar.error.[GrammarFault, GrammarFaultKind, GrammarFaults, GrammarReport, TextSpot, grammar_faults, grammar_report]
     core.grammar.plan.[GrammarKeywords, GrammarPlan, GrammarScanner, GrammarSource]
     core.grammar.runtime.[GRAMMAR_MAX_DEPTH, NO_HOLE, NO_TOKEN, bounds_column, check_errors, check_resync, cursor_depth, cursor_enter, cursor_expect, cursor_fail, cursor_leave, cursor_of, cursor_of_parts, cursor_resync, cursor_take, grammar_scanner, into_result, into_token, keyword_find, keyword_next, lexer_column, lexer_match, parse_decide, parse_end, parse_error, parse_text, parse_token, pen_of, print_error, print_result, print_text, print_text_in, print_token, scan, scan_after, word_end, word_shaped]
     core.grammar.sink.[GrammarSink]
@@ -53,20 +53,21 @@ analyze: fn(text: String, start: String, imports: [GrammarSource]) -> GrammarPla
 
 /// A checked grammar: the plan of its literal's rule notation, built while
 /// building, with every parser rule a start. A refused grammar reports each
-/// fault at its spot in the literal. A grammar literal has no holes.
+/// fault at its spot in the literal, under its kind's code. A grammar
+/// literal has no holes.
 Grammar: struct {
     plan: GrammarPlan,
 
     impl CheckedText {
-        Error: [GrammarFault],
+        Error: [GrammarReport],
         Hole: String,
         Shape: GrammarPlan,
 
-        check: fn(parts: [String]) -[]> Checked<GrammarPlan, TextSlot> [GrammarFault]! {
-            if parts.len() > 1 -> return Err(grammar_hole_faults(parts))
+        check: fn(parts: [String]) -[]> Checked<GrammarPlan, TextSlot> [GrammarReport]! {
+            if parts.len() > 1 -> return Err(grammar_hole_reports(parts))
             if analyze(parts[0], "", [GrammarSource]{}) == {
                 .Ok(plan) -> Ok(Checked{shape: plan, slots: [TextSlot]{}})
-                .Err(faults) -> Err(faults.faults)
+                .Err(faults) -> Err(loop fault in faults.faults -> grammar_report(fault))
             }
         }
 
@@ -80,14 +81,14 @@ Grammar: struct {
 
 priv GRAMMAR_HOLE_MESSAGE: "a grammar literal has no holes"
 
-/// One fault for each hole of a grammar literal's `parts`, at the place the
+/// One report for each hole of a grammar literal's `parts`, at the place the
 /// hole opens: the end of the part before it.
-priv grammar_hole_faults: fn(parts: [String]) -> [GrammarFault] Never! {
-    ^faults: [GrammarFault]{}
+priv grammar_hole_reports: fn(parts: [String]) -> [GrammarReport] Never! {
+    ^reports: [GrammarReport]{}
     loop part in 0..<parts.len() - 1 {
-        faults.push(GrammarFault{kind: GrammarFaultKind.Notation, at: TextSpot{part: part, offset: parts[part].len()}, message: GRAMMAR_HOLE_MESSAGE, fix: "write the grammar's text whole: it is read while building, so no value can fill a hole"})
+        reports.push(grammar_report(GrammarFault{kind: GrammarFaultKind.Notation, at: TextSpot{part: part, offset: parts[part].len()}, message: GRAMMAR_HOLE_MESSAGE, fix: "write the grammar's text whole: it is read while building, so no value can fill a hole"}))
     }
-    faults
+    reports
 }
 
 // The run-time support over analyzed plans: keyword lookup, the class

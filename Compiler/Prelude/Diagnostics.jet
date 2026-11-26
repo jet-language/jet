@@ -23406,6 +23406,216 @@ CheckedTextHoleSlot: struct {
     }
 }
 
+GrammarNotation: struct {
+    impl Diagnostic {
+        code: "E2716",
+        safety_class: .Soundness,
+        safety_reason: "A grammar that does not read as rules describes no parser, so no types or parser can be generated from it.",
+        expert_path: "none: the grammar's text reads as rules",
+        stage: [.Compile],
+        meaning: "A grammar literal whose text breaks the rule notation",
+        detail: true,
+        no_fix: .Ambiguous,
+
+        what: fn(self) -> String { "This grammar's text does not read as rules" }
+
+        why: fn(self) -> String {
+            "A grammar literal is rules in the form `name : alternatives ;`, read like ANTLR 4 notation, and this text breaks that form."
+        }
+
+        fix: fn(self) -> String { "Write the rule as `name : alternatives ;`, each alternative a sequence of elements." }
+    }
+}
+
+GrammarUndefinedRule: struct {
+    impl Diagnostic {
+        code: "E2717",
+        safety_class: .Soundness,
+        safety_reason: "A reference to no rule leaves the parser nothing to call at that point.",
+        expert_path: "none: every name a grammar uses is a rule",
+        stage: [.Compile],
+        meaning: "A grammar reference to a name no rule defines",
+        detail: true,
+        no_fix: .Ambiguous,
+
+        what: fn(self) -> String { "This grammar uses a name that is no rule" }
+
+        why: fn(self) -> String {
+            "Each name an alternative uses must be a rule the parser can take, defined in this grammar or in a grammar it imports."
+        }
+
+        fix: fn(self) -> String { "Define the rule, or import the grammar that defines it." }
+    }
+}
+
+GrammarStartRule: struct {
+    impl Diagnostic {
+        code: "E2718",
+        safety_class: .Soundness,
+        safety_reason: "With no start rule, the grammar's `parse` would not know which rule the whole text is.",
+        expert_path: "none: the binding names a rule of its grammar",
+        stage: [.Compile],
+        meaning: "A grammar binding whose name picks none of its rules",
+        detail: true,
+        no_fix: .Ambiguous,
+
+        what: fn(self) -> String { "This grammar binding names no rule" }
+
+        why: fn(self) -> String {
+            "The binding's name picks the rule a parse starts from: the rule whose name in PascalCase it is."
+        }
+
+        fix: fn(self) -> String { "Rename the binding to the PascalCase name of the rule a parse starts from." }
+    }
+}
+
+GrammarLeftRecursive: struct {
+    impl Diagnostic {
+        code: "E2719",
+        safety_class: .Soundness,
+        safety_reason: "A parser for a rule that begins with itself would call itself forever without reading a token.",
+        expert_path: "none: only a rule's operator alternatives begin with the rule",
+        stage: [.Compile],
+        meaning: "A grammar rule that can begin with itself outside the operator form",
+        detail: true,
+        no_fix: .Ambiguous,
+
+        what: fn(self) -> String { "This grammar has left recursion outside the operator form" }
+
+        why: fn(self) -> String {
+            "A generated parser reads from the left, so a rule that can begin with itself would call itself forever; only a rule's own operator alternatives may begin with it."
+        }
+
+        fix: fn(self) -> String { "Write the recursion as operator alternatives of one rule, or factor the shared start out of the rules." }
+    }
+}
+
+GrammarAmbiguous: struct {
+    impl Diagnostic {
+        code: "E2720",
+        safety_class: .Soundness,
+        safety_reason: "Where two alternatives fit the same text, the parse would not decide which value the text is.",
+        expert_path: "none: the next tokens tell the alternatives apart",
+        stage: [.Compile],
+        meaning: "A grammar choice whose alternatives the next tokens do not tell apart",
+        detail: true,
+        no_fix: .Ambiguous,
+
+        what: fn(self) -> String { "This grammar choice is ambiguous" }
+
+        why: fn(self) -> String {
+            "A generated parser picks a way by the next three tokens at most, with no backtracking, so two ways that can begin alike leave it no choice."
+        }
+
+        fix: fn(self) -> String { "Factor the shared start out of the alternatives, or write operators in the operator form." }
+    }
+}
+
+GrammarTooComplex: struct {
+    impl Diagnostic {
+        code: "E2721",
+        safety_class: .Soundness,
+        safety_reason: "A decision whose lookahead the build cannot finish is one it cannot show unambiguous.",
+        expert_path: "none: each decision's first tokens tell its alternatives apart",
+        stage: [.Compile],
+        meaning: "A grammar decision whose lookahead search passes its limit",
+        detail: true,
+        no_fix: .Ambiguous,
+
+        what: fn(self) -> String { "This grammar decision needs too much lookahead to check" }
+
+        why: fn(self) -> String {
+            "The build searches the tokens that can come next at one decision only up to a fixed number of token sequences, so that checking a grammar stays fast."
+        }
+
+        fix: fn(self) -> String { "Factor the alternatives so that their first tokens tell them apart." }
+    }
+}
+
+GrammarEmptyRepeat: struct {
+    impl Diagnostic {
+        code: "E2722",
+        safety_class: .Soundness,
+        safety_reason: "A repeat of an item that matches no text never ends.",
+        expert_path: "none: every repeated item matches at least one token",
+        stage: [.Compile],
+        meaning: "A grammar repeat whose item can match no text",
+        detail: true,
+        no_fix: .Ambiguous,
+
+        what: fn(self) -> String { "This grammar repeats an item that can match nothing" }
+
+        why: fn(self) -> String {
+            "A repeat goes on while its item matches, and an item that matches no text matches forever."
+        }
+
+        fix: fn(self) -> String { "Make the repeated item match at least one token." }
+    }
+}
+
+GrammarTokenClash: struct {
+    impl Diagnostic {
+        code: "E2723",
+        safety_class: .Soundness,
+        safety_reason: "Where two tokens match the same text, the lexer would not decide which token the text is.",
+        expert_path: "none: the tokens that can come next match different text",
+        stage: [.Compile],
+        meaning: "Two grammar tokens that match the same text where either can come next",
+        detail: true,
+        no_fix: .Ambiguous,
+
+        what: fn(self) -> String { "This grammar has two tokens the lexer cannot tell apart" }
+
+        why: fn(self) -> String {
+            "The lexer reads only the tokens the parser can take next, and where two of them match the same text it cannot tell which one the text is."
+        }
+
+        fix: fn(self) -> String { "Make one of the tokens match less, or use them where only one of them can come next." }
+    }
+}
+
+GrammarFieldShape: struct {
+    impl Diagnostic {
+        code: "E2724",
+        safety_class: .Soundness,
+        safety_reason: "A rule whose fields or cases clash generates no type that holds what it parses.",
+        expert_path: "none: each field and case has one name and one type",
+        stage: [.Compile],
+        meaning: "A grammar rule whose labels or alternatives give no well-formed generated type",
+        detail: true,
+        no_fix: .Ambiguous,
+
+        what: fn(self) -> String { "This grammar rule's generated type does not hold together" }
+
+        why: fn(self) -> String {
+            "Each parser rule becomes a type, so its labels and alternatives must give every field one name and one type, and every case its own name."
+        }
+
+        fix: fn(self) -> String { "Label the elements and alternatives so that each field and case has one name and one type." }
+    }
+}
+
+GrammarUnprintable: struct {
+    impl Diagnostic {
+        code: "E2725",
+        safety_class: .Soundness,
+        safety_reason: "A value `print` cannot write as text that parses back would break the round trip a grammar promises.",
+        expert_path: "none: every token the parser takes is kept in a field or has fixed text",
+        stage: [.Compile],
+        meaning: "A grammar rule whose values `print` could not write back as text",
+        detail: true,
+        no_fix: .Ambiguous,
+
+        what: fn(self) -> String { "This grammar's `print` cannot write this rule" }
+
+        why: fn(self) -> String {
+            "A grammar's `print` writes a value as text that parses back to the same value, and here no text it could write would."
+        }
+
+        fix: fn(self) -> String { "Keep the token in a labeled field, or give it fixed text." }
+    }
+}
+
 RetiredDeriveTraitSpelling: struct {
     trait_name: String,
 

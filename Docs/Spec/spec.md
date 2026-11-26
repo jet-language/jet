@@ -112,9 +112,11 @@ vocabulary](vocabulary.md).
   type, and a failure is E2712, at the line and column of the literal its
   error names with an `at: TextSpot` field (`TextSpot{part, offset}`, the
   byte offset in part `part`), else at the literal. An `Error` that is a
-  list of error types (`[GrammarFault]`) reports each item that way. An
+  list of error types (`[GrammarReport]`) reports each item that way. An
   error whose type implements
-  `Diagnostic` reports under that impl's code and texts; any other gives
+  `Diagnostic` reports under that impl's code and texts, and an error
+  enum's case that holds one value whose type implements it reports that
+  value so; any other gives
   E2712, whose Why is the error when it is a `String`. Every refused
   literal reports in one build. A `distinct String`
   type's literal is the joined text, with each hole passed through
