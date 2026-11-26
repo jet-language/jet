@@ -23,7 +23,7 @@ perf_budget_report: fn(content: CanonicalJSON) -> CanonicalJSON Never! {
 }
 
 perf_report_object_new: fn(fields: [CanonicalJSONField]) -> CanonicalJSON Never! {
-    canonical_json_object(fields) ?? panic(err.message)
+    canonical_json_object(fields) ?? panic("budget report object has duplicate key")
 }
 
 // An object; return indices, not copies of the object's large values.
@@ -246,7 +246,8 @@ perf_validate_provider: fn(value: CanonicalJSON) PerfBudgetError! {
         loop field in f {
             if field.key != "hardware_fingerprint" -> unhashed.push(field.copy())
         }
-        perf_verify_stable_id(perf_report_object_new(unhashed), hash) ?? return Err(perf_error("provider hardware_fingerprint mismatch"))
+        unhashed_obj: canonical_json_object(unhashed) ?? return Err(perf_error(err.message))
+        perf_verify_stable_id(unhashed_obj, hash) ?? return Err(perf_error("provider hardware_fingerprint mismatch"))
     }
 }
 
@@ -477,7 +478,8 @@ perf_sanitize_measurement: fn(value: CanonicalJSON) -> CanonicalJSON PerfBudgetE
         }
         keys: [String]{"history", "baseline", "decision"}
         loop key in keys -> out.push(CanonicalJSONField{key: key, value: CanonicalJSON.Null})
-        return Ok(perf_report_object_new(out))
+        sanitized_obj: canonical_json_object(out) ?? return Err(perf_error(err.message))
+        return Ok(sanitized_obj)
     }
     Err(perf_error("measurement is not object"))
 }

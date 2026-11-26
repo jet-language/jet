@@ -315,8 +315,14 @@ x64_comptime_receive_bytes: fn(child: ^X64ComptimeChild, count: Int) -> [U8]? {
                 x64_comptime_reap(child, false)
                 return None
             }
+            ^appended: false
             #Unsafe("os_read just wrote `moved` bytes past the scratch page's first page") {
-                x64_comptime_take(child.scratch + 4096, moved, bytes)
+                appended = x64_comptime_take(child.scratch + 4096, moved, bytes)
+            }
+            if !appended {
+                child.failure = "the comptime child's {moved} reply bytes don't fit in memory"
+                x64_comptime_reap(child, true)
+                return None
             }
         }
     }
@@ -364,21 +370,24 @@ x64_comptime_drain: fn(child: ^X64ComptimeChild, errors: Bool) -> Bool {
         if errors -> child.errors = -1 else -> child.output = -1
         return false
     }
+    ^appended: false
     #Unsafe("os_read just wrote `moved` bytes past the scratch page's first page") {
-        if errors -> x64_comptime_take(child.scratch + 4096, moved, child.stderr) else {
-            x64_comptime_take(child.scratch + 4096, moved, child.stdout)
-        }
+        appended = if errors -> x64_comptime_take(child.scratch + 4096, moved, child.stderr) else -> x64_comptime_take(child.scratch + 4096, moved, child.stdout)
+    }
+    if !appended {
+        if child.failure == "" -> child.failure = "the comptime child's {moved} reply bytes don't fit in memory"
+        x64_comptime_close_fd(fd)
+        if errors -> child.errors = -1 else -> child.output = -1
+        return false
     }
     true
 }
 
 // Appends the `count` bytes at `address` (in our mapping) to `bytes` in one
-// move.
+// move; false if the destination buffer cannot grow.
 #Unsafe("the caller's `count` bytes at `address` lie in our mapping")
-x64_comptime_take: fn(address: Int, count: Int, bytes: ^[U8]) {
-    if !mem.list_append<U8>(bytes, mem.Ptr<U8>.from_addr(address), count) {
-        panic("the comptime child's {count} reply bytes don't fit in memory")
-    }
+x64_comptime_take: fn(address: Int, count: Int, bytes: ^[U8]) -> Bool {
+    mem.list_append<U8>(bytes, mem.Ptr<U8>.from_addr(address), count)
 }
 
 // Waits for the child (killing it first when `kill`), collecting what it

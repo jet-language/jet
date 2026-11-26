@@ -19,8 +19,8 @@
 // First the check that holds the compiler's copies of it equal to it: `jet
 // check` of Compiler/JetFoundation/Source/Registry/CoreCallRows.jet, whose
 // build-time tables read Core.rows and CoreSourceParts.tsv, for those two;
-// CoreSourceRows.jet for Effects.jet, the Core surface ledger for CoreSurfaceInventory.rows,
-// DiagnosticRows.jet for Diagnostics.jet, OwnedTraitRows.jet for Traits.jet
+// CoreSourceRows.jet for Effects.jet, DiagnosticRows.jet for Diagnostics.jet,
+// OwnedTraitRows.jet for Traits.jet
 // and Core/prelude.jet, and Compiler/Toolchain/PreludeSources.jet (the
 // `prelude-sources` step of `jet build Compiler`, run from Compiler/) for
 // Markers.jet, Derives.jet, Errors.jet and Units.jet. Then every Prelude Jet
@@ -385,7 +385,6 @@ prelude_generator: fn(name: String, jet: String) -> [String] Never! {
     if name == {
         "Core.rows" | "CoreSourceParts.tsv" -> [String]{jet, "check", CORE_DECLARATION_TABLES}
         "Effects.jet" -> [String]{jet, "Tools/Agent/CoreSourceRows.jet", "--check"}
-        "CoreSurfaceInventory.rows" -> [String]{jet, "Tools/Agent/CoreSurfaceLedger.jet", "--check"}
         "Diagnostics.jet" -> [String]{jet, "Tools/Agent/DiagnosticRows.jet", "--check"}
         "Traits.jet" | "Core/prelude.jet" -> [String]{jet, "Tools/Agent/OwnedTraitRows.jet", "--check"}
         "Markers.jet" | "Derives.jet" | "Errors.jet" | "Units.jet" | "Facts.jet" -> [String]{jet, "Toolchain/PreludeSources.jet", "--check"}
@@ -884,7 +883,7 @@ unblock_uses: fn(text: String) -> String Never! {
     loop at in 0..<lines.len() {
         line: lines[at].copy()
         if !open {
-            trimmed: line.trim_start()
+            trimmed: line.trim_start().copy()
             lead: line.removesuffix(trimmed)
             if lead.bytes().all(fn(b) { space_byte(b) }) && trimmed.starts_with("use {{") && trimmed.removeprefix("use {{").trim() == "" {
                 indent = lead.copy()
@@ -985,7 +984,7 @@ kernel_entries: fn(text: String) -> [String] Never! {
 runtime_locations: fn(text: String, unit_path: String, lines: [UnitLine]) -> String Never! {
     ^out: [String]{}
     loop line in text.split("\n") {
-        trimmed: line.trim_start()
+        trimmed: line.trim_start().copy()
         location: trimmed.removeprefix("-->").trim().partition(" ")
         file: file_of(location.head)
         parts: location.head.split(":").to_list()
@@ -1349,7 +1348,6 @@ first_hit: fn(dir: String, file: String, args: [String], flags: [String]) -[Exec
     assert_eq(prelude_generator("Effects.jet", "/j"), [String]{"/j", "Tools/Agent/CoreSourceRows.jet", "--check"})
     assert_eq(prelude_generator("Core.rows", "/j"), [String]{"/j", "check", CORE_DECLARATION_TABLES})
     assert_eq(prelude_generator("CoreCallRows.jet", "/j"), [String]{})
-    assert_eq(prelude_generator("CoreSurfaceInventory.rows", "/j"), [String]{"/j", "Tools/Agent/CoreSurfaceLedger.jet", "--check"})
     assert_eq(prelude_generator("Diagnostics.jet", "/j")[1], "Tools/Agent/DiagnosticRows.jet")
     assert_eq(prelude_generator("Core/prelude.jet", "/j")[1], "Tools/Agent/OwnedTraitRows.jet")
     assert_eq(prelude_generator("Units.jet", "/j")[1], "Toolchain/PreludeSources.jet")

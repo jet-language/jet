@@ -1,0 +1,28 @@
+# `jet fmt --simplify` rewrites arm-table value tails (adds an explicit `else`
+# arm for a trailing default return and drops redundant `return` keywords in
+# last-line arm tables), leaves plain `jet fmt` untouched, preserves runtime
+# behavior, and is stable on a second `--simplify --check` pass.
+fixture: FmtArmTableRewrite.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step before_run: jet run one/tables.jet
+exit: 0
+stdout: = "one:1\nother\nn negative\n-\n0\n+\n-1\n7\n"
+copy: one/tables.jet tables.before
+step: jet fmt one/tables.jet
+exit: 0
+stdout: = ""
+stderr: = ""
+file: one/tables.jet == tables.before
+step: jet fmt --simplify one/tables.jet
+exit: 0
+stdout: = ""
+stderr: = ""
+file: one/tables.jet ~ "else -> \"other\"" # trailing default becomes explicit else arm
+file: one/tables.jet !~ "return \"+\"" # last-line table arm drops redundant return
+step: jet fmt --simplify --check one/tables.jet
+exit: 0
+step after_run: jet run one/tables.jet
+exit: 0
+stdout: == before_run

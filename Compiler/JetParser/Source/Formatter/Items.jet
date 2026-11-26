@@ -1468,20 +1468,27 @@ jfmt_fmt_test: fn(f: ^JetFmt, t: TestDef) {
     if {
         t.params.len() == 0 && t.fn_keyword_span == None -> {
             jfmt_write(f, "(")
-            if t.name_expr == .Val(name) -> jfmt_fmt_expr(f, name, JFMT_PREC_OR_FALLBACK) else {
-                name: t.name ?? panic("synthetic test blocks have a resolved name")
-                jfmt_write(f, "\"")
-                jfmt_write(f, name.replace("\\", "\\\\").replace("\"", "\\\""))
-                jfmt_write(f, "\"")
+            // A test sema makes with no name (TraitLaws.jet
+            // sema_trait_law_empty) writes only the arguments it has.
+            ^listed: true
+            if {
+                t.name_expr == .Val(name) -> jfmt_fmt_expr(f, name, JFMT_PREC_OR_FALLBACK)
+                t.name == .Val(name) -> {
+                    jfmt_write(f, "\"")
+                    jfmt_write(f, name.replace("\\", "\\\\").replace("\"", "\\\""))
+                    jfmt_write(f, "\"")
+                }
+                else -> listed = false
             }
             if t.faults_expr == .Val(faults) {
-                jfmt_write(f, ", ")
+                if listed -> jfmt_write(f, ", ")
+                listed = true
                 jfmt_write(f, "faults")
                 jfmt_write(f, ": ")
                 jfmt_fmt_expr(f, faults, JFMT_PREC_OR_FALLBACK)
             }
             if t.expected_fail_expr == .Val(expected_fail) {
-                jfmt_write(f, ", ")
+                if listed -> jfmt_write(f, ", ")
                 jfmt_write(f, "expected_fail")
                 jfmt_write(f, ": ")
                 jfmt_fmt_expr(f, expected_fail, JFMT_PREC_OR_FALLBACK)

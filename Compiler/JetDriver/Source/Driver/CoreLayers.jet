@@ -40,7 +40,8 @@ jet_driver_check_core_layers: fn(request: JetDriverCompileRequest, source_units:
         from: if row.owner == "" -> row.module_name else -> row.owner
         from_layer: jet_driver_core_layer_of(request.core_layers, from).layer
         if from_layer < 0 -> next
-        lexed: lex_generated(row.source().bytes())
+        text: row.try_source() ?? next
+        lexed: lex_generated(text.bytes())
         ^names: [JetDriverCoreLayerName]{}
         jet_driver_core_layer_names(lexed.tokens, lexed.tables, owners, names)
         loop name in names {

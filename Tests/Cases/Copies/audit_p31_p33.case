@@ -1,0 +1,72 @@
+# `jet audit copies` and `jet fmt --explicit-copies` on p31 and p33:
+# reports exactly the real implicit-copy sites from JetSema (never a struct
+# name), checks each site under `#Policy(copies: .Explicit)` as E0120 with a
+# Safe `.copy()` edit, rewrites parseable `.copy()` at those exact sites, and
+# verifies the rewritten programs check clean under `#Policy(copies: .Explicit)`
+# and keep identical runtime output.
+fixture: AuditP31P33.fixture
+
+step baseline_p31: jet run {work}/p31.jet
+exit: 0
+step baseline_p33: jet run {work}/p33.jet
+exit: 0
+
+step: jet audit copies {work}/p31.jet
+exit: 0
+stdout: count "{work}/p31.jet:" = 2 # exactly two implicit copy sites
+stdout: line ^= "  {work}/p31.jet:7:16 " # site 1: name into User.name
+stdout: line ^= "  {work}/p31.jet:16:35 " # site 2: names into User.tags
+stdout: before "p31.jet:7:16 " "p31.jet:16:35 " # sites reported in source order
+stdout: !~ "User" # never reports a struct name
+
+step: jet audit copies {work}/p33.jet
+exit: 0
+stdout: count "{work}/p33.jet:" = 1 # exactly one implicit copy site
+stdout: line ^= "  {work}/p33.jet:9:19 " # site 1: a into Holder.xs
+stdout: !~ "Holder" # never reports a struct name
+
+concat: p31_policy.jet policy.header p31.jet
+step: jet check --json {work}/p31_policy.jet
+exit: 1
+json: stdout doc $.reports #= 2
+json: stdout doc $.reports[0].code = "E0120"
+json: stdout doc $.reports[0].applicability = "safe"
+json: stdout doc $.reports[0].fix_edits[0].new_text = ".copy()"
+json: stdout doc $.reports[1].code = "E0120"
+json: stdout doc $.reports[1].applicability = "safe"
+json: stdout doc $.reports[1].fix_edits[0].new_text = ".copy()"
+
+concat: p33_policy.jet policy.header p33.jet
+step: jet check --json {work}/p33_policy.jet
+exit: 1
+json: stdout doc $.reports #= 1
+json: stdout doc $.reports[0].code = "E0120"
+json: stdout doc $.reports[0].applicability = "safe"
+json: stdout doc $.reports[0].fix_edits[0].new_text = ".copy()"
+
+step: jet fmt --explicit-copies {work}/p31.jet
+exit: 0
+file: p31.jet ~ "User{name: name.copy()" # site 1 rewritten with .copy()
+file: p31.jet ~ "tags: names.copy()}" # site 2 rewritten with .copy()
+file: p31.jet !~ "User.copy" # struct name untouched
+file: p31.jet count ".copy()" = 3 # two inserted plus fixture's first.copy()
+copy: p31.jet p31_rewritten.txt
+concat: p31.jet policy.header p31_rewritten.txt
+step: jet check {work}/p31.jet
+exit: 0
+step: jet run {work}/p31.jet
+exit: 0
+stdout: == baseline_p31
+
+step: jet fmt --explicit-copies {work}/p33.jet
+exit: 0
+file: p33.jet ~ "Holder{xs: a.copy()}" # site 1 rewritten with .copy()
+file: p33.jet !~ "Holder.copy" # struct name untouched
+file: p33.jet count ".copy()" = 1 # exactly one .copy() inserted
+copy: p33.jet p33_rewritten.txt
+concat: p33.jet policy.header p33_rewritten.txt
+step: jet check {work}/p33.jet
+exit: 0
+step: jet run {work}/p33.jet
+exit: 0
+stdout: == baseline_p33

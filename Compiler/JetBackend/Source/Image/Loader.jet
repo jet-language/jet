@@ -1132,6 +1132,14 @@ x64_executable_kept: fn(path: String) -> X64Executable? {
     tail: loader_kept_take(reader, tail_len)
     if reader.failed || reader.at != reader.bytes.len() -> return None
     if image_end == 0 -> return Val(x64_executable_whole(tail))
+    // A bound program's ELF header is its patch at file offset 0
+    // (link_bind_image, link_direct_bind); a file without one is not in the
+    // kept form.
+    ^headed: false
+    loop at in patch_at {
+        if at == 0 -> headed = true
+    }
+    if !headed -> return None
     if tail_at < image_end || image_size < image_end || !loader_same_stamp(loader_file_stamp(image_path), stamp) {
         return None
     }
@@ -1208,12 +1216,16 @@ loader_image_file_failed: fn(failure: String) -> X64ImageFile Never! {
 // Give `exe` its whole image part when x64_image_file_read left out the
 // loaded segments (loader_image_part_whole); "" or why not.
 x64_executable_complete: fn(exe: ^X64Executable) -> String {
-    if exe.image_gap == 0 -> return ""
-    whole: loader_image_part_whole(exe)
-    if whole.failure != "" -> return whole.failure
-    exe.image = whole.bytes.move()
-    exe.image_gap_at = 0
-    exe.image_gap = 0
+    if exe.image_gap > 0 {
+        whole: loader_image_part_whole(exe)
+        if whole.failure != "" -> return whole.failure
+        exe.image = whole.bytes.move()
+        exe.image_gap_at = 0
+        exe.image_gap = 0
+    }
+    if exe.image_end > 0 && exe.image_symbols_left && !link_bind_has_symbol_tables(exe, exe.image, 0, 0) {
+        return "the runtime image {exe.image_path} or its program part has no symbol table"
+    }
     ""
 }
 

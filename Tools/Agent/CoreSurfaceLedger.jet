@@ -46,12 +46,8 @@ TOWER_BOARD_TOOL: "Tools/Tower/Board.jet"
 
 CORE_SOURCE_PATH: "Compiler/Prelude/Core.rows"
 
-// The Core rows with no Core.rows declaration: typed fixed-signature members
-// and built-in receiver methods.
-CORE_SURFACE_INVENTORY_PATH: "Compiler/Prelude/CoreSurfaceInventory.rows"
-
-// The Jet tables an inventory `receivers` row reads receiver methods from, and
-// the sema sources a `methods` row's names must be spelled in.
+// The Jet tables from which receiver methods are read, and the sema sources
+// compiler-coded handle methods must be spelled in.
 BUILTIN_METHODS_PATH: "Compiler/JetFoundation/Source/Registry/BuiltinMethods.jet"
 
 BUILTIN_STATICS_PATH: "Compiler/JetFoundation/Source/Registry/BuiltinStatics.jet"
@@ -1556,8 +1552,6 @@ SIZE_ALIAS_ROW: Regex{"^([A-Z][A-Za-z0-9]*): (Signed|Unsigned|IEEE)<([0-9, ]+)>$
 
 SEMA_LITERAL: Regex{"\x22([A-Za-z_][A-Za-z0-9_]*)\x22"}
 
-INVENTORY_ROW: Regex{"^(receivers|methods)\s+(\S+)\s+\{{\s*([^{{}}]*?)\s*\}}$"}
-
 RECEIVER_SOURCE: Regex{"^(builtin|collection|static|numeric|source|type):([A-Za-z_][A-Za-z0-9_.]*)$"}
 
 IMPL_HEADER: Regex{"^(?:impl\s+([A-Za-z_][A-Za-z0-9_]*)(?:<[^>]*>)?(?:\.[A-Za-z_.]+)?|([A-Za-z_][A-Za-z0-9_]*):\s*(?:struct|enum)(?:<[^>]*>)?)\s*\x7B"}
@@ -1729,83 +1723,138 @@ core_type_methods: fn(root: String, paths: [String], type_name: String) -[FS]> [
     Ok(methods)
 }
 
+// One receiver-derived container: the ledger container name, its evidence
+// source path, and the Jet table / Core source selectors whose methods it
+// combines.
+SurfaceReceivers: struct {
+    name: String,
+    source: String,
+    items: [String],
+}
+
+// One compiler-handled container whose methods sema checks in code without a
+// separate registry table; every method is verified to be spelled in
+// Compiler/JetSema/Source and disjoint from derived receiver methods.
+SurfaceHandleMethods: struct {
+    name: String,
+    source: String,
+    methods: [String],
+}
+
+SURFACE_RECEIVERS: [SurfaceReceivers]{
+    SurfaceReceivers{name: "Bits", source: COLLECTIONS_PATH, items: [String]{"collection:Bits", "static:Bits"}},
+    SurfaceReceivers{name: "Bytes", source: BUILTIN_METHODS_PATH, items: [String]{"builtin:Bytes", "static:Bytes"}},
+    SurfaceReceivers{name: "Cache", source: COLLECTIONS_PATH, items: [String]{"collection:Cache", "static:Cache"}},
+    SurfaceReceivers{name: "Cell", source: BUILTIN_STATICS_PATH, items: [String]{"static:Cell"}},
+    SurfaceReceivers{name: "Clock", source: TIME_SOURCE_PATH, items: [String]{"type:core.time.Clock"}},
+    SurfaceReceivers{name: "Condition", source: "Core/Tasks/Tasks.jet", items: [String]{"type:core.tasks.Condition", "static:Condition"}},
+    SurfaceReceivers{name: "core.crypto.vault", source: "Core/Crypto/Vault.jet", items: [String]{"type:core.crypto.vault.WrappedVaultKey", "static:core.crypto.vault.KeyUnlock"}},
+    SurfaceReceivers{name: "core.math", source: BUILTIN_METHODS_PATH, items: [String]{"builtin:Integer", "builtin:Float", "builtin:ExactInt", "builtin:FixedInt", "builtin:Scalar", "builtin:Ordering", "static:Int", "static:Float", "static:F64", "static:Decimal", "static:Fraction", "static:Char", "static:U32", "numeric:conversions", "type:core.math.Decimal", "type:core.math.Fraction"}},
+    SurfaceReceivers{name: "core.net.tls", source: "Core/Net/TLS.jet", items: [String]{"type:core.net.tls.TLSStream"}},
+    SurfaceReceivers{name: "core.process", source: BUILTIN_STATICS_PATH, items: [String]{"static:Authority"}},
+    SurfaceReceivers{name: "core.regex", source: "Core/Regex/Regex.jet", items: [String]{"type:core.regex.Regex", "type:core.regex.Match"}},
+    SurfaceReceivers{name: "core.service", source: "Core/Service/Service.jet", items: [String]{"type:core.service.ServiceTree", "type:core.service.ServiceWorkflow", "type:core.service.ServiceEndpoint", "type:core.service.Delivery", "type:core.service.DeliveryState", "type:core.service.ServiceRuntime"}},
+    SurfaceReceivers{name: "core.sync", source: BUILTIN_METHODS_PATH, items: [String]{"builtin:Atomic", "builtin:AtomicAdd", "builtin:AtomicInt", "static:Atomic"}},
+    SurfaceReceivers{name: "core.sys", source: "Core/Sys/Sys.jet", items: [String]{"type:core.sys.Fd", "type:core.sys.SharedMemory"}},
+    SurfaceReceivers{name: "core.testing", source: "Core/Testing/Testing.jet", items: [String]{"type:core.testing.Test"}},
+    SurfaceReceivers{name: "core.time", source: BUILTIN_STATICS_PATH, items: [String]{"static:Duration"}},
+    SurfaceReceivers{name: "Derived", source: "Core/Web/Store.jet", items: [String]{"type:core.web.store.Derived"}},
+    SurfaceReceivers{name: "DeterministicWorld", source: "Core/Testing/Testing.jet", items: [String]{"type:core.testing.DeterministicWorld"}},
+    SurfaceReceivers{name: "Duration", source: TIME_SOURCE_PATH, items: [String]{"source:Duration"}},
+    SurfaceReceivers{name: "Iter", source: COLLECTIONS_PATH, items: [String]{"collection:Iter"}},
+    SurfaceReceivers{name: "List", source: COLLECTIONS_PATH, items: [String]{"collection:List", "static:List"}},
+    SurfaceReceivers{name: "Map", source: COLLECTIONS_PATH, items: [String]{"collection:Map", "static:Map"}},
+    SurfaceReceivers{name: "Pool", source: BUILTIN_STATICS_PATH, items: [String]{"static:Pool"}},
+    SurfaceReceivers{name: "PriorityQueue", source: COLLECTIONS_PATH, items: [String]{"collection:PriorityQueue", "static:PriorityQueue"}},
+    SurfaceReceivers{name: "Queue", source: COLLECTIONS_PATH, items: [String]{"collection:Queue", "static:Queue"}},
+    SurfaceReceivers{name: "Rank", source: COLLECTIONS_PATH, items: [String]{"collection:Rank", "static:Rank"}},
+    SurfaceReceivers{name: "Rng", source: "Core/Math/Random.jet", items: [String]{"type:core.math.random.RNG"}},
+    SurfaceReceivers{name: "Set", source: COLLECTIONS_PATH, items: [String]{"collection:Set", "static:Set"}},
+    SurfaceReceivers{name: "Shared", source: BUILTIN_STATICS_PATH, items: [String]{"static:Shared"}},
+    SurfaceReceivers{name: "String", source: BUILTIN_METHODS_PATH, items: [String]{"builtin:String", "static:String"}},
+    SurfaceReceivers{name: "Tally", source: COLLECTIONS_PATH, items: [String]{"collection:Tally", "static:Tally"}},
+    SurfaceReceivers{name: "View", source: COLLECTIONS_PATH, items: [String]{"collection:View"}},
+    SurfaceReceivers{name: "WatchHandle", source: "Core/Watcher/Watcher.jet", items: [String]{"type:core.watcher.WatchHandle"}},
+    SurfaceReceivers{name: "WatchSet", source: "Core/Watcher/Watcher.jet", items: [String]{"type:core.watcher.WatchSet"}},
+}
+
+SURFACE_HANDLE_METHODS: [SurfaceHandleMethods]{
+    SurfaceHandleMethods{name: "AsyncEvent", source: "Compiler/JetSema/Source/Sema/Calls/EventHandles.jet", methods: [String]{"blocked_count", "close", "emit_async", "listener_count", "on", "on_priority", "once", "queued_count", "running_count"}},
+    SurfaceHandleMethods{name: "Cell", source: "Compiler/JetSema/Source/Sema/Calls/SharedOwner.jet", methods: [String]{"edit", "get", "get_or_set", "guard_edit", "guard_read", "read", "replace", "set"}},
+    SurfaceHandleMethods{name: "CellGuard", source: "Compiler/JetSema/Source/Sema/Calls/SharedOwner.jet", methods: [String]{"edit", "get", "map", "read", "second", "set", "split"}},
+    SurfaceHandleMethods{name: "core.compiler", source: "Compiler/JetSema/Source/Sema/Calls/CompilerServices.jet", methods: [String]{"action", "add_asset_bundle", "add_doc", "add_executable", "add_install", "add_library", "add_package", "add_publish", "add_test", "build_profiles", "cause", "code", "collisions", "content_hash", "contribute", "debug_info", "dependencies", "description", "diagnostics", "edition", "effects", "entry", "error", "extends", "fetch", "file", "find", "fingerprint", "functions", "generate", "generated_lines", "inferred_layer", "items", "jet", "key", "kind", "layer", "license", "message", "name", "optimize", "outputs", "packages", "panic", "plan", "profiles", "repository", "revision", "root_dependencies", "schema_version", "semantic_index", "small", "source", "source_kind", "sources", "syntax", "target", "targets", "tokens", "toolchain", "value", "version"}},
+    SurfaceHandleMethods{name: "core.process", source: "Compiler/JetSema/Source/Sema/Calls/Core.jet", methods: [String]{"with", "without"}},
+    SurfaceHandleMethods{name: "core.reflect", source: "Compiler/JetSema/Source/Sema/Calls/Reflection.jet", methods: [String]{"call_edges", "definitions", "foreign", "functions", "has", "has_method", "is_active", "marker", "packages", "reaches_panic", "references", "structural_nodes", "types", "unsubscribe"}},
+    SurfaceHandleMethods{name: "core.time.expiring", source: "Compiler/JetSema/Source/Sema/Calls/TimeHandles.jet", methods: [String]{"new"}},
+    SurfaceHandleMethods{name: "DecisionHook", source: "Compiler/JetSema/Source/Sema/Calls/EventHandles.jet", methods: [String]{"listener_count", "on", "on_priority", "once", "run"}},
+    SurfaceHandleMethods{name: "DispatchReport", source: "Compiler/JetSema/Source/Sema/Calls/EventHandles.jet", methods: [String]{"accepted", "delivered_handlers", "state", "trace"}},
+    SurfaceHandleMethods{name: "Event", source: "Compiler/JetSema/Source/Sema/Calls/EventHandles.jet", methods: [String]{"emit", "listener_count", "on", "on_priority", "once", "trace"}},
+    SurfaceHandleMethods{name: "EventScope", source: "Compiler/JetSema/Source/Sema/Calls/EventHandles.jet", methods: [String]{"active_count", "cancel"}},
+    SurfaceHandleMethods{name: "EventTrace", source: "Compiler/JetSema/Source/Sema/Calls/EventHandles.jet", methods: [String]{"delivered", "dropped", "queued", "summary"}},
+    SurfaceHandleMethods{name: "Hook", source: "Compiler/JetSema/Source/Sema/Calls/EventHandles.jet", methods: [String]{"listener_count", "on", "on_priority", "once", "run", "trace"}},
+    SurfaceHandleMethods{name: "Iter", source: "Compiler/JetSema/Source/Sema/Calls/Collections.jet", methods: [String]{"zip", "zip_pad", "zip_short"}},
+    SurfaceHandleMethods{name: "List", source: "Compiler/JetSema/Source/Sema/Calls/Collections.jet", methods: [String]{"para_filter", "para_fold", "para_map", "para_partition", "view", "zip", "zip_pad", "zip_short"}},
+    SurfaceHandleMethods{name: "Option", source: "Compiler/JetSema/Source/Sema/Calls/Collections.jet", methods: [String]{"map", "or_err", "why"}},
+    SurfaceHandleMethods{name: "Pool", source: "Compiler/JetSema/Source/Sema/Calls/Concurrency.jet", methods: [String]{"add", "ids", "remove"}},
+    SurfaceHandleMethods{name: "Receiver", source: "Compiler/JetSema/Source/Sema/Calls/Concurrency.jet", methods: [String]{"close", "delay_ms", "is_canceled", "is_interval", "is_ready", "is_timer", "receive", "try_receive"}},
+    SurfaceHandleMethods{name: "Sender", source: "Compiler/JetSema/Source/Sema/Calls/Concurrency.jet", methods: [String]{"close", "send"}},
+    SurfaceHandleMethods{name: "Shared", source: "Compiler/JetSema/Source/Sema/Calls/SharedOwner.jet", methods: [String]{"capture", "downgrade", "edit", "guard_edit", "guard_edit_within", "guard_read", "guard_read_within", "read", "same", "strong_count", "try_guard_edit", "try_guard_read", "try_replace"}},
+    SurfaceHandleMethods{name: "SharedGuard", source: "Compiler/JetSema/Source/Sema/Calls/SharedOwner.jet", methods: [String]{"map", "second", "split", "wait"}},
+    SurfaceHandleMethods{name: "SharedSnapshot", source: "Compiler/JetSema/Source/Sema/Calls/SharedOwner.jet", methods: [String]{"value"}},
+    SurfaceHandleMethods{name: "SharedWeak", source: "Compiler/JetSema/Source/Sema/Calls/SharedOwner.jet", methods: [String]{"upgrade"}},
+    SurfaceHandleMethods{name: "Signal", source: "Compiler/JetSema/Source/Sema/Calls/ReactiveHandles.jet", methods: [String]{"get", "set"}},
+    SurfaceHandleMethods{name: "Subscription", source: "Compiler/JetSema/Source/Sema/Calls/ReactiveHandles.jet", methods: [String]{"is_active", "unsubscribe"}},
+    SurfaceHandleMethods{name: "Task", source: "Compiler/JetSema/Source/Sema/Calls/Concurrency.jet", methods: [String]{"cancel", "detach", "join", "pause", "resume", "trace"}},
+}
+
 // The Core surface beyond Core.rows's module exports: the members of the
 // compiler's non-receiver Core call records (`fixed_pairs`, from
-// core_call_pairs), and the containers' methods from the inventory's one
-// authored home, its `receivers <Container> { … }` and `methods <Container>
-// { … }` lines. A receivers row names the Jet tables a container's receiver
-// methods come from; the method names are read from those tables, so the
-// inventory follows the compiler. A methods row names only the methods sema
-// checks in code with no table to read; each must be spelled in sema and must
-// not already come from the container's receivers.
+// core_call_pairs), and the containers' methods derived directly from the
+// compiler's Jet tables, Core sources, and sema-verified handle rows.
 core_surface_inventory: fn(root: String, module_paths: [String:[String]], fixed_pairs: [String]) -[FS]> Inventory LedgerError! {
-    source: read_source(root, CORE_SURFACE_INVENTORY_PATH) ?? return Err(err)
     tables: jet_receiver_tables(root, module_paths) ?? return Err(err)
-    ^derived: [Collection]{}
-    ^declared: [Collection]{}
-    loop (index, raw) in split_lines(source) {
-        line: raw.trim()
-        if line == "" || line.starts_with("//") -> next
-        context: "{CORE_SURFACE_INVENTORY_PATH} line {index + 1}"
-        row: INVENTORY_ROW.match(line.copy()) ?? return Err(fail("{context} is not a receivers or methods row"))
-        kind: row.group(1) ?? ""
-        name: row.group(2) ?? ""
-        listed: loop item in (row.group(3) ?? "").split(",") -> item.trim()
-        if listed.contains("") || sorted_unique(listed).len() != listed.len() {
-            return Err(fail("{context} has an empty or repeated name"))
-        }
-        into: if kind == "receivers" -> derived else -> declared
-        loop entry in into {
-            if entry.type_name == name {
-                return Err(fail("{context} repeats {kind} container {name}"))
+    ^collections: [Collection]{}
+    loop (index, row) in SURFACE_RECEIVERS {
+        context: "SURFACE_RECEIVERS[{index}] ({row.name})"
+        ^methods: [String]{}
+        loop item in row.items {
+            loop method in receiver_source_methods(root, tables, item, context) ?? return Err(err) {
+                if !methods.contains(method) -> methods.push(method.copy())
             }
         }
-        if kind == "receivers" {
-            ^methods: [String]{}
-            loop item in listed {
-                loop method in receiver_source_methods(root, tables, item, context) ?? return Err(err) {
-                    if !methods.contains(method) -> methods.push(method.copy())
-                }
-            }
-            derived.push(Collection{function: CORE_SURFACE_INVENTORY_PATH, type_name: name.copy(), methods: methods, source_line: index + 1})
-            next
-        }
-        loop method in listed {
+        collections.push(Collection{function: row.source.copy(), type_name: row.name.copy(), methods: methods, source_line: index + 1})
+    }
+    loop (index, row) in SURFACE_HANDLE_METHODS {
+        context: "SURFACE_HANDLE_METHODS[{index}] ({row.name})"
+        loop method in row.methods {
             if !is_identifier(method) {
                 return Err(fail("{context} has an invalid method: {method}"))
             }
             if tables.sema_names.get(method) == None {
-                return Err(fail("{context} declares `{name}.{method}`, but no sema source spells that method; delete the stale name"))
+                return Err(fail("{context} declares `{row.name}.{method}`, but no sema source spells that method; delete the stale name"))
             }
         }
-        declared.push(Collection{function: CORE_SURFACE_INVENTORY_PATH, type_name: name.copy(), methods: listed, source_line: index + 1})
-    }
-    ^collections: derived
-    loop entry in declared {
         ^at: -1
         loop (position, owner) in collections {
-            if owner.type_name == entry.type_name -> at = position
+            if owner.type_name == row.name -> at = position
         }
         if at >= 0 {
             ^repeated: [String]{}
-            loop method in entry.methods {
+            loop method in row.methods {
                 if collections[at].methods.contains(method) -> repeated.push(method.copy())
             }
             repeated.sort()
             if repeated.len() > 0 {
-                return Err(fail("{CORE_SURFACE_INVENTORY_PATH} line {entry.source_line} declares {entry.type_name} methods its receivers row already reads from the Jet tables: {repeated.join(", ")}"))
+                return Err(fail("{context} declares {row.name} methods its receivers already read from the Jet tables: {repeated.join(", ")}"))
             }
-            loop method in entry.methods {
+            loop method in row.methods {
                 if !collections[at].methods.contains(method) {
                     collections[at].methods.push(method.copy())
                 }
             }
             next
         }
-        collections.push(entry.copy())
-    }
-    if collections.len() == 0 {
-        return Err(fail("{CORE_SURFACE_INVENTORY_PATH} has an empty table"))
+        collections.push(Collection{function: row.source.copy(), type_name: row.name.copy(), methods: row.methods.copy(), source_line: index + 1})
     }
     ^sorted_pairs: fixed_pairs.copy()
     sorted_pairs.sort()
@@ -2224,7 +2273,7 @@ row_for_module: fn(module_fact: ModuleFact, member: String, fixed_only: Bool, su
         witness_count: -1,
         pooled_witness_count: -1,
         competitors: cells,
-        evidence: [String]{"source:{CORE_SOURCE_PATH}", "source:{CORE_SURFACE_INVENTORY_PATH}"},
+        evidence: [String]{"source:{CORE_SOURCE_PATH}"},
         declined_by: "",
     }
 }
@@ -2233,7 +2282,7 @@ row_for_collection: fn(entry: Collection, method: String, surfaces: [LanguageSur
     container: container_for(entry.type_name)
     cells: competitor_cells(surfaces, container, method, keys)
     type_item: is_type_item(method)
-    ^evidence: [String]{"source:{CORE_SURFACE_INVENTORY_PATH}"}
+    ^evidence: [String]{"source:{entry.function}"}
     loop path in fixtures -> evidence.push("fixture:{path}")
     Row{
         id: "collection.{entry.type_name}.{method}",
@@ -2794,7 +2843,6 @@ conformance_fixture_paths: fn(bindings: [Binding]) -> [String] Never! {
 source_files: fn(root: String, bindings: [Binding]) -[FS]> Dyn LedgerError! {
     ^paths: [String]{
         CORE_SOURCE_PATH,
-        CORE_SURFACE_INVENTORY_PATH,
         BUILTIN_METHODS_PATH,
         BUILTIN_STATICS_PATH,
         COLLECTIONS_PATH,
@@ -5673,4 +5721,30 @@ run: fn() { print(ledger_main(process.args()) ?? process.fail(1, err.message)) }
     assert((rejects("wrong", "stale owner", Err(fail("setup broke\nmore"))) ?? err.message).contains("failed for the wrong reason"))
     assert_eq(rejects("right", "stale owner", Err(fail("stale owner: X\nmore"))) ?? err.message, "rejected: right -> stale owner: X")
     assert_eq(holds("held", Ok(0)) ?? err.message, "held: held")
+}
+
+#Test("core_surface_inventory derives containers directly from compiler tables and Core sources") {
+    root: files.cwd() ?? panic("cwd: {err}")
+    if !files.exists("{root}/{CORE_SOURCE_PATH}") -> return
+    assert(!files.exists("{root}/Compiler/Prelude/CoreSurfaceInventory.rows"))
+    module_paths: [String:[String]]{
+        "core.time": [String]{"Core/Time/Time.jet"},
+        "core.tasks": [String]{"Core/Tasks/Tasks.jet"},
+        "core.crypto.vault": [String]{"Core/Crypto/Vault.jet"},
+        "core.math": [String]{"Core/Math/Math.jet"},
+        "core.net.tls": [String]{"Core/Net/TLS.jet"},
+        "core.regex": [String]{"Core/Regex/Regex.jet"},
+        "core.service": [String]{"Core/Service/Service.jet"},
+        "core.sys": [String]{"Core/Sys/Sys.jet"},
+        "core.testing": [String]{"Core/Testing/Testing.jet"},
+        "core.web.store": [String]{"Core/Web/Store.jet"},
+        "core.math.random": [String]{"Core/Math/Random.jet"},
+        "core.watcher": [String]{"Core/Watcher/Watcher.jet"},
+    }
+    inventory: core_surface_inventory(root, module_paths, [String]{}) ?? panic("core_surface_inventory failed: {err.message}")
+    assert(inventory.collections.len() >= 50)
+    loop entry in inventory.collections {
+        assert(files.exists("{root}/{entry.function}"), "missing evidence source {entry.function} for {entry.type_name}")
+        assert(entry.methods.len() > 0, "empty container {entry.type_name}")
+    }
 }
