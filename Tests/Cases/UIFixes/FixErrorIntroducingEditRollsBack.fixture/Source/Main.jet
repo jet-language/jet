@@ -1,0 +1,12 @@
+use {
+    http: core.http
+    core.http.[query_get]
+}
+
+city: fn(body: String) -> String Never! {
+    query_get(http.query_decode(body), "city") ?? ""
+}
+
+run: fn() {
+    print(city("city=Oslo"))
+}

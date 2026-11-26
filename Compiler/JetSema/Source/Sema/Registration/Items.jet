@@ -1851,7 +1851,7 @@ sema_registration_func_header: fn(func: Func) -> Func Never! {
 }
 
 sema_registration_trait_impl_block_header: fn(block: TraitImplBlock) -> TraitImplBlock Never! {
-    methods: loop method in block.methods -> sema_registration_func_header(method)
+    methods: if block.trait_name == "Diagnostic" -> block.methods else -> loop method in block.methods -> sema_registration_func_header(method)
     TraitImplBlock{
         trait_name: block.trait_name,
         trait_span: block.trait_span,
@@ -1869,7 +1869,7 @@ sema_registration_trait_impl_block_header: fn(block: TraitImplBlock) -> TraitImp
 }
 
 sema_registration_impl_header: fn(definition: ImplDef) -> ImplDef Never! {
-    methods: loop method in definition.methods -> sema_registration_func_header(method)
+    methods: if definition.trait_name == Val("Diagnostic") -> definition.methods else -> loop method in definition.methods -> sema_registration_func_header(method)
     ImplDef{
         span: definition.span,
         type_name: definition.type_name,

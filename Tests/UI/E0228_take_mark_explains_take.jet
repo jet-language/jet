@@ -1,0 +1,22 @@
+// E0228 on a `^^` take mark explains that the callee takes the input,
+// never claiming the callee "reads this input".
+#Policy(writes: .Explicit)
+
+Holder: struct {
+    buf: [Int],
+}
+
+seal: fn(xs: ^^[Int]) {
+    print(xs.len())
+}
+
+take_n: fn(n: ^^Int) {
+    print(n)
+}
+
+run: fn() {
+    st: Holder{buf: [Int]{1}}
+    seal(^^st.buf)
+    n: 3
+    take_n(^^n)
+}

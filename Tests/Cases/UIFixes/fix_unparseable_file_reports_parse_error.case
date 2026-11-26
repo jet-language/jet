@@ -1,0 +1,13 @@
+# `jet fix` on a file that does not parse names the parse error and exits
+# non-zero instead of printing `no changes made`.
+fixture: FixUnparseableFileReportsParseError.fixture
+env: NO_COLOR=1
+step dry: jet fix --dry-run broken.jet
+exit: 1
+stderr: ~ "Error: Jet.InvalidStatement:" # dry run reports the parse error
+stderr: !~ "no changes made" # does not pretend nothing changed on a syntax error
+step fix: jet fix broken.jet
+exit: 1
+stderr: ~ "Error: Jet.InvalidStatement:" # file mode reports the parse error
+stderr: !~ "no changes made" # does not pretend nothing changed on a syntax error
+file: broken.jet ~ "x: (" # broken source is left untouched

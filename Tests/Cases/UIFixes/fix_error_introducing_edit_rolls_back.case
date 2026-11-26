@@ -1,0 +1,19 @@
+# A fix whose edit introduces a new compile error is rolled back and reported
+# in --dry-run, file, and package modes without claiming any fix was applied.
+fixture: FixErrorIntroducingEditRollsBack.fixture
+env: NO_COLOR=1
+step dry: jet fix Source/Main.jet --all --dry-run
+exit: 0
+stderr: ~ "rolled back the fix" # dry run reports the rolled-back edit
+stderr: ~ "the edited file no longer checks:" # names the added error
+stderr: !~ "would apply" # does not claim the broken fix would apply
+step file: jet fix Source/Main.jet --all
+exit: 0
+stderr: ~ "rolled back the fix" # file mode reports the rolled-back edit
+stderr: !~ "applied 1 fix" # does not claim the broken fix was applied
+file: Source/Main.jet ~ "http.query_decode(body)" # source remains unchanged
+step pkg: jet fix . --all
+exit: 0
+stderr: ~ "rolled back the fix" # package mode reports the rolled-back edit
+stderr: !~ "applied 1 fix" # does not claim the broken fix was applied
+file: Source/Main.jet ~ "http.query_decode(body)" # source remains unchanged

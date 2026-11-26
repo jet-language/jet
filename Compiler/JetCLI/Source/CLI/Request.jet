@@ -111,7 +111,7 @@ use {
         jet_eval_default_config,
         jet_eval_native_session,
     ]
-    jet_backend.[X64ExecutableResult, X64ImageFile, X64_JETLINE_RUNTIME_DIRECTORY, X64_SELF_EXECUTABLE, x64_image_file_read, x64_image_part_file, x64_link_runtime_image, x64_link_runtime_image_objects, x64_link_runtime_pack, x64_self_read, x64_self_read_into]
+    jet_backend.[X64ExecutableResult, X64ImageFile, X64_JETLINE_RUNTIME_DIRECTORY, X64_SELF_EXECUTABLE, loader_u16, loader_u32, loader_u64, x64_image_file_read, x64_image_part_file, x64_link_runtime_image, x64_link_runtime_image_objects, x64_link_runtime_pack, x64_part_note, x64_self_read, x64_self_read_into]
     jet_ir.[IREvalUnit, IRLibraryExportRow, IRLibraryResult, IRLintFinding, IROptOptions, ir_build_library, ir_eval_link_receipt, ir_export_abi_json, ir_lint_module, ir_opt_options, ir_optimize_module, ir_source_text, ir_stop_exports, ir_thread_exports, ir_x64_compile_module, ir_x64_library_object_into]
     jet_pkg_model.[BuildStamp, DepSpec, JET_VERSION, LockFile, LockedBuildContribution, PackageFacts, pkg_authority_source_walk_skips, pkg_load_organization_gate_policy, pkg_lock_load, pkg_manifest_parse, pkg_source_store_path, pkg_to_manifest]
     jet_sema.[SemaOutputIntent, sema_core_bodies_read, sema_unsafe_unit_map]
@@ -2123,10 +2123,12 @@ jet_cli_eval_config: fn() -> JetEvalConfig Never! {
 }
 
 // The compile's native children over the runtime image (this jet's part of
-// it, else the file beside the pack), read only when compile-time code first
-// runs; None when this toolchain has none.
+// it, else the file beside the pack, else the `$JET` compiler binary exported
+// by `jet test` when compiler code runs inside a test executable), read only
+// when compile-time code first runs; None when this toolchain has none.
 jet_cli_native_session: fn() -> Shared<JetEvalNativeSession>? Never! {
-    jet_cli_native_session_at(jet_cli_runtime_dir())
+    if jet_cli_native_session_at(jet_cli_runtime_dir()) == .Val(session) -> return Val(session)
+    jet_cli_native_session_from_jet_env()
 }
 
 // The native session over the runtime pack directory `runtime_dir`, or this
@@ -2140,16 +2142,68 @@ jet_cli_native_session_at: fn(runtime_dir: String) -> Shared<JetEvalNativeSessio
     Val(jet_eval_native_session("{runtime_dir}/{JET_CLI_RUNTIME_IMAGE_FILE}", JetCLINativeImageReader{embedded: false}))
 }
 
+priv jet_cli_file_part_range: fn(path: String, part_name: String) -[FS.Read]> {at: Int, size: Int}? Never! {
+    header: cli_files.read_at(path, 0, 64) ?? return None
+    if header.len() < 64 || header[0] != (U8{127}) || header[1] != (U8{69}) || header[2] != (U8{76}) || header[3] != (U8{70}) {
+        return None
+    }
+    phoff: loader_u64(header, 32)
+    phnum: loader_u16(header, 56)
+    if phoff <= 0 || phnum <= 0 -> return None
+    table: cli_files.read_at(path, phoff, phnum * 56) ?? return None
+    if table.len() < phnum * 56 -> return None
+    label: part_name.bytes()
+    descriptor: (label.len() + 8) /% 8 * 8
+    loop k in 0..<phnum {
+        if loader_u32(table, k * 56) != 4 -> next
+        at: loader_u64(table, k * 56 + 8)
+        size: loader_u64(table, k * 56 + 32)
+        if size < 16 + descriptor -> next
+        note: cli_files.read_at(path, at, 16 + descriptor) ?? return None
+        if x64_part_note(note, 0, size, label) == .Val(length) {
+            return Val({at: at + 16 + descriptor, size: length})
+        }
+    }
+    None
+}
+
+// When compiler code runs inside a test executable (which carries no embedded
+// runtime parts and has no `jet-runtime/` sibling), resolve the runtime image
+// from the `jet` compiler named by `$JET` (set by `jet test` in Host.jet).
+jet_cli_native_session_from_jet_env: fn() -> Shared<JetEvalNativeSession>? Never! {
+    jet_path: cli_sys.get(JET_CLI_TEST_SUITE_JET_ENV) ?? return None
+    if jet_path == "" -> return None
+    ^parts: jet_path.split("/").to_list()
+    ^_: parts.pop()
+    peer_dir: "{parts.join("/")}/jet-runtime"
+    if cli_files.is_file("{peer_dir}/{JET_CLI_RUNTIME_IMAGE_FILE}") {
+        return Val(jet_eval_native_session("{peer_dir}/{JET_CLI_RUNTIME_IMAGE_FILE}", JetCLINativeImageReader{embedded: false}))
+    }
+    part_name: "{JET_CLI_RUNTIME_PART_PREFIX}{JET_CLI_RUNTIME_IMAGE_FILE}"
+    if jet_cli_file_part_range(jet_path, part_name) != None {
+        return Val(jet_eval_native_session(jet_path, JetCLINativeImageReader{embedded: false, host_part: part_name}))
+    }
+    None
+}
+
 // The CLI's read of the runtime image for jet_eval_native_session, as a
 // bind of `jet run` reads it (Host.jet jet_cli_native_foreign_realize):
-// this jet's image part, lent (`embedded`), else the file without its
-// loaded segments (JetBackend Image/Loader.jet x64_image_file_read).
+// this jet's image part, lent (`embedded`), an embedded part of another jet
+// executable (`host_part`), else the file without its loaded segments
+// (JetBackend Image/Loader.jet x64_image_file_read).
 JetCLINativeImageReader: struct {
     embedded: Bool,
+    host_part: String{""},
 
     impl JetEvalNativeImageReader {
         read: fn(self, file: String) -[FS.Read, Env, FFI.Asm, Time.Wait]> X64ImageFile? {
             if self.embedded -> return Val(jet_cli_runtime_image_lent())
+            if self.host_part != "" {
+                found: jet_cli_file_part_range(file, self.host_part) ?? return None
+                bytes: cli_files.read_at(file, found.at, found.size) ?? return None
+                if bytes.len() != found.size -> return None
+                return Val(X64ImageFile{bytes: bytes, at: 0, stamp: [Int]{}, gap_at: 0, gap: 0, failure: ""})
+            }
             image: x64_image_file_read(file)
             if image.failure != "" -> return None
             Val(image)

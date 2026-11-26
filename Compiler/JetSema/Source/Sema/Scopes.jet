@@ -1872,7 +1872,7 @@ sema_check_context_snapshot: fn(source: SemaCheckContext) -> SemaCheckContext Ne
         lambda_statement_tails: source.lambda_statement_tails.copy(),
         call_facts: source.call_facts.copy(),
         module_writes: source.module_writes.copy(),
-        module_reads: (loop item in source.module_reads -> TEffectSpan{name: item.name, span: item.span, held: item.held}),
+        module_reads: (loop item in source.module_reads -> TEffectSpan{name: item.name, span: item.span, held: item.held, storage: item.storage}),
         rule_tables: if source.rule_tables.calls_at.len() == 0 -> SemaRuleTables{} else -> source.rule_tables.copy(),
         call_return_views: source.call_return_views.copy(),
         local_view_provenance: source.local_view_provenance.copy(),
@@ -3490,7 +3490,12 @@ sema_scope_type_is_changeable_holder: fn(ty: Type) -> Bool Never! {
 // `Shared` / `Cell` / `Atom` / `Mutex` holder.
 sema_scope_record_module_constant_read: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, context: ^SemaCheckContext, symbol: Symbol, name: String, ty: Type, span: Span) Never! {
     if environment.function_name == "" -> return
-    if sema_scope_module_storage_binding(environment, program, symbol) != None || sema_scope_type_is_changeable_holder(ty) {
+    if sema_scope_module_storage_binding(environment, program, symbol) != None {
+        context.module_reads.push(TEffectSpan{name: name, span: span, storage: true})
+        sema_taskgroup_note_global_access(context, symbol, name, span, AccessConvention.Read)
+        return
+    }
+    if sema_scope_type_is_changeable_holder(ty) {
         context.module_reads.push(TEffectSpan{name: name, span: span})
     }
 }
