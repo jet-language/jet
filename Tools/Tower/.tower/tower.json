@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7042,
-    "rev": 114829,
+    "rev": 114837,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -42617,20 +42617,20 @@
         {
           "n": 1,
           "text": "Copy, resource and typestate facts come from declarations: Sema/Ownership/Copy.jet (298-307, 597, 697), Sema/Ownership/Crossings.jet (225) and Sema/Typestate.jet (67-68, Task join and detach) hold no Core type-name lists. Declaration facts are on Main's ballot list (2026-11-15). Proof: those lists leave Tests/Guards/closed_lists/baseline.tsv and `jet test Tests/Guards --filter closed_lists` passes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:06:49.310Z"
+          "evidence": "master HEAD (dev c9bf04e321a, Batch 82 S1): D-FALLIBLE-CLOSE1=A landed — all 6 network streams (TCPStream, UnixStream, TLSStream, DTLSSession, DTLSListener, WsConn) implement infallible Close with explicit shutdown/finish goodbyes; sema_copy_fallible_close_stream deleted from Sema/Ownership/Copy.jet; zero Core type-name lists remain in Copy.jet, Crossings.jet, Typestate.jet or closed_lists/baseline.tsv; Core/Net 21/21 PASS, SocketEcho/DTLSEcho/WSEcho goldens 9/9 PASS.",
+          "at": "2026-11-26T16:11:36.119Z"
         },
         {
           "n": 2,
           "text": "A user type declared like a Core type gets the same copy, resource and typestate facts. It depends on the same ballot (Main's ballot list, 2026-11-15).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T11:34:10.383Z",
+          "evidence": "master HEAD (dev c9bf04e321a, Batch 82 S1): user-declared UserStream implementing Close + fallible finish() matches all 6 Core network streams through generic close_resource<R: Close>(^^R) Never! in Tests/Run/Net/UserCloseParity.jet (PASS on O0 and O2) and produces identical Jet.MissingMoveMarker diagnostics in Tests/UI/user_close_holder_is_not_copied.jet (PASS) vs ws_conn_holder_is_not_copied.jet (PASS).",
+          "at": "2026-11-26T16:11:36.961Z",
           "proof": {
             "profile": "cases",
             "filter": "declared_copy_resource_typestate_facts"
@@ -42796,8 +42796,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:08.392Z",
-      "updated": "2026-11-26T12:54:38.313Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-26T16:11:36.961Z",
+      "updatedBy": "Orchestrator",
       "criteriaLastN": 16
     },
     {
@@ -62082,7 +62082,7 @@
       "track": "epoch",
       "epoch": "G3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -62090,52 +62090,58 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-26",
+          "by": "Orchestrator",
+          "text": "Closed #7014 on master (Batch 82 S1 d8ef4568632968e4). All 5 criteria met and verified across Core/Term 11/11, O0/O1/O2 goldens, docs, and guards."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "Design review: a dated audit in Docs/Audits attacks the whole mechanism of proposal item P16: it names every place the same fact or operation lives today, the exact cutover list and the copies it deletes, and passes; every gap it finds becomes a row here or a ballot.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T17:38:50.345Z"
+          "evidence": "master HEAD (dev c9bf04e321a, Batch 82 S1 d8ef4568632968e4): dated adversarial design review Docs/Audits/2026-11-26-interaction-provider-review.md maps all terminal prompt sites, #CLI guided input, and exact cutover list.",
+          "at": "2026-11-26T16:11:30.234Z"
         },
         {
           "n": 2,
           "text": "Core declares an `Interaction` provider trait covering ask, choose, confirm, secret and progress, and the terminal implementation is the default.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T17:38:50.345Z"
+          "evidence": "master HEAD (dev c9bf04e321a): Core declares Interaction provider trait (ask, choose, confirm, secret, progress, prompt_guided) with TerminalInteraction default via ContextInteraction; Core/Term/Term.jet 11/11 PASS on Batch 82 S1.",
+          "at": "2026-11-26T16:11:31.135Z"
         },
         {
           "n": 3,
           "text": "The `io` prompt functions and #6891's guided input call the installed `Interaction` provider, with the duplicate terminal-only paths deleted.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T17:38:50.345Z"
+          "evidence": "master HEAD (dev c9bf04e321a): all 8 Core/Term prompt functions and Compiler/JetSema/Source/Sema/Registration/CLIEntry.jet guided CLI prompts route through context.interaction with duplicate terminal-only paths removed.",
+          "at": "2026-11-26T16:11:32.025Z"
         },
         {
           "n": 4,
           "text": "A test installs a scripted `Interaction` provider, and an agent runner installs one that turns each prompt into a structured tool call.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T17:38:50.345Z"
+          "evidence": "master HEAD (dev c9bf04e321a): Core/Term/Term.jet live tests (11/11 PASS on Batch 82 S1) install both a scripted Interaction provider (nested scopes + spawned tasks + guided input) and an agent-runner Interaction provider bridging prompts/progress/guided input into JSON tool calls.",
+          "at": "2026-11-26T16:11:32.898Z"
         },
         {
           "n": 5,
           "text": "An executable example with golden output proves the feature on every applicable tier, and the spec, reference pages and editor grammars describe it.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T17:38:50.345Z"
+          "evidence": "master HEAD (dev c9bf04e321a): Examples/Systems/Terminal/InteractionProvider.jet golden 3/3 PASS (O0/O1/O2); Docs/Spec/spec.md, Docs/Spec/Reference/tui-interaction.md, and core-library.md updated; CoreDeclarations 8/8, editor_grammars, tree_sitter, copy_ratchet 2/2, american_spelling 6/6, doc_evidence_links 3/3 PASS.",
+          "at": "2026-11-26T16:11:33.751Z"
         }
       ],
       "refs": [],
@@ -62143,8 +62149,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-25T17:38:50.345Z",
-      "updated": "2026-11-25T17:38:50.345Z",
-      "updatedBy": "Pip"
+      "updated": "2026-11-26T16:11:35.309Z",
+      "updatedBy": "Orchestrator",
+      "completedAt": "2026-11-26T16:11:35.309Z"
     },
     {
       "id": "c09pfvak",
@@ -128147,6 +128154,62 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-26T16:11:36.961Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0sdz4q0",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-26T16:11:36.119Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0sdz4q0",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-26T16:11:35.309Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0ypa1af",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-26T16:11:33.751Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0ypa1af",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-26T16:11:32.898Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0ypa1af",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-26T16:11:32.025Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0ypa1af",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-26T16:11:31.135Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0ypa1af",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-26T16:11:30.234Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0ypa1af",
+      "note": "#1"
+    },
     {
       "at": "2026-11-26T15:22:12.605Z",
       "by": "Orchestrator",
