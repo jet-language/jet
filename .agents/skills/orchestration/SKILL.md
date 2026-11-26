@@ -35,10 +35,13 @@ matches the work:
 - Submissions and `DOCS ONLY` are receipts, not runtime or milestone proof.
   The exact focused criterion proof, linked-card token, composed sweep, and
   fresh-context review are defined only in `references/closeout.md`.
-- The orchestrator may name one Lander, which runs the rolling train of
-  `references/intake.md` and commits on `dev` in its place, and one Closer,
-  which works the cards with the fewest open criteria and hands back proof.
-  Tower writes, owner gates and dispatch stay with the orchestrator.
+- The orchestrator works open epochs in Tower `order` with at most **3
+  subagents** running at once (reviewers and helpers included): two epoch
+  workers on the first unfinished epoch and one Closer burning down open cards
+  across any epoch, ranked smallest-first by estimated remaining workload (never
+  criteria count). The orchestrator may also delegate the rolling landing cycle
+  of `references/intake.md` to one Lander within the same 3-subagent cap. Tower
+  writes, owner gates, and dispatch stay with the orchestrator.
 
 ## Standing work order: implement, then batch-verify
 

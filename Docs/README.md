@@ -60,14 +60,15 @@ it builds itself from an admitted seed compiler. See
 
 ## Evidence and proposals
 
-These directories hold dated material. They record what was found or proposed
-at a point in time, not how Jet behaves now.
+These directories hold dated material tied to currently open Tower cards,
+open decisions, or active tests. Completed historical audits, research, and
+proposals live in git history (`git show 6413383d70d:<path>`).
 
 | Directory | Holds |
 |---|---|
-| [Audits](Audits/README.md) | Dated audit findings and retained evidence |
-| [Research](research/) | Source-backed investigations and prior alternatives |
-| [Proposals](proposals/) | Design alternatives linked to Tower decisions; not a work queue |
+| [Audits](Audits/) | Dated audit findings and retained evidence for open work |
+| [Research](Research/) | Source-backed investigations linked to open work |
+| [Proposals](Proposals/) | Design alternatives linked to open Tower decisions |
 
 Check the source and exercise the behavior before relying on any claim here.
 
@@ -75,5 +76,5 @@ Check the source and exercise the behavior before relying on any claim here.
 
 | Directory | Holds |
 |---|---|
-| [site](site/) | The project website. `generate.jet` writes `Site/Dist/`, which also carries the per-diagnostic pages and the published trust-root keys |
-| [assets](assets/) | The logo and visual design references |
+| [Site](Site/) | The project website. `generate.jet` writes `Site/Dist/`, which also carries the per-diagnostic pages and the published trust-root keys |
+| [Assets](Assets/) | The logo and visual design references |

@@ -1,0 +1,12 @@
+# A `#run`-defaulted parameter passes through a wrapper whose own parameter
+# has the same `#run` default; a written value is refused (E0642).
+fixture: PerCallRunDefault.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 0 # forwarding the wrapper's own `twice` is accepted
+stderr: !~ "Jet.RunDefaultWritten" # the forwarded parameter is not a written value
+step: jet run main.jet
+exit: 0
+stdout: = "41\n9\n" # each call's default is computed once and forwarded

@@ -88,5 +88,6 @@ than once. Read it before capture and again before drafting.
   architecture, tool and concept, each with its outcome.
 - **An order of work.** Priorities and dependency chains, so whoever builds it
   can go straight through.
-- **Opus does the thinking.** Helpers only capture transcripts, pages and data.
-  Reading, ledgers, claims, designs and ballots belong to the thinking model.
+- **The primary agent does the thinking.** Helpers only capture transcripts,
+  pages and data. Reading, ledgers, claims, designs and ballots belong to the
+  primary agent.

@@ -37,7 +37,6 @@ vocabulary](vocabulary.md).
 
 **Tools:** [Formatting Jet source](#formatting-jet-source) · [Writing and running tests](#writing-and-running-tests) · [Size-oriented builds and language tooling](#size-oriented-builds-and-language-tooling) · [REPL state, authority, and editing](#repl-state-authority-and-editing) · [jet inspect expand](#jet-inspect-expand) · [Semantic index and codemods](#semantic-index-and-codemods) · [Semantic source import](#semantic-source-import) · [Web development dashboard](#web-development-dashboard) · [Canvas visual editor](#canvas-visual-editor) · [Public front-end toolkit](#public-front-end-toolkit)
 
-**Packages, builds, and releases:** [Command registry and typed inputs](#command-registry-and-typed-inputs) · [Editions and compatibility](#editions-and-compatibility) · [Toolchain pins and source channels](#toolchain-pins-and-source-channels) · [Inline script dependencies](#inline-script-dependencies) · [Sandboxed WASM packages](#sandboxed-wasm-packages) · [Programmable builds](#programmable-builds) · [JetOS plans and proofs](#jetos-plans-and-proofs)
 
 **Scope:** [Deliberately absent](#deliberately-absent)
 
@@ -8147,106 +8146,6 @@ drift is E3512 and action outputs roll back. `jet inspect graph`, `jet inspect
 query build`, and `jet inspect explain-build` expose the same typed graph and
 cache provenance without running actions. LSP checking uses the same root
 signature and static graph facts.
-
-## JetOS plans and proofs
-
-The `jet os` command family is:
-
-```text
-jet os check|init|plan|proof|build|switch|rollback|generations|lift|import|image|vm
-```
-
-A host name selects `system.<name>` in `./config.jet`; `host@../machines` selects
-an exact external root. Builds create named generations, `generations` lists
-them newest first, `switch --name <name>` selects a name explicitly, and
-`rollback` activates a prior generation. `plan` prints the checked plan without
-building. `proof` reads the selected generation's plan, proof, provenance,
-health, boot, init, secrets, VM, and rollback facts.
-
-A system plan can carry a package closure, services and target wants,
-users/groups, filesystems and swap, network/firewall/wireless facts, boot and
-kernel facts, terminal and desktop facts, storage and persistence plans,
-workloads, hardware facts, profile and specialization entries, theme
-projections, fleet plans, lifecycle policy, typed option records, and image
-variant records. These facts are written into generation artifacts and are
-available to proof and explain commands; secrets remain ciphertext or metadata,
-never plaintext in generated reports.
-
-Generated terminal profiles set `JETOS_BRAND=JetOS` and a `JetOS <host>`
-prompt for login and VM run-mode shells; `/etc/issue` and `/etc/motd` carry
-the same host branding. Compatibility escape hatches such as overlays and
-`specialArgs` are allowed only as explicit `packages.*` options, and each is
-recorded in generation compatibility audit and provenance facts.
-
-`jet os import <flake-or-dir>` consumes semantic
-`jetos-import-facts.json` input; the facts-only fallback is audited. Storage
-application is safe by default and requires its explicit apply command. Fleet
-deploy scripts stage over SSH, request remote proof before switching, health
-check the result, and roll back on failure. Lifecycle garbage collection
-explains before deletion and needs `--apply` to delete old generation
-directories.
-
-### VM proof and installed media
-
-`jet os vm prove <host> --disk <path>` is the install and reboot proof
-entrypoint. `--real` upgrades it to replacement acceptance and rejects script or
-fake VM tools. Missing pinned QEMU or media tools report **E1279**; a prepared
-harness without guest proof reports **E1285**. The harness records QEMU create,
-install, reboot, and verifier phases and requires the installed guest to emit
-a matching `JETOS_GUEST_PROOF:` marker. The installer boots with
-`console=ttyS0`; its Limine entry supplies `rdinit=/jetos/init`,
-`jetos.mode=install`, and the target disk. The installed-disk verifier uses
-`jetos.mode=verify` and the installed root label.
-
-The installer writes a GPT disk with a FAT ESP, an ext4 `jetos-root`,
-`EFI/BOOT/BOOTX64.EFI`, the kernel and initrd, and an installed Limine config.
-The proof also checks terminal-login, desktop-session, graphical-console, and
-launcher readiness, including the generation's terminal facts, shell profile,
-serial getty, desktop facts, display-manager unit, fallback launcher, and
-installed Studio app. `jet os vm run <host> --disk <path>` opens only a disk
-linked to the latest `guest-passed` proof; otherwise it reports **E1287**.
-
-The default kernel is a first-party `cachyos-kernel` package with recipe,
-configuration, patch, and initrd-input hashes beside its artifacts. Missing
-kernel provenance is **E1280**; missing bootable artifact headers are **E1282**;
-missing source or builder provenance is **E1284**; and a failing package
-`source/build.sh` is **E1286**. When present, the package-internal build script
-runs before boot validation and writes the kernel and initrd that the
-installer and proof boot.
-
-The installer initrd contains `/jetos/init`, `/jetos/install.sh`, and
-`/jetos/guest-verify.sh`. `/jetos/init` dispatches `install`, `verify`, and
-`desktop-verify` modes after mounting proc, dev, and sys and probing the root
-label and installer disks. The hybrid ISO carries BIOS Limine files and a FAT
-UEFI image so QEMU/OVMF and physical UEFI use the same installer artifact.
-
-### JetOS Studio and VM scenarios
-
-`jetos studio` launches the installed Studio app. `jetos studio --headless`
-prints its installed path; `--json` prints root, app, metadata, and data paths;
-`--serve <loopback:port>` serves the local browser fallback. `GET /studio/source`
-returns the selected `config.jet`. `POST /studio/transaction` accepts source
-transactions such as `set-option` and writes only with `write: true`, returning
-an exact diff. `POST /studio/run` executes the selected
-`jet os check|plan|build|proof|generations` action and returns captured output;
-Studio does not replace CLI proof with hidden state. It remains a separate
-JetOS system app from Canvas, may fall back to the browser over the same local
-projection service, and may deep-link to Canvas for generic source-graph
-editing without storing Canvas semantic state.
-
-`vmtest.<name>: module` declares a VM scenario. Its `hosts:` map names scenario
-handles bound to `system.<host>` declarations, and `run: test { ... }` contains
-assertions such as `wait_for_boot`, `assert_unit_active`, and
-`assert_port_open`. `jet os vm test <name> --disk <path>` uses the same
-installer/reboot proof harness as `vm prove` and writes a proof per host plus a
-scenario proof artifact containing the source test, assertion method, host
-generations, disks, and artifact paths.
-
-`jetos user plan|build|switch|rollback|prove <name>` selects a `user.<name>` or
-`users.<name>` generation from `config.jet` and uses the same named-generation
-model. `jetos-user-apply <name>` projects declared files, links package binaries
-into `.jetos/profile/bin`, writes user service units, and records a user proof
-under `.jetos/proof/`.
 
 ## Deliberately absent
 
