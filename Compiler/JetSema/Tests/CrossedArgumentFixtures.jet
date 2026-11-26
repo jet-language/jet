@@ -33,7 +33,8 @@ priv crossed_arg_find: fn(diagnostics: [Diagnostic], code: String) -> [Int] {
 }
 
 #Test("crossed_args_methods_generics_and_copy_move_marks") {
-    source: "Writer: struct {{\n    tag: String,\n    transfer: fn(self, src: String, dst: String) -> String {{ \"{{self.tag}}:{{src}}->{{dst}}\" }}\n}}\npair_up: fn<T>(first: T, second: T) -> [T] {{ [T]{{first, second}} }}\nmove_pair: fn(src: ^^String, dst: ^^String) -> String {{ \"{{src}}->{{dst}}\" }}\nwrite_pair: fn(src: ^Int, dst: ^Int) {{ src += dst }}\nrun: fn() {{\n    w: Writer{{tag: \"w\"}}\n    src: \"a\"\n    dst: \"b\"\n    _: w.transfer(dst, src)\n    first: 1\n    second: 2\n    _: pair_up(second, first)\n    _: move_pair(dst.copy(), src.copy())\n    ^x_src: \"p\"\n    ^x_dst: \"q\"\n    _: move_pair(src: x_dst.move(), dst: x_src.move())\n    ^src_n: 1\n    ^dst_n: 2\n    write_pair(^src_n, ^dst_n)\n}}\n"
+    copy_call: "copy"
+    source: "Writer: struct {{\n    tag: String,\n    transfer: fn(self, src: String, dst: String) -> String {{ \"{{self.tag}}:{{src}}->{{dst}}\" }}\n}}\npair_up: fn<T>(first: T, second: T) -> [T] {{ [T]{{first, second}} }}\nmove_pair: fn(src: ^^String, dst: ^^String) -> String {{ \"{{src}}->{{dst}}\" }}\nwrite_pair: fn(src: ^Int, dst: ^Int) {{ src += dst }}\nrun: fn() {{\n    w: Writer{{tag: \"w\"}}\n    src: \"a\"\n    dst: \"b\"\n    _: w.transfer(dst, src)\n    first: 1\n    second: 2\n    _: pair_up(second, first)\n    _: move_pair(dst.{copy_call}(), src.{copy_call}())\n    ^x_src: \"p\"\n    ^x_dst: \"q\"\n    _: move_pair(src: x_dst.move(), dst: x_src.move())\n    ^src_n: 1\n    ^dst_n: 2\n    write_pair(^src_n, ^dst_n)\n}}\n"
     diagnostics: core_failure_record_diagnostics(source, "user/crossed_methods_generics")
     hits: crossed_arg_find(diagnostics, "E0773")
     assert_eq(hits.len(), 3)

@@ -1897,9 +1897,9 @@ sema_call_crossed_param_name: fn(param: SemaCallParam) -> String Never! {
 }
 
 // Simple variable name carried by an unlabeled, non-spread positional argument
-// (including `^x`, `^^x`, `x.move()`, and `x.copy()`). Labeled arguments opt
-// out explicitly, and field/index projections such as `a.x, b.x` are not bare
-// variable names.
+// (including `^x`, `^^x`, `x.move()`, and explicit copy calls). Labeled
+// arguments opt out explicitly, and field/index projections such as `a.x, b.x`
+// are not bare variable names.
 sema_call_crossed_arg_name: fn(arg: CallArg) -> String? {
     if arg.label != None || arg.spread -> return None
     if arg.expr == .Ident(name, _, _) -> return Val(name)
