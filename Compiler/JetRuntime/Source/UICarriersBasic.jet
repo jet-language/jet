@@ -1,5 +1,28 @@
 // cols/rows are i64, not exact-Int owners. Narrow only at constructors;
 // getters return fresh exact Int owners, while clone/eq/drop use raw words.
+UI_CARRIER_SCALAR_BYTES: I64{8}
+
+UI_CARRIER_TERMINAL_SIZE_BYTES: I64{16}
+
+UI_CARRIER_TERMINAL_SIZE_COLS: I64{0}  // An i64 word.
+
+UI_CARRIER_TERMINAL_SIZE_ROWS: I64{8}  // An i64 word.
+
+// TerminalPolicy owns TerminalSize by value. Embedded Size@0 is
+// byte-identical to the 16-byte TerminalSize carrier. Ctor consumes/frees its
+// input Size once; getter owns a fresh Size allocation.
+UI_CARRIER_TERMINAL_POLICY_BYTES: I64{24}
+
+UI_CARRIER_TERMINAL_POLICY_SIZE: I64{0}
+
+UI_CARRIER_TERMINAL_POLICY_MODE: I64{16}
+
+UI_CARRIER_TEXT_WIDTH_BYTES: I64{16}
+
+UI_CARRIER_TEXT_WIDTH_AMBIGUOUS: I64{0}
+
+UI_CARRIER_TEXT_WIDTH_CONTROLS: I64{8}
+
 ui_carrier_terminal_size_new: fn(cols: I64, rows: I64) -> I64 {
     result: jet_rt_alloc(UI_CARRIER_TERMINAL_SIZE_BYTES, I64{8})
     ui_carrier_store(wrapping(result + UI_CARRIER_TERMINAL_SIZE_COLS), cols)

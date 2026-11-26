@@ -9,7 +9,6 @@ use {
     jet_foundation.[interner_empty, CompilerThreads, CompilerTraceSink, FnBody, NameTable, TConstantDef, TImplDef, TTypeDef, Type, compiler_apply_order, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_joined, compiler_threads_taken, compiler_threads_heaviest_first, compiler_threads_single, compiler_transfer_rows, module_none, name_find, name_index, name_intern, name_table_sized, sha256_hex, symbol_table]
     jet_sema.[sema_inline_member_module, sema_inline_member_source_name]
     jet_backend.[
-        TIME_DURATION_NS,
         X64CompiledFunction,
         X64Data,
         X64DataExport,
@@ -376,7 +375,7 @@ ir_x64_debug_type: fn(m: IRModule, tables: ^IRX64Tables, shared: ^IRX64DebugRows
             }
             if ir_handle_row_is(m, row, "Duration") {
                 if shared.duration < 0 {
-                    members: [X64DebugMember]{X64DebugMember{name: "ns", offset: Int{TIME_DURATION_NS}, ty: shared.word}}
+                    members: [X64DebugMember]{X64DebugMember{name: "ns", offset: 0, ty: shared.word}}
                     record: ir_x64_debug_add(tables, X64DebugType{name: "Duration", size: 8, kind: X64DebugTypeKind.Struct{members: members}})
                     shared.duration = ir_x64_debug_pointer(tables, record)
                 }

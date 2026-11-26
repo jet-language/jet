@@ -1,5 +1,5 @@
 // Derived Clone/PartialEq. Borrowed exact Int, cloned text.
-// XMLABI.jet owns native offsets.
+// CoreLayoutABI.jet owns XML_ERROR_* and XML_RENDER_* offsets.
 // Reads borrow an initialized aligned word of a live XML carrier or optional
 // input; writes own a word of a fresh carrier or caller output. RawWords.jet
 // performs the access.
@@ -8,17 +8,17 @@ xml_word: fn(address: I64) -> I64 { rt_text_word(address) }
 xml_store: fn(address: I64, value: I64) { rt_text_store(address, value) }
 
 xml_enum_clone: fn(value: I64) -> I64 {
-    result: jet_rt_alloc(XML_ENUM_BYTES, I64{8})
-    xml_store(wrapping(result + XML_ENUM_TAG), xml_word(wrapping(value + XML_ENUM_TAG)))
+    result: jet_rt_alloc(ENCODING_ENUM_BYTES, I64{8})
+    xml_store(wrapping(result + ENCODING_ENUM_TAG), xml_word(wrapping(value + ENCODING_ENUM_TAG)))
     result
 }
 
 xml_enum_drop: fn(value: I64) {
-    if (value != I64{0}) { jet_rt_free(value, XML_ENUM_BYTES, I64{8}) }
+    if (value != I64{0}) { jet_rt_free(value, ENCODING_ENUM_BYTES, I64{8}) }
 }
 
 xml_enum_eq: fn(left: I64, right: I64) -> Bool {
-    xml_word(wrapping(left + XML_ENUM_TAG)) == xml_word(wrapping(right + XML_ENUM_TAG))
+    xml_word(wrapping(left + ENCODING_ENUM_TAG)) == xml_word(wrapping(right + ENCODING_ENUM_TAG))
 }
 
 #Export(c) jet_rt_handle_clone_xml_reason: fn(value: I64) -> I64 { xml_enum_clone(value) }

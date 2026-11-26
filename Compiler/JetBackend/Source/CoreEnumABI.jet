@@ -3,7 +3,8 @@
 // checkout, and `jet check` reads it before any build step runs. Each case
 // constant is the case's ordinal in its enum's declaration, the tag the
 // runtime reads and writes for it. A carrier's heap copy is its tag word, then
-// one word holding its case's payload.
+// either one shared payload word or one word per labeled payload slot in
+// declaration order.
 
 // NetDNSError (Core/Net/Net.jet)
 NET_DNS_BYTES: I64{16}
@@ -142,6 +143,14 @@ TASK_STATUS_PAUSED: I64{1}
 TASK_STATUS_CANCEL_REQUESTED: I64{2}
 
 // WsError (Core/Net/Ws.jet)
+WS_ERROR_BYTES: I64{24}
+
+WS_ERROR_TAG: I64{0}
+
+WS_ERROR_LIMIT: I64{8}
+
+WS_ERROR_OPERATION: I64{16}
+
 WS_ERROR_INVALID_URL: I64{0}
 
 WS_ERROR_INVALID_HANDSHAKE: I64{1}
