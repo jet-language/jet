@@ -1,0 +1,26 @@
+^level: 1
+
+think_all: fn() -> Int { level * 2 }
+
+via_param: fn(g: Group) {
+    t: task { level }
+    _: t.join() ?? 0
+}
+
+outliving_direct: fn() {
+    direct: task { level + 1 }
+    _: direct.join() ?? 0
+}
+
+outliving_transitive: fn() {
+    transitive: task think_all()
+    _: transitive.join() ?? 0
+}
+
+run: fn() {
+    outliving_direct()
+    outliving_transitive()
+    task.group g {
+        via_param(g)
+    }
+}

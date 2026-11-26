@@ -1535,6 +1535,64 @@ sema_effect_state_reader_path: fn(nodes: [SemaEffectNode], index: Int, seen: ^[B
     [Int]{}
 }
 
+// First changeable module storage binding (`^name: ...` / `#Persist`) this
+// node reads or writes directly; None for nodes that touch only thread-safe
+// `Shared` holders or no module state.
+sema_effect_node_storage_touch: fn(node: SemaEffectNode) -> TEffectSpan? Never! {
+    rare: node.rare ?? return None
+    loop write in rare.module_writes {
+        if write.storage -> return Val(write)
+    }
+    loop read in rare.module_reads {
+        if read.storage -> return Val(read)
+    }
+    None
+}
+
+// The call path from `index` to the first function reached depth-first that
+// reads or writes a changeable module storage binding (`storage: true`).
+sema_effect_storage_touch_path: fn(nodes: [SemaEffectNode], index: Int, seen: ^[Bool], visited: ^[Int]) -> [Int] Never! {
+    if seen[index] -> return [Int]{}
+    seen[index] = true
+    visited.push(index)
+    if sema_effect_node_storage_touch(nodes[index]) != None -> return [Int]{index}
+    calls: nodes[index].call_targets.len()
+    loop position in 0..<(calls + sema_effect_node_value_count(nodes[index])) {
+        target: if position < calls -> nodes[index].call_targets[position] else -> sema_effect_node_value_target(nodes[index], position - calls)
+        if target < 0 -> next
+        tail: sema_effect_storage_touch_path(nodes, target, seen, visited)
+        if tail.len() == 0 -> next
+        ^path: [Int]{index}
+        loop step in tail -> path.push(step)
+        return path
+    }
+    [Int]{}
+}
+
+// Whether a `BodyCoreClosureKind.Spawn` is unscoped: either started outside
+// any `task.group` (`group == None`) or spawned through a `Group` parameter
+// (whose opener cannot see the child's borrows).
+sema_effect_spawn_is_unscoped: fn(function: FnBody, group: Int?) -> Bool Never! {
+    group_node: group ?? return true
+    offset: group_node - function.tree.node_base
+    if offset < 0 || offset >= function.tree.nodes.len() -> return false
+    if function.tree.nodes[offset].kind == .Local(local) {
+        loop param in function.params {
+            if param.name == local.name -> return true
+        }
+    }
+    false
+}
+
+sema_effect_unscoped_task_storage_diagnostic: fn(nodes: [SemaEffectNode], path: [Int], spawn_span: Span) -> Diagnostic {
+    leaf: nodes[path[path.len() - 1]]
+    touch: sema_effect_node_storage_touch(leaf) ?? TEffectSpan{name: leaf.name, span: spawn_span, storage: true}
+    chain: loop step in path -> nodes[step].chain_name
+    why: "a task started outside a lexical `task.group` may outlive its starter and race other accesses to `{touch.name}` ({chain.join(" → ")})"
+    diagnostic: sema_error("E1102", spawn_span, "this task reaches changeable module state `{touch.name}` through `{nodes[path[0]].chain_name}`", why, "spawn the task inside a `task.group`, pass `{touch.name}` in by value, or keep shared state in `Shared{{…}}`")
+    diagnostic_with_rights(diagnostic, "task", chain, [String]{}, None)
+}
+
 // A comptime input call (`embed_file`, `embed_bytes`, `find`, `net.fetch`)
 // at `node`, charged to `node_index` once per call span.
 sema_effect_record_comptime_input: fn(nodes: ^[SemaEffectNode], node_index: Int, node: BodyNode) Never! {
@@ -2747,7 +2805,7 @@ sema_effect_node_from_source: fn(function: FnBody, sources: [SemaEffectFunctionS
         loop edge in function.effects.value_edges -> sema_effect_set_add(rare.value_edges, edge)
         // copy: the node keeps the writes; the function keeps its effect facts.
         rare.module_writes = function.effects.module_writes.copy()
-        rare.module_reads = (loop item in function.effects.module_reads -> TEffectSpan{name: item.name, span: item.span, held: item.held})
+        rare.module_reads = (loop item in function.effects.module_reads -> TEffectSpan{name: item.name, span: item.span, held: item.held, storage: item.storage})
         node.rare = Val(rare)
     }
     if function.effects.maximal {
@@ -7149,13 +7207,15 @@ sema_effects_check_modules: fn(modules: ^[SemaGraphModuleResult], inputs: [SemaE
     sema_effect_check_compiler_hooks(table, modules, inputs, nodes, calls.node_by_key, solved, diagnostics)
     ^any_module_writes: false
     ^any_module_reads: false
+    ^any_storage_globals: false
     ^any_comptime_inputs: false
     loop node in nodes {
         if node.rare == .Val(rare) {
             if rare.module_writes.len() > 0 -> any_module_writes = true
             if rare.module_reads.len() > 0 -> any_module_reads = true
+            if !any_storage_globals && sema_effect_node_storage_touch(node) != None -> any_storage_globals = true
             if rare.comptime_inputs.len() > 0 -> any_comptime_inputs = true
-            if any_module_writes && any_module_reads && any_comptime_inputs -> break
+            if any_module_writes && any_module_reads && any_storage_globals && any_comptime_inputs -> break
         }
     }
     // A pure (`-[]>`) or `#Memo` function may not write or read changeable
@@ -7211,6 +7271,34 @@ sema_effects_check_modules: fn(modules: ^[SemaGraphModuleResult], inputs: [SemaE
                     if read_path.len() > 0 {
                         ^memo_diagnostics: [Diagnostic]{sema_effect_memo_state_diagnostic(nodes, read_path, at_memo, false)}
                         sema_effect_publish_diagnostics(diagnostics, inputs[nodes[node_index].module_index].source_segments, memo_diagnostics)
+                    }
+                }
+            }
+        }
+        // A task started outside a lexical `task.group` (or through a `Group`
+        // parameter) may outlive its starter and therefore cannot call any
+        // function that transitively reads or writes a changeable module
+        // storage binding (`^name: ...` / `#Persist`).
+        if any_storage_globals {
+            loop input_index in 0..<inputs.len() {
+                module_row: inputs[input_index]
+                loop function in modules[module_row.module_index].functions {
+                    loop body_node in function.tree.nodes {
+                        if body_node.kind == .CoreClosureCall(closure_kind) {
+                            if closure_kind == .Spawn(group, _, _, executable) {
+                                if !sema_effect_spawn_is_unscoped(function, group) -> next
+                                loop edge in executable.effects.call_edges {
+                                    target: sema_effect_node_index(calls.node_by_key, edge) ?? next
+                                    touch_path: sema_effect_storage_touch_path(nodes, target, state_seen, state_visited)
+                                    loop row in state_visited -> state_seen[row] = false
+                                    state_visited.clear()
+                                    if touch_path.len() == 0 -> next
+                                    ^task_diagnostics: [Diagnostic]{sema_effect_unscoped_task_storage_diagnostic(nodes, touch_path, body_node.span)}
+                                    sema_effect_publish_diagnostics(diagnostics, module_row.source_segments, task_diagnostics)
+                                    break
+                                }
+                            }
+                        }
                     }
                 }
             }

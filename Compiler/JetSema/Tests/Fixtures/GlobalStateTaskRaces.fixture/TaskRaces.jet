@@ -1,0 +1,42 @@
+^level: 1
+#Persist ^pinned: 0
+
+conflict_children: fn() {
+    task.group workers {
+        writer: task { pinned += 1 }
+        reader: task { pinned }
+        _: writer.join() ?? ()
+        _: reader.join() ?? 0
+    }
+}
+
+conflict_opener: fn() {
+    task.group workers {
+        writer: task { pinned += 1 }
+        seen: pinned
+        print(seen)
+        _: writer.join() ?? ()
+    }
+}
+
+detach_borrowed: fn() {
+    task.group workers {
+        reader: task { level }
+        reader.detach()
+    }
+}
+
+para_write: fn() {
+    xs: [Int]{1, 2}
+    _: xs.para_map(fn(x: Int) {
+        pinned += 1
+        x
+    })
+}
+
+run: fn() {
+    conflict_children()
+    conflict_opener()
+    detach_borrowed()
+    para_write()
+}

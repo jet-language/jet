@@ -165,11 +165,16 @@ sema_call_concurrency_infer_callback: fn(argument: CallArg, required: Type, meth
         check.diagnostics.push(sema_value_method_argument_mismatch(method, index, shown, written.ty, argument.span))
         return None
     }
+    global_access_start: check.context.taskgroups.global_accesses.len()
     checked_result: if open_result -> sema_expression_lambda_collection_callback(argument.expr, Val(required), check) else -> sema_check_expression_with_lambda_escapes(argument.expr, Val(required), check, Val(false))
     checked: checked_result ?? {
+        if !check.context.taskgroups.in_spawn {
+            loop check.context.taskgroups.global_accesses.len() > global_access_start -> ^_: check.context.taskgroups.global_accesses.pop()
+        }
         sema_call_concurrency_failed_callback_writes(check.environment.tables, argument.expr, check.scopes, check.diagnostics)
         return None
     }
+    if !sema_taskgroup_check_para_global_accesses(check, global_access_start) -> return None
     ^contract: required
     if open_result && required == .Fn(params, _, effect_bound, param_contract, call_metadata, return_view_provenance) && checked.ty == .Fn(_, adopted, _, _, _, _) {
         // copy: the contract is a new owned Type built from the required slot and the callback's adopted result

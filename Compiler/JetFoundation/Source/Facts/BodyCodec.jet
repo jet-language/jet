@@ -1279,13 +1279,15 @@ body_codec_put_teffectspan: fn(out: ^BodyCodecOut, value: TEffectSpan) Never! {
     body_codec_put_string(out, value.name)
     body_codec_put_span(out, value.span)
     body_codec_put_bool(out, value.held)
+    body_codec_put_bool(out, value.storage)
 }
 
 body_codec_get_teffectspan: fn(bytes: [U8], input: ^BodyCodecIn) -> TEffectSpan Never! {
     f0: body_codec_get_string(bytes, input)
     f1: body_codec_get_span(bytes, input)
     f2: body_codec_get_bool(bytes, input)
-    TEffectSpan{name: f0, span: f1, held: f2}
+    f3: body_codec_get_bool(bytes, input)
+    TEffectSpan{name: f0, span: f1, held: f2, storage: f3}
 }
 
 body_codec_put_teffectcontextkey: fn(out: ^BodyCodecOut, value: TEffectContextKey) Never! {

@@ -1,0 +1,29 @@
+Count: struct {
+    value: Int,
+}
+
+^level: 1
+#Persist ^pinned: 0
+HITS: Shared{Count{value: 0}}
+
+read_level: fn() -> Int { level }
+
+run: fn() {
+    task.group workers {
+        a: task { level + 1 }
+        b: task { level + 2 }
+        c: task { read_level() }
+        d: task {
+            pinned += 1
+        }
+        _: a.join() ?? 0
+        _: b.join() ?? 0
+        _: c.join() ?? 0
+        _: d.join() ?? ()
+    }
+    xs: [Int]{1, 2, 3}
+    ys: xs.para_map(fn(x: Int) { x * level })
+    print(ys.len())
+    h: task { HITS.value }
+    _: h.join() ?? 0
+}
