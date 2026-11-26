@@ -2319,6 +2319,7 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, o
     ^failure_edge_start: lambda_context.failure_edges.len()
     ^failure_union_edge_start: lambda_context.failure_union_edges.len()
     ^module_write_start: lambda_context.module_writes.len()
+    ^module_read_start: lambda_context.module_reads.len()
     lambda_context.autodiff_safe_panic = false
     lambda_context.autodiff_unsafe_panic = false
     ^frame: sema_scope_enter(check.scopes, lambda_state, "lambda@{lambda.span.start}")
@@ -3125,6 +3126,10 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, o
     // a pure function may not hide a write in a lambda (E3401).
     loop write_index in module_write_start..<lambda_context.module_writes.len() {
         check.context.module_writes.push(lambda_context.module_writes[write_index].copy())
+    }
+    loop read_index in module_read_start..<lambda_context.module_reads.len() {
+        read_span: lambda_context.module_reads[read_index]
+        check.context.module_reads.push(TEffectSpan{name: read_span.name, span: read_span.span, held: read_span.held})
     }
     // The lambda's flat nodes are rows of its arena, which continues this one.
     sema_arena_take_back(check.context, lambda_context.arena.move())

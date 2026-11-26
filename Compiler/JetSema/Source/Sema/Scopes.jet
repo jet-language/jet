@@ -1049,6 +1049,9 @@ SemaCheckContext: struct {
     // The module state this body writes (sema_scope_record_module_write),
     // which a pure function may not reach (E3401).
     module_writes: [TEffectSpan]{[TEffectSpan]{}},
+    // The changeable module state this body reads (sema_scope_record_module_constant_read),
+    // which a pure (`-[]>`) or `#Memo` function may not reach (E3401/E0938).
+    module_reads: [TEffectSpan]{[TEffectSpan]{}},
     // E0408/E0409: a fallback with no failure report to name (`??` on an
     // optional, or a pure pattern miss) denies `err` with this code.
     fallback_err_denial: String?,
@@ -1869,6 +1872,7 @@ sema_check_context_snapshot: fn(source: SemaCheckContext) -> SemaCheckContext Ne
         lambda_statement_tails: source.lambda_statement_tails.copy(),
         call_facts: source.call_facts.copy(),
         module_writes: source.module_writes.copy(),
+        module_reads: (loop item in source.module_reads -> TEffectSpan{name: item.name, span: item.span, held: item.held}),
         rule_tables: if source.rule_tables.calls_at.len() == 0 -> SemaRuleTables{} else -> source.rule_tables.copy(),
         call_return_views: source.call_return_views.copy(),
         local_view_provenance: source.local_view_provenance.copy(),
@@ -1986,6 +1990,7 @@ sema_check_delta_pass: fn(from: ^[InternerDelta], to: ^[InternerDelta]) Never! {
 SemaCheckContextMark: struct {
     call_facts: Int,
     module_writes: Int,
+    module_reads: Int,
     call_return_views: Int,
     local_view_provenance: Int,
     name_references: Int,
@@ -2087,6 +2092,7 @@ sema_check_context_save: fn(context: SemaCheckContext) -> SemaCheckContextMark N
     SemaCheckContextMark{
         call_facts: context.call_facts.len(),
         module_writes: context.module_writes.len(),
+        module_reads: context.module_reads.len(),
         call_return_views: context.call_return_views.len(),
         local_view_provenance: context.local_view_provenance.len(),
         name_references: context.name_references.len(),
@@ -2187,6 +2193,7 @@ sema_scope_commit: fn(table: ^SemaScopeTable, mark: SemaScopeMark) Never! {
 sema_check_context_rollback: fn(context: ^SemaCheckContext, mark: ^^SemaCheckContextMark) Never! {
     loop context.call_facts.len() > mark.call_facts -> ^_: context.call_facts.pop()
     loop context.module_writes.len() > mark.module_writes -> ^_: context.module_writes.pop()
+    loop context.module_reads.len() > mark.module_reads -> ^_: context.module_reads.pop()
     loop context.call_return_views.len() > mark.call_return_views {
         ^_: context.call_return_views.pop()
     }
@@ -3439,6 +3446,53 @@ sema_scope_record_lent_write: fn(place: Expr, span: Span, check: ^SemaBodyCheck)
         return
     }
     check.context.module_writes.push(TEffectSpan{name: name, span: span})
+}
+
+// Whether `symbol` is a module-level `^name: ...` binding (not `#run`),
+// across either the current module's declarations or its registered module in
+// the graph. Returns whether it is `#Persist`, or None for any other binding.
+sema_scope_module_storage_binding: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, symbol: Symbol) -> Bool? Never! {
+    if symbol.module_identity == environment.module_identity {
+        loop declaration_index in 0..<environment.declarations.len() {
+            if environment.declarations[declaration_index].symbol_id != symbol.id -> next
+            if environment.declarations[declaration_index].item == .Const(definition) {
+                if definition.mutable && !definition.is_comptime -> return Val(definition.is_persist)
+            }
+            return None
+        }
+    }
+    graph: program.registration_graph
+    module_index: sema_registration_module_index(graph, symbol.module_identity) ?? return None
+    loop constant_index in 0..<graph.modules[module_index].constants.len() {
+        if graph.modules[module_index].constants[constant_index].symbol.id != symbol.id -> next
+        if graph.modules[module_index].constants[constant_index].declaration.mutable && !graph.modules[module_index].constants[constant_index].declaration.is_comptime {
+            return Val(graph.modules[module_index].constants[constant_index].declaration.is_persist)
+        }
+        return None
+    }
+    None
+}
+
+// Whether `ty` is a module-level interior-mutable holder (`Shared`, `Cell`,
+// `Atom`, or `Mutex`), unwrapping tags.
+sema_scope_type_is_changeable_holder: fn(ty: Type) -> Bool Never! {
+    if ty == {
+        .Tagged(_, inner) -> sema_scope_type_is_changeable_holder(inner)
+        .Shared(_) -> true
+        .Apply(name, _) -> name == "Cell" || name == "Atom" || name == "Mutex"
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
+    }
+}
+
+// A read of a module-level constant in a function body records in
+// `context.module_reads` when the constant is changeable module state: a
+// `^name: ...` / `#Persist ^name: ...` storage binding or a module-level
+// `Shared` / `Cell` / `Atom` / `Mutex` holder.
+sema_scope_record_module_constant_read: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, context: ^SemaCheckContext, symbol: Symbol, name: String, ty: Type, span: Span) Never! {
+    if environment.function_name == "" -> return
+    if sema_scope_module_storage_binding(environment, program, symbol) != None || sema_scope_type_is_changeable_holder(ty) {
+        context.module_reads.push(TEffectSpan{name: name, span: span})
+    }
 }
 
 // An initializer that builds a new cell: `Shared{…}` (optionally in `Val`)

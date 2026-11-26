@@ -1067,8 +1067,9 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     source_file: sema_source_file_at(updated.source_segments, fallback_source_file, updated.source_origin, func.span)
     ^visibility: NameVisibility.Private
     if func.is_pub -> visibility = NameVisibility.Public
-    ^effects: TEffectFacts{direct: [String]{}, solved: [String]{}, call_edges: [String]{}, maximal: false, direct_spans: [TEffectSpan]{}, module_writes: check.context.module_writes.move()}
+    ^effects: TEffectFacts{direct: [String]{}, solved: [String]{}, call_edges: [String]{}, maximal: false, direct_spans: [TEffectSpan]{}, module_writes: check.context.module_writes.move(), module_reads: check.context.module_reads.move()}
     check.context.module_writes = [TEffectSpan]{}
+    check.context.module_reads = [TEffectSpan]{}
     if stand_in == .Val(seal_facts) -> effects = seal_facts.effects
     ^unsafe_gate: TUnsafeGate?{None}
     if func.is_unsafe && unsafe_gate_valid && func.unsafe_reason != None {

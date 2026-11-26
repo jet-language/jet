@@ -1,0 +1,23 @@
+Count: struct {
+    value: Int,
+}
+
+^level: 1
+#Persist ^pinned: 0
+HITS: Shared{Count{value: 0}}
+
+read_level: fn() -> Int { level }
+#Memo cost_global: fn(x: Int) -> Int { x * level }
+#Memo cost_holder: fn(x: Int) -> Int { x + HITS.value }
+#Memo cost_indirect: fn(x: Int) -> Int { x + read_level() }
+#Memo bump_memo: fn(x: Int) -> Int {
+    pinned += 1
+    x
+}
+
+run: fn() {
+    print(cost_global(2))
+    print(cost_holder(2))
+    print(cost_indirect(2))
+    print(bump_memo(2))
+}

@@ -1,0 +1,22 @@
+Count: struct {
+    value: Int,
+}
+
+^level: 1
+#Persist ^pinned: 0
+HITS: Shared{Count{value: 0}}
+
+read_level: fn() -> Int { level }
+direct_global: fn(x: Int) -[]> Int { x * level }
+direct_persist: fn() -[]> Int { pinned }
+direct_holder: fn() -[]> Int { HITS.value }
+via_helper: fn(x: Int) -[]> Int { x + read_level() }
+#Memo memo_pure: fn(x: Int) -[]> Int { x * level }
+
+run: fn() {
+    print(direct_global(2))
+    print(direct_persist())
+    print(direct_holder())
+    print(via_helper(3))
+    print(memo_pure(4))
+}
