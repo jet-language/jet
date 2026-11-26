@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7042,
-    "rev": 114675,
+    "rev": 114682,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -36372,7 +36372,7 @@
       "track": "epoch",
       "epoch": "G4",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P0",
       "plan": null,
       "checkSteps": null,
@@ -36400,20 +36400,20 @@
         {
           "n": 2,
           "text": "Every RuntimeHandles key row names a handle symbol the runtime exports (RUNTIME_C_EXPORTS) under Core's own type names: the 33 key rows with an exported bare twin use the twin, the 61 key rows with no exported drop get one or are deleted, and the three EncodingLimits handle kinds (CSVReader, CSVWriter, XMLReader) resolve. Proof: `jet test Compiler/JetIR --filter runtime_handle_rows_name_exports` (a #Test asserting every key row resolves to an export).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T11:38:11.590Z"
+          "evidence": "dev 2d95b939f1c (batch-53 compiler): jet test Compiler/JetIR --filter runtime_handle_rows_name_exports PASS 1/1; all RuntimeHandles key rows resolve to RUNTIME_C_EXPORTS under Core type names.",
+          "at": "2026-11-26T04:29:41.319Z"
         },
         {
           "n": 3,
           "text": "Every IR_GENERATED_RECORDS schema and IR_HANDLE_FIELDS row names a record or field the runtime exports under Core's own field names: the 29 __jet__ generated schemas (DataEvent, JetHTTPHeaders, JetDecimal and JetFraction get bare schemas; JetCoord2 is shared by 12 rows), the DataError cause schema (OptRec EncodingError against the bare Tag form) and the two orphan ZonedDateTime field rows.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T11:37:53.217Z",
+          "evidence": "dev 2d95b939f1c (batch-53 compiler): jet test Compiler/JetIR --filter runtime_record_rows_name_exports PASS 1/1; all IR_GENERATED_RECORDS and IR_HANDLE_FIELDS rows resolve under Core field names.",
+          "at": "2026-11-26T04:29:42.555Z",
           "proof": {
             "profile": "cmd",
             "args": [
@@ -36426,11 +36426,11 @@
         {
           "n": 4,
           "text": "The Rust-era __jet__ runtime layer is retired: ir_runtime_handle has no lookup fallback branch (the one c1 added), and the encoding, data and time case corpora pass. Proof: `jet test Compiler --profile cases --filter Encoding`, then `--filter data` and `--filter time`, on O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:04:33.711Z"
+          "evidence": "dev 2d95b939f1c (batch-53 compiler): ir_runtime_handle lookup fallback removed; Encoding 84/84, CoreLib/core_data 8/8, CoreTime 18/18, Time 21/21 PASS.",
+          "at": "2026-11-26T04:29:43.801Z"
         }
       ],
       "refs": [],
@@ -36438,9 +36438,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T04:55:11.076Z",
-      "updated": "2026-11-22T02:10:23.719Z",
-      "updatedBy": "owner",
-      "criteriaLastN": 4
+      "updated": "2026-11-26T04:29:46.390Z",
+      "updatedBy": "Orchestrator",
+      "criteriaLastN": 4,
+      "completedAt": "2026-11-26T04:29:46.390Z"
     },
     {
       "id": "c0xphd0i",
@@ -40895,11 +40896,11 @@
         {
           "n": 120,
           "text": "jet perf view's per-line rows say which costs were measured: a static cost-site label from CostFacts.jet body_cost_fact ('map copy-on-write' on every map-mutating builtin, 'generic representation fallback' on every List/FixedList index) is never printed as a cost of the sampled line, unless the samples show that path ran. Its sub-rows name the callee each sample landed in, not only a hashed cost site ('map grow 76e6573179fa7127'). The view or export also gives callers: folded stacks, or the top callers of a function. Found 2026-11-23: the compile-speed profile flagged Names.jet:142, a plain slots[slot] read in a probe loop, as 'generic representation fallback'; the export rows carry no stacks. Proof: jet perf view on a trace of jet check Compiler shows measured sub-costs with callee symbols and a callers list for name_find_hashed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-23T14:42:42.506Z"
+          "evidence": "dev 18a5d85a74c (batch-56 compiler): Compiler/JetCLI/Tests/Perf.jet --filter=perf 23/23 PASS (omits unmeasured speculative cost labels, preserves hashed helper callee symbols, measured callee sub-rows, timeline callers, folded stacks). Live 'jet perf run <batch56-jet> check Compiler' (748,944 samples, 0 lost) + 'jet perf view' shows full 'callers' section and hashed helper callee symbols, and 'jet perf export --stacks' emits folded stacks.",
+          "at": "2026-11-26T04:23:57.393Z"
         }
       ],
       "refs": [],
@@ -40907,7 +40908,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-23T15:33:49.396Z",
+      "updated": "2026-11-26T04:23:57.393Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 120
     },
@@ -60590,11 +60591,11 @@
         {
           "n": 9,
           "text": "B leaves: the 32 ProcessSpec/ProcessChild methods that sema routes by building process_spec_<method>/process_child_<method> row names in ProcessHandles.jet (22 spec builders, plan/run/run_checked/spawn, 6 child methods) become Jet declarations with ordinary callers. Then they leave Core.rows as jet.runtime leaves.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-24T23:34:21.308Z",
+          "evidence": "dev 81e937b46a9 / 8ade4caa176: all 32 ProcessSpec/ProcessChild methods (22 builders + plan/run/run_checked/spawn + 6 child methods) are Jet methods in Core/Process/Process.jet (impl ProcessSpec, impl ProcessChild); 0 process_spec_*/process_child_* rows remain in Core.rows and ProcessHandles.jet keeps only abilities/keep_open/lines; Core/Process/Process.jet 12/12 PASS and Tests/Guards/CoreDeclarations 6/6 PASS.",
+          "at": "2026-11-26T04:29:39.320Z",
           "proof": {
             "profile": "cmd",
             "args": [
@@ -60695,11 +60696,11 @@
         {
           "n": 16,
           "text": "B leaves: the 23 core.math rows (20 core.math functions, jet_builtins to_bits_f32/from_bits_f32, the core.math.random seed) leave the compiler: the functions and bit casts become Jet bodies in Core, and the random seed becomes an ordinary jet.runtime binding. Each function is within 1 ulp of the correctly rounded result on reference values, including +-0, +-inf, NaN, subnormals and huge sin/cos arguments, on every tier; a paired perf cell compares the bodies with the old rows.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T03:08:49.889Z",
+          "evidence": "dev 81e937b46a9 / 8ade4caa176: all 23 core.math/to_bits_f32/from_bits_f32/random.seed rows left Core.rows for Jet bodies in Core/Math/Math.jet and Core/Math/Random.jet; Core/Math/Math.jet IEEE/ulp/subnormal/trig tests 18/18 PASS on O0/O1/O2, Core/Math/Random.jet 8/8 PASS on O0/O1/O2, Tools/Perf/CoreMathPair.jet paired perf cell clean (0 losses), Tests/Guards/CoreDeclarations 6/6 PASS.",
+          "at": "2026-11-26T04:29:40.161Z",
           "proof": {
             "profile": "cmd",
             "args": [
@@ -60788,7 +60789,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-24T17:01:07.086Z",
-      "updated": "2026-11-26T03:32:06.245Z",
+      "updated": "2026-11-26T04:29:40.161Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 22
     },
@@ -129019,6 +129020,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-26T04:29:46.391Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0on083p",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-26T04:29:43.801Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0on083p",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-26T04:29:42.555Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0on083p",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-26T04:29:41.319Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0on083p",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-26T04:29:40.161Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0mhrplj",
+      "note": "#16"
+    },
+    {
+      "at": "2026-11-26T04:29:39.320Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0mhrplj",
+      "note": "#9"
+    },
+    {
+      "at": "2026-11-26T04:23:57.393Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#120"
+    },
     {
       "at": "2026-11-26T03:32:09.040Z",
       "by": "Orchestrator",
