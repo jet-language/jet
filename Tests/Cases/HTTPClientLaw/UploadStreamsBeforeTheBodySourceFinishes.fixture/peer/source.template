@@ -13,9 +13,9 @@ prefix: fn(raw: [U8], want: [U8]) -> Bool {
 contains_bytes: fn(raw: [U8], want: [U8], ascii_casefold: Bool) -> Bool {
     if raw.len() < want.len() -> return false
     loop start in 0..<(raw.len() - want.len() + 1) {
-        same := true
+        ^same: true
         loop i in 0..<want.len() {
-            n := Int{raw[start + i]}
+            ^n: Int{raw[start + i]}
             if ascii_casefold && n >= 65 && n <= 90 -> n += 32
             if n != (Int{want[i]}) -> same = false
         }
@@ -25,7 +25,7 @@ contains_bytes: fn(raw: [U8], want: [U8], ascii_casefold: Bool) -> Bool {
 }
 request_head: fn(stream: ^TCPStream) -> [U8] {
     // Original request_head10-23: 5s per read,512-byte reads, positive read, <=64KiB bound, exact CRLFCRLF terminator.
-    request := [U8]{}
+    ^request: [U8]{}
     loop !contains_bytes(request, [U8]{13,10,13,10}, false) {
         block: stream.read_bytes(512, deadline: 5s) ?? panic("request read")
         assert(block.len() > 0)
@@ -42,13 +42,13 @@ publish: fn(listener: TCPListener, path: String) {
 run: fn() {
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     publish(listener, "{work}/addr.txt")
-    stream := listener.accept() ?? panic("accept")
+    ^stream: listener.accept() ?? panic("accept")
     files.write_atomic("{work}/accepted", "yes".bytes()) ?? panic("accepted flag")
     head: request_head(stream)
     assert(prefix(head, "POST /upload HTTP/1.1{PEER_CRLF}".bytes()))
     assert(contains_bytes(head, "content-length: 204800".bytes(), true))
-    got := 0
-    seen := false
+    ^got: 0
+    ^seen: false
     loop got < 204800 {
         block: stream.read_bytes(4096) ?? panic("upload read")
         assert(block.len() != 0)

@@ -156,9 +156,9 @@ stream: fn<T: Decode>(loader: DataLoader<T>) -> DataStream<T> DataError! {
 /// by `core.files.data.read`.
 ///
 /// ```jet
-/// remote := core.data.url_as<Int, json.Codec>("https://example.test/rows", "network", DataLimits.safe()) ?? panic("{err}")
+/// ^remote: core.data.url_as<Int, json.Codec>("https://example.test/rows", "network", DataLimits.safe()) ?? panic("{err}")
 /// bind<Int>(remote, "[1, 2]".bytes()) ?? panic("{err}")
-/// rows := stream_as<Int, json.Codec>(remote) ?? panic("{err}")
+/// ^rows: stream_as<Int, json.Codec>(remote) ?? panic("{err}")
 /// (core.data.stream.collect<Int>(rows) ?? panic("{err}")) == [Int]{1, 2} // => true
 /// local: core.data.file_as<Int, json.Codec>("rows.json", DataLimits.safe()) ?? panic("{err}")
 /// local.codec == Val("json") // => true

@@ -46,7 +46,7 @@ Packet: struct {
 }
 
 resident: fn() -[]> String {
-    value := Packet{
+    ^value: Packet{
         display_name: "Ada",
         token: Token{ raw: "ignored" },
         event: Event.Count(7),
@@ -57,19 +57,19 @@ resident: fn() -[]> String {
         score: 1.5,
         letter: 'Z',
     }
-    encoded := cbor.to_bytes_canonical(value) ?? panic("encode")
-    decoded := cbor.decode<Packet>(encoded.copy()) ?? panic("decode {err}")
-    roundtrip := cbor.to_bytes_canonical(decoded) ?? panic("re-encode")
-    boxed := cbor.decode<Wrap<Int>>([U8]{ 0xa1, 0x65, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x0b }) ?? panic("generic decode")
-    boxed_wire := cbor.to_bytes_canonical(boxed) ?? panic("generic encode")
-    boxed_back := cbor.decode<Wrap<Int>>(boxed_wire.copy()) ?? panic("generic roundtrip")
+    ^encoded: cbor.to_bytes_canonical(value) ?? panic("encode")
+    ^decoded: cbor.decode<Packet>(encoded.copy()) ?? panic("decode {err}")
+    ^roundtrip: cbor.to_bytes_canonical(decoded) ?? panic("re-encode")
+    ^boxed: cbor.decode<Wrap<Int>>([U8]{ 0xa1, 0x65, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x0b }) ?? panic("generic decode")
+    ^boxed_wire: cbor.to_bytes_canonical(boxed) ?? panic("generic encode")
+    ^boxed_back: cbor.decode<Wrap<Int>>(boxed_wire.copy()) ?? panic("generic roundtrip")
     return "{hex.encode(encoded)}|{hex.encode(roundtrip)}|{decoded.token.raw}|{boxed_back.value}"
 }
 
 forced_deopt: fn(seed: String) -[]> String {
-    folded := text.casefold(seed)
+    ^folded: text.casefold(seed)
     if folded != "strasse" { panic("casefold") }
-    value := Packet{
+    ^value: Packet{
         display_name: "Ada",
         token: Token{ raw: "ignored" },
         event: Event.Count(7),
@@ -80,12 +80,12 @@ forced_deopt: fn(seed: String) -[]> String {
         score: 1.5,
         letter: 'Z',
     }
-    encoded := cbor.to_bytes_canonical(value) ?? panic("encode")
-    decoded := cbor.decode<Packet>(encoded.copy()) ?? panic("decode {err}")
-    roundtrip := cbor.to_bytes_canonical(decoded) ?? panic("re-encode")
-    boxed := cbor.decode<Wrap<Int>>([U8]{ 0xa1, 0x65, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x0b }) ?? panic("generic decode")
-    boxed_wire := cbor.to_bytes_canonical(boxed) ?? panic("generic encode")
-    boxed_back := cbor.decode<Wrap<Int>>(boxed_wire.copy()) ?? panic("generic roundtrip")
+    ^encoded: cbor.to_bytes_canonical(value) ?? panic("encode")
+    ^decoded: cbor.decode<Packet>(encoded.copy()) ?? panic("decode {err}")
+    ^roundtrip: cbor.to_bytes_canonical(decoded) ?? panic("re-encode")
+    ^boxed: cbor.decode<Wrap<Int>>([U8]{ 0xa1, 0x65, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x0b }) ?? panic("generic decode")
+    ^boxed_wire: cbor.to_bytes_canonical(boxed) ?? panic("generic encode")
+    ^boxed_back: cbor.decode<Wrap<Int>>(boxed_wire.copy()) ?? panic("generic roundtrip")
     return "{hex.encode(encoded)}|{hex.encode(roundtrip)}|{decoded.token.raw}|{boxed_back.value}"
 }
 

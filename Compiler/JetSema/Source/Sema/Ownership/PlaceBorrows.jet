@@ -4,7 +4,7 @@
 // (its root) are both immutable: sema rejects every write through either
 // (E0111 or E0205). The root holds its value for the whole function: it is a read
 // parameter (or `self`), or an immutable Let that is not itself a window
-// (`r: ^place`). Nowhere in the
+// (`r: place.in_place()`). Nowhere in the
 // function is either variable moved, dropped, closed, taken apart, rolled
 // back, edited through a window or named by a closure. So every read of the
 // binding sees the bytes a copy would have held, and lowering reads the
@@ -118,7 +118,7 @@ sema_place_borrow_statements: fn(body: ^[TStmt], census: SemaPlaceBorrowCensus, 
                     }
                 }
                 // An owning immutable variable is a root for later places;
-                // a window (`r: ^place`) aliases storage another variable
+                // a window (`r: place.in_place()`) aliases storage another variable
                 // may still change. A piece's bytes stay put while its root
                 // does.
                 if !sema_place_borrow_is_window(init, arena) -> ^_: table.roots.add(key.id, true)

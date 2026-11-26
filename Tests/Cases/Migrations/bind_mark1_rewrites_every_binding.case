@@ -1,0 +1,34 @@
+# The registered bind-mark1 plan (toolchain a0.0.47) rewrites every
+# changeable name and write window of an older-spelling source, a Markdown
+# file and any other text to `^name: value` and `place.in_place()`: a plain
+# `:=`, `_ :=`, a `#Persist` name, a state loop's `loop i := 0`, a
+# destructuring pun, a renamed field and a list pattern, a fence of
+# changeable names, a window bound with `:` and with `:=`, a writing match's
+# subject, a writing loop's source with an arrow and with a block, a quoted
+# Jet string though its lines run on after `\n`, an interpolated name
+# (`{name} :=` becomes `^{name}:`, `__f{name} :=` becomes `^__f{name}:`), a
+# window opening a one-line block (`{{ part: ^xs[0..1]`) and doubled-brace
+# destructuring in a string, a comment's code spans and its code written out
+# in full, a Jet fence, prose code spans and a diagnostic's source lines.
+# A mark on a type, a call's argument mark, a receiver mark (also before a
+# call at the end of a binding), the `^` operator, a YAML key over its
+# indented fields, a shell's `${{NAME:=word}}`, a `:=` with no blank before
+# it, a Makefile's capitalized `CC := cc`, every string of a source quoting
+# Go and a `go` fence stay as written, and a `:=` after a typed name is
+# reported with SKIP and stays.
+# A second run finds nothing left to rewrite.
+fixture: BindMark1RewritesEveryBinding/Input
+step: jet run {root}/Compiler/Migrations/Migrate.jet -- bind-mark1 --write before.jet guide.md notes.txt gen.jet
+exit: 0
+stdout: = "SKIP before.jet:61: a `:=` after a typed name (`name: Type := value`)\nEDIT before.jet 27\nEDIT guide.md 4\nSKIP notes.txt:1: a `:=` after a typed name (`name: Type := value`)\nEDIT notes.txt 3\nTOTAL 34 sites in 3 files\n"
+file: before.jet = BindMark1RewritesEveryBinding/before.out
+file: guide.md = BindMark1RewritesEveryBinding/guide.out
+file: notes.txt = BindMark1RewritesEveryBinding/notes.out
+file: gen.jet = BindMark1RewritesEveryBinding/Input/gen.jet
+step: jet run {root}/Compiler/Migrations/Migrate.jet -- bind-mark1 --write before.jet guide.md notes.txt gen.jet
+exit: 0
+stdout: = "SKIP before.jet:61: a `:=` after a typed name (`name: Type := value`)\nSKIP notes.txt:1: a `:=` after a typed name (`name: Type := value`)\nTOTAL 0 sites in 0 files\n"
+file: before.jet = BindMark1RewritesEveryBinding/before.out
+file: guide.md = BindMark1RewritesEveryBinding/guide.out
+file: notes.txt = BindMark1RewritesEveryBinding/notes.out
+file: gen.jet = BindMark1RewritesEveryBinding/Input/gen.jet

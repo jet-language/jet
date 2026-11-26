@@ -109,7 +109,7 @@ name_byte: fn(code: Int, at: Int) -> Bool Never! {
 // The name a line declares at its left margin (`NAME: `), or "".
 declared_name: fn(line: String) -> String Never! {
     bytes: line.bytes()
-    end := 0
+    ^end: 0
     loop end < bytes.len() && name_byte(Int{bytes[end]}, end) -> end += 1
     if end == 0 || end + 1 >= bytes.len() || (Int{bytes[end]}) != 58 || (Int{bytes[end + 1]}) != 32 {
         return ""
@@ -136,10 +136,10 @@ continues_declaration: fn(line: String) -> Bool Never! {
 // The upper-case constants `source` declares, in order, each with the
 // comment lines right above it.
 registry_constants: fn(source: String) -> [RegistryConstant] Never! {
-    found := [RegistryConstant]{}
+    ^found: [RegistryConstant]{}
     lines: source.lines()
-    comments := ""
-    at := 0
+    ^comments: ""
+    ^at: 0
     loop at < lines.len() {
         line: lines[at]
         at += 1
@@ -152,7 +152,7 @@ registry_constants: fn(source: String) -> [RegistryConstant] Never! {
             comments = ""
             next
         }
-        declaration := "{line}\n"
+        ^declaration: "{line}\n"
         loop at < lines.len() && continues_declaration(lines[at]) {
             declaration = "{declaration}{lines[at]}\n"
             at += 1
@@ -165,7 +165,7 @@ registry_constants: fn(source: String) -> [RegistryConstant] Never! {
 
 // Every top-level name `source` declares at its left margin.
 declared_names: fn(source: String) -> [String] Never! {
-    names := [String]{}
+    ^names: [String]{}
     loop line in source.lines() {
         name: declared_name(line)
         if name != "" -> names.push(name)
@@ -175,7 +175,7 @@ declared_names: fn(source: String) -> [String] Never! {
 
 // How many bytes equal to `code` run from `at`.
 run_len: fn(bytes: [U8], at: Int, code: Int) -> Int Never! {
-    end := at
+    ^end: at
     loop end < bytes.len() && (Int{bytes[end]}) == code -> end += 1
     end - at
 }
@@ -184,16 +184,16 @@ run_len: fn(bytes: [U8], at: Int, code: Int) -> Int Never! {
 // and string text, but inside a string's `{…}` interpolations.
 code_names: fn(source: String) -> [String] Never! {
     bytes: source.bytes()
-    names := [String]{}
+    ^names: [String]{}
     // The open string's quote run: 0 in code, 1 in "…", 3 in """…""".
-    quotes := 0
+    ^quotes: 0
     // Each open interpolation's string quote run and the brace depth of the
     // code around that string, outermost first; `depth` is the innermost
     // code's.
-    open_quotes := [Int]{}
-    open_depths := [Int]{}
-    depth := 0
-    at := 0
+    ^open_quotes: [Int]{}
+    ^open_depths: [Int]{}
+    ^depth: 0
+    ^at: 0
     loop at < bytes.len() {
         code: Int{bytes[at]}
         next_code: if at + 1 < bytes.len() -> (Int{bytes[at + 1]}) else -> 0
@@ -251,8 +251,8 @@ code_names: fn(source: String) -> [String] Never! {
             code == 125 && depth == 0 && open_quotes.len() > 0 -> {
                 quotes = open_quotes[open_quotes.len() - 1]
                 depth = open_depths[open_depths.len() - 1]
-                _ := open_quotes.pop()
-                _ := open_depths.pop()
+                ^_: open_quotes.pop()
+                ^_: open_depths.pop()
                 at += 1
             }
             code == 125 -> {
@@ -293,8 +293,8 @@ standalone_value: fn(constant: RegistryConstant) -> Bool Never! {
 
 // The registry's constants in file order, refusing a name declared twice.
 read_registry: fn(sources: [SourceFile]) -> [RegistryConstant] JetpackSyntaxError! {
-    constants := [RegistryConstant]{}
-    owner := [String:String]{}
+    ^constants: [RegistryConstant]{}
+    ^owner: [String:String]{}
     loop source in sources {
         found: registry_constants(source.text)
         loop constant in found {
@@ -313,7 +313,7 @@ read_registry: fn(sources: [SourceFile]) -> [RegistryConstant] JetpackSyntaxErro
 // The names every `<import_list>…]` import list in `text` brings in, for
 // an import list such as `jetpack_foundation.[`.
 foundation_imports: fn(text: String, import_list: String) -> [String] Never! {
-    names := [String]{}
+    ^names: [String]{}
     parts: text.split(import_list).to_list()
     loop index in 1..<parts.len() {
         list: parts[index].split("]").to_list()[0]
@@ -329,15 +329,15 @@ foundation_imports: fn(text: String, import_list: String) -> [String] Never! {
 // the generated file itself, and `imported`, the names packages import from
 // the unit's foundation package, given the registry `constants`.
 render_registry: fn(constants: [RegistryConstant], target: SyntaxTarget, unit: [SourceFile], imported: [String]) -> String JetpackSyntaxError! {
-    registry := [String:Int]{}
-    index := 0
+    ^registry: [String:Int]{}
+    ^index: 0
     loop constant in constants {
         // copy: the index map outlives the loop's borrowed name.
         registry[constant.name.copy()] = index
         index += 1
     }
-    declared := [String:Bool]{}
-    copies := [String]{}
+    ^declared: [String:Bool]{}
+    ^copies: [String]{}
     loop source in unit {
         loop name in declared_names(source.text) {
             if registry.get(name) != None && target.owned_prefix != "" && source.path.starts_with(target.owned_prefix) {
@@ -350,23 +350,23 @@ render_registry: fn(constants: [RegistryConstant], target: SyntaxTarget, unit: [
     if copies.len() > 0 {
         return Err(syntax_fail("{copies.len()} declarations in {target.owned_prefix} copy a name {SYNTAX_DIR} owns; delete them so the generated {target.output} carries the registry's:\n{copies.join("\n")}"))
     }
-    wanted := [String:Bool]{}
-    pending := [String]{}
+    ^wanted: [String:Bool]{}
+    ^pending: [String]{}
     // copy: the import names stay the caller's.
     loop name in imported -> pending.push(name.copy())
     loop source in unit -> pending.extend(code_names(source.text))
     loop pending.len() > 0 {
         // copy: the pop below drops the list's slot.
         name: pending[pending.len() - 1].copy()
-        _ := pending.pop()
+        ^_: pending.pop()
         if declared.get(name) != None || wanted.get(name) != None -> next
         at: registry.get(name) ?? -1
         if at < 0 -> next
         wanted[name] = true
         pending.extend(code_names(declared_value(constants[at])))
     }
-    unfit := [String]{}
-    out := [String]{GENERATED_BY, "// Each constant is the registry's, with its comments; the tool keeps", "// exactly those {target.unit}'s sources name or packages import.", ""}
+    ^unfit: [String]{}
+    ^out: [String]{GENERATED_BY, "// Each constant is the registry's, with its comments; the tool keeps", "// exactly those {target.unit}'s sources name or packages import.", ""}
     loop constant in constants {
         if wanted.get(constant.name) == None -> next
         if !standalone_value(constant) {
@@ -391,9 +391,9 @@ read_source: fn(path: String) -[FS]> SourceFile JetpackSyntaxError! {
 
 // The registry files, in path order.
 registry_sources: fn() -[FS]> [SourceFile] JetpackSyntaxError! {
-    paths := files.glob("{SYNTAX_DIR}/*.jet") ?? return Err(syntax_fail("could not list {SYNTAX_DIR}: {err}"))
+    ^paths: files.glob("{SYNTAX_DIR}/*.jet") ?? return Err(syntax_fail("could not list {SYNTAX_DIR}: {err}"))
     paths.sort()
-    sources := [SourceFile]{}
+    ^sources: [SourceFile]{}
     loop path in paths -> sources.push(read_source(path) ?? return Err(err))
     Ok(sources)
 }
@@ -401,7 +401,7 @@ registry_sources: fn() -[FS]> [SourceFile] JetpackSyntaxError! {
 // The unit's sources, without the generated file: those the assembly lists
 // name, or every `.jet` file under the unit's folder.
 unit_sources: fn(target: SyntaxTarget) -[FS]> [SourceFile] JetpackSyntaxError! {
-    sources := [SourceFile]{}
+    ^sources: [SourceFile]{}
     loop list in target.unit_lists {
         text: files.read(list) ?? return Err(syntax_fail("could not read {list}: {err}"))
         loop line in text.lines() {
@@ -411,7 +411,7 @@ unit_sources: fn(target: SyntaxTarget) -[FS]> [SourceFile] JetpackSyntaxError! {
         }
     }
     if target.unit_dir == "" -> return Ok(sources)
-    paths := [String]{}
+    ^paths: [String]{}
     loop entry in files.walk_files(target.unit_dir, skip: IMPORT_SKIP) {
         found: entry ?? return Err(syntax_fail("could not walk {target.unit_dir}: {err}"))
         // copy: the list outlives the walk's entry.
@@ -427,7 +427,7 @@ unit_sources: fn(target: SyntaxTarget) -[FS]> [SourceFile] JetpackSyntaxError! {
 // Every name a `.jet` file under IMPORT_ROOTS imports from each target's
 // foundation package, one list per target.
 imported_names: fn(targets: [SyntaxTarget]) -[FS]> [[String]] JetpackSyntaxError! {
-    names := [[String]]{}
+    ^names: [[String]]{}
     loop _ in targets -> names.push([String]{})
     loop root in IMPORT_ROOTS {
         loop entry in files.walk_files(root, skip: IMPORT_SKIP) {
@@ -450,7 +450,7 @@ jetpack_syntax_main: fn(args: [String]) -[FS]> String JetpackSyntaxError! {
     constants: read_registry(registry_sources() ?? return Err(err)) ?? return Err(err)
     targets: [SyntaxTarget]{JETPACK_TARGET, COMPILER_TARGET}
     imported: imported_names(targets) ?? return Err(err)
-    report := [String]{}
+    ^report: [String]{}
     loop index in 0..<targets.len() {
         target: targets[index]
         generated: render_registry(constants, target, unit_sources(target) ?? return Err(err), imported[index]) ?? return Err(err)

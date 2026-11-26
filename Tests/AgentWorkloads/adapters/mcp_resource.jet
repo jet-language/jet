@@ -16,10 +16,10 @@ run: fn(args: WorkloadArgs) {
     root: args.root
     case_name: env.get("JET_CORPUS_TASK") ?? panic("missing task identity")
     jet: env.get("JET_CORPUS_JET") ?? panic("missing Jet binary")
-    project := "{root}/readonly"
+    ^project: "{root}/readonly"
     if case_name == "mcp-environment-denied" -> project = "{root}/denied"
     root_uri: "file://{project}"
-    bodies := [
+    ^bodies: [
         "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"rootUri\":\"{root_uri}\",\"capabilities\":{{}}}}}}",
         "{{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\",\"params\":{{}}}}",
         "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"resources/list\",\"params\":{{}}}}",
@@ -27,7 +27,7 @@ run: fn(args: WorkloadArgs) {
         "{{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"shutdown\",\"params\":{{}}}}",
         "{{\"jsonrpc\":\"2.0\",\"method\":\"exit\",\"params\":{{}}}}"
     ]
-    payload := ""
+    ^payload: ""
     loop body in bodies -> payload += frame(body)
     duration: Duration.seconds(10) ?? panic("duration")
     child: process.cmd([jet, "self", "lsp"])

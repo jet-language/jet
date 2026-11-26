@@ -17,7 +17,7 @@
 // evaluator computes for it, written in the Examples layout under
 // OUT/corpus/Examples/features/{fuzz,core}/s<seed>_<n>.jet with expected/.
 // The generator draws from the syntax the feature goldens and the memory
-// corpus use: Int and Bool bindings (`:`, `:=` only when the program mutates
+// corpus use: Int and Bool bindings (`:`, `^name:` only when the program mutates
 // them), every Int operator at Jet's precedence with minimal parentheses,
 // compound assignment, `if` statements, arm tables and `if` values, counted,
 // conditional and list loops with `break` and `next`, lists (literal, push,
@@ -754,7 +754,7 @@ stmt: fn(g: ^Gen, ctx: Ctx) -> [Int] Never! {
         "int" -> {
             init: if chance(g, 0.1) -> if_value(g) else -> int_expr(g, 2)
             // `v: xs[i]` and `v: p.f` bind a read view that blocks later writes
-            // to the owner (E0212); `:=` binds an owned copy.
+            // to the owner (E0212); `^v:` binds an owned copy.
             owned: g.exprs[init].k == "index" || g.exprs[init].k == "field"
             ^v: local_var(fresh(g, "v"), "Int", 0)
             v.mutated = owned
@@ -1219,7 +1219,7 @@ nested: fn(g: Gen, head: String, body: [Int], pad: String, depth: Int) -> [Strin
 
 decl_lines: fn(g: Gen, s: Stmt, pad: String) -> [String] Never! {
     v: g.vars[s.binding]
-    bind: if v.mutated -> "{pad}{v.name} := " else -> "{pad}{v.name}: "
+    bind: if v.mutated -> "{pad}^{v.name}: " else -> "{pad}{v.name}: "
     init: g.exprs[s.e]
     if init.k == {
         "list" -> return [String]{"{bind}[{init.args.map(fn(arg) { expr(g, arg) }).join(", ")}]"}
@@ -1713,7 +1713,7 @@ pad4: fn(index: Int) -> String Never! {
 // not UB.
 generate_core_case: fn(seed: Int, index: Int) -> Case Never! {
     ^rng: new_gen(seed_state("jet-core-safety-fuzz:{seed}:{index}"))
-    ^statements: [String]{"m := [String:Int]{{}}", "xs := [Int]{{}}"}
+    ^statements: [String]{"^m: [String:Int]{{}}", "^xs: [Int]{{}}"}
     ^output: [String]{}
     ^map: [String:Int]{}
     ^list: [Int]{}
@@ -1734,8 +1734,8 @@ generate_core_case: fn(seed: Int, index: Int) -> Case Never! {
                 output.push("{list.len()}")
             }
             2 -> {
-                statements.push("print((^m.pop(\"{key}\")) ?? -1)")
-                statements.push("print((^xs.pop()) ?? -1)")
+                statements.push("print(m.pop(\"{key}\") ?? -1)")
+                statements.push("print(xs.pop() ?? -1)")
                 output.push("{map.pop(key) ?? -1}")
                 output.push("{list.pop() ?? -1}")
             }

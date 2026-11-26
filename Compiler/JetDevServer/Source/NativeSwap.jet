@@ -433,13 +433,13 @@ NativeSwapCapability: struct {
     }
 
     with_relocation: fn(self, strategy: NativeSwapRelocationStrategy) -> NativeSwapCapability {
-        updated := self
+        ^updated: self
         updated.relocation = strategy
         updated
     }
 
     with_link: fn(self, strategy: NativeSwapLinkStrategy) -> NativeSwapCapability {
-        updated := self
+        ^updated: self
         updated.link = strategy
         updated
     }
@@ -514,34 +514,34 @@ NativeSwapPlan: struct {
     }
 
     mark_layout_changed: fn(self, affected: [String]) -> NativeSwapPlan {
-        updated := self
+        ^updated: self
         updated.blocking_fact = Val(NativeSwapBlockingFact.LayoutChanged)
         updated.restart_boundary = NativeSwapRestartBoundary.required_by(.LayoutChanged, affected)
         updated
     }
 
     with_quiescence: fn(self, quiescence: NativeSwapQuiescence) -> NativeSwapPlan {
-        updated := self
+        ^updated: self
         updated.quiescence = quiescence
         updated
     }
 
     with_relocation: fn(self, relocation: NativeSwapRelocationFacts) -> NativeSwapPlan {
-        updated := self
+        ^updated: self
         updated.relocation = relocation
         updated
     }
 
     with_link: fn(self, link: NativeSwapLinkFacts) -> NativeSwapPlan {
-        updated := self
+        ^updated: self
         updated.link = link
         updated
     }
 
     // Handles stay ordered by identity so receipts and validation read them deterministically.
     preserve_listener: fn(self, handle: ^^NativeSwapListenerHandle) -> NativeSwapPlan {
-        updated := self
-        at := updated.preserve_listeners.len()
+        ^updated: self
+        ^at: updated.preserve_listeners.len()
         loop index in 0..<updated.preserve_listeners.len() {
             if handle.id < updated.preserve_listeners[index].id {
                 at = index
@@ -553,8 +553,8 @@ NativeSwapPlan: struct {
     }
 
     preserve_connection: fn(self, handle: ^^NativeSwapConnectionHandle) -> NativeSwapPlan {
-        updated := self
-        at := updated.preserve_connections.len()
+        ^updated: self
+        ^at: updated.preserve_connections.len()
         loop index in 0..<updated.preserve_connections.len() {
             if handle.id < updated.preserve_connections[index].id {
                 at = index
@@ -761,23 +761,23 @@ NativeSwapState: struct {
         }
         self.validate_plan(plan)
         checkpoint: self.checkpoint ?? return Err(self.error(.RollbackUnavailable, "apply checkpoint is missing"))
-        next_listeners := [String:NativeSwapListenerHandle]{}
+        ^next_listeners: [String:NativeSwapListenerHandle]{}
         loop handle in plan.preserve_listeners {
-            preserved := handle
+            ^preserved: handle
             preserved.generation = plan.to.generation
             next_listeners[preserved.id] = preserved
         }
-        next_connections := [String:NativeSwapConnectionHandle]{}
+        ^next_connections: [String:NativeSwapConnectionHandle]{}
         loop handle in plan.preserve_connections {
-            preserved := handle
+            ^preserved: handle
             preserved.generation = plan.to.generation
             next_connections[preserved.id] = preserved
         }
-        reset_listeners := [String]{}
+        ^reset_listeners: [String]{}
         loop id in sorted_keys(checkpoint.listeners) {
             if next_listeners.get(id) == None -> reset_listeners.push(id)
         }
-        reset_connections := [String]{}
+        ^reset_connections: [String]{}
         loop id in sorted_keys(checkpoint.connections) {
             if next_connections.get(id) == None -> reset_connections.push(id)
         }
@@ -817,11 +817,11 @@ NativeSwapState: struct {
         }
         checkpoint: self.checkpoint ?? return Err(self.error(.RollbackUnavailable, "rollback checkpoint is missing"))
         before: self.executable
-        reset_listeners := [String]{}
+        ^reset_listeners: [String]{}
         loop id in sorted_keys(self.listeners) {
             if checkpoint.listeners.get(id) == None -> reset_listeners.push(id)
         }
-        reset_connections := [String]{}
+        ^reset_connections: [String]{}
         loop id in sorted_keys(self.connections) {
             if checkpoint.connections.get(id) == None -> reset_connections.push(id)
         }

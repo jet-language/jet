@@ -12,11 +12,11 @@ session repl raw: jet repl
 pty: true
 recv repl until ~ "1 user> " within 30s # the first prompt
 stdout: !~ "interactive keys require a TTY" # the raw line editor runs, the one that draws history ghosts
-pty-send: "alphabet := 1\r" after 0ms
+pty-send: "^alphabet: 1\r" after 0ms
 recv repl until ~ "2 user> " within 30s # the first turn is answered
 pty-send: "a" after 0ms
 pty-send: "\u0003" after 0ms
 pty-send: ":quit\r" after 0ms
 close repl
 exit: 0
-stdout: !~ "alphabet := 1" # Original rsplit(last) rs2835-2838: after the second prompt, typing `a` shows no ghost `lphabet := 1` as real text.
+stdout: !~ "^alphabet: 1" # Original rsplit(last) rs2835-2838: after the second prompt, typing `a` shows no ghost `^lphabet: 1` as real text.

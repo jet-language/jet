@@ -96,16 +96,16 @@
 ] @type.builtin
 
 ; builtin: assert assert_eq channel check freeze input join print
-; marker.rule: ABI Allow Arg As Bindgen CLI Close Codable Commutative Comparable Context ContextKey Credential Deadline Debug Deprecated DevPanel Doc Equatable Error FFI FX HTML Impure Inline Input Interrupt Job Kernel Layout Live Local MaxDepth Memo Meta MoveOnly MustUse NoPrelude Nondeterministic Numeric Off On Open Overflow PII Patchable Persist Policy Post Pre Printable Reactive Receipt Redact Region Rename Replayable Root Runtime SQL Scalar Scrub Secret Shared Shield SingleUse Specified State Static StepLimit Target Test Through Todo Track Transact Undo UnitFamily Unsafe Waive
+; marker.rule: ABI Allow Arg As Bindgen CLI Close Codable Commutative Comparable Context ContextKey Credential Deadline Debug Deprecated DevPanel Doc Equatable Error FFI FX HTML Impure Inline Input Interrupt Job Kernel Layout Live Local MaxDepth Memo Meta MoveOnly MustUse NoPrelude Nondeterministic Numeric Off On Open Overflow PII Patchable Persist Policy Post Pre Printable Reactive Receipt Recorded Redact Region Rename Replayable Root Runtime SQL Scalar Scrub Secret Shared Shield SingleUse Specified State Static StepLimit Target Test Through Todo Track Transact Undo UnitFamily Unsafe Waive
 ; take: ^^
-; sigil: # $ ... : := :> <: ^
+; sigil: # $ ... : :> <: ^
 ; operator: ! != % %% %%= %= & && &= &~ &~= * *= + += - -= -> .. ..< .[ / /% /%= /= < << <<= <= <=> <> == > >= >> >>= ? ?. ?? | |= |> || ~ ~=
 ; END GENERATED JET SYNTAX HIGHLIGHTS
 
 ; Operators and punctuation
 [
   "!" "!=" "%" "%%" "%%=" "%=" "&" "&&" "&=" "*" "*=" "+" "+=" "-" "-=" "->"
-  ".." "..." "..<" "/" "/%" "/%=" "/=" "::" ":=" ":>" "<" "<:" "<<" "<<="
+  ".." "..." "..<" "/" "/%" "/%=" "/=" "::" ":>" "<" "<:" "<<" "<<="
   "<=" "<=>" "<>" "=" "==" "=>" ">" ">=" ">>" ">>=" "?" "?." "??" "^" "^^" "^=" "|"
   "|=" "|>" "||" "~" "~|" "~|=" "#" "$" "@"
 ] @operator
@@ -144,6 +144,9 @@
 (function_def name: (type_identifier) @function)
 (function_def name: (meta_name) @function)
 (binding name: (type_identifier) @constant)
+; A changeable name (`^count: 0`): its mark and its name stand apart from a
+; fixed name (`total: 0`).
+(binding "^" @keyword name: (identifier) @variable.special)
 (label name: (type_identifier) @constant)
 
 ; Calls, members, constructors and variants

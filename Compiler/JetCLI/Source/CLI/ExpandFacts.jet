@@ -372,7 +372,9 @@ jet_cli_expand_reflect_expr: fn(unit: JetDriverDocModule, sites: [Int], tree: Bo
 jet_cli_expand_reflect_sites: fn(unit: JetDriverDocModule) -> [Int] Never! {
     ^sites: [Int]{}
     loop fact in unit.call_facts {
-        if sema_call_site_detail(fact).intrinsic_api == .Val(api) && api == SEMA_CALL_REFLECT_OF_API -> sites.push(fact.span.start)
+        if sema_call_site_detail(fact).intrinsic_api == .Val(api) && api == SEMA_CALL_REFLECT_OF_API {
+            sites.push(fact.span.start)
+        }
     }
     sites
 }

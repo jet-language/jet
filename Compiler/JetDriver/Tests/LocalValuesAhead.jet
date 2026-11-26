@@ -64,7 +64,7 @@ ahead_runtime_dir: fn() -> String {
 
 // Every local value names only module functions: each is computed ahead,
 // in the build that computes `NINE`.
-AHEAD_SOURCE: "square: fn(n: Int) -> Int {{\n    n * n\n}}\n\nrepeat: fn(word: String, times: Int) -> String {{\n    out := \"\"\n    loop _ in 0..<times -> out = \"{{out}}{{word}}\"\n    out\n}}\n\nNINE: #run square(3)\n\nshow: fn(count: Int) -> String {{\n    label: repeat(\"=\", 2)\n    \"{{label}}{{count}}\"\n}}\n\nrun: fn() {{\n    four: square(2)\n    word: repeat(\"ab\", 3)\n    print(\"{{four}} {{word}} {{show(four)}} {{NINE}}\")\n}}\n"
+AHEAD_SOURCE: "square: fn(n: Int) -> Int {{\n    n * n\n}}\n\nrepeat: fn(word: String, times: Int) -> String {{\n    ^out: \"\"\n    loop _ in 0..<times -> out = \"{{out}}{{word}}\"\n    out\n}}\n\nNINE: #run square(3)\n\nshow: fn(count: Int) -> String {{\n    label: repeat(\"=\", 2)\n    \"{{label}}{{count}}\"\n}}\n\nrun: fn() {{\n    four: square(2)\n    word: repeat(\"ab\", 3)\n    print(\"{{four}} {{word}} {{show(four)}} {{NINE}}\")\n}}\n"
 
 // `pick`'s `if` is not read ahead: the landing of `four` and `pick` builds
 // a program that computes only `pick`.

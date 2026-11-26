@@ -191,7 +191,7 @@ LATENCY_IMAGE: "out/prog"
 latency_program: fn(functions: Int) -> String Never! {
     ^lines: latency_functions(functions)
     lines.push("run: fn() {{")
-    lines.push("    total := 0")
+    lines.push("    ^total: 0")
     loop index in 0..<functions -> lines.push("    total = f_{index}(total)")
     lines.extend(latency_run_tail())
     lines.join("\n")
@@ -242,7 +242,7 @@ latency_functions: fn(functions: Int) -> [String] Never! {
 // `--stop nested`'s entry: `run` calls `outer` (latency_nested_lib), then
 // each of the N functions in turn, then the tail (latency_run_tail).
 latency_nested_program: fn(functions: Int) -> String Never! {
-    ^lines: [String]{"run: fn() {{", "    total := 0", "    total = outer(total)"}
+    ^lines: [String]{"run: fn() {{", "    ^total: 0", "    total = outer(total)"}
     loop index in 0..<functions -> lines.push("    total = f_{index}(total)")
     lines.extend(latency_run_tail())
     lines.join("\n")
@@ -258,7 +258,7 @@ latency_nested_lib: fn(functions: Int) -> String Never! {
     lines.push("}}")
     lines.push("")
     lines.push("inner: fn(x: Int) -> Int {{")
-    lines.push("    total := x + 2")
+    lines.push("    ^total: x + 2")
     lines.push("    total = f_2(total)")
     lines.push("    total = f_3(total)")
     lines.push("    total")

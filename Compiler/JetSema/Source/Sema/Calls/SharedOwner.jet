@@ -452,7 +452,7 @@ sema_call_try_cell_method: fn(receiver: Expr, receiver_value: TExpr, name: Strin
 // The Pool methods: `pool.add(value)` consumes a `T` and returns its `ID<T>`,
 // `pool.remove(id)` returns the removed `T?`, `pool.ids()` lists every live
 // `ID<T>`. `add` and `remove` change the pool, so like `pool[id] = v` they need
-// a writable pool (a `:=` binding or a `^` parameter); the call site needs no
+// a writable pool (a changeable binding or a `^` parameter); the call site needs no
 // `^` mark. Each lowers to the plain `JetPool<T>` method.
 sema_call_pool_method: fn(receiver: Expr, receiver_value: TExpr, element: Type, method: String, args: [CallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
     failed: SemaMethodSpecialCheck{handled: true, value: None}

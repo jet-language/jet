@@ -38,10 +38,10 @@
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>Jet.ServiceImportOutsideCore</code>: <code>Tests/UI/service_import_outside_core.stderr</code>.</p>
 <pre class="diag">Error: Jet.ServiceImportOutsideCore: `source_key` imports a `jet.build` service, which only Core declares
-  --&gt; Tests/UI/service_import_outside_core.jet:3:1
+  --&gt; Tests/UI/service_import_outside_core.jet:2:48
     |
-  3 | source_key: fn(b: Build) -&gt; String Never!
-    | ^^^^^^^^^^
+  2 | #Import(jet.build, symbol: &quot;Build.source_key&quot;) source_key: fn(b: Build) -&gt; String Never!
+    |                                                ^^^^^^^^^^
  Why: The compiler and build host answer each `jet.build` symbol for the declaration Core writes for it; the provider, not a program, decides which services exist and where they run.
  Fix: Call the Core function or method that declares this service, such as `core.build` or `core.compiler`.
 More: jet-lang.dev/e/Jet.ServiceImportOutsideCore

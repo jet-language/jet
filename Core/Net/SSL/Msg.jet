@@ -190,7 +190,7 @@ ssl_transform_aead_dynamic_iv_is_explicit: fn(t: ssldefs.SSLTransform) -> Bool N
     t.ivlen != t.fixed_ivlen
 }
 
-/// IV := (fixed_iv || 0) XOR (0 || dynamic_iv) over 12 bytes
+/// ^IV: (fixed_iv || 0) XOR (0 || dynamic_iv) over 12 bytes
 /// (ssl_build_record_nonce).
 ssl_build_record_nonce: fn(fixed_iv: [U8], fixed_iv_len: Int, dynamic_iv: [U8], doff: Int, dynamic_iv_len: Int) -> [U8] Never! {
     ^iv: ssldefs.ssl_zeros(12)

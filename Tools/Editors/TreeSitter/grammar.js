@@ -21,9 +21,9 @@ const JET_HIGHLIGHT_KEYWORD_OTHER = ["#build", "#caller", "#code", "#here", "#if
 const JET_HIGHLIGHT_LITERAL = ["Canceled", "DeadlineBlown", "None", "Panicked", "Val", "false", "true"];
 const JET_HIGHLIGHT_TYPE_BUILTIN = ["()", "BTreeMap", "Bits", "Bool", "Budget", "BudgetApplies", "Bytes", "CSV", "Cache", "Char", "Complex", "Complex32", "Computed", "Condition", "DBValue", "Decimal", "Derived", "Duration", "Dyn", "Effect", "EncodingError", "Err", "Event", "EventPolicy", "EventScope", "EventTrace", "F32", "F64", "Float", "HashMap", "Hook", "I16", "I32", "I64", "I8", "IOError", "Instant", "Int", "Iter", "JSON", "Key", "Measurement", "MemoStats", "PriorityQueue", "Ptr", "Queue", "Rank", "Receiver", "Sender", "Set", "Shared", "Shared.Weak", "SharedGuard", "SharedRevisionError", "SharedSnapshot", "Signal", "Stream", "String", "Subscription", "TOML", "Task", "TaskFailure", "U16", "U32", "U64", "U8", "UTF8Error", "ViewIter", "WatchEvent", "WatchHandle", "WatchSet", "YAML"];
 const JET_HIGHLIGHT_BUILTIN = ["assert", "assert_eq", "channel", "check", "freeze", "input", "join", "print"];
-const JET_HIGHLIGHT_MARKER_RULE = ["ABI", "Allow", "Arg", "As", "Bindgen", "CLI", "Close", "Codable", "Commutative", "Comparable", "Context", "ContextKey", "Credential", "Deadline", "Debug", "Deprecated", "DevPanel", "Doc", "Equatable", "Error", "FFI", "FX", "HTML", "Impure", "Inline", "Input", "Interrupt", "Job", "Kernel", "Layout", "Live", "Local", "MaxDepth", "Memo", "Meta", "MoveOnly", "MustUse", "NoPrelude", "Nondeterministic", "Numeric", "Off", "On", "Open", "Overflow", "PII", "Patchable", "Persist", "Policy", "Post", "Pre", "Printable", "Reactive", "Receipt", "Redact", "Region", "Rename", "Replayable", "Root", "Runtime", "SQL", "Scalar", "Scrub", "Secret", "Shared", "Shield", "SingleUse", "Specified", "State", "Static", "StepLimit", "Target", "Test", "Through", "Todo", "Track", "Transact", "Undo", "UnitFamily", "Unsafe", "Waive"];
+const JET_HIGHLIGHT_MARKER_RULE = ["ABI", "Allow", "Arg", "As", "Bindgen", "CLI", "Close", "Codable", "Commutative", "Comparable", "Context", "ContextKey", "Credential", "Deadline", "Debug", "Deprecated", "DevPanel", "Doc", "Equatable", "Error", "FFI", "FX", "HTML", "Impure", "Inline", "Input", "Interrupt", "Job", "Kernel", "Layout", "Live", "Local", "MaxDepth", "Memo", "Meta", "MoveOnly", "MustUse", "NoPrelude", "Nondeterministic", "Numeric", "Off", "On", "Open", "Overflow", "PII", "Patchable", "Persist", "Policy", "Post", "Pre", "Printable", "Reactive", "Receipt", "Recorded", "Redact", "Region", "Rename", "Replayable", "Root", "Runtime", "SQL", "Scalar", "Scrub", "Secret", "Shared", "Shield", "SingleUse", "Specified", "State", "Static", "StepLimit", "Target", "Test", "Through", "Todo", "Track", "Transact", "Undo", "UnitFamily", "Unsafe", "Waive"];
 const JET_HIGHLIGHT_TAKE_MARK = ["^^"];
-const JET_HIGHLIGHT_SIGIL = ["#", "$", "...", ":", ":=", ":>", "<:", "^"];
+const JET_HIGHLIGHT_SIGIL = ["#", "$", "...", ":", ":>", "<:", "^"];
 const JET_HIGHLIGHT_OPERATOR = ["!", "!=", "%", "%%", "%%=", "%=", "&", "&&", "&=", "&~", "&~=", "*", "*=", "+", "+=", "-", "-=", "->", "..", "..<", ".[", "/", "/%", "/%=", "/=", "<", "<<", "<<=", "<=", "<=>", "<>", "==", ">", ">=", ">>", ">>=", "?", "?.", "??", "|", "|=", "|>", "||", "~", "~="];
 const JET_MARKER_INBODY_SEPARATOR = ":";
 // END GENERATED JET SYNTAX HIGHLIGHTS
@@ -89,6 +89,9 @@ module.exports = grammar({
     [$.label, $._decl_label],
     // `[K: V]` is a map type; any other bracket group is a list/index/type list.
     [$._type, $._element],
+    // `^name:` opens a changeable binding; any other `^` (`p: ^Player`,
+    // `fn(^self)`) is the loose mark, so both readings stay open until `:`.
+    [$.binding, $._operator],
   ],
 
   rules: {
@@ -148,7 +151,6 @@ module.exports = grammar({
         ",",
         ":",
         "::",
-        ":=",
         ".",
         "?",
         $._unknown,
@@ -279,14 +281,15 @@ module.exports = grammar({
       ),
 
     // ── Bindings, labels, calls, members ─────────────────────────────────────
-    // `name := value`; the immutable `name: value`, `LIMIT: #run { … }` and
+    // `^name: value`; the immutable `name: value`, `LIMIT: #run { … }` and
     // `outer: loop` are labels.
     binding: ($) =>
-      prec(
+      prec.dynamic(
         PREC.binding,
         seq(
+          "^",
           field("name", choice($.identifier, $.type_identifier, $.lower_attribute, $.meta_name)),
-          ":=",
+          ":",
         ),
       ),
 

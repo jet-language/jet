@@ -1,0 +1,73 @@
+// Every changeable name and window in the older spelling: `count := 0`,
+// `w: ^xs[0]` and `if ^shape == …` in a comment.
+Shape: enum {
+    Dot(Int),
+    Line(Int),
+}
+
+Pair: struct {
+    left: Int,
+    right: Int,
+}
+
+Player: struct {
+    hp: Int,
+}
+
+grow: fn(items: ^[Int], p: ^Player) { items.push(p.hp) }
+
+stretch: fn(shape: ^Shape) {
+    if ^shape == {
+        .Dot(size) -> size += 1
+        .Line(size) -> size += 2
+    }
+}
+
+double_all: fn(values: ^[Int]) {
+    loop value in ^values -> value *= 2
+    loop value in ^values {
+        value += 1
+    }
+}
+
+counter: fn() -> Int {
+    #Persist calls := 0
+    calls += 1
+    calls
+}
+
+run: fn() {
+    count := 0
+    count += 1
+    _ := count
+    xs := [Int]{1, 2, 3}
+    grow(^xs, ^Player{hp: 4})
+    ^xs.push(5)
+    first: ^xs[0]
+    first = 9
+    window := ^xs[1]
+    window += 1
+    {a, b} := Pair{left: 1, right: 2}
+    a += b
+    {left: l, right: _} := Pair{left: 3, right: 4}
+    l += 1
+    <: low, high :> := 0
+    low += high
+    loop i := 0, i < 3, i += 1 -> count += i
+    [m, n] := [5, 6]
+    m += n
+    mask: count ^ 3
+    equal: count == 4
+    typed: Int := 5
+    line: ^reader.read_line()
+    source: "total := 0\nw: ^xs[0]\nloop v in ^xs -> v += 1"
+    template: "{name} := [Int]{{}}\n{{x, y}} := pair\nrun: fn() {{\n    w: ^xs[0]\n}}"
+    inline: "    __f{name} := false\ntake: fn(xs: ^[Int]) {{ part: ^xs[0..1]\npart[0] = 1 }}"
+    yaml: "base: ^b\n  host: local\nuse: *b\n"
+    shell: "${{NAME:=word}} b:= 1"
+    make: "CC := cc"
+    // Written out in full:
+    //     total := 0
+    //     edit: ^xs[0]
+    print("{count} {a} {l} {low} {m} {mask} {equal} {typed} {line} {source} {template} {inline} {yaml} {shell} {make} {calls()}")
+}

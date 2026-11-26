@@ -37,11 +37,9 @@
 // output (ProcessStdoutLine) and error output (ProcessStderrLine), the
 // loop sources `child.stdout.chunks(size)` and `child.stderr.chunks(size)`
 // build (ProcessStdoutChunks, ProcessStderrChunks), the
-// `ProcessSpec` builders, launch steps and `abilities` a `spec.cwd(path)`,
-// `spec.run()` and the rest call (ProcessSpecAbilities through ProcessSpecSpawn,
-// with `terminal(policy)` as ProcessSpecTerminalWithPolicy) and the
-// `ProcessChild` steps a `child.wait()` and the rest call (ProcessChildID
-// through ProcessChildInterrupt), and the
+// `ProcessSpec` builders and `abilities` a `spec.cwd(path)` and the rest call
+// (ProcessSpecAbilities through ProcessSpecCPUTimeLimit, with
+// `terminal(policy)` as ProcessSpecTerminalWithPolicy), and the
 // decode helpers a `tree.decode<T>()` with no Decode implementation of T's
 // own runs for a List (DecodeList), a `[T#N]` (DecodeFixedList), a byte List
 // (DecodeBytes), an Option (DecodeOption) and a String-keyed Map
@@ -71,9 +69,8 @@
 // stamp, `key_by` (StreamKeyBy) and `window` (StreamWindow). The source
 // functions other Core calls forward to fill roles too: a list's SQL `query`
 // (ListQuery), a typed `json.decode<T>` (JSONTypedDecode), `toml.decode<T>`
-// (TOMLTypedDecode) and `yaml.decode<T>` (YAMLTypedDecode), a `JobQueue`'s
-// `enqueue` (JobEnqueue) and `delay` (JobDelay), a service's `app.enqueue`
-// (AppEnqueue), `tls.client` over a stream (TLSClientStream), with a deadline
+// (TOMLTypedDecode) and `yaml.decode<T>` (YAMLTypedDecode), a service's
+// `app.enqueue` (AppEnqueue), `tls.client` over a stream (TLSClientStream), with a deadline
 // (TLSClientDeadline) and with a config and a deadline
 // (TLSClientConfigDeadline), `term.take` (TermTake) and `task.timeout`
 // (TaskTimeout). Each Duration method runs the core.time function that
@@ -243,8 +240,6 @@ RoleKind: enum {
     ProcessSpecKeepOpen,
     HTTPMethodTokenCheck,
     HTTPHandlerNew,
-    JobEnqueue,
-    JobDelay,
     AbsFloat,
     InlineFloatSqrt,
     PowFloat,
@@ -351,6 +346,10 @@ RoleKind: enum {
     ComplexMul,
     ComplexDiv,
     ComplexToString,
+    FixedFrame,
+    FixedOver,
+    MemAddressOf,
+    MemPin,
     InlineVolatileRead,
     InlineVolatileWrite,
     InlineMemCopy,
@@ -402,16 +401,6 @@ RoleKind: enum {
     ProcessSpecStderr,
     ProcessSpecTimeout,
     ProcessSpecCPUTimeLimit,
-    ProcessSpecPlan,
-    ProcessSpecRun,
-    ProcessSpecRunChecked,
-    ProcessSpecSpawn,
-    ProcessChildID,
-    ProcessChildWait,
-    ProcessChildExited,
-    ProcessChildKill,
-    ProcessChildTerminate,
-    ProcessChildInterrupt,
     ProcessStdoutLine,
     ProcessStderrLine,
     ProcessStdoutChunks,
@@ -469,6 +458,7 @@ RoleKind: enum {
     Index,
     IndexMut,
 }
+
 // END GENERATED
 
 // `#Builtin.Role(.X)` on a Core function, method or trait makes it the one

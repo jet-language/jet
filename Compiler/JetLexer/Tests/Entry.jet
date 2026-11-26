@@ -15,11 +15,11 @@ use {
         TOKEN_CHAR,
         TOKEN_COLON,
         TOKEN_COLON_COLON,
-        TOKEN_COLON_EQ,
         TOKEN_COMPARE,
         TOKEN_DOLLAR,
         TOKEN_DOT,
         TOKEN_EOF,
+        TOKEN_EQ,
         TOKEN_FENCE_CLOSE,
         TOKEN_FENCE_OPEN,
         TOKEN_GT,
@@ -500,7 +500,8 @@ byte_fixed: [ /* block */ U8 /* block */ # /* block */ 8 /* block */ ] /* block 
     loop token in lexed.tokens {
         if token.kind != TOKEN_IDENT && token.kind != TOKEN_EOF -> kinds.push(token.kind)
     }
-    assert_eq(kinds, [Int]{TOKEN_FENCE_OPEN, TOKEN_FENCE_CLOSE, TOKEN_LT, TOKEN_LE, TOKEN_COMPARE, TOKEN_GT, TOKEN_LT, TOKEN_GT, TOKEN_COLON_COLON, TOKEN_COLON_EQ, TOKEN_COLON})
+    // `:=` is no token: it lexes as `:` then `=`.
+    assert_eq(kinds, [Int]{TOKEN_FENCE_OPEN, TOKEN_FENCE_CLOSE, TOKEN_LT, TOKEN_LE, TOKEN_COMPARE, TOKEN_GT, TOKEN_LT, TOKEN_GT, TOKEN_COLON_COLON, TOKEN_COLON, TOKEN_EQ, TOKEN_COLON})
 }
 
 #Test("payload_golden_whitespace_exponents_and_shifted_spans") {

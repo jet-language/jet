@@ -1,0 +1,57 @@
+// A user rule reads the responses a handler returns from its FunctionInfo:
+// Core's `server.response` and `server.json` are `#Recorded`, so each
+// returned call is heard with its status. The callee is matched by symbol,
+// so the package's own `json` is not heard. A `?? return` fallback counts
+// as a return path.
+use {
+    server: core.http.server
+}
+
+Misread: struct {
+    heard: String,
+
+    impl Diagnostic {
+        code: "known.Misread",
+
+        what: fn(self) -> String { "the handler's responses read as `{self.heard}`" }
+
+        why: fn(self) -> String { "a handler's returned responses are known while building" }
+
+        fix: fn(self) -> String { "read each returned `response` and `json` call" }
+    }
+}
+
+status_of: fn(made: CompilerCall) -> String {
+    if made.args.len() > 0 && made.args[0].value == .Val(.Int(status)) -> "{status}" else -> "?"
+}
+
+Serves: struct {
+    impl Marker {
+        sites: [.Function],
+
+        check: fn(self, call: CompilerCall) {
+            if call.args[0].function == .Val(info) {
+                returns: (loop made in info.returns -> status_of(made)).join(" ")
+                heard: "{info.recorded.len()}: {returns}"
+                if heard != "4: 404 400 415 200" -> reject(Misread{heard: heard}, at: call.args[0])
+            }
+        }
+    }
+}
+
+json: fn(status: Int, text: String) -> String { "{status} {text}" }
+
+show: fn(id: Int) -> HTTPResponse HTTPError! {
+    if id == 0 -> return Ok(server.response(404, "missing"))
+    _: json(500, "local")
+    checked: server.json(400, "negative") ?? return server.json(415, "unencodable")
+    if id < 0 -> return Ok(checked)
+    server.json(200, "item {id}")
+}
+
+#Serves serve: fn(handler: fn(Int) -> HTTPResponse HTTPError!, id: Int) -> Int {
+    answer: handler(id) ?? return 0
+    answer.status
+}
+
+run: fn() { print(serve(show, 7)) }

@@ -24,15 +24,15 @@ Report: struct {
 }
 
 summarize: fn(batch: Batch) -> Report {
-    services := [String]{}
+    ^services: [String]{}
     loop event in batch.events {
         if !services.contains(event.service) -> services.push(event.service.copy())
     }
     services.sort()
-    summaries := [Summary]{}
+    ^summaries: [Summary]{}
     loop service in services {
-        count := 0
-        total_ms := 0
+        ^count: 0
+        ^total_ms: 0
         loop event in batch.events {
             if event.service == service {
                 count += 1

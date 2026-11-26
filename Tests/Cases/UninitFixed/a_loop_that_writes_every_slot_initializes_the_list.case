@@ -1,6 +1,6 @@
 # A fixed `[T#N]{ uninit }` list is written once a loop runs its index from 0
 # through all N slots and writes `list[index]` first on every pass: a range
-# loop (`0..<N` or `0..N-1`), a state loop (`loop i := 0, i < N { … i += 1 }`)
+# loop (`0..<N` or `0..N-1`), a state loop (`loop ^i: 0, i < N { … i += 1 }`)
 # and a conditional loop over an index set to 0 just before it. A loop that
 # can skip a slot (too few passes, a `break`, a `next` before the write, a
 # step other than one) leaves the list unwritten, so its read stays E0420.

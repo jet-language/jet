@@ -166,15 +166,15 @@ eval_probe_report: fn(failures: [String]) {
 Box: struct { items: [Int] }
 
 run: fn() {
-    xs := [Int]{1, 2, 3}
+    ^xs: [Int]{1, 2, 3}
     total: xs.len()
-    box := Box{items: xs}
+    ^box: Box{items: xs}
     print("{total} {box.items.len()}")
 }
 `
     // A binding statement's node starts at its name, where a debugger's stop
     // on its line asks.
-    at_box: source.find("box := Box")
+    at_box: source.find("^box: Box")
     at_print: source.find(`print("{total}`)
     in_total: source.find(": xs.len()") + 1
     moved_at: source.find("xs}}")
@@ -226,8 +226,8 @@ run: fn() {
     source: `Box: struct { items: [Int] }
 
 run: fn() {
-    xs := [Int]{1, 2}
-    box := Box{items: xs}
+    ^xs: [Int]{1, 2}
+    ^box: Box{items: xs}
     print("{box.items.len()}")
     xs.push(3)
     print("{xs.len()}")
@@ -268,7 +268,7 @@ run: fn() {
         }
         else -> failures.push("`total + 1` did not parse: {sum.diagnostics:Debug}")
     }
-    refused_texts: [String]{"x := 1", "a\nb", "(1 +"}
+    refused_texts: [String]{"^x: 1", "a\nb", "(1 +"}
     loop text in refused_texts {
         refused: sema_eval_probe_parse(text, 40)
         if refused.expression != None || refused.diagnostics.len() == 0 {
@@ -304,7 +304,7 @@ eval_probe_function_checks: fn(source: String, run: EvalProbeRun, probe: Int, ex
 
 run: fn() {
     total: 3
-    box := Box{items: [Int]{4, 5}}
+    ^box: Box{items: [Int]{4, 5}}
     print("{total} {box.first()}")
 }
 `

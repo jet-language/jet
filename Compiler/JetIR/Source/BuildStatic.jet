@@ -528,7 +528,7 @@ ir_storage_start_helper: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, definitio
         payload: if static_payload >= 0 -> static_payload else -> ir_comptime(m, p, a, inner, definition.value, span)
         if a.error == "" -> value = ir_shared_new(m, p, a, [Int]{payload}, definition.ty, span)
     } else if ir_point_type(p, definition.ty) {
-        // A declared point binding (`clicked := event.point<Int>()`) starts
+        // A declared point binding (`^clicked: event.point<Int>()`) starts
         // from a fresh carrier (ir_point_holder_read).
         value = ir_point_new(m, p, a, definition, span)
     } else { value = ir_comptime(m, p, a, definition.ty, definition.value, span) }

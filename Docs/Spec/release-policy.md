@@ -146,8 +146,8 @@ use {
 }
 
 run: fn() {
-    cert := "server.crt"
-    key := "server.key"
+    ^cert: "server.crt"
+    ^key: "server.key"
     running: web.app().bind(
         "127.0.0.1:0",
         tls: server.tls(cert, key)

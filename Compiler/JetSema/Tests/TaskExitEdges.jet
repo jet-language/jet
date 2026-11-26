@@ -1,0 +1,31 @@
+// A task handle owes its join or detach at every written exit that leaves
+// its scope (E0140): a `return` in each form and a `break` or `next` that
+// leaves the loop body it is bound in.
+use {
+    jet_driver.[JetDriverCompileMode, jet_driver_present_diagnostics]
+    jet_cli.[jet_cli_compile_file]
+    jet_foundation.[DIAGNOSTIC_ERROR]
+}
+
+#Test("task_exit_edges") {
+    file: "Compiler/JetSema/Tests/Fixtures/TaskExitEdges.fixture/TaskExitEdges.jet"
+    ^exits: [String]{}
+    checked: jet_cli_compile_file(file, false, None, JetDriverCompileMode.Program)
+    if checked == {
+        .Refused(refusal) -> { panic("{file}: {refusal.stderr}") }
+        .Compiled(result, snapshot) -> {
+            if result.internal_problem != None -> panic("{file}: internal compiler failure")
+            loop diagnostic in jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files) {
+                if diagnostic.severity != DIAGNOSTIC_ERROR -> next
+                if diagnostic.code != "E0140" -> panic("{file}: unexpected {diagnostic.code}: {diagnostic.what}")
+                exits.push(diagnostic.what)
+            }
+        }
+    }
+    ^expected: [String]{}
+    routes: [String]{"return", "return", "return", "break", "next", "break", "next"}
+    loop exit in routes {
+        expected.push("`t` still owes `join` or `detach`, but this `{exit}` leaves with it undone")
+    }
+    if exits != expected -> panic("task exits: {exits}")
+}

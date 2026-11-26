@@ -7,7 +7,7 @@ SQLFMT_KEYWORDS: [String]{"select", "from", "where", "and", "or", "order", "by"}
 #On(fmt.block, SQL) shape: fn(block: compiler.MarkerBlock) -> String? {
     pieces: block.text.split("SQL{{\"").to_list()
     if pieces.len() < 2 -> return None
-    out := pieces[0].copy()
+    ^out: pieces[0].copy()
     loop index in 1..<pieces.len() {
         query: pieces[index].partition("\"}}")
         if query.sep == "" -> return None
@@ -17,7 +17,7 @@ SQLFMT_KEYWORDS: [String]{"select", "from", "where", "and", "or", "order", "by"}
 }
 
 sqlfmt_query: fn(text: String) -> String {
-    words := [String]{}
+    ^words: [String]{}
     loop word in text.split(" ") {
         if word == "" -> next
         words.push(if SQLFMT_KEYWORDS.contains(word.lower()) -> word.upper() else -> word.copy())

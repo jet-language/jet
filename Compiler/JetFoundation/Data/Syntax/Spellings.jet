@@ -10,8 +10,9 @@ LexicalEntry: struct {
 
 LEXICAL_LEDGER: [LexicalEntry]{
     {spelling: ":", meaning: "immutable binding and declaration: `name: value`, `name: fn(…)`, `Name: struct {{…}}`, `name: module {{…}}`; `run: fn() {{…}}` declares a program's one entry, and a program is either that entry or its entry file's top-level statements, never both, anywhere in its load graph, package or project (E0621)"},
-    {spelling: ":=", meaning: "mutable binding"},
-    {spelling: "name := value", meaning: "mutable module global at file scope: starts from any storable value its initializer computes while building, held as program data with no startup copy, which an assignment replaces; only a value holding a runtime handle, such as a `Shared` cell, is built on the global's first use; any function that sees it reads and writes it directly, the main task owns it, and a task whose work touches it is a build error naming the variable and the call path"},
+    {spelling: "^name: value", meaning: "changeable binding: `^` before the name marks a name that `=` and the compound assignments may change; a changeable name nothing writes is an error whose fix removes the `^`; `{{^a, b}}: v` marks only some destructured names, `loop ^i: 0, …` a state loop's counter"},
+    {spelling: "^name: value (file scope)", meaning: "changeable module global at file scope: starts from any storable value its initializer computes while building, held as program data with no startup copy, which an assignment replaces; only a value holding a runtime handle, such as a `Shared` cell, is built on the global's first use; any function that sees it reads and writes it directly, the main task owns it, and a task whose work touches it is a build error naming the variable and the call path"},
+    {spelling: "place.in_place()", meaning: "write window: a compiler-owned method, read only as a binding's value (`slot: xs[0].in_place()`), a match subject (`if shape.in_place() == …`) or a loop source (`loop x in items.in_place()`); writes through it change the place; it ends the place, a window can't be re-pointed, and no function may take the name (E0436)"},
     {spelling: "use {{ … }} / use alias: path", meaning: "import block: one row per line, each a module path, `alias: path`, a \"file\" path or `alias: \"file\"`; `alias: owner.x` where `owner.x` names no module binds the member `x` that `owner` declares; several blocks per scope; a row binds only locally, and a re-export is the bare-path declaration `name: module.member`"},
     {spelling: "x.copy()", meaning: "the one deliberate copy: a compiler-owned method returning an independent owned value"},
     {spelling: "name: T -> expr", meaning: "computed struct field: a read-time formula read like a field; nothing assigns, lends for writing or takes it, even inside its module (E0339), so a public one over `priv` storage is a read-only field"},
@@ -120,6 +121,7 @@ LANGUAGE_REWRITES: [LanguageRewrite]{
     {name: "american-tokens1", toolchain: "a0.0.45"},
     {name: "diagnostic-names1", toolchain: "a0.0.46"},
     {name: "mark-caret1", toolchain: "a0.0.47"},
+    {name: "bind-mark1", toolchain: "a0.0.47"},
 }
 
 /// Checked compiler metadata queries that has not yet given a `$` root.

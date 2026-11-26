@@ -7,7 +7,7 @@ use {
 
 run: fn() {
     directory_input: files.open("{work}") ?? panic("open dir")
-    directory_reader := cbor.reader(directory_input) ?? panic("reader")
+    ^directory_reader: cbor.reader(directory_input) ?? panic("reader")
     if directory_reader.next() == {
         .Val(_) | .None -> { print("read-ok-missed") }
         .Err(first) -> {

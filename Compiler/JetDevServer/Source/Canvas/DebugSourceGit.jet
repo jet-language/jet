@@ -76,7 +76,7 @@ DebugSessions: struct {
 
     // The program of session `id` ended.
     clear_paused_session: fn(^self, host: ^PausedEvaluateHost, id: String) {
-        adapter := self.adapters.remove(id) ?? {
+        ^adapter: self.adapters.remove(id) ?? {
             debug_clear_host_session(host, id)
             return
         }
@@ -85,7 +85,7 @@ DebugSessions: struct {
 
     // The program of session `id` runs on from its stop.
     resume_paused_session: fn(^self, host: ^PausedEvaluateHost, id: String) {
-        adapter := self.adapters.remove(id) ?? {
+        ^adapter: self.adapters.remove(id) ?? {
             debug_clear_host_session(host, id)
             return
         }
@@ -94,7 +94,7 @@ DebugSessions: struct {
 
     // Session `id` ended because its source changed.
     stale_paused_session: fn(^self, host: ^PausedEvaluateHost, id: String) {
-        adapter := self.adapters.remove(id) ?? {
+        ^adapter: self.adapters.remove(id) ?? {
             debug_clear_host_session(host, id)
             return
         }
@@ -102,7 +102,7 @@ DebugSessions: struct {
     }
 
     cancel_paused_session: fn(^self, host: ^PausedEvaluateHost, id: String, reason: String) CanvasDebugError! {
-        adapter := self.adapters.remove(id) ?? {
+        ^adapter: self.adapters.remove(id) ?? {
             debug_clear_host_session(host, id)
             return Ok()
         }
@@ -111,7 +111,7 @@ DebugSessions: struct {
     }
 
     cancel_all_paused_sessions: fn(^self, host: ^PausedEvaluateHost, reason: String) CanvasDebugError! {
-        ids := [String]{}
+        ^ids: [String]{}
         loop entry in self.adapters -> ids.push(entry.key)
         loop id in ids -> self.cancel_paused_session(host, id, reason) ?? return Err(err)
         Ok()
@@ -131,8 +131,8 @@ debug_clear_host_session: fn(host: ^PausedEvaluateHost, id: String) Never! {
 
 // The whitespace-separated words of `text`.
 debug_words: fn(text: String) -> [String] Never! {
-    words := [String]{}
-    current := ""
+    ^words: [String]{}
+    ^current: ""
     loop ch in text.chars() {
         piece: "{ch}"
         if {
@@ -165,7 +165,7 @@ git_root: fn(path: String) -> String? Never! {
 git_relative_path: fn(root: String, path: String) -> String Never! {
     absolute: canonical_path(path)
     base: canonical_path(root)
-    relative := absolute
+    ^relative: absolute
     if absolute.starts_with("{base}/") && absolute.split_once("{base}/") == .Val(parts) {
         relative = parts.after
     }
@@ -181,7 +181,7 @@ git_output: fn(root: String, args: [String]) -> String? Never! {
 }
 
 untracked_diff: fn(rel: String, src: String) -> String Never! {
-    pieces := [String]{"--- /dev/null\n+++ b/{rel}\n"}
+    ^pieces: [String]{"--- /dev/null\n+++ b/{rel}\n"}
     loop line in canvas_debug_lines(src) -> pieces.push("+{line}\n")
     pieces.join("")
 }

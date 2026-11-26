@@ -86,25 +86,25 @@ NativeOverlayNode: struct {
     }
 
     with_value: fn(self, value: String) -> NativeOverlayNode Never! {
-        node := self
+        ^node: self
         node.value = Val(value)
         node
     }
 
     with_status: fn(self, status: String) -> NativeOverlayNode Never! {
-        node := self
+        ^node: self
         node.status = Val(status)
         node
     }
 
     with_children: fn(self, children: [NativeOverlayNode]) -> NativeOverlayNode Never! {
-        node := self
+        ^node: self
         node.children = children
         node
     }
 
     with_action: fn(self, action: NativeOverlayAction) -> NativeOverlayNode Never! {
-        node := self
+        ^node: self
         node.action = Val(action)
         node
     }
@@ -157,7 +157,7 @@ NativeOverlayPanelFact: struct {
         validate_overlay_text(self.panel_id, "native overlay panel id", false)
         validate_overlay_text(self.title, "native overlay panel title", false)
         validate_overlay_text(self.status, "native overlay panel status", true)
-        ids := [String:Bool]{}
+        ^ids: [String:Bool]{}
         loop node in self.nodes -> node.validate(0, count, ids)
     }
 }
@@ -189,8 +189,8 @@ NativeOverlayEvent: struct {
         if self.panels.len() > MAX_OVERLAY_PANELS {
             return Err(native_overlay_error("native overlay event exceeds its panel budget"))
         }
-        panel_ids := [String:Bool]{}
-        count := 0
+        ^panel_ids: [String:Bool]{}
+        ^count: 0
         loop panel in self.panels {
             if panel_ids.get(panel.panel_id) != None {
                 return Err(native_overlay_error("native overlay event repeats panel `{panel.panel_id}`"))
@@ -294,20 +294,20 @@ NativeOverlayFrame: struct {
     panel_count: fn(self) -> Int { self.panels.len() }
 
     node_count: fn(self) -> Int {
-        total := 0
+        ^total: 0
         loop panel in self.panels -> total += overlay_panel_node_count(panel)
         total
     }
 }
 
 overlay_node_count: fn(node: NativeOverlayNode) -> Int {
-    total := 1
+    ^total: 1
     loop child in node.children -> total += overlay_node_count(child)
     total
 }
 
 overlay_panel_node_count: fn(panel: NativeOverlayPanelFact) -> Int {
-    total := 0
+    ^total: 0
     loop node in panel.nodes -> total += overlay_node_count(node)
     total
 }
@@ -447,10 +447,10 @@ NativeOverlayHost: struct {
                 return Err(native_overlay_error("native overlay event sequence is not increasing"))
             }
         }
-        revision_changed := false
+        ^revision_changed: false
         if self.revision == .Val(revision) -> revision_changed = revision != event.revision
-        projected_panel_count := 0
-        projected_node_count := 0
+        ^projected_panel_count: 0
+        ^projected_node_count: 0
         if !revision_changed {
             projected_panel_count = self.panels.len()
             loop (_, panel) in self.panels {
@@ -513,14 +513,14 @@ NativeOverlayHost: struct {
 
     // Canonical commands executed in the real backend's BeginDrawing/EndDrawing context.
     native_draw_commands: fn(self) -> [JetDevtoolsNativeDrawCommand] {
-        commands := [JetDevtoolsNativeDrawCommand]{}
+        ^commands: [JetDevtoolsNativeDrawCommand]{}
         frame: self.frame() ?? return commands
         if self.release_build || !frame.open -> return commands
         bounds: frame.bounds
         bottom: bounds.y + bounds.height
         commands.push(JetDevtoolsNativeDrawCommand.Rectangle{x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height, color: JetDevtoolsNativeColor.new(16, 20, 28, 232)})
         commands.push(JetDevtoolsNativeDrawCommand.Text{text: "Jet Devtools [{frame.session_id}]", x: bounds.x + 12, y: bounds.y + 22, size: 18, color: JetDevtoolsNativeColor.new(255, 255, 255, 255)})
-        y := bounds.y + 46
+        ^y: bounds.y + 46
         loop panel in frame.panels {
             if y >= bottom || commands.len() >= MAX_OVERLAY_NODES -> break
             commands.push(JetDevtoolsNativeDrawCommand.Text{text: panel.title, x: bounds.x + 12, y: overlay_clamp_coordinate(y), size: 15, color: JetDevtoolsNativeColor.new(255, 220, 120, 255)})
@@ -574,7 +574,7 @@ NativeOverlayHost: struct {
     }
 
     headless_projection: fn(event: NativeOverlayEvent) -> NativeOverlayFrame NativeOverlayHostError! {
-        host := NativeOverlayHost.new()
+        ^host: NativeOverlayHost.new()
         host.open()
         host.ingest(event)
         host.frame() ?? return Err(native_overlay_error("native overlay did not produce a headless frame"))
@@ -589,7 +589,7 @@ NativeOverlayHost: struct {
         sequence: self.sequence ?? return
         frame_id: self.next_frame_id
         self.next_frame_id += 1
-        keys := self.panels.keys().to_list()
+        ^keys: self.panels.keys().to_list()
         keys.sort()
         panels: loop key in keys -> self.panels[key]
         frame: NativeOverlayFrame{
@@ -626,7 +626,7 @@ append_native_node_commands: fn(commands: ^[JetDevtoolsNativeDrawCommand], node:
     if y >= bottom || commands.len() >= MAX_OVERLAY_NODES {
         return
     }
-    text := node.label
+    ^text: node.label
     if node.value == .Val(value) -> text = "{text}: {value}"
     if node.status == .Val(status) -> text = "{text} [{status}]"
     commands.push(JetDevtoolsNativeDrawCommand.Text{text: text, x: x + depth * 12, y: overlay_clamp_coordinate(y), size: 12, color: JetDevtoolsNativeColor.new(220, 230, 240, 255)})
@@ -647,9 +647,9 @@ NativeOverlayHostBridge: struct {
     toggle_key_state: [String:Bool],
 
     new: fn(session: ResidentDevSession, release_build: Bool) -> NativeOverlayHostBridge {
-        adapter := NativeOverlayAdapter.for_session(session)
+        ^adapter: NativeOverlayAdapter.for_session(session)
         adapter.set_release_build(release_build)
-        host := NativeOverlayHost.new()
+        ^host: NativeOverlayHost.new()
         host.set_release_build(release_build)
         NativeOverlayHostBridge{session: session, adapter: adapter, host: host, toggle_key_state: [String:Bool]{}}
     }
@@ -684,7 +684,7 @@ NativeOverlayHostBridge: struct {
             if session_id != self.session.id() -> return false
             routed: if input == {
                 .Key(code, pressed) -> {
-                    edge_pressed := pressed
+                    ^edge_pressed: pressed
                     if code == self.host.toggle_key {
                         was_pressed: self.toggle_key_state.get(code) ?? false
                         self.toggle_key_state[code] = pressed

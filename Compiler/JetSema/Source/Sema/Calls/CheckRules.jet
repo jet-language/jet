@@ -416,8 +416,9 @@ sema_call_rule_stage: fn(check: ^SemaBodyCheck, owner: String, site_owner: Strin
 // argument), the `name` it was written with, the file a stand-in call
 // stands for (`source`), its `receiver` and its `args` in written order,
 // then the keys of its table (sema_rule_table_keys), then the TypeId of
-// each checked explicit type argument (`type_args`). An argument's `type`
-// is the type its own check gives it (`_` when that check fails), and its
+// each checked explicit type argument (`type_args`). An argument's span runs
+// over all it writes (sema_rule_arg_span), its `type` is the type its own
+// check gives it (`_` when that check fails), and its
 // `value` the Dyn its value encodes to when the build knows that value
 // (sema_rule_value_dyn). A literal is heard as that check would hear it,
 // without the check (sema_rule_literal). A type name, which checks only
@@ -473,7 +474,7 @@ sema_rule_call_value: fn(
         ^label: String?{None}
         if argument.label == .Val(written) -> label = Val("{written.name}")
         function: sema_rule_function_of(argument.expr, heard_arg.ty, argument.span, check)
-        sema_rule_call_arg(heard, label, heard_arg.ty, heard_arg.known, function, sema_rule_written(argument.expr, file), argument.span, graph, check.context.type_delta, check.environment.*)
+        sema_rule_call_arg(heard, label, heard_arg.ty, heard_arg.known, function, sema_rule_written(argument.expr, file), sema_rule_arg_span(argument), graph, check.context.type_delta, check.environment.*)
     }
     heard.words.push(tables.len())
     loop table in tables {
@@ -486,6 +487,13 @@ sema_rule_call_value: fn(
         heard.words.push(heard.types.len() - 1)
     }
     heard
+}
+
+// The span argument `argument` is written over, a rule's site for it: from
+// its label or first token to the end of its value.
+sema_rule_arg_span: fn(argument: CallArg) -> Span Never! {
+    value: expr_source_span(argument.expr)
+    Span{start: argument.span.start, end: if value.end > argument.span.end -> value.end else -> argument.span.end}
 }
 
 // The identities a body's heard calls name, by declaration key
@@ -1460,8 +1468,8 @@ sema_call_rule_batch_text: fn(paired: Bool{false}) -> String Never! {
     w: "__jet_w"
     t: "__jet_t"
     call: sema_call_rule_call_text("row")
-    unpack: "        {w} := [Int]{{}}\n        __jet_word := 0\n        __jet_shift := 0\n        loop __jet_byte in __jet_b {{\n            __jet_part: Int{{__jet_byte}}\n            __jet_word += (__jet_part & 127) << __jet_shift\n            __jet_shift += 7\n            if __jet_part < 128 {{\n                {w}.push(__jet_word)\n                __jet_word = 0\n                __jet_shift = 0\n            }}\n        }}\n        __jet_rows := [Int]{{}}\n        __jet_at := 0\n        loop __jet_at < {w}.len() {{\n            __jet_rows.push(__jet_at)\n            __jet_keys: __jet_at + {SEMA_CALL_RULE_ARGS_WORD} + {SEMA_CALL_RULE_ARG_WORDS} * {w}[__jet_at + {SEMA_CALL_RULE_COUNT_WORD}]\n            __jet_types: __jet_keys + 1 + {w}[__jet_keys]\n            __jet_at = __jet_types + 1 + {w}[__jet_types]\n        }}\n"
-    checks: if paired -> "        __jet_first := [Int]{{}}\n        __jet_seen := [String: Int]{{}}\n        loop row in __jet_rows {{\n            first := -1\n            if __jet_r[{w}[row]].row({call}) == .Val(key) {{\n                at: row + {SEMA_CALL_RULE_ARGS_WORD} + {SEMA_CALL_RULE_ARG_WORDS} * {w}[row + {SEMA_CALL_RULE_COUNT_WORD}]\n                loop k in 1..<{w}[at] + 1 {{\n                    if __jet_seen.get(\"{{{t}[{w}[at + k]]}}|{{key}}\") == .Val(earlier) && (first < 0 || earlier < first) -> first = earlier\n                }}\n                own: \"{{{t}[{w}[at + {w}[at]]]}}|{{key}}\"\n                if __jet_seen.get(own) == None -> __jet_seen[own] = row\n            }}\n            __jet_first.push(first)\n        }}\n        loop (at, row) in __jet_rows -> __jet_r[{w}[row]].check({call}, if __jet_first[at] < 0 -> None else -> Val({sema_call_rule_call_text("__jet_first[at]")}))\n" else -> "        loop row in __jet_rows -> __jet_r[{w}[row]].check({call})\n"
+    unpack: "        ^{w}: [Int]{{}}\n        ^__jet_word: 0\n        ^__jet_shift: 0\n        loop __jet_byte in __jet_b {{\n            __jet_part: Int{{__jet_byte}}\n            __jet_word += (__jet_part & 127) << __jet_shift\n            __jet_shift += 7\n            if __jet_part < 128 {{\n                {w}.push(__jet_word)\n                __jet_word = 0\n                __jet_shift = 0\n            }}\n        }}\n        ^__jet_rows: [Int]{{}}\n        ^__jet_at: 0\n        loop __jet_at < {w}.len() {{\n            __jet_rows.push(__jet_at)\n            __jet_keys: __jet_at + {SEMA_CALL_RULE_ARGS_WORD} + {SEMA_CALL_RULE_ARG_WORDS} * {w}[__jet_at + {SEMA_CALL_RULE_COUNT_WORD}]\n            __jet_types: __jet_keys + 1 + {w}[__jet_keys]\n            __jet_at = __jet_types + 1 + {w}[__jet_types]\n        }}\n"
+    checks: if paired -> "        ^__jet_first: [Int]{{}}\n        ^__jet_seen: [String: Int]{{}}\n        loop row in __jet_rows {{\n            ^first: -1\n            if __jet_r[{w}[row]].row({call}) == .Val(key) {{\n                at: row + {SEMA_CALL_RULE_ARGS_WORD} + {SEMA_CALL_RULE_ARG_WORDS} * {w}[row + {SEMA_CALL_RULE_COUNT_WORD}]\n                loop k in 1..<{w}[at] + 1 {{\n                    if __jet_seen.get(\"{{{t}[{w}[at + k]]}}|{{key}}\") == .Val(earlier) && (first < 0 || earlier < first) -> first = earlier\n                }}\n                own: \"{{{t}[{w}[at + {w}[at]]]}}|{{key}}\"\n                if __jet_seen.get(own) == None -> __jet_seen[own] = row\n            }}\n            __jet_first.push(first)\n        }}\n        loop (at, row) in __jet_rows -> __jet_r[{w}[row]].check({call}, if __jet_first[at] < 0 -> None else -> Val({sema_call_rule_call_text("__jet_first[at]")}))\n" else -> "        loop row in __jet_rows -> __jet_r[{w}[row]].check({call})\n"
     "RULE_BATCH: if {{\n    true -> {{\n        __jet_r: {SEMA_CALL_RULE_RULES_LOCAL}\n        __jet_b: {SEMA_CALL_RULE_WORDS_LOCAL}\n        {t}: {SEMA_CALL_RULE_TEXTS_LOCAL}\n        __jet_y: {SEMA_CALL_RULE_TYPES_LOCAL}\n        __jet_v: {SEMA_CALL_RULE_VALUES_LOCAL}\n        __jet_f: {SEMA_CALL_RULE_FUNCTIONS_LOCAL}\n        __jet_p: {SEMA_CALL_RULE_WRITTEN_LOCAL}\n{unpack}{checks}    }}\n    else -> [CompilerRejection?]{{}}\n}}\n"
 }
 

@@ -296,16 +296,19 @@ arm_name_end: fn(facts: [Int], index: Int) -> Int Never! {
     -1
 }
 
-// `^name` / `^^name` / `name.move()` written together at line start marks
-// the place a call writes or takes, so it begins a statement, and so does a
-// complement `~name` written together. A continued exclusive-or or power
-// line keeps a space after its operator; a line that starts with `&` or `&&`
+// `^name` / `^^name` / `name.move()` written together at line start declares
+// a changeable name (`^count: 0`) or marks the place a call writes or takes,
+// so it begins a statement, and so does a changeable fence `^<: … :>: v` or a
+// complement `~name` written together. A continued exclusive-or or power line
+// keeps a space after its operator; a line that starts with `&` or `&&`
 // always continues the one above.
 place_mark_starts_at: fn(facts: [Int], index: Int) -> Bool Never! {
     mark: kind_at(facts, index)
     if mark != TOKEN_CARET && mark != TOKEN_TILDE -> return false
     name: kind_at(facts, index + 1)
-    if name != TOKEN_IDENT && name != TOKEN_SELF -> return false
+    if name != TOKEN_IDENT && name != TOKEN_SELF && !(mark == TOKEN_CARET && name == TOKEN_FENCE_OPEN) {
+        return false
+    }
     facts[index * 4 + 2] == facts[(index + 1) * 4 + 1]
 }
 
@@ -327,7 +330,7 @@ tuple_rename_starts_at: fn(facts: [Int], index: Int) -> Bool Never! {
             depth -= 1
             if depth == 0 {
                 after: kind_at(facts, at + 1)
-                return after == TOKEN_COLON || after == TOKEN_COLON_COLON || after == TOKEN_COLON_EQ
+                return after == TOKEN_COLON || after == TOKEN_COLON_COLON
             }
         }
         at += 1

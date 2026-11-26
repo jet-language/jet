@@ -24,8 +24,8 @@ use {
         STRING_PART_INTERPOLATION,
         STRING_PART_TEXT,
         TOKEN_BLOCK_COMMENT,
+        TOKEN_CARET,
         TOKEN_COLON,
-        TOKEN_COLON_EQ,
         TOKEN_COMMA,
         TOKEN_DOT,
         TOKEN_DOT_DOT,
@@ -347,7 +347,9 @@ parser_fence_expand_segment: fn(segment: [Token], brace_depth: Int, budget: Pars
     }
     if opens.len() == 0 -> return parser_fence_segment_failure(statement_span, diagnostics, used)
 
-    binding_target: opens[0] == 0 && closes[0] + 1 < segment.len() && (segment[closes[0] + 1].kind == TOKEN_COLON || segment[closes[0] + 1].kind == TOKEN_COLON_EQ)
+    // `<: … :>: v` binds the fenced names, and `^<: … :>: v` binds them changeable.
+    target_start: if segment[0].kind == TOKEN_CARET -> 1 else -> 0
+    binding_target: opens[0] == target_start && closes[0] + 1 < segment.len() && segment[closes[0] + 1].kind == TOKEN_COLON
     // A `:` inside a group is a label or a field, not the binding sigil.
     ^has_binding_sigil: false
     ^sigil_depth: 0
@@ -359,7 +361,7 @@ parser_fence_expand_segment: fn(segment: [Token], brace_depth: Int, budget: Pars
         if kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET || kind == TOKEN_RBRACE {
             sigil_depth -= 1
         }
-        if kind == TOKEN_COLON_EQ || kind == TOKEN_EQ || (kind == TOKEN_COLON && sigil_depth == 0) {
+        if kind == TOKEN_EQ || (kind == TOKEN_COLON && sigil_depth == 0) {
             has_binding_sigil = true
             break
         }
@@ -410,13 +412,20 @@ parser_fence_expand_segment: fn(segment: [Token], brace_depth: Int, budget: Pars
     }
     ^expanded: [Token]{}
     at: segment[0].span.start
+    // A changeable fence's `^` marks every name it expands to, touching each
+    // name as an authored `^name` does.
+    changeable_target: binding_target && target_start == 1
     loop copy_index in 0..<copies {
         if copy_index > 0 {
             expanded.push(parser_synthetic_token(TOKEN_SEMI, Span{start: at, end: at}))
         }
-        ^cursor: 0
+        ^cursor: if changeable_target -> 1 else -> 0
         loop (fence_index, open) in opens {
             loop authored_index in cursor..<open -> expanded.push(segment[authored_index])
+            if changeable_target && fence_index == 0 && fence_entries[0][copy_index].len() > 0 {
+                name_start: fence_entries[0][copy_index][0].span.start
+                expanded.push(parser_synthetic_token(TOKEN_CARET, Span{start: name_start, end: name_start}))
+            }
             loop token in fence_entries[fence_index][copy_index] -> expanded.push(token)
             cursor = closes[fence_index] + 1
         }

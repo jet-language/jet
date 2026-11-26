@@ -931,7 +931,7 @@ jet_cli_repl_stmts: fn(session: ^JetCLIReplSession, tables: ASTTables, body: [St
     loop report in bindings -> reports.push(report.copy())
     program: jet_cli_repl_source(session, "", "", true, true, statement, reports)
     ^built: jet_cli_repl_build(session, program, program.statements_at + prefix.count_bytes(), true)
-    // A binding whose type has no `Display` (`cell := Shared{...}`) still
+    // A binding whose type has no `Display` (`^cell: Shared{...}`) still
     // binds: when only the value lines fail, the turn is built again showing
     // only the echo, and each binding keeps its type with no shown text.
     ^unshown: false
@@ -1220,10 +1220,10 @@ jet_cli_repl_docs: fn(session: JetCLIReplSession, name: String) {
     if jet_cli_repl_binding_index(session.bindings, name) == .Val(index) {
         binding: session.bindings[index]
         ty: jet_cli_repl_type_text(binding.ty)
-        // The binding as the session wrote it (`answer: 42`, `count := 0`),
+        // The binding as the session wrote it (`answer: 42`, `^count: 0`),
         // then its type.
-        sigil: if binding.mutable -> " :=" else -> ":"
-        jet_cli_repl_out("{name}{sigil} {binding.shown}\nType: {ty}\nSource: this session\n")
+        mark: if binding.mutable -> "^" else -> ""
+        jet_cli_repl_out("{mark}{name}: {binding.shown}\nType: {ty}\nSource: this session\n")
         return
     }
     if jet_cli_repl_functions(session.items).contains(name) {

@@ -124,7 +124,7 @@ ssl_ticket_key_bits: fn(key: SSLTicketKey) -> Int Never! {
 // (mbedtls_cipher_setkey). With GCM, CCM and ChaCha20-Poly1305 one context
 // seals and opens. The error, if any; BadInputData before setup.
 ssl_ticket_key_set: fn(key: ^SSLTicketKey, k: [U8]) -> ssldefs.SSLError? Never! {
-    if ^key.cipher == {
+    if key.cipher.in_place() == {
         .Val(c) -> {
             ^bytes: ssldefs.ssl_bytes_of(k, 0, c.info.key_bits /% 8)
             ^failure: ssldefs.SSLError?{None}
@@ -142,7 +142,7 @@ ssl_ticket_key_set: fn(key: ^SSLTicketKey, k: [U8]) -> ssldefs.SSLError? Never! 
 // Encrypt and authenticate `state` under the key: ciphertext then tag
 // (mbedtls_cipher_auth_encrypt_ext).
 ssl_ticket_key_seal: fn(key: ^SSLTicketKey, iv: [U8], ad: [U8], state: [U8]) -> [U8] ssldefs.SSLError! {
-    if ^key.cipher == {
+    if key.cipher.in_place() == {
         .Val(c) -> if layer.cipher_auth_encrypt_ext(c, iv, ad, state, SSL_TICKET_AUTH_TAG_BYTES) == {
             .Ok(out) -> Ok(out)
             .Err(e) -> Err(.Cipher(e))
@@ -155,7 +155,7 @@ ssl_ticket_key_seal: fn(key: ^SSLTicketKey, iv: [U8], ad: [U8], state: [U8]) -> 
 // (mbedtls_cipher_auth_decrypt_ext); InvalidMac when it does not
 // authenticate, as ssl_ticket.c maps MBEDTLS_ERR_CIPHER_AUTH_FAILED.
 ssl_ticket_key_open: fn(key: ^SSLTicketKey, iv: [U8], ad: [U8], sealed: [U8]) -> [U8] ssldefs.SSLError! {
-    if ^key.cipher == {
+    if key.cipher.in_place() == {
         .Val(c) -> if layer.cipher_auth_decrypt_ext(c, iv, ad, sealed, SSL_TICKET_AUTH_TAG_BYTES) == {
             .Ok(out) -> Ok(out)
             .Err(e) -> {

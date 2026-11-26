@@ -60,7 +60,6 @@ use {
         TOKEN_COLON,
         TOKEN_COLON_COLON,
         TOKEN_COMMA,
-        TOKEN_COLON_EQ,
         TOKEN_DOT,
         TOKEN_EOF,
         TOKEN_EQ,
@@ -540,7 +539,7 @@ ParserChunksOutcome: struct {
 
 // Whether token `index` in `tokens[..<to]` opens a valid top-level item head:
 // item keywords, `priv`, `#` markers, `#run`/`#if`/`#loop` (`TOKEN_PREP`), or
-// `TOKEN_IDENT` ONLY when followed by `TOKEN_COLON` or `TOKEN_COLON_EQ`
+// `TOKEN_IDENT` or `^` `TOKEN_IDENT` ONLY when followed by `TOKEN_COLON`
 // (matching `parser_module_binding_ahead`, never bare script statements).
 parser_chunk_head_at: fn(tokens: [Token], index: Int, to: Int) -> Bool Never! {
     if index < 0 || index >= to -> return false
@@ -555,10 +554,7 @@ parser_chunk_head_at: fn(tokens: [Token], index: Int, to: Int) -> Bool Never! {
             after += 1
         }
         loop after < to && parser_is_trivia(tokens[after].kind) -> after += 1
-        if after < to {
-            next_kind: tokens[after].kind
-            return next_kind == TOKEN_COLON || (kind == TOKEN_IDENT && next_kind == TOKEN_COLON_EQ)
-        }
+        if after < to -> return tokens[after].kind == TOKEN_COLON
     }
     false
 }
@@ -1669,7 +1665,7 @@ parser_debug_call_tight_at: fn(tokens: [Token], source: [U8], source_offset: Int
 }
 
 parser_debug_value_opener: fn(kind: Int) -> Bool Never! {
-    kind == TOKEN_COLON || kind == TOKEN_COLON_EQ || kind == TOKEN_EQ || kind == TOKEN_UNIFIED_ARROW || kind == TOKEN_RETURN || kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET || kind == TOKEN_LBRACE || kind == TOKEN_COMMA || kind == TOKEN_SEMI || kind == TOKEN_KW_IF || kind == TOKEN_KW_IN || kind == TOKEN_KW_LOOP || kind == TOKEN_LINE_COMMENT || kind == TOKEN_BLOCK_COMMENT || (kind >= TOKEN_PLUS_EQ && kind <= TOKEN_SHR_EQ) || kind == TOKEN_TILDE_PIPE_EQ || kind == TOKEN_TILDE_EQ || kind == TOKEN_AMP_TILDE_EQ
+    kind == TOKEN_COLON || kind == TOKEN_EQ || kind == TOKEN_UNIFIED_ARROW || kind == TOKEN_RETURN || kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET || kind == TOKEN_LBRACE || kind == TOKEN_COMMA || kind == TOKEN_SEMI || kind == TOKEN_KW_IF || kind == TOKEN_KW_IN || kind == TOKEN_KW_LOOP || kind == TOKEN_LINE_COMMENT || kind == TOKEN_BLOCK_COMMENT || (kind >= TOKEN_PLUS_EQ && kind <= TOKEN_SHR_EQ) || kind == TOKEN_TILDE_PIPE_EQ || kind == TOKEN_TILDE_EQ || kind == TOKEN_AMP_TILDE_EQ
 }
 
 parser_debug_value_closer: fn(kind: Int) -> Bool Never! {
@@ -1780,7 +1776,7 @@ parser_parse_program: fn(state: ^JetParserState) -> Program {
                 item: parser_module_binding_item(statement, start, parser_previous_end(state))
                 if {
                     destructuring -> {
-                        parser_add_error_code(state, "E0003", start, "module globals bind one name at a time", "a module binding is a named value available to every function in the file", "write `name: value` or `name := value`")
+                        parser_add_error_code(state, "E0003", start, "module globals bind one name at a time", "a module binding is a named value available to every function in the file", "write `name: value` or `^name: value`")
                         parser_sync_top(state)
                     }
                     parser_error_since(state, errors_before) -> { parser_sync_top(state) }
@@ -1889,8 +1885,7 @@ parser_marked_module_binding_ahead: fn(state: ^JetParserState) -> Bool Never! {
     }
     if parser_changeable_name_ahead(state, offset) -> offset += 1
     if parser_kind_at(state, offset) != TOKEN_IDENT -> return false
-    next: parser_kind_at(state, offset + 1)
-    if next != TOKEN_COLON && next != TOKEN_COLON_EQ -> return false
+    if parser_kind_at(state, offset + 1) != TOKEN_COLON -> return false
     name: parser_lookahead(state, offset)
     bytes: parser_value(state, name).bytes()
     if bytes.len() == 0 || !((bytes[0] >= 97 && bytes[0] <= 122) || bytes[0] == 95) -> return false

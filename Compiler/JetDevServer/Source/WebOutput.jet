@@ -36,7 +36,7 @@ WebOutputAuthority: struct {
     // The member `name` must be present as a regular file with one link.
     require_file: fn(self, name: String) -[FS.Read]> IOError! {
         web_output_normal_name(name)
-        _ := web_output_member(self.directory, self.path, name)
+        ^_: web_output_member(self.directory, self.path, name)
     }
 
     // Move the member `name` into `destination` under the same name,
@@ -114,7 +114,7 @@ web_output_open: fn(out_dir: String, root: String) -[FS, Env]> WebOutputAuthorit
     if real != anchor && !real.starts_with(prefix) {
         return Err(web_output_denied(real, "web output directory escapes `{anchor}`"))
     }
-    directory := files.open_directory(anchor)
+    ^directory: files.open_directory(anchor)
     if real != anchor {
         loop part in real.removeprefix(prefix).split("/") {
             if part == "" -> next
@@ -127,7 +127,7 @@ web_output_open: fn(out_dir: String, root: String) -[FS, Env]> WebOutputAuthorit
 // Make `path` a real directory: an existing link or non-directory is refused,
 // and missing ancestors are created the same way, nearest the root first.
 web_output_ensure_directory: fn(path: String) -[FS]> IOError! {
-    missing := false
+    ^missing: false
     if files.lstat(path) == {
         .Ok(info) -> {
             if info.is_symlink {
@@ -171,11 +171,11 @@ web_output_publish: fn(staging: String, out_dir: String, root: String) -[FS, Env
     // The members every web bundle publishes, then its optional source maps.
     members: [String]{"web.manifest.json", "jet_dom_runtime.js", "app.js", "app.wasm", "index.html"}
     maps: [String]{"app.js.map", "app.wasm.map"}
-    names := [String]{}
-    staged_names := [String]{}
+    ^names: [String]{}
+    ^staged_names: [String]{}
     loop name in members {
         staging_root.require_file(name)
-        _ := output_root.has_file(name)
+        ^_: output_root.has_file(name)
         names.push(name.copy())
         staged_names.push(name.copy())
     }
@@ -186,9 +186,9 @@ web_output_publish: fn(staging: String, out_dir: String, root: String) -[FS, Env
         if staged -> staged_names.push(name.copy())
     }
     backup: output_root.create_unique_child(".jet-web-publication")
-    backed_up := [String]{}
-    published := [String]{}
-    failure := IOError?{None}
+    ^backed_up: [String]{}
+    ^published: [String]{}
+    ^failure: IOError?{None}
     loop name in names {
         if failure != None -> break
         if output_root.has_file(name) == {

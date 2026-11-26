@@ -588,7 +588,7 @@ pkg_com_render_jet: fn(lib: String, schema: ComSchema) -> String Never! {
     out = "{out}close: fn(^^object: {root}) -[FFI.Com]> {{\n    abi.close(object.value)\n    if abi.take_error() != 0 {{ panic(\"COM resource close failed\") }}\n}}\n\n"
     loop interface in interfaces {
         out = "{out}impl {interface}.Close {{\n    close: fn(^^self) {{\n        abi.close(self.value)\n        code: abi.take_error()\n        if code != 0 {{ panic(\"COM resource close failed\") }}\n    }}\n}}\n\n"
-        out = "{out}#Unsafe(\"dynamic IDispatch has no type-library contract\")\ndynamic_{interface}: fn(object: {interface}, name: String, args: [Dyn], flags: Int) -[FFI.Com]> Dyn ComError! {{\n    payload: json.to_string(args) ?? return Err(ComError.TypeMismatch)\n    raw: abi.dynamic(object.value, name, payload, flags)\n    code: abi.take_error()\n    if code != 0 {{ return Err(error(code)) }}\n    value := json.parse(raw) ?? return Err(ComError.TypeMismatch)\n    return Ok(value)\n}}\n\n"
+        out = "{out}#Unsafe(\"dynamic IDispatch has no type-library contract\")\ndynamic_{interface}: fn(object: {interface}, name: String, args: [Dyn], flags: Int) -[FFI.Com]> Dyn ComError! {{\n    payload: json.to_string(args) ?? return Err(ComError.TypeMismatch)\n    raw: abi.dynamic(object.value, name, payload, flags)\n    code: abi.take_error()\n    if code != 0 {{ return Err(error(code)) }}\n    ^value: json.parse(raw) ?? return Err(ComError.TypeMismatch)\n    return Ok(value)\n}}\n\n"
     }
     out = "{out}error: fn(code: Int) -[]> ComError Never! {{\n    if code == 1 {{ return ComError.WrongApartment }}\n    if code == 2 {{ return ComError.InvalidHandle }}\n    if code == 3 {{ return ComError.InvalidArgument }}\n    if code == 5 {{ return ComError.TypeMismatch }}\n    if code == 6 {{ return ComError.Limit }}\n    return ComError.MemberFailed\n}}\n\n"
     loop method in schema.methods {
@@ -604,7 +604,7 @@ pkg_com_render_jet: fn(lib: String, schema: ComSchema) -> String Never! {
         out = "{out}{name}: fn(object: {method.interface}{params}{head}abi.{name}(object.value{args})\n    code: abi.take_error()\n    if code != 0 {{ return Err(error(code)) }}\n"
         tail: if method.result == {
             .Unit -> "    return\n"
-            .Data -> "    value := json.parse(value) ?? return Err(ComError.TypeMismatch)\n    return Ok(value)\n"
+            .Data -> "    ^value: json.parse(value) ?? return Err(ComError.TypeMismatch)\n    return Ok(value)\n"
             .Object(interface) -> "    return Ok({interface}{{ value: value }})\n"
             .Int | .Float | .Bool | .Text -> "    return Ok(value)\n"
         }

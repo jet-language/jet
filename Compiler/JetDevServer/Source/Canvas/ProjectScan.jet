@@ -128,20 +128,20 @@ project_file_context: fn(checker: LSPChecker, path: String, runtime_events: Stri
 }
 
 project_context_for_entry: fn(path: String) -> ProjectContext {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     entry_path: absolute_entry_path(path)
     entry_dir: entry_parent(entry_path)
     boundary: find_workspace_boundary(cache, entry_dir)
-    workspace_root := String?{None}
-    boundary_diagnostic := Diagnostic?{None}
+    ^workspace_root: String?{None}
+    ^boundary_diagnostic: Diagnostic?{None}
     if boundary == .Val(found) {
         if found.malformed || found.member_root != None || same_path(entry_dir, found.root) {
             workspace_root = Val(found.root)
         }
         boundary_diagnostic = found.diagnostic
     }
-    manifest_diagnostic := Diagnostic?{None}
-    manifest_root := String?{None}
+    ^manifest_diagnostic: Diagnostic?{None}
+    ^manifest_root: String?{None}
     if pkg_find_manifest_root_checked(cache, entry_dir) == {
         .Ok(found) -> { manifest_root = found }
         .Err(error) -> manifest_diagnostic = Val(error.diagnostic)
@@ -151,8 +151,8 @@ project_context_for_entry: fn(path: String) -> ProjectContext {
             if !manifest_in_boundary(entry_dir, manifest, found) -> manifest_root = None
         }
     }
-    ecosystem_diagnostic := Diagnostic?{None}
-    ecosystem_root := manifest_root
+    ^ecosystem_diagnostic: Diagnostic?{None}
+    ^ecosystem_root: manifest_root
     if workspace_root == .Val(root) {
         if pkg_manifest_path_checked(root) == {
             .Ok(found) -> {
@@ -161,12 +161,12 @@ project_context_for_entry: fn(path: String) -> ProjectContext {
             .Err(error) -> ecosystem_diagnostic = Val(error.diagnostic)
         }
     }
-    project_root := entry_dir
+    ^project_root: entry_dir
     if ecosystem_root == .Val(root) -> project_root = root
     if manifest_root == .Val(root) -> project_root = root
     if workspace_root == .Val(root) -> project_root = root
     collected: collect_project_files(cache, project_root, entry_path, manifest_root, ecosystem_root, workspace_root)
-    authority_diagnostic := boundary_diagnostic
+    ^authority_diagnostic: boundary_diagnostic
     if ecosystem_diagnostic != None -> authority_diagnostic = ecosystem_diagnostic
     if manifest_diagnostic != None -> authority_diagnostic = manifest_diagnostic
     if collected.diagnostic != None -> authority_diagnostic = collected.diagnostic
@@ -224,14 +224,14 @@ find_workspace_boundary: fn(cache: ^WorkspaceDeclarationCache, start: String) ->
         if err.is_missing() -> return None
         return Val(malformed_boundary(start, err.diagnostic()))
     }
-    dir := opened.root
+    ^dir: opened.root
     loop {
         resolver: AuthorityResolver.open(dir) ?? {
             if !err.is_missing() -> return Val(malformed_boundary(dir, err.diagnostic()))
             dir = parent_dir(dir) ?? return None
             next
         }
-        source := WorkspaceSource?{None}
+        ^source: WorkspaceSource?{None}
         if resolver.resolve_workspace_source(cache) == {
             .Ok(found) -> source = found
             .Err(error) -> return Val(malformed_boundary(resolver.root, error.workspace_diagnostic()))
@@ -261,8 +261,8 @@ workspace_boundary: fn(resolver: AuthorityResolver, start: String, source: Works
 // The deepest checked member directory that holds the entry directory.
 matching_member_root: fn(resolver: AuthorityResolver, entry_dir: String, plan: WorkspacePlan) -> String? AuthorityError! {
     entry_resolver: AuthorityResolver.open(entry_dir)
-    best := String?{None}
-    best_depth := -1
+    ^best: String?{None}
+    ^best_depth: -1
     loop member in plan.members {
         directory: resolver.checked_directory(member.path)
         resolver.revalidate_directory(directory)
@@ -329,15 +329,15 @@ workspace_view: fn(cache: ^WorkspaceDeclarationCache, root: String) -> Workspace
 // the entry, env.jet, the package and workspace manifests, the lock and the
 // discovered sources. The first refusal is the project's diagnostic.
 collect_project_files: fn(cache: ^WorkspaceDeclarationCache, project_root: String, entry_path: String, manifest_root: String?, ecosystem_root: String?, workspace_root: String?) -> ProjectFiles {
-    paths := [String:Bool]{}
-    diagnostic := Diagnostic?{None}
+    ^paths: [String:Bool]{}
+    ^diagnostic: Diagnostic?{None}
     push_existing(paths, entry_path)
     push_existing(paths, scan_files.join(project_root, ENV_FILE))
     if manifest_root == .Val(root) -> push_existing(paths, scan_files.join(root, PACKAGE_FILE))
     if ecosystem_root == .Val(root) -> push_existing(paths, scan_files.join(root, PACKAGE_FILE))
-    workspace_source := ""
-    fallback_workspace := ""
-    member_roots := [String]{}
+    ^workspace_source: ""
+    ^fallback_workspace: ""
+    ^member_roots: [String]{}
     if workspace_root == .Val(root) {
         view: workspace_view(cache, root)
         if view.source_path == .Val(source_path) {
@@ -363,7 +363,7 @@ collect_project_files: fn(cache: ^WorkspaceDeclarationCache, project_root: Strin
         if workspace_root != None && !within_any(file.path, member_roots) -> next
         paths[file.path] = true
     }
-    records := [ProjectFileRec]{}
+    ^records: [ProjectFileRec]{}
     loop path in sorted_keys(paths) {
         relative: resolver.relative_path(path) ?? {
             keep_first(diagnostic, err.diagnostic())
@@ -429,9 +429,9 @@ diagnostic_json: fn(diagnostic: Diagnostic) -> String Never! {
 
 workspace_project_json: fn(project_root: String, workspace_root: String?) -> String {
     root: workspace_root ?? return "null"
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     view: workspace_view(cache, root)
-    source_path := ""
+    ^source_path: ""
     if view.source_path == .Val(path) -> source_path = rel_path(project_root, path) else if view.source_failed {
         fallback: scan_files.join(root, WORKSPACE_FILE)
         if scan_files.stat(fallback) == .Ok(_) -> source_path = rel_path(project_root, fallback)
@@ -445,7 +445,7 @@ workspace_project_json: fn(project_root: String, workspace_root: String?) -> Str
 // workspace members, or the entry's own directory when it carries an inline
 // Package.
 project_package_dirs: fn(cache: ^WorkspaceDeclarationCache, entry_path: String, manifest_root: String?, ecosystem_root: String?, workspace_root: String?) -> [String] {
-    dirs := [String:Bool]{}
+    ^dirs: [String:Bool]{}
     if manifest_root == .Val(root) -> dirs[root] = true
     if ecosystem_root == .Val(root) -> dirs[root] = true
     if workspace_root == .Val(root) {
@@ -459,14 +459,14 @@ project_package_dirs: fn(cache: ^WorkspaceDeclarationCache, entry_path: String, 
 }
 
 packages_project_json: fn(project_root: String, entry_path: String, manifest_root: String?, ecosystem_root: String?, workspace_root: String?) -> String {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     rows: loop dir in project_package_dirs(cache, entry_path, manifest_root, ecosystem_root, workspace_root) -> package_project_json(cache, project_root, entry_path, dir)
     rows.join(",")
 }
 
 targets_project_json: fn(project_root: String, entry_path: String, manifest_root: String?, ecosystem_root: String?, workspace_root: String?) -> String {
-    cache := WorkspaceDeclarationCache.new()
-    rows := [String]{}
+    ^cache: WorkspaceDeclarationCache.new()
+    ^rows: [String]{}
     loop dir in project_package_dirs(cache, entry_path, manifest_root, ecosystem_root, workspace_root) {
         loop row in package_targets_json(cache, project_root, entry_path, dir) -> rows.push(row)
     }
@@ -510,7 +510,7 @@ output_payload_json: fn(payload: OutputPayload) -> String Never! {
             "[{items.join(",")}]"
         }
         .Object(values) -> {
-            names := values.keys().to_list()
+            ^names: values.keys().to_list()
             names.sort()
             fields: loop name in names -> "{json_str(name)}:{output_payload_json(values[name])}"
             "{{{fields.join(",")}}}"
@@ -526,7 +526,7 @@ output_fields_json: fn(facts: PackageFacts, name: String) -> String Never! {
 }
 
 sorted_output_names: fn(facts: PackageFacts) -> [String] Never! {
-    names := facts.outputs.keys().to_list()
+    ^names: facts.outputs.keys().to_list()
     names.sort()
     names
 }
@@ -534,7 +534,7 @@ sorted_output_names: fn(facts: PackageFacts) -> [String] Never! {
 package_targets_json: fn(cache: ^WorkspaceDeclarationCache, project_root: String, entry_path: String, dir: String) -> [String] {
     facts: canonical_package_facts(cache, dir, entry_path) ?? return [String]{canonical_package_error(project_root, dir, err.diagnostic)}
     head: "\"package\":{json_str(facts.name)},\"package_path\":{json_str(rel_path(project_root, dir))},\"manifest\":{json_str(rel_path(project_root, scan_files.join(dir, PACKAGE_FILE)))}"
-    rows := [String]{}
+    ^rows: [String]{}
     loop name in sorted_output_names(facts) {
         rows.push("{{{head},\"target\":{json_str(facts.outputs[name].name)},{output_fields_json(facts, name)}}}")
     }
@@ -550,8 +550,8 @@ package_project_json: fn(cache: ^WorkspaceDeclarationCache, project_root: String
     facts: canonical_package_facts(cache, dir, entry_path) ?? return canonical_package_error(project_root, dir, err.diagnostic)
     deps: loop view in pkg_dependency_views(facts.deps) -> "{{\"name\":{json_str(view.name)},\"source\":{json_str(view.source)}}}"
     profiles: loop view in pkg_target_profile_views(facts.targets) -> "{{\"name\":{json_str(view.name)},\"profile\":{json_str(view.profile)}}}"
-    package_targets := [String]{}
-    outputs := [String]{}
+    ^package_targets: [String]{}
+    ^outputs: [String]{}
     loop name in sorted_output_names(facts) {
         output_name: json_str(facts.outputs[name].name)
         outputs.push("{{\"name\":{output_name},{output_fields_json(facts, name)}}}")
@@ -561,7 +561,7 @@ package_project_json: fn(cache: ^WorkspaceDeclarationCache, project_root: String
         package_name: json_str(package.name)
         if !package_targets.contains(package_name) -> package_targets.push(package_name)
     }
-    environment_names := facts.environments.keys().to_list()
+    ^environment_names: facts.environments.keys().to_list()
     environment_names.sort()
     environments: loop key in environment_names -> environment_fact_json(facts.environments[key])
     members: loop member in facts.members -> member.path()
@@ -569,10 +569,10 @@ package_project_json: fn(cache: ^WorkspaceDeclarationCache, project_root: String
 }
 
 environment_fact_json: fn(environment: EnvironmentFact) -> String Never! {
-    service_names := environment.services.keys().to_list()
+    ^service_names: environment.services.keys().to_list()
     service_names.sort()
     services: loop name in service_names -> service_fact_json(name, environment.services[name])
-    secret_names := environment.secrets.keys().to_list()
+    ^secret_names: environment.secrets.keys().to_list()
     secret_names.sort()
     "{{\"name\":{json_str(environment.name)},\"tools\":[{json_strs(environment.tools)}],\"services\":[{services.join(",")}],\"secrets\":[{json_strs(secret_names)}]}}"
 }

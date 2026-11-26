@@ -1,0 +1,53 @@
+// Changeable names and write windows. A name made with `:` keeps its value;
+// a `^` before the name makes it changeable, and `=` changes it. A write
+// window, `place.in_place()`, writes into the place itself, where a plain
+// `slot: scores[0]` would hold a copy.
+Shape: enum {
+    Dot(Int),
+    Line(Int),
+}
+
+bounds: fn(xs: [Int]) -> {lo: Int, hi: Int} { lo: xs[0], hi: xs[xs.len() - 1] }
+
+grow: fn(shape: ^Shape) {
+    if shape.in_place() == {
+        .Dot(size) -> { size += 1 }
+        .Line(length) -> length *= 2
+    }
+}
+
+describe: fn(shape: Shape) -> String {
+    if shape == {
+        .Dot(size) -> "dot {size}"
+        .Line(length) -> "line {length}"
+    }
+}
+
+run: fn() {
+    ^count: 0
+    loop _ in 0..<3 -> count += 1
+    print("count {count}")
+
+    {^lo, hi}: bounds([2, 5, 9])
+    lo -= 2
+    print("lo {lo}, hi {hi}")
+
+    ^total: 0
+    loop ^i: 0, i < 4 {
+        total += i
+        i += 1
+    }
+    print("total {total}")
+
+    ^scores: [3, 8, 5]
+    best: scores[0].in_place()
+    best = 10
+    best += 1
+    print("scores {scores[0]} {scores[1]} {scores[2]}")
+
+    ^dot: Shape.Dot(1)
+    grow(dot)
+    ^line: Shape.Line(3)
+    grow(line)
+    print("{describe(dot)}, {describe(line)}")
+}

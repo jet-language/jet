@@ -15,7 +15,7 @@ lock: fn(name: String) -[FS, Env]> FileLock { files.lock(name) ?? panic("lock {n
 
 consume_lock: fn(l: ^^FileLock) -[FS]> Int { held() }
 
-// A group update (`group := map.get(key) ?? fallback`, then
+// A group update (`^group: map.get(key) ?? fallback`, then
 // `map[key] = group`) builds as a write window into the key's entry. Its
 // fallback seeds a missing key and moves the lock there only: where the key
 // is present, the parameter still owns the lock, which closes as this

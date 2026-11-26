@@ -98,7 +98,6 @@ use {
     jet_lexer.[
         TOKEN_BANG,
         TOKEN_COLON,
-        TOKEN_COLON_EQ,
         TOKEN_COMMA,
         TOKEN_DOT,
         TOKEN_DOT_DOT,
@@ -867,8 +866,10 @@ parser_parse_param: fn(state: ^JetParserState, zone: ParamZone) -> Param {
         keyword_text: parser_text(state, keyword_token)
         parser_add_error(state, keyword_token.span, "expected a name for a parameter name, found the keyword `{keyword_text}`", "names start with a letter or `_`", "e.g. `main`, `count`, `_tmp`")
     }
+    // Only a receiver takes a mark before its name (`^self`, `^^self`); any
+    // other parameter carries its mark on the type (`xs: ^[Int]`).
     ^leading_mark: ""
-    if parser_write_mark(access_kind) || parser_take_mark(access_kind) {
+    if (parser_write_mark(access_kind) || parser_take_mark(access_kind)) && parser_kind_at(state, 1) == TOKEN_SELF {
         mark: parser_bump(state)
         convention = if parser_write_mark(access_kind) -> AccessConvention.Write else -> AccessConvention.Move
         leading_mark = parser_text(state, mark)
@@ -1078,12 +1079,19 @@ parser_parse_function: fn(state: ^JetParserState, modifiers: ParsedItemModifiers
         }
         else -> { params = parser_parse_param_list(state) }
     }
-    // `x.copy()` and `x.move()` are the compiler's own
-    // copy and take, so a method may not take either name (E0436). A module
-    // function keeps it (`files.move(from, to)`).
-    if (func_name == "copy" || func_name == "move") && params.len() > 0 && params[0].name == "self" {
-        verb: if func_name == "copy" -> "copy" else -> "take"
-        parser_add_error_code(state, "E0436", func_name_span, "a method can't be named `{func_name}`", "`x.{func_name}()` is the compiler's own {verb} of a named value, so a method with that name would be shadowed at every call", "rename the method and its calls, for example to `emit_{func_name}`")
+    // `x.copy()` and `x.move()` are the compiler's own copy and take, so a
+    // method may not take either name (E0436); a module function keeps it
+    // (`files.move(from, to)`). `place.in_place()` is the compiler's own write
+    // window, so no method or function may be named `in_place`.
+    in_place: func_name == "in_place"
+    if in_place || ((func_name == "copy" || func_name == "move") && params.len() > 0 && params[0].name == "self") {
+        kind: if in_place -> "function" else -> "method"
+        verb: if func_name == {
+            "copy" -> "copy of"
+            "move" -> "take of"
+            else -> "write window onto"
+        }
+        parser_add_error_code(state, "E0436", func_name_span, "a {kind} can't be named `{func_name}`", "`x.{func_name}()` is the compiler's own {verb} a named value, so a {kind} with that name would be shadowed at every call", "rename the {kind} and its calls, for example to `emit_{func_name}`")
     }
     signature: parser_parse_callable_result(state)
     ^return_type: signature.return_type
@@ -2236,7 +2244,7 @@ parser_parse_struct: fn(state: ^JetParserState, modifiers: ParsedItemModifiers) 
                         parsed_value: parser_parse_expression(state, 1, 0)
                         computed = Val(parsed_value.expr)
                     }
-                    default_kind == TOKEN_COLON_EQ || default_kind == TOKEN_EQ -> {
+                    default_kind == TOKEN_EQ -> {
                         parser_bump(state)
                         parsed_value: parser_parse_expression(state, 1, 0)
                         default = Val(parsed_value.expr)
@@ -2729,13 +2737,13 @@ parser_check_step_limit: fn(state: ^JetParserState, markers: [Marker]) {
     }
 }
 
-// `name: value` / `^name: value` / `name := value` at file scope declares a
-// module binding, not an executable script statement.
+// `name: value` / `^name: value` at file scope declares a module binding,
+// not an executable script statement.
 parser_module_binding_ahead: fn(state: ^JetParserState) -> Bool Never! {
     if parser_changeable_name_ahead(state, 0) -> return true
     if parser_current_kind(state) != TOKEN_IDENT -> return false
     next: parser_kind_at(state, 1)
-    if next == TOKEN_COLON_EQ || next == TOKEN_COLON -> return true
+    if next == TOKEN_COLON -> return true
     // `Type{ … }: value` is a destructuring head; the module-binding parser
     // rejects it with one diagnostic.
     if next != TOKEN_LBRACE -> return false
@@ -2747,10 +2755,7 @@ parser_module_binding_ahead: fn(state: ^JetParserState) -> Bool Never! {
         if kind == TOKEN_LBRACE -> depth += 1
         if kind == TOKEN_RBRACE {
             depth -= 1
-            if depth == 0 {
-                after: parser_kind_at(state, offset + 1)
-                return after == TOKEN_COLON || after == TOKEN_COLON_EQ
-            }
+            if depth == 0 -> return parser_kind_at(state, offset + 1) == TOKEN_COLON
         }
         offset += 1
     }

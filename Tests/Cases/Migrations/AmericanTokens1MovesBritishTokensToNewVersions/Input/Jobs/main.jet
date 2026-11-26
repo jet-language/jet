@@ -5,13 +5,13 @@ use jobs: core.jobs
 #Job(.Dev) process: fn(payload: String) { print("job:{payload}") }
 
 run: fn() {
-    queue := jobs.queue() ?? panic("{err}")
+    ^queue: jobs.queue() ?? panic("{err}")
     status: queue.status() ?? panic("{err}")
     print("queued:{status.queued} canceled:{status.canceled}")
     records: queue.inspect(16, false) ?? panic("{err}")
     loop record in records {
         events: queue.events(record.receipt.id) ?? panic("{err}")
-        states := [String]{}
+        ^states: [String]{}
         loop event in events -> states.push("{event.state}")
         key: record.receipt.idempotency_key ?? ""
         print("{key}:{record.receipt.state}:{states.join(",")}")

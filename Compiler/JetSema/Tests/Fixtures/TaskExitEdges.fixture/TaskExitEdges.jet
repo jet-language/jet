@@ -1,0 +1,79 @@
+// Each written exit that leaves a task handle unsettled is E0140, in source
+// order: a `?? return` route, `return Err(…)` in both forms, a `break` and a
+// `next` statement, then `?? break` and `?? next` routes.
+work: fn(n: Int) -> Int { n * 2 }
+
+or_return: fn(x: Int?) -> Int {
+    t: task work(1)
+    v: x ?? return 0
+    v + (t.join() ?? 0)
+}
+
+#Error
+EdgeFailure: enum {
+    Missing,
+}
+
+or_return_err: fn(x: Int?) -> Int EdgeFailure! {
+    t: task work(1)
+    v: x ?? return Err(EdgeFailure.Missing)
+    Ok(v + (t.join() ?? 0))
+}
+
+return_err: fn(x: Int) -> Int EdgeFailure! {
+    t: task work(1)
+    if x == 0 -> return Err(EdgeFailure.Missing)
+    Ok(x + (t.join() ?? 0))
+}
+
+loop_exits: fn(xs: [Int]) -> Int {
+    ^total: 0
+    loop x in xs {
+        t: task work(x)
+        if x == 3 -> break
+        if x == 4 -> next
+        total += t.join() ?? 0
+    }
+    total
+}
+
+loop_or_exits: fn(xs: [Int?]) -> Int {
+    ^total: 0
+    loop x in xs {
+        t: task work(1)
+        a: x ?? break
+        b: x ?? next
+        total += a + b + (t.join() ?? 0)
+    }
+    total
+}
+
+// Not an exit of the task's scope: the loop it breaks is inside that scope.
+outer_task: fn(xs: [Int]) -> Int {
+    t: task work(1)
+    ^total: 0
+    loop x in xs {
+        if x == 3 -> break
+        total += x
+    }
+    total + (t.join() ?? 0)
+}
+
+// Settled before each exit.
+settled_exits: fn(xs: [Int?]) -> Int {
+    ^total: 0
+    loop x in xs {
+        t: task work(1)
+        a: x ?? {
+            t.detach()
+            break
+        }
+        total += a + (t.join() ?? 0)
+    }
+    total
+}
+
+run: fn() {
+    print(or_return(Val(1)) + loop_exits([Int]{1, 2}) + loop_or_exits([Int?]{Val(1)}) + outer_task([Int]{1}) + settled_exits([Int?]{Val(1)}))
+    print((or_return_err(Val(1)) ?? 0) + (return_err(1) ?? 0))
+}

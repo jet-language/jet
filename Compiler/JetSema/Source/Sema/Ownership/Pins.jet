@@ -24,7 +24,7 @@ sema_pin_write_window: fn(argument: CallArg) -> Bool Never! {
 // is rejected.
 sema_pin_check_call: fn(args: [CallArg], diagnostics: ^[Diagnostic]) -> Bool {
     if sema_pin_write_window(args[0]) -> return true
-    diagnostics.push(sema_error("E0218", expr_span(args[0].expr), "`pin` needs a named place to pin", "a pin promises one storage location will not move, so it has to name that location instead of a temporary value", "bind the value to a `:=` name, then write `mem.pin(place)`"))
+    diagnostics.push(sema_error("E0218", expr_span(args[0].expr), "`pin` needs a named place to pin", "a pin promises one storage location will not move, so it has to name that location instead of a temporary value", "bind the value to a changeable name, then write `mem.pin(place)`"))
     false
 }
 

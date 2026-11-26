@@ -31,8 +31,8 @@
 // ============================================================================
 // VALUES, BINDINGS & TYPES
 // ============================================================================
-// `:` binds immutable (D-BIND-BARE1); `:=` binds mutable; `=` reassigns a
-// `:=` binding (S17). Local binding names never carry type annotations.
+// `:` binds immutable (D-BIND-BARE1); `^name:` binds changeable (D-BIND-MARK1); `=` reassigns a
+// changeable binding (S17). Local binding names never carry type annotations.
 
 values: fn() {
 name: "Jet" // inferred immutable binding
@@ -40,7 +40,7 @@ name: "Jet" // inferred immutable binding
     version: 0.1                 // inferred Float; always prints with `.0` (S21)
 ready: true // Bool (S11)
 
-    count := 0                     // mutable (D-BIND1)
+    ^count: 0                      // changeable (D-BIND-MARK1)
     count = count + 3              // reassign (S17)
 
     // string interpolation — expressions inside `{ }` (S8); double braces escape
@@ -56,7 +56,7 @@ wide: I64{ 9_000_000_000 } // `_` digit separators (S67)
     mask: 0xDEAD_BEEF             // hex; also 0o.. octal, 0b.. binary (S67)
     big: 6.022e23                 // float exponent (S67)
     // safe widening is implicit; narrowing is explicit (S42)
-    f := Float{ 0.0 }
+    ^f: Float{ 0.0 }
     f = small
     n: checked(Int{f}) ?? 0
 }
@@ -143,14 +143,14 @@ control: fn() {
     }
 
     // conditional loop
-    n := 10
+    ^n: 10
     loop n > 0 {
         n = n - 1
     }
 
     // source iteration; ranges are inclusive (S22), and optional stride is the
     // third comma clause (D-LOOP-COMMA1 / D-LOOP-HEADER2/D-LOOP-ADVANCE2)
-    sum := 0
+    ^sum: 0
     loop i in 1..5 {
         sum = sum + i
     }
@@ -165,11 +165,11 @@ control: fn() {
 
     // state loop — mutable initializer, condition, and optional afterthought
     // are comma clauses (D-LOOP-COMMA1 / D-LOOP-HEADER2)
-    total := 0
+    ^total: 0
     loop i in 0..<5 {
         total += i
     }
-    loop retries := 0, retries < 3 {
+    loop ^retries: 0, retries < 3 {
         retries += 1                 // afterthought omitted; advance in body
     }
 
@@ -389,14 +389,14 @@ Described: struct { x: Int }
 // List `[a, b, c]` (S37); map `["k": v]` (S38). Type shorthands `[T]` / `[K:V]`.
 
 collections: fn() {
-     nums := [Int]{ 3, 1, 2 } // list type shorthand (S65)
+     ^nums: [Int]{ 3, 1, 2 } // list type shorthand (S65)
     nums.push(4)
     nums.sort()
 
     // empty literals infer element type from context (S78); else annotate
-     seen := [Int]{} // (S78 / explicit)
+     ^seen: [Int]{} // (S78 / explicit)
 
-     fruits := [String:Float]{ "limes": 4.2 } // map shorthand (S64)
+     ^fruits: [String:Float]{ "limes": 4.2 } // map shorthand (S64)
     fruits["pears"] = 9.9                        // insert (S39)
     got: fruits.get("limes")                  // safe access produces V? (S39)
 
@@ -477,7 +477,7 @@ fixed_size_list: fn() {
 // deferred cleanup follow D-CANCELMODEL1=C at the next wait point or loop
 // iteration.
 numbers: fn(n: Int) -> Stream<Int> {
-    i := 0
+    ^i: 0
     loop i < n {
         yield i
         i += 1
@@ -576,7 +576,7 @@ deref_cell: fn(cell: Int) -> Int {
 // Visible uninitialization, gated behind `use core.mem`; write-before-read
 // proof (D-UNINIT1); body sentinel spelling (D-UNINIT-SENTINEL2).
 uninit: fn() {
-    n := Int{ uninit }
+    ^n: Int{ uninit }
     n = 7
     print("{n}")
 }

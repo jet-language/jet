@@ -3086,8 +3086,9 @@ ir_resolve_deferred: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder) Never! {
 // struct member or an Option's payload (BuildOwn.jet IRPartStep).
 // `boxed`: the member at `offset` is a recursive edge's wrapper box holding the payload.
 // `loaded`: an or-pattern already loaded `slot` in its matching alternative.
-// `window`: the subject is a write window (`if ^place == ...`), so the name
-// binds the payload's storage and an assignment to it lands in the box.
+// `window`: the subject is a write window (`if place.in_place() == ...`), so
+// the name binds the payload's storage and an assignment to it lands in the
+// box.
 IRPending: struct {
     name: String,
     slot: Int,
@@ -4590,7 +4591,7 @@ ir_op_can_stop: fn(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
     }
 }
 
-// `stopped := poll(); if stopped { stop edge }`, with poll `key`. The edge
+// `^stopped: poll(); if stopped { stop edge }`, with poll `key`. The edge
 // runs the scope's deferred statements, which move the builder's line to
 // theirs; the code after the stop point is still the statement's that
 // raised it, so its line comes back (a bounds stop later in the statement

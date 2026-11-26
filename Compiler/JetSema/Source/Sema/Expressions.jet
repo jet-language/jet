@@ -4279,6 +4279,8 @@ sema_expr_core_module_method_checked: fn(receiver: Expr, method: String, method_
     if route_value == {
         .SharedSite(lifetime) -> return SemaMethodSpecialCheck{handled: true, value: sema_call_core_global_shared(lifetime, method, type_args, args, method_span, expected, check)}
         .Source(target) -> {
+            place: sema_call_try_memory_place(target, args, method_span, expected, check)
+            if place.handled -> return place
             // An audited `core.mem` operation (SEMA_CORE_MEM_AUDITED) outside
             // `#Unsafe` is E3101 at the call, before its arguments are checked.
             audited_operation: module_name == "core.mem" && SEMA_CORE_MEM_AUDITED.contains(method)
@@ -4364,17 +4366,6 @@ sema_expr_try_method_static_routes: fn(receiver: Expr, method: String, method_sp
         .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> None
     }
     alias: module_alias ?? ""
-    if alias != "" && sema_expr_core_module_alias_visible(alias, check.scopes) {
-        ^memory: sema_call_try_memory_static(receiver, method, args, method_span, expected, check)
-        if memory.handled -> return memory
-    }
-    // `mem.address_of(place)` names the module itself as its receiver.
-    if receiver == .Ident(name, _, _) {
-        if sema_expr_core_module_alias_visible(name, check.scopes) {
-            ^memory: sema_call_try_memory_static(receiver, method, args, method_span, expected, check)
-            if memory.handled -> return memory
-        }
-    }
 
     ^owner: if receiver == {
         .Ident(name, _, _) -> name
@@ -4529,7 +4520,7 @@ sema_expr_try_method_special_routes: fn(receiver: Expr, receiver_value: TExpr, m
                     err_as: sema_expr_try_err_as(receiver, receiver_value, method, type_args, args, span, expected, check)
                     if err_as.handled -> return err_as
                 }
-                if method != "enqueue" && method != "delay" && method != "cast" && method != "swizzle" && method != "wait" && method != "start" && method != "read" && method != "write" && method != "set" && method != "clear" && method != "send" && method != "join" && method != "detach" && method != "para_map" && method != "para_filter" && method != "para_partition" && method != "para_fold" {
+                if method != "cast" && method != "swizzle" && method != "wait" && method != "start" && method != "read" && method != "write" && method != "set" && method != "clear" && method != "send" && method != "join" && method != "detach" && method != "para_map" && method != "para_filter" && method != "para_partition" && method != "para_fold" {
                     ^value_method: sema_call_try_value_method(receiver, receiver_value, method, args, span, expected, check)
                     if value_method.handled -> return value_method
                     ^builtin: sema_call_try_builtin_method(receiver, receiver_value, method, args, span, expected, check)
@@ -4564,9 +4555,6 @@ sema_expr_try_method_special_routes: fn(receiver: Expr, receiver_value: TExpr, m
     if reflection.handled -> return reflection
     ^compiler_value: sema_call_try_compiler_value_method(receiver, receiver_value, method, args, span, expected, check)
     if compiler_value.handled -> return compiler_value
-
-    ^queue: sema_call_try_job_queue_method(receiver, receiver_value, method, args, span, expected, check)
-    if queue.handled -> return queue
 
     ^tree: sema_check_service_tree_method(method, receiver, receiver_value, args, expected, span, check)
     if tree == .Val(tree_check) {
@@ -7119,7 +7107,7 @@ sema_expr_copy_fork_body: fn(subject: Expr, ty: Type, row: SemaRegistrationRowRe
 
 // A map keeps its keys and takes each value's semantic copy, written over a
 // share of the map so the result keeps the map's type and order:
-// `(() -> { made := m; loop key in made.keys() -> made[key] = made[key].copy(); made })()`.
+// `(() -> { ^made: m; loop key in made.keys() -> made[key] = made[key].copy(); made })()`.
 // A key never holds a Clock (E0502 admits only scalar, payload-free enum and
 // tuple or struct keys of those), so keeping the keys forks nothing away.
 sema_expr_copy_fork_map: fn(subject: Expr, depth: Int, span: Span) -> Expr Never! {
@@ -7135,7 +7123,7 @@ sema_expr_copy_fork_map: fn(subject: Expr, depth: Int, span: Span) -> Expr Never
 // A union takes its member's own copy, written over a share of the value so
 // each arm's copy widens to the union as it is stored; a named case wraps
 // its payload's copy back in the case:
-// `(() -> { made := u; if u == { .A(member) -> made = member.copy() … } made })()`.
+// `(() -> { ^made: u; if u == { .A(member) -> made = member.copy() … } made })()`.
 sema_expr_copy_fork_union: fn(subject: Expr, members: [Type], depth: Int, span: Span) -> Expr Never! {
     made: "__fork_union{depth}"
     member: "__fork_member{depth}"
@@ -7150,7 +7138,7 @@ sema_expr_copy_fork_union: fn(subject: Expr, members: [Type], depth: Int, span: 
     sema_expr_copy_fork_over_share(made, subject, each, span)
 }
 
-// `(() -> { made := subject; step; made })()`: `step` replaces the parts of
+// `(() -> { ^made: subject; step; made })()`: `step` replaces the parts of
 // the share `made` that hold a Clock with their copies.
 sema_expr_copy_fork_over_share: fn(made: String, subject: Expr, step: Stmt, span: Span) -> Expr Never! {
     start: Stmt.Val{binding: Binding{mutable: true, markers: [Marker]{}, reactive_upgrade: false, meta: None, name: made.copy(), name_span: span, sigil_span: None, pattern: None, ty: None, ty_span: None, init: subject, is_comptime: false, ct: None, uninit: false, arena_view: false, string_view: false, gc_promotion: None, gc_transferred: false}}

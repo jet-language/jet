@@ -55,7 +55,11 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
     }
     loop send in sends {
         reply: client.request(send.method, "http://{addr}{send.path}").send()
-        print("{send.method} {send.path}: {reply.status()} {reply.body().text(1024) ?? return} allow={reply.header("allow") ?? "-"}")
+        text: reply.body().text(1024) ?? {
+            serving.detach()
+            return
+        }
+        print("{send.method} {send.path}: {reply.status()} {text} allow={reply.header("allow") ?? "-"}")
     }
     serving.join()
 }

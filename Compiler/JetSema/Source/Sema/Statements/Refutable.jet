@@ -136,7 +136,7 @@ SemaStmtMapGroupTake: struct {
     span: Span,
 }
 
-// L0534: `group := groups.get(key) ?? fallback`, a write such as
+// L0534: `^group: groups.get(key) ?? fallback`, a write such as
 // `group.insert(0, item)`, then `groups[key] = group` copies the whole group
 // on every pass. The local still shares the entry's buffer when it is
 // written, so the write first makes it unique by copying it, strings and
@@ -257,7 +257,7 @@ sema_stmt_source_text: fn(raw: [U8], span: Span) -> String? {
     Val(text)
 }
 
-// Whether `statement` is `name := map.get(key) ?? fallback` with a mutable
+// Whether `statement` is `^name: map.get(key) ?? fallback` with a mutable
 // local `name`.
 sema_stmt_map_group_takes: fn(statement: Stmt) -> Bool {
     if statement == .Val(binding) {
@@ -339,8 +339,8 @@ sema_stmt_map_group_edit: fn(statements: [Stmt], index: Int, taken: SemaStmtMapG
     if open >= raw.len() || raw[open] != (U8{40}) -> return None
     close: sema_stmt_scan_close(raw, open + 1) ?? return None
     arguments: sema_stmt_source_text(raw, Span{start: open, end: close + 1}) ?? return None
-    // The take starts at its local's name (its statement span starts at `:=`).
-    start: taken.span.start
+    // The take starts at its local's `^` mark, just before the name span.
+    start: if taken.span.start > 0 && raw[taken.span.start - 1] == (U8{94}) -> taken.span.start - 1 else -> taken.span.start
     last: sema_compiler_index_stmt_span(statements[index + 2])
     // A `name.move()` store is spanned at `move`; only a plain store is
     // rewritten.
@@ -605,7 +605,7 @@ sema_stmt_refutable_loop_labels: fn(nested_labels: [String], label: NamedSpan?) 
     labels
 }
 
-// E0513: a `loop i := start, cond { … }` whose condition reads the mutable
+// E0513: a `loop ^i: start, cond { … }` whose condition reads the mutable
 // header binding while neither the body nor the step writes it, and whose
 // body can return to the condition, re-tests unchanged state.
 sema_stmt_check_state_loop_unchanged: fn(tables: ASTTables, init: Binding, cond: Expr, step: Stmt?, body: [Stmt], label: NamedSpan?, diagnostics: ^[Diagnostic]) Never! {
@@ -622,7 +622,7 @@ sema_stmt_check_state_loop_unchanged: fn(tables: ASTTables, init: Binding, cond:
     if !sema_stmt_state_loop_reaches_next_turn(body, label_name) {
         return
     }
-    diagnostics.push(sema_error("E0513", init.name_span, "The condition reads `{init.name}`, but nothing in the loop changes `{init.name}` before the next turn", "The header binding is set once, before the first turn; when neither the body nor the step writes it, every turn tests the same value, so the loop never ends or never starts", "Change `{init.name}` in the body or in a step, as in `loop i := 0, i < n, i += 1`; read repeated input with `loop line in io.stdin().lines()`; or stop from the body with `if test {{ break }}`"))
+    diagnostics.push(sema_error("E0513", init.name_span, "The condition reads `{init.name}`, but nothing in the loop changes `{init.name}` before the next turn", "The header binding is set once, before the first turn; when neither the body nor the step writes it, every turn tests the same value, so the loop never ends or never starts", "Change `{init.name}` in the body or in a step, as in `loop ^i: 0, i < n, i += 1`; read repeated input with `loop line in io.stdin().lines()`; or stop from the body with `if test {{ break }}`"))
 }
 
 SemaStmtNameScan: struct {
@@ -1204,6 +1204,9 @@ sema_stmt_check_refutable_fallback: fn(fallback: OrFallback, subject_ty: Type, s
                 return_tree = Val(TOrFallback.Return{value: None})
             }
             if return_tree != None {
+                // E0140: this route leaves like a `return` statement (the
+                // returned value was moved above).
+                sema_single_use_check_exit(check.state, check.context.duty_scope_depth, "return", Span{start: return_span.start, end: return_span.start + "return".len()}, check.diagnostics)
                 result.or_fallback = return_tree
                 result.statements.push(TStmt.Return{value: statement_value, span: return_span})
                 result.complete = true
@@ -1233,6 +1236,7 @@ sema_stmt_check_refutable_fallback: fn(fallback: OrFallback, subject_ty: Type, s
                     check.diagnostics.push(sema_error("E0115", route_span, "`break` only works inside a loop", "`break` and `next` steer the nearest `loop` loop", "move this inside a loop, or remove it"))
                 }
                 else -> {
+                    if sema_loop_value_resolve_frame(check.context, None) == .Val(frame_index) -> sema_single_use_check_loop_exit(check, frame_index, "break", route_span)
                     result.or_fallback = Val(TOrFallback.Break)
                     result.statements.push(TStmt.Break{label: None, span: route_span})
                     result.complete = true
@@ -1246,6 +1250,7 @@ sema_stmt_check_refutable_fallback: fn(fallback: OrFallback, subject_ty: Type, s
                 }
                 else -> {
                     if sema_loop_value_resolve_frame(check.context, None) == .Val(frame_index) {
+                        sema_single_use_check_loop_exit(check, frame_index, "next", route_span)
                         sema_ownership_check_loop_move_backedge(check.state, check.context.loop_value_frames[frame_index], check.diagnostics)
                     }
                     result.or_fallback = Val(TOrFallback.Continue)
@@ -1260,6 +1265,7 @@ sema_stmt_check_refutable_fallback: fn(fallback: OrFallback, subject_ty: Type, s
                     check.diagnostics.push(sema_error("E0405", route_span, "the `?? break` label is not an enclosing loop", "the fallback route must name an active loop label", "use an enclosing loop label"))
                 }
                 else -> {
+                    if sema_loop_value_resolve_frame(check.context, Val(label)) == .Val(frame_index) -> sema_single_use_check_loop_exit(check, frame_index, "break", route_span)
                     result.or_fallback = Val(TOrFallback.BreakLabel{label: label})
                     result.statements.push(TStmt.Break{label: Val(label), span: route_span})
                     result.complete = true
@@ -1273,6 +1279,7 @@ sema_stmt_check_refutable_fallback: fn(fallback: OrFallback, subject_ty: Type, s
                 }
                 else -> {
                     if sema_loop_value_resolve_frame(check.context, Val(label)) == .Val(frame_index) {
+                        sema_single_use_check_loop_exit(check, frame_index, "next", route_span)
                         sema_ownership_check_loop_move_backedge(check.state, check.context.loop_value_frames[frame_index], check.diagnostics)
                     }
                     result.or_fallback = Val(TOrFallback.ContinueLabel{label: label})

@@ -773,12 +773,6 @@ sema_stmt_return_allows_empty: fn(return_type: Type?) -> Bool Never! {
     sema_stmt_return_success_type(return_type) == Type.Named{name: "Unit"}
 }
 
-// `return Err(…)`: the function leaves by its failure route.
-sema_stmt_return_is_failure: fn(value: Expr?) -> Bool Never! {
-    if value == .Val(returned) && returned == .Err(_, _, _) -> return true
-    false
-}
-
 // A Result whose failure is reachable.
 sema_stmt_type_is_fallible_result: fn(ty: Type) -> Bool Never! {
     if sema_expr_unwrap_tag(ty) == {

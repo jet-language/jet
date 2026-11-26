@@ -1,0 +1,605 @@
+// Toolchain a0.0.47: a changeable name carries the write mark before it,
+// `^count: 0`, and a write window is made by `place.in_place()`, so each
+// older spelling becomes the new one with its meaning kept:
+// - `x := v` becomes `^x: v`, `_ := v` becomes `^_: v`, `loop i := 0, …`
+//   becomes `loop ^i: 0, …` and `#Persist n := v` becomes `#Persist ^n: v`;
+// - destructuring marks each name it binds: `{a, b} := v` becomes
+//   `{^a, ^b}: v` and `{left: a} := v` becomes `{left: ^a}: v`;
+// - a fence of changeable names, `<: a, b :> := 0`, becomes `^<: a, b :>: 0`;
+// - a window bound to a name, `w: ^xs[0]` or `w := ^xs[0]`, becomes
+//   `w: xs[0].in_place()`, because a window is bound with `:` only;
+// - a writing match's subject, `if ^shape == …`, becomes
+//   `if shape.in_place() == …`;
+// - a writing loop's source, `loop x in ^items`, becomes
+//   `loop x in items.in_place()`.
+// A place starts with a lower-case name (`self`, `xs`) and goes on through
+// `.name` and `[…]`; a call ends no place. So a mark on a type (`p: ^Player`,
+// `ssl: ^defs.Context`, `xs: ^[Int]`) and a call's or a receiver's mark
+// (`grow(^xs)`, `^xs.push(4)` at the start of a line, `^reader.read_line()`)
+// stay as written. A `:=` the plan can't read, such as one after a typed
+// name, is reported with SKIP and stays as written. A Jet `:=` has a blank
+// on each side and follows a lower-case name, so `${NAME:=word}`, `b:= 1`
+// and `CC := cc` are no bindings.
+// The plan reads the lexer's tokens: a Jet source's code, its strings whole
+// and its comments line by line, each code span on its own and the rest
+// whole. A source with a string quoting another language's code keeps all
+// its strings as written. A Markdown file's ```jet fences are read whole
+// and its prose by code spans; any other text is read whole, a case file
+// line by line.
+use jet_lexer.[lex_generated, TOKEN_BLOCK_COMMENT, TOKEN_LINE_COMMENT, TOKEN_RAW_STRING, TOKEN_STRING]
+
+// Text that only another language's code quoted in a string holds.
+BIND_MARK1_FOREIGN: [String]{"func ", "package main", "#include", "def ", "let mut ", ":= range"}
+
+// One rewrite: `cut` bytes at `at` become `text`.
+BindMark1Edit: struct {
+    at: Int,
+    cut: Int,
+    text: String,
+}
+
+// A file being rewritten: its bytes, its edits in order of position, the
+// sites it leaves alone, whether the text being read is a Jet string's
+// contents, whose `{name}` is an interpolation and whose `{{` is a brace,
+// and whether its strings quote another language's code.
+BindMark1Scan: struct {
+    path: String,
+    bytes: [U8],
+    edits: [BindMark1Edit],
+    skipped: [String],
+    sites: Int,
+    quoted: Bool,
+    foreign: Bool,
+}
+
+// Rewrites the changeable names and windows of one file: a Jet source
+// (`source`, or a `.jet` or `.template` path), a Markdown file, a case file
+// or any other text.
+bind_mark1_file: fn(path: String, text: String, source: Bool) -> MigrationOutcome {
+    if !text.contains(":=") && !text.contains("^") {
+        return MigrationOutcome{text: text, rewritten: 0, skipped: [String]{}}
+    }
+    ^scan: BindMark1Scan{path: path, bytes: text.bytes(), edits: [BindMark1Edit]{}, skipped: [String]{}, sites: 0, quoted: false, foreign: false}
+    if {
+        source || path.ends_with(".jet") || path.ends_with(".template") -> bind_mark1_source(scan)
+        path.ends_with(".md") -> bind_mark1_markdown(scan)
+        path.ends_with(".case") -> bind_mark1_case(scan)
+        else -> bind_mark1_text(scan, 0, scan.bytes.len())
+    }
+    if scan.sites == 0 {
+        return MigrationOutcome{text: text, rewritten: 0, skipped: scan.skipped.move()}
+    }
+    MigrationOutcome{text: bind_mark1_apply(scan), rewritten: scan.sites, skipped: scan.skipped.move()}
+}
+
+// The file's bytes with every edit made.
+bind_mark1_apply: fn(scan: BindMark1Scan) -> String {
+    ^out: [U8]{}
+    ^at: 0
+    loop edit in scan.edits {
+        loop at < edit.at {
+            out.push(scan.bytes[at])
+            at += 1
+        }
+        loop byte in edit.text.bytes() -> out.push(byte)
+        at = edit.at + edit.cut
+    }
+    loop at < scan.bytes.len() {
+        out.push(scan.bytes[at])
+        at += 1
+    }
+    String.from_bytes(out) ?? panic("{scan.path}: the rewrite is not UTF-8")
+}
+
+// A Jet source by its tokens: its code and each comment and string read
+// whole, unless one of its strings quotes another language's code.
+bind_mark1_source: fn(scan: ^BindMark1Scan) {
+    lexed: lex_generated(scan.bytes)
+    loop token in lexed.tokens {
+        if token.kind == TOKEN_STRING || token.kind == TOKEN_RAW_STRING {
+            contents: bind_mark1_word(scan.bytes, token.span.start, token.span.end)
+            if BIND_MARK1_FOREIGN.any(fn(foreign) { contents.contains(foreign) }) {
+                scan.foreign = true
+            }
+        }
+    }
+    ^code: 0
+    loop token in lexed.tokens {
+        kind: token.kind
+        quoted: kind == TOKEN_STRING || kind == TOKEN_RAW_STRING
+        if !quoted && kind != TOKEN_LINE_COMMENT && kind != TOKEN_BLOCK_COMMENT -> next
+        bind_mark1_text(scan, code, token.span.start)
+        if quoted {
+            scan.quoted = kind == TOKEN_STRING
+            bind_mark1_quoted(scan, token.span.start, token.span.end)
+            scan.quoted = false
+        } else { bind_mark1_comment(scan, token.span.start, token.span.end) }
+        code = token.span.end
+    }
+    bind_mark1_text(scan, code, scan.bytes.len())
+}
+
+// A string literal's contents, between its run of opening quote bytes and
+// the matching closing run.
+bind_mark1_quoted: fn(scan: ^BindMark1Scan, start: Int, end: Int) {
+    if scan.foreign {
+        return
+    }
+    ^quote: 0
+    loop start + quote < end && scan.bytes[start + quote] == scan.bytes[start] -> quote += 1
+    if end - start < quote * 2 {
+        return
+    }
+    bind_mark1_quoted_jet(scan, start + quote, end - quote)
+}
+
+// Quoted text from `lo` to `hi` read whole, unless it quotes another
+// language's code.
+bind_mark1_quoted_jet: fn(scan: ^BindMark1Scan, lo: Int, hi: Int) {
+    contents: bind_mark1_word(scan.bytes, lo, hi)
+    if BIND_MARK1_FOREIGN.any(fn(foreign) { contents.contains(foreign) }) {
+        return
+    }
+    bind_mark1_text(scan, lo, hi)
+}
+
+// A comment from `lo` to `hi` line by line: each line past its `//`, `///`
+// or `*` is read with its code spans on their own and the rest whole.
+bind_mark1_comment: fn(scan: ^BindMark1Scan, lo: Int, hi: Int) {
+    ^start: lo
+    loop start < hi {
+        ^end: start
+        loop end < hi && scan.bytes[end] != 10 -> end += 1
+        ^text: start
+        loop text < end && bind_mark1_blank(scan.bytes[text]) -> text += 1
+        loop text < end && (scan.bytes[text] == 47 || scan.bytes[text] == 42 || scan.bytes[text] == 33) {
+            text += 1
+        }
+        bind_mark1_spans(scan, text, end, true)
+        start = end + 1
+    }
+}
+
+// The code spans from `lo` to `hi`, the bytes between two single backticks
+// on one line, and with `whole` the text around them too.
+bind_mark1_spans: fn(scan: ^BindMark1Scan, lo: Int, hi: Int, whole: Bool) {
+    ^index: lo
+    ^rest: lo
+    loop index < hi {
+        if scan.bytes[index] != 96 {
+            index += 1
+            next
+        }
+        ^run: index
+        loop run < hi && scan.bytes[run] == 96 -> run += 1
+        if run - index != 1 {
+            index = run
+            next
+        }
+        ^close: index + 1
+        loop close < hi && scan.bytes[close] != 96 && scan.bytes[close] != 10 -> close += 1
+        if close >= hi || scan.bytes[close] != 96 {
+            index = close
+            next
+        }
+        if whole -> bind_mark1_quoted_jet(scan, rest, index)
+        bind_mark1_quoted_jet(scan, index + 1, close)
+        index = close + 1
+        rest = index
+    }
+    if whole -> bind_mark1_quoted_jet(scan, rest, hi)
+}
+
+// A case file line by line, each read whole.
+bind_mark1_case: fn(scan: ^BindMark1Scan) {
+    ^start: 0
+    loop start < scan.bytes.len() {
+        ^end: start
+        loop end < scan.bytes.len() && scan.bytes[end] != 10 -> end += 1
+        bind_mark1_quoted_jet(scan, start, end)
+        start = end + 1
+    }
+}
+
+// A Markdown file: each ```jet fence is read whole and each line of prose by
+// its code spans. Other fences stay as written.
+bind_mark1_markdown: fn(scan: ^BindMark1Scan) {
+    ^start: 0
+    // Inside a fence: 1 for a ```jet fence, 2 for any other; 0 outside.
+    ^fence: 0
+    loop start < scan.bytes.len() {
+        ^end: start
+        loop end < scan.bytes.len() && scan.bytes[end] != 10 -> end += 1
+        trimmed: bind_mark1_word(scan.bytes, start, end).trim()
+        if {
+            fence != 0 && trimmed == "```" -> fence = 0
+            fence == 1 -> bind_mark1_text(scan, start, end)
+            fence == 2 -> {}
+            trimmed.starts_with("```") -> {
+                fence = if trimmed == "```jet" || trimmed.starts_with("```jet ") -> 1 else -> 2
+            }
+            else -> bind_mark1_spans(scan, start, end, false)
+        }
+        start = end + 1
+    }
+}
+
+// Each `:=` and each window mark from `lo` to `hi`, read with `lo` as the
+// start of its text.
+bind_mark1_text: fn(scan: ^BindMark1Scan, lo: Int, hi: Int) {
+    ^index: lo
+    loop index < hi {
+        byte: scan.bytes[index]
+        if byte == 58 && index + 1 < hi && scan.bytes[index + 1] == 61 && !(index + 2 < hi && scan.bytes[index + 2] == 61) && !(index > lo && scan.bytes[index - 1] == 58) {
+            index = bind_mark1_binding(scan, lo, hi, index)
+            next
+        }
+        if byte == 94 {
+            index = bind_mark1_window(scan, lo, hi, index)
+            next
+        }
+        index += 1
+    }
+}
+
+// The `:=` at `colon`: the name, the destructuring braces or brackets or the
+// fence before it takes the mark and the `:=` becomes `:`. A window value
+// (`w := ^xs[0]`) keeps the name unmarked and becomes `w: xs[0].in_place()`.
+// In a Jet string, `{w} := …` binds an interpolated name and becomes
+// `^{w}: …`, and doubled braces destructure. A `:=` quoted on its own (in
+// a code span, quotes or parentheses), one without a blank on each side and
+// one after a capitalized name are no binding. Returns where reading goes
+// on.
+bind_mark1_binding: fn(scan: ^BindMark1Scan, lo: Int, hi: Int, colon: Int) -> Int {
+    bytes: scan.bytes
+    after: colon + 2
+    if colon == lo || !bind_mark1_blank(bytes[colon - 1]) || (after < hi && !bind_mark1_blank(bytes[after])) {
+        return after
+    }
+    ^before: colon - 1
+    loop before >= lo && (bytes[before] == 32 || bytes[before] == 9) -> before -= 1
+    if before < lo -> return after
+    last: bytes[before]
+    // The marks the site inserts, in order, before its `:=` becomes `:`.
+    ^marks: [Int]{}
+    if bind_mark1_name_byte(last) {
+        start: bind_mark1_name_start(bytes, lo, before + 1)
+        if bytes[start] >= 48 && bytes[start] <= 57 {
+            bind_mark1_skip(scan, colon, "a `:=` after a number")
+            return after
+        }
+        if start > lo && bytes[start - 1] == 36 {
+            bind_mark1_skip(scan, colon, "a `:=` after a template's `$` name")
+            return after
+        }
+        ^prev: start - 1
+        loop prev >= lo && (bytes[prev] == 32 || bytes[prev] == 9) -> prev -= 1
+        if prev >= lo && bytes[prev] == 58 {
+            bind_mark1_skip(scan, colon, "a `:=` after a typed name (`name: Type := value`)")
+            return after
+        }
+        if bytes[start] >= 65 && bytes[start] <= 90 -> return after
+        if prev >= lo && (bytes[prev] == 94 || bytes[prev] == 46) {
+            bind_mark1_skip(scan, colon, "a `:=` after a marked name or a field")
+            return after
+        }
+        ^value: after
+        loop value < hi && (bytes[value] == 32 || bytes[value] == 9) -> value += 1
+        if value + 1 < hi && bytes[value] == 94 && bind_mark1_place_start(bytes[value + 1]) {
+            end: bind_mark1_place_end(bytes, value + 1, hi)
+            if end < 0 || !bind_mark1_window_ends(bytes, lo, start, end, hi) {
+                bind_mark1_skip(scan, colon, "a `:=` whose value marks something other than a place")
+                return after
+            }
+            if !bind_mark1_fits(scan, before + 1) -> return after
+            scan.edits.push(BindMark1Edit{at: before + 1, cut: after - before - 1, text: ":"})
+            scan.edits.push(BindMark1Edit{at: value, cut: 1, text: ""})
+            scan.edits.push(BindMark1Edit{at: end, cut: 0, text: ".in_place()"})
+            scan.sites += 1
+            return end
+        }
+        marks.push(start)
+    } else if last == 125 || last == 93 {
+        open: bind_mark1_open_brace(bytes, lo, before)
+        doubled: scan.quoted && last == 125 && open >= 0 && open + 1 < before && bytes[open + 1] == 123 && bytes[before - 1] == 125
+        if scan.quoted && last == 125 && open >= 0 && !doubled {
+            // A name written around the interpolation (`__f{slot}`) takes
+            // the mark before all of it.
+            ^mark: open
+            loop mark > lo && bind_mark1_name_byte(bytes[mark - 1]) -> mark -= 1
+            marks.push(mark)
+        } else {
+            inner_open: if doubled -> open + 1 else -> open
+            inner_close: if doubled -> before - 1 else -> before
+            if open < 0 || !bind_mark1_members(bytes, inner_open, inner_close, marks) {
+                bind_mark1_skip(scan, colon, "a destructuring `:=` whose names the plan can't read")
+                return after
+            }
+        }
+    } else if last == 62 && before - 1 >= lo && bytes[before - 1] == 58 {
+        ^fence: before - 2
+        loop fence > lo && !(bytes[fence - 1] == 60 && bytes[fence] == 58) && bytes[fence] != 10 {
+            fence -= 1
+        }
+        if fence <= lo || bytes[fence - 1] != 60 || bytes[fence] != 58 {
+            bind_mark1_skip(scan, colon, "a fenced `:=` with no `<:` on its line")
+            return after
+        }
+        marks.push(fence - 1)
+    } else if last == 96 || last == 34 || last == 39 || last == 40 { return after } else {
+        bind_mark1_skip(scan, colon, "a `:=` after something other than a name, braces or a fence")
+        return after
+    }
+    first: if marks.len() > 0 -> marks[0] else -> before + 1
+    if !bind_mark1_fits(scan, first) -> return after
+    loop mark in marks -> scan.edits.push(BindMark1Edit{at: mark, cut: 0, text: "^"})
+    scan.edits.push(BindMark1Edit{at: before + 1, cut: after - before - 1, text: ":"})
+    scan.sites += 1
+    after
+}
+
+// The `^` at `caret`: a window when it marks a place bound to a name at the
+// start of its line (`w: ^xs[0]`), a writing match's subject
+// (`if ^shape ==`) or a writing loop's source (`in ^items`). Returns where
+// reading goes on.
+bind_mark1_window: fn(scan: ^BindMark1Scan, lo: Int, hi: Int, caret: Int) -> Int {
+    bytes: scan.bytes
+    if caret + 1 >= hi || !bind_mark1_place_start(bytes[caret + 1]) -> return caret + 1
+    if caret > lo && (bytes[caret - 1] == 94 || bind_mark1_name_byte(bytes[caret - 1])) {
+        return caret + 1
+    }
+    end: bind_mark1_place_end(bytes, caret + 1, hi)
+    if end < 0 -> return caret + 1
+    ^before: caret - 1
+    loop before >= lo && (bytes[before] == 32 || bytes[before] == 9) -> before -= 1
+    if before < lo -> return caret + 1
+    last: bytes[before]
+    window: if {
+        last == 58 -> bind_mark1_named_window(bytes, lo, before, end, hi)
+        bind_mark1_word_before(bytes, lo, before) == "if" -> bind_mark1_compares_after(bytes, end, hi)
+        bind_mark1_word_before(bytes, lo, before) == "in" -> bind_mark1_loop_source_ends(bytes, end, hi)
+        else -> false
+    }
+    if !window || !bind_mark1_fits(scan, caret) -> return caret + 1
+    scan.edits.push(BindMark1Edit{at: caret, cut: 1, text: ""})
+    scan.edits.push(BindMark1Edit{at: end, cut: 0, text: ".in_place()"})
+    scan.sites += 1
+    end
+}
+
+// Whether the `:` at `colon` ends a plain name that starts its line and the
+// window from `colon` to `end` ends it: a window bound to a name. A marked
+// name (`^w: ^xs`), a field and a member of a record or a call are not.
+bind_mark1_named_window: fn(bytes: [U8], lo: Int, colon: Int, end: Int, hi: Int) -> Bool {
+    ^name_end: colon
+    loop name_end > lo && (bytes[name_end - 1] == 32 || bytes[name_end - 1] == 9) -> name_end -= 1
+    start: bind_mark1_name_start(bytes, lo, name_end)
+    if start == name_end || !bind_mark1_place_start(bytes[start]) -> return false
+    bind_mark1_line_starts(bytes, lo, start) && bind_mark1_window_ends(bytes, lo, start, end, hi)
+}
+
+// Whether the line of the binding whose name starts at `start` ends at
+// `end`, and the next line is no deeper than it. A deeper next line makes
+// it a nested key, such as YAML's `base: ^b` over its indented fields.
+bind_mark1_window_ends: fn(bytes: [U8], lo: Int, start: Int, end: Int, hi: Int) -> Bool {
+    if !bind_mark1_line_ends(bytes, end, hi) -> return false
+    bind_mark1_indent_after(bytes, end, hi) <= bind_mark1_indent_before(bytes, lo, start)
+}
+
+// The blank space before `at` back to the start of its line.
+bind_mark1_indent_before: fn(bytes: [U8], lo: Int, at: Int) -> Int {
+    ^index: at
+    loop index > lo && (bytes[index - 1] == 32 || bytes[index - 1] == 9) -> index -= 1
+    at - index
+}
+
+// The blank space that starts the line after the one holding `at` (after
+// a line break or a quoted `\n`); 0 when no line follows before `hi`.
+bind_mark1_indent_after: fn(bytes: [U8], at: Int, hi: Int) -> Int {
+    ^index: at
+    loop index < hi && bytes[index] != 10 && !(bytes[index] == 92 && index + 1 < hi && bytes[index + 1] == 110) {
+        index += 1
+    }
+    if index >= hi -> return 0
+    index += if bytes[index] == 10 -> 1 else -> 2
+    ^indent: 0
+    loop index + indent < hi && (bytes[index + indent] == 32 || bytes[index + indent] == 9) {
+        indent += 1
+    }
+    indent
+}
+
+// Whether only blank space stands between the start of a statement and
+// `at`: the start of the line, `lo`, a quoted line break (`\n`), a `;`, or
+// a block's `{` with blank space after it and before it (`fn() { w: …`).
+bind_mark1_line_starts: fn(bytes: [U8], lo: Int, at: Int) -> Bool {
+    ^index: at - 1
+    loop index >= lo && (bytes[index] == 32 || bytes[index] == 9) -> index -= 1
+    if index < lo || bytes[index] == 10 || bytes[index] == 59 -> return true
+    if bytes[index] == 123 {
+        ^brace: index
+        loop brace > lo && bytes[brace - 1] == 123 -> brace -= 1
+        return index + 1 < at && brace > lo && bind_mark1_blank(bytes[brace - 1])
+    }
+    bytes[index] == 110 && index - 1 >= lo && bytes[index - 1] == 92
+}
+
+// Whether nothing but blank space, a comment, a `;`, a `}` or a line break
+// (or a quoted one) follows `at`.
+bind_mark1_line_ends: fn(bytes: [U8], at: Int, hi: Int) -> Bool {
+    ^index: at
+    loop index < hi && (bytes[index] == 32 || bytes[index] == 9) -> index += 1
+    if index >= hi -> return true
+    byte: bytes[index]
+    if byte == 10 || byte == 13 || byte == 59 || byte == 125 -> return true
+    if byte == 47 -> return index + 1 < hi && bytes[index + 1] == 47
+    byte == 92 && index + 1 < hi && bytes[index + 1] == 110
+}
+
+// Whether `==` follows `at`, past blank space: a match subject.
+bind_mark1_compares_after: fn(bytes: [U8], at: Int, hi: Int) -> Bool {
+    ^index: at
+    loop index < hi && bytes[index] == 32 -> index += 1
+    index + 1 < hi && bytes[index] == 61 && bytes[index + 1] == 61
+}
+
+// Whether a loop's source ends at `at`: its body's `{` or `->`, a `,` before
+// another clause, or the end of the line follows.
+bind_mark1_loop_source_ends: fn(bytes: [U8], at: Int, hi: Int) -> Bool {
+    ^index: at
+    loop index < hi && bytes[index] == 32 -> index += 1
+    if index >= hi -> return true
+    byte: bytes[index]
+    byte == 123 || byte == 44 || byte == 10 || (byte == 45 && index + 1 < hi && bytes[index + 1] == 62)
+}
+
+// The word that ends at `at`, or "" when `at` holds no name byte. A quoted
+// escape's letter is not part of the word.
+bind_mark1_word_before: fn(bytes: [U8], lo: Int, at: Int) -> String {
+    if !bind_mark1_name_byte(bytes[at]) -> return ""
+    bind_mark1_word(bytes, bind_mark1_name_start(bytes, lo, at + 1), at + 1)
+}
+
+// Where the name that ends before `end` starts. A quoted escape's letter
+// (the `n` of `\n`) is not part of it.
+bind_mark1_name_start: fn(bytes: [U8], lo: Int, end: Int) -> Int {
+    ^start: end
+    loop start > lo && bind_mark1_name_byte(bytes[start - 1]) && !(start - 2 >= lo && bytes[start - 2] == 92) {
+        start -= 1
+    }
+    start
+}
+
+// Where the place that starts at `start` ends: a lower-case name, then any
+// `.name` and `[…]`; -1 when a `.` leads to a capitalized name (a type's
+// path) or a bracket doesn't close before `hi`. A call ends no place, so
+// `^reader.read_line()` is a receiver's mark.
+bind_mark1_place_end: fn(bytes: [U8], start: Int, hi: Int) -> Int {
+    ^at: start
+    loop at < hi && bind_mark1_name_byte(bytes[at]) -> at += 1
+    loop at < hi {
+        byte: bytes[at]
+        if byte == 46 && at + 1 < hi && bind_mark1_name_byte(bytes[at + 1]) {
+            if !bind_mark1_place_start(bytes[at + 1]) -> return -1
+            at += 1
+            loop at < hi && bind_mark1_name_byte(bytes[at]) -> at += 1
+        } else if byte == 91 {
+            at = bind_mark1_close(bytes, at, hi)
+            if at < 0 -> return -1
+        } else { break }
+    }
+    at
+}
+
+// The index after the bracket that closes the one at `open`, or -1.
+bind_mark1_close: fn(bytes: [U8], open: Int, hi: Int) -> Int {
+    ^depth: 0
+    ^at: open
+    loop at < hi {
+        byte: bytes[at]
+        if byte == 40 || byte == 91 || byte == 123 -> depth += 1
+        if byte == 41 || byte == 93 || byte == 125 {
+            depth -= 1
+            if depth == 0 -> return at + 1
+        }
+        at += 1
+    }
+    -1
+}
+
+// The `{` that opens the destructuring whose `}` is at `close`, or -1.
+bind_mark1_open_brace: fn(bytes: [U8], lo: Int, close: Int) -> Int {
+    ^depth: 0
+    ^at: close
+    loop at >= lo {
+        byte: bytes[at]
+        if byte == 41 || byte == 93 || byte == 125 -> depth += 1
+        if byte == 40 || byte == 91 || byte == 123 {
+            depth -= 1
+            if depth == 0 -> return at
+        }
+        at -= 1
+    }
+    -1
+}
+
+// The marks a destructuring between `open` and `close` takes: one before
+// each name it binds, a pun (`a`) or a renamed field's name (`left: a`).
+// False when a member is neither, such as a nested pattern.
+bind_mark1_members: fn(bytes: [U8], open: Int, close: Int, marks: ^[Int]) -> Bool {
+    ^start: open + 1
+    ^depth: 0
+    ^at: open + 1
+    loop at <= close {
+        if at == close || (depth == 0 && bytes[at] == 44) {
+            if !bind_mark1_member(bytes, start, at, marks) -> return false
+            start = at + 1
+        } else if bytes[at] == 40 || bytes[at] == 91 || bytes[at] == 123 { depth += 1 } else if bytes[at] == 41 || bytes[at] == 93 || bytes[at] == 125 {
+            depth -= 1
+        }
+        at += 1
+    }
+    true
+}
+
+// The mark one destructuring member from `lo` to `hi` takes; `_` and a name
+// already marked take none.
+bind_mark1_member: fn(bytes: [U8], lo: Int, hi: Int, marks: ^[Int]) -> Bool {
+    ^start: lo
+    loop start < hi && bind_mark1_blank(bytes[start]) -> start += 1
+    ^end: hi
+    loop end > start && bind_mark1_blank(bytes[end - 1]) -> end -= 1
+    if start >= end || bytes[start] == 94 -> return true
+    ^name_end: start
+    loop name_end < end && bind_mark1_name_byte(bytes[name_end]) -> name_end += 1
+    if name_end == end -> return bind_mark1_mark_name(bytes, start, end, marks)
+    ^bound: name_end
+    loop bound < end && bind_mark1_blank(bytes[bound]) -> bound += 1
+    if bound >= end || bytes[bound] != 58 -> return false
+    bound += 1
+    loop bound < end && bind_mark1_blank(bytes[bound]) -> bound += 1
+    if bound < end && bytes[bound] == 94 -> return true
+    ^bound_end: bound
+    loop bound_end < end && bind_mark1_name_byte(bytes[bound_end]) -> bound_end += 1
+    if bound_end != end || bound == end -> return false
+    bind_mark1_mark_name(bytes, bound, end, marks)
+}
+
+// Marks the name from `start` to `end`, unless it is `_`; false when it
+// starts with a digit.
+bind_mark1_mark_name: fn(bytes: [U8], start: Int, end: Int, marks: ^[Int]) -> Bool {
+    if bytes[start] >= 48 && bytes[start] <= 57 -> return false
+    if end - start == 1 && bytes[start] == 95 -> return true
+    marks.push(start)
+    true
+}
+
+// Whether a site's first edit at `at` comes after every edit made so far.
+bind_mark1_fits: fn(scan: ^BindMark1Scan, at: Int) -> Bool {
+    if scan.edits.len() == 0 -> return true
+    last: scan.edits[scan.edits.len() - 1]
+    if at >= last.at + last.cut -> return true
+    bind_mark1_skip(scan, at, "a site inside one already rewritten")
+    false
+}
+
+bind_mark1_skip: fn(scan: ^BindMark1Scan, at: Int, reason: String) {
+    ^line: 1
+    loop index in 0..<at {
+        if scan.bytes[index] == 10 -> line += 1
+    }
+    scan.skipped.push("{scan.path}:{line}: {reason}")
+}
+
+// A place's first byte: a lower-case letter or `_`.
+bind_mark1_place_start: fn(byte: U8) -> Bool { (byte >= 97 && byte <= 122) || byte == 95 }
+
+bind_mark1_name_byte: fn(byte: U8) -> Bool {
+    (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || (byte >= 48 && byte <= 57) || byte == 95
+}
+
+bind_mark1_blank: fn(byte: U8) -> Bool { byte == 32 || byte == 9 || byte == 10 || byte == 13 }
+
+bind_mark1_word: fn(bytes: [U8], start: Int, end: Int) -> String {
+    String.from_bytes(bytes[start..<end]) ?? ""
+}

@@ -398,23 +398,23 @@ native_test_session: fn(root: String, program: String, flags: ^^[String]) -> Nat
     NativeSession.start(native_test_files.join(out, "prog"), native_test_files.join(root, "output.txt")) ?? panic("start: {err.detail}")
 }
 
-NATIVE_TEST_PROGRAM: "double: fn(x: Int) -> Int {{\n    y: x * 2\n    y\n}}\n\nrun: fn() {{\n    count := 0\n    loop i in 0..<2 {{\n        count += double(i)\n    }}\n    print(\"count {{count}}\")\n}}\n"
+NATIVE_TEST_PROGRAM: "double: fn(x: Int) -> Int {{\n    y: x * 2\n    y\n}}\n\nrun: fn() {{\n    ^count: 0\n    loop i in 0..<2 {{\n        count += double(i)\n    }}\n    print(\"count {{count}}\")\n}}\n"
 
 // At O2 `sum_squares` is inlined into `run`; the count comes from the
 // program's arguments, so the loop is not folded away.
-NATIVE_TEST_INLINED: "use process: core.process\n\nsum_squares: fn(n: Int) -> Int {{\n    total := 0\n    loop i in 0..<n {{\n        total += i * i\n        if total < 0 -> break\n    }}\n    total\n}}\n\nrun: fn() {{\n    n: Int.parse(process.args().get(0) ?? \"1000\") ?? 1000\n    print(\"{{sum_squares(n)}}\")\n}}\n"
+NATIVE_TEST_INLINED: "use process: core.process\n\nsum_squares: fn(n: Int) -> Int {{\n    ^total: 0\n    loop i in 0..<n {{\n        total += i * i\n        if total < 0 -> break\n    }}\n    total\n}}\n\nrun: fn() {{\n    n: Int.parse(process.args().get(0) ?? \"1000\") ?? 1000\n    print(\"{{sum_squares(n)}}\")\n}}\n"
 
 // At O2 `early` (line 4) is inlined into `host` (lines 13-17), whose own
 // code lies after line 9; `middle` is recursive, so line 9 keeps its own
 // code there. A break on line 9 belongs to `middle` only.
-NATIVE_TEST_LATER_LINE: "use process: core.process\n\nearly: fn(n: Int) -> Int {{\n    n * 3 + 1\n}}\n\nmiddle: fn(n: Int) -> Int {{\n    if n <= 0 -> return 1\n    total := middle(n - 1) + n\n    total * 2\n}}\n\nhost: fn(n: Int) -> Int {{\n    a := early(n)\n    loop k in 0..<n -> a += early(k)\n    a\n}}\n\nrun: fn() {{\n    n: Int.parse(process.args().get(0) ?? \"5\") ?? 5\n    first: host(n)\n    print(\"{{first}} {{middle(first % 7)}}\")\n}}\n"
+NATIVE_TEST_LATER_LINE: "use process: core.process\n\nearly: fn(n: Int) -> Int {{\n    n * 3 + 1\n}}\n\nmiddle: fn(n: Int) -> Int {{\n    if n <= 0 -> return 1\n    ^total: middle(n - 1) + n\n    total * 2\n}}\n\nhost: fn(n: Int) -> Int {{\n    ^a: early(n)\n    loop k in 0..<n -> a += early(k)\n    a\n}}\n\nrun: fn() {{\n    n: Int.parse(process.args().get(0) ?? \"5\") ?? 5\n    first: host(n)\n    print(\"{{first}} {{middle(first % 7)}}\")\n}}\n"
 
-NATIVE_TEST_SPLIT: "sum_squares: fn(n: Int) -> Int {{\n    total := 0\n    loop i in 0..<n -> total += i * i\n    return total\n}}\n\nrun: fn() {{ print(\"{{sum_squares(1000)}}\") }}\n"
+NATIVE_TEST_SPLIT: "sum_squares: fn(n: Int) -> Int {{\n    ^total: 0\n    loop i in 0..<n -> total += i * i\n    return total\n}}\n\nrun: fn() {{ print(\"{{sum_squares(1000)}}\") }}\n"
 
 // A one-line loop, then a recursive call: `next` must run the loop whole
 // and, in fib's outer frame, run past the traps its deeper calls reach.
 // fib's argument depends on the loop, so the call is not folded away.
-NATIVE_TEST_LOOP: "fib: fn(n: Int) -> Int {{\n    if n < 2 -> return n\n    left: fib(n - 1)\n    right: fib(n - 2)\n    left + right\n}}\n\nrun: fn() {{\n    total := 0\n    loop i in 0..<3000000 -> total += i\n    answer: fib(15 + total % 2)\n    print(\"{{total}} {{answer}}\")\n}}\n"
+NATIVE_TEST_LOOP: "fib: fn(n: Int) -> Int {{\n    if n < 2 -> return n\n    left: fib(n - 1)\n    right: fib(n - 2)\n    left + right\n}}\n\nrun: fn() {{\n    ^total: 0\n    loop i in 0..<3000000 -> total += i\n    answer: fib(15 + total % 2)\n    print(\"{{total}} {{answer}}\")\n}}\n"
 
 // A ring buffer whose DebugView lists its items in order, in the Prelude's
 // DebugItem rows. A view is a DebugView implementation: a build keeps the
@@ -479,7 +479,7 @@ NATIVE_TEST_LOUD: "use {{\n    process: core.process\n    files: core.files\n}}\
 }
 
 // A view that runs far past the evaluation budget.
-NATIVE_TEST_SPIN: "use process: core.process\n\nSpin: struct {{\n    count: Int,\n\n    impl DebugView {{\n        debug_view: fn(self) -> [DebugItem] Never! {{\n            total := 0\n            loop i in 0..<self.count -> total += i % 7\n            [DebugItem]{{DebugItem{{label: \"total\", value: \"{{total}}\"}}}}\n        }}\n    }}\n}}\n\nrun: fn() {{\n    spin: Spin{{count: 1000000000000000}}\n    if process.args().len() > 5 -> print(\"{{spin.debug_view().len()}}\")\n    print(\"spun {{spin.count > 0}}\")\n}}\n"
+NATIVE_TEST_SPIN: "use process: core.process\n\nSpin: struct {{\n    count: Int,\n\n    impl DebugView {{\n        debug_view: fn(self) -> [DebugItem] Never! {{\n            ^total: 0\n            loop i in 0..<self.count -> total += i % 7\n            [DebugItem]{{DebugItem{{label: \"total\", value: \"{{total}}\"}}}}\n        }}\n    }}\n}}\n\nrun: fn() {{\n    spin: Spin{{count: 1000000000000000}}\n    if process.args().len() > 5 -> print(\"{{spin.debug_view().len()}}\")\n    print(\"spun {{spin.count > 0}}\")\n}}\n"
 
 #Test("a_debug_view_past_its_budget_is_stopped_and_the_program_runs_on") {
     scratch: native_test_files.temp_dir("jet-debug-spin") ?? panic("scratch: {err}")
@@ -644,7 +644,7 @@ native_test_frame_end: fn(session: NativeSession, pc: Int) -> String {
 // storage stays for its loans but holds the fields only around them, so
 // `items` is either the true list or unavailable at a stop in later, never
 // the stale bytes there (an empty list).
-NATIVE_TEST_SCATTERED: "early: fn(n: Int) -> [Int] {{\n    items := [Int]{{}}\n    loop k in 0..<n -> items.push(k * 3)\n    items\n}}\n\nlater: fn(items: [Int]) -> Int {{\n    total := 0\n    loop v in items -> total += v\n    total\n}}\n\nrun: fn() {{\n    xs: early(5)\n    print(later(xs))\n}}\n"
+NATIVE_TEST_SCATTERED: "early: fn(n: Int) -> [Int] {{\n    ^items: [Int]{{}}\n    loop k in 0..<n -> items.push(k * 3)\n    items\n}}\n\nlater: fn(items: [Int]) -> Int {{\n    ^total: 0\n    loop v in items -> total += v\n    total\n}}\n\nrun: fn() {{\n    xs: early(5)\n    print(later(xs))\n}}\n"
 
 #Test("an_optimized_stop_never_shows_a_scattered_list_as_empty") {
     lines: NATIVE_TEST_SCATTERED.split("\n").to_list()
@@ -754,7 +754,7 @@ NATIVE_TEST_FALLIBLE_RUN: "run: fn() Err! {{\n    n: 21\n    print(\"got {{n * 2
     native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")
 }
 
-NATIVE_TEST_REVERSE: "double: fn(x: Int) -> Int {{\n    y: x * 2\n    y\n}}\n\nrun: fn() {{\n    total := 0\n    loop k in 0..<3 {{\n        d: double(k)\n        total += d\n    }}\n    print(\"total {{total}}\")\n}}\n"
+NATIVE_TEST_REVERSE: "double: fn(x: Int) -> Int {{\n    y: x * 2\n    y\n}}\n\nrun: fn() {{\n    ^total: 0\n    loop k in 0..<3 {{\n        d: double(k)\n        total += d\n    }}\n    print(\"total {{total}}\")\n}}\n"
 
 // A reverse step made after a seek (`rn`) and a step (`n`) runs the seek
 // and the step again with its probes in: the step's run passes the probes
@@ -817,7 +817,7 @@ NATIVE_TEST_REVERSE: "double: fn(x: Int) -> Int {{\n    y: x * 2\n    y\n}}\n\nr
 // A task keeps the -O2 loop from folding away. `double` is inlined into
 // `run`, and `d` lives in the register that holds the inlined `y` from line
 // 15 to its last read on line 16; on line 17 it has no value.
-NATIVE_TEST_RECOVER: "bump: fn(rounds: Int) -> Int {{\n    rounds * 2\n}}\n\ndouble: fn(x: Int) -> Int {{\n    y: x * 2\n    y\n}}\n\nrun: fn() {{\n    helper: task bump(3)\n    total := 0\n    passes := 0\n    loop k in 0..<3 {{\n        d: double(k)\n        total += d\n        passes += k\n    }}\n    print(\"total {{total}} {{passes}} {{helper.join() ?? 0}}\")\n}}\n"
+NATIVE_TEST_RECOVER: "bump: fn(rounds: Int) -> Int {{\n    rounds * 2\n}}\n\ndouble: fn(x: Int) -> Int {{\n    y: x * 2\n    y\n}}\n\nrun: fn() {{\n    helper: task bump(3)\n    ^total: 0\n    ^passes: 0\n    loop k in 0..<3 {{\n        d: double(k)\n        total += d\n        passes += k\n    }}\n    print(\"total {{total}} {{passes}} {{helper.join() ?? 0}}\")\n}}\n"
 
 // An -O2 image keeps no place for `d` on line 17, past its last read: `why`
 // asks for a recovery, and the -O0 image of the same source, run to the
@@ -1121,7 +1121,7 @@ NATIVE_TEST_RECOVER: "bump: fn(rounds: Int) -> Int {{\n    rounds * 2\n}}\n\ndou
 
 // Two instances of one generic module: at O1 and O2 each instance's `bump`
 // is inlined into `run`, two copies of one line.
-NATIVE_TEST_GENERIC_MODULE: "use core.process\n\ncounter: module<T>(start: Int) {{\n    HITS: start\n\n    bump: fn(by: Int) -> Int {{\n        total := HITS + by\n        return total\n    }}\n}}\n\nsmall: counter<Int>(8)\n\nlarge: counter<Int>(64)\n\nrun: fn() {{\n    by: process.args().len() + 1\n    print(\"{{small.bump(by)}}\")\n    print(\"{{large.bump(by)}}\")\n}}\n"
+NATIVE_TEST_GENERIC_MODULE: "use core.process\n\ncounter: module<T>(start: Int) {{\n    HITS: start\n\n    bump: fn(by: Int) -> Int {{\n        ^total: HITS + by\n        return total\n    }}\n}}\n\nsmall: counter<Int>(8)\n\nlarge: counter<Int>(64)\n\nrun: fn() {{\n    by: process.args().len() + 1\n    print(\"{{small.bump(by)}}\")\n    print(\"{{large.bump(by)}}\")\n}}\n"
 
 #Test("a_generic_module_member_line_stops_in_each_inlined_instance") {
     levels: [String]{"-O1", "-O2"}
@@ -1147,7 +1147,7 @@ NATIVE_TEST_GENERIC_MODULE: "use core.process\n\ncounter: module<T>(start: Int) 
 // other threads, ends the program with a stop's status, 70, while the main
 // thread waits for it, so the exit kills the main thread before the
 // worker's own exit stop.
-NATIVE_TEST_WORKER_EXIT: "use process: core.process\n\nhalf: fn(n: Int) -> Int {{\n    n /% 2\n}}\n\nspin: fn(n: Int) -> Int {{\n    total := 0\n    loop i in 0..<n -> total += i\n    total\n}}\n\nwork: fn(n: Int) -> Int {{\n    loop k in 0..<3 {{\n        spinning: task spin(1000000000 + k)\n        spinning.detach()\n    }}\n    total := 0\n    loop i in 0..<n -> total += half(i)\n    print(\"total {{total}}\")\n    process.exit(70)\n    total\n}}\n\nrun: fn() {{\n    results := [Int]{{}}\n    task.group big(stack: 201326592) {{\n        worker: task work(7)\n        results.push(worker.join() ?? panic(\"the worker failed\"))\n    }}\n    print(\"{{results[0]}}\")\n}}\n"
+NATIVE_TEST_WORKER_EXIT: "use process: core.process\n\nhalf: fn(n: Int) -> Int {{\n    n /% 2\n}}\n\nspin: fn(n: Int) -> Int {{\n    ^total: 0\n    loop i in 0..<n -> total += i\n    total\n}}\n\nwork: fn(n: Int) -> Int {{\n    loop k in 0..<3 {{\n        spinning: task spin(1000000000 + k)\n        spinning.detach()\n    }}\n    ^total: 0\n    loop i in 0..<n -> total += half(i)\n    print(\"total {{total}}\")\n    process.exit(70)\n    total\n}}\n\nrun: fn() {{\n    ^results: [Int]{{}}\n    task.group big(stack: 201326592) {{\n        worker: task work(7)\n        results.push(worker.join() ?? panic(\"the worker failed\"))\n    }}\n    print(\"{{results[0]}}\")\n}}\n"
 
 #Test("a_worker_s_stopping_exit_pauses_and_ends_after_its_breakpoint_is_deleted") {
     scratch: native_test_files.temp_dir("jet-debug-worker-exit") ?? panic("scratch: {err}")
@@ -1231,7 +1231,7 @@ NATIVE_TEST_SIGNALED: "use sys: core.sys\n\ncrash: fn(n: Int) -> Int {{\n    #Un
 // A copy the runtime makes from an address the program never mapped
 // (mem.list_append from 0x40; a release build, so no checked access stops
 // it first) faults inside the runtime's copy routine.
-NATIVE_TEST_RUNTIME_FAULT: "use mem: core.mem\n\nspill: fn(address: Int, count: Int) -> Int {{\n    held := [U8]{{}}\n    #Unsafe(\"the program copies from an address it never mapped, to fault\") {{\n        _ := mem.list_append(held, mem.from_addr<U8>(address), count)\n    }}\n    held.len()\n}}\n\nrun: fn() {{\n    print(\"before the fault\")\n    print(spill(64, 100000))\n}}\n"
+NATIVE_TEST_RUNTIME_FAULT: "use mem: core.mem\n\nspill: fn(address: Int, count: Int) -> Int {{\n    ^held: [U8]{{}}\n    #Unsafe(\"the program copies from an address it never mapped, to fault\") {{\n        ^_: mem.list_append(held, mem.from_addr<U8>(address), count)\n    }}\n    held.len()\n}}\n\nrun: fn() {{\n    print(\"before the fault\")\n    print(spill(64, 100000))\n}}\n"
 
 #Test("a_fault_inside_a_runtime_routine_shows_the_routines_the_instruction_and_the_address") {
     scratch: native_test_files.temp_dir("jet-debug-runtime-fault") ?? panic("scratch: {err}")
@@ -1245,7 +1245,7 @@ NATIVE_TEST_RUNTIME_FAULT: "use mem: core.mem\n\nspill: fn(address: Int, count: 
     faulted: session.command("c", first.stop, "prog.jet", lines) ?? panic("continue: {err.detail}")
     assert(faulted.text.contains("Program received SIGSEGV  prog.jet:6  in spill()\n  through jet_rt_mem_move\n  fault address 0x40  pc 0x"), faulted.text)
     assert(faulted.text.contains(" <jet_rt_mem_move+"), faulted.text)
-    assert(faulted.text.contains("6 |         _ := mem.list_append(held, mem.from_addr<U8>(address), count)        <- here\n"), faulted.text)
+    assert(faulted.text.contains("6 |         ^_: mem.list_append(held, mem.from_addr<U8>(address), count)        <- here\n"), faulted.text)
     // `bt` lists the routine's frame above the user's frames, numbered
     // with them.
     shown: session.command("bt", faulted.stop, "prog.jet", lines) ?? panic("bt: {err.detail}")
@@ -1290,7 +1290,7 @@ NATIVE_TEST_RUNTIME_FAULT: "use mem: core.mem\n\nspill: fn(address: Int, count: 
 // `square` (line 3) inlined into `sum_squares`, called on line 8, which is
 // inlined into `run`, called on line 16; at -O2 Core's `args_from_argv`
 // is inlined into `args`, which calls it in Process.jet.
-NATIVE_TEST_NESTED: "use process: core.process\n\nsquare: fn(i: Int) -> Int {{ i * i }}\n\nsum_squares: fn(n: Int) -> Int {{\n    total := 0\n    loop i in 0..<n {{\n        sq: square(i)\n        total += sq\n    }}\n    total\n}}\n\nrun: fn() {{\n    n: Int.parse(process.args().get(0) ?? \"1000\") ?? 1000\n    print(\"{{sum_squares(n)}}\")\n}}\n"
+NATIVE_TEST_NESTED: "use process: core.process\n\nsquare: fn(i: Int) -> Int {{ i * i }}\n\nsum_squares: fn(n: Int) -> Int {{\n    ^total: 0\n    loop i in 0..<n {{\n        sq: square(i)\n        total += sq\n    }}\n    total\n}}\n\nrun: fn() {{\n    n: Int.parse(process.args().get(0) ?? \"1000\") ?? 1000\n    print(\"{{sum_squares(n)}}\")\n}}\n"
 
 #Test("disas_names_a_nested_inlined_run_s_caller_and_a_call_s_file") {
     lines: NATIVE_TEST_NESTED.split("\n").to_list()

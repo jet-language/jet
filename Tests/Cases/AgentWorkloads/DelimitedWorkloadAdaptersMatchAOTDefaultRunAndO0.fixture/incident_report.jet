@@ -16,9 +16,9 @@ WorkloadArgs: struct {
 run: fn(args: WorkloadArgs) {
     input: args.input
     text: fs.read(input) ?? panic("cannot read input")
-    incidents := [Incident]{}
-    services := [String]{}
-    rejects := [String]{}
+    ^incidents: [Incident]{}
+    ^services: [String]{}
+    ^rejects: [String]{}
     rows: csv.rows(
         text, delimiter: "\t", header: true, skip_blank: true
     ) ?? panic("cannot parse input")
@@ -48,8 +48,8 @@ run: fn(args: WorkloadArgs) {
     print("rejected|{rejects.len()}")
     loop reject in rejects -> print(reject)
     loop service in services {
-        ok := 0
-        errors := 0
+        ^ok: 0
+        ^errors: 0
         loop incident in incidents {
             if incident.service == service {
                 if incident.status == "ok" -> ok += 1 else -> errors += 1

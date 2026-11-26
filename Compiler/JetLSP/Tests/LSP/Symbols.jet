@@ -286,7 +286,7 @@ lsp_test_labels: fn(result: Dyn) -> [String] Never! {
             snippets.push("{lsp_test_text(item, "label")}|{lsp_test_text(item, "insertText")}|{lsp_test_int(item, "insertTextFormat")}")
         }
     }
-    assert_eq(snippets, [String]{"bind immut (inferred)|${{1:name}}: ${{2:value}}|2", "bind mut|${{1:name}} := ${{2:value}}|2"})
+    assert_eq(snippets, [String]{"bind immut (inferred)|${{1:name}}: ${{2:value}}|2", "bind mut|^${{1:name}}: ${{2:value}}|2"})
     outside: lsp_test_labels(lsp_test_result(server, "textDocument/completion", lsp_test_at(uri, 3, 0)))
     assert(!outside.contains("bind mut=15"), "no binding starts outside a block")
 }

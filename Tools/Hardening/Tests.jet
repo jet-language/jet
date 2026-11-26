@@ -594,7 +594,7 @@ forged: fn(decls: String, body: String) -> Generated Never! {
     assert_eq(classify(program, missing_tier).class, UNLOWERED)
     silent: forged("", "value_0: 1\n_: value_0\nprint(\"done\")")
     assert(validate_program(silent).join("\n").contains("construct:control-flow/forged #0: `value_0` never reaches an observer"))
-    unbounded: validate_program(forged("spin_0: fn(n: Int) -> Int Never! {{\n    spin_0(n)\n}}", "value_0 := spin_0(1)\nloop value_0 > 0 -> value_0 += 1\nprint(\"value_0 {{value_0}}\")")).join("\n")
+    unbounded: validate_program(forged("spin_0: fn(n: Int) -> Int Never! {{\n    spin_0(n)\n}}", "^value_0: spin_0(1)\nloop value_0 > 0 -> value_0 += 1\nprint(\"value_0 {{value_0}}\")")).join("\n")
     assert(unbounded.contains("`spin_0` calls itself, so it may not end"))
     assert(unbounded.contains("`loop value_0 > 0 -> value_0 += 1` is not a bounded loop"))
 }

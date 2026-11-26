@@ -6,7 +6,7 @@ run: fn() {
     second_task: task { client.send(http.request("GET", "http://{cap:addr}/h2")) ?? panic("second") }
     second: second_task.join() ?? panic("second task")
     assert_eq(second.status(), 200)
-    saw_error := false
+    ^saw_error: false
     loop chunk in first.body().chunks(65536) {
         if chunk == {
             .Ok(_) -> panic("original FIRST read must fail")

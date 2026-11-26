@@ -10,7 +10,7 @@ browser_test_event: fn(session: String, revision: Int, sequence: Int, status: St
 }
 
 #Test("event_validation_and_monotonic_projection") {
-    host := BrowserHost.new("s1")
+    ^host: BrowserHost.new("s1")
     host.apply_event(browser_test_event("s1", 1, 1, "ready")) ?? panic("first event")
     assert_eq(host.revision, Val(1))
     assert_eq(host.sequence, Val(1))
@@ -34,7 +34,7 @@ browser_test_event: fn(session: String, revision: Int, sequence: Int, status: St
 }
 
 #Test("layout_and_selection_are_shared_but_open_state_is_placement_local") {
-    host := BrowserHost.new("s1")
+    ^host: BrowserHost.new("s1")
     host.apply_event(browser_test_event("s1", 1, 1, "ready")) ?? panic("event")
     _: host.dispatch(BrowserHostAction.OpenPanel{placement: BrowserPlacement.InApp, panel_id: "build"}) ?? panic("open in-app")
     _: host.dispatch(BrowserHostAction.OpenPanel{placement: BrowserPlacement.Workbench, panel_id: "build"}) ?? panic("open workbench")
@@ -66,7 +66,7 @@ browser_test_event: fn(session: String, revision: Int, sequence: Int, status: St
 }
 
 #Test("reconnect_is_bounded_and_cursor_resumes") {
-    host := BrowserHost.new("s1")
+    ^host: BrowserHost.new("s1")
     loop sequence in 1..<(MAX_RECONNECT_EVENTS + 3) {
         host.apply_event(browser_test_event("s1", sequence, sequence, "ready")) ?? panic("event")
     }
@@ -86,7 +86,7 @@ browser_test_event: fn(session: String, revision: Int, sequence: Int, status: St
 }
 
 #Test("stale_wrong_session_and_ungranted_actions_are_rejected") {
-    host := BrowserHost.new("s1")
+    ^host: BrowserHost.new("s1")
     host.apply_event(browser_test_event("s1", 7, 1, "ready")) ?? panic("event")
     location: BrowserSourceLocation{source_id: "src/main.jet", line: 4, column: 2, function: Val("main")}
     source: BrowserSourceGrant{session_id: "s1", revision: 7, panel_id: "build", node_id: "source", source: location}

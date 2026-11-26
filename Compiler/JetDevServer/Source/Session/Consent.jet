@@ -49,13 +49,13 @@ CaptureConsentScope: struct {
     }
 
     new: fn(authorities: ^^[String], hosts: ^^[String], streams: ^^[String], disclosures: ^^[String], destination: ^^String, byte_limit: U64) -> CaptureConsentScope Never! {
-        scope := CaptureConsentScope{authorities: authorities.move(), hosts: hosts.move(), streams: streams.move(), disclosures: disclosures.move(), destination: destination.move(), byte_limit, mode: CaptureMode.Development, source_kinds: [CaptureSource]{}}
+        ^scope: CaptureConsentScope{authorities: authorities.move(), hosts: hosts.move(), streams: streams.move(), disclosures: disclosures.move(), destination: destination.move(), byte_limit, mode: CaptureMode.Development, source_kinds: [CaptureSource]{}}
         scope.canonicalize()
         scope
     }
 
     for_budget: fn(budget: CaptureBudget) -> CaptureConsentScope Never! {
-        scope := CaptureConsentScope.default()
+        ^scope: CaptureConsentScope.default()
         scope.byte_limit = budget.max_bytes
         scope
     }
@@ -69,14 +69,14 @@ CaptureConsentScope: struct {
         // Declaration order, not lexical order of Time/Rand/Input/Net.
         loop index in 1..<self.source_kinds.len() {
             value: self.source_kinds[index].copy()
-            cursor := index
+            ^cursor: index
             loop cursor > 0 && capture_consent_source_rank(self.source_kinds[cursor - 1]) > capture_consent_source_rank(value) {
                 self.source_kinds[cursor] = self.source_kinds[cursor - 1]
                 cursor -= 1
             }
             self.source_kinds[cursor] = value
         }
-        count := 0
+        ^count: 0
         loop index in 0..<self.source_kinds.len() {
             if count == 0 || self.source_kinds[count - 1] != self.source_kinds[index] {
                 self.source_kinds[count] = self.source_kinds[index]
@@ -87,7 +87,7 @@ CaptureConsentScope: struct {
     }
 
     digest: fn(self) -> String Never! {
-        bytes := "capture-consent-scope-v1".bytes()
+        ^bytes: "capture-consent-scope-v1".bytes()
         bytes.push(U8{0})
         capture_consent_frame_vec(bytes, "authorities", self.authorities)
         capture_consent_frame_vec(bytes, "hosts", self.hosts)
@@ -106,7 +106,7 @@ CaptureConsentScope: struct {
 
 capture_consent_sort_unique: fn(values: ^[String]) Never! {
     values.sort()
-    count := 0
+    ^count: 0
     loop index in 0..<values.len() {
         if count == 0 || values[count - 1] != values[index] {
             if count != index -> values[count] = values[index]
@@ -146,7 +146,7 @@ SensitiveCaptureConsent: struct {
     _scope: CaptureConsentScope,
 
     new: fn(identity: ^^CaptureIdentity, scope: ^^CaptureConsentScope) -> SensitiveCaptureConsent Never! {
-        canonical := scope.move()
+        ^canonical: scope.move()
         canonical.canonicalize()
         SensitiveCaptureConsent{_identity: identity.move(), _scope: canonical.move()}
     }
@@ -156,7 +156,7 @@ SensitiveCaptureConsent: struct {
     scope: fn(self) -> CaptureConsentScope Never! { self._scope }
 
     digest: fn(self) -> String Never! {
-        bytes := "capture-sensitive-consent-v1".bytes()
+        ^bytes: "capture-sensitive-consent-v1".bytes()
         bytes.push(U8{0})
         capture_consent_frame(bytes, "target_inputs_sha256", self._identity.target_inputs_sha256)
         capture_consent_frame(bytes, "tool_version", self._identity.tool_version)
@@ -203,20 +203,20 @@ CaptureAttempt: struct {
 
     // Move every retained field once.
     with_sources: fn(^^self, sources: ^^[CaptureSourceFact]) -> CaptureAttempt Never! {
-        updated := self.move()
+        ^updated: self.move()
         updated.sources = sources.move()
         updated.move()
     }
 
     with_source: fn(^^self, source: ^^CaptureSourceFact) -> CaptureAttempt Never! {
-        updated := self.move()
+        ^updated: self.move()
         updated.sources.push(source)
         updated.move()
     }
 
     // Copy only the retained scope fields; stale scope kinds are never cloned.
     base_consent_scope: fn(self) -> CaptureConsentScope Never! {
-        scope := CaptureConsentScope{authorities: self.scope.authorities.copy(), hosts: self.scope.hosts.copy(), streams: self.scope.streams.copy(), disclosures: self.scope.disclosures.copy(), destination: self.scope.destination.copy(), byte_limit: self.scope.byte_limit, mode: self.scope.mode, source_kinds: [CaptureSource]{}}
+        ^scope: CaptureConsentScope{authorities: self.scope.authorities.copy(), hosts: self.scope.hosts.copy(), streams: self.scope.streams.copy(), disclosures: self.scope.disclosures.copy(), destination: self.scope.destination.copy(), byte_limit: self.scope.byte_limit, mode: self.scope.mode, source_kinds: [CaptureSource]{}}
         loop fact in self.sources -> scope.source_kinds.push(fact.source)
         scope.canonicalize()
         scope

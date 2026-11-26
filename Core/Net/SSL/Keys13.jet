@@ -474,7 +474,7 @@ ssl_tls13_xxdh_agree: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) -> [U8] ssld
     group: ssl.handshake.offered_group_id
     ^peer: ssl.handshake.xxdh_peerkey.copy()
     if ssltls.ssl_tls13_named_group_is_ecdhe(group) {
-        ^shared: if ^ssl.handshake.ecdh_ctx == {
+        ^shared: if ssl.handshake.ecdh_ctx.in_place() == {
             .Val(ctx) -> ssl_tls13_ecdh_agree(ctx, peer, rng) ?? return Err(err)
             None -> {
                 return Err(.GenericError)
@@ -484,7 +484,7 @@ ssl_tls13_xxdh_agree: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) -> [U8] ssld
         return Ok(shared)
     }
     if ssltls.ssl_tls13_named_group_is_ffdh(group) {
-        ^shared: if ^ssl.handshake.dhm_ctx == {
+        ^shared: if ssl.handshake.dhm_ctx.in_place() == {
             .Val(ctx) -> ssl_tls13_ffdh_agree(ctx, peer) ?? return Err(err)
             None -> {
                 return Err(.GenericError)

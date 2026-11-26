@@ -1925,6 +1925,9 @@ sema_expression_or_fallback_route: fn(fallback: OrFallback, span: Span, subject_
                     fallback_tree = Val(TOrFallback.Return{value: Val(checked_return)})
                 }
             }
+            // E0140: this route leaves like a `return` statement (the
+            // returned value was moved above).
+            sema_single_use_check_exit(check.state, check.context.duty_scope_depth, "return", Span{start: return_span.start, end: return_span.start + "return".len()}, check.diagnostics)
         }
         .Panic(name_span, args) -> {
             if args.len() != 1 {
@@ -1942,6 +1945,7 @@ sema_expression_or_fallback_route: fn(fallback: OrFallback, span: Span, subject_
                 check.diagnostics.push(sema_error("E0115", route_span, "`break` only works inside a loop", "`break` and `next` steer the nearest `loop` loop", "move this inside a loop, or remove it"))
                 return None
             }
+            if sema_loop_value_resolve_frame(check.context, None) == .Val(frame_index) -> sema_single_use_check_loop_exit(check, frame_index, "break", route_span)
             fallback_tree = Val(TOrFallback.Break)
         }
         .Continue(route_span) -> {
@@ -1950,6 +1954,7 @@ sema_expression_or_fallback_route: fn(fallback: OrFallback, span: Span, subject_
                 return None
             }
             if sema_loop_value_resolve_frame(check.context, None) == .Val(frame_index) {
+                sema_single_use_check_loop_exit(check, frame_index, "next", route_span)
                 sema_ownership_check_loop_move_backedge(check.state, check.context.loop_value_frames[frame_index], check.diagnostics)
             }
             fallback_tree = Val(TOrFallback.Continue)
@@ -1959,6 +1964,7 @@ sema_expression_or_fallback_route: fn(fallback: OrFallback, span: Span, subject_
                 check.diagnostics.push(sema_error("E0405", route_span, "the `?? break` label is not an enclosing loop", "the fallback route must name an active loop label", "use an enclosing loop label"))
                 return None
             }
+            if sema_loop_value_resolve_frame(check.context, Val(label)) == .Val(frame_index) -> sema_single_use_check_loop_exit(check, frame_index, "break", route_span)
             fallback_tree = Val(TOrFallback.BreakLabel{label: label})
         }
         .ContinueLabel(label, route_span) -> {
@@ -1967,6 +1973,7 @@ sema_expression_or_fallback_route: fn(fallback: OrFallback, span: Span, subject_
                 return None
             }
             if sema_loop_value_resolve_frame(check.context, Val(label)) == .Val(frame_index) {
+                sema_single_use_check_loop_exit(check, frame_index, "next", route_span)
                 sema_ownership_check_loop_move_backedge(check.state, check.context.loop_value_frames[frame_index], check.diagnostics)
             }
             fallback_tree = Val(TOrFallback.ContinueLabel{label: label})

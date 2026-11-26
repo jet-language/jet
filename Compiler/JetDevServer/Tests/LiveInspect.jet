@@ -30,7 +30,7 @@ live_view_text: fn(out: ^[U8], text: String) Never! {
 // waiter and, when `event_sequence` is set, one event record. The world id
 // holds a newline, which the view shows as a space.
 live_view_fixture: fn(pid: Int, boot_ns: U64, captured: Int, event_sequence: Int?) -> [U8] Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     live_view_words(out, [U64]{U64{3622396348102624586}, U64{1}, U64{pid}, U64{captured}, U64{7}, boot_ns, U64{3}, U64{100}, U64{1}, U64{1}, U64{2}, U64{64}, U64{1}, U64{0}})
     loop text in ([String]{"session", "app.jet", "build-1", "rev-1", "world\n1"}) {
         live_view_text(out, text)
@@ -62,7 +62,7 @@ live_view_fixture: fn(pid: Int, boot_ns: U64, captured: Int, event_sequence: Int
     assert(view.contains("\"effects\":{{\"compute\":0,\"waiting\":1,\"channel\":1,\"time\":0,\"io\":0}}"))
     assert(view.contains("\"resources\":{{\"workers\":1,\"running\":0,\"queued\":0,\"canceled\":0,\"arenas\":1,\"arena_allocations\":2,\"arena_bytes\":64}}"))
     assert(view.ends_with("\"event_observations\":[],\"runtime\":{{\"elapsed_ns\":7,\"cpu_ns\":null,\"exit\":true}}}}"))
-    bound := jet_live_decode(live_view_fixture(42, U64{20000000000}, 1, Val(1))) ?? panic(err.message)
+    ^bound: jet_live_decode(live_view_fixture(42, U64{20000000000}, 1, Val(1))) ?? panic(err.message)
     jet_live_bind(bound, "42 (a) b) S 0 0 0 0 0 0 0 0 0 0 5 2 0 0 0 0 0 0 1234 0") ?? panic(err.message)
     bound_view: live_view_json(bound)
     assert(bound_view.contains("\"start_id\":\"1234\""))

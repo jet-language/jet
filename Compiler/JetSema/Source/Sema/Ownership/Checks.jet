@@ -215,7 +215,7 @@ SemaOwnershipLoan: struct {
     carrier_fact_seq: Int,
     carrier_id: SymbolID,
     // A window a `^place`/read-place expression opened in value position. No
-    // name carries it unless its own statement binds it (`w := ^xs`); an
+    // name carries it unless its own statement binds it (`w: xs.in_place()`); an
     // unbound one ends before the next statement (sema_ownership_release_dead_views).
     statement_window: Bool{false},
 }
@@ -374,10 +374,10 @@ SemaOwnershipState: struct {
     // leaves (`return`, `break`). A fork rollback drops a leaving path's
     // references, but its reads are still uses for L0101/L0102.
     used_ids: [U32:Bool]{[U32:Bool]{}},
-    // The `:=` bindings this body declares (E0514 candidates) and the name
-    // starts of the bindings a checked write needed `:=` for. Like
-    // `used_ids`, neither is rolled back: a write in a branch, a lambda, an
-    // unreached line or a discarded check still counts.
+    // The `^` bindings this body declares (E0514 candidates), keyed by their
+    // first name start, and the name starts of the bindings a checked write
+    // needed `^` for. Like `used_ids`, neither is rolled back: a write in a
+    // branch, a lambda, an unreached line or a discarded check still counts.
     mutable_bindings: [SemaOwnershipMutableBinding]{[SemaOwnershipMutableBinding]{}},
     mutable_sigils: [Int:Bool]{[Int:Bool]{}},
     mutated_starts: [Int:Bool]{[Int:Bool]{}},
@@ -411,13 +411,12 @@ sema_ownership_block_allocator_refuses: fn(state: SemaOwnershipState, places: [S
     false
 }
 
-// A written `name := value` (or `{a, b} := value`): the names it declares,
-// by name start, and the text from the end of the name through `:=`, which
-// the E0514 edit replaces with `:`.
+// A written `^name: value` (or `{^a, ^b}: value`): the names it declares, by
+// name start. The `^` before each name ends at its start; the E0514 edit
+// removes it.
 SemaOwnershipMutableBinding: struct {
     name: String,
     name_span: Span,
-    sigil: Span,
     starts: [Int],
 }
 
@@ -1138,7 +1137,7 @@ sema_ownership_release_loans_from: fn(state: ^SemaOwnershipState, depth: Int) Ne
 // A view stays live while this statement or a later one uses its carrier. A
 // dead view releases its window, so the owner may be read, changed, moved,
 // windowed, or pinned again after the view's last use. A window no name
-// carries (`if ^x.session == {…}` in value position) ends before the next
+// carries (`if x.session.in_place() == {…}` in value position) ends before the next
 // statement, nested ones included: no view is recorded for it at all.
 sema_ownership_release_dead_views: fn(check: ^SemaBodyCheck, statement: Stmt) {
     loop index in 0..<check.state.views.len() {
@@ -2434,7 +2433,7 @@ sema_ownership_open_reference_for_expr: fn(state: ^SemaOwnershipState, expr: Exp
     true
 }
 
-// The windows a binding statement's initializer (`right: ^xs[1..2]`) or a
+// The windows a binding statement's initializer (`right: xs[1..2].in_place()`) or a
 // `ViewMut` list literal's elements open are checked against the other views
 // where the value lands, which name the binding or the element; the open itself
 // does not report that overlap.
@@ -2530,7 +2529,7 @@ sema_ownership_open_write_reference: fn(state: ^SemaOwnershipState, expr: Expr, 
     ^places: sema_ownership_places_from_expr_in_state(expr, scopes, state)
     if places.len() == 0 {
         if sema_ownership_writes_temporary_edit_guard(expr) -> return true
-        diagnostics.push(sema_error("E0225", span, "`^` marks a fresh value, not a named place", "a write window lends a named place; a temporary value has no place to lend", "bind the value with `:=` first, then take the window from that name"))
+        diagnostics.push(sema_error("E0225", span, "`^` marks a fresh value, not a named place", "a write window lends a named place; a temporary value has no place to lend", "bind the value to a `^` name first, then take the window from that name"))
         return false
     }
     loop place in places {
@@ -2577,7 +2576,7 @@ sema_ownership_open_write_reference: fn(state: ^SemaOwnershipState, expr: Expr, 
                 diagnostics.push(sema_ownership_read_parameter_error("E0205", span, "cannot take a write window into `{places[0].root}`", "an unmarked parameter gives read access only; a write window needs write access", places[0].root, type_name(param_ty)))
             }
         } else {
-            diagnostics.push(sema_ownership_diag_unchangeable(info, places[0].root, span, "a write window can change its owner, so the owner must be mutable (`:=`)"))
+            diagnostics.push(sema_ownership_diag_unchangeable(info, places[0].root, span, "a write window can change its owner, so the owner must be changeable (`^`)"))
         }
         return false
     }
@@ -2720,45 +2719,45 @@ sema_ownership_keep_share_found: fn(state: ^SemaOwnershipState, branch: SemaOwne
     loop site in branch.share_found -> sema_ownership_note_share_found(state, site)
 }
 
-// A written `:=` binding this body declares, once per sigil.
+// A written `^` binding this body declares, once per binding.
 sema_ownership_note_mutable_binding: fn(state: ^SemaOwnershipState, binding: ^^SemaOwnershipMutableBinding) Never! {
-    if state.mutable_sigils.get(binding.sigil.start) != None {
+    if state.mutable_sigils.get(binding.starts[0]) != None {
         return
     }
-    state.mutable_sigils[binding.sigil.start] = true
+    state.mutable_sigils[binding.starts[0]] = true
     state.mutable_bindings.push(binding)
 }
 
-// A write that needed the `:=` of the binding whose name starts at `start`.
+// A write that needed the `^` of the binding whose name starts at `start`.
 sema_ownership_note_mutation: fn(state: ^SemaOwnershipState, start: Int) Never! {
     state.mutated_starts[start] = true
 }
 
-// A write through `binding`: the write needed its `:=` or its `^` mark.
+// A write through `binding`: the write needed its changeable mark or its `^` type mark.
 sema_ownership_note_binding_write: fn(state: ^SemaOwnershipState, binding: SemaScopeBinding) Never! {
     if binding.mutable || binding.access == AccessConvention.Write {
         sema_ownership_note_mutation(state, binding.symbol.span.start)
     }
 }
 
-// The `:=` bindings and writes a sub-state (a branch, a lambda body, an
+// The `^` bindings and writes a sub-state (a branch, a lambda body, an
 // unreached line, a deferred arm) saw belong to the function whatever
 // becomes of that state.
 sema_ownership_keep_mutations: fn(state: ^SemaOwnershipState, branch: SemaOwnershipState) Never! {
     loop binding in branch.mutable_bindings {
-        if state.mutable_sigils.get(binding.sigil.start) != None -> next
-        state.mutable_sigils[binding.sigil.start] = true
+        if state.mutable_sigils.get(binding.starts[0]) != None -> next
+        state.mutable_sigils[binding.starts[0]] = true
         // copy: `branch` is the caller's sub-state, read here; the function's state keeps its own row.
         state.mutable_bindings.push(binding.copy())
     }
     loop (start, _) in branch.mutated_starts -> state.mutated_starts[start] = true
 }
 
-// E0514: a `:=` binding nothing in its scope writes. Any checked write counts,
-// whether or not it can run; the edit swaps ` :=` for `:`. It reports as a
-// lint until the repo-wide `:=` -> `:` sweep lands: as an error it stops the
-// build's own Core compile (the runtime step), which still has those sites,
-// and a program that only embeds Core drops a lint in Core (sema_core_lint_dropped).
+// E0514: a `^` binding nothing in its scope writes. Any checked write counts,
+// whether or not it can run; the edit removes each `^`. It reports as a lint
+// until every never-written `^` in the repository is fixed: as an error it
+// stops the build's own Core compile (the runtime step), and a program that
+// only embeds Core drops a lint in Core (sema_core_lint_dropped).
 sema_ownership_report_never_written: fn(check: ^SemaBodyCheck) {
     row: sema_diagnostic_row("E0514")
     loop binding in check.state.mutable_bindings {
@@ -2767,9 +2766,13 @@ sema_ownership_report_never_written: fn(check: ^SemaBodyCheck) {
             if check.state.mutated_starts.get(start) != None -> written = true
         }
         if written -> next
-        ^diagnostic: sema_error("E0514", binding.name_span, row.what.replace("{{name}}", binding.name), row.why, row.fix.replace("{{name}}", binding.name))
-        diagnostic.severity = DIAGNOSTIC_LINT
-        check.diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: binding.sigil, new_text: ":"}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
+        ^reported: sema_error("E0514", binding.name_span, row.what.replace("{{name}}", binding.name), row.why, row.fix.replace("{{name}}", binding.name))
+        reported.severity = DIAGNOSTIC_LINT
+        ^diagnostic: diagnostic_with_edit_grade(reported, TextEdit{span: Span{start: binding.starts[0] - 1, end: binding.starts[0]}, new_text: ""}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving)
+        loop index in 1..<binding.starts.len() {
+            diagnostic.fix_edits.push(TextEdit{span: Span{start: binding.starts[index] - 1, end: binding.starts[index]}, new_text: ""})
+        }
+        check.diagnostics.push(diagnostic)
     }
 }
 
@@ -3466,7 +3469,7 @@ sema_ownership_write_capability: fn(state: ^SemaOwnershipState, expr: Expr, acti
     if places.len() == 0 {
         if sema_ownership_writes_temporary_edit_guard(expr) -> return true
         what: if callee == "" -> "this write needs a place, not a temporary" else -> "`{callee}` writes to this input, so it needs a place, not a temporary"
-        diagnostics.push(sema_error("E0111", expr_span(expr), what, "write access can only be granted to stable storage, not a temporary expression", "bind the value to a `:=` name first, then pass the name"))
+        diagnostics.push(sema_error("E0111", expr_span(expr), what, "write access can only be granted to stable storage, not a temporary expression", "bind the value to a changeable name first, then pass the name"))
         return false
     }
     // The group loan outlives the borrow binding's last lexical use, so it is
@@ -3481,7 +3484,7 @@ sema_ownership_write_capability: fn(state: ^SemaOwnershipState, expr: Expr, acti
             // An assignment has no static-borrow check: a constant can't be
             // changed (E0111).
             if action == "be assigned" {
-                diagnostics.push(sema_error("E0111", expr_span(expr), "`{places[0].root}` is a constant, so it can't be changed", "static storage is not mutable", "copy the value into a mutable local (`:=`) and change that"))
+                diagnostics.push(sema_error("E0111", expr_span(expr), "`{places[0].root}` is a constant, so it can't be changed", "static storage is not mutable", "copy the value into a changeable local (`^`) and change that"))
             } else {
                 sema_ownership_report_static_write(state, place, expr_span(expr), diagnostics)
             }
@@ -3534,16 +3537,16 @@ sema_ownership_write_capability: fn(state: ^SemaOwnershipState, expr: Expr, acti
                     param_type: type_name(info.symbol.ty ?? Type.Named{name: "Unit"})
                     why: if call_why == "" -> "an unmarked parameter gives read access only; nobody changes it during the call" else -> "{call_why}, but an unmarked parameter gives read access only"
                     diagnostics.push(sema_ownership_read_parameter_error("E0205", expr_span(expr), "cannot edit through `{places[0].root}` — it has read access only", why, places[0].root, param_type))
-                } else if call_why != "" && !info.place_alias && info.binding_sigil != None {
+                } else if call_why != "" && !info.place_alias && info.changeable_mark_at != None {
                     // A `:` local, or a part of one, passed to a write
-                    // parameter: the fix is the binding's sigil.
-                    diagnostics.push(sema_ownership_diag_unchangeable(info, places[0].root, expr_span(expr), "{call_why}, so `{places[0].root}` must be mutable (`:=`)"))
+                    // parameter: the fix is the binding's changeable mark.
+                    diagnostics.push(sema_ownership_diag_unchangeable(info, places[0].root, expr_span(expr), "{call_why}, so `{places[0].root}` must be changeable (`^{places[0].root}:`)"))
                 } else {
                     diagnostics.push(sema_error("E0205", expr_span(expr), "cannot edit through `{places[0].root}` — it has read access only", "a read window may inspect its place, but it cannot change the owner", "take a write window from a mutable owner instead"))
                 }
             }
             .Write | .Move -> {
-                diagnostics.push(sema_ownership_diag_unchangeable(info, places[0].root, expr_span(expr), if call_why == "" -> "a write window can change its owner, so the owner must be mutable (`:=`)" else -> "{call_why}, so `{places[0].root}` must be mutable (`:=`)"))
+                diagnostics.push(sema_ownership_diag_unchangeable(info, places[0].root, expr_span(expr), if call_why == "" -> "a write window can change its owner, so the owner must be changeable (`^{places[0].root}:`)" else -> "{call_why}, so `{places[0].root}` must be changeable (`^{places[0].root}:`)"))
             }
         }
         return false
@@ -3561,7 +3564,7 @@ sema_ownership_diag_read_view_write: fn(state: SemaOwnershipState, expr: Expr, r
             next
         }
         if !sema_ownership_view_fact_matches_expr(fact, expr, scopes) -> next
-        return sema_error("E0205", span, "cannot edit through `{fact.carrier}` — it is a read-only arm binding", "an arm binds a read window into `{root}` when the subject it tests is written without `^`, so `{fact.carrier}` can't change it, whatever access `{root}` has", "write the subject with `^` so the arm binds a write window: `if ^subject == {{ … }}`")
+        return sema_error("E0205", span, "cannot edit through `{fact.carrier}` — it is a read-only arm binding", "an arm binds a read window into `{root}` when the subject it tests is written without `^`, so `{fact.carrier}` can't change it, whatever access `{root}` has", "write the subject with `^` so the arm binds a write window: `if subject.in_place() == {{ … }}`")
     }
     sema_error("E0205", span, "cannot edit through `{root}` — it has read access only", "a read window may inspect its place, but it cannot change the owner", "take a write window from a mutable owner instead")
 }
@@ -3589,7 +3592,7 @@ sema_ownership_report_assignment_capability: fn(expr: Expr, root: String, info: 
             } else if is_param {
                 diagnostics.push(sema_ownership_read_parameter_error("E0205", span, "cannot edit `{member}` — `{root}` has read access only", "editing a field requires write access to the owning place", root, param_type))
             } else {
-                diagnostics.push(sema_error("E0205", span, "cannot edit `{member}` — `{root}` has read access only", "editing a field requires write access to the owning place", "declare it with `{root} := ...` to give it write access"))
+                diagnostics.push(sema_error("E0205", span, "cannot edit `{member}` — `{root}` has read access only", "editing a field requires write access to the owning place", "declare it with `^{root}: ...` to give it write access"))
             }
             true
         }
@@ -3598,7 +3601,7 @@ sema_ownership_report_assignment_capability: fn(expr: Expr, root: String, info: 
             if is_param && info.access == AccessConvention.Read {
                 diagnostics.push(sema_ownership_read_parameter_error("E0205", span, what, "an unmarked parameter gives read access only; assigning into it needs write access", root, param_type))
             } else {
-                diagnostics.push(sema_ownership_diag_unchangeable(info, root, span, "assigning into a collection edits it, so the binding must be mutable (`:=`)"))
+                diagnostics.push(sema_ownership_diag_unchangeable(info, root, span, "assigning into a collection edits it, so the binding must be changeable (`^`)"))
             }
             true
         }
@@ -4700,7 +4703,7 @@ sema_ownership_check_call_receiver_as: fn(check: ^SemaBodyCheck, receiver: Expr,
     if places.len() == 0 {
         if convention == AccessConvention.Write {
             if sema_ownership_writes_temporary_edit_guard(receiver) -> return true
-            check.diagnostics.push(sema_error("E0111", span, "this call writes a temporary value", "write access can only be granted to stable storage, not a temporary expression", "bind the value with `:=` first, then call the method on that name"))
+            check.diagnostics.push(sema_error("E0111", span, "this call writes a temporary value", "write access can only be granted to stable storage, not a temporary expression", "bind the value to a `^` name first, then call the method on that name"))
             return false
         }
         return true
@@ -4751,7 +4754,7 @@ sema_ownership_check_receiver_write: fn(check: ^SemaBodyCheck, receiver: Expr, m
     diagnostic: if {
         root == "self" -> sema_error("E0205", change_span, "`.{method}()` edits `self`, but this method has read access only", why, "declare the enclosing method with the write mark: `^self`")
         info.symbol.kind == SymbolKind.Parameter -> sema_ownership_read_parameter_error("E0205", change_span, "`.{method}()` changes `{root}`, which has read access only", "{why}, but an unmarked parameter gives read access only", root, type_name(info.symbol.ty ?? Type.Named{name: "Unit"}))
-        else -> sema_ownership_diag_unchangeable(info, root, change_span, "{why}, so `{root}` must be mutable (`:=`)")
+        else -> sema_ownership_diag_unchangeable(info, root, change_span, "{why}, so `{root}` must be changeable (`^`)")
     }
     check.diagnostics.push(diagnostic)
     false
@@ -4907,13 +4910,13 @@ sema_ownership_convention_mark: fn(convention: AccessConvention) -> String Never
 }
 
 // E0111 for a change to a binding that can't change. `why` names what changes
-// it; a `:` binding that is not itself a window gets the `:=` edit.
+// it; a `:` binding that is not itself a window gets the `^` edit.
 sema_ownership_diag_unchangeable: fn(info: SemaScopeBinding, root: String, span: Span, why: String) -> Diagnostic {
-    if !info.place_alias && info.binding_sigil == .Val(sigil) {
-        diagnostic: sema_error("E0111", span, "`{root}` was made with `:`, so it can't be changed", why, "declare it with `{root} := ...`")
-        return diagnostic_with_edit(diagnostic, TextEdit{span: sigil, new_text: " :="})
+    if !info.place_alias && info.changeable_mark_at == .Val(at) {
+        diagnostic: sema_error("E0111", span, "`{root}` was made with `:`, so it can't be changed", why, "add `^` before the name: `^{root}: ...`")
+        return diagnostic_with_edit(diagnostic, TextEdit{span: at, new_text: "^"})
     }
-    sema_error("E0111", span, "`{root}` can't be changed here", why, "declare it with `{root} := ...`")
+    sema_error("E0111", span, "`{root}` can't be changed here", why, "add `^` before the name: `^{root}: ...`")
 }
 
 // A type-qualified callee (`Option.map`) names the consumer of a moved
@@ -4971,7 +4974,7 @@ sema_ownership_check_call_receiver_with_footprint: fn(check: ^SemaBodyCheck, rec
     if base_places.len() == 0 {
         if convention == AccessConvention.Write {
             if sema_ownership_writes_temporary_edit_guard(receiver) -> return true
-            check.diagnostics.push(sema_error("E0111", span, "this call writes a temporary value", "write access can only be granted to stable storage, not a temporary expression", "bind the value with `:=` first, then call the method on that name"))
+            check.diagnostics.push(sema_error("E0111", span, "this call writes a temporary value", "write access can only be granted to stable storage, not a temporary expression", "bind the value to a `^` name first, then call the method on that name"))
             return false
         }
         return true
@@ -5057,7 +5060,7 @@ sema_ownership_check_call_receiver_with_footprint: fn(check: ^SemaBodyCheck, rec
             diagnostic: if {
                 root == "self" -> sema_error("E0205", change_span, "`.{method}()` edits `self`, but this method has read access only", why, "declare the enclosing method with the write mark: `^self`")
                 info.symbol.kind == SymbolKind.Parameter -> sema_ownership_read_parameter_error("E0205", change_span, "`.{method}()` changes `{root}`, which has read access only", "{why}, but an unmarked parameter gives read access only", root, type_name(info.symbol.ty ?? Type.Named{name: "Unit"}))
-                else -> sema_ownership_diag_unchangeable(info, root, change_span, "{why}, so `{root}` must be mutable (`:=`)")
+                else -> sema_ownership_diag_unchangeable(info, root, change_span, "{why}, so `{root}` must be changeable (`^`)")
             }
             check.diagnostics.push(diagnostic)
             return false

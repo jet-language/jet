@@ -8,7 +8,7 @@ send lsp: "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\
 recv lsp
 stdout: ~ "hoverProvider" # the server answers initialize before any hover
 send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
-send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{tmp}/lsp_script_helper.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"limit: 3\\ncount := 0\\nnote: fn(word: String) {\\n    count += 1\\n    if count <= limit -> print(word)\\n}\\nnote(\\\"apple\\\")\\n\"}}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{tmp}/lsp_script_helper.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"limit: 3\\n^count: 0\\nnote: fn(word: String) {\\n    count += 1\\n    if count <= limit -> print(word)\\n}\\nnote(\\\"apple\\\")\\n\"}}}"
 recv lsp
 stdout: ~ "publishDiagnostics" # the document is checked before the hover
 send lsp: "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://{tmp}/lsp_script_helper.jet\"},\"position\":{\"line\":6,\"character\":1}}}"

@@ -9,7 +9,7 @@ terminal_style_test_edit: fn(source: String) -> TerminalStyleEdit {
 }
 
 terminal_style_test_bytes: fn(text: String) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     loop byte in text.bytes() -> out.push(byte)
     out
 }
@@ -19,7 +19,7 @@ terminal_style_test_sgr: fn(codes: String) -> TerminalStyleValue? {
 }
 
 terminal_style_test_adapter: fn() -> TerminalStyleHostAdapter {
-    adapter := TerminalStyleHostAdapter.new()
+    ^adapter: TerminalStyleHostAdapter.new()
     adapter.inject(TerminalStyleHostSource.new("app/style", TERMINAL_CAPABILITY_DEFAULT) ?? panic("host source"))
     adapter
 }
@@ -50,7 +50,7 @@ terminal_style_test_adapter: fn() -> TerminalStyleHostAdapter {
 }
 
 #Test("style_reload_is_atomic_and_keeps_last_valid_snapshot_on_failure") {
-    reload := TerminalStyleReload.new()
+    ^reload: TerminalStyleReload.new()
     subscriber: reload.subscribe() ?? panic("subscriber")
     first: reload.reload(terminal_style_test_edit("accent=red\nsuccess=green"))
     assert(first.applied())
@@ -75,7 +75,7 @@ terminal_style_test_adapter: fn() -> TerminalStyleHostAdapter {
 }
 
 #Test("burst_coalescing_notifies_once_for_last_edit") {
-    reload := TerminalStyleReload.new()
+    ^reload: TerminalStyleReload.new()
     subscriber: reload.subscribe() ?? panic("subscriber")
     _: reload.reload(terminal_style_test_edit("accent=red"))
     _: reload.drain_notifications(subscriber)
@@ -92,7 +92,7 @@ terminal_style_test_adapter: fn() -> TerminalStyleHostAdapter {
 }
 
 #Test("capability_change_applies_but_layout_or_type_change_requires_restart") {
-    reload := TerminalStyleReload.new()
+    ^reload: TerminalStyleReload.new()
     base: TerminalCapabilityFacts.from_environment(Val("xterm-256color"), None, true, false, ColorChoice.Auto)
     plain: TerminalCapabilityFacts.from_environment(Val("dumb"), None, true, false, ColorChoice.Auto)
     first: reload.reload(terminal_style_test_edit("accent=red").with_capabilities(base))
@@ -118,7 +118,7 @@ terminal_style_test_adapter: fn() -> TerminalStyleHostAdapter {
 }
 
 #Test("host_adapter_reports_unavailable_before_source_is_injected") {
-    adapter := TerminalStyleHostAdapter.new()
+    ^adapter: TerminalStyleHostAdapter.new()
     assert(adapter.source == None)
     response: adapter.apply_json(`{"source":"accent=red"}`)
     assert_eq(response.outcome, TerminalStyleHostOutcome.Unavailable{reason: TerminalStyleHostUnavailableReason.SourceNotInjected})
@@ -127,7 +127,7 @@ terminal_style_test_adapter: fn() -> TerminalStyleHostAdapter {
 }
 
 #Test("host_adapter_applies_bounded_json_after_injection") {
-    adapter := terminal_style_test_adapter()
+    ^adapter: terminal_style_test_adapter()
     assert(adapter.source != None)
     response: adapter.apply_json(`{"source":"accent=red\nsuccess=green"}`)
     assert_eq(response.outcome, TerminalStyleHostOutcome.Applied{revision: 1, change: TerminalStyleChangeKind.Initial})
@@ -136,7 +136,7 @@ terminal_style_test_adapter: fn() -> TerminalStyleHostAdapter {
 }
 
 #Test("host_adapter_rejects_invalid_style_json") {
-    adapter := terminal_style_test_adapter()
+    ^adapter: terminal_style_test_adapter()
     response: adapter.apply_json(`{"source":"accent=1;;96"}`)
     code: if response.outcome == {
         .Rejected(.Invalid(fact)) -> Val(fact.code)
@@ -147,7 +147,7 @@ terminal_style_test_adapter: fn() -> TerminalStyleHostAdapter {
 }
 
 #Test("host_adapter_rejects_restart_required_layout_change_without_reloading") {
-    adapter := terminal_style_test_adapter()
+    ^adapter: terminal_style_test_adapter()
     first: adapter.apply_json(`{"source":"accent=red"}`)
     applied: if first.outcome == {
         .Applied(_, _) -> true
@@ -160,7 +160,7 @@ terminal_style_test_adapter: fn() -> TerminalStyleHostAdapter {
 }
 
 #Test("host_adapter_current_json_reports_unavailable_then_applied") {
-    adapter := TerminalStyleHostAdapter.new()
+    ^adapter: TerminalStyleHostAdapter.new()
     before: adapter.current_json()
     assert_eq(before.outcome, TerminalStyleHostOutcome.Unavailable{reason: TerminalStyleHostUnavailableReason.NoStyleApplied})
     adapter.inject(TerminalStyleHostSource.new("app/style", TERMINAL_CAPABILITY_DEFAULT) ?? panic("host source"))

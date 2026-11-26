@@ -55,7 +55,7 @@ SessionEvent: struct {
         recording_validate_text(kind, "event kind")
         recording_validate_text(entity, "event entity")
         fields: recording_canonical_object(fields_json, "event fields")
-        payload := String?{None}
+        ^payload: String?{None}
         if payload_json == .Val(text) {
             value: recording_parse_json(text, "event payload")
             if value == {
@@ -147,7 +147,7 @@ ReplayCursor: struct {
 
     seek: fn(^self, recording: SessionRecording, sequence: Int) -> ReplayProjection RecordingError! {
         self.check(recording)
-        index := -1
+        ^index: -1
         loop (position, event) in recording.events {
             if event.sequence == sequence {
                 index = position
@@ -168,7 +168,7 @@ ReplayCursor: struct {
                 return Err(RecordingError.CursorUnavailable{sequence: first.sequence})
             }
         }
-        position := 0
+        ^position: 0
         loop (index, event) in recording.events {
             if event.timestamp_ms <= timestamp_ms -> position = index + 1
         }
@@ -304,7 +304,7 @@ SessionRecording: struct {
 
     append_event: fn(^self, event: ^^SessionEvent) -> Int RecordingError! {
         sequence: event.sequence
-        events := [SessionEvent]{}
+        ^events: [SessionEvent]{}
         events.push(event.move())
         self.preflight(events)
         loop recorded in events.move() -> self.append_event_unchecked(recorded)
@@ -337,14 +337,14 @@ SessionRecording: struct {
 
     projection: fn(self, cursor: ReplayCursor) -> ReplayProjection RecordingError! {
         cursor.check(self)
-        event := SessionEvent?{None}
-        timestamp_ms := Int?{None}
+        ^event: SessionEvent?{None}
+        ^timestamp_ms: Int?{None}
         if cursor.position > 0 {
             current: self.events[cursor.position - 1]
             event = Val(current)
             timestamp_ms = Val(current.timestamp_ms)
         }
-        next_sequence := Int?{None}
+        ^next_sequence: Int?{None}
         if cursor.position < self.events.len() {
             next_sequence = Val(self.events[cursor.position].sequence)
         }
@@ -363,7 +363,7 @@ SessionRecording: struct {
 
     checkpoint: fn(self, cursor: ReplayCursor) -> SessionCheckpoint RecordingError! {
         cursor.check(self)
-        timestamp_ms := Int?{None}
+        ^timestamp_ms: Int?{None}
         if cursor.position > 0 -> timestamp_ms = Val(self.events[cursor.position - 1].timestamp_ms)
         SessionCheckpoint{
             identity: self.identity,
@@ -394,8 +394,8 @@ SessionRecording: struct {
 
     // Every event must fit the byte limit and advance sequence and time; nothing is appended on failure.
     preflight: fn(self, events: [SessionEvent]) RecordingError! {
-        previous_sequence := self.last_sequence
-        previous_time := self.last_timestamp_ms
+        ^previous_sequence: self.last_sequence
+        ^previous_time: self.last_timestamp_ms
         loop event in events {
             bytes: event.wire_len()
             if bytes > self.limits.max_bytes {
@@ -422,7 +422,7 @@ SessionRecording: struct {
         self.retained_bytes += event.wire_len()
         self.events.push(event.move())
         // Evict oldest events until both limits hold again.
-        evicted := 0
+        ^evicted: 0
         loop self.events.len() - evicted > self.limits.max_events || self.retained_bytes > self.limits.max_bytes {
             if self.events.len() - evicted > self.limits.max_events {
                 self.event_limit_reached = true
@@ -460,7 +460,7 @@ recording_parse_envelope: fn(bytes: [U8], expected_identity: SessionRecordingIde
     values: recording_lookup(fields, "events") ?? return Err(RecordingError.InvalidEnvelope{message: "missing `events` array"})
     if values == {
         .Array(items) -> {
-            events := [SessionEvent]{}
+            ^events: [SessionEvent]{}
             loop item in items -> events.push(recording_parse_event(item))
             events
         }
@@ -479,7 +479,7 @@ recording_parse_event: fn(value: Dyn) -> SessionEvent RecordingError! {
     if recording_object_fields(event_fields) == None {
         return Err(RecordingError.InvalidEvent{message: "event fields must be an object"})
     }
-    payload_json := String?{None}
+    ^payload_json: String?{None}
     if recording_lookup(fields, "payload") == .Val(payload) {
         if payload == {
             .Null -> {}
@@ -519,7 +519,7 @@ recording_object_fields: fn(value: Dyn) -> [{key: String, value: Dyn}]? {
 
 // The last occurrence of a repeated key wins, as in the canonical object.
 recording_lookup: fn(fields: [{key: String, value: Dyn}], key: String) -> Dyn? {
-    found := Dyn?{None}
+    ^found: Dyn?{None}
     loop field in fields {
         if field.key == key -> found = Val(field.value)
     }
@@ -566,7 +566,7 @@ recording_validate_envelope_identity: fn(fields: [{key: String, value: Dyn}], ex
 
 recording_validate_id: fn(value: String, label: String) RecordingError! {
     bytes: value.bytes()
-    invalid := bytes.len() == 0 || bytes.len() > MAX_RECORDING_ID_BYTES
+    ^invalid: bytes.len() == 0 || bytes.len() > MAX_RECORDING_ID_BYTES
     loop byte in bytes {
         if byte < 32 || byte == 127 -> invalid = true
     }
@@ -591,14 +591,14 @@ recording_canonical_json: fn(value: Dyn) -> String {
         .Number(lexeme) -> lexeme
         .Text(text) -> foundation_json_quote(text)
         .Array(items) -> {
-            parts := [String]{}
+            ^parts: [String]{}
             loop item in items -> parts.push(recording_canonical_json(item))
             "[{parts.join(",")}]"
         }
         .Object(fields) -> {
-            members := [String:Dyn]{}
+            ^members: [String:Dyn]{}
             loop field in fields -> members[field.key] = field.value
-            keys := members.keys().to_list()
+            ^keys: members.keys().to_list()
             keys.sort()
             parts: loop key in keys -> "{foundation_json_quote(key)}:{recording_canonical_json(members[key])}"
             "{{{parts.join(",")}}}"

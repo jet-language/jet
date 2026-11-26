@@ -16,7 +16,7 @@ Frame: struct {
     payload: [U8],
 }
 read_exact: fn(stream: TCPStream, size: Int) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     loop out.len() < size {
         chunk: stream.read_bytes(size - out.len(), deadline: 10s) ?? panic("frame read_exact")
         assert(chunk.len() > 0)
@@ -51,12 +51,12 @@ preface: fn(stream: ^TCPStream) {
 run: fn() {
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     publish(listener, "{work}/addr.txt")
-    stream := listener.accept() ?? panic("accept")
+    ^stream: listener.accept() ?? panic("accept")
     preface(stream)
     request: first_headers(stream)
     assert(request.id == 1)
     write_frame(stream, 1, 4, 1, [U8]{136})
-    chunk := [U8]{}
+    ^chunk: [U8]{}
     loop index in 0..<65536 { chunk.push(U8{120}) }
     loop index in 0..<1024 { write_frame(stream, 0, 0, 1, chunk) }
     write_frame(stream, 0, 1, 1, "x".bytes())

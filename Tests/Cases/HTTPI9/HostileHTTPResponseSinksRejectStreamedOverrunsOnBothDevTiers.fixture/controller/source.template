@@ -1,14 +1,14 @@
 use process: core.process
 subject: fn(mode: String, path: String) -> ProcessReceipt {
     if mode != "aot" {
-        argv := [String]{"{jet}", "run"}
+        ^argv: [String]{"{jet}", "run"}
         argv.push(path.copy())
         return process.cmd(argv).run() ?? panic("run subject")
     }
     // Source/CmdCompile.rs482-488 public built: path; compile happens INSIDE runner task.
     build: process.cmd([String]{"{jet}", "build", path}).run() ?? panic("build subject")
     assert(build.success)
-    artifact := ""
+    ^artifact: ""
     loop line in build.output.split("\n") {
         if line.starts_with("built: ") {
             rest: line.slice(7..<line.len()).copy()

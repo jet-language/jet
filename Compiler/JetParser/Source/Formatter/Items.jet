@@ -1975,8 +1975,13 @@ jfmt_fmt_func: fn(f: ^JetFmt, func: Func) {
     }
     // Parsing moves the C symbol into the Import marker
     // and clears the body. It remains a declaration, never an empty fn.
+    // A service import (`#Import(jet.build, symbol: "…")`) names its symbol
+    // in the marker line and is written with no body at all.
     loop marker in func.markers {
         if marker.name == "Import" && !marker.negated {
+            if parser_marker_spells_service_import(marker) {
+                return
+            }
             if marker.ct == .Val(fact) && fact == .Str(symbol) {
                 jfmt_write(f, " = \"")
                 jfmt_write(f, jfmt_escape_str_lit(symbol))
@@ -2028,7 +2033,7 @@ jfmt_fmt_func: fn(f: ^JetFmt, func: Func) {
     }
     // A one-line `fn` body the author wrote inline survives, and so does a
     // body written as fields.
-    if func.body.len() == 1 && func.body[0] == .Expr(value) && jfmt_is_record_body(f, value) {
+    if func.body.len() == 1 && func.body[0] == .Expr(value) && jfmt_is_record_body(f, value, parser_return_type_has_value(func.return_type)) {
         jfmt_fmt_record_body(f, value)
     } else { jfmt_fmt_body(f, func.body) }
     f.value_tail_at = saved_tail
@@ -2958,7 +2963,7 @@ jfmt_fmt_const: fn(f: ^JetFmt, c: ConstDef) {
         }
     }
     // `#Persist` on a binding, its value `#run …` when the author wrote it
-    // so. Preserve `:` vs `:=` (jfmt_fmt_const_name).
+    // so. Keep a changeable name's `^` (jfmt_fmt_const_name).
     if c.is_persist {
         jfmt_write(f, "#Persist ")
         jfmt_fmt_const_name(f, c)
@@ -3000,20 +3005,13 @@ jfmt_fmt_const: fn(f: ^JetFmt, c: ConstDef) {
 }
 
 // A module binding's privacy, name and sigil: `^name: ` when changeable.
-// D-BIND-MARK1 stage 1, temporary: an ordinary format keeps a written
-// `name := `, the migration format (JetFmt.bind_mark1) rewrites it.
 jfmt_fmt_const_name: fn(f: ^JetFmt, c: ConstDef) {
     start: c.name_span.start
     caret: start > 0 && jfmt_src_valid(f, start - 1, start) && jfmt_src_text(f, start - 1, start) == "^"
     jfmt_fmt_written_privacy(f, c.is_pub, if caret -> start - 1 else -> start)
-    if c.mutable && (caret || f.bind_mark1) {
-        jfmt_write(f, "^")
-        jfmt_write(f, c.name)
-        jfmt_write(f, ": ")
-        return
-    }
+    if c.mutable -> jfmt_write(f, "^")
     jfmt_write(f, c.name)
-    jfmt_write(f, if c.mutable -> " := " else -> ": ")
+    jfmt_write(f, ": ")
 }
 
 // The imports of one scope (#6542): two or more print as one `use { … }`

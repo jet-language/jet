@@ -127,6 +127,34 @@ sema_single_use_note_binding: fn(check: ^SemaBodyCheck, symbol: Symbol) {
     check.state.declarations[row].lendable = sema_single_use_lendable(ty, check)
 }
 
+// Whether a plain write of `value` to the binding `id` leaves it owing
+// nothing: its value was already consumed and the write is the written `None`
+// (sema_derive_none_literal), so it holds no value with a job. `None` over a
+// value that still owes its job leaves that job owed.
+sema_single_use_write_owes_nothing: fn(state: SemaOwnershipState, id: SymbolID, value: Expr) -> Bool {
+    row: sema_ownership_last_row(state, id)
+    if row < 0 || !state.declarations[row].single_use -> return false
+    sema_single_use_moved(state, state.declarations[row]) && sema_derive_none_literal(value)
+}
+
+// After the plain write of `None` that leaves `symbol`'s local binding owing
+// nothing (sema_single_use_write_owes_nothing): no job is owed on this path.
+sema_single_use_note_cleared: fn(check: ^SemaBodyCheck, symbol: Symbol) {
+    row: sema_ownership_last_row(check.state, symbol.id)
+    if row < 0 || check.state.declarations[row].parameter -> return
+    sema_ownership_note_undo(check.state, row)
+    check.state.declarations[row].single_use = false
+}
+
+// After any other plain write to `symbol`'s local binding: given a value
+// again, it owes its job once more. A parameter never owes it.
+sema_single_use_note_write: fn(check: ^SemaBodyCheck, symbol: Symbol) {
+    row: sema_ownership_last_row(check.state, symbol.id)
+    if row < 0 || check.state.declarations[row].parameter -> return
+    ty: symbol.ty ?? return
+    if sema_single_use_type(ty, check.environment.*, check.program.*) -> sema_ownership_set_single_use(check.state, row)
+}
+
 // The fields of a tuple or of a struct (not itself `#SingleUse`) that hold
 // its duty; empty when only a move of the whole value discharges it.
 sema_single_use_duty_fields: fn(ty: Type, check: SemaBodyCheck) -> [String] {
@@ -251,21 +279,32 @@ sema_single_use_check_scope_end: fn(state: SemaOwnershipState, diagnostics: ^[Di
     }
 }
 
-// E0140 at a `return`: the function (or lambda) hands control back while a
-// `#SingleUse` binding it owns still owes its job. `frame_depth` is the scope
-// depth of that function's own frame, so an enclosing function's bindings,
-// seen from a lambda, are not this return's. A reported duty is cleared on
-// this path, so the scope end doesn't report it again.
-sema_single_use_check_return: fn(state: ^SemaOwnershipState, frame_depth: Int, span: Span, diagnostics: ^[Diagnostic]) {
+// E0140 at an exit edge: a `return` (a statement or a `?? return` route)
+// hands control back from the function (or lambda) whose own frame is at
+// scope depth `frame_depth`, and a `break` or `next` leaves every scope of its
+// loop's body (sema_single_use_check_loop_exit). Each binding at that depth or
+// deeper that still owes its job leaves with it undone; an enclosing
+// function's bindings, seen from a lambda, are not this exit's. A reported
+// duty is cleared on this path, so the scope end doesn't report it again.
+sema_single_use_check_exit: fn(state: ^SemaOwnershipState, frame_depth: Int, exit: String, span: Span, diagnostics: ^[Diagnostic]) {
     loop row in sema_ownership_single_use_rows(state) {
         if !state.declarations[row].active || state.declarations[row].scope_depth < frame_depth {
             next
         }
         if sema_single_use_moved(state, state.declarations[row]) -> next
-        diagnostics.push(sema_single_use_diag_returned(state.declarations[row].name, state.declarations[row].duty_methods, span))
+        diagnostics.push(sema_single_use_diag_exit(state.declarations[row].name, state.declarations[row].duty_methods, exit, span))
         sema_ownership_note_undo(state, row)
         state.declarations[row].single_use = false
     }
+}
+
+// E0140 at a `break` or `next` (`exit`, at `span`) to the loop frame
+// `frame_index`: it leaves the bindings of that loop's body, the scopes
+// deeper than the loop's entry.
+sema_single_use_check_loop_exit: fn(check: ^SemaBodyCheck, frame_index: Int, exit: String, span: Span) {
+    if frame_index < 0 || frame_index >= check.context.loop_value_frames.len() -> return
+    body_depth: check.context.loop_value_frames[frame_index].scope_depth + 1
+    sema_single_use_check_exit(check.state, body_depth, exit, Span{start: span.start, end: span.start + exit.len()}, check.diagnostics)
 }
 
 // The scope-end duty check, then the lexical scope exit.
@@ -434,8 +473,13 @@ sema_single_use_diag_discarded: fn(methods: [String], how: String, span: Span) -
     sema_error("E0140", span, "this value still owes {sema_single_use_job(methods)}", "this value's type is `#SingleUse`, so it carries a job that has to be done — {how} skips that job before it's done", "bind it to a name, then consume it exactly once — or write `#Unsafe(\"reason\") {{ consume(...) }}` to discard it deliberately")
 }
 
-sema_single_use_diag_returned: fn(name: String, methods: [String], span: Span) -> Diagnostic {
-    sema_error("E0140", span, "`{name}` still owes {sema_single_use_job(methods)}, but this `return` leaves with it undone", "this value's type is `#SingleUse`, so its job has to be done before the function hands control back — returning here leaves the work undone (an open transaction, an unreleased lock)", "consume `{name}` before this `return` (commit or roll back the transaction, release the lock), or return it")
+// A `return` hands control back from the function; a `break` or `next`
+// leaves the loop body the value was bound in.
+sema_single_use_diag_exit: fn(name: String, methods: [String], exit: String, span: Span) -> Diagnostic {
+    if exit == "return" {
+        return sema_error("E0140", span, "`{name}` still owes {sema_single_use_job(methods)}, but this `return` leaves with it undone", "this value's type is `#SingleUse`, so its job has to be done before the function hands control back — returning here leaves the work undone (an open transaction, an unreleased lock)", "consume `{name}` before this `return` (commit or roll back the transaction, release the lock), or return it")
+    }
+    sema_error("E0140", span, "`{name}` still owes {sema_single_use_job(methods)}, but this `{exit}` leaves with it undone", "this value's type is `#SingleUse`, so its job has to be done before control leaves the loop body it was bound in — `{exit}` here leaves the work undone (an unjoined task, an unreleased lock)", "consume `{name}` before this `{exit}` — {sema_single_use_job_calls(methods)}or pass it to a `^^` parameter")
 }
 
 sema_single_use_diag_branch: fn(name: String, methods: [String], span: Span) -> Diagnostic {

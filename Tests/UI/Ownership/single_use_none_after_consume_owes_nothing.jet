@@ -1,0 +1,39 @@
+// A binding whose value was consumed and is then set to `None` holds no value
+// with a job, so a `return` after that leaves nothing undone. `None` written
+// over a value that still owes its job does not do that job: the `return`
+// after it is E0140.
+#SingleUse Lease: struct {
+    name: String,
+
+    release: fn(^^self) {}
+}
+
+acquire: fn(name: String) -> Lease { Lease{name: name.copy()} }
+
+release_held: fn(held: ^^Lease?) {
+    if held == .Val(lease) -> lease.release()
+}
+
+released_then_none: fn(stop: Bool) {
+    ^held: Lease?{acquire("a")}
+    if stop {
+        release_held(held)
+        held = None
+        return
+    }
+    release_held(held)
+}
+
+none_over_held: fn(stop: Bool) {
+    ^held: Lease?{acquire("b")}
+    if stop {
+        held = None
+        return
+    }
+    release_held(held)
+}
+
+run: fn() {
+    released_then_none(true)
+    none_over_held(false)
+}

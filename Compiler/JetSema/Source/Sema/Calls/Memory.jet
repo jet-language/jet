@@ -15,6 +15,7 @@ use jet_foundation.[
     NodeKind,
     ParamZone,
     Span,
+    Symbol,
     SymbolID,
     SymbolKind,
     TAllocCtor,
@@ -25,6 +26,7 @@ use jet_foundation.[
     AST_EMPTY_CALL_ARG_FLAGS,
     expr_span,
     measure_literal_value,
+    module_is_core,
     ir_runtime_handle_row,
 ]
 
@@ -125,9 +127,9 @@ sema_call_memory_call_arg: fn(argument: CallArg, value: TExpr, borrow: Bool, mut
     }
 }
 
-sema_call_memory_static_arity: fn(method: String, args: [CallArg], span: Span, check: ^SemaBodyCheck) -> Bool {
+sema_call_memory_static_arity: fn(method: String, over: Bool, args: [CallArg], span: Span, check: ^SemaBodyCheck) -> Bool {
     if args.len() == 1 -> return true
-    ^fix: if method == "over" -> "write `mem.Fixed.over(bytes)`" else -> "write `mem.Fixed.new(size: N)`"
+    ^fix: if over -> "write `mem.Fixed.over(bytes)`" else -> "write `mem.Fixed.new(size: N)`"
     check.diagnostics.push(sema_error("E0103", span, "`Fixed.{method}` has the wrong number of arguments", "a fixed allocator needs one size or backing buffer", fix))
     sema_call_memory_discard_args(args, check)
     return false
@@ -181,7 +183,7 @@ sema_call_memory_check_fixed_buffer: fn(argument: CallArg, value: TExpr, check: 
     // buffer's name passed plain is that window.
     ^direct_write: argument.convention != AccessConvention.Move && direct_expr
     if !fixed_bytes || !direct_write {
-        check.diagnostics.push(sema_error("E0103", argument.span, "`Fixed.over` needs one mutable fixed-size byte buffer", "the allocator exclusively borrows that exact inline buffer until the Fixed handle is closed", "bind `[Byte#N]` storage with `:=`, then write `fixed: mem.Fixed.over(storage)`"))
+        check.diagnostics.push(sema_error("E0103", argument.span, "`Fixed.over` needs one mutable fixed-size byte buffer", "the allocator exclusively borrows that exact inline buffer until the Fixed handle is closed", "bind `[Byte#N]` storage to a `^` name, then write `fixed: mem.Fixed.over(storage)`"))
         return false
     }
     ^parameter: SemaCallParam{label: "buffer", name: "buffer", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Write, ty: Val(value.ty), variadic: false}
@@ -190,120 +192,127 @@ sema_call_memory_check_fixed_buffer: fn(argument: CallArg, value: TExpr, check: 
     return ownership.accepted && ownership.complete
 }
 
-// Handles `mem.Fixed.{new,over}`, `mem.address_of` and `mem.pin` before
-// normal receiver checking: each works on the caller's own storage. Arena,
-// Bump and Pool are Core declarations whose `new` is an ordinary call.
-sema_call_try_memory_static: fn(receiver: Expr, method: String, args: [CallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
-    return if receiver == {
-        .Ident(alias, alias_span, _) -> {
-            if method != "address_of" && method != "pin" {
-                return SemaMethodSpecialCheck{handled: false, value: None}
-            }
-            imported: sema_call_core_import_target(check.environment.*, check.program.*, alias) ?? return SemaMethodSpecialCheck{handled: false, value: None}
-            if imported.module_name != "core.mem" || !sema_call_core_record_import_reference(check, imported, alias_span) {
-                return SemaMethodSpecialCheck{handled: false, value: None}
-            }
-            if method == "pin" {
-                return SemaMethodSpecialCheck{handled: true, value: sema_call_memory_pin(args, span, expected, check)}
-            }
-            SemaMethodSpecialCheck{handled: true, value: sema_call_memory_address_of(args, span, expected, check)}
-        }
-        .Field(base, name, _, _) -> {
-            // A binding's permission for `Fixed` covers this call only, never
-            // a constructor nested in its arguments.
-            fixed_allowed: check.context.allow_fixed_constructor
-            check.context.allow_fixed_constructor = false
-            ^alias: if base == {
-                .Ident(value, _, _) -> value
-                .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {
-                    return SemaMethodSpecialCheck{handled: false, value: None}
-                }
-            }
-            if sema_expr_core_import_module(check, alias) != Val("core.mem") {
-                return SemaMethodSpecialCheck{handled: false, value: None}
-            }
-            if name != "Fixed" -> return SemaMethodSpecialCheck{handled: false, value: None}
-            if method != "new" && method != "over" {
-                check.diagnostics.push(sema_error("E0102", span, "`Fixed` has no method `{method}`", "`Fixed` supports `new` and `over` constructors", "write `mem.Fixed.new(size: N)` or `mem.Fixed.over(bytes)`"))
-                sema_call_memory_discard_args(args, check)
-                return SemaMethodSpecialCheck{handled: true, value: None}
-            }
-            if !fixed_allowed {
-                check.diagnostics.push(sema_error("E0103", span, "`Fixed.{method}` must directly initialize a lexical binding", "the Fixed handle borrows inline storage whose lifetime and drop order are fixed at its declaration", "write `fixed: mem.Fixed.{method}(…)`"))
-            }
-            if !sema_call_memory_static_arity(method, args, span, check) {
-                return SemaMethodSpecialCheck{handled: true, value: None}
-            }
+// The roles of the core.mem declarations (Core/Mem/Mem.jet) the compiler
+// builds where their call stands, each on the caller's own storage: the
+// `address_of` and `pin` functions, and Fixed's two constructors.
+SEMA_CORE_ROLE_MEM_ADDRESS_OF: "MemAddressOf"
 
-            ^constructor: TAllocCtor.Fixed{size: 1}
-            ^values: [TExpr]{}
-            ^index: 0
-            loop index < args.len() {
-                ^argument: args[index]
-                ^required: if method == "over" -> None else -> Val(Type.Int)
-                checked: sema_check_expression(argument.expr, required, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-                if {
-                    method == "new" -> {
-                        ^size_value: sema_call_memory_compiletime_int(argument.expr, checked, check)
-                        if size_value == None && sema_call_memory_reads_runtime_local(argument.expr, check.scopes) {
-                            check.diagnostics.push(sema_error("E0103", argument.span, "`Fixed.new` needs a positive compile-time byte size", "runtime-sized storage cannot become an inline fixed array in the current stack frame", "use a positive literal or comptime integer, e.g. `mem.Fixed.new(size: 4096)`"))
-                            return SemaMethodSpecialCheck{handled: true, value: None}
-                        }
-                        if size_value == None {
-                            ^staged: sema_comptime_body_value_find(check.context, check.environment.module_identity, sema_scope_function_owner_key(check.scopes), argument.span, span)
-                            if staged == {
-                                .Val(body_value) -> {
-                                    if body_value.ty != Type.Int {
-                                        check.diagnostics.push(sema_error("E0103", argument.span, "`Fixed.new` needs a positive compile-time byte size", "runtime-sized storage cannot become an inline fixed array in the current stack frame", "use a positive literal or comptime integer, e.g. `mem.Fixed.new(size: 4096)`"))
-                                        return SemaMethodSpecialCheck{handled: true, value: None}
-                                    }
-                                    size_value = if body_value.value == {
-                                        .Int(number) -> Val(number)
-                                        .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Function(_) -> {
-                                            check.diagnostics.push(sema_error("E0103", argument.span, "`Fixed.new` needs a positive compile-time byte size", "runtime-sized storage cannot become an inline fixed array in the current stack frame", "use a positive literal or comptime integer, e.g. `mem.Fixed.new(size: 4096)`"))
-                                            return SemaMethodSpecialCheck{handled: true, value: None}
-                                        }
-                                    }
-                                }
-                                .None -> {
-                                    ^_: sema_comptime_body_capture(check.context, check.environment.*, check.program.*, check.scopes, "Fixed.new size", argument.expr, Type.Int, argument.span, span)
-                                    return SemaMethodSpecialCheck{handled: true, value: None}
-                                }
-                            }
-                        }
-                        size: size_value ?? return SemaMethodSpecialCheck{handled: true, value: None}
-                        // Body-level comptime staging owns unresolved values; only a resolved value can be validated here.
-                        if size <= 0 {
-                            check.diagnostics.push(sema_error("E0103", argument.span, "`Fixed.new` needs a positive compile-time byte size", "runtime-sized storage cannot become an inline fixed array in the current stack frame", "use a positive literal or comptime integer, e.g. `mem.Fixed.new(size: 4096)`"))
-                            return SemaMethodSpecialCheck{handled: true, value: None}
-                        }
-                        constructor = TAllocCtor.Fixed{size: size}
-                        values.push(sema_expr_unbounded_integer_literal(size, argument.span))
-                    }
-                    else -> {
-                        if !sema_call_memory_check_fixed_buffer(argument, checked, check) {
-                            return SemaMethodSpecialCheck{handled: true, value: None}
-                        }
-                        values.push(checked)
-                        constructor = TAllocCtor.FixedOver
-                    }
-                }
-                index += 1
-            }
-            ^tree_args: [TCallArg]{}
-            index = 0
-            loop index < values.len() {
-                ^borrowed: method == "over"
-                tree_args.push(sema_call_memory_call_arg(args[index], values[index], borrowed, borrowed))
-                index += 1
-            }
-            ^value: sema_tree_node(Type.Named{name: name}, TExprKind.AllocNew{ctor: constructor, args: tree_args}, span)
-            return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, check.environment.*, check.program.*, check.diagnostics)}
+SEMA_CORE_ROLE_MEM_PIN: "MemPin"
+
+SEMA_CORE_ROLE_FIXED_FRAME: "FixedFrame"
+
+SEMA_CORE_ROLE_FIXED_OVER: "FixedOver"
+
+// A call through its Core module of `target`, when `target` fills the
+// MemAddressOf or MemPin role: a place operation on the caller's own
+// storage, checked before any argument is. Every route that calls a Core
+// module's function (`mem.address_of(place)`, `mem.pin(place)`) asks here
+// once it resolves the declaration, before it checks the call's arguments.
+sema_call_try_memory_place: fn(target: SemaCallDirectTarget, args: [CallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
+    role: sema_core_symbol_role(check.program.registration_graph, target.symbol)
+    if role == SEMA_CORE_ROLE_MEM_PIN {
+        return SemaMethodSpecialCheck{handled: true, value: sema_call_memory_pin(args, span, expected, check)}
+    }
+    if role == SEMA_CORE_ROLE_MEM_ADDRESS_OF {
+        return SemaMethodSpecialCheck{handled: true, value: sema_call_memory_address_of(args, span, expected, check)}
+    }
+    SemaMethodSpecialCheck{handled: false, value: None}
+}
+
+// Whether `target` fills the MemAddressOf or MemPin role. Its call is a place
+// operation only through its module (sema_call_try_memory_place).
+sema_call_memory_place_target: fn(target: SemaCallDirectTarget, check: SemaBodyCheck) -> Bool {
+    role: sema_core_symbol_role(check.program.registration_graph, target.symbol)
+    role == SEMA_CORE_ROLE_MEM_ADDRESS_OF || role == SEMA_CORE_ROLE_MEM_PIN
+}
+
+// The role of the Core static that `receiver.method` calls (`mem.Fixed.new`
+// fills FixedFrame), or "" when it calls none that fills a role.
+sema_call_memory_static_role: fn(receiver: Expr, method: String, check: SemaBodyCheck) -> String {
+    owner: sema_call_static_source_owner(receiver, method, [Type]{}, check) ?? return ""
+    if owner.symbol.kind != SymbolKind.Type || !module_is_core(owner.symbol.module_identity) -> return ""
+    graph: check.program.registration_graph
+    row: sema_type_graph_nominal_row(graph, owner.symbol.id) ?? return ""
+    sema_core_method_role(graph, row, method)
+}
+
+// Whether `receiver.method` calls one of Fixed's constructors.
+sema_call_memory_fixed_constructor: fn(receiver: Expr, method: String, check: SemaBodyCheck) -> Bool {
+    role: sema_call_memory_static_role(receiver, method, check)
+    role == SEMA_CORE_ROLE_FIXED_FRAME || role == SEMA_CORE_ROLE_FIXED_OVER
+}
+
+// A static call of `method` on the type `owner` names. When the method is one
+// of Fixed's constructors, the call works in the caller's frame: FixedFrame
+// takes `size` bytes of it, a positive compile-time count, and FixedOver
+// borrows a mutable `[Byte#N]` buffer of it. Either must directly initialize
+// a lexical binding. Every static call passes here first, so a binding's
+// permission covers its own initializer only, never a constructor nested in
+// its arguments.
+sema_call_try_memory_fixed: fn(owner: Symbol, method: String, args: [CallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
+    fixed_allowed: check.context.allow_fixed_constructor
+    check.context.allow_fixed_constructor = false
+    unhandled: SemaMethodSpecialCheck{handled: false, value: None}
+    if !module_is_core(owner.module_identity) -> return unhandled
+    graph: check.program.registration_graph
+    row: sema_type_graph_nominal_row(graph, owner.id) ?? return unhandled
+    role: sema_core_method_role(graph, row, method)
+    over: role == SEMA_CORE_ROLE_FIXED_OVER
+    if !over && role != SEMA_CORE_ROLE_FIXED_FRAME -> return unhandled
+    if !fixed_allowed {
+        check.diagnostics.push(sema_error("E0103", span, "`Fixed.{method}` must directly initialize a lexical binding", "the Fixed handle borrows inline storage whose lifetime and drop order are fixed at its declaration", "write `fixed: mem.Fixed.{method}(…)`"))
+    }
+    if !sema_call_memory_static_arity(method, over, args, span, check) {
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    rejected: SemaMethodSpecialCheck{handled: true, value: None}
+    argument: args[0]
+    required: if over -> None else -> Val(Type.Int)
+    checked: sema_check_expression(argument.expr, required, check) ?? return rejected
+    if over && !sema_call_memory_check_fixed_buffer(argument, checked, check) -> return rejected
+    ^constructor: TAllocCtor.FixedOver
+    ^tree_value: checked
+    if !over {
+        size: sema_call_memory_fixed_size(argument, checked, span, check) ?? return rejected
+        constructor = TAllocCtor.Fixed{size: size}
+        tree_value = sema_expr_unbounded_integer_literal(size, argument.span)
+    }
+    tree_args: [TCallArg]{sema_call_memory_call_arg(argument, tree_value, over, over)}
+    // The handle has the Core declaration's own type (`<corelib>/core.mem.Fixed`),
+    // which its runtime handle row is keyed by.
+    module_row: graph.modules[row.module_index]
+    fixed_ty: Type.Named{name: sema_checked_nominal_key(graph, module_row, module_row.nominals[row.row])}
+    value: sema_tree_node(fixed_ty, TExprKind.AllocNew{ctor: constructor, args: tree_args}, span)
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, check.environment.*, check.program.*, check.diagnostics)}
+}
+
+// The byte size of `Fixed.new(size)`, whose argument `argument` is checked as
+// `checked`: a positive compile-time Int, else E0103. None too while body-level
+// comptime staging has yet to resolve it.
+sema_call_memory_fixed_size: fn(argument: CallArg, checked: TExpr, span: Span, check: ^SemaBodyCheck) -> Int? {
+    refused: sema_error("E0103", argument.span, "`Fixed.new` needs a positive compile-time byte size", "runtime-sized storage cannot become an inline fixed array in the current stack frame", "use a positive literal or comptime integer, e.g. `mem.Fixed.new(size: 4096)`")
+    ^size_value: sema_call_memory_compiletime_int(argument.expr, checked, check)
+    if size_value == None && sema_call_memory_reads_runtime_local(argument.expr, check.scopes) {
+        check.diagnostics.push(refused)
+        return None
+    }
+    if size_value == None {
+        staged: sema_comptime_body_value_find(check.context, check.environment.module_identity, sema_scope_function_owner_key(check.scopes), argument.span, span) ?? {
+            ^_: sema_comptime_body_capture(check.context, check.environment.*, check.program.*, check.scopes, "Fixed.new size", argument.expr, Type.Int, argument.span, span)
+            return None
         }
-        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {
-            return SemaMethodSpecialCheck{handled: false, value: None}
+        size_value = if staged.value == {
+            .Int(number) -> if staged.ty == Type.Int -> Val(number) else -> None
+            .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Function(_) -> None
         }
     }
+    // Body-level comptime staging owns unresolved values; only a resolved value can be validated here.
+    size: size_value ?? 0
+    if size <= 0 {
+        check.diagnostics.push(refused)
+        return None
+    }
+    Val(size)
 }
 
 sema_call_memory_record_allocator_effect: fn(name: String, method: String, result_type: Type, span: Span, check: ^SemaBodyCheck) -> Bool Never! {

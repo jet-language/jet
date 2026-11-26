@@ -71,15 +71,15 @@ in_run: fn(body: String) -> String { "run: fn() {{\n{body}}}\n" }
 }
 
 #Test("statement habits are rewritten to the Jet statement") {
-    assert_habit_fix(in_run("    n := 1\n    n++\n    print(n)\n"), in_run("    n := 1\n    n += 1\n    print(n)\n"))
-    assert_habit_fix(in_run("    n := 1\n    n--\n    print(n)\n"), in_run("    n := 1\n    n -= 1\n    print(n)\n"))
+    assert_habit_fix(in_run("    ^n: 1\n    n++\n    print(n)\n"), in_run("    ^n: 1\n    n += 1\n    print(n)\n"))
+    assert_habit_fix(in_run("    ^n: 1\n    n--\n    print(n)\n"), in_run("    ^n: 1\n    n -= 1\n    print(n)\n"))
     assert_habit_fix(in_run("    pass\n"), in_run(""))
     assert_habit_fix(in_run("    n: 3\n    if n > 5 {{\n        print(1)\n    }} elif n > 2 {{\n        print(2)\n    }}\n"), in_run("    n: 3\n    if n > 5 {{\n        print(1)\n    }} else if n > 2 {{\n        print(2)\n    }}\n"))
     assert_habit_fix("import math\n\nrun: fn() {{ print(math.sqrt(16.0)) }}\n", "use math: core.math\n\nrun: fn() {{ print(math.sqrt(16.0)) }}\n")
 }
 
 #Test("a Python block after a `:` is put in braces") {
-    assert_habit_fix(in_run("    n := 0\n    while n < 3:\n        n += 1\n    print(n)\n"), in_run("    n := 0\n    loop n < 3 {{\n        n += 1\n    }}\n    print(n)\n"))
+    assert_habit_fix(in_run("    ^n: 0\n    while n < 3:\n        n += 1\n    print(n)\n"), in_run("    ^n: 0\n    loop n < 3 {{\n        n += 1\n    }}\n    print(n)\n"))
     assert_habit_fix(in_run("    xs: [Int]{{1, 2}}\n    for x in xs:\n        print(x)\n"), in_run("    xs: [Int]{{1, 2}}\n    loop x in xs {{\n        print(x)\n    }}\n"))
     assert_habit_fix(in_run("    xs: [Int]{{1, 2}}\n    for x in xs {{\n        print(x)\n    }}\n"), in_run("    xs: [Int]{{1, 2}}\n    loop x in xs {{\n        print(x)\n    }}\n"))
     assert_habit_fix(in_run("    xs: [Int]{{1, 2}}\n    loop x in xs:\n        print(x)\n"), in_run("    xs: [Int]{{1, 2}}\n    loop x in xs {{\n        print(x)\n    }}\n"))

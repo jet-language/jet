@@ -1,0 +1,13 @@
+# A user rule reads the `server.response` and `server.json` calls a
+# handler returns from its FunctionInfo, with their statuses; the
+# package's own `json` is not Core's and is not heard.
+fixture: RuleReadsCoreHTTPReturns.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 0 # each returned Core response is heard with its status
+stderr: !~ "known.Misread" # four recorded calls, all returned
+step: jet run main.jet
+exit: 0
+stdout: = "200\n" # the rule only reads; the handler answers 200

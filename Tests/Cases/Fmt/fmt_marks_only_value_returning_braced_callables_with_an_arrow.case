@@ -2,6 +2,7 @@
 # Claim: fn value() -> Int { return 1 } (tests/fmt.rs:1286)
 # Claim: fn concise() -> Int { 1 } (tests/fmt.rs:1287)
 # Claim: fn record() -> Rect { {width: 1, height: 2} } (tests/fmt.rs:1288-1291)
+# Claim: the record braced inside the body prints bare, `record: fn() -> Rect { width: 1, height: 2 }`, which reads back as the same record (Docs/Spec/spec.md, record bodies)
 # Claim: fn impure() { print(1) } kept (tests/fmt.rs:1292)
 # Claim: fn explicit() () { print(1) } kept (tests/fmt.rs:1293)
 # Claim: fn fail() Err! {} (tests/fmt.rs:1294)
@@ -23,7 +24,7 @@ step: jet fmt marks/run.jet
 exit: 0 # tests/fmt.rs:1285 formats
 file: marks/run.jet ~ "value: fn() -> Int { return 1 }" # tests/fmt.rs:1286-1301 the ten substrings
 file: marks/run.jet ~ "concise: fn() -> Int { 1 }" # tests/fmt.rs:1286-1301 the ten substrings
-file: marks/run.jet ~ "record: fn() -> Rect { {width: 1, height: 2} }" # tests/fmt.rs:1286-1301 the ten substrings
+file: marks/run.jet ~ "record: fn() -> Rect { width: 1, height: 2 }" # tests/fmt.rs:1286-1301 the ten substrings
 file: marks/run.jet ~ "impure: fn() { print(1) }" # tests/fmt.rs:1286-1301 the ten substrings
 file: marks/run.jet ~ "explicit: fn() { print(1) }" # tests/fmt.rs:1286-1301 the ten substrings
 file: marks/run.jet ~ "fail: fn() Err! { print(1) }" # tests/fmt.rs:1286-1301 the ten substrings

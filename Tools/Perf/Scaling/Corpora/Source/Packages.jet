@@ -114,7 +114,7 @@ consumer_tree: fn(files: ^[String:String], entries: [String], prefix: String) ->
         ^groups: [[String]]{}
         loop group in 0..<(level.len() + GROUP - 1) /% GROUP {
             name: "{prefix}_l{depth}_g{group}"
-            ^body: [String]{"{name}: fn(seed: Int) -> Int {{", "    acc := seed % {M}"}
+            ^body: [String]{"{name}: fn(seed: Int) -> Int {{", "    ^acc: seed % {M}"}
             loop index in group * GROUP..<min(level.len(), (group + 1) * GROUP) {
                 body.push("    acc = (acc * 31 + {level[index]}(acc + {index - group * GROUP + 1})) % {M}")
             }
@@ -138,7 +138,7 @@ consumer_tree: fn(files: ^[String:String], entries: [String], prefix: String) ->
 // The entry file: `run` folds every root into one checksum line, after any
 // declarations the shape already placed in main.jet.
 finish: fn(name: String, files: ^[String:String], roots: [String]) {
-    ^body: [String]{"run: fn() {{", "    checksum := 0"}
+    ^body: [String]{"run: fn() {{", "    ^checksum: 0"}
     loop (index, root) in roots {
         body.push("    checksum = (checksum * 31 + {root}({index + 1})) % {M}")
     }

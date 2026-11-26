@@ -388,7 +388,7 @@ sema_function_check_generics: fn(func: Func, environment: SemaScopeEnvironment, 
 }
 
 // The checks of one function (sema_function_check): again while share sites
-// are found or a use decides a `:=` number name's type
+// are found or a use decides a changeable number name's type
 // (Expressions/NumberNames.jet), then its last pass's reports and facts are kept.
 sema_function_check_passes: fn(func: Func, owner_key: String, function_kind: TFuncKind, raw_protocol_return: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, module_scopes: ^SemaScopeTable, generics: SemaFunctionCheckGenerics, host_hooks: SemaHostHookAccess?, diagnostics: ^[Diagnostic], call_facts: ^[SemaCallSiteFact], comptime_requests: ^[SemaComptimeRequest], name_references: ^[SemaNameReferenceFact]) -> SemaFunctionResult {
     sema_comptime_body_work_count(environment.comptime_body_values, SemaComptimeBodyWorkOperation.FunctionsStarted)
@@ -1008,7 +1008,7 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     // compiler-generated body (derived codec scaffolding) binds every slot it
     // may need. A body with an unresolved name gives neither: the reads and
     // writes under that name's expression go unrecorded, so a used binding
-    // would look unread and a reassigned `:=` unwritten.
+    // would look unread and a reassigned changeable name unwritten.
     if !check.context.compiler_generated && stand_in == None && !sema_has_unresolved_name_since(check.diagnostics, diagnostics_start) {
         sema_ownership_finalize_references(check)
         sema_ownership_report_never_written(check)

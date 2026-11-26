@@ -23,7 +23,7 @@ run: fn() {
     }
     client2: http.Client.new().protocols(true, false, true)
     response: client2.send(http.request("GET", "http://{cap:addr}/h2")) ?? panic("third send")
-    saw_error := false
+    ^saw_error: false
     loop chunk in response.body().chunks(64) {
         if chunk == {
             .Ok(_) -> panic("original FIRST read must fail")

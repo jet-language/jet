@@ -243,7 +243,7 @@ web: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
                 }}
 
                 customer{i}_seed: fn(count: Int) -> [Customer{i}] {{
-                    rows := [Customer{i}]{{}}
+                    ^rows: [Customer{i}]{{}}
                     loop index in 0..<count {{
                         rows.push(Customer{i}{{id: index + 1, name: "customer-{{index}}", email: "c{{index}}@example.com", tier: index % {r.int(2, 5)}, active: index % 3 != 0, tags: [String]{{"t{{index % 4}}", "{r.pick(WORDS)}"}}}})
                     }}
@@ -294,7 +294,7 @@ web: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
                 }}
 
                 items{i}_list: fn(user: Int) -> String {{
-                    parts := [String]{{}}
+                    ^parts: [String]{{}}
                     loop index in 0..<(user % 4 + 1) -> parts.push("item-{{index}}")
                     parts.join(",")
                 }}
@@ -319,7 +319,7 @@ web: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
 
                 handler{i}_main: fn(seed: Int) -> Int {{
                     paths: [String]{{"/api/v{i}/items", "/api/v{i}/item", "/api/v{i}/health", "/missing"}}
-                    total := 0
+                    ^total: 0
                     loop (index, path) in paths {{
                         response: handle{i}(Request{{method: "GET", path: path, user_id: seed % 11 + index, body: ""}})
                         total = (total + response.status + response.body.len()) % {M}
@@ -335,13 +335,13 @@ web: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
                 ["template{i}_width"],
                 """
                 render{i}_row: fn(cells: [String]) -> String {{
-                    out := "<tr>"
+                    ^out: "<tr>"
                     loop cell in cells -> out = "{{out}}<td>{{cell}}</td>"
                     "{{out}}</tr>"
                 }}
 
                 render{i}_page: fn(title: String, rows: [[String]]) -> String {{
-                    body := ""
+                    ^body: ""
                     loop row in rows -> body = "{{body}}{{render{i}_row(row)}}"
                     "<html><head><title>{{title}}</title></head><body><h1>{{title}}</h1><table>{{body}}</table></body></html>"
                 }}
@@ -349,7 +349,7 @@ web: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
                 template{i}_width: fn(x: Int) -> Int {{ (x % {r.int(40, 120)}) + {r.int(1, 9)} }}
 
                 template{i}_main: fn(seed: Int) -> Int {{
-                    rows := [[String]]{{}}
+                    ^rows: [[String]]{{}}
                     loop index in 0..<(seed % 5 + 2) -> rows.push([String]{{"r{{index}}", "{{index * seed % 97}}", "{r.pick(WORDS)}"}})
                     page: render{i}_page("Report {i}", rows)
                     (page.len() + {call(r, h, "seed")}) % {M}
@@ -375,7 +375,7 @@ web: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
                     order_by: fn(^self, column: String) {{ self.order = column }}
 
                     to_sql: fn(self) -> String {{
-                        clause := ""
+                        ^clause: ""
                         loop (index, filter) in self.filters {{
                             clause = if index == 0 -> "WHERE {{filter}}" else -> "{{clause}} AND {{filter}}"
                         }}
@@ -384,7 +384,7 @@ web: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
                 }}
 
                 query{i}_main: fn(seed: Int) -> Int {{
-                    query := Query{i}{{table: "{r.pick(WORDS)}_{i}", filters: [String]{{}}, limit: seed % 50 + 1, order: "id"}}
+                    ^query: Query{i}{{table: "{r.pick(WORDS)}_{i}", filters: [String]{{}}, limit: seed % 50 + 1, order: "id"}}
                     query.where_eq("tenant", seed % 13)
                     query.where_eq("status", {r.int(0, 4)})
                     query.order_by("created_at")
@@ -424,7 +424,7 @@ web: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
 
                 permissions{i}_main: fn(seed: Int) -> Int {{
                     actions: [String]{{"read", "write", "delete"}}
-                    allowed := 0
+                    ^allowed: 0
                     loop index in 0..<6 {{
                         role: role{i}_of(seed + index)
                         loop action in actions {{
@@ -488,7 +488,7 @@ game: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
                 }}
 
                 bodies{i}_spawn: fn(count: Int) -> [Body{i}] {{
-                    bodies := [Body{i}]{{}}
+                    ^bodies: [Body{i}]{{}}
                     loop index in 0..<count {{
                         bodies.push(Body{i}{{position: vec2(Float.from_int(index), 0.5), velocity: vec2(1.0, Float.from_int(index % 3)), mass: 1.0 + Float.from_int(index % 5), alive: true}})
                     }}
@@ -496,7 +496,7 @@ game: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
                 }}
 
                 bodies{i}_step: fn(bodies: [Body{i}], dt: Float) -> [Body{i}] {{
-                    out := [Body{i}]{{}}
+                    ^out: [Body{i}]{{}}
                     loop body in bodies {{
                         gravity: vec2(0.0, 0.0 - {r.int(5, 12)}.8 * dt)
                         velocity: vec_add(body.velocity, gravity)
@@ -507,7 +507,7 @@ game: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
                 }}
 
                 bodies{i}_energy: fn(bodies: [Body{i}]) -> Float {{
-                    total := 0.0
+                    ^total: 0.0
                     loop body in bodies {{
                         if body.alive -> total = total + 0.5 * body.mass * vec_dot(body.velocity, body.velocity)
                     }}
@@ -517,7 +517,7 @@ game: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
                 system{i}_frames: fn(x: Int) -> Int {{ x % {r.int(3, 9)} + 1 }}
 
                 system{i}_main: fn(seed: Int) -> Int {{
-                    bodies := bodies{i}_spawn(seed % 6 + 2)
+                    ^bodies: bodies{i}_spawn(seed % 6 + 2)
                     loop frame in 0..<system{i}_frames(seed) -> bodies = bodies{i}_step(bodies, 0.016 + Float.from_int(frame) * 0.001)
                     (to_score(bodies{i}_energy(bodies)) + {call(r, h, "seed")}) % {M}
                 }}
@@ -567,8 +567,8 @@ game: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
                 }}
 
                 ai{i}_main: fn(seed: Int) -> Int {{
-                    state := Mind{i}.Idle
-                    total := 0
+                    ^state: Mind{i}.Idle
+                    ^total: 0
                     loop tick in 0..<8 {{
                         state = mind{i}_next(state, (seed + tick * {r.int(3, 17)}) % 40, (seed * tick) % 100)
                         total = (total + mind{i}_code(state)) % {M}
@@ -598,7 +598,7 @@ game: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
 
                 wave{i}_spawns: fn(level: Int) -> [Spawn{i}] {{
                     table: wave{i}_table()
-                    spawns := [Spawn{i}]{{}}
+                    ^spawns: [Spawn{i}]{{}}
                     loop index in 0..<8 {{
                         value: table[(level * 8 + index) % table.len()]
                         spawns.push(Spawn{i}{{kind: value % 5, count: value % 9 + 1, delay: Float.from_int(value % 30) * 0.1}})
@@ -609,7 +609,7 @@ game: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
                 wave{i}_pick: fn(x: Int) -> Int {{ wave{i}_table()[x % 64] }}
 
                 waves{i}_main: fn(seed: Int) -> Int {{
-                    total := 0
+                    ^total: 0
                     loop spawn in wave{i}_spawns(seed % 7) {{
                         total = (total + spawn.kind * spawn.count + to_score(spawn.delay)) % {M}
                     }}
@@ -631,10 +631,10 @@ game: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
                 }}
 
                 inventory{i}_main: fn(seed: Int) -> Int {{
-                    items := [Item{i}]{{}}
+                    ^items: [Item{i}]{{}}
                     loop index in 0..<(seed % 7 + 3) -> items.push(Item{i}{{name: "{r.pick(WORDS)}-{{index}}", weight: index * {r.int(2, 9)} % 23, value: index * 17 % 101, rarity: index % 5}})
                     heavy: items.filter(fn(item) {{ item.weight > {r.int(5, 15)} }}).len()
-                    best := items[0]
+                    ^best: items[0]
                     loop item in items {{
                         if item.rarity > best.rarity -> best = item
                     }}
@@ -662,7 +662,7 @@ game: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
 
                 behaviors{i}_main: fn(seed: Int) -> Int {{
                     agents: [Behavior]{{Turret{i}{{range: {r.int(5, 30)}.0, rate: 2.0, heat: 0.0}}, Turret{i}{{range: Float.from_int(seed % 20), rate: 1.0, heat: 0.5}}}}
-                    total := 0.0
+                    ^total: 0.0
                     loop agent in agents -> total = total + agent.tick(0.016) + Float.from_int(agent.label().len())
                     (to_score(total) + {call(r, h, "seed")}) % {M}
                 }}
@@ -703,7 +703,7 @@ default_options: fn() -> Options {{ Options{{verbose: false, count: 1, name: "de
 verbosity: fn(options: Options) -> Int {{ if options.verbose -> 2 else -> 1 }}
 
 pad_right: fn(text: String, width: Int) -> String {{
-    out := text
+    ^out: text
     loop out.len() < width -> out = "{{out}} "
     out
 }}
@@ -718,8 +718,8 @@ cli: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
                 [String]{},
                 """
                 parse{i}_args: fn(args: [String]) -> Options CLIError! {{
-                    options := default_options()
-                    index := 0
+                    ^options: default_options()
+                    ^index: 0
                     loop index < args.len() {{
                         arg: args[index]
                         if arg == {{
@@ -786,7 +786,7 @@ cli: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
 
                 command{i}_main: fn(seed: Int) -> Int {{
                     words: [String]{{"build", "test", "clean", "help"}}
-                    total := 0
+                    ^total: 0
                     loop word in words {{
                         loop line in command{i}_run(command{i}_parse(word, seed % 5)) -> total = (total + pad_right(line, {r.int(20, 40)}).len()) % {M}
                     }}
@@ -806,11 +806,11 @@ cli: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
                 }}
 
                 table{i}_render: fn(columns: [Column{i}], rows: [[String]]) -> String {{
-                    header := ""
+                    ^header: ""
                     loop column in columns -> header = "{{header}}{{pad_right(column.title, column.width)}}|"
-                    out := header
+                    ^out: header
                     loop row in rows {{
-                        line := ""
+                        ^line: ""
                         loop (index, cell) in row {{
                             width: if index < columns.len() -> columns[index].width else -> 8
                             line = "{{line}}{{pad_right(cell, width)}}|"
@@ -822,7 +822,7 @@ cli: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
 
                 table{i}_main: fn(seed: Int) -> Int {{
                     columns: [Column{i}]{{Column{i}{{title: "name", width: {r.int(8, 16)}}}, Column{i}{{title: "size", width: 8}}, Column{i}{{title: "{r.pick(WORDS)}", width: 10}}}}
-                    rows := [[String]]{{}}
+                    ^rows: [[String]]{{}}
                     loop index in 0..<(seed % 4 + 2) -> rows.push([String]{{"file{{index}}", "{{index * 1024}}", "{{seed % 7}}"}})
                     (table{i}_render(columns, rows).len() + {call(r, h, "seed")}) % {M}
                 }}
@@ -843,7 +843,7 @@ cli: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
                 config{i}_default: fn(x: Int) -> Int {{ x % {r.int(10, 60)} + 1 }}
 
                 config{i}_main: fn(seed: Int) -> Int {{
-                    settings := [String:String]{{}}
+                    ^settings: [String:String]{{}}
                     settings["jobs"] = "{{seed % 16 + 1}}"
                     settings["retries"] = "{r.int(1, 5)}"
                     settings["mode"] = "fast"
@@ -871,14 +871,14 @@ to_score: fn(v: Float) -> Int {{
 DATA_COMMON: """
 mean: fn(values: [Float]) -> Float {{
     if values.len() == 0 -> return 0.0
-    total := 0.0
+    ^total: 0.0
     loop value in values -> total = total + value
     total / Float.from_int(values.len())
 }}
 
 variance: fn(values: [Float]) -> Float {{
     center: mean(values)
-    total := 0.0
+    ^total: 0.0
     loop value in values -> total = total + (value - center) * (value - center)
     if values.len() < 2 -> return 0.0
     total / Float.from_int(values.len() - 1)
@@ -896,7 +896,7 @@ data: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
                 [String]{},
                 """
                 column{i}_build: fn(seed: Int, count: Int) -> [Float] {{
-                    values := [Float]{{}}
+                    ^values: [Float]{{}}
                     loop index in 0..<count -> values.push(Float.from_int((seed * {r.int(3, 31)} + index * {r.int(3, 17)}) % 1000) * 0.1)
                     values
                 }}
@@ -930,16 +930,16 @@ data: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
                 groups{i}_bucket: fn(x: Int) -> Int {{ x % {r.int(3, 9)} }}
 
                 groups{i}_sum: fn(rows: [Sale{i}]) -> [String:Float] {{
-                    sums := [String:Float]{{}}
+                    ^sums: [String:Float]{{}}
                     loop row in rows -> sums[row.region] = (sums.get(row.region) ?? 0.0) + row.amount * Float.from_int(row.product + 1)
                     sums
                 }}
 
                 groups{i}_main: fn(seed: Int) -> Int {{
                     regions: [String]{{"north", "south", "east", "{r.pick(WORDS)}"}}
-                    rows := [Sale{i}]{{}}
+                    ^rows: [Sale{i}]{{}}
                     loop index in 0..<(seed % 12 + 4) -> rows.push(Sale{i}{{region: regions[groups{i}_bucket(index) % 4], product: index % 7, amount: Float.from_int(index * 13 % 97) + 0.5}})
-                    total := 0
+                    ^total: 0
                     loop (region, amount) in groups{i}_sum(rows) -> total = (total + region.len() + to_score(amount)) % {M}
                     (total + {call(r, h, "total")}) % {M}
                 }}
@@ -958,7 +958,7 @@ data: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
                 }}
 
                 pipeline{i}_main: fn(seed: Int) -> Int {{
-                    readings := [Reading{i}]{{}}
+                    ^readings: [Reading{i}]{{}}
                     loop index in 0..<(seed % 10 + 5) -> readings.push(Reading{i}{{sensor: index % 3, value: Float.from_int(index * {r.int(3, 19)} % 50), valid: index % 4 != 0}})
                     good: readings.filter(fn(reading) {{ reading.valid && reading.sensor != 2 && reading.value > 5.0 }})
                     scaled: good.map(fn(reading) {{ reading.value * {r.int(1, 3)}.5 }})
@@ -990,7 +990,7 @@ data: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
 
                 csv{i}_main: fn(seed: Int) -> Int {{
                     lines: [String]{{"a,{{seed % 10}},x", "b,oops,y", "c,{{seed % 3}}", "d,{r.int(1, 99)},{r.pick(WORDS)}"}}
-                    total := 0
+                    ^total: 0
                     loop line in lines {{
                         total = if csv{i}_parse(line) == {{
                             .Ok(value) -> total + value
@@ -1046,8 +1046,8 @@ gui: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
                 }}
 
                 layout{i}_column: fn(widgets: [Widget{i}], width: Int) -> [Rect] {{
-                    rects := [Rect]{{}}
-                    y := 0
+                    ^rects: [Rect]{{}}
+                    ^y: 0
                     loop widget in widgets {{
                         height: widget{i}_height(widget)
                         rects.push(Rect{{x: 0, y: y, w: width, h: height}})
@@ -1059,7 +1059,7 @@ gui: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
                 layout{i}_main: fn(seed: Int) -> Int {{
                     widgets: [Widget{i}]{{Widget{i}.Label("{r.pick(WORDS)} panel"), Widget{i}.Button{{text: "ok", id: seed % 9}}, Widget{i}.Spacer(8), Widget{i}.Image{{width: 64, height: seed % 48 + 16}}}}
                     rects: layout{i}_column(widgets, {r.int(120, 480)})
-                    total := 0
+                    ^total: 0
                     loop rect in rects -> total += rect_area(rect) % 997
                     (total + {call(r, h, "total")}) % {M}
                 }}
@@ -1087,7 +1087,7 @@ gui: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
                 }}
 
                 update{i}: fn(state: State{i}, msg: Msg{i}) -> State{i} {{
-                    updated := state
+                    ^updated: state
                     if msg == {{
                         .Increment(by) -> updated.count = updated.count + by
                         .Rename(title) -> updated.title = title
@@ -1101,7 +1101,7 @@ gui: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
                 reducer{i}_step: fn(x: Int) -> Int {{ (x + {r.int(1, 9)}) % {r.int(10, 30)} }}
 
                 reducer{i}_main: fn(seed: Int) -> Int {{
-                    state := State{i}{{count: 0, title: "start", items: [String]{{}}, selected: -1}}
+                    ^state: State{i}{{count: 0, title: "start", items: [String]{{}}, selected: -1}}
                     messages: [Msg{i}]{{Msg{i}.Reset, Msg{i}.Increment(seed % 5), Msg{i}.Add("a"), Msg{i}.Rename("{r.pick(WORDS)}"), Msg{i}.Select(1), Msg{i}.Add("b"), Msg{i}.Increment(reducer{i}_step(seed))}}
                     loop msg in messages -> state = update{i}(state, msg)
                     (state.count + state.title.len() + state.items.len() + state.selected + {call(r, h, "seed")}) % {M}
@@ -1134,7 +1134,7 @@ gui: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
                 style{i}_default: fn() -> Style{i} {{ Style{i}{{margin: 4, padding: 8, border: 1, radius: 4, font_size: 14, line_height: 20, weight: 400, opacity: 100, shadow: 0, gap: 8, min_width: 0, max_width: 1200, color: "#222", background: "#fff"}} }}
 
                 style{i}_emphasis: fn(base: Style{i}) -> Style{i} {{
-                    styled := base
+                    ^styled: base
                     styled.weight = {r.pick(["600", "700", "800"])}
                     styled.font_size = base.font_size + 2
                     styled.color = "#000"
@@ -1174,7 +1174,7 @@ gui: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
                 events{i}_main: fn(seed: Int) -> Int {{
                     area: Rect{{x: 10, y: 10, w: {r.int(50, 200)}, h: 40}}
                     events: [Event{i}]{{Event{i}.Click{{x: seed % 100, y: 20}}, Event{i}.Key("Enter"), Event{i}.Scroll(seed % 9), Event{i}.Resize{{w: 800, h: 600}}}}
-                    handled := 0
+                    ^handled: 0
                     loop event in events -> handled += events{i}_handle(event, area)
                     (handled + {call(r, h, "handled")}) % {M}
                 }}
@@ -1210,7 +1210,7 @@ embedded: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
                 regs{i}_mask: fn(x: Int) -> Int {{ x & {r.int(15, 255)} }}
 
                 regs{i}_configure: fn(ctrl: Int, speed: Int) -> Int {{
-                    value := set_bit(ctrl, 0)
+                    ^value: set_bit(ctrl, 0)
                     value = clear_bit(value, 3)
                     value |= (speed & 7) << 4
                     value & 65535
@@ -1242,14 +1242,14 @@ embedded: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
                     }}
 
                     sum: fn(self) -> Int {{
-                        total := 0
+                        ^total: 0
                         loop k in 0..<self.count -> total += self.data[(self.head + k) % 16]
                         total
                     }}
                 }}
 
                 ring{i}_main: fn(seed: Int) -> Int {{
-                    ring := Ring{i}{{data: [Int#16]{{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}}, head: 0, count: 0}}
+                    ^ring: Ring{i}{{data: [Int#16]{{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}}, head: 0, count: 0}}
                     loop k in 0..<{r.int(10, 30)} -> ring.push((seed + k * {r.int(3, 11)}) % 256)
                     (ring.sum() + {call(r, h, "seed")}) % {M}
                 }}
@@ -1271,14 +1271,14 @@ embedded: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
                 crc{i}_byte: fn(x: Int) -> Int {{ crc{i}_table()[x & 63] }}
 
                 crc{i}_update: fn(crc: Int, bytes: [Int]) -> Int {{
-                    value := crc
+                    ^value: crc
                     table: crc{i}_table()
                     loop byte in bytes -> value = ((value >> 4) + table[(value + byte) & 63]) & 65535
                     value
                 }}
 
                 crc{i}_main: fn(seed: Int) -> Int {{
-                    bytes := [Int]{{}}
+                    ^bytes: [Int]{{}}
                     loop k in 0..<12 -> bytes.push((seed * 7 + k) & 255)
                     (crc{i}_update({r.int(0, 65535)}, bytes) + {call(r, h, "seed")}) % {M}
                 }}
@@ -1307,8 +1307,8 @@ embedded: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
                 }}
 
                 frame{i}_main: fn(seed: Int) -> Int {{
-                    state := Frame{i}.Sync
-                    done := 0
+                    ^state: Frame{i}.Sync
+                    ^done: 0
                     loop k in 0..<24 {{
                         state = frame{i}_step(state, (seed + k * 31) & 255)
                         if state == .Done(sum) -> done += sum
@@ -1360,7 +1360,7 @@ compiler: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
                 }}
 
                 lex{i}: fn(codes: [Int]) -> [Tok{i}] {{
-                    tokens := [Tok{i}]{{}}
+                    ^tokens: [Tok{i}]{{}}
                     loop code in codes {{
                         token: if code % 12 == {{
                             0 -> Tok{i}.Num(code)
@@ -1399,9 +1399,9 @@ compiler: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
                 }}
 
                 lexer{i}_main: fn(seed: Int) -> Int {{
-                    codes := [Int]{{}}
+                    ^codes: [Int]{{}}
                     loop k in 0..<{r.int(16, 40)} -> codes.push((seed * 7 + k * {r.int(3, 13)}) % 97)
-                    total := 0
+                    ^total: 0
                     loop token in lex{i}(codes) -> total = (total * 3 + tok{i}_weight(token)) % {M}
                     (total + symbol_weight(Symbol{{name: "tok", slot: total % 8, depth: 1}}) + {call(r, h, "total")}) % {M}
                 }}
@@ -1422,7 +1422,7 @@ compiler: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
                 }}
 
                 eval{i}: fn(nodes: [Node{i}], env: [String:Int]) -> Int {{
-                    values := [Int]{{}}
+                    ^values: [Int]{{}}
                     loop node in nodes {{
                         value: if node == {{
                             .Lit(v) -> v
@@ -1439,7 +1439,7 @@ compiler: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
                 eval{i}_fold: fn(x: Int) -> Int {{ (x * {r.int(2, 9)}) % 1009 }}
 
                 eval{i}_main: fn(seed: Int) -> Int {{
-                    env := [String:Int]{{}}
+                    ^env: [String:Int]{{}}
                     env["x"] = seed % 50
                     env["y"] = {r.int(1, 99)}
                     nodes: [Node{i}]{{Node{i}.Lit({r.int(1, 9)}), Node{i}.Var("x"), Node{i}.Add{{left: 0, right: 1}}, Node{i}.Var("y"), Node{i}.Mul{{left: 2, right: 3}}, Node{i}.Neg(4), Node{i}.Add{{left: 4, right: 5}}}}
@@ -1467,9 +1467,9 @@ compiler: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
                 }}
 
                 vm{i}_run: fn(program: [Op{i}]) -> Int {{
-                    stack := [Int]{{}}
-                    pc := 0
-                    fuel := 64
+                    ^stack: [Int]{{}}
+                    ^pc: 0
+                    ^fuel: 64
                     loop pc < program.len() && fuel > 0 {{
                         fuel -= 1
                         op: program[pc]
@@ -1550,7 +1550,7 @@ compiler: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
 
                 types{i}_main: fn(seed: Int) -> Int {{
                     types: [Ty{i}]{{Ty{i}.IntT, Ty{i}.BoolT, Ty{i}.ListT(seed % 3), Ty{i}.FnT{{params: 2, result: {r.int(1, 3)}}}, Ty{i}.StrT, Ty{i}.ListT(1)}}
-                    matches := 0
+                    ^matches: 0
                     loop left in types {{
                         loop right in types {{
                             if ty{i}_unify(left, right) -> matches += 1
@@ -1589,13 +1589,13 @@ scientific: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
                 poly{i}_coefficients: fn() -> [Float] {{ [Float]{{{coefficients.join(", ")}}} }}
 
                 poly{i}_eval: fn(x: Float) -> Float {{
-                    total := 0.0
+                    ^total: 0.0
                     loop c in poly{i}_coefficients() -> total = total * x + c
                     total
                 }}
 
                 poly{i}_newton: fn(start: Float) -> Float {{
-                    x := start
+                    ^x: start
                     loop k in 0..<8 {{
                         slope: (poly{i}_eval(x + 0.001) - poly{i}_eval(x)) / 0.001
                         if absf(slope) < 0.000001 -> break
@@ -1615,7 +1615,7 @@ scientific: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
                 """
                 integrate{i}: fn(f: fn(Float) -> Float, low: Float, high: Float, steps: Int) -> Float {{
                     width: (high - low) / Float.from_int(steps)
-                    total := 0.5 * (f(low) + f(high))
+                    ^total: 0.5 * (f(low) + f(high))
                     loop k in 1..<steps -> total = total + f(low + width * Float.from_int(k))
                     total * width
                 }}
@@ -1636,10 +1636,10 @@ scientific: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
                 [String]{},
                 """
                 matrix{i}_mul: fn(a: [Float], b: [Float], n: Int) -> [Float] {{
-                    out := [Float]{{}}
+                    ^out: [Float]{{}}
                     loop row in 0..<n {{
                         loop col in 0..<n {{
-                            total := 0.0
+                            ^total: 0.0
                             loop k in 0..<n -> total = total + a[row * n + k] * b[k * n + col]
                             out.push(total)
                         }}
@@ -1648,14 +1648,14 @@ scientific: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
                 }}
 
                 matrix{i}_trace: fn(m: [Float], n: Int) -> Float {{
-                    total := 0.0
+                    ^total: 0.0
                     loop k in 0..<n -> total = total + m[k * n + k]
                     total
                 }}
 
                 matrix{i}_main: fn(seed: Int) -> Int {{
-                    a := [Float]{{}}
-                    b := [Float]{{}}
+                    ^a: [Float]{{}}
+                    ^b: [Float]{{}}
                     loop k in 0..<16 {{
                         a.push(Float.from_int((seed + k * {r.int(2, 9)}) % 10))
                         b.push(Float.from_int((k * 3) % 7) * 0.5)
@@ -1684,7 +1684,7 @@ scientific: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
                 }}
 
                 ode{i}_main: fn(seed: Int) -> Int {{
-                    state := Oscillator{i}{{position: 1.0, velocity: 0.0, damping: 0.{r.int(1, 9)}, stiffness: {r.int(1, 9)}.0}}
+                    ^state: Oscillator{i}{{position: 1.0, velocity: 0.0, damping: 0.{r.int(1, 9)}, stiffness: {r.int(1, 9)}.0}}
                     loop _ in 0..<(seed % 20 + 10) -> state = ode{i}_step(state, 0.01)
                     (to_score(absf(state.position) * 1000.0) + {call(r, h, "seed")}) % {M}
                 }}
@@ -1727,7 +1727,7 @@ find_index: fn<T>(items: [T], keep: fn(T) -> Bool) -> Int {{
 }}
 
 fold_ints: fn<T>(items: [T], start: Int, f: fn(Int, T) -> Int) -> Int {{
-    total := start
+    ^total: start
     loop item in items -> total = f(total, item)
     total
 }}
@@ -1750,7 +1750,7 @@ generic_lib: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
                 model{i}_rank: fn(x: Int) -> Int {{ (x * {r.int(2, 13)}) % 211 }}
 
                 model{i}_main: fn(seed: Int) -> Int {{
-                    models := [Model{i}]{{}}
+                    ^models: [Model{i}]{{}}
                     loop k in 0..<(seed % 6 + 3) -> models.push(Model{i}{{id: k, label: "{r.pick(WORDS)}{{k}}", score: model{i}_rank(seed + k)}})
                     labels: models.map(fn(model) {{ model.label }})
                     scores: models.map(fn(model) {{ model.score }})
@@ -1825,7 +1825,7 @@ generated: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
                 message{i}_sample: fn(seed: Int) -> Message{i} {{ Message{i}{{{samples.join(", ")}}} }}
 
                 message{i}_encode: fn(message: Message{i}) -> String {{
-                    out := ""
+                    ^out: ""
                 {encodes.join("\n")}
                     out
                 }}
@@ -1925,7 +1925,7 @@ generated: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
                 }}
 
                 accessors{i}_main: fn(seed: Int) -> Int {{
-                    record := Record{i}{{{values.join(", ")}}}
+                    ^record: Record{i}{{{values.join(", ")}}}
                 {sets.join("\n")}
                     ({gets.join(" + ")} + {call(r, h, "seed")}) % {M}
                 }}

@@ -98,7 +98,7 @@ function jetFiles() {
   const files = {
     "package.jet": `// ${HEADER}\nname: "medium"\nversion: "0.1.0"\nedition: "2026"\n`,
     "@build.jet": `// ${HEADER}\nbuild: fn(b: Build) {\n    app: b.add_executable("medium", [${sources.map((s) => JSON.stringify(s)).join(", ")}], [])\n    b.default(app)\n}\n`,
-    "run.jet": `// ${HEADER}\nrun: fn() {\n    total := 0\n${folds}\n    print("checksum {total}")\n}\n`,
+    "run.jet": `// ${HEADER}\nrun: fn() {\n    ^total: 0\n${folds}\n    print("checksum {total}")\n}\n`,
   };
   unitNames.forEach((name, file) => {
     files[`${name}.jet`] = `// ${HEADER}\n${fileUnits(file).map(jetUnit).join("\n")}`;

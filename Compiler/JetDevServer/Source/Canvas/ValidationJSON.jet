@@ -83,7 +83,7 @@ validate_single_line_fragment: fn(fragment: String, label: String) Err! {
 
 validate_comment_color: fn(color: String) Err! {
     bytes: color.bytes()
-    ok := bytes.len() == 7 && Int{bytes[0]} == 35
+    ^ok: bytes.len() == 7 && Int{bytes[0]} == 35
     if ok {
         loop i in 1..<7 {
             byte: Int{bytes[i]}
@@ -117,7 +117,7 @@ quoted_attr: fn(value: String) -> String Never! { json_str(value) }
 // The hint whose anchor is the source span recorded for `region_id` in
 // `graph_json`, among the hints of `kind` ("comment" or "collapse").
 find_hint_region: fn(src: String, graph_json: String, region_id: String, kind: String) -> CommentHint? Never! {
-    first := true
+    ^first: true
     loop chunk in graph_json.split("\"region_id\":") {
         if first {
             first = false
@@ -148,10 +148,10 @@ NamedType: struct {
 }
 
 extract_params: fn(graph_json: String, expr: String) -> [NamedType] Never! {
-    out := [NamedType]{}
+    ^out: [NamedType]{}
     loop ident in identifiers(expr) {
         ty: graph_type_for_name(graph_json, ident) ?? next
-        known := false
+        ^known: false
         loop param in out {
             if param.name == ident -> known = true
         }
@@ -161,7 +161,7 @@ extract_params: fn(graph_json: String, expr: String) -> [NamedType] Never! {
 }
 
 graph_type_for_name: fn(graph_json: String, name: String) -> String? Never! {
-    first := true
+    ^first: true
     loop chunk in graph_json.split("\"name\":") {
         if first {
             first = false
@@ -175,9 +175,9 @@ graph_type_for_name: fn(graph_json: String, name: String) -> String? Never! {
 }
 
 identifiers: fn(expr: String) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     bytes: expr.bytes()
-    start := -1
+    ^start: -1
     stop: bytes.len() + 1
     loop i in 0..<stop {
         byte: if i < bytes.len() -> (Int{bytes[i]}) else -> 32
@@ -208,7 +208,7 @@ parse_simple_call: fn(call: String) -> SimpleCall? Never! {
     name: call.slice(0, open).trim()
     if !is_jet_ident(name) -> return None
     inner: call.slice(open + 1, close).trim()
-    args := [String]{}
+    ^args: [String]{}
     if inner != "" {
         loop arg in inner.split(",") -> args.push(arg.trim())
     }
@@ -226,7 +226,7 @@ find_simple_helper: fn(src: String, name: String) -> SimpleHelper? Never! {
     start: src.index_of(needle) ?? return None
     rest: src.slice(start + needle.len(), src.len())
     params_end: rest.index_of(")") ?? return None
-    params := [String]{}
+    ^params: [String]{}
     loop param in rest.slice(0, params_end).split(",") {
         if param.split_once(":") == .Val(parts) -> params.push(parts.before.trim())
     }
@@ -240,10 +240,10 @@ find_simple_helper: fn(src: String, name: String) -> SimpleHelper? Never! {
 }
 
 replace_ident: fn(expr: String, ident: String, replacement: String) -> String Never! {
-    out := [String]{}
+    ^out: [String]{}
     bytes: expr.bytes()
-    start := -1
-    plain := 0
+    ^start: -1
+    ^plain: 0
     stop: bytes.len() + 1
     loop i in 0..<stop {
         byte: if i < bytes.len() -> (Int{bytes[i]}) else -> 32
@@ -301,7 +301,7 @@ json_bool_field: fn(text: String, key: String) -> Bool? Never! {
 
 leading_digits: fn(text: String) -> String Never! {
     bytes: text.bytes()
-    end := 0
+    ^end: 0
     loop end < bytes.len() && (Int{bytes[end]}) >= 48 && (Int{bytes[end]}) <= 57 -> end += 1
     foundation_byte_text(bytes, 0, end)
 }
@@ -312,10 +312,10 @@ json_int_field: fn(text: String, key: String) -> Int? Never! {
 }
 
 json_string_array: fn(text: String, key: String) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     value: json_field_value(text, key) ?? return out
     if !value.starts_with("[") -> return out
-    rest := value.remove_prefix("[")
+    ^rest: value.remove_prefix("[")
     loop {
         rest = rest.trim_start()
         if rest.starts_with("]") -> break
@@ -329,17 +329,17 @@ json_string_array: fn(text: String, key: String) -> [String] Never! {
 
 // The integers of the JSON array at `"key":`, up to its first non-integer.
 json_int_array: fn(text: String, key: String) -> [Int] Never! {
-    out := [Int]{}
+    ^out: [Int]{}
     body: json_array_body(text, key) ?? return out
     bytes: body.bytes()
-    at := 0
+    ^at: 0
     // Each comma-separated item, its JSON whitespace (space, tab, line feed,
     // carriage return) cut by byte bounds; an empty item is skipped.
     loop at <= bytes.len() {
-        end := at
+        ^end: at
         loop end < bytes.len() && bytes[end] != 44 -> end += 1
-        start := at
-        stop := end
+        ^start: at
+        ^stop: end
         at = end + 1
         loop start < stop && json_space(bytes[start]) -> start += 1
         loop stop > start && json_space(bytes[stop - 1]) -> stop -= 1
@@ -357,9 +357,9 @@ json_array_body: fn(text: String, key: String) -> String? Never! {
     value: json_field_value(text, key) ?? return None
     if !value.starts_with("[") -> return None
     bytes: value.bytes()
-    depth := 0
-    in_string := false
-    escaped := false
+    ^depth: 0
+    ^in_string: false
+    ^escaped: false
     loop i in 0..<bytes.len() {
         byte: Int{bytes[i]}
         if in_string {
@@ -382,12 +382,12 @@ json_array_body: fn(text: String, key: String) -> String? Never! {
 
 // The body of every top-level JSON object in `text`, braces removed.
 json_object_bodies: fn(text: String) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     bytes: text.bytes()
-    start := 0
-    depth := 0
-    in_string := false
-    escaped := false
+    ^start: 0
+    ^depth: 0
+    ^in_string: false
+    ^escaped: false
     loop i in 0..<bytes.len() {
         byte: Int{bytes[i]}
         if in_string {

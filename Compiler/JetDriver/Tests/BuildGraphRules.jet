@@ -128,7 +128,7 @@ build_graph_rules_step: fn(session: ^BuildSession, operation: fn(^BuildSessionSt
     build_session_call(session, operation, args, None, true, 9, 10)
 }
 
-// `step := b.run(name, tool, caps)`, then `step.output(path)` for each output.
+// `^step: b.run(name, tool, caps)`, then `step.output(path)` for each output.
 build_graph_rules_made: fn(session: ^BuildSession, tool: BuildSessionValue, name: String, outputs: [String]) -> BuildSessionReply Never! {
     step: build_session_call(session, build_session_run, [BuildSessionValue]{.Text{value: name}, tool, build_graph_rules_list([String]{})}, None, true, 5, 6)
     handle: if step == {
@@ -675,7 +675,7 @@ build_graph_rules_made: fn(session: ^BuildSession, tool: BuildSessionValue, name
     assert_eq(diagnostic.error, Val(BuildSessionError.StepWithoutOutputs{value: "quiet"}))
 }
 
-// `step := b.run(name, tool, caps)` at bytes `start..end`, then
+// `^step: b.run(name, tool, caps)` at bytes `start..end`, then
 // `step.reads(path)` for each of `reads` and `step.writes(path)` for each of
 // `writes`.
 build_graph_rules_schedule_step: fn(session: ^BuildSession, tool: BuildSessionValue, name: String, reads: [String], writes: [String], start: Int) -> BuildSessionValue Never! {

@@ -5,7 +5,7 @@
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JET_RECHECK_VERIFY=1
-write: main.jet = "fact: fn(n: Int) -> Int {\n    if n <= 1 -> return 1\n    n * fact(n - 1)\n}\n\nrepeat: fn(word: String, times: Int) -> String {\n    out := \"\"\n    loop _ in 0..<times -> out = \"{out}{word}\"\n    out\n}\n\nfirst: fn() {\n    big: #run fact(10)\n    word: #run repeat(\"ab\", 3)\n    print(\"{big} {word}\")\n}\n\nsecond: fn() {\n    small: #run fact(5)\n    print(\"{small}\")\n}\n\nrun: fn() {\n    first()\n    second()\n}\n"
+write: main.jet = "fact: fn(n: Int) -> Int {\n    if n <= 1 -> return 1\n    n * fact(n - 1)\n}\n\nrepeat: fn(word: String, times: Int) -> String {\n    ^out: \"\"\n    loop _ in 0..<times -> out = \"{out}{word}\"\n    out\n}\n\nfirst: fn() {\n    big: #run fact(10)\n    word: #run repeat(\"ab\", 3)\n    print(\"{big} {word}\")\n}\n\nsecond: fn() {\n    small: #run fact(5)\n    print(\"{small}\")\n}\n\nrun: fn() {\n    first()\n    second()\n}\n"
 step: jet run --trace main.jet
 exit: 0
 stdout: = "3628800 ababab\n120\n"

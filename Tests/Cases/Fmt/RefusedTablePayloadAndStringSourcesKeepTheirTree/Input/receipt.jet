@@ -4,13 +4,13 @@ jet_cli_receipt_context_identity: fn(verb: String, argv: [String], terminal: [U8
     loop bit in terminal {
         if bit != (U8{48}) && bit != (U8{49}) -> return Err(jet_cli_read_error("receipt terminal identity requires three host bits"))
     }
-    out := jet_cli_receipt_section_marker(JET_CLI_RECEIPT_MAGIC)
+    ^out: jet_cli_receipt_section_marker(JET_CLI_RECEIPT_MAGIC)
     jet_cli_receipt_frame(out, verb.bytes())
     jet_cli_receipt_frame(out, (cli_sys.current_dir() ?? ".").bytes())
     jet_cli_receipt_frame(out, jet_cli_receipt_argv_identity(argv))
     names: cli_sys.vars() ?? return Err(jet_cli_read_error("could not read receipt environment: {err}"))
     jet_cli_receipt_frame(out, jet_cli_receipt_environment_identity(names))
-    tools := [U8]{}
+    ^tools: [U8]{}
     loop name in ([String]{"jet", "jetpack", "rustc", "cargo", "wasm-tools"}) {
         jet_cli_receipt_frame(tools, name.bytes())
         path: jet_cli_receipt_tool_path(name) ?? {

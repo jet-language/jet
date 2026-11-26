@@ -542,14 +542,14 @@ receipt_diff: fn(before: BuildGraph, after: BuildGraph) -> BuildGraphDiff Never!
     }
 
     file_deltas: diff_files(before, after)
-    action_names := [String]{}
+    ^action_names: [String]{}
     loop action in before.actions -> append_unique(action_names, action.name)
     loop action in after.actions -> append_unique(action_names, action.name)
     action_names.sort()
 
-    key_deltas := [BuildGraphKeyDelta]{}
-    cache_deltas := [BuildGraphCacheDelta]{}
-    changed_actions := [String]{}
+    ^key_deltas: [BuildGraphKeyDelta]{}
+    ^cache_deltas: [BuildGraphCacheDelta]{}
+    ^changed_actions: [String]{}
     loop name in action_names {
         before_action: find_action_name(before, name)
         after_action: find_action_name(after, name)
@@ -568,7 +568,7 @@ receipt_diff: fn(before: BuildGraph, after: BuildGraph) -> BuildGraphDiff Never!
         }
     }
 
-    affected := affected_files(before, changed_actions)
+    ^affected: affected_files(before, changed_actions)
     loop path in affected_files(after, changed_actions) -> append_unique(affected, path)
     affected.sort()
     return {
@@ -580,12 +580,12 @@ receipt_diff: fn(before: BuildGraph, after: BuildGraph) -> BuildGraphDiff Never!
 }
 
 diff_files: fn(before: BuildGraph, after: BuildGraph) -> [BuildGraphFileDelta] {
-    paths := [String]{}
+    ^paths: [String]{}
     loop file in before.files -> append_unique(paths, file.path)
     loop file in after.files -> append_unique(paths, file.path)
     paths.sort()
 
-    out := [BuildGraphFileDelta]{}
+    ^out: [BuildGraphFileDelta]{}
     loop path in paths {
         before_file: find_file(before.files, path)
         after_file: find_file(after.files, path)
@@ -597,18 +597,18 @@ diff_files: fn(before: BuildGraph, after: BuildGraph) -> [BuildGraphFileDelta] {
 }
 
 affected_files: fn(graph: BuildGraph, changed_actions: [String]) -> [String] {
-    pending_actions := [String]{}
+    ^pending_actions: [String]{}
     loop action in graph.actions {
         if contains_string(changed_actions, action.name) {
             append_unique(pending_actions, action.name)
         }
     }
-    pending_targets := [Int]{}
-    seen_actions := [String]{}
-    seen_targets := [Int]{}
-    affected := [String]{}
-    action_index := 0
-    target_index := 0
+    ^pending_targets: [Int]{}
+    ^seen_actions: [String]{}
+    ^seen_targets: [Int]{}
+    ^affected: [String]{}
+    ^action_index: 0
+    ^target_index: 0
 
     loop action_index < pending_actions.len() || target_index < pending_targets.len() {
         loop action_index < pending_actions.len() {
@@ -659,18 +659,18 @@ affected_files: fn(graph: BuildGraph, changed_actions: [String]) -> [String] {
 
 file_identity: fn(graph: BuildGraph, file: BuildGraphFile?) -> String {
     current: file ?? return "<missing>"
-    owner := ""
+    ^owner: ""
     if current.owner != .None {
         owner_id: current.owner ?? -1
         owner = action_name(graph, owner_id)
     }
-    consumers := [String]{}
+    ^consumers: [String]{}
     loop id in current.consumers {
         name: action_name(graph, id)
         if name != "" -> append_unique(consumers, name)
     }
     consumers.sort()
-    targets := [String]{}
+    ^targets: [String]{}
     loop id in current.targets {
         name: target_name(graph, id)
         if name != "" -> append_unique(targets, name)
@@ -734,8 +734,8 @@ valid_graph: fn(graph: BuildGraph) -> Bool {
         return false
     }
 
-    target_ids := [Int]{}
-    target_names := [String]{}
+    ^target_ids: [Int]{}
+    ^target_names: [String]{}
     loop target in graph.targets {
         if target.id < 0 || !valid_graph_text(target.name, 1024) -> return false
         if contains_int(target_ids, target.id) || contains_string(target_names, target.name) {
@@ -751,8 +751,8 @@ valid_graph: fn(graph: BuildGraph) -> Bool {
         }
     }
 
-    action_ids := [Int]{}
-    action_names := [String]{}
+    ^action_ids: [Int]{}
+    ^action_names: [String]{}
     loop action in graph.actions {
         if action.id < 0 || !valid_graph_text(action.name, 1024) -> return false
         if contains_int(action_ids, action.id) || contains_string(action_names, action.name) {
@@ -781,7 +781,7 @@ valid_graph: fn(graph: BuildGraph) -> Bool {
         }
     }
 
-    file_paths := [String]{}
+    ^file_paths: [String]{}
     loop file in graph.files {
         if !valid_graph_path(file.path) || contains_string(file_paths, file.path) -> return false
         file_paths.push(file.path.copy())
@@ -820,7 +820,7 @@ valid_graph: fn(graph: BuildGraph) -> Bool {
         }
     }
 
-    affected_paths := [String]{}
+    ^affected_paths: [String]{}
     loop file in graph.affected_files {
         if !valid_graph_path(file.path) || contains_string(affected_paths, file.path) {
             return false

@@ -315,6 +315,17 @@ gh_grammar_keyword_words: fn() -> [String] {
     assert(!zed.contains("\"&&\" @keyword"), "{GH_ZED} still marks logical and `&&` as the take mark")
 }
 
+// A changeable name stands apart from a fixed one: TextMate gives the mark
+// and the name of `^name: value` their own scopes, and Zed colors the mark
+// and the name of a tree-sitter `binding`.
+#Test("changeable_name_is_colored_apart_from_a_fixed_name") {
+    guards_enter_root()
+    vscode: gh_read(GH_VSCODE)
+    assert(vscode.contains("\"2\": {{ \"name\": \"variable.other.changeable.jet\" }}"), "{GH_VSCODE} gives a changeable name no scope of its own")
+    assert(gh_read("Tools/Editors/jet.tmGrammar").contains("variable.other.changeable.jet"), "Tools/Editors/jet.tmGrammar gives a changeable name no scope of its own")
+    assert(gh_read(GH_ZED).contains("(binding \"^\" @keyword name: (identifier) @variable.special)"), "{GH_ZED} does not color a changeable name")
+}
+
 // The `#X: value` marker line: the tree-sitter section renders the
 // registry's separator, and the grammar's `inbody_marker` rule parses it.
 #Test("tree_sitter_parses_the_inbody_marker_line_with_the_registry_separator") {

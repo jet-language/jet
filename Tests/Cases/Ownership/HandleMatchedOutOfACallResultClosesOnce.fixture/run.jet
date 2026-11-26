@@ -4,8 +4,8 @@ use files: core.files
 // mutable binding (its `^self` reads and writes need one) and closed with
 // `close(name)` inside the arm, has exactly one owner: the arm's close ends
 // it and the matched carrier no longer does. The artifact store's lock
-// (`if files.create(path, if_exists: .Refuse) == { .Ok(created) -> { writer
-// := created; ...; close(writer) } }`) is this shape; a second close of the
+// (`if files.create(path, if_exists: .Refuse) == { .Ok(created) -> { ^writer:
+// created; ...; close(writer) } }`) is this shape; a second close of the
 // same handle hung `jet self doctor`. Every round leaves no descriptor open,
 // and the file written in the arm holds exactly what the arm wrote.
 

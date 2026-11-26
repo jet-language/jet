@@ -9,7 +9,7 @@ ship this file as an artifact named `jet-context-capsule`.
 ## 1. Program shape
 
 A Jet executable has a `run: fn` entry point. A statement ends at a newline; use
-braces for a multi-statement body. `:` creates an immutable binding, `:=`
+braces for a multi-statement body. `:` creates an immutable binding, `^name:`
 creates a mutable binding, and `=` reassigns a mutable binding. `->` introduces
 a concise body or a closure. The primitive types are `Int`, `Float`, `Bool`,
 `String`, and `Char`; lists are `[T]`; optional values are `T?`; a fallible
@@ -40,7 +40,7 @@ until the condition is false. `loop item in collection { ... }` iterates values;
 
 ```jet
 run: fn() {
-    total := 0
+    ^total: 0
     loop i in 1..5 -> total += i
     if total == 10 -> print("sum={total}") else -> print("wrong")
 }
@@ -52,7 +52,7 @@ an operation or field after it. Module functions also use a dotted alias.
 
 ```jet
 run: fn() {
-    values := [Int]{3, 1, 2}
+    ^values: [Int]{3, 1, 2}
     values.sort()
     print(values[0])
 }
@@ -86,7 +86,7 @@ run: fn() {
 A call that can fail returns an outcome; handle it instead of ignoring it.
 
 For line transforms, use `text.lines()` and keep the result in a mutable list:
-`lines := text.lines().filter(line -> !line.trim().is_empty()).map(line ->
+`^lines: text.lines().filter(line -> !line.trim().is_empty()).map(line ->
 line.trim().to_lower())`. Then call `lines.sort()` and loop over the list.
 
 ## 3. Memory and ownership verbs
@@ -219,7 +219,7 @@ run: fn() {
 
 ```jet
 run: fn() {
-    total := 0
+    ^total: 0
     loop i in 1..5 -> total += i
     print(total)
 }
@@ -229,7 +229,7 @@ run: fn() {
 
 ```jet
 run: fn() {
-    values := [Int]{3, 1, 2}
+    ^values: [Int]{3, 1, 2}
     values.sort()
     print(values[0])
 }

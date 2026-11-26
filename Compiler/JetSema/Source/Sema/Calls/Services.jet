@@ -9,21 +9,17 @@ use jet_foundation.[
     Diagnostic,
     Expr,
     FunctionDefaultRef,
-    NodeKind,
     ParamZone,
     Span,
     SymbolID,
     SymbolKind,
     TFailureCarrier,
-    TGenericParam,
     StrPart,
     Type,
     core_identity_is,
-    core_source_owns_type,
     AST_EMPTY_CALL_ARG_FLAGS,
     UnOp,
     expr_span,
-    sema_casing_pascal_words,
     module_text,
     type_name,
 ]
@@ -529,90 +525,4 @@ sema_core_module_nominal: fn(program: SemaProgramTables, module_name: String, le
         }
     }
     leaf.copy()
-}
-
-sema_job_queue_function: fn(expression: Expr, check: SemaBodyCheck) -> SemaRegistrationRowRef? {
-    if expression == .Paren(inner, _, _) -> return sema_job_queue_function(inner, check)
-    name: if expression == {
-        .Ident(name, _, _) -> name
-        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {
-            return None
-        }
-    }
-    graph: check.program.registration_graph
-    resolved: sema_registration_lookup_name(graph, check.environment.module_identity, name) ?? return None
-    if sema_resolved_kind(graph, resolved) != SymbolKind.Function -> return None
-    module_index: sema_registration_module_index(graph, resolved.source_module_identity) ?? return None
-    id: sema_resolved_id(graph, resolved)
-    loop index in 0..<graph.modules[module_index].functions.len() {
-        if graph.modules[module_index].functions[index].symbol.id != id -> next
-        if !graph.modules[module_index].functions[index].declaration.is_job || graph.modules[module_index].functions[index].declaration.params.len() != 1 {
-            return None
-        }
-        return Val(SemaRegistrationRowRef{module_index: module_index, row: index})
-    }
-    return None
-}
-
-sema_job_queue_identity_error: fn(method: String, span: Span) -> Diagnostic Never! {
-    sema_error("E0112", span, "`JobQueue.{method}` expects a checked `#Job` function", "the queue identity is attached to the declared #Job and cannot be selected by an arbitrary function value", "pass the name of a #Job function with exactly one payload parameter")
-}
-
-sema_call_try_job_queue_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
-    unhandled: SemaMethodSpecialCheck{handled: false, value: None}
-    failed: SemaMethodSpecialCheck{handled: true, value: None}
-    if method != "enqueue" && method != "delay" -> return unhandled
-    queue_name: if receiver_value.ty == {
-        .Named(name) -> name
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {
-            return unhandled
-        }
-    }
-    if queue_name != "JobQueue" && !(core_source_owns_type(queue_name) && queue_name.ends_with(".JobQueue")) {
-        return unhandled
-    }
-    if !sema_ownership_check_call_receiver(check, receiver, AccessConvention.Write, span) {
-        return failed
-    }
-    required: if method == "enqueue" -> 2 else -> 3
-    if args.len() != required && !(method == "enqueue" && args.len() == 3) {
-        sema_services_report_arity(method, args.len(), required, span, check.diagnostics)
-        sema_services_check_untyped_args(args, check)
-        return failed
-    }
-    ^updated_args: args
-    if args.len() == 3 && !sema_services_bind_labels("JobQueue.{method}", updated_args, [String]{"", "", if method == "enqueue" -> "key" else -> "for"}, span, check.diagnostics) {
-        return failed
-    }
-    job: sema_job_queue_function(updated_args[0].expr, check) ?? {
-        check.diagnostics.push(sema_job_queue_identity_error(method, expr_span(updated_args[0].expr)))
-        sema_services_check_untyped_args(updated_args, check)
-        return failed
-    }
-    graph: check.program.registration_graph
-    job_name: graph.modules[job.module_index].functions[job.row].declaration.name
-    payload_type: sema_type_resolve_declared_with_generics(graph, graph.modules[job.module_index].functions[job.row].declaration.params[0].ty, graph.modules[job.module_index].module_identity, [TGenericParam]{})
-    job_span: expr_span(updated_args[0].expr)
-    updated_args[0].expr = Expr.Str{parts: [StrPart]{StrPart.Lit{text: job_name}}, span: job_span, id: AST_NODE_GENERATED}
-    sema_call_http_check_serde(SemaSerdeDirection.Encode, payload_type, expr_span(updated_args[1].expr), check)
-    payload: sema_check_expression(updated_args[1].expr, Val(payload_type), check) ?? return failed
-    last_type: if method == "enqueue" -> Type.Option{inner: Type.String} else -> Type.Named{name: "Duration"}
-    last: if updated_args.len() == 3 -> sema_check_expression(updated_args[2].expr, Val(last_type), check) ?? return failed else -> sema_node(check.context, last_type, NodeKind.Absent, span)
-    parameter_types: if updated_args.len() == 3 -> [Type]{Type.String, payload_type, last_type} else -> [Type]{Type.String, payload_type}
-    params: sema_services_method_params(parameter_types, [AccessConvention]{})
-    ownership: sema_ownership_check_method_call(check, "JobQueue.{method}", receiver, AccessConvention.Write, params, updated_args, span)
-    if !ownership.accepted || !ownership.complete -> return failed
-    // Source takes its immutable shared handle as a normal read, not the old
-    // native mutable carrier. Receiver ownership has already been checked.
-    // The call runs the Core function that fills the method's role
-    // (JobEnqueue, JobDelay).
-    normalized: [TExpr]{receiver_value, sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: job_name}}}, job_span), payload, last}
-    record: sema_data_role_record("JobQueue", method, "Job{sema_casing_pascal_words(method)}", [Type]{payload_type}, span, check) ?? return failed
-    result_type: sema_services_result_type(Type.Named{name: sema_core_module_nominal(check.program.*, "core.jobs", "JobQueueReceipt")})
-    failure: sema_services_result_carrier(result_type)
-    if !sema_call_core_record_effects(record, span, [Type]{payload_type}, result_type, failure, [FunctionDefaultRef]{}, check) {
-        return failed
-    }
-    value: sema_call_core_tree(record, normalized, span, [Type]{payload_type}, result_type, expected, check)
-    return SemaMethodSpecialCheck{handled: true, value: value}
 }

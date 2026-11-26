@@ -56,11 +56,23 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
         app.serve_once(listener)
     }
     first: client.get("http://{addr}/jokes/0")
-    print("GET /jokes/0: {first.status()} {first.body().text(1024) ?? return}")
+    first_text: first.body().text(1024) ?? {
+        serving.detach()
+        return
+    }
+    print("GET /jokes/0: {first.status()} {first_text}")
     added: client.request("POST", "http://{addr}/jokes").json(NewJoke{text: "A pun walks into a bar."}).send()
-    print("POST /jokes: {added.status()} {added.body().text(1024) ?? return}")
+    added_text: added.body().text(1024) ?? {
+        serving.detach()
+        return
+    }
+    print("POST /jokes: {added.status()} {added_text}")
     second: client.get("http://{addr}/jokes/1")
-    print("GET /jokes/1: {second.status()} {second.body().text(1024) ?? return}")
+    second_text: second.body().text(1024) ?? {
+        serving.detach()
+        return
+    }
+    print("GET /jokes/1: {second.status()} {second_text}")
     bad: client.get("http://{addr}/jokes/first")
     print("GET /jokes/first: {bad.status()}")
     serving.join()

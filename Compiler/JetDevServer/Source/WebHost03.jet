@@ -144,7 +144,7 @@ web_host_devtools: fn(state: Shared<WebHostState>, request: HTTPRequest, path: S
     }
     if path == "/__jet_devtools/reconnect" {
         if request.method != "GET" -> return web_host_text(405, "method not allowed")
-        cursor := Int?{None}
+        ^cursor: Int?{None}
         if canvas_host_query(query, "cursor") == .Val(text) {
             value: Int.parse(text) ?? -1
             if value < 0 -> return web_host_text(400, "cursor must be a non-negative integer")
@@ -210,7 +210,7 @@ web_host_browser_reconnect: fn(state: Shared<WebHostState>, cursor: Int?) -> Str
 // A layout or navigation action changes only the browser view, not the
 // session, so the handler applies it.
 web_host_browser_dispatch: fn(state: Shared<WebHostState>, action: BrowserHostAction) -> String BrowserHostError! {
-    permit := state.guard_edit()
+    ^permit: state.guard_edit()
     browser_web_dispatch(permit.value.browser, action)
 }
 
@@ -218,7 +218,7 @@ web_host_browser_dispatch: fn(state: Shared<WebHostState>, action: BrowserHostAc
 // The panel must be one of the catalog's, and an item the panel no longer
 // holds selects the panel alone.
 web_host_browser_select: fn(state: Shared<WebHostState>, payload: String, selection: DevtoolsSelectionFact?) -> WebHostFrame {
-    permit := state.guard_edit()
+    ^permit: state.guard_edit()
     if permit.value.selections.len() >= WEB_HOST_MAX_QUEUED {
         return WebHostFrame{status: 503, body: "devtools selection inbox is full; retry"}
     }
@@ -226,7 +226,7 @@ web_host_browser_select: fn(state: Shared<WebHostState>, payload: String, select
         if permit.value.browser.host.panel(chosen.panel_id) == None {
             return WebHostFrame{status: 400, body: "browser selection panel_id must match the canonical panel catalog"}
         }
-        node_id := String?{None}
+        ^node_id: String?{None}
         if chosen.item_key != "" && permit.value.browser.host.node_exists(chosen.panel_id, Val(chosen.item_key)) {
             node_id = Val(chosen.item_key)
         }
@@ -359,13 +359,13 @@ web_host_session_id: fn(state: Shared<WebHostState>) -> String {
 
 // The latest recording, kept fresh for a while after each ask.
 web_host_recording: fn(state: Shared<WebHostState>) -> String {
-    permit := state.guard_edit()
+    ^permit: state.guard_edit()
     permit.value.recording_ticks = WEB_HOST_RECORDING_TICKS
     "{permit.value.recording}"
 }
 
 web_host_take_commands: fn(state: Shared<WebHostState>) -> WebHostFrame? {
-    permit := state.guard_edit()
+    ^permit: state.guard_edit()
     if permit.value.commands == .Val(frame) {
         taken: WebHostFrame{status: frame.status, body: "{frame.body}"}
         permit.value.commands = None
@@ -375,7 +375,7 @@ web_host_take_commands: fn(state: Shared<WebHostState>) -> WebHostFrame? {
 }
 
 web_host_take_assets: fn(state: Shared<WebHostState>) -> String? {
-    permit := state.guard_edit()
+    ^permit: state.guard_edit()
     if permit.value.assets == .Val(frame) {
         taken: "{frame}"
         permit.value.assets = None
@@ -389,7 +389,7 @@ web_host_queue_client: fn(state: Shared<WebHostState>, client: String, dropped: 
     if client == "" || client.len() > WEB_HOST_MAX_CLIENT_ID {
         return
     }
-    permit := state.guard_edit()
+    ^permit: state.guard_edit()
     if dropped {
         if permit.value.dropped.len() < WEB_HOST_MAX_QUEUED -> permit.value.dropped.push("{client}")
         return
@@ -398,14 +398,14 @@ web_host_queue_client: fn(state: Shared<WebHostState>, client: String, dropped: 
 }
 
 web_host_queue_beacon: fn(state: Shared<WebHostState>, body: ^^[U8]) -> Bool {
-    permit := state.guard_edit()
+    ^permit: state.guard_edit()
     if permit.value.beacons.len() >= WEB_HOST_MAX_QUEUED -> return false
     permit.value.beacons.push(body.move())
     true
 }
 
 web_host_queue_envelope: fn(state: Shared<WebHostState>, envelope: ^^JetDevtoolsDecodedEnvelope) -> Bool {
-    permit := state.guard_edit()
+    ^permit: state.guard_edit()
     if permit.value.envelopes.len() >= WEB_HOST_MAX_QUEUED -> return false
     permit.value.envelopes.push(envelope.move())
     true
@@ -413,7 +413,7 @@ web_host_queue_envelope: fn(state: Shared<WebHostState>, envelope: ^^JetDevtools
 
 // The verbose request log; the dev clock stamps and prints it.
 web_host_note_request: fn(state: Shared<WebHostState>, method: String, path: String, status: Int) {
-    permit := state.guard_edit()
+    ^permit: state.guard_edit()
     if !permit.value.verbose || permit.value.requests.len() >= WEB_HOST_MAX_QUEUED {
         return
     }

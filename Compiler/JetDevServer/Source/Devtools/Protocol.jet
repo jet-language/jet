@@ -87,7 +87,7 @@ JetDevtoolsSourceIdentityFact: struct {
     // Only the published components, in wire order.
     json: fn(self) -> String Err! {
         self.validate()
-        parts := [String]{}
+        ^parts: [String]{}
         if self.source_id == .Val(value) {
             parts.push("\"source_id\":{foundation_json_quote(value)}")
         }
@@ -143,7 +143,7 @@ JetDevtoolsPayload: struct {
         if self.fields.len() > JET_DEVTOOLS_MAX_HISTORY {
             return Err("jet.devtools.v1 payload has too many fields")
         }
-        seen := [String:Bool]{}
+        ^seen: [String:Bool]{}
         loop (index, field) in self.fields {
             if field.key == "" {
                 return Err("jet.devtools.v1 payload field {index} has an empty key")
@@ -163,14 +163,14 @@ JetDevtoolsPayload: struct {
     // `{"fields":{...}}` with the keys in byte order.
     json: fn(self) -> String Err! {
         self.validate()
-        rendered := [String:String]{}
-        keys := [String]{}
+        ^rendered: [String:String]{}
+        ^keys: [String]{}
         loop field in self.fields {
             rendered["{field.key}"] = "{field.value.json}"
             keys.push("{field.key}")
         }
         keys.sort_by(fn(left: String, right: String) { left <=> right })
-        parts := [String]{}
+        ^parts: [String]{}
         loop key in keys -> parts.push("{foundation_json_quote(key)}:{rendered.get(key) ?? "null"}")
         Ok("{{\"fields\":{{{parts.join(",")}}}}}")
     }
@@ -191,7 +191,7 @@ JetDevtoolsEvent: struct {
 
     try_new: fn(timestamp_ms: Int, source: ^^String, body: ^^JetDevtoolsEventBody) -> JetDevtoolsEvent Err! {
         fields: devtools_body_fields(body)
-        event := JetDevtoolsEvent.from_parts(timestamp_ms, source, devtools_body_family(body), devtools_body_entity(body), fields)
+        ^event: JetDevtoolsEvent.from_parts(timestamp_ms, source, devtools_body_family(body), devtools_body_entity(body), fields)
         event.body = Val(body.move())
         Ok(event)
     }
@@ -199,7 +199,7 @@ JetDevtoolsEvent: struct {
     // A typed event rebuilt from its flat wire projection.
     from_wire: fn(sequence: Int, timestamp_ms: Int, source: ^^String, body: ^^JetDevtoolsEventBody, fields_json: ^^String, payload_json: ^^String?) -> JetDevtoolsEvent Err! {
         if sequence <= 0 -> return Err("jet.devtools.v1 event sequence must be positive")
-        event := JetDevtoolsEvent.try_new(timestamp_ms, source, body)
+        ^event: JetDevtoolsEvent.try_new(timestamp_ms, source, body)
         devtools_validate_json_object(fields_json, "fields")
         if payload_json == .Val(payload) -> devtools_validate_json_object(payload, "payload")
         event.fields = fields_json.move()
@@ -227,7 +227,7 @@ JetDevtoolsEvent: struct {
     // The only path that attaches values to an event.
     publish: fn(^^self, payload: JetDevtoolsPayload) -> JetDevtoolsEvent Err! {
         rendered: payload.json()
-        published := self.move()
+        ^published: self.move()
         published.payload = Val(rendered)
         Ok(published)
     }
@@ -255,7 +255,7 @@ JetDevtoolsEvent: struct {
         devtools_validate_text(self.event_kind, "kind")
         devtools_validate_text(self.event_entity, "entity")
         devtools_validate_json_object(self.fields, "fields")
-        payload := "null"
+        ^payload: "null"
         if self.payload == .Val(published) {
             devtools_validate_json_object(published, "payload")
             payload = "{published}"
@@ -274,7 +274,7 @@ JetDevtoolsSelection: struct {
 
     json: fn(self) -> String Err! {
         devtools_validate_text(self.panel_id, "selection.panel_id")
-        item_key := "null"
+        ^item_key: "null"
         if self.item_key == .Val(key) {
             devtools_validate_text(key, "selection.item_key")
             item_key = foundation_json_quote(key)
@@ -336,7 +336,7 @@ JetDevtoolsEnvelope: struct {
     push: fn(^self, event: ^^JetDevtoolsEvent) -> Int Never! {
         sequence: self.next_sequence
         self.next_sequence = sequence + 1
-        stamped := event.move()
+        ^stamped: event.move()
         stamped.assigned_sequence = sequence
         if stamped.payload != None -> self.privacy.published_payloads = true
         if self.event_list.len() >= JET_DEVTOOLS_MAX_EVENTS {
@@ -354,7 +354,7 @@ JetDevtoolsEnvelope: struct {
     // cursor is given.
     events_since: fn(self, cursor: Int?) -> [JetDevtoolsEvent] Never! {
         after: cursor ?? return self.event_list
-        first := self.event_list.len()
+        ^first: self.event_list.len()
         loop (index, event) in self.event_list {
             if event.assigned_sequence > after {
                 first = index
@@ -407,15 +407,15 @@ JetDevtoolsEnvelope: struct {
 
     serialize: fn(self) -> String Err! {
         devtools_validate_text(self.session_id, "session_id")
-        events := [String]{}
+        ^events: [String]{}
         loop event in self.event_list -> events.push(event.json())
-        selection := "null"
+        ^selection: "null"
         if self.view.selection == .Val(chosen) -> selection = chosen.json()
-        cursor := "null"
+        ^cursor: "null"
         if self.view.cursor == .Val(at) -> cursor = "{at}"
-        out := "{{\"protocol\":{foundation_json_quote(JET_DEVTOOLS_PROTOCOL)},\"session_id\":{foundation_json_quote(self.session_id)},\"started_at_ms\":{self.started_at_ms},\"events\":[{events.join(",")}],\"selection\":{selection},\"cursor\":{cursor}"
+        ^out: "{{\"protocol\":{foundation_json_quote(JET_DEVTOOLS_PROTOCOL)},\"session_id\":{foundation_json_quote(self.session_id)},\"started_at_ms\":{self.started_at_ms},\"events\":[{events.join(",")}],\"selection\":{selection},\"cursor\":{cursor}"
         if self.has_metadata() {
-            identity := "null"
+            ^identity: "null"
             if self.source_identity == .Val(fact) -> identity = fact.json()
             freshness: "{{\"state\":\"{self.freshness.state.as_str()}\",\"observed_at_ms\":{self.freshness.observed_at_ms}}}"
             privacy: "{{\"loopback_only\":{self.privacy.loopback_only},\"payload_free_by_default\":{self.privacy.payload_free_by_default},\"published_payloads\":{self.privacy.published_payloads}}}"
@@ -481,7 +481,7 @@ devtools_body_entity: fn(body: JetDevtoolsEventBody) -> String Never! {
 
 // The canonical `fields` object of a typed body.
 devtools_body_fields: fn(body: JetDevtoolsEventBody) -> String Err! {
-    parts := [String]{}
+    ^parts: [String]{}
     if body == {
         .Build(status, tier, diagnostics, kept, reset) -> {
             if diagnostics.len() > JET_DEVTOOLS_MAX_HISTORY {
@@ -489,7 +489,7 @@ devtools_body_fields: fn(body: JetDevtoolsEventBody) -> String Err! {
             }
             parts.push(devtools_text_field("status", status))
             parts.push(devtools_text_field("tier", tier))
-            rendered := [String]{}
+            ^rendered: [String]{}
             loop diagnostic in diagnostics -> rendered.push(devtools_text_json(diagnostic))
             parts.push("\"diagnostics\":[{rendered.join(",")}]")
             parts.push("\"kept\":{kept}")
@@ -579,10 +579,10 @@ devtools_body_fields: fn(body: JetDevtoolsEventBody) -> String Err! {
             parts.push(devtools_text_field("trace_id", trace_id))
             parts.push("\"start_ns\":{start_ns}")
             parts.push("\"cpu_ns\":{cpu_ns}")
-            gpu := "null"
+            ^gpu: "null"
             if gpu_ns == .Val(value) -> gpu = "{value}"
             parts.push("\"gpu_ns\":{gpu}")
-            responsible := "null"
+            ^responsible: "null"
             if responsible_function == .Val(function) {
                 responsible = devtools_function_json(function)
             }
@@ -613,7 +613,7 @@ devtools_body_fields: fn(body: JetDevtoolsEventBody) -> String Err! {
             parts.push(devtools_text_field("target", target))
             parts.push(devtools_text_field("run_mode", run_mode))
             parts.push("\"headless_compatible\":{headless_compatible}")
-            rendered := [String]{}
+            ^rendered: [String]{}
             loop phase in phases -> rendered.push(devtools_launch_phase_json(phase))
             parts.push("\"phases\":[{rendered.join(",")}]")
         }
@@ -727,9 +727,9 @@ devtools_validate_json_object: fn(value: String, field: String) Err! {
     if bytes.len() > JET_DEVTOOLS_MAX_TEXT_BYTES || !trimmed.starts_with("{{") || !trimmed.ends_with("}}") {
         return Err("jet.devtools.v1 {field} must be a bounded JSON object")
     }
-    depth := 0
-    in_string := false
-    escaped := false
+    ^depth: 0
+    ^in_string: false
+    ^escaped: false
     loop byte in bytes {
         code: Int{byte}
         if code < 32 || code == 127 {

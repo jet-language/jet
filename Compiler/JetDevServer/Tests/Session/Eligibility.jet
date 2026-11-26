@@ -10,13 +10,13 @@ capture_eligibility_test_identity: fn() -> CaptureIdentity Never! {
 }
 
 capture_eligibility_test_attempt: fn() -> CaptureAttempt Never! {
-    attempt := CaptureAttempt.new(capture_eligibility_test_identity()).with_sources([CaptureSourceFact]{CaptureSourceFact.at(CaptureSource.Clock, "clock.jet", U32{2}), CaptureSourceFact.at(CaptureSource.RawInput, "input.jet", U32{7}), CaptureSourceFact.at(CaptureSource.Network, "net.jet", U32{9})})
+    ^attempt: CaptureAttempt.new(capture_eligibility_test_identity()).with_sources([CaptureSourceFact]{CaptureSourceFact.at(CaptureSource.Clock, "clock.jet", U32{2}), CaptureSourceFact.at(CaptureSource.RawInput, "input.jet", U32{7}), CaptureSourceFact.at(CaptureSource.Network, "net.jet", U32{9})})
     attempt.scope = CaptureConsentScope.new([String]{"Rand", "Input"}, [String]{"example.test"}, [String]{"stdin"}, [String]{"typed text"}, "record", U64{17})
     attempt
 }
 
 capture_eligibility_test_granted: fn(policy: CapturePolicy) -> CaptureAttempt Never! {
-    attempt := capture_eligibility_test_attempt()
+    ^attempt: capture_eligibility_test_attempt()
     attempt.consent = Val(SensitiveCaptureConsent.new(attempt.identity.copy(), policy.consent_scope(attempt)))
     attempt
 }
@@ -35,9 +35,9 @@ capture_eligibility_assert_skip: fn(outcome: CaptureEligibility, reason: Capture
             loop override_active in ([Bool]{false, true}) {
                 loop explicit_capture in ([Bool]{false, true}) {
                     loop terminal_available in ([Bool]{false, true}) {
-                        policy := CapturePolicy.new(if release -> CaptureMode.Release else -> CaptureMode.Development, PackageCapturePolicy.new(setting, CaptureBudget.new_unchecked(U64{41})), (NoCaptureOverrideFact{active: override_active}))
+                        ^policy: CapturePolicy.new(if release -> CaptureMode.Release else -> CaptureMode.Development, PackageCapturePolicy.new(setting, CaptureBudget.new_unchecked(U64{41})), (NoCaptureOverrideFact{active: override_active}))
                         policy.explicit_capture = explicit_capture
-                        attempt := capture_eligibility_test_granted(policy)
+                        ^attempt: capture_eligibility_test_granted(policy)
                         attempt.terminal_available = terminal_available
                         outcome: policy.eligibility(attempt)
                         if override_active {
@@ -59,7 +59,7 @@ capture_eligibility_assert_skip: fn(outcome: CaptureEligibility, reason: Capture
 }
 
 #Test("capture_package_on_does_not_enable_release_without_explicit_capture") {
-    policy := CapturePolicy.release()
+    ^policy: CapturePolicy.release()
     policy.package.capture = DevCaptureSetting.On
     attempt: CaptureAttempt.safe_clock(capture_eligibility_test_identity())
     capture_eligibility_assert_skip(policy.eligibility(attempt), CaptureSkipReason.ReleaseMode, true)
@@ -69,15 +69,15 @@ capture_eligibility_assert_skip: fn(outcome: CaptureEligibility, reason: Capture
 }
 
 #Test("capture_empty_and_clock_sources_are_safe_without_terminal_or_consent") {
-    policy := CapturePolicy.development()
+    ^policy: CapturePolicy.development()
     policy.package.budget = CaptureBudget.new_unchecked(U64{29})
     loop sources in
         ([[CaptureSourceFact]]{([CaptureSourceFact]{}), ([CaptureSourceFact]{CaptureSourceFact.new(CaptureSource.Clock, None), CaptureSourceFact.at(CaptureSource.Clock, "clock.jet", (U32{3}))})}) {
-        attempt := CaptureAttempt.new(capture_eligibility_test_identity()).with_sources(sources.copy())
+        ^attempt: CaptureAttempt.new(capture_eligibility_test_identity()).with_sources(sources.copy())
         attempt.terminal_available = false
         assert(policy.eligibility(attempt) == CaptureEligibility.SafeClock{budget: CaptureBudget.new_unchecked(U64{29})})
         // A stale grant is irrelevant to a safe run, too.
-        other := attempt.identity.copy()
+        ^other: attempt.identity.copy()
         other.build_id = "old"
         attempt.consent = Val(SensitiveCaptureConsent.new(other, CaptureConsentScope.default()))
         assert(policy.eligibility(attempt) == CaptureEligibility.SafeClock{budget: CaptureBudget.new_unchecked(U64{29})})
@@ -89,9 +89,9 @@ capture_eligibility_assert_skip: fn(outcome: CaptureEligibility, reason: Capture
     loop first_kind in
         ([CaptureSource]{CaptureSource.Randomness, CaptureSource.RawInput, CaptureSource.Network}) {
         first: CaptureSourceFact.new(first_kind, Val(CaptureLocation.new("first.jet", U32{13}).with_column(U32{4})))
-        attempt := CaptureAttempt.new(capture_eligibility_test_identity()).with_sources([CaptureSourceFact]{CaptureSourceFact.new(CaptureSource.Clock, None), first.copy(), CaptureSourceFact.at(CaptureSource.Network, "later.jet", U32{99})})
+        ^attempt: CaptureAttempt.new(capture_eligibility_test_identity()).with_sources([CaptureSourceFact]{CaptureSourceFact.new(CaptureSource.Clock, None), first.copy(), CaptureSourceFact.at(CaptureSource.Network, "later.jet", U32{99})})
         capture_eligibility_assert_skip(policy.eligibility(attempt), CaptureSkipReason.UnsafeSource{source: first.copy()}, true)
-        wrong := attempt.identity.copy()
+        ^wrong: attempt.identity.copy()
         wrong.revision = "old"
         attempt.consent = Val(SensitiveCaptureConsent.new(wrong, policy.consent_scope(attempt)))
         capture_eligibility_assert_skip(policy.eligibility(attempt), CaptureSkipReason.SensitiveConsentScopeChanged{source: first.copy()}, true)
@@ -100,10 +100,10 @@ capture_eligibility_assert_skip: fn(outcome: CaptureEligibility, reason: Capture
 
 #Test("capture_no_terminal_denies_before_matching_or_stale_grant") {
     policy: CapturePolicy.development()
-    attempt := capture_eligibility_test_granted(policy)
+    ^attempt: capture_eligibility_test_granted(policy)
     attempt.terminal_available = false
     capture_eligibility_assert_skip(policy.eligibility(attempt), CaptureSkipReason.UnsafeSource{source: attempt.sources[1].copy()}, false)
-    wrong := attempt.identity.copy()
+    ^wrong: attempt.identity.copy()
     wrong.source_id = "other"
     attempt.consent = Val(SensitiveCaptureConsent.new(wrong, policy.consent_scope(attempt)))
     capture_eligibility_assert_skip(policy.eligibility(attempt), CaptureSkipReason.UnsafeSource{source: attempt.sources[1].copy()}, false)
@@ -112,13 +112,13 @@ capture_eligibility_assert_skip: fn(outcome: CaptureEligibility, reason: Capture
 }
 
 #Test("capture_policy_scope_uses_actual_sources_policy_mode_budget_and_all_scope_fields") {
-    policy := CapturePolicy.release()
+    ^policy: CapturePolicy.release()
     policy.package.budget = CaptureBudget.new_unchecked(U64{73})
-    attempt := capture_eligibility_test_attempt()
+    ^attempt: capture_eligibility_test_attempt()
     attempt.scope = CaptureConsentScope.new([String]{"z", "a", "a"}, [String]{"h2", "h1", "h1"}, [String]{"s2", "s1", "s1"}, [String]{"d2", "d1", "d1"}, "destination", U64{5})
     attempt.scope.source_kinds = [CaptureSource]{CaptureSource.Randomness}
     attempt.sources = [CaptureSourceFact]{CaptureSourceFact.new(CaptureSource.Network, None), CaptureSourceFact.new(CaptureSource.Clock, None), CaptureSourceFact.new(CaptureSource.RawInput, None), CaptureSourceFact.new(CaptureSource.Clock, None)}
-    expected := CaptureConsentScope.new([String]{"a", "z"}, [String]{"h1", "h2"}, [String]{"s1", "s2"}, [String]{"d1", "d2"}, "destination", U64{73})
+    ^expected: CaptureConsentScope.new([String]{"a", "z"}, [String]{"h1", "h2"}, [String]{"s1", "s2"}, [String]{"d1", "d2"}, "destination", U64{73})
     expected.mode = CaptureMode.Release
     expected.source_kinds = [CaptureSource]{CaptureSource.Clock, CaptureSource.RawInput, CaptureSource.Network}
     assert(policy.consent_scope(attempt) == expected)
@@ -133,7 +133,7 @@ capture_eligibility_assert_skip: fn(outcome: CaptureEligibility, reason: Capture
     original: capture_eligibility_test_granted(policy)
     assert(policy.eligibility(original) == CaptureEligibility.Sensitive{budget: policy.budget()})
     loop field in 0..<7 {
-        changed := original.copy()
+        ^changed: original.copy()
         if field == 0 -> changed.identity.target_inputs_sha256 = "other inputs"
         if field == 1 -> changed.identity.tool_version = "other version"
         if field == 2 -> changed.identity.engine = "other engine"
@@ -149,8 +149,8 @@ capture_eligibility_assert_skip: fn(outcome: CaptureEligibility, reason: Capture
     policy: CapturePolicy.development()
     original: capture_eligibility_test_granted(policy)
     loop field in 0..<8 {
-        changed := original.copy()
-        changed_policy := policy.copy()
+        ^changed: original.copy()
+        ^changed_policy: policy.copy()
         if field == 0 -> changed.scope.authorities.push("extra authority")
         if field == 1 -> changed.scope.hosts.push("other.test")
         if field == 2 -> changed.scope.streams.push("stderr")
@@ -166,7 +166,7 @@ capture_eligibility_assert_skip: fn(outcome: CaptureEligibility, reason: Capture
     }
     // Duplicate/order changes and obsolete base mode/limit are canonicalized;
     // locations anchor denials but are not an additional consent scope field.
-    equivalent := original.copy()
+    ^equivalent: original.copy()
     equivalent.scope.authorities = [String]{"Input", "Rand", "Input"}
     equivalent.scope.byte_limit = U64{1}
     equivalent.scope.mode = CaptureMode.Release
@@ -177,7 +177,7 @@ capture_eligibility_assert_skip: fn(outcome: CaptureEligibility, reason: Capture
 
 #Test("capture_live_eligibility_does_not_add_receipt_exact_validation") {
     policy: CapturePolicy.development()
-    attempt := capture_eligibility_test_attempt()
+    ^attempt: capture_eligibility_test_attempt()
     attempt.identity.revision = ""
     attempt.identity.source_id = "\n"
     attempt.consent = Val(SensitiveCaptureConsent.new(attempt.identity.copy(), policy.consent_scope(attempt)))
@@ -186,11 +186,11 @@ capture_eligibility_assert_skip: fn(outcome: CaptureEligibility, reason: Capture
 }
 
 #Test("capture_start_and_fault_preserve_full_identity_policy_outcome_and_fault_anchor") {
-    policy := CapturePolicy.development()
+    ^policy: CapturePolicy.development()
     policy.package.budget = CaptureBudget.new_unchecked(U64{53})
     policy.explicit_capture = true
     loop state in 0..<3 {
-        attempt := capture_eligibility_test_attempt()
+        ^attempt: capture_eligibility_test_attempt()
         if state == 0 -> attempt.sources = [CaptureSourceFact]{}
         if state == 1 {
             attempt.consent = Val(SensitiveCaptureConsent.new(attempt.identity.copy(), policy.consent_scope(attempt)))
@@ -222,10 +222,10 @@ capture_eligibility_assert_skip: fn(outcome: CaptureEligibility, reason: Capture
 }
 
 #Test("capture_policy_denial_receipts_preserve_policy_and_terminal_outcome") {
-    attempt := capture_eligibility_test_attempt()
+    ^attempt: capture_eligibility_test_attempt()
     attempt.terminal_available = false
     loop deny in 0..<3 {
-        policy := CapturePolicy.release()
+        ^policy: CapturePolicy.release()
         if deny == 0 -> policy.no_capture = NoCaptureOverrideFact.explicit()
         if deny <= 1 -> policy.package.capture = DevCaptureSetting.Off
         start: policy.start_fact(attempt)

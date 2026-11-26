@@ -62,8 +62,8 @@ BrowserTraceRelay: struct {
         browser_trace_remove_quietly(path)
         started: browser_trace_process_start(pid) ?? return Err(browser_trace_error("browser trace process identity cannot be verified"))
         nonce: browser_trace_random.token_hex(16) ?? return Err(browser_trace_error("cannot generate a browser trace relay nonce"))
-        writer := browser_trace_files.create(path, if_exists: .Refuse, mode: Val(0o600), links: .Refuse) ?? return Err(browser_trace_error("cannot create browser trace relay: {err}"))
-        fields := [String]{"\"nonce\":{foundation_json_quote(nonce)}", "\"pid\":{pid}", "\"started\":{foundation_json_quote(started)}", "\"sources\":{foundation_json_quote(browser_trace_hex.encode(browser_trace_encode_sources(identity.sources).bytes()))}"}
+        ^writer: browser_trace_files.create(path, if_exists: .Refuse, mode: Val(0o600), links: .Refuse) ?? return Err(browser_trace_error("cannot create browser trace relay: {err}"))
+        ^fields: [String]{"\"nonce\":{foundation_json_quote(nonce)}", "\"pid\":{pid}", "\"started\":{foundation_json_quote(started)}", "\"sources\":{foundation_json_quote(browser_trace_hex.encode(browser_trace_encode_sources(identity.sources).bytes()))}"}
         if identity.source_map == .Val(map) {
             fields.push("\"source_map\":{foundation_json_quote(browser_trace_hex.encode(map.bytes()))}")
         }
@@ -80,7 +80,7 @@ BrowserTraceRelay: struct {
             return Err(BrowserTraceRecordError.Oversized)
         }
         text: String.from_bytes(body) ?? return Err(BrowserTraceRecordError.Malformed)
-        keys := [String]{}
+        ^keys: [String]{}
         loop part in text.split("&") -> keys.push(part.split("=").to_list()[0])
         keys.sort()
         expected: [String]{"class", "clock_ns", "duration_ns", "start_ns", "symbol"}
@@ -122,7 +122,7 @@ BrowserTraceRelay: struct {
 
 // One shared status line: `{"schema":"jet.status/v1","action":…,"ok":true,"reports":[],…fields}`.
 browser_trace_status_line: fn(action: String, fields: [String]) -> String {
-    rendered := "{{\"schema\":{foundation_json_quote(BROWSER_TRACE_STATUS_SCHEMA)},\"action\":{foundation_json_quote(action)},\"ok\":true,\"reports\":[]"
+    ^rendered: "{{\"schema\":{foundation_json_quote(BROWSER_TRACE_STATUS_SCHEMA)},\"action\":{foundation_json_quote(action)},\"ok\":true,\"reports\":[]"
     loop field in fields -> rendered = "{rendered},{field}"
     "{rendered}}}\n"
 }
@@ -174,7 +174,7 @@ browser_trace_secure_read: fn(path: String, limit: Int, label: String) -> String
     if !entry.is_file || entry.is_symlink {
         return Err(browser_trace_error("{label} is not a regular file"))
     }
-    reader := browser_trace_files.open(path, links: .Refuse) ?? return Err(browser_trace_error("cannot securely open {label}"))
+    ^reader: browser_trace_files.open(path, links: .Refuse) ?? return Err(browser_trace_error("cannot securely open {label}"))
     metadata: reader.stat() ?? return Err(browser_trace_error("cannot inspect {label}"))
     if browser_trace_sys.is_unix() {
         if metadata.mode & 0o077 != 0 {
@@ -187,7 +187,7 @@ browser_trace_secure_read: fn(path: String, limit: Int, label: String) -> String
     if !metadata.is_file || metadata.size > limit {
         return Err(browser_trace_error("{label} is not bounded"))
     }
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop {
         chunk: reader.read_bytes(limit + 1 - bytes.len()) ?? return Err(browser_trace_error("cannot read {label}"))
         if chunk.len() == 0 -> break
@@ -223,7 +223,7 @@ browser_trace_manifest_field: fn(manifest: String, key: String, label: String) -
 }
 
 browser_trace_encode_sources: fn(sources: [BrowserTraceSource]) -> String {
-    lines := [String]{}
+    ^lines: [String]{}
     loop source in sources {
         path: browser_trace_hex.encode(source.path.bytes())
         lines.push("source\t{path}\t{source.sha256}")
@@ -239,8 +239,8 @@ browser_trace_encode_sources: fn(sources: [BrowserTraceSource]) -> String {
 // symbol rows `symbol\t<hex path>\t<hex name>\t<fn|handler>` attach to the
 // first source with that path, and a symbol name is unique across sources.
 browser_trace_decode_sources: fn(text: String) -> [BrowserTraceSource] BrowserTraceError! {
-    sources := [BrowserTraceSource]{}
-    pending := [{path: String, symbol: BrowserTraceSymbol}]{}
+    ^sources: [BrowserTraceSource]{}
+    ^pending: [{path: String, symbol: BrowserTraceSymbol}]{}
     lines: text.split("\n").to_list()
     loop index in 0..<lines.len() {
         line: lines[index]
@@ -261,11 +261,11 @@ browser_trace_decode_sources: fn(text: String) -> [BrowserTraceSource] BrowserTr
         } else { return Err(browser_trace_error("compiler trace map row is malformed")) }
     }
     if sources.len() == 0 -> return Err(browser_trace_error("compiler trace map has no sources"))
-    by_path := [String:Int]{}
+    ^by_path: [String:Int]{}
     loop index in 0..<sources.len() {
         if !by_path.has_key(sources[index].path) -> by_path[sources[index].path] = index
     }
-    names := [String:Bool]{}
+    ^names: [String:Bool]{}
     loop row in pending {
         if names.has_key(row.symbol.name) {
             return Err(browser_trace_error("compiler trace symbol `{row.symbol.name}` is ambiguous"))
@@ -322,7 +322,7 @@ browser_trace_process_start: fn(pid: Int) -> String? {
     stat: browser_trace_files.read("/proc/{pid}/stat") ?? return None
     parts: stat.split(") ").to_list()
     if parts.len() < 2 -> return None
-    fields := [String]{}
+    ^fields: [String]{}
     loop field in parts[parts.len() - 1].split(" ") {
         if field != "" -> fields.push(field)
     }

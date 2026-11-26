@@ -41,7 +41,11 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
     watch: time.start()
     second: client.get("http://{addr}/hi")
     waited: watch.elapsed_millis()
-    print("second: {second.status()} {second.body().text(64) ?? return}")
+    second_text: second.body().text(64) ?? {
+        serving.detach()
+        return
+    }
+    print("second: {second.status()} {second_text}")
     print("second answered while the first was held: {waited < 5000}")
     held.write_bytes("Host: test{crlf()}{crlf()}".bytes())
     first: read_all(held)

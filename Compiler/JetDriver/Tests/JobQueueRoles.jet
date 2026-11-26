@@ -1,8 +1,7 @@
 // Assemble with the Compiler source unit. `JobQueue.enqueue` and
-// `JobQueue.delay` run the Core function that fills their role (JobEnqueue,
-// JobDelay), typed by that function's declaration, through the real loader
-// and checker over the tree's Core. The queue checker's own findings still
-// come first.
+// `JobQueue.delay` are the methods Core declares, checked through the real
+// loader and checker over the tree's Core. A queued function that is no
+// `#Job` is refused by the rule those methods are heard by.
 use {
     jet_driver.[
         JetDriverAuthorizedSourceFile,
@@ -30,7 +29,7 @@ use jobs: core.jobs
 plain: fn(payload: String) { print(payload) }
 
 run: fn() {
-    queue := jobs.queue() ?? return
+    ^queue: jobs.queue() ?? return
     first: queue.enqueue(process, "now") ?? return
     keyed: queue.enqueue(process, "keyed", key: "first") ?? return
     later: queue.delay(process, "later", for: 1s) ?? return

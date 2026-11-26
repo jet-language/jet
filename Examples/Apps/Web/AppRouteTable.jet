@@ -34,10 +34,22 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
         app.serve_once(listener)
     }
     page: client.get("http://{addr}/")
-    print("page:{page.status()}:{(page.body().text(4096) ?? return).contains("welcome")}")
+    page_text: page.body().text(4096) ?? {
+        serving.detach()
+        return
+    }
+    print("page:{page.status()}:{page_text.contains("welcome")}")
     health: client.get("http://{addr}/health")
-    print("get:{health.status()}:{health.body().text(1024) ?? return}")
+    health_text: health.body().text(1024) ?? {
+        serving.detach()
+        return
+    }
+    print("get:{health.status()}:{health_text}")
     order: client.get("http://{addr}/api/orders/7")
-    print("mount:{order.status()}:{order.body().text(1024) ?? return}")
+    order_text: order.body().text(1024) ?? {
+        serving.detach()
+        return
+    }
+    print("mount:{order.status()}:{order_text}")
     serving.join()
 }

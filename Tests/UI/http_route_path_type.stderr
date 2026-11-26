@@ -2,7 +2,7 @@ Error: Jet.InvalidRoute: Invalid HTTP route `/files/{name}`: use `:name` or fina
   --> http_route_path_type.jet:16:16
     |
  16 |     router.get(Path{"/files/{{name}}"}, named)
-    |                ^^^^
+    |                ^^^^^^^^^^^^^^^^^^^^^^^
  Why: Route patterns use one canonical grammar; ambiguous escapes, traversal, duplicate names, and retired markers would make routing and audit metadata disagree
  Fix: Use `:name` for one segment or final `*name` for a catch-all; percent-encode a literal leading `:` or `*`, and never encode `/`
 More: jet-lang.dev/e/Jet.InvalidRoute
@@ -11,7 +11,7 @@ Error: Jet.InvalidRoute: HTTPRouter route path must be a static String or Path
   --> http_route_path_type.jet:19:16
     |
  19 |     router.get(Path{"/area/{area}/:key"}, keyed)
-    |                ^^^^
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^^
  Why: Router endpoint contracts are fully checked while building; App routes may be computed at runtime
  Fix: Use a literal, a compile-time String constant or a Path without holes, or register the dynamic route on a `web.app()`
 More: jet-lang.dev/e/Jet.InvalidRoute

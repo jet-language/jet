@@ -264,7 +264,7 @@ apply_rename: fn(checker: LSPChecker, path: String, src: String, from: String, t
     checked: checked_source(checker, path, src)
     module_path: checked.modules[checked.at].path
     index: checked.index ?? return Err(edit_error("check", "Canvas rename needs the semantic index of this file"))
-    edits := [TextEdit]{}
+    ^edits: [TextEdit]{}
     loop definition in index.definitions {
         if definition.def.name == from && definition.def.module_path == module_path {
             edits.push(edit(definition.def.def_span, to))
@@ -297,7 +297,7 @@ record_canvas_rename: fn(path: String, before: String, after: String, from: Stri
     }
     before_hash: sha256_hex(before)
     after_hash: sha256_hex(after)
-    targets := [String]{}
+    ^targets: [String]{}
     loop fact in index.definition_facts {
         if fact.name != from -> next
         targets.push("{{\"stable_id\":{json_str(fact.stable_id)},\"before\":{json_str(fact.human_identity)},\"after\":{json_str("{fact.module_path}.{to}")},\"kind\":{json_str(fact.kind)},\"module_path\":{json_str(fact.module_path)}}}")
@@ -306,8 +306,8 @@ record_canvas_rename: fn(path: String, before: String, after: String, from: Stri
     op: "{{\"kind\":\"rename\",\"from\":{json_str(from)},\"to\":{json_str(to)},\"targets\":[{targets.join(",")}],\"files\":[{file}]}}"
     base: "CanvasRename-{after_hash.slice(0, 12)}"
     log: "{{\"schema\":2,\"name\":{json_str(base)},\"project\":{json_str(project)},\"semantic_ops\":[{op}],\"files\":[{file}]}}\n"
-    receipt := edit_files.join(directory, "{base}.log.json")
-    suffix := 0
+    ^receipt: edit_files.join(directory, "{base}.log.json")
+    ^suffix: 0
     loop edit_files.exists(receipt) {
         suffix += 1
         receipt = edit_files.join(directory, "{base}-{suffix}.log.json")
@@ -353,7 +353,7 @@ apply_create_trait_impl: fn(checker: LSPChecker, path: String, src: String, type
     permit: storage.guard_read()
     local_name: if trait_name.cut_last(".") == .Val(parts) -> parts.after else -> trait_name
     requested_scope: if trait_name.cut_last(".") == .Val(parts) -> "{parts.before}." else -> ""
-    request := TraitRequest{name: trait_name, local_name: local_name, scope: requested_scope, module_index: doc.name_module_index, module_alias: doc.alias}
+    ^request: TraitRequest{name: trait_name, local_name: local_name, scope: requested_scope, module_index: doc.name_module_index, module_alias: doc.alias}
     location: find_trait_location(doc.items, "", src.count_bytes(), request, src, permit.value) ?? return Err(edit_error("not_found", "Canvas trait was not found in source"))
     if location.has_assoc_types {
         return Err(edit_error("needs_associated_types", "Canvas will not guess associated type implementations; add each associated type in source first"))
@@ -401,7 +401,7 @@ find_trait_location: fn(items: [Item], scope: String, close: Int, request: Trait
 
 // A stub body for each trait method without a default body.
 trait_impl_methods: fn(src: String, methods: [TraitMethodSig]) -> String {
-    lines := [String]{}
+    ^lines: [String]{}
     loop method in methods {
         if method.default_body != None -> next
         lines.push("    {trait_method_signature(src, method)} {{\n")
@@ -453,8 +453,8 @@ apply_visible_conversion: fn(checker: LSPChecker, path: String, src: String, inl
 
 rewrite_wire_expr: fn(checker: LSPChecker, path: String, src: String, wire_id: String, replacement: String) -> String Err! {
     projection: projection_for_edit(checker, path, src)
-    found := Span?{None}
-    first := true
+    ^found: Span?{None}
+    ^first: true
     loop chunk in projection.json.split("\"wire_id\":") {
         if first {
             first = false
@@ -485,14 +485,14 @@ extract_inline_candidate: fn(checker: LSPChecker, path: String, src: String, inl
 
 inline_helper_candidate: fn(checker: LSPChecker, path: String, src: String, inline_id: String?, start: Int?, end: Int?) -> String Err! {
     projection: projection_for_edit(checker, path, src)
-    span := Span{start: start ?? 0, end: end ?? 0}
+    ^span: Span{start: start ?? 0, end: end ?? 0}
     if inline_id == .Val(id) -> span = inline_span(projection.inline_exprs, id)
     call: parse_simple_call(snippet(src, span)) ?? return Err(edit_error("diagnostic", "Canvas inline needs a direct helper call expression"))
     helper: find_simple_helper(src, call.name) ?? return Err(edit_error("diagnostic", "Canvas inline could not find a simple helper return body"))
     if helper.params.len() != call.args.len() {
         return Err(edit_error("diagnostic", "Canvas inline helper argument count changed"))
     }
-    expression := helper.returned
+    ^expression: helper.returned
     loop at in 0..<helper.params.len() {
         expression = replace_ident(expression, helper.params[at], call.args[at])
     }
@@ -541,8 +541,8 @@ NodeHit: struct {
 }
 
 widest_node: fn(nodes: [NodeQueryRef], graph_id: String, node_id: String, suffixed: Bool) -> NodeHit? Never! {
-    best := NodeHit?{None}
-    best_width := -1
+    ^best: NodeHit?{None}
+    ^best_width: -1
     loop node in nodes {
         if node.graph_id != graph_id -> next
         if node.node_id != node_id && !(suffixed && node.node_id.ends_with(":{node_id}")) -> next
@@ -577,7 +577,7 @@ call_insert_target: fn(src: String, graph_id: String, projection: Projection, an
     node_start: clamp_to_source(src, node.span.start)
     node_end: clamp_to_source(src, node.span.end)
     bytes: src.bytes()
-    line_end := node_end
+    ^line_end: node_end
     loop line_end < bytes.len() && bytes[line_end] != (U8{10}) -> line_end += 1
     after_node: foundation_byte_text(bytes, node_end, line_end)
     inline_body: line == line_start(src, anchor.insert_offset) && line <= node_start && foundation_byte_text(bytes, line, node_start).contains("{{") && after_node.contains("}}")
@@ -602,11 +602,11 @@ CallWire: struct {
 
 apply_insert_call: fn(checker: LSPChecker, path: String, src: String, graph_id: String, callee: String, args: [String], bind: String?, wire: CallWire, module_path: String?) -> String Err! {
     projection: projection_for_edit(checker, path, src)
-    args_text := args.join(", ")
+    ^args_text: args.join(", ")
     if args.len() == 0 && wire.expression == .Val(expression) -> args_text = "{expression}"
     plan: insert_call_plan(src, callee, module_path)
     call: "{plan.callee}({args_text})"
-    edits := [TextEdit]{}
+    ^edits: [TextEdit]{}
     if wire.inline_expr_id == .Val(inline_id) {
         edits.push(edit(inline_span(projection.inline_exprs, inline_id), call))
     } else {
@@ -673,8 +673,8 @@ core_target_for_callee: fn(src: String, callee: String, module_path: String?) ->
 // How the source already names `module_ref`: its import's alias, or the
 // longest imported parent's alias with the rest of the path.
 imported_core_prefix: fn(src: String, module_ref: String) -> String? {
-    best := String?{None}
-    best_len := -1
+    ^best: String?{None}
+    ^best_len: -1
     loop import in core_imports(src) {
         if import.module_ref == module_ref -> return Val(import.alias)
         prefix: "{import.module_ref}."
@@ -694,8 +694,8 @@ CoreImport: struct {
 // A `use` line or a row of a `use {` block: `alias: core.x`, or `core.x`
 // named by its last segment.
 core_imports: fn(src: String) -> [CoreImport] {
-    imports := [CoreImport]{}
-    in_block := false
+    ^imports: [CoreImport]{}
+    ^in_block: false
     loop line in src.lines() {
         code: if line.index_of(COMMENT_PREFIX) == .Val(at) -> line.slice(0, at).trim() else -> line.trim()
         if in_block && code.starts_with("}}") {
@@ -728,7 +728,7 @@ core_imports: fn(src: String) -> [CoreImport] {
 
 ident_prefix: fn(text: String) -> String {
     bytes: text.bytes()
-    end := 0
+    ^end: 0
     loop end < bytes.len() && ident_byte(Int{bytes[end]}, false) -> end += 1
     foundation_byte_text(bytes, 0, end)
 }
@@ -746,10 +746,10 @@ CoreImportPoint: struct {
 }
 
 core_import_insert_point: fn(src: String) -> CoreImportPoint {
-    offset := 0
-    insert_at := 0
-    saw_use := false
-    in_block := false
+    ^offset: 0
+    ^insert_at: 0
+    ^saw_use: false
+    ^in_block: false
     loop line in src.split("\n") {
         trimmed: line.trim()
         line_end: clamp_to_source(src, offset + line.len() + 1)
@@ -795,7 +795,7 @@ apply_insert_structural: fn(checker: LSPChecker, path: String, src: String, grap
     anchor: graph_anchor(projection.graph_anchors, graph_id)
     target: structural_insert_target(src, graph_id, projection, anchor, origin_pin_id, target_pin)
     indent: target.indent
-    statement := ""
+    ^statement: ""
     if op == "insert_branch" {
         statement = "{indent}if true {{\n{indent}    print(\"branch\")\n{indent}}} else {{\n{indent}    print(\"else\")\n{indent}}}\n"
     } else if op == "insert_switch" {
@@ -839,7 +839,7 @@ structural_insert_target: fn(src: String, graph_id: String, projection: Projecti
 
 // Whether a pin record of `marker` in the graph JSON has the exec type.
 pin_is_exec: fn(graph_json: String, marker: String) -> Bool Never! {
-    first := true
+    ^first: true
     loop chunk in graph_json.split(marker) {
         if first {
             first = false
@@ -893,7 +893,7 @@ apply_delete_hint_region: fn(checker: LSPChecker, path: String, src: String, reg
     projection: projection_for_edit(checker, path, src)
     hint: find_hint_region(src, projection.json, region_id, kind) ?? return Err(edit_error("not_found", "Canvas source hint no longer exists"))
     bytes: src.bytes()
-    end := hint.hint_span.end
+    ^end: hint.hint_span.end
     if end < bytes.len() && (Int{bytes[end]}) == 10 -> end += 1
     changed: jet_driver_apply_edits(src, [TextEdit]{edit(Span{start: hint.hint_span.start, end: end}, "")}) ?? return Err(edit_error("overlap", "Canvas source hint delete overlapped"))
     write_checked_formatted(checker, path, src, changed)
@@ -923,8 +923,8 @@ apply_create_collapse_region: fn(checker: LSPChecker, path: String, src: String,
 // The whole statements of one block that `requested` starts and ends on.
 validated_collapse_selection: fn(checker: LSPChecker, path: String, src: String, graph_id: String, requested: Span) -> Span Err! {
     func: checked_func_for_graph(checker, path, src, graph_id)
-    locs := [StatementLoc]{}
-    block := [Int]{}
+    ^locs: [StatementLoc]{}
+    ^block: [Int]{}
     collect_statement_locs(func.tables, src, func.body, block, locs)
     first: collapse_first(locs, requested.start) ?? return Err(edit_error("bad_request", "Canvas collapse must select whole statements from this graph"))
     last: collapse_last(locs, requested.end) ?? return Err(edit_error("bad_request", "Canvas collapse must select whole statements from this graph"))

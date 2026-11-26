@@ -24,7 +24,7 @@ row: fn(name: String, port: String, version: TLSVersion) -> Row {
 
 // The row's line, or the row's error.
 exchange: fn(r: Row, roots: RootCertificates, identity: ClientIdentity) -[Net, Time.Wait]> String {
-    config := tls.ClientConfig.default().with_trust(.CustomOnly(roots)) ?? panic("trust policy")
+    ^config: tls.ClientConfig.default().with_trust(.CustomOnly(roots)) ?? panic("trust policy")
     config = config.with_version_bounds(min: r.min, max: r.max) ?? panic("version policy")
     if r.identity {
         config = config.with_client_identity(identity) ?? panic("client identity")
@@ -32,13 +32,13 @@ exchange: fn(r: Row, roots: RootCertificates, identity: ClientIdentity) -[Net, T
     if r.alpn.len() > 0 {
         config = config.with_alpn(r.alpn) ?? panic("ALPN policy")
     }
-    tcp := net.tcp_connect("127.0.0.1:{r.port}") ?? panic("connect {r.name}")
+    ^tcp: net.tcp_connect("127.0.0.1:{r.port}") ?? panic("connect {r.name}")
     budget: 10s
-    secure := tls.client(tcp, server_name: "localhost", config: config, deadline: budget) ?? return "{r.name}: {err}"
+    ^secure: tls.client(tcp, server_name: "localhost", config: config, deadline: budget) ?? return "{r.name}: {err}"
     peer: secure.peer_identity()
     version: if tls.is_tls13(peer.tls_version) -> "TLS 1.3" else -> "TLS 1.2"
     secure.write_bytes("ping\n".bytes(), deadline: budget) ?? return "{r.name}: write: {err}"
-    reply := [U8]{}
+    ^reply: [U8]{}
     loop {
         got: secure.read_bytes(4096, deadline: budget) ?? return "{r.name}: read: {err}"
         if got.len() == 0 -> break
@@ -53,17 +53,17 @@ exchange: fn(r: Row, roots: RootCertificates, identity: ClientIdentity) -[Net, T
 run: fn() {
     rsa_ca: files.read_bytes("rsa-ca.pem") ?? panic("RSA CA fixture")
     ec_ca: files.read_bytes("ec-ca.pem") ?? panic("EC CA fixture")
-    bundle := rsa_ca.copy()
+    ^bundle: rsa_ca.copy()
     bundle.extend(ec_ca)
     roots: tls.RootCertificates.from_pem(bundle) ?? panic("validate CAs")
     cert: files.read_bytes("client.cert.pem") ?? panic("client certificate fixture")
     key: files.read_bytes("client.key.pem") ?? panic("client key fixture")
     identity: tls.ClientIdentity.from_pem(cert, key) ?? panic("validate client identity")
-    mtls13 := row("TLS 1.3 client certificate", "{free-port:mtls13}", TLSVersion.TLS13)
+    ^mtls13: row("TLS 1.3 client certificate", "{free-port:mtls13}", TLSVersion.TLS13)
     mtls13.identity = true
-    mtls12 := row("TLS 1.2 client certificate", "{free-port:mtls12}", TLSVersion.TLS12)
+    ^mtls12: row("TLS 1.2 client certificate", "{free-port:mtls12}", TLSVersion.TLS12)
     mtls12.identity = true
-    alpn := row("TLS 1.3 ALPN h2", "{free-port:alpn}", TLSVersion.TLS13)
+    ^alpn: row("TLS 1.3 ALPN h2", "{free-port:alpn}", TLSVersion.TLS13)
     alpn.alpn = [String]{"h2", "http/1.1"}
     rows: [Row]{
         row("TLS 1.3 AES-128-GCM RSA-PSS", "{free-port:aes128}", TLSVersion.TLS13),

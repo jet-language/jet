@@ -35,12 +35,12 @@ debug_test_contains: fn(document: String, wanted: [String]) {
 // devtools, resumes to the next hit, and stops.
 #Test("a_native_session_builds_pauses_resumes_and_stops") {
     jet: debug_test_process.which("jet") ?? panic("the Jet dev shell puts `jet` on PATH")
-    src: "double: fn(x: Int) -> Int {{\n    y: x * 2\n    y\n}}\n\nrun: fn() {{\n    count := 0\n    loop i in 0..<2 {{\n        count += double(i)\n    }}\n    print(\"count {{count}}\")\n}}\n"
+    src: "double: fn(x: Int) -> Int {{\n    y: x * 2\n    y\n}}\n\nrun: fn() {{\n    ^count: 0\n    loop i in 0..<2 {{\n        count += double(i)\n    }}\n    print(\"count {{count}}\")\n}}\n"
     scratch: debug_test_scratch("prog.jet", src)
     path: debug_test_files.join(scratch, "prog.jet")
     revision: source_revision(src)
-    sessions := debug_sessions(jet)
-    host := PausedEvaluateHost{session: None, evaluator_result: None}
+    ^sessions: debug_sessions(jet)
+    ^host: PausedEvaluateHost{session: None, evaluator_result: None}
     first: debug_test_answer(sessions, host, path, "prog.jet", "{{\"schema_version\":1,\"revision\":\"{revision}\",\"source_id\":\"prog.jet\",\"breakpoints\":[2],\"commands\":[\"continue\"],\"watches\":[\"x\"]}}")
     debug_test_contains(first, [String]{"\"id\":\"canvas-debug-1\"", "\"state\":\"running\"", "\"tier\":\"native\"", "\"active_line\":2", "\"name\":\"x\",\"type\":\"Int\",\"value\":\"0\""})
     assert(sessions.adapters.has_key("canvas-debug-1"), "the paused stop has no adapter")
@@ -58,15 +58,15 @@ debug_test_contains: fn(document: String, wanted: [String]) {
 // and goes back to the second with reverse-continue.
 #Test("a_recorded_session_replays_its_recording") {
     jet: debug_test_process.which("jet") ?? panic("the Jet dev shell puts `jet` on PATH")
-    src: "Score: struct {{\n    count: Int,\n}}\n\ndouble: fn(x: Int) -> Int {{\n    y: x * 2\n    y\n}}\n\nbump: fn(rounds: Int, tally: Shared<Score>) -> Int {{\n    loop _ in 0..<rounds -> tally.count += 1\n    rounds\n}}\n\nrun: fn() {{\n    tally: Shared{{Score{{count: 0}}}}\n    helper: task bump(3, tally)\n    total := 0\n    loop k in 0..<3 {{\n        d: double(k)\n        total += d\n    }}\n    print(\"total {{total}} tally {{tally.count + (helper.join() ?? 0)}}\")\n}}\n"
+    src: "Score: struct {{\n    count: Int,\n}}\n\ndouble: fn(x: Int) -> Int {{\n    y: x * 2\n    y\n}}\n\nbump: fn(rounds: Int, tally: Shared<Score>) -> Int {{\n    loop _ in 0..<rounds -> tally.count += 1\n    rounds\n}}\n\nrun: fn() {{\n    tally: Shared{{Score{{count: 0}}}}\n    helper: task bump(3, tally)\n    ^total: 0\n    loop k in 0..<3 {{\n        d: double(k)\n        total += d\n    }}\n    print(\"total {{total}} tally {{tally.count + (helper.join() ?? 0)}}\")\n}}\n"
     scratch: debug_test_scratch("main.jet", src)
     debug_test_files.write(debug_test_files.join(scratch, "package.jet"), "name: \"canvas_replay\"\nversion: \"0.1.0\"\nauthority: {{\n    allow: [IO, Time]\n}}\n") ?? panic("package: {err}")
     recorded: debug_test_process.cmd([String]{jet, "run", "--record=canvas", "main.jet"}).cwd(scratch).stdout(.Capture).stderr(.Capture).run() ?? panic("jet run --record: {err}")
     assert(recorded.success, "jet run --record=canvas main.jet failed: {recorded.output}{recorded.errors}")
     path: debug_test_files.join(scratch, "main.jet")
     revision: source_revision(src)
-    sessions := debug_sessions(jet)
-    host := PausedEvaluateHost{session: None, evaluator_result: None}
+    ^sessions: debug_sessions(jet)
+    ^host: PausedEvaluateHost{session: None, evaluator_result: None}
     replayed: debug_test_answer(sessions, host, path, "main.jet", "{{\"schema_version\":1,\"revision\":\"{revision}\",\"source_id\":\"main.jet\",\"recording\":\"canvas\",\"breakpoints\":[21],\"commands\":[\"continue\",\"continue\",\"continue\"]}}")
     debug_test_contains(replayed, [String]{"\"tier\":\"native-recorded\"", "\"active_line\":21", "\"name\":\"d\",\"type\":\"Int\",\"value\":\"4\""})
     back: debug_test_answer(sessions, host, path, "main.jet", "{{\"schema_version\":1,\"revision\":\"{revision}\",\"source_id\":\"main.jet\",\"session_id\":\"canvas-debug-1\",\"tier\":\"native-recorded\",\"commands\":[\"reverse-continue\"]}}")
@@ -82,8 +82,8 @@ debug_test_contains: fn(document: String, wanted: [String]) {
     src: "run: fn() {{\n    print(\"ok\")\n}}\n"
     scratch: debug_test_scratch("prog.jet", src)
     path: debug_test_files.join(scratch, "prog.jet")
-    sessions := debug_sessions(jet)
-    host := PausedEvaluateHost{session: None, evaluator_result: None}
+    ^sessions: debug_sessions(jet)
+    ^host: PausedEvaluateHost{session: None, evaluator_result: None}
     request: "{{\"schema_version\":1,\"revision\":\"{source_revision(src)}\",\"source_id\":\"prog.jet\",\"tier\":\"interpreted\"}}"
     if sessions.answer(host, jet_cli_canvas_debug_host(), debug_test_state(path, "prog.jet"), path, "prog.jet", request) == {
         .Err(failure) -> {

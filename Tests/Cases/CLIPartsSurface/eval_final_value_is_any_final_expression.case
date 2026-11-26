@@ -11,7 +11,7 @@ env: XDG_CACHE_HOME={work}/xdg
 step if_value: jet eval 'if 1 > 0 -> "yes" else -> "no"'
 exit: 0
 stdout: = "yes\n"
-step dispatch_value: jet eval 'x := 2; if x == { 1 -> "one"; 2 -> "two"; else -> "many" }'
+step dispatch_value: jet eval '^x: 2; if x == { 1 -> "one"; 2 -> "two"; else -> "many" }'
 exit: 0
 stdout: = "two\n"
 step if_statement: jet eval 'if 1 > 0 { print("hi") }'
@@ -30,7 +30,7 @@ step value_if_not_last: jet eval 'if 1 > 0 -> "a" else -> "b"; print(1)'
 exit: 1
 stdout: = ""
 stderr: ~ "Jet.SemicolonAfterArm" # the `;` after a one-line arm could end the arm or the `if`
-step negative_after_semicolon: jet eval 'x := 1; -1; print(x)'
+step negative_after_semicolon: jet eval '^x: 1; -1; print(x)'
 exit: 1
 stdout: = ""
 stderr: ~ "Jet.SemicolonWithoutLineBreak" # a line break before `-1` would continue the statement

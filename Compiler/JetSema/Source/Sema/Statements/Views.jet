@@ -522,7 +522,7 @@ sema_stmt_binding_is_write_window: fn(state: SemaOwnershipState, id: SymbolID) -
     false
 }
 
-// `name: ^map[key]` binds a write window over one map value
+// `name: map[key].in_place()` binds a write window over one map value
 // (SemaScopeBinding.map_slot).
 sema_stmt_binds_map_slot: fn(statement: TStmt) -> Bool Never! {
     if statement == .Let(_, _, init, _, _, _) {
@@ -671,7 +671,7 @@ sema_stmt_record_binding_views: fn(binding: Binding, init_ty: Type, scopes: Sema
         sema_stmt_store_local_view_provenance(local_key, local_facts, context)
         return valid
     }
-    // `x: ^place` is a write window into the place whatever the place's
+    // `x: place.in_place()` is a write window into the place whatever the place's
     // type: a scalar or struct place is not carried by a `ViewMut`.
     view_access: sema_stmt_view_access(init_ty)
     if sema_stmt_binding_is_place_view(binding.init) && (view_access != None || sema_stmt_binding_is_write_place(binding.init)) {

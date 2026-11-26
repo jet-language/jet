@@ -1,4 +1,4 @@
-# Claim: a local whose value closes, reassigned from a call that reads it (`x = sub(x, a) ?? ...`, also inside a loop with `?? return Err(err)`, in a helper, in the entry, and through `nx := sub(x, a) ?? ...; x = nx`), closes its old value exactly once before that value drops, on o0, o1, o2 and web.
+# Claim: a local whose value closes, reassigned from a call that reads it (`x = sub(x, a) ?? ...`, also inside a loop with `?? return Err(err)`, in a helper, in the entry, and through `^nx: sub(x, a) ?? ...; x = nx`), closes its old value exactly once before that value drops, on o0, o1, o2 and web.
 # Hand-derived: Close moves its list out and prints its length and sum, so a close after the drop prints a wrong sum or faults; each old value closes at its reassignment, the rest latest first at their scope ends.
 fixture: ReassignedCloseLocalClosesItsOldValueOnceBeforeItsDrop.fixture
 env: NO_COLOR=1

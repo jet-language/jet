@@ -14,7 +14,7 @@ overlay_test_rejection: fn(host: ^NativeOverlayHost, event: NativeOverlayEvent) 
 }
 
 #Test("projection_keeps_panel_identity_and_freshness") {
-    host := NativeOverlayHost.new()
+    ^host: NativeOverlayHost.new()
     host.ingest(overlay_test_event("revision", 1, 10, [NativeOverlayPanelFact]{overlay_test_panel("Build", 4)})) ?? panic("first ingest")
     first: host.frame() ?? panic("first frame")
     host.ingest(overlay_test_event("revision", 2, 11, [NativeOverlayPanelFact]{overlay_test_panel("Build", 5)})) ?? panic("second ingest")
@@ -24,14 +24,14 @@ overlay_test_rejection: fn(host: ^NativeOverlayHost, event: NativeOverlayEvent) 
 }
 
 #Test("stale_revision_identity_is_rejected_at_equal_sequence") {
-    host := NativeOverlayHost.new()
+    ^host: NativeOverlayHost.new()
     host.ingest(overlay_test_event("revision-a", 1, 10, [NativeOverlayPanelFact]{overlay_test_panel("Build", 1)})) ?? panic("ingest")
     message: overlay_test_rejection(host, overlay_test_event("revision-b", 1, 11, [NativeOverlayPanelFact]{overlay_test_panel("Build", 2)}))
     assert(message.contains("revision identity"))
 }
 
 #Test("revision_rollover_discards_old_panels") {
-    host := NativeOverlayHost.new()
+    ^host: NativeOverlayHost.new()
     host.ingest(overlay_test_event("revision-a", 1, 10, [NativeOverlayPanelFact]{overlay_test_panel("Old", 1)})) ?? panic("old")
     host.ingest(overlay_test_event("revision-b", 2, 11, [NativeOverlayPanelFact]{overlay_test_panel("New", 1)})) ?? panic("new")
     frame: host.frame() ?? panic("frame")
@@ -40,7 +40,7 @@ overlay_test_rejection: fn(host: ^NativeOverlayHost, event: NativeOverlayEvent) 
 }
 
 #Test("focused_overlay_never_routes_input_to_game") {
-    host := NativeOverlayHost.new()
+    ^host: NativeOverlayHost.new()
     host.open()
     inputs: [NativeOverlayInput]{
         NativeOverlayInput.Key{code: "Space", pressed: true},
@@ -61,7 +61,7 @@ overlay_test_rejection: fn(host: ^NativeOverlayHost, event: NativeOverlayEvent) 
 }
 
 #Test("merged_projection_stays_bounded") {
-    host := NativeOverlayHost.new()
+    ^host: NativeOverlayHost.new()
     nodes: loop index in 0..<MAX_OVERLAY_NODES -> NativeOverlayNode.text("node-{index}", "node")
     host.ingest(overlay_test_event("revision", 1, 1, [NativeOverlayPanelFact]{NativeOverlayPanelFact.new("first", "first", 1, "ready", nodes)})) ?? panic("full panel")
     message: overlay_test_rejection(host, overlay_test_event("revision", 2, 2, [NativeOverlayPanelFact]{overlay_test_panel("second", 1)}))
@@ -71,7 +71,7 @@ overlay_test_rejection: fn(host: ^NativeOverlayHost, event: NativeOverlayEvent) 
 }
 
 #Test("frame_history_is_bounded") {
-    host := NativeOverlayHost.new()
+    ^host: NativeOverlayHost.new()
     host.set_frame_capacity(2)
     loop sequence in 1..<5 {
         host.ingest(overlay_test_event("revision", sequence, sequence, [NativeOverlayPanelFact]{overlay_test_panel("Build", sequence)})) ?? panic("ingest")

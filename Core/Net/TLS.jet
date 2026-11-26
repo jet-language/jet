@@ -1623,11 +1623,11 @@ priv test_step: fn(tls: ^TLSState) -> Int Never! {
 // Whether a finished handshake kept none of what it needed only to finish:
 // the key shares, the secrets, the transcript and the handshake transform.
 priv test_handshake_freed: fn(ssl: ^ssldefs.SSLContext) -> Bool Never! {
-    share: if ^ssl.handshake.ecdh_ctx == {
+    share: if ssl.handshake.ecdh_ctx.in_place() == {
         .Val(_) -> true
         None -> false
     }
-    transcript: if ^ssl.handshake.fin_sha256 == {
+    transcript: if ssl.handshake.fin_sha256.in_place() == {
         .Val(_) -> true
         None -> false
     }

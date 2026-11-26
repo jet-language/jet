@@ -68,8 +68,8 @@ web_host_bind: fn(state: Shared<WebHostState>, port: Int?) -> HTTPServer WebHost
         return Ok(bound)
     }
     // HTTPError names no busy port, so any refusal moves on to the next one.
-    last := ""
-    candidate := APPLICATION_PORT_FIRST
+    ^last: ""
+    ^candidate: APPLICATION_PORT_FIRST
     loop candidate <= APPLICATION_PORT_LAST {
         if app.bind("{WEB_HOST_BIND}:{candidate}") == {
             .Ok(bound) -> {
@@ -87,7 +87,7 @@ web_host_listening: fn(state: Shared<WebHostState>, server: HTTPServer, requeste
     address: server.local_addr() ?? "{WEB_HOST_BIND}:{requested}"
     parts: address.split(":").to_list()
     port: Int.parse(parts[parts.len() - 1]) ?? requested
-    permit := state.guard_edit()
+    ^permit: state.guard_edit()
     permit.value.facts.port = port
     permit.value.session.application_port_number = port
     permit.value.dirty = true
@@ -122,12 +122,12 @@ web_host_stopped: fn(state: Shared<WebHostState>) -> String? {
 }
 
 web_host_stop: fn(state: Shared<WebHostState>, reason: String) {
-    permit := state.guard_edit()
+    ^permit: state.guard_edit()
     if permit.value.stopped == None -> permit.value.stopped = Val("{reason}")
 }
 
 web_host_finish: fn(state: Shared<WebHostState>) {
-    permit := state.guard_edit()
+    ^permit: state.guard_edit()
     permit.value.close_relay()
     permit.value.session.mark_stopped()
 }
@@ -140,13 +140,13 @@ web_host_tick: fn(state: Shared<WebHostState>) {
 }
 
 web_host_step: fn(state: Shared<WebHostState>, clock: String) -> String {
-    permit := state.guard_edit()
+    ^permit: state.guard_edit()
     permit.value.step(clock)
 }
 
 // A build started; the trace relay of the last build ends with it.
 web_host_mark_building: fn(state: Shared<WebHostState>) {
-    permit := state.guard_edit()
+    ^permit: state.guard_edit()
     permit.value.close_relay()
     permit.value.facts.building()
     permit.value.session.mark_building()
@@ -156,7 +156,7 @@ web_host_mark_building: fn(state: Shared<WebHostState>) {
 // A good build of `build_ms`; a rebuild publishes the next revision.
 web_host_mark_ready: fn(state: Shared<WebHostState>, build_ms: Int, rebuild: Bool) {
     clock: clock_time()
-    permit := state.guard_edit()
+    ^permit: state.guard_edit()
     if permit.value.trace_enabled -> permit.value.open_relay()
     permit.value.facts.ready(build_ms, rebuild)
     permit.value.session.mark_ready()
@@ -167,7 +167,7 @@ web_host_mark_ready: fn(state: Shared<WebHostState>, build_ms: Int, rebuild: Boo
 // A failed build; the last good output stays served.
 web_host_mark_error: fn(state: Shared<WebHostState>, code: String, diagnostic: String, rebuild: Bool) {
     clock: clock_time()
-    permit := state.guard_edit()
+    ^permit: state.guard_edit()
     permit.value.facts.failed(code, diagnostic)
     permit.value.session.mark_error(code, diagnostic)
     permit.value.dirty = true
@@ -180,7 +180,7 @@ web_host_mark_error: fn(state: Shared<WebHostState>, code: String, diagnostic: S
 // Publishes a completed bundle; no static read runs while the output root is
 // swapped.
 web_host_publish: fn(state: Shared<WebHostState>, staging: String, out_dir: String, root: String) IOError! {
-    publication := state.guard_edit()
+    ^publication: state.guard_edit()
     publication.value.dirty = true
     web_output_publish(staging, out_dir, root)
 }
@@ -213,7 +213,7 @@ impl WebHostState {
         self.beacons = [[U8]]{}
         self.take_trace_request()
         self.refill_frames()
-        out := ""
+        ^out: ""
         loop row in self.requests -> out = "{out}{clock}  {row}\n"
         self.requests = [String]{}
         loop line in self.log -> out = "{out}{line}\n"
@@ -228,7 +228,7 @@ impl WebHostState {
     // A clean drop is a closed page; a lease that runs out with no page left
     // is a lost connection.
     apply_clients: fn(^self) {
-        clean := false
+        ^clean: false
         loop client in self.noted -> self.session.note_client(client)
         loop client in self.dropped {
             self.session.drop_client(client)
@@ -237,7 +237,7 @@ impl WebHostState {
         self.noted = [String]{}
         self.dropped = [String]{}
         count: self.session.client_count()
-        lost := self.facts.reconnecting
+        ^lost: self.facts.reconnecting
         if self.facts.clients > 0 && count == 0 -> lost = true
         if count > 0 || clean -> lost = false
         if count != self.facts.clients || lost != self.facts.reconnecting {
@@ -307,7 +307,7 @@ impl WebHostState {
             if failed && !self.verbose -> return "{line}\n{self.facts.diagnostic}\n"
             return "{line}\n"
         }
-        lines := [String]{line, "         watching {self.facts.file}"}
+        ^lines: [String]{line, "         watching {self.facts.file}"}
         if failed {
             loop framed in frame_lines(self.facts.code, self.facts.diagnostic) -> lines.push(framed)
         }
@@ -346,18 +346,18 @@ format_line_plain: fn(word: String, rest: String) -> String Never! { "jet dev  [
 frame_lines: fn(code: String, diagnostic: String) -> [String] Never! {
     lines: web_host_lines(diagnostic)
     title: diagnostic_display_name(code)
-    width := title.len() + 2
+    ^width: title.len() + 2
     loop line in lines {
-        scalars := 0
+        ^scalars: 0
         loop _ in line.chars() -> scalars += 1
         if scalars > width -> width = scalars
     }
     if width < 20 -> width = 20
     if width > 96 -> width = 96
-    dashes := width - title.len() - 3
+    ^dashes: width - title.len() - 3
     if dashes < 1 -> dashes = 1
     top: "─".repeat(dashes)
-    out := [String]{"┌ {title} {top}"}
+    ^out: [String]{"┌ {title} {top}"}
     loop line in lines -> out.push("│ {line}")
     bottom: "─".repeat(width + 2)
     out.push("└{bottom}")
@@ -366,7 +366,7 @@ frame_lines: fn(code: String, diagnostic: String) -> [String] Never! {
 
 // `text`'s lines without their line ends; a final line end starts no line.
 web_host_lines: fn(text: String) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     if text == "" -> return out
     pieces: text.split("\n").to_list()
     loop (index, piece) in pieces {

@@ -63,11 +63,11 @@ run_locals_runtime_dir: fn() -> String {
 }
 
 // The case's program.
-RUN_LOCALS_SOURCE: "fact: fn(n: Int) -> Int {{\n    if n <= 1 -> return 1\n    n * fact(n - 1)\n}}\n\nrepeat: fn(word: String, times: Int) -> String {{\n    out := \"\"\n    loop _ in 0..<times -> out = \"{{out}}{{word}}\"\n    out\n}}\n\nshout: fn(text: String) -> String {{\n    \"{{text}}!\"\n}}\n\nrun: fn() {{\n    big: #run fact(10)\n    word: #run repeat(\"ab\", 3)\n    print(\"{{big}} {{big + 1}} {{shout(word)}} {{shout(word)}}\")\n}}\n"
+RUN_LOCALS_SOURCE: "fact: fn(n: Int) -> Int {{\n    if n <= 1 -> return 1\n    n * fact(n - 1)\n}}\n\nrepeat: fn(word: String, times: Int) -> String {{\n    ^out: \"\"\n    loop _ in 0..<times -> out = \"{{out}}{{word}}\"\n    out\n}}\n\nshout: fn(text: String) -> String {{\n    \"{{text}}!\"\n}}\n\nrun: fn() {{\n    big: #run fact(10)\n    word: #run repeat(\"ab\", 3)\n    print(\"{{big}} {{big + 1}} {{shout(word)}} {{shout(word)}}\")\n}}\n"
 
 // A program whose `#run` values reach functions over several calls, one of
 // which splices a `#run` local of its own.
-RUN_LOCALS_REACH_SOURCE: "fact: fn(n: Int) -> Int {{\n    if n <= 1 -> return 1\n    n * fact(n - 1)\n}}\n\ntwice: fn(n: Int) -> Int {{\n    n + n\n}}\n\nsquare: fn(n: Int) -> Int {{\n    n * n\n}}\n\nscaled: fn(n: Int) -> Int {{\n    base: #run fact(3)\n    square(twice(n)) * base\n}}\n\nsum: fn(n: Int) -> Int {{\n    total := 0\n    loop at in 0..<n -> total += scaled(at)\n    total\n}}\n\nrun: fn() {{\n    big: #run sum(4)\n    small: #run twice(fact(4))\n    print(\"{{big}} {{small}} {{scaled(2)}}\")\n}}\n"
+RUN_LOCALS_REACH_SOURCE: "fact: fn(n: Int) -> Int {{\n    if n <= 1 -> return 1\n    n * fact(n - 1)\n}}\n\ntwice: fn(n: Int) -> Int {{\n    n + n\n}}\n\nsquare: fn(n: Int) -> Int {{\n    n * n\n}}\n\nscaled: fn(n: Int) -> Int {{\n    base: #run fact(3)\n    square(twice(n)) * base\n}}\n\nsum: fn(n: Int) -> Int {{\n    ^total: 0\n    loop at in 0..<n -> total += scaled(at)\n    total\n}}\n\nrun: fn() {{\n    big: #run sum(4)\n    small: #run twice(fact(4))\n    print(\"{{big}} {{small}} {{scaled(2)}}\")\n}}\n"
 
 // The request that compiles `source` on `threads` compiler threads, its
 // trace going to `path`.

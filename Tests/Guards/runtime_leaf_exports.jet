@@ -797,7 +797,7 @@ rl_keyword: fn(text: String, word: String) -> Bool Never! {
 // Whether a function body's last statement is a statement, not the value
 // the body ends in.
 rl_statement: fn(text: String) -> Bool Never! {
-    if rl_keyword(text, "return") || rl_keyword(text, "if") || rl_keyword(text, "loop") || text.starts_with("#") || text.starts_with("}}") {
+    if rl_keyword(text, "return") || rl_keyword(text, "if") || rl_keyword(text, "loop") || text.starts_with("#") || text.starts_with("^") || text.starts_with("}}") {
         return true
     }
     bytes: text.bytes()
@@ -805,7 +805,7 @@ rl_statement: fn(text: String) -> Bool Never! {
     loop width < bytes.len() && rl_ident(bytes[width]) -> width += 1
     if width == 0 -> return false
     rest: text.slice(width, text.len()).trim()
-    rest.starts_with(": ") || rest.starts_with(":= ") || rest.starts_with("= ") || rest.starts_with("+= ") || rest.starts_with("-= ")
+    rest.starts_with(": ") || rest.starts_with("= ") || rest.starts_with("+= ") || rest.starts_with("-= ")
 }
 
 // A body's statements: its lines outside brackets, trimmed.
@@ -827,11 +827,11 @@ rl_statements: fn(body: String) -> [String] Never! {
     out
 }
 
-// The values `body` binds to the local `local`: `local: v`, `local := v`
+// The values `body` binds to the local `local`: `local: v`, `^local: v`
 // and `local = v`, each to its line's end.
 rl_definitions: fn(body: String, local: String) -> [String] Never! {
     ^out: [String]{}
-    prefixes: [String]{"{local}: ", "{local} := ", "{local} = "}
+    prefixes: [String]{"{local}: ", "^{local}: ", "{local} = "}
     loop line in body.lines() {
         text: line.trim()
         loop prefix in prefixes {

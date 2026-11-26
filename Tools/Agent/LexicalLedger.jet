@@ -112,7 +112,7 @@ name_len: fn(text: String) -> Int Never! {
     end
 }
 
-// The name a line declares at its left margin (`NAME:`, not `NAME:=`), and the
+// The name a line declares at its left margin (`NAME:`), and the
 // text after the colon.
 Declaration: struct {
     name: String,
@@ -123,7 +123,6 @@ declaration: fn(line: String) -> Declaration? Never! {
     end: name_len(line)
     bytes: line.bytes()
     if end == 0 || end >= bytes.len() || (Int{bytes[end]}) != 58 -> return None
-    if end + 1 < bytes.len() && (Int{bytes[end + 1]}) == 61 -> return None
     Val(Declaration{name: String.from_bytes_lossy(bytes[0..<end]), rest: byte_tail(line, end + 1)})
 }
 

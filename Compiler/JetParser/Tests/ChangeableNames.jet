@@ -1,9 +1,7 @@
-// D-BIND-MARK1 stage 1: a changeable name is written `^name: value` and a
-// write window `place.in_place()`, beside the retiring `name := value` and
-// `^place`. The migration format rewrites the retiring spellings to the new
-// ones without changing the program; an ordinary format keeps whichever
-// spelling the source wrote.
-use jet_parser.[JetFormatResult, jet_format_source, jet_format_source_bind_mark1]
+// A changeable name is written `^name: value` and a write window
+// `place.in_place()`. Each formats as written; the retired spellings
+// `name := value` and a `^place` value no longer parse.
+use jet_parser.[JetFormatResult, jet_format_source]
 
 // Why a format failed: its diagnostics, or the meaning it would change.
 changeable_names_why: fn(result: JetFormatResult) -> String Never! {
@@ -12,131 +10,57 @@ changeable_names_why: fn(result: JetFormatResult) -> String Never! {
     why
 }
 
-changeable_names_migrate: fn(name: String, old: String, new: String) Never! {
-    migrated: jet_format_source_bind_mark1(old, false, false)
-    if !migrated.ok {
-        panic("changeable names: {name}: the retiring spelling does not migrate: {changeable_names_why(migrated)}")
+changeable_names_keep: fn(name: String, source: String) Never! {
+    kept: jet_format_source(source, false)
+    if !kept.ok -> panic("changeable names: {name}: does not format: {changeable_names_why(kept)}")
+    if kept.text != source {
+        panic("changeable names: {name}: formatted to\n{kept.text}\nexpected\n{source}")
     }
-    if migrated.text != new {
-        panic("changeable names: {name}: migrated to\n{migrated.text}\nexpected\n{new}")
-    }
-    again: jet_format_source_bind_mark1(new, false, false)
-    if !again.ok || again.text != new {
-        panic("changeable names: {name}: the migration is not stable:\n{again.text}")
-    }
-    kept: jet_format_source(new, false)
-    if !kept.ok || kept.text != new {
-        panic("changeable names: {name}: an ordinary format changed the new spelling:\n{kept.text}")
-    }
-    old_kept: jet_format_source(old, false)
-    if !old_kept.ok || old_kept.text != old {
-        panic("changeable names: {name}: an ordinary format changed the retiring spelling:\n{old_kept.text}")
+}
+
+changeable_names_refuse: fn(name: String, source: String) Never! {
+    if jet_format_source(source, false).ok {
+        panic("changeable names: {name}: the retired spelling still parses")
     }
 }
 
 #Test("changeable local names") {
-    changeable_names_migrate(
-        "local",
-        "run: fn() -> Int {{\n    count := 0\n    count += 1\n    _ := count\n    count\n}}\n",
-        "run: fn() -> Int {{\n    ^count: 0\n    count += 1\n    ^_: count\n    count\n}}\n",
-    )
-    changeable_names_migrate(
-        "uninit",
-        "run: fn() -> Int {{\n    total := Int{{ uninit }}\n    total = 2\n    total\n}}\n",
-        "run: fn() -> Int {{\n    ^total: Int{{ uninit }}\n    total = 2\n    total\n}}\n",
-    )
+    changeable_names_keep("local", "run: fn() -> Int {{\n    ^count: 0\n    count += 1\n    ^_: count\n    count\n}}\n")
+    changeable_names_keep("uninit", "run: fn() -> Int {{\n    ^total: Int{{ uninit }}\n    total = 2\n    total\n}}\n")
 }
 
 #Test("changeable destructured names") {
-    changeable_names_migrate(
-        "record",
-        "Pair: struct {{\n    lo: Int,\n    hi: Int,\n}}\n\nrun: fn(pair: Pair) -> Int {{\n    {{lo, hi}} := pair\n    lo += hi\n    lo\n}}\n",
-        "Pair: struct {{\n    lo: Int,\n    hi: Int,\n}}\n\nrun: fn(pair: Pair) -> Int {{\n    {{^lo, ^hi}}: pair\n    lo += hi\n    lo\n}}\n",
-    )
-    changeable_names_migrate(
-        "renamed",
-        "Pair: struct {{\n    lo: Int,\n    hi: Int,\n}}\n\nrun: fn(pair: Pair) -> Int {{\n    {{ lo: low }} := pair\n    low += 1\n    low\n}}\n",
-        "Pair: struct {{\n    lo: Int,\n    hi: Int,\n}}\n\nrun: fn(pair: Pair) -> Int {{\n    {{ lo: ^low }}: pair\n    low += 1\n    low\n}}\n",
-    )
-    changeable_names_migrate(
-        "list",
-        "run: fn(xs: [Int]) -> Int {{\n    [a, b] := xs\n    a += b\n    a\n}}\n",
-        "run: fn(xs: [Int]) -> Int {{\n    [^a, ^b]: xs\n    a += b\n    a\n}}\n",
-    )
-}
-
-#Test("one changeable name among destructured names") {
-    source: "Pair: struct {{\n    lo: Int,\n    hi: Int,\n}}\n\nrun: fn(pair: Pair) -> Int {{\n    {{^lo, hi}}: pair\n    lo += hi\n    lo\n}}\n"
-    formatted: jet_format_source(source, false)
-    if !formatted.ok || formatted.text != source {
-        panic("changeable names: a partly marked destructuring does not format as written:\n{formatted.text}")
-    }
-    migrated: jet_format_source_bind_mark1(source, false, false)
-    if !migrated.ok || migrated.text != source {
-        panic("changeable names: a partly marked destructuring does not migrate as written:\n{migrated.text}")
-    }
+    changeable_names_keep("record", "Pair: struct {{\n    lo: Int,\n    hi: Int,\n}}\n\nrun: fn(pair: Pair) -> Int {{\n    {{^lo, ^hi}}: pair\n    lo += hi\n    lo\n}}\n")
+    changeable_names_keep("one of two", "Pair: struct {{\n    lo: Int,\n    hi: Int,\n}}\n\nrun: fn(pair: Pair) -> Int {{\n    {{^lo, hi}}: pair\n    lo += hi\n    lo\n}}\n")
+    changeable_names_keep("renamed", "Pair: struct {{\n    lo: Int,\n    hi: Int,\n}}\n\nrun: fn(pair: Pair) -> Int {{\n    {{ lo: ^low }}: pair\n    low += 1\n    low\n}}\n")
+    changeable_names_keep("list", "run: fn(xs: [Int]) -> Int {{\n    [^a, ^b]: xs\n    a += b\n    a\n}}\n")
 }
 
 #Test("changeable module and persisted names") {
-    changeable_names_migrate(
-        "module",
-        "hits := 0\n\nbump: fn() {{ hits += 1 }}\n",
-        "^hits: 0\n\nbump: fn() {{ hits += 1 }}\n",
-    )
-    changeable_names_migrate(
-        "persist",
-        "#Persist visits := 0\n\nbump: fn() {{ visits += 1 }}\n",
-        "#Persist ^visits: 0\n\nbump: fn() {{ visits += 1 }}\n",
-    )
+    changeable_names_keep("module", "^hits: 0\n\nbump: fn() {{ hits += 1 }}\n")
+    changeable_names_keep("persist", "#Persist ^visits: 0\n\nbump: fn() {{ visits += 1 }}\n")
+    changeable_names_keep("file-scope lambda", "print(1)\n\n^scaled: fn(x: Int) -> Int {{ x * 2 }}\n\nprint(scaled(2))\n")
 }
 
 #Test("changeable state loop names") {
-    changeable_names_migrate(
-        "state loop",
-        "run: fn() -> Int {{\n    total := 0\n    loop i := 0, i < 3 {{\n        total += i\n        i += 1\n    }}\n    total\n}}\n",
-        "run: fn() -> Int {{\n    ^total: 0\n    loop ^i: 0, i < 3 {{\n        total += i\n        i += 1\n    }}\n    total\n}}\n",
-    )
-    changeable_names_migrate(
-        "collecting state loop",
-        "run: fn() -> [Int] {{\n    squares: loop i := 0, i < 3, i += 1 -> i * i\n    squares\n}}\n",
-        "run: fn() -> [Int] {{\n    squares: loop ^i: 0, i < 3, i += 1 -> i * i\n    squares\n}}\n",
-    )
+    changeable_names_keep("state loop", "run: fn() -> Int {{\n    ^total: 0\n    loop ^i: 0, i < 3 {{\n        total += i\n        i += 1\n    }}\n    total\n}}\n")
+    changeable_names_keep("collecting state loop", "run: fn() -> [Int] {{\n    squares: loop ^i: 0, i < 3, i += 1 -> i * i\n    squares\n}}\n")
 }
 
 #Test("write windows") {
-    changeable_names_migrate(
-        "binding window",
-        "run: fn(xs: ^[Int]) {{\n    slot: ^xs[0]\n    slot = 2\n}}\n",
-        "run: fn(xs: ^[Int]) {{\n    slot: xs[0].in_place()\n    slot = 2\n}}\n",
-    )
-    changeable_names_migrate(
-        "changeable-binding window",
-        "run: fn(xs: ^[Int]) {{\n    slot := ^xs[0]\n    slot = 2\n}}\n",
-        "run: fn(xs: ^[Int]) {{\n    slot: xs[0].in_place()\n    slot = 2\n}}\n",
-    )
-    changeable_names_migrate(
-        "match subject",
-        "Shape: enum {{\n    Dot(Int),\n    Line(Int),\n}}\n\nrun: fn(shape: ^Shape) {{\n    if ^shape == {{\n        .Dot(size) -> {{ size += 1 }}\n        .Line(size) -> size += 2\n    }}\n}}\n",
-        "Shape: enum {{\n    Dot(Int),\n    Line(Int),\n}}\n\nrun: fn(shape: ^Shape) {{\n    if shape.in_place() == {{\n        .Dot(size) -> {{ size += 1 }}\n        .Line(size) -> size += 2\n    }}\n}}\n",
-    )
-    changeable_names_migrate(
-        "one-arm match",
-        "run: fn(slot: ^Int?) {{\n    if ^slot == .Val(value) -> value += 1\n}}\n",
-        "run: fn(slot: ^Int?) {{\n    if slot.in_place() == .Val(value) -> value += 1\n}}\n",
-    )
-    changeable_names_migrate(
-        "loop source",
-        "run: fn(xs: ^[Int]) {{\n    loop x in ^xs -> x += 1\n}}\n",
-        "run: fn(xs: ^[Int]) {{\n    loop x in xs.in_place() -> x += 1\n}}\n",
-    )
+    changeable_names_keep("binding window", "run: fn(xs: ^[Int]) {{\n    slot: xs[0].in_place()\n    slot = 2\n}}\n")
+    changeable_names_keep("match subject", "Shape: enum {{\n    Dot(Int),\n    Line(Int),\n}}\n\nrun: fn(shape: ^Shape) {{\n    if shape.in_place() == {{\n        .Dot(size) -> {{ size += 1 }}\n        .Line(size) -> size += 2\n    }}\n}}\n")
+    changeable_names_keep("loop source", "run: fn(xs: ^[Int]) {{\n    loop x in xs.in_place() -> x += 1\n}}\n")
 }
 
 #Test("marks that stay marks") {
-    source: "run: fn(buf: ^[Int], xs: ^[Int]) {{\n    ^buf.push(1)\n    fill(^xs)\n}}\n"
-    migrated: jet_format_source_bind_mark1(source, false, false)
-    if !migrated.ok || migrated.text != source {
-        panic("changeable names: a receiver or argument mark changed:\n{migrated.text}")
-    }
+    changeable_names_keep("receiver and argument", "run: fn(buf: ^[Int], xs: ^[Int]) {{\n    ^buf.push(1)\n    fill(^xs)\n}}\n")
+}
+
+#Test("the retired spellings no longer parse") {
+    changeable_names_refuse("changeable local", "run: fn() {{\n    count := 0\n    count += 1\n}}\n")
+    changeable_names_refuse("state loop", "run: fn() {{\n    loop i := 0, i < 3, i += 1 {{}}\n}}\n")
+    changeable_names_refuse("binding window", "run: fn(xs: ^[Int]) {{\n    slot: ^xs[0]\n    slot = 2\n}}\n")
 }
 
 #Test("a window is never a changeable name") {

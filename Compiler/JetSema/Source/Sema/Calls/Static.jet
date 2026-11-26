@@ -1490,6 +1490,8 @@ sema_call_try_static_method: fn(receiver: Expr, method: String, method_span: Spa
     if owner_symbol.kind != SymbolKind.Type {
         return SemaMethodSpecialCheck{handled: false, value: None}
     }
+    fixed: sema_call_try_memory_fixed(owner_symbol, method, args, span, expected, check)
+    if fixed.handled -> return fixed
     if method == "new" && args.len() == 3 && type_name == "ExpiringSecret" && module_is_core(owner_symbol.module_identity) {
         if !sema_call_expiring_secret_new_accepts(args, check) {
             return SemaMethodSpecialCheck{handled: true, value: None}

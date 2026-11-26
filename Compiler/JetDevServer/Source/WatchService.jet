@@ -89,14 +89,14 @@ watch_file_digest: fn(path: String) -> String? {
 }
 
 watch_stamps: fn(paths: [String]) -> [PathStamp] {
-    stamps := [PathStamp]{}
+    ^stamps: [PathStamp]{}
     loop path in paths -> stamps.push(watch_stamp_capture(path))
     stamps
 }
 
 // The nearest existing directory that holds `path`.
 watch_existing_directory: fn(path: String) -> String? {
-    candidate := if watch_files.is_dir(path) -> watch_files.normalize(path) else -> watch_files.dirname(path)
+    ^candidate: if watch_files.is_dir(path) -> watch_files.normalize(path) else -> watch_files.dirname(path)
     loop {
         if candidate == "" -> return None
         if watch_files.is_dir(candidate) -> return Val(candidate)
@@ -107,11 +107,11 @@ watch_existing_directory: fn(path: String) -> String? {
 }
 
 watch_directories: fn(paths: [String]) -> [String] {
-    seen := [String:Bool]{}
+    ^seen: [String:Bool]{}
     loop path in paths {
         if watch_existing_directory(path) == .Val(directory) -> seen[directory] = true
     }
-    directories := seen.keys().to_list()
+    ^directories: seen.keys().to_list()
     directories.sort()
     directories
 }
@@ -123,7 +123,7 @@ WatchEvents: struct {
     handles: [WatchHandle],
 
     open: fn(paths: [String]) -> WatchEvents {
-        events := WatchEvents{directories: [String]{}, handles: [WatchHandle]{}}
+        ^events: WatchEvents{directories: [String]{}, handles: [WatchHandle]{}}
         events.refresh(paths)
         events
     }
@@ -134,7 +134,7 @@ WatchEvents: struct {
             return
         }
         loop handle in self.handles -> handle.cancel()
-        handles := [WatchHandle]{}
+        ^handles: [WatchHandle]{}
         loop directory in directories {
             if watch_watcher.files(directory) == .Ok(handle) -> handles.push(handle)
         }
@@ -144,7 +144,7 @@ WatchEvents: struct {
 
     // Drains every handle, then says whether any reported a change.
     changed: fn(self) -> Bool {
-        any := false
+        ^any: false
         loop handle in self.handles {
             if handle.poll().len() > 0 -> any = true
         }
@@ -155,7 +155,7 @@ WatchEvents: struct {
         clock: watch_time.start()
         loop {
             if self.changed() -> return true
-            interval := WATCH_POLL_INTERVAL_MS
+            ^interval: WATCH_POLL_INTERVAL_MS
             if timeout_ms == .Val(limit) {
                 remaining: limit - clock.elapsed_millis()
                 if remaining <= 0 -> return false
@@ -200,13 +200,13 @@ watch_json_optional: fn(value: String?) -> String Never! {
 }
 
 watch_json_strings: fn(items: [String]) -> String Never! {
-    parts := [String]{}
+    ^parts: [String]{}
     loop item in items -> parts.push(foundation_json_quote(item))
     parts.join(",")
 }
 
 watch_json_optional_strings: fn(items: [String?]) -> String Never! {
-    parts := [String]{}
+    ^parts: [String]{}
     loop item in items -> parts.push(watch_json_optional(item))
     parts.join(",")
 }
@@ -248,9 +248,9 @@ WatchGraph: struct {
 
     // The nodes in path order.
     node_list: fn(self) -> [WatchNode] {
-        paths := self.nodes.keys().to_list()
+        ^paths: self.nodes.keys().to_list()
         paths.sort()
-        out := [WatchNode]{}
+        ^out: [WatchNode]{}
         loop path in paths {
             if self.nodes.get(path) == .Val(node) -> out.push(node)
         }
@@ -258,7 +258,7 @@ WatchGraph: struct {
     }
 
     watched_paths: fn(self) -> [String] {
-        paths := self.nodes.keys().to_list()
+        ^paths: self.nodes.keys().to_list()
         paths.sort()
         paths
     }
@@ -272,7 +272,7 @@ WatchGraph: struct {
 
     set_stamp: fn(^self, path: String, stamp: PathStamp) {
         if self.nodes.get(path) == .Val(node) {
-            updated := node
+            ^updated: node
             updated.stamp = stamp
             self.nodes[path] = updated
         }
@@ -282,7 +282,7 @@ WatchGraph: struct {
     // asset sentinel.
     reshape: fn(^self, path: String, is_dir: Bool, as_asset: Bool) {
         if self.nodes.get(path) == .Val(node) {
-            updated := node
+            ^updated: node
             updated.is_dir = is_dir
             if as_asset && is_dir -> updated.kind = RootKind.Asset
             self.nodes[path] = updated
@@ -297,10 +297,10 @@ WatchGraph: struct {
     }
 
     link: fn(^self, source_path: String, target_path: String) {
-        targets := self.forward.get(source_path) ?? [String:Bool]{}
+        ^targets: self.forward.get(source_path) ?? [String:Bool]{}
         targets[target_path] = true
         self.forward[source_path] = targets
-        sources := self.reverse.get(target_path) ?? [String:Bool]{}
+        ^sources: self.reverse.get(target_path) ?? [String:Bool]{}
         sources[source_path] = true
         self.reverse[target_path] = sources
     }
@@ -320,7 +320,7 @@ WatchGraph: struct {
     register_asset_root: fn(^self, raw_path: String) {
         root: watch_canonicalize_loose(raw_path)
         self.asset_roots[root] = true
-        visited := [String:Bool]{}
+        ^visited: [String:Bool]{}
         self.add_asset_tree(root, visited)
     }
 
@@ -338,9 +338,9 @@ WatchGraph: struct {
     }
 
     discover_asset_tree: fn(^self) {
-        roots := self.asset_roots.keys().to_list()
+        ^roots: self.asset_roots.keys().to_list()
         roots.sort()
-        visited := [String:Bool]{}
+        ^visited: [String:Bool]{}
         loop root in roots -> self.add_new_asset_tree(root, visited)
     }
 
@@ -364,9 +364,9 @@ WatchGraph: struct {
     }
 
     discover_runtime_input_trees: fn(^self) {
-        roots := self.runtime_input_roots.keys().to_list()
+        ^roots: self.runtime_input_roots.keys().to_list()
         roots.sort()
-        visited := [String:Bool]{}
+        ^visited: [String:Bool]{}
         loop root in roots -> self.add_new_runtime_tree(root, visited)
     }
 
@@ -377,7 +377,7 @@ WatchGraph: struct {
         }
         visited[path] = true
         exists: watch_files.exists(path)
-        expected_dir := false
+        ^expected_dir: false
         if !exists && self.nodes.get(path) == .Val(node) {
             expected_dir = node.is_dir && !node.stamp.exists
         }
@@ -397,11 +397,11 @@ WatchGraph: struct {
 
     // The seeds and every path that reaches one through reverse edges.
     closure_of: fn(self, seeds: [String]) -> [String] {
-        seen := [String:Bool]{}
+        ^seen: [String:Bool]{}
         loop seed in seeds -> seen[seed] = true
-        frontier := seen.keys().to_list()
+        ^frontier: seen.keys().to_list()
         loop frontier.len() > 0 {
-            found := [String:Bool]{}
+            ^found: [String:Bool]{}
             loop path in frontier {
                 if self.reverse.get(path) == .Val(dependents) {
                     loop dependent in dependents.keys() {
@@ -412,7 +412,7 @@ WatchGraph: struct {
             loop dependent in found.keys() -> seen[dependent] = true
             frontier = found.keys().to_list()
         }
-        result := seen.keys().to_list()
+        ^result: seen.keys().to_list()
         result.sort()
         result
     }
@@ -447,10 +447,10 @@ WatchGraph: struct {
     // shell, style and target fact, each dependency, what the HTML shells
     // reference and the files the sources read at run time.
     from_entry: fn(entry_path: String, dependencies: [String]) -> WatchGraph {
-        graph := WatchGraph.new()
+        ^graph: WatchGraph.new()
         entry: watch_canonicalize_loose(entry_path)
         graph.set_entry(entry)
-        html_paths := [String]{}
+        ^html_paths: [String]{}
         entry_dir: watch_files.dirname(entry)
         project: watch_manifest_root(entry_dir) ?? entry_dir
         stem: watch_files.stem(entry)
@@ -488,19 +488,19 @@ WatchGraph: struct {
     // The graph of `entry` over the modules the checker loaded for it.
     discover: fn(entry: String, checker: LSPChecker) -> WatchGraph {
         checked: checker.check(entry, [JetDriverSourceDocument]{})
-        seen := [String:Bool]{}
+        ^seen: [String:Bool]{}
         loop loaded in checked.modules {
             if loaded.physical_path != "" -> seen[loaded.physical_path] = true else if loaded.path != "" {
                 seen[loaded.path] = true
             }
         }
-        dependencies := seen.keys().to_list()
+        ^dependencies: seen.keys().to_list()
         dependencies.sort()
         WatchGraph.from_entry(entry, dependencies)
     }
 
     scan_runtime_inputs: fn(^self) {
-        sources := [String]{}
+        ^sources: [String]{}
         nodes: self.node_list()
         loop node in nodes.move() {
             if node.kind == RootKind.Import || watch_extension(watch_ascii_lower(node.path)) == "jet" {
@@ -508,7 +508,7 @@ WatchGraph: struct {
             }
         }
         base: if self.entry == .Val(entry) -> watch_files.dirname(entry) else -> "."
-        inputs := [String:Bool]{}
+        ^inputs: [String:Bool]{}
         loop source in sources {
             if watch_files.read(source) == .Ok(text) {
                 loop input in watch_runtime_file_inputs(text) {
@@ -518,9 +518,9 @@ WatchGraph: struct {
                 }
             }
         }
-        paths := inputs.keys().to_list()
+        ^paths: inputs.keys().to_list()
         paths.sort()
-        visited := [String:Bool]{}
+        ^visited: [String:Bool]{}
         loop path in paths {
             self.add_runtime_input_node(path, visited, inputs.get(path) ?? false, true)
         }
@@ -551,7 +551,7 @@ WatchGraph: struct {
     }
 
     scan_html_references: fn(^self, roots: [String]) {
-        visited := [String:Bool]{}
+        ^visited: [String:Bool]{}
         loop root in roots -> self.add_reference_tree(root, visited)
     }
 
@@ -576,7 +576,7 @@ WatchGraph: struct {
 // The children of a directory in path order; an unreadable one has none.
 watch_children: fn(path: String) -> [String] {
     entries: watch_files.list_dir(path) ?? return [String]{}
-    children := [String]{}
+    ^children: [String]{}
     loop entry in entries.move() -> children.push(entry.path)
     children.sort()
     children
@@ -584,7 +584,7 @@ watch_children: fn(path: String) -> [String] {
 
 // The nearest directory at or above `start` that holds a package manifest.
 watch_manifest_root: fn(start: String) -> String? {
-    candidate := watch_files.normalize(start)
+    ^candidate: watch_files.normalize(start)
     loop {
         if watch_files.is_file(watch_files.join(candidate, PACKAGE_FILE)) -> return Val(candidate)
         parent: watch_files.dirname(candidate)
@@ -601,7 +601,7 @@ watch_canonicalize_loose: fn(path: String) -> String {
 }
 
 watch_ascii_lower: fn(text: String) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop byte in text.bytes() {
         if byte >= 65 && byte <= 90 -> out.push(byte + 32) else -> out.push(byte)
     }
@@ -611,7 +611,7 @@ watch_ascii_lower: fn(text: String) -> String Never! {
 // The text after the last `.` of a file name, or "".
 watch_extension: fn(name: String) -> String Never! {
     bytes: name.bytes()
-    at := bytes.len() - 1
+    ^at: bytes.len() - 1
     loop at >= 0 {
         if bytes[at] == 47 -> return ""
         if bytes[at] == 46 -> return String.from_bytes(bytes.slice(at + 1, bytes.len())) ?? ""
@@ -629,7 +629,7 @@ watch_is_word: fn(byte: U8) -> Bool Never! {
 watch_is_attribute_name: fn(byte: U8) -> Bool Never! { watch_is_word(byte) || byte == 45 }
 
 watch_skip_space: fn(bytes: [U8], start: Int) -> Int Never! {
-    cursor := start
+    ^cursor: start
     loop cursor < bytes.len() && watch_is_space(bytes[cursor]) -> cursor += 1
     cursor
 }
@@ -637,9 +637,9 @@ watch_skip_space: fn(bytes: [U8], start: Int) -> Int Never! {
 // The first index at or after `start` where `needle` begins, or -1.
 watch_find: fn(bytes: [U8], needle: [U8], start: Int) -> Int Never! {
     if needle.len() == 0 -> return -1
-    at := start
+    ^at: start
     loop at + needle.len() <= bytes.len() {
-        matched := true
+        ^matched: true
         loop index in 0..<needle.len() {
             if bytes[at + index] != needle[index] {
                 matched = false
@@ -670,7 +670,7 @@ WatchQuoted: struct {
 // when the call reads a directory.
 watch_runtime_file_inputs: fn(source: String) -> [RuntimeFileInput] Never! {
     bytes: source.bytes()
-    inputs := [String:Bool]{}
+    ^inputs: [String:Bool]{}
     watch_scan_method(bytes, "copy", false, inputs)
     watch_scan_method(bytes, "copy_dir", true, inputs)
     watch_scan_method(bytes, "exists", false, inputs)
@@ -685,9 +685,9 @@ watch_runtime_file_inputs: fn(source: String) -> [RuntimeFileInput] Never! {
     watch_scan_method(bytes, "golden", false, inputs)
     watch_scan_method(bytes, "corpus", true, inputs)
     watch_scan_method(bytes, "corpus_entries", true, inputs)
-    paths := inputs.keys().to_list()
+    ^paths: inputs.keys().to_list()
     paths.sort()
-    out := [RuntimeFileInput]{}
+    ^out: [RuntimeFileInput]{}
     loop path in paths.move() {
         is_dir: inputs.get(path) ?? false
         out.push(RuntimeFileInput{path: path, is_dir: is_dir})
@@ -697,11 +697,11 @@ watch_runtime_file_inputs: fn(source: String) -> [RuntimeFileInput] Never! {
 
 watch_scan_method: fn(bytes: [U8], method: String, is_dir: Bool, inputs: ^[String:Bool]) Never! {
     marker: ".{method}".bytes()
-    offset := 0
+    ^offset: 0
     loop {
         start: watch_find(bytes, marker, offset)
         if start < 0 -> break
-        cursor := start + marker.len()
+        ^cursor: start + marker.len()
         if cursor < bytes.len() && watch_is_word(bytes[cursor]) {
             offset = cursor
             next
@@ -726,7 +726,7 @@ watch_quoted_literal: fn(bytes: [U8], start: Int) -> WatchQuoted? Never! {
     if start >= bytes.len() -> return None
     quote: bytes[start]
     if quote != 39 && quote != 34 -> return None
-    cursor := start + 1
+    ^cursor: start + 1
     loop cursor < bytes.len() {
         if bytes[cursor] == 92 -> cursor += 2 else if bytes[cursor] == quote {
             return Val(WatchQuoted{value: watch_text(bytes, start + 1, cursor), end: cursor})
@@ -739,7 +739,7 @@ watch_quoted_literal: fn(bytes: [U8], start: Int) -> WatchQuoted? Never! {
 // `base`; remote, inline and script URLs are not files.
 watch_local_reference_path: fn(base: String, raw: String) -> String? {
     bytes: raw.trim().bytes()
-    cut := bytes.len()
+    ^cut: bytes.len()
     loop (index, byte) in bytes {
         if byte == 63 || byte == 35 {
             cut = index
@@ -752,13 +752,13 @@ watch_local_reference_path: fn(base: String, raw: String) -> String? {
         if reference.starts_with(prefix) -> return None
     }
     if reference.contains("\\") -> return None
-    relative := reference
+    ^relative: reference
     loop relative.starts_with("/") -> relative = relative.slice(1, relative.len())
     Val(watch_canonicalize_loose(watch_files.join(base, relative)))
 }
 
 watch_referenced_paths: fn(path: String, source: String) -> [String] Never! {
-    references := [String]{}
+    ^references: [String]{}
     extension: watch_extension(watch_ascii_lower(watch_files.basename(path)))
     markup: extension == "html" || extension == "htm"
     if markup {
@@ -782,7 +782,7 @@ watch_extract_values: fn(source: String, keyword: String, delimiter: Int, option
     bytes: source.bytes()
     lower: watch_ascii_lower(source).bytes()
     needle: keyword.bytes()
-    offset := 0
+    ^offset: 0
     loop {
         start: watch_find(lower, needle, offset)
         if start < 0 -> break
@@ -793,7 +793,7 @@ watch_extract_values: fn(source: String, keyword: String, delimiter: Int, option
             offset = after_keyword
             next
         }
-        cursor := watch_skip_space(lower, after_keyword)
+        ^cursor: watch_skip_space(lower, after_keyword)
         if delimiter != 0 {
             if cursor >= lower.len() || (Int{lower[cursor]}) != delimiter {
                 offset = after_keyword
@@ -803,7 +803,7 @@ watch_extract_values: fn(source: String, keyword: String, delimiter: Int, option
         } else if optional_parentheses && cursor < lower.len() && lower[cursor] == 40 {
             cursor = watch_skip_space(lower, cursor + 1)
         }
-        quote := 0
+        ^quote: 0
         if cursor < bytes.len() && (bytes[cursor] == 39 || bytes[cursor] == 34) {
             quote = Int{bytes[cursor]}
             cursor += 1
@@ -812,7 +812,7 @@ watch_extract_values: fn(source: String, keyword: String, delimiter: Int, option
             offset = after_keyword
             next
         }
-        value_end := cursor
+        ^value_end: cursor
         loop value_end < bytes.len() {
             byte: bytes[value_end]
             if quote != 0 {
@@ -838,7 +838,7 @@ watch_extract_values: fn(source: String, keyword: String, delimiter: Int, option
 watch_first_word: fn(text: String) -> String Never! {
     bytes: text.bytes()
     start: watch_skip_space(bytes, 0)
-    end := start
+    ^end: start
     loop end < bytes.len() && !watch_is_space(bytes[end]) -> end += 1
     watch_text(bytes, start, end)
 }
@@ -903,7 +903,7 @@ WatchSession: struct {
         self.graph.discover_asset_tree()
         self.graph.discover_runtime_input_trees()
         self.events.refresh(self.graph.watched_paths())
-        changes := [WatchChange]{}
+        ^changes: [WatchChange]{}
         nodes: self.graph.node_list()
         loop node in nodes.move() {
             now: watch_stamp_capture(node.path)
@@ -920,14 +920,14 @@ WatchSession: struct {
         if changes.len() == 0 -> return None
         if self.edit_started == None -> self.edit_started = Val(watch_time.start())
         self.events.coalesce(self.coalesce_ms)
-        changed_paths := [String]{}
+        ^changed_paths: [String]{}
         loop change in changes -> changed_paths.push(watch_files.normalize(change.path))
         self.settle(changed_paths)
-        rows := [WatchSettled]{}
+        ^rows: [WatchSettled]{}
         loop change in changes.move() {
-            root_kind := WatchGraph.classify(change.path)
-            is_dir := watch_files.is_dir(change.path)
-            previous := watch_stamp_missing()
+            ^root_kind: WatchGraph.classify(change.path)
+            ^is_dir: watch_files.is_dir(change.path)
+            ^previous: watch_stamp_missing()
             if self.graph.nodes.get(change.path) == .Val(node) {
                 root_kind = node.kind
                 is_dir = node.is_dir
@@ -958,10 +958,10 @@ WatchSession: struct {
             }
         }
         dev_entries: watch_dev_entries(rows, stale)
-        changed := [String]{}
-        kinds := [String]{}
-        change_names := [String]{}
-        digests := [String?]{}
+        ^changed: [String]{}
+        ^kinds: [String]{}
+        ^change_names: [String]{}
+        ^digests: [String?]{}
         loop row in rows.move() {
             kinds.push(row.root_kind.as_str())
             change_names.push(if stale -> ChangeKind.Stale.as_str() else -> row.change_kind.as_str())
@@ -981,7 +981,7 @@ WatchSession: struct {
             })
         }
         closure: self.graph.closure_of(changed)
-        edit_to_visible_ms := Int?{None}
+        ^edit_to_visible_ms: Int?{None}
         if self.edit_started == .Val(started) -> edit_to_visible_ms = Val(started.elapsed_millis())
         self.edit_started = None
         Val(InvalidationReceipt{
@@ -1000,9 +1000,9 @@ WatchSession: struct {
     // truncated a file before writing it, for at most WATCH_SETTLE_MAX_MS.
     settle: fn(self, paths: [String]) {
         clock: watch_time.start()
-        previous := watch_stamps(paths)
+        ^previous: watch_stamps(paths)
         loop clock.elapsed_millis() < WATCH_SETTLE_MAX_MS {
-            truncated := false
+            ^truncated: false
             loop (index, path) in paths {
                 if (previous[index].size ?? -1) == 0 && self.graph.stamp_size(path) > 0 {
                     truncated = true
@@ -1024,18 +1024,18 @@ WatchSession: struct {
             self.acknowledge(receipt, checker)
             return
         }
-        desired := [String:Bool]{}
+        ^desired: [String:Bool]{}
         desired[entry] = true
         loop dependency in dependencies {
             path: watch_canonicalize_loose(dependency)
             if WatchGraph.classify(path) == RootKind.Import -> desired[path] = true
         }
-        current := [String:Bool]{}
+        ^current: [String:Bool]{}
         nodes: self.graph.node_list()
         loop node in nodes {
             if node.kind == RootKind.Import -> current[node.path] = true
         }
-        topology_changed := false
+        ^topology_changed: false
         loop path in desired.keys() {
             if !current.has_key(path) -> topology_changed = true
         }
@@ -1067,11 +1067,11 @@ WatchSession: struct {
         loop node in nodes {
             if !self.graph.nodes.has_key(node.path) -> self.graph.upsert(node.path, node.kind)
         }
-        targets := discovered.reverse.keys().to_list()
+        ^targets: discovered.reverse.keys().to_list()
         targets.sort()
         loop target in targets {
             if discovered.reverse.get(target) == .Val(sources) {
-                source_paths := sources.keys().to_list()
+                ^source_paths: sources.keys().to_list()
                 source_paths.sort()
                 loop source_path in source_paths -> self.graph.link(source_path, target)
             }
@@ -1094,7 +1094,7 @@ watch_detect_renames: fn(changes: ^[WatchChange], graph: WatchGraph) {
         deleted_path: changes[deleted_index].path
         deleted_parent: watch_files.dirname(deleted_path)
         deleted_node: graph.nodes.get(deleted_path) ?? next
-        renamed := false
+        ^renamed: false
         loop change in changes {
             if change.kind != ChangeKind.Created || change.path == deleted_path -> next
             if watch_files.dirname(change.path) != deleted_parent -> next
@@ -1109,7 +1109,7 @@ watch_detect_renames: fn(changes: ^[WatchChange], graph: WatchGraph) {
 // The game-facing rows of a receipt: scripts and assets. A stale receipt
 // carries no digests.
 watch_dev_entries: fn(rows: [WatchSettled], stale: Bool) -> [DevWatchEntry] Never! {
-    entries := [DevWatchEntry]{}
+    ^entries: [DevWatchEntry]{}
     loop row in rows {
         game_kind: if row.root_kind == {
             .Import -> "script"

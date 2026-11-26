@@ -24,7 +24,7 @@ run: fn() {
     // the observation window; the accept waiter gets a real client after it.
     listener: net.tcp_listen("127.0.0.1:{free-port:trace}") ?? panic("bind")
     io_child: task {
-        server := listener.accept() ?? panic("accept")
+        ^server: listener.accept() ?? panic("accept")
         _: net.tcp_read_bytes(server, 4) ?? panic("receive")
     }
     io_child.detach()
@@ -33,14 +33,14 @@ run: fn() {
     arena: mem.Arena.new()
     x: arena.alloc(42)
     probe_work()
-    digest := crypto.sha256("trace-work".bytes())
+    ^digest: crypto.sha256("trace-work".bytes())
     loop i in 0..16384 {
         digest = crypto.sha256(digest.hex().bytes())
     }
     print("READY {digest.hex().len()}")
     time.sleep(1200ms)
     hold_sender.send(1)
-    client := net.tcp_connect("127.0.0.1:{free-port:trace}") ?? panic("connect")
+    ^client: net.tcp_connect("127.0.0.1:{free-port:trace}") ?? panic("connect")
     // A real transfer, which the runtime records as an I/O row.
     net.tcp_write_all_bytes(client, "ping".bytes()) ?? panic("send")
 }

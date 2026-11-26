@@ -8,7 +8,7 @@ Member: struct {
 // The match form over a borrowed element's optional handle: the
 // switch's subject aliases the element, so only the List closes the handle.
 member_size: fn(members: ^[Member], index: Int) -> Int IOError! {
-    if ^members[index].file == {
+    if members[index].file.in_place() == {
         .Val(input) -> {
             info: input.stat()
             Ok(info.size)
@@ -23,7 +23,7 @@ member_size: fn(members: ^[Member], index: Int) -> Int IOError! {
 reader_size: fn(input: FileReader) -> Int { input.stat().size }
 
 member_size_through: fn(members: ^[Member], index: Int) -> Int {
-    if ^members[index].file == {
+    if members[index].file.in_place() == {
         .Val(input) -> reader_size(input)
         .None -> -1
     }

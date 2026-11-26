@@ -80,13 +80,13 @@ jet_unit: fn(i: Int) -> String {
     }}
 
     unit_{i}: fn(seed: Int) -> Int {{
-        s := State{i}{{a: seed % {MODULUS}, b: {k.c2}, c: {k.c3}}}
-        values := [Int]{{}}
+        ^s: State{i}{{a: seed % {MODULUS}, b: {k.c2}, c: {k.c3}}}
+        ^values: [Int]{{}}
         loop j in 0..<{k.n} {{
             s = step_{i}(s, j)
             values.push(score_{i}(classify_{i}(s.a % 1000)))
         }}
-        total := 0
+        ^total: 0
         loop v in values {{
             if v % 2 == 0 {{
                 total += v
@@ -310,7 +310,7 @@ rust_fold: fn(i: Int) -> String { "    total = (total * 31 + unit_{i}({seed(i)})
 
 // Each program: the header, every unit, then `run`/`main` with every fold.
 jet_program: fn(units: String, folds: String) -> String {
-    "// {HEADER}\n{units}\nrun: fn() {{\n    total := 0\n{folds}\n    print(\"checksum {{total}}\")\n}}\n"
+    "// {HEADER}\n{units}\nrun: fn() {{\n    ^total: 0\n{folds}\n    print(\"checksum {{total}}\")\n}}\n"
 }
 
 go_program: fn(units: String, folds: String) -> String {

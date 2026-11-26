@@ -17,7 +17,7 @@ capture_consent_test_scope: fn() -> CaptureConsentScope Never! {
     assert(grant.matches(identity, scope))
     assert(identity.matches(capture_consent_test_identity()))
     loop field in 0..<7 {
-        changed := identity.copy()
+        ^changed: identity.copy()
         if field == 0 -> changed.target_inputs_sha256 = "other inputs"
         if field == 1 -> changed.tool_version = "other version"
         if field == 2 -> changed.engine = "other engine"
@@ -32,7 +32,7 @@ capture_consent_test_scope: fn() -> CaptureConsentScope Never! {
 }
 
 #Test("capture_live_consent_matches_incomplete_supplied_lineage_without_substitution") {
-    identity := capture_consent_test_identity()
+    ^identity: capture_consent_test_identity()
     // The live caller supplied these facts explicitly; no constructor defaults.
     identity.revision = ""
     scope: CaptureConsentScope.default()
@@ -41,7 +41,7 @@ capture_consent_test_scope: fn() -> CaptureConsentScope Never! {
     assert(!grant.matches(capture_consent_test_identity(), scope))
     attempt: CaptureAttempt.new(identity.copy())
     assert(grant.matches(attempt.identity, attempt.base_consent_scope()))
-    changed := scope.copy()
+    ^changed: scope.copy()
     changed.destination = "record"
     assert(!grant.matches(identity, changed))
 }
@@ -51,7 +51,7 @@ capture_consent_test_scope: fn() -> CaptureConsentScope Never! {
     identity: capture_consent_test_identity()
     scope: CaptureConsentScope.default()
     loop field in 0..<7 {
-        incomplete := identity.copy()
+        ^incomplete: identity.copy()
         if field == 0 -> incomplete.target_inputs_sha256 = ""
         if field == 1 -> incomplete.tool_version = ""
         if field == 2 -> incomplete.engine = ""
@@ -67,7 +67,7 @@ capture_consent_test_scope: fn() -> CaptureConsentScope Never! {
     }
     invalid: [String]{"\n", "\r", "\t", String.from_bytes([U8]{0}) ?? panic("NUL"), String.from_bytes([U8]{127}) ?? panic("DEL"), String.from_bytes([U8]{194, 133}) ?? panic("C1")}
     loop text in invalid {
-        changed := identity.copy()
+        ^changed: identity.copy()
         changed.revision = "rev{text}"
         assert(!changed.is_exact())
     }
@@ -77,11 +77,11 @@ capture_consent_test_scope: fn() -> CaptureConsentScope Never! {
 }
 
 #Test("capture_scope_canonicalizes_order_duplicates_and_source_declaration_order") {
-    left := CaptureConsentScope.new([String]{"z", "a", "a"}, [String]{"b", "a", "b"}, [String]{"s", "s"}, [String]{"y", "x", "x"}, "record", U64{123})
-    right := CaptureConsentScope.new([String]{"a", "z"}, [String]{"a", "b"}, [String]{"s"}, [String]{"x", "y"}, "record", U64{123})
+    ^left: CaptureConsentScope.new([String]{"z", "a", "a"}, [String]{"b", "a", "b"}, [String]{"s", "s"}, [String]{"y", "x", "x"}, "record", U64{123})
+    ^right: CaptureConsentScope.new([String]{"a", "z"}, [String]{"a", "b"}, [String]{"s"}, [String]{"x", "y"}, "record", U64{123})
     left.source_kinds = [CaptureSource]{CaptureSource.Network, CaptureSource.Clock, CaptureSource.Randomness, CaptureSource.RawInput, CaptureSource.Clock}
     right.source_kinds = [CaptureSource]{CaptureSource.Clock, CaptureSource.Randomness, CaptureSource.RawInput, CaptureSource.Network}
-    canonical := left.copy()
+    ^canonical: left.copy()
     canonical.canonicalize()
     assert_eq(canonical, right)
     identity: capture_consent_test_identity()
@@ -102,7 +102,7 @@ capture_consent_test_scope: fn() -> CaptureConsentScope Never! {
     scope: capture_consent_test_scope()
     grant: SensitiveCaptureConsent.new(identity.copy(), scope.copy())
     loop dimension in 0..<8 {
-        changed := scope.copy()
+        ^changed: scope.copy()
         if dimension == 0 -> changed.authorities.push("Time")
         if dimension == 1 -> changed.hosts.push("other.test")
         if dimension == 2 -> changed.streams.push("error")
@@ -123,7 +123,7 @@ capture_consent_test_scope: fn() -> CaptureConsentScope Never! {
     assert_eq(scope.digest(), "7f19d8a53794744b810c33c098b6202be816b82696e34be9860346f41e103b49")
     assert_eq(SensitiveCaptureConsent.new(capture_consent_test_identity(), scope).digest(), "10d9e4ea16a1c03f89a0e643fe41d651aa9324a1a58ba071f5c0afdef6c00213")
     nul: String.from_bytes([U8]{0}) ?? panic("NUL")
-    unicode := CaptureConsentScope.new([String]{"λ", "a"}, [String]{"host"}, [String]{"s"}, [String]{"raw{nul}text"}, "é;:sink", U64.MAX)
+    ^unicode: CaptureConsentScope.new([String]{"λ", "a"}, [String]{"host"}, [String]{"s"}, [String]{"raw{nul}text"}, "é;:sink", U64.MAX)
     unicode.source_kinds = [CaptureSource]{CaptureSource.Clock, CaptureSource.Randomness, CaptureSource.RawInput, CaptureSource.Network}
     assert_eq(unicode.digest(), "0376bc9355f4fb6f96bbbb00632854eede6fdcb0b7a138c2cf54162bb4f2a93f")
     a: CaptureConsentScope.new([String]{"ab", "c"}, [String]{}, [String]{}, [String]{}, "", U64{1})
@@ -138,7 +138,7 @@ capture_consent_test_scope: fn() -> CaptureConsentScope Never! {
     identity: capture_consent_test_identity()
     clock: CaptureAttempt.safe_clock(identity.copy())
     assert_eq(clock.base_consent_scope().source_kinds, [CaptureSource]{CaptureSource.Clock})
-    attempt := CaptureAttempt.new(identity)
+    ^attempt: CaptureAttempt.new(identity)
     attempt.scope = capture_consent_test_scope()
     attempt.scope.source_kinds = [CaptureSource]{CaptureSource.Randomness}
     facts: [CaptureSourceFact]{CaptureSourceFact.at(CaptureSource.Network, "source.jet", U32{8}), CaptureSourceFact.at(CaptureSource.Clock, "source.jet", U32{3}), CaptureSourceFact.at(CaptureSource.Network, "source.jet", U32{9})}
@@ -237,7 +237,7 @@ capture_consent_test_scope: fn() -> CaptureConsentScope Never! {
 }
 
 #Test("capture_sensitive_debug_exposes_digest_not_private_disclosures") {
-    scope := capture_consent_test_scope()
+    ^scope: capture_consent_test_scope()
     scope.disclosures = [String]{"secret raw input"}
     scope.hosts = [String]{"secret-host.test"}
     grant: SensitiveCaptureConsent.new(capture_consent_test_identity(), scope)

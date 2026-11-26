@@ -26,18 +26,18 @@ keep_cbor_reader: fn(v: ^^cbor.CBORReader<files.FileReader>) -> cbor.CBORReader<
 keep_cbor_writer: fn(v: ^^cbor.CBORWriter<files.FileWriter>) -> cbor.CBORWriter<files.FileWriter> { return v }
 
 run: fn() {
-    limits := encoding.EncodingLimits.safe()
+    ^limits: encoding.EncodingLimits.safe()
     print("{limits.buffer_bytes}:{limits.max_depth}:{limits.max_item_bytes}:{limits.max_expansion_depth}:{limits.max_expansion_bytes}")
     if limits.max_total_bytes == None { print(true) } else { print(false) }
     print(keep_format(encoding.EncodingFormat.JSON.move()) == encoding.EncodingFormat.JSON)
     print(keep_kind(encoding.EncodingErrorKind.Limit.move()) == encoding.EncodingErrorKind.Limit)
 
-    cause := encoding.EncodingCause{ kind: "io", os_code: None, message: "nope" }
-    kept_cause := keep_cause(cause)
+    ^cause: encoding.EncodingCause{ kind: "io", os_code: None, message: "nope" }
+    ^kept_cause: keep_cause(cause)
     print(kept_cause.kind)
     print(kept_cause.message)
 
-    err := encoding.EncodingError{
+    ^err: encoding.EncodingError{
         format: encoding.EncodingFormat.JSON,
         kind: encoding.EncodingErrorKind.Limit,
         byte_offset: 0,
@@ -47,24 +47,24 @@ run: fn() {
         reason: "buffer_bytes 1 is outside 4096..16777216",
         cause: None,
     }
-    kept_err := keep_error(err)
+    ^kept_err: keep_error(err)
     print(kept_err.format == encoding.EncodingFormat.JSON)
     print(kept_err.kind == encoding.EncodingErrorKind.Limit)
     print(kept_err.byte_offset)
     if kept_err.cause == None { print(true) } else { print(false) }
     print("{kept_err}")
 
-    event := encoding.DataEvent.Null
-    _kept_event := keep_event(event)
+    ^event: encoding.DataEvent.Null
+    ^_kept_event: keep_event(event)
     print(true)
 
     output: files.create("{work}/foundation.json") ?? panic("create")
     writer: json.writer(output, limits, false) ?? panic("writer")
-    kept_writer := keep_json_writer(writer)
+    ^kept_writer: keep_json_writer(writer)
     kept_writer.write(encoding.DataEvent.Null) ?? panic("write")
     kept_writer.finish() ?? panic("finish")
 
-    bad := encoding.EncodingLimits.safe()
+    ^bad: encoding.EncodingLimits.safe()
     bad.buffer_bytes = 1
     bad_output: files.create("{work}/bad-limits.json") ?? panic("bad create")
     if json.writer(bad_output, bad, false) == {

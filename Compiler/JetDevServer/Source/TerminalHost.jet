@@ -126,20 +126,20 @@ TerminalHostConfig: struct {
     }
 
     with_limits: fn(self, max_events: Int, max_nodes: Int) -> TerminalHostConfig Never! {
-        config := self
+        ^config: self
         config.max_events = terminal_clamp(max_events, 1, MAX_TERMINAL_EVENTS)
         config.max_nodes = terminal_clamp(max_nodes, 1, MAX_TERMINAL_NODES)
         config
     }
 
     with_viewport: fn(self, viewport: TerminalViewport) -> TerminalHostConfig Never! {
-        config := self
+        ^config: self
         config.viewport = viewport
         config
     }
 
     with_capabilities: fn(self, capabilities: TerminalHostCapabilities) -> TerminalHostConfig Never! {
-        config := self
+        ^config: self
         config.capabilities = capabilities
         config
     }
@@ -219,7 +219,7 @@ TerminalHostEvent: struct {
     facts: [TerminalHostFact],
 
     from_devtools_event: fn(event: JetDevtoolsEvent, protocol: String, session_id: String, revision: String, panel_id: JetDevtoolsPanelID) -> TerminalHostEvent Never! {
-        facts := [TerminalHostFact]{}
+        ^facts: [TerminalHostFact]{}
         facts.push(TerminalHostFact.text_bounded("fields", event.fields_json()))
         if event.payload_json() == .Val(payload) {
             facts.push(TerminalHostFact.text_bounded("payload", payload))
@@ -239,7 +239,7 @@ TerminalHostEvent: struct {
     }
 
     published_fact_count: fn(self) -> Int {
-        count := 0
+        ^count: 0
         loop fact in self.facts {
             if fact.published -> count += 1
         }
@@ -261,7 +261,7 @@ TerminalHostEvent: struct {
         if self.facts.len() > MAX_TERMINAL_FACTS {
             return Err(TerminalHostError{message: "terminal event exceeds its fact bound"})
         }
-        keys := [String:Bool]{}
+        ^keys: [String:Bool]{}
         loop fact in self.facts {
             fact.validate()
             if keys.get(fact.key) != None {
@@ -369,7 +369,7 @@ TerminalNode: struct {
     }
 
     count: fn(self) -> Int {
-        total := 1
+        ^total: 1
         loop child in self.children -> total += child.count()
         total
     }
@@ -390,7 +390,7 @@ TerminalPanelTree: struct {
     }
 
     nodes: fn(self) -> [String:TerminalNode] {
-        nodes := [String:TerminalNode]{}
+        ^nodes: [String:TerminalNode]{}
         self.root.flatten(nodes)
         nodes
     }
@@ -429,12 +429,12 @@ TerminalFrame: struct {
     diff: fn(self, previous: TerminalFrame) -> TerminalDiff {
         before: previous.tree.nodes()
         after: self.tree.nodes()
-        ids := [String:Bool]{}
+        ^ids: [String:Bool]{}
         loop id in before.keys().to_list() -> ids[id] = true
         loop id in after.keys().to_list() -> ids[id] = true
-        ordered_ids := ids.keys().to_list()
+        ^ordered_ids: ids.keys().to_list()
         ordered_ids.sort_by(fn(left, right) { left <=> right })
-        operations := [TerminalDiffOperation]{}
+        ^operations: [TerminalDiffOperation]{}
         loop id in ordered_ids {
             old: before.get(id)
             new: after.get(id)
@@ -474,9 +474,9 @@ TerminalDiff: struct {
 
     initial: fn(frame: TerminalFrame) -> TerminalDiff {
         nodes: frame.tree.nodes()
-        ids := nodes.keys().to_list()
+        ^ids: nodes.keys().to_list()
         ids.sort_by(fn(left, right) { left <=> right })
-        operations := [TerminalDiffOperation]{}
+        ^operations: [TerminalDiffOperation]{}
         loop id in ids {
             if nodes.get(id) == .Val(node) {
                 operations.push(TerminalDiffOperation.Insert{id: id, node: node})
@@ -585,9 +585,9 @@ TerminalHost: struct {
     // `panel_ids` maps each event sequence to the panel that owns it.
     sync_projection: fn(^self, projection: DevtoolsProjection, panel_ids: [Int:JetDevtoolsPanelID]) -> TerminalFrame TerminalHostError! {
         terminal_validate_projection(projection)
-        session_changed := false
+        ^session_changed: false
         if self.session_id == .Val(id) -> session_changed = id != projection.session_id
-        revision_changed := false
+        ^revision_changed: false
         if self.revision == .Val(revision) -> revision_changed = revision != projection.revision
         if session_changed || revision_changed || projection.reset || projection.truncation {
             self.time_cursor = None
@@ -628,7 +628,7 @@ TerminalHost: struct {
         projection: session.devtools_events_since(self.cursor)
         grants: if self.config.capabilities.access.local_details_enabled() -> JetDevtoolsPanelCapability.all() else -> [JetDevtoolsPanelCapability]{}
         panels: session.devtools_panels(.Terminal, grants) ?? return Err(TerminalHostError{message: "{err}"})
-        panel_ids := [Int:JetDevtoolsPanelID]{}
+        ^panel_ids: [Int:JetDevtoolsPanelID]{}
         loop panel in panels {
             panel_id: panel.availability.descriptor.id
             loop event in panel.events {
@@ -724,7 +724,7 @@ TerminalHost: struct {
         viewport: self.effective_viewport()
         tree: self.build_tree(ordered)
         freshness: terminal_overall_freshness(ordered, self.display_cursor())
-        revision := ""
+        ^revision: ""
         if self.revision == .Val(current) -> revision = current else if ordered.len() > 0 {
             revision = ordered[ordered.len() - 1].revision
         }
@@ -772,10 +772,10 @@ TerminalHost: struct {
     }
 
     move_panel: fn(^self, direction: Int) -> TerminalAction {
-        panel_ids := [String]{}
+        ^panel_ids: [String]{}
         loop descriptor in descriptors() -> panel_ids.push(descriptor.id.as_str())
         if panel_ids.len() == 0 -> return TerminalAction.Ignored
-        current := 0
+        ^current: 0
         if self.focus.panel_id == .Val(focused) {
             loop (index, panel_id) in panel_ids {
                 if panel_id == focused {
@@ -796,7 +796,7 @@ TerminalHost: struct {
             return TerminalAction.Inspect{panel_id: panel_id, item_key: item_key}
         }
         ordered: terminal_ordered_events(self.events)
-        index := ordered.len()
+        ^index: ordered.len()
         loop index > 0 {
             index -= 1
             if ordered[index].panel_id.as_str() == panel_id {
@@ -810,7 +810,7 @@ TerminalHost: struct {
 
     // Steps the time cursor to the next retained sequence, wrapping to the first.
     move_cursor: fn(^self) -> TerminalAction {
-        sequences := [Int]{}
+        ^sequences: [Int]{}
         loop event in terminal_ordered_events(self.events) {
             if sequences.len() == 0 || sequences[sequences.len() - 1] != event.sequence {
                 sequences.push(event.sequence)
@@ -818,7 +818,7 @@ TerminalHost: struct {
         }
         if sequences.len() == 0 -> return TerminalAction.Ignored
         current: self.time_cursor ?? sequences[0]
-        target := sequences[0]
+        ^target: sequences[0]
         loop sequence in sequences {
             if sequence > current {
                 target = sequence
@@ -831,7 +831,7 @@ TerminalHost: struct {
 
     effective_viewport: fn(self) -> TerminalViewport Never! {
         configured: self.config.viewport
-        width := configured.width
+        ^width: configured.width
         capability_width: terminal_at_least_one(self.config.capabilities.width)
         if capability_width < width -> width = capability_width
         configured.resize(width, configured.height)
@@ -840,19 +840,19 @@ TerminalHost: struct {
     build_tree: fn(self, ordered: [TerminalHostEvent]) -> TerminalPanelTree Never! {
         viewport: self.effective_viewport()
         root_bounds: viewport.bounds()
-        children := [TerminalNode]{}
+        ^children: [TerminalNode]{}
         availability: self.panel_availability()
-        remaining := self.config.max_nodes - 1
+        ^remaining: self.config.max_nodes - 1
         panel_height: 3
         cursor: self.display_cursor()
-        index := 0
+        ^index: 0
         loop descriptor in descriptors() {
             if remaining <= 0 -> break
             remaining -= 1
             panel_id: descriptor.id.as_str()
             // The indexes in `ordered` of this panel's events.
-            panel_events := [Int]{}
-            latest := Int?{None}
+            ^panel_events: [Int]{}
+            ^latest: Int?{None}
             loop at in 0..<ordered.len() {
                 event: ordered[at]
                 if event.panel_id.as_str() != panel_id -> next
@@ -863,9 +863,9 @@ TerminalHost: struct {
             y: index * panel_height
             height: terminal_clamp(viewport.height - y, 0, panel_height)
             panel_bounds: TerminalBounds{x: 0, y: y, width: viewport.width, height: height}
-            panel_children := [TerminalNode]{}
+            ^panel_children: [TerminalNode]{}
             if remaining > 0 {
-                status := TerminalStatus{label: freshness.label(), detail: "{panel_events.len()} event(s), retained {ordered.len()}/{self.config.max_events}", freshness: freshness}
+                ^status: TerminalStatus{label: freshness.label(), detail: "{panel_events.len()} event(s), retained {ordered.len()}/{self.config.max_events}", freshness: freshness}
                 loop row in availability {
                     if row.descriptor.id == descriptor.id && !row.is_available() {
                         status.label = "unavailable"
@@ -877,7 +877,7 @@ TerminalHost: struct {
                 remaining -= 1
             }
             if remaining > 0 {
-                summary := "No recorded facts"
+                ^summary: "No recorded facts"
                 if panel_events.len() > 0 {
                     summary = terminal_event_summary(ordered[panel_events[panel_events.len() - 1]], self.config.capabilities)
                 }
@@ -885,10 +885,10 @@ TerminalHost: struct {
                 remaining -= 1
             }
             if remaining > 0 {
-                rows := [TerminalTableRow]{}
+                ^rows: [TerminalTableRow]{}
                 loop at in panel_events {
                     event: ordered[at]
-                    cells := [String]{}
+                    ^cells: [String]{}
                     cells.push(event.revision)
                     cells.push("{event.sequence}")
                     cells.push("{event.observed_at}")
@@ -987,7 +987,7 @@ terminal_require_text: fn(value: String?, label: String) TerminalHostError! {
 
 terminal_bounded_status: fn(status: DevtoolsStatusFact) -> DevtoolsStatusFact TerminalHostError! {
     terminal_validate_status(status)
-    bounded := status
+    ^bounded: status
     bounded.diagnostic_code = terminal_bounded_optional(status.diagnostic_code)
     bounded.diagnostic = terminal_bounded_optional(status.diagnostic)
     bounded.accepted_revision = terminal_bounded_optional(status.accepted_revision)
@@ -1008,8 +1008,8 @@ terminal_bounded_optional: fn(value: String?) -> String? {
 terminal_bounded_text: fn(value: String, limit: Int) -> String Never! {
     if limit <= 0 -> return ""
     bytes: value.bytes()
-    out := [U8]{}
-    index := 0
+    ^out: [U8]{}
+    ^index: 0
     loop index < bytes.len() {
         lead: bytes[index]
         width: terminal_style_char_len(lead)
@@ -1056,7 +1056,7 @@ terminal_status_field: fn(key: String, value: String?, reveal: Bool) -> String {
 }
 
 terminal_status_summary: fn(status: DevtoolsStatusFact, reveal: Bool) -> String {
-    fields := [String]{}
+    ^fields: [String]{}
     fields.push("state={terminal_session_state_label(status.state)}")
     fields.push(terminal_status_field("diagnostic_code", status.diagnostic_code, reveal))
     fields.push(terminal_status_field("diagnostic", status.diagnostic, reveal))
@@ -1069,7 +1069,7 @@ terminal_status_summary: fn(status: DevtoolsStatusFact, reveal: Bool) -> String 
 }
 
 terminal_unavailable_panel_detail: fn(reasons: [JetDevtoolsPanelUnavailableReason]) -> String {
-    details := [String]{}
+    ^details: [String]{}
     loop reason in reasons {
         if reason == {
             .UnsupportedHost(host) -> { details.push("unsupported host {host.as_str()}") }
@@ -1082,7 +1082,7 @@ terminal_unavailable_panel_detail: fn(reasons: [JetDevtoolsPanelUnavailableReaso
 
 // Events by sequence, then observation time, revision, kind, entity and source.
 terminal_ordered_events: fn(events: [TerminalHostEvent]) -> [TerminalHostEvent] {
-    ordered := events
+    ^ordered: events
     ordered.sort_by(fn(left, right) {
         (left.sequence <=> right.sequence).then(left.observed_at <=> right.observed_at)
             .then(left.revision <=> right.revision).then(left.kind <=> right.kind).then(left.entity <=> right.entity).then(left.source <=> right.source)
@@ -1091,9 +1091,9 @@ terminal_ordered_events: fn(events: [TerminalHostEvent]) -> [TerminalHostEvent] 
 }
 
 terminal_event_summary: fn(event: TerminalHostEvent, capabilities: TerminalHostCapabilities) -> String {
-    values := "<redacted>"
+    ^values: "<redacted>"
     if capabilities.access.local_details_enabled() {
-        published := [String]{}
+        ^published: [String]{}
         loop fact in event.facts {
             if fact.published -> published.push(fact.display())
         }
@@ -1114,7 +1114,7 @@ terminal_freshness: fn(latest: Int?, cursor: Int?) -> TerminalFreshness Never! {
 }
 
 terminal_overall_freshness: fn(events: [TerminalHostEvent], cursor: Int?) -> TerminalFreshness Never! {
-    latest := Int?{None}
+    ^latest: Int?{None}
     loop event in events {
         if latest == None || event.sequence > (latest ?? 0) -> latest = Val(event.sequence)
     }
@@ -1148,8 +1148,8 @@ terminal_optional_number: fn(value: Int?) -> String {
 terminal_render_lines: fn(input: TerminalRenderInput) -> [String] {
     capabilities: input.capabilities
     if capabilities.quiet -> return [String]{}
-    raw := [String]{}
-    state := "-"
+    ^raw: [String]{}
+    ^state: "-"
     if input.status == .Val(status) -> state = terminal_session_state_label(status.state)
     raw.push("jet devtools  session={terminal_display_optional(input.session_id)}  source_id={terminal_display_optional(input.source_id ?? "")}  build_id={terminal_display_optional(input.build_id ?? "")}  world_id={terminal_display_optional(input.world_id ?? "")}  revision={terminal_display_optional(input.revision)}  sequence={terminal_optional_number(input.cursor)}  observed_at={terminal_optional_number(input.observed_at)}  state={state}  freshness={input.freshness.label()}")
     access: capabilities.access
@@ -1173,7 +1173,7 @@ terminal_render_lines: fn(input: TerminalRenderInput) -> [String] {
         }
     }
     action_help: if access.actions_enabled() -> "r rerun  R restart" else -> "r/R disabled(read-only)"
-    last := "none"
+    ^last: "none"
     if input.keyboard.last_action == .Val(action) -> last = action.label()
     raw.push("keys: Tab/Down next panel  Shift-Tab/Up previous  Enter inspect  Esc back  {action_help}  j jobs  t time  q quit  last={last}")
     skip: terminal_clamp(input.viewport.scroll, 0, raw.len())
@@ -1187,7 +1187,7 @@ TERMINAL_ESC: U8{27}
 // The ANSI sequence that opens style `code`, or nothing without color.
 terminal_style_open: fn(code: String, capabilities: TerminalHostCapabilities) -> String Never! {
     if !capabilities.color_enabled() -> return ""
-    out := [U8]{TERMINAL_ESC}
+    ^out: [U8]{TERMINAL_ESC}
     out.extend("[{code}m".bytes())
     String.from_bytes(out) ?? ""
 }
@@ -1195,14 +1195,14 @@ terminal_style_open: fn(code: String, capabilities: TerminalHostCapabilities) ->
 // The ANSI sequence that ends a style `terminal_style_open` opened.
 terminal_style_close: fn(capabilities: TerminalHostCapabilities) -> String Never! {
     if !capabilities.color_enabled() -> return ""
-    out := [U8]{TERMINAL_ESC}
+    ^out: [U8]{TERMINAL_ESC}
     out.extend("[0m".bytes())
     String.from_bytes(out) ?? ""
 }
 
 // The end of the CSI sequence opened at `start` (ESC `[` ... final byte `@`..`~`).
 terminal_csi_end: fn(bytes: [U8], start: Int) -> Int {
-    index := start + 2
+    ^index: start + 2
     loop index < bytes.len() {
         byte: bytes[index]
         index += 1
@@ -1214,8 +1214,8 @@ terminal_csi_end: fn(bytes: [U8], start: Int) -> Int {
 // `text` without CSI sequences; an ESC not followed by `[` drops with its next byte.
 terminal_strip_ansi: fn(text: String) -> String {
     bytes: text.bytes()
-    out := [U8]{}
-    index := 0
+    ^out: [U8]{}
+    ^index: 0
     loop index < bytes.len() {
         if bytes[index] == TERMINAL_ESC {
             if index + 1 < bytes.len() && bytes[index + 1] == 91 {
@@ -1233,14 +1233,14 @@ terminal_strip_ansi: fn(text: String) -> String {
 terminal_truncate_columns: fn(text: String, width: Int) -> String {
     limit: terminal_at_least_one(width)
     bytes: text.bytes()
-    out := [U8]{}
-    visible := 0
-    clipped := false
-    has_ansi := false
+    ^out: [U8]{}
+    ^visible: 0
+    ^clipped: false
+    ^has_ansi: false
     loop byte in bytes {
         if byte == TERMINAL_ESC -> has_ansi = true
     }
-    index := 0
+    ^index: 0
     loop index < bytes.len() {
         if bytes[index] == TERMINAL_ESC && index + 1 < bytes.len() && bytes[index + 1] == 91 {
             end: terminal_csi_end(bytes, index)

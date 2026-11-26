@@ -187,7 +187,7 @@ BrokerWireReader: struct {
 
     // Up to `limit` bytes; an empty list is end of input.
     read_some: fn(^self, limit: Int) -> [U8] StoreError! {
-        if ^self.stream == {
+        if self.stream.in_place() == {
             .Val(stream) -> Ok(net.unix_read_bytes(stream, limit) ?? return Err(store_broker_net_error(err)))
             .None -> {
                 end: if self.position + limit < self.bytes.len() -> self.position + limit else -> self.bytes.len()

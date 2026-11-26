@@ -24,12 +24,12 @@ watch_test_write: fn(path: String, body: String) {
     watch_test_write(html, "<html></html>\n")
     watch_test_write(watch_test_files.join(dir, "package.jet"), "name: \"app\"\n")
     watch_test_write(watch_test_files.join(dir, ".jet/lock"), "lock = 1\n")
-    graph := WatchGraph.from_entry(entry, [String]{"{lib}"})
+    ^graph: WatchGraph.from_entry(entry, [String]{"{lib}"})
     graph.upsert(watch_test_files.join(dir, "logo.png"), RootKind.Asset)
     graph.upsert(watch_test_files.join(dir, "generated/out.jet"), RootKind.Generated)
     graph.upsert(watch_test_files.join(dir, "input.json"), RootKind.BuildInput)
     assert(graph.node_count() >= 8)
-    kinds := [String:Bool]{}
+    ^kinds: [String:Bool]{}
     loop node in graph.node_list() -> kinds[node.kind.as_str()] = true
     expected_kinds: [String]{"import", "manifest", "lock", "style", "html", "asset", "generated", "build_input"}
     loop kind in expected_kinds -> assert(kinds.has_key(kind), "graph lost the {kind} kind")
@@ -37,7 +37,7 @@ watch_test_write: fn(path: String, body: String) {
     closure: graph.closure_of([String]{canonical_lib})
     assert(closure.contains(watch_canonicalize_loose(lib)))
     assert(closure.contains(watch_canonicalize_loose(entry)))
-    session := WatchSession.from_graph(graph)
+    ^session: WatchSession.from_graph(graph)
     watch_test_files.append_all(lib, "// touch\n") ?? panic("cannot touch lib: {err}")
     session.mark_edit_started()
     receipt: session.poll() ?? panic("lib change")
@@ -94,7 +94,7 @@ watch_test_write: fn(path: String, body: String) {
     watch_test_write(a_path, "a: fn() {{}}\n")
     entry: watch_canonicalize_loose(entry_path)
     a: watch_canonicalize_loose(a_path)
-    session := WatchSession.from_graph(WatchGraph.from_entry(entry_path, [String]{"{a_path}"}))
+    ^session: WatchSession.from_graph(WatchGraph.from_entry(entry_path, [String]{"{a_path}"}))
     temporary: watch_test_files.join(dir, "a.jet.tmp")
     watch_test_write(temporary, "a: fn() {{ /* new */ }}\n")
     watch_test_files.rename(temporary, a_path) ?? panic("cannot rename: {err}")
@@ -127,7 +127,7 @@ watch_test_write: fn(path: String, body: String) {
     dir: watch_test_dir("recover")
     entry: watch_test_files.join(dir, "app.jet")
     watch_test_write(entry, "run: fn() {{}}\n")
-    session := WatchSession.from_graph(WatchGraph.from_entry(entry, [String]{}))
+    ^session: WatchSession.from_graph(WatchGraph.from_entry(entry, [String]{}))
     watch_test_write(entry, "run: fn() {{ /* edited offline */ }}\n")
     session.recover()
     assert(session.poll() == None)
@@ -142,7 +142,7 @@ watch_test_write: fn(path: String, body: String) {
     dir: watch_test_dir("settle")
     entry: watch_test_files.join(dir, "app.jet")
     watch_test_write(entry, "run: fn() {{}}\n")
-    session := WatchSession.from_graph(WatchGraph.from_entry(entry, [String]{}))
+    ^session: WatchSession.from_graph(WatchGraph.from_entry(entry, [String]{}))
     saved: "run: fn() {{ print(\"saved\") }}\n"
     watch_test_write(entry, saved)
     receipt: session.poll() ?? panic("save")

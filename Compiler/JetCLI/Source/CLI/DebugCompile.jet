@@ -848,7 +848,7 @@ jet_cli_debug_eval_item_names: fn(code: String) -> [String] Never! {
 // it uses, which names the effect as the stop's check would. `others` stand
 // in for the package's other sources (jet_cli_debug_eval_sliced);
 // `core_bound` is the session's Core binding (jet_cli_debug_eval_core). The
-// function discards the value (`_ := text`); once checked, that statement
+// function discards the value (`^_: text`); once checked, that statement
 // returns it and the function's result is its type. The compiled
 // expression, or the debugger's refusal of an effect it uses; None, so the
 // check where the frame stopped answers, for any other refusal, a value
@@ -858,7 +858,7 @@ jet_cli_debug_eval_direct: fn(entry: String, color: Bool, options: BuildOptions,
     lead: "{JET_CLI_DEBUG_EXPRESSION}: fn({typed.join(", ")}) {{\n    "
     // The ask's offset is the statement's first byte in the appended source.
     offset: source.len() + 1 + lead.len()
-    asked: if jet_cli_debug_eval_prepare(entry, color, path, Val("{source}\n{lead}_ := {text}\n}}\n"), others: others.move()) == {
+    asked: if jet_cli_debug_eval_prepare(entry, color, path, Val("{source}\n{lead}^_: {text}\n}}\n"), others: others.move()) == {
         .Refused(output) -> JetCLIPrepared.Refused{output: output}
         .Prepared(request, snapshot) -> {
             ^held: request
@@ -1527,7 +1527,7 @@ jet_cli_debug_eval_held_run: fn(held: ^^JetCLIDebugEvalHeld?, path: String, text
         return JetCLIDebugEvalHeldRun{held: Val(current.move()), built: None, refusal: None}
     }
     typed: loop param in params -> "{param.name}: {param.type_name}"
-    source: "{JET_CLI_DEBUG_EXPRESSION}: fn({typed.join(", ")}) {{\n    _ := {text}\n}}\n"
+    source: "{JET_CLI_DEBUG_EXPRESSION}: fn({typed.join(", ")}) {{\n    ^_: {text}\n}}\n"
     names: loop param in params -> param.name
     jet_cli_debug_eval_held_build(current.move(), display, source, names, None, text)
 }
@@ -1646,7 +1646,7 @@ jet_cli_debug_eval_held_module: fn(eval: JetDriverHeldEval, path: String) -> Str
 }
 
 // The type of the value the held check's expression function discards
-// (`_ := text`), its last statement; None when that is not the discard.
+// (`^_: text`), its last statement; None when that is not the discard.
 jet_cli_debug_eval_held_value: fn(interner: Interner, function: FnBody) -> Type? Never! {
     if function.body.len() == 0 -> return None
     row: function.body[function.body.len() - 1] - function.tree.stmt_base

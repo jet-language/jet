@@ -488,10 +488,73 @@ Codec: struct {
     }
 }
 
+// `csv.to_string` writes rows of fields (`[[String]]`), a list of records, or
+// the row-array `Dyn` tree `parse` returns, so other `rows` are refused where
+// they are written. Rows a type parameter types pass.
+priv CSVRows: struct {
+    impl Marker {
+        sites: [.Function],
+
+        check: fn(self, call: CompilerCall) {
+            if call.args.len() == 0 || rows_written(call.args[0].type) {
+                return None
+            }
+            reject(RowsWanted{shown: type_shown(call.args[0].type)}, at: call.args[0])
+        }
+    }
+}
+
+priv RowsWanted: struct {
+    shown: String,
+
+    impl Diagnostic {
+        code: "E0112",
+
+        what: fn(self) -> String {
+            "`to_string` wants [[String]] rows or a list of #Codable records for argument 1, but this is {self.shown}"
+        }
+
+        why: fn(self) -> String { "CSV output accepts string rows or typed records" }
+
+        fix: fn(self) -> String { "use [[String]] rows or a list of #Codable records here" }
+    }
+}
+
+// Whether `rows` is a type `to_string` writes: a list whose rows are lists or
+// records, the `Dyn` tree, or a type not bound yet.
+priv rows_written: fn(rows: TypeId) -> Bool Never! {
+    if rows.kind == .List || rows.kind == .FixedList {
+        if rows.generic_bindings.len() == 0 -> return true
+        row: rows.generic_bindings[0].type
+        return row.kind == .List || row.kind == .FixedList || row.kind == .Struct || unbound(row)
+    }
+    rows.name == "Dyn" || rows.name.ends_with(".Dyn") || unbound(rows)
+}
+
+// Whether type `id` is not bound yet: a type parameter, or `_` where the
+// argument's own check failed. Both read as builtins no scalar names.
+priv unbound: fn(id: TypeId) -> Bool Never! {
+    id.kind == .Builtin && id.name != "String" && id.name != "Bool" && id.name != "Char" && id.name != "Never" && id.name != "Dyn"
+}
+
+// Type `id` as an error shows it: a scalar with what it holds, a built shape
+// (`[Int]`) as written, and a named type quoted.
+priv type_shown: fn(id: TypeId) -> String Never! {
+    if id.name == {
+        "Int" -> "Int (a whole number)"
+        "Float" -> "Float (an approximate binary number)"
+        "Bool" -> "Bool (true or false)"
+        "String" -> "String (text)"
+        "Char" -> "Char (one character)"
+        else -> if id.kind == .Struct || id.kind == .Enum || id.kind == .Distinct || id.kind == .Builtin -> "`{id.name}`" else -> "{id.name}"
+    }
+}
+
 // `rows` is a list of row arrays or records, or the row-array tree `parse`
 // returns; each encodes to one array of rows, so `parse` round-trips.
-// `formulas` says what a text cell that opens a formula is written as.
-to_string: fn<T: Encode>(rows: T, formulas: CSVFormulas{CSVFormulas.Escape}) -> String Never! {
+// `formulas` says what a text cell that opens a formula is written as. Other
+// `rows` are refused where they are written (CSVRows).
+#CSVRows to_string: fn<T: Encode>(rows: T, formulas: CSVFormulas{CSVFormulas.Escape}) -> String Never! {
     encoded: rows.encode()
     items: if encoded == {
         .Array(values) -> values

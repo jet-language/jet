@@ -32,7 +32,7 @@ overlay_adapter_test_projection: fn(revision: String, sequence: Int, events: [Je
 overlay_adapter_test_event: fn(sequence: Int) -> JetDevtoolsEvent {
     raw: JetDevtoolsEvent.from_parts(sequence, "session", "build", "program", `{"ok":true}`) ?? panic("devtools event")
     event: raw.publish(JetDevtoolsPayload.one("message", JetDevtoolsValue.text("opaque payload"))) ?? panic("published payload")
-    envelope := JetDevtoolsEnvelope.new("session", 0)
+    ^envelope: JetDevtoolsEnvelope.new("session", 0)
     _: envelope.push(event)
     envelope.events()[0]
 }
@@ -46,7 +46,7 @@ overlay_adapter_test_action_panel: fn() -> NativeOverlayPanelFact {
     input: overlay_adapter_test_projection("rev-1", 1, [JetDevtoolsEvent]{overlay_adapter_test_event(1)})
     update: NativeOverlayAdapter.from_projection(input, [NativeOverlayPanelFact]{}) ?? panic("projection applies")
     event: update.event ?? panic("projected event")
-    log := NativeOverlayPanelFact?{None}
+    ^log: NativeOverlayPanelFact?{None}
     loop panel in event.panels {
         if panel.panel_id == NATIVE_OVERLAY_EVENT_LOG_PANEL_ID -> log = Val(panel)
     }
@@ -58,7 +58,7 @@ overlay_adapter_test_action_panel: fn() -> NativeOverlayPanelFact {
 }
 
 #Test("action_request_rejects_stale_revision") {
-    adapter := NativeOverlayAdapter.new("session")
+    ^adapter: NativeOverlayAdapter.new("session")
     update: adapter.apply_projection_with_panels(overlay_adapter_test_projection("rev-1", 1, [JetDevtoolsEvent]{overlay_adapter_test_event(1)}), [NativeOverlayPanelFact]{overlay_adapter_test_action_panel()}) ?? panic("first projection")
     request: adapter.action_request("Build", "run") ?? panic("action request")
     second: adapter.apply_projection_with_panels(overlay_adapter_test_projection("rev-2", 2, [JetDevtoolsEvent]{overlay_adapter_test_event(2)}), [NativeOverlayPanelFact]{overlay_adapter_test_action_panel()}) ?? panic("second projection")
@@ -72,13 +72,13 @@ overlay_adapter_test_action_panel: fn() -> NativeOverlayPanelFact {
 }
 
 #Test("reset_and_truncation_are_preserved") {
-    input := overlay_adapter_test_projection("rev-1", 1, [JetDevtoolsEvent]{overlay_adapter_test_event(1)})
+    ^input: overlay_adapter_test_projection("rev-1", 1, [JetDevtoolsEvent]{overlay_adapter_test_event(1)})
     input.reset = true
     input.truncation = true
     update: NativeOverlayAdapter.from_projection(input, [NativeOverlayPanelFact]{}) ?? panic("projection applies")
     assert(update.reset)
     assert(update.truncation)
-    reset_reported := false
+    ^reset_reported: false
     loop fact in update.unavailable {
         if fact.reason == NativeOverlayUnavailableReason.Reset -> reset_reported = true
     }
