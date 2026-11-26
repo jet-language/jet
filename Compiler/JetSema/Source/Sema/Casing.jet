@@ -775,7 +775,9 @@ sema_casing_expr: fn(tables: ASTTables, expr: Expr, diagnostics: ^[Diagnostic]) 
 }
 
 // Every E0357 for one parsed source file: import aliases, declarations and
-// every binding site reachable from their bodies.
+// every binding site reachable from their bodies. A module binding that
+// declares a grammar (sema_grammar_declaring_binding) is named as the
+// PascalCase type of its start rule, not as an ALL_CAPS constant.
 sema_casing_program: fn(program: Program, diagnostics: ^[Diagnostic]) {
     loop declaration in program.imports {
         if declaration.alias != "" {
@@ -789,5 +791,12 @@ sema_casing_program: fn(program: Program, diagnostics: ^[Diagnostic]) {
             .File(_, _) -> {}
         }
     }
-    loop item in program.items -> sema_casing_item(program.tables, item, diagnostics)
+    loop item in program.items {
+        if item == .Const(definition) && sema_grammar_declaring_binding(program.imports, definition) {
+            sema_casing_pascal(definition.name, definition.name_span, "grammar", diagnostics)
+            sema_casing_expr(program.tables, definition.value, diagnostics)
+            next
+        }
+        sema_casing_item(program.tables, item, diagnostics)
+    }
 }

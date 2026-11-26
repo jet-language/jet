@@ -511,7 +511,12 @@ global starts from a fresh carrier made at its first use. A point's name may
 be snake_case or ALL_CAPS, and its constructor is refused anywhere else
 (E0644). `NAME: event.new<T>()` still declares an event point while Core's
 own `app.LIFECYCLE` is written that way. Any other global holding an event is
-E0643. Only an explicit
+E0643. A global `Name: Grammar{"""…"""}` declares a grammar when its head
+resolves through the file's `use` table to `core.grammar.Grammar`, through an
+imported item or a module alias, never by its spelling: its name is the
+PascalCase name of the start rule, not an ALL_CAPS constant (E0357), and a
+head that resolves anywhere else, a type the file names `Grammar` included,
+declares nothing. Only an explicit
 `#run { … }` reads build
 inputs. Both globals are visible to functions in the file; only the mutable
 form may be assigned after initialization. A local value whose call reads a

@@ -1,0 +1,19 @@
+# A module binding declares a grammar only when its head resolves through the
+# module's `use` table to `core.grammar.Grammar`: an imported item and a module
+# alias both resolve, so their PascalCase start-rule names are not held to
+# ALL_CAPS. A checked head the module declares under the same spelling resolves
+# elsewhere, so its binding is an ordinary constant.
+fixture: DeclaringHeadIsFoundByIdentity.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check --json item/main.jet
+exit: 0 # `use core.grammar.[Grammar]` names the Core head
+json: stdout doc $.reports[?code="E0357"] #= 0
+step: jet check --json alias/main.jet
+exit: 0 # `rules.Grammar` through `use rules: core.grammar` names the same head
+json: stdout doc $.reports[?code="E0357"] #= 0
+step: jet check --json user/main.jet
+exit: nonzero # the module's own `Grammar` declares nothing
+json: stdout doc $.reports[?code="E0357"] #= 1
+json: stdout doc $.reports[?code="E0357"][0].message ~ "`Pair` must be ALL_CAPS"
