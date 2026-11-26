@@ -597,27 +597,41 @@ sema_comptime_close_methods: fn(graph: SemaRegistrationGraph, ty: Type, module_i
 // The trait methods the generic calls in checked tree `tree` (named from
 // `module_identity`) reach through a bounded type parameter. An instance
 // calls its bound's methods on the type argument by owner type
-// (`math.floor<Float>` calls Float's `rounded`), and no call fact records
-// them, so a compile-time closure queues the argument's implementation of
-// each bound like a callee.
+// (`math.floor<Float>` calls Float's `rounded`, and
+// `__Decoding.read<Target, Parser>` reads through Parser's source methods),
+// and no call fact records them, so a compile-time closure queues the
+// argument's implementation of each bound like a callee. A function's,
+// static method's and method's type arguments all do.
 sema_comptime_bound_methods: fn(graph: SemaRegistrationGraph, tree: BodyTree, module_identity: ModuleID) -> [{module_identity: ModuleID, key: String}] {
     ^found: [{module_identity: ModuleID, key: String}]{}
     loop node in tree.nodes {
-        if node.kind == .Call(callee, type_args, _) {
-            if type_args.len() == 0 -> next
-            row: sema_registration_callable_row_of(graph, graph.decls.rows[callee.row].symbol) ?? next
-            if row == .Function(declaring, index) {
-                params: graph.modules[declaring].functions[index].declaration.type_params
-                loop (position, arg) in type_args {
-                    if position >= params.len() -> break
-                    loop bound in params[position].bounds {
-                        sema_comptime_trait_methods_add(graph, arg, bound, module_identity, found)
-                    }
-                }
-            }
-        }
+        if node.kind == .Call(callee, type_args, _) -> sema_comptime_bound_args_add(graph, graph.decls.rows[callee.row].symbol, type_args, module_identity, found)
+        if node.kind == .StaticCall(_, _, method, type_args, _) -> sema_comptime_bound_args_add(graph, method.symbol, type_args, module_identity, found)
+        if node.kind == .MethodCall(_, method, type_args, _) -> sema_comptime_bound_args_add(graph, method.symbol, type_args, module_identity, found)
     }
     found
+}
+
+// The methods the type arguments `type_args` of a call of `callee` reach
+// through the bounds of the callee's type parameters, added to `found`.
+sema_comptime_bound_args_add: fn(graph: SemaRegistrationGraph, callee: SymbolID, type_args: [Type], module_identity: ModuleID, found: ^[{module_identity: ModuleID, key: String}]) {
+    if type_args.len() == 0 -> return
+    row: sema_registration_callable_row_of(graph, callee) ?? return
+    if row == {
+        .Function(declaring, index) -> sema_comptime_bound_params_add(graph, graph.modules[declaring].functions[index].declaration.type_params, type_args, module_identity, found)
+        .NominalMethod(declaring, owner, index) -> sema_comptime_bound_params_add(graph, graph.modules[declaring].nominals[owner].methods[index].declaration.type_params, type_args, module_identity, found)
+        .ImplMethod(declaring, owner, index) -> sema_comptime_bound_params_add(graph, graph.modules[declaring].impls[owner].methods[index].declaration.type_params, type_args, module_identity, found)
+        .Foreign(_, _) -> {}
+    }
+}
+
+sema_comptime_bound_params_add: fn(graph: SemaRegistrationGraph, params: [TypeParam], type_args: [Type], module_identity: ModuleID, found: ^[{module_identity: ModuleID, key: String}]) {
+    loop (position, arg) in type_args {
+        if position >= params.len() -> break
+        loop bound in params[position].bounds {
+            sema_comptime_trait_methods_add(graph, arg, bound, module_identity, found)
+        }
+    }
 }
 
 // The methods of type `ty`'s implementation of the trait written `bound`

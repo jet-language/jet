@@ -2543,11 +2543,19 @@ sema_type_graph_impl_matches_nominal: fn(graph: SemaRegistrationGraph, implement
         }
     }
     if !graph.impl_traits_indexed {
-        target: sema_type_graph_impl_target_nominal(graph, implementation) ?? return None
+        target: sema_type_graph_impl_target_nominal(graph, implementation) ?? return sema_type_graph_impl_rowless_target(implementation)
         return Val(target == nominal.symbol.id)
     }
     if implementation.target_nominal == .Val(target) -> return Val(target == nominal.symbol.id)
-    None
+    sema_type_graph_impl_rowless_target(implementation)
+}
+
+// An impl whose target resolves to no nominal. Core's impls for the data
+// tree the checker owns (`impl Dyn.Encode`, spelled as sema_data_is_json_name
+// reads it) name a type that has no row, so they match no nominal; any other
+// such target is unresolved.
+sema_type_graph_impl_rowless_target: fn(implementation: SemaRegistrationImpl) -> Bool? Never! {
+    if sema_data_is_json_name(implementation.target_type_name) -> Val(false) else -> None
 }
 
 // The symbol id of the nominal an impl's target type names from the impl's

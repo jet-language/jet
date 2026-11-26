@@ -4297,9 +4297,11 @@ sema_effect_walk_expr_enter: fn(nodes: ^[SemaEffectNode], node_index: Int, tree:
             }
             // A static of an Arena or Bump that answers one (`mem.Arena.new`)
             // reserves arena storage; a literal capacity is the proven bound.
+            // The owner is the nominal as declared (`Arena`) and the result
+            // as its Core identity resolves it, so they meet by family.
             result: body_type(facts.interner, tree, expression)
             allocator: sema_call_memory_allocator_name(result) ?? ""
-            if (allocator == "Arena" || allocator == "Bump") && owner_type == .Val(owner_ty) && owner_ty == result {
+            if (allocator == "Arena" || allocator == "Bump") && owner_type == .Val(owner_ty) && sema_call_memory_allocator_name(owner_ty) == (Val(allocator)) {
                 ^bound: Int?{None}
                 if args.len() > 0 && body_node(tree, args[0].value).kind == .IntLit(bytes, _) && bytes >= 0 {
                     bound = Val(bytes)
