@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7042,
-    "rev": 114701,
+    "rev": 114705,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -36453,7 +36453,7 @@
       "track": "epoch",
       "epoch": "G4",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "checkSteps": null,
@@ -36496,20 +36496,20 @@
         {
           "n": 3,
           "text": "A build-time constant's payload is mapped read-only: immutable folded data lands in a read-only ELF segment, not a writable one. Found by the D-COMPTIME-SIZE1 review on seed-b13. Proof: readelf of a built binary holding a large folded String shows its bytes in a non-writable PT_LOAD, and a case asserts it.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-12T10:57:01.480Z"
+          "evidence": "dev 132ddf9308b (batch-60 compiler): sema_comptime_local_value_candidate recognizes pure builtin method calls (String.repeat); MemorySemantics/a_folded_string_payload_loads_read_only.case PASS 1/1 and pure_builtin_method_local_value_is_staged PASS 1/1.",
+          "at": "2026-11-26T05:28:31.029Z"
         },
         {
           "n": 4,
           "text": "A consumer that needs only a large constant's length does no run-time scan of it. In the ballot program, `big.len()` of a folded 50 MB String folds to its constant, and the emitted IR holds no Unicode scalar count over it. Proof: jet inspect decisions shows the folded length, and a case checks the IR.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-12T10:57:03.266Z"
+          "evidence": "dev 132ddf9308b (batch-60 compiler): BuildEntry/a_folded_string_read_only_for_its_length_costs_no_bytes.case PASS 1/1.",
+          "at": "2026-11-26T05:28:32.004Z"
         },
         {
           "n": 5,
@@ -36556,11 +36556,11 @@
         {
           "n": 8,
           "text": "D-COMPTIME-SIZE1=A author path: core.archive.zstd compress writes real compressed blocks, not only stored blocks, and round-trips through zstd.decompress. `jet inspect decisions --estimate` prints each large raw value's stored size and its zstd-estimated size, running only when asked. Proof: a golden of --estimate and a round-trip test.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T11:16:31.898Z"
+          "evidence": "dev 132ddf9308b (batch-60 compiler): BuildEntry/inspect_decisions_estimate_lists_each_large_raw_value.case PASS 1/1 and Archive/zstd_compress_writes_compressed_blocks_that_round_trip.case PASS 1/1.",
+          "at": "2026-11-26T05:28:33.353Z"
         }
       ],
       "refs": [],
@@ -36568,9 +36568,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T10:16:07.441Z",
-      "updated": "2026-11-25T23:44:03.806Z",
+      "updated": "2026-11-26T05:28:36.109Z",
       "updatedBy": "Orchestrator",
-      "criteriaLastN": 8
+      "criteriaLastN": 8,
+      "completedAt": "2026-11-26T05:28:36.109Z"
     },
     {
       "id": "c0gy2j07",
@@ -129232,6 +129233,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-26T05:28:36.109Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0xphd0i",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-26T05:28:33.353Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0xphd0i",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-26T05:28:32.004Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0xphd0i",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-26T05:28:31.029Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0xphd0i",
+      "note": "#3"
+    },
     {
       "at": "2026-11-26T05:27:29.499Z",
       "by": "Orchestrator",
