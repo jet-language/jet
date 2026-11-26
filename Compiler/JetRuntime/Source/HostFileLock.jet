@@ -48,13 +48,13 @@ fs_lock_identity: fn(result: I64, facts: I64) -> I64 {
 // open retries EINTR; a path NUL is an error without an OS code (errno 0).
 #Export(c) jet_fs_lock_open_raw: fn(path: I64) -> I64 {
     if fs_text_has_nul(path) -> return fs_lock_call(I64{-1}, I64{0})
-    name: fd_c_path(path)
+    name: fd_c_fs_path(path)
     ^opened: I64{0}
     loop {
         opened = host_call(I64{2}, name, I64{655426}, I64{384})
         if (opened != I64{-4}) { break }
     }
-    fd_c_path_drop(name, path)
+    fd_c_fs_path_drop(name)
     if (opened < I64{0}) -> fs_lock_call(I64{-1}, -opened) else -> fs_lock_call(opened, I64{0})
 }
 

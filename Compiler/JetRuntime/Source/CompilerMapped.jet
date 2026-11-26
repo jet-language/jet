@@ -69,10 +69,10 @@ compiler_mapped_key: fn(path: I64) -> I64 {
     }
     // Failed canonicalize falls back to the ORIGINAL spelling (not absolute or
     // lexical normalization), exactly PathBuf fallback does.
-    name: fd_c_path(path)
+    name: fd_c_fs_path(path)
     scratch: jet_rt_alloc(I64{48}, I64{8})
     bytes: jet_process_path_canonicalize_raw(name, scratch, wrapping(scratch + I64{8}), wrapping(scratch + I64{16}))
-    fd_c_path_drop(name, path)
+    fd_c_fs_path_drop(name)
     result: if (bytes == I64{0}) -> jet_rt_string_clone(path) else -> rt_text_lossy(bytes, rt_text_word(scratch))
     if (bytes != I64{0}) { jet_rt_free(bytes, rt_text_word(wrapping(scratch + I64{8})), I64{1}) }
     jet_rt_free(scratch, I64{48}, I64{8})
@@ -329,16 +329,19 @@ compiler_mapped_spare: fn(path: I64) -> I64 {
     jet_rt_free(directory, keep + I64{1}, I64{1})
     if (fd >= I64{0}) { return fd }
     temp: jet_fs_temp_directory_raw()
-    name: fd_c_path(temp)
+    name: fd_c_fs_path(temp)
     fd = compiler_mapped_tmpfile(name)
-    fd_c_path_drop(name, temp)
+    fd_c_fs_path_drop(name)
     jet_rt_string_drop(temp)
     fd
 }
 
 // openat(AT_FDCWD, directory, O_RDWR|O_TMPFILE|O_CLOEXEC, 0o600).
 compiler_mapped_tmpfile: fn(directory: I64) -> I64 {
-    host_call4(I64{257}, I64{-100}, directory, I64{2} | JETC_O_TMPFILE | JETC_O_CLOEXEC, I64{384})
+    resolved: fd_c_fs_path_bytes(directory, files_c_len(directory))
+    fd: host_call4(I64{257}, I64{-100}, resolved, I64{2} | JETC_O_TMPFILE | JETC_O_CLOEXEC, I64{384})
+    fd_c_fs_path_drop(resolved)
+    fd
 }
 
 // Whether ioctl FICLONE made the empty `spare` share every block of `fd`'s

@@ -440,14 +440,14 @@ fs_open_at: fn(key: I64, name: I64, access: I64, if_exists: I64, mode: I64, link
 // asks stat/lstat and statx apart).
 fs_statx_facts: fn(path: I64, follow: Bool, facts: I64, birth: I64, errno: I64) -> I64 {
     buffer: jet_rt_alloc(I64{256}, I64{8})
-    name: fd_c_path(path)
+    name: fd_c_fs_path(path)
     ^result: I64{0}
     rt_test_reads_path(I64{83}, I64{-100}, name)
     #Unsafe("the terminated borrowed path and the 256-byte statx buffer are live for the syscall") {
         // statx(AT_FDCWD, name, follow ? 0 : AT_SYMLINK_NOFOLLOW, STATX_BASIC_STATS | STATX_BTIME, buffer)
         result = host_syscall(I64{332}, I64{-100}, name, if follow -> I64{0} else -> I64{256}, I64{4095}, buffer, I64{0})
     }
-    fd_c_path_drop(name, path)
+    fd_c_fs_path_drop(name)
     low: I64{4294967295}
     mask: rt_text_word(buffer) & low
     if (result == I64{-38} || (result == I64{0} && mask & I64{2047} != I64{2047})) {

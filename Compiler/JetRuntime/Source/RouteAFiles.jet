@@ -257,10 +257,13 @@ entries_out_io_error: fn(value: I64, kind: I64, code_tag: I64, code: I64, cause_
         return
     }
     data: rt_text_word(wrapping(slot + I64{8}))
+    data_len: rt_text_word(wrapping(slot + I64{16}))
     ^failure: ENTRIES_NUL
-    if !walk_has_nul(data, rt_text_word(wrapping(slot + I64{16}))) {
+    if !walk_has_nul(data, data_len) {
+        resolved: fd_c_fs_path_bytes(data, data_len)
         ^fd: I64{-4}
-        loop fd == (I64{-4}) -> fd = host_call(I64{2}, data, FILES_O_DIRECTORY_CLOEXEC, I64{0})
+        loop fd == (I64{-4}) -> fd = host_call(I64{2}, resolved, FILES_O_DIRECTORY_CLOEXEC, I64{0})
+        fd_c_fs_path_drop(resolved)
         failure = if (fd < I64{0}) -> fd else -> I64{0}
         if (fd >= I64{0}) {
             stream: jet_rt_alloc(WALK_STREAM_BYTES, I64{8})
@@ -571,7 +574,7 @@ files_name_valid: fn(text: I64, operation: I64, shown: I64, error: I64) -> Bool 
     if !files_name_valid(path, HOST_IO_OP_READ, path, error) || !effect_scope_admit_path(path, false, HOST_IO_OP_READ, error) {
         return I64{0}
     }
-    name: fd_c_path(path)
+    name: fd_c_fs_path(path)
     ^buffer: I64{0}
     ^allocated: I64{0}
     ^size: I64{0}
@@ -599,7 +602,7 @@ files_name_valid: fn(text: I64, operation: I64, shown: I64, error: I64) -> Bool 
             break
         }
     }
-    fd_c_path_drop(name, path)
+    fd_c_fs_path_drop(name)
     if (failure < I64{0}) {
         if (allocated != I64{0}) { jet_rt_free(buffer, allocated, I64{1}) }
         if (sizing && failure == I64{-95}) {
@@ -650,7 +653,7 @@ files_name_valid: fn(text: I64, operation: I64, shown: I64, error: I64) -> Bool 
         return I64{0}
     }
     if !files_name_valid(attribute, HOST_IO_OP_READ, path, error) -> return I64{0}
-    name: fd_c_path(path)
+    name: fd_c_fs_path(path)
     key: fd_c_path(attribute)
     ^buffer: I64{0}
     ^allocated: I64{0}
@@ -680,7 +683,7 @@ files_name_valid: fn(text: I64, operation: I64, shown: I64, error: I64) -> Bool 
         }
     }
     fd_c_path_drop(key, attribute)
-    fd_c_path_drop(name, path)
+    fd_c_fs_path_drop(name)
     if (failure < I64{0}) {
         if (allocated != I64{0}) { jet_rt_free(buffer, allocated, I64{8}) }
         if (failure == I64{-61} || (sizing && failure == I64{-95})) {
@@ -728,7 +731,7 @@ files_texts_sort: fn(data: I64, count: I64) {
         return I64{0}
     }
     if !files_name_valid(name, HOST_IO_OP_WRITE, path, error) -> return I64{0}
-    c_path: fd_c_path(path)
+    c_path: fd_c_fs_path(path)
     c_name: fd_c_path(name)
     temporary: RT_HOST_U8_STRIDE != I64{1} && length != I64{0}
     packed: if temporary -> jet_rt_alloc(length, I64{8}) else -> data
@@ -736,7 +739,7 @@ files_texts_sort: fn(data: I64, count: I64) {
     result: host_call5(I64{189}, c_path, c_name, packed, length, I64{0})
     if temporary -> jet_rt_free(packed, length, I64{8})
     fd_c_path_drop(c_name, name)
-    fd_c_path_drop(c_path, path)
+    fd_c_fs_path_drop(c_path)
     if (result < I64{0}) { return compiler_fs_errno(HOST_IO_OP_WRITE, path, -result, error) }
     I64{1}
 }
@@ -744,9 +747,9 @@ files_texts_sort: fn(data: I64, count: I64) {
 // create_dir(path) (mode 0777), then the path itself.
 #Export(c) jet_std_fs_temp_dir_path_raw: fn(path: I64, ok: I64, error: I64) -> I64 {
     if !compiler_fs_link_path(path, HOST_IO_OP_WRITE, error) -> return I64{0}
-    name: fd_c_path(path)
+    name: fd_c_fs_path(path)
     result: host_call(I64{83}, name, I64{511}, I64{0})
-    fd_c_path_drop(name, path)
+    fd_c_fs_path_drop(name)
     if (result < I64{0}) { return compiler_fs_errno(HOST_IO_OP_WRITE, path, -result, error) }
     rt_text_store(ok, jet_rt_string_clone(path))
     I64{1}
@@ -758,10 +761,10 @@ files_texts_sort: fn(data: I64, count: I64) {
 // ignores its result.
 #Export(c) jet_std_fs_temp_file_raw: fn(path: I64, ok: I64, error: I64) -> I64 {
     if !compiler_fs_link_path(path, HOST_IO_OP_WRITE, error) -> return I64{0}
-    name: fd_c_path(path)
+    name: fd_c_fs_path(path)
     ^fd: I64{-4}
     loop fd == (I64{-4}) -> fd = host_call(I64{2}, name, I64{524481}, I64{438})
-    fd_c_path_drop(name, path)
+    fd_c_fs_path_drop(name)
     if (fd < I64{0}) { return compiler_fs_errno(HOST_IO_OP_WRITE, path, -fd, error) }
     ^_: host_call(I64{3}, fd, I64{0}, I64{0})
     owner: jet_rt_alloc(I64{16}, I64{8})
@@ -785,9 +788,9 @@ files_texts_sort: fn(data: I64, count: I64) {
     }
     path: rt_text_word(wrapping(owner + I64{8}))
     if !walk_has_nul(rt_text_data(path), rt_text_len(path)) {
-        name: fd_c_path(path)
+        name: fd_c_fs_path(path)
         ^_: host_call(I64{87}, name, I64{0}, I64{0})
-        fd_c_path_drop(name, path)
+        fd_c_fs_path_drop(name)
     }
     jet_rt_string_drop(path)
     jet_rt_free(owner, I64{16}, I64{8})
@@ -816,9 +819,9 @@ files_texts_sort: fn(data: I64, count: I64) {
         return host_io_other_take(HOST_IO_OP_WRITE, jet_rt_string_clone(path), jet_rt_string_clone(rt_static_text("path contains an interior NUL")), error)
     }
     if !effect_scope_admit_path(path, true, HOST_IO_OP_WRITE, error) -> return I64{0}
-    name: fd_c_path(path)
+    name: fd_c_fs_path(path)
     result: host_call(I64{92}, name, uid & I64{4294967295}, gid & I64{4294967295})
-    fd_c_path_drop(name, path)
+    fd_c_fs_path_drop(name)
     if (result < I64{0}) { return compiler_fs_errno(HOST_IO_OP_WRITE, path, -result, error) }
     I64{1}
 }
@@ -830,9 +833,9 @@ files_texts_sort: fn(data: I64, count: I64) {
 
 #Export(c) jet_std_fs_remove_dir_raw: fn(path: I64, error: I64) -> I64 {
     if !compiler_fs_link_path(path, HOST_IO_OP_WRITE, error) -> return I64{0}
-    name: fd_c_path(path)
+    name: fd_c_fs_path(path)
     result: host_call(I64{84}, name, I64{0}, I64{0})
-    fd_c_path_drop(name, path)
+    fd_c_fs_path_drop(name)
     if (result < I64{0}) { return compiler_fs_errno(HOST_IO_OP_WRITE, path, -result, error) }
     I64{1}
 }
@@ -844,10 +847,10 @@ files_texts_sort: fn(data: I64, count: I64) {
     position: jet_int_owned_to_i64(offset)
     if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     if !compiler_fs_path(path, HOST_IO_OP_WRITE, error) -> return I64{0}
-    name: fd_c_path(path)
+    name: fd_c_fs_path(path)
     ^fd: I64{-4}
     loop fd == (I64{-4}) -> fd = host_call(I64{2}, name, I64{524353}, I64{438})
-    fd_c_path_drop(name, path)
+    fd_c_fs_path_drop(name)
     if (fd < I64{0}) { return compiler_fs_errno(HOST_IO_OP_WRITE, path, -fd, error) }
     sought: host_call(I64{8}, fd, position, I64{0})
     if (sought < I64{0}) {

@@ -4965,6 +4965,30 @@ unchanged, so `print("x = {255}")` shows `x = 255`; interpolation, Debug,
 do not read the style. The defaults print as a program without a block
 does. A program that spells either form loads core.term.
 
+`context.dir` (`String`) and `context.env` (`[String:String]`) are the
+current task's working directory and effective environment.
+`#Context(dir: build_root, env: {CC: "clang"}) { ... }` sets them for the
+block and any tasks spawned inside it, and restores both on normal exit or
+early return. `dir` accepts either a `String` or a `core.files.path.Path`;
+a relative `dir` resolves against the enclosing task's working directory.
+`env` accepts either a `[String:String]` map or the shorthand record literal
+`{NAME: "value", ...}` whose field names become environment variable keys,
+overlaying the enclosing task's environment while leaving unmentioned keys
+inherited. Inside the block, every relative filesystem and database path
+(`core.files.*`, `core.db.open`, `core.sys.current_dir`, `core.files.cwd`),
+every environment read (`core.sys.get`, `core.sys.environment`,
+`core.sys.vars`, `core.process.env_get`, `context.env`), and every spawned
+child process (`core.process.cmd(...).run()` — inheriting both `dir` and
+`env`, with relative `.cwd(...)` resolved against `context.dir` and explicit
+`.env(...)` / `.env_clear()` taking precedence) resolves against the task
+context. Imperative updates (`core.sys.set_current_dir`, `core.files.chdir`,
+`core.files.cd`, `core.sys.set`, `core.sys.unset`) mutate only the current
+task's context frame and never call OS `chdir(2)` or mutate process-wide
+environment state, so parallel tasks and tests setting different directories
+or variables run concurrently without interference. A program that spells
+`context.dir`, `context.env`, `#Context(dir: ...)`, or `#Context(env: ...)`
+loads `core.sys`.
+
 ### Parallel collection adapters
 
 Lists expose `para_map`, `para_filter`, `para_partition`, and `para_fold`.

@@ -90,13 +90,13 @@ fs_text_has_nul: fn(path: I64) -> Bool {
     limit: host_native_int(count)
     if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     if !compiler_fs_path(path, HOST_IO_OP_READ, error) -> return I64{0}
-    name: fd_c_path(path)
+    name: fd_c_fs_path(path)
     ^fd: I64{0}
     loop {
         fd = host_call(I64{2}, name, I64{524288}, I64{0})
         if (fd != I64{-4}) { break }
     }
-    fd_c_path_drop(name, path)
+    fd_c_fs_path_drop(name)
     if (fd < I64{0}) { return compiler_fs_errno(HOST_IO_OP_READ, path, -fd, error) }
     sought: host_call(I64{8}, fd, start, I64{0})
     if (sought < I64{0}) {

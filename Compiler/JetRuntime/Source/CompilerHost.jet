@@ -324,6 +324,11 @@ host_image_part_length: fn(note: I64, name: I64) -> I64 {
 // reports an unreachable directory as a non-absolute path, which getcwd(3)
 // refuses with ENOENT.
 #Export(c) jet_sys_current_dir_raw: fn(ok: I64, err: I64) -> I64 {
+    cur: context_dir_current()
+    if (cur != I64{0}) {
+        rt_text_store(ok, jet_rt_string_clone(cur))
+        return I64{1}
+    }
     ^capacity: I64{512}
     loop {
         bytes: jet_rt_alloc(capacity, I64{8})

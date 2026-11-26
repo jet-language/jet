@@ -45,7 +45,7 @@ db_vfs_fd_valid: fn(fd: I64) -> Bool { fd >= I64{0} && fd <= I64{2147483647} }
     if walk_has_nul(rt_text_data(path), rt_text_len(path)) {
         return jet_int_owned_from_i64(DB_VFS_EINVAL)
     }
-    name: fd_c_path(path)
+    name: fd_c_fs_path(path)
     create_mode: if (native_mode == I64{0}) -> DB_VFS_DEFAULT_MODE else -> native_mode
     exclusive_create: DB_VFS_O_EXCL | DB_VFS_O_CREAT
     ^fd: DB_VFS_EINTR
@@ -60,7 +60,7 @@ db_vfs_fd_valid: fn(fd: I64) -> Bool { fd >= I64{0} && fd <= I64{2147483647} }
         fd = db_vfs_open_dev_null(native_mode)
         if (fd < I64{0}) { break }
     }
-    fd_c_path_drop(name, path)
+    fd_c_fs_path_drop(name)
     if (fd >= I64{0} && native_mode != I64{0}) {
         facts: jet_rt_alloc(I64{144}, I64{8})
         thread_zero(facts, I64{144})
@@ -186,11 +186,11 @@ db_vfs_open_dev_null: fn(mode: I64) -> I64 {
 // (struct stat: st_ino 8, st_mode 24 (u32), st_uid 28, st_gid 32, st_size 48.)
 db_vfs_path_fact: fn(path: I64, call: I64, offset: I64, mask: I64) -> I64 {
     if walk_has_nul(rt_text_data(path), rt_text_len(path)) -> return DB_VFS_EINVAL
-    name: fd_c_path(path)
+    name: fd_c_fs_path(path)
     facts: jet_rt_alloc(I64{144}, I64{8})
     thread_zero(facts, I64{144})
     status: host_call(call, name, facts, I64{0})
-    fd_c_path_drop(name, path)
+    fd_c_fs_path_drop(name)
     fact: if (status < I64{0}) -> status else -> rt_text_word(wrapping(facts + offset)) & mask
     jet_rt_free(facts, I64{144}, I64{8})
     fact
@@ -279,9 +279,9 @@ db_vfs_path_fact: fn(path: I64, call: I64, offset: I64, mask: I64) -> I64 {
     if walk_has_nul(rt_text_data(path), rt_text_len(path)) {
         return jet_int_owned_from_i64(DB_VFS_EINVAL)
     }
-    name: fd_c_path(path)
+    name: fd_c_fs_path(path)
     status: host_call(I64{87}, name, I64{0}, I64{0})
-    fd_c_path_drop(name, path)
+    fd_c_fs_path_drop(name)
     jet_int_owned_from_i64(status)
 }
 
@@ -292,9 +292,9 @@ db_vfs_path_fact: fn(path: I64, call: I64, offset: I64, mask: I64) -> I64 {
     if walk_has_nul(rt_text_data(path), rt_text_len(path)) {
         return jet_int_owned_from_i64(DB_VFS_EINVAL)
     }
-    name: fd_c_path(path)
+    name: fd_c_fs_path(path)
     status: host_call(I64{21}, name, native_mode, I64{0})
-    fd_c_path_drop(name, path)
+    fd_c_fs_path_drop(name)
     jet_int_owned_from_i64(status)
 }
 
@@ -303,11 +303,11 @@ db_vfs_path_fact: fn(path: I64, call: I64, offset: I64, mask: I64) -> I64 {
 // (unixTempFileDir's S_ISDIR test).
 #Export(c) jet_db_vfs_exists: fn(path: I64, directory: Bool) -> Bool {
     if walk_has_nul(rt_text_data(path), rt_text_len(path)) -> return false
-    name: fd_c_path(path)
+    name: fd_c_fs_path(path)
     facts: jet_rt_alloc(I64{144}, I64{8})
     thread_zero(facts, I64{144})
     status: host_call(I64{4}, name, facts, I64{0})
-    fd_c_path_drop(name, path)
+    fd_c_fs_path_drop(name)
     kind: rt_text_word(wrapping(facts + I64{24})) & I64{61440}
     size: rt_text_word(wrapping(facts + I64{48}))
     jet_rt_free(facts, I64{144}, I64{8})
@@ -322,9 +322,9 @@ db_vfs_path_fact: fn(path: I64, call: I64, offset: I64, mask: I64) -> I64 {
     buffer: jet_rt_alloc(I64{4097}, I64{1})
     ^got: DB_VFS_EINVAL
     if !walk_has_nul(rt_text_data(path), rt_text_len(path)) {
-        name: fd_c_path(path)
+        name: fd_c_fs_path(path)
         got = host_call(I64{89}, name, buffer, I64{4097})
-        fd_c_path_drop(name, path)
+        fd_c_fs_path_drop(name)
     }
     length: if (got < I64{0} || got > I64{4096}) -> I64{0} else -> got
     text: rt_text_lossy(buffer, length)
@@ -332,9 +332,11 @@ db_vfs_path_fact: fn(path: I64, call: I64, offset: I64, mask: I64) -> I64 {
     text
 }
 
-// unixFullPathname's getcwd(3) (the getcwd(2) system call), or empty text
-// when it fails.
+// unixFullPathname's task-context cwd (falling back to getcwd(2)), or empty
+// text when it fails.
 #Export(c) jet_db_vfs_cwd: fn() -> I64 {
+    cur: context_dir_current()
+    if (cur != I64{0}) { return jet_rt_string_clone(cur) }
     buffer: jet_rt_alloc(I64{4097}, I64{1})
     got: host_call(I64{79}, buffer, I64{4097}, I64{0})
     length: if (got <= I64{0}) -> I64{0} else -> got - I64{1}

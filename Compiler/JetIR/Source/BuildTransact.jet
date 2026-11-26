@@ -10,7 +10,7 @@
 // leaving the block (ir_tx_unwind) and a stop (a panic, a cancellation,
 // process.exit, os.stop: Build.jet ir_stop_return) restore the snapshots,
 // latest first, then drop the Stm and the handle before the exit's own drops.
-use jet_foundation.[Span, SymbolID, BodyCallArg, BodyContextGuard, CONTEXT_ON_STOP_KEY, NodeKind, BodyLambda, TLocal, TMethodRef, BodyPlace, TTransactionSnapshot, TTryConvert, Type, checked_generated_local, stable_id, StmtKind]
+use jet_foundation.[Span, SymbolID, BodyCallArg, BodyContextGuard, CONTEXT_ON_STOP_KEY, CONTEXT_DIR_KEY, CONTEXT_ENV_KEY, NodeKind, BodyLambda, TLocal, TMethodRef, BodyPlace, TTransactionSnapshot, TTryConvert, Type, checked_generated_local, stable_id, StmtKind]
 
 // An open transaction: its handle and Stm slots (-1: none), its snapshots
 // and the number of loops open around it. A `#Shield` block is a frame with
@@ -443,14 +443,16 @@ ir_context_scratch: fn(p: IRProgram, b: IRBuilder, value: Int) -> Bool Never! {
 }
 
 // The runtime word naming the key whose text is `key`: the stop handler's
-// CONTEXT_ON_STOP_KEY is 1, the word the runtime's stop door finds (Runtime
-// Context.jet CONTEXT_ON_STOP_KEY); a `#ContextKey` constant's SymbolID key
-// text is its stable hash kept to 62 bits, so one positive machine word,
-// and never 0 (jet_ctx_value_find's "not set") or 1.
+// CONTEXT_ON_STOP_KEY is 1, CONTEXT_DIR_KEY is 2, CONTEXT_ENV_KEY is 3
+// (Runtime Context.jet); a `#ContextKey` constant's SymbolID key text is its
+// stable hash kept to 62 bits, so one positive machine word >= 4 and never
+// colliding with 0 ("not set") or 1..3.
 ir_context_key_word: fn(key: String) -> Int Never! {
     if key == CONTEXT_ON_STOP_KEY -> return 1
+    if key == CONTEXT_DIR_KEY -> return 2
+    if key == CONTEXT_ENV_KEY -> return 3
     word: Int{stable_id("context.key", key) & U64{4611686018427387903}}
-    if word <= 1 -> 2 else -> word
+    if word <= 3 -> 4 else -> word
 }
 
 // Installs `value` (-1: a Unit value; else fresh, its ownership moving

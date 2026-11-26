@@ -185,6 +185,10 @@ logical_environment_text: fn(bytes: I64, length: I64) -> I64 {
 // None. Raw OS lookup preserves bytes.
 #Export(c) jet_rt_logical_env_get: fn(key: I64) -> I64 {
     rt_test_reads_text(I64{69}, key)
+    comptime_serve_refuse(COMPTIME_REFUSED_ENVIRONMENT)
+    hit: context_env_lookup(rt_text_data(key), rt_text_len(key))
+    if (hit == CONTEXT_ENV_UNSET) { return I64{0} }
+    if (hit != I64{0}) { return logical_environment_text(rt_text_data(hit), rt_text_len(hit)) }
     row: logical_environment_startup_row(rt_text_data(key), rt_text_len(key))
     if (row == I64{0}) { return I64{0} }
     if (row > I64{0}) {
@@ -208,6 +212,15 @@ logical_environment_text: fn(bytes: I64, length: I64) -> I64 {
     rt_test_reads_text(I64{69}, key)
     rt_text_store(data_out, I64{0})
     rt_text_store(len_out, I64{0})
+    comptime_serve_refuse(COMPTIME_REFUSED_ENVIRONMENT)
+    hit: context_env_lookup(rt_text_data(key), rt_text_len(key))
+    if (hit == CONTEXT_ENV_UNSET) { return I64{0} }
+    if (hit != I64{0}) {
+        length: rt_text_len(hit)
+        rt_text_store(data_out, logical_environment_copy(rt_text_data(hit), length))
+        rt_text_store(len_out, length)
+        return I64{1}
+    }
     row: logical_environment_startup_row(rt_text_data(key), rt_text_len(key))
     if (row == I64{0}) { return I64{0} }
     if (row > I64{0}) {
@@ -243,7 +256,9 @@ logical_environment_valid_name: fn(name: I64) -> Bool {
     true
 }
 
-// Status: 0 success, -1 InvalidName, -2 InvalidValue; no OS environment write.
+// Status: 0 success, -1 InvalidName, -2 InvalidValue; writes only the current
+// task's context environment (or active deterministic World when no context
+// env frame overlays it), never mutating the process-wide default cell.
 #Export(c) jet_rt_logical_env_set: fn(key: I64, value: I64) -> I64 {
     if !(logical_environment_valid_name(key)) -> return I64{-1}
     ^at: I64{0}
@@ -251,24 +266,55 @@ logical_environment_valid_name: fn(name: I64) -> Bool {
         if (rt_text_byte(wrapping(rt_text_data(value) + at)) == I64{0}) { return I64{-2} }
         at = wrapping(at + I64{1})
     }
-    root: logical_environment_current()
-    shared_acquire(root, true)
-    logical_environment_append(root, rt_text_data(key), rt_text_len(key), rt_text_data(value), rt_text_len(value))
-    shared_release(root, true)
+    comptime_serve_refuse(COMPTIME_REFUSED_ENVIRONMENT)
+    world: world_current()
+    if (world != I64{0} && context_env_lookup(rt_text_data(key), rt_text_len(key)) == I64{0}) {
+        root: world_environment(world)
+        shared_acquire(root, true)
+        logical_environment_append(root, rt_text_data(key), rt_text_len(key), rt_text_data(value), rt_text_len(value))
+        shared_release(root, true)
+        return I64{0}
+    }
+    context_env_set_imperative(key, value)
     I64{0}
 }
 
-// Status: 0 absent, 1 removed, -1 InvalidName.
+// Status: 0 absent, 1 removed, -1 InvalidName. Removes only in the current
+// task's context environment (installing an unset tombstone), never mutating
+// the process-wide default cell.
 #Export(c) jet_rt_logical_env_unset: fn(key: I64) -> I64 {
     if !(logical_environment_valid_name(key)) -> return I64{-1}
-    root: logical_environment_current()
-    shared_acquire(root, true)
-    entry: logical_environment_find(root, rt_text_data(key), rt_text_len(key))
-    ^removed: I64{0}
-    if (entry != I64{0}) {
-        logical_environment_remove(root, entry)
-        removed = I64{1}
+    comptime_serve_refuse(COMPTIME_REFUSED_ENVIRONMENT)
+    hit: context_env_lookup(rt_text_data(key), rt_text_len(key))
+    world: world_current()
+    if (world != I64{0} && hit == I64{0}) {
+        root: world_environment(world)
+        shared_acquire(root, true)
+        entry: logical_environment_find(root, rt_text_data(key), rt_text_len(key))
+        ^removed: I64{0}
+        if (entry != I64{0}) {
+            logical_environment_remove(root, entry)
+            removed = I64{1}
+        }
+        shared_release(root, true)
+        return removed
     }
-    shared_release(root, true)
-    removed
+    ^present: I64{0}
+    if (hit == CONTEXT_ENV_UNSET) {
+        present = I64{0}
+    } else if (hit != I64{0}) {
+        present = I64{1}
+    } else {
+        row: logical_environment_startup_row(rt_text_data(key), rt_text_len(key))
+        if (row > I64{0}) {
+            present = I64{1}
+        } else if (row < I64{0}) {
+            root: logical_environment_current()
+            shared_acquire(root, false)
+            if (logical_environment_find(root, rt_text_data(key), rt_text_len(key)) != I64{0}) { present = I64{1} }
+            shared_release(root, false)
+        }
+    }
+    if (present != I64{0}) { context_env_set_imperative(key, I64{0}) }
+    present
 }

@@ -144,10 +144,10 @@ compiler_fs_bytes_take: fn(bytes: I64, capacity: I64, length: I64, output: I64, 
 compiler_fs_read_whole: fn(path: I64, align: I64, cells: I64, error: I64) -> I64 {
     if !compiler_fs_path(path, HOST_IO_OP_READ, error) -> return I64{0}
     began: perf_samples_io_start()
-    name: fd_c_path(path)
+    name: fd_c_fs_path(path)
     fd: host_call(I64{2}, name, I64{524288}, I64{0})
     if (fd < I64{0}) {
-        fd_c_path_drop(name, path)
+        fd_c_fs_path_drop(name)
         perf_samples_io(began, PERF_SAMPLES_IO_READ, fd, PERF_SAMPLES_TARGET_PATH, rt_text_data(path), rt_text_len(path))
         return compiler_fs_errno(HOST_IO_OP_READ, path, -fd, error)
     }
@@ -197,7 +197,7 @@ compiler_fs_read_whole: fn(path: I64, align: I64, cells: I64, error: I64) -> I64
         used += count
     }
     ^_: host_call(I64{3}, fd, I64{0}, I64{0})
-    fd_c_path_drop(name, path)
+    fd_c_fs_path_drop(name)
     perf_samples_io(began, PERF_SAMPLES_IO_READ, if (failure < I64{0}) -> failure else -> used, PERF_SAMPLES_TARGET_PATH, rt_text_data(path), rt_text_len(path))
     if (failure < I64{0}) {
         jet_rt_free(bytes, capacity, align)
@@ -224,9 +224,9 @@ compiler_fs_read_whole: fn(path: I64, align: I64, cells: I64, error: I64) -> I64
 compiler_fs_write_open: fn(path: I64, data: I64, length: I64, error: I64, flags: I64) -> I64 {
     if !compiler_fs_path(path, HOST_IO_OP_WRITE, error) -> return I64{0}
     began: perf_samples_io_start()
-    name: fd_c_path(path)
+    name: fd_c_fs_path(path)
     fd: host_call(I64{2}, name, flags, I64{438})
-    fd_c_path_drop(name, path)
+    fd_c_fs_path_drop(name)
     if (fd < I64{0}) {
         perf_samples_io(began, PERF_SAMPLES_IO_WRITE, fd, PERF_SAMPLES_TARGET_PATH, rt_text_data(path), rt_text_len(path))
         return compiler_fs_errno(HOST_IO_OP_WRITE, path, -fd, error)
@@ -282,7 +282,8 @@ compiler_fs_mkdir_prefix: fn(name: I64, at: I64, scratch: I64) -> I64 {
     if !compiler_fs_path(path, HOST_IO_OP_WRITE, error) -> return I64{0}
     length: rt_text_len(path)
     if (length == I64{0}) { return I64{1} }
-    name: fd_c_path(path)
+    name: fd_c_fs_path(path)
+    name_len: files_c_len(name)
     scratch: jet_rt_alloc(I64{128}, I64{8})
     ^present: false
     #Unsafe("name is NUL-terminated and scratch lends 128 writable portable stat-fact bytes") {
@@ -290,7 +291,7 @@ compiler_fs_mkdir_prefix: fn(name: I64, at: I64, scratch: I64) -> I64 {
     }
     ^result: I64{1}
     if !present {
-        ^at: length
+        ^at: name_len
         loop {
             result = compiler_fs_mkdir_prefix(name, at, scratch)
             if (result != I64{-2}) { break }
@@ -301,14 +302,14 @@ compiler_fs_mkdir_prefix: fn(name: I64, at: I64, scratch: I64) -> I64 {
             if (back <= I64{0}) { break }
             at = back
         }
-        loop result >= (I64{0}) && at < length {
+        loop result >= (I64{0}) && at < name_len {
             at += I64{1}
-            loop at < length && rt_text_byte(wrapping(name + at)) != (I64{47}) -> at += I64{1}
+            loop at < name_len && rt_text_byte(wrapping(name + at)) != (I64{47}) -> at += I64{1}
             result = compiler_fs_mkdir_prefix(name, at, scratch)
         }
     }
     jet_rt_free(scratch, I64{128}, I64{8})
-    fd_c_path_drop(name, path)
+    fd_c_fs_path_drop(name)
     if (result < I64{0}) { return compiler_fs_errno(HOST_IO_OP_WRITE, path, -result, error) }
     I64{1}
 }
@@ -342,9 +343,9 @@ compiler_fs_mkdir_prefix: fn(name: I64, at: I64, scratch: I64) -> I64 {
 #Export(c) jet_std_files_open_reader_nonblocking: fn(path: I64, output: I64, error: I64) -> I64 {
     if compiler_fs_fault(path, error) -> return I64{0}
     if !compiler_fs_path(path, HOST_IO_OP_READ, error) -> return I64{0}
-    name: fd_c_path(path)
+    name: fd_c_fs_path(path)
     fd: host_call(I64{2}, name, I64{526336}, I64{0})
-    fd_c_path_drop(name, path)
+    fd_c_fs_path_drop(name)
     if (fd < I64{0}) { return compiler_fs_errno(HOST_IO_OP_READ, path, -fd, error) }
     rt_text_store(output, fd_new(fd, path, false))
     I64{1}
@@ -525,10 +526,10 @@ compiler_fs_space_bytes: fn(blocks: I64, unit: I64) -> I64 {
 // f_bavail@32 and f_frsize@72.
 #Export(c) jet_fs_space: fn(path: I64, output: I64, len: I64, error: I64) -> I64 {
     if !compiler_fs_path(path, HOST_IO_OP_READ, error) -> return I64{0}
-    name: fd_c_path(path)
+    name: fd_c_fs_path(path)
     facts: jet_rt_alloc(I64{120}, I64{8})
     result: host_call(I64{137}, name, facts, I64{0})
-    fd_c_path_drop(name, path)
+    fd_c_fs_path_drop(name)
     if (result < I64{0}) {
         jet_rt_free(facts, I64{120}, I64{8})
         if (result == I64{-38}) {

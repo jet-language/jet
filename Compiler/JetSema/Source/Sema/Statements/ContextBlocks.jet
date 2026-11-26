@@ -1,10 +1,13 @@
 // Context blocks: the check of a `context` block, its scratch and deadline
 // guards, and the allocator a block installs with its handler.
 use jet_foundation.[
+    AST_NODE_GENERATED,
     AccessConvention,
     CallArg,
     ContextField,
     Expr,
+    ExprPair,
+    StrPart,
     core_source_owns_type,
     Span,
     Stmt,
@@ -15,19 +18,42 @@ use jet_foundation.[
     symbol_is_none,
 ]
 
+// Desugar `{CC: "clang", ...}` (inferred anonymous StructLit) in `#Context(env: ...)`
+// into a `[String:String]` MapLit whose keys are the field names.
+sema_stmt_context_env_desugar: fn(expr: Expr) -> Expr? Never! {
+    if expr == .StructLit(type_name, _, _, _, fields, inferred, lit_span, _) && inferred && type_name == "" {
+        ^entries: [ExprPair]{}
+        loop f in fields {
+            key: Expr.Str{parts: [StrPart]{StrPart.Lit{text: f.name}}, span: f.name_span, id: AST_NODE_GENERATED}
+            entries.push(ExprPair{key: key, value: f.value})
+        }
+        return Val(Expr.MapLit{entries: entries, span: lit_span, id: AST_NODE_GENERATED})
+    }
+    None
+}
+
+// Whether `ty` is `core.files.path.Path` (extracting its `.raw: String` field
+// for `#Context(dir: path)`).
+sema_stmt_context_dir_path: fn(ty: Type) -> Bool Never! {
+    if ty == .Named(name) {
+        return name == "Path" || (name.ends_with(".Path") && core_source_owns_type(name))
+    }
+    false
+}
+
 // Each `#Context` field value is checked once in the enclosing scope
 // (`allocator` an `Arena`, `Bump`, `Pool` or `Fixed` handle,
 // `context.scratch`, the task's own arena (sema_stmt_context_scratch), or a
 // value whose type implements `mem.Allocator`, whose guard is its handler,
 // sema_stmt_context_allocator_handler); `logger` is core.log's
-// `logger` key and `on_stop` the stop
-// handler, a `fn(debug.Stop)` (ContextKeys.jet sema_context_field_key), and
-// any other label names a `#ContextKey` constant, whose value takes the
-// key's type; a label naming neither is E0761. A `#Deadline(limit)` block is
-// the context block of its one `deadline` field, a `Duration` or an `Instant`
-// (the marker binding, E0930). Then the body is an ordinary nested block.
-// Lowering installs the guards around the body (IR BuildTransact.jet
-// ir_context_block).
+// `logger` key, `on_stop` the stop handler, a `fn(debug.Stop)`, `dir` the
+// task working directory (`String` or `Path`), `env` an environment overlay
+// (`[String:String]` or `{KEY: "value"}`), and any other label names a
+// `#ContextKey` constant, whose value takes the key's type; a label naming
+// neither is E0761. A `#Deadline(limit)` block is the context block of its
+// one `deadline` field, a `Duration` or an `Instant` (the marker binding,
+// E0930). Then the body is an ordinary nested block. Lowering installs the
+// guards around the body (IR BuildTransact.jet ir_context_block).
 sema_stmt_check_context_block: fn(fields: [ContextField], body: [Stmt], span: Span, return_type: Type?, check: ^SemaBodyCheck, loop_depth: Int, output: ^[TStmt]) -> Bool {
     // The block's `#Context` or `#Deadline` application binds first; fields
     // that do not bind (E0930) get no E0762 of their own.
@@ -43,7 +69,30 @@ sema_stmt_check_context_block: fn(fields: [ContextField], body: [Stmt], span: Sp
                 complete = false
                 next
             }
-            checked_key: sema_check_expression(field.value, Val(found.ty), check) ?? {
+            if field.name == "dir" {
+                checked_dir: sema_check_expression(field.value, None, check) ?? {
+                    complete = false
+                    next
+                }
+                if sema_stmt_context_dir_path(checked_dir.ty) {
+                    reference: TFieldRef{owner: None, name: "raw", ty: Type.String, boxed: false}
+                    raw_dir: sema_tree_node(Type.String, TExprKind.Field{receiver: checked_dir, field: reference}, field.span)
+                    guards.push(TContextGuard{field: field.name, value: raw_dir, key: found.key})
+                    next
+                }
+                dir_val: sema_expr_expected_owned(checked_dir, Val(found.ty), check.environment.*, check.program.*, check.diagnostics) ?? {
+                    complete = false
+                    next
+                }
+                guards.push(TContextGuard{field: field.name, value: dir_val, key: found.key})
+                next
+            }
+            checked_opt: if field.name == "env" && sema_stmt_context_env_desugar(field.value) == .Val(desugared) -> {
+                sema_check_expression(desugared, Val(found.ty), check)
+            } else -> {
+                sema_check_expression(field.value, Val(found.ty), check)
+            }
+            checked_key: checked_opt ?? {
                 complete = false
                 next
             }
