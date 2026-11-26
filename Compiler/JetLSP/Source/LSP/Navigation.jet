@@ -554,8 +554,7 @@ lsp_rename_edit: fn(server: LSPServer, view: LSPView, def: SemDef, new_name: Str
             next
         }
         ^uri: lsp_path_to_uri(placed.path)
-        ^edit_text: source
-        ^edit_span: span
+        ^range_json: lsp_range_json(lsp_byte_span_to_range(source, span))
         ^version: "null"
         if lsp_open_doc_for_check_path(server, placed.path) == .Val(open_uri) {
             if server.diagnostic_state.docs.get(open_uri) == .Val(doc) {
@@ -565,8 +564,7 @@ lsp_rename_edit: fn(server: LSPServer, view: LSPView, def: SemDef, new_name: Str
                 if doc.host_doc != None {
                     host_span: lsp_doc_to_host_span(doc, span) ?? return Err(LSPRPCError{code: -32803, message: "rename touches generated text outside the host document"})
                     uri = open_uri
-                    edit_text = doc.text
-                    edit_span = host_span
+                    range_json = lsp_range_json(lsp_byte_span_to_range(doc.text, host_span))
                 }
                 version = "{doc.version}"
             }
@@ -576,7 +574,7 @@ lsp_rename_edit: fn(server: LSPServer, view: LSPView, def: SemDef, new_name: Str
             by_uri[uri] = [String]{}
             versions[uri] = version
         }
-        by_uri[uri].push("{{\"range\":{lsp_range_json(lsp_byte_span_to_range(edit_text, edit_span))},\"newText\":{foundation_json_quote(new_name)}}}")
+        by_uri[uri].push("{{\"range\":{range_json},\"newText\":{foundation_json_quote(new_name)}}}")
         if fresh -> order.push(uri)
     }
     order.sort()

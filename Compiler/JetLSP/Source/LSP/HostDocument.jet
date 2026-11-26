@@ -14,7 +14,7 @@ use {
         jet_driver_jet_offset,
         jet_driver_source_document_problem,
     ]
-    jet_foundation.[Diagnostic, Span, foundation_json_quote]
+    jet_foundation.[Diagnostic, DiagnosticOrigin, Span, foundation_json_quote, sha256_hex]
 }
 
 lsp_bytes_find: fn(haystack: [U8], needle: [U8], from: Int) -> Int Never! {
@@ -189,7 +189,11 @@ lsp_doc_map_diagnostics: fn(host_doc: JetDriverSourceDocument, diagnostics: ^^[D
         }
         placed: jet_driver_host_diagnostic(host_doc, diagnostic)
         if placed.generated -> next
-        mapped.push(placed.diagnostic)
+        ^out_diag: placed.diagnostic
+        if host_doc.host == .Val(host) {
+            out_diag.origin = Val(DiagnosticOrigin{path: "{host.identity}", display: "{host.identity}", source: "{host.text}", revision: sha256_hex(host.text)})
+        }
+        mapped.push(out_diag)
     }
     mapped
 }
