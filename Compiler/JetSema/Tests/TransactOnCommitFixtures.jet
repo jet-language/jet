@@ -1,0 +1,68 @@
+// Regression tests for #7035 n6: `tx.on_commit` and `tx.on_rollback` hooks
+// run after commit/rollback, so calling an inferred-effect irreversible helper
+// inside them must not trigger E0746, while direct irreversible calls inside
+// `#Transact`, nested `#Transact` inside `on_commit`, and outer pure/`#FX`
+// ceilings remain enforced.
+use {
+    jet_driver.[JetDriverCompileMode, jet_driver_present_diagnostics]
+    jet_cli.[jet_cli_compile_file]
+    jet_foundation.[DIAGNOSTIC_ERROR, Diagnostic]
+}
+
+transact_on_commit_compile: fn(file: String) -> [Diagnostic] {
+    checked: jet_cli_compile_file(file, false, None, JetDriverCompileMode.Program)
+    if checked == {
+        .Refused(refusal) -> panic("{file}: {refusal.stderr}")
+        .Compiled(result, snapshot) -> {
+            if result.internal_problem != None -> panic("{file}: internal compiler failure")
+            ^errors: [Diagnostic]{}
+            loop diagnostic in jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files) {
+                if diagnostic.severity == DIAGNOSTIC_ERROR -> errors.push(diagnostic)
+            }
+            return errors
+        }
+    }
+}
+
+transact_on_commit_show: fn(diagnostics: [Diagnostic]) -> String {
+    rows: loop item in diagnostics -> "{item.code}: {item.what}"
+    rows.join(" | ")
+}
+
+#Test("transact_on_commit_inferred_irreversible_helper_is_allowed") {
+    diagnostics: transact_on_commit_compile("Compiler/JetSema/Tests/Fixtures/TransactOnCommitAllowed.fixture/OnCommitAllowed.jet")
+    if diagnostics.len() != 0 {
+        panic("expected 0 errors, got {diagnostics.len()}: {transact_on_commit_show(diagnostics)}")
+    }
+}
+
+#Test("transact_on_commit_direct_and_outer_row_stay_refused") {
+    diagnostics: transact_on_commit_compile("Compiler/JetSema/Tests/Fixtures/TransactOnCommitRefused.fixture/OnCommitRefused.jet")
+    if diagnostics.len() != 3 {
+        panic("expected 3 errors, got {diagnostics.len()}: {transact_on_commit_show(diagnostics)}")
+    }
+    ^e0746_count: 0
+    ^has_pure_error: false
+    ^has_fx_error: false
+    loop item in diagnostics {
+        if item.code == "E0746" && item.what.contains("`write_notice`") -> e0746_count += 1
+        if item.code == "E3401" && item.what.contains("`pure_commit`") -> has_pure_error = true
+        if item.code == "E0712" && item.what.contains("FS.Write") -> has_fx_error = true
+    }
+    if e0746_count != 1 || !has_pure_error || !has_fx_error {
+        panic("unexpected diagnostics: {transact_on_commit_show(diagnostics)}")
+    }
+}
+
+#Test("transact_on_commit_runtime_case_fixtures_check") {
+    ok_diagnostics: transact_on_commit_compile("Tests/Cases/Effects/TransactOnCommitIrreversibleCallRuns.fixture/run.jet")
+    if ok_diagnostics.len() != 0 {
+        panic("expected 0 errors for run.jet, got {ok_diagnostics.len()}: {transact_on_commit_show(ok_diagnostics)}")
+    }
+    bad_diagnostics: transact_on_commit_compile("Tests/Cases/Effects/TransactOnCommitIrreversibleCallRuns.fixture/refused.jet")
+    if bad_diagnostics.len() != 1 {
+        panic("expected 1 error for refused.jet, got {bad_diagnostics.len()}: {transact_on_commit_show(bad_diagnostics)}")
+    }
+    assert_eq(bad_diagnostics[0].code, "E0746")
+    assert(bad_diagnostics[0].what.contains("`write_receipt`"))
+}

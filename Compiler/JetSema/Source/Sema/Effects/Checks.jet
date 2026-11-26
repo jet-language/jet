@@ -2520,8 +2520,8 @@ sema_effect_unsafe_site: fn(gate: TUnsafeGate) -> String Never! {
 // charged at the function.
 sema_effect_walk_unsafe_gate: fn(walk: SemaEffectWalk, nodes: ^[SemaEffectNode], gate: TUnsafeGate, span: Span?) Never! {
     node_index: if walk == {
-        .Collect(index) | .LambdaBody(index) -> index
-        .Unsafe(_) | .Region(_, _) -> {
+        .Collect(index) | .TransactCollect(index) | .LambdaBody(index) -> index
+        .Unsafe(_) | .Region(_, _, _) -> {
             return
         }
     }
@@ -4259,11 +4259,11 @@ sema_effect_record_close: fn(nodes: ^[SemaEffectNode], facts: SemaEffectCallInde
 // enclosing function (SemaEffectWalk.LambdaBody).
 sema_effect_record_iterable_loop: fn(walk: SemaEffectWalk, nodes: ^[SemaEffectNode], facts: SemaEffectCallIndex, iter_type: String, iter_symbol: String, next_symbol: String, span: Span) Never! {
     node_index: if walk == {
-        .Collect(index) | .LambdaBody(index) -> index
+        .Collect(index) | .TransactCollect(index) | .LambdaBody(index) -> index
         .Unsafe(_) -> {
             return
         }
-        .Region(index, region) -> if sema_effect_span_contains(region, span) -> index else -> {
+        .Region(index, region, _) -> if sema_effect_span_contains(region, span) -> index else -> {
             return
         }
     }
@@ -6908,22 +6908,22 @@ sema_effect_discarded_result_diagnostic: fn(node: SemaEffectNode, span: Span) ->
 // The part of `expression` inside `region` (a `#FX` block span).
 sema_effect_walk_region_expr: fn(nodes: ^[SemaEffectNode], node_index: Int, tree: BodyTree, expression: Int, region: Span, facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], diagnostics: ^[Diagnostic], caller: SemaEffectCaller) {
     node: body_node(tree, expression)
-    next: sema_effect_walk_region_enter(nodes, node_index, tree, expression, node, region, facts, module_facts, diagnostics, caller) ?? return
+    next: sema_effect_walk_region_enter(nodes, node_index, tree, expression, node, region, false, facts, module_facts, diagnostics, caller) ?? return
     sema_effect_walk_expr_children(next, nodes, facts, module_facts, diagnostics, caller, tree, node)
 }
 
 // sema_effect_walk_region_expr's own work on `node`: the walk its children
 // continue with, the whole walk (Collect) once the region holds the node; None
 // when they aren't walked.
-sema_effect_walk_region_enter: fn(nodes: ^[SemaEffectNode], node_index: Int, tree: BodyTree, expression: Int, node: BodyNode, region: Span, facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], diagnostics: ^[Diagnostic], caller: SemaEffectCaller) -> SemaEffectWalk? {
+sema_effect_walk_region_enter: fn(nodes: ^[SemaEffectNode], node_index: Int, tree: BodyTree, expression: Int, node: BodyNode, region: Span, skip_tx_hooks: Bool, facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], diagnostics: ^[Diagnostic], caller: SemaEffectCaller) -> SemaEffectWalk? {
     if sema_effect_span_contains(region, node.span) {
         if sema_effect_walk_expr_enter(nodes, node_index, tree, expression, node, facts, module_facts, diagnostics, caller) {
-            return Val(SemaEffectWalk.Collect{node_index: node_index})
+            return Val(if skip_tx_hooks -> SemaEffectWalk.TransactCollect{node_index: node_index} else -> SemaEffectWalk.Collect{node_index: node_index})
         }
         return None
     }
     if !sema_effect_span_contains(node.span, region) -> return None
-    Val(SemaEffectWalk.Region{node_index: node_index, region: region})
+    Val(SemaEffectWalk.Region{node_index: node_index, region: region, skip_tx_hooks: skip_tx_hooks})
 }
 
 // The node of the part of `function` inside `span`, a `#FX(…)` or `#Transact`
@@ -6953,8 +6953,9 @@ sema_effect_region_walk: fn(nodes: [SemaEffectNode], owner: Int, function: FnBod
     ^local_nodes: [SemaEffectNode]{region_node}
     ^ignored: [Diagnostic]{}
     caller: sema_effect_caller_slot(facts, module_index, function.key)
+    skip_tx_hooks: label == "Transact"
     loop statement in function.body {
-        sema_effect_walk_stmt_children(SemaEffectWalk.Region{node_index: 0, region: span}, local_nodes, facts, module_facts, ignored, caller, function.tree, function.tree.stmts[statement])
+        sema_effect_walk_stmt_children(SemaEffectWalk.Region{node_index: 0, region: span, skip_tx_hooks: skip_tx_hooks}, local_nodes, facts, module_facts, ignored, caller, function.tree, function.tree.stmts[statement])
     }
     ^walked: local_nodes.pop() ?? panic("the region node left the local list")
     sema_effect_node_settle_edges(walked)
@@ -8298,8 +8299,9 @@ sema_effect_check_hole_headers: fn(call_facts: [SemaCallSiteFact], module_row: S
 // lambda body walking).
 SemaEffectWalk: enum {
     Collect(node_index: Int),
+    TransactCollect(node_index: Int),
     Unsafe(audited: Bool),
-    Region(node_index: Int, region: Span),
+    Region(node_index: Int, region: Span, skip_tx_hooks: Bool),
     LambdaBody(node_index: Int),
 }
 
@@ -8319,9 +8321,9 @@ sema_effect_walk_visit_in: fn(walk: SemaEffectWalk, nodes: ^[SemaEffectNode], fa
 // children: the walk they continue with, or None when they aren't walked.
 sema_effect_walk_enter: fn(walk: SemaEffectWalk, nodes: ^[SemaEffectNode], facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], diagnostics: ^[Diagnostic], caller: SemaEffectCaller, tree: BodyTree, expression: Int, node: BodyNode) -> SemaEffectWalk? {
     if walk == {
-        .Collect(node_index) -> if sema_effect_walk_expr_enter(nodes, node_index, tree, expression, node, facts, module_facts, diagnostics, caller) -> Val(walk) else -> None
+        .Collect(node_index) | .TransactCollect(node_index) -> if sema_effect_walk_expr_enter(nodes, node_index, tree, expression, node, facts, module_facts, diagnostics, caller) -> Val(walk) else -> None
         .Unsafe(audited) -> if sema_effect_check_unsafe_enter(nodes, facts, module_facts, caller, tree, node, audited, diagnostics) -> Val(walk) else -> None
-        .Region(node_index, region) -> sema_effect_walk_region_enter(nodes, node_index, tree, expression, node, region, facts, module_facts, diagnostics, caller)
+        .Region(node_index, region, skip_tx_hooks) -> sema_effect_walk_region_enter(nodes, node_index, tree, expression, node, region, skip_tx_hooks, facts, module_facts, diagnostics, caller)
         .LambdaBody(node_index) -> {
             // A lambda body's value reads and stops are the enclosing node's,
             // as its calls are the enclosing node's edges; so are the bounded
@@ -8957,8 +8959,15 @@ sema_effect_walk_stmt_list_children: fn(walk: SemaEffectWalk, nodes: ^[SemaEffec
 // true. JetIR builds only the arm the instance's value takes
 // (ir_folded_type_test), so the other arm's reads need no row there. True
 // when it opened one.
+sema_effect_walk_collect_node: fn(walk: SemaEffectWalk) -> Int? Never! {
+    if walk == {
+        .Collect(node_index) | .TransactCollect(node_index) -> Val(node_index)
+        .Unsafe(_) | .Region(_, _, _) | .LambdaBody(_) -> None
+    }
+}
+
 sema_effect_guard_open: fn(walk: SemaEffectWalk, nodes: ^[SemaEffectNode], tree: BodyTree, condition: BodyIfCond) -> Bool {
-    if walk == .Collect(node_index) && condition == .Plain(value) {
+    if sema_effect_walk_collect_node(walk) == .Val(node_index) && condition == .Plain(value) {
         if tree.nodes[body_node_index(tree, value)].kind == .TraitConst(owner, trait_name, name) && trait_name == COMPTIME_SITE_TRAIT {
             sema_effect_node_rare_open(nodes[node_index])
             if nodes[node_index].rare.in_place() == .Val(rare) {
@@ -8972,14 +8981,14 @@ sema_effect_guard_open: fn(walk: SemaEffectWalk, nodes: ^[SemaEffectNode], tree:
 
 // Turns the innermost guard (sema_effect_guard_open) to its else arm.
 sema_effect_guard_else: fn(walk: SemaEffectWalk, nodes: ^[SemaEffectNode]) {
-    if walk == .Collect(node_index) && nodes[node_index].rare.in_place() == .Val(rare) {
+    if sema_effect_walk_collect_node(walk) == .Val(node_index) && nodes[node_index].rare.in_place() == .Val(rare) {
         rare.guards[rare.guards.len() - 1].holds = false
     }
 }
 
 // Closes the innermost guard (sema_effect_guard_open).
 sema_effect_guard_close: fn(walk: SemaEffectWalk, nodes: ^[SemaEffectNode]) {
-    if walk == .Collect(node_index) && nodes[node_index].rare.in_place() == .Val(rare) {
+    if sema_effect_walk_collect_node(walk) == .Val(node_index) && nodes[node_index].rare.in_place() == .Val(rare) {
         ^_: rare.guards.pop()
     }
 }
@@ -9163,7 +9172,13 @@ sema_effect_walk_core_closure_children: fn(walk: SemaEffectWalk, nodes: ^[SemaEf
             sema_effect_walk_lambda_children(walk, nodes, facts, module_facts, diagnostics, caller, tree, executable)
         }
         .OnCommit(_, executable) | .OnRollback(_, executable) -> {
-            sema_effect_walk_lambda_children(walk, nodes, facts, module_facts, diagnostics, caller, tree, executable)
+            if walk == .TransactCollect(_) {
+                // `tx.on_commit` and `tx.on_rollback` hooks run after the
+                // transaction commits or rolls back, not as undoable calls
+                // inside `#Transact`.
+            } else {
+                sema_effect_walk_lambda_children(walk, nodes, facts, module_facts, diagnostics, caller, tree, executable)
+            }
         }
     }
 }

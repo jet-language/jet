@@ -1,0 +1,36 @@
+use files: core.files
+
+// No declared effect row: its FS.Write effect is inferred by the effect pass.
+write_notice: fn(path: String, text: String) Never! {
+    files.write(path, text) ?? panic("write failed")
+}
+
+direct_in_transact: fn() {
+    #Transact(tx) {
+        write_notice("direct.txt", "bad")
+    }
+}
+
+pure_commit: fn() -[]> {
+    #Transact(tx) {
+        tx.on_commit(fn() {
+            write_notice("pure.txt", "bad")
+        })
+    }
+}
+
+fx_capped_commit: fn() {
+    #FX(Mem) {
+        #Transact(tx) {
+            tx.on_commit(fn() {
+                write_notice("fx.txt", "bad")
+            })
+        }
+    }
+}
+
+run: fn() {
+    direct_in_transact()
+    pure_commit()
+    fx_capped_commit()
+}

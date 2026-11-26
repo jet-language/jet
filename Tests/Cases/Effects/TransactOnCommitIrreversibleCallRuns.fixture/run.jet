@@ -1,0 +1,45 @@
+use {
+    files: core.files
+    testing: core.testing
+}
+
+#Error
+RollbackFail: enum {
+    Abort,
+}
+
+// No declared effect row: its irreversible FS.Write effect is inferred.
+write_receipt: fn(path: String, text: String) {
+    files.write(path, text) ?? panic("write failed")
+}
+
+commit_or_abort: fn(path: String, fail: Bool) -> String RollbackFail! {
+    #Transact(tx) {
+        tx.on_commit(fn() {
+            write_receipt(path, "committed")
+        })
+        if fail -> return Err(RollbackFail.Abort)
+    }
+    Ok("done")
+}
+
+run: fn() {
+    root: testing.temp_dir("transact-on-commit")
+    aborted_path: Path.from(root).join("aborted.txt").to_string()
+    committed_path: Path.from(root).join("committed.txt").to_string()
+    if commit_or_abort(aborted_path, true) == {
+        .Ok(_) -> panic("expected abort")
+        .Err(_) -> {
+            assert(!files.exists(aborted_path))
+            print("aborted:ok")
+        }
+    }
+    if commit_or_abort(committed_path, false) == {
+        .Ok(_) -> {
+            body: files.read(committed_path) ?? panic("read receipt")
+            print("committed:{body}")
+        }
+        .Err(_) -> panic("expected commit")
+    }
+    files.remove_all(root) ?? panic("cleanup")
+}
