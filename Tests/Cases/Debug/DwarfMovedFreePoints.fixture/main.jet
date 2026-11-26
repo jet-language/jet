@@ -1,0 +1,24 @@
+package: {
+    name: "dwarf_moved_free_points"
+    authority: { allow: [Env, IO] }
+}
+
+use sys: core.sys
+
+Holder: struct {
+    text: String,
+}
+
+wrap_text: fn(s: String) -> Holder Never! { Holder{text: s} }
+
+borrow_len: fn(s: String) -> Int Never! { s.len() }
+
+run: fn() Never! {
+    seed: sys.get("SEED") ?? "7"
+    first: "alpha-{seed}"
+    n1: borrow_len(first)
+    second: "beta-{n1}-{seed}"
+    kept: wrap_text(second.move())
+    total: n1 + kept.text.len()
+    print("total={total}")
+}

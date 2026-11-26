@@ -1149,7 +1149,7 @@ IRX64StopTail: struct {
     target: Int,
 }
 
-ir_x64_emit_colds: fn(e: ^IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, tables: IRX64FunctionTables, exit: Int) Never! {
+ir_x64_emit_colds: fn(e: ^IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, tables: IRX64FunctionTables, exit: Int, lines: ^[X64LineRow]) Never! {
     // The shared calls of the numeric stops (.Stop): offset, path, text
     // and edge of each, stored columnarly.
     ^stop_tails: Rows<IRX64StopTail>{}
@@ -1157,6 +1157,8 @@ ir_x64_emit_colds: fn(e: ^IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
         e.at = cold.at
         e.code.at = cold.at
         here: e.code.bytes.len()
+        cold_line: if cold.line > 0 -> cold.line else if cold.at >= 0 && cold.at < f.code_line.len() -> ir_code_line_source(f.code_line[cold.at]) else -> 0
+        if cold_line > 0 -> ir_x64_debug_line(lines, here, cold_line)
         loop site in cold.sites -> ir_x64_patch(e, site, here)
         // A stop's branches: their taken side ends the program. A shift
         // stop tests its count, a stop on one operand that operand.
@@ -2391,6 +2393,7 @@ ir_x64_string_drop: fn(e: ^IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Al
     slow.resume = e.code.bytes.len()
     slow.symbol = "jet_rt_string_drop"
     slow.left = slot
+    if e.at >= 0 && e.at < f.code_line.len() -> slow.line = ir_code_line_source(f.code_line[e.at])
     e.colds.push(slow)
 }
 
@@ -5272,26 +5275,30 @@ ir_x64_variables: fn(m: IRModule, f: IRFunction, al: IRX64Allocation, positions:
             }
             next
         }
+        stop: positions[al.ends[place] + 1]
+        last_op: if al.ends[place] >= 0 && al.ends[place] < f.op.len() -> f.op[al.ends[place]] else -> IROp.Nop
+        dropped_param: last_op == .Drop
+        freed: last_op == .Drop || last_op == .Move || (place >= f.param_count && m.types[f.slot_type[place]].drop != "" && m.types[f.slot_type[place]].kind != .Int)
+        limit: if freed && stop < end -> stop else -> end
         if al.frames[place] != 0 {
-            if end > start {
-                ranges.push(X64VariableRange{variable: variable, start: start, end: end, location: X64DebugLocation.FrameAddress{offset: al.frames[place]}})
+            if limit > start {
+                ranges.push(X64VariableRange{variable: variable, start: start, end: limit, location: X64DebugLocation.FrameAddress{offset: al.frames[place]}})
             }
             next
         }
         if al.regs[place] >= 0 || al.xmms[place] >= 0 {
-            stop: positions[al.ends[place] + 1]
             // An xmm register is 16 + n (x64_dwarf_register).
             reg: if al.regs[place] >= 0 -> al.regs[place] else -> 16 + al.xmms[place]
             if stop > start {
                 ranges.push(X64VariableRange{variable: variable, start: start, end: stop, location: X64DebugLocation.Register{reg: reg}})
             }
             after: if stop > start -> stop else -> start
-            if entry >= 0 && end > after {
+            if entry >= 0 && !dropped_param && end > after {
                 ranges.push(X64VariableRange{variable: variable, start: after, end: end, location: X64DebugLocation.EntryValue{reg: entry}})
             }
         } else {
-            if end > start {
-                ranges.push(X64VariableRange{variable: variable, start: start, end: end, location: X64DebugLocation.Frame{offset: al.homes[place]}})
+            if limit > start {
+                ranges.push(X64VariableRange{variable: variable, start: start, end: limit, location: X64DebugLocation.Frame{offset: al.homes[place]}})
             }
         }
     }
@@ -6375,7 +6382,7 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
     loop (nth, site) in e.returns {
         ir_x64_patch(e, site, if nth < body_returns -> epilogue else -> exit)
     }
-    ir_x64_emit_colds(e, m, f, al, tables, exit)
+    ir_x64_emit_colds(e, m, f, al, tables, exit, lines)
     ^grow: IRX64Grow{start: -1, pushed: -1, based: -1, returned: -1, resumed: -1, left: -1}
     if grow_site >= 0 {
         grow = ir_x64_stack_grow(e, row, entered, 16 + 8 * al.saved.len() + al.frame_bytes + e.below, stacked)
@@ -8400,6 +8407,75 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
     loop range in compiled.debug.ranges {
         assert(compiled.variables[range.variable].name != "unused", "unused has a location")
     }
+}
+
+#Test("A spilled String's DWARF range ends at its moved free point and its cold drop keeps that line") {
+    ^m: ir_module_new()
+    m.single_thread = true
+    word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
+    bool_row: ir_scalar_type_row(m, Type.Bool)
+    int_row: ir_scalar_type_row(m, Type.Int)
+    str_row: ir_scalar_type_row(m, Type.String)
+    m.types[str_row].drop = "jet_rt_string_drop"
+    ^f: ir_function_new("spilled_free", "test:free.jet.spilled_free", "", "free.jet", 1)
+    p0: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "p0"), 1)
+    p1: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "p1"), 1)
+    p2: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "p2"), 1)
+    p3: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "p3"), 1)
+    p4: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "p4"), 1)
+    f.result = word
+    a: ir_slot(f, str_row, IRSlotKind.Local, ir_intern_name(m, "a"), 2)
+    n1: ir_slot(f, int_row, IRSlotKind.Local, ir_intern_name(m, "n1"), 3)
+    s0: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+    s4: ir_slot(f, bool_row, IRSlotKind.Temp, -1, 0)
+    make_name: ir_intern_name(m, "test_make_string")
+    borrow_name: ir_intern_name(m, "test_borrow_string")
+    args_p0: ir_args(f, [Int]{p0})
+    ^_: ir_emit(f, IROp.CallRuntime, a, make_name, args_p0, 1, 2)
+    // Keep p0..p4 hot inside a Loop after `a` is dropped so they claim all 5 callee-saved regs and spill `a` to its frame home.
+    args_a: ir_args(f, [Int]{a})
+    ^_: ir_emit(f, IROp.CallRuntime, n1, borrow_name, args_a, 1, 3)
+    ^_: ir_emit(f, IROp.Add, s0, p0, p1, IR_OVERFLOW_WRAP, 4)
+    ^_: ir_emit(f, IROp.Drop, -1, a, -1, -1, 4)
+    ^_: ir_open(f, IROp.Loop, 5)
+    ^_: ir_emit(f, IROp.Add, s0, s0, p0, IR_OVERFLOW_WRAP, 5)
+    ^_: ir_emit(f, IROp.Add, s0, s0, p1, IR_OVERFLOW_WRAP, 6)
+    ^_: ir_emit(f, IROp.Add, s0, s0, p2, IR_OVERFLOW_WRAP, 6)
+    ^_: ir_emit(f, IROp.Add, s0, s0, p3, IR_OVERFLOW_WRAP, 7)
+    ^_: ir_emit(f, IROp.Add, s0, s0, p4, IR_OVERFLOW_WRAP, 7)
+    ^_: ir_emit(f, IROp.Lt, s4, s0, p0, IR_OVERFLOW_WRAP, 7)
+    ^_: ir_emit(f, IROp.BrIf, -1, s4, 0, -1, 7)
+    ir_end(f, 8)
+    ^_: ir_emit(f, IROp.Return, -1, s0, -1, -1, 8)
+    m.functions.push(f)
+    plan: ir_drop_plan(m, m.functions[0], -1, -1, -1)
+    assert(plan.slots.len() > 0, "a's Drop should move back to its last use")
+    ir_drop_apply(m.functions[0], plan)
+    al: ir_x64_allocate(m, m.functions[0])
+    assert(al.regs[a] < 0 && al.homes[a] < 0, "a should spill to a frame home")
+    compiled: ir_x64_compile_function(m, ir_x64_tables(m), 0)
+    assert(compiled.errors.is_empty())
+    ^line4_at: -1
+    ^line8_at: -1
+    ^cold_drop_line3: false
+    loop row in compiled.debug.lines {
+        if row.line == 4 && line4_at < 0 -> line4_at = row.at
+        if row.line == 8 && line8_at < 0 -> line8_at = row.at
+        if line8_at >= 0 && row.at > line8_at && row.line == 3 -> cold_drop_line3 = true
+    }
+    assert(line4_at > compiled.debug.body)
+    assert(line8_at > line4_at)
+    assert(cold_drop_line3, "cold jet_rt_string_drop stub should record the moved free-point line 3")
+    ^a_frame: false
+    ^a_end: -1
+    loop range in compiled.debug.ranges {
+        if compiled.variables[range.variable].name == "a" {
+            a_end = range.end
+            if range.location == .Frame(_) -> a_frame = true
+        }
+    }
+    assert(a_frame, "spilled a should have a Frame location")
+    assert(a_end > compiled.debug.body && a_end <= line4_at, "spilled String `a` must end at its line 3 free point before line 4")
 }
 
 // A plot's arguments as Core Perf.jet plot builds them (Float{total %%
