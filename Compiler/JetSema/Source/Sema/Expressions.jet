@@ -4850,7 +4850,9 @@ sema_expr_check_method_call: fn(receiver: Expr, method: String, method_span: Spa
         return sema_expr_check_method_on(receiver, receiver_value, method, method_span, owner_type_args, type_args, args, expected, check)
     }
     ^written_types: [Type]{}
-    loop ty in type_args -> written_types.push(sema_type_resolve_declared(graph, ty, check.environment.module_identity))
+    loop ty in type_args {
+        written_types.push(sema_type_resolve_declared(graph, ty, check.environment.module_identity))
+    }
     hearing: sema_call_rules_hear(rules, None, method, method_span, args, written_types, Val(receiver), Val(receiver_value.ty), sema_rule_known(receiver_value, check), receiver_value.span, None, "", check.scopes.current, check)
     if hearing.rejected -> return None
     if !hearing.staged {
@@ -7632,7 +7634,9 @@ sema_expr_check_pipe: fn(head: Expr, steps: [PipeStep], span: Span, expected: Ty
     in_place: if head == .Ident(name, _, _) -> name == steps[0].name else -> false
     ^pipe_symbol: SymbolID?{None}
     if in_place {
-        if sema_scope_resolve(check.scopes, steps[0].name) == .Val(symbol) -> pipe_symbol = Val(symbol.id)
+        if sema_scope_resolve(check.scopes, steps[0].name) == .Val(symbol) {
+            pipe_symbol = Val(symbol.id)
+        }
     }
     if !in_place -> bindings.push(sema_expr_pipe_binding(steps[0].name, head, steps[0].span))
     loop index in 1..<steps.len() {
@@ -7685,7 +7689,9 @@ sema_expr_check_pipe: fn(head: Expr, steps: [PipeStep], span: Span, expected: Ty
         sema_scope_leave(check.scopes, check.state)
         return None
     }
-    if in_place && steps.len() == 1 -> check.scopes.pipe_in_place_symbol = pipe_symbol else -> check.scopes.pipe_in_place_symbol = previous_pipe_symbol
+    if in_place && steps.len() == 1 -> check.scopes.pipe_in_place_symbol = pipe_symbol else {
+        check.scopes.pipe_in_place_symbol = previous_pipe_symbol
+    }
     checked_last: sema_check_expression(last.value, expected, check)
     check.scopes.pipe_in_place_symbol = previous_pipe_symbol
     value: checked_last ?? {
@@ -7937,7 +7943,7 @@ sema_expr_shared_place_call_writes: fn(receiver: Expr, method: String, method_sp
 sema_expr_check_list_literal: fn(elements: [Expr], span: Span, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
     ^expanded: sema_expression_list_member_spreads(elements)
     ^checked: sema_expression_list(Expr.ListLit{elements: expanded, span: span, id: AST_NODE_GENERATED}, expanded, span, expected, check)
-    if checked != None && sema_expr_repeated_list_head(elements) == .Val(head) {
+    if checked != None && sema_expr_repeated_list_head(elements) == .Val(head) && !head.starts_with("__jet_grammar_") {
         lint: sema_lint("L0523", span, "this list repeats `{head}` on every element", "a typed list head states the shared element type once and leaves each record body focused on its fields", "write `[{head}]{{{{…}}, {{…}}}}` and remove the repeated element heads")
         // A fixed-length list keeps its literal: `[T]{…}` builds a growable one.
         ^fixed: false
