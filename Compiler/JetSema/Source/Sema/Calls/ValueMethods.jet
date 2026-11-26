@@ -225,7 +225,7 @@ sema_value_method_option_or_err: fn(receiver: Expr, receiver_value: TExpr, inner
     route: sema_call_core_resolve_route(check, "core.prelude", "option_or_err", [Type]{inner}, 2, span) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     target: if route == {
         .Source(source) -> source
-        .Core(_) | .SharedSite(_) -> {
+        .SharedSite(_) -> {
             check.context.incomplete_reasons.push("Option.or_err must resolve its canonical Jet source body")
             return SemaMethodSpecialCheck{handled: true, value: None}
         }

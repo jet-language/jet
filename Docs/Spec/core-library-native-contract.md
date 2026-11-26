@@ -176,7 +176,7 @@ E3010 stop. Recursive mkdir dispatch names the single no-fault-probe raw leaf;
 the source caller, not a second evaluator arm, owns the FS.Write preflight.
 
 The registry tables are projections, not a second API catalog. The main one,
-[`CoreCallRows.jet`](../../Compiler/JetFoundation/Source/Registry/CoreCallRows.jet),
+[`CoreModules.jet`](../../Compiler/JetFoundation/Source/Registry/CoreModules.jet),
 is computed from Core.rows when the compiler builds; the generated projections
 in the Prelude are never hand-edited. Native runtime
 files under [`Compiler/JetRuntime`](../../Compiler/JetRuntime/) provide

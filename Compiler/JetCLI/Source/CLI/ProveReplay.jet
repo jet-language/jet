@@ -40,7 +40,6 @@ use {
         ast_stmt,
         canonical_json_bytes,
         canonical_json_value,
-        core_call,
         effect_vocabulary_list_view_count,
         foundation_byte_text,
         import_alias,
@@ -2837,9 +2836,7 @@ jet_cli_replay_core_authority: fn(core: ^JetCLIReplayCore, module_name: String, 
         if root == "" -> return None
         return Val(sema_effect_root(root))
     }
-    record: core_call(module_name, member) ?? return None
-    if record.effects.len() == 0 -> return None
-    Val(sema_effect_root(record.effects[0]))
+    None
 }
 
 // Local name -> the Core module or member it imports.

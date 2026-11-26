@@ -783,3 +783,128 @@ core_record_literal_fields_in: fn(rows: [CoreRecordLiteralRow], owner: String) -
     }
     None
 }
+
+// Module/member/type names follow Core.rows module declaration order.
+CORE_MODULE_EXPORTS: #run core_module_export_rows(CORE_DECLARATIONS)
+
+// The lookup keys of CORE_MODULE_EXPORTS, exported type leaves, and
+// CORE_BARE_SOURCE_MODULES, frozen at build time for halving search
+// (ir_key_row). Each key keeps its first row, as a scan would.
+CORE_MODULE_EXPORT_KEY_ROWS: #run ir_key_index(core_module_export_names(CORE_MODULE_EXPORTS))
+
+CORE_MODULE_EXPORT_KEYS: #run ir_key_index_keys(core_module_export_names(CORE_MODULE_EXPORTS), CORE_MODULE_EXPORT_KEY_ROWS)
+
+CORE_TYPE_EXPORT_LEAVES: #run core_type_export_leaves(CORE_MODULE_EXPORTS)
+
+CORE_TYPE_EXPORT_MODULES: #run core_type_export_modules(CORE_MODULE_EXPORTS, CORE_TYPE_EXPORT_LEAVES)
+
+CORE_TYPE_EXPORT_KEY_ROWS: #run ir_key_index(CORE_TYPE_EXPORT_LEAVES)
+
+CORE_TYPE_EXPORT_KEYS: #run ir_key_index_keys(CORE_TYPE_EXPORT_LEAVES, CORE_TYPE_EXPORT_KEY_ROWS)
+
+CORE_BARE_SOURCE_KEY_ROWS: #run ir_key_index(core_bare_source_names(CORE_BARE_SOURCE_MODULES))
+
+CORE_BARE_SOURCE_KEYS: #run ir_key_index_keys(core_bare_source_names(CORE_BARE_SOURCE_MODULES), CORE_BARE_SOURCE_KEY_ROWS)
+
+core_module_export_names: fn(rows: [CoreModuleExportNames]) -> [String] Never! {
+    ^names: [String]{}
+    loop row in rows -> names.push(row.module_name)
+    names
+}
+
+// The distinct type export leaves of `rows`, in first-export order.
+core_type_export_leaves: fn(rows: [CoreModuleExportNames]) -> [String] Never! {
+    ^leaves: [String]{}
+    loop row in rows {
+        loop at in 0..<row.type_exports.len() {
+            if leaves.contains(row.type_exports[at]) -> next
+            leaves.push(row.type_exports[at])
+        }
+    }
+    leaves
+}
+
+// Per leaf of `leaves`, the module of each row of `rows` exporting it, in
+// table order.
+core_type_export_modules: fn(rows: [CoreModuleExportNames], leaves: [String]) -> [[String]] Never! {
+    key_rows: ir_key_index(leaves)
+    keys: ir_key_index_keys(leaves, key_rows)
+    ^groups: [[String]]{}
+    // The last row that joined each leaf's modules, so a row joins once.
+    ^joined: [Int]{}
+    loop _ in 0..<leaves.len() {
+        groups.push([String]{})
+        joined.push(-1)
+    }
+    loop (row_index, row) in rows {
+        loop at in 0..<row.type_exports.len() {
+            slot: ir_key_row(keys, key_rows, row.type_exports[at]) ?? next
+            if joined[slot] == row_index -> next
+            joined[slot] = row_index
+            groups[slot].push(row.module_name)
+        }
+    }
+    groups
+}
+
+core_bare_source_names: fn(rows: [CoreBareSourceModule]) -> [String] Never! {
+    ^names: [String]{}
+    loop row in rows -> names.push(row.name)
+    names
+}
+
+core_module_export_rows: fn(declared: CoreDeclarations) -> [CoreModuleExportNames] Never! {
+    ^rows: [CoreModuleExportNames]{}
+    loop entry in declared.modules {
+        types: loop leaf in entry.types -> leaf.name
+        rows.push(CoreModuleExportNames{module_name: entry.name, members: entry.members, type_exports: types})
+    }
+    rows
+}
+
+// Parameter arity and borrow mask for a source-owned Core role call.
+CoreCallSignature: struct {
+    arity: Int,
+    max_arity: Int,
+    borrow_mask: [Bool],
+}
+
+// A source-owned Core call description constructed from checked Core declarations
+// (no static CORE_CALLS table remains).
+CoreCallRecord: struct {
+    module_name: String,
+    member: String,
+    signature: CoreCallSignature,
+    source_target: String?,
+    source_role: String?{None},
+}
+
+core_call_source_member: fn(row: CoreCallRecord) -> String? Never! {
+    if row.source_role != None -> return None
+    Val(row.source_target ?? row.member)
+}
+
+core_call_source_role: fn(row: CoreCallRecord) -> String? Never! {
+    row.source_role
+}
+
+core_call_accepts_arity: fn(row: CoreCallRecord, count: Int) -> Bool Never! {
+    count >= row.signature.arity && count <= row.signature.max_arity
+}
+
+// The source-owned record of `receiver_type`'s method `member`, whose call
+// runs the Core function that fills `role`. `borrowed[i]` is whether that
+// function reads its parameter `i` rather than taking it.
+core_call_role_receiver: fn(_receiver_type: String, member: String, role: String, borrowed: [Bool]) -> CoreCallRecord Never! {
+    arity: borrowed.len()
+    CoreCallRecord{module_name: "", member: member, signature: CoreCallSignature{arity: arity, max_arity: arity, borrow_mask: borrowed}, source_target: None, source_role: Val(role)}
+}
+
+// The source-owned record of the Core module call `module_name.member`, whose
+// call runs the Core function that fills `role`, else the module's own
+// `member`. `borrowed[i]` is whether that function reads its parameter `i`
+// rather than taking it.
+core_call_source_function: fn(module_name: String, member: String, role: String?, borrowed: [Bool]) -> CoreCallRecord Never! {
+    arity: borrowed.len()
+    CoreCallRecord{module_name: module_name, member: member, signature: CoreCallSignature{arity: arity, max_arity: arity, borrow_mask: borrowed}, source_target: None, source_role: role}
+}

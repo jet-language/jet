@@ -1,16 +1,16 @@
 // The Core surface the hardening manifest counts, and the route behind each row.
 //
 // Membership comes from the compiler's own registries: module calls from
-// CORE_MODULE_EXPORTS, receiver methods from CORE_CALLS receiver rows, fields
-// from CORE_RECORD_FIELD_ROWS and nominal types from the module type exports.
-// A route is a fact read from the tree: a declaration in the parsed Core
-// source, an IR dispatcher arm, a compiler-owned record, or a verified entry
-// in special-routes.tsv. A row without a route is reported, never invented.
+// CORE_MODULE_EXPORTS, receiver methods from parsed Core source declarations,
+// fields from CORE_RECORD_FIELD_ROWS and nominal types from the module type
+// exports. A route is a fact read from the tree: a declaration in the parsed
+// Core source, an IR dispatcher arm, a compiler-owned record, or a verified
+// entry in special-routes.tsv. A row without a route is reported, never invented.
 use {
     jet_lexer.[lex_generated]
     jet_parser.[parse_lexed_with_source, parser_line_starts]
     jet_ir.[IRCompilerOwnedCore, ir_route_symbol, ir_route_builder_lowered, ir_environment_route, ir_runtime_route, ir_runtime_handle, ir_runtime_handle_field, ir_compiler_owned_core_fields, ir_compiler_owned_record_fields, ir_compiler_owned_type_rows]
-    jet_foundation.[CORE_SOURCE_OWNED_ROWS, CORE_MODULE_EXPORTS, CORE_CALLS, CORE_RECORD_FIELD_ROWS, CORE_CALL_COVERAGE_AOT, CoreCallSymbol, IRRecordSchema, IR_GENERATED_RECORDS, IR_RECORD_SCHEMAS, Type, core_call, core_call_coverage_contains, core_enum_cases, ir_host_value_name, ir_runtime_handle_row]
+    jet_foundation.[CORE_SOURCE_OWNED_ROWS, CORE_MODULE_EXPORTS, CORE_RECORD_FIELD_ROWS, IRRecordSchema, IR_GENERATED_RECORDS, IR_RECORD_SCHEMAS, Type, core_enum_cases, ir_host_value_name, ir_runtime_handle_row]
     jet_eval.[jet_eval_compiler_value_method_record]
 }
 
@@ -283,13 +283,6 @@ file_line: fn(files: [SourceFile], path: String, needle: String) -> Int Never! {
     0
 }
 
-symbol_name: fn(symbol: CoreCallSymbol) -> String Never! {
-    if symbol == {
-        .Prelude(name) -> name.copy()
-        .SourceOwned -> ""
-    }
-}
-
 // The special-route table: `key<TAB>path<TAB>needle`, one row per line, a
 // `#` line is a comment. Each row must name a surface row with no other route.
 parse_special_routes: fn(text: String) -> [SpecialRoute] Err! {
@@ -329,17 +322,6 @@ surface: fn(core: ParsedCore, specials: [SpecialRoute], special_files: [SourceFi
             rows.push(nominal_row(id, export.module_name, name, core, route_files))
         }
     }
-    loop record in CORE_CALLS {
-        ^target: record.source_target ?? ""
-        if record.source_role == .Val(role) -> target = core.roles.get(role) ?? ""
-        loop owner in record.receiver_types {
-            if owner == "" || owner.bytes()[0] == 0 -> next
-            id: "receiver:{owner}.{record.member}"
-            if seen.get(id) != None -> next
-            seen[id.copy()] = true
-            rows.push(receiver_row(id, owner, record.member, symbol_name(record.symbol), target, core, route_files, declared_aot: core_call_coverage_contains(record.coverage, CORE_CALL_COVERAGE_AOT)))
-        }
-    }
     // A receiver method that Core source declares has no registry record of
     // its own: the Core parse is its registry. A reserved `__` owner or method
     // is outside the user-callable surface.
@@ -369,49 +351,23 @@ unrouted: fn(id: String, kind: String, owner: String, member: String, problem: S
 }
 
 module_call_row: fn(id: String, module_name: String, member: String, core: ParsedCore, route_files: [SourceFile]) -> SurfaceRow Never! {
-    record: core_call(module_name, member)
     ^owned_path: String?{None}
     loop row in CORE_SOURCE_OWNED_ROWS {
         if row.module_name == module_name && row.owned_members.contains(member) {
             owned_path = Val(row.path.copy())
         }
     }
-    ^declared_aot: false
-    ^target: member.copy()
-    ^source_owned: false
-    ^key: "{module_name}.{member}"
-    if record == .Val(found) {
-        declared_aot = core_call_coverage_contains(found.coverage, CORE_CALL_COVERAGE_AOT)
-        if found.symbol == .SourceOwned {
-            source_owned = true
-            if found.source_target == .Val(t) {
-                target = t.copy()
-                key = "{module_name}.{t}"
-            }
-            if found.source_role == .Val(role) && core.roles.get(role) == .Val(filler) {
-                target = filler.rpartition(".").tail
-                key = filler.copy()
-            }
-        }
-    }
-    if owned_path != None || source_owned {
+    key: "{module_name}.{member}"
+    if owned_path != None {
         if core.fns.get(key) == .Val(at) {
             ty: core.returns.get(key)
             shown: if ty == .Val(t) -> type_text(t) else -> "Unit"
-            return SurfaceRow{id: id.copy(), kind: "module_call", owner: module_name.copy(), member: member.copy(), route: Val(Route{kind: "source", path: at.path.copy(), line: at.line, symbol: target.copy()}), problem: "", declared_aot: declared_aot, result_type: shown, result_class: result_class(ty, core)}
+            return SurfaceRow{id: id.copy(), kind: "module_call", owner: module_name.copy(), member: member.copy(), route: Val(Route{kind: "source", path: at.path.copy(), line: at.line, symbol: member.copy()}), problem: "", declared_aot: false, result_type: shown, result_class: result_class(ty, core)}
         }
         place: owned_path ?? "its Core source"
-        return unrouted(id, "module_call", module_name, member, "`{place}` owns `{member}` but declares no top-level `{target}: fn`", declared_aot: declared_aot)
+        return unrouted(id, "module_call", module_name, member, "`{place}` owns `{member}` but declares no top-level `{member}: fn`")
     }
-    // A row no Core source owns has no declared result type.
-    if record == .Val(found) {
-        name: symbol_name(found.symbol)
-        if ir_route(name, route_files) == .Val(route) {
-            return SurfaceRow{id: id.copy(), kind: "module_call", owner: module_name.copy(), member: member.copy(), route: Val(route.copy()), problem: "", declared_aot: declared_aot, result_type: "", result_class: "unknown"}
-        }
-        return unrouted(id, "module_call", module_name, member, "registry symbol `{name}` has no IR dispatcher arm", declared_aot: declared_aot)
-    }
-    unrouted(id, "module_call", module_name, member, "`{module_name}` exports `{member}` but no Core source owns it and CORE_CALLS has no row", declared_aot: declared_aot)
+    unrouted(id, "module_call", module_name, member, "`{module_name}` exports `{member}` but no Core source owns it")
 }
 
 // `target` is a source-owned registry record's Core function, by its

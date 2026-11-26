@@ -25,7 +25,6 @@ use jet_foundation.[
     TagDef,
     TextEdit,
     Type,
-    core_call,
     diagnostic_with_edit,
     expr_binary_operands,
     expr_optional_method_call_as_call,
@@ -493,12 +492,9 @@ sema_taint_encodable: fn(function: Func, ty: Type) -> Bool Never! {
     false
 }
 
-// The effects of a Core member the Core dispatcher routes with no source
-// declaration: its call record's, as sema_call_core_record_effects bounds
-// them.
-sema_taint_record_effects: fn(module_name: String, method: String) -> [String] Never! {
-    record: core_call(module_name, method) ?? return [String]{}
-    record.effects
+// All Core calls are source-owned; there are no static CORE_CALLS rows left.
+sema_taint_record_effects: fn(_module_name: String, _method: String) -> [String] Never! {
+    [String]{}
 }
 
 // A Prelude value tag (Prelude/Markers.jet, read ahead of time into

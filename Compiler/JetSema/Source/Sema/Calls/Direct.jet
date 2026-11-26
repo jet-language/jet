@@ -11,7 +11,6 @@ use {
         BinOp,
         Call,
         CallArg,
-        CoreCallRecord,
         Diagnostic,
         EffectRowEntry,
         Expr,
@@ -1082,7 +1081,7 @@ sema_call_check_expect_snapshot: fn(call: Call, args: [CallArg], type_args: [Typ
     route: sema_call_core_resolve_route(check, "core.testing", "snap", [Type]{}, 2, call.name_span) ?? return None
     target: if route == {
         .Source(source) -> source
-        .Core(_) | .SharedSite(_) -> {
+        .SharedSite(_) -> {
             check.context.incomplete_reasons.push("expect(value).snapshot() must resolve core.testing.snap's Jet source body")
             return None
         }
@@ -1146,16 +1145,6 @@ sema_call_try_scope_guard: fn(module_name: String, member: String, alias: String
     }
     value: sema_tree_node(Type.Named{name: "ScopeGuard"}, TExprKind.CoreClosureCall{kind: TCoreClosureKind.Guard{executable: cleanup}}, span)
     SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(value, expected, check.environment.*, check.program.*, check.diagnostics)}
-}
-
-// Core registry rows are selected by the caller's canonical route.  These
-// source-owned projections run before the generic fixed-row producer; an
-// unhandled projection deliberately leaves the row for that producer.
-sema_call_try_core_direct_record: fn(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaDirectSpecialCheck Never! {
-    ^reactive: sema_call_try_reactive_core_call(record.module_name, record.member, args, type_args, span, expected, check)
-    if reactive.handled -> return reactive
-
-    SemaDirectSpecialCheck{handled: false, value: None}
 }
 
 sema_call_try_core_direct_call: fn(call: Call, expected: Type?, check: ^SemaBodyCheck) -> SemaDirectSpecialCheck Never! {
@@ -1257,14 +1246,6 @@ sema_call_core_direct_checked: fn(call: Call, expected: Type?, check: ^SemaBodyC
             }
             check.scopes.ownership_call_depth += 1
             ^value: sema_call_core_check_source_owned(target, call.name, call.type_args, call.args, call.name_span, expected, check)
-            check.scopes.ownership_call_depth -= 1
-            return SemaDirectSpecialCheck{handled: true, value: value}
-        }
-        .Core(record) -> {
-            ^special: sema_call_try_core_direct_record(record, call.args, call.type_args, call.name_span, expected, check)
-            if special.handled -> return special
-            check.scopes.ownership_call_depth += 1
-            ^value: sema_call_core_check_fixed(module_name, member, call.type_args, call.args, call.name_span, expected, check)
             check.scopes.ownership_call_depth -= 1
             return SemaDirectSpecialCheck{handled: true, value: value}
         }

@@ -17,7 +17,7 @@
 // own package and in the assembled unit.
 // A Compiler/Prelude source is checked as the compiler embeds it (#6670 c1).
 // First the check that holds the compiler's copies of it equal to it: `jet
-// check` of Compiler/JetFoundation/Source/Registry/CoreCallRows.jet, whose
+// check` of Compiler/JetFoundation/Source/Registry/CoreModules.jet, whose
 // build-time tables read Core.rows and CoreSourceParts.tsv, for those two;
 // CoreSourceRows.jet for Effects.jet, DiagnosticRows.jet for Diagnostics.jet,
 // OwnedTraitRows.jet for Traits.jet
@@ -393,7 +393,7 @@ PRELUDE_UNCHECKED: "PRELUDE UNCHECKED: needs a seed with the prelude check mode"
 
 // The compiler source whose build-time tables read Core.rows and
 // CoreSourceParts.tsv (Compiler/JetFoundation/Source/CoreDeclarations).
-CORE_DECLARATION_TABLES: "Compiler/JetFoundation/Source/Registry/CoreCallRows.jet"
+CORE_DECLARATION_TABLES: "Compiler/JetFoundation/Source/Registry/CoreModules.jet"
 
 // Whether `relative` is a Prelude source LaneCheck checks: a `.jet`, `.rows`
 // or `.tsv` file under Compiler/Prelude other than its package.jet.
@@ -1375,7 +1375,7 @@ first_hit: fn(dir: String, file: String, args: [String], flags: [String]) -[Exec
     assert(!prelude_source("Compiler/Prelude/package.jet") && !prelude_source("Compiler/Prelude/Assets/host.js") && !prelude_source("Compiler/Prelude") && !prelude_source("Compiler/JetCLI/Source/CLI/Front.jet"))
     assert_eq(prelude_generator("Effects.jet", "/j"), [String]{"/j", "Tools/Agent/CoreSourceRows.jet", "--check"})
     assert_eq(prelude_generator("Core.rows", "/j"), [String]{"/j", "check", CORE_DECLARATION_TABLES})
-    assert_eq(prelude_generator("CoreCallRows.jet", "/j"), [String]{})
+    assert_eq(prelude_generator("CoreModules.jet", "/j"), [String]{})
     assert_eq(prelude_generator("Diagnostics.jet", "/j")[1], "Tools/Agent/DiagnosticRows.jet")
     assert_eq(prelude_generator("Core/prelude.jet", "/j")[1], "Tools/Agent/OwnedTraitRows.jet")
     assert_eq(prelude_generator("Units.jet", "/j")[1], "Toolchain/PreludeSources.jet")
