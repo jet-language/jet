@@ -90,7 +90,8 @@ show: fn(expr: Expr) -> String {
 }
 
 built: fn(expr: Expr) {
-    if Calc{body: expr}.print() == {
+    calc: Calc{body: expr}
+    if calc.print() == {
         .Ok(printed) -> {
             again: Calc.parse(printed) ?? return print("{printed}: no reparse")
             print("{printed} => {show(again.body)}")
@@ -118,11 +119,13 @@ run: fn() {
     built(Expr.Add{left: num("1"), op: "*", right: num("2")})
     ^out: [U8]{}
     loop b in "> ".bytes() -> out.push(b)
-    if Calc{body: Expr.Add{left: num("1"), op: "+", right: num("2")}}.print_into(out) == {
+    good: Calc{body: Expr.Add{left: num("1"), op: "+", right: num("2")}}
+    if good.print_into(out) == {
         .Ok(_) -> print("into {String.from_bytes(out) ?? ""}")
         .Err(error) -> print("into error {error}")
     }
-    if Calc{body: Expr.Add{left: num("1"), op: "+", right: Expr.Var{name: "9"}}}.print_into(out) == {
+    bad: Calc{body: Expr.Add{left: num("1"), op: "+", right: Expr.Var{name: "9"}}}
+    if bad.print_into(out) == {
         .Ok(_) -> print("into {String.from_bytes(out) ?? ""}")
         .Err(error) -> print("into error {error}, out {String.from_bytes(out) ?? ""}")
     }

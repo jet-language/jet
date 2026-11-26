@@ -104,7 +104,8 @@ run: fn() {
     script_round(Script{items: [Item]{Item.Assignment(Assignment{name: "let", value: Term.Number{text: "12"}})}})
     ^out: [U8]{}
     loop b in "> ".bytes() -> out.push(b)
-    if Calc{body: Expr.Add{left: num("1"), op: "+", right: num("2")}}.print_into(out) == {
+    sum: Calc{body: Expr.Add{left: num("1"), op: "+", right: num("2")}}
+    if sum.print_into(out) == {
         .Ok(_) -> print("into {String.from_bytes(out) ?? ""}")
         .Err(error) -> print("into error {error}")
     }

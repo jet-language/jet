@@ -130,7 +130,7 @@ sema_root_call_try: fn(receiver: Expr, method: String, method_span: Span, type_a
     ^candidates: [SemaRootCallTarget]{}
     local: sema_root_call_local(method, receiver_type, check)
     if local -> candidates.push(SemaRootCallTarget{alias: None, shown: method})
-    if method == "print" && !local && sema_call_gate_is_unshadowed(method, check.scopes) && sema_call_ambient_printable(receiver_type, check.environment.*, check.program.*) {
+    if method == "print" && !local && !sema_root_call_owner_declares(receiver_type, method, method_span, check) && sema_call_gate_is_unshadowed(method, check.scopes) && sema_call_ambient_printable(receiver_type, check.environment.*, check.program.*) {
         candidates.push(SemaRootCallTarget{alias: None, shown: "core.term.print"})
     }
     loop imported in sema_root_call_imported(method, Val(receiver_type), check) {
