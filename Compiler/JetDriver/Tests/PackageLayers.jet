@@ -9,7 +9,10 @@ use {
     jet_foundation.[
         Diagnostic,
         EffectModuleSource,
+        Span,
         compiler_threads_single,
+        diagnostic_caused_by,
+        diagnostic_from_registry,
     ]
     jet_driver.[
         JetDriverAuthorizedSourceFile,
@@ -339,4 +342,18 @@ layers: {
     diagnostics: layer_test_load([JetDriverAuthorizedSourceRoot]{root}, "app-root", "/app/run.jet")
     assert(diagnostics.len() >= 1)
     assert(diagnostics[0].why.contains("listed in more than one layer") || diagnostics[0].what.contains("listed in more than one layer"))
+}
+
+#Test("report_problems_deduplicates_and_hides_follow_on_errors") {
+    source: "a: missing\nb: bad\nc: cascade\n"
+    root_a: diagnostic_from_registry("E0107", Val(Span{start: 3, end: 10}), "Nothing named `missing` exists here", "why a", "fix a")
+    root_a_dup: diagnostic_from_registry("E0107", Val(Span{start: 3, end: 10}), "Nothing named `missing` exists here", "why a", "fix a")
+    root_b: diagnostic_from_registry("E0107", Val(Span{start: 14, end: 17}), "Nothing named `bad` exists here", "why b", "fix b")
+    follow_c: diagnostic_caused_by(diagnostic_from_registry("E0108", Val(Span{start: 21, end: 28}), "follow-on type mismatch", "why c", "fix c"), root_a)
+    rendered: jet_driver_report_problems("demo.jet", source, [Diagnostic]{follow_c, root_a, root_a_dup, root_b}, false, true)
+    assert(rendered.contains("Nothing named `missing` exists here"), "root a present:\n{rendered}")
+    assert(rendered.contains("Nothing named `bad` exists here"), "root b present:\n{rendered}")
+    assert(!rendered.contains("follow-on type mismatch"), "follow-on hidden from text:\n{rendered}")
+    assert(rendered.contains("Repeated: 1 more time"), "repeat-count line present:\n{rendered}")
+    assert(rendered.contains("3 problems found (1 follow-on hidden)"), "follow-on counted in summary:\n{rendered}")
 }

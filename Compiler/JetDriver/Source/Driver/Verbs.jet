@@ -18,6 +18,7 @@ use jet_foundation.[
     diagnostic_is_tidy,
     diagnostic_registry_row,
     diagnostic_render_all,
+    diagnostic_split_roots,
     diagnostic_without_fix,
     diagnostic_theme_dim,
     sha256_hex,
@@ -215,8 +216,9 @@ jet_driver_problem_report: fn(file: String, source: String, diagnostics: [Diagno
 jet_driver_plural: fn(count: Int) -> String Never! { if count == 1 -> "" else -> "s" }
 
 // Front-end problems ending in the "N problems found" count. `run`, `dev`,
-// and `test` hide ordinary advisory lints unless `--verbose` asks
-// pass `show_advisories` accordingly.
+// and `test` hide ordinary advisory lints unless `--verbose` asks — pass
+// `show_advisories` accordingly. Follow-on reports caused by an earlier report
+// in the same batch are hidden from text output and counted in the summary.
 jet_driver_report_problems: fn(file: String, source: String, diagnostics: [Diagnostic], color: Bool, show_advisories: Bool) -> String Never! {
     ^shown: [Diagnostic]{}
     loop diagnostic in diagnostics {
@@ -224,8 +226,11 @@ jet_driver_report_problems: fn(file: String, source: String, diagnostics: [Diagn
             shown.push(diagnostic.copy())
         }
     }
-    count: shown.len()
-    jet_driver_problem_report(file, source, shown, "{count} problem{jet_driver_plural(count)} found", color)
+    split: diagnostic_split_roots(shown.move())
+    count: split.roots.len()
+    hidden: split.follow_on.len()
+    summary: if hidden > 0 -> "{count} problem{jet_driver_plural(count)} found ({hidden} follow-on hidden)" else -> "{count} problem{jet_driver_plural(count)} found"
+    jet_driver_problem_report(file, source, split.roots, summary, color)
 }
 
 // What fails `jet check` and `jet build`: the errors, or with none the tidy

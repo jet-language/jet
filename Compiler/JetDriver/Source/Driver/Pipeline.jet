@@ -6000,10 +6000,11 @@ jet_driver_compile_keep_going: fn(owned_request: ^^JetDriverCompileRequest, opti
 jet_driver_compile_stages: fn(request: JetDriverCompileRequest, preloaded: ^[JetDriverPreloaded], kg: ^JetDriverKeepGoingLog, checked_projection: Bool, capture: ^JetDriverCheckedProjectionCapture) -> JetDriverCompileResult {
     // Phase spans for the host trace (JET_TRACE_FILE). A phase an early
     // return abandons is closed by the next enclosing end the host records.
-    // JET_KEEP_GOING and `jet check Core` load every declaration of each
-    // loaded Core module, so they check the Core bodies no program calls too;
-    // so does a `jet test` of a Core source, so its unit loads with its owner.
-    use_driven: !kg.enabled && !request.every_core_body && request.core_tests == ""
+    // `jet check Core` loads every declaration of each loaded Core module, so it
+    // checks the Core bodies no program calls too; so does a `jet test` of a
+    // Core source, so its unit loads with its owner. Keep-going keeps the exact
+    // same Core reach pruning as normal compilation so emitted code never changes.
+    use_driven: !request.every_core_body && request.core_tests == ""
     ^load: jet_driver_preloaded_take(preloaded, use_driven) ?? {
         if request.trace_sink == .Val(sink) -> sink.begin("load", "", -1, -1)
         fresh: jet_driver_load_reach(request, use_driven)
@@ -6036,7 +6037,7 @@ jet_driver_compile_stages: fn(request: JetDriverCompileRequest, preloaded: ^[Jet
         ^probe_capture: JetDriverCheckedProjectionCapture{}
         probe: jet_driver_compile_loaded_stages(request, probe_log, load, checked_projection, probe_capture, loop_values.move(), grammar_plans.copy(), JetDriverStagesPass.LoopProbe)
         if request.trace_sink == .Val(sink) -> sink.begin("load", "", -1, -1)
-        load = jet_driver_load_reach(request, !kg.enabled && !request.every_core_body && request.core_tests == "")
+        load = jet_driver_load_reach(request, !request.every_core_body && request.core_tests == "")
         if request.trace_sink == .Val(sink) -> sink.end("load", load.modules.len())
         // A first pass that stopped before computing the values hands back
         // none: every loop's value is then missing.
@@ -6598,7 +6599,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: ^JetD
     ^registration_inputs: jet_driver_registration_module_inputs(load.modules, load.source_units, load.source_files, load.packages, foreign_provider_inputs, load.diagnostics, request.core_sources, release_programs) ?? return jet_driver_compile_result(load, Val(JetDriverStage.Load), false, trace)
     // A compile that reaches Core on demand (jet_driver_load_reach's
     // `use_driven`) leaves Core's casing to the Core library's check.
-    if !kg.enabled && !request.every_core_body && request.core_tests == "" {
+    if !request.every_core_body && request.core_tests == "" {
         loop index in 0..<registration_inputs.len() {
             if module_is_core(registration_inputs[index].module_identity) {
                 registration_inputs[index].check_casing = false
@@ -6718,7 +6719,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: ^JetD
         registration_graph.retain_programs = true
     }
     if request.doc_core_on_demand -> registration_graph.retained_core_demand = true
-    if (kg.enabled || request.every_core_body) && !grammar_batch {
+    if request.every_core_body && !grammar_batch {
         registration_graph.every_core_body = true
     }
     if request.core_entry && request.every_core_body && !request.core_seal && !grammar_batch {
@@ -6726,10 +6727,11 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: ^JetD
     }
     if request.core_seal && !grammar_batch -> registration_graph.core_seal = true
     // A compile that lowers, a Check compile and a `doc_core_on_demand` Doc
-    // compile check Core bodies on demand (CoreDemand.jet); JET_KEEP_GOING
-    // and `jet check Core` check every body.
+    // compile check Core bodies on demand (CoreDemand.jet); `jet check Core`
+    // checks every body. Keep-going keeps the same Core lowering roots so
+    // emitted binaries and runtime packs stay byte-identical.
     lowers: request.mode == JetDriverCompileMode.Program || request.mode == JetDriverCompileMode.Test || request.mode == JetDriverCompileMode.Eval || request.mode == JetDriverCompileMode.RootRun
-    if lowers && !kg.enabled {
+    if lowers {
         tested: if request.core_tests != "" -> jet_driver_test_modules(load, request.core_tests) else -> [U32:Bool]{}
         registration_graph.core_lowering_roots = Val(jet_driver_core_lowering_roots(registration_graph, tested))
     }

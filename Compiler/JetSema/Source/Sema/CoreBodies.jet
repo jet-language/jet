@@ -193,13 +193,14 @@ sema_core_body_module: fn(row: SemaRegistrationModule) -> Bool Never! {
 }
 
 // The facts of `graph`'s compile a Core body's check reads beyond the Core
-// text: its target, profile and OS, and the keep-going and test modes. A
+// text: its target, profile, OS and test mode. Keep-going never changes the
+// checked bodies of a clean Core, so it shares the same cache context. A
 // body captured under other facts is not loaded. A shipped artifact's
 // compile (`jet build`) checks a Core body as a run does: the one check
 // that tells them apart refuses a `debug` trace, which the Core library's
 // check refuses as well (Calls/Direct.jet).
 sema_core_bodies_context: fn(graph: SemaRegistrationGraph) -> String Never! {
-    "{graph.target_machine.triple} {graph.build_facts.profile} {graph.build_facts.os} {graph.keep_going} {graph.test_mode}"
+    "{graph.target_machine.triple} {graph.build_facts.profile} {graph.build_facts.os} {graph.test_mode}"
 }
 
 // Whether `graph`'s Core function checks stay on the module pass's thread

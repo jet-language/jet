@@ -265,6 +265,46 @@ diagnostic_order_root_first: fn(diagnostics: ^^[Diagnostic]) -> [Diagnostic] Nev
     ordered
 }
 
+// A batch of diagnostics split into root reports (rendered in human text) and
+// follow-on reports whose cause names another report in the same batch (hidden
+// from human text and counted in the summary, kept in full for `--json`).
+DiagnosticRootSplit: struct {
+    roots: [Diagnostic],
+    follow_on: [Diagnostic],
+}
+
+// Splits `diagnostics` into root-first root reports and follow-on reports. A
+// report whose `cause` matches an earlier report in the ordered batch is a
+// follow-on; cycles still keep their first member as a root so nothing is lost.
+diagnostic_split_roots: fn(diagnostics: ^^[Diagnostic]) -> DiagnosticRootSplit Never! {
+    ordered: diagnostic_order_root_first(diagnostics)
+    ^roots: [Diagnostic]{}
+    ^follow_on: [Diagnostic]{}
+    loop diagnostic in ordered {
+        ^caused: false
+        if diagnostic.cause.len() > 0 {
+            loop cause in diagnostic.cause {
+                loop prior in roots {
+                    if diagnostic_cause_matches(cause, prior) {
+                        caused = true
+                        break
+                    }
+                }
+                if caused -> break
+                loop prior in follow_on {
+                    if diagnostic_cause_matches(cause, prior) {
+                        caused = true
+                        break
+                    }
+                }
+                if caused -> break
+            }
+        }
+        if caused -> follow_on.push(diagnostic) else -> roots.push(diagnostic)
+    }
+    DiagnosticRootSplit{roots: roots.move(), follow_on: follow_on.move()}
+}
+
 // A label's types print by the shared display rule
 // (diagnostic_display_identities), as the message's do, with clashes judged
 // over the label.

@@ -1,0 +1,18 @@
+# `jet run` on a file with check errors stops at check with the exact
+# diagnostics `jet check` prints for that file and prints no program output.
+# Per owner ruling (full path on refused `jet run` headers), `jet run` writes
+# `{work}/main.jet` on the `-->` line while keeping every diagnostic, span,
+# Why/Fix/More, summary count, and explain pointer identical to `jet check`.
+fixture: RunStopsAtCheckWithExactCheckDiagnostics.fixture
+env: NO_COLOR=1
+env: TERM=dumb
+step: jet check main.jet
+exit: 1
+stdout: = "" # jet check prints diagnostics on stderr only
+stderr: ~ "Error: Jet.UnknownName: Nothing named `missing_symbol` exists here\n  --> main.jet:2:5\n    |\n  2 |     missing_symbol + 1\n    |     ^^^^^^^^^^^^^^\n Why: A name must be declared before it's used\n Fix: Declare it first: `missing_symbol: ...`\nMore: jet-lang.dev/e/Jet.UnknownName\n" # first check diagnostic
+stderr: ~ "Error: Jet.ReturnTypeMismatch: This value is String (text), but `broken_type` returns Int\n  --> main.jet:6:5\n    |\n  6 |     \"not an Int\"\n    |     ^^^^^^^^^^^^\n Why: `broken_type` declares Int as its result, so the value it hands back must be Int\n Fix: Hand back a Int value: convert this value to Int, or return the value you meant\nMore: jet-lang.dev/e/Jet.ReturnTypeMismatch\n\n2 problems found\nRun `jet explain Jet.UnknownName` to learn more\n" # second check diagnostic and summary
+step: jet run main.jet
+exit: 1
+stdout: = "" # jet run prints no program output when check fails
+stderr: ~ "Error: Jet.UnknownName: Nothing named `missing_symbol` exists here\n  --> {work}/main.jet:2:5\n    |\n  2 |     missing_symbol + 1\n    |     ^^^^^^^^^^^^^^\n Why: A name must be declared before it's used\n Fix: Declare it first: `missing_symbol: ...`\nMore: jet-lang.dev/e/Jet.UnknownName\n" # exact first diagnostic from jet check
+stderr: ~ "Error: Jet.ReturnTypeMismatch: This value is String (text), but `broken_type` returns Int\n  --> {work}/main.jet:6:5\n    |\n  6 |     \"not an Int\"\n    |     ^^^^^^^^^^^^\n Why: `broken_type` declares Int as its result, so the value it hands back must be Int\n Fix: Hand back a Int value: convert this value to Int, or return the value you meant\nMore: jet-lang.dev/e/Jet.ReturnTypeMismatch\n\n2 problems found\nRun `jet explain Jet.UnknownName` to learn more\n" # exact second diagnostic and summary from jet check

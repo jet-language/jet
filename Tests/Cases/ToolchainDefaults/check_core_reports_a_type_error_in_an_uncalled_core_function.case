@@ -1,7 +1,7 @@
 # Docs/Spec/Reference/cli.md: a program check loads only the Core declarations the program
-# reaches, so a type error in a Core function nothing calls stays hidden from it. `jet check Core`
-# and a JET_KEEP_GOING check load and check every Core declaration, so both report it. The
-# program checks name the tree; `jet check tree/Core` names it by its entry.
+# reaches, so a type error in a Core function nothing calls stays hidden from it — both with
+# and without `--keep-going`, since keep-going never changes Core reach pruning. `jet check Core`
+# loads and checks every Core declaration, so it reports the uncalled error.
 env: NO_COLOR=1
 requires: os:unix
 fixture: CheckCoreUncalled.fixture
@@ -15,8 +15,8 @@ stdout+stderr: ~ "has no problems" # the check's verdict line; the path varies w
 step: jet check tree/app/probe.jet
 env: JET_TOOLCHAIN_ROOT={work}/tree
 env: JET_KEEP_GOING=1
-exit: 1
-stdout+stderr: ~ "not an Int" # the error's source line; the rest of the report names the work directory
+exit: 0
+stdout+stderr: ~ "has no problems" # keep-going preserves Core reach pruning
 step: jet check tree/Core
 unset: JET_TOOLCHAIN_ROOT
 exit: 1
