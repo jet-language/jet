@@ -559,6 +559,9 @@ sema_guest_check_surfaces: fn(graph: ^SemaRegistrationGraph) {
                 }
                 .CModule(c_module) -> {
                     loop foreign in c_module.functions {
+                        if foreign.generated && (foreign.callback_transport == Val("managed") || foreign.callback_transport == Val("managed-close") || foreign.callback_transport == Val("emit-task")) {
+                            next
+                        }
                         sema_guest_record_symbol(symbols, foreign.rust_path, owner, "C module imports", foreign.name, Val(foreign.name_span), diagnostics)
                     }
                 }

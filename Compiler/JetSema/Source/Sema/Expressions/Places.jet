@@ -574,6 +574,11 @@ sema_expression_field_checked: fn(base: TExpr, member: String, span: Span, expec
             return sema_expr_expected_owned(run_value, expected, environment, program, diagnostics)
         }
     }
+    if owner_name == "FfiCallbackEvent" && owner_args.len() == 1 && member == "value" {
+        event_reference: TFieldRef{owner: None, name: member, ty: owner_args[0], boxed: false}
+        event_value: sema_tree_node(owner_args[0], TExprKind.Field{receiver: base, field: event_reference}, span)
+        return sema_expr_expected_owned(event_value, expected, environment, program, diagnostics)
+    }
     // A builtin Core record (`ProcessReceipt.success`, `IOContext.operation`)
     // has no Jet declaration; its fields are the generated Core record rows.
     // A core_only field is private storage: outside Core source it does not

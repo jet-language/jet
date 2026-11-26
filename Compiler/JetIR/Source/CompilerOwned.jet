@@ -311,6 +311,12 @@ ir_compiler_owned_record_fields: fn(name: String, core: IRCompilerOwnedCore) -> 
             {name: "grads", ty: t},
         })
     }
+    if name == "FfiCallbackEvent" {
+        return Val([TypeTupleField]{
+            {name: "__reg", ty: Type.IntN{signed: false, bits: 64}},
+            {name: "value", ty: t},
+        })
+    }
     if name_find(core.keys, name) == .Val(found) -> return Val(core.fields[name_index(found)])
     loop record in IR_COMPILER_OWNED_MATH_RECORDS {
         if record.name != name -> next
@@ -346,8 +352,8 @@ IR_COMPILER_OWNED_MATH_RECORDS: #run { [IRCompilerOwnedRecord]{
 } }
 
 // The carrier record rows between `Range` and the Core records (generic Core
-// carriers, geometry, keyed vault, data summaries, `AllocError`, `VJPRun`),
-// in program order.
+// carriers, geometry, keyed vault, data summaries, `AllocError`, `VJPRun`,
+// `FfiCallbackEvent`), in program order.
 IR_COMPILER_OWNED_CARRIER_RECORDS: #run { [String]{
     "DataJoin",
     "Group",
@@ -375,6 +381,7 @@ IR_COMPILER_OWNED_CARRIER_RECORDS: #run { [String]{
     "AllocError",
     "DataSummary",
     "VJPRun",
+    "FfiCallbackEvent",
 } }
 
 // The type parameters of a compiler-owned row; empty for every other row.
@@ -385,7 +392,7 @@ ir_compiler_owned_generic_params: fn(name: String) -> [String] Never! {
     if name == "Point2" || name == "Delta2" -> return [String]{"T", "Space"}
     if name == "Ray2" || name == "Transform2" -> return [String]{"T", "From", "To"}
     if name == "Transform" -> return [String]{"From", "To"}
-    if name == "DataSnapshot" || name == "KeyRef" || name == "MutationPlan" || name == "VaultWrite" || name == "Rotation" || name == "VJPRun" {
+    if name == "DataSnapshot" || name == "KeyRef" || name == "MutationPlan" || name == "VaultWrite" || name == "Rotation" || name == "VJPRun" || name == "FfiCallbackEvent" {
         return [String]{"T"}
     }
     if name == "DispatchFailure" -> return [String]{"E"}

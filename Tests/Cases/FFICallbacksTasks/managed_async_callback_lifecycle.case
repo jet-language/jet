@@ -1,0 +1,22 @@
+# Proves all managed async FFI callback lifecycle invariants:
+# 1. Captured heap state stays alive after the registering function returns.
+# 2. Borrowed `event.stop()` closes admission without deadlocking on itself.
+# 3. Late invocation after `event.stop()` is refused.
+# 4. In-flight invocation on a foreign C pthread drains before `unsubscribe`
+#    resolves and releases captures.
+# 5. Stale foreign invocation after `unsubscribe` is refused without UAF, and
+#    scope-end drop closes/drains cleanly.
+requires: os:unix
+fixture: ManagedAsyncCallbackLifecycle.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet inspect bind c/source.h --pkg source
+exit: 0
+step: jet check main.jet
+exit: 0
+step: jet build main.jet
+exit: 0
+step: built
+exit: 0
+stdout: = managed_async_callback_lifecycle.out

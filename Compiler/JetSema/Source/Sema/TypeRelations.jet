@@ -1378,6 +1378,7 @@ SEMA_TYPE_COMPILER_CARRIERS: [String]{
     "Camera",
     "DataGroupedQuery",
     "Device",
+    "FfiCallbackEvent",
     "FileLines",
     "ID",
     "Matrix",
@@ -3035,7 +3036,9 @@ sema_type_dyn_bound: fn(graph: SemaRegistrationGraph, actual_resolved: Type, bou
     if !owned_trait_through_elements(bound_name) -> return None
     ^spelled: false
     if actual_resolved == .Named(name) -> spelled = sema_data_is_json_name(name)
-    if !spelled || sema_type_resolve_nominal_row_at(graph, actual_resolved, caller) != None -> return None
+    if !spelled || sema_type_resolve_nominal_row_at(graph, actual_resolved, caller) != None {
+        return None
+    }
     handle: IR_RUNTIME_HANDLES[ir_runtime_handle_row("Dyn") ?? return None]
     if bound_name == "Display" -> return Val(handle.display)
     if bound_name == "Debug" -> return Val(handle.debug)

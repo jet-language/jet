@@ -1,0 +1,56 @@
+use source: c.source
+
+register_capture: fn(tag: String) -> FfiCallbackRegistration {
+    label: "{tag}-captured"
+    source.on_data(fn(event) {
+        print("{label}: {event.value}")
+        if (event.value == I64{12}) { event.stop() }
+    })
+}
+
+register_drain_callback: fn(tag: String) -> FfiCallbackRegistration {
+    label: "{tag}-captured"
+    source.on_data(fn(event) {
+        _: source.mark_inflight_entered_and_delay()
+        print("{label}: {event.value}")
+        _: source.mark_inflight_done()
+    })
+}
+
+run: fn() {
+    // 1. Captured heap String outlives register_capture; event.stop() is
+    //    non-blocking; post-stop emission (13) is refused before unsubscribe.
+    sub1: register_capture("ok")
+    t11: source.emit_async(I64{11})
+    _: (t11.join() ?? panic("task 11 failed")) ?? panic("emit 11 failed")
+    t12: source.emit_async(I64{12})
+    _: (t12.join() ?? panic("task 12 failed")) ?? panic("emit 12 failed")
+    t13: source.emit_async(I64{13})
+    v13: (t13.join() ?? panic("task 13 failed")) ?? panic("emit 13 failed")
+    print("after-stop-emitted: {v13}")
+    u1: source.unsubscribe(sub1)
+    _: (u1.join() ?? panic("unsub 1 task failed")) ?? panic("unsub 1 failed")
+
+    // 2. Concurrent in-flight callback on a foreign C pthread drains completely
+    //    before unsubscribe resolves and releases captures.
+    sub2: register_drain_callback("drain")
+    started: source.start_inflight_pthread(I64{42})
+    if started != 0 -> panic("pthread start failed")
+    _: source.wait_inflight_entered()
+    u2: source.unsubscribe(sub2)
+    _: (u2.join() ?? panic("unsub 2 task failed")) ?? panic("unsub 2 failed")
+    done_before_return: source.read_inflight_done()
+    print("drain-done: {done_before_return}")
+    _: source.join_inflight_pthread()
+
+    // 3. Stale foreign invocation after unsubscribe is cleanly refused (no UAF).
+    _: source.invoke_stale_callback(I64{99})
+    print("stale-refused")
+
+    // 4. Scope-end drop without explicit unsubscribe closes and drains cleanly.
+    if true -> _sub3: register_capture("dropped")
+    unsubs: source.read_unsub_count()
+    print("scope-drop-unsub: {unsubs}")
+    _: source.invoke_stale_callback(I64{100})
+    print("all-ok")
+}

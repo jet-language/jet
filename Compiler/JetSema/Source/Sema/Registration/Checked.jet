@@ -1291,7 +1291,75 @@ sema_checked_foreign_bridge_eligible: fn(graph: SemaRegistrationGraph, module_id
     managed || sema_checked_foreign_bridge_generated_shape(graph, module_identity, generated, params, return_type, handles) || sema_checked_foreign_bridge_resident_shape(graph, module_identity, params, return_type, handles) || sema_checked_foreign_bridge_legacy_shape(graph, module_identity, params, return_type, handles)
 }
 
+sema_checked_foreign_managed_callback_param: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, ty: Type, handles: [SemaCheckedForeignHandle]) -> Bool Never! {
+    qualified: sema_checked_qualify_type(graph, ty, module_identity)
+    if qualified == .Fn(params, ret, _, _, _, _) {
+        if params.len() != 1 -> return false
+        event_ok: if params[0] == .Apply(name, args) -> name == "FfiCallbackEvent" && args.len() == 1 && sema_checked_foreign_type(graph, args[0], module_identity, true, false, handles, [SymbolID]{}) else -> false
+        if !event_ok -> return false
+        return if ret == .Val(returned) -> returned == (Type.Named{name: "Unit"}) else -> true
+    }
+    false
+}
+
+sema_checked_foreign_managed_task_return: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, ty: Type, handles: [SemaCheckedForeignHandle], unit_ok: Bool) -> Bool Never! {
+    qualified: sema_checked_qualify_type(graph, ty, module_identity)
+    if qualified == .Apply(name, args) {
+        if name != "Task" || args.len() != 1 -> return false
+        if args[0] == .Result(ok, err) {
+            err_ok: if err == .Named(err_name) -> err_name == "Err" || err_name.ends_with(".Err") else -> false
+            if !err_ok -> return false
+            if ok == (Type.Named{name: "Unit"}) -> return unit_ok
+            return !unit_ok && sema_checked_foreign_type(graph, ok, module_identity, true, false, handles, [SymbolID]{})
+        }
+    }
+    false
+}
+
+sema_checked_foreign_managed_callback_signature: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, registered: SemaRegistrationForeignFunction, handles: [SemaCheckedForeignHandle]) -> Bool Never! {
+    if !registered.declaration.generated -> return false
+    transport: registered.declaration.callback_transport ?? return false
+    if transport == "managed" || transport == "native-start" {
+        ^has_callback: false
+        loop parameter in registered.declaration.params {
+            if sema_checked_foreign_managed_callback_param(graph, module_identity, parameter.ty, handles) {
+                has_callback = true
+            } else if !sema_checked_foreign_type(graph, parameter.ty, module_identity, true, true, handles, [SymbolID]{}) {
+                return false
+            }
+        }
+        if !has_callback -> return false
+        returned: registered.declaration.return_type ?? return false
+        if transport == "managed" {
+            return returned == (Type.Named{name: "FfiCallbackRegistration"})
+        }
+        return if returned == .Apply(name, args) -> name == "Ptr" && args.len() == 1 else -> sema_checked_foreign_type(graph, returned, module_identity, true, true, handles, [SymbolID]{})
+    }
+    if transport == "managed-close" {
+        if registered.declaration.params.len() != 1 -> return false
+        param: registered.declaration.params[0]
+        if param.convention != AccessConvention.Move || param.ty != (Type.Named{name: "FfiCallbackRegistration"}) {
+            return false
+        }
+        returned: registered.declaration.return_type ?? return false
+        return sema_checked_foreign_managed_task_return(graph, module_identity, returned, handles, true)
+    }
+    if transport == "emit-task" {
+        loop parameter in registered.declaration.params {
+            if !sema_checked_foreign_type(graph, parameter.ty, module_identity, true, true, handles, [SymbolID]{}) {
+                return false
+            }
+        }
+        returned: registered.declaration.return_type ?? return false
+        return sema_checked_foreign_managed_task_return(graph, module_identity, returned, handles, false)
+    }
+    false
+}
+
 sema_checked_foreign_signature: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, registered: SemaRegistrationForeignFunction, c_abi: Bool, handles: [SemaCheckedForeignHandle], diagnostics: ^[Diagnostic]) -> Bool {
+    if c_abi && sema_checked_foreign_managed_callback_signature(graph, module_identity, registered, handles) {
+        return true
+    }
     ^valid: true
     loop parameter in registered.declaration.params {
         if !sema_checked_foreign_type(graph, parameter.ty, module_identity, c_abi, registered.declaration.generated, handles, [SymbolID]{}) && !(c_abi && parameter.convention == AccessConvention.Write && sema_checked_foreign_by_reference_struct(graph, parameter.ty, module_identity, [SymbolID]{})) {

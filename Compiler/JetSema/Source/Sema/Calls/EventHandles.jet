@@ -22,7 +22,7 @@ sema_event_unit: fn() -> Type Never! { Type.Named{name: "Unit"} }
 sema_event_handle_family: fn(ty: Type) -> String? {
     if ty == {
         .Apply(name, args) -> if name == {
-            "Event" | "DispatchReport" -> if args.len() == 1 -> Val(name) else -> None
+            "Event" | "DispatchReport" | "FfiCallbackEvent" -> if args.len() == 1 -> Val(name) else -> None
             "Hook" | "DecisionHook" | "AsyncEvent" -> if args.len() == 2 -> Val(name) else -> None
             else -> None
         }
@@ -109,6 +109,10 @@ sema_event_method_shape: fn(owner: String, method: String, args: [Type]) -> {ari
         if method == "delivered" || method == "queued" || method == "dropped" {
             return Val({arity: 0, result: Type.Int})
         }
+        return None
+    }
+    if owner == "FfiCallbackEvent" {
+        if method == "stop" -> return Val({arity: 0, result: sema_event_unit()})
         return None
     }
     None

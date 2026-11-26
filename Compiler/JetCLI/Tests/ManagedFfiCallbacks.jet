@@ -1,0 +1,170 @@
+// End-to-end Sema, IR lowering, IR lint, optimization (O0/O1/O2), and x64
+// codegen tests for managed FFI callback registrations:
+// - Examples/Interop/FFI/Callbacks binds, checks, lowers, lints, optimizes,
+//   and compiles to x64 ELF objects across O0, O1, and O2 with zero errors.
+// - Consuming `unsubscribe(sub)` refuses reuse of `FfiCallbackRegistration`.
+// - ManagedAsyncCallbackLifecycle binds, checks, lowers, and compiles cleanly.
+use {
+    cb_files: core.files
+    jet_cli.[
+        jet_cli_compile_check,
+        jet_cli_compile_executable_file,
+        jet_cli_execute,
+        jet_cli_front,
+        jet_cli_toolchain_root,
+    ]
+    jet_driver.[jet_driver_checked_declarations]
+    jet_foundation.[BuildSettingOverride, build_options_stock, compiler_threads_single]
+    jet_ir.[
+        IROptInline,
+        IROptOptions,
+        ir_build_program,
+        ir_checks_stock,
+        ir_function_text,
+        ir_lint_module,
+        ir_lint_text,
+        ir_optimize_module_measured,
+        ir_x64_compile_module,
+        ir_x64_object,
+    ]
+    jet_pkg_model.[WorkspaceDeclarationCache]
+}
+
+managed_cb_root: fn() -> String {
+    if jet_cli_toolchain_root(cb_files.cwd() ?? ".") == {
+        .Found(found) -> found
+        .Missing(what, fix) -> panic("{what}; {fix}")
+    }
+}
+
+managed_cb_copy_dir: fn(src: String, dst: String) {
+    cb_files.create_dir_all(dst) ?? panic("mkdir {dst}: {err}")
+    entries: cb_files.list_dir(src) ?? panic("list {src}: {err}")
+    loop entry in entries {
+        if entry.name == ".jet" -> next
+        from: "{src}/{entry.name}"
+        to: "{dst}/{entry.name}"
+        if entry.is_dir -> managed_cb_copy_dir(from, to) else {
+            cb_files.copy(from, to) ?? panic("copy {entry.name}: {err}")
+        }
+    }
+}
+
+managed_cb_check_file: fn(path: String) -> {exit_code: Int, stdout: String, stderr: String} {
+    source: cb_files.read(path) ?? panic("read {path}: {err}")
+    out: jet_cli_compile_check(path, source, false, false, None, true, false, false, [BuildSettingOverride]{}, "", false, None, false)
+    {exit_code: out.exit_code, stdout: out.stdout, stderr: out.stderr}
+}
+
+managed_cb_verify_tiers: fn(entry: String, require_hooks: Bool) {
+    compiled: jet_cli_compile_executable_file(entry, None, false, None, build_options_stock("build"), None)
+    if compiled.move() == {
+        .Refused(refusal) -> { panic("compile refused: {refusal.stderr}") }
+        .Checked(result, inputs, _) -> {
+            assert(result.complete && result.internal_problem == None, "compile incomplete")
+            ^checked: inputs.move() ?? panic("missing lowering inputs")
+            declarations: jet_driver_checked_declarations(checked)
+            ^built: ir_build_program(checked.functions.move(), checked.decls, checked.symbols.move(), checked.interner.move(), declarations.type_defs.move(), declarations.impls.move(), checked.sources.move(), declarations.constants.move(), declarations.foreign.move(), checked.entry_key ?? "", ir_checks_stock(), compiler_threads_single(), None)
+            assert(built.failures.len() == 0, "IR lowering failures: {built.failures.len()}")
+
+            lint_o0: ir_lint_module(built.program, "ir.build", compiler_threads_single())
+            assert(lint_o0.len() == 0, "O0 IR lint errors: {ir_lint_text(lint_o0)}")
+
+            if require_hooks {
+                ^ir_parts: [String]{}
+                loop f in built.program.functions {
+                    ir_parts.push(ir_function_text(built.program, f))
+                }
+                ir_all: ir_parts.join("\n")
+                assert(ir_all.contains("jet_rt_ffi_callback_alloc"), "missing jet_rt_ffi_callback_alloc")
+                assert(ir_all.contains("jet_rt_ffi_callback_id"), "missing jet_rt_ffi_callback_id")
+                assert(ir_all.contains("jet_rt_ffi_callback_bind_ctx"), "missing jet_rt_ffi_callback_bind_ctx")
+                assert(ir_all.contains("jet_rt_ffi_callback_dispatch"), "missing jet_rt_ffi_callback_dispatch")
+                assert(ir_all.contains("jet_rt_ffi_callback_event_stop"), "missing jet_rt_ffi_callback_event_stop")
+                assert(ir_all.contains("jet_rt_ffi_callback_begin_close"), "missing jet_rt_ffi_callback_begin_close")
+                assert(ir_all.contains("jet_rt_ffi_callback_finish_close"), "missing jet_rt_ffi_callback_finish_close")
+                assert(ir_all.contains("on_data"), "missing native on_data")
+                assert(ir_all.contains("emit_async"), "missing native emit_async")
+                assert(ir_all.contains("unsubscribe"), "missing native unsubscribe")
+            }
+
+            x0: ir_x64_compile_module(built.program, compiler_threads_single())
+            assert(x0.errors.len() == 0, "x64 O0 failed: {x0.errors.join("; ")}")
+            obj0: ir_x64_object(x0, true)
+            assert(obj0.errors.len() == 0 && obj0.bytes.len() > 0, "O0 ELF object failed: {obj0.errors.join("; ")}")
+
+            ^_: ir_optimize_module_measured(built.program, IROptOptions{level: 1, small: false, inline: IROptInline.Auto, disabled: [String]{}, verify: true, stress: false, dump: ""}, compiler_threads_single())
+            lint_o1: ir_lint_module(built.program, "ir.opt1", compiler_threads_single())
+            assert(lint_o1.len() == 0, "O1 IR lint errors: {ir_lint_text(lint_o1)}")
+            x1: ir_x64_compile_module(built.program, compiler_threads_single())
+            assert(x1.errors.len() == 0, "x64 O1 failed: {x1.errors.join("; ")}")
+            obj1: ir_x64_object(x1, true)
+            assert(obj1.errors.len() == 0 && obj1.bytes.len() > 0, "O1 ELF object failed: {obj1.errors.join("; ")}")
+
+            ^_: ir_optimize_module_measured(built.program, IROptOptions{level: 2, small: false, inline: IROptInline.Auto, disabled: [String]{}, verify: true, stress: false, dump: ""}, compiler_threads_single())
+            lint_o2: ir_lint_module(built.program, "ir.opt2", compiler_threads_single())
+            assert(lint_o2.len() == 0, "O2 IR lint errors: {ir_lint_text(lint_o2)}")
+            x2: ir_x64_compile_module(built.program, compiler_threads_single())
+            assert(x2.errors.len() == 0, "x64 O2 failed: {x2.errors.join("; ")}")
+            obj2: ir_x64_object(x2, true)
+            assert(obj2.errors.len() == 0 && obj2.bytes.len() > 0, "O2 ELF object failed: {obj2.errors.join("; ")}")
+        }
+    }
+}
+
+#Test("managed_ffi_callbacks_e2e: Examples/Interop/FFI/Callbacks binds, checks, lowers, and emits x64 cleanly") {
+    root: managed_cb_root()
+    tmp: cb_files.temp_dir("jet_managed_ffi_cb") ?? panic("temp_dir: {err}")
+    work: "{tmp.path}/Callbacks"
+    managed_cb_copy_dir("{root}/Examples/Interop/FFI/Callbacks", work)
+    ^discovery: WorkspaceDeclarationCache.new()
+
+    bind_out: jet_cli_execute(jet_cli_front([String]{"inspect", "bind", "{work}/Native/Callbacks.h", "--pkg", "source", "-o", "{work}/.jet/bindings/c/source.jet"}, discovery))
+    assert(bind_out.exit_code == 0, "bind failed: {bind_out.stderr}")
+
+    check_out: managed_cb_check_file("{work}/run.jet")
+    assert(check_out.exit_code == 0, "check failed: stdout={check_out.stdout} stderr={check_out.stderr}")
+
+    managed_cb_verify_tiers("{work}/run.jet", true)
+}
+
+#Test("managed_ffi_callbacks_reuse_refused: consuming unsubscribe refuses reuse of FfiCallbackRegistration") {
+    root: managed_cb_root()
+    tmp: cb_files.temp_dir("jet_managed_ffi_cb_reuse") ?? panic("temp_dir: {err}")
+    work: "{tmp.path}/Callbacks"
+    managed_cb_copy_dir("{root}/Examples/Interop/FFI/Callbacks", work)
+    ^discovery: WorkspaceDeclarationCache.new()
+    bind_out: jet_cli_execute(jet_cli_front([String]{"inspect", "bind", "{work}/Native/Callbacks.h", "--pkg", "source", "-o", "{work}/.jet/bindings/c/source.jet"}, discovery))
+    assert(bind_out.exit_code == 0, "bind failed: {bind_out.stderr}")
+
+    bad_src: [String]{
+        "use source: c.source",
+        "run: fn() {{",
+        "    sub: source.on_data(fn(event) {{ event.stop() }})",
+        "    first: source.unsubscribe(sub)",
+        "    _: (first.join() ?? panic(\"a\")) ?? panic(\"b\")",
+        "    second: source.unsubscribe(sub)",
+        "    _: (second.join() ?? panic(\"c\")) ?? panic(\"d\")",
+        "}}",
+    }.join("\n")
+    cb_files.write("{work}/bad.jet", bad_src) ?? panic("write bad.jet: {err}")
+    check_out: managed_cb_check_file("{work}/bad.jet")
+    assert(check_out.exit_code != 0, "second unsubscribe(sub) must fail typecheck")
+    assert(check_out.stderr.contains("Jet.UseAfterMove"), "expected Jet.UseAfterMove, got: {check_out.stderr}")
+}
+
+#Test("managed_ffi_callbacks_lifecycle_fixture: ManagedAsyncCallbackLifecycle binds, checks, lowers, and emits x64 across O0/O1/O2") {
+    root: managed_cb_root()
+    tmp: cb_files.temp_dir("jet_managed_ffi_cb_life") ?? panic("temp_dir: {err}")
+    work: "{tmp.path}/Lifecycle"
+    managed_cb_copy_dir("{root}/Tests/Cases/FFICallbacksTasks/ManagedAsyncCallbackLifecycle.fixture", work)
+    ^discovery: WorkspaceDeclarationCache.new()
+
+    bind_out: jet_cli_execute(jet_cli_front([String]{"inspect", "bind", "{work}/c/source.h", "--pkg", "source", "-o", "{work}/.jet/bindings/c/source.jet"}, discovery))
+    assert(bind_out.exit_code == 0, "bind failed: {bind_out.stderr}")
+
+    check_out: managed_cb_check_file("{work}/main.jet")
+    assert(check_out.exit_code == 0, "check failed: stdout={check_out.stdout} stderr={check_out.stderr}")
+
+    managed_cb_verify_tiers("{work}/main.jet", false)
+}
