@@ -1,0 +1,137 @@
+// End-to-end multi-process driver proving workspace session ownership (`jet self lsp --serve`),
+// attached build parity across success, error, and ICE (byte-identical binary + stdout/stderr),
+// `jet dev --serve` attaching as a client, toolchain mismatch fallback (silent vs --verbose),
+// clean endpoint removal on owner close, and disk edits made while no session ran.
+use {
+    files: core.files
+    process: core.process
+    sys: core.sys
+    time: core.time
+}
+
+strip_elapsed: fn(text: String) -> String Never! {
+    key: "\"elapsed_ms\":"
+    if text.split_once(key) == .Val(parts) {
+        rest: parts.after
+        ^end: 0
+        bytes: rest.bytes()
+        loop end < bytes.len() && bytes[end] >= (U8{48}) && bytes[end] <= (U8{57}) {
+            end += 1
+        }
+        return "{parts.before}{key}0{rest.slice(end..<rest.len())}"
+    }
+    "{text}"
+}
+
+run: fn() {
+    jet: sys.get("JET_BIN") ?? "jet"
+    root: "{sys.temp_dir()}/jet-session-e2e-{sys.getpid()}"
+    files.remove_all(root).drop("clear prior e2e dir")
+    ws: "{root}/ws"
+    bad_dir: "{root}/bad_pkg"
+    xdg: "{root}/xdg"
+    files.create_dir_all(ws) ?? panic("create ws: {err}")
+    files.create_dir_all(bad_dir) ?? panic("create bad_dir: {err}")
+    files.create_dir_all(xdg) ?? panic("create xdg: {err}")
+    files.set_mode(xdg, 0o700) ?? panic("chmod xdg: {err}")
+
+    files.write("{ws}/package.jet", "name: \"e2e_app\"\nversion: \"0.1.0\"\n") ?? panic("write package.jet: {err}")
+    main_file: "{ws}/main.jet"
+    bad_file: "{bad_dir}/bad.jet"
+    bin_path: "{ws}/.jet/build/main"
+    files.write(main_file, "run: fn() {{\n    print(\"v1-output\")\n}}\n") ?? panic("write main.jet: {err}")
+    files.write(bad_file, "run: fn() {{\n    x: missing_symbol_e2e\n}}\n") ?? panic("write bad.jet: {err}")
+
+    // 1. Fresh baselines (success, error --json, ICE).
+    fresh_ok: process.cmd([String]{jet, "build", main_file, "--session=off"}).cwd(ws).env("XDG_RUNTIME_DIR", xdg).env("NO_COLOR", "1").stdout(.Capture).stderr(.Capture).run() ?? panic("fresh build: {err}")
+    assert(fresh_ok.code == 0, "fresh build failed: {fresh_ok.errors}")
+    fresh_bytes: files.read_bytes(bin_path) ?? panic("read fresh bin: {err}")
+    files.remove(bin_path).drop("remove fresh bin")
+
+    fresh_err: process.cmd([String]{jet, "build", bad_file, "--json", "--session=off"}).cwd(ws).env("XDG_RUNTIME_DIR", xdg).env("NO_COLOR", "1").stdout(.Capture).stderr(.Capture).run() ?? panic("fresh err build: {err}")
+    assert(fresh_err.code != 0, "fresh err build must fail")
+
+    fresh_ice: process.cmd([String]{jet, "build", main_file, "--session=off"}).cwd(ws).env("XDG_RUNTIME_DIR", xdg).env("NO_COLOR", "1").env("JET_ICE_SELF_TEST", "1").stdout(.Capture).stderr(.Capture).run() ?? panic("fresh ice build: {err}")
+    assert(fresh_ice.code == 101, "fresh ice build must exit 101, got {fresh_ice.code}")
+
+    // 2. Start `jet self lsp --serve` as workspace owner.
+    lsp_owner: process.cmd([String]{jet, "self", "lsp", "--serve"}).cwd(ws).env("XDG_RUNTIME_DIR", xdg).env("NO_COLOR", "1").stdin(.Stream).stdout(.Capture).stderr(.Capture).spawn() ?? panic("spawn lsp --serve: {err}")
+    desc_path: "{ws}/.jet/session"
+    ^ready: false
+    loop _ in 0..<200 {
+        if files.exists(desc_path) {
+            ready = true
+            break
+        }
+        time.sleep(50ms)
+    }
+    assert(ready, "lsp --serve did not publish .jet/session")
+    desc_before: files.read(desc_path) ?? panic("read .jet/session: {err}")
+
+    // 3. Attached build parity across success, error, and ICE.
+    att_ok: process.cmd([String]{jet, "build", main_file, "--session=required"}).cwd(ws).env("XDG_RUNTIME_DIR", xdg).env("NO_COLOR", "1").stdout(.Capture).stderr(.Capture).run() ?? panic("attached build: {err}")
+    assert(att_ok.code == 0, "attached build failed: {att_ok.errors}")
+    assert(att_ok.output == fresh_ok.output, "attached stdout mismatch")
+    assert(att_ok.errors == fresh_ok.errors, "attached stderr mismatch")
+    att_bytes: files.read_bytes(bin_path) ?? panic("read attached bin: {err}")
+    assert(att_bytes == fresh_bytes, "attached binary bytes differ from fresh build")
+
+    att_err: process.cmd([String]{jet, "build", bad_file, "--json", "--session=required"}).cwd(ws).env("XDG_RUNTIME_DIR", xdg).env("NO_COLOR", "1").stdout(.Capture).stderr(.Capture).run() ?? panic("attached err build: {err}")
+    assert(att_err.code == fresh_err.code, "attached err exit mismatch")
+    assert(strip_elapsed(att_err.output) == strip_elapsed(fresh_err.output), "attached err stdout mismatch")
+    assert(att_err.errors == fresh_err.errors, "attached err stderr mismatch")
+
+    att_ice: process.cmd([String]{jet, "build", main_file, "--session=required"}).cwd(ws).env("XDG_RUNTIME_DIR", xdg).env("NO_COLOR", "1").env("JET_ICE_SELF_TEST", "1").stdout(.Capture).stderr(.Capture).run() ?? panic("attached ice build: {err}")
+    assert(att_ice.code == 101, "attached ice exit must be 101, got {att_ice.code}")
+    assert(att_ice.output == fresh_ice.output, "attached ice stdout mismatch")
+    assert(att_ice.errors == fresh_ice.errors, "attached ice stderr mismatch")
+
+    // 4. Toolchain mismatch falls back fresh: silent without --verbose, explains under --verbose.
+    mm_quiet: process.cmd([String]{jet, "build", main_file, "--session=auto"}).cwd(ws).env("XDG_RUNTIME_DIR", xdg).env("NO_COLOR", "1").env("JET_COMPILER_IDENTITY", "jet@mismatch-e2e").stdout(.Capture).stderr(.Capture).run() ?? panic("mismatch quiet build: {err}")
+    assert(mm_quiet.code == 0, "mismatch quiet build failed: {mm_quiet.errors}")
+    assert(!mm_quiet.errors.contains("toolchain mismatch"), "quiet mismatch must not print fallback note")
+
+    mm_verb: process.cmd([String]{jet, "build", main_file, "--session=auto", "--verbose"}).cwd(ws).env("XDG_RUNTIME_DIR", xdg).env("NO_COLOR", "1").env("JET_COMPILER_IDENTITY", "jet@mismatch-e2e").stdout(.Capture).stderr(.Capture).run() ?? panic("mismatch verbose build: {err}")
+    assert(mm_verb.code == 0, "mismatch verbose build failed: {mm_verb.errors}")
+    assert(mm_verb.errors.contains("toolchain mismatch"), "verbose mismatch must explain fallback")
+
+    // 5. `jet dev --serve` attaches as a client when `lsp --serve` already owns the workspace.
+    dev_client: process.cmd([String]{jet, "dev", "--serve"}).cwd(ws).env("XDG_RUNTIME_DIR", xdg).env("NO_COLOR", "1").stdout(.Capture).stderr(.Capture).spawn() ?? panic("spawn dev --serve: {err}")
+    time.sleep(300ms)
+    desc_during: files.read(desc_path) ?? panic("read .jet/session while dev --serve attached: {err}")
+    assert(desc_during == desc_before, "dev --serve must not replace lsp --serve endpoint")
+    dev_client.kill().drop("stop dev client")
+    dev_receipt: dev_client.wait() ?? panic("wait dev client: {err}")
+    assert(dev_receipt.errors.contains("attached to workspace session"), "dev --serve must report attaching as client")
+
+    // 6. Closing `jet self lsp --serve` removes `.jet/session`; next `jet build --verbose` notes fresh compiler.
+    lsp_owner.stdin.close()
+    lsp_owner.wait().drop("wait lsp owner close")
+    assert(!files.exists(desc_path), ".jet/session must be removed after owner closes")
+
+    after_close: process.cmd([String]{jet, "build", main_file, "--verbose"}).cwd(ws).env("XDG_RUNTIME_DIR", xdg).env("NO_COLOR", "1").stdout(.Capture).stderr(.Capture).run() ?? panic("build after close: {err}")
+    assert(after_close.code == 0, "build after close failed: {after_close.errors}")
+    assert(after_close.errors.contains("Note: no workspace session; running a fresh compiler"), "expected fresh compiler note after owner close")
+
+    // 7. Edit while NO session runs is picked up by the next attached build.
+    files.write(main_file, "run: fn() {{\n    print(\"v2-edited\")\n}}\n") ?? panic("rewrite main.jet: {err}")
+    lsp_owner2: process.cmd([String]{jet, "self", "lsp", "--serve"}).cwd(ws).env("XDG_RUNTIME_DIR", xdg).env("NO_COLOR", "1").stdin(.Stream).stdout(.Capture).stderr(.Capture).spawn() ?? panic("spawn second lsp --serve: {err}")
+    ^ready2: false
+    loop _ in 0..<200 {
+        if files.exists(desc_path) {
+            ready2 = true
+            break
+        }
+        time.sleep(50ms)
+    }
+    assert(ready2, "second lsp --serve did not publish .jet/session")
+    att_v2: process.cmd([String]{jet, "build", main_file, "--session=required"}).cwd(ws).env("XDG_RUNTIME_DIR", xdg).env("NO_COLOR", "1").stdout(.Capture).stderr(.Capture).run() ?? panic("attached v2 build: {err}")
+    assert(att_v2.code == 0, "attached v2 build failed: {att_v2.errors}")
+    ran_v2: process.cmd([String]{bin_path}).stdout(.Capture).stderr(.Capture).run() ?? panic("run v2 bin: {err}")
+    assert(ran_v2.code == 0 && ran_v2.output.trim() == "v2-edited", "rebuilt binary must print v2-edited, got: {ran_v2.output}")
+
+    lsp_owner2.stdin.close()
+    lsp_owner2.wait().drop("wait second lsp owner")
+    files.remove_all(root).drop("cleanup e2e dir")
+    print("owner-parity-ok")
+}

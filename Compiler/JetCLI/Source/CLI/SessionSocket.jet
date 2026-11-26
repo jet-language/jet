@@ -1,0 +1,743 @@
+// Secure workspace session endpoint management over Linux Unix domain sockets:
+// per-user 0700 runtime directory, exclusive workspace flock in `.jet/session.lock`,
+// 0600 `.jet/session` descriptor with 256-bit random nonce, symlink rejection via
+// `lstat` and `O_NOFOLLOW`, kernel `SO_PEERCRED` peer UID verification, and
+// `signalfd4` + `poll` for clean SIGINT/SIGTERM teardown.
+use {
+    cli_files: core.files
+    cli_sys: core.sys
+    jet_backend.[
+        OS_AT_FDCWD,
+        OS_EINTR,
+        OS_PROT_READ,
+        OS_PROT_WRITE,
+        OS_SYS_CLOSE,
+        OS_SYS_GETRANDOM,
+        OS_SYS_OPENAT,
+        OS_SYS_POLL,
+        OS_SYS_RT_SIGPROCMASK,
+        os_copy_in,
+        os_failed,
+        os_load_byte,
+        os_map,
+        os_store_byte,
+        os_store_word,
+        os_syscall,
+        os_unmap,
+    ]
+    jet_foundation.[
+        compiler_service_int,
+        compiler_service_text,
+        sha256_hex,
+    ]
+}
+
+// Linux x86-64 syscall numbers and socket/lock constants.
+SESSION_SYS_SOCKET: 41
+SESSION_SYS_CONNECT: 42
+SESSION_SYS_BIND: 49
+SESSION_SYS_LISTEN: 50
+SESSION_SYS_GETSOCKOPT: 55
+SESSION_SYS_FLOCK: 73
+SESSION_SYS_CHDIR: 80
+SESSION_SYS_UNLINK: 87
+SESSION_SYS_CHMOD: 90
+SESSION_SYS_ACCEPT4: 288
+SESSION_SYS_SIGNALFD4: 289
+
+SESSION_AF_UNIX: 1
+SESSION_SOCK_STREAM: 1
+SESSION_SOCK_NONBLOCK: 2048
+SESSION_SOCK_CLOEXEC: 524288
+SESSION_SOL_SOCKET: 1
+SESSION_SO_PEERCRED: 17
+
+SESSION_O_RDWR: 2
+SESSION_O_CREAT: 64
+SESSION_O_NOFOLLOW: 131072
+SESSION_O_CLOEXEC: 524288
+
+SESSION_LOCK_EX_NB: 6
+
+SESSION_POLLIN: 1
+
+SESSION_SFD_NONBLOCK: 2048
+SESSION_SFD_CLOEXEC: 524288
+SESSION_SIG_BLOCK: 0
+SESSION_SIG_UNBLOCK: 1
+// Bitmask for SIGINT (2 -> bit 1) | SIGTERM (15 -> bit 14).
+SESSION_SIG_MASK: 16386
+
+SESSION_EAGAIN: 11
+
+// Parsed contents of `.jet/session`.
+JetSessionDescriptor: struct {
+    socket: String,
+    nonce: String,
+    toolchain: String,
+    pid: Int,
+    uid: Int,
+    session_id: String,
+    owner: String,
+}
+
+// Result of reading and validating `.jet/session` and its endpoint path.
+JetSessionRead: enum {
+    Missing,
+    Invalid(reason: String),
+    Found(desc: JetSessionDescriptor),
+}
+
+// Result of creating or verifying the per-user 0700 runtime directory.
+JetSessionRuntimeDir: enum {
+    Ready(path: String),
+    Failed(reason: String),
+}
+
+// Owned workspace session endpoint held by `jet self lsp --serve` or `jet dev --serve`.
+JetSessionOwner: struct {
+    socket_path: String,
+    descriptor_path: String,
+    nonce: String,
+    session_id: String,
+    toolchain: String,
+    listen_fd: Int,
+    lock_fd: Int,
+    sig_fd: Int,
+    owner_kind: String,
+    active: Bool,
+}
+
+// Outcome of trying to acquire workspace session ownership for `--serve`.
+JetSessionAcquire: enum {
+    Owned(owner: JetSessionOwner),
+    AlreadyOwned(desc: JetSessionDescriptor),
+    Failed(reason: String),
+}
+
+// Resolve the canonical workspace/package root enclosing `start`.
+jet_cli_session_workspace_root: fn(start: String) -[FS, Env]> String Never! {
+    cwd: cli_files.cwd() ?? "."
+    abs_start: jet_cli_report_path(Val(cwd), if start == "" -> cwd else -> start)
+    dir: if cli_files.is_dir(abs_start) -> abs_start else -> (jet_cli_parent(abs_start) ?? abs_start)
+    found: jet_cli_report_root(dir) ?? dir
+    cli_files.canonicalize(found) ?? jet_cli_report_path(Val(cwd), found)
+}
+
+// Store a 32-bit little-endian integer into mapped memory.
+#Unsafe("caller provides a live mapped buffer with at least 4 writable bytes at addr")
+jet_cli_session_store_u32: fn(addr: Int, value: Int) Never! {
+    os_store_byte(addr, value & 255)
+    os_store_byte(addr + 1, (value >> 8) & 255)
+    os_store_byte(addr + 2, (value >> 16) & 255)
+    os_store_byte(addr + 3, (value >> 24) & 255)
+}
+
+// Store a 16-bit little-endian integer into mapped memory.
+#Unsafe("caller provides a live mapped buffer with at least 2 writable bytes at addr")
+jet_cli_session_store_u16: fn(addr: Int, value: Int) Never! {
+    os_store_byte(addr, value & 255)
+    os_store_byte(addr + 1, (value >> 8) & 255)
+}
+
+// Load an unsigned 32-bit little-endian integer from mapped memory.
+#Unsafe("caller provides a live mapped buffer with at least 4 readable bytes at addr")
+jet_cli_session_load_u32: fn(addr: Int) -> Int Never! {
+    b0: os_load_byte(addr)
+    b1: os_load_byte(addr + 1)
+    b2: os_load_byte(addr + 2)
+    b3: os_load_byte(addr + 3)
+    b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)
+}
+
+// Load an unsigned 16-bit little-endian integer from mapped memory.
+#Unsafe("caller provides a live mapped buffer with at least 2 readable bytes at addr")
+jet_cli_session_load_u16: fn(addr: Int) -> Int Never! {
+    b0: os_load_byte(addr)
+    b1: os_load_byte(addr + 1)
+    b0 | (b1 << 8)
+}
+
+// Close a raw file descriptor if non-negative.
+jet_cli_session_close_fd: fn(fd: Int) Never! {
+    if fd < 0 -> return
+    #Unsafe("closes a raw file descriptor owned by the session layer") {
+        ^_: os_syscall(OS_SYS_CLOSE, fd, 0, 0, 0, 0, 0)
+    }
+}
+
+// Write a NUL-terminated path into mapped memory, returning false if too large.
+#Unsafe("caller provides a live mapped buffer of size `cap` >= `path.bytes().len() + 1`")
+jet_cli_session_write_cstr: fn(addr: Int, cap: Int, path: String) -> Bool Never! {
+    bytes: path.bytes()
+    if bytes.len() + 1 > cap -> return false
+    loop b in bytes {
+        if b == (U8{0}) -> return false
+    }
+    os_copy_in(addr, bytes)
+    os_store_byte(addr + bytes.len(), 0)
+    true
+}
+
+// Change the current working directory.
+jet_cli_session_chdir: fn(path: String) -> Bool Never! {
+    buf: os_map(4096, OS_PROT_READ | OS_PROT_WRITE)
+    if os_failed(buf) -> return false
+    ^ok: false
+    #Unsafe("buf is a freshly mapped 4096-byte writable page") {
+        ok = jet_cli_session_write_cstr(buf, 4096, path)
+    }
+    if !ok {
+        ^_: os_unmap(buf, 4096)
+        return false
+    }
+    ^res: -1
+    #Unsafe("chdir(2) with a NUL-terminated path in a live mapped buffer") {
+        res = os_syscall(SESSION_SYS_CHDIR, buf, 0, 0, 0, 0, 0)
+    }
+    ^_: os_unmap(buf, 4096)
+    res == 0
+}
+
+// chmod(2) on a path.
+jet_cli_session_chmod: fn(path: String, mode: Int) -> Bool Never! {
+    buf: os_map(4096, OS_PROT_READ | OS_PROT_WRITE)
+    if os_failed(buf) -> return false
+    ^ok: false
+    #Unsafe("buf is a freshly mapped 4096-byte writable page") {
+        ok = jet_cli_session_write_cstr(buf, 4096, path)
+    }
+    if !ok {
+        ^_: os_unmap(buf, 4096)
+        return false
+    }
+    ^res: -1
+    #Unsafe("chmod(2) with a NUL-terminated path in a live mapped buffer") {
+        res = os_syscall(SESSION_SYS_CHMOD, buf, mode, 0, 0, 0, 0)
+    }
+    ^_: os_unmap(buf, 4096)
+    res == 0
+}
+
+// unlink(2) on a path.
+jet_cli_session_unlink: fn(path: String) -> Bool Never! {
+    buf: os_map(4096, OS_PROT_READ | OS_PROT_WRITE)
+    if os_failed(buf) -> return false
+    ^ok: false
+    #Unsafe("buf is a freshly mapped 4096-byte writable page") {
+        ok = jet_cli_session_write_cstr(buf, 4096, path)
+    }
+    if !ok {
+        ^_: os_unmap(buf, 4096)
+        return false
+    }
+    ^res: -1
+    #Unsafe("unlink(2) with a NUL-terminated path in a live mapped buffer") {
+        res = os_syscall(SESSION_SYS_UNLINK, buf, 0, 0, 0, 0, 0)
+    }
+    ^_: os_unmap(buf, 4096)
+    res == 0
+}
+
+// Open `path` with O_CREAT|O_RDWR|O_NOFOLLOW|O_CLOEXEC (mode 0600) and acquire
+// an exclusive non-blocking flock. Returns fd >= 0 if acquired, -1 if already
+// locked by another owner, or -2 on error (including symlink ELOOP).
+jet_cli_session_try_lock_file: fn(path: String) -> Int Never! {
+    buf: os_map(4096, OS_PROT_READ | OS_PROT_WRITE)
+    if os_failed(buf) -> return -2
+    ^ok: false
+    #Unsafe("buf is a freshly mapped 4096-byte writable page") {
+        ok = jet_cli_session_write_cstr(buf, 4096, path)
+    }
+    if !ok {
+        ^_: os_unmap(buf, 4096)
+        return -2
+    }
+    flags: SESSION_O_RDWR | SESSION_O_CREAT | SESSION_O_NOFOLLOW | SESSION_O_CLOEXEC
+    ^fd: -1
+    #Unsafe("openat(2) with O_NOFOLLOW|O_CLOEXEC on a NUL-terminated path in mapped memory") {
+        fd = os_syscall(OS_SYS_OPENAT, OS_AT_FDCWD, buf, flags, 0o600, 0, 0)
+    }
+    ^_: os_unmap(buf, 4096)
+    if fd < 0 -> return -2
+    ^locked: -OS_EINTR
+    loop locked == -OS_EINTR {
+        #Unsafe("flock(2) LOCK_EX|LOCK_NB on the lock descriptor") {
+            locked = os_syscall(SESSION_SYS_FLOCK, fd, SESSION_LOCK_EX_NB, 0, 0, 0, 0)
+        }
+    }
+    if locked == 0 -> return fd
+    jet_cli_session_close_fd(fd)
+    if locked == -SESSION_EAGAIN -> return -1 else -> return -2
+}
+
+// Generate 32 cryptographic random bytes encoded as 64 lowercase hex characters.
+jet_cli_session_random_nonce: fn() -> String Never! {
+    buf: os_map(4096, OS_PROT_READ | OS_PROT_WRITE)
+    if os_failed(buf) -> return sha256_hex("fallback-{cli_sys.getpid()}")
+    ^filled: 0
+    loop filled < 32 {
+        ^got: 0
+        #Unsafe("getrandom(2) into a 32-byte slice of a mapped page") {
+            got = os_syscall(OS_SYS_GETRANDOM, buf + filled, 32 - filled, 0, 0, 0, 0)
+        }
+        if got == -OS_EINTR -> next
+        if got <= 0 -> break
+        filled += got
+    }
+    ^hex: [String]{}
+    loop i in 0..<32 {
+        ^b: 0
+        #Unsafe("reading 32 filled random bytes from mapped page") {
+            b = os_load_byte(buf + i)
+        }
+        hex.push(jet_cli_report_hex_digit((b >> 4) & 15))
+        hex.push(jet_cli_report_hex_digit(b & 15))
+    }
+    ^_: os_unmap(buf, 4096)
+    hex.join("")
+}
+
+// Verify that `dir` exists, is not a symlink, is a directory, is owned by
+// `euid`, and has owner-only permissions (mode & 0o077 == 0).
+jet_cli_session_check_private_dir: fn(dir: String, euid: Int) -[FS]> String? Never! {
+    info: cli_files.lstat(dir) ?? return Val("session directory `{dir}` does not exist")
+    if info.is_symlink -> return Val("session directory `{dir}` is a symlink")
+    if !info.is_dir -> return Val("session path `{dir}` is not a directory")
+    if info.owner != Val((euid)) -> return Val("session directory `{dir}` is owned by another user")
+    if (info.mode & 0o077) != 0 -> return Val("session directory `{dir}` permissions are not private (0700)")
+    None
+}
+
+// Create or verify the per-user 0700 runtime directory for session sockets.
+jet_cli_session_runtime_dir: fn(warn_xdg: Bool) -> JetSessionRuntimeDir Never! {
+    euid: cli_sys.geteuid()
+    xdg: cli_sys.get("XDG_RUNTIME_DIR") ?? ""
+    ^base: ""
+    if xdg != "" {
+        info: cli_files.lstat(xdg) ?? return JetSessionRuntimeDir.Failed{reason: "XDG_RUNTIME_DIR `{xdg}` is not accessible"}
+        if info.is_symlink -> return JetSessionRuntimeDir.Failed{reason: "XDG_RUNTIME_DIR `{xdg}` is a symlink"}
+        if !info.is_dir -> return JetSessionRuntimeDir.Failed{reason: "XDG_RUNTIME_DIR `{xdg}` is not a directory"}
+        if info.owner != Val((euid)) -> return JetSessionRuntimeDir.Failed{reason: "XDG_RUNTIME_DIR `{xdg}` is owned by another user"}
+        base = "{xdg}/jet"
+    } else {
+        tmp: cli_sys.temp_dir()
+        base = "{tmp}/jet-runtime-{euid}"
+        if warn_xdg {
+            ^_: jet_cli_session_write_all(2, "Warning: XDG_RUNTIME_DIR is not set; using private directory {base}\n")
+        }
+    }
+    if cli_files.lstat(base) == .Err(_) {
+        cli_files.create_dir_all(base) ?? return JetSessionRuntimeDir.Failed{reason: "could not create session runtime directory `{base}`: {err}"}
+        if !jet_cli_session_chmod(base, 0o700) {
+            return JetSessionRuntimeDir.Failed{reason: "could not set 0700 permissions on `{base}`"}
+        }
+    }
+    if jet_cli_session_check_private_dir(base, euid) == .Val(problem) {
+        return JetSessionRuntimeDir.Failed{reason: problem}
+    }
+    JetSessionRuntimeDir.Ready{path: base}
+}
+
+// Populate a `sockaddr_un` at `addr` (size 110 bytes) and return `addrlen`, or -1 if invalid.
+#Unsafe("caller provides a live mapped sockaddr_un page with at least 110 writable bytes")
+jet_cli_session_fill_sockaddr_un: fn(addr: Int, socket_path: String) -> Int Never! {
+    bytes: socket_path.bytes()
+    if bytes.len() == 0 || bytes.len() > 107 -> return -1
+    loop b in bytes {
+        if b == (U8{0}) -> return -1
+    }
+    jet_cli_session_store_u16(addr, SESSION_AF_UNIX)
+    os_copy_in(addr + 2, bytes)
+    os_store_byte(addr + 2 + bytes.len(), 0)
+    2 + bytes.len() + 1
+}
+
+// Create, bind, chmod 0600, and listen on a non-symlink Unix domain socket.
+// Returns listening fd >= 0, or -1 on error.
+jet_cli_session_unix_listen: fn(socket_path: String) -> Int Never! {
+    if cli_files.lstat(socket_path) == .Ok(existing) {
+        if existing.is_symlink -> return -1
+        if !jet_cli_session_unlink(socket_path) -> return -1
+    }
+    sock_type: SESSION_SOCK_STREAM | SESSION_SOCK_NONBLOCK | SESSION_SOCK_CLOEXEC
+    ^fd: -1
+    #Unsafe("socket(AF_UNIX, SOCK_STREAM|SOCK_NONBLOCK|SOCK_CLOEXEC, 0)") {
+        fd = os_syscall(SESSION_SYS_SOCKET, SESSION_AF_UNIX, sock_type, 0, 0, 0, 0)
+    }
+    if fd < 0 -> return -1
+    buf: os_map(4096, OS_PROT_READ | OS_PROT_WRITE)
+    if os_failed(buf) {
+        jet_cli_session_close_fd(fd)
+        return -1
+    }
+    ^addrlen: -1
+    #Unsafe("buf is a freshly mapped 4096-byte writable page") {
+        addrlen = jet_cli_session_fill_sockaddr_un(buf, socket_path)
+    }
+    if addrlen < 0 {
+        ^_: os_unmap(buf, 4096)
+        jet_cli_session_close_fd(fd)
+        return -1
+    }
+    ^bound: -1
+    #Unsafe("bind(2) AF_UNIX sockaddr_un in live mapped memory") {
+        bound = os_syscall(SESSION_SYS_BIND, fd, buf, addrlen, 0, 0, 0)
+    }
+    ^_: os_unmap(buf, 4096)
+    if bound < 0 {
+        jet_cli_session_close_fd(fd)
+        return -1
+    }
+    if !jet_cli_session_chmod(socket_path, 0o600) {
+        ^_: jet_cli_session_unlink(socket_path)
+        jet_cli_session_close_fd(fd)
+        return -1
+    }
+    ^listening: -1
+    #Unsafe("listen(2) on owned AF_UNIX socket") {
+        listening = os_syscall(SESSION_SYS_LISTEN, fd, 16, 0, 0, 0, 0)
+    }
+    if listening < 0 {
+        ^_: jet_cli_session_unlink(socket_path)
+        jet_cli_session_close_fd(fd)
+        return -1
+    }
+    fd
+}
+
+// Accept one connection on a non-blocking listening Unix socket (blocking client fd with CLOEXEC).
+// Returns client fd >= 0, -1 if would block (EAGAIN), or -2 on error.
+jet_cli_session_unix_accept: fn(listen_fd: Int) -> Int Never! {
+    ^fd: -OS_EINTR
+    loop fd == -OS_EINTR {
+        #Unsafe("accept4(2) with SOCK_CLOEXEC on owned listener fd") {
+            fd = os_syscall(SESSION_SYS_ACCEPT4, listen_fd, 0, 0, SESSION_SOCK_CLOEXEC, 0, 0)
+        }
+    }
+    if fd >= 0 -> return fd
+    if fd == -SESSION_EAGAIN -> return -1 else -> return -2
+}
+
+// Connect to a Unix domain socket path. Returns client fd >= 0, or -1 on error.
+jet_cli_session_unix_connect: fn(socket_path: String) -> Int Never! {
+    sock_type: SESSION_SOCK_STREAM | SESSION_SOCK_CLOEXEC
+    ^fd: -1
+    #Unsafe("socket(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC, 0)") {
+        fd = os_syscall(SESSION_SYS_SOCKET, SESSION_AF_UNIX, sock_type, 0, 0, 0, 0)
+    }
+    if fd < 0 -> return -1
+    buf: os_map(4096, OS_PROT_READ | OS_PROT_WRITE)
+    if os_failed(buf) {
+        jet_cli_session_close_fd(fd)
+        return -1
+    }
+    ^addrlen: -1
+    #Unsafe("buf is a freshly mapped 4096-byte writable page") {
+        addrlen = jet_cli_session_fill_sockaddr_un(buf, socket_path)
+    }
+    if addrlen < 0 {
+        ^_: os_unmap(buf, 4096)
+        jet_cli_session_close_fd(fd)
+        return -1
+    }
+    ^res: -OS_EINTR
+    loop res == -OS_EINTR {
+        #Unsafe("connect(2) AF_UNIX sockaddr_un in live mapped memory") {
+            res = os_syscall(SESSION_SYS_CONNECT, fd, buf, addrlen, 0, 0, 0)
+        }
+    }
+    ^_: os_unmap(buf, 4096)
+    if res < 0 {
+        jet_cli_session_close_fd(fd)
+        return -1
+    }
+    fd
+}
+
+// Read the kernel SO_PEERCRED UID of a connected AF_UNIX stream socket.
+jet_cli_session_peer_uid: fn(fd: Int) -> Int? Never! {
+    buf: os_map(4096, OS_PROT_READ | OS_PROT_WRITE)
+    if os_failed(buf) -> return None
+    // ucred { pid: i32 (0), uid: u32 (4), gid: u32 (8) }; optlen: u32 (16) = 12.
+    ^res: -1
+    ^uid: 0
+    ^optlen: 0
+    #Unsafe("getsockopt(SO_PEERCRED) into a live mapped ucred buffer") {
+        jet_cli_session_store_u32(buf + 16, 12)
+        res = os_syscall(SESSION_SYS_GETSOCKOPT, fd, SESSION_SOL_SOCKET, SESSION_SO_PEERCRED, buf, buf + 16, 0)
+        uid = jet_cli_session_load_u32(buf + 4)
+        optlen = jet_cli_session_load_u32(buf + 16)
+    }
+    ^_: os_unmap(buf, 4096)
+    if res != 0 || optlen < 12 -> return None
+    Val(uid)
+}
+
+// Pure peer credential check: peer UID must exist and equal expected effective UID.
+jet_cli_session_peer_allowed: fn(peer_uid: Int?, expected_uid: Int) -> Bool Never! {
+    if peer_uid == .Val(actual) -> actual == expected_uid else -> false
+}
+
+// Open a non-blocking signalfd for SIGINT and SIGTERM (blocking both signals in
+// the thread mask so poll(2) wakes cleanly for graceful endpoint teardown).
+jet_cli_session_signalfd_open: fn() -> Int Never! {
+    buf: os_map(4096, OS_PROT_READ | OS_PROT_WRITE)
+    if os_failed(buf) -> return -1
+    ^blocked: -1
+    #Unsafe("rt_sigprocmask(SIG_BLOCK, SIGINT and SIGTERM) with 8-byte sigset") {
+        os_store_word(buf, SESSION_SIG_MASK)
+        blocked = os_syscall(OS_SYS_RT_SIGPROCMASK, SESSION_SIG_BLOCK, buf, 0, 8, 0, 0)
+    }
+    if blocked < 0 {
+        ^_: os_unmap(buf, 4096)
+        return -1
+    }
+    ^sfd: -1
+    #Unsafe("signalfd4(-1, SIGINT and SIGTERM, 8, SFD_NONBLOCK|SFD_CLOEXEC)") {
+        sfd = os_syscall(SESSION_SYS_SIGNALFD4, -1, buf, 8, SESSION_SFD_NONBLOCK | SESSION_SFD_CLOEXEC, 0, 0)
+    }
+    ^_: os_unmap(buf, 4096)
+    sfd
+}
+
+// Close signalfd and unblock SIGINT and SIGTERM.
+jet_cli_session_signalfd_close: fn(sig_fd: Int) Never! {
+    if sig_fd >= 0 {
+        jet_cli_session_close_fd(sig_fd)
+    }
+    buf: os_map(4096, OS_PROT_READ | OS_PROT_WRITE)
+    if os_failed(buf) -> return
+    #Unsafe("rt_sigprocmask(SIG_UNBLOCK, SIGINT and SIGTERM) with 8-byte sigset") {
+        os_store_word(buf, SESSION_SIG_MASK)
+        ^_: os_syscall(OS_SYS_RT_SIGPROCMASK, SESSION_SIG_UNBLOCK, buf, 0, 8, 0, 0)
+    }
+    ^_: os_unmap(buf, 4096)
+}
+
+// Poll up to three file descriptors (`fd < 0` ignored) for POLLIN/POLLHUP/POLLERR
+// with `timeout_ms`. Returns a bitmask (bit 0 = fd0, bit 1 = fd1, bit 2 = fd2),
+// 0 on timeout, or -1 on error.
+jet_cli_session_poll3: fn(fd0: Int, fd1: Int, fd2: Int, timeout_ms: Int) -> Int Never! {
+    buf: os_map(4096, OS_PROT_READ | OS_PROT_WRITE)
+    if os_failed(buf) -> return -1
+    ^count: 0
+    ^slot0: -1
+    ^slot1: -1
+    ^slot2: -1
+    #Unsafe("buf is a freshly mapped 4096-byte page holding up to 3 pollfd structs") {
+        if fd0 >= 0 {
+            slot0 = count
+            jet_cli_session_store_u32(buf + count * 8, fd0)
+            jet_cli_session_store_u16(buf + count * 8 + 4, SESSION_POLLIN)
+            jet_cli_session_store_u16(buf + count * 8 + 6, 0)
+            count += 1
+        }
+        if fd1 >= 0 {
+            slot1 = count
+            jet_cli_session_store_u32(buf + count * 8, fd1)
+            jet_cli_session_store_u16(buf + count * 8 + 4, SESSION_POLLIN)
+            jet_cli_session_store_u16(buf + count * 8 + 6, 0)
+            count += 1
+        }
+        if fd2 >= 0 {
+            slot2 = count
+            jet_cli_session_store_u32(buf + count * 8, fd2)
+            jet_cli_session_store_u16(buf + count * 8 + 4, SESSION_POLLIN)
+            jet_cli_session_store_u16(buf + count * 8 + 6, 0)
+            count += 1
+        }
+    }
+    if count == 0 {
+        ^_: os_unmap(buf, 4096)
+        return 0
+    }
+    ^ready: -OS_EINTR
+    loop ready == -OS_EINTR {
+        #Unsafe("poll(2) on up to 3 pollfd entries in mapped memory") {
+            ready = os_syscall(OS_SYS_POLL, buf, count, timeout_ms, 0, 0, 0)
+        }
+    }
+    ^mask: 0
+    if ready < 0 {
+        mask = -1
+    } else if ready > 0 {
+        #Unsafe("reading revents fields of up to 3 pollfd structs from mapped page") {
+            if slot0 >= 0 && jet_cli_session_load_u16(buf + slot0 * 8 + 6) != 0 -> mask = mask | 1
+            if slot1 >= 0 && jet_cli_session_load_u16(buf + slot1 * 8 + 6) != 0 -> mask = mask | 2
+            if slot2 >= 0 && jet_cli_session_load_u16(buf + slot2 * 8 + 6) != 0 -> mask = mask | 4
+        }
+    }
+    ^_: os_unmap(buf, 4096)
+    mask
+}
+
+// Render `.jet/session` descriptor JSON.
+jet_cli_session_descriptor_json: fn(desc: JetSessionDescriptor) -> String Never! {
+    "{{\"schema\":{jet_cli_json_control_quote(JET_SESSION_SCHEMA)},\"socket\":{jet_cli_json_control_quote(desc.socket)},\"nonce\":{jet_cli_json_control_quote(desc.nonce)},\"toolchain\":{jet_cli_json_control_quote(desc.toolchain)},\"pid\":{desc.pid},\"uid\":{desc.uid},\"session_id\":{jet_cli_json_control_quote(desc.session_id)},\"owner\":{jet_cli_json_control_quote(desc.owner)}}}\n"
+}
+
+// Parse and validate `.jet/session` and verify non-symlink private ownership of
+// `.jet`, `.jet/session`, the socket parent directory, and the socket endpoint.
+jet_cli_session_read_descriptor: fn(workspace_root: String) -[FS, Env, Time.Wait]> JetSessionRead Never! {
+    euid: cli_sys.geteuid()
+    jet_dir: "{workspace_root}/.jet"
+    if cli_files.lstat(jet_dir) == {
+        .Err(_) -> return JetSessionRead.Missing
+        .Ok(info) -> {
+            if info.is_symlink -> return JetSessionRead.Invalid{reason: "workspace `.jet` directory is a symlink"}
+            if !info.is_dir -> return JetSessionRead.Invalid{reason: "workspace `.jet` path is not a directory"}
+        }
+    }
+    path: "{jet_dir}/session"
+    info: cli_files.lstat(path) ?? return JetSessionRead.Missing
+    if info.is_symlink -> return JetSessionRead.Invalid{reason: "workspace session descriptor is a symlink"}
+    if !info.is_file -> return JetSessionRead.Invalid{reason: "workspace session descriptor is not a regular file"}
+    if info.owner != Val((euid)) -> return JetSessionRead.Invalid{reason: "workspace session descriptor is owned by another user"}
+    if (info.mode & 0o077) != 0 -> return JetSessionRead.Invalid{reason: "workspace session descriptor permissions are not private"}
+    ^reader: cli_files.open(path, links: .Refuse) ?? return JetSessionRead.Invalid{reason: "cannot open workspace session descriptor: {err}"}
+    raw: reader.read(65536) ?? return JetSessionRead.Invalid{reason: "cannot read workspace session descriptor: {err}"}
+    text: String.from_bytes(raw) ?? return JetSessionRead.Invalid{reason: "workspace session descriptor is not valid UTF-8"}
+    obj: jet_cli_session_parse_object(text.trim()) ?? return JetSessionRead.Invalid{reason: "workspace session descriptor is malformed JSON"}
+    schema: compiler_service_text(obj, "schema") ?? ""
+    if schema != JET_SESSION_SCHEMA -> return JetSessionRead.Invalid{reason: "unsupported session descriptor schema `{schema}`"}
+    socket: compiler_service_text(obj, "socket") ?? ""
+    nonce: compiler_service_text(obj, "nonce") ?? ""
+    toolchain: compiler_service_text(obj, "toolchain") ?? ""
+    pid: compiler_service_int(obj, "pid") ?? 0
+    uid: compiler_service_int(obj, "uid") ?? -1
+    session_id: compiler_service_text(obj, "session_id") ?? ""
+    owner: compiler_service_text(obj, "owner") ?? ""
+    if socket == "" || nonce == "" || toolchain == "" || pid <= 0 {
+        return JetSessionRead.Invalid{reason: "workspace session descriptor is missing required fields"}
+    }
+    if uid != euid {
+        return JetSessionRead.Invalid{reason: "workspace session descriptor UID {uid} does not match current user {euid}"}
+    }
+    // Validate socket parent directory and socket endpoint itself (reject symlinks & wrong owner).
+    parent: jet_cli_parent(socket) ?? return JetSessionRead.Invalid{reason: "workspace session socket path has no parent directory"}
+    if jet_cli_session_check_private_dir(parent, euid) == .Val(problem) {
+        return JetSessionRead.Invalid{reason: problem}
+    }
+    sock_info: cli_files.lstat(socket) ?? return JetSessionRead.Invalid{reason: "workspace session socket `{socket}` does not exist"}
+    if sock_info.is_symlink -> return JetSessionRead.Invalid{reason: "workspace session endpoint `{socket}` is a symlink"}
+    if sock_info.is_file || sock_info.is_dir -> return JetSessionRead.Invalid{reason: "workspace session endpoint `{socket}` is not a socket"}
+    if sock_info.owner != Val((euid)) -> return JetSessionRead.Invalid{reason: "workspace session endpoint `{socket}` is owned by another user"}
+    if (sock_info.mode & 0o077) != 0 -> return JetSessionRead.Invalid{reason: "workspace session endpoint `{socket}` permissions are not private"}
+    JetSessionRead.Found{desc: JetSessionDescriptor{socket: socket, nonce: nonce, toolchain: toolchain, pid: pid, uid: uid, session_id: session_id, owner: owner}}
+}
+
+// Acquire workspace session ownership for `--serve`.
+// If another owner holds `.jet/session.lock` and a valid endpoint is present,
+// returns `AlreadyOwned(desc)` so the caller attaches as a client instead.
+jet_cli_session_owner_acquire: fn(workspace_root: String, owner_kind: String) -> JetSessionAcquire Never! {
+    euid: cli_sys.geteuid()
+    jet_dir: "{workspace_root}/.jet"
+    if cli_files.lstat(jet_dir) == {
+        .Ok(info) -> {
+            if info.is_symlink -> return JetSessionAcquire.Failed{reason: "workspace `.jet` directory is a symlink"}
+            if !info.is_dir -> return JetSessionAcquire.Failed{reason: "workspace `.jet` path is not a directory"}
+        }
+        .Err(_) -> {
+            cli_files.create_dir_all(jet_dir) ?? return JetSessionAcquire.Failed{reason: "could not create `{jet_dir}`: {err}"}
+        }
+    }
+    lock_path: "{jet_dir}/session.lock"
+    lock_fd: jet_cli_session_try_lock_file(lock_path)
+    if lock_fd == -1 {
+        // Another live owner holds the lock; inspect its descriptor so we can attach as a client.
+        if jet_cli_session_read_descriptor(workspace_root) == {
+            .Found(desc) -> return JetSessionAcquire.AlreadyOwned{desc: desc}
+            .Invalid(reason) -> return JetSessionAcquire.Failed{reason: "workspace session is locked, but its descriptor is invalid: {reason}"}
+            .Missing -> return JetSessionAcquire.Failed{reason: "workspace session lock is held, but `.jet/session` is not ready"}
+        }
+    }
+    if lock_fd < 0 {
+        return JetSessionAcquire.Failed{reason: "could not lock `{lock_path}` (refusing symlinks and unwritable paths)"}
+    }
+    ^runtime_dir: ""
+    if jet_cli_session_runtime_dir(true) == {
+        .Ready(path) -> { runtime_dir = path }
+        .Failed(reason) -> {
+            jet_cli_session_close_fd(lock_fd)
+            return JetSessionAcquire.Failed{reason: reason}
+        }
+    }
+    key: sha256_hex(workspace_root).slice(0..<16)
+    socket_path: "{runtime_dir}/session-{key}.sock"
+    listen_fd: jet_cli_session_unix_listen(socket_path)
+    if listen_fd < 0 {
+        jet_cli_session_close_fd(lock_fd)
+        return JetSessionAcquire.Failed{reason: "could not bind workspace session socket `{socket_path}`"}
+    }
+    nonce: jet_cli_session_random_nonce()
+    session_id: nonce.slice(0..<4)
+    toolchain: jet_cli_session_toolchain()
+    desc_path: "{jet_dir}/session"
+    if cli_files.lstat(desc_path) == .Ok(existing) {
+        if existing.is_symlink {
+            jet_cli_session_close_fd(listen_fd)
+            ^_: jet_cli_session_unlink(socket_path)
+            jet_cli_session_close_fd(lock_fd)
+            return JetSessionAcquire.Failed{reason: "workspace session descriptor `{desc_path}` is a symlink"}
+        }
+        ^_: jet_cli_session_unlink(desc_path)
+    }
+    desc: JetSessionDescriptor{
+        socket: socket_path,
+        nonce: nonce,
+        toolchain: toolchain,
+        pid: cli_sys.getpid(),
+        uid: euid,
+        session_id: session_id,
+        owner: owner_kind,
+    }
+    desc_text: jet_cli_session_descriptor_json(desc)
+    ^writer: cli_files.create(desc_path, if_exists: .Replace, mode: Val(0o600), links: .Refuse) ?? {
+        jet_cli_session_close_fd(listen_fd)
+        ^_: jet_cli_session_unlink(socket_path)
+        jet_cli_session_close_fd(lock_fd)
+        return JetSessionAcquire.Failed{reason: "could not write `{desc_path}`: {err}"}
+    }
+    writer.write_all(desc_text.bytes()) ?? {
+        jet_cli_session_close_fd(listen_fd)
+        ^_: jet_cli_session_unlink(socket_path)
+        ^_: jet_cli_session_unlink(desc_path)
+        jet_cli_session_close_fd(lock_fd)
+        return JetSessionAcquire.Failed{reason: "could not write `{desc_path}`: {err}"}
+    }
+    writer.flush().drop("flush descriptor before advertising endpoint")
+    sig_fd: jet_cli_session_signalfd_open()
+    JetSessionAcquire.Owned{
+        owner: JetSessionOwner{
+            socket_path: desc.socket,
+            descriptor_path: desc_path,
+            nonce: desc.nonce,
+            session_id: desc.session_id,
+            toolchain: desc.toolchain,
+            listen_fd: listen_fd,
+            lock_fd: lock_fd,
+            sig_fd: sig_fd,
+            owner_kind: owner_kind,
+            active: true,
+        },
+    }
+}
+
+// Close the workspace session owner and remove its socket and `.jet/session`.
+jet_cli_session_owner_close: fn(owner: ^JetSessionOwner) Never! {
+    if !owner.active -> return
+    owner.active = false
+    if owner.listen_fd >= 0 {
+        jet_cli_session_close_fd(owner.listen_fd)
+        owner.listen_fd = -1
+    }
+    ^_: jet_cli_session_unlink(owner.socket_path)
+    ^_: jet_cli_session_unlink(owner.descriptor_path)
+    jet_cli_session_signalfd_close(owner.sig_fd)
+    owner.sig_fd = -1
+    if owner.lock_fd >= 0 {
+        jet_cli_session_close_fd(owner.lock_fd)
+        owner.lock_fd = -1
+    }
+}

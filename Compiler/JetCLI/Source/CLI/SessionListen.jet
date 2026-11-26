@@ -1,0 +1,414 @@
+// Stdio `jet.session.v1` NDJSON server for `jet check|build|test|run|dev --listen=-`.
+// Sends an initial `hello` line with the toolchain identity, then answers
+// `hello`, `update`, typed verb ops, `cancel`, and `exit` one JSON object per line.
+// Malformed lines and lines exceeding 1 MiB receive a `jet.report/v4` E2104 line
+// and the session continues.
+use {
+    cli_files: core.files
+    cli_process: core.process
+    cli_sys: core.sys
+    jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE]
+    jet_foundation.[
+        ENV_JET_DEV,
+        compiler_service_array,
+        compiler_service_int,
+        compiler_service_render,
+        compiler_service_text,
+    ]
+}
+
+// Mutable session state for one `--listen=-` stdio loop.
+JetSessionListenState: struct {
+    verb: String,
+    base_argv: [String],
+    toolchain: String,
+    attached: Bool,
+    owner_pid: Int,
+    session_id: String,
+    attached_desc: JetSessionDescriptor?,
+}
+
+// Strip `--listen=<val>`, `--listen <val>`, `--session=<val>`, and `--session <val>`
+// from `raw` so `base_argv` holds the plain command words for each `update`.
+jet_cli_session_strip_listen_flags: fn(raw: [String]) -> [String] Never! {
+    ^out: [String]{}
+    ^skip_next: false
+    ^after_sep: false
+    loop word in raw {
+        if skip_next {
+            skip_next = false
+            next
+        }
+        if !after_sep && word == "--" {
+            after_sep = true
+            out.push("{word}")
+            next
+        }
+        if !after_sep {
+            if word == "--listen" || word == "--session" {
+                skip_next = true
+                next
+            }
+            if word.starts_with("--listen=") || word.starts_with("--session=") -> next
+        }
+        out.push("{word}")
+    }
+    out
+}
+
+// Split `base_argv` at the first standalone `--`: words before `--` go into
+// `cmd_words`, words after `--` go into `prog_args`.
+jet_cli_session_split_passthrough: fn(base_argv: [String], cmd_words: ^[String], prog_args: ^[String]) Never! {
+    ^after: false
+    loop word in base_argv {
+        if !after && word == "--" {
+            after = true
+            next
+        }
+        if after -> prog_args.push("{word}") else -> cmd_words.push("{word}")
+    }
+}
+
+// Execute `argv` either via the attached workspace session (falling back to
+// local execution with a `session.detached` event if the owner closed) or
+// locally in-process.
+jet_cli_session_exec_argv: fn(state: ^JetSessionListenState, req_id: Int, seq: ^Int, argv: [String]) -> JetDriverVerbOutput {
+    cwd: cli_files.cwd() ?? "."
+    if state.attached {
+        if state.attached_desc == .Val(desc) {
+            if jet_cli_session_remote_invoke(desc, argv, cwd, false) == .Val(out) {
+                return out
+            }
+            // Owner closed mid-stream: emit `session.detached` and continue locally.
+            state.attached = false
+            state.attached_desc = None
+            state.owner_pid = 0
+            state.session_id = ""
+            seq += 1
+            ^_: jet_cli_session_send_line(1, jet_cli_session_event_line(req_id, seq, "session.detached", "{{\"reason\":\"workspace session closed\"}}"))
+        }
+    }
+    jet_cli_session_invoke_local(argv, cwd, jet_cli_session_capture_env())
+}
+
+// Emit any `jet.report/v4` diagnostic objects contained in a `--json` status
+// line (under `"reports":[...]`), returning true if any report was emitted.
+jet_cli_session_emit_status_reports: fn(json_output: String) -> Bool {
+    ^emitted: false
+    loop raw_line in json_output.split("\n") {
+        if raw_line.trim() == "" -> next
+        obj: jet_cli_session_parse_object(raw_line) ?? next
+        schema: compiler_service_text(obj, "schema") ?? ""
+        if schema == JET_CLI_REPORT_SCHEMA {
+            ^_: jet_cli_session_send_line(1, compiler_service_render(obj))
+            emitted = true
+            next
+        }
+        if compiler_service_array(obj, "reports") == .Val(reports) {
+            loop item in reports {
+                ^_: jet_cli_session_send_line(1, compiler_service_render(item))
+                emitted = true
+            }
+        }
+    }
+    emitted
+}
+
+// Resolve the target binary path that `jet build` produces for `cmd_words`.
+jet_cli_session_build_artifact_paths: fn(cmd_words: [String]) -[FS, Env]> [String] Never! {
+    ^artifacts: [String]{}
+    pos: jet_cli_positionals(cmd_words)
+    ^target_file: ""
+    if pos.len() >= 2 && pos[1] != "" && !pos[1].starts_with("-") {
+        if cli_files.is_file(pos[1]) {
+            target_file = pos[1]
+        } else if cli_files.is_file("{pos[1]}.jet") {
+            target_file = "{pos[1]}.jet"
+        }
+    }
+    if target_file == "" {
+        cwd: cli_files.cwd() ?? "."
+        if jet_cli_resolve_source_path("build", cwd, false, [String]{}) == .File(path, _, _) {
+            target_file = path
+        }
+    }
+    if target_file == "" -> return artifacts
+    parent: jet_cli_parent(target_file) ?? (cli_files.cwd() ?? ".")
+    root: jet_cli_manifest_root(parent) ?? parent
+    stem: jet_cli_stem(target_file)
+    candidate: "{root}/.jet/build/{stem}"
+    if cli_files.is_file(candidate) -> artifacts.push(candidate)
+    artifacts
+}
+
+// Build `cmd_words` as `jet build --json ...` (replacing the verb word with `build`).
+jet_cli_session_build_words: fn(cmd_words: [String], with_json: Bool) -> [String] Never! {
+    ^out: [String]{"build"}
+    if with_json && !cmd_words.contains("--json") -> out.push("--json")
+    loop i in 1..<cmd_words.len() {
+        word: cmd_words[i]
+        // Drop run/dev-only flags when compiling a binary for `run`/`dev`.
+        if word == "--watch" || word.starts_with("--watch=") -> next
+        out.push("{word}")
+    }
+    out
+}
+
+// Handle `check` / `update` on `jet check --listen=-`.
+jet_cli_session_do_check: fn(state: ^JetSessionListenState, req_id: Int, seq: ^Int) {
+    ^cmd_words: [String]{}
+    ^prog_args: [String]{}
+    jet_cli_session_split_passthrough(state.base_argv, cmd_words, prog_args)
+    ^argv: [String]{"check"}
+    if !cmd_words.contains("--json") -> argv.push("--json")
+    loop i in 1..<cmd_words.len() -> argv.push("{cmd_words[i]}")
+    output: jet_cli_session_exec_argv(state, req_id, seq, argv)
+    ^_: jet_cli_session_emit_status_reports(output.stdout)
+    ^_: jet_cli_session_emit_status_reports(output.stderr)
+    seq += 1
+    ok_text: if output.exit_code == 0 -> "true" else -> "false"
+    ^_: jet_cli_session_send_line(1, jet_cli_session_event_line(req_id, seq, "check.finished", "{{\"ok\":{ok_text},\"exit\":{output.exit_code}}}"))
+    status: if output.exit_code == 0 -> "ok" else -> "failed"
+    ^_: jet_cli_session_send_line(1, jet_cli_session_response_line(Val(req_id), status, output.exit_code))
+}
+
+// Handle `build` / `update` on `jet build --listen=-`.
+jet_cli_session_do_build: fn(state: ^JetSessionListenState, req_id: Int, seq: ^Int) {
+    ^cmd_words: [String]{}
+    ^prog_args: [String]{}
+    jet_cli_session_split_passthrough(state.base_argv, cmd_words, prog_args)
+    argv: jet_cli_session_build_words(cmd_words, true)
+    output: jet_cli_session_exec_argv(state, req_id, seq, argv)
+    ^_: jet_cli_session_emit_status_reports(output.stdout)
+    ^_: jet_cli_session_emit_status_reports(output.stderr)
+    artifacts: if output.exit_code == 0 -> jet_cli_session_build_artifact_paths(cmd_words) else -> [String]{}
+    seq += 1
+    data: "{{\"artifacts\":{jet_cli_session_string_array_json(artifacts)},\"exit\":{output.exit_code}}}"
+    ^_: jet_cli_session_send_line(1, jet_cli_session_event_line(req_id, seq, "build.finished", data))
+    status: if output.exit_code == 0 -> "ok" else -> "failed"
+    extra: "\"artifacts\":{jet_cli_session_string_array_json(artifacts)}"
+    ^_: jet_cli_session_send_line(1, jet_cli_session_response_line(Val(req_id), status, output.exit_code, "", "", extra))
+}
+
+// Handle `test` / `update` on `jet test --listen=-`.
+jet_cli_session_do_test: fn(state: ^JetSessionListenState, req_id: Int, seq: ^Int, filter_override: String?) {
+    ^cmd_words: [String]{}
+    ^prog_args: [String]{}
+    jet_cli_session_split_passthrough(state.base_argv, cmd_words, prog_args)
+    ^argv: [String]{"test"}
+    loop i in 1..<cmd_words.len() -> argv.push("{cmd_words[i]}")
+    if filter_override == .Val(flt) && flt != "" {
+        argv.push("--filter={flt}")
+    }
+    seq += 1
+    ^_: jet_cli_session_send_line(1, jet_cli_session_event_line(req_id, seq, "test.started"))
+    output: jet_cli_session_exec_argv(state, req_id, seq, argv)
+    ^_: jet_cli_session_stream_output(1, req_id, seq, "test.output", "stdout", output.stdout)
+    ^_: jet_cli_session_stream_output(1, req_id, seq, "test.output", "stderr", output.stderr)
+    seq += 1
+    ^_: jet_cli_session_send_line(1, jet_cli_session_event_line(req_id, seq, "test.finished", "{{\"exit\":{output.exit_code}}}"))
+    status: if output.exit_code == 0 -> "ok" else -> "failed"
+    ^_: jet_cli_session_send_line(1, jet_cli_session_response_line(Val(req_id), status, output.exit_code))
+}
+
+// Handle `run` / `update` on `jet run --listen=-` and `dev` / `dev.update` on `jet dev --listen=-`.
+// Cancels any previous child, builds the newest sources, runs the built binary
+// with empty stdin, and streams stdout/stderr as `run.output` events.
+jet_cli_session_do_run_or_dev: fn(state: ^JetSessionListenState, req_id: Int, seq: ^Int, is_dev: Bool) {
+    ^cmd_words: [String]{}
+    ^prog_args: [String]{}
+    jet_cli_session_split_passthrough(state.base_argv, cmd_words, prog_args)
+    build_argv: jet_cli_session_build_words(cmd_words, true)
+    built: jet_cli_session_exec_argv(state, req_id, seq, build_argv)
+    ^_: jet_cli_session_emit_status_reports(built.stdout)
+    ^_: jet_cli_session_emit_status_reports(built.stderr)
+    if built.exit_code != 0 {
+        if is_dev {
+            seq += 1
+            ^_: jet_cli_session_send_line(1, jet_cli_session_event_line(req_id, seq, "dev.updated", "{{\"mode\":\"failed\"}}"))
+        }
+        ^_: jet_cli_session_send_line(1, jet_cli_session_response_line(Val(req_id), "failed", built.exit_code))
+        return
+    }
+    artifacts: jet_cli_session_build_artifact_paths(cmd_words)
+    if artifacts.len() == 0 {
+        report: jet_cli_session_report_line("E2105", "build produced no runnable binary artifact", jet_cli_why("E2105"), "ensure the entry declares a runnable program")
+        ^_: jet_cli_session_send_line(1, report)
+        ^_: jet_cli_session_send_line(1, jet_cli_session_response_line(Val(req_id), "failed", 1))
+        return
+    }
+    binary: artifacts[0]
+    ^run_argv: [String]{binary}
+    loop arg in prog_args -> run_argv.push("{arg}")
+    ^spec: cli_process.cmd(run_argv).stdin(.Stream).stdout(.Capture).stderr(.Capture)
+    if is_dev -> spec = spec.env(ENV_JET_DEV, "1")
+    seq += 1
+    if is_dev {
+        ^_: jet_cli_session_send_line(1, jet_cli_session_event_line(req_id, seq, "dev.updated", "{{\"mode\":\"restart\"}}"))
+    } else {
+        ^_: jet_cli_session_send_line(1, jet_cli_session_event_line(req_id, seq, "run.started"))
+    }
+    child: spec.spawn() ?? {
+        report: jet_cli_session_report_line("E2105", "could not launch built program `{binary}`: {err}", jet_cli_why("E2105"), "verify the built binary is executable")
+        ^_: jet_cli_session_send_line(1, report)
+        ^_: jet_cli_session_send_line(1, jet_cli_session_response_line(Val(req_id), "failed", 1))
+        return
+    }
+    // Empty stdin per ratified `jet run --listen=-` contract.
+    child.stdin.close()
+    receipt: child.wait() ?? {
+        report: jet_cli_session_report_line("E2105", "could not wait for program `{binary}`: {err}", jet_cli_why("E2105"), "retry the update request")
+        ^_: jet_cli_session_send_line(1, report)
+        ^_: jet_cli_session_send_line(1, jet_cli_session_response_line(Val(req_id), "failed", 1))
+        return
+    }
+    ^_: jet_cli_session_stream_output(1, req_id, seq, "run.output", "stdout", receipt.output)
+    ^_: jet_cli_session_stream_output(1, req_id, seq, "run.output", "stderr", receipt.errors)
+    seq += 1
+    ^_: jet_cli_session_send_line(1, jet_cli_session_event_line(req_id, seq, "run.finished", "{{\"exit\":{receipt.code}}}"))
+    status: if receipt.code == 0 -> "ok" else -> "failed"
+    ^_: jet_cli_session_send_line(1, jet_cli_session_response_line(Val(req_id), status, receipt.code))
+}
+
+// Entry point for `jet check|build|test|run|dev --listen=-`.
+jet_cli_session_listen: fn(verb: String, raw: [String], color: Bool) -> JetDriverVerbOutput {
+    owned: jet_cli_owned_flags(raw)
+    ^policy: "auto"
+    if jet_cli_session_policy_from(owned) == {
+        .Policy(val) -> { policy = val }
+        .Invalid(bad) -> {
+            return jet_cli_report_output("", "E2104", "invalid `--session` value `{bad}`; expected `auto`, `off`, or `required`", jet_cli_why("E2104"), "Write `--session=auto`, `--session=off`, or `--session=required`", color, JET_DRIVER_EXIT_USAGE)
+        }
+    }
+    ^attached: false
+    ^owner_pid: 0
+    ^session_id: ""
+    ^attached_desc: JetSessionDescriptor?{None}
+    // `check`, `build`, `test`, `run` join a running workspace session under `--session`;
+    // `dev --listen=-` always keeps its own compiler.
+    if verb != "dev" && policy != "off" {
+        root: jet_cli_session_root_for_argv(raw)
+        probe: jet_cli_session_probe(root)
+        if probe == {
+            .Attached(desc, pid) -> {
+                attached = true
+                owner_pid = pid
+                session_id = desc.session_id
+                attached_desc = Val(desc)
+            }
+            .Unavailable(reason) -> {
+                if policy == "required" {
+                    return jet_cli_report_output("", "E2104", "{reason} for `{root}`", jet_cli_why("E2104"), "Start `jet self lsp --serve` or `jet dev --serve` in this workspace, or pass `--session=off`", color, JET_DRIVER_EXIT_USAGE)
+                }
+            }
+            .Mismatch(reason) -> {
+                if policy == "required" {
+                    return jet_cli_report_output("", "E2104", "{reason}", jet_cli_why("E2104"), "Restart the workspace session with this toolchain, or pass `--session=off`", color, JET_DRIVER_EXIT_USAGE)
+                }
+            }
+            .Rejected(reason) -> {
+                if policy == "required" {
+                    return jet_cli_report_output("", "E2104", "cannot attach to workspace session: {reason}", jet_cli_why("E2104"), "Remove the invalid endpoint and restart `jet dev --serve` or `jet self lsp --serve`", color, JET_DRIVER_EXIT_USAGE)
+                }
+            }
+        }
+    }
+
+    base_argv: jet_cli_session_strip_listen_flags(raw)
+    toolchain: jet_cli_session_toolchain()
+    ^state: JetSessionListenState{
+        verb: verb,
+        base_argv: base_argv,
+        toolchain: toolchain,
+        attached: attached,
+        owner_pid: owner_pid,
+        session_id: session_id,
+        attached_desc: attached_desc,
+    }
+
+    // Send initial `hello` line with toolchain identity before waiting for requests.
+    initial_hello: jet_cli_session_hello_line(state.toolchain, state.verb, state.attached, true, "", state.session_id, cli_sys.getpid(), state.owner_pid)
+    if !jet_cli_session_send_line(1, initial_hello) {
+        return JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    }
+
+    ^reader: jet_cli_session_reader(0)
+    ^next_id: 1
+    loop {
+        line: jet_cli_session_read_line(reader)
+        if line == {
+            .EOF -> {
+                break
+            }
+            .ReadError(message) -> {
+                report: jet_cli_session_report_line("E2104", "{message}", jet_cli_why("E2104"), "send valid UTF-8 jet.session.v1 NDJSON lines")
+                ^_: jet_cli_session_send_line(1, report)
+                break
+            }
+            .TooLong(bytes) -> {
+                report: jet_cli_session_report_line("E2104", "session message exceeds the {JET_SESSION_MAX_LINE_BYTES}-byte line limit ({bytes} bytes)", jet_cli_why("E2104"), "keep each jet.session.v1 message at or under 1 MiB")
+                if !jet_cli_session_send_line(1, report) -> break
+                next
+            }
+            .Line(text) -> {
+                if text.trim() == "" -> next
+                obj: jet_cli_session_parse_object(text) ?? {
+                    report: jet_cli_session_report_line("E2104", "malformed jet.session.v1 JSON message", jet_cli_why("E2104"), "send one valid JSON object per line")
+                    if !jet_cli_session_send_line(1, report) -> break
+                    next
+                }
+                kind: compiler_service_text(obj, "kind") ?? ""
+                op: compiler_service_text(obj, "op") ?? kind
+                req_id_opt: compiler_service_int(obj, "id")
+                req_id: req_id_opt ?? next_id
+                next_id += 1
+
+                if op == "hello" {
+                    client_tc: compiler_service_text(obj, "toolchain") ?? ""
+                    if client_tc != "" && client_tc != state.toolchain {
+                        report: jet_cli_session_report_line("E2104", "toolchain identity mismatch: client `{client_tc}` does not match server `{state.toolchain}`", jet_cli_why("E2104"), "use matching Jet toolchains on client and server")
+                        ^_: jet_cli_session_send_line(1, report)
+                        reply: jet_cli_session_hello_line(state.toolchain, state.verb, false, false, "toolchain_mismatch", state.session_id, cli_sys.getpid(), state.owner_pid, req_id_opt)
+                        if !jet_cli_session_send_line(1, reply) -> break
+                        next
+                    }
+                    reply: jet_cli_session_hello_line(state.toolchain, state.verb, state.attached, true, "", state.session_id, cli_sys.getpid(), state.owner_pid, req_id_opt)
+                    if !jet_cli_session_send_line(1, reply) -> break
+                    next
+                }
+
+                if op == "exit" {
+                    ^_: jet_cli_session_send_line(1, jet_cli_session_response_line(req_id_opt, "ok", 0))
+                    break
+                }
+
+                if op == "cancel" {
+                    if !jet_cli_session_send_line(1, jet_cli_session_response_line(Val(req_id), "cancelled", 0)) -> break
+                    next
+                }
+
+                if op == "update" || op == "check" || op == "build" || op == "test" || op == "run" || op == "dev.update" {
+                    ^seq: 1
+                    if !jet_cli_session_send_line(1, jet_cli_session_event_line(req_id, seq, "request.started")) -> break
+                    effective: if op == "update" -> state.verb else -> op
+                    if effective == {
+                        "check" -> jet_cli_session_do_check(state, req_id, seq)
+                        "build" -> jet_cli_session_do_build(state, req_id, seq)
+                        "test" -> jet_cli_session_do_test(state, req_id, seq, compiler_service_text(obj, "filter"))
+                        "run" -> jet_cli_session_do_run_or_dev(state, req_id, seq, false)
+                        "dev" | "dev.update" -> jet_cli_session_do_run_or_dev(state, req_id, seq, true)
+                        else -> {
+                            ^_: jet_cli_session_send_line(1, jet_cli_session_response_line(Val(req_id), "error", JET_DRIVER_EXIT_USAGE, "E2104", "unsupported session op"))
+                        }
+                    }
+                    next
+                }
+
+                report: jet_cli_session_report_line("E2104", "unknown jet.session.v1 operation `{op}`", jet_cli_why("E2104"), "send `hello`, `update`, `cancel`, `exit`, or a typed verb request")
+                ^_: jet_cli_session_send_line(1, report)
+                if !jet_cli_session_send_line(1, jet_cli_session_response_line(Val(req_id), "error", JET_DRIVER_EXIT_USAGE, "E2104", "unknown operation")) -> break
+            }
+        }
+    }
+    JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+}

@@ -2714,7 +2714,7 @@ jet_cli_compile_release: fn(checked: ^^JetCLICheckedTarget) {
     released.detach()
 }
 
-jet_cli_compile_build: fn(file: String, source: String, color: Bool, options: BuildOptions, threads: Int?, invocation: JetCLIInvocationAuthority?, json: Bool, sbom: Bool, quiet: Bool, verbose: Bool, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
+jet_cli_compile_build: fn(file: String, source: String, color: Bool, options: BuildOptions, threads: Int?, invocation: JetCLIInvocationAuthority?, json: Bool, sbom: Bool, quiet: Bool, verbose: Bool, trace_sink: JetCLITraceSink?, finish: Bool{true}) -> JetDriverVerbOutput {
     members: jet_cli_build_workspace_members(file, color, options, threads, false, trace_sink)
     if members.exit_code != JET_DRIVER_EXIT_OK -> return members
     // A workspace index without its own `run: fn` is built once its members are.
@@ -2726,11 +2726,16 @@ jet_cli_compile_build: fn(file: String, source: String, color: Bool, options: Bu
     if compiled.move() == {
         .Refused(refusal) -> { output = refusal }
         .Checked(result, inputs, snapshot) -> {
-            jet_cli_finish(jet_cli_build_result(file, jet_cli_stem(file), source, color, options, invocation, json, sbom, quiet, verbose, false, result, inputs, snapshot), trace_sink)
+            built: jet_cli_build_result(file, jet_cli_stem(file), source, color, options, invocation, json, sbom, quiet, verbose, false, result, inputs, snapshot)
+            if finish {
+                jet_cli_finish(built, trace_sink)
+            } else {
+                output = built
+            }
         }
     }
-    // Reached only by a refusal: a value-returning verb never ends in its
-    // Never exit call.
+    // Reached only by a refusal or a session run (`finish: false`): a value-returning
+    // verb never ends in its Never exit call.
     output
 }
 
@@ -2875,7 +2880,7 @@ JetCLIRunStep: enum {
 // (jet_cli_observe_env), else return its output. A `--record` run records
 // its replay (jet_cli_run_recorded). The receipt's walk reuses
 // `discovery`, the command's discovery cache.
-jet_cli_run_step: fn(step: ^^JetCLIRunStep, discovery: ^WorkspaceDeclarationCache) -> JetDriverVerbOutput {
+jet_cli_run_step: fn(step: ^^JetCLIRunStep, discovery: ^WorkspaceDeclarationCache, finish: Bool{true}) -> JetDriverVerbOutput {
     ^result: JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     if step.move() == {
         .Output(output) -> { result = output }
@@ -2887,7 +2892,11 @@ jet_cli_run_step: fn(step: ^^JetCLIRunStep, discovery: ^WorkspaceDeclarationCach
                 loop field in jet_cli_observe_env(file) -> vars.push(field)
             }
             output: if options.record != "" -> jet_cli_run_recorded(executable, file, program_args, options, invocation, read_scope, vars.move(), color) else -> jet_cli_launch(executable, file, binary, program_args, options, invocation, read_scope, vars, verbose, color)
-            jet_cli_finish(output)
+            if finish {
+                jet_cli_finish(output)
+            } else {
+                result = output
+            }
         }
     }
     result
@@ -3140,7 +3149,7 @@ jet_cli_run_result: fn(file: String, source: String, color: Bool, options: Build
     }
 }
 
-jet_cli_compile_run: fn(file: String, entry: String?, source: String, color: Bool, options: BuildOptions, verbose: Bool, json: Bool, threads: Int?, program_args: [String], invocation: JetCLIInvocationAuthority?, trace_sink: JetCLITraceSink?) -> JetCLIRunStep {
+jet_cli_compile_run: fn(file: String, entry: String?, source: String, color: Bool, options: BuildOptions, verbose: Bool, json: Bool, threads: Int?, program_args: [String], invocation: JetCLIInvocationAuthority?, trace_sink: JetCLITraceSink?, finish: Bool{true}) -> JetCLIRunStep {
     // A loose script's first run fetches and locks its inline dependencies.
     if jet_cli_script_dependency_fetch(file, source, color, json) == .Val(refused) {
         return JetCLIRunStep.Output{output: refused}
@@ -3156,7 +3165,7 @@ jet_cli_compile_run: fn(file: String, entry: String?, source: String, color: Boo
     if compiled.move() == {
         .Refused(refusal) -> { step = JetCLIRunStep.Output{output: refusal} }
         .Checked(result, inputs, snapshot) -> {
-            step = jet_cli_run_settled(jet_cli_run_result(file, source, color, options, verbose, json, program_args, invocation, result, inputs, snapshot))
+            step = jet_cli_run_settled(jet_cli_run_result(file, source, color, options, verbose, json, program_args, invocation, result, inputs, snapshot), finish)
         }
     }
     step
@@ -3165,8 +3174,10 @@ jet_cli_compile_run: fn(file: String, entry: String?, source: String, color: Boo
 // A compiled run's step. A build that stopped ends the process here, inside
 // the scope that owns the compile (jet_cli_finish); a linked program goes on
 // to the main thread.
-jet_cli_run_settled: fn(step: ^^JetCLIRunStep) -> JetCLIRunStep {
-    if step == .Output(output) -> jet_cli_finish(output)
+jet_cli_run_settled: fn(step: ^^JetCLIRunStep, finish: Bool{true}) -> JetCLIRunStep {
+    if finish {
+        if step == .Output(output) -> jet_cli_finish(output)
+    }
     step
 }
 
@@ -3628,8 +3639,8 @@ jet_cli_test_records_failed: fn(fault: JetNativeTestRecordsFault, color: Bool) -
     jet_cli_build_failed("Can't use the test records file `{fault.path}`: {fault.cause}", jet_cli_why("E2105"), "Free space where the test records go (XDG_RUNTIME_DIR, else /dev/shm, else .jet/build) or make it writable, then run the tests again", color)
 }
 
-jet_cli_compile_test: fn(file: String, source: String, color: Bool, verbose: Bool, threads: Int?, options: JetCLITestOptions, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
-    if options.status.len() > 0 {
+jet_cli_compile_test: fn(file: String, source: String, color: Bool, verbose: Bool, threads: Int?, options: JetCLITestOptions, trace_sink: JetCLITraceSink?, finish: Bool{true}) -> JetDriverVerbOutput {
+    if finish && options.status.len() > 0 {
         ^stderr_handle: cli_term.stderr()
         stderr_handle.write(options.status).drop("jet stderr")
     }
@@ -3664,7 +3675,17 @@ jet_cli_compile_test: fn(file: String, source: String, color: Bool, verbose: Boo
     if compiled.move() == {
         .Refused(refusal) -> { output = refusal }
         .Checked(result, inputs, snapshot) -> {
-            jet_cli_finish(jet_cli_test_result(file, tested, doctests, measure, color, verbose, options, result, inputs, snapshot), trace_sink)
+            tested_out: jet_cli_test_result(file, tested, doctests, measure, color, verbose, options, result, inputs, snapshot)
+            if finish {
+                jet_cli_finish(tested_out, trace_sink)
+            } else {
+                output = JetDriverVerbOutput{
+                    stdout: tested_out.stdout,
+                    stderr: if options.status.len() > 0 -> "{options.status}{tested_out.stderr}" else -> tested_out.stderr,
+                    exit_code: tested_out.exit_code,
+                    failure: tested_out.failure,
+                }
+            }
         }
     }
     output
@@ -4897,11 +4918,16 @@ jet_cli_plan_allows_attach: fn(plan: JetCLIPlan) -> Bool Never! {
     if plan == {
         .Run(_, _, _, _, _, _, _, _, _, _, _, _) | .RunRemote(_, _, _, _, _, _, _, _) | .Done(_) | .Refused(_, _, _, _) | .Diagnostics(_, _, _, _, _) | .Output(_, _, _, _) -> false
         .NativeSource(_, _, run, _, _) -> !run
-        .Check(_, _, _, _, _, _, _, _, _, _, _, _, _) | .CheckWorkspace(_, _, _, _, _, _, _, _, _, _) | .CheckPrelude(_, _, _, _, _, _) | .CheckCore(_, _, _, _, _) | .Build(_, _, _, _, _, _, _, _, _, _, _) | .LockedBuild(_, _) | .BuildPackage(_, _, _, _, _, _, _, _) | .DevWeb(_, _, _, _, _, _, _, _) | .DevCanvas(_, _, _, _, _, _) | .Jobs(_, _, _, _) | .Test(_, _, _, _, _, _) | .TestWorkspace(_, _, _, _, _, _, _, _) | .TestProfile(_, _, _, _, _, _) | .New(_, _, _, _, _, _) | .NewApp(_) | .Doc(_, _, _, _, _) | .Emit(_, _, _, _, _, _) | .Eval(_, _, _, _, _) | .Fill(_, _, _) | .Structural(_, _, _) | .Review(_, _, _) | .Keygen(_, _, _) | .KeyBackup(_, _, _) | .Publish(_, _, _, _) | .Yank(_, _, _) | .Lint(_, _, _, _, _, _, _) | .Fmt(_) | .FmtLang(_, _) | .Fix(_, _, _, _, _, _, _, _, _) | .Inspect(_) | .InspectB(_) | .ForeignBind(_, _, _) | .Perf(_, _) | .Semindex(_, _, _) | .Find(_, _, _, _) | .Cache(_, _) | .Remote(_, _, _) | .Comparison(_, _, _) | .Try(_, _, _) | .Maintenance(_, _, _, _) | .Completion(_, _, _) | .Schema(_, _, _, _, _) | .Codemod(_, _, _, _, _) | .PolicyExplain(_, _, _, _, _, _) | .DiagnosticTypeExplain(_, _, _, _) | .BuildFactExplain(_, _, _, _, _, _, _) | .Gates(_, _, _, _, _) | .Doctor(_, _, _, _) | .UpdateJet(_, _, _, _, _) | .AuditCopies(_, _, _, _, _) | .AuditWrites(_, _, _, _, _) | .AuditForeign(_, _, _, _, _) | .CompilerService(_) | .Repl(_, _, _, _) | .LSP | .ReplChild(_) | .EvalExpression(_, _, _) | .Prove(_, _, _, _, _, _) | .Budget(_, _, _, _) -> true
+        .Check(_, _, _, _, _, _, _, _, _, _, _, _, _) | .CheckWorkspace(_, _, _, _, _, _, _, _, _, _) | .CheckPrelude(_, _, _, _, _, _) | .CheckCore(_, _, _, _, _) | .Build(_, _, _, _, _, _, _, _, _, _, _) | .LockedBuild(_, _) | .BuildPackage(_, _, _, _, _, _, _, _) | .DevWeb(_, _, _, _, _, _, _, _) | .DevCanvas(_, _, _, _, _, _) | .Jobs(_, _, _, _) | .Test(_, _, _, _, _, _) | .TestWorkspace(_, _, _, _, _, _, _, _) | .TestProfile(_, _, _, _, _, _) | .New(_, _, _, _, _, _) | .NewApp(_) | .Doc(_, _, _, _, _) | .Emit(_, _, _, _, _, _) | .Eval(_, _, _, _, _) | .Fill(_, _, _) | .Structural(_, _, _) | .Review(_, _, _) | .Keygen(_, _, _) | .KeyBackup(_, _, _) | .Publish(_, _, _, _) | .Yank(_, _, _) | .Lint(_, _, _, _, _, _, _) | .Fmt(_) | .FmtLang(_, _) | .Fix(_, _, _, _, _, _, _, _, _) | .Inspect(_) | .InspectB(_) | .ForeignBind(_, _, _) | .Perf(_, _) | .Semindex(_, _, _) | .Find(_, _, _, _) | .Cache(_, _) | .Remote(_, _, _) | .Comparison(_, _, _) | .Try(_, _, _) | .Maintenance(_, _, _, _) | .Completion(_, _, _) | .Schema(_, _, _, _, _) | .Codemod(_, _, _, _, _) | .PolicyExplain(_, _, _, _, _, _) | .DiagnosticTypeExplain(_, _, _, _) | .BuildFactExplain(_, _, _, _, _, _, _) | .Gates(_, _, _, _, _) | .Doctor(_, _, _, _) | .UpdateJet(_, _, _, _, _) | .AuditCopies(_, _, _, _, _) | .AuditWrites(_, _, _, _, _) | .AuditForeign(_, _, _, _, _) | .CompilerService(_) | .Repl(_, _, _, _) | .LSP | .Session(_, _, _) | .ReplChild(_) | .EvalExpression(_, _, _) | .Prove(_, _, _, _, _, _) | .Budget(_, _, _, _) -> true
     }
 }
 
 jet_cli_main: fn(args: [String]) {
+    if jet_cli_session_try_attach(args) == {
+        .Completed(exit_code) -> jet_cli_finish(JetDriverVerbOutput{stdout: "", stderr: "", exit_code: exit_code})
+        .Refused(refusal) -> jet_cli_finish(refusal)
+        .Fallback -> {}
+    }
     if (cli_sys.get(ENV_JET_ICE_SELF_TEST) ?? "") == "1" {
         jet_cli_finish(jet_cli_ice("ICE self-test triggered by JET_ICE_SELF_TEST"))
     }
@@ -4941,11 +4967,11 @@ jet_cli_main: fn(args: [String]) {
 // jet_cli_finish instead. The worker's task traces as the trace's first lane.
 JET_CLI_COMPILE_STACK_BYTES: 201326592
 
-jet_cli_compile_on_worker: fn(plan: ^^JetCLIPlan, discovery: ^WorkspaceDeclarationCache, recording: JetCLICheckRecording?{None}) -> JetDriverVerbOutput {
+jet_cli_compile_on_worker: fn(plan: ^^JetCLIPlan, discovery: ^WorkspaceDeclarationCache, recording: JetCLICheckRecording?{None}, finish: Bool{true}) -> JetDriverVerbOutput {
     trace_sink: jet_cli_trace_sink()
     ^steps: [JetCLIRunStep]{}
     task.group compile_stack(stack: JET_CLI_COMPILE_STACK_BYTES) {
-        compiling: task jet_cli_execute_compiling(plan, recording, trace_sink)
+        compiling: task jet_cli_execute_compiling(plan, recording, trace_sink, finish)
         step: compiling.join() ?? {
             if trace_sink == .Val(sink) -> jet_cli_trace_finish(sink)
             compiler_threads_failed(err)
@@ -4954,20 +4980,20 @@ jet_cli_compile_on_worker: fn(plan: ^^JetCLIPlan, discovery: ^WorkspaceDeclarati
         steps.push(step)
     }
     step: steps.pop() ?? panic("the compile thread lost its step")
-    jet_cli_run_step(step, discovery)
+    jet_cli_run_step(step, discovery, finish)
 }
 
 // A compiling plan, on its worker (jet_cli_compile_on_worker): `jet run`
 // stops at the step the main thread finishes; every other verb at its output.
-jet_cli_execute_compiling: fn(plan: ^^JetCLIPlan, recording: JetCLICheckRecording?, trace_sink: JetCLITraceSink?) -> JetCLIRunStep {
+jet_cli_execute_compiling: fn(plan: ^^JetCLIPlan, recording: JetCLICheckRecording?, trace_sink: JetCLITraceSink?, finish: Bool{true}) -> JetCLIRunStep {
     jet_cli_trace_adopt(trace_sink)
     if plan == .Run(file, source, color, options, verbose, json, threads, program_args, invocation, notice, watch, entry) {
         if !watch {
-            jet_cli_write_notice(notice)
-            return jet_cli_compile_run(file, entry, source, color, options, verbose, json, threads, program_args, invocation, trace_sink)
+            if finish -> jet_cli_write_notice(notice)
+            return jet_cli_compile_run(file, entry, source, color, options, verbose, json, threads, program_args, invocation, trace_sink, finish)
         }
     }
-    JetCLIRunStep.Output{output: jet_cli_execute(plan, trace_sink, recording)}
+    JetCLIRunStep.Output{output: jet_cli_execute(plan, trace_sink, recording, finish)}
 }
 
 // A verb's output, written to the process's stdout and stderr.
@@ -4986,7 +5012,7 @@ jet_cli_write_output: fn(output: JetDriverVerbOutput) {
 jet_cli_plan_compiles: fn(plan: JetCLIPlan) -> Bool Never! {
     if plan == {
         .Check(_, _, _, _, _, _, _, _, _, _, _, _, _) | .CheckWorkspace(_, _, _, _, _, _, _, _, _, _) | .CheckPrelude(_, _, _, _, _, _) | .CheckCore(_, _, _, _, _) | .Build(_, _, _, _, _, _, _, _, _, _, _) | .BuildPackage(_, _, _, _, _, _, _, _) | .Run(_, _, _, _, _, _, _, _, _, _, _, _) | .DevWeb(_, _, _, _, _, _, _, _) | .DevCanvas(_, _, _, _, _, _) | .Test(_, _, _, _, _, _) | .Doc(_, _, _, _, _) | .Emit(_, _, _, _, _, _) | .InspectB(.Env(_, _, _, _, _, .Val(_))) -> true
-        .Done(_) | .Refused(_, _, _, _) | .Diagnostics(_, _, _, _, _) | .LockedBuild(_, _) | .RunRemote(_, _, _, _, _, _, _, _) | .NativeSource(_, _, _, _, _) | .Jobs(_, _, _, _) | .TestWorkspace(_, _, _, _, _, _, _, _) | .TestProfile(_, _, _, _, _, _) | .New(_, _, _, _, _, _) | .NewApp(_) | .Eval(_, _, _, _, _) | .Fill(_, _, _) | .Structural(_, _, _) | .Review(_, _, _) | .Keygen(_, _, _) | .KeyBackup(_, _, _) | .Publish(_, _, _, _) | .Yank(_, _, _) | .Lint(_, _, _, _, _, _, _) | .Fmt(_) | .FmtLang(_, _) | .Fix(_, _, _, _, _, _, _, _, _) | .Inspect(_) | .InspectB(.Engine(_, _, _)) | .InspectB(.Env(_, _, _, _, _, .None)) | .ForeignBind(_, _, _) | .Perf(_, _) | .Semindex(_, _, _) | .Find(_, _, _, _) | .Cache(_, _) | .Remote(_, _, _) | .Comparison(_, _, _) | .Try(_, _, _) | .Maintenance(_, _, _, _) | .Completion(_, _, _) | .Schema(_, _, _, _, _) | .Codemod(_, _, _, _, _) | .PolicyExplain(_, _, _, _, _, _) | .DiagnosticTypeExplain(_, _, _, _) | .BuildFactExplain(_, _, _, _, _, _, _) | .Gates(_, _, _, _, _) | .Output(_, _, _, _) | .Doctor(_, _, _, _) | .UpdateJet(_, _, _, _, _) | .AuditCopies(_, _, _, _, _) | .AuditForeign(_, _, _, _, _) | .CompilerService(_) | .Repl(_, _, _, _) | .LSP | .ReplChild(_) | .EvalExpression(_, _, _) | .Prove(_, _, _, _, _, _) | .Budget(_, _, _, _) | .AuditWrites(_, _, _, _, _) -> false
+        .Done(_) | .Refused(_, _, _, _) | .Diagnostics(_, _, _, _, _) | .LockedBuild(_, _) | .RunRemote(_, _, _, _, _, _, _, _) | .NativeSource(_, _, _, _, _) | .Jobs(_, _, _, _) | .TestWorkspace(_, _, _, _, _, _, _, _) | .TestProfile(_, _, _, _, _, _) | .New(_, _, _, _, _, _) | .NewApp(_) | .Eval(_, _, _, _, _) | .Fill(_, _, _) | .Structural(_, _, _) | .Review(_, _, _) | .Keygen(_, _, _) | .KeyBackup(_, _, _) | .Publish(_, _, _, _) | .Yank(_, _, _) | .Lint(_, _, _, _, _, _, _) | .Fmt(_) | .FmtLang(_, _) | .Fix(_, _, _, _, _, _, _, _, _) | .Inspect(_) | .InspectB(.Engine(_, _, _)) | .InspectB(.Env(_, _, _, _, _, .None)) | .ForeignBind(_, _, _) | .Perf(_, _) | .Semindex(_, _, _) | .Find(_, _, _, _) | .Cache(_, _) | .Remote(_, _, _) | .Comparison(_, _, _) | .Try(_, _, _) | .Maintenance(_, _, _, _) | .Completion(_, _, _) | .Schema(_, _, _, _, _) | .Codemod(_, _, _, _, _) | .PolicyExplain(_, _, _, _, _, _) | .DiagnosticTypeExplain(_, _, _, _) | .BuildFactExplain(_, _, _, _, _, _, _) | .Gates(_, _, _, _, _) | .Output(_, _, _, _) | .Doctor(_, _, _, _) | .UpdateJet(_, _, _, _, _) | .AuditCopies(_, _, _, _, _) | .AuditForeign(_, _, _, _, _) | .CompilerService(_) | .Repl(_, _, _, _) | .LSP | .Session(_, _, _) | .ReplChild(_) | .EvalExpression(_, _, _) | .Prove(_, _, _, _, _, _) | .Budget(_, _, _, _) | .AuditWrites(_, _, _, _, _) -> false
     }
 }
 
@@ -5011,14 +5037,14 @@ jet_cli_locked_plan: fn(plan: ^^JetCLIPlan) -> JetCLIPlan Never! {
             locked.locked = true
             return JetCLIPlan.Build{file: file.move(), source: source.move(), color: color, options: locked, threads: threads, invocation: invocation.move(), notice: notice.move(), json: json, sbom: sbom, quiet: quiet, verbose: verbose}
         }
-        .Done(_) | .Refused(_, _, _, _) | .Diagnostics(_, _, _, _, _) | .Check(_, _, _, _, _, _, _, _, _, _, _, _, _) | .CheckWorkspace(_, _, _, _, _, _, _, _, _, _) | .CheckPrelude(_, _, _, _, _, _) | .CheckCore(_, _, _, _, _) | .LockedBuild(_, _) | .BuildPackage(_, _, _, _, _, _, _, _) | .Run(_, _, _, _, _, _, _, _, _, _, _, _) | .RunRemote(_, _, _, _, _, _, _, _) | .NativeSource(_, _, _, _, _) | .DevWeb(_, _, _, _, _, _, _, _) | .DevCanvas(_, _, _, _, _, _) | .Jobs(_, _, _, _) | .Test(_, _, _, _, _, _) | .TestWorkspace(_, _, _, _, _, _, _, _) | .TestProfile(_, _, _, _, _, _) | .New(_, _, _, _, _, _) | .NewApp(_) | .Doc(_, _, _, _, _) | .Emit(_, _, _, _, _, _) | .Eval(_, _, _, _, _) | .Fill(_, _, _) | .Structural(_, _, _) | .Review(_, _, _) | .Keygen(_, _, _) | .KeyBackup(_, _, _) | .Publish(_, _, _, _) | .Yank(_, _, _) | .Lint(_, _, _, _, _, _, _) | .Fmt(_) | .FmtLang(_, _) | .Fix(_, _, _, _, _, _, _, _, _) | .Inspect(_) | .InspectB(_) | .ForeignBind(_, _, _) | .Perf(_, _) | .Semindex(_, _, _) | .Find(_, _, _, _) | .Cache(_, _) | .Remote(_, _, _) | .Comparison(_, _, _) | .Try(_, _, _) | .Maintenance(_, _, _, _) | .Completion(_, _, _) | .Schema(_, _, _, _, _) | .Codemod(_, _, _, _, _) | .PolicyExplain(_, _, _, _, _, _) | .DiagnosticTypeExplain(_, _, _, _) | .BuildFactExplain(_, _, _, _, _, _, _) | .Gates(_, _, _, _, _) | .Output(_, _, _, _) | .Doctor(_, _, _, _) | .UpdateJet(_, _, _, _, _) | .AuditCopies(_, _, _, _, _) | .AuditForeign(_, _, _, _, _) | .CompilerService(_) | .Repl(_, _, _, _) | .LSP | .ReplChild(_) | .EvalExpression(_, _, _) | .Prove(_, _, _, _, _, _) | .Budget(_, _, _, _) | .AuditWrites(_, _, _, _, _) -> {}
+        .Done(_) | .Refused(_, _, _, _) | .Diagnostics(_, _, _, _, _) | .Check(_, _, _, _, _, _, _, _, _, _, _, _, _) | .CheckWorkspace(_, _, _, _, _, _, _, _, _, _) | .CheckPrelude(_, _, _, _, _, _) | .CheckCore(_, _, _, _, _) | .LockedBuild(_, _) | .BuildPackage(_, _, _, _, _, _, _, _) | .Run(_, _, _, _, _, _, _, _, _, _, _, _) | .RunRemote(_, _, _, _, _, _, _, _) | .NativeSource(_, _, _, _, _) | .DevWeb(_, _, _, _, _, _, _, _) | .DevCanvas(_, _, _, _, _, _) | .Jobs(_, _, _, _) | .Test(_, _, _, _, _, _) | .TestWorkspace(_, _, _, _, _, _, _, _) | .TestProfile(_, _, _, _, _, _) | .New(_, _, _, _, _, _) | .NewApp(_) | .Doc(_, _, _, _, _) | .Emit(_, _, _, _, _, _) | .Eval(_, _, _, _, _) | .Fill(_, _, _) | .Structural(_, _, _) | .Review(_, _, _) | .Keygen(_, _, _) | .KeyBackup(_, _, _) | .Publish(_, _, _, _) | .Yank(_, _, _) | .Lint(_, _, _, _, _, _, _) | .Fmt(_) | .FmtLang(_, _) | .Fix(_, _, _, _, _, _, _, _, _) | .Inspect(_) | .InspectB(_) | .ForeignBind(_, _, _) | .Perf(_, _) | .Semindex(_, _, _) | .Find(_, _, _, _) | .Cache(_, _) | .Remote(_, _, _) | .Comparison(_, _, _) | .Try(_, _, _) | .Maintenance(_, _, _, _) | .Completion(_, _, _) | .Schema(_, _, _, _, _) | .Codemod(_, _, _, _, _) | .PolicyExplain(_, _, _, _, _, _) | .DiagnosticTypeExplain(_, _, _, _) | .BuildFactExplain(_, _, _, _, _, _, _) | .Gates(_, _, _, _, _) | .Output(_, _, _, _) | .Doctor(_, _, _, _) | .UpdateJet(_, _, _, _, _) | .AuditCopies(_, _, _, _, _) | .AuditForeign(_, _, _, _, _) | .CompilerService(_) | .Repl(_, _, _, _) | .LSP | .Session(_, _, _) | .ReplChild(_) | .EvalExpression(_, _, _) | .Prove(_, _, _, _, _, _) | .Budget(_, _, _, _) | .AuditWrites(_, _, _, _, _) -> {}
     }
     plan
 }
 
 // Carry out one plan; a host step that finishes as a plan runs that plan.
 // `trace_sink` traces a compiling verb's compile (`jet_cli_main`).
-jet_cli_execute: fn(plan: ^^JetCLIPlan, trace_sink: JetCLITraceSink?{None}, recording: JetCLICheckRecording?{None}) -> JetDriverVerbOutput {
+jet_cli_execute: fn(plan: ^^JetCLIPlan, trace_sink: JetCLITraceSink?{None}, recording: JetCLICheckRecording?{None}, finish: Bool{true}) -> JetDriverVerbOutput {
     ^output: JetDriverVerbOutput{stdout: "", stderr: "", exit_code: 0}
     if plan == {
         .Done(done) -> { output = done.move() }
@@ -5029,12 +5055,16 @@ jet_cli_execute: fn(plan: ^^JetCLIPlan, trace_sink: JetCLITraceSink?{None}, reco
             output = jet_cli_diagnostics_output(file, source, report, color, false, notice)
         }
         .Check(file, source, color, quiet, threads, project, notice, json, verbose, settings, profile, style, target) -> {
-            jet_cli_write_notice(notice)
-            output = jet_cli_compile_check(file, source, color, quiet, threads, project, json, verbose, settings, profile, style, trace_sink, true, recording, target)
+            if finish -> jet_cli_write_notice(notice)
+            ^checked: jet_cli_compile_check(file, source, color, quiet, threads, project, json, verbose, settings, profile, style, trace_sink, finish, recording, target)
+            if !finish && notice.len() > 0 -> checked.stderr = "{notice}{checked.stderr}"
+            output = checked
         }
         .CheckWorkspace(files, sources, color, quiet, threads, notice, json, settings, profile, style) -> {
-            jet_cli_write_notice(notice)
-            output = jet_cli_check_workspace(files, sources, color, quiet, threads, json, settings, profile, style, trace_sink)
+            if finish -> jet_cli_write_notice(notice)
+            ^checked: jet_cli_check_workspace(files, sources, color, quiet, threads, json, settings, profile, style, trace_sink)
+            if !finish && notice.len() > 0 -> checked.stderr = "{notice}{checked.stderr}"
+            output = checked
         }
         .CheckPrelude(file, source, color, quiet, threads, json) -> {
             output = jet_cli_compile_prelude_check(file, source, color, quiet, threads, json, trace_sink)
@@ -5043,28 +5073,32 @@ jet_cli_execute: fn(plan: ^^JetCLIPlan, trace_sink: JetCLITraceSink?{None}, reco
             output = jet_cli_compile_core_check(core, color, quiet, threads, json, trace_sink)
         }
         .Build(file, source, color, options, threads, invocation, notice, json, sbom, quiet, verbose) -> {
-            jet_cli_write_notice(notice)
+            if finish -> jet_cli_write_notice(notice)
             // `jet build --lib` writes the entry's native Library (LibraryBuild.jet).
             if {
                 options.library -> {
                     output = jet_cli_build_library(file, source, color, options.move(), threads, trace_sink)
                 }
                 else -> {
-                    output = jet_cli_compile_build(file, source, color, options, threads, invocation, json, sbom, quiet, verbose, trace_sink)
+                    ^built: jet_cli_compile_build(file, source, color, options, threads, invocation, json, sbom, quiet, verbose, trace_sink, finish)
+                    if !finish && notice.len() > 0 -> built.stderr = "{notice}{built.stderr}"
+                    output = built
                 }
             }
         }
         .BuildPackage(file, color, options, build_args, threads, invocation, notice, locked) -> {
-            jet_cli_write_notice(notice)
+            if finish -> jet_cli_write_notice(notice)
             check: locked ?? [String]{}
             checked: if check.len() > 0 -> jet_cli_engine_dispatch(JET_CLI_JETPACK_BINARY, "build --locked", check) else -> JetDriverVerbOutput{stdout: "", stderr: "", exit_code: 0}
-            output = if checked.exit_code != 0 -> checked else -> jet_cli_build_package(file, color, options, build_args, threads, invocation, locked != None, trace_sink)
+            ^built: if checked.exit_code != 0 -> checked else -> jet_cli_build_package(file, color, options, build_args, threads, invocation, locked != None, trace_sink)
+            if !finish && notice.len() > 0 -> built.stderr = "{notice}{built.stderr}"
+            output = built
         }
         .LockedBuild(check, build) -> { output = jet_cli_locked_build_host(check, build) }
         .Run(file, source, color, options, verbose, json, threads, program_args, invocation, notice, watch, entry) -> {
-            jet_cli_write_notice(notice)
+            if finish -> jet_cli_write_notice(notice)
             ^discovery: WorkspaceDeclarationCache.new()
-            output = if watch -> jet_cli_dev_loop(file, entry, color, options, verbose, json, threads, program_args, invocation, trace_sink) else -> jet_cli_run_step(jet_cli_compile_run(file, entry, source, color, options, verbose, json, threads, program_args, invocation, trace_sink), discovery)
+            output = if watch -> jet_cli_dev_loop(file, entry, color, options, verbose, json, threads, program_args, invocation, trace_sink) else -> jet_cli_run_step(jet_cli_compile_run(file, entry, source, color, options, verbose, json, threads, program_args, invocation, trace_sink, finish), discovery, finish)
         }
         .NativeSource(file, level, run, program_args, color) -> {
             output = jet_cli_native_source(file, level, run, program_args, color)
@@ -5082,7 +5116,7 @@ jet_cli_execute: fn(plan: ^^JetCLIPlan, trace_sink: JetCLITraceSink?{None}, reco
             output = jet_cli_compile_jobs(file, color, json)
         }
         .Test(file, source, color, verbose, threads, options) -> {
-            output = jet_cli_compile_test(file, source, color, verbose, threads, options, trace_sink)
+            output = jet_cli_compile_test(file, source, color, verbose, threads, options, trace_sink, finish)
         }
         .TestWorkspace(names, member_args, envs, executable, heading, results, tiers, quiet) -> {
             output = jet_cli_test_workspace(names, member_args, envs, executable, heading, results, tiers, quiet)
@@ -5191,7 +5225,10 @@ jet_cli_execute: fn(plan: ^^JetCLIPlan, trace_sink: JetCLITraceSink?{None}, reco
         .Repl(project, preload, options, color) -> {
             output = jet_cli_repl(project, preload, options, color)
         }
-        .LSP -> { output = jet_cli_lsp() }
+        .LSP -> { output = jet_cli_lsp(false) }
+        .Session(mode, raw, color) -> {
+            output = jet_cli_session_dispatch(mode, raw, color, trace_sink)
+        }
         .ReplChild(invocation) -> { output = jet_cli_repl_child(invocation) }
         .EvalExpression(source, color, json) -> {
             output = jet_cli_eval_expression(source, color, json)
@@ -5207,6 +5244,210 @@ jet_cli_execute: fn(plan: ^^JetCLIPlan, trace_sink: JetCLITraceSink?{None}, reco
         }
     }
     output
+}
+
+// Dispatch `JetCLIPlan.Session`: `--listen=-`, `jet self lsp --serve`, or `jet dev --serve`.
+jet_cli_session_dispatch: fn(mode: JetCLISessionMode, raw: [String], color: Bool, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
+    if mode == {
+        .Listen(verb) -> jet_cli_session_listen(verb, raw, color)
+        .LSPServe -> jet_cli_lsp(true)
+        .DevServe(file, entry, options, verbose, json, threads, program_args, invocation, notice) -> {
+            jet_cli_write_notice(notice)
+            jet_cli_dev_serve_loop(file, entry, color, options, verbose, json, threads, program_args, invocation, trace_sink)
+        }
+    }
+}
+
+// Stop a `JetCLIDevChild` cleanly.
+jet_cli_dev_stop_child: fn(child: JetCLIDevChild) {
+    if child == {
+        .Memory(pid) -> { x64_process_stop(pid) }
+        .File(running) -> {
+            running.kill().drop("the program may already have exited")
+            running.wait().drop("the stopped program's status is not reported")
+        }
+        .Idle -> {}
+    }
+}
+
+// `jet dev --serve`: acquires the workspace session lock and serves build/check/test
+// requests over the workspace Unix socket while watching for edits. If another owner
+// (e.g. `jet self lsp --serve`) already holds the lock, attaches to it as a client
+// and delegates rebuilds without opening a second endpoint or taking over the lock.
+jet_cli_dev_serve_loop: fn(file: String, entry: String?, color: Bool, options: BuildOptions, verbose: Bool, json: Bool, threads: Int?, program_args: [String], invocation: JetCLIInvocationAuthority?, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
+    root: if file == "" -> (cli_files.cwd() ?? ".") else -> (jet_cli_manifest_root(jet_cli_parent(file) ?? ".") ?? (jet_cli_parent(file) ?? "."))
+    workspace: jet_cli_session_workspace_root(root)
+    acquired: jet_cli_session_owner_acquire(workspace, "dev")
+    if acquired == {
+        .Failed(reason) -> {
+            return jet_cli_report_output("", "E2104", "could not start workspace session for `jet dev --serve`: {reason}", jet_cli_why("E2104"), "ensure `{workspace}/.jet` and your runtime directory are private and contain no symlinks", color, JET_DRIVER_EXIT_USAGE)
+        }
+        .AlreadyOwned(desc) -> {
+            // Another owner (e.g. `jet self lsp --serve`) holds the workspace lock:
+            // verify handshake and attach as a client.
+            ^attached: true
+            ^attached_desc: JetSessionDescriptor?{Val(desc)}
+            if jet_cli_session_probe(workspace) == {
+                .Attached(verified, owner_pid) -> {
+                    cli_term.eprint("jet dev: attached to workspace session {verified.session_id} (owned by {verified.owner} pid {owner_pid})")
+                    attached_desc = Val(verified)
+                }
+                .Unavailable(reason) | .Mismatch(reason) | .Rejected(reason) -> {
+                    cli_term.eprint("jet dev: could not attach to workspace session ({reason}); running locally")
+                    attached = false
+                    attached_desc = None
+                }
+            }
+            sig_fd: jet_cli_session_signalfd_open()
+            if file == "" {
+                loop {
+                    if sig_fd >= 0 {
+                        mask: jet_cli_session_poll3(sig_fd, -1, -1, 250)
+                        if mask < 0 || (mask & 1) != 0 -> break
+                    } else {
+                        cli_time.sleep(100ms)
+                    }
+                }
+                jet_cli_session_signalfd_close(sig_fd)
+                return JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+            }
+            ^first: true
+            loop {
+                stamp: jet_cli_dev_stamp(root, [String]{})
+                ^child: JetCLIDevChild.Idle
+                ^built_ok: false
+                if attached {
+                    if attached_desc == .Val(owner_desc) {
+                        cwd: cli_files.cwd() ?? "."
+                        if jet_cli_session_remote_invoke(owner_desc, [String]{"build", file}, cwd, false) == .Val(ran) {
+                            if ran.exit_code == 0 {
+                                built_ok = true
+                            } else {
+                                if ran.stderr.len() > 0 -> cli_term.eprint(ran.stderr)
+                            }
+                        } else {
+                            cli_term.eprint("jet dev: workspace session detached; running locally")
+                            attached = false
+                            attached_desc = None
+                        }
+                    }
+                }
+                if !attached {
+                    source: cli_files.read(file) ?? ""
+                    compiled: jet_cli_compile_executable_file(file, entry, color, threads, options, trace_sink)
+                    if compiled.move() == {
+                        .Refused(refusal) -> {
+                            if first {
+                                jet_cli_session_signalfd_close(sig_fd)
+                                return refusal
+                            }
+                            cli_term.eprint(refusal.stderr)
+                        }
+                        .Checked(result, inputs, snapshot) -> {
+                            read_scope: jet_cli_run_read_scope(jet_cli_policy_authority([String]{}, result.authority_policy), invocation)
+                            child = jet_cli_dev_start(jet_cli_run_build(file, source, color, options, verbose, json, invocation, result, inputs, snapshot), file, program_args, None, options, invocation, read_scope, verbose, color, json)
+                        }
+                    }
+                } else if built_ok {
+                    binary: "{root}/.jet/build/{jet_cli_stem(file)}"
+                    if cli_files.is_file(binary) {
+                        ^run_argv: [String]{binary}
+                        loop arg in program_args -> run_argv.push("{arg}")
+                        if cli_process.cmd(run_argv).env(ENV_JET_DEV, "1").stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).spawn() == .Ok(spawned) {
+                            child = JetCLIDevChild.File{child: spawned}
+                        }
+                    }
+                }
+                first = false
+                cli_term.eprint("jet dev: watching {root} (Ctrl-C to stop)")
+                ^stopped: false
+                loop jet_cli_dev_stamp(root, [String]{}) == stamp {
+                    if sig_fd >= 0 {
+                        mask: jet_cli_session_poll3(sig_fd, -1, -1, 100)
+                        if mask < 0 || (mask & 1) != 0 {
+                            stopped = true
+                            break
+                        }
+                    } else {
+                        cli_time.sleep(100ms)
+                    }
+                }
+                jet_cli_dev_stop_child(child)
+                if stopped {
+                    jet_cli_session_signalfd_close(sig_fd)
+                    return JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+                }
+                cli_term.eprint("jet dev: change detected, rebuilding")
+            }
+        }
+        .Owned(owned_session) -> {
+            ^owner: owned_session
+            if file == "" {
+                cli_term.eprint("jet dev: serving builds for {workspace} (session {owner.session_id})")
+                loop {
+                    if !jet_cli_session_owner_wait(owner, 250) -> break
+                }
+                jet_cli_session_owner_close(owner)
+                return JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+            }
+            cli_term.eprint("jet dev: watching {root} · serving builds for this workspace (session {owner.session_id})")
+            ^hot_noted: false
+            ^first: true
+            loop {
+                source: cli_files.read(file) ?? ""
+                ^config: jet_driver_dev_config_stock()
+                ^configured: true
+                if jet_cli_dev_config(file, source, color, threads) == {
+                    .Config(found) -> { config = found }
+                    .Refused(output) -> {
+                        cli_term.eprint(output.stderr)
+                        configured = false
+                    }
+                }
+                stamp: jet_cli_dev_stamp(root, config.watch)
+                ^child: JetCLIDevChild.Idle
+                if config.configured && config.reload == "Hot" && !hot_noted {
+                    cli_term.eprint("jet dev: in-process hot reload isn't available yet; restarting the program on each change")
+                    hot_noted = true
+                }
+                ^read: [JetDriverComptimeInputRecord]{}
+                compiled: jet_cli_compile_executable_file(file, entry, color, threads, options, trace_sink)
+                if compiled.move() == {
+                    .Refused(refusal) -> {
+                        if first {
+                            jet_cli_session_owner_close(owner)
+                            return JetDriverVerbOutput{stdout: "", stderr: if configured -> refusal.stderr else -> "", exit_code: refusal.exit_code}
+                        }
+                        if configured -> cli_term.eprint(refusal.stderr)
+                    }
+                    .Checked(result, inputs, snapshot) -> {
+                        read_scope: jet_cli_run_read_scope(jet_cli_policy_authority([String]{}, result.authority_policy), invocation)
+                        if configured {
+                            child = jet_cli_dev_start(jet_cli_run_build(file, source, color, options, verbose, json, invocation, result, inputs, snapshot), file, program_args, config.port, options, invocation, read_scope, verbose, color, json)
+                        }
+                        read = result.comptime_inputs.move()
+                    }
+                }
+                first = false
+                inputs_stamp: jet_cli_dev_inputs_stamp(read)
+                ^stopped: false
+                if jet_cli_dev_inputs_current(read) {
+                    loop jet_cli_dev_stamp(root, config.watch) == stamp && jet_cli_dev_inputs_stamp(read) == inputs_stamp {
+                        if !jet_cli_session_owner_wait(owner, 50) {
+                            stopped = true
+                            break
+                        }
+                    }
+                }
+                jet_cli_dev_stop_child(child)
+                if stopped {
+                    jet_cli_session_owner_close(owner)
+                    return JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+                }
+                cli_term.eprint("jet dev: change detected, rebuilding")
+            }
+        }
+    }
 }
 
 // Stock `jet dev`: build and run the program; when any source of its package

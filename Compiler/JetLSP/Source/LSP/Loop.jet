@@ -206,6 +206,14 @@ lsp_queued_edits: fn(queued: LSPQueued, uri: String) -> Bool Never! {
     lsp_params_uri(lsp_member(message, "params")) == Val((uri))
 }
 
+// Optional host hook for `jet self lsp --serve` to multiplex workspace session
+// socket requests and clean SIGINT/SIGTERM teardown alongside LSP stdio.
+LSPServeHook: trait {
+    wait_for_input: fn(^self) -[FS, Env, Exec, IO, Time, Net, Rand, FFI.C, FFI.Asm]> Bool Never!,
+    poll_once: fn(^self) -[FS, Env, Exec, IO, Time, Net, Rand, FFI.C, FFI.Asm]> Never!,
+    close_owner: fn(^self) -[FS, Env, Exec, IO, Time, Net, Rand, FFI.C, FFI.Asm]> Never!,
+}
+
 // Serves until `exit` or the end of input. The exit code is 0 when a
 // `shutdown` request came first, else 1.
 lsp_serve: fn(checker: ^^LSPChecker) -> Int {
@@ -223,6 +231,48 @@ lsp_serve: fn(checker: ^^LSPChecker) -> Int {
             else -> lsp_read_waiting(input)
         }
     }
+}
+
+// Like `lsp_serve`, invoking `hook` while idle and after each LSP message so
+// `jet self lsp --serve` accepts workspace session clients with zero delay.
+lsp_serve_with_hook: fn(checker: ^^LSPChecker, hook: ^^LSPServeHook) -> Int {
+    ^server: lsp_server(checker)
+    ^active: hook
+    ^stdout: lsp_loop_term.stdout()
+    ^input: lsp_input()
+    ^code: 1
+    loop {
+        if {
+            lsp_next_queued(input) == .Val(queued) -> {
+                if queued.stop != "" {
+                    code = lsp_stop(queued.stop)
+                    break
+                }
+                if lsp_serve_message(server, queued, input, stdout) == .Err(error) {
+                    code = lsp_stop("could not write to the client: {error}")
+                    break
+                }
+                if server.exited {
+                    code = lsp_exit_code(server)
+                    break
+                }
+                active.poll_once()
+            }
+            input.ended -> {
+                code = lsp_exit_code(server)
+                break
+            }
+            else -> {
+                if !active.wait_for_input() {
+                    code = lsp_exit_code(server)
+                    break
+                }
+                lsp_read_waiting(input)
+            }
+        }
+    }
+    active.close_owner()
+    code
 }
 
 lsp_exit_code: fn(server: LSPServer) -> Int Never! { if server.shutdown -> 0 else -> 1 }

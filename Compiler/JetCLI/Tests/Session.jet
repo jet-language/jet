@@ -1,0 +1,540 @@
+// Unit and loopback integration tests for `jet.session.v1` NDJSON framing,
+// `--listen=-` / `--serve` / `--session` front-door routing, private Unix
+// domain socket security (UID, nonce, symlink checks, flock ownership),
+// 1 MiB line enforcement, malformed JSON recovery, and attached build parity.
+use {
+    sess_files: core.files
+    sess_sys: core.sys
+    sess_testing: core.testing
+    jet_backend.[loader_open]
+    jet_cli.[
+        JET_SESSION_MAX_LINE_BYTES,
+        JET_SESSION_SCHEMA,
+        JetCLIEnvVar,
+        JetCLISessionMode,
+        JetSessionDescriptor,
+        JetSessionOwner,
+        jet_cli_execute,
+        jet_cli_front,
+        jet_cli_json_control_quote,
+        jet_cli_plan,
+        jet_cli_session_attachable_verb,
+        jet_cli_session_capture_env,
+        jet_cli_session_check_line_bytes,
+        jet_cli_session_chmod,
+        jet_cli_session_client_hello_line,
+        jet_cli_session_close_fd,
+        jet_cli_session_const_time_eq,
+        jet_cli_session_env_json,
+        jet_cli_session_invoke_local,
+        jet_cli_session_owner_acquire,
+        jet_cli_session_owner_close,
+        jet_cli_session_owner_wait,
+        jet_cli_session_parse_object,
+        jet_cli_session_peer_allowed,
+        jet_cli_session_probe,
+        jet_cli_session_read_bool,
+        jet_cli_session_read_descriptor,
+        jet_cli_session_read_line,
+        jet_cli_session_reader,
+        jet_cli_session_report_line,
+        jet_cli_session_send_line,
+        jet_cli_session_string_array_json,
+        jet_cli_session_toolchain,
+        jet_cli_session_unix_connect,
+        jet_cli_toolchain_root,
+    ]
+    jet_driver.[JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JetDriverVerbOutput]
+    jet_foundation.[
+        ENV_JET_COMPILER_IDENTITY,
+        ENV_JET_ICE_SELF_TEST,
+        ENV_JET_TOOLCHAIN_ROOT,
+        compiler_service_get,
+        compiler_service_int,
+        compiler_service_text,
+    ]
+    jet_pkg_model.[JET_VERSION, WorkspaceDeclarationCache]
+}
+
+// Create an isolated scratch directory and private 0700 XDG_RUNTIME_DIR for a session test.
+session_test_env_begin: fn(tag: String) -> {root: String, ws: String, xdg: String, prev_xdg: String?} {
+    root: "{sess_sys.temp_dir()}/jet-session-{tag}-{sess_sys.getpid()}"
+    sess_files.remove_all(root).drop("clear prior scratch dir")
+    ws: "{root}/ws"
+    xdg: "{root}/xdg"
+    sess_files.create_dir_all(ws) ?? panic("create ws: {err}")
+    sess_files.create_dir_all(xdg) ?? panic("create xdg: {err}")
+    assert(jet_cli_session_chmod(xdg, 0o700), "chmod 0700 on scratch xdg dir")
+    sess_files.write("{ws}/package.jet", "name: \"session_test\"\nversion: \"0.1.0\"\n") ?? panic("write package.jet: {err}")
+    prev_xdg: sess_sys.get("XDG_RUNTIME_DIR")
+    sess_sys.set("XDG_RUNTIME_DIR", xdg)
+    {root: root, ws: ws, xdg: xdg, prev_xdg: prev_xdg}
+}
+
+session_test_env_end: fn(root: String, prev_xdg: String?) {
+    if prev_xdg == {
+        .Val(old) -> sess_sys.set("XDG_RUNTIME_DIR", old)
+        .None -> { sess_sys.unset("XDG_RUNTIME_DIR").drop("restore unset XDG_RUNTIME_DIR") }
+    }
+    sess_files.remove_all(root).drop("cleanup scratch dir")
+}
+
+// Read all lines sent by the owner until EOF on `fd`.
+session_test_read_all_lines: fn(fd: Int) -> [String] {
+    ^reader: jet_cli_session_reader(fd)
+    ^lines: [String]{}
+    loop {
+        if jet_cli_session_read_line(reader) == {
+            .Line(text) -> lines.push(text)
+            .EOF | .ReadError(_) | .TooLong(_) -> break
+        }
+    }
+    lines
+}
+
+// Send one `invoke` request to `owner` over its real Unix domain socket, serve it
+// synchronously on `owner`, and assemble the streamed stdout/stderr/exit code.
+session_test_socket_invoke: fn(owner: ^JetSessionOwner, desc: JetSessionDescriptor, argv: [String], cwd: String, req_env: [JetCLIEnvVar]) -> JetDriverVerbOutput {
+    fd: jet_cli_session_unix_connect(desc.socket)
+    assert(fd >= 0, "connect to owner socket for invoke")
+    assert(jet_cli_session_send_line(fd, jet_cli_session_client_hello_line(desc.toolchain, desc.nonce, sess_sys.getpid())))
+    req: "{{\"schema\":\"{JET_SESSION_SCHEMA}\",\"kind\":\"request\",\"id\":1,\"op\":\"invoke\",\"argv\":{jet_cli_session_string_array_json(argv)},\"cwd\":{jet_cli_json_control_quote(cwd)},\"env\":{jet_cli_session_env_json(req_env)},\"tty\":false}}"
+    assert(jet_cli_session_send_line(fd, req))
+    assert(jet_cli_session_send_line(fd, "{{\"schema\":\"{JET_SESSION_SCHEMA}\",\"kind\":\"request\",\"id\":2,\"op\":\"exit\"}}"))
+    // Owner accepts, authenticates peer UID + nonce + toolchain, executes invoke, streams output, closes peer fd.
+    assert(jet_cli_session_owner_wait(owner, 5000), "owner_wait invoke")
+    lines: session_test_read_all_lines(fd)
+    jet_cli_session_close_fd(fd)
+    assert(lines.len() >= 2, "expected hello + invoke response lines")
+    hello_obj: jet_cli_session_parse_object(lines[0]) ?? panic("parse invoke hello")
+    assert_eq(jet_cli_session_read_bool(hello_obj, "ok"), Val(true))
+    ^out_chunks: [String]{}
+    ^err_chunks: [String]{}
+    ^exit_code: -1
+    loop idx in 1..<lines.len() {
+        obj: jet_cli_session_parse_object(lines[idx]) ?? next
+        kind: compiler_service_text(obj, "kind") ?? ""
+        if kind == "event" && (compiler_service_text(obj, "event") ?? "") == "invoke.output" {
+            if compiler_service_get(obj, "data") == .Val(data) {
+                stream: compiler_service_text(data, "stream") ?? ""
+                piece: compiler_service_text(data, "text") ?? ""
+                if stream == "stdout" {
+                    out_chunks.push(piece)
+                } else if stream == "stderr" {
+                    err_chunks.push(piece)
+                }
+            }
+        }
+        if kind == "response" && compiler_service_int(obj, "id") == Val(1) {
+            exit_code = compiler_service_int(obj, "exit") ?? 1
+        }
+    }
+    assert(exit_code >= 0, "invoke response missing exit code")
+    JetDriverVerbOutput{stdout: out_chunks.join(""), stderr: err_chunks.join(""), exit_code: exit_code}
+}
+
+#Test("session: front-door plan accepts --listen=-, --serve, --session and refuses invalid forms") {
+    // All 5 session verbs accept `--listen=-`.
+    loop verb in ([String]{"check", "build", "test", "run", "dev"}) {
+        plan: jet_cli_plan([String]{verb, "--listen=-"})
+        if plan == .Session(mode, _, _) {
+            assert(mode == JetCLISessionMode.Listen{verb: verb}, "expected Listen({verb})")
+        } else {
+            panic("expected JetCLIPlan.Session(Listen) for `{verb} --listen=-`")
+        }
+    }
+
+    // `self lsp --serve` and `dev --serve` route to owner modes.
+    if jet_cli_plan([String]{"self", "lsp", "--serve"}) == .Session(mode, _, _) {
+        assert(mode == JetCLISessionMode.LSPServe, "expected LSPServe")
+    } else {
+        panic("expected JetCLIPlan.Session(LSPServe) for `self lsp --serve`")
+    }
+    if jet_cli_plan([String]{"dev", "--serve"}) == .Session(mode, _, _) {
+        assert(mode == .DevServe(_, _, _, _, _, _, _, _, _), "expected DevServe")
+    } else {
+        panic("expected JetCLIPlan.Session(DevServe) for `dev --serve`")
+    }
+
+    // `--listen=<addr>` other than `-` is refused with E2104 matching the UI snapshot.
+    addr_plan: jet_cli_plan([String]{"build", "Tests/UI/session_listen_addr_e2104.jet", "--listen=127.0.0.1:9999"})
+    addr_out: jet_cli_execute(addr_plan)
+    assert_eq(addr_out.exit_code, JET_DRIVER_EXIT_USAGE)
+    expected_ui: sess_files.read("Tests/UI/session_listen_addr_e2104.stderr") ?? panic("read UI snapshot: {err}")
+    assert_eq(addr_out.stderr, expected_ui)
+
+    // `--listen=-` cannot combine with `--watch` or `--serve`.
+    watch_out: jet_cli_execute(jet_cli_plan([String]{"check", "--listen=-", "--watch"}))
+    assert_eq(watch_out.exit_code, JET_DRIVER_EXIT_USAGE)
+    assert(watch_out.stderr.contains("Jet.InvalidCommandInput"))
+    serve_out: jet_cli_execute(jet_cli_plan([String]{"dev", "--listen=-", "--serve"}))
+    assert_eq(serve_out.exit_code, JET_DRIVER_EXIT_USAGE)
+    assert(serve_out.stderr.contains("Jet.InvalidCommandInput"))
+
+    // Invalid `--session` policy is refused with E2104.
+    bad_pol: jet_cli_execute(jet_cli_plan([String]{"build", "--session=bogus"}))
+    assert_eq(bad_pol.exit_code, JET_DRIVER_EXIT_USAGE)
+    assert(bad_pol.stderr.contains("Jet.InvalidCommandInput"))
+
+    // Attachable verb filter admits check/build/test and excludes help, listen, serve, watch, locked, dev.
+    assert_eq(jet_cli_session_attachable_verb([String]{"build", "main.jet"}), Val("build"))
+    assert_eq(jet_cli_session_attachable_verb([String]{"check", "main.jet"}), Val("check"))
+    assert_eq(jet_cli_session_attachable_verb([String]{"test", "Tests/"}), Val("test"))
+    assert_eq(jet_cli_session_attachable_verb([String]{"build", "--help"}), None)
+    assert_eq(jet_cli_session_attachable_verb([String]{"build", "--listen=-"}), None)
+    assert_eq(jet_cli_session_attachable_verb([String]{"build", "--watch"}), None)
+    assert_eq(jet_cli_session_attachable_verb([String]{"build", "--locked"}), None)
+    assert_eq(jet_cli_session_attachable_verb([String]{"dev", "--serve"}), None)
+}
+
+#Test("session: wire framing enforces exact 1 MiB cap, constant-time nonce, and peer UID law") {
+    // Exact 1 MiB (1048576 bytes) is accepted; 1 MiB + 1 byte (1048577) is refused.
+    ^exact_buf: [U8]{}
+    loop _ in 0..<JET_SESSION_MAX_LINE_BYTES -> exact_buf.push(U8{97})
+    if jet_cli_session_check_line_bytes(exact_buf) == .Line(text) {
+        assert_eq(text.len(), JET_SESSION_MAX_LINE_BYTES)
+    } else {
+        panic("exact 1 MiB line must be accepted")
+    }
+
+    exact_buf.push(U8{98})
+    if jet_cli_session_check_line_bytes(exact_buf) == .TooLong(bytes) {
+        assert_eq(bytes, JET_SESSION_MAX_LINE_BYTES + 1)
+    } else {
+        panic("1 MiB + 1 byte line must be refused with TooLong")
+    }
+
+    // Streaming reader over a real file fd: 1 MiB accepted, 1 MiB + 1 byte refused,
+    // and the following line is still read cleanly (O(1) drain recovery).
+    env: session_test_env_begin("wire")
+    stream_file: "{env.root}/stream.ndjson"
+    ^exact_parts: [String]{}
+    loop _ in 0..<16384 -> exact_parts.push("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+    exact_line: exact_parts.join("")
+    assert_eq(exact_line.len(), JET_SESSION_MAX_LINE_BYTES)
+    over_line: "{exact_line}x"
+    assert_eq(over_line.len(), JET_SESSION_MAX_LINE_BYTES + 1)
+    sess_files.write(stream_file, "{exact_line}\n{over_line}\n{{\"kind\":\"ok\"}}\n") ?? panic("write stream.ndjson: {err}")
+    fd: loader_open(stream_file)
+    assert(fd >= 0, "open stream.ndjson")
+    ^reader: jet_cli_session_reader(fd)
+    if jet_cli_session_read_line(reader) == .Line(first) {
+        assert_eq(first.len(), JET_SESSION_MAX_LINE_BYTES)
+    } else {
+        panic("streaming exact 1 MiB line must succeed")
+    }
+    if jet_cli_session_read_line(reader) == .TooLong(bytes) {
+        assert_eq(bytes, JET_SESSION_MAX_LINE_BYTES + 1)
+    } else {
+        panic("streaming 1 MiB + 1 byte line must return TooLong")
+    }
+    if jet_cli_session_read_line(reader) == .Line(after) {
+        assert_eq(after, "{{\"kind\":\"ok\"}}")
+    } else {
+        panic("streaming reader must recover cleanly after TooLong line")
+    }
+    assert(jet_cli_session_read_line(reader) == .EOF, "expected EOF after third line")
+    jet_cli_session_close_fd(fd)
+    session_test_env_end(env.root, env.prev_xdg)
+
+    // Constant-time nonce comparison.
+    assert(jet_cli_session_const_time_eq("abcdef0123456789", "abcdef0123456789"))
+    assert(!jet_cli_session_const_time_eq("abcdef0123456789", "abcdef0123456788"))
+    assert(!jet_cli_session_const_time_eq("abcdef0123456789", "abcdef"))
+
+    // Peer UID enforcement: only exact euid matches.
+    euid: sess_sys.geteuid()
+    assert(jet_cli_session_peer_allowed(Val(euid), euid))
+    assert(!jet_cli_session_peer_allowed(Val(euid + 1), euid))
+    assert(!jet_cli_session_peer_allowed(None, euid))
+
+    // Report line reuses jet.report/v4 shape unchanged.
+    report_line: jet_cli_session_report_line("E2104", "malformed", "bad input", "send valid JSON")
+    report_obj: jet_cli_session_parse_object(report_line) ?? panic("report line must be valid JSON")
+    assert_eq(compiler_service_text(report_obj, "schema"), Val("jet.report/v4"))
+    assert_eq(compiler_service_text(report_obj, "code"), Val("E2104"))
+}
+
+#Test("session: owner lock, descriptor validation, symlink rejection, and clean close") {
+    env: session_test_env_begin("owner")
+    ^owner_opt: JetSessionOwner?{None}
+    if jet_cli_session_owner_acquire(env.ws, "lsp") == {
+        .Owned(acquired) -> { owner_opt = Val(acquired) }
+        .AlreadyOwned(_) -> panic("fresh workspace must not already be owned")
+        .Failed(reason) -> panic("owner_acquire failed: {reason}")
+    }
+    ^owner: owner_opt ?? panic("missing owner")
+
+    // Descriptor exists and validates.
+    ^desc_opt: JetSessionDescriptor?{None}
+    if jet_cli_session_read_descriptor(env.ws) == {
+        .Found(desc) -> { desc_opt = Val(desc) }
+        .Missing -> panic("descriptor missing after acquire")
+        .Invalid(reason) -> panic("descriptor invalid after acquire: {reason}")
+    }
+    desc: desc_opt ?? panic("missing descriptor")
+    assert_eq(desc.session_id, owner.session_id)
+    assert_eq(desc.socket, owner.socket_path)
+    assert_eq(desc.nonce, owner.nonce)
+    assert(sess_files.exists(owner.socket_path), "socket file must exist while owner is live")
+
+    // Second owner attempt (`jet dev --serve`) sees AlreadyOwned and preserves the live endpoint.
+    if jet_cli_session_owner_acquire(env.ws, "dev") == {
+        .AlreadyOwned(existing) -> {
+            assert_eq(existing.session_id, owner.session_id)
+            assert_eq(existing.socket, owner.socket_path)
+        }
+        .Owned(second) -> {
+            ^dup: second
+            jet_cli_session_owner_close(dup)
+            panic("second owner must not steal the lock")
+        }
+        .Failed(reason) -> panic("second owner_acquire failed: {reason}")
+    }
+
+    // Closing the owner removes the socket and `.jet/session`.
+    jet_cli_session_owner_close(owner)
+    assert(!sess_files.exists(owner.socket_path), "socket file must be removed on close")
+    assert(!sess_files.exists(owner.descriptor_path), ".jet/session must be removed on close")
+    assert(jet_cli_session_probe(env.ws) == .Unavailable(_), "probe after close must be Unavailable")
+
+    // Symlinked `.jet/session` is rejected.
+    decoy: "{env.root}/decoy.session"
+    sess_files.write(decoy, "{{\"schema\":\"{JET_SESSION_SCHEMA}\"}}\n") ?? panic("write decoy: {err}")
+    sess_files.symlink(decoy, "{env.ws}/.jet/session") ?? panic("symlink .jet/session: {err}")
+    if jet_cli_session_read_descriptor(env.ws) == .Invalid(reason) {
+        assert(reason.contains("symlink"), "expected symlink rejection, got: {reason}")
+    } else {
+        panic("symlinked .jet/session must be rejected")
+    }
+    sess_files.remove("{env.ws}/.jet/session").drop("remove symlink")
+
+    // Descriptor pointing to a symlinked socket path is rejected.
+    sym_sock: "{env.xdg}/jet/symlinked.sock"
+    sess_files.symlink(decoy, sym_sock) ?? panic("symlink socket: {err}")
+    fake_desc: "{{\"schema\":\"{JET_SESSION_SCHEMA}\",\"pid\":{sess_sys.getpid()},\"uid\":{sess_sys.geteuid()},\"toolchain\":\"{jet_cli_session_toolchain()}\",\"socket\":\"{sym_sock}\",\"nonce\":\"0123456789abcdef\",\"session_id\":\"symtest\"}}\n"
+    sess_files.write("{env.ws}/.jet/session", fake_desc) ?? panic("write fake desc: {err}")
+    assert(jet_cli_session_chmod("{env.ws}/.jet/session", 0o600), "chmod fake desc")
+    if jet_cli_session_read_descriptor(env.ws) == .Invalid(reason) {
+        assert(reason.contains("symlink"), "expected socket symlink rejection, got: {reason}")
+    } else {
+        panic("symlinked socket endpoint must be rejected")
+    }
+
+    session_test_env_end(env.root, env.prev_xdg)
+}
+
+#Test("session: Unix socket loopback tests nonce, toolchain mismatch, malformed JSON, and ping/cancel/exit") {
+    env: session_test_env_begin("loopback")
+    ^owner: if jet_cli_session_owner_acquire(env.ws, "lsp") == {
+        .Owned(acquired) -> acquired
+        .AlreadyOwned(_) -> panic("unexpected AlreadyOwned")
+        .Failed(reason) -> panic("owner_acquire failed: {reason}")
+    }
+    tc: owner.toolchain
+    sock: owner.socket_path
+    nonce: owner.nonce
+
+    // 1. Wrong nonce is rejected with `invalid_nonce`.
+    fd1: jet_cli_session_unix_connect(sock)
+    assert(fd1 >= 0, "connect for bad nonce")
+    assert(jet_cli_session_send_line(fd1, jet_cli_session_client_hello_line(tc, "0000000000000000", sess_sys.getpid())))
+    assert(jet_cli_session_owner_wait(owner, 5000), "owner_wait bad nonce")
+    replies1: session_test_read_all_lines(fd1)
+    jet_cli_session_close_fd(fd1)
+    assert(replies1.len() >= 1, "expected hello refusal line")
+    obj1: jet_cli_session_parse_object(replies1[0]) ?? panic("parse bad nonce hello")
+    assert_eq(jet_cli_session_read_bool(obj1, "ok"), Val(false))
+    assert_eq(compiler_service_text(obj1, "error"), Val("invalid_nonce"))
+
+    // 2. Toolchain mismatch on `hello` is rejected with `toolchain_mismatch`.
+    fd2: jet_cli_session_unix_connect(sock)
+    assert(fd2 >= 0, "connect for mismatch")
+    assert(jet_cli_session_send_line(fd2, jet_cli_session_client_hello_line("jet@mismatch-0.0.0", nonce, sess_sys.getpid())))
+    assert(jet_cli_session_owner_wait(owner, 5000), "owner_wait mismatch")
+    replies2: session_test_read_all_lines(fd2)
+    jet_cli_session_close_fd(fd2)
+    assert(replies2.len() >= 1, "expected mismatch hello line")
+    obj2: jet_cli_session_parse_object(replies2[0]) ?? panic("parse mismatch hello")
+    assert_eq(jet_cli_session_read_bool(obj2, "ok"), Val(false))
+    assert_eq(compiler_service_text(obj2, "error"), Val("toolchain_mismatch"))
+
+    // 3. Valid hello + malformed JSON recovery + ping + cancel + exit.
+    fd3: jet_cli_session_unix_connect(sock)
+    assert(fd3 >= 0, "connect for protocol check")
+    assert(jet_cli_session_send_line(fd3, jet_cli_session_client_hello_line(tc, nonce, sess_sys.getpid())))
+    assert(jet_cli_session_send_line(fd3, "{{not-valid-json"))
+    assert(jet_cli_session_send_line(fd3, "{{\"schema\":\"{JET_SESSION_SCHEMA}\",\"kind\":\"request\",\"id\":1,\"op\":\"ping\"}}"))
+    assert(jet_cli_session_send_line(fd3, "{{\"schema\":\"{JET_SESSION_SCHEMA}\",\"kind\":\"request\",\"id\":2,\"op\":\"cancel\"}}"))
+    assert(jet_cli_session_send_line(fd3, "{{\"schema\":\"{JET_SESSION_SCHEMA}\",\"kind\":\"request\",\"id\":3,\"op\":\"exit\"}}"))
+    assert(jet_cli_session_owner_wait(owner, 5000), "owner_wait protocol")
+    replies3: session_test_read_all_lines(fd3)
+    jet_cli_session_close_fd(fd3)
+    assert_eq(replies3.len(), 5)
+
+    h_obj: jet_cli_session_parse_object(replies3[0]) ?? panic("parse hello")
+    assert_eq(jet_cli_session_read_bool(h_obj, "ok"), Val(true))
+    assert_eq(compiler_service_text(h_obj, "verb"), Val("lsp"))
+
+    bad_obj: jet_cli_session_parse_object(replies3[1]) ?? panic("parse malformed JSON report")
+    assert_eq(compiler_service_text(bad_obj, "schema"), Val("jet.report/v4"))
+    assert_eq(compiler_service_text(bad_obj, "code"), Val("E2104"))
+
+    ping_obj: jet_cli_session_parse_object(replies3[2]) ?? panic("parse ping response")
+    assert_eq(compiler_service_text(ping_obj, "status"), Val("ok"))
+    assert_eq(compiler_service_int(ping_obj, "id"), Val(1))
+
+    cancel_obj: jet_cli_session_parse_object(replies3[3]) ?? panic("parse cancel response")
+    assert_eq(compiler_service_text(cancel_obj, "status"), Val("cancelled"))
+    assert_eq(compiler_service_int(cancel_obj, "id"), Val(2))
+
+    exit_obj: jet_cli_session_parse_object(replies3[4]) ?? panic("parse exit response")
+    assert_eq(compiler_service_text(exit_obj, "status"), Val("ok"))
+    assert_eq(compiler_service_int(exit_obj, "id"), Val(3))
+
+    // 4. Probe with mismatched JET_COMPILER_IDENTITY returns Mismatch before connecting.
+    prev_id: sess_sys.get(ENV_JET_COMPILER_IDENTITY)
+    sess_sys.set(ENV_JET_COMPILER_IDENTITY, "jet@other-toolchain")
+    assert(jet_cli_session_probe(env.ws) == .Mismatch(_), "probe with mismatched identity must return Mismatch")
+    if prev_id == {
+        .Val(old) -> sess_sys.set(ENV_JET_COMPILER_IDENTITY, old)
+        .None -> { sess_sys.unset(ENV_JET_COMPILER_IDENTITY).drop("restore compiler identity") }
+    }
+
+    jet_cli_session_owner_close(owner)
+    session_test_env_end(env.root, env.prev_xdg)
+}
+
+// Normalize observation timing (`"elapsed_ms":<N>`) before comparing `--json` outputs.
+session_test_strip_elapsed: fn(text: String) -> String Never! {
+    key: "\"elapsed_ms\":"
+    if text.split_once(key) == .Val(parts) {
+        rest: parts.after
+        ^end: 0
+        bytes: rest.bytes()
+        loop end < bytes.len() && bytes[end] >= (U8{48}) && bytes[end] <= (U8{57}) {
+            end += 1
+        }
+        return "{parts.before}{key}0{rest.slice(end..<rest.len())}"
+    }
+    "{text}"
+}
+
+#Test("session: attached invoke matches fresh compile across success, error, ICE, and picks up disk edit") {
+    env: session_test_env_begin("parity")
+    main_file: "{env.ws}/main.jet"
+    bad_dir: "{env.root}/bad_pkg"
+    sess_files.create_dir_all(bad_dir) ?? panic("create bad_dir: {err}")
+    bad_file: "{bad_dir}/bad.jet"
+    sess_files.write(main_file, "run: fn() {{\n    print(\"version-one\")\n}}\n") ?? panic("write main.jet: {err}")
+    sess_files.write(bad_file, "run: fn() {{\n    x: unknown_symbol_for_session_test\n}}\n") ?? panic("write bad.jet: {err}")
+
+    tc_root: if jet_cli_toolchain_root(sess_files.cwd() ?? ".") == {
+        .Found(found) -> found
+        .Missing(what, fix) -> panic("{what}; {fix}")
+    }
+    ^base_env: jet_cli_session_capture_env()
+    base_env.push(JetCLIEnvVar{name: ENV_JET_TOOLCHAIN_ROOT, value: tc_root})
+
+    // 1. Fresh check (success, human + --json) baselines.
+    fresh_ok: jet_cli_session_invoke_local([String]{"check", main_file}, env.ws, base_env)
+    assert(fresh_ok.exit_code == JET_DRIVER_EXIT_OK, "fresh check failed ({fresh_ok.exit_code}): {fresh_ok.stderr}")
+    fresh_ok_json: jet_cli_session_invoke_local([String]{"check", main_file, "--json"}, env.ws, base_env)
+    assert_eq(fresh_ok_json.exit_code, JET_DRIVER_EXIT_OK)
+
+    // 2. Fresh build (error + --json) baseline.
+    fresh_err: jet_cli_session_invoke_local([String]{"build", bad_file, "--json"}, env.ws, base_env)
+    assert(fresh_err.exit_code != 0, "error build must exit nonzero")
+
+    // 3. Fresh ICE baseline (`JET_ICE_SELF_TEST=1`).
+    ^ice_env: [JetCLIEnvVar]{}
+    loop item in base_env -> ice_env.push(item)
+    ice_env.push(JetCLIEnvVar{name: ENV_JET_ICE_SELF_TEST, value: "1"})
+    fresh_ice: jet_cli_session_invoke_local([String]{"build", main_file}, env.ws, ice_env)
+    assert_eq(fresh_ice.exit_code, 101)
+
+    // Acquire workspace session owner and compare attached invokes over real Unix socket.
+    ^owner: if jet_cli_session_owner_acquire(env.ws, "lsp") == {
+        .Owned(acquired) -> acquired
+        .AlreadyOwned(_) -> panic("unexpected AlreadyOwned")
+        .Failed(reason) -> panic("owner_acquire failed: {reason}")
+    }
+    desc: if jet_cli_session_read_descriptor(env.ws) == {
+        .Found(found) -> found
+        .Missing | .Invalid(_) -> panic("missing descriptor for parity")
+    }
+
+    // 1b. Attached check (human + --json) -> identical stdout, stderr, exit code (minus elapsed_ms).
+    attached_ok: session_test_socket_invoke(owner, desc, [String]{"check", main_file}, env.ws, base_env)
+    assert_eq(attached_ok.exit_code, fresh_ok.exit_code)
+    assert_eq(attached_ok.stdout, fresh_ok.stdout)
+    assert_eq(attached_ok.stderr, fresh_ok.stderr)
+
+    attached_ok_json: session_test_socket_invoke(owner, desc, [String]{"check", main_file, "--json"}, env.ws, base_env)
+    assert_eq(attached_ok_json.exit_code, fresh_ok_json.exit_code)
+    assert_eq(session_test_strip_elapsed(attached_ok_json.stdout), session_test_strip_elapsed(fresh_ok_json.stdout))
+    assert_eq(attached_ok_json.stderr, fresh_ok_json.stderr)
+
+    // 2b. Attached build (error + --json) -> identical stdout, stderr, exit code (minus elapsed_ms).
+    attached_err: session_test_socket_invoke(owner, desc, [String]{"build", bad_file, "--json"}, env.ws, base_env)
+    assert_eq(attached_err.exit_code, fresh_err.exit_code)
+    assert_eq(session_test_strip_elapsed(attached_err.stdout), session_test_strip_elapsed(fresh_err.stdout))
+    assert_eq(attached_err.stderr, fresh_err.stderr)
+
+    // 3b. Attached ICE (`JET_ICE_SELF_TEST=1`) -> identical stdout, stderr, exit 101, AND owner survives!
+    attached_ice: session_test_socket_invoke(owner, desc, [String]{"build", main_file}, env.ws, ice_env)
+    assert_eq(attached_ice.exit_code, 101)
+    assert_eq(attached_ice.stdout, fresh_ice.stdout)
+    assert_eq(attached_ice.stderr, fresh_ice.stderr)
+
+    // Close owner, edit `main.jet` while NO session runs, reopen owner, and confirm next attached check picks up the edit.
+    jet_cli_session_owner_close(owner)
+    sess_files.write(main_file, "run: fn() {{\n    x: edited_while_no_session_ran\n}}\n") ?? panic("rewrite main.jet: {err}")
+
+    ^owner2: if jet_cli_session_owner_acquire(env.ws, "dev") == {
+        .Owned(acquired) -> acquired
+        .AlreadyOwned(_) -> panic("unexpected AlreadyOwned on reopen")
+        .Failed(reason) -> panic("reopen owner_acquire failed: {reason}")
+    }
+    desc2: if jet_cli_session_read_descriptor(env.ws) == {
+        .Found(found) -> found
+        .Missing | .Invalid(_) -> panic("missing descriptor on reopen")
+    }
+    attached_v2: session_test_socket_invoke(owner2, desc2, [String]{"check", main_file}, env.ws, base_env)
+    assert(attached_v2.exit_code != 0, "edited broken file must fail check")
+    assert(attached_v2.stderr.contains("edited_while_no_session_ran"), "attached check must see edit made while no session ran")
+
+    jet_cli_session_owner_close(owner2)
+    session_test_env_end(env.root, env.prev_xdg)
+}
+
+#Test("session: CLI help, man, and completion snapshots include session flags") {
+    checks: [{args: [String], file: String}]{
+        {args: [String]{"--help"}, file: "Tests/CLI/help_frequency.txt"},
+        {args: [String]{"help", "--sort", "az"}, file: "Tests/CLI/help_az.txt"},
+        {args: [String]{"--help"}, file: "Tests/Cases/CLIPartsRuntime/help_frequency.txt"},
+        {args: [String]{"help", "--sort", "az"}, file: "Tests/Cases/CLIPartsRuntime/help_az.txt"},
+        {args: [String]{"help", "--all"}, file: "Tests/Cases/CLIPartsRuntime/help_all.txt"},
+        {args: [String]{"build", "--help"}, file: "Tests/Cases/CLIRuntime/help-build.out"},
+        {args: [String]{"check", "--help"}, file: "Tests/Cases/CLIRuntime/help-check.out"},
+        {args: [String]{"run", "--help"}, file: "Tests/Cases/CLIPartsSurface/help_run.txt"},
+        {args: [String]{"self", "man"}, file: "Tests/CLI/man.txt"},
+        {args: [String]{"self", "man"}, file: "Tests/Cases/CLIPartsCommands/man.out"},
+        {args: [String]{"self", "completions", "bash"}, file: "Tests/CLI/completions_bash.txt"},
+        {args: [String]{"self", "completions", "bash"}, file: "Tests/Cases/CLIPartsCommands/completions-bash.out"},
+        {args: [String]{"self", "completions", "fish"}, file: "Tests/CLI/completions_fish.txt"},
+        {args: [String]{"self", "completions", "fish"}, file: "Tests/Cases/CLIPartsCommands/completions-fish.out"},
+        {args: [String]{"self", "completions", "powershell"}, file: "Tests/CLI/completions_powershell.txt"},
+        {args: [String]{"self", "completions", "powershell"}, file: "Tests/Cases/CLIPartsCommands/completions-powershell.out"},
+        {args: [String]{"self", "completions", "zsh"}, file: "Tests/CLI/completions_zsh.txt"},
+        {args: [String]{"self", "completions", "zsh"}, file: "Tests/Cases/CLIPartsCommands/completions-zsh.out"},
+    }
+    loop check in checks {
+        ^discovery: WorkspaceDeclarationCache.new()
+        plan: jet_cli_front(check.args, discovery)
+        out: jet_cli_execute(plan)
+        assert_eq(out.exit_code, JET_DRIVER_EXIT_OK)
+        actual: out.stdout.replace("{JET_VERSION}-dev", "VERSION").replace(JET_VERSION, "VERSION")
+        assert(sess_testing.golden(check.file, actual), "golden mismatch on {check.file}")
+    }
+}

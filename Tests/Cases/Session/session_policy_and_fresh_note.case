@@ -1,0 +1,28 @@
+# End-to-end verification of `--session=auto|off|required`, `--verbose` fresh-compiler
+# note when no workspace session runs, and illegal flag combinations.
+fixture: Fixtures/App
+env: NO_COLOR=1
+
+step: jet build main.jet --session=required
+exit: 2
+stderr: ~ "Jet.InvalidCommandInput" # --session=required refuses when no workspace session is running
+
+step: jet build main.jet --session=auto
+exit: 0
+stderr: !~ "no workspace session" # silent fresh fallback without --verbose
+
+step: jet build main.jet --session=auto --verbose
+exit: 0
+stderr: ~ "Note: no workspace session; running a fresh compiler" # --verbose explains fresh-compiler fallback
+
+step: jet build main.jet --session=bogus
+exit: 2
+stderr: ~ "Jet.InvalidCommandInput" # unknown --session policy is refused with E2104
+
+step: jet check main.jet --listen=- --watch
+exit: 2
+stderr: ~ "Jet.InvalidCommandInput" # --listen=- cannot combine with --watch
+
+step: jet dev main.jet --listen=- --serve
+exit: 2
+stderr: ~ "Jet.InvalidCommandInput" # --listen=- cannot combine with --serve

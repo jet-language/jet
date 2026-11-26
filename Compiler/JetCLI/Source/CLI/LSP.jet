@@ -12,9 +12,9 @@
 // shows the Core module's own declaration, read from the Core source.
 use {
     cli_files: core.files
-    jet_driver.[JetDriverCompileMode, JetDriverDocModule, JetDriverKeepGoing, JetDriverSourceDocument, JetDriverToolStageItem, JetDriverVerbOutput, jet_driver_compile_keep_going, jet_driver_present_diagnostics]
+    jet_driver.[JetDriverCompileMode, JetDriverDocModule, JetDriverKeepGoing, JetDriverSourceDocument, JetDriverToolStageItem, JetDriverVerbOutput, JET_DRIVER_EXIT_USAGE, jet_driver_compile_keep_going, jet_driver_present_diagnostics]
     jet_foundation.[Diagnostic, Span, TextEdit, diagnostic_headline]
-    jet_lsp.[LSPChecked, LSPChecker, LSPChoice, LSPDeclaredFile, LSPProducer, lsp_serve, lsp_write_log]
+    jet_lsp.[LSPChecked, LSPChecker, LSPChoice, LSPDeclaredFile, LSPProducer, LSPServeHook, lsp_serve, lsp_serve_with_hook, lsp_write_log]
     jet_semindex.[SemDeclared, SemSymbol, semindex_build_symbols, semindex_declared, semindex_imports]
 }
 
@@ -245,8 +245,47 @@ jet_cli_lsp_unsaved_loose: fn(entry: String) -[FS]> Bool Never! {
     !cli_files.is_file(jet_cli_authority_path(jet_cli_source_root(entry), "package.jet"))
 }
 
+JetCLILSPSessionHook: struct {
+    owner: JetSessionOwner,
+
+    impl LSPServeHook {
+        wait_for_input: fn(^self) -[FS, Env, Exec, IO, Time, Net, Rand, FFI.C, FFI.Asm]> Bool Never! {
+            jet_cli_session_owner_wait_with_fd(self.owner, 0)
+        }
+
+        poll_once: fn(^self) -[FS, Env, Exec, IO, Time, Net, Rand, FFI.C, FFI.Asm]> Never! {
+            jet_cli_session_owner_drain(self.owner)
+        }
+
+        close_owner: fn(^self) -[FS, Env, Exec, IO, Time, Net, Rand, FFI.C, FFI.Asm]> Never! {
+            jet_cli_session_owner_close(self.owner)
+        }
+    }
+}
+
 // Serves until the client's `exit` or the end of input; the exit status is the
 // server's (0 after a `shutdown` request, else 1). The server writes stdout.
-jet_cli_lsp: fn() -> JetDriverVerbOutput {
-    JetDriverVerbOutput{stdout: "", stderr: "", exit_code: lsp_serve(JetCLILSPChecker{})}
+// With `--serve`, acquires the workspace session lock and serves build/check/test
+// clients over the workspace Unix socket until shutdown, cleaning up the endpoint
+// on exit; if another owner already holds the lock, attaches as a client instead.
+jet_cli_lsp: fn(serve: Bool{false}) -> JetDriverVerbOutput {
+    if !serve {
+        return JetDriverVerbOutput{stdout: "", stderr: "", exit_code: lsp_serve(JetCLILSPChecker{})}
+    }
+    workspace: jet_cli_session_workspace_root(cli_files.cwd() ?? ".")
+    if jet_cli_session_owner_acquire(workspace, "lsp") == {
+        .Owned(owner) -> {
+            session_id: "{owner.session_id}"
+            lsp_write_log("serving workspace session {session_id} for {workspace}").drop("standard error is the log; a failed log write has nowhere to go")
+            code: lsp_serve_with_hook(JetCLILSPChecker{}, JetCLILSPSessionHook{owner: owner})
+            JetDriverVerbOutput{stdout: "", stderr: "", exit_code: code}
+        }
+        .AlreadyOwned(desc) -> {
+            lsp_write_log("workspace session {desc.session_id} is already owned by {desc.owner} (pid {desc.pid}); attached as a client").drop("standard error is the log; a failed log write has nowhere to go")
+            JetDriverVerbOutput{stdout: "", stderr: "", exit_code: lsp_serve(JetCLILSPChecker{})}
+        }
+        .Failed(reason) -> {
+            jet_cli_report_output("", "E2104", "could not start workspace session for `jet self lsp --serve`: {reason}", jet_cli_why("E2104"), "ensure `{workspace}/.jet` and your runtime directory are private and contain no symlinks", false, JET_DRIVER_EXIT_USAGE)
+        }
+    }
 }

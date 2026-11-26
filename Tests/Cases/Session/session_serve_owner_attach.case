@@ -1,0 +1,11 @@
+# End-to-end multi-process verification of workspace session ownership (`jet self lsp --serve`),
+# attached build parity (identical binary bytes, stdout, stderr across success, error, and ICE),
+# `jet dev --serve` attaching as a client, toolchain mismatch fallback (silent vs `--verbose`),
+# clean endpoint removal on owner close, and edits made while no session ran.
+fixture: Fixtures/OwnerParity
+env: JET_BIN={jet}
+env: NO_COLOR=1
+
+step: jet run -A driver.jet
+exit: 0
+stdout: ~ "owner-parity-ok" # multi-process workspace session parity driver completed all checks

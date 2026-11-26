@@ -1,0 +1,52 @@
+# End-to-end verification of `jet check|build|test|run|dev --listen=-`,
+# malformed JSON E2104 recovery, toolchain mismatch refusal, and `--listen=<addr>` refusal.
+fixture: Fixtures/App
+env: NO_COLOR=1
+
+step: jet check main.jet --listen=- --session=off
+stdin: listen_commands.stdin
+exit: 0
+stdout: ~ "\"schema\":\"jet.session.v1\",\"kind\":\"hello\"" # startup hello advertises session schema and toolchain
+stdout: ~ "\"schema\":\"jet.report/v4\"" # malformed JSON line emits a jet.report/v4 diagnostic
+stdout: ~ "\"code\":\"E2104\"" # malformed JSON report uses E2104
+stdout: ~ "\"event\":\"check.finished\"" # check update completes without writing artifacts
+stdout: ~ "\"id\":3,\"status\":\"cancelled\"" # cancel request answers cancelled
+stdout: ~ "\"id\":4,\"status\":\"ok\"" # exit request closes session cleanly
+
+step: jet build main.jet --listen=- --session=off
+stdin: listen_commands.stdin
+exit: 0
+stdout: ~ "\"event\":\"build.finished\"" # build update emits build.finished with artifact paths
+stdout: ~ "\"id\":4,\"status\":\"ok\"" # build session exits cleanly on exit
+
+step: jet test math_test.jet --listen=- --session=off
+stdin: listen_commands.stdin
+exit: 0
+stdout: ~ "\"event\":\"test.finished\"" # test update emits test.finished
+stdout: ~ "\"id\":4,\"status\":\"ok\"" # test session exits cleanly on exit
+
+step: jet run main.jet --listen=- --session=off
+stdin: listen_commands.stdin
+exit: 0
+stdout: ~ "\"event\":\"run.started\"" # run update builds and launches the program
+stdout: ~ "hello-session" # run update streams program stdout inside run.output events
+stdout: ~ "\"event\":\"run.finished\"" # run update emits run.finished
+stdout: ~ "\"id\":4,\"status\":\"ok\"" # run session exits cleanly on exit
+
+step: jet dev main.jet --listen=- --session=off
+stdin: listen_commands.stdin
+exit: 0
+stdout: ~ "\"event\":\"dev.updated\"" # dev update emits dev.updated
+stdout: ~ "hello-session" # dev update streams program stdout inside run.output events
+stdout: ~ "\"id\":4,\"status\":\"ok\"" # dev session exits cleanly on exit
+
+step: jet check main.jet --listen=- --session=off
+stdin: listen_mismatch.stdin
+exit: 0
+stdout: ~ "\"error\":\"toolchain_mismatch\"" # mismatched client toolchain is refused on hello
+stdout: ~ "\"code\":\"E2104\"" # toolchain mismatch emits an E2104 report line
+
+step: jet build main.jet --listen=127.0.0.1:9999
+stdin: null
+exit: 2
+stderr: ~ "Jet.InvalidCommandInput" # non-stdio --listen address is refused with E2104

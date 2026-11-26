@@ -1,0 +1,595 @@
+// Workspace session owner server loop and CLI client attachment (`--serve` and
+// `--session=auto|off|required`). The owner serves authenticated same-UID,
+// matching-nonce, matching-toolchain requests in-process over its private Unix
+// domain socket; clients forward an explicit invocation envelope (argv, cwd,
+// allowlisted env, tty) and stream exact stdout/stderr and exit code back.
+use {
+    cli_files: core.files
+    cli_sys: core.sys
+    jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE]
+    jet_foundation.[
+        ENV_JET_BUILD_THREADS,
+        ENV_JET_COMPILER_IDENTITY,
+        ENV_JET_ICE_SELF_TEST,
+        ENV_JET_RECHECK_VERIFY,
+        ENV_JET_TOOLCHAIN_ROOT,
+        compiler_service_get,
+        compiler_service_int,
+        compiler_service_text,
+    ]
+    jet_pkg_model.[WorkspaceDeclarationCache]
+}
+
+// Explicit non-secret environment allowlist carried by the `invoke` envelope.
+// Ambient secrets in the owner process are never exposed to requests, and
+// client secrets absent from this list never cross the wire.
+JET_SESSION_ENV_ALLOWLIST: [String]{
+    "PATH",
+    "HOME",
+    "TMPDIR",
+    "TERM",
+    "NO_COLOR",
+    "CLICOLOR",
+    "CLICOLOR_FORCE",
+    "LANG",
+    "LC_ALL",
+    "XDG_CACHE_HOME",
+    "XDG_CONFIG_HOME",
+    "XDG_DATA_HOME",
+    "XDG_RUNTIME_DIR",
+    "JET_CACHE_DIR",
+    "JET_KEEP_GOING",
+    "JET_KEEP_GOING_REPORT",
+    "JET_KEEP_GOING_SKIP",
+    "JET_TRACE",
+    "JET_TRACE_DETAIL",
+    "JET_PHASE_COUNTERS",
+    "JET_OPT_DUMP",
+    "JET_OPT_DISABLE",
+    "JET_OPT_VERIFY",
+    "JET_ORG_UNSAFE_POLICY",
+    ENV_JET_TOOLCHAIN_ROOT,
+    ENV_JET_COMPILER_IDENTITY,
+    ENV_JET_BUILD_THREADS,
+    ENV_JET_ICE_SELF_TEST,
+    ENV_JET_RECHECK_VERIFY,
+}
+
+// Result of probing/attaching a client CLI invocation to a workspace session.
+JetSessionAttachResult: enum {
+    Completed(exit_code: Int),
+    Fallback,
+    Refused(output: JetDriverVerbOutput),
+}
+
+// Result of probing an existing workspace session endpoint for `--listen=-` or
+// a secondary `--serve` client.
+JetSessionProbe: enum {
+    Attached(desc: JetSessionDescriptor, owner_pid: Int),
+    Unavailable(reason: String),
+    Mismatch(reason: String),
+    Rejected(reason: String),
+}
+
+// Capture the client's allowlisted environment variables for the request envelope.
+jet_cli_session_capture_env: fn() -[Env]> [JetCLIEnvVar] Never! {
+    ^out: [JetCLIEnvVar]{}
+    loop key in JET_SESSION_ENV_ALLOWLIST {
+        if cli_sys.get(key) == .Val(value) {
+            out.push(JetCLIEnvVar{name: key, value: value})
+        }
+    }
+    out
+}
+
+// Look up `name` in `entries`.
+jet_cli_session_env_get: fn(entries: [JetCLIEnvVar], name: String) -> String? Never! {
+    loop entry in entries {
+        if entry.name == name -> return Val(entry.value)
+    }
+    None
+}
+
+// Result of parsing `--session=<mode>`.
+JetSessionPolicyParse: enum {
+    Policy(value: String),
+    Invalid(value: String),
+}
+
+// Strip `--session=...` / `--session <val>` from an argv list before forwarding
+// to the owner server so the server executes locally without re-attaching.
+jet_cli_session_strip_policy_flag: fn(raw: [String]) -> [String] Never! {
+    ^out: [String]{}
+    ^skip_next: false
+    ^after_sep: false
+    loop word in raw {
+        if skip_next {
+            skip_next = false
+            next
+        }
+        if !after_sep && word == "--" {
+            after_sep = true
+            out.push("{word}")
+            next
+        }
+        if !after_sep {
+            if word == "--session" {
+                skip_next = true
+                next
+            }
+            if word.starts_with("--session=") -> next
+        }
+        out.push("{word}")
+    }
+    out
+}
+
+// Extract the `--session` policy value from owned flags (`"auto"` by default).
+jet_cli_session_policy_from: fn(jet_argv: [String]) -> JetSessionPolicyParse Never! {
+    ^policy: "auto"
+    ^idx: 0
+    loop idx < jet_argv.len() {
+        word: jet_argv[idx]
+        if word == "--session" {
+            if idx + 1 >= jet_argv.len() -> return JetSessionPolicyParse.Invalid{value: ""}
+            policy = jet_argv[idx + 1]
+            idx += 2
+            next
+        }
+        if word.starts_with("--session=") {
+            policy = word.slice(10..<word.len())
+        }
+        idx += 1
+    }
+    if policy != "auto" && policy != "off" && policy != "required" {
+        return JetSessionPolicyParse.Invalid{value: policy}
+    }
+    JetSessionPolicyParse.Policy{value: policy}
+}
+
+// Extract the `--listen` flag value if present, or None if not given.
+jet_cli_session_listen_from: fn(jet_argv: [String]) -> String? Never! {
+    ^idx: 0
+    loop idx < jet_argv.len() {
+        word: jet_argv[idx]
+        if word == "--listen" {
+            if idx + 1 < jet_argv.len() -> return Val(jet_argv[idx + 1])
+            return Val("")
+        }
+        if word.starts_with("--listen=") {
+            return Val(word.slice(9..<word.len()))
+        }
+        idx += 1
+    }
+    None
+}
+
+// Whether `raw` is a CLI verb that supports transparent workspace session
+// attachment (`check`, `build`, `test`, `run`), excluding `--listen`, `--serve`,
+// `--help`, `--version`, and `--locked` (which invokes external engine fetch).
+jet_cli_session_attachable_verb: fn(raw: [String]) -> String? Never! {
+    if raw.len() == 0 -> return None
+    owned: jet_cli_owned_flags(raw)
+    if jet_cli_any_help_flag(owned) -> return None
+    if owned.contains("--version") || owned.contains("--serve") || owned.contains("--locked") || owned.contains("--watch") -> return None
+    if jet_cli_session_listen_from(owned) != None -> return None
+    pos: jet_cli_positionals(owned)
+    if pos.len() == 0 -> return None
+    verb: pos[0]
+    if verb == "check" || verb == "build" || verb == "test" -> return Val(verb)
+    None
+}
+
+// Find the workspace root for a CLI invocation's arguments.
+jet_cli_session_root_for_argv: fn(raw: [String]) -[FS, Env]> String Never! {
+    owned: jet_cli_owned_flags(raw)
+    pos: jet_cli_positionals(owned)
+    if pos.len() >= 2 && pos[1] != "" && !pos[1].starts_with("-") {
+        if cli_files.exists(pos[1]) || cli_files.exists("{pos[1]}.jet") {
+            return jet_cli_session_workspace_root(pos[1])
+        }
+    }
+    jet_cli_session_workspace_root(cli_files.cwd() ?? ".")
+}
+
+// Execute one `invoke` request inside the owner process with request-scoped
+// `cwd` and allowlisted `env`, returning the exact `JetDriverVerbOutput`
+// without exiting the owner process.
+jet_cli_session_invoke_local: fn(argv: [String], req_cwd: String, req_env: [JetCLIEnvVar]) -> JetDriverVerbOutput Never! {
+    saved_cwd: cli_files.cwd() ?? "."
+    saved_env: jet_cli_session_capture_env()
+    // Apply request allowlisted env (clearing any allowlisted key absent from request).
+    loop key in JET_SESSION_ENV_ALLOWLIST {
+        if jet_cli_session_env_get(req_env, key) == {
+            .Val(value) -> cli_sys.set(key, value)
+            .None -> { cli_sys.unset(key).drop("clear allowlisted env key absent from request") }
+        }
+    }
+    if req_cwd != "" -> ^_: jet_cli_session_chdir(req_cwd)
+
+    ^result: JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    if (cli_sys.get(ENV_JET_ICE_SELF_TEST) ?? "") == "1" {
+        result = jet_cli_ice("ICE self-test triggered by JET_ICE_SELF_TEST")
+    } else {
+        clean_argv: jet_cli_session_strip_policy_flag(argv)
+        ^discovery: WorkspaceDeclarationCache.new()
+        plan: jet_cli_front(clean_argv, discovery)
+        compiles: jet_cli_plan_compiles(plan)
+        if compiles -> jet_cli_load_start()
+        done: if compiles -> (jet_cli_compile_on_worker(plan, discovery, None, false) ?? jet_cli_ice("session worker failed: {err}")) else -> (jet_cli_execute(plan, None, None, false) ?? jet_cli_ice("session execute failed: {err}"))
+        result = jet_cli_json_outcome(done.failure != None && jet_cli_settled_json(clean_argv), done)
+    }
+
+    // Always restore owner cwd and env.
+    ^_: jet_cli_session_chdir(saved_cwd)
+    loop key in JET_SESSION_ENV_ALLOWLIST {
+        if jet_cli_session_env_get(saved_env, key) == {
+            .Val(value) -> cli_sys.set(key, value)
+            .None -> { cli_sys.unset(key).drop("restore owner env key") }
+        }
+    }
+    result
+}
+
+// Serve one accepted client socket connection on `owner`.
+// Enforces kernel SO_PEERCRED UID, constant-time nonce, toolchain identity,
+// and the 1 MiB per-line limit.
+jet_cli_session_serve_client: fn(owner: ^JetSessionOwner, client_fd: Int) Never! {
+    // 1. Kernel SO_PEERCRED UID check before reading a single byte.
+    peer_uid: jet_cli_session_peer_uid(client_fd)
+    if !jet_cli_session_peer_allowed(peer_uid, cli_sys.geteuid()) {
+        jet_cli_session_close_fd(client_fd)
+        return
+    }
+    ^reader: jet_cli_session_reader(client_fd)
+    // 2. Authenticate client `hello` line (nonce + toolchain identity).
+    first: jet_cli_session_read_line(reader)
+    ^hello_text: ""
+    if first == {
+        .Line(text) -> { hello_text = text }
+        .TooLong(bytes) -> {
+            report: jet_cli_session_report_line("E2104", "session message exceeds the {JET_SESSION_MAX_LINE_BYTES}-byte line limit ({bytes} bytes)", jet_cli_why("E2104"), "keep each jet.session.v1 message at or under 1 MiB")
+            ^_: jet_cli_session_send_line(client_fd, report)
+            jet_cli_session_close_fd(client_fd)
+            return
+        }
+        .EOF | .ReadError(_) -> {
+            jet_cli_session_close_fd(client_fd)
+            return
+        }
+    }
+    hello_obj: jet_cli_session_parse_object(hello_text) ?? {
+        report: jet_cli_session_report_line("E2104", "malformed jet.session.v1 handshake message", jet_cli_why("E2104"), "send a valid JSON hello object first")
+        ^_: jet_cli_session_send_line(client_fd, report)
+        jet_cli_session_close_fd(client_fd)
+        return
+    }
+    hello_kind: compiler_service_text(hello_obj, "kind") ?? ""
+    if hello_kind != "hello" {
+        reply: jet_cli_session_hello_line(owner.toolchain, "", false, false, "expected_hello", owner.session_id, cli_sys.getpid(), cli_sys.getpid())
+        ^_: jet_cli_session_send_line(client_fd, reply)
+        jet_cli_session_close_fd(client_fd)
+        return
+    }
+    client_nonce: compiler_service_text(hello_obj, "nonce") ?? ""
+    if !jet_cli_session_const_time_eq(client_nonce, owner.nonce) {
+        reply: jet_cli_session_hello_line(owner.toolchain, "", false, false, "invalid_nonce", "", cli_sys.getpid(), cli_sys.getpid())
+        ^_: jet_cli_session_send_line(client_fd, reply)
+        jet_cli_session_close_fd(client_fd)
+        return
+    }
+    client_toolchain: compiler_service_text(hello_obj, "toolchain") ?? ""
+    if client_toolchain != owner.toolchain {
+        reply: jet_cli_session_hello_line(owner.toolchain, "", false, false, "toolchain_mismatch", owner.session_id, cli_sys.getpid(), cli_sys.getpid())
+        ^_: jet_cli_session_send_line(client_fd, reply)
+        jet_cli_session_close_fd(client_fd)
+        return
+    }
+    // Handshake accepted.
+    ok_hello: jet_cli_session_hello_line(owner.toolchain, owner.owner_kind, true, true, "", owner.session_id, cli_sys.getpid(), cli_sys.getpid())
+    if !jet_cli_session_send_line(client_fd, ok_hello) {
+        jet_cli_session_close_fd(client_fd)
+        return
+    }
+    // 3. Process requests on this authenticated connection until exit or EOF.
+    loop {
+        next_line: jet_cli_session_read_line(reader)
+        if next_line == {
+            .EOF | .ReadError(_) -> break
+            .TooLong(bytes) -> {
+                report: jet_cli_session_report_line("E2104", "session message exceeds the {JET_SESSION_MAX_LINE_BYTES}-byte line limit ({bytes} bytes)", jet_cli_why("E2104"), "keep each jet.session.v1 message at or under 1 MiB")
+                if !jet_cli_session_send_line(client_fd, report) -> break
+                next
+            }
+            .Line(text) -> {
+                if text.trim() == "" -> next
+                obj: jet_cli_session_parse_object(text) ?? {
+                    report: jet_cli_session_report_line("E2104", "malformed jet.session.v1 JSON message", jet_cli_why("E2104"), "send one valid JSON object per line")
+                    if !jet_cli_session_send_line(client_fd, report) -> break
+                    next
+                }
+                kind: compiler_service_text(obj, "kind") ?? ""
+                op: compiler_service_text(obj, "op") ?? kind
+                req_id: compiler_service_int(obj, "id")
+                if op == "exit" {
+                    ^_: jet_cli_session_send_line(client_fd, jet_cli_session_response_line(req_id, "ok", 0))
+                    break
+                }
+                if op == "cancel" {
+                    ^_: jet_cli_session_send_line(client_fd, jet_cli_session_response_line(req_id, "cancelled", 0))
+                    next
+                }
+                if op == "ping" {
+                    extra: "\"owner_pid\":{cli_sys.getpid()},\"session_id\":{jet_cli_json_control_quote(owner.session_id)}"
+                    if !jet_cli_session_send_line(client_fd, jet_cli_session_response_line(req_id, "ok", 0, "", "", extra)) -> break
+                    next
+                }
+                if op == "invoke" {
+                    rid: req_id ?? 1
+                    ^seq: 1
+                    ^_: jet_cli_session_send_line(client_fd, jet_cli_session_event_line(rid, seq, "request.started"))
+                    argv: jet_cli_session_read_string_array(obj, "argv")
+                    req_cwd: compiler_service_text(obj, "cwd") ?? ""
+                    req_env: jet_cli_session_read_env_map(obj, "env")
+                    output: jet_cli_session_invoke_local(argv, req_cwd, req_env)
+                    if !jet_cli_session_stream_output(client_fd, rid, seq, "invoke.output", "stdout", output.stdout) -> break
+                    if !jet_cli_session_stream_output(client_fd, rid, seq, "invoke.output", "stderr", output.stderr) -> break
+                    status: if output.exit_code == 0 -> "ok" else -> "failed"
+                    extra: "\"owner_pid\":{cli_sys.getpid()}"
+                    if !jet_cli_session_send_line(client_fd, jet_cli_session_response_line(Val(rid), status, output.exit_code, "", "", extra)) -> break
+                    next
+                }
+                report: jet_cli_session_report_line("E2104", "unknown workspace session operation `{op}`", jet_cli_why("E2104"), "send `invoke`, `ping`, `cancel`, or `exit`")
+                ^_: jet_cli_session_send_line(client_fd, report)
+                if !jet_cli_session_send_line(client_fd, jet_cli_session_response_line(req_id, "error", JET_DRIVER_EXIT_USAGE, "E2104", "unknown operation")) -> break
+            }
+        }
+    }
+    jet_cli_session_close_fd(client_fd)
+}
+
+// Drain all pending incoming connections on `owner.listen_fd` without blocking.
+jet_cli_session_owner_drain: fn(owner: ^JetSessionOwner) Never! {
+    if !owner.active || owner.listen_fd < 0 -> return
+    loop {
+        client_fd: jet_cli_session_unix_accept(owner.listen_fd)
+        if client_fd < 0 -> break
+        jet_cli_session_serve_client(owner, client_fd)
+    }
+}
+
+// Wait up to `timeout_ms` for an incoming client connection or SIGINT/SIGTERM.
+// Serves any accepted clients. Returns false if SIGINT/SIGTERM arrived (caller
+// should shut down cleanly), true otherwise.
+jet_cli_session_owner_wait: fn(owner: ^JetSessionOwner, timeout_ms: Int) -> Bool Never! {
+    if !owner.active -> return false
+    mask: jet_cli_session_poll3(owner.listen_fd, owner.sig_fd, -1, timeout_ms)
+    if mask < 0 -> return false
+    if (mask & 2) != 0 -> return false
+    if (mask & 1) != 0 -> jet_cli_session_owner_drain(owner)
+    true
+}
+
+// Wait for either `extra_fd` (e.g. stdin fd 0 for LSP) to become readable,
+// an incoming session client on `owner.listen_fd`, or SIGINT/SIGTERM on
+// `owner.sig_fd`. Serves any incoming session clients while waiting.
+// Returns true when `extra_fd` is readable, false when SIGINT/SIGTERM arrived.
+jet_cli_session_owner_wait_with_fd: fn(owner: ^JetSessionOwner, extra_fd: Int) -> Bool Never! {
+    loop {
+        if !owner.active -> return false
+        mask: jet_cli_session_poll3(extra_fd, owner.listen_fd, owner.sig_fd, 50)
+        if mask < 0 -> return false
+        if (mask & 4) != 0 -> return false
+        if (mask & 2) != 0 -> jet_cli_session_owner_drain(owner)
+        if (mask & 1) != 0 -> return true
+    }
+}
+
+// Probe and authenticate against the workspace session at `workspace_root`
+// (without executing an invocation), verifying non-symlink paths, private
+// permissions, SO_PEERCRED UID, nonce, and toolchain identity.
+jet_cli_session_probe: fn(workspace_root: String) -> JetSessionProbe {
+    if jet_cli_session_read_descriptor(workspace_root) == {
+        .Missing -> JetSessionProbe.Unavailable{reason: "no workspace session"}
+        .Invalid(reason) -> JetSessionProbe.Rejected{reason: reason}
+        .Found(desc) -> {
+            my_toolchain: jet_cli_session_toolchain()
+            if desc.toolchain != my_toolchain {
+                return JetSessionProbe.Mismatch{reason: "workspace session toolchain mismatch (server `{desc.toolchain}`, client `{my_toolchain}`)"}
+            }
+            fd: jet_cli_session_unix_connect(desc.socket)
+            if fd < 0 -> return JetSessionProbe.Unavailable{reason: "no workspace session"}
+            if !jet_cli_session_peer_allowed(jet_cli_session_peer_uid(fd), cli_sys.geteuid()) {
+                jet_cli_session_close_fd(fd)
+                return JetSessionProbe.Rejected{reason: "workspace session peer UID does not match current user"}
+            }
+            if !jet_cli_session_send_line(fd, jet_cli_session_client_hello_line(my_toolchain, desc.nonce, cli_sys.getpid())) {
+                jet_cli_session_close_fd(fd)
+                return JetSessionProbe.Unavailable{reason: "workspace session closed during handshake"}
+            }
+            ^reader: jet_cli_session_reader(fd)
+            line: jet_cli_session_read_line(reader)
+            jet_cli_session_close_fd(fd)
+            if line == {
+                .Line(text) -> {
+                    obj: jet_cli_session_parse_object(text) ?? return JetSessionProbe.Rejected{reason: "workspace session returned malformed hello"}
+                    ok: jet_cli_session_read_bool(obj, "ok") ?? false
+                    server_toolchain: compiler_service_text(obj, "toolchain") ?? ""
+                    error: compiler_service_text(obj, "error") ?? ""
+                    owner_pid: compiler_service_int(obj, "owner_pid") ?? desc.pid
+                    if error == "toolchain_mismatch" || (ok && server_toolchain != my_toolchain) {
+                        return JetSessionProbe.Mismatch{reason: "workspace session toolchain mismatch (server `{server_toolchain}`, client `{my_toolchain}`)"}
+                    }
+                    if !ok {
+                        return JetSessionProbe.Rejected{reason: "workspace session refused handshake ({error})"}
+                    }
+                    return JetSessionProbe.Attached{desc: desc, owner_pid: owner_pid}
+                }
+                .TooLong(_) -> return JetSessionProbe.Rejected{reason: "workspace session handshake exceeded 1 MiB limit"}
+                .EOF | .ReadError(_) -> return JetSessionProbe.Unavailable{reason: "workspace session closed during handshake"}
+            }
+        }
+    }
+}
+
+// Run one `invoke` call against a validated `JetSessionDescriptor`, capturing
+// stdout, stderr, and exit_code. Returns None if the session endpoint died or
+// rejected the connection.
+jet_cli_session_remote_invoke: fn(desc: JetSessionDescriptor, argv: [String], req_cwd: String, stream_to_stdio: Bool) -> JetDriverVerbOutput? {
+    fd: jet_cli_session_unix_connect(desc.socket)
+    if fd < 0 -> return None
+    if !jet_cli_session_peer_allowed(jet_cli_session_peer_uid(fd), cli_sys.geteuid()) {
+        jet_cli_session_close_fd(fd)
+        return None
+    }
+    my_toolchain: jet_cli_session_toolchain()
+    if !jet_cli_session_send_line(fd, jet_cli_session_client_hello_line(my_toolchain, desc.nonce, cli_sys.getpid())) {
+        jet_cli_session_close_fd(fd)
+        return None
+    }
+    ^reader: jet_cli_session_reader(fd)
+    hello_line: jet_cli_session_read_line(reader)
+    if hello_line == {
+        .Line(text) -> {
+            obj: jet_cli_session_parse_object(text) ?? {
+                jet_cli_session_close_fd(fd)
+                return None
+            }
+            ok: jet_cli_session_read_bool(obj, "ok") ?? false
+            server_toolchain: compiler_service_text(obj, "toolchain") ?? ""
+            if !ok || server_toolchain != my_toolchain {
+                jet_cli_session_close_fd(fd)
+                return None
+            }
+        }
+        .TooLong(_) | .EOF | .ReadError(_) -> {
+            jet_cli_session_close_fd(fd)
+            return None
+        }
+    }
+    env_entries: jet_cli_session_capture_env()
+    req_json: "{{\"schema\":{jet_cli_json_control_quote(JET_SESSION_SCHEMA)},\"kind\":\"request\",\"id\":1,\"op\":\"invoke\",\"argv\":{jet_cli_session_string_array_json(argv)},\"cwd\":{jet_cli_json_control_quote(req_cwd)},\"env\":{jet_cli_session_env_json(env_entries)}}}"
+    if !jet_cli_session_send_line(fd, req_json) {
+        jet_cli_session_close_fd(fd)
+        return None
+    }
+    sig_fd: jet_cli_session_signalfd_open()
+    ^out_chunks: [String]{}
+    ^err_chunks: [String]{}
+    ^exit_code: -1
+    ^got_response: false
+    loop {
+        if sig_fd >= 0 {
+            mask: jet_cli_session_poll3(fd, sig_fd, -1, 50)
+            if mask < 0 -> break
+            if (mask & 2) != 0 {
+                // Propagate Ctrl-C / SIGTERM as cancellation to the owner.
+                ^_: jet_cli_session_send_line(fd, "{{\"schema\":{jet_cli_json_control_quote(JET_SESSION_SCHEMA)},\"kind\":\"request\",\"id\":2,\"op\":\"cancel\",\"target\":1}}")
+                jet_cli_session_signalfd_close(sig_fd)
+                jet_cli_session_close_fd(fd)
+                return Val(JetDriverVerbOutput{stdout: out_chunks.join(""), stderr: err_chunks.join(""), exit_code: 130})
+            }
+            if (mask & 1) == 0 -> next
+        }
+        line: jet_cli_session_read_line(reader)
+        if line == {
+            .EOF | .ReadError(_) | .TooLong(_) -> break
+            .Line(text) -> {
+                obj: jet_cli_session_parse_object(text) ?? next
+                kind: compiler_service_text(obj, "kind") ?? ""
+                if kind == "event" {
+                    ev: compiler_service_text(obj, "event") ?? ""
+                    if ev == "invoke.output" {
+                        if compiler_service_get(obj, "data") == .Val(data) {
+                            stream: compiler_service_text(data, "stream") ?? ""
+                            piece: compiler_service_text(data, "text") ?? ""
+                            if stream == "stdout" {
+                                if stream_to_stdio -> ^_: jet_cli_session_write_all(1, piece) else -> out_chunks.push(piece)
+                            } else if stream == "stderr" {
+                                if stream_to_stdio -> ^_: jet_cli_session_write_all(2, piece) else -> err_chunks.push(piece)
+                            }
+                        }
+                    }
+                    next
+                }
+                if kind == "response" {
+                    exit_code = compiler_service_int(obj, "exit") ?? 1
+                    got_response = true
+                    break
+                }
+            }
+        }
+    }
+    jet_cli_session_signalfd_close(sig_fd)
+    jet_cli_session_close_fd(fd)
+    if !got_response -> return None
+    Val(JetDriverVerbOutput{stdout: out_chunks.join(""), stderr: err_chunks.join(""), exit_code: exit_code})
+}
+
+// Attempt to attach a plain CLI invocation (`jet check|build|test`) to a
+// running workspace `--serve` owner according to `--session=auto|off|required`.
+jet_cli_session_try_attach: fn(raw: [String]) -> JetSessionAttachResult {
+    if jet_cli_session_attachable_verb(raw) == None -> return JetSessionAttachResult.Fallback
+    owned: jet_cli_owned_flags(raw)
+    verbose: owned.contains("--verbose") || owned.contains("-v")
+    color: owned.contains("--color") || owned.contains("--color=always")
+    json: jet_cli_wants_json(owned)
+    ^policy: "auto"
+    if jet_cli_session_policy_from(owned) == {
+        .Policy(val) -> { policy = val }
+        .Invalid(bad) -> {
+            report: jet_cli_report_output("", "E2104", "invalid `--session` value `{bad}`; expected `auto`, `off`, or `required`", jet_cli_why("E2104"), "Write `--session=auto`, `--session=off`, or `--session=required`", color, JET_DRIVER_EXIT_USAGE)
+            return JetSessionAttachResult.Refused{output: jet_cli_json_outcome(json, report)}
+        }
+    }
+    if policy == "off" -> return JetSessionAttachResult.Fallback
+    root: jet_cli_session_root_for_argv(raw)
+    probe: jet_cli_session_probe(root)
+    if probe == {
+        .Unavailable(_) -> {
+            if policy == "required" {
+                report: jet_cli_report_output("", "E2104", "no workspace session is running for `{root}`", jet_cli_why("E2104"), "Start `jet self lsp --serve` or `jet dev --serve` in this workspace, or use `--session=auto`", color, JET_DRIVER_EXIT_USAGE)
+                return JetSessionAttachResult.Refused{output: jet_cli_json_outcome(json, report)}
+            }
+            if verbose && !json {
+                ^_: jet_cli_session_write_all(2, "Note: no workspace session; running a fresh compiler\n")
+            }
+            return JetSessionAttachResult.Fallback
+        }
+        .Mismatch(reason) -> {
+            if policy == "required" {
+                report: jet_cli_report_output("", "E2104", "{reason}", jet_cli_why("E2104"), "Restart the workspace session with this toolchain, or use `--session=off`", color, JET_DRIVER_EXIT_USAGE)
+                return JetSessionAttachResult.Refused{output: jet_cli_json_outcome(json, report)}
+            }
+            if verbose && !json {
+                ^_: jet_cli_session_write_all(2, "Note: {reason}; running a fresh compiler\n")
+            }
+            return JetSessionAttachResult.Fallback
+        }
+        .Rejected(reason) -> {
+            if policy == "required" {
+                report: jet_cli_report_output("", "E2104", "cannot attach to workspace session: {reason}", jet_cli_why("E2104"), "Remove the invalid endpoint and restart `jet dev --serve` or `jet self lsp --serve`", color, JET_DRIVER_EXIT_USAGE)
+                return JetSessionAttachResult.Refused{output: jet_cli_json_outcome(json, report)}
+            }
+            if verbose && !json {
+                ^_: jet_cli_session_write_all(2, "Note: workspace session refused ({reason}); running a fresh compiler\n")
+            }
+            return JetSessionAttachResult.Fallback
+        }
+        .Attached(desc, _) -> {
+            cwd: cli_files.cwd() ?? "."
+            clean_argv: jet_cli_session_strip_policy_flag(raw)
+            if jet_cli_session_remote_invoke(desc, clean_argv, cwd, true) == .Val(ran) {
+                return JetSessionAttachResult.Completed{exit_code: ran.exit_code}
+            }
+            if policy == "required" {
+                report: jet_cli_report_output("", "E2104", "workspace session disconnected before finishing the request", jet_cli_why("E2104"), "Restart the workspace session or run with `--session=off`", color, JET_DRIVER_EXIT_USAGE)
+                return JetSessionAttachResult.Refused{output: jet_cli_json_outcome(json, report)}
+            }
+            if verbose && !json {
+                ^_: jet_cli_session_write_all(2, "Note: workspace session disconnected; running a fresh compiler\n")
+            }
+            return JetSessionAttachResult.Fallback
+        }
+    }
+}

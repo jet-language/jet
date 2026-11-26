@@ -86,6 +86,7 @@ Inspect Commands:
   jet inspect gates [TARGET] [--live PID]                      Read gates with required, granted, denied effects, and authority
   jet inspect memory [TARGET] [--live PID]                     Show worst-case stack per entry point
   jet inspect choices [TARGET] [--live PID]                    Show automatic compiler choices and their reasons
+  jet inspect live --attach PID [--once] [--json]              Watch the task tree, channels, deadlines and effects of a running program
   jet inspect target [MACHINE] [--json]                        List target machines or show the dossier of one
   jet inspect events --schema                                  Print the JSON Schema of compiler events
   jet inspect graph <file.jet>                                 Show the build graph
@@ -139,9 +140,12 @@ Self Commands:
   jet self completions                                      Print shell completions
   jet self man                                              Print the Jet manual
   jet self devtools grammars|new-example|new-ui|reduce|ice-report|check-fixture-paths|embed Run Jet maintenance tools
+  jet self lsp                                              Start the language server
 
 Flags:
   --live                       With inspect: Process id for a live plane scope
+  --attach                     With inspect live: Process id of a program run with --observe; with debug: Process id of a running program to debug where it is
+  --once                       With inspect live: Print one view and exit instead of watching
   --observe                    With run: Expose bounded live runtime facts for attachment
   --log                        With run/dev: Set the log level filter, such as warn,shop.db=debug; above JET_LOG
   --deep-checks                With run/dev/test/build/debug/repl: Keep every deep check, or with =<scope> (repeatable) those of one package, module, type or function, such as =tree
@@ -180,6 +184,7 @@ Flags:
   --explicit-failures          With fmt: Write `?` at each call that can pass a failure up
   --skipped                    With project parts: Show modules omitted from automatic discovery
   --stdin-path                 With fmt -: Path label used in diagnostics when reading from stdin
+  --lib                        With build: Emit the native Library and C header
   --output                     With jobs: Select a named output, which Canvas uses as the initial selection
   --locked                     With build/fetch/jobs/inspect gates: Require locked dependency and provenance facts
   --sha256                     With run: Pin the first fetch of a URL target to this sha256, as --sha256=HEX
@@ -208,8 +213,12 @@ Flags:
   --all                        With fix: Apply safety classes beyond formatting and behavior-preserving; with help: Also list every form this `jet` has not built yet, with the Tower card that owns its port
   --markers                    With fix: Move every marker set above its declaration or into its body --markers <inside|above>
   --try-anyway                 With inspect gates: Evaluate past unsupported features (no guarantees)
+  --caps                       With explain effects: List every effect cap written under a file or directory
   --watch                      With dev: Re-run on dependency changes (--watch=off runs once)
+  --canvas                     With dev: Open the full Canvas IDE over this dev session
   --port                       With dev: Serve the web build on this preview listener port, as --port=N (0 lets the listener choose)
+  --canvas-host                With dev: With --canvas, bind host (loopback by default)
+  --canvas-port                With dev: With --canvas, bind an explicit port
   --project                    With repl: Load package settings and imports from this directory
   --no-prepare                 With run: Refuse Jetpack project environment preparation
   -e                           With run: Run CODE as the body of the program's run function and show its last value, as jet -e CODE [<args>]; jet run - reads the program from standard input
@@ -274,11 +283,11 @@ Flags:
   --time                       --time=<n>, `time: 4`, `t.time(4)`
   --seed                       With test: Generated-grade base PRNG seed (default: fixed 0, reproducible); --seed=<n>, `seed: 7`, `t.seed(7)`
   --corpus                     --corpus=<text>, `corpus: "x"`, `t.corpus("x")`
-  --browser-retries            --browser-retries=<n>, `browser_retries: 4`, `t.browser_retries(4)`
-  --browser-reporter           --browser-reporter=<text>, `browser_reporter: "x"`, `t.browser_reporter("x")`
-  --browser-ui                 --browser-ui, `browser_ui: true`, `t.browser_ui()`
+  --browser-retries            With test: Retry each browser attempt up to five times; --browser-retries=<n>, `browser_retries: 4`, `t.browser_retries(4)`
+  --browser-reporter           With test: Browser report format: text, json, or html; --browser-reporter=<text>, `browser_reporter: "x"`, `t.browser_reporter("x")`
+  --browser-ui                 With test: Write/open the local browser report viewer; --browser-ui, `browser_ui: true`, `t.browser_ui()`
   --browser-visual             --browser-visual, `browser_visual: true`, `t.browser_visual()`
-  --browser-trace              --browser-trace, `browser_trace: true`, `t.browser_trace()`
+  --browser-trace              With test: Keep redacted BiDi trace entries for every browser attempt; --browser-trace, `browser_trace: true`, `t.browser_trace()`
   --update                     With import: Merge generated Jet into an existing target
   --coverage                   With test/inspect build: Show function or diagnostic coverage
   --times                      With inspect build: Show how long each step and target of the last build took
@@ -309,6 +318,8 @@ Flags:
   --action-timeout             With build/run/dev/test/inspect: How long one build step may run, such as 10min
   --link                       With build/run/dev/test/inspect: The link step of each executable: default, or a link hook such as tools.relink
   --post-link                  With build/run/dev/test/inspect: The hooks run on each linked executable, in order, such as tools.sign
+  --linkage                    With build/run/dev/test/inspect: Whole-program linkage override: auto, static or dynamic
+  --link-parts                 With build/run/dev/test/inspect: Per-part linkage overrides as <part>=static or <part>=dynamic
   --set                        With build/run/dev/jobs/test/check: Set one declared package setting as key=value
   --threads                    With build/run/check/test/dev/inspect: Use at most N compiler threads (1 = one thread); without it jet picks a safe number of compiler threads
   --keep-going                 With build/run/check/test/emit: Go on past the first failure through every phase, and report every failure
@@ -323,16 +334,21 @@ Flags:
   --opt-ssa-stress             With build/run/test/inspect decisions: Move every SSA value out of SSA through a fresh slot
   --gc-trace                   With gc report: Read the GC trace at PATH with --gc-trace=PATH
   --memory-ledger              With audit memory/fix memory: Read the memory ledger at PATH
+  --listen                     With check/build/test/run/dev: Serve the compiler session protocol on standard input and output (--listen=-)
+  --serve                      With dev/lsp: Own or join the workspace compiler session endpoint
+  --session                    With check/build/test/run: Workspace session attachment policy (auto, off, or required)
   --builder                    With jobs: Select a previously bound remote builder
   --a11y                       With lint: Check roles, labels, and other accessibility basics
   --complexity                 With lint: Report per-function cognitive complexity
+  --cost                       With lint/explain: Show typed hidden-copy and fallback costs
   --max                        With lint --complexity: Fail when a function exceeds this score
   --scope                      With inspect: Choose a ledger or trust scope
   --core                       With inspect structure: Show the canonical core module export facts
   --schema                     With inspect events: Print the JSON Schema of the events jet build --json lists
   --show-default               With run/build/dev/test: Use and report the stock default
+  --browser                    With test: Select browser engines for tests or serve a loopback database inspector
   --browser-scaffold           With test: Create an isolated browser-test project as --browser-scaffold=<name>
-  --record                     With run/test: Record a named replay as --record=<name>
+  --record                     With run/test/debug: Record a named replay as --record=<name>
   --replay                     With debug: Consume a named replay artifact
   --lens                       With prove: Project the human report by an exact evidence facet
   --facts                      With expand: Project inline, memory, web, effects, layout, derive, templates, or callable-signature facts --facts=<lens>

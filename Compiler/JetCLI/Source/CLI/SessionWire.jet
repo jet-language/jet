@@ -1,0 +1,338 @@
+// The `jet.session.v1` newline-delimited JSON wire protocol shared by
+// `jet check|build|test|run|dev --listen=-`, workspace `--serve` owners,
+// and attached CLI clients. Every message is one UTF-8 JSON object per line
+// capped at 1 MiB (1048576 bytes); diagnostic reports reuse the `jet.report/v4`
+// shape unchanged.
+use {
+    core.encoding.[Dyn]
+    jet_backend.[
+        OS_EINTR,
+        OS_PROT_READ,
+        OS_PROT_WRITE,
+        os_copy_in_range,
+        os_failed,
+        os_load_byte,
+        os_map,
+        os_read,
+        os_unmap,
+        os_write,
+    ]
+    jet_foundation.[
+        compiler_service_array,
+        compiler_service_get,
+        diagnostic_from_registry,
+        foundation_byte_text,
+        foundation_parse_protocol_json,
+    ]
+    jet_pkg_model.[JET_VERSION]
+}
+
+JET_SESSION_SCHEMA: "jet.session.v1"
+
+// Maximum payload bytes per NDJSON line (excluding the terminating newline).
+JET_SESSION_MAX_LINE_BYTES: 1048576
+
+// Maximum output bytes per streamed `invoke.output` / `run.output` / `test.output` event.
+JET_SESSION_CHUNK_BYTES: 65536
+
+// Read buffer chunk size for incremental line framing.
+JET_SESSION_READ_BUF: 8192
+
+// The toolchain identity advertised in `hello` messages.
+jet_cli_session_toolchain: fn() -> String Never! {
+    jet_cli_compiler_identity() ?? "jet@{JET_VERSION}"
+}
+
+// One framed line read from a session stream.
+JetSessionLine: enum {
+    Line(text: String),
+    TooLong(bytes: Int),
+    EOF,
+    ReadError(message: String),
+}
+
+// Incremental bounded-memory NDJSON line reader over a file descriptor.
+JetSessionReader: struct {
+    fd: Int,
+    pending: [U8],
+    offset: Int,
+    eof: Bool,
+}
+
+jet_cli_session_reader: fn(fd: Int) -> JetSessionReader Never! {
+    JetSessionReader{fd: fd, pending: [U8]{}, offset: 0, eof: false}
+}
+
+// Fill the reader's internal buffer with one read(2) call. Returns true if
+// bytes were added, false on EOF or read error (returned via `error`).
+jet_cli_session_fill: fn(reader: ^JetSessionReader, error: ^String) -> Bool Never! {
+    if reader.eof -> return false
+    buf: os_map(JET_SESSION_READ_BUF, OS_PROT_READ | OS_PROT_WRITE)
+    if os_failed(buf) {
+        error = "failed to allocate session read buffer"
+        reader.eof = true
+        return false
+    }
+    ^got: -OS_EINTR
+    loop got == -OS_EINTR {
+        got = os_read(reader.fd, buf, JET_SESSION_READ_BUF)
+    }
+    if got < 0 {
+        ^_: os_unmap(buf, JET_SESSION_READ_BUF)
+        error = "session read failed (errno {-got})"
+        reader.eof = true
+        return false
+    }
+    if got == 0 {
+        ^_: os_unmap(buf, JET_SESSION_READ_BUF)
+        reader.eof = true
+        return false
+    }
+    if reader.offset >= reader.pending.len() {
+        reader.pending = [U8]{}
+        reader.offset = 0
+    } else if reader.offset > 4096 {
+        ^tail: [U8]{}
+        loop idx in reader.offset..<reader.pending.len() {
+            tail.push(reader.pending[idx])
+        }
+        reader.pending = tail.move()
+        reader.offset = 0
+    }
+    #Unsafe("buf holds `got` readable bytes from os_read within its mapped page") {
+        loop idx in 0..<got {
+            reader.pending.push(U8{os_load_byte(buf + idx)})
+        }
+    }
+    ^_: os_unmap(buf, JET_SESSION_READ_BUF)
+    true
+}
+
+// Read the next newline-delimited line from `reader`, enforcing `max_bytes`.
+// If a line exceeds `max_bytes`, drains bytes up to the next newline in O(1)
+// memory and returns `JetSessionLine.TooLong`.
+jet_cli_session_read_line: fn(reader: ^JetSessionReader, max_bytes: Int{JET_SESSION_MAX_LINE_BYTES}) -> JetSessionLine Never! {
+    ^line: [U8]{}
+    ^oversized: false
+    ^total_bytes: 0
+    loop {
+        loop reader.offset < reader.pending.len() {
+            byte: reader.pending[reader.offset]
+            reader.offset += 1
+            if byte == (U8{10}) {
+                if oversized {
+                    return JetSessionLine.TooLong{bytes: total_bytes}
+                }
+                ^end: line.len()
+                if end > 0 && line[end - 1] == (U8{13}) -> end -= 1
+                text: String.from_bytes(if end == line.len() -> line else -> line[0..<end]) ?? return JetSessionLine.ReadError{message: "session message is not valid UTF-8"}
+                return JetSessionLine.Line{text: text}
+            }
+            total_bytes += 1
+            if total_bytes > max_bytes {
+                if !oversized {
+                    oversized = true
+                    line = [U8]{}
+                }
+            } else {
+                line.push(byte)
+            }
+        }
+        ^read_err: ""
+        if !jet_cli_session_fill(reader, read_err) {
+            if read_err != "" -> return JetSessionLine.ReadError{message: read_err}
+            if total_bytes == 0 -> return JetSessionLine.EOF
+            if oversized -> return JetSessionLine.TooLong{bytes: total_bytes}
+            ^end: line.len()
+            if end > 0 && line[end - 1] == (U8{13}) -> end -= 1
+            text: String.from_bytes(if end == line.len() -> line else -> line[0..<end]) ?? return JetSessionLine.ReadError{message: "session message is not valid UTF-8"}
+            return JetSessionLine.Line{text: text}
+        }
+    }
+}
+
+// Pure line-limit check over an in-memory line payload (excluding `\n`) for tests.
+jet_cli_session_check_line_bytes: fn(payload: [U8], max_bytes: Int{JET_SESSION_MAX_LINE_BYTES}) -> JetSessionLine Never! {
+    if payload.len() > max_bytes -> return JetSessionLine.TooLong{bytes: payload.len()}
+    ^end: payload.len()
+    if end > 0 && payload[end - 1] == (U8{13}) -> end -= 1
+    text: String.from_bytes(if end == payload.len() -> payload else -> payload[0..<end]) ?? return JetSessionLine.ReadError{message: "session message is not valid UTF-8"}
+    JetSessionLine.Line{text: text}
+}
+
+// Write every byte of `text` to `fd`, retrying short writes and EINTR.
+jet_cli_session_write_all: fn(fd: Int, text: String) -> Bool Never! {
+    bytes: text.bytes()
+    if bytes.len() == 0 -> return true
+    chunk_cap: 8192
+    buf: os_map(chunk_cap, OS_PROT_READ | OS_PROT_WRITE)
+    if os_failed(buf) -> return false
+    ^pos: 0
+    ^ok: true
+    loop pos < bytes.len() {
+        rem: bytes.len() - pos
+        step: if rem < chunk_cap -> rem else -> chunk_cap
+        #Unsafe("buf holds `chunk_cap` writable bytes and `step <= chunk_cap`") {
+            os_copy_in_range(buf, bytes, pos, step)
+        }
+        ^written: 0
+        loop written < step {
+            wrote: os_write(fd, buf + written, step - written)
+            if wrote == -OS_EINTR -> next
+            if wrote <= 0 {
+                ok = false
+                break
+            }
+            written += wrote
+        }
+        if !ok -> break
+        pos += step
+    }
+    ^_: os_unmap(buf, chunk_cap)
+    ok
+}
+
+// Write one NDJSON line (appending `\n`).
+jet_cli_session_send_line: fn(fd: Int, json_line: String) -> Bool Never! {
+    jet_cli_session_write_all(fd, "{json_line}\n")
+}
+
+// Constant-time string comparison for session nonces.
+jet_cli_session_const_time_eq: fn(left: String, right: String) -> Bool Never! {
+    a: left.bytes()
+    b: right.bytes()
+    ^diff: a.len() ~ b.len()
+    limit: if a.len() < b.len() -> a.len() else -> b.len()
+    loop i in 0..<limit {
+        diff = diff | (Int{a[i]} ~ Int{b[i]})
+    }
+    diff == 0
+}
+
+// JSON array of strings.
+jet_cli_session_string_array_json: fn(values: [String]) -> String Never! {
+    ^parts: [String]{}
+    loop value in values -> parts.push(jet_cli_json_control_quote(value))
+    "[{parts.join(",")}]"
+}
+
+// JSON object mapping env var names to values.
+jet_cli_session_env_json: fn(entries: [JetCLIEnvVar]) -> String Never! {
+    ^parts: [String]{}
+    loop entry in entries {
+        parts.push("{jet_cli_json_control_quote(entry.name)}:{jet_cli_json_control_quote(entry.value)}")
+    }
+    "{{{parts.join(",")}}}"
+}
+
+// Build a `hello` NDJSON line.
+jet_cli_session_hello_line: fn(toolchain: String, verb: String, attached: Bool, ok: Bool, error: String, session_id: String, pid: Int, owner_pid: Int, request_id: Int?{None}) -> String Never! {
+    ^fields: [String]{
+        "\"schema\":{jet_cli_json_control_quote(JET_SESSION_SCHEMA)}",
+        "\"kind\":\"hello\"",
+        "\"ok\":{if ok -> "true" else -> "false"}",
+        "\"toolchain\":{jet_cli_json_control_quote(toolchain)}",
+        "\"attached\":{if attached -> "true" else -> "false"}",
+        "\"pid\":{pid}",
+    }
+    if verb != "" -> fields.push("\"verb\":{jet_cli_json_control_quote(verb)}")
+    if session_id != "" -> fields.push("\"session_id\":{jet_cli_json_control_quote(session_id)}")
+    if owner_pid > 0 -> fields.push("\"owner_pid\":{owner_pid}")
+    if error != "" -> fields.push("\"error\":{jet_cli_json_control_quote(error)}")
+    if request_id == .Val(rid) -> fields.push("\"id\":{rid}")
+    "{{{fields.join(",")}}}"
+}
+
+// Build a client `hello` handshake line carrying workspace nonce + toolchain.
+jet_cli_session_client_hello_line: fn(toolchain: String, nonce: String, pid: Int) -> String Never! {
+    "{{\"schema\":{jet_cli_json_control_quote(JET_SESSION_SCHEMA)},\"kind\":\"hello\",\"toolchain\":{jet_cli_json_control_quote(toolchain)},\"nonce\":{jet_cli_json_control_quote(nonce)},\"pid\":{pid}}}"
+}
+
+// Build an `event` NDJSON line.
+jet_cli_session_event_line: fn(request_id: Int, seq: Int, event: String, data_json: String{"{{}}"}) -> String Never! {
+    "{{\"schema\":{jet_cli_json_control_quote(JET_SESSION_SCHEMA)},\"kind\":\"event\",\"request\":{request_id},\"seq\":{seq},\"event\":{jet_cli_json_control_quote(event)},\"data\":{data_json}}}"
+}
+
+// Build a `response` NDJSON line.
+jet_cli_session_response_line: fn(request_id: Int?, status: String, exit_code: Int, code: String{""}, message: String{""}, extra_json: String{""}) -> String Never! {
+    ^fields: [String]{
+        "\"schema\":{jet_cli_json_control_quote(JET_SESSION_SCHEMA)}",
+        "\"kind\":\"response\"",
+    }
+    if request_id == .Val(rid) -> fields.push("\"id\":{rid}")
+    fields.push("\"status\":{jet_cli_json_control_quote(status)}")
+    fields.push("\"exit\":{exit_code}")
+    if code != "" -> fields.push("\"code\":{jet_cli_json_control_quote(code)}")
+    if message != "" -> fields.push("\"message\":{jet_cli_json_control_quote(message)}")
+    if extra_json != "" -> fields.push("{extra_json}")
+    "{{{fields.join(",")}}}"
+}
+
+// Build a `jet.report/v4` single-line JSON report for a protocol/CLI diagnostic.
+jet_cli_session_report_line: fn(code: String, what: String, why: String, fix: String) -> String Never! {
+    diag: diagnostic_from_registry(code, None, what, why, fix)
+    jet_cli_report_json(diag, None, "", "", 0)
+}
+
+// Stream `text` as one or more bounded output events (`invoke.output`, `run.output`,
+// `test.output`) so no line ever approaches the 1 MiB cap.
+jet_cli_session_stream_output: fn(fd: Int, request_id: Int, seq: ^Int, event_name: String, stream: String, text: String) -> Bool Never! {
+    bytes: text.bytes()
+    if bytes.len() == 0 -> return true
+    ^pos: 0
+    loop pos < bytes.len() {
+        ^end: pos + JET_SESSION_CHUNK_BYTES
+        if end > bytes.len() -> end = bytes.len()
+        // Do not split in the middle of a multi-byte UTF-8 sequence.
+        loop end > pos && end < bytes.len() && (Int{bytes[end]} & 0xC0) == 0x80 {
+            end -= 1
+        }
+        if end == pos -> end = pos + 1
+        piece: foundation_byte_text(bytes, pos, end)
+        seq += 1
+        data: "{{\"stream\":{jet_cli_json_control_quote(stream)},\"text\":{jet_cli_json_control_quote(piece)}}}"
+        if !jet_cli_session_send_line(fd, jet_cli_session_event_line(request_id, seq, event_name, data)) {
+            return false
+        }
+        pos = end
+    }
+    true
+}
+
+// Extract a `[String]` field from a parsed protocol JSON object.
+jet_cli_session_read_string_array: fn(obj: Dyn, name: String) -> [String] Never! {
+    ^out: [String]{}
+    items: compiler_service_array(obj, name) ?? return out
+    loop item in items {
+        if item == .Text(text) -> out.push(text)
+    }
+    out
+}
+
+// Extract an env object `{ "KEY": "VAL", ... }` from a parsed protocol JSON object.
+jet_cli_session_read_env_map: fn(obj: Dyn, name: String) -> [JetCLIEnvVar] Never! {
+    ^out: [JetCLIEnvVar]{}
+    field: compiler_service_get(obj, name) ?? return out
+    if field == .Object(entries) {
+        loop entry in entries {
+            if entry.value == .Text(val_text) {
+                out.push(JetCLIEnvVar{name: entry.key, value: val_text})
+            }
+        }
+    }
+    out
+}
+
+// Extract an optional Bool field from a parsed protocol JSON object.
+jet_cli_session_read_bool: fn(obj: Dyn, name: String) -> Bool? Never! {
+    field: compiler_service_get(obj, name) ?? return None
+    if field == .Bool(flag) -> return Val(flag)
+    None
+}
+
+// Parse one JSON object line; None if malformed or not a JSON object.
+jet_cli_session_parse_object: fn(line: String) -> Dyn? Never! {
+    parsed: foundation_parse_protocol_json(line) ?? return None
+    if parsed == .Object(_) -> return Val(parsed)
+    None
+}
