@@ -44,7 +44,6 @@ use jet_foundation.[
     expr_span,
     type_name,
     shared_lifetime_core_member,
-    CORE_CALLS,
     ModuleID,
     module_find,
     module_is_core,
@@ -640,20 +639,6 @@ sema_call_core_record: fn(module_name: String, member: String, actual_arity: Int
     }
 }
 
-// `tls.client(tcp, server_name: …, config: …, deadline: …)` takes a connected
-// stream: the native resource consumer row, where the `(host, port)` form is
-// source-owned. The two forms differ by arity.
-sema_call_core_configured_client: fn(args: [CallArg]) -> Bool Never! { args.len() >= 3 }
-
-sema_call_core_native_resource_consumer: fn(module_name: String, member: String, configured_client: Bool) -> Bool Never! {
-    module_name == "core.net.tls" && member == "client" && configured_client
-}
-
-sema_call_core_has_explicit_source_target: fn(module_name: String, member: String) -> Bool Never! {
-    row: core_call(module_name, member) ?? return false
-    row.symbol == CoreCallSymbol.SourceOwned && (row.source_target != None || row.source_role != None)
-}
-
 // The no-OS call boundary is checked before choosing either a source-owned
 // implementation or a native Core row. These modules need an OS on every
 // machine; a module a machine's declared services can back (`core.time`'s
@@ -685,13 +670,13 @@ sema_call_core_no_os_refused: fn(check: ^SemaBodyCheck, module_name: String, mem
 // Source exports are ordinary functions ahead of static Core records. A Core record
 // route checks no type-argument count: the bespoke Core arms take their own `<T>`
 // and only the fixed-signature fallback checks the count against the typed row.
-sema_call_core_resolve_route: fn(check: ^SemaBodyCheck, module_name: String, member: String, type_args: [Type], actual_arity: Int, configured_client: Bool, span: Span) -> SemaCoreCallRoute? {
+sema_call_core_resolve_route: fn(check: ^SemaBodyCheck, module_name: String, member: String, type_args: [Type], actual_arity: Int, span: Span) -> SemaCoreCallRoute? {
     ^diagnostic_count: check.diagnostics.len()
     if sema_call_core_no_os_refused(check, module_name, member, span) -> return None
     if sema_call_core_typed_decode_call(module_name, member, type_args) == .Val(role) {
         return sema_call_core_typed_decode_route(check, module_name, role, type_args, span)
     }
-    source_identity: if sema_call_core_has_explicit_source_target(module_name, member) || sema_call_core_native_resource_consumer(module_name, member, configured_client) -> None else -> sema_call_core_module_identity(check.environment.*, check.program.*, module_name)
+    source_identity: sema_call_core_module_identity(check.environment.*, check.program.*, module_name)
     source: if source_identity == {
         .Val(identity) -> sema_call_core_source_target(check.environment.*, check.program.*, identity, member, type_args, span, false, check.diagnostics)
         .None -> None
@@ -730,7 +715,7 @@ sema_call_core_tolerant_form_lint: fn(check: ^SemaBodyCheck, module_name: String
     check.diagnostics.push(diagnostic_with_edit(lint, TextEdit{span: Span{start: span.end, end: span.end}, new_text: "_strict"}))
 }
 
-sema_call_core_resolve_import_route: fn(check: ^SemaBodyCheck, alias: String, requested_member: String, type_args: [Type], actual_arity: Int, configured_client: Bool, span: Span, alias_span: Span) -> SemaCoreCallRoute? {
+sema_call_core_resolve_import_route: fn(check: ^SemaBodyCheck, alias: String, requested_member: String, type_args: [Type], actual_arity: Int, span: Span, alias_span: Span) -> SemaCoreCallRoute? {
     imported: sema_call_core_import_target(check.environment.*, check.program.*, alias) ?? return None
     if !sema_call_core_import_is_unshadowed(check.environment.*, check.program.*, check.scopes, imported) {
         return None
@@ -750,7 +735,7 @@ sema_call_core_resolve_import_route: fn(check: ^SemaBodyCheck, alias: String, re
     // `core.term` owns only the one-argument print and eprint wrappers; other
     // arities keep the fixed Core route.
     variadic_term: imported.module_name == "core.term" && (member == "print" || member == "eprint") && actual_arity != 1
-    source_identity: if variadic_term || sema_call_core_has_explicit_source_target(imported.module_name, member) || sema_call_core_native_resource_consumer(imported.module_name, member, configured_client) -> None else -> sema_call_core_import_source_identity(check.environment.*, check.program.*, imported)
+    source_identity: if variadic_term -> None else -> sema_call_core_import_source_identity(check.environment.*, check.program.*, imported)
     source: if source_identity == {
         .Val(identity) -> sema_call_core_source_target(check.environment.*, check.program.*, identity, member, type_args, span, false, check.diagnostics)
         .None -> None
@@ -771,7 +756,7 @@ sema_call_core_resolve_import_route: fn(check: ^SemaBodyCheck, alias: String, re
 // under `use core as core`) routes against that submodule by name, exactly as
 // an alias of the submodule itself would, including the `core.mem` Shared
 // sites.
-sema_call_core_resolve_import_path_route: fn(check: ^SemaBodyCheck, alias: String, module_name: String, member: String, type_args: [Type], actual_arity: Int, configured_client: Bool, span: Span, alias_span: Span) -> SemaCoreCallRoute? {
+sema_call_core_resolve_import_path_route: fn(check: ^SemaBodyCheck, alias: String, module_name: String, member: String, type_args: [Type], actual_arity: Int, span: Span, alias_span: Span) -> SemaCoreCallRoute? {
     imported: sema_call_core_import_target(check.environment.*, check.program.*, alias) ?? return None
     if imported.item != None -> return None
     if !sema_call_core_record_import_reference(check, imported, alias_span) -> return None
@@ -780,7 +765,7 @@ sema_call_core_resolve_import_path_route: fn(check: ^SemaBodyCheck, alias: Strin
             return Val(SemaCoreCallRoute.SharedSite{lifetime: lifetime})
         }
     }
-    sema_call_core_resolve_route(check, module_name, member, type_args, actual_arity, configured_client, span)
+    sema_call_core_resolve_route(check, module_name, member, type_args, actual_arity, span)
 }
 
 // `("core.term", "print")` and `("core.term", "progress")`: an imported
@@ -1115,21 +1100,6 @@ sema_call_core_math_exact_crossing: fn(module_name: String, member: String, args
         updated
     }
     Val(crossed)
-}
-
-// A `tls.client` runs the Core function that fills the role of its arity and
-// arguments; a stream moved into a two-argument `tls.client` is the stream
-// form, else it is the `(host, port)` one.
-sema_call_core_arity_source_record: fn(record: CoreCallRecord, args: [CallArg]) -> CoreCallRecord Never! {
-    ^normalized: record
-    if record.symbol == CoreCallSymbol.SourceOwned && record.module_name == "core.net.tls" && record.member == "client" {
-        if args.len() == 4 -> normalized.source_role = Val("TLSClientConfigDeadline") else if args.len() == 3 {
-            normalized.source_role = Val("TLSClientDeadline")
-        } else if args.len() == 2 && args[0].convention == AccessConvention.Move {
-            normalized.source_role = Val("TLSClientStream")
-        } else { normalized.source_target = Val("client") }
-    }
-    normalized
 }
 
 // The role whose Core function a text codec's typed `decode<T>(text)` runs,
@@ -1476,13 +1446,12 @@ sema_call_core_check_fixed_record: fn(record: CoreCallRecord, args: [CallArg], t
         // A source-owned row is checked against the Core declaration it runs:
         // the function that fills its role, else the one its source target or
         // member names.
-        routed: sema_call_core_arity_source_record(canonical_record, args)
-        role: core_call_source_role(routed)
+        role: core_call_source_role(canonical_record)
         if role == .Val(filled) && sema_call_core_role_target(filled, type_args, span, check.environment.*, check.program.*, check.diagnostics) == .Val(target) {
             return sema_call_core_check_source_owned(target, "{canonical_record.module_name}.{canonical_record.member}", type_args, args, span, expected, check)
         }
         if role == None && sema_call_core_module_identity(check.environment.*, check.program.*, canonical_record.module_name) == .Val(identity) {
-            declared_member: routed.source_target ?? canonical_record.member
+            declared_member: canonical_record.source_target ?? canonical_record.member
             if sema_call_core_source_target(check.environment.*, check.program.*, identity, declared_member, type_args, span, true, check.diagnostics) == .Val(target) {
                 return sema_call_core_check_source_owned(target, "{canonical_record.module_name}.{declared_member}", type_args, args, span, expected, check)
             }
@@ -1543,7 +1512,7 @@ sema_call_core_check_fixed_record: fn(record: CoreCallRecord, args: [CallArg], t
 // Resolve source exports before building a fixed Core call. The callee's
 // canonical typed contract is discovered here; callers never supply its Type.
 sema_call_core_check_fixed: fn(module_name: String, member: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
-    route: sema_call_core_resolve_route(check, module_name, member, type_args, args.len(), sema_call_core_configured_client(args), span) ?? return None
+    route: sema_call_core_resolve_route(check, module_name, member, type_args, args.len(), span) ?? return None
     if route == {
         .SharedSite(lifetime) -> {
             return sema_call_core_global_shared(lifetime, member, type_args, args, span, expected, check)
@@ -1695,15 +1664,4 @@ sema_call_core_check_source_owned: fn(target: SemaCallDirectTarget, qualified_na
         tree_expr_retype(value, loaded)
     }
     Val(value)
-}
-
-#Test("worker checked-function inference changes no other Core route") {
-    configured: [Bool]{false, true}
-    loop row in CORE_CALLS {
-        loop moved in configured {
-            previous: row.module_name == "core.net.tls" && row.member == "client" && moved
-            worker: row.module_name == "core.service" && row.member == "worker"
-            assert(sema_call_core_native_resource_consumer(row.module_name, row.member, moved) == (previous || worker))
-        }
-    }
 }

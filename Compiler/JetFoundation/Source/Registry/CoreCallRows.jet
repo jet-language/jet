@@ -1,20 +1,18 @@
-// The Core ABI rows: Core.rows's dispatcher rows in order. No two rows share
-// a core_call_key: the build stops when a Core.rows row repeats an earlier
-// key.
-CORE_CALLS: #run core_call_rows(CORE_DECLARATIONS)
+// The Core ABI rows: empty once every Core.rows dispatcher_row is retired
+// and every Core member is declared directly in Core/.
+CORE_CALLS: [CoreCallRecord]{}
 
 // Module/member/type names follow Core.rows module declaration order.
 CORE_MODULE_EXPORTS: #run core_module_export_rows(CORE_DECLARATIONS)
 
 // The lookup keys of the tables above and CORE_BARE_SOURCE_MODULES, frozen
 // at build time for halving search (ir_key_row), so a lookup costs a search
-// instead of a scan of every row: CORE_CALLS by core_call_lookup_key (a
-// receiver row keys ""), CORE_MODULE_EXPORTS by module name, each distinct
-// type export leaf with the modules exporting it in table order, and the
-// bare spellings by name. Each key keeps its first row, as a scan would.
-CORE_CALL_KEY_ROWS: #run ir_key_index(core_call_lookup_keys(CORE_CALLS))
+// instead of a scan of every row: CORE_MODULE_EXPORTS by module name, each
+// distinct type export leaf with the modules exporting it in table order, and
+// the bare spellings by name. Each key keeps its first row, as a scan would.
+CORE_CALL_KEY_ROWS: [Int]{}
 
-CORE_CALL_KEYS: #run ir_key_index_keys(core_call_lookup_keys(CORE_CALLS), CORE_CALL_KEY_ROWS)
+CORE_CALL_KEYS: [String]{}
 
 CORE_MODULE_EXPORT_KEY_ROWS: #run ir_key_index(core_module_export_names(CORE_MODULE_EXPORTS))
 
@@ -102,20 +100,6 @@ core_module_export_rows: fn(declared: CoreDeclarations) -> [CoreModuleExportName
     loop entry in declared.modules {
         types: loop leaf in entry.types -> leaf.name.copy()
         rows.push(CoreModuleExportNames{module_name: entry.name.copy(), members: entry.members.copy(), type_exports: types})
-    }
-    rows
-}
-
-core_call_rows: fn(declared: CoreDeclarations) -> [CoreCallRecord] {
-    ^rows: [CoreCallRecord]{}
-    ^seen: [String:Bool]{}
-    loop row in declared.dispatchers {
-        key: core_call_key(row.record)
-        if seen.has_key(key) {
-            build_time_refused("Core.rows: row `{key}` repeats another Core.rows row; keep one")
-        }
-        seen[key] = true
-        rows.push(row.record.copy())
     }
     rows
 }

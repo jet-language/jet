@@ -1,4 +1,12 @@
 // core-conformance: core.net.tls.client
-use tls: core.net.tls
+use {
+    net: core.net
+    tls: core.net.tls
+}
 
-run: fn() -[Net, Time.Wait, IO]> { print(tls.client("localhost", 0) == .Err(_)) }
+run: fn() -[Net, Time.Wait, IO]> {
+    listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    address: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("address"))
+    tcp: net.tcp_connect(address) ?? panic("connect")
+    print(tls.client(tcp, server_name: "bad..example", deadline: 1s) == .Err(_))
+}

@@ -4269,7 +4269,7 @@ sema_expr_core_module_method_checked: fn(receiver: Expr, method: String, method_
         return SemaMethodSpecialCheck{handled: true, value: printed.value}
     }
     ^diagnostics_before: check.diagnostics.len()
-    ^route: if nested -> sema_call_core_resolve_import_path_route(check, alias, module_name, method, type_args, args.len(), sema_call_core_configured_client(args), method_span, alias_span) else -> sema_call_core_resolve_import_route(check, alias, method, type_args, args.len(), sema_call_core_configured_client(args), method_span, alias_span)
+    ^route: if nested -> sema_call_core_resolve_import_path_route(check, alias, module_name, method, type_args, args.len(), method_span, alias_span) else -> sema_call_core_resolve_import_route(check, alias, method, type_args, args.len(), method_span, alias_span)
     route_value: route ?? {
         if check.diagnostics.len() != diagnostics_before {
             return SemaMethodSpecialCheck{handled: true, value: None}

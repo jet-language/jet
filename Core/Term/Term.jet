@@ -69,7 +69,7 @@ StdinHandle: struct {
     impl Reader {
         read_bytes: fn(^self, limit: Int) -[IO, Time.Wait]> [U8] IOError! {
             if limit <= 0 -> return Err(terminal_invalid("the read limit must be positive"))
-            __take_bytes(limit)
+            take_bytes(limit)
         }
 
         read_into: fn(^self, buffer: ^[U8], limit: Int) -[IO, Time.Wait]> Int IOError! {
@@ -371,7 +371,8 @@ read_until: fn(delimiter: String) -[IO, Time.Wait]> String IOError! {
     Ok(result.input)
 }
 
-#Builtin.Role(.TermTake) priv __take_bytes: fn(n: Int) -[IO, Time.Wait]> [U8] IOError! {
+// Up to `n` stdin bytes, waiting until stdin has bytes or ends; [] at EOF.
+take_bytes: fn(n: Int) -[IO, Time.Wait]> [U8] IOError! {
     if n < 0 -> return Err(terminal_other(.Read, Val("stdin"), "negative take"))
     terminal_read_preflight()
     result: rt.terminal8_take(n)
@@ -933,7 +934,7 @@ stdio_flush: fn(stderr: Bool) -[IO]> IOError! {
 }
 
 #Test("negative byte take fails before reading stdin") {
-    if __take_bytes(-1) == {
+    if take_bytes(-1) == {
         .Err(_) -> {}
         .Ok(_) -> panic("a negative take must fail")
     }

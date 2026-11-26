@@ -1079,7 +1079,7 @@ sema_call_check_expect_snapshot: fn(call: Call, args: [CallArg], type_args: [Typ
     value_span: expr_span(call.args[0].expr)
     text: Expr.Str{parts: [StrPart]{StrPart.Interp{expr: call.args[0].expr, format: None}}, span: value_span, id: AST_NODE_GENERATED}
     checked_text: sema_check_expression(text, Val(Type.String), check) ?? return None
-    route: sema_call_core_resolve_route(check, "core.testing", "snap", [Type]{}, 2, false, call.name_span) ?? return None
+    route: sema_call_core_resolve_route(check, "core.testing", "snap", [Type]{}, 2, call.name_span) ?? return None
     target: if route == {
         .Source(source) -> source
         .Core(_) | .SharedSite(_) -> {
@@ -1229,7 +1229,7 @@ sema_call_core_direct_checked: fn(call: Call, expected: Type?, check: ^SemaBodyC
         return sema_call_check_ambient_print(call, check)
     }
     ^diagnostics_before: check.diagnostics.len()
-    ^route: sema_call_core_resolve_import_route(check, alias, member, call.type_args, call.args.len(), sema_call_core_configured_client(call.args), call.name_span, call.name_span)
+    ^route: sema_call_core_resolve_import_route(check, alias, member, call.type_args, call.args.len(), call.name_span, call.name_span)
     route_value: route ?? {
         if check.diagnostics.len() != diagnostics_before {
             return SemaDirectSpecialCheck{handled: true, value: None}

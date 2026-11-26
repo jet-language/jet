@@ -87,7 +87,7 @@ cli_hangar_archive: fn(verification: StoreVerification, theme: Theme, parsed: CL
             EXIT_OK
         }
         .Restore -> {
-            bytes: term.take(STORE_MAX_ARCHIVE_BYTES + 1) ?? return cli_hangar_archive_error(theme, parsed, action, StoreError.Other("could not read archive from stdin: {err}"))
+            bytes: term.take_bytes(STORE_MAX_ARCHIVE_BYTES + 1) ?? return cli_hangar_archive_error(theme, parsed, action, StoreError.Other("could not read archive from stdin: {err}"))
             if bytes.len() > STORE_MAX_ARCHIVE_BYTES {
                 return cli_hangar_archive_error(theme, parsed, action, StoreError.InvalidInput("archive from stdin exceeds the 1 GiB Hangar limit"))
             }

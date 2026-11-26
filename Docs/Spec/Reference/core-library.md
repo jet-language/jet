@@ -534,10 +534,12 @@ list are the executable authority; this reference explains the durable rules
 and points to those files instead of duplicating their generated details.
 The audited intrinsic/ABI kernel is the only provider seam; ordinary Core packages remain Jet source. Archive byte-format calls cross that seam only where the source implementation requires them.
 
-The overloaded Unix connect and TLS client calls retain their checked public
-argument forms before forwarding into their owning Jet entry points. An App's
-route, mount and middleware registrations lower to its Jet `__http_*` methods
-after the existing escaping-callback admission. The original effects and
+`core.net.tls` separates `tls.connect(host, port)` (which dials TCP and runs a
+TLS client handshake) from `tls.client(stream, server_name:, config:, deadline:)`
+(which wraps an existing `TCPStream`), and `core.term` exposes `take_bytes`
+directly, all as ordinary Jet declarations in `Core/` without dispatcher rows.
+An App's route, mount and middleware registrations lower to its Jet `__http_*`
+methods after the existing escaping-callback admission. The original effects and
 resource conventions remain in force.
 
 ### Database crash consistency and storage model
