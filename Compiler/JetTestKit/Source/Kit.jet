@@ -983,7 +983,11 @@ kit_execute_suites: fn(options: KitOptions, root: String, selected_suites: [Stri
     if kit_exec_stack_limit() == .Val(why) {
         return kit_execution_refused("ERROR\tselection\t\tstack limit: {why}")
     }
-    base: if options.scratch != "" -> options.scratch else -> kit_scratch_root() ?? return kit_execution_refused("ERROR\tselection\t\tscratch: set HOME or pass --scratch")
+    base: if {
+        options.scratch != "" -> options.scratch
+        options.opt_in -> kit_disk_root() ?? return kit_execution_refused("ERROR\tselection\t\tscratch: set HOME or pass --scratch")
+        else -> kit_scratch_root() ?? return kit_execution_refused("ERROR\tselection\t\tscratch: set HOME or pass --scratch")
+    }
     canonical: kit_execute_scratch_dir(base, root) ?? return kit_execution_refused("ERROR\tselection\t\tscratch: {err}")
     // What outlives a run: each suite's measurements, and the FFI cache when
     // the rows stage on disk.
