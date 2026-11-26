@@ -51,7 +51,6 @@ use {
         name_column_table,
         name_index,
         name_intern,
-        symbol_key_leaf,
     ]
     jet_parser.[parse_generated_source]
 }
@@ -843,8 +842,10 @@ sema_rule_known_row: fn(index: Int, check: SemaBodyCheck) -> TComptimeValue? {
         }
         return Val(TComptimeValue.Struct{type_name: "", fields: known})
     }
-    if check.context.arena.tree.nodes[row].kind == .EnumCtor(_, variant, payload) {
-        return sema_rule_known_case(symbol_key_leaf(sema_symbol_key(check.program.*, check.context, variant)), payload, check)
+    if check.context.arena.tree.nodes[row].kind == .EnumCtor(owner, variant, payload) {
+        owner_key: sema_symbol_key(check.program.*, check.context, owner)
+        variant_key: sema_symbol_key(check.program.*, check.context, variant)
+        return sema_rule_known_case(sema_comptime_fold_variant_name(owner_key, variant_key), payload, check)
     }
     if check.context.arena.tree.nodes[row].kind == .EnumLit(_, variant, payload) {
         return sema_rule_known_case("{variant}", payload, check)

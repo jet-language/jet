@@ -9118,9 +9118,61 @@ ir_function_value: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, key: 
     boxed
 }
 
+// Whether a compile-time value matches the member type `member` directly.
+ir_comptime_matches_type: fn(member: Type, value: TComptimeValue) -> Bool Never! {
+    unwrapped: ir_untag(member)
+    if value == {
+        .Int(_) -> unwrapped == .Int || unwrapped == .IntN(_, _) || unwrapped == .InlineRange(_, _, _)
+        .BigInt(_) -> unwrapped == .Int || unwrapped == .IntN(_, _)
+        .Bool(_) -> unwrapped == .Bool
+        .Char(_) -> unwrapped == .Char
+        .Float(_, bits) -> if bits == 32 -> unwrapped == .Float32 else -> unwrapped == .Float || unwrapped == .Float32
+        .String(_) -> unwrapped == .String
+        .Bytes(_) -> if unwrapped == .List(elem) -> ir_untag(elem) == (Type.IntN{signed: false, bits: 8}) else -> false
+        .List(_) -> unwrapped == .List(_) || unwrapped == .FixedList(_, _)
+        .Map(_) -> unwrapped == .Map(_, _, _)
+        .Present(_) -> unwrapped == .Option(_) || unwrapped == .Result(_, _)
+        .Failed(report) -> if report == .Told(_) -> unwrapped == .Result(_, _) else -> unwrapped == .Option(_)
+        .Struct(name, _) -> if ir_nominal_name(unwrapped) == .Val(target) -> target == name || symbol_key_names(target, name) else -> false
+        .Enum(name, _, _) -> if name == "" -> false else if ir_nominal_name(unwrapped) == .Val(target) -> target == name || symbol_key_names(target, name) else -> false
+        .Function(_) -> unwrapped == .Fn(_, _, _, _, _, _)
+        .Unit -> false
+    }
+}
+
+// The union member type a compile-time value fills, when `value` is a bare
+// member value rather than a pre-wrapped union case.
+ir_comptime_union_member: fn(members: [Type], value: TComptimeValue) -> Type? Never! {
+    loop member in members {
+        if ir_comptime_matches_type(member, value) -> return Val(member)
+    }
+    None
+}
+
 // A compile-time value of type `ty`.
 ir_comptime: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, value: TComptimeValue, span: Span) -> Int Never! {
     if value == .Unit -> return -1
+    if ir_untag(ty) == .Union(members) {
+        if ir_comptime_union_member(members, value) == .Val(member_ty) {
+            member_slot: ir_comptime(m, p, b, member_ty, value, span)
+            if ir_failed(b) -> return -1
+            return ir_union_box(m, p, b, member_slot, member_ty, ty, span)
+        }
+        is_carrier: if value == {
+            .Present(_) | .Failed(_) -> true
+            .Int(_) | .BigInt(_) | .Bool(_) | .Char(_) | .Float(_, _) | .String(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Function(_) | .Unit -> false
+        }
+        if !is_carrier {
+            loop member in members {
+                if ir_untag(member) == .Option(inner_ty) && ir_comptime_matches_type(inner_ty, value) {
+                    wrapped: TComptimeValue.Present{value: value}
+                    member_slot: ir_comptime(m, p, b, member, wrapped, span)
+                    if ir_failed(b) -> return -1
+                    return ir_union_box(m, p, b, member_slot, member, ty, span)
+                }
+            }
+        }
+    }
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     if ir_host_value_row(m, p, row) != None || ir_type_handle_row(m, p, row) {
         return ir_host_literal(m, b, row, value)

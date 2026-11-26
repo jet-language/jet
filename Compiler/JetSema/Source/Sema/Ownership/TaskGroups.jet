@@ -425,6 +425,7 @@ sema_taskgroup_check_statement: fn(name: String, name_span: Span, args: TaskGrou
 // children have nothing to run on: a web build refuses the group rather than
 // emitting code that cannot run.
 sema_taskgroup_web_refused: fn(span: Span, check: ^SemaBodyCheck) -> Bool {
+    // Snapshot: target machine selection lives on the full program graph, so a lone Snapshot program has none.
     if check.program.registration_graph.mode == .Snapshot -> return false
     machine: check.program.registration_graph.target_machine
     if machine.name != "wasm.browser" -> return false

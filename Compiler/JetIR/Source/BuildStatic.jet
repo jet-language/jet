@@ -584,14 +584,28 @@ ir_static_into: fn(m: ^IRModule, p: IRProgram, s: ^IRStaticBuild, object: Int, o
 // The word of a non-aggregate value (ir_comptime's scalars and boxes).
 ir_static_word: fn(m: ^IRModule, p: IRProgram, s: ^IRStaticBuild, ty: Type, row: Int, value: TComptimeValue) -> IRStaticWord? Never! {
     kind: m.types[row].kind
+    if ir_untag(ty) == .Union(_) {
+        if value == .Enum(_, variant, args) -> return ir_static_enum(m, p, s, ty, row, variant, args)
+        return None
+    }
     if value == {
         .Int(number) -> {
+            if kind == .Pointer -> return None
             if kind == .Int && !ir_int_inline(number) -> return ir_static_big_int(s, number)
             return Val(IRStaticWord{word: number})
         }
-        .Bool(flag) -> return Val(IRStaticWord{word: if flag -> 1 else -> 0})
-        .Char(code) -> return Val(IRStaticWord{word: code})
-        .Float(number, _) -> return Val(IRStaticWord{word: ir_float_constant_bits(number, kind == .Float32)})
+        .Bool(flag) -> {
+            if kind == .Pointer -> return None
+            return Val(IRStaticWord{word: if flag -> 1 else -> 0})
+        }
+        .Char(code) -> {
+            if kind == .Pointer -> return None
+            return Val(IRStaticWord{word: code})
+        }
+        .Float(number, _) -> {
+            if kind == .Pointer -> return None
+            return Val(IRStaticWord{word: ir_float_constant_bits(number, kind == .Float32)})
+        }
         .String(text) -> {
             if kind != .String -> return None
             return Val(IRStaticWord{word: 0, target: ir_intern_text(m, text), text: true})
@@ -653,7 +667,9 @@ ir_static_word: fn(m: ^IRModule, p: IRProgram, s: ^IRStaticBuild, ty: Type, row:
 // An enum value (ir_comptime_enum): a payload-free enum's variant index, else
 // a box with the discriminant and each payload member.
 ir_static_enum: fn(m: ^IRModule, p: IRProgram, s: ^IRStaticBuild, ty: Type, slot_type: Int, variant: String, args: [TComptimeEnumArg]) -> IRStaticWord? Never! {
-    nominal: ir_nominal_name(ir_untag(ty)) ?? return None
+    written: ir_untag(ty)
+    union_key: if written == .Union(_) -> Val(ir_union_key(written)) else -> String?{None}
+    nominal: union_key ?? ir_nominal_name(written) ?? return None
     row: ir_type_def(p, nominal) ?? ir_enum_def(m, p, slot_type) ?? return None
     index: ir_variant_index(p, row, variant) ?? return None
     if m.types[slot_type].kind != .Pointer {

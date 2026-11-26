@@ -200,9 +200,12 @@ sema_comptime_fold_node: fn(interner: Interner, tree: BodyTree, expression: Int,
             }
             return Val(TComptimeValue.Struct{type_name: type_name, fields: folded})
         }
-        .EnumCtor(_, variant, payload) -> {
+        .EnumCtor(owner, variant, payload) -> {
             type_name: sema_comptime_fold_type_name(expression_ty) ?? return None
-            return sema_comptime_fold_enum(interner, tree, type_name, symbol_key_leaf(symbol_key(symbols, tree.symbols, variant)), payload, values, symbols, type_delta)
+            owner_key: symbol_key(symbols, tree.symbols, owner)
+            variant_key: symbol_key(symbols, tree.symbols, variant)
+            variant_name: sema_comptime_fold_variant_name(owner_key, variant_key)
+            return sema_comptime_fold_enum(interner, tree, type_name, variant_name, payload, values, symbols, type_delta)
         }
         .EnumLit(enum_type, variant, payload) -> return sema_comptime_fold_enum(interner, tree, symbol_key_leaf(enum_type), variant, payload, values, symbols, type_delta)
         .Present(value) -> {
@@ -500,6 +503,18 @@ sema_comptime_fold_key_text: fn(key: TComptimeKey) -> String Never! {
 sema_comptime_fold_key_fields: fn(fields: [TComptimeKeyField]) -> String Never! {
     parts: loop field in fields -> "{field.name.bytes().len()}:{field.name}{sema_comptime_fold_key_text(field.key)}"
     "{fields.len()}({parts.join("")})"
+}
+
+// The variant's full name inside its enum (preserving group prefixes such as
+// `Net.Packet` rather than stripping to `Packet`).
+sema_comptime_fold_variant_name: fn(owner_key: String, variant_key: String) -> String Never! {
+    if owner_key != "" {
+        marker: ".{owner_key}."
+        if variant_key.split_once(marker) == .Val(parts) -> return parts.after
+        prefix: ":{owner_key}."
+        if variant_key.split_once(prefix) == .Val(parts) -> return parts.after
+    }
+    symbol_key_leaf(variant_key)
 }
 
 sema_comptime_fold_enum: fn(interner: Interner, tree: BodyTree, type_name: String, variant: String, payload: BodyEnumPayload, values: [SemaComptimeItemValue], symbols: SymbolTable, type_delta: [InternerDelta]) -> TComptimeValue? Never! {
