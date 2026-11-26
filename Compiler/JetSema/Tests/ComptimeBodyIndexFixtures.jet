@@ -619,3 +619,37 @@ run: fn() -> Int {
     body_index_require(!has_plain, "plain must not be staged")
     body_index_require(!has_list, "list must not be staged")
 }
+
+#Test("mutable_module_global_local_value_is_not_staged") {
+    source: `^flag: -1
+FIXED: -1
+answer: fn() -> Int { 42 }
+run: fn() -> Int {
+    dynamic_read: if flag >= 0 -> answer() else -> 0
+    static_read: if FIXED >= 0 -> answer() else -> 0
+    dynamic_read + static_read
+}
+`
+    ^graph: body_index_constant_graph([String]{source})
+    hooks: Shared{SemaRegistrationHostHooks{numeric_unit_conversion_exact: None}}
+    ^stage: sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, compiler_threads_single(), None) ?? panic("declaration check failed: {err}")
+    ^declared: stage.graph.move()
+    stage.graph = None
+    ^registration: declared.move() ?? panic("lost registration graph")
+    values: [SemaComptimeItemValue]{
+        body_index_constant_value("constant.0", symbol_table_key(registration.symbols, registration.modules[0].constants[0].symbol.id), -1),
+        body_index_constant_value("constant.0", symbol_table_key(registration.symbols, registration.modules[0].constants[1].symbol.id), -1),
+    }
+    ^trail: sema_graph_trail_init()
+    sema_comptime_graph_apply_values(registration, values, trail)
+    ^checked: sema_finalize_registration_graph(registration, None, stage, values, [SemaComptimeFunctionResult]{}, hooks, compiler_threads_single(), None) ?? panic("finalization failed: {err}")
+    ^has_dynamic: false
+    ^has_static: false
+    loop entry in checked.comptime_body_sources {
+        if !entry.local_value -> next
+        if entry.name == "dynamic_read" -> has_dynamic = true
+        if entry.name == "static_read" -> has_static = true
+    }
+    body_index_require(!has_dynamic, "immutable local reading a mutable module global must not be staged; diagnostics={checked.diagnostics:Debug}")
+    body_index_require(has_static, "immutable local reading an immutable module constant remains eligible; diagnostics={checked.diagnostics:Debug}")
+}

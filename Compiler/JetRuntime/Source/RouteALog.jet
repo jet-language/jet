@@ -401,7 +401,8 @@ log_sink_open: fn(path: I64) -> I64 {
     ^_: log_state()
     id: dyn_word(wrapping(span + LOG_SPAN_ID))
     name: dyn_word(wrapping(span + LOG_SPAN_NAME))
-    start_ns: if (perf_spans_fd >= I64{0}) -> time_host_monotonic_i64() else -> I64{0}
+    ^start_ns: I64{0}
+    if (perf_spans_fd >= I64{0}) { start_ns = time_host_monotonic_i64() }
     ^_: context_frame_push(name, I64{0}, I64{0}, id, start_ns, CONTEXT_FRAME_KIND_LOG_SPAN)
     observe_task_count(OBSERVE_TASK_SPANS, I64{1})
 }

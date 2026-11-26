@@ -122,6 +122,12 @@ sema_comptime_local_value_candidate: fn(
     if sema_comptime_local_value_holds_callback_bound(check, node_start) -> return false
     loop index in reference_start..<check.context.name_references.len() {
         reference: check.context.name_references[index]
+        if reference.kind == Val(SymbolKind.Constant) {
+            if sema_comptime_local_value_reads_mutable_global(check.environment.*, check.program.*, reference.symbol) {
+                return false
+            }
+            next
+        }
         if reference.kind != Val(SymbolKind.Local) && reference.kind != Val(SymbolKind.Parameter) {
             next
         }
@@ -129,6 +135,31 @@ sema_comptime_local_value_candidate: fn(
         if check.scopes.bindings[position].prepared == None -> return false
     }
     sema_comptime_call_facts_impurity_from(graph, check.context.call_facts, fact_start, true) == None
+}
+
+// Whether a referenced module constant names a mutable module storage binding
+// (`^name: ...`) or a changeable holder (`Shared`/`Cell`), which must stay
+// run-time code rather than be auto-folded from its initial value.
+sema_comptime_local_value_reads_mutable_global: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, referent: SemaNameReferent) -> Bool Never! {
+    if referent.module_identity == environment.module_identity {
+        loop declaration_index in 0..<environment.declarations.len() {
+            if environment.declarations[declaration_index].symbol_id != referent.id -> next
+            if environment.declarations[declaration_index].item == .Const(definition) {
+                if definition.mutable && !definition.is_comptime -> return true
+            }
+            break
+        }
+    }
+    graph: program.registration_graph
+    module_index: sema_registration_module_index(graph, referent.module_identity) ?? return false
+    loop constant_index in 0..<graph.modules[module_index].constants.len() {
+        constant: graph.modules[module_index].constants[constant_index]
+        if constant.symbol.id != referent.id -> next
+        if constant.declaration.mutable && !constant.declaration.is_comptime -> return true
+        if constant.symbol.ty == .Val(ref_ty) && sema_scope_type_is_changeable_holder(ref_ty) -> return true
+        return false
+    }
+    false
 }
 
 // Whether `expr` contains a call expression. Pure collection and value
