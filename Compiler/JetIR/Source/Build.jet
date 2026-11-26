@@ -3154,7 +3154,7 @@ ir_bind_pending: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder) Never! {
         }
         if !row.loaded -> ir_pending_load(m, b, row, row.slot)
         ir_close_note(m, p, b, row.slot, row.subject, IRPartStep{selector: row.selector, offset: row.offset})
-        b.bindings.push(IRBinding{name: row.name, slot: row.slot, carrier: if row.boxed -> -1 else -> row.subject})
+        b.bindings.push(IRBinding{name: row.name, slot: row.slot, write: row.window, carrier: if row.boxed -> -1 else -> row.subject})
     }
 }
 
