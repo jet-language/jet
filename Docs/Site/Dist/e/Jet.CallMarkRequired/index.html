@@ -36,59 +36,23 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Write the mark the quoted signature implies: `^` for a `^` parameter or `^self` method, `^^` for a `^^` parameter or `^^self` method, and no mark for a read.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>Jet.CallMarkRequired</code>: <code>Tests/UI/writes_policy_call_marks.stderr</code>.</p>
-<pre class="diag">Error: Jet.CallMarkRequired: `.push()` changes `items`, so the call writes `^items`
-  --&gt; Tests/UI/writes_policy_call_marks.jet:3:27
+<p>First UI snapshot mentioning <code>Jet.CallMarkRequired</code>: <code>Tests/UI/E0228_take_mark_explains_take.stderr</code>.</p>
+<pre class="diag">Error: Jet.CallMarkRequired: `^^` cannot mark a part of `st`
+  --&gt; Tests/UI/E0228_take_mark_explains_take.jet:19:10
     |
-  3 | grow: fn(items: ^[Int]) { items.push(4) }
-    |                           ^^^^^
- Why: `push: fn(^self, ^^Int)` changes this input, and `#Policy(writes: .Explicit)` writes every change and take at the call
- Fix: Write `^items`
-More: jet-lang.dev/e/Jet.CallMarkRequired
-
-Error: Jet.CallMarkRequired: `grow` changes `xs`, so the call writes `^xs`
-  --&gt; Tests/UI/writes_policy_call_marks.jet:11:10
-    |
- 11 |     grow(xs)
+ 19 |     seal(^^st.buf)
     |          ^^
- Why: `grow: fn(items: ^[Int])` changes this input, and `#Policy(writes: .Explicit)` writes every change and take at the call
- Fix: Write `^xs`
+ Why: `seal: fn(xs: ^^[Int])` takes this input, but a `^^` call mark applies only to a whole named value, not a field or indexed part
+ Fix: Remove `^^`, or write `.move()` on the part if you intend to move it out
 More: jet-lang.dev/e/Jet.CallMarkRequired
 
-Error: Jet.CallMarkRequired: `.push()` changes `xs`, so the call writes `^xs`
-  --&gt; Tests/UI/writes_policy_call_marks.jet:12:5
+Error: Jet.CallMarkRequired: `n` is a copied type, so `take_n` takes no `^^`
+  --&gt; Tests/UI/E0228_take_mark_explains_take.jet:21:12
     |
- 12 |     xs.push(5)
-    |     ^^
- Why: `push: fn(^self, ^^Int)` changes this input, and `#Policy(writes: .Explicit)` writes every change and take at the call
- Fix: Write `^xs`
-More: jet-lang.dev/e/Jet.CallMarkRequired
-
-Error: Jet.CallMarkRequired: `grow` changes `xs`, so its mark is `^`, not `^^`
-  --&gt; Tests/UI/writes_policy_call_marks.jet:13:10
-    |
- 13 |     grow(^^xs)
-    |          ^^
- Why: `grow: fn(items: ^[Int])` changes this input, and `#Policy(writes: .Explicit)` writes every change and take at the call
- Fix: Write `^xs`
-More: jet-lang.dev/e/Jet.CallMarkRequired
-
-Error: Jet.CallMarkRequired: `archive` takes `title`, so the call writes `^^title`
-  --&gt; Tests/UI/writes_policy_call_marks.jet:15:16
-    |
- 15 |     n: archive(title)
-    |                ^^^^^
- Why: `archive: fn(title: ^^String)` takes this input, and `#Policy(writes: .Explicit)` writes every change and take at the call
- Fix: Write `^^title`
-More: jet-lang.dev/e/Jet.CallMarkRequired
-
-Error: Jet.CallMarkRequired: `count` neither changes nor takes `xs`, so it takes no `^`
-  --&gt; Tests/UI/writes_policy_call_marks.jet:16:19
-    |
- 16 |     print(&quot;{count(^xs)} {n}&quot;)
-    |                   ^
- Why: `count: fn(items: [Int])` reads this input; a mark says the call changes or takes the value, so it would tell the reader something false
- Fix: Remove the `^`
+ 21 |     take_n(^^n)
+    |            ^^
+ Why: `take_n: fn(n: ^^Int)` takes this input by value, which copies `n` instead of moving it, so `n` stays usable after the call
+ Fix: Remove the `^^`
 More: jet-lang.dev/e/Jet.CallMarkRequired
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>
