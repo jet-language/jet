@@ -39,6 +39,7 @@ StoreVerification: struct {
                 verified_digest_hash_counts: [String:Int]{},
                 proven_members: [String:Bool]{},
                 planned_narinfos: [String:[String:FetchedInfo]]{},
+                pinned_projections: [String:PooledProjection]{},
             }},
         }
     }
@@ -57,6 +58,9 @@ StoreVerificationState: struct {
     // The signed narinfos the last Nix download plan verified, keyed by
     // `store_nix_planned_key(roots, endpoint)`.
     planned_narinfos: [String:[String:FetchedInfo]],
+    // Refcounted pinned Nix projection handles shared across leases in one
+    // invocation, keyed by canonical projection source path.
+    pinned_projections: [String:PooledProjection],
 }
 
 // The kind of one filesystem node: a sealed Hangar root, a node of an output

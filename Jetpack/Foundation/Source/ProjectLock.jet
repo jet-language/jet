@@ -138,6 +138,24 @@ env_acquire_lease_lock: fn(root: String, scope: String) -[FS, Env, Time]> Runtim
     env_acquire_lock(root, scope)
 }
 
+// Acquire a lease lock and keep only its kernel FileLock descriptor, dropping
+// the directory authority chains once acquisition and validation succeed.
+env_acquire_lease_lock_owner: fn(root: String, scope: String) -[FS, Env, Time]> FileLock IOError! {
+    authority: foundation_open_directory_authority(root, true)
+    opened: env_lock_open_scope(authority, scope)
+    deadline: time.instant() + time.duration_seconds(RUNTIME_LOCK_WAIT_SECONDS)
+    loop {
+        attempt: env_lock_try_owner(opened)
+        if attempt == .Val(owner) -> return Ok(owner.move())
+        remaining: deadline - time.instant()
+        if remaining.ns <= 0 {
+            return Err(IOError.TimedOut(IOContext{operation: .Write, resource: Val(opened.path), os_code: None, cause: Val("timed out waiting for jetpack lock `{opened.path}`")}))
+        }
+        poll: time.duration_ms(RUNTIME_LOCK_POLL_MS)
+        time.sleep(if remaining.ns < poll.ns -> remaining else -> poll)
+    }
+}
+
 // A scope marker is created/opened only below the original retained root.
 env_lock_open_scope: fn(authority: ^^FoundationDirectoryAuthority, scope: String) -[FS]> RuntimeLockScope IOError! {
     marker_parent: authority.child(RUNTIME_LOCK_DIR, true)
