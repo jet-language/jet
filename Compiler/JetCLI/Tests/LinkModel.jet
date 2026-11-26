@@ -1,0 +1,263 @@
+// End-to-end tests for per-part native linkage, canonical `z` package key,
+// `jet inspect choices` linkage reporting, and CLI snapshot parity.
+use {
+    cli_files: core.files
+    cli_process: core.process
+    cli_sys: core.sys
+    jet_cli.[
+        JetCLIChoice,
+        JetCLIForeignSources,
+        JetCLILinkPart,
+        jet_cli_choices_report,
+        jet_cli_closure_libraries,
+        jet_cli_dynamic_link,
+        jet_cli_elf_loader,
+        jet_cli_execute,
+        jet_cli_foreign_canonical_nix_attr,
+        jet_cli_foreign_canonical_pkg_config,
+        jet_cli_front,
+        jet_cli_link_part_mode,
+        jet_cli_link_plan,
+        jet_cli_native_c_sources,
+        jet_cli_native_executable,
+        jet_cli_prepare_overlays,
+        jet_cli_toolchain_root,
+        jet_cli_lowering_inputs,
+    ]
+    jet_driver.[JetDriverCDependency, JetDriverCompileMode, JetDriverForeignDeclaration, JetDriverForeignLinkFacts, JetDriverIceRow, JetDriverInlineC, JetDriverSourceDocument]
+    jet_foundation.[BuildOptionChoice, BuildOptionLayer, build_option_flags, build_options_resolve, build_options_stock, build_options_with_code]
+    jet_pkg_model.[JET_VERSION, WorkspaceDeclarationCache]
+    jet_backend.[LINK_BASE, X64DebugSource, x64_executable_bytes]
+}
+
+link_model_test_root: fn() -> String {
+    if jet_cli_toolchain_root(cli_files.cwd() ?? ".") == {
+        .Found(found) -> found
+        .Missing(what, fix) -> panic("{what}; {fix}")
+    }
+}
+
+link_model_cli_out: fn(args: [String]) -> String {
+    ^discovery: WorkspaceDeclarationCache.new()
+    plan: jet_cli_front(args, discovery)
+    out: jet_cli_execute(plan)
+    assert(out.exit_code == 0, "args={args.join(" ")} exit={out.exit_code} stderr={out.stderr}")
+    out.stdout
+}
+
+#Test("CLI help, man, and completion snapshots match --linkage and --link-parts") {
+    root: link_model_test_root()
+    checks: [{args: [String], file: String}]{
+        {args: [String]{"--help"}, file: "Tests/CLI/help_frequency.txt"},
+        {args: [String]{"--help"}, file: "Tests/Cases/CLIPartsRuntime/help_frequency.txt"},
+        {args: [String]{"help", "--sort", "az"}, file: "Tests/Cases/CLIPartsRuntime/help_az.txt"},
+        {args: [String]{"help", "--all"}, file: "Tests/Cases/CLIPartsRuntime/help_all.txt"},
+        {args: [String]{"build", "--help"}, file: "Tests/Cases/CLIRuntime/help-build.out"},
+        {args: [String]{"run", "--help"}, file: "Tests/Cases/CLIPartsSurface/help_run.txt"},
+        {args: [String]{"self", "man"}, file: "Tests/CLI/man.txt"},
+        {args: [String]{"self", "man"}, file: "Tests/Cases/CLIPartsCommands/man.out"},
+        {args: [String]{"self", "completions", "bash"}, file: "Tests/CLI/completions_bash.txt"},
+        {args: [String]{"self", "completions", "bash"}, file: "Tests/Cases/CLIPartsCommands/completions-bash.out"},
+        {args: [String]{"self", "completions", "fish"}, file: "Tests/CLI/completions_fish.txt"},
+        {args: [String]{"self", "completions", "fish"}, file: "Tests/Cases/CLIPartsCommands/completions-fish.out"},
+        {args: [String]{"self", "completions", "powershell"}, file: "Tests/CLI/completions_powershell.txt"},
+        {args: [String]{"self", "completions", "powershell"}, file: "Tests/Cases/CLIPartsCommands/completions-powershell.out"},
+        {args: [String]{"self", "completions", "zsh"}, file: "Tests/CLI/completions_zsh.txt"},
+        {args: [String]{"self", "completions", "zsh"}, file: "Tests/Cases/CLIPartsCommands/completions-zsh.out"},
+    }
+    loop check in checks {
+        expected: cli_files.read("{root}/{check.file}") ?? panic("read {check.file}: {err}")
+        actual: link_model_cli_out(check.args).replace("{JET_VERSION}-dev", "VERSION").replace(JET_VERSION, "VERSION")
+        assert(actual == expected, "snapshot mismatch on {check.file}")
+    }
+}
+
+#Test("LinkModel choices report renders text and JSON with linkage parts and fn build source") {
+    facts: JetDriverForeignLinkFacts{
+        libraries: [String]{"helper"},
+        direct_links: [String]{"helper"},
+        transitive_links: [String]{},
+        c_or_rust_rows: true,
+        inline_c: [JetDriverInlineC]{},
+        declarations: [JetDriverForeignDeclaration]{},
+    }
+    sources: JetCLIForeignSources{
+        root: "/proj",
+        declarations: [JetDriverCDependency]{JetDriverCDependency{library: "helper", root: "/proj", target: "c"}},
+        libs: [String]{},
+        link_args: [String]{},
+    }
+    code: [BuildOptionChoice]{
+        BuildOptionChoice{
+            name: "link_parts",
+            value: "helper=dynamic",
+            layer: BuildOptionLayer.Code,
+            written: "b.link_parts([\"helper=dynamic\"])",
+            site: "at build.jet:2",
+            pinned: false,
+        },
+    }
+    merged: if build_options_with_code(build_options_stock("build"), code) == {
+        .Resolved(options, _) -> options
+        .Refused(_, what, _) -> panic(what)
+    }
+    parts: if jet_cli_link_plan(facts, sources, merged, None) == {
+        .Planned(planned, dynamic) -> {
+            assert(dynamic)
+            assert_eq(jet_cli_link_part_mode(planned, "helper"), "dynamic")
+            assert_eq(jet_cli_link_part_mode(planned, "libc"), "dynamic")
+            planned
+        }
+        .Refused(_, what, _) -> panic(what)
+    }
+    ^choices: [JetCLIChoice]{}
+    loop part in parts {
+        choices.push(JetCLIChoice{kind: "linkage", file: "", line: 0, function: "{part.part}", choice: "{part.part} = {part.linkage} ({part.source})"})
+    }
+    text: jet_cli_choices_report(choices, "target", "main.jet", "debug", false, parts)
+    assert(text.contains("Linkage: jet.program = static (default: pure Jet)"))
+    assert(text.contains("Linkage: helper = dynamic (`b.link_parts([\"helper=dynamic\"])` at build.jet:2)"))
+    assert(text.contains("Linkage: libc = dynamic (implied by dynamic part `helper`)"))
+    json_out: jet_cli_choices_report(choices, "target", "main.jet", "debug", true, parts)
+    assert(json_out.contains("\"linkage\":["))
+    assert(json_out.contains("\"part\":\"helper\""))
+    assert(json_out.contains("\"linkage\":\"dynamic\""))
+}
+
+#Test("LinkModel end-to-end static, dynamic, fn build override, and canonical z closure across O0/O1/O2") {
+    root: link_model_test_root()
+    jet_bin: cli_sys.get("JET") ?? return
+    ^parts_path: jet_bin.split("/").to_list()
+    ^_: parts_path.pop()
+    runtime_dir: "{parts_path.join("/")}/jet-runtime"
+    if !cli_files.is_file("{runtime_dir}/jet_runtime_jet.o") {
+        return
+    }
+
+    scratch: cli_files.temp_dir("jet-linkmodel-e2e") ?? panic("temp_dir: {err}")
+    work: scratch.path
+
+    // Helper: compile & link one entry under options, returning built path or error message.
+    build_one: fn(entry: String, flag_words: [String], out_name: String) -> {ok: Bool, path: String, err: String} {
+        prepared: jet_cli_prepare_overlays(entry, entry, [JetDriverSourceDocument]{}, false, None, JetDriverCompileMode.Program)
+        if prepared == .Refused(refusal) -> return {ok: false, path: "", err: refusal.stderr}
+        req_and_snap: if prepared == {
+            .Prepared(req, snap) -> {req: req, snap: snap}
+            .Refused(_) -> panic("unreachable")
+        }
+        written: if build_option_flags(flag_words) == {
+            .Resolved(given, _) -> given.written
+            .Refused(_, what, _) -> {
+                return {ok: false, path: "", err: what}
+            }
+        }
+        options: if build_options_resolve("build", "", written) == {
+            .Resolved(opt, _) -> opt
+            .Refused(_, what, _) -> {
+                return {ok: false, path: "", err: what}
+            }
+        }
+        sources: jet_cli_native_c_sources(req_and_snap.snap, options) ?? return {ok: false, path: "", err: err.message}
+        front: jet_cli_lowering_inputs(req_and_snap.req, None)
+        inputs: front.inputs.move() ?? return {ok: false, path: "", err: "no lowering inputs"}
+        ^census: [JetDriverIceRow]{}
+        out_path: "{work}/{out_name}"
+        linked: jet_cli_native_executable(front.compile, inputs, None, sources, options, runtime_dir, out_path, LINK_BASE, census, entry, req_and_snap.snap.roots[0].canonical_path, [String]{}, None, [X64DebugSource]{})
+        if census.len() > 0 -> return {ok: false, path: "", err: "ICE ({census.len()} rows)"}
+        if linked == {
+            .Image(exe) -> {
+                bytes: x64_executable_bytes(exe)
+                cli_files.write_bytes(out_path, bytes) ?? panic("write binary: {err}")
+                cli_files.set_mode(out_path, 0o755) ?? panic("chmod binary: {err}")
+                return {ok: true, path: out_path, err: ""}
+            }
+            .Inputs(_, _) -> return {ok: false, path: "", err: "unexpected link hook inputs"}
+            .Failed(failure) -> {
+                msg: if failure == {
+                    .Foreign(m) -> m
+                    .Runtime(w) -> w
+                    .RuntimeKey(w) -> w
+                    .Write(w) -> w
+                    .NoEntry -> "no entry"
+                    .Faulted -> "faulted"
+                    .RustForeign(_) -> "rust foreign"
+                }
+                return {ok: false, path: "", err: msg}
+            }
+        }
+    }
+
+    // 1. Pure Jet static vs --linkage=dynamic
+    pure_entry: "{root}/Tests/Cases/LinkModel/DefaultsAndOverride.fixture/pure/main.jet"
+    pure_static: build_one(pure_entry, [String]{}, "pure_static")
+    assert(pure_static.ok, "pure static failed: {pure_static.err}")
+    pure_static_elf: jet_cli_elf_loader(cli_files.read_bytes(pure_static.path) ?? panic("read")) ?? panic("elf")
+    assert(!pure_static_elf.dynamic)
+    assert(pure_static_elf.interpreter == None)
+    r1: cli_process.cmd([String]{pure_static.path}).run() ?? panic("run")
+    assert(r1.success)
+    assert_eq(r1.output, "pure-ok\n")
+
+    pure_dyn: build_one(pure_entry, [String]{"--linkage=dynamic"}, "pure_dyn")
+    assert(pure_dyn.ok, "pure dynamic failed: {pure_dyn.err}")
+    pure_dyn_elf: jet_cli_elf_loader(cli_files.read_bytes(pure_dyn.path) ?? panic("read")) ?? panic("elf")
+    assert(pure_dyn_elf.dynamic)
+    assert(pure_dyn_elf.interpreter == Val("/lib64/ld-linux-x86-64.so.2"))
+    assert(pure_dyn_elf.needed.contains("libc.so.6"))
+    r2: cli_process.cmd([String]{pure_dyn.path}).run() ?? panic("run")
+    assert(r2.success)
+    assert_eq(r2.output, "pure-ok\n")
+
+    // 2. Bundled C static default vs per-part dynamic override (libhelper.so)
+    bundled_entry: "{root}/Tests/Cases/LinkModel/DefaultsAndOverride.fixture/bundled/main.jet"
+    b_static: build_one(bundled_entry, [String]{}, "bundled_static")
+    assert(b_static.ok, "bundled static failed: {b_static.err}")
+    b_static_elf: jet_cli_elf_loader(cli_files.read_bytes(b_static.path) ?? panic("read")) ?? panic("elf")
+    assert(!b_static_elf.dynamic)
+    r3: cli_process.cmd([String]{b_static.path}).run() ?? panic("run")
+    assert(r3.success)
+    assert_eq(r3.output, "42\n")
+
+    b_dyn: build_one(bundled_entry, [String]{"--link-parts=helper=dynamic"}, "bundled_dyn")
+    assert(b_dyn.ok, "bundled dynamic failed: {b_dyn.err}")
+    b_dyn_elf: jet_cli_elf_loader(cli_files.read_bytes(b_dyn.path) ?? panic("read")) ?? panic("elf")
+    assert(b_dyn_elf.dynamic)
+    assert(b_dyn_elf.needed.contains("libhelper.so"))
+    assert(b_dyn_elf.needed.contains("libc.so.6"))
+    r4: cli_process.cmd([String]{b_dyn.path}).run() ?? panic("run")
+    assert(r4.success)
+    assert_eq(r4.output, "42\n")
+
+    // 3. Multi-package canonical z closure + -lz across O0, O1, O2
+    app_entry: "{root}/Tests/Cases/LinkModel/NativeClosureFeedsLinker.fixture/app/main.jet"
+    zflag_entry: "{root}/Tests/Cases/LinkModel/NativeClosureFeedsLinker.fixture/z_flag/main.jet"
+    missing_entry: "{root}/Tests/Cases/LinkModel/NativeClosureFeedsLinker.fixture/missing_pkg/main.jet"
+    loop level in ([String]{"-O0", "-O1", "-O2"}) {
+        res_static: build_one(app_entry, [String]{level}, "z_app_{level}")
+        assert(res_static.ok, "z closure {level} failed: {res_static.err}")
+        run_s: cli_process.cmd([String]{res_static.path}).run() ?? panic("run")
+        assert(run_s.success)
+        assert_eq(run_s.output, "37\n")
+
+        res_dyn: build_one(app_entry, [String]{level, "--link-parts=z=dynamic"}, "z_app_dyn_{level}")
+        assert(res_dyn.ok, "z closure dyn {level} failed: {res_dyn.err}")
+        dyn_elf: jet_cli_elf_loader(cli_files.read_bytes(res_dyn.path) ?? panic("read")) ?? panic("elf")
+        assert(dyn_elf.dynamic)
+        assert(dyn_elf.needed.contains("libz.so"))
+        run_d: cli_process.cmd([String]{res_dyn.path}).run() ?? panic("run")
+        assert(run_d.success, "run_d failed code={run_d.code} out={run_d.output} err={run_d.errors}")
+        assert_eq(run_d.output, "37\n")
+
+        res_flag: build_one(zflag_entry, [String]{level, "--link-args=-lz"}, "z_flag_{level}")
+        assert(res_flag.ok, "z flag {level} failed: {res_flag.err}")
+        run_f: cli_process.cmd([String]{res_flag.path}).run() ?? panic("run")
+        assert(run_f.success)
+        assert_eq(run_f.output, "37\n")
+
+        res_miss: build_one(missing_entry, [String]{level}, "miss_{level}")
+        assert(!res_miss.ok, "missing dep must fail")
+        assert(res_miss.err.contains("ghostlib"), "missing error must name ghostlib: {res_miss.err}")
+    }
+
+    cli_files.remove_all(work).drop("cleanup e2e scratch")
+}

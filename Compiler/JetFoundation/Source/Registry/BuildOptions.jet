@@ -146,7 +146,40 @@ JET_BUILD_OPTIONS: #run { [BuildOptionRow]{
     // their image in memory, and a web build writes no linked executable, so
     // each refuses a step (E2104).
     {name: "post_link", kind: BuildOptionKind.Hooks, values: [String]{}, stock_build: "", stock_run: "", removes_check: [String]{}, shapes_image: true, help: "The hooks run on each linked executable, in order, such as tools.sign"},
+    // Whole-program linkage override: auto uses each linked part's default
+    // (pure Jet and bundled C static; OS drivers and system libraries dynamic),
+    // static forces static linkage where possible, and dynamic links the
+    // program dynamically against the platform libc.
+    {name: "linkage", kind: BuildOptionKind.Choice, values: [String]{"auto", "static", "dynamic"}, stock_build: "auto", stock_run: "auto", removes_check: [String]{}, shapes_image: true, help: "Whole-program linkage override: auto, static or dynamic"},
+    // Per-part linkage overrides, each `<part>=static` or `<part>=dynamic`
+    // (such as `helper=dynamic` or `z=static`), overriding the part's default.
+    {name: "link_parts", kind: BuildOptionKind.List, values: [String]{}, stock_build: "", stock_run: "", removes_check: [String]{}, shapes_image: true, help: "Per-part linkage overrides as <part>=static or <part>=dynamic"},
 } }
+
+// OS driver libraries that must load from the host operating system at run
+// time and cannot be forced static.
+build_option_is_os_driver: fn(name: String) -> Bool Never! {
+    if name == {
+        "GL" | "EGL" | "vulkan" | "X11" | "X11-xcb" | "xcb" | "wayland-client" | "wayland-egl" | "wayland-cursor" | "xkbcommon" | "drm" | "gbm" | "asound" | "pulse" | "pipewire-0.3" | "d3d11" | "opengl32" | "kernel32" | "Metal" -> true
+        else -> false
+    }
+}
+
+BuildLinkPartOverride: struct {
+    part: String,
+    linkage: String,
+}
+
+// Parse one `link_parts` entry `<part>=static` or `<part>=dynamic`.
+build_option_link_part_entry: fn(entry: String) -> BuildLinkPartOverride? Never! {
+    split: entry.split("=").to_list()
+    if split.len() != 2 -> return None
+    part: split[0]
+    mode: split[1]
+    if part == "" || part.contains(" ") || part.contains("\t") -> return None
+    if mode != "static" && mode != "dynamic" -> return None
+    Val(BuildLinkPartOverride{part: part, linkage: mode})
+}
 
 // The runtime exports of the checked heap (JetRuntime Alloc.jet): its link
 // entry, which the entry of a `checked_alloc` build calls, and its start-up
@@ -950,6 +983,23 @@ build_options_resolve: fn(command: String, profile: String, written: [BuildOptio
     if values[post_link].value != "" && os.value == "web" {
         return BuildOptionsResolved.Refused{code: "E2104", what: "{build_option_place(values[post_link])} names steps to run on each linked executable, and a web build writes a WebAssembly module, not a linked executable", fix: "drop it, or build for a native target"}
     }
+    linkage: build_option_index("linkage")
+    if values[linkage].value != "auto" && os.value == "web" {
+        return BuildOptionsResolved.Refused{code: "E2104", what: "{build_option_place(values[linkage])} sets native linkage, and a web build writes a WebAssembly module, not a native linked executable", fix: "drop it, or build for a native target"}
+    }
+    link_parts: build_option_index("link_parts")
+    if values[link_parts].value != "" && os.value == "web" {
+        return BuildOptionsResolved.Refused{code: "E2104", what: "{build_option_place(values[link_parts])} sets per-part native linkage, and a web build writes a WebAssembly module, not a native linked executable", fix: "drop it, or build for a native target"}
+    }
+    loop item in build_option_items(values[link_parts].value) {
+        parsed: build_option_link_part_entry(item) ?? return BuildOptionsResolved.Refused{code: "E2104", what: "{build_option_place(values[link_parts])} passes `{item}`, which isn't a `<part>=static` or `<part>=dynamic` linkage override", fix: "write `<part>=static` or `<part>=dynamic`"}
+        if parsed.linkage == "dynamic" && (parsed.part == "jet.program" || parsed.part == "jet.runtime") {
+            return BuildOptionsResolved.Refused{code: "E2104", what: "{build_option_place(values[link_parts])} sets `{parsed.part}` dynamic, and pure Jet executable code links statically", fix: "keep `{parsed.part}` static, or set `libc=dynamic`"}
+        }
+        if parsed.linkage == "static" && build_option_is_os_driver(parsed.part) {
+            return BuildOptionsResolved.Refused{code: "E2104", what: "{build_option_place(values[link_parts])} forces OS driver library `{parsed.part}` static, and OS drivers must load dynamically from the operating system", fix: "drop `{parsed.part}=static`, or set `{parsed.part}=dynamic`"}
+        }
+    }
     BuildOptionsResolved.Resolved{options: BuildOptions{command: command, profile: profile, written: written, values: values}, notes: notes}
 }
 
@@ -1077,5 +1127,43 @@ BUILD_REUSE_SAVED_WORK: false
     if build_option_flags([String]{"--link=relink"}) == {
         .Resolved(_, _) -> { panic("`--link=relink` names no module") }
         .Refused(code, _, _) -> assert_eq(code, "E2104")
+    }
+}
+
+#Test("linkage and link_parts accept valid values and refuse impossible combinations") {
+    assert_eq(build_options_value(build_options_stock("build"), "linkage"), "auto")
+    assert_eq(build_options_value(build_options_stock("build"), "link_parts"), "")
+    if build_option_flags([String]{"--linkage=dynamic", "--link-parts=helper=dynamic", "--link-parts=z=static"}) == {
+        .Resolved(given, _) -> {
+            if build_options_resolve("build", "", given.written) == {
+                .Resolved(options, _) -> {
+                    assert_eq(build_options_value(options, "linkage"), "dynamic")
+                    assert_eq(build_option_items(build_options_value(options, "link_parts")), [String]{"helper=dynamic", "z=static"})
+                }
+                .Refused(_, what, _) -> assert(false, what)
+            }
+        }
+        .Refused(_, what, _) -> assert(false, what)
+    }
+    if build_option_flags([String]{"--link-parts=GL=static"}) == {
+        .Resolved(given, _) -> {
+            if build_options_resolve("build", "", given.written) == {
+                .Resolved(_, _) -> { assert(false, "GL=static must be refused") }
+                .Refused(code, what, _) -> {
+                    assert_eq(code, "E2104")
+                    assert(what.contains("OS driver library `GL`"))
+                }
+            }
+        }
+        .Refused(_, what, _) -> assert(false, what)
+    }
+    if build_option_flags([String]{"--link-parts=badentry"}) == {
+        .Resolved(given, _) -> {
+            if build_options_resolve("build", "", given.written) == {
+                .Resolved(_, _) -> { assert(false, "malformed link_parts must be refused") }
+                .Refused(code, _, _) -> assert_eq(code, "E2104")
+            }
+        }
+        .Refused(_, what, _) -> assert(false, what)
     }
 }

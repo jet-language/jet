@@ -1173,7 +1173,12 @@ jet_cli_native_executable: fn(result: JetDriverCompileResult, inputs: ^^JetDrive
     // refused one reads the pack for it.
     decided: rust_helper == None && sources.libs.len() == 0 && sources.link_args.len() == 0 && (jet_cli_native_c_linked(foreign_link) || foreign_link.inline_c.len() > 0)
     first_facts: if decided -> jet_driver_foreign_link_empty() else -> foreign_link.copy()
-    bind: base == LINK_RUN_BASE
+    ^initial_dynamic: false
+    if jet_cli_link_plan(first_facts, sources, options, rust_helper) == {
+        .Refused(_, what, _) -> return JetCLINativeLinked.Failed{failure: JetCLINativeFailure.Foreign{message: what}}
+        .Planned(_, is_dynamic) -> initial_dynamic = is_dynamic
+    }
+    bind: base == LINK_RUN_BASE && !initial_dynamic
     // A run whose Core is the Core built into this jet binds its Core calls
     // to the Core library's code, which was built from that Core: the
     // image's when the program binds to the image, else jet_core.o's, which
@@ -1190,7 +1195,7 @@ jet_cli_native_executable: fn(result: JetDriverCompileResult, inputs: ^^JetDrive
     // thread realizes it while the object builds.
     if {
         bind && !jet_cli_native_c_linked(first_facts) && first_facts.inline_c.len() == 0 && rust_helper == None && sources.libs.len() == 0 && sources.link_args.len() == 0 -> {
-            realizing: jet_cli_native_foreign_realize(first_facts, rust_helper, sources, runtime_dir, runtime_key, bind)
+            realizing: jet_cli_native_foreign_realize(first_facts, rust_helper, sources, runtime_dir, runtime_key, bind, initial_dynamic)
             closures.push(realizing)
             object: jet_cli_native_object(result, checked, harness, options, runtime_exports, census, file, root, hot, recorded)
             if object.failure == None && trace_sink == .Val(sink) {
@@ -1200,9 +1205,9 @@ jet_cli_native_executable: fn(result: JetDriverCompileResult, inputs: ^^JetDrive
         }
         else -> {
             task.group native_foreign {
-                realizing: task jet_cli_native_foreign_realize(first_facts, rust_helper, sources.copy(), runtime_dir.copy(), runtime_key, bind)
+                realizing: task jet_cli_native_foreign_realize(first_facts, rust_helper, sources.copy(), runtime_dir.copy(), runtime_key, bind, initial_dynamic)
                 // Split-buffer direct handoff skips the flat ELF copy when StaticLink consumes the object directly.
-                object: jet_cli_native_object(result, checked, harness, options, runtime_exports, census, file, root, hot, recorded, !bind && !jet_cli_link_hooked(options))
+                object: jet_cli_native_object(result, checked, harness, options, runtime_exports, census, file, root, hot, recorded, !bind && !initial_dynamic && !jet_cli_link_hooked(options))
                 if object.failure == None && trace_sink == .Val(sink) {
                     sink.begin("native.foreign", "", -1, -1)
                 }
@@ -1271,11 +1276,32 @@ jet_cli_native_executable: fn(result: JetDriverCompileResult, inputs: ^^JetDrive
             runtime = queried.pop() ?? panic("the live symbol query lost the runtime pack")
             object = queried.pop() ?? panic("the live symbol query lost the program object")
             kept: jet_driver_foreign_link_live(foreign_link, live)
-            if jet_cli_native_c_linked(kept) || kept.inline_c.len() > 0 {
-                live_closure: jet_cli_native_foreign_realize(kept, None, sources, runtime_dir, runtime_key, false)
-                closure = live_closure.inputs ?? return JetCLINativeLinked.Failed{failure: JetCLINativeFailure.Foreign{message: live_closure.error}}
-                runtime = live_closure.runtime.move() ?? return JetCLINativeLinked.Failed{failure: JetCLINativeFailure.Runtime{what: live_closure.runtime_error}}
-                runtime_path = live_closure.runtime_path
+            if jet_cli_link_plan(kept, sources, options, None) == {
+                .Refused(_, what, _) -> return JetCLINativeLinked.Failed{failure: JetCLINativeFailure.Foreign{message: what}}
+                .Planned(kept_parts, is_dynamic) -> {
+                    if is_dynamic {
+                        return jet_cli_native_dynamic_finish(object.move(), runtime_dir, runtime_exports.core != None, kept, None, sources, kept_parts, result.command_record)
+                    }
+                    if jet_cli_native_c_linked(kept) || kept.inline_c.len() > 0 {
+                        live_closure: jet_cli_native_foreign_realize(kept, None, sources, runtime_dir, runtime_key, false)
+                        closure = live_closure.inputs ?? return JetCLINativeLinked.Failed{failure: JetCLINativeFailure.Foreign{message: live_closure.error}}
+                        runtime = live_closure.runtime.move() ?? return JetCLINativeLinked.Failed{failure: JetCLINativeFailure.Runtime{what: live_closure.runtime_error}}
+                        runtime_path = live_closure.runtime_path
+                    }
+                }
+            }
+        }
+    }
+    if initial_dynamic {
+        if split_bufs.len() > 0 {
+            object = x64_object_split_flatten(object, split_bufs, split_sec_buf)
+            split_bufs = [[U8]]{}
+            split_sec_buf = [Int]{}
+        }
+        if jet_cli_link_plan(first_facts, sources, options, rust_helper) == {
+            .Refused(_, what, _) -> return JetCLINativeLinked.Failed{failure: JetCLINativeFailure.Foreign{message: what}}
+            .Planned(parts, _) -> {
+                return jet_cli_native_dynamic_finish(object.move(), runtime_dir, runtime_exports.core != None, first_facts, rust_helper, sources, parts, result.command_record)
             }
         }
     }
@@ -1439,19 +1465,25 @@ JetCLIForeignRealized: struct {
 // without one is read whole, as before. A jet that carries its runtime
 // (jet_cli_runtime_embedded) lends its image part, which the loader maps
 // from the jet's own file, and reads no file but that file's part table.
-jet_cli_native_foreign_realize: fn(facts: JetDriverForeignLinkFacts, rust_helper: String?, sources: JetCLIForeignSources, runtime_dir: String, runtime_key: String?, bind: Bool) -[FS, Env, Exec, Time.Wait, FFI.Asm]> JetCLIForeignRealized {
+jet_cli_native_foreign_realize: fn(facts: JetDriverForeignLinkFacts, rust_helper: String?, sources: JetCLIForeignSources, runtime_dir: String, runtime_key: String?, bind: Bool, dynamic_mode: Bool{false}) -[FS, Env, Exec, Time.Wait, FFI.Asm]> JetCLIForeignRealized {
     ^realized: JetCLIForeignRealized{inputs: None, error: "", runtime: None, runtime_path: "", runtime_stamp: [Int]{}, runtime_at: 0, runtime_gap_at: 0, runtime_gap: 0, runtime_error: "", bound: false}
     ^platform: false
     ^no_closure: false
-    if jet_cli_native_c_inputs(facts, rust_helper, sources) == {
-        .Ok(found) -> {
-            platform = found.platform
-            no_closure = found.names.len() == 0
-            realized.inputs = Val(found)
-        }
-        .Err(error) -> {
-            realized.error = error.message
-            return realized
+    if dynamic_mode {
+        platform = true
+        no_closure = true
+        realized.inputs = Val(JetCLIForeignInputs{names: [String]{}, bytes: [[U8]]{}, paths: [String]{}})
+    } else {
+        if jet_cli_native_c_inputs(facts, rust_helper, sources) == {
+            .Ok(found) -> {
+                platform = found.platform
+                no_closure = found.names.len() == 0
+                realized.inputs = Val(found)
+            }
+            .Err(error) -> {
+                realized.error = error.message
+                return realized
+            }
         }
     }
     if runtime_key == None -> return realized
@@ -1486,6 +1518,19 @@ jet_cli_native_foreign_realize: fn(facts: JetDriverForeignLinkFacts, rust_helper
         .Err(err) -> realized.runtime_error = "couldn't read the Jet runtime: {err.message}"
     }
     realized
+}
+
+// Link a dynamically linked native executable from `object`, the Jet-only
+// runtime object, optional Core object, and settled dynamic link plan `parts`.
+jet_cli_native_dynamic_finish: fn(object: ^^[U8], runtime_dir: String, with_core: Bool, facts: JetDriverForeignLinkFacts, rust_helper: String?, sources: JetCLIForeignSources, parts: [JetCLILinkPart], command_record: [U8]) -[FS, Env, Exec, Time.Wait]> JetCLINativeLinked Never! {
+    runtime_obj: jet_cli_runtime_bytes(runtime_dir, JET_CLI_RUNTIME_OBJECT_FILE) ?? return JetCLINativeLinked.Failed{failure: JetCLINativeFailure.Runtime{what: "couldn't read the Jet runtime: {err.message}"}}
+    ^core_obj: [U8]?{None}
+    if with_core {
+        core_bytes: jet_cli_runtime_bytes(runtime_dir, JET_CLI_CORE_OBJECT_FILE) ?? return JetCLINativeLinked.Failed{failure: JetCLINativeFailure.Runtime{what: "couldn't read the Core library object: {err.message}"}}
+        core_obj = Val(core_bytes)
+    }
+    bytes: jet_cli_dynamic_link(object.move(), runtime_obj, core_obj, facts, rust_helper, sources, parts) ?? return JetCLINativeLinked.Failed{failure: JetCLINativeFailure.Foreign{message: err.message}}
+    JetCLINativeLinked.Image{executable: jet_cli_native_with_command(x64_executable_whole(bytes), command_record)}
 }
 
 // The runtime's key, its exports file's bytes (one exported symbol per

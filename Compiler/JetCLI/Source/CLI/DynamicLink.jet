@@ -1,0 +1,399 @@
+// Dynamic ELF linking for native executables that include at least one dynamic
+// part (an OS driver, a system library, or a part overridden to dynamic via
+// `fn build`, a profile, or `--linkage`/`--link-parts`). Static parts (pure
+// Jet, the Jet runtime, bundled C archives, inline C) stay statically linked
+// inside the executable, while dynamic parts link through the platform glibc
+// loader so OS drivers and shared system libraries load at run time.
+use {
+    cli_crypto: core.crypto
+    cli_files: core.files
+    cli_process: core.process
+    cli_sys: core.sys
+    jet_backend.[x64_fault_report_object]
+    jet_driver.[JetDriverForeignLinkFacts]
+    jet_foundation.[BUILD_REUSE_SAVED_WORK]
+}
+
+// The constructor compiled into every dynamically linked Jet executable: it
+// hands glibc's pthread functions to the Jet runtime before `main` runs so
+// tasks and C code share glibc threads and TLS.
+jet_cli_dynamic_threads_c: fn() -> String Never! {
+    lines: [String]{
+        "#include <pthread.h>",
+        "/* Register glibc pthread hooks with the Jet runtime before main. */",
+        "extern void jet_rt_thread_libc(void*, void*, void*, void*, void*, void*);",
+        "__attribute__((constructor)) static void jet_dyn_thread_init(void) {{",
+        "    jet_rt_thread_libc((void*)pthread_create, (void*)pthread_join, (void*)pthread_detach, (void*)pthread_attr_init, (void*)pthread_attr_setstacksize, (void*)pthread_attr_destroy);",
+        "}}",
+    }
+    "{lines.join("\n")}\n"
+}
+
+jet_cli_dynamic_push_unique: fn(items: ^[String], value: String) Never! {
+    if value != "" && !items.contains(value) -> items.push("{value}")
+}
+
+// Probe the C compiler's library search path for `lib<name>.so`.
+jet_cli_foreign_probe_shared: fn(tools: JetCLINativeCTools, name: String) -[Env, Exec, FS, Time.Wait]> String? Never! {
+    ^probe: jet_cli_native_c_argv(tools)
+    probe.push("-print-file-name=lib{name}.so")
+    receipt: cli_process.cmd(probe).run() ?? return None
+    path: receipt.output.trim()
+    if !receipt.success || path == ("lib{name}.so") || !cli_files.is_file(path) -> return None
+    Val(path)
+}
+
+// Compile a local C source directory `directory` into a shared library
+// `lib<lib>.so` under `{cache}/shared/<key>` and return the directory holding
+// that shared library.
+jet_cli_foreign_compile_shared: fn(closure: ^JetCLIClosureCTools, lib: String, directory: String, cache: String) -[FS, Env, Exec, Time.Wait]> String JetCLIForeignLinkError! {
+    jet_cli_native_c_tool_digest(closure) ?? return Err(err)
+    tools: closure.tools
+    flags: [String]{"-std=c11", "-O2", "-fPIC", "-fno-stack-protector", "-fno-asynchronous-unwind-tables", "-fno-unwind-tables", "-D_GNU_SOURCE"}
+    ^paths: [String]{}
+    loop item in cli_files.walk_files(directory, None) {
+        entry: item ?? return Err(jet_cli_foreign_link_error("couldn't read C source directory `{directory}`: {err}"))
+        if entry.path.ends_with(".c") || entry.path.ends_with(".h") -> paths.push(entry.path)
+    }
+    paths = jet_cli_sorted_set(paths)
+    ^sources: [String]{}
+    ^identity: cli_crypto.Hasher.new()
+    jet_cli_native_c_identity(identity, "jet-native-c-shared-v1", tools, closure.tool_digest, flags)
+    loop path in paths {
+        content: cli_files.read_bytes(path) ?? return Err(jet_cli_foreign_link_error("couldn't read C input `{path}`: {err}"))
+        relative: path.removeprefix("{directory}/")
+        jet_cli_foreign_hash_field(identity, relative, content)
+        if path.ends_with(".c") -> sources.push(path)
+    }
+    if sources.len() == 0 {
+        return Err(jet_cli_foreign_link_error("C dependency `{lib}` has neither a shared library nor C sources in `{directory}`"))
+    }
+    ^commands: [[String]]{}
+    loop source in sources {
+        ^argv: jet_cli_native_c_argv(tools)
+        loop flag in flags -> argv.push(flag)
+        loop flag in
+            ([String]{"-ffile-prefix-map={directory}=/jet/c", "-I", directory, "-E", "-P", source}) {
+            argv.push(flag)
+        }
+        commands.push(argv)
+    }
+    ^preprocessed: [String]{}
+    loop (index, outcome) in jet_cli_native_c_run_all(commands) {
+        receipt: outcome.receipt ?? return Err(jet_cli_foreign_link_error("couldn't preprocess C dependency `{lib}`: {outcome.failure}"))
+        if !receipt.success {
+            return Err(jet_cli_foreign_link_error("C compiler rejected `{sources[index]}`: {receipt.errors}"))
+        }
+        jet_cli_foreign_hash_field(identity, "preprocessed", receipt.output.bytes())
+        preprocessed.push(receipt.output)
+    }
+    key: identity.digest()
+    store: "{cache}/shared/{key}"
+    shared_path: "{store}/lib{lib}.so"
+    if BUILD_REUSE_SAVED_WORK && cli_files.is_file(shared_path) -> return Ok(store)
+    cli_files.create_dir_all(store) ?? return Err(jet_cli_foreign_link_error("couldn't create shared C library cache `{store}`: {err}"))
+    temporary: "{store}/build-{cli_sys.pid()}"
+    cli_files.remove_all(temporary).drop("an absent previous shared build directory is expected")
+    cli_files.create_dir_all(temporary) ?? return Err(jet_cli_foreign_link_error("couldn't create C shared build directory: {err}"))
+    ^objects: [String]{}
+    ^compiles: [[String]]{}
+    loop (index, source) in preprocessed {
+        staged_source: "{temporary}/{index}.i"
+        cli_files.write(staged_source, source) ?? return Err(jet_cli_foreign_link_error("couldn't stage preprocessed C source: {err}"))
+        object: "{temporary}/{index}.o"
+        ^argv: jet_cli_native_c_argv(tools)
+        loop flag in flags -> argv.push(flag)
+        loop flag in
+            ([String]{jet_cli_native_c_build_map(temporary), "-c", staged_source, "-o", "{object}"}) {
+            argv.push(flag)
+        }
+        compiles.push(argv)
+        objects.push(object)
+    }
+    loop (index, outcome) in jet_cli_native_c_run_all(compiles) {
+        receipt: outcome.receipt ?? return Err(jet_cli_foreign_link_error("couldn't compile C dependency `{lib}`: {outcome.failure}"))
+        if !receipt.success {
+            return Err(jet_cli_foreign_link_error("C compiler rejected `{sources[index]}`: {receipt.errors}"))
+        }
+    }
+    staged_so: "{temporary}/lib{lib}.so"
+    ^link_argv: jet_cli_native_c_argv(tools)
+    loop word in tools.link_flags {
+        if !word.starts_with("-Wl,--dynamic-linker=") -> link_argv.push("{word}")
+    }
+    link_argv.push("-shared")
+    link_argv.push("-Wl,-soname,lib{lib}.so")
+    loop object in objects -> link_argv.push(object)
+    link_argv.push("-o")
+    link_argv.push("{staged_so}")
+    linked: jet_cli_native_c_command(link_argv).run() ?? return Err(jet_cli_foreign_link_error("couldn't link shared C library `{lib}`: {err}"))
+    if !linked.success {
+        return Err(jet_cli_foreign_link_error("C linker rejected shared library `{lib}`: {linked.errors}"))
+    }
+    cli_files.rename(staged_so, shared_path) ?? return Err(jet_cli_foreign_link_error("couldn't publish shared C library `{lib}`: {err}"))
+    cli_files.remove_all(temporary).drop("cleanup shared build directory")
+    Ok(store)
+}
+
+// Link a dynamically linked x86-64 ELF executable combining static Jet/C parts
+// with dynamic system/OS-driver/overridden shared libraries against glibc.
+jet_cli_dynamic_link: fn(object: [U8], runtime_obj: [U8], core_obj: [U8]?, facts: JetDriverForeignLinkFacts, rust_helper: String?, sources: JetCLIForeignSources, parts: [JetCLILinkPart]) -[FS, Env, Exec, Time.Wait]> [U8] JetCLIForeignLinkError! {
+    tools: jet_cli_native_c_tools() ?? return Err(err)
+    ^closure: JetCLIClosureCTools{tools: tools, platform: [String]{}, proof: [String]{"-shared", "-Wl,--no-undefined"}, tool_digest: ""}
+    root: sources.root
+    cache: "{jet_cli_rust_foreign_cache()}/clinks-glibc"
+    declarations: sources.declarations
+    libraries: jet_cli_closure_libraries(facts, sources)
+    ^link_dirs: [String]{}
+    ^archives: [String]{}
+    loop word in sources.link_args {
+        if {
+            word.starts_with("-L") -> {
+                link_dirs.push(jet_cli_foreign_option_path(root, word.removeprefix("-L")))
+            }
+            word.starts_with("-l") -> {}
+            else -> archives.push(jet_cli_foreign_option_path(root, word))
+        }
+    }
+    ^static_archives: [String]{}
+    ^dyn_lib_dirs: [String]{}
+    ^dyn_rpath_dirs: [String]{}
+    ^dyn_libs: [String]{}
+    loop dir in link_dirs -> jet_cli_dynamic_push_unique(dyn_lib_dirs, "{dir}")
+    loop lib in libraries {
+        if jet_cli_is_libc_family(lib) -> next
+        mode: jet_cli_link_part_mode(parts, lib)
+        ^directories: [String]{}
+        ^declared_system: false
+        loop declaration in declarations {
+            if declaration.library != lib -> next
+            target: declaration.target
+            if target == "system" {
+                declared_system = true
+                next
+            }
+            ^directory: ""
+            if {
+                target.starts_with("nixpkgs:") -> {
+                    directory = jet_cli_foreign_nix_directory(lib, target.removeprefix("nixpkgs:"), declaration.root) ?? return Err(err)
+                }
+                else -> {
+                    directory = cli_files.canonicalize(cli_files.join(declaration.root, target)) ?? return Err(jet_cli_foreign_link_error("couldn't resolve C dependency `{lib}` at `{target}`: {err}"))
+                }
+            }
+            if !directories.contains(directory) -> directories.push(directory)
+        }
+        if directories.len() > 1 {
+            return Err(jet_cli_foreign_link_error("C dependency `{lib}` has conflicting declarations"))
+        }
+        if mode == "static" {
+            if directories.len() > 0 {
+                path: jet_cli_foreign_static_archive(closure, lib, directories, cache, true) ?? return Err(err)
+                jet_cli_dynamic_push_unique(static_archives, path)
+                next
+            }
+            ^found_static: ""
+            loop dir in link_dirs {
+                if found_static == "" && cli_files.is_file("{dir}/lib{lib}.a") {
+                    found_static = "{dir}/lib{lib}.a"
+                }
+            }
+            if found_static != "" {
+                jet_cli_dynamic_push_unique(static_archives, found_static)
+                next
+            }
+            ^pc_out: ""
+            ^pc_ok: false
+            loop pc_name in jet_cli_foreign_canonical_pkg_config(lib) {
+                if pc_ok -> break
+                if cli_process.cmd([String]{"pkg-config", "--static", "--libs", pc_name}).run() == .Ok(receipt) {
+                    if receipt.success {
+                        pc_out = receipt.output
+                        pc_ok = true
+                    }
+                }
+            }
+            if pc_ok {
+                ^pc_dirs: [String]{}
+                ^pc_names: [String]{}
+                loop word in pc_out.replace("\n", " ").replace("\t", " ").split(" ").to_list() {
+                    if word.starts_with("-L") -> pc_dirs.push(word.removeprefix("-L"))
+                    if word.starts_with("-l") -> pc_names.push(word.removeprefix("-l"))
+                }
+                if pc_names.len() == 0 -> pc_names.push("{lib}")
+                loop name in pc_names {
+                    if jet_cli_is_libc_family(name) -> next
+                    path: jet_cli_foreign_static_archive(closure, name, pc_dirs, cache, false) ?? return Err(err)
+                    jet_cli_dynamic_push_unique(static_archives, path)
+                }
+                next
+            }
+            if jet_cli_foreign_static_archive(closure, lib, [String]{}, cache, false) == .Ok(path) {
+                jet_cli_dynamic_push_unique(static_archives, path)
+                next
+            }
+            if declared_system {
+                directory: jet_cli_foreign_nix_directory(lib, jet_cli_foreign_canonical_nix_attr(lib), root) ?? return Err(err)
+                path: jet_cli_foreign_static_archive(closure, lib, [String]{directory}, cache, false) ?? return Err(err)
+                jet_cli_dynamic_push_unique(static_archives, path)
+                next
+            }
+            return Err(jet_cli_foreign_link_error("C static archive `{lib}` was not found"))
+        }
+        // Dynamic resolution for `lib`.
+        if directories.len() > 0 {
+            dir: directories[0]
+            if cli_files.is_file("{dir}/lib{lib}.so") {
+                jet_cli_dynamic_push_unique(dyn_lib_dirs, "{dir}")
+                jet_cli_dynamic_push_unique(dyn_rpath_dirs, "{dir}")
+                jet_cli_dynamic_push_unique(dyn_libs, "{lib}")
+                next
+            }
+            built_dir: jet_cli_foreign_compile_shared(closure, lib, dir, cache) ?? return Err(err)
+            jet_cli_dynamic_push_unique(dyn_lib_dirs, "{built_dir}")
+            jet_cli_dynamic_push_unique(dyn_rpath_dirs, "{built_dir}")
+            jet_cli_dynamic_push_unique(dyn_libs, "{lib}")
+            next
+        }
+        ^found_so_dir: ""
+        loop dir in link_dirs {
+            if found_so_dir == "" && cli_files.is_file("{dir}/lib{lib}.so") {
+                found_so_dir = "{dir}"
+            }
+        }
+        if found_so_dir != "" {
+            jet_cli_dynamic_push_unique(dyn_lib_dirs, "{found_so_dir}")
+            jet_cli_dynamic_push_unique(dyn_rpath_dirs, "{found_so_dir}")
+            jet_cli_dynamic_push_unique(dyn_libs, "{lib}")
+            next
+        }
+        ^pc_out: ""
+        ^pc_ok: false
+        loop pc_name in jet_cli_foreign_canonical_pkg_config(lib) {
+            if pc_ok -> break
+            if cli_process.cmd([String]{"pkg-config", "--libs", pc_name}).run() == .Ok(receipt) {
+                if receipt.success {
+                    pc_out = receipt.output
+                    pc_ok = true
+                }
+            }
+        }
+        if pc_ok {
+            ^pc_names: [String]{}
+            loop word in pc_out.replace("\n", " ").replace("\t", " ").split(" ").to_list() {
+                if word.starts_with("-L") {
+                    dir: word.removeprefix("-L")
+                    jet_cli_dynamic_push_unique(dyn_lib_dirs, "{dir}")
+                    jet_cli_dynamic_push_unique(dyn_rpath_dirs, "{dir}")
+                }
+                if word.starts_with("-l") -> pc_names.push(word.removeprefix("-l"))
+            }
+            if pc_names.len() == 0 -> pc_names.push("{lib}")
+            loop name in pc_names {
+                if !jet_cli_is_libc_family(name) -> jet_cli_dynamic_push_unique(dyn_libs, name)
+            }
+            next
+        }
+        if jet_cli_foreign_probe_shared(tools, lib) == .Val(so_path) {
+            if jet_cli_parent(so_path) == .Val(dir) {
+                jet_cli_dynamic_push_unique(dyn_lib_dirs, "{dir}")
+                jet_cli_dynamic_push_unique(dyn_rpath_dirs, "{dir}")
+            }
+            jet_cli_dynamic_push_unique(dyn_libs, "{lib}")
+            next
+        }
+        if declared_system {
+            dir: jet_cli_foreign_nix_directory(lib, jet_cli_foreign_canonical_nix_attr(lib), root) ?? return Err(err)
+            if !cli_files.is_file("{dir}/lib{lib}.so") {
+                return Err(jet_cli_foreign_link_error("C shared library `{lib}` was not found in `{dir}`"))
+            }
+            jet_cli_dynamic_push_unique(dyn_lib_dirs, "{dir}")
+            jet_cli_dynamic_push_unique(dyn_rpath_dirs, "{dir}")
+            jet_cli_dynamic_push_unique(dyn_libs, "{lib}")
+            next
+        }
+        return Err(jet_cli_foreign_link_error("C dependency `{lib}` was not declared and no shared library `lib{lib}.so` was found"))
+    }
+    loop archive in archives {
+        if !cli_files.is_file(archive) {
+            return Err(jet_cli_foreign_link_error("the `link_args` archive `{archive}` doesn't exist"))
+        }
+        jet_cli_dynamic_push_unique(static_archives, archive)
+    }
+    if rust_helper == .Val(path) -> jet_cli_dynamic_push_unique(static_archives, path)
+    if jet_cli_native_inline_c(closure, facts, cache) == {
+        .Val(archive) -> jet_cli_dynamic_push_unique(static_archives, archive)
+        .None -> {}
+        .Err(error) -> return Err(error)
+    }
+    scratch: cli_files.temp_dir("jet-dynlink") ?? return Err(jet_cli_foreign_link_error("couldn't create dynamic link directory: {err}"))
+    dir: scratch.path
+    prog_path: "{dir}/program.o"
+    rt_path: "{dir}/runtime.o"
+    fault_path: "{dir}/fault.o"
+    threads_path: "{dir}/threads.c"
+    out_path: "{dir}/out"
+    cli_files.write_bytes(prog_path, object) ?? {
+        cli_files.remove_all(dir).drop("cleanup on error")
+        return Err(jet_cli_foreign_link_error("couldn't stage program object for dynamic link: {err}"))
+    }
+    cli_files.write_bytes(rt_path, runtime_obj) ?? {
+        cli_files.remove_all(dir).drop("cleanup on error")
+        return Err(jet_cli_foreign_link_error("couldn't stage runtime object for dynamic link: {err}"))
+    }
+    cli_files.write_bytes(fault_path, x64_fault_report_object()) ?? {
+        cli_files.remove_all(dir).drop("cleanup on error")
+        return Err(jet_cli_foreign_link_error("couldn't stage fault report object for dynamic link: {err}"))
+    }
+    cli_files.write(threads_path, jet_cli_dynamic_threads_c()) ?? {
+        cli_files.remove_all(dir).drop("cleanup on error")
+        return Err(jet_cli_foreign_link_error("couldn't stage dynamic thread init for dynamic link: {err}"))
+    }
+    ^argv: jet_cli_native_c_argv(tools)
+    loop word in tools.link_flags -> argv.push("{word}")
+    argv.push("-no-pie")
+    argv.push("-Wl,--gc-sections")
+    argv.push(prog_path)
+    argv.push(rt_path)
+    argv.push(fault_path)
+    if core_obj == .Val(core_bytes) {
+        core_path: "{dir}/core.o"
+        cli_files.write_bytes(core_path, core_bytes) ?? {
+            cli_files.remove_all(dir).drop("cleanup on error")
+            return Err(jet_cli_foreign_link_error("couldn't stage Core object for dynamic link: {err}"))
+        }
+        argv.push(core_path)
+    }
+    argv.push(threads_path)
+    if static_archives.len() > 0 {
+        argv.push("-Wl,--start-group")
+        loop archive in static_archives -> argv.push(archive)
+        argv.push("-Wl,--end-group")
+    }
+    loop lib_dir in dyn_lib_dirs -> argv.push("-L{lib_dir}")
+    if dyn_rpath_dirs.len() > 0 -> argv.push("-Wl,--disable-new-dtags")
+    loop rpath_dir in dyn_rpath_dirs -> argv.push("-Wl,-rpath,{rpath_dir}")
+    if dyn_libs.len() > 0 {
+        argv.push("-Wl,-Bdynamic")
+        loop name in dyn_libs -> argv.push("-l{name}")
+    }
+    argv.push("-lm")
+    argv.push("-lpthread")
+    argv.push("-ldl")
+    argv.push("-o")
+    argv.push("{out_path}")
+    receipt: jet_cli_native_c_command(argv).run() ?? {
+        cli_files.remove_all(dir).drop("cleanup on error")
+        return Err(jet_cli_foreign_link_error("couldn't run dynamic linker `{tools.compiler}`: {err}"))
+    }
+    if !receipt.success {
+        cli_files.remove_all(dir).drop("cleanup on error")
+        return Err(jet_cli_foreign_link_error("dynamic link failed: {receipt.errors.trim()}"))
+    }
+    bytes: cli_files.read_bytes(out_path) ?? {
+        cli_files.remove_all(dir).drop("cleanup on error")
+        return Err(jet_cli_foreign_link_error("couldn't read dynamically linked executable: {err}"))
+    }
+    cli_files.remove_all(dir).drop("cleanup dynamic link scratch directory")
+    Ok(bytes)
+}

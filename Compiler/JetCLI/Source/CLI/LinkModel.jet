@@ -1,0 +1,334 @@
+// Per-part native linkage model: each linked part has its own linkage (pure
+// Jet and bundled C static; OS drivers and system libraries dynamic), `fn build`
+// and profiles/flags can override any part, and `jet inspect choices` reads the
+// same plan the linker executes.
+use {
+    jet_driver.[JetDriverCDependency, JetDriverForeignLinkFacts, jet_driver_foreign_link_empty]
+    jet_foundation.[
+        BuildOptionChoice,
+        BuildOptionLayer,
+        BuildOptions,
+        build_option_flags,
+        build_option_index,
+        build_option_is_os_driver,
+        build_option_items,
+        build_option_link_part_entry,
+        build_option_place,
+        build_options_resolve,
+        build_options_stock,
+    ]
+}
+
+// Platform libc family names supplied by the static musl archive when every
+// linked part stays static, or by glibc when any part links dynamically.
+jet_cli_is_libc_family: fn(name: String) -> Bool Never! {
+    if name == {
+        "c" | "m" | "pthread" | "dl" | "rt" | "util" -> true
+        else -> false
+    }
+}
+
+// One linked part of a native executable: its name, its classification kind,
+// its resolved linkage (`static` or `dynamic`), and why it has that linkage.
+JetCLILinkPart: struct {
+    part: String,
+    kind: String,
+    linkage: String,
+    source: String,
+}
+
+// The settled linkage plan of a native executable, or why an override is
+// impossible (E2104).
+JetCLILinkPlan: enum {
+    Planned(parts: [JetCLILinkPart], dynamic: Bool),
+    Refused(code: String, what: String, fix: String),
+}
+
+// The canonical pkg-config names to probe for library key `lib`. The canonical
+// `z` package key for `-lz` probes `z` then `zlib`.
+jet_cli_foreign_canonical_pkg_config: fn(lib: String) -> [String] Never! {
+    if lib == "z" -> return [String]{"z", "zlib"}
+    [String]{lib}
+}
+
+// The canonical nixpkgs attribute for a `c@system` fallback of library key
+// `lib`. The canonical `z` package key for `-lz` provisions `zlib`.
+jet_cli_foreign_canonical_nix_attr: fn(lib: String) -> String Never! {
+    if lib == "z" -> return "zlib"
+    "{lib}"
+}
+
+// Whether `declarations` declare `lib` as a bundled local path (any target
+// other than `system`).
+jet_cli_foreign_is_bundled: fn(declarations: [JetDriverCDependency], lib: String) -> Bool Never! {
+    loop declaration in declarations {
+        if declaration.library == lib && declaration.target != "system" -> return true
+    }
+    false
+}
+
+// Every native library name in the program's package and module closure:
+// module-imported C providers (direct and transitive), `libs` and `-l<name>`
+// from `link_args`, plus declared non-libc `c@…` package dependencies from the
+// module closure whenever live C declarations are present.
+jet_cli_closure_libraries: fn(facts: JetDriverForeignLinkFacts, sources: JetCLIForeignSources) -> [String] Never! {
+    ^libraries: [String]{}
+    if {
+        facts.direct_links.len() > 0 -> {
+            loop lib in facts.direct_links -> libraries.push("{lib}")
+        }
+        else -> {
+            loop lib in facts.libraries -> libraries.push("{lib}")
+        }
+    }
+    loop lib in facts.transitive_links -> libraries.push("{lib}")
+    loop lib in sources.libs -> libraries.push("{lib}")
+    loop word in sources.link_args {
+        if word.starts_with("-l") && word.len() > 2 -> libraries.push(word.removeprefix("-l"))
+    }
+    if facts.c_or_rust_rows {
+        loop declaration in sources.declarations {
+            if !jet_cli_is_libc_family(declaration.library) {
+                libraries.push("{declaration.library}")
+            }
+        }
+    }
+    jet_cli_sorted_set(libraries)
+}
+
+// Explicit `.a` archive paths passed in `sources.link_args`.
+jet_cli_closure_archives: fn(sources: JetCLIForeignSources) -> [String] Never! {
+    ^archives: [String]{}
+    loop word in sources.link_args {
+        if !word.starts_with("-L") && !word.starts_with("-l") {
+            archives.push(jet_cli_foreign_option_path(sources.root, word))
+        }
+    }
+    archives
+}
+
+// Layer precedence rank for comparing whole-program `linkage` against per-part
+// `link_parts` overrides.
+jet_cli_link_layer_rank: fn(layer: BuildOptionLayer) -> Int Never! {
+    if layer == {
+        .Stock -> 0
+        .Profile -> 1
+        .Code -> 2
+        .Flag -> 3
+    }
+}
+
+// Look up the last per-part override for `name` in `link_parts_choice`, if any.
+jet_cli_link_part_override: fn(link_parts_choice: BuildOptionChoice, name: String) -> String? Never! {
+    ^found: String?{None}
+    loop item in build_option_items(link_parts_choice.value) {
+        if build_option_link_part_entry(item) == .Val(entry) {
+            if entry.part == name -> found = Val(entry.linkage)
+        }
+    }
+    found
+}
+
+// Resolve one part's linkage and source from its default, the whole-program
+// `linkage` option, and any per-part `link_parts` entry.
+jet_cli_link_resolve_part: fn(part: String, kind: String, default_linkage: String, default_source: String, linkage_choice: BuildOptionChoice, parts_choice: BuildOptionChoice) -> JetCLILinkPart Never! {
+    ^linkage: default_linkage
+    ^source: default_source
+    whole: linkage_choice.value
+    per_part: jet_cli_link_part_override(parts_choice, part)
+    if whole != "auto" {
+        linkage = whole
+        source = build_option_place(linkage_choice)
+    }
+    if per_part == .Val(mode) {
+        if whole == "auto" || jet_cli_link_layer_rank(parts_choice.layer) >= jet_cli_link_layer_rank(linkage_choice.layer) {
+            linkage = mode
+            source = build_option_place(parts_choice)
+        }
+    }
+    JetCLILinkPart{part: part, kind: kind, linkage: linkage, source: source}
+}
+
+// The settled linkage plan for a native executable given checked foreign link
+// facts `facts`, declared package C sources `sources`, resolved `options`, and
+// optional `rust_helper` archive path.
+jet_cli_link_plan: fn(facts: JetDriverForeignLinkFacts, sources: JetCLIForeignSources, options: BuildOptions, rust_helper: String?) -> JetCLILinkPlan Never! {
+    linkage_choice: options.values[build_option_index("linkage")]
+    parts_choice: options.values[build_option_index("link_parts")]
+    ^parts: [JetCLILinkPart]{
+        JetCLILinkPart{part: "jet.program", kind: "pure_jet", linkage: "static", source: "default: pure Jet"},
+        JetCLILinkPart{part: "jet.runtime", kind: "pure_jet", linkage: "static", source: "default: pure Jet"},
+    }
+    libraries: jet_cli_closure_libraries(facts, sources)
+    archives: jet_cli_closure_archives(sources)
+    ^first_dynamic: ""
+    loop lib in libraries {
+        bundled: jet_cli_foreign_is_bundled(sources.declarations, lib)
+        driver: !bundled && build_option_is_os_driver(lib)
+        libc_member: !bundled && jet_cli_is_libc_family(lib)
+        kind: if {
+            bundled -> "bundled_c"
+            driver -> "os_driver"
+            libc_member -> "platform_libc"
+            else -> "system_library"
+        }
+        default_linkage: if bundled || libc_member -> "static" else -> "dynamic"
+        default_source: if {
+            bundled -> "default: bundled C"
+            driver -> "default: OS driver"
+            libc_member -> "default: platform libc"
+            else -> "default: system library"
+        }
+        resolved: jet_cli_link_resolve_part(lib, kind, default_linkage, default_source, linkage_choice, parts_choice)
+        if driver && resolved.linkage == "static" {
+            return JetCLILinkPlan.Refused{
+                code: "E2104",
+                what: "{resolved.source} forces OS driver library `{lib}` static, and OS drivers must load dynamically from the operating system",
+                fix: "drop the static override for `{lib}`, or keep its default dynamic linkage",
+            }
+        }
+        if resolved.linkage == "dynamic" && first_dynamic == "" -> first_dynamic = "{lib}"
+        parts.push(resolved)
+    }
+    loop archive in archives {
+        resolved: jet_cli_link_resolve_part(archive, "bundled_c", "static", "default: bundled C", linkage_choice, parts_choice)
+        if resolved.linkage == "dynamic" && first_dynamic == "" -> first_dynamic = "{archive}"
+        parts.push(resolved)
+    }
+    if facts.inline_c.len() > 0 {
+        parts.push(JetCLILinkPart{part: "jet.inline_c", kind: "bundled_c", linkage: "static", source: "default: bundled C"})
+    }
+    if rust_helper != None {
+        parts.push(JetCLILinkPart{part: "jet.rust_helper", kind: "bundled_c", linkage: "static", source: "default: bundled C"})
+    }
+    has_c_closure: libraries.len() > 0 || archives.len() > 0 || facts.inline_c.len() > 0 || rust_helper != None || facts.c_or_rust_rows
+    libc_override: jet_cli_link_part_override(parts_choice, "libc")
+    whole_dynamic: linkage_choice.value == "dynamic"
+    whole_static: linkage_choice.value == "static"
+    libc_forced_dynamic: libc_override == Val("dynamic") && (!whole_static || jet_cli_link_layer_rank(parts_choice.layer) >= jet_cli_link_layer_rank(linkage_choice.layer))
+    libc_forced_static: libc_override == Val("static") && (!whole_dynamic || jet_cli_link_layer_rank(parts_choice.layer) >= jet_cli_link_layer_rank(linkage_choice.layer))
+    needs_dynamic: first_dynamic != "" || whole_dynamic || libc_forced_dynamic
+    if needs_dynamic && libc_forced_static {
+        return JetCLILinkPlan.Refused{
+            code: "E2104",
+            what: "{build_option_place(parts_choice)} forces `libc` static, which cannot load dynamic part `{if first_dynamic != "" -> first_dynamic else -> "libc"}`",
+            fix: "allow `libc` to link dynamically, or link every library statically",
+        }
+    }
+    if needs_dynamic {
+        // Any platform_libc library promoted by a dynamic program links dynamically with glibc.
+        loop index in 0..<parts.len() {
+            if parts[index].kind == "platform_libc" && parts[index].linkage == "static" {
+                reason: if first_dynamic != "" -> "implied by dynamic part `{first_dynamic}`" else -> build_option_place(if libc_forced_dynamic -> parts_choice else -> linkage_choice)
+                parts[index] = JetCLILinkPart{part: parts[index].part, kind: parts[index].kind, linkage: "dynamic", source: reason}
+            }
+        }
+        libc_source: if {
+            libc_forced_dynamic -> build_option_place(parts_choice)
+            whole_dynamic && first_dynamic == "" -> build_option_place(linkage_choice)
+            first_dynamic != "" -> "implied by dynamic part `{first_dynamic}`"
+            else -> build_option_place(linkage_choice)
+        }
+        parts.push(JetCLILinkPart{part: "libc", kind: "platform_libc", linkage: "dynamic", source: libc_source})
+        return JetCLILinkPlan.Planned{parts: parts, dynamic: true}
+    }
+    if has_c_closure {
+        libc_source: if {
+            libc_forced_static -> build_option_place(parts_choice)
+            whole_static -> build_option_place(linkage_choice)
+            else -> "default: bundled C"
+        }
+        parts.push(JetCLILinkPart{part: "libc", kind: "platform_libc", linkage: "static", source: libc_source})
+    }
+    JetCLILinkPlan.Planned{parts: parts, dynamic: false}
+}
+
+// The resolved linkage of `name` in `parts`, defaulting to `"static"`.
+jet_cli_link_part_mode: fn(parts: [JetCLILinkPart], name: String) -> String Never! {
+    loop row in parts {
+        if row.part == name -> return row.linkage
+    }
+    "static"
+}
+
+#Test("link plan defaults pure Jet and bundled C static and OS drivers and system libraries dynamic") {
+    empty_facts: jet_driver_foreign_link_empty()
+    empty_sources: JetCLIForeignSources{root: "/proj", declarations: [JetDriverCDependency]{}, libs: [String]{}, link_args: [String]{}}
+    stock: build_options_stock("build")
+    if jet_cli_link_plan(empty_facts, empty_sources, stock, None) == {
+        .Planned(parts, dynamic) -> {
+            assert(!dynamic)
+            assert_eq(parts.len(), 2)
+            assert_eq(parts[0].part, "jet.program")
+            assert_eq(parts[0].linkage, "static")
+            assert_eq(parts[1].part, "jet.runtime")
+            assert_eq(parts[1].linkage, "static")
+        }
+        .Refused(_, what, _) -> assert(false, what)
+    }
+    // Bundled C stays static with static libc.
+    bundled_facts: JetDriverForeignLinkFacts{libraries: [String]{"helper"}, direct_links: [String]{"helper"}, transitive_links: [String]{}, c_or_rust_rows: true, inline_c: [JetDriverInlineC]{}, declarations: [JetDriverForeignDeclaration]{}}
+    bundled_sources: JetCLIForeignSources{root: "/proj", declarations: [JetDriverCDependency]{JetDriverCDependency{library: "helper", root: "/proj", target: "c"}}, libs: [String]{}, link_args: [String]{}}
+    if jet_cli_link_plan(bundled_facts, bundled_sources, stock, None) == {
+        .Planned(parts, dynamic) -> {
+            assert(!dynamic)
+            assert_eq(jet_cli_link_part_mode(parts, "helper"), "static")
+            assert_eq(jet_cli_link_part_mode(parts, "libc"), "static")
+        }
+        .Refused(_, what, _) -> assert(false, what)
+    }
+    // System library (canonical z) defaults dynamic and promotes libc to dynamic.
+    sys_facts: JetDriverForeignLinkFacts{libraries: [String]{"z"}, direct_links: [String]{"z"}, transitive_links: [String]{}, c_or_rust_rows: true, inline_c: [JetDriverInlineC]{}, declarations: [JetDriverForeignDeclaration]{}}
+    sys_sources: JetCLIForeignSources{root: "/proj", declarations: [JetDriverCDependency]{JetDriverCDependency{library: "z", root: "/proj", target: "system"}}, libs: [String]{}, link_args: [String]{}}
+    if jet_cli_link_plan(sys_facts, sys_sources, stock, None) == {
+        .Planned(parts, dynamic) -> {
+            assert(dynamic)
+            assert_eq(jet_cli_link_part_mode(parts, "z"), "dynamic")
+            assert_eq(jet_cli_link_part_mode(parts, "libc"), "dynamic")
+        }
+        .Refused(_, what, _) -> assert(false, what)
+    }
+    // Per-part override switches z to static and returns the binary to static.
+    if build_option_flags([String]{"--link-parts=z=static"}) == {
+        .Resolved(given, _) -> {
+            if build_options_resolve("build", "", given.written) == {
+                .Resolved(overridden, _) -> {
+                    if jet_cli_link_plan(sys_facts, sys_sources, overridden, None) == {
+                        .Planned(parts, dynamic) -> {
+                            assert(!dynamic)
+                            assert_eq(jet_cli_link_part_mode(parts, "z"), "static")
+                            assert_eq(jet_cli_link_part_mode(parts, "libc"), "static")
+                        }
+                        .Refused(_, what, _) -> assert(false, what)
+                    }
+                }
+                .Refused(_, what, _) -> assert(false, what)
+            }
+        }
+        .Refused(_, what, _) -> assert(false, what)
+    }
+    // Whole-program --linkage=static refuses an OS driver library.
+    gl_facts: JetDriverForeignLinkFacts{libraries: [String]{"GL"}, direct_links: [String]{"GL"}, transitive_links: [String]{}, c_or_rust_rows: true, inline_c: [JetDriverInlineC]{}, declarations: [JetDriverForeignDeclaration]{}}
+    gl_sources: JetCLIForeignSources{root: "/proj", declarations: [JetDriverCDependency]{JetDriverCDependency{library: "GL", root: "/proj", target: "system"}}, libs: [String]{}, link_args: [String]{}}
+    if build_option_flags([String]{"--linkage=static"}) == {
+        .Resolved(given, _) -> {
+            if build_options_resolve("build", "", given.written) == {
+                .Resolved(forced_static, _) -> {
+                    if jet_cli_link_plan(gl_facts, gl_sources, forced_static, None) == {
+                        .Planned(_, _) -> {
+                            assert(false, "OS driver GL must refuse static linkage")
+                        }
+                        .Refused(code, what, _) -> {
+                            assert_eq(code, "E2104")
+                            assert(what.contains("OS driver library `GL`"))
+                        }
+                    }
+                }
+                .Refused(_, what, _) -> assert(false, what)
+            }
+        }
+        .Refused(_, what, _) -> assert(false, what)
+    }
+    assert_eq(jet_cli_foreign_canonical_pkg_config("z"), [String]{"z", "zlib"})
+    assert_eq(jet_cli_foreign_canonical_nix_attr("z"), "zlib")
+}
