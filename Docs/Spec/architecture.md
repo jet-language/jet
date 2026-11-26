@@ -154,6 +154,11 @@ class and semantic home (enforced by `Tests/Guards/architecture_rows.jet`):
 | `core.files.sealed` | Host | `Core/Files/Sealed.jet` seals and opens whole files with `core.crypto`'s chunk engine, publishing through a private temporary. |
 | `core.game` | Intrinsic | `Core/Game/Game.jet`: scene, replay and backend are compiler-owned handles; the runtime owns frame scheduling and presentation. |
 | `core.git` | Host | `Core/Git/Git.jet` runs git command blocks in a work tree. |
+| `core.grammar` | Jet | `Core/Grammar/Grammar.jet` owns typed grammar definitions, parse trees and checked text-literal lowering. |
+| `core.grammar.error` | Jet | `Core/Grammar/Error.jet` owns grammar parse and compile-time format diagnostics. |
+| `core.grammar.plan` | Jet | `Core/Grammar/Plan.jet` owns compiled grammar rule tables and AST node plans. |
+| `core.grammar.runtime` | Jet | `Core/Grammar/Runtime.jet` executes compiled grammar plans over source text. |
+| `core.grammar.sink` | Jet | `Core/Grammar/Sink.jet` streams grammar parse events into typed builders and printers. |
 | `core.http` | Mixed | `Core/HTTP/HTTP.jet` owns HTTP/1.1 message semantics; the transport leaf is host-bound. |
 | `core.http.client` | Host | `Core/HTTP/Client.jet` owns client configuration and session policy around the transport leaves. |
 | `core.http.server` | Host | `Core/HTTP/Server.jet` serves HTTP/1.1 over `core.net` TCP or `core.net.tls`. |
@@ -165,6 +170,7 @@ class and semantic home (enforced by `Tests/Guards/architecture_rows.jet`):
 | `core.mem.scope` | Namespace | Scoped allocation names the compiler provides; no source declares them. |
 | `core.meta` | Intrinsic | `Core/Meta/Meta.jet` declares the module and package metadata the compiler fills. |
 | `core.mod` | Host | `Core/Mod/Mod.jet` owns loader sequencing and typed refusals; mapping a compiled unit stays native. |
+| `core.net.dtls` | Mixed | `Core/Net/DTLS.jet` owns DTLS 1.2 framing, handshakes, cookies and replay protection over `core.net` UDP and `core.net.tls` crypto. |
 | `core.net.ip` | Jet | `Core/Net/IP.jet` owns IPv4 and IPv6 addresses and CIDR networks. |
 | `core.net.ws` | Host | `Core/Net/Ws.jet` validates the URL and handshake; the provider owns socket I/O and the frame codec. |
 | `core.plugin` | Intrinsic | `Core/Plugin/Plugin.jet` is the WASM Component boundary; the compiler attaches the component interface and `load` is the native route. |

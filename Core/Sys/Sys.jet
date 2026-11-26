@@ -109,7 +109,7 @@ priv __env_snapshot: fn() -> [{name: [U8], value: [U8]}] Never! {
 }
 
 // The task's current working directory for `context.dir`.
-priv __context_dir: fn() -> String Never! {
+priv context_dir_current: fn() -> String Never! {
     if sys_rt.current_dir() == {
         .Ok(path) -> path
         .Err(_) -> ""
@@ -117,7 +117,7 @@ priv __context_dir: fn() -> String Never! {
 }
 
 // The task's effective environment map for `context.env`.
-priv __context_env: fn() -> [String:String] Never! {
+priv context_env_current: fn() -> [String:String] Never! {
     ^found: [String:String]{}
     loop entry in __env_snapshot() {
         name: String.from_bytes(entry.name) ?? next

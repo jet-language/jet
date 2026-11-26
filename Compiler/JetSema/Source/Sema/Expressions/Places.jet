@@ -1032,19 +1032,20 @@ sema_expression_context_allocator: fn(span: Span, expected: Type?, check: ^SemaB
 
 // `context.dir` (`String`) and `context.env` (`[String:String]`): read the
 // current task's working directory and merged environment map through
-// `core.sys.__context_dir` / `core.sys.__context_env`. Like every context read
-// it records no effect row of its own.
+// `core.sys.context_dir_current` / `core.sys.context_env_current`. Like every
+// context read it records no effect row of its own.
 sema_expression_context_sys_field: fn(member: String, span: Span, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
     if !sema_effect_record_intrinsic_effects(check, "context.{member}", span, [EffectRowEntry]{}) {
         return None
     }
     graph: check.program.registration_graph
+    // Snapshot: a lone program loads no core.sys to read context.dir or context.env.
     if graph.mode == .Snapshot -> return None
     identity: sema_call_core_module_identity(check.environment.*, check.program.*, "core.sys") ?? {
         check.diagnostics.push(sema_error("E0906", span, "the core.sys module for `context.{member}` is unavailable", "`context.{member}` reads the task context through `core.sys`", "restore the `core.sys` source module"))
         return None
     }
-    helper: if member == "dir" -> "__context_dir" else -> "__context_env"
+    helper: if member == "dir" -> "context_dir_current" else -> "context_env_current"
     target: sema_call_core_source_target(check.environment.*, check.program.*, identity, helper, [Type]{}, span, true, check.diagnostics) ?? {
         check.diagnostics.push(sema_error("E0906", span, "the core.sys helper `{helper}` for `context.{member}` is unavailable", "`context.{member}` reads the task context through `core.sys`", "restore `core.sys`"))
         return None

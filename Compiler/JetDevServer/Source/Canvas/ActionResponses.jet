@@ -257,19 +257,18 @@ diagnostics_json: fn(path: String, src: String, diags: [Diagnostic]) -> String N
     reports: loop diagnostic in diags -> {
         severity: if diagnostic_is_warning(diagnostic) -> "warning" else -> "error"
         ^file_path: path
-        ^origin_digest: ""
-        if diagnostic.origin == {
+        origin_digest_json: if diagnostic.origin == {
             .Val(origin) -> {
                 if origin.path != "" -> file_path = origin.path
-                origin_digest = origin.revision
+                json_str(origin.revision)
             }
             .None -> {
                 if fallback_digest == "" -> fallback_digest = sha256_hex(src)
-                origin_digest = fallback_digest
+                json_str(fallback_digest)
             }
         }
         origin_path_json: if file_path != "" -> json_str(file_path) else -> "null"
-        origin_json: "\"origin\":{{\"path\":{origin_path_json},\"source_digest\":{json_str(origin_digest)}}}"
+        origin_json: "\"origin\":{{\"path\":{origin_path_json},\"source_digest\":{origin_digest_json}}}"
         position: if diagnostic.span == .Val(span) -> {
             at: diagnostic_source_position(sources, diagnostic.origin, src)
             "\"line\":{diagnostic_source_line(sources.texts[at], span.start)},\"col\":{diagnostic_source_column(sources.texts[at], span.start)},\"span\":{{\"start\":{span.start},\"end\":{span.end}}}"

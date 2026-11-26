@@ -529,12 +529,12 @@ impl ProcessSpec {
     /// Clears all inherited environment variables for the child.
     env_clear: fn(self) -> ProcessSpec Never! { rt.spec_env_clear(self.copy()) }
 
-    /// Caps captured stdout and stderr bytes at `limit`.
+    /// Limits captured stdout and stderr bytes at `limit`.
     output_limit: fn(self, limit: Int) -> ProcessSpec Never! {
         rt.spec_output_limit(self.copy(), limit)
     }
 
-    /// Caps the child's address space at `limit` bytes.
+    /// Limits the child's address space at `limit` bytes.
     memory_limit: fn(self, limit: Int) -> ProcessSpec Never! {
         rt.spec_memory_limit(self.copy(), limit)
     }
@@ -544,7 +544,7 @@ impl ProcessSpec {
         rt.spec_memory_scope(self.copy(), bytes)
     }
 
-    /// Caps the child's open file descriptors at `limit`.
+    /// Limits the child's open file descriptors at `limit`.
     open_file_limit: fn(self, limit: Int) -> ProcessSpec Never! {
         rt.spec_open_file_limit(self.copy(), limit)
     }
@@ -592,12 +592,12 @@ impl ProcessSpec {
         rt.spec_stderr(self.copy(), mode)
     }
 
-    /// Caps the child's wall-clock run time at `limit`.
+    /// Limits the child's wall-clock run time at `limit`.
     timeout: fn(self, limit: Duration) -> ProcessSpec Never! {
         rt.spec_timeout(self.copy(), limit.ns)
     }
 
-    /// Caps the child's CPU time at `limit`.
+    /// Limits the child's CPU time at `limit`.
     cpu_time_limit: fn(self, limit: Duration) -> ProcessSpec Never! {
         rt.spec_cpu_time_limit(self.copy(), limit.ns)
     }
