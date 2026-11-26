@@ -91,15 +91,14 @@ sema_state_types_rewrite_inputs: fn(inputs: ^[SemaRegistrationModuleInput]) Neve
         if repeated[id] -> global.owners[id] = None
     }
     loop index in 0..<inputs.len() {
-        // copy: each input sees the global owners under its own.
-        ^visible: global.copy()
-        loop id in 1..<local[index].owners.len() {
-            owner: local[index].owners[id] ?? next
-            visible.owners[sema_state_types_owner_id(visible, name_text(local[index].names, Name{id: U32{id}}))] = Val(owner)
-        }
-        if !sema_state_types_items_name_owner(inputs[index].program.items, visible) -> next
-        inputs[index].program.items = sema_state_types_rewrite_items(inputs[index].program.items, visible)
+        if !sema_state_types_items_name_owner(inputs[index].program.items, local[index], global) -> next
+        sema_state_types_rewrite_items_in_place(inputs[index].program.items, local[index], global)
     }
+}
+
+priv sema_state_types_visible_owner: fn(local: SemaStateTypeOwners, global: SemaStateTypeOwners, name: String) -> SemaStateTypeOwner? Never! {
+    if sema_state_types_owner_named(local, name) == .Val(owner) -> return Val(owner)
+    sema_state_types_owner_named(global, name)
 }
 
 sema_state_types_collect: fn(items: [Item], owners: ^SemaStateTypeOwners) Never! {
@@ -139,25 +138,25 @@ sema_state_types_group_put: fn(groups: ^[SemaStateTypeGroup], name: String, memb
 
 // Whether any function signature in `items` names a state type, so inputs
 // without one are not copied.
-sema_state_types_items_name_owner: fn(items: [Item], owners: SemaStateTypeOwners) -> Bool Never! {
+sema_state_types_items_name_owner: fn(items: [Item], local: SemaStateTypeOwners, global: SemaStateTypeOwners) -> Bool Never! {
     loop item in items {
         if item == {
             .Func(function) -> {
-                if sema_state_types_fn_names_owner(function, owners) -> return true
+                if sema_state_types_fn_names_owner(function, local, global) -> return true
             }
             .Struct(definition) -> {
                 loop method in definition.methods {
-                    if sema_state_types_fn_names_owner(method, owners) -> return true
+                    if sema_state_types_fn_names_owner(method, local, global) -> return true
                 }
             }
             .Enum(definition) -> {
                 loop method in definition.methods {
-                    if sema_state_types_fn_names_owner(method, owners) -> return true
+                    if sema_state_types_fn_names_owner(method, local, global) -> return true
                 }
             }
             .Impl(implementation) -> {
                 loop method in implementation.methods {
-                    if sema_state_types_fn_names_owner(method, owners) -> return true
+                    if sema_state_types_fn_names_owner(method, local, global) -> return true
                 }
             }
             .Test(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
@@ -166,52 +165,63 @@ sema_state_types_items_name_owner: fn(items: [Item], owners: SemaStateTypeOwners
     false
 }
 
-sema_state_types_fn_names_owner: fn(function: Func, owners: SemaStateTypeOwners) -> Bool Never! {
+sema_state_types_fn_names_owner: fn(function: Func, local: SemaStateTypeOwners, global: SemaStateTypeOwners) -> Bool Never! {
     loop param in function.params {
-        if sema_state_types_split(param.ty, owners) != None -> return true
+        if sema_state_types_split_visible(param.ty, local, global) != None -> return true
     }
     if function.return_type == .Val(ty) {
-        return sema_state_types_split(sema_state_types_success(ty), owners) != None
+        return sema_state_types_split_return(ty, local, global) != None
     }
     false
 }
 
 sema_state_types_rewrite_items: fn(items: [Item], owners: SemaStateTypeOwners) -> [Item] Never! {
-    ^out: [Item]{}
-    loop item in items {
-        if item == {
+    ^updated: items
+    sema_state_types_rewrite_items_in_place(updated, owners, sema_state_types_owners())
+    updated
+}
+
+priv sema_state_types_rewrite_items_in_place: fn(items: ^[Item], local: SemaStateTypeOwners, global: SemaStateTypeOwners) Never! {
+    loop index in 0..<items.len() {
+        ^replacement: Item?{None}
+        if items[index] == {
             .Func(function) -> {
-                out.push(Item.Func{value: sema_state_types_rewrite_fn(function, owners)})
+                if sema_state_types_fn_names_owner(function, local, global) {
+                    replacement = Val(Item.Func{value: sema_state_types_rewrite_fn(function, local, global)})
+                }
             }
             .Struct(definition) -> {
                 ^updated: definition.copy()
-                updated.methods = loop method in definition.methods -> sema_state_types_rewrite_fn(method, owners)
-                out.push(Item.Struct{value: updated})
+                updated.methods = loop method in definition.methods -> sema_state_types_rewrite_fn(method, local, global)
+                replacement = Val(Item.Struct{value: updated})
             }
             .Enum(definition) -> {
                 ^updated: definition.copy()
-                updated.methods = loop method in definition.methods -> sema_state_types_rewrite_fn(method, owners)
-                out.push(Item.Enum{value: updated})
+                updated.methods = loop method in definition.methods -> sema_state_types_rewrite_fn(method, local, global)
+                replacement = Val(Item.Enum{value: updated})
             }
             .Impl(implementation) -> {
                 ^updated: implementation.copy()
-                updated.methods = loop method in implementation.methods -> sema_state_types_rewrite_fn(method, owners)
-                out.push(Item.Impl{value: updated})
+                updated.methods = loop method in implementation.methods -> sema_state_types_rewrite_fn(method, local, global)
+                replacement = Val(Item.Impl{value: updated})
             }
-            .Test(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {
-                out.push(item.copy())
-            }
+            .Test(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
+        sema_state_types_replace_item(items, index, replacement.move())
     }
-    out
 }
 
-sema_state_types_rewrite_fn: fn(function: Func, owners: SemaStateTypeOwners) -> Func Never! {
+priv sema_state_types_replace_item: fn(items: ^[Item], index: Int, replacement: ^^Item?) Never! {
+    updated: replacement ?? return
+    items[index] = updated
+}
+
+sema_state_types_rewrite_fn: fn(function: Func, local: SemaStateTypeOwners, global: SemaStateTypeOwners) -> Func Never! {
     ^updated: function
     ^params: [Param]{}
     loop position in 0..<function.params.len() {
         ^param: function.params[position]
-        if sema_state_types_split(param.ty, owners) == .Val(found) {
+        if sema_state_types_split_visible(param.ty, local, global) == .Val(found) {
             updated.state_types.push(StateTypeUse{position: position, owner: found.owner, states: found.states, span: param.ty_span})
             param.ty = Type.Named{name: found.owner}
         }
@@ -219,7 +229,7 @@ sema_state_types_rewrite_fn: fn(function: Func, owners: SemaStateTypeOwners) -> 
     }
     updated.params = params.move()
     if function.return_type == .Val(ty) {
-        if sema_state_types_split(sema_state_types_success(ty), owners) == .Val(found) {
+        if sema_state_types_split_return(ty, local, global) == .Val(found) {
             span: function.return_type_span ?? function.name_span
             updated.state_types.push(StateTypeUse{position: -1, owner: found.owner, states: found.states, span: span})
             plain: Type.Named{name: found.owner}
@@ -230,9 +240,9 @@ sema_state_types_rewrite_fn: fn(function: Func, owners: SemaStateTypeOwners) -> 
 }
 
 // The success type of a result: `Order.Draft` in `Order.Draft E!`.
-sema_state_types_success: fn(ty: Type) -> Type Never! {
-    if ty == .Result(ok, _) -> return ok.copy()
-    ty.copy()
+priv sema_state_types_split_return: fn(ty: Type, local: SemaStateTypeOwners, global: SemaStateTypeOwners) -> SemaStateTypeFound? Never! {
+    if ty == .Result(ok, _) -> return sema_state_types_split_visible(ok, local, global)
+    sema_state_types_split_visible(ty, local, global)
 }
 
 // The owner and states a state type names.
@@ -246,11 +256,15 @@ SemaStateTypeFound: struct {
 // one of the same owner. A group expands to its members; a name that is
 // neither a state nor a group is kept as written.
 sema_state_types_split: fn(ty: Type, owners: SemaStateTypeOwners) -> SemaStateTypeFound? Never! {
+    sema_state_types_split_visible(ty, owners, sema_state_types_owners())
+}
+
+priv sema_state_types_split_visible: fn(ty: Type, local: SemaStateTypeOwners, global: SemaStateTypeOwners) -> SemaStateTypeFound? Never! {
     if ty == .Named(name) {
         parts: name.split(".").to_list()
         if parts.len() < 2 -> return None
         owner_name: (loop index in 0..<(parts.len() - 1) -> parts[index]).join(".")
-        owner: sema_state_types_owner_named(owners, owner_name) ?? return None
+        owner: sema_state_types_visible_owner(local, global, owner_name) ?? return None
         ^states: [String]{}
         sema_state_types_expand(owner, parts[parts.len() - 1], states)
         return Val(SemaStateTypeFound{owner: owner_name, states: states})
@@ -260,7 +274,7 @@ sema_state_types_split: fn(ty: Type, owners: SemaStateTypeOwners) -> SemaStateTy
         ^owner_name: ""
         ^states: [String]{}
         loop member in members {
-            found: sema_state_types_split(member, owners) ?? return None
+            found: sema_state_types_split_visible(member, local, global) ?? return None
             if owner_name != "" && owner_name != found.owner -> return None
             owner_name = found.owner
             loop state in found.states {

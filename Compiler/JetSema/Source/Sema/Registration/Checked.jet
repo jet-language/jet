@@ -864,135 +864,152 @@ sema_checked_foreign_handle_source_matches: fn(handles: [SemaCheckedForeignHandl
     false
 }
 
-sema_checked_foreign_nominal_type: fn(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal, c_abi: Bool, generated: Bool, handles: [SemaCheckedForeignHandle], seen: [SymbolID]) -> Bool Never! {
-    key: nominal.symbol.id
-    if sema_checked_foreign_seen(seen, key) -> return false
-    ^next_seen: seen
-    next_seen.push(key.copy())
+priv sema_checked_foreign_nominal_type_seen: fn(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal, c_abi: Bool, generated: Bool, handles: [SemaCheckedForeignHandle], seen: ^[U32]) -> Bool Never! {
+    key: nominal.symbol.id.id
+    if seen.contains(key) -> return false
+    seen.push(key)
     nominal_module: nominal.symbol.module_identity
-    if nominal.source == {
+    valid: if nominal.source == {
         .CompilerBuiltinTrait(_) -> false
         .ForeignHandle(facts) -> c_abi && sema_checked_foreign_handle_source_matches(handles, facts)
         .SourceAST(item) -> if item == {
             .Struct(definition) -> {
-                if c_abi && !sema_checked_foreign_struct_c_layout(definition.layout) -> return false
-                loop field in definition.fields {
-                    if !sema_checked_foreign_type(graph, field.ty, nominal_module, c_abi, generated, handles, next_seen) {
-                        return false
-                    }
+                if c_abi && !sema_checked_foreign_struct_c_layout(definition.layout) -> false else -> {
+                    loop field in definition.fields {
+                        if !sema_checked_foreign_type_seen(graph, field.ty, nominal_module, c_abi, generated, handles, seen) {
+                            break false
+                        }
+                    } ?? true
                 }
-                true
             }
             .Enum(definition) -> {
-                if c_abi && jet_target_layout_enum_c_tag(definition) == None -> return false
-                payload_handles: if c_abi -> [SemaCheckedForeignHandle]{} else -> handles
-                payload_generated: if c_abi -> false else -> generated
-                loop variant in definition.variants {
-                    if variant.payload == {
-                        .Single(ty, _) -> {
-                            if !sema_checked_foreign_type(graph, ty, nominal_module, c_abi, payload_generated, payload_handles, next_seen) {
-                                return false
-                            }
-                        }
-                        .Named(fields) -> {
-                            loop field in fields {
-                                if !sema_checked_foreign_type(graph, field.ty, nominal_module, c_abi, payload_generated, payload_handles, next_seen) {
-                                    return false
+                if c_abi && jet_target_layout_enum_c_tag(definition) == None -> false else -> {
+                    payload_handles: if c_abi -> [SemaCheckedForeignHandle]{} else -> handles
+                    payload_generated: if c_abi -> false else -> generated
+                    loop variant in definition.variants {
+                        ok: if variant.payload == {
+                            .Single(ty, _) -> sema_checked_foreign_type_seen(graph, ty, nominal_module, c_abi, payload_generated, payload_handles, seen)
+                            .Named(fields) -> (loop field in fields {
+                                if !sema_checked_foreign_type_seen(graph, field.ty, nominal_module, c_abi, payload_generated, payload_handles, seen) {
+                                    break false
                                 }
-                            }
+                            } ?? true)
+                            .Unit -> true
                         }
-                        .Unit -> {}
-                    }
+                        if !ok -> break false
+                    } ?? true
                 }
-                true
             }
-            .Distinct(definition) -> sema_checked_foreign_type(graph, definition.base, nominal_module, c_abi, generated, handles, next_seen)
-            .TypeAlias(definition) -> sema_checked_foreign_type(graph, definition.target, nominal_module, c_abi, generated, handles, next_seen)
+            .Distinct(definition) -> sema_checked_foreign_type_seen(graph, definition.base, nominal_module, c_abi, generated, handles, seen)
+            .TypeAlias(definition) -> sema_checked_foreign_type_seen(graph, definition.target, nominal_module, c_abi, generated, handles, seen)
             .Func(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> false
         }
     }
+    ^_: seen.pop()
+    valid
+}
+
+sema_checked_foreign_nominal_type: fn(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal, c_abi: Bool, generated: Bool, handles: [SemaCheckedForeignHandle], seen: [SymbolID]) -> Bool Never! {
+    ^seen_ids: loop entry in seen -> entry.id
+    sema_checked_foreign_nominal_type_seen(graph, nominal, c_abi, generated, handles, seen_ids)
 }
 
 sema_checked_foreign_builtin_type: fn(name: String) -> Bool Never! {
     name == "Int" || name == "Float" || name == "Bool" || name == "String" || name == "Char" || name == "I8" || name == "I16" || name == "I32" || name == "I64" || name == "U8" || name == "U16" || name == "U32" || name == "U64" || name == "F32"
 }
 
-sema_checked_foreign_type: fn(graph: SemaRegistrationGraph, ty: Type, caller_module: ModuleID, c_abi: Bool, generated: Bool, handles: [SemaCheckedForeignHandle], seen: [SymbolID]) -> Bool Never! {
+priv sema_checked_foreign_type_seen: fn(graph: SemaRegistrationGraph, ty: Type, caller_module: ModuleID, c_abi: Bool, generated: Bool, handles: [SemaCheckedForeignHandle], seen: ^[U32]) -> Bool Never! {
     qualified: sema_checked_qualify_type(graph, ty, caller_module)
     if qualified == {
         .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 -> true
         .List(inner) -> if {
-            !c_abi -> sema_checked_foreign_type(graph, inner, caller_module, c_abi, generated, handles, seen)
+            !c_abi -> sema_checked_foreign_type_seen(graph, inner, caller_module, c_abi, generated, handles, seen)
             !generated -> false
-            else -> sema_checked_foreign_type(graph, inner, caller_module, c_abi, false, handles, seen)
+            else -> sema_checked_foreign_type_seen(graph, inner, caller_module, c_abi, false, handles, seen)
         }
-        .Option(inner) | .FixedList(inner, _) -> !c_abi && sema_checked_foreign_type(graph, inner, caller_module, c_abi, generated, handles, seen)
-        .Map(key, _, value) -> !c_abi && sema_checked_foreign_type(graph, key, caller_module, c_abi, generated, handles, seen) && sema_checked_foreign_type(graph, value, caller_module, c_abi, generated, handles, seen)
-        .Result(ok, err) -> !c_abi && sema_checked_foreign_type(graph, ok, caller_module, c_abi, generated, handles, seen) && sema_checked_foreign_type(graph, err, caller_module, c_abi, generated, handles, seen)
+        .Option(inner) | .FixedList(inner, _) -> !c_abi && sema_checked_foreign_type_seen(graph, inner, caller_module, c_abi, generated, handles, seen)
+        .Map(key, _, value) -> !c_abi && sema_checked_foreign_type_seen(graph, key, caller_module, c_abi, generated, handles, seen) && sema_checked_foreign_type_seen(graph, value, caller_module, c_abi, generated, handles, seen)
+        .Result(ok, err) -> !c_abi && sema_checked_foreign_type_seen(graph, ok, caller_module, c_abi, generated, handles, seen) && sema_checked_foreign_type_seen(graph, err, caller_module, c_abi, generated, handles, seen)
         .Shared(_) -> false
         .Fn(params, ret, effects, _, _, _) -> {
             if !c_abi -> return false
             bound: effects ?? return false
             if bound.len() != 0 -> return false
             loop parameter in params {
-                if !sema_checked_foreign_type(graph, parameter, caller_module, c_abi, generated, handles, seen) {
+                if !sema_checked_foreign_type_seen(graph, parameter, caller_module, c_abi, generated, handles, seen) {
                     return false
                 }
             }
-            if ret == .Val(returned) -> sema_checked_foreign_type(graph, returned, caller_module, c_abi, generated, handles, seen) else -> true
+            if ret == .Val(returned) -> sema_checked_foreign_type_seen(graph, returned, caller_module, c_abi, generated, handles, seen) else -> true
         }
-        .Apply(name, args) -> c_abi && name == "Ptr" && args.len() == 1 && sema_checked_foreign_type(graph, args[0], caller_module, c_abi, false, handles, seen)
+        .Apply(name, args) -> c_abi && name == "Ptr" && args.len() == 1 && sema_checked_foreign_type_seen(graph, args[0], caller_module, c_abi, false, handles, seen)
         .Named(name) -> {
             if sema_checked_foreign_builtin_type(name) -> return true
             nominal_row: sema_type_resolve_nominal_row(graph, qualified, caller_module) ?? return false
-            sema_checked_foreign_nominal_type(graph, graph.modules[nominal_row.module_index].nominals[nominal_row.row], c_abi, generated, handles, seen)
+            sema_checked_foreign_nominal_type_seen(graph, graph.modules[nominal_row.module_index].nominals[nominal_row.row], c_abi, generated, handles, seen)
         }
-        .Tagged(_, inner) -> sema_checked_foreign_type(graph, inner, caller_module, c_abi, generated, handles, seen)
-        .InlineRange(base, _, _) -> sema_checked_foreign_type(graph, base, caller_module, c_abi, generated, handles, seen)
+        .Tagged(_, inner) -> sema_checked_foreign_type_seen(graph, inner, caller_module, c_abi, generated, handles, seen)
+        .InlineRange(base, _, _) -> sema_checked_foreign_type_seen(graph, base, caller_module, c_abi, generated, handles, seen)
         .TraitObject(_) | .Tuple(_) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
+}
+
+sema_checked_foreign_type: fn(graph: SemaRegistrationGraph, ty: Type, caller_module: ModuleID, c_abi: Bool, generated: Bool, handles: [SemaCheckedForeignHandle], seen: [SymbolID]) -> Bool Never! {
+    ^seen_ids: loop entry in seen -> entry.id
+    sema_checked_foreign_type_seen(graph, ty, caller_module, c_abi, generated, handles, seen_ids)
 }
 
 // Whether a C function may take `^ty` as the address of the Jet value's own
 // bytes: a struct, of any layout, whose stored fields are machine integers,
 // floats, Bools or such structs. A C declaration that follows the struct's
 // `$layout` reads and writes those bytes in place.
-sema_checked_foreign_by_reference_struct: fn(graph: SemaRegistrationGraph, ty: Type, caller_module: ModuleID, seen: [SymbolID]) -> Bool Never! {
+priv sema_checked_foreign_by_reference_struct_seen: fn(graph: SemaRegistrationGraph, ty: Type, caller_module: ModuleID, seen: ^[U32]) -> Bool Never! {
     qualified: sema_checked_qualify_type(graph, ty, caller_module)
     nominal_row: sema_type_resolve_nominal_row(graph, qualified, caller_module) ?? return false
     if graph.modules[nominal_row.module_index].nominals[nominal_row.row].kind != SemaRegistrationNominalKind.Struct {
         return false
     }
     nominal: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
-    key: nominal.symbol.id
-    if sema_checked_foreign_seen(seen, key) -> return false
-    ^next_seen: seen
-    next_seen.push(key.copy())
+    key: nominal.symbol.id.id
+    if seen.contains(key) -> return false
+    seen.push(key)
+    ^valid: false
     if nominal.source == .SourceAST(item) {
         if item == .Struct(definition) {
-            if definition.type_params.len() > 0 -> return false
-            loop field in definition.fields {
-                if field.computed != None -> next
-                if !sema_checked_foreign_by_reference_field(graph, field.ty, nominal.symbol.module_identity, next_seen) {
-                    return false
-                }
+            if definition.type_params.len() == 0 {
+                valid = loop field in definition.fields {
+                    if field.computed != None -> next
+                    if !sema_checked_foreign_by_reference_field_seen(graph, field.ty, nominal.symbol.module_identity, seen) {
+                        break false
+                    }
+                } ?? true
             }
-            return true
         }
     }
-    false
+    ^_: seen.pop()
+    valid
 }
 
-sema_checked_foreign_by_reference_field: fn(graph: SemaRegistrationGraph, ty: Type, caller_module: ModuleID, seen: [SymbolID]) -> Bool Never! {
+sema_checked_foreign_by_reference_struct: fn(graph: SemaRegistrationGraph, ty: Type, caller_module: ModuleID, seen: [SymbolID]) -> Bool Never! {
+    ^seen_ids: loop entry in seen -> entry.id
+    sema_checked_foreign_by_reference_struct_seen(graph, ty, caller_module, seen_ids)
+}
+
+priv sema_checked_foreign_by_reference_field_seen: fn(graph: SemaRegistrationGraph, ty: Type, caller_module: ModuleID, seen: ^[U32]) -> Bool Never! {
     if sema_checked_qualify_type(graph, ty, caller_module) == {
         .IntN(_, bits) -> bits == 8 || bits == 16 || bits == 32 || bits == 64
         .Float | .Float32 | .Bool -> true
         .Named(name) -> if name == {
             "I8" | "I16" | "I32" | "I64" | "U8" | "U16" | "U32" | "U64" | "Float" | "F64" | "F32" | "Bool" -> true
-            else -> sema_checked_foreign_by_reference_struct(graph, ty, caller_module, seen)
+            else -> sema_checked_foreign_by_reference_struct_seen(graph, ty, caller_module, seen)
         }
         .Int | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
+}
+
+sema_checked_foreign_by_reference_field: fn(graph: SemaRegistrationGraph, ty: Type, caller_module: ModuleID, seen: [SymbolID]) -> Bool Never! {
+    ^seen_ids: loop entry in seen -> entry.id
+    sema_checked_foreign_by_reference_field_seen(graph, ty, caller_module, seen_ids)
 }
 
 // What a call of the C import registered under `target` asks the native

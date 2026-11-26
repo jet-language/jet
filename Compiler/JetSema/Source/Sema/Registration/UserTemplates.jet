@@ -891,7 +891,8 @@ sema_user_rule_collect_module: fn(graph: SemaRegistrationGraph, module_index: In
         span: fact.target ?? next
         if span.start < 0 || span.end < span.start || span.end > source_bytes.len() -> next
         from_ty: String.from_bytes(source_bytes[span.start..<span.end]) ?? next
-        sema_user_rule_collect_impl(graph, module_index, from_ty, [Marker]{fact.marker.copy()}, generated, diagnostics)
+        ^type_info: CtValue?{None}
+        sema_user_rule_collect_impl_marker(graph, module_index, from_ty, fact.marker, type_info, generated, diagnostics)
     }
     // A `.Block` rule receives the text inside Jet's closed braces as its
     // `target` value. The rule body can check that text and emit ordinary Jet
@@ -1136,25 +1137,29 @@ sema_user_template_handle: fn(kind: String, name: String) -> CtValue Never! {
     CtValue.Struct{type_name: kind, fields: [NamedCtValue]{NamedCtValue{name: "name", value: CtValue.Str{value: name}}}}
 }
 
+priv sema_user_rule_collect_impl_marker: fn(graph: SemaRegistrationGraph, module_index: Int, type_name: String, marker: Marker, type_info: ^CtValue?, generated: ^[Item], diagnostics: ^[Diagnostic]) {
+    if marker.negated -> return
+    items: graph.modules[module_index].program.items
+    rule: sema_user_rule_body(graph, graph.modules[module_index].module_identity, marker) ?? return
+    if type_info == None {
+        type_info = sema_user_template_type_info(graph, module_index, type_name)
+        if type_info == None {
+            type_info = Val(sema_user_template_handle("TypeInfo", type_name))
+        }
+    }
+    info: type_info ?? return
+    expanded: sema_derive_expand_rule_body(rule.body, "target", info, Val(rule.receiver), rule.reports, Val(marker.span), rule.definition_module, diagnostics, rule.origin, rule.reserved_pastes) ?? return
+    if !sema_user_rule_row_admits(rule, marker.name, marker.span, expanded, diagnostics) -> return
+    sema_user_rule_accept(items, marker.name, Val(type_name), marker.span, expanded.move(), generated, diagnostics)
+}
+
 // One impl's markers: each rule body runs over the implementing type's
 // TypeInfo, or over a handle naming the type when the type has no
 // registered declaration here (`impl String -> Err`).
 sema_user_rule_collect_impl: fn(graph: SemaRegistrationGraph, module_index: Int, type_name: String, markers: [Marker], generated: ^[Item], diagnostics: ^[Diagnostic]) {
-    items: graph.modules[module_index].program.items
     ^type_info: CtValue?{None}
     loop marker in markers {
-        if marker.negated -> next
-        rule: sema_user_rule_body(graph, graph.modules[module_index].module_identity, marker) ?? next
-        if type_info == None {
-            type_info = sema_user_template_type_info(graph, module_index, type_name)
-            if type_info == None {
-                type_info = Val(sema_user_template_handle("TypeInfo", type_name))
-            }
-        }
-        info: type_info ?? next
-        expanded: sema_derive_expand_rule_body(rule.body, "target", info, Val(rule.receiver), rule.reports, Val(marker.span), rule.definition_module, diagnostics, rule.origin, rule.reserved_pastes) ?? next
-        if !sema_user_rule_row_admits(rule, marker.name, marker.span, expanded, diagnostics) -> next
-        sema_user_rule_accept(items, marker.name, Val(type_name), marker.span, expanded.move(), generated, diagnostics)
+        sema_user_rule_collect_impl_marker(graph, module_index, type_name, marker, type_info, generated, diagnostics)
     }
 }
 
@@ -1219,33 +1224,27 @@ sema_user_text_block_source: fn(source: String, body: [Stmt], block_spans: [Span
     String.from_bytes(bytes[span.start..<span.end]) ?? ""
 }
 
-sema_user_text_statement_bodies: fn(statement: Stmt) -> [[Stmt]] Never! {
-    if statement == {
-        .Switch(_, arms, else_body, _) | .ComptimeSwitch(_, arms, else_body, _) -> {
-            ^bodies: [[Stmt]]{}
-            loop arm in arms -> bodies.push(arm.body)
-            if else_body == .Val(body) -> bodies.push(body.copy())
-            bodies
-        }
-        .ComptimeIf(_, _, then_body, else_body, _, _) -> {
-            ^bodies: [[Stmt]]{then_body}
-            if else_body == .Val(body) -> bodies.push(body.copy())
-            bodies
-        }
-        .While(_, body, _, _, _) | .For(_, _, _, _, body, _, _, _, _) | .Loop(body, _, _, _) | .CountedLoop(_, _, _, body, _, _, _) | .Unsafe(_, _, body, _) | .Impure(_, _, body, _) | .Reactive(body, _) | .Shield(body, _) | .Defer(body, _) | .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .ComptimeBlock(body, _, _) | .ContextBlock(_, body, _) | .Live(body, _) | .AssumeDet(_, _, body, _) | .Transact(_, _, body, _, _) | .ScopeMember(_, _, _, _, body, _, _, _) -> [[Stmt]]{body}
-        .Expr(_) | .Val(_) | .Assign(_, _, _, _) | .Return(_, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Yield(_, _) | .DeferClose(_, _) -> [[Stmt]]{}
-    }
-}
-
 sema_user_text_blocks_in: fn(statements: [Stmt], source: String, block_spans: [Span], blocks: ^[SemaUserTextBlock]) {
     loop statement in statements {
-        if statement == .ScopeMember(name, name_span, _, _, body, dsl, hash_span, span) {
-            if dsl {
-                blocks.push(SemaUserTextBlock{name: name, text: sema_user_text_block_source(source, body, block_spans, span), span: span, site: Span{start: hash_span.start, end: name_span.end}})
+        if statement == {
+            .ScopeMember(name, name_span, _, _, body, dsl, hash_span, span) -> {
+                if dsl {
+                    blocks.push(SemaUserTextBlock{name: name, text: sema_user_text_block_source(source, body, block_spans, span), span: span, site: Span{start: hash_span.start, end: name_span.end}})
+                }
+                sema_user_text_blocks_in(body, source, block_spans, blocks)
             }
-        }
-        loop child in sema_user_text_statement_bodies(statement) {
-            sema_user_text_blocks_in(child, source, block_spans, blocks)
+            .Switch(_, arms, else_body, _) | .ComptimeSwitch(_, arms, else_body, _) -> {
+                loop arm in arms -> sema_user_text_blocks_in(arm.body, source, block_spans, blocks)
+                if else_body == .Val(body) -> sema_user_text_blocks_in(body, source, block_spans, blocks)
+            }
+            .ComptimeIf(_, _, then_body, else_body, _, _) -> {
+                sema_user_text_blocks_in(then_body, source, block_spans, blocks)
+                if else_body == .Val(body) -> sema_user_text_blocks_in(body, source, block_spans, blocks)
+            }
+            .While(_, body, _, _, _) | .For(_, _, _, _, body, _, _, _, _) | .Loop(body, _, _, _) | .CountedLoop(_, _, _, body, _, _, _) | .Unsafe(_, _, body, _) | .Impure(_, _, body, _) | .Reactive(body, _) | .Shield(body, _) | .Defer(body, _) | .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .ComptimeBlock(body, _, _) | .ContextBlock(_, body, _) | .Live(body, _) | .AssumeDet(_, _, body, _) | .Transact(_, _, body, _, _) -> {
+                sema_user_text_blocks_in(body, source, block_spans, blocks)
+            }
+            .Expr(_) | .Val(_) | .Assign(_, _, _, _) | .Return(_, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Yield(_, _) | .DeferClose(_, _) -> {}
         }
     }
 }

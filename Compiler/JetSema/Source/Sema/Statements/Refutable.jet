@@ -298,7 +298,10 @@ sema_stmt_map_group_store: fn(statement: Stmt, raw: [U8], taken: SemaStmtMapGrou
     if statement == .Assign(target, op, _, value) {
         if op != None || !sema_stmt_names_local(value, taken.name) -> return false
         if target == .Index(base, index, _, _) {
-            return (sema_stmt_source_text(raw, expr_source_span(base)) == Val(taken.map.copy())) && (sema_stmt_source_text(raw, expr_source_span(index)) == Val(taken.key.copy()))
+            if sema_stmt_source_text(raw, expr_source_span(base)) == .Val(base_text) && base_text == taken.map && sema_stmt_source_text(raw, expr_source_span(index)) == .Val(index_text) && index_text == taken.key {
+                return true
+            }
+            return false
         }
     }
     false

@@ -1110,7 +1110,7 @@ sema_call_core_math_exact_crossing: fn(module_name: String, member: String, args
     crossed: loop (index, argument) in args -> {
         ^updated: argument.copy()
         if exact[index] {
-            updated.expr = Expr.MethodCall{receiver: argument.expr.copy(), method: "to_float", method_span: argument.span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{}, id: AST_NODE_GENERATED}
+            updated.expr = Expr.MethodCall{receiver: updated.expr.move(), method: "to_float", method_span: argument.span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{}, id: AST_NODE_GENERATED}
         }
         updated
     }
@@ -1497,15 +1497,10 @@ sema_call_core_check_fixed_record: fn(record: CoreCallRecord, args: [CallArg], t
     if !sema_call_core_check_type_args(canonical_record.module_name, canonical_record.member, names.len(), true, type_args, span, check.diagnostics) {
         return None
     }
-    ^source_args: [CallArg]{}
-    ^local_args: [CallArg]{}
-    loop argument in args {
-        source_args.push(argument.copy())
-        local_args.push(argument.copy())
-    }
+    ^local_args: loop argument in args -> argument.copy()
     ^binding: sema_call_bind_args(api, shape_params, local_args, span, check.diagnostics) ?? return None
     return_type: sema_call_core_native_return(target.signature)
-    resolved_type_args: sema_call_core_infer_type_args(api, names, return_type, shape_params, binding, source_args, type_args, expected, span, check) ?? return None
+    resolved_type_args: sema_call_core_infer_type_args(api, names, return_type, shape_params, binding, args, type_args, expected, span, check) ?? return None
     // A parameter the call leaves unwritten takes the Core declaration's
     // default, checked in the declaring module like a direct call's.
     if binding.default_refs.len() > 0 {

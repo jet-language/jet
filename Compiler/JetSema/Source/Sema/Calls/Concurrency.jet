@@ -152,22 +152,16 @@ sema_call_concurrency_names_module_function: fn(scopes: SemaScopeTable, name: St
 // parameter types differ from the slot's checks on its own types and is one
 // argument mismatch (E0108), shown with the slot's `result` when the caller
 // knows it.
-sema_call_concurrency_infer_callback: fn(argument: CallArg, required: Type, method: String, index: Int, result: Type?, check: ^SemaBodyCheck) -> TExpr? {
-    ^open_result: false
-    if required == .Fn(_, ret, _, _, _, _) && ret == None -> open_result = true
+sema_call_concurrency_infer_callback: fn(argument: CallArg, params: [Type], method: String, index: Int, result: Type?, check: ^SemaBodyCheck) -> TExpr? {
+    required: Type.Fn{params: params, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
     if sema_call_concurrency_written_params_differ(argument.expr, required, check) {
         written: sema_check_expression_with_lambda_escapes(argument.expr, None, check, Val(false)) ?? return None
-        ^shown: required
-        if result == .Val(slot_result) && required == .Fn(params, _, effect_bound, param_contract, call_metadata, return_view_provenance) {
-            // copy: the shown slot is a new owned Type built from the required one and the caller's result
-            shown = Type.Fn{params: params.copy(), ret: Val(slot_result.copy()), effect_bound: effect_bound.copy(), param_contract: param_contract.copy(), call_metadata: call_metadata.copy(), return_view_provenance: return_view_provenance.copy()}
-        }
+        shown: if result == .Val(slot_result) -> Type.Fn{params: params, ret: Val(slot_result.copy()), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None} else -> required
         check.diagnostics.push(sema_value_method_argument_mismatch(method, index, shown, written.ty, argument.span))
         return None
     }
     global_access_start: check.context.taskgroups.global_accesses.len()
-    checked_result: if open_result -> sema_expression_lambda_collection_callback(argument.expr, Val(required), check) else -> sema_check_expression_with_lambda_escapes(argument.expr, Val(required), check, Val(false))
-    checked: checked_result ?? {
+    checked: sema_expression_lambda_collection_callback(argument.expr, Val(required), check) ?? {
         if !check.context.taskgroups.in_spawn {
             loop check.context.taskgroups.global_accesses.len() > global_access_start -> ^_: check.context.taskgroups.global_accesses.pop()
         }
@@ -175,11 +169,7 @@ sema_call_concurrency_infer_callback: fn(argument: CallArg, required: Type, meth
         return None
     }
     if !sema_taskgroup_check_para_global_accesses(check, global_access_start) -> return None
-    ^contract: required
-    if open_result && required == .Fn(params, _, effect_bound, param_contract, call_metadata, return_view_provenance) && checked.ty == .Fn(_, adopted, _, _, _, _) {
-        // copy: the contract is a new owned Type built from the required slot and the callback's adopted result
-        contract = Type.Fn{params: params.copy(), ret: adopted, effect_bound: effect_bound.copy(), param_contract: param_contract.copy(), call_metadata: call_metadata.copy(), return_view_provenance: return_view_provenance.copy()}
-    }
+    contract: if checked.ty == .Fn(_, adopted, _, _, _, _) -> Type.Fn{params: params, ret: adopted, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None} else -> Type.Fn{params: params, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
     compatible: sema_call_host_callback_assignable(contract, checked.ty, check) ?? return None
     if !compatible {
         check.diagnostics.push(sema_type_mismatch(contract, checked.ty, argument.span, check.program.*))
@@ -311,8 +301,7 @@ sema_call_concurrency_parallel: fn(receiver: Expr, receiver_value: TExpr, method
     ^typed: [TExpr]{}
     ^result_type: Type.Named{name: "Unit"}
     if method == "para_map" {
-        ^map_type: Type.Fn{params: [Type]{element}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
-        callback: sema_call_concurrency_infer_callback(args[0], map_type, method, 0, None, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+        callback: sema_call_concurrency_infer_callback(args[0], [Type]{element}, method, 0, None, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         ^_: sema_call_concurrency_check_parallel_callback(callback, args[0].expr, check)
         ^callback_result: Type.Named{name: "Unit"}
         ^callback_error: Type?{None}
@@ -344,15 +333,14 @@ sema_call_concurrency_parallel: fn(receiver: Expr, receiver_value: TExpr, method
     if method == "para_filter" || method == "para_partition" {
         // The result slot stays open so a fallible predicate checks; its
         // success must be Bool.
-        ^predicate_type: Type.Fn{params: [Type]{element}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
-        callback: sema_call_concurrency_infer_callback(args[0], predicate_type, method, 0, Val(Type.Bool), check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+        callback: sema_call_concurrency_infer_callback(args[0], [Type]{element}, method, 0, Val(Type.Bool), check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         makes_callback: sema_call_concurrency_callback_makes(callback.ty, [Type]{element}, Type.Bool, args[0].span, check)
         ^_: sema_call_concurrency_check_parallel_callback(callback, args[0].expr, check)
         if !makes_callback -> return SemaMethodSpecialCheck{handled: true, value: None}
-        typed.push(callback.copy())
         // As for para_map, a fallible predicate's failure
         // leaves the call, which is the Result of the selection.
         callback_error: sema_call_concurrency_callback_error(callback.ty)
+        typed.push(callback)
         if method == "para_filter" {
             result_type = Type.List{element: element}
             sema_call_concurrency_reject_parallel_type("item", element, span, check)
@@ -368,24 +356,21 @@ sema_call_concurrency_parallel: fn(receiver: Expr, receiver_value: TExpr, method
         return sema_call_concurrency_parallel_result(receiver_value, operation, typed, result_type, callback_error, span, expected, check)
     }
 
-    ^seed_type: Type.Fn{params: [Type]{}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
-    seed: sema_call_concurrency_infer_callback(args[0], seed_type, method, 0, None, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    seed: sema_call_concurrency_infer_callback(args[0], [Type]{}, method, 0, None, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     ^_: sema_call_concurrency_check_parallel_callback(seed, args[0].expr, check)
     ^accumulator: Type.Named{name: "Unit"}
     if sema_call_signature_return(seed.ty) == .Val(ret) {
         accumulator = sema_call_concurrency_success_type(ret)
     }
-    ^step_type: Type.Fn{params: [Type]{accumulator, element}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
     // Each slot is checked even after an earlier one fails, and the fold's
     // result still crosses the worker boundary.
-    ^step_checked: sema_call_concurrency_infer_callback(args[1], step_type, method, 1, Val(accumulator), check)
+    ^step_checked: sema_call_concurrency_infer_callback(args[1], [Type]{accumulator, element}, method, 1, Val(accumulator), check)
     ^makes_step: false
     if step_checked == .Val(checked_step) {
         makes_step = sema_call_concurrency_callback_makes(checked_step.ty, [Type]{accumulator, element}, accumulator, args[1].span, check)
         ^_: sema_call_concurrency_check_parallel_callback(checked_step, args[1].expr, check)
     }
-    ^merge_type: Type.Fn{params: [Type]{accumulator, accumulator}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
-    ^merge_checked: sema_call_concurrency_infer_callback(args[2], merge_type, method, 2, Val(accumulator), check)
+    ^merge_checked: sema_call_concurrency_infer_callback(args[2], [Type]{accumulator, accumulator}, method, 2, Val(accumulator), check)
     ^makes_merge: false
     if merge_checked == .Val(checked_merge) {
         makes_merge = sema_call_concurrency_callback_makes(checked_merge.ty, [Type]{accumulator, accumulator}, accumulator, args[2].span, check)
@@ -398,11 +383,14 @@ sema_call_concurrency_parallel: fn(receiver: Expr, receiver_value: TExpr, method
     }
     step: step_checked ?? return SemaMethodSpecialCheck{handled: true, value: None}
     merge: merge_checked ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    typed.push(seed)
+    typed.push(step)
+    typed.push(merge)
     // One failure domain for the fold: every fallible callback's Err is the
     // call's.
     ^fold_error: Type?{None}
-    loop (index, callback_ty) in ([Type]{seed.ty.copy(), step.ty.copy(), merge.ty.copy()}) {
-        if sema_call_concurrency_callback_error(callback_ty) == .Val(error) {
+    loop index in 0..<3 {
+        if sema_call_concurrency_callback_error(typed[index].ty) == .Val(error) {
             if fold_error == .Val(known) {
                 if known != error {
                     check.diagnostics.push(sema_type_mismatch(known, error, args[index].span, check.program.*))
@@ -412,9 +400,6 @@ sema_call_concurrency_parallel: fn(receiver: Expr, receiver_value: TExpr, method
             fold_error = Val(error)
         }
     }
-    typed.push(seed)
-    typed.push(step)
-    typed.push(merge)
     result_type = accumulator
     sema_call_concurrency_reject_parallel_type("item", element, span, check)
     sema_call_concurrency_reject_parallel_type("result", result_type, span, check)

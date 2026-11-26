@@ -697,7 +697,6 @@ sema_check_registration_top_level_declared: fn(declaration: Func, module_index: 
             sema_drain_scope_delta(program, result.type_delta, scopes, checked.value, function_comptime_requests, 0)
             result.comptime_body_sources.extend(checked.comptime_body_sources.move())
             result.compute_facts.push(checked.compute_facts)
-            if checked.failure == .Val(facts) -> result.failure_facts.push(facts.copy())
             result.recorded_calls.extend(checked.recorded_calls.move())
             if checked.value == .Val(function) {
                 if sema_function_publish_return_views(scopes, return_view_rows, function, owner_id) {
@@ -748,8 +747,14 @@ sema_check_registration_top_level_declared: fn(declaration: Func, module_index: 
                     result.incomplete_reasons.push("function `{function_name}`: checked function could not be recorded")
                 }
             }
+            sema_check_push_failure(result.failure_facts, checked.failure.move())
         }
     }
+}
+
+priv sema_check_push_failure: fn(target: ^[SemaFunctionFailureFacts], failure: ^^SemaFunctionFailureFacts?) Never! {
+    facts: failure ?? return
+    target.push(facts)
 }
 
 // `declaration`: the method row's declaration, which `method` names
@@ -833,7 +838,7 @@ sema_check_registration_method: fn(method: SemaMethodJob, declaration: Func, mod
         reasons.push("{label}: the memory plan has no row for its declaration at offset {declaration.span.start}")
     }
     base_generic_params: environment.generic_params.copy()
-    environment.generic_params = owned_input.generic_params.copy()
+    environment.generic_params = owned_input.generic_params.move()
     // copy: `previous_location` restores scopes.location_function after this method's check
     // overwrites it. Jet has no exchange on a field of the write-borrowed table.
     previous_location: scopes.location_function.copy()
@@ -872,7 +877,7 @@ sema_check_registration_method: fn(method: SemaMethodJob, declaration: Func, mod
     compute_facts.push(checked.compute_facts)
     // A method's failure row joins the bundle failure solve, which infers
     // the contract of an inherent method as it does a top-level function's.
-    if checked.failure == .Val(facts) -> failure_facts.push(facts.copy())
+    sema_check_push_failure(failure_facts, checked.failure.move())
     name_references.extend(function_name_references)
     if !memory_complete || !owner_generic_complete {
         ^causes: [String]{}
