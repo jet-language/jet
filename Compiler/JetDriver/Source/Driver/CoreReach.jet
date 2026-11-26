@@ -157,12 +157,13 @@ jet_driver_reach_lazy_owned_trait: fn(trait_name: String) -> Bool Never! {
 }
 
 // Whether a Core implementation of `trait_name` (as written) is a lazy row:
-// a codec trait's, CheckedText's, or one of a trait another module declares
+// a codec trait's, or one of a trait another module declares
 // (`cipher.ForwardBlock`). Any other owned trait is one the compiler calls
-// without a name, and a trait the type's own module declares is reached
-// with it.
+// without a name (non-boundary CheckedText impls such as `core.grammar.Grammar`
+// stay eager so `Grammar{"""…"""}` always finds them), and a trait the type's
+// own module declares is reached with it.
 jet_driver_reach_lazy_trait: fn(trait_name: String) -> Bool Never! {
-    if owned_trait(trait_name) != None -> return jet_driver_reach_lazy_owned_trait(trait_name)
+    if owned_trait(trait_name) != None -> return owned_trait_codec(trait_name)
     trait_name.contains(".")
 }
 
@@ -744,7 +745,7 @@ jet_driver_reach_rows: fn(items: [Item], held: [JetDriverReachDeclaration], part
                 jet_driver_reach_row(rows, position, "", -1, value.type_name, false, value.span)
             } else if value.operator_rhs == .Val(rhs) && rhs == .Named(rhs_name) && types.get(rhs_name) != None {
                 jet_driver_reach_row(rows, position, "", -1, rhs_name, false, value.span)
-            } else if value.trait_name == .Val(trait_name) && value.delegation_field == None && jet_driver_reach_lazy_trait(trait_name) {
+            } else if value.trait_name == .Val(trait_name) && value.delegation_field == None && (jet_driver_reach_lazy_trait(trait_name) || (trait_name == "CheckedText" && BOUNDARY_TYPED_HEADS.contains(value.type_name))) {
                 jet_driver_reach_impl_row(rows, position, -1, value.type_name, trait_name, value.span)
             }
         }
@@ -1109,6 +1110,7 @@ JetDriverReachUnit: struct {
     loaded: Int,
     module_name: String,
     open: Bool,
+    user_open: Bool,
     local: [Int:Bool],
     dotted: [Int:Bool],
     heads: [Int:Bool],
@@ -1159,11 +1161,12 @@ JetDriverReach: struct {
     edges: [JetDriverReachEdge],
     demands: [JetDriverReachDemand],
     open_names: [String],
+    typed_head_opened: NameTable,
     stack: [Int],
 }
 
 jet_driver_reach: fn(enabled: Bool) -> JetDriverReach Never! {
-    JetDriverReach{enabled: enabled, names: name_table(), global: [Bool]{}, spelled: [Bool]{}, units: [JetDriverReachUnit]{}, items: [JetDriverReachItem]{}, by_name: [[Int]]{}, impls: [JetDriverReachImpl]{}, reached: name_table_sized(64), edges: [JetDriverReachEdge]{}, demands: [JetDriverReachDemand]{}, open_names: [String]{}, stack: [Int]{}}
+    JetDriverReach{enabled: enabled, names: name_table(), global: [Bool]{}, spelled: [Bool]{}, units: [JetDriverReachUnit]{}, items: [JetDriverReachItem]{}, by_name: [[Int]]{}, impls: [JetDriverReachImpl]{}, reached: name_table_sized(64), edges: [JetDriverReachEdge]{}, demands: [JetDriverReachDemand]{}, open_names: [String]{}, typed_head_opened: name_table_sized(16), stack: [Int]{}}
 }
 
 jet_driver_reach_has: fn(flags: [Bool], id: Int) -> Bool Never! { id < flags.len() && flags[id] }
@@ -1198,7 +1201,7 @@ jet_driver_reach_deferrable: fn(scoped: JetDriverScopedImport, scoped_imports: [
 // it declares tries again.
 jet_driver_reach_admit: fn(reach: ^JetDriverReach, loaded: Int, module_name: String, words: JetDriverUnitWords, imports: [ImportDecl], open: Bool) -> Int {
     unit: reach.units.len()
-    reach.units.push(JetDriverReachUnit{loaded: loaded, module_name: module_name, open: open || reach.open_names.contains(module_name), local: [Int:Bool]{}, dotted: [Int:Bool]{}, heads: [Int:Bool]{}})
+    reach.units.push(JetDriverReachUnit{loaded: loaded, module_name: module_name, open: open || reach.open_names.contains(module_name), user_open: open, local: [Int:Bool]{}, dotted: [Int:Bool]{}, heads: [Int:Bool]{}})
     _: name_intern(reach.reached, module_name)
     loop at in 0..<reach.impls.len() {
         index: reach.impls[at].item
@@ -1317,6 +1320,26 @@ jet_driver_reach_open: fn(reach: ^JetDriverReach, module_name: String) {
         reach.units[unit].open = true
         loop index in 0..<reach.items.len() {
             if reach.items[index].unit == unit -> reach.stack.push(index)
+        }
+    }
+    jet_driver_reach_drain(reach)
+}
+
+// Opens `module_name` for a boundary typed-head literal (`Path{"…"}`), which
+// activates its lazy CheckedText impl even when an earlier source-module open
+// left that impl deferred.
+jet_driver_reach_open_typed_head: fn(reach: ^JetDriverReach, module_name: String) {
+    if !reach.enabled {
+        return
+    }
+    _: name_intern(reach.typed_head_opened, module_name)
+    jet_driver_reach_open(reach, module_name)
+    loop unit in 0..<reach.units.len() {
+        if reach.units[unit].module_name != module_name -> next
+        loop index in 0..<reach.items.len() {
+            if reach.items[index].unit == unit && reach.items[index].lazy_impl >= 0 && !reach.items[index].live {
+                reach.stack.push(index)
+            }
         }
     }
     jet_driver_reach_drain(reach)
@@ -1479,9 +1502,7 @@ jet_driver_reach_mark: fn(reach: ^JetDriverReach, unit: Int, spell: Int) {
                 if reach.items[index].lazy_impl >= 0 -> reach.stack.push(index)
             }
         }
-    } else {
-        jet_driver_reach_local(reach, unit, id)
-    }
+    } else { jet_driver_reach_local(reach, unit, id) }
 }
 
 jet_driver_reach_global: fn(reach: ^JetDriverReach, id: Int) {
@@ -1537,7 +1558,7 @@ jet_driver_reach_impl_live: fn(reach: ^JetDriverReach, at: Int) -> Bool Never! {
         loop trigger in reach.impls[at].dotted_triggers {
             ^hit: false
             loop u in 0..<reach.units.len() {
-                if reach.units[u].open && reach.units[u].dotted.get(trigger) != None {
+                if reach.units[u].user_open && reach.units[u].dotted.get(trigger) != None {
                     hit = true
                     break
                 }
@@ -1564,8 +1585,11 @@ jet_driver_reach_drain: fn(reach: ^JetDriverReach) {
             next
         }
         unit: reach.items[index].unit
-        if reach.items[index].lazy_impl >= 0 && !reach.units[unit].open && !jet_driver_reach_impl_live(reach, reach.items[index].lazy_impl) {
-            next
+        impl_at: reach.items[index].lazy_impl
+        if impl_at >= 0 {
+            checked_text_lazy: reach.impls[impl_at].row.trait_name == "CheckedText"
+            opened: if checked_text_lazy -> name_find(reach.typed_head_opened, reach.units[unit].module_name) != None else -> reach.units[unit].open
+            if !opened && !jet_driver_reach_impl_live(reach, impl_at) -> next
         }
         reach.items[index].live = true
         loop at in 0..<reach.items[index].spells.len() {
@@ -2073,4 +2097,3 @@ jet_driver_reach_gone: fn(reach: JetDriverReach, index: Int, gone: ^[Bool], glob
     loop local_gone[unit].len() <= name -> local_gone[unit].push(false)
     local_gone[unit][name] = true
 }
-

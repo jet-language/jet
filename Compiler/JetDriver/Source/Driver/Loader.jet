@@ -4841,7 +4841,9 @@ jet_driver_collect_core_identifier_demand_ids: fn(tokens: [Token], tables: Token
                     loop payload in names.dyn_payloads[at] {
                         if payload == .Named(type_name) {
                             loop module_name in core_type_modules(type_name) {
-                                if !demand.source_modules.contains(module_name) -> demand.source_modules.push(module_name)
+                                if !demand.source_modules.contains(module_name) {
+                                    demand.source_modules.push(module_name)
+                                }
                             }
                         }
                     }
@@ -7147,7 +7149,7 @@ jet_driver_load_walk: fn(
         if !embedded {
             loop module_name in demand.typed_head_modules {
                 if !bare_modules.contains(module_name) -> bare_modules.push(module_name.copy())
-                jet_driver_reach_open(reach, module_name)
+                jet_driver_reach_open_typed_head(reach, module_name)
                 head_index: jet_driver_core_unit(source_units, queued, pending, generated_records, request.core_sources, module_name, false, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, diagnostics)
                 if head_index == .Val(index) {
                     if !queued[index] {
