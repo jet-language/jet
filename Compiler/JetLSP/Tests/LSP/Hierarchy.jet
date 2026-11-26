@@ -4,7 +4,7 @@
 use {
     core.encoding.[Dyn]
     jet_foundation.[foundation_json_quote]
-    jet_lsp.[LSPServer]
+    jet_lsp.[LSPServer, lsp_server]
 }
 
 LSP_TEST_HIERARCHY_URI: "file:///w/shapes.jet"
@@ -149,4 +149,18 @@ lsp_test_call_groups: fn(result: Dyn, side: String) -> [String] Never! {
     assert_eq(lsp_test_call_groups(lsp_test_result(server, "callHierarchy/incomingCalls", lsp_test_hierarchy_params(run)), "from"), [String]{})
     // A parameter is no function.
     assert(lsp_test_result(server, "textDocument/prepareCallHierarchy", lsp_test_at(LSP_TEST_CALLS_URI, 0, 13)) == .Null, "a parameter has no call hierarchy")
+}
+
+#Test("call hierarchy incomingCalls aggregates callers from open importing documents") {
+    ^server: lsp_server(LSPImporterChecker{})
+    lsp_test_open(server, LSP_IMPORTER_SHAPES_URI, LSP_IMPORTER_SHAPES)
+    lsp_test_open(server, LSP_IMPORTER_MAIN_URI, LSP_IMPORTER_MAIN)
+    // Publish shapes.jet from its own module only, and main.jet with both.
+    shapes_doc: server.diagnostic_state.docs.get(LSP_IMPORTER_SHAPES_URI) ?? panic("shapes open")
+    server.published[LSP_IMPORTER_SHAPES_URI] = LSPFixtureChecker{}.check(shapes_doc.path, [JetDriverSourceDocument]{JetDriverSourceDocument{path: shapes_doc.path, source: shapes_doc.text}})
+    lsp_test_publish(server, LSP_IMPORTER_MAIN_URI)
+    items: lsp_test_rows(lsp_test_result(server, "textDocument/prepareCallHierarchy", lsp_test_at(LSP_IMPORTER_SHAPES_URI, 0, 1)))
+    assert_eq(items.len(), 1)
+    incoming: lsp_test_result(server, "callHierarchy/incomingCalls", lsp_test_hierarchy_params(items[0]))
+    assert_eq(lsp_test_call_groups(incoming, "from"), [String]{"run=12 3:11-15"})
 }

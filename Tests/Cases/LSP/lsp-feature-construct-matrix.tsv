@@ -1,0 +1,73 @@
+feature	construct	status	witness	reason
+hover	functions_and_calls	applicable	lsp_hover_shows_one_jet_signature.case	Hover shows explicit and inferred Jet callable signatures without duplicate failure lines
+hover	structs_fields_and_methods	applicable	lsp_hover_shows_one_jet_signature.case	Hover shows struct layout, method signatures, and receiver-typed copy signatures
+hover	enums_and_variants	applicable	lsp_feature_construct_matrix.case	Hover shows enum and variant declarations from checked index
+hover	traits_and_impls	applicable	lsp_feature_construct_matrix.case	Hover shows trait and trait-impl method signatures
+hover	generics_and_aliases	applicable	lsp_hover_names_generic_alias.case	Hover names generic type aliases as written with expansion and generic struct types
+hover	cross_file_imports	applicable	lsp_feature_construct_matrix.case	Hover resolves imported symbols across files through checked identity
+hover	shadowing_and_locals	applicable	lsp_hover_shows_when_an_immutable_local_is_computed.case	Hover distinguishes lexical locals and shadowed bindings with checked types
+hover	generated_and_foreign_origins	applicable	lsp_hover_marks_foreign_and_generated_origins.case	Hover marks foreign and .jet/generated/ module origins explicitly
+hover	broken_incremental_edits	applicable	lsp_feature_construct_matrix.case	Hover stays version-consistent across broken and repaired incremental edits
+definition	functions_and_calls	applicable	lsp_definition_returns_location.case	Go-to-definition jumps to the checked function declaration
+definition	structs_fields_and_methods	applicable	lsp_type_definition_value_types.case	Definition and typeDefinition jump to checked struct declarations
+definition	enums_and_variants	applicable	lsp_feature_construct_matrix.case	Definition resolves enum types and variants to their checked declaration
+definition	traits_and_impls	applicable	lsp_feature_construct_matrix.case	Definition resolves trait names in impl headers to the trait declaration
+definition	generics_and_aliases	applicable	lsp_accepts_hidden_generic_constructor_arguments.case	Definition resolves generic constructors and generic type declarations
+definition	cross_file_imports	applicable	lsp_definition_imported_identity_collisions_are_exact.case	Definition resolves imported identity across files even under leaf-name collisions
+definition	shadowing_and_locals	applicable	lsp_feature_construct_matrix.case	Definition resolves shadowed local bindings to their lexical declaration rather than outer names
+definition	generated_and_foreign_origins	applicable	lsp_definition_foreign_declaration_uses_checked_jet_boundary.case	Definition reaches checked Jet foreign boundaries and generated build sources
+definition	broken_incremental_edits	applicable	lsp_feature_construct_matrix.case	Definition does not return stale cross-version locations after broken edits and recovers on repair
+references	functions_and_calls	applicable	lsp_references_finds_all_uses.case	References find declaration and every checked call site
+references	structs_fields_and_methods	applicable	lsp_feature_construct_matrix.case	References follow struct types across declarations, annotations, and literals
+references	enums_and_variants	applicable	lsp_rename_variant_across_modules.case	References track enum variant declarations and cross-module uses
+references	traits_and_impls	applicable	lsp_feature_construct_matrix.case	References track trait uses across impl blocks and files
+references	generics_and_aliases	applicable	lsp_feature_construct_matrix.case	References track generic type declarations and instantiations
+references	cross_file_imports	applicable	lsp_feature_construct_matrix.case	References aggregate checked uses across open importing files
+references	shadowing_and_locals	applicable	lsp_feature_construct_matrix.case	References on an outer symbol exclude shadowed inner local bindings of the same name
+references	generated_and_foreign_origins	applicable	lsp_definition_uses_build_graph_generated_source.case	References resolve against build-graph generated declarations when open
+references	broken_incremental_edits	applicable	lsp_feature_construct_matrix.case	References stay bounded to the current checked version during broken edits
+rename	functions_and_calls	applicable	lsp_rename_produces_workspace_edit.case	Rename updates function declaration and all checked calls
+rename	structs_fields_and_methods	applicable	lsp_feature_construct_matrix.case	Rename updates struct declarations, type annotations, and literals by checked identity
+rename	enums_and_variants	applicable	lsp_rename_variant_across_modules.case	Rename updates enum variants across importing modules
+rename	traits_and_impls	applicable	lsp_feature_construct_matrix.case	Rename updates trait declarations and impl headers by checked identity
+rename	generics_and_aliases	applicable	lsp_feature_construct_matrix.case	Rename updates generic type declarations and type applications
+rename	cross_file_imports	applicable	lsp_checked_identity_and_versioned_rename.case	Rename emits version-bound documentChanges across importing files with semantic_ops
+rename	shadowing_and_locals	applicable	lsp_feature_construct_matrix.case	Rename follows checked identity and never rewrites shadowed inner locals with the same spelling
+rename	generated_and_foreign_origins	na	-	Generated and foreign declarations are owned by build producers or foreign boundaries rather than handwritten source edits; rename refuses declarations outside open handwritten source
+rename	broken_incremental_edits	applicable	lsp_feature_construct_matrix.case	Rename refuses programs with check errors (-32803) so incomplete checks never corrupt uses, and succeeds once repaired
+completion	functions_and_calls	applicable	lsp_completion_returns_items.case	Completion suggests in-scope functions and callable items
+completion	structs_fields_and_methods	applicable	lsp_hover_and_completion_show_caret_marks.case	Dot-completion lists struct methods with receiver marks and shared semantic docs
+completion	enums_and_variants	applicable	lsp_feature_construct_matrix.case	Completion suggests enum declarations and variants in scope
+completion	traits_and_impls	applicable	lsp_feature_construct_matrix.case	Completion suggests trait methods implemented on checked receivers
+completion	generics_and_aliases	applicable	lsp_feature_construct_matrix.case	Completion suggests generic types and methods on instantiated receivers
+completion	cross_file_imports	applicable	lsp_completion_returns_snippets_and_auto_imports.case	Completion suggests imported symbols and auto-import edits across modules
+completion	shadowing_and_locals	applicable	lsp_feature_construct_matrix.case	Completion includes lexical parameters and locals in the active scope
+completion	generated_and_foreign_origins	applicable	lsp_builtin_member_completion_uses_shared_semantic_symbol_docs.case	Completion surfaces checked builtin and generated/discovery catalog entries with docs
+completion	broken_incremental_edits	applicable	lsp_feature_construct_matrix.case	Completion degrades safely during partial syntax edits without returning stale errors
+hierarchy	functions_and_calls	applicable	lsp_wave3_prepare_rename_semantic_range_and_call_hierarchy.case	Call hierarchy prepares callable items and resolves incoming and outgoing calls
+hierarchy	structs_fields_and_methods	applicable	lsp_type_hierarchy_trait_impls.case	Type hierarchy prepares struct items and resolves implemented trait supertypes
+hierarchy	enums_and_variants	applicable	lsp_type_hierarchy_trait_impls.case	Type hierarchy resolves enum types and their trait supertypes
+hierarchy	traits_and_impls	applicable	lsp_type_hierarchy_trait_impls.case	Type hierarchy resolves trait supertypes and implementing subtypes
+hierarchy	generics_and_aliases	applicable	lsp_feature_construct_matrix.case	Call and type hierarchy prepare generic callables and generic types
+hierarchy	cross_file_imports	applicable	lsp_feature_construct_matrix.case	Call and type hierarchy resolve incoming/outgoing calls and supertypes across files
+hierarchy	shadowing_and_locals	na	-	LSP call and type hierarchies operate on callable and type declarations rather than lexical local variables
+hierarchy	generated_and_foreign_origins	na	-	Generated and foreign declarations carry origin metadata on hover/definition and have no handwritten call/type hierarchy graph to traverse
+hierarchy	broken_incremental_edits	applicable	lsp_feature_construct_matrix.case	Hierarchy queries stay version-safe under broken edits and resume cleanly once repaired
+implementation	functions_and_calls	na	-	Plain free functions have no trait implementations; textDocument/definition navigates to function declarations
+implementation	structs_fields_and_methods	applicable	lsp_implementation_trait_impls.case	Implementation resolves impl blocks for struct types
+implementation	enums_and_variants	na	-	Enum variants are data constructors rather than traits with separate implementations
+implementation	traits_and_impls	applicable	lsp_implementation_trait_impls.case	Implementation resolves every impl Trait for Type declaration for a trait
+implementation	generics_and_aliases	applicable	lsp_feature_construct_matrix.case	Implementation resolves trait impls involving generic types
+implementation	cross_file_imports	applicable	lsp_feature_construct_matrix.case	Implementation finds trait impls across open modules
+implementation	shadowing_and_locals	na	-	Local variable bindings have no trait implementations; definition and references navigate locals
+implementation	generated_and_foreign_origins	na	-	Foreign declarations have no Jet-side trait implementation bodies to jump to
+implementation	broken_incremental_edits	applicable	lsp_feature_construct_matrix.case	Implementation answers safely without false results during broken edits
+signature_and_diagnostics	functions_and_calls	applicable	lsp_signature_help_returns_active_parameter.case	Signature help tracks active parameter and diagnostics match jet check
+signature_and_diagnostics	structs_fields_and_methods	applicable	lsp_feature_construct_matrix.case	Diagnostics and signature help cover struct literals and method calls
+signature_and_diagnostics	enums_and_variants	applicable	lsp_feature_construct_matrix.case	Diagnostics verify enum variant constructors and pattern matches
+signature_and_diagnostics	traits_and_impls	applicable	lsp_feature_construct_matrix.case	Diagnostics verify trait impl conformance
+signature_and_diagnostics	generics_and_aliases	applicable	lsp_accepts_hidden_generic_constructor_arguments.case	Diagnostics accept checked generic constructor arguments without false errors
+signature_and_diagnostics	cross_file_imports	applicable	lsp_checked_imported_diagnostics_and_repairs.case	Diagnostics and repairs track imported module errors across files
+signature_and_diagnostics	shadowing_and_locals	applicable	lsp_feature_construct_matrix.case	Diagnostics and signature help track lexical parameter and local types accurately
+signature_and_diagnostics	generated_and_foreign_origins	applicable	lsp_diagnostics_follow_their_origin.case	Diagnostics follow checked origin paths accurately
+signature_and_diagnostics	broken_incremental_edits	applicable	lsp_overlapping_edits_latest_checked_revision_wins.case	Diagnostics track the latest checked version across broken and repaired incremental edits

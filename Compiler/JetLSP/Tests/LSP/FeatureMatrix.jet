@@ -1,0 +1,191 @@
+// Semantic feature x Jet construct witness matrix gate (#6903 c5): verifies
+// that Tests/Cases/LSP/lsp-feature-construct-matrix.tsv covers every
+// (feature, construct) cell of the 8x9 matrix with zero `unknown` rows, every
+// `applicable` row names an existing passing stdio witness `.case` not listed
+// in Tests/known-failing.tsv, and every `na` row states a concrete architectural
+// reason rather than claiming something is unimplemented.
+use {
+    lsp_matrix_files: core.files
+    lsp_matrix_sys: core.sys
+}
+
+LSP_MATRIX_FEATURES: [String]{
+    "hover",
+    "definition",
+    "references",
+    "rename",
+    "completion",
+    "hierarchy",
+    "implementation",
+    "signature_and_diagnostics",
+}
+
+LSP_MATRIX_CONSTRUCTS: [String]{
+    "functions_and_calls",
+    "structs_fields_and_methods",
+    "enums_and_variants",
+    "traits_and_impls",
+    "generics_and_aliases",
+    "cross_file_imports",
+    "shadowing_and_locals",
+    "generated_and_foreign_origins",
+    "broken_incremental_edits",
+}
+
+LSPMatrixRow: struct {
+    line: Int,
+    feature: String,
+    construct: String,
+    status: String,
+    witness: String,
+    reason: String,
+}
+
+lsp_matrix_repo_root: fn() -[FS.Read, Env]> String Never! {
+    if lsp_matrix_sys.get("JET_TOOLCHAIN_ROOT") == .Val(env_root) {
+        if lsp_matrix_files.is_file("{env_root}/Tests/Cases/LSP/lsp-feature-construct-matrix.tsv") {
+            return env_root
+        }
+    }
+    candidates: [String]{".", "..", "../..", "../../.."}
+    loop candidate in candidates {
+        if lsp_matrix_files.is_file("{candidate}/Tests/Cases/LSP/lsp-feature-construct-matrix.tsv") {
+            return "{candidate}"
+        }
+    }
+    "."
+}
+
+LSPMatrixParsed: struct {
+    rows: [LSPMatrixRow],
+    error: String,
+}
+
+lsp_matrix_known_failing: fn(root: String) -[FS.Read]> [String:Bool] Never! {
+    ^failing: [String:Bool]{}
+    text: lsp_matrix_files.read("{root}/Tests/known-failing.tsv") ?? return failing
+    loop line in text.lines() {
+        trimmed: line.trim()
+        if trimmed == "" || trimmed.starts_with("#") -> next
+        cols: trimmed.split("\t").to_list()
+        if cols.len() > 0 -> failing[cols[0].trim()] = true
+    }
+    failing
+}
+
+lsp_matrix_parse: fn(text: String) -> LSPMatrixParsed Never! {
+    lines: text.lines()
+    if lines.len() == 0 -> return LSPMatrixParsed{rows: [LSPMatrixRow]{}, error: "matrix is empty"}
+    if lines[0].trim() != "feature\tconstruct\tstatus\twitness\treason" {
+        return LSPMatrixParsed{rows: [LSPMatrixRow]{}, error: "unexpected header `{lines[0]}`"}
+    }
+    ^rows: [LSPMatrixRow]{}
+    loop idx in 1..<lines.len() {
+        raw: lines[idx].trim()
+        if raw == "" || raw.starts_with("#") -> next
+        cols: raw.split("\t").to_list()
+        if cols.len() != 5 {
+            return LSPMatrixParsed{rows: [LSPMatrixRow]{}, error: "line {idx + 1}: expected 5 tab-separated columns, got {cols.len()}"}
+        }
+        rows.push(LSPMatrixRow{
+            line: idx + 1,
+            feature: cols[0].trim(),
+            construct: cols[1].trim(),
+            status: cols[2].trim(),
+            witness: cols[3].trim(),
+            reason: cols[4].trim(),
+        })
+    }
+    LSPMatrixParsed{rows: rows, error: ""}
+}
+
+lsp_matrix_validate: fn(root: String, rows: [LSPMatrixRow], known_failing: [String:Bool]) -[FS.Read]> [String] Never! {
+    ^errors: [String]{}
+    ^seen: [String:Bool]{}
+    ^feature_ok: [String:Bool]{}
+    loop f in LSP_MATRIX_FEATURES -> feature_ok[f] = true
+    ^construct_ok: [String:Bool]{}
+    loop c in LSP_MATRIX_CONSTRUCTS -> construct_ok[c] = true
+
+    loop row in rows {
+        if !feature_ok.has_key(row.feature) {
+            errors.push("line {row.line}: unknown feature `{row.feature}`")
+        }
+        if !construct_ok.has_key(row.construct) {
+            errors.push("line {row.line}: unknown construct `{row.construct}`")
+        }
+        key: "{row.feature}\t{row.construct}"
+        if seen.has_key(key) {
+            errors.push("line {row.line}: duplicate cell `{row.feature}` x `{row.construct}`")
+        }
+        seen[key] = true
+        if row.status != "applicable" && row.status != "na" {
+            errors.push("line {row.line} (`{row.feature}` x `{row.construct}`): invalid status `{row.status}`")
+            next
+        }
+        if row.reason == "" || row.reason == "-" {
+            errors.push("line {row.line} (`{row.feature}` x `{row.construct}`): missing reason")
+        }
+        if row.status == "applicable" {
+            if row.witness == "" || row.witness == "-" || !row.witness.ends_with(".case") {
+                errors.push("line {row.line} (`{row.feature}` x `{row.construct}`): applicable cell must name a .case witness, got `{row.witness}`")
+                next
+            }
+            rel: "Tests/Cases/LSP/{row.witness}"
+            if known_failing.has_key(rel) {
+                errors.push("line {row.line} (`{row.feature}` x `{row.construct}`): witness `{rel}` is listed in Tests/known-failing.tsv")
+            }
+            text: lsp_matrix_files.read("{root}/{rel}") ?? {
+                errors.push("line {row.line} (`{row.feature}` x `{row.construct}`): witness `{rel}` does not exist")
+                ""
+            }
+            if text != "" && !text.contains("jet self lsp") {
+                errors.push("line {row.line} (`{row.feature}` x `{row.construct}`): witness `{row.witness}` does not run `jet self lsp`")
+            }
+        } else {
+            if row.witness != "-" && row.witness != "" {
+                errors.push("line {row.line} (`{row.feature}` x `{row.construct}`): N/A cell should use `-` witness, got `{row.witness}`")
+            }
+            lower: row.reason.to_lower()
+            if lower.contains("unimplemented") || lower.contains("not implemented") || lower.contains("todo") || lower.contains("not yet") {
+                errors.push("line {row.line} (`{row.feature}` x `{row.construct}`): N/A reason claims missing implementation (`{row.reason}`)")
+            }
+        }
+    }
+
+    loop f in LSP_MATRIX_FEATURES {
+        loop c in LSP_MATRIX_CONSTRUCTS {
+            if !seen.has_key("{f}\t{c}") {
+                errors.push("missing matrix cell `{f}` x `{c}`")
+            }
+        }
+    }
+    errors
+}
+
+#Test("lsp_feature_construct_matrix_is_complete_witnessed_and_honest") {
+    root: lsp_matrix_repo_root()
+    text: lsp_matrix_files.read("{root}/Tests/Cases/LSP/lsp-feature-construct-matrix.tsv") ?? panic("cannot read lsp-feature-construct-matrix.tsv")
+    parsed: lsp_matrix_parse(text)
+    if parsed.error != "" -> panic("matrix parse error: {parsed.error}")
+    assert_eq(parsed.rows.len(), LSP_MATRIX_FEATURES.len() * LSP_MATRIX_CONSTRUCTS.len())
+    known_failing: lsp_matrix_known_failing(root)
+    problems: lsp_matrix_validate(root, parsed.rows, known_failing)
+    if problems.len() > 0 {
+        panic("feature-construct matrix failed:\n{problems.join("\n")}")
+    }
+}
+
+#Test("lsp_feature_construct_matrix_validator_rejects_missing_unwitnessed_and_dishonest_na") {
+    root: lsp_matrix_repo_root()
+    bad_rows: [LSPMatrixRow]{
+        LSPMatrixRow{line: 2, feature: "hover", construct: "functions_and_calls", status: "unknown", witness: "-", reason: "unchecked"},
+        LSPMatrixRow{line: 3, feature: "rename", construct: "cross_file_imports", status: "applicable", witness: "-", reason: "no witness"},
+        LSPMatrixRow{line: 4, feature: "hierarchy", construct: "shadowing_and_locals", status: "na", witness: "-", reason: "unimplemented right now"},
+    }
+    problems: lsp_matrix_validate(root, bad_rows, [String:Bool]{})
+    assert(problems.len() >= 4, "validator rejects invalid status, missing witness, dishonest N/A, and missing cells")
+    assert(problems[0].contains("invalid status `unknown`"))
+    assert(problems[1].contains("applicable cell must name a .case witness"))
+    assert(problems[2].contains("N/A reason claims missing implementation"))
+}
