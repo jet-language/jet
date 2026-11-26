@@ -5973,8 +5973,10 @@ jet_driver_compile_stages: fn(request: JetDriverCompileRequest, preloaded: ^[Jet
     jet_driver_check_core_layers(request, load.source_units, layer_diagnostics)
     // Registration makes a grammar's items from its plan, so the plan of
     // every grammar a module binding declares is computed first, by one
-    // compile of those bindings alone (jet_driver_grammar_plans).
-    _: jet_driver_grammar_plans(request, load)
+    // compile of those bindings alone (jet_driver_grammar_plans), and each
+    // registration of the program (a root `#loop`'s first pass too) takes
+    // its module's plans.
+    grammar_plans: jet_driver_grammar_plans(request, load)
     // A root `#loop` over a module value computed while building (`#loop
     // row in ROWS` over `ROWS: #run rows()`) waits on that value. A first
     // pass registers the program without such loops and computes the
@@ -5987,7 +5989,7 @@ jet_driver_compile_stages: fn(request: JetDriverCompileRequest, preloaded: ^[Jet
     if loop_values.len() > 0 {
         ^probe_log: jet_driver_keep_going_log(None)
         ^probe_capture: JetDriverCheckedProjectionCapture{}
-        probe: jet_driver_compile_loaded_stages(request, probe_log, load, checked_projection, probe_capture, loop_values.move(), JetDriverStagesPass.LoopProbe)
+        probe: jet_driver_compile_loaded_stages(request, probe_log, load, checked_projection, probe_capture, loop_values.move(), grammar_plans.copy(), JetDriverStagesPass.LoopProbe)
         if request.trace_sink == .Val(sink) -> sink.begin("load", "", -1, -1)
         load = jet_driver_load_reach(request, !kg.enabled && !request.every_core_body && request.core_tests == "")
         if request.trace_sink == .Val(sink) -> sink.end("load", load.modules.len())
@@ -5996,7 +5998,7 @@ jet_driver_compile_stages: fn(request: JetDriverCompileRequest, preloaded: ^[Jet
         loop_values = probe.root_loop_values.move() ?? jet_driver_root_loop_waits(load)
     }
     ^events: if request.compiler_events -> jet_driver_load_events(load) else -> [CompilerEventRecord]{}
-    ^result: jet_driver_compile_loaded_stages(request, kg, load, checked_projection, capture, loop_values, JetDriverStagesPass.Compile)
+    ^result: jet_driver_compile_loaded_stages(request, kg, load, checked_projection, capture, loop_values, grammar_plans.move(), JetDriverStagesPass.Compile)
     if request.compiler_events {
         finished: jet_driver_finished_event(result)
         loop event in result.events.move() -> events.push(event)
@@ -6039,7 +6041,7 @@ jet_driver_grammar_plans: fn(request: JetDriverCompileRequest, load: JetDriverLo
     batch_load: jet_driver_grammar_load(load, waits)
     ^batch_log: jet_driver_keep_going_log(None)
     ^batch_capture: JetDriverCheckedProjectionCapture{}
-    batch: jet_driver_compile_loaded_stages(request, batch_log, batch_load, false, batch_capture, waits.move(), JetDriverStagesPass.GrammarBatch)
+    batch: jet_driver_compile_loaded_stages(request, batch_log, batch_load, false, batch_capture, waits.move(), [SemaRootLoopValue]{}, JetDriverStagesPass.GrammarBatch)
     // A batch that stopped before computing the values hands back none.
     ^plans: batch.root_loop_values.move() ?? jet_driver_grammar_waits(load)
     ^landed: 0
@@ -6381,11 +6383,15 @@ JetDriverStagesPass: enum {
 // (jet_driver_compile_stages): on a first pass (`pass`) the loops are left
 // out and the compile stops once the values are computed, handing them back
 // in `root_loop_values`; on the compile proper the loops expand over them.
-jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: ^JetDriverKeepGoingLog, owned_load: ^^JetDriverLoadResult, checked_projection: Bool, capture: ^JetDriverCheckedProjectionCapture, owned_loop_values: ^^[SemaRootLoopValue], pass: JetDriverStagesPass) -> JetDriverCompileResult {
+// `owned_grammar_plans` are the plans of the grammars the modules declare
+// (jet_driver_grammar_plans), which registration makes the grammars' items
+// from.
+jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: ^JetDriverKeepGoingLog, owned_load: ^^JetDriverLoadResult, checked_projection: Bool, capture: ^JetDriverCheckedProjectionCapture, owned_loop_values: ^^[SemaRootLoopValue], owned_grammar_plans: ^^[SemaRootLoopValue], pass: JetDriverStagesPass) -> JetDriverCompileResult {
     loop_probe: pass != JetDriverStagesPass.Compile
     grammar_batch: pass == JetDriverStagesPass.GrammarBatch
     ^load: owned_load.move()
     ^loop_values: owned_loop_values.move()
+    grammar_plans: owned_grammar_plans.move()
     ^trace: jet_driver_empty_compile_trace()
     if !load.complete {
         failure: load.failed_stage ?? JetDriverStage.Load
@@ -6479,6 +6485,16 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: ^JetD
         loop index in 0..<registration_inputs.len() {
             if module_text(load.module_table, registration_inputs[index].module_identity) == wait.module_identity {
                 registration_inputs[index].loop_values.push(NamedCtValue{name: wait.name, value: value})
+                break
+            }
+        }
+    }
+    // Each computed plan goes to the registration of its module.
+    loop plan in grammar_plans.move() {
+        value: plan.value ?? next
+        loop index in 0..<registration_inputs.len() {
+            if module_text(load.module_table, registration_inputs[index].module_identity) == plan.module_identity {
+                registration_inputs[index].grammar_plans.push(NamedCtValue{name: plan.name, value: value})
                 break
             }
         }

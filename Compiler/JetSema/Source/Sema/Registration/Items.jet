@@ -741,6 +741,12 @@ SemaRegistrationModuleInput: struct {
     // Set on that first pass: a root `#loop` over a value not computed yet
     // is left out, without a report, until the value is known.
     loop_values_pending: Bool{false},
+    // The plans of the grammars this module's bindings declare
+    // (sema_grammar_declaring_binding), each the `plan` of the binding's
+    // checked value, by binding name: the driver computes them in one batch
+    // before registration. A binding whose literal the grammar check refused
+    // has none; the compile proper reports the literal.
+    grammar_plans: [NamedCtValue]{[NamedCtValue]{}},
 }
 
 SemaForeignImportBinding: struct {
