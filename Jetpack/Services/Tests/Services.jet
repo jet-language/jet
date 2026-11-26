@@ -952,3 +952,30 @@ services_test_has_pair: fn(command: [String], first: String, second: String) -> 
     assert(!services_run_bounded_probe(process.shell("sleep 30").cwd(dir), 100))
     assert(services_now_ms() - started < 2000)
 }
+
+#Test("stale supervisor finish never resurrects deleted dir or hijacks new generation and down drains supervisor") {
+    project: services_test_scratch("supervisor-down-drain")
+    plan: services_test_plan("fixture", "sleep 30")
+    ^env: services_test_env()
+    started: services_start_one(services_test_host(), project, env, plan) ?? panic("start first")
+    service_dir: services_service_dir(project, "fixture")
+    assert(files.is_dir(service_dir))
+
+    // Spawn a short-lived dummy supervisor process and record its verified supervisor.pid.
+    ^dummy_sup: process.cmd([String]{"sh", "-c", "sleep 0.15"}).spawn() ?? panic("spawn dummy supervisor")
+    sup_pid: dummy_sup.id()
+    sup_start: services_process_start_identity(sup_pid) ?? panic("sup start id")
+    sup_state: ServiceProcessState{pid: sup_pid, start_identity: sup_start, containment: None}
+    services_write_atomic(services_supervisor_pid_path(service_dir), sup_state.encode().bytes()) ?? panic("write supervisor.pid")
+
+    // `services_down_one` must wait until the recorded supervisor exits and remove supervisor.pid.
+    services_down_one(services_test_host(), project, plan) ?? panic("down first")
+    assert(!(services_process_matches_start(sup_state) ?? false), "down returned before supervisor exited")
+    assert(!files.exists(services_supervisor_pid_path(service_dir)), "supervisor.pid was left behind")
+    dummy_sup.wait().drop("reap dummy supervisor")
+
+    // Deleting the service dir and running a late supervisor finish must NOT recreate supervisor.error.
+    files.remove_all(project) ?? panic("remove project")
+    services_finish_supervisor(ServiceHost.Platform, project, plan, started, Val("service exited unexpectedly"))
+    assert(!files.exists(services_supervisor_error_path(service_dir)), "late supervisor recreated supervisor.error in deleted project")
+}
