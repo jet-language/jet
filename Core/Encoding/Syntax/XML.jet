@@ -1,0 +1,137 @@
+// Private XML 1.0 grammar for `core.encoding.xml`.
+//
+// Declares the W3C XML 1.0 document syntax (prolog, XML declaration, DOCTYPE
+// with SYSTEM/PUBLIC external IDs and internal DTD subset, comments,
+// processing instructions, CDATA sections, elements, attributes, references,
+// and character data) as a checked printable `Grammar` literal.
+use {
+    core.grammar.[Grammar]
+    core.grammar.sink.[GrammarSink]
+}
+
+#Allow(Jet.RawMultilineHtml, "XML 1.0 grammar notation contains angle-bracket markup literals")
+priv Document: Grammar{"""
+    document     : bom=BOM? decl=XML_DECL? pre+=misc_item* (dtd=doctype mid+=misc_item*)? root=element post+=misc_item* ;
+    misc_item    : text=COMMENT # Comment
+                 | text=PI      # ProcessingInstruction
+                 ;
+    doctype      : '<!DOCTYPE' name=NAME ext=external_id? ('[' decls+=dtd_decl* ']')? '>' ;
+    external_id  : 'SYSTEM' sys=ATTR_VAL                # SystemId
+                 | 'PUBLIC' pub=ATTR_VAL sys=ATTR_VAL   # PublicId
+                 ;
+    dtd_decl     : text=DTD_ENTITY # EntityDecl
+                 | text=DTD_OTHER  # OtherDecl
+                 | text=COMMENT    # DtdComment
+                 | text=PI         # DtdPi
+                 ;
+    element      : '<' name=NAME attrs+=attr* tail=element_tail ;
+    attr         : name=NAME '=' val=ATTR_VAL ;
+    element_tail : '/>'                                   # Empty
+                 | '>' content=body '</' close=NAME '>'   # Pair
+                 ;
+    body         : lead=TEXT? items+=markup* ;
+    markup       : node=markup_node tail=TEXT? ;
+    markup_node  : elem=element # Element
+                 | text=REF     # Reference
+                 | text=CDATA   # Cdata
+                 | text=COMMENT # Comment
+                 | text=PI      # ProcessingInstruction
+                 ;
+
+    BOM        : '\u{{FEFF}}' ;
+    XML_DECL   : '<?xml' [ \t\r\n]+ ([^?] | '?' [^>])* '?>' ;
+    CDATA      : '<![CDATA[' ([^\]] | ']' [^\]] | ']]' [^>])* ']]>' ;
+    COMMENT    : '<!--' ([^\-] | '-' [^\-])* '-->' ;
+    DTD_ENTITY : '<!ENTITY' ([^>"'] | '"' [^"]* '"' | '\'' [^']* '\'')* '>' ;
+    DTD_OTHER  : '<!' ('ELEMENT' | 'ATTLIST' | 'NOTATION') ([^>"'] | '"' [^"]* '"' | '\'' [^']* '\'')* '>' ;
+    PI         : '<?' ([^xX? \t\r\n] | [xX] [^mM? \t\r\n] | [xX] [mM] [^lL? \t\r\n] | [xX] [mM] [lL] [A-Za-z0-9_.\-:]) ([^?] | '?' [^>])* '?>' ;
+    REF        : '&' ([A-Za-z_:] [A-Za-z0-9_.\-:]* | '#' [0-9]+ | '#x' [0-9A-Fa-f]+) ';' ;
+    ATTR_VAL   : '"' ([^"<&] | '&' ([A-Za-z_:] [A-Za-z0-9_.\-:]* | '#' [0-9]+ | '#x' [0-9A-Fa-f]+) ';')* '"'
+               | '\'' ([^'<&] | '&' ([A-Za-z_:] [A-Za-z0-9_.\-:]* | '#' [0-9]+ | '#x' [0-9A-Fa-f]+) ';')* '\''
+               ;
+    NAME       : [A-Za-z_:\u{{C0}}-\u{{D6}}\u{{D8}}-\u{{F6}}\u{{F8}}-\u{{2FF}}\u{{370}}-\u{{37D}}\u{{37F}}-\u{{1FFF}}\u{{200C}}-\u{{200D}}\u{{2070}}-\u{{218F}}\u{{2C00}}-\u{{2FEF}}\u{{3001}}-\u{{D7FF}}\u{{F900}}-\u{{FDCF}}\u{{FDF0}}-\u{{FFFD}}\u{{10000}}-\u{{EFFFF}}]
+                 [A-Za-z0-9_.\-:\u{{B7}}\u{{C0}}-\u{{D6}}\u{{D8}}-\u{{F6}}\u{{F8}}-\u{{2FF}}\u{{300}}-\u{{36F}}\u{{370}}-\u{{37D}}\u{{37F}}-\u{{1FFF}}\u{{200C}}-\u{{200D}}\u{{203F}}-\u{{2040}}\u{{2070}}-\u{{218F}}\u{{2C00}}-\u{{2FEF}}\u{{3001}}-\u{{D7FF}}\u{{F900}}-\u{{FDCF}}\u{{FDF0}}-\u{{FFFD}}\u{{10000}}-\u{{EFFFF}}]*
+               ;
+    TEXT       : [^<& \t\r\n] [^<&]* ;
+    WS         : [ \t\r\n]+ -> skip ;
+"""}
+
+/// Checks whether `source` parses under the XML 1.0 grammar and has matching
+/// opening and closing element tags throughout its tree.
+check_well_formed: fn(source: String) -> Bool Never! {
+    if Document.parse(source) == {
+        .Ok(doc) -> tags_match(doc.root)
+        .Err(_) -> false
+    }
+}
+
+/// Parses `source` under the XML 1.0 grammar and formats it back through the
+/// grammar's checked printer when well-formed.
+print_document: fn(source: String) -> String? Never! {
+    if Document.parse(source) == {
+        .Ok(doc) -> {
+            if !tags_match(doc.root) -> return None
+            if doc.print() == {
+                .Ok(printed) -> Val(printed)
+                .Err(_) -> None
+            }
+        }
+        .Err(_) -> None
+    }
+}
+
+/// Returns the root element's tag name when `source` is well-formed XML 1.0.
+root_name: fn(source: String) -> String? Never! {
+    if Document.parse(source) == {
+        .Ok(doc) -> {
+            if !tags_match(doc.root) -> return None
+            Val(doc.root.name)
+        }
+        .Err(_) -> None
+    }
+}
+
+/// Streams `source` through `Document.parse_into` without building a tree and
+/// returns the number of elements parsed, or `None` on syntax error.
+count_elements: fn(source: String) -> Int? Never! {
+    ^sink: ElementCounter{elements: 0}
+    if Document.parse_into(source, sink) == {
+        .Ok(_) -> Val(sink.elements)
+        .Err(_) -> None
+    }
+}
+
+priv ElementCounter: struct {
+    elements: Int,
+
+    impl GrammarSink {
+        open: fn(^self, rule: Int) Never! {
+            r: DocumentRule.from_int(rule) ?? return
+            if r == .Element {
+                self.elements += 1
+            }
+        }
+
+        close: fn(^self, _rule: Int) Never! {}
+
+        token: fn(^self, _kind: Int, _start: Int, _end: Int) Never! {}
+    }
+}
+
+priv tags_match: fn(elem: Element) -> Bool Never! {
+    if elem.tail == {
+        .Empty -> true
+        .Pair(content, close) -> {
+            if elem.name != close -> return false
+            loop item in content.items {
+                if item.node == {
+                    .Element(child) -> {
+                        if !tags_match(child) -> return false
+                    }
+                    .Reference(_) | .Cdata(_) | .Comment(_) | .ProcessingInstruction(_) -> {}
+                }
+            }
+            true
+        }
+    }
+}

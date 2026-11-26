@@ -7,6 +7,7 @@ use {
     stream: __core_encoding_stream
     engine: __core_encoding_xml_engine
     kernel: __core_encoding_xml_kernel
+    xml_syntax: __core_encoding_syntax_xml
 }
 
 #Error
@@ -115,6 +116,10 @@ XMLCanonical: struct {
 
 parse: fn(text: String) -> Dyn XMLError! {
     kernel.parse_document(text) ?? return Err(kernel.public_error(err))
+}
+
+priv check_xml_syntax: fn(text: String) -> Bool Never! {
+    xml_syntax.check_well_formed(text)
 }
 
 parse_with: fn(text: String, options: XMLParseOptions) -> Dyn XMLError! {
@@ -563,5 +568,33 @@ value_heap_cost: fn(value: Dyn) -> Int Never! {
             assert_eq(error.reason, "mismatched XML closing tag")
         }
         .Ok(_) -> panic("mismatched non-ASCII XML accepted")
+    }
+}
+
+#Test("XML grammar parses prolog, doctype, elements, references, and prints back") {
+    source: "<?xml version='1.0'?>\n<!DOCTYPE r PUBLIC 'pub' 'sys' [<!ENTITY e 'v'>]><r xmlns='u' xmlns:p='v' p:a='x&amp;y'>a&amp;<!--c--><![CDATA[<x>]]><?go now?><p:c/></r>\n"
+    assert(check_xml_syntax(source))
+    assert(xml_syntax.check_well_formed(source))
+    assert_eq(xml_syntax.root_name(source), Val("r"))
+    assert_eq(xml_syntax.count_elements(source), Val(2))
+    printed: xml_syntax.print_document(source) ?? panic("XML grammar print")
+    assert(xml_syntax.check_well_formed(printed))
+    tree: parse(source) ?? panic("XML parse original")
+    reparsed: parse(printed) ?? panic("XML parse printed")
+    orig_root: root(tree) ?? panic("XML orig root")
+    re_root: root(reparsed) ?? panic("XML reparsed root")
+    assert_eq(expanded_name(orig_root) ?? panic("orig name"), expanded_name(re_root) ?? panic("reparsed name"))
+    assert_eq(attribute(orig_root, "{{v}}a") ?? panic("orig attr"), attribute(re_root, "{{v}}a") ?? panic("reparsed attr"))
+    assert_eq((content(orig_root) ?? panic("orig content")).len(), (content(re_root) ?? panic("reparsed content")).len())
+    no_dtd: "<?xml version='1.0'?><r xmlns:p='urn:p' p:a='1'><e/><!--c--><![CDATA[<&]]></r>"
+    no_dtd_printed: xml_syntax.print_document(no_dtd) ?? panic("XML no-dtd print")
+    c_orig: canonical(parse(no_dtd) ?? panic("parse no_dtd"), XMLCanonical.inclusive11()) ?? panic("c14n orig")
+    c_re: canonical(parse(no_dtd_printed) ?? panic("parse no_dtd_printed"), XMLCanonical.inclusive11()) ?? panic("c14n printed")
+    assert_eq(c_orig, c_re)
+    assert(xml_syntax.check_well_formed("<é a=\"1\">text&#65;<child/></é>"))
+    assert_eq(xml_syntax.root_name("<é a=\"1\">text&#65;<child/></é>"), Val("é"))
+    loop bad in ["<r><a></b></r>", "<r><unclosed>", "<r a=1/>", "<r></r><extra/>", "plain text"] {
+        assert(!xml_syntax.check_well_formed(bad))
+        assert(xml_syntax.print_document(bad) == None)
     }
 }
