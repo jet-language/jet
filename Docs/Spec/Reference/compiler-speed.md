@@ -265,6 +265,6 @@ hermetic build from scratch. Evaluation, no-op and incremental each need
 Jet/Nix at or below `0.25`; the other two need it below `1.00`.
 
 A dated receipt is historical evidence, not a live status claim:
-[`performance-receipt.md`](../../Audits/performance-receipt.md). The scripts
-and their manifest define the measurement protocol; this page records the
-meaning-preserving architecture law.
+[`compile-cost-hello-2026-10-02.md`](../../Audits/compile-cost-hello-2026-10-02.md).
+The scripts and their manifest define the measurement protocol; this page
+records the meaning-preserving architecture law.
