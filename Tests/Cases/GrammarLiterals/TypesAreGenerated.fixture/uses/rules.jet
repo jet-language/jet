@@ -1,0 +1,25 @@
+// A public grammar, whose types another module uses, and a private one,
+// whose types only this module reaches.
+use core.grammar.[Grammar]
+
+Ini: Grammar{"""
+    ini     : lines+=line (';' lines+=line)* ;
+    line    : section | entry | blank ;
+    section : '[' name=KEY ']' ;
+    entry   : name=KEY '=' value? ;
+    blank   : ;
+    value   : text=KEY # Bare | text=QUOTED # Quoted | HOLE<slot=Value> # Spliced ;
+    KEY     : [a-z]+ ;
+    QUOTED  : '"' [a-z]* '"' ;
+    WS      : [ \t]+ -> skip ;
+    """}
+
+priv Level: Grammar{"""
+    level : 'trace' # Trace | 'info' # Info ;
+    """}
+
+// The private grammar's token number for `info` and its one rule's number.
+level_numbers: fn() -> String {
+    level: Level.Info
+    "{level == Level.Info} {LevelToken.Info.to_int()} {LevelRule.Level.to_int()}"
+}

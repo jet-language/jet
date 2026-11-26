@@ -3,10 +3,12 @@
 
 /// Receives one parse as events, in input order: `open(rule)` when a rule
 /// starts, `close(rule)` when it ends, and `token(kind, start, end)` for each
-/// token, skipped ones (spaces, comments) included. `rule` is the rule's
-/// `RULE` constant and `kind` a token-kind constant of the generated types;
-/// `start` and `end` are byte offsets into the parsed text, so a sink reads a
-/// token's text without a copy being made for it.
+/// token, skipped ones (spaces, comments) included. `rule` is a case of the
+/// grammar's generated `<Start>Rule` enum as its number, and `kind` one of
+/// `<Start>Token`: a sink matches `PairRule.from_int(rule)` or
+/// `PairToken.from_int(kind)`. `start` and `end` are byte offsets into the
+/// parsed text, so a sink reads a token's text without a copy being made for
+/// it.
 GrammarSink: trait {
     open: fn(^self, rule: Int),
     close: fn(^self, rule: Int),

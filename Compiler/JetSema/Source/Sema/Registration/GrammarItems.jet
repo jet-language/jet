@@ -1,0 +1,346 @@
+// The items a grammar declares. A module binding whose value is a
+// `core.grammar.Grammar` literal (sema_grammar_declaring_binding) gives way,
+// before registration, to the types its plan describes:
+//   a struct per parser rule of one alternative, an enum per rule of several
+//                                  (the rule's fields and cases, in order)
+//   `<Start>Rule`                  a case per parser rule, numbered by rule
+//   `<Start>Token`                 a case per token kind, numbered by kind
+//   `<Start>Slot`                  a case per hole, when the grammar has holes
+// `<Start>` is the binding's name. The rule and token enums are
+// `#Layout(U32)`, so `PairRule.from_int(rule)` names the rule a sink
+// receives. Each type takes the binding's visibility, and every name and
+// shape is the plan's (Core/Grammar/Shape.jet): this file only arranges the
+// plan as items. A binding whose literal the check refused has no plan and
+// stays, so the compile proper reports its faults.
+use {
+    jet_foundation.[
+        AST_NODE_GENERATED,
+        CallLabel,
+        CLICommandBinding,
+        ConstDef,
+        CtValue,
+        Diagnostic,
+        EnumDef,
+        EnumGroup,
+        Expr,
+        Field,
+        Func,
+        Item,
+        Marker,
+        MarkerCallArg,
+        NamedCtValue,
+        NamedSpan,
+        Span,
+        Stmt,
+        StructDef,
+        TraitImplBlock,
+        Type,
+        TypeParam,
+        Variant,
+        VariantField,
+        VariantPayload,
+        expr_span,
+    ]
+}
+
+// What a generated field holds (core.grammar GrammarFieldKind): a token's
+// text, a value of another rule's type, or whether an optional literal was
+// there.
+SemaGrammarFieldKind: enum {
+    Text,
+    Rule,
+    Flag,
+}
+
+// One field of a generated type (core.grammar GrammarField).
+SemaGrammarField: struct {
+    name: String,
+    kind: SemaGrammarFieldKind,
+    rule: Int,
+    optional: Bool,
+    list: Bool,
+}
+
+// One case of a generated enum (core.grammar GrammarCase): its fields, or
+// the rule `wraps` whose value it carries (-1 for none).
+SemaGrammarCase: struct {
+    name: String,
+    fields: [SemaGrammarField],
+    wraps: Int,
+}
+
+// The type parser rule `rule` generates (core.grammar GrammarShape).
+SemaGrammarShape: struct {
+    rule: Int,
+    name: String,
+    is_enum: Bool,
+    fields: [SemaGrammarField],
+    cases: [SemaGrammarCase],
+}
+
+// What the items are made of: the plan's shapes, each token kind's case
+// name, and each kind's hole name ("" for a kind that is no hole).
+SemaGrammarItemsPlan: struct {
+    shapes: [SemaGrammarShape],
+    kind_names: [String],
+    holes: [String],
+}
+
+// Replace each module binding `plans` names with the items its plan
+// describes, accepted as a rule's generated items (UserTemplates.jet
+// sema_user_rule_accept).
+sema_grammar_items_expand: fn(items: ^[Item], plans: ^^[NamedCtValue], diagnostics: ^[Diagnostic]) {
+    loop plan in plans.move() {
+        ^index: -1
+        loop (position, item) in items {
+            if item == .Const(definition) && definition.name == plan.name {
+                index = position
+                break
+            }
+        }
+        if index < 0 -> next
+        removed: items.remove(index, .Slot) ?? next
+        if removed == .Const(definition) {
+            ^expanded: sema_grammar_items(definition, sema_grammar_items_plan(plan.value))
+            ^generated: [Item]{}
+            sema_user_rule_accept(items, "Grammar", None, expr_span(definition.value), expanded.move(), generated, diagnostics)
+            loop item in generated.move() -> items.push(item)
+        }
+    }
+}
+
+// The items of grammar binding `definition` with plan `plan`.
+sema_grammar_items: fn(definition: ConstDef, plan: SemaGrammarItemsPlan) -> [Item] Never! {
+    span: expr_span(definition.value)
+    ^rule_types: [String]{}
+    loop shape in plan.shapes {
+        loop rule_types.len() <= shape.rule -> rule_types.push("")
+        rule_types[shape.rule] = shape.name.copy()
+    }
+    ^items: [Item]{}
+    loop shape in plan.shapes {
+        if shape.is_enum {
+            ^variants: [Variant]{}
+            loop case in shape.cases {
+                ^payload: VariantPayload.Unit
+                if case.wraps >= 0 {
+                    payload = VariantPayload.Single{ty: Type.Named{name: rule_types[case.wraps].copy()}, span: span}
+                } else if case.fields.len() > 0 {
+                    ^fields: [VariantField]{}
+                    loop field in case.fields {
+                        fields.push(VariantField{name: field.name.copy(), name_span: span, ty: sema_grammar_field_type(field, rule_types), ty_span: span})
+                    }
+                    payload = VariantPayload.Named{fields: fields}
+                }
+                variants.push(Variant{name: case.name.copy(), name_span: span, payload: payload, discriminant: None, discriminant_expr: None, serde_markers: [Marker]{}})
+            }
+            items.push(Item.Enum{value: sema_grammar_enum(definition, shape.name.copy(), variants, [Marker]{})})
+        } else {
+            ^fields: [Field]{}
+            loop field in shape.fields {
+                fields.push(Field{is_pub: true, is_package_pub: false, name: field.name.copy(), name_span: span, ty: sema_grammar_field_type(field, rule_types), ty_span: span, serde_markers: [Marker]{}, redact: false, computed: None, default: None, default_ct: None})
+            }
+            items.push(Item.Struct{value: sema_grammar_struct(definition, shape.name.copy(), fields)})
+        }
+    }
+    ^rules: [Variant]{}
+    loop shape in plan.shapes -> rules.push(sema_grammar_numbered(shape.name.copy(), shape.rule, span))
+    items.push(Item.Enum{value: sema_grammar_enum(definition, "{definition.name}Rule", rules, [Marker]{sema_grammar_layout(span)})})
+    ^kinds: [Variant]{}
+    ^slots: [Variant]{}
+    loop (kind, name) in plan.kind_names {
+        kinds.push(sema_grammar_numbered(name.copy(), kind, span))
+        if kind < plan.holes.len() && plan.holes[kind] != "" {
+            slot: if name.starts_with("Hole") -> name.slice(4, name.len()) else -> name.copy()
+            slots.push(Variant{name: slot, name_span: span, payload: VariantPayload.Unit, discriminant: None, discriminant_expr: None, serde_markers: [Marker]{}})
+        }
+    }
+    items.push(Item.Enum{value: sema_grammar_enum(definition, "{definition.name}Token", kinds, [Marker]{sema_grammar_layout(span)})})
+    if slots.len() > 0 {
+        items.push(Item.Enum{value: sema_grammar_enum(definition, "{definition.name}Slot", slots, [Marker]{})})
+    }
+    items
+}
+
+// The type of `field`: `String`, `Bool` or the type of the rule it holds,
+// in a list or an option as the field is.
+sema_grammar_field_type: fn(field: SemaGrammarField, rule_types: [String]) -> Type Never! {
+    held: if field.kind == {
+        .Text -> Type.String
+        .Flag -> Type.Bool
+        .Rule -> Type.Named{name: rule_types[field.rule].copy()}
+    }
+    if field.list -> return Type.List{element: held}
+    if field.optional -> return Type.Option{inner: held}
+    held
+}
+
+// Case `name` of a numbered enum, numbered `number`.
+sema_grammar_numbered: fn(name: String, number: Int, span: Span) -> Variant Never! {
+    written: Expr.Int{value: number, span: span, width: None, raw: None, id: AST_NODE_GENERATED}
+    Variant{name: name, name_span: span, payload: VariantPayload.Unit, discriminant: Val(number), discriminant_expr: Val(written), serde_markers: [Marker]{}}
+}
+
+// `#Layout(U32)`, which numbers an enum's cases (EnumNumbers.jet).
+sema_grammar_layout: fn(span: Span) -> Marker Never! {
+    backing: Expr.Ident{name: "U32", span: span, id: AST_NODE_GENERATED}
+    Marker{name: "Layout", negated: false, name_span: span, args: [MarkerCallArg]{MarkerCallArg.Expr{value: backing}}, arg_labels: [CallLabel?]{None}, span: span, ct: None}
+}
+
+sema_grammar_struct: fn(definition: ConstDef, name: String, fields: [Field]) -> StructDef Never! {
+    span: expr_span(definition.value)
+    StructDef{
+        span: span,
+        is_pub: definition.is_pub,
+        is_package_pub: definition.is_package_pub,
+        name: name,
+        name_span: span,
+        type_params: [TypeParam]{},
+        fields: fields,
+        state: None,
+        methods: [Func]{},
+        cli_bindings: [CLICommandBinding]{},
+        trait_impls: [TraitImplBlock]{},
+        derives: [NamedSpan]{},
+        auto_derive_default: true,
+        is_published_schema: false,
+        published_schema_span: None,
+        is_single_use: false,
+        single_use_span: None,
+        is_must_use: false,
+        must_use_span: None,
+        layout: None,
+        layout_span: None,
+        layout_alignment_span: None,
+        serde_markers: [Marker]{},
+        type_markers: [Marker]{},
+        validate_block: [Stmt]{},
+        validate_span: None,
+    }
+}
+
+sema_grammar_enum: fn(definition: ConstDef, name: String, variants: [Variant], markers: [Marker]) -> EnumDef Never! {
+    span: expr_span(definition.value)
+    EnumDef{
+        span: span,
+        is_pub: definition.is_pub,
+        is_package_pub: definition.is_package_pub,
+        name: name,
+        name_span: span,
+        type_params: [TypeParam]{},
+        variants: variants,
+        methods: [Func]{},
+        trait_impls: [TraitImplBlock]{},
+        derives: [NamedSpan]{},
+        auto_derive_default: true,
+        is_single_use: false,
+        single_use_span: None,
+        is_must_use: false,
+        must_use_span: None,
+        serde_markers: [Marker]{},
+        type_markers: markers,
+        groups: [EnumGroup]{},
+    }
+}
+
+// Read the parts of a computed `GrammarPlan` value the items are made of.
+sema_grammar_items_plan: fn(value: CtValue) -> SemaGrammarItemsPlan Never! {
+    ^plan: SemaGrammarItemsPlan{shapes: [SemaGrammarShape]{}, kind_names: [String]{}, holes: [String]{}}
+    if value == .Struct(_, entries) {
+        loop entry in entries {
+            if entry.value == .List(values) {
+                if entry.name == {
+                    "shapes" -> loop shape in values -> plan.shapes.push(sema_grammar_shape(shape))
+                    "kind_names" -> loop name in values -> plan.kind_names.push(sema_grammar_text(name))
+                    "tokens" -> loop token in values -> plan.holes.push(sema_grammar_member_text(token, "hole"))
+                    else -> {}
+                }
+            }
+        }
+    }
+    plan
+}
+
+sema_grammar_shape: fn(value: CtValue) -> SemaGrammarShape Never! {
+    ^shape: SemaGrammarShape{rule: -1, name: "", is_enum: false, fields: [SemaGrammarField]{}, cases: [SemaGrammarCase]{}}
+    if value == .Struct(_, entries) {
+        loop entry in entries {
+            if entry.name == {
+                "rule" -> shape.rule = sema_grammar_int(entry.value)
+                "name" -> shape.name = sema_grammar_text(entry.value)
+                "is_enum" -> shape.is_enum = entry.value == .Bool(true)
+                "fields" -> shape.fields = sema_grammar_fields(entry.value)
+                "cases" -> if entry.value == .List(values) {
+                    loop case in values -> shape.cases.push(sema_grammar_case(case))
+                }
+                else -> {}
+            }
+        }
+    }
+    shape
+}
+
+sema_grammar_case: fn(value: CtValue) -> SemaGrammarCase Never! {
+    ^case: SemaGrammarCase{name: "", fields: [SemaGrammarField]{}, wraps: -1}
+    if value == .Struct(_, entries) {
+        loop entry in entries {
+            if entry.name == {
+                "name" -> case.name = sema_grammar_text(entry.value)
+                "fields" -> case.fields = sema_grammar_fields(entry.value)
+                "wraps" -> case.wraps = sema_grammar_int(entry.value)
+                else -> {}
+            }
+        }
+    }
+    case
+}
+
+sema_grammar_fields: fn(value: CtValue) -> [SemaGrammarField] Never! {
+    ^fields: [SemaGrammarField]{}
+    if value == .List(values) {
+        loop field in values -> fields.push(sema_grammar_field(field))
+    }
+    fields
+}
+
+sema_grammar_field: fn(value: CtValue) -> SemaGrammarField Never! {
+    ^field: SemaGrammarField{name: "", kind: SemaGrammarFieldKind.Text, rule: -1, optional: false, list: false}
+    if value == .Struct(_, entries) {
+        loop entry in entries {
+            if entry.name == {
+                "name" -> field.name = sema_grammar_text(entry.value)
+                "kind" -> if entry.value == .Enum(_, variant, _) {
+                    if variant == "Rule" {
+                        field.kind = .Rule
+                    } else if variant == "Flag" {
+                        field.kind = .Flag
+                    }
+                }
+                "rule" -> field.rule = sema_grammar_int(entry.value)
+                "optional" -> field.optional = entry.value == .Bool(true)
+                "list" -> field.list = entry.value == .Bool(true)
+                else -> {}
+            }
+        }
+    }
+    field
+}
+
+// Text field `name` of struct value `value` ("" when it has none).
+sema_grammar_member_text: fn(value: CtValue, name: String) -> String Never! {
+    if value == .Struct(_, entries) {
+        loop entry in entries {
+            if entry.name == name -> return sema_grammar_text(entry.value)
+        }
+    }
+    ""
+}
+
+sema_grammar_text: fn(value: CtValue) -> String Never! {
+    if value == .Str(text) -> return text.copy()
+    ""
+}
+
+sema_grammar_int: fn(value: CtValue) -> Int Never! {
+    if value == .Int(number) -> number else -> -1
+}

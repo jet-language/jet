@@ -1,6 +1,7 @@
 // Generated types: a struct per one-alternative rule, an enum per rule of
-// several, the field each label or lone rule reference makes, and the
-// refusals: a field set twice or of two types, and a rule with no end.
+// several, the field each label or lone rule reference makes, the case name
+// of each token kind, and the refusals: a field set twice or of two types, a
+// rule with no end, and a token kind named as a rule's type.
 use {
     core.grammar.[analyze]
     core.grammar.error.[GrammarFault, GrammarFaultKind]
@@ -170,4 +171,20 @@ only_fault: fn(text: String) -> GrammarFault Never! {
 #Test("a rule no finite text can build is refused") {
     fault: only_fault("a : '(' a ')' ;")
     assert_eq(fault.message, "the rule `a` cannot end: every alternative of it needs a rule that needs it again")
+}
+
+#Test("each token kind is named as a case: Eof, token rules in TitleCase, then literals by their words and signs") {
+    assert_eq(plan_of("p : n=NAME '<=' q=QUOTED_ID ;\nNAME : [a-z]+ ;\nQUOTED_ID : '\"' [a-z]+ '\"' ;\nWS : ' '+ -> skip ;").kind_names, [String]{"Eof", "Name", "QuotedId", "Ws", "LessEquals"})
+    assert_eq(plan_of("p : 'is not'i '_' '2x' '<>' 'a-b' ;\nWS : ' '+ -> skip ;").kind_names, [String]{"Eof", "Ws", "IsNot", "Underscore", "Literal2x", "LessGreater", "AMinusB"})
+}
+
+#Test("a kind whose name an earlier kind has is numbered, and a hole is Hole and its slot") {
+    names: plan_of("s : 'select'i 'a' # Folded | '(' 'SELECT' ')' # Exact | HOLE<slot=Value> # Hole ;\nWS : ' '+ -> skip ;").kind_names
+    assert_eq(names, [String]{"Eof", "Ws", "Select", "A", "LeftParen", "Select2", "RightParen", "HoleValue"})
+}
+
+#Test("a token kind named as a rule's type is refused") {
+    fault: only_fault("name : NAME ;\nNAME : [a-z]+ ;")
+    assert_eq(fault.message, "the token NAME and the rule `name` would both be named `Name`")
+    assert_eq(fault.at.offset, 14)
 }
