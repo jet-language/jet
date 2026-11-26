@@ -1,0 +1,85 @@
+// Changeable module globals stay ergonomic while keeping tasks, pure code,
+// and `#Memo` caches sound:
+// - `task.group` workers borrow sendable globals for reading with zero copies
+//   and can write disjoint globals before the group joins at `}`.
+// - `task.all` branches and `para_map` workers read sendable globals safely.
+// - Pure (`-[]>`) and `#Memo` functions take global values as parameters so
+//   cached results never go stale when module state changes.
+// - Outliving tasks coordinate shared state through `Shared{...}`, and raw
+//   words whose every write sits inside `#Unsafe` stay available to low-level
+//   code.
+package: {
+    name: "global_state_safety"
+    authority: { allow: [IO, Time, Time.Wait] }
+}
+
+Counter: struct {
+    value: Int,
+}
+
+^difficulty: 3
+
+#Persist ^score: 0
+
+#Persist ^bonus: 0
+
+^raw_tag: I64{0}
+
+HITS: Shared{Counter{value: 0}}
+
+read_difficulty: fn() -> Int Never! { difficulty }
+
+#Memo weighted: fn(x: Int, mult: Int) -[]> Int { x * mult }
+
+set_raw_tag: fn(tag: I64) Never! {
+    #Unsafe("single-threaded setup of a raw word") { raw_tag = tag }
+}
+
+run: fn() {
+    // 1. `task.group` workers borrow globals for reading and disjointly write
+    // separate globals; every write is visible after the group joins.
+    ^group_sum: 0
+    task.group workers {
+        r1: task { difficulty * 2 }
+        r2: task { read_difficulty() * 3 }
+        w1: task {
+            score += 10
+        }
+        w2: task {
+            bonus += 5
+        }
+        group_sum = (r1.join() ?? panic("r1 failed")) + (r2.join() ?? panic("r2 failed"))
+        w1.join() ?? panic("w1 failed")
+        w2.join() ?? panic("w2 failed")
+    }
+    print("group_reads {group_sum}")
+    print("after_group score={score} bonus={bonus}")
+
+    // 2. `task.all` branches borrow globals for reading until the combinator joins.
+    branch_values: (task.all {difficulty + 1, read_difficulty() + 2}) ?? panic("task.all failed")
+    print("task_all {branch_values[0]} {branch_values[1]}")
+
+    // 3. `para_map` workers read sendable globals without copying.
+    items: [Int]{1, 2, 3, 4}
+    scaled: items.para_map(fn(x: Int) { x * difficulty })
+    print("para_map {scaled[0]} {scaled[1]} {scaled[2]} {scaled[3]}")
+
+    // 4. Pure (`-[]>`) and `#Memo` functions receive global values as parameters
+    // so changing a global never produces a stale cached answer.
+    first_memo: weighted(4, score)
+    score += 5
+    second_memo: weighted(4, score)
+    print("memo {first_memo} {second_memo}")
+
+    // 5. Outliving handle tasks share mutable state safely through `Shared`.
+    t: task {
+        HITS.value += 7
+        HITS.value
+    }
+    hits: t.join() ?? panic("shared task failed")
+    print("shared_task {hits}")
+
+    // 6. A raw word whose every write sits inside `#Unsafe`.
+    set_raw_tag(I64{99})
+    print("raw_tag {raw_tag}")
+}
