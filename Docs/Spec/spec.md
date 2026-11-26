@@ -5044,8 +5044,8 @@ every environment read (`core.sys.get`, `core.sys.environment`,
 child process (`core.process.cmd(...).run()` — inheriting both `dir` and
 `env`, with relative `.cwd(...)` resolved against `context.dir` and explicit
 `.env(...)` / `.env_clear()` taking precedence) resolves against the task
-context. Imperative updates (`core.sys.set_current_dir`, `core.files.chdir`,
-`core.files.cd`, `core.sys.set`, `core.sys.unset`) mutate only the current
+context. Imperative updates (`core.sys.set_current_dir`,
+`core.sys.set`, `core.sys.unset`) mutate only the current
 task's context frame and never call OS `chdir(2)` or mutate process-wide
 environment state, so parallel tasks and tests setting different directories
 or variables run concurrently without interference. A program that spells

@@ -65,7 +65,7 @@ sema_stmt_check_context_block: fn(fields: [ContextField], body: [Stmt], span: Sp
             name_span: Span{start: field.span.start, end: field.span.start + field.name.len()}
             found: sema_context_label_key(field.name, check) ?? {
                 ^_: sema_check_expression(field.value, None, check)
-                check.diagnostics.push(sema_error("E0761", name_span, "`{field.name}` isn't a context field or key", "`#Context` sets `allocator`, `logger` and `on_stop`, and the constants a package declares with `#ContextKey`", "declare `#ContextKey {field.name}: …` or write `#Context(allocator: …)`, `#Context(logger: …)` or `#Context(on_stop: …)`"))
+                check.diagnostics.push(sema_error("E0761", name_span, "`{field.name}` isn't a context field or key", "`#Context` sets `allocator`, `logger`, `on_stop`, `dir` and `env`, and the constants a package declares with `#ContextKey`", "declare `#ContextKey {field.name}: …` or write `#Context(allocator: …)`, `#Context(logger: …)`, `#Context(on_stop: …)`, `#Context(dir: …)` or `#Context(env: …)`"))
                 complete = false
                 next
             }

@@ -74,7 +74,7 @@ contracts, generated collection/module indexes, and non-obvious invariants.
   relative paths in `core.files`, `core.db`, and `core.process`, environment
   reads in `core.sys` and `core.process`, and spawned child processes resolve
   against the task context. Imperative mutators (`core.sys.set_current_dir`,
-  `core.files.chdir`, `core.files.cd`, `core.sys.set`, `core.sys.unset`)
+  `core.sys.set`, `core.sys.unset`)
   update only the current task's context frame — no Core API reads or mutates
   a shared process-wide working directory or environment outside the task
   context, so parallel tests and tasks setting different directories never

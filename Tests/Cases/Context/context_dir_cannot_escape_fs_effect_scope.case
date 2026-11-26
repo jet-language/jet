@@ -1,0 +1,15 @@
+# `#Context(dir:)` resolves relative paths before effect-scope authority checks,
+# so switching context directory cannot bypass `-[FS.Read("allowed/")]>` on any tier.
+fixture: ContextDirCannotEscapeFSEffectScope.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = "allowed: public-ok\nescape: refused\n"
+step o1: jet run -O1 main.jet
+exit: 0
+stdout: = "allowed: public-ok\nescape: refused\n"
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: = "allowed: public-ok\nescape: refused\n"

@@ -655,20 +655,22 @@ effect_scope_cause: fn(node: I64, verdict: I64, marker: I64, resource: I64, leng
 effect_scope_admit_path: fn(path: I64, follow: Bool, operation: I64, error: I64) -> Bool {
     marker: effect_scope_publisher(I64{1})
     if (marker == I64{0}) { return true }
+    resolved: context_dir_resolve_owned(path)
     work: jet_rt_alloc(EFFECT_SCOPE_WORK_BYTES, I64{8})
     ^resource: wrapping(work + EFFECT_SCOPE_RESOURCE)
-    ^length: effect_scope_resolve(rt_text_data(path), rt_text_len(path), follow, work, resource)
+    ^length: effect_scope_resolve(rt_text_data(resolved), rt_text_len(resolved), follow, work, resource)
     verdict: wrapping(work + EFFECT_SCOPE_VERDICT)
     node: effect_scope_refusing(marker, resource, length, work, verdict)
     if (node != I64{0}) {
         if (length < I64{0}) {
-            resource = rt_text_data(path)
-            length = rt_text_len(path)
+            resource = rt_text_data(resolved)
+            length = rt_text_len(resolved)
         }
         cause: effect_scope_cause(node, sync_load(verdict), marker, resource, length)
-        ^_: compiler_fs_error(HOST_IO_KIND_PERMISSION_DENIED, operation, path, I64{0}, cause, error)
+        ^_: compiler_fs_error(HOST_IO_KIND_PERMISSION_DENIED, operation, resolved, I64{0}, cause, error)
     }
     jet_rt_free(work, EFFECT_SCOPE_WORK_BYTES, I64{8})
+    jet_rt_string_drop(resolved)
     node == I64{0}
 }
 
