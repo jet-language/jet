@@ -127,7 +127,7 @@ ir_build_tests: fn(functions: ^^[FnBody], decls: DeclTable, symbols: ^^SymbolTab
     }
     override: if harness.stock -> -1 else -> ir_test_override(m, p)
     built: ir_build_queue(m, p, failures, 0)
-    reset_id: ir_test_function(m, "test.reset", -1, "reset")
+    reset_id: ir_test_reserve(m, "test.reset", -1, "reset")
     m.entry = ir_test_main(m, p, harness, bodies, check_ids, override, reset_id, failures)
     // The functions the harness's renders reached (a Printable impl).
     built_renders: ir_build_queue(m, p, failures, built)
@@ -202,6 +202,27 @@ ir_test_finish: fn(m: ^IRModule, p: IRProgram, b: ^^IRBuilder, failures: ^[IRBui
     m.functions.push(built.f.move())
     ir_function_bind(m, key, id)
     id
+}
+
+// Reserves a function slot for a harness helper whose body is built after
+// its callers are lowered (such as `test.reset`).
+ir_test_reserve: fn(m: ^IRModule, name: String, from: Int, suffix: String) -> Int Never! {
+    ^b: ir_test_builder(m.*, name, from, suffix)
+    id: m.functions.len()
+    key: b.f.key
+    m.functions.push(b.f.move())
+    ir_function_bind(m, key, id)
+    id
+}
+
+// Completes a pre-reserved harness function slot without adding a new slot.
+ir_test_finish_at: fn(m: ^IRModule, p: IRProgram, b: ^^IRBuilder, id: Int, failures: ^[IRBuildFailure]) Never! {
+    ^built: b.move()
+    if built.error != "" {
+        failures.push(IRBuildFailure{key: built.f.key, name: built.f.name, message: built.error, source_file: built.f.source_file, span: built.error_span})
+    }
+    ir_resolve_deferred(m, p, built)
+    m.functions[id] = built.f.move()
 }
 
 // Drops `slot` when its type has a drop, leaving its freshness alone.
@@ -881,7 +902,7 @@ ir_test_reset_body: fn(m: ^IRModule, p: IRProgram, id: Int, failures: ^[IRBuildF
         b.stopping = stopping
     }
     ir_emit(b.f, IROp.Return, -1, -1, -1, -1, b.line)
-    ir_test_finish(m, p, b, id, failures)
+    ir_test_finish_at(m, p, b, id, failures)
 }
 
 // A test's scope members (JetRuntime TestScope.jet), each region scoped by
