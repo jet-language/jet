@@ -499,10 +499,13 @@ X64_DECODE_TEST_SPOTS: [[U8]]{
         // A line's mnemonic is its first word, or the word after a lock or
         // rep prefix as well.
         loop line in sample.template.split("\n") {
-            words: line.split(" ").to_list()
-            covered.push(words[0].copy())
-            if (words[0] == "lock" || words[0] == "rep") && words.len() > 1 {
-                covered.push(words[1].copy())
+            ^words: line.split(" ").to_list()
+            words.reverse()
+            first: words.pop() ?? ""
+            has_prefix: first == "lock" || first == "rep"
+            covered.push(first)
+            if has_prefix {
+                if words.pop() == .Val(second) -> covered.push(second)
             }
         }
     }
@@ -513,11 +516,13 @@ X64_DECODE_TEST_SPOTS: [[U8]]{
     loop rail in x64_decode_test_rails() {
         ^expected: [String]{}
         loop line in rail.lines {
-            word: line.split(" ").to_list()[0]
+            ^parts: line.split(" ").to_list()
+            parts.reverse()
+            word: parts.pop() ?? next
             if word.ends_with(":") -> next
-            rail_words.push(word.copy())
             // objdump spells jnz as its synonym jne.
             expected.push(if word == "jnz" -> "jne" else -> word.copy())
+            rail_words.push(word)
         }
         decoded: x64_decode_test_mnemonics(rail.bytes)
         if decoded != expected {
@@ -571,7 +576,7 @@ x64_decode_test_objdump_text: fn(text: String) -> String Never! {
     loop word in text.split(" ") {
         piece: word.trim()
         if piece.starts_with("#") || piece.starts_with("<") -> break
-        if piece != "" -> words.push(piece.copy())
+        if piece != "" -> words.push(piece)
     }
     words.join(" ")
 }

@@ -87,9 +87,9 @@ KIT_KNOWN_ANSWER_LIMIT: 3000000000
 kit_cases_known_failure: fn(entry: KitEntry, known: [String:String], source: String) -> String {
     prefix: "# KNOWN-FAILING "
     loop raw in source.split("\n") {
-        line: raw.trim().copy()
+        line: raw.trim()
         if line.starts_with(prefix) {
-            return kit_steps_byte_slice(line, prefix.count_bytes(), line.count_bytes()).trim()
+            return line.removeprefix(prefix).trim().copy()
         }
     }
     kit_known_ledger(known, entry.path)

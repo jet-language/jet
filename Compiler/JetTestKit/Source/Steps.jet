@@ -20,7 +20,6 @@ kit_steps_parse: fn(source: String) -> KitPlan {
     ^joined: [String]{}
     ^captures: [String]{}
     ^capture_scopes: [KitCaptureScope]{}
-    ^inventories: [String]{}
     ^conditions: [String]{}
     ^before_steps: 0
     ^before_assertions: 0
@@ -51,7 +50,8 @@ kit_steps_parse: fn(source: String) -> KitPlan {
                 }
                 capture_scopes = capture_scopes.slice(0, capture_scopes.len() - 1)
             }
-            plan.steps.push(KitStep{argv: [line.copy()], stdin: "", exit: "0", assertions: [], action: line})
+            end_action: if kind == "for" -> "end for" else if kind == "repeat" -> "end repeat" else -> "end parallel"
+            plan.steps.push(KitStep{argv: [line], stdin: "", exit: "0", assertions: [], action: end_action})
             plan.steps.push(KitStep{argv: [], stdin: "", exit: "any", assertions: [], action: "assert"})
             modifier_adjacent = false
             next
@@ -63,14 +63,15 @@ kit_steps_parse: fn(source: String) -> KitPlan {
             next
         }
         if line.starts_with("for ") || line.starts_with("repeat ") {
-            words: if line.starts_with("for ") -> kit_steps_loop_words(line) ?? [] else -> kit_steps_words(kit_steps_body(line)) ?? []
-            valid: if line.starts_with("for ") -> kit_steps_loop_valid(words) else -> kit_steps_repeat_valid(words, line)
+            is_for: line.starts_with("for ")
+            words: if is_for -> kit_steps_loop_words(line) ?? [] else -> kit_steps_words(kit_steps_body(line)) ?? []
+            valid: if is_for -> kit_steps_loop_valid(words) else -> kit_steps_repeat_valid(words, line)
             if !valid {
                 plan.error = "line {line_number}: invalid bounded loop"
                 return plan
             }
             kind: words[0]
-            blocks.push(kind.copy())
+            blocks.push(if is_for -> "for" else -> "repeat")
             capture_scopes.push(KitCaptureScope{start: plan.steps.len(), names: captures, aggregates: []})
             plan.steps.push(KitStep{argv: words, stdin: "", exit: "0", assertions: [], action: kind})
             modifier_adjacent = false
@@ -205,7 +206,7 @@ kit_steps_parse: fn(source: String) -> KitPlan {
             next
         }
         if key == "host-port" {
-            port: Int.parse(value.copy()) ?? 0
+            port: Int.parse(value) ?? 0
             if port < 1 || port > 65535 || plan.host_port != 0 || plan.steps.len() != 0 {
                 plan.error = "line {line_number}: host-port needs one header port in 1..65535"
                 return plan
@@ -394,7 +395,8 @@ kit_steps_parse: fn(source: String) -> KitPlan {
                 plan.error = "line {line_number}: invalid {key} path count"
                 return plan
             }
-            ^argv: [String]{key.copy()}
+            file_action: if key == "copy" -> "copy" else if key == "remove" -> "remove" else if key == "concat" -> "concat" else -> "write"
+            ^argv: [String]{file_action}
             loop (position, path) in paths {
                 external_source: key == "copy" && position == 0 && (path.contains("{{root}}") || path.contains("{{jet}}") || path.contains("{{jetpack}}"))
                 template: key == "write" && position == 1
@@ -462,14 +464,25 @@ kit_steps_parse: fn(source: String) -> KitPlan {
                 return plan
             }
             if label != "" {
-                if words.len() != 1 || label.contains(" ") || label.contains("\t") || kit_expect_named(inventories, label) {
+                ^duplicate_inventory: false
+                loop previous in plan.steps {
+                    if previous.action == "inventory" && previous.label == label -> duplicate_inventory = true
+                }
+                if words.len() != 1 || label.contains(" ") || label.contains("\t") || duplicate_inventory {
                     plan.error = "line {line_number}: invalid duplicate inventory label"
                     return plan
                 }
-                inventories.push(label.copy())
-            } else if words.len() != 3 || words[1] != "==" || !kit_expect_named(inventories, words[2]) {
-                plan.error = "line {line_number}: inventory comparison needs a known label"
-                return plan
+            } else {
+                ^known_inventory: false
+                if words.len() == 3 {
+                    loop previous in plan.steps {
+                        if previous.action == "inventory" && previous.label == words[2] -> known_inventory = true
+                    }
+                }
+                if words.len() != 3 || words[1] != "==" || !known_inventory {
+                    plan.error = "line {line_number}: inventory comparison needs a known label"
+                    return plan
+                }
             }
             plan.steps.push(KitStep{argv: words, stdin: "", exit: "0", assertions: [], label: label, action: "inventory"})
             next
@@ -820,7 +833,7 @@ kit_steps_parse: fn(source: String) -> KitPlan {
                 next
             }
             if value.starts_with("in ") {
-                codes: kit_steps_exit_codes(kit_steps_byte_slice(value, 3, value.count_bytes()).trim().copy()) ?? {
+                codes: kit_steps_exit_codes(kit_steps_byte_slice(value, 3, value.count_bytes()).trim()) ?? {
                     plan.error = "line {line_number}: exit membership needs a nonempty integer list"
                     return plan
                 }
@@ -915,7 +928,7 @@ kit_steps_parse_case: fn(source: String) -> KitPlan {
 // The banner's first line after `jet `: `a0.0.43 (29517f5447, 2026-11-09,
 // alpha)` for a release, `a0.0.43-dev+29517f5447` for a dev build.
 kit_steps_version_display: fn(banner: String) -> String? {
-    first: kit_steps_byte_slice(banner, 0, kit_steps_byte_index(banner, "\n") ?? banner.count_bytes()).trim().copy()
+    first: kit_steps_byte_slice(banner, 0, kit_steps_byte_index(banner, "\n") ?? banner.count_bytes()).trim()
     if !first.starts_with("jet ") -> return None
     display: first.removeprefix("jet ").trim().copy()
     if display == "" -> return None
@@ -1259,7 +1272,7 @@ kit_steps_exit_status: fn(expected: String, code: Int) -> KitVerdict {
         return kit_expect_verdict("PASS", "")
     }
     if expected.starts_with("!=") {
-        forbidden: Int.parse(kit_steps_byte_slice(expected, 2, expected.count_bytes()).trim().copy()) ?? 0
+        forbidden: Int.parse(kit_steps_byte_slice(expected, 2, expected.count_bytes()).trim()) ?? 0
         if code == forbidden {
             return kit_expect_verdict("FAIL", "exit equals forbidden status {forbidden}")
         }
@@ -1361,23 +1374,26 @@ kit_steps_build_entry_executable: fn(text: String) -> String? {
         call: line.split_once("{builder}.add_executable(") ?? next
         handle: if call.before.split_once(":") == .Val(bound) -> bound.before.trim().copy() else -> ""
         // The target name is the call's first string, on its line or a later one.
-        ^rest: call.after.copy()
-        ^cursor: index
-        loop !rest.contains("\"") && cursor < lines.len() {
-            rest = lines[cursor].copy()
-            cursor += 1
+        ^rest_line: -1
+        if !call.after.contains("\"") {
+            ^cursor: index
+            loop cursor < lines.len() && !lines[cursor].contains("\"") {
+                cursor += 1
+            }
+            if cursor >= lines.len() -> next
+            rest_line = cursor
         }
-        quoted: rest.split_once("\"") ?? next
+        quoted: (if rest_line < 0 -> call.after else -> lines[rest_line]).split_once("\"") ?? next
         name: quoted.after.split_once("\"") ?? next
         handles.push(handle)
         names.push(name.before.copy())
     }
     if selected != "" {
         loop position in 0..<handles.len() {
-            if handles[position] == selected -> return Val(names[position].copy())
+            if handles[position] == selected -> return names.remove(position, .Slot)
         }
     }
-    if names.len() == 1 -> return Val(names[0].copy())
+    if names.len() == 1 -> return names.pop()
     None
 }
 
@@ -1471,9 +1487,9 @@ kit_steps_manifest_close: fn(tokens: [String], open: Int) -> Int {
 kit_steps_manifest_entry_stem: fn(root: String) -> String? {
     text: kit_exec_optional(files.join(root, "package.jet")) ?? return None
     tokens: kit_steps_manifest_tokens(text)
-    ^names: [String]{}
+    ^name_indices: [Int]{}
     ^stems: [String]{}
-    ^selected: ""
+    ^selected_index: -1
     ^i: 0
     loop i < tokens.len() {
         if tokens[i] == "{{" || tokens[i] == "[" {
@@ -1488,7 +1504,7 @@ kit_steps_manifest_entry_stem: fn(root: String) -> String? {
         if tokens[i] == "defaults" {
             loop j in (i + 3)..<close {
                 if tokens[j] == "run" && j + 2 < close && tokens[j + 1] == ":" {
-                    selected = tokens[j + 2].copy()
+                    selected_index = j + 2
                 }
             }
         } else if tokens[i] == "outputs" {
@@ -1507,10 +1523,9 @@ kit_steps_manifest_entry_stem: fn(root: String) -> String? {
                             // `entry: file.callable`, or a bare `entry: callable`
                             // built under the stem of the file declaring it.
                             stem: if k + 3 < record_close && tokens[k + 3] == "." -> Val(tokens[k + 2].copy()) else -> kit_steps_callable_stem(root, tokens[k + 2])
-                            if stem == .Val(found) {
-                                names.push(tokens[j].copy())
-                                stems.push(found.copy())
-                            }
+                            found: stem ?? next
+                            name_indices.push(j)
+                            stems.push(found)
                         }
                     }
                 }
@@ -1519,13 +1534,14 @@ kit_steps_manifest_entry_stem: fn(root: String) -> String? {
         }
         i = close + 1
     }
-    if selected != "" {
-        loop (index, name) in names {
-            if name == selected -> return Val(stems[index].copy())
+    if selected_index >= 0 {
+        selected: tokens[selected_index]
+        loop (index, token_index) in name_indices {
+            if tokens[token_index] == selected -> return stems.remove(index, .Slot)
         }
         return None
     }
-    if stems.len() == 1 -> return Val(stems[0].copy())
+    if stems.len() == 1 -> return stems.pop()
     None
 }
 
@@ -1572,7 +1588,8 @@ kit_steps_member_dir: fn(root: String, name: String) -> String? {
                 return Val(entry.path.copy())
             }
         }
-        if kit_steps_member_dir(entry.path, name) == .Val(found) -> return Val(found.copy())
+        found: kit_steps_member_dir(entry.path, name)
+        if found != None -> return found
     }
     None
 }

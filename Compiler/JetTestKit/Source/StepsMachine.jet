@@ -121,7 +121,7 @@ kit_steps_machine_status: fn(object: Dyn) -> String? {
 }
 
 kit_steps_machine_line: fn(text: String) -> String Err! {
-    value: json.parse(text.trim().copy()) ?? return Err("machine JSON: {err}")
+    value: json.parse(text.trim()) ?? return Err("machine JSON: {err}")
     object: kit_steps_machine_object(value) ?? return Err("machine record is not an object")
     schema: kit_steps_machine_string(object, "schema") ?? return Err("machine record is missing `schema`")
     if schema == "jet.report/v4" {

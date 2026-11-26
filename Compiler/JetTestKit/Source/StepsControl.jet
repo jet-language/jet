@@ -112,13 +112,13 @@ kit_steps_loop_bind: fn(frame: KitLoopFrame, state: KitStepState) -> KitStepStat
 kit_steps_loop_restore: fn(frame: KitLoopFrame, state: KitStepState) -> KitStepState {
     ^result: state
     ^restored: frame.captures
-    loop capture in state.captures {
+    loop capture in result.captures.move() {
         if !capture.aggregate -> next
         ^found: -1
         loop index in 0..<restored.len() {
             if restored[index].name == capture.name -> found = index
         }
-        if found >= 0 -> restored[found] = capture else -> restored.push(capture.copy())
+        if found >= 0 -> restored[found] = capture else -> restored.push(capture)
     }
     result.captures = restored
     result.bindings = frame.bindings

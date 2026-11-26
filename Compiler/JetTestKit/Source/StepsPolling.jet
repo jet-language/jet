@@ -43,7 +43,7 @@ kit_steps_poll_step: fn(label: String, original: String) -> KitStep? {
     reason: kit_steps_byte_slice(original, kit_steps_comment(original), original.count_bytes())
     loop predicate in predicates {
         colon: kit_steps_condition_colon(predicate) ?? return None
-        subject: kit_steps_byte_slice(predicate, 0, colon).trim().copy()
+        subject: kit_steps_byte_slice(predicate, 0, colon).trim()
         form: kit_steps_byte_slice(predicate, colon + 1, predicate.count_bytes()).trim().copy()
         assertion: if subject == "exit" -> {
             if kit_steps_integer(form) == None -> return None

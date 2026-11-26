@@ -406,7 +406,7 @@ link_bind_sections: fn(c: ^LinkContext, out: ^[U8], origin: Int, view: LinkImage
     ^symbol_names: [U8]{}
     ^locals: [U8]{}
     loop obj in 0..<c.obj_name.len() {
-        b: c.obj_buffer[obj].copy()
+        b: c.obj_buffer[obj]
         loop k in 1..<c.obj_first_global[obj] {
             at: link_sym_at(c, obj, k)
             info: link_u8(c.bufs, b, at + 4)
@@ -806,8 +806,12 @@ link_bind_bytes: fn(bound: ^^X64BindResult) -> X64ExecutableResult Never! {
 link_bind_failure: fn(c: ^LinkContext) -> X64BindResult Never! {
     ^exe: x64_executable_whole([U8]{})
     exe.image = c.bufs.remove(1, .Slot) ?? [U8]{}
-    // copy: a few report lines; the context drops its own with it.
-    X64BindResult{executable: exe, errors: c.errors.copy()}
+    ^errors: [String]{}
+    loop c.errors.len() > 0 {
+        errors.push(c.errors.pop() ?? "")
+    }
+    errors.reverse()
+    X64BindResult{executable: exe, errors: errors}
 }
 
 link_bind_image: fn(name: String, program: ^^[U8], image: ^^[U8], gap_at: Int, gap: Int, program_base: Int?, debug_info: Bool) -> X64BindResult Never! {

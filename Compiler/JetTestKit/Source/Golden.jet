@@ -52,7 +52,8 @@ kit_golden_collect: fn(root: String, directory: String) -> [KitEntry] {
             nested: kit_golden_collect(root, shown)
             loop entry in nested -> entries.push(entry)
         } else if child.name != "package.jet" && child.name != "workspace.jet" && kit_golden_entry_stem(child.name) == .Val(stem) {
-            entries.push(KitEntry{path: shown.copy(), expected: kit_steps_byte_slice(shown, 0, shown.count_bytes() - child.name.count_bytes() + stem.count_bytes()), project: directory, suite: "golden", mode: ""})
+            expected: kit_steps_byte_slice(shown, 0, shown.count_bytes() - child.name.count_bytes() + stem.count_bytes())
+            entries.push(KitEntry{path: shown, expected: expected, project: directory, suite: "golden", mode: ""})
         }
     }
     entries
@@ -204,14 +205,14 @@ kit_golden_default_step: fn(word: String) -> KitStep {
 // The harness exits 1 when its summary, the last line, counts a failed or an
 // unexpected-pass test, and 0 otherwise; output with no summary has no exit.
 kit_golden_test_exit: fn(stdout: String) -> Int? {
-    lines: stdout.trim().split("\n").to_list()
-    summary: lines[lines.len() - 1].copy()
+    ^lines: stdout.trim().split("\n").to_list()
+    summary: lines.pop() ?? ""
     if !summary.contains(" passed, ") -> return None
     ^code: 0
     loop part in summary.split(", ") {
         words: part.split(" ").to_list()
         if words.len() != 2 -> return None
-        count: Int.parse(words[0].copy()) ?? return None
+        count: Int.parse(words[0]) ?? return None
         if count > 0 && (words[1] == "failed" || words[1] == "unexpected-pass") -> code = 1
     }
     Val(code)
@@ -258,31 +259,34 @@ kit_golden_stage: fn(project: String, entry: KitEntry, work: String) {
     }
     files.create_dir_all(work) ?? panic("mkdir {work}: {err}")
     listed: files.list_dir(project) ?? panic("list {project}: {err}")
-    // Each sibling entry's stem, and at the same index its source file.
+    // Each sibling entry's stem, and at the same index its position in `listed`.
     ^siblings: [String]{}
-    ^sources: [String]{}
-    loop child in listed {
+    ^source_indices: [Int]{}
+    loop (index, child) in listed {
         if child.is_dir || child.name == own || child.name == "package.jet" || child.name == "workspace.jet" {
             next
         }
         stem: kit_golden_entry_stem(child.name) ?? next
         siblings.push(stem)
-        sources.push(child.name.copy())
+        source_indices.push(index)
     }
-    own_stem: kit_golden_entry_stem(own) ?? own.copy()
-    ^named: [String]{own_stem.copy()}
+    ^named: [Bool]{}
+    loop _ in 0..<siblings.len() -> named.push(false)
+    ^queue: [Int]{-1}
     ^at: 0
-    loop at < named.len() {
-        ^source: own.copy()
-        loop index in 0..<siblings.len() {
-            if siblings[index] == named[at] -> source = sources[index].copy()
-        }
-        text: files.read(files.join(project, source)) ?? ""
+    loop at < queue.len() {
+        slot: queue[at]
         at += 1
-        loop stem in siblings {
-            if !named.contains(stem) && text.contains(stem) -> named.push(stem.copy())
+        source_path: if slot < 0 -> files.join(project, own) else -> files.join(project, listed[source_indices[slot]].name)
+        text: files.read(source_path) ?? ""
+        loop (index, stem) in siblings {
+            if !named[index] && text.contains(stem) {
+                named[index] = true
+                queue.push(index)
+            }
         }
     }
+    own_stem: kit_golden_entry_stem(own) ?? own
     loop child in listed {
         if !child.is_dir && !child.name.starts_with("{own_stem}.") && kit_golden_unnamed_sibling(child.name, siblings, named) {
             next
@@ -293,9 +297,9 @@ kit_golden_stage: fn(project: String, entry: KitEntry, work: String) {
 
 // Whether the file `name` belongs to a sibling entry (`<stem>.*`) that the
 // staged entry never names.
-kit_golden_unnamed_sibling: fn(name: String, siblings: [String], named: [String]) -> Bool {
-    loop stem in siblings {
-        if !named.contains(stem) && name.starts_with("{stem}.") -> return true
+kit_golden_unnamed_sibling: fn(name: String, siblings: [String], named: [Bool]) -> Bool {
+    loop (index, stem) in siblings {
+        if !named[index] && name.starts_with("{stem}.") -> return true
     }
     false
 }

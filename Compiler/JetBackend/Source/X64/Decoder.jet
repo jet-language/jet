@@ -1684,10 +1684,8 @@ x64_decode_rows: fn(table: String) -> [X64DecodeRow] Never! {
         }
     }
     ^rows: [X64DecodeRow]{}
-    loop bucket in buckets {
-        loop row in bucket {
-            rows.push(x64_decode_row_at(row, row.space, row.opcode, row.name.copy()))
-        }
+    loop bucket in buckets.move() {
+        loop row in bucket -> rows.push(row)
     }
     rows
 }

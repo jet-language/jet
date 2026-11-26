@@ -998,7 +998,7 @@ link_load_object: fn(c: ^LinkContext, b: Int, base: Int, size: Int, name: String
         weak: bind == 2
         value: link_u64(c.bufs, symtab_buf, at + 8)
         symbol_size: link_u64(c.bufs, symtab_buf, at + 16)
-        kind: c.g_kind[g].copy()
+        kind: c.g_kind[g]
         if {
             section == LINK_UNDEF -> link_reference(c, g, weak)
             section == LINK_COMMON -> {
@@ -1017,7 +1017,7 @@ link_load_object: fn(c: ^LinkContext, b: Int, base: Int, size: Int, name: String
                 c.g_weak_def[g] = weak
             }
             !weak && !c.g_weak_def[g] && kind == LINK_G_FILE -> {
-                earlier: c.g_obj[g].copy()
+                earlier: c.g_obj[g]
                 seen_in: if earlier >= 0 -> c.obj_name[earlier] else -> "the linker"
                 message: "duplicate symbol `{symbol_name}`: defined in {seen_in} and {name}"
                 link_error(c, message)
@@ -1156,16 +1156,16 @@ link_pull: fn(c: ^LinkContext, key: Int) Never! {
     index: key.div_euclid(LINK_MEMBER_SCALE)
     member: key % LINK_MEMBER_SCALE
     name: "{c.archives[index].path}({c.archives[index].names[member]})"
-    b: c.archive_buffer[index].copy()
-    start: c.archives[index].starts[member].copy()
-    size: c.archives[index].sizes[member].copy()
+    b: c.archive_buffer[index]
+    start: c.archives[index].starts[member]
+    size: c.archives[index].sizes[member]
     ^_: link_load_object(c, b, start, size, name)
 }
 
 // Pull members until no queued strong reference can be satisfied.
 link_resolve: fn(c: ^LinkContext) Never! {
     loop c.pending_head < c.pending.len() {
-        g: c.pending[c.pending_head].copy()
+        g: c.pending[c.pending_head]
         c.pending_head += 1
         f: link_final(c, g)
         if c.g_kind[f] != LINK_G_NONE -> next
@@ -1830,11 +1830,11 @@ link_mark: fn(c: ^LinkContext, work: ^[Int], s: Int) Never! {
 
 // Mark the targets of the relocations in `piece`, except its pc_begin.
 link_mark_piece: fn(c: ^LinkContext, work: ^[Int], piece: Int, skip_pc: Bool) Never! {
-    s: c.ep_sec[piece].copy()
-    obj: c.ep_obj[piece].copy()
+    s: c.ep_sec[piece]
+    obj: c.ep_obj[piece]
     rb: link_rel_buf(c, obj, s)
     table: link_rel_table(c, obj, s)
-    first: c.ep_first_reloc[piece].copy()
+    first: c.ep_first_reloc[piece]
     end: first + c.ep_reloc_count[piece]
     pc: c.ep_start[piece] + 8
     loop k in first..<end {
@@ -1937,7 +1937,7 @@ link_collect: fn(c: ^LinkContext, entries: [Int], linker_names: [String], kept: 
         }
         if phase == 0 {
             loop index in 0..<c.cond_roots.len() {
-                root: c.cond_roots[index].copy()
+                root: c.cond_roots[index]
                 if link_live_row(c, c.cond_guards[index]) >= 0 -> link_mark(c, work, root)
             }
             if head == work.len() {
@@ -2144,7 +2144,7 @@ link_share_cies: fn(c: ^LinkContext) Never! {
     ^records: name_table_sized(64)
     ^record_cie: [Int]{-1}
     loop piece in 0..<c.ep_sec.len() {
-        cie: c.ep_cie[piece].copy()
+        cie: c.ep_cie[piece]
         if cie < 0 || !c.ep_keep[piece] -> next
         ^shared: chosen.get(cie) ?? -1
         if shared < 0 {
@@ -2165,11 +2165,11 @@ link_share_cies: fn(c: ^LinkContext) Never! {
 // The bytes of one `.eh_frame` record as text: its 32-bit words, then any
 // trailing bytes.
 link_eh_record_key: fn(c: LinkContext, piece: Int) -> String Never! {
-    obj: c.ep_obj[piece].copy()
-    s: c.ep_sec[piece].copy()
+    obj: c.ep_obj[piece]
+    s: c.ep_sec[piece]
     b: link_sec_buf(c, obj, s)
     start: link_sec_offset(c, obj, s) + c.ep_start[piece]
-    length: c.ep_len[piece].copy()
+    length: c.ep_len[piece]
     ^words: [String]{}
     ^at: 0
     loop at + 4 <= length {
@@ -2349,7 +2349,7 @@ link_sort_by: fn(items: [Int], keys: [Int]) -> [Int] Never! {
 link_place: fn(c: ^LinkContext, rows: [Int], start: Int) -> Int Never! {
     ^addr: start
     loop row in rows {
-        s: c.live_secs[row].copy()
+        s: c.live_secs[row]
         obj: link_obj_of(c, s)
         addr = link_align(addr, link_sec_align(c, obj, s))
         c.live_addr[row] = addr
@@ -2788,7 +2788,7 @@ link_apply: fn(c: LinkContext, errors: ^[String], out: ^[U8], obj: Int, s: Int, 
 // its reports go to `errors`. `out` is the image at the row's file offset,
 // or the row's own piece (link_emit_pieces): the bytes are the same.
 link_emit_section: fn(c: LinkContext, errors: ^[String], out: ^[U8], row: Int) Never! {
-    s: c.live_secs[row].copy()
+    s: c.live_secs[row]
     obj: link_obj_of(c, s)
     b: link_sec_buf(c, obj, s)
     pos: out.len()
@@ -2802,8 +2802,8 @@ link_emit_section: fn(c: LinkContext, errors: ^[String], out: ^[U8], row: Int) N
     rb: link_sec_buf(c, obj, r)
     count: link_sec_size(c, obj, r).div_euclid(24)
     table: link_sec_offset(c, obj, r)
-    address: c.live_addr[row].copy()
-    base: c.rel_base[row].copy()
+    address: c.live_addr[row]
+    base: c.rel_base[row]
     ^skip: false
     loop k in 0..<count {
         if skip {
@@ -2813,7 +2813,7 @@ link_emit_section: fn(c: LinkContext, errors: ^[String], out: ^[U8], row: Int) N
         at: table + 24 * k
         // Section offsets fit 32 bits.
         off: link_u32(c.bufs, rb, at)
-        slot: c.rel_slot[base + k].copy()
+        slot: c.rel_slot[base + k]
         skip = link_apply(c, errors, out, obj, s, rb, at, off, slot, pos + off, address + off)
     }
 }
@@ -2825,17 +2825,17 @@ link_emit_eh: fn(c: ^LinkContext, out: ^[U8]) Never! {
     ^errors: [String]{}
     loop piece in 0..<c.ep_sec.len() {
         if !c.ep_keep[piece] -> next
-        s: c.ep_sec[piece].copy()
-        obj: c.ep_obj[piece].copy()
+        s: c.ep_sec[piece]
+        obj: c.ep_obj[piece]
         b: link_sec_buf(c, obj, s)
         rb: link_rel_buf(c, obj, s)
-        piece_start: c.ep_start[piece].copy()
+        piece_start: c.ep_start[piece]
         start: link_sec_offset(c, obj, s) + piece_start
         pos: out.len()
-        length: c.ep_len[piece].copy()
+        length: c.ep_len[piece]
         out.extend(c.bufs[b][start..<start + length])
         table: link_rel_table(c, obj, s)
-        first: c.ep_first_reloc[piece].copy()
+        first: c.ep_first_reloc[piece]
         end: first + c.ep_reloc_count[piece]
         loop k in first..<end {
             at: table + 24 * k
@@ -2844,7 +2844,7 @@ link_emit_eh: fn(c: ^LinkContext, out: ^[U8]) Never! {
             place: c.eh_start + pos - base + off
             ^_: link_apply(c, errors, out, obj, s, rb, at, rel_off, -1, pos + off, place)
         }
-        cie: c.ep_cie[piece].copy()
+        cie: c.ep_cie[piece]
         if cie >= 0 -> link_put32(out, pos + 4, c.ep_out[piece] + 4 - c.ep_out[cie])
     }
     loop _ in 0..<4 -> out.push(U8{0})
@@ -3259,7 +3259,7 @@ link_emitted_rows: fn(l: LinkLayout, debug: LinkDebug) -> [Int] Never! {
 LINK_EMIT_MIN_WEIGHT_PER_THREAD: 20000
 
 link_row_weight: fn(c: LinkContext, row: Int) -> Int Never! {
-    s: c.live_secs[row].copy()
+    s: c.live_secs[row]
     obj: link_obj_of(c, s)
     ^weight: 1 + (link_sec_size(c, obj, s) >> 6)
     r: link_rela_of(c, obj, s)
@@ -3556,8 +3556,8 @@ link_debug_sections: fn(c: ^LinkContext, debug_info: Bool) -> LinkDebug Never! {
     ^group_of: [Int]{-1}
     loop obj in 0..<c.obj_name.len() {
         if c.obj_base[obj] != 0 -> next
-        b: c.obj_buffer[obj].copy()
-        first: c.obj_first_section[obj].copy()
+        b: c.obj_buffer[obj]
+        first: c.obj_first_section[obj]
         loop k in 1..<c.obj_count[obj] {
             s: first + k
             if link_sec_type(c, obj, s) != LINK_SHT_PROGBITS || (link_sec_flags(c, obj, s) & 0x802) != 0 || link_sec_size(c, obj, s) == 0 {
@@ -4031,7 +4031,7 @@ link_trace_lines: fn(c: ^LinkContext, debug: LinkDebug, pieces: LinkPieces, l: L
                 pieces.chunks[row].len() > 0 -> {
                     loop chunk in pieces.chunks[row] -> bytes.extend(chunk[0..<chunk.len()])
                 }
-                else -> { bytes.extend(pieces.bytes[row].copy()) }
+                else -> { bytes.extend(pieces.bytes[row][0..<pieces.bytes[row].len()]) }
             }
         }
         link_pad_to(bytes, debug.sizes[group], 0)
@@ -4106,7 +4106,8 @@ link_write_section_headers: fn(out: ^[U8], origin: Int, headers: [LinkSectionHea
     loop header in headers -> name_offsets.push(elf64_string(shstrtab, header.name))
     names_offset: elf64_string(shstrtab, ".shstrtab")
     shstrtab_at: origin + out.len()
-    out.extend(shstrtab.copy())
+    shstrtab_len: shstrtab.len()
+    out.extend(shstrtab)
     elf64_pad(out, 8)
     shoff: origin + out.len()
     loop _ in 0..<64 -> out.push(U8{0})
@@ -4122,7 +4123,7 @@ link_write_section_headers: fn(out: ^[U8], origin: Int, headers: [LinkSectionHea
         elf64_u64(out, header.align)
         elf64_u64(out, header.entry_size)
     }
-    elf64_section_header(out, names_offset, 3, 0, shstrtab_at, shstrtab.len(), 0, 0, 1, 0)
+    elf64_section_header(out, names_offset, 3, 0, shstrtab_at, shstrtab_len, 0, 0, 1, 0)
     shoff
 }
 

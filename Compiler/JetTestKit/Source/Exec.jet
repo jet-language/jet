@@ -36,15 +36,15 @@ kit_exec_select_ids: fn(all_ids: [String], options: KitOptions) -> KitSelection 
             requested.push(id)
         }
     }
-    ^seen: [String]{}
-    loop id in options.bless.ids {
-        if kit_expect_named(seen, id) {
-            return KitSelection{ids: [], error: "duplicate bless ID: {id}"}
+    loop (index, id) in options.bless.ids {
+        loop previous in 0..<index {
+            if options.bless.ids[previous] == id {
+                return KitSelection{ids: [], error: "duplicate bless ID: {id}"}
+            }
         }
         if !kit_expect_named(all_ids, id) {
             return KitSelection{ids: [], error: "unknown bless ID: {id}"}
         }
-        seen.push(id.copy())
     }
     ^selected: [String]{}
     loop (index, id) in all_ids {
@@ -123,8 +123,8 @@ kit_exec_user_home: fn() -> String {
     uid: "{sys.getuid()}"
     if files.read("/etc/passwd") == .Ok(text) {
         loop line in text.split("\n") {
-            fields: line.split(":").to_list()
-            if fields.len() >= 6 && fields[2] == uid -> return fields[5].copy()
+            ^fields: line.split(":").to_list()
+            if fields.len() >= 6 && fields[2] == uid -> return fields.remove(5, .Slot) ?? ""
         }
     }
     sys.get("HOME") ?? ""
@@ -434,13 +434,13 @@ kit_exec_invoke_terminal: fn(env: KitEnv, argv: [String], cwd: String, scratch: 
     kit_exec_run(env, argv, cwd, scratch, stdin, overlay, Val(terminal))
 }
 
-// Events by time; events at the same time keep their line order.
-kit_exec_terminal_order: fn(events: [KitTerminalEvent]) -> [KitTerminalEvent] {
-    ^ordered: [KitTerminalEvent]{}
-    loop event in events {
-        ordered.push(event.copy())
+// Event positions by time; events at the same time keep their line order.
+kit_exec_terminal_order: fn(events: [KitTerminalEvent]) -> [Int] {
+    ^ordered: [Int]{}
+    loop index in 0..<events.len() {
+        ordered.push(index)
         ^position: ordered.len() - 1
-        loop position > 0 && ordered[position - 1].at > ordered[position].at {
+        loop position > 0 && events[ordered[position - 1]].at > events[ordered[position]].at {
             earlier: ordered[position - 1]
             ordered[position - 1] = ordered[position]
             ordered[position] = earlier
@@ -470,7 +470,8 @@ kit_exec_run: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, stdi
     if terminal == {
         .Val(shape) -> {
             eof: String.from_bytes([U8{4}]) ?? panic("EOF character")
-            loop event in kit_exec_terminal_order(shape.events) {
+            loop event_index in kit_exec_terminal_order(shape.events) {
+                event: shape.events[event_index]
                 kit_exec_wait(child, watched, spent, started, event.at)
                 if event.kind == "resize" {
                     session: child.terminal ?? {
@@ -562,8 +563,9 @@ kit_exec_read_stderr: fn(stream: ProcessStderrStream, bytes: ^[U8]) -> String {
 // holds one of the parts Core's process receipt treats as secret, ASCII
 // case-insensitive.
 kit_exec_redact: fn(text: String, overlay: [KitEnvVar]) -> String {
-    ^secrets: [String]{}
-    loop variable in overlay {
+    ^secrets: [Int]{}
+    ^lengths: [Int]{}
+    loop (index, variable) in overlay {
         value: variable.value ?? next
         name: variable.name.to_ascii_lower()
         ^secret: false
@@ -571,17 +573,23 @@ kit_exec_redact: fn(text: String, overlay: [KitEnvVar]) -> String {
             if name.contains(marker) -> secret = true
         }
         if !secret || value == "" -> next
-        secrets.push(value.copy())
+        secrets.push(index)
+        lengths.push(value.count_bytes())
         ^position: secrets.len() - 1
-        loop position > 0 && secrets[position - 1].count_bytes() < secrets[position].count_bytes() {
-            longer: secrets[position]
+        loop position > 0 && lengths[position - 1] < lengths[position] {
+            longer_index: secrets[position]
             secrets[position] = secrets[position - 1]
-            secrets[position - 1] = longer
+            secrets[position - 1] = longer_index
+            longer_len: lengths[position]
+            lengths[position] = lengths[position - 1]
+            lengths[position - 1] = longer_len
             position -= 1
         }
     }
     ^redacted: text
-    loop secret in secrets -> redacted = redacted.replace(secret, "<redacted>")
+    loop index in secrets {
+        if overlay[index].value == .Val(secret) -> redacted = redacted.replace(secret, "<redacted>")
+    }
     redacted
 }
 
@@ -823,7 +831,7 @@ kit_exec_tree_resident: fn(pid: Int, tree: Bool, pids: ^[Int]) -> Int Never! {
         loop thread in threads {
             children: files.read(files.join(thread.path, "children")) ?? next
             loop word in children.split(" ") {
-                child: Int.parse(word.trim().copy()) ?? next
+                child: Int.parse(word.trim()) ?? next
                 queue.push(child)
             }
         }
@@ -838,7 +846,7 @@ kit_exec_kib_field: fn(text: String, field: String) -> Int {
     loop line in text.split("\n") {
         if !line.starts_with(field) -> next
         loop value in line.slice(field.len(), line.len()).trim().split(" ") {
-            if value.len() > 0 -> return (Int.parse(value.copy()) ?? 0) * 1024
+            if value.len() > 0 -> return (Int.parse(value) ?? 0) * 1024
         }
     }
     0
@@ -874,7 +882,7 @@ kit_exec_cgroup_path: fn(membership: String) -> String {
 }
 
 // A cgroup memory file's byte count; 0 for `max`, an empty read or anything unreadable.
-kit_exec_cgroup_value: fn(text: String) -> Int { Int.parse(text.trim().copy()) ?? 0 }
+kit_exec_cgroup_value: fn(text: String) -> Int { Int.parse(text.trim()) ?? 0 }
 
 // `available` lowered to the room under `limit` once `current` is in use. A 0 limit is no
 // limit and a 0 `available` is unknown; a full cgroup leaves one byte, so the pool runs one.

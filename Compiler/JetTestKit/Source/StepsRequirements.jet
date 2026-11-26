@@ -67,10 +67,10 @@ kit_steps_host_matches: fn(actual: String, choices: String) -> Bool {
 }
 
 kit_steps_tools_all: fn(text: String) -> Bool {
-    names: text.trim().copy()
+    names: text.trim()
     if names == "" -> return false
     loop name in names.split("+") {
-        if process.which(name.trim().copy()) == None -> return false
+        if process.which(name.trim()) == None -> return false
     }
     true
 }
@@ -98,7 +98,7 @@ kit_steps_probe: fn(text: String, env: KitEnv, work: String, scratch: String) ->
     if boundary == tokens.len() -> return true
     if tokens[boundary].text == "json" {
         if tokens.len() < boundary + 4 || tokens[boundary + 2].text != "=" -> return false
-        literal: kit_steps_byte_slice(body, tokens[boundary + 3].start, body.count_bytes()).trim().copy()
+        literal: kit_steps_byte_slice(body, tokens[boundary + 3].start, body.count_bytes()).trim()
         return kit_steps_json_test(result.stdout, "doc", tokens[boundary + 1].text, "=", literal) == None
     }
     assertion: kit_steps_stream_assertion("stdout", kit_steps_byte_slice(text, tokens[boundary].end, text.count_bytes())) ?? return false
@@ -116,13 +116,13 @@ kit_steps_probes_all: fn(text: String, env: KitEnv, work: String, scratch: Strin
     ^start: 0
     loop token in tokens {
         if token.text == "+" && kit_steps_byte_slice(text, token.start, token.end) == "+" {
-            if !kit_steps_probe(kit_steps_byte_slice(text, start, token.start).trim().copy(), env, work, scratch) {
+            if !kit_steps_probe(kit_steps_byte_slice(text, start, token.start).trim(), env, work, scratch) {
                 return false
             }
             start = token.end
         }
     }
-    kit_steps_probe(kit_steps_byte_slice(text, start, text.count_bytes()).trim().copy(), env, work, scratch)
+    kit_steps_probe(kit_steps_byte_slice(text, start, text.count_bytes()).trim(), env, work, scratch)
 }
 
 kit_steps_capability_any: fn(text: String, probes: Bool, env: KitEnv, work: String, scratch: String) -> Bool {
@@ -130,12 +130,12 @@ kit_steps_capability_any: fn(text: String, probes: Bool, env: KitEnv, work: Stri
     ^start: 0
     loop token in tokens {
         if token.text == "|" && kit_steps_byte_slice(text, token.start, token.end) == "|" {
-            alternative: kit_steps_byte_slice(text, start, token.start).trim().copy()
+            alternative: kit_steps_byte_slice(text, start, token.start).trim()
             passed: if probes -> kit_steps_probes_all(alternative, env, work, scratch) else -> kit_steps_tools_all(alternative)
             if passed -> return true
             start = token.end
         }
     }
-    alternative: kit_steps_byte_slice(text, start, text.count_bytes()).trim().copy()
+    alternative: kit_steps_byte_slice(text, start, text.count_bytes()).trim()
     if probes -> kit_steps_probes_all(alternative, env, work, scratch) else -> kit_steps_tools_all(alternative)
 }
