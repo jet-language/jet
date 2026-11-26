@@ -1,0 +1,69 @@
+// Service restart policy (limit, window, backoff): validates policy inputs,
+// restarts a failing stateful worker up to `limit` times inside `window` while
+// honoring `backoff` and resetting state on each restart, then stops the worker
+// on the (limit + 1)-th failure with ServiceError.Unavailable.
+use {
+    service: core.service
+    core.service.[ServiceError]
+    time: core.time
+}
+
+accumulate: fn(total: ^Int, delta: Int) -> Int Err! {
+    if delta < 0 -> return Err("negative delta")
+    total += delta
+    total
+}
+
+run: fn() {
+    ^tree: service.tree("restart_policy")
+    bad_limit: tree.set_restart_policy(limit: -1, window: 5s, backoff: 10ms) == .Err(.Policy(_))
+    bad_window: tree.set_restart_policy(limit: 2, window: 0ms, backoff: 10ms) == .Err(.Policy(_))
+    bad_backoff: tree.set_restart_policy(limit: 2, window: 5s, backoff: time.duration_ms(-1)) == .Err(.Policy(_))
+    print("validation:{bad_limit}:{bad_window}:{bad_backoff}")
+
+    counter: tree.stateful_worker("counter", accumulate, state: 100, capacity: 8) ?? panic("worker")
+    // Configured after declaring the worker and before start().
+    tree.set_restart_policy(limit: 3, window: 5s, backoff: 15ms) ?? panic("set_restart_policy")
+    tree.start() ?? panic("start")
+
+    post_start_refused: tree.set_restart_policy(limit: 1, window: 5s, backoff: 0ms) == .Err(.Policy(_))
+    print("post_start_refused:{post_start_refused}")
+
+    // Initial healthy work mutates state from 100 -> 110.
+    v0: counter.call(10) ?? panic("call 10")
+    print("before_fail:{v0}")
+
+    sw: time.start()
+    ^ambiguous: 0
+    ^reset_ok: true
+    loop _ in 0..<3 {
+        if counter.call(-1) == {
+            .Err(ServiceError.Ambiguous(_)) -> { ambiguous += 1 }
+            .Err(other) -> panic("expected Ambiguous, got {other:Debug}")
+            .Ok(v) -> panic("expected failure, got {v}")
+        }
+        after: counter.call(5) ?? panic("call after restart")
+        if after != 105 -> reset_ok = false
+    }
+    elapsed_ms: sw.elapsed_millis()
+    restarts_after_3: tree.restarts(counter) ?? panic("restarts")
+    print("after_three:{ambiguous}:{restarts_after_3}:{reset_ok}:{elapsed_ms >= 40}")
+
+    // 4th failure inside the 5s window exhausts the budget and stops the worker.
+    fourth_ambiguous: counter.call(-1) == .Err(.Ambiguous(_))
+    // Give the worker task a brief moment to close its mailbox on exit.
+    ^exhausted: false
+    loop _ in 0..<50 {
+        if counter.call(1) == {
+            .Err(ServiceError.Unavailable(msg)) -> {
+                exhausted = msg.contains("counter") && msg.contains("restart budget")
+                break
+            }
+            .Err(ServiceError.Ambiguous(_)) -> time.sleep(5ms)
+            .Err(other) -> panic("unexpected err: {other:Debug}")
+            .Ok(v) -> panic("expected Unavailable after budget exhaustion, got {v}")
+        }
+    }
+    print("exhausted:{fourth_ambiguous}:{exhausted}")
+    tree.stop() ?? panic("stop")
+}

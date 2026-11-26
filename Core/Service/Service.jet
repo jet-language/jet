@@ -16,7 +16,6 @@ use {
     service_json: core.encoding.json
     service_crypto: core.crypto
     service_files: core.files
-    service_actor: core.actor
     service_log: core.log
     service_tasks: core.tasks
     service_time: core.time
@@ -427,6 +426,31 @@ priv set_restart: fn(tree: ^ServiceTree, restart: ServiceRestart) ServiceError! 
     loop index in 0..<tree.groups.len() -> tree.groups[index].restart = restart
 }
 
+// Configures the windowed restart budget (limit, window, backoff) for the
+// tree and every declared group before start.
+priv set_restart_policy: fn(tree: ^ServiceTree, limit: Int, window: service_time.Duration, backoff: service_time.Duration) ServiceError! {
+    if tree.started -> return Err(ServiceError.Policy("cannot change restart policy after start"))
+    if limit < 0 -> return Err(ServiceError.Policy("restart policy limit must be non-negative"))
+    window_ms: window.ns /% 1000000
+    if window.ns <= 0 || window_ms <= 0 -> return Err(ServiceError.Policy("restart policy window must be positive"))
+    if backoff.ns < 0 -> return Err(ServiceError.Policy("restart policy backoff must be non-negative"))
+    backoff_ms: backoff.ns /% 1000000
+    tree.budget_max = limit
+    tree.budget_per_ms = window_ms
+    tree.budget_backoff_ms = backoff_ms
+    budget_policy_write(tree.budget_policy, RestartBudget{limit: limit, window_ms: window_ms, backoff_ms: backoff_ms})
+    loop index in 0..<tree.groups.len() {
+        tree.groups[index].budget_max = limit
+        tree.groups[index].budget_per_ms = window_ms
+        tree.groups[index].budget_backoff_ms = backoff_ms
+    }
+}
+
+priv budget_policy_write: fn(cell: Shared<RestartBudget>, value: RestartBudget) Never! {
+    ^guard: cell.guard_edit()
+    guard.value = value
+}
+
 priv drain_dead_letters: fn(tree: ^ServiceTree) -> Int ServiceError! {
     if !tree.started -> return Err(ServiceError.NotStarted("service tree is not started"))
     count: tree.dead_letters.len()
@@ -711,6 +735,8 @@ ServiceTree: struct {
     priv restart: ServiceRestart,
     priv budget_max: Int,
     priv budget_per_ms: Int,
+    priv budget_backoff_ms: Int,
+    priv budget_policy: Shared<RestartBudget>,
     priv workers: [TreeWorker],
     priv groups: [TreeGroup],
     priv started: Bool,
@@ -729,6 +755,12 @@ ServiceTree: struct {
     priv last_upgrade: ServiceUpgradeReceipt?,
 
     set_restart: fn(^self, restart: ServiceRestart) ServiceError! { set_restart(self, restart) }
+
+    /// Configures the restart budget (limit, window, backoff) for workers in
+    /// this tree and its groups before `start()`.
+    set_restart_policy: fn(^self, limit: Int, window: service_time.Duration, backoff: service_time.Duration{0ms}) ServiceError! {
+        set_restart_policy(self, limit, window, backoff)
+    }
 
     set_delivery: fn(^self, delivery: ServiceDelivery) ServiceError! {
         set_delivery(self, delivery)
@@ -899,6 +931,7 @@ priv TreeWorker: struct {
     // The free places of a typed worker's mailbox; None for a String worker.
     room: service_tasks.Semaphore?,
     restarts: [Int],
+    live_restarts: Shared<[Int]>,
     running: Bool,
 }
 
@@ -907,7 +940,14 @@ priv TreeGroup: struct {
     restart: ServiceRestart,
     budget_max: Int,
     budget_per_ms: Int,
+    budget_backoff_ms: Int,
     workers: [String],
+}
+
+priv RestartBudget: struct {
+    limit: Int,
+    window_ms: Int,
+    backoff_ms: Int,
 }
 
 priv TreeStateAdapter: enum {
@@ -1135,6 +1175,8 @@ priv ServiceEndpointSend: struct {
         restart: ServiceRestart.OneForOne,
         budget_max: 5,
         budget_per_ms: 60000,
+        budget_backoff_ms: 0,
+        budget_policy: Shared{RestartBudget{limit: 5, window_ms: 60000, backoff_ms: 0}},
         workers: [TreeWorker]{},
         groups: [TreeGroup]{},
         started: false,
@@ -3854,7 +3896,7 @@ priv group: fn(tree: ^ServiceTree, name: String, workers: [String]) ServiceError
     ^groups: [{name: String, workers: [String]}]{}
     loop existing in tree.groups -> groups.push({name: existing.name, workers: existing.workers})
     validate_group(name, workers, known, groups)
-    tree.groups.push(TreeGroup{name: name, restart: tree.restart, budget_max: tree.budget_max, budget_per_ms: tree.budget_per_ms, workers: workers})
+    tree.groups.push(TreeGroup{name: name, restart: tree.restart, budget_max: tree.budget_max, budget_per_ms: tree.budget_per_ms, budget_backoff_ms: tree.budget_backoff_ms, workers: workers})
 }
 
 validate_group: fn(name: String, workers: [String], known: [String], groups: [{name: String, workers: [String]}]) ServiceError! {
@@ -5475,8 +5517,25 @@ priv declare_worker: fn(tree: ^ServiceTree, name: String, handler_name: String, 
     // The mailbox exists before the endpoint is published, so a failed
     // allocation never leaves a ghost authority in the registry.
     authority_register(endpoint, false, Val(channel))
-    tree.workers.push(TreeWorker{name: name, handler_name: handler_name, endpoint: endpoint, capacity: capacity, channel: channel, room: room, restarts: [Int]{}, running: false})
+    tree.workers.push(TreeWorker{name: name, handler_name: handler_name, endpoint: endpoint, capacity: capacity, channel: channel, room: room, restarts: [Int]{}, live_restarts: Shared{[Int]{}}, running: false})
     Ok(endpoint)
+}
+
+priv worker_live_restarts_cell: fn(tree: ServiceTree, id: ServiceEndpoint) -> Shared<[Int]> Never! {
+    loop worker in tree.workers {
+        if worker.name == id.worker && worker.endpoint.tree == id.tree -> return worker.live_restarts.copy()
+    }
+    Shared{[Int]{}}
+}
+
+priv worker_record_live_restarts: fn(cell: Shared<[Int]>, timestamps: [Int]) Never! {
+    ^guard: cell.guard_edit()
+    guard.value = timestamps.copy()
+}
+
+priv worker_read_live_restarts: fn(cell: Shared<[Int]>) -> [Int] Never! {
+    guard: cell.guard_read()
+    guard.value.copy()
 }
 
 // The messages waiting in a worker's mailbox: a typed worker's are the
@@ -5487,19 +5546,131 @@ priv worker_depth: fn(worker: TreeWorker) -> Int Never! {
 }
 
 // --- Typed workers ---------------------------------------------------------
-// A worker is its handler: a core.actor actor whose one detached task owns
+// A worker is its handler: a supervised mailbox whose one detached task owns
 // the worker's state and runs the handler once per message, in send order.
 // The tree gates every send (started, running, draining, generation), and a
 // semaphore counts the free places of the mailbox, so a send past
 // `capacity` waiting messages is Full. A handler that fails or panics fails
-// only its message; the worker begins again from its `state:` value, at most
-// the tree's restart budget of times, and then stops.
+// only its message; the worker sleeps `backoff`, begins again from its
+// `state:` value at most `limit` times inside `window`, and then stops.
+
+priv WorkerReply: struct<R> {
+    sender: Sender<R>,
+
+    answer: fn(self, value: ^^R) -[Time.Wait]> { self.sender.send(value) ?? return }
+}
+
+priv WorkerEnvelope: struct<M> {
+    message: M,
+    done: Sender<Bool>?,
+
+    finish: fn(self) {
+        if self.done == .Val(done) -> done.close()
+    }
+}
+
+priv WorkerBox: struct<M> {
+    inbox: Sender<WorkerEnvelope<M>>,
+
+    send: fn(self, message: ^^M) -> Bool Never! {
+        if self.inbox.send(WorkerEnvelope<M>{message: message, done: None}) == {
+            .Ok(_) -> true
+            .Err(_) -> false
+        }
+    }
+
+    ask: fn<R>(self, worker: String, build: fn(WorkerReply<R>) -> M Never!) -> R ServiceError! {
+        { sender: reply, receiver: answer }: channel<R>(capacity: 1)
+        { sender: done, receiver: handled }: channel<Bool>(capacity: 1)
+        message: build(WorkerReply<R>{sender: reply})
+        self.inbox.send(WorkerEnvelope<M>{message: message, done: Val(done)}) ?? return Err(ServiceError.Unavailable("worker `{worker}` stopped after its restart budget"))
+        _: handled.receive() ?? false
+        if answer.try_receive() == {
+            .Val(value) -> Ok(value)
+            .None -> Err(ServiceError.Ambiguous("worker `{worker}` failed while handling the call"))
+        }
+    }
+}
+
+priv spawn_worker_box: fn<S, M>(state: ^^S, handler: ^^fn(S, M) -> S Err!) -> WorkerBox<M> {
+    { sender: inbox, receiver: mailbox }: channel<WorkerEnvelope<M>>()
+    worker: task ^^mailbox {
+        ^current: state
+        loop envelope in mailbox {
+            if !plain_worker_turn(current, handler, envelope) -> break
+        }
+        drain_worker_mailbox(mailbox)
+    }
+    worker.detach()
+    WorkerBox<M>{inbox: inbox}
+}
+
+priv supervise_worker_box: fn<S, M>(start: ^^fn() -> S, handler: ^^fn(S, M) -> S Err!, policy: Shared<RestartBudget>, live_restarts: Shared<[Int]>) -> WorkerBox<M> {
+    { sender: inbox, receiver: mailbox }: channel<WorkerEnvelope<M>>()
+    worker: task ^^mailbox {
+        ^current: start()
+        ^restarts: [Int]{}
+        loop envelope in mailbox {
+            if !supervised_worker_turn(current, handler, envelope) {
+                budget: policy.guard_read().value
+                now: service_now()
+                if worker_spent(restarts, now, budget.window_ms) >= budget.limit -> break
+                if budget.backoff_ms > 0 -> service_time.sleep(service_time.duration_ms(budget.backoff_ms))
+                restarts = worker_pruned(restarts, service_now(), budget.window_ms)
+                worker_record_live_restarts(live_restarts, restarts)
+                current = start()
+            }
+        }
+        drain_worker_mailbox(mailbox)
+    }
+    worker.detach()
+    WorkerBox<M>{inbox: inbox}
+}
+
+priv plain_worker_turn: fn<S, M>(current: ^S, handler: fn(S, M) -> S Err!, envelope: WorkerEnvelope<M>) -> Bool {
+    handled: if handler(current, envelope.message) == {
+        .Ok(next) -> {
+            current = next
+            true
+        }
+        .Err(_) -> false
+    }
+    envelope.finish()
+    handled
+}
+
+priv supervised_worker_turn: fn<S, M>(current: ^S, handler: fn(S, M) -> S Err!, envelope: WorkerEnvelope<M>) -> Bool {
+    ^outcome: S?{None}
+    task.group group {
+        attempt: task handler(current, envelope.message)
+        if attempt.join() == {
+            .Ok(next) -> { outcome = Val(next) }
+            .Err(_) -> {}
+        }
+    }
+    envelope.finish()
+    if outcome == {
+        .Val(next) -> {
+            current = next
+            true
+        }
+        .None -> false
+    }
+}
+
+priv drain_worker_mailbox: fn<M>(mailbox: Receiver<WorkerEnvelope<M>>) {
+    mailbox.close()
+    loop {
+        envelope: mailbox.try_receive() ?? break
+        envelope.finish()
+    }
+}
 
 /// The address of a worker whose handler takes `Q` and answers `R`; the
 /// endpoint of a worker that does not answer has `R` = Unit.
 Endpoint: struct<Q, R> {
     priv id: ServiceEndpoint,
-    priv inbox: service_actor.Actor<Job<Q, R>>,
+    priv inbox: WorkerBox<Job<Q, R>>,
     priv room: service_tasks.Semaphore,
     priv capacity: Int,
     priv starved: Shared<Bool>,
@@ -5538,7 +5709,7 @@ impl Endpoint<Q: [Encode, Decode], R> {
 // and its durable receipt when it came from the authority. A batched
 // worker's timer also queues the flush of a waiting batch.
 priv Job: enum<Q, R> {
-    Message(message: Q, reply: service_actor.Reply<R>?, receipt: PendingEntry?),
+    Message(message: Q, reply: WorkerReply<R>?, receipt: PendingEntry?),
     Flush(round: Int),
 }
 
@@ -5583,12 +5754,13 @@ priv batched_declare: fn<Q>(tree: ^ServiceTree, name: String, handler: ^^fn([Q])
     }
     room: service_tasks.Semaphore.new(capacity)
     id: declare_worker(tree, name, handler_name, capacity, Val(room))
+    live_restarts: worker_live_restarts_cell(tree, id)
+    policy: tree.budget_policy.copy()
     starved: Shared<Bool>{false}
     wake: service_tasks.Semaphore.new(0)
     // The timer reaches the worker through its own mailbox, which exists
-    // only once the actor does.
-    timer_inbox: Shared<service_actor.Actor<Job<Q, ()>>?>{None}
-    attempts: tree.budget_max + 1
+    // only once the worker box does.
+    timer_inbox: Shared<WorkerBox<Job<Q, ()>>?>{None}
     step: fn(state: BatchState<Q>, job: Job<Q, ()>) -> BatchState<Q> Err! {
         ^current: state
         if job == {
@@ -5596,19 +5768,19 @@ priv batched_declare: fn<Q>(tree: ^ServiceTree, name: String, handler: ^^fn([Q])
                 room_free(room, starved, wake)
                 current.pending.push(message.copy())
                 if receipt == .Val(entry) -> current.receipts.push(entry.copy())  // copy: the job lends its receipt
-                if current.pending.len() >= batch -> hand_over(current, handler, attempts) else if current.pending.len() == 1 {
+                if current.pending.len() >= batch -> hand_over(current, handler, policy, live_restarts) else if current.pending.len() == 1 {
                     arm_flush(timer_inbox, wait, current.round)
                 }
             }
             .Flush(round) -> {
                 if round == current.round && current.pending.len() > 0 {
-                    hand_over(current, handler, attempts)
+                    hand_over(current, handler, policy, live_restarts)
                 }
             }
         }
         current
     }
-    inbox: service_actor.spawn(BatchState<Q>{pending: [Q]{}, receipts: [PendingEntry]{}, round: 0}, step) ?? return Err(worker_task_failed(name))
+    inbox: spawn_worker_box(BatchState<Q>{pending: [Q]{}, receipts: [PendingEntry]{}, round: 0}, step) ?? return Err(worker_task_failed(name))
     ^slot: timer_inbox.guard_edit()
     slot.value = Val(inbox)
     Ok(Endpoint<Q, ()>{id: id, inbox: inbox, room: room, capacity: capacity, starved: starved, wake: wake, feeder_started: Shared<Bool>{false}})
@@ -5625,6 +5797,8 @@ priv worker_task_failed: fn(name: String) -> ServiceError Never! {
 priv typed_declare: fn<S, Q, R>(tree: ^ServiceTree, name: String, handler_name: String, capacity: Int, state: ^^S, handler: ^^fn(^S, Q) -> R Err!) -> Endpoint<Q, R> ServiceError! {
     room: service_tasks.Semaphore.new(capacity)
     id: declare_worker(tree, name, handler_name, capacity, Val(room))
+    live_restarts: worker_live_restarts_cell(tree, id)
+    policy: tree.budget_policy.copy()
     starved: Shared<Bool>{false}
     wake: service_tasks.Semaphore.new(0)
     step: fn(held: S, job: Job<Q, R>) -> S Err! {
@@ -5640,7 +5814,7 @@ priv typed_declare: fn<S, Q, R>(tree: ^ServiceTree, name: String, handler_name: 
         }
         current
     }
-    inbox: service_actor.supervise(fn() -> S { state }, step, .Restart{limit: tree.budget_max}) ?? return Err(worker_task_failed(name))
+    inbox: supervise_worker_box(fn() -> S { state }, step, policy, live_restarts) ?? return Err(worker_task_failed(name))
     Ok(Endpoint<Q, R>{id: id, inbox: inbox, room: room, capacity: capacity, starved: starved, wake: wake, feeder_started: Shared<Bool>{false}})
 }
 
@@ -5682,14 +5856,14 @@ priv room_take: fn(room: service_tasks.Semaphore, starved: Shared<Bool>) -> Bool
 // it hands the worker its pending durable receipts, at the generation it
 // runs now, while the worker takes messages and its mailbox has places. A
 // worker without a decoder has no feeder.
-priv feed_start: fn<Q, R>(id: ServiceEndpoint, inbox: service_actor.Actor<Job<Q, R>>, room: service_tasks.Semaphore, starved: Shared<Bool>, wake: service_tasks.Semaphore, decoder: ^^(fn(String) -> Q ServiceError!)?) Never! {
+priv feed_start: fn<Q, R>(id: ServiceEndpoint, inbox: WorkerBox<Job<Q, R>>, room: service_tasks.Semaphore, starved: Shared<Bool>, wake: service_tasks.Semaphore, decoder: ^^(fn(String) -> Q ServiceError!)?) Never! {
     decode: decoder ?? return
     feed_register(id, wake)
     feeder: task feed_wait(id, inbox, room, starved, wake, decode)
     feeder.detach()
 }
 
-priv feed_wait: fn<Q, R>(id: ServiceEndpoint, inbox: service_actor.Actor<Job<Q, R>>, room: service_tasks.Semaphore, starved: Shared<Bool>, wake: service_tasks.Semaphore, decode: fn(String) -> Q ServiceError!) Never! {
+priv feed_wait: fn<Q, R>(id: ServiceEndpoint, inbox: WorkerBox<Job<Q, R>>, room: service_tasks.Semaphore, starved: Shared<Bool>, wake: service_tasks.Semaphore, decode: fn(String) -> Q ServiceError!) Never! {
     loop {
         if !wake.acquire() {
             return
@@ -5698,7 +5872,7 @@ priv feed_wait: fn<Q, R>(id: ServiceEndpoint, inbox: service_actor.Actor<Job<Q, 
     }
 }
 
-priv feed: fn<Q, R>(id: ServiceEndpoint, inbox: service_actor.Actor<Job<Q, R>>, room: service_tasks.Semaphore, starved: Shared<Bool>, decode: fn(String) -> Q ServiceError!) ServiceError! {
+priv feed: fn<Q, R>(id: ServiceEndpoint, inbox: WorkerBox<Job<Q, R>>, room: service_tasks.Semaphore, starved: Shared<Bool>, decode: fn(String) -> Q ServiceError!) ServiceError! {
     loop {
         current: feed_current(id) ?? return Ok()
         if !room_take(room, starved) -> return Ok()
@@ -5720,7 +5894,7 @@ priv feed: fn<Q, R>(id: ServiceEndpoint, inbox: service_actor.Actor<Job<Q, R>>, 
 // Queues the next pending receipt that decodes, marked handed to the
 // worker; false when none is pending. A receipt that no longer decodes is
 // dead-lettered.
-priv feed_one: fn<Q, R>(id: ServiceEndpoint, inbox: service_actor.Actor<Job<Q, R>>, decode: fn(String) -> Q ServiceError!) -> Bool ServiceError! {
+priv feed_one: fn<Q, R>(id: ServiceEndpoint, inbox: WorkerBox<Job<Q, R>>, decode: fn(String) -> Q ServiceError!) -> Bool ServiceError! {
     loop {
         taken: authority_take_pending(id, 1, [String]{})
         if taken.len() == 0 -> return Ok(false)
@@ -5730,17 +5904,20 @@ priv feed_one: fn<Q, R>(id: ServiceEndpoint, inbox: service_actor.Actor<Job<Q, R
             next
         }
         authority_mark_delivered(entry.store, entry.id)
-        inbox.send(Job<Q, R>.Message{message: message, reply: None, receipt: Val(entry)}) ?? return Err(ServiceError.Unavailable("worker `{id.worker}` stopped after its restart budget"))
+        if !inbox.send(Job<Q, R>.Message{message: message, reply: None, receipt: Val(entry)}) {
+            return Err(ServiceError.Unavailable("worker `{id.worker}` stopped after its restart budget"))
+        }
         return Ok(true)
     }
 }
 
-// Hands the waiting batch to the handler, again after each failure up to
-// `attempts` runs, then starts the next batch. A handled batch commits its
-// durable receipts.
-priv hand_over: fn<Q>(state: ^BatchState<Q>, handler: fn([Q]) Err!, attempts: Int) {
+// Hands the waiting batch to the handler, retrying under the tree's restart
+// policy (limit, window, backoff), then starts the next batch. A handled batch
+// commits its durable receipts.
+priv hand_over: fn<Q>(state: ^BatchState<Q>, handler: fn([Q]) Err!, policy: Shared<RestartBudget>, live_restarts: Shared<[Int]>) {
     ^handled: false
-    loop _ in 1..attempts {
+    ^restarts: worker_read_live_restarts(live_restarts)
+    loop {
         task.group group {
             attempt: task handler(state.pending)
             if attempt.join() == {
@@ -5749,6 +5926,11 @@ priv hand_over: fn<Q>(state: ^BatchState<Q>, handler: fn([Q]) Err!, attempts: In
             }
         }
         if handled -> break
+        budget: policy.guard_read().value
+        if worker_spent(restarts, service_now(), budget.window_ms) >= budget.limit -> break
+        if budget.backoff_ms > 0 -> service_time.sleep(service_time.duration_ms(budget.backoff_ms))
+        restarts = worker_pruned(restarts, service_now(), budget.window_ms)
+        worker_record_live_restarts(live_restarts, restarts)
     }
     if handled {
         loop entry in state.receipts -> receipt_commit(entry)
@@ -5759,11 +5941,11 @@ priv hand_over: fn<Q>(state: ^BatchState<Q>, handler: fn([Q]) Err!, attempts: In
 }
 
 // After `wait`, flushes batch `round` if it is still waiting.
-priv arm_flush: fn<Q>(inbox: Shared<service_actor.Actor<Job<Q, ()>>?>, wait: service_time.Duration, round: Int) {
+priv arm_flush: fn<Q>(inbox: Shared<WorkerBox<Job<Q, ()>>?>, wait: service_time.Duration, round: Int) {
     timer: task {
         service_time.sleep(wait)
         slot: inbox.guard_read()
-        if slot.value == .Val(worker) -> worker.send(Job<Q, ()>.Flush{round: round}) ?? return
+        if slot.value == .Val(worker) -> _: worker.send(Job<Q, ()>.Flush{round: round})
     }
     timer.detach()
 }
@@ -5823,7 +6005,7 @@ priv endpoint_typed_queue: fn<Q, R>(endpoint: Endpoint<Q, R>) ServiceError! {
 
 priv endpoint_typed_send: fn<Q, R>(endpoint: Endpoint<Q, R>, message: ^^Q) ServiceError! {
     endpoint_typed_queue(endpoint)
-    endpoint.inbox.send(Job<Q, R>.Message{message: message, reply: None, receipt: None}) ?? {
+    if !endpoint.inbox.send(Job<Q, R>.Message{message: message, reply: None, receipt: None}) {
         endpoint.room.release()
         return Err(ServiceError.Unavailable("worker `{endpoint.id.worker}` stopped after its restart budget"))
     }
@@ -5831,9 +6013,14 @@ priv endpoint_typed_send: fn<Q, R>(endpoint: Endpoint<Q, R>, message: ^^Q) Servi
 
 priv endpoint_typed_call: fn<Q, R>(endpoint: Endpoint<Q, R>, message: ^^Q) -> R ServiceError! {
     endpoint_typed_queue(endpoint)
-    answer: endpoint.inbox.ask<R, Never>(fn(reply: service_actor.Reply<R>) -> Job<Q, R> Never! { Job<Q, R>.Message{message: message, reply: Val(reply), receipt: None} })
-    handled: answer ?? return Err(ServiceError.Ambiguous("worker `{endpoint.id.worker}` failed while handling the call"))
-    Ok(handled)
+    if endpoint.inbox.ask<R>(endpoint.id.worker, fn(reply: WorkerReply<R>) -> Job<Q, R> Never! { Job<Q, R>.Message{message: message, reply: Val(reply), receipt: None} }) == {
+        .Ok(handled) -> Ok(handled)
+        .Err(ServiceError.Unavailable(msg)) -> {
+            endpoint.room.release()
+            Err(ServiceError.Unavailable(msg))
+        }
+        .Err(error) -> Err(error)
+    }
 }
 
 priv endpoint_typed_send_durable: fn<Q: [Encode, Decode], R>(endpoint: Endpoint<Q, R>, message: ^^Q, key: String) -> Delivery ServiceError! {
@@ -6261,10 +6448,12 @@ priv fail_worker: fn(tree: ^ServiceTree, endpoint: ServiceEndpoint) ServiceError
     ^restart: tree.restart
     ^max: tree.budget_max
     ^per: tree.budget_per_ms
+    ^backoff: tree.budget_backoff_ms
     if scope.supervisor < tree.groups.len() {
         restart = tree.groups[scope.supervisor].restart
         max = tree.groups[scope.supervisor].budget_max
         per = tree.groups[scope.supervisor].budget_per_ms
+        backoff = tree.groups[scope.supervisor].budget_backoff_ms
     }
     now: service_now()
     preserve: tree.delivery == ServiceDelivery.DurableAtLeastOnce
@@ -6286,6 +6475,8 @@ priv fail_worker: fn(tree: ^ServiceTree, endpoint: ServiceEndpoint) ServiceError
             return Err(ServiceError.Unavailable(reason))
         }
     }
+    if backoff > 0 -> service_time.sleep(service_time.duration_ms(backoff))
+    restarted_at: service_now()
     ^desired: [Bool]{}
     loop i in 0..<tree.workers.len() {
         desired.push(if index_listed(targets, i) -> !worker_contains(tree.partitioned, tree.workers[i].name) else -> tree.workers[i].running)
@@ -6312,7 +6503,7 @@ priv fail_worker: fn(tree: ^ServiceTree, endpoint: ServiceEndpoint) ServiceError
         }
     }
     loop index in targets {
-        tree.workers[index].restarts = worker_pruned(tree.workers[index].restarts, now, per)
+        tree.workers[index].restarts = worker_pruned(tree.workers[index].restarts, restarted_at, per)
         tree.workers[index].running = true
         messages: if preserve -> channel_snapshot(tree.workers[index].channel) else -> [String]{}
         channel_close(tree.workers[index].channel)
@@ -6336,7 +6527,7 @@ priv restarts: fn(tree: ServiceTree, endpoint: ServiceEndpoint) -> Int ServiceEr
     now: service_now()
     loop worker in tree.workers {
         if worker.name == endpoint.worker && worker.endpoint.tree == endpoint.tree {
-            return Ok(worker_spent(worker.restarts, now, per))
+            return Ok(worker_spent(worker.restarts, now, per) + worker_spent(worker_read_live_restarts(worker.live_restarts), now, per))
         }
     }
     Err(ServiceError.Unknown("endpoint {endpoint.tree}/{endpoint.worker} is not in this tree"))

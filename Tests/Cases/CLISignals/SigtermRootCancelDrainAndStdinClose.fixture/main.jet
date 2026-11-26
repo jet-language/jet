@@ -1,0 +1,66 @@
+// Root cancellation on SIGTERM, listener drain for an in-flight request,
+// child task cancellation, and ProcessStdin.close() running through shared
+// Prelude semantics across O0, O1, and O2.
+use {
+    http_server: core.http.server
+    net: core.net
+    process: core.process
+    term: core.term
+    time: core.time
+    web: core.web
+}
+
+crlf: fn() -> String { "\r\n" }
+
+run: fn() {
+    process.on_signal(.Term)
+
+    // Verify ProcessStdin.close() delivers clean EOF before serving.
+    child: process.cmd([String]{"cat"}).stdin(.Stream).stdout(.Stream).spawn() ?? process.fail(2, "spawn cat: {err}")
+    child.stdin.write("cli-stdin\n") ?? process.fail(2, "stdin write: {err}")
+    child.stdin.close()
+    ^echo_bytes: [U8]{}
+    loop {
+        chunk: child.stdout.read_bytes(64) ?? process.fail(2, "stdout read: {err}")
+        if chunk.len() == 0 -> break
+        loop byte in chunk { echo_bytes.push(byte) }
+    }
+    child_rcpt: child.wait() ?? process.fail(2, "wait cat: {err}")
+    echoed: (String.from_bytes(echo_bytes) ?? "").trim()
+    if child_rcpt.code != 0 || echoed != "cli-stdin" -> process.fail(2, "unexpected cat output")
+
+    // Bind listener with explicit request deadline and launch a sleeping sibling
+    // plus an in-flight client that finishes across SIGTERM.
+    app: web.app().get("/ping", fn(_req: HTTPRequest) { Ok(http_server.response(200, "pong")) })
+    server: app.bind("127.0.0.1:0", deadline: 2000ms) ?? process.fail(2, "bind: {err}")
+    addr: server.local_addr() ?? process.fail(2, "local_addr: {err}")
+
+    sleeper: task { time.sleep(60s) }
+    client: task {
+        #Shield {
+            conn: net.tcp_connect(addr) ?? process.fail(1, "connect: {err}")
+            conn.write_bytes("GET /ping HTTP/1.1{crlf()}".bytes()) ?? process.fail(1, "write1: {err}")
+            time.sleep(80ms)
+            print("ready")
+            ^out: term.stdout()
+            out.flush() ?? process.fail(1, "flush: {err}")
+            time.sleep(200ms)
+            conn.write_bytes("Host: test{crlf()}{crlf()}".bytes()) ?? process.fail(1, "write2: {err}")
+            ^parts: [String]{}
+            loop {
+                part: conn.read(4096) ?? process.fail(1, "read: {err}")
+                if part == "" -> break
+                parts.push(part)
+            }
+            line: parts.join("").split_once(crlf()) ?? process.fail(1, "no response")
+            print("in_flight: {line.before}")
+        }
+    }
+
+    report: server.serve() ?? process.fail(1, "serve: {err}")
+    client_canceled: client.join() == .Err(.Canceled)
+    sleeper_canceled: sleeper.join() == .Err(.Canceled)
+    print("stdin_closed: true")
+    print("root_cancel: client={client_canceled} sleeper={sleeper_canceled}")
+    print("drained: accepted={report.accepted} completed={report.completed} canceled={report.canceled}")
+}

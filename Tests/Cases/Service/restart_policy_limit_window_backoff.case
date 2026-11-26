@@ -1,0 +1,22 @@
+# Service restart policy enforces limit, window, and backoff across O0, O1, and
+# O2: rejects invalid policies and post-start mutation, restarts 3 times with
+# backoff and clean state reset, and stops on the 4th failure inside the window.
+fixture: RestartPolicyLimitWindowBackoff.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+
+step o0: jet run main.jet
+exit: 0
+stdout: = "validation:true:true:true\npost_start_refused:true\nbefore_fail:110\nafter_three:3:3:true:true\nexhausted:true:true\n"
+
+step build_o1: jet build -O1 main.jet
+exit: 0
+step o1: built
+exit: == o0
+stdout: == o0
+
+step build_o2: jet build -O2 main.jet
+exit: 0
+step o2: built
+exit: == o0
+stdout: == o0

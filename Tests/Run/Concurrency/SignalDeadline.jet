@@ -1,0 +1,90 @@
+// Shared Prelude semantics for signal handling, ambient deadlines, HTTP request
+// deadlines, listener drain, and ProcessStdin.close() across O0, O1, and O2.
+package: {
+    name: "signal_deadline"
+    authority: { allow: [Env, Exec, FS.Read, IO, Mem.Alloc, Net, Time, Time.Wait] }
+}
+
+use {
+    http_server: core.http.server
+    net: core.net
+    process: core.process
+    time: core.time
+    web: core.web
+}
+
+crlf: fn() -> String { "\r\n" }
+
+send_self_signal: fn(name: String) -[Env, Exec, Time.Wait]> {
+    receipt: process.run_spec(process.cmd([String]{"kill", "-{name}", "{process.current_pid()}"})) ?? panic("kill failed to start")
+    if !receipt.success -> panic("kill -{name} failed")
+}
+
+run: fn() {
+    // 1. Signal subscription as a typed value + close ends receiver.
+    sub: process.signals([ProcessSignal]{.Usr1}) ?? panic("signals failed")
+    send_self_signal("USR1")
+    got: sub.receiver.receive() ?? panic("signal receiver closed early")
+    sub.close()
+    after_close: sub.receiver.receive() == .Err(_)
+    print("signal:{process.signal_number(got) == process.signal_number(.Usr1)}:{after_close}")
+
+    // 2. Ambient #Deadline cancels a sleeping child task with DeadlineBlown.
+    sleeper: task {
+        #Deadline(40ms) {
+            time.sleep(5s)
+        }
+    }
+    deadline_hit: if sleeper.join() == {
+        .Err(.DeadlineBlown) -> true
+        .Err(_) -> false
+        .Ok(_) -> false
+    }
+    print("ambient_deadline:{deadline_hit}")
+
+    // 3. HTTP request deadline + listener drain on shutdown(grace:).
+    app: web.app().get("/ok", fn(_req: HTTPRequest) { Ok(http_server.response(200, "ok")) })
+    server: app.bind("127.0.0.1:0", deadline: 150ms) ?? panic("bind")
+    addr: server.local_addr() ?? panic("local_addr")
+    serving: task { server.serve() ?? panic("serve") }
+
+    // 3a. Slow client opens a connection and stalls past the 150ms request deadline.
+    slow: net.tcp_connect(addr) ?? panic("slow connect")
+    slow.write_bytes("GET /ok HTTP/1.1{crlf()}".bytes()) ?? panic("slow write")
+    slow_reply: slow.read(1024) ?? ""
+    print("request_deadline_closed:{slow_reply == "" || slow_reply.contains("408")}")
+
+    // 3b. In-flight client holds half a request while server.shutdown(grace:) drains it.
+    inflight: task {
+        conn: net.tcp_connect(addr) ?? panic("inflight connect")
+        conn.write_bytes("GET /ok HTTP/1.1{crlf()}".bytes()) ?? panic("inflight write 1")
+        time.sleep(80ms)
+        conn.write_bytes("Host: test{crlf()}{crlf()}".bytes()) ?? panic("inflight write 2")
+        ^parts: [String]{}
+        loop {
+            part: conn.read(4096) ?? break
+            if part == "" -> break
+            parts.push(part)
+        }
+        parts.join("").contains("200 OK")
+    }
+    time.sleep(30ms)
+    drain_report: server.shutdown(grace: 1500ms) ?? panic("shutdown")
+    served_report: serving.join() ?? panic("serving join")
+    inflight_ok: inflight.join() ?? false
+    print("drain:{inflight_ok}:{drain_report.completed >= 1}:{served_report.completed >= 1}")
+
+    // 4. ProcessStdin.close() delivers EOF to a piped child immediately.
+    child: process.cmd([String]{"cat"}).stdin(.Stream).stdout(.Stream).spawn() ?? panic("spawn cat")
+    child.stdin.write("hello-stdin\n") ?? panic("stdin write")
+    child.stdin.close()
+    ^received: [U8]{}
+    loop {
+        chunk: child.stdout.read_bytes(64) ?? panic("stdout read")
+        if chunk.len() == 0 -> break
+        loop byte in chunk { received.push(byte) }
+    }
+    receipt: child.wait() ?? panic("wait cat")
+    echoed: (String.from_bytes(received) ?? "").trim()
+    print("stdin_close:{receipt.code}:{echoed}")
+}
