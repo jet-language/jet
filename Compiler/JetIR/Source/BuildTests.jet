@@ -207,7 +207,7 @@ ir_test_finish: fn(m: ^IRModule, p: IRProgram, b: ^^IRBuilder, failures: ^[IRBui
 // Reserves a function slot for a harness helper whose body is built after
 // its callers are lowered (such as `test.reset`).
 ir_test_reserve: fn(m: ^IRModule, name: String, from: Int, suffix: String) -> Int Never! {
-    ^b: ir_test_builder(m.*, name, from, suffix)
+    ^b: ir_test_builder(m, name, from, suffix)
     id: m.functions.len()
     key: b.f.key
     m.functions.push(b.f.move())
