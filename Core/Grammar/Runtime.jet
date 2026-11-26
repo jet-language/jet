@@ -518,6 +518,9 @@ cursor_leave: fn(cursor: ^GrammarCursor) Never! {
     cursor.depth -= 1
 }
 
+/// The rules the parse is inside.
+cursor_depth: fn(cursor: GrammarCursor) -> Int Never! { cursor.depth }
+
 /// After an error, passes tokens up to the next of `stops` (the separator
 /// or closing literal of the nearest enclosing repeat) and returns it
 /// untaken. Nothing is invented: a token of any kind is passed whole, and
@@ -637,6 +640,27 @@ into_token: fn<S: GrammarSink>(cursor: ^GrammarCursor, scanner: GrammarScanner, 
 into_result: fn(cursor: GrammarCursor) -> Int GrammarError! {
     if cursor.errors.len() > 0 -> return Err(parse_error(cursor))
     Ok(cursor.at)
+}
+
+/// After a refusal inside a repeat of a check, puts the depth back to
+/// `depth`, that of the rule the repeat is in, and passes tokens up to the
+/// next of `stops` (`cursor_resync`). Whether the repeat goes on: the stop
+/// is its `separator`.
+check_resync: fn(cursor: ^GrammarCursor, scanner: GrammarScanner, depth: Int, stops: [Int], separator: Int) -> Bool Never! {
+    cursor.depth = depth
+    stop: cursor_resync(cursor, scanner, stops)
+    separator >= 0 && stop.kind == separator
+}
+
+/// The errors a check of a literal's parts recorded, one per resync point;
+/// none when it passed. `ran` is whether the start rule's check ran to its
+/// end; the input must end there.
+check_errors: fn(cursor: ^GrammarCursor, scanner: GrammarScanner, ran: Bool) -> [GrammarError] Never! {
+    if ran {
+        _: parse_token(cursor, scanner, 0)
+    }
+    // copy: the errors outlive the cursor
+    cursor.errors.copy()
 }
 
 /// A print in progress: where it started in its output, the token kind it

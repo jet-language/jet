@@ -10,7 +10,7 @@
 use {
     core.grammar.error.[GrammarFault, GrammarFaultKind, GrammarFaults, TextSpot, grammar_faults]
     core.grammar.plan.[GrammarKeywords, GrammarPlan, GrammarScanner, GrammarSource]
-    core.grammar.runtime.[GRAMMAR_MAX_DEPTH, NO_HOLE, NO_TOKEN, bounds_column, cursor_enter, cursor_expect, cursor_fail, cursor_leave, cursor_of, cursor_of_parts, cursor_resync, cursor_take, grammar_scanner, into_result, into_token, keyword_find, keyword_next, lexer_column, lexer_match, parse_decide, parse_end, parse_error, parse_text, parse_token, pen_of, print_error, print_result, print_text, print_text_in, print_token, scan, scan_after, word_end, word_shaped]
+    core.grammar.runtime.[GRAMMAR_MAX_DEPTH, NO_HOLE, NO_TOKEN, bounds_column, check_errors, check_resync, cursor_depth, cursor_enter, cursor_expect, cursor_fail, cursor_leave, cursor_of, cursor_of_parts, cursor_resync, cursor_take, grammar_scanner, into_result, into_token, keyword_find, keyword_next, lexer_column, lexer_match, parse_decide, parse_end, parse_error, parse_text, parse_token, pen_of, print_error, print_result, print_text, print_text_in, print_token, scan, scan_after, word_end, word_shaped]
     core.grammar.sink.[GrammarSink]
     __core_grammar_analyze.[mark_nullable, mark_parents, report_left_recursion, resolve, split_operators]
     __core_grammar_keywords.[plan_keywords]
@@ -398,6 +398,44 @@ priv LIST: "s : '[' items+=NAME (',' items+=NAME)* ']' ;\nNAME : [a-z]+ ;\nWS : 
     assert_eq(end.start, 6)
     cursor_fail(cursor, scanner, end, [close])
     assert_eq(cursor.errors.len(), 1)
+}
+
+#Test("a check resyncs a repeat at its separator and its closing token, and keeps every error") {
+    scanner: grammar_scanner(plan_of(LIST))
+    open: scanner_kind(scanner, "\"[\"")
+    name: scanner_kind(scanner, "NAME")
+    comma: scanner_kind(scanner, "\",\"")
+    close: scanner_kind(scanner, "\"]\"")
+    ^cursor: cursor_of_parts(["[a %, b c]"])
+    _: cursor_expect(cursor, scanner, [open])
+    assert(cursor_enter(cursor))
+    depth: cursor_depth(cursor)
+    _: cursor_expect(cursor, scanner, [name])
+    assert(cursor_enter(cursor))
+    _: cursor_expect(cursor, scanner, [comma, close])
+    assert(check_resync(cursor, scanner, depth, [comma, close], comma))
+    assert_eq(cursor_depth(cursor), depth)
+    _: cursor_expect(cursor, scanner, [comma])
+    _: cursor_expect(cursor, scanner, [name])
+    _: cursor_expect(cursor, scanner, [comma, close])
+    assert(!check_resync(cursor, scanner, depth, [comma, close], comma))
+    _: cursor_expect(cursor, scanner, [close])
+    cursor_leave(cursor)
+    errors: check_errors(cursor, scanner, true)
+    assert_eq(errors.len(), 2)
+    assert_eq("{errors[0]}", "1:4: expected \",\" or \"]\", found \"%\"")
+    assert_eq("{errors[1]}", "1:9: expected \",\" or \"]\", found \"c\"")
+    ^trailing: cursor_of_parts(["[a b"])
+    _: cursor_expect(trailing, scanner, [open])
+    _: cursor_expect(trailing, scanner, [name])
+    left: check_errors(trailing, scanner, true)
+    assert_eq(left.len(), 1)
+    assert("{left[0]}".starts_with("1:4: expected end of input"))
+    ^whole: cursor_of_parts(["[a]"])
+    _: cursor_expect(whole, scanner, [open])
+    _: cursor_expect(whole, scanner, [name])
+    _: cursor_expect(whole, scanner, [close])
+    assert_eq(check_errors(whole, scanner, true).len(), 0)
 }
 
 #Test("a hole sits between parts, and no token runs across it") {

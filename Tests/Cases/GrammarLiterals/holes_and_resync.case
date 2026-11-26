@@ -1,0 +1,16 @@
+# A grammar with holes gives its types `check_parts`: the slot of each hole,
+# in order, for a literal it takes, and for one it refuses an error per
+# resync point at the separator or closing token of the nearest repeat, with
+# line and column in the joined text, the same at every tier.
+fixture: HolesAndResync.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 0
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = "ok: 3 parts, slots [Value, Item]\nrefused\n  1:7: expected NAME, NUMBER or a `Value` hole, found \"+\"\n  2:5: expected \",\" or \")\", found \"y\"\nrefused\n  1:1: expected \"[\", found \"(\"\nrefused\n  1:6: expected \",\" or \"]\", found a hole\nrefused\n  1:8: expected \",\" or \")\", found end of input\n"
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: == o0

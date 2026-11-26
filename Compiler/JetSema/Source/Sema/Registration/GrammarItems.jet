@@ -8,8 +8,8 @@
 //   `<Start>Slot`                  a case per hole, when the grammar has holes
 // and to the parser (GrammarParse.jet): each rule type's `parse(text)`, a
 // private function per parser rule, and the private scanner constant; to
-// the parse into a sink (GrammarInto.jet) and to the printer
-// (GrammarPrint.jet).
+// the parse into a sink and the check of a literal's parts
+// (GrammarWalk.jet) and to the printer (GrammarPrint.jet).
 // `<Start>` is the binding's name. The rule and token enums are
 // `#Layout(U32)`, so `PairRule.from_int(rule)` names the rule a sink
 // receives. Each type takes the binding's visibility, and every name and
@@ -183,6 +183,7 @@ sema_grammar_items: fn(definition: ConstDef, plan: SemaGrammarItemsPlan, value: 
     }
     parses: plan.rules.len() > 0
     gen: SemaGrammarGen{start: definition.name.copy(), types: rule_types.copy(), span: span}
+    holes: sema_grammar_has_holes(plan)
     ^items: [Item]{}
     loop shape in plan.shapes {
         ^methods: [Func]{}
@@ -190,6 +191,7 @@ sema_grammar_items: fn(definition: ConstDef, plan: SemaGrammarItemsPlan, value: 
             methods.push(sema_grammar_parse_method(gen, plan, shape, definition.is_pub, definition.is_package_pub))
             sema_grammar_print_methods(gen, plan, shape, definition.is_pub, definition.is_package_pub, methods)
             methods.push(sema_grammar_into_method(gen, plan, shape, definition.is_pub, definition.is_package_pub))
+            if holes -> methods.push(sema_grammar_check_method(gen, plan, shape, definition.is_pub, definition.is_package_pub))
         }
         if shape.is_enum {
             ^variants: [Variant]{}
@@ -223,18 +225,17 @@ sema_grammar_items: fn(definition: ConstDef, plan: SemaGrammarItemsPlan, value: 
     loop (kind, name) in plan.kind_names {
         kinds.push(sema_grammar_numbered(name.copy(), kind, span))
         if kind < plan.holes.len() && plan.holes[kind] != "" {
-            slot: if name.starts_with("Hole") -> name.slice(4, name.len()) else -> name.copy()
-            slots.push(Variant{name: slot, name_span: span, payload: VariantPayload.Unit, discriminant: None, discriminant_expr: None, serde_markers: [Marker]{}})
+            slots.push(Variant{name: sema_grammar_slot_name(plan, kind), name_span: span, payload: VariantPayload.Unit, discriminant: None, discriminant_expr: None, serde_markers: [Marker]{}})
         }
     }
     items.push(Item.Enum{value: sema_grammar_enum(definition, "{definition.name}Token", kinds, [Marker]{sema_grammar_layout(span)}, [Func]{})})
     if slots.len() > 0 {
-        items.push(Item.Enum{value: sema_grammar_enum(definition, "{definition.name}Slot", slots, [Marker]{}, [Func]{})})
+        items.push(Item.Enum{value: sema_grammar_enum(definition, sema_grammar_slot_type(gen), slots, [Marker]{}, [Func]{})})
     }
     if parses {
         sema_grammar_parser_items(gen, plan, value, items)
         sema_grammar_printer_items(gen, plan, value, items)
-        sema_grammar_into_items(gen, plan, items)
+        sema_grammar_walk_items(gen, plan, items)
     }
     items
 }
