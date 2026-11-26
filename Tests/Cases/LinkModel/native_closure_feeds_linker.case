@@ -86,30 +86,30 @@ stdout: = "37\n"
 step missing_declared_o0: jet build -O0 main.jet
 cwd: missing_pkg
 exit: 1
-stderr: ~ "ghostlib"
+stderr: ~ "ghostlib" # missing-library diagnostic includes full explanation and help
 
 step missing_declared_o1: jet build -O1 main.jet
 cwd: missing_pkg
 exit: 1
-stderr: ~ "ghostlib"
+stderr: ~ "ghostlib" # missing-library diagnostic includes full explanation and help
 
 step missing_declared_o2: jet build -O2 main.jet
 cwd: missing_pkg
 exit: 1
-stderr: ~ "ghostlib"
+stderr: ~ "ghostlib" # missing-library diagnostic includes full explanation and help
 
 # 5. Missing undeclared `-l` library produces a clear missing-library error on O0, O1, and O2.
 step missing_flag_o0: jet build -O0 --link-args=-lno_such_jet_lib main.jet
 cwd: z_flag
 exit: 1
-stderr: ~ "no_such_jet_lib"
+stderr: ~ "no_such_jet_lib" # missing-library diagnostic includes full explanation and help
 
 step missing_flag_o1: jet build -O1 --link-args=-lno_such_jet_lib main.jet
 cwd: z_flag
 exit: 1
-stderr: ~ "no_such_jet_lib"
+stderr: ~ "no_such_jet_lib" # missing-library diagnostic includes full explanation and help
 
 step missing_flag_o2: jet build -O2 --link-args=-lno_such_jet_lib main.jet
 cwd: z_flag
 exit: 1
-stderr: ~ "no_such_jet_lib"
+stderr: ~ "no_such_jet_lib" # missing-library diagnostic includes full explanation and help
