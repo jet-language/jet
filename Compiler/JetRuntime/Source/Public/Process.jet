@@ -148,6 +148,26 @@ process: module {
 
     #Import(c) priv child_interrupt: fn(child: ProcessChild) -[Exec]> IOError! = "jet_process_child_interrupt"
 
+    // A child's input pipe: the whole text, one partial write of bytes that
+    // answers the count taken, every byte, and closing it
+    // (ProcessExecutionCollect.jet).
+    #Import(c) priv stdin_write_text: fn(stdin: ProcessStdin, text: String) -[Exec]> IOError! = "jet_process_stdin_write_text"
+
+    #Import(c) priv stdin_write: fn(stdin: ProcessStdin, bytes: [U8]) -[Exec]> Int IOError! = "jet_process_stdin_write"
+
+    #Import(c) priv stdin_write_all: fn(stdin: ProcessStdin, bytes: [U8]) -[Exec]> IOError! = "jet_process_stdin_write_all"
+
+    #Import(c) priv stdin_close: fn(stdin: ProcessStdin) -[Exec]> = "jet_process_stdin_close"
+
+    // Up to `max` bytes of a child's output or error output; empty at the end
+    // of input.
+    #Import(c) priv stdout_read: fn(stream: ProcessStdoutStream, max: Int) -[Exec]> [U8] IOError! = "jet_process_stdout_read"
+
+    #Import(c) priv stderr_read: fn(stream: ProcessStderrStream, max: Int) -[Exec]> [U8] IOError! = "jet_process_stderr_read"
+
+    // A terminal child's new window size (TerminalProcessRoutes.jet).
+    #Import(c) priv terminal_session_resize: fn(session: TerminalSession, size: TerminalSize) -[IO]> IOError! = "jet_terminal_session_resize"
+
     // One line of a child's output or error output as its raw bytes, the
     // newline kept; empty at the end of input (HostPipe.jet). Core's line
     // readers decode it.
