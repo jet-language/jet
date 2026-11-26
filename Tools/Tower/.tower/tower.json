@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7042,
-    "rev": 114758,
+    "rev": 114762,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -44602,7 +44602,7 @@
       "track": "epoch",
       "epoch": "G3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -44611,6 +44611,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-26",
+          "by": "Orchestrator",
+          "text": "All 3/3 criteria honestly verified and met on Batch 68 (dev 39f55d2b47e, master a5ba43bcf05)."
+        },
         {
           "at": "2026-11-24",
           "by": "Orchestrator",
@@ -44621,11 +44626,11 @@
         {
           "n": 1,
           "text": "A Jet test db_crash_reopen crashes every reachable write and sync boundary of a two-transaction workload on the real emitted DB bridge under the stated storage model (including dropped and reordered unsynced writes); each reopen shows whole-or-absent transactions with `PRAGMA integrity_check` = ok, and the smallest failing schedule replays from its seed and reduces.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:07:54.277Z",
+          "evidence": "dev 39f55d2b47e (Batch 68 s1 55714cf732f65f1b): real engine PRAGMAs (integrity_check/quick_check/journal_mode/synchronous) and zero-overhead opt-in VFS boundary tracer (CREATE/WRITE/TRUNCATE/SYNC/DELETE/DIRSYNC) wired in Core/DB; DB/crash_reopen PASS 1/1 across DELETE and WAL modes with whole-or-absent states S0/S1/S2, PRAGMA integrity_check=ok, and synchronous=OFF torn-write deterministic seed replay + 1-minimal reduction.",
+          "at": "2026-11-26T09:29:01.395Z",
           "proof": {
             "profile": "cases",
             "filter": "DB/crash_reopen"
@@ -44634,11 +44639,11 @@
         {
           "n": 2,
           "text": "A timeout, an invalid oracle, unsupported storage or an incomplete schedule never counts as a pass, and network filesystems get no untested atomicity promise.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:07:55.340Z",
+          "evidence": "dev 39f55d2b47e (Batch 68 s1 55714cf732f65f1b): DB/crash_harness_refuses_incomplete PASS 1/1 (fail-closed refusal for timeouts, invalid oracles, 14 network/remote filesystems, unsafe sync/journal modes, and incomplete schedules) plus Docs/Spec/Reference/core-library.md storage model + network-FS non-promise (doc_evidence_links 3/3 PASS).",
+          "at": "2026-11-26T09:29:02.250Z",
           "proof": {
             "profile": "cases",
             "filter": "DB/crash_harness_refuses_incomplete"
@@ -44647,11 +44652,11 @@
         {
           "n": 3,
           "text": "Metamorphic SQL pairs over generated data compare equal under core.testing.compare; a planted wrong query yields the first difference and a reduced replay; malformed DB or SQL input reports typed failures.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:07:56.301Z",
+          "evidence": "dev 39f55d2b47e (Batch 68 s1 55714cf732f65f1b): DB/metamorphic_sql PASS 1/1 (7 metamorphic SQL pairs via core.testing.compare, planted wrong query first_difference + 1-row reduced replay, typed DBError on malformed SQL and corrupt/truncated DB files), plus Core/DB/DB.jet 23/23 PASS and CoreDeclarations 6/6 PASS.",
+          "at": "2026-11-26T09:29:03.098Z",
           "proof": {
             "profile": "cases",
             "filter": "DB/metamorphic_sql"
@@ -44667,8 +44672,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:03:11.358Z",
-      "updated": "2026-11-24T00:40:03.117Z",
-      "updatedBy": "Orchestrator"
+      "updated": "2026-11-26T09:29:04.569Z",
+      "updatedBy": "Orchestrator",
+      "completedAt": "2026-11-26T09:29:04.569Z"
     },
     {
       "id": "c0zutf08",
@@ -129268,6 +129274,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-26T09:29:04.569Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0kgt885",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-26T09:29:03.099Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0kgt885",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-26T09:29:02.250Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0kgt885",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-26T09:29:01.395Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0kgt885",
+      "note": "#1"
+    },
     {
       "at": "2026-11-26T09:26:34.375Z",
       "by": "Orchestrator",
