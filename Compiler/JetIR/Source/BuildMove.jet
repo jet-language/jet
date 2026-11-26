@@ -197,10 +197,8 @@ ir_move_helper: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int) -> Int N
     helper_key: "#move<{ir_row_key(m, row)}>"
     known: ir_keyed_function(m, helper_key) ?? -1
     if known >= 0 -> return known
-    id: m.functions.len()
-    m.functions.push(ir_hashed_function("move", helper_key, "jet_ir_move_", "", 0))
-    ir_function_bind(m, helper_key, id)
-    ^a: ir_builder_new(m.functions[id].copy())
+    id: ir_reserve_slot(m, helper_key)
+    ^a: ir_builder_new(ir_hashed_function("move", helper_key, "jet_ir_move_", "", 0))
     value: ir_new_slot(a, row, IRSlotKind.Param, ir_intern_name(m, "value"))
     boxed: m.types[row].kind != .Aggregate
     if boxed {

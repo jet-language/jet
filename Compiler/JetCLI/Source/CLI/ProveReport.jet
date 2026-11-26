@@ -266,7 +266,7 @@ jet_cli_prove_run: fn(target: JetCLIProveTarget, lenses: [String], capture: JetC
             _journal_folder = Val(scratch.move())
         }
     }
-    ^tests: JetCLIProveTests{items: [JetCLIProveTestItem]{}, contracts: front.contracts.copy(), consumed: [JetDriverRecordLink]{}, exit_code: JET_DRIVER_EXIT_OK, errors: ""}
+    ^tests: JetCLIProveTests{items: [JetCLIProveTestItem]{}, contracts: front.contracts, consumed: [JetDriverRecordLink]{}, exit_code: JET_DRIVER_EXIT_OK, errors: ""}
     if failed == 0 {
         ran: jet_cli_prove_tests(identity, members, groups, cwd, front.contracts, time_ms, journal) ?? return jet_cli_prove_refused(err, color, json)
         tests = ran
@@ -312,7 +312,7 @@ jet_cli_prove_run: fn(target: JetCLIProveTarget, lenses: [String], capture: JetC
             if exit_code != artifact.status {
                 return jet_cli_prove_refused(jet_cli_replay_diverged("the replayed run exited {exit_code}, but the captured run exited {artifact.status}"), color, json)
             }
-            replayed = Val(artifact.copy())
+            replayed = Val(artifact)
             replay_note = "REPLAY   reproduced {artifact.artifact_id} · parity: not available\n"
         }
         if exit_code != JET_CLI_EXIT_ICE && capture == .Val(request) {
@@ -350,7 +350,7 @@ jet_cli_prove_floor: fn(groups: [JetCLIProveGroup]) -> ClaimsGrade? Never! {
         if floor == .Val(current) {
             if current.meets(required) -> next
         }
-        floor = Val(required.copy())
+        floor = Val(required)
     }
     floor
 }
@@ -380,7 +380,7 @@ jet_cli_prove_members: fn(target: JetCLIProveTarget) -[FS]> [JetCLIProveMember] 
 // `package.jet` at or above it. Each member is requested by its path below that
 // root and its SHA-256.
 jet_cli_prove_budgets: fn(identity: JetCLIProveIdentity, members: [JetCLIProveMember]) -[FS, Time.Wait]> JetCLIBudgetProjection Never! {
-    start: if cli_files.is_dir(identity.root) -> identity.root.copy() else -> jet_cli_parent(identity.root) ?? "."
+    start: if cli_files.is_dir(identity.root) -> identity.root else -> jet_cli_parent(identity.root) ?? "."
     folder: cli_files.realpath(start) ?? return JetCLIBudgetProjection{facts: [JetCLIBudgetFact]{}, rejected: [String]{"couldn't resolve the target's folder: {jet_cli_io_error_text(err)}"}}
     root: jet_cli_manifest_root(folder) ?? folder
     prefix: jet_cli_entry_join(root, "")
@@ -669,7 +669,7 @@ jet_cli_prove_error_item: fn(identity: JetCLIProveIdentity, members: [JetCLIProv
             column = diagnostic_column_at(origin.source, span.start)
         }
     } else {
-        path = members[entry].path.copy()
+        path = members[entry].path
         if diagnostic.span == .Val(span) {
             span_text = jet_cli_prove_span_text(members[entry].source, span)
             line = diagnostic_line_at(members[entry].source, span.start)
@@ -1126,7 +1126,7 @@ jet_cli_prove_test_items: fn(identity: JetCLIProveIdentity, members: [JetCLIProv
 // clause is the only one of its marker on that line (a column counts bytes
 // at runtime and characters here, which differ after non-ASCII text).
 jet_cli_prove_contracts_settle: fn(declared: [JetCLIProveContract], observed: [JetCLIProveObserved]) -> [JetCLIProveContract] Never! {
-    ^contracts: declared.copy()
+    ^contracts: declared
     loop index in 0..<contracts.len() {
         loop seen in observed {
             if !jet_cli_prove_contract_observes(declared, index, seen) -> next
@@ -1765,7 +1765,7 @@ jet_cli_prove_stop_text: fn(item: JetCLIProveTestItem) -[FS]> String Never! {
 // then indexed as a protected proof record.
 jet_cli_prove_write: fn(identity: JetCLIProveIdentity, report: String, consumed: [JetDriverRecordLink]) -[FS, Env, Time]> JetCLIProveRefusal! {
     report_id: prove_crypto.sha256("{report}\n".bytes()).hex()
-    ^links: consumed.copy()
+    ^links: consumed
     links.sort_by(fn(left: JetDriverRecordLink, right: JetDriverRecordLink) { if left.kind == right.kind -> left.artifact_id <=> right.artifact_id else -> left.kind <=> right.kind })
     consumed_json: "[{(loop link in links -> "{{\"artifact_id\":{foundation_json_quote(link.artifact_id)},\"kind\":{foundation_json_quote(link.kind)}}}").join(",")}]"
     produced_json: "[]"
@@ -1814,14 +1814,14 @@ jet_cli_prove_write: fn(identity: JetCLIProveIdentity, report: String, consumed:
 
 // The folders the artifact goes in, below the authority root.
 jet_cli_prove_artifact_parts: fn(identity: JetCLIProveIdentity) -> [String] Never! {
-    [String]{".jet", "proofs", identity.kind.copy(), jet_cli_prove_artifact_name(identity)}
+    [String]{".jet", "proofs", identity.kind, jet_cli_prove_artifact_name(identity)}
 }
 
 // Each artifact folder that exists is a real folder, not a link or a file
 // (E3614). `jet_cli_prove_run` asks once the target resolves, before any
 // test runs; the write asks again in case the path changed since.
 jet_cli_prove_artifact_folders_safe: fn(root: String, parts: [String]) -[FS]> JetCLIProveRefusal! {
-    ^walked: root.copy()
+    ^walked: root
     ^shown: ""
     loop part in parts {
         walked = jet_cli_rooted_join(walked, part)

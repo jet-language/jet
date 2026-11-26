@@ -31,10 +31,8 @@ ir_para_helper: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, role: String, ty: 
         if known < 0 -> return ir_fail_slot(b, span, "para.{role} of {ir_type_name(ty)}")
         return known
     }
-    id: m.functions.len()
-    m.functions.push(ir_hashed_function("para.{role}", key, "jet_ir_para_{role}_", "", 0))
-    ir_function_bind(m, key, id)
-    ^a: ir_builder_new(m.functions[id].copy())
+    id: ir_reserve_slot(m, key)
+    ^a: ir_builder_new(ir_hashed_function("para.{role}", key, "jet_ir_para_{role}_", "", 0))
     if role == "map" -> ir_para_map_body(m, p, a, ty, span) else {
         ir_para_fold_body(m, p, a, ty, span)
     }

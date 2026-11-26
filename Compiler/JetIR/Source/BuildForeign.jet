@@ -125,10 +125,8 @@ ir_foreign_handle_row: fn(m: ^IRModule, p: IRProgram, ty: Type, handle: IRForeig
     if ir_keyed_function(m, symbol) == None {
         // The function key is its symbol, so x64 resolves the row's drop
         // symbol to this module function (as ir_scope_guard_row).
-        id: m.functions.len()
-        m.functions.push(ir_function_new("ffi.handle.close", symbol, symbol, "", 0))
-        ir_function_bind(m, symbol, id)
-        ^a: ir_builder_new(m.functions[id].copy())
+        id: ir_reserve_slot(m, symbol)
+        ^a: ir_builder_new(ir_function_new("ffi.handle.close", symbol, symbol, "", 0))
         pointer_row: ir_pointer_row(m)
         held: ir_new_slot(a, pointer_row, IRSlotKind.Param, ir_intern_name(m, "handle"))
         none: ir_word_const(m, a, 0)

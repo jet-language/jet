@@ -214,7 +214,7 @@ jet_cli_codemod_host: fn(action: String, path: String, yes: Bool, color: Bool, j
 }
 
 jet_cli_codemod_failed: fn(run: ^JetCLICodemodRun, err: JetCLIReadError) -> Bool Never! {
-    run.failure = Val(err.message.copy())
+    run.failure = Val(err.message)
     false
 }
 
@@ -227,7 +227,7 @@ jet_cli_codemod_error: fn(message: String) -> JetCLIReadError Never! { jet_cli_r
 jet_cli_codemod_object: fn(value: JetCLIStatusValue, message: String) -> JetCLICodemodObject JetCLIReadError! {
     if value == .Object(fields) {
         taken: loop _index in 0..<fields.len() -> false
-        return Ok(JetCLICodemodObject{fields: fields.copy(), taken: taken})
+        return Ok(JetCLICodemodObject{fields: fields, taken: taken})
     }
     Err(jet_cli_codemod_error(message))
 }
@@ -242,7 +242,7 @@ jet_cli_codemod_take: fn(object: ^JetCLICodemodObject, key: String) -> JetCLISta
         }
     }
     if found < 0 -> return None
-    Val(object.fields[found].value.copy())
+    Val(object.fields[found].value)
 }
 
 jet_cli_codemod_reject_unknown: fn(object: JetCLICodemodObject, what: String) JetCLIReadError! {
@@ -392,7 +392,7 @@ jet_cli_codemod_reject_parent_or_absolute: fn(raw: String, label: String) JetCLI
 }
 
 jet_cli_codemod_secure_components: fn(project: String, raw: String) -[FS]> String JetCLIReadError! {
-    ^path: project.copy()
+    ^path: project
     loop part in jet_cli_codemod_components(raw) {
         if part == ".." || part == "." {
             return Err(jet_cli_codemod_error("path `{raw}` contains a forbidden component"))
@@ -479,7 +479,7 @@ jet_cli_codemod_validate_destination: fn(project: String, path: String, any_path
             return Err(jet_cli_codemod_error("destination must be a .jet source or paired Tests/UI .stderr snapshot"))
         }
     }
-    ^current: project.copy()
+    ^current: project
     loop index in 0..<(parts.len() - 1) {
         current = jet_cli_rooted_join(current, parts[index])
         info: cli_files.stat(current) ?? return Err(jet_cli_codemod_error(jet_cli_io_error_text(err)))
@@ -917,7 +917,7 @@ jet_cli_codemod_pattern_node: fn(forest: JetCLICodemodForest, index: Int, source
         children: loop child in slot.children -> jet_cli_codemod_pattern_node(forest, child, source, captures, variadic, pattern)
         slots.push(JetCLICodemodPatternSlot{name: slot.name.copy(), kind: slot.kind.copy(), children: children})
     }
-    pattern.push(JetCLICodemodPatternNode{capture: None, variadic: false, class: tree.class.copy(), shape: tree.shape.copy(), signature: tree.signature.copy(), slots: slots})
+    pattern.push(JetCLICodemodPatternNode{capture: None, variadic: false, class: tree.class, shape: tree.shape, signature: tree.signature, slots: slots})
     pattern.len() - 1
 }
 
@@ -954,7 +954,7 @@ jet_cli_codemod_parse_pattern: fn(atoms: [JetCLICodemodAtom], class: String) -> 
     if parsed.diagnostics.len() > 0 {
         return Err(jet_cli_codemod_error("AST pattern produced parser teaching diagnostics"))
     }
-    pattern_module: JetDriverDocModule{path: "<codemod-pattern>", physical_path: "<codemod-pattern>", alias: "pattern", source: wrapped.copy(), items: parsed.program.items.move(), block_spans: parsed.program.block_spans.move(), imports: parsed.program.imports.move(), tables: parsed.program.tables.move()}
+    pattern_module: JetDriverDocModule{path: "<codemod-pattern>", physical_path: "<codemod-pattern>", alias: "pattern", source: wrapped, items: parsed.program.items.move(), block_spans: parsed.program.block_spans.move(), imports: parsed.program.imports.move(), tables: parsed.program.tables.move()}
     // A pattern is parsed, never checked: it has no checked bodies to type.
     index: semindex_build([JetDriverDocModule]{pattern_module}, interner_empty(), jet_cli_effect_projection(jet_cli_policy_authority([String]{}, None)))
     ^root: -1
@@ -1384,7 +1384,7 @@ jet_cli_codemod_insert_unit: fn(units: ^[JetCLICodemodUnit], path: String, fixtu
             return
         }
     }
-    units.push(JetCLICodemodUnit{entry: path.copy(), fixture: fixture})
+    units.push(JetCLICodemodUnit{entry: path, fixture: fixture})
 }
 
 // Sorted, no links, every `.jet` file a unit.
@@ -1475,7 +1475,7 @@ jet_cli_codemod_kind_matches: fn(kind: SemKind, want: String) -> Bool Never! {
 
 jet_cli_codemod_anchor: fn(def: SemDef) -> SemAnchor Never! {
     name: semindex_definition_kind(def.kind)
-    SemAnchor{module_path: def.module_path.copy(), kind: if name == "variant" -> "enum_variant" else -> name, def_span: def.def_span, semantic_identity: Val(def.identity.copy())}
+    SemAnchor{module_path: def.module_path, kind: if name == "variant" -> "enum_variant" else -> name, def_span: def.def_span, semantic_identity: Val(def.identity)}
 }
 
 jet_cli_codemod_anchor_selected: fn(selected: [SemAnchor], candidate: SemAnchor) -> Bool Never! {
@@ -1511,11 +1511,11 @@ jet_cli_codemod_definition_fact: fn(index: SemIndex, def: SemDef) -> SemDefiniti
         found = Val(at)
     }
     at: found ?? return None
-    Val(index.definition_facts[at].copy())
+    Val(index.definition_facts[at])
 }
 
 jet_cli_codemod_target: fn(fact: SemDefinitionFact, to: String) -> JetCLISemOpTarget Never! {
-    JetCLISemOpTarget{stable_id: fact.stable_id.copy(), before: fact.human_identity.copy(), after: semindex_renamed_identity(fact, to), kind: fact.kind.copy(), module_path: fact.module_path.copy()}
+    JetCLISemOpTarget{stable_id: fact.stable_id, before: fact.human_identity, after: semindex_renamed_identity(fact, to), kind: fact.kind, module_path: fact.module_path}
 }
 
 // Apply a `symbol_rename` rule.
@@ -1575,7 +1575,7 @@ jet_cli_codemod_apply_rename: fn(rule: JetCLICodemodRule, units: [JetCLICodemodU
     }
     count: jet_cli_codemod_dedup_apply(rule.id, edits, plan.files)
     if count > 0 {
-        plan.semantic_ops.push(JetCLISemOp{kind: "rename", rule_id: Val(rule.id.copy()), from: Val(rule.name.copy()), to: Val(rule.to.copy()), node: None, match_template: None, replace_template: None, targets: targets, files: [JetCLISemOpFile]{}})
+        plan.semantic_ops.push(JetCLISemOp{kind: "rename", rule_id: Val(rule.id), from: Val(rule.name), to: Val(rule.to), node: None, match_template: None, replace_template: None, targets: targets, files: [JetCLISemOpFile]{}})
     }
     Ok(count)
 }
@@ -1595,7 +1595,7 @@ jet_cli_codemod_apply_ast: fn(rule: JetCLICodemodRule, units: [JetCLICodemodUnit
     }
     count: jet_cli_codemod_dedup_apply(rule.id, edits, plan.files)
     if count > 0 {
-        plan.semantic_ops.push(JetCLISemOp{kind: "ast_rewrite", rule_id: Val(rule.id.copy()), from: None, to: None, node: Val(rule.node.copy()), match_template: Val(jet_cli_codemod_template_text(rule.pattern)), replace_template: Val(jet_cli_codemod_template_text(rule.replacement)), targets: [JetCLISemOpTarget]{}, files: [JetCLISemOpFile]{}})
+        plan.semantic_ops.push(JetCLISemOp{kind: "ast_rewrite", rule_id: Val(rule.id), from: None, to: None, node: Val(rule.node), match_template: Val(jet_cli_codemod_template_text(rule.pattern)), replace_template: Val(jet_cli_codemod_template_text(rule.replacement)), targets: [JetCLISemOpTarget]{}, files: [JetCLISemOpFile]{}})
     }
     Ok(count)
 }
@@ -1819,7 +1819,7 @@ jet_cli_codemod_parse_v1: fn(value: JetCLIStatusValue, path: String) -> JetCLICo
 jet_cli_codemod_managed_project: fn(entry: String) -[FS, Env]> String JetCLIReadError! {
     canonical: cli_files.realpath(entry) ?? return Err(jet_cli_codemod_error("could not canonicalize codemod entry: {jet_cli_io_error_text(err)}"))
     parent: jet_cli_parent(canonical) ?? return Err(jet_cli_codemod_error("codemod entry `{canonical}` has no directory"))
-    ^ancestor: Val(parent.copy())
+    ^ancestor: Val(parent)
     loop {
         directory: ancestor ?? break
         relative: jet_cli_codemod_components(jet_cli_codemod_project_rel(directory, canonical))
@@ -1873,7 +1873,7 @@ jet_cli_codemod_run_v1: fn(codemod: JetCLICodemodV1, apply: Bool, run: ^JetCLICo
     project_path: jet_cli_codemod_managed_project(codemod.entry)
     paths: loop change in changes -> change.path.copy()
     jet_cli_codemod_validate_destinations(project_path, paths, false)
-    operation: JetCLISemOp{kind: "rename", rule_id: None, from: Val(codemod.from.copy()), to: Val(codemod.to.copy()), node: None, match_template: None, replace_template: None, targets: targets, files: [JetCLISemOpFile]{}}
+    operation: JetCLISemOp{kind: "rename", rule_id: None, from: Val(codemod.from), to: Val(codemod.to), node: None, match_template: None, replace_template: None, targets: targets, files: [JetCLISemOpFile]{}}
     name_json: foundation_json_quote(codemod.name)
     to_json: foundation_json_quote(codemod.to)
     from_json: foundation_json_quote(codemod.from)

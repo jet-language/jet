@@ -639,7 +639,7 @@ jet_cli_command_first: fn(items: [String], command: String) -> [String] Never! {
             break
         }
     }
-    ^out: [String]{items[at].copy()}
+    ^out: [String]{items[at]}
     loop (index, item) in items {
         if index != at -> out.push(item.copy())
     }
@@ -853,7 +853,7 @@ jet_cli_unknown_flag: fn(head: String, command: String, color: Bool) -> JetCLIPl
 jet_cli_misplaced_flag: fn(flag: String, command: String, takers: [String], color: Bool) -> JetCLIPlan Never! {
     ^names: [String]{}
     loop taker in takers -> names.push("`jet {taker}`")
-    ^listed: names[0].copy()
+    ^listed: names[0]
     if names.len() > 1 {
         listed = "{jet_cli_prefix(names, names.len() - 1).join(", ")} or {names[names.len() - 1]}"
     }
@@ -1373,7 +1373,7 @@ jet_cli_check_settled: fn(jet_argv: [String], args: [String], color: Bool, quiet
     ^settings: [BuildSettingOverride]{}
     if jet_cli_setting_flags(jet_argv, color) == {
         .Refused(plan) -> return plan
-        .Given(given) -> settings = given.copy()
+        .Given(given) -> settings = given
     }
     style: jet_argv.contains("--style")
     machine: jet_cli_check_target_machine(jet_argv)
@@ -1381,13 +1381,11 @@ jet_cli_check_settled: fn(jet_argv: [String], args: [String], color: Bool, quiet
     if planned == {
         .Check(file, source, _, _, _, project, notice, _, verbose, _, _, _, _) -> if jet_cli_check_profile(jet_argv, [String]{file}, [String]{source}, color) == {
             .Refused(refusal) -> refusal.move()
-            // copy: `profile` is a payload view of the resolved name.
-            .Given(profile) -> JetCLIPlan.Check{file: file, source: source, color: color, quiet: quiet, threads: threads, project: project, notice: notice, json: json, verbose: verbose, settings: settings, profile: profile.copy(), style: style, target: machine}
+            .Given(profile) -> JetCLIPlan.Check{file: file, source: source, color: color, quiet: quiet, threads: threads, project: project, notice: notice, json: json, verbose: verbose, settings: settings, profile: profile, style: style, target: machine}
         }
         .CheckWorkspace(files, sources, _, _, _, notice, _, _, _, _) -> if jet_cli_check_profile(jet_argv, files, sources, color) == {
             .Refused(refusal) -> refusal.move()
-            // copy: `profile` is a payload view of the resolved name.
-            .Given(profile) -> JetCLIPlan.CheckWorkspace{files: files, sources: sources, color: color, quiet: quiet, threads: threads, notice: notice, json: json, settings: settings, profile: profile.copy(), style: style}
+            .Given(profile) -> JetCLIPlan.CheckWorkspace{files: files, sources: sources, color: color, quiet: quiet, threads: threads, notice: notice, json: json, settings: settings, profile: profile, style: style}
         }
         .Done(_) | .Refused(_, _, _, _) | .Diagnostics(_, _, _, _, _) | .CheckPrelude(_, _, _, _, _, _) | .CheckCore(_, _, _, _, _) | .Build(_, _, _, _, _, _, _, _, _, _, _) | .LockedBuild(_, _) | .BuildPackage(_, _, _, _, _, _, _, _) | .Run(_, _, _, _, _, _, _, _, _, _, _, _) | .RunRemote(_, _, _, _, _, _, _, _) | .NativeSource(_, _, _, _, _) | .DevWeb(_, _, _, _, _, _, _, _) | .DevCanvas(_, _, _, _, _, _) | .Jobs(_, _, _, _) | .Test(_, _, _, _, _, _) | .TestWorkspace(_, _, _, _, _, _, _, _) | .TestProfile(_, _, _, _, _, _) | .New(_, _, _, _, _, _) | .NewApp(_) | .Doc(_, _, _, _, _) | .Emit(_, _, _, _, _, _) | .Eval(_, _, _, _, _) | .Fill(_, _, _) | .Structural(_, _, _) | .Review(_, _, _) | .Keygen(_, _, _) | .KeyBackup(_, _, _) | .Publish(_, _, _, _) | .Yank(_, _, _) | .Lint(_, _, _, _, _, _, _) | .Fmt(_) | .FmtLang(_, _) | .Fix(_, _, _, _, _, _, _, _, _) | .Inspect(_) | .InspectB(_) | .ForeignBind(_, _, _) | .Perf(_, _) | .Semindex(_, _, _) | .Find(_, _, _, _) | .Cache(_, _) | .Remote(_, _, _) | .Comparison(_, _, _) | .Try(_, _, _) | .Maintenance(_, _, _, _) | .Completion(_, _, _) | .Schema(_, _, _, _, _) | .Codemod(_, _, _, _, _) | .PolicyExplain(_, _, _, _, _, _) | .DiagnosticTypeExplain(_, _, _, _) | .BuildFactExplain(_, _, _, _, _, _, _) | .Gates(_, _, _, _, _) | .Output(_, _, _, _) | .Doctor(_, _, _, _) | .UpdateJet(_, _, _, _, _) | .AuditCopies(_, _, _, _, _) | .AuditForeign(_, _, _, _, _) | .CompilerService(_) | .Repl(_, _, _, _) | .LSP | .ReplChild(_) | .EvalExpression(_, _, _) | .Prove(_, _, _, _, _, _) | .Budget(_, _, _, _) | .AuditWrites(_, _, _, _, _) -> planned
     }
@@ -1418,8 +1416,7 @@ jet_cli_check_profile: fn(jet_argv: [String], files: [String], sources: [String]
     loop (index, file) in files {
         if jet_cli_build_options(jet_argv, "check", file, sources[index], color, true) == {
             .Refused(refusal) -> return JetCLICheckProfile.Refused{plan: refusal.move()}
-            // copy: `options` is a payload view of the resolved options.
-            .Selected(options, _) -> profile = options.profile.copy()
+            .Selected(options, _) -> profile = options.profile
         }
     }
     JetCLICheckProfile.Given{profile: profile}
@@ -1543,17 +1540,17 @@ jet_cli_build_options: fn(jet_argv: [String], command: String, file: String, sou
     ^settings: [BuildSettingOverride]{}
     if jet_cli_setting_flags(jet_argv, color) == {
         .Refused(plan) -> return JetCLIBuildOptions.Refused{plan: plan}
-        .Given(given) -> settings = given.copy()
+        .Given(given) -> settings = given
     }
     ^gates: [PolicyKey]{}
     if jet_cli_gate_flags(jet_argv, color) == {
         .Refused(plan) -> return JetCLIBuildOptions.Refused{plan: plan}
-        .Given(given) -> gates = given.copy()
+        .Given(given) -> gates = given
     }
     ^deep_checks: DeepChecks{}
     if deep_checks_read(jet_argv) == {
         .Refused(argument) -> return JetCLIBuildOptions.Refused{plan: JetCLIPlan.Refused{report: deep_checks_malformed(argument), color: color, exit_code: JET_DRIVER_EXIT_USAGE, notice: ""}}
-        .Read(request) -> deep_checks = request.copy()
+        .Read(request) -> deep_checks = request
     }
     if build_option_flags(jet_argv) == {
         .Refused(code, what, fix) -> return JetCLIBuildOptions.Refused{plan: jet_cli_fail(code, what, jet_cli_why(code), fix, color, JET_DRIVER_EXIT_USAGE)}
@@ -1662,7 +1659,7 @@ jet_cli_build_options: fn(jet_argv: [String], command: String, file: String, sou
                     text = "{text}{build_option_check_removal_note(choice)}\n"
                 }
             }
-            ^selected: options.copy()
+            ^selected: options
             selected.settings = settings
             selected.gates = gates
             selected.deep_checks = deep_checks
@@ -1740,7 +1737,7 @@ jet_cli_gate_flags: fn(jet_argv: [String], color: Bool) -> JetCLIGateFlags Never
 jet_cli_stock_release_choices: fn(name: String) -> [BuildOptionChoice] Never! {
     site: "of the stock `{name}` profile"
     [BuildOptionChoice]{
-        {name: "optimize", value: "O2", layer: BuildOptionLayer.Profile, written: "optimize: O2", site: site.copy(), pinned: false},
+        {name: "optimize", value: "O2", layer: BuildOptionLayer.Profile, written: "optimize: O2", site: site, pinned: false},
         {name: "debug_info", value: "split", layer: BuildOptionLayer.Profile, written: "debug_info: split", site: site.move(), pinned: false},
     }
 }
@@ -1930,11 +1927,11 @@ jet_cli_locked_build: fn(raw: [String], jet_argv: [String], args: [String], pass
             if jet_cli_manifest_root(directory) != None {
                 engine: jet_cli_package_engine(directory, [String]{"fetch", "--locked", "--quiet"}, color, json)
                 if engine == .InspectB(inspect) {
-                    if inspect == .Engine(_, _, check_argv) -> check = check_argv.copy()
+                    if inspect == .Engine(_, _, check_argv) -> check = check_argv
                 }
                 if check.len() == 0 -> return engine
             }
-            JetCLIPlan.BuildPackage{file: file.copy(), color: color, options: options.copy(), build_args: build_args.copy(), threads: threads, invocation: invocation.copy(), notice: notice.copy(), locked: Val(check)}
+            JetCLIPlan.BuildPackage{file: file, color: color, options: options, build_args: build_args, threads: threads, invocation: invocation, notice: notice, locked: Val(check)}
         }
         .Done(_) | .Refused(_, _, _, _) | .Diagnostics(_, _, _, _, _) | .Check(_, _, _, _, _, _, _, _, _, _, _, _, _) | .CheckWorkspace(_, _, _, _, _, _, _, _, _, _) | .CheckPrelude(_, _, _, _, _, _) | .CheckCore(_, _, _, _, _) | .LockedBuild(_, _) | .Run(_, _, _, _, _, _, _, _, _, _, _, _) | .RunRemote(_, _, _, _, _, _, _, _) | .NativeSource(_, _, _, _, _) | .DevWeb(_, _, _, _, _, _, _, _) | .DevCanvas(_, _, _, _, _, _) | .Jobs(_, _, _, _) | .Test(_, _, _, _, _, _) | .TestWorkspace(_, _, _, _, _, _, _, _) | .TestProfile(_, _, _, _, _, _) | .New(_, _, _, _, _, _) | .NewApp(_) | .Doc(_, _, _, _, _) | .Emit(_, _, _, _, _, _) | .Eval(_, _, _, _, _) | .Fill(_, _, _) | .Structural(_, _, _) | .Review(_, _, _) | .Keygen(_, _, _) | .KeyBackup(_, _, _) | .Publish(_, _, _, _) | .Yank(_, _, _) | .Lint(_, _, _, _, _, _, _) | .Fmt(_) | .FmtLang(_, _) | .Fix(_, _, _, _, _, _, _, _, _) | .Inspect(_) | .InspectB(_) | .ForeignBind(_, _, _) | .Perf(_, _) | .Semindex(_, _, _) | .Find(_, _, _, _) | .Cache(_, _) | .Remote(_, _, _) | .Comparison(_, _, _) | .Try(_, _, _) | .Maintenance(_, _, _, _) | .Completion(_, _, _) | .Schema(_, _, _, _, _) | .Codemod(_, _, _, _, _) | .PolicyExplain(_, _, _, _, _, _) | .DiagnosticTypeExplain(_, _, _, _) | .BuildFactExplain(_, _, _, _, _, _, _) | .Gates(_, _, _, _, _) | .Output(_, _, _, _) | .Doctor(_, _, _, _) | .UpdateJet(_, _, _, _, _) | .AuditCopies(_, _, _, _, _) | .AuditForeign(_, _, _, _, _) | .CompilerService(_) | .Repl(_, _, _, _) | .LSP | .ReplChild(_) | .EvalExpression(_, _, _) | .Prove(_, _, _, _, _, _) | .Budget(_, _, _, _) | .AuditWrites(_, _, _, _, _) -> planned
     }
@@ -2435,7 +2432,7 @@ jet_cli_test: fn(jet_argv: [String], color: Bool, quiet: Bool, verbose: Bool, th
             if row.name == "filter" && test_settings_get(flags, "filter") == .Val(previous) && previous != value {
                 return jet_cli_test_option_error("conflicting test filters `{previous}` and `{value}`", color)
             }
-            test_settings_put(flags, TestSetting{name: row.name.copy(), value: value, source: JET_CLI_TEST_FLAG_LAYER})
+            test_settings_put(flags, TestSetting{name: row.name, value: value, source: JET_CLI_TEST_FLAG_LAYER})
             index += 1
             next
         }
@@ -2473,7 +2470,7 @@ jet_cli_test: fn(jet_argv: [String], color: Bool, quiet: Bool, verbose: Bool, th
                 }
             }
             else -> {
-                test_settings_put(flags, TestSetting{name: "filter", value: filter.copy(), source: JET_CLI_TEST_FLAG_LAYER})
+                test_settings_put(flags, TestSetting{name: "filter", value: filter, source: JET_CLI_TEST_FLAG_LAYER})
             }
         }
     }
@@ -2620,7 +2617,7 @@ jet_cli_test_file: fn(jet_argv: [String], file: String, color: Bool, verbose: Bo
     }
     // A child of a run takes the settings that run decided (TEST_SETTINGS_ENV).
     inherited: cli_sys.get(TEST_SETTINGS_ENV) != None
-    ^settings: flags.copy()  // copy: the caller keeps its flag layer.
+    ^settings: flags
     if inherited {
         decided: jet_cli_test_inherited_settings() ?? return jet_cli_test_option_error(err.message, color)
         settings = test_settings_layered(decided, flags)
@@ -2720,13 +2717,13 @@ jet_cli_explain: fn(jet_argv: [String], args: [String], color: Bool, json: Bool,
     if jet_cli_explain_build_fact_name(query) == .Val(key) {
         if jet_cli_setting_flags(jet_argv, color) == {
             .Refused(plan) -> return plan
-            .Given(settings) -> return JetCLIPlan.BuildFactExplain{key: key, file: if args.len() > 2 -> args[2] else -> "", profile: jet_cli_build_fact_profile(jet_argv), settings: settings.copy(), module_value: None, color: color, json: json}
+            .Given(settings) -> return JetCLIPlan.BuildFactExplain{key: key, file: if args.len() > 2 -> args[2] else -> "", profile: jet_cli_build_fact_profile(jet_argv), settings: settings, module_value: None, color: color, json: json}
         }
     }
     if args.len() > 2 && jet_cli_module_value(query, cli_files.read(args[2]) ?? "") == .Val(value) {
         if jet_cli_setting_flags(jet_argv, color) == {
             .Refused(plan) -> return plan
-            .Given(settings) -> return JetCLIPlan.BuildFactExplain{key: "Build.Settings.{value.setting}", file: args[2], profile: jet_cli_build_fact_profile(jet_argv), settings: settings.copy(), module_value: Val(value), color: color, json: json}
+            .Given(settings) -> return JetCLIPlan.BuildFactExplain{key: "Build.Settings.{value.setting}", file: args[2], profile: jet_cli_build_fact_profile(jet_argv), settings: settings, module_value: Val(value), color: color, json: json}
         }
     }
     if args.len() > 2 && policy_key_parse(query.trim().removeprefix("@")) == .Val(key) {
@@ -3092,7 +3089,7 @@ jet_cli_plan_with: fn(raw: [String], discovery: ^WorkspaceDeclarationCache) -[FS
 
     // Moved and grouped spellings. copy: `raw` stays with the caller (`raw` is a read parameter:
     // no move out of it, E0201) and the binding `argv` owns its own.
-    ^argv: raw.copy()
+    ^argv: raw
     // `jet eval CODE [args...]` is `jet run <file> [args...]` of the file that
     // holds CODE as the body of `run: fn`, as `jet -e CODE` is; the flags
     // between `eval` and CODE are the run's.
@@ -3136,7 +3133,7 @@ jet_cli_plan_with: fn(raw: [String], discovery: ^WorkspaceDeclarationCache) -[FS
     }
     // copy: `argv[0]` stays in its list (owner: `argv`; no move out of an element, E0225) and the
     // binding `group` owns its own.
-    group: argv[0].copy()
+    group: argv[0]
     ^exhaustive: false
     if jet_cli_group_index(group) == .Val(index) {
         exhaustive = JET_CLI_COMMANDS[index].exhaustive
@@ -3150,7 +3147,7 @@ jet_cli_plan_with: fn(raw: [String], discovery: ^WorkspaceDeclarationCache) -[FS
     if argv.len() > 1 {
         // copy: `argv[1]` stays in its list (owner: `argv`; no move out of an element, E0225) and
         // the binding `sub` owns its own.
-        sub: argv[1].copy()
+        sub: argv[1]
         nested: jet_cli_nested_command(group, sub)
         if exhaustive && nested == None {
             return jet_cli_fail("E2101", "`{sub}` isn't a jet {group} command.", "jet {group} accepts only commands in its named area.", "run `jet {group} help`.", color, JET_DRIVER_EXIT_USAGE)

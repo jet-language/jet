@@ -296,8 +296,8 @@ jet_cli_errors: fn(diagnostics: [Diagnostic]) -> [Diagnostic] Never! {
 // without an OS the program is checked for ("" for the host).
 jet_cli_compile_check: fn(file: String, source: String, color: Bool, quiet: Bool, threads: Int?, project: Bool, json: Bool, verbose: Bool, settings: [BuildSettingOverride], profile: String, style: Bool, trace_sink: JetCLITraceSink?, finish: Bool, recording: JetCLICheckRecording?{None}, target_machine: String{""}, prior_exit: Int{JET_DRIVER_EXIT_OK}, release_state_aside: Bool{false}) -> JetDriverVerbOutput {
     watch: cli_time.start()
-    // copy: `profile` still selects the compile below.
-    selected: if profile == "" -> JET_BUILD_DEFAULT_PROFILE else -> profile.copy()
+    // `profile` still selects the compile below.
+    selected: if profile == "" -> JET_BUILD_DEFAULT_PROFILE else -> profile
     if !project {
         if jet_cli_missing_project_context(file, source) == .Val(missing) {
             if json {
@@ -490,8 +490,7 @@ jet_cli_workspace_command: fn(member_args: [[String]]) -> String Never! {
 // jet_cli_test_workspace with `scratch` ("" without `results` or a
 // `handoff` report) holding each child's evidence report.
 jet_cli_test_workspace_run: fn(names: [String], member_args: [[String]], envs: [[String]], executable: String, heading: String, results: String, tiers: [String], scratch: String, handoff: String, quiet: Bool) -> JetDriverVerbOutput {
-    // copy: the plan keeps its executable; each argv owns its program word.
-    program: if executable == "" -> cli_sys.executable() else -> executable.copy()
+    program: if executable == "" -> cli_sys.executable() else -> executable
     ^argvs: [[String]]{}
     loop args in member_args {
         ^argv: [String]{program.copy()}  // copy: one program word per argv.
@@ -533,10 +532,7 @@ jet_cli_test_workspace_run: fn(names: [String], member_args: [[String]], envs: [
 // finished, so the streams keep argv order whatever order the children end
 // in. The runs come back in argv order.
 jet_cli_test_members_run: fn(heading: String, names: [String], argvs: [[String]], envs: [[String]], width: Int, quiet: Bool) -> [JetCLITestMemberRun] {
-    ^runs: [JetCLITestMemberRun]{}
-    loop index in 0..<argvs.len() {
-        runs.push(JetCLITestMemberRun{index: index, done: false, code: 0, output: "", errors: ""})
-    }
+    ^runs: loop index in 0..<argvs.len() -> JetCLITestMemberRun{index: index, done: false, code: 0, output: "", errors: ""}
     ^started: 0
     ^running: 0
     ^written: 0
@@ -1143,7 +1139,7 @@ jet_cli_native_executable: fn(result: JetDriverCompileResult, inputs: ^^JetDrive
     // starts: queued behind the closure thread's archive reads, these small
     // reads would stall the object between ir.build and ir.opt.
     ^runtime_exports: jet_cli_runtime_exports(runtime_dir)
-    runtime_key: if runtime_exports.failure == None -> Val(runtime_exports.key.copy()) else -> None
+    runtime_key: if runtime_exports.failure == None -> Val(runtime_exports.key) else -> None
     // `dead_code: keep` keeps the runtime's unreached exports too, so code
     // compiled later against the image (`jet debug`'s `fix` and its
     // evaluations) finds every runtime function it may call.
@@ -1153,8 +1149,7 @@ jet_cli_native_executable: fn(result: JetDriverCompileResult, inputs: ^^JetDrive
     debug_info: build_options_value(options, "debug_info") != "false"
     ^objects: [JetCLINativeObject]{}
     ^closures: [JetCLIForeignRealized]{}
-    // copy: the closure's thread owns its inputs; this function still reads them.
-    foreign_link: result.foreign_link.copy()
+    foreign_link: result.foreign_link
     // A closure only the checked foreign declarations name (the C provider
     // of an imported module's declarations) is decided by the
     // program's live code: the link's own collection over the object and the
@@ -1172,7 +1167,7 @@ jet_cli_native_executable: fn(result: JetDriverCompileResult, inputs: ^^JetDrive
     // succeeds is the link the collection would have chosen, and only a
     // refused one reads the pack for it.
     decided: rust_helper == None && sources.libs.len() == 0 && sources.link_args.len() == 0 && (jet_cli_native_c_linked(foreign_link) || foreign_link.inline_c.len() > 0)
-    first_facts: if decided -> jet_driver_foreign_link_empty() else -> foreign_link.copy()
+    first_facts: if decided -> jet_driver_foreign_link_empty() else -> foreign_link
     ^initial_dynamic: false
     if jet_cli_link_plan(first_facts, sources, options, rust_helper) == {
         .Refused(_, what, _) -> return JetCLINativeLinked.Failed{failure: JetCLINativeFailure.Foreign{message: what}}
@@ -1271,7 +1266,7 @@ jet_cli_native_executable: fn(result: JetDriverCompileResult, inputs: ^^JetDrive
             // symbols, and only their declarations' providers are realized.
             query: x64_link_live_undefined([String]{"{executable_path} (program object)", runtime_path}, [[U8]]{object.move(), runtime.move()})
             ^live: [String:Bool]{}
-            loop symbol in query.symbols -> live[symbol.copy()] = true
+            loop symbol in query.symbols.move() -> live[symbol] = true
             ^queried: query.bufs.move()
             runtime = queried.pop() ?? panic("the live symbol query lost the runtime pack")
             object = queried.pop() ?? panic("the live symbol query lost the program object")
@@ -1316,13 +1311,14 @@ jet_cli_native_executable: fn(result: JetDriverCompileResult, inputs: ^^JetDrive
         names.push(jet_cli_runtime_label(runtime_dir, JET_CLI_CORE_OBJECT_FILE))
         bytes.push(jet_cli_runtime_bytes(runtime_dir, JET_CLI_CORE_OBJECT_FILE) ?? return JetCLINativeLinked.Failed{failure: JetCLINativeFailure.Runtime{what: "couldn't read the Core library object: {err.message}"}})
     }
-    loop name in closure.names -> names.push(name.copy())
-    loop input in closure.bytes -> bytes.push(input.copy())
+    has_closure: closure.names.len() > 0
+    loop name in closure.names.move() -> names.push(name)
+    loop input in closure.bytes.move() -> bytes.push(input)
     // A link step links these inputs itself (LinkStep.jet).
     if jet_cli_link_hooked(options) -> return JetCLINativeLinked.Inputs{names: names, bytes: bytes}
     input_count: names.len()
     // copy: only a C closure can refuse LINK_RUN_BASE, and the retry at LINK_RUN_LOW_BASE needs the inputs again.
-    retry: if base != LINK_BASE && closure.names.len() > 0 -> Val(bytes.copy()) else -> None
+    retry: if base != LINK_BASE && has_closure -> Val(bytes.copy()) else -> None
     if trace_sink == .Val(sink) -> sink.begin("native.link", "", -1, -1)
     // The memory term is read now: the link's section pieces are new work.
     link_threads: CompilerThreads{cap: result.compiler_threads.cap, cores: result.compiler_threads.cores, memory_available: jet_cli_memory_available()}
@@ -1770,7 +1766,7 @@ jet_cli_runtime_exports_mark: fn(bytes: [U8], wanted: ^[String:Bool]) Never! {
         if {
             jet_cli_runtime_exports_search(bytes, row) -> wanted[name] = true
             else -> {
-                names.push(name.copy())
+                names.push(name)
                 rows.push(row)
             }
         }
@@ -1990,8 +1986,8 @@ jet_cli_native_checks: fn(result: JetDriverCompileResult, checked: JetDriverLowe
     checks.checked_alloc = jet_cli_checked_alloc(options)
     // A recorded run starts its log where an observed run starts observing.
     checks.observe = options.observe || options.record != ""
-    checks.log_package = result.log_filter.copy()
-    checks.log_flag = options.log.copy()
+    checks.log_package = result.log_filter
+    checks.log_flag = options.log
     // The `hardened` profile sets the same hardening fact as the entry
     // package's `policy.harden`: the release build keeps the memory sentry.
     checks.harden = result.harden || options.profile == "hardened"
@@ -2788,12 +2784,11 @@ jet_cli_launch_plan: fn(file: String, program_args: [String], options: BuildOpti
         if rows.allow.len() > 0 -> relaunch.push("--allow={rows.allow.join(",")}")
         if rows.deny.len() > 0 -> relaunch.push("--deny={rows.deny.join(",")}")
     }
-    // copy: `vars` is the caller's; the launch's rows own their own.
-    ^env_vars: vars.copy()
+    ^env_vars: vars
     if read_scope.len() > 0 {
         env_vars.push(JetCLIEnvVar{name: ENV_JET_READ_SCOPE, value: read_scope.join(", ")})
     }
-    X64Launch{argv: argv, env: jet_cli_launch_env(env_vars), executable: executable, name: jet_cli_stem(file), relaunch: relaunch, parent_death: true, read_scope: read_scope.copy()}
+    X64Launch{argv: argv, env: jet_cli_launch_env(env_vars), executable: executable, name: jet_cli_stem(file), relaunch: relaunch, parent_death: true, read_scope: read_scope}
 }
 
 // The environment of an observed run (`jet run --observe`, `jet perf test`):
@@ -2810,8 +2805,8 @@ jet_cli_observe_env: fn(source: String) -> [JetCLIEnvVar] {
         JetCLIEnvVar{name: ENV_JET_DEVTOOLS_RELAY_REVISION, value: "runtime"},
         JetCLIEnvVar{name: ENV_JET_DEVTOOLS_RELAY_WORLD_ID, value: "game"},
     }
-    loop field in identity {
-        if (cli_sys.get(field.name) ?? "") == "" -> vars.push(field.copy())
+    loop field in identity.move() {
+        if (cli_sys.get(field.name) ?? "") == "" -> vars.push(field)
     }
     vars
 }
@@ -2827,8 +2822,7 @@ jet_cli_perf_map: fn(executable: X64Executable, pid: Int) {
         return
     }
     jet: cli_process.current_pid()
-    // copy: the map reads the whole file's bytes; the parts stay mapped.
-    ^whole: executable.copy()
+    ^whole: executable
     complete: x64_executable_complete(whole)
     if complete != "" {
         cli_term.eprint("jet: no perf map for the program: {complete}")
@@ -2878,8 +2872,7 @@ jet_cli_run_step: fn(step: ^^JetCLIRunStep, discovery: ^WorkspaceDeclarationCach
             jet_cli_discovery_counters(discovery)
             if json -> vars.push(JetCLIEnvVar{name: ENV_JET_RUN_JSON, value: "1"})
             if options.observe {
-                // copy: the observed run's fields join the receipt's.
-                loop field in jet_cli_observe_env(file) -> vars.push(field.copy())
+                loop field in jet_cli_observe_env(file) -> vars.push(field)
             }
             output: if options.record != "" -> jet_cli_run_recorded(executable, file, program_args, options, invocation, read_scope, vars.move(), color) else -> jet_cli_launch(executable, file, binary, program_args, options, invocation, read_scope, vars, verbose, color)
             jet_cli_finish(output)
@@ -3492,7 +3485,7 @@ jet_cli_test_result: fn(file: String, source: String, doctests: [JetCLIDoctestFi
             }
         }
     }
-    ran: jet_cli_native_test_report(spec, JetNativeTestOutcomes{wires: wires, outputs: run.outputs, errors: run.errors, contracts: run.contracts.copy()}, records_path, records_fault) ?? {
+    ran: jet_cli_native_test_report(spec, JetNativeTestOutcomes{wires: wires, outputs: run.outputs, errors: run.errors, contracts: run.contracts}, records_path, records_fault) ?? {
         cli_files.remove(binary).drop("the native run already failed")
         if records_fault == .Val(fault) -> return jet_cli_test_records_failed(fault, color)
         return jet_cli_ice(err.message)
@@ -5343,7 +5336,7 @@ jet_cli_dev_launch: fn(executable: X64Executable, binary: String, file: String, 
     ^argv: [String]{binary}
     loop argument in program_args -> argv.push(argument.copy())
     ^spec: cli_process.cmd(argv)
-    loop variable in vars -> spec = spec.env(variable.name.copy(), variable.value.copy())
+    loop variable in vars.move() -> spec = spec.env(variable.name, variable.value)
     if spec.stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).spawn() == {
         .Ok(spawned) -> return JetCLIDevChild.File{child: spawned}
         .Err(error) -> cli_term.eprint(jet_cli_report("E2105", "couldn't run the built program: {error}", jet_cli_why("E2105"), fix, color))
@@ -5443,8 +5436,8 @@ jet_cli_link_image: fn(names: [String], bytes: ^^[[U8]], split_bufs: ^^[[U8]], s
     if {
         debug_link == .Val(name) -> {
             split: if extra.len() > 0 -> x64_link_executable_split_direct(names, bytes, extra, split_sec_buf, base, link_threads, name, link_roots) else -> x64_link_executable_split(names, bytes, base, link_threads, name, link_roots)
-            errors: split.errors.copy()
-            undefined: split.undefined.copy()
+            errors: split.errors
+            undefined: split.undefined
             return JetCLILinkedImage{executable: x64_executable_split(split), errors: errors, undefined: undefined}
         }
         else -> {

@@ -8,7 +8,7 @@ use jet_foundation.[Span, Type, name_column_set, name_column_value]
 ir_buffer_element: fn(m: ^IRModule, p: IRProgram, row: Int) -> Int? Never! {
     if m.types[row].kind != .Aggregate -> return None
     ty: ir_untag(ir_row_ty(m, p, row))
-    element: if ty == .List(element) -> Val(element.copy()) else if ir_view_element(ty) == .Val(element) -> Val(element) else -> ir_map_entry_type(ty)
+    element: if ty == .List(element) -> Val(element) else if ir_view_element(ty) == .Val(element) -> Val(element) else -> ir_map_entry_type(ty)
     if element == .Val(element_ty) -> return ir_value_type(m, p, element_ty)
     None
 }
@@ -496,10 +496,8 @@ ir_box_last_helper: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, shap
     helper_key: "#box.last<{ir_row_key(m, row)}>"
     known: ir_keyed_function(m, helper_key) ?? -1
     if known >= 0 -> return known
-    id: m.functions.len()
-    m.functions.push(ir_hashed_function(IR_LAST_OWNER, helper_key, "jet_ir_last_", "", 0))
-    ir_function_bind(m, helper_key, id)
-    ^a: ir_builder_new(m.functions[id].copy())
+    id: ir_reserve_slot(m, helper_key)
+    ^a: ir_builder_new(ir_hashed_function(IR_LAST_OWNER, helper_key, "jet_ir_last_", "", 0))
     at: ir_new_slot(a, row, IRSlotKind.Param, ir_intern_name(m, "value"))
     loop shape in shapes {
         ^dropped: false
@@ -572,10 +570,8 @@ ir_box_unique_helper: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int) ->
     helper_key: "#box.unique<{ir_row_key(m, row)}>"
     known: ir_keyed_function(m, helper_key) ?? -1
     if known >= 0 -> return known
-    id: m.functions.len()
-    m.functions.push(ir_hashed_function("unique", helper_key, "jet_ir_box_unique_", "", 0))
-    ir_function_bind(m, helper_key, id)
-    ^a: ir_builder_new(m.functions[id].copy())
+    id: ir_reserve_slot(m, helper_key)
+    ^a: ir_builder_new(ir_hashed_function("unique", helper_key, "jet_ir_box_unique_", "", 0))
     boxed: ir_new_slot(a, row, IRSlotKind.Param, ir_intern_name(m, "boxed"))
     a.f.result = row
     shapes: ir_box_shapes(m, p, row) ?? [IRBoxShape]{}
@@ -759,10 +755,8 @@ ir_drop_glues: fn(m: ^IRModule, p: IRProgram) Never! {
 // as a trait value's does its concrete payload (ir_trait_drop_body).
 ir_drop_glue: fn(m: ^IRModule, p: IRProgram, row: Int) Never! {
     key: ir_drop_key(m, row)
-    id: m.functions.len()
-    m.functions.push(ir_hashed_function("drop", key, "jet_ir_drop_", "", 0))
-    ir_function_bind(m, key, id)
-    ^a: ir_builder_new(m.functions[id].copy())
+    id: ir_reserve_slot(m, key)
+    ^a: ir_builder_new(ir_hashed_function("drop", key, "jet_ir_drop_", "", 0))
     at: ir_new_slot(a, row, IRSlotKind.Param, ir_intern_name(m, "value"))
     if ir_box_row(m, row) -> ir_box_drop_body(m, p, a, row, at) else if ir_trait_row(m, row) {
         ir_trait_drop_body(m, p, a, row, at)
@@ -842,10 +836,8 @@ ir_buffer_last_helper: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, e
     helper_key: "#buffer.last<{ir_row_key(m, row)}>"
     known: ir_keyed_function(m, helper_key) ?? -1
     if known >= 0 -> return known
-    id: m.functions.len()
-    m.functions.push(ir_hashed_function(IR_LAST_OWNER, helper_key, "jet_ir_last_", "", 0))
-    ir_function_bind(m, helper_key, id)
-    ^a: ir_builder_new(m.functions[id].copy())
+    id: ir_reserve_slot(m, helper_key)
+    ^a: ir_builder_new(ir_hashed_function(IR_LAST_OWNER, helper_key, "jet_ir_last_", "", 0))
     word_row: ir_word_row(m)
     data: ir_new_slot(a, word_row, IRSlotKind.Param, ir_intern_name(m, "data"))
     length: ir_new_slot(a, word_row, IRSlotKind.Param, ir_intern_name(m, "length"))
@@ -932,10 +924,8 @@ ir_unique_helper: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int) -> Int
     known: ir_keyed_function(m, helper_key) ?? -1
     if known >= 0 -> return known
     entry: ir_counted_entry(m, p, row) ?? return -1
-    id: m.functions.len()
-    m.functions.push(ir_hashed_function("unique", helper_key, "jet_ir_unique_", "", 0))
-    ir_function_bind(m, helper_key, id)
-    ^a: ir_builder_new(m.functions[id].copy())
+    id: ir_reserve_slot(m, helper_key)
+    ^a: ir_builder_new(ir_hashed_function("unique", helper_key, "jet_ir_unique_", "", 0))
     header: ir_new_slot(a, row, IRSlotKind.Param, ir_intern_name(m, "header"))
     length: ir_load_word(m, a, header, 0)
     capacity: ir_load_word(m, a, header, 8)
@@ -1061,10 +1051,8 @@ ir_copy_helper: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int) -> Int N
     helper_key: "#copy<{ir_row_key(m, row)}>"
     known: ir_keyed_function(m, helper_key) ?? -1
     if known >= 0 -> return known
-    id: m.functions.len()
-    m.functions.push(ir_hashed_function("copy", helper_key, "jet_ir_copy_", "", 0))
-    ir_function_bind(m, helper_key, id)
-    ^a: ir_builder_new(m.functions[id].copy())
+    id: ir_reserve_slot(m, helper_key)
+    ^a: ir_builder_new(ir_hashed_function("copy", helper_key, "jet_ir_copy_", "", 0))
     at: ir_new_slot(a, row, IRSlotKind.Param, ir_intern_name(m, "value"))
     ir_copy_fixup_body(m, p, a, row, at)
     if a.error != "" {
@@ -1279,14 +1267,12 @@ ir_close_glue: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, members_o
         name_column_set(m.close_glue_keys, m.close_glue, key, -1)
         return -1
     }
-    id: m.functions.len()
-    m.functions.push(ir_hashed_function("close", key, "jet_ir_close_", "", 0))
-    ir_function_bind(m, key, id)
+    id: ir_reserve_slot(m, key)
     name_column_set(m.close_glue_keys, m.close_glue, key, id)
-    ^a: ir_builder_new(m.functions[id].copy())
+    ^a: ir_builder_new(ir_hashed_function("close", key, "jet_ir_close_", "", 0))
     value: ir_new_slot(a, row, IRSlotKind.Param, ir_intern_name(m, "value"))
     if method >= 0 {
-        method_key: p.functions[method].key.copy()
+        method_key: p.functions[method].key
         generic: p.functions[method].generic_params.len() > 0
         // A Close method of a generic type is built for this instance.
         args: if generic -> ir_row_args(m, p, row) else -> ir_owner_args(p, p.functions[method], ir_row_ty(m, p, row)) ?? [Type]{}
@@ -1547,11 +1533,9 @@ ir_part_close_helper: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, me
         return -1
     }
     if known != -3 -> return known
-    id: m.functions.len()
-    m.functions.push(ir_hashed_function("close", key, "jet_ir_close_", "", 0))
-    ir_function_bind(m, key, id)
+    id: ir_reserve_slot(m, key)
     name_column_set(m.close_glue_keys, m.close_glue, key, id)
-    ^a: ir_builder_new(m.functions[id].copy())
+    ^a: ir_builder_new(ir_hashed_function("close", key, "jet_ir_close_", "", 0))
     value: ir_new_slot(a, row, IRSlotKind.Param, ir_intern_name(m, "value"))
     armed: ir_new_slot(a, ir_word_row(m), IRSlotKind.Param, ir_intern_name(m, "armed"))
     ir_close_partial(m, p, a, row, value, armed, parts, 0, members_only, span)
@@ -1787,7 +1771,7 @@ ir_moved_bit: fn(b: ^IRBuilder, root: Int, path: [IRPartStep]) -> Int Never! {
         ir_fail(b, Span{start: 0, end: 0}, "more than {IR_CLOSE_PARTS} parts moved out of one closing variable")
         return -1
     }
-    b.moved.push(IRMovedPart{root: root, path: path.copy(), bit: count + 1})
+    b.moved.push(IRMovedPart{root: root, path: path, bit: count + 1})
     count + 1
 }
 

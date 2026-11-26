@@ -517,10 +517,8 @@ ir_storage_start_helper: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, definitio
     helper_key: "#storage.start<{definition.key}>"
     known: ir_keyed_function(m, helper_key) ?? -1
     if known >= 0 -> return known
-    id: m.functions.len()
-    m.functions.push(ir_hashed_function("storage.start", helper_key, "jet_ir_storage_start_", "", 0))
-    ir_function_bind(m, helper_key, id)
-    ^a: ir_builder_new(m.functions[id].copy())
+    id: ir_reserve_slot(m, helper_key)
+    ^a: ir_builder_new(ir_hashed_function("storage.start", helper_key, "jet_ir_storage_start_", "", 0))
     word_row: ir_word_row(m)
     bool_row: ir_type_row(m, Type.Bool) ?? 0
     site: ir_shared_site_word(m, a, "storage:{definition.key}")

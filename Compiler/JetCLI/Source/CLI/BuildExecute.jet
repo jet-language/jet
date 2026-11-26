@@ -138,9 +138,9 @@ jet_cli_build_run_graph: fn(graph: BuildPlanExecution, receipt: BuildGraph, made
         return jet_cli_build_run_nodes(nodes, None, None, [BuildEffect]{}, [BuildProbeFact]{}, graph, receipt, made, settings, selected, JetCLIBuildNeeds{steps: [Int]{}, host: [Int]{}, images: [Int]{}}, root, member, options, threads, invocation, generated, [String:String]{}, trace_sink, color)
     }
     ^workspace: OverlayPolicy.empty()
-    // copy: `refused` is a payload view of the policy read's result.
-    if jet_cli_build_workspace_policy(workspace, root) == .Val(refused) {
-        return jet_cli_build_policy_refused(refused.copy(), color)
+    policy_refusal: jet_cli_build_workspace_policy(workspace, root)
+    if policy_refusal.move() == .Val(refused) {
+        return jet_cli_build_policy_refused(refused, color)
     }
     last: jet_cli_build_last(root)
     plan: jet_cli_build_hermetic_plan(graph, action_timeout_ms, last.kept) ?? return jet_cli_ice("the checked build plan does not lower to the executor's graph: {err.debug_text()}")
@@ -165,9 +165,9 @@ jet_cli_build_run_graph: fn(graph: BuildPlanExecution, receipt: BuildGraph, made
             return jet_cli_build_execution_failed("E3502", "step `{graph.actions[step].name}` runs `b.image({name})`, a Linux x86-64 image, which a step's sandbox on this machine ({cli_sys.name()} {cli_sys.arch()}) can't run", None, "run this build on Linux x86-64", color)
         }
     }
-    // copy: `overwritten` is a payload view of the check's result.
-    if jet_cli_build_overwrite(root, graph, needs.steps, last.made) == .Val(overwritten) {
-        return jet_cli_build_execution_failed("E3502", overwritten.copy(), None, "move the file, declare the step's output at another path, or keep the file in git with `.output(path, kept: true)`", color)
+    overwrite_refusal: jet_cli_build_overwrite(root, graph, needs.steps, last.made)
+    if overwrite_refusal.move() == .Val(overwritten) {
+        return jet_cli_build_execution_failed("E3502", overwritten, None, "move the file, declare the step's output at another path, or keep the file in git with `.output(path, kept: true)`", color)
     }
     granted: jet_cli_build_steps_granted(plan, graph, needs.steps, needs.host, root, workspace, policy, invocation, member, color)
     if granted.move() == {
@@ -606,14 +606,12 @@ jet_cli_build_node_kind: fn(kind: JetCLIBuildNodeKind) -> String Never! {
 // settings and their writers; and `times.json`, its BuildTimes. A record
 // that can't be written is the failure returned.
 jet_cli_build_record: fn(root: String, receipt: BuildGraph, made: [BuildSessionGeneratedModule], settings: [JetDriverBuildPackageSettings], reused: [Int:Bool], kept: [JetDriverBuildKept], times: [JetDriverBuildTime], color: Bool) -[FS]> JetDriverVerbOutput? Never! {
-    ^graph: receipt.copy()
+    ^graph: receipt
     ^hits: [BuildGraphAction]{}
     loop index in 0..<graph.actions.len() {
         hit: reused.get(graph.actions[index].id) ?? next
-        ^action: graph.actions[index].copy()
-        action.cache_hit = Val(hit)
-        if hit -> hits.push(action.copy())
-        graph.actions[index] = action
+        graph.actions[index].cache_hit = Val(hit)
+        if hit -> hits.push(graph.actions[index].copy())
     }
     graph.cache_hits = hits
     directory: jet_cli_entry_join(root, ".jet/build")
@@ -637,8 +635,8 @@ jet_cli_build_kept: fn(root: String, graph: BuildPlanExecution, reused: [Int:Boo
             if reused.get(id) != None && cli_files.read_bytes(jet_cli_entry_join(root, path)) == .Ok(bytes) {
                 digest = Val(ContentDigest.from_bytes(bytes).as_str())
             }
-            if digest == .Val(held) {
-                kept.push(JetDriverBuildKept{path: path.copy(), digest: held.copy()})
+            if digest.move() == .Val(held) {
+                kept.push(JetDriverBuildKept{path: path.copy(), digest: held})
             }
         }
     }
@@ -661,7 +659,8 @@ jet_cli_build_last: fn(root: String) -[FS]> JetCLIBuildLast Never! {
         loop action in actions {
             outputs: jet_cli_status_list(jet_cli_status_get(action, "outputs")) ?? [JetCLIStatusValue]{}
             loop output in outputs {
-                if jet_cli_status_string(Val(output)) == .Val(path) -> last.made.push(path.copy())
+                out_path: jet_cli_status_string(Val(output))
+                if out_path.move() == .Val(path) -> last.made.push(path)
             }
         }
         rows: jet_cli_status_list(jet_cli_status_get(receipt, "kept")) ?? [JetCLIStatusValue]{}
@@ -788,14 +787,14 @@ jet_cli_build_target_node: fn(node: JetCLIBuildNode, graph: BuildPlanExecution, 
 jet_cli_build_target_image: fn(source_path: String, name: String, options: BuildOptions, root: String) -> String {
     source_dir: jet_cli_parent(cli_files.realpath(source_path) ?? source_path) ?? root
     ^cache: WorkspaceDeclarationCache.new()
-    ^source_root: source_dir.copy()
+    ^source_root: source_dir
     if jet_cli_find_package_root_checked(cache, source_dir) == .Ok(found) && found == .Val(package_root) {
-        source_root = package_root.copy()
+        source_root = package_root
     }
     written: build_options_value(options, "output_dir")
     image_dir: if {
         written == "" -> "{source_root}/.jet/build"
-        written.starts_with("/") -> written.copy()
+        written.starts_with("/") -> written
         else -> "{source_root}/{written}"
     }
     cli_files.join(image_dir, name)
@@ -831,12 +830,10 @@ jet_cli_build_toolchain_options: fn(graph: BuildPlanExecution, row: BuildSession
 
 // `options` with the resolved value of row `name` replaced by `value`.
 jet_cli_build_options_set: fn(options: BuildOptions, name: String, value: String) -> BuildOptions Never! {
-    ^changed: options.copy()
+    ^changed: options
     loop index in 0..<changed.values.len() {
         if changed.values[index].name == name {
-            ^choice: changed.values[index].copy()
-            choice.value = value.copy()
-            changed.values[index] = choice
+            changed.values[index].value = value.copy()
         }
     }
     changed
@@ -877,7 +874,7 @@ jet_cli_build_needs: fn(graph: BuildPlanExecution, plan: HermeticBuildPlan, sele
     }
     ^host: [Int]{}
     ^images: [Int]{}
-    ^pending: steps.copy()
+    ^pending: steps
     loop pending.len() > 0 {
         step: pending.pop() ?? break
         ^more: prereqs.get(step) ?? [Int]{}
@@ -985,9 +982,7 @@ jet_cli_build_nodes: fn(graph: BuildPlanExecution, selected: BuildPlanSelection,
             made: target_nodes.get(target) ?? panic("a target a step uses has a node")
             if !waits.contains(made) -> waits.push(made)
         }
-        ^node: nodes[index].copy()
-        node.needs = waits
-        nodes[index] = node
+        nodes[index].needs = waits
     }
     nodes
 }
@@ -1004,8 +999,7 @@ jet_cli_build_step_nodes: fn(step_nodes: [Int:Int], steps: [Int]) -> [Int] Never
 // The names of the nodes that wait on each other in a cycle, and so on
 // nothing that can finish; empty when every node can start.
 jet_cli_build_cycle: fn(nodes: [JetCLIBuildNode]) -> [String] Never! {
-    ^done: [Bool]{}
-    loop _ in nodes -> done.push(false)
+    ^done: loop _ in nodes -> false
     ^progressed: true
     loop progressed {
         progressed = false
@@ -1064,8 +1058,8 @@ jet_cli_build_workspace_policy: fn(policy: ^OverlayPolicy, root: String) -[FS, E
 // `policy.deny` win over every grant.
 jet_cli_build_grants: fn(policy: JetDriverAuthorityPolicy?, workspace: OverlayPolicy, invocation: JetCLIInvocationAuthority?) -> [BuildEffect] Never! {
     ^authority: jet_cli_policy_authority([String]{}, policy)
-    subject: if policy == .Val(package) -> package.subject.copy() else -> ""
-    ^granted: authority.granted.copy()
+    subject: if policy == .Val(package) -> package.subject else -> ""
+    ^granted: authority.granted.move()
     loop grant in workspace.build_grants {
         if subject != "" && grant.subject == subject {
             loop right in jet_cli_policy_effects(grant.effects) -> granted.push(right)

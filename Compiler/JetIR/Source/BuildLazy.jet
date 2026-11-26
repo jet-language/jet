@@ -194,10 +194,8 @@ ir_lazy_helper: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, role: String, ty: 
         if known < 0 -> return ir_fail_slot(b, span, "lazy.{role} of {ir_type_name(ty)}")
         return known
     }
-    id: m.functions.len()
-    m.functions.push(ir_hashed_function("lazy.{role}", key, "jet_ir_lazy_{role}_", "", 0))
-    ir_function_bind(m, key, id)
-    ^a: ir_builder_new(m.functions[id].copy())
+    id: ir_reserve_slot(m, key)
+    ^a: ir_builder_new(ir_hashed_function("lazy.{role}", key, "jet_ir_lazy_{role}_", "", 0))
     if role == "clone" -> ir_lazy_clone_body(m, p, a, ty, span) else if role == "drop" {
         ir_lazy_drop_body(m, p, a, ty, span)
     } else if role == "retire" { ir_lazy_retire_body(m, p, a, ty, span) } else if role == "equal" {

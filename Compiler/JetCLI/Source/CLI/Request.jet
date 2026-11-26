@@ -1129,7 +1129,7 @@ jet_cli_walk_held_sources: fn(root: String, relative: String, depth: Int, held: 
 // the build entry `build: fn(b: Build)`, whose source lists may name any
 // file of the folder.
 jet_cli_reach_sources: fn(root: String, entry: String, files: ^[JetDriverAuthorizedSourceFile], budget: ^JetCLISourceBudget) -[FS]> Bool JetCLIReadError! {
-    ^pending: [String]{entry.copy()}
+    ^pending: [String]{entry}
     loop stock in JET_CLI_STOCK_ENTRIES {
         if stock != entry -> pending.push(stock.copy())
     }
@@ -2003,10 +2003,10 @@ JetCLIToolchainPackages: struct {
         packages: fn(self, root: String) -[FS.Read]> [String] {
             ^found: [String]{}
             workspace: cli_files.canonicalize(jet_cli_entry_join(root, "Compiler")) ?? return found
-            found.push(workspace.copy())
-            workspace_manifest: jet_cli_entry_join(workspace, JET_CLI_PACKAGE_FILE)
+            found.push(workspace)
+            workspace_manifest: jet_cli_entry_join(found[0], JET_CLI_PACKAGE_FILE)
             loop member in jet_cli_manifest_facts(cli_files.read(workspace_manifest) ?? "", workspace_manifest).members {
-                directory: cli_files.canonicalize(jet_cli_entry_join(workspace, member.path)) ?? next
+                directory: cli_files.canonicalize(jet_cli_entry_join(found[0], member.path)) ?? next
                 if directory.starts_with("{root}/") && !found.contains(directory) {
                     found.push(directory)
                 }
@@ -2064,10 +2064,9 @@ jet_cli_driver_request: fn(snapshot: JetDriverAuthorizedSourceSnapshot, core_sou
     ^stamp: BuildStamp?{None}
     ^contributions: [LockedBuildContribution]{}
     lock: jet_cli_entry_lock(snapshot)
-    if lock == .Val(found) {
-        // copy: `found` is a payload view of `lock`.
-        stamp = found.build_stamp.copy()
-        contributions = found.build_contributions.copy()
+    if lock.move() == .Val(found) {
+        stamp = found.build_stamp
+        contributions = found.build_contributions
     }
     // `jet -e`'s entry file shows the value of its last statement.
     eval_entry: jet_cli_kept_entry(snapshot.entry_path, "eval")
@@ -2717,8 +2716,8 @@ jet_cli_compile_prepared: fn(prepared: ^^JetCLIPrepared, input_log: Shared<JetDr
         .Prepared(request, snapshot) -> {
             ^selected: request
             selected.trace_sink = jet_cli_trace_boxed(trace_sink)
-            // copy: the caller keeps its handle on the one shared log.
-            selected.comptime_input_log = input_log.copy()
+            // The caller keeps its handle on the one shared log.
+            selected.comptime_input_log = input_log
             selected.setting_overrides = settings
             if profile != "" -> selected.profile = profile
             selected.target_machine = target_machine
@@ -2749,8 +2748,7 @@ jet_cli_compile_prepared: fn(prepared: ^^JetCLIPrepared, input_log: Shared<JetDr
             // a check, test or build under a stray JET_FRONT_LIBRARY_OBJECT_OUTPUT
             // stays that verb's compile.
             library_prefix: if selected.mode == JetDriverCompileMode.Doc -> cli_sys.get(ENV_JET_FRONT_LIBRARY_OBJECT_OUTPUT) else -> None
-            // copy: a three-field row; the request moves into the compiler below.
-            compiler_threads: selected.compiler_threads.copy()
+            compiler_threads: selected.compiler_threads
             ^result: if library_prefix == .Val(prefix) -> jet_cli_runtime_library(selected, prefix, cli_sys.get(ENV_JET_FRONT_LIBRARY_LIFECYCLE), compiler_threads, trace_sink) else -> jet_cli_compile_request(selected, trace_sink)
             // What the build's call watches raised, and a failed build's own
             // reports, follow the compile's (jet_cli_generated_request).
@@ -2802,10 +2800,10 @@ jet_cli_compile_executable: fn(prepared: ^^JetCLIPrepared, entry: String?, optio
         .Prepared(request, snapshot) -> {
             ^selected: request
             selected.trace_sink = jet_cli_trace_boxed(trace_sink)
-            // copy: the caller keeps its handle on the one shared log, and
+            // The caller keeps its handle on the one shared log, and
             // this compile keeps its own to read the records back.
-            log: input_log.copy() ?? Shared{JetDriverComptimeInputLog{records: [JetDriverComptimeInputRecord]{}}}
-            selected.comptime_input_log = Val(log.copy())
+            log: input_log ?? Shared{JetDriverComptimeInputLog{records: [JetDriverComptimeInputRecord]{}}}
+            selected.comptime_input_log = Val(log)
             if options.profile != "" -> selected.profile = options.profile
             selected.artifact_build = options.command == "build"
             // An OS-less build (`os: web`) folds `#build.target.os` on its own OS,
@@ -2814,10 +2812,9 @@ jet_cli_compile_executable: fn(prepared: ^^JetCLIPrepared, entry: String?, optio
             if target_os_parse(os_option) == .Val(os) && !target_os_native(os) {
                 selected.build_os = os_option
             }
-            // copy: the caller's options keep the machine for the image refusal.
-            selected.target_machine = options.target_machine.copy()
-            selected.setting_overrides = options.settings.copy()
-            selected.gate_set.allowed = options.gates.copy()
+            selected.target_machine = options.target_machine
+            selected.setting_overrides = options.settings
+            selected.gate_set.allowed = options.gates
             // A `build: fn` output's own settings, and the triple of its own
             // toolchain, whose machine its target facts read.
             selected.output = options.output
@@ -2827,16 +2824,15 @@ jet_cli_compile_executable: fn(prepared: ^^JetCLIPrepared, entry: String?, optio
             }
             // A `jet build` compile already carries what its build generated.
             contributed: jet_cli_contributed_request(selected, options.command != "build", color)
-            // copy: `refusal` is a payload view of `contributed`.
-            if contributed.refusal == .Val(refusal) {
-                return JetCLIExecutableCompiled.Refused{output: refusal.copy()}
+            if contributed.refusal.move() == .Val(refusal) {
+                return JetCLIExecutableCompiled.Refused{output: refusal}
             }
             ^compiled_request: contributed.request.move()
             if entry != None {
-                compiled_request.selected_entry = entry.copy()
+                compiled_request.selected_entry = entry
                 compiled_request.preloaded = [JetDriverPreloaded]{}
             }
-            compiled_request.deep_checks = options.deep_checks.copy()
+            compiled_request.deep_checks = options.deep_checks
             // A package with moment hooks records its moments for them
             // (Host.jet jet_cli_build_result).
             compiled_request.compiler_events = options.compiler_events || jet_driver_moment_hooks(snapshot).len() > 0
@@ -2858,8 +2854,7 @@ jet_cli_compile_executable: fn(prepared: ^^JetCLIPrepared, entry: String?, optio
             if compiled_request.selected_entry == None {
                 compiled_request.output_intent = SemaOutputIntent.Run
             }
-            // copy: a three-field row; the request moves into the compiler below.
-            compiler_threads: compiled_request.compiler_threads.copy()
+            compiler_threads: compiled_request.compiler_threads
             // A compile loads the Core library's function checks, and a run
             // binds its Core calls to the Core library's code this jet
             // carries, only when its Core is the Core built into this jet
@@ -3523,9 +3518,10 @@ JetCLITraceMemory: struct {
 // prints the counters. A file target, with each `%p` in its name this
 // process's id, is truncated and starts with the trace header.
 jet_cli_trace_sink: fn() -> JetCLITraceSink? {
-    chosen: if jet_cli_control("trace").value == {
+    trace_control: jet_cli_control("trace")
+    chosen: if trace_control.value.move() == {
         .Bool(on) -> if on -> "-" else -> ""
-        .Text(file) -> file.copy()  // copy: the control's value is dropped here.
+        .Text(file) -> file
         .Null | .Integer(_) | .Float(_) | .Array(_) | .Object(_) -> ""
     }
     if chosen == "" -> return None
