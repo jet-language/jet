@@ -1,11 +1,17 @@
 // Hover shows one signature in Jet syntax, the failure a callable gives its
 // callers written after the return as Jet writes it.
+use {
+    jet_foundation.[NameAlias, NameDeclaration, NameFacts, NameModule, NameVisibility, Span, interner_empty, name_ledger_from_facts]
+    jet_lsp.[lsp_member, lsp_server]
+    jet_semindex.[SemAnchor, SemEffectProjection, SemRef, semindex_build, semindex_build_symbols]
+}
+
 LSP_TEST_SIGNATURES_URI: "file:///w/signatures.jet"
 
-// `scale` is declared on line 13; line 19 calls `parse` at characters 4-9.
-// The fixture checker types no receiver and solves no failure, so hover on
-// a method call and an inferred contract are covered by the LSP cases.
-LSP_TEST_SIGNATURES: `Bad: struct {
+// `scale` is declared on line 13; line 20 calls `parse` at characters 4-9.
+lsp_test_signatures_source: fn() -> String Never! {
+    copy_method: "copy"
+    head: `Bad: struct {
     reason: String
 }
 
@@ -24,19 +30,107 @@ impl Meter {
 }
 
 run: fn(meter: Meter) -> Int {
-    parse("1") + meter.scale(2)
+    copied: meter.`
+    "{head}{copy_method}()\n    parse(\"1\") + meter.scale(2)\n}}\n"
 }
-`
 
 lsp_test_hover_at: fn(server: ^LSPServer, uri: String, line: Int, character: Int) -> String {
     lsp_test_text(lsp_test_field(lsp_test_result(server, "textDocument/hover", lsp_test_at(uri, line, character)), "contents"), "value")
 }
 
+// A checker that attaches a NameLedger containing both the user's module and
+// unimported public Core declarations sharing leaf names (`parse`, `Meter`),
+// plus a sibling module in the same package namespace (`Span.jet`).
+LSPHoverLedgerChecker: struct {
+    impl LSPChecker {
+        check: fn(self, entry: String, overlays: [JetDriverSourceDocument]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> LSPChecked Never! {
+            ^checked: LSPFixtureChecker{}.check(entry, overlays)
+            ^modules: [NameModule]{}
+            ^declarations: [NameDeclaration]{}
+            loop (position, doc_module) in checked.modules {
+                modules.push(NameModule{alias: "{doc_module.alias}", path: "{doc_module.path}", package: "app", namespace: Val("app")})
+                checked.modules[position].name_module_index = position
+            }
+            core_index: modules.len()
+            modules.push(NameModule{alias: "core.units", path: "core/units.jet", package: "core", namespace: None})
+            declarations.push(NameDeclaration{module_index: 0, name: "parse", path: "signatures.parse", kind: "fn", span: Span{start: 0, end: 1}, visibility: NameVisibility.Public})
+            declarations.push(NameDeclaration{module_index: 0, name: "Meter", path: "signatures.Meter", kind: "struct", span: Span{start: 0, end: 1}, visibility: NameVisibility.Public})
+            declarations.push(NameDeclaration{module_index: core_index, name: "parse", path: "core.units.parse", kind: "fn", span: Span{start: 0, end: 1}, visibility: NameVisibility.Public})
+            declarations.push(NameDeclaration{module_index: core_index, name: "Meter", path: "core.units.Meter", kind: "struct", span: Span{start: 0, end: 1}, visibility: NameVisibility.Public})
+            ledger: Shared{name_ledger_from_facts(NameFacts{modules: modules, declarations: declarations, aliases: [NameAlias]{}, references: [], structure_facts: []})}
+            loop index in 0..<checked.modules.len() {
+                checked.modules[index].name_ledger = Val(ledger)
+            }
+            ^index: semindex_build(checked.modules, interner_empty(), SemEffectProjection{required: [String]{}, granted: [String]{}, denied: [String]{}, authority: ""})
+            // Add param references for `meter` in the two dotted receiver calls.
+            ^meter_span: Span{start: 0, end: 0}
+            loop definition in index.definitions {
+                if definition.def.name == "meter" {
+                    meter_span = definition.def.def_span
+                    break
+                }
+            }
+            if meter_span.end > meter_span.start {
+                text: checked.modules[0].source
+                ^search_from: meter_span.end
+                loop {
+                    rest: String.from_bytes(text.bytes().slice(search_from, text.bytes().len())) ?? break
+                    rel: rest.find("meter.")
+                    if rel < 0 -> break
+                    start: search_from + rel
+                    index.references.push(SemRef{name: "meter", span: Span{start: start, end: start + 5}, module_path: "{checked.modules[0].path}", scope_identity: None, target: Val(SemAnchor{module_path: "{checked.modules[0].path}", kind: "param", def_span: meter_span, semantic_identity: None}), fact: None})
+                    search_from = start + 6
+                }
+            }
+            checked.symbols = semindex_build_symbols(index, checked.modules)
+            checked.index = Val(index)
+            checked
+        }
+
+        stage: fn(self, entry: String, overlays: ^^[JetDriverSourceDocument], stage: String, bodies: [Span], program: ^^String) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [[JetDriverToolStageItem]] Never! {
+            LSPFixtureChecker{}.stage(entry, overlays, stage, bodies, program)
+        }
+
+        failure_marks: fn(self, entry: String, overlays: ^^[JetDriverSourceDocument]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [Int] Never! {
+            LSPFixtureChecker{}.failure_marks(entry, overlays)
+        }
+
+        sources: fn(self, root: String) -[FS]> [JetDriverSourceDocument] Never! {
+            LSPFixtureChecker{}.sources(root)
+        }
+    }
+}
+
 #Test("hover shows one signature in Jet syntax, its failure written after the return") {
     ^server: lsp_test_server()
-    lsp_test_open(server, LSP_TEST_SIGNATURES_URI, LSP_TEST_SIGNATURES)
-    assert_eq(lsp_test_hover_at(server, LSP_TEST_SIGNATURES_URI, 19, 5), "```jet\nparse: fn(text: String) -> Int Bad!\n```")
+    lsp_test_open(server, LSP_TEST_SIGNATURES_URI, lsp_test_signatures_source())
+    assert_eq(lsp_test_hover_at(server, LSP_TEST_SIGNATURES_URI, 20, 5), "```jet\nparse: fn(text: String) -> Int Bad!\n```")
     // The implicit default `Err!` is not written.
     assert_eq(lsp_test_hover_at(server, LSP_TEST_SIGNATURES_URI, 18, 1), "```jet\nrun: fn(meter: Meter) -> Int\n```")
     assert_eq(lsp_test_hover_at(server, LSP_TEST_SIGNATURES_URI, 13, 6), "```jet\nMeter.scale(by: Int) -> Int\n```")
+}
+
+#Test("hover keeps local signatures unqualified against unimported Core names and resolves copy and method calls") {
+    ^server: lsp_server(LSPHoverLedgerChecker{})
+    lsp_test_open(server, LSP_TEST_SIGNATURES_URI, lsp_test_signatures_source())
+    assert_eq(lsp_test_hover_at(server, LSP_TEST_SIGNATURES_URI, 20, 5), "```jet\nparse: fn(text: String) -> Int Bad!\n```")
+    assert_eq(lsp_test_hover_at(server, LSP_TEST_SIGNATURES_URI, 20, 24), "```jet\nMeter.scale(by: Int) -> Int\n```")
+    copy_hover: lsp_test_result(server, "textDocument/hover", lsp_test_at(LSP_TEST_SIGNATURES_URI, 19, 19))
+    copy_method: "copy"
+    assert(lsp_test_text(lsp_test_field(copy_hover, "contents"), "value").contains("```jet\nMeter.{copy_method}() -> Meter\n```"), "copy hover shows receiver-typed signature")
+    assert(lsp_member(copy_hover, "range") != None, "copy hover carries the token range")
+}
+
+#Test("hover resolves type annotations declared in same-namespace sibling modules") {
+    ^server: lsp_server(LSPHoverLedgerChecker{})
+    lsp_test_open(server, "file:///w/span.jet", `Span: struct {
+    start: Int,
+    end: Int,
+}
+`)
+    lsp_test_open(server, "file:///w/probe.jet", `probe_width: fn(span: Span) -> Int {
+    span.end - span.start
+}
+`)
+    assert(lsp_test_hover_at(server, "file:///w/probe.jet", 0, 23).contains("Span: struct"), "same-namespace sibling type hovers with its struct signature")
 }

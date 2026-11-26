@@ -11,12 +11,12 @@ stdout: ~ "\"version\":1" # original predicate; unrelated metadata varies
 # The edit, request 50 and its cancel go in one write, so the cancel is never
 # a separate read away.
 send lsp raw: Messages/LSPCanceledCostlyRequestReturns32800AndNeverPublishes/2-edit-request-cancel.frames
-recv lsp collect until $.id = 50
+recv lsp collect until ndjson $[?id=50] #>= 1
 json: stdout ndjson $[?id=50].error.code = -32800
 stdout: !~ "\"result\":" # original canceled response has no result; preceding frames are notifications
 json: stdout ndjson $[?method="textDocument/publishDiagnostics"].params[?uri="file:///tmp/lsp_canceled_costly_request.jet"][?version!=2] #= 0 # original predicate
 send lsp: Messages/LSPCanceledCostlyRequestReturns32800AndNeverPublishes/5.json
-recv lsp collect until $.id = 51
+recv lsp collect until ndjson $[?id=51] #>= 1
 json: stdout ndjson $[?id=50] #= 0 # original predicate
 json: stdout ndjson $[?id=51].result[?name="marker_new"] #>= 1 # original predicate
 json: stdout ndjson $[?id=51].result[?name~="marker_old"] #= 0 # original predicate
