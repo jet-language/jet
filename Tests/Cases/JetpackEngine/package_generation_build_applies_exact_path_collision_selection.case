@@ -1,61 +1,25 @@
 # HAND-PORT tests/jetpack_engine.rs:1578-1624 package_generation_build_applies_exact_path_collision_selection
-# PENDING-GRAMMAR(batch-four) / PENDING-SAME-HEAD: source only.
 fixture: PackageGenerationBuildAppliesExactPathCollisionSelection.fixture
 env: NO_COLOR=1
-refused: store-ingest
-# Full original setup, observations and predicates preserved: this refusal is NOT a passing replacement.
-# #[test]
-# fn package_generation_build_applies_exact_path_collision_selection() {
-#     let project = Scratch::new("profile-generation-selected-collision-project");
-#     let root = Scratch::new("profile-generation-selected-collision-root");
-#     let fixtures = Scratch::new("profile-generation-selected-collision-fixtures");
-# 
-#     for (package, contents) in [("left", "left editor\n"), ("right", "right editor\n")] {
-#         seed_profile_fixture(&root.path, &fixtures.path, package, |staging| {
-#             let bin = staging.join("bin");
-#             fs::create_dir_all(&bin).unwrap();
-#             let editor = bin.join("editor");
-#             fs::write(&editor, contents).unwrap();
-#             #[cfg(unix)]
-#             {
-#                 use std::os::unix::fs::PermissionsExt;
-#                 fs::set_permissions(&editor, fs::Permissions::from_mode(0o755)).unwrap();
-#             }
-#         });
-#     }
-#     fs::write(
-#         project.join("env.jet"),
-#         "module profile.dev { packages: [default.left, default.right] collisions: {\"bin/editor\": \"right@default\"} }\n",
-#     )
-#     .unwrap();
-#     let output = jetpack()
-#         .args(["profile", "build", "dev", "--no-color", "--offline"])
-#         .current_dir(&project.path)
-#         .env("JETPACK_ROOT", &root.path)
-#         .env("JETPACK_FIXTURES", &fixtures.path)
-#         .output()
-#         .unwrap();
-#     assert!(
-#         output.status.success(),
-#         "stderr: {}",
-#         String::from_utf8_lossy(&output.stderr)
-#     );
-#     let generation = project.join(".jet/profiles/dev/generations/1");
-#     assert_eq!(
-#         fs::read_to_string(generation.join("root/bin/editor")).unwrap(),
-#         "right editor\n"
-#     );
-#     let metadata = fs::read_to_string(generation.join("meta.json")).unwrap();
-#     assert!(metadata.contains("\"selected\":\"right@default\""));
-#     assert!(metadata.contains("left@default"));
-#     assert!(metadata.contains("right@default"));
-#     assert!(metadata.matches("sha256-").count() >= 3);
-# }
 env: JETPACK_ROOT={work}/root
+env: JETPACK_FIXTURES={work}/fixtures
 mkdir: root
 mkdir: project
 mkdir: fixtures
-env: JETPACK_FIXTURES={work}/fixtures
+mkdir: left-src/bin
+mkdir: right-src/bin
+write: left-src/bin/editor = "left editor\n"
+chmod: left-src/bin/editor 0755
+write: right-src/bin/editor = "right editor\n"
+chmod: right-src/bin/editor 0755
+step: jetpack hangar ingest left-src --name left --version 1.0 --ref left@default --json --no-color
+exit: 0
+capture: left_digest stdout doc $.output_hash
+step: jetpack hangar ingest right-src --name right --version 1.0 --ref right@default --json --no-color
+exit: 0
+capture: right_digest stdout doc $.output_hash
+write: fixtures/jetpack-left.json = "[{\"drvPath\":\"/nix/store/0fixture00000000000000000000-left.drv\",\"outputs\":{\"out\":\"{work}/root/hangar/objects/{cap:left_digest}\"}}]\n"
+write: fixtures/jetpack-right.json = "[{\"drvPath\":\"/nix/store/0fixture00000000000000000000-right.drv\",\"outputs\":{\"out\":\"{work}/root/hangar/objects/{cap:right_digest}\"}}]\n"
 step: jetpack profile build dev --no-color --offline
 cwd: project
 exit: 0
@@ -63,5 +27,6 @@ file: project/.jet/profiles/dev/generations/1/root/bin/editor = package_generati
 file: project/.jet/profiles/dev/generations/1/meta.json ~ "\"selected\":\"right@default\"" # original contains predicate
 file: project/.jet/profiles/dev/generations/1/meta.json ~ "left@default" # original contains predicate
 file: project/.jet/profiles/dev/generations/1/meta.json ~ "right@default" # original contains predicate
-file: project/.jet/profiles/dev/generations/1/meta.json count "sha256-" >= 3 # original count predicate
+capture: meta = text file project/.jet/profiles/dev/generations/1/meta.json
+cap:meta: count "sha256-" >= 3 # original count predicate
 

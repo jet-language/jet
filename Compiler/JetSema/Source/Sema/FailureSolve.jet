@@ -450,12 +450,15 @@ sema_failure_obligation_callee: fn(diagnostic: Diagnostic, mark: String) -> Stri
 // unannotated callee is not one yet: the solve discharges it, or the module
 // that keeps it is checked again (`sema_failure_recheck_modules`).
 sema_check_function_failed: fn(diagnostics: [Diagnostic], start: Int, pending_obligations: Bool) -> Bool Never! {
-    if !pending_obligations -> return sema_has_error_since(diagnostics, start)
     mark: sema_failure_obligation_mark()
     loop index in start..<diagnostics.len() {
-        if diagnostics[index].severity == DIAGNOSTIC_ERROR && sema_failure_obligation_callee(diagnostics[index], mark) == None {
-            return true
-        }
+        if diagnostics[index].severity != DIAGNOSTIC_ERROR -> next
+        if pending_obligations && sema_failure_obligation_callee(diagnostics[index], mark) != None -> next
+        // Provisional crypto-misuse reports (E2702) are suppressed if the
+        // effect pass reports an error, and C callback safety rejections
+        // (E3203) still need the effect pass to check callback effect bounds.
+        if diagnostics[index].code == "E2702" || diagnostics[index].code == "E3203" -> next
+        return true
     }
     false
 }

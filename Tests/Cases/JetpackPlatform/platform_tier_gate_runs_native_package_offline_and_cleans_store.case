@@ -1,27 +1,33 @@
-# Exact tests/jetpack_platform.rs:53-110; runtime PENDING-SAME-HEAD.
+# Exact tests/jetpack_platform.rs:53-110
 fixture: PlatformTierGateRunsNativePackageOfflineAndCleansStore.fixture
 requires: os-name:linux
+env: NO_COLOR=1
 mkdir: package-root
 mkdir: missing-tools
+mkdir: fixtures
+mkdir: staging/bin
+mkdir: stale-src
 step: jet build native.jet
 exit: 0
-step: jet test {root}/Jetpack/Store/Tests/PkgIntegrationPlatformSetup.jet --filter "S3 platform authentic fixture setup"
-env: JET_TEST_PLATFORM_SETUP={work}
-env: JET_TEST_PLATFORM_MODE=native
+copy: .jet/build/native staging/bin/jetpack
+step: jetpack hangar ingest staging --name native-jetpack --version 1.0.0 --ref native-jetpack@jetpack --json --no-color
+env: JETPACK_ROOT={work}/package-root
 exit: 0
-step: jetpack use native-jetpack@nixpkgs --no-color --offline -- jetpack{sys:exe-suffix} --help
+capture: native_digest stdout doc $.output_hash
+write: fixtures/jetpack-native-jetpack.json = "[{\"drvPath\":\"/nix/store/0fixture00000000000000000000-native-jetpack.drv\",\"outputs\":{\"out\":\"{work}/package-root/hangar/objects/{cap:native_digest}\"}}]\n"
+step: jetpack use native-jetpack@jetpack --no-color --offline -- jetpack{sys:exe-suffix} --help
 env: JETPACK_ROOT={work}/package-root
 env: JETPACK_FIXTURES={work}/fixtures
 env: PATH={work}/missing-tools
 exit: 0
 stdout: ~ "jetpack" # original native package predicate
-step: jet test {root}/Jetpack/Store/Tests/PkgIntegrationPlatformSetup.jet --filter "S3 platform authentic fixture setup"
-env: JET_TEST_PLATFORM_SETUP={work}
-env: JET_TEST_PLATFORM_MODE=stale
+write: stale-src/payload = "fixture payload: platform-stale"
+step: jetpack hangar ingest stale-src --name platform-stale --version 1.0 --ref fixture:platform-stale --source-fingerprint sha256-fixture-source-platform-stale --recipe-fingerprint sha256-fixture-recipe-platform-stale --policy-fingerprint policy=fixture --provenance fixture --last-used-at 1 --json --no-color
+env: JETPACK_ROOT={work}/package-root
 exit: 0
-capture: object = text file fixture-object
+capture: stale_id stdout doc $.id
 step: jetpack hangar clean --no-color --yes
 env: JETPACK_ROOT={work}/package-root
 env: PATH={work}/missing-tools
 exit: 0
-file: {cap:object} absent
+file: package-root/hangar/{cap:stale_id} absent

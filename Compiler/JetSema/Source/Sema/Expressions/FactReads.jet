@@ -450,7 +450,7 @@ sema_fact_reflection_field_type: fn(type_name: String, field: String) -> Type? {
             field == "span" -> Val(sema_fact_named("SourceSpan"))
             field == "location" -> Val(sema_fact_optional("SourceLocation"))
             field == "documentation" -> Val(sema_fact_list_of("CommentInfo"))
-            field == "reaches_panic" -> Val(Type.Bool)
+            field == "reaches_panic" || field == "repeatable" -> Val(Type.Bool)
             field == "arithmetic" -> Val(sema_fact_list_of("ArithmeticOperationInfo"))
             field == "facts" -> Val(sema_fact_list_of("FactInfo"))
             field == "recorded" || field == "returns" -> Val(sema_fact_list_of("CompilerCall"))
@@ -544,6 +544,8 @@ sema_fact_reflection_field_type: fn(type_name: String, field: String) -> Type? {
         return if {
             field == "values" -> Val(Type.List{element: string})
             field == "declared" || field == "inferred" -> Val(Type.Option{inner: Type.List{element: string}})
+            field == "access" -> Val(sema_fact_named("EffectAccess"))
+            field == "open_world" -> Val(Type.Bool)
             else -> None
         }
     }
@@ -555,7 +557,7 @@ sema_fact_reflection_field_type: fn(type_name: String, field: String) -> Type? {
             field == "dimensions" -> Val(sema_fact_list_of("DimensionInfo"))
             field == "facts" -> Val(sema_fact_list_of("FactInfo"))
             field == "arithmetic" -> Val(sema_fact_list_of("ArithmeticOperationInfo"))
-            field == "is_pub" -> Val(Type.Bool)
+            field == "is_pub" || field == "repeatable" -> Val(Type.Bool)
             field == "span" -> Val(sema_fact_named("SourceSpan"))
             field == "location" -> Val(sema_fact_optional("SourceLocation"))
             field == "documentation" -> Val(sema_fact_list_of("CommentInfo"))

@@ -4,7 +4,6 @@
 use jet_foundation.[
     AccessConvention,
     CallArg,
-    CoreCallRecord,
     DerivationPayload,
     DerivationRecord,
     Expr,
@@ -59,17 +58,6 @@ FrameUse: struct {
 SemaFrameOperationFact: struct {
     operation: FrameOperation?,
     error: String?,
-}
-
-// A Core call row as a frame operation: an external effect that completes
-// synchronously. The caller supplies the canonical call name and source byte
-// index.
-sema_frame_core_call_operation: fn(record: CoreCallRecord, name: String, source_index: Int) -> SemaFrameOperationFact Never! {
-    if record.effects.len() == 0 -> return SemaFrameOperationFact{operation: None, error: None}
-    SemaFrameOperationFact{
-        operation: Val(FrameOperation{name: name, source_index: source_index, accesses: [ResourceAccess]{}, completion: FrameCompletion.Synchronous, completion_provider: None, external_effect: true}),
-        error: None,
-    }
 }
 
 // Checked ordinary-call parameter conventions take precedence; elaborated

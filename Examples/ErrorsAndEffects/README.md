@@ -68,6 +68,7 @@ Run a lesson from the repository root, for example `jet run Examples/ErrorsAndEf
 - [FallibleArmTables](Errors/FallibleArmTables.jet) — A decision table is the value of a fallible function.
 - [FallibleRun](Errors/FallibleRun.jet) — Optional success and typed failure use prefix roles.
 - [FatalExit](Errors/FatalExit.jet) — A `-> Never` helper is a complete non-returning contract.
+- [FrameBreadcrumbs](Errors/FrameBreadcrumbs.jet) — `#Frame(text) { … }` pushes one task-inherited breadcrumb frame that errors, structured log lines, trace spans, and `jet perf` samples inside all carry.
 - [InferredFailureUnion](Errors/InferredFailureUnion.jet) — No function here writes a failure contract.
 - [MustUse](Errors/MustUse.jet) — `#MustUse` on types, functions, and methods.
 - [OrErr](Errors/OrErr.jet) — `?T` and `T !E` are two views of one outcome carrier.

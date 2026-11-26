@@ -227,9 +227,18 @@ provider_cc_pack_ensure: fn(verification: StoreVerification, roots: HangarRoots,
     if found == .Val(tools) -> return Ok(tools)
     hangar: roots.hangar_dir()
     provider_cc_ensure_real_directory(hangar) ?? return Err(ProviderError.BadOutput(err.message()))
-    stem: ".{CC_PACK_PACKAGE}-{provider_cc_pack_short(asset.sha256)}-{process.current_pid()}"
-    archive: files.join(hangar, "{stem}.tar.zst.partial")
-    staging: files.join(hangar, "{stem}.partial")
+    area: files.join(hangar, "{STORE_BUILD_SCRATCH_DIR}/cc-pack")
+    files.create_dir_all(area) ?? return Err(ProviderError.BadOutput("create C toolchain pack lock directory: {err}"))
+    short: provider_cc_pack_short(asset.sha256)
+    _held: files.lock(files.join(area, "{CC_PACK_PACKAGE}-{short}.lock")) ?? return Err(ProviderError.BadOutput("lock C toolchain pack install: {err}"))
+    if provider_cc_pack_lookup(verification, roots, asset) == {
+        .Ok(value) -> found = value
+        .Err(error) -> return Err(ProviderError.BadOutput(error.message()))
+    }
+    if found == .Val(tools) -> return Ok(tools)
+    stem: ".{CC_PACK_PACKAGE}-{short}-{process.current_pid()}"
+    archive: files.join(area, "{stem}.tar.zst.partial")
+    staging: files.join(area, "{stem}.partial")
     provider_cc_remove_tree(archive)
     provider_cc_remove_tree(staging)
     ^unpack: CcPackArchive{path: "", origin: ""}
@@ -653,9 +662,11 @@ provider_cc_realize_pack: fn(verification: StoreVerification, spec: RefSpec, ctx
     roots: ctx.nix_roots ?? return Err(ProviderError.BadOutput("C toolchain realization has no Hangar roots"))
     tools: provider_cc_pack_ensure(verification, roots, asset, provider_cc_pack_default_sources(), ctx.offline)
     provider_cc_ensure_real_directory(ctx.store_dir) ?? return Err(ProviderError.BadOutput(err.message()))
+    area: files.join(ctx.store_dir, "{STORE_BUILD_SCRATCH_DIR}/cc-target")
+    files.create_dir_all(area) ?? return Err(ProviderError.BadOutput("create C toolchain target staging directory: {err}"))
     stem: "{CC_TOOLCHAIN_PACKAGE}-{covered.triple}-{provider_cc_pack_short(tools.digest)}-{process.current_pid()}"
-    staging: files.join(ctx.store_dir, ".{stem}.partial")
-    output: files.join(ctx.store_dir, stem)
+    staging: files.join(area, ".{stem}.partial")
+    output: files.join(area, stem)
     provider_cc_remove_tree(staging)
     provider_cc_remove_tree(output)
     if provider_cc_pack_publish_target(spec, ctx, tools, covered, staging, output) == {

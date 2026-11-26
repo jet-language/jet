@@ -1,0 +1,107 @@
+// Ratified core.jobs typed queue methods and job error lifecycle run through
+// one owner deterministically across O0, O1, and O2.
+package: {
+    name: "typed_queue_lifecycle"
+    authority: { allow: [DB, Env, FS, IO, Mem.Alloc, Rand, Time, Time.Wait] }
+}
+
+use jobs: core.jobs
+
+#Codable
+WorkItem: struct {
+    kind: String,
+    value: Int,
+}
+
+#Error
+WorkFailure: enum {
+    Transient(String),
+
+    impl Describe {
+        public: fn(self) -> String Never! { "work item failed transiently" }
+
+        detail: fn(self) -> String Never! {
+            if self == {
+                .Transient(cause) -> "transient work failure: {cause}"
+            }
+        }
+    }
+}
+
+#Job(.Dev) run_work: fn(item: WorkItem) { print("work:{item.kind}:{item.value}") }
+
+state_label: fn(state: JobQueueState) -> String {
+    if state == {
+        .Queued -> "Queued"
+        .Running -> "Running"
+        .Retrying -> "Retrying"
+        .Completed -> "Completed"
+        .Failed -> "Failed"
+        .DeadLettered -> "DeadLettered"
+        .Canceled -> "Canceled"
+    }
+}
+
+run: fn() {
+    ^queue: jobs.queue() ?? panic("open queue")
+
+    // Enqueue + idempotent deduplication by key.
+    ok_job: queue.enqueue(run_work, WorkItem{kind: "ok", value: 1}, key: "idem-ok") ?? panic("enqueue ok")
+    dup_job: queue.enqueue(run_work, WorkItem{kind: "ok", value: 1}, key: "idem-ok") ?? panic("enqueue dup")
+    print("idempotent:{dup_job.id == ok_job.id}:{dup_job.duplicate}:{ok_job.job_type}")
+
+    // Enqueue two jobs to exercise fail() and fail_described(), plus two delayed jobs
+    // to exercise cancel() and dead_letter().
+    fail_job: queue.enqueue(run_work, WorkItem{kind: "fail", value: 2}, key: "k-fail") ?? panic("enqueue fail")
+    desc_job: queue.enqueue(run_work, WorkItem{kind: "desc", value: 3}, key: "k-desc") ?? panic("enqueue desc")
+    cancel_job: queue.delay(run_work, WorkItem{kind: "cancel", value: 4}, for: 5s) ?? panic("delay cancel")
+    dlq_job: queue.delay(run_work, WorkItem{kind: "dead", value: 5}, for: 5s) ?? panic("delay dead")
+
+    // Receipt, inspect, events before claim.
+    rcpt: queue.receipt(ok_job.id) ?? panic("receipt")
+    print("receipt:{rcpt.id == ok_job.id}:{state_label(rcpt.state)}")
+    records: queue.inspect(16, false) ?? panic("inspect")
+    print("inspect:{records.len()}")
+    initial_events: queue.events(ok_job.id) ?? panic("events")
+    print("initial_events:{initial_events.len()}")
+
+    // Claim all three ready jobs, heartbeat each, then acknowledge/fail/fail_described.
+    claims: queue.claim("worker-1", 4) ?? panic("claim")
+    print("claimed:{claims.len()}")
+    loop claim in claims {
+        hb: queue.heartbeat(claim) ?? panic("heartbeat")
+        assert(state_label(hb.state) == "Running")
+        if {
+            claim.receipt.id == ok_job.id -> {
+                res: JobResult{type_id: claim.payload.type_id, bytes: claim.payload.bytes, publish: false}
+                acked: queue.acknowledge(claim, res) ?? panic("acknowledge")
+                print("acked:{state_label(acked.state)}")
+            }
+            claim.receipt.id == fail_job.id -> {
+                err_val: JobError{type_id: claim.payload.type_id, reason: "boom", detail: Val("internal detail")}
+                failed: queue.fail(claim, err_val) ?? panic("fail")
+                print("failed:{state_label(failed.state)}:{failed.error_reason ?? ""}")
+            }
+            claim.receipt.id == desc_job.id -> {
+                failed_d: queue.fail_described(claim, claim.payload.type_id, WorkFailure.Transient("upstream 503")) ?? panic("fail_described")
+                print("described:{state_label(failed_d.state)}:{failed_d.error_reason ?? ""}")
+            }
+            else -> panic("unexpected claim")
+        }
+    }
+
+    // Cancel and dead-letter the delayed jobs.
+    canceled: queue.cancel(cancel_job.id, "operator cancel") ?? panic("cancel")
+    print("canceled:{state_label(canceled.state)}:{canceled.error_reason ?? ""}")
+    dead: queue.dead_letter(dlq_job.id, "poison payload") ?? panic("dead_letter")
+    print("dead_letter:{state_label(dead.state)}:{dead.error_reason ?? ""}")
+
+    // Recovery, pause/resume, status, wait, and prune.
+    queue.recover_expired() ?? panic("recover_expired")
+    paused: queue.pause() ?? panic("pause")
+    resumed: queue.resume() ?? panic("resume")
+    st: queue.status() ?? panic("status")
+    waited: queue.wait(1ms) ?? panic("wait")
+    pruned: queue.prune() ?? panic("prune")
+    print("lifecycle:{paused.paused}:{resumed.paused}:{st.completed}:{st.canceled}:{st.dead_lettered}:{waited.paused}:{pruned}")
+}

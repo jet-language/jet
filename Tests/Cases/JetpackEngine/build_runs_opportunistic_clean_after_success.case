@@ -1,40 +1,26 @@
 # HAND-PORT tests/jetpack_engine.rs:3434-3457 build_runs_opportunistic_clean_after_success
-# PENDING-GRAMMAR / PENDING-SAME-HEAD: authored, not runtime-proven.
 # Retargeted off the retired `jetpack build` (2b160ee885): build -> env --prep / use --prep, run -> env / use, test -> jet test.
 env: NO_COLOR=1
-refused: hangar-fixture-backdate
-# Verbatim original setup and ALL predicates; no passing substitute for the named seam.
-# #[test]
-# fn build_runs_opportunistic_clean_after_success() {
-#     let root = Scratch::new("root");
-#     let stale = write_hangar_meta(&root.path, "old-auto", "oldauto", "1.0", Some(1)).0;
-# 
-#     let out = jetpack()
-#         .args(["build", "fastfetch@nixpkgs", "--no-color", "--offline"])
-#         .env("JETPACK_ROOT", &root.path)
-#         .env("JETPACK_FIXTURES", example_fixtures(&root.path))
-#         .env("JETPACK_AUTO_CLEAN_ALWAYS", "1")
-#         .output()
-#         .unwrap();
-#     assert!(
-#         out.status.success(),
-#         "stderr: {}",
-#         String::from_utf8_lossy(&out.stderr)
-#     );
-#     assert!(
-#         !stale.exists(),
-#         "successful build should run opportunistic clean"
-#     );
-#     let stderr = String::from_utf8_lossy(&out.stderr);
-#     assert!(stderr.contains("auto-cleaned hangar"), "stderr: {stderr}");
-# }
 env: JETPACK_ROOT={work}/root
+env: JETPACK_FIXTURES={work}/fixtures
+requires: os:unix
 mkdir: root
 mkdir: project
 mkdir: fixtures
-env: JETPACK_FIXTURES={work}/fixtures
+mkdir: stale-src
+write: stale-src/payload = "old-auto"
+step: jetpack hangar ingest stale-src --name oldauto --version 1.0 --ref oldauto@jetpack --last-used-at 1 --json --no-color
+exit: 0
+capture: stale_digest stdout doc $.output_hash
+mkdir: ff-src/bin
+write: ff-src/bin/fastfetch = "#!/bin/sh\necho fastfetch\n"
+chmod: ff-src/bin/fastfetch 0755
+step: jetpack hangar ingest ff-src --name fastfetch --version 1.0 --ref fastfetch@jetpack --json --no-color
+exit: 0
+capture: ff_digest stdout doc $.output_hash
+write: fixtures/jetpack-fastfetch.json = "[{\"drvPath\":\"/nix/store/0fixture00000000000000000000-fastfetch.drv\",\"outputs\":{\"out\":\"{work}/root/hangar/objects/{cap:ff_digest}\"}}]\n"
 step: jetpack use --prep fastfetch@jetpack --no-color --offline
 env: JETPACK_AUTO_CLEAN_ALWAYS=1
 exit: 0
+file: root/hangar/objects/{cap:stale_digest} absent
 stderr: ~ "auto-cleaned hangar" # original contains predicate
-

@@ -1,0 +1,120 @@
+// Tests for `jet run --preview` and MCP `tool_annotations` on `jet inspect rights`
+// and `jet run --preview` (#7035 criterion 4).
+use {
+    test_sys: core.sys
+    jet_cli.[
+        jet_cli_driver_request,
+        jet_cli_inspect_rights,
+        jet_cli_plan,
+        jet_cli_run_preview,
+    ]
+    jet_driver.[
+        JET_DRIVER_EXIT_OK,
+        JetDriverAuthorizedSourceFile,
+        JetDriverAuthorizedSourceRoot,
+        JetDriverAuthorizedSourceSnapshot,
+        JetDriverCompileMode,
+        JetDriverCompileResult,
+        JetDriverCoreSource,
+        jet_driver_compile,
+    ]
+}
+
+preview_test_compile_doc: fn(path: String, source: String) -> JetDriverCompileResult {
+    snapshot: JetDriverAuthorizedSourceSnapshot{
+        roots: [JetDriverAuthorizedSourceRoot]{
+            JetDriverAuthorizedSourceRoot{
+                canonical_path: "/preview-fixture",
+                identity: "preview-root",
+                allow_hardlinks: false,
+                files: [JetDriverAuthorizedSourceFile]{
+                    JetDriverAuthorizedSourceFile{
+                        path: path,
+                        relative_path: "main.jet",
+                        identity: "preview-file",
+                        source: source,
+                    },
+                },
+                foreign_cache_files: [JetDriverAuthorizedSourceFile]{},
+            },
+        },
+        entry_root_identity: "preview-root",
+        entry_path: path,
+    }
+    request: jet_cli_driver_request(snapshot, [JetDriverCoreSource]{}, Val(1), JetDriverCompileMode.Doc)
+    jet_driver_compile(request)
+}
+
+#Test("run_preview_plan_routes_to_static_preview_without_executing") {
+    root: test_sys.get("JET_TOOLCHAIN_ROOT") ?? "."
+    example_path: "{root}/Examples/Basics/EffectAccess.jet"
+    plan: jet_cli_plan([String]{"run", "--preview", example_path})
+    if plan == .Inspect(job) {
+        assert_eq(job.action, "preview")
+        assert(!job.json)
+    } else {
+        panic("expected jet run --preview to produce an Inspect(preview) plan, got: {plan:Debug}")
+    }
+    json_plan: jet_cli_plan([String]{"run", "--preview", "--json", example_path})
+    if json_plan == .Inspect(job) {
+        assert_eq(job.action, "preview")
+        assert(job.json)
+    } else {
+        panic("expected jet run --preview --json to produce an Inspect(preview, json=true) plan, got: {json_plan:Debug}")
+    }
+}
+
+#Test("run_preview_lists_adds_and_highlights_replaces_with_mcp_annotations") {
+    path: "/preview-fixture/main.jet"
+    target: "main.jet"
+    source: `read_it: fn() -[FS.Read]> Int Never! { 1 }
+
+#Repeatable("overwrite is idempotent")
+write_it: fn() -[FS.Write]> Int Never! { 2 }
+
+send_it: fn() -[Net]> Int Never! { 3 }
+
+gen_it: fn() -[Meta.Generate]> Int Never! { 4 }
+
+run: fn() -[FS.Read, Meta.Generate, FS.Write, Net]> {
+    _: read_it()
+    _: gen_it()
+    _: write_it()
+    _: send_it()
+}
+`
+    result: preview_test_compile_doc(path, source)
+
+    plain: jet_cli_run_preview(result, target, false, false)
+    assert_eq(plain.exit_code, JET_DRIVER_EXIT_OK)
+    assert(plain.stdout.contains("Preview (not run):"), "preview must announce not run: {plain.stdout}")
+    assert(plain.stdout.contains("1 adds, 2 replaces"), "preview summary must count adds and replaces: {plain.stdout}")
+    assert(plain.stdout.contains("+ Meta.Generate"), "preview must list Adds effects: {plain.stdout}")
+    assert(plain.stdout.contains("[REPLACES] FS.Write (irreversible)"), "preview must highlight Replaces effects: {plain.stdout}")
+    assert(plain.stdout.contains("[REPLACES] Net (irreversible)"), "preview must highlight Net Replaces: {plain.stdout}")
+    assert(plain.stdout.contains("readOnlyHint=false"), "preview must print readOnlyHint: {plain.stdout}")
+    assert(plain.stdout.contains("destructiveHint=true"), "preview must print destructiveHint: {plain.stdout}")
+    assert(plain.stdout.contains("idempotentHint=false"), "preview must print idempotentHint: {plain.stdout}")
+    assert(plain.stdout.contains("openWorldHint=true"), "preview must print openWorldHint: {plain.stdout}")
+
+    colored: jet_cli_run_preview(result, target, false, true)
+    assert(colored.stdout.contains("\u{1b}[1;31m[REPLACES]\u{1b}[0m"), "colored preview must ANSI-highlight Replaces")
+
+    json_out: jet_cli_run_preview(result, target, true, false)
+    assert_eq(json_out.exit_code, JET_DRIVER_EXIT_OK)
+    assert(json_out.stdout.contains("\"executed\":false"), "preview JSON must mark executed=false: {json_out.stdout}")
+    assert(json_out.stdout.contains("\"access\":\"Replaces\""), "preview JSON must include access: {json_out.stdout}")
+    assert(json_out.stdout.contains("\"adds\":[\"Meta.Generate\"]"), "preview JSON must list adds: {json_out.stdout}")
+    assert(json_out.stdout.contains("\"replaces\":[\"FS.Write\",\"Net\"]"), "preview JSON must list replaces: {json_out.stdout}")
+    assert(json_out.stdout.contains("\"readOnlyHint\":false"), "preview JSON must carry readOnlyHint: {json_out.stdout}")
+    assert(json_out.stdout.contains("\"destructiveHint\":true"), "preview JSON must carry destructiveHint: {json_out.stdout}")
+    assert(json_out.stdout.contains("\"idempotentHint\":false"), "preview JSON must carry idempotentHint: {json_out.stdout}")
+    assert(json_out.stdout.contains("\"openWorldHint\":true"), "preview JSON must carry openWorldHint: {json_out.stdout}")
+
+    rights_json: jet_cli_inspect_rights(result, false, target, true)
+    assert_eq(rights_json.exit_code, JET_DRIVER_EXIT_OK)
+    assert(rights_json.stdout.contains("\"tool_annotations\""), "inspect rights JSON must include tool_annotations: {rights_json.stdout}")
+    assert(rights_json.stdout.contains("\"readOnlyHint\":true,\"destructiveHint\":false,\"idempotentHint\":true,\"openWorldHint\":false"), "read_it must derive readOnly+idempotent annotations: {rights_json.stdout}")
+    assert(rights_json.stdout.contains("\"readOnlyHint\":false,\"destructiveHint\":true,\"idempotentHint\":true,\"openWorldHint\":false"), "write_it must derive destructive+idempotent annotations: {rights_json.stdout}")
+    assert(rights_json.stdout.contains("\"readOnlyHint\":false,\"destructiveHint\":true,\"idempotentHint\":false,\"openWorldHint\":true"), "send_it must derive destructive+openWorld annotations: {rights_json.stdout}")
+}

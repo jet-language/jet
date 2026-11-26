@@ -306,6 +306,286 @@ cancel: fn<T>(rx: Receiver<T>) -[Time]> Receiver<T> Never! {
     rx.copy()
 }
 
+/// Restart policy for a supervised task group: a failing worker is restarted
+/// up to `limit` times inside `window`, sleeping `backoff` before each restart.
+/// Another failure inside `window` fails the group.
+RestartPolicy: struct {
+    limit: Int{3},
+    window: time.Duration{60s},
+    backoff: time.Duration{0ms},
+}
+
+/// Terminal failure of a supervised task group.
+#Error
+GroupFailure: enum {
+    RestartExhausted(worker: String, restarts: Int, window: time.Duration, last_failure: String),
+    Canceled,
+
+    impl Display {
+        display: fn(self) -> String Never! {
+            if self == {
+                .RestartExhausted(worker, restarts, window, last_failure) -> "worker `{worker}` exhausted restart limit ({restarts} in {window.ns /% 1000000}ms): {last_failure}"
+                .Canceled -> "supervised group canceled"
+            }
+        }
+    }
+
+    impl Describe {
+        public: fn(self) -> String Never! { self.display() }
+
+        detail: fn(self) -> String Never! { self.display() }
+    }
+}
+
+priv SupervisedRunner: struct {
+    id: Int,
+    task_handle: Task<Int>,
+}
+
+priv SupervisedState: struct {
+    next_id: Int,
+    canceled: Bool,
+    failure: GroupFailure?,
+    runners: [SupervisedRunner],
+}
+
+/// A task group that supervises named workers under a `RestartPolicy`.
+/// Failing workers are restarted up to `policy.limit` times within
+/// `policy.window` with `policy.backoff` between attempts; an additional
+/// failure inside the window fails the group with a report naming the worker
+/// and its last failure and cancels every sibling. Canceling the group stops
+/// restarts immediately and joins every worker so none outlives the group.
+SupervisedGroup: struct {
+    policy: RestartPolicy,
+    priv state: Shared<SupervisedState>,
+    priv done_tx: Sender<Int>,
+    priv done_rx: Receiver<Int>,
+
+    /// Spawns a named worker under this group's restart policy. Does nothing
+    /// if the group has already been canceled or failed.
+    spawn: fn(self, name: String, work: ^^fn() Err!) -[Time.Wait]> Never! {
+        id: supervised_alloc_id(self.state) ?? return
+        worker_name: name.copy()
+        policy: self.policy.copy()
+        state: self.state.copy()
+        done: self.done_tx.copy()
+        runner: task supervised_worker_entry(id, worker_name, policy, state, done, work)
+        rejected: supervised_register(self.state, id, runner.move())
+        loop handle in rejected {
+            if handle.join() == {
+                .Ok(_) -> {}
+                .Err(_) -> {}
+            }
+        }
+    }
+
+    /// Cancels every running worker and stops all further restarts.
+    cancel: fn(self) Never! {
+        ^guard: self.state.guard_edit()
+        guard.value.canceled = true
+        loop entry in guard.value.runners -> entry.task_handle.cancel()
+    }
+
+    /// Waits for every worker in the group to finish and joins them all.
+    /// If this task is canceled while waiting, every worker is canceled and
+    /// joined before unwinding so no worker outlives the group.
+    wait: fn(self) -[Time.Wait]> GroupFailure! {
+        defer { supervised_cancel_and_join_all(self.state) }
+        loop {
+            if supervised_runner_count(self.state) == 0 -> break
+            finished_id: self.done_rx.receive() ?? break
+            supervised_join_by_id(self.state, finished_id)
+        }
+        supervised_join_remaining(self.state)
+        guard: self.state.guard_read()
+        if guard.value.failure == .Val(report) -> return Err(report.copy())
+        if guard.value.canceled -> return Err(GroupFailure.Canceled)
+        Ok()
+    }
+
+    impl Close {
+        close: fn(^^self) Never! { supervised_cancel_and_join_all(self.state) }
+    }
+}
+
+/// Creates a new supervised task group with `policy`.
+supervised_group: fn(policy: RestartPolicy) -> SupervisedGroup Never! {
+    { sender: done_tx, receiver: done_rx }: channel_pair<Int>()
+    SupervisedGroup{
+        policy: policy,
+        state: Shared{SupervisedState{next_id: 1, canceled: false, failure: None, runners: [SupervisedRunner]{}}},
+        done_tx: done_tx,
+        done_rx: done_rx,
+    }
+}
+
+priv supervised_alloc_id: fn(state: Shared<SupervisedState>) -> Int? Never! {
+    ^guard: state.guard_edit()
+    if guard.value.canceled || guard.value.failure != None -> return None
+    id: guard.value.next_id
+    guard.value.next_id += 1
+    Val(id)
+}
+
+priv supervised_register: fn(state: Shared<SupervisedState>, id: Int, runner: ^^Task<Int>) -> [Task<Int>] Never! {
+    ^guard: state.guard_edit()
+    if guard.value.canceled || guard.value.failure != None {
+        runner.cancel()
+        return [Task<Int>]{runner.move()}
+    }
+    guard.value.runners.push(SupervisedRunner{id: id, task_handle: runner.move()})
+    [Task<Int>]{}
+}
+
+priv supervised_stopped: fn(state: Shared<SupervisedState>) -> Bool Never! {
+    guard: state.guard_read()
+    guard.value.canceled || guard.value.failure != None
+}
+
+priv supervised_runner_count: fn(state: Shared<SupervisedState>) -> Int Never! {
+    guard: state.guard_read()
+    guard.value.runners.len()
+}
+
+priv supervised_fail: fn(state: Shared<SupervisedState>, failure: GroupFailure) Never! {
+    ^guard: state.guard_edit()
+    if guard.value.failure == None -> guard.value.failure = Val(failure)
+    guard.value.canceled = true
+    loop entry in guard.value.runners -> entry.task_handle.cancel()
+}
+
+priv supervised_take_by_id: fn(state: Shared<SupervisedState>, target: Int) -> [Task<Int>] Never! {
+    ^guard: state.guard_edit()
+    ^found: [Task<Int>]{}
+    ^kept: [SupervisedRunner]{}
+    loop {
+        entry: guard.value.runners.pop() ?? break
+        if entry.id == target && found.len() == 0 {
+            found.push(entry.task_handle)
+        } else { kept.push(entry) }
+    }
+    loop {
+        entry: kept.pop() ?? break
+        guard.value.runners.push(entry)
+    }
+    found
+}
+
+priv supervised_join_by_id: fn(state: Shared<SupervisedState>, target: Int) Never! {
+    found: supervised_take_by_id(state, target)
+    loop handle in found {
+        if handle.join() == {
+            .Ok(_) -> {}
+            .Err(_) -> {}
+        }
+    }
+}
+
+priv supervised_take_all: fn(state: Shared<SupervisedState>, cancel_each: Bool) -> [Task<Int>] Never! {
+    ^guard: state.guard_edit()
+    if cancel_each -> guard.value.canceled = true
+    ^taken: [Task<Int>]{}
+    loop {
+        entry: guard.value.runners.pop() ?? break
+        if cancel_each -> entry.task_handle.cancel()
+        taken.push(entry.task_handle)
+    }
+    taken
+}
+
+priv supervised_join_remaining: fn(state: Shared<SupervisedState>) Never! {
+    taken: supervised_take_all(state, false)
+    loop handle in taken {
+        if handle.join() == {
+            .Ok(_) -> {}
+            .Err(_) -> {}
+        }
+    }
+}
+
+priv supervised_cancel_and_join_all: fn(state: Shared<SupervisedState>) Never! {
+    taken: supervised_take_all(state, true)
+    loop handle in taken {
+        if handle.join() == {
+            .Ok(_) -> {}
+            .Err(_) -> {}
+        }
+    }
+}
+
+priv supervised_worker_entry: fn(
+    id: Int,
+    name: String,
+    policy: RestartPolicy,
+    state: Shared<SupervisedState>,
+    done: Sender<Int>,
+    work: fn() Err!,
+) -[Time.Wait]> Int Never! {
+    supervised_worker_loop(id, name, policy, state, done, work)
+    0
+}
+
+priv supervised_worker_loop: fn(
+    id: Int,
+    name: String,
+    policy: RestartPolicy,
+    state: Shared<SupervisedState>,
+    done: Sender<Int>,
+    work: fn() Err!,
+) -[Time.Wait]> Never! {
+    defer {
+        if done.send(id) == {
+            .Ok(_) -> {}
+            .Err(_) -> {}
+        }
+    }
+    ^restarts: [Int]{}
+    loop {
+        if supervised_stopped(state) -> return
+        ^outcome: String?{None}
+        task.group attempt_group {
+            attempt: task {
+                if work() == {
+                    .Ok(_) -> None
+                    .Err(failure) -> Val(failure.detail())
+                }
+            }
+            if attempt.join() == {
+                .Ok(result) -> { outcome = result }
+                .Err(.Panicked(reason)) -> { outcome = Val(reason) }
+                .Err(.DeadlineBlown) -> { outcome = Val("deadline exceeded") }
+                .Err(.Canceled) -> { return }
+            }
+        }
+        failure: outcome ?? return
+        if supervised_stopped(state) -> return
+        now: rt.clock_mono_ns()
+        window_ns: if policy.window.ns < 0 -> 0 else -> policy.window.ns
+        ^kept: [Int]{}
+        loop ts in restarts {
+            if now - ts <= window_ns -> kept.push(ts)
+        }
+        restarts = kept
+        limit: if policy.limit < 0 -> 0 else -> policy.limit
+        if restarts.len() >= limit {
+            supervised_fail(
+                state,
+                GroupFailure.RestartExhausted{
+                    worker: name.copy(),
+                    restarts: limit,
+                    window: policy.window,
+                    last_failure: failure,
+                },
+            )
+            return
+        }
+        restarts.push(now)
+        if policy.backoff.ns > 0 {
+            time.sleep(policy.backoff)
+        }
+    }
+}
+
 TaskState: struct {
     values: [Int],
     capacity: Int,
@@ -510,3 +790,78 @@ spawn_name: fn(name: String) -> String Never! { name.copy() }
     assert_eq(capacity(restarted), 1)
     assert_eq(generation(restarted), 4)
 }
+
+priv test_bump: fn(cell: Shared<Int>, delta: Int) -> Int Never! {
+    ^guard: cell.guard_edit()
+    guard.value += delta
+    guard.value
+}
+
+#Test("group_restart_policy restarts 3 failures and fails the group on the 4th inside window") {
+    attempts: Shared{0}
+    counter: attempts.copy()
+    group: supervised_group(RestartPolicy{limit: 3, window: 5s, backoff: 5ms})
+    group.spawn("flaky_worker", fn() Err! {
+        n: test_bump(counter, 1)
+        panic("boom attempt {n}")
+    })
+    if group.wait() == {
+        .Err(.RestartExhausted(worker, restarts, _, last_failure)) -> {
+            assert_eq(worker, "flaky_worker")
+            assert_eq(restarts, 3)
+            assert(last_failure.contains("boom attempt 4"))
+        }
+        .Err(.Canceled) -> panic("expected RestartExhausted, got Canceled")
+        .Ok(_) -> panic("expected RestartExhausted, got Ok")
+    }
+    assert_eq(attempts.guard_read().value, 4)
+}
+
+#Test("group_restart_policy succeeds when worker recovers within restart limit") {
+    attempts: Shared{0}
+    counter: attempts.copy()
+    group: supervised_group(RestartPolicy{limit: 3, window: 5s, backoff: 5ms})
+    group.spawn("recovering", fn() Err! {
+        n: test_bump(counter, 1)
+        if n <= 3 -> panic("transient {n}")
+        Ok()
+    })
+    if group.wait() == {
+        .Ok(_) -> {}
+        .Err(failure) -> panic("expected Ok, got {failure.display()}")
+    }
+    assert_eq(attempts.guard_read().value, 4)
+}
+
+#Test("group_cancel_stops_restarts and joins every worker so none outlives the group") {
+    started: Shared{0}
+    active: Shared{0}
+    started_w: started.copy()
+    active_w: active.copy()
+    { sender: entered_tx, receiver: entered_rx }: bounded_pair<Int>(4)
+    group: supervised_group(RestartPolicy{limit: 100, window: 60s, backoff: 20ms})
+    group.spawn("looping_worker", fn() Err! {
+        _: test_bump(started_w, 1)
+        _: test_bump(active_w, 1)
+        defer { _: test_bump(active_w, -1) }
+        if entered_tx.send(1) == {
+            .Ok(_) -> {}
+            .Err(_) -> {}
+        }
+        time.sleep(2s)
+        panic("should not reach after cancel")
+    })
+    _: entered_rx.receive() ?? panic("worker never started")
+    group.cancel()
+    if group.wait() == {
+        .Err(.Canceled) -> {}
+        .Err(other) -> panic("expected Canceled, got {other.display()}")
+        .Ok(_) -> panic("expected Canceled, got Ok")
+    }
+    assert_eq(active.guard_read().value, 0)
+    runs_after_cancel: started.guard_read().value
+    time.sleep(60ms)
+    assert_eq(started.guard_read().value, runs_after_cancel)
+    assert_eq(active.guard_read().value, 0)
+}
+

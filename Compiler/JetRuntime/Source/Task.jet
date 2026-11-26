@@ -152,6 +152,29 @@ task_spawn_typed_deadline: fn(label: I64, env: I64, invoke: I64, release: I64, m
     child
 }
 
+// A timer/interval producer (RouteAInterval.jet) runs on a scheduler fiber
+// rather than a detached host thread, so it uses no OS thread of its own,
+// parks on the fiber timer heap, and is tracked by scheduler quiesce. Its
+// lifetime follows its channel (tasks.cancel / Receiver drop), never an
+// ambient deadline inherited from the caller that created it.
+task_spawn_timer: fn(worker: I64, job: I64) {
+    meta: jet_rt_alloc(I64{72}, I64{8})
+    thread_zero(meta, I64{72})
+    sync_store(meta, I64{8})
+    label: scheduler_text_new(I64{0})
+    child: task_state_new(I64{0}, label, job, worker, I64{0}, meta, I64{0}, I64{0})
+    jet_rt_string_drop(label)
+    coll_meta_drop(meta)
+    if (sync_load(wrapping(child + TASK_CONTEXT + CONTEXT_DEADLINE_PRESENT)) != I64{0}) {
+        sync_store(wrapping(child + TASK_CONTEXT + CONTEXT_DEADLINE_PRESENT), I64{0})
+        control: sync_load(wrapping(child + I64{8}))
+        scheduler_deadline_unwatch(control)
+        scheduler_attention_set(control, SCHEDULER_ATTEND_DEADLINE, false)
+    }
+    scheduler_submit(child)
+    task_drop(child)
+}
+
 // A task's state, registered but not yet submitted: a generator
 // (Generator.jet) records its producer before the producer can run.
 task_state_new: fn(site: I64, label: I64, env: I64, invoke: I64, release: I64, meta: I64, group: I64, permit: I64) -> I64 {
@@ -294,7 +317,8 @@ task_run: fn(child: I64) {
     // callbacks are named: the invoke helper at 72 is one per result type,
     // shared by every body that returns it.
     env: sync_load(wrapping(child + I64{64}))
-    code: if (env == I64{0}) -> sync_load(wrapping(child + I64{72})) else -> sync_load(wrapping(env + I64{8}))
+    release: sync_load(wrapping(child + I64{80}))
+    code: if (env == I64{0} || release == I64{0}) -> sync_load(wrapping(child + I64{72})) else -> sync_load(wrapping(env + I64{8}))
     causal_outer: perf_causal_task_start(child, code)
     // A paused task waits here before its body starts, and a cancel posted
     // before the start wins: the body never runs. A shield the body opens
@@ -305,7 +329,11 @@ task_run: fn(child: I64) {
     frame: scheduler_task_completion_begin()
     body: scheduler_body_enter()
     if (!aborted && jet_scheduler_native_propagate() == I64{0}) {
-        ^_: coll_call2(sync_load(wrapping(child + I64{72})), sync_load(wrapping(child + I64{64})), sync_load(wrapping(child + I64{48})))
+        if (release == I64{0}) {
+            ^_: coll_call1(sync_load(wrapping(child + I64{72})), sync_load(wrapping(child + I64{64})))
+        } else {
+            ^_: coll_call2(sync_load(wrapping(child + I64{72})), sync_load(wrapping(child + I64{64})), sync_load(wrapping(child + I64{48})))
+        }
         if (jet_scheduler_native_propagate() == I64{0}) {
             sync_store(wrapping(child + I64{56}), I64{1})
         }
@@ -316,7 +344,7 @@ task_run: fn(child: I64) {
     scheduler_body_leave(body)
     jet_scheduler_shield_enter()
     release_cleanup: jet_rt_session_cleanup_enter(jet_scheduler_native_status())
-    coll_call1_unit(sync_load(wrapping(child + I64{80})), sync_load(wrapping(child + I64{64})))
+    if (release != I64{0}) { coll_call1_unit(release, sync_load(wrapping(child + I64{64}))) }
     scheduler_shield_leave_finished()
     jet_rt_session_cleanup_leave(release_cleanup)
     scheduler_task_completion_end(frame)

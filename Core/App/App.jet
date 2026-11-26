@@ -22,6 +22,7 @@ use {
     core.reactive.loadable.[Loadable]
     core.net.ws.[WsConn]
     tasks: core.tasks
+    tasks_rt: jet.runtime.tasks
     core.tasks.[TaskID]
     uuid: core.crypto.uuid
     time: core.time
@@ -164,6 +165,7 @@ UploadCheck: struct {
 // job is no endpoint: no Remote calls it.
 Job: struct {
     retries: Int{5},
+    at_least_once: Bool{false},
 
     impl Marker {
         sites: [.Method],
@@ -9042,42 +9044,116 @@ priv job_reply: fn(run: fn(RemoteArgs) -> String [FieldError]!, args: String) ->
     run(RemoteArgs{tree: tree}) ?? "{{\"err\":\"the job's arguments don't decode\"}}"
 }
 
+// A running schedule owned by a served App until that App's server stops.
+priv ScheduleEntry: struct {
+    id: Int,
+    name: String,
+    stop: Shared<Bool>,
+    runner: Task<Int>,
+}
+
+priv ScheduleRuntime: struct {
+    next_id: Int,
+    entries: [ScheduleEntry],
+}
+
+priv SCHEDULES: Shared{ScheduleRuntime{next_id: 1, entries: [ScheduleEntry]{}}}
+
 // The schedules of a served App: core.web starts each `#App.Every` method
-// of a mounted service as the App starts serving (`start`).
+// of a mounted service as the App starts serving (`start`) and cancels and
+// joins each one when that server stops (`stop`).
 priv(package) schedules: module {
     // Whether `cron` is a cron line a schedule runs on.
     valid: fn(cron: String) -> Bool Never! { cron_parse(cron) != None }
 
-    // Starts schedule `name` on a task of its own: it runs `run` at the
-    // latest minute the cron line `cron` allows, unless a store records that
-    // run, and then at each next one (`schedule_run`).
-    start: fn(name: String, cron: String, run: ^^fn(RemoteArgs) -> String [FieldError]!) Never! {
+    // Starts schedule `name` on a tracked task of its own: it runs `run` at
+    // the latest minute the cron line `cron` allows, unless a store records
+    // that run, and then at each next one (`schedule_run`). Returns its handle
+    // id for `stop`.
+    start: fn(name: String, cron: String, run: ^^fn(RemoteArgs) -> String [FieldError]!) -> Int Never! {
         line: cron_parse(cron) ?? panic("`{cron}` is not a cron line")
-        runner: task { schedule_run(name, line, run) }
-        runner.detach()
+        task_name: name.copy()
+        stop: Shared{false}
+        task_stop: stop.copy()
+        runner: task schedule_run_entry(task_name, line, run, task_stop)
+        ^runtime: SCHEDULES.guard_edit()
+        id: runtime.value.next_id
+        runtime.value.next_id += 1
+        runtime.value.entries.push(ScheduleEntry{id: id, name: name.copy(), stop: stop, runner: runner.move()})
+        id
     }
+
+    // Cancels and joins every running schedule whose id is in `ids`.
+    stop: fn(ids: [Int], _wait_ms: Int) Never! {
+        if ids.len() == 0 -> return
+        taken: schedule_take_entries(ids)
+        loop entry in taken {
+            if entry.runner.join() == {
+                .Ok(_) -> {}
+                .Err(_) -> {}
+            }
+        }
+    }
+}
+
+priv schedule_run_entry: fn(name: String, line: CronLine, run: fn(RemoteArgs) -> String [FieldError]!, stop: Shared<Bool>) -> Int Never! {
+    schedule_run(name, line, run, stop)
+    0
+}
+
+priv schedule_mark_stopped: fn(stop: Shared<Bool>) Never! {
+    ^guard: stop.guard_edit()
+    guard.value = true
+}
+
+priv schedule_stopped: fn(stop: Shared<Bool>) -> Bool Never! {
+    if stop.guard_read().value -> return true
+    tasks_rt.task_canceled() ?? false
+}
+
+priv schedule_take_entries: fn(ids: [Int]) -> [ScheduleEntry] Never! {
+    ^runtime: SCHEDULES.guard_edit()
+    ^taken: [ScheduleEntry]{}
+    ^kept: [ScheduleEntry]{}
+    loop {
+        entry: runtime.value.entries.pop() ?? break
+        if ids.contains(entry.id) {
+            schedule_mark_stopped(entry.stop)
+            entry.runner.cancel()
+            taken.push(entry)
+        } else { kept.push(entry) }
+    }
+    loop {
+        entry: kept.pop() ?? break
+        runtime.value.entries.push(entry)
+    }
+    taken
 }
 
 // Runs schedule `name` on its cron line `line`: first the latest minute the
 // line allows, a run missed while no server ran, then each next minute it
 // allows, each as a call of its own (`schedule_tick`). A run that ends
 // after its next minute has passed is followed by the latest minute that
-// passed, once.
-priv schedule_run: fn(name: String, line: CronLine, run: fn(RemoteArgs) -> String [FieldError]!) Never! {
+// passed, once. Exits promptly when stopped or canceled.
+priv schedule_run: fn(name: String, line: CronLine, run: fn(RemoteArgs) -> String [FieldError]!, stop: Shared<Bool>) Never! {
+    if schedule_stopped(stop) -> return
     ^due: schedule_minute()
     if cron_due_by(line, due) == .Val(missed) {
         schedule_tick(name, missed, run)
         due = missed
     }
     loop {
+        if schedule_stopped(stop) -> return
         ^next: cron_due_after(line, due) ?? return
         now: schedule_minute()
         if next < now -> next = cron_due_by(line, now) ?? next
         loop {
+            if schedule_stopped(stop) -> return
             wait_ms: next * 60000 - time.unix_ns() /% 1000000
             if wait_ms <= 0 -> break
             time.sleep(time.duration_ms(wait_ms))
         }
+        if schedule_stopped(stop) -> return
         schedule_tick(name, next, run)
         due = next
     }
@@ -9284,6 +9360,35 @@ priv cron_due_after: fn(line: CronLine, minute: Int) -> Int? {
     assert(schedules.valid(printed))
     malformed_lines: [String]{"0 8 * *", "0 8 * * * *", "60 * * * *", "*/0 * * * *", "a * * * *", "5-1 * * * *", "1,,2 * * * *", "* * 0 * *", "* * * 13 *", "* * * * 8", "1-2-3 * * * *", "*/100 * * * *"}
     loop malformed in malformed_lines { assert(!schedules.valid(malformed), malformed) }
+}
+
+#Test("schedule stop cancels and joins sleeping schedules") {
+    runs: Shared{0}
+    runs_in_task: runs.copy()
+    id: schedules.start("test_leap_day", "0 0 29 2 *", fn(_args: RemoteArgs) -> String [FieldError]! {
+        ^guard: runs_in_task.guard_edit()
+        guard.value += 1
+        Ok("1")
+    })
+    loop _ in 0..<200 {
+        if runs.guard_read().value > 0 -> break
+        time.sleep(10ms)
+    }
+    assert_eq(runs.guard_read().value, 1)
+    time.sleep(20ms)
+    sw: time.start()
+    schedules.stop([Int]{id}, 2000)
+    assert(sw.elapsed_millis() < 1000)
+    assert_eq(SCHEDULES.guard_read().value.entries.len(), 0)
+    ^quiesced: false
+    loop _ in 0..<100 {
+        if tasks.quiesce() {
+            quiesced = true
+            break
+        }
+        time.sleep(5ms)
+    }
+    assert(quiesced)
 }
 
 #Test("SyncDocument grammar parses SyncText, SyncMap, SyncList, PNCounter and prints back") {

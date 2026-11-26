@@ -62,9 +62,10 @@ timer_send: fn(channel: I64, slot: I64, meta: I64) -> Bool {
 }
 
 // A new unbounded timer channel of `kind` whose producer job (Job40:
-// channel (the producer's sender endpoint) 0, delay ms 8, owned World lease
-// or 0 at 16, owned value slot or 0 at 24, owned element descriptor or 0 at
-// 32) runs `worker` on a detached host thread.
+// channel (the producer's sender endpoint) 0, delay ms 8, reserved 16,
+// owned value slot or 0 at 24, owned element descriptor or 0 at 32) runs
+// `worker` on a scheduler fiber, so it owns no OS thread of its own and
+// wakes immediately when the receiver is closed or dropped.
 timer_start: fn(kind: I64, delay: I64, value: I64, meta: I64, worker: I64) -> I64 {
     channel: channel_new(I64{-1}, kind, delay)
     sync_store(wrapping(channel + I64{120}), I64{1})
@@ -72,48 +73,96 @@ timer_start: fn(kind: I64, delay: I64, value: I64, meta: I64, worker: I64) -> I6
     job: jet_rt_alloc(I64{40}, I64{8})
     sync_store(job, channel)
     sync_store(wrapping(job + I64{8}), delay)
-    world: world_current()
-    sync_store(wrapping(job + I64{16}), if (world == I64{0}) -> I64{0} else -> jet_rt_world_clone(world))
+    sync_store(wrapping(job + I64{16}), I64{0})
     sync_store(wrapping(job + I64{24}), value)
     sync_store(wrapping(job + I64{32}), meta)
-    if (world != I64{0}) { world_task_spawned(world) }
-    handle: thread_spawn(worker, job)
-    if (handle < I64{0}) {
-        scheduler_start_failed()
-        return channel
-    }
-    ^_: thread_detach(handle)
+    task_spawn_timer(worker, job)
     channel
 }
 
-timer_worker_enter: fn(job: I64, save: I64) {
-    world: sync_load(wrapping(job + I64{16}))
-    if (world != I64{0}) { world_scope_enter(world, save, true) }
+timer_channel_open: fn(channel: I64) -> Bool {
+    sync_load(wrapping(channel + I64{88})) == I64{0} && sync_load(wrapping(channel + I64{128})) != I64{0}
 }
 
-timer_worker_leave: fn(job: I64, save: I64) {
-    channel: sync_load(job)
-    world: sync_load(wrapping(job + I64{16}))
-    jet_rt_free(job, I64{40}, I64{8})
-    if (world != I64{0}) {
-        world_task_finished(world)
-        world_scope_leave(save)
-        jet_rt_world_drop(world)
+// Waits `delay_ms` milliseconds unless `channel` is closed, loses its last
+// receiver, or this producer task is canceled. Registering on the channel's
+// sendwait list lets `channel_close` (tasks.cancel) and `receiver_drop` wake
+// the parked fiber immediately instead of waiting out the full delay.
+timer_sleep: fn(channel: I64, delay_ms: I64) -> Bool {
+    duration_ns: deadline_ms_to_ns(delay_ms)
+    if (duration_ns <= I64{0}) {
+        if (jet_scheduler_native_propagate() != I64{0}) { return false }
+        sync_mutex_lock(channel)
+        alive: timer_channel_open(channel)
+        sync_mutex_unlock(channel)
+        return alive
     }
-    jet_rt_free(save, I64{32}, I64{8})
+    slot: sync_park_new()
+    node: channel_wait_new(slot)
+    kind: scheduler_msg_sleep()
+    world: world_current()
+    ^alive: false
+    if (world != I64{0}) {
+        sync_mutex_lock(channel)
+        open: timer_channel_open(channel)
+        if open -> channel_wait_add(channel, node, true)
+        sync_mutex_unlock(channel)
+        if open {
+            world_park(world, duration_ns, slot)
+            status: scheduler_yield_policy(kind, slot, I64{-1}, false, I64{0})
+            sync_mutex_lock(channel)
+            channel_wait_remove(channel, node, true)
+            alive = status == I64{0} && timer_channel_open(channel)
+            sync_mutex_unlock(channel)
+        }
+    } else {
+        deadline: sync_deadline(duration_ns)
+        loop {
+            sync_mutex_lock(channel)
+            open: timer_channel_open(channel)
+            if open -> channel_wait_add(channel, node, true)
+            sync_mutex_unlock(channel)
+            if !open -> break
+            remaining: deadline - sync_now_ns()
+            if (remaining <= I64{0}) {
+                sync_mutex_lock(channel)
+                channel_wait_remove(channel, node, true)
+                alive = timer_channel_open(channel)
+                sync_mutex_unlock(channel)
+                break
+            }
+            status: scheduler_yield_policy(kind, slot, remaining, false, I64{0})
+            sync_mutex_lock(channel)
+            channel_wait_remove(channel, node, true)
+            still_open: timer_channel_open(channel)
+            sync_mutex_unlock(channel)
+            if (status != I64{0} || !still_open) { break }
+            if (sync_now_ns() >= deadline) {
+                alive = true
+                break
+            }
+        }
+    }
+    jet_rt_string_drop(kind)
+    jet_rt_free(node, I64{24}, I64{8})
+    sync_park_drop(slot)
+    alive
+}
+
+timer_worker_leave: fn(job: I64) {
+    channel: sync_load(job)
+    jet_rt_free(job, I64{40}, I64{8})
     jet_rt_native_sender_drop(channel)
 }
 
 #Export(c) jet_rt_interval_worker: fn(job: I64) -> I64 {
-    save: jet_rt_alloc(I64{32}, I64{8})
-    timer_worker_enter(job, save)
     channel: sync_load(job)
     delay: sync_load(wrapping(job + I64{8}))
     meta: timer_meta()
     slot: jet_rt_alloc(I64{8}, I64{8})
     ^tick: I64{1}
     loop {
-        jet_scheduler_sleep_ms(delay)
+        if !timer_sleep(channel, delay) -> break
         sync_store(slot, jet_int_owned_from_i64(tick))
         if !timer_send(channel, slot, meta) {
             jet_rt_int_drop(sync_load(slot))
@@ -123,21 +172,20 @@ timer_worker_leave: fn(job: I64, save: I64) {
     }
     jet_rt_free(slot, I64{8}, I64{8})
     coll_meta_drop(meta)
-    timer_worker_leave(job, save)
+    timer_worker_leave(job)
     I64{0}
 }
 
 #Export(c) jet_rt_after_worker: fn(job: I64) -> I64 {
-    save: jet_rt_alloc(I64{32}, I64{8})
-    timer_worker_enter(job, save)
-    jet_scheduler_sleep_ms(sync_load(wrapping(job + I64{8})))
+    channel: sync_load(job)
+    delay: sync_load(wrapping(job + I64{8}))
     value: sync_load(wrapping(job + I64{24}))
     meta: sync_load(wrapping(job + I64{32}))
-    if timer_send(sync_load(job), value, meta) -> jet_rt_free_8(value, coll_size(meta)) else {
-        coll_slot_free(value, meta)
-    }
+    if (timer_sleep(channel, delay) && timer_send(channel, value, meta)) {
+        jet_rt_free_8(value, coll_size(meta))
+    } else { coll_slot_free(value, meta) }
     coll_meta_drop(meta)
-    timer_worker_leave(job, save)
+    timer_worker_leave(job)
     I64{0}
 }
 

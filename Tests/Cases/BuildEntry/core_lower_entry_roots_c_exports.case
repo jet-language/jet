@@ -1,0 +1,23 @@
+# Under `dead_code: remove`, `#Export(c)` entry roots and the helpers they call
+# stay lowered even when no Jet function calls them, while an unreached sibling
+# function is checked by sema but omitted from IR lowering until
+# `dead_code: keep` is selected.
+fixture: CoreLowerEntryRootsCExports.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JET_TRACE_DETAIL=functions
+step: jet build -O0 --trace=trace.json main.jet
+exit: 0
+file: trace.json ~ "{\"name\":\"never_called\",\"cat\":\"sema.function\"" # the unreached function is still checked
+file: trace.json !~ "{\"name\":\"never_called\",\"cat\":\"ir.function\"" # the unreached function is not lowered
+file: trace.json ~ "{\"name\":\"run\",\"cat\":\"ir.function\"" # the entry is lowered
+file: trace.json ~ "{\"name\":\"exported_tick\",\"cat\":\"ir.function\"" # the uncalled #Export(c) root is lowered
+file: trace.json ~ "{\"name\":\"tick_step\",\"cat\":\"ir.function\"" # the helper reached by exported_tick is lowered
+file: trace.json ~ "{\"name\":\"jet_rt_scheduler_queue_push\",\"cat\":\"ir.function\"" # the runtime-called push C export is lowered
+file: trace.json ~ "{\"name\":\"jet_rt_scheduler_queue_pop\",\"cat\":\"ir.function\"" # the runtime-called pop C export is lowered
+step: jet build -O0 --dead-code=keep --trace=keep.json main.jet
+exit: 0
+file: keep.json ~ "{\"name\":\"never_called\",\"cat\":\"ir.function\"" # dead_code=keep lowers the unreached sibling
+step: jet run main.jet
+exit: 0
+stdout: = "sum 12\nhooked true\n"

@@ -1,0 +1,22 @@
+# Service restart policy honors sliding-window expiry on live workers and
+# OneForAll / RestForOne group restart strategies with backoff and escalation
+# across O0, O1, and O2.
+fixture: RestartPolicyWindowExpiryAndStrategies.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+
+step o0: jet run main.jet
+exit: 0
+stdout: = "window_expiry:101:2:0:102:2:true\none_for_all:1:1:true:true\nrest_for_one:0:1:1\n"
+
+step build_o1: jet build -O1 main.jet
+exit: 0
+step o1: built
+exit: == o0
+stdout: == o0
+
+step build_o2: jet build -O2 main.jet
+exit: 0
+step o2: built
+exit: == o0
+stdout: == o0

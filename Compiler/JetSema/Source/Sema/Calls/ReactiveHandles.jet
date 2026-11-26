@@ -7,7 +7,6 @@ use jet_foundation.[
     AccessConvention,
     CallArg,
     CallLabel,
-    CoreCallRecord,
     Diagnostic,
     EffectRowEntry,
     Expr,
@@ -93,18 +92,6 @@ sema_reactive_call_fact: fn(check: ^SemaBodyCheck, api: String, span: Span, resu
         default_refs: [FunctionDefaultRef]{},
     }
     sema_effect_record_intrinsic_fact(check.environment.*, check.program.*, check.scopes, check.context, api, span, facts, check.diagnostics)
-}
-
-sema_reactive_core_call_value: fn(record: CoreCallRecord, args: [TExpr], span: Span, type_args: [Type], result_type: Type, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
-    value: sema_call_core_tree(record, args, span, type_args, result_type, expected, check) ?? return None
-    if !sema_call_core_record_effects(record, span, type_args, result_type, sema_call_failure_carrier(Val(result_type)), [FunctionDefaultRef]{}, check) {
-        return None
-    }
-    Val(value)
-}
-
-sema_reactive_core_record: fn(module_name: String, member: String, args: [CallArg], span: Span, diagnostics: ^[Diagnostic]) -> CoreCallRecord? {
-    sema_call_core_record(module_name, member, args.len(), span, diagnostics)
 }
 
 sema_reactive_typed_single_argument: fn(member: String, argument: CallArg, required: Type?, check: ^SemaBodyCheck) -> TExpr? {
@@ -222,20 +209,10 @@ sema_reactive_signal_value: fn(type_args: [Type], span: Span, expected: Type?, c
     SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(call, expected, check.environment.*, check.program.*, check.diagnostics)}
 }
 
-sema_reactive_loadable_value: fn(member: String, type_args: [Type], span: Span, expected: Type?, check: ^SemaBodyCheck, args: [CallArg]) -> SemaDirectSpecialCheck Never! {
-    record: sema_reactive_core_record("core.reactive.loadable", member, args, span, check.diagnostics) ?? {
-        ^_: sema_reactive_infer_args(args, check)
-        return SemaDirectSpecialCheck{handled: true, value: None}
-    }
-    if member == "idle" || member == "loading" {
-        ^result_type: sema_reactive_loadable_type(sema_reactive_unit_type(), sema_reactive_unit_type())
-        value: sema_reactive_core_call_value(record, [TExpr]{}, span, type_args, result_type, expected, check)
-        return SemaDirectSpecialCheck{handled: true, value: value}
-    }
-    value: sema_reactive_typed_single_argument(member, args[0], None, check) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-    ^result_type: if member == "loaded" -> sema_reactive_loadable_type(sema_call_resolved_type(value.ty, check.environment.*, check.program.*), sema_reactive_unit_type()) else -> sema_reactive_loadable_type(sema_reactive_unit_type(), sema_call_resolved_type(value.ty, check.environment.*, check.program.*))
-    value_out: sema_reactive_core_call_value(record, [TExpr]{value}, span, type_args, result_type, expected, check)
-    SemaDirectSpecialCheck{handled: true, value: value_out}
+sema_reactive_loadable_value: fn(member: String, _type_args: [Type], span: Span, _expected: Type?, check: ^SemaBodyCheck, args: [CallArg]) -> SemaDirectSpecialCheck Never! {
+    check.diagnostics.push(sema_call_core_unknown_item("core.reactive.loadable", member, span))
+    ^_: sema_reactive_infer_args(args, check)
+    SemaDirectSpecialCheck{handled: true, value: None}
 }
 
 sema_call_try_reactive_core_call: fn(module_name: String, member: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaDirectSpecialCheck {

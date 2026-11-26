@@ -221,14 +221,14 @@ JobQueue: struct {
     /// Queues one run of the `#Job` function `job` with `payload`, encoded as
     /// canonical CBOR. A `key` makes the enqueue idempotent: a second enqueue
     /// with the same key answers the first receipt.
-    #QueueJob enqueue: fn<T: Encode>(^self, job: fn(T), payload: T, key: String?{None}, job_type: String{#run job.reflect().name}) -[DB, Time]> JobQueueReceipt ServiceError! {
+    #QueueJob enqueue: fn<T: Encode>(^self, job: fn(T), payload: T, key: String?{None}, job_type: String{#run (job.reflect()).name}) -[DB, Time]> JobQueueReceipt ServiceError! {
         encoded: queue_encoded_payload(job_type, payload) ?? return Err(err)
         queue_enqueue_request(self, EnqueueRequest{job_type: job_type, payload: encoded, idempotency_key: key, request_id: None, delay_ms: 0})
     }
 
     /// Queues one run of the `#Job` function `job` with `payload`, claimable
     /// once `duration` has passed.
-    #QueueJob delay: fn<T: Encode>(^self, job: fn(T), payload: T, for duration: Duration, job_type: String{#run job.reflect().name}) -[DB, Time]> JobQueueReceipt ServiceError! {
+    #QueueJob delay: fn<T: Encode>(^self, job: fn(T), payload: T, for duration: Duration, job_type: String{#run (job.reflect()).name}) -[DB, Time]> JobQueueReceipt ServiceError! {
         encoded: queue_encoded_payload(job_type, payload) ?? return Err(err)
         millis: duration.ns /% 1000000
         if millis < 0 || millis > 9223372036854775807 {

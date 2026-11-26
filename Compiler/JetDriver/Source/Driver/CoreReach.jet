@@ -45,7 +45,7 @@
 // (jet_driver_reach_hold), so load time and memory follow reach, not the
 // size of the library.
 use {
-    jet_foundation.[BOUNDARY_TYPED_HEADS, BUILTIN_METHOD_ROWS, BUILTIN_STATIC_ROWS, CORE_CALLS, CompilerThreads, DIAGNOSTIC_LINT, Diagnostic, Func, ImportDecl, Item, MARKER_HTML, MARKER_NO_PRELUDE, MARKER_POLICY, MARKER_TARGET, NameTable, ParseResult, Span, TraitImplBlock, compiler_threads_admit, compiler_threads_joined, compiler_threads_partition, compiler_threads_single, core_call_source_member, core_module_export, core_module_has_member, diagnostic_with_source_path, name_find, name_index, name_intern, name_intern_bytes, name_table, name_table_sized, name_text, owned_trait, owned_trait_codec, sema_casing_marker_qualifier]
+    jet_foundation.[BOUNDARY_TYPED_HEADS, BUILTIN_METHOD_ROWS, BUILTIN_STATIC_ROWS, CompilerThreads, DIAGNOSTIC_LINT, Diagnostic, Func, ImportDecl, Item, MARKER_HTML, MARKER_NO_PRELUDE, MARKER_POLICY, MARKER_TARGET, NameTable, ParseResult, Span, TraitImplBlock, compiler_threads_admit, compiler_threads_joined, compiler_threads_partition, compiler_threads_single, core_module_export, core_module_has_member, diagnostic_with_source_path, name_find, name_index, name_intern, name_intern_bytes, name_table, name_table_sized, name_text, owned_trait, owned_trait_codec, sema_casing_marker_qualifier]
     jet_lexer.[
         Lexed,
         STRING_PART_INTERPOLATION,
@@ -782,20 +782,6 @@ jet_driver_core_routes: fn(module_name: String) -> JetDriverCoreRoutes Never! {
     ^routes: JetDriverCoreRoutes{module_name: module_name, routed: JET_DRIVER_ROUTED_MODULES.contains(module_name), names: [String:Bool]{}}
     // A user unit has no routes.
     if module_name == "" -> return routes
-    loop row in CORE_CALLS {
-        if row.module_name == module_name && (!routes.routed || row.member.starts_with("__")) {
-            routes.names[row.member] = true
-        }
-        target: core_call_source_member(row) ?? next
-        // Most targets name another module: skip them before splitting.
-        if row.module_name != module_name && !target.starts_with(module_name) -> next
-        ^parts: target.split(".").to_list()
-        member: parts.pop() ?? next
-        owner: if parts.len() > 0 -> parts.join(".") else -> row.module_name
-        if owner == module_name && (member != row.member || owner != row.module_name) {
-            routes.names[member] = true
-        }
-    }
     prefix: "{module_name}."
     loop route in JET_DRIVER_SOURCE_ROUTES {
         if !route.starts_with(prefix) -> next

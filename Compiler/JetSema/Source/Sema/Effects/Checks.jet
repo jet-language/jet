@@ -13,8 +13,12 @@
 use jet_foundation.[
     EFFECT_VOCABULARY_ROOTS,
     EFFECT_VOCABULARY_ROWS,
+    EffectAccess,
+    Expr,
     JET_FRAME_ALLOWANCE,
     MARKER_MEMO,
+    MARKER_REPEATABLE,
+    Marker,
     authority_covers_any,
     authority_expert,
     authority_expert_answer,
@@ -46,6 +50,7 @@ use jet_foundation.[
     decl_table_key,
     Diagnostic,
     EffectRowEntry,
+    effect_access_max,
     effect_scope_argument_valid,
     effect_scope_covers,
     effect_scope_descriptor,
@@ -54,8 +59,8 @@ use jet_foundation.[
     effect_scope_of_argument,
     effect_scope_published_effect,
     effect_scope_split,
+    effect_value_base,
     effect_value_is_valued,
-    Expr,
     FnBody,
     Func,
     FunctionDefaultRef,
@@ -196,6 +201,25 @@ SemaEffectFunctionSource: struct {
     // Whether this function carries `#Export(c)` (E3203 if it touches
     // changeable module storage globals that are not raw words).
     is_guest_export: Bool{false},
+    // The `#Repeatable` marker contract (E0778, E0779).
+    repeatable: SemaEffectRepeatableSpec?{None},
+    // The `#App.Job` retry contract (E0780).
+    job_retry: SemaEffectJobRetrySpec?{None},
+}
+
+// A function's `#Repeatable` marker: trusted leaf with `reason`, keyed with
+// `key_expr`, or checked against every non-read callee when neither is written.
+SemaEffectRepeatableSpec: struct {
+    span: Span,
+    has_reason: Bool,
+    key_expr: Expr?,
+}
+
+// An `#App.Job` method's retry contract: default retries=5, at_least_once=false.
+SemaEffectJobRetrySpec: struct {
+    span: Span,
+    retries: Int,
+    at_least_once: Bool,
 }
 
 // One `#FX(…)` region: its parsed caps, the head span E0712 points at, and
@@ -625,6 +649,9 @@ SemaEffectNodeRare: struct {
     // compile-time site conditions it is in, outermost first
     // (sema_effect_guard_open).
     guards: [SemaEffectGuard]{[SemaEffectGuard]{}},
+    // The `#Repeatable` marker contract and `#App.Job` retry contract.
+    repeatable: SemaEffectRepeatableSpec?{None},
+    job_retry: SemaEffectJobRetrySpec?{None},
 }
 
 // The rare rows of a node that fills none of them.
@@ -704,7 +731,56 @@ sema_effect_source_from_header: fn(func: Func, key: String, facts: ^^SemaEffectB
         kernel: owned.kernel.move(),
         module_caps: func.module_caps,
         is_guest_export: sema_function_is_guest_export(func),
+        repeatable: sema_effect_repeatable_spec(func),
     }
+}
+
+// Extracts the first `#Repeatable` marker contract from `func.markers`.
+sema_effect_repeatable_spec: fn(func: Func) -> SemaEffectRepeatableSpec? Never! {
+    loop marker in func.markers {
+        if marker.negated || marker.name != MARKER_REPEATABLE -> next
+        ^has_reason: false
+        ^key_expr: Expr?{None}
+        loop (index, argument) in marker.args {
+            if argument == .Expr(value) {
+                ^label: ""
+                if index < marker.arg_labels.len() {
+                    if marker.arg_labels[index] == .Val(named) -> label = named.name
+                }
+                if {
+                    label == "key" -> key_expr = Val(value)
+                    label == "reason" -> has_reason = true
+                    label == "" && index == 0 -> has_reason = true
+                    label == "" && index == 1 -> key_expr = Val(value)
+                    else -> {}
+                }
+            }
+        }
+        return Val(SemaEffectRepeatableSpec{span: marker.span, has_reason: has_reason, key_expr: key_expr})
+    }
+    None
+}
+
+// Extracts `#App.Job(retries: ..., at_least_once: ...)` from `func.markers`
+// when resolved against `graph` in `module_identity`.
+sema_effect_app_job_retry_spec: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, func: Func) -> SemaEffectJobRetrySpec? Never! {
+    loop marker in func.markers {
+        if !sema_app_marker_is(marker, SEMA_APP_JOB_MARKER, graph, module_identity) -> next
+        ^retries: SEMA_APP_JOB_RETRIES
+        ^at_least_once: false
+        if sema_app_marker_arg_at(marker, "retries", 0) == .Val(at) {
+            if marker.args[at] == .Expr(value) {
+                if value == .Int(count, _, _, _, _) -> retries = count
+            }
+        }
+        if sema_app_marker_arg_at(marker, "at_least_once", 1) == .Val(at) {
+            if marker.args[at] == .Expr(value) {
+                if value == .Bool(flag, _, _) -> at_least_once = flag
+            }
+        }
+        return Val(SemaEffectJobRetrySpec{span: marker.span, retries: retries, at_least_once: at_least_once})
+    }
+    None
 }
 
 // A comptime callable takes the purity path, so only an ordinary function's
@@ -1205,17 +1281,46 @@ sema_effect_span_contains: fn(outer: Span, inner: Span) -> Bool Never! {
 
 // An effect's own declaration says whether it is irreversible (`FS.Read`
 // is not, `FS.Write` is, and the family `FS` is because a case is); a
-// name the canonical module does not declare follows its root.
+// name the canonical module does not declare follows its root. A scoped
+// name is judged by its base effect.
 sema_effect_declarations_irreversible_fact: fn(declarations: [Item], effect_name: String) -> Bool? {
-    root: sema_effect_root(effect_name)
+    base: effect_scope_split(effect_name).base
+    root: sema_effect_root(base)
     ^root_fact: Bool?{None}
     loop item in declarations {
         if item == .EffectDecl(declaration) {
-            if declaration.name == effect_name -> return Val(declaration.irreversible)
+            if declaration.name == base -> return Val(declaration.irreversible)
             if declaration.name == root -> root_fact = Val(declaration.irreversible)
         }
     }
     root_fact
+}
+
+// The declared EffectAccess of `effect_name`, reading library effects visible
+// to the module first and then the canonical effect vocabulary (exact leaf,
+// else family root). Scoped and valued names follow their base effect.
+sema_effect_access: fn(effect_name: String, library_effects: [SemaLibraryEffectName]) -> EffectAccess Never! {
+    base: effect_value_base(effect_scope_split(effect_name).base)
+    loop entry in library_effects {
+        if entry.token == base || entry.written == base -> return entry.access
+    }
+    root: sema_effect_root(base)
+    ^family: EffectAccess.Reads
+    loop row in EFFECT_VOCABULARY_ROWS {
+        if row.name == base -> return row.access
+        if row.name == root -> family = row.access
+    }
+    family
+}
+
+// The strongest EffectAccess across every positive effect in `effects`.
+sema_effect_row_access: fn(effects: [String], library_effects: [SemaLibraryEffectName]) -> EffectAccess Never! {
+    ^highest: EffectAccess.Reads
+    loop effect_name in effects {
+        if effect_name.starts_with("!") -> next
+        highest = effect_access_max(highest, sema_effect_access(effect_name, library_effects))
+    }
+    highest
 }
 
 // The transaction wall follows the canonical `irreversible: fn` facts loaded
@@ -3531,11 +3636,13 @@ sema_effect_node_from_source: fn(function: FnBody, sources: [SemaEffectFunctionS
     node.effect_via = actual.effect_via
     node.unsafe_span = actual.unsafe_span
     node.loop_spans = actual.loop_spans
-    if actual.assume_det_spans.len() > 0 || actual.module_caps.len() > 0 {
+    if actual.assume_det_spans.len() > 0 || actual.module_caps.len() > 0 || actual.repeatable != None || actual.job_retry != None {
         sema_effect_node_rare_open(node)
         if node.rare.in_place() == .Val(rare) {
             rare.assume_det_spans = actual.assume_det_spans
             rare.module_caps = actual.module_caps
+            rare.repeatable = actual.repeatable
+            rare.job_retry = actual.job_retry
         }
     }
     node.memo_span = actual.memo_span
@@ -7909,6 +8016,7 @@ sema_effects_check_modules: fn(modules: ^[SemaGraphModuleResult], inputs: [SemaE
     ^pure_rows: [[String]]{}
     sema_effect_trace_step(trace_sink, "sema.effects.solve", "sema.effects.nodes")
     sema_effect_check_nodes_parallel(nodes, inputs, solved, secret_reach, library_reach, dispatch_reach, threads, diagnostics, pure_nodes, pure_rows)
+    sema_effect_check_repeatable_and_retries(nodes, inputs, calls.node_by_key, solved, diagnostics)
     loop node_index in 0..<nodes.len() {
         rare: nodes[node_index].rare ?? next
         if rare.callback_bounds.len() == 0 && rare.lambda_bounds.len() == 0 -> next
@@ -9875,3 +9983,426 @@ sema_effect_walk_core_closure_children: fn(walk: SemaEffectWalk, nodes: ^[SemaEf
         }
     }
 }
+
+// Whether `key` is a deferred job-enqueue boundary (`app.enqueue` /
+// `app.__enqueue`), which hands work to the outbox rather than running it inline.
+sema_effect_is_deferred_enqueue: fn(key: String) -> Bool Never! {
+    symbol_key_names(key, "__enqueue") || symbol_key_names(key, "enqueue")
+}
+
+// Whether node `index` is repeatable: explicitly marked `#Repeatable` (trusted
+// leaf, keyed, or checked) or bounded to `EffectAccess.Reads` across both its
+// solved and declared effect rows without open dynamic dispatch.
+sema_effect_node_is_repeatable: fn(nodes: [SemaEffectNode], inputs: [SemaEffectModuleInput], solved: [[String]], index: Int) -> Bool Never! {
+    node: nodes[index]
+    if node.rare == .Val(rare) && rare.repeatable != None -> return true
+    if node.maximal -> return false
+    library: inputs[node.module_index].library_effects
+    if sema_effect_row_access(solved[index], library) != EffectAccess.Reads -> return false
+    sema_effect_row_access(node.declared, library) == EffectAccess.Reads
+}
+
+// First unstable effect (`Rand` or `Time`) reached by a call inside a
+// `#Repeatable(key: ...)` expression, or None when the key is stable.
+SemaEffectUnstableKey: struct {
+    effect_name: String,
+    span: Span,
+}
+
+sema_effect_solved_unstable_key_effect: fn(effects: [String]) -> String? Never! {
+    loop effect_name in effects {
+        root: sema_effect_root(effect_scope_split(effect_name).base)
+        if root == "Rand" || root == "Time" -> return Val(root)
+    }
+    None
+}
+
+sema_effect_node_unstable_key_effect: fn(nodes: [SemaEffectNode], solved: [[String]], caller_module: ModuleID, callee_name: String) -> String? Never! {
+    loop (index, candidate) in nodes {
+        if candidate.name != callee_name -> next
+        if candidate.module_identity != caller_module && !module_is_core(candidate.module_identity) -> next
+        if sema_effect_solved_unstable_key_effect(solved[index]) == .Val(found) -> return Val(found)
+        if sema_effect_solved_unstable_key_effect(candidate.declared) == .Val(found) -> return Val(found)
+    }
+    None
+}
+
+sema_effect_key_expr_unstable_in_args: fn(args: [CallArg], nodes: [SemaEffectNode], solved: [[String]], caller_module: ModuleID) -> SemaEffectUnstableKey? Never! {
+    loop arg in args {
+        if sema_effect_key_expr_unstable(arg.expr, nodes, solved, caller_module) == .Val(found) {
+            return Val(found)
+        }
+    }
+    None
+}
+
+sema_effect_key_expr_unstable: fn(expr: Expr, nodes: [SemaEffectNode], solved: [[String]], caller_module: ModuleID) -> SemaEffectUnstableKey? Never! {
+    if expr == {
+        .Call(call, _) -> {
+            if call.name == "random" || call.name.starts_with("rand_") || call.name == "uuid" {
+                return Val(SemaEffectUnstableKey{effect_name: "Rand", span: call.name_span})
+            }
+            if call.name == "now" || call.name == "utc_now" || call.name == "monotonic" {
+                return Val(SemaEffectUnstableKey{effect_name: "Time", span: call.name_span})
+            }
+            if sema_effect_node_unstable_key_effect(nodes, solved, caller_module, call.name) == .Val(found) {
+                return Val(SemaEffectUnstableKey{effect_name: found, span: call.name_span})
+            }
+            sema_effect_key_expr_unstable_in_args(call.args, nodes, solved, caller_module)
+        }
+        .MethodCall(receiver, method, method_span, _, _, args, _) -> {
+            if receiver == .Ident(alias, _, _) {
+                if alias == "rand" || alias == "random" || method == "random" || method == "uuid" {
+                    return Val(SemaEffectUnstableKey{effect_name: "Rand", span: method_span})
+                }
+                if alias == "time" && (method == "now" || method == "utc_now" || method == "monotonic" || method == "monotonic_ms" || method == "unix_seconds" || method == "unix_millis" || method == "unix_nanos") {
+                    return Val(SemaEffectUnstableKey{effect_name: "Time", span: method_span})
+                }
+            }
+            if sema_effect_node_unstable_key_effect(nodes, solved, caller_module, method) == .Val(found) {
+                return Val(SemaEffectUnstableKey{effect_name: found, span: method_span})
+            }
+            if sema_effect_key_expr_unstable(receiver, nodes, solved, caller_module) == .Val(found) {
+                return Val(found)
+            }
+            sema_effect_key_expr_unstable_in_args(args, nodes, solved, caller_module)
+        }
+        .OptMethodCall(receiver, method, method_span, _, args, _, _) -> {
+            if sema_effect_node_unstable_key_effect(nodes, solved, caller_module, method) == .Val(found) {
+                return Val(SemaEffectUnstableKey{effect_name: found, span: method_span})
+            }
+            if sema_effect_key_expr_unstable(receiver, nodes, solved, caller_module) == .Val(found) {
+                return Val(found)
+            }
+            sema_effect_key_expr_unstable_in_args(args, nodes, solved, caller_module)
+        }
+        .CallValue(callee, args, _, _) -> {
+            if sema_effect_key_expr_unstable(callee, nodes, solved, caller_module) == .Val(found) {
+                return Val(found)
+            }
+            sema_effect_key_expr_unstable_in_args(args, nodes, solved, caller_module)
+        }
+        .Str(parts, _, _) -> {
+            loop part in parts {
+                if part == .Interp(inner, _) {
+                    if sema_effect_key_expr_unstable(inner, nodes, solved, caller_module) == .Val(found) {
+                        return Val(found)
+                    }
+                }
+            }
+            None
+        }
+        .Binary(_, left, right, _, _) -> {
+            if sema_effect_key_expr_unstable(left, nodes, solved, caller_module) == .Val(found) {
+                return Val(found)
+            }
+            sema_effect_key_expr_unstable(right, nodes, solved, caller_module)
+        }
+        .Unary(_, operand, _, _) | .Deref(operand, _, _) | .Copy(operand, _, _) | .Paren(operand, _, _) | .Try(operand, _, _, _, _) | .Present(operand, _, _) | .Ok(operand, _, _) | .Err(operand, _, _) | .Field(operand, _, _, _) | .OptField(operand, _, _, _, _, _) | .Spread(operand, _, _) -> {
+            sema_effect_key_expr_unstable(operand, nodes, solved, caller_module)
+        }
+        .Index(base, idx, _, _, _) -> {
+            if sema_effect_key_expr_unstable(base, nodes, solved, caller_module) == .Val(found) {
+                return Val(found)
+            }
+            sema_effect_key_expr_unstable(idx, nodes, solved, caller_module)
+        }
+        .ListLit(elements, _, _) -> {
+            loop element in elements {
+                if sema_effect_key_expr_unstable(element, nodes, solved, caller_module) == .Val(found) {
+                    return Val(found)
+                }
+            }
+            None
+        }
+        .TupleLit(fields, _, _, _) -> {
+            loop field in fields {
+                if sema_effect_key_expr_unstable(field.value, nodes, solved, caller_module) == .Val(found) {
+                    return Val(found)
+                }
+            }
+            None
+        }
+        .StructLit(_, _, _, _, fields, _, _, _) -> {
+            loop field in fields {
+                if sema_effect_key_expr_unstable(field.value, nodes, solved, caller_module) == .Val(found) {
+                    return Val(found)
+                }
+            }
+            None
+        }
+        .If(cond, _, then_val, _, else_val, _, _) -> {
+            if sema_effect_key_expr_unstable(cond, nodes, solved, caller_module) == .Val(found) {
+                return Val(found)
+            }
+            if sema_effect_key_expr_unstable(then_val, nodes, solved, caller_module) == .Val(found) {
+                return Val(found)
+            }
+            sema_effect_key_expr_unstable(else_val, nodes, solved, caller_module)
+        }
+        .Pipe(head, steps, _, _) -> {
+            if sema_effect_key_expr_unstable(head, nodes, solved, caller_module) == .Val(found) {
+                return Val(found)
+            }
+            loop step in steps {
+                if sema_effect_key_expr_unstable(step.value, nodes, solved, caller_module) == .Val(found) {
+                    return Val(found)
+                }
+            }
+            None
+        }
+        .OrFallback(value, _, _, _, _) | .MemberSpread(value, _, _, _) | .Tainted(value, _, _, _) | .RawOf(value, _, _) | .Place(value, _, _, _) -> {
+            sema_effect_key_expr_unstable(value, nodes, solved, caller_module)
+        }
+        .Range(start, end, _, _, _) -> {
+            if sema_effect_key_expr_unstable(start, nodes, solved, caller_module) == .Val(found) {
+                return Val(found)
+            }
+            sema_effect_key_expr_unstable(end, nodes, solved, caller_module)
+        }
+        .Slice(base, start, end, _, _, _) -> {
+            if sema_effect_key_expr_unstable(base, nodes, solved, caller_module) == .Val(found) {
+                return Val(found)
+            }
+            if sema_effect_key_expr_unstable(start, nodes, solved, caller_module) == .Val(found) {
+                return Val(found)
+            }
+            sema_effect_key_expr_unstable(end, nodes, solved, caller_module)
+        }
+        .CompareChain(operands, _, _, _, _) -> {
+            loop operand in operands {
+                if sema_effect_key_expr_unstable(operand, nodes, solved, caller_module) == .Val(found) {
+                    return Val(found)
+                }
+            }
+            None
+        }
+        .MapLit(entries, _, _) -> {
+            loop entry in entries {
+                if sema_effect_key_expr_unstable(entry.key, nodes, solved, caller_module) == .Val(found) {
+                    return Val(found)
+                }
+                if sema_effect_key_expr_unstable(entry.value, nodes, solved, caller_module) == .Val(found) {
+                    return Val(found)
+                }
+            }
+            None
+        }
+        .EnumLit(_, _, _, args, _, _, _) -> {
+            loop arg in args {
+                inner: if arg == {
+                    .Positional(value) -> value
+                    .Named(_, expr_value) -> expr_value
+                }
+                if sema_effect_key_expr_unstable(inner, nodes, solved, caller_module) == .Val(found) {
+                    return Val(found)
+                }
+            }
+            None
+        }
+        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .Ident(_, _, _) | .UnitLit(_, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Lambda(_, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .TypeValue(_, _, _) -> None
+    }
+}
+
+// Walks non-repeatable, non-deferred callees starting at `start` to find any
+// direct irreversible effect, returning the first offending callee or effect
+// name, or None when every reached irreversible effect is guarded.
+sema_effect_find_unkeyed_irreversible: fn(nodes: [SemaEffectNode], inputs: [SemaEffectModuleInput], solved: [[String]], start: Int, seen: ^[Bool], visited: ^[Int]) -> String? Never! {
+    if seen[start] -> return None
+    seen[start] = true
+    visited.push(start)
+    node: nodes[start]
+    loop effect_name in node.direct {
+        if sema_effect_vocabulary_irreversible(effect_name) {
+            return Val(if node.name != "" -> node.name else -> effect_name)
+        }
+    }
+    ^has_guarded_callee: false
+    loop target in node.call_targets {
+        if target < 0 -> next
+        if sema_effect_is_deferred_enqueue(nodes[target].key) || sema_effect_node_is_repeatable(nodes, inputs, solved, target) {
+            has_guarded_callee = true
+            next
+        }
+        if sema_effect_find_unkeyed_irreversible(nodes, inputs, solved, target, seen, visited) == .Val(found) {
+            return Val(found)
+        }
+    }
+    if !has_guarded_callee {
+        loop effect_name in node.declared {
+            if sema_effect_vocabulary_irreversible(effect_name) {
+                return Val(if node.name != "" -> node.name else -> effect_name)
+            }
+        }
+    }
+    None
+}
+
+// Checks `#Repeatable` / `#Repeatable(key: ...)` (E0778, E0779) and retried
+// `#App.Job` bodies (E0780) once every function's effect row has been solved.
+sema_effect_check_repeatable_and_retries: fn(nodes: [SemaEffectNode], inputs: [SemaEffectModuleInput], node_by_key: SemaEffectNodeKeys, solved: [[String]], diagnostics: ^[Diagnostic]) {
+    ^any_marked: false
+    loop node in nodes {
+        if node.rare == .Val(rare) && (rare.repeatable != None || rare.job_retry != None) {
+            any_marked = true
+            break
+        }
+    }
+    if !any_marked -> return
+    ^seen: (loop _ in nodes -> false)
+    ^visited: [Int]{}
+    loop node_index in 0..<nodes.len() {
+        rare: nodes[node_index].rare ?? next
+        node: nodes[node_index]
+        ^node_diagnostics: [Diagnostic]{}
+        if rare.repeatable == .Val(spec) {
+            if spec.key_expr == .Val(key_expr) {
+                if sema_effect_key_expr_unstable(key_expr, nodes, solved, node.module_identity) == .Val(unstable) {
+                    node_diagnostics.push(
+                        sema_error(
+                            "E0779",
+                            unstable.span,
+                            "the `#Repeatable(key: ...)` key on `{node.name}` reaches `{unstable.effect_name}`, so retries would not produce the same key",
+                            "an idempotency key deduplicates retries only when every try computes the same key from the call's parameters and constants; randomness or clock time changes on each retry",
+                            "build `key:` from parameters and constants without calling `Rand` or `Time`",
+                        ),
+                    )
+                }
+            } else if !spec.has_reason {
+                ^reported_bad: false
+                if node.maximal {
+                    node_diagnostics.push(
+                        sema_error(
+                            "E0778",
+                            node.maximal_span ?? spec.span,
+                            "`{node.name}` is marked `#Repeatable`, but calls a function value whose repeatability is not known",
+                            "calling a `#Repeatable` function twice must leave kept data the same as calling it once, so every non-read call it reaches must be `#Repeatable`, keyed with `#Repeatable(key: ...)`, or deferred with `app.enqueue`",
+                            "restrict the callback to read-only effects, supply a stable `#Repeatable(key: ...)` key, or remove `#Repeatable` from `{node.name}`",
+                        ),
+                    )
+                    reported_bad = true
+                }
+                ^checked_targets: [Int]{}
+                loop call in node.memory_calls {
+                    if sema_effect_is_deferred_enqueue(call.callee) -> next
+                    target: sema_effect_node_index(node_by_key, call.callee) ?? next
+                    checked_targets.push(target)
+                    if !sema_effect_node_is_repeatable(nodes, inputs, solved, target) {
+                        callee_label: nodes[target].name
+                        node_diagnostics.push(
+                            sema_error(
+                                "E0778",
+                                call.span,
+                                "`{node.name}` is marked `#Repeatable`, but calls `{callee_label}`, which is not repeatable",
+                                "calling a `#Repeatable` function twice must leave kept data the same as calling it once, so every non-read call it reaches must be `#Repeatable`, keyed with `#Repeatable(key: ...)`, or deferred with `app.enqueue`",
+                                "mark `{callee_label}` as `#Repeatable` when safe, supply a stable `#Repeatable(key: ...)` key, defer the call with `app.enqueue`, or remove `#Repeatable` from `{node.name}`",
+                            ),
+                        )
+                        reported_bad = true
+                    }
+                }
+                loop target in node.call_targets {
+                    if target < 0 || checked_targets.contains(target) -> next
+                    if sema_effect_is_deferred_enqueue(nodes[target].key) -> next
+                    if !sema_effect_node_is_repeatable(nodes, inputs, solved, target) {
+                        callee_label: nodes[target].name
+                        node_diagnostics.push(
+                            sema_error(
+                                "E0778",
+                                spec.span,
+                                "`{node.name}` is marked `#Repeatable`, but calls `{callee_label}`, which is not repeatable",
+                                "calling a `#Repeatable` function twice must leave kept data the same as calling it once, so every non-read call it reaches must be `#Repeatable`, keyed with `#Repeatable(key: ...)`, or deferred with `app.enqueue`",
+                                "mark `{callee_label}` as `#Repeatable` when safe, supply a stable `#Repeatable(key: ...)` key, defer the call with `app.enqueue`, or remove `#Repeatable` from `{node.name}`",
+                            ),
+                        )
+                        reported_bad = true
+                    }
+                }
+                if !reported_bad {
+                    loop site in node.direct_spans {
+                        if sema_effect_access(site.name, inputs[node.module_index].library_effects) != EffectAccess.Reads {
+                            node_diagnostics.push(
+                                sema_error(
+                                    "E0778",
+                                    site.span,
+                                    "`{node.name}` is marked `#Repeatable`, but directly performs `{site.name}`, which is not repeatable",
+                                    "calling a `#Repeatable` function twice must leave kept data the same as calling it once, so a leaf primitive must audit its promise with `#Repeatable(\"reason\")` or supply a stable `#Repeatable(key: ...)` key",
+                                    "audit this leaf with `#Repeatable(\"reason\")`, supply a stable `#Repeatable(key: ...)` key, or remove `#Repeatable` from `{node.name}`",
+                                ),
+                            )
+                            break
+                        }
+                    }
+                }
+            }
+        }
+        if rare.job_retry == .Val(job) && job.retries > 0 && !job.at_least_once {
+            if !sema_effect_node_is_repeatable(nodes, inputs, solved, node_index) {
+                ^reported_retry: false
+                loop call in node.memory_calls {
+                    if sema_effect_is_deferred_enqueue(call.callee) -> next
+                    target: sema_effect_node_index(node_by_key, call.callee) ?? next
+                    if sema_effect_node_is_repeatable(nodes, inputs, solved, target) -> next
+                    found: sema_effect_find_unkeyed_irreversible(nodes, inputs, solved, target, seen, visited)
+                    loop row in visited -> seen[row] = false
+                    visited = [Int]{}
+                    if found == .Val(offender) {
+                        node_diagnostics.push(
+                            sema_error(
+                                "E0780",
+                                call.span,
+                                "retried job `{node.name}` reaches irreversible `{offender}` without `#Repeatable`, an idempotency key, or `at_least_once: true`",
+                                "when a retried job fails and runs again, an irreversible call that is neither repeatable nor keyed will run more than once and leave duplicate external side effects",
+                                "wrap the call in a `#Repeatable(key: ...)` operation, defer it with `app.enqueue`, set `retries: 0`, or mark the job `#App.Job(at_least_once: true)` if duplicate delivery is acceptable",
+                            ),
+                        )
+                        reported_retry = true
+                        break
+                    }
+                }
+                if !reported_retry {
+                    loop target in node.call_targets {
+                        if target < 0 || sema_effect_is_deferred_enqueue(nodes[target].key) -> next
+                        if sema_effect_node_is_repeatable(nodes, inputs, solved, target) -> next
+                        found: sema_effect_find_unkeyed_irreversible(nodes, inputs, solved, target, seen, visited)
+                        loop row in visited -> seen[row] = false
+                        visited = [Int]{}
+                        if found == .Val(offender) {
+                            node_diagnostics.push(
+                                sema_error(
+                                    "E0780",
+                                    job.span,
+                                    "retried job `{node.name}` reaches irreversible `{offender}` without `#Repeatable`, an idempotency key, or `at_least_once: true`",
+                                    "when a retried job fails and runs again, an irreversible call that is neither repeatable nor keyed will run more than once and leave duplicate external side effects",
+                                    "wrap the call in a `#Repeatable(key: ...)` operation, defer it with `app.enqueue`, set `retries: 0`, or mark the job `#App.Job(at_least_once: true)` if duplicate delivery is acceptable",
+                                ),
+                            )
+                            reported_retry = true
+                            break
+                        }
+                    }
+                }
+                if !reported_retry {
+                    loop site in node.direct_spans {
+                        if sema_effect_vocabulary_irreversible(site.name) {
+                            node_diagnostics.push(
+                                sema_error(
+                                    "E0780",
+                                    site.span,
+                                    "retried job `{node.name}` reaches irreversible `{site.name}` without `#Repeatable`, an idempotency key, or `at_least_once: true`",
+                                    "when a retried job fails and runs again, an irreversible call that is neither repeatable nor keyed will run more than once and leave duplicate external side effects",
+                                    "wrap the call in a `#Repeatable(key: ...)` operation, defer it with `app.enqueue`, set `retries: 0`, or mark the job `#App.Job(at_least_once: true)` if duplicate delivery is acceptable",
+                                ),
+                            )
+                            break
+                        }
+                    }
+                }
+            }
+        }
+        if node_diagnostics.len() > 0 {
+            sema_effect_publish_diagnostics(diagnostics, inputs[node.module_index].source_segments, node_diagnostics)
+        }
+    }
+}
+

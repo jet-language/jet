@@ -1,0 +1,26 @@
+# Under `dead_code: remove`, callbacks passed as Jet function values, held in
+# comptime constants, or passed across C FFI stay lowered together with their
+# helpers, while unreached sibling functions in the entry package are checked
+# by sema but omitted from IR lowering until `dead_code: keep` is selected.
+fixture: CoreLowerEntryRootsCallbacks.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JET_TRACE_DETAIL=functions
+step: jet build -O0 --trace=trace.json main.jet
+exit: 0
+file: trace.json ~ "{\"name\":\"never_called\",\"cat\":\"sema.function\"" # the unreached entry function is still checked
+file: trace.json !~ "{\"name\":\"never_called\",\"cat\":\"ir.function\"" # the unreached entry function is not lowered
+file: trace.json ~ "{\"name\":\"unused_callback\",\"cat\":\"sema.function\"" # the unreached callback sibling is still checked
+file: trace.json !~ "{\"name\":\"unused_callback\",\"cat\":\"ir.function\"" # the unreached callback sibling is not lowered
+file: trace.json ~ "{\"name\":\"run\",\"cat\":\"ir.function\"" # the entry is lowered
+file: trace.json ~ "{\"name\":\"double\",\"cat\":\"ir.function\"" # the Jet callback value is lowered
+file: trace.json ~ "{\"name\":\"double_step\",\"cat\":\"ir.function\"" # the helper reached by double is lowered
+file: trace.json ~ "{\"name\":\"triple\",\"cat\":\"ir.function\"" # the comptime-held callback is lowered
+file: trace.json ~ "{\"name\":\"c_increment\",\"cat\":\"ir.function\"" # the C FFI callback is lowered
+step: jet build -O0 --dead-code=keep --trace=keep.json main.jet
+exit: 0
+file: keep.json ~ "{\"name\":\"never_called\",\"cat\":\"ir.function\"" # dead_code=keep lowers the unreached entry function
+file: keep.json ~ "{\"name\":\"unused_callback\",\"cat\":\"ir.function\"" # dead_code=keep lowers the unreached callback sibling
+step: jet run main.jet
+exit: 0
+stdout: = "42\n21\n42\n"

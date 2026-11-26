@@ -270,20 +270,30 @@ UserPolicyDecl: struct {
     span: Span,
 }
 
+// What an effect operation does to kept data: Reads only looks, Adds makes
+// something new while leaving existing data alone, and Replaces overwrites or
+// removes existing data.
+EffectAccess: enum {
+    Reads,
+    Adds,
+    Replaces,
+}
+
 EffectDecl: struct {
     name: String,
     name_span: Span,
     irreversible: Bool,
     span: Span,
+    access: EffectAccess{EffectAccess.Reads},
 }
 
 // A type's `impl Effect { … }` block: where it starts, the written
-// `irreversible: fn(self) -> Bool` body, the `parent: Name` setting of a
-// package effect (the effect whose kind it is, written as a row writes it:
-// `Log`, `Audit`, `audit.Audit`), and the effect names the type declares
-// (the type itself, then each case of an enum family). A toolchain effect
-// may also write the `expert: fn(self) -> Bool` body (EffectVocabularyRow
-// `expert`).
+// `irreversible: fn(self) -> Bool` body, the `access: fn(self) -> EffectAccess`
+// body, the `parent: Name` setting of a package effect (the effect whose kind
+// it is, written as a row writes it: `Log`, `Audit`, `audit.Audit`), and the
+// effect names the type declares (the type itself, then each case of an enum
+// family). A toolchain effect may also write the `expert: fn(self) -> Bool`
+// body (EffectVocabularyRow `expert`).
 EffectImpl: struct {
     span: Span,
     irreversible: Expr?,
@@ -292,6 +302,8 @@ EffectImpl: struct {
     decls: [EffectDecl],
     expert: Expr?{None},
     expert_span: Span?{None},
+    access: Expr?{None},
+    access_span: Span?{None},
 }
 
 MarkerDecl: struct {

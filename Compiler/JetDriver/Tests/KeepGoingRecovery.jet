@@ -75,3 +75,89 @@ run: fn() {}
     assert(saw_parse, "expected parse error from broken_syntax")
     assert(saw_sema, "expected E0107 sema error from other_item in the same file")
 }
+
+#Test("keep_going_aborted_marker_does_not_duplicate_item_or_leak_placeholder") {
+    source: `#!Pure
+run: fn() {}
+`
+    files: [JetDriverAuthorizedSourceFile]{
+        kg_recovery_file("/app", "main.jet", source),
+    }
+    diagnostics: kg_recovery_check(files, "/app/main.jet")
+    ^saw_e0931: false
+    ^saw_dup: false
+    loop diagnostic in diagnostics {
+        if diagnostic.code == "E0931" -> saw_e0931 = true
+        if diagnostic.code == "E0105" -> saw_dup = true
+    }
+    assert(saw_e0931, "expected E0931 invalid signed derive error")
+    assert(!saw_dup, "aborted marker must not parse the following item twice")
+}
+
+#Test("keep_going_failed_import_suppresses_graph_edge_and_links_follow_on") {
+    source: `use bad: core.no_such_module_xyz
+
+run: fn() {
+    x: bad.value
+}
+`
+    files: [JetDriverAuthorizedSourceFile]{
+        kg_recovery_file("/app", "main.jet", source),
+    }
+    diagnostics: kg_recovery_check(files, "/app/main.jet")
+    ^saw_unknown_core: false
+    ^saw_no_edge: false
+    ^unlinked_bad: false
+    loop diagnostic in diagnostics {
+        if diagnostic.code == "E1001" -> saw_unknown_core = true
+        if diagnostic.what.contains("no resolved graph edge") -> saw_no_edge = true
+        if (diagnostic.code == "E0107" || diagnostic.code == "E0102") && diagnostic.what.contains("`bad`") && diagnostic.cause.len() == 0 {
+            unlinked_bad = true
+        }
+    }
+    assert(saw_unknown_core, "expected E1001 unknown core module error")
+    assert(!saw_no_edge, "failed import must not emit internal E0003 graph-edge cascade")
+    assert(!unlinked_bad, "downstream unresolved reference to failed import alias must carry cause")
+}
+
+#Test("keep_going_duplicate_method_does_not_emit_symbol_key_e0003") {
+    source: `Worker: struct {
+    step: fn(self) {}
+    step: fn(self) {}
+}
+
+run: fn() {}
+`
+    files: [JetDriverAuthorizedSourceFile]{
+        kg_recovery_file("/app", "main.jet", source),
+    }
+    diagnostics: kg_recovery_check(files, "/app/main.jet")
+    ^saw_dup: false
+    ^saw_sym_key: false
+    loop diagnostic in diagnostics {
+        if diagnostic.code == "E0105" -> saw_dup = true
+        if diagnostic.what.contains("share one canonical symbol key") -> saw_sym_key = true
+    }
+    assert(saw_dup, "expected E0105 duplicate method error")
+    assert(!saw_sym_key, "duplicate method must not emit internal E0003 symbol-key cascade")
+}
+
+#Test("keep_going_comptime_dependency_failure_does_not_stall") {
+    source: `BASE: #run missing_comptime_helper()
+TOTAL: #run { BASE + 1 }
+
+run: fn() {}
+`
+    files: [JetDriverAuthorizedSourceFile]{
+        kg_recovery_file("/app", "main.jet", source),
+    }
+    diagnostics: kg_recovery_check(files, "/app/main.jet")
+    ^saw_missing: false
+    ^saw_stalled: false
+    loop diagnostic in diagnostics {
+        if diagnostic.code == "E0102" && diagnostic.what.contains("missing_comptime_helper") -> saw_missing = true
+        if diagnostic.what.contains("stalled without a proven cycle") -> saw_stalled = true
+    }
+    assert(saw_missing, "expected E0102 unknown function on BASE")
+    assert(!saw_stalled, "dependent comptime item must not emit internal stalled E0003")
+}

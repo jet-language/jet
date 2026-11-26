@@ -17,10 +17,15 @@ use {
         AUTHORITY_AMBIENT_BASIC_EFFECTS,
         EFFECT_VOCABULARY_LEAVES,
         EFFECT_VOCABULARY_ROWS,
+        EffectAccess,
         EffectRowEntry,
         Func,
         Item,
+        MARKER_REPEATABLE,
         Span,
+        effect_access_max,
+        effect_access_name,
+        effect_scope_split,
     ]
     jet_semindex.[semindex_module_alias, semindex_summaries, semindex_summary, semindex_witness, semindex_witnesses]
 }
@@ -63,6 +68,7 @@ JetCLICallableView: struct {
     is_pure: Bool,
     is_comptime: Bool,
     is_replayable: Bool,
+    is_repeatable: Bool{false},
     inferred_seed: String?,
 }
 
@@ -138,9 +144,16 @@ jet_cli_rights_effect_names: fn(effects: [EffectRowEntry]?) -> [String]? Never! 
     Val(loop entry in entries -> entry.name)
 }
 
+jet_cli_rights_func_is_repeatable: fn(function: Func) -> Bool Never! {
+    loop marker in function.markers {
+        if !marker.negated && marker.name == MARKER_REPEATABLE -> return true
+    }
+    false
+}
+
 jet_cli_rights_add_func: fn(out: ^[JetCLICallableView], alias: String, namespace: String, source: String, owner: String?, function: Func) {
     identity: if owner == .Val(name) -> "{namespace}{name}.{function.name}" else -> "{namespace}{function.name}"
-    out.push(JetCLICallableView{key: "{alias}.{identity}", name: function.name, source: source, span: function.span, declared_effects: jet_cli_rights_effect_names(function.declared_effects), is_pure: function.is_pure, is_comptime: function.is_comptime, is_replayable: function.is_replayable, inferred_seed: None})
+    out.push(JetCLICallableView{key: "{alias}.{identity}", name: function.name, source: source, span: function.span, declared_effects: jet_cli_rights_effect_names(function.declared_effects), is_pure: function.is_pure, is_comptime: function.is_comptime, is_replayable: function.is_replayable, is_repeatable: jet_cli_rights_func_is_repeatable(function), inferred_seed: None})
 }
 
 // `run_rights` `collect_items`: functions, impl/struct/enum methods and trait
@@ -348,9 +361,10 @@ jet_cli_inspect_rights: fn(result: JetDriverCompileResult, project: Bool, target
     text = "{text}Authority: {application.authority}\nGranted: {jet_cli_rights_text(application.granted)}\nDenied: {jet_cli_rights_text(application.denied)}\nAuthority facts:\n"
     ^facts: [JetCLIStatusValue]{}
     loop declaration in EFFECT_VOCABULARY_ROWS {
-        marker: if declaration.irreversible -> " (irreversible)" else -> ""
+        access_name: effect_access_name(declaration.access)
+        marker: if declaration.irreversible -> " ({access_name}, irreversible)" else -> " ({access_name})"
         text = "{text}  {declaration.name}{marker}\n"
-        facts.push(jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("name", jet_cli_status_text(declaration.name)), jet_cli_status_field("irreversible", jet_cli_status_bool(declaration.irreversible))}))
+        facts.push(jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("name", jet_cli_status_text(declaration.name)), jet_cli_status_field("access", jet_cli_status_text(access_name)), jet_cli_status_field("irreversible", jet_cli_status_bool(declaration.irreversible))}))
     }
     ^values: [JetCLIStatusValue]{}
     loop view in callables {
@@ -421,6 +435,18 @@ jet_cli_inspect_rights: fn(result: JetDriverCompileResult, project: Bool, target
                 ),
             )
         }
+        ^effective_effects: [String]{}
+        loop effect_name in inferred_effects -> effective_effects.push(effect_name)
+        if view.declared_effects == .Val(declared_list) {
+            loop effect_name in declared_list {
+                if !effect_name.starts_with("!") -> effective_effects.push(effect_name)
+            }
+        }
+        effective_effects = jet_cli_sorted_set(effective_effects)
+        access: jet_cli_rights_row_access(effective_effects, maximal)
+        repeatable: view.is_repeatable || (!maximal && access == EffectAccess.Reads)
+        open_world: maximal || jet_cli_rights_row_open_world(effective_effects)
+        annotations: jet_cli_rights_tool_annotations_value(access, repeatable, open_world)
         effects: jet_cli_status_object(
             [JetCLIStatusField]{
                 jet_cli_status_field("direct", jet_cli_status_texts(direct)),
@@ -437,6 +463,9 @@ jet_cli_inspect_rights: fn(result: JetDriverCompileResult, project: Bool, target
                     jet_cli_status_field("declared_row", jet_cli_rights_row_value(declared)),
                     jet_cli_status_field("inferred_row", jet_cli_rights_row_value(inferred)),
                     jet_cli_status_field("inferred_effects", jet_cli_status_texts(inferred_effects)),
+                    jet_cli_status_field("access", jet_cli_status_text(effect_access_name(access))),
+                    jet_cli_status_field("repeatable", jet_cli_status_bool(repeatable)),
+                    jet_cli_status_field("tool_annotations", annotations),
                     jet_cli_status_field("effects", effects),
                     jet_cli_status_field("verdict", jet_cli_status_text(verdict)),
                     jet_cli_status_field("denials", jet_cli_status_array(denial_values)),
@@ -465,5 +494,161 @@ jet_cli_inspect_rights: fn(result: JetDriverCompileResult, project: Bool, target
         }
         return JetDriverVerbOutput{stdout: "{jet_cli_status_render("inspect.rights", true, fields)}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     }
+    JetDriverVerbOutput{stdout: text, stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+}
+
+jet_cli_rights_effect_access: fn(effect_name: String) -> EffectAccess Never! {
+    base: effect_scope_split(effect_name).base
+    root: if base.index(".") == .Val(dot) -> base.slice(0..<dot) else -> base
+    ^family: EffectAccess.Reads
+    loop row in EFFECT_VOCABULARY_ROWS {
+        if row.name == base -> return row.access
+        if row.name == root -> family = row.access
+    }
+    family
+}
+
+jet_cli_rights_effect_irreversible: fn(effect_name: String) -> Bool Never! {
+    base: effect_scope_split(effect_name).base
+    root: if base.index(".") == .Val(dot) -> base.slice(0..<dot) else -> base
+    ^family: false
+    loop row in EFFECT_VOCABULARY_ROWS {
+        if row.name == base -> return row.irreversible
+        if row.name == root -> family = row.irreversible
+    }
+    family
+}
+
+jet_cli_rights_row_access: fn(effects: [String], maximal: Bool) -> EffectAccess Never! {
+    if maximal -> return EffectAccess.Replaces
+    ^highest: EffectAccess.Reads
+    loop effect_name in effects {
+        if effect_name.starts_with("!") -> next
+        highest = effect_access_max(highest, jet_cli_rights_effect_access(effect_name))
+    }
+    highest
+}
+
+jet_cli_rights_row_open_world: fn(effects: [String]) -> Bool Never! {
+    loop effect_name in effects {
+        if effect_name.starts_with("!") -> next
+        base: effect_scope_split(effect_name).base
+        root: if base.index(".") == .Val(dot) -> base.slice(0..<dot) else -> base
+        if root == "Net" || root == "Browser" || root == "Exec" || root == "FFI" -> return true
+    }
+    false
+}
+
+// MCP ToolAnnotations JSON object derived from checked effect classes and
+// repeatability: readOnlyHint, destructiveHint, idempotentHint, openWorldHint.
+jet_cli_rights_tool_annotations_value: fn(access: EffectAccess, repeatable: Bool, open_world: Bool) -> JetCLIStatusValue Never! {
+    read_only: access == EffectAccess.Reads
+    jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("readOnlyHint", jet_cli_status_bool(read_only)),
+            jet_cli_status_field("destructiveHint", jet_cli_status_bool(access == EffectAccess.Replaces)),
+            jet_cli_status_field("idempotentHint", jet_cli_status_bool(read_only || repeatable)),
+            jet_cli_status_field("openWorldHint", jet_cli_status_bool(open_world)),
+        },
+    )
+}
+
+// `jet run --preview <target>`: statically reports every `Adds` and `Replaces`
+// effect the run would reach (highlighting `Replaces`) together with derived
+// MCP tool annotations, without executing the program.
+jet_cli_run_preview: fn(result: JetDriverCompileResult, target: String, json: Bool, color: Bool) -[FS]> JetDriverVerbOutput {
+    modules: result.doc_modules
+    ^views: [JetCLICallableView]{}
+    loop doc_module in modules {
+        if !jet_cli_rights_selected(doc_module, target) -> next
+        jet_cli_rights_collect(doc_module.items, semindex_module_alias(doc_module), "", doc_module.path, views)
+    }
+    callables: jet_cli_rights_sorted(views)
+    summaries: semindex_summaries(modules)
+    ^selected: [JetCLICallableView]{}
+    loop view in callables {
+        if view.name == "run" || view.name == "main" -> selected.push(view)
+    }
+    if selected.len() == 0 -> selected = callables
+    ^reached: [String]{}
+    ^entry_maximal: false
+    ^entry_repeatable: selected.len() > 0
+    loop view in selected {
+        if !view.is_repeatable -> entry_repeatable = false
+        ^effects: [String]{}
+        if semindex_summary(summaries, view.key) == .Val(found) {
+            effects = if found.solved.len() > 0 -> found.solved else -> found.direct
+            if found.maximal -> entry_maximal = true
+        }
+        if view.declared_effects == .Val(declared) {
+            loop entry in declared {
+                if !entry.starts_with("!") -> effects.push(entry)
+            }
+        }
+        if effects.len() == 0 {
+            if view.inferred_seed == .Val(seed) -> effects = [String]{seed}
+        }
+        loop effect_name in effects -> reached.push(effect_name)
+    }
+    reached = jet_cli_sorted_set(reached)
+    ^reads: [String]{}
+    ^adds: [String]{}
+    ^replaces: [String]{}
+    loop effect_name in reached {
+        if effect_name.starts_with("!") -> next
+        kind: jet_cli_rights_effect_access(effect_name)
+        if kind == {
+            .Reads -> reads.push(effect_name)
+            .Adds -> adds.push(effect_name)
+            .Replaces -> replaces.push(effect_name)
+        }
+    }
+    access: jet_cli_rights_row_access(reached, entry_maximal)
+    repeatable: entry_repeatable || (!entry_maximal && access == EffectAccess.Reads)
+    open_world: entry_maximal || jet_cli_rights_row_open_world(reached)
+    if json {
+        summary_value: jet_cli_status_object(
+            [JetCLIStatusField]{
+                jet_cli_status_field("reads", jet_cli_status_int(reads.len())),
+                jet_cli_status_field("adds", jet_cli_status_int(adds.len())),
+                jet_cli_status_field("replaces", jet_cli_status_int(replaces.len())),
+            },
+        )
+        fields: [JetCLIStatusField]{
+            jet_cli_status_field("target", jet_cli_status_text(target)),
+            jet_cli_status_field("executed", jet_cli_status_bool(false)),
+            jet_cli_status_field("access", jet_cli_status_text(effect_access_name(access))),
+            jet_cli_status_field("reads", jet_cli_status_texts(reads)),
+            jet_cli_status_field("adds", jet_cli_status_texts(adds)),
+            jet_cli_status_field("replaces", jet_cli_status_texts(replaces)),
+            jet_cli_status_field("summary", summary_value),
+            jet_cli_status_field("tool_annotations", jet_cli_rights_tool_annotations_value(access, repeatable, open_world)),
+        }
+        return JetDriverVerbOutput{stdout: "{jet_cli_status_render("run.preview", true, fields)}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    }
+    ^text: "Preview (not run): {target}\nSummary: {adds.len()} adds, {replaces.len()} replaces ({reads.len()} reads)\n"
+    if adds.len() == 0 {
+        text = "{text}Adds: none\n"
+    } else {
+        text = "{text}Adds:\n"
+        loop effect_name in adds {
+            note: if jet_cli_rights_effect_irreversible(effect_name) -> " (irreversible)" else -> ""
+            text = "{text}  + {effect_name}{note}\n"
+        }
+    }
+    if replaces.len() == 0 {
+        text = "{text}Replaces: none\n"
+    } else {
+        text = "{text}Replaces (destructive):\n"
+        loop effect_name in replaces {
+            note: if jet_cli_rights_effect_irreversible(effect_name) -> " (irreversible)" else -> ""
+            badge: if color -> "\u{1b}[1;31m[REPLACES]\u{1b}[0m" else -> "[REPLACES]"
+            text = "{text}  ! {badge} {effect_name}{note}\n"
+        }
+    }
+    read_only: access == EffectAccess.Reads
+    destructive: access == EffectAccess.Replaces
+    idempotent: read_only || repeatable
+    text = "{text}Tool annotations: readOnlyHint={read_only}, destructiveHint={destructive}, idempotentHint={idempotent}, openWorldHint={open_world}\n"
     JetDriverVerbOutput{stdout: text, stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }

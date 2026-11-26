@@ -1,0 +1,95 @@
+// Service restart policy sliding-window expiry + OneForAll / RestForOne group
+// supervision strategies with backoff and escalation across O0, O1, and O2.
+use {
+    service: core.service
+    core.service.[ServiceError]
+    time: core.time
+}
+
+accumulate: fn(total: ^Int, delta: Int) -> Int Err! {
+    if delta < 0 -> return Err("negative delta")
+    total += delta
+    total
+}
+
+noop_worker: fn() {}
+
+run: fn() {
+    // 1. Sliding window expiry on a live stateful worker: limit=2, window=120ms, backoff=10ms.
+    ^live_tree: service.tree("window_expiry")
+    live_tree.set_restart_policy(limit: 2, window: 120ms, backoff: 10ms) ?? panic("policy")
+    worker: live_tree.stateful_worker("w", accumulate, state: 100, capacity: 8) ?? panic("worker")
+    live_tree.start() ?? panic("start")
+
+    // Two failures inside first window -> 2 restarts, still alive.
+    _: worker.call(-1) == .Err(.Ambiguous(_))
+    _: worker.call(-1) == .Err(.Ambiguous(_))
+    ok1: worker.call(1) ?? panic("alive after 2 restarts")
+    r1: live_tree.restarts(worker) ?? panic("restarts 1")
+
+    // Wait past the 120ms window so prior restarts expire.
+    time.sleep(160ms)
+    r_expired: live_tree.restarts(worker) ?? panic("restarts expired")
+
+    // Two MORE failures inside the fresh window -> 2 restarts again, still alive!
+    _: worker.call(-1) == .Err(.Ambiguous(_))
+    _: worker.call(-1) == .Err(.Ambiguous(_))
+    ok2: worker.call(2) ?? panic("alive in fresh window")
+    r2: live_tree.restarts(worker) ?? panic("restarts 2")
+
+    // 3rd failure inside the fresh window exhausts limit=2 and stops the worker.
+    _: worker.call(-1) == .Err(.Ambiguous(_))
+    ^stopped: false
+    loop _ in 0..<50 {
+        if worker.call(1) == {
+            .Err(ServiceError.Unavailable(_)) -> {
+                stopped = true
+                break
+            }
+            .Err(ServiceError.Ambiguous(_)) -> time.sleep(5ms)
+            .Err(other) -> panic("unexpected err: {other:Debug}")
+            .Ok(v) -> panic("expected Unavailable, got {v}")
+        }
+    }
+    print("window_expiry:{ok1}:{r1}:{r_expired}:{ok2}:{r2}:{stopped}")
+    live_tree.stop() ?? panic("stop live_tree")
+
+    // 2. OneForAll strategy with backoff + budget exhaustion escalation.
+    ^ofa: service.tree("ofa_tree")
+    ofa.set_restart(service.restart_one_for_all()) ?? panic("ofa restart")
+    ofa.set_restart_policy(limit: 2, window: 5s, backoff: 10ms) ?? panic("ofa policy")
+    ep_a: ofa.mailbox_worker("a", noop_worker, capacity: 2) ?? panic("a")
+    ep_b: ofa.mailbox_worker("b", noop_worker, capacity: 2) ?? panic("b")
+    ofa.group("pair", [String]{"a", "b"}) ?? panic("pair group")
+    ofa.start() ?? panic("ofa start")
+
+    sw: time.start()
+    ofa.fail_worker(ep_a) ?? panic("ofa fail 1")
+    ofa_r1_a: ofa.restarts(ep_a) ?? panic("ofa r1 a")
+    ofa_r1_b: ofa.restarts(ep_b) ?? panic("ofa r1 b")
+    ofa.fail_worker(ep_a) ?? panic("ofa fail 2")
+    ofa_elapsed: sw.elapsed_millis()
+    ofa_escalated: if ofa.fail_worker(ep_a) == {
+        .Err(ServiceError.Unavailable(msg)) -> msg.contains("restart budget") && msg.contains("escalates")
+        .Err(_) -> false
+        .Ok(_) -> false
+    }
+    print("one_for_all:{ofa_r1_a}:{ofa_r1_b}:{ofa_elapsed >= 18}:{ofa_escalated}")
+
+    // 3. RestForOne strategy restarts only the failed worker and later siblings.
+    ^rfo: service.tree("rfo_tree")
+    rfo.set_restart(service.restart_rest_for_one()) ?? panic("rfo restart")
+    rfo.set_restart_policy(limit: 2, window: 5s, backoff: 5ms) ?? panic("rfo policy")
+    r_a: rfo.mailbox_worker("a", noop_worker, capacity: 2) ?? panic("r_a")
+    r_b: rfo.mailbox_worker("b", noop_worker, capacity: 2) ?? panic("r_b")
+    r_c: rfo.mailbox_worker("c", noop_worker, capacity: 2) ?? panic("r_c")
+    rfo.group("chain", [String]{"a", "b", "c"}) ?? panic("chain group")
+    rfo.start() ?? panic("rfo start")
+
+    rfo.fail_worker(r_b) ?? panic("rfo fail b")
+    ra: rfo.restarts(r_a) ?? panic("ra")
+    rb: rfo.restarts(r_b) ?? panic("rb")
+    rc: rfo.restarts(r_c) ?? panic("rc")
+    print("rest_for_one:{ra}:{rb}:{rc}")
+    rfo.stop() ?? panic("stop rfo")
+}

@@ -25,11 +25,13 @@ Handles: struct {
         check: fn(self, call: CompilerCall) {
             if call.args[0].function == .Val(info) {
                 params: (loop param in info.signature.params -> "{param.name}: {param.type.name}").join(", ")
+                ret: if info.signature.return_type == .Val(ty) -> ty.name else -> "none"
                 recorded: (loop made in info.recorded -> "{made.name.text}<{(loop ty in made.type_args -> ty.name).join(",")}>").join(" ")
                 returns: (loop made in info.returns -> "{made.name.text}<{(loop ty in made.type_args -> ty.name).join(",")}>").join(" ")
-                heard: "{info.name}({params}) {recorded} | {returns}"
-                expected: if info.name == "" -> "(id: Int, name: String) mark<> answer<String> answer<Int> | answer<String> answer<Int>" else -> "show(id: Int, name: String) note<> reply<String> reply<Int> | reply<String> reply<Int>"
-                if heard != expected -> reject(Misread{heard: heard}, at: call.args[0])
+                id_ok: if info.name == "" -> info.identity.starts_with("main.fn@") && info.identity.len() > 8 else -> info.identity == "pages.show"
+                heard: "{info.name}({params}) -> {ret} [{id_ok}] {recorded} | {returns}"
+                expected: if info.name == "" -> "(id: Int, name: String) -> String [true] mark<> answer<String> answer<Int> | answer<String> answer<Int>" else -> "show(id: Int, name: String) -> String [true] note<> reply<String> reply<Int> | reply<String> reply<Int>"
+                if heard != expected -> reject(Misread{heard: "{heard} (identity={info.identity})"}, at: call.args[0])
             } else {
                 reject(Misread{heard: "no FunctionInfo"}, at: call.args[0])
             }

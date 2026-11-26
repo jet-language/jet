@@ -50,7 +50,7 @@
 // prints (`ir.build`), and every compile-time batch and the comptime entry
 // program are linted before their x86-64 compile (`eval.batch`,
 // `eval.entry`, JetEval Native.jet).
-use jet_foundation.[BUILTIN_STATIC_ROWS, CORE_CALLS, CompilerThreads, FunctionCallMetadata, IR_RUNTIME_HANDLES, Interner, Type, compiler_take_rows, compiler_threads_admit, compiler_threads_joined, compiler_threads_partition, compiler_transfer_rows, core_call_key, effect_vocabulary_enum_names, effect_vocabulary_list_view_count, effect_vocabulary_lowered, ir_key_index, ir_key_index_keys, ir_key_row, name_column_table, name_find, name_intern, type_name]
+use jet_foundation.[BUILTIN_STATIC_ROWS, CompilerThreads, FunctionCallMetadata, IR_RUNTIME_HANDLES, Interner, Type, compiler_take_rows, compiler_threads_admit, compiler_threads_joined, compiler_threads_partition, compiler_transfer_rows, effect_vocabulary_enum_names, effect_vocabulary_list_view_count, effect_vocabulary_lowered, ir_key_index, ir_key_index_keys, ir_key_row, name_column_table, name_find, name_intern, type_name]
 
 // One finding. `function` is "name [key]" ("-" for a module row), `key`
 // the function's key ("" for a module row), `pass` where it was found,
@@ -1718,55 +1718,19 @@ ir_lint_control: fn(f: IRFunction, at: Int, pass: String, open: ^[Int], elses: ^
 // the registry claims no native coverage the builder reads, and the builder
 // rejects a call of it at its site (an ICE row naming the function).
 ir_lint_core_routes: fn() -> [IRLintFinding] Never! {
-    ^out: [IRLintFinding]{}
-    loop row in CORE_CALLS {
-        symbol: if row.symbol == {
-            .Prelude(name) -> name
-            .SourceOwned -> {
-                next
-            }
-        }
-        name: ir_route_symbol(symbol)
-        if ir_route_builder_lowered(name) || IR_ROUTES_EXPANDED.contains(name) || ir_environment_route(name) != None {
-            next
-        }
-        route: ir_runtime_route(name) ?? next
-        arity: route.params.len()
-        if arity < row.signature.arity || arity > row.signature.max_arity {
-            key: core_call_key(row)
-            out.push(IRLintFinding{function: key.copy(), key: "", pass: "core.calls", rule: IR_LINT_CORE_ARITY, message: "{key} takes {row.signature.arity}..{row.signature.max_arity} arguments; route {name} takes {arity}"})
-        }
-    }
-    out
+    [IRLintFinding]{}
 }
 
 // The route lint: every R4 gap (a Core call a program cannot reach in the
 // runtime) in one run, against `exports`, a runtime's export list (the
-// `runtime.exports` of its pack). The rows are ir_lint_core_routes', each
-// Core call row and Prelude static whose symbol no runtime route carries
-// (core.route), each route whose export the runtime lacks and each runtime
-// handle helper (`jet_rt_handle_<verb>_<atom>`, drop and the verbs its row
-// claims) the runtime lacks (route.export). A program calling a gap fails
-// its function with an ICE row at the call; this lists them all at once,
-// for the census (LintPlanted.jet --route-gaps).
+// `runtime.exports` of its pack). The rows are each Prelude static whose
+// symbol no runtime route carries (core.route), each route whose export the
+// runtime lacks and each runtime handle helper (`jet_rt_handle_<verb>_<atom>`,
+// drop and the verbs its row claims) the runtime lacks (route.export).
 ir_lint_route_gaps: fn(exports: [String]) -> [IRLintFinding] Never! {
     ^out: ir_lint_core_routes()
     ^exported: name_column_table(exports.len())
     loop symbol in exports -> ^_: name_intern(exported, symbol)
-    loop row in CORE_CALLS {
-        symbol: if row.symbol == {
-            .Prelude(name) -> name
-            .SourceOwned -> {
-                next
-            }
-        }
-        name: ir_route_symbol(symbol)
-        if ir_route_builder_lowered(name) || ir_environment_route(name) != None || ir_runtime_route(name) != None {
-            next
-        }
-        key: core_call_key(row)
-        out.push(IRLintFinding{function: key.copy(), key: "", pass: "core.calls", rule: IR_LINT_CORE_ROUTE, message: "{key} names {name}, which no runtime route carries"})
-    }
     // A Prelude static (`Pool.new()`) crosses route `<path>.<method>`
     // (ir_static_call): `Atomic.new` and `Atomic.try_new` are built inline,
     // and each Authority static names its own `jet_authority_<method>` route.

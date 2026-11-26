@@ -72,7 +72,7 @@ Crew: struct {
     }
 
     // Pushes "Assigned to you" to task `id`'s assignee; a tap opens the task.
-    #App.Job(retries: 3) tell_assignee: fn(self, id: Int) -[DB.Read, Net]> Int TaskError! {
+    #App.Job(retries: 3, at_least_once: true) tell_assignee: fn(self, id: Int) -[DB.Read, Net]> Int TaskError! {
         task: if tasks_in(self.store).get(id) == {
             .Val(found) -> found
             .None -> {

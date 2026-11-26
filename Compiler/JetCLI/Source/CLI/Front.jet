@@ -775,7 +775,7 @@ jet_cli_check_flags: fn(jet_argv: [String], command: String, color: Bool) -> Jet
         }
         if external_fmt && JET_CLI_EXTERNAL_FMT_FLAGS.contains(head) -> next
         if jet_cli_flag_spec(head) == .Val(spec) {
-            if !jet_cli_flag_takes(spec, command) && !jet_cli_flag_takes(spec, also) {
+            if !(command == "run" && head == "--preview") && !jet_cli_flag_takes(spec, command) && !jet_cli_flag_takes(spec, also) {
                 return Val(jet_cli_misplaced_flag(head, command, jet_cli_flag_commands(spec.help) ?? [String]{}, color))
             }
             if jet_cli_control_of_flag(head) != None {
@@ -2113,7 +2113,7 @@ jet_cli_native_source_plan: fn(jet_argv: [String], file: String, language: Strin
 // `jet <file>` shorthand by jet_cli_check_flags, on `jet dev` by
 // jet_cli_run_entry. The flags every command accepts (CLI_GLOBAL_FLAGS)
 // are among them.
-JET_CLI_RUN_PORTED_FLAGS: #run CLI_GLOBAL_FLAGS.concat([String]{"--release", "--profile", "--verbose", "-v", "--no-color", "--threads", "--allow", "--allow-all", "-A", "--deny", "-p", "--show-default", "--no-prepare", "--set", "--gate", "--log", "--observe", "-e", "--sha256", "--port", "--deep-checks"})
+JET_CLI_RUN_PORTED_FLAGS: #run CLI_GLOBAL_FLAGS.concat([String]{"--release", "--profile", "--verbose", "-v", "--no-color", "--threads", "--allow", "--allow-all", "-A", "--deny", "-p", "--show-default", "--no-prepare", "--set", "--gate", "--log", "--observe", "--preview", "-e", "--sha256", "--port", "--deep-checks"})
 
 // A compiler control (CLIControls.jet) `jet run` or `jet dev` takes: its row
 // scopes it to `command`, and the command model ports the form.
@@ -2255,6 +2255,21 @@ jet_cli_run_entry: fn(jet_argv: [String], args: [String], passthrough: [String]?
             program_args: passthrough ?? jet_cli_tail(args, 2)
             selects_dev: watch && !jet_argv.contains("--show-default") && jet_cli_top_level_function_lines(source, "dev").len() > 0
             function: if selects_dev -> String?{Val("dev")} else -> String?{None}
+            if !watch && jet_cli_flag_before_separator(jet_argv, "--preview") {
+                return JetCLIPlan.Inspect{
+                    job: JetCLIInspectJob{
+                        action: "preview",
+                        file: file,
+                        subject: function,
+                        json: jet_argv.contains("--json"),
+                        verbose: verbose,
+                        color: color,
+                        threads: threads,
+                        notice: notice,
+                        project: false,
+                    },
+                }
+            }
             return JetCLIPlan.Run{file: file, source: source, color: color, options: build_options_stock("run"), verbose: verbose, json: jet_argv.contains("--json"), threads: threads, program_args: program_args, invocation: invocation, notice: notice, watch: keep_watching, entry: function}
         }
         .Done(_) | .Refused(_, _, _, _) | .Diagnostics(_, _, _, _, _) | .CheckWorkspace(_, _, _, _, _, _, _, _, _, _) | .CheckPrelude(_, _, _, _, _, _) | .CheckCore(_, _, _, _, _) | .Build(_, _, _, _, _, _, _, _, _, _, _) | .LockedBuild(_, _) | .BuildPackage(_, _, _, _, _, _, _, _) | .Run(_, _, _, _, _, _, _, _, _, _, _, _) | .RunRemote(_, _, _, _, _, _, _, _) | .NativeSource(_, _, _, _, _) | .DevWeb(_, _, _, _, _, _, _, _) | .DevCanvas(_, _, _, _, _, _) | .Jobs(_, _, _, _) | .Test(_, _, _, _, _, _) | .TestWorkspace(_, _, _, _, _, _, _, _) | .TestProfile(_, _, _, _, _, _) | .New(_, _, _, _, _, _) | .NewApp(_) | .Doc(_, _, _, _, _) | .Emit(_, _, _, _, _, _) | .Eval(_, _, _, _, _) | .Fill(_, _, _) | .Structural(_, _, _) | .Review(_, _, _) | .Keygen(_, _, _) | .KeyBackup(_, _, _) | .Publish(_, _, _, _) | .Yank(_, _, _) | .Lint(_, _, _, _, _, _, _) | .Fmt(_) | .FmtLang(_, _) | .Fix(_, _, _, _, _, _, _, _, _) | .Inspect(_) | .InspectB(_) | .ForeignBind(_, _, _) | .Perf(_, _) | .Semindex(_, _, _) | .Find(_, _, _, _) | .Cache(_, _) | .Remote(_, _, _) | .Comparison(_, _, _) | .Try(_, _, _) | .Maintenance(_, _, _, _) | .Completion(_, _, _) | .Schema(_, _, _, _, _) | .Codemod(_, _, _, _, _) | .PolicyExplain(_, _, _, _, _, _) | .DiagnosticTypeExplain(_, _, _, _) | .BuildFactExplain(_, _, _, _, _, _, _) | .Gates(_, _, _, _, _) | .Output(_, _, _, _) | .Doctor(_, _, _, _) | .UpdateJet(_, _, _, _, _) | .AuditCopies(_, _, _, _, _) | .AuditForeign(_, _, _, _, _) | .CompilerService(_) | .Repl(_, _, _, _) | .LSP | .ReplChild(_) | .EvalExpression(_, _, _) | .Prove(_, _, _, _, _, _) | .Budget(_, _, _, _) | .AuditWrites(_, _, _, _, _) -> {}

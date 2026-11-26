@@ -91,8 +91,12 @@ cli_cmd_list: fn(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time.Wait]> Int
     EXIT_OK
 }
 
-cli_hangar_path: fn(theme: Theme, parsed: CLIParsed) -[IO, Env, Time.Wait]> Int Never! {
-    path: pkg_resolve_roots().hangar_dir()
+cli_hangar_path: fn(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time, Time.Wait]> Int Never! {
+    roots: pkg_resolve_roots()
+    store_migrate_legacy_user_hangar(roots) ?? {
+        return cli_hangar_report_error(theme, parsed, "E2604", err.message(), err.message(), "inspect or remove any incomplete `.hangar-migration.partial` directory and fix escaping links in the legacy Hangar, then retry.")
+    }
+    path: roots.hangar_dir()
     if parsed.flags.json {
         cli_hangar_status_json("path", StatusFields.new().with("path", Dyn.Text(path))) ?? return cli_status_encoding_error(err)
     } else { print(path) }
@@ -220,6 +224,28 @@ cli_hangar_ingest: fn(verification: StoreVerification, theme: Theme, parsed: CLI
         return cli_hangar_report_error(theme, parsed, "E1340", "`hangar ingest` needs a source directory", "atomic staged ingest copies a local tree into the hangar.", "run `jetpack hangar ingest <dir> --name <pkg>`.")
     }
     reference: cli_flag_value(parsed, "--ref") ?? dir
+    source_fp: cli_flag_value(parsed, "--source-fingerprint") ?? ""
+    recipe_fp: cli_flag_value(parsed, "--recipe-fingerprint") ?? ""
+    policy_fp: cli_flag_value(parsed, "--policy-fingerprint") ?? ""
+    explicit_platform: cli_flag_value(parsed, "--platform") ?? ""
+    provenance: cli_flag_value(parsed, "--provenance") ?? ""
+    ^last_used_at: Int?{None}
+    if cli_flag_value(parsed, "--last-used-at") == .Val(raw_ts) {
+        parsed_ts: Int.parse(raw_ts) ?? {
+            return cli_hangar_report_error(theme, parsed, "E1340", "`--last-used-at` needs a non-negative integer", "could not parse `{raw_ts}` as Unix seconds.", "pass a Unix timestamp such as `--last-used-at 1`.")
+        }
+        if parsed_ts < 0 {
+            return cli_hangar_report_error(theme, parsed, "E1340", "`--last-used-at` needs a non-negative integer", "received `{raw_ts}`.", "pass a Unix timestamp >= 0.")
+        }
+        last_used_at = Val(parsed_ts)
+    }
+    has_identity: source_fp != "" || recipe_fp != "" || policy_fp != "" || explicit_platform != ""
+    cache_identity: if has_identity -> CacheIdentity{
+        source_fingerprint: source_fp,
+        recipe_fingerprint: recipe_fp,
+        policy_fingerprint: policy_fp,
+        platform: if explicit_platform != "" -> explicit_platform else -> pkg_host_platform(),
+    } else -> CacheIdentity.empty()
     ^outputs: [String:String]{}
     outputs["out"] = dir
     if cli_flag_value(parsed, "--output-dev") == .Val(dev) -> outputs["dev"] = dev
@@ -227,15 +253,21 @@ cli_hangar_ingest: fn(verification: StoreVerification, theme: Theme, parsed: CLI
         name: name,
         version: version,
         reference: reference,
-        cache_identity: CacheIdentity.empty(),
+        cache_identity: cache_identity,
         references: [String]{},
         outputs: outputs,
         signature: "",
-        provenance: "",
+        provenance: provenance,
         platform_artifact_kind: platform_artifact_kind,
     }
-    if store_ingest_tree(verification, pkg_resolve_roots(), request) == {
+    roots: pkg_resolve_roots()
+    if store_ingest_tree(verification, roots, request) == {
         .Ok(ingested) -> {
+            if last_used_at == .Val(ts) {
+                store_test_backdate_last_used_at(verification, roots, ingested.entry.id, ts) ?? {
+                    return cli_hangar_report_error(theme, parsed, "E1340", "could not record `--last-used-at`", err.message(), "retry against a healthy Hangar.")
+                }
+            }
             if parsed.flags.json {
                 cli_hangar_status_json(
                     "ingest",

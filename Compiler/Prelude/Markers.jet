@@ -219,6 +219,20 @@ Replayable: struct {
     }
 }
 
+// `#Repeatable`, `#Repeatable("reason")`, or `#Repeatable(key: expr)` states
+// that calling the marked function or method twice leaves kept data in the
+// same state as calling it once. Reads are automatically repeatable; leaf
+// primitives carry an audited reason string; composite functions are checked
+// against every call they reach unless guarded by a stable key.
+Repeatable: struct {
+    reason: String{none},
+    key: Value{none},
+
+    impl Marker {
+        sites: [.Function, .Method],
+    }
+}
+
 // Retired: state types carry what `#State(S)` and `#State(A -> B)` said,
 // and the parser reports each marker with the edit that writes them (E0175).
 // The shape stays declared, the arrow binding `to`, so old sources parse.

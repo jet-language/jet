@@ -603,3 +603,34 @@ sema_ownership_crossing_diagnostic: fn(value: String, ty: Type, problem: SemaSen
     }
     sema_error("E1102", span, what, why, fix)
 }
+
+// Only a lambda's captures cross the HTTP handler worker boundary; a named
+// function or callable value carries no captured state to prove.
+sema_ownership_check_http_handler_callback: fn(value: TExpr, check: ^SemaBodyCheck) -> Bool {
+    if value.kind == .Lambda(lambda) {
+        ^updated_lambda: lambda
+        ^valid: true
+        loop name in updated_lambda.capture_facts.mutable {
+            check.diagnostics.push(sema_ownership_crossing_concurrent_write_diagnostic(name, "HTTP handler", updated_lambda.source_span))
+            valid = false
+        }
+        loop capture in updated_lambda.captures {
+            ^mutable: false
+            loop name in updated_lambda.capture_facts.mutable {
+                if name == capture.source -> mutable = true
+            }
+            if mutable -> next
+            closure_taken: sema_ownership_crossing_capture_taken(updated_lambda, capture, check.environment.*, check.program.*, check.context.generic_params)
+            ^problem: sema_ownership_crossing_problem_for_name(capture.source, capture.ty, SemaSendCrossing.HTTPHandler, closure_taken, check.environment.*, check.program.*, check.scopes, check.state, check.context)
+            if problem == .Val(found) {
+                check.diagnostics.push(sema_ownership_crossing_diagnostic(capture.source, capture.ty, found, SemaSendCrossing.HTTPHandler, updated_lambda.source_span))
+                valid = false
+                next
+            }
+            sema_generic_crossing_note(capture.ty, SemaSendCrossing.HTTPHandler, sema_taskgroup_contains_name(updated_lambda.capture_facts.moved, capture.source), true, check.environment.*, check.program.*, check.context)
+        }
+        updated_lambda.is_move = true
+        return valid
+    }
+    true
+}

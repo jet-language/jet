@@ -1,0 +1,16 @@
+// Helper reached only from the `#Job` root `tidy`.
+format_tidy: fn(target: String) -> String { "tidied: {target}" }
+
+// Helper reached only from the scheduled `#Job(every: ...)` root `sweep`.
+sweep_step: fn(count: Int) -> Int { count + 1 }
+
+// Nothing reaches `never_called`.
+never_called: fn(count: Int) -> Int { count * 3 + 1 }
+
+// Uncalled job root selected by argv word.
+#Job tidy: fn() { print(format_tidy("cache")) }
+
+// Uncalled scheduled job root.
+#Job(every: 5min) sweep: fn() { print("swept {sweep_step(2)}") }
+
+run: fn() { print("main ready") }

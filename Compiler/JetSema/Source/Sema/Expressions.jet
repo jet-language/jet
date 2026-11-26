@@ -4318,14 +4318,6 @@ sema_expr_core_module_method_checked: fn(receiver: Expr, method: String, method_
             }
             return SemaMethodSpecialCheck{handled: true, value: value}
         }
-        .Core(record) -> {
-            ^special: sema_call_try_core_direct_record(record, args, type_args, method_span, expected, check)
-            if special.handled -> return SemaMethodSpecialCheck{handled: true, value: special.value}
-            check.scopes.ownership_call_depth += 1
-            ^value: sema_call_core_check_fixed(module_name, method, type_args, args, method_span, expected, check)
-            check.scopes.ownership_call_depth -= 1
-            return SemaMethodSpecialCheck{handled: true, value: value}
-        }
     }
 }
 

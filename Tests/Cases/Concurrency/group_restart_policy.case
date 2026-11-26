@@ -1,0 +1,10 @@
+# A supervised task group carries a restart policy (limit, window, backoff):
+# a worker failing 3 times is restarted 3 times with backoff, and a 4th failure
+# inside the window fails the group with a report naming the worker and its
+# last failure while canceling and joining every sibling.
+fixture: GroupRestartPolicy.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run main.jet
+exit: 0
+stdout: = "attempts: 4\nworker: worker_alpha\nrestarts: 3\nbackoff_honored: true\nreport_names_worker_and_failure: true\nsibling_active: 0\n"

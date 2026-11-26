@@ -335,7 +335,9 @@ kit_steps_file_predicate: fn(bytes: [U8], mode: String, value: String, extra: St
             count += 1
             cursor = at + needle.len()
         }
-        return count == (Int.parse(extra) ?? -1)
+        expected: kit_steps_numeric(extra) ?? return false
+        op: if alternatives.len() > 0 -> alternatives[0] else -> "="
+        return kit_steps_compare(count, op, expected)
     }
     if mode == "before" {
         left: kit_steps_bytes_search(bytes, needle, 0, bytes.len(), false) ?? return false

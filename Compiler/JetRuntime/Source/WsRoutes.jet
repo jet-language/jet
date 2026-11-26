@@ -33,13 +33,23 @@ ws_fail_io: fn(operation: I64, error: I64) -> I64 {
     I64{0}
 }
 
+ws_fail_deadline: fn(error: I64) -> I64 {
+    scheduler_deadline_reported()
+    ws_fail(WS_ERROR_CANCELED, error)
+}
+
 // The WsError for the JetNetError a stream route left in `failure` (0 when a
-// native stop is propagating: then no error is written). A read classifies
-// it; a write is always I/O.
+// native stop is propagating: then no error is written). Cancellation or an
+// expired ambient task deadline is `Canceled`; otherwise a read classifies it
+// and a write is always I/O.
 ws_net_failure: fn(failure: I64, reading: Bool, operation: I64, error: I64) -> I64 {
     if (failure == I64{0}) { return I64{0} }
     kind: jet_rt_record_tag_jet_net_error(failure)
     jet_rt_handle_drop_jet_net_error(failure)
+    if (kind == NET_ERROR_CANCELED) { return ws_fail(WS_ERROR_CANCELED, error) }
+    if (kind == NET_ERROR_TIMEOUT && !scheduler_shielded() && jet_ctx_deadline_present() && jet_deadline_remaining_ms() <= I64{10}) {
+        return ws_fail_deadline(error)
+    }
     if !reading -> return ws_fail_io(operation, error)
     if (kind == NET_ERROR_TIMEOUT) { return ws_fail(WS_ERROR_TIMEOUT, error) }
     if (kind == NET_ERROR_CONNECTION_RESET || kind == NET_ERROR_CLOSED || kind == NET_ERROR_NOT_CONNECTED) {
@@ -49,7 +59,7 @@ ws_net_failure: fn(failure: I64, reading: Bool, operation: I64, error: I64) -> I
 }
 
 ws_deadline_passed: fn() -> Bool {
-    jet_ctx_deadline_present() && jet_deadline_remaining_ms() <= I64{0}
+    !scheduler_shielded() && jet_ctx_deadline_present() && jet_deadline_remaining_ms() <= I64{0}
 }
 
 #Export(c) jet_rt_record_tag_jet_ws_error: fn(value: I64) -> I64 {
@@ -159,7 +169,7 @@ ws_reserve: fn(conn: I64, more: I64) {
 // -1 at end of stream (no error written).
 ws_fill: fn(conn: I64, need: I64, error: I64) -> I64 {
     loop ws_buffered(conn) < need {
-        if ws_deadline_passed() -> return ws_fail(WS_ERROR_CANCELED, error)
+        if ws_deadline_passed() -> return ws_fail_deadline(error)
         missing: need - ws_buffered(conn)
         want: if (missing > WS_READ_CHUNK) -> missing else -> WS_READ_CHUNK
         ws_reserve(conn, want)
@@ -245,7 +255,7 @@ ws_write_frame: fn(conn: I64, opcode: I64, data: I64, length: I64, error: I64) -
 
 ws_send: fn(conn: I64, opcode: I64, data: I64, length: I64, error: I64) -> I64 {
     if (net_word(conn, WS_CONN_CLOSED) != I64{0}) { return ws_fail(WS_ERROR_CLOSED, error) }
-    if ws_deadline_passed() -> return ws_fail(WS_ERROR_CANCELED, error)
+    if ws_deadline_passed() -> return ws_fail_deadline(error)
     ws_write_frame(conn, opcode, data, length, error)
 }
 
@@ -368,7 +378,7 @@ ws_receive: fn(conn: I64, assembly: I64, output: I64, error: I64) -> I64 {
     expect_masked: net_word(conn, WS_CONN_CLIENT) == I64{0}
     ^data_opcode: I64{-1}
     loop {
-        if ws_deadline_passed() -> return ws_fail(WS_ERROR_CANCELED, error)
+        if ws_deadline_passed() -> return ws_fail_deadline(error)
         ^filled: ws_fill(conn, I64{2}, error)
         if (filled <= I64{0}) {
             return if (filled < I64{0}) -> ws_fail(WS_ERROR_CLOSED, error) else -> I64{0}

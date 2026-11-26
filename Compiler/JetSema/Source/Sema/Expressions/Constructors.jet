@@ -2918,7 +2918,7 @@ sema_expression_typed_literal_regex: fn(value: Expr, span: Span, expected: Type?
             checked: sema_tree_node(result_type, TExprKind.OrFallback{value: compiled, fallback: fallback, ambient_err: None}, span)
             return sema_expr_expected_owned(checked, expected, check.environment.*, check.program.*, check.diagnostics)
         }
-        .Core(_) | .SharedSite(_) -> {
+        .SharedSite(_) -> {
             check.diagnostics.push(sema_error("E0906", span, "the source Regex literal producer is unavailable", "checked patterns and dynamic patterns use the same source-owned engine", "load the core.regex source module"))
             return None
         }

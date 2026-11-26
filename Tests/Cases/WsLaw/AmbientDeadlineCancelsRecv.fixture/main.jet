@@ -5,23 +5,35 @@ use {
     server: core.http.server
 }
 
-handle: fn(req: HTTPRequest) -> HTTPResponse HTTPError! {
+handle: fn(req: HTTPRequest, release: Receiver<Int>) -> HTTPResponse HTTPError! {
     sock: ws.upgrade(req) ?? panic("upgrade")
-    message: sock.recv() ?? panic("recv")
-    text: message.text() ?? panic("text")
-    sock.send_text("echo:{text}") ?? panic("send")
-    return Ok(server.response(500, "unused"))
+    ^_: release.receive() ?? 0
+    if sock.finish(1000, "") == {
+        .Ok(_) -> {}
+        .Err(_) -> {}
+    }
+    Ok(server.response(500, "unused"))
 }
 
 run: fn() {
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     addr: listener.local_addr() ?? panic("address")
+    { sender: release_tx, receiver: release_rx }: channel<Int>(capacity: 1)
     mux: web.app()
-    mux.get("/live", fn(req: HTTPRequest) { handle(req) })
+    mux.get("/live", fn(req: HTTPRequest) { handle(req, release_rx) })
     serving: task { mux.serve_once(listener) ?? panic("serve") }
     client: ws.connect("ws://{addr}/live") ?? panic("connect")
-    client.send_text("0123456789") ?? panic("client send")
-    reply: client.recv() ?? panic("client recv")
-    print(reply.text() ?? panic("reply text"))
+    ^label: "unexpected"
+    #Deadline(40ms) {
+        if client.recv() == {
+            .Err(.Canceled) -> label = "Canceled"
+            .Err(.Timeout) -> label = "Timeout"
+            .Err(.Closed) -> label = "Closed"
+            .Err(_) -> label = "OtherError"
+            .Ok(_) -> label = "Message"
+        }
+    }
+    print(label)
+    release_tx.send(1)
     serving.join() ?? panic("server join")
 }

@@ -74,6 +74,16 @@ scheduler_test_env: fn(log: I64, mode: I64, value: I64) -> I64 {
             jet_task_sleep_duration_ns_defaulted(I64{1000000})
             if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
         }
+        (mode == I64{4}) -> {
+            jet_rt_session_shield_enter()
+            sync_store(log + I64{16}, I64{1})
+            jet_task_sleep_duration_ns_defaulted(I64{20000000})
+            scheduler_test_require(jet_scheduler_native_propagate() == I64{0})
+            sync_store(log + I64{16}, I64{2})
+            jet_rt_session_shield_leave()
+            if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
+            sync_store(log + I64{16}, I64{3})
+        }
     }
     sync_store(out, sync_load(env + I64{16}))
     I64{0}
@@ -378,6 +388,18 @@ scheduler_test_rings: fn() {
     failure: sync_load(out)
     scheduler_test_require(jet_rt_record_tag_jet_task_failure(failure) == I64{0})
     jet_rt_handle_drop_jet_task_failure(failure)
+    // Cancel arriving while a task sleeps inside #Shield is deferred until
+    // shield exit: the sleep and shielded side effect complete, then cancel
+    // lands before post-shield code runs.
+    sync_store(log + I64{16}, I64{0})
+    shielded_sleep: scheduler_test_spawn(callbacks, meta, log, I64{4}, I64{77})
+    loop sync_load(log + I64{16}) == (I64{0}) -> sync_park(slot, I64{1000000})
+    jet_rt_native_task_cancel(shielded_sleep)
+    scheduler_test_require(jet_rt_native_task_join(shielded_sleep, I64{0}, out) == I64{0})
+    shielded_failure: sync_load(out)
+    scheduler_test_require(jet_rt_record_tag_jet_task_failure(shielded_failure) == I64{0})
+    jet_rt_handle_drop_jet_task_failure(shielded_failure)
+    scheduler_test_require(sync_load(log + I64{16}) == I64{2})
     // Intentional task panic produces an owned failure with no stderr report.
     panicked: scheduler_test_spawn(callbacks, meta, log, I64{2}, I64{0})
     scheduler_test_require(jet_rt_native_task_join(panicked, I64{0}, out) == I64{0})
@@ -472,8 +494,8 @@ scheduler_test_rings: fn() {
     jet_rt_free(handles, I64{16}, I64{8})
     jet_rt_free(offsets, I64{16}, I64{8})
     // Every environment released exactly once: the 10000 joined tasks, then
-    // the canceled, panicked, detached, rejected and two group tasks.
-    scheduler_test_require(sync_load(log) == I64{10006})
+    // the canceled, shielded-sleep, panicked, detached, rejected and two group tasks.
+    scheduler_test_require(sync_load(log) == I64{10007})
     // No fiber stays parked, and the 10000 tasks ran on at most the pool's
     // carriers: a waiting task holds no thread of its own.
     stats: jet_rt_alloc(I64{24}, I64{8})

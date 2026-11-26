@@ -3,6 +3,7 @@
 // item, and the effect sources of compile-time functions.
 use jet_foundation.[
     BodyTree,
+    CORE_ROLE_TYPED_DECODE_READ,
     FnBody,
     MARKER_CLI,
     MarkerHook,
@@ -349,22 +350,20 @@ sema_comptime_codec_methods_add: fn(graph: SemaRegistrationGraph, ty: Type, modu
             nominal_id: graph.modules[row.module_index].nominals[row.row].symbol.id
             loop reference in sema_registration_impl_rows_named(graph, nominal_name) {
                 implementation: graph.modules[reference.module_index].impls[reference.row]
-                method_name: if {
-                    decode && sema_comptime_impl_matches_trait(implementation, "Decode") -> "decode"
-                    encode && sema_comptime_impl_matches_trait(implementation, "Encode") -> "encode"
-                    else -> ""
-                }
-                if method_name == "" -> next
-                if sema_codec_impl_pending(implementation) && sema_codec_pending_body(graph, reference.module_index, reference.row, method_name) == None {
-                    next
-                }
+                want_decode: decode && sema_comptime_impl_matches_trait(implementation, "Decode")
+                want_encode: encode && sema_comptime_impl_matches_trait(implementation, "Encode")
+                if !want_decode && !want_encode -> next
                 if sema_type_graph_impl_target_nominal(graph, implementation) != Val(nominal_id) {
                     next
                 }
+                pending: sema_codec_impl_pending(implementation)
                 loop method in implementation.methods {
-                    if method.symbol.name == method_name {
-                        found.push({module_identity: graph.modules[reference.module_index].module_identity, key: symbol_table_key(graph.symbols, method.symbol.id)})
+                    want_method: (want_encode && method.symbol.name == "encode") || (want_decode && (method.symbol.name == "decode" || method.symbol.name == "__read"))
+                    if !want_method -> next
+                    if pending && sema_codec_pending_body(graph, reference.module_index, reference.row, method.symbol.name) == None {
+                        next
                     }
+                    found.push({module_identity: graph.modules[reference.module_index].module_identity, key: symbol_table_key(graph.symbols, method.symbol.id)})
                 }
             }
             // An `impl Encode { … }` or `impl Decode { … }` block in the
@@ -620,7 +619,24 @@ sema_comptime_bound_args_add: fn(graph: SemaRegistrationGraph, callee: SymbolID,
     row: sema_registration_callable_row_of(graph, callee) ?? return
     if row == {
         .Function(declaring, index) -> sema_comptime_bound_params_add(graph, graph.modules[declaring].functions[index].declaration.type_params, type_args, module_identity, found)
-        .NominalMethod(declaring, owner, index) -> sema_comptime_bound_params_add(graph, graph.modules[declaring].nominals[owner].methods[index].declaration.type_params, type_args, module_identity, found)
+        .NominalMethod(declaring, owner, index) -> {
+            declaring_module: graph.modules[declaring]
+            nominal: declaring_module.nominals[owner]
+            method: nominal.methods[index]
+            if sema_core_role(method.declaration.markers, graph, declaring_module.module_identity) == CORE_ROLE_TYPED_DECODE_READ {
+                // Lowering dispatches TypedDecodeRead (`__Decoding.read<Target, Source>`)
+                // to the sibling `read_*` methods on the same Core nominal by target type
+                // without a keyed call (JetIR BuildDyn.jet ir_decoding_read), so comptime
+                // closures queue those siblings alongside the bound trait implementations.
+                loop sibling in nominal.methods {
+                    if sibling.symbol.id != method.symbol.id {
+                        found.push({module_identity: declaring_module.module_identity, key: symbol_table_key(graph.symbols, sibling.symbol.id)})
+                    }
+                }
+                sema_comptime_codec_methods_add(graph, type_args[0], module_identity, false, true, found)
+            }
+            sema_comptime_bound_params_add(graph, method.declaration.type_params, type_args, module_identity, found)
+        }
         .ImplMethod(declaring, owner, index) -> sema_comptime_bound_params_add(graph, graph.modules[declaring].impls[owner].methods[index].declaration.type_params, type_args, module_identity, found)
         .Foreign(_, _) -> {}
     }
@@ -1162,6 +1178,7 @@ sema_comptime_struct_bakes_defaults: fn(derives: [NamedSpan]) -> Bool Never! {
 sema_comptime_collect_module_sources: fn(graph: SemaRegistrationGraph, source_module: SemaRegistrationModule) -> [SemaComptimeItemSource] {
     ^sources: SemaComptimeSourceList{items: [SemaComptimeItemSource]{}}
     loop constant in source_module.constants {
+        if sema_span_overlaps_any(constant.declaration.span, source_module.load_error_spans) -> next
         if sema_output_metadata_binding(constant.declaration) -> next
         if constant.declaration.ct != None -> next
         // Registration reports a `#Persist` binding whose value is not a
@@ -1873,7 +1890,9 @@ sema_comptime_effect_source: fn(graph: SemaRegistrationGraph, source_module: Sem
     body: sema_registration_function_body(source_module, function)
     ^facts: sema_effect_body_facts(body)
     if top_level -> facts.kernel = sema_kernel_pending(function.declaration, body, compute_aliases)
-    sema_effect_source_from_header(function.declaration, symbol_table_key(graph.symbols, function.symbol.id), facts)
+    ^source: sema_effect_source_from_header(function.declaration, symbol_table_key(graph.symbols, function.symbol.id), facts)
+    source.job_retry = sema_effect_app_job_retry_spec(graph, source_module.module_identity, function.declaration)
+    source
 }
 
 // The trait each of `nominal`'s methods implements, by method row: None for

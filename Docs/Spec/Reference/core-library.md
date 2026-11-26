@@ -371,7 +371,7 @@ Generated from `Core/` by `Tools/Agent/CoreSourceRows.jet` (never hand-edited):
 ## `core` — built Core modules
 
 The canonical module registry is [`Core.rows`](../../../Compiler/Prelude/Core.rows),
-and the loader's exported list is [`CoreCallRows.jet`](../../../Compiler/JetFoundation/Source/Registry/CoreCallRows.jet), which the compiler build computes from it.
+and the loader's exported list is [`CoreModules.jet`](../../../Compiler/JetFoundation/Source/Registry/CoreModules.jet), which the compiler build computes from it.
 The list below is the source-facing module inventory. A module may be a
 namespace-only provider boundary; its presence in the registry does not imply
 that every provider operation is available on every target.
@@ -443,7 +443,7 @@ The built-module inventory is a source-facing registry, not a missing-domain led
 - `core.http.server`
 - `core.image`
 - `core.jobs`
-- `core.log`
+- `core.log` — structured text and JSON logging, redaction, sinks, and `log.span` scopes unified with `#Frame(text) { … }` (`frames=[outer > inner]` in text output and `"spans":[...]` in JSON; see [`Examples/ErrorsAndEffects/Errors/FrameBreadcrumbs.jet`](../../../Examples/ErrorsAndEffects/Errors/FrameBreadcrumbs.jet))
 - `core.math`
 - `core.math.random`
 - `core.math.combinatorics`
@@ -458,7 +458,7 @@ The built-module inventory is a source-facing registry, not a missing-domain led
 - `core.net.dtls`
 - `core.net.ws`
 - `core.net.ip`
-- `core.perf`
+- `core.perf` — patched-site `perf.zone` intervals, causal progress points, and heap marks unified with `#Frame(text) { … }` on the task's shared frame stack for `jet perf run` / `jet perf view`
 - `core.plugin`
 - `core.prelude`
 - `core.process`

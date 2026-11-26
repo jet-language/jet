@@ -17,7 +17,6 @@ use jet_foundation.[
     ast_expr,
     ast_visit_body,
     ast_visit_expr,
-    core_call,
     core_module_export,
 ]
 
@@ -100,14 +99,7 @@ sema_frame_module_call_operation: fn(receiver: Expr, method: String, args: [Call
             module_name = "{module_name}.{leaf}"
             if core_module_export(module_name) == None -> return None
         }
-        // A source-owned row's effects are its Core declaration's.
-        if core_call(module_name, method) == .Val(found) {
-            ^record: found
-            ^declared: [String]{}
-            if sema_call_core_declared_effects(record, check, declared) -> record.effects = declared
-            return Val(sema_frame_core_call_operation(record, "{module_name}.{method}", index))
-        }
-        // A Core function with no row is its registered declaration.
+        // A Core function resolves through its registered declaration.
         graph: check.program.registration_graph
         identity: sema_call_core_module_identity(check.environment.*, check.program.*, module_name) ?? return None
         module_index: sema_registration_module_index(graph, identity) ?? return None

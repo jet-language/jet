@@ -1751,9 +1751,11 @@ parser_parse_program: fn(state: ^JetParserState) -> Program {
                 if declaration.imports.len() == 0 {
                     if declaration.item == {
                         .Val(value) -> {
-                            program.items.push(value)
-                            loop companion in declaration.companions {
-                                program.items.push(companion)
+                            if !parser_aborting(state) {
+                                program.items.push(value)
+                                loop companion in declaration.companions {
+                                    program.items.push(companion)
+                                }
                             }
                         }
                         .None -> {

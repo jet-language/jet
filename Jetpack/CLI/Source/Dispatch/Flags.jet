@@ -66,6 +66,8 @@ CLIFlags: struct {
     archive_no_deps: Bool,
     // Explicit expert escape hatch for a local unsigned archive.
     archive_allow_unsigned: Bool,
+    // Write an unsigned archive from `hangar export --unsigned`.
+    archive_unsigned: Bool,
     // Host-owned cache role and typed credential
     // provider label (never a secret) the write grant.
     cache_role: String?,
@@ -115,6 +117,7 @@ CLIFlags: struct {
             archive_from: None,
             archive_no_deps: false,
             archive_allow_unsigned: false,
+            archive_unsigned: false,
             cache_role: None,
             cache_credential: None,
             cache_write: false,
@@ -285,6 +288,7 @@ cli_parse_args_for: fn(verb: String, args: [String]) -> CLIParsed Never! {
             }
             arg == "--no-deps" -> flags.archive_no_deps = true
             arg == "--allow-unsigned" -> flags.archive_allow_unsigned = true
+            arg == "--unsigned" -> flags.archive_unsigned = true
             arg == "--write" -> flags.cache_write = true
             arg == "--role" -> {
                 index += 1
@@ -340,7 +344,7 @@ cli_verb_flags: fn(verb: String) -> [String] Never! {
         "env" -> [String]{"{ENV_FLAG_PACKAGE} <pkg>...", ENV_FLAG_FLAKE, ENV_FLAG_PURE, ENV_FLAG_PREP, ENV_FLAG_EXPLAIN}
         "use" -> [String]{ENV_FLAG_PREP, ENV_FLAG_EXPLAIN}
         TRUST_SUBCOMMAND -> [String]{"{TRUST_FLAG_SCOPE} <user|repo>"}
-        "hangar" -> [String]{"--all", "--repair", "--read-only", "{HANGAR_FLAG_NAME} <name>", "--version <version>", "--platform-artifact-kind <kind>", "--ref <ref>", "--output-dev <dir>", "--expires-in <duration>", "--if-etag <etag>", "--etag <etag>", "--to <path>", "--key <path-or-name>", "--from <path>", "--no-deps", "--allow-unsigned", "--write", "--role <role>", "--role=<role>", "--credential <provider>", "--credential=<provider>"}
+        "hangar" -> [String]{"--all", "--repair", "--read-only", "{HANGAR_FLAG_NAME} <name>", "--version <version>", "--platform-artifact-kind <kind>", "--ref <ref>", "--source-fingerprint <fp>", "--recipe-fingerprint <fp>", "--policy-fingerprint <fp>", "--platform <platform>", "--provenance <text>", "--last-used-at <epoch>", "--output-dev <dir>", "--expires-in <duration>", "--if-etag <etag>", "--etag <etag>", "--to <path>", "--key <path-or-name>", "--from <path>", "--no-deps", "--allow-unsigned", "--unsigned", "--write", "--role <role>", "--role=<role>", "--credential <provider>", "--credential=<provider>"}
         "add" -> [String]{"--adapt"}
         "update" -> [String]{UPDATE_FLAG_DEPS, UPDATE_FLAG_TOOLS}
         JETPACK_LOCK_VERB -> [String]{"{LOCK_DIFF_FLAG_AGAINST} <rev>", "{LOCK_DIFF_FLAG_AGAINST}=<rev>"}

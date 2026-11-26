@@ -1,0 +1,66 @@
+// `#Frame(text) { … }` pushes one task-inherited breadcrumb frame that errors,
+// structured log lines, trace spans, and `jet perf` samples inside all carry.
+package: {
+    name: "frame_breadcrumbs"
+    authority: { allow: [Env, FS, IO, Log, Mem.Alloc, Time] }
+}
+
+use {
+    files: core.files
+    log: core.log
+    perf: core.perf
+}
+
+parse_amount: fn(raw: String) -> Int Err! { Err("invalid number: {raw}") }
+
+import_row: fn(row: Int, raw: String) -> Int Err! {
+    #Frame("row {row}") {
+        log.info("parsing row")
+        amount: parse_amount(raw)?("parsing amount")
+        return Ok(amount)
+    }
+    Ok(0)
+}
+
+worker_step: fn() -> String {
+    #Frame("worker step") {
+        log.info("inside worker")
+        return "worker ok"
+    }
+    ""
+}
+
+strip_log_line: fn(line: String) -> String {
+    parts: line.split(" | ").to_list()
+    if parts.len() >= 2 -> parts[1] else -> line
+}
+
+run: fn() {
+    scratch: files.temp_dir("frame-breadcrumbs") ?? panic("temp_dir")
+    text_path: "{scratch.path}/events.log"
+    json_path: "{scratch.path}/events.jsonl"
+    log.set_sink("text", text_path)
+    #Frame("importing orders.csv") {
+        log.info("started import")
+        if import_row(42, "abc") == {
+            .Ok(value) -> { print("unexpected {value}") }
+            .Err(error) -> print("caught: {error}")
+        }
+        worker: task { worker_step() }
+        print("task: {worker.join() ?? "join failed"}")
+        audit: log.span("audit")
+        log.info("with log span")
+        log.close(audit)
+        _zone: perf.zone("score")
+        log.info("inside perf zone")
+        log.set_sink("jsonl", json_path)
+        #Frame("row 42") { log.info("json event") }
+    }
+    log.flush()
+    text_log: files.read(text_path) ?? panic("read text log")
+    loop line in text_log.lines() {
+        if line != "" -> print("text: {strip_log_line(line)}")
+    }
+    json_log: files.read(json_path) ?? panic("read json log")
+    print("json has spans: {json_log.contains("\"spans\":[\"importing orders.csv\",\"row 42\"]")}")
+}

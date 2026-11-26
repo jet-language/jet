@@ -1,0 +1,18 @@
+use perf: core.perf
+
+busy: fn(rounds: Int) -> Int {
+    ^acc: 0
+    loop i in 0..<rounds -> acc = (acc + i * 31 + 7) % 1000003
+    acc
+}
+
+run: fn() {
+    ^total: 0
+    #Frame("importing orders.csv") {
+        #Frame("row 42") {
+            _zone: perf.zone("score")
+            total = busy(2000000)
+        }
+    }
+    print("done={total}")
+}

@@ -462,7 +462,9 @@ jet_driver_comptime_body_pass: fn(
     ^batches: sema_call_rule_batches(registration, pending, pass, body_sources, current_graph.modules)
     jet_driver_trace_body_begin(request.trace_sink, "comptime.body.run", body_sources, pass)
     ^memory_plan: [SemaFunctionMemoryPlan]{}
-    ^run: jet_driver_run_comptime(registration, [SemaGraphModuleResult]{}, None, body_sources, values, functions, request, diagnostics, memory_plan)
+    ^run_diagnostics: [Diagnostic]{}
+    ^run: jet_driver_run_comptime(registration, [SemaGraphModuleResult]{}, None, body_sources, values, functions, request, run_diagnostics, memory_plan)
+    jet_driver_comptime_diagnostics_add(diagnostics, run_diagnostics)
     jet_driver_trace_step_end(request.trace_sink, "comptime.body.run", body_sources.len())
     ^finished_registration: run.graph.move()
     run.graph = None
@@ -705,6 +707,7 @@ jet_driver_validate_checked_text: fn(
         return jet_driver_comptime_body_returning(jet_driver_comptime_body_result(initial_graph, initial_values, initial_functions, initial_trace, true, false), registration)
     }
     ^memory_plan: [SemaFunctionMemoryPlan]{}
+    ^run_diagnostics: [Diagnostic]{}
     ^run: jet_driver_run_comptime(
         registration,
         [SemaGraphModuleResult]{},
@@ -713,9 +716,10 @@ jet_driver_validate_checked_text: fn(
         initial_values,
         initial_functions,
         request,
-        diagnostics,
+        run_diagnostics,
         memory_plan,
     )
+    jet_driver_comptime_diagnostics_add(diagnostics, run_diagnostics)
     ^finished_registration: run.graph.move()
     run.graph = None
     ^partial_registration: run.partial_graph.move()

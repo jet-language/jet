@@ -846,9 +846,77 @@ StaticRoutes: struct {
             if registers && static_route_text(call, at) == .Val(pattern) && routes.__route_pattern_error(pattern) == .Val(reason) {
                 reject(RouteInvalid{pattern: pattern, reason: reason}, at: call.args[at])
             }
+            if !self.runtime_methods && (custom || standard) && call.args.len() > at && call.args[at].value == None {
+                path_type: call.args[at].type.name
+                if path_type == "String" || path_type == "Path" {
+                    reject(RoutePathNotStatic{}, at: call.args[at])
+                }
+            }
             if !self.runtime_methods && custom && call.args.len() == 3 {
                 if call.args[1].value != None && call.args[0].value == None {
                     reject(RouteMethodNotStatic{}, at: call.args[0])
+                }
+            }
+            if custom && static_route_text(call, 0) == .Val(token) {
+                if __method_token_check(token) == .Err(refused) {
+                    reject(refused, at: call.args[0])
+                }
+            }
+            if (custom || standard) && call.args.len() == at + 2 {
+                path_type: call.args[at].type.name
+                if path_type == "String" || path_type == "Path" {
+                    handler: call.args[at + 1].function ?? {
+                        reject(RouteHandlerNotCallable{}, at: call.args[at + 1])
+                    }
+                    params: handler.signature.params
+                    ^request_count: 0
+                    ^typed_names: [String]{}
+                    ^untyped: false
+                    loop param in params {
+                        if route_param_is_request(param) {
+                            request_count += 1
+                        } else if param.type.name == "_" {
+                            if self.runtime_methods && params.len() == 1 {
+                                request_count += 1
+                            } else {
+                                untyped = true
+                            }
+                        } else {
+                            typed_names.push(param.name.copy())
+                        }
+                    }
+                    if untyped {
+                        reject(RouteHandlerNotCallable{}, at: call.args[at + 1])
+                    }
+                    if request_count <= 1 {
+                        pattern: static_route_text(call, at) ?? ""
+                        loop (i, param) in params {
+                            loop j in 0..<i {
+                                if params[j].name == param.name {
+                                    reject(RouteHandlerAmbiguousInput{pattern: pattern, name: param.name}, at: call.args[at + 1])
+                                }
+                            }
+                        }
+                        if pattern != "" {
+                            fields: route_pattern_fields(pattern)
+                            loop field in fields {
+                                ^matches: 0
+                                loop name in typed_names {
+                                    if name == field -> matches += 1
+                                }
+                                if matches != 1 {
+                                    reject(RoutePathFieldMissing{pattern: pattern, field: field}, at: call.args[at])
+                                }
+                            }
+                            if call.name.text != "get" && call.name.text != "head" {
+                                loop name in typed_names {
+                                    if !fields.contains(name) {
+                                        reject(RouteUnboundNonGetInput{pattern: pattern, name: name}, at: call.args[at + 1])
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
             if first == .Val(earlier) && static_route(call) == .Val(route) {
@@ -860,6 +928,24 @@ StaticRoutes: struct {
             }
         }
     }
+}
+
+priv route_param_is_request: fn(param: ParamInfo) -> Bool Never! {
+    param.type.name == "HTTPRequest" || param.type.identity == "core.http.HTTPRequest"
+}
+
+priv route_pattern_fields: fn(pattern: String) -> [String] Never! {
+    ^fields: [String]{}
+    if !pattern.starts_with("/") -> return fields
+    segments: pattern.split("/").to_list()
+    loop index in 1..<segments.len() {
+        segment: segments[index]
+        if segment.starts_with(":") || segment.starts_with("*") {
+            name: String.from_bytes(segment.bytes().slice(1, segment.bytes().len())) ?? ""
+            if name != "" -> fields.push(name)
+        }
+    }
+    fields
 }
 
 // A route path literal as written, each hole as `{name}`, or `{…}` when the
@@ -915,6 +1001,104 @@ priv RouteInvalid: struct {
 
         fix: fn(self) -> String {
             "use `:name` for one segment or final `*name` for a catch-all; percent-encode a literal leading `:` or `*`, and never encode `/`"
+        }
+    }
+}
+
+// E2805: a router's route names its path with a value only the run knows.
+priv RoutePathNotStatic: struct {
+    impl Diagnostic {
+        code: "E2805",
+
+        what: fn(self) -> String { "HTTPRouter route path must be a static String or Path" }
+
+        why: fn(self) -> String {
+            "router endpoint contracts are fully checked while building; App routes may be computed at runtime"
+        }
+
+        fix: fn(self) -> String {
+            "use a literal, a compile-time String constant or a Path without holes, or register the dynamic route on a `web.app()`"
+        }
+    }
+}
+
+// E2805: a route handler is neither a lambda nor a named function with typed parameters.
+priv RouteHandlerNotCallable: struct {
+    impl Diagnostic {
+        code: "E2805",
+
+        what: fn(self) -> String {
+            "HTTP route handler must be a lambda or named function with explicit typed parameters"
+        }
+
+        why: fn(self) -> String {
+            "route binding needs source parameter names and types before it can define transport inputs"
+        }
+
+        fix: fn(self) -> String {
+            "write `fn(id: Int, req: HTTPRequest) {{ ... }}` or pass a named function"
+        }
+    }
+}
+
+// E2805: a route handler declares two parameters with the same name.
+priv RouteHandlerAmbiguousInput: struct {
+    pattern: String,
+    name: String,
+
+    impl Diagnostic {
+        code: "E2805",
+
+        what: fn(self) -> String {
+            "HTTP route `{self.pattern}` has ambiguous handler input `{self.name}`"
+        }
+
+        why: fn(self) -> String {
+            "path placeholders bind by name; GET/HEAD remainder is query data and non-GET inputs need an explicit body model"
+        }
+
+        fix: fn(self) -> String {
+            "rename the handler input, add the matching path placeholder, or decode a body with `req.json<T>()`"
+        }
+    }
+}
+
+// E2805: a route path placeholder has no matching typed handler input.
+priv RoutePathFieldMissing: struct {
+    pattern: String,
+    field: String,
+
+    impl Diagnostic {
+        code: "E2805",
+
+        what: fn(self) -> String {
+            "HTTP route `{self.pattern}` path field `{self.field}` does not have exactly one typed handler input"
+        }
+
+        why: fn(self) -> String { "path placeholders are bound by name before request decoding" }
+
+        fix: fn(self) -> String { "declare one `{self.field}: T` handler input" }
+    }
+}
+
+// E2805: a non-GET route handler declares a typed parameter not bound by the path.
+priv RouteUnboundNonGetInput: struct {
+    pattern: String,
+    name: String,
+
+    impl Diagnostic {
+        code: "E2805",
+
+        what: fn(self) -> String {
+            "HTTP route `{self.pattern}` has unbound non-GET handler input `{self.name}`"
+        }
+
+        why: fn(self) -> String {
+            "path placeholders bind by name; GET/HEAD remainder is query data and non-GET inputs need an explicit body model"
+        }
+
+        fix: fn(self) -> String {
+            "rename the handler input, add the matching path placeholder, or decode a body with `req.json<T>()`"
         }
     }
 }

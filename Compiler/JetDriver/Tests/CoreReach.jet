@@ -38,7 +38,7 @@ use {
         jet_driver_scoped_imports,
     ]
     jet_cli.[jet_cli_driver_request]
-    jet_foundation.[CORE_CALLS, CORE_SOURCE_OWNED_ROWS, Func, ModuleID, compiler_threads_single]
+    jet_foundation.[CORE_SOURCE_OWNED_ROWS, Func, ModuleID, compiler_threads_single]
 }
 
 // A check request for the one user file `source`, with no Core sources yet.
@@ -652,15 +652,6 @@ reach_test_spelled_pairs: fn(files: [String]) -> [String] {
     pairs
 }
 
-// Whether `name` is one of `module_name`'s registry members, which are
-// routes of a module that isn't routed.
-reach_test_registry_member: fn(module_name: String, name: String) -> Bool {
-    loop row in CORE_CALLS {
-        if row.module_name == module_name && row.member == name -> return true
-    }
-    false
-}
-
 // Whether `value` carries a jet_builtins role (`#Builtin.Role(.InlineMapped)`)
 // and its module's `text` calls it by its qualified name `pair`: lowering the
 // role reaches that call though neither the program nor the compiler spells
@@ -676,7 +667,7 @@ reach_test_role_self_call: fn(value: Func, text: String, pair: String) -> Bool {
 // A Core module that isn't routed leaves each top-level function no reached
 // code names, so one the compiler calls by a literal name, or a role reaches
 // by its qualified name, must be a route: JET_DRIVER_SOURCE_ROUTES holds
-// exactly those that aren't registry members.
+// those routes.
 #Test("each top-level Core function the compiler calls by a literal name right after its module's, or its role reaches by its qualified name, is a source route") {
     ^files: [String]{}
     reach_test_sources("Compiler", files)
@@ -695,7 +686,7 @@ reach_test_role_self_call: fn(value: Func, text: String, pair: String) -> Bool {
             if item == .Func(value) {
                 pair: "{prefix}{value.name}"
                 reached: pairs.contains(pair) || reach_test_role_self_call(value, text, pair)
-                if value.name.starts_with("__") || !reached || reach_test_registry_member(row.module_name, value.name) {
+                if value.name.starts_with("__") || !reached {
                     next
                 }
                 if JET_DRIVER_SOURCE_ROUTES.contains(pair) {

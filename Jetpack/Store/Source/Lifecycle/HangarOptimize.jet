@@ -225,11 +225,12 @@ store_verify_hangar_object: fn(verification: StoreVerification, roots: HangarRoo
 
 // The closure graph must agree with the record's primary, action key,
 // references and output map; every named output must re-hash to its recorded
-// digest; every reference must exist.
+// digest; every reference must exist; and every store closure proof must hold.
 store_verify_hangar_object_unlocked: fn(verification: StoreVerification, roots: HangarRoots, entry: StoreEntry) -[FS, Env, Time]> IngestError! {
     hangar: roots.hangar_dir()
     allow: entry.platform_artifact_kind != ""
-    graph: store_lifecycle_closure_graph_unlocked(verification, roots) ?? return Err(IngestError.Invalid(err.message()))
+    migrated: store_migrate_closure_graph_unlocked(verification, roots) ?? return Err(IngestError.Invalid(err.message()))
+    graph: migrated.graph
     record: graph.records.get(entry.id) ?? return Err(IngestError.Invalid("closure graph has no record `{entry.id}`"))
     if record.primary != entry.envelope.output_hash || record.action_key != store_entry_action_key(entry) || record.references != store_lifecycle_sorted_set(entry.references) {
         return Err(IngestError.Invalid("closure graph disagrees with record `{entry.id}`"))
@@ -254,4 +255,99 @@ store_verify_hangar_object_unlocked: fn(verification: StoreVerification, roots: 
             return Err(IngestError.Invalid("closure record `{entry.id}` references missing object `{reference}`"))
         }
     }
+    store_validate_graph_store_proofs(verification, roots, graph, false) ?? return Err(IngestError.Invalid(err.message()))
+}
+
+STORE_LEGACY_MIGRATION_PARTIAL: ".hangar-migration.partial"
+
+// Copy the pre-cutover user Hangar (`$XDG_STATE_HOME/jet/hangar`) into the
+// native user data Hangar (`$XDG_DATA_HOME/jet/hangar`) via an atomic staged
+// rename without consuming or modifying the legacy tree. Explicit
+// `JETPACK_ROOT` roots never migrate. Any escaping link or leftover staging
+// directory fails closed so repair state stays visible.
+store_migrate_legacy_user_hangar: fn(roots: HangarRoots) -[FS, Env, Time]> StoreError! {
+    if !roots.dev_mode {
+        return
+    }
+    target: roots.hangar_dir()
+    legacy: pkg_legacy_user_hangar_dir()
+    if target == legacy || files.exists(target) {
+        return
+    }
+    partial: files.join(roots.root, STORE_LEGACY_MIGRATION_PARTIAL)
+    if !files.exists(partial) && !files.exists(legacy) {
+        return
+    }
+    _lock: env_runtime_lock(roots.root, "hangar-migration")
+    if files.exists(target) {
+        return
+    }
+    if files.exists(partial) {
+        return Err(StoreError.InvalidData("incomplete Hangar migration found at `{partial}`"))
+    }
+    if !files.exists(legacy) {
+        return
+    }
+    legacy_meta: store_node_stat(legacy) ?? return
+    if legacy_meta.is_symlink || !legacy_meta.is_dir {
+        return Err(StoreError.InvalidData("legacy Hangar `{legacy}` is not a real directory"))
+    }
+    legacy_root: files.canonicalize(legacy) ?? legacy
+    files.create_dir_all(partial)
+    store_migrate_copy_tree(legacy, partial, legacy_root)
+    files.rename(partial, target)
+}
+
+store_migrate_copy_tree: fn(source: String, destination: String, legacy_root: String) -[FS]> StoreError! {
+    entries: files.list_dir(source)
+    loop entry in entries {
+        source_path: entry.path
+        dest_path: files.join(destination, entry.name)
+        info: store_node_stat(source_path) ?? next
+        if info.is_symlink {
+            link_target: files.read_link(source_path)
+            if !store_migrate_link_stays_inside(source_path, link_target, legacy_root) {
+                return Err(StoreError.InvalidData("Hangar migration path `{source_path}` escapes its migration root"))
+            }
+            files.symlink(link_target, dest_path)
+            next
+        }
+        if info.is_dir {
+            files.create_dir_all(dest_path)
+            store_migrate_copy_tree(source_path, dest_path, legacy_root)
+            files.set_mode(dest_path, info.mode & 0o777)
+            next
+        }
+        if info.is_file {
+            files.copy2(source_path, dest_path)
+            files.set_mode(dest_path, info.mode & 0o777)
+            next
+        }
+        return Err(StoreError.InvalidData("Hangar migration path `{source_path}` is not a regular file, directory, or symlink"))
+    }
+}
+
+store_migrate_link_stays_inside: fn(link_path: String, link_target: String, legacy_root: String) -[FS]> Bool Never! {
+    base: files.dirname(link_path)
+    combined: if link_target.starts_with("/") -> link_target else -> files.join(base, link_target)
+    normalized: store_migrate_normalize_lexical(combined)
+    root_norm: store_migrate_normalize_lexical(legacy_root)
+    if !store_path_starts_with(normalized, root_norm) -> return false
+    if files.canonicalize(link_path) == .Ok(resolved) {
+        if !store_path_starts_with(resolved, legacy_root) -> return false
+    }
+    true
+}
+
+store_migrate_normalize_lexical: fn(path: String) -> String Never! {
+    ^parts: [String]{}
+    loop segment in path.split("/") {
+        if segment == "" || segment == "." -> next
+        if segment == ".." {
+            if parts.len() > 0 -> parts.pop().drop("pop parent path segment")
+            next
+        }
+        parts.push(segment)
+    }
+    "/{parts.join("/")}"
 }

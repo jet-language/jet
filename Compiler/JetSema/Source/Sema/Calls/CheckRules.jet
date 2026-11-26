@@ -50,6 +50,7 @@ use {
         diagnostic_with_label,
         expr_source_span,
         expr_span,
+        module_text,
         name_column_table,
         name_index,
         name_intern,
@@ -1456,7 +1457,7 @@ sema_call_rule_batch_source: fn(graph: SemaRegistrationGraph, batch: SemaCallRul
     if sema_registration_module_index(graph, batch.module_identity) == .Val(row) {
         file = "{graph.modules[row].source_file}"
     }
-    marker: Type.Named{name: batch.marker}
+    marker: Type.Named{name: sema_checked_module_key(module_text(graph.module_table, batch.module_identity), batch.marker)}
     texts: TComptimeValue.List{values: loop text in columns.names.texts -> TComptimeValue.String{value: "{text}"}}
     SemaComptimeItemSource{
         module_identity: batch.module_identity,

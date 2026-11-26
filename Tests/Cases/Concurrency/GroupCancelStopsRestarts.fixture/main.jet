@@ -1,0 +1,80 @@
+// Canceling a supervised group stops restarts immediately and joins every
+// worker so no worker outlives the group.
+use {
+    files: core.files
+    tasks: core.tasks
+    time: core.time
+}
+
+bump: fn(cell: Shared<Int>, delta: Int) -> Int Never! {
+    ^guard: cell.guard_edit()
+    guard.value += delta
+    guard.value
+}
+
+threads: fn() -[FS]> Int {
+    text: files.read("/proc/self/status") ?? panic("read status")
+    loop line in text.lines() {
+        if line.starts_with("Threads:") {
+            return Int.parse(line.remove_prefix("Threads:").trim()) ?? -1
+        }
+    }
+    -1
+}
+
+wait_quiesce: fn() -[Exec, Time.Wait]> Bool {
+    loop _ in 0..<100 {
+        if tasks.quiesce() -> return true
+        time.sleep(5ms)
+    }
+    false
+}
+
+run: fn() {
+    before: threads()
+    restarts_seen: Shared{0}
+    active: Shared{0}
+    restarts_w: restarts_seen.copy()
+    active_w1: active.copy()
+    active_w2: active.copy()
+    { sender: ready_tx1, receiver: ready_rx1 }: channel<Int>(capacity: 4)
+    { sender: ready_tx2, receiver: ready_rx2 }: channel<Int>(capacity: 4)
+    group: tasks.supervised_group(tasks.RestartPolicy{limit: 100, window: 60s, backoff: 15ms})
+    group.spawn("flaky", fn() Err! {
+        _: bump(restarts_w, 1)
+        _: bump(active_w1, 1)
+        defer { _: bump(active_w1, -1) }
+        if ready_tx1.send(1) == {
+            .Ok(_) -> {}
+            .Err(_) -> {}
+        }
+        panic("keep failing")
+    })
+    group.spawn("sleeper", fn() Err! {
+        _: bump(active_w2, 1)
+        defer { _: bump(active_w2, -1) }
+        if ready_tx2.send(1) == {
+            .Ok(_) -> {}
+            .Err(_) -> {}
+        }
+        time.sleep(10s)
+        Ok()
+    })
+    _: ready_rx1.receive() ?? panic("flaky never started")
+    _: ready_rx2.receive() ?? panic("sleeper never started")
+    group.cancel()
+    if group.wait() == {
+        .Err(.Canceled) -> print("canceled: true")
+        .Err(other) -> panic("expected Canceled, got {other.display()}")
+        .Ok(_) -> panic("expected Canceled, got Ok")
+    }
+    active_after: active.guard_read().value
+    runs_after_cancel: restarts_seen.guard_read().value
+    time.sleep(60ms)
+    runs_later: restarts_seen.guard_read().value
+    quiesced: wait_quiesce()
+    after: threads()
+    print("active_after_wait: {active_after}")
+    print("restarts_stopped: {runs_later == runs_after_cancel}")
+    print("quiesced: {quiesced && after == before}")
+}

@@ -28,6 +28,48 @@ EffectVocabularyRow: struct {
     // Never held by default nor through a parent: only a package that names
     // it, or an expert effect above it, holds it.
     expert: Bool{false},
+    // What this effect does to kept data: Reads, Adds, or Replaces.
+    access: EffectAccess{EffectAccess.Reads},
+}
+
+effect_access_rank: fn(access: EffectAccess) -> Int Never! {
+    if access == {
+        .Reads -> 0
+        .Adds -> 1
+        .Replaces -> 2
+    }
+}
+
+// The stronger of two access classes: Replaces > Adds > Reads.
+effect_access_max: fn(left: EffectAccess, right: EffectAccess) -> EffectAccess Never! {
+    if effect_access_rank(right) > effect_access_rank(left) -> right else -> left
+}
+
+effect_access_name: fn(access: EffectAccess) -> String Never! {
+    if access == {
+        .Reads -> "Reads"
+        .Adds -> "Adds"
+        .Replaces -> "Replaces"
+    }
+}
+
+effect_access_parse: fn(text: String) -> EffectAccess? Never! {
+    cleaned: text.trim()
+    if cleaned == {
+        ".Reads" | "EffectAccess.Reads" -> Val(EffectAccess.Reads)
+        ".Adds" | "EffectAccess.Adds" -> Val(EffectAccess.Adds)
+        ".Replaces" | "EffectAccess.Replaces" -> Val(EffectAccess.Replaces)
+        else -> None
+    }
+}
+
+// The declared access class of built-in effect `name` (root or leaf), or
+// Reads when not in the vocabulary.
+effect_vocabulary_access: fn(name: String) -> EffectAccess Never! {
+    loop row in EFFECT_VOCABULARY_ROWS {
+        if row.name == name -> return row.access
+    }
+    EffectAccess.Reads
 }
 
 // Every declared root and leaf, in source order.
@@ -267,13 +309,18 @@ effect_vocabulary_source_scan: fn(source: String, path: String, machine: [Effect
     ^case_spans: [Span]{}
     ^body: String?{None}
     ^expert_body: String?{None}
+    ^access_body: String?{None}
     ^parent: String?{None}
     ^impl_seen: false
     ^in_impl: false
+    ^access_depth: 0
+    ^access_lines: [String]{}
     ^kernel: [String]{}
     ^listed: false
     impl_head: "irreversible: fn(self) -> Bool {{ "
     expert_head: "expert: fn(self) -> Bool {{ "
+    access_head: "access: fn(self) -> EffectAccess {{ "
+    access_open: "access: fn(self) -> EffectAccess {{"
     parent_head: "parent: "
     ^offset: base
     loop index in 0..<lines.len() {
@@ -323,16 +370,32 @@ effect_vocabulary_source_scan: fn(source: String, path: String, machine: [Effect
             case_spans = [Span]{}
             body = None
             expert_body = None
+            access_body = None
             parent = None
             impl_seen = false
             next
         }
         if in_impl {
+            if access_depth > 0 {
+                if line == "}}" {
+                    access_depth -= 1
+                    if access_depth == 0 {
+                        access_body = Val(access_lines.join("\n"))
+                        access_lines = [String]{}
+                        next
+                    }
+                    access_lines.push(line)
+                    next
+                }
+                if line.ends_with("{{") -> access_depth += 1
+                access_lines.push(line)
+                next
+            }
             if line == "}}" {
                 in_impl = false
                 next
             }
-            if line.starts_with(parent_head) && parent == None && family && cases.len() > 0 && body == None && expert_body == None {
+            if line.starts_with(parent_head) && parent == None && family && cases.len() > 0 && body == None && expert_body == None && access_body == None {
                 written: line.removeprefix(parent_head).removesuffix(",").trim()
                 if written.split(".").to_list().len() != 2 || effect_vocabulary_row_at(rows, written) < 0 {
                     build_time_refused("{place}: `parent: {written}` names no `Root.Case` effect declared above it")
@@ -347,8 +410,17 @@ effect_vocabulary_source_scan: fn(source: String, path: String, machine: [Effect
                 expert_body = Val(line.removeprefix(expert_head).removesuffix(" }}").trim())
                 next
             }
-            if body != None || expert_body != None || !line.starts_with(impl_head) || !line.ends_with(" }}") {
-                build_time_refused("{place}: expected `parent: Root.Case`, then one `irreversible: fn(self) -> Bool {{ … }}` line, then one `expert: fn(self) -> Bool {{ … }}` line in `impl Effect`")
+            if line == access_open && access_body == None {
+                access_depth = 1
+                access_lines = [String]{}
+                next
+            }
+            if line.starts_with(access_head) && line.ends_with(" }}") && access_body == None {
+                access_body = Val(line.removeprefix(access_head).removesuffix(" }}").trim())
+                next
+            }
+            if body != None || !line.starts_with(impl_head) || !line.ends_with(" }}") {
+                build_time_refused("{place}: expected `parent: Root.Case`, `irreversible: fn(self) -> Bool {{ … }}`, `expert: fn(self) -> Bool {{ … }}`, or `access: fn(self) -> EffectAccess {{ … }}` in `impl Effect`")
             }
             body = Val(line.removeprefix(impl_head).removesuffix(" }}").trim())
             next
@@ -366,30 +438,39 @@ effect_vocabulary_source_scan: fn(source: String, path: String, machine: [Effect
             if family && cases.len() == 0 {
                 build_time_refused("{place}: the effect family `{type_name}` has no cases")
             }
-            ^case_facts: [{irreversible: Bool, expert: Bool}]{}
+            ^parent_access: EffectAccess.Reads
+            if parent == .Val(parent_name) {
+                parent_index: effect_vocabulary_row_at(rows, parent_name)
+                if parent_index >= 0 -> parent_access = rows[parent_index].access
+            }
+            ^case_facts: [{irreversible: Bool, expert: Bool, access: EffectAccess}]{}
             ^any: false
+            ^root_access: EffectAccess.Reads
             loop member in cases {
                 irreversible: effect_vocabulary_fact(body, cases, Val(member)) ?? build_time_refused("{place}: `{type_name}`'s `irreversible` body is not `true`, `false`, `self == .Case` or an `||` of those")
                 expert: effect_vocabulary_fact(expert_body, cases, Val(member)) ?? build_time_refused("{place}: `{type_name}`'s `expert` body is not `true`, `false`, `self == .Case` or an `||` of those")
+                access: if access_body == None && parent != None -> parent_access else -> (effect_vocabulary_access_fact(access_body, cases, Val(member)) ?? build_time_refused("{place}: `{type_name}`'s `access` body is not `.Reads`, `.Adds`, `.Replaces`, or an `if self == .Case -> …` chain"))
                 if irreversible -> any = true
-                case_facts.push({irreversible: irreversible, expert: expert})
+                root_access = effect_access_max(root_access, access)
+                case_facts.push({irreversible: irreversible, expert: expert, access: access})
             }
             ^root: any
             ^root_expert: false
             if !family {
                 root = effect_vocabulary_fact(body, cases, None) ?? build_time_refused("{place}: `{type_name}`'s `irreversible` body is not `true` or `false`")
                 root_expert = effect_vocabulary_fact(expert_body, cases, None) ?? build_time_refused("{place}: `{type_name}`'s `expert` body is not `true` or `false`")
+                root_access = effect_vocabulary_access_fact(access_body, cases, None) ?? build_time_refused("{place}: `{type_name}`'s `access` body is not `.Reads`, `.Adds`, or `.Replaces`")
             }
             // A family under a parent case names its cases below that case.
             prefix: parent ?? type_name
             if parent == None {
-                decls.push(EffectDecl{name: "{type_name}", name_span: type_span, irreversible: root, span: type_span})
-                rows.push(EffectVocabularyRow{name: type_name.copy(), irreversible: root, kernel: kernel.copy(), expert: root_expert})
+                decls.push(EffectDecl{name: "{type_name}", name_span: type_span, irreversible: root, span: type_span, access: root_access})
+                rows.push(EffectVocabularyRow{name: type_name.copy(), irreversible: root, kernel: kernel.copy(), expert: root_expert, access: root_access})
             }
             loop (at, member) in cases {
                 full: "{prefix}.{member}"
-                decls.push(EffectDecl{name: "{full}", name_span: case_spans[at], irreversible: case_facts[at].irreversible, span: case_spans[at]})
-                rows.push(EffectVocabularyRow{name: full, irreversible: case_facts[at].irreversible, kernel: kernel.copy(), expert: case_facts[at].expert})
+                decls.push(EffectDecl{name: "{full}", name_span: case_spans[at], irreversible: case_facts[at].irreversible, span: case_spans[at], access: case_facts[at].access})
+                rows.push(EffectVocabularyRow{name: full, irreversible: case_facts[at].irreversible, kernel: kernel.copy(), expert: case_facts[at].expert, access: case_facts[at].access})
             }
             type_name = ""
             kernel = [String]{}
@@ -459,4 +540,62 @@ effect_vocabulary_fact: fn(body: String?, cases: [String], member: String?) -> B
         }
     }
     Val(holds)
+}
+
+// An `access` body's value for one case (None for a struct), or None when the
+// body is not `.Reads`, `.Adds`, `.Replaces`, an `if self == .Case -> …`
+// chain, or an `if { self == .Case -> …; else -> … }` arm table. No body
+// defaults to `Reads`.
+effect_vocabulary_access_fact: fn(body: String?, cases: [String], member: String?) -> EffectAccess? {
+    written: body ?? return Val(EffectAccess.Reads)
+    if effect_access_parse(written) == .Val(direct) -> return Val(direct)
+    if member == None -> return None
+    if written.starts_with("if {{") && written.ends_with("}}") {
+        inner: written.removeprefix("if {{").removesuffix("}}").trim()
+        ^matched: EffectAccess?{None}
+        ^fallback: EffectAccess?{None}
+        loop raw_arm in inner.split("\n") {
+            arm: raw_arm.trim()
+            if arm == "" -> next
+            arrow: arm.find(" -> ")
+            if arrow < 0 -> return None
+            cond_text: foundation_byte_text(arm.bytes(), 0, arrow).trim()
+            val_text: foundation_byte_text(arm.bytes(), arrow + 4, arm.bytes().len()).trim()
+            parsed: effect_access_parse(val_text) ?? return None
+            if cond_text == "else" {
+                fallback = Val(parsed)
+                next
+            }
+            cond: effect_vocabulary_fact(Val(cond_text), cases, member) ?? return None
+            if matched == None && cond -> matched = Val(parsed)
+        }
+        if matched == .Val(found) -> return Val(found)
+        return fallback
+    }
+    if !written.starts_with("if ") -> return None
+    ^rest: written.removeprefix("if ")
+    ^matched: EffectAccess?{None}
+    loop {
+        arrow: rest.find(" -> ")
+        if arrow < 0 -> return None
+        cond_text: foundation_byte_text(rest.bytes(), 0, arrow).trim()
+        cond: effect_vocabulary_fact(Val(cond_text), cases, member) ?? return None
+        after_arrow: foundation_byte_text(rest.bytes(), arrow + 4, rest.bytes().len()).trim()
+        else_if: after_arrow.find(" else if ")
+        else_at: after_arrow.find(" else -> ")
+        if else_if >= 0 && (else_at < 0 || else_if < else_at) {
+            branch_text: foundation_byte_text(after_arrow.bytes(), 0, else_if).trim()
+            branch: effect_access_parse(branch_text) ?? return None
+            if matched == None && cond -> matched = Val(branch)
+            rest = foundation_byte_text(after_arrow.bytes(), else_if + 9, after_arrow.bytes().len()).trim()
+            next
+        }
+        if else_at < 0 -> return None
+        then_text: foundation_byte_text(after_arrow.bytes(), 0, else_at).trim()
+        else_text: foundation_byte_text(after_arrow.bytes(), else_at + 9, after_arrow.bytes().len()).trim()
+        then_val: effect_access_parse(then_text) ?? return None
+        else_val: effect_access_parse(else_text) ?? return None
+        if matched == .Val(found) -> return Val(found)
+        return Val(if cond -> then_val else -> else_val)
+    }
 }

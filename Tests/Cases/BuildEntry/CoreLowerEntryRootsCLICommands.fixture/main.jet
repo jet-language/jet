@@ -1,0 +1,18 @@
+// Helpers reached only from `#CLI` command methods.
+format_greet: fn(greeting: String, name: String) -> String { "{greeting}, {name}" }
+
+format_count: fn(times: Int) -> String { "count={times}" }
+
+// Nothing reaches `never_called`.
+never_called: fn(count: Int) -> Int { count * 3 + 1 }
+
+#CLI
+Tool: struct {
+    #Doc("the greeting") greeting: String{"hi"},
+
+    #Doc("greet someone") greet: fn(self, name: String) { print(format_greet(self.greeting, name)) }
+
+    #Doc("count up") count: fn(self, times: Int{2}) { print(format_count(times)) }
+}
+
+run: fn(_args: Tool) {}

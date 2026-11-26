@@ -1,0 +1,43 @@
+// A 2s idle event loop wait with 10 ticks uses under 5% of one CPU, shows
+// exactly 10 wakeups, and returns open file descriptors to baseline after cancel.
+use {
+    files: core.files
+    tasks: core.tasks
+    time: core.time
+}
+
+fd_count: fn() -[FS.Read]> Int {
+    entries: files.list_dir("/proc/self/fd") ?? panic("list /proc/self/fd")
+    entries.len()
+}
+
+wait_quiesce: fn() -[Exec, Time.Wait]> Bool {
+    loop _ in 0..<100 {
+        if tasks.quiesce() -> return true
+        time.sleep(5ms)
+    }
+    false
+}
+
+run: fn() {
+    fds_before: fd_count()
+    cpu_before: tasks.cpu_ns()
+    sw: time.start()
+    ticks: tasks.interval(200ms)
+    ^wakeups: 0
+    loop wakeups < 10 {
+        tick: ticks.receive() ?? panic("interval closed early")
+        assert_eq(tick, wakeups + 1)
+        wakeups += 1
+    }
+    _: tasks.cancel(ticks)
+    elapsed_ms: sw.elapsed_millis()
+    cpu_used_ns: tasks.cpu_ns() - cpu_before
+    quiesced: wait_quiesce()
+    fds_after: fd_count()
+    print("wakeups: {wakeups}")
+    print("elapsed_ok: {elapsed_ms >= 1800}")
+    print("cpu_under_5pct: {cpu_used_ns * 20 < elapsed_ms * 1000000}")
+    print("quiesced: {quiesced}")
+    print("fds_restored: {fds_after == fds_before}")
+}

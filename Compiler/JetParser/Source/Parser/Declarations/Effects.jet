@@ -5,6 +5,7 @@ use {
         BinOp,
         Diagnostic,
         EFFECT_VOCABULARY_ROWS,
+        EffectAccess,
         EffectDecl,
         EffectImpl,
         Expr,
@@ -16,6 +17,7 @@ use {
         Span,
         Variant,
         diagnostic_from_registry,
+        effect_access_max,
         expr_span,
     ]
     jet_lexer.[
@@ -80,11 +82,24 @@ parser_parse_effect_impl: fn(state: ^JetParserState, type_name: String, repeated
     Val(declared)
 }
 
-// One method of `impl Effect` joins `declared`: the `irreversible` or
-// `expert` fact, each once, or a report.
+// One method of `impl Effect` joins `declared`: the `irreversible`, `expert`,
+// or `access` fact, each once, or a report.
 parser_effect_method_take: fn(declared: ^EffectImpl, method: Func, type_name: String, reports: ^[Diagnostic]) Never! {
     if parser_effect_method_problem(method) == .Val(problem) {
         reports.push(problem)
+        return
+    }
+    if method.name == "access" {
+        if declared.access_span != None {
+            reports.push(parser_effect_method_twice_report(method.name_span, method.name))
+            return
+        }
+        declared.access_span = Val(method.span)
+        body: parser_effect_method_body(method) ?? {
+            reports.push(parser_effect_access_report(method.name_span, type_name))
+            return
+        }
+        declared.access = Val(body)
         return
     }
     expert: method.name == "expert"
@@ -131,6 +146,10 @@ parser_effect_body_report: fn(span: Span, type_name: String, method: String) -> 
     diagnostic_from_registry("E0633", Val(span), "this `{method}: fn` body is not an effect fact", "the compiler reads `{method}` without running it, so its body is `true`, `false`, `self == .Case` or an `||` of those, naming cases of `{type_name}`", "write `{{ true }}`, `{{ false }}` or `{{ self == .Write }}`")
 }
 
+parser_effect_access_report: fn(span: Span, type_name: String) -> Diagnostic Never! {
+    diagnostic_from_registry("E0633", Val(span), "this `access: fn` body is not an effect access fact", "the compiler reads `access` without running it, so its body is `.Reads`, `.Adds`, `.Replaces`, or an `if self == .Case -> … else -> …` chain naming cases of `{type_name}`", "write `{{ .Reads }}`, `{{ .Adds }}`, `{{ .Replaces }}`, or `{{ if self == .Read -> .Reads else -> .Replaces }}`")
+}
+
 // `report`, unless the parser is abandoning the item it is in.
 parser_add_report: fn(state: ^JetParserState, report: ^^Diagnostic) {
     if !parser_aborting(state) -> state.diagnostics.push(report.move())
@@ -138,22 +157,28 @@ parser_add_report: fn(state: ^JetParserState, report: ^^Diagnostic) {
 
 // The report for a second `impl Effect` block of `type_name` at `span`.
 parser_effect_repeated_report: fn(span: Span, type_name: String) -> Diagnostic Never! {
-    diagnostic_from_registry("E0908", Val(span), "`{type_name}` has a second `impl Effect` block", "a type declares one effect, so its one method shares one block", "move these members into the first `impl Effect` block")
+    diagnostic_from_registry("E0908", Val(span), "`{type_name}` has a second `impl Effect` block", "a type declares one effect, so its methods share one block", "move these members into the first `impl Effect` block")
 }
 
 // The report for a method of `impl Effect` that is not `irreversible: fn(self)
-// -> Bool` or `expert: fn(self) -> Bool`, or None for one of those.
+// -> Bool`, `expert: fn(self) -> Bool`, or `access: fn(self) -> EffectAccess`,
+// or None for one of those.
 parser_effect_method_problem: fn(method: Func) -> Diagnostic? Never! {
     ^returns_bool: false
     if method.return_type == .Val(returned) && returned == .Bool -> returns_bool = true
     if method.return_type == .Val(returned) && returned == .Named(returned_name) && returned_name == "Bool" {
         returns_bool = true
     }
-    known: method.name == "irreversible" || method.name == "expert"
-    shaped: known && method.type_params.len() == 0 && method.params.len() == 1 && method.params[0].name == "self" && method.params[0].convention == AccessConvention.Read && returns_bool && method.declared_effects == None
+    ^returns_access: false
+    if method.return_type == .Val(returned) && returned == .Named(returned_name) && returned_name == "EffectAccess" {
+        returns_access = true
+    }
+    known: method.name == "irreversible" || method.name == "expert" || method.name == "access"
+    return_ok: if method.name == "access" -> returns_access else -> returns_bool
+    shaped: known && method.type_params.len() == 0 && method.params.len() == 1 && method.params[0].name == "self" && method.params[0].convention == AccessConvention.Read && return_ok && method.declared_effects == None
     if shaped -> return None
     what: if known -> "`{method.name}: fn` doesn't match the `Effect` contract" else -> "`{method.name}` is not a method of `Effect`"
-    Val(diagnostic_from_registry("E0907", Val(method.name_span), what, "`impl Effect` has one method, which says whether the effect's work can be rolled back", "write `irreversible: fn(self) -> Bool {{ … }}`"))
+    Val(diagnostic_from_registry("E0907", Val(method.name_span), what, "`impl Effect` accepts `irreversible: fn(self) -> Bool` and `access: fn(self) -> EffectAccess`", "write `irreversible: fn(self) -> Bool {{ … }}` or `access: fn(self) -> EffectAccess {{ … }}`"))
 }
 
 parser_effect_method_twice_report: fn(span: Span, method: String) -> Diagnostic Never! {
@@ -226,15 +251,32 @@ parser_effect_type_decls: fn(type_name: String, name_span: Span, effect_impl: Ef
             }
         }
     }
+    ^access_body: declared.access
+    if access_body == .Val(value) && parser_effect_access_problem(value, names, cases.len() > 0) == .Val(span) {
+        reports.push(parser_effect_access_report(span, type_name))
+        access_body = None
+    }
+    ^parent_access: EffectAccess.Reads
+    if access_body == None && declared.parent == .Val(written) {
+        loop row in EFFECT_VOCABULARY_ROWS {
+            if row.name == written.name -> parent_access = row.access
+        }
+    }
     ^case_decls: [EffectDecl]{}
     ^any: false
+    ^root_access: EffectAccess.Reads
     loop member in cases {
         if !names.contains(member.name) -> next
         irreversible: parser_effect_fact_value(body, Val(member.name))
         if irreversible -> any = true
-        case_decls.push(EffectDecl{name: "{prefix}.{member.name}", name_span: member.name_span, irreversible: irreversible, span: member.name_span})
+        case_access: if access_body == None && declared.parent != None -> parent_access else -> parser_effect_access_value(access_body, Val(member.name))
+        root_access = effect_access_max(root_access, case_access)
+        case_decls.push(EffectDecl{name: "{prefix}.{member.name}", name_span: member.name_span, irreversible: irreversible, span: member.name_span, access: case_access})
     }
     ^root: if cases.len() == 0 -> parser_effect_fact_value(body, None) else -> any
+    if cases.len() == 0 {
+        root_access = if access_body == None && declared.parent != None -> parent_access else -> parser_effect_access_value(access_body, None)
+    }
     if body == None && nested == None && declared.parent == .Val(written) {
         loop row in EFFECT_VOCABULARY_ROWS {
             if row.name == written.name -> root = row.irreversible
@@ -242,11 +284,12 @@ parser_effect_type_decls: fn(type_name: String, name_span: Span, effect_impl: Ef
     }
     ^decls: [EffectDecl]{}
     if nested == None {
-        decls.push(EffectDecl{name: type_name, name_span: name_span, irreversible: root, span: name_span})
+        decls.push(EffectDecl{name: type_name, name_span: name_span, irreversible: root, span: name_span, access: root_access})
     }
     loop declaration in case_decls -> decls.push(declaration)
     declared.decls = decls
     declared.irreversible = body
+    declared.access = access_body
     declared
 }
 
@@ -479,4 +522,69 @@ parser_effect_fact_holds: fn(expr: Expr, member: String?) -> Bool Never! {
     named: parser_effect_fact_case(expr) ?? return false
     if member == .Val(case_name) -> return case_name == named
     false
+}
+
+// The EffectAccess case `.Reads`, `.Adds`, `.Replaces`, or `EffectAccess.*`
+// spelled by `expr`, or None.
+parser_effect_access_literal: fn(expr: Expr) -> EffectAccess? Never! {
+    if expr == {
+        .Paren(inner, _, _) -> return parser_effect_access_literal(inner)
+        .EnumLit(type_name, variant, _, args, leading_dot, _, _) -> {
+            if args.len() != 0 -> return None
+            if !leading_dot && type_name != "EffectAccess" -> return None
+            if variant == {
+                "Reads" -> return Val(EffectAccess.Reads)
+                "Adds" -> return Val(EffectAccess.Adds)
+                "Replaces" -> return Val(EffectAccess.Replaces)
+                else -> return None
+            }
+        }
+        .Field(base, member, _, _) -> {
+            if base == .Ident(name, _, _) && name == "EffectAccess" {
+                if member == {
+                    "Reads" -> return Val(EffectAccess.Reads)
+                    "Adds" -> return Val(EffectAccess.Adds)
+                    "Replaces" -> return Val(EffectAccess.Replaces)
+                    else -> return None
+                }
+            }
+        }
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
+    }
+    None
+}
+
+// The first part of an `access` body outside `.Reads`/`.Adds`/`.Replaces` or
+// an `if self == .Case -> … else -> …` chain, or None when valid.
+parser_effect_access_problem: fn(expr: Expr, cases: [String], family: Bool) -> Span? Never! {
+    if parser_effect_access_literal(expr) != None -> return None
+    if expr == {
+        .Paren(inner, _, _) -> return parser_effect_access_problem(inner, cases, family)
+        .If(cond, then_body, then_value, else_body, else_value, span, _) -> {
+            if !family || then_body.len() != 0 || else_body.len() != 0 -> return Val(span)
+            if parser_effect_fact_problem(cond, cases, family) == .Val(problem) -> return Val(problem)
+            if parser_effect_access_literal(then_value) == None -> return Val(expr_span(then_value))
+            return parser_effect_access_problem(else_value, cases, family)
+        }
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
+    }
+    Val(expr_span(expr))
+}
+
+parser_effect_access_value: fn(body: Expr?, member: String?) -> EffectAccess Never! {
+    value: body ?? return EffectAccess.Reads
+    parser_effect_access_eval(value, member)
+}
+
+parser_effect_access_eval: fn(expr: Expr, member: String?) -> EffectAccess Never! {
+    if parser_effect_access_literal(expr) == .Val(direct) -> return direct
+    if expr == {
+        .Paren(inner, _, _) -> return parser_effect_access_eval(inner, member)
+        .If(cond, _, then_value, _, else_value, _, _) -> {
+            if parser_effect_fact_holds(cond, member) -> return parser_effect_access_eval(then_value, member)
+            return parser_effect_access_eval(else_value, member)
+        }
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
+    }
+    EffectAccess.Reads
 }

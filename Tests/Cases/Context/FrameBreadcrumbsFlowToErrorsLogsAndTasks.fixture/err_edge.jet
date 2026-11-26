@@ -1,0 +1,14 @@
+parse_amount: fn(raw: String) -> Int Err! { Err("invalid number: {raw}") }
+
+import_row: fn(row: Int, raw: String) -> Int Err! {
+    #Frame("row {row}") {
+        amount: parse_amount(raw)?("parsing amount")
+        return Ok(amount)
+    }
+    Ok(0)
+}
+
+run: fn() Err! {
+    #Frame("importing orders.csv") { _: import_row(42, "abc") }
+    Ok()
+}
