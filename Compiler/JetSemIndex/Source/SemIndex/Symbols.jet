@@ -21,12 +21,16 @@ use {
         Type,
         builtin_static_numeric_row,
         builtin_static_rows,
+        type_identity_unqualified_nominals,
         type_name,
         access_sigil,
         marker_decl_signature,
+        name_facts_leaf,
+        name_ledger_declaration,
         name_ledger_display_path,
         name_ledger_display_path_at,
         name_ledger_canonical_path,
+        name_ledger_visible,
     ]
     jet_sema.[
         sema_registration_unit_family_type_names,
@@ -621,7 +625,7 @@ semindex_symbol_shape: fn(name: String, kind: SemKind, owner: String?) -> SemSym
             shape = SemSymbolShape{kind: SemSymbolKind.Member, signature: "{parent}.{name}: {type_name(ty)}"}
         }
         .Local(_, ty) -> {
-            shown: if ty == .Val(value) -> type_name(value) else -> "value"
+            shown: if ty == .Val(value) -> type_name(type_identity_unqualified_nominals(value)) else -> "value"
             shape = SemSymbolShape{kind: SemSymbolKind.Local, signature: "{name}: {shown}"}
         }
         .Param(ty) -> {
@@ -846,12 +850,57 @@ semindex_symbol_module_at: fn(modules: [JetDriverDocModule]) -> [String:Int] Nev
     module_at
 }
 
-semindex_symbol_display: fn(modules: [JetDriverDocModule], module_at: [String:Int], module_path: String, name: String) -> String Never! {
+// The display name of a declaration in `module_path` when spelling its
+// signature or owner: preserves ledger display projections (such as lifted
+// inline-module types `geo.Point` or generated instance paths), and qualifies
+// only when another indexed module or visible import alias introduces a
+// competing path — never against unimported Core modules that happen to share
+// a leaf name like `parse` or `Meter`.
+semindex_symbol_display: fn(modules: [JetDriverDocModule], module_at: [String:Int], indexed_modules: [Int:Bool], module_path: String, name: String) -> String Never! {
     if module_at.get(module_path) == .Val(position) {
         doc_module: modules[position]
-        storage: doc_module.name_ledger ?? return name
+        storage: doc_module.name_ledger ?? return "{name}"
         permit: storage.guard_read()
-        return name_ledger_display_path(permit.value, doc_module.name_module_index, name, Val(doc_module.name_module_index)) ?? name
+        ledger: permit.value
+        from: doc_module.name_module_index
+        if name.contains(".") || name.starts_with("__jet_") {
+            return name_ledger_display_path(ledger, from, name, Val(from)) ?? "{name}"
+        }
+        decl: name_ledger_declaration(ledger, from, name) ?? return (name_ledger_display_path(ledger, from, name, Val(from)) ?? "{name}")
+        if ledger.display_paths.get({module_index: from, path: decl.path}) == .Val(projected) {
+            return projected
+        }
+        ^ambiguous: false
+        loop index in (ledger.declaration_names.get(name) ?? [Int]{}) {
+            row: ledger.facts.declarations[index]
+            if row.module_index == from || !indexed_modules.has_key(row.module_index) -> next
+            if !name_ledger_visible(ledger, from, row.module_index, name) -> next
+            other_path: ledger.display_paths.get({module_index: row.module_index, path: "{row.path}"}) ?? "{row.path}"
+            if other_path != decl.path {
+                ambiguous = true
+                break
+            }
+        }
+        if !ambiguous {
+            loop index in (ledger.alias_names.get(name) ?? [Int]{}) {
+                alias: ledger.facts.aliases[index]
+                if !indexed_modules.has_key(alias.module_index) -> next
+                if !name_ledger_visible(ledger, from, alias.module_index, name) -> next
+                ^target_path: String?{None}
+                if alias.target_module == .Val(target) {
+                    if name_ledger_declaration(ledger, target, name_facts_leaf(alias.target)) == .Val(target_row) {
+                        target_path = Val(ledger.display_paths.get({module_index: target, path: target_row.path}) ?? target_row.path)
+                    }
+                }
+                if target_path == None && alias.target.contains(".") -> target_path = Val("{alias.target}")
+                if target_path == .Val(other_path) && other_path != decl.path {
+                    ambiguous = true
+                    break
+                }
+            }
+        }
+        if ambiguous -> return decl.path
+        return "{name}"
     }
     // copy: `name` stays with the caller (`name` is a read parameter: no move out of it, E0201) and
     // the returned value owns its own.
@@ -893,6 +942,10 @@ semindex_build_symbols: fn(index: SemIndex, modules: [JetDriverDocModule]) -> [S
         }
     }
     module_at: semindex_symbol_module_at(modules)
+    ^indexed_modules: [Int:Bool]{}
+    loop doc_module in modules {
+        if doc_module.name_module_index >= 0 -> indexed_modules[doc_module.name_module_index] = true
+    }
     markers: semindex_symbol_markers(modules)
     // A module path -> the last module of that path, whose source the docs
     // read; and each module's source bytes, read once.
@@ -916,10 +969,10 @@ semindex_build_symbols: fn(index: SemIndex, modules: [JetDriverDocModule]) -> [S
                 .Module | .Function(_) | .Struct(_, _) | .Enum(_, _) | .Trait | .Tag | .Type(_) | .Const | .Local(_, _) | .Param(_) -> {}
             }
         }
-        display_name: semindex_symbol_display(modules, module_at, def.module_path, def.name)
+        display_name: semindex_symbol_display(modules, module_at, indexed_modules, def.module_path, def.name)
         ^display_owner: owner.copy()
         if owner == .Val(value) {
-            display_owner = Val(semindex_symbol_display(modules, module_at, def.module_path, value))
+            display_owner = Val(semindex_symbol_display(modules, module_at, indexed_modules, def.module_path, value))
         }
         qualified_name: semindex_symbol_canonical_name(modules, module_at, def.module_path, def.name, owner, def.def_span)
         shape: semindex_symbol_shape(display_name, def.kind, display_owner)
@@ -930,7 +983,7 @@ semindex_build_symbols: fn(index: SemIndex, modules: [JetDriverDocModule]) -> [S
             }
         }
         if definition.nominal_base == .Val(base) {
-            signature = "type {display_name}: distinct {semindex_symbol_display(modules, module_at, def.module_path, base)}"
+            signature = "type {display_name}: distinct {semindex_symbol_display(modules, module_at, indexed_modules, def.module_path, base)}"
         }
         if definition.trait_contracts.len() > 0 {
             signature = "{signature}\n{semindex_symbol_trait_contracts(definition.trait_contracts, def.kind == .Trait)}"

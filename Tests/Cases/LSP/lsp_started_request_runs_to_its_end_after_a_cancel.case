@@ -6,20 +6,20 @@ recv lsp until $.id = 1
 send lsp: Messages/LSPStartedRequestRunsToItsEndAfterACancel/1.json
 recv lsp
 stdout: ~ "publishDiagnostics" # the opened document is published
-stdout: ~ "\"version\":1"
+stdout: ~ "\"version\":1" # the initial publication carries version 1
 # The edit and request 7 go in one write. Request 7 publishes the edit only
 # after it has looked for a queued cancel, so the publication shows it has
 # started.
 send lsp raw: Messages/LSPStartedRequestRunsToItsEndAfterACancel/2-edit-request.frames
 recv lsp
-stdout: ~ "publishDiagnostics"
-stdout: ~ "\"version\":2"
+stdout: ~ "publishDiagnostics" # request 7 started and published the edit
+stdout: ~ "\"version\":2" # the started publication carries version 2
 send lsp: Messages/LSPStartedRequestRunsToItsEndAfterACancel/3.json
-recv lsp collect until $.id = 7
+recv lsp collect until ndjson $[?id=7] #>= 1
 json: stdout ndjson $[?id=7].result[?name="marker_new"] #>= 1
 stdout: !~ "-32800" # the cancel came after the request started
 send lsp: Messages/LSPStartedRequestRunsToItsEndAfterACancel/4.json
-recv lsp collect until $.id = 8
+recv lsp collect until ndjson $[?id=8] #>= 1
 json: stdout ndjson $[?id=8].result[?name="marker_new"] #>= 1
 stdout: !~ "-32800" # the ignored cancel does not touch a later request
 send lsp: Messages/LSPStartedRequestRunsToItsEndAfterACancel/5.json

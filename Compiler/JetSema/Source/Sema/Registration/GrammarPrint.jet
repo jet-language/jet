@@ -53,7 +53,6 @@ SEMA_GRAMMAR_FOLLOW: "__jet_follow"
 // Where a print body reads its fields: the members of the struct value, or
 // the locals a case pattern binds.
 SemaGrammarPrintScope: struct {
-    fields: [SemaGrammarField],
     field_of: [Int],
     in_struct: Bool,
 }
@@ -116,12 +115,12 @@ sema_grammar_print_token: fn(kind: Int, span: Span) -> Stmt Never! {
 
 // The call that prints `value` of rule `rule`: at `place` when the rule is
 // an operator rule and the value is one of its operands.
-sema_grammar_print_call: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan, rule: Int, value: Expr, place: SemaGrammarPlace?, span: Span) -> Expr Never! {
+sema_grammar_print_call: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan, rule: Int, value: Expr, place: ^^SemaGrammarPlace?, span: Span) -> Expr Never! {
     ^args: [Expr]{value, sema_serde_items_ident(SEMA_GRAMMAR_OUT, span), sema_serde_items_ident(SEMA_GRAMMAR_PEN, span), sema_serde_items_ident(SEMA_GRAMMAR_SCANNER, span), sema_serde_items_ident(SEMA_GRAMMAR_PRINTER, span)}
     if sema_grammar_operator_index(plan, rule) >= 0 {
-        if place == .Val(at) {
-            args.push(at.level.copy())
-            args.push(at.follow.copy())
+        if place.move() == .Val(at) {
+            args.push(at.level)
+            args.push(at.follow)
             return sema_serde_items_free_call(sema_grammar_print_level_function(gen, plan, rule), args, span)
         }
     }
@@ -129,9 +128,9 @@ sema_grammar_print_call: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan, rul
 }
 
 // The value of field `f`: the struct value's member, or the case's local.
-sema_grammar_print_field: fn(scope: SemaGrammarPrintScope, f: Int, span: Span) -> Expr Never! {
-    field: scope.fields[f]
-    if scope.in_struct -> return sema_serde_items_field_read(SEMA_GRAMMAR_VALUE, field.name.copy(), span)
+sema_grammar_print_field: fn(fields: [SemaGrammarField], scope: SemaGrammarPrintScope, f: Int, span: Span) -> Expr Never! {
+    field: fields[f]
+    if scope.in_struct -> return sema_serde_items_field_read(SEMA_GRAMMAR_VALUE, field.name, span)
     sema_serde_items_ident(sema_grammar_local(field), span)
 }
 
@@ -167,13 +166,13 @@ sema_grammar_print_fields_in: fn(plan: SemaGrammarItemsPlan, scope: SemaGrammarP
 // with elements left and, unless `lists_only`, an optional field under it
 // that holds a value or a flag under it that is set. Empty when no field
 // under it is either.
-sema_grammar_print_tests: fn(plan: SemaGrammarItemsPlan, scope: SemaGrammarPrintScope, n: Int, lists_only: Bool, span: Span) -> [Expr] Never! {
+sema_grammar_print_tests: fn(plan: SemaGrammarItemsPlan, fields: [SemaGrammarField], scope: SemaGrammarPrintScope, n: Int, lists_only: Bool, span: Span) -> [Expr] Never! {
     ^found: [Int]{}
     sema_grammar_print_fields_in(plan, scope, n, found)
     ^tests: [Expr]{}
     loop f in found {
-        field: scope.fields[f]
-        value: sema_grammar_print_field(scope, f, span)
+        field: fields[f]
+        value: sema_grammar_print_field(fields, scope, f, span)
         if {
             field.list -> {
                 count: sema_serde_items_method_call(value, "len", [Expr]{}, span)
@@ -193,11 +192,11 @@ sema_grammar_print_tests: fn(plan: SemaGrammarItemsPlan, scope: SemaGrammarPrint
 
 // Prints `value`, held by field `f` at node `n`: a text checked against
 // the token or tokens the node takes, or a rule's value at `place`.
-sema_grammar_print_held: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan, scope: SemaGrammarPrintScope, f: Int, n: Int, value: Expr, place: SemaGrammarPlace?, body: ^[Stmt]) Never! {
+sema_grammar_print_held: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan, fields: [SemaGrammarField], f: Int, n: Int, value: Expr, place: ^^SemaGrammarPlace?, body: ^[Stmt]) Never! {
     span: gen.span
-    field: scope.fields[f]
+    field: fields[f]
     if field.kind == .Rule {
-        body.push(sema_grammar_print_check(sema_grammar_print_call(gen, plan, field.rule, value, place, span), span))
+        body.push(sema_grammar_print_check(sema_grammar_print_call(gen, plan, field.rule, value, place.move(), span), span))
         return
     }
     ^kinds: [Int]{}
@@ -216,9 +215,9 @@ sema_grammar_print_held: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan, sco
 // Prints field `f` at node `n`: a flag's literal, the next element of a
 // list, an optional field's value, or the field's value. A list with no
 // element left, or an optional field with no value, is a recorded failure.
-sema_grammar_print_field_at: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan, scope: SemaGrammarPrintScope, f: Int, n: Int, place: SemaGrammarPlace?, body: ^[Stmt]) Never! {
+sema_grammar_print_field_at: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan, fields: [SemaGrammarField], scope: SemaGrammarPrintScope, f: Int, n: Int, place: ^^SemaGrammarPlace?, body: ^[Stmt]) Never! {
     span: gen.span
-    field: scope.fields[f]
+    field: fields[f]
     if field.kind == .Flag {
         ^kinds: [Int]{}
         sema_grammar_print_kinds(plan, n, kinds)
@@ -227,40 +226,39 @@ sema_grammar_print_field_at: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan,
     }
     if field.list {
         index: sema_grammar_print_index(field)
-        count: sema_serde_items_method_call(sema_grammar_print_field(scope, f, span), "len", [Expr]{}, span)
+        count: sema_serde_items_method_call(sema_grammar_print_field(fields, scope, f, span), "len", [Expr]{}, span)
         body.push(sema_serde_items_if(sema_grammar_compare(.Ge, sema_serde_items_ident(index, span), count, span), [Stmt]{sema_grammar_print_fail("print_missing", field.name, span)}, span))
-        element: Expr.Index{base: sema_grammar_print_field(scope, f, span), index: sema_serde_items_ident(index, span), span: span, kind: IndexKind.Unknown, id: AST_NODE_GENERATED}
-        sema_grammar_print_held(gen, plan, scope, f, n, element, place, body)
+        element: Expr.Index{base: sema_grammar_print_field(fields, scope, f, span), index: sema_serde_items_ident(index, span), span: span, kind: IndexKind.Unknown, id: AST_NODE_GENERATED}
+        sema_grammar_print_held(gen, plan, fields, f, n, element, place.move(), body)
         body.push(Stmt.Assign{target: LValue.Local{name: index, name_span: span}, op: Val(BinOp.Add), op_span: span, value: sema_grammar_number(1, span)})
         return
     }
     if field.optional {
         held: "__jet_held_{n}"
         ^present: [Stmt]{}
-        sema_grammar_print_held(gen, plan, scope, f, n, sema_serde_items_ident(held, span), place, present)
-        value: sema_grammar_print_field(scope, f, span)
-        present_test: Expr.PatternTest{subject: value.copy(), pattern: sema_serde_items_variant_pattern("Val", [String]{held}, span), span: span, id: AST_NODE_GENERATED}
-        absent_test: Expr.PatternTest{subject: value.copy(), pattern: sema_serde_items_variant_pattern("None", [String]{}, span), span: span, id: AST_NODE_GENERATED}
+        sema_grammar_print_held(gen, plan, fields, f, n, sema_serde_items_ident(held, span), place.move(), present)
+        present_test: Expr.PatternTest{subject: sema_grammar_print_field(fields, scope, f, span), pattern: sema_serde_items_variant_pattern("Val", [String]{held}, span), span: span, id: AST_NODE_GENERATED}
+        absent_test: Expr.PatternTest{subject: sema_grammar_print_field(fields, scope, f, span), pattern: sema_serde_items_variant_pattern("None", [String]{}, span), span: span, id: AST_NODE_GENERATED}
         arms: [SwitchArm]{SwitchArm{cond: present_test, body: present, span: span}, SwitchArm{cond: absent_test, body: [Stmt]{sema_grammar_print_fail("print_missing", field.name, span)}, span: span}}
-        body.push(Stmt.Switch{subject: value, arms: arms, else_body: None, span: span})
+        body.push(Stmt.Switch{subject: sema_grammar_print_field(fields, scope, f, span), arms: arms, else_body: None, span: span})
         return
     }
-    sema_grammar_print_held(gen, plan, scope, f, n, sema_grammar_print_field(scope, f, span), place, body)
+    sema_grammar_print_held(gen, plan, fields, f, n, sema_grammar_print_field(fields, scope, f, span), place.move(), body)
 }
 
 // `^__jet_index_<list>: 0` for each list field.
-sema_grammar_print_counters: fn(scope: SemaGrammarPrintScope, body: ^[Stmt], span: Span) Never! {
-    loop field in scope.fields {
+sema_grammar_print_counters: fn(fields: [SemaGrammarField], body: ^[Stmt], span: Span) Never! {
+    loop field in fields {
         if field.list -> body.push(sema_serde_items_binding(sema_grammar_print_index(field), None, sema_grammar_number(0, span), true, span))
     }
 }
 
 // Ends a printed alternative: each list field must have printed all its
 // elements; then `return true`.
-sema_grammar_print_done: fn(scope: SemaGrammarPrintScope, body: ^[Stmt], span: Span) Never! {
-    loop (f, field) in scope.fields {
+sema_grammar_print_done: fn(fields: [SemaGrammarField], scope: SemaGrammarPrintScope, body: ^[Stmt], span: Span) Never! {
+    loop (f, field) in fields {
         if !field.list -> next
-        count: sema_serde_items_method_call(sema_grammar_print_field(scope, f, span), "len", [Expr]{}, span)
+        count: sema_serde_items_method_call(sema_grammar_print_field(fields, scope, f, span), "len", [Expr]{}, span)
         body.push(sema_serde_items_if(sema_grammar_compare(.Ne, sema_serde_items_ident(sema_grammar_print_index(field), span), count, span), [Stmt]{sema_grammar_print_fail("print_extra", field.name, span)}, span))
     }
     body.push(sema_serde_items_return(sema_grammar_flag(true, span), span))
@@ -270,28 +268,28 @@ sema_grammar_print_done: fn(scope: SemaGrammarPrintScope, body: ^[Stmt], span: S
 // Elements.
 
 // Prints element `n` from the fields of `scope`.
-sema_grammar_print_element: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan, scope: SemaGrammarPrintScope, n: Int, body: ^[Stmt]) Never! {
+sema_grammar_print_element: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan, fields: [SemaGrammarField], scope: SemaGrammarPrintScope, n: Int, body: ^[Stmt]) Never! {
     span: gen.span
     node: plan.nodes[n]
     f: scope.field_of[n]
     if f >= 0 {
-        sema_grammar_print_field_at(gen, plan, scope, f, n, None, body)
+        sema_grammar_print_field_at(gen, plan, fields, scope, f, n, None, body)
         return
     }
     if node.kind == {
-        "Alt" -> loop child in node.children -> sema_grammar_print_element(gen, plan, scope, child, body)
-        "Choice" -> sema_grammar_print_choice(gen, plan, scope, n, body)
+        "Alt" -> loop child in node.children -> sema_grammar_print_element(gen, plan, fields, scope, child, body)
+        "Choice" -> sema_grammar_print_choice(gen, plan, fields, scope, n, body)
         "Optional" -> {
-            ^tests: sema_grammar_print_tests(plan, scope, n, false, span)
+            ^tests: sema_grammar_print_tests(plan, fields, scope, n, false, span)
             if tests.len() == 0 -> return
             ^taken: [Stmt]{}
-            sema_grammar_print_element(gen, plan, scope, node.children[0], taken)
+            sema_grammar_print_element(gen, plan, fields, scope, node.children[0], taken)
             body.push(sema_serde_items_if(sema_grammar_print_any(tests.move(), span), taken, span))
         }
-        "Star" -> sema_grammar_print_repeat(gen, plan, scope, n, body)
+        "Star" -> sema_grammar_print_repeat(gen, plan, fields, scope, n, body)
         "Plus" -> {
-            sema_grammar_print_element(gen, plan, scope, node.children[0], body)
-            sema_grammar_print_repeat(gen, plan, scope, n, body)
+            sema_grammar_print_element(gen, plan, fields, scope, node.children[0], body)
+            sema_grammar_print_repeat(gen, plan, fields, scope, n, body)
         }
         "Ref" -> if node.token >= 0 -> body.push(sema_grammar_print_token(node.token, span))
         "Literal" -> body.push(sema_grammar_print_token(node.token, span))
@@ -302,30 +300,30 @@ sema_grammar_print_element: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan, 
 }
 
 // Prints repeat `n` again while a list field under it has elements left.
-sema_grammar_print_repeat: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan, scope: SemaGrammarPrintScope, n: Int, body: ^[Stmt]) Never! {
+sema_grammar_print_repeat: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan, fields: [SemaGrammarField], scope: SemaGrammarPrintScope, n: Int, body: ^[Stmt]) Never! {
     span: gen.span
-    ^tests: sema_grammar_print_tests(plan, scope, n, true, span)
+    ^tests: sema_grammar_print_tests(plan, fields, scope, n, true, span)
     if tests.len() == 0 -> return
     ^again: [Stmt]{}
-    sema_grammar_print_element(gen, plan, scope, plan.nodes[n].children[0], again)
+    sema_grammar_print_element(gen, plan, fields, scope, plan.nodes[n].children[0], again)
     body.push(Stmt.While{cond: sema_grammar_print_any(tests.move(), span), body: again, span: span, arrow_body: false, label: None})
 }
 
 // Prints choice `n`: the first alternative a field under it calls for,
 // else the first that needs none, else the last.
-sema_grammar_print_choice: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan, scope: SemaGrammarPrintScope, n: Int, body: ^[Stmt]) Never! {
+sema_grammar_print_choice: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan, fields: [SemaGrammarField], scope: SemaGrammarPrintScope, n: Int, body: ^[Stmt]) Never! {
     span: gen.span
     alts: plan.nodes[n].children
     if alts.len() == 1 {
-        sema_grammar_print_element(gen, plan, scope, alts[0], body)
+        sema_grammar_print_element(gen, plan, fields, scope, alts[0], body)
         return
     }
     ^arms: [SwitchArm]{}
     ^otherwise: [Stmt]?{None}
     loop (i, alt) in alts {
         ^printed: [Stmt]{}
-        sema_grammar_print_element(gen, plan, scope, alt, printed)
-        ^tests: sema_grammar_print_tests(plan, scope, alt, false, span)
+        sema_grammar_print_element(gen, plan, fields, scope, alt, printed)
+        ^tests: sema_grammar_print_tests(plan, fields, scope, alt, false, span)
         if tests.len() == 0 || i == alts.len() - 1 {
             otherwise = Val(printed.move())
             break
@@ -335,38 +333,37 @@ sema_grammar_print_choice: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan, s
     body.push(Stmt.Switch{subject: sema_grammar_flag(true, span), arms: arms, else_body: otherwise.move(), span: span})
 }
 
-// Prints the elements of alternative `alt`, each operand of operator `op`
-// at its place (sema_grammar_print_place).
-sema_grammar_print_alt: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan, scope: SemaGrammarPrintScope, alt: Int, op: SemaGrammarOperator?, body: ^[Stmt]) Never! {
+// Prints the elements of alternative `alt`, each operand of operator `op_index`
+// in `plan.operators[op_rule_index]` at its place (sema_grammar_print_place).
+sema_grammar_print_alt: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan, fields: [SemaGrammarField], scope: SemaGrammarPrintScope, alt: Int, op_rule_index: Int, op_index: Int, body: ^[Stmt]) Never! {
     span: gen.span
     kids: plan.nodes[alt].children
     loop (k, kid) in kids {
         f: scope.field_of[kid]
-        place: sema_grammar_print_place(op, k, kids.len(), f, span)
-        if place == .Val(_) {
-            sema_grammar_print_field_at(gen, plan, scope, f, kid, place, body)
+        ^place: sema_grammar_print_place(plan, op_rule_index, op_index, k, kids.len(), f, span)
+        if place != None {
+            sema_grammar_print_field_at(gen, plan, fields, scope, f, kid, place.move(), body)
         } else {
-            sema_grammar_print_element(gen, plan, scope, kid, body)
+            sema_grammar_print_element(gen, plan, fields, scope, kid, body)
         }
     }
 }
 
-// The place of element `k` of `count` in operator `op`'s alternative, when
-// it is an operand that sets field `f`: the leading operand of a binary or
-// suffix operator at the operator's level (one tighter when it groups from
+// The place of element `k` of `count` in operator `op_index`'s alternative,
+// when it is an operand that sets field `f`: the leading operand of a binary
+// or suffix operator at the operator's level (one tighter when it groups from
 // the right), with the operator after it; another at the level the plan
 // gives, followed by what follows the whole when it is last.
-sema_grammar_print_place: fn(op: SemaGrammarOperator?, k: Int, count: Int, f: Int, span: Span) -> SemaGrammarPlace? Never! {
-    if f < 0 -> return None
-    if op == .Val(o) {
-        if k == 0 && o.kind != "Prefix" {
-            level: if o.right -> o.level + 1 else -> o.level
-            return Val(SemaGrammarPlace{level: sema_grammar_number(level, span), follow: sema_grammar_number(o.level, span)})
-        }
-        if k < o.operands.len() && o.operands[k] >= 0 {
-            follow: if k == count - 1 -> sema_serde_items_ident(SEMA_GRAMMAR_FOLLOW, span) else -> sema_grammar_number(-1, span)
-            return Val(SemaGrammarPlace{level: sema_grammar_number(o.operands[k], span), follow: follow})
-        }
+sema_grammar_print_place: fn(plan: SemaGrammarItemsPlan, op_rule_index: Int, op_index: Int, k: Int, count: Int, f: Int, span: Span) -> SemaGrammarPlace? Never! {
+    if f < 0 || op_rule_index < 0 || op_index < 0 -> return None
+    o: plan.operators[op_rule_index].operators[op_index]
+    if k == 0 && o.kind != "Prefix" {
+        level: if o.right -> o.level + 1 else -> o.level
+        return Val(SemaGrammarPlace{level: sema_grammar_number(level, span), follow: sema_grammar_number(o.level, span)})
+    }
+    if k < o.operands.len() && o.operands[k] >= 0 {
+        follow: if k == count - 1 -> sema_serde_items_ident(SEMA_GRAMMAR_FOLLOW, span) else -> sema_grammar_number(-1, span)
+        return Val(SemaGrammarPlace{level: sema_grammar_number(o.operands[k], span), follow: follow})
     }
     None
 }
@@ -380,21 +377,22 @@ sema_grammar_print_params: fn(gen: SemaGrammarGen, rule: Int, span: Span) -> [Pa
     ^pen: sema_serde_items_param(SEMA_GRAMMAR_PEN, Type.Named{name: "{sema_grammar_alias(SEMA_GRAMMAR_RUNTIME_MODULE)}.GrammarPen"}, span)
     pen.convention = AccessConvention.Write
     printer: sema_serde_items_param(SEMA_GRAMMAR_PRINTER, Type.Named{name: "{sema_grammar_alias(SEMA_GRAMMAR_PLAN_MODULE)}.GrammarPrinter"}, span)
+    // copy: generated print parameter Type.Named owns the rule type name apart from gen.types
     [Param]{sema_serde_items_param(SEMA_GRAMMAR_VALUE, Type.Named{name: gen.types[rule].copy()}, span), out, pen, sema_grammar_scanner_param(span), printer}
 }
 
 // The statements that print case `case` of rule `rule`, bound by its
 // pattern: the wrapped rule's value, or the case's alternative.
-sema_grammar_print_case: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan, case: SemaGrammarCase, op: SemaGrammarOperator?, body: ^[Stmt]) Never! {
+sema_grammar_print_case: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan, case: SemaGrammarCase, op_rule_index: Int, op_index: Int, body: ^[Stmt]) Never! {
     span: gen.span
     if case.wraps >= 0 {
         body.push(sema_serde_items_return(sema_grammar_print_call(gen, plan, case.wraps, sema_serde_items_ident(SEMA_GRAMMAR_WRAPPED, span), None, span), span))
         return
     }
-    scope: SemaGrammarPrintScope{fields: case.fields.copy(), field_of: sema_grammar_field_of(plan, case.fields), in_struct: false}
-    sema_grammar_print_counters(scope, body, span)
-    sema_grammar_print_alt(gen, plan, scope, case.alt, op, body)
-    sema_grammar_print_done(scope, body, span)
+    scope: SemaGrammarPrintScope{field_of: sema_grammar_field_of(plan, case.fields), in_struct: false}
+    sema_grammar_print_counters(case.fields, body, span)
+    sema_grammar_print_alt(gen, plan, case.fields, scope, case.alt, op_rule_index, op_index, body)
+    sema_grammar_print_done(case.fields, scope, body, span)
 }
 
 // The pattern locals of case `case`: the wrapped value, or each field.
@@ -409,18 +407,18 @@ sema_grammar_print_cases: fn(shape: SemaGrammarShape, arms: ^^[[Stmt]], span: Sp
     ^switch_arms: [SwitchArm]{}
     loop (i, arm) in arms.move() {
         case: shape.cases[i]
-        test: Expr.PatternTest{subject: sema_serde_items_ident(SEMA_GRAMMAR_VALUE, span), pattern: sema_serde_items_variant_pattern(case.name.copy(), sema_grammar_print_bindings(case), span), span: span, id: AST_NODE_GENERATED}
+        test: Expr.PatternTest{subject: sema_serde_items_ident(SEMA_GRAMMAR_VALUE, span), pattern: sema_serde_items_variant_pattern(case.name, sema_grammar_print_bindings(case), span), span: span, id: AST_NODE_GENERATED}
         switch_arms.push(SwitchArm{cond: test, body: arm, span: span})
     }
     Stmt.Switch{subject: sema_serde_items_ident(SEMA_GRAMMAR_VALUE, span), arms: switch_arms, else_body: None, span: span}
 }
 
-// The operator of `op_rule` whose alternative is `alt`.
-sema_grammar_print_operator: fn(op_rule: SemaGrammarOperatorRule, alt: Int) -> SemaGrammarOperator? Never! {
-    loop op in op_rule.operators {
-        if op.alt == alt -> return Val(op.copy())
+// The index in `op_rule.operators` whose alternative is `alt`, or -1.
+sema_grammar_print_operator_index: fn(op_rule: SemaGrammarOperatorRule, alt: Int) -> Int Never! {
+    loop (index, op) in op_rule.operators {
+        if op.alt == alt -> return index
     }
-    None
+    -1
 }
 
 // What an operator case prints when it binds looser than its place: the
@@ -454,12 +452,13 @@ sema_grammar_print_functions: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan
         ^arms: [[Stmt]]{}
         loop case in shape.cases {
             ^arm: [Stmt]{}
-            op: sema_grammar_print_operator(op_rule, case.alt)
-            if op == .Val(o) {
+            op_index: sema_grammar_print_operator_index(op_rule, case.alt)
+            if op_index >= 0 {
+                o: op_rule.operators[op_index]
                 looser: if o.kind == "Prefix" -> sema_grammar_compare(.Le, sema_grammar_number(o.level, span), sema_serde_items_ident(SEMA_GRAMMAR_FOLLOW, span), span) else -> sema_grammar_compare(.Lt, sema_grammar_number(o.level, span), sema_serde_items_ident(SEMA_GRAMMAR_LEVEL, span), span)
                 arm.push(sema_serde_items_if(looser, sema_grammar_print_grouped(gen, plan, r, case), span))
             }
-            sema_grammar_print_case(gen, plan, case, op, arm)
+            sema_grammar_print_case(gen, plan, case, operator_index, op_index, arm)
             arms.push(arm)
         }
         ^level_params: sema_grammar_print_params(gen, r, span)
@@ -474,15 +473,15 @@ sema_grammar_print_functions: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan
         ^arms: [[Stmt]]{}
         loop case in shape.cases {
             ^arm: [Stmt]{}
-            sema_grammar_print_case(gen, plan, case, None, arm)
+            sema_grammar_print_case(gen, plan, case, -1, -1, arm)
             arms.push(arm)
         }
         body.push(sema_grammar_print_cases(shape, arms.move(), span))
     } else {
-        scope: SemaGrammarPrintScope{fields: shape.fields.copy(), field_of: sema_grammar_field_of(plan, shape.fields), in_struct: true}
-        sema_grammar_print_counters(scope, body, span)
-        sema_grammar_print_element(gen, plan, scope, plan.rules[r].body, body)
-        sema_grammar_print_done(scope, body, span)
+        scope: SemaGrammarPrintScope{field_of: sema_grammar_field_of(plan, shape.fields), in_struct: true}
+        sema_grammar_print_counters(shape.fields, body, span)
+        sema_grammar_print_element(gen, plan, shape.fields, scope, plan.rules[r].body, body)
+        sema_grammar_print_done(shape.fields, scope, body, span)
     }
     items.push(sema_grammar_free_function(sema_grammar_print_function(gen, plan, r), sema_grammar_print_params(gen, r, span), sema_grammar_bool_never(), body.move(), sema_grammar_span_at(gen, 2 * rules + r)))
 }
@@ -517,16 +516,15 @@ sema_grammar_print_member: fn(name: String, params: [Param], ok: Type, is_pub: B
 // as it was.
 sema_grammar_print_methods: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan, shape: SemaGrammarShape, is_pub: Bool, is_package_pub: Bool, methods: ^[Func]) Never! {
     span: gen.span
-    bytes: Type.List{element: Type.IntN{signed: false, bits: 8}}
     ^print_member: sema_grammar_print_member("print", [Param]{sema_serde_items_param("self", Type.Named{name: ""}, span)}, Type.String, is_pub, is_package_pub, Span{start: span.start + 1, end: span.start + 1})
     print_member.body = [Stmt]{
-        sema_serde_items_binding(SEMA_GRAMMAR_OUT, Val(bytes.copy()), Expr.ListLit{elements: [Expr]{}, span: span, id: AST_NODE_GENERATED}, true, span),
+        sema_serde_items_binding(SEMA_GRAMMAR_OUT, Val(Type.List{element: Type.IntN{signed: false, bits: 8}}), Expr.ListLit{elements: [Expr]{}, span: span, id: AST_NODE_GENERATED}, true, span),
         sema_grammar_print_pen(SEMA_GRAMMAR_OUT, span),
         sema_grammar_print_run(gen, plan, shape, SEMA_GRAMMAR_OUT, span),
         sema_serde_items_return(Expr.Ok{value: sema_grammar_print_runtime("print_result", [Expr]{sema_serde_items_ident(SEMA_GRAMMAR_OUT, span)}, span), span: span, id: AST_NODE_GENERATED}, span),
     }
     methods.push(print_member)
-    ^out: sema_serde_items_param("out", bytes, span)
+    ^out: sema_serde_items_param("out", Type.List{element: Type.IntN{signed: false, bits: 8}}, span)
     out.convention = AccessConvention.Write
     ^into_member: sema_grammar_print_member("print_into", [Param]{sema_serde_items_param("self", Type.Named{name: ""}, span), out}, Type.Named{name: "Unit"}, is_pub, is_package_pub, Span{start: span.start + 2, end: span.start + 2})
     into_member.body = [Stmt]{
@@ -537,22 +535,17 @@ sema_grammar_print_methods: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan, 
     methods.push(into_member)
 }
 
-// `__jet_grammar_<Start>_printer`: plan `value`'s printer.
-sema_grammar_printer_item: fn(gen: SemaGrammarGen, value: CtValue) -> Item Never! {
+// `__jet_grammar_<Start>_printer`: plan `printer`'s constant.
+sema_grammar_printer_item: fn(gen: SemaGrammarGen, printer_value: ^^CtValue?) -> Item Never! {
     span: gen.span
-    ^init: Expr.Absent{span: span, id: AST_NODE_GENERATED}
-    if value == .Struct(_, entries) {
-        loop entry in entries {
-            if entry.name == "printer" -> init = sema_grammar_literal(entry.value, "GrammarPrinter", span)
-        }
-    }
+    init: if printer_value.move() == .Val(value) -> sema_grammar_literal(value, "GrammarPrinter", span) else -> Expr.Absent{span: span, id: AST_NODE_GENERATED}
     Item.Const{value: ast_const(sema_grammar_printer_constant(gen), span, span, init)}
 }
 
 // The printer items of a grammar: the printer constant and each parser
 // rule's print functions.
-sema_grammar_printer_items: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan, value: CtValue, items: ^[Item]) Never! {
+sema_grammar_printer_items: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan, printer_value: ^^CtValue?, items: ^[Item]) Never! {
     if plan.shapes.len() == 0 -> return
-    items.push(sema_grammar_printer_item(gen, value))
+    items.push(sema_grammar_printer_item(gen, printer_value.move()))
     loop shape in plan.shapes -> sema_grammar_print_functions(gen, plan, shape, items)
 }

@@ -131,18 +131,24 @@ SemaGrammarOperatorRule: struct {
 }
 
 // What the items are made of: the plan's shapes, each token kind's case
-// name, each kind's hole name ("" for a kind that is no hole), the parse:
-// the rule tree, each node's decision and the operator rules, and each
-// rule's grouping alternative (-1 for none) the printer parenthesizes with.
+// name, whether each kind is a hole, the parse: the rule tree, each node's
+// decision and the operator rules, and each rule's grouping alternative (-1
+// for none) the printer parenthesizes with.
 SemaGrammarItemsPlan: struct {
     shapes: [SemaGrammarShape],
     kind_names: [String],
-    holes: [String],
+    holes: [Bool],
     rules: [SemaGrammarRule],
     nodes: [SemaGrammarNode],
     decision_of: [Int],
     operators: [SemaGrammarOperatorRule],
     groups: [Int],
+}
+
+SemaGrammarItemsRead: struct {
+    plan: SemaGrammarItemsPlan,
+    scanner_entries: [NamedCtValue],
+    printer_value: CtValue?,
 }
 
 // Replace each module binding `plans` names with the items its plan
@@ -161,17 +167,18 @@ sema_grammar_items_expand: fn(program: ^Program, plans: ^^[NamedCtValue], diagno
             }
         }
         if index < 0 -> next
-        read: sema_grammar_items_plan(plan.value)
-        if program.items[index] == .Const(definition) && sema_grammar_start_report(definition, read) == .Val(report) {
+        ^read: sema_grammar_items_plan(plan.value)
+        if program.items[index] == .Const(definition) && sema_grammar_start_report(definition, read.plan) == .Val(report) {
             diagnostics.push(report)
             next
         }
         removed: program.items.remove(index, .Slot) ?? next
         if removed == .Const(definition) {
-            if read.rules.len() > 0 -> parsers = true
-            ^expanded: sema_grammar_items(definition, read, plan.value)
+            if read.plan.rules.len() > 0 -> parsers = true
+            span: expr_span(definition.value)
+            ^expanded: sema_grammar_items(definition, read.plan.move(), read.scanner_entries.move(), read.printer_value.move())
             ^generated: [Item]{}
-            sema_user_rule_accept(program.items, "Grammar", None, expr_span(definition.value), expanded.move(), generated, diagnostics)
+            sema_user_rule_accept(program.items, "Grammar", None, span, expanded.move(), generated, diagnostics)
             loop item in generated.move() -> program.items.push(item)
         }
     }
@@ -190,75 +197,91 @@ sema_grammar_start_report: fn(definition: ConstDef, plan: SemaGrammarItemsPlan) 
     Val(sema_error("E2718", definition.name_span, "`{definition.name}` names no rule of its grammar", "The binding's name picks the rule a parse starts from: the rule whose name in PascalCase it is", "Name the binding for the rule a parse starts from, as `{example.name}` names {rule}"))
 }
 
-// The items of grammar binding `definition` with plan `plan`, computed as
-// `value`.
-sema_grammar_items: fn(definition: ConstDef, plan: SemaGrammarItemsPlan, value: CtValue) -> [Item] Never! {
+// The items of grammar binding `definition` with plan `plan` and moved
+// scanner/printer values.
+sema_grammar_items: fn(definition: ^^ConstDef, plan: ^^SemaGrammarItemsPlan, scanner_entries: ^^[NamedCtValue], printer_value: ^^CtValue?) -> [Item] Never! {
     span: expr_span(definition.value)
+    is_pub: definition.is_pub
+    is_package_pub: definition.is_package_pub
     ^rule_types: [String]{}
     loop _ in plan.rules -> rule_types.push("")
     loop shape in plan.shapes {
         loop rule_types.len() <= shape.rule -> rule_types.push("")
+        // copy: gen.types retains every rule type name for cross-rule field/parse/print references
         rule_types[shape.rule] = shape.name.copy()
     }
     parses: plan.rules.len() > 0
-    gen: SemaGrammarGen{start: definition.name.copy(), types: rule_types.copy(), span: span}
+    gen: SemaGrammarGen{start: definition.name, types: rule_types, span: span}
     holes: sema_grammar_has_holes(plan)
-    ^items: [Item]{}
+    ^shape_methods: [[Func]]{}
     loop shape in plan.shapes {
         ^methods: [Func]{}
         if parses {
-            methods.push(sema_grammar_parse_method(gen, plan, shape, definition.is_pub, definition.is_package_pub))
-            sema_grammar_print_methods(gen, plan, shape, definition.is_pub, definition.is_package_pub, methods)
-            methods.push(sema_grammar_into_method(gen, plan, shape, definition.is_pub, definition.is_package_pub))
+            methods.push(sema_grammar_parse_method(gen, plan, shape, is_pub, is_package_pub))
+            sema_grammar_print_methods(gen, plan, shape, is_pub, is_package_pub, methods)
+            methods.push(sema_grammar_into_method(gen, plan, shape, is_pub, is_package_pub))
             if holes {
-                methods.push(sema_grammar_parse_parts_method(gen, plan, shape, definition.is_pub, definition.is_package_pub))
-                methods.push(sema_grammar_check_method(gen, plan, shape, definition.is_pub, definition.is_package_pub))
+                methods.push(sema_grammar_parse_parts_method(gen, plan, shape, is_pub, is_package_pub))
+                methods.push(sema_grammar_check_method(gen, plan, shape, is_pub, is_package_pub))
             }
         }
-        if shape.is_enum {
-            ^variants: [Variant]{}
-            loop case in shape.cases {
-                ^payload: VariantPayload.Unit
-                if case.wraps >= 0 {
-                    payload = VariantPayload.Single{ty: Type.Named{name: rule_types[case.wraps].copy()}, span: span}
-                } else if case.fields.len() > 0 {
-                    ^fields: [VariantField]{}
-                    loop field in case.fields {
-                        fields.push(VariantField{name: field.name.copy(), name_span: span, ty: sema_grammar_field_type(field, rule_types), ty_span: span})
-                    }
-                    payload = VariantPayload.Named{fields: fields}
-                }
-                variants.push(Variant{name: case.name.copy(), name_span: span, payload: payload, discriminant: None, discriminant_expr: None, serde_markers: [Marker]{}})
-            }
-            items.push(Item.Enum{value: sema_grammar_enum(definition, shape.name.copy(), variants, [Marker]{}, methods.move())})
-        } else {
-            ^fields: [Field]{}
-            loop field in shape.fields {
-                fields.push(Field{is_pub: true, is_package_pub: false, name: field.name.copy(), name_span: span, ty: sema_grammar_field_type(field, rule_types), ty_span: span, serde_markers: [Marker]{}, redact: false, computed: None, default: None, default_ct: None})
-            }
-            items.push(Item.Struct{value: sema_grammar_struct(definition, shape.name.copy(), fields, methods.move())})
-        }
+        shape_methods.push(methods)
     }
     ^rules: [Variant]{}
-    loop shape in plan.shapes -> rules.push(sema_grammar_numbered(shape.name.copy(), shape.rule, span))
-    items.push(Item.Enum{value: sema_grammar_enum(definition, "{definition.name}Rule", rules, [Marker]{sema_grammar_layout(span)}, [Func]{})})
-    ^kinds: [Variant]{}
+    loop shape in plan.shapes -> rules.push(sema_grammar_numbered(shape.name, shape.rule, span))
     ^slots: [Variant]{}
-    loop (kind, name) in plan.kind_names {
-        kinds.push(sema_grammar_numbered(name.copy(), kind, span))
-        if kind < plan.holes.len() && plan.holes[kind] != "" {
+    loop (kind, is_hole) in plan.holes {
+        if is_hole {
             slots.push(Variant{name: sema_grammar_slot_name(plan, kind), name_span: span, payload: VariantPayload.Unit, discriminant: None, discriminant_expr: None, serde_markers: [Marker]{}})
         }
     }
-    items.push(Item.Enum{value: sema_grammar_enum(definition, "{definition.name}Token", kinds, [Marker]{sema_grammar_layout(span)}, [Func]{})})
-    if slots.len() > 0 {
-        items.push(Item.Enum{value: sema_grammar_enum(definition, sema_grammar_slot_type(gen), slots, [Marker]{}, [Func]{})})
-    }
+    ^extra_items: [Item]{}
     if parses {
-        sema_grammar_parser_items(gen, plan, value, items)
-        sema_grammar_printer_items(gen, plan, value, items)
-        sema_grammar_walk_items(gen, plan, items)
+        sema_grammar_parser_items(gen, plan, scanner_entries.move(), extra_items)
+        sema_grammar_printer_items(gen, plan, printer_value.move(), extra_items)
+        sema_grammar_walk_items(gen, plan, extra_items)
     }
+    shape_methods.reverse()
+    ^items: [Item]{}
+    loop shape in plan.shapes.move() {
+        ^methods: shape_methods.pop() ?? [Func]{}
+        if shape.is_enum {
+            ^variants: [Variant]{}
+            loop case in shape.cases.move() {
+                ^payload: VariantPayload.Unit
+                if case.wraps >= 0 {
+                    // copy: wrapped variant payload Type.Named owns the target rule type name apart from gen.types
+                    payload = VariantPayload.Single{ty: Type.Named{name: gen.types[case.wraps].copy()}, span: span}
+                } else if case.fields.len() > 0 {
+                    ^fields: [VariantField]{}
+                    loop field in case.fields.move() {
+                        ty: sema_grammar_field_type(field, gen.types)
+                        fields.push(VariantField{name: field.name, name_span: span, ty: ty, ty_span: span})
+                    }
+                    payload = VariantPayload.Named{fields: fields}
+                }
+                variants.push(Variant{name: case.name, name_span: span, payload: payload, discriminant: None, discriminant_expr: None, serde_markers: [Marker]{}})
+            }
+            items.push(Item.Enum{value: sema_grammar_enum(is_pub, is_package_pub, span, shape.name, variants, [Marker]{}, methods.move())})
+        } else {
+            ^fields: [Field]{}
+            loop field in shape.fields.move() {
+                ty: sema_grammar_field_type(field, gen.types)
+                fields.push(Field{is_pub: true, is_package_pub: false, name: field.name, name_span: span, ty: ty, ty_span: span, serde_markers: [Marker]{}, redact: false, computed: None, default: None, default_ct: None})
+            }
+            items.push(Item.Struct{value: sema_grammar_struct(is_pub, is_package_pub, span, shape.name, fields, methods.move())})
+        }
+    }
+    items.push(Item.Enum{value: sema_grammar_enum(is_pub, is_package_pub, span, "{gen.start}Rule", rules, [Marker]{sema_grammar_layout(span)}, [Func]{})})
+    ^kinds: [Variant]{}
+    loop (kind, name) in plan.kind_names.move() {
+        kinds.push(sema_grammar_numbered(name, kind, span))
+    }
+    items.push(Item.Enum{value: sema_grammar_enum(is_pub, is_package_pub, span, "{gen.start}Token", kinds, [Marker]{sema_grammar_layout(span)}, [Func]{})})
+    if slots.len() > 0 {
+        items.push(Item.Enum{value: sema_grammar_enum(is_pub, is_package_pub, span, sema_grammar_slot_type(gen), slots, [Marker]{}, [Func]{})})
+    }
+    loop extra in extra_items.move() -> items.push(extra)
     items
 }
 
@@ -268,6 +291,7 @@ sema_grammar_field_type: fn(field: SemaGrammarField, rule_types: [String]) -> Ty
     held: if field.kind == {
         .Text -> Type.String
         .Flag -> Type.Bool
+        // copy: generated field Type.Named owns the referenced rule type name apart from rule_types
         .Rule -> Type.Named{name: rule_types[field.rule].copy()}
     }
     if field.list -> return Type.List{element: held}
@@ -287,13 +311,12 @@ sema_grammar_layout: fn(span: Span) -> Marker Never! {
     Marker{name: "Layout", negated: false, name_span: span, args: [MarkerCallArg]{MarkerCallArg.Expr{value: backing}}, arg_labels: [CallLabel?]{None}, span: span, ct: None}
 }
 
-sema_grammar_struct: fn(definition: ConstDef, name: String, fields: [Field], methods: [Func]) -> StructDef Never! {
-    span: expr_span(definition.value)
+sema_grammar_struct: fn(is_pub: Bool, is_package_pub: Bool, span: Span, name: ^^String, fields: [Field], methods: [Func]) -> StructDef Never! {
     StructDef{
         span: span,
-        is_pub: definition.is_pub,
-        is_package_pub: definition.is_package_pub,
-        name: name,
+        is_pub: is_pub,
+        is_package_pub: is_package_pub,
+        name: name.move(),
         name_span: span,
         type_params: [TypeParam]{},
         fields: fields,
@@ -319,13 +342,12 @@ sema_grammar_struct: fn(definition: ConstDef, name: String, fields: [Field], met
     }
 }
 
-sema_grammar_enum: fn(definition: ConstDef, name: String, variants: [Variant], markers: [Marker], methods: [Func]) -> EnumDef Never! {
-    span: expr_span(definition.value)
+sema_grammar_enum: fn(is_pub: Bool, is_package_pub: Bool, span: Span, name: ^^String, variants: [Variant], markers: [Marker], methods: [Func]) -> EnumDef Never! {
     EnumDef{
         span: span,
-        is_pub: definition.is_pub,
-        is_package_pub: definition.is_package_pub,
-        name: name,
+        is_pub: is_pub,
+        is_package_pub: is_package_pub,
+        name: name.move(),
         name_span: span,
         type_params: [TypeParam]{},
         variants: variants,
@@ -343,36 +365,52 @@ sema_grammar_enum: fn(definition: ConstDef, name: String, variants: [Variant], m
     }
 }
 
-// Read the parts of a computed `GrammarPlan` value the items are made of.
-sema_grammar_items_plan: fn(value: CtValue) -> SemaGrammarItemsPlan Never! {
-    ^plan: SemaGrammarItemsPlan{shapes: [SemaGrammarShape]{}, kind_names: [String]{}, holes: [String]{}, rules: [SemaGrammarRule]{}, nodes: [SemaGrammarNode]{}, decision_of: [Int]{}, operators: [SemaGrammarOperatorRule]{}, groups: [Int]{}}
+// Read the parts of a computed `GrammarPlan` value the items are made of,
+// moving the scanner entries and printer value out for literal emission.
+sema_grammar_items_plan: fn(value: ^^CtValue) -> SemaGrammarItemsRead Never! {
+    ^plan: SemaGrammarItemsPlan{shapes: [SemaGrammarShape]{}, kind_names: [String]{}, holes: [Bool]{}, rules: [SemaGrammarRule]{}, nodes: [SemaGrammarNode]{}, decision_of: [Int]{}, operators: [SemaGrammarOperatorRule]{}, groups: [Int]{}}
+    ^scanner_entries: [NamedCtValue]{}
+    ^printer_value: CtValue?{None}
     if value == .Struct(_, entries) {
-        loop entry in entries {
-            if entry.name == "tree" -> sema_grammar_tree(entry.value, plan)
-            if entry.name == "printer" -> plan.groups = sema_grammar_member_ints(entry.value, "groups")
-            if entry.value == .List(values) {
-                if entry.name == {
-                    "shapes" -> loop shape in values -> plan.shapes.push(sema_grammar_shape(shape))
-                    "kind_names" -> loop name in values -> plan.kind_names.push(sema_grammar_text(name))
-                    "tokens" -> loop token in values -> plan.holes.push(sema_grammar_member_text(token, "hole"))
-                    "decision_of" -> plan.decision_of = sema_grammar_ints(entry.value)
-                    "operators" -> loop operator in values -> plan.operators.push(sema_grammar_operator_rule(operator))
-                    else -> {}
+        loop entry in entries.move() {
+            if entry.name == {
+                "tree" -> sema_grammar_tree(entry.value, plan)
+                "printer" -> {
+                    plan.groups = sema_grammar_member_ints(entry.value, "groups")
+                    printer_value = Val(entry.value)
                 }
+                "tokens" -> {
+                    if entry.value == .List(values) {
+                        loop token in values -> plan.holes.push(sema_grammar_token_is_hole(token))
+                    }
+                    scanner_entries.push(entry)
+                }
+                "lexer" | "keywords" | "decisions" -> scanner_entries.push(entry)
+                "shapes" -> if entry.value == .List(values) {
+                    loop shape in values.move() -> plan.shapes.push(sema_grammar_shape(shape))
+                }
+                "kind_names" -> if entry.value == .List(values) {
+                    loop name in values.move() -> plan.kind_names.push(sema_grammar_text(name))
+                }
+                "decision_of" -> plan.decision_of = sema_grammar_ints(entry.value)
+                "operators" -> if entry.value == .List(values) {
+                    loop operator in values.move() -> plan.operators.push(sema_grammar_operator_rule(operator))
+                }
+                else -> {}
             }
         }
     }
-    plan
+    SemaGrammarItemsRead{plan: plan, scanner_entries: scanner_entries, printer_value: printer_value}
 }
 
 // Read the rules and nodes of a computed `RuleTree` into `plan`.
-sema_grammar_tree: fn(value: CtValue, plan: ^SemaGrammarItemsPlan) Never! {
+sema_grammar_tree: fn(value: ^^CtValue, plan: ^SemaGrammarItemsPlan) Never! {
     if value == .Struct(_, entries) {
-        loop entry in entries {
+        loop entry in entries.move() {
             if entry.value == .List(values) {
                 if entry.name == {
-                    "rules" -> loop rule in values -> plan.rules.push(sema_grammar_rule(rule))
-                    "nodes" -> loop node in values -> plan.nodes.push(sema_grammar_node(node))
+                    "rules" -> loop rule in values.move() -> plan.rules.push(sema_grammar_rule(rule))
+                    "nodes" -> loop node in values.move() -> plan.nodes.push(sema_grammar_node(node))
                     else -> {}
                 }
             }
@@ -380,10 +418,10 @@ sema_grammar_tree: fn(value: CtValue, plan: ^SemaGrammarItemsPlan) Never! {
     }
 }
 
-sema_grammar_rule: fn(value: CtValue) -> SemaGrammarRule Never! {
+sema_grammar_rule: fn(value: ^^CtValue) -> SemaGrammarRule Never! {
     ^rule: SemaGrammarRule{name: "", parser: false, body: -1}
     if value == .Struct(_, entries) {
-        loop entry in entries {
+        loop entry in entries.move() {
             if entry.name == {
                 "name" -> rule.name = sema_grammar_text(entry.value)
                 "kind" -> rule.parser = sema_grammar_variant(entry.value) == "Parser"
@@ -395,10 +433,10 @@ sema_grammar_rule: fn(value: CtValue) -> SemaGrammarRule Never! {
     rule
 }
 
-sema_grammar_node: fn(value: CtValue) -> SemaGrammarNode Never! {
+sema_grammar_node: fn(value: ^^CtValue) -> SemaGrammarNode Never! {
     ^node: SemaGrammarNode{kind: "", children: [Int]{}, label: "", rule: -1, token: -1}
     if value == .Struct(_, entries) {
-        loop entry in entries {
+        loop entry in entries.move() {
             if entry.name == {
                 "kind" -> node.kind = sema_grammar_variant(entry.value)
                 "children" -> node.children = sema_grammar_ints(entry.value)
@@ -412,16 +450,16 @@ sema_grammar_node: fn(value: CtValue) -> SemaGrammarNode Never! {
     node
 }
 
-sema_grammar_operator_rule: fn(value: CtValue) -> SemaGrammarOperatorRule Never! {
+sema_grammar_operator_rule: fn(value: ^^CtValue) -> SemaGrammarOperatorRule Never! {
     ^operator_rule: SemaGrammarOperatorRule{rule: -1, primary: -1, repeat: -1, operators: [SemaGrammarOperator]{}}
     if value == .Struct(_, entries) {
-        loop entry in entries {
+        loop entry in entries.move() {
             if entry.name == {
                 "rule" -> operator_rule.rule = sema_grammar_int(entry.value)
                 "primary" -> operator_rule.primary = sema_grammar_int(entry.value)
                 "repeat" -> operator_rule.repeat = sema_grammar_int(entry.value)
                 "operators" -> if entry.value == .List(values) {
-                    loop op in values -> operator_rule.operators.push(sema_grammar_operator(op))
+                    loop op in values.move() -> operator_rule.operators.push(sema_grammar_operator(op))
                 }
                 else -> {}
             }
@@ -430,10 +468,10 @@ sema_grammar_operator_rule: fn(value: CtValue) -> SemaGrammarOperatorRule Never!
     operator_rule
 }
 
-sema_grammar_operator: fn(value: CtValue) -> SemaGrammarOperator Never! {
+sema_grammar_operator: fn(value: ^^CtValue) -> SemaGrammarOperator Never! {
     ^op: SemaGrammarOperator{alt: -1, tail: -1, kind: "", level: -1, right: false, operands: [Int]{}}
     if value == .Struct(_, entries) {
-        loop entry in entries {
+        loop entry in entries.move() {
             if entry.name == {
                 "alt" -> op.alt = sema_grammar_int(entry.value)
                 "tail" -> op.tail = sema_grammar_int(entry.value)
@@ -448,17 +486,17 @@ sema_grammar_operator: fn(value: CtValue) -> SemaGrammarOperator Never! {
     op
 }
 
-sema_grammar_shape: fn(value: CtValue) -> SemaGrammarShape Never! {
+sema_grammar_shape: fn(value: ^^CtValue) -> SemaGrammarShape Never! {
     ^shape: SemaGrammarShape{rule: -1, name: "", is_enum: false, fields: [SemaGrammarField]{}, cases: [SemaGrammarCase]{}}
     if value == .Struct(_, entries) {
-        loop entry in entries {
+        loop entry in entries.move() {
             if entry.name == {
                 "rule" -> shape.rule = sema_grammar_int(entry.value)
                 "name" -> shape.name = sema_grammar_text(entry.value)
                 "is_enum" -> shape.is_enum = entry.value == .Bool(true)
                 "fields" -> shape.fields = sema_grammar_fields(entry.value)
                 "cases" -> if entry.value == .List(values) {
-                    loop case in values -> shape.cases.push(sema_grammar_case(case))
+                    loop case in values.move() -> shape.cases.push(sema_grammar_case(case))
                 }
                 else -> {}
             }
@@ -467,10 +505,10 @@ sema_grammar_shape: fn(value: CtValue) -> SemaGrammarShape Never! {
     shape
 }
 
-sema_grammar_case: fn(value: CtValue) -> SemaGrammarCase Never! {
+sema_grammar_case: fn(value: ^^CtValue) -> SemaGrammarCase Never! {
     ^case: SemaGrammarCase{name: "", alt: -1, fields: [SemaGrammarField]{}, wraps: -1}
     if value == .Struct(_, entries) {
-        loop entry in entries {
+        loop entry in entries.move() {
             if entry.name == {
                 "name" -> case.name = sema_grammar_text(entry.value)
                 "alt" -> case.alt = sema_grammar_int(entry.value)
@@ -483,18 +521,18 @@ sema_grammar_case: fn(value: CtValue) -> SemaGrammarCase Never! {
     case
 }
 
-sema_grammar_fields: fn(value: CtValue) -> [SemaGrammarField] Never! {
+sema_grammar_fields: fn(value: ^^CtValue) -> [SemaGrammarField] Never! {
     ^fields: [SemaGrammarField]{}
     if value == .List(values) {
-        loop field in values -> fields.push(sema_grammar_field(field))
+        loop field in values.move() -> fields.push(sema_grammar_field(field))
     }
     fields
 }
 
-sema_grammar_field: fn(value: CtValue) -> SemaGrammarField Never! {
+sema_grammar_field: fn(value: ^^CtValue) -> SemaGrammarField Never! {
     ^field: SemaGrammarField{name: "", kind: SemaGrammarFieldKind.Text, rule: -1, optional: false, list: false, nodes: [Int]{}}
     if value == .Struct(_, entries) {
-        loop entry in entries {
+        loop entry in entries.move() {
             if entry.name == {
                 "name" -> field.name = sema_grammar_text(entry.value)
                 "kind" -> if entry.value == .Enum(_, variant, _) {
@@ -515,14 +553,17 @@ sema_grammar_field: fn(value: CtValue) -> SemaGrammarField Never! {
     field
 }
 
-// Text field `name` of struct value `value` ("" when it has none).
-sema_grammar_member_text: fn(value: CtValue, name: String) -> String Never! {
+// Whether a `GrammarToken` struct value carries a non-empty `hole` field.
+sema_grammar_token_is_hole: fn(value: CtValue) -> Bool Never! {
     if value == .Struct(_, entries) {
         loop entry in entries {
-            if entry.name == name -> return sema_grammar_text(entry.value)
+            if entry.name == "hole" {
+                if entry.value == .Str(text) -> return text != ""
+                return false
+            }
         }
     }
-    ""
+    false
 }
 
 // Int list member `name` of struct value `value` (empty when it has none).
@@ -535,8 +576,8 @@ sema_grammar_member_ints: fn(value: CtValue, name: String) -> [Int] Never! {
     [Int]{}
 }
 
-sema_grammar_text: fn(value: CtValue) -> String Never! {
-    if value == .Str(text) -> return text.copy()
+sema_grammar_text: fn(value: ^^CtValue) -> String Never! {
+    if value == .Str(text) -> return text
     ""
 }
 
@@ -545,8 +586,8 @@ sema_grammar_int: fn(value: CtValue) -> Int Never! {
 }
 
 // The variant an enum value names ("" for a value that is no enum).
-sema_grammar_variant: fn(value: CtValue) -> String Never! {
-    if value == .Enum(_, variant, _) -> return variant.copy()
+sema_grammar_variant: fn(value: ^^CtValue) -> String Never! {
+    if value == .Enum(_, variant, _) -> return variant
     ""
 }
 

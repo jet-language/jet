@@ -7,18 +7,18 @@ recv lsp until $.id = 1
 send lsp: Messages/LSPQueuedRequestCanceledBeforeItRunsReturns32800/1.json
 recv lsp
 stdout: ~ "publishDiagnostics" # the opened document is published
-stdout: ~ "\"version\":1"
+stdout: ~ "\"version\":1" # the initial publication carries version 1
 # The edit, request 7 and its cancel go in one write, so the cancel is queued
 # when request 7 is taken.
 send lsp raw: Messages/LSPQueuedRequestCanceledBeforeItRunsReturns32800/2-edit-request-cancel.frames
-recv lsp collect until $.id = 7
+recv lsp collect until ndjson $[?id=7] #>= 1
 json: stdout ndjson $[?id=7].error.code = -32800
 stdout: !~ "\"result\":" # the canceled request does not run
 stdout: !~ "publishDiagnostics" # nor does it publish the edit before it
 send lsp: Messages/LSPQueuedRequestCanceledBeforeItRunsReturns32800/3.json
-recv lsp collect until $.id = 8
+recv lsp collect until ndjson $[?id=8] #>= 1
 stdout: ~ "publishDiagnostics" # the next request publishes the edit
-stdout: ~ "\"version\":2"
+stdout: ~ "\"version\":2" # the delayed publication carries version 2
 json: stdout ndjson $[?id=8].result[?name="marker_new"] #>= 1
 json: stdout ndjson $[?id=8].result[?name="marker_old"] #= 0
 send lsp: Messages/LSPQueuedRequestCanceledBeforeItRunsReturns32800/4.json

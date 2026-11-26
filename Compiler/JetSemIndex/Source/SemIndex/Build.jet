@@ -570,12 +570,35 @@ semindex_declaration_ref: fn(name: String, span: Span, db: SemDB, ctx: SemWalk, 
 // it imports, becomes a reference to that declaration. A name before `:`
 // labels a function type's parameter, and a span already referenced keeps
 // its row; the module's references start at `first_ref`.
+// The positions in `modules` that share `doc_module`'s package namespace in
+// the checked name ledger (sibling files in the same package see one another's
+// module-scope types without a `use` import).
+semindex_same_namespace_modules: fn(doc_module: JetDriverDocModule, modules: [JetDriverDocModule]) -> [Int:Bool] Never! {
+    ^same: [Int:Bool]{}
+    storage: doc_module.name_ledger ?? return same
+    from: doc_module.name_module_index
+    if from < 0 -> return same
+    permit: storage.guard_read()
+    ledger_modules: permit.value.facts.modules
+    if from >= ledger_modules.len() -> return same
+    source_namespace: ledger_modules[from].namespace
+    if source_namespace == None -> return same
+    loop (position, other) in modules {
+        other_index: other.name_module_index
+        if other_index >= 0 && other_index < ledger_modules.len() && ledger_modules[other_index].namespace == source_namespace {
+            same[position] = true
+        }
+    }
+    same
+}
+
 semindex_type_refs: fn(db: ^SemDB, doc_module: JetDriverDocModule, modules: [JetDriverDocModule], first: Int, first_ref: Int, scope: String) {
     bytes: doc_module.source.bytes()
     ^taken: [Int:Bool]{}
     loop index in first_ref..<db.refs.len() {
         if db.refs[index].module_path == doc_module.path -> taken[db.refs[index].span.start] = true
     }
+    same_namespace: semindex_same_namespace_modules(doc_module, modules)
     ^imported: [String:Bool]{}
     ^aliases: [String:Bool]{}
     loop import in doc_module.imports {
@@ -616,7 +639,7 @@ semindex_type_refs: fn(db: ^SemDB, doc_module: JetDriverDocModule, modules: [Jet
             if group < 0 -> next
             loop position in db.declarations.holders.groups[group] {
                 other: modules[position]
-                visible: if owner == "" -> other.path == doc_module.path || imported.has_key(name) else -> aliases.has_key(owner) && (other.alias == owner || semindex_module_alias(other) == owner)
+                visible: if owner == "" -> other.path == doc_module.path || same_namespace.has_key(position) || imported.has_key(name) else -> aliases.has_key(owner) && (other.alias == owner || semindex_module_alias(other) == owner)
                 if !visible -> next
                 target = db.declarations.by_module[position].get(name)
                 if other.path == doc_module.path -> break

@@ -5,27 +5,27 @@
 session lsp content-length: jet self lsp
 send lsp: Messages/LSPHoverShowsOneJetSignature/0.json
 recv lsp
-stdout: ~ "hoverProvider"
+stdout: ~ "hoverProvider" # initialize advertises hoverProvider
 send lsp: Messages/LSPHoverShowsOneJetSignature/1.json
 send lsp: Messages/LSPHoverShowsOneJetSignature/2.json
 recv lsp
-stdout: ~ "publishDiagnostics"
+stdout: ~ "publishDiagnostics" # opening the document publishes checked diagnostics
 send lsp: Messages/LSPHoverShowsOneJetSignature/3.json
 recv lsp
-stdout: ~ "jet\\nparse: fn(text: String) -> Int Bad!\\n```"
-stdout: !~ "failure:"
+stdout: ~ "jet\\nparse: fn(text: String) -> Int Bad!\\n```" # explicit failure contract appears on the signature line
+stdout: !~ "failure:" # no separate failure: line is printed
 send lsp: Messages/LSPHoverShowsOneJetSignature/4.json
 recv lsp
-stdout: ~ "jet\\nrelay: fn(text: String) -> Int Bad!\\n```"
-stdout: !~ "failure:"
+stdout: ~ "jet\\nrelay: fn(text: String) -> Int Bad!\\n```" # inferred failure contract appears on the signature line
+stdout: !~ "failure:" # no separate failure: line is printed
 send lsp: Messages/LSPHoverShowsOneJetSignature/5.json
 recv lsp
-stdout: ~ "jet\\nMeter.scale(by: Int) -> Int"
+stdout: ~ "jet\\nMeter.scale(by: Int) -> Int" # method hover shows callee signature
 send lsp: Messages/LSPHoverShowsOneJetSignature/6.json
 recv lsp
-stdout: ~ "jet\\nMeter.copy() -> Meter\\n```"
+stdout: ~ "jet\\nMeter.copy() -> Meter\\n```" # compiler-owned copy hover shows receiver-typed signature
 send lsp: Messages/LSPHoverShowsOneJetSignature/7.json
 recv lsp
-stdout: ~ "result"
+stdout: ~ "result" # shutdown returns a JSON-RPC result
 close lsp
-exit: any
+exit: 0
