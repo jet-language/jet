@@ -39,14 +39,14 @@ SCRATCH_ROOT = Path(os.environ.get("JET_STATE_ROOT") or Path.home() / ".cache" /
 JET_WORKLOAD = r'''to_u8: fn(n: Int) -> U8 { (U8{n & 255}) }
 
 run: fn() {
-    payload := [U8]{}
-    i := 0
+    ^payload: [U8]{}
+    ^i: 0
     loop i < 257 {
         payload.push(to_u8(i % 251))
         i += 1
     }
     rounds: {rounds}
-    encoded := ""
+    ^encoded: ""
     i = 0
     loop i < rounds {
         encoded = b64.encode(payload)

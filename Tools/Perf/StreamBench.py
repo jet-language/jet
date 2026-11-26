@@ -67,8 +67,8 @@ def jet_source(case: str, size: int) -> str:
     return f'''{producer}
 
 run: fn() {{
-    total := 0
-    i := 0
+    ^total: 0
+    ^i: 0
     loop i < {size} {{
         {body}
         i += 1

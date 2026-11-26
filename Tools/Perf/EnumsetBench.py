@@ -79,8 +79,8 @@ mask_of: fn(r: Int) -> Int {{
 JET_REPS = {
     "jet_set_enum": """
 mk: fn(mask: Int) -> Set<Case> {{
-    out := Set.from([Case]{{}})
-    i := 0
+    ^out: Set.from([Case]{{}})
+    ^i: 0
     loop i < {k} {{
         if (mask >> i) & 1 == 1 -> ^out.add(ALL[i])
         i += 1
@@ -102,8 +102,8 @@ diff: fn(a: Set<Case>, b: Set<Case>) -> Set<Case> {{ a.difference(b) }}
 """,
     "jet_bits": """
 mk: fn(mask: Int) -> Bits {{
-    out := Bits.new()
-    i := 0
+    ^out: Bits.new()
+    ^i: 0
     loop i < {k} {{
         if (mask >> i) & 1 == 1 -> ^out.add(i)
         i += 1
@@ -118,12 +118,12 @@ set_bit: fn(s: ^Bits, i: Int) {{ ^s.add(i) }}
 clear_bit: fn(s: ^Bits, i: Int) {{ ^s.remove(i) }}
 
 combine: fn(a: Bits, b: Bits, op: Int) -> Bits {{
-    out := Bits.new()
-    i := 0
+    ^out: Bits.new()
+    ^i: 0
     loop i < {k} {{
         x: a.has(i)
         y: b.has(i)
-        keep := x && !y
+        ^keep: x && !y
         if op == 0 -> keep = x || y
         if op == 1 -> keep = x && y
         if keep -> ^out.add(i)
@@ -176,8 +176,8 @@ diff: fn(a: Word, b: Word) -> Word {{ Word{{bits: a.bits - (a.bits & b.bits)}} }
 
 JET_DRIVER = """
 to_mask: fn(s: {ty}) -> Int {{
-    m := 0
-    i := 0
+    ^m: 0
+    ^i: 0
     loop i < {k} {{
         if has(s, i) -> m = m | (1 << i)
         i += 1
@@ -186,8 +186,8 @@ to_mask: fn(s: {ty}) -> Int {{
 }}
 
 items: fn(s: {ty}) -> [Int] {{
-    out := [Int]{{}}
-    i := 0
+    ^out: [Int]{{}}
+    ^i: 0
     loop i < {k} {{
         if has(s, i) -> ^out.push(i)
         i += 1
@@ -196,17 +196,17 @@ items: fn(s: {ty}) -> [Int] {{
 }}
 
 from_items: fn(xs: [Int]) -> {ty} {{
-    m := 0
+    ^m: 0
     loop x in xs -> m = m | (1 << x)
     return mk(m)
 }}
 
 run: fn() {{
     rounds: {rounds}
-    check := 0
+    ^check: 0
 
     w: time.instant()
-    r := 0
+    ^r: 0
     loop r < rounds {{
         check = (check * 31 + to_mask(mk(mask_of(r)))) % 1000000007
         r += 1
@@ -214,7 +214,7 @@ run: fn() {{
     t_construction: w.elapsed().in(.Nanoseconds)
 
     w2: time.instant()
-    s := mk(0)
+    ^s: mk(0)
     r = 0
     loop r < rounds {{
         set_bit(^s, r % {kbits})
@@ -226,7 +226,7 @@ run: fn() {{
 
     w3: time.instant()
     probe: mk(dense(7))
-    hits := 0
+    ^hits: 0
     r = 0
     loop r < rounds {{
         if has(probe, r % {k}) -> hits += 1
@@ -246,7 +246,7 @@ run: fn() {{
     t_setops: w4.elapsed().in(.Nanoseconds)
 
     w5: time.instant()
-    total := 0
+    ^total: 0
     r = 0
     loop r < rounds /% 8 {{
         loop x in items(probe) -> total += x

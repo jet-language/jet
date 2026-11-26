@@ -144,6 +144,9 @@
 (function_def name: (type_identifier) @function)
 (function_def name: (meta_name) @function)
 (binding name: (type_identifier) @constant)
+; A changeable name (`^count: 0`): its mark and its name stand apart from a
+; fixed name (`total: 0`).
+(binding "^" @keyword name: (identifier) @variable.special)
 (label name: (type_identifier) @constant)
 
 ; Calls, members, constructors and variants
