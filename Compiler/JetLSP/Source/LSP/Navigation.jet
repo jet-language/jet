@@ -19,7 +19,8 @@ lsp_at: fn(server: LSPServer, params: Dyn?) -> LSPAt? {
     position: lsp_params_position(params) ?? return None
     view: lsp_view(server, params) ?? return None
     bytes: view.doc.text.bytes()
-    offset: lsp_checked_offset_bytes(lsp_line_table_bytes(bytes), bytes, position) ?? return None
+    host_offset: lsp_checked_offset_bytes(lsp_line_table_bytes(bytes), bytes, position) ?? return None
+    offset: lsp_doc_to_jet_offset(view.doc, host_offset) ?? return None
     Val(LSPAt{view: view, offset: offset, line: position.line})
 }
 
@@ -186,6 +187,7 @@ lsp_hover_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
     if lsp_choices_markdown(at) == .Val(choices) {
         markdown = if markdown == .Val(shown) -> Val("{shown}\n\n{choices}") else -> Val(choices)
     }
+    if at.view.doc.host_doc != None -> return lsp_host_hover_response(at, markdown, id)
     text: markdown ?? return lsp_response(id, "null")
     ^range: ""
     if lsp_ident_token_at(at.view.lexed, at.offset) == .Val(name) {
@@ -354,8 +356,13 @@ lsp_keyword_symbol_at: fn(view: LSPView, offset: Int) -> Int? Never! {
 lsp_definition_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
     at: lsp_at(server, params) ?? return lsp_response(id, "null")
     if lsp_target_at(at.view, at.offset) == .Val(target) {
-        if lsp_location(at.view.checked, target.module_path, target.span) == .Val(location) {
-            return lsp_response(id, lsp_location_json(location))
+        if lsp_module_index(at.view.checked, target.module_path) == .Val(module_index) {
+            module_ref: at.view.checked.modules[module_index]
+            if module_ref.physical_path != "" {
+                if lsp_host_location_json(server, module_ref.physical_path, module_ref.source, target.span) == .Val(json) {
+                    return lsp_response(id, json)
+                }
+            }
         }
     }
     declared: lsp_declared_at(at.view, at.offset) ?? return lsp_response(id, "null")
@@ -374,7 +381,12 @@ lsp_references_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String 
     if at.view.checked.index == None -> return lsp_response(id, "null")
     target: lsp_target_at(at.view, at.offset) ?? return lsp_response(id, "[]")
     declaration: lsp_bool_member(lsp_param(params, "context") ?? Dyn.Null, "includeDeclaration")
-    rows: loop placed in lsp_open_occurrences(server, at.view, target, declaration: declaration).placed -> lsp_location_json(LSPLocation{uri: lsp_path_to_uri(placed.path), source: placed.source, span: placed.span})
+    ^rows: [String]{}
+    loop placed in lsp_open_occurrences(server, at.view, target, declaration: declaration).placed {
+        if lsp_host_location_json(server, placed.path, placed.source, placed.span) == .Val(json) {
+            rows.push(json)
+        }
+    }
     lsp_response(id, "[{rows.join(",")}]")
 }
 
@@ -388,7 +400,8 @@ lsp_document_highlight_response: fn(server: LSPServer, params: Dyn?, id: Dyn) ->
     loop occurrence in lsp_occurrences(index, target, declaration: true) {
         if occurrence.module_path != module_path -> next
         kind: if occurrence.target == None -> 3 else -> 2
-        rows.push("{{\"range\":{lsp_range_json(lsp_byte_span_to_range(at.view.doc.text, occurrence.span))},\"kind\":{kind}}}")
+        mapped: lsp_doc_to_host_span(at.view.doc, occurrence.span) ?? next
+        rows.push("{{\"range\":{lsp_range_json(lsp_byte_span_to_range(at.view.doc.text, mapped))},\"kind\":{kind}}}")
     }
     lsp_response(id, "[{rows.join(",")}]")
 }
@@ -410,7 +423,7 @@ lsp_linked_editing_range_response: fn(server: LSPServer, params: Dyn?, id: Dyn) 
         }
     }
     if def.module_path != module_path -> return lsp_response(id, "null")
-    text: at.view.doc.text
+    text: lsp_doc_jet_text(at.view.doc)
     ^rows: [String]{}
     loop occurrence in lsp_occurrences(index, target, declaration: true) {
         if occurrence.module_path != module_path -> return lsp_response(id, "null")
@@ -420,7 +433,8 @@ lsp_linked_editing_range_response: fn(server: LSPServer, params: Dyn?, id: Dyn) 
         if span.end > text.count_bytes() || foundation_byte_text(text.bytes(), span.start, span.end) != def.name {
             return lsp_response(id, "null")
         }
-        rows.push(lsp_range_json(lsp_byte_span_to_range(text, span)))
+        mapped: lsp_doc_to_host_span(at.view.doc, span) ?? return lsp_response(id, "null")
+        rows.push(lsp_range_json(lsp_byte_span_to_range(at.view.doc.text, mapped)))
     }
     lsp_response(id, "{{\"ranges\":[{rows.join(",")}]}}")
 }
@@ -459,7 +473,9 @@ lsp_rename_target: fn(server: LSPServer, at: LSPAt) -> LSPRenameTarget LSPRPCErr
 lsp_path_is_open: fn(server: LSPServer, path: String) -> Bool Never! {
     if path == "" -> return false
     loop (_, doc) in server.diagnostic_state.docs {
-        if lsp_source_paths_equal(doc.path, path) -> return true
+        if lsp_source_paths_equal(doc.path, path) || lsp_source_paths_equal(lsp_doc_check_path(doc), path) {
+            return true
+        }
     }
     false
 }
@@ -467,7 +483,10 @@ lsp_path_is_open: fn(server: LSPServer, path: String) -> Bool Never! {
 lsp_prepare_rename_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
     at: lsp_at(server, params) ?? return lsp_response(id, "null")
     if lsp_rename_target(server, at) == {
-        .Ok(target) -> lsp_response(id, "{{\"range\":{lsp_range_json(lsp_byte_span_to_range(at.view.doc.text, target.span))},\"placeholder\":{foundation_json_quote(target.def.name)}}}")
+        .Ok(target) -> {
+            mapped: lsp_doc_to_host_span(at.view.doc, target.span) ?? return lsp_error_response(id, -32803, "rename target lies in generated text outside the host document")
+            lsp_response(id, "{{\"range\":{lsp_range_json(lsp_byte_span_to_range(at.view.doc.text, mapped))},\"placeholder\":{foundation_json_quote(target.def.name)}}}")
+        }
         .Err(problem) -> lsp_error_response(id, problem.code, problem.message)
     }
 }
@@ -534,23 +553,30 @@ lsp_rename_edit: fn(server: LSPServer, view: LSPView, def: SemDef, new_name: Str
         if span.end > source.count_bytes() || foundation_byte_text(source.bytes(), span.start, span.end) != def.name {
             next
         }
-        uri: lsp_path_to_uri(placed.path)
-        fresh: !by_uri.has_key(uri)
-        if fresh {
-            // An open document's edits apply only to the version the check
-            // read; a file no editor holds is the one on disk.
-            ^version: "null"
-            loop (_, doc) in server.diagnostic_state.docs {
-                if !lsp_source_paths_equal(doc.path, placed.path) -> next
-                if doc.text != source {
+        ^uri: lsp_path_to_uri(placed.path)
+        ^edit_text: source
+        ^edit_span: span
+        ^version: "null"
+        if lsp_open_doc_for_check_path(server, placed.path) == .Val(open_uri) {
+            if server.diagnostic_state.docs.get(open_uri) == .Val(doc) {
+                if !lsp_checked_source_matches(source, lsp_doc_jet_text(doc)) {
                     return Err(LSPRPCError{code: -32801, message: "`{placed.path}` changed after the check; rename again"})
+                }
+                if doc.host_doc != None {
+                    host_span: lsp_doc_to_host_span(doc, span) ?? return Err(LSPRPCError{code: -32803, message: "rename touches generated text outside the host document"})
+                    uri = open_uri
+                    edit_text = doc.text
+                    edit_span = host_span
                 }
                 version = "{doc.version}"
             }
+        }
+        fresh: !by_uri.has_key(uri)
+        if fresh {
             by_uri[uri] = [String]{}
             versions[uri] = version
         }
-        by_uri[uri].push("{{\"range\":{lsp_range_json(lsp_byte_span_to_range(source, span))},\"newText\":{foundation_json_quote(new_name)}}}")
+        by_uri[uri].push("{{\"range\":{lsp_range_json(lsp_byte_span_to_range(edit_text, edit_span))},\"newText\":{foundation_json_quote(new_name)}}}")
         if fresh -> order.push(uri)
     }
     order.sort()

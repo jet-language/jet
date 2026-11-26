@@ -1,0 +1,70 @@
+# A host document with embedded Jet regions checks through the JetDriver
+# SourceDocument query: UTF-8 25..46 / UTF-16 23..44 single-region emoji case,
+# two Jet regions with cross-region navigation and rename edits in host ranges,
+# incremental edits mapping diagnostics and edits to host ranges, stale version
+# refusal, cancellation (-32800), Unicode, and partial syntax (#6903 c4).
+session lsp content-length: jet self lsp
+stderr: null
+
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"capabilities\":{}}}"
+recv lsp until $.id = 1
+stdout: ~ "\"hoverProvider\":true" # initialize advertises hover
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
+
+# 1. UTF-8 25..46 / UTF-16 23..44 emoji host document: region checks cleanly,
+# cursor on emoji (host text) returns null, cursor inside region hovers cleanly.
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/panel.html\",\"languageId\":\"html\",\"version\":1,\"text\":\"🙂\\n<script lang=\\\"jet\\\">\\nrun: fn() {print(1)}\\n</script>\\n\"}}}"
+recv lsp until $.method = "textDocument/publishDiagnostics"
+json: stdout doc $.params.uri = "file://{work}/panel.html"
+json: stdout doc $.params.diagnostics[?severity=1] #= 0
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/panel.html\"},\"position\":{\"line\":0,\"character\":0}}}"
+recv lsp until $.id = 2
+json: stdout doc $.result = null
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/panel.html\"},\"position\":{\"line\":2,\"character\":1}}}"
+recv lsp until $.id = 3
+stdout: ~ "run: fn()" # hover resolves inside UTF-8 25..46 / UTF-16 23..44 region
+json: stdout doc $.result.range = {"start":{"line":2,"character":0},"end":{"line":2,"character":3}}
+
+# 2. Two Jet regions in one host document (with emoji prefix + host text between regions):
+# cross-region hover, definition, and rename edits map to host coordinates.
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/page.html\",\"languageId\":\"html\",\"version\":1,\"text\":\"🙂\\n<script lang=\\\"jet\\\">\\nscale_val: fn() -> Int {\\n    3\\n}\\n</script>\\n<p>middle</p>\\n<script lang=\\\"jet\\\">\\nuse_val: fn() -> Int {\\n    scale_val() + 1\\n}\\n</script>\\n\"}}}"
+recv lsp until $.method = "textDocument/publishDiagnostics"
+json: stdout doc $.params.uri = "file://{work}/page.html"
+json: stdout doc $.params.diagnostics[?severity=1] #= 0
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/page.html\"},\"position\":{\"line\":9,\"character\":6}}}"
+recv lsp until $.id = 4
+json: stdout doc $.result.uri = "file://{work}/page.html"
+json: stdout doc $.result.range = {"start":{"line":2,"character":0},"end":{"line":2,"character":9}}
+
+# 3. Incremental edit in region 1 shifts line numbers in region 2; rename edits map to updated host lines.
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didChange\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/page.html\",\"version\":2},\"contentChanges\":[{\"range\":{\"start\":{\"line\":3,\"character\":0},\"end\":{\"line\":3,\"character\":0}},\"text\":\"    // shifted\\n\"}]}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"textDocument/rename\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/page.html\"},\"position\":{\"line\":10,\"character\":6},\"newName\":\"factor\"}}"
+recv lsp collect until ndjson $[?id=5] #>= 1
+json: stdout ndjson $[?id=5][0].result.changes."file://{work}/page.html" #= 2
+json: stdout ndjson $[?id=5][0].result.changes."file://{work}/page.html"[0].range = {"start":{"line":2,"character":0},"end":{"line":2,"character":9}}
+json: stdout ndjson $[?id=5][0].result.changes."file://{work}/page.html"[1].range = {"start":{"line":10,"character":4},"end":{"line":10,"character":13}}
+
+# 4. Stale version didChange is refused without overwriting current version or returning false results.
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didChange\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/page.html\",\"version\":1},\"contentChanges\":[{\"text\":\"<script lang=\\\"jet\\\">\\nbroken: (\\n</script>\\n\"}]}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/page.html\"},\"position\":{\"line\":10,\"character\":6}}}"
+recv lsp until $.id = 6
+stdout: ~ "scale_val: fn() -> Int" # stale edit did not overwrite valid version 2
+
+# 5. Queued request canceled before it runs returns -32800 (RequestCancelled).
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/page.html\"},\"position\":{\"line\":10,\"character\":6}}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"$/cancelRequest\",\"params\":{\"id\":7}}"
+recv lsp collect until ndjson $[?id=7] #>= 1
+json: stdout ndjson $[?id=7][0].error.code = -32800
+
+# 6. Incremental edit introducing partial/broken syntax in region 2 publishes host-mapped diagnostics at version 3.
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didChange\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/page.html\",\"version\":3},\"contentChanges\":[{\"range\":{\"start\":{\"line\":10,\"character\":13},\"end\":{\"line\":10,\"character\":19}},\"text\":\"(\"}]}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/page.html\"},\"position\":{\"line\":6,\"character\":2}}}"
+recv lsp collect until ndjson $[?id=8] #>= 1
+json: stdout ndjson $[?method="textDocument/publishDiagnostics"][?params.uri="file://{work}/page.html"][0].params.version = 3
+json: stdout ndjson $[?method="textDocument/publishDiagnostics"][?params.uri="file://{work}/page.html"][0].params.diagnostics[?severity=1] #>= 1
+json: stdout ndjson $[?method="textDocument/publishDiagnostics"][?params.uri="file://{work}/page.html"][0].params.diagnostics[0].range.start.line >= 9
+
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{}}"
+recv lsp until $.id = 99
+close lsp
+exit: 0

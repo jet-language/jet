@@ -2950,8 +2950,8 @@ jet_cli_snapshot_file_count: fn(snapshot: JetDriverAuthorizedSourceSnapshot) -> 
 // `alone` holds the entry by itself, `target` holds a build target's whole
 // folder, and `appended` overlays only add code to the files they replace,
 // as jet_cli_prepare_snapshot says.
-jet_cli_prepare_overlays: fn(anchor: String, entry: String, overlays: [JetDriverSourceDocument], color: Bool, threads: Int?, mode: JetDriverCompileMode, alone: Bool{false}, target: Bool{false}, appended: Bool{false}) -> JetCLIPrepared {
-    if jet_cli_prepare_snapshot(anchor, entry, overlays, color, alone, target, appended) == {
+jet_cli_prepare_overlays: fn(anchor: String, entry: String, overlays: [JetDriverSourceDocument], color: Bool, threads: Int?, mode: JetDriverCompileMode, alone: Bool{false}, target: Bool{false}, appended: Bool{false}, ignore_outside_overlays: Bool{false}) -> JetCLIPrepared {
+    if jet_cli_prepare_snapshot(anchor, entry, overlays, color, alone, target, appended, ignore_outside_overlays) == {
         .Refused(output) -> JetCLIPrepared.Refused{output: output}
         .Held(snapshot) -> jet_cli_prepare_request(snapshot, color, threads, mode)
     }
@@ -3100,7 +3100,7 @@ jet_cli_entry_is_script: fn(entry_path: String, overlays: [JetDriverSourceDocume
 // unsaved buffer). Overlays that are `appended` (a debugger's expression added
 // to a source it reaches) keep a loose entry loose: they reach no other file
 // than the disk copies do.
-jet_cli_prepare_snapshot: fn(anchor: String, entry: String, overlays: [JetDriverSourceDocument], color: Bool, alone: Bool{false}, target: Bool{false}, appended: Bool{false}) -> JetCLISnapshotted {
+jet_cli_prepare_snapshot: fn(anchor: String, entry: String, overlays: [JetDriverSourceDocument], color: Bool, alone: Bool{false}, target: Bool{false}, appended: Bool{false}, ignore_outside_overlays: Bool{false}) -> JetCLISnapshotted {
     anchor_path: cli_files.realpath(anchor) ?? jet_cli_overlaid_path(anchor, overlays) ?? return jet_cli_snapshot_refused(jet_cli_unread_file_what(anchor), "check the spelling, or run jet from the folder that contains it", color)
     entry_path: jet_cli_overlay_path(entry)
     script: alone || jet_cli_entry_is_script(entry_path, overlays)
@@ -3174,6 +3174,7 @@ jet_cli_prepare_snapshot: fn(anchor: String, entry: String, overlays: [JetDriver
             next
         }
         if relative == "" || cli_files.exists(path) || !relative.ends_with(".jet") || jet_cli_outside_walk(root, relative) {
+            if ignore_outside_overlays && path != entry_path -> next
             return jet_cli_snapshot_refused("`{overlay.path}` is not a checked source file of `{root}`", "check a `.jet` file that is not inside a skipped or nested project directory", color)
         }
         size: overlay.source.count_bytes()
@@ -3225,6 +3226,7 @@ jet_cli_prepare_snapshot: fn(anchor: String, entry: String, overlays: [JetDriver
             }
         }
         if !placed {
+            if ignore_outside_overlays && path != entry_path -> next
             return jet_cli_snapshot_refused("`{overlay.path}` is not a checked source file of `{root}`", "check a `.jet` file that is not inside a skipped or nested project directory", color)
         }
     }

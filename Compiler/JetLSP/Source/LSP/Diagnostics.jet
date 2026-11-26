@@ -98,7 +98,7 @@ lsp_diagnostic_groups: fn(state: LSPDiagnosticState, uri: String, checked: LSPCh
 lsp_diagnostic_group_add: fn(groups: ^[String:[Int]], state: LSPDiagnosticState, uri: String, diagnostic: Diagnostic, index: Int) Never! {
     if diagnostic.origin == .Val(origin) {
         loop (open_uri, open) in state.docs {
-            if lsp_source_paths_equal(open.path, origin.path) {
+            if lsp_source_paths_equal(open.path, origin.path) || lsp_source_paths_equal(lsp_doc_check_path(open), origin.path) {
                 lsp_group_add(groups, open_uri, index)
                 return
             }
@@ -119,7 +119,9 @@ lsp_group_add: fn(groups: ^[String:[Int]], target: String, index: Int) Never! {
 lsp_diagnostic_lands_on_root: fn(state: LSPDiagnosticState, uri: String, diagnostic: Diagnostic) -> Bool Never! {
     origin: diagnostic.origin ?? return true
     loop (open_uri, open) in state.docs {
-        if lsp_source_paths_equal(open.path, origin.path) -> return open_uri == uri
+        if lsp_source_paths_equal(open.path, origin.path) || lsp_source_paths_equal(lsp_doc_check_path(open), origin.path) {
+            return open_uri == uri
+        }
     }
     lsp_path_to_uri(origin.path) == uri
 }

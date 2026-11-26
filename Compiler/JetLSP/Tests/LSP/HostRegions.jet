@@ -1,0 +1,96 @@
+// Host documents with embedded Jet regions (`JetDriverSourceDocument` /
+// `JetDriverHostDocument`) and inline-package source matching (#6903 c4, c6).
+use {
+    jet_driver.[jet_driver_host_span, jet_driver_source_document_problem, jet_driver_utf16_offset]
+    jet_foundation.[Span, foundation_json_quote]
+    jet_pkg_model.[pkg_mask_inline_package_source]
+    jet_lsp.[
+        lsp_checked_source_matches,
+        lsp_diagnostic_groups,
+        lsp_document_group_json,
+        lsp_extract_host_document,
+        lsp_member,
+        lsp_update_document,
+    ]
+}
+
+LSP_HOST_ONE_REGION_URI: "file:///w/panel.html"
+LSP_HOST_ONE_REGION_TEXT: "🙂\n<script lang=\"jet\">\nrun: fn() {{print(1)}}\n</script>\n"
+
+LSP_HOST_TWO_REGION_URI: "file:///w/page.html"
+LSP_HOST_TWO_REGION_TEXT: "🙂\n<script lang=\"jet\">\nscale_val: fn() -> Int {{\n    3\n}}\n</script>\n<p>middle</p>\n<script lang=\"jet\">\nuse_val: fn() -> Int {{\n    scale_val() + 1\n}}\n</script>\n"
+
+#Test("host document extracts the UTF-8 25..46 / UTF-16 23..44 Jet region") {
+    doc: lsp_extract_host_document("/w/panel.html", 1, LSP_HOST_ONE_REGION_TEXT, "html") ?? panic("expected embedded region")
+    assert_eq(jet_driver_source_document_problem(doc), None)
+    span: jet_driver_host_span(doc, Span{start: 0, end: 21}) ?? panic("region maps to host")
+    assert_eq(span.start, 25)
+    assert_eq(span.end, 46)
+    assert_eq(jet_driver_utf16_offset(LSP_HOST_ONE_REGION_TEXT, span.start), 23)
+    assert_eq(jet_driver_utf16_offset(LSP_HOST_ONE_REGION_TEXT, span.end), 44)
+    // Plain HTML without Jet regions is still ignored.
+    assert_eq(lsp_extract_host_document("/w/plain.html", 1, "<p>🙂</p>", "html"), None)
+}
+
+#Test("host document with two Jet regions maps hover, definition, rename, and diagnostics after incremental edits") {
+    ^server: lsp_test_server()
+    open: lsp_test_json("{{\"textDocument\":{{\"uri\":\"{LSP_HOST_TWO_REGION_URI}\",\"languageId\":\"html\",\"version\":1,\"text\":{foundation_json_quote(LSP_HOST_TWO_REGION_TEXT)}}}}}")
+    assert_eq(lsp_update_document(server.diagnostic_state, Val(open), is_open: true), Val(LSP_HOST_TWO_REGION_URI))
+    lsp_test_publish(server, LSP_HOST_TWO_REGION_URI)
+
+    // Cursor in host text outside Jet regions (on the emoji / `<p>middle</p>`) returns null.
+    assert_eq(lsp_test_result(server, "textDocument/hover", lsp_test_at(LSP_HOST_TWO_REGION_URI, 0, 0)), .Null)
+    assert_eq(lsp_test_result(server, "textDocument/hover", lsp_test_at(LSP_HOST_TWO_REGION_URI, 6, 3)), .Null)
+
+    // Hover on `scale_val` call in region 2 (host line 9, col 6) returns signature & host range on line 9.
+    hover: lsp_test_result(server, "textDocument/hover", lsp_test_at(LSP_HOST_TWO_REGION_URI, 9, 6))
+    assert(lsp_test_text(lsp_test_field(hover, "contents"), "value").contains("scale_val: fn() -> Int"), "hover resolves across regions")
+    assert_eq(lsp_test_range(lsp_test_field(hover, "range")), "9:4-9:13")
+
+    // Go-to-definition from region 2 jumps to region 1 (host line 2, cols 0..9) under the host URI.
+    def_loc: lsp_test_result(server, "textDocument/definition", lsp_test_at(LSP_HOST_TWO_REGION_URI, 9, 6))
+    assert_eq(lsp_test_text(def_loc, "uri"), LSP_HOST_TWO_REGION_URI)
+    assert_eq(lsp_test_range(lsp_test_field(def_loc, "range")), "2:0-2:9")
+
+    // Rename from region 2 produces host-mapped edits in both region 1 (line 2) and region 2 (line 9).
+    rename: lsp_test_result(server, "textDocument/rename", "{{{lsp_test_text_document(LSP_HOST_TWO_REGION_URI)},\"position\":{{\"line\":9,\"character\":6}},\"newName\":\"factor\"}}")
+    changes: lsp_test_field(rename, "changes")
+    edits: lsp_test_rows(lsp_test_field(changes, LSP_HOST_TWO_REGION_URI))
+    assert_eq(edits.len(), 2)
+    assert_eq(lsp_test_range(lsp_test_field(edits[0], "range")), "2:0-2:9")
+    assert_eq(lsp_test_range(lsp_test_field(edits[1], "range")), "9:4-9:13")
+
+    // Stale version didChange is refused without mutating the document.
+    assert_eq(lsp_test_change(server.diagnostic_state, LSP_HOST_TWO_REGION_URI, 1, "[{{\"text\":\"broken\"}}]"), None)
+    assert_eq((server.diagnostic_state.docs.get(LSP_HOST_TWO_REGION_URI) ?? panic("open")).version, 1)
+
+    // Incremental edit inside region 2 introduces broken syntax `scale_val(` on host line 9;
+    // diagnostics map back to host line 9 (not Jet line offsets).
+    break_edit: "[{{\"range\":{{\"start\":{{\"line\":9,\"character\":13}},\"end\":{{\"line\":9,\"character\":19}}}},\"text\":\"(\"}}]"
+    assert_eq(lsp_test_change(server.diagnostic_state, LSP_HOST_TWO_REGION_URI, 2, break_edit), Val(LSP_HOST_TWO_REGION_URI))
+    doc: server.diagnostic_state.docs.get(LSP_HOST_TWO_REGION_URI) ?? panic("open")
+    checked: server.check(doc)
+    assert(checked.diagnostics.len() > 0, "broken incremental edit produces parse diagnostics")
+    ^targets: [String:Bool]{}
+    groups: lsp_diagnostic_groups(server.diagnostic_state, LSP_HOST_TWO_REGION_URI, checked, targets)
+    msg: lsp_test_json(lsp_document_group_json(server.diagnostic_state, LSP_HOST_TWO_REGION_URI, checked, groups[LSP_HOST_TWO_REGION_URI]))
+    params: lsp_test_field(msg, "params")
+    assert_eq(lsp_test_int(params, "version"), 2)
+    diags: lsp_test_rows(lsp_test_field(params, "diagnostics"))
+    assert(diags.len() > 0, "host publication carries mapped diagnostics")
+    start_line: lsp_test_int(lsp_test_field(lsp_test_field(diags[0], "range"), "start"), "line")
+    assert(start_line >= 8 && start_line <= 10, "diagnostic maps into host region 2 (line {start_line}), not Jet line offsets")
+    assert(lsp_member(params, "uri") != None, "publication names host URI")
+}
+
+#Test("inline package source matches masked module text") {
+    raw: "package: {{\n    name: \"demo\"\n}}\n\nrun: fn() -> Int {{\n    1\n}}\n"
+    masked: if pkg_mask_inline_package_source(raw) == {
+        .Ok(result) -> result.source
+        .Err(_) -> panic("inline package source should mask cleanly")
+    }
+    assert(masked != raw, "inline package header is masked")
+    assert(lsp_checked_source_matches(raw, raw), "identical source matches")
+    assert(lsp_checked_source_matches(masked, raw), "masked inline package source matches raw text")
+    assert(!lsp_checked_source_matches("run: fn() {{}}\n", raw), "unrelated source does not match")
+}

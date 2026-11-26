@@ -1,0 +1,115 @@
+# Workspace and document operations across inline single-file metadata,
+# canonical formatting, multi-root workspaces, unsaved buffers, read-only files,
+# generated modules, Unicode text, symlinks, and live dependency edits (#6903 c6).
+write: root_a/inline.jet = "package: {\n    name: \"inline_demo\"\n}\n\ninline_answer: fn() -> Int {\n    42\n}\n"
+write: root_a/unformatted.jet = "messy:fn(a:Int,b:Int)->Int{a+b}\n"
+write: root_a/unformatted_ref.jet = "messy:fn(a:Int,b:Int)->Int{a+b}\n"
+write: root_a/readonly.jet = "ro_value:fn()->Int{7}\n"
+write: root_a/.jet/generated/gen.jet = "generated_value: fn() -> Int {\n    9\n}\n"
+write: root_a/unicode.jet = "// 🙂 café\nunicode_greet: fn() -> String {\n    \"🙂\"\n}\n"
+write: root_a/dep.jet = "dep_value: fn() -> Int {\n    1\n}\n"
+write: root_a/consumer.jet = "use dep: \"./dep\"\n\nuse_dep: fn() -> Int {\n    dep.dep_value() + 1\n}\n"
+write: root_b/target.jet = "symlink_target_fn: fn() -> Int {\n    11\n}\n"
+symlink: {work}/root_b/target.jet root_sym/linked.jet
+when os unix: chmod: root_a/readonly.jet 444
+
+# Verify canonical formatter output via `jet fmt` for comparison.
+step: jet fmt root_a/unformatted_ref.jet
+exit: 0
+capture: canonical_formatted = text file root_a/unformatted_ref.jet
+
+session lsp content-length: jet self lsp
+
+# 1. Initialize multi-root workspace (root_a + root_b).
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"workspaceFolders\":[{\"uri\":\"file://{work}/root_a\",\"name\":\"root_a\"},{\"uri\":\"file://{work}/root_b\",\"name\":\"root_b\"}],\"capabilities\":{}}}"
+recv lsp until $.id = 1
+stdout: ~ "\"documentFormattingProvider\":true" # initialize advertises formatting
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
+
+# 2. Inline single-file metadata: checks cleanly, hovers, formatting returns [] honestly.
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/root_a/inline.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"package: {\\n    name: \\\"inline_demo\\\"\\n}\\n\\ninline_answer: fn() -> Int {\\n    42\\n}\\n\"}}}"
+recv lsp until $.method = "textDocument/publishDiagnostics"
+json: stdout doc $.params.diagnostics[?severity=1] #= 0
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/root_a/inline.jet\"},\"position\":{\"line\":4,\"character\":2}}}"
+recv lsp until $.id = 2
+stdout: ~ "inline_answer: fn() -> Int" # hover works inside inline-metadata file
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"textDocument/formatting\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/root_a/inline.jet\"},\"options\":{\"tabSize\":4,\"insertSpaces\":true}}}"
+recv lsp until $.id = 3
+json: stdout doc $.result #= 0
+
+# 3. Canonical formatting matches `jet fmt`.
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/root_a/unformatted.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"messy:fn(a:Int,b:Int)->Int{a+b}\\n\"}}}"
+recv lsp until $.method = "textDocument/publishDiagnostics"
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"textDocument/formatting\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/root_a/unformatted.jet\"},\"options\":{\"tabSize\":4,\"insertSpaces\":true}}}"
+recv lsp until $.id = 4
+json: stdout doc $.result #= 1
+json: stdout doc $.result[0].newText = "{cap:canonical_formatted}"
+
+# 4. Unsaved buffer (does not exist on disk): checks and hovers without poisoning other roots.
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/root_a/unsaved_only.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"unsaved_fn: fn(n: Int) -> Int {\\n    n + 1\\n}\\n\"}}}"
+recv lsp until $.method = "textDocument/publishDiagnostics"
+json: stdout doc $.params.diagnostics[?severity=1] #= 0
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/root_a/unsaved_only.jet\"},\"position\":{\"line\":0,\"character\":2}}}"
+recv lsp until $.id = 5
+stdout: ~ "unsaved_fn: fn(n: Int) -> Int" # hover works on unsaved in-memory buffer
+
+# 5. Read-only file: checks, hovers, and returns formatting edits without writing disk.
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/root_a/readonly.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"ro_value:fn()->Int{7}\\n\"}}}"
+recv lsp until $.method = "textDocument/publishDiagnostics"
+json: stdout doc $.params.diagnostics[?severity=1] #= 0
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/root_a/readonly.jet\"},\"position\":{\"line\":0,\"character\":2}}}"
+recv lsp until $.id = 6
+stdout: ~ "ro_value: fn() -> Int" # hover works on read-only file
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"textDocument/formatting\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/root_a/readonly.jet\"},\"options\":{\"tabSize\":4,\"insertSpaces\":true}}}"
+recv lsp until $.id = 7
+json: stdout doc $.result #= 1
+
+# 6. Generated module: hover marks generated origin honestly while unsaved buffer stays open.
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/root_a/.jet/generated/gen.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"generated_value: fn() -> Int {\\n    9\\n}\\n\"}}}"
+recv lsp until $.method = "textDocument/publishDiagnostics"
+json: stdout doc $.params.diagnostics[?severity=1] #= 0
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/root_a/.jet/generated/gen.jet\"},\"position\":{\"line\":0,\"character\":3}}}"
+recv lsp until $.id = 8
+stdout: ~ "generated_value: fn() -> Int" # hover shows generated function signature
+stdout: ~ "Origin: generated module" # hover marks generated module origin honestly
+
+# 7. Unicode file: UTF-16 range and hover work past emoji and accented characters.
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/root_a/unicode.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"// 🙂 café\\nunicode_greet: fn() -> String {\\n    \\\"🙂\\\"\\n}\\n\"}}}"
+recv lsp until $.method = "textDocument/publishDiagnostics"
+json: stdout doc $.params.diagnostics[?severity=1] #= 0
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/root_a/unicode.jet\"},\"position\":{\"line\":1,\"character\":3}}}"
+recv lsp until $.id = 9
+stdout: ~ "unicode_greet: fn() -> String" # hover works past multi-byte emoji and accents
+
+# 8. Symlink tree refuses honestly without crashing server, and multi-root workspace/symbol works.
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/root_sym/linked.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"symlink_target_fn: fn() -> Int {\\n    11\\n}\\n\"}}}"
+recv lsp until $.method = "textDocument/publishDiagnostics"
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":10,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/root_sym/linked.jet\"},\"position\":{\"line\":0,\"character\":3}}}"
+recv lsp until $.id = 10
+json: stdout doc $.result = null
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":11,\"method\":\"workspace/symbol\",\"params\":{\"query\":\"symlink_target_fn\"}}"
+recv lsp until $.id = 11
+stdout: ~ "symlink_target_fn" # workspace/symbol finds symbol in second root
+
+# 9. Dependency-change: editing an imported module updates the dependent open document's diagnostics.
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/root_a/dep.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"dep_value: fn() -> Int {\\n    1\\n}\\n\"}}}"
+recv lsp until $.method = "textDocument/publishDiagnostics"
+json: stdout doc $.params.diagnostics[?severity=1] #= 0
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/root_a/consumer.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"use dep: \\\"./dep\\\"\\n\\nuse_dep: fn() -> Int {\\n    dep.dep_value() + 1\\n}\\n\"}}}"
+recv lsp until $.method = "textDocument/publishDiagnostics"
+json: stdout doc $.params.diagnostics[?severity=1] #= 0
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didChange\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/root_a/dep.jet\",\"version\":2},\"contentChanges\":[{\"text\":\"dep_value: fn() -> String {\\n    \\\"bad\\\"\\n}\\n\"}]}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":12,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/root_a/consumer.jet\"},\"position\":{\"line\":3,\"character\":10}}}"
+recv lsp collect until ndjson $[?id=12] #>= 1
+json: stdout ndjson $[?method="textDocument/publishDiagnostics"][?params.uri="file://{work}/root_a/consumer.jet"][0].params.diagnostics[?severity=1] #>= 1
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didChange\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/root_a/dep.jet\",\"version\":3},\"contentChanges\":[{\"text\":\"dep_value: fn() -> Int {\\n    2\\n}\\n\"}]}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":13,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/root_a/consumer.jet\"},\"position\":{\"line\":3,\"character\":10}}}"
+recv lsp collect until ndjson $[?id=13] #>= 1
+json: stdout ndjson $[?method="textDocument/publishDiagnostics"][?params.uri="file://{work}/root_a/consumer.jet"][0].params.diagnostics[?severity=1] #= 0
+
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{}}"
+recv lsp until $.id = 99
+close lsp
+exit: 0
+
+when os unix: chmod: root_a/readonly.jet 644
