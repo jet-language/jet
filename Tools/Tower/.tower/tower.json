@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7042,
-    "rev": 114764,
+    "rev": 114772,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -54663,7 +54663,7 @@
       "track": "epoch",
       "epoch": "G5",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "checkSteps": null,
@@ -54672,6 +54672,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-26",
+          "by": "Orchestrator",
+          "text": "All 4/4 criteria honestly verified and met on Batch 70 (dev ab0e8e3c7d9, master 34b94e9b04a)."
+        },
         {
           "at": "2026-11-24",
           "by": "Orchestrator",
@@ -54695,11 +54700,11 @@
         {
           "n": 2,
           "text": "A captured async callback registration keeps its capture alive, the borrowed event can stop without waiting on itself, in-flight calls drain before release, and a later invocation is refused (D-FFI-CALLBACK2=A).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:16:25.128Z",
+          "evidence": "dev fc1efc48d52 + 7c186ef7d9d (Batch 70 s1 31454c900dd6f025, pack affa3f23dbe22d37): JetFfiCallbackRegistrationHandle + live token table + foreign-thread TLS enter/leave + non-blocking event.stop() + two-phase condvar drain before release in JetRuntime/Source/FfiCallback.jet, JetSema, and JetIR; FFICallbacksTasks/ PASS 4/4 (including managed_async_callback_lifecycle.case and foreign_callback_reenters_jet_and_completes_on_a_jet_task.case) and copy_ratchet 2/2 PASS.",
+          "at": "2026-11-26T10:08:27.103Z",
           "proof": {
             "profile": "cases",
             "filter": "FFICallbacksTasks/registration_lifetime_"
@@ -54721,11 +54726,11 @@
         {
           "n": 4,
           "text": "MetaSuite family J34 (native callbacks and C calling convention) passes its witness Examples/Interop/FFI/Callbacks/run.jet on every applicable tier, so the MetaSuite check reports no owed J34 row. Proof: `jet test Compiler --profile cases --filter MetaSuite` lists no owed row for J34.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-24T02:42:21.059Z"
+          "evidence": "dev fc1efc48d52 + 7c186ef7d9d (Batch 70 s1 31454c900dd6f025): Examples/Interop/FFI/Callbacks/run.jet removed from Tests/known-failing.tsv and PASS 3/3 golden (o0, o1, o2); MetaSuite verify run reports zero owed row for Examples/Interop/FFI/Callbacks/run.jet (the only remaining J34 owed row is cffi_card436_c_abi_shapes_round_trip.case tracked on #6945).",
+          "at": "2026-11-26T10:08:27.972Z"
         }
       ],
       "refs": [],
@@ -54737,9 +54742,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:57:32.582Z",
-      "updated": "2026-11-24T02:42:21.059Z",
+      "updated": "2026-11-26T10:08:30.417Z",
       "updatedBy": "Orchestrator",
-      "criteriaLastN": 4
+      "criteriaLastN": 4,
+      "completedAt": "2026-11-26T10:08:30.417Z"
     },
     {
       "id": "c0zvan7c",
@@ -63390,7 +63396,7 @@
       "track": "epoch",
       "epoch": "G2",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -63398,43 +63404,49 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-26",
+          "by": "Orchestrator",
+          "text": "All 4/4 criteria honestly verified and met on Batch 70 (dev ab0e8e3c7d9, master 34b94e9b04a)."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "Design review: a dated audit in Docs/Audits checks the inferred footprint against every place reads and writes are already computed (ownership facts, effect facts, ^self.[a, b] receiver footprints) so one source serves all, and passes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T17:59:02.257Z"
+          "evidence": "dev 7c186ef7d9d (Batch 70 s1 31454c900dd6f025): Docs/Audits/2026-11-26-block-footprint-review.md audits FnBody/BodyTree, solved ^self.[a, b] receiver footprints, copy vs take semantics, and the single-source JetSemIndex/Footprint.jet analyzer.",
+          "at": "2026-11-26T10:08:21.723Z"
         },
         {
           "n": 2,
           "text": "`jet inspect footprint FILE:LINE[-LINE]` prints the names and fields a block or line range reads, writes and takes, with their kinds, from checked facts.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T17:59:02.257Z"
+          "evidence": "dev 7c186ef7d9d + 0353e82c51d (Batch 70 s1 31454c900dd6f025): single-source JetSemIndex/Footprint.jet + jet inspect footprint FILE:LINE[-LINE] [--json] + 15 CLI help/man/completion snapshots; CompilerAPI/inspect_footprint.case PASS 1/1 (including InspectFootprint.jet 3/3 unit tests) and copy_ratchet 2/2 PASS.",
+          "at": "2026-11-26T10:08:22.715Z"
         },
         {
           "n": 3,
           "text": "The language server shows the same footprint for a selected range (hover or code lens), and an extract-function action turns the selection into a local function whose parameters carry that footprint.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T17:59:02.257Z"
+          "evidence": "dev 7c186ef7d9d + 1b06e3a0606 (Batch 70 s1 31454c900dd6f025): JetLSP Footprint code lenses, block hover, and refactor.extract action generating _extracted with exact T/^T/^^T params; LSP/lsp_block_footprint_and_extract.case PASS 1/1 (including real-checker LSPFootprint.jet 1/1) and LSP/lsp_initialize_capabilities_have_named_test_coverage.case PASS 1/1.",
+          "at": "2026-11-26T10:08:23.665Z"
         },
         {
           "n": 4,
           "text": "An executable example with golden output proves the ratified design on every applicable tier, and the spec, reference pages and editor grammars describe it.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T17:59:02.257Z"
+          "evidence": "dev c6a2edbfcc0 + ab0e8e3c7d9 (Batch 70 s1 31454c900dd6f025): Examples/Tooling/BlockFootprint/BlockFootprint.{jet,out} golden PASS 3/3 (o0, o1, o2); Docs/Spec/spec.md and Reference/cli.md updated; doc_evidence_links 3/3 PASS and CoreDeclarations 6/6 PASS.",
+          "at": "2026-11-26T10:08:24.586Z"
         }
       ],
       "refs": [],
@@ -63442,8 +63454,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-25T17:59:02.257Z",
-      "updated": "2026-11-25T17:59:02.257Z",
-      "updatedBy": "Pip"
+      "updated": "2026-11-26T10:08:26.247Z",
+      "updatedBy": "Orchestrator",
+      "completedAt": "2026-11-26T10:08:26.247Z"
     },
     {
       "id": "c05bs1oq",
@@ -129280,6 +129293,62 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-26T10:08:30.417Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0kkogun",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-26T10:08:27.972Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0kkogun",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-26T10:08:27.103Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0kkogun",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-26T10:08:26.247Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0pi4dar",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-26T10:08:24.586Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0pi4dar",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-26T10:08:23.665Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0pi4dar",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-26T10:08:22.715Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0pi4dar",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-26T10:08:21.723Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0pi4dar",
+      "note": "#1"
+    },
     {
       "at": "2026-11-26T09:55:56.564Z",
       "by": "owner",
