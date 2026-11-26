@@ -310,11 +310,14 @@ store_nix_cas_build_manifest: fn(objects: [HangarArchiveObject], graph: ClosureG
     ^members: [NixClosureMember]{}
     loop object in objects {
         bytes: store_nix_cas_canonical_object_bytes(object)
-        references: graph.direct_references(object.digest)
-        loop reference in references {
+        raw_references: graph.direct_references(object.digest)
+        ^references: [String]{}
+        loop reference in raw_references {
+            if reference == object.digest -> next
             if !object_keys.contains(reference) {
                 return Err(StoreError.InvalidData("Nix closure graph references an object outside the exported member set"))
             }
+            references.push(reference)
         }
         members.push(
             NixClosureMember{

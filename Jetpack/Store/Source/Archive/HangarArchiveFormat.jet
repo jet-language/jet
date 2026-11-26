@@ -281,13 +281,15 @@ HangarArchive: struct {
             loop _ in 0..<node_count {
                 kind_code: Int{reader.byte()}
                 path: reader.string()
-                store_archive_validate_relative(path)
                 mode: reader.u32()
                 size: reader.u64()
                 if size < 0 || size > STORE_ARCHIVE_MAX_NODE_BYTES {
                     return Err(StoreError.InvalidData("archive node exceeds the 512 MiB limit"))
                 }
                 kind: HangarArchiveNodeKind.from_int(kind_code) ?? return Err(StoreError.InvalidData("archive contains an unknown node kind"))
+                if !(node_count == 1 && path == "." && (kind == HangarArchiveNodeKind.File || kind == HangarArchiveNodeKind.Symlink)) {
+                    store_archive_validate_relative(path)
+                }
                 payload: if kind == {
                     .Directory -> {
                         if size != 0 {
@@ -491,8 +493,18 @@ store_archive_validate_relative: fn(value: String) StoreError! {
     if escapes -> return Err(StoreError.InvalidData("archive path `{value}` escapes its root"))
 }
 
+// A single-file or single-symlink root output is encoded as one `.` node so
+// its archive path is never empty while directory children keep strict
+// relative paths.
+store_archive_is_root_leaf_nodes: fn(nodes: [HangarArchiveNode]) -> Bool Never! {
+    nodes.len() == 1 && nodes[0].path == "." && (nodes[0].kind == HangarArchiveNodeKind.File || nodes[0].kind == HangarArchiveNodeKind.Symlink)
+}
+
 // Paths must be unique, and no path may sit below a non-directory node.
 store_archive_validate_no_path_collisions: fn(nodes: [HangarArchiveNode]) StoreError! {
+    if store_archive_is_root_leaf_nodes(nodes) {
+        return
+    }
     ^kinds: [String:HangarArchiveNodeKind]{}
     loop node in nodes {
         store_archive_validate_relative(node.path)

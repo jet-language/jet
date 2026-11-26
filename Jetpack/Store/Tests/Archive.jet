@@ -135,3 +135,127 @@ store_archive_test_cleanup: fn(root: String) Never! {
     }
     store_archive_test_cleanup(root)
 }
+
+#Test("hangar archive round trips a single-file root object without an empty path") {
+    root: store_archive_test_root("single-file-root")
+    roots: HangarRoots.at(root)
+    hangar: roots.hangar_dir()
+    files.create_dir_all(hangar) ?? panic("hangar dir")
+    source: files.join(root, "setup-hook.sh")
+    files.write(source, "#!/bin/sh\necho single-file-root\n") ?? panic("write root file")
+    if sys.is_unix() -> files.chmod(source, 0o755) ?? panic("chmod root file")
+    digest: pkg_try_output_hash_of_in_hangar(source, hangar, false) ?? panic("hash root file")
+    root_mode: (files.stat(source) ?? panic("stat root file")).mode
+    nodes: store_archive_collect_nodes(source, true) ?? panic("collect root file nodes")
+    assert_eq(nodes.len(), 1)
+    assert_eq(nodes[0].path, ".")
+    assert_eq(nodes[0].kind, HangarArchiveNodeKind.File)
+    object: HangarArchiveObject{id: digest, digest: digest, meta: "", root_mode: root_mode, nodes: nodes}
+    archive: HangarArchive{root_id: digest, objects: [HangarArchiveObject]{object}, nix_manifest: None, signature: None}
+    encoded: archive.encode() ?? panic("encode single-file archive")
+    decoded: HangarArchive.decode(encoded) ?? panic("decode single-file archive")
+    assert_eq(decoded.objects.len(), 1)
+    assert_eq(decoded.objects[0].nodes.len(), 1)
+    assert_eq(decoded.objects[0].nodes[0].path, ".")
+    restored: files.join(root, "restored")
+    store_archive_write_nodes(restored, decoded.objects[0].nodes, decoded.objects[0].root_mode, true) ?? panic("restore single-file root")
+    restored_info: files.stat(restored) ?? panic("stat restored root file")
+    assert(restored_info.is_file && !restored_info.is_symlink)
+    assert_eq(files.read(restored) ?? panic("read restored"), "#!/bin/sh\necho single-file-root\n")
+    rehashed: store_archive_output_hash(restored, hangar, true) ?? panic("rehash restored root file")
+    assert_eq(rehashed, digest)
+    // A `.` directory or `.` mixed with children remains rejected.
+    bad_dir: [HangarArchiveNode]{HangarArchiveNode{path: ".", kind: HangarArchiveNodeKind.Directory, mode: 0o755, bytes: [U8]{}}}
+    assert(store_archive_validate_no_path_collisions(bad_dir) == .Err(_))
+    bad_pair: [HangarArchiveNode]{
+        HangarArchiveNode{path: ".", kind: HangarArchiveNodeKind.File, mode: 0o644, bytes: "a".bytes()},
+        HangarArchiveNode{path: "child", kind: HangarArchiveNodeKind.File, mode: 0o644, bytes: "b".bytes()},
+    }
+    assert(store_archive_validate_no_path_collisions(bad_pair) == .Err(_))
+    store_archive_test_cleanup(root)
+}
+
+#Test("hangar archive collects and restores Nix chained ld.so relative symlinks without following /nix/store") {
+    if !sys.is_unix() {
+        return
+    }
+    root: store_archive_test_root("nix-ldso-symlink")
+    roots: HangarRoots.at(root)
+    hangar: roots.hangar_dir()
+    files.create_dir_all(hangar) ?? panic("hangar dir")
+    source: files.join(root, "glibc-like")
+    files.create_dir_all(files.join(source, "lib")) ?? panic("lib dir")
+    files.create_dir_all(files.join(source, "lib64")) ?? panic("lib64 dir")
+    files.create_dir_all(files.join(source, "share")) ?? panic("share dir")
+    nix_ld: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-glibc-2.42/lib/ld-linux-x86-64.so.2"
+    files.symlink(nix_ld, files.join(source, "lib/ld-linux-x86-64.so.2")) ?? panic("abs nix link")
+    files.symlink("../lib/ld-linux-x86-64.so.2", files.join(source, "lib64/ld-linux-x86-64.so.2")) ?? panic("chained rel link")
+    files.symlink("../../../../../etc/environment", files.join(source, "share/env")) ?? panic("nix inert rel link")
+    digest: pkg_try_output_hash_of_in_hangar(source, hangar, false) ?? panic("hash nix tree")
+    root_mode: (files.stat(source) ?? panic("stat nix tree")).mode
+    // Generic non-Nix collection must still refuse dangling/absolute links.
+    assert(store_archive_collect_nodes(source, false) == .Err(_))
+    nodes: store_archive_collect_nodes(source, true) ?? panic("collect nix symlink tree")
+    object: HangarArchiveObject{id: digest, digest: digest, meta: "", root_mode: root_mode, nodes: nodes}
+    archive: HangarArchive{root_id: digest, objects: [HangarArchiveObject]{object}, nix_manifest: None, signature: None}
+    decoded: HangarArchive.decode(archive.encode() ?? panic("encode")) ?? panic("decode")
+    // Generic non-Nix restore must still reject absolute and escaping links.
+    assert(store_archive_write_nodes(files.join(root, "generic-restored"), decoded.objects[0].nodes, decoded.objects[0].root_mode, false) == .Err(_))
+    restored: files.join(root, "nix-restored")
+    store_archive_write_nodes(restored, decoded.objects[0].nodes, decoded.objects[0].root_mode, true) ?? panic("restore nix symlink tree")
+    assert_eq(files.read_link(files.join(restored, "lib/ld-linux-x86-64.so.2")) ?? panic("read abs link"), nix_ld)
+    assert_eq(files.read_link(files.join(restored, "lib64/ld-linux-x86-64.so.2")) ?? panic("read rel link"), "../lib/ld-linux-x86-64.so.2")
+    assert_eq(files.read_link(files.join(restored, "share/env")) ?? panic("read env link"), "../../../../../etc/environment")
+    rehashed: store_archive_output_hash(restored, hangar, true) ?? panic("rehash restored nix tree")
+    assert_eq(rehashed, digest)
+    store_archive_test_cleanup(root)
+}
+
+#Test("nix closure graph and CAS manifest drop self-references from multi-output records") {
+    out_digest: "sha256-1111111111111111111111111111111111111111111111111111111111111111"
+    bin_digest: "sha256-2222222222222222222222222222222222222222222222222222222222222222"
+    dep_digest: "sha256-3333333333333333333333333333333333333333333333333333333333333333"
+    record: ClosureRecord{
+        id: "curl@default",
+        primary: out_digest,
+        action_key: "action-curl",
+        outputs: [String:String]{"out": out_digest, "bin": bin_digest},
+        references: [String]{out_digest, dep_digest},
+        producer_record: "",
+        package_meta: "",
+    }
+    graph: ClosureGraph{
+        objects: [String:ClosureObject]{
+            out_digest: ClosureObject{digest: out_digest, path: "/hangar/objects/{out_digest}", external: false},
+            dep_digest: ClosureObject{digest: dep_digest, path: "/hangar/objects/{dep_digest}", external: false},
+        },
+        records: [String:ClosureRecord]{"curl@default": record},
+        deleted_records: [String]{},
+    }
+    assert_eq(graph.direct_references(out_digest), [String]{dep_digest})
+    out_obj: HangarArchiveObject{
+        id: out_digest,
+        digest: out_digest,
+        meta: "",
+        root_mode: 0o755,
+        nodes: [HangarArchiveNode]{HangarArchiveNode{path: "lib/libcurl.so", kind: HangarArchiveNodeKind.File, mode: 0o644, bytes: "curl".bytes()}},
+    }
+    dep_obj: HangarArchiveObject{
+        id: dep_digest,
+        digest: dep_digest,
+        meta: "",
+        root_mode: 0o755,
+        nodes: [HangarArchiveNode]{HangarArchiveNode{path: "lib/libc.so", kind: HangarArchiveNodeKind.File, mode: 0o644, bytes: "libc".bytes()}},
+    }
+    objects: [HangarArchiveObject]{out_obj, dep_obj}
+    manifest: store_nix_cas_build_manifest(
+        objects,
+        graph,
+        out_digest,
+        "x86_64-linux",
+        "3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2",
+        "4444444444444444444444444444444444444444444444444444444444444444",
+    ) ?? panic("build manifest")
+    archive: HangarArchive{root_id: out_digest, objects: objects, nix_manifest: Val(manifest), signature: None}
+    store_nix_cas_validate_bundle(archive, None) ?? panic("validate bundle without self-reference")
+}

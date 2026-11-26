@@ -1,0 +1,77 @@
+# Realize a c@nixpkgs dependency into Hangar via the loopback signed Nix index
+# and binary-cache peer, corrupt the cached Hangar entry on disk, verify that
+# subsequent offline and online builds refuse it with a registered error without
+# running the tampered binary, and confirm it is re-admitted cleanly only after
+# a clean repair/realize from the signed cache.
+requires: os-name:linux
+fixture: NixCacheCorruptEntryRefused.fixture
+artifact: run
+env: JETPACK_ROOT={work}/root
+env: JETPACK_SHARED_CAS={work}/root/hangar/cas
+env: JETPACK_NIX_FALLBACK_POLICY=deny
+env: PATH=/usr/bin
+mkdir: root
+copy: {root}/Jetpack/Nix/Source/Index/IndexCodec.jet {work}/peer/IndexCodec.jet
+step: jet build peer
+exit: 0
+spawn peer: built serve {work}/root {work}/peer.port {work}/nix-index-cache-nar-source
+await: file {work}/peer.port timeout 30s
+capture: port = text file {work}/peer.port
+copy: .jet/lock initial-lock
+step initial-realize: jetpack env --no-color --trust -y -- c-tool --version
+isolate: no-nix network=enabled
+unset: JETPACK_FIXTURES
+exit: 0
+stdout: ~ "c 1.0.0" # initial clean realization runs verified c@nixpkgs tool
+step explain-root: jetpack explain c@nixpkgs --json
+exit: 0
+capture: root_digest stdout doc $.explain.entry.output_hash
+cap:root_digest: nonempty # realized c@nixpkgs object has a Hangar output digest
+# Corrupt the cached Hangar entry by replacing its executable with a tampered script.
+chmod: root/hangar/objects/{cap:root_digest} 0755
+chmod: root/hangar/objects/{cap:root_digest}/bin 0755
+remove: root/hangar/objects/{cap:root_digest}/bin/c-tool
+write: root/hangar/objects/{cap:root_digest}/bin/c-tool = "#!/bin/sh\necho TAMPERED\n"
+chmod: root/hangar/objects/{cap:root_digest}/bin/c-tool 0755
+# Offline build refuses the corrupted cached entry with a registered error.
+step corrupt-offline: jetpack env --no-color --trust -y --offline -- c-tool --version
+isolate: no-nix network=disabled
+unset: JETPACK_FIXTURES
+exit: 1
+stdout: = ""
+stderr: ~ "Error: Jet.NixCacheAdmissionFailed" # registered error refuses corrupted cached entry offline
+# Online build also refuses the corrupted primary object rather than reusing it.
+step corrupt-online: jetpack env --no-color --trust -y -- c-tool --version
+isolate: no-nix network=enabled
+unset: JETPACK_FIXTURES
+exit: 1
+stdout: = ""
+stderr: ~ "Error: Jet.NixCacheAdmissionFailed" # registered error refuses corrupted cached entry online
+# Clean repair removes the corrupted object drift and restores verified cache bytes.
+step clean-repair: jetpack hangar doctor --repair --no-color
+isolate: no-nix network=enabled
+unset: JETPACK_FIXTURES
+exit: 0
+stderr: ~ "fixed drift objects/{cap:root_digest}: repaired from native binary cache" # clean repair re-admits verified object
+# Clean realize re-admits the signed c@nixpkgs package entry from the pinned channel.
+copy: initial-lock .jet/lock
+step clean-realize: jetpack env --no-color --trust -y -- c-tool --version
+isolate: no-nix network=enabled
+unset: JETPACK_FIXTURES
+exit: 0
+stdout: ~ "c 1.0.0" # re-admitted verified binary executes cleanly
+stdout: !~ "TAMPERED" # tampered payload was replaced
+# Subsequent offline build reuses the cleanly re-admitted entry.
+step after-realize-offline: jetpack env --no-color --trust -y --offline -- c-tool --version
+isolate: no-nix network=disabled
+unset: JETPACK_FIXTURES
+exit: 0
+stdout: ~ "c 1.0.0" # offline reuse works after clean re-admission
+stdout: !~ "TAMPERED" # tampered payload is absent
+step counts: built counts {cap:port}
+exit: 0
+json: stdout doc $.root >= 4
+step: built stop {cap:port}
+exit: 0
+wait: peer
+exit: 0
