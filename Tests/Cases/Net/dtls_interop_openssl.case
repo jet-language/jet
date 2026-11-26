@@ -41,47 +41,47 @@ stdout: = "ready\n"
 step s_client_ecdsa12: openssl s_client -dtls1_2 -brief -ign_eof -connect 127.0.0.1:{free-port:srv_ec} -servername localhost -CAfile ec-ca.pem -verify_return_error -cipher ECDHE-ECDSA-AES128-GCM-SHA256
 stdin: ping.txt
 exit: 0
-stdout: ~ "echo:ping-to-jet"
-stderr: ~ "Protocol version: DTLSv1.2"
-stderr: ~ "Ciphersuite: ECDHE-ECDSA-AES128-GCM-SHA256"
-stderr: ~ "Verification: OK"
+stdout: ~ "echo:ping-to-jet" # openssl s_client receives echoed DTLS datagram
+stderr: ~ "Protocol version: DTLSv1.2" # negotiated protocol is DTLS 1.2
+stderr: ~ "Ciphersuite: ECDHE-ECDSA-AES128-GCM-SHA256" # negotiated ECDSA AES-128-GCM suite
+stderr: ~ "Verification: OK" # OpenSSL verified Jet server certificate chain
 step s_client_ecdsa256: openssl s_client -dtls1_2 -brief -ign_eof -connect 127.0.0.1:{free-port:srv_ec} -servername localhost -CAfile ec-ca.pem -verify_return_error -cipher ECDHE-ECDSA-AES256-GCM-SHA384
 stdin: ping.txt
 exit: 0
-stdout: ~ "echo:ping-to-jet"
-stderr: ~ "Protocol version: DTLSv1.2"
-stderr: ~ "Ciphersuite: ECDHE-ECDSA-AES256-GCM-SHA384"
-stderr: ~ "Verification: OK"
+stdout: ~ "echo:ping-to-jet" # openssl s_client receives echoed DTLS datagram
+stderr: ~ "Protocol version: DTLSv1.2" # negotiated protocol is DTLS 1.2
+stderr: ~ "Ciphersuite: ECDHE-ECDSA-AES256-GCM-SHA384" # negotiated ECDSA AES-256-GCM suite
+stderr: ~ "Verification: OK" # OpenSSL verified Jet server certificate chain
 step s_client_rsa_chacha: openssl s_client -dtls1_2 -brief -ign_eof -connect 127.0.0.1:{free-port:srv_rsa} -servername localhost -CAfile rsa-ca.pem -verify_return_error -cipher ECDHE-RSA-CHACHA20-POLY1305
 stdin: ping.txt
 exit: 0
-stdout: ~ "echo:ping-to-jet"
-stderr: ~ "Protocol version: DTLSv1.2"
-stderr: ~ "Ciphersuite: ECDHE-RSA-CHACHA20-POLY1305"
-stderr: ~ "Verification: OK"
+stdout: ~ "echo:ping-to-jet" # openssl s_client receives echoed DTLS datagram
+stderr: ~ "Protocol version: DTLSv1.2" # negotiated protocol is DTLS 1.2
+stderr: ~ "Ciphersuite: ECDHE-RSA-CHACHA20-POLY1305" # negotiated RSA ChaCha20-Poly1305 suite
+stderr: ~ "Verification: OK" # OpenSSL verified Jet server certificate chain
 step s_client_mtls: openssl s_client -dtls1_2 -brief -ign_eof -connect 127.0.0.1:{free-port:srv_mtls} -servername localhost -CAfile ec-ca.pem -verify_return_error -cert client.cert.pem -key client.key.pem -cipher ECDHE-ECDSA-AES128-GCM-SHA256
 stdin: ping.txt
 exit: 0
-stdout: ~ "echo:ping-to-jet"
-stderr: ~ "Protocol version: DTLSv1.2"
-stderr: ~ "Verification: OK"
+stdout: ~ "echo:ping-to-jet" # openssl s_client receives echoed mTLS DTLS datagram
+stderr: ~ "Protocol version: DTLSv1.2" # negotiated protocol is DTLS 1.2
+stderr: ~ "Verification: OK" # OpenSSL verified Jet mTLS server certificate
 signal srv: KILL
 close srv
 exit: any
 signal ecdsa12: KILL
 close ecdsa12
 exit: any
-stdout: ~ "ping-ecdsa12"
+stdout: ~ "ping-ecdsa12" # openssl s_server received Jet ECDSA client datagram
 signal rsa12: KILL
 close rsa12
 exit: any
-stdout: ~ "ping-rsa12"
+stdout: ~ "ping-rsa12" # openssl s_server received Jet RSA client datagram
 signal chacha12: KILL
 close chacha12
 exit: any
-stdout: ~ "ping-chacha12"
+stdout: ~ "ping-chacha12" # openssl s_server received Jet ChaCha20 client datagram
 signal mtls12: KILL
 close mtls12
 exit: any
-stdout: ~ "ping-mtls12"
-stderr: ~ "Peer certificate: CN=localhost"
+stdout: ~ "ping-mtls12" # openssl s_server received Jet mTLS client datagram
+stderr: ~ "Peer certificate: CN=localhost" # openssl s_server verified Jet client certificate

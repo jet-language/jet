@@ -319,7 +319,7 @@ plan_eviction_inner: fn<I: RecordIndexRetention>(budget: CaptureBudget, records:
     loop width < order.len() {
         // Swap the two buffers' roles, not their contents. Moving and then
         // reinitializing loop locals currently hits night12 E0121.
-        if in_scratch -> capture_merge_indices<I>(records, scratch, order, width) else {
+        if in_scratch -> capture_merge_indices<I>(records, order: scratch, scratch: order, width: width) else {
             capture_merge_indices<I>(records, order, scratch, width)
         }
         in_scratch = !in_scratch

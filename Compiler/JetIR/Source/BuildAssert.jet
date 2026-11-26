@@ -114,13 +114,37 @@ ir_assert_type_renderable: fn(m: ^IRModule, p: IRProgram, ty: Type, depth: Int) 
         .Option(inner) -> return ir_assert_type_renderable(m, p, inner, depth + 1)
         .Result(ok_ty, err_ty) -> return ir_assert_type_renderable(m, p, ok_ty, depth + 1) && ir_assert_type_renderable(m, p, err_ty, depth + 1)
         .List(elem) -> return ir_assert_type_renderable(m, p, elem, depth + 1)
+        .Map(k, v, _) -> return ir_assert_type_renderable(m, p, k, depth + 1) && ir_assert_type_renderable(m, p, v, depth + 1)
         .Tuple(fields) -> {
             loop f in fields {
                 if !ir_assert_type_renderable(m, p, f.ty, depth + 1) -> return false
             }
             return true
         }
-        .Int | .IntN(_, _) | .Float | .Float32 | .Bool | .Char | .String | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
+        .Named(_) | .Apply(_, _) -> {
+            if ir_carrier_type(ty) -> return true
+            if ir_enum_def(m, p, row) == .Val(def_row) {
+                loop variant_index in 0..<p.types[def_row].variants.len() {
+                    if ir_variant_members(m, p, def_row, ir_type_args(ty), variant_index) == .Val(v_members) {
+                        loop vm in v_members {
+                            if !ir_assert_type_renderable(m, p, vm.ty, depth + 1) -> return false
+                        }
+                    }
+                }
+                return true
+            }
+            if ir_nominal_name(ty) == .Val(name) {
+                if ir_type_def(p, name) == .Val(def_row) {
+                    members: ir_struct_members(m, p, def_row, ir_type_args(ty)) ?? return false
+                    loop member in members {
+                        if !ir_assert_type_renderable(m, p, member.ty, depth + 1) -> return false
+                    }
+                    return true
+                }
+            }
+            return false
+        }
+        .Int | .IntN(_, _) | .Float | .Float32 | .Bool | .Char | .String | .Shared(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }
     true
 }
