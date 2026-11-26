@@ -15,6 +15,7 @@ use {
     db: core.db
     text: core.text
     crypto: core.crypto
+    log: core.log
     service: core.service
     core.service.[ServiceError, ServiceEndpoint]
     files: core.files
@@ -58,6 +59,13 @@ JobError: struct {
     type_id: String,
     reason: String,
     detail: String?,
+
+    /// Builds a two-audience job failure from any `Describe` error:
+    /// `reason` (exposed on `JobQueueReceipt.error_reason` and `JobQueueEvent.reason`)
+    /// carries only `error.public()`, while `detail` carries `error.detail()` for operators.
+    from_describe: fn<E: Describe>(type_id: String, error: E) -> JobError Never! {
+        JobError{type_id: type_id, reason: error.public(), detail: Val(error.detail())}
+    }
 }
 
 JobQueueReceipt: struct {
@@ -287,6 +295,31 @@ JobQueue: struct {
         committed: queue_fail_transaction(self, claim, failure) ?? return Err(err)
         queue_publish_optional_transition(committed.observation)
         Ok(committed.receipt)
+    }
+
+    /// Records a job failure from any `Describe` error: caller-facing receipt
+    /// and event `reason` receive only `error.public()`, while the operator
+    /// record's `error.detail` preserves `error.detail()` with its cause chain.
+    fail_described: fn<E: Describe>(self, claim: JobQueueClaim, type_id: String, error: E) -[DB, Time]> JobQueueReceipt ServiceError! {
+        self.fail(claim, JobError.from_describe(type_id, error))
+    }
+
+    /// Same as `fail_described`, and also emits a structured `core.log` record
+    /// carrying `error.detail()` for operators.
+    fail_described_logged: fn<E: Describe>(self, claim: JobQueueClaim, type_id: String, error: E) -[DB, Log, Time]> JobQueueReceipt ServiceError! {
+        failure: JobError.from_describe(type_id, error)
+        detail_text: failure.detail ?? ""
+        log.error_fields(
+            "job execution failed",
+            [log.LogField]{
+                log.field("job_id", claim.receipt.id),
+                log.field("queue", self.name),
+                log.field("type_id", failure.type_id),
+                log.field("public", failure.reason),
+                log.field("detail", detail_text),
+            },
+        )
+        self.fail(claim, failure)
     }
 
     cancel: fn(self, id: String, reason: String, lease_token: String?{None}) -[DB, Time]> JobQueueReceipt ServiceError! {
@@ -2144,4 +2177,46 @@ queue_claim_on_driver: fn(driver: ^db.DBDriver, authority: String, name: String,
     if queue_sql_error("capacity", .Full("full")) == .Full(message) -> assert_eq(message, "full") else {
         assert(false)
     }
+}
+
+#Test("described job failures keep public text on receipts and events while preserving operator detail and cause chain") {
+    ^driver: db.__driver_open(":memory:") ?? panic("open memory db")
+    authority: "sa-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    queue_name: "sync"
+    queue_initialize_on_driver(driver, authority, queue_name, 16) ?? panic("init: {err}")
+    payload: JobPayload{type_id: "String", bytes: [U8]{1, 2, 3}, publish: false}
+    req: EnqueueRequest{job_type: "sync_job", payload: payload, idempotency_key: Val("k1"), request_id: None, delay_ms: 0}
+    _: queue_enqueue_on_driver(driver, authority, queue_name, 16, false, [EnqueueRequest]{req}, 1000) ?? panic("enqueue: {err}")
+    claimed: queue_claim_on_driver(driver, authority, queue_name, "worker-1", 1, 3, 30000, 1000) ?? panic("claim: {err}")
+    assert_eq(claimed.claims.len(), 1)
+
+    secret_path: "/etc/jet-secret/vault.key"
+    secret_sql: "SELECT token FROM sessions"
+    inner: Err("open {secret_path}: EACCES")
+    wrapped: Err("query {secret_sql} failed", code: "ERR_JOB_500", cause: inner)
+    failure: JobError.from_describe("SyncJobError", wrapped)
+    failed: queue_fail_on_driver(driver, authority, queue_name, 3, 1000, 60000, claimed.claims[0], failure) ?? panic("fail: {err}")
+
+    reason: failed.receipt.error_reason ?? panic("missing receipt.error_reason")
+    assert_eq(reason, "Request failed (ERR_JOB_500).")
+    assert(!reason.contains(secret_path))
+    assert(!reason.contains(secret_sql))
+    assert(!reason.contains("caused by:"))
+
+    events: queue_events_on_driver(driver, authority, queue_name, failed.receipt.id) ?? panic("events: {err}")
+    assert(events.len() >= 1)
+    ev_reason: events[events.len() - 1].reason ?? panic("missing event.reason")
+    assert_eq(ev_reason, "Request failed (ERR_JOB_500).")
+    assert(!ev_reason.contains(secret_path))
+    assert(!ev_reason.contains(secret_sql))
+
+    records: queue_inspect_on_driver(driver, authority, queue_name, 10, false) ?? panic("inspect: {err}")
+    assert_eq(records.len(), 1)
+    rec_err: records[0].error ?? panic("missing JobQueueRecord.error")
+    assert_eq(rec_err.reason, "Request failed (ERR_JOB_500).")
+    op_detail: rec_err.detail ?? panic("missing operator detail")
+    assert(op_detail.contains("[ERR_JOB_500]"))
+    assert(op_detail.contains(secret_sql))
+    assert(op_detail.contains("caused by:"))
+    assert(op_detail.contains(secret_path))
 }

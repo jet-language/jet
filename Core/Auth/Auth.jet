@@ -43,6 +43,33 @@ AuthError: enum {
     TokenExpired,
     DecodeError(String),
     TokenNotYetValid,
+
+    impl Describe {
+        public: fn(self) -> String Never! {
+            if self == {
+                .MalformedToken(_) -> "Malformed authentication token."
+                .UnsupportedToken(_) -> "Unsupported authentication token."
+                .TokenExpired -> "Authentication token expired."
+                .TokenNotYetValid -> "Authentication token is not yet valid."
+                .InvalidSignature | .WeakKey | .MissingClaim(_) | .WrongAudience(_, _) | .WrongIssuer(_, _) | .DecodeError(_) -> "Invalid authentication credentials."
+            }
+        }
+
+        detail: fn(self) -> String Never! {
+            if self == {
+                .MalformedToken(reason) -> "malformed auth token: {reason}"
+                .UnsupportedToken(reason) -> "unsupported auth token: {reason}"
+                .InvalidSignature -> "auth token signature verification failed"
+                .WeakKey -> "auth signing key does not meet minimum strength"
+                .MissingClaim(claim) -> "auth token missing required claim `{claim}`"
+                .WrongAudience(expected, actual) -> "auth token audience mismatch: expected `{expected}`, got `{actual}`"
+                .WrongIssuer(expected, actual) -> if actual == .Val(got) -> "auth token issuer mismatch: expected `{expected}`, got `{got}`" else -> "auth token missing expected issuer `{expected}`"
+                .TokenExpired -> "auth token expired"
+                .DecodeError(reason) -> "auth token decode failed: {reason}"
+                .TokenNotYetValid -> "auth token not yet valid"
+            }
+        }
+    }
 }
 
 /// Verified token claims. `audience` is the expected audience the token named.

@@ -65,6 +65,22 @@ SYNC_MAX_INT: 9223372036854775807
 AppError: enum {
     Invalid,
     Unsupported,
+
+    impl Describe {
+        public: fn(self) -> String Never! {
+            if self == {
+                .Invalid -> "Invalid request."
+                .Unsupported -> "Operation is not supported."
+            }
+        }
+
+        detail: fn(self) -> String Never! {
+            if self == {
+                .Invalid -> "app request invalid"
+                .Unsupported -> "app operation unsupported"
+            }
+        }
+    }
 }
 
 // Endpoint markers. A method of a mounted service is an endpoint only when
@@ -365,6 +381,26 @@ CallError: enum {
     // This failure as an error of the call; the compiler's `fail` binds it,
     // so the method's error type takes it through its conversion.
     __raise: fn<R>(self) -> R CallError! { Err(self) }
+
+    impl Describe {
+        public: fn(self) -> String Never! {
+            if self == {
+                .Unreachable(_) -> "Service is temporarily unreachable."
+                .Invalid(_) -> "Request validation failed."
+                .SignedOut -> "Authentication required."
+                .UpdateRequired -> "Client update required."
+            }
+        }
+
+        detail: fn(self) -> String Never! {
+            if self == {
+                .Unreachable(reason) -> "remote call unreachable: {reason}"
+                .Invalid(fields) -> "remote call invalid ({fields.len()} field error(s))"
+                .SignedOut -> "remote call rejected: caller is signed out"
+                .UpdateRequired -> "remote call rejected: client wire version unsupported"
+            }
+        }
+    }
 }
 
 // No answer: the server is down or unreachable, or its reply was not one
@@ -422,6 +458,14 @@ new_id: fn() -[Rand, Time]> String Never! {
 Notice: struct {
     text: String,
     retry: Bool{false},
+
+    impl Describe {
+        public: fn(self) -> String Never! { self.text.copy() }
+
+        detail: fn(self) -> String Never! {
+            if self.retry -> "notice (retryable): {self.text}" else -> "notice: {self.text}"
+        }
+    }
 }
 
 // The app's notice list holds the notices that have no control to sit
@@ -8118,6 +8162,22 @@ Blob: struct {
 BlobError: enum {
     WrongType,
     Storage(String),
+
+    impl Describe {
+        public: fn(self) -> String Never! {
+            if self == {
+                .WrongType -> "Unsupported file type."
+                .Storage(_) -> "Storage operation failed."
+            }
+        }
+
+        detail: fn(self) -> String Never! {
+            if self == {
+                .WrongType -> "blob rejected: wrong file type"
+                .Storage(reason) -> "blob storage error: {reason}"
+            }
+        }
+    }
 }
 
 // A store of blobs: the directory `name`, under the working directory, which

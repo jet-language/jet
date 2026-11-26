@@ -1,0 +1,22 @@
+# Proves two-audience errors (`Describe`) end-to-end across O0/O1/O2:
+# - Live HTTP 500 responses carry zero internal detail in body or headers while
+#   operator-side HTTPErrorRecord receives full `detail()` and cause chain.
+# - Durable job reports keep `public()` on caller receipts/events and `detail()`
+#   on operator records.
+# - CLI and MCP tool-result boundaries separate `public()` from `detail()`.
+# - `Err` and Core error types never leak paths, SQL, secrets, or frames via `public()`.
+fixture: TwoAudienceErrorsAndHTTP500.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JET_JOB_QUEUE_DB={work}/state/jobs.db
+step check: jet check main.jet
+exit: 0
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = "http_500_ok\njobs_ok\ncli_ok\nmcp_ok\ncore_errors_ok\n"
+step o1: jet run -O1 main.jet
+exit: 0
+stdout: = "http_500_ok\njobs_ok\ncli_ok\nmcp_ok\ncore_errors_ok\n"
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: = "http_500_ok\njobs_ok\ncli_ok\nmcp_ok\ncore_errors_ok\n"

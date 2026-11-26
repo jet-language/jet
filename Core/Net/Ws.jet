@@ -17,6 +17,36 @@ WsError: enum {
     UnsupportedTarget,
     MessageTooLarge(limit: Int),
     IO(operation: String),
+
+    impl Describe {
+        public: fn(self) -> String Never! {
+            if self == {
+                .InvalidURL -> "Invalid WebSocket URL."
+                .InvalidHandshake -> "WebSocket handshake failed."
+                .Protocol -> "WebSocket protocol error."
+                .Timeout -> "WebSocket operation timed out."
+                .Closed -> "WebSocket connection closed."
+                .Canceled -> "WebSocket operation canceled."
+                .UnsupportedTarget -> "WebSocket is not supported on this target."
+                .MessageTooLarge(_) -> "WebSocket message too large."
+                .IO(_) -> "WebSocket I/O error."
+            }
+        }
+
+        detail: fn(self) -> String Never! {
+            if self == {
+                .InvalidURL -> "invalid WebSocket URL"
+                .InvalidHandshake -> "WebSocket handshake failed"
+                .Protocol -> "WebSocket protocol violation"
+                .Timeout -> "WebSocket operation timed out"
+                .Closed -> "WebSocket connection closed"
+                .Canceled -> "WebSocket operation canceled"
+                .UnsupportedTarget -> "WebSocket unsupported on target"
+                .MessageTooLarge(limit) -> "WebSocket message exceeded limit of {limit} bytes"
+                .IO(operation) -> "WebSocket I/O error: {operation}"
+            }
+        }
+    }
 }
 
 /// A WebSocket connection. Every send and receive waits at most the

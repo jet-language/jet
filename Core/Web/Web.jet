@@ -18,7 +18,7 @@ use {
     codec: core.image
     crypto: core.crypto
     web_http: core.http
-    core.http.server.[HTTPAdmit, HTTPCorsPolicy, HTTPHandler, HTTPMux, HTTPServer, HTTPServerTLS, HTTPSpool]
+    core.http.server.[HTTPAdmit, HTTPCorsPolicy, HTTPErrorRecord, HTTPHandler, HTTPMux, HTTPServer, HTTPServerTLS, HTTPSpool]
     http_server: core.http.server
     live_json: core.encoding.json
     core.encoding.[Dyn]
@@ -111,7 +111,7 @@ priv __AppCall: struct {
     __page: fn(self, page: WebPage) -> __AppReply Never! { __AppReply.Page(page) }
 
     __json: fn<Value: Encode>(self, value: Value) -> __AppReply Never! {
-        text: live_json.to_string(value.encode()) ?? return __AppReply.Failed("the handler result does not encode as JSON: {err}")
+        text: live_json.to_string(value.encode()) ?? return __AppReply.Failed(WebRecordedError{public_text: err.public(), detail_text: err.detail()})
         __AppReply.JSON(text)
     }
 
@@ -121,14 +121,27 @@ priv __AppCall: struct {
         __AppReply.Rejected("the {input} input is missing or does not decode")
     }
 
-    __failed: fn(self, message: String) -> __AppReply Never! { __AppReply.Failed(message) }
+    __failed: fn(self, message: String) -> __AppReply Never! {
+        __AppReply.Failed(WebRecordedError{public_text: "An internal error occurred.", detail_text: message})
+    }
+}
+
+priv WebRecordedError: struct {
+    public_text: String,
+    detail_text: String,
+
+    impl Describe {
+        public: fn(self) -> String Never! { self.public_text.copy() }
+
+        detail: fn(self) -> String Never! { self.detail_text.copy() }
+    }
 }
 
 priv __AppReply: enum {
     Page(WebPage),
     JSON(String),
     Rejected(String),
-    Failed(String),
+    Failed(WebRecordedError),
 }
 
 priv AppHandlerCell: struct {
@@ -139,10 +152,11 @@ priv AppHandlerCell: struct {
 priv AppHandler: struct {
     __cell: Shared<AppHandlerCell>,
 
-    // A handler failure is the route's 500 answer, never the server's.
+    // A handler failure is the route's 500 answer, never the server's: the
+    // caller receives only `err.public()` while operators receive `err.detail()`.
     run: fn(self, call: __AppCall) -[Net, FS.Read]> __AppReply Never! {
         guard: self.__cell.guard_read()
-        reply: guard.value.call(call) ?? return __AppReply.Failed("the handler failed: {err}")
+        reply: guard.value.call(call) ?? return __AppReply.Failed(WebRecordedError{public_text: err.public(), detail_text: err.detail()})
         reply
     }
 }
@@ -335,6 +349,23 @@ FormActionInputMismatch: struct {
 #[RouteTable, WebHTTP.StaticRoutes(runtime_methods: true)]
 App: struct {
     __state: Shared<AppState>,
+
+    /// Registers an operator-side error sink on this app's HTTP mux.
+    on_error: fn(self, sink: ^^fn(HTTPErrorRecord) -[]> Never!) -> App Never! {
+        app_table(self).on_error(sink.move())
+        self.copy()
+    }
+
+    /// Returns operator-side HTTP error records captured by this app.
+    error_records: fn(self) -> [HTTPErrorRecord] Never! {
+        app_table(self).error_records()
+    }
+
+    /// Answers a request with `error.public()` while recording `error.detail()`
+    /// for operators on this app's HTTP mux.
+    respond_error: fn<E: Describe>(self, request: HTTPRequest, status: Int, error: E) -> HTTPResponse Never! {
+        app_table(self).respond_error(request, status, error)
+    }
 
     // `route`, `page` and `layout` land here with the handler's adapter, its
     // name and its typed input binding; the page answers GET `path`.
@@ -1208,7 +1239,11 @@ priv app_page_answer: fn(app: App, route: AppRoute, request: HTTPRequest, loaded
         if reply == {
             .JSON(text) -> call.data = text
             .Rejected(message) -> return app_boundary(400, route.error, "Route error", message, call)
-            .Failed(message) -> return app_boundary(500, route.error, "Route error", message, call)
+            .Failed(failure) -> {
+                public_msg: failure.public()
+                _: app_table(app).respond_error(call.request, 500, failure)
+                return app_boundary(500, route.error, "Route error", public_msg, call)
+            }
             .Page(_) -> return app_boundary(500, route.error, "Route error", "the loader of `{path}` rendered a page instead of data", call)
         }
     }
@@ -1222,7 +1257,11 @@ priv app_page_answer: fn(app: App, route: AppRoute, request: HTTPRequest, loaded
             app_html(200, WebPage{title: "{rendered.title}", body: linked}, app_route_data(path, request.path, call.data))
         }
         .Rejected(message) -> app_boundary(400, route.error, "Route error", message, call)
-        .Failed(message) -> app_boundary(500, route.error, "Route error", message, call)
+        .Failed(failure) -> {
+            public_msg: failure.public()
+            _: app_table(app).respond_error(call.request, 500, failure)
+            app_boundary(500, route.error, "Route error", public_msg, call)
+        }
         .JSON(_) -> app_boundary(500, route.error, "Route error", "the handler of `{path}` returned data instead of a page", call)
     }
 }
@@ -2436,7 +2475,7 @@ priv app_boundary: fn(status: Int, boundary: AppHandler?, title: String, message
     if handler.run(call) == {
         .Page(rendered) -> app_html(status, rendered, "")
         .Rejected(failure) -> app_html(status, WebPage{title: title, body: "{message}\n{failure}"}, "")
-        .Failed(failure) -> app_html(status, WebPage{title: title, body: "{message}\n{failure}"}, "")
+        .Failed(failure) -> app_html(status, WebPage{title: title, body: "{message}\n{failure.public()}"}, "")
         .JSON(_) -> app_html(status, WebPage{title: title, body: message}, "")
     }
 }
@@ -2531,7 +2570,7 @@ priv app_action_response: fn(handler: AppHandler, request: HTTPRequest) -[Net, F
     if handler.run(__AppCall{request: request, data: ""}) == {
         .JSON(text) -> app_json(200, text)
         .Rejected(message) -> app_json(400, app_error_json(message))
-        .Failed(message) -> app_json(500, app_error_json(message))
+        .Failed(failure) -> app_json(500, app_error_json(failure.public()))
         .Page(_) -> app_json(500, app_error_json("a server function rendered a page"))
     }
 }
@@ -2541,7 +2580,7 @@ priv app_mount_response: fn(handler: AppHandler, request: HTTPRequest) -[Net, FS
         .JSON(text) -> app_json(200, text)
         .Page(rendered) -> app_html(200, rendered, "")
         .Rejected(message) -> app_json(400, app_error_json(message))
-        .Failed(message) -> app_json(500, app_error_json(message))
+        .Failed(failure) -> app_json(500, app_error_json(failure.public()))
     }
 }
 

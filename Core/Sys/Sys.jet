@@ -31,6 +31,18 @@ EnvError: enum {
     InvalidName,
     InvalidValue,
     NonUnicode,
+
+    impl Describe {
+        public: fn(self) -> String Never! { "Invalid environment configuration." }
+
+        detail: fn(self) -> String Never! {
+            if self == {
+                .InvalidName -> "invalid environment variable name"
+                .InvalidValue -> "invalid environment variable value"
+                .NonUnicode -> "environment variable contains non-UTF-8 bytes"
+            }
+        }
+    }
 }
 
 // Reused from Foundation CLISchema/TargetWidth (a736ba79d). This pointer

@@ -56,6 +56,20 @@ CryptoError: enum {
     KeyRejected,
     Length,
     Unavailable,
+
+    impl Describe {
+        public: fn(self) -> String Never! { "Cryptographic operation failed." }
+
+        detail: fn(self) -> String Never! {
+            if self == {
+                .OpenFailed -> "crypto open/decrypt failed"
+                .VerifyFailed -> "crypto signature or MAC verification failed"
+                .KeyRejected -> "crypto key rejected"
+                .Length -> "crypto input length invalid"
+                .Unavailable -> "crypto primitive unavailable"
+            }
+        }
+    }
 }
 
 #Error
@@ -65,6 +79,20 @@ FileCryptoError: enum {
     SourceIO,
     DestinationExists,
     DestinationIO,
+
+    impl Describe {
+        public: fn(self) -> String Never! { "Encrypted file operation failed." }
+
+        detail: fn(self) -> String Never! {
+            if self == {
+                .OpenFailed -> "file crypto open/decrypt failed"
+                .SealFailed -> "file crypto seal/encrypt failed"
+                .SourceIO -> "file crypto source I/O failed"
+                .DestinationExists -> "file crypto destination already exists"
+                .DestinationIO -> "file crypto destination I/O failed"
+            }
+        }
+    }
 }
 
 Digest256: struct {

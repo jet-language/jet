@@ -17,6 +17,7 @@ use {
     service_crypto: core.crypto
     service_files: core.files
     service_actor: core.actor
+    service_log: core.log
     service_tasks: core.tasks
     service_time: core.time
     service_files_rt: jet.runtime.files
@@ -42,24 +43,43 @@ ServiceError: enum {
     Expired(String),
 
     impl Display {
-        display: fn(self) -> String { service_error_show(self) }
+        display: fn(self) -> String { self.detail() }
+    }
+
+    impl Describe {
+        public: fn(self) -> String Never! {
+            if self == {
+                .Full(_) -> "Service capacity exceeded."
+                .Ambiguous(_) -> "Service target is ambiguous."
+                .Unknown(_) -> "Service target was not found."
+                .NotStarted(_) -> "Service is not running."
+                .Policy(_) -> "Request rejected by service policy."
+                .Unavailable(_) -> "Service is temporarily unavailable."
+                .Partitioned(_) -> "Service is temporarily unreachable."
+                .Revoked(_) -> "Service authorization was revoked."
+                .Stale(_) -> "Service state is stale."
+                .Expired(_) -> "Service lease expired."
+            }
+        }
+
+        detail: fn(self) -> String Never! {
+            if self == {
+                .Full(message) -> message.copy()
+                .Ambiguous(message) -> message.copy()
+                .Unknown(message) -> message.copy()
+                .NotStarted(message) -> message.copy()
+                .Policy(message) -> message.copy()
+                .Unavailable(message) -> message.copy()
+                .Partitioned(message) -> message.copy()
+                .Revoked(message) -> message.copy()
+                .Stale(message) -> message.copy()
+                .Expired(message) -> message.copy()
+            }
+        }
     }
 }
 
-service_error_show: fn(error: ServiceError) -> String Never! {
-    if error == {
-        .Full(message) -> message
-        .Ambiguous(message) -> message
-        .Unknown(message) -> message
-        .NotStarted(message) -> message
-        .Policy(message) -> message
-        .Unavailable(message) -> message
-        .Partitioned(message) -> message
-        .Revoked(message) -> message
-        .Stale(message) -> message
-        .Expired(message) -> message
-    }
-}
+service_error_show: fn(error: ServiceError) -> String Never! { error.detail() }
 
 // Two-audience MCP / tool-call result: `public_content` is rendered to external
 // callers and model contexts, while `operator_detail` preserves the full
@@ -69,6 +89,33 @@ ToolErrorReport: struct {
     is_error: Bool,
     public_content: String,
     operator_detail: String,
+
+    ok: fn(tool: String, content: String) -> ToolErrorReport Never! {
+        ToolErrorReport{tool: tool, is_error: false, public_content: content, operator_detail: ""}
+    }
+
+    from_error: fn<E: Describe>(tool: String, error: E) -> ToolErrorReport Never! {
+        ToolErrorReport{tool: tool, is_error: true, public_content: error.public(), operator_detail: error.detail()}
+    }
+
+    /// Renders the caller-facing MCP tool result JSON (`isError` + `content`)
+    /// strictly from `public_content`, never including `operator_detail`.
+    caller_json: fn(self) -> String Never! {
+        flag: if self.is_error -> "true" else -> "false"
+        encoded: service_json.to_string(service_encoding.Dyn.Text(self.public_content.copy())) ?? "\"An internal error occurred.\""
+        "{{\"isError\":{flag},\"content\":[{{\"type\":\"text\",\"text\":{encoded}}}]}}"
+    }
+
+    log: fn(self) -[Log]> Never! {
+        service_log.error_fields(
+            "tool call failed",
+            [service_log.LogField]{
+                service_log.field("tool", self.tool),
+                service_log.field("public", self.public_content),
+                service_log.field("detail", self.operator_detail),
+            },
+        )
+    }
 }
 
 DeliveryState: enum {

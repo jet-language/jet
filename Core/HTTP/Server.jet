@@ -2,6 +2,7 @@ use {
     builtin: jet_builtins
     core: core
     http: core.http
+    log: core.log
     core.http.[Body, Header, Headers, HTTPError, HTTPRequest, HTTPResponse]
     json_codec: core.encoding.json
     route_url: core.net.url
@@ -192,6 +193,20 @@ HTTPErrorRecord: struct {
     status: Int,
     public_message: String,
     detail: String,
+
+    log: fn(self) -[Log]> Never! {
+        log.error_fields(
+            "http request failed",
+            [log.LogField]{
+                log.field("request_id", self.request_id),
+                log.field("method", self.method),
+                log.field("path", self.path),
+                log.int("status", self.status),
+                log.field("public", self.public_message),
+                log.field("detail", self.detail),
+            },
+        )
+    }
 }
 
 /// Whether a server should be sent traffic, as `readiness()` and the built-in
@@ -282,7 +297,13 @@ priv HTTPMuxState: struct {
     // The checks of the routes that admit a request by its head before its
     // body is read (`__route_add_admitted`).
     admits: [HTTPAdmitRow],
+    // Operator-facing error records captured at the HTTP boundary (capped at
+    // C_MAX_ERROR_RECORDS) and optional operator error hooks.
+    errors: [HTTPErrorRecord],
+    error_sinks: [fn(HTTPErrorRecord) -[]> Never!],
 }
+
+priv C_MAX_ERROR_RECORDS: 256
 
 // What an admitted route's check (`__route_add_admitted`) decides from a
 // request's head, before the body is read: the response that refuses the
@@ -325,6 +346,26 @@ priv HTTPAdmitted: struct {
 /// so does an `http.router()`; copies share the one table.
 HTTPMux: struct {
     __state: Shared<HTTPMuxState>,
+
+    /// Registers an operator-side sink invoked whenever the HTTP boundary
+    /// records a failure with its full `detail()`.
+    on_error: fn(self, sink: ^^fn(HTTPErrorRecord) -[]> Never!) Never! {
+        ^guard: self.__state.guard_edit()
+        guard.value.error_sinks.push(sink.move())
+    }
+
+    /// Returns the operator-side error records captured by this mux.
+    error_records: fn(self) -> [HTTPErrorRecord] Never! {
+        guard: self.__state.guard_read()
+        guard.value.errors.copy()
+    }
+
+    /// Turns any `Describe` failure into an HTTP response carrying only
+    /// `error.public()` while recording `error.detail()` (with its cause chain)
+    /// for operators.
+    respond_error: fn<E: Describe>(self, request: HTTPRequest, status: Int, error: E) -> HTTPResponse Never! {
+        mux_record_error_response(self, request, status, error)
+    }
 }
 
 // A route whose pattern was checked while building: its contract is the one
@@ -442,6 +483,16 @@ HTTPServer: struct {
 
     // What a readiness probe reads now (HTTPReadiness). It does no I/O.
     readiness: fn(self) -> HTTPReadiness Never! { server_readiness(self.__state) }
+
+    /// Registers an operator-side error sink on this server's mux.
+    on_error: fn(self, sink: ^^fn(HTTPErrorRecord) -[]> Never!) Never! {
+        self.__mux.on_error(sink.move())
+    }
+
+    /// Returns the operator-side error records captured by this server's mux.
+    error_records: fn(self) -> [HTTPErrorRecord] Never! {
+        self.__mux.error_records()
+    }
 
     // Each admitted connection is served by its own task, so a held
     // connection does not hold up the next; one over the connection limits
@@ -817,7 +868,7 @@ priv accept_transient_code: fn(os_code: Int?) -> Bool Never! {
 // An empty route table: a `web.app()`'s, and the one an `http.router()`
 // routes with.
 priv mux_new: fn() -> HTTPMux Never! {
-    HTTPMux{__state: Shared{HTTPMuxState{routes: [HTTPRoute]{}, layers: [Shared<HTTPLayerCell>]{}, request_seq: 0, starts: [fn() -[Time]> Never!]{}, stops: [fn(Int) -[Time]> Never!]{}, upgraded: [Shared<HTTPUpgradedCell>]{}, admits: [HTTPAdmitRow]{}}}}
+    HTTPMux{__state: Shared{HTTPMuxState{routes: [HTTPRoute]{}, layers: [Shared<HTTPLayerCell>]{}, request_seq: 0, starts: [fn() -[Time]> Never!]{}, stops: [fn(Int) -[Time]> Never!]{}, upgraded: [Shared<HTTPUpgradedCell>]{}, admits: [HTTPAdmitRow]{}, errors: [HTTPErrorRecord]{}, error_sinks: [fn(HTTPErrorRecord) -[]> Never!]{}}}}
 }
 
 // Has the first server that serves `mux`, by `serve` or `serve_once`, run
@@ -1191,17 +1242,66 @@ priv __dispatch: fn(mux: HTTPMux, request: HTTPRequest) -[Net, FS.Read]> HTTPRes
     }
     if current.handle(tagged) == {
         .Ok(answered) -> answered
-        .Err(error) -> error_response(error)
+        .Err(error) -> mux_error_response(mux, tagged, error)
     }
 }
 
-priv error_response: fn(error: HTTPError) -> HTTPResponse Never! {
-    if error == {
-        .BodyTooLarge(_) -> empty_response(413)
-        .InvalidFraming -> empty_response(400)
-        .UnsupportedEncoding -> empty_response(415)
-        .InvalidMethod | .InvalidURL | .InvalidHeader | .InvalidStatus | .BodyConsumed | .Canceled | .Resolve(_) | .Connect(_) | .TLS(_) | .Timeout(_) | .Proxy(_) | .Redirect(_) | .Protocol(_) | .IO(_) | .Policy(_) | .ResourceUnavailable(_) | .Internal(_) | .UnsupportedTarget(_) -> status_page(500)
+priv mux_store_error_record: fn(mux: HTTPMux, record: HTTPErrorRecord) -> [fn(HTTPErrorRecord) -[]> Never!] Never! {
+    ^sinks: [fn(HTTPErrorRecord) -[]> Never!]{}
+    ^guard: mux.__state.guard_edit()
+    if guard.value.errors.len() >= C_MAX_ERROR_RECORDS {
+        ^trimmed: [HTTPErrorRecord]{}
+        loop i in 1..<guard.value.errors.len() {
+            trimmed.push(guard.value.errors[i].copy())
+        }
+        guard.value.errors = trimmed
     }
+    guard.value.errors.push(record.copy())
+    loop sink in guard.value.error_sinks {
+        sinks.push(sink)
+    }
+    sinks
+}
+
+priv mux_record_error: fn(mux: HTTPMux, record: HTTPErrorRecord) Never! {
+    sinks: mux_store_error_record(mux, record)
+    loop sink in sinks {
+        sink(record.copy())
+    }
+}
+
+priv mux_record_error_response: fn<E: Describe>(mux: HTTPMux, request: HTTPRequest, status: Int, error: E) -> HTTPResponse Never! {
+    code: if status < 400 || status > 599 -> 500 else -> status
+    public_text: error.public()
+    detail_text: error.detail()
+    req_id: request.header("x-request-id") ?? ""
+    record: HTTPErrorRecord{
+        request_id: req_id,
+        method: request.method.copy(),
+        path: access_log_path(request.path),
+        status: code,
+        public_message: public_text.copy(),
+        detail: detail_text,
+    }
+    mux_record_error(mux, record)
+    response(code, public_text)
+}
+
+priv http_error_status: fn(error: HTTPError) -> Int Never! {
+    if error == {
+        .BodyTooLarge(_) -> 413
+        .InvalidFraming -> 400
+        .UnsupportedEncoding -> 415
+        .InvalidMethod | .InvalidURL | .InvalidHeader | .InvalidStatus | .BodyConsumed | .Canceled | .Resolve(_) | .Connect(_) | .TLS(_) | .Timeout(_) | .Proxy(_) | .Redirect(_) | .Protocol(_) | .IO(_) | .Policy(_) | .ResourceUnavailable(_) | .Internal(_) | .UnsupportedTarget(_) -> 500
+    }
+}
+
+priv mux_error_response: fn(mux: HTTPMux, request: HTTPRequest, error: HTTPError) -> HTTPResponse Never! {
+    mux_record_error_response(mux, request, http_error_status(error), error)
+}
+
+priv error_response: fn(error: HTTPError) -> HTTPResponse Never! {
+    response(http_error_status(error), error.public())
 }
 
 priv empty_response: fn(status: Int) -> HTTPResponse Never! {
@@ -1908,7 +2008,7 @@ priv serve_connection: fn(stream: HTTPConn, mux: HTTPMux, deadline: Duration?, s
                 // connection is.
                 routed: request.copy()
                 handling: task { dispatch_shielded(mux, routed) }
-                reply: handling.join() ?? status_page(500)
+                reply: handling.join() ?? mux_record_error_response(mux, request, 500, err)
                 upgraded = http.cell_upgraded(cell)
                 if upgraded {
                     answered = true
