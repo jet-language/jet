@@ -116,3 +116,102 @@ cli_tools_test_replace_first: fn(text: String, from: String, to: String) -> Stri
     metadata: cli_format_tool_generation_meta(7, [InstalledUserTool]{installed}) ?? panic("generation metadata formats")
     assert(metadata.contains(resolved))
 }
+
+cli_tools_test_admit_bin: fn(verification: StoreVerification, root: String, bin_name: String, script: String) -> InstalledUserTool {
+    roots: HangarRoots{root: root, dev_mode: true}
+    stage: files.tmpdir("jet-tool-recovery-src-") ?? panic("tmpdir")
+    bin_dir: files.join(stage, "bin")
+    files.create_dir_all(bin_dir) ?? panic("create bin")
+    bin_path: files.join(bin_dir, bin_name)
+    files.write(bin_path, script) ?? panic("write bin")
+    files.set_mode(bin_path, 493) ?? panic("chmod bin")
+    request: IngestRequest{
+        name: bin_name,
+        version: "1",
+        reference: "{bin_name}@jetpack",
+        cache_identity: CacheIdentity{
+            source_fingerprint: "sha256-source-{bin_name}",
+            recipe_fingerprint: "sha256-recipe-{bin_name}",
+            policy_fingerprint: "policy=tool-recovery-test",
+            platform: pkg_host_platform(),
+        },
+        references: [String]{},
+        outputs: [String:String]{"out": stage},
+        signature: "",
+        provenance: "tool-recovery-test",
+        platform_artifact_kind: "",
+    }
+    ingested: store_ingest_tree(verification, roots, request) ?? panic("ingest {bin_name}: {err.message()}")
+    files.remove_all(stage).drop("cleanup")
+    InstalledUserTool{
+        name: bin_name,
+        version: "1",
+        source: "jetpack",
+        reference: "{bin_name}@jetpack",
+        bins: [String]{bin_name},
+        members: [String]{bin_name},
+        member_digests: [String]{},
+        output_hash: ingested.entry.envelope.output_hash,
+        store_root: root,
+    }
+}
+
+#Test("multi-store crash between root commits rolls forward on recovery while preserving intentional rollback") {
+    base: files.tmpdir("jet-tool-recovery-") ?? panic("tmpdir")
+    home: files.join(base, "home")
+    left_root: files.join(base, "left-root")
+    right_root: files.join(base, "right-root")
+    files.create_dir_all(home) ?? panic("home")
+    files.create_dir_all(left_root) ?? panic("left")
+    files.create_dir_all(right_root) ?? panic("right")
+    old_home: sys.get("HOME")
+    old_fp: sys.get(TOOL_PROFILE_FAILPOINT_ENV)
+    sys.set("HOME", home)
+    sys.unset(TOOL_PROFILE_FAILPOINT_ENV)
+
+    verification: StoreVerification.new()
+    left: cli_tools_test_admit_bin(verification, left_root, "left", "#!/bin/sh\necho left\n")
+    right: cli_tools_test_admit_bin(verification, right_root, "right", "#!/bin/sh\necho right\n")
+
+    gen1: cli_write_tool_generation_locked(verification, [InstalledUserTool]{left}, None) ?? panic("gen1: {err:Debug}")
+    assert_eq(gen1, 1)
+    assert_eq(cli_tool_current_generation_locked() ?? panic("current1"), 1)
+
+    // Crash between multi-store root commits: generation 2 is complete on disk,
+    // left-root is committed, right-root is uncommitted, and current stays 1.
+    sys.set(TOOL_PROFILE_FAILPOINT_ENV, "between-root-commits")
+    assert(cli_write_tool_generation_locked(verification, [InstalledUserTool]{left, right}, None) == .Err(_))
+    sys.unset(TOOL_PROFILE_FAILPOINT_ENV)
+    assert(files.is_file(files.join(cli_tool_generation_dir(2), TOOL_PROFILE_COMPLETE_FILE)))
+    assert_eq(cli_tool_current_generation_locked() ?? panic("current_pre_recover"), 1)
+
+    // Recovery commits both store roots and rolls forward to generation 2.
+    cli_recover_tool_profile_state(verification) ?? panic("recover between-root-commits: {err:Debug}")
+    assert_eq(cli_tool_current_generation_locked() ?? panic("current_post_recover"), 2)
+    assert(!files.exists(cli_tool_pending_path()))
+    left_snap: store_lifecycle_snapshot(verification, HangarRoots{root: left_root, dev_mode: true}) ?? panic("left snap")
+    right_snap: store_lifecycle_snapshot(verification, HangarRoots{root: right_root, dev_mode: true}) ?? panic("right snap")
+    assert(left_snap.roots.get("profile-generation:user:tools:2") != None)
+    assert(right_snap.roots.get("profile-generation:user:tools:2") != None)
+
+    // Crash after all roots commit (before-pointer) also rolls forward via pending-publish.
+    sys.set(TOOL_PROFILE_FAILPOINT_ENV, "before-pointer")
+    assert(cli_write_tool_generation_locked(verification, [InstalledUserTool]{right}, None) == .Err(_))
+    sys.unset(TOOL_PROFILE_FAILPOINT_ENV)
+    assert_eq(cli_tool_current_generation_locked() ?? panic("current_before_pointer"), 2)
+    cli_recover_tool_profile_state(verification) ?? panic("recover before-pointer: {err:Debug}")
+    assert_eq(cli_tool_current_generation_locked() ?? panic("current_post_before_pointer"), 3)
+    assert(!files.exists(cli_tool_pending_path()))
+
+    // Intentional rollback to generation 1 stays at generation 1 across subsequent recovery.
+    cli_activate_tool_generation_locked(verification, 1) ?? panic("rollback to 1: {err:Debug}")
+    assert_eq(cli_tool_current_generation_locked() ?? panic("current_rolled_back"), 1)
+    cli_recover_tool_profile_state(verification) ?? panic("recover after rollback: {err:Debug}")
+    assert_eq(cli_tool_current_generation_locked() ?? panic("current_stays_1"), 1)
+
+    if old_home == .Val(h) -> sys.set("HOME", h) else -> sys.unset("HOME")
+    if old_fp == .Val(f) -> sys.set(TOOL_PROFILE_FAILPOINT_ENV, f) else {
+        sys.unset(TOOL_PROFILE_FAILPOINT_ENV)
+    }
+    files.remove_all(base).drop("cleanup")
+}

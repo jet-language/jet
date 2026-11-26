@@ -255,6 +255,25 @@ cli_atomic_write_current_pointer: fn(bytes: [U8]) -[FS, Env]> CLIError! {
     store_sync_store_directory(directory) ?? return Err(CLIError.Store(err))
 }
 
+cli_atomic_write_pending_pointer: fn(bytes: [U8]) -[FS, Env]> CLIError! {
+    directory: cli_tools_state_dir()
+    partial: files.join(directory, TOOL_PROFILE_PENDING_PARTIAL)
+    if cli_stat_optional(partial) != None -> files.remove(partial)
+    cli_write_synced(partial, bytes)
+    cli_finalize_profile_pointer(partial, cli_tool_pending_path())
+    store_sync_store_directory(directory) ?? return Err(CLIError.Store(err))
+}
+
+cli_remove_pending_pointer: fn() -[FS, Env]> CLIError! {
+    path: cli_tool_pending_path()
+    info: cli_stat_optional(path) ?? return
+    if !info.is_file || info.is_symlink {
+        return Err(CLIError.Other("tool generation pending pointer is not a regular file"))
+    }
+    files.remove(path)
+    store_sync_store_directory(cli_tools_state_dir()) ?? return Err(CLIError.Store(err))
+}
+
 // A no-follow stat, or None when nothing exists at `path`.
 cli_stat_optional: fn(path: String) -[FS]> files.Stat? CLIError! {
     if files.stat(path) == {
