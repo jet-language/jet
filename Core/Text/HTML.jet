@@ -9,7 +9,11 @@ package: {
     }
 }
 
-use unicode: core.text
+use {
+    unicode: core.text
+    core.grammar.error.[TextSpot]
+    html_syntax: __core_text_syntax_html
+}
 
 // XML-safe escaping and bounded entity decoding. Decoding preserves literal
 // UTF-8 and unknown entities; tag stripping is a span operation, not a parser.
@@ -86,10 +90,45 @@ attr_escape: fn(text: String) -> String Never! { escape_quote(text, true) }
 
 text_escape: fn(text: String) -> String Never! { escape_quote(text, false) }
 
-// Checked HTML markup. `HTML{"…{value}…"}` escapes each hole unless the hole
-// is itself HTML, and escapes it for where it sits: a hole in text escapes
-// `& < >`, and one inside an attribute value escapes its quotes too.
-// `HTML.raw(text)` is the audited escape hatch.
+/// Where a hole sits inside a checked `HTML{…}` literal, chosen at build time
+/// by the HTML grammar and attribute classifier.
+HTMLSlot: enum {
+    Text,
+    QuotedAttr,
+    UnquotedAttr,
+    URLQuotedStart,
+    URLUnquotedStart,
+    URLQuotedPrefix,
+    URLUnquotedPrefix,
+    RefusedAttr,
+    TagName,
+    RawText,
+}
+
+priv html_slot_from_code: fn(code: Int) -> HTMLSlot Never! {
+    if code == {
+        html_syntax.HTML_SLOT_TEXT -> HTMLSlot.Text
+        html_syntax.HTML_SLOT_QUOTED_ATTR -> HTMLSlot.QuotedAttr
+        html_syntax.HTML_SLOT_UNQUOTED_ATTR -> HTMLSlot.UnquotedAttr
+        html_syntax.HTML_SLOT_URL_QUOTED_START -> HTMLSlot.URLQuotedStart
+        html_syntax.HTML_SLOT_URL_UNQUOTED_START -> HTMLSlot.URLUnquotedStart
+        html_syntax.HTML_SLOT_URL_QUOTED_PREFIX -> HTMLSlot.URLQuotedPrefix
+        html_syntax.HTML_SLOT_URL_UNQUOTED_PREFIX -> HTMLSlot.URLUnquotedPrefix
+        html_syntax.HTML_SLOT_REFUSED_ATTR -> HTMLSlot.RefusedAttr
+        html_syntax.HTML_SLOT_TAG_NAME -> HTMLSlot.TagName
+        html_syntax.HTML_SLOT_RAW_TEXT -> HTMLSlot.RawText
+        else -> HTMLSlot.Text
+    }
+}
+
+// Checked HTML markup. `HTML{"…{value}…"}` checks well-formedness and classifies
+// every hole at build time through the HTML grammar, escaping each hole for its
+// exact slot: text (`& < >`), quoted attribute (`& < > " '`), unquoted attribute
+// (plus whitespace, `=`, backtick; empty -> `""`), URL start (Go `isSafeURL` ->
+// `about:invalid#jet` on unsafe schemes, including for `URL` values), and URL
+// after a fixed prefix (RFC 3986 percent-encoding + attribute escaping). An
+// `HTML` value composes raw only in `Text`. `HTML.raw(text)` is the audited
+// escape hatch.
 HTML: struct {
     markup: String,
 
@@ -104,123 +143,79 @@ HTML: struct {
     impl Equatable {
         equal: fn(self, rhs: HTML) -> Bool { self.markup == rhs.markup }
     }
+}
 
+impl HTML {
     text: fn(self) -> String Never! { self.markup.copy() }
 
     raw: fn(text: String) -> HTML Never! { HTML{markup: text.copy()} }
+}
 
-    // A checked `HTML{…}` literal: each hole becomes markup, an HTML value as it
-    // is and any other value as its text-escaped display text. `build` then
-    // escapes a hole inside an attribute value for that value (html_value_hole).
-    impl CheckedText {
-        Error: HTMLLiteralError,
-        Hole: String,
+impl HTML.CheckedText {
+    Error: HTMLLiteralError,
+    Hole: String,
+    Slot: HTMLSlot,
 
-        check: fn(parts: [String]) -[]> Checked<[String], TextSlot> HTMLLiteralError! {
-            Ok(Checked{shape: parts.copy(), slots: loop _ in 1..<parts.len() -> TextSlot.Text})
+    check: fn(parts: [String]) -[]> Checked<[String], HTMLSlot> HTMLLiteralError! {
+        codes: html_syntax.html_check_parts(parts) ?? return Err(HTMLLiteralError{reason: err.reason.copy(), at: TextSpot{part: err.part, offset: err.offset}})
+        slots: loop code in codes -> html_slot_from_code(code)
+        Ok(Checked{shape: parts.copy(), slots: slots})
+    }
+
+    accepts: fn(slot: HTMLSlot, _hole: TypeId) -[]> String? {
+        if slot == {
+            .TagName -> Val("a hole cannot be an HTML tag name; write the tag name literally")
+            .RawText -> Val("a hole cannot sit inside a raw-text element (`<script>` or `<style>`)")
+            .RefusedAttr -> Val("a hole cannot sit inside a script, style, `srcdoc`, or `srcset` attribute")
+            .Text | .QuotedAttr | .UnquotedAttr | .URLQuotedStart | .URLUnquotedStart | .URLQuotedPrefix | .URLUnquotedPrefix -> None
         }
+    }
 
-        encode_hole: fn<T: Printable>(value: T, _slot: TextSlot) -[]> String {
+    encode_hole: fn<T: Printable>(value: T, slot: HTMLSlot) -[]> String {
+        if slot == .Text {
             if T == {
-                HTML -> value.markup.copy()
-                else -> text_escape("{value}")
+                HTML -> return value.markup.copy()
+                else -> return text_escape("{value}")
             }
         }
+        raw: "{value}"
+        if slot == {
+            .QuotedAttr -> attr_escape(raw)
+            .UnquotedAttr -> html_syntax.html_escape_unquoted(raw)
+            .URLQuotedStart -> attr_escape(html_syntax.html_safe_url(raw))
+            .URLUnquotedStart -> html_syntax.html_escape_unquoted(html_syntax.html_safe_url(raw))
+            .URLQuotedPrefix -> attr_escape(html_syntax.html_url_prefix_encode(raw))
+            .URLUnquotedPrefix -> html_syntax.html_escape_unquoted(html_syntax.html_url_prefix_encode(raw))
+            .Text | .RefusedAttr | .TagName | .RawText -> ""
+        }
+    }
 
-        build: fn(parts: [String], holes: [String]) -[]> HTML {
-            ^markup: parts[0].copy()
-            ^state: html_state_after(HTML_TEXT, parts[0])
-            loop index in 0..<holes.len() {
-                ^hole: holes[index].copy()
-                if state == HTML_DOUBLE_VALUE || state == HTML_SINGLE_VALUE {
-                    hole = html_value_hole(hole, false)
-                } else if state == HTML_AFTER_EQUALS || state == HTML_UNQUOTED_VALUE {
-                    hole = html_value_hole(hole, true)
-                    if hole != "" -> state = HTML_UNQUOTED_VALUE
-                } else { state = html_state_after(state, hole) }
-                markup = "{markup}{hole}{parts[index + 1]}"
-                state = html_state_after(state, parts[index + 1])
-            }
-            HTML{markup: markup}
+    build: fn(parts: [String], holes: [String]) -[]> HTML {
+        ^pieces: [String]{parts[0].copy()}
+        loop index in 0..<holes.len() {
+            pieces.push(holes[index].copy())
+            pieces.push(parts[index + 1].copy())
         }
+        HTML{markup: pieces.join("")}
     }
 }
 
 // Why a checked HTML literal was rejected: the compiler reports it under the
-// checked text rejection's code with this reason as its Why.
+// checked text rejection's code at `at`, with `reason` as its Why.
 #Error
 HTMLLiteralError: struct {
     reason: String,
-
-    impl Diagnostic {
-        code: "E2712",
-
-        what: fn(self) -> String { "this checked text type rejected its body" }
-
-        why: fn(self) -> String { "{self.reason}" }
-
-        fix: fn(self) -> String { "fix the body so it satisfies the type's declared text grammar" }
-    }
+    at: TextSpot,
 }
 
-// Where the markup so far leaves the next hole: in text, in a tag's attribute
-// list, just after an attribute's `=`, or inside an unquoted, "…" or '…'
-// attribute value.
-HTML_TEXT: 0
+impl HTMLLiteralError.Diagnostic {
+    code: "E2712",
 
-HTML_TAG: 1
+    what: fn(self) -> String { "this checked text type rejected its body" }
 
-HTML_AFTER_EQUALS: 2
+    why: fn(self) -> String { "{self.reason}" }
 
-HTML_UNQUOTED_VALUE: 3
-
-HTML_DOUBLE_VALUE: 4
-
-HTML_SINGLE_VALUE: 5
-
-// The markup state after `text`, read from `state`.
-priv html_state_after: fn(state: Int, text: String) -> Int Never! {
-    ^at: state
-    loop byte in text.bytes() {
-        b: Int{byte}
-        if at == HTML_TEXT {
-            if b == 60 -> at = HTML_TAG
-        } else if at == HTML_TAG {
-            if b == 62 -> at = HTML_TEXT else if b == 61 -> at = HTML_AFTER_EQUALS
-        } else if at == HTML_AFTER_EQUALS {
-            if b == 34 -> at = HTML_DOUBLE_VALUE else if b == 39 -> at = HTML_SINGLE_VALUE else if b == 62 {
-                at = HTML_TEXT
-            } else if !html_space(b) { at = HTML_UNQUOTED_VALUE }
-        } else if at == HTML_UNQUOTED_VALUE {
-            if b == 62 -> at = HTML_TEXT else if html_space(b) -> at = HTML_TAG
-        } else if at == HTML_DOUBLE_VALUE {
-            if b == 34 -> at = HTML_TAG
-        } else if b == 39 { at = HTML_TAG }
-    }
-    at
-}
-
-priv html_space: fn(b: Int) -> Bool Never! { b == 32 || b == 9 || b == 10 || b == 12 || b == 13 }
-
-// A hole inside an attribute value: its quotes and angle brackets become
-// entities, and in an unquoted value its whitespace, `=` and backtick too,
-// so the hole stays inside the one value. An `&` is left as it is: a text
-// hole's was already escaped, and an HTML hole's starts an entity.
-priv html_value_hole: fn(hole: String, unquoted: Bool) -> String Never! {
-    ^out: [U8]{}
-    loop byte in hole.bytes() {
-        b: Int{byte}
-        ^entity: ""
-        if b == 34 -> entity = "&quot;" else if b == 39 -> entity = "&#x27;" else if b == 60 {
-            entity = "&lt;"
-        } else if b == 62 { entity = "&gt;" } else if unquoted && (html_space(b) || b == 61 || b == 96) {
-            entity = "&#{b};"
-        }
-        if entity == "" -> out.push(byte) else {
-            loop e in entity.bytes() -> out.push(e)
-        }
-    }
-    String.from_bytes(out) ?? hole
+    fix: fn(self) -> String { "fix the body so it satisfies the type's declared text grammar" }
 }
 
 entity: fn(name: String) -> String {

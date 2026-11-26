@@ -1,0 +1,467 @@
+// Compiler-private part of core.text.html: the strict HTML document grammar,
+// tag-balance check, Go html/template attribute classifier, URL scheme filter,
+// prefix percent-encoder, and unquoted attribute escaper.
+use {
+    core.grammar.[Grammar]
+    core.grammar.error.[GrammarError]
+}
+
+#Allow(Jet.RawMultilineHtml, "grammar notation defines HTML tag rules")
+priv Document: Grammar{"""
+    document       : body=nodes EOF ;
+    nodes          : lead=TEXT? items+=node_tail* ;
+    node_tail      : item=non_text tail=TEXT? ;
+    non_text       : element # Element
+                   | void_element # Void
+                   | script_element # Script
+                   | style_element # Style
+                   | tag_hole # TagHole
+                   | text=COMMENT # Comment
+                   | text=DOCTYPE # Doctype
+                   | HOLE<slot=Text> # Hole
+                   ;
+    tag_hole       : '<' HOLE<slot=TagName> attrs+=attr* WS? ('/>' | '>') ;
+    element        : open=OPEN_TAG attrs+=attr* WS? tail=elem_tail ;
+    elem_tail      : '/>' # SelfClose
+                   | '>' body=nodes close=CLOSE_TAG WS? '>' # Full
+                   ;
+    void_element   : tag=void_open attrs+=attr* WS? ('/>' | '>') ;
+    void_open      : '<area'i | '<base'i | '<br'i | '<col'i | '<embed'i | '<hr'i
+                   | '<img'i | '<input'i | '<link'i | '<meta'i | '<param'i
+                   | '<source'i | '<track'i | '<wbr'i ;
+    script_element : '<script'i attrs+=attr* WS? '>' holes+=script_hole* body=SCRIPT_BODY ;
+    script_hole    : HOLE<slot=RawText> ;
+    style_element  : '<style'i attrs+=attr* WS? '>' holes+=style_hole* body=STYLE_BODY ;
+    style_hole     : HOLE<slot=RawText> ;
+    attr           : WS name=ATTR_NAME (WS? '=' WS? value=attr_value)? ;
+    attr_value     : '"' lead=DQ_TEXT? parts+=dq_part* '"' # Double
+                   | '\'' lead=SQ_TEXT? parts+=sq_part* '\'' # Single
+                   | lead=UNQUOTED parts+=uq_part* # Unquoted
+                   | parts+=uq_part+ # UnquotedHole
+                   ;
+    dq_part        : HOLE<slot=Attr> tail=DQ_TEXT? ;
+    sq_part        : HOLE<slot=Attr> tail=SQ_TEXT? ;
+    uq_part        : HOLE<slot=Attr> tail=UNQUOTED? ;
+    DOCTYPE        : '<!doctype'i [^>]* '>' ;
+    COMMENT        : '<!--' .*? '-->' ;
+    SCRIPT_BODY    : .*? '</script>'i ;
+    STYLE_BODY     : .*? '</style>'i ;
+    OPEN_TAG       : '<' [A-Za-z] [A-Za-z0-9:-]* ;
+    CLOSE_TAG      : '</' [A-Za-z] [A-Za-z0-9:-]* ;
+    ATTR_NAME      : [A-Za-z_:] [A-Za-z0-9_.:-]* ;
+    DQ_TEXT        : [^"]+ ;
+    SQ_TEXT        : [^']+ ;
+    UNQUOTED       : [^ \t\r\n"'=<>/`]+ ;
+    TEXT           : [^<]+ ;
+    WS             : (' ' | [\t\r\n]) [ \t\r\n]* ;
+"""}
+
+/// Slot kind codes returned by `html_check_parts` and mapped to `HTMLSlot` by
+/// `Core/Text/HTML.jet`.
+HTML_SLOT_TEXT: 0
+
+HTML_SLOT_QUOTED_ATTR: 1
+
+HTML_SLOT_UNQUOTED_ATTR: 2
+
+HTML_SLOT_URL_QUOTED_START: 3
+
+HTML_SLOT_URL_UNQUOTED_START: 4
+
+HTML_SLOT_URL_QUOTED_PREFIX: 5
+
+HTML_SLOT_URL_UNQUOTED_PREFIX: 6
+
+HTML_SLOT_REFUSED_ATTR: 7
+
+HTML_SLOT_TAG_NAME: 8
+
+HTML_SLOT_RAW_TEXT: 9
+
+/// Attribute classification codes matching Go's `html/template` `attrType`.
+HTML_ATTR_NORMAL: 0
+
+HTML_ATTR_URL: 1
+
+HTML_ATTR_REFUSED: 2
+
+/// Syntax refusal from the HTML grammar or tag balance check, with its part
+/// and byte offset.
+#Error
+HTMLSyntaxError: struct {
+    reason: String,
+    part: Int,
+    offset: Int,
+}
+
+priv html_ascii_lower: fn(text: String) -> String Never! {
+    ^out: [U8]{}
+    loop b in text.bytes() {
+        if b >= 65 && b <= 90 -> out.push(b + 32) else -> out.push(b)
+    }
+    String.from_bytes(out) ?? text.copy()
+}
+
+priv html_is_space: fn(b: Int) -> Bool Never! { b == 32 || b == 9 || b == 10 || b == 12 || b == 13 }
+
+priv html_is_blank: fn(text: String) -> Bool Never! {
+    loop b in text.bytes() {
+        if !html_is_space(Int{b}) -> return false
+    }
+    true
+}
+
+priv html_is_void_name: fn(lower: String) -> Bool Never! {
+    lower == "area" || lower == "base" || lower == "br" || lower == "col" || lower == "embed" || lower == "hr" || lower == "img" || lower == "input" || lower == "link" || lower == "meta" || lower == "param" || lower == "source" || lower == "track" || lower == "wbr"
+}
+
+/// Go `html/template` `attrType` classification (`src/html/template/attr.go`):
+/// 1. ASCII lowercase.
+/// 2. Strip leading `data-`.
+/// 3. `xmlns:*` is URL; otherwise strip through the last `:`.
+/// 4. Refused (B8): starts with `on`, or equals `style`, `srcdoc`, `srcset`.
+/// 5. URL: exact `attrTypeMap` URL names, or contains `src`, `uri`, `url`.
+/// 6. Otherwise normal attribute.
+html_classify_attr: fn(raw_name: String) -> Int Never! {
+    ^name: html_ascii_lower(raw_name)
+    if name.starts_with("data-") -> name = name.slice(5, name.len())
+    if name.starts_with("xmlns:") -> return HTML_ATTR_URL
+    if name.cut_last(":") == .Val(parts) -> name = parts.after
+    if name.starts_with("on") || name == "style" || name == "srcdoc" || name == "srcset" {
+        return HTML_ATTR_REFUSED
+    }
+    if name == {
+        "action" | "archive" | "background" | "cite" | "classid" | "codebase"
+        | "data" | "formaction" | "href" | "icon" | "longdesc" | "manifest"
+        | "poster" | "profile" | "src" | "usemap" | "xmlns" -> return HTML_ATTR_URL
+        else -> {}
+    }
+    if name.contains("src") || name.contains("uri") || name.contains("url") {
+        return HTML_ATTR_URL
+    }
+    HTML_ATTR_NORMAL
+}
+
+/// Go `html/template` `isSafeURL`: if there is a `:` with no `/` before it,
+/// the prefix before `:` must be `http`, `https`, or `mailto` (ASCII
+/// case-insensitive, without stripping control or whitespace characters).
+html_is_safe_url: fn(text: String) -> Bool Never! {
+    bytes: text.bytes()
+    ^colon: -1
+    loop (i, b) in bytes {
+        if b == 47 -> return true
+        if b == 58 {
+            colon = i
+            break
+        }
+    }
+    if colon < 0 -> return true
+    scheme: html_ascii_lower(String.from_bytes(bytes.slice(0, colon)) ?? "")
+    scheme == "http" || scheme == "https" || scheme == "mailto"
+}
+
+/// Returns `text` when `html_is_safe_url(text)` holds, else `about:invalid#jet`.
+html_safe_url: fn(text: String) -> String Never! {
+    if html_is_safe_url(text) -> return text.copy()
+    "about:invalid#jet"
+}
+
+priv html_hex_upper: fn(n: Int) -> U8 Never! {
+    if n < 10 -> U8{48 + n} else -> U8{55 + n}
+}
+
+/// Percent-encodes bytes outside RFC 3986 unreserved (`[A-Za-z0-9-._~]`) for a
+/// hole that follows a fixed prefix inside a URL attribute.
+html_url_prefix_encode: fn(text: String) -> String Never! {
+    ^out: [U8]{}
+    loop b in text.bytes() {
+        c: Int{b}
+        unreserved: (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || (c >= 48 && c <= 57) || c == 45 || c == 46 || c == 95 || c == 126
+        if unreserved {
+            out.push(b)
+        } else {
+            out.push(U8{37})
+            out.push(html_hex_upper(c >> 4))
+            out.push(html_hex_upper(c & 15))
+        }
+    }
+    String.from_bytes(out) ?? text.copy()
+}
+
+/// Escapes an unquoted attribute value: `& < > " '` plus ASCII whitespace,
+/// `=`, and backtick; an empty value becomes `""`.
+html_escape_unquoted: fn(text: String) -> String Never! {
+    if text.bytes().len() == 0 -> return "\"\""
+    ^out: [U8]{}
+    loop byte in text.bytes() {
+        b: Int{byte}
+        ^ent: ""
+        if b == 38 -> ent = "&amp;" else if b == 60 -> ent = "&lt;" else if b == 62 {
+            ent = "&gt;"
+        } else if b == 34 -> ent = "&quot;" else if b == 39 -> ent = "&#x27;" else if html_is_space(b) || b == 61 || b == 96 {
+            ent = "&#{b};"
+        }
+        if ent == "" -> out.push(byte) else {
+            loop e in ent.bytes() -> out.push(e)
+        }
+    }
+    String.from_bytes(out) ?? text.copy()
+}
+
+priv html_spot_in_parts: fn(parts: [String], joined_offset: Int) -> {part: Int, offset: Int} Never! {
+    ^at: 0
+    loop (i, piece) in parts {
+        len: piece.bytes().len()
+        if joined_offset <= at + len -> return {part: i, offset: joined_offset - at}
+        at += len
+    }
+    last: if parts.len() > 0 -> parts.len() - 1 else -> 0
+    {part: last, offset: if parts.len() > 0 -> parts[last].bytes().len() else -> 0}
+}
+
+priv html_collect_attr: fn(a: Attr, slots: ^[Int]) Never! {
+    value: a.value ?? return
+    kind: html_classify_attr(a.name)
+    if value == {
+        .Double(lead, parts) -> {
+            has_prefix: if lead == .Val(t) -> !html_is_blank(t) else -> false
+            loop (idx, _) in parts {
+                if kind == HTML_ATTR_REFUSED {
+                    slots.push(HTML_SLOT_REFUSED_ATTR)
+                } else if kind == HTML_ATTR_URL {
+                    if idx == 0 && !has_prefix -> slots.push(HTML_SLOT_URL_QUOTED_START) else -> slots.push(HTML_SLOT_URL_QUOTED_PREFIX)
+                } else {
+                    slots.push(HTML_SLOT_QUOTED_ATTR)
+                }
+            }
+        }
+        .Single(lead, parts) -> {
+            has_prefix: if lead == .Val(t) -> !html_is_blank(t) else -> false
+            loop (idx, _) in parts {
+                if kind == HTML_ATTR_REFUSED {
+                    slots.push(HTML_SLOT_REFUSED_ATTR)
+                } else if kind == HTML_ATTR_URL {
+                    if idx == 0 && !has_prefix -> slots.push(HTML_SLOT_URL_QUOTED_START) else -> slots.push(HTML_SLOT_URL_QUOTED_PREFIX)
+                } else {
+                    slots.push(HTML_SLOT_QUOTED_ATTR)
+                }
+            }
+        }
+        .Unquoted(_, parts) -> {
+            loop _ in parts {
+                if kind == HTML_ATTR_REFUSED {
+                    slots.push(HTML_SLOT_REFUSED_ATTR)
+                } else if kind == HTML_ATTR_URL {
+                    slots.push(HTML_SLOT_URL_UNQUOTED_PREFIX)
+                } else {
+                    slots.push(HTML_SLOT_UNQUOTED_ATTR)
+                }
+            }
+        }
+        .UnquotedHole(parts) -> {
+            loop (idx, _) in parts {
+                if kind == HTML_ATTR_REFUSED {
+                    slots.push(HTML_SLOT_REFUSED_ATTR)
+                } else if kind == HTML_ATTR_URL {
+                    if idx == 0 -> slots.push(HTML_SLOT_URL_UNQUOTED_START) else -> slots.push(HTML_SLOT_URL_UNQUOTED_PREFIX)
+                } else {
+                    slots.push(HTML_SLOT_UNQUOTED_ATTR)
+                }
+            }
+        }
+    }
+}
+
+priv html_collect_attrs: fn(attrs: [Attr], slots: ^[Int]) Never! {
+    loop a in attrs -> html_collect_attr(a, slots)
+}
+
+priv html_skip_tag_head: fn(bytes: [U8], pos: ^Int) Never! {
+    ^quote: 0
+    loop pos < bytes.len() {
+        b: Int{bytes[pos]}
+        if quote != 0 {
+            if b == quote -> quote = 0
+            pos += 1
+            next
+        }
+        if b == 34 || b == 39 {
+            quote = b
+            pos += 1
+            next
+        }
+        if b == 62 {
+            pos += 1
+            return
+        }
+        pos += 1
+    }
+}
+
+priv html_collect_nodes: fn(nodes: Nodes, parts: [String], bytes: [U8], pos: ^Int, slots: ^[Int]) -> HTMLSyntaxError? Never! {
+    if nodes.lead == .Val(t) -> pos += t.bytes().len()
+    loop entry in nodes.items {
+        if entry.item == {
+            .Element(elem) -> {
+                open_name: elem.open.slice(1, elem.open.len())
+                html_collect_attrs(elem.attrs, slots)
+                html_skip_tag_head(bytes, pos)
+                if elem.tail == .Full(body, close) {
+                    if html_collect_nodes(body, parts, bytes, pos, slots) == .Val(err) -> return Val(err)
+                    close_offset: pos
+                    close_name: close.slice(2, close.len())
+                    if html_ascii_lower(open_name) != html_ascii_lower(close_name) {
+                        spot: html_spot_in_parts(parts, close_offset)
+                        return Val(HTMLSyntaxError{reason: "expected `</{open_name}>`, found `{close}>`", part: spot.part, offset: spot.offset})
+                    }
+                    html_skip_tag_head(bytes, pos)
+                }
+            }
+            .Void(v) -> {
+                html_collect_attrs(v.attrs, slots)
+                html_skip_tag_head(bytes, pos)
+            }
+            .Script(s) -> {
+                html_collect_attrs(s.attrs, slots)
+                html_skip_tag_head(bytes, pos)
+                loop _ in s.holes -> slots.push(HTML_SLOT_RAW_TEXT)
+                pos += s.body.bytes().len()
+            }
+            .Style(s) -> {
+                html_collect_attrs(s.attrs, slots)
+                html_skip_tag_head(bytes, pos)
+                loop _ in s.holes -> slots.push(HTML_SLOT_RAW_TEXT)
+                pos += s.body.bytes().len()
+            }
+            .TagHole(th) -> {
+                slots.push(HTML_SLOT_TAG_NAME)
+                html_collect_attrs(th.attrs, slots)
+                html_skip_tag_head(bytes, pos)
+            }
+            .Comment(text) -> pos += text.bytes().len()
+            .Doctype(text) -> pos += text.bytes().len()
+            .Hole -> slots.push(HTML_SLOT_TEXT)
+        }
+        if entry.tail == .Val(t) -> pos += t.bytes().len()
+    }
+    None
+}
+
+// When `Document.parse_parts` fails because of unbalanced tags (e.g.
+// `<div><span></div>`), locate the exact mismatched close tag or unclosed open
+// tag so the error points directly at it with `expected </…>, found </…>`.
+priv html_find_tag_mismatch: fn(parts: [String]) -> HTMLSyntaxError? Never! {
+    joined: parts.join("")
+    bytes: joined.bytes()
+    ^stack_names: [String]{}
+    ^stack_offsets: [Int]{}
+    ^i: 0
+    loop i < bytes.len() {
+        b0: Int{bytes[i]}
+        if b0 != 60 {
+            i += 1
+            next
+        }
+        if i + 3 < bytes.len() && (Int{bytes[i + 1]}) == 33 && (Int{bytes[i + 2]}) == 45 && (Int{bytes[i + 3]}) == 45 {
+            i += 4
+            loop i + 2 < bytes.len() {
+                if (Int{bytes[i]}) == 45 && (Int{bytes[i + 1]}) == 45 && (Int{bytes[i + 2]}) == 62 {
+                    i += 3
+                    break
+                }
+                i += 1
+            }
+            next
+        }
+        if i + 1 < bytes.len() && (Int{bytes[i + 1]}) == 33 {
+            html_skip_tag_head(bytes, i)
+            next
+        }
+        if i + 1 < bytes.len() && (Int{bytes[i + 1]}) == 47 {
+            close_start: i
+            ^j: i + 2
+            loop j < bytes.len() {
+                c: Int{bytes[j]}
+                if (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || (c >= 48 && c <= 57) || c == 58 || c == 45 {
+                    j += 1
+                } else { break }
+            }
+            if j > i + 2 {
+                close_name: String.from_bytes(bytes.slice(i + 2, j)) ?? ""
+                if stack_names.len() == 0 {
+                    spot: html_spot_in_parts(parts, close_start)
+                    return Val(HTMLSyntaxError{reason: "unexpected closing tag `</{close_name}>` with no matching open tag", part: spot.part, offset: spot.offset})
+                }
+                top: stack_names.pop() ?? ""
+                _: stack_offsets.pop()
+                if html_ascii_lower(top) != html_ascii_lower(close_name) {
+                    spot: html_spot_in_parts(parts, close_start)
+                    return Val(HTMLSyntaxError{reason: "expected `</{top}>`, found `</{close_name}>`", part: spot.part, offset: spot.offset})
+                }
+            }
+            html_skip_tag_head(bytes, i)
+            next
+        }
+        open_start: i
+        ^j: i + 1
+        loop j < bytes.len() {
+            c: Int{bytes[j]}
+            if (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || (c >= 48 && c <= 57) || c == 58 || c == 45 {
+                j += 1
+            } else { break }
+        }
+        if j > i + 1 {
+            open_name: String.from_bytes(bytes.slice(i + 1, j)) ?? ""
+            lower: html_ascii_lower(open_name)
+            html_skip_tag_head(bytes, i)
+            self_close: i >= 2 && (Int{bytes[i - 2]}) == 47 && (Int{bytes[i - 1]}) == 62
+            if lower == "script" || lower == "style" {
+                end_tag: "</{lower}>"
+                end_len: end_tag.bytes().len()
+                loop i + end_len <= bytes.len() {
+                    chunk: html_ascii_lower(String.from_bytes(bytes.slice(i, i + end_len)) ?? "")
+                    if chunk == end_tag {
+                        i += end_len
+                        break
+                    }
+                    i += 1
+                }
+                next
+            }
+            if !self_close && !html_is_void_name(lower) {
+                stack_names.push(open_name)
+                stack_offsets.push(open_start)
+            }
+            next
+        }
+        i += 1
+    }
+    if stack_names.len() > 0 {
+        top: stack_names[stack_names.len() - 1]
+        at: stack_offsets[stack_offsets.len() - 1]
+        spot: html_spot_in_parts(parts, at)
+        return Val(HTMLSyntaxError{reason: "unclosed `<{top}>` element; expected `</{top}>`", part: spot.part, offset: spot.offset})
+    }
+    None
+}
+
+priv html_explain_error: fn(parts: [String], error: GrammarError) -> HTMLSyntaxError Never! {
+    if html_find_tag_mismatch(parts) == .Val(mismatch) -> return mismatch
+    spot: html_spot_in_parts(parts, error.offset)
+    HTMLSyntaxError{reason: "{error}", part: spot.part, offset: spot.offset}
+}
+
+/// Validates `HTML` literal `parts` with the strict `Document` grammar,
+/// verifies ASCII case-insensitive open/close tag balance over the parsed tree,
+/// and returns one refined `HTML_SLOT_*` code per hole.
+html_check_parts: fn(parts: [String]) -> [Int] HTMLSyntaxError! {
+    parsed: Document.parse_parts(parts) ?? return Err(html_explain_error(parts, err))
+    joined: parts.join("")
+    bytes: joined.bytes()
+    ^pos: 0
+    ^slots: [Int]{}
+    if html_collect_nodes(parsed.body, parts, bytes, pos, slots) == .Val(err) {
+        return Err(err)
+    }
+    Ok(slots)
+}

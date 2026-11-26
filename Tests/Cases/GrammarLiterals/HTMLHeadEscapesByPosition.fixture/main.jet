@@ -1,0 +1,28 @@
+// HTML grammar head: escaping chosen at build time by slot (text, quoted attr,
+// unquoted attr, URL start for String and URL values, URL after fixed prefix,
+// and HTML fragment composition in Text only).
+use url: core.net.url
+
+run: fn() {
+    text: "<script>&\"'"
+    frag: HTML{"<b>ok</b>"}
+    empty: ""
+    ok_href: "https://example.com/a?x=1&y=2"
+    js_str: "javascript:alert(1)"
+    js_tab: "\tjavascript:alert(1)"
+    js_url: url.parse("javascript:alert(1)") ?? panic("bad url")
+    seg: "a/b?c=1"
+
+    quoted_doc: HTML{"""
+        <a title="{text}" data-raw="{frag}">q</a>
+        """}
+    print("text: {HTML{"<p>{text}</p>"}.text()}")
+    print("compose: {HTML{"<section>{frag}</section>"}.text()}")
+    print("quoted: {quoted_doc.text()}")
+    print("unquoted: {HTML{"<a data-a={text} data-b={empty}>u</a>"}.text()}")
+    print("url_ok: {HTML{"<a href='{ok_href}'>ok</a>"}.text()}")
+    print("url_js_str: {HTML{"<a href='{js_str}'>no</a>"}.text()}")
+    print("url_js_tab: {HTML{"<a href='{js_tab}'>no</a>"}.text()}")
+    print("url_js_url: {HTML{"<a href='{js_url}'>no</a>"}.text()}")
+    print("url_prefix: {HTML{"<a href='/user/{seg}'>p</a>"}.text()}")
+}

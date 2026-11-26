@@ -1,0 +1,97 @@
+use {
+    url: core.net.url
+    core.text.html.[HTML]
+}
+
+#Test("HTML grammar escapes text, quoted, unquoted, URL start, and URL prefix slots by position") {
+    evil: "<script>alert(1)</script>"
+    quote_mix: "Tom \"T\" & 'Jo'"
+    frag: HTML{"<strong>safe</strong>"}
+    empty: ""
+
+    // Text slot escapes `& < >`, leaves quotes, and composes HTML raw.
+    assert_eq(HTML{"<p>{evil}</p>"}.text(), "<p>&lt;script&gt;alert(1)&lt;/script&gt;</p>")
+    assert_eq(HTML{"<article>{frag}</article>"}.text(), "<article><strong>safe</strong></article>")
+    assert_eq(HTML{"<DIV>{quote_mix}</div>"}.text(), "<DIV>Tom \"T\" &amp; 'Jo'</div>")
+
+    // Quoted attribute escapes `& < > " '`, and does NOT compose HTML raw.
+    assert_eq(HTML{"<a title='{quote_mix}'>x</a>"}.text(), "<a title='Tom &quot;T&quot; &amp; &#x27;Jo&#x27;'>x</a>")
+    dq_frag: HTML{"""
+        <a title="{frag}">x</a>
+        """}
+    assert_eq(dq_frag.text(), "<a title=\"&lt;strong&gt;safe&lt;/strong&gt;\">x</a>")
+
+    // Unquoted attribute escapes quotes, angle brackets, spaces, `=`, backtick; empty becomes `""`.
+    assert_eq(HTML{"<a data-name={quote_mix}>x</a>"}.text(), "<a data-name=Tom&#32;&quot;T&quot;&#32;&amp;&#32;&#x27;Jo&#x27;>x</a>")
+    assert_eq(HTML{"<a data-empty={empty}>x</a>"}.text(), "<a data-empty=\"\">x</a>")
+    trick: "a=b`c"
+    assert_eq(HTML{"<a data-v={trick}>x</a>"}.text(), "<a data-v=a&#61;b&#96;c>x</a>")
+
+    // Void elements, doctype, comments, self-closing, and static raw-text elements.
+    doc: HTML{"""
+        <!doctype html><html><body><!-- note --><hr><br/><img src="/a.png"/><script>var a = 1;</script><style>body{{}}</style></body></html>
+        """}
+    assert(doc.text().contains("<!doctype html>"))
+    assert(doc.text().contains("<hr><br/>"))
+}
+
+#Test("HTML URL slots enforce Go isSafeURL for String and URL values and percent-encode after prefixes") {
+    ok_http: "https://example.com/a?b=1&c=2"
+    ok_upper: "HTTP://EXAMPLE.COM"
+    ok_mailto: "mailto:ada@example.com"
+    ok_rel: "/path/with:colon"
+    bad_js: "javascript:alert(1)"
+    bad_tab: "\tjavascript:alert(1)"
+    bad_nl: "java\nscript:alert(1)"
+    bad_data: "data:text/html,<script>alert(1)</script>"
+    bad_url: url.parse("javascript:alert(1)") ?? panic("expected url.parse to parse javascript: URL")
+    ok_url: URL{"https://example.com/ok"}
+
+    assert_eq(HTML{"<a href='{ok_http}'>ok</a>"}.text(), "<a href='https://example.com/a?b=1&amp;c=2'>ok</a>")
+    assert_eq(HTML{"<a href='{ok_upper}'>ok</a>"}.text(), "<a href='HTTP://EXAMPLE.COM'>ok</a>")
+    assert_eq(HTML{"<a href='{ok_mailto}'>ok</a>"}.text(), "<a href='mailto:ada@example.com'>ok</a>")
+    assert_eq(HTML{"<a href='{ok_rel}'>ok</a>"}.text(), "<a href='/path/with:colon'>ok</a>")
+    assert_eq(HTML{"<a href='{ok_url}'>ok</a>"}.text(), "<a href='https://example.com/ok'>ok</a>")
+
+    // Unsafe schemes — including parsed URL values and control-char tricks — become about:invalid#jet.
+    assert_eq(HTML{"<a href='{bad_js}'>no</a>"}.text(), "<a href='about:invalid#jet'>no</a>")
+    assert_eq(HTML{"<a href='{bad_tab}'>no</a>"}.text(), "<a href='about:invalid#jet'>no</a>")
+    assert_eq(HTML{"<a href='{bad_nl}'>no</a>"}.text(), "<a href='about:invalid#jet'>no</a>")
+    assert_eq(HTML{"<a href='{bad_data}'>no</a>"}.text(), "<a href='about:invalid#jet'>no</a>")
+    assert_eq(HTML{"<a href='{bad_url}'>no</a>"}.text(), "<a href='about:invalid#jet'>no</a>")
+    assert_eq(HTML{"<a href={bad_js}>no</a>"}.text(), "<a href=about:invalid#jet>no</a>")
+
+    // Go html/template URL attribute rules: xlink:href, xmlns:svg, data-url, data-my-src, formaction.
+    assert_eq(HTML{"<a xlink:href='{bad_js}' data-url='{bad_js}' data-my-src='{bad_js}'>no</a>"}.text(), "<a xlink:href='about:invalid#jet' data-url='about:invalid#jet' data-my-src='about:invalid#jet'>no</a>")
+
+    // Hole after a fixed prefix in a URL attribute is RFC 3986 percent-encoded.
+    seg: "a/b?c=1&d=2 x"
+    assert_eq(HTML{"<a href='/user/{seg}'>u</a>"}.text(), "<a href='/user/a%2Fb%3Fc%3D1%26d%3D2%20x'>u</a>")
+    assert_eq(HTML{"<a href=user-{seg}>u</a>"}.text(), "<a href=user-a%2Fb%3Fc%3D1%26d%3D2%20x>u</a>")
+}
+
+#Test("HTML.check refuses malformed markup and classifies refused slots accurately") {
+    if HTML.check([String]{"<div><span></div>"}) == .Ok(_) -> panic("expected tag mismatch to fail")
+    if HTML.check([String]{"<div></span>"}) == .Ok(_) -> panic("expected mismatched close tag to fail")
+    if HTML.check([String]{"<div><span>"}) == .Ok(_) -> panic("expected unclosed tag to fail")
+    if HTML.check([String]{"</div>"}) == .Ok(_) -> panic("expected stray close tag to fail")
+    if HTML.check([String]{"<a ", "></a>"}) == .Ok(_) -> panic("expected attr-name hole to fail")
+
+    if HTML.check([String]{"<", ">"}) == .Ok(checked) {
+        assert_eq("{checked.slots:Debug}", "[TagName]")
+    } else {
+        panic("expected tag-name hole to parse to TagName slot")
+    }
+
+    if HTML.check([String]{"<script>", "</script>"}) == .Ok(checked) {
+        assert_eq("{checked.slots:Debug}", "[RawText]")
+    } else {
+        panic("expected script hole to parse to RawText slot")
+    }
+
+    if HTML.check([String]{"<a onclick=\"go(", ")\" data-onclick=\"", "\" style=\"", "\" srcdoc=\"", "\" srcset=\"", "\">x</a>"}) == .Ok(checked) {
+        assert_eq("{checked.slots:Debug}", "[RefusedAttr, RefusedAttr, RefusedAttr, RefusedAttr, RefusedAttr]")
+    } else {
+        panic("expected refused attributes to parse to RefusedAttr slots")
+    }
+}
