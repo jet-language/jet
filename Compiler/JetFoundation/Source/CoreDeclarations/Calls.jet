@@ -403,24 +403,30 @@ core_decl_capability: fn(expression: String, context: String, constants: CoreDec
     count: call.args.len()
     if {
         call.name == "CoreCapabilityContract.pure" && count == 0 -> return Ok(core_decl_pure_capability())
-        call.name == "CoreCapabilityContract.native_required" && count == 2 -> return Ok(CoreCapabilityContract{
-            kind: CoreCapabilityKind.NativeRequired,
-            provider: Val(core_decl_rust_string(call.args[0], context, constants) ?? return Err(err)),
-            fallback: None,
-            failure: Val(core_decl_rust_string(call.args[1], context, constants) ?? return Err(err)),
-        })
-        call.name == "CoreCapabilityContract.portable_fallback" && count == 3 -> return Ok(CoreCapabilityContract{
-            kind: CoreCapabilityKind.PortableFallback,
-            provider: Val(core_decl_rust_string(call.args[0], context, constants) ?? return Err(err)),
-            fallback: Val(core_decl_rust_string(call.args[1], context, constants) ?? return Err(err)),
-            failure: Val(core_decl_rust_string(call.args[2], context, constants) ?? return Err(err)),
-        })
-        call.name == "CoreCapabilityContract.explicit_simulation" && count == 2 -> return Ok(CoreCapabilityContract{
-            kind: CoreCapabilityKind.ExplicitSimulation,
-            provider: Val(core_decl_rust_string(call.args[0], context, constants) ?? return Err(err)),
-            fallback: None,
-            failure: Val(core_decl_rust_string(call.args[1], context, constants) ?? return Err(err)),
-        })
+        call.name == "CoreCapabilityContract.native_required" && count == 2 -> return Ok(
+            CoreCapabilityContract{
+                kind: CoreCapabilityKind.NativeRequired,
+                provider: Val(core_decl_rust_string(call.args[0], context, constants) ?? return Err(err)),
+                fallback: None,
+                failure: Val(core_decl_rust_string(call.args[1], context, constants) ?? return Err(err)),
+            },
+        )
+        call.name == "CoreCapabilityContract.portable_fallback" && count == 3 -> return Ok(
+            CoreCapabilityContract{
+                kind: CoreCapabilityKind.PortableFallback,
+                provider: Val(core_decl_rust_string(call.args[0], context, constants) ?? return Err(err)),
+                fallback: Val(core_decl_rust_string(call.args[1], context, constants) ?? return Err(err)),
+                failure: Val(core_decl_rust_string(call.args[2], context, constants) ?? return Err(err)),
+            },
+        )
+        call.name == "CoreCapabilityContract.explicit_simulation" && count == 2 -> return Ok(
+            CoreCapabilityContract{
+                kind: CoreCapabilityKind.ExplicitSimulation,
+                provider: Val(core_decl_rust_string(call.args[0], context, constants) ?? return Err(err)),
+                fallback: None,
+                failure: Val(core_decl_rust_string(call.args[1], context, constants) ?? return Err(err)),
+            },
+        )
     }
     Err(core_decl_fail("unsupported CoreCapabilityContract in {context}: {call.name}"))
 }
@@ -528,7 +534,7 @@ core_decl_call_effect_leaf: fn(module_name: String, member: String) -> String? N
             else -> None
         }
         "core.term" -> if member == {
-            "confirm" | "choose" | "input_secret" | "read_all_input" | "readline" | "read_until" | "take" | "take_within" | "binread" | "binwrite" | "progress" | "read_key" -> Val("Time.Wait")
+            "ask" | "confirm" | "choose" | "input_secret" | "secret" | "prompt_guided" | "read_all_input" | "readline" | "read_until" | "take" | "take_within" | "binread" | "binwrite" | "progress" | "read_key" -> Val("Time.Wait")
             else -> None
         }
         "core.net.tls" -> if member == {
