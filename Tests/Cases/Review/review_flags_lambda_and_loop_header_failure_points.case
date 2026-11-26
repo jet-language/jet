@@ -1,0 +1,18 @@
+# `jet review` and `jet diff --structural` list failure points inside lambdas
+# (even inside an infallible enclosing function) and in loop headers over a
+# failing Iterable source.
+fixture: ReviewFlagsLambdaAndLoopHeaderFailurePoints.fixture
+step: jet review {work}/base/run.jet {work}/head/run.jet --json
+exit: 0
+stdout: ~ "\"function\":\"use_lambda\",\"status\":\"points_changed\",\"before_can_fail\":false,\"after_can_fail\":false" # infallible function gained a lambda failure point
+stdout: ~ "{\"status\":\"new\",\"callee\":\"parse\",\"site\":\"run.jet:36\"}" # lambda propagation site
+stdout: ~ "\"function\":\"total\",\"status\":\"newly_fallible\",\"before_can_fail\":false,\"after_can_fail\":true" # loop header made total fallible
+stdout: ~ "{\"status\":\"new\",\"callee\":\"Reads.next\",\"site\":\"run.jet:43\"}" # failing Iterable loop header
+step: jet review {work}/base/run.jet {work}/head/run.jet --annotations none
+exit: 0
+stdout: ~ "  newly can fail: total\n    new failure point: Reads.next at run.jet:43" # text review lists loop header failure point
+stdout: ~ "  failure points changed: use_lambda\n    new failure point: parse at run.jet:36" # text review lists lambda failure point
+step: jet diff --structural {work}/base/run.jet {work}/head/run.jet
+exit: 0
+stdout: ~ "newly can fail: total\n  new failure point: Reads.next at run.jet:43" # structural diff lists loop header failure point
+stdout: ~ "failure points changed: use_lambda\n  new failure point: parse at run.jet:36" # structural diff lists lambda failure point

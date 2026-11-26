@@ -1,0 +1,305 @@
+// Failure-point extraction inside lambdas and failing Iterable loop headers
+// (shared by `jet review` and `jet diff --structural`), and GitHub PR
+// annotations emitted by `jet review --annotations`.
+use {
+    jet_cli.[
+        JetCLIFailureChange,
+        JetCLIFailureFunction,
+        JetCLIFailurePoint,
+        JetCLIFailurePointChange,
+        jet_cli_review,
+        jet_cli_review_failure_annotations,
+        jet_cli_structural,
+    ]
+    jet_driver.[JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE]
+    cli_files: core.files
+    cli_process: core.process
+    cli_sys: core.sys
+}
+
+JetCLIReviewFixtureRoot: struct {
+    path: String,
+
+    impl Close {
+        close: fn(^^self) -[FS]> { cli_files.remove_all(self.path).drop("review fixture cleanup") }
+    }
+}
+
+review_fixture_write_pair: fn(root: String, base_source: String, head_source: String) -[FS]> {
+    manifest: `name: "review_failures"
+version: "0.1.0"
+edition: "2026"
+`
+    cli_files.create_dir_all("{root}/base") ?? panic("create base dir")
+    cli_files.create_dir_all("{root}/head") ?? panic("create head dir")
+    cli_files.write("{root}/base/package.jet", manifest) ?? panic("write base manifest")
+    cli_files.write("{root}/head/package.jet", manifest) ?? panic("write head manifest")
+    cli_files.write("{root}/base/run.jet", base_source) ?? panic("write base source")
+    cli_files.write("{root}/head/run.jet", head_source) ?? panic("write head source")
+}
+
+#Test("review_lambda_failure_points") {
+    root: "{cli_sys.temp_dir()}/jet-review-lambda-{cli_process.current_pid()}"
+    cli_files.create_dir_all(root) ?? panic("create temp root")
+    owner: JetCLIReviewFixtureRoot{path: root}
+    defer close(owner)
+
+    base_source: `#Error
+ParseError: enum {
+    Empty,
+}
+
+parse: fn(text: String) -> Int ParseError! {
+    if text == "" -> return Err(ParseError.Empty)
+    text.count_bytes()
+}
+
+use_lambda: fn() {
+    f: fn(text: String) -> Int { text.count_bytes() }
+    print(f("ab"))
+    print(parse("ab") ?? 0)
+}
+
+infallible_outer: fn() Never! {
+    f: fn(text: String) -> Int { text.count_bytes() }
+    print(f("ab"))
+}
+`
+
+    head_source: `#Error
+ParseError: enum {
+    Empty,
+}
+
+parse: fn(text: String) -> Int ParseError! {
+    if text == "" -> return Err(ParseError.Empty)
+    text.count_bytes()
+}
+
+use_lambda: fn() {
+    f: fn(text: String) -> Int ParseError! { parse(text) + 1 }
+    print(f("ab") ?? 0)
+    print(parse("ab") ?? 0)
+}
+
+infallible_outer: fn() Never! {
+    f: fn(text: String) -> Int ParseError! { parse(text) + 1 }
+    print(f("ab") ?? 0)
+}
+`
+
+    review_fixture_write_pair(root, base_source, head_source)
+    base_path: "{root}/base/run.jet"
+    head_path: "{root}/head/run.jet"
+
+    review_json: jet_cli_review([String]{"review", base_path, head_path, "--json"}, true, false)
+    if review_json.exit_code != JET_DRIVER_EXIT_OK {
+        panic("review_json failed ({review_json.exit_code}): stdout={review_json.stdout}\nstderr={review_json.stderr}")
+    }
+    assert(review_json.stdout.contains(`"function":"use_lambda"`))
+    assert(review_json.stdout.contains(`{"status":"new","callee":"parse","site":"run.jet:12"}`))
+    assert(!review_json.stdout.contains(`run.jet:14`))
+    assert(review_json.stdout.contains(`"function":"infallible_outer","status":"points_changed","before_can_fail":false,"after_can_fail":false`))
+    assert(review_json.stdout.contains(`{"status":"new","callee":"parse","site":"run.jet:18"}`))
+
+    review_text: jet_cli_review([String]{"review", base_path, head_path, "--annotations", "none"}, false, false)
+    if review_text.exit_code != JET_DRIVER_EXIT_OK {
+        panic("review_text failed ({review_text.exit_code}): stdout={review_text.stdout}\nstderr={review_text.stderr}")
+    }
+    assert(review_text.stdout.contains("new failure point: parse at run.jet:12"))
+    assert(review_text.stdout.contains("failure points changed: infallible_outer\n    new failure point: parse at run.jet:18"))
+    assert_eq(review_text.stderr, "")
+
+    diff_text: jet_cli_structural([String]{"diff", "--structural", base_path, head_path}, "diff", false)
+    if diff_text.exit_code != JET_DRIVER_EXIT_OK {
+        panic("diff_text failed ({diff_text.exit_code}): stdout={diff_text.stdout}\nstderr={diff_text.stderr}")
+    }
+    assert(diff_text.stdout.contains("new failure point: parse at run.jet:12"))
+    assert(diff_text.stdout.contains("failure points changed: infallible_outer\n  new failure point: parse at run.jet:18"))
+}
+
+#Test("review_loop_header_failure_points") {
+    root: "{cli_sys.temp_dir()}/jet-review-loop-{cli_process.current_pid()}"
+    cli_files.create_dir_all(root) ?? panic("create temp root")
+    owner: JetCLIReviewFixtureRoot{path: root}
+    defer close(owner)
+
+    shared_types: `#Error
+ReadError: enum {
+    Torn,
+}
+
+Reads: struct {
+    priv at: Int,
+    impl Iterator {
+        Item: Int,
+        next: fn(^self) -> Int? ReadError! {
+            if self.at > 0 -> return Err(ReadError.Torn)
+            self.at += 1
+            Val(1)
+        }
+    }
+}
+
+Source: struct {
+    impl Iterable {
+        Iter: Reads,
+        iter: fn(^^self) -> Reads { Reads{at: 0} }
+    }
+}
+
+`
+
+    base_tail: `total: fn() -> Int {
+    1
+}
+`
+    head_tail: `total: fn() -> Int ReadError! {
+    ^sum: 0
+    src: Source{}
+    loop item in src {
+        sum += item
+    }
+    sum
+}
+`
+
+    review_fixture_write_pair(root, "{shared_types}{base_tail}", "{shared_types}{head_tail}")
+    base_path: "{root}/base/run.jet"
+    head_path: "{root}/head/run.jet"
+
+    review_json: jet_cli_review([String]{"review", base_path, head_path, "--json"}, true, false)
+    if review_json.exit_code != JET_DRIVER_EXIT_OK {
+        panic("loop review_json failed ({review_json.exit_code}): stdout={review_json.stdout}\nstderr={review_json.stderr}")
+    }
+    assert(review_json.stdout.contains(`"function":"total","status":"newly_fallible","before_can_fail":false,"after_can_fail":true`))
+    assert(review_json.stdout.contains(`{"status":"new","callee":"Reads.next","site":"run.jet:28"}`))
+
+    review_text: jet_cli_review([String]{"review", base_path, head_path, "--annotations", "none"}, false, false)
+    assert_eq(review_text.exit_code, JET_DRIVER_EXIT_OK)
+    assert(review_text.stdout.contains("newly can fail: total\n    new failure point: Reads.next at run.jet:28"))
+
+    diff_text: jet_cli_structural([String]{"diff", "--structural", base_path, head_path}, "diff", false)
+    assert_eq(diff_text.exit_code, JET_DRIVER_EXIT_OK)
+    assert(diff_text.stdout.contains("newly can fail: total\n  new failure point: Reads.next at run.jet:28"))
+}
+
+#Test("review_github_annotations") {
+    root: "{cli_sys.temp_dir()}/jet-review-annotations-{cli_process.current_pid()}"
+    cli_files.create_dir_all(root) ?? panic("create temp root")
+    owner: JetCLIReviewFixtureRoot{path: root}
+    defer close(owner)
+
+    base_source: `#Error
+ParseError: enum {
+    Empty,
+}
+
+parse: fn(text: String) -> Int ParseError! {
+    if text == "" -> return Err(ParseError.Empty)
+    text.count_bytes()
+}
+
+kept_caller: fn(text: String) -> Int ParseError! {
+    parse(text)
+}
+
+report: fn(text: String) -> Int {
+    text.count_bytes() + 1
+}
+`
+
+    head_source: `#Error
+ParseError: enum {
+    Empty,
+}
+
+parse: fn(text: String) -> Int ParseError! {
+    if text == "" -> return Err(ParseError.Empty)
+    text.count_bytes()
+}
+
+kept_caller: fn(text: String) -> Int ParseError! {
+    parse(text)
+}
+
+report: fn(text: String) -> Int ParseError! {
+    parse(text) + 1
+}
+`
+
+    review_fixture_write_pair(root, base_source, head_source)
+    base_path: "{root}/base/run.jet"
+    head_path: "{root}/head/run.jet"
+
+    github: jet_cli_review([String]{"review", base_path, head_path, "--annotations", "github"}, false, false)
+    if github.exit_code != JET_DRIVER_EXIT_OK {
+        panic("github review failed ({github.exit_code}): stdout={github.stdout}\nstderr={github.stderr}")
+    }
+    assert(github.stderr.contains("::warning file=run.jet,line=16,title=Jet new failure point::report newly can fail: new failure point calling parse\n"))
+    assert(github.stderr.contains("::notice file=run.jet,line=12,title=Jet failure point::kept_caller: failure point calling parse\n"))
+
+    suppressed: jet_cli_review([String]{"review", base_path, head_path, "--annotations=none"}, false, false)
+    assert_eq(suppressed.exit_code, JET_DRIVER_EXIT_OK)
+    assert_eq(suppressed.stderr, "")
+
+    json_mode: jet_cli_review([String]{"review", base_path, head_path, "--annotations", "github", "--json"}, true, false)
+    assert_eq(json_mode.exit_code, JET_DRIVER_EXIT_OK)
+    assert_eq(json_mode.stderr, "")
+    assert(json_mode.stdout.contains(`"function":"report"`))
+
+    invalid: jet_cli_review([String]{"review", base_path, head_path, "--annotations", "gitlab"}, false, false)
+    assert_eq(invalid.exit_code, JET_DRIVER_EXIT_USAGE)
+    assert(invalid.stderr.contains("`--annotations` accepts auto, none, or github"))
+
+    missing: jet_cli_review([String]{"review", base_path, head_path, "--annotations"}, false, false)
+    assert_eq(missing.exit_code, JET_DRIVER_EXIT_USAGE)
+    assert(missing.stderr.contains("`--annotations` needs a value"))
+
+    // Escaping and skipping `gone` points.
+    rendered: jet_cli_review_failure_annotations(
+        [JetCLIFailureFunction]{
+            JetCLIFailureFunction{
+                function: "unchanged",
+                can_fail: true,
+                points: [JetCLIFailurePoint]{JetCLIFailurePoint{callee: "io.read", site: "a,b:c/file.jet:14", offset: 1}},
+            },
+        },
+        [JetCLIFailureChange]{
+            JetCLIFailureChange{
+                function: "changed",
+                before: Val(true),
+                after: Val(true),
+                points: [JetCLIFailurePointChange]{
+                    JetCLIFailurePointChange{status: "gone", callee: "old_fn", site: "base.jet:3"},
+                    JetCLIFailurePointChange{status: "kept", callee: "kept_fn", site: "head.jet:8"},
+                    JetCLIFailurePointChange{status: "new", callee: "new%fn", site: "head.jet:9"},
+                },
+            },
+        },
+    )
+    assert(!rendered.contains("old_fn"))
+    assert(rendered.contains("::notice file=head.jet,line=8,title=Jet failure point::changed: failure point calling kept_fn\n"))
+    assert(rendered.contains("::warning file=head.jet,line=9,title=Jet new failure point::changed: new failure point calling new%25fn\n"))
+    assert(rendered.contains("::notice file=a%2Cb%3Ac/file.jet,line=14,title=Jet failure point::unchanged: failure point calling io.read\n"))
+}
+
+#Test("review_existing_failure_point_fixture") {
+    base_path: "Tests/Cases/Review/ReviewFlagsNewFailurePoint.fixture/base/run.jet"
+    head_path: "Tests/Cases/Review/ReviewFlagsNewFailurePoint.fixture/head/run.jet"
+
+    review_json: jet_cli_review([String]{"review", base_path, head_path, "--json"}, true, false)
+    assert_eq(review_json.exit_code, JET_DRIVER_EXIT_OK)
+    assert(review_json.stdout.contains(`"function":"report","status":"newly_fallible","before_can_fail":false,"after_can_fail":true`))
+    assert(review_json.stdout.contains(`{"status":"new","callee":"parse","site":"`))
+    assert(review_json.stdout.contains(`"function":"run","status":"newly_fallible","before_can_fail":false,"after_can_fail":true`))
+    assert(review_json.stdout.contains(`{"status":"new","callee":"report","site":"`))
+    assert(!review_json.stdout.contains(`{"status":"kept"`))
+    assert(!review_json.stdout.contains(`"function":"parse"`))
+
+    review_text: jet_cli_review([String]{"review", base_path, head_path, "--annotations", "none"}, false, false)
+    assert_eq(review_text.exit_code, JET_DRIVER_EXIT_OK)
+    assert(review_text.stdout.contains("failures   2 function(s) fail differently · 2 newly can fail"))
+    assert(review_text.stdout.contains("  newly can fail: report\n    new failure point: parse at "))
+    assert(review_text.stdout.contains("  newly can fail: run\n    new failure point: report at "))
+}

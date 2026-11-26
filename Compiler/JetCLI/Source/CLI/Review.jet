@@ -7,6 +7,7 @@
 // checker diagnostics of the two sides by occurrence identity instead.
 use {
     cli_files: core.files
+    cli_sys: core.sys
     core.encoding.[Dyn]
     jet_driver.[
         JetDriverSourceDocument,
@@ -222,6 +223,14 @@ jet_cli_review: fn(argv: [String], json: Bool, color: Bool) -> JetDriverVerbOutp
     if head_receipt.problem == .Val(problem) {
         return jet_cli_review_error("E2104", problem, "provide a path after the receipt flag", color, json)
     }
+    annotations_option: jet_cli_review_option(argv, [String]{"--annotations"})
+    if annotations_option.problem == .Val(problem) {
+        return jet_cli_review_error("E2104", problem, "provide auto, none, or github after `--annotations`", color, json)
+    }
+    annotations: annotations_option.value ?? "auto"
+    if annotations != "auto" && annotations != "none" && annotations != "github" {
+        return jet_cli_review_error("E2104", "`--annotations` accepts auto, none, or github", "pass `--annotations auto`, `--annotations none`, or `--annotations github`", color, json)
+    }
     base: jet_cli_review_load(paths[0])
     if base == {
         .Failed(message) -> return jet_cli_review_input_error(paths[0], message, color, json)
@@ -236,13 +245,13 @@ jet_cli_review: fn(argv: [String], json: Bool, color: Bool) -> JetDriverVerbOutp
     }
     if base == .Loaded(before) {
         if head == .Loaded(after) {
-            return jet_cli_review_compare(before, after, base_receipt.value, head_receipt.value, json, color)
+            return jet_cli_review_compare(before, after, base_receipt.value, head_receipt.value, annotations, json, color)
         }
     }
     jet_cli_ice("`jet review` lost a checked side")
 }
 
-jet_cli_review_compare: fn(base: JetCLIReviewSide, head: JetCLIReviewSide, base_receipt: String?, head_receipt: String?, json: Bool, color: Bool) -> JetDriverVerbOutput {
+jet_cli_review_compare: fn(base: JetCLIReviewSide, head: JetCLIReviewSide, base_receipt: String?, head_receipt: String?, annotations: String, json: Bool, color: Bool) -> JetDriverVerbOutput {
     base_proof: jet_cli_review_read_receipt(base_receipt) ?? return jet_cli_review_error("E2105", err.message, "provide a readable `.jetproof` receipt", color, json)
     head_proof: jet_cli_review_read_receipt(head_receipt) ?? return jet_cli_review_error("E2105", err.message, "provide a readable `.jetproof` receipt", color, json)
     paths: [String]{base.path.copy(), head.path.copy()}
@@ -265,11 +274,13 @@ jet_cli_review_compare: fn(base: JetCLIReviewSide, head: JetCLIReviewSide, base_
     if json {
         return JetDriverVerbOutput{stdout: "{jet_cli_review_json(base, head, base_proof, head_proof, meaning, failures, authority, receipts, verdict)}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     }
-    JetDriverVerbOutput{stdout: jet_cli_review_text(meaning, failures, authority, receipts, verdict), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    annotate: annotations == "github" || (annotations == "auto" && cli_sys.get("GITHUB_ACTIONS") == Val("true"))
+    stderr: if annotate -> jet_cli_review_failure_annotations(head.failures, failures) else -> ""
+    JetDriverVerbOutput{stdout: jet_cli_review_text(meaning, failures, authority, receipts, verdict), stderr: stderr, exit_code: JET_DRIVER_EXIT_OK}
 }
 
 // `positional`: the words after the command that are neither flags nor a
-// receipt flag's value.
+// value-taking flag's value.
 jet_cli_review_positional: fn(argv: [String]) -> [String] Never! {
     ^values: [String]{}
     ^skip: false
@@ -279,7 +290,7 @@ jet_cli_review_positional: fn(argv: [String]) -> [String] Never! {
             skip = false
             next
         }
-        if word == "--base-receipt" || word == "--receipt" || word == "--head-receipt" || word == "--after-receipt" {
+        if word == "--base-receipt" || word == "--receipt" || word == "--head-receipt" || word == "--after-receipt" || word == "--annotations" {
             skip = true
             next
         }
@@ -300,7 +311,8 @@ jet_cli_review_option: fn(argv: [String], names: [String]) -> JetCLIReviewOption
                 if index + 1 < argv.len() && !argv[index + 1].starts_with("-") {
                     return JetCLIReviewOption{value: Val(argv[index + 1].copy()), problem: None}
                 }
-                return JetCLIReviewOption{value: None, problem: Val("`{name}` needs a receipt path")}
+                need: if name == "--annotations" -> "a value" else -> "a receipt path"
+                return JetCLIReviewOption{value: None, problem: Val("`{name}` needs {need}")}
             }
         }
     }
@@ -1481,9 +1493,10 @@ jet_cli_failure_carrier_fails: fn(carrier: TFailureCarrier) -> Bool Never! {
 
 // The failure facts of every checked user function in `modules`, sorted by
 // function. A function can fail when the failure solve left it a Result
-// carrier, and only such a function has failure points. Functions of the
-// `entry` file (a normalized path) go by their local names, so two sides
-// stored at different paths still pair; the others are `module.local`.
+// carrier; failure points are collected across both the function's own body
+// and any lambdas or failing loop headers inside it. Functions of the `entry`
+// file (a normalized path) go by their local names, so two sides stored at
+// different paths still pair; the others are `module.local`.
 jet_cli_failure_functions: fn(interner: Interner, modules: [JetDriverDocModule], entry: String) -> [JetCLIFailureFunction] {
     ^aliases: [String:String]{}
     ^infallible: [String:Bool]{}
@@ -1503,9 +1516,7 @@ jet_cli_failure_functions: fn(interner: Interner, modules: [JetDriverDocModule],
             key: semindex_function_key(function.key, aliases) ?? next
             can_fail: jet_cli_failure_carrier_fails(function.failure_carrier)
             ^points: [JetCLIFailurePoint]{}
-            if can_fail {
-                jet_cli_failure_points(interner, doc_module, function, aliases, infallible, points)
-            }
+            jet_cli_failure_points(interner, doc_module, function, aliases, infallible, points)
             functions.push(JetCLIFailureFunction{function: jet_cli_failure_name(alias, key.local), can_fail: can_fail, points: points})
         }
     }
@@ -1517,28 +1528,34 @@ jet_cli_failure_name: fn(alias: String, local: String) -> String Never! {
     if alias == "" -> "{local}" else -> "{alias}.{local}"
 }
 
-// The propagation sites of `function`'s own body: a lambda's sites pass
-// failures out of the lambda, and a call of a function the failure solve
-// proved infallible passes nothing up.
+// The propagation sites of `function`: every propagating call in the function
+// body or any nested lambda, plus every `for-in` loop header whose `Iterable`
+// step can fail. A call of a function the failure solve proved infallible
+// passes nothing up.
 jet_cli_failure_points: fn(interner: Interner, doc_module: JetDriverDocModule, function: FnBody, aliases: [String:String], infallible: [String:Bool], points: ^[JetCLIFailurePoint]) Never! {
     tree: function.tree
-    ^lambdas: [Span]{}
-    loop node in tree.nodes {
-        if node.kind == .Lambda(_) -> lambdas.push(node.span)
-    }
     loop node in tree.nodes {
         call: jet_cli_failure_site_call(interner, tree, node) ?? next
         span: body_node(tree, call).span
-        inside: loop lambda in lambdas {
-            if span.start >= lambda.start && span.end <= lambda.end {
-                break true
-            }
-        } ?? false
-        if inside -> next
         callee: jet_cli_failure_callee(doc_module, function.key, span, aliases, infallible) ?? next
         points.push(JetCLIFailurePoint{callee: callee, site: "{doc_module.path}:{diagnostic_line_at(doc_module.source, span.start)}", offset: span.start})
     }
-    points.sort_by(fn(left: JetCLIFailurePoint, right: JetCLIFailurePoint) { left.offset <=> right.offset })
+    loop stmt in tree.stmts {
+        if stmt == .ForIn(_, _, _, source, _, _, method_kind, _, _, _, _, loop_span) {
+            if method_kind == .Val(method) {
+                if method == .Iterable(_, _, _, next_symbol, _, failure) {
+                    if failure == .Never -> next
+                    callee: jet_cli_failure_target_name(next_symbol, aliases, infallible) ?? next
+                    use_span: if loop_span.start == 0 && loop_span.end == 0 -> body_node(tree, source).span else -> loop_span
+                    points.push(JetCLIFailurePoint{callee: callee, site: "{doc_module.path}:{diagnostic_line_at(doc_module.source, use_span.start)}", offset: use_span.start})
+                }
+            }
+        }
+    }
+    points.sort_by(fn(left: JetCLIFailurePoint, right: JetCLIFailurePoint) {
+        if left.offset != right.offset -> return left.offset <=> right.offset
+        left.callee <=> right.callee
+    })
 }
 
 // The call node of a site that passes a failure up: a `?` on a Result
@@ -1558,13 +1575,22 @@ jet_cli_failure_site_call: fn(interner: Interner, tree: BodyTree, node: BodyNode
     None
 }
 
+// The display name of a callee symbol key `target`, or None when the failure
+// solve proved that function infallible.
+jet_cli_failure_target_name: fn(target: String, aliases: [String:String], infallible: [String:Bool]) -> String? Never! {
+    if infallible.has_key(target) -> return None
+    key: semindex_function_key(target, aliases) ?? return Val("{target}")
+    alias: aliases.get(key.module_identity) ?? return Val(semindex_outside_edge(key))
+    Val(jet_cli_failure_name(alias, key.local))
+}
+
 // The name of the function the outermost call inside `span` reaches,
 // or None when the failure solve proved that function infallible. A call no
 // checked fact names (a local function value) shows its source text.
 jet_cli_failure_callee: fn(doc_module: JetDriverDocModule, caller: String, span: Span, aliases: [String:String], infallible: [String:Bool]) -> String? Never! {
     ^best: -1
     loop (index, fact) in doc_module.call_facts {
-        if fact.caller_key != caller || fact.span.start < span.start || fact.span.end > span.end {
+        if (fact.caller_key != caller && !fact.caller_key.starts_with("lambda@")) || fact.span.start < span.start || fact.span.end > span.end {
             next
         }
         if best >= 0 {
@@ -1574,10 +1600,7 @@ jet_cli_failure_callee: fn(doc_module: JetDriverDocModule, caller: String, span:
         best = index
     }
     target: (if best < 0 -> None else -> jet_cli_failure_callee_key(doc_module, best)) ?? return Val(semindex_doc_text(doc_module.source.bytes(), span.start, span.end).trim())
-    if infallible.has_key(target) -> return None
-    key: semindex_function_key(target, aliases) ?? return Val(target)
-    alias: aliases.get(key.module_identity) ?? return Val(semindex_outside_edge(key))
-    Val(jet_cli_failure_name(alias, key.local))
+    jet_cli_failure_target_name(target, aliases, infallible)
 }
 
 // The symbol key of the callee of `doc_module`'s call fact `index`.
@@ -1588,8 +1611,8 @@ jet_cli_failure_callee_key: fn(doc_module: JetDriverDocModule, index: Int) -> St
 }
 
 // The functions that fail differently after the change: one that newly can
-// fail or no longer can, one added or removed that can fail, and one whose
-// failure points differ. Sorted by function.
+// fail or no longer can, one added or removed that can fail or carries
+// failure points, and one whose failure points differ. Sorted by function.
 jet_cli_failure_changes: fn(before: [JetCLIFailureFunction], after: [JetCLIFailureFunction]) -> [JetCLIFailureChange] Never! {
     ^old_rows: [String:Int]{}
     loop (index, row) in before -> old_rows[row.function] = index
@@ -1599,8 +1622,8 @@ jet_cli_failure_changes: fn(before: [JetCLIFailureFunction], after: [JetCLIFailu
     loop row in after {
         old_index: old_rows.get(row.function) ?? -1
         if old_index < 0 {
-            if row.can_fail {
-                changes.push(JetCLIFailureChange{function: row.function, before: None, after: Val(true), points: jet_cli_failure_point_changes([JetCLIFailurePoint]{}, row.points)})
+            if row.can_fail || row.points.len() > 0 {
+                changes.push(JetCLIFailureChange{function: row.function, before: None, after: Val(row.can_fail), points: jet_cli_failure_point_changes([JetCLIFailurePoint]{}, row.points)})
             }
             next
         }
@@ -1610,8 +1633,8 @@ jet_cli_failure_changes: fn(before: [JetCLIFailureFunction], after: [JetCLIFailu
         changes.push(JetCLIFailureChange{function: row.function, before: Val(old.can_fail), after: Val(row.can_fail), points: points})
     }
     loop row in before {
-        if new_rows.has_key(row.function) || !row.can_fail -> next
-        changes.push(JetCLIFailureChange{function: row.function, before: Val(true), after: None, points: jet_cli_failure_point_changes(row.points, [JetCLIFailurePoint]{})})
+        if new_rows.has_key(row.function) || (!row.can_fail && row.points.len() == 0) -> next
+        changes.push(JetCLIFailureChange{function: row.function, before: Val(row.can_fail), after: None, points: jet_cli_failure_point_changes(row.points, [JetCLIFailurePoint]{})})
     }
     changes.sort_by(fn(left: JetCLIFailureChange, right: JetCLIFailureChange) { left.function <=> right.function })
     changes
@@ -1671,8 +1694,8 @@ jet_cli_failure_lines: fn(changes: [JetCLIFailureChange], indent: String) -> [St
     ^lines: [String]{}
     loop change in changes {
         heading: if jet_cli_failure_kind(change) == {
-            "added" -> "added, can fail"
-            "removed" -> "removed, could fail"
+            "added" -> if change.after == Val(true) -> "added, can fail" else -> "added, has failure points"
+            "removed" -> if change.before == Val(true) -> "removed, could fail" else -> "removed, had failure points"
             "newly_fallible" -> "newly can fail"
             "no_longer_fallible" -> "no longer can fail"
             else -> "failure points changed"
@@ -1707,6 +1730,60 @@ jet_cli_failure_value: fn(changes: [JetCLIFailureChange]) -> JetCLIStatusValue N
         },
     )
     jet_cli_status_array(rows)
+}
+
+// A `file:line` failure site split on its last `:`.
+JetCLIFailureSiteParts: struct {
+    file: String,
+    line: String,
+}
+
+jet_cli_failure_site_parts: fn(site: String) -> JetCLIFailureSiteParts Never! {
+    bytes: site.bytes()
+    ^colon: -1
+    loop index in 0..<bytes.len() {
+        if bytes[index] == 58 -> colon = index
+    }
+    if colon <= 0 || colon + 1 >= bytes.len() {
+        return JetCLIFailureSiteParts{file: "{site}", line: "1"}
+    }
+    file: String.from_bytes(bytes.slice(0, colon)) ?? "{site}"
+    line: String.from_bytes(bytes.slice(colon + 1, bytes.len())) ?? "1"
+    JetCLIFailureSiteParts{file: file, line: line}
+}
+
+jet_cli_review_failure_annotation_line: fn(level: String, title: String, site: String, message: String) -> String Never! {
+    parts: jet_cli_failure_site_parts(site)
+    "::{level} file={jet_cli_budget_annotation_property(parts.file)},line={parts.line},title={jet_cli_budget_annotation_property(title)}::{jet_cli_budget_annotation_text(message)}\n"
+}
+
+// GitHub workflow-command PR annotations for head-side failure points:
+// `::warning` for new failure points and `::notice` for kept/unchanged ones.
+jet_cli_review_failure_annotations: fn(head_failures: [JetCLIFailureFunction], changes: [JetCLIFailureChange]) -> String Never! {
+    ^changed_functions: [String:Bool]{}
+    ^out: ""
+    loop change in changes {
+        changed_functions[change.function] = true
+        kind: jet_cli_failure_kind(change)
+        loop point in change.points {
+            if point.status == "gone" -> next
+            if point.status == "new" {
+                message: if kind == "newly_fallible" -> "{change.function} newly can fail: new failure point calling {point.callee}" else if kind == "added" && change.after == Val(true) -> "{change.function} (added) can fail: new failure point calling {point.callee}" else -> "{change.function}: new failure point calling {point.callee}"
+                out = "{out}{jet_cli_review_failure_annotation_line("warning", "Jet new failure point", point.site, message)}"
+            } else {
+                message: "{change.function}: failure point calling {point.callee}"
+                out = "{out}{jet_cli_review_failure_annotation_line("notice", "Jet failure point", point.site, message)}"
+            }
+        }
+    }
+    loop row in head_failures {
+        if changed_functions.has_key(row.function) -> next
+        loop point in row.points {
+            message: "{row.function}: failure point calling {point.callee}"
+            out = "{out}{jet_cli_review_failure_annotation_line("notice", "Jet failure point", point.site, message)}"
+        }
+    }
+    out
 }
 
 // ---- rendering ----

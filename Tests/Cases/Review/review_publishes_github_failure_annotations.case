@@ -1,0 +1,27 @@
+# `jet review` publishes head-side failure points as GitHub workflow-command
+# pull-request annotations on stderr when `--annotations github` is passed or
+# when `GITHUB_ACTIONS=true` under the default `--annotations auto` mode.
+# `--annotations none` and `--json` suppress annotations, and invalid values
+# fail with exit 2.
+fixture: ReviewPublishesGithubFailureAnnotations.fixture
+step: jet review {work}/base/run.jet {work}/head/run.jet --annotations github
+unset: GITHUB_ACTIONS
+exit: 0
+stderr: ~ "::warning file=run.jet,line=16,title=Jet new failure point::report newly can fail: new failure point calling parse" # new failure point emits a warning annotation
+stderr: ~ "::notice file=run.jet,line=12,title=Jet failure point::kept_caller: failure point calling parse" # existing head failure point emits a notice annotation
+step: jet review {work}/base/run.jet {work}/head/run.jet
+env: GITHUB_ACTIONS=true
+exit: 0
+stderr: ~ "::warning file=run.jet,line=16,title=Jet new failure point::report newly can fail: new failure point calling parse" # auto mode detects GITHUB_ACTIONS=true
+stderr: ~ "::notice file=run.jet,line=12,title=Jet failure point::kept_caller: failure point calling parse" # auto mode includes unchanged head failure points
+step: jet review {work}/base/run.jet {work}/head/run.jet --annotations none
+env: GITHUB_ACTIONS=true
+exit: 0
+stderr: empty
+step: jet review {work}/base/run.jet {work}/head/run.jet --annotations github --json
+exit: 0
+stderr: empty
+stdout: ~ "\"function\":\"report\"" # json mode keeps stdout JSON-only
+step: jet review {work}/base/run.jet {work}/head/run.jet --annotations gitlab
+exit: 2
+stderr: ~ "`--annotations` accepts auto, none, or github" # invalid annotation target refused
