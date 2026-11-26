@@ -857,9 +857,7 @@ jet_driver_parse_allocator_bytes: fn(value: String, span: Span, diagnostics: ^[D
     loop (index, byte) in value_bytes {
         if (Int{byte}) == 46 -> dot = index
     }
-    // copy: `digits_text` is trimmed in place to its digits, while `value` is the caller's manifest
-    // field (a read parameter) and stays intact.
-    ^digits_text: value.copy()
+    ^digits_text: value
     ^multiplier: 1
     if dot >= 0 {
         digits_text = String.from_bytes(value_bytes[0..<dot]) ?? ""
@@ -6693,8 +6691,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
     // The organization floor, then the entry package's policy, apply to the
     // entire user-source closure, including imports, not each dependency's
     // own floor.
-    // copy: the request keeps its organization rows for the rest of the compile.
-    ^package_policy: request.organization_policy.copy()
+    ^package_policy: request.organization_policy
     loop package in catalog.packages {
         if package.identity == catalog.entry_package_identity {
             // copy: `catalog` keeps its package rows for the rest of the load (catalog.source_units
@@ -6714,8 +6711,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         }
     }
     ^pending: [Int]{entry_index ?? 0}
-    ^queued: [Bool]{}
-    loop _ in 0..<source_units.len() -> queued.push(false)
+    ^queued: loop _ in 0..<source_units.len() -> false
     queued[entry_index ?? 0] = true
     // The build plan selected these exact modules. Check every selected output,
     // including loose-file outputs not named by an import.
@@ -6726,8 +6722,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         }
     }
     ^modules: [JetDriverLoadedModule]{}
-    ^namespace_expanded: [Bool]{}
-    loop _ in 0..<request.authorized_sources.roots.len() -> namespace_expanded.push(false)
+    ^namespace_expanded: loop _ in 0..<request.authorized_sources.roots.len() -> false
     ^resolved_imports: [SemaRegistrationImportEdge]{}
     // Unit index -> the dotted `name: module` path that declared it
     // (JetDriverLoadedModule.declared_module); the first declaration wins.

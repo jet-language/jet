@@ -23,17 +23,11 @@ JetDriverBuildAdapter: struct {
         // Fork the adapter without changing its invocation-owned session authority.
         // Raw transports remain host-owned; build policy stays in this adapter.
         clone_adapter: fn(self) -[]> JetEvalBuildHostAdapter Never! {
-            // copy: clone_adapter exists to fork the adapter: the machine keeps this adapter and
-            // answers each host call on a fork, so each needs its own session handle, inputs and
-            // base_dir.
-            JetDriverBuildAdapter{session: self.session.copy(), inputs: self.inputs.copy(), base_dir: self.base_dir.copy()}
+            JetDriverBuildAdapter{session: self.session, inputs: self.inputs, base_dir: self.base_dir}
         }
 
         build_call: fn(self, member: String, args: [TComptimeValue], fallible: Bool, impure: Bool, span: Span, file: String) -[FS.Read, Net, Time.Wait]> JetEvalBuildReply? {
-            // copy: build_call has a read `self`, but jet_driver_build_host_call writes its session
-            // (`^`). This call writes a session of its own, and the adapter keeps its session for the
-            // next build_call.
-            ^session: self.session.copy()
+            ^session: self.session
             reply: jet_driver_build_host_call(session, self, member, args, fallible, impure, span, file)
             // A refused call stops the run, and its report is the build's own:
             // the build query keeps it beside a failed staging check's reports.
@@ -227,11 +221,11 @@ jet_driver_build_answer: fn(session: BuildSession, reply: BuildSessionReply, fal
             JetEvalBuildReply.Value{value: data.move()}
         }
         .Failure(error) -> {
-            if fallible && jet_driver_build_failed_value(error) == .Val(value) {
-                // copy: the reply owns the failure's data value, but `value` is a view of the
-                // payload in jet_driver_build_failed_value's result; Jet has no consuming match to
-                // move it out.
-                return JetEvalBuildReply.Value{value: value.copy()}
+            if fallible {
+                failed_value: jet_driver_build_failed_value(error)
+                if failed_value.move() == .Val(value) {
+                    return JetEvalBuildReply.Value{value: value}
+                }
             }
             JetEvalBuildReply.Failure{diagnostic: jet_driver_build_session_diagnostic(error)}
         }
@@ -280,10 +274,7 @@ jet_driver_build_generate: fn(session: ^BuildSession, _host: JetDriverBuildAdapt
         }
         value: jet_driver_build_session_input(args[index]) ?? return jet_driver_build_host_failure(session, span, "build method received a non-data argument")
         if index == 2 {
-            // copy: `generated` outlives this loop and is handed to build_session_call, while
-            // `source` is only a view of the `.Text` payload inside `value`; Jet has no
-            // consuming match, so the payload cannot be moved out.
-            if value == .Text(source) -> generated = Val(source.copy()) else {
+            if value.move() == .Text(source) -> generated = Val(source) else {
                 return jet_driver_build_host_failure(session, span, "generated items lost their checked source")
             }
         } else if index > 2 { splices.push(value) } else { values.push(value) }
@@ -378,12 +369,11 @@ jet_driver_build_action_session_strings: fn(values: [String]) -> BuildSessionVal
 // the `Build` it was made from), which `meta.events` watches.
 jet_driver_build_compiler_value: fn(handle: ^^TComptimeValue, context: TComptimeValue) -> TComptimeValue Never! {
     ^program: jet_driver_build_field(context, "program") ?? return handle.move()
-    if handle == .Struct(name, fields) {
-        ^carried: fields.copy()
-        carried.push(TComptimeField{name: "program", value: program.move()})
-        return TComptimeValue.Struct{type_name: name.copy(), fields: carried}
+    ^owned: handle.move()
+    if owned.in_place() == .Struct(_, fields) {
+        fields.push(TComptimeField{name: "program", value: program.move()})
     }
-    handle.move()
+    owned
 }
 
 // One spliced build value as the Jet literal the generated items read.
@@ -611,7 +601,7 @@ jet_driver_compiler_add_struct: fn(session: ^BuildSession, host: JetDriverBuildA
             scope: jet_driver_build_session_input(args[3]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its name argument")
             producer: jet_driver_build_session_input(args[4]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its caller")
             authority: jet_driver_build_session_input(args[5]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its Meta effects")
-            reply: build_session_call(session, build_session_compiler_add, [BuildSessionValue]{held, scope, producer, authority, BuildSessionValue.Text{value: name.copy()}}, Val(source), false, span.start, span.end)
+            reply: build_session_call(session, build_session_compiler_add, [BuildSessionValue]{held, scope, producer, authority, BuildSessionValue.Text{value: name}}, Val(source), false, span.start, span.end)
             if reply == .Value(_) {
                 // The new struct's `TypeId`, made as every TypeId is: declared as
                 // `name` in the generated module `module`, which shares the
@@ -647,7 +637,7 @@ jet_driver_compiler_report: fn(session: ^BuildSession, host: JetDriverBuildAdapt
     if args[6] == .String(target) {
         if args[7] == .String(replacement) {
             place: jet_driver_build_field(args[8], "span") ?? return jet_driver_build_host_failure(session, span, "`meta.report` takes a call a `.Calls{{to: f}}` watch heard")
-            called_in: if jet_driver_build_field(place, "file") == .Val(.String(text)) -> text.copy() else -> {
+            called_in: if jet_driver_build_field(place, "file") == .Val(.String(text)) -> text else -> {
                 return jet_driver_build_host_failure(session, span, "`meta.report` lost the file of its call")
             }
             first: if jet_driver_build_field(place, "start") == .Val(.Int(value)) -> value else -> -1
@@ -655,7 +645,7 @@ jet_driver_compiler_report: fn(session: ^BuildSession, host: JetDriverBuildAdapt
             ^rewrite: ""
             if target != "" {
                 if jet_driver_build_field(args[8], "callee") == .Val(.String(called)) {
-                    if called == target -> rewrite = replacement.copy()
+                    if called == target -> rewrite = replacement
                 }
             }
             values.push(BuildSessionValue.Text{value: called_in})
@@ -672,7 +662,7 @@ jet_driver_compiler_report: fn(session: ^BuildSession, host: JetDriverBuildAdapt
 // value's formatted items, or the text `meta.add` was given, which the
 // build parses as it adds. None when `code` is neither.
 jet_driver_compiler_code: fn(code: TComptimeValue, text_allowed: Bool) -> String? Never! {
-    if text_allowed && code == .String(written) -> return Val(written.copy())
+    if text_allowed && code == .String(written) -> return Val(written)
     jet_driver_code_source(code)
 }
 
@@ -952,11 +942,11 @@ jet_driver_meta_type_resolve: fn(ty: Type, table: ^JetCompilerServicesTypeTable,
             if to_key {
                 resolved_head: jet_driver_meta_type_key(table, made, name) ?? return None
                 chosen: if resolved_head == .Named(renamed) -> renamed else -> name
-                head = chosen.copy()
+                head = chosen
             } else {
                 head = jet_driver_meta_scope_spelling(table, made, name) ?? {
                     if name.contains(".") -> return None
-                    name.copy()
+                    name
                 }
             }
             ^resolved_args: [Type]{}
@@ -1010,12 +1000,11 @@ jet_driver_meta_type_resolve: fn(ty: Type, table: ^JetCompilerServicesTypeTable,
         }
         .Case(name, payload) -> {
             resolved: jet_driver_meta_type_resolve(payload, table, made, to_key) ?? return None
-            return Val(Type.Case{name: name.copy(), payload: resolved})
+            return Val(Type.Case{name: name, payload: resolved})
         }
         .Int | .Float | .Bool | .String | .Char | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }
-    // copy: a form that names no type by name stays as it is.
-    Val(ty.copy())
+    Val(ty)
 }
 
 // Whether `text`, read as a path under the build file's directory, names a
@@ -1041,10 +1030,7 @@ JET_DRIVER_BUILD_MAX_FETCH_BYTES: 67108864
 JET_DRIVER_BUILD_NOT_FOUND: "No such file or directory (os error 2)"
 
 jet_driver_build_input_fail: fn(code: String, what: String, why: String, fix: String, span: Span) -> BuildSessionReply Never! {
-    // copy: the reply's BuildSessionDiagnostic owns its four texts. Callers pass literals, the
-    // global JET_DRIVER_BUILD_NOT_FOUND, payload views (root_error.message) and texts shared by
-    // sibling error paths, none of which they can move in.
-    BuildSessionReply.Failure{error: BuildSessionDiagnostic{code: code.copy(), what: what.copy(), why: why.copy(), fix: fix.copy(), start: span.start, end: span.end}}
+    BuildSessionReply.Failure{error: BuildSessionDiagnostic{code: code, what: what, why: why, fix: fix, start: span.start, end: span.end}}
 }
 
 // `split_rel`: the non-empty, non-`.` components.

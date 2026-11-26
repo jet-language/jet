@@ -104,7 +104,7 @@ JetCLITestOutcome: struct {
 // variable takes `fallback`.
 jet_cli_test_env: fn(name: String, fallback: String) -[Env]> String Never! {
     value: cli_sys.get(name) ?? ""
-    if value == "" -> fallback.copy() else -> value
+    if value == "" -> fallback else -> value
 }
 
 jet_cli_test_text: fn(bytes: [U8], start: Int, end: Int) -> String Never! {
@@ -166,21 +166,19 @@ jet_cli_test_property_failure: fn(stderr: String) -> JetCLITestPropertyFailure? 
 // Each run test's claim, in run order: a doctest by its doctest claim name, a
 // property by its plan fact (`facts[id - 1]`), else a unit test of `file`.
 jet_cli_test_claims: fn(tests: [JetNativeTestCase], facts: [TTestFact], doctests: [JetCLIDoctestFile], file: String) -> [JetCLITestClaim] Never! {
-    ^claims: [JetCLITestClaim]{}
-    loop test in tests -> claims.push(jet_cli_test_claim(test, facts, doctests, file))
-    claims
+    loop test in tests -> jet_cli_test_claim(test, facts, doctests, file)
 }
 
 jet_cli_test_claim: fn(test: JetNativeTestCase, facts: [TTestFact], doctests: [JetCLIDoctestFile], file: String) -> JetCLITestClaim Never! {
     loop doctest_file in doctests {
         doctest: jet_cli_doctest_named(doctest_file, test.name) ?? next
-        return JetCLITestClaim{kind: 4, file: doctest_file.shown.copy(), line: checked(U32{doctest.line}) ?? U32{0}, mismatch: None}
+        return JetCLITestClaim{kind: 4, file: doctest_file.shown, line: checked(U32{doctest.line}) ?? U32{0}, mismatch: None}
     }
     index: Int{test.id} - 1
     if index >= 0 && index < facts.len() && facts[index].kind == TTestKind.Property {
-        return JetCLITestClaim{kind: 3, file: file.copy(), line: U32{0}, mismatch: None, law: facts[index].law.copy()}
+        return JetCLITestClaim{kind: 3, file: file, line: U32{0}, mismatch: None, law: facts[index].law.copy()}
     }
-    JetCLITestClaim{kind: 0, file: file.copy(), line: U32{0}, mismatch: None}
+    JetCLITestClaim{kind: 0, file: file, line: U32{0}, mismatch: None}
 }
 
 // A property record's law (#6015 c5), as attachments of its one evidence
@@ -297,12 +295,12 @@ jet_cli_claims_floor_fix: fn(grade: ClaimsGrade, required: ClaimsGrade, target: 
 jet_cli_test_outcome: fn(file: String, source: String, build_options: BuildOptions, wires: [String], tests: [JetCLITestClaim], contracts: [JetNativeTestContract], ran_ok: Bool, floor: ClaimsGrade?) -> JetCLITestOutcome Err! {
     source_revision: jet_cli_test_env(EVIDENCE_SOURCE_REVISION_ENV, receipt_crypto.sha256(source.bytes()).hex())
     revision_bytes: source_revision.bytes()
-    short: if revision_bytes.len() > 16 -> jet_cli_test_text(revision_bytes, 0, 16) else -> source_revision.copy()
+    short: if revision_bytes.len() > 16 -> jet_cli_test_text(revision_bytes, 0, 16) else -> source_revision
     // The run, not only its source, names the report: two runs of one file
     // never collide in `.jet/evidence`.
     report_id: jet_cli_test_env(EVIDENCE_REPORT_ID_ENV, "test:{short}:{cli_process.current_pid()}:{cli_time.unix_ns()}")
     profile_tag: "{build_options_key(build_options)};aot-target=native"
-    default_profile: if build_options.profile == "" -> JET_BUILD_DEFAULT_PROFILE else -> build_options.profile.copy()
+    default_profile: if build_options.profile == "" -> JET_BUILD_DEFAULT_PROFILE else -> build_options.profile
     build: EvidenceBuild{
         toolchain: jet_cli_test_env(EVIDENCE_TOOLCHAIN_ENV, JET_VERSION),
         target: jet_cli_test_env(EVIDENCE_TARGET_ENV, jet_cli_host_triple(cli_sys.arch(), cli_sys.name())),
@@ -311,11 +309,14 @@ jet_cli_test_outcome: fn(file: String, source: String, build_options: BuildOptio
     build_revision: jet_cli_test_env(EVIDENCE_BUILD_REVISION_ENV, receipt_crypto.sha256("jet-test-build-v1:{source_revision}:{profile_tag}".bytes()).hex())
     run_revision: jet_cli_test_env(EVIDENCE_REVISION_ENV, receipt_crypto.sha256("jet-test-mir-v1:{source_revision}:{profile_tag}".bytes()).hex())
     revision: EvidenceRevision{source: source_revision.move(), build: build_revision, revision: run_revision}
-    ^report: evidence_report_new(report_id.copy(), EvidenceProducerKind.Test, EvidenceSource{path: file.copy(), line: U32{0}, column: U32{1}}, build.copy(), revision.copy())
+    ^report: evidence_report_new(report_id, EvidenceProducerKind.Test, EvidenceSource{path: file, line: U32{0}, column: U32{1}}, build.copy(), revision.copy())
     ^tally: JetCLITestTally{passed: 0, failed: 0, skipped: 0, expected_failures: 0, unexpected_passes: 0}
     loop (index, wire) in wires {
         parts: jet_cli_native_test_wire_parts(wire) ?? return Err(err.message)
-        claim: if index < tests.len() -> tests[index].copy() else -> JetCLITestClaim{kind: 0, file: file.copy(), line: U32{0}, mismatch: None}
+        has_claim: index < tests.len()
+        claim_kind: if has_claim -> tests[index].kind else -> 0
+        claim_file: if has_claim -> tests[index].file else -> file
+        claim_line: if has_claim -> tests[index].line else -> U32{0}
         // `ok` is the runtime's verdict against the expectation: an
         // expected-fail test is ok when it fails and not ok when it passes.
         ok: parts.flags & 1 != 0
@@ -332,11 +333,10 @@ jet_cli_test_outcome: fn(file: String, source: String, build_options: BuildOptio
         ^stop: JetCLITestStop?{None}
         if !skipped && ran_failed -> stop = jet_cli_test_stop(parts.stderr)
         // A doctest whose output contradicted a claimed value, without a stop.
-        ^mismatch: JetCLITestStop?{None}
-        if !skipped && ran_failed && stop == None -> mismatch = claim.mismatch.copy()
+        has_mismatch: !skipped && ran_failed && stop == None && has_claim && tests[index].mismatch != None
         ^message: ""
-        if stop == .Val(found) -> message = found.message.copy()
-        if mismatch == .Val(found) -> message = found.message.copy()
+        if stop == .Val(found) -> message = found.message
+        if has_mismatch && tests[index].mismatch == .Val(found) -> message = found.message
         state: if {
             skipped -> 2
             ran_failed -> 1
@@ -344,19 +344,19 @@ jet_cli_test_outcome: fn(file: String, source: String, build_options: BuildOptio
         }
         // A property's record counts the generated cases that ran where
         // others have a line; the cases its `#Pre` rejected never count.
-        line: if claim.kind == 3 -> checked(U32{parts.property.map(fn(run) { run.cases }) ?? 0}) ?? (U32{0}) else -> claim.line
-        ^record: evidence_record_from_test_codes(claim.kind, state, parts.name, message, claim.file, line, report_id, build, revision) ?? return Err(err.message)
-        if mismatch == .Val(found) {
-            record.diagnostics = [EvidenceDiagnostic]{EvidenceDiagnostic{code: found.code.copy(), message: found.message.copy(), source: Val(EvidenceSource{path: found.file.copy(), line: found.line, column: U32{1}})}}
+        line: if claim_kind == 3 -> checked(U32{parts.property.map(fn(run) { run.cases }) ?? 0}) ?? (U32{0}) else -> claim_line
+        ^record: evidence_record_from_test_codes(claim_kind, state, parts.name, message, claim_file, line, report_id, build, revision) ?? return Err(err.message)
+        if has_mismatch && tests[index].mismatch == .Val(found) {
+            record.diagnostics = [EvidenceDiagnostic]{EvidenceDiagnostic{code: found.code, message: found.message, source: Val(EvidenceSource{path: found.file, line: found.line, column: U32{1}})}}
         }
-        if claim.kind == 3 -> jet_cli_test_law_attachments(record, claim.law, parts.property)
-        if claim.kind == 3 && state == 1 && jet_cli_test_property_failure(parts.stderr) == .Val(failure) {
+        if claim_kind == 3 && has_claim -> jet_cli_test_law_attachments(record, tests[index].law, parts.property)
+        if claim_kind == 3 && state == 1 && jet_cli_test_property_failure(parts.stderr) == .Val(failure) {
             record.attachments.push(EvidenceAttachment{name: "case", value: "{failure.case_number}"})
             if parts.property == None {
-                record.attachments.push(EvidenceAttachment{name: "seed", value: failure.seed.copy()})
+                record.attachments.push(EvidenceAttachment{name: "seed", value: failure.seed})
             }
             if failure.minimized != "" {
-                record.attachments.push(EvidenceAttachment{name: "minimized_inputs", value: failure.minimized.copy()})
+                record.attachments.push(EvidenceAttachment{name: "minimized_inputs", value: failure.minimized})
             }
         }
         if expected_failure && !skipped {
@@ -365,12 +365,12 @@ jet_cli_test_outcome: fn(file: String, source: String, build_options: BuildOptio
         derivation: evidence_record_checked_derivation(record)
         evidence_report_add_record_with_derivation(report, record, derivation) ?? return Err(evidence_merge_error_text(err))
         if stop == .Val(found) {
-            place: if found.file == "" -> file.copy() else -> found.file.copy()
+            place: if found.file == "" -> file else -> found.file
             ^observed: evidence_record_from_test_codes(2, 1, found.code, found.message, place, found.line, report_id, build, revision) ?? return Err(err.message)
             // A property case and a failed assertion catch their stop; any
             // other stop (flag 8) ended the test at a runtime stop.
             caught: if {
-                claim.kind == 3 -> "property_case"
+                claim_kind == 3 -> "property_case"
                 parts.flags & 8 == 0 -> "assertion"
                 else -> ""
             }
@@ -381,7 +381,7 @@ jet_cli_test_outcome: fn(file: String, source: String, build_options: BuildOptio
             if caught != "" {
                 observed.attachments.push(EvidenceAttachment{name: "caught_by", value: caught})
                 // A caught and an uncaught stop at one site stay two records.
-                observed.identity.evidence_id = evidence_stable_token([String]{observed.identity.evidence_id.copy(), "caught_by", caught})
+                observed.identity.evidence_id = evidence_stable_token([String]{observed.identity.evidence_id, "caught_by", caught})
             }
             if expected_failure {
                 evidence_record_set_expectation(observed, EvidenceExpectation.ExpectedFailure) ?? return Err(evidence_expectation_error_text(err))
@@ -420,7 +420,7 @@ jet_cli_test_outcome: fn(file: String, source: String, build_options: BuildOptio
     )
     claims: jet_cli_status_object(
         [JetCLIStatusField]{
-            jet_cli_status_field("grade", jet_cli_status_text(grade.copy())),
+            jet_cli_status_field("grade", jet_cli_status_text(grade)),
             jet_cli_status_field("floor", jet_cli_status_optional_text(floor_text)),
             jet_cli_status_field("floorMet", jet_cli_status_bool(projection.floor_met(floor))),
             jet_cli_status_field("generatedAttempts", jet_cli_status_int(projection.generated_attempts)),
@@ -430,7 +430,7 @@ jet_cli_test_outcome: fn(file: String, source: String, build_options: BuildOptio
     )
     summaries: jet_cli_status_object(
         [JetCLIStatusField]{
-            jet_cli_status_field("claims", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("grade", jet_cli_status_text(grade.copy()))})),
+            jet_cli_status_field("claims", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("grade", jet_cli_status_text(grade))})),
         },
     )
     // `Float` carries JSON text already rendered: the canonical report JSON.
@@ -464,10 +464,10 @@ jet_cli_test_contract_record: fn(contract: JetNativeTestContract, file: String, 
     }
     line: Int.parse(fields[1]) ?? return Err("native contract site line is invalid")
     column: Int.parse(fields[2]) ?? return Err("native contract site column is invalid")
-    ^named: fields[3].copy()
+    ^named: fields[3]
     loop index in 4..<fields.len() -> named = "{named}\t{fields[index]}"
     source: EvidenceSource{
-        path: if named == "" -> file.copy() else -> named,
+        path: if named == "" -> file else -> named,
         line: checked(U32{line}) ?? U32{0},
         column: checked(U32{column}) ?? U32{1},
     }
@@ -480,9 +480,9 @@ jet_cli_test_contract_record: fn(contract: JetNativeTestContract, file: String, 
     }
     if !contract.held && contract.test != "" {
         last: if contract.last -> "true" else -> "false"
-        record.attachments.push(EvidenceAttachment{name: "test", value: contract.test.copy()})
+        record.attachments.push(EvidenceAttachment{name: "test", value: contract.test})
         record.attachments.push(EvidenceAttachment{name: "last", value: last})
-        record.identity.evidence_id = evidence_stable_token([String]{record.identity.evidence_id.copy(), "test", contract.test.copy(), last})
+        record.identity.evidence_id = evidence_stable_token([String]{record.identity.evidence_id, "test", contract.test, last})
     }
     Ok(record)
 }

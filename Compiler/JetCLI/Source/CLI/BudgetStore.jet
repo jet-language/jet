@@ -62,8 +62,8 @@ jet_cli_budget_plan_update: fn(root: String, baseline: String, report: Canonical
         prior_manifest = Val(jet_cli_budget_store_text(current, "manifest_id", "manifest_id") ?? return Err(err))
         prior_head = Val(jet_cli_budget_store_head(current) ?? return Err(err))
     }
-    // copy: the caller keeps its baseline, report id, timestamp and kind.
-    Ok(JetCLIBudgetUpdatePlan{baseline: baseline.copy(), report_id: report_id.copy(), prior_manifest_id: prior_manifest, prior_head_report_id: prior_head, accepted_at: accepted_at.copy(), kind: kind.copy()})
+    // copy: the caller keeps its kind.
+    Ok(JetCLIBudgetUpdatePlan{baseline: baseline, report_id: report_id, prior_manifest_id: prior_manifest, prior_head_report_id: prior_head, accepted_at: accepted_at, kind: kind.copy()})
 }
 
 // Applies a plan: under the baselines lock the manifest must still be
@@ -313,22 +313,21 @@ jet_cli_budget_store_next_manifest: fn(current: CanonicalJSON, plan: JetCLIBudge
         .Bootstrap(text) -> {
             jet_cli_budget_store_reason(text) ?? return Err(err)
             kind_name = "bootstrap"
-            reason = CanonicalJSON.String(text.copy())  // copy: the plan keeps its reason.
+            reason = CanonicalJSON.String(text)
             bootstrap = true
         }
         .AcceptRegression(text) -> {
             jet_cli_budget_store_reason(text) ?? return Err(err)
             kind_name = "exception"
-            reason = CanonicalJSON.String(text.copy())  // copy: the plan keeps its reason.
+            reason = CanonicalJSON.String(text)
             accept_regression = true
         }
     }
-    // copy: the plan keeps its links, timestamp, report id and name.
-    prior_head: if plan.prior_head_report_id == .Val(id) -> CanonicalJSON.String(id.copy()) else -> CanonicalJSON.Null
-    prior_state: if plan.prior_manifest_id == .Val(id) -> CanonicalJSON.String(id.copy()) else -> CanonicalJSON.Null
+    prior_head: if plan.prior_head_report_id == .Val(id) -> CanonicalJSON.String(id) else -> CanonicalJSON.Null
+    prior_state: if plan.prior_manifest_id == .Val(id) -> CanonicalJSON.String(id) else -> CanonicalJSON.Null
     body: perf_report_object_new(
         [CanonicalJSONField]{
-            CanonicalJSONField{key: "accepted_at", value: CanonicalJSON.String(plan.accepted_at.copy())},
+            CanonicalJSONField{key: "accepted_at", value: CanonicalJSON.String(plan.accepted_at)},
             CanonicalJSONField{key: "actor_label", value: CanonicalJSON.String("local")},
             CanonicalJSONField{
                 key: "flags",
@@ -343,7 +342,7 @@ jet_cli_budget_store_next_manifest: fn(current: CanonicalJSON, plan: JetCLIBudge
             CanonicalJSONField{key: "prior_head_report_id", value: prior_head},
             CanonicalJSONField{key: "prior_state_id", value: prior_state},
             CanonicalJSONField{key: "reason", value: reason},
-            CanonicalJSONField{key: "report_id", value: CanonicalJSON.String(plan.report_id.copy())},
+            CanonicalJSONField{key: "report_id", value: CanonicalJSON.String(plan.report_id)},
         },
     )
     ^audit_fields: jet_cli_budget_fields(body)
@@ -356,15 +355,15 @@ jet_cli_budget_store_next_manifest: fn(current: CanonicalJSON, plan: JetCLIBudge
         perf_report_object_new(
             [CanonicalJSONField]{
                 CanonicalJSONField{key: "audit", value: perf_report_object_new(audit_fields)},
-                CanonicalJSONField{key: "report_id", value: CanonicalJSON.String(plan.report_id.copy())},
+                CanonicalJSONField{key: "report_id", value: CanonicalJSON.String(plan.report_id)},
             },
         ),
     )
     content: perf_report_object_new(
         [CanonicalJSONField]{
             CanonicalJSONField{key: "generations", value: CanonicalJSON.Array(generations)},
-            CanonicalJSONField{key: "head_report_id", value: CanonicalJSON.String(plan.report_id.copy())},
-            CanonicalJSONField{key: "name", value: CanonicalJSON.String(plan.baseline.copy())},
+            CanonicalJSONField{key: "head_report_id", value: CanonicalJSON.String(plan.report_id)},
+            CanonicalJSONField{key: "name", value: CanonicalJSON.String(plan.baseline)},
         },
     )
     manifest_id: perf_stable_id(content)
@@ -403,7 +402,7 @@ jet_cli_budget_store_read_manifest: fn(root: String, baseline: String) -> Canoni
 jet_cli_budget_store_manifest_dir: fn(baseline: String) -> [String] Never! {
     ^parts: [String]{".jet", "perf", "baselines", "names"}
     segments: baseline.split("/").to_list()
-    loop index in 0..<(segments.len() - 1) -> parts.push(segments[index].copy())  // copy: the split keeps its segments.
+    loop index in 0..<(segments.len() - 1) -> parts.push(segments[index])
     parts
 }
 
@@ -476,8 +475,8 @@ jet_cli_budget_store_verify_manifest: fn(bytes: [U8], expected_name: String) -> 
                 prefix_content: perf_report_object_new(
                     [CanonicalJSONField]{
                         CanonicalJSONField{key: "generations", value: CanonicalJSON.Array(prefix.copy())},  // copy: the next generation's prefix extends this one.
-                        CanonicalJSONField{key: "head_report_id", value: CanonicalJSON.String(expected_head.copy())},  // copy: the head is compared below.
-                        CanonicalJSONField{key: "name", value: CanonicalJSON.String(expected_name.copy())},  // copy: every generation names the baseline.
+                        CanonicalJSONField{key: "head_report_id", value: CanonicalJSON.String(expected_head)},
+                        CanonicalJSONField{key: "name", value: CanonicalJSON.String(expected_name)},
                     },
                 )
                 ^chained: false
@@ -655,7 +654,7 @@ jet_cli_budget_store_text: fn(value: CanonicalJSON, key: String, name: String) -
     if value == .Object(fields) {
         loop field in fields {
             if field.key == key {
-                if field.value == .String(text) -> return Ok(text.copy())  // copy: the object stays whole.
+                if field.value == .String(text) -> return Ok(text)
                 return Err(jet_cli_budget_failure("{name} is not text"))
             }
         }
@@ -670,7 +669,7 @@ jet_cli_budget_store_nullable: fn(value: CanonicalJSON, key: String, name: Strin
             if field.key == key {
                 if field.value == {
                     .Null -> return Ok(CanonicalJSON.Null)
-                    .String(text) -> return Ok(CanonicalJSON.String(text.copy()))  // copy: the object stays whole.
+                    .String(text) -> return Ok(CanonicalJSON.String(text))
                     .Bool(_) | .Integer(_) | .Array(_) | .Object(_) -> return Err(jet_cli_budget_failure("{name} is not text or null"))
                 }
             }

@@ -232,7 +232,7 @@ jet_cli_solver_entry: fn(interner: Interner, function: FnBody, scope: ^JetCLISol
         if scope.names.contains(parameter.name) {
             return Err(jet_cli_solver_unsupported("a shadowed name"))
         }
-        scope.names.push(parameter.name.copy())
+        scope.names.push(parameter.name)
         jet_cli_solver_bound_facts(parameter.name, bounds, facts)
         if parameter.local.integer_bounds == .Val(known) {
             jet_cli_solver_bound_facts(parameter.name, JetCLISolverBounds{integer: true, lo: Val(known.lo), hi: Val(known.hi)}, facts)
@@ -255,7 +255,7 @@ jet_cli_solver_let: fn(interner: Interner, tree: BodyTree, local: TLocal, init: 
     value: jet_cli_solver_affine_of(interner, tree, init, scope) ?? return Ok(false)
     facts.push(jet_cli_solver_compare(jet_cli_solver_variable(local.name), "==", value))
     jet_cli_solver_bound_facts(local.name, bounds, facts)
-    scope.names.push(local.name.copy())
+    scope.names.push(local.name)
     Ok(true)
 }
 
@@ -280,7 +280,7 @@ jet_cli_solver_text: fn(source: String, span: Span) -> String Never! {
 jet_cli_solver_index_obligations: fn(function: FnBody, source: String, out: ^[JetCLISolverObligation]) Never! {
     loop proof in function.index_proofs {
         text: jet_cli_solver_text(source, proof.span)
-        ^row: JetCLISolverObligation{kind: "fixed_index_bounds", function: function.name.copy(), callee: "", span: proof.span, claim: text, formula: None, reason: "", detail: "", pre: false}
+        ^row: JetCLISolverObligation{kind: "fixed_index_bounds", function: function.name, callee: "", span: proof.span, claim: text, formula: None, reason: "", detail: "", pre: false}
         formula: jet_cli_solver_index_formula(proof) ?? {
             row.reason = err.reason
             row.detail = err.detail
@@ -317,7 +317,7 @@ jet_cli_solver_post_obligations: fn(interner: Interner, function: FnBody, source
     if body_stmt(function.tree, function.body[0]) == .ContractScope(_, body, post, result, _) {
         loop contract in post {
             claim: jet_cli_solver_text(source, body_node(function.tree, contract.condition).span)
-            ^row: JetCLISolverObligation{kind: "function_postcondition", function: function.name.copy(), callee: "", span: contract.span, claim: claim, formula: None, reason: "", detail: "", pre: function.pre.len() > 0}
+            ^row: JetCLISolverObligation{kind: "function_postcondition", function: function.name, callee: "", span: contract.span, claim: claim, formula: None, reason: "", detail: "", pre: function.pre.len() > 0}
             formula: jet_cli_solver_post_formula(interner, function, body, contract, result) ?? {
                 row.reason = err.reason
                 row.detail = err.detail
@@ -368,7 +368,7 @@ jet_cli_solver_post_formula: fn(interner: Interner, function: FnBody, body: [Int
         return Err(jet_cli_solver_unsupported("a body that is not affine bindings and one return"))
     }
     jet_cli_solver_bound_facts(name, bounds, facts)
-    scope.names.push(name.copy())
+    scope.names.push(name)
     claim: jet_cli_solver_bool_of(interner, tree, contract.condition, scope)
     Ok(jet_cli_solver_formula(facts, [JetCLISolverBool]{claim}))
 }
@@ -409,7 +409,7 @@ jet_cli_solver_callee: fn(tree: BodyTree, body: [Int], callees: JetCLISolverCall
             key: decl_table_key(callees.decls, callees.symbols, callee)
             return callees.names.get(key) ?? key
         }
-        if node.kind == .MethodCall(_, method, _, _) -> return method.name.copy()
+        if node.kind == .MethodCall(_, method, _, _) -> return method.name
     }
     ""
 }
@@ -484,7 +484,7 @@ jet_cli_solver_call_obligations: fn(function: FnBody, source: String, callees: J
             loop item in body {
                 if body_stmt(tree, item) == .Contract(contract) && contract.kind == .Pre {
                     claim: jet_cli_solver_text(source, body_node(tree, contract.condition).span)
-                    out.push(JetCLISolverObligation{kind: "call_precondition", function: function.name.copy(), callee: callee.copy(), span: contract.span, claim: claim, formula: None, reason: "unsupported_formula", detail: "a call behind a branch, a loop or a short-circuit", pre: function.pre.len() > 0})
+                    out.push(JetCLISolverObligation{kind: "call_precondition", function: function.name, callee: callee.copy(), span: contract.span, claim: claim, formula: None, reason: "unsupported_formula", detail: "a call behind a branch, a loop or a short-circuit", pre: function.pre.len() > 0})
                 }
             }
         }
@@ -514,18 +514,18 @@ jet_cli_solver_call_block: fn(function: FnBody, block: Int, source: String, call
         statement: body_stmt(tree, item)
         if statement == .Let(local, _, init, _, _, _) {
             value: jet_cli_solver_affine_of(callees.interner, tree, init, scope) ?? {
-                pinned.pins.push(JetCLISolverPin{name: local.name.copy(), symbol: local.symbol_id.copy(), value: None})
+                pinned.pins.push(JetCLISolverPin{name: local.name, symbol: local.symbol_id, value: None})
                 next
             }
-            pinned.pins.push(JetCLISolverPin{name: local.name.copy(), symbol: local.symbol_id.copy(), value: Val(value)})
+            pinned.pins.push(JetCLISolverPin{name: local.name, symbol: local.symbol_id, value: Val(value)})
             next
         }
         if statement == .Contract(contract) && contract.kind == .Pre {
             claim_text: jet_cli_solver_text(source, body_node(tree, contract.condition).span)
-            ^row: JetCLISolverObligation{kind: "call_precondition", function: function.name.copy(), callee: callee.copy(), span: contract.span, claim: claim_text, formula: None, reason: "", detail: "", pre: function.pre.len() > 0}
+            ^row: JetCLISolverObligation{kind: "call_precondition", function: function.name, callee: callee.copy(), span: contract.span, claim: claim_text, formula: None, reason: "", detail: "", pre: function.pre.len() > 0}
             if blocked != "" {
                 row.reason = "unsupported_formula"
-                row.detail = blocked.copy()
+                row.detail = blocked
                 out.push(row)
                 next
             }
@@ -579,14 +579,19 @@ jet_cli_solver_obligations: fn(functions: [FnBody], callees: JetCLISolverCallees
     // A closure comparator: a compiler older than JetIR's named-comparator fix frees a named one's result twice.
     keyed.sort_by(fn(left: JetCLISolverKeyedObligation, right: JetCLISolverKeyedObligation) { jet_cli_solver_obligation_order(left, right) })
     ^kept: [JetCLISolverObligation]{}
-    loop (index, item) in keyed {
-        if index > 0 {
-            previous: keyed[index - 1]
-            if previous.obligation.span == item.obligation.span && previous.obligation.kind == item.obligation.kind && previous.text == item.text {
-                next
-            }
+    ^has_prev: false
+    ^prev_span: Span{start: 0, end: 0}
+    ^prev_kind: ""
+    ^prev_text: ""
+    loop item in keyed.move() {
+        if has_prev && prev_span == item.obligation.span && prev_kind == item.obligation.kind && prev_text == item.text {
+            next
         }
-        kept.push(item.obligation.copy())
+        has_prev = true
+        prev_span = item.obligation.span
+        prev_kind = item.obligation.kind
+        prev_text = item.text
+        kept.push(item.obligation)
     }
     kept
 }

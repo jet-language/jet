@@ -56,11 +56,12 @@ jet_cli_budget_plan: fn(raw: [String], color: Bool) -> JetCLIPlan Never! {
     source_root: jet_cli_manifest_root(cwd) ?? cwd
     root: cli_files.realpath(source_root) ?? source_root
     ^notices: [String]{}
-    entry: if jet_cli_find_project_entry(root, "budget", color, notices) == {
-        .Entry(found) -> found.path.copy()
+    entry_found: jet_cli_find_project_entry(root, "budget", color, notices)
+    entry: if entry_found.move() == {
+        .Entry(found) -> found.path
         .Absent -> ""
         .Refused(plan) -> {
-            return plan.copy()
+            return plan
         }
     }
     if entry == "" || !cli_files.is_file(entry) {
@@ -72,7 +73,7 @@ jet_cli_budget_plan: fn(raw: [String], color: Bool) -> JetCLIPlan Never! {
 jet_cli_budget_parse: fn(raw: [String]) -> JetCLIBudgetOptions JetCLIUsageError! {
     command: if raw.get(1) == {
         .Val(word) -> if word == {
-            "check" | "update" -> word.copy()
+            "check" | "update" -> word
             else -> {
                 return Err(jet_cli_usage_error("E2101", "unknown `jet budget` subcommand `{word}`"))
             }
@@ -86,7 +87,7 @@ jet_cli_budget_parse: fn(raw: [String]) -> JetCLIBudgetOptions JetCLIUsageError!
     ^index: 2
     loop index < raw.len() {
         flag: raw[index]
-        key: if flag == "-y" -> "--yes" else -> flag.copy()
+        key: if flag == "-y" -> "--yes" else -> flag
         if seen.contains(key) {
             return Err(jet_cli_usage_error("E2104", "flag `{flag}` is repeated"))
         }
@@ -105,13 +106,13 @@ jet_cli_budget_parse: fn(raw: [String]) -> JetCLIBudgetOptions JetCLIUsageError!
                     return Err(jet_cli_usage_error("E2104", "flag `{flag}` needs a value"))
                 }
                 if {
-                    flag == "--baseline" -> out.baseline = Val(value.copy())
-                    flag == "--reason" -> { out.reason = Val(value.copy()) }
+                    flag == "--baseline" -> out.baseline = Val(value)
+                    flag == "--reason" -> { out.reason = Val(value) }
                     else -> {
                         if value != "auto" && value != "none" && value != "github" {
                             return Err(jet_cli_usage_error("E2104", "`--annotations` accepts auto, none, or github"))
                         }
-                        out.annotations = value.copy()
+                        out.annotations = value
                     }
                 }
             }
@@ -149,8 +150,7 @@ jet_cli_budget_run: fn(options: JetCLIBudgetOptions, root: String, entry: String
     if prepared == {
         .Refused(output) -> output.move()
         .Prepared(request, snapshot) -> {
-            // copy: the request moves into the projection below.
-            profile: request.profile.copy()
+            profile: request.profile
             projection: jet_driver_budget_projection(request.move())
             diagnostics: jet_driver_present_diagnostics(projection.compile.diagnostics, snapshot, projection.compile.generated_source_files)
             if jet_cli_errors(diagnostics).len() > 0 {
@@ -158,8 +158,8 @@ jet_cli_budget_run: fn(options: JetCLIBudgetOptions, root: String, entry: String
             }
             if projection.compile.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
             ^active: [JetDriverBudgetSpec]{}
-            loop row in projection.budget_specs {
-                if jet_cli_budget_applies(row.spec, profile) -> active.push(row.copy())  // copy: the projection keeps its specs.
+            loop row in projection.budget_specs.move() {
+                if jet_cli_budget_applies(row.spec, profile) -> active.push(row)
             }
             ^sources: [JetCLIBudgetSource]{}
             prefix: jet_cli_entry_join(root, "")
@@ -189,8 +189,7 @@ jet_cli_budget_applies: fn(spec: BudgetSpec, profile: String) -> Bool Never! {
 jet_cli_budget_title: fn(word: String) -> String Never! {
     ^bytes: word.bytes()
     if bytes.len() > 0 && bytes[0] >= 97 && bytes[0] <= 122 -> bytes[0] = bytes[0] - 32
-    // copy: an unchanged word when its bytes are not text.
-    String.from_bytes(bytes) ?? word.copy()
+    String.from_bytes(bytes) ?? word
 }
 
 jet_cli_budget_axis_applies: fn(axis: BudgetAxis, current: String, title: String) -> Bool Never! {
@@ -290,8 +289,7 @@ jet_cli_budget_compile_workload: fn(root: String, spec: BudgetSpec, profile: Str
             return Err(jet_cli_budget_failure("compile workload patch path is not project-relative"))
         }
         segments: patch.split("/").to_list()
-        ^parts: [String]{}
-        loop index in 0..<segments.len() - 1 { parts.push(segments[index]) }
+        parts: loop index in 0..<segments.len() - 1 -> segments[index]
         name: segments[segments.len() - 1]
         present: JetCLIRootedDirectory.present(root, parts) ?? return Err(jet_cli_budget_failure("compile workload patch is unavailable: {err.message}"))
         if !present {
@@ -329,10 +327,9 @@ jet_cli_budget_compile_profile: fn(root: String, profile: String) -> Bool {
 jet_cli_budget_update: fn(options: JetCLIBudgetOptions, root: String, built: JetCLIBudgetBuilt, report_path: String, color: Bool) -> JetDriverVerbOutput {
     baseline: options.baseline ?? ""
     reason: options.reason ?? ""
-    // copy: the options keep their reason.
     kind: if {
-        options.bootstrap -> JetCLIBudgetUpdateKind.Bootstrap(reason.copy())
-        options.accept_regression -> JetCLIBudgetUpdateKind.AcceptRegression(reason.copy())
+        options.bootstrap -> JetCLIBudgetUpdateKind.Bootstrap(reason)
+        options.accept_regression -> JetCLIBudgetUpdateKind.AcceptRegression(reason)
         else -> JetCLIBudgetUpdateKind.Pass
     }
     plan: jet_cli_budget_plan_update(root, baseline, built.report, built.report_id, kind, jet_cli_rfc3339(cli_time.unix_ns())) ?? return jet_cli_budget_report_failure(options, built.report_id, "baseline plan refused: {err.message}", color)
@@ -347,7 +344,7 @@ jet_cli_budget_update: fn(options: JetCLIBudgetOptions, root: String, built: Jet
         }
         planned: jet_cli_status_object(
             [JetCLIStatusField]{
-                jet_cli_status_field("baseline", jet_cli_status_text(baseline.copy())),  // copy: the options keep their baseline.
+                jet_cli_status_field("baseline", jet_cli_status_text(baseline)),
                 jet_cli_status_field("requires_confirmation", jet_cli_status_bool(false)),
                 jet_cli_status_field("rows", jet_cli_status_array(rows)),
             },
@@ -392,16 +389,15 @@ jet_cli_budget_confirm: fn() -> Bool {
 
 // One row of the update plan: what is written where, and the head it moves from.
 jet_cli_budget_plan_row: fn(operation: String, artifact: String, path: String, from_id: String?, id: String) -> JetCLIStatusValue Never! {
-    // copy: the plan keeps its prior head and the report its id.
-    from_value: if from_id == .Val(prior) -> jet_cli_status_text(prior.copy()) else -> JetCLIStatusValue.Null
+    from_value: if from_id == .Val(prior) -> jet_cli_status_text(prior) else -> JetCLIStatusValue.Null
     jet_cli_status_object(
         [JetCLIStatusField]{
             jet_cli_status_field("artifact", jet_cli_status_text(artifact)),
             jet_cli_status_field("from_id", from_value),
-            jet_cli_status_field("id", jet_cli_status_text(id.copy())),
+            jet_cli_status_field("id", jet_cli_status_text(id)),
             jet_cli_status_field("operation", jet_cli_status_text(operation)),
-            jet_cli_status_field("path", jet_cli_status_text(path.copy())),
-            jet_cli_status_field("to_id", jet_cli_status_text(id.copy())),
+            jet_cli_status_field("path", jet_cli_status_text(path)),
+            jet_cli_status_field("to_id", jet_cli_status_text(id)),
         },
     )
 }
@@ -441,8 +437,8 @@ jet_cli_budget_subject: fn(root: String, sources: [JetCLIBudgetSource], measured
     ordered.sort_by(fn(left: JetCLIBudgetSource, right: JetCLIBudgetSource) { if left.path == right.path -> left.sha256 <=> right.sha256 else -> left.path <=> right.path })
     members: loop source in ordered -> perf_report_object_new(
         [CanonicalJSONField]{
-            CanonicalJSONField{key: "path", value: CanonicalJSON.String(source.path.copy())},
-            CanonicalJSONField{key: "sha256", value: CanonicalJSON.String(source.sha256.copy())},
+            CanonicalJSONField{key: "path", value: CanonicalJSON.String(source.path)},
+            CanonicalJSONField{key: "sha256", value: CanonicalJSON.String(source.sha256)},
         },
     )
     target_id: jet_cli_budget_package(root)
@@ -523,16 +519,16 @@ jet_cli_budget_status_value: fn(value: CanonicalJSON) -> JetCLIStatusValue Never
     if value == {
         .Null -> JetCLIStatusValue.Null
         .Bool(flag) -> jet_cli_status_bool(flag)
-        .Integer(digits) -> JetCLIStatusValue.Float{text: digits.copy()}
-        .String(text) -> jet_cli_status_text(text.copy())
+        .Integer(digits) -> JetCLIStatusValue.Float{text: digits}
+        .String(text) -> jet_cli_status_text(text)
         .Array(values) -> jet_cli_status_array(loop item in values -> jet_cli_budget_status_value(item))
-        .Object(fields) -> jet_cli_status_object(loop field in fields -> jet_cli_status_field(field.key.copy(), jet_cli_budget_status_value(field.value)))
+        .Object(fields) -> jet_cli_status_object(loop field in fields -> jet_cli_status_field(field.key, jet_cli_budget_status_value(field.value)))
     }
 }
 
 // The `budget` status of a run that produced no report.
 jet_cli_budget_failed_status: fn(command: String, diagnostics: [String], failure_kind: String) -> String Never! {
-    reports: loop report in diagnostics -> JetCLIStatusValue.Float{text: report.copy()}
+    reports: loop report in diagnostics -> JetCLIStatusValue.Float{text: report}
     budget: jet_cli_status_object(
         [JetCLIStatusField]{
             jet_cli_status_field("applied", jet_cli_status_bool(false)),

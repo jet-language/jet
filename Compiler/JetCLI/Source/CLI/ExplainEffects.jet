@@ -421,7 +421,7 @@ jet_cli_effects_locate: fn(items: [Item], alias: String, namespace: String, offs
 jet_cli_effects_with_cap: fn(caps: [ModuleCap], cap: ModuleCap?, scope: String) -> [ModuleCap] Never! {
     ^typed: caps.copy()
     if cap == .Val(value) {
-        typed.push(ModuleCap{owner: value.owner.copy(), scope: scope, entries: value.entries.copy(), span: value.span})
+        typed.push(ModuleCap{owner: value.owner, scope: scope, entries: value.entries.copy(), span: value.span})
     }
     typed
 }
@@ -514,18 +514,15 @@ jet_cli_effects_reach_add: fn(reaches: ^[JetCLIEffectsReach], name: String, chai
         }
     }
     shown: loop step in chain -> jet_cli_effects_source_key(step)
-    // copy: the reach keeps its own name and site; the caller keeps theirs.
-    reaches.push(JetCLIEffectsReach{name: name.copy(), chain: shown, site: site.copy()})
+    reaches.push(JetCLIEffectsReach{name: name, chain: shown, site: site})
 }
 
 // A function name as its source spells it: a function of an inline module
 // or a generic module instance, lowered to a generated file-level name
 // (`__jet_counter_dbump`), reads as its source path (`counter.bump`).
 jet_cli_effects_source_name: fn(name: String) -> String Never! {
-    // copy: the shown name is the caller's own; `name` stays the caller's.
     if !name.starts_with("__jet_") -> return name.copy()
-    // copy: an undecodable name shows as written.
-    sema_inline_decode_generated_suffix(name.removeprefix("__jet_")) ?? name.copy()
+    sema_inline_decode_generated_suffix(name.removeprefix("__jet_")) ?? name
 }
 
 // An effect-graph key (`pricing.rates`, `generic.__jet_counter_dbump`)
@@ -587,9 +584,9 @@ jet_cli_effects_part_reaches: fn(doc_module: JetDriverDocModule, owner: String, 
             ^chain: [String]{owner}
             if {
                 semindex_witness(witnesses, summaries, callee.key, name) == .Val(witness) && witness.path.len() > 0 -> {
-                    loop part in witness.path -> chain.push(part.copy())
+                    loop part in witness.path -> chain.push(part)
                 }
-                else -> { chain.push(callee.key.copy()) }
+                else -> { chain.push(callee.key) }
             }
             jet_cli_effects_reach_add(reaches, name, chain, jet_cli_effects_site(doc_module, edge.span.start))
         }
@@ -605,7 +602,7 @@ jet_cli_effects_span_reaches: fn(doc_module: JetDriverDocModule, key: String, sp
         if function.key != summary.raw_key -> next
         loop entry in function.effects.direct_spans {
             if entry.span.start >= span.start && entry.span.end <= span.end {
-                direct.push(EffectRowEntry{name: entry.name.copy(), span: entry.span})
+                direct.push(EffectRowEntry{name: entry.name, span: entry.span})
             }
         }
     }
@@ -614,7 +611,7 @@ jet_cli_effects_span_reaches: fn(doc_module: JetDriverDocModule, key: String, sp
         if fact.caller_key != summary.raw_key -> next
         if fact.span.start < span.start || fact.span.end > span.end -> next
         if fact.detail == .Val(detail) && detail.foreign_effect_root == .Val(root) {
-            direct.push(EffectRowEntry{name: root.copy(), span: fact.span})
+            direct.push(EffectRowEntry{name: root, span: fact.span})
         }
         storage: doc_module.name_ledger ?? next
         permit: storage.guard_read()
@@ -734,7 +731,10 @@ jet_cli_explain_effects_report: fn(result: JetDriverCompileResult, job: JetCLIIn
                 ordered[0].lambda -> {
                     lambda_span: ordered[0].span
                     direct: loop name in ordered[0].direct -> EffectRowEntry{name: name, span: lambda_span}
-                    edges: loop edge in ordered[0].edges -> EffectRowEntry{name: edge.copy(), span: jet_cli_effects_call_span(doc_module, edge, lambda_span)}
+                    edges: loop edge in ordered[0].edges -> {
+                        span: jet_cli_effects_call_span(doc_module, edge, lambda_span)
+                        EffectRowEntry{name: edge, span: span}
+                    }
                     jet_cli_effects_part_reaches(doc_module, found.key, direct, edges, summaries, witnesses, reaches)
                 }
                 else -> {
@@ -798,7 +798,7 @@ jet_cli_explain_effects_report: fn(result: JetDriverCompileResult, job: JetCLIIn
 }
 
 jet_cli_effects_cap_row: fn(doc_module: JetDriverDocModule, cap: ModuleCap, kind: String, name: String) -> JetCLIEffectsCapRow Never! {
-    JetCLIEffectsCapRow{file: doc_module.path.copy(), line: diagnostic_line_at(doc_module.source, cap.span.start), cap: jet_cli_effects_cap_text(cap.entries), kind: kind, name: name.copy()}
+    JetCLIEffectsCapRow{file: doc_module.path, line: diagnostic_line_at(doc_module.source, cap.span.start), cap: jet_cli_effects_cap_text(cap.entries), kind: kind, name: name}
 }
 
 // `row` unless the same cap is listed already: a module's cap is read both

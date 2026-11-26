@@ -506,7 +506,7 @@ jet_driver_comptime_body_pass: fn(
     // hold them (JetSema Comptime/LocalSplice.jet); under `recheck_verify`
     // the full recheck runs too, and the two results must agree.
     ^full_input: SemaGraphResult?{None}
-    if request.recheck_verify -> full_input = Val(current_graph.copy())
+    if request.recheck_verify -> full_input = Val(current_graph)
     jet_driver_trace_body_begin(request.trace_sink, "comptime.body.splice", body_sources, pass)
     ^splice: sema_local_value_splice(registration, run.trail, current_graph, body_sources, earlier_values, earlier_functions, values, functions, request.eval_config.host_hooks, request.compiler_threads, request.trace_sink)
     jet_driver_trace_step_end(request.trace_sink, "comptime.body.splice", body_sources.len())

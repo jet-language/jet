@@ -1241,7 +1241,7 @@ jet_driver_foreign_rewrite_module: fn(load: ^JetDriverLoadResult, surface: JetDr
     // A Core provider is its own package and module identity, as
     // jet_driver_core_source_unit and jet_driver_unit_module_identity set them.
     core_provider: surface.root_index < 0
-    package: if core_provider -> aggregate_path.copy() else -> jet_driver_foreign_package_for_root(load, surface.root_index)
+    package: if core_provider -> aggregate_path else -> jet_driver_foreign_package_for_root(load, surface.root_index)
     module_identity: module_intern(load.module_table, if core_provider -> package else -> jet_driver_module_identity(package, aggregate_path))
     source_identity: jet_driver_source_identity(package, aggregate_path)
     ^synthetic_items: [Item]{}

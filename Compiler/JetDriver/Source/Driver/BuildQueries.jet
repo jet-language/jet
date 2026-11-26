@@ -660,12 +660,12 @@ jet_driver_query_build_plan: fn(owned_request: ^^JetDriverCompileRequest, scope:
     // compiles still check every member.
     jet_driver_trace_step_begin(request.trace_sink, "build.plan.stage")
     request.build_entry_reach = true
-    ^selection: jet_driver_lowering_inputs_selection(request, JetDriverCompileMode.RootRun, Val(path.copy()), Val("build"), true, true, None)
+    ^selection: jet_driver_lowering_inputs_selection(request, JetDriverCompileMode.RootRun, Val(path), Val("build"), true, true, None)
     ^errors: [Diagnostic]{}
     staged_failed: selection.compile.internal_problem == None && jet_driver_has_errors(selection.compile.diagnostics)
     if staged_failed {
         errors = selection.compile.diagnostics.move()
-        selection = jet_driver_lowering_inputs_selection(request, JetDriverCompileMode.RootRun, Val(path.copy()), Val("build"), true, false, Val(JetDriverKeepGoing{skip: [String]{}}))
+        selection = jet_driver_lowering_inputs_selection(request, JetDriverCompileMode.RootRun, Val(path), Val("build"), true, false, Val(JetDriverKeepGoing{skip: [String]{}}))
     }
     request.build_entry_reach = false
     jet_driver_trace_step_end(request.trace_sink, "build.plan.stage", if staged_failed -> 2 else -> 1)
@@ -1055,8 +1055,8 @@ JetDriverRewriteMissing: struct {
 
 jet_driver_build_generated_row: fn(row: ^^BuildSessionGeneratedModule, package: String, modules: [JetDriverSourceQueryModule]) -> JetDriverGeneratedModule JetDriverRewriteMissing! {
     ^owned: row.move()
-    function: owned.rewrites.move() ?? return Ok(JetDriverGeneratedModule{package_identity: package.copy(), name: owned.name.move(), relative_path: owned.path.move(), source: owned.source.move(), authority: owned.authority.move() ?? "", consent: owned.consent.move() ?? ""})
-    owner: owned.package.move() ?? package.copy()
+    function: owned.rewrites.move() ?? return Ok(JetDriverGeneratedModule{package_identity: package, name: owned.name.move(), relative_path: owned.path.move(), source: owned.source.move(), authority: owned.authority.move() ?? "", consent: owned.consent.move() ?? ""})
+    owner: owned.package.move() ?? package
     loop module_row in modules {
         if module_row.package_identity != owner -> next
         loop item in module_row.program.items {
@@ -1374,10 +1374,7 @@ jet_driver_build_profiled_handle: fn(handle: BuildSessionValue) -> BuildSessionV
 priv jet_driver_build_run_config: fn(request: JetDriverCompileRequest, session: BuildSession, host_held: Bool, path: String) -> JetEvalConfig {
     ^config: jet_eval_runtime_config(request.eval_config)
     config.host_held = host_held
-    // copy: the evaluator's build adapter gets a session and the request's input handles of its
-    // own. The build keeps `session` to abort or finish it, and `request` is returned in every
-    // response.
-    config.build_host_adapter = Val(JetDriverBuildAdapter{session: session.copy(), inputs: request.build_inputs.copy(), base_dir: jet_driver_parent_path(path)})
+    config.build_host_adapter = Val(JetDriverBuildAdapter{session: session, inputs: request.build_inputs, base_dir: jet_driver_parent_path(path)})
     config.comptime_input_adapter = jet_driver_comptime_inputs_for(request, path)
     config.compiler_query_host = Val(jet_driver_comptime_compiler_for(request))
     config

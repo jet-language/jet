@@ -361,7 +361,7 @@ build_plan_selection: fn(plan: BuildSessionPlan) -> BuildPlanSelection Never! {
             libraries.push(BuildPlanExecutable{name: target.name.copy(), source: target.sources[0].copy(), sources: target.sources.copy(), target: index})
         } else if target.actions.len() == 0 { unsupported.push("{target.name} ({target.kind})") }
     }
-    {executables: executables, libraries: libraries, unsupported: unsupported, options: permit.value.options.copy()}
+    {executables: executables, libraries: libraries, unsupported: unsupported, options: permit.value.options}
 }
 
 build_plan_graph: fn(plan: BuildSessionPlan) -> BuildGraph Never! {
@@ -385,14 +385,14 @@ BuildPlanExecution: struct {
 
 build_plan_execution: fn(plan: BuildSessionPlan) -> BuildPlanExecution Never! {
     permit: plan.storage.guard_read()
-    BuildPlanExecution{toolchains: permit.value.toolchains.copy(), signing: permit.value.signing.copy(), probes: permit.value.probes.copy(), plugins: permit.value.plugins.copy(), actions: permit.value.actions.copy(), targets: permit.value.targets.copy(), files: permit.value.files.copy(), default: plan.default}
+    BuildPlanExecution{toolchains: permit.value.toolchains, signing: permit.value.signing, probes: permit.value.probes, plugins: permit.value.plugins, actions: permit.value.actions, targets: permit.value.targets, files: permit.value.files, default: plan.default}
 }
 
 // Every module `build: fn` generated, selected or not (`write_generated: on`
 // writes them all for inspection), in path order.
 build_plan_generated: fn(plan: BuildSessionPlan) -> [BuildSessionGeneratedModule] Never! {
     permit: plan.storage.guard_read()
-    ^generated: permit.value.generated.copy()
+    ^generated: permit.value.generated
     generated.sort_by(fn(left: BuildSessionGeneratedModule, right: BuildSessionGeneratedModule) { if left.path == right.path -> left.name <=> right.name else -> left.path <=> right.path })
     generated
 }

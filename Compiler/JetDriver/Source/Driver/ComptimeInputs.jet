@@ -68,9 +68,7 @@ JetDriverComptimeInputs: struct {
 
     impl JetEvalComptimeInputAdapter {
         clone_input_adapter: fn(self) -[]> JetEvalComptimeInputAdapter Never! {
-            // copy: the evaluator forks the adapter for each machine; the forks share the input
-            // transports, the one input log and the one toolchain tree.
-            JetDriverComptimeInputs{inputs: self.inputs.copy(), http_inputs: self.http_inputs.copy(), base_dir: self.base_dir.copy(), log: self.log.copy(), file: self.file.copy(), toolchain: self.toolchain.copy()}
+            JetDriverComptimeInputs{inputs: self.inputs, http_inputs: self.http_inputs, base_dir: self.base_dir, log: self.log, file: self.file, toolchain: self.toolchain}
         }
 
         comptime_input: fn(self, builtin: String, path: String, span: Span) -[FS.Read]> TComptimeValue JetEvalComptimeInputError! {
@@ -108,8 +106,7 @@ JetDriverCoreComptimeInputs: struct {
 
     impl JetEvalComptimeInputAdapter {
         clone_input_adapter: fn(self) -[]> JetEvalComptimeInputAdapter Never! {
-            // copy: the forks share the Core row's text cell and so its reader.
-            JetDriverCoreComptimeInputs{text: self.text.copy(), base_dir: self.base_dir.copy()}
+            JetDriverCoreComptimeInputs{text: self.text, base_dir: self.base_dir}
         }
 
         comptime_input: fn(self, builtin: String, path: String, span: Span) -[FS.Read]> TComptimeValue JetEvalComptimeInputError! {
@@ -157,7 +154,7 @@ jet_driver_comptime_fetch_value: fn(url: String, reply: BuildSessionReply, span:
 // then `path`), the file beneath `base_dir` and its SHA-256.
 jet_driver_comptime_input_record: fn(recorder: Shared<JetDriverComptimeInputLog>?, base_dir: String, prefix: String, path: String, bytes: [U8]) Never! {
     log: recorder ?? return
-    file: if base_dir == "" -> path.copy() else -> "{base_dir}/{path}"
+    file: if base_dir == "" -> path else -> "{base_dir}/{path}"
     permit: log.guard_edit()
     permit.value.records.push(JetDriverComptimeInputRecord{path: "{prefix}{path}", file: file, sha256: comptime_inputs_crypto.sha256(bytes).hex()})
 }
@@ -221,7 +218,7 @@ jet_driver_comptime_toolchain_input: fn(adapter: JetDriverComptimeInputs, builti
 jet_driver_toolchain_admits: fn(tree: Shared<JetDriverToolchainTree>, file: String) -[FS.Read]> String? {
     permit: tree.guard_edit()
     root: if permit.value.root == {
-        .Val(named) -> named.copy()
+        .Val(named) -> named
         None -> permit.value.reader.tree_of(file) ?? return None
     }
     if !file.starts_with("{root}/") -> return None
@@ -280,7 +277,7 @@ jet_driver_comptime_find: fn(adapter: JetDriverComptimeInputs, base_dir: String,
     }
     if adapter.log == .Val(log) {
         permit: log.guard_edit()
-        permit.value.records.push(JetDriverComptimeInputRecord{path: "{prefix}{glob}", file: "{base_dir}/{glob}", sha256: digest, glob: glob.copy()})
+        permit.value.records.push(JetDriverComptimeInputRecord{path: "{prefix}{glob}", file: "{base_dir}/{glob}", sha256: digest, glob: glob})
     }
     Ok(TComptimeValue.List{values: strings})
 }
@@ -296,8 +293,7 @@ jet_driver_comptime_inputs_for: fn(request: JetDriverCompileRequest, source_file
     }
     inputs: request.build_inputs ?? return None
     physical: jet_driver_physical_path(jet_driver_entry_root_path(request.authorized_sources), source_file)
-    // copy: the adapter shares the request's transport handles; the request keeps its own.
-    Val(JetDriverComptimeInputs{inputs: inputs.copy(), http_inputs: request.build_http_inputs.copy(), base_dir: jet_driver_parent_path(physical), log: request.comptime_input_log.copy(), file: physical, toolchain: request.toolchain_tree.copy()})
+    Val(JetDriverComptimeInputs{inputs: inputs, http_inputs: request.build_http_inputs, base_dir: jet_driver_parent_path(physical), log: request.comptime_input_log, file: physical, toolchain: request.toolchain_tree})
 }
 
 // The comptime input host of the Core file `source_file` names: the directory

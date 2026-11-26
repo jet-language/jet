@@ -42,7 +42,7 @@ jet_driver_comptime_declared: fn(modules: [SemaGraphModuleResult]) -> IRProgram 
 // functions for this build. Either builds on up to `threads` compiler
 // threads.
 jet_driver_comptime_ir_build: fn(batch: JetDriverComptimeBatch, staging: ^JetDriverComptimeStaging, values: [SemaComptimeItemValue], decls: DeclTable, symbols: SymbolTable, interner: Interner, table: ModuleTable, threads: CompilerThreads) -> JetEvalIRComptime {
-    ^functions: batch.functions.copy()
+    ^functions: batch.functions
     ^keys: [String]{}
     ^computed: [TConstantDef]{}
     loop entry in batch.entries {
@@ -85,7 +85,7 @@ jet_driver_comptime_ir_build: fn(batch: JetDriverComptimeBatch, staging: ^JetDri
 
 // The constant row of landed value `value` under `key`, named in `table`.
 jet_driver_comptime_value_row: fn(value: SemaComptimeItemValue, key: String, table: ModuleTable) -> TConstantDef Never! {
-    TConstantDef{module_identity: value.module_identity, key: key.copy(), name: key.copy(), symbol_key: symbol_key_text(SymbolKind.Constant, module_text(table, value.module_identity), "", key), span: Span{start: 0, end: 0}, visibility: NameVisibility.Private, ty: value.ty.copy(), is_comptime: true, is_storage: false, value: value.value.copy(), shared_holder: value.shared_holder}
+    TConstantDef{module_identity: value.module_identity, key: key, name: key, symbol_key: symbol_key_text(SymbolKind.Constant, module_text(table, value.module_identity), "", key), span: Span{start: 0, end: 0}, visibility: NameVisibility.Private, ty: value.ty, is_comptime: true, is_storage: false, value: value.value, shared_holder: value.shared_holder}
 }
 
 // A fn-build or fn-dev invocation's run (`result`): the checked entry
