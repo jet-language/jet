@@ -3345,7 +3345,7 @@ jet_driver_comptime_flush: fn(
             }
             if graph.keep_going {
                 if eval_result.internal_problem == .Val(problem) {
-                    diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, comptime_request.module_identity, "E0003", comptime_request.span, "keep-going: the native comptime run failed internally: {problem.message}", "JET_KEEP_GOING drops the item and runs the rest", "fix the comptime run defect"))
+                    diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, comptime_request.module_identity, "E0003", comptime_request.span, "keep-going: the native comptime run failed internally: {problem.message}", "keep-going drops the item and runs the rest", "fix the comptime run defect"))
                 }
                 next
             }
@@ -3840,7 +3840,7 @@ jet_driver_comptime_run: fn(
                             diagnostics.push(attached)
                         }
                     }
-                    // JET_KEEP_GOING: an item whose own check reported an error is
+                    // Keep-going: an item whose own check reported an error is
                     // dropped (its value never lands) and the run goes on.
                     if keep_going {
                         if jet_driver_has_errors_since(diagnostics, item_diagnostic_start) -> next
@@ -3895,7 +3895,7 @@ jet_driver_comptime_run: fn(
                     }
                 }
                 if !checked_item.complete && keep_going {
-                    diagnostics.push(jet_driver_diagnostic_at_program_site(programs[0], source.module_identity, "E0003", source.span, "keep-going: comptime item `{source.name}` did not check to a complete typed value", "JET_KEEP_GOING drops the item and runs the rest", "see the item's other reports"))
+                    diagnostics.push(jet_driver_diagnostic_at_program_site(programs[0], source.module_identity, "E0003", source.span, "keep-going: comptime item `{source.name}` did not check to a complete typed value", "keep-going drops the item and runs the rest", "see the item's other reports"))
                     next
                 }
                 if !checked_item.complete {
@@ -4091,7 +4091,7 @@ jet_driver_comptime_run: fn(
                 }
                 if !closure.complete && closure.waiting_dependencies.len() == 0 && keep_going {
                     reasons: loop row in closure.incomplete -> "{jet_driver_totality_function(row)}: {row.reason}"
-                    diagnostics.push(jet_driver_diagnostic_at_program_site(programs[0], source.module_identity, "E0003", source.span, "keep-going: comptime item `{source.name}` has an incomplete function closure: {reasons.join("; ")}", "JET_KEEP_GOING drops the item and runs the rest", "see the closure's other reports"))
+                    diagnostics.push(jet_driver_diagnostic_at_program_site(programs[0], source.module_identity, "E0003", source.span, "keep-going: comptime item `{source.name}` has an incomplete function closure: {reasons.join("; ")}", "keep-going drops the item and runs the rest", "see the closure's other reports"))
                     next
                 }
                 if !closure.complete && closure.waiting_dependencies.len() == 0 {
@@ -5164,7 +5164,7 @@ jet_driver_core_lowering_roots: fn(graph: SemaRegistrationGraph, tested: [U32:Bo
     roots
 }
 
-// ---- JET_KEEP_GOING: the compiler-internal all-phases diagnostic mode ----
+// ---- Keep-going: the all-phases diagnostic mode ----
 // Every failed unit is recorded and replaced by a typed trap so every later
 // phase still runs: sema keeps a failed function as a trap of its declared
 // signature (SemaRegistrationGraph.keep_going), comptime drops a failed item,
@@ -5356,7 +5356,7 @@ jet_driver_keep_going_trap_body_row: fn(kg: ^JetDriverKeepGoingLog, function: Fn
 // Codegen lowers a checked direct call to its callee's checked function or
 // to a checked foreign row (`jet_codegen_find_function_row`,
 // `jet_codegen_find_checked_foreign_row`); a callee with neither stops it.
-// Under JET_KEEP_GOING a function whose check failed and whose own trap did
+// Under keep-going a function whose check failed and whose own trap did
 // not check either (sema_keep_going_push_stub) is such a callee: each of its
 // callers lowers as a trap instead, and each is a census row.
 jet_driver_keep_going_trap_unresolved_calls: fn(kg: ^JetDriverKeepGoingLog, functions: ^[FnBody], modules: [SemaGraphModuleResult], decls: DeclTable, symbols: SymbolTable) {
@@ -5427,7 +5427,7 @@ jet_driver_unresolved_call_in: fn(tree: BodyTree, expression: Int, targets: [Boo
 }
 
 // A constant's row carries its value, and IR reads a constant through its
-// row (ir_constant). Under JET_KEEP_GOING a compile-time value whose
+// row (ir_constant). Under keep-going a compile-time value whose
 // evaluation failed (a check, a refusal, or its step limit) never lands, so
 // its constant has no row: each function that reads it lowers as a trap
 // instead, and each is a census row.
@@ -5623,7 +5623,7 @@ JetDriverLoweringInputsResult: struct {
 // The native executable route's front: the ordinary checked compile of
 // `request`, stopped right before lowering, with the lowering inputs (None
 // when the compile stopped earlier; its result carries the diagnostics).
-// `keep_going` (JET_KEEP_GOING) collects every failure of every stage as
+// `keep_going` collects every failure of every stage as
 // jet_driver_compile_keep_going does, one row each in the result's
 // keep_going_rows.
 jet_driver_lowering_inputs: fn(request: JetDriverCompileRequest, keep_going: JetDriverKeepGoing?) -> JetDriverLoweringInputsResult {
@@ -5975,7 +5975,7 @@ jet_driver_compile_selection: fn(request: ^JetDriverCompileRequest, mode: JetDri
     result
 }
 
-// JET_KEEP_GOING (the CLI reads it): every phase runs past the failures
+// Keep-going (the CLI reads it): every phase runs past the failures
 // before it; each failure is a row of the result's keep_going_rows.
 // The result keeps every error report, so a compile with any row never
 // passes; a crash later in the run still leaves the rows already streamed to
@@ -6777,7 +6777,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: ^JetD
     // with the stage's diagnostics, and the bodies are checked too
     // (sema_check_registration_module_start).
     registration_errors: sema_registration_blocking_error(registration_graph.diagnostics)
-    // Under JET_KEEP_GOING the check goes on past such an error; every module
+    // Under keep-going the check goes on past such an error; every module
     // row without one keeps its registered facts known
     // (sema_registration_settle_modules).
     if kg.enabled -> sema_registration_settle_modules(registration_graph)
@@ -6889,7 +6889,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: ^JetD
     }
     if request.trace_sink == .Val(sink) -> sink.begin("sema.finalize", "", -1, -1)
     // A completed run's graph already carries its values: finalization takes
-    // it in place. After any other exit (JET_KEEP_GOING) the run's edits are
+    // it in place. After any other exit (keep-going) the run's edits are
     // undone and every value applied again, which is
     // sema_comptime_graph_with_values of the registration graph.
     ^trail: comptime_run.trail.move()
@@ -7255,7 +7255,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: ^JetD
     // (jet_driver_restore_checked_functions) and are released after those.
     ^checked_functions: [FnBody]{}
     // Per row of `checked_functions`: false for a repeated key that
-    // JET_KEEP_GOING leaves unlowered.
+    // keep-going leaves unlowered.
     ^lowering_candidates: [Bool]{}
     ^repeated_rows: [Bool]{}
     ^registered_function_keys: if compiler_threads_admit(request.compiler_threads, checked_graph.modules.len(), checked_graph.modules.len(), 32, 0, 0) > 1 -> {
@@ -7318,7 +7318,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: ^JetD
             if repeated {
                 load.diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, graph_module.module_identity, "E0003", module_functions[function_index].source_span, "two checked functions share one canonical symbol key", "every lowered function identity names exactly one declaration in the package graph", "report the duplicate Sema function key"))
                 failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Check)
-                // JET_KEEP_GOING: the first function of a key lowers.
+                // Keep-going: the first function of a key lowers.
                 if kg.enabled {
                     lowering_candidates.push(false)
                     next
@@ -7364,7 +7364,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: ^JetD
     // (pruning only drops unreached Core bodies, never a user entry), and the
     // foreign facts check realizes come from the same graphs.
     if request.mode == JetDriverCompileMode.Check {
-        // JET_KEEP_GOING has no lowering to keep going into here.
+        // Keep-going has no lowering to keep going into here.
         if failed_stage != None {
             return jet_driver_compile_result(load, failed_stage, false, trace)
         }

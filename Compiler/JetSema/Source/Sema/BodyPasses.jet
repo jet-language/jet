@@ -24,8 +24,10 @@ use jet_foundation.[
     compiler_threads_admit,
     compiler_threads_limit,
     compiler_threads_failed,
+    compiler_threads_failure_text,
     compiler_threads_joined,
     compiler_threads_taken,
+    compiler_threads_try_join,
     symbol_table_key,
     compiler_threads_heaviest_first,
 ]
@@ -254,6 +256,7 @@ SemaOwnedModuleCheck: struct {
 SemaBodyPart: struct {
     scopes: SemaScopeTable,
     bodies: [SemaClaimedBody],
+    active_claim: SemaBodyClaim?{None},
 }
 
 // A body a thread checked, with its position in the pass's job list and the
@@ -525,14 +528,18 @@ sema_check_body_part_in: fn(environment: SemaScopeEnvironment, program: SemaProg
         loop {
             claim: sema_check_body_claim(jobs.value, queue, trace_sink)
             if claim.position < 0 -> break
+            part.active_claim = Val(claim)
             checked_count += sema_check_body_claimed(environment, thread_program, memory_plan, part, claim, module_index, wanted)
+            part.active_claim = None
         }
         return checked_count
     }
     loop {
         claim: sema_check_body_claim(jobs.value, queue, trace_sink)
         if claim.position < 0 -> break
+        part.active_claim = Val(claim)
         checked_count += sema_check_body_claimed(environment, program, memory_plan, part, claim, module_index, wanted)
+        part.active_claim = None
     }
     checked_count
 }
@@ -568,18 +575,53 @@ SemaStreamHandle: struct {
     changed: Condition,
 }
 
-sema_check_body_stream_part: fn(shared: Shared<SemaCheckShared>, cells: SemaStreamCells, handle: SemaStreamHandle, args: SemaStreamFinishArgs, kind: SemaWaveKind) {
+// Per-worker state for a body stream thread: holds its scratch SemaBodyPart
+// and the current claimed batch so that a runtime stop (E3010/E3012/panic)
+// inside one item is recovered at the task join without losing earlier items
+// in the batch or dropping the remaining items' completion count.
+SemaStreamWorkerState: struct {
+    part: SemaBodyPart,
+    pending_claims: [SemaBodyClaim],
+    active_index: Int{-1},
+    parallel_finish: Bool{false},
+    can_finish: Bool{false},
+}
+
+sema_check_body_stream_set_pending: fn(state: Shared<SemaStreamWorkerState>, claims: ^^[SemaBodyClaim], parallel_finish: Bool, can_finish: Bool) {
+    permit: state.guard_edit()
+    permit.value.pending_claims = claims.move()
+    permit.value.active_index = -1
+    permit.value.parallel_finish = parallel_finish
+    permit.value.can_finish = can_finish
+}
+
+sema_check_body_stream_has_pending: fn(state: Shared<SemaStreamWorkerState>) -> Bool {
+    held: state.guard_read()
+    held.value.pending_claims.len() > 0
+}
+
+sema_check_body_stream_part: fn(shared: Shared<SemaCheckShared>, cells: SemaStreamCells, handle: SemaStreamHandle, state: Shared<SemaStreamWorkerState>, args: SemaStreamFinishArgs, kind: SemaWaveKind) -> Int {
     inputs: shared.guard_read()
     wanted: Shared{SemaHostHookWanted{wanted: false}}
-    ^part: SemaBodyPart{scopes: sema_scope_init(module_none()), bodies: [SemaClaimedBody]{}}
     ^current: -1
     parallel_finish: kind == SemaWaveKind.Modules
     ^own_program: SemaProgramTables?{None}
     if sema_check_body_demand_apart(inputs.value.programs[0]) {
         own_program = Val(sema_comptime_function_thread_program(inputs.value.programs[0]))
     }
+    // Finish any remaining items left in the batch after a recovered stop.
+    if sema_check_body_stream_has_pending(state) {
+        if own_program == {
+            .Val(program) -> {
+                sema_check_body_stream_job_tracked(program, inputs.value.memory_plans[0], cells, handle, state, current, wanted)
+            }
+            .None -> {
+                sema_check_body_stream_job_tracked(inputs.value.programs[0], inputs.value.memory_plans[0], cells, handle, state, current, wanted)
+            }
+        }
+    }
     loop {
-        step: sema_check_body_stream_next(handle, current)
+        ^step: sema_check_body_stream_next(handle, current)
         if step.finish {
             if own_program == {
                 .Val(program) -> {
@@ -593,13 +635,17 @@ sema_check_body_stream_part: fn(shared: Shared<SemaCheckShared>, cells: SemaStre
         }
         if step.action == {
             .Body -> {
-                if own_program == {
-                    .Val(program) -> {
-                        sema_check_body_stream_job(program, inputs.value.memory_plans[0], cells, handle, part, current, step.claims, wanted, parallel_finish, step.can_finish)
-                    }
-                    // Passed straight through: a local binding of a guarded row would copy it.
-                    .None -> {
-                        sema_check_body_stream_job(inputs.value.programs[0], inputs.value.memory_plans[0], cells, handle, part, current, step.claims, wanted, parallel_finish, step.can_finish)
+                if step.claims.len() > 0 {
+                    ^claims: step.claims.move()
+                    sema_check_body_stream_set_pending(state, claims, parallel_finish, step.can_finish)
+                    if own_program == {
+                        .Val(program) -> {
+                            sema_check_body_stream_job_tracked(program, inputs.value.memory_plans[0], cells, handle, state, current, wanted)
+                        }
+                        // Passed straight through: a local binding of a guarded row would copy it.
+                        .None -> {
+                            sema_check_body_stream_job_tracked(inputs.value.programs[0], inputs.value.memory_plans[0], cells, handle, state, current, wanted)
+                        }
                     }
                 }
             }
@@ -612,6 +658,7 @@ sema_check_body_stream_part: fn(shared: Shared<SemaCheckShared>, cells: SemaStre
             .Await | .Stop -> break
         }
     }
+    0
 }
 
 sema_check_body_stream_finish_module: fn(base_environment: SemaScopeEnvironment, program: SemaProgramTables, memory_plan: SemaFunctionMemoryPlan, cells: SemaStreamCells, handle: SemaStreamHandle, step: SemaStreamStep, args: SemaStreamFinishArgs, wanted: Shared<SemaHostHookWanted>, apart: Bool) {
@@ -755,6 +802,88 @@ sema_check_body_stream_claimed_batch: fn(cell: Shared<SemaStreamEnvironment>, pr
         done += sema_check_body_claimed(held.value.environments[0], program, memory_plan, part, claim, claim.module_index, wanted)
     }
     done
+}
+
+// Runs `state.pending_claims` against `cell`, recording `state.active_index`
+// before each claim so a runtime stop inside one item can be recovered at the
+// worker task join without losing earlier completed bodies in the batch.
+sema_check_body_stream_run_pending: fn(cell: Shared<SemaStreamEnvironment>, program: SemaProgramTables, memory_plan: SemaFunctionMemoryPlan, worker: ^SemaStreamWorkerState, current: ^Int, wanted: Shared<SemaHostHookWanted>) -> Int {
+    held: cell.guard_read()
+    stream_module: worker.pending_claims[0].stream_module
+    if stream_module != current {
+        current = stream_module
+        ^saved_delta: worker.part.scopes.type_delta.pop()
+        worker.part.scopes = if held.value.light_scopes.len() > 0 -> sema_scope_light_copy(held.value.light_scopes[0]) else -> sema_check_body_stream_scope_copy(held.value.environments[0])
+        if saved_delta == .Val(delta) -> worker.part.scopes.type_delta.push(delta)
+    }
+    ^done: 0
+    count: worker.pending_claims.len()
+    loop index in 0..<count {
+        claim: worker.pending_claims[index]
+        worker.active_index = index
+        done += sema_check_body_claimed(held.value.environments[0], program, memory_plan, worker.part, claim, claim.module_index, wanted)
+    }
+    done
+}
+
+sema_check_body_stream_job_tracked: fn(program: SemaProgramTables, memory_plan: SemaFunctionMemoryPlan, cells: SemaStreamCells, handle: SemaStreamHandle, state: Shared<SemaStreamWorkerState>, current: ^Int, wanted: Shared<SemaHostHookWanted>) {
+    ^permit: state.guard_edit()
+    count: permit.value.pending_claims.len()
+    if count == 0 {
+        return
+    }
+    stream_module: permit.value.pending_claims[0].stream_module
+    parallel_finish: permit.value.parallel_finish
+    can_finish: permit.value.can_finish
+    ^_: sema_check_body_stream_run_pending(cells.environments[stream_module], program, memory_plan, permit.value, current, wanted)
+    permit.value.active_index = -1
+    permit.value.pending_claims = [SemaBodyClaim]{}
+    if sema_check_body_stream_publish(cells.outs[stream_module], permit.value.part, count, handle.changed, parallel_finish) {
+        held: handle.stream.guard_edit()
+        if can_finish -> held.value.ready_finish.push(stream_module) else {
+            held.value.lead_pending.push(stream_module)
+        }
+        handle.work.notify_all()
+    }
+}
+
+// Captures a runtime stop (E3010/E3012/panic) on the active stream body claim
+// when keep-going is enabled: emits the failed item's stop diagnostic packet,
+// publishes the prefix through the stopped item, and leaves the rest of the
+// batch in `state.pending_claims` for the restarted worker.
+sema_check_body_stream_recover: fn(shared: Shared<SemaCheckShared>, cells: SemaStreamCells, handle: SemaStreamHandle, state: Shared<SemaStreamWorkerState>, reason: String) -> Bool {
+    inputs: shared.guard_read()
+    graph: inputs.value.programs[0].registration_graph
+    if !graph.keep_going {
+        return false
+    }
+    ^permit: state.guard_edit()
+    failed_index: permit.value.active_index
+    if failed_index < 0 || failed_index >= permit.value.pending_claims.len() {
+        return false
+    }
+    failed_claim: permit.value.pending_claims[failed_index]
+    stream_module: failed_claim.stream_module
+    parallel_finish: permit.value.parallel_finish
+    can_finish: permit.value.can_finish
+    ^packet: sema_keep_going_stop_packet(graph, failed_claim.module_index, failed_claim, reason)
+    permit.value.part.bodies.push(packet)
+    permit.value.part.scopes.type_delta = [InternerDelta]{}
+    ^remaining: [SemaBodyClaim]{}
+    loop index in (failed_index + 1)..<permit.value.pending_claims.len() {
+        remaining.push(permit.value.pending_claims[index])
+    }
+    completed: failed_index + 1
+    permit.value.pending_claims = remaining.move()
+    permit.value.active_index = -1
+    if sema_check_body_stream_publish(cells.outs[stream_module], permit.value.part, completed, handle.changed, parallel_finish) {
+        held: handle.stream.guard_edit()
+        if can_finish -> held.value.ready_finish.push(stream_module) else {
+            held.value.lead_pending.push(stream_module)
+        }
+        handle.work.notify_all()
+    }
+    true
 }
 
 // Moves the bodies a batch left in `part` into its stream module's published
@@ -1041,16 +1170,58 @@ sema_check_body_part_place: fn(slot: Shared<SemaBodyPart>, placed: ^[SemaParalle
     }
 }
 
+// Captures a runtime stop (E3010/E3012/panic) on the active body claim when
+// keep-going is enabled, turning that item into an E0003 failure packet so the
+// worker restarts on the remaining unclaimed jobs.
+sema_check_body_part_recover: fn(shared: Shared<SemaCheckShared>, slot: Shared<SemaBodyPart>, module_index: Int, reason: String) -> Bool {
+    inputs: shared.guard_read()
+    graph: inputs.value.programs[0].registration_graph
+    if !graph.keep_going {
+        return false
+    }
+    ^permit: slot.guard_edit()
+    claim: permit.value.active_claim ?? return false
+    permit.value.active_claim = None
+    ^packet: sema_keep_going_stop_packet(graph, module_index, claim, reason)
+    permit.value.bodies.push(packet)
+    true
+}
+
+// Runs one body worker slot inside a guarded task so a runtime stop inside an
+// item is caught at the task join, recorded as that item's failure diagnostic
+// under keep-going, and the slot restarts until the queue is drained.
+sema_check_body_part_guarded: fn(shared: Shared<SemaCheckShared>, slot: Shared<SemaBodyPart>, plan: Shared<SemaBodyPlan>, queue: SemaBodyQueue, module_index: Int) -> Int {
+    ^checked: 0
+    loop {
+        ^recovered: false
+        task.group sema_body_guard {
+            worker: task sema_check_body_part(shared, slot, plan, queue, module_index, None)
+            checked += compiler_threads_try_join(worker) ?? {
+                if !sema_check_body_part_recover(shared, slot, module_index, compiler_threads_failure_text(err)) {
+                    compiler_threads_failed(err)
+                }
+                recovered = true
+                0
+            }
+        }
+        if !recovered -> break
+    }
+    checked
+}
+
 // Checks on `slots[from..]`, one task per slot and the last slot on this
 // thread, the one that reports the pass's progress to `trace_sink`; returns
 // how many bodies they checked.
 sema_check_body_parts: fn(shared: Shared<SemaCheckShared>, slots: [Shared<SemaBodyPart>], plan: Shared<SemaBodyPlan>, queue: SemaBodyQueue, from: Int, module_index: Int, trace_sink: CompilerTraceSink?) -> Int {
     if from >= slots.len() - 1 {
+        if trace_sink == None {
+            return sema_check_body_part_guarded(shared, slots[from], plan, queue, module_index)
+        }
         return sema_check_body_part(shared, slots[from], plan, queue, module_index, trace_sink)
     }
     ^checked: 0
     task.group sema_threads {
-        head: task sema_check_body_part(shared, slots[from], plan, queue, module_index, None)
+        head: task sema_check_body_part_guarded(shared, slots[from], plan, queue, module_index)
         checked = sema_check_body_parts(shared, slots, plan, queue, from + 1, module_index, trace_sink)
         checked += compiler_threads_joined(head)
     }
@@ -1070,10 +1241,12 @@ SemaWaveKind: enum {
 }
 
 // A body stream's threads: `tasks` tasks of sema_check_body_stream_part,
-// each watched so that its failure stops the stream at once
-// (sema_check_body_stream_stop) and the lead stops waiting, and the
-// stream's lead (sema_check_body_stream_lead) on this thread, which stops
-// the threads once it checked every module.
+// each watched so that under keep-going a runtime stop inside a body claim is
+// captured at the task join and the worker restarts on the rest of the stream,
+// while any unrecoverable failure stops the stream at once
+// (sema_check_body_stream_stop) and the lead stops waiting; the stream's lead
+// (sema_check_body_stream_lead) runs on this thread and stops the threads once
+// it checked every module.
 sema_check_body_stream_parts: fn(shared: Shared<SemaCheckShared>, cells: SemaStreamCells, handle: SemaStreamHandle, tasks: Int, environment: ^SemaScopeEnvironment, host_hooks: SemaHostHookAccess?, args: SemaStreamFinishArgs, kind: SemaWaveKind, phase: String, trace_sink: CompilerTraceSink?, slot_of_orig: [Int], modules: ^[SemaGraphModuleResult], checked_functions: ^Int, done: ^Int) {
     if tasks <= 0 {
         // Deferred so a panic of the lead stops the threads too: they would
@@ -1084,12 +1257,21 @@ sema_check_body_stream_parts: fn(shared: Shared<SemaCheckShared>, cells: SemaStr
     }
     task.group sema_threads {
         head: task {
-            task.group sema_body_stream_watch {
-                thread: task sema_check_body_stream_part(shared, cells, handle, args, kind)
-                ^_: thread.join() ?? {
-                    sema_check_body_stream_stop(cells, handle, true)
-                    compiler_threads_failed(err)
+            state: Shared{SemaStreamWorkerState{part: SemaBodyPart{scopes: sema_scope_init(module_none()), bodies: [SemaClaimedBody]{}}, pending_claims: [SemaBodyClaim]{}}}
+            loop {
+                ^recovered: false
+                task.group sema_body_stream_watch {
+                    thread: task sema_check_body_stream_part(shared, cells, handle, state, args, kind)
+                    ^_: compiler_threads_try_join(thread) ?? {
+                        if !sema_check_body_stream_recover(shared, cells, handle, state, compiler_threads_failure_text(err)) {
+                            sema_check_body_stream_stop(cells, handle, true)
+                            compiler_threads_failed(err)
+                        }
+                        recovered = true
+                        0
+                    }
                 }
+                if !recovered -> break
             }
         }
         sema_check_body_stream_parts(shared, cells, handle, tasks - 1, environment, host_hooks, args, kind, phase, trace_sink, slot_of_orig, modules, checked_functions, done)

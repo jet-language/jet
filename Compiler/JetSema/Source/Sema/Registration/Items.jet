@@ -1147,7 +1147,7 @@ SemaRegistrationGraph: struct {
     // callable's contract, so a body checked again (the recheck pass) reads
     // a still-defaulted callee as one the solve left fallible.
     failure_solved: Bool{false},
-    // JET_KEEP_GOING, the compiler-internal diagnostic mode the driver sets
+    // Keep-going, the diagnostic mode the driver sets
     // (its output is never shipped): a function whose body check fails is
     // kept as a typed trap of its declared signature instead of being left
     // out, so its callers and every later phase still run.
@@ -1209,7 +1209,7 @@ SemaRegistrationGraph: struct {
     // checked body named checked.
     retained_core_demand: Bool{false},
     // Every Core body is checked whether a checked body names it or not
-    // (JET_KEEP_GOING, `jet check Core`), so none waits for demand.
+    // (keep-going, `jet check Core`), so none waits for demand.
     every_core_body: Bool{false},
     // `jet check Core` (driver core_entry with every_core_body, not the Core
     // library's sealing check): the program is Core's own check, so
@@ -5779,7 +5779,7 @@ sema_registration_import_is_unqualified: fn(declaration: ImportDecl) -> Bool Nev
     }
 }
 
-// Records, for JET_KEEP_GOING, which module rows registered in full: a row
+// Records, for keep-going, which module rows registered in full: a row
 // is settled when no registration-blocking error
 // (sema_registration_blocking_diagnostic) lies in one of its source files.
 // An error with no source file could belong to any row, so it leaves every
@@ -5806,7 +5806,7 @@ sema_registration_settle_modules: fn(graph: ^SemaRegistrationGraph) Never! {
 }
 
 // Whether module row `module_index`'s registered declarations are final: the
-// graph is complete, or JET_KEEP_GOING settled the row. Facts a query reads
+// graph is complete, or keep-going settled the row. Facts a query reads
 // from a settled row are known even when the graph is incomplete.
 sema_registration_module_settled: fn(graph: SemaRegistrationGraph, module_index: Int) -> Bool Never! {
     if graph.complete -> return true

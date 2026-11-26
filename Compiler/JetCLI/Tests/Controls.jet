@@ -83,7 +83,7 @@ controls_test_refused: fn(argv: [String]) -> String Never! {
     assert_eq(controls_test_resolved(jet_cli_control_resolve(report, [String]{}, settings, None)), "settings.tsv from setting")
     variable: jet_cli_control_resolve(report, [String]{}, settings, Val("env.tsv"))
     assert_eq(controls_test_resolved(variable), "env.tsv from environment")
-    assert_eq(variable.location, "JET_KEEP_GOING_REPORT")
+    assert_eq(variable.location, report.variable)
     assert(!variable.shadowed, "a variable that wins is not hidden")
     flag: jet_cli_control_resolve(report, [String]{"--keep-going-report=flag.tsv"}, settings, Val("env.tsv"))
     assert_eq(controls_test_resolved(flag), "flag.tsv from flag")
