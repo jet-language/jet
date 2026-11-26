@@ -1,0 +1,146 @@
+# Power asserts (#7013 n2) and structural `assert_eq` diffs (#7013 n3):
+# 1. JetIR unit tests prove zero passing-path formatting, short-circuit SSA
+#    dominance, IR lint, and x86-64 codegen across O0, O1, and O2.
+# 2. Failing `assert` prints each reached subexpression aligned under the source
+#    identically on O0, O1, and O2, respecting short-circuit `&&`.
+# 3. Failing `assert_eq` on structs, lists, maps, and text prints structural
+#    diffs naming the differing paths identically on O0, O1, and O2.
+env: NO_COLOR=1
+env: JET_TOOLCHAIN_ROOT={root}
+
+step: jet test {root}/Compiler/JetIR/Tests/PowerAssert.jet --filter=power_assert_
+exit: 0
+stdout: ~ "3 passed, 0 failed" # IR lint, zero passing-path formatting, and O0/O1/O2 x64 codegen pass
+
+# --- n2: Power assert (short-circuit LHS fails; RHS is not evaluated) ---
+write: assert_lhs.jet = "User: struct {\n    name: String,\n    age: Int,\n}\n\nrun: fn() {\n    user: User{name: \"Ada\", age: 16}\n    min_age: 18\n    items: [Int]{10, 20}\n    assert(user.age + 1 >= min_age && items.len() > 2)\n}\n"
+
+step lhs_o0: jet run -O0 assert_lhs.jet
+exit: 70
+stderr: ~ "10 |     assert(user.age + 1 >= min_age && items.len() > 2)" # source line printed
+stderr: ~ "   |            |    |   |   |  |       |" # aligned vertical pipes under reached subexpressions
+stderr: ~ "   |            |    |   |   |  |       false" # && value aligned under &&
+stderr: ~ "   |            |    |   |   |  18" # min_age value aligned under min_age
+stderr: ~ "   |            |    |   |   false" # >= value aligned under >=
+stderr: ~ "   |            |    |   17" # + value aligned under +
+stderr: ~ "   |            |    16" # .age value aligned under age
+stderr: ~ "   |            User" # user struct aligned under user
+stderr: !~ "[10, 20]" # short-circuited RHS was not evaluated or printed
+
+step: jet run -O1 assert_lhs.jet
+exit: 70
+stderr: == lhs_o0
+
+step: jet run -O2 assert_lhs.jet
+exit: 70
+stderr: == lhs_o0
+
+# --- n2: Power assert (LHS holds, conditional RHS fails) ---
+write: assert_rhs.jet = "User: struct {\n    name: String,\n    age: Int,\n}\n\nrun: fn() {\n    user: User{name: \"Ada\", age: 21}\n    items: [Int]{10, 20}\n    assert(user.age >= 18 && items.len() > 5)\n}\n"
+
+step rhs_o0: jet run -O0 assert_rhs.jet
+exit: 70
+stderr: ~ "9 |     assert(user.age >= 18 && items.len() > 5)" # source line printed
+stderr: ~ "  |            |    |   |     |  |     |     |" # both LHS and conditional RHS pipes aligned
+stderr: ~ "  |            |    |   |     |  |     |     false" # > value aligned under >
+stderr: ~ "  |            |    |   |     |  |     2" # items.len() aligned under len
+stderr: ~ "  |            |    |   |     |  [10, 20]" # items aligned under items
+stderr: ~ "  |            |    |   |     false" # && value aligned under &&
+stderr: ~ "  |            |    |   true" # >= value aligned under >=
+stderr: ~ "  |            |    21" # user.age aligned under age
+
+step: jet run -O1 assert_rhs.jet
+exit: 70
+stderr: == rhs_o0
+
+step: jet run -O2 assert_rhs.jet
+exit: 70
+stderr: == rhs_o0
+
+# --- n3: Structural diff on nested structs ---
+write: diff_struct.jet = "User: struct {\n    name: String,\n    age: Int,\n}\n\nOrder: struct {\n    id: Int,\n    buyer: User,\n    total: Int,\n}\n\nrun: fn() {\n    got: Order{id: 7, buyer: User{name: \"Ada\", age: 29}, total: 120}\n    expected: Order{id: 7, buyer: User{name: \"Ada\", age: 30}, total: 100}\n    assert_eq(got, expected)\n}\n"
+
+step struct_o0: jet run -O0 diff_struct.jet
+exit: 70
+stderr: ~ "diff:\n" # structural diff header emitted
+stderr: ~ "  buyer.age: expected 30, got 29" # nested struct field path named
+stderr: ~ "  total: expected 100, got 120" # top-level differing field named
+stderr: !~ "buyer.name" # equal field omitted from diff
+
+step: jet run -O1 diff_struct.jet
+exit: 70
+stderr: == struct_o0
+
+step: jet run -O2 diff_struct.jet
+exit: 70
+stderr: == struct_o0
+
+# --- n3: Structural diff on lists ---
+write: diff_list.jet = "run: fn() {\n    got: [Int]{10, 99, 30, 40}\n    expected: [Int]{10, 20, 30}\n    assert_eq(got, expected)\n}\n"
+
+step list_o0: jet run -O0 diff_list.jet
+exit: 70
+stderr: ~ "diff:\n" # structural diff header emitted
+stderr: ~ "  [1]: expected 20, got 99" # differing list index named
+stderr: ~ "  [3]: extra 40" # trailing extra list element named
+
+step: jet run -O1 diff_list.jet
+exit: 70
+stderr: == list_o0
+
+step: jet run -O2 diff_list.jet
+exit: 70
+stderr: == list_o0
+
+# --- n3: Structural diff on maps ---
+write: diff_map.jet = "run: fn() {\n    got: [String:String]{\"env\": \"staging\", \"debug\": \"true\"}\n    expected: [String:String]{\"env\": \"prod\", \"region\": \"us\"}\n    assert_eq(got, expected)\n}\n"
+
+step map_o0: jet run -O0 diff_map.jet
+exit: 70
+stderr: ~ "diff:\n" # structural diff header emitted
+stderr: ~ "  [\"debug\"]: extra \"true\"" # extra map key named
+stderr: ~ "  [\"env\"] (at char 0): expected \"prod\", got \"staging\"" # differing map key path named
+stderr: ~ "  [\"region\"]: missing (expected \"us\")" # missing map key named
+
+step: jet run -O1 diff_map.jet
+exit: 70
+stderr: == map_o0
+
+step: jet run -O2 diff_map.jet
+exit: 70
+stderr: == map_o0
+
+# --- n3: Structural diff on multi-line and single-line text ---
+write: diff_text_multi.jet = "run: fn() {\n    got: \"line one\\nline two\\nline three\"\n    expected: \"line one\\nline TWO\\nline three\"\n    assert_eq(got, expected)\n}\n"
+
+step text_multi_o0: jet run -O0 diff_text_multi.jet
+exit: 70
+stderr: ~ "diff:\n" # structural diff header emitted
+stderr: ~ "  line 2:" # differing line number named
+stderr: ~ "    - expected: \"line TWO\"" # expected line shown
+stderr: ~ "    + got:      \"line two\"" # actual line shown
+
+step: jet run -O1 diff_text_multi.jet
+exit: 70
+stderr: == text_multi_o0
+
+step: jet run -O2 diff_text_multi.jet
+exit: 70
+stderr: == text_multi_o0
+
+write: diff_text_single.jet = "run: fn() {\n    assert_eq(\"hello earth\", \"hello world\")\n}\n"
+
+step text_single_o0: jet run -O0 diff_text_single.jet
+exit: 70
+stderr: ~ "diff:\n" # structural diff header emitted
+stderr: ~ "  at char 6:" # first differing character offset named
+stderr: ~ "    expected: \"hello world\"" # expected text shown
+stderr: ~ "    got:      \"hello earth\"" # actual text shown
+
+step: jet run -O1 diff_text_single.jet
+exit: 70
+stderr: == text_single_o0
+
+step: jet run -O2 diff_text_single.jet
+exit: 70
+stderr: == text_single_o0

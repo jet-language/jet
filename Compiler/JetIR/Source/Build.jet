@@ -197,6 +197,10 @@ IRBuilder: struct {
     // The `#Impure` blocks open around the code being built: a build host
     // call made inside one may touch the ambient world (ir_host_method).
     impure: Int{0},
+    // Active power-assert subexpression capture list and fresh temporaries
+    // held until after `if !condition` closes (BuildAssert.jet).
+    assert_captures: [IRAssertCapture]{[IRAssertCapture]{}},
+    assert_held_fresh: [IRAssertHeld]{[IRAssertHeld]{}},
     // The checked function this body is built from, by its row in the
     // program's functions (None: glue, built from none), whose body
     // (ir_builder_body) holds the nodes and statements it reads; and the

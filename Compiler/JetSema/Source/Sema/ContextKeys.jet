@@ -10,6 +10,8 @@ use jet_foundation.[
     symbol_table_key,
     CONTEXT_ON_STOP_KEY,
     CONTEXT_PRINT_KEY,
+    CONTEXT_DIR_KEY,
+    CONTEXT_ENV_KEY,
     CallArg,
     CallLabel,
     ConstDef,
@@ -37,7 +39,7 @@ SEMA_CONTEXT_SET_FIELDS: [String]{"allocator", "deadline"}
 // The names of the context's own fields and of `context.get`, which a key
 // may not take: `context.<name>` already means them. A Core module declares
 // the key behind a field it owns (sema_context_field_module).
-SEMA_CONTEXT_RESERVED_NAMES: [String]{"allocator", "logger", "deadline", "scratch", "on_stop", "print", "thread", "trace", "get"}
+SEMA_CONTEXT_RESERVED_NAMES: [String]{"allocator", "logger", "deadline", "scratch", "on_stop", "print", "thread", "trace", "dir", "env", "get"}
 
 // A resolved key: its SymbolID key text and its value type.
 SemaContextKey: struct {
@@ -53,7 +55,7 @@ sema_context_field_settable: fn(name: String) -> Bool Never! {
 // The context fields a Core module carries (sema_context_field_module). The
 // loader loads that module wherever the field is spelled (Loader.jet
 // jet_driver_context_field_spelled).
-SEMA_CONTEXT_CORE_FIELDS: [String]{"allocator", "logger", "on_stop", "print", "trace"}
+SEMA_CONTEXT_CORE_FIELDS: [String]{"allocator", "logger", "on_stop", "print", "trace", "dir", "env"}
 
 // The Core module that carries the context field `name`: `logger` is
 // core.log's `logger` key, a `log.Handler`; `on_stop` is a
@@ -63,13 +65,16 @@ SEMA_CONTEXT_CORE_FIELDS: [String]{"allocator", "logger", "on_stop", "print", "t
 // is read through the core.debug function that fills the ContextTrace role
 // (Places.jet sema_expression_context_trace) and has no key, so no block
 // sets it; `allocator` is read through core.mem's `__context_allocator`
-// (Places.jet sema_expression_context_allocator) and set by the block itself.
+// (Places.jet sema_expression_context_allocator) and set by the block itself;
+// `dir` and `env` are task working directory (`String`) and environment
+// overlay (`[String:String]`) carried by `core.sys` and Runtime Context.jet.
 sema_context_field_module: fn(name: String) -> String? Never! {
     if name == {
         "allocator" -> Val("core.mem")
         "logger" -> Val("core.log")
         "on_stop" | "trace" -> Val("core.debug")
         "print" -> Val("core.term")
+        "dir" | "env" -> Val("core.sys")
         else -> None
     }
 }
@@ -157,9 +162,12 @@ sema_context_field_default: fn(field: SemaContextFieldKey, ty: Type, span: Span,
     }
 }
 
-// The key a `#Context` label names: a field a Core key carries, else a
-// `#ContextKey` constant in scope.
+// The key a `#Context` label names: `dir` and `env` are built-in task context
+// keys (`String` and `[String:String]`), any other Core-carried field resolves
+// via `sema_context_field_key`, else a `#ContextKey` constant in scope.
 sema_context_label_key: fn(name: String, check: SemaBodyCheck) -> SemaContextKey? {
+    if name == "dir" -> return Val(SemaContextKey{key: CONTEXT_DIR_KEY, ty: Type.String})
+    if name == "env" -> return Val(SemaContextKey{key: CONTEXT_ENV_KEY, ty: Type.Map{key: Type.String, key_span: None, value: Type.String}})
     if sema_context_field_module(name) != None {
         field: sema_context_field_key(name, check.program.*) ?? return None
         return Val(field.key)

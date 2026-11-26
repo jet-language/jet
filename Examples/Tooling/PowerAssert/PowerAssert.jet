@@ -1,0 +1,55 @@
+// Executable golden example for power `assert` and structural `assert_eq`
+// diffs (#7013): proves zero double-evaluation on compound `assert` conditions,
+// short-circuit preservation, and passing `assert_eq` on structs, lists, maps,
+// and text across O0, O1, and O2.
+
+User: struct {
+    name: String,
+    age: Int,
+}
+
+Order: struct {
+    id: Int,
+    buyer: User,
+    items: [Int],
+    tags: [String:String],
+    summary: String,
+}
+
+make_order: fn(age: Int, second_item: Int, env: String) -> Order {
+    Order{
+        id: 7,
+        buyer: User{name: "Ada", age: age},
+        items: [Int]{10, second_item},
+        tags: [String:String]{"env": env, "tier": "gold"},
+        summary: "order 7\nstatus: ready",
+    }
+}
+
+count_and_add: fn(calls: ^Int, a: Int, b: Int) -> Int {
+    calls += 1
+    a + b
+}
+
+run: fn() {
+    ^calls: 0
+    order: make_order(30, 20, "prod")
+    expected: make_order(30, 20, "prod")
+
+    // Power `assert`: every subexpression evaluates once, respecting short-circuit `&&` / `||`.
+    assert(order.buyer.age >= 18 && order.items.len() == 2)
+    assert(count_and_add(^calls, order.items[0], order.items[1]) == 30)
+    assert(order.id == 7 || count_and_add(^calls, 1, 1) == 0)
+    assert(count_and_add(^calls, 4, 5) == 9)
+    assert_eq(calls, 2)
+
+    // Structural `assert_eq`: structs, lists, maps, and multi-line / single-line text.
+    assert_eq(order, expected)
+    assert_eq(order.items, [Int]{10, 20})
+    assert_eq(order.tags, [String:String]{"env": "prod", "tier": "gold"})
+    assert_eq(order.summary, "order 7\nstatus: ready")
+    assert_eq(order.buyer.name, "Ada")
+
+    total: order.items[0] + order.items[1]
+    print("power assert ok: calls={calls} total={total} items={order.items.len()}")
+}

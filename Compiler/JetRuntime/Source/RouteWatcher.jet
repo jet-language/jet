@@ -141,10 +141,10 @@ watch_snapshot: fn(root: I64, snapshot: I64, error: I64) -> Bool {
         directory: mode == I64{16384}
         watch_snapshot_push(snapshot, jet_rt_string_clone(path), modified, trap_word(wrapping(facts + I64{56})), if directory -> I64{1} else -> I64{0})
         if directory {
-            name: fd_c_path(path)
+            name: fd_c_fs_path(path)
             ^fd: I64{-4}
             loop fd == (I64{-4}) -> fd = host_call(I64{2}, name, FILES_O_DIRECTORY_CLOEXEC, I64{0})
-            fd_c_path_drop(name, path)
+            fd_c_fs_path_drop(name)
             if (fd < I64{0}) {
                 ^_: compiler_fs_errno(HOST_IO_OP_READ, path, -fd, error)
                 failed = true

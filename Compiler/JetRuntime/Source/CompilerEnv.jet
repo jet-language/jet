@@ -12,8 +12,24 @@ compiler_env_columns_storage: fn(pairs: I64, output: I64) -> I64 {
     data
 }
 
+compiler_env_find_pair: fn(buf: I64, len: I64, key_data: I64, key_len: I64) -> I64 {
+    ^at: I64{0}
+    loop at < len {
+        row: wrapping(buf + at * I64{32})
+        if (rt_text_word(wrapping(row + I64{8})) == key_len && rt_text_equal_bytes(rt_text_word(row), key_data, key_len)) {
+            return at
+        }
+        at += I64{1}
+    }
+    I64{-1}
+}
+
 #Export(c) jet_rt_logical_env_columns: fn(output: I64) {
     rt_test_reads_text(I64{65}, I64{0})
+    count_slot: jet_rt_alloc(I64{8}, I64{8})
+    nodes: context_env_nodes_outer_to_inner(count_slot)
+    node_count: rt_text_word(count_slot)
+    jet_rt_free(count_slot, I64{8}, I64{8})
     root: logical_environment_current()
     shared_acquire(root, false)
     ^pairs: I64{0}
@@ -22,16 +38,98 @@ compiler_env_columns_storage: fn(pairs: I64, output: I64) -> I64 {
         pairs += I64{1}
         entry = rt_text_word(entry)
     }
-    data: compiler_env_columns_storage(pairs, output)
+    if (node_count == I64{0}) {
+        data: compiler_env_columns_storage(pairs, output)
+        entry = rt_text_word(wrapping(root + I64{56}))
+        ^at: I64{0}
+        loop entry != (I64{0}) {
+            host_startup_list(rt_text_word(wrapping(entry + I64{8})), rt_text_word(wrapping(entry + I64{16})), wrapping(data + at * I64{48}))
+            host_startup_list(rt_text_word(wrapping(entry + I64{24})), rt_text_word(wrapping(entry + I64{32})), wrapping(wrapping(data + at * I64{48}) + I64{24}))
+            entry = rt_text_word(entry)
+            at += I64{1}
+        }
+        shared_release(root, false)
+        return
+    }
+    ^cap: wrapping(pairs + I64{16})
+    ^buf: jet_rt_alloc(wrapping(cap * I64{32}), I64{8})
+    ^len: I64{0}
     entry = rt_text_word(wrapping(root + I64{56}))
-    ^at: I64{0}
     loop entry != (I64{0}) {
-        host_startup_list(rt_text_word(wrapping(entry + I64{8})), rt_text_word(wrapping(entry + I64{16})), wrapping(data + at * I64{48}))
-        host_startup_list(rt_text_word(wrapping(entry + I64{24})), rt_text_word(wrapping(entry + I64{32})), wrapping(wrapping(data + at * I64{48}) + I64{24}))
+        row: wrapping(buf + len * I64{32})
+        rt_text_store(row, rt_text_word(wrapping(entry + I64{8})))
+        rt_text_store(wrapping(row + I64{8}), rt_text_word(wrapping(entry + I64{16})))
+        rt_text_store(wrapping(row + I64{16}), rt_text_word(wrapping(entry + I64{24})))
+        rt_text_store(wrapping(row + I64{24}), rt_text_word(wrapping(entry + I64{32})))
+        len += I64{1}
         entry = rt_text_word(entry)
+    }
+    ^ni: I64{0}
+    loop ni < node_count {
+        node: rt_text_word(wrapping(nodes + ni * I64{8}))
+        mlen: sync_load(wrapping(node + I64{40}))
+        mdata: sync_load(wrapping(node + I64{56}))
+        ^mi: I64{0}
+        loop mi < mlen {
+            mrow: wrapping(mdata + mi * I64{16})
+            k: sync_load(mrow)
+            v: sync_load(wrapping(mrow + I64{8}))
+            kd: rt_text_data(k)
+            kl: rt_text_len(k)
+            pos: compiler_env_find_pair(buf, len, kd, kl)
+            if context_env_is_tombstone(v) {
+                if (pos >= I64{0}) {
+                    ^shift: pos
+                    loop wrapping(shift + I64{1}) < len {
+                        dst: wrapping(buf + shift * I64{32})
+                        src: wrapping(buf + wrapping(shift + I64{1}) * I64{32})
+                        rt_text_store(dst, rt_text_word(src))
+                        rt_text_store(wrapping(dst + I64{8}), rt_text_word(wrapping(src + I64{8})))
+                        rt_text_store(wrapping(dst + I64{16}), rt_text_word(wrapping(src + I64{16})))
+                        rt_text_store(wrapping(dst + I64{24}), rt_text_word(wrapping(src + I64{24})))
+                        shift += I64{1}
+                    }
+                    len -= I64{1}
+                }
+            } else {
+                vd: rt_text_data(v)
+                vl: rt_text_len(v)
+                if (pos >= I64{0}) {
+                    dst: wrapping(buf + pos * I64{32})
+                    rt_text_store(wrapping(dst + I64{16}), vd)
+                    rt_text_store(wrapping(dst + I64{24}), vl)
+                } else {
+                    if (len == cap) {
+                        grown: cap * I64{2}
+                        next_buf: jet_rt_alloc(wrapping(grown * I64{32}), I64{8})
+                        coll_copy(buf, next_buf, wrapping(len * I64{32}))
+                        jet_rt_free(buf, wrapping(cap * I64{32}), I64{8})
+                        buf = next_buf
+                        cap = grown
+                    }
+                    dst: wrapping(buf + len * I64{32})
+                    rt_text_store(dst, kd)
+                    rt_text_store(wrapping(dst + I64{8}), kl)
+                    rt_text_store(wrapping(dst + I64{16}), vd)
+                    rt_text_store(wrapping(dst + I64{24}), vl)
+                    len += I64{1}
+                }
+            }
+            mi += I64{1}
+        }
+        ni += I64{1}
+    }
+    data: compiler_env_columns_storage(len, output)
+    ^at: I64{0}
+    loop at < len {
+        row: wrapping(buf + at * I64{32})
+        host_startup_list(rt_text_word(row), rt_text_word(wrapping(row + I64{8})), wrapping(data + at * I64{48}))
+        host_startup_list(rt_text_word(wrapping(row + I64{16})), rt_text_word(wrapping(row + I64{24})), wrapping(wrapping(data + at * I64{48}) + I64{24}))
         at += I64{1}
     }
     shared_release(root, false)
+    jet_rt_free(buf, wrapping(cap * I64{32}), I64{8})
+    jet_rt_free(nodes, wrapping(node_count * I64{8}), I64{8})
 }
 
 #Export(c) jet_rt_startup_env_columns: fn(output: I64) {

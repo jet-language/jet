@@ -197,9 +197,9 @@ process_authority_executable: fn(spec: I64, err: I64) -> I64 {
     }
     if (process_execution_has(command, I64{47}) || process_execution_has(command, I64{92})) {
         scratch: jet_rt_alloc(I64{48}, I64{8})
-        name: fd_c_path(command)
+        name: fd_c_fs_path(command)
         bytes: jet_process_path_canonicalize_raw(name, scratch, wrapping(scratch + I64{8}), wrapping(scratch + I64{16}))
-        jet_rt_free(name, rt_text_len(command) + I64{1}, I64{1})
+        fd_c_fs_path_drop(name)
         ^found: I64{0}
         if (bytes == I64{0}) {
             ^_: process_execution_error(spec, HOST_IO_OP_RESOLVE, host_errno_cause(fd_word(scratch, I64{24})), err)
@@ -427,9 +427,9 @@ process_authority_plan: fn(spec: I64, bwrap_out: I64, err: I64) -> I64 {
 // A real directory's canonical path (owned), or 0 with a Resolve error.
 process_authority_real_directory: fn(spec: I64, path: I64, err: I64) -> I64 {
     scratch: jet_rt_alloc(I64{176}, I64{8})
-    name: fd_c_path(path)
+    name: fd_c_fs_path(path)
     bytes: jet_process_path_canonicalize_raw(name, wrapping(scratch + I64{160}), wrapping(scratch + I64{168}), wrapping(scratch + I64{128}))
-    jet_rt_free(name, rt_text_len(path) + I64{1}, I64{1})
+    fd_c_fs_path_drop(name)
     if (bytes == I64{0}) {
         cause: jet_rt_string_builder_new()
         jet_rt_string_builder_push(cause, rt_static_text("sandbox directory `"))
@@ -476,9 +476,9 @@ process_authority_child_directory: fn(spec: I64, parent: I64, name: I64, err: I6
     if (errno == I64{0} && mode == I64{40960}) { refusal = rt_static_text("` is a symlink") } else if (errno == I64{0} && mode != I64{16384}) {
         refusal = rt_static_text("` is not a directory")
     } else if (errno == I64{2}) {
-        name_c: fd_c_path(path)
+        name_c: fd_c_fs_path(path)
         made: host_call(I64{83}, name_c, I64{511}, I64{0})
-        jet_rt_free(name_c, rt_text_len(path) + I64{1}, I64{1})
+        fd_c_fs_path_drop(name_c)
         errno = if (made < I64{0}) -> { -made } else -> { I64{0} }
     }
     if (refusal != I64{0}) {

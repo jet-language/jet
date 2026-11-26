@@ -2057,6 +2057,9 @@ ir_expr: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, expression: Int) -> Int N
     ir_fix_expr(m, p, b, expression, slot)
     span: ir_body_node_span(p, b, expression)
     ir_call_sites_mark(p, b, first, span)
+    if b.assert_captures.len() > 0 && slot >= 0 {
+        ir_assert_capture_record(m, p, b, expression, slot)
+    }
     slot
 }
 
@@ -2849,6 +2852,9 @@ ir_binary_chain: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, expression: Int) 
             lhs_ty: ir_ty(m, p, b, lhs)
             rhs_ty: ir_ty(m, p, b, rhs)
             result: ir_binary(m, p, b, op, overflow, line, lhs_ty, left, right, rhs_ty, node.span)
+            if b.assert_captures.len() > 0 && result >= 0 && index > 0 {
+                ir_assert_capture_record(m, p, b, levels[index], result)
+            }
             ir_release(m, b, left)
             ir_release(m, b, right)
             left = result
@@ -9633,35 +9639,7 @@ ir_require_stop: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, kind: BodyRequire
     report: ir_report_location(p, location)
     if kind == {
         .Require(test, message) -> {
-            condition: ir_expr(m, p, b, test)
-            if ir_failed(b) || condition < 0 -> return -1
-            // The message runs on the stopping path only: a variable it
-            // moves still owns its value where the condition holds.
-            before: ir_own_states(b, b.bindings.len())
-            if !always_stops {
-                bool_row: ir_type_row(m, Type.Bool) ?? 0
-                failed: ir_temp(m, b, bool_row)
-                ir_emit(b.f, IROp.Not, failed, condition, -1, -1, b.line)
-                ir_open_if(b.f, failed, b.line)
-            }
-            ^text: -1
-            if message == .Val(value) {
-                slot: ir_expr(m, p, b, value)
-                if ir_failed(b) -> return -1
-                value_ty: ir_ty(m, p, b, value)
-                text = ir_render(m, p, b, value_ty, slot, IRRender.Display, span)
-            } else {
-                string_row: ir_string_row(m)
-                text = ir_temp(m, b, string_row)
-                ir_emit(b.f, IROp.ConstText, text, ir_intern_text(m, "condition failed"), -1, -1, b.line)
-            }
-            if ir_failed(b) -> return -1
-            null: ir_word_const(m, b, 0)
-            ir_stop(m, p, b, 0, text, null, null, report)
-            if !always_stops {
-                ir_end(b.f, b.line)
-                ir_set_own_states(b, before)
-            }
+            return ir_assert_require(m, p, b, test, message, report, always_stops, span)
         }
         .RequireEq(left, right, hook) -> {
             left_slot: ir_expr(m, p, b, left)
@@ -9684,8 +9662,9 @@ ir_require_stop: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, kind: BodyRequire
             left_text: ir_render(m, p, b, left_ty, left_slot, IRRender.Debug, span)
             right_text: ir_render(m, p, b, right_ty, right_slot, IRRender.Debug, span)
             if ir_failed(b) -> return -1
-            code: ir_word_const(m, b, 0)
-            ir_stop(m, p, b, 1, code, left_text, right_text, report)
+            diff: ir_assert_eq_diff(m, p, b, left_ty, left_slot, right_slot, span)
+            if ir_failed(b) -> return -1
+            ir_stop(m, p, b, 1, diff, left_text, right_text, report)
             if !always_stops -> ir_end(b.f, b.line)
         }
         .Panic(message) -> {

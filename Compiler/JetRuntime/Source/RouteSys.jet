@@ -397,9 +397,9 @@ sys_group_file: fn(user: I64, gid: I64, list: I64, look: I64, reader: I64, nscd:
     if (jet_scheduler_native_propagate() != I64{0}) {
         return
     }
-    name: fd_c_path(path)
+    name: fd_c_fs_path(path)
     result: host_call(I64{133}, name, native & I64{4294967295} | I64{4096}, I64{0})
-    fd_c_path_drop(name, path)
+    fd_c_fs_path_drop(name)
     host_sample_out(result, available, value, errno)
 }
 
@@ -414,9 +414,9 @@ sys_group_file: fn(user: I64, gid: I64, list: I64, look: I64, reader: I64, nscd:
     if (jet_scheduler_native_propagate() != I64{0}) {
         return
     }
-    name: fd_c_path(path)
+    name: fd_c_fs_path(path)
     result: host_call(I64{133}, name, native_mode & I64{4294967295}, native_dev)
-    fd_c_path_drop(name, path)
+    fd_c_fs_path_drop(name)
     host_sample_out(result, available, value, errno)
 }
 
@@ -619,12 +619,12 @@ sys_load_bits: fn(info: I64, result: I64, offset: I64) -> I64 {
     trap_store(wrapping(times + I64{8}), I64{0})
     trap_store(wrapping(times + I64{16}), modified)
     trap_store(wrapping(times + I64{24}), I64{0})
-    name: fd_c_path(path)
+    name: fd_c_fs_path(path)
     ^result: I64{0}
     #Unsafe("utimensat borrows the NUL-terminated path and the two owned timespecs for the synchronous call") {
         result = host_syscall(I64{280}, I64{-100}, name, times, I64{0}, I64{0}, I64{0})
     }
-    fd_c_path_drop(name, path)
+    fd_c_fs_path_drop(name)
     jet_rt_free(times, I64{32}, I64{8})
     host_sample_out(result, available, value, errno)
 }
@@ -648,10 +648,15 @@ sys_load_bits: fn(info: I64, result: I64, offset: I64) -> I64 {
     jet_rt_free(buffer, I64{32}, I64{8})
 }
 
-// std.env.set_current_dir: a NUL byte is std's CString refusal; otherwise
-// chdir and io.Error's Display of the errno.
+// Task-scoped working directory update (no OS chdir(2)): validates NUL,
+// existence, directory type, and execute/search permission, then updates only
+// the current task's context directory.
 #Export(c) jet_sys_set_current_dir_raw: fn(path: I64, error: I64) -> I64 {
     length: rt_text_len(path)
+    if (length == I64{0}) {
+        rt_text_store(error, host_errno_cause(I64{2}))
+        return I64{0}
+    }
     ^at: I64{0}
     loop at < length {
         if (rt_text_byte(wrapping(rt_text_data(path) + at)) == I64{0}) {
@@ -660,13 +665,32 @@ sys_load_bits: fn(info: I64, result: I64, offset: I64) -> I64 {
         }
         at += I64{1}
     }
-    name: fd_c_path(path)
-    result: host_call(I64{80}, name, I64{0}, I64{0})
-    fd_c_path_drop(name, path)
-    if (result < I64{0}) {
-        rt_text_store(error, host_errno_cause(-result))
+    name: fd_c_fs_path(path)
+    scratch: jet_rt_alloc(I64{128}, I64{8})
+    ^stat_res: I64{0}
+    #Unsafe("the terminated resolved path and 128-byte stat scratch remain live through stat") {
+        stat_res = os_stat_facts_i64(I64{4}, name, scratch)
+    }
+    mode: rt_text_word(wrapping(scratch + I64{16}))
+    jet_rt_free(scratch, I64{128}, I64{8})
+    if (stat_res < I64{0}) {
+        fd_c_fs_path_drop(name)
+        rt_text_store(error, host_errno_cause(-stat_res))
         return I64{0}
     }
+    if ((mode & I64{61440}) != I64{16384}) {
+        fd_c_fs_path_drop(name)
+        rt_text_store(error, host_errno_cause(I64{20}))
+        return I64{0}
+    }
+    acc: host_call(I64{21}, name, I64{1}, I64{0})
+    fd_c_fs_path_drop(name)
+    if (acc < I64{0}) {
+        rt_text_store(error, host_errno_cause(-acc))
+        return I64{0}
+    }
+    resolved: context_dir_resolve_owned(path)
+    context_dir_set_imperative(resolved)
     I64{1}
 }
 
@@ -683,7 +707,11 @@ sys_load_bits: fn(info: I64, result: I64, offset: I64) -> I64 {
         return
     }
     out: jet_rt_alloc(I64{8}, I64{8})
-    status: env_read_file(path, out)
+    len: rt_text_len(path)
+    use_resolved: len > I64{0} && rt_text_byte(rt_text_data(path)) != I64{47} && context_dir_current() != I64{0}
+    target: if use_resolved -> context_dir_resolve_owned(path) else -> path
+    status: env_read_file(target, out)
+    if use_resolved { jet_rt_string_drop(target) }
     value: rt_text_word(out)
     jet_rt_free(out, I64{8}, I64{8})
     if (status == I64{1}) {
@@ -700,9 +728,8 @@ sys_load_bits: fn(info: I64, result: I64, offset: I64) -> I64 {
     rt_text_store(cause, value)
 }
 
-// std.env.var_os(name).into_encoded_bytes(): the process environment (the
-// logical overlay never writes it). musl getenv finds no name holding '=' (or
-// empty); std refuses an interior NUL as absent.
+// Task-scoped environment lookup falling back to startup process bytes.
+// Refuses empty names or names holding '=' or NUL as absent.
 #Export(c) jet_sys_host_env_raw: fn(name: I64, data_out: I64, length_out: I64) -> I64 {
     comptime_serve_refuse(COMPTIME_REFUSED_ENVIRONMENT)
     rt_test_reads_text(I64{69}, name)
@@ -714,6 +741,14 @@ sys_load_bits: fn(info: I64, result: I64, offset: I64) -> I64 {
         byte: rt_text_byte(wrapping(rt_text_data(name) + at))
         if (byte == I64{0} || byte == I64{61}) { return I64{0} }
         at += I64{1}
+    }
+    hit: context_env_lookup(rt_text_data(name), length)
+    if (hit == CONTEXT_ENV_UNSET) { return I64{0} }
+    if (hit != I64{0}) {
+        size: rt_text_len(hit)
+        rt_text_store(data_out, host_startup_bytes(rt_text_data(hit), size))
+        rt_text_store(length_out, size)
+        return I64{1}
     }
     value: host_environment_value_bytes(rt_text_data(name), length)
     if (value == I64{0}) { return I64{0} }

@@ -1,0 +1,24 @@
+# Working directory and environment are task-scoped context keys:
+# `#Context(dir:, env:)` sets them for the block (and spawned tasks),
+# relative file/DB/process operations resolve against them, imperative
+# `chdir`/`set`/`unset` mutate only the current task's context frame, and
+# parallel tests and tasks never interfere across O0, O1, and O2.
+fixture: ContextDirEnvScopingAndParallelIsolation.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run -O0 main.jet
+exit: 0
+stdout: = "ok\n"
+step: jet run -O1 main.jet
+exit: 0
+stdout: = "ok\n"
+step: jet run -O2 main.jet
+exit: 0
+stdout: = "ok\n"
+step: jet test -O0 main.jet
+exit: 0
+step: jet test -O1 main.jet
+exit: 0
+step: jet test -O2 main.jet
+exit: 0

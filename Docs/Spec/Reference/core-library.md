@@ -67,6 +67,18 @@ contracts, generated collection/module indexes, and non-obvious invariants.
   equals `r.split("a").split("b")`). Zero-argument `rng.split()` retains the
   legacy stateful step, and `core.crypto.random` remains a separate OS CSPRNG.
   See [`Examples/Math/SplittableRandom.jet`](../../../Examples/Math/SplittableRandom.jet).
+- **Task-scoped working directory and environment (`#Context(dir:, env:)`):**
+  `context.dir` (`String`) and `context.env` (`[String:String]`) carry the
+  active task's working directory and environment. `#Context(dir: ..., env: {CC: "clang"}) { ... }`
+  scopes both lexically (restoring on exit and inherited by spawned tasks);
+  relative paths in `core.files`, `core.db`, and `core.process`, environment
+  reads in `core.sys` and `core.process`, and spawned child processes resolve
+  against the task context. Imperative mutators (`core.sys.set_current_dir`,
+  `core.files.chdir`, `core.files.cd`, `core.sys.set`, `core.sys.unset`)
+  update only the current task's context frame — no Core API reads or mutates
+  a shared process-wide working directory or environment outside the task
+  context, so parallel tests and tasks setting different directories never
+  interfere.
 
 ## Collection operations
 
@@ -458,7 +470,7 @@ The built-module inventory is a source-facing registry, not a missing-domain led
 - `core.sys`
 - `core.tasks`
 - `core.term`
-- `core.testing`
+- `core.testing` — deterministic tests, goldens, snapshots, and fake clocks; ambient `assert` renders aligned subexpression values on failure across `O0`/`O1`/`O2` with zero passing-path formatting, and `assert_eq` prints path-level structural diffs for structs, lists, maps, and text
 - `core.text`
 - `core.text.fmt`
 - `core.text.html`

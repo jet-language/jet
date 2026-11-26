@@ -1,0 +1,75 @@
+package: {
+    name: "context_dir_env"
+    authority: { allow: [FS, Env, Exec, IO] }
+}
+
+use {
+    files: core.files
+    process: core.process
+    sys: core.sys
+}
+
+run: fn() -[FS, Env, Exec, IO]> {
+    root: files.temp_dir("context-dir-env") ?? panic("temp_dir failed")
+    build_root: files.join(root.path, "build_root")
+    sub: files.join(build_root, "sub")
+    dir_a: files.join(root.path, "dir_a")
+    dir_b: files.join(root.path, "dir_b")
+    files.create_dir_all(sub) ?? panic("create_dir_all sub failed")
+    files.create_dir_all(dir_a) ?? panic("create_dir_all dir_a failed")
+    files.create_dir_all(dir_b) ?? panic("create_dir_all dir_b failed")
+
+    outer_dir: context.dir
+    outer_cc: sys.get("CC") ?? "unset"
+
+    #Context(dir: build_root, env: {CC: "clang", MODE: "release"}) {
+        cur: sys.current_dir() ?? panic("current_dir failed")
+        cwd: files.cwd() ?? panic("cwd failed")
+        print("dir_match={context.dir == build_root && cur == build_root && cwd == build_root}")
+        print("env_cc={context.env.get("CC") ?? "missing"}")
+        print("env_mode={process.env_get("MODE") ?? "missing"}")
+
+        files.write("artifact.txt", "built-with-clang") ?? panic("write failed")
+        text: files.read("artifact.txt") ?? panic("read failed")
+        print("file={text}")
+
+        child: process.cmd(["sh", "-c", "printf '%s|%s|%s' \"$(basename \"$(pwd)\")\" \"$CC\" \"$MODE\""]).stdout(.Capture).stderr(.Capture).run() ?? panic("child failed")
+        print("child={child.output.trim()}")
+
+        #Context(dir: "sub", env: {CC: "gcc"}) {
+            files.write("nested.txt", "ok") ?? panic("nested write failed")
+            nested_dir: files.basename(context.dir)
+            nested_cc: sys.get("CC") ?? "missing"
+            nested_mode: sys.get("MODE") ?? "missing"
+            print("nested={nested_dir}|{nested_cc}|{nested_mode}")
+        }
+
+        print("restored_inner={files.basename(context.dir)}|{sys.get("CC") ?? "missing"}")
+    }
+
+    restored_dir: context.dir == outer_dir
+    restored_cc: (sys.get("CC") ?? "unset") == outer_cc
+    print("restored_outer={restored_dir && restored_cc}")
+
+    both: (task.all {
+        left: {
+            ^out: ""
+            #Context(dir: dir_a, env: {TAG: "alpha"}) {
+                files.write("marker.txt", "alpha") ?? panic("write a failed")
+                res: process.cmd(["sh", "-c", "printf '%s:%s' \"$(basename \"$(pwd)\")\" \"$TAG\""]).stdout(.Capture).stderr(.Capture).run() ?? panic("child a failed")
+                out = res.output.trim()
+            }
+            out
+        },
+        right: {
+            ^out: ""
+            #Context(dir: dir_b, env: {TAG: "beta"}) {
+                files.write("marker.txt", "beta") ?? panic("write b failed")
+                res: process.cmd(["sh", "-c", "printf '%s:%s' \"$(basename \"$(pwd)\")\" \"$TAG\""]).stdout(.Capture).stderr(.Capture).run() ?? panic("child b failed")
+                out = res.output.trim()
+            }
+            out
+        },
+    }) ?? panic("task.all failed")
+    print("parallel={both.left}|{both.right}")
+}

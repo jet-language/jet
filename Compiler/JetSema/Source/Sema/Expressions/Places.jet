@@ -933,6 +933,7 @@ sema_expression_field: fn(field: Expr, base: Expr, member: String, span: Span, e
 sema_expression_context_read: fn(member: String, member_span: Span, span: Span, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
     if member == "trace" -> return sema_expression_context_trace(span, expected, check)
     if member == "allocator" -> return sema_expression_context_allocator(span, expected, check)
+    if member == "dir" || member == "env" -> return sema_expression_context_sys_field(member, span, expected, check)
     keyed: if sema_context_field_module(member) != None -> sema_context_field_key(member, check.program.*) else -> SemaContextFieldKey?{None}
     ty: if keyed == {
         .Val(field) -> field.key.ty.copy()
@@ -1026,6 +1027,31 @@ sema_expression_context_allocator: fn(span: Span, expected: Type?, check: ^SemaB
     returned: sema_call_signature_return(target.signature) ?? return None
     allocator: if returned == .Result(ok, _) -> ok.copy() else -> returned
     read: sema_tree_node(allocator, TExprKind.Call{callee: callee, type_args: [Type]{}, args: [TCallArg]{}}, span)
+    sema_expr_expected_owned(read, expected, check.environment.*, check.program.*, check.diagnostics)
+}
+
+// `context.dir` (`String`) and `context.env` (`[String:String]`): read the
+// current task's working directory and merged environment map through
+// `core.sys.__context_dir` / `core.sys.__context_env`. Like every context read
+// it records no effect row of its own.
+sema_expression_context_sys_field: fn(member: String, span: Span, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
+    if !sema_effect_record_intrinsic_effects(check, "context.{member}", span, [EffectRowEntry]{}) {
+        return None
+    }
+    graph: check.program.registration_graph
+    if graph.mode == .Snapshot -> return None
+    identity: sema_call_core_module_identity(check.environment.*, check.program.*, "core.sys") ?? {
+        check.diagnostics.push(sema_error("E0906", span, "the core.sys module for `context.{member}` is unavailable", "`context.{member}` reads the task context through `core.sys`", "restore the `core.sys` source module"))
+        return None
+    }
+    helper: if member == "dir" -> "__context_dir" else -> "__context_env"
+    target: sema_call_core_source_target(check.environment.*, check.program.*, identity, helper, [Type]{}, span, true, check.diagnostics) ?? {
+        check.diagnostics.push(sema_error("E0906", span, "the core.sys helper `{helper}` for `context.{member}` is unavailable", "`context.{member}` reads the task context through `core.sys`", "restore `core.sys`"))
+        return None
+    }
+    callee: sema_call_callee_decl(check.program.*, target.symbol.id, span, check.diagnostics) ?? return None
+    result_ty: if member == "dir" -> Type.String else -> Type.Map{key: Type.String, key_span: None, value: Type.String}
+    read: sema_tree_node(result_ty, TExprKind.Call{callee: callee, type_args: [Type]{}, args: [TCallArg]{}}, span)
     sema_expr_expected_owned(read, expected, check.environment.*, check.program.*, check.diagnostics)
 }
 

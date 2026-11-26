@@ -550,11 +550,13 @@ walk_out_error: fn(failure: I64, kind: I64, code_tag: I64, code: I64, cause_tag:
 // std.fs.read: open O_RDONLY|O_CLOEXEC and read to the end, EINTR retried.
 // Returns 0 with the bytes/length/capacity in `output`, or -errno.
 walk_read_file: fn(name: I64, output: I64) -> I64 {
+    resolved: fd_c_fs_path_bytes(name, files_c_len(name))
     ^fd: I64{-4}
     loop {
-        fd = host_call(I64{2}, name, I64{524288}, I64{0})
+        fd = host_call(I64{2}, resolved, I64{524288}, I64{0})
         if (fd != I64{-4}) { break }
     }
+    fd_c_fs_path_drop(resolved)
     if (fd < I64{0}) { return fd }
     ^capacity: I64{8192}
     ^bytes: jet_rt_alloc(capacity, I64{1})
@@ -689,9 +691,12 @@ walk_read_file: fn(name: I64, output: I64) -> I64 {
         return
     }
     data: walk_slot_data(context, slot)
+    data_len: walk_slot_length(context, slot)
     ^failure: WALK_NUL
-    if !walk_has_nul(data, walk_slot_length(context, slot)) {
-        fd: host_call(I64{2}, data, FILES_O_DIRECTORY_CLOEXEC, I64{0})
+    if !walk_has_nul(data, data_len) {
+        resolved: fd_c_fs_path_bytes(data, data_len)
+        fd: host_call(I64{2}, resolved, FILES_O_DIRECTORY_CLOEXEC, I64{0})
+        fd_c_fs_path_drop(resolved)
         failure = if (fd < I64{0}) -> fd else -> I64{0}
         if (fd >= I64{0}) {
             stream: jet_rt_alloc(WALK_STREAM_BYTES, I64{8})
@@ -913,10 +918,12 @@ path_walk_canonical: fn(data: I64, size: I64) -> I64 {
         rt_text_store(wrapping(stack_sizes + I64{8}), top)
         ^fd: I64{-1}
         if path_walk_valid(directory, directory_length) {
-            canonical: path_walk_canonical(directory, size)
+            resolved: fd_c_fs_path_bytes(directory, directory_length)
+            canonical: path_walk_canonical(resolved, size)
             if (canonical != I64{0} && path_walk_visit(seen, seen_sizes, canonical, rt_text_word(size))) {
-                fd = host_call(I64{2}, directory, FILES_O_DIRECTORY_CLOEXEC, I64{0})
+                fd = host_call(I64{2}, resolved, FILES_O_DIRECTORY_CLOEXEC, I64{0})
             }
+            fd_c_fs_path_drop(resolved)
         }
         loop fd >= (I64{0}) {
             count: host_call(I64{217}, fd, buffer, FILES_DIRENT_BYTES)

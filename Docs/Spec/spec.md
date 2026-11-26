@@ -4965,6 +4965,30 @@ unchanged, so `print("x = {255}")` shows `x = 255`; interpolation, Debug,
 do not read the style. The defaults print as a program without a block
 does. A program that spells either form loads core.term.
 
+`context.dir` (`String`) and `context.env` (`[String:String]`) are the
+current task's working directory and effective environment.
+`#Context(dir: build_root, env: {CC: "clang"}) { ... }` sets them for the
+block and any tasks spawned inside it, and restores both on normal exit or
+early return. `dir` accepts either a `String` or a `core.files.path.Path`;
+a relative `dir` resolves against the enclosing task's working directory.
+`env` accepts either a `[String:String]` map or the shorthand record literal
+`{NAME: "value", ...}` whose field names become environment variable keys,
+overlaying the enclosing task's environment while leaving unmentioned keys
+inherited. Inside the block, every relative filesystem and database path
+(`core.files.*`, `core.db.open`, `core.sys.current_dir`, `core.files.cwd`),
+every environment read (`core.sys.get`, `core.sys.environment`,
+`core.sys.vars`, `core.process.env_get`, `context.env`), and every spawned
+child process (`core.process.cmd(...).run()` — inheriting both `dir` and
+`env`, with relative `.cwd(...)` resolved against `context.dir` and explicit
+`.env(...)` / `.env_clear()` taking precedence) resolves against the task
+context. Imperative updates (`core.sys.set_current_dir`, `core.files.chdir`,
+`core.files.cd`, `core.sys.set`, `core.sys.unset`) mutate only the current
+task's context frame and never call OS `chdir(2)` or mutate process-wide
+environment state, so parallel tasks and tests setting different directories
+or variables run concurrently without interference. A program that spells
+`context.dir`, `context.env`, `#Context(dir: ...)`, or `#Context(env: ...)`
+loads `core.sys`.
+
 ### Parallel collection adapters
 
 Lists expose `para_map`, `para_filter`, `para_partition`, and `para_fold`.
@@ -6182,6 +6206,28 @@ fails. A failing assertion carries the E3001 report and Jet
 source location. A test target with no tests or doctests reports E0601; bare
 package testing skips source members with neither, then reports the resolved
 package contains no testable member at all. (R9)
+
+### Power assertions and structural diffs
+
+A failing `assert(condition[, message])` renders the runtime value of every
+evaluated non-literal subexpression on the assertion's source line aligned
+directly under its source column on every optimization tier (`-O0`, `-O1`,
+`-O2`). Subexpressions evaluate once in Jet's normal left-to-right
+short-circuiting order: unevaluated branches of `&&`, `||`, or `??` are neither
+evaluated nor printed, and moved non-copyable temporaries are omitted rather
+than copied. Formatting runs strictly on the failure path, so passing
+assertions perform zero string formatting.
+
+A failing `assert_eq(got, expected)` on structs, lists, maps, tuples, payload
+enums, structured optionals/results, or text appends a `diff:` section naming
+each differing path (`field`, `outer.inner`, `[index]`, `["key"]`, extra and
+missing list/map entries, multi-line `line N:` unified entries, and single-line
+`at char N:` offsets), bounded to 32 leaf differences. Plain top-level scalars
+and `--backtrace=off` keep their compact stop output unchanged, and raw stop
+messages (`.expect_fail(message:)`) preserve `expected: <right>, got: <left>`.
+`assert` and `assert_eq` remain standard ambient builtins in the editor
+grammars (`Tools/Editors/jet.tmGrammar`, `Tools/Editors/TreeSitter/grammar.js`,
+and `Tools/Editors/Zed/languages/jet/highlights.scm`) with zero new syntax.
 
 Each `#Test` and `Output.Check` starts with fresh module state. After each test
 finishes, the runtime settles any leftover tasks started by that test, and the

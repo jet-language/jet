@@ -1,0 +1,202 @@
+package: {
+    name: "context_dir_env_scoping_and_parallel_isolation"
+    authority: { allow: [FS, Env, Exec, IO, DB] }
+}
+
+use {
+    db: core.db
+    files: core.files
+    path: core.files.path
+    process: core.process
+    sys: core.sys
+}
+
+early_exit_helper: fn(dir_target: String) -[FS, Env]> String {
+    #Context(dir: dir_target, env: {EARLY_KEY: "inside"}) {
+        files.write("early.txt", "from-early") ?? panic("early write failed")
+        if sys.get("EARLY_KEY") == Val("inside") {
+            return files.basename(context.dir)
+        }
+    }
+    "unreachable"
+}
+
+run: fn() -[FS, Env, Exec, IO, DB]> {
+    root: files.temp_dir("ctx-dir-env-case") ?? panic("temp_dir failed")
+    build_root: files.join(root.path, "build_root")
+    sub: files.join(build_root, "sub")
+    files.create_dir_all(sub) ?? panic("create_dir_all failed")
+
+    outer_dir: context.dir
+    outer_cc: sys.get("CC")
+
+    // 1. Shorthand `{CC: "clang"}` + String `dir` + relative files, DB, list_dir, walk, and spawn.
+    #Context(dir: build_root, env: {CC: "clang", BUILD_TAG: "r1"}) {
+        assert_eq(context.dir, build_root)
+        assert_eq(sys.current_dir() ?? panic("current_dir"), build_root)
+        assert_eq(files.cwd() ?? panic("cwd"), build_root)
+        assert_eq(sys.get("CC"), Val("clang"))
+        assert_eq(process.env_get("BUILD_TAG"), Val("r1"))
+        assert_eq(context.env.get("CC"), Val("clang"))
+        assert_eq(sys.environment().get("BUILD_TAG"), Val("r1"))
+        assert(sys.vars().contains("BUILD_TAG"))
+
+        // Relative file write/read/exists/list_dir/create_dir_all.
+        files.write("hello.txt", "world") ?? panic("write hello")
+        assert(files.exists("hello.txt"))
+        assert_eq(files.read("hello.txt") ?? panic("read hello"), "world")
+        assert_eq(files.read(files.join(build_root, "hello.txt")) ?? panic("read abs"), "world")
+        files.create_dir_all("gen/out") ?? panic("create_dir_all rel")
+        assert(files.exists(files.join(build_root, "gen/out")))
+        entries: files.list_dir(".") ?? panic("list_dir")
+        ^saw_hello: false
+        loop entry in entries {
+            if entry.name == "hello.txt" -> saw_hello = true
+        }
+        assert(saw_hello)
+
+        // Relative DB open resolves against `#Context(dir:)`.
+        store: db.open("local.db") ?? panic("db.open")
+        _: store.execute(SQL{"CREATE TABLE kv(k TEXT, v TEXT)"}) ?? panic("create table")
+        _: store.execute(SQL{"INSERT INTO kv VALUES ('a', '1')"}) ?? panic("insert")
+        _: store.close()
+        assert(files.exists(files.join(build_root, "local.db")))
+
+        // Spawned child inherits context dir and env; relative `.cwd("sub")` resolves against context dir;
+        // explicit `.env(...)` overrides context env.
+        c1: process.cmd(["sh", "-c", "printf '%s|%s|%s' \"$(basename \"$(pwd)\")\" \"$CC\" \"$BUILD_TAG\""]).stdout(.Capture).stderr(.Capture).run() ?? panic("spawn c1")
+        assert_eq(c1.output.trim(), "build_root|clang|r1")
+        c2: process.cmd(["sh", "-c", "printf '%s|%s' \"$(basename \"$(pwd)\")\" \"$CC\""]).cwd("sub").env("CC", "custom").stdout(.Capture).stderr(.Capture).run() ?? panic("spawn c2")
+        assert_eq(c2.output.trim(), "sub|custom")
+
+        // Nested `#Context` with relative `dir: "sub"` and `[String:String]` map `env`.
+        #Context(dir: "sub", env: ["CC": "gcc", "NESTED": "yes"]) {
+            assert_eq(context.dir, sub)
+            assert_eq(sys.get("CC"), Val("gcc"))
+            assert_eq(sys.get("BUILD_TAG"), Val("r1"))
+            assert_eq(sys.get("NESTED"), Val("yes"))
+            files.write("sub.txt", "nested") ?? panic("write sub")
+            assert(files.exists(files.join(sub, "sub.txt")))
+        }
+        assert_eq(context.dir, build_root)
+        assert_eq(sys.get("CC"), Val("clang"))
+        assert_eq(sys.get("NESTED"), None)
+
+        // Imperative `chdir`/`set`/`unset` inside `#Context` unwinds on block exit.
+        files.chdir("sub") ?? panic("chdir sub")
+        assert_eq(context.dir, sub)
+        sys.set("CC", "tcc")
+        assert_eq(sys.get("CC"), Val("tcc"))
+        removed: sys.unset("BUILD_TAG") ?? panic("unset")
+        assert(removed)
+        assert_eq(sys.get("BUILD_TAG"), None)
+        assert_eq(context.env.get("BUILD_TAG"), String?{None})
+        c3: process.cmd(["sh", "-c", "printf '%s|%s|%s' \"$(basename \"$(pwd)\")\" \"$CC\" \"$BUILD_TAG\""]).stdout(.Capture).stderr(.Capture).run() ?? panic("spawn c3")
+        assert_eq(c3.output.trim(), "sub|tcc|")
+    }
+
+    // Restored cleanly outside `#Context`.
+    assert_eq(context.dir, outer_dir)
+    assert_eq(sys.get("CC"), outer_cc)
+    assert_eq(sys.get("BUILD_TAG"), None)
+
+    // 2. `#Context(dir: Path)` accepts `core.files.path.Path`.
+    sub_path: path.of(sub)
+    #Context(dir: sub_path) {
+        assert_eq(context.dir, sub)
+        assert_eq(files.read("sub.txt") ?? panic("read sub via Path"), "nested")
+    }
+    assert_eq(context.dir, outer_dir)
+
+    // 3. Early `return` restores both `dir` and `env`.
+    assert_eq(early_exit_helper(build_root), "build_root")
+    assert_eq(context.dir, outer_dir)
+    assert_eq(sys.get("EARLY_KEY"), None)
+    assert_eq(files.read(files.join(build_root, "early.txt")) ?? panic("read early"), "from-early")
+
+    // 4. Spawned child task inherits parent `#Context(dir:, env:)` even after parent exits block.
+    ^inherited_task: task { "" }
+    #Context(dir: build_root, env: {INHERITED: "yes"}) {
+        inherited_task = task {
+            "{files.basename(context.dir)}|{sys.get("INHERITED") ?? "no"}|{files.read("hello.txt") ?? "err"}"
+        }
+    }
+    assert_eq(context.dir, outer_dir)
+    assert_eq(sys.get("INHERITED"), None)
+    assert_eq(inherited_task.join() ?? panic("join"), "build_root|yes|world")
+
+    // 5. Parallel tasks setting different directories via `#Context(dir:)` AND imperative `chdir`/`set`
+    // never interfere with each other or the parent task.
+    dir_p1: files.join(root.path, "p1")
+    dir_p2: files.join(root.path, "p2")
+    files.create_dir_all(dir_p1) ?? panic("mkdir p1")
+    files.create_dir_all(dir_p2) ?? panic("mkdir p2")
+    parallel: (task.all {
+        a: {
+            files.chdir(dir_p1) ?? panic("chdir p1")
+            sys.set("PAR_WHO", "one")
+            ^i: 0
+            loop i < 8 {
+                files.write("probe_{i}.txt", "one") ?? panic("write p1")
+                assert_eq(context.dir, dir_p1)
+                assert_eq(sys.get("PAR_WHO"), Val("one"))
+                i += 1
+            }
+            c: process.cmd(["sh", "-c", "printf '%s:%s' \"$(basename \"$(pwd)\")\" \"$PAR_WHO\""]).stdout(.Capture).stderr(.Capture).run() ?? panic("child p1")
+            c.output.trim()
+        },
+        b: {
+            files.chdir(dir_p2) ?? panic("chdir p2")
+            sys.set("PAR_WHO", "two")
+            ^i: 0
+            loop i < 8 {
+                files.write("probe_{i}.txt", "two") ?? panic("write p2")
+                assert_eq(context.dir, dir_p2)
+                assert_eq(sys.get("PAR_WHO"), Val("two"))
+                i += 1
+            }
+            c: process.cmd(["sh", "-c", "printf '%s:%s' \"$(basename \"$(pwd)\")\" \"$PAR_WHO\""]).stdout(.Capture).stderr(.Capture).run() ?? panic("child p2")
+            c.output.trim()
+        },
+    }) ?? panic("task.all parallel")
+    assert_eq(parallel.a, "p1:one")
+    assert_eq(parallel.b, "p2:two")
+    assert_eq(context.dir, outer_dir)
+    assert_eq(sys.get("PAR_WHO"), None)
+
+    print("ok")
+}
+
+#Test("parallel test A sets directory A without interfering with test B") {
+    root: files.temp_dir("ctx-par-test-a") ?? panic("temp_dir a")
+    dir_a: files.join(root.path, "work_a")
+    files.create_dir_all(dir_a) ?? panic("mkdir work_a")
+    files.chdir(dir_a) ?? panic("chdir work_a")
+    sys.set("TEST_LANE", "A")
+    ^i: 0
+    loop i < 16 {
+        files.write("step_{i}.txt", "A") ?? panic("write a")
+        assert_eq(files.cwd() ?? panic("cwd a"), dir_a)
+        assert_eq(sys.get("TEST_LANE"), Val("A"))
+        i += 1
+    }
+    child: process.cmd(["sh", "-c", "printf '%s:%s' \"$(basename \"$(pwd)\")\" \"$TEST_LANE\""]).stdout(.Capture).stderr(.Capture).run() ?? panic("child a")
+    assert_eq(child.output.trim(), "work_a:A")
+}
+
+#Test("parallel test B sets directory B without interfering with test A") {
+    root: files.temp_dir("ctx-par-test-b") ?? panic("temp_dir b")
+    dir_b: files.join(root.path, "work_b")
+    files.create_dir_all(dir_b) ?? panic("mkdir work_b")
+    #Context(dir: dir_b, env: {TEST_LANE: "B"}) {
+        ^i: 0
+        loop i < 16 {
+            files.write("step_{i}.txt", "B") ?? panic("write b")
+            assert_eq(files.cwd() ?? panic("cwd b"), dir_b)
+            assert_eq(sys.get("TEST_LANE"), Val("B"))
+            i += 1
+        }
+        child: process.cmd(["sh", "-c", "printf '%s:%s' \"$(basename \"$(pwd)\")\" \"$TEST_LANE\""]).stdout(.Capture).stderr(.Capture).run() ?? panic("child b")
+        assert_eq(child.output.trim(), "work_b:B")
+    }
+}

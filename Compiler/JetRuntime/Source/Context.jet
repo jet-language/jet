@@ -217,6 +217,89 @@ context_release: fn(record: I64) {
     context_scratch_drop(record)
 }
 
+// Fixed context key words (IR BuildTransact.jet ir_context_key_word):
+// 1 = on_stop, 2 = dir (resolved absolute String), 3 = env (24-byte Map header
+// of {key: String, val: String} pairs; 1-byte "\0" value = unset tombstone).
+// Bit 62 marks a task-local imperative node (sys.set/unset/set_current_dir),
+// which jet_ctx_value_pop skips so exiting a `#Context` block always pops its
+// own block nodes.
+CONTEXT_DIR_KEY: I64{2}
+
+CONTEXT_ENV_KEY: I64{3}
+
+CONTEXT_KEY_MASK: I64{4611686018427387903}
+
+CONTEXT_IMPERATIVE_FLAG: I64{4611686018427387904}
+
+CONTEXT_ENV_UNSET: I64{-1}
+
+// Drops a runtime-allocated imperative context node (release helper == 0).
+context_imperative_node_free: fn(node: I64) {
+    key: sync_load(wrapping(node + CONTEXT_NODE_KEY)) & CONTEXT_KEY_MASK
+    if (key == CONTEXT_DIR_KEY) {
+        dir: sync_load(wrapping(node + I64{40}))
+        if (dir != I64{0}) { jet_rt_string_drop(dir) }
+        jet_rt_free(node, I64{48}, I64{8})
+        return
+    }
+    if (key == CONTEXT_ENV_KEY) {
+        len: sync_load(wrapping(node + I64{40}))
+        cap: sync_load(wrapping(node + I64{48}))
+        data: sync_load(wrapping(node + I64{56}))
+        ^at: I64{0}
+        loop at < len {
+            row: wrapping(data + at * I64{16})
+            jet_rt_string_drop(sync_load(row))
+            jet_rt_string_drop(sync_load(wrapping(row + I64{8})))
+            at += I64{1}
+        }
+        if (cap > I64{0} && data != I64{0}) {
+            jet_rt_free(data, wrapping(cap * I64{16}), I64{8})
+        }
+        jet_rt_free(node, I64{64}, I64{8})
+    }
+}
+
+// Clones an imperative node (with refcount 1 and next == 0) for copy-on-write
+// when a spawned task shares the parent's chain via context_inherit.
+context_imperative_node_clone: fn(node: I64) -> I64 {
+    raw_key: sync_load(wrapping(node + CONTEXT_NODE_KEY))
+    key: raw_key & CONTEXT_KEY_MASK
+    if (key == CONTEXT_DIR_KEY) {
+        fresh: jet_rt_alloc(I64{48}, I64{8})
+        sync_store(fresh, I64{1})
+        sync_store(wrapping(fresh + I64{8}), I64{0})
+        sync_store(wrapping(fresh + CONTEXT_NODE_RELEASE), I64{0})
+        sync_store(wrapping(fresh + CONTEXT_NODE_KEY), raw_key)
+        sync_store(wrapping(fresh + CONTEXT_NODE_NEXT), I64{0})
+        dir: sync_load(wrapping(node + I64{40}))
+        sync_store(wrapping(fresh + I64{40}), if (dir == I64{0}) -> I64{0} else -> jet_rt_string_clone(dir))
+        return fresh
+    }
+    len: sync_load(wrapping(node + I64{40}))
+    cap: if (len < I64{4}) -> I64{4} else -> len
+    data: jet_rt_alloc(wrapping(cap * I64{16}), I64{8})
+    src: sync_load(wrapping(node + I64{56}))
+    ^at: I64{0}
+    loop at < len {
+        srow: wrapping(src + at * I64{16})
+        drow: wrapping(data + at * I64{16})
+        sync_store(drow, jet_rt_string_clone(sync_load(srow)))
+        sync_store(wrapping(drow + I64{8}), jet_rt_string_clone(sync_load(wrapping(srow + I64{8}))))
+        at += I64{1}
+    }
+    fresh: jet_rt_alloc(I64{64}, I64{8})
+    sync_store(fresh, I64{1})
+    sync_store(wrapping(fresh + I64{8}), I64{0})
+    sync_store(wrapping(fresh + CONTEXT_NODE_RELEASE), I64{0})
+    sync_store(wrapping(fresh + CONTEXT_NODE_KEY), raw_key)
+    sync_store(wrapping(fresh + CONTEXT_NODE_NEXT), I64{0})
+    sync_store(wrapping(fresh + I64{40}), len)
+    sync_store(wrapping(fresh + I64{48}), cap)
+    sync_store(wrapping(fresh + I64{56}), data)
+    fresh
+}
+
 // Drops one reference to `node` (0: none); a last owner's release helper
 // drops its value and frees it, and its reference to the next node goes
 // the same way.
@@ -227,35 +310,375 @@ context_values_release: fn(node: I64) {
             return
         }
         next: sync_load(wrapping(at + CONTEXT_NODE_NEXT))
-        before: jet_scheduler_native_status()
-        coll_call1_unit(sync_load(wrapping(at + CONTEXT_NODE_RELEASE)), at)
-        scheduler_hook_checks_arm(before)
+        release: sync_load(wrapping(at + CONTEXT_NODE_RELEASE))
+        if (release == I64{0}) {
+            context_imperative_node_free(at)
+        } else {
+            before: jet_scheduler_native_status()
+            coll_call1_unit(release, at)
+            scheduler_hook_checks_arm(before)
+        }
         at = next
     }
 }
 
+// OS getcwd(2) as an owned String, or 0 on failure. Used only as the base when
+// no `#Context(dir:)` is active on the current task.
+context_os_getcwd: fn() -> I64 {
+    ^capacity: I64{512}
+    loop {
+        bytes: jet_rt_alloc(capacity, I64{8})
+        result: host_call(I64{79}, bytes, capacity, I64{0})
+        if (result > I64{0}) {
+            if (rt_text_byte(bytes) == I64{47}) {
+                text: rt_text_lossy(bytes, result - I64{1})
+                jet_rt_free(bytes, capacity, I64{8})
+                return text
+            }
+            jet_rt_free(bytes, capacity, I64{8})
+            return I64{0}
+        }
+        jet_rt_free(bytes, capacity, I64{8})
+        if (result != I64{-34}) { return I64{0} }
+        capacity *= I64{2}
+    }
+}
+
+// Lexically normalize an absolute POSIX path (`bytes[0..<length]`, starting
+// with '/'): collapses duplicate '/', '/./', and '/../', stripping a trailing
+// '/' except for "/". Returns an owned String.
+context_dir_normalize: fn(bytes: I64, length: I64) -> I64 {
+    // Store (start, len) of each kept path segment in a scratch array.
+    ^seg_cap: I64{16}
+    ^segs: jet_rt_alloc(wrapping(seg_cap * I64{16}), I64{8})
+    ^seg_len: I64{0}
+    ^at: I64{0}
+    loop at < length {
+        loop at < length && rt_text_byte(wrapping(bytes + at)) == (I64{47}) -> at += I64{1}
+        start: at
+        loop at < length && rt_text_byte(wrapping(bytes + at)) != (I64{47}) -> at += I64{1}
+        part_len: at - start
+        if (part_len == I64{0}) { next }
+        if (part_len == I64{1} && rt_text_byte(wrapping(bytes + start)) == I64{46}) { next }
+        if (part_len == I64{2} && rt_text_byte(wrapping(bytes + start)) == I64{46} && rt_text_byte(wrapping(wrapping(bytes + start) + I64{1})) == I64{46}) {
+            if (seg_len > I64{0}) { seg_len -= I64{1} }
+            next
+        }
+        if (seg_len == seg_cap) {
+            grown: seg_cap * I64{2}
+            next_segs: jet_rt_alloc(wrapping(grown * I64{16}), I64{8})
+            coll_copy(segs, next_segs, wrapping(seg_cap * I64{16}))
+            jet_rt_free(segs, wrapping(seg_cap * I64{16}), I64{8})
+            segs = next_segs
+            seg_cap = grown
+        }
+        row: wrapping(segs + seg_len * I64{16})
+        rt_text_store(row, start)
+        rt_text_store(wrapping(row + I64{8}), part_len)
+        seg_len += I64{1}
+    }
+    builder: jet_rt_string_builder_new()
+    if (seg_len == I64{0}) {
+        jet_rt_string_builder_push(builder, rt_static_text("/"))
+    } else {
+        ^i: I64{0}
+        loop i < seg_len {
+            row: wrapping(segs + i * I64{16})
+            jet_rt_string_builder_push(builder, rt_static_text("/"))
+            rt_text_append(builder, wrapping(bytes + rt_text_word(row)), rt_text_word(wrapping(row + I64{8})))
+            i += I64{1}
+        }
+    }
+    jet_rt_free(segs, wrapping(seg_cap * I64{16}), I64{8})
+    jet_rt_string_builder_finish(builder)
+}
+
+// Resolve `raw` (borrowed String) against the current task's working directory
+// (or OS getcwd) into a normalized absolute owned String.
+context_dir_resolve_owned: fn(raw: I64) -> I64 {
+    len: rt_text_len(raw)
+    data: rt_text_data(raw)
+    if (len > I64{0} && rt_text_byte(data) == I64{47}) {
+        return context_dir_normalize(data, len)
+    }
+    cur: context_dir_current()
+    base: if (cur != I64{0}) -> jet_rt_string_clone(cur) else -> context_os_getcwd()
+    if (base == I64{0}) { return jet_rt_string_clone(raw) }
+    if (len == I64{0}) { return base }
+    builder: jet_rt_string_builder_new()
+    jet_rt_string_builder_push(builder, base)
+    jet_rt_string_builder_push(builder, rt_static_text("/"))
+    jet_rt_string_builder_push(builder, raw)
+    joined: jet_rt_string_builder_finish(builder)
+    jet_rt_string_drop(base)
+    normalized: context_dir_normalize(rt_text_data(joined), rt_text_len(joined))
+    jet_rt_string_drop(joined)
+    normalized
+}
+
+// The innermost task-context working directory String (borrowed), or 0 when
+// no `#Context(dir:)` or task-local chdir is active on this task.
+context_dir_current: fn() -> I64 {
+    base: thread_base()
+    if (base == I64{0} || base == thread_detached_base()) { return I64{0} }
+    record: sync_load(wrapping(base + CONTEXT_TCB_SLOT))
+    if (record == I64{0}) { return I64{0} }
+    ^at: sync_load(wrapping(record + CONTEXT_VALUES))
+    loop at != (I64{0}) {
+        if ((sync_load(wrapping(at + CONTEXT_NODE_KEY)) & CONTEXT_KEY_MASK) == CONTEXT_DIR_KEY) {
+            return sync_load(wrapping(at + I64{40}))
+        }
+        at = sync_load(wrapping(at + CONTEXT_NODE_NEXT))
+    }
+    I64{0}
+}
+
+// Install `resolved` (owned String, ownership transferred) as this task's
+// imperative working directory without calling OS chdir(2).
+context_dir_set_imperative: fn(resolved: I64) {
+    head_slot: wrapping(context_current() + CONTEXT_VALUES)
+    head: sync_load(head_slot)
+    if (head != I64{0} && sync_load(wrapping(head + CONTEXT_NODE_KEY)) == (CONTEXT_DIR_KEY | CONTEXT_IMPERATIVE_FLAG) && sync_load(head) == I64{1}) {
+        old: sync_load(wrapping(head + I64{40}))
+        sync_store(wrapping(head + I64{40}), resolved)
+        if (old != I64{0}) { jet_rt_string_drop(old) }
+        return
+    }
+    node: jet_rt_alloc(I64{48}, I64{8})
+    sync_store(node, I64{1})
+    sync_store(wrapping(node + I64{8}), I64{0})
+    sync_store(wrapping(node + CONTEXT_NODE_RELEASE), I64{0})
+    sync_store(wrapping(node + CONTEXT_NODE_KEY), CONTEXT_DIR_KEY | CONTEXT_IMPERATIVE_FLAG)
+    sync_store(wrapping(node + CONTEXT_NODE_NEXT), head)
+    sync_store(wrapping(node + I64{40}), resolved)
+    sync_store(head_slot, node)
+}
+
+// Whether `val` (String) is the 1-byte "\0" unset tombstone.
+context_env_is_tombstone: fn(val: I64) -> Bool {
+    rt_text_len(val) == I64{1} && rt_text_byte(rt_text_data(val)) == I64{0}
+}
+
+// Fresh 1-byte "\0" String marking an unset environment variable.
+context_env_tombstone: fn() -> I64 {
+    buf: jet_rt_alloc(I64{1}, I64{1})
+    rt_text_put(buf, I64{0})
+    text: rt_text_copy(buf, I64{1})
+    jet_rt_free(buf, I64{1}, I64{1})
+    text
+}
+
+// Validate every entry of a `#Context(env: ...)` node before linking it.
+context_env_validate_node: fn(node: I64) {
+    len: sync_load(wrapping(node + I64{40}))
+    data: sync_load(wrapping(node + I64{56}))
+    ^at: I64{0}
+    loop at < len {
+        row: wrapping(data + at * I64{16})
+        k: sync_load(row)
+        v: sync_load(wrapping(row + I64{8}))
+        if !logical_environment_valid_name(k) {
+            walk_panic(rt_static_text("core.sys.set: invalid environment variable name"))
+            return
+        }
+        if walk_has_nul(rt_text_data(v), rt_text_len(v)) {
+            walk_panic(rt_static_text("core.sys.set: invalid environment variable value"))
+            return
+        }
+        at += I64{1}
+    }
+}
+
+// Look up `(bytes, length)` across this task's `CONTEXT_ENV_KEY` chain
+// innermost-first: returns a borrowed value String (>0), CONTEXT_ENV_UNSET (-1)
+// if explicitly unset, or 0 to fall through to the base environment.
+context_env_lookup: fn(bytes: I64, length: I64) -> I64 {
+    base: thread_base()
+    if (base == I64{0} || base == thread_detached_base()) { return I64{0} }
+    record: sync_load(wrapping(base + CONTEXT_TCB_SLOT))
+    if (record == I64{0}) { return I64{0} }
+    ^at: sync_load(wrapping(record + CONTEXT_VALUES))
+    loop at != (I64{0}) {
+        if ((sync_load(wrapping(at + CONTEXT_NODE_KEY)) & CONTEXT_KEY_MASK) == CONTEXT_ENV_KEY) {
+            len: sync_load(wrapping(at + I64{40}))
+            data: sync_load(wrapping(at + I64{56}))
+            ^i: len - I64{1}
+            loop i >= (I64{0}) {
+                row: wrapping(data + i * I64{16})
+                k: sync_load(row)
+                if (rt_text_len(k) == length && rt_text_equal_bytes(rt_text_data(k), bytes, length)) {
+                    v: sync_load(wrapping(row + I64{8}))
+                    if context_env_is_tombstone(v) { return CONTEXT_ENV_UNSET }
+                    return v
+                }
+                i -= I64{1}
+            }
+        }
+        at = sync_load(wrapping(at + CONTEXT_NODE_NEXT))
+    }
+    I64{0}
+}
+
+// Update or insert `(key, value)` (value == 0 -> unset tombstone) in this
+// task's imperative `CONTEXT_ENV_KEY` overlay (mutating in place when the head
+// is an unshared imperative env node, else pushing a fresh imperative node).
+context_env_set_imperative: fn(key: I64, value: I64) {
+    head_slot: wrapping(context_current() + CONTEXT_VALUES)
+    head: sync_load(head_slot)
+    stored_val: if (value == I64{0}) -> context_env_tombstone() else -> jet_rt_string_clone(value)
+    if (head != I64{0} && sync_load(wrapping(head + CONTEXT_NODE_KEY)) == (CONTEXT_ENV_KEY | CONTEXT_IMPERATIVE_FLAG) && sync_load(head) == I64{1}) {
+        len: sync_load(wrapping(head + I64{40}))
+        cap: sync_load(wrapping(head + I64{48}))
+        ^data: sync_load(wrapping(head + I64{56}))
+        ^i: I64{0}
+        loop i < len {
+            row: wrapping(data + i * I64{16})
+            if jet_rt_string_eq(sync_load(row), key) {
+                old_val: sync_load(wrapping(row + I64{8}))
+                sync_store(wrapping(row + I64{8}), stored_val)
+                jet_rt_string_drop(old_val)
+                return
+            }
+            i += I64{1}
+        }
+        if (len == cap) {
+            grown: if (cap == I64{0}) -> I64{4} else -> cap * I64{2}
+            next_data: jet_rt_alloc(wrapping(grown * I64{16}), I64{8})
+            if (len > I64{0}) { coll_copy(data, next_data, wrapping(len * I64{16})) }
+            if (cap > I64{0} && data != I64{0}) { jet_rt_free(data, wrapping(cap * I64{16}), I64{8}) }
+            data = next_data
+            sync_store(wrapping(head + I64{48}), grown)
+            sync_store(wrapping(head + I64{56}), data)
+        }
+        row: wrapping(data + len * I64{16})
+        sync_store(row, jet_rt_string_clone(key))
+        sync_store(wrapping(row + I64{8}), stored_val)
+        sync_store(wrapping(head + I64{40}), len + I64{1})
+        return
+    }
+    data: jet_rt_alloc(I64{64}, I64{8})
+    sync_store(data, jet_rt_string_clone(key))
+    sync_store(wrapping(data + I64{8}), stored_val)
+    node: jet_rt_alloc(I64{64}, I64{8})
+    sync_store(node, I64{1})
+    sync_store(wrapping(node + I64{8}), I64{0})
+    sync_store(wrapping(node + CONTEXT_NODE_RELEASE), I64{0})
+    sync_store(wrapping(node + CONTEXT_NODE_KEY), CONTEXT_ENV_KEY | CONTEXT_IMPERATIVE_FLAG)
+    sync_store(wrapping(node + CONTEXT_NODE_NEXT), head)
+    sync_store(wrapping(node + I64{40}), I64{1})
+    sync_store(wrapping(node + I64{48}), I64{4})
+    sync_store(wrapping(node + I64{56}), data)
+    sync_store(head_slot, node)
+}
+
+// Collect all `CONTEXT_ENV_KEY` nodes of this task in outermost-to-innermost
+// order into a newly allocated buffer (caller frees `count * 8` bytes).
+// Writes count to `out_count` and returns buffer pointer (0 when count == 0).
+context_env_nodes_outer_to_inner: fn(out_count: I64) -> I64 {
+    rt_text_store(out_count, I64{0})
+    base: thread_base()
+    if (base == I64{0} || base == thread_detached_base()) { return I64{0} }
+    record: sync_load(wrapping(base + CONTEXT_TCB_SLOT))
+    if (record == I64{0}) { return I64{0} }
+    ^count: I64{0}
+    ^at: sync_load(wrapping(record + CONTEXT_VALUES))
+    loop at != (I64{0}) {
+        if ((sync_load(wrapping(at + CONTEXT_NODE_KEY)) & CONTEXT_KEY_MASK) == CONTEXT_ENV_KEY) {
+            count += I64{1}
+        }
+        at = sync_load(wrapping(at + CONTEXT_NODE_NEXT))
+    }
+    if (count == I64{0}) { return I64{0} }
+    buf: jet_rt_alloc(wrapping(count * I64{8}), I64{8})
+    ^pos: count - I64{1}
+    at = sync_load(wrapping(record + CONTEXT_VALUES))
+    loop at != (I64{0}) {
+        if ((sync_load(wrapping(at + CONTEXT_NODE_KEY)) & CONTEXT_KEY_MASK) == CONTEXT_ENV_KEY) {
+            rt_text_store(wrapping(buf + pos * I64{8}), at)
+            pos -= I64{1}
+        }
+        at = sync_load(wrapping(at + CONTEXT_NODE_NEXT))
+    }
+    rt_text_store(out_count, count)
+    buf
+}
+
 // `#Context(key: value)` entry: `node`, a new node with one owner, goes in
 // front of the current record's chain, taking over the head's reference.
+// For CONTEXT_DIR_KEY, resolves relative paths against the enclosing context
+// dir before linking; for CONTEXT_ENV_KEY, validates every key and value.
 #Export(c) jet_ctx_value_push: fn(node: I64) {
+    key: sync_load(wrapping(node + CONTEXT_NODE_KEY))
+    if (key == CONTEXT_DIR_KEY) {
+        raw: sync_load(wrapping(node + I64{40}))
+        resolved: context_dir_resolve_owned(raw)
+        sync_store(wrapping(node + I64{40}), resolved)
+        jet_rt_string_drop(raw)
+    } else if (key == CONTEXT_ENV_KEY) {
+        context_env_validate_node(node)
+    }
     head: wrapping(context_current() + CONTEXT_VALUES)
     sync_store(wrapping(node + CONTEXT_NODE_NEXT), sync_load(head))
     sync_store(head, node)
 }
 
-// `#Context(key: value)` exit: the `count` innermost nodes leave the
+// Unlinks the innermost non-imperative node from the current record's chain,
+// copy-on-writing any shared imperative prefix sitting above it so spawned
+// tasks keep their inherited chain untouched.
+context_pop_one_block: fn(head_slot: I64) {
+    head: sync_load(head_slot)
+    if (head == I64{0}) { return }
+    if ((sync_load(wrapping(head + CONTEXT_NODE_KEY)) & CONTEXT_IMPERATIVE_FLAG) == I64{0}) {
+        next: sync_load(wrapping(head + CONTEXT_NODE_NEXT))
+        if next != (I64{0}) -> jet_rt_native_closure_retain(next)
+        sync_store(head_slot, next)
+        context_values_release(head)
+        return
+    }
+    // Count imperative nodes above the first block node.
+    ^imp_count: I64{0}
+    ^target: head
+    loop target != (I64{0}) && (sync_load(wrapping(target + CONTEXT_NODE_KEY)) & CONTEXT_IMPERATIVE_FLAG) != (I64{0}) {
+        imp_count += I64{1}
+        target = sync_load(wrapping(target + CONTEXT_NODE_NEXT))
+    }
+    if (target == I64{0}) { return }
+    target_key: sync_load(wrapping(target + CONTEXT_NODE_KEY)) & CONTEXT_KEY_MASK
+    after: sync_load(wrapping(target + CONTEXT_NODE_NEXT))
+    // Clone only imperative nodes of other keys; imperative mutations of
+    // `target_key` made inside this `#Context` block unwind with the block.
+    ^new_head: I64{0}
+    ^new_tail: I64{0}
+    ^cur: head
+    ^i: I64{0}
+    loop i < imp_count {
+        if ((sync_load(wrapping(cur + CONTEXT_NODE_KEY)) & CONTEXT_KEY_MASK) != target_key) {
+            cloned: context_imperative_node_clone(cur)
+            if (new_head == I64{0}) { new_head = cloned } else {
+                sync_store(wrapping(new_tail + CONTEXT_NODE_NEXT), cloned)
+            }
+            new_tail = cloned
+        }
+        cur = sync_load(wrapping(cur + CONTEXT_NODE_NEXT))
+        i += I64{1}
+    }
+    if after != (I64{0}) -> jet_rt_native_closure_retain(after)
+    if (new_head == I64{0}) {
+        sync_store(head_slot, after)
+    } else {
+        sync_store(wrapping(new_tail + CONTEXT_NODE_NEXT), after)
+        sync_store(head_slot, new_head)
+    }
+    context_values_release(head)
+}
+
+// `#Context(key: value)` exit: the `count` innermost block nodes leave the
 // current record's chain, which keeps the next one.
 #Export(c) jet_ctx_value_pop: fn(count: I64) {
     head: wrapping(context_current() + CONTEXT_VALUES)
     ^left: count
     loop left > (I64{0}) {
-        node: sync_load(head)
-        if node == (I64{0}) {
-            return
-        }
-        next: sync_load(wrapping(node + CONTEXT_NODE_NEXT))
-        if next != (I64{0}) -> jet_rt_native_closure_retain(next)
-        sync_store(head, next)
-        context_values_release(node)
+        context_pop_one_block(head)
         left -= I64{1}
     }
 }
@@ -265,7 +688,7 @@ context_values_release: fn(node: I64) {
 #Export(c) jet_ctx_value_find: fn(key: I64) -> I64 {
     ^at: sync_load(wrapping(context_current() + CONTEXT_VALUES))
     loop at != (I64{0}) {
-        if sync_load(wrapping(at + CONTEXT_NODE_KEY)) == key -> return at
+        if ((sync_load(wrapping(at + CONTEXT_NODE_KEY)) & CONTEXT_KEY_MASK) == key) -> return at
         at = sync_load(wrapping(at + CONTEXT_NODE_NEXT))
     }
     I64{0}

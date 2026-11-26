@@ -1,0 +1,350 @@
+// Power-assert waterfall alignment (`jet_rt_assert_diagram`) and structural
+// text diffing (`jet_rt_assert_diff_text`) for failing `assert` / `assert_eq`
+// stops (#7013). Called strictly on the failure path.
+
+ASSERT_DIFF_LIMIT: I64{32}
+ASSERT_DIAGRAM_MAX_ENTRIES: I64{64}
+ASSERT_DIAGRAM_MAX_VALUE: I64{120}
+ASSERT_TEXT_MAX_LINES: I64{256}
+
+assert_diff_push_spaces: fn(builder: I64, count: I64) {
+    ^i: I64{0}
+    loop i < count {
+        rt_text_push_word(builder, I64{32}, I64{1})
+        i += I64{1}
+    }
+}
+
+assert_diff_push_gutter: fn(builder: I64, digits: I64) {
+    assert_diff_push_spaces(builder, digits)
+    // " | " = 0x20, 0x7c, 0x20 -> 32 | (124 << 8) | (32 << 16) = 2128928
+    rt_text_push_word(builder, I64{2128928}, I64{3})
+}
+
+assert_diff_push_single_line: fn(builder: I64, text: I64) {
+    data: rt_text_data(text)
+    length: rt_text_len(text)
+    limit: if (length > ASSERT_DIAGRAM_MAX_VALUE) -> ASSERT_DIAGRAM_MAX_VALUE else -> length
+    ^at: I64{0}
+    ^cut: limit
+    if (length > ASSERT_DIAGRAM_MAX_VALUE) {
+        // Step back from UTF-8 continuation bytes (0x80..0xBF).
+        loop cut > (I64{0}) {
+            b: rt_text_byte(wrapping(data + cut))
+            if (b < I64{128} || b >= I64{192}) { break }
+            cut -= I64{1}
+        }
+    }
+    loop at < cut {
+        b: rt_text_byte(wrapping(data + at))
+        if (b == I64{10} || b == I64{13}) {
+            rt_text_push_word(builder, I64{32}, I64{1})
+        } else {
+            rt_text_push_word(builder, b, I64{1})
+        }
+        at += I64{1}
+    }
+    if (length > ASSERT_DIAGRAM_MAX_VALUE) {
+        jet_rt_string_builder_push(builder, rt_static_text("..."))
+    }
+}
+
+// Render aligned subexpression values directly under the failing `assert`
+// source line. `cols` and `texts` point to `count` 8-byte words on the
+// caller's frame (`col` = 1-based character column on the source line, `text`
+// = Debug String handle or 0 when a conditional subexpression was not reached).
+#Export(c) jet_rt_assert_diagram: fn(line: I64, count: I64, cols: I64, texts: I64) -> I64 {
+    if (count <= I64{0} || cols == I64{0} || texts == I64{0}) { return I64{0} }
+    cap: if (count > ASSERT_DIAGRAM_MAX_ENTRIES) -> ASSERT_DIAGRAM_MAX_ENTRIES else -> count
+    buf_bytes: cap * I64{16}
+    buf: jet_rt_alloc_8(buf_bytes)
+    if (buf == I64{0}) { return I64{0} }
+    ^n: I64{0}
+    ^i: I64{0}
+    loop i < cap {
+        col: rt_text_word(wrapping(cols + i * I64{8}))
+        text: rt_text_word(wrapping(texts + i * I64{8}))
+        if (col >= I64{1} && text != I64{0} && rt_text_len(text) > I64{0}) {
+            // Deduplicate identical columns: post-order evaluation means the
+            // later entry at the same column is the enclosing expression.
+            ^dup: I64{-1}
+            ^j: I64{0}
+            loop j < n {
+                if (rt_text_word(wrapping(buf + j * I64{16})) == col) {
+                    dup = j
+                    break
+                }
+                j += I64{1}
+            }
+            if (dup >= I64{0}) {
+                rt_text_store(wrapping(buf + dup * I64{16} + I64{8}), text)
+            } else {
+                rt_text_store(wrapping(buf + n * I64{16}), col)
+                rt_text_store(wrapping(buf + n * I64{16} + I64{8}), text)
+                n += I64{1}
+            }
+        }
+        i += I64{1}
+    }
+    if (n == I64{0}) {
+        jet_rt_free_8(buf, buf_bytes)
+        return I64{0}
+    }
+    // Insertion sort ascending by column.
+    ^s: I64{1}
+    loop s < n {
+        key_col: rt_text_word(wrapping(buf + s * I64{16}))
+        key_text: rt_text_word(wrapping(buf + s * I64{16} + I64{8}))
+        ^p: s - I64{1}
+        loop p >= (I64{0}) {
+            prev_col: rt_text_word(wrapping(buf + p * I64{16}))
+            if (prev_col <= key_col) { break }
+            prev_text: rt_text_word(wrapping(buf + p * I64{16} + I64{8}))
+            rt_text_store(wrapping(buf + (p + I64{1}) * I64{16}), prev_col)
+            rt_text_store(wrapping(buf + (p + I64{1}) * I64{16} + I64{8}), prev_text)
+            p -= I64{1}
+        }
+        rt_text_store(wrapping(buf + (p + I64{1}) * I64{16}), key_col)
+        rt_text_store(wrapping(buf + (p + I64{1}) * I64{16} + I64{8}), key_text)
+        s += I64{1}
+    }
+    ^digits: I64{1}
+    ^rem: if (line < I64{1}) -> I64{1} else -> line
+    loop rem >= (I64{10}) {
+        digits += I64{1}
+        rem = rem /% I64{10}
+    }
+    builder: jet_rt_string_builder_new()
+    // Connector row: `|` under every captured column.
+    assert_diff_push_gutter(builder, digits)
+    ^cursor: I64{1}
+    ^k: I64{0}
+    loop k < n {
+        col: rt_text_word(wrapping(buf + k * I64{16}))
+        if (col > cursor) { assert_diff_push_spaces(builder, col - cursor) }
+        rt_text_push_word(builder, I64{124}, I64{1})
+        cursor = col + I64{1}
+        k += I64{1}
+    }
+    rt_text_push_word(builder, I64{10}, I64{1})
+    // Waterfall rows: rightmost value first so text never collides with `|`.
+    ^row: n - I64{1}
+    loop row >= (I64{0}) {
+        assert_diff_push_gutter(builder, digits)
+        cursor = I64{1}
+        k = I64{0}
+        loop k < row {
+            col: rt_text_word(wrapping(buf + k * I64{16}))
+            if (col > cursor) { assert_diff_push_spaces(builder, col - cursor) }
+            rt_text_push_word(builder, I64{124}, I64{1})
+            cursor = col + I64{1}
+            k += I64{1}
+        }
+        target_col: rt_text_word(wrapping(buf + row * I64{16}))
+        target_text: rt_text_word(wrapping(buf + row * I64{16} + I64{8}))
+        if (target_col > cursor) { assert_diff_push_spaces(builder, target_col - cursor) }
+        assert_diff_push_single_line(builder, target_text)
+        rt_text_push_word(builder, I64{10}, I64{1})
+        row -= I64{1}
+    }
+    jet_rt_free_8(buf, buf_bytes)
+    jet_rt_string_builder_finish(builder)
+}
+
+assert_diff_push_quoted_slice: fn(builder: I64, data: I64, start: I64, length: I64) {
+    slice: rt_text_copy(wrapping(data + start), length)
+    rt_text_push_debug_str(builder, slice, false)
+    jet_rt_string_drop(slice)
+}
+
+assert_diff_has_newline: fn(data: I64, length: I64) -> Bool {
+    ^i: I64{0}
+    loop i < length {
+        if (rt_text_byte(wrapping(data + i)) == I64{10}) { return true }
+        i += I64{1}
+    }
+    false
+}
+
+assert_diff_split_lines: fn(data: I64, length: I64, starts: I64, lens: I64) -> I64 {
+    ^count: I64{0}
+    ^start: I64{0}
+    ^i: I64{0}
+    loop i < length && count < ASSERT_TEXT_MAX_LINES {
+        if (rt_text_byte(wrapping(data + i)) == I64{10}) {
+            rt_text_store(wrapping(starts + count * I64{8}), start)
+            rt_text_store(wrapping(lens + count * I64{8}), i - start)
+            count += I64{1}
+            start = i + I64{1}
+        }
+        i += I64{1}
+    }
+    if (start <= length && count < ASSERT_TEXT_MAX_LINES && (start < length || count == I64{0})) {
+        rt_text_store(wrapping(starts + count * I64{8}), start)
+        rt_text_store(wrapping(lens + count * I64{8}), length - start)
+        count += I64{1}
+    }
+    count
+}
+
+assert_diff_line_eq: fn(a_data: I64, a_start: I64, a_len: I64, b_data: I64, b_start: I64, b_len: I64) -> Bool {
+    if (a_len != b_len) { return false }
+    rt_text_equal_bytes(wrapping(a_data + a_start), wrapping(b_data + b_start), a_len)
+}
+
+assert_diff_bump_count: fn(builder: I64, count_addr: I64) -> Bool {
+    c: rt_text_word(count_addr)
+    if (c >= ASSERT_DIFF_LIMIT) {
+        if (c == ASSERT_DIFF_LIMIT) {
+            jet_rt_string_builder_push(builder, rt_static_text("  ... (more differences omitted)\n"))
+            rt_text_store(count_addr, ASSERT_DIFF_LIMIT + I64{1})
+        }
+        return false
+    }
+    rt_text_store(count_addr, c + I64{1})
+    true
+}
+
+// Structural text diff for `assert_eq`: `left` is `got`, `right` is `expected`,
+// `path` is "" at top level or a dotted/indexed path when nested inside a
+// struct, list, or map. Appends formatted diff lines to `builder` and tracks
+// the emitted difference count in `*count_addr`.
+#Export(c) jet_rt_assert_diff_text: fn(builder: I64, path: I64, left: I64, right: I64, count_addr: I64) {
+    if (builder == I64{0} || left == I64{0} || right == I64{0} || count_addr == I64{0}) { return }
+    l_data: rt_text_data(left)
+    l_len: rt_text_len(left)
+    r_data: rt_text_data(right)
+    r_len: rt_text_len(right)
+    if (l_len == r_len && rt_text_equal_bytes(l_data, r_data, l_len)) { return }
+    path_len: if (path != I64{0}) -> rt_text_len(path) else -> I64{0}
+    if (assert_diff_has_newline(l_data, l_len) || assert_diff_has_newline(r_data, r_len)) {
+        meta_bytes: ASSERT_TEXT_MAX_LINES * I64{8} * I64{4}
+        meta: jet_rt_alloc_8(meta_bytes)
+        if (meta == I64{0}) { return }
+        r_starts: meta
+        r_lens: wrapping(meta + ASSERT_TEXT_MAX_LINES * I64{8})
+        l_starts: wrapping(meta + ASSERT_TEXT_MAX_LINES * I64{16})
+        l_lens: wrapping(meta + ASSERT_TEXT_MAX_LINES * I64{24})
+        rn: assert_diff_split_lines(r_data, r_len, r_starts, r_lens)
+        ln: assert_diff_split_lines(l_data, l_len, l_starts, l_lens)
+        rows: rn + I64{1}
+        cols: ln + I64{1}
+        dp_bytes: rows * cols * I64{8}
+        dp: jet_rt_alloc_8(dp_bytes)
+        if (dp == I64{0}) {
+            jet_rt_free_8(meta, meta_bytes)
+            return
+        }
+        ^z: I64{0}
+        total_cells: rows * cols
+        loop z < total_cells {
+            rt_text_store(wrapping(dp + z * I64{8}), I64{0})
+            z += I64{1}
+        }
+        ^row: rn - I64{1}
+        loop row >= (I64{0}) {
+            rs: rt_text_word(wrapping(r_starts + row * I64{8}))
+            rl: rt_text_word(wrapping(r_lens + row * I64{8}))
+            ^col: ln - I64{1}
+            loop col >= (I64{0}) {
+                ls: rt_text_word(wrapping(l_starts + col * I64{8}))
+                ll: rt_text_word(wrapping(l_lens + col * I64{8}))
+                idx: (row * cols + col) * I64{8}
+                if assert_diff_line_eq(r_data, rs, rl, l_data, ls, ll) {
+                    diag: rt_text_word(wrapping(dp + ((row + I64{1}) * cols + col + I64{1}) * I64{8}))
+                    rt_text_store(wrapping(dp + idx), diag + I64{1})
+                } else {
+                    down: rt_text_word(wrapping(dp + ((row + I64{1}) * cols + col) * I64{8}))
+                    across: rt_text_word(wrapping(dp + (row * cols + col + I64{1}) * I64{8}))
+                    rt_text_store(wrapping(dp + idx), if (down > across) -> down else -> across)
+                }
+                col -= I64{1}
+            }
+            row -= I64{1}
+        }
+        ^ri: I64{0}
+        ^li: I64{0}
+        loop ri < rn || li < ln {
+            if (ri < rn && li < ln && assert_diff_line_eq(r_data, rt_text_word(wrapping(r_starts + ri * I64{8})), rt_text_word(wrapping(r_lens + ri * I64{8})), l_data, rt_text_word(wrapping(l_starts + li * I64{8})), rt_text_word(wrapping(l_lens + li * I64{8})))) {
+                ri += I64{1}
+                li += I64{1}
+                next
+            }
+            if (!assert_diff_bump_count(builder, count_addr)) { break }
+            jet_rt_string_builder_push(builder, rt_static_text("  "))
+            if (path_len > I64{0}) {
+                jet_rt_string_builder_push(builder, path)
+                jet_rt_string_builder_push(builder, rt_static_text(" (line "))
+                rt_text_push_number(builder, ri + I64{1})
+                jet_rt_string_builder_push(builder, rt_static_text("):\n"))
+            } else {
+                jet_rt_string_builder_push(builder, rt_static_text("line "))
+                rt_text_push_number(builder, ri + I64{1})
+                jet_rt_string_builder_push(builder, rt_static_text(":\n"))
+            }
+            // Emit contiguous mismatching lines together under this line header.
+            loop ri < rn || li < ln {
+                if (ri < rn && li < ln && assert_diff_line_eq(r_data, rt_text_word(wrapping(r_starts + ri * I64{8})), rt_text_word(wrapping(r_lens + ri * I64{8})), l_data, rt_text_word(wrapping(l_starts + li * I64{8})), rt_text_word(wrapping(l_lens + li * I64{8})))) {
+                    break
+                }
+                take_insert: li < ln && (ri == rn || rt_text_word(wrapping(dp + (ri * cols + li + I64{1}) * I64{8})) > rt_text_word(wrapping(dp + ((ri + I64{1}) * cols + li) * I64{8})))
+                if take_insert {
+                    jet_rt_string_builder_push(builder, rt_static_text("    + got:      "))
+                    assert_diff_push_quoted_slice(builder, l_data, rt_text_word(wrapping(l_starts + li * I64{8})), rt_text_word(wrapping(l_lens + li * I64{8})))
+                    rt_text_push_word(builder, I64{10}, I64{1})
+                    li += I64{1}
+                } else {
+                    jet_rt_string_builder_push(builder, rt_static_text("    - expected: "))
+                    assert_diff_push_quoted_slice(builder, r_data, rt_text_word(wrapping(r_starts + ri * I64{8})), rt_text_word(wrapping(r_lens + ri * I64{8})))
+                    rt_text_push_word(builder, I64{10}, I64{1})
+                    ri += I64{1}
+                }
+            }
+        }
+        jet_rt_free_8(dp, dp_bytes)
+        jet_rt_free_8(meta, meta_bytes)
+        return
+    }
+    // Single-line string diff: locate first differing Unicode scalar index.
+    if (!assert_diff_bump_count(builder, count_addr)) { return }
+    min_len: if (l_len < r_len) -> l_len else -> r_len
+    ^diff_byte: I64{0}
+    loop diff_byte < min_len {
+        if (rt_text_byte(wrapping(l_data + diff_byte)) != rt_text_byte(wrapping(r_data + diff_byte))) { break }
+        diff_byte += I64{1}
+    }
+    ^char_idx: I64{0}
+    ^b_at: I64{0}
+    ^plain_ascii: true
+    loop b_at < diff_byte {
+        b: rt_text_byte(wrapping(r_data + b_at))
+        if (b < I64{128} || b >= I64{192}) { char_idx += I64{1} }
+        if (b < I64{32} || b >= I64{127} || b == I64{34} || b == I64{92}) { plain_ascii = false }
+        b_at += I64{1}
+    }
+    if (path_len > I64{0}) {
+        jet_rt_string_builder_push(builder, rt_static_text("  "))
+        jet_rt_string_builder_push(builder, path)
+        jet_rt_string_builder_push(builder, rt_static_text(" (at char "))
+        rt_text_push_number(builder, char_idx)
+        jet_rt_string_builder_push(builder, rt_static_text("): expected "))
+        rt_text_push_debug_str(builder, right, false)
+        jet_rt_string_builder_push(builder, rt_static_text(", got "))
+        rt_text_push_debug_str(builder, left, false)
+        rt_text_push_word(builder, I64{10}, I64{1})
+        return
+    }
+    jet_rt_string_builder_push(builder, rt_static_text("  at char "))
+    rt_text_push_number(builder, char_idx)
+    jet_rt_string_builder_push(builder, rt_static_text(":\n    expected: "))
+    rt_text_push_debug_str(builder, right, false)
+    jet_rt_string_builder_push(builder, rt_static_text("\n    got:      "))
+    rt_text_push_debug_str(builder, left, false)
+    rt_text_push_word(builder, I64{10}, I64{1})
+    if (plain_ascii && char_idx <= I64{80}) {
+        // "    got:      \"" is 15 columns before char 0.
+        assert_diff_push_spaces(builder, I64{15} + char_idx)
+        rt_text_push_word(builder, I64{94}, I64{1})
+        rt_text_push_word(builder, I64{10}, I64{1})
+    }
+}

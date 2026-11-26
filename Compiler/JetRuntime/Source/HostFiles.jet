@@ -54,6 +54,46 @@ fd_c_path_drop: fn(data: I64, path: I64) {
     jet_rt_free(data, wrapping(rt_text_len(path) + I64{1}), I64{1})
 }
 
+// Terminated filesystem path resolved against the active task's `#Context(dir:)`
+// when non-empty and relative. Stores its allocation size at `ptr - 8` so
+// `fd_c_fs_path_drop` frees the exact resolved buffer; never modifies non-path
+// callers (DNS hosts, xattr names, usernames) or `*at` dirfd-relative names.
+fd_c_fs_path_bytes: fn(bytes: I64, length: I64) -> I64 {
+    cur: if (length > I64{0} && rt_text_byte(bytes) != I64{47}) -> context_dir_current() else -> I64{0}
+    if (cur == I64{0}) {
+        alloc_size: wrapping(length + I64{9})
+        raw: jet_rt_alloc(alloc_size, I64{8})
+        rt_text_store(raw, alloc_size)
+        data: wrapping(raw + I64{8})
+        if (length > I64{0}) { rt_text_bytes_copy(data, bytes, length) }
+        rt_text_put(wrapping(data + length), I64{0})
+        return data
+    }
+    cur_len: rt_text_len(cur)
+    cur_data: rt_text_data(cur)
+    need_slash: cur_len > I64{0} && rt_text_byte(wrapping(cur_data + wrapping(cur_len - I64{1}))) != I64{47}
+    sep: if need_slash -> I64{1} else -> I64{0}
+    total: wrapping(wrapping(cur_len + sep) + length)
+    alloc_size: wrapping(total + I64{9})
+    raw: jet_rt_alloc(alloc_size, I64{8})
+    rt_text_store(raw, alloc_size)
+    data: wrapping(raw + I64{8})
+    if (cur_len > I64{0}) { rt_text_bytes_copy(data, cur_data, cur_len) }
+    if need_slash { rt_text_put(wrapping(data + cur_len), I64{47}) }
+    rt_text_bytes_copy(wrapping(data + wrapping(cur_len + sep)), bytes, length)
+    rt_text_put(wrapping(data + total), I64{0})
+    data
+}
+
+fd_c_fs_path: fn(path: I64) -> I64 {
+    fd_c_fs_path_bytes(rt_text_data(path), rt_text_len(path))
+}
+
+fd_c_fs_path_drop: fn(data: I64) {
+    raw: wrapping(data - I64{8})
+    jet_rt_free(raw, rt_text_word(raw), I64{8})
+}
+
 fd_new: fn(number: I64, path: I64, writer: Bool) -> I64 {
     state: jet_rt_alloc(I64{72}, I64{8})
     fd_put(state, I64{0}, I64{0})
@@ -73,10 +113,10 @@ fd_new: fn(number: I64, path: I64, writer: Bool) -> I64 {
     if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     native_mode: host_native_int(mode)
     if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
-    name: fd_c_path(path)
+    name: fd_c_fs_path(path)
     bits: fd_open_flags(native_flags)
     result: host_call(I64{2}, name, bits | I64{524288}, native_mode & I64{4294967295})
-    fd_c_path_drop(name, path)
+    fd_c_fs_path_drop(name)
     ^_: fd_error(result, errno)
     if (result < I64{0}) -> I64{0} else -> fd_new(result, path, (bits & I64{3}) != I64{0})
 }
@@ -377,13 +417,13 @@ fd_operation: fn(state: I64, syscall: I64, a2: I64, a3: I64, errno: I64) {
 
 // Directory and path leaves borrow source-approved paths, return errno only.
 #Export(c) jet_fs_stat_raw: fn(path: I64, follow: Bool, stat: I64, errno: I64) {
-    name: fd_c_path(path)
+    name: fd_c_fs_path(path)
     ^result: I64{0}
     rt_test_reads_path(I64{83}, I64{-100}, name)
     #Unsafe("the terminated borrowed path and 128-byte stat fact output are live for the syscall") {
         result = os_stat_facts_i64(if follow -> I64{4} else -> I64{6}, name, stat)
     }
-    fd_c_path_drop(name, path)
+    fd_c_fs_path_drop(name)
     ^_: fd_error(result, errno)
 }
 
@@ -392,34 +432,36 @@ fd_operation: fn(state: I64, syscall: I64, a2: I64, a3: I64, errno: I64) {
     if (jet_scheduler_native_propagate() != I64{0}) {
         return
     }
-    name: fd_c_path(path)
+    name: fd_c_fs_path(path)
     result: host_call(I64{83}, name, native & I64{4294967295}, I64{0})
-    fd_c_path_drop(name, path)
+    fd_c_fs_path_drop(name)
     ^_: fd_error(result, errno)
 }
 
 #Export(c) jet_fs_unlink_raw: fn(path: I64, directory: Bool, errno: I64) {
-    name: fd_c_path(path)
+    name: fd_c_fs_path(path)
     result: host_call(if directory -> I64{84} else -> I64{87}, name, I64{0}, I64{0})
-    fd_c_path_drop(name, path)
+    fd_c_fs_path_drop(name)
     ^_: fd_error(result, errno)
 }
 
 #Export(c) jet_fs_link_raw: fn(old: I64, new: I64, symbolic: Bool, errno: I64) {
-    a: fd_c_path(old)
-    b: fd_c_path(new)
+    // Symlink targets are stored verbatim; only hard-link source and linkpath
+    // resolve relative to the task's working directory.
+    a: if symbolic -> fd_c_path(old) else -> fd_c_fs_path(old)
+    b: fd_c_fs_path(new)
     result: host_call(if symbolic -> I64{88} else -> I64{86}, a, b, I64{0})
-    fd_c_path_drop(a, old)
-    fd_c_path_drop(b, new)
+    if symbolic { fd_c_path_drop(a, old) } else { fd_c_fs_path_drop(a) }
+    fd_c_fs_path_drop(b)
     ^_: fd_error(result, errno)
 }
 
 #Export(c) jet_fs_rename_raw: fn(old: I64, new: I64, errno: I64) {
-    a: fd_c_path(old)
-    b: fd_c_path(new)
+    a: fd_c_fs_path(old)
+    b: fd_c_fs_path(new)
     result: host_call(I64{82}, a, b, I64{0})
-    fd_c_path_drop(a, old)
-    fd_c_path_drop(b, new)
+    fd_c_fs_path_drop(a)
+    fd_c_fs_path_drop(b)
     ^_: fd_error(result, errno)
 }
 
@@ -518,12 +560,12 @@ fd_created_finish: fn(result: I64, output: I64, errno: I64) {
 }
 
 #Export(c) jet_fs_created_raw: fn(path: I64, follow: Bool, output: I64, errno: I64) {
-    name: fd_c_path(path)
+    name: fd_c_fs_path(path)
     ^result: I64{0}
     #Unsafe("the terminated source-approved path and three writable birth-time output words stay live through statx") {
         result = os_statx_created_i64(I64{-100}, name, if follow -> I64{0} else -> I64{256}, output)
     }
-    fd_c_path_drop(name, path)
+    fd_c_fs_path_drop(name)
     fd_created_finish(result, output, errno)
 }
 
@@ -563,9 +605,9 @@ fd_created_finish: fn(result: I64, output: I64, errno: I64) {
 #Export(c) jet_fs_readlink_raw: fn(path: I64, bytes: I64, length: I64, errno: I64) -> I64 {
     requested: host_native_int(length)
     if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
-    name: fd_c_path(path)
+    name: fd_c_fs_path(path)
     result: host_call(I64{89}, name, bytes, requested)
-    fd_c_path_drop(name, path)
+    fd_c_fs_path_drop(name)
     fd_error(result, errno)
 }
 
@@ -575,14 +617,14 @@ fd_created_finish: fn(result: I64, output: I64, errno: I64) {
 #Export(c) jet_fs_xattr_get_raw: fn(path: I64, attribute: I64, bytes: I64, length: I64, error: I64) -> I64 {
     requested: host_native_int(length)
     if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
-    name: fd_c_path(path)
+    name: fd_c_fs_path(path)
     key: fd_c_path(attribute)
     ^result: I64{0}
     #Unsafe("both terminated borrowed names and the caller's optional compact byte output remain live only through lgetxattr") {
         result = host_syscall(I64{192}, name, key, bytes, requested, I64{0}, I64{0})
     }
     fd_c_path_drop(key, attribute)
-    fd_c_path_drop(name, path)
+    fd_c_fs_path_drop(name)
     fd_error(result, error)
 }
 

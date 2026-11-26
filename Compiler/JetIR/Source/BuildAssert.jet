@@ -1,0 +1,918 @@
+// Power asserts (`n2`) and structural `assert_eq` diffs (`n3`) in JetIR (#7013).
+//
+// - Passing path (`n4`): zero string formatting and zero diff allocations.
+//   Unconditional subexpression values stay in their existing IR slots across
+//   the `if !condition` check; conditional subexpressions (RHS of `&&`/`||`,
+//   `IfExpr`, `OrFallback`, `CompareChain` tail) record into frame cells
+//   guarded by 1-word `reached` flags so SSA dominance holds across O0/O1/O2.
+// - Failing `assert`: renders reached subexpressions with `ir_render(..., Debug)`
+//   strictly inside `if !condition` and formats the aligned waterfall via
+//   `jet_rt_assert_diagram`.
+// - Failing `assert_eq`: lowers type-driven structural diffs (`#diff<row>`) for
+//   structs, lists, maps, tuples, enums, options, results, and text strictly
+//   inside `if !equal`, delegating text diffs to `jet_rt_assert_diff_text`.
+
+use {
+    jet_foundation.[
+        BodyCallArg,
+        Span,
+        TPanicLoc,
+        Type,
+    ]
+}
+
+IR_ASSERT_MAX_CAPTURES: 24
+IR_ASSERT_DIFF_LIMIT: 32
+
+// One subexpression scheduled for capture during `assert(condition)` lowering.
+IRAssertCapture: struct {
+    node: Int,
+    col: Int,
+    ty: Type,
+    conditional: Bool,
+    // For unconditional captures: SSA slot written when `node` finishes (-1 if not reached).
+    slot: Int{-1},
+    // For conditional captures: pre-allocated frame flag (8 bytes, 0/1) and storage cell.
+    flag_addr: Int{-1},
+    cell_addr: Int{-1},
+    cell_row: Int{-1},
+    // Whether the captured conditional cell holds a fresh owned value that must be
+    // released on the passing path when `flag_addr == 1`.
+    cell_owns: Bool{false},
+}
+
+// One fresh temporary kept alive across `if !condition` for power-assert display
+// and released immediately after the passing branch resumes.
+IRAssertHeld: struct {
+    slot: Int,
+    flag_addr: Int{-1},
+    cell_addr: Int{-1},
+    cell_row: Int{-1},
+}
+
+ir_assert_line_bounds: fn(p: IRProgram, path: String, line: Int) -> {row: Int, start: Int, end: Int}? Never! {
+    row: ir_source_row(p, path) ?? return None
+    if line < 1 || line > p.source_lines[row].len() -> return None
+    start: p.source_lines[row][line - 1]
+    ^end: start
+    bytes_len: p.source_bytes[row].len()
+    loop end < bytes_len && p.source_bytes[row][end] != (U8{10}) -> end += 1
+    if end > start && p.source_bytes[row][end - 1] == (U8{13}) -> end -= 1
+    Val({row: row, start: start, end: end})
+}
+
+ir_assert_col_of: fn(p: IRProgram, row: Int, line_start: Int, offset: Int) -> Int Never! {
+    ^col: 1
+    ^at: line_start
+    limit: if offset < p.source_bytes[row].len() -> offset else -> p.source_bytes[row].len()
+    loop at < limit {
+        byte: p.source_bytes[row][at]
+        if byte < (U8{128}) || byte >= (U8{192}) -> col += 1
+        at += 1
+    }
+    col
+}
+
+ir_assert_scan_byte: fn(p: IRProgram, row: Int, from: Int, to: Int, target: U8) -> Int? Never! {
+    ^at: if from < 0 -> 0 else -> from
+    limit: if to < p.source_bytes[row].len() -> to else -> p.source_bytes[row].len()
+    loop at < limit {
+        if p.source_bytes[row][at] == target -> return Val(at)
+        at += 1
+    }
+    None
+}
+
+ir_assert_scan_non_space: fn(p: IRProgram, row: Int, from: Int, to: Int) -> Int? Never! {
+    ^at: if from < 0 -> 0 else -> from
+    limit: if to < p.source_bytes[row].len() -> to else -> p.source_bytes[row].len()
+    loop at < limit {
+        b: p.source_bytes[row][at]
+        if b != (U8{32}) && b != (U8{9}) && b != (U8{40}) && b != (U8{41}) -> return Val(at)
+        at += 1
+    }
+    None
+}
+
+ir_assert_is_plain_scalar: fn(ty: Type) -> Bool Never! {
+    untagged: ir_untag(ty)
+    untagged == .Int || untagged == .IntN(_, _) || untagged == .Float || untagged == .Float32 || untagged == .Bool || untagged == .Char
+}
+
+ir_assert_type_renderable: fn(m: ^IRModule, p: IRProgram, ty: Type, depth: Int) -> Bool Never! {
+    if depth > 4 -> return false
+    untagged: ir_untag(ty)
+    if ir_unit_type(untagged) || ir_never_type(untagged) -> return false
+    if untagged == .Fn(_, _, _, _, _, _) || untagged == .Measure(_) || untagged == .TraitObject(_) -> return false
+    if ir_native_carrier(untagged) -> return false
+    row: ir_value_type(m, p, ty) ?? return false
+    if ir_is_handle(m, row) && !ir_carrier_type(ty) {
+        return ir_render_handle_symbol(p, ty, IRRender.Debug) != None
+    }
+    if m.types[row].kind == .Pointer && !ir_carrier_type(ty) && !ir_is_handle(m, row) -> return false
+    if untagged == {
+        .Option(inner) -> return ir_assert_type_renderable(m, p, inner, depth + 1)
+        .Result(ok_ty, err_ty) -> return ir_assert_type_renderable(m, p, ok_ty, depth + 1) && ir_assert_type_renderable(m, p, err_ty, depth + 1)
+        .List(elem) -> return ir_assert_type_renderable(m, p, elem, depth + 1)
+        .Tuple(fields) -> {
+            loop f in fields {
+                if !ir_assert_type_renderable(m, p, f.ty, depth + 1) -> return false
+            }
+            return true
+        }
+        .Int | .IntN(_, _) | .Float | .Float32 | .Bool | .Char | .String | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
+    }
+    true
+}
+
+ir_assert_can_capture_type: fn(m: ^IRModule, p: IRProgram, ty: Type) -> Bool Never! {
+    ir_assert_type_renderable(m, p, ty, 0)
+}
+
+ir_assert_anchor_offset: fn(p: IRProgram, b: IRBuilder, src_row: Int, line_start: Int, line_end: Int, node_idx: Int) -> Int? Never! {
+    node: ir_body_node(p, b, node_idx)
+    sp: node.span
+    if sp.start < line_start || sp.start >= line_end -> return None
+    offset: if node.kind == {
+        .Local(_) | .Unary(_, _) | .Call(_, _, _) | .StaticCall(_, _, _, _, _) | .IndirectCall(_, _, _, _) | .StructLit(_) | .List(_, _) | .ListLit(_) | .Map(_) | .MapLit(_) | .Tuple(_) | .EnumLit(_, _, _) | .EnumCtor(_, _, _) | .Present(_) | .Ok(_) | .Err(_) | .ConstRef(_) -> sp.start
+        .Field(recv, _) | .OptField(recv, _, _) -> {
+            recv_sp: ir_body_node(p, b, recv).span
+            dot_at: ir_assert_scan_byte(p, src_row, recv_sp.end, sp.end, U8{46}) ?? sp.start
+            if dot_at + 1 < sp.end -> dot_at + 1 else -> dot_at
+        }
+        .MethodCall(recv, _, _, _) | .BuiltinMethod(recv, _, _) | .NumericMethod(recv, _) | .NumericBinaryMethod(recv, _, _) | .HandleMethod(recv, _, _) | .ClosureMethod(recv, _, _) | .OptMethodCall(recv, _, _, _) -> {
+            recv_sp: ir_body_node(p, b, recv).span
+            dot_at: ir_assert_scan_byte(p, src_row, recv_sp.end, sp.end, U8{46}) ?? sp.start
+            if dot_at + 1 < sp.end -> dot_at + 1 else -> dot_at
+        }
+        .Binary(_, _, _, lhs, rhs) -> {
+            lhs_sp: ir_body_node(p, b, lhs).span
+            rhs_sp: ir_body_node(p, b, rhs).span
+            ir_assert_scan_non_space(p, src_row, lhs_sp.end, rhs_sp.start) ?? sp.start
+        }
+        .CompareChain(operands, _, _) -> if {
+            operands.len() >= 2 -> {
+                a_sp: ir_body_node(p, b, operands[0]).span
+                b_sp: ir_body_node(p, b, operands[1]).span
+                ir_assert_scan_non_space(p, src_row, a_sp.end, b_sp.start) ?? sp.start
+            }
+            else -> sp.start
+        }
+        .Index(base, idx, _, _, _, _) -> {
+            base_sp: ir_body_node(p, b, base).span
+            idx_sp: ir_body_node(p, b, idx).span
+            ir_assert_scan_byte(p, src_row, base_sp.end, idx_sp.start, U8{91}) ?? sp.start
+        }
+        .OrFallback(value, fallback, _) -> {
+            v_sp: ir_body_node(p, b, value).span
+            end_at: if fallback == .Value(fb_node) -> ir_body_node(p, b, fb_node).span.start else -> sp.end
+            ir_assert_scan_byte(p, src_row, v_sp.end, end_at, U8{63}) ?? sp.start
+        }
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .TraitConst(_, _, _) | .NumberParam(_) | .CopyPhase(_, _, _, _) | .GlobalShared(_, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .HostCall(_) | .AllocNew(_, _) | .JSONLit(_, _, _) | .ListSpread(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .DecodeUnder(_, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Absent | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .OverflowOpt(_, _, _, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .TypePath(_) -> return None
+    }
+    if offset < line_start || offset >= line_end -> return None
+    Val(offset)
+}
+
+ir_assert_collect_args: fn(m: ^IRModule, p: IRProgram, b: IRBuilder, src_row: Int, line_start: Int, line_end: Int, args: [BodyCallArg], conditional: Bool, out: ^[IRAssertCapture]) Never! {
+    loop arg in args {
+        moved: !arg.borrow && !arg.mut_borrow
+        ir_assert_collect(m, p, b, src_row, line_start, line_end, arg.value, conditional, moved, out)
+    }
+}
+
+ir_assert_collect: fn(m: ^IRModule, p: IRProgram, b: IRBuilder, src_row: Int, line_start: Int, line_end: Int, node_idx: Int, conditional: Bool, moved: Bool, out: ^[IRAssertCapture]) Never! {
+    if node_idx < 0 || out.len() >= IR_ASSERT_MAX_CAPTURES -> return
+    node: ir_body_node(p, b, node_idx)
+    // Recurse into children first (left-to-right, post-order), respecting short-circuit branches.
+    if node.kind == {
+        .Binary(op, _, _, lhs, rhs) -> {
+            ir_assert_collect(m, p, b, src_row, line_start, line_end, lhs, conditional, false, out)
+            rhs_cond: conditional || op == .And || op == .Or
+            ir_assert_collect(m, p, b, src_row, line_start, line_end, rhs, rhs_cond, false, out)
+        }
+        .CompareChain(operands, _, _) -> {
+            loop (idx, op_node) in operands {
+                ir_assert_collect(m, p, b, src_row, line_start, line_end, op_node, conditional || idx > 1, false, out)
+            }
+        }
+        .Unary(_, inner) | .Present(inner) | .Ok(inner) | .Err(inner) -> {
+            ir_assert_collect(m, p, b, src_row, line_start, line_end, inner, conditional, false, out)
+        }
+        .Move(inner) -> {
+            ir_assert_collect(m, p, b, src_row, line_start, line_end, inner, conditional, true, out)
+            return
+        }
+        .Borrow(inner, _) | .Clone(inner, _) | .ExplicitCopy(inner) | .MaterializeView(inner) | .DistinctCtor(inner) | .DistinctRaw(inner) | .DistinctConvert(_, inner, _, _, _) | .RawOf(inner) -> {
+            ir_assert_collect(m, p, b, src_row, line_start, line_end, inner, conditional, moved, out)
+            return
+        }
+        .Field(recv, _) | .OptField(recv, _, _) -> {
+            ir_assert_collect(m, p, b, src_row, line_start, line_end, recv, conditional, false, out)
+        }
+        .Index(base, idx, _, _, _, _) -> {
+            ir_assert_collect(m, p, b, src_row, line_start, line_end, base, conditional, false, out)
+            ir_assert_collect(m, p, b, src_row, line_start, line_end, idx, conditional, false, out)
+        }
+        .Call(_, _, args) | .StaticCall(_, _, _, _, args) -> {
+            ir_assert_collect_args(m, p, b, src_row, line_start, line_end, args, conditional, out)
+        }
+        .IndirectCall(callee, _, args, _) -> {
+            ir_assert_collect(m, p, b, src_row, line_start, line_end, callee, conditional, false, out)
+            ir_assert_collect_args(m, p, b, src_row, line_start, line_end, args, conditional, out)
+        }
+        .MethodCall(recv, _, _, args) -> {
+            ir_assert_collect(m, p, b, src_row, line_start, line_end, recv, conditional, false, out)
+            ir_assert_collect_args(m, p, b, src_row, line_start, line_end, args, conditional, out)
+        }
+        .BuiltinMethod(recv, _, args) | .HandleMethod(recv, _, args) | .ClosureMethod(recv, _, args) -> {
+            ir_assert_collect(m, p, b, src_row, line_start, line_end, recv, conditional, false, out)
+            loop a in args -> ir_assert_collect(m, p, b, src_row, line_start, line_end, a, conditional, false, out)
+        }
+        .NumericMethod(recv, _) -> {
+            ir_assert_collect(m, p, b, src_row, line_start, line_end, recv, conditional, false, out)
+        }
+        .NumericBinaryMethod(recv, _, arg) -> {
+            ir_assert_collect(m, p, b, src_row, line_start, line_end, recv, conditional, false, out)
+            ir_assert_collect(m, p, b, src_row, line_start, line_end, arg, conditional, false, out)
+        }
+        .OrFallback(value, fallback, _) -> {
+            ir_assert_collect(m, p, b, src_row, line_start, line_end, value, conditional, false, out)
+            if fallback == .Value(fb_node) {
+                ir_assert_collect(m, p, b, src_row, line_start, line_end, fb_node, true, false, out)
+            }
+        }
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Unit | .Absent | .CtLit(_) | .Uninit | .Never(_, _) | .NumberParam(_) | .TypePath(_) | .Lambda(_) | .FnValue(_) | .InlineBlock(_) | .IfExpr(_, _, _, _, _) -> return
+        .Local(_) | .ConstRef(_) | .TraitConst(_, _, _) | .CopyPhase(_, _, _, _) | .GlobalShared(_, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .RequireStop(_, _, _) | .StructLit(_) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .DecodeUnder(_, _) | .InvariantViolation(_, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .OverflowOpt(_, _, _, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .TypeTest(_, _) -> {}
+    }
+    if out.len() >= IR_ASSERT_MAX_CAPTURES -> return
+    ty: ir_ty(m, p, b, node_idx)
+    if moved && !ir_assert_is_plain_scalar(ty) -> return
+    if !ir_assert_can_capture_type(m, p, ty) -> return
+    offset: ir_assert_anchor_offset(p, b, src_row, line_start, line_end, node_idx) ?? return
+    col: ir_assert_col_of(p, src_row, line_start, offset)
+    out.push(IRAssertCapture{node: node_idx, col: col, ty: ty, conditional: conditional})
+}
+
+// Called at the end of `ir_expr` (and intermediate `ir_binary_chain` levels) only
+// when `b.assert_captures.len() > 0`. Records the evaluated slot with zero
+// string formatting and zero heap allocation on the passing path.
+ir_assert_capture_record: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, node_idx: Int, slot: Int) Never! {
+    if slot < 0 || b.assert_captures.len() == 0 -> return
+    ^found: -1
+    loop i in 0..<b.assert_captures.len() {
+        if b.assert_captures[i].node == node_idx {
+            found = i
+            break
+        }
+    }
+    if found < 0 -> return
+    // Record once per node; keep fresh temporaries alive until after `if !cond`.
+    if !b.assert_captures[found].conditional {
+        b.assert_captures[found].slot = slot
+        if b.fresh[slot] {
+            b.fresh[slot] = false
+            b.assert_held_fresh.push(IRAssertHeld{slot: slot})
+        }
+        return
+    }
+    flag_addr: b.assert_captures[found].flag_addr
+    cell_addr: b.assert_captures[found].cell_addr
+    cell_row: b.assert_captures[found].cell_row
+    if flag_addr < 0 || cell_addr < 0 || cell_row < 0 -> return
+    kind: ir_kind_of(m, b, slot)
+    if kind == .Aggregate {
+        size: m.types[b.f.slot_type[slot]].size
+        ir_emit(b.f, IROp.CopyBytes, -1, cell_addr, slot, size, b.line)
+    } else {
+        ir_emit(b.f, IROp.Store, -1, cell_addr, 0, slot, b.line)
+    }
+    one: ir_word_const(m, b, 1)
+    ir_emit(b.f, IROp.Store, -1, flag_addr, 0, one, b.line)
+    if b.fresh[slot] {
+        b.fresh[slot] = false
+        b.assert_captures[found].cell_owns = true
+        b.assert_held_fresh.push(IRAssertHeld{slot: -1, flag_addr: flag_addr, cell_addr: cell_addr, cell_row: cell_row})
+    }
+}
+
+ir_assert_release_held: fn(m: ^IRModule, b: ^IRBuilder, held: [IRAssertHeld]) Never! {
+    loop item in held {
+        if item.slot >= 0 {
+            if ir_has_drop(m, b, item.slot) {
+                ir_emit(b.f, IROp.Drop, -1, item.slot, -1, -1, b.line)
+            }
+            next
+        }
+        if item.flag_addr >= 0 && item.cell_addr >= 0 && item.cell_row >= 0 {
+            flag: ir_load_word(m, b, item.flag_addr, 0)
+            zero: ir_word_const(m, b, 0)
+            reached: ir_bool_op(m, b, IROp.Ne, flag, zero)
+            ir_open_if(b.f, reached, b.line)
+            loaded: ir_load_at(m, b, item.cell_addr, 0, item.cell_row)
+            if loaded >= 0 && ir_has_drop(m, b, loaded) {
+                ir_emit(b.f, IROp.Drop, -1, loaded, -1, -1, b.line)
+            }
+            ir_end(b.f, b.line)
+        }
+    }
+}
+
+// Lower `assert(test[, message])` with power-assert subexpression capture.
+ir_assert_require: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, test: Int, message: Int?, report: TPanicLoc, always_stops: Bool, span: Span) -> Int Never! {
+    ^captures: [IRAssertCapture]{}
+    if report.source_line != "" && report.line >= 1 {
+        if ir_assert_line_bounds(p, report.file, report.line) == .Val(bounds) {
+            ir_assert_collect(m, p, b, bounds.row, bounds.start, bounds.end, test, false, false, captures)
+        }
+    }
+    // Pre-allocate frame flags & storage cells for conditional captures so SSA
+    // dominance holds on the failure block across O0/O1/O2.
+    pointer_row: ir_pointer_row(m)
+    zero_word: if captures.len() > 0 -> ir_word_const(m, b, 0) else -> -1
+    loop i in 0..<captures.len() {
+        if !captures[i].conditional -> next
+        row: ir_value_type(m, p, captures[i].ty) ?? next
+        flag_addr: ir_temp(m, b, pointer_row)
+        ir_emit(b.f, IROp.StackAddress, flag_addr, 8, 8, -1, b.line)
+        ir_emit(b.f, IROp.Store, -1, flag_addr, 0, zero_word, b.line)
+        size: if m.types[row].kind == .Aggregate -> m.types[row].size else -> 8
+        align: if m.types[row].kind == .Aggregate && m.types[row].align > 0 -> m.types[row].align else -> 8
+        cell_size: if size > 0 -> size else -> 8
+        cell_addr: ir_temp(m, b, pointer_row)
+        ir_emit(b.f, IROp.StackAddress, cell_addr, cell_size, align, -1, b.line)
+        captures[i].flag_addr = flag_addr
+        captures[i].cell_addr = cell_addr
+        captures[i].cell_row = row
+    }
+    // Save outer capture state in case of nested asserts.
+    prev_captures: b.assert_captures
+    prev_held: b.assert_held_fresh
+    b.assert_captures = captures
+    b.assert_held_fresh = [IRAssertHeld]{}
+    condition: ir_expr(m, p, b, test)
+    finished_captures: b.assert_captures
+    held_fresh: b.assert_held_fresh
+    b.assert_captures = prev_captures
+    b.assert_held_fresh = prev_held
+    if ir_failed(b) || condition < 0 -> return -1
+    // The message and power-assert diagram run on the stopping path only:
+    // a variable the message moves still owns its value where the condition holds.
+    before: ir_own_states(b, b.bindings.len())
+    if !always_stops {
+        bool_row: ir_type_row(m, Type.Bool) ?? 0
+        failed: ir_temp(m, b, bool_row)
+        ir_emit(b.f, IROp.Not, failed, condition, -1, -1, b.line)
+        ir_open_if(b.f, failed, b.line)
+    }
+    ^text: -1
+    if message == .Val(value) {
+        slot: ir_expr(m, p, b, value)
+        if ir_failed(b) -> return -1
+        value_ty: ir_ty(m, p, b, value)
+        text = ir_render(m, p, b, value_ty, slot, IRRender.Display, span)
+    } else {
+        string_row: ir_string_row(m)
+        text = ir_temp(m, b, string_row)
+        ir_emit(b.f, IROp.ConstText, text, ir_intern_text(m, "condition failed"), -1, -1, b.line)
+    }
+    if ir_failed(b) -> return -1
+    diagram: ir_assert_build_diagram(m, p, b, finished_captures, report.line, span)
+    if ir_failed(b) -> return -1
+    null: ir_word_const(m, b, 0)
+    ir_stop(m, p, b, 0, text, diagram, null, report)
+    if !always_stops {
+        ir_end(b.f, b.line)
+        ir_set_own_states(b, before)
+        ir_assert_release_held(m, b, held_fresh)
+    }
+    -1
+}
+
+// Render all reached captured subexpressions strictly inside the failure branch
+// and call `jet_rt_assert_diagram(line, count, cols_addr, texts_addr)`.
+ir_assert_build_diagram: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, captures: [IRAssertCapture], line_no: Int, span: Span) -> Int Never! {
+    ^active: [Int]{}
+    loop i in 0..<captures.len() {
+        c: captures[i]
+        if (!c.conditional && c.slot >= 0) || (c.conditional && c.flag_addr >= 0 && c.cell_addr >= 0 && c.cell_row >= 0) {
+            active.push(i)
+        }
+    }
+    if active.len() == 0 -> return ir_word_const(m, b, 0)
+    pointer_row: ir_pointer_row(m)
+    string_row: ir_string_row(m)
+    count: active.len()
+    table_bytes: count * 8
+    cols_addr: ir_temp(m, b, pointer_row)
+    ir_emit(b.f, IROp.StackAddress, cols_addr, table_bytes, 8, -1, b.line)
+    texts_addr: ir_temp(m, b, pointer_row)
+    ir_emit(b.f, IROp.StackAddress, texts_addr, table_bytes, 8, -1, b.line)
+    zero: ir_word_const(m, b, 0)
+    loop (idx, cap_i) in active {
+        c: captures[cap_i]
+        offset: idx * 8
+        col_word: ir_word_const(m, b, c.col)
+        ir_emit(b.f, IROp.Store, -1, cols_addr, offset, col_word, b.line)
+        ir_emit(b.f, IROp.Store, -1, texts_addr, offset, zero, b.line)
+        if !c.conditional {
+            rendered: ir_render(m, p, b, c.ty, c.slot, IRRender.Debug, span)
+            if ir_failed(b) -> return -1
+            ir_emit(b.f, IROp.Store, -1, texts_addr, offset, rendered, b.line)
+        } else {
+            flag: ir_load_word(m, b, c.flag_addr, 0)
+            reached: ir_bool_op(m, b, IROp.Ne, flag, zero)
+            ir_open_if(b.f, reached, b.line)
+            val_slot: ir_load_at(m, b, c.cell_addr, 0, c.cell_row)
+            if val_slot >= 0 {
+                rendered: ir_render(m, p, b, c.ty, val_slot, IRRender.Debug, span)
+                if !ir_failed(b) {
+                    ir_emit(b.f, IROp.Store, -1, texts_addr, offset, rendered, b.line)
+                }
+            }
+            ir_end(b.f, b.line)
+            if ir_failed(b) -> return -1
+        }
+    }
+    line_word: ir_word_const(m, b, line_no)
+    count_word: ir_word_const(m, b, count)
+    ir_runtime(m, b, "jet_rt_assert_diagram", [Int]{line_word, count_word, cols_addr, texts_addr}, string_row)
+}
+
+// ============================================================================
+// Structural diff for `assert_eq(got, expected)` (#7013 n3)
+// ============================================================================
+
+ir_diff_is_structured: fn(m: ^IRModule, p: IRProgram, row: Int) -> Bool Never! {
+    if row < 0 || row >= m.types.len() -> return false
+    kind: m.types[row].kind
+    if kind == .String -> return true
+    ty: ir_untag(ir_row_ty(m, p, row))
+    if ir_is_handle(m, row) || ir_native_carrier(ty) -> return false
+    if ir_map_row_hashed(m, p, row) || ir_map_entry_type(ty) != None -> return true
+    if ir_sequence_element(ty) != None || ir_view_element(ty) != None -> return true
+    if ty == .Tuple(_) -> return true
+    if ty == .Option(inner) {
+        if ir_value_type(m, p, inner) == .Val(inner_row) -> return ir_diff_is_structured(m, p, inner_row)
+        return false
+    }
+    if ty == .Result(ok_ty, err_ty) {
+        if ir_value_type(m, p, ok_ty) == .Val(ok_row) && ir_diff_is_structured(m, p, ok_row) -> return true
+        if ir_value_type(m, p, err_ty) == .Val(err_row) && ir_diff_is_structured(m, p, err_row) -> return true
+        return false
+    }
+    if ir_nominal_name(ty) == .Val(name) {
+        if ir_type_def(p, name) == .Val(def_row) {
+            if p.types[def_row].kind == .Struct(_, _) -> return true
+            if kind == .Pointer && p.types[def_row].kind == .Enum(_, _) -> return true
+        }
+    }
+    false
+}
+
+// Entry point called inside `if !equal` of `ir_require_stop(.RequireEq)`.
+// Returns a String handle containing `"diff:\n..."` or 0 (`null`) for plain
+// top-level scalars (or when no structural paths were emitted).
+ir_assert_eq_diff: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, left: Int, right: Int, span: Span) -> Int Never! {
+    row: b.f.slot_type[left]
+    if !ir_diff_is_structured(m, p, row) -> return ir_word_const(m, b, 0)
+    pointer_row: ir_pointer_row(m)
+    string_row: ir_string_row(m)
+    builder: ir_text_builder(m, b)
+    b.fresh[builder] = false
+    ir_push_static(m, b, builder, "diff:\n")
+    count_addr: ir_temp(m, b, pointer_row)
+    ir_emit(b.f, IROp.StackAddress, count_addr, 8, 8, -1, b.line)
+    zero: ir_word_const(m, b, 0)
+    ir_emit(b.f, IROp.Store, -1, count_addr, 0, zero, b.line)
+    empty_path: ir_temp(m, b, string_row)
+    ir_emit(b.f, IROp.ConstText, empty_path, ir_intern_text(m, ""), -1, -1, b.line)
+    ir_diff_push(m, p, b, row, builder, empty_path, left, right, count_addr, true, span)
+    if ir_failed(b) -> return -1
+    result_cell: ir_temp(m, b, pointer_row)
+    ir_emit(b.f, IROp.StackAddress, result_cell, 8, 8, -1, b.line)
+    ir_emit(b.f, IROp.Store, -1, result_cell, 0, zero, b.line)
+    emitted: ir_load_word(m, b, count_addr, 0)
+    has_diff: ir_bool_op(m, b, IROp.Gt, emitted, zero)
+    ir_open_if(b.f, has_diff, b.line)
+    finished: ir_runtime(m, b, "jet_rt_string_builder_finish", [Int]{builder}, string_row)
+    b.fresh[finished] = false
+    ir_emit(b.f, IROp.Store, -1, result_cell, 0, finished, b.line)
+    ir_else(b.f, b.line)
+    _: ir_runtime(m, b, "jet_rt_string_drop", [Int]{builder}, -1)
+    ir_end(b.f, b.line)
+    ir_load_at(m, b, result_cell, 0, string_row)
+}
+
+ir_diff_join_field: fn(m: ^IRModule, b: ^IRBuilder, path: Int, field_name: String) -> Int Never! {
+    string_row: ir_string_row(m)
+    child_builder: ir_text_builder(m, b)
+    b.fresh[child_builder] = false
+    path_len: ir_load_word(m, b, path, 8)
+    zero: ir_word_const(m, b, 0)
+    non_empty: ir_bool_op(m, b, IROp.Gt, path_len, zero)
+    ir_open_if(b.f, non_empty, b.line)
+    _: ir_runtime(m, b, "jet_rt_string_builder_push", [Int]{child_builder, path}, -1)
+    ir_push_static(m, b, child_builder, ".{field_name}")
+    ir_else(b.f, b.line)
+    ir_push_static(m, b, child_builder, field_name)
+    ir_end(b.f, b.line)
+    ir_runtime(m, b, "jet_rt_string_builder_finish", [Int]{child_builder}, string_row)
+}
+
+ir_diff_join_index: fn(m: ^IRModule, b: ^IRBuilder, path: Int, index_word: Int) -> Int Never! {
+    string_row: ir_string_row(m)
+    child_builder: ir_text_builder(m, b)
+    b.fresh[child_builder] = false
+    _: ir_runtime(m, b, "jet_rt_string_builder_push", [Int]{child_builder, path}, -1)
+    ir_push_static(m, b, child_builder, "[")
+    _: ir_runtime(m, b, "jet_rt_string_builder_push_i64", [Int]{child_builder, index_word}, -1)
+    ir_push_static(m, b, child_builder, "]")
+    ir_runtime(m, b, "jet_rt_string_builder_finish", [Int]{child_builder}, string_row)
+}
+
+ir_diff_join_key: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, path: Int, key_slot: Int, span: Span) -> Int Never! {
+    string_row: ir_string_row(m)
+    child_builder: ir_text_builder(m, b)
+    b.fresh[child_builder] = false
+    _: ir_runtime(m, b, "jet_rt_string_builder_push", [Int]{child_builder, path}, -1)
+    ir_push_static(m, b, child_builder, "[")
+    key_ty: ir_row_ty(m, p, b.f.slot_type[key_slot])
+    key_text: ir_render(m, p, b, key_ty, key_slot, IRRender.Debug, span)
+    if !ir_failed(b) && key_text >= 0 {
+        _: ir_runtime(m, b, "jet_rt_string_builder_push", [Int]{child_builder, key_text}, -1)
+        if key_text != key_slot -> ir_release(m, b, key_text)
+    }
+    ir_push_static(m, b, child_builder, "]")
+    ir_runtime(m, b, "jet_rt_string_builder_finish", [Int]{child_builder}, string_row)
+}
+
+// Guard a single diff line with the 32-entry cap (`count_addr`).
+ir_diff_open_cap: fn(m: ^IRModule, b: ^IRBuilder, builder: Int, count_addr: Int) Never! {
+    c: ir_load_word(m, b, count_addr, 0)
+    limit: ir_word_const(m, b, IR_ASSERT_DIFF_LIMIT)
+    under: ir_bool_op(m, b, IROp.Lt, c, limit)
+    ir_open_if(b.f, under, b.line)
+    one: ir_word_const(m, b, 1)
+    next_c: ir_word_op(m, b, IROp.Add, c, one)
+    ir_emit(b.f, IROp.Store, -1, count_addr, 0, next_c, b.line)
+}
+
+ir_diff_close_cap: fn(m: ^IRModule, b: ^IRBuilder, builder: Int, count_addr: Int) Never! {
+    ir_else(b.f, b.line)
+    c: ir_load_word(m, b, count_addr, 0)
+    limit: ir_word_const(m, b, IR_ASSERT_DIFF_LIMIT)
+    at_limit: ir_bool_op(m, b, IROp.Eq, c, limit)
+    ir_open_if(b.f, at_limit, b.line)
+    over: ir_word_const(m, b, IR_ASSERT_DIFF_LIMIT + 1)
+    ir_emit(b.f, IROp.Store, -1, count_addr, 0, over, b.line)
+    ir_push_static(m, b, builder, "  ... (more differences omitted)\n")
+    ir_end(b.f, b.line)
+    ir_end(b.f, b.line)
+}
+
+ir_diff_emit_leaf: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, builder: Int, path: Int, left: Int, right: Int, count_addr: Int, span: Span) Never! {
+    path_len: ir_load_word(m, b, path, 8)
+    zero: ir_word_const(m, b, 0)
+    has_path: ir_bool_op(m, b, IROp.Gt, path_len, zero)
+    ir_open_if(b.f, has_path, b.line)
+    ir_diff_open_cap(m, b, builder, count_addr)
+    ir_push_static(m, b, builder, "  ")
+    _: ir_runtime(m, b, "jet_rt_string_builder_push", [Int]{builder, path}, -1)
+    ir_push_static(m, b, builder, ": expected ")
+    right_ty: ir_row_ty(m, p, b.f.slot_type[right])
+    right_text: ir_render(m, p, b, right_ty, right, IRRender.Debug, span)
+    if !ir_failed(b) && right_text >= 0 {
+        _: ir_runtime(m, b, "jet_rt_string_builder_push", [Int]{builder, right_text}, -1)
+        if right_text != right -> ir_release(m, b, right_text)
+    }
+    ir_push_static(m, b, builder, ", got ")
+    left_ty: ir_row_ty(m, p, b.f.slot_type[left])
+    left_text: ir_render(m, p, b, left_ty, left, IRRender.Debug, span)
+    if !ir_failed(b) && left_text >= 0 {
+        _: ir_runtime(m, b, "jet_rt_string_builder_push", [Int]{builder, left_text}, -1)
+        if left_text != left -> ir_release(m, b, left_text)
+    }
+    ir_push_static(m, b, builder, "\n")
+    ir_diff_close_cap(m, b, builder, count_addr)
+    ir_end(b.f, b.line)
+}
+
+ir_diff_emit_extra: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, builder: Int, path: Int, value: Int, count_addr: Int, span: Span) Never! {
+    ir_diff_open_cap(m, b, builder, count_addr)
+    ir_push_static(m, b, builder, "  ")
+    _: ir_runtime(m, b, "jet_rt_string_builder_push", [Int]{builder, path}, -1)
+    ir_push_static(m, b, builder, ": extra ")
+    val_ty: ir_row_ty(m, p, b.f.slot_type[value])
+    val_text: ir_render(m, p, b, val_ty, value, IRRender.Debug, span)
+    if !ir_failed(b) && val_text >= 0 {
+        _: ir_runtime(m, b, "jet_rt_string_builder_push", [Int]{builder, val_text}, -1)
+        if val_text != value -> ir_release(m, b, val_text)
+    }
+    ir_push_static(m, b, builder, "\n")
+    ir_diff_close_cap(m, b, builder, count_addr)
+}
+
+ir_diff_emit_missing: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, builder: Int, path: Int, expected: Int, count_addr: Int, span: Span) Never! {
+    ir_diff_open_cap(m, b, builder, count_addr)
+    ir_push_static(m, b, builder, "  ")
+    _: ir_runtime(m, b, "jet_rt_string_builder_push", [Int]{builder, path}, -1)
+    ir_push_static(m, b, builder, ": missing (expected ")
+    exp_ty: ir_row_ty(m, p, b.f.slot_type[expected])
+    exp_text: ir_render(m, p, b, exp_ty, expected, IRRender.Debug, span)
+    if !ir_failed(b) && exp_text >= 0 {
+        _: ir_runtime(m, b, "jet_rt_string_builder_push", [Int]{builder, exp_text}, -1)
+        if exp_text != expected -> ir_release(m, b, exp_text)
+    }
+    ir_push_static(m, b, builder, ")\n")
+    ir_diff_close_cap(m, b, builder, count_addr)
+}
+
+ir_diff_members: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, members: [IRMember], builder: Int, path: Int, left: Int, right: Int, count_addr: Int, span: Span) Never! {
+    loop member in members {
+        if ir_failed(b) -> return
+        left_member: ir_member_value(m, b, left, member)
+        right_member: ir_member_value(m, b, right, member)
+        child_path: ir_diff_join_field(m, b, path, member.name)
+        ir_diff_push(m, p, b, member.ty, builder, child_path, left_member, right_member, count_addr, false, span)
+        ir_release(m, b, child_path)
+    }
+}
+
+ir_diff_push: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, builder: Int, path: Int, left: Int, right: Int, count_addr: Int, outer: Bool, span: Span) Never! {
+    if row < 0 || row >= m.types.len() || left < 0 || right < 0 -> return
+    kind: m.types[row].kind
+    if kind == .Unit -> return
+    ty: ir_untag(ir_row_ty(m, p, row))
+    // String: delegate directly to `jet_rt_assert_diff_text`.
+    if kind == .String {
+        _: ir_runtime(m, b, "jet_rt_assert_diff_text", [Int]{builder, path, left, right, count_addr}, -1)
+        return
+    }
+    // Scalar leaf: compare with `==` and emit only when unequal.
+    if kind == .Int || (kind == .Word && !ir_option_inline(m, row) && !ir_type_handle(p, ty)) || kind == .Bool || kind == .Char || kind == .Float || kind == .Float32 {
+        same: ir_bool_op(m, b, IROp.Eq, left, right)
+        diff: ir_temp_like(m, b, same)
+        ir_emit(b.f, IROp.Not, diff, same, -1, -1, b.line)
+        ir_open_if(b.f, diff, b.line)
+        ir_diff_emit_leaf(m, p, b, builder, path, left, right, count_addr, span)
+        ir_end(b.f, b.line)
+        return
+    }
+    if ir_is_handle(m, row) || ir_native_carrier(ty) {
+        if ir_is_handle(m, row) {
+            if ir_equal_handle_symbol(p, ty) == .Val(symbol) {
+                bool_row: ir_type_row(m, Type.Bool) ?? 0
+                same: ir_runtime(m, b, symbol, [Int]{left, right}, bool_row)
+                diff: ir_temp_like(m, b, same)
+                ir_emit(b.f, IROp.Not, diff, same, -1, -1, b.line)
+                ir_open_if(b.f, diff, b.line)
+                ir_diff_emit_leaf(m, p, b, builder, path, left, right, count_addr, span)
+                ir_end(b.f, b.line)
+            }
+        }
+        return
+    }
+    // Option<T>: recurse into payload when both are Val; leaf when presence differs.
+    if ty == .Option(inner) {
+        payload: ir_value_type(m, p, inner) ?? return
+        left_some: ir_option_is_some(m, b, left)
+        right_some: ir_option_is_some(m, b, right)
+        same_tag: ir_bool_op(m, b, IROp.Eq, left_some, right_some)
+        ir_open_if(b.f, same_tag, b.line)
+        ir_open_if(b.f, left_some, b.line)
+        lp: ir_option_payload(m, b, left, payload)
+        rp: ir_option_payload(m, b, right, payload)
+        ir_diff_push(m, p, b, payload, builder, path, lp, rp, count_addr, false, span)
+        ir_end(b.f, b.line)
+        ir_else(b.f, b.line)
+        ir_diff_emit_leaf(m, p, b, builder, path, left, right, count_addr, span)
+        ir_end(b.f, b.line)
+        return
+    }
+    // Result<T, E>: recurse into payload when both are Ok or both are Err.
+    if ty == .Result(ok_ty, err_ty) {
+        ok_row: ir_value_type(m, p, ok_ty) ?? return
+        err_row: ir_value_type(m, p, err_ty) ?? return
+        left_ok: ir_result_is_ok(m, b, left)
+        right_ok: ir_result_is_ok(m, b, right)
+        same_tag: ir_bool_op(m, b, IROp.Eq, left_ok, right_ok)
+        ir_open_if(b.f, same_tag, b.line)
+        ir_open_if(b.f, left_ok, b.line)
+        lv: ir_load_at(m, b, left, 8, ok_row)
+        rv: ir_load_at(m, b, right, 8, ok_row)
+        ir_diff_push(m, p, b, ok_row, builder, path, lv, rv, count_addr, false, span)
+        ir_else(b.f, b.line)
+        le: ir_load_at(m, b, left, 8, err_row)
+        re: ir_load_at(m, b, right, 8, err_row)
+        ir_diff_push(m, p, b, err_row, builder, path, le, re, count_addr, false, span)
+        ir_end(b.f, b.line)
+        ir_else(b.f, b.line)
+        ir_diff_emit_leaf(m, p, b, builder, path, left, right, count_addr, span)
+        ir_end(b.f, b.line)
+        return
+    }
+    // Map [K:V]: walk ordered keys of left (extra / changed) and ordered keys of right (missing).
+    if ir_map_row_hashed(m, p, row) || ir_map_entry_type(ty) != None {
+        shape: ir_map_shape(m, p, row) ?? return
+        word_row: ir_word_row(m)
+        zero: ir_word_const(m, b, 0)
+        // Pass 1: keys in `left` (got).
+        left_ord: ir_map_ordered(m, p, b, left)
+        l_walk: ir_walk_open(m, b, left_ord, shape.entry)
+        l_key: ir_load_at(m, b, l_walk.item, shape.key.offset, shape.key.ty)
+        l_val: ir_load_at(m, b, l_walk.item, shape.value.offset, shape.value.ty)
+        found_r: ir_map_call(m, p, b, row, "map.find", [Int]{right, l_key}, word_row)
+        in_right: ir_bool_op(m, b, IROp.Ge, found_r, zero)
+        ir_open_if(b.f, in_right, b.line)
+        r_data: ir_load_word(m, b, right, 16)
+        r_at: ir_element_address(m, b, r_data, found_r, shape.stride)
+        r_val: ir_load_at(m, b, r_at, shape.value.offset, shape.value.ty)
+        child_path: ir_diff_join_key(m, p, b, path, l_key, span)
+        ir_diff_push(m, p, b, shape.value.ty, builder, child_path, l_val, r_val, count_addr, false, span)
+        ir_release(m, b, child_path)
+        ir_else(b.f, b.line)
+        extra_path: ir_diff_join_key(m, p, b, path, l_key, span)
+        ir_diff_emit_extra(m, p, b, builder, extra_path, l_val, count_addr, span)
+        ir_release(m, b, extra_path)
+        ir_end(b.f, b.line)
+        ir_walk_close(m, b, l_walk)
+        ir_map_ordered_end(m, b, left, left_ord)
+        // Pass 2: keys in `right` (expected) missing from `left` (got).
+        right_ord: ir_map_ordered(m, p, b, right)
+        r_walk: ir_walk_open(m, b, right_ord, shape.entry)
+        r_key: ir_load_at(m, b, r_walk.item, shape.key.offset, shape.key.ty)
+        found_l: ir_map_call(m, p, b, row, "map.find", [Int]{left, r_key}, word_row)
+        missing_in_left: ir_bool_op(m, b, IROp.Lt, found_l, zero)
+        ir_open_if(b.f, missing_in_left, b.line)
+        r_val2: ir_load_at(m, b, r_walk.item, shape.value.offset, shape.value.ty)
+        miss_path: ir_diff_join_key(m, p, b, path, r_key, span)
+        ir_diff_emit_missing(m, p, b, builder, miss_path, r_val2, count_addr, span)
+        ir_release(m, b, miss_path)
+        ir_end(b.f, b.line)
+        ir_walk_close(m, b, r_walk)
+        ir_map_ordered_end(m, b, right, right_ord)
+        return
+    }
+    // Lists, fixed lists, and views: element-by-element diff + trailing extra/missing.
+    elem_opt: if ir_sequence_element(ty) == .Val(el) -> Val(el) else -> ir_view_element(ty)
+    if elem_opt == .Val(elem_ty) {
+        elem_row: ir_value_type(m, p, elem_ty) ?? return
+        stride: ir_list_stride(m, elem_row)
+        l_len: ir_list_length(m, b, left)
+        r_len: ir_list_length(m, b, right)
+        l_data: ir_list_data(m, b, left)
+        r_data: ir_list_data(m, b, right)
+        // Shared prefix 0..<min(l_len, r_len).
+        shorter_left: ir_bool_op(m, b, IROp.Lt, l_len, r_len)
+        min_cell: ir_temp(m, b, ir_pointer_row(m))
+        ir_emit(b.f, IROp.StackAddress, min_cell, 8, 8, -1, b.line)
+        ir_open_if(b.f, shorter_left, b.line)
+        ir_emit(b.f, IROp.Store, -1, min_cell, 0, l_len, b.line)
+        ir_else(b.f, b.line)
+        ir_emit(b.f, IROp.Store, -1, min_cell, 0, r_len, b.line)
+        ir_end(b.f, b.line)
+        min_len: ir_load_word(m, b, min_cell, 0)
+        one: ir_word_const(m, b, 1)
+        cap_word: ir_word_const(m, b, IR_ASSERT_DIFF_LIMIT)
+        index: ir_word_const(m, b, 0)
+        done_common: ir_open(b.f, IROp.Block, b.line)
+        _: ir_open(b.f, IROp.Loop, b.line)
+        more_common: ir_bool_op(m, b, IROp.Lt, index, min_len)
+        ir_exit_unless(m, b, more_common, done_common)
+        cur_count: ir_load_word(m, b, count_addr, 0)
+        under_cap: ir_bool_op(m, b, IROp.Le, cur_count, cap_word)
+        ir_exit_unless(m, b, under_cap, done_common)
+        l_at: ir_element_address(m, b, l_data, index, stride)
+        r_at: ir_element_address(m, b, r_data, index, stride)
+        l_elem: ir_load_at(m, b, l_at, 0, elem_row)
+        r_elem: ir_load_at(m, b, r_at, 0, elem_row)
+        child_path: ir_diff_join_index(m, b, path, index)
+        ir_diff_push(m, p, b, elem_row, builder, child_path, l_elem, r_elem, count_addr, false, span)
+        ir_release(m, b, child_path)
+        ir_emit(b.f, IROp.Add, index, index, one, IR_OVERFLOW_WRAP, b.line)
+        ir_emit(b.f, IROp.Br, -1, 0, -1, -1, b.line)
+        ir_end(b.f, b.line)
+        ir_end(b.f, b.line)
+        // Extra elements in `left` (got).
+        extra_i: ir_load_word(m, b, min_cell, 0)
+        done_extra: ir_open(b.f, IROp.Block, b.line)
+        _: ir_open(b.f, IROp.Loop, b.line)
+        more_extra: ir_bool_op(m, b, IROp.Lt, extra_i, l_len)
+        ir_exit_unless(m, b, more_extra, done_extra)
+        cur_c2: ir_load_word(m, b, count_addr, 0)
+        under_c2: ir_bool_op(m, b, IROp.Le, cur_c2, cap_word)
+        ir_exit_unless(m, b, under_c2, done_extra)
+        e_at: ir_element_address(m, b, l_data, extra_i, stride)
+        e_val: ir_load_at(m, b, e_at, 0, elem_row)
+        e_path: ir_diff_join_index(m, b, path, extra_i)
+        ir_diff_emit_extra(m, p, b, builder, e_path, e_val, count_addr, span)
+        ir_release(m, b, e_path)
+        ir_emit(b.f, IROp.Add, extra_i, extra_i, one, IR_OVERFLOW_WRAP, b.line)
+        ir_emit(b.f, IROp.Br, -1, 0, -1, -1, b.line)
+        ir_end(b.f, b.line)
+        ir_end(b.f, b.line)
+        // Missing elements from `right` (expected).
+        miss_i: ir_load_word(m, b, min_cell, 0)
+        done_miss: ir_open(b.f, IROp.Block, b.line)
+        _: ir_open(b.f, IROp.Loop, b.line)
+        more_miss: ir_bool_op(m, b, IROp.Lt, miss_i, r_len)
+        ir_exit_unless(m, b, more_miss, done_miss)
+        cur_c3: ir_load_word(m, b, count_addr, 0)
+        under_c3: ir_bool_op(m, b, IROp.Le, cur_c3, cap_word)
+        ir_exit_unless(m, b, under_c3, done_miss)
+        m_at: ir_element_address(m, b, r_data, miss_i, stride)
+        m_val: ir_load_at(m, b, m_at, 0, elem_row)
+        m_path: ir_diff_join_index(m, b, path, miss_i)
+        ir_diff_emit_missing(m, p, b, builder, m_path, m_val, count_addr, span)
+        ir_release(m, b, m_path)
+        ir_emit(b.f, IROp.Add, miss_i, miss_i, one, IR_OVERFLOW_WRAP, b.line)
+        ir_emit(b.f, IROp.Br, -1, 0, -1, -1, b.line)
+        ir_end(b.f, b.line)
+        ir_end(b.f, b.line)
+        return
+    }
+    // Tuple / named record.
+    if ty == .Tuple(fields) {
+        members: ir_tuple_members(m, p, fields) ?? return
+        loop (idx, member) in members {
+            if ir_failed(b) -> return
+            lm: ir_member_value(m, b, left, member)
+            rm: ir_member_value(m, b, right, member)
+            fname: if fields[idx].name != "" -> fields[idx].name else -> "{idx}"
+            c_path: ir_diff_join_field(m, b, path, fname)
+            ir_diff_push(m, p, b, member.ty, builder, c_path, lm, rm, count_addr, false, span)
+            ir_release(m, b, c_path)
+        }
+        return
+    }
+    // Nominal struct / enum: delegate nested types to a keyed helper `#diff<row>`
+    // so recursive types terminate cleanly and share one helper body per type.
+    name: ir_nominal_name(ty) ?? return
+    def_row: ir_type_def(p, name) ?? return
+    if !outer {
+        helper: ir_diff_helper(m, p, b, row, span)
+        if helper < 0 -> return
+        start: ir_args(b.f, [Int]{builder, path, left, right, count_addr})
+        ir_emit(b.f, IROp.Call, -1, helper, start, 5, b.line)
+        ir_stop_check(m, b)
+        return
+    }
+    if p.types[def_row].kind == .Struct(_, _) {
+        members: ir_struct_members(m, p, def_row, ir_type_args(ty)) ?? return
+        ir_diff_members(m, p, b, members, builder, path, left, right, count_addr, span)
+        return
+    }
+    if kind == .Pointer && p.types[def_row].kind == .Enum(variants, _) {
+        left_tag: ir_load_word(m, b, left, 0)
+        right_tag: ir_load_word(m, b, right, 0)
+        same_tag: ir_bool_op(m, b, IROp.Eq, left_tag, right_tag)
+        ir_open_if(b.f, same_tag, b.line)
+        loop v_idx in 0..<variants.len() {
+            members: ir_variant_members(m, p, def_row, ir_type_args(ty), v_idx) ?? next
+            if members.len() == 0 -> next
+            v_word: ir_word_const(m, b, v_idx)
+            selected: ir_bool_op(m, b, IROp.Eq, left_tag, v_word)
+            ir_open_if(b.f, selected, b.line)
+            ir_diff_members(m, p, b, members, builder, path, left, right, count_addr, span)
+            ir_end(b.f, b.line)
+        }
+        ir_else(b.f, b.line)
+        ir_diff_emit_leaf(m, p, b, builder, path, left, right, count_addr, span)
+        ir_end(b.f, b.line)
+    }
+}
+
+// Per-type IR helper `#diff<row>(builder, path, left, right, count_addr)` for
+// nominal structs and payload enums (built once per type row).
+ir_diff_helper: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, span: Span) -> Int Never! {
+    helper_key: "#diff<{ir_row_key(m, row)}>"
+    known: ir_keyed_function(m, helper_key) ?? -1
+    if known >= 0 -> return known
+    id: m.functions.len()
+    template: ir_hashed_function("diff", helper_key, "jet_ir_diff_", "", 0)
+    m.functions.push(ir_hashed_function("diff", helper_key, "jet_ir_diff_", "", 0))
+    ir_function_bind(m, helper_key, id)
+    ^a: ir_builder_new(template)
+    pointer_row: ir_pointer_row(m)
+    string_row: ir_string_row(m)
+    builder: ir_new_slot(a, pointer_row, IRSlotKind.Param, ir_intern_name(m, "builder"))
+    path: ir_new_slot(a, string_row, IRSlotKind.Param, ir_intern_name(m, "path"))
+    left: ir_new_slot(a, row, IRSlotKind.Param, ir_intern_name(m, "left"))
+    right: ir_new_slot(a, row, IRSlotKind.Param, ir_intern_name(m, "right"))
+    count_addr: ir_new_slot(a, pointer_row, IRSlotKind.Param, ir_intern_name(m, "count_addr"))
+    ir_diff_push(m, p, a, row, builder, path, left, right, count_addr, true, span)
+    if a.error != "" {
+        ir_emit(a.f, IROp.Unreachable, -1, -1, -1, -1, a.line)
+        m.functions[id] = a.f.move()
+        ir_function_bind(m, helper_key, -1)
+        ir_fail(b, span, a.error)
+        return -1
+    }
+    ir_emit(a.f, IROp.Return, -1, -1, -1, -1, a.line)
+    loop call in a.deferred {
+        b.deferred.push(IRDeferredCall{at: call.at, key: call.key, function: if call.function >= 0 -> call.function else -> id, args: call.args})
+    }
+    m.functions[id] = a.f.move()
+    id
+}

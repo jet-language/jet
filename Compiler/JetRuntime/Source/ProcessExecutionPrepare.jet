@@ -76,6 +76,32 @@ process_execution_environment: fn(spec: I64, err: I64) -> I64 {
             entry = fd_word(entry, I64{0})
         }
         shared_release(root, false)
+        count_slot: jet_rt_alloc(I64{8}, I64{8})
+        nodes: context_env_nodes_outer_to_inner(count_slot)
+        node_count: rt_text_word(count_slot)
+        jet_rt_free(count_slot, I64{8}, I64{8})
+        if (node_count > I64{0}) {
+            ^ni: I64{0}
+            loop ni < node_count {
+                node: rt_text_word(wrapping(nodes + ni * I64{8}))
+                mlen: sync_load(wrapping(node + I64{40}))
+                mdata: sync_load(wrapping(node + I64{56}))
+                ^mi: I64{0}
+                loop mi < mlen {
+                    mrow: wrapping(mdata + mi * I64{16})
+                    k: sync_load(mrow)
+                    v: sync_load(wrapping(mrow + I64{8}))
+                    if context_env_is_tombstone(v) {
+                        process_execution_env_remove(env, k)
+                    } else {
+                        process_execution_env_set(env, k, v)
+                    }
+                    mi += I64{1}
+                }
+                ni += I64{1}
+            }
+            jet_rt_free(nodes, wrapping(node_count * I64{8}), I64{8})
+        }
     }
     sets: fd_word(spec, PROCESS_SPEC_ENV_SET)
     removes: fd_word(spec, PROCESS_SPEC_ENV_REMOVE)
@@ -105,6 +131,9 @@ process_execution_environment: fn(spec: I64, err: I64) -> I64 {
 // This process's inherited PATH as an owned text, or 0 when it is unset. The
 // receipt resolves against it without building a whole child environment.
 process_execution_inherited_path: fn() -> I64 {
+    hit: context_env_lookup(rt_text_data(rt_static_text("PATH")), I64{4})
+    if (hit == CONTEXT_ENV_UNSET) { return I64{0} }
+    if (hit != I64{0}) { return jet_rt_string_clone(hit) }
     root: logical_environment_current()
     shared_acquire(root, false)
     entry: logical_environment_find(root, rt_text_data(rt_static_text("PATH")), I64{4})
@@ -492,6 +521,20 @@ process_execution_launch_native: fn(spec: I64, err: I64) -> I64 {
         if (process_execution_has(first, I64{47})) -> { I64{0} } else -> { I64{1} },
     )
     mechanical: process_execution_pack(spec)
+    ^resolved_cwd: I64{0}
+    if !process_execution_held_cwd(spec) {
+        ctx_dir: context_dir_current()
+        if (ctx_dir != I64{0}) {
+            if (cwd == I64{0}) {
+                fd_put(mechanical, I64{8}, I64{1})
+                fd_put(mechanical, I64{16}, ctx_dir)
+            } else if (rt_text_len(cwd) > I64{0} && rt_text_byte(rt_text_data(cwd)) != I64{47}) {
+                resolved_cwd = context_dir_resolve_owned(cwd)
+                fd_put(mechanical, I64{8}, I64{1})
+                fd_put(mechanical, I64{16}, resolved_cwd)
+            }
+        }
+    }
     // The scope is made last, so only the spawn itself can fail after it.
     ^scope: I64{0}
     ^child: I64{0}
@@ -515,6 +558,7 @@ process_execution_launch_native: fn(spec: I64, err: I64) -> I64 {
             ^_: compiler_fs_errno(HOST_IO_OP_RESOLVE, process_execution_resource(spec), fd_word(facts, I64{40}), err)
         }
     }
+    if (resolved_cwd != I64{0}) { jet_rt_string_drop(resolved_cwd) }
     if (scope != I64{0}) {
         spawn_close(fd_word(facts, I64{64}))
         if (child != I64{0}) { fd_put(child, I64{96}, scope) } else {

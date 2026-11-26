@@ -377,11 +377,11 @@ log_sink_open: fn(path: I64) -> I64 {
         if (rt_text_byte(wrapping(data + at)) == I64{0}) { return I64{-22} }
         at += I64{1}
     }
-    name: fd_c_path(path)
+    name: fd_c_fs_path(path)
     ^fd: I64{-4}
     // O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, mode 0666.
     loop fd == (I64{-4}) -> fd = host_call(I64{2}, name, I64{525377}, I64{438})
-    fd_c_path_drop(name, path)
+    fd_c_fs_path_drop(name)
     fd
 }
 
