@@ -1,0 +1,17 @@
+# A parsed value prints back to text its grammar parses to the same value,
+# and that text prints again unchanged: separators only where tokens would
+# run together, a field-less token as its first spelling, an absent optional
+# part as nothing, a keyword-shaped name kept a name, and print_into
+# appending to the bytes it is given, at every tier.
+fixture: PrintRoundTrips.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 0
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = "1+2*3 same\n2^3^2 same\n-2^2 same\nf(1,x)(2)-(3-4)%5 same\na--b same\ng() same\n[server]\nport=8080\nname=\"web one\"\n\n[client]\nretry=\n\n7 lines, stable\n[let x=5;show!x,-3,+4;do let letter=y;show letter;end let end=1;] same\n[] same\n[let let=12;] same\ninto > 1+2\n"
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: == o0

@@ -106,12 +106,15 @@ SemaGrammarNode: struct {
 }
 
 // One operator of an operator rule (core.grammar GrammarOperator): its
-// alternative, its tail (-1 for a prefix operator), its level and the level
-// each element parses at (-1 for none).
+// alternative, its tail (-1 for a prefix operator), its kind's name
+// (Binary, Prefix or Suffix), its level, whether it groups from the right,
+// and the level each element parses at (-1 for none).
 SemaGrammarOperator: struct {
     alt: Int,
     tail: Int,
+    kind: String,
     level: Int,
+    right: Bool,
     operands: [Int],
 }
 
@@ -125,8 +128,9 @@ SemaGrammarOperatorRule: struct {
 }
 
 // What the items are made of: the plan's shapes, each token kind's case
-// name, each kind's hole name ("" for a kind that is no hole), and the
-// parse: the rule tree, each node's decision and the operator rules.
+// name, each kind's hole name ("" for a kind that is no hole), the parse:
+// the rule tree, each node's decision and the operator rules, and each
+// rule's grouping alternative (-1 for none) the printer parenthesizes with.
 SemaGrammarItemsPlan: struct {
     shapes: [SemaGrammarShape],
     kind_names: [String],
@@ -135,6 +139,7 @@ SemaGrammarItemsPlan: struct {
     nodes: [SemaGrammarNode],
     decision_of: [Int],
     operators: [SemaGrammarOperatorRule],
+    groups: [Int],
 }
 
 // Replace each module binding `plans` names with the items its plan
@@ -179,7 +184,10 @@ sema_grammar_items: fn(definition: ConstDef, plan: SemaGrammarItemsPlan, value: 
     ^items: [Item]{}
     loop shape in plan.shapes {
         ^methods: [Func]{}
-        if parses -> methods.push(sema_grammar_parse_method(gen, plan, shape, definition.is_pub, definition.is_package_pub))
+        if parses {
+            methods.push(sema_grammar_parse_method(gen, plan, shape, definition.is_pub, definition.is_package_pub))
+            sema_grammar_print_methods(gen, plan, shape, definition.is_pub, definition.is_package_pub, methods)
+        }
         if shape.is_enum {
             ^variants: [Variant]{}
             loop case in shape.cases {
@@ -220,7 +228,10 @@ sema_grammar_items: fn(definition: ConstDef, plan: SemaGrammarItemsPlan, value: 
     if slots.len() > 0 {
         items.push(Item.Enum{value: sema_grammar_enum(definition, "{definition.name}Slot", slots, [Marker]{}, [Func]{})})
     }
-    if parses -> sema_grammar_parser_items(gen, plan, value, items)
+    if parses {
+        sema_grammar_parser_items(gen, plan, value, items)
+        sema_grammar_printer_items(gen, plan, value, items)
+    }
     items
 }
 
@@ -307,10 +318,11 @@ sema_grammar_enum: fn(definition: ConstDef, name: String, variants: [Variant], m
 
 // Read the parts of a computed `GrammarPlan` value the items are made of.
 sema_grammar_items_plan: fn(value: CtValue) -> SemaGrammarItemsPlan Never! {
-    ^plan: SemaGrammarItemsPlan{shapes: [SemaGrammarShape]{}, kind_names: [String]{}, holes: [String]{}, rules: [SemaGrammarRule]{}, nodes: [SemaGrammarNode]{}, decision_of: [Int]{}, operators: [SemaGrammarOperatorRule]{}}
+    ^plan: SemaGrammarItemsPlan{shapes: [SemaGrammarShape]{}, kind_names: [String]{}, holes: [String]{}, rules: [SemaGrammarRule]{}, nodes: [SemaGrammarNode]{}, decision_of: [Int]{}, operators: [SemaGrammarOperatorRule]{}, groups: [Int]{}}
     if value == .Struct(_, entries) {
         loop entry in entries {
             if entry.name == "tree" -> sema_grammar_tree(entry.value, plan)
+            if entry.name == "printer" -> plan.groups = sema_grammar_member_ints(entry.value, "groups")
             if entry.value == .List(values) {
                 if entry.name == {
                     "shapes" -> loop shape in values -> plan.shapes.push(sema_grammar_shape(shape))
@@ -392,13 +404,15 @@ sema_grammar_operator_rule: fn(value: CtValue) -> SemaGrammarOperatorRule Never!
 }
 
 sema_grammar_operator: fn(value: CtValue) -> SemaGrammarOperator Never! {
-    ^op: SemaGrammarOperator{alt: -1, tail: -1, level: -1, operands: [Int]{}}
+    ^op: SemaGrammarOperator{alt: -1, tail: -1, kind: "", level: -1, right: false, operands: [Int]{}}
     if value == .Struct(_, entries) {
         loop entry in entries {
             if entry.name == {
                 "alt" -> op.alt = sema_grammar_int(entry.value)
                 "tail" -> op.tail = sema_grammar_int(entry.value)
+                "kind" -> op.kind = sema_grammar_variant(entry.value)
                 "level" -> op.level = sema_grammar_int(entry.value)
+                "right" -> op.right = entry.value == .Bool(true)
                 "operands" -> op.operands = sema_grammar_ints(entry.value)
                 else -> {}
             }
@@ -482,6 +496,16 @@ sema_grammar_member_text: fn(value: CtValue, name: String) -> String Never! {
         }
     }
     ""
+}
+
+// Int list member `name` of struct value `value` (empty when it has none).
+sema_grammar_member_ints: fn(value: CtValue, name: String) -> [Int] Never! {
+    if value == .Struct(_, entries) {
+        loop entry in entries {
+            if entry.name == name -> return sema_grammar_ints(entry.value)
+        }
+    }
+    [Int]{}
 }
 
 sema_grammar_text: fn(value: CtValue) -> String Never! {

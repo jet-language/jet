@@ -2,7 +2,10 @@
 //
 // Every meaning a generated parser has lives here: the cursor, the
 // character columns, the token automata, keyword lookup, the depth bound,
-// error text and resynchronization. The generated code only arranges calls.
+// error text and resynchronization. A generated printer writes through a
+// pen: token texts, the separator where two tokens would lex as one, and
+// the check that a field's text is its token. The generated code only
+// arranges calls.
 //
 // Lexing is contextual: the parser asks for the next token among the kinds
 // it can take there, so a word is a keyword only where the keyword can
@@ -10,8 +13,8 @@
 // among the kinds wins, a literal over a token rule of the same length. A
 // keyword matches a whole word only: the word is scanned and looked up.
 use {
-    core.grammar.error.[GrammarError, grammar_error_at, literal_name]
-    core.grammar.plan.[GrammarDecision, GrammarKeywords, GrammarLexer, GrammarPlan, GrammarScanner, GrammarToken]
+    core.grammar.error.[GrammarError, expected_list, grammar_error_at, literal_name]
+    core.grammar.plan.[GrammarDecision, GrammarKeywords, GrammarLexer, GrammarPlan, GrammarPrinter, GrammarScanner, GrammarToken]
 }
 
 /// The byte length of the UTF-8 sequence that starts with `lead`. Jet
@@ -598,4 +601,140 @@ parse_end: fn(cursor: ^GrammarCursor, scanner: GrammarScanner) -> Bool Never! {
 parse_error: fn(cursor: GrammarCursor) -> GrammarError Never! {
     // copy: the error outlives the cursor
     cursor.errors[0].copy()
+}
+
+/// A print in progress: where it started in its output, the token kind it
+/// wrote last (-1 for none yet) and, once it failed, why.
+GrammarPen: struct {
+    start: Int,
+    last: Int,
+    error: GrammarError?,
+}
+
+/// A pen that prints onto the end of `out`.
+pen_of: fn(out: [U8]) -> GrammarPen Never! {
+    GrammarPen{start: out.len(), last: -1, error: None}
+}
+
+/// Whether the printer separates a token of kind `b` from one of kind `a`
+/// before it.
+print_glued: fn(printer: GrammarPrinter, a: Int, b: Int) -> Bool Never! {
+    bit: a * printer.texts.len() + b
+    ((printer.glue[bit /% 32] >> (bit % 32)) & 1) == 1
+}
+
+/// Writes `bytes`, a token of kind `kind`, after the separator if the
+/// token before could run on into it.
+print_bytes: fn(out: ^[U8], pen: ^GrammarPen, printer: GrammarPrinter, kind: Int, bytes: [U8]) Never! {
+    if pen.last >= 0 && print_glued(printer, pen.last, kind) {
+        loop b in printer.separator.bytes() -> out.push(b)
+    }
+    loop b in bytes -> out.push(b)
+    pen.last = kind
+}
+
+/// Writes the token of kind `kind` that no field keeps: its fixed text.
+print_token: fn(out: ^[U8], pen: ^GrammarPen, printer: GrammarPrinter, kind: Int) Never! {
+    print_bytes(out, pen, printer, kind, printer.texts[kind].bytes())
+}
+
+/// Whether all of `bytes`, and nothing less, is a token of kind `kind`: its
+/// literal text, folded as the scanner folds it, or a match of its rule.
+print_matches: fn(scanner: GrammarScanner, kind: Int, bytes: [U8]) -> Bool Never! {
+    if bytes.len() == 0 -> return false
+    if scanner.texts[kind] != "" -> return literal_end(scanner, kind, bytes, 0, bytes.len()) == bytes.len()
+    lexer_match(scanner.lexer, kind, bytes, 0) == bytes.len()
+}
+
+/// Writes field `field`'s `text` as a token of kind `kind`, when it is all
+/// one such token; otherwise the error is recorded and nothing is written.
+/// Whether it was written.
+print_text: fn(out: ^[U8], pen: ^GrammarPen, scanner: GrammarScanner, printer: GrammarPrinter, field: String, text: String, kind: Int) -> Bool Never! {
+    bytes: text.bytes()
+    if print_matches(scanner, kind, bytes) {
+        print_bytes(out, pen, printer, kind, bytes)
+        return true
+    }
+    print_fail(out, pen, "{scanner.names[kind]} for `{field}`", print_text_name(text))
+}
+
+/// Writes field `field`'s `text` as the first token of `kinds`, the
+/// literals of a labeled choice, that it is all of; otherwise the error is
+/// recorded. Whether it was written.
+print_text_in: fn(out: ^[U8], pen: ^GrammarPen, scanner: GrammarScanner, printer: GrammarPrinter, field: String, text: String, kinds: [Int]) -> Bool Never! {
+    bytes: text.bytes()
+    loop kind in kinds {
+        if print_matches(scanner, kind, bytes) {
+            print_bytes(out, pen, printer, kind, bytes)
+            return true
+        }
+    }
+    ^names: [String]{}
+    loop kind in kinds -> names.push(scanner.names[kind].copy())
+    print_fail(out, pen, "{expected_list(names)} for `{field}`", print_text_name(text))
+}
+
+/// A field's text as an error names it: in double quotes, with quotes,
+/// backslashes, tabs and line breaks escaped, so a text that would inject a
+/// line still reads as one.
+print_text_name: fn(text: String) -> String Never! {
+    ^quoted: [U8]{U8{34}}
+    loop b in text.bytes() {
+        code: Int{b}
+        escape: if code == {
+            9 -> 116
+            10 -> 110
+            13 -> 114
+            34 -> 34
+            92 -> 92
+            else -> 0
+        }
+        if escape != 0 -> quoted.push(U8{92})
+        quoted.push(if escape != 0 -> U8{escape} else -> b)
+    }
+    quoted.push(U8{34})
+    String.from_bytes(quoted) ?? ""
+}
+
+/// Records that field `field` has no value, or list field `field` no more
+/// elements, where the grammar needs one. Always false.
+print_missing: fn(out: [U8], pen: ^GrammarPen, field: String) -> Bool Never! {
+    print_fail(out, pen, "a value for `{field}`", "none")
+}
+
+/// Records that list field `field` has an element the grammar has no
+/// place for. Always false.
+print_extra: fn(out: [U8], pen: ^GrammarPen, field: String) -> Bool Never! {
+    print_fail(out, pen, "the end of `{field}`", "another element")
+}
+
+/// Records that case `case` binds looser than its place and the rule has
+/// no grouping alternative to parenthesize it. Always false.
+print_ungrouped: fn(out: [U8], pen: ^GrammarPen, case: String) -> Bool Never! {
+    print_fail(out, pen, "a value that binds as tightly as its place", "`{case}`, which the grammar cannot parenthesize")
+}
+
+/// Records the error at the end of the text printed so far: the first
+/// failure stands. Always false.
+print_fail: fn(out: [U8], pen: ^GrammarPen, expected: String, found: String) -> Bool Never! {
+    if pen.error == .Val(_) -> return false
+    ^printed: [U8]{}
+    loop i in pen.start..<out.len() -> printed.push(out[i])
+    text: String.from_bytes(printed) ?? ""
+    pen.error = Val(grammar_error_at(text, printed.len(), [String]{expected}, found))
+    false
+}
+
+/// The error a failed print reports. What the print wrote is taken back
+/// off `out`, so a refused value leaves no partial text.
+print_error: fn(out: ^[U8], pen: GrammarPen) -> GrammarError Never! {
+    loop out.len() > pen.start -> _: out.pop()
+    // copy: the error outlives the pen
+    held: pen.error ?? return grammar_error_at("", 0, [String]{}, "a value the printer refused")
+    held.copy()
+}
+
+/// The text printed onto `out`, from its start.
+print_result: fn(out: [U8]) -> String Never! {
+    String.from_bytes(out) ?? ""
 }

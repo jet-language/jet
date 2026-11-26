@@ -10,7 +10,7 @@
 use {
     core.grammar.error.[GrammarFault, GrammarFaultKind, GrammarFaults, TextSpot, grammar_faults]
     core.grammar.plan.[GrammarKeywords, GrammarPlan, GrammarScanner, GrammarSource]
-    core.grammar.runtime.[GRAMMAR_MAX_DEPTH, NO_HOLE, NO_TOKEN, bounds_column, cursor_enter, cursor_expect, cursor_fail, cursor_leave, cursor_of, cursor_of_parts, cursor_resync, cursor_take, grammar_scanner, keyword_find, keyword_next, lexer_column, lexer_match, parse_decide, parse_end, parse_error, parse_text, parse_token, scan, scan_after, word_end, word_shaped]
+    core.grammar.runtime.[GRAMMAR_MAX_DEPTH, NO_HOLE, NO_TOKEN, bounds_column, cursor_enter, cursor_expect, cursor_fail, cursor_leave, cursor_of, cursor_of_parts, cursor_resync, cursor_take, grammar_scanner, keyword_find, keyword_next, lexer_column, lexer_match, parse_decide, parse_end, parse_error, parse_text, parse_token, pen_of, print_error, print_result, print_text, print_text_in, print_token, scan, scan_after, word_end, word_shaped]
     __core_grammar_analyze.[mark_nullable, mark_parents, report_left_recursion, resolve, split_operators]
     __core_grammar_keywords.[plan_keywords]
     __core_grammar_lookahead.[assign_tokens, plan_decisions, plan_sets]
@@ -469,4 +469,38 @@ priv LIST: "s : '[' items+=NAME (',' items+=NAME)* ']' ;\nNAME : [a-z]+ ;\nWS : 
     assert_eq(wrong.errors.len(), 1)
     assert("{parse_error(wrong)}".starts_with("1:4: expected \"=\""))
     assert(!parse_end(wrong, scanner))
+}
+
+#Test("a printer writes tokens apart only where they would run together") {
+    plan: plan_of("s : name=NAME '=' value=NAME ;\nNAME : [a-z]+ ;\nWS : ' '+ -> skip ;")
+    scanner: grammar_scanner(plan)
+    name: scanner_kind(scanner, "NAME")
+    equals: scanner_kind(scanner, "\"=\"")
+    ^out: [U8]{}
+    ^pen: pen_of(out)
+    assert(print_text(out, pen, scanner, plan.printer, "name", "ab", name))
+    print_token(out, pen, plan.printer, equals)
+    assert(print_text(out, pen, scanner, plan.printer, "value", "cd", name))
+    assert(print_text(out, pen, scanner, plan.printer, "value", "ef", name))
+    assert_eq(print_result(out), "ab=cd ef")
+}
+
+#Test("a field's text prints only as all of one token, and a refusal takes back the print") {
+    plan: plan_of("s : name=NAME op=('+' | '-') ;\nNAME : [a-z]+ ;\nWS : ' '+ -> skip ;")
+    scanner: grammar_scanner(plan)
+    name: scanner_kind(scanner, "NAME")
+    kinds: [Int]{scanner_kind(scanner, "\"+\""), scanner_kind(scanner, "\"-\"")}
+    ^out: [U8]{}
+    loop b in "> ".bytes() -> out.push(b)
+    ^pen: pen_of(out)
+    assert(print_text(out, pen, scanner, plan.printer, "name", "ab", name))
+    assert(print_text_in(out, pen, scanner, plan.printer, "op", "-", kinds))
+    assert(!print_text_in(out, pen, scanner, plan.printer, "op", "*", kinds))
+    assert(!print_text(out, pen, scanner, plan.printer, "name", "a b", name))
+    assert_eq("{print_error(out, pen)}", "1:4: expected \"+\" or \"-\" for `op`, found \"*\"")
+    assert_eq(print_result(out), "> ")
+    ^empty: [U8]{}
+    ^blank: pen_of(empty)
+    assert(!print_text(empty, blank, scanner, plan.printer, "name", "", name))
+    assert_eq("{print_error(empty, blank)}", "1:1: expected NAME for `name`, found \"\"")
 }
