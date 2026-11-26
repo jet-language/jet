@@ -655,6 +655,17 @@ Deadline: struct {
     }
 }
 
+// `#Frame(text) { … }` pushes one breadcrumb frame for its block (and tasks
+// spawned inside) that errors, log lines, trace spans, and `jet perf` samples
+// all carry until the block exits on any path.
+Frame: struct {
+    text: String,
+
+    impl Marker {
+        sites: [.Block],
+    }
+}
+
 Reactive: struct {
     impl Marker {
         sites: [.Function, .Method, .Block],

@@ -2658,6 +2658,20 @@ jet_cli_perf_log_spans_read: fn(capture: ^JetCLIPerfCapture, path: String, sourc
             }
             zones[index].samples += held
         }
+        if kind == JET_CLI_PERF_ZONE_LOG {
+            ^tally: [Int:Int]{}
+            loop sample in jet_cli_perf_timed_first(timed, start)..<timed.len() {
+                if timed[sample].at_ns >= end -> break
+                if timed[sample].task != task -> next
+                held += 1
+                line: timed[sample].line
+                if line == 0 -> next
+                tally[line] = (tally.get(line) ?? 0) + 1
+                if hottest == 0 || tally[line] > tally[hottest] || (tally[line] == tally[hottest] && line < hottest) {
+                    hottest = line
+                }
+            }
+        }
         if kind == JET_CLI_PERF_ZONE_FRAME -> frames.push(start)
         if kind == JET_CLI_PERF_ZONE_PLOT {
             if !plot_at.has_key(name) {
@@ -2847,6 +2861,8 @@ JetCLIPerfZoneLine: struct {
 // others): a closed log span, a closed zone, a frame mark, a plot, why
 // zones could not turn on, the file's bound reached, an attach's zones
 // window, or how many rows of each kind the bound dropped.
+JET_CLI_PERF_ZONE_LOG: 0
+
 JET_CLI_PERF_ZONE_ZONE: 1
 
 JET_CLI_PERF_ZONE_FRAME: 2

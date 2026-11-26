@@ -32,11 +32,6 @@ use jet_foundation.[
     expr_span,
 ]
 
-// The fields a context block sets itself: `#Context`'s `allocator` and
-// `#Deadline`'s `deadline` (Parser Statements.jet parser_context_fields); any
-// other label names a key.
-SEMA_CONTEXT_SET_FIELDS: [String]{"allocator", "deadline"}
-
 // The names of the context's own fields and of `context.get`, which a key
 // may not take: `context.<name>` already means them. A Core module declares
 // the key behind a field it owns (sema_context_field_module).
@@ -48,9 +43,14 @@ SemaContextKey: struct {
     ty: Type,
 }
 
-// Whether `#Context` sets the field `name` itself.
+// Whether a context block sets the field `name` itself: `#Context`'s
+// `allocator`, `#Deadline`'s `deadline`, and `#Frame`'s `frame` (Parser
+// Statements.jet parser_context_fields); any other label names a key.
 sema_context_field_settable: fn(name: String) -> Bool Never! {
-    SEMA_CONTEXT_SET_FIELDS.contains(name)
+    if name == {
+        "allocator" | "deadline" | "frame" -> true
+        else -> false
+    }
 }
 
 // The context fields a Core module carries (sema_context_field_module). The

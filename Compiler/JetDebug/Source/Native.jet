@@ -3722,10 +3722,58 @@ NativeSession: struct {
                 }
                 source: self.frame_source(frame, file, lines)
                 locals: self.locals() ?? return Err(err)
-                text = "{text}{frame.line} | {source}        <- here\n{native_debug_locals_line(locals)}\n"
+                active: self.context_frames()
+                frames_line: if active != "" -> "frames=[{active}]\n" else -> ""
+                text = "{text}{frame.line} | {source}        <- here\n{native_debug_locals_line(locals)}\n{frames_line}"
             }
         }
         Ok(text)
+    }
+
+    // Active task breadcrumb frames (`outer > inner`), read from a dump's
+    // saved frames section or live target memory (`GS:0 -> tcb+48 -> ctx+32`).
+    context_frames: fn(self) -> String Never! {
+        if self.dump == .Val(dumped) -> return "{dumped.frames}"
+        registers: self.registers() ?? return ""
+        if registers.len() <= X64_TRACE_GS_BASE -> return ""
+        base: registers[X64_TRACE_GS_BASE]
+        if base == 0 -> return ""
+        memory: NativeMemory{trace: Val(self.trace), blocks: [NativeBlock]{}}
+        tcb_word: native_debug_read(memory, base, 8, 1) ?? return ""
+        tcb: tcb_word[0]
+        if tcb == 0 -> return ""
+        record_word: native_debug_read(memory, tcb + NATIVE_DEBUG_TCB_CONTEXT, 8, 1) ?? return ""
+        record: record_word[0]
+        if record == 0 -> return ""
+        head_word: native_debug_read(memory, record + NATIVE_DEBUG_CONTEXT_VALUES, 8, 1) ?? return ""
+        ^at: head_word[0]
+        ^parts: [String]{}
+        ^steps: 0
+        loop at != 0 && steps < 256 {
+            node: native_debug_read(memory, at + 24, 8, 3) ?? break
+            key: node[0] & NATIVE_DEBUG_CONTEXT_KEY_MASK
+            next_node: node[1]
+            text_ptr: node[2]
+            if key == NATIVE_DEBUG_CONTEXT_FRAME_KEY && text_ptr != 0 {
+                kind_word: native_debug_read(memory, at + 80, 8, 1) ?? break
+                if kind_word[0] >= 0 {
+                    if native_debug_text(text_ptr, memory, quoted: false) == .Val(label) {
+                        parts.push(label)
+                    }
+                }
+            }
+            at = next_node
+            steps += 1
+        }
+        if parts.len() == 0 -> return ""
+        ^rendered: ""
+        ^i: parts.len() - 1
+        loop i >= 0 {
+            if rendered != "" -> rendered = "{rendered} > "
+            rendered = "{rendered}{parts[i]}"
+            i -= 1
+        }
+        rendered
     }
 
     // The paused facts at the current stop: the innermost Jet frame, its
@@ -7101,12 +7149,22 @@ NATIVE_DEBUG_TASK_WORDS: 15
 NATIVE_DEBUG_MOST_TASKS: 4096
 
 // A thread's TCB (JetRuntime Thread.jet): its current control at 16, its
-// fiber at 56; a control's task id (Scheduler.jet Control160 observe56).
+// context record at 48 (Context.jet CONTEXT_TCB_SLOT), its fiber at 56;
+// a control's task id (Scheduler.jet Control160 observe56).
 NATIVE_DEBUG_TCB_CONTROL: 16
+
+NATIVE_DEBUG_TCB_CONTEXT: 48
 
 NATIVE_DEBUG_TCB_FIBER: 56
 
 NATIVE_DEBUG_CONTROL_TASK: 56
+
+// Context record value-chain head and breadcrumb frame node key (Context.jet).
+NATIVE_DEBUG_CONTEXT_VALUES: 32
+
+NATIVE_DEBUG_CONTEXT_FRAME_KEY: 4
+
+NATIVE_DEBUG_CONTEXT_KEY_MASK: 4611686018427387903
 
 // A fiber's saved stack pointer (JetRuntime Fiber.jet savedStack8); the
 // registers its switch pushes above the resume address, nearest first, as
