@@ -39,15 +39,6 @@ sema_process_wrong_arity: fn(method: String, expected: Int, actual: Int, span: S
     diagnostics.push(sema_call_core_arity_diagnostic(method, expected, actual, span))
 }
 
-sema_process_check_args: fn(args: [CallArg], required: [Type], check: ^SemaBodyCheck) -> [TExpr]? {
-    if args.len() != required.len() -> return None
-    values: loop index in 0..<args.len() -> {
-        value: sema_check_expression(args[index].expr, Val(required[index]), check) ?? return None
-        value
-    }
-    Val(values)
-}
-
 sema_process_handle_receiver_name: fn(ty: Type) -> String Never! {
     if ty == {
         .Named(name) -> name
@@ -120,80 +111,33 @@ sema_process_finish: fn(receiver: TExpr, operation: BodyHandleOp, args: [TExpr],
     SemaMethodSpecialCheck{handled: true, value: checked}
 }
 
-// The ProcessSpec builders and checks the compiler still types; the launch
-// steps (`plan`, `run`, `run_checked`, `spawn`) are core.process's
-// `impl ProcessSpec` methods.
+// The two ProcessSpec checks the compiler still types: `abilities` (tagged
+// TerminalFactSet) and `keep_open` (the core.files descriptor-passing role).
+// The 22 builders and 4 launch steps are core.process's `impl ProcessSpec`
+// methods.
 sema_process_spec_known_method: fn(method: String) -> Bool Never! {
-    method == "cwd" || method == "env_remove" || method == "stdin" || method == "stdout" || method == "stderr" || method == "env" || method == "arg" || method == "args_extend" || method == "terminal" || method == "env_clear" || method == "detached" || method == "abilities" || method == "keep_open" || method == "timeout" || method == "cpu_time_limit" || method == "output_limit" || method == "memory_limit" || method == "memory_scope" || method == "open_file_limit" || method == "cpu_affinity" || method == "io_priority" || method == "io_idle" || method == "under"
+    method == "abilities" || method == "keep_open"
 }
 
 sema_process_spec_result: fn(method: String, argc: Int, span: Span, diagnostics: ^[Diagnostic]) -> Type? {
-    ^spec: sema_process_named("ProcessSpec")
     if method == {
-        "cwd" | "env_remove" | "stdin" | "stdout" | "stderr" -> {
-            if argc == 1 -> return Val(spec)
-        }
-        "env" -> {
-            if argc == 2 -> return Val(spec)
-        }
-        "arg" | "args_extend" -> {
-            if argc == 1 -> return Val(spec)
-        }
-        "terminal" -> {
-            if argc == 0 || argc == 1 -> return Val(spec)
-        }
-        "env_clear" | "detached" | "io_idle" -> {
-            if argc == 0 -> return Val(spec)
-        }
         "abilities" -> {
             if argc == 0 {
                 return Val(Type.Tagged{marker: TagMarker.Internal{internal_tag: InternalTag.TerminalFactSet}, inner: Type.Apply{name: "Set", args: [Type]{Type.String}}})
             }
         }
         "keep_open" -> {
-            if argc == 1 || argc == 2 -> return Val(spec)
-        }
-        "timeout" | "cpu_time_limit" | "output_limit" | "memory_limit" | "memory_scope" | "open_file_limit" | "cpu_affinity" | "io_priority" -> {
-            if argc == 1 -> return Val(spec)
-        }
-        "under" -> {
-            if argc == 1 -> return Val(spec)
+            if argc == 1 || argc == 2 -> return Val(sema_process_named("ProcessSpec"))
         }
         else -> {}
     }
     if !sema_process_spec_known_method(method) -> return None
-    if {
-        method == "terminal" -> {
-            diagnostics.push(sema_error("E0104", span, "`terminal` expects 0 or 1 arguments, got {argc}", "`terminal()` uses portable defaults; `terminal(policy)` uses one TerminalPolicy", "pass no argument or one TerminalPolicy"))
-        }
-        method == "keep_open" -> {
-            diagnostics.push(sema_error("E0104", span, "`keep_open` expects 1 or 2 arguments, got {argc}", "`keep_open(handle)` keeps the handle at its own descriptor number; `keep_open(handle, at: slot)` keeps it at `slot`", "pass the handle, then optionally `at:` and a descriptor slot"))
-        }
-        method == "env" -> { sema_process_wrong_arity(method, 2, argc, span, diagnostics) }
-        method == "arg" || method == "args_extend" || method == "under" -> {
-            sema_process_wrong_arity(method, 1, argc, span, diagnostics)
-        }
-        method == "cwd" || method == "env_remove" || method == "stdin" || method == "stdout" || method == "stderr" || method == "timeout" || method == "cpu_time_limit" || method == "output_limit" || method == "memory_limit" || method == "memory_scope" || method == "open_file_limit" || method == "cpu_affinity" || method == "io_priority" -> {
-            sema_process_wrong_arity(method, 1, argc, span, diagnostics)
-        }
-        else -> { sema_process_wrong_arity(method, 0, argc, span, diagnostics) }
+    if method == "keep_open" {
+        diagnostics.push(sema_error("E0104", span, "`keep_open` expects 1 or 2 arguments, got {argc}", "`keep_open(handle)` keeps the handle at its own descriptor number; `keep_open(handle, at: slot)` keeps it at `slot`", "pass the handle, then optionally `at:` and a descriptor slot"))
+    } else {
+        sema_process_wrong_arity(method, 0, argc, span, diagnostics)
     }
     None
-}
-
-sema_process_spec_arg_types: fn(method: String, argc: Int) -> [Type] Never! {
-    return if method == {
-        "cwd" | "env_remove" | "arg" -> [Type]{Type.String}
-        "args_extend" -> [Type]{Type.List{element: Type.String}}
-        "stdin" | "stdout" | "stderr" -> [Type]{sema_process_named("ProcessStreamMode")}
-        "env" -> [Type]{Type.String, Type.String}
-        "timeout" | "cpu_time_limit" -> [Type]{sema_process_named("Duration")}
-        "output_limit" | "memory_limit" | "memory_scope" | "open_file_limit" | "io_priority" -> [Type]{Type.Int}
-        "cpu_affinity" -> [Type]{Type.List{element: Type.Int}}
-        "under" -> [Type]{sema_process_named("Authority")}
-        "terminal" -> if argc == 1 -> [Type]{sema_process_named("TerminalPolicy")} else -> [Type]{}
-        else -> [Type]{}
-    }
 }
 
 sema_process_spec_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
@@ -210,60 +154,10 @@ sema_process_spec_method: fn(receiver: Expr, receiver_value: TExpr, method: Stri
     if method == "keep_open" {
         return sema_process_spec_keep_open(receiver, receiver_value, args, result, span, expected, check)
     }
-    required: sema_process_spec_arg_types(method, args.len())
-    values: sema_process_check_args(args, required, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    // ProcessSpec builders are typed with no receiver convention and no
-    // recorded move: a builder on a named spec read again later
-    // (`clean.env(…).run()` in a loop) is no E0121.
-    // The spec still moves like an unmarked owning position, so a later use
-    // turns the move into a share and a borrowed parameter keeps its value.
-    known_mutating: method != "abilities"
-    if !sema_process_check_method_ownership(receiver, "ProcessSpec.{method}", args, required, [Bool]{}, AccessConvention.Read, span, check) {
+    if !sema_process_check_method_ownership(receiver, "ProcessSpec.abilities", args, [Type]{}, [Bool]{}, AccessConvention.Read, span, check) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    sema_receiver_mark_forget(check.state, receiver)
-    if known_mutating && receiver == .Ident(_, _, _) {
-        if !sema_ownership_mark_unmarked_move(check.state, receiver, check.scopes, "`ProcessSpec.{method}`", check.diagnostics) {
-            return SemaMethodSpecialCheck{handled: true, value: None}
-        }
-    }
-    // Each method is the ordinary Core source body that fills its
-    // jet_builtins role (sema_process_spec_role; `abilities` reports the
-    // checked TerminalFact set), so every tier runs the same Jet code.
-    ^call_args: [TExpr]{receiver_value}
-    loop argument in values -> call_args.push(argument)
-    sema_process_source_call(sema_process_spec_role(method, args.len()), "ProcessSpec.{method}", "", call_args, result, span, expected, check)
-}
-
-// The jet_builtins role of the Core body a ProcessSpec method other than
-// `keep_open` calls, given its argument count (`terminal(policy)` fills
-// ProcessSpecTerminalWithPolicy); "" for no such method.
-sema_process_spec_role: fn(method: String, argc: Int) -> String Never! {
-    if method == {
-        "abilities" -> "ProcessSpecAbilities"
-        "cwd" -> "ProcessSpecCwd"
-        "arg" -> "ProcessSpecArg"
-        "args_extend" -> "ProcessSpecArgsExtend"
-        "env" -> "ProcessSpecEnv"
-        "env_remove" -> "ProcessSpecEnvRemove"
-        "env_clear" -> "ProcessSpecEnvClear"
-        "output_limit" -> "ProcessSpecOutputLimit"
-        "memory_limit" -> "ProcessSpecMemoryLimit"
-        "memory_scope" -> "ProcessSpecMemoryScope"
-        "open_file_limit" -> "ProcessSpecOpenFileLimit"
-        "cpu_affinity" -> "ProcessSpecCPUAffinity"
-        "io_priority" -> "ProcessSpecIOPriority"
-        "io_idle" -> "ProcessSpecIOIdle"
-        "detached" -> "ProcessSpecDetached"
-        "terminal" -> if argc == 1 -> "ProcessSpecTerminalWithPolicy" else -> "ProcessSpecTerminal"
-        "under" -> "ProcessSpecUnder"
-        "stdin" -> "ProcessSpecStdin"
-        "stdout" -> "ProcessSpecStdout"
-        "stderr" -> "ProcessSpecStderr"
-        "timeout" -> "ProcessSpecTimeout"
-        "cpu_time_limit" -> "ProcessSpecCPUTimeLimit"
-        else -> ""
-    }
+    sema_process_source_call("ProcessSpecAbilities", "ProcessSpec.abilities", "", [TExpr]{receiver_value}, result, span, expected, check)
 }
 
 // `api` as a call of the Core source body that fills `role` on `args` (the

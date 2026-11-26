@@ -460,10 +460,107 @@ run_all_canceled: fn() -> IOError Never! {
 }
 
 // The compiler's `ProcessSpec`: an opaque runtime handle over a command, its
-// environment, streams and limits. Its launch steps read the spec; the
-// builders are still checked by the compiler, which lets a later use of the
-// spec turn a builder's move into a share.
+// environment, streams and limits. Every builder copies the spec it reads and
+// answers the changed copy through its `jet.runtime.process` leaf; each launch
+// step reads the spec directly.
 impl ProcessSpec {
+    /// Sets the child's working directory.
+    cwd: fn(self, path: String) -> ProcessSpec Never! { rt.spec_cwd(self.copy(), path) }
+
+    /// Appends one argument to the child's command vector.
+    arg: fn(self, extra: String) -> ProcessSpec Never! { rt.spec_arg(self.copy(), extra) }
+
+    /// Appends each argument in `extra` to the child's command vector.
+    args_extend: fn(self, extra: [String]) -> ProcessSpec Never! {
+        rt.spec_args_extend(self.copy(), extra)
+    }
+
+    /// Sets environment variable `name` to `value` for the child.
+    env: fn(self, name: String, value: String) -> ProcessSpec Never! {
+        rt.spec_env(self.copy(), name, value)
+    }
+
+    /// Removes environment variable `name` from the child's environment.
+    env_remove: fn(self, name: String) -> ProcessSpec Never! {
+        rt.spec_env_remove(self.copy(), name)
+    }
+
+    /// Clears all inherited environment variables for the child.
+    env_clear: fn(self) -> ProcessSpec Never! { rt.spec_env_clear(self.copy()) }
+
+    /// Caps captured stdout and stderr bytes at `limit`.
+    output_limit: fn(self, limit: Int) -> ProcessSpec Never! {
+        rt.spec_output_limit(self.copy(), limit)
+    }
+
+    /// Caps the child's address space at `limit` bytes.
+    memory_limit: fn(self, limit: Int) -> ProcessSpec Never! {
+        rt.spec_memory_limit(self.copy(), limit)
+    }
+
+    /// Runs the child and its descendants in a memory scope capped at `bytes`.
+    memory_scope: fn(self, bytes: Int) -> ProcessSpec Never! {
+        rt.spec_memory_scope(self.copy(), bytes)
+    }
+
+    /// Caps the child's open file descriptors at `limit`.
+    open_file_limit: fn(self, limit: Int) -> ProcessSpec Never! {
+        rt.spec_open_file_limit(self.copy(), limit)
+    }
+
+    /// Pins the child to the listed CPU indices.
+    cpu_affinity: fn(self, cpus: [Int]) -> ProcessSpec Never! {
+        rt.spec_cpu_affinity(self.copy(), cpus)
+    }
+
+    /// Sets the child's best-effort I/O scheduling priority level.
+    io_priority: fn(self, level: Int) -> ProcessSpec Never! {
+        rt.spec_io_priority(self.copy(), level)
+    }
+
+    /// Places the child in the idle I/O scheduling class.
+    io_idle: fn(self) -> ProcessSpec Never! { rt.spec_io_idle(self.copy()) }
+
+    /// Runs the child detached from this process.
+    detached: fn(self) -> ProcessSpec Never! { rt.spec_detached(self.copy()) }
+
+    /// Runs the child attached to a pseudo-terminal, using portable defaults
+    /// when `policy` is `None`.
+    terminal: fn(self, policy: TerminalPolicy?{None}) -> ProcessSpec Never! {
+        if policy == .Val(configured) -> return rt.spec_terminal_with_policy(self.copy(), configured)
+        rt.spec_terminal(self.copy())
+    }
+
+    /// Delegates an authority policy to the child launch plan.
+    under: fn(self, authority: Authority) -> ProcessSpec Never! {
+        rt.spec_under(self.copy(), authority)
+    }
+
+    /// Configures the child's standard input stream mode.
+    stdin: fn(self, mode: ProcessStreamMode) -> ProcessSpec Never! {
+        rt.spec_stdin(self.copy(), mode)
+    }
+
+    /// Configures the child's standard output stream mode.
+    stdout: fn(self, mode: ProcessStreamMode) -> ProcessSpec Never! {
+        rt.spec_stdout(self.copy(), mode)
+    }
+
+    /// Configures the child's standard error stream mode.
+    stderr: fn(self, mode: ProcessStreamMode) -> ProcessSpec Never! {
+        rt.spec_stderr(self.copy(), mode)
+    }
+
+    /// Caps the child's wall-clock run time at `limit`.
+    timeout: fn(self, limit: Duration) -> ProcessSpec Never! {
+        rt.spec_timeout(self.copy(), limit.ns)
+    }
+
+    /// Caps the child's CPU time at `limit`.
+    cpu_time_limit: fn(self, limit: Duration) -> ProcessSpec Never! {
+        rt.spec_cpu_time_limit(self.copy(), limit.ns)
+    }
+
     /// The checked launch plan, without launching. A spec resolves a plan
     /// only under an authority policy from `under`.
     ///
@@ -545,10 +642,9 @@ impl TerminalSession {
     resize: fn(self, size: TerminalSize) -[IO]> IOError! { rt.terminal_session_resize(self, size) }
 }
 
-// The ProcessSpec builders: `spec.cwd(path)` and the rest check as calls of
-// these bodies, which the compiler finds by their roles (`terminal(policy)`
-// fills ProcessSpecTerminalWithPolicy), each the jet.runtime.process leaf of
-// its runtime export. A builder takes its spec and answers it changed.
+// Bootstrap shims for the current seed compiler, which still routes the
+// ProcessSpec builders by role; removed once the next seed resolves them
+// through `impl ProcessSpec` above.
 #Builtin.Role(.ProcessSpecCwd) priv __spec_cwd: fn(spec: ^^ProcessSpec, path: String) -> ProcessSpec Never! {
     rt.spec_cwd(spec, path)
 }
