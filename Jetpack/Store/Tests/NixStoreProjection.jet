@@ -268,7 +268,7 @@ store_test_admit_signed_closure_with_bin_symlinks: fn(verification: StoreVerific
     files.write(files.join(source, "leaf/bin/leaf-tool"), leaf_tool_body) ?? panic("leaf tool")
     files.set_mode(files.join(source, "leaf/bin/leaf-tool"), 493) ?? panic("chmod leaf tool")
     files.symlink("{STORE_TEST_PROJECTION_LEAF}/bin/leaf-tool", files.join(source, "root/bin/projected-tool")) ?? panic("projected symlink")
-    files.symlink("/nix/store/22222222222222222222222222222222-missing-gdb/bin/gdb", files.join(source, "root/bin/rust-gdb")) ?? panic("dangling nix symlink")
+    files.symlink("/nix/store/22222222222222222222222222222222-missing-tool/bin/missing-tool", files.join(source, "root/bin/dangling-nix")) ?? panic("dangling nix symlink")
     files.symlink("../libexec/missing-helper", files.join(source, "root/bin/dangling-rel")) ?? panic("dangling rel symlink")
     root_nar: (store_write_nar(files.join(source, "root")) ?? panic("root nar")).bytes
     leaf_nar: (store_write_nar(files.join(source, "leaf")) ?? panic("leaf nar")).bytes
@@ -309,7 +309,7 @@ store_test_admit_signed_closure_with_bin_symlinks: fn(verification: StoreVerific
     lease.validate() ?? panic("lease must validate")
     assert(lease.executable("rg") != None)
     assert(lease.executable("projected-tool") != None)
-    assert(lease.executable("rust-gdb") == None)
+    assert(lease.executable("dangling-nix") == None)
     assert(lease.executable("dangling-rel") == None)
     digest: if lease.executable_digest_for_command("projected-tool") == {
         .Val(value) -> value
