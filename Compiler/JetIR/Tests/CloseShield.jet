@@ -1,0 +1,294 @@
+// Close.close glue (`ir_close_glue` in BuildOwn.jet) wraps the user Close
+// method in `jet_rt_cleanup_enter` / `jet_rt_cleanup_leave` so a cancellation
+// or deadline arriving during a normal scope-exit close is deferred until Close
+// completes and delivered at the next stop or wait point. Verifies IR shape,
+// lint, O1/O2 optimization preservation, and x86-64 codegen across O0/O1/O2.
+use {
+    jet_foundation.[
+        AccessConvention,
+        BodyNode,
+        BodyParameter,
+        BodyStructFieldValue,
+        BodyTree,
+        DeclTable,
+        FnBody,
+        NameVisibility,
+        NodeKind,
+        ParamZone,
+        Span,
+        StmtKind,
+        Symbol,
+        SymbolID,
+        SymbolKind,
+        TAssociatedTypeValue,
+        TConstantDef,
+        TDeclarationOwnership,
+        TEffectFacts,
+        TEffectSpan,
+        TExprType,
+        TFailureCarrier,
+        TField,
+        TFuncKind,
+        TGenericParam,
+        TImplDef,
+        TLetTy,
+        TLocal,
+        TSerdeAttribute,
+        TTraitConstantValue,
+        TTypeDef,
+        TTypeDefKind,
+        TWebParamReconstruction,
+        TCLIBinding,
+        TYPE_ID_INT,
+        TYPE_ID_UNIT,
+        Type,
+        body_tree_new,
+        compiler_threads_single,
+        decl_table_add,
+        decl_table_index,
+        interner,
+        module_none,
+        symbol_intern,
+        symbol_table,
+        type_intern_syntax,
+    ]
+    jet_ir.[
+        IRBacktrace,
+        IRBoundsMode,
+        IRBuildResult,
+        IRChecks,
+        IRModule,
+        IROp,
+        IRSourceTexts,
+        ir_build_program,
+        ir_lint_module,
+        ir_lint_text,
+        ir_opt_options,
+        ir_optimize_module,
+        ir_x64_compile_module,
+    ]
+    jet_sema.[SemaCheckedForeignFunction]
+}
+
+priv cs_checks: fn() -> IRChecks {
+    IRChecks{bounds: IRBoundsMode.Fatal, modules: [U32:Bool]{}, backtrace: IRBacktrace.Off, keep: false}
+}
+
+priv cs_fn_body: fn(name: String, key: String, params: [BodyParameter], body: [Int], tree: ^^BodyTree, kind: TFuncKind) -> FnBody {
+    FnBody{
+        name: name,
+        module_name: "demo",
+        module_identity: module_none(),
+        key: key,
+        source_file: "demo.jet",
+        source_span: Span{start: 0, end: 1},
+        failure_carrier: TFailureCarrier.Infallible,
+        effects: TEffectFacts{direct: [String]{}, solved: [String]{}, call_edges: [String]{}, maximal: false, direct_spans: [TEffectSpan]{}},
+        web_bucket: None,
+        web_marker: None,
+        visibility: NameVisibility.Public,
+        foreign: None,
+        params: params,
+        web_param_reconstructions: [TWebParamReconstruction]{},
+        ret: None,
+        gc_return: false,
+        gc_scope: false,
+        return_view_provenance: None,
+        generic_params: [TGenericParam]{},
+        is_main: false,
+        line: 1,
+        synthetic: false,
+        is_unsafe: false,
+        unsafe_gate: None,
+        is_pure: false,
+        memo_bound: None,
+        memo_unbounded: false,
+        is_reactive: false,
+        reactive_upgrades: [String]{},
+        is_inline: false,
+        is_inline_always: false,
+        is_scalar: false,
+        kernel_proof: None,
+        uses_stack_sentry: false,
+        body: body,
+        kind: kind,
+        tree: tree.move(),
+    }
+}
+
+priv cs_build: fn() -> IRBuildResult {
+    span: Span{start: 0, end: 1}
+    ^symbols: symbol_table()
+    ^decls: DeclTable{}
+    ^types: interner()
+
+    resource_key: "type:demo.Resource"
+    close_trait_key: "trait:core.prelude.Close"
+    close_fn_key: "function:demo.Resource.close"
+    entry_key: "function:demo.run"
+
+    resource_ty: Type.Named{name: resource_key}
+    resource_tid: type_intern_syntax(types, resource_ty)
+
+    resource_sym: symbol_intern(symbols, resource_key)
+    close_trait_sym: symbol_intern(symbols, close_trait_key)
+    close_fn_sym: symbol_intern(symbols, close_fn_key)
+    entry_sym: symbol_intern(symbols, entry_key)
+
+    _: decl_table_add(decls, Symbol{id: resource_sym, kind: SymbolKind.Type, name: "Resource", module_identity: module_none(), owner: None, span: span, ty: None, visibility: 0})
+    _: decl_table_add(decls, Symbol{id: close_trait_sym, kind: SymbolKind.Trait, name: "Close", module_identity: module_none(), owner: None, span: span, ty: None, visibility: 0})
+    _: decl_table_add(decls, Symbol{id: close_fn_sym, kind: SymbolKind.Function, name: "close", module_identity: module_none(), owner: Val(resource_key), span: span, ty: None, visibility: 0})
+    _: decl_table_add(decls, Symbol{id: entry_sym, kind: SymbolKind.Function, name: "run", module_identity: module_none(), owner: None, span: span, ty: None, visibility: 0})
+    decl_table_index(decls)
+
+    // Resource.close: fn(^^self) { print(1) }
+    ^close_tree: body_tree_new()
+    close_tree.nodes.push(BodyNode{id: 1, kind: NodeKind.IntLit{value: 1, width: None}, span: span})
+    close_tree.expr_types.push(TExprType{id: 1, ty: TYPE_ID_INT})
+    close_tree.nodes.push(BodyNode{id: 2, kind: NodeKind.Print{value: 1}, span: span})
+    close_tree.expr_types.push(TExprType{id: 2, ty: TYPE_ID_UNIT})
+    close_tree.stmts.push(StmtKind.ExprStmt{value: 2, span: span})
+    close_fn: cs_fn_body(
+        "close",
+        close_fn_key,
+        [BodyParameter]{},
+        [Int]{0},
+        close_tree.move(),
+        TFuncKind.TraitMethod{is_unsafe: false, self_convention: Val(AccessConvention.Move), owner_type: resource_ty, trait_name: close_trait_sym, serde_codec: None},
+    )
+
+    // run: fn() { r: Resource{} }
+    r_local: TLocal{name: "r", symbol_id: None, span: span, ty: resource_ty, generated: false, deref: false, address_lifetime: None, persist_key: None, persist_ty: None, mutable: false, string_bytes_source: None, integer_bounds: None, uninit_scalar: false, uninit_fixed: false}
+    ^entry_tree: body_tree_new()
+    entry_tree.nodes.push(BodyNode{id: 1, kind: NodeKind.StructLit{fields: [BodyStructFieldValue]{}}, span: span})
+    entry_tree.expr_types.push(TExprType{id: 1, ty: resource_tid})
+    entry_tree.stmts.push(StmtKind.Let{local: r_local, let_ty: TLetTy.Inferred, init: 1, gc_promotion: None, gc_transferred: false, span: span})
+    entry_fn: cs_fn_body("run", entry_key, [BodyParameter]{}, [Int]{0}, entry_tree.move(), TFuncKind.TopLevel)
+
+    type_defs: [TTypeDef]{
+        TTypeDef{
+            module_identity: module_none(),
+            key: resource_key,
+            name: "Resource",
+            span: span,
+            public: true,
+            package_public: false,
+            generic_params: [TGenericParam]{},
+            derives: [String]{},
+            auto_derive_default: false,
+            auto_printable: false,
+            published_schema: false,
+            single_use: false,
+            must_use: false,
+            layout: None,
+            c_layout_tag: None,
+            enum_layout: None,
+            layout_alignment: None,
+            serde: [TSerdeAttribute]{},
+            cli_bindings: [TCLIBinding]{},
+            ownership: TDeclarationOwnership.Owned,
+            boxed_edges: [String]{},
+            compiler_builtin: None,
+            kind: TTypeDefKind.Struct{fields: [TField]{}, methods: [String]{}},
+        },
+    }
+    impls: [TImplDef]{
+        TImplDef{
+            module_identity: module_none(),
+            key: "impl:demo.Resource:Close",
+            span: span,
+            self_type: resource_ty,
+            trait_name: Val("Close"),
+            trait_ref: Val(close_trait_key),
+            associated_types: [TAssociatedTypeValue]{},
+            constants: [TTraitConstantValue]{},
+            methods: [String]{"close"},
+            delegation_field: None,
+            compiler_generated: false,
+            serde: None,
+            operator_rhs: None,
+            operator_marker: None,
+            target_os: None,
+        },
+    }
+
+    functions: [FnBody]{close_fn, entry_fn}
+    constants: [TConstantDef]{}
+    sources: IRSourceTexts{}
+    foreign: [SemaCheckedForeignFunction]{}
+    ir_build_program(functions.move(), decls, symbols.move(), types.move(), type_defs.move(), impls.move(), sources.move(), constants.move(), foreign.move(), entry_key, cs_checks(), compiler_threads_single(), None)
+}
+
+priv cs_find_close_glue: fn(m: IRModule) -> Int? {
+    loop (index, f) in m.functions {
+        if f.key.starts_with("#close<") -> return Val(index)
+    }
+    None
+}
+
+priv cs_find_fn: fn(m: IRModule, key: String) -> Int? {
+    loop (index, f) in m.functions {
+        if f.key == key -> return Val(index)
+    }
+    None
+}
+
+priv cs_assert_shielded_close_glue: fn(m: IRModule, glue_id: Int, close_id: Int, label: String) {
+    f: m.functions[glue_id]
+    ^enter_at: -1
+    ^call_at: -1
+    ^leave_at: -1
+    loop at in 0..<f.op.len() {
+        if f.op[at] == IROp.CallRuntime {
+            name: m.names[f.a[at]]
+            if name == "jet_rt_cleanup_enter" -> enter_at = at
+            if name == "jet_rt_cleanup_leave" -> leave_at = at
+        }
+        if f.op[at] == IROp.Call {
+            if f.a[at] == close_id -> call_at = at
+            assert(m.functions[f.a[at]].key != "jet_ir_stop_poll#asm", "{label}: #close glue must not emit a stop poll")
+        }
+    }
+    assert(enter_at >= 0, "{label}: #close glue must enter a cleanup frame")
+    assert(call_at > enter_at, "{label}: Close.close must run after jet_rt_cleanup_enter")
+    assert(leave_at > call_at, "{label}: jet_rt_cleanup_leave must run after Close.close")
+}
+
+priv cs_has_cleanup_frame: fn(m: IRModule, fn_id: Int) -> Bool {
+    f: m.functions[fn_id]
+    ^enter_at: -1
+    ^leave_at: -1
+    loop at in 0..<f.op.len() {
+        if f.op[at] == IROp.CallRuntime {
+            name: m.names[f.a[at]]
+            if name == "jet_rt_cleanup_enter" -> enter_at = at
+            if name == "jet_rt_cleanup_leave" -> leave_at = at
+        }
+    }
+    enter_at >= 0 && leave_at > enter_at
+}
+
+#Test("close_glue_wraps_close_method_in_cleanup_frame_across_o0_o1_o2") {
+    loop level in ([Int]{0, 1, 2}) {
+        built: cs_build()
+        assert_eq(built.failures.len(), 0)
+        ^m: built.program
+        glue_id: cs_find_close_glue(m) ?? panic("expected #close<Resource> glue")
+        close_id: cs_find_fn(m, "function:demo.Resource.close") ?? panic("expected Resource.close")
+        cs_assert_shielded_close_glue(m, glue_id, close_id, "pre-opt O{level}")
+
+        pre_lint: ir_lint_module(m, "pre-opt", compiler_threads_single())
+        assert(pre_lint.len() == 0, "pre-opt lint failed at O{level}: {ir_lint_text(pre_lint)}")
+
+        if level > 0 {
+            ^_: ir_optimize_module(m, ir_opt_options(level), compiler_threads_single())
+            post_lint: ir_lint_module(m, "post-opt", compiler_threads_single())
+            assert(post_lint.len() == 0, "post-opt lint failed at O{level}: {ir_lint_text(post_lint)}")
+            assert(cs_has_cleanup_frame(m, glue_id) || cs_has_cleanup_frame(m, m.entry), "post-opt O{level} must preserve cleanup frame around Close.close")
+        }
+
+        m.fast_o0 = level == 0
+        compiled: ir_x64_compile_module(m, compiler_threads_single())
+        assert(compiled.errors.len() == 0, "x64 compile failed at O{level}: {compiled.errors.join("; ")}")
+    }
+}

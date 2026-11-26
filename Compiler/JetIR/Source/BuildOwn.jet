@@ -1280,8 +1280,19 @@ ir_close_glue: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, members_o
         if callee < 0 {
             ir_fail(a, span, "the Close method of {ir_type_name(ir_row_ty(m, p, row))}")
         } else {
+            // Close runs inside a cleanup frame so a cancellation or deadline
+            // arriving during normal scope exit is deferred until Close finishes
+            // and delivered at the next stop or wait point.
+            a.stopping = true
+            ^saved: -1
+            if m.stop_points {
+                word_row: ir_word_row(m)
+                saved = ir_runtime(m, a, "jet_rt_cleanup_enter", [Int]{}, word_row)
+            }
             start: ir_args(a.f, [Int]{value})
             ir_emit(a.f, IROp.Call, -1, callee, start, 1, a.line)
+            if saved >= 0 -> _: ir_runtime(m, a, "jet_rt_cleanup_leave", [Int]{saved}, -1)
+            a.stopping = false
         }
     } else { ir_close_parts(m, p, a, row, value, [IRMovedPart]{}, 0, -1, span) }
     if a.error != "" {
