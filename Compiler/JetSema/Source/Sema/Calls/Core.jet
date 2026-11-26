@@ -508,6 +508,25 @@ sema_call_core_module_identity: fn(environment: SemaScopeEnvironment, program: S
     return None
 }
 
+// The checked name of the type `leaf` that Core module `module_name`
+// declares (the identity of `core.data.DataJoin`); just `leaf` for a
+// compiler-owned row, or when the load holds no such declaration.
+sema_core_source_type_name: fn(program: SemaProgramTables, module_name: String, leaf: String) -> String Never! {
+    graph: program.registration_graph
+    loop module_row_index in 0..<graph.modules.len() {
+        if graph.modules[module_row_index].module_name != module_name -> next
+        loop nominal_index in 0..<graph.modules[module_row_index].nominals.len() {
+            if graph.modules[module_row_index].nominals[nominal_index].symbol.name == leaf {
+                if graph.modules[module_row_index].nominals[nominal_index].compiler_owned {
+                    return "{leaf}"
+                }
+                return "{module_text(graph.module_table, graph.modules[module_row_index].nominals[nominal_index].symbol.module_identity)}.{leaf}"
+            }
+        }
+    }
+    return "{leaf}"
+}
+
 // Whether the symbol of module `symbol_module` belongs to the loaded Core
 // source module `module_name` (sema_call_core_module_identity).
 sema_call_core_module_is: fn(check: SemaBodyCheck, module_name: String, symbol_module: ModuleID) -> Bool Never! {
@@ -1654,9 +1673,6 @@ sema_call_core_check_source_owned: fn(target: SemaCallDirectTarget, qualified_na
     if sema_call_devtools_is_publish(target, check) {
         call_args = sema_call_devtools_publish_args(args, span, check) ?? return None
     }
-    if sema_data_is_sys_decode(target, check) {
-        call_args = sema_data_sys_decode_args(args, type_args, span, check) ?? return None
-    }
     if sema_data_is_db_decode(target, check) {
         call_args = sema_data_db_decode_args(args, type_args, span, check) ?? return None
     }
@@ -1665,9 +1681,6 @@ sema_call_core_check_source_owned: fn(target: SemaCallDirectTarget, qualified_na
     }
     ^call: Call{name: qualified_name, name_span: span, type_args: type_args, args: call_args}
     checked: sema_call_check_direct_target_owned(check, target, call, [SemaCallDefaultValue]{}, expected) ?? return None
-    if target.symbol.name == "to_string" && sema_call_core_module_is(check, "core.encoding.csv", target.symbol.module_identity) {
-        if !sema_data_csv_check_rows(args, checked.value, check) -> return None
-    }
     if !sema_data_encode_check_value(target, args, checked.value, check) -> return None
     // Every call's returned views compose with its arguments; a source-module
     // call (`stream.object_entries(v)`) publishes them like a direct call, so a

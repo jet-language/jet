@@ -416,8 +416,9 @@ sema_call_rule_stage: fn(check: ^SemaBodyCheck, owner: String, site_owner: Strin
 // argument), the `name` it was written with, the file a stand-in call
 // stands for (`source`), its `receiver` and its `args` in written order,
 // then the keys of its table (sema_rule_table_keys), then the TypeId of
-// each checked explicit type argument (`type_args`). An argument's `type`
-// is the type its own check gives it (`_` when that check fails), and its
+// each checked explicit type argument (`type_args`). An argument's span runs
+// over all it writes (sema_rule_arg_span), its `type` is the type its own
+// check gives it (`_` when that check fails), and its
 // `value` the Dyn its value encodes to when the build knows that value
 // (sema_rule_value_dyn). A literal is heard as that check would hear it,
 // without the check (sema_rule_literal). A type name, which checks only
@@ -473,7 +474,7 @@ sema_rule_call_value: fn(
         ^label: String?{None}
         if argument.label == .Val(written) -> label = Val("{written.name}")
         function: sema_rule_function_of(argument.expr, heard_arg.ty, argument.span, check)
-        sema_rule_call_arg(heard, label, heard_arg.ty, heard_arg.known, function, sema_rule_written(argument.expr, file), argument.span, graph, check.context.type_delta, check.environment.*)
+        sema_rule_call_arg(heard, label, heard_arg.ty, heard_arg.known, function, sema_rule_written(argument.expr, file), sema_rule_arg_span(argument), graph, check.context.type_delta, check.environment.*)
     }
     heard.words.push(tables.len())
     loop table in tables {
@@ -486,6 +487,13 @@ sema_rule_call_value: fn(
         heard.words.push(heard.types.len() - 1)
     }
     heard
+}
+
+// The span argument `argument` is written over, a rule's site for it: from
+// its label or first token to the end of its value.
+sema_rule_arg_span: fn(argument: CallArg) -> Span Never! {
+    value: expr_source_span(argument.expr)
+    Span{start: argument.span.start, end: if value.end > argument.span.end -> value.end else -> argument.span.end}
 }
 
 // The identities a body's heard calls name, by declaration key

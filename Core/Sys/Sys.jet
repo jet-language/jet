@@ -2470,8 +2470,9 @@ priv value_failure: fn(result: Int IOError!) -> String Never! {
 // decodes through T's Decode protocol inside the text-cell scope (every
 // environment value is text). Everything between metadata and codec, and
 // error provenance afterwards, is source policy rather than a second codec or
-// host environment writer.
-decode: fn<T: Decode>(prefix: String, file: String, allow: [String]) -[FS, Env, Exec]> T [FieldError]! {
+// host environment writer. `prefix`, `file` and `allow` default to no prefix,
+// `.env` and no names.
+decode: fn<T: Decode>(prefix: String{""}, file: String{".env"}, allow: [String]{}) -[FS, Env, Exec]> T [FieldError]! {
     names: T.__env_names
     found: __decode_tree(prefix, file, allow, names) ?? return Err(err)
     previous: rt.text_cells_enter()
