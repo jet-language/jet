@@ -12,6 +12,7 @@ package: {
 use {
     builtin: jet_builtins
     prefilter.[needle_absent]
+    regex_syntax: __core_regex_syntax
 }
 
 // core.regex — one engine, compile-checked literals, fallible runtime.
@@ -252,29 +253,74 @@ compile_with: fn(pattern: String, flags: RegexFlags) -> Regex RegexError! {
 /// `with_dfa` is false for a pattern used once, where building the DFA would
 /// cost more than the one scan it could speed up.
 compile_program: fn(pattern: String, flags: RegexFlags, with_dfa: Bool) -> Regex RegexError! {
-    ^p: PatternParser{
-        cps: decode_all(pattern.bytes()),
-        i: 0,
-        depth: 0,
-        nodes: [Node]{},
-        kids: [Int]{},
-        kinds: [Int]{},
-        los: [Int]{},
-        his: [Int]{},
-        groups: 0,
-        names: [String]{},
-        looks: [Int]{},
-        look_behind: [Bool]{},
-        look_neg: [Bool]{},
+    ^nodes: [Node]{}
+    ^kids: [Int]{}
+    ^kinds: [Int]{}
+    ^los: [Int]{}
+    ^his: [Int]{}
+    ^groups: 0
+    ^names: [String]{}
+    ^looks: [Int]{}
+    ^look_behind: [Bool]{}
+    ^look_neg: [Bool]{}
+    ^root: 0
+    if regex_syntax.regex_parse_ast(pattern) == .Val(ast) {
+        loop i in 0..<ast.node_kinds.len() {
+            nodes.push(Node{
+                kind: ast.node_kinds[i],
+                a: ast.node_a[i],
+                b: ast.node_b[i],
+                left: ast.node_left[i],
+                neg: ast.node_neg[i],
+                lo: ast.node_lo[i],
+                hi: ast.node_hi[i],
+            })
+        }
+        kids = ast.kids
+        kinds = ast.cls_kinds
+        los = ast.cls_los
+        his = ast.cls_his
+        groups = ast.groups
+        names = ast.names
+        looks = ast.looks
+        look_behind = ast.look_behind
+        look_neg = ast.look_neg
+        root = ast.root
+    } else {
+        ^p: PatternParser{
+            cps: decode_all(pattern.bytes()),
+            i: 0,
+            depth: 0,
+            nodes: [Node]{},
+            kids: [Int]{},
+            kinds: [Int]{},
+            los: [Int]{},
+            his: [Int]{},
+            groups: 0,
+            names: [String]{},
+            looks: [Int]{},
+            look_behind: [Bool]{},
+            look_neg: [Bool]{},
+        }
+        root = p.parse_alt(-1)
+        if p.i != p.cps.len() -> return Err(fail(p.i, "this `)` has no matching `(`"))
+        nodes = p.nodes
+        kids = p.kids
+        kinds = p.kinds
+        los = p.los
+        his = p.his
+        groups = p.groups
+        names = p.names
+        looks = p.looks
+        look_behind = p.look_behind
+        look_neg = p.look_neg
     }
-    root: p.parse_alt(-1)
-    if p.i != p.cps.len() -> return Err(fail(p.i, "this `)` has no matching `(`"))
     // Case folding lets other scalars stand for a literal, so the literal
     // pre-checks only run on case-sensitive patterns.
-    facts: if flags.ignore_case -> no_facts() else -> literal_facts(p.nodes, p.kids, root)
+    facts: if flags.ignore_case -> no_facts() else -> literal_facts(nodes, kids, root)
     ^c: PatternCompiler{
-        nodes: p.nodes,
-        kids: p.kids,
+        nodes: nodes,
+        kids: kids,
         ops: [Int]{},
         args: [Int]{},
         ends: [Int]{},
@@ -290,9 +336,9 @@ compile_program: fn(pattern: String, flags: RegexFlags, with_dfa: Bool) -> Regex
     // Each lookaround's body is a program of its own after the main one,
     // ending in its own Match; a lookahead's body reads the text backward.
     ^look_starts: [Int]{}
-    loop look in 0..<p.looks.len() {
-        c.reverse = !p.look_behind[look]
-        body: c.compile(p.looks[look])
+    loop look in 0..<looks.len() {
+        c.reverse = !look_behind[look]
+        body: c.compile(looks[look])
         accept: c.push(OP_MATCH, 0, 0, false)
         c.patch(body.outs, accept)
         look_starts.push(body.start)
@@ -312,20 +358,20 @@ compile_program: fn(pattern: String, flags: RegexFlags, with_dfa: Bool) -> Regex
         negs: c.negs,
         xs: c.xs,
         ys: c.ys,
-        kinds: p.kinds,
-        los: p.los,
-        his: p.his,
+        kinds: kinds,
+        los: los,
+        his: his,
         start: first,
         anchored_start: anchored,
-        groups: p.groups,
-        names: p.names,
+        groups: groups,
+        names: names,
         needle: scalars_utf8(facts.best),
         needle_text: String.from_bytes(scalars_utf8(facts.best)) ?? "",
         prefix: scalars_utf8(facts.prefix),
         dfa: no_dfa(),
         look_starts: look_starts,
-        look_behind: p.look_behind,
-        look_neg: p.look_neg,
+        look_behind: look_behind,
+        look_neg: look_neg,
     }
     if with_dfa -> re.dfa = build_dfa(re)
     Ok(re)
@@ -3032,3 +3078,76 @@ subn: fn(pattern: Regex, text: String, replacement: String) -> {text: String, co
         }
     }
 }
+
+#Test("regex grammar parses every valid pattern and rejects every invalid pattern") {
+    valid: [String]{
+        "",
+        "abc",
+        "a|b|",
+        "|a",
+        "^foo$",
+        "\\A\\b\\w+\\B\\z",
+        "a*b+c?d*?e+?f??",
+        "x{{3}}y{{2,}}z{{1,4}}w{{0,2}}?",
+        "(a)(?:b)(?<name>c)(?P<alt>d)",
+        "(?=foo)(?!bar)(?<=baz)(?<!qux)x",
+        "[a-z][^0-9][]a][^]][-a][a-][\\d\\w\\s\\p{{L}}\\x41\\u0042\\n\\[\\]]",
+        "\\d\\D\\w\\W\\s\\S",
+        "\\pL\\pN\\p{{Letter}}\\p{{Alphabetic}}\\p{{Number}}\\p{{White_Space}}\\P{{L}}",
+        "\\x41\\x{{1F600}}\\u00E9\\u{{41}}",
+        "\\n\\r\\t\\f\\v\\a\\.\\*\\+\\?\\(\\)\\[\\]\\{{\\}}\\|\\^\\$\\\\\\ ",
+        "café}}123",
+    }
+    loop pat in valid {
+        if regex_syntax.regex_parse_ast(pat) == None {
+            panic("expected regex grammar to parse valid pattern `{pat}`")
+        }
+        _: compile(pat) ?? panic("compile failed for `{pat}`: {err}")
+    }
+    invalid: [String]{
+        "(unclosed",
+        "unmatched)",
+        "[unclosed",
+        "[]",
+        "[^]",
+        "[a[b]",
+        "[z-a]",
+        "[\\d-a]",
+        "[\\b]",
+        "*a",
+        "+a",
+        "?a",
+        "{{2}}",
+        "a**",
+        "a+?+",
+        "a{{5,2}}",
+        "a{{1001}}",
+        "a{{",
+        "a{{}}",
+        "(?i)a",
+        "(?x)a",
+        "(?<>a)",
+        "(?<1a>x)",
+        "(?<a>x)(?<a>y)",
+        "(?=(a))",
+        "\\1",
+        "\\k",
+        "\\x4",
+        "\\u123",
+        "\\x{{110000}}",
+        "\\u{{D800}}",
+        "\\p{{Bogus}}",
+        "\\",
+        "\\<",
+        "\\>",
+    }
+    loop pat in invalid {
+        if regex_syntax.regex_parse_ast(pat) != None {
+            panic("expected regex grammar to reject invalid pattern `{pat}`")
+        }
+        if compile(pat) == .Ok(_) {
+            panic("expected compile to reject invalid pattern `{pat}`")
+        }
+    }
+}
+
