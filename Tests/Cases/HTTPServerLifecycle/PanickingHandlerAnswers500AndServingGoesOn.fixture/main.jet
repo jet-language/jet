@@ -23,7 +23,11 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
     boom: client.get("http://{addr}/boom")
     print("boom: {boom.status()}")
     after: client.get("http://{addr}/hi")
-    print("after: {after.status()} {after.body().text(64) ?? return}")
+    after_text: after.body().text(64) ?? {
+        serving.detach()
+        return
+    }
+    print("after: {after.status()} {after_text}")
     report: listening.shutdown(100ms)
     serving.join()
     print("accepted {report.accepted} completed {report.completed}")

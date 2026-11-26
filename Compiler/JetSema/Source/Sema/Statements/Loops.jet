@@ -175,6 +175,7 @@ sema_stmt_check_loop_value_break: fn(value: Expr, label: String?, label_span: Sp
     }
     result: sema_loop_value_check_result_exit(check, frame_index, checked) ?? return None
     if !sema_stmt_move_direct(value, check, "the loop `break`") -> return None
+    sema_single_use_check_loop_exit(check, frame_index, "break", span)
     sema_loop_value_record_break(check, frame_index)
     Val(TStmt.BreakValue{label: label, value: result, span: span})
 }

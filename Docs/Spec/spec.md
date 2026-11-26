@@ -4524,10 +4524,17 @@ and `freeze_capture.out`; UI fixtures are
 declares both as the consuming methods. `handle.join()` consumes the handle and
 returns `T TaskFailure!`. Calling `join()` twice is **E0121**. Dropping a bound
 `Task` without joining, using its result, or detaching it is **E0140**, whose
-text names `join` and `detach`. A failure is `.Panicked(reason)`,
-`.Canceled`, or `.DeadlineBlown`. An error that leaves a task body whose element
-is not a `Result` or `Option` stops the task as a panic does: its join reports
-`.Panicked(reason)` with the error's text.
+text names `join` and `detach`. Every written exit counts as a drop: a
+`return` (`return Err(…)` included), a `?? return` route, and a `break` or
+`next` that leaves the loop body the handle is bound in each report E0140 while
+the handle is unsettled. A binding whose `#SingleUse` value was already
+consumed and is then set to `None` owes nothing until it is given a value
+again; `None` written over a value that still owes its job leaves that job
+owed. A propagated failure (`?`, or a fallible call's own propagation) leaves
+by the failure route, as for every `#SingleUse` value. A failure is
+`.Panicked(reason)`, `.Canceled`, or `.DeadlineBlown`. An error that leaves a
+task body whose element is not a `Result` or `Option` stops the task as a panic
+does: its join reports `.Panicked(reason)` with the error's text.
 
 `handle.detach()` consumes the handle and lets the task run in the background;
 it discharges the same duty. Detach is sound only when the child owns all data it

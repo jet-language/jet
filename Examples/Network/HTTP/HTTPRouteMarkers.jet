@@ -65,16 +65,40 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
         mux.serve_once(listener)
     }
     got: client.get("http://{addr}/jokes/7")
-    print("get:{got.status()}:{got.body().text(1024) ?? return}")
+    got_text: got.body().text(1024) ?? {
+        serving.detach()
+        return
+    }
+    print("get:{got.status()}:{got_text}")
     added: client.request("POST", "http://{addr}/jokes").json(NewJoke{text: "hello"}).send()
-    print("post:{added.status()}:{added.body().text(1024) ?? return}")
+    added_text: added.body().text(1024) ?? {
+        serving.detach()
+        return
+    }
+    print("post:{added.status()}:{added_text}")
     again: client.get("http://{addr}/jokes/7")
-    print("shared:{again.body().text(1024) ?? return}:{state.guard_read().value.added}")
+    again_text: again.body().text(1024) ?? {
+        serving.detach()
+        return
+    }
+    print("shared:{again_text}:{state.guard_read().value.added}")
     before: client.get("http://{addr}/before/fixed")
-    print("value-before:{before.body().text(1024) ?? return}")
+    before_text: before.body().text(1024) ?? {
+        serving.detach()
+        return
+    }
+    print("value-before:{before_text}")
     ordered: client.get("http://{addr}/order/fixed")
-    print("mounted-order:{ordered.body().text(1024) ?? return}")
+    ordered_text: ordered.body().text(1024) ?? {
+        serving.detach()
+        return
+    }
+    print("mounted-order:{ordered_text}")
     after: client.get("http://{addr}/order/after")
-    print("value-after:{after.body().text(1024) ?? return}")
+    after_text: after.body().text(1024) ?? {
+        serving.detach()
+        return
+    }
+    print("value-after:{after_text}")
     serving.join()
 }

@@ -327,7 +327,10 @@ jet_cli_runtime_with_core: fn(request: ^^JetDriverCompileRequest, prefix: String
             made_pack = pack
         }
     }
-    core: building.join() ?? return jet_driver_compile_escaped_failure("the Core library build stopped: {compiler_threads_failure_text(err)}")
+    core: building.join() ?? {
+        interfacing.detach()
+        return jet_driver_compile_escaped_failure("the Core library build stopped: {compiler_threads_failure_text(err)}")
+    }
     finished: if {
         stopped_result.move() == .Val(result) -> result
         else -> {
@@ -343,7 +346,10 @@ jet_cli_runtime_with_core: fn(request: ^^JetDriverCompileRequest, prefix: String
                 interfacing.detach()
                 return jet_driver_compile_escaped_failure(core.problem)
             }
-            res: made_result.move() ?? return jet_driver_compile_escaped_failure("the runtime compile result was lost")
+            res: made_result.move() ?? {
+                interfacing.detach()
+                return jet_driver_compile_escaped_failure("the runtime compile result was lost")
+            }
             jet_cli_runtime_packed(res, prefix, made_pack, Val(core.bytes.move()), compiler_threads, trace_sink)
         }
     }

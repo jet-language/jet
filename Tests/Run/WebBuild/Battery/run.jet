@@ -184,7 +184,10 @@ run: fn() {
     print("detail:{detail.status()}")
     login_request: client.request("POST", "http://{addr}/api/login").json(Login{user: "alice", password: "argon2id:demo"})
     logged: login_request.send()
-    set_cookie: logged.header("set-cookie") ?? return
+    set_cookie: logged.header("set-cookie") ?? {
+        task_handle.detach()
+        return
+    }
     print("login:{logged.status()}:cookie={set_cookie.starts_with("jet_session=")}")
     protected_request: client.request("GET", "http://{addr}/api/protected").cookie("jet_session", state.guard_read().value.session_id)
     protected_response: protected_request.send()

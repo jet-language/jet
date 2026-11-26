@@ -45,7 +45,10 @@ pay: fn(path: String, ledger: Shared<Ledger>, request: HTTPRequest) -> HTTPRespo
     conn: db.open(path)
     scoped: conn.with_policy(db.policy("payments", "true") ?? return Ok(http_server.response(503, "policy")), "service")
     tx: scoped.begin() ?? return Ok(http_server.response(503, "begin"))
-    _: scoped.execute(SQL{"INSERT INTO payments (who) VALUES ({who})"}) ?? return Ok(http_server.response(503, "insert"))
+    _: scoped.execute(SQL{"INSERT INTO payments (who) VALUES ({who})"}) ?? {
+        tx.rollback() ?? return Ok(http_server.response(503, "rollback"))
+        return Ok(http_server.response(503, "insert"))
+    }
     ^outcome: "committed"
     if mode == "hold rollback" {
         tx.rollback() ?? return Ok(http_server.response(503, "rollback"))

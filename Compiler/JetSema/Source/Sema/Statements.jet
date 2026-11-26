@@ -390,12 +390,10 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, check: ^SemaBo
                     }
                 }
                 // E0140: a `#SingleUse` value still owing its job can't leave
-                // with a success `return` (the returned value was moved
-                // above). `return Err(…)` leaves by the failure route, like a
-                // propagated failure.
-                if !sema_stmt_return_is_failure(value) {
-                    sema_single_use_check_return(check.state, check.context.duty_scope_depth, Span{start: span.start, end: span.start + "return".len()}, check.diagnostics)
-                }
+                // with a `return` (the returned value was moved above),
+                // `return Err(…)` included. Only a propagated failure leaves
+                // without this check.
+                sema_single_use_check_exit(check.state, check.context.duty_scope_depth, "return", Span{start: span.start, end: span.start + "return".len()}, check.diagnostics)
             }
             .For(var, var_span, var2, kind, body, span, arrow_body, label, _) -> {
                 if kind == {
@@ -856,6 +854,7 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, check: ^SemaBo
                             complete = false
                         }
                         else -> {
+                            sema_single_use_check_loop_exit(check, frame_index, "break", span)
                             sema_loop_value_record_break(check, frame_index)
                             output.push(TStmt.Break{label: None, span: span})
                         }
@@ -880,6 +879,7 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, check: ^SemaBo
                     }
                     else -> {
                         if sema_loop_value_resolve_frame(check.context, None) == .Val(frame_index) {
+                            sema_single_use_check_loop_exit(check, frame_index, "next", span)
                             sema_ownership_check_loop_move_backedge(check.state, check.context.loop_value_frames[frame_index], check.diagnostics)
                         }
                         output.push(TStmt.Continue{label: None, span: span})
@@ -895,6 +895,7 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, check: ^SemaBo
                             complete = false
                         }
                         else -> {
+                            sema_single_use_check_loop_exit(check, frame_index, "break", span)
                             sema_loop_value_record_break(check, frame_index)
                             output.push(TStmt.Break{label: Val(name), span: span})
                         }
@@ -919,6 +920,7 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, check: ^SemaBo
                     }
                     else -> {
                         if sema_loop_value_resolve_frame(check.context, Val(name)) == .Val(frame_index) {
+                            sema_single_use_check_loop_exit(check, frame_index, "next", span)
                             sema_ownership_check_loop_move_backedge(check.state, check.context.loop_value_frames[frame_index], check.diagnostics)
                         }
                         output.push(TStmt.Continue{label: Val(name), span: span})

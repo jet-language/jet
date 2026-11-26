@@ -65,32 +65,59 @@ jet_cli_devtools_embed: fn(args: [String], color: Bool, json: Bool) -> JetDriver
     ^packer: ""
     ^core_exports: ""
     ^core_facts: ""
+    // A part that can't be read stops the loop; the tasks are let go before
+    // its report.
+    ^unread: ""
     loop name in JET_CLI_RUNTIME_PART_FILES {
         path: "{runtime_dir}/{name}"
-        payload: embed_files.read_bytes(path) ?? return jet_cli_maintenance_error("E2105", "couldn't read the runtime file `{path}`: {jet_cli_io_error_text(err)}", None, color, json)
+        payload: embed_files.read_bytes(path) ?? {
+            unread = "couldn't read the runtime file `{path}`: {jet_cli_io_error_text(err)}"
+            break
+        }
         if name == JET_CLI_IDENTITY_FILE {
-            packer = String.from_bytes(payload) ?? return jet_cli_maintenance_error("E2105", "the runtime identity `{path}` is not UTF-8", None, color, json)
+            packer = String.from_bytes(payload) ?? {
+                unread = "the runtime identity `{path}` is not UTF-8"
+                break
+            }
         }
         if name == JET_CLI_CORE_EXPORTS_FILE {
-            core_exports = String.from_bytes(payload) ?? return jet_cli_maintenance_error("E2105", "the Core export list `{path}` is not UTF-8", None, color, json)
+            core_exports = String.from_bytes(payload) ?? {
+                unread = "the Core export list `{path}` is not UTF-8"
+                break
+            }
         }
         if name == JET_CLI_CORE_FACTS_FILE {
-            core_facts = String.from_bytes(payload) ?? return jet_cli_maintenance_error("E2105", "the Core facts `{path}` is not UTF-8", None, color, json)
+            core_facts = String.from_bytes(payload) ?? {
+                unread = "the Core facts `{path}` is not UTF-8"
+                break
+            }
         }
         names.push("{JET_CLI_RUNTIME_PART_PREFIX}{name}")
         payloads.push(payload)
     }
+    if unread != "" {
+        hashing.detach()
+        splitting.detach()
+        return jet_cli_maintenance_error("E2105", unread, None, color, json)
+    }
     // The runtime must be the one `image` built: its IDENTITY names the
     // jet-bare that lowered it.
     checking_facts: task ir_core_facts_disagree(core_facts, core_exports)
-    image_digest: hashing.join() ?? return jet_cli_maintenance_error("E2105", "the digest of `{image_file}` stopped: {compiler_threads_failure_text(err)}", None, color, json)
+    image_digest: hashing.join() ?? {
+        splitting.detach()
+        checking_facts.detach()
+        return jet_cli_maintenance_error("E2105", "the digest of `{image_file}` stopped: {compiler_threads_failure_text(err)}", None, color, json)
+    }
     lowered_by: "jet@{JET_VERSION}#{image_digest}"
     if packer.trim() != lowered_by {
         splitting.detach()
         checking_facts.detach()
         return jet_cli_maintenance_error("E2105", "the runtime in `{runtime_dir}` was built by `{packer.trim()}`, not by `{image_file}` (`{lowered_by}`)", Val("build the runtime with the jet it is embedded in"), color, json)
     }
-    disagree: checking_facts.join() ?? return jet_cli_maintenance_error("E2105", "checking the Core facts in `{runtime_dir}` stopped: {compiler_threads_failure_text(err)}", None, color, json)
+    disagree: checking_facts.join() ?? {
+        splitting.detach()
+        return jet_cli_maintenance_error("E2105", "checking the Core facts in `{runtime_dir}` stopped: {compiler_threads_failure_text(err)}", None, color, json)
+    }
     if disagree.len() > 0 {
         splitting.detach()
         return jet_cli_maintenance_error("E2105", "the Core facts in `{runtime_dir}` disagree with its Core export list in {disagree.len()} row(s); the first: {disagree[0]}", Val("build the runtime again: one Core library build writes both"), color, json)
@@ -108,10 +135,16 @@ jet_cli_devtools_embed: fn(args: [String], color: Bool, json: Bool) -> JetDriver
     loop _ in 0..<prefix.len() + 64 -> placeholder.push(U8{0})
     names.push(JET_CLI_IDENTITY_PART)
     payloads.push(placeholder)
-    shipped: x64_executable_add_parts(apart.bytes, names, payloads) ?? return jet_cli_maintenance_error("E2105", "couldn't add the runtime and the identity to `{image_file}`: {err}", None, color, json)
+    shipped: x64_executable_add_parts(apart.bytes, names, payloads) ?? {
+        side_writing.detach()
+        return jet_cli_maintenance_error("E2105", "couldn't add the runtime and the identity to `{image_file}`: {err}", None, color, json)
+    }
     writing: task jet_cli_embed_write(out, shipped)
     identity: "{prefix}{jet_cli_image_digest(shipped)}"
-    written: writing.join() ?? return jet_cli_maintenance_error("E2105", "writing the executable `{out}` stopped: {compiler_threads_failure_text(err)}", None, color, json)
+    written: writing.join() ?? {
+        side_writing.detach()
+        return jet_cli_maintenance_error("E2105", "writing the executable `{out}` stopped: {compiler_threads_failure_text(err)}", None, color, json)
+    }
     if written != "" {
         side_writing.detach()
         return jet_cli_maintenance_error("E2105", "couldn't write the executable `{out}`: {written}", None, color, json)
