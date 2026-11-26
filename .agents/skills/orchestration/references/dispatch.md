@@ -87,8 +87,7 @@ runtime, I9 tier, diagnostic, snapshot, golden, or generated-artifact claims.
 ## Dispatch and style reads
 
 Dispatch through the host's task and steering tools, which handle harvest,
-cancellation, and liveness. Select the most specific role available that runs
-on Claude Opus (AGENTS.md, Delegation); prompts do not choose or name a model.
+cancellation, and liveness. Select the most specific role available; prompts do not choose or name a model.
 If the host cannot run the required role, record
 the exact harness failure in the handoff before a bounded fallback. A fallback
 still uses the dev worktree and its owned paths, explicit timeout, complete
