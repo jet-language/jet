@@ -12,7 +12,7 @@ run: fn() {
     dt: time.parse_rfc3339("2024-03-10T06:30:00Z")
     print(dt.format_rfc3339())
     print(dt.to_unix_ms())
-    print(time.from_unix_ms(dt.to_unix_ms()).format("yyyy-MM-dd HH:mm:ss"))
+    print(time.from_unix_ms(dt.to_unix_ms()).format("%Y-%m-%d %H:%M:%S"))
     d: date.new(2024, 3, 31)
     print(d.add_period(time.period_months(1)).to_string())
     print(d.iso_weekday())
@@ -20,7 +20,7 @@ run: fn() {
     print(d.format("%a %Y-%j"))
     utc: time.utc()
     z: time.zoned(dt, utc)
-    print(z.format("yyyy-MM-dd HH:mm:ss VV XXX"))
+    print(z.format("%Y-%m-%d %H:%M:%S %Z %:z"))
     print(z.offset_seconds())
     span: 2h
     span_s: span.in(.Seconds)
@@ -32,7 +32,7 @@ run: fn() {
     // instant and holds the zone, `add_period` moves the local wall clock.
     day: 24h
     absolute: z.add_duration(day)
-    print(absolute.format("yyyy-MM-dd HH:mm:ss VV XXX"))
+    print(absolute.format("%Y-%m-%d %H:%M:%S %Z %:z"))
     print(absolute.offset_seconds())
     print(absolute.is_dst())
     civil: z.add_period(time.period_days(1))
@@ -47,12 +47,12 @@ run: fn() {
     eight: 8h
     dst_duration: start.add_duration(eight)
     print(dst_duration.to_string())
-    print(dst_duration.format("yyyy-MM-dd HH:mm:ss VV XXX"))
+    print(dst_duration.format("%Y-%m-%d %H:%M:%S %Z %:z"))
     print(dst_duration.offset_seconds())
     print(dst_duration.is_dst())
     dst_period: start.add_period(time.period_days(1))
     print(dst_period.to_string())
-    print(dst_period.format("yyyy-MM-dd HH:mm:ss VV XXX"))
+    print(dst_period.format("%Y-%m-%d %H:%M:%S %Z %:z"))
     print(dst_period.offset_seconds())
     print(dst_period.is_dst())
 }
