@@ -464,13 +464,32 @@ impl ProcessSpec {
     spawn: fn(self) -[Exec]> ProcessChild IOError! { rt.spec_spawn(self) }
 }
 
-// The ProcessSpec builders and the ProcessChild steps: `spec.cwd(path)`,
-// `child.wait()` and the rest check as calls of these bodies, which the
-// compiler finds by their roles (`terminal(policy)` fills
-// ProcessSpecTerminalWithPolicy), each the jet.runtime.process leaf of its
-// runtime export. A builder takes its spec and answers it changed; a child
-// step reads its receiver. The launch-step roles serve a compiler built before
-// `impl ProcessSpec` declared `plan`, `run`, `run_checked` and `spawn`.
+// A started child process. Each step reads the child; every one but `id` is
+// an Exec step.
+impl ProcessChild {
+    /// The child's operating-system process id.
+    id: fn(self) -> Int Never! { rt.child_id(self) }
+
+    /// Waits for the child to exit and answers its receipt.
+    wait: fn(self) -[Exec]> ProcessReceipt IOError! { rt.child_wait(self) }
+
+    /// Whether the child has exited, without waiting for it.
+    exited: fn(self) -[Exec]> Bool IOError! { rt.child_exited(self) }
+
+    /// Stops the child at once (SIGKILL).
+    kill: fn(self) -[Exec]> IOError! { rt.child_kill(self) }
+
+    /// Asks the child to stop (SIGTERM).
+    terminate: fn(self) -[Exec]> IOError! { rt.child_terminate(self) }
+
+    /// Interrupts the child (SIGINT).
+    interrupt: fn(self) -[Exec]> IOError! { rt.child_interrupt(self) }
+}
+
+// The ProcessSpec builders: `spec.cwd(path)` and the rest check as calls of
+// these bodies, which the compiler finds by their roles (`terminal(policy)`
+// fills ProcessSpecTerminalWithPolicy), each the jet.runtime.process leaf of
+// its runtime export. A builder takes its spec and answers it changed.
 #Builtin.Role(.ProcessSpecCwd) priv __spec_cwd: fn(spec: ^^ProcessSpec, path: String) -> ProcessSpec Never! {
     rt.spec_cwd(spec, path)
 }
@@ -557,46 +576,6 @@ impl ProcessSpec {
 
 #Builtin.Role(.ProcessSpecCPUTimeLimit) priv __spec_cpu_time_limit: fn(spec: ^^ProcessSpec, limit: Duration) -> ProcessSpec Never! {
     rt.spec_cpu_time_limit(spec, limit.ns)
-}
-
-#Builtin.Role(.ProcessSpecPlan) priv __spec_plan: fn(spec: ProcessSpec) -> ProcessPlan IOError! {
-    rt.spec_plan(spec)
-}
-
-#Builtin.Role(.ProcessSpecRun) priv __spec_run: fn(spec: ProcessSpec) -[Exec]> ProcessReceipt IOError! {
-    rt.spec_run(spec)
-}
-
-#Builtin.Role(.ProcessSpecRunChecked) priv __spec_run_checked: fn(spec: ProcessSpec) -[Exec]> ProcessReceipt IOError! {
-    rt.spec_run_checked(spec)
-}
-
-#Builtin.Role(.ProcessSpecSpawn) priv __spec_spawn: fn(spec: ProcessSpec) -[Exec]> ProcessChild IOError! {
-    rt.spec_spawn(spec)
-}
-
-#Builtin.Role(.ProcessChildID) priv __child_id: fn(child: ProcessChild) -> Int Never! {
-    rt.child_id(child)
-}
-
-#Builtin.Role(.ProcessChildWait) priv __child_wait: fn(child: ProcessChild) -[Exec]> ProcessReceipt IOError! {
-    rt.child_wait(child)
-}
-
-#Builtin.Role(.ProcessChildExited) priv __child_exited: fn(child: ProcessChild) -[Exec]> Bool IOError! {
-    rt.child_exited(child)
-}
-
-#Builtin.Role(.ProcessChildKill) priv __child_kill: fn(child: ProcessChild) -[Exec]> IOError! {
-    rt.child_kill(child)
-}
-
-#Builtin.Role(.ProcessChildTerminate) priv __child_terminate: fn(child: ProcessChild) -[Exec]> IOError! {
-    rt.child_terminate(child)
-}
-
-#Builtin.Role(.ProcessChildInterrupt) priv __child_interrupt: fn(child: ProcessChild) -[Exec]> IOError! {
-    rt.child_interrupt(child)
 }
 
 status_ok: fn(receipt: ProcessReceipt) -> Bool Never! { receipt.success }

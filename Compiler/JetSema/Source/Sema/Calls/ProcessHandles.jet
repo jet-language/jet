@@ -349,50 +349,6 @@ sema_process_spec_keep_open: fn(receiver: Expr, receiver_value: TExpr, args: [Ca
     SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, check)}
 }
 
-// The result of a child's method (`child.wait()` and the rest); None for a
-// name that is not one of them.
-sema_process_child_result: fn(method: String) -> Type? Never! {
-    if method == {
-        "id" -> Val(Type.Int)
-        "wait" -> Val(sema_process_io_result(sema_process_named("ProcessReceipt")))
-        "exited" -> Val(sema_process_io_result(Type.Bool))
-        "kill" | "terminate" | "interrupt" -> Val(sema_process_io_result(sema_process_named("Unit")))
-        else -> None
-    }
-}
-
-// A child's methods are the ordinary Core source bodies that fill their
-// jet_builtins roles (sema_process_child_role), which read the child; every
-// one but `id` is an Exec step.
-sema_process_child_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
-    rejected: SemaMethodSpecialCheck{handled: true, value: None}
-    result: sema_process_child_result(method) ?? return SemaMethodSpecialCheck{handled: false, value: None}
-    if args.len() != 0 {
-        sema_process_wrong_arity(method, 0, args.len(), span, check.diagnostics)
-        sema_process_infer_args(args, check)
-        return rejected
-    }
-    if !sema_ownership_check_call_receiver(check, receiver, AccessConvention.Read, span) {
-        return rejected
-    }
-    effect: if method == "id" -> "" else -> "Exec"
-    sema_process_source_call(sema_process_child_role(method), "ProcessChild.{method}", effect, [TExpr]{receiver_value}, result, span, expected, check)
-}
-
-// The jet_builtins role of the Core body a ProcessChild method calls; "" for
-// no such method.
-sema_process_child_role: fn(method: String) -> String Never! {
-    if method == {
-        "id" -> "ProcessChildID"
-        "wait" -> "ProcessChildWait"
-        "exited" -> "ProcessChildExited"
-        "kill" -> "ProcessChildKill"
-        "terminate" -> "ProcessChildTerminate"
-        "interrupt" -> "ProcessChildInterrupt"
-        else -> ""
-    }
-}
-
 sema_process_terminal_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
     if method != "resize" -> return SemaMethodSpecialCheck{handled: false, value: None}
     if args.len() != 1 {
@@ -515,9 +471,6 @@ sema_call_try_process_handle_method: fn(receiver: Expr, receiver_value: TExpr, m
     receiver_name: sema_process_handle_receiver_name(receiver_value.ty)
     if receiver_name == "ProcessSpec" {
         return sema_process_spec_method(receiver, receiver_value, method, args, span, expected, check)
-    }
-    if receiver_name == "ProcessChild" {
-        return sema_process_child_method(receiver, receiver_value, method, args, span, expected, check)
     }
     if receiver_name == "TerminalSession" {
         return sema_process_terminal_method(receiver, receiver_value, method, args, span, expected, check)
