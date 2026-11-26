@@ -243,6 +243,7 @@ jet_cli_keep_going_append: fn(rows: [String]) -> String Never! {
 jet_cli_runtime_library: fn(request: ^^JetDriverCompileRequest, prefix: String, lifecycle: String?, compiler_threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> JetDriverCompileResult {
     ^selected: request.move()
     selected.release_state_aside = true
+    selected.runtime_library = true
     if cli_sys.get(ENV_JET_FRONT_CORE_OBJECT_OUTPUT) == .Val(core_prefix) {
         return jet_cli_runtime_with_core(selected, prefix, lifecycle, core_prefix, compiler_threads, trace_sink)
     }

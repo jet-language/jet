@@ -240,9 +240,7 @@ JetDriverCoreSource: struct {
         if permit.value.file != "" -> permit.value.file else -> self.path
     }
 
-    source: fn(self) -> String Never! {
-        self.try_source() ?? ""
-    }
+    source: fn(self) -> String Never! { self.try_source() ?? "" }
 }
 
 // A Core row's source text. A host that embeds Core supplies the text
@@ -416,6 +414,10 @@ JetDriverCompileRequest: struct {
     // jet_driver_release_aside) while the host builds IR, not on the
     // compile's thread as the stages return.
     release_state_aside: Bool{false},
+    // The runtime library build (JetCLI Request.jet jet_cli_runtime_library):
+    // sits below Core and uses only its explicit `use` imports, never
+    // speculative bare-name or typed-head Core module loads.
+    runtime_library: Bool{false},
     // `jet test` of a Core source: the Core row path (`Core/Encoding/CBOR.jet`)
     // whose unit keeps its #Test controls (Loader.jet JetDriverParseJob.Core)
     // and whose tests the run collects (Pipeline.jet jet_driver_test_modules),

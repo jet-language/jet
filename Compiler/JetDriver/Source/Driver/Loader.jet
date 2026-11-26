@@ -7047,7 +7047,7 @@ jet_driver_load_walk: fn(
         // Established bare names use the same declaring-owner table. The
         // lowercase URL typed head remains supported without adding a lowercase
         // nominal alias.
-        if !embedded {
+        if !embedded && !request.runtime_library {
             loop bare in CORE_BARE_SOURCE_MODULES {
                 if !demand.bare_names.contains(bare.name) -> next
                 module_name: core_bare_source_module(bare.name) ?? next
@@ -7108,7 +7108,7 @@ jet_driver_load_walk: fn(
         }
         // `input.csv<Row>()`: the module an ambient `input` method names
         // declares the function filling its role (core_input_method_module).
-        if !embedded {
+        if !embedded && !request.runtime_library {
             loop method in demand.input_methods {
                 module_name: core_input_method_module(method) ?? next
                 ^sourced: false
@@ -7146,7 +7146,7 @@ jet_driver_load_walk: fn(
         // A boundary typed literal (`DateTime{"…"}`) is checked by its owner
         // module's CheckedText impl, even when the caller has no import of
         // that module.
-        if !embedded {
+        if !embedded && !request.runtime_library {
             loop module_name in demand.typed_head_modules {
                 if !bare_modules.contains(module_name) -> bare_modules.push(module_name.copy())
                 jet_driver_reach_open_typed_head(reach, module_name)
