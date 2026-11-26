@@ -8,13 +8,16 @@ use {
         SemaComptimeBodyValue,
         SemaComptimeBodyValues,
         SemaComptimeBodyWork,
+        SemaComptimeFunctionResult,
         SemaComptimeItemKind,
         SemaComptimeItemValue,
         SemaForeignProviderInput,
         SemaRegistrationForeignHandleFacts,
         SemaRegistrationGraph,
+        SemaRegistrationHostHooks,
         SemaRegistrationImportEdge,
         SemaRegistrationModuleInput,
+        SemaRegistrationPackagePolicy,
         SemaScopeDeclaration,
         SemaScopeEnvironment,
         SemaScopeFrame,
@@ -25,6 +28,7 @@ use {
         sema_check_context_mark,
         sema_check_context_rollback,
         sema_check_context_snapshot,
+        sema_collect_comptime_declarations,
         sema_comptime_available_constants,
         sema_comptime_body_capture,
         sema_comptime_body_destination_key,
@@ -39,8 +43,10 @@ use {
         sema_comptime_environment,
         sema_comptime_environment_tables,
         sema_comptime_graph_apply_values,
+        sema_comptime_local_value_expr_calls,
         sema_comptime_value_sites,
         sema_expression_lambda_merge_context_facts,
+        sema_finalize_registration_graph,
         sema_graph_trail_init,
         sema_has_error_since,
         sema_program_tables_snapshot,
@@ -553,4 +559,63 @@ body_index_constant_projection: fn() {
     body_index_shared_size(64)
     body_index_shared_size(128)
     body_index_shared_size(256)
+}
+
+#Test("pure_builtin_method_local_value_is_staged") {
+    source: `SIZE: 100
+run: fn() -> Int {
+    big: "x".repeat(SIZE)
+    lit: "ab".repeat(50)
+    plain: 1 + 2
+    list: [Int]{1, 2}
+    wrapped: [String]{"x".repeat(4)}
+    big.len() + lit.len() + plain + list.len() + wrapped.len()
+}
+`
+    parsed: parse_source(source.bytes())
+    body_index_require(!sema_has_error_since(parsed.diagnostics, 0), "fixture parses")
+    // Verify the expression call predicate directly on the parsed initializers.
+    ^checked_exprs: 0
+    loop item in parsed.program.items {
+        if item == .Func(function) && function.name == "run" {
+            loop stmt in function.body {
+                if stmt == .Val(binding) {
+                    expected: binding.name == "big" || binding.name == "lit" || binding.name == "wrapped"
+                    body_index_require(sema_comptime_local_value_expr_calls(binding.init) == expected, "expr call check for `{binding.name}`")
+                    checked_exprs += 1
+                }
+            }
+        }
+    }
+    body_index_require(checked_exprs == 5, "checked all 5 binding initializers")
+    // Verify full sema finalization stages `big`, `lit`, and `wrapped` (whose
+    // pure `String.repeat` omits empty effect call_facts) and leaves `plain`/`list` unstaged.
+    ^graph: body_index_constant_graph([String]{source})
+    hooks: Shared{SemaRegistrationHostHooks{numeric_unit_conversion_exact: None}}
+    ^stage: sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, compiler_threads_single(), None) ?? panic("declaration check failed: {err}")
+    ^declared: stage.graph.move()
+    stage.graph = None
+    ^registration: declared.move() ?? panic("lost registration graph")
+    size_val: body_index_constant_value("constant.0", symbol_table_key(registration.symbols, registration.modules[0].constants[0].symbol.id), 100)
+    ^trail: sema_graph_trail_init()
+    sema_comptime_graph_apply_values(registration, [SemaComptimeItemValue]{size_val}, trail)
+    ^checked: sema_finalize_registration_graph(registration, None, stage, [SemaComptimeItemValue]{size_val}, [SemaComptimeFunctionResult]{}, hooks, compiler_threads_single(), None) ?? panic("finalization failed: {err}")
+    ^has_big: false
+    ^has_lit: false
+    ^has_wrapped: false
+    ^has_plain: false
+    ^has_list: false
+    loop entry in checked.comptime_body_sources {
+        if !entry.local_value -> next
+        if entry.name == "big" -> has_big = true
+        if entry.name == "lit" -> has_lit = true
+        if entry.name == "wrapped" -> has_wrapped = true
+        if entry.name == "plain" -> has_plain = true
+        if entry.name == "list" -> has_list = true
+    }
+    body_index_require(has_big, "big must be staged as a comptime local value; diagnostics={checked.diagnostics:Debug}")
+    body_index_require(has_lit, "lit must be staged as a comptime local value; diagnostics={checked.diagnostics:Debug}")
+    body_index_require(has_wrapped, "wrapped must be staged as a comptime local value; diagnostics={checked.diagnostics:Debug}")
+    body_index_require(!has_plain, "plain must not be staged")
+    body_index_require(!has_list, "list must not be staged")
 }

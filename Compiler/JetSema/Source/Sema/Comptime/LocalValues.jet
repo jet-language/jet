@@ -63,7 +63,7 @@ sema_comptime_local_value: fn(
     check: ^SemaBodyCheck,
 ) -> SemaComptimeLocalValue {
     none: SemaComptimeLocalValue{value: None, reason: None}
-    if !sema_comptime_local_value_candidate(init.ty, fact_start, reference_start, node_start, check) {
+    if !sema_comptime_local_value_candidate(expression, init.ty, fact_start, reference_start, node_start, check) {
         return none
     }
     // `#Runtime` keeps a local that could be computed to run time, and that
@@ -99,14 +99,21 @@ sema_comptime_local_value: fn(
 // the Core library's, computes them, and the library's Core bodies carry
 // them to every compile.
 sema_comptime_local_value_candidate: fn(
+    expression: Expr,
     ty: Type,
     fact_start: Int,
     reference_start: Int,
     node_start: Int,
     check: SemaBodyCheck,
 ) -> Bool {
-    if check.context.call_facts.len() <= fact_start -> return false
     if check.scopes.comptime_execution_depth > 0 || check.context.unsafe_depth > 0 || check.context.generic_params.len() > 0 {
+        return false
+    }
+    graph: check.program.registration_graph
+    // Snapshot: purity is judged on registered callees, and a lone program registers none.
+    if graph.mode == .Snapshot -> return false
+    if graph.check_tests && !graph.every_core_body -> return false
+    if check.context.call_facts.len() <= fact_start && !sema_comptime_local_value_expr_calls(expression) {
         return false
     }
     if sema_scope_inside_impure(check.scopes) || sema_comptime_local_value_unstorable(ty) {
@@ -121,12 +128,97 @@ sema_comptime_local_value_candidate: fn(
         position: sema_scope_resolve_index(check.scopes, reference.symbol.name) ?? return false
         if check.scopes.bindings[position].prepared == None -> return false
     }
-    graph: check.program.registration_graph
-    // Snapshot: purity is judged on registered callees, and a lone program registers none.
-    if graph.mode == .Snapshot -> return false
-    if graph.check_tests && !graph.every_core_body -> return false
     calls: loop index in fact_start..<check.context.call_facts.len() -> check.context.call_facts[index].copy()
     sema_comptime_call_facts_impurity(graph, calls, true) == None
+}
+
+// Whether `expr` contains a call expression. Pure collection and value
+// builtins (such as `String.repeat`) skip pushing an empty effect call fact
+// (Calls/Collections.jet, Calls/ValueMethods.jet), so local-value candidacy
+// checks the written expression when `call_facts` is empty.
+sema_comptime_local_value_expr_calls: fn(expr: Expr) -> Bool Never! {
+    if expr == {
+        .Call(_, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .CallValue(_, _, _, _) | .Pipe(_, _, _, _) -> true
+        .TypedLit(_, body, _, _) -> {
+            if body == {
+                .Fields(fields) -> {
+                    loop field in fields {
+                        if sema_comptime_local_value_expr_calls(field.value) -> return true
+                    }
+                    false
+                }
+                .Elements(elements) -> {
+                    loop element in elements {
+                        if sema_comptime_local_value_expr_calls(element) -> return true
+                    }
+                    false
+                }
+                .Entries(entries) -> {
+                    loop entry in entries {
+                        if sema_comptime_local_value_expr_calls(entry.key) || sema_comptime_local_value_expr_calls(entry.value) {
+                            return true
+                        }
+                    }
+                    false
+                }
+                .Value(value) -> sema_comptime_local_value_expr_calls(value)
+                .ByteText(_) | .Empty -> false
+            }
+        }
+        .Str(parts, _, _) -> {
+            loop part in parts {
+                if part == .Interp(inner, _) && sema_comptime_local_value_expr_calls(inner) {
+                    return true
+                }
+            }
+            false
+        }
+        .ListLit(items, _, _) | .CompareChain(items, _, _, _, _) -> {
+            loop item in items {
+                if sema_comptime_local_value_expr_calls(item) -> return true
+            }
+            false
+        }
+        .Unary(_, inner, _, _) | .Field(inner, _, _, _) | .OptField(inner, _, _, _, _, _) | .Copy(inner, _, _) | .Present(inner, _, _) | .Ok(inner, _, _) | .Err(inner, _, _) | .Paren(inner, _, _) | .Deref(inner, _, _) | .RawOf(inner, _, _) | .Place(inner, _, _, _) | .Tainted(inner, _, _, _) | .Spread(inner, _, _) | .MemberSpread(inner, _, _, _) | .PatternTest(inner, _, _, _) | .PtrFromAddr(_, _, _, inner, _, _) | .OrFallback(inner, _, _, _, _) -> sema_comptime_local_value_expr_calls(inner)
+        .Try(inner, _, _, context, _) -> sema_comptime_local_value_expr_calls(inner) || (if context == .Val(ctx) -> sema_comptime_local_value_expr_calls(ctx) else -> false)
+        .Range(left, right, _, _, _) | .Binary(_, left, right, _, _) | .Index(left, right, _, _, _) -> sema_comptime_local_value_expr_calls(left) || sema_comptime_local_value_expr_calls(right)
+        .Slice(base, start, end, range, _, _) -> sema_comptime_local_value_expr_calls(base) || sema_comptime_local_value_expr_calls(start) || sema_comptime_local_value_expr_calls(end) || (if range == .Val(r) -> sema_comptime_local_value_expr_calls(r) else -> false)
+        .MapLit(entries, _, _) -> {
+            loop entry in entries {
+                if sema_comptime_local_value_expr_calls(entry.key) || sema_comptime_local_value_expr_calls(entry.value) {
+                    return true
+                }
+            }
+            false
+        }
+        .StructLit(_, _, _, _, fields, _, _, _) -> {
+            loop field in fields {
+                if sema_comptime_local_value_expr_calls(field.value) -> return true
+            }
+            false
+        }
+        .TupleLit(fields, _, _, _) -> {
+            loop field in fields {
+                if sema_comptime_local_value_expr_calls(field.value) -> return true
+            }
+            false
+        }
+        .EnumLit(_, _, _, args, _, _, _) -> {
+            loop argument in args {
+                if argument == {
+                    .Positional(value) -> {
+                        if sema_comptime_local_value_expr_calls(value) -> return true
+                    }
+                    .Named(_, value) -> {
+                        if sema_comptime_local_value_expr_calls(value) -> return true
+                    }
+                }
+            }
+            false
+        }
+        .If(cond, _, then_value, _, else_value, _, _) -> sema_comptime_local_value_expr_calls(cond) || sema_comptime_local_value_expr_calls(then_value) || sema_comptime_local_value_expr_calls(else_value)
+        .Ident(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Absent(_, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Todo(_, _, _) | .NoElse(_, _) | .Lambda(_, _) | .ComptimeName(_, _, _, _) | .TypeValue(_, _, _) -> false
+    }
 }
 
 // Whether the arena rows from `node_start` on hold a named function read
