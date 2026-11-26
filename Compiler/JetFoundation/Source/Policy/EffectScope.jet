@@ -27,10 +27,13 @@ EffectScopeName: struct {
 
 effect_scope_split: fn(name: String) -> EffectScopeName Never! {
     trimmed: name.trim()
-    if !trimmed.ends_with("\")") -> return EffectScopeName{base: trimmed.copy(), scope: None}
-    parts: trimmed.split_once("(\"") ?? return EffectScopeName{base: trimmed.copy(), scope: None}
-    inner: parts.after.slice(0..<parts.after.len() - 2)
-    EffectScopeName{base: parts.before.trim(), scope: Val(inner)}
+    if trimmed.ends_with("\")") {
+        if trimmed.split_once("(\"") == .Val(parts) {
+            inner: parts.after.slice(0..<parts.after.len() - 2)
+            return EffectScopeName{base: parts.before.trim(), scope: Val(inner)}
+        }
+    }
+    EffectScopeName{base: trimmed.copy(), scope: None}
 }
 
 // The written spelling of `base` scoped to `scope`.
@@ -119,7 +122,7 @@ effect_scope_read_paths: fn(rights: [String]) -> [String] Never! {
     loop right in rights {
         split: effect_scope_split(right)
         if split.scope == .Val(path) {
-            if split.base == "FS.Read" && !paths.contains(path) -> paths.push(path.copy())
+            if split.base == "FS.Read" && !paths.contains(path) -> paths.push(path)
             next
         }
         if split.base == "FS" || split.base == "FS.Read" -> return [String]{}
@@ -174,10 +177,7 @@ effect_scope_published_effect: fn(callee_key: String, path_first: Bool, declared
 // a library effect's listed scopes stay static.
 effect_scope_descriptor: fn(name: String, key: String, path_first: Bool, row: [String]?) -> String Never! {
     written_row: row ?? return ""
-    ^allowed: [String]{}
-    loop entry in written_row {
-        if !entry.starts_with("!") && !entry.starts_with("..") -> allowed.push(entry.trim().copy())
-    }
+    allowed: loop entry in written_row if !entry.starts_with("!") && !entry.starts_with("..") -> entry.trim().copy()
     if effect_scope_published_effect(key, path_first, allowed) == .Val(published) {
         return "@{published}"
     }
@@ -189,11 +189,10 @@ effect_scope_descriptor: fn(name: String, key: String, path_first: Bool, row: [S
         written: if denied -> entry.slice(1..<entry.len()) else -> entry
         split: effect_scope_split(written)
         if effect_scope_kind(split.base) == "value" -> next
-        ^spelled: split.base.copy()
-        if split.scope == .Val(scope) {
+        spelled: if split.scope == .Val(scope) -> {
             scoped = true
-            spelled = effect_scope_name(split.base, scope)
-        }
+            effect_scope_name(split.base, scope)
+        } else -> split.base
         entries.push(if denied -> "!{spelled}" else -> spelled)
     }
     if !scoped -> return ""
@@ -207,10 +206,9 @@ effect_scope_descriptor: fn(name: String, key: String, path_first: Bool, row: [S
 // host. None when the constant text names no scope.
 effect_scope_of_argument: fn(published: String, text: String, whole: Bool) -> String? Never! {
     if effect_scope_kind(published) == "host" -> return effect_scope_url_host(text, whole)
-    ^scope: text.copy()
-    if !whole {
+    scope: if whole -> text.copy() else -> {
         folder: text.cut_last("/") ?? return None
-        scope = "{folder.before}/"
+        "{folder.before}/"
     }
     if !effect_scope_argument_valid(scope) -> return None
     Val(scope)

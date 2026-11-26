@@ -345,7 +345,7 @@ deep_checks_read: fn(argv: [String]) -> DeepChecksRead Never! {
         if !deep_checks_scope_valid(scope) {
             return DeepChecksRead.Refused{argument: argument.copy()}  // copy: the refusal outlives argv.
         }
-        if !request.scopes.contains(scope) -> request.scopes.push(scope.copy())  // copy: the request owns its scopes.
+        if !request.scopes.contains(scope) -> request.scopes.push(scope)
     }
     DeepChecksRead.Read{request: request}
 }
@@ -386,8 +386,7 @@ deep_checks_off: fn(request: DeepChecks) -> Bool Never! {
 // scopes in sorted order, so one selection written in any order has one key.
 deep_checks_key: fn(request: DeepChecks) -> String Never! {
     if deep_checks_off(request) -> return ""
-    ^words: [String]{}
-    loop scope in request.scopes -> words.push(scope.copy())  // copy: sorted for the key; the request keeps argv order.
+    ^words: loop scope in request.scopes -> scope.copy()  // copy: sorted for the key; the request keeps argv order.
     words.sort()
     if request.all -> words.insert(0, "all")
     words.join(",")
@@ -505,11 +504,10 @@ deep_checks_text: fn(text: String, argument: String, scope: String, selected: St
 // skipped.
 log_filter_bad_pair: fn(text: String) -> String? {
     loop raw in text.split(",") {
-        pair: raw.trim()
-        if pair == "" -> next
-        parts: pair.copy().split("=").to_list()
-        valid: if parts.len() == 1 -> log_filter_level(pair.copy()) else -> parts.len() == 2 && log_filter_module(parts[0].trim()) && log_filter_level(parts[1].trim())
-        if !valid -> return Val(pair.copy())
+        if raw.trim() == "" -> next
+        parts: raw.split("=").to_list()
+        valid: if parts.len() == 1 -> log_filter_level(parts[0].trim()) else -> parts.len() == 2 && log_filter_module(parts[0].trim()) && log_filter_level(parts[1].trim())
+        if !valid -> return Val(raw.trim().copy())
     }
     None
 }
@@ -598,8 +596,7 @@ build_option_argument: fn(row: BuildOptionRow, value: String) -> String {
         .Bool | .Duration | .Hook -> value.copy()
         .Text -> "\"{value}\""
         .List -> {
-            ^items: [String]{}
-            loop item in build_option_items(value) -> items.push("\"{item}\"")
+            items: loop item in build_option_items(value) -> "\"{item}\""
             "[{items.join(", ")}]"
         }
         .Hooks -> "[{build_option_items(value).join(", ")}]"
@@ -719,8 +716,7 @@ build_option_variants_text: fn(row: BuildOptionRow) -> String Never! {
     if row.kind == BuildOptionKind.Hooks {
         return "a list literal of hook functions such as `[tools.sign]`"
     }
-    ^words: [String]{}
-    loop value in build_option_method_values(row) -> words.push(build_option_argument(row, value))
+    words: loop value in build_option_method_values(row) -> build_option_argument(row, value)
     "one of {build_option_join(words)}"
 }
 
@@ -729,11 +725,7 @@ build_option_variants_text: fn(row: BuildOptionRow) -> String Never! {
 // flag's value only.
 build_option_method_values: fn(row: BuildOptionRow) -> [String] Never! {
     if row.kind != BuildOptionKind.Bool -> return row.values.copy()
-    ^out: [String]{}
-    loop value in row.values {
-        if value == "true" || value == "false" -> out.push(value.copy())
-    }
-    out
+    loop value in row.values if value == "true" || value == "false" -> if value == "true" -> "true" else -> "false"
 }
 
 build_option_join: fn(words: [String]) -> String Never! {
@@ -834,11 +826,7 @@ build_option_removes_check: fn(choice: BuildOptionChoice) -> Bool Never! {
 
 // The resolved values that remove a runtime check, in table order.
 build_options_check_removals: fn(options: BuildOptions) -> [BuildOptionChoice] Never! {
-    ^out: [BuildOptionChoice]{}
-    loop choice in options.values {
-        if build_option_removes_check(choice) -> out.push(choice.copy())
-    }
-    out
+    loop choice in options.values if build_option_removes_check(choice) -> choice.copy()
 }
 
 // The stderr receipt of one check removal (build_options_check_removals), the
@@ -874,8 +862,10 @@ build_option_flags: fn(argv: [String]) -> BuildOptionsResolved Never! {
             ^merged: false
             loop at in 0..<flags.len() {
                 if flags[at].name != row.name -> next
-                earlier: flags[at].copy()
-                flags[at] = BuildOptionChoice{name: earlier.name, value: "{earlier.value}\n{value}", layer: earlier.layer, written: "{earlier.written} {argument}", site: "", pinned: false}
+                flags[at].value = "{flags[at].value}\n{value}"
+                flags[at].written = "{flags[at].written} {argument}"
+                flags[at].site = ""
+                flags[at].pinned = false
                 merged = true
             }
             if merged -> next
@@ -926,43 +916,43 @@ build_options_resolve: fn(command: String, profile: String, written: [BuildOptio
     // A full backtrace names frames from the DWARF that `debug_info: false`
     // leaves out; the stock `full` degrades to addresses, a written one is
     // refused.
-    backtrace: values[build_option_index("backtrace")].copy()
-    debug_info: values[build_option_index("debug_info")].copy()
-    if backtrace.layer != BuildOptionLayer.Stock && backtrace.value == "full" && debug_info.value == "false" {
-        backtrace_place: if backtrace.site == "" -> "`{backtrace.written}`" else -> "`{backtrace.written}` {backtrace.site}"
-        debug_place: if debug_info.site == "" -> "`{debug_info.written}`" else -> "`{debug_info.written}` {debug_info.site}"
+    backtrace: build_option_index("backtrace")
+    debug_info: build_option_index("debug_info")
+    if values[backtrace].layer != BuildOptionLayer.Stock && values[backtrace].value == "full" && values[debug_info].value == "false" {
+        backtrace_place: build_option_place(values[backtrace])
+        debug_place: build_option_place(values[debug_info])
         return BuildOptionsResolved.Refused{code: "E2104", what: "{backtrace_place} needs debug info, which {debug_place} leaves out", fix: "write `backtrace: brief` or `backtrace: off`, or drop `debug_info: false`"}
     }
     // The native backend writes Linux x86-64 ELF images (JetBackend Image/);
     // `jet build` also writes a web build (JetWeb), which only it writes.
-    os: values[build_option_index("os")].copy()
-    if os.value == "web" && command != "build" {
-        return BuildOptionsResolved.Refused{code: "E2104", what: "{build_option_place(os)} asks for a web build, and `jet {command}` runs Linux x86-64 ELF images only", fix: "drop it, or use `jet build`"}
+    os: build_option_index("os")
+    if values[os].value == "web" && command != "build" {
+        return BuildOptionsResolved.Refused{code: "E2104", what: "{build_option_place(values[os])} asks for a web build, and `jet {command}` runs Linux x86-64 ELF images only", fix: "drop it, or use `jet build`"}
     }
-    if os.value != "linux" && os.value != "web" {
-        return BuildOptionsResolved.Refused{code: "E2104", what: "{build_option_place(os)} asks for a {os.value} image, and the native backend writes Linux x86-64 ELF images only", fix: "drop it, or write `os: linux`"}
+    if values[os].value != "linux" && values[os].value != "web" {
+        return BuildOptionsResolved.Refused{code: "E2104", what: "{build_option_place(values[os])} asks for a {values[os].value} image, and the native backend writes Linux x86-64 ELF images only", fix: "drop it, or write `os: linux`"}
     }
     // The web runtime partition holds no checked heap
     // (CHECKED_ALLOC_RUNTIME_EXPORTS).
-    checked_alloc: values[build_option_index("checked_alloc")].copy()
-    if os.value == "web" && checked_alloc.value == "true" {
-        return BuildOptionsResolved.Refused{code: "E2104", what: "{build_option_place(checked_alloc)} asks for the checked allocator, and a web build has none", fix: "drop it, or build for Linux"}
+    checked_alloc: build_option_index("checked_alloc")
+    if values[os].value == "web" && values[checked_alloc].value == "true" {
+        return BuildOptionsResolved.Refused{code: "E2104", what: "{build_option_place(values[checked_alloc])} asks for the checked allocator, and a web build has none", fix: "drop it, or build for Linux"}
     }
-    min_os: values[build_option_index("min_os")].copy()
-    if min_os.value != "" {
-        return BuildOptionsResolved.Refused{code: "E2104", what: "{build_option_place(min_os)} sets a minimum OS version, and a Linux ELF image has none to set: its ABI has no versioned floor", fix: "drop it"}
+    min_os: build_option_index("min_os")
+    if values[min_os].value != "" {
+        return BuildOptionsResolved.Refused{code: "E2104", what: "{build_option_place(values[min_os])} sets a minimum OS version, and a Linux ELF image has none to set: its ABI has no versioned floor", fix: "drop it"}
     }
     // Only `jet build` writes an executable for output_dir to place.
-    output_dir: values[build_option_index("output_dir")].copy()
-    if command != "build" && output_dir.value != "" {
-        return BuildOptionsResolved.Refused{code: "E2104", what: "{build_option_place(output_dir)} places the executables `jet build` writes, and `jet {command}` writes none", fix: "drop it, or use `jet build`"}
+    output_dir: build_option_index("output_dir")
+    if command != "build" && values[output_dir].value != "" {
+        return BuildOptionsResolved.Refused{code: "E2104", what: "{build_option_place(values[output_dir])} places the executables `jet build` writes, and `jet {command}` writes none", fix: "drop it, or use `jet build`"}
     }
     // The native linker takes no flags and reads `ar` archives only.
-    link_args: values[build_option_index("link_args")].copy()
-    loop word in build_option_items(link_args.value) {
+    link_args: build_option_index("link_args")
+    loop word in build_option_items(values[link_args].value) {
         if (word.starts_with("-L") || word.starts_with("-l")) && word.len() > 2 -> next
         if !word.starts_with("-") && word.ends_with(".a") -> next
-        return BuildOptionsResolved.Refused{code: "E2104", what: "{build_option_place(link_args)} passes `{word}`, and the native linker takes only `-L<dir>`, `-l<name>` and `.a` archive paths", fix: "drop `{word}`, or name the library or archive it links"}
+        return BuildOptionsResolved.Refused{code: "E2104", what: "{build_option_place(values[link_args])} passes `{word}`, and the native linker takes only `-L<dir>`, `-l<name>` and `.a` archive paths", fix: "drop `{word}`, or name the library or archive it links"}
     }
     // A run, a test and `jet dev` link their image in memory, and a web build
     // writes a module no native link makes: each keeps Jet's own link. Only
@@ -971,7 +961,7 @@ build_options_resolve: fn(command: String, profile: String, written: [BuildOptio
     if values[link].value != BUILD_OPTION_HOOK_DEFAULT && command != "build" {
         return BuildOptionsResolved.Refused{code: "E2104", what: "{build_option_place(values[link])} names a link hook, and `jet {command}` links every image itself: only `jet build` runs one", fix: "drop it, or use `jet build`"}
     }
-    if values[link].value != BUILD_OPTION_HOOK_DEFAULT && os.value == "web" {
+    if values[link].value != BUILD_OPTION_HOOK_DEFAULT && values[os].value == "web" {
         return BuildOptionsResolved.Refused{code: "E2104", what: "{build_option_place(values[link])} names a link hook, and a web build writes a WebAssembly module, which no native link step makes", fix: "drop it, or build for a native target"}
     }
     // A post-link step turns the executable a native `jet build` linked into
@@ -980,7 +970,7 @@ build_options_resolve: fn(command: String, profile: String, written: [BuildOptio
     if values[post_link].value != "" && command != "build" {
         return BuildOptionsResolved.Refused{code: "E2104", what: "{build_option_place(values[post_link])} names steps to run on each linked executable, and `jet {command}` writes none: only `jet build` runs them", fix: "drop it, or use `jet build`"}
     }
-    if values[post_link].value != "" && os.value == "web" {
+    if values[post_link].value != "" && values[os].value == "web" {
         return BuildOptionsResolved.Refused{code: "E2104", what: "{build_option_place(values[post_link])} names steps to run on each linked executable, and a web build writes a WebAssembly module, not a linked executable", fix: "drop it, or build for a native target"}
     }
     linkage: build_option_index("linkage")

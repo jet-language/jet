@@ -151,12 +151,13 @@ core_declarations_built: fn(core: String, parts: String, syntax: [CoreDeclaratio
 }
 
 core_declarations_modules: fn(declared: CoreDeclarations) -> [CoreModuleDeclaration] Never! {
-    ^out: [CoreModuleDeclaration]{}
-    loop entry in declared.modules {
-        exports: loop leaf in entry.types -> CoreModuleTypeExport{name: leaf.name.copy(), kind: core_declarations_leaf_kind(leaf)}
-        out.push(CoreModuleDeclaration{module_name: entry.name.copy(), members: entry.members.copy(), type_exports: exports, dependencies: entry.dependencies.copy(), line: entry.line})
+    loop entry in declared.modules -> CoreModuleDeclaration{
+        module_name: entry.name.copy(),
+        members: entry.members.copy(),
+        type_exports: loop leaf in entry.types -> CoreModuleTypeExport{name: leaf.name.copy(), kind: core_declarations_leaf_kind(leaf)},
+        dependencies: entry.dependencies.copy(),
+        line: entry.line,
     }
-    out
 }
 
 // A type's leaf kind: a generic arity first, then enum variants.
@@ -267,12 +268,26 @@ core_decl_syntax_constants: fn(syntax: [CoreDeclarationFile]) -> CoreDeclTexts C
             ^text_bytes: [U8]{}
             ^listed: true
             loop item in items.split(",") {
-                value: item.trim().copy()
-                if !core_decl_is_digits(value) {
+                item_bytes: item.bytes()
+                ^lo: 0
+                ^hi: item_bytes.len()
+                loop lo < hi && core_decl_space(Int{item_bytes[lo]}) -> lo += 1
+                loop hi > lo && core_decl_space(Int{item_bytes[hi - 1]}) -> hi -= 1
+                if lo == hi {
                     listed = false
                     break
                 }
-                text_bytes.push(U8{Int.parse(value) ?? 0})
+                ^num: 0
+                loop at in lo..<hi {
+                    digit: Int{item_bytes[at]}
+                    if !core_decl_digit(digit) {
+                        listed = false
+                        break
+                    }
+                    num = num * 10 + (digit - 48)
+                }
+                if !listed -> break
+                text_bytes.push(U8{num})
             }
             if !listed -> next
             core_decl_text_put(constants, name, String.from_bytes(text_bytes) ?? return Err(core_decl_fail("{file.path}: a String.from_bytes constant is not UTF-8")))
@@ -327,13 +342,13 @@ core_decl_take_keyword: fn(line: String, at: Int, keyword: String) -> Int? Never
 }
 
 // `bootstrap NAME depends_on [DEPENDENCIES]`: the name and the list body.
-core_decl_bootstrap_line: fn(line: String, at: Int) -> [String]? Never! {
+core_decl_bootstrap_line: fn(line: String, at: Int) -> {name: String, dependencies: String}? Never! {
     name: core_decl_take_word(line, at) ?? return None
     if !core_decl_is_name(name.text, ".-") -> return None
     after: core_decl_take_keyword(line, name.end, "depends_on") ?? return None
     list: core_decl_take_block(line, after, 91, 93) ?? return None
     if list.end != core_decl_len(line) -> return None
-    Val([String]{name.text, list.text})
+    Val({name: name.text, dependencies: list.text})
 }
 
 // `root_types { … }`, `namespace_only { … }` or `error_types { … }`: the body.
@@ -344,14 +359,14 @@ core_decl_braced_line: fn(line: String, at: Int) -> String? Never! {
 }
 
 // `format_row VARIANT module LABEL`.
-core_decl_format_line: fn(line: String, at: Int) -> [String]? Never! {
+core_decl_format_line: fn(line: String, at: Int) -> {variant: String, module_name: String, label: String}? Never! {
     variant: core_decl_take_word(line, at) ?? return None
     module_name: core_decl_take_word(line, variant.end) ?? return None
     label: core_decl_take_word(line, module_name.end) ?? return None
     if label.end != core_decl_len(line) || !core_decl_is_constant(variant.text) || !core_decl_is_name(module_name.text, ".") || !core_decl_is_constant(label.text) {
         return None
     }
-    Val([String]{variant.text, module_name.text, label.text})
+    Val({variant: variant.text, module_name: module_name.text, label: label.text})
 }
 
 // `dispatcher_row <plain|adapter|receiver> <module> <member> | <expression>`.
@@ -367,7 +382,7 @@ core_decl_dispatcher_line: fn(line: String, at: Int) -> [String]? Never! {
 }
 
 // `source_module NAME path PATH alias ALIAS owns { … } [types { … }] [impls { … }]`.
-core_decl_source_line: fn(line: String, at: Int) -> [String]? Never! {
+core_decl_source_line: fn(line: String, at: Int) -> {module_name: String, path: String, alias: String, owns: String, types: String, impls: String}? Never! {
     name: core_decl_take_word(line, at) ?? return None
     after_path: core_decl_take_keyword(line, name.end, "path") ?? return None
     path: core_decl_take_word(line, after_path) ?? return None
@@ -380,18 +395,18 @@ core_decl_source_line: fn(line: String, at: Int) -> [String]? Never! {
     if impls.end != core_decl_len(line) || !core_decl_is_name(name.text, ".") || !core_decl_is_name(alias.text, "") {
         return None
     }
-    Val([String]{name.text, path.text, alias.text, owns.text, types.text, impls.text})
+    Val({module_name: name.text, path: path.text, alias: alias.text, owns: owns.text, types: types.text, impls: impls.text})
 }
 
 // `module NAME exports { … } [types { … }] [depends_on [ … ]]`.
-core_decl_module_line: fn(line: String, at: Int) -> [String]? Never! {
+core_decl_module_line: fn(line: String, at: Int) -> {name: String, exports: String, types: String, dependencies: String}? Never! {
     name: core_decl_take_word(line, at) ?? return None
     after_exports: core_decl_take_keyword(line, name.end, "exports") ?? return None
     exports: core_decl_take_block(line, after_exports, 123, 125) ?? return None
     types: core_decl_optional_block(line, exports.end, "types", 123, 125) ?? return None
     dependencies: core_decl_optional_block(line, types.end, "depends_on", 91, 93) ?? return None
     if dependencies.end != core_decl_len(line) || !core_decl_is_name(name.text, ".") -> return None
-    Val([String]{name.text, exports.text, types.text, dependencies.text})
+    Val({name: name.text, exports: exports.text, types: types.text, dependencies: dependencies.text})
 }
 
 // A Core.rows list body as declaration names (`[A-Za-z_][A-Za-z0-9_!?]*`).
@@ -432,7 +447,7 @@ core_decl_type: fn(raw: String, context: String) -> CoreDeclarationType CoreDecl
         return Err(core_decl_fail("invalid Core type export `{raw}` in {context}"))
     }
     descriptor: if parts.len() == 2 && parts[1] != "" -> parts[1].copy() else -> "plain"
-    ^kind: descriptor.copy()
+    ^kind: ""
     ^arity: 0
     ^variants: [String]{}
     ^payloads: [String]{}
@@ -459,9 +474,10 @@ core_decl_type: fn(raw: String, context: String) -> CoreDeclarationType CoreDecl
         kind = "plain"
     }
     if core_decl_descriptor_argument(descriptor, "from") == .Val(reference) && reference.starts_with("core.") && core_decl_is_name(reference.removeprefix("core."), ".") {
-        from_module = reference.copy()
+        from_module = reference
         kind = "plain"
     }
+    if kind == "" -> kind = descriptor
     if kind != "plain" && kind != "crypto_nominal" {
         return Err(core_decl_fail("invalid Core type kind `{kind}` in {context}"))
     }
@@ -494,9 +510,8 @@ core_decl_payload_text: fn(text: String) -> Bool Never! {
     true
 }
 
-core_decl_module: fn(groups: [String], number: Int, context: String) -> CoreDeclarationModule CoreDeclarationError! {
-    name: groups[0]
-    members: core_decl_core_names(groups[1], context) ?? return Err(err)
+core_decl_module: fn(name: ^^String, exports: String, types_body: String, dependencies_body: String, number: Int, context: String) -> CoreDeclarationModule CoreDeclarationError! {
+    members: core_decl_core_names(exports, context) ?? return Err(err)
     ^seen: [String]{}
     loop member in members {
         if seen.contains(member) {
@@ -505,22 +520,23 @@ core_decl_module: fn(groups: [String], number: Int, context: String) -> CoreDecl
         seen.push(member)
     }
     ^types: [CoreDeclarationType]{}
-    ^seen_types: [String]{}
-    loop raw in core_decl_names(groups[2]) {
+    loop raw in core_decl_names(types_body) {
         leaf: core_decl_type(raw, context) ?? return Err(err)
-        if seen_types.contains(leaf.name) {
-            return Err(core_decl_fail("duplicate Core type export `{name}.{leaf.name}`"))
+        loop seen_leaf in types {
+            if seen_leaf.name == leaf.name {
+                return Err(core_decl_fail("duplicate Core type export `{name}.{leaf.name}`"))
+            }
         }
-        seen_types.push(leaf.name.copy())
         types.push(leaf)
     }
-    Ok(CoreDeclarationModule{name: name.copy(), members: members, types: types, dependencies: core_decl_core_paths(groups[3], context) ?? return Err(err), line: number})
+    dependencies: core_decl_core_paths(dependencies_body, context) ?? return Err(err)
+    Ok(CoreDeclarationModule{name: name.move(), members: members, types: types, dependencies: dependencies, line: number})
 }
 
 // `leaf` of module `module_name` with a `from(core.x)` reference replaced by
 // the kind, variants, payloads and arity of the type it names. Re-exports
 // share one definition instead of copying variant lists.
-core_decl_resolve_type: fn(modules: [CoreDeclarationModule], module_name: String, leaf: CoreDeclarationType, visiting: [String]) -> CoreDeclarationType CoreDeclarationError! {
+core_decl_resolve_type: fn(modules: [CoreDeclarationModule], module_name: String, leaf: CoreDeclarationType, visiting: ^[String]) -> CoreDeclarationType CoreDeclarationError! {
     if leaf.from_module == "" -> return Ok(leaf.copy())
     key: "{module_name}.{leaf.name}"
     if visiting.contains(key) -> return Err(core_decl_fail("cyclic Core type reference `{key}`"))
@@ -529,10 +545,12 @@ core_decl_resolve_type: fn(modules: [CoreDeclarationModule], module_name: String
         if !owner.members.contains(leaf.name) -> break
         loop target in owner.types {
             if target.name != leaf.name -> next
-            ^nested: visiting.copy()
-            nested.push(key)
-            ^resolved: core_decl_resolve_type(modules, owner.name, target, nested) ?? return Err(err)
-            resolved.name = leaf.name.copy()
+            visiting.push(key)
+            ^resolved: core_decl_resolve_type(modules, owner.name, target, visiting) ?? {
+                ^_: visiting.pop()
+                return Err(err)
+            }
+            ^_: visiting.pop()
             resolved.from_module = leaf.from_module.copy()
             return Ok(resolved)
         }
@@ -543,8 +561,9 @@ core_decl_resolve_type: fn(modules: [CoreDeclarationModule], module_name: String
 
 // A `dispatcher_row`'s module or member may name a Syntax constant.
 core_decl_dispatcher_member: fn(member: String, constants: CoreDeclTexts) -> String Never! {
-    if !core_decl_is_constant(member) -> return member.copy()
-    if core_decl_text_of(constants, member) == .Val(value) && value != "" -> return value.copy()
+    if core_decl_is_constant(member) {
+        if core_decl_text_of(constants, member) == .Val(value) && value != "" -> return value
+    }
     member.copy()
 }
 
@@ -566,15 +585,14 @@ core_decl_dispatcher: fn(groups: [String], expression: String, number: Int, cons
         return Err(core_decl_fail("invalid dispatcher member `{member}`"))
     }
     evaluated: core_decl_call_record(expression, "Core.rows line {number}", constants) ?? return Err(err)
-    record: evaluated.record.copy()
     expected: core_decl_dispatcher_member(member, constants)
-    matches: if module_name != "" -> record.module_name == module_name && record.member == expected else -> record.module_name == "" && (record.member == expected || record.receiver_types.contains(member) || record.receiver_types.contains(expected))
+    matches: if module_name != "" -> evaluated.record.module_name == module_name && evaluated.record.member == expected else -> evaluated.record.module_name == "" && (evaluated.record.member == expected || evaluated.record.receiver_types.contains(member) || evaluated.record.receiver_types.contains(expected))
     if !matches {
-        shown: if module_name == "" -> "-" else -> module_name.copy()
-        emitted: if record.module_name == "" -> "-" else -> record.module_name.copy()
-        return Err(core_decl_fail("dispatcher row identity disagrees with emitted adapter: DSL {shown}.{member} vs {evaluated.constructor} {emitted}.{record.member}"))
+        shown: if module_name == "" -> "-" else -> module_name
+        emitted: if evaluated.record.module_name == "" -> "-" else -> evaluated.record.module_name
+        return Err(core_decl_fail("dispatcher row identity disagrees with emitted adapter: DSL {shown}.{member} vs {evaluated.constructor} {emitted}.{evaluated.record.member}"))
     }
-    Ok(CoreDeclarationDispatcher{kind: kind.copy(), module_name: module_name, member: member.copy(), line: number, constructor: evaluated.constructor.move(), record: record.copy()})
+    Ok(CoreDeclarationDispatcher{kind: kind.copy(), module_name: module_name, member: member.copy(), line: number, constructor: evaluated.constructor.move(), record: evaluated.record})
 }
 
 core_decl_position: fn(values: [String], value: String) -> Int Never! {
@@ -644,12 +662,11 @@ core_decl_problem: fn(declared: CoreDeclarations) -> String Never! {
             return "{CORE_DECLARATIONS_CORE_PATH}:{row.line}: dispatcher row is not declared by Core.rows exports: {row.module_name}.{row.member}"
         }
     }
-    ^seen: [String]{}
-    loop namespace in declared.namespace_only {
-        if seen.contains(namespace) {
+    loop at in 0..<declared.namespace_only.len() {
+        namespace: declared.namespace_only[at]
+        if declared.namespace_only.slice(0, at).contains(namespace) {
             return "{CORE_DECLARATIONS_CORE_PATH}: Core namespace_only declarations contain a duplicate"
         }
-        seen.push(namespace.copy())
         if !module_names.contains(namespace) {
             return "{CORE_DECLARATIONS_CORE_PATH}: Core namespace_only module is not declared: {namespace}"
         }
@@ -714,10 +731,10 @@ core_decl_plain_quoted: fn(text: String, at: Int) -> CoreDeclTake? Never! {
 
 // The module and member of every `sema_web_call("<module>", "<member>"`
 // in `expression`.
-core_decl_web_calls: fn(expression: String) -> [[String]] Never! {
+core_decl_web_calls: fn(expression: String) -> [{module_name: String, member: String}] Never! {
     head: "sema_web_call"
     bytes: expression.bytes()
-    ^out: [[String]]{}
+    ^out: [{module_name: String, member: String}]{}
     ^start: 0
     loop {
         found: core_decl_tail(expression, start).find(head)
@@ -731,7 +748,7 @@ core_decl_web_calls: fn(expression: String) -> [[String]] Never! {
         comma: core_decl_skip_space(bytes, module_name.end)
         if comma >= bytes.len() || (Int{bytes[comma]}) != 44 -> next
         member: core_decl_plain_quoted(expression, core_decl_skip_space(bytes, comma + 1)) ?? next
-        out.push([String]{module_name.text, member.text})
+        out.push({module_name: module_name.text, member: member.text})
         start = member.end
     }
 }
@@ -779,9 +796,9 @@ core_decl_public_problem: fn(declared: CoreDeclarations, expressions: [String], 
     }
     loop (index, row) in declared.dispatchers {
         loop found in core_decl_web_calls(expressions[index]) {
-            problem: core_decl_register_public(rows, found[0], found[1], row.line)
+            problem: core_decl_register_public(rows, found.module_name, found.member, row.line)
             if problem != "" -> return Ok(problem)
-            rows.push(CoreDeclPublic{module_name: found[0].copy(), member: found[1].copy(), line: row.line})
+            rows.push(CoreDeclPublic{module_name: found.module_name, member: found.member, line: row.line})
         }
     }
     ^adapter_keys: [String]{}
@@ -946,7 +963,7 @@ core_decl_resolve_items: fn(body: String, constants: CoreDeclTexts) -> [String] 
         start = -1
         if !core_decl_is_constant(name) -> next
         if core_decl_text_of(constants, name) == .Val(value) && !out.contains(value) {
-            out.push(value.copy())
+            out.push(value)
         }
     }
     out.sort()
@@ -1086,27 +1103,23 @@ core_decl_port_pending: fn(source: String) -> Bool Never! {
 // one more module segment (`Core/Text/Runtime/Assets/x.jet` is
 // `core.text.runtime.assets.x`).
 core_decl_runtime_units: fn(found: [CoreDeclarationFile]) -> [CoreDeclarationSource] CoreDeclarationError! {
-    ^ordered: [CoreDeclarationFile]{}
-    loop file in found {
-        ordered.push(file.copy())
-        ^at: ordered.len() - 1
-        loop at > 0 && core_decl_walk_before(ordered[at].path, ordered[at - 1].path) {
-            held: ordered[at - 1].copy()
-            ordered[at - 1] = ordered[at].copy()
-            ordered[at] = held
+    ^order: [Int]{}
+    loop index in 0..<found.len() {
+        order.push(index)
+        ^at: order.len() - 1
+        loop at > 0 && core_decl_walk_before(found[order[at]].path, found[order[at - 1]].path) {
+            held: order[at - 1]
+            order[at - 1] = order[at]
+            order[at] = held
             at -= 1
         }
     }
     ^rows: [CoreDeclarationSource]{}
-    loop file in ordered {
+    loop file_index in order {
+        file: found[file_index]
         if core_decl_port_pending(file.text) -> next
         segments: file.path.split("/").to_list()
-        ^unit: [String]{}
-        loop index in 1..<segments.len() {
-            segment: segments[index]
-            unit.push(if index + 1 == segments.len() -> segment.removesuffix(".jet") else -> segment.copy())
-        }
-        module_segments: loop segment in unit -> core_decl_snake_segment(segment)
+        module_segments: loop index in 1..<segments.len() -> core_decl_snake_segment(if index + 1 == segments.len() -> segments[index].removesuffix(".jet") else -> segments[index])
         loop segment in module_segments {
             if !core_decl_unit_segment(segment) {
                 return Err(core_decl_fail("{file.path}: runtime unit path segment `{segment}` is not a lowercase identifier"))
@@ -1153,11 +1166,12 @@ core_declarations_read: fn(core: String, parts: String, syntax: [CoreDeclaration
             "bootstrap" -> {
                 groups: core_decl_bootstrap_line(line, head_end) ?? return Err(core_decl_unrecognized(number, line))
                 loop step in bootstraps {
-                    if step.name == groups[0] {
-                        return Err(core_decl_fail_at(number, "duplicate Core bootstrap step `{groups[0]}`"))
+                    if step.name == groups.name {
+                        return Err(core_decl_fail_at(number, "duplicate Core bootstrap step `{groups.name}`"))
                     }
                 }
-                bootstraps.push(CoreBootstrapStep{name: groups[0].copy(), dependencies: core_decl_core_paths(groups[1], context) ?? return Err(core_decl_at(number, err))})
+                dependencies: core_decl_core_paths(groups.dependencies, context) ?? return Err(core_decl_at(number, err))
+                bootstraps.push(CoreBootstrapStep{name: groups.name, dependencies: dependencies})
             }
             "root_types" -> {
                 body: core_decl_braced_line(line, head_end) ?? return Err(core_decl_unrecognized(number, line))
@@ -1173,7 +1187,7 @@ core_declarations_read: fn(core: String, parts: String, syntax: [CoreDeclaration
             }
             "format_row" -> {
                 groups: core_decl_format_line(line, head_end) ?? return Err(core_decl_unrecognized(number, line))
-                format: CoreDeclarationFormat{variant: groups[0].copy(), module_name: groups[1].copy(), label: groups[2].copy(), line: number}
+                format: CoreDeclarationFormat{variant: groups.variant, module_name: groups.module_name, label: groups.label, line: number}
                 loop seen in formats {
                     if seen.variant == format.variant {
                         return Err(core_decl_fail_at(number, "duplicate Core encoding format variant `{format.variant}`"))
@@ -1204,17 +1218,20 @@ core_declarations_read: fn(core: String, parts: String, syntax: [CoreDeclaration
             }
             "source_module" -> {
                 groups: core_decl_source_line(line, head_end) ?? return Err(core_decl_unrecognized(number, line))
+                members: core_decl_core_names(groups.owns, context) ?? return Err(core_decl_at(number, err))
+                // `types { … }` names the module's source-owned nominals:
+                // every tier uses the Jet declaration.
+                owned_types: core_decl_core_names(groups.types, context) ?? return Err(core_decl_at(number, err))
+                // Owner-only impl admission never exports a type.
+                impl_types: core_decl_core_names(groups.impls, context) ?? return Err(core_decl_at(number, err))
                 row: CoreDeclarationSource{
-                    module_name: groups[0].copy(),
-                    alias: groups[2].copy(),
-                    path: groups[1].copy(),
+                    module_name: groups.module_name,
+                    alias: groups.alias,
+                    path: groups.path,
                     owner: "",
-                    members: core_decl_core_names(groups[3], context) ?? return Err(core_decl_at(number, err)),
-                    // `types { … }` names the module's source-owned nominals:
-                    // every tier uses the Jet declaration.
-                    owned_types: core_decl_core_names(groups[4], context) ?? return Err(core_decl_at(number, err)),
-                    // Owner-only impl admission never exports a type.
-                    impl_types: core_decl_core_names(groups[5], context) ?? return Err(core_decl_at(number, err)),
+                    members: members,
+                    owned_types: owned_types,
+                    impl_types: impl_types,
                     runtime: false,
                     line: number,
                 }
@@ -1230,7 +1247,7 @@ core_declarations_read: fn(core: String, parts: String, syntax: [CoreDeclaration
             }
             "module" -> {
                 groups: core_decl_module_line(line, head_end) ?? return Err(core_decl_unrecognized(number, line))
-                declared: core_decl_module(groups, number, context) ?? return Err(core_decl_at(number, err))
+                declared: core_decl_module(groups.name, groups.exports, groups.types, groups.dependencies, number, context) ?? return Err(core_decl_at(number, err))
                 if core_declarations_module(modules, declared.name) != None {
                     return Err(core_decl_fail_at(number, "duplicate Core module `{declared.name}`"))
                 }
@@ -1242,15 +1259,21 @@ core_declarations_read: fn(core: String, parts: String, syntax: [CoreDeclaration
     if rows.len() == 0 {
         return Err(core_decl_fail("{CORE_DECLARATIONS_CORE_PATH} declares no source modules"))
     }
-    ^resolved: [CoreDeclarationModule]{}
+    ^resolved_types: [[CoreDeclarationType]]{}
+    ^visiting: [String]{}
     loop entry in modules {
         ^types: [CoreDeclarationType]{}
         loop leaf in entry.types {
-            types.push(core_decl_resolve_type(modules, entry.name, leaf, [String]{}) ?? return Err(core_decl_at(entry.line, err)))
+            types.push(core_decl_resolve_type(modules, entry.name, leaf, visiting) ?? return Err(core_decl_at(entry.line, err)))
         }
-        resolved.push(CoreDeclarationModule{name: entry.name.copy(), members: entry.members.copy(), types: types, dependencies: entry.dependencies.copy(), line: entry.line})
+        resolved_types.push(types)
     }
-    declared: CoreDeclarations{source_rows: rows, parts: core_decl_parts(parts) ?? return Err(err), runtime: core_decl_runtime_units(runtime) ?? return Err(err), modules: resolved, bootstraps: bootstraps, root_types: root_types, namespace_only: namespace_only, error_types: error_types, dispatchers: dispatchers, formats: formats}
+    ^at: modules.len()
+    loop at > 0 {
+        at -= 1
+        modules[at].types = resolved_types.pop() ?? [CoreDeclarationType]{}
+    }
+    declared: CoreDeclarations{source_rows: rows, parts: core_decl_parts(parts) ?? return Err(err), runtime: core_decl_runtime_units(runtime) ?? return Err(err), modules: modules, bootstraps: bootstraps, root_types: root_types, namespace_only: namespace_only, error_types: error_types, dispatchers: dispatchers, formats: formats}
     roots: effect_vocabulary_names(effects, false)
     problems: [String]{
         core_decl_problem(declared),

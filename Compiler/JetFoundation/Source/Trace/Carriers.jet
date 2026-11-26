@@ -389,22 +389,21 @@ trace_hardware_to_json: fn(value: TraceHardware) -> CanonicalJSON JetTraceError!
 }
 
 capture_policy_to_json: fn(value: CapturePolicy) -> CanonicalJSON JetTraceError! {
-    ^names: value.allowlist.copy()
-    names.sort()
+    ^order: loop index in 0..<value.allowlist.len() -> index
+    order.sort_by(fn(left: Int, right: Int) { value.allowlist[left] <=> value.allowlist[right] })
     ^allowlist: [CanonicalJSON]{}
-    ^prior: String?{None}
-    loop name in names {
-        if prior != Val(name) -> allowlist.push(.String(name.copy()))
-        prior = Val(name.copy())
+    loop at in 0..<order.len() {
+        if at == 0 || value.allowlist[order[at]] != value.allowlist[order[at - 1]] {
+            allowlist.push(.String(value.allowlist[order[at]].copy()))
+        }
     }
-    ^exclusions: [CanonicalJSON]{}
-    loop name in DEFAULT_EXCLUSIONS -> exclusions.push(.String(name.copy()))
+    exclusions: loop name in DEFAULT_EXCLUSIONS -> CanonicalJSON.String(name.copy())
     jettrace_object(
         [CanonicalJSONField]{
             jettrace_field("allowlist", .Array(allowlist.move())),
             jettrace_field("browser_row_limit", jettrace_uint(TRACE_BROWSER_ROW_LIMIT)),
             jettrace_field("browser_rows_truncated", .Bool(value.browser_rows_truncated)),
-            jettrace_field("default_exclusions", .Array(exclusions.move())),
+            jettrace_field("default_exclusions", .Array(exclusions)),
             jettrace_field("io_row_limit", jettrace_uint(TRACE_IO_ROW_LIMIT)),
             jettrace_field("io_rows_truncated", .Bool(value.io_rows_truncated)),
             jettrace_field("native_row_limit", jettrace_uint(TRACE_NATIVE_ROW_LIMIT)),
@@ -436,11 +435,9 @@ trace_counter_to_json: fn(value: TraceCounter) -> CanonicalJSON JetTraceError! {
 }
 
 trace_profile_to_json: fn(value: TraceProfile) -> CanonicalJSON JetTraceError! {
-    ^counters: [CanonicalJSON]{}
-    loop counter in value.counters -> counters.push(trace_counter_to_json(counter))
-    ^rows: [CanonicalJSON]{}
-    loop row in value.rows -> rows.push(trace_profile_row_to_json(row))
-    jettrace_object([CanonicalJSONField]{jettrace_field("counters", .Array(counters.move())), jettrace_field("coverage", .String(value.coverage.copy())), jettrace_field("method", .String(value.method.copy())), jettrace_field("overhead_kernel_ns", jettrace_optional_uint(value.overhead_kernel_ns)), jettrace_field("overhead_ns", jettrace_optional_uint(value.overhead_ns)), jettrace_field("overhead_reason", .String(value.overhead_reason.copy())), jettrace_field("overhead_runtime_ns", jettrace_optional_uint(value.overhead_runtime_ns)), jettrace_field("overhead_status", .String(value.overhead_status.copy())), jettrace_field("reason", .String(value.reason.copy())), jettrace_field("row_limit", jettrace_uint(value.row_limit)), jettrace_field("rows", .Array(rows.move())), jettrace_field("rows_truncated", .Bool(value.rows_truncated)), jettrace_field("status", .String(value.status.copy())), jettrace_field("window_cpu_ns", jettrace_optional_uint(value.window_cpu_ns)), jettrace_field("window_reason", .String(value.window_reason.copy())), jettrace_field("window_status", .String(value.window_status.copy())), jettrace_field("window_wall_ns", jettrace_optional_uint(value.window_wall_ns))})
+    counters: loop counter in value.counters -> trace_counter_to_json(counter)
+    rows: loop row in value.rows -> trace_profile_row_to_json(row)
+    jettrace_object([CanonicalJSONField]{jettrace_field("counters", .Array(counters)), jettrace_field("coverage", .String(value.coverage.copy())), jettrace_field("method", .String(value.method.copy())), jettrace_field("overhead_kernel_ns", jettrace_optional_uint(value.overhead_kernel_ns)), jettrace_field("overhead_ns", jettrace_optional_uint(value.overhead_ns)), jettrace_field("overhead_reason", .String(value.overhead_reason.copy())), jettrace_field("overhead_runtime_ns", jettrace_optional_uint(value.overhead_runtime_ns)), jettrace_field("overhead_status", .String(value.overhead_status.copy())), jettrace_field("reason", .String(value.reason.copy())), jettrace_field("row_limit", jettrace_uint(value.row_limit)), jettrace_field("rows", .Array(rows)), jettrace_field("rows_truncated", .Bool(value.rows_truncated)), jettrace_field("status", .String(value.status.copy())), jettrace_field("window_cpu_ns", jettrace_optional_uint(value.window_cpu_ns)), jettrace_field("window_reason", .String(value.window_reason.copy())), jettrace_field("window_status", .String(value.window_status.copy())), jettrace_field("window_wall_ns", jettrace_optional_uint(value.window_wall_ns))})
 }
 
 trace_sample_to_json: fn(value: TraceSample) -> CanonicalJSON JetTraceError! {

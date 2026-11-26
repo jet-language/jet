@@ -90,11 +90,11 @@ effect_vocabulary_module_source: fn(source: String, decls: [EffectDecl]) -> Effe
 // The rows of the three sources, in order.
 effect_vocabulary_rows: fn(machine_source: String, core_source: String, meta_source: String) -> [EffectVocabularyRow] {
     machine: effect_vocabulary_source_rows(machine_source, EFFECT_VOCABULARY_MACHINE_PATH, None)
-    ^rows: machine.copy()
-    loop row in effect_vocabulary_source_rows(core_source, "Core/Effects/Effects.jet", Val(machine)) {
-        rows.push(row.copy())
-    }
-    loop row in effect_vocabulary_source_rows(meta_source, "Core/Compiler/Meta.jet", Val(machine)) {
+    core_rows: effect_vocabulary_source_rows(core_source, "Core/Effects/Effects.jet", Val(machine))
+    meta_rows: effect_vocabulary_source_rows(meta_source, "Core/Compiler/Meta.jet", Val(machine))
+    ^rows: machine
+    loop row in core_rows -> rows.push(row.copy())
+    loop row in meta_rows {
         loop seen in rows {
             if seen.name == row.name {
                 build_time_refused("Core/Compiler/Meta.jet: duplicate effect {row.name}")
@@ -106,12 +106,8 @@ effect_vocabulary_rows: fn(machine_source: String, core_source: String, meta_sou
 }
 
 // The effect names that are leaves (`Root.Member`) or, with `leaf` false, roots.
-effect_vocabulary_names: fn(rows: [EffectVocabularyRow], leaf: Bool) -> [String] {
-    ^out: [String]{}
-    loop row in rows {
-        if row.name.contains(".") == leaf -> out.push(row.name.copy())
-    }
-    out
+effect_vocabulary_names: fn(rows: [EffectVocabularyRow], leaf: Bool) -> [String] Never! {
+    loop row in rows if row.name.contains(".") == leaf -> row.name.copy()
 }
 
 // The cases of `<type_name>: enum { … }` in `text`: the words of a one-line
@@ -139,12 +135,8 @@ effect_vocabulary_enum_cases: fn(text: String, type_name: String) -> [String]? {
 }
 
 // The names of `found` that `known` does not hold, in `found`'s order.
-effect_vocabulary_strays: fn(found: [String], known: [String]) -> [String] {
-    ^out: [String]{}
-    loop name in found {
-        if !known.contains(name) -> out.push(name.copy())
-    }
-    out
+effect_vocabulary_strays: fn(found: [String], known: [String]) -> [String] Never! {
+    loop name in found if !known.contains(name) -> name.copy()
 }
 
 // The cases of `<type_name>: enum { … }` in `text` written one case to a
@@ -289,7 +281,7 @@ effect_vocabulary_source_scan: fn(source: String, path: String, machine: [Effect
         start: offset + raw.bytes().len() - raw.trim_start().bytes().len()
         offset += raw.bytes().len() + 1
         comment: raw.find(COMMENT_PREFIX)
-        line: (if comment < 0 -> raw.copy() else -> foundation_byte_text(raw.bytes(), 0, comment)).trim()
+        line: if comment < 0 -> raw.trim() else -> foundation_byte_text(raw.bytes(), 0, comment).trim()
         if line == "" -> next
         fields: effect_vocabulary_words(line)
         place: "{path}:{index + 1}"
@@ -323,8 +315,8 @@ effect_vocabulary_source_scan: fn(source: String, path: String, machine: [Effect
                     }
                 }
             }
-            type_name = name.copy()
             type_span = Span{start: start, end: start + name.bytes().len()}
+            type_name = name
             family = fields[1] == "enum"
             cases = [String]{}
             case_spans = [Span]{}
@@ -373,15 +365,13 @@ effect_vocabulary_source_scan: fn(source: String, path: String, machine: [Effect
             if family && cases.len() == 0 {
                 build_time_refused("{place}: the effect family `{type_name}` has no cases")
             }
-            ^case_rows: [EffectVocabularyRow]{}
+            ^case_facts: [{irreversible: Bool, expert: Bool}]{}
             ^any: false
-            // A family under a parent case names its cases below that case.
-            prefix: parent ?? type_name
             loop member in cases {
                 irreversible: effect_vocabulary_fact(body, cases, Val(member)) ?? build_time_refused("{place}: `{type_name}`'s `irreversible` body is not `true`, `false`, `self == .Case` or an `||` of those")
                 expert: effect_vocabulary_fact(expert_body, cases, Val(member)) ?? build_time_refused("{place}: `{type_name}`'s `expert` body is not `true`, `false`, `self == .Case` or an `||` of those")
                 if irreversible -> any = true
-                case_rows.push(EffectVocabularyRow{name: "{prefix}.{member}", irreversible: irreversible, kernel: kernel.copy(), expert: expert})
+                case_facts.push({irreversible: irreversible, expert: expert})
             }
             ^root: any
             ^root_expert: false
@@ -389,13 +379,16 @@ effect_vocabulary_source_scan: fn(source: String, path: String, machine: [Effect
                 root = effect_vocabulary_fact(body, cases, None) ?? build_time_refused("{place}: `{type_name}`'s `irreversible` body is not `true` or `false`")
                 root_expert = effect_vocabulary_fact(expert_body, cases, None) ?? build_time_refused("{place}: `{type_name}`'s `expert` body is not `true` or `false`")
             }
+            // A family under a parent case names its cases below that case.
+            prefix: parent ?? type_name
             if parent == None {
-                rows.push(EffectVocabularyRow{name: type_name.copy(), irreversible: root, kernel: kernel.copy(), expert: root_expert})
                 decls.push(EffectDecl{name: "{type_name}", name_span: type_span, irreversible: root, span: type_span})
+                rows.push(EffectVocabularyRow{name: type_name.copy(), irreversible: root, kernel: kernel.copy(), expert: root_expert})
             }
-            loop (at, row) in case_rows {
-                decls.push(EffectDecl{name: "{row.name}", name_span: case_spans[at], irreversible: row.irreversible, span: case_spans[at]})
-                rows.push(row.copy())
+            loop (at, member) in cases {
+                full: "{prefix}.{member}"
+                decls.push(EffectDecl{name: "{full}", name_span: case_spans[at], irreversible: case_facts[at].irreversible, span: case_spans[at]})
+                rows.push(EffectVocabularyRow{name: full, irreversible: case_facts[at].irreversible, kernel: kernel.copy(), expert: case_facts[at].expert})
             }
             type_name = ""
             kernel = [String]{}
@@ -431,7 +424,7 @@ effect_vocabulary_kernel: fn(line: String, machine: [EffectVocabularyRow], place
         if !known {
             build_time_refused("{place}: `{entry}` is no machine effect of {EFFECT_VOCABULARY_MACHINE_PATH}")
         }
-        if kernel.contains(entry.copy()) -> build_time_refused("{place}: `{entry}` is listed twice")
+        if kernel.contains(entry) -> build_time_refused("{place}: `{entry}` is listed twice")
         kernel.push(entry.copy())
     }
     if kernel.len() == 0 -> build_time_refused("{place}: the `#FX(…)` line lists no machine effect")
