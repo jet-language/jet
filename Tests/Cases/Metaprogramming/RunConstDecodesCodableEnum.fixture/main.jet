@@ -10,7 +10,15 @@ Shape: enum {
 }
 
 SHAPE: #run { json.decode<Shape>(json.to_string(Shape.Circle(7))) ?? Shape.Dot }
+SHAPES: #run { json.decode<[Shape]>(json.to_string([Shape]{Shape.Dot, Shape.Circle(7)})) ?? [Shape]{} }
 
 run: fn() {
-    print(json.to_string(SHAPE))
+    runtime_shape: json.decode<Shape>(json.to_string(Shape.Circle(7))) ?? Shape.Dot
+    runtime_shapes: json.decode<[Shape]>(json.to_string([Shape]{Shape.Dot, Shape.Circle(7)})) ?? [Shape]{}
+    built_shape: json.to_string(SHAPE)
+    built_shapes: json.to_string(SHAPES)
+    print(built_shape)
+    print("{built_shape == json.to_string(runtime_shape)}")
+    print(built_shapes)
+    print("{built_shapes == json.to_string(runtime_shapes)}")
 }
