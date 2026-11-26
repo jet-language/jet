@@ -54,6 +54,6 @@ run: fn() {
             assert(!contains_bytes(head, "suffix=".bytes(), true) && !contains_bytes(head, "exact=".bytes(), true))
     stream.write_bytes("HTTP/1.1 200 OK{PEER_CRLF}Content-Length: 0{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}".bytes()) ?? panic("response write")
         }
-        stream.close() ?? panic("close")
+        close(stream)
     }
 }

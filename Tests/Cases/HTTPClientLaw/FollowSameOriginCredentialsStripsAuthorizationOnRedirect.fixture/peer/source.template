@@ -50,7 +50,7 @@ run: fn() {
         // starts_with lower ASCII prefix, equivalent for this ASCII prefix.
         assert(contains_bytes(head.slice(0, 11), "get /start ".bytes(), true))
     first.write_bytes("HTTP/1.1 302 Found{PEER_CRLF}Location: /next{PEER_CRLF}Content-Length: 0{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}".bytes()) ?? panic("response write")
-        first.close() ?? panic("close first")
+        close(first)
         ^second: listener.accept() ?? panic("second accept")
         next_head: request_head(second)
         assert(contains_bytes(next_head.slice(0, 10), "get /next ".bytes(), true))
@@ -60,6 +60,6 @@ run: fn() {
             assert(!contains_bytes(next_head, "authorization:".bytes(), true))
         }
     second.write_bytes("HTTP/1.1 200 OK{PEER_CRLF}Content-Length: 2{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}ok".bytes()) ?? panic("response write")
-        second.close() ?? panic("close second")
+        close(second)
     }
 }

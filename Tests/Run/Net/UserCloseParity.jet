@@ -1,0 +1,146 @@
+// Parity proof: a user-declared resource with `impl Close` (infallible,
+// zero effects) and an explicit fallible `finish()` gets the exact same
+// compiler and runtime lifecycle as Core's six network streams (`TCPStream`,
+// `UnixStream`, `TLSStream`, `DTLSSession`, `DTLSListener`, `WsConn`).
+package: {
+    name: "user_close_parity"
+    authority: { allow: [Env, FS.Read, FS.Write, IO, Mem.Alloc, Net, Time, Time.Wait] }
+}
+
+use {
+    _dtls: core.net.dtls
+    files: core.files
+    net: core.net
+    os: core.sys
+    server: core.http.server
+    _tls: core.net.tls
+    web: core.web
+    ws: core.net.ws
+}
+
+UserStreamState: struct {
+    finished: Bool,
+    closed: Int,
+    fail_finish: Bool,
+}
+
+#Error
+UserCloseError: enum {
+    Refused,
+}
+
+UserStream: struct {
+    state: Shared<UserStreamState>,
+
+    finish: fn(self) UserCloseError! {
+        ^guard: self.state.guard_edit()
+        if guard.value.fail_finish -> return Err(UserCloseError.Refused)
+        guard.value.finished = true
+        Ok()
+    }
+
+    impl Close {
+        close: fn(^^self) Never! {
+            ^guard: self.state.guard_edit()
+            guard.value.closed += 1
+        }
+    }
+}
+
+// One effect-free generic helper accepts both user resources and every Core
+// network stream solely through `Close`.
+close_resource: fn<R: Close>(resource: ^^R) Never! { close(resource) }
+
+// Type-level parity check: every Core network stream satisfies `Close` with
+// zero leaked effects at scope exit or explicit `close(...)`.
+accept_tls_close: fn(stream: ^^TLSStream) Never! { close_resource(stream) }
+
+accept_dtls_session_close: fn(session: ^^DTLSSession) Never! { close_resource(session) }
+
+accept_dtls_listener_close: fn(listener: ^^DTLSListener) Never! { close_resource(listener) }
+
+handle_ws: fn(req: HTTPRequest) -> HTTPResponse HTTPError! {
+    sock: ws.upgrade(req) ?? panic("upgrade")
+    msg: sock.recv() ?? panic("ws server recv")
+    if msg.is_text() -> sock.send_text("ok:{msg.text() ?? ""}") ?? panic("ws server send")
+    sock.finish(1000, "") ?? panic("ws server finish")
+    close_resource(sock)
+    Ok(server.response(500, "unused"))
+}
+
+run: fn() {
+    // 1. User-declared resource: scope-exit close with zero effects.
+    scope_state: Shared{UserStreamState{finished: false, closed: 0, fail_finish: false}}
+    if true -> _scoped: UserStream{state: scope_state.copy()}
+    print("user scope close={scope_state.guard_read().value.closed}")
+
+    // 2. User-declared resource: explicit fallible finish + generic close.
+    ok_state: Shared{UserStreamState{finished: false, closed: 0, fail_finish: false}}
+    ok_stream: UserStream{state: ok_state.copy()}
+    ok_stream.finish() ?? panic("user finish")
+    close_resource(ok_stream)
+    print("user ok finish={ok_state.guard_read().value.finished} close={ok_state.guard_read().value.closed}")
+
+    // 3. User-declared resource: failing finish still closes once at scope exit.
+    err_state: Shared{UserStreamState{finished: false, closed: 0, fail_finish: true}}
+    if true {
+        bad_stream: UserStream{state: err_state.copy()}
+        if bad_stream.finish() == {
+            .Ok(_) -> { panic("expected error") }
+            .Err(_) -> print("user err finish=failed")
+        }
+    }
+    print("user err close={err_state.guard_read().value.closed}")
+
+    // 4. TCPStream: explicit shutdown(.Both) + generic close_resource.
+    tcp_listener: net.tcp_listen("127.0.0.1:0") ?? panic("tcp listen")
+    tcp_addr: tcp_listener.local_addr() ?? panic("tcp addr")
+    tcp_srv: task {
+        l: tcp_listener.move()
+        peer: l.accept() ?? panic("tcp accept")
+        peer.write_bytes("hi".bytes()) ?? panic("tcp write")
+        peer.shutdown(.Both) ?? panic("tcp shutdown")
+        close_resource(peer)
+    }
+    tcp_cli: net.tcp_connect(tcp_addr) ?? panic("tcp connect")
+    ^tcp_buf: [U8]{}
+    tcp_n1: tcp_cli.read_into(tcp_buf, 16, deadline: 5s) ?? panic("tcp read 1")
+    tcp_n2: tcp_cli.read_into(tcp_buf, 16, deadline: 5s) ?? panic("tcp read 2")
+    close_resource(tcp_cli)
+    tcp_srv.join() ?? panic("tcp join")
+    print("tcp read={tcp_n1} eof={tcp_n2}")
+
+    // 5. UnixStream: explicit shutdown(.Both) + generic close_resource.
+    sock_path: "{os.temp_dir()}/jet-ucp-{os.pid()}.sock"
+    unix_listener: net.unix_listen(sock_path) ?? panic("unix listen")
+    unix_srv: task {
+        ^peer: unix_listener.accept(deadline: 5s) ?? panic("unix accept")
+        peer.write_bytes("ok".bytes(), deadline: 5s) ?? panic("unix write")
+        peer.shutdown(.Both) ?? panic("unix shutdown")
+        close_resource(peer)
+    }
+    unix_cli: net.unix_connect(sock_path, deadline: 5s) ?? panic("unix connect")
+    ^unix_buf: [U8]{}
+    unix_n1: unix_cli.read_into(unix_buf, 16, deadline: 5s) ?? panic("unix read 1")
+    unix_n2: unix_cli.read_into(unix_buf, 16, deadline: 5s) ?? panic("unix read 2")
+    close_resource(unix_cli)
+    unix_srv.join() ?? panic("unix join")
+    files.remove(sock_path) ?? panic("remove sock")
+    print("unix read={unix_n1} eof={unix_n2}")
+
+    // 6. WsConn: explicit finish(code, reason) + generic close_resource.
+    ws_listener: net.tcp_listen("127.0.0.1:0") ?? panic("ws listen")
+    ws_addr: ws_listener.local_addr() ?? panic("ws addr")
+    mux: web.app()
+    mux.get("/ws", fn(req: HTTPRequest) { handle_ws(req) })
+    ws_srv: task { mux.serve_once(ws_listener) ?? panic("ws serve") }
+    ws_cli: ws.connect("ws://{ws_addr}/ws") ?? panic("ws connect")
+    ws_cli.send_text("hi") ?? panic("ws send")
+    ws_reply: ws_cli.recv() ?? panic("ws recv")
+    ws_cli.finish(1000, "") ?? panic("ws cli finish")
+    close_resource(ws_cli)
+    ws_srv.join() ?? panic("ws join")
+    print("ws reply={ws_reply.text() ?? ""}")
+
+    print("parity=ok")
+}

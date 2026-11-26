@@ -20,6 +20,6 @@ run: fn() {
     payload: [U8]{ 7 }
     client.write_bytes(payload, deadline: budget) ?? panic("write")
     print(server.read_bytes(1, deadline: budget) ?? panic("read"))
-    client.close() ?? panic("close")
-    client.close() ?? panic("second close")
+    client.shutdown(.Both) ?? panic("shutdown")
+    close(client)
 }

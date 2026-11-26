@@ -81,7 +81,7 @@ run: fn() {
     assert(!contains_bytes(initial, "proxy-authorization:".bytes(), true))
     assert(starts_casefold(initial, "get /start ".bytes()))
     first.write_bytes("HTTP/1.1 302 Found{PEER_CRLF}Location: http://{second_addr}/next{PEER_CRLF}Content-Length: 0{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}".bytes()) ?? panic("response write")
-    _: first.close()
+    close(first)
     ^second: second_listener.accept() ?? panic("second accept")
     redirected: request_head(second)
     assert(starts_casefold(redirected, "get /next ".bytes()))

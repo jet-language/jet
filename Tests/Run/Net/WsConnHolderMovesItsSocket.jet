@@ -29,7 +29,7 @@ handle: fn(req: HTTPRequest) -> HTTPResponse HTTPError! {
     message: sock.recv() ?? panic("recv")
     text: message.text() ?? panic("text")
     sock.send_text("echo:{text}") ?? panic("send")
-    sock.close(1000, "") ?? panic("close")
+    sock.finish(1000, "") ?? panic("close")
     return Ok(server.response(500, "unused"))
 }
 

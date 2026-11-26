@@ -54,7 +54,7 @@ run: fn() {
     // The stream ends inside a character: the text read fails and the byte
     // read still returns the byte.
     net.tcp_write_all_bytes(server, [U8]{0xc3}) ?? panic("write")
-    server.close() ?? panic("close")
+    close(server)
     print("C3 then end: {shown(net.tcp_read_text(client, 8192))}")
     print("bytes: {bytes_shown(net.tcp_read_bytes(client, 8))}")
     print("end: {shown(net.tcp_read_text(client, 8192))}")

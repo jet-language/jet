@@ -60,12 +60,12 @@ run: fn() {
     }
 
     // Close, then misuse.
-    client.close() ?? panic("client close")
+    net.tcp_close(client) ?? panic("client close")
     if client.write("late") == {
         .Ok(_) -> { print("tcp write after close:accepted") }
         .Err(error) -> {
             print("tcp write after close:{net.error_operation(error)}:{net.error_message(error)}")
         }
     }
-    server.close() ?? panic("server close")
+    close(server)
 }

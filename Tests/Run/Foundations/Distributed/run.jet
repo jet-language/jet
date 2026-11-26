@@ -54,7 +54,7 @@ run_worker: fn(args: [String]) {
     request: stream.read(8192) ?? panic("worker read failed")
     value: request.trim().to_int() ?? panic("TCP request was not an Int")
     stream.write_bytes((value * value).to_string().bytes()) ?? panic("worker write failed")
-    stream.close() ?? panic("worker close failed")
+    close(stream)
 }
 
 run_tcp_parent: fn() {
@@ -79,8 +79,8 @@ run_tcp_parent: fn() {
     second_connection.write_bytes("11".bytes()) ?? panic("second request failed")
     first_result: first_connection.read(8192) ?? panic("first response failed")
     second_result: second_connection.read(8192) ?? panic("second response failed")
-    first_connection.close() ?? panic("first connection close failed")
-    second_connection.close() ?? panic("second connection close failed")
+    close(first_connection)
+    close(second_connection)
 
     first_receipt: first.wait() ?? panic("first worker wait failed")
     second_receipt: second.wait() ?? panic("second worker wait failed")

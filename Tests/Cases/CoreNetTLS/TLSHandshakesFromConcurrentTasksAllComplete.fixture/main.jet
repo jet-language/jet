@@ -24,7 +24,7 @@ exchange: fn(addr: String, ca: String, index: Int) -> String {
     crlf: "\r\n"
     secure.write_bytes("GET / HTTP/1.1{crlf}Host: localhost{crlf}Connection: close{crlf}{crlf}".bytes(), deadline: budget) ?? panic("request {index}")
     reply: secure.read_bytes(8192, deadline: budget) ?? panic("response {index}")
-    secure.close() ?? panic("close TLS {index}")
+    secure.finish() ?? panic("close TLS {index}")
     text: String.from_bytes(reply) ?? panic("response text {index}")
     "client {index}: {peer.verified_server_name} {version} {text.starts_with("HTTP/1.1 200")}"
 }

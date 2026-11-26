@@ -46,6 +46,6 @@ run: fn() {
     loop _ in 0..<2 {
         stream: listener.accept() ?? panic("accept")
         _: stream.write_bytes("HTTP/1.1 200 OK{PEER_CRLF}Content-Length: 67108865{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}".bytes())
-        stream.close() ?? panic("close")
+        close(stream)
     }
 }

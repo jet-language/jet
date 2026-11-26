@@ -35,9 +35,9 @@ run: fn() {
     ready: net.tcp_ready(server, NetReadyInterest.Read, 1000) ?? return
     print("readable:{net.ready_readable(ready)}")
     _: net.tcp_accept(listener) ?? return
-    happy_client.close() ?? return
-    client.close() ?? return
-    server.close() ?? return
+    close(happy_client)
+    close(client)
+    close(server)
 
     udp_server: net.udp_bind_addr(net.socket_addr("127.0.0.1", 0) ?? return) ?? return
     udp_address: net.udp_local_addr(udp_server) ?? return

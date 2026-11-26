@@ -11,7 +11,7 @@ run: fn() {
     client: task {
         ^stream: net.tcp_connect(address) ?? panic("connect")
         time.sleep(100ms)
-        stream.close() ?? panic("close")
+        close(stream)
     }
     ^stream: net.tcp_accept(listener) ?? panic("accept")
     if stream.read_bytes(1, deadline: 20ms) == {

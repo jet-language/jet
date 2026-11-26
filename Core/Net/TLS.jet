@@ -179,9 +179,9 @@ TLSStream: struct {
     }
 
     // Sends close_notify, shuts down the socket's write side and closes the
-    // stream, freeing the engine and wiping its buffers. Closing a closed
-    // stream succeeds.
-    close: fn(self) -[Net, Time.Wait]> IOError! {
+    // stream, freeing the engine and wiping its buffers. Finishing an already
+    // finished stream succeeds.
+    finish: fn(self) -[Net, Time.Wait]> IOError! {
         state: __state(self) ?? return Err(io_error(.Close, "TLS stream is closed"))
         ^guard: state.guard_edit()
         if guard.value.closed -> return Ok()
@@ -207,6 +207,21 @@ TLSStream: struct {
         ^guard: state.guard_edit()
         if guard.value.peer == .Val(peer) -> return peer.copy()
         empty_identity()
+    }
+
+    // Releases the TLS engine, wipes key and plaintext buffers, and closes the
+    // underlying socket without failing. Call `finish()` first to send
+    // `close_notify` and observe I/O errors.
+    impl Close {
+        close: fn(^^self) Never! {
+            state: __state(self) ?? return
+            ^guard: state.guard_edit()
+            if guard.value.closed {
+                return
+            }
+            guard.value.closed = true
+            release(guard.value)
+        }
     }
 }
 
@@ -414,7 +429,7 @@ write: fn(stream: TLSStream, text: String) -[Net, Time.Wait]> IOError! {
     write_bytes(stream, text.bytes())
 }
 
-close: fn(stream: TLSStream) -[Net, Time.Wait]> IOError! { stream.close() }
+close: fn(stream: TLSStream) -[Net, Time.Wait]> IOError! { stream.finish() }
 
 sni: fn(stream: TLSStream) -[Net]> String Never! {
     peer: stream.peer_identity()
@@ -1679,10 +1694,10 @@ priv test_released: fn(tls: TLSState) -> Bool Never! {
         }
         assert_eq(got, message.len())
         assert(!test_zero(server.buffer))
-        // close: close_notify goes out, then the engine is freed and the
+        // finish: close_notify goes out, then the engine is freed and the
         // plaintext wiped.
         ^stream: TLSStream{state: Val(Shared{server})}
-        _: stream.close() ?? panic("close: {err}")
+        _: stream.finish() ?? panic("finish: {err}")
         state: __state(stream) ?? panic("the closed stream lost its state")
         ^guard: state.guard_edit()
         assert(test_released(guard.value))

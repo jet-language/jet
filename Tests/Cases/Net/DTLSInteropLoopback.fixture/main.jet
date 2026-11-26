@@ -18,15 +18,15 @@ run_ecdsa_cookie: fn(ec_roots: RootCertificates, ec_cert: [U8], ec_key: [U8], bu
         sess.write("echo:{msg}", deadline: budget) ?? panic("ec srv write")
         eof: sess.read_bytes(4096, deadline: budget) ?? panic("ec srv eof")
         if eof.len() != 0 -> panic("ec expected eof")
-        sess.close() ?? panic("ec srv close")
-        listener.close() ?? panic("ec listener close")
+        sess.finish() ?? panic("ec srv close")
+        listener.finish() ?? panic("ec listener close")
     }
     sess: dtls.connect(addr, server_name: "localhost", config: cli_cfg, deadline: budget) ?? panic("ec connect")
     sess.write("hello-ecdsa", deadline: budget) ?? panic("ec cli write")
     reply: sess.read(4096, deadline: budget) ?? panic("ec cli read")
     peer: sess.peer_identity()
     print("ecdsa-cookie: {sess.protocol_version()} {peer.verified_server_name} {sess.alpn_protocol() ?? "none"} {reply}")
-    sess.close() ?? panic("ec cli close")
+    sess.finish() ?? panic("ec cli close")
     srv_task.join() ?? panic("ec join")
 }
 
@@ -45,15 +45,15 @@ run_rsa_fragmented: fn(rsa_roots: RootCertificates, rsa_cert: [U8], rsa_key: [U8
         msg: String.from_bytes(buf) ?? panic("rsa utf8")
         sess.write("echo:{msg}", deadline: budget) ?? panic("rsa srv write")
         _: sess.read_bytes(4096, deadline: budget) ?? panic("rsa srv eof")
-        sess.close() ?? panic("rsa srv close")
-        listener.close() ?? panic("rsa listener close")
+        sess.finish() ?? panic("rsa srv close")
+        listener.finish() ?? panic("rsa listener close")
     }
     sess: dtls.connect(addr, server_name: "localhost", config: cli_cfg, deadline: budget) ?? panic("rsa connect")
     sess.write("hello-rsa-mtu", deadline: budget) ?? panic("rsa cli write")
     reply: sess.read(4096, deadline: budget) ?? panic("rsa cli read")
     peer: sess.peer_identity()
     print("rsa-fragmented: {sess.protocol_version()} {peer.verified_server_name} {reply}")
-    sess.close() ?? panic("rsa cli close")
+    sess.finish() ?? panic("rsa cli close")
     srv_task.join() ?? panic("rsa join")
 }
 
@@ -71,17 +71,17 @@ run_mtls: fn(ec_roots: RootCertificates, ec_cert: [U8], ec_key: [U8], cli_roots:
         msg: sess.read(4096, deadline: budget) ?? panic("mtls srv read")
         sess.write("echo:{msg}", deadline: budget) ?? panic("mtls srv write")
         _: sess.read_bytes(4096, deadline: budget) ?? panic("mtls srv eof")
-        sess.close() ?? panic("mtls srv close")
+        sess.finish() ?? panic("mtls srv close")
         refused: listener.accept(deadline: budget) == .Err(_)
         if !refused -> panic("mtls server accepted client without cert")
-        listener.close() ?? panic("mtls listener close")
+        listener.finish() ?? panic("mtls listener close")
         cli_peer.leaf.subject
     }
     sess: dtls.connect(addr, server_name: "localhost", config: cli_good, deadline: budget) ?? panic("mtls connect")
     sess.write("hello-mtls", deadline: budget) ?? panic("mtls cli write")
     reply: sess.read(4096, deadline: budget) ?? panic("mtls cli read")
     version: sess.protocol_version()
-    sess.close() ?? panic("mtls cli close")
+    sess.finish() ?? panic("mtls cli close")
     bad_refused: dtls.connect(addr, server_name: "localhost", config: cli_bad, deadline: budget) == .Err(_)
     subject: srv_task.join() ?? panic("mtls join")
     print("mtls-accepted: {version} {subject} {reply}")

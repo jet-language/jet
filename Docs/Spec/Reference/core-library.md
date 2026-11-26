@@ -553,6 +553,14 @@ An App's route, mount and middleware registrations lower to its Jet `__http_*`
 methods after the existing escaping-callback admission. The original effects and
 resource conventions remain in force.
 
+Network streams (`TCPStream`, `UnixStream`, `TLSStream`, `DTLSSession`,
+`DTLSListener`, and `WsConn`) implement infallible `Close` (`close(handle)` and
+scope-exit cleanup) with zero network or wait effects leaked at scope exit, and
+separate explicit fallible goodbye operations (`shutdown(.Both)` on `TCPStream`
+and `UnixStream`; `finish(...)` on `TLSStream`, `DTLSSession`, `DTLSListener`,
+and `WsConn`) so resource ownership comes solely from `impl Close` declarations,
+identical to any user-declared `Close` type.
+
 ### Database crash consistency and storage model
 
 `core.db` provides whole-or-absent transaction crash recovery (`PRAGMA integrity_check = ok`)

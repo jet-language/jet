@@ -822,7 +822,7 @@ jet_http_build_get: fn(host: String, authority: String, target: String, secure: 
     // refuses the alert does not change it.
     if wire.tls == {
         .Val(stream) -> {
-            if stream.close() == {
+            if stream.finish() == {
                 .Ok(_) -> {}
                 .Err(_) -> {}
             }
@@ -2194,7 +2194,7 @@ priv client_take_u64: fn(bytes: [U8], at: Int) -> Int Never! {
 // close_notify; the reply is already decided either way.
 priv client_close: fn(wire: BuildWire) -[Net, Time.Wait]> Never! {
     if wire.tls == .Val(stream) {
-        if stream.close() == {
+        if stream.finish() == {
             .Ok(_) -> {}
             .Err(_) -> {}
         }

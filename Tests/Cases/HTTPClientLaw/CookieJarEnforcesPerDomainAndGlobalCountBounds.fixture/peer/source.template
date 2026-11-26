@@ -56,7 +56,7 @@ run: fn() {
             loop cookie in start..<end { response += "Set-Cookie: c{domain}_{cookie}=v; Path=/; SameSite=Lax{PEER_CRLF}" }
             response += "Content-Length: 0{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}"
             stream.write_bytes(response.bytes()) ?? panic("seed write")
-            stream.close() ?? panic("seed close")
+            close(stream)
         }
     }
     ^stream: listener.accept() ?? panic("verify accept")

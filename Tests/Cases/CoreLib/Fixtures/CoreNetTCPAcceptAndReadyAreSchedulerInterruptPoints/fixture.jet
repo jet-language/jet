@@ -27,7 +27,7 @@ canceled_accept: fn() -> String? {
     accepting.cancel()
     // A connection keeps a broken cancel from hanging the accept.
     release: net.tcp_connect(address) ?? panic("release accept")
-    release.close() ?? panic("release close")
+    close(release)
     if accepting.join() == {
         .Ok(message) -> Val(message)
         .Err(failure) -> {
@@ -64,7 +64,7 @@ canceled_ready: fn() -> String? {
             None
         }
     }
-    client.close() ?? panic("ready client close")
+    close(client)
     outcome
 }
 
@@ -91,7 +91,7 @@ run: fn() {
     write_ready: server.ready(write_interest, deadline: Duration.milliseconds(1000) ?? panic("write ready deadline")) ?? panic("write ready")
     print(net.ready_readable(write_ready))
     print(net.ready_writable(write_ready))
-    client.close() ?? panic("write client close")
+    close(client)
 
     print(typed_cancellation(canceled_ready, "ready"))
 }

@@ -412,7 +412,7 @@ tcp_serve: fn(listener: TCPListener) {
     loop {
         stream: net.tcp_accept(listener) ?? return
         serving: tcp_answer(stream)
-        stream.close() ?? return
+        close(stream)
         if !serving {
             return
         }
@@ -575,5 +575,5 @@ run: fn() {
     net.tcp_write_all_bytes(stopper, framed(query_for(STOP))) ?? panic("stop TCP")
     udp_server.join() ?? panic("UDP server")
     tcp_server.join() ?? panic("TCP server")
-    stopper.close() ?? panic("close the stopping client")
+    close(stopper)
 }

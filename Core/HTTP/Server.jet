@@ -490,9 +490,7 @@ HTTPServer: struct {
     }
 
     /// Returns the operator-side error records captured by this server's mux.
-    error_records: fn(self) -> [HTTPErrorRecord] Never! {
-        self.__mux.error_records()
-    }
+    error_records: fn(self) -> [HTTPErrorRecord] Never! { self.__mux.error_records() }
 
     // Each admitted connection is served by its own task, so a held
     // connection does not hold up the next; one over the connection limits
@@ -822,7 +820,7 @@ priv refuse: fn(stream: ^^TCPStream, tls: HTTPServerTLS?) -[Net, Time]> Never! {
             .Err(_) -> {}
         }
     }
-    if stream.close() == {
+    if stream.shutdown(.Both) == {
         .Ok(_) -> {}
         .Err(_) -> {}
     }
@@ -1000,8 +998,7 @@ priv mount_static_files: fn(mux: HTTPMux, prefix: String, root: String, index: B
 // A handler's calls of `response` and `json` are `#Recorded`: a rule reads
 // the ones its return paths return, with their status and body type, from
 // the handler's FunctionInfo.
-#Recorded
-response: fn(status: Int, body: String) -> HTTPResponse Never! {
+#Recorded response: fn(status: Int, body: String) -> HTTPResponse Never! {
     payload: core.http.body_text(body)
     fields: core.http.headers()
     response_body(status, payload, fields)
@@ -1021,8 +1018,7 @@ priv status_text: fn(status: Int) -> String Never! { "{status} {http.reason_phra
 
 priv status_page: fn(status: Int) -> HTTPResponse Never! { response(status, status_text(status)) }
 
-#Recorded
-json: fn<T: Encode>(status: Int, body: T) -> HTTPResponse HTTPError! {
+#Recorded json: fn<T: Encode>(status: Int, body: T) -> HTTPResponse HTTPError! {
     text: json_codec.to_string(body.encode()) ?? return Err(HTTPError.InvalidFraming)
     fields: core.http.headers_set(core.http.headers(), "content-type", "application/json; charset=utf-8")
     payload: core.http.body_text(text)
@@ -1081,7 +1077,7 @@ priv tls_accept: fn(accepted: Shared<[TCPStream]>, cert_pem: String, key_pem: St
         },
         close: fn() {
             stream: session.guard_read()
-            if stream.value.close() == {
+            if stream.value.finish() == {
                 .Ok(_) -> {}
                 .Err(_) -> {}
             }
@@ -1251,23 +1247,17 @@ priv mux_store_error_record: fn(mux: HTTPMux, record: HTTPErrorRecord) -> [fn(HT
     ^guard: mux.__state.guard_edit()
     if guard.value.errors.len() >= C_MAX_ERROR_RECORDS {
         ^trimmed: [HTTPErrorRecord]{}
-        loop i in 1..<guard.value.errors.len() {
-            trimmed.push(guard.value.errors[i].copy())
-        }
+        loop i in 1..<guard.value.errors.len() { trimmed.push(guard.value.errors[i].copy()) }
         guard.value.errors = trimmed
     }
     guard.value.errors.push(record.copy())
-    loop sink in guard.value.error_sinks {
-        sinks.push(sink)
-    }
+    loop sink in guard.value.error_sinks { sinks.push(sink) }
     sinks
 }
 
 priv mux_record_error: fn(mux: HTTPMux, record: HTTPErrorRecord) Never! {
     sinks: mux_store_error_record(mux, record)
-    loop sink in sinks {
-        sink(record.copy())
-    }
+    loop sink in sinks { sink(record.copy()) }
 }
 
 priv mux_record_error_response: fn<E: Describe>(mux: HTTPMux, request: HTTPRequest, status: Int, error: E) -> HTTPResponse Never! {
@@ -2036,7 +2026,7 @@ priv serve_connection: fn(stream: HTTPConn, mux: HTTPMux, deadline: Duration?, s
     if !upgraded && stream.tcp == .Val(plain) {
         // Past the drain, the socket closes at once.
         if drain_ended(server) {
-            if plain.close() == {
+            if plain.shutdown(.Both) == {
                 .Ok(_) -> {}
                 .Err(_) -> {}
             }
@@ -2073,7 +2063,7 @@ priv linger_close: fn(plain: TCPStream) -[Net, Time.Wait]> Never! {
         }
         .Err(_) -> {}
     }
-    if plain.close() == {
+    if plain.shutdown(.Both) == {
         .Ok(_) -> {}
         .Err(_) -> {}
     }

@@ -1,0 +1,26 @@
+// A struct that holds a user-declared `Close` resource with an explicit
+// fallible `finish()` gets the exact same move-only ownership diagnostic as a
+// struct holding `WsConn` (`Tests/UI/ws_conn_holder_is_not_copied.jet`).
+UserStream: struct {
+    id: Int,
+
+    finish: fn(self) IOError! { Ok() }
+
+    impl Close {
+        close: fn(^^self) Never! {}
+    }
+}
+
+UserWire: struct {
+    conn: UserStream,
+
+    child: fn(self) -> UserChild { UserChild{wire: self} }
+}
+
+UserChild: struct {
+    wire: UserWire,
+}
+
+wrap: fn(wire: UserWire) -> UserChild { UserChild{wire: wire} }
+
+run: fn() {}
