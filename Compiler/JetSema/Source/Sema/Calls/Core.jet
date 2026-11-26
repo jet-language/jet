@@ -416,6 +416,11 @@ sema_call_try_source_module_call: fn(alias: String, alias_span: Span, member: St
         loop argument in args -> ^_: sema_check_expression(argument.expr, None, check)
         return failed
     }
+    place: sema_call_try_memory_place(target, args, span, expected, check)
+    if place.handled {
+        sema_call_core_unbuilt_settle(unbuilt, before, check.diagnostics)
+        return place
+    }
     check.scopes.ownership_call_depth += 1
     ^value: sema_call_core_check_source_owned(target, "{alias}.{shown}", type_args, args, span, expected, check)
     check.scopes.ownership_call_depth -= 1

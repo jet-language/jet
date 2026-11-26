@@ -80,12 +80,30 @@ sema_core_role_function: fn(graph: SemaRegistrationGraph, role: String) -> SemaC
 // Whether `name` is a top-level function of Core module `module_row` that
 // fills a role (sema_core_role).
 sema_core_role_filler: fn(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, name: String) -> Bool {
-    if !module_is_core(module_row.module_identity) -> return false
+    sema_core_function_role(graph, module_row, name) != ""
+}
+
+// The role that `name`, a top-level function of Core module `module_row`,
+// fills, or "" when it fills none.
+sema_core_function_role: fn(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, name: String) -> String {
+    if !module_is_core(module_row.module_identity) -> return ""
     loop function in module_row.functions {
         if function.declaration.name != name || function.declaration.markers.len() == 0 -> next
-        return sema_core_role(function.declaration.markers, graph, module_row.module_identity) != ""
+        return sema_core_role(function.declaration.markers, graph, module_row.module_identity)
     }
-    false
+    ""
+}
+
+// The role that static `method` of the Core type at nominal row `row` fills:
+// the role of the method it declares by that name, or "" when that fills none.
+sema_core_method_role: fn(graph: SemaRegistrationGraph, row: SemaRegistrationRowRef, method: String) -> String {
+    module_row: graph.modules[row.module_index]
+    if !module_is_core(module_row.module_identity) -> return ""
+    loop function in module_row.nominals[row.row].methods {
+        if function.declaration.name != method || function.declaration.markers.len() == 0 -> next
+        return sema_core_role(function.declaration.markers, graph, module_row.module_identity)
+    }
+    ""
 }
 
 // Whether callable `row` is a top-level Core function that constructs a

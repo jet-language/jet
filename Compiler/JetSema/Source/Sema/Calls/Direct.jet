@@ -1239,6 +1239,8 @@ sema_call_core_direct_checked: fn(call: Call, expected: Type?, check: ^SemaBodyC
             return SemaDirectSpecialCheck{handled: true, value: sema_call_core_global_shared(lifetime, member, call.type_args, call.args, call.name_span, expected, check)}
         }
         .Source(target) -> {
+            place: sema_call_try_memory_place(target, call.args, call.name_span, expected, check)
+            if place.handled -> return SemaDirectSpecialCheck{handled: true, value: place.value}
             math_abs: sema_call_try_core_math_abs(module_name, member, call.type_args, call.args, call.name_span, expected, check)
             if math_abs.handled -> return math_abs
             float_class: sema_call_try_core_math_float_class(module_name, member, call.type_args, call.args, check)
@@ -1872,6 +1874,11 @@ sema_call_service_out_of_phase: fn(target: SemaCallDirectTarget, span: Span, che
 sema_call_direct_checked_from_target: fn(check: ^SemaBodyCheck, target: SemaCallDirectTarget, call: Call, defaults: [SemaCallDefaultValue], expected: Type?) -> SemaCallChecked? {
     if sema_call_point_in_body(target, check) {
         check.diagnostics.push(sema_error("E0644", call.name_span, "`{target.symbol.name}` makes a point, which is declared only as a module binding's value", "a point is the module binding it initializes: the program makes its carrier at the first read and every reader shares it, and a call in a body would make a new, anonymous carrier each time it runs", "declare it at module level (`clicked: event.point<Int>()`) and use that binding; for a value that is local by design, use `event.new`, `event.hook` or `event.decision_hook`"))
+        return None
+    }
+    if sema_call_memory_place_target(target, check) {
+        check.diagnostics.push(sema_error("E1004", call.name_span, "`{target.symbol.name}` is called through its module", "the compiler builds `{target.symbol.name}` where the call stands, on the caller's own storage, and only a call through `core.mem` reaches it", "write `mem.{target.symbol.name}(…)` after `use core.mem`"))
+        loop argument in call.args -> _ := sema_check_expression(argument.expr, None, check)
         return None
     }
     if sema_call_service_out_of_phase(target, call.name_span, check) == .Val(refused) {

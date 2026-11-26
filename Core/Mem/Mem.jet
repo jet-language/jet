@@ -54,8 +54,20 @@ Bump: struct {
     }
 }
 
+// A Fixed allocator works in storage that its call's own frame holds, so the
+// compiler builds each of its constructors where the call stands, found by
+// the role that constructor fills. That call must directly initialize a
+// lexical binding, which keeps the storage for the binding's scope. The
+// constructors' bodies never run.
 #Local
 Fixed: struct {
+    // `size` bytes of inline storage in the calling frame. `size` is a
+    // positive compile-time Int.
+    #Builtin.Role(.FixedFrame) new: fn(size: Int) -> Fixed Never! { panic("`Fixed.new` is built at its call") }
+
+    // The mutable `[Byte#N]` buffer `bytes`, borrowed until the handle
+    // closes.
+    #Builtin.Role(.FixedOver) over: fn<B>(bytes: ^B) -> Fixed Never! { panic("`Fixed.over` is built at its call") }
     impl Close {
         close: fn(^^self) {}
     }
@@ -72,6 +84,16 @@ Pool: struct {
 }
 
 Pin: struct<T> {}
+
+// The compiler builds `address_of` and `pin` where the call stands, found by
+// the role each fills: each works on the caller's own storage, and neither
+// body runs. `address_of` is the inert numeric address of the place
+// `value` names, never of a copy.
+#Builtin.Role(.MemAddressOf) address_of: fn<T>(value: T) -> Int Never! { panic("`address_of` is built at its call") }
+
+// A write window on `place` that it cannot move out of, typed `Pin<T>`.
+// Pinning a `Pin<T>` keeps that pin.
+#Builtin.Role(.MemPin) pin: fn<T>(place: ^T) -> Pin<T> Never! { panic("`pin` is built at its call") }
 
 // Every raw memory primitive here is a compiler intrinsic (the list above
 // `__type_size`) or `#Inline(Always)`, so a call of one costs what the

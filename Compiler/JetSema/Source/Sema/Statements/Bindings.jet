@@ -554,13 +554,11 @@ sema_stmt_bind_name_local: fn(element: BindName) -> String {
     if element.rename == .Val(local) -> local.name else -> element.name
 }
 
-// True when the initializer is itself a `<alias>.Fixed.<method>(…)` call;
-// the memory check confirms the alias names `core.mem`.
-sema_stmt_init_is_fixed_constructor: fn(init: Expr) -> Bool Never! {
-    if init == .MethodCall(receiver, _, _, _, _, _, _) && receiver == .Field(base, name, _, _) {
-        return name == "Fixed" && base == .Ident(_, _, _)
-    }
-    return false
+// True when the initializer is itself a call of one of Fixed's constructors
+// (sema_call_memory_fixed_constructor).
+sema_stmt_init_is_fixed_constructor: fn(init: Expr, check: SemaBodyCheck) -> Bool {
+    if init == .MethodCall(receiver, method, _, _, _, _, _) -> return sema_call_memory_fixed_constructor(receiver, method, check)
+    false
 }
 
 sema_stmt_install_binding_loop_label: fn(expr: Expr, name: String, name_span: Span) -> Expr Never! {
@@ -652,9 +650,9 @@ sema_stmt_check_binding: fn(binding: Binding, lambda_escapes: Bool?, check: ^Sem
     node_start: check.context.arena.tree.nodes.len()
     previous_binding_initializer: check.context.binding_initializer
     check.context.binding_initializer = true
-    // `mem.Fixed.new`/`.over` is allowed only as the whole initializer.
+    // A Fixed constructor is allowed only as the whole initializer.
     previous_fixed_constructor: check.context.allow_fixed_constructor
-    check.context.allow_fixed_constructor = sema_stmt_init_is_fixed_constructor(binding.init)
+    check.context.allow_fixed_constructor = sema_stmt_init_is_fixed_constructor(binding.init, check)
     // A task spawned by this initializer records its binding for the
     // `.detach()` refusals.
     previous_binding_name: check.context.taskgroups.binding_name
@@ -1127,13 +1125,11 @@ sema_stmt_uninit_write_arg: fn(arg: CallArg, check: ^SemaBodyCheck) Never! {
 // set again after the call is checked.
 sema_stmt_uninit_fixed_over_take: fn(receiver: Expr, method: String, args: [CallArg], check: ^SemaBodyCheck) -> [SemaOwnershipUninitFact] Never! {
     ^taken: [SemaOwnershipUninitFact]{}
-    if method != "over" || check.state.uninit.len() == 0 -> return taken
-    if receiver == .Field(_, member, _, _) && member == "Fixed" {
-        loop arg in args {
-            if arg.expr == .Ident(name, _, _) && sema_scope_resolve_index(check.scopes, name) == .Val(index) {
-                if sema_ownership_uninit_take(check.state, check.scopes.bindings[index].key) == .Val(fact) {
-                    taken.push(fact)
-                }
+    if check.state.uninit.len() == 0 || sema_call_memory_static_role(receiver, method, check) != SEMA_CORE_ROLE_FIXED_OVER -> return taken
+    loop arg in args {
+        if arg.expr == .Ident(name, _, _) && sema_scope_resolve_index(check.scopes, name) == .Val(index) {
+            if sema_ownership_uninit_take(check.state, check.scopes.bindings[index].key) == .Val(fact) {
+                taken.push(fact)
             }
         }
     }
