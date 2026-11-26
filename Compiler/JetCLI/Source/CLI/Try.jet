@@ -16,6 +16,7 @@ use {
         JetDriverVerbOutput,
         jet_driver_inline_package,
         jet_driver_mask_inline_package,
+        jet_driver_present_diagnostics,
         JetDriverIceRow,
         jet_driver_ice_record,
     ]
@@ -375,7 +376,7 @@ jet_cli_try_check: fn(queries: ^JetDriverCompilerQueries, entry: String, disk: B
                     }
                 }
             }
-            checked: if {
+            ^checked: if {
                 disk -> {
                     jet_driver_compiler_queries_check_disk(queries, parsed, request) ?? return Err(JetCLITryError.Output{output: jet_cli_try_fail("{err}")})
                 }
@@ -386,6 +387,7 @@ jet_cli_try_check: fn(queries: ^JetDriverCompilerQueries, entry: String, disk: B
             if checked.internal_problem == .Val(problem) {
                 return Err(jet_cli_try_ice("query", problem))
             }
+            checked.diagnostics = jet_driver_present_diagnostics(checked.diagnostics, snapshot, checked.generated_source_files)
             ^index: SemIndex?{None}
             if disk && checked.complete {
                 if checked.product == {

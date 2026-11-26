@@ -223,16 +223,17 @@ jet_cli_dev_canvas_source_id: fn(root: String, file: String) -[FS]> String Never
 // cannot be read) carries its rendered report, and the status names E2105.
 jet_cli_dev_canvas_project: fn(state: Shared<CanvasHostState>, file: String, source_id: String) {
     watch: cli_time.start()
-    src: cli_files.read(file) ?? ""
-    revision: source_revision(src)
     compiled: jet_cli_compile_file(file, false, None, JetDriverCompileMode.Doc)
     if compiled == {
         .Refused(refusal) -> {
-            canvas_host_publish_failure(state, revision, "E2105", refusal.stderr, watch.elapsed_millis())
+            src: cli_files.read(file) ?? ""
+            canvas_host_publish_failure(state, source_revision(src), "E2105", refusal.stderr, watch.elapsed_millis())
         }
         .Compiled(result, snapshot) -> {
+            checked_src: jet_cli_snapshot_entry_source(snapshot) ?? ""
+            checked_revision: source_revision(checked_src)
             jet_cli_dev_canvas_publish_project(state, snapshot)
-            jet_cli_dev_canvas_publish(state, file, source_id, src, revision, result, snapshot, watch.elapsed_millis())
+            jet_cli_dev_canvas_publish(state, file, source_id, checked_src, checked_revision, result, snapshot, watch.elapsed_millis())
         }
     }
 }

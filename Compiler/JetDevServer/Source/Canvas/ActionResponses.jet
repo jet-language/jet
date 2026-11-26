@@ -24,6 +24,7 @@ use {
         diagnostic_source_position,
         diagnostic_source_texts,
         foundation_byte_text,
+        sha256_hex,
     ]
     jet_lsp.[LSPChecker]
     jet_semindex.[SemIndex]
@@ -252,13 +253,28 @@ query_diagnostics_error: fn(path: String, src: String, diags: [Diagnostic]) -> S
 // One report object per diagnostic: what Canvas shows beside a refused edit.
 diagnostics_json: fn(path: String, src: String, diags: [Diagnostic]) -> String Never! {
     ^sources: diagnostic_source_texts()
+    ^fallback_digest: ""
     reports: loop diagnostic in diags -> {
         severity: if diagnostic_is_warning(diagnostic) -> "warning" else -> "error"
+        ^file_path: path
+        ^origin_digest: ""
+        if diagnostic.origin == {
+            .Val(origin) -> {
+                if origin.path != "" -> file_path = origin.path
+                origin_digest = origin.revision
+            }
+            .None -> {
+                if fallback_digest == "" -> fallback_digest = sha256_hex(src)
+                origin_digest = fallback_digest
+            }
+        }
+        origin_path_json: if file_path != "" -> json_str(file_path) else -> "null"
+        origin_json: "\"origin\":{{\"path\":{origin_path_json},\"source_digest\":{json_str(origin_digest)}}}"
         position: if diagnostic.span == .Val(span) -> {
             at: diagnostic_source_position(sources, diagnostic.origin, src)
             "\"line\":{diagnostic_source_line(sources.texts[at], span.start)},\"col\":{diagnostic_source_column(sources.texts[at], span.start)},\"span\":{{\"start\":{span.start},\"end\":{span.end}}}"
         } else -> "\"line\":null,\"col\":null,\"span\":null"
-        "{{\"severity\":{json_str(severity)},\"code\":{json_str(diagnostic.code)},\"what\":{json_str(diagnostic.what)},\"why\":{json_str(diagnostic.why)},\"fix\":{json_str(diagnostic.fix)},\"file\":{json_str(path)},{position}}}"
+        "{{\"severity\":{json_str(severity)},\"code\":{json_str(diagnostic.code)},\"what\":{json_str(diagnostic.what)},\"why\":{json_str(diagnostic.why)},\"fix\":{json_str(diagnostic.fix)},\"file\":{json_str(file_path)},{origin_json},{position}}}"
     }
     reports.join(",")
 }

@@ -43,12 +43,11 @@ canvas_machine_error: fn(action: String, payload: String) -> String Never! {
 }
 
 graph_json_for_file: fn(checker: LSPChecker, path: String) -> String Err! {
-    projection: project_file(checker, path) ?? return Err(graph_json_error_for_file(path, err.diagnostics))
+    projection: project_file(checker, path) ?? return Err(graph_json_error_for_file(path, err.source, err.diagnostics))
     Ok(canvas_machine_success("canvas.graph", projection.json))
 }
 
-graph_json_error_for_file: fn(path: String, diags: [Diagnostic]) -> String {
-    src: read_source_without_symlinks(path) ?? ""
+graph_json_error_for_file: fn(path: String, src: String, diags: [Diagnostic]) -> String Never! {
     canvas_machine_error("canvas.graph", query_error("diagnostic", diagnostic_render_all(path, src, diags, false)))
 }
 
@@ -61,7 +60,7 @@ graph_json_for_entry_source_with_live_pid: fn(checker: LSPChecker, entry: String
     snapshot: live_inspect_read(pid) ?? return Err(canvas_machine_error("canvas.graph", query_error("live", err.message)))
     runtime_events: runtime_events_json(snapshot) ?? return Err(canvas_machine_error("canvas.graph", err.message))
     path: resolve_entry_source_path(entry, source_id) ?? return Err(canvas_machine_error("canvas.graph", err.message))
-    context: project_file_context(checker, path, Val(runtime_events)) ?? return Err(graph_json_error_for_file(path, err.diagnostics))
+    context: project_file_context(checker, path, Val(runtime_events)) ?? return Err(graph_json_error_for_file(path, err.source, err.diagnostics))
     Ok(canvas_machine_success("canvas.graph", context.projection.json))
 }
 

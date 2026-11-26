@@ -2101,11 +2101,11 @@ jet_cli_review_diagnostics: fn(argv: [String], json: Bool, color: Bool) -> JetDr
 // diagnostics even when it has errors. It is complete when the checker got past
 // loading; it is valid when complete and error-free.
 jet_cli_review_diagnostic_load: fn(path: String) -> JetCLIReviewDiagnosticLoaded {
-    source: cli_files.read(path) ?? return JetCLIReviewDiagnosticLoaded.Failed{message: "could not read `{path}`: {jet_cli_io_error_text(err)}"}
-    source_hash: sha256_hex(source)
     if jet_cli_compile_file(path, false, None, JetDriverCompileMode.Doc) == {
         .Refused(output) -> JetCLIReviewDiagnosticLoaded.Refused{output: output.move()}
         .Compiled(result, snapshot) -> {
+            checked_source: jet_cli_snapshot_entry_source(snapshot) ?? ""
+            source_hash: sha256_hex(checked_source)
             diagnostics: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
             if jet_cli_errors(diagnostics).len() == 0 {
                 if result.internal_problem == .Val(problem) {

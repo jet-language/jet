@@ -1,0 +1,93 @@
+# All compiler-session consumers (CLI `jet check --json`, `jet inspect compiler check`,
+# typed `core.compiler` compile-time consumer, `jet try --json` query session,
+# `jet self lsp`, and JetDevServer Canvas/WebErrorPage) read the same canonical
+# checked source, result, and diagnostic/origin/digest model.
+env: NO_COLOR=1
+env: JET_TOOLCHAIN_ROOT={root}
+
+# 1. JetDevServer Canvas & WebErrorPage unit witness (canonical origin/digest, no disk re-read, fix_edits).
+step: jet test {root}/Compiler/JetDevServer/Tests/Canvas/QueryActions.jet --filter=canvas_and_web_error
+exit: 0
+stdout: ~ "1 passed, 0 failed" # Canvas diagnostics_json, graph_json_error_for_file, and WebErrorPage preserve canonical model
+
+# Start with a clean multi-file program on disk and a speculative `jet try` plan that breaks dep.jet.
+write: dep.jet = "answer: fn() -> Int {\n    1\n}\n"
+write: main.jet = "use dep: \"./dep\"\n\nrun: fn() {\n    print(dep.answer())\n}\n"
+write: plan.json = "{\"version\":1,\"name\":\"BreakDep\",\"entry\":\"main.jet\",\"edits\":[{\"path\":\"dep.jet\",\"start\":26,\"end\":27,\"new_text\":\"\\\"bad\\\"\"}]}"
+write: typed_consumer.jet = "use compiler: core.compiler\n\nPARSED: #run { compiler.parse(embed_file(\"dep.jet\")) ?? panic(\"parse\") }\nCHECKED: #run { compiler.check(PARSED) ?? panic(\"check\") }\nIDX: #run (if CHECKED.semantic_index == None -> \"absent\" else -> \"present\")\nSUMMARY: #run (loop d in CHECKED.diagnostics -> \"{d.code} {d.severity} {(if d.span == .Val(s) -> \"[{s.file}] {s.start}-{s.end}\" else -> \"unplaced\")} | {(if d.origin == .Val(o) -> \"{o.path ?? \"none\"} {o.source_digest}\" else -> \"no-origin\")} | index={IDX}\").join(\"\\n\")\n\nrun: fn() {\n    print(SUMMARY)\n}\n"
+
+# 2. Speculative `jet try --json` session consumer: breaks dep.jet in-memory without touching disk,
+#    and presents the canonical imported-file span, origin path, SHA-256 digest, and line/col.
+step: jet try --json plan.json
+exit: 1
+json: stdout doc $.reports[0].schema = "jet.report/v4"
+json: stdout doc $.reports[0].code = "E0113"
+json: stdout doc $.reports[0].severity = "error"
+json: stdout doc $.reports[0].span = {"file":"dep.jet","start":26,"end":31}
+json: stdout doc $.reports[0].origin = {"path":"dep.jet","source_digest":"7b122c7f55c12397c79bd0ff7840ec6630e3d94e51e2ecb0957de57c9f02820a"}
+json: stdout doc $.reports[0].line = 2
+json: stdout doc $.reports[0].col = 5
+
+# Now materialize the exact same broken dep.jet on disk so every other consumer reads identical bytes.
+write: dep.jet = "answer: fn() -> Int {\n    \"bad\"\n}\n"
+
+# 3. CLI `jet check --json` diagnostic consumer.
+step: jet check --json main.jet
+exit: 1
+json: stdout doc $.reports[0].schema = "jet.report/v4"
+json: stdout doc $.reports[0].code = "E0113"
+json: stdout doc $.reports[0].severity = "error"
+json: stdout doc $.reports[0].span = {"file":"dep.jet","start":26,"end":31}
+json: stdout doc $.reports[0].origin = {"path":"dep.jet","source_digest":"7b122c7f55c12397c79bd0ff7840ec6630e3d94e51e2ecb0957de57c9f02820a"}
+json: stdout doc $.reports[0].line = 2
+json: stdout doc $.reports[0].col = 5
+
+# 4. `jet inspect compiler check` CompilerAPI consumer.
+step: jet inspect compiler check main.jet
+exit: 0
+json: stdout doc $.compiler.value.diagnostics[0].code = "E0113"
+json: stdout doc $.compiler.value.diagnostics[0].severity = "error"
+json: stdout doc $.compiler.value.diagnostics[0].span = {"file":"dep.jet","start":26,"end":31}
+json: stdout doc $.compiler.value.diagnostics[0].origin = {"path":"dep.jet","source_digest":"7b122c7f55c12397c79bd0ff7840ec6630e3d94e51e2ecb0957de57c9f02820a"}
+json: stdout doc $.compiler.value.semantic_index = null
+
+# 5. Typed `core.compiler` compile-time consumer (handed text names no file, shares identical span and SHA-256 digest).
+step: jet run typed_consumer.jet
+exit: 0
+stdout: = "E0113 error [] 26-31 | none 7b122c7f55c12397c79bd0ff7840ec6630e3d94e51e2ecb0957de57c9f02820a | index=absent\n"
+
+# 6. `jet self lsp` session consumer: publishes exact same diagnostic, digest, span, and line/col
+#    on dep.jet's URI, and clears diagnostics once the in-memory overlay repairs dep.jet.
+session lsp content-length: jet self lsp
+stderr: null
+
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"rootUri\":\"file://{work}\",\"capabilities\":{}}}"
+recv lsp until $.id = 1
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
+
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/dep.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"answer: fn() -> Int {\\n    \\\"bad\\\"\\n}\\n\"}}}"
+recv lsp until $.params.uri = "file://{work}/dep.jet"
+json: stdout doc $.params.diagnostics[0].code = "E0113"
+json: stdout doc $.params.diagnostics[0].severity = 1
+json: stdout doc $.params.diagnostics[0].range = {"start":{"line":1,"character":4},"end":{"line":1,"character":9}}
+json: stdout doc $.params.diagnostics[0].data.schema = "jet.report/v4"
+json: stdout doc $.params.diagnostics[0].data.origin.source_digest = "7b122c7f55c12397c79bd0ff7840ec6630e3d94e51e2ecb0957de57c9f02820a"
+json: stdout doc $.params.diagnostics[0].data.span.start = 26
+json: stdout doc $.params.diagnostics[0].data.span.end = 31
+json: stdout doc $.params.diagnostics[0].data.line = 2
+json: stdout doc $.params.diagnostics[0].data.col = 5
+
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"use dep: \\\"./dep\\\"\\n\\nrun: fn() {\\n    print(dep.answer())\\n}\\n\"}}}"
+recv lsp collect until ndjson $[?method="textDocument/publishDiagnostics"][?params.uri="file://{work}/dep.jet"] #>= 1
+json: stdout ndjson $[?method="textDocument/publishDiagnostics"][?params.uri="file://{work}/dep.jet"][0].params.diagnostics[0].data.origin.source_digest = "7b122c7f55c12397c79bd0ff7840ec6630e3d94e51e2ecb0957de57c9f02820a"
+
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didChange\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/dep.jet\",\"version\":2},\"contentChanges\":[{\"text\":\"answer: fn() -> Int {\\n    1\\n}\\n\"}]}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\"},\"position\":{\"line\":3,\"character\":16}}}"
+recv lsp collect until ndjson $[?id=2] #>= 1
+json: stdout ndjson $[?method="textDocument/publishDiagnostics"][?params.uri="file://{work}/dep.jet"][?params.version=2][0].params.diagnostics[?severity=1] #= 0
+stdout: ~ "answer: fn() -> Int" # repaired in-memory overlay restores clean cross-file hover
+
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{}}"
+recv lsp until $.id = 99
+close lsp
+exit: 0

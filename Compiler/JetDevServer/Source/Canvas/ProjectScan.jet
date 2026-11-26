@@ -42,6 +42,7 @@ use {
 #Error
 ProjectFileError: struct {
     diagnostics: [Diagnostic],
+    source: String{""},
 }
 
 project_file_error: fn(diagnostic: Diagnostic) -> ProjectFileError Never! {
@@ -119,9 +120,9 @@ project_file_context: fn(checker: LSPChecker, path: String, runtime_events: Stri
     resolver.revalidate_file(checked) ?? return Err(project_file_error(err.diagnostic()))
     result: checker.check(path, [JetDriverSourceDocument]{JetDriverSourceDocument{path: path, source: src}})
     if jet_driver_has_errors(result.diagnostics) {
-        return Err(ProjectFileError{diagnostics: result.diagnostics})
+        return Err(ProjectFileError{diagnostics: result.diagnostics, source: src})
     }
-    index: result.index ?? return Err(ProjectFileError{diagnostics: result.diagnostics})
+    index: result.index ?? return Err(ProjectFileError{diagnostics: result.diagnostics, source: src})
     resolver.revalidate_file(checked) ?? return Err(project_file_error(err.diagnostic()))
     source_id: rel_path(project_context_for_entry(path).project_root, checked.path)
     Ok(project_checked(path, source_id, src, result.modules, index, runtime_events))
