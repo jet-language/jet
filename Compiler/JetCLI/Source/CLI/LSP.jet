@@ -131,11 +131,11 @@ JetCLILSPChecker: struct {
             sites
         }
 
-        // The `.git` and `.jet` trees hold no workspace source; an
-        // unreadable file is left out.
+        // The `.git`, `.jet`, `node_modules`, and `target` trees hold no
+        // workspace source; an unreadable file is left out.
         sources: fn(self, root: String) -[FS]> [JetDriverSourceDocument] Never! {
             ^saved: [JetDriverSourceDocument]{}
-            loop item in cli_files.walk_files(root, skip: [String]{".git", ".jet"}) {
+            loop item in cli_files.walk_files(root, skip: [String]{".git", ".jet", "node_modules", "target"}) {
                 entry: item ?? return saved
                 if !entry.path.ends_with(".jet") -> next
                 source: cli_files.read(entry.path) ?? next

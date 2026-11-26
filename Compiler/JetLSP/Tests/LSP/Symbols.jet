@@ -4,7 +4,16 @@ use {
     core.encoding.[Dyn]
     jet_foundation.[Span, TextEdit, foundation_json_integer, jet_error_json_encode_value]
     jet_parser.[parser_marker_placement_edits]
-    jet_lsp.[LSPServer, lsp_change_workspace_folders, lsp_member, lsp_update_document]
+    jet_lsp.[
+        LSPServer,
+        lsp_change_workspace_folders,
+        lsp_fuzzy_match_wanted,
+        lsp_member,
+        lsp_query_ident_only,
+        lsp_query_wanted,
+        lsp_source_may_match_query,
+        lsp_update_document,
+    ]
 }
 
 LSP_TEST_SHAPES_URI: "file:///w/shapes.jet"
@@ -84,6 +93,20 @@ lsp_test_change_folders: fn(server: ^LSPServer, added: String, removed: String) 
     ^server: lsp_test_server()
     ^_: lsp_test_result(server, "initialize", "{{\"rootUri\":\"file:///w/third\"}}")
     assert_eq(lsp_test_symbol_rows(lsp_test_workspace_rows(server)), [String]{"AddedThird=12"})
+}
+
+#Test("workspace symbol prefilter matches valid identifiers and skips non-matching sources") {
+    empty: lsp_query_wanted("")
+    assert(lsp_source_may_match_query("x: fn() {{}}", empty, lsp_query_ident_only(empty)))
+    wanted: lsp_query_wanted("LspSymResp")
+    assert(lsp_query_ident_only(wanted))
+    assert(lsp_fuzzy_match_wanted(wanted, "lsp_workspace_symbol_response"))
+    assert(lsp_source_may_match_query("// café\nlsp_workspace_symbol_response: fn() {{}}\n", wanted, true))
+    assert(!lsp_source_may_match_query("lsp_other: fn() {{ symbol: response }}\n", wanted, true))
+    assert(!lsp_source_may_match_query("plain: fn() -> Int {{ 42 }}\n", wanted, true))
+    non_ascii: lsp_query_wanted("café")
+    assert(lsp_query_ident_only(non_ascii))
+    assert(lsp_source_may_match_query("café_fn: fn() {{}}\n", non_ascii, true))
 }
 
 #Test("selection ranges grow from the name to the whole document") {
