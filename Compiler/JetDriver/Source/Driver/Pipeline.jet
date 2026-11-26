@@ -6646,8 +6646,8 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: ^JetD
         // expansion in its bodies file; a compile its host lends that
         // file to takes the records in place of expanding.
         derive_hooks: if request.core_seal -> None else -> sema_host_hook_access(request.eval_config.host_hooks),
-        capture_derives: request.core_seal,
-        core_marker_laws: request.every_core_body,
+        capture_derives: request.core_seal && !grammar_batch,
+        core_marker_laws: request.every_core_body && !grammar_batch,
     )
     if eval_probes != None -> registration_graph.eval_probes = eval_probes
     registration_graph.entry_run_module = load.entry_run_module
@@ -6667,9 +6667,11 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: ^JetD
     }
     // Each jet_builtins role is filled once, and every role is filled when
     // all of Core is loaded (`jet check Core`, the Core library's check).
+    // A grammar batch cuts out Core modules that declare or import grammars,
+    // so full-Core role completeness runs only on the main compile.
     role_problems_from: registration_graph.diagnostics.len()
     role_fill: sema_core_roles_check(registration_graph)
-    if request.every_core_body -> sema_core_roles_check_filled(registration_graph, role_fill)
+    if request.every_core_body && !grammar_batch -> sema_core_roles_check_filled(registration_graph, role_fill)
     if registration_graph.diagnostics.len() > role_problems_from {
         registration_graph.complete = false
     }
@@ -6685,17 +6687,17 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: ^JetD
     }
     registration_graph.plugin_facts = plugin_facts
     registration_graph.comptime_host_packages = jet_driver_comptime_host_packages(package_policies, load.package_identity)
-    if request.mode == JetDriverCompileMode.Check -> registration_graph.check_tests = true
-    if request.mode == JetDriverCompileMode.Program -> registration_graph.check_root_tests = true
+    if request.mode == JetDriverCompileMode.Check && !grammar_batch -> registration_graph.check_tests = true
+    if request.mode == JetDriverCompileMode.Program && !grammar_batch -> registration_graph.check_root_tests = true
     if checked_projection || request.mode == JetDriverCompileMode.Doc {
         registration_graph.retain_programs = true
     }
     if request.doc_core_on_demand -> registration_graph.retained_core_demand = true
-    if kg.enabled || request.every_core_body -> registration_graph.every_core_body = true
-    if request.core_entry && request.every_core_body && !request.core_seal {
+    if (kg.enabled || request.every_core_body) && !grammar_batch -> registration_graph.every_core_body = true
+    if request.core_entry && request.every_core_body && !request.core_seal && !grammar_batch {
         registration_graph.core_own_check = true
     }
-    if request.core_seal -> registration_graph.core_seal = true
+    if request.core_seal && !grammar_batch -> registration_graph.core_seal = true
     // A compile that lowers, a Check compile and a `doc_core_on_demand` Doc
     // compile check Core bodies on demand (CoreDemand.jet); JET_KEEP_GOING
     // and `jet check Core` check every body.
