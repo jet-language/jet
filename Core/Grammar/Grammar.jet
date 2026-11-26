@@ -5,8 +5,10 @@
 // ambiguity within 3 tokens, token clashes, unprintable token pairs and
 // field shapes are refusals) and returns its plan: the data a generated
 // parser and printer run from. Every refusal is a `GrammarFault`.
+// `Grammar` is the checked head: `Grammar{"""…"""}` runs `analyze` while
+// building and keeps the plan.
 use {
-    core.grammar.error.[GrammarFaults, grammar_faults]
+    core.grammar.error.[GrammarFault, GrammarFaultKind, GrammarFaults, TextSpot, grammar_faults]
     core.grammar.plan.[GrammarKeywords, GrammarPlan, GrammarScanner, GrammarSource]
     core.grammar.runtime.[GRAMMAR_MAX_DEPTH, NO_HOLE, NO_TOKEN, bounds_column, cursor_enter, cursor_expect, cursor_fail, cursor_leave, cursor_of, cursor_of_parts, cursor_resync, cursor_take, grammar_scanner, keyword_find, keyword_next, lexer_column, lexer_match, scan, scan_after, word_end, word_shaped]
     __core_grammar_analyze.[mark_nullable, mark_parents, report_left_recursion, resolve, split_operators]
@@ -45,6 +47,46 @@ analyze: fn(text: String, start: String, imports: [GrammarSource]) -> GrammarPla
     loop _ in work.tree.nodes -> decision_of.push(-1)
     loop (d, decision) in work.decisions -> decision_of[decision.node] = d
     Ok(GrammarPlan{tree: work.tree, start: work.start, parent: work.parent, nullable: work.nullable, operators: work.operators, tokens: work.tokens, decisions: work.decisions, decision_of: decision_of, lexer: lexer, keywords: keywords, shapes: shapes, printer: printer})
+}
+
+/// A checked grammar: the plan of its literal's rule notation, built while
+/// building, with every parser rule a start. A refused grammar reports each
+/// fault at its spot in the literal. A grammar literal has no holes.
+Grammar: struct {
+    plan: GrammarPlan,
+
+    impl CheckedText {
+        Error: [GrammarFault],
+        Hole: String,
+        Slot: Never,
+        Shape: GrammarPlan,
+
+        check: fn(parts: [String]) -[]> Checked<GrammarPlan, Never> [GrammarFault]! {
+            if parts.len() > 1 -> return Err(grammar_hole_faults(parts))
+            if analyze(parts[0], "", [GrammarSource]{}) == {
+                .Ok(plan) -> Ok(Checked{shape: plan, slots: [Never]{}})
+                .Err(faults) -> Err(faults.faults)
+            }
+        }
+
+        accepts: fn(_slot: Never, _hole: TypeId) -[]> String? { Val(GRAMMAR_HOLE_MESSAGE) }
+
+        encode_hole: fn<T: Printable>(value: T, _slot: Never) -[]> String { "{value}" }
+
+        build: fn(shape: GrammarPlan, _holes: [String]) -[]> Grammar { Grammar{plan: shape} }
+    }
+}
+
+priv GRAMMAR_HOLE_MESSAGE: "a grammar literal has no holes"
+
+/// One fault for each hole of a grammar literal's `parts`, at the place the
+/// hole opens: the end of the part before it.
+priv grammar_hole_faults: fn(parts: [String]) -> [GrammarFault] Never! {
+    ^faults: [GrammarFault]{}
+    loop part in 0..<parts.len() - 1 {
+        faults.push(GrammarFault{kind: GrammarFaultKind.Notation, at: TextSpot{part: part, offset: parts[part].len()}, message: GRAMMAR_HOLE_MESSAGE, fix: "write the grammar's text whole: it is read while building, so no value can fill a hole"})
+    }
+    faults
 }
 
 // The run-time support over analyzed plans: keyword lookup, the class
