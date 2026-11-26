@@ -1,0 +1,222 @@
+// Compiler-private part of core.encoding.json: RFC 8259 JSON grammar and Dyn lowering.
+use {
+    core.encoding.[Dyn]
+    core.grammar.[Grammar]
+    stream: __core_encoding_stream
+}
+
+priv Document: Grammar{"""
+    document    : body=value EOF ;
+    value       : '{{' entries=members? '}}' # Object
+                | '[' items=elements? ']' # Array
+                | raw=STR # Str
+                | raw=NUM # Num
+                | 'true' # True
+                | 'false' # False
+                | 'null' # Null
+                ;
+    members     : first=member rest+=more_member* ;
+    more_member : ',' item=member ;
+    member      : key=STR ':' item=value ;
+    elements    : first=value rest+=more_elem* ;
+    more_elem   : ',' item=value ;
+    STR         : '"' ('\\' (["\\/bfnrt] | 'u' [0-9A-Fa-f] [0-9A-Fa-f] [0-9A-Fa-f] [0-9A-Fa-f]) | [^\u{{0}}-\u{{1f}}"\\])* '"' ;
+    NUM         : '-'? ('0' | [1-9] [0-9]*) ('.' [0-9]+)? ([eE] [+\-]? [0-9]+)? ;
+    WS          : [ \t\r\n]+ -> skip ;
+"""}
+
+priv JSON_SEEN_SCAN: 16
+
+priv hex_nibble: fn(b: U8) -> Int Never! {
+    c: Int{b}
+    if c >= 48 && c <= 57 -> return c - 48
+    if c >= 97 && c <= 102 -> return c - 87
+    if c >= 65 && c <= 70 -> return c - 55
+    return -1
+}
+
+priv parse_hex4_bytes: fn(raw: [U8], at: Int) -> Int? Never! {
+    if at + 4 > raw.len() -> return None
+    d0: hex_nibble(raw[at])
+    d1: hex_nibble(raw[at + 1])
+    d2: hex_nibble(raw[at + 2])
+    d3: hex_nibble(raw[at + 3])
+    if d0 < 0 || d1 < 0 || d2 < 0 || d3 < 0 -> return None
+    Val(((d0 << 12) | (d1 << 8) | (d2 << 4) | d3))
+}
+
+priv push_utf8_scalar: fn(out: ^[U8], cp: Int) Never! {
+    if cp < 128 {
+        out.push(U8{cp})
+    } else if cp < 2048 {
+        out.push(U8{192 | (cp >> 6)})
+        out.push(U8{128 | (cp & 63)})
+    } else if cp < 65536 {
+        out.push(U8{224 | (cp >> 12)})
+        out.push(U8{128 | ((cp >> 6) & 63)})
+        out.push(U8{128 | (cp & 63)})
+    } else {
+        out.push(U8{240 | (cp >> 18)})
+        out.push(U8{128 | ((cp >> 12) & 63)})
+        out.push(U8{128 | ((cp >> 6) & 63)})
+        out.push(U8{128 | (cp & 63)})
+    }
+}
+
+priv unescape_json_string: fn(token: String) -> String? Never! {
+    raw: token.bytes()
+    if raw.len() < 2 -> return None
+    end: raw.len() - 1
+    // Fast path: no backslash inside the quotes.
+    ^has_escape: false
+    loop i in 1..<end {
+        if raw[i] == (U8{92}) {
+            has_escape = true
+            break
+        }
+    }
+    if !has_escape {
+        ^plain: [U8]{}
+        loop i in 1..<end -> plain.push(raw[i])
+        s: String.from_bytes(plain) ?? return None
+        return Val(s)
+    }
+    ^out: [U8]{}
+    ^i: 1
+    loop i < end {
+        b: raw[i]
+        if b != (U8{92}) {
+            out.push(b)
+            i += 1
+            next
+        }
+        i += 1
+        if i >= end -> return None
+        esc: Int{raw[i]}
+        i += 1
+        if esc == 34 {
+            out.push(U8{34})
+        } else if esc == 92 {
+            out.push(U8{92})
+        } else if esc == 47 {
+            out.push(U8{47})
+        } else if esc == 98 {
+            out.push(U8{8})
+        } else if esc == 102 {
+            out.push(U8{12})
+        } else if esc == 110 {
+            out.push(U8{10})
+        } else if esc == 114 {
+            out.push(U8{13})
+        } else if esc == 116 {
+            out.push(U8{9})
+        } else if esc == 117 {
+            unit: parse_hex4_bytes(raw, i) ?? return None
+            i += 4
+            if unit >= 55296 && unit <= 56319 {
+                // High surrogate must be paired with \uXXXX low surrogate.
+                if i + 6 > end || raw[i] != (U8{92}) || raw[i + 1] != (U8{117}) -> return None
+                low: parse_hex4_bytes(raw, i + 2) ?? return None
+                if low < 56320 || low > 57343 -> return None
+                i += 6
+                cp: 65536 + ((unit - 55296) << 10) + (low - 56320)
+                push_utf8_scalar(out, cp)
+            } else if unit >= 56320 && unit <= 57343 {
+                // Lone low surrogate is invalid UTF-8 / RFC 8259.
+                return None
+            } else {
+                push_utf8_scalar(out, unit)
+            }
+        } else {
+            return None
+        }
+    }
+    s: String.from_bytes(out) ?? return None
+    Val(s)
+}
+
+priv lower_member: fn(
+    member: Member,
+    entries: ^[{key: String, value: Dyn}],
+    positions: ^[String:Int],
+    allow_duplicates: Bool,
+    depth: Int,
+    max_depth: Int,
+) -> Bool Never! {
+    key: unescape_json_string(member.key) ?? return false
+    ^pos: -1
+    if entries.len() < JSON_SEEN_SCAN {
+        loop at in 0..<entries.len() {
+            if entries[at].key == key {
+                pos = at
+                break
+            }
+        }
+    } else {
+        if positions.len() == 0 {
+            loop at in 0..<entries.len() -> _: positions.add(entries[at].key.copy(), at)
+        }
+        pos = positions.get(key) ?? -1
+        if pos < 0 -> _: positions.add(key.copy(), entries.len())
+    }
+    if pos >= 0 && !allow_duplicates -> return false
+    val: lower_val(member.item, allow_duplicates, depth, max_depth) ?? return false
+    if pos >= 0 {
+        entries[pos] = {key: key, value: val}
+    } else {
+        entries.push({key: key, value: val})
+    }
+    true
+}
+
+priv lower_val: fn(node: Value, allow_duplicates: Bool, depth: Int, max_depth: Int) -> Dyn? Never! {
+    if node == {
+        .Null -> Val(Dyn.Null)
+        .True -> Val(Dyn.Bool(true))
+        .False -> Val(Dyn.Bool(false))
+        .Num(raw) -> Val(stream.typed_number(raw.copy()))
+        .Str(raw) -> {
+            text: unescape_json_string(raw) ?? return None
+            Val(Dyn.Text(text))
+        }
+        .Array(items_opt) -> {
+            next_depth: depth + 1
+            if next_depth > max_depth -> return None
+            ^out: [Dyn]{}
+            if items_opt == .Val(elems) {
+                first: lower_val(elems.first, allow_duplicates, next_depth, max_depth) ?? return None
+                out.push(first)
+                loop more in elems.rest {
+                    item: lower_val(more.item, allow_duplicates, next_depth, max_depth) ?? return None
+                    out.push(item)
+                }
+            }
+            Val(Dyn.Array(out))
+        }
+        .Object(entries_opt) -> {
+            next_depth: depth + 1
+            if next_depth > max_depth -> return None
+            ^entries: [{key: String, value: Dyn}]{}
+            ^positions: [String:Int]{}
+            if entries_opt == .Val(members) {
+                if !lower_member(members.first, entries, positions, allow_duplicates, next_depth, max_depth) {
+                    return None
+                }
+                loop more in members.rest {
+                    if !lower_member(more.item, entries, positions, allow_duplicates, next_depth, max_depth) {
+                        return None
+                    }
+                }
+            }
+            Val(stream.object_from_entries(entries))
+        }
+    }
+}
+
+/// Parses `text` using the RFC 8259 `Document` grammar and lowers directly to
+/// `Dyn`. Returns `None` on syntax, surrogate, depth, or disallowed duplicate
+/// key errors so `core.encoding.json` can report its exact location diagnostic.
+json_parse_dyn: fn(text: String, allow_duplicates: Bool, max_depth: Int) -> Dyn? Never! {
+    parsed: Document.parse(text) ?? return None
+    lower_val(parsed.body, allow_duplicates, 0, max_depth)
+}

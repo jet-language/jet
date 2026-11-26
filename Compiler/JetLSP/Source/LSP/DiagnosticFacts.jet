@@ -1,11 +1,15 @@
 // The open documents and what each publication covered. The request loop owns
 // the checker and the transport; this holds no checked result.
+use jet_driver.[JetDriverSourceDocument]
 
 // An open editor document: its file path, unsaved text and editor version.
+// When opened from a host file with embedded Jet regions (HTML, Markdown),
+// `host_doc` holds its validated JetDriverSourceDocument projection.
 LSPDocument: struct {
     path: String,
     text: String,
     version: Int,
+    host_doc: JetDriverSourceDocument?{None},
 
     replace_text: fn(^self, text: String) Never! { self.text = text }
 

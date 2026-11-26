@@ -1,0 +1,19 @@
+path_refusal: fn(parts: [String]) -> String {
+    _: Path.check(parts) ?? return err.reason
+    ""
+}
+
+#Test("Path grammar accepts literal and interpolated paths without NUL bytes") {
+    assert_eq(path_refusal([String]{"/srv/data/file.txt"}), "")
+    assert_eq(path_refusal([String]{"/srv/", "/data/", ""}), "")
+    assert_eq(path_refusal([String]{""}), "")
+    assert_eq(Path.encode_hole(42, .Text), "42")
+    built: Path.build([String]{"/srv/", "/data"}, [String]{"a/b"})
+    assert_eq("{built}", "/srv/a%2Fb/data")
+}
+
+#Test("Path grammar rejects NUL bytes in any literal part") {
+    nul: String.from_bytes([U8]{47, 97, 0, 98}) ?? panic("{err}")
+    assert_eq(path_refusal([String]{nul}), "a Path cannot contain a NUL character")
+    assert_eq(path_refusal([String]{"/srv/", nul}), "a Path cannot contain a NUL character")
+}

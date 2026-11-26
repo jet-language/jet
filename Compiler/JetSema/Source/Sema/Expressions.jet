@@ -7630,6 +7630,10 @@ sema_expr_check_pipe: fn(head: Expr, steps: [PipeStep], span: Span, expected: Ty
     // Step k reads its hidden name, bound to the head (k = 0) or to step k - 1.
     ^bindings: [Stmt]{}
     in_place: if head == .Ident(name, _, _) -> name == steps[0].name else -> false
+    ^pipe_symbol: SymbolID?{None}
+    if in_place {
+        if sema_scope_resolve(check.scopes, steps[0].name) == .Val(symbol) -> pipe_symbol = Val(symbol.id)
+    }
     if !in_place -> bindings.push(sema_expr_pipe_binding(steps[0].name, head, steps[0].span))
     loop index in 1..<steps.len() {
         bindings.push(sema_expr_pipe_binding(steps[index].name, steps[index - 1].value, steps[index].span))
@@ -7642,29 +7646,55 @@ sema_expr_check_pipe: fn(head: Expr, steps: [PipeStep], span: Span, expected: Ty
     }
     last: steps[steps.len() - 1]
     return_type: check.scopes.return_type
+    previous_pipe_symbol: check.scopes.pipe_in_place_symbol
     mark: sema_scope_mark(check.scopes)
     sema_scope_enter(check.scopes, check.state, "pipe@{span.start}")
-    checked_bindings: sema_check_statements(bindings, return_type, check, check.scopes.loop_depth)
+    ^checked_bindings_complete: true
+    ^checked_bindings_stmts: [TStmt]{}
+    if in_place && bindings.len() > 0 {
+        check.scopes.pipe_in_place_symbol = pipe_symbol
+        first_checked: sema_check_statements([Stmt]{bindings[0]}, return_type, check, check.scopes.loop_depth)
+        check.scopes.pipe_in_place_symbol = previous_pipe_symbol
+        checked_bindings_complete = first_checked.complete
+        loop stmt in first_checked.value -> checked_bindings_stmts.push(stmt)
+        if checked_bindings_complete && bindings.len() > 1 {
+            ^rest: [Stmt]{}
+            loop index in 1..<bindings.len() -> rest.push(bindings[index])
+            rest_checked: sema_check_statements(rest, return_type, check, check.scopes.loop_depth)
+            checked_bindings_complete = rest_checked.complete
+            loop stmt in rest_checked.value -> checked_bindings_stmts.push(stmt)
+        }
+    } else {
+        check.scopes.pipe_in_place_symbol = previous_pipe_symbol
+        checked_bindings: sema_check_statements(bindings, return_type, check, check.scopes.loop_depth)
+        checked_bindings_complete = checked_bindings.complete
+        checked_bindings_stmts = checked_bindings.value
+    }
     if unread == .Val(index) {
-        if checked_bindings.complete {
+        if checked_bindings_complete {
             check.diagnostics.push(sema_expr_pipe_step_without_value(steps[index], check))
         } else {
             check.diagnostics.push(sema_error("E0438", steps[index].span, "This pipe step doesn't use `<>`", "Each `|>` step receives the value of the line above as `<>`; a step that never reads it drops that value", "Write `<>` where the value goes, such as `|> f(<>)`, or end the pipe before this step"))
         }
+        check.scopes.pipe_in_place_symbol = previous_pipe_symbol
         sema_scope_leave(check.scopes, check.state)
         return None
     }
-    if !checked_bindings.complete {
+    if !checked_bindings_complete {
+        check.scopes.pipe_in_place_symbol = previous_pipe_symbol
         sema_scope_leave(check.scopes, check.state)
         return None
     }
-    value: sema_check_expression(last.value, expected, check) ?? {
+    if in_place && steps.len() == 1 -> check.scopes.pipe_in_place_symbol = pipe_symbol else -> check.scopes.pipe_in_place_symbol = previous_pipe_symbol
+    checked_last: sema_check_expression(last.value, expected, check)
+    check.scopes.pipe_in_place_symbol = previous_pipe_symbol
+    value: checked_last ?? {
         sema_scope_leave(check.scopes, check.state)
         return None
     }
     sema_single_use_leave_scope(check)
     sema_scope_rollback(check.scopes, mark)
-    ^body: checked_bindings.value
+    ^body: checked_bindings_stmts
     body.push(TStmt.ExprStmt{value: value, span: expr_span(last.value)})
     Val(sema_tree_node(value.ty, TExprKind.InlineBlock{body: body}, span))
 }
@@ -7750,6 +7780,11 @@ sema_expr_check_method_call_expr: fn(receiver: Expr, method: String, method_span
     written_place: sema_stmt_binding_is_write_place(receiver)
     if written_place {
         if sema_shared_access_call_place(receiver, method_span, check) == .Val(cell) {
+            if !check.scopes.writes_explicit && sema_call_marks_written_receiver(receiver) != None {
+                if receiver == .Place(value, _, _, _) {
+                    sema_call_marks_check_receiver(check, receiver, value, SemaReceiverMarkFrame{receiver_span: expr_span(value), convention: Val(AccessConvention.Write), written_mark: true}, method)
+                }
+            }
             rewritten: sema_shared_access_desugar_place_call(cell.handle, cell.place, cell.place_span, method, method_span, owner_type_args, type_args, args, cell.span, cell.name)
             edited: sema_check_expression(rewritten, expected, check)
             if receiver == .Place(value, _, _, _) {

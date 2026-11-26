@@ -1,0 +1,635 @@
+// Compiler-private part of core.regex: regular-expression syntax grammar and
+// AST-to-Node lowering for `core.regex.compile` / `Regex{...}`.
+use {
+    core.grammar.[Grammar]
+}
+
+// Parse-tree node kinds (matching Core/Regex/Regex.jet constants).
+priv N_LIT: 0
+priv N_ANY: 1
+priv N_CLASS: 2
+priv N_ASSERT: 3
+priv N_EMPTY: 4
+priv N_SEQ: 5
+priv N_ALT: 6
+priv N_GROUP: 7
+priv N_STAR: 8
+priv N_PLUS: 9
+priv N_OPT: 10
+priv N_RANGE: 11
+priv N_LOOK: 12
+
+// Zero-width assertion kinds.
+priv A_LINE_START: 0
+priv A_TEXT_START: 1
+priv A_TEXT_END: 2
+priv A_WORD: 3
+priv A_NOT_WORD: 4
+
+// Character-class member kinds.
+priv K_CHAR: 0
+priv K_RANGE: 1
+priv K_DIGIT: 2
+priv K_WORD: 3
+priv K_SPACE: 4
+priv K_ALPHA: 5
+priv K_NUMBER: 6
+priv K_NEGATED: 8
+
+priv MAX_REPEAT: 1000
+priv MAX_NEST: 250
+
+#Allow(Jet.RawMultilineHtml, "regex grammar includes group forms `(?<name>...)` and `(?<=...)`")
+priv Pattern: Grammar{"""
+    pattern   : body=alt EOF ;
+    alt       : first=seq rest+=alt_arm* ;
+    alt_arm   : '|' branch=seq ;
+    seq       : pieces+=piece* ;
+    piece     : body=atom quant=quantifier? ;
+    quantifier: op=quant_op lazy=LAZY? ;
+    quant_op  : '*' # Star
+              | '+' # Plus
+              | '?' # Opt
+              | raw=QUANT_RANGE # Range
+              ;
+    atom      : '.' # Any
+              | '^' # LineStart
+              | '$' # TextEnd
+              | '(' body=alt ')' # Capture
+              | GRP_NONCAP body=alt ')' # NonCapture
+              | head=GRP_NAMED body=alt ')' # Named
+              | GRP_LOOKAHEAD_POS body=alt ')' # LookaheadPos
+              | GRP_LOOKAHEAD_NEG body=alt ')' # LookaheadNeg
+              | GRP_LOOKBEHIND_POS body=alt ')' # LookbehindPos
+              | GRP_LOOKBEHIND_NEG body=alt ')' # LookbehindNeg
+              | raw=CHAR_CLASS # CharClass
+              | raw=ESC_ASSERT # EscAssert
+              | raw=ESC_CLASS # EscClass
+              | raw=ESC_UNICODE # EscUnicode
+              | raw=ESC_HEX # EscHex
+              | raw=ESC_UNI # EscUni
+              | raw=ESC_CTRL # EscCtrl
+              | raw=ESC_PUNCT # EscPunct
+              | raw=LIT # Lit
+              ;
+    LAZY               : '?' ;
+    GRP_NONCAP         : '(?:' ;
+    GRP_LOOKAHEAD_POS  : '(?=' ;
+    GRP_LOOKAHEAD_NEG  : '(?!' ;
+    GRP_LOOKBEHIND_POS : '(?<=' ;
+    GRP_LOOKBEHIND_NEG : '(?<!' ;
+    GRP_NAMED          : '(?' 'P'? '<' [A-Za-z_] [A-Za-z0-9_]* '>' ;
+    QUANT_RANGE        : '{{' [0-9]+ (',' [0-9]*)? '}}' ;
+    CHAR_CLASS         : '[' ('^' (']' | CLS_ESC | [^\\\[\]]) | (']' | CLS_ESC | [^\\\[\]\^])) (CLS_ESC | [^\\\[\]])* ']' ;
+    fragment CLS_ESC   : '\\' ([dDwWsSnrtfva] | [pP] ('{{' ('L' | 'Letter' | 'Alphabetic' | 'N' | 'Number' | 'White_Space' | 'Whitespace') '}}' | [LN]) | 'x' ([0-9A-Fa-f] [0-9A-Fa-f] | '{{' [0-9A-Fa-f]+ '}}') | 'u' ([0-9A-Fa-f] [0-9A-Fa-f] [0-9A-Fa-f] [0-9A-Fa-f] | '{{' [0-9A-Fa-f]+ '}}') | [ !"#$%&'()*+,\-./:;=?@\[\\\]^_`{{|}}~]) ;
+    ESC_ASSERT         : '\\' [bBAz] ;
+    ESC_CLASS          : '\\' [dDwWsS] ;
+    ESC_UNICODE        : '\\' [pP] ('{{' ('L' | 'Letter' | 'Alphabetic' | 'N' | 'Number' | 'White_Space' | 'Whitespace') '}}' | [LN]) ;
+    ESC_HEX            : '\\x' ([0-9A-Fa-f] [0-9A-Fa-f] | '{{' [0-9A-Fa-f]+ '}}') ;
+    ESC_UNI            : '\\u' ([0-9A-Fa-f] [0-9A-Fa-f] [0-9A-Fa-f] [0-9A-Fa-f] | '{{' [0-9A-Fa-f]+ '}}') ;
+    ESC_CTRL           : '\\' [nrtfva] ;
+    ESC_PUNCT          : '\\' [ !"#$%&'()*+,\-./:;=?@\[\\\]^_`{{|}}~] ;
+    LIT                : [^\\.\^$|()*+?{{\[] ;
+"""}
+
+/// Flat lowered regex AST produced from the `Pattern` grammar parse tree.
+RegexParsed: struct {
+    root: Int,
+    node_kinds: [Int],
+    node_a: [Int],
+    node_b: [Int],
+    node_left: [Int],
+    node_neg: [Bool],
+    node_lo: [Int],
+    node_hi: [Int],
+    kids: [Int],
+    cls_kinds: [Int],
+    cls_los: [Int],
+    cls_his: [Int],
+    groups: Int,
+    names: [String],
+    looks: [Int],
+    look_behind: [Bool],
+    look_neg: [Bool],
+}
+
+priv LowerState: struct {
+    node_kinds: [Int],
+    node_a: [Int],
+    node_b: [Int],
+    node_left: [Int],
+    node_neg: [Bool],
+    node_lo: [Int],
+    node_hi: [Int],
+    kids: [Int],
+    cls_kinds: [Int],
+    cls_los: [Int],
+    cls_his: [Int],
+    groups: Int,
+    names: [String],
+    looks: [Int],
+    look_behind: [Bool],
+    look_neg: [Bool],
+    depth: Int,
+    failed: Bool,
+}
+
+priv emit_node: fn(st: ^LowerState, kind: Int, a: Int, b: Int, left: Int, neg: Bool) -> Int Never! {
+    id: st.node_kinds.len()
+    st.node_kinds.push(kind)
+    st.node_a.push(a)
+    st.node_b.push(b)
+    st.node_left.push(left)
+    st.node_neg.push(neg)
+    st.node_lo.push(0)
+    st.node_hi.push(0)
+    id
+}
+
+priv emit_list: fn(st: ^LowerState, kind: Int, parts: [Int]) -> Int Never! {
+    lo: st.kids.len()
+    loop part in parts -> st.kids.push(part)
+    id: st.node_kinds.len()
+    st.node_kinds.push(kind)
+    st.node_a.push(0)
+    st.node_b.push(0)
+    st.node_left.push(-1)
+    st.node_neg.push(false)
+    st.node_lo.push(lo)
+    st.node_hi.push(st.kids.len())
+    id
+}
+
+priv emit_class: fn(st: ^LowerState, lo: Int, neg: Bool) -> Int Never! {
+    id: st.node_kinds.len()
+    st.node_kinds.push(N_CLASS)
+    st.node_a.push(0)
+    st.node_b.push(0)
+    st.node_left.push(-1)
+    st.node_neg.push(neg)
+    st.node_lo.push(lo)
+    st.node_hi.push(st.cls_kinds.len())
+    id
+}
+
+priv push_class_item: fn(st: ^LowerState, kind: Int, lo: Int, hi: Int) Never! {
+    st.cls_kinds.push(kind)
+    st.cls_los.push(lo)
+    st.cls_his.push(hi)
+}
+
+priv decode_scalars: fn(raw: [U8]) -> [Int] Never! {
+    ^out: [Int]{}
+    ^i: 0
+    n: raw.len()
+    loop i < n {
+        b0: Int{raw[i]}
+        if b0 < 128 {
+            out.push(b0)
+            i += 1
+        } else if b0 < 224 && i + 1 < n {
+            cp: ((b0 & 31) << 6) | ((Int{raw[i + 1]}) & 63)
+            out.push(cp)
+            i += 2
+        } else if b0 < 240 && i + 2 < n {
+            cp: ((b0 & 15) << 12) | (((Int{raw[i + 1]}) & 63) << 6) | ((Int{raw[i + 2]}) & 63)
+            out.push(cp)
+            i += 3
+        } else if i + 3 < n {
+            cp: ((b0 & 7) << 18) | (((Int{raw[i + 1]}) & 63) << 12) | (((Int{raw[i + 2]}) & 63) << 6) | ((Int{raw[i + 3]}) & 63)
+            out.push(cp)
+            i += 4
+        } else {
+            out.push(b0)
+            i += 1
+        }
+    }
+    out
+}
+
+priv hex_digit: fn(c: Int) -> Int Never! {
+    if c >= 48 && c <= 57 -> return c - 48
+    if c >= 97 && c <= 102 -> return c - 87
+    if c >= 65 && c <= 70 -> return c - 55
+    return -1
+}
+
+priv parse_hex_escape: fn(raw: String) -> Int? Never! {
+    bytes: raw.bytes()
+    if bytes.len() < 4 -> return None
+    ^value: 0
+    if (Int{bytes[2]}) == 123 {
+        digits: bytes.len() - 4
+        if digits <= 0 || digits > 8 -> return None
+        loop i in 3..<(bytes.len() - 1) {
+            h: hex_digit(Int{bytes[i]})
+            if h < 0 -> return None
+            value = value * 16 + h
+        }
+    } else {
+        loop i in 2..<bytes.len() {
+            h: hex_digit(Int{bytes[i]})
+            if h < 0 -> return None
+            value = value * 16 + h
+        }
+    }
+    if value > 1114111 || (value >= 55296 && value <= 57343) -> return None
+    Val(value)
+}
+
+priv decode_unicode_class_kind: fn(raw: String) -> Int Never! {
+    bytes: raw.bytes()
+    neg: (Int{bytes[1]}) == 80
+    ^name: ""
+    if (Int{bytes[2]}) == 123 {
+        ^buf: [U8]{}
+        loop i in 3..<(bytes.len() - 1) -> buf.push(bytes[i])
+        name = String.from_bytes(buf) ?? ""
+    } else {
+        name = String.from_bytes([U8]{bytes[2]}) ?? ""
+    }
+    base: if name == "L" || name == "Letter" || name == "Alphabetic" -> K_ALPHA else if name == "N" || name == "Number" -> K_NUMBER else -> K_SPACE
+    if neg -> base + K_NEGATED else -> base
+}
+
+priv decode_ctrl_scalar: fn(c: Int) -> Int Never! {
+    if c == 110 -> return 10
+    if c == 114 -> return 13
+    if c == 116 -> return 9
+    if c == 102 -> return 12
+    if c == 118 -> return 11
+    7
+}
+
+priv ClassCursor: struct {
+    pos: Int,
+}
+
+priv decode_class_escape_at: fn(cps: [Int], cur: ^ClassCursor) -> Int? Never! {
+    // cur.pos points just past `\`.
+    if cur.pos >= cps.len() -> return None
+    c: cps[cur.pos]
+    cur.pos += 1
+    if c == 100 -> return Val(-(K_DIGIT + 1))
+    if c == 68 -> return Val(-(K_DIGIT + K_NEGATED + 1))
+    if c == 119 -> return Val(-(K_WORD + 1))
+    if c == 87 -> return Val(-(K_WORD + K_NEGATED + 1))
+    if c == 115 -> return Val(-(K_SPACE + 1))
+    if c == 83 -> return Val(-(K_SPACE + K_NEGATED + 1))
+    if c == 112 || c == 80 {
+        neg: c == 80
+        ^buf: [U8]{}
+        if cur.pos < cps.len() && cps[cur.pos] == 123 {
+            cur.pos += 1
+            loop cur.pos < cps.len() && cps[cur.pos] != 125 {
+                buf.push(U8{cps[cur.pos]})
+                cur.pos += 1
+            }
+            if cur.pos >= cps.len() -> return None
+            cur.pos += 1
+        } else {
+            if cur.pos >= cps.len() -> return None
+            buf.push(U8{cps[cur.pos]})
+            cur.pos += 1
+        }
+        name: String.from_bytes(buf) ?? ""
+        ^base: -1
+        if name == "L" || name == "Letter" || name == "Alphabetic" {
+            base = K_ALPHA
+        } else if name == "N" || name == "Number" {
+            base = K_NUMBER
+        } else if name == "White_Space" || name == "Whitespace" {
+            base = K_SPACE
+        } else {
+            return None
+        }
+        kind: if neg -> base + K_NEGATED else -> base
+        return Val(-(kind + 1))
+    }
+    if c == 110 || c == 114 || c == 116 || c == 102 || c == 118 || c == 97 {
+        return Val(decode_ctrl_scalar(c))
+    }
+    if c == 120 || c == 117 {
+        ^value: 0
+        if cur.pos < cps.len() && cps[cur.pos] == 123 {
+            cur.pos += 1
+            ^digits: 0
+            loop cur.pos < cps.len() && cps[cur.pos] != 125 {
+                h: hex_digit(cps[cur.pos])
+                if h < 0 -> return None
+                cur.pos += 1
+                digits += 1
+                if digits > 8 -> return None
+                value = value * 16 + h
+            }
+            if cur.pos >= cps.len() || digits == 0 -> return None
+            cur.pos += 1
+        } else {
+            width: if c == 120 -> 2 else -> 4
+            loop _ in 0..<width {
+                if cur.pos >= cps.len() -> return None
+                h: hex_digit(cps[cur.pos])
+                if h < 0 -> return None
+                cur.pos += 1
+                value = value * 16 + h
+            }
+        }
+        if value > 1114111 || (value >= 55296 && value <= 57343) -> return None
+        return Val(value)
+    }
+    Val(c)
+}
+
+priv lower_char_class: fn(st: ^LowerState, raw: String) -> Int Never! {
+    cps: decode_scalars(raw.bytes())
+    // Skip leading `[` and trailing `]`.
+    end: cps.len() - 1
+    ^cur: ClassCursor{pos: 1}
+    ^neg: false
+    if cur.pos < end && cps[cur.pos] == 94 {
+        neg = true
+        cur.pos += 1
+    }
+    lo: st.cls_kinds.len()
+    loop cur.pos < end {
+        ^first: 0
+        if cps[cur.pos] == 92 {
+            cur.pos += 1
+            first = decode_class_escape_at(cps, cur) ?? {
+                st.failed = true
+                return 0
+            }
+        } else {
+            first = cps[cur.pos]
+            cur.pos += 1
+        }
+        if cur.pos < end && cps[cur.pos] == 45 && cur.pos + 1 < end {
+            cur.pos += 1
+            ^last: 0
+            if cps[cur.pos] == 92 {
+                cur.pos += 1
+                last = decode_class_escape_at(cps, cur) ?? {
+                    st.failed = true
+                    return 0
+                }
+            } else {
+                last = cps[cur.pos]
+                cur.pos += 1
+            }
+            if first < 0 || last < 0 || last < first {
+                st.failed = true
+                return 0
+            }
+            push_class_item(st, K_RANGE, first, last)
+        } else if first >= 0 {
+            push_class_item(st, K_CHAR, first, first)
+        } else {
+            push_class_item(st, -first - 1, 0, 0)
+        }
+    }
+    emit_class(st, lo, neg)
+}
+
+priv parse_quant_range: fn(raw: String) -> [Int]? Never! {
+    bytes: raw.bytes()
+    ^i: 1
+    end: bytes.len() - 1
+    ^lo: 0
+    ^got_lo: false
+    loop i < end && (Int{bytes[i]}) >= 48 && (Int{bytes[i]}) <= 57 {
+        lo = lo * 10 + ((Int{bytes[i]}) - 48)
+        if lo > MAX_REPEAT -> return None
+        got_lo = true
+        i += 1
+    }
+    if !got_lo -> return None
+    ^hi: lo
+    if i < end && (Int{bytes[i]}) == 44 {
+        i += 1
+        hi = -1
+        if i < end {
+            ^v: 0
+            ^got_hi: false
+            loop i < end && (Int{bytes[i]}) >= 48 && (Int{bytes[i]}) <= 57 {
+                v = v * 10 + ((Int{bytes[i]}) - 48)
+                if v > MAX_REPEAT -> return None
+                got_hi = true
+                i += 1
+            }
+            if !got_hi -> return None
+            hi = v
+        }
+    }
+    if i != end -> return None
+    if hi >= 0 && hi < lo -> return None
+    Val([Int]{lo, hi})
+}
+
+priv extract_group_name: fn(head: String) -> String Never! {
+    bytes: head.bytes()
+    start: if (Int{bytes[2]}) == 80 -> 4 else -> 3
+    ^out: [U8]{}
+    loop i in start..<(bytes.len() - 1) -> out.push(bytes[i])
+    String.from_bytes(out) ?? ""
+}
+
+priv lower_alt: fn(st: ^LowerState, node: Alt) -> Int Never! {
+    first: lower_seq(st, node.first)
+    if st.failed -> return 0
+    if node.rest.len() == 0 -> return first
+    ^arms: [Int]{first}
+    loop arm in node.rest {
+        id: lower_seq(st, arm.branch)
+        if st.failed -> return 0
+        arms.push(id)
+    }
+    emit_list(st, N_ALT, arms)
+}
+
+priv lower_seq: fn(st: ^LowerState, node: Seq) -> Int Never! {
+    if node.pieces.len() == 0 -> return emit_node(st, N_EMPTY, 0, 0, -1, false)
+    ^parts: [Int]{}
+    loop piece in node.pieces {
+        id: lower_piece(st, piece)
+        if st.failed -> return 0
+        parts.push(id)
+    }
+    if parts.len() == 1 -> return parts[0]
+    emit_list(st, N_SEQ, parts)
+}
+
+priv lower_piece: fn(st: ^LowerState, piece: Piece) -> Int Never! {
+    base: lower_atom(st, piece.body)
+    if st.failed -> return 0
+    quant: piece.quant ?? return base
+    lazy: quant.lazy != None
+    if quant.op == {
+        .Star -> emit_node(st, N_STAR, 0, -1, base, lazy)
+        .Plus -> emit_node(st, N_PLUS, 0, -1, base, lazy)
+        .Opt -> emit_node(st, N_OPT, 0, -1, base, lazy)
+        .Range(raw) -> {
+            bounds: parse_quant_range(raw) ?? {
+                st.failed = true
+                return 0
+            }
+            emit_node(st, N_RANGE, bounds[0], bounds[1], base, lazy)
+        }
+    }
+}
+
+priv lower_group: fn(st: ^LowerState, capture: Bool, name: ^^String, body: Alt) -> Int Never! {
+    if st.depth >= MAX_NEST {
+        st.failed = true
+        return 0
+    }
+    if name != "" {
+        loop other in st.names {
+            if other == name {
+                st.failed = true
+                return 0
+            }
+        }
+    }
+    ^index: 0
+    if capture {
+        st.groups += 1
+        index = st.groups
+        st.names.push(name)
+    }
+    st.depth += 1
+    inner: lower_alt(st, body)
+    st.depth -= 1
+    if st.failed -> return 0
+    if !capture -> return inner
+    emit_node(st, N_GROUP, index, 0, inner, false)
+}
+
+priv lower_look: fn(st: ^LowerState, behind: Bool, neg: Bool, body: Alt) -> Int Never! {
+    if st.depth >= MAX_NEST {
+        st.failed = true
+        return 0
+    }
+    groups_before: st.groups
+    st.depth += 1
+    inner: lower_alt(st, body)
+    st.depth -= 1
+    if st.failed || st.groups != groups_before {
+        st.failed = true
+        return 0
+    }
+    st.looks.push(inner)
+    st.look_behind.push(behind)
+    st.look_neg.push(neg)
+    look_id: st.looks.len() - 1
+    emit_node(st, N_LOOK, look_id, 0, inner, false)
+}
+
+priv emit_single_class: fn(st: ^LowerState, member: Int) -> Int Never! {
+    lo: st.cls_kinds.len()
+    if member >= K_NEGATED {
+        push_class_item(st, member - K_NEGATED, 0, 0)
+        return emit_class(st, lo, true)
+    }
+    push_class_item(st, member, 0, 0)
+    emit_class(st, lo, false)
+}
+
+priv lower_atom: fn(st: ^LowerState, atom: Atom) -> Int Never! {
+    if atom == {
+        .Any -> emit_node(st, N_ANY, 0, 0, -1, false)
+        .LineStart -> emit_node(st, N_ASSERT, A_LINE_START, 0, -1, false)
+        .TextEnd -> emit_node(st, N_ASSERT, A_TEXT_END, 0, -1, false)
+        .Capture(body) -> lower_group(st, true, "", body)
+        .NonCapture(body) -> lower_group(st, false, "", body)
+        .Named(head, body) -> lower_group(st, true, extract_group_name(head), body)
+        .LookaheadPos(body) -> lower_look(st, false, false, body)
+        .LookaheadNeg(body) -> lower_look(st, false, true, body)
+        .LookbehindPos(body) -> lower_look(st, true, false, body)
+        .LookbehindNeg(body) -> lower_look(st, true, true, body)
+        .CharClass(raw) -> lower_char_class(st, raw)
+        .EscAssert(raw) -> {
+            c: Int{raw.bytes()[1]}
+            kind: if c == 98 -> A_WORD else if c == 66 -> A_NOT_WORD else if c == 65 -> A_TEXT_START else -> A_TEXT_END
+            emit_node(st, N_ASSERT, kind, 0, -1, false)
+        }
+        .EscClass(raw) -> {
+            c: Int{raw.bytes()[1]}
+            member: if c == 100 -> K_DIGIT else if c == 68 -> K_DIGIT + K_NEGATED else if c == 119 -> K_WORD else if c == 87 -> K_WORD + K_NEGATED else if c == 115 -> K_SPACE else -> K_SPACE + K_NEGATED
+            emit_single_class(st, member)
+        }
+        .EscUnicode(raw) -> emit_single_class(st, decode_unicode_class_kind(raw))
+        .EscHex(raw) -> {
+            cp: parse_hex_escape(raw) ?? {
+                st.failed = true
+                return 0
+            }
+            emit_node(st, N_LIT, cp, 0, -1, false)
+        }
+        .EscUni(raw) -> {
+            cp: parse_hex_escape(raw) ?? {
+                st.failed = true
+                return 0
+            }
+            emit_node(st, N_LIT, cp, 0, -1, false)
+        }
+        .EscCtrl(raw) -> emit_node(st, N_LIT, decode_ctrl_scalar(Int{raw.bytes()[1]}), 0, -1, false)
+        .EscPunct(raw) -> emit_node(st, N_LIT, Int{raw.bytes()[1]}, 0, -1, false)
+        .Lit(raw) -> {
+            cps: decode_scalars(raw.bytes())
+            if cps.len() != 1 {
+                st.failed = true
+                return 0
+            }
+            emit_node(st, N_LIT, cps[0], 0, -1, false)
+        }
+    }
+}
+
+/// Parses `pattern` with the `Pattern` Core/Grammar and lowers it into the
+/// flat node arena consumed by `core.regex.compile_program`. Returns `None`
+/// when `pattern` has a syntax or semantic error so the caller can emit the
+/// exact scalar-offset diagnostic.
+regex_parse_ast: fn(pattern: String) -> RegexParsed? Never! {
+    parsed: Pattern.parse(pattern) ?? return None
+    ^st: LowerState{
+        node_kinds: [Int]{},
+        node_a: [Int]{},
+        node_b: [Int]{},
+        node_left: [Int]{},
+        node_neg: [Bool]{},
+        node_lo: [Int]{},
+        node_hi: [Int]{},
+        kids: [Int]{},
+        cls_kinds: [Int]{},
+        cls_los: [Int]{},
+        cls_his: [Int]{},
+        groups: 0,
+        names: [String]{},
+        looks: [Int]{},
+        look_behind: [Bool]{},
+        look_neg: [Bool]{},
+        depth: 0,
+        failed: false,
+    }
+    root: lower_alt(st, parsed.body)
+    if st.failed -> return None
+    Val(RegexParsed{
+        root: root,
+        node_kinds: st.node_kinds.move(),
+        node_a: st.node_a.move(),
+        node_b: st.node_b.move(),
+        node_left: st.node_left.move(),
+        node_neg: st.node_neg.move(),
+        node_lo: st.node_lo.move(),
+        node_hi: st.node_hi.move(),
+        kids: st.kids.move(),
+        cls_kinds: st.cls_kinds.move(),
+        cls_los: st.cls_los.move(),
+        cls_his: st.cls_his.move(),
+        groups: st.groups,
+        names: st.names.move(),
+        looks: st.looks.move(),
+        look_behind: st.look_behind.move(),
+        look_neg: st.look_neg.move(),
+    })
+}

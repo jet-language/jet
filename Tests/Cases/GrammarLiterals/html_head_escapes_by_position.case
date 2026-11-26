@@ -1,0 +1,21 @@
+# HTML{"..."} checks markup structure and chooses hole escaping by slot at
+# build time (text, quoted/unquoted attributes, URL start with Go isSafeURL for
+# both String and URL values, URL after fixed prefix, and HTML composition only
+# in text), with identical output across O0, O2, and AOT.
+fixture: HTMLHeadEscapesByPosition.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 0
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = "text: <p>&lt;script&gt;&amp;\"'</p>\ncompose: <section><b>ok</b></section>\nquoted: <a title=\"&lt;script&gt;&amp;&quot;&#x27;\" data-raw=\"&lt;b&gt;ok&lt;/b&gt;\">q</a>\nunquoted: <a data-a=&lt;script&gt;&amp;&quot;&#x27; data-b=\"\">u</a>\nurl_ok: <a href='https://example.com/a?x=1&amp;y=2'>ok</a>\nurl_js_str: <a href='about:invalid#jet'>no</a>\nurl_js_tab: <a href='about:invalid#jet'>no</a>\nurl_js_url: <a href='about:invalid#jet'>no</a>\nurl_prefix: <a href='/user/a%2Fb%3Fc%3D1'>p</a>\n"
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: == o0
+step build: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: == o0

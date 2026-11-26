@@ -1,0 +1,148 @@
+// Compiler-private part of core.net.ip: IPv4, IPv4 CIDR, and IPv6 address grammars.
+use {
+    core.grammar.[Grammar]
+}
+
+priv V4Address: Grammar{"""
+    v4_address : a=OCTET '.' b=OCTET '.' c=OCTET '.' d=OCTET EOF ;
+    OCTET      : '0' | [1-9] [0-9]* ;
+"""}
+
+priv V4Network: Grammar{"""
+    v4_network : a=OCTET '.' b=OCTET '.' c=OCTET '.' d=OCTET '/' prefix=PREFIX EOF ;
+    OCTET      : '0' | [1-9] [0-9]* ;
+    PREFIX     : [0-9]+ ;
+"""}
+
+priv V6Address: Grammar{"""
+    v6_address : '::' right=hex_seq? EOF # LeadingCompress
+               | left=hex_seq tail=v6_tail? EOF # Full
+               ;
+    v6_tail    : '::' right=hex_seq? ;
+    hex_seq    : first=HEX rest+=hex_more* ;
+    hex_more   : ':' group=HEX ;
+    HEX        : [0-9A-Fa-f]+ ;
+"""}
+
+V4Parsed: struct {
+    a: Int,
+    b: Int,
+    c: Int,
+    d: Int,
+}
+
+V4NetworkParsed: struct {
+    a: Int,
+    b: Int,
+    c: Int,
+    d: Int,
+    prefix: Int,
+}
+
+priv parse_octet_val: fn(text: String) -> Int? Never! {
+    raw: text.bytes()
+    if raw.len() == 0 || raw.len() > 3 -> return None
+    if raw.len() > 1 && raw[0] == (U8{48}) -> return None
+    ^n: 0
+    loop b in raw {
+        d: Int{b}
+        if d < 48 || d > 57 -> return None
+        n = n * 10 + (d - 48)
+        if n > 255 -> return None
+    }
+    Val(n)
+}
+
+priv parse_prefix_val: fn(text: String) -> Int? Never! {
+    raw: text.bytes()
+    if raw.len() == 0 -> return None
+    ^n: 0
+    loop b in raw {
+        d: Int{b}
+        if d < 48 || d > 57 -> return None
+        n = n * 10 + (d - 48)
+        if n > 32 -> return None
+    }
+    Val(n)
+}
+
+priv parse_hex4_val: fn(text: String) -> Int? Never! {
+    raw: text.bytes()
+    if raw.len() == 0 || raw.len() > 4 -> return None
+    ^n: 0
+    loop b in raw {
+        c: Int{b}
+        d: if c >= 48 && c <= 57 -> c - 48 else if c >= 65 && c <= 70 -> c - 55 else if c >= 97 && c <= 102 -> c - 87 else -> -1
+        if d < 0 -> return None
+        n = n * 16 + d
+    }
+    Val(n)
+}
+
+priv collect_hex_seq: fn(seq: HexSeq) -> [Int]? Never! {
+    ^out: [Int]{}
+    first: parse_hex4_val(seq.first) ?? return None
+    out.push(first)
+    loop more in seq.rest {
+        val: parse_hex4_val(more.group) ?? return None
+        out.push(val)
+    }
+    Val(out)
+}
+
+ip_parse_v4: fn(text: String) -> V4Parsed? Never! {
+    parsed: V4Address.parse(text) ?? return None
+    a: parse_octet_val(parsed.a) ?? return None
+    b: parse_octet_val(parsed.b) ?? return None
+    c: parse_octet_val(parsed.c) ?? return None
+    d: parse_octet_val(parsed.d) ?? return None
+    Val(V4Parsed{a: a, b: b, c: c, d: d})
+}
+
+ip_parse_v4_network: fn(text: String) -> V4NetworkParsed? Never! {
+    parsed: V4Network.parse(text) ?? return None
+    a: parse_octet_val(parsed.a) ?? return None
+    b: parse_octet_val(parsed.b) ?? return None
+    c: parse_octet_val(parsed.c) ?? return None
+    d: parse_octet_val(parsed.d) ?? return None
+    prefix: parse_prefix_val(parsed.prefix) ?? return None
+    Val(V4NetworkParsed{a: a, b: b, c: c, d: d, prefix: prefix})
+}
+
+ip_parse_v6: fn(text: String) -> [Int]? Never! {
+    parsed: V6Address.parse(text) ?? return None
+    ^lw: [Int]{}
+    ^rw: [Int]{}
+    ^compressed: false
+    if parsed == {
+        .LeadingCompress(right_opt) -> {
+            compressed = true
+            if right_opt == .Val(seq) {
+                rw = collect_hex_seq(seq) ?? return None
+            }
+        }
+        .Full(left_seq, tail_opt) -> {
+            lw = collect_hex_seq(left_seq) ?? return None
+            if tail_opt == .Val(tail) {
+                compressed = true
+                if tail.right == .Val(seq) {
+                    rw = collect_hex_seq(seq) ?? return None
+                }
+            }
+        }
+    }
+    total: lw.len() + rw.len()
+    if compressed {
+        if total >= 8 -> return None
+    } else if total != 8 {
+        return None
+    }
+    ^words: [Int]{}
+    loop w in lw -> words.push(w)
+    if compressed {
+        loop _ in 0..<(8 - total) -> words.push(0)
+    }
+    loop w in rw -> words.push(w)
+    if words.len() != 8 -> return None
+    Val(words)
+}

@@ -1,0 +1,205 @@
+// Tests for the grammar-driven SQL CheckedText head (SQLite 3.45.0).
+use {
+    db: core.db
+    core.db.[DBValue, SQL]
+    fs: core.files
+}
+
+priv read_engine_file: fn(rel: String) -> String {
+    if fs.exists("Core/DB/Engine/{rel}") {
+        return fs.read("Core/DB/Engine/{rel}") ?? panic("cannot read Core/DB/Engine/{rel}")
+    }
+    fs.read("Engine/{rel}") ?? panic("cannot read Engine/{rel}")
+}
+
+priv parse_int_simple: fn(text: String) -> Int? Never! {
+    trimmed: text.trim()
+    bytes: trimmed.bytes()
+    if bytes.len() == 0 -> return None
+    ^val: 0
+    loop b in bytes {
+        d: Int{b} - 48
+        if d < 0 || d > 9 -> return None
+        val = val * 10 + d
+    }
+    Val(val)
+}
+
+priv extract_tk_ids: fn(tokenize_src: String) -> [String:Int] Never! {
+    ^ids: [String:Int]{}
+    loop line in tokenize_src.split("\n") {
+        trimmed: line.trim()
+        if !trimmed.starts_with("TK_") -> next
+        colon: trimmed.partition(":")
+        if colon.tail == "" -> next
+        num: parse_int_simple(colon.tail) ?? next
+        ids[colon.head.trim()] = num
+    }
+    ids
+}
+
+priv extract_yy_fallback: fn(parse_tables_src: String) -> [Int] Never! {
+    ^vals: [Int]{}
+    ^inside: false
+    loop line in parse_tables_src.split("\n") {
+        trimmed: line.trim()
+        if !inside {
+            if trimmed.starts_with("YY_FALLBACK:") -> inside = true
+            next
+        }
+        if trimmed == "}}" -> break
+        cleaned: trimmed.replace(",", "")
+        num: parse_int_simple(cleaned) ?? next
+        vals.push(num)
+    }
+    vals
+}
+
+priv KeywordRow: struct {
+    word: String,
+    tk: String,
+}
+
+priv extract_keywords: fn(tokenize_src: String) -> [KeywordRow] Never! {
+    ^rows: [KeywordRow]{}
+    ^seen: [String:Bool]{}
+    loop line in tokenize_src.split("\n") {
+        trimmed: line.trim()
+        if !trimmed.starts_with("\"") -> next
+        parts: trimmed.partition("->")
+        if parts.tail == "" -> next
+        left: parts.head.trim()
+        right: parts.tail.trim()
+        if !left.starts_with("\"") || !left.ends_with("\"") || !right.starts_with("TK_") -> next
+        word: left.replace("\"", "")
+        if word.bytes().len() < 2 -> next
+        if seen.get(word) != None -> next
+        seen[word.copy()] = true
+        rows.push(KeywordRow{word: word, tk: right})
+    }
+    rows
+}
+
+#Test("SQL grammar matches SQLite 3.45.0 YY_FALLBACK and hard-reserved keyword partition") {
+    tok_src: read_engine_file("Tokenize.jet")
+    pt_src: read_engine_file("ParseTables.jet")
+    tk_ids: extract_tk_ids(tok_src)
+    yy_fb: extract_yy_fallback(pt_src)
+    assert(yy_fb.len() >= 180, "expected full YY_FALLBACK table, got {yy_fb.len()}")
+    ^nonzero_fb: 0
+    loop v in yy_fb {
+        if v != 0 -> nonzero_fb += 1
+    }
+    assert_eq(nonzero_fb, 73)
+
+    kws: extract_keywords(tok_src)
+    assert_eq(kws.len(), 147)
+
+    ^fb_count: 0
+    ^join_idx_count: 0
+    ^reserved_count: 0
+    loop row in kws {
+        tk_id: tk_ids.get(row.tk) ?? panic("missing token id for {row.tk}")
+        is_fb: tk_id >= 0 && tk_id < yy_fb.len() && yy_fb[tk_id] != 0
+        is_join_or_idx: row.tk == "TK_JOIN_KW" || row.tk == "TK_INDEXED"
+        if is_fb {
+            fb_count += 1
+            // Every YY_FALLBACK keyword is valid unquoted as a table and column name.
+            assert(SQL.check([String]{"CREATE TABLE {row.word} ({row.word} TEXT)"}) == .Ok(_), "YY_FALLBACK keyword {row.word} ({row.tk}) must be accepted as unquoted identifier")
+        } else if is_join_or_idx {
+            join_idx_count += 1
+            assert(SQL.check([String]{"CREATE TABLE {row.word} ({row.word} TEXT)"}) == .Ok(_), "JOIN_KW/INDEXED keyword {row.word} ({row.tk}) must be accepted as unquoted identifier")
+        } else {
+            reserved_count += 1
+            // Every hard-reserved keyword must be refused unquoted as a table name...
+            if SQL.check([String]{"CREATE TABLE {row.word} (x TEXT)"}) == {
+                .Ok(_) -> panic("hard-reserved SQL keyword {row.word} ({row.tk}) must be refused unquoted")
+                .Err(e) -> assert(e.reason.contains("reserved SQL word"), "expected reserved-word reason for {row.word}, got: {e.reason}")
+            }
+            // ...and accepted when double-quoted.
+            assert(SQL.check([String]{"CREATE TABLE \"{row.word}\" (\"{row.word}\" TEXT)"}) == .Ok(_), "quoted reserved keyword \"{row.word}\" must be accepted")
+        }
+    }
+    assert_eq(fb_count, 78)
+    assert_eq(join_idx_count, 8)
+    assert_eq(reserved_count, 61)
+}
+
+#Test("SQL grammar accepts full SQLite 3.45.0 DDL, DML, CTE, window, UPSERT, trigger, and utility forms") {
+    val: 7
+    title: "hello"
+    tbl: SQL.ident("items") ?? panic("tbl")
+    col: SQL.ident("title") ?? panic("col")
+
+    q_cte: SQL{"WITH RECURSIVE cnt(x) AS (VALUES(1) UNION ALL SELECT x + 1 FROM cnt WHERE x < {val}) SELECT x FROM cnt"}
+    assert_eq(q_cte.params(), [DBValue]{.Int(7)})
+
+    q_win: SQL{"SELECT a, sum(b) FILTER (WHERE b > {val}) OVER (PARTITION BY a ORDER BY c DESC NULLS LAST ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW EXCLUDE TIES) FROM t"}
+    assert_eq(q_win.params(), [DBValue]{.Int(7)})
+
+    q_upsert: SQL{"INSERT INTO {tbl} (id, {col}) VALUES ({val}, {title}) ON CONFLICT (id) DO UPDATE SET {col} = excluded.title WHERE excluded.title IS NOT DISTINCT FROM {title} RETURNING id, {col}"}
+    assert_eq(q_upsert.template(), "INSERT INTO \"items\" (id, \"title\") VALUES (?, ?) ON CONFLICT (id) DO UPDATE SET \"title\" = excluded.title WHERE excluded.title IS NOT DISTINCT FROM ? RETURNING id, \"title\"")
+    assert_eq(q_upsert.params(), [DBValue]{.Int(7), .Text("hello"), .Text("hello")})
+
+    q_ddl: SQL{"CREATE TABLE IF NOT EXISTS {tbl} (id INTEGER PRIMARY KEY AUTOINCREMENT, {col} TEXT NOT NULL DEFAULT 'none' COLLATE NOCASE, body BLOB DEFAULT X'deadbeef', total INT GENERATED ALWAYS AS (id * 2) STORED, CHECK (id >= 0)) STRICT"}
+    assert(q_ddl.template().starts_with("CREATE TABLE IF NOT EXISTS \"items\""))
+
+    q_trig: SQL{"CREATE TRIGGER IF NOT EXISTS tr_items AFTER INSERT ON items FOR EACH ROW WHEN NEW.id > 0 BEGIN INSERT INTO audit(msg) VALUES (NEW.title); END"}
+    assert(q_trig.params().len() == 0)
+
+    q_vtab: SQL{"CREATE VIRTUAL TABLE IF NOT EXISTS docs USING fts5(title, body, tokenize='unicode61')"}
+    assert(q_vtab.params().len() == 0)
+
+    q_pragma: SQL{"PRAGMA journal_mode = WAL; PRAGMA foreign_keys(ON);"}
+    assert(q_pragma.params().len() == 0)
+
+    q_explain: SQL{"EXPLAIN QUERY PLAN SELECT a -> '$.k', a ->> '$.v' FROM t WHERE c BETWEEN 1 AND 10 AND d LIKE '%x%' ESCAPE '!'"}
+    assert(q_explain.params().len() == 0)
+}
+
+#Test("SQLName quoting, slot classification, InString detection, and live SQLite execution") {
+    assert(SQL.ident("") == .Err(_))
+    assert(SQL.ident("a\u{0}b") == .Err(_))
+    weird: SQL.ident("odd\"table") ?? panic("weird")
+    assert_eq(weird.text(), "odd\"table")
+    assert_eq(weird.quoted(), "\"odd\"\"table\"")
+
+    // Slot classification checks
+    c_slots: SQL.check([String]{"SELECT t.", " FROM ", " WHERE a = ", ""}) ?? panic("c_slots")
+    assert_eq(c_slots.slots.len(), 3)
+    assert(c_slots.slots[0] == .Name)
+    assert(c_slots.slots[1] == .Name)
+    assert(c_slots.slots[2] == .Operand)
+
+    c_in_str: SQL.check([String]{"SELECT * FROM t WHERE a = '", "' AND b = ", ""}) ?? panic("c_in_str")
+    assert_eq(c_in_str.slots.len(), 2)
+    assert(c_in_str.slots[0] == .InString)
+    assert(c_in_str.slots[1] == .Operand)
+
+    c_esc_sq: SQL.check([String]{"SELECT * FROM t WHERE a = 'it''s' AND b = ", ""}) ?? panic("c_esc_sq")
+    assert_eq(c_esc_sq.slots.len(), 1)
+    assert(c_esc_sq.slots[0] == .Operand)
+
+    // Syntax refusals with accurate TextSpot
+    if SQL.check([String]{"SELEC id FROM t"}) == {
+        .Ok(_) -> panic("typo must be refused")
+        .Err(e) -> {
+            assert_eq(e.at.part, 0)
+            assert_eq(e.at.offset, 0)
+        }
+    }
+    assert(SQL.check([String]{""}) == .Err(_))
+    assert(SQL.check([String]{"   "}) == .Err(_))
+    assert(SQL.check([String]{"SELECT 'unterminated"}) == .Err(_))
+
+    // Live SQLite execution with SQLName + [U8] blob + scalar values
+    store: db.open_memory()
+    scope: store.all_rows()
+    col: SQL.ident("label\"col") ?? panic("col")
+    blob: [U8]{U8{1}, U8{2}, U8{255}}
+    _: db.migrate(scope, "v1", [SQL]{SQL{"CREATE TABLE {weird} (id INTEGER PRIMARY KEY, {col} TEXT NOT NULL, raw BLOB NOT NULL)"}}) ?? panic("migrate: {err}")
+    _: scope.execute(SQL{"INSERT INTO {weird} (id, {col}, raw) VALUES ({1}, {"o'brien"}, {blob})"}) ?? panic("insert: {err}")
+    found: scope.query_one(SQL{"SELECT {col}, raw FROM {weird} WHERE id = {1}"}) ?? panic("expected one row")
+    assert_eq(db.row_text(found, "label\"col") ?? panic("text"), "o'brien")
+    assert_eq(db.row_value(found, "raw") ?? panic("raw"), DBValue.Blob(blob))
+}

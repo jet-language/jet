@@ -34,6 +34,8 @@ use {
     app.[Live]
     // A row policy is asked as an account by its id.
     auth: core.auth
+    core.grammar.error.[TextSpot]
+    sql_syntax: __core_db_syntax_sql
 }
 
 // core.db owns its SQL values, typed row selection and conversion. The private
@@ -304,65 +306,172 @@ priv db_error: fn(message: String) -> DBError Never! { DBError.Failed(message.co
 
 priv db_closed: fn() -> DBError Never! { db_error("database connection is closed") }
 
-// Why a checked SQL literal was rejected: the compiler reports it under the
-// checked text rejection's code with this reason as its Why.
-#Error
-SQLLiteralError: struct {
-    reason: String,
+/// A checked SQL identifier (table, column, index, trigger, schema, or alias)
+/// safe to splice into a `SQL{"..."}` identifier slot via double-quote escaping.
+SQLName: struct {
+    name: String,
 
-    impl Diagnostic {
-        code: "E2712",
+    impl Display {
+        display: fn(self) -> String { self.name.copy() }
+    }
 
-        what: fn(self) -> String { "this checked text type rejected its body" }
+    impl Debug {
+        debug: fn(^^self) -> String { self.quoted() }
+    }
 
-        why: fn(self) -> String { "{self.reason}" }
+    impl Equatable {
+        equal: fn(self, rhs: SQLName) -> Bool { self.name == rhs.name }
+    }
 
-        fix: fn(self) -> String { "fix the body so it satisfies the type's declared text grammar" }
+    new: fn(text: String) -> SQLName DBError! {
+        raw: text.bytes()
+        if raw.len() == 0 {
+            return Err(db_error("SQL identifier cannot be empty"))
+        }
+        loop byte in raw {
+            if byte == (U8{0}) {
+                return Err(db_error("SQL identifier cannot contain NUL"))
+            }
+        }
+        Ok(SQLName{name: text.copy()})
+    }
+
+    text: fn(self) -> String Never! { self.name.copy() }
+
+    quoted: fn(self) -> String Never! { "\"{self.name.replace("\"", "\"\"")}\"" }
+}
+
+/// Where a hole sits inside a checked `SQL{…}` literal, chosen at build time
+/// by the SQLite 3.45.0 grammar.
+SQLSlot: enum {
+    Operand,
+    Name,
+    InString,
+}
+
+/// One encoded hole carried into `SQL.build`: either a bound parameter value
+/// or a checked `SQLName` identifier spliced via double-quote escaping.
+#Equatable
+SQLHole: enum {
+    Value(DBValue),
+    Name(SQLName),
+}
+
+priv sql_slot_from_code: fn(code: Int) -> SQLSlot Never! {
+    if code == {
+        sql_syntax.SQL_SLOT_NAME -> SQLSlot.Name
+        sql_syntax.SQL_SLOT_IN_STRING -> SQLSlot.InString
+        else -> SQLSlot.Operand
     }
 }
 
+// Why a checked SQL literal was rejected: the compiler reports it under the
+// checked text rejection's code at `at`, with `reason` as its Why.
+#Error
+SQLLiteralError: struct {
+    reason: String,
+    at: TextSpot,
+}
+
+impl SQLLiteralError.Diagnostic {
+    code: "E2712",
+
+    what: fn(self) -> String { "this checked text type rejected its body" }
+
+    why: fn(self) -> String { "{self.reason}" }
+
+    fix: fn(self) -> String { "fix the body so it satisfies the type's declared text grammar" }
+}
+
 // Checked SQL: the template text with `?` placeholders plus its bound values.
-// `SQL{"… {value} …"}` is a checked text literal whose holes stay values: each
-// becomes one bound DBValue, never query text.
-#Equatable
+// `SQL{"… {value} …"}` checks SQLite 3.45.0 syntax at build time, binds every
+// value hole as a `?` parameter, and requires `SQLName` in identifier slots.
 SQL: struct {
     text: String,
     values: [DBValue],
-
-    raw: fn(text: String) -> SQL Never! { SQL{text: text.copy(), values: [DBValue]{}} }
-
-    template: fn(self) -> String Never! { self.text.copy() }
-
-    params: fn(self) -> [DBValue] Never! { self.values.copy() }
 
     impl Display {
         display: fn(self) -> String { self.text.copy() }
     }
 
-    impl CheckedText {
-        Error: SQLLiteralError,
-        Hole: DBValue,
+    impl Equatable {
+        equal: fn(self, rhs: SQL) -> Bool { self.text == rhs.text && self.values == rhs.values }
+    }
+}
 
-        // Every SQL text is accepted; its holes are what keeps a query safe.
-        check: fn(parts: [String]) -[]> Checked<[String], TextSlot> SQLLiteralError! {
-            Ok(Checked{shape: parts.copy(), slots: loop _ in 1..<parts.len() -> TextSlot.Text})
-        }
+impl SQL {
+    raw: fn(text: String) -> SQL Never! { SQL{text: text.copy(), values: [DBValue]{}} }
 
-        // A DBValue binds as-is; Int, Float, Bool and byte lists bind as their own
-        // variant; anything else binds its display text.
-        encode_hole: fn<T: Printable>(value: T, _slot: TextSlot) -[]> DBValue {
-            if T == {
-                DBValue -> value.copy()
-                Int -> DBValue.Int(value)
-                Float -> DBValue.Float(value)
-                Bool -> DBValue.Bool(value)
-                [U8] -> DBValue.Blob(value.copy())
-                else -> DBValue.Text("{value}")
+    ident: fn(text: String) -> SQLName DBError! { SQLName.new(text) }
+
+    template: fn(self) -> String Never! { self.text.copy() }
+
+    params: fn(self) -> [DBValue] Never! { self.values.copy() }
+}
+
+impl SQL.CheckedText {
+    Error: SQLLiteralError,
+    Hole: SQLHole,
+    Slot: SQLSlot,
+
+    check: fn(parts: [String]) -[]> Checked<[String], SQLSlot> SQLLiteralError! {
+        codes: sql_syntax.sql_check_parts(parts) ?? return Err(SQLLiteralError{reason: err.reason.copy(), at: TextSpot{part: err.part, offset: err.offset}})
+        slots: loop code in codes -> sql_slot_from_code(code)
+        Ok(Checked{shape: parts.copy(), slots: slots})
+    }
+
+    accepts: fn(slot: SQLSlot, hole: TypeId) -[]> String? {
+        if slot == {
+            .InString -> Val("a hole cannot sit inside a SQL string literal; drop the quotes and write `{{value}}` so it binds as a parameter")
+            .Name -> {
+                if hole.name == "SQLName" -> return None
+                Val("a SQL identifier slot expects `SQLName`, not `{hole.name}`; construct one with `SQLName.new(...)`")
+            }
+            .Operand -> {
+                kind: hole.kind
+                if (kind == .List && hole.name != "[U8]") || kind == .FixedList || kind == .Map {
+                    return Val("a SQL value hole binds one scalar or `[U8]` blob, not `{hole.name}`")
+                }
+                None
             }
         }
-
-        build: fn(shape: [String], holes: [DBValue]) -[]> SQL { __sql_literal(shape, holes) }
     }
+
+    // A SQLName splices as a double-quoted identifier; a DBValue binds as-is;
+    // Int, Float, Bool and `[U8]` bind as their own variant; anything else
+    // binds its display text.
+    encode_hole: fn<T: Printable>(value: T, _slot: SQLSlot) -[]> SQLHole {
+        if T == {
+            SQLName -> SQLHole.Name(value.copy())
+            DBValue -> SQLHole.Value(value.copy())
+            Int -> SQLHole.Value(DBValue.Int(value))
+            Float -> SQLHole.Value(DBValue.Float(value))
+            Bool -> SQLHole.Value(DBValue.Bool(value))
+            [U8] -> SQLHole.Value(DBValue.Blob(value.copy()))
+            else -> SQLHole.Value(DBValue.Text("{value}"))
+        }
+    }
+
+    build: fn(shape: [String], holes: [SQLHole]) -[]> SQL { __sql_build(shape, holes) }
+}
+
+priv __sql_build: fn(literals: [String], holes: [SQLHole]) -> SQL Never! {
+    if literals.len() != holes.len() + 1 {
+        panic("typed SQL literal pieces do not match its holes")
+    }
+    ^pieces: [String]{literals[0].copy()}
+    ^values: [DBValue]{}
+    loop index in 0..<holes.len() {
+        if holes[index] == {
+            .Name(ident) -> pieces.push(ident.quoted())
+            .Value(value) -> {
+                pieces.push("?")
+                values.push(value.copy())
+            }
+        }
+        pieces.push(literals[index + 1].copy())
+    }
+    SQL{text: pieces.join(""), values: values}
 }
 
 priv __sql_literal: fn(literals: [String], values: [DBValue]) -> SQL Never! {

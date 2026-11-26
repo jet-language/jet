@@ -1,0 +1,29 @@
+use {
+    db: core.db
+    core.db.[DBValue, SQL]
+}
+
+run: fn() {
+    tbl: SQL.ident("events\"log") ?? panic("tbl")
+    col: SQL.ident("body\"text") ?? panic("col")
+    id: 42
+    msg: "o'brien"
+    blob: [U8]{U8{65}, U8{66}, U8{67}}
+
+    create_q: SQL{"CREATE TABLE {tbl} (id INTEGER PRIMARY KEY, {col} TEXT NOT NULL, raw BLOB NOT NULL)"}
+    insert_q: SQL{"INSERT INTO {tbl} (id, {col}, raw) VALUES ({id}, {msg}, {blob})"}
+    select_q: SQL{"SELECT {col}, raw FROM {tbl} WHERE id = {id}"}
+
+    print("create: {create_q.template()}")
+    print("insert: {insert_q.template()} ({insert_q.params().len()})")
+    print("select: {select_q.template()} ({select_q.params().len()})")
+
+    store: db.open_memory()
+    scope: store.all_rows()
+    _: db.migrate(scope, "v1", [SQL]{create_q}) ?? panic("migrate")
+    _: scope.execute(insert_q) ?? panic("insert")
+    found: scope.query_one(select_q) ?? panic("query_one")
+    text: db.row_text(found, "body\"text") ?? panic("row_text")
+    raw: db.row_value(found, "raw") ?? panic("row_value")
+    print("row: {text} blob={raw == DBValue.Blob(blob)}")
+}

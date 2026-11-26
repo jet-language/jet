@@ -35,7 +35,7 @@ JetCLILSPChecker: struct {
                     given.push(JetDriverSourceDocument{path: overlay.path.copy(), source: overlay.source.copy()})
                 }
             }
-            if jet_cli_prepare_overlays(entry, entry, given, false, None, JetDriverCompileMode.Doc, alone) == {
+            if jet_cli_prepare_overlays(entry, entry, given, false, None, JetDriverCompileMode.Doc, alone, ignore_outside_overlays: true) == {
                 // A refusal (no toolchain, an unreadable manifest) has no span in
                 // the document; the client's log shows it.
                 .Refused(output) -> {
@@ -108,7 +108,7 @@ JetCLILSPChecker: struct {
             }
             ^sites: [Int]{}
             if length < 0 -> return sites
-            if jet_cli_prepare_overlays(entry, entry, given, false, None, JetDriverCompileMode.Doc, alone) == {
+            if jet_cli_prepare_overlays(entry, entry, given, false, None, JetDriverCompileMode.Doc, alone, ignore_outside_overlays: true) == {
                 .Refused(_) -> return sites
                 .Prepared(request, snapshot) -> {
                     ^demanded: request.move()

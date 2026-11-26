@@ -8,6 +8,7 @@ use {
     rt: jet.runtime.encoding
     mem: core.mem
     builtin: jet_builtins
+    csv_syntax: __core_encoding_syntax_csv
 }
 
 syntax_error: fn(format: EncodingFormat, offset: Int, line: Int, column: Int, path: String, reason: String) -> EncodingError Never! {
@@ -673,6 +674,13 @@ parse_rows_with: fn(text: String, delimiter: [U8], header: Bool, skip_blank: Boo
     raw: text.bytes()
     first: delimiter[0]
     width: delimiter.len()
+    if width == 1 && first == 44 {
+        if csv_syntax.csv_parse_rows(text, header, skip_blank) == .Val(parsed) {
+            ^out: [CSVRow]{}
+            loop row in parsed -> out.push(CSVRow{line: row.line, fields: row.fields})
+            return Ok(out)
+        }
+    }
     name: if width == 1 && first == 44 -> "comma" else -> "delimiter"
     ^rows: [CSVRow]{}
     ^fields: [String]{}
@@ -1688,3 +1696,31 @@ rows_error: fn(text: String) -> EncodingError Never! {
 #Test("CSV Bytes cells are base64 text") {
     assert_eq(csv_cell(Dyn.Bytes([U8]{104, 105})), "aGk=")
 }
+
+#Test("CSV grammar parses RFC 4180 sheets directly and rejects bare CR, unclosed quotes, and stray text") {
+    valid: [String]{
+        "",
+        "a,b,c\n1,2,3\n",
+        "\"hello, \"\"world\"\"\",\"line1\nline2\",plain\r\n,,\r\n",
+        "\n\"\"\n",
+    }
+    loop text in valid {
+        if csv_syntax.csv_parse_rows(text, false, false) == None {
+            panic("expected CSV grammar to parse `{text}`")
+        }
+        _: rows(text, skip_blank: false) ?? panic("rows failed: {err.reason}")
+    }
+    invalid: [String]{
+        "\"unterminated",
+        "\"a\"x,b",
+        "a\"b,c",
+        "a,b\rc,d",
+    }
+    loop text in invalid {
+        if csv_syntax.csv_parse_rows(text, false, false) != None {
+            panic("expected CSV grammar to reject `{text}`")
+        }
+        if rows(text) == .Ok(_) -> panic("expected rows to reject `{text}`")
+    }
+}
+

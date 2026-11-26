@@ -1268,6 +1268,9 @@ SemaScopeTable: struct {
     // `writes: .Explicit` is active: every call writes the `^`/`^^` mark its
     // signature implies (Ownership/CallMarks.jet).
     writes_explicit: Bool{false},
+    // While checking the first step of a named-head pipe (`xs |> grow(^<>)`),
+    // the head's symbol id so call-mark reports name `<>` rather than `xs`.
+    pipe_in_place_symbol: SymbolID?{None},
     // `failures: .Explicit` is active: every call that can fail is written
     // with `?` (FailureMarks.jet).
     failures_explicit: Bool{false},
@@ -1355,6 +1358,7 @@ SemaScopeMark: struct {
     unit_explicit_units: Bool,
     copies_explicit: Bool,
     writes_explicit: Bool,
+    pipe_in_place_symbol: SymbolID?,
     failures_explicit: Bool,
     context_allocation: Int,
     open_marks: Int,
@@ -2398,6 +2402,7 @@ sema_scope_snapshot: fn(source: SemaScopeTable) -> SemaScopeTable Never! {
         unit_explicit_units: source.unit_explicit_units,
         copies_explicit: source.copies_explicit,
         writes_explicit: source.writes_explicit,
+        pipe_in_place_symbol: source.pipe_in_place_symbol,
         failures_explicit: source.failures_explicit,
         context_allocation: source.context_allocation,
         binding_undo: source.binding_undo.copy(),
@@ -2431,6 +2436,7 @@ sema_scope_mark: fn(table: ^SemaScopeTable) -> SemaScopeMark Never! {
         unit_explicit_units: table.unit_explicit_units,
         copies_explicit: table.copies_explicit,
         writes_explicit: table.writes_explicit,
+        pipe_in_place_symbol: table.pipe_in_place_symbol,
         failures_explicit: table.failures_explicit,
         context_allocation: table.context_allocation,
         open_marks: table.open_marks,
@@ -2475,6 +2481,7 @@ sema_scope_rollback: fn(table: ^SemaScopeTable, mark: SemaScopeMark) Never! {
     table.unit_explicit_units = mark.unit_explicit_units
     table.copies_explicit = mark.copies_explicit
     table.writes_explicit = mark.writes_explicit
+    table.pipe_in_place_symbol = mark.pipe_in_place_symbol
     table.failures_explicit = mark.failures_explicit
     table.context_allocation = mark.context_allocation
     table.deep_check = mark.deep_check
@@ -3288,6 +3295,7 @@ sema_scope_light_copy: fn(source: SemaScopeTable) -> SemaScopeTable Never! {
             unit_explicit_units: source.unit_explicit_units,
             copies_explicit: source.copies_explicit,
             writes_explicit: source.writes_explicit,
+            pipe_in_place_symbol: source.pipe_in_place_symbol,
             failures_explicit: source.failures_explicit,
             context_allocation: source.context_allocation,
             policy_modules: source.policy_modules,
@@ -3351,6 +3359,7 @@ sema_scope_light_copy: fn(source: SemaScopeTable) -> SemaScopeTable Never! {
         unit_explicit_units: source.unit_explicit_units,
         copies_explicit: source.copies_explicit,
         writes_explicit: source.writes_explicit,
+        pipe_in_place_symbol: source.pipe_in_place_symbol,
         failures_explicit: source.failures_explicit,
         context_allocation: source.context_allocation,
         policy_modules: source.policy_modules,

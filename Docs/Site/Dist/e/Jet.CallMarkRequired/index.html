@@ -5,9 +5,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Jet.CallMarkRequired — Jet diagnostic</title>
-<meta name="description" content="A call under `#Policy(writes: .Explicit)` is missing the `^` or `^^` mark its callee&#39;s signature implies for a named argument or receiver, or writes a mark the signature doesn&#39;t imply.">
+<meta name="description" content="A call is missing `^` before a named argument its callee&#39;s signature changes, or writes a mark that disagrees with the signature.">
 <meta property="og:title" content="Jet.CallMarkRequired — Jet diagnostic">
-<meta property="og:description" content="A call under `#Policy(writes: .Explicit)` is missing the `^` or `^^` mark its callee&#39;s signature implies for a named argument or receiver, or writes a mark the signature doesn&#39;t imply.">
+<meta property="og:description" content="A call is missing `^` before a named argument its callee&#39;s signature changes, or writes a mark that disagrees with the signature.">
 <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
 <link rel="stylesheet" href="../../assets/site.css">
 </head>
@@ -25,16 +25,16 @@
 <div class="page-header">
 <p class="eyebrow">// diagnostic E0228</p>
 <h1>Jet.CallMarkRequired</h1>
-<p>A call under `#Policy(writes: .Explicit)` is missing the `^` or `^^` mark its callee&#39;s signature implies for a named argument or receiver, or writes a mark the signature doesn&#39;t imply.</p>
+<p>A call is missing `^` before a named argument its callee&#39;s signature changes, or writes a mark that disagrees with the signature.</p>
 </div>
 </section>
 <article class="wrap article">
 <h2>What</h2>
-<p class="diag-copy what" data-registry-field="what">A call under `#Policy(writes: .Explicit)` is missing the `^` or `^^` mark its callee&#39;s signature implies for a named argument or receiver, or writes a mark the signature doesn&#39;t imply.</p>
+<p class="diag-copy what" data-registry-field="what">A call is missing `^` before a named argument its callee&#39;s signature changes, or writes a mark that disagrees with the signature.</p>
 <h2>Why</h2>
-<p class="diag-copy why" data-registry-field="why">Calls are written plain and the signature decides what each one does. The policy asks that every call that changes a named value write `^` before it and every call that takes one write `^^`, so the text shows each write and take; a mark that disagrees with the signature would tell the reader something false.</p>
+<p class="diag-copy why" data-registry-field="why">Every call writes `^` before each named argument it changes (`grow(^xs)`), including a forwarded `^` parameter, so writes are visible in diffs and plain text. Method receivers stay plain (`xs.push(4)`), and `^^` on a whole-name take is optional and checked when written.</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Write the mark the quoted signature implies: `^` for a `^` parameter or `^self` method, `^^` for a `^^` parameter or `^^self` method, and no mark for a read.</p>
+<p class="diag-copy fix" data-registry-field="fix">Write `^` before the named argument the quoted signature changes, or `^^` (or no mark) for a whole-name take.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>Jet.CallMarkRequired</code>: <code>Tests/UI/E0228_take_mark_explains_take.stderr</code>.</p>
 <pre class="diag">Error: Jet.CallMarkRequired: `^^` cannot mark a part of `st`

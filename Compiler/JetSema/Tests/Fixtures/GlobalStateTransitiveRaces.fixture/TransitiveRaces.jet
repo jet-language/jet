@@ -1,0 +1,69 @@
+^level: 1
+#Persist ^pinned: 0
+
+bump_pinned: fn() Never! {
+    pinned += 1
+}
+
+read_pinned: fn() -> Int { pinned }
+read_level: fn() -> Int { level }
+
+allowed_combinator_reads: fn() {
+    _: (task.all {read_level(), level + 1}) ?? [Int]{}
+}
+
+race_group_trans_write_vs_direct_read: fn() {
+    task.group workers {
+        a: task { bump_pinned() }
+        b: task { pinned }
+        _: a.join() ?? ()
+        _: b.join() ?? 0
+    }
+}
+
+race_group_trans_write_vs_trans_write: fn() {
+    task.group workers {
+        a: task { bump_pinned() }
+        b: task { bump_pinned() }
+        _: a.join() ?? ()
+        _: b.join() ?? ()
+    }
+}
+
+race_group_opener_trans_read_vs_child_trans_write: fn() {
+    task.group workers {
+        a: task { bump_pinned() }
+        seen: read_pinned()
+        print(seen)
+        _: a.join() ?? ()
+    }
+}
+
+race_combinator_trans_write: fn() {
+    _: (task.all {bump_pinned(), ()}) ?? [Unit]{}
+}
+
+race_para_trans_write: fn() {
+    xs: [Int]{1, 2}
+    _: xs.para_map(fn(x: Int) {
+        bump_pinned()
+        x
+    })
+}
+
+detach_trans_reader: fn() {
+    task.group workers {
+        t: task { read_level() }
+        t.detach()
+    }
+}
+
+run: fn() {
+    allowed_combinator_reads()
+    race_group_trans_write_vs_direct_read()
+    race_group_trans_write_vs_trans_write()
+    race_group_opener_trans_read_vs_child_trans_write()
+    race_combinator_trans_write()
+    race_para_trans_write()
+    detach_trans_reader()
+}

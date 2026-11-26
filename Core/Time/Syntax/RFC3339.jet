@@ -1,0 +1,22 @@
+// RFC 3339 date-time grammar for checked `DateTime{"..."}` literals.
+use core.grammar.[Grammar]
+
+priv Timestamp: Grammar{"""
+    timestamp : y=year '-' m=two '-' d=two sep=T_SEP hh=two ':' mm=two ':' ss=two frac=fraction? zone=tz EOF ;
+    year      : a=DIGIT b=DIGIT c=DIGIT d=DIGIT ;
+    two       : a=DIGIT b=DIGIT ;
+    fraction  : '.' digits+=DIGIT+ ;
+    tz        : z=UTC # Utc
+              | sign=('+' | '-') hh=two ':' mm=two # Offset
+              ;
+    T_SEP     : [T] ;
+    UTC       : [Z] ;
+    DIGIT     : [0-9] ;
+"""}
+
+rfc3339_syntax_ok: fn(text: String) -> Bool Never! {
+    if Timestamp.parse(text) == {
+        .Ok(_) -> true
+        .Err(_) -> false
+    }
+}

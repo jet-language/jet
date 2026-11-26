@@ -1,0 +1,14 @@
+// HTML refuses holes in tag names, raw-text elements (<script>/<style>), and
+// B8 refused attributes (on*, data-on*, style, srcdoc, srcset) with
+// Jet.CheckedTextHoleSlot.
+run: fn() {
+    tag: "div"
+    x: "1"
+    a: HTML{"<{tag}>"}
+    b: HTML{"<script>{x}</script>"}
+    c: HTML{"<a onclick='go({x})'>x</a>"}
+    d: HTML{"<div style='{x}'>x</div>"}
+    e: HTML{"<iframe srcdoc='{x}'></iframe>"}
+    f: HTML{"<img srcset='{x}'/>"}
+    print("{a} {b} {c} {d} {e} {f}")
+}

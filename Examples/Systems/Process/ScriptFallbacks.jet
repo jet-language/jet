@@ -42,7 +42,7 @@ run: fn() {
     done.symlink("seed", files.join(root, "current"), replace: true)
     print("current: {files.basename(done.canonicalize(files.join(root, "current")))}")
     print("best effort: failed {done.failed()}, {done.report().lines().len()} failure, seed has {files.list_dir_or(files.join(root, "seed"), []).len()}")
-    exe: os.executable()
+    exe: Path.from(os.executable())
     loop name in ["b1", "b2", "b9"] {
         receipt: Sh{"{exe} {files.join(root, "{name}.status")}"}.run()
         print("{name}: exit {receipt.code} out [{receipt.output.trim()}] err [{receipt.errors.trim()}]")

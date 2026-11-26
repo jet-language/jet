@@ -2544,22 +2544,25 @@ parser_parse_call_args: fn(state: ^JetParserState, depth: Int, allow_marker_labe
     args
 }
 
-// `grow(^xs)` / `archive(^^title)`: a call mark on a place argument
-// (CallMark). A mark before a call on a place marks that call's receiver
-// (parser_receiver_mark); before any other value it is the ordinary
-// "expected a value" report.
+// `grow(^xs)` / `archive(^^title)`: a call mark on an argument (`CallArg.mark`).
+// A mark before a method call on a place marks that call's receiver
+// (`parser_receiver_mark`); a mark before a fresh value stays on the argument so
+// sema refuses it with E0225 and a Safe removal edit.
 parser_parse_marked_argument: fn(state: ^JetParserState, depth: Int, argument_span: Span, label: CallLabel?, spread: Bool) -> CallArg {
     mark_token: parser_bump(state)
     access: if parser_write_mark(mark_token.kind) -> PlaceAccess.Write else -> PlaceAccess.Take
+    saved_diagnostics: state.diagnostics.len()
     argument: parser_parse_expression(state, 1, depth + 1)
     if parser_mark_place(argument.expr) {
         return CallArg{convention: AccessConvention.Read, expr: argument.expr, span: argument_span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: label, spread: spread, mark: Val(CallMark{access: access, span: mark_token.span})}
     }
-    marked: parser_receiver_mark(state, argument.expr, access, mark_token.span) ?? {
-        parser_report_mark_not_value(state, mark_token)
+    if parser_receiver_mark(state, argument.expr, access, mark_token.span) == .Val(marked) {
+        return CallArg{convention: AccessConvention.Read, expr: marked, span: argument_span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: label, spread: spread}
+    }
+    if state.diagnostics.len() > saved_diagnostics {
         return CallArg{convention: AccessConvention.Read, expr: argument.expr, span: argument_span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: label, spread: spread}
     }
-    CallArg{convention: AccessConvention.Read, expr: marked, span: argument_span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: label, spread: spread}
+    CallArg{convention: AccessConvention.Read, expr: argument.expr, span: argument_span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: label, spread: spread, mark: Val(CallMark{access: access, span: mark_token.span})}
 }
 
 parser_parse_expression_fields: fn(state: ^JetParserState, depth: Int) -> ParsedExprFields {

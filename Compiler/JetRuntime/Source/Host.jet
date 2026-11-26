@@ -124,6 +124,12 @@ host_cpuid: fn(leaf: I64, subleaf: I64, register: I64) -> I64 {
 // output.
 ^host_stdout_direct: I64{0}
 
+priv _host_stdout_direct_write: fn(value: I64) {
+    #Unsafe("jet debug patches host_stdout_direct out of band through X64_DEBUG_EVAL_STORAGE") {
+        host_stdout_direct = value
+    }
+}
+
 // Caller holds the lock. Preserve unwritten bytes after a failed/short flush,
 // so a subsequent explicit flush has the same pending suffix, not duplicates.
 host_stdout_flush_locked: fn() -> I64 {

@@ -11,6 +11,7 @@
 use {
     core.net.mime.[MIME]
     unicode: core.text
+    url_syntax: __core_net_syntax_url
 }
 
 #Error
@@ -165,24 +166,25 @@ URL: struct {
         with_query(self, rows)
     }
 
-    // A checked `URL{"…{host}…"}` literal: `check` validates the skeleton before
-    // the program runs; holes stay opaque, so their slashes and dot segments never
-    // become URL grammar.
-    impl CheckedText {
-        Error: URLLiteralError,
-        Hole: String,
+}
 
-        check: fn(parts: [String]) -[]> Checked<[String], TextSlot> URLLiteralError! {
-            if url_literal_reason(parts) == .Val(reason) {
-                return Err(URLLiteralError{reason: reason})
-            }
-            Ok(Checked{shape: parts.copy(), slots: loop _ in 1..<parts.len() -> TextSlot.Text})
+// A checked `URL{"…{host}…"}` literal: `check` validates the URL template with
+// the RFC 3986 grammar before the program runs; holes stay opaque, so their
+// slashes and dot segments never become URL grammar.
+impl URL.CheckedText {
+    Error: URLLiteralError,
+    Hole: String,
+
+    check: fn(parts: [String]) -[]> Checked<[String], TextSlot> URLLiteralError! {
+        if url_literal_reason(parts) == .Val(reason) {
+            return Err(URLLiteralError{reason: reason})
         }
-
-        encode_hole: fn<T: Printable>(value: T, _slot: TextSlot) -[]> String { "{value}" }
-
-        build: fn(parts: [String], holes: [String]) -[]> URL { literal(parts, holes) }
+        Ok(Checked{shape: parts.copy(), slots: loop _ in 1..<parts.len() -> TextSlot.Text})
     }
+
+    encode_hole: fn<T: Printable>(value: T, _slot: TextSlot) -[]> String { "{value}" }
+
+    build: fn(parts: [String], holes: [String]) -[]> URL { literal(parts, holes) }
 }
 
 with_query: fn(url: URL, rows: [[String]]) -> URL Never! {
@@ -212,16 +214,16 @@ userinfo_text: fn(url: URL) -> String Never! {
 #Error
 URLLiteralError: struct {
     reason: String,
+}
 
-    impl Diagnostic {
-        code: "E2712",
+impl URLLiteralError.Diagnostic {
+    code: "E2712",
 
-        what: fn(self) -> String { "this checked text type rejected its body" }
+    what: fn(self) -> String { "this checked text type rejected its body" }
 
-        why: fn(self) -> String { "{self.reason}" }
+    why: fn(self) -> String { "{self.reason}" }
 
-        fix: fn(self) -> String { "fix the body so it satisfies the type's declared text grammar" }
-    }
+    fix: fn(self) -> String { "fix the body so it satisfies the type's declared text grammar" }
 }
 
 // A marker that occurs in none of `literals`, standing for each hole while the
@@ -241,59 +243,33 @@ priv url_hole_marker: fn(literals: [String]) -> String Never! {
     marker
 }
 
-// Why the checked literal pieces `literals` (a hole between each two) are no
-// URL, or None. Scheme, port and data-URL MIME holes are found structurally;
-// the rest parses with the URL grammar `literal` uses.
-priv url_literal_reason: fn(literals: [String]) -> String? {
-    marker: url_hole_marker(literals)
-    skeleton: unicode.trim(literals.join(marker))
-    bytes: skeleton.bytes()
-    colon: index_of(bytes, 58)
-    if colon >= 0 {
-        scheme: slice(bytes, 0, colon)
-        if find_text(scheme, marker, 0) >= 0 {
-            return Val("URL scheme cannot contain interpolation")
-        }
-        rest: slice(bytes, colon + 1, bytes.len())
-        if ascii_lower(scheme) == "data" {
-            ^data_body: rest
-            data_stops: [Int]{63, 35}
-            loop stop in data_stops {
-                end: index_of(data_body.bytes(), stop)
-                if end >= 0 -> data_body = slice(data_body.bytes(), 0, end)
-            }
-            comma: index_of(data_body.bytes(), 44)
-            if comma >= 0 && find_text(slice(data_body.bytes(), 0, comma), marker, 0) >= 0 {
-                return Val("data URL MIME metadata cannot contain interpolation")
-            }
-            if comma < 0 && find_text(data_body, marker, 0) >= 0 {
-                return Val("data URL payload needs a MIME separator")
-            }
-        }
-        if starts(rest, "//") {
-            ^authority: slice(rest.bytes(), 2, rest.bytes().len())
-            authority_stops: [Int]{47, 63, 35}
-            loop stop in authority_stops {
-                end: index_of(authority.bytes(), stop)
-                if end >= 0 -> authority = slice(authority.bytes(), 0, end)
-            }
-            at: last_index(authority.bytes(), 64)
-            host_port: if at >= 0 -> slice(authority.bytes(), at + 1, authority.bytes().len()) else -> authority
-            host_end: host_port.bytes().len()
-            bracket: index_of(host_port.bytes(), 93)
-            ^port: ""
-            if bracket >= 0 {
-                suffix: slice(host_port.bytes(), bracket + 1, host_end)
-                if starts(suffix, ":") -> port = suffix
-            } else {
-                port_colon: last_index(host_port.bytes(), 58)
-                if port_colon >= 0 -> port = slice(host_port.bytes(), port_colon + 1, host_end)
-            }
-            if find_text(port, marker, 0) >= 0 {
-                return Val("URL port cannot contain interpolation")
-            }
+priv url_trim_parts: fn(literals: [String]) -> [String] Never! {
+    if literals.len() == 0 -> return [String]{}
+    if literals.len() == 1 -> return [String]{unicode.trim(literals[0])}
+    ^out: [String]{}
+    loop (index, part) in literals {
+        if index == 0 {
+            out.push(unicode.trim_start(part))
+        } else if index + 1 == literals.len() {
+            out.push(unicode.trim_end(part))
+        } else {
+            out.push(part.copy())
         }
     }
+    out
+}
+
+// Why the checked literal pieces `literals` (a hole between each two) are no
+// URL, or None. Scheme, port, data-URL MIME and structural syntax are judged
+// by the URLTemplate grammar; semantic host/port/percent rules follow via
+// `parse_recipe`.
+priv url_literal_reason: fn(literals: [String]) -> String? {
+    trimmed: url_trim_parts(literals)
+    if url_syntax.url_check_parts(trimmed) == .Err(err) {
+        return Val(err.reason.copy())
+    }
+    marker: url_hole_marker(literals)
+    skeleton: unicode.trim(literals.join(marker))
     _: parse_recipe(skeleton, false) ?? return Val("the text is not a valid URL ({err})")
     None
 }

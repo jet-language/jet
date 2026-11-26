@@ -1,0 +1,20 @@
+# Sh{"..."} checks shell-word syntax through its grammar at build time, keeps
+# glued words (`a{x}b`, `--author={who}`) as one argv item, unquotes literal
+# quotes/escapes, keeps empty holes as one argv item, and leaves `*` literal.
+fixture: ShHeadOneHoleOneArgvItem.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 0
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = "commit: 7 -> [\"git\", \"commit\", \"-m\", \"hello; world | rm\", \"--author=Ada <ada@example.com>\", \"--\", \"*.jet\"]\nglued: 2 -> [\"echo\", \"aMIDb\"]\nempty: 4 -> [\"printf\", \"%s\", \"\", \"end\"]\nquotes: 5 -> [\"echo\", \"a  b\", \"c d\", \"say \\\"hi\\\"\", \"$raw\"]\ncont: 2 -> [\"echo\", \"continued\"]\nquoted_pipe: 3 -> [\"grep\", \"a|b\", \"*.jet\"]\n"
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: == o0
+step build: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: == o0

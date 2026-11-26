@@ -38,3 +38,20 @@ global_state_task_count: fn(diagnostics: [Diagnostic], code: String) -> Int {
         panic("expected 3 E1101 and 1 E1106, got {e1101} E1101 and {e1106} E1106: {global_state_purity_show(diagnostics)}")
     }
 }
+
+#Test("global_state_export_c_and_raw_words") {
+    diagnostics: global_state_purity_compile("Compiler/JetSema/Tests/Fixtures/GlobalStateExportSafety.fixture/ExportSafety.jet")
+    e3203: global_state_task_count(diagnostics, "E3203")
+    if e3203 != 2 || diagnostics.len() != 2 {
+        panic("expected 2 E3203 errors, got {e3203} E3203 (total {diagnostics.len()}): {global_state_purity_show(diagnostics)}")
+    }
+}
+
+#Test("global_state_transitive_task_and_para_races") {
+    diagnostics: global_state_purity_compile("Compiler/JetSema/Tests/Fixtures/GlobalStateTransitiveRaces.fixture/TransitiveRaces.jet")
+    e1101: global_state_task_count(diagnostics, "E1101")
+    e1106: global_state_task_count(diagnostics, "E1106")
+    if e1101 != 5 || e1106 != 1 || diagnostics.len() != 6 {
+        panic("expected 5 E1101 and 1 E1106, got {e1101} E1101 and {e1106} E1106 (total {diagnostics.len()}): {global_state_purity_show(diagnostics)}")
+    }
+}

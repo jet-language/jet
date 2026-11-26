@@ -1,0 +1,118 @@
+// Compiler-private part of core.encoding.ini: INI / ConfigParser document grammar.
+use {
+    core.grammar.[Grammar]
+}
+
+priv Config: Grammar{"""
+    config     : first=line rest+=next_line* EOF ;
+    next_line  : EOL body=line ;
+    line       : '[' name=SEC_NAME ']' # Section
+               | key=KEY sep=SEP val=val_item? # Entry
+               | # Blank
+               ;
+    val_item   : raw=DQUOTED # DQuoted
+               | raw=SQUOTED # SQuoted
+               | raw=BARE # Bare
+               ;
+    SEC_NAME   : [^\]\r\n;# \t] ([^\]\r\n;#]* [^\]\r\n;# \t])? ;
+    KEY        : [^=:\[\]\r\n;# \t] ([^=:\r\n;#]* [^=:\r\n;# \t])? ;
+    SEP        : '=' | ':' ;
+    DQUOTED    : '"' ('\\' [^\r\n] | [^"\\\r\n])* '"' ;
+    SQUOTED    : '\'' ('\\' [^\r\n] | [^'\\\r\n])* '\'' ;
+    BARE       : [^ \t\r\n;#"'] ([^\r\n;#]* [^ \t\r\n;#])? ;
+    EOL        : '\r'? '\n' ;
+    WS         : [ \t]+ -> skip ;
+    COMMENT    : [;#] [^\r\n]* -> skip ;
+"""}
+
+#Error
+IniSyntaxError: struct {
+    line: Int,
+    reason: String,
+}
+
+IniItem: struct {
+    is_section: Bool,
+    key: String,
+    value: String,
+}
+
+priv ini_trim: fn(text: String) -> String Never! {
+    raw: text.bytes()
+    ^a: 0
+    ^b: raw.len()
+    loop a < b {
+        n: Int{raw[a]}
+        if n == 32 || n == 9 -> a += 1 else -> break
+    }
+    loop b > a {
+        n: Int{raw[b - 1]}
+        if n == 32 || n == 9 -> b -= 1 else -> break
+    }
+    ^out: [U8]{}
+    loop i in a..<b -> out.push(raw[i])
+    String.from_bytes(out) ?? ""
+}
+
+priv ini_unquote: fn(text: String) -> String Never! {
+    raw: text.bytes()
+    if raw.len() < 2 -> return text.copy()
+    ^body: [U8]{}
+    ^i: 1
+    loop i < raw.len() - 1 {
+        if raw[i] == (U8{92}) && i + 1 < raw.len() - 1 {
+            i += 1
+            if raw[i] == (U8{110}) -> body.push(U8{10}) else if raw[i] == (U8{114}) {
+                body.push(U8{13})
+            } else if raw[i] == (U8{116}) -> body.push(U8{9}) else -> body.push(raw[i])
+        } else {
+            body.push(raw[i])
+        }
+        i += 1
+    }
+    String.from_bytes(body) ?? text.copy()
+}
+
+priv collect_line: fn(line: Line, line_no: Int, items: ^[IniItem]) -> Bool IniSyntaxError! {
+    if line == {
+        .Section(raw_name) -> {
+            name: ini_trim(raw_name)
+            if name.bytes().len() == 0 {
+                return Err(IniSyntaxError{line: line_no, reason: "ini section name is empty"})
+            }
+            items.push(IniItem{is_section: true, key: name, value: ""})
+            Ok(true)
+        }
+        .Entry(raw_key, _, val_opt) -> {
+            key: ini_trim(raw_key)
+            if key.bytes().len() == 0 {
+                return Err(IniSyntaxError{line: line_no, reason: "ini key is empty"})
+            }
+            val: if val_opt == {
+                .Val(v) -> {
+                    if v == {
+                        .DQuoted(raw) -> ini_unquote(raw)
+                        .SQuoted(raw) -> ini_unquote(raw)
+                        .Bare(raw) -> ini_trim(raw)
+                    }
+                }
+                .None -> ""
+            }
+            items.push(IniItem{is_section: false, key: key, value: val})
+            Ok(true)
+        }
+        .Blank -> Ok(true)
+    }
+}
+
+ini_parse_items: fn(text: String) -> [IniItem] IniSyntaxError! {
+    parsed: Config.parse(text) ?? return Err(IniSyntaxError{line: err.line, reason: "{err}"})
+    ^items: [IniItem]{}
+    _: collect_line(parsed.first, 1, items) ?? return Err(err)
+    ^line_no: 2
+    loop next_row in parsed.rest {
+        _: collect_line(next_row.body, line_no, items) ?? return Err(err)
+        line_no += 1
+    }
+    Ok(items)
+}

@@ -4841,7 +4841,9 @@ jet_driver_collect_core_identifier_demand_ids: fn(tokens: [Token], tables: Token
                     loop payload in names.dyn_payloads[at] {
                         if payload == .Named(type_name) {
                             loop module_name in core_type_modules(type_name) {
-                                if !demand.source_modules.contains(module_name) -> demand.source_modules.push(module_name)
+                                if !demand.source_modules.contains(module_name) {
+                                    demand.source_modules.push(module_name)
+                                }
                             }
                         }
                     }
@@ -7045,7 +7047,7 @@ jet_driver_load_walk: fn(
         // Established bare names use the same declaring-owner table. The
         // lowercase URL typed head remains supported without adding a lowercase
         // nominal alias.
-        if !embedded {
+        if !embedded && !request.runtime_library {
             loop bare in CORE_BARE_SOURCE_MODULES {
                 if !demand.bare_names.contains(bare.name) -> next
                 module_name: core_bare_source_module(bare.name) ?? next
@@ -7106,7 +7108,7 @@ jet_driver_load_walk: fn(
         }
         // `input.csv<Row>()`: the module an ambient `input` method names
         // declares the function filling its role (core_input_method_module).
-        if !embedded {
+        if !embedded && !request.runtime_library {
             loop method in demand.input_methods {
                 module_name: core_input_method_module(method) ?? next
                 ^sourced: false
@@ -7144,10 +7146,10 @@ jet_driver_load_walk: fn(
         // A boundary typed literal (`DateTime{"…"}`) is checked by its owner
         // module's CheckedText impl, even when the caller has no import of
         // that module.
-        if !embedded {
+        if !embedded && !request.runtime_library {
             loop module_name in demand.typed_head_modules {
                 if !bare_modules.contains(module_name) -> bare_modules.push(module_name.copy())
-                jet_driver_reach_open(reach, module_name)
+                jet_driver_reach_open_typed_head(reach, module_name)
                 head_index: jet_driver_core_unit(source_units, queued, pending, generated_records, request.core_sources, module_name, false, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, diagnostics)
                 if head_index == .Val(index) {
                     if !queued[index] {
@@ -7160,7 +7162,7 @@ jet_driver_load_walk: fn(
         // `t.suite(…)` on a `Test` and `expect(value).snapshot()` run `core.testing`
         // source bodies, even when the caller has no explicit core.testing
         // import.
-        if demand.test_suite && !defers {
+        if demand.test_suite && !defers && !request.runtime_library {
             if !bare_modules.contains("core.testing") -> bare_modules.push("core.testing")
             jet_driver_reach_open(reach, "core.testing")
             testing_index: jet_driver_core_unit(source_units, queued, pending, generated_records, request.core_sources, "core.testing", importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, diagnostics)
@@ -7174,7 +7176,7 @@ jet_driver_load_walk: fn(
         // `stream.with_event_time(…)` and its `.key_by`/`.window` stages run
         // their core.data source stages, even when the caller has no explicit
         // core.data import.
-        if demand.stream_event_time && !defers {
+        if demand.stream_event_time && !defers && !request.runtime_library {
             if !bare_modules.contains("core.data") -> bare_modules.push("core.data")
             jet_driver_reach_open(reach, "core.data")
             data_index: jet_driver_core_unit(source_units, queued, pending, generated_records, request.core_sources, "core.data", importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, diagnostics)
@@ -7198,7 +7200,7 @@ jet_driver_load_walk: fn(
                 }
             }
         }
-        if demand.codec_decode && !defers {
+        if demand.codec_decode && !defers && !request.runtime_library {
             jet_driver_reach_open(reach, "core.encoding")
             encoding_index: jet_driver_core_unit(source_units, queued, pending, generated_records, request.core_sources, "core.encoding", importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, diagnostics)
             if encoding_index == .Val(index) {

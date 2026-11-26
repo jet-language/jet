@@ -1,0 +1,30 @@
+use {
+    core.net.url.[URL]
+}
+
+url_refusal: fn(parts: [String]) -> String {
+    _: URL.check(parts) ?? return err.reason
+    ""
+}
+
+#Test("URL grammar accepts hierarchical, opaque, IPv6, and data URL templates") {
+    assert_eq(url_refusal([String]{"https://example.com/files/", ""}), "")
+    assert_eq(url_refusal([String]{"https://example.com/search?q=", "#top"}), "")
+    assert_eq(url_refusal([String]{"http://[::1]:8080/items/", ""}), "")
+    assert_eq(url_refusal([String]{"https://user:pass@", "/home"}), "")
+    assert_eq(url_refusal([String]{"mailto:", ""}), "")
+    assert_eq(url_refusal([String]{"data:text/plain,", ""}), "")
+    built: URL.build([String]{"https://example.com/files/", ""}, [String]{"a b"})
+    assert_eq(built.host() ?? "", "example.com")
+    assert_eq("{built}", "https://example.com/files/a%20b")
+}
+
+#Test("URL grammar rejects scheme holes, port holes, data MIME holes, and malformed syntax") {
+    assert_eq(url_refusal([String]{"", "://example.com/"}), "URL scheme cannot contain interpolation")
+    assert_eq(url_refusal([String]{"https://example.com:", "/"}), "URL port cannot contain interpolation")
+    assert_eq(url_refusal([String]{"https://user:pass@example.com:", "/"}), "URL port cannot contain interpolation")
+    assert_eq(url_refusal([String]{"data:", ",hello"}), "data URL MIME metadata cannot contain interpolation")
+    assert_eq(url_refusal([String]{"data:", ""}), "data URL payload needs a MIME separator")
+    assert_eq(url_refusal([String]{"http://[::1/", ""}), "the text is not a valid URL (Syntax)")
+    assert_eq(url_refusal([String]{"not-a-url"}), "the text is not a valid URL (Syntax)")
+}

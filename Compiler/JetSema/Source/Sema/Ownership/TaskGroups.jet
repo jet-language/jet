@@ -85,6 +85,7 @@ SemaTaskGroupGlobalAccess: struct {
     symbol_id: SymbolID,
     module_identity: ModuleID,
     name: String,
+    place: SemaOwnershipPlace,
     span: Span,
     access: AccessConvention,
 }
@@ -158,7 +159,7 @@ sema_taskgroup_state_snapshot: fn(source: SemaTaskGroupState) -> SemaTaskGroupSt
         )
     }
     effects: loop time_effect in source.time_effects -> time_effect.copy()
-    global_accesses: loop item in source.global_accesses -> SemaTaskGroupGlobalAccess{symbol_id: item.symbol_id, module_identity: item.module_identity, name: item.name, span: item.span, access: item.access}
+    global_accesses: loop item in source.global_accesses -> SemaTaskGroupGlobalAccess{symbol_id: item.symbol_id, module_identity: item.module_identity, name: item.name, place: sema_ownership_place_snapshot(item.place), span: item.span, access: item.access}
     SemaTaskGroupState{
         stack: stack,
         in_spawn: source.in_spawn,
@@ -889,8 +890,19 @@ sema_taskgroup_check_scoped_loan_read: fn(check: ^SemaBodyCheck, expression: Exp
     }
 }
 
+sema_taskgroup_note_global_place_access: fn(context: ^SemaCheckContext, symbol: Symbol, name: String, place: SemaOwnershipPlace, span: Span, access: AccessConvention) Never! {
+    context.taskgroups.global_accesses.push(SemaTaskGroupGlobalAccess{symbol_id: symbol.id, module_identity: symbol.module_identity, name: name, place: place, span: span, access: access})
+}
+
 sema_taskgroup_note_global_access: fn(context: ^SemaCheckContext, symbol: Symbol, name: String, span: Span, access: AccessConvention) Never! {
-    context.taskgroups.global_accesses.push(SemaTaskGroupGlobalAccess{symbol_id: symbol.id, module_identity: symbol.module_identity, name: name, span: span, access: access})
+    place: SemaOwnershipPlace{
+        root: name,
+        root_id: symbol.id,
+        root_span: Span{start: 0, end: 0},
+        projections: [String]{},
+        typed_projections: [SemaOwnershipProjection]{},
+    }
+    sema_taskgroup_note_global_place_access(context, symbol, name, place, span, access)
 }
 
 sema_taskgroup_check_global_opener_write: fn(check: ^SemaBodyCheck, symbol_id: SymbolID, name: String, span: Span) -> Bool {
@@ -916,20 +928,20 @@ sema_taskgroup_global_type: fn(program: SemaProgramTables, symbol_id: SymbolID, 
 sema_taskgroup_check_global_accesses: fn(check: ^SemaBodyCheck, start: Int, keep_for_outer: Bool) {
     end: check.context.taskgroups.global_accesses.len()
     if end <= start -> return
-    ^seen_ids: [SymbolID]{}
+    ^seen_places: [SemaOwnershipPlace]{}
     ^seen_writes: [Bool]{}
     loop index in start..<end {
         item: check.context.taskgroups.global_accesses[index]
         is_write: item.access == AccessConvention.Write
         ^duplicate: false
-        loop seen_index in 0..<seen_ids.len() {
-            if seen_ids[seen_index] == item.symbol_id && seen_writes[seen_index] == is_write {
+        loop seen_index in 0..<seen_places.len() {
+            if seen_writes[seen_index] == is_write && sema_ownership_place_exact(seen_places[seen_index], item.place) {
                 duplicate = true
                 break
             }
         }
         if duplicate -> next
-        seen_ids.push(item.symbol_id)
+        seen_places.push(sema_ownership_place_snapshot(item.place))
         seen_writes.push(is_write)
         if sema_taskgroup_global_type(check.program.*, item.symbol_id, item.module_identity) == .Val(global_ty) {
             if sema_ownership_crossing_problem(global_ty, SemaSendCrossing.TaskCapture, true, check.environment.*, check.program.*, check.scopes, check.context) == .Val(problem) {
@@ -938,14 +950,7 @@ sema_taskgroup_check_global_accesses: fn(check: ^SemaBodyCheck, start: Int, keep
                 next
             }
         }
-        place: SemaOwnershipPlace{
-            root: item.name,
-            root_id: item.symbol_id,
-            root_span: Span{start: 0, end: 0},
-            projections: [String]{},
-            typed_projections: [SemaOwnershipProjection]{},
-        }
-        admitted: sema_taskgroup_admit_scoped_borrow(check.context, item.name, place, item.access, true, item.span, check.scopes, check.diagnostics)
+        admitted: sema_taskgroup_admit_scoped_borrow(check.context, item.name, item.place, item.access, true, item.span, check.scopes, check.diagnostics)
         if admitted == Val(true) {
             sema_taskgroup_publish_loans(check.context, check.state)
             sema_taskgroup_note_detach_problem(check.context, true)

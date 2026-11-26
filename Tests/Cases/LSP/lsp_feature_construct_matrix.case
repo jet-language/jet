@@ -1,0 +1,124 @@
+# Semantic feature x Jet construct witness matrix (#6903 c5):
+# 1. Validates the complete 8x9 matrix TSV (zero unknown, every applicable cell
+#    names a passing stdio witness .case, every N/A cell has an honest reason).
+# 2. Exercises navigation, references, rename, completion, implementation,
+#    signatureHelp, call/type hierarchy across multi-file imports, generics,
+#    traits/impls, enums, shadowing (checked identity!), generated origins, and
+#    broken/repaired incremental edits over real `jet self lsp` stdio.
+env: JET_TOOLCHAIN_ROOT={root}
+step: jet test {root}/Compiler/JetLSP/Tests/LSP/FeatureMatrix.jet --filter=lsp_feature_construct_matrix
+exit: 0
+stdout: ~ "2 passed, 0 failed" # feature-construct matrix validator and negative guard both pass
+
+write: lib.jet = "Describable: trait {\n    describe: fn(self) -> String,\n}\n\nMode: enum {\n    Fast,\n    Safe,\n}\n\nBox: struct<T> {\n    value: T,\n}\n\nMeter: struct {\n    value: Int,\n    impl Describable {\n        describe: fn(self) -> String {\n            \"meter\"\n        }\n    }\n}\n\ncompute: fn(x: Int) -> Int {\n    x + 1\n}\n"
+write: main.jet = "use lib: \"./lib\"\n\nwrapper: fn(m: lib.Meter, mode: lib.Mode) -> Int {\n    box: lib.Box<Int>{value: m.value}\n    if mode == .Fast -> return lib.compute(box.value)\n    lib.compute(box.value) + 1\n}\n\nshadow_demo: fn() -> Int {\n    compute: 99\n    compute\n}\n"
+write: .jet/generated/gen.jet = "gen_helper: fn() -> Int {\n    7\n}\n"
+
+session lsp content-length: jet self lsp
+stderr: null
+
+# Initialize with documentChanges so versioned cross-file renames carry checked versions.
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"rootUri\":\"file://{work}\",\"capabilities\":{\"workspace\":{\"workspaceEdit\":{\"documentChanges\":true}}}}}"
+recv lsp until $.id = 1
+stdout: ~ "\"renameProvider\"" # initialize advertises rename
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
+
+# Open lib.jet and main.jet cleanly.
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/lib.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"Describable: trait {\\n    describe: fn(self) -> String,\\n}\\n\\nMode: enum {\\n    Fast,\\n    Safe,\\n}\\n\\nBox: struct<T> {\\n    value: T,\\n}\\n\\nMeter: struct {\\n    value: Int,\\n    impl Describable {\\n        describe: fn(self) -> String {\\n            \\\"meter\\\"\\n        }\\n    }\\n}\\n\\ncompute: fn(x: Int) -> Int {\\n    x + 1\\n}\\n\"}}}"
+recv lsp until $.method = "textDocument/publishDiagnostics"
+json: stdout doc $.params.diagnostics[?severity=1] #= 0
+
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"use lib: \\\"./lib\\\"\\n\\nwrapper: fn(m: lib.Meter, mode: lib.Mode) -> Int {\\n    box: lib.Box<Int>{value: m.value}\\n    if mode == .Fast -> return lib.compute(box.value)\\n    lib.compute(box.value) + 1\\n}\\n\\nshadow_demo: fn() -> Int {\\n    compute: 99\\n    compute\\n}\\n\"}}}"
+recv lsp until $.method = "textDocument/publishDiagnostics"
+json: stdout doc $.params.diagnostics[?severity=1] #= 0
+
+# 1. Cross-file hover on enum (Mode), generic struct (Box), and imported fn (compute).
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\"},\"position\":{\"line\":2,\"character\":37}}}"
+recv lsp until $.id = 2
+stdout: ~ "Mode: enum" # cross-file hover resolves enum declaration
+
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\"},\"position\":{\"line\":3,\"character\":14}}}"
+recv lsp until $.id = 3
+stdout: ~ "Box: struct" # cross-file hover resolves generic struct
+
+# 2. Shadowed local definition jumps to local line 9 in main.jet, NOT lib.jet!
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\"},\"position\":{\"line\":10,\"character\":6}}}"
+recv lsp until $.id = 4
+json: stdout doc $.result.uri = "file://{work}/main.jet"
+json: stdout doc $.result.range = {"start":{"line":9,"character":4},"end":{"line":9,"character":11}}
+
+# 3. Cross-file references on `lib.compute` find lib.jet decl + 2 calls in main.jet (3 total),
+#    NEVER touching shadowed local `compute` on main.jet lines 9-10!
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"textDocument/references\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\"},\"position\":{\"line\":4,\"character\":36},\"context\":{\"includeDeclaration\":true}}}"
+recv lsp until $.id = 5
+json: stdout doc $.result #= 3
+json: stdout doc $.result[?uri="file://{work}/lib.jet"] #= 1
+json: stdout doc $.result[?uri="file://{work}/main.jet"] #= 2
+
+# 4. Cross-file versioned rename on `lib.compute` edits lib.jet (1) and main.jet (2),
+#    excluding shadowed local `compute` on lines 9-10, and carries checked document versions.
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"textDocument/rename\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\"},\"position\":{\"line\":4,\"character\":36},\"newName\":\"bump\"}}"
+recv lsp until $.id = 6
+json: stdout doc $.result.documentChanges #= 2
+json: stdout doc $.result.documentChanges[?textDocument.uri="file://{work}/lib.jet"][0].textDocument.version = 1
+json: stdout doc $.result.documentChanges[?textDocument.uri="file://{work}/lib.jet"][0].edits #= 1
+json: stdout doc $.result.documentChanges[?textDocument.uri="file://{work}/main.jet"][0].textDocument.version = 1
+json: stdout doc $.result.documentChanges[?textDocument.uri="file://{work}/main.jet"][0].edits #= 2
+
+# 5. Cross-file call hierarchy: prepare on `lib.compute` in lib.jet -> incomingCalls includes `wrapper` in main.jet.
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"textDocument/prepareCallHierarchy\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/lib.jet\"},\"position\":{\"line\":22,\"character\":2}}}"
+recv lsp until $.id = 7
+json: stdout doc $.result #= 1
+json: stdout doc $.result[0].name = "compute"
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"callHierarchy/incomingCalls\",\"params\":{\"item\":{\"name\":\"compute\",\"kind\":12,\"uri\":\"file://{work}/lib.jet\",\"range\":{\"start\":{\"line\":22,\"character\":0},\"end\":{\"line\":22,\"character\":7}},\"selectionRange\":{\"start\":{\"line\":22,\"character\":0},\"end\":{\"line\":22,\"character\":7}}}}}"
+recv lsp until $.id = 8
+stdout: ~ "wrapper" # incomingCalls reaches cross-file caller wrapper in main.jet
+
+# 6. Trait implementation + type hierarchy on Describable / Meter.
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"textDocument/implementation\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/lib.jet\"},\"position\":{\"line\":0,\"character\":3}}}"
+recv lsp until $.id = 9
+json: stdout doc $.result #= 1
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":10,\"method\":\"textDocument/prepareTypeHierarchy\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/lib.jet\"},\"position\":{\"line\":13,\"character\":2}}}"
+recv lsp until $.id = 10
+json: stdout doc $.result #= 1
+json: stdout doc $.result[0].name = "Meter"
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":11,\"method\":\"typeHierarchy/supertypes\",\"params\":{\"item\":{\"name\":\"Meter\",\"kind\":23,\"uri\":\"file://{work}/lib.jet\"}}}"
+recv lsp until $.id = 11
+stdout: ~ "Describable" # Meter type hierarchy lists Describable supertype
+
+# 7. Completion and signatureHelp inside main.jet.
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":12,\"method\":\"textDocument/completion\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\"},\"position\":{\"line\":3,\"character\":31}}}"
+recv lsp until $.id = 12
+stdout: ~ "describe" # dot-completion after m. lists trait method describe
+stdout: ~ "value" # dot-completion after m. lists struct field value
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":13,\"method\":\"textDocument/signatureHelp\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\"},\"position\":{\"line\":4,\"character\":44}}}"
+recv lsp until $.id = 13
+stdout: ~ "x: Int" # signatureHelp shows parameter x: Int
+
+# 8. Generated module origin hover.
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/.jet/generated/gen.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"gen_helper: fn() -> Int {\\n    7\\n}\\n\"}}}"
+recv lsp until $.method = "textDocument/publishDiagnostics"
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":14,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/.jet/generated/gen.jet\"},\"position\":{\"line\":0,\"character\":3}}}"
+recv lsp until $.id = 14
+stdout: ~ "Origin: generated module" # generated module hover marks generated origin
+
+# 9. Broken incremental edit (version 2) publishes version 2 error and refuses rename (-32803);
+#    repairing edit (version 3) clears diagnostics and restores rename.
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didChange\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\",\"version\":2},\"contentChanges\":[{\"range\":{\"start\":{\"line\":5,\"character\":26},\"end\":{\"line\":5,\"character\":30}},\"text\":\"+ \\\"bad\\\"\"}]}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":15,\"method\":\"textDocument/rename\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\"},\"position\":{\"line\":4,\"character\":36},\"newName\":\"bump\"}}"
+recv lsp collect until ndjson $[?id=15] #>= 1
+json: stdout ndjson $[?method="textDocument/publishDiagnostics"][?params.uri="file://{work}/main.jet"][0].params.version = 2
+json: stdout ndjson $[?method="textDocument/publishDiagnostics"][?params.uri="file://{work}/main.jet"][0].params.diagnostics[?severity=1] #>= 1
+json: stdout ndjson $[?id=15][0].error.code = -32803
+
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didChange\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\",\"version\":3},\"contentChanges\":[{\"range\":{\"start\":{\"line\":5,\"character\":26},\"end\":{\"line\":5,\"character\":33}},\"text\":\"+ 1\"}]}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":16,\"method\":\"textDocument/rename\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\"},\"position\":{\"line\":4,\"character\":36},\"newName\":\"bump\"}}"
+recv lsp collect until ndjson $[?id=16] #>= 1
+json: stdout ndjson $[?method="textDocument/publishDiagnostics"][?params.uri="file://{work}/main.jet"][0].params.version = 3
+json: stdout ndjson $[?method="textDocument/publishDiagnostics"][?params.uri="file://{work}/main.jet"][0].params.diagnostics[?severity=1] #= 0
+json: stdout ndjson $[?id=16][0].result.documentChanges[?textDocument.uri="file://{work}/main.jet"][0].textDocument.version = 3
+
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{}}"
+recv lsp until $.id = 99
+close lsp
+exit: 0

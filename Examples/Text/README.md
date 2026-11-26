@@ -52,6 +52,7 @@ Run a lesson from the repository root, for example `jet run Examples/Text/<Lesso
 - [Ini](Grammar/Ini.jet) — A `Grammar` literal declares a parser: its rules give way to types, and `Ini.parse` reads a document into them or reports the first error by line and column.
 - [Calc](Grammar/Calc.jet) — A rule that names itself on the left is an operator rule: its alternatives bind from tightest to loosest, with `<assoc=right>`, prefix and suffix forms.
 - [LogLine](Grammar/LogLine.jet) — A log line as a grammar: labeled alternatives become enum cases, an unknown level is refused at its line and column, and tokens read in context keep a keyword-shaped word in the message as text.
+- [Heads](Grammar/Heads.jet) — Jet's built-in checked text heads (`SQL`, `HTML`, `Sh`, `URL`, `DateTime`, `Path`, and `Regex`) check their literal bodies before the program runs and type or escape every interpolated hole for its position.
 
 ## Unicode
 

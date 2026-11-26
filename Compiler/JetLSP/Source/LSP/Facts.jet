@@ -6,6 +6,7 @@ use {
     core.encoding.[Dyn]
     jet_foundation.[Span, foundation_byte_text, foundation_json_quote]
     jet_lexer.[Lexed, Token, TOKEN_IDENT]
+    jet_pkg_model.[pkg_mask_inline_package_source]
     jet_semindex.[SemDef, SemIndex, SemKind, SemRef, SemSymbol]
 }
 
@@ -39,6 +40,17 @@ lsp_open_document: fn(server: LSPServer, params: Dyn?) -> LSPDocument? Never! {
     server.diagnostic_state.docs.get(lsp_params_uri(params) ?? return None)
 }
 
+// Whether a checked module's source text came from `doc_text`: exact equality
+// for ordinary files, or equality after masking an inline `package: { ... }`
+// block (which the loader replaces with spaces of identical byte length).
+lsp_checked_source_matches: fn(checked_source: String, doc_text: String) -> Bool Never! {
+    if checked_source == doc_text -> return true
+    if pkg_mask_inline_package_source(doc_text) == .Ok(masked) {
+        if masked.block != None -> return checked_source == masked.source
+    }
+    false
+}
+
 // The loop republishes every document an edit touched before it answers a
 // request, so the document's last publication read the current texts; a
 // document never published is checked now.
@@ -50,8 +62,8 @@ lsp_view_of: fn(server: LSPServer, uri: String) -> LSPView? {
     doc: server.diagnostic_state.docs.get(uri) ?? return None
     checked: server.published.get(uri) ?? server.check(doc)
     ^module_path: String?{None}
-    if lsp_checked_module_at(checked, doc.path) == .Val(index) {
-        if checked.modules[index].source == doc.text {
+    if lsp_checked_module_at(checked, lsp_doc_check_path(doc)) == .Val(index) {
+        if lsp_checked_source_matches(checked.modules[index].source, lsp_doc_jet_text(doc)) {
             module_path = Val(checked.modules[index].path)
         }
     }
@@ -145,7 +157,7 @@ lsp_written_at: fn(bytes: [U8], span: Span, name: String) -> Bool Never! {
 lsp_target_at: fn(view: LSPView, offset: Int) -> LSPTarget? Never! {
     index: view.checked.index ?? return None
     module_path: view.module_path ?? return None
-    bytes: view.doc.text.bytes()
+    bytes: lsp_doc_jet_text(view.doc).bytes()
     ^best: LSPTarget?{None}
     ^width: -1
     loop reference in index.references {

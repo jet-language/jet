@@ -393,6 +393,11 @@ The built-module inventory is a source-facing registry, not a missing-domain led
 - `core.files.sealed`
 - `core.game`
 - `core.git`
+- `core.grammar`
+- `core.grammar.error`
+- `core.grammar.plan`
+- `core.grammar.runtime`
+- `core.grammar.sink`
 - `core.http`
 - `core.http.client`
 - `core.http.server`
@@ -463,6 +468,17 @@ The built-module inventory is a source-facing registry, not a missing-domain led
 
 The sketch types are source-owned plain values: cloning one produces independent
 storage, and mutating a sketch uses its `^self` receiver with an explicit `^` call.
+
+### Grammar literals (`core.grammar`)
+
+`core.grammar` exports the `Grammar` checked-text head and `analyze(text, start, imports) -> GrammarPlan GrammarFaults!`. A top-level binding `Name: Grammar{"""…"""}` checks its rule notation while building and generates one struct or enum per parser rule, `{Name}Rule` and `{Name}Token` enums (plus `{Name}Slot` when `HOLE<slot=…>` is present), and methods `parse`, `parse_into`, `print`, and `print_into` (plus `parse_parts` and `check_parts` for hole-bearing grammars).
+
+- `core.grammar.error` exports `GrammarError`, `TextPlace`, `TextSpot`, `GrammarFault`, `GrammarFaults`, and the `GrammarReport` fault variants reported by `Grammar{…}`.
+- `core.grammar.plan` exports `GrammarPlan`, `GrammarSource`, `GrammarScanner`, `GrammarPrinter`, and the analyzed rule/lexer/shape tables.
+- `core.grammar.sink` exports the `GrammarSink` trait consumed by `parse_into`.
+- `core.grammar.runtime` supplies the generated parser, scanner, cursor, and printer runtime helpers.
+
+Core's built-in checked-text heads (`SQL`, `HTML`, `Sh`, `URL`, `DateTime`, `Path`, `Regex`) and format parsers keep their grammars in private `Syntax/` parts under their owning packages so the grammars are checked during builds and deferred unless the owning surface is used. See [`Examples/Text/Grammar/`](../../../Examples/Text/Grammar/) (`Ini.jet`, `Calc.jet`, `LogLine.jet`, `Heads.jet`).
 
 ### Writing Core in Jet
 

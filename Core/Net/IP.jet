@@ -9,6 +9,10 @@ package: {
     }
 }
 
+use {
+    ip_syntax: __core_net_syntax_ip
+}
+
 // core.net.ip — IPv4/IPv6 addresses and CIDR networks.
 //
 // Python `ipaddress` is the bar: parse, classify, and ask whether a host
@@ -38,13 +42,8 @@ ipv4: fn(a: Int, b: Int, c: Int, d: Int) -> IPv4 IOError! {
 }
 
 parse_ipv4: fn(text: String) -> IPv4 IOError! {
-    ^parts: split_dot(text)
-    if parts.len() != 4 -> return Err(net_err("IPv4 needs four dotted octets"))
-    a: parse_oct(parts[0]) ?? return Err(net_err("bad IPv4 octet"))
-    b: parse_oct(parts[1]) ?? return Err(net_err("bad IPv4 octet"))
-    c: parse_oct(parts[2]) ?? return Err(net_err("bad IPv4 octet"))
-    d: parse_oct(parts[3]) ?? return Err(net_err("bad IPv4 octet"))
-    ipv4(a, b, c, d)
+    parsed: ip_syntax.ip_parse_v4(text) ?? return Err(net_err("bad IPv4 address"))
+    ipv4(parsed.a, parsed.b, parsed.c, parsed.d)
 }
 
 ipv4_to_string: fn(addr: IPv4) -> String Never! { "{addr.a}.{addr.b}.{addr.c}.{addr.d}" }
@@ -118,21 +117,10 @@ is_public_destination: fn(addr: IPv4) -> Bool Never! {
 }
 
 network: fn(cidr: String) -> Network IOError! {
-    ^slash: -1
-    raw: cidr.bytes()
-    loop i in 0..<raw.len() {
-        if raw[i] == (U8{47}) {
-            if slash >= 0 -> return Err(net_err("CIDR may contain only one prefix slash"))
-            slash = i
-        }
-    }
-    if slash < 0 -> return Err(net_err("CIDR needs prefix /n"))
-    host: String.from_bytes(slice_u(raw, 0, slash)) ?? ""
-    pref: parse_int(String.from_bytes(slice_u(raw, slash + 1, raw.len())) ?? "") ?? return Err(net_err("bad prefix"))
-    if pref < 0 || pref > 32 -> return Err(net_err("prefix must be 0..=32"))
-    addr: parse_ipv4(host) ?? return Err(net_err("bad IPv4 address"))
-    masked: ipv4_from_int((ipv4_int(addr)) & prefix_mask(pref)) ?? return Err(net_err("bad network address"))
-    Ok(Network{addr: masked, prefix: pref})
+    parsed: ip_syntax.ip_parse_v4_network(cidr) ?? return Err(net_err("bad CIDR network"))
+    addr: ipv4(parsed.a, parsed.b, parsed.c, parsed.d) ?? return Err(net_err("bad IPv4 address"))
+    masked: ipv4_from_int((ipv4_int(addr)) & prefix_mask(parsed.prefix)) ?? return Err(net_err("bad network address"))
+    Ok(Network{addr: masked, prefix: parsed.prefix})
 }
 
 network_contains: fn(net: Network, addr: IPv4) -> Bool Never! {
@@ -154,44 +142,7 @@ network_hosts: fn(net: Network) -> Int Never! {
 }
 
 parse_ipv6: fn(text: String) -> IPv6 IOError! {
-    raw: text.bytes()
-    if raw.len() == 0 -> return Err(net_err("empty IPv6"))
-    ^dbl: find_dcolon(text)
-    if dbl >= 0 {
-        tail: slice_u(raw, dbl + 2, raw.len())
-        if find_dcolon(String.from_bytes(tail) ?? "") >= 0 {
-            return Err(net_err("IPv6 may contain only one: "))
-        }
-    }
-    ^left: String.from_bytes(raw) ?? ""
-    ^right: ""
-    ^compressed: dbl >= 0
-    if compressed {
-        left = String.from_bytes(slice_u(raw, 0, dbl)) ?? ""
-        right = String.from_bytes(slice_u(raw, dbl + 2, raw.len())) ?? ""
-    }
-    lw: split_colon(left)
-    rw: split_colon(right)
-    total: lw.len() + rw.len()
-    if compressed {
-        if total >= 8 -> return Err(net_err("IPv6: must replace at least one group"))
-    } else if total != 8 { return Err(net_err("IPv6 needs 8 groups or a: ")) }
-    ^words: [Int]{}
-    loop w in lw {
-        n: parse_hex4(w) ?? return Err(net_err("bad IPv6 group"))
-        words.push(n)
-    }
-    ^pad: 0
-    if compressed -> pad = 8 - total
-    loop pad > 0 {
-        words.push(0)
-        pad -= 1
-    }
-    loop w in rw {
-        n: parse_hex4(w) ?? return Err(net_err("bad IPv6 group"))
-        words.push(n)
-    }
-    if words.len() != 8 -> return Err(net_err("IPv6 needs 8 groups"))
+    words: ip_syntax.ip_parse_v6(text) ?? return Err(net_err("bad IPv6 address"))
     Ok(IPv6{words: words})
 }
 
@@ -623,3 +574,41 @@ ends_colon_str: fn(text: String) -> Bool {
     loop b in text.bytes() -> found = Int{b} == 58
     return found
 }
+
+#Test("IPv4 and CIDR grammars parse valid addresses and reject malformed ones") {
+    a: parse_ipv4("192.168.1.42") ?? panic("valid ipv4")
+    assert_eq(ipv4_to_string(a), "192.168.1.42")
+    z: parse_ipv4("0.0.0.0") ?? panic("zero ipv4")
+    assert(is_unspecified(z))
+    for_bad_v4: [String]{"", "1.2.3", "1.2.3.4.5", "256.0.0.1", "01.2.3.4", "1.2.3.a", "1.2.3.4 "}
+    loop bad in for_bad_v4 {
+        if parse_ipv4(bad) == .Ok(_) -> panic("expected parse_ipv4 to reject `{bad}`")
+    }
+    net: network("10.20.30.40/24") ?? panic("valid cidr")
+    assert_eq(ipv4_to_string(net.addr), "10.20.30.0")
+    assert_eq(net.prefix, 24)
+    assert(network_contains(net, parse_ipv4("10.20.30.99") ?? panic("host")))
+    assert(!network_contains(net, parse_ipv4("10.20.31.1") ?? panic("other")))
+    for_bad_cidr: [String]{"10.0.0.1", "10.0.0.1/33", "10.0.0.1/", "10.0.0.1/8/16", "01.0.0.0/8"}
+    loop bad in for_bad_cidr {
+        if network(bad) == .Ok(_) -> panic("expected network to reject `{bad}`")
+    }
+}
+
+#Test("IPv6 grammar parses full and compressed forms and rejects malformed ones") {
+    loopback: parse_ipv6("::1") ?? panic("valid ::1")
+    assert(ipv6_is_loopback(loopback))
+    unspec: parse_ipv6("::") ?? panic("valid ::")
+    assert(ipv6_is_unspecified(unspec))
+    ll: parse_ipv6("fe80::") ?? panic("valid fe80::")
+    assert(ipv6_is_link_local(ll))
+    doc: parse_ipv6("2001:db8::1") ?? panic("valid 2001:db8::1")
+    assert_eq(ipv6_to_string(doc), "2001:0db8:0000:0000:0000:0000:0000:0001")
+    full: parse_ipv6("2001:0db8:0000:0000:0000:ff00:0042:8329") ?? panic("valid full ipv6")
+    assert_eq(ipv6_to_string(full), "2001:0db8:0000:0000:0000:ff00:0042:8329")
+    for_bad_v6: [String]{"", ":", ":::", "2001::db8::1", "1:2:3:4:5:6:7", "1:2:3:4:5:6:7:8:9", "1:2:3:4:5:6:7:8::", "12345::1", "zzzz::1", ":1", "1:"}
+    loop bad in for_bad_v6 {
+        if parse_ipv6(bad) == .Ok(_) -> panic("expected parse_ipv6 to reject `{bad}`")
+    }
+}
+

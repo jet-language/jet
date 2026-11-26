@@ -16,6 +16,7 @@ use {
     core.encoding.[Dyn, EncodingError, EncodingErrorKind, EncodingFormat, EncodingLimits, Format, FormatError]
     json: core.encoding.json
     stream: __core_encoding_stream
+    toml_syntax: __core_encoding_syntax_toml
     nesting.[enter_nesting]
 }
 
@@ -88,6 +89,10 @@ Codec: struct {
 }
 
 priv parse_toml: fn(text: String, allow_duplicates: Bool) -> Dyn EncodingError! {
+    if toml_syntax.parse_document(text, allow_duplicates) == {
+        .Val(tree) -> return Ok(tree)
+        .None -> {}
+    }
     ^p: TOMLParser{
         bytes: text.bytes(),
         index: 0,
@@ -985,6 +990,55 @@ toml_leaf: fn(value: Dyn) -> String Never! {
     assert_eq(tree.keys(), [String]{"port", "name", "t"})
     assert((tree.get("port") ?? panic("port")) == stream.typed_number("2"))
     assert_eq(toml_leaf(tree.get("t") ?? panic("inline table")), "{{ k = 2 }}")
+}
+
+#Test("TOML grammar parses full surface, prints back, and refuses malformed input") {
+    sample: """
+        # top comment
+        title = "hello\\nworld"
+        raw = 'C:\\path\\to\\file'
+        flags = [
+            true, # inline comment
+            false,
+        ]
+        hex = 0xdead_beef
+        oct = 0o755
+        bin = 0b1010
+        ratio = -2.5e-3
+        when = 2024-01-02 03:04:05+02:00
+        local_date = 2024-01-02
+        local_time = 03:04:05
+        "quoted.key" = {{ x = 1, y = [10, 20] }}
+
+        [server.net]
+        host = "localhost"
+        port = 8_080
+
+        [[items]]
+        name = "one"
+    """
+    printed: toml_syntax.print_document(sample) ?? panic("TOML grammar print")
+    _: toml_syntax.parse_document(printed, false) ?? panic("TOML printed roundtrip parse")
+    tree: parse(sample) ?? panic("TOML parse")
+    reparsed: parse(printed) ?? panic("TOML reparsed")
+    assert_eq(to_string(tree), to_string(reparsed))
+    assert((tree.get("hex") ?? panic("hex")) == stream.typed_number("3735928559"))
+    assert((tree.get("oct") ?? panic("oct")) == stream.typed_number("493"))
+    assert((tree.get("bin") ?? panic("bin")) == stream.typed_number("10"))
+    assert((tree.get("local_date") ?? panic("local_date")) == Dyn.Text("2024-01-02"))
+    assert((tree.get("local_time") ?? panic("local_time")) == Dyn.Text("03:04:05"))
+    loop bad in ["[unclosed", "= 1", "k = [1, , 2]", "k = {{ a = 1"] {
+        assert(toml_syntax.print_document(bad) == None)
+    }
+    open256: "[".repeat(256)
+    close256: "]".repeat(256)
+    _: parse("value = {open256}{close256}") ?? panic("256-deep TOML array must parse")
+    open257: "[".repeat(257)
+    close257: "]".repeat(257)
+    if parse("value = {open257}{close257}") == {
+        .Ok(_) -> panic("257-deep TOML array must fail")
+        .Err(error) -> assert(error.reason.contains("max_depth"))
+    }
 }
 
 // A float keeps its own spelling when it is a JSON number token (`+` dropped),

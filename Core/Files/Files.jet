@@ -21,6 +21,7 @@ use {
     raw_names.[raw_held_name]
     scope_reads.[scope_roots, scope_has_parent, scope_part_name, scope_input_error, scope_read_at]
     process_rt: jet.runtime.process
+    path_syntax: __core_files_syntax_path
 }
 
 // core.files — one filesystem surface.
@@ -73,10 +74,8 @@ impl Path.CheckedText {
     Hole: String,
 
     check: fn(parts: [String]) -[]> Checked<[String], TextSlot> PathLiteralError! {
-        loop part in parts {
-            if part.bytes().contains(U8{0}) {
-                return Err(PathLiteralError{reason: "a Path cannot contain a NUL character"})
-            }
+        if !path_syntax.path_check_parts_ok(parts) {
+            return Err(PathLiteralError{reason: "a Path cannot contain a NUL character"})
         }
         Ok(Checked{shape: parts.copy(), slots: loop _ in 1..<parts.len() -> TextSlot.Text})
     }
@@ -90,6 +89,10 @@ impl Path.CheckedText {
         }
         Path.from(text)
     }
+}
+
+impl Path.Display {
+    display: fn(self) -> String Never! { self.to_string() }
 }
 
 // The compiler's `Path`: an opaque runtime handle over a path's bytes. Its

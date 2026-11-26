@@ -1,0 +1,41 @@
+Count: struct {
+    value: Int,
+}
+
+^level: 1
+^raw_flag: 0
+HITS: Shared{Count{value: 0}}
+
+set_raw: fn(v: Int) {
+    #Unsafe("raw word") {
+        raw_flag = v
+    }
+}
+
+read_level: fn() -> Int { level }
+
+#Export(c)
+export_direct: fn() -> Int Never! {
+    level
+}
+
+#Export(c)
+export_transitive: fn() -> Int Never! {
+    read_level()
+}
+
+#Export(c)
+export_raw: fn() -> Int Never! {
+    raw_flag
+}
+
+#Export(c)
+export_shared: fn() -> Int Never! {
+    HITS.value
+}
+
+run: fn() {
+    set_raw(42)
+    print(export_raw())
+    print(export_shared())
+}

@@ -1,0 +1,21 @@
+# SQL{"..."} checks SQLite 3.45.0 syntax at build time, classifies holes by
+# grammatical slot (Name vs Operand), double-quote splices SQLName identifiers,
+# binds scalar and [U8] blob values as `?` parameters, and matches across check,
+# JIT O0, JIT O2, and AOT.
+fixture: SQLHeadHolesTypedByPosition.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 0
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = "create: CREATE TABLE \"events\"\"log\" (id INTEGER PRIMARY KEY, \"body\"\"text\" TEXT NOT NULL, raw BLOB NOT NULL)\ninsert: INSERT INTO \"events\"\"log\" (id, \"body\"\"text\", raw) VALUES (?, ?, ?) (3)\nselect: SELECT \"body\"\"text\", raw FROM \"events\"\"log\" WHERE id = ? (1)\nrow: o'brien blob=true\n"
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: == o0
+step build: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: == o0

@@ -1,0 +1,234 @@
+// Host documents with embedded Jet regions (`JetDriverSourceDocument` /
+// `JetDriverHostDocument`): extracts `<script lang="jet">...</script>` (and
+// fenced Markdown `jet` blocks) into one Jet source with verified byte
+// mappings, translates LSP host positions into Jet offsets, and maps
+// diagnostics, navigation spans, and edits back into host byte/UTF-16 ranges.
+use {
+    core.encoding.[Dyn]
+    jet_driver.[
+        JetDriverHostDocument,
+        JetDriverSourceDocument,
+        JetDriverSourceMapping,
+        jet_driver_host_diagnostic,
+        jet_driver_host_span,
+        jet_driver_jet_offset,
+        jet_driver_source_document_problem,
+    ]
+    jet_foundation.[Diagnostic, Span, foundation_json_quote]
+}
+
+lsp_bytes_find: fn(haystack: [U8], needle: [U8], from: Int) -> Int Never! {
+    if needle.len() == 0 -> return from
+    if from < 0 || haystack.len() < needle.len() -> return -1
+    limit: haystack.len() - needle.len()
+    ^at: from
+    loop at <= limit {
+        ^matched: true
+        loop offset in 0..<needle.len() {
+            if haystack[at + offset] != needle[offset] {
+                matched = false
+                break
+            }
+        }
+        if matched -> return at
+        at += 1
+    }
+    -1
+}
+
+lsp_byte_is: fn(bytes: [U8], index: Int, code: Int) -> Bool Never! {
+    if index < 0 || index >= bytes.len() -> return false
+    Int{bytes[index]} == code
+}
+
+lsp_host_extract_script_regions: fn(host_bytes: [U8]) -> [Span] Never! {
+    open_tag: "<script lang=\"jet\">".bytes()
+    close_tag: "</script>".bytes()
+    ^regions: [Span]{}
+    ^cursor: 0
+    loop cursor < host_bytes.len() {
+        open_at: lsp_bytes_find(host_bytes, open_tag, cursor)
+        if open_at < 0 -> break
+        ^region_start: open_at + open_tag.len()
+        if lsp_byte_is(host_bytes, region_start, 13) -> region_start += 1
+        if lsp_byte_is(host_bytes, region_start, 10) -> region_start += 1
+        close_at: lsp_bytes_find(host_bytes, close_tag, region_start)
+        if close_at < 0 -> break
+        regions.push(Span{start: region_start, end: close_at})
+        cursor = close_at + close_tag.len()
+    }
+    regions
+}
+
+lsp_host_extract_fence_regions: fn(host_bytes: [U8]) -> [Span] Never! {
+    open_tag: "```jet".bytes()
+    close_tag: "```".bytes()
+    ^regions: [Span]{}
+    ^cursor: 0
+    loop cursor < host_bytes.len() {
+        open_at: lsp_bytes_find(host_bytes, open_tag, cursor)
+        if open_at < 0 -> break
+        line_start: open_at == 0 || lsp_byte_is(host_bytes, open_at - 1, 10)
+        ^after_open: open_at + open_tag.len()
+        if !line_start || after_open >= host_bytes.len() {
+            cursor = after_open
+            next
+        }
+        if lsp_byte_is(host_bytes, after_open, 13) -> after_open += 1
+        if !lsp_byte_is(host_bytes, after_open, 10) {
+            cursor = after_open
+            next
+        }
+        region_start: after_open + 1
+        ^scan: region_start
+        ^close_at: -1
+        loop scan < host_bytes.len() {
+            found: lsp_bytes_find(host_bytes, close_tag, scan)
+            if found < 0 -> break
+            if found == region_start || lsp_byte_is(host_bytes, found - 1, 10) {
+                close_at = found
+                break
+            }
+            scan = found + close_tag.len()
+        }
+        if close_at < 0 -> break
+        regions.push(Span{start: region_start, end: close_at})
+        cursor = close_at + close_tag.len()
+    }
+    regions
+}
+
+lsp_host_build_source_document: fn(path: String, version: Int, host_text: String, regions: [Span]) -> JetDriverSourceDocument? Never! {
+    if regions.len() == 0 -> return None
+    host_bytes: host_text.bytes()
+    ^jet_bytes: [U8]{}
+    ^mappings: [JetDriverSourceMapping]{}
+    separator: "// generated\n".bytes()
+    loop (index, region) in regions {
+        if index > 0 {
+            if jet_bytes.len() > 0 && !lsp_byte_is(jet_bytes, jet_bytes.len() - 1, 10) {
+                jet_bytes.push(U8{10})
+            }
+            loop byte in separator -> jet_bytes.push(byte)
+        }
+        jet_start: jet_bytes.len()
+        loop at in region.start..<region.end -> jet_bytes.push(host_bytes[at])
+        jet_end: jet_bytes.len()
+        mappings.push(JetDriverSourceMapping{host: region, jet: Span{start: jet_start, end: jet_end}})
+    }
+    jet_source: String.from_bytes(jet_bytes) ?? return None
+    doc: JetDriverSourceDocument{
+        path: "{path}.jet",
+        source: jet_source,
+        host: Val(JetDriverHostDocument{identity: "{path}", revision: version, text: "{host_text}", mappings: mappings}),
+    }
+    if jet_driver_source_document_problem(doc) != None -> return None
+    Val(doc)
+}
+
+// Extracts embedded Jet regions from a host document (`html`, `markdown`, ...).
+// Returns None when no embedded Jet regions exist so plain non-Jet documents
+// remain ignored.
+lsp_extract_host_document: fn(path: String, version: Int, host_text: String, language: String) -> JetDriverSourceDocument? Never! {
+    if language == "jet" -> return None
+    host_bytes: host_text.bytes()
+    ^regions: lsp_host_extract_script_regions(host_bytes)
+    if regions.len() == 0 -> regions = lsp_host_extract_fence_regions(host_bytes)
+    lsp_host_build_source_document(path, version, host_text, regions)
+}
+
+lsp_empty_host_document: fn(path: String, version: Int, host_text: String) -> JetDriverSourceDocument Never! {
+    JetDriverSourceDocument{
+        path: "{path}.jet",
+        source: "",
+        host: Val(JetDriverHostDocument{identity: "{path}", revision: version, text: "{host_text}", mappings: [JetDriverSourceMapping]{}}),
+    }
+}
+
+// The path passed to JetDriver when checking `doc`: a host document's virtual
+// `.jet` path, else `doc.path`.
+lsp_doc_check_path: fn(doc: LSPDocument) -> String Never! {
+    if doc.host_doc == .Val(host_doc) -> return "{host_doc.path}"
+    "{doc.path}"
+}
+
+// The Jet source text `JetDriver` checks for `doc`: a host document's extracted
+// Jet text, else `doc.text`.
+lsp_doc_jet_text: fn(doc: LSPDocument) -> String Never! {
+    if doc.host_doc == .Val(host_doc) -> return "{host_doc.source}"
+    "{doc.text}"
+}
+
+// Translates a host byte offset into a Jet byte offset; returns None when the
+// cursor lies in non-Jet host text outside every mapped region.
+lsp_doc_to_jet_offset: fn(doc: LSPDocument, host_offset: Int) -> Int? Never! {
+    if doc.host_doc == .Val(host_doc) -> return jet_driver_jet_offset(host_doc, host_offset)
+    Val(host_offset)
+}
+
+// Translates a Jet byte span back into host byte offsets; returns None when
+// any part of the span lies in generated text outside mapped regions.
+lsp_doc_to_host_span: fn(doc: LSPDocument, jet_span: Span) -> Span? Never! {
+    if doc.host_doc == .Val(host_doc) -> return jet_driver_host_span(host_doc, jet_span)
+    Val(jet_span)
+}
+
+// Maps checked diagnostics for a host document through `jet_driver_host_diagnostic`
+// so spans, labels, causes, and fix edits land on host bytes (and diagnostics
+// whose span sits only in generated text are never placed on a false host byte).
+lsp_doc_map_diagnostics: fn(host_doc: JetDriverSourceDocument, diagnostics: ^^[Diagnostic]) -> [Diagnostic] Never! {
+    ^mapped: [Diagnostic]{}
+    loop diagnostic in diagnostics {
+        belongs: if diagnostic.origin == {
+            .Val(origin) -> lsp_source_paths_equal(origin.path, host_doc.path)
+            .None -> true
+        }
+        if !belongs {
+            mapped.push(diagnostic)
+            next
+        }
+        placed: jet_driver_host_diagnostic(host_doc, diagnostic)
+        if placed.generated -> next
+        mapped.push(placed.diagnostic)
+    }
+    mapped
+}
+
+// Finds an open document whose checked path matches `path` (either a whole Jet
+// document or a host document's virtual `.jet` path).
+lsp_open_doc_for_check_path: fn(server: LSPServer, path: String) -> String? Never! {
+    loop (uri, doc) in server.diagnostic_state.docs {
+        if lsp_source_paths_equal(doc.path, path) || lsp_source_paths_equal(lsp_doc_check_path(doc), path) {
+            return Val("{uri}")
+        }
+    }
+    None
+}
+
+// Formats a hover response for a host document, mapping the token's Jet span
+// back into host UTF-16 coordinates (omitting range if it lies in generated text).
+lsp_host_hover_response: fn(at: LSPAt, markdown: String?, id: Dyn) -> String Never! {
+    text: markdown ?? return lsp_response(id, "null")
+    ^range: ""
+    if lsp_ident_token_at(at.view.lexed, at.offset) == .Val(name) {
+        if lsp_doc_to_host_span(at.view.doc, name.span) == .Val(host_span) {
+            range = ",\"range\":{lsp_range_json(lsp_byte_span_to_range(at.view.doc.text, host_span))}"
+        }
+    }
+    lsp_response(id, "{{\"contents\":{{\"kind\":\"markdown\",\"value\":{foundation_json_quote(text)}}}{range}}}")
+}
+
+// Formats a checked location in `path` at Jet `span`: if `path` is an open host
+// document's virtual `.jet` path, maps `span` to host bytes/UTF-16 under the
+// host URI (returning None if the span touches generated text).
+lsp_host_location_json: fn(server: LSPServer, path: String, source: String, span: Span) -> String? Never! {
+    if lsp_open_doc_for_check_path(server, path) == .Val(open_uri) {
+        if server.diagnostic_state.docs.get(open_uri) == .Val(doc) {
+            if doc.host_doc != None {
+                host_span: lsp_doc_to_host_span(doc, span) ?? return None
+                return Val(lsp_source_location_json(open_uri, doc.text, host_span))
+            }
+        }
+    }
+    Val(lsp_source_location_json(lsp_path_to_uri(path), source, span))
+}

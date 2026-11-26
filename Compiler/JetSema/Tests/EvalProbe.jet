@@ -407,3 +407,43 @@ run: fn() {
     }
     eval_probe_report(failures)
 }
+
+// The debugger and `--pure` check refuse transitive writes to held/module state
+// with E3401 directly from the solved `solved_writes` touch fact (with no
+// second call-graph walk), while non-writing calls pass.
+#Test("eval_probe_global_reads_allowed_and_transitive_writes_refused") {
+    ^failures: [String]{}
+    source: `Score: struct {
+    value: Int,
+}
+
+bump: fn(s: Shared<Score>) -> Int {
+    s.value += 1
+    s.value
+}
+
+bump_indirect: fn(s: Shared<Score>) -> Int {
+    bump(s)
+}
+
+double_value: fn(n: Int) -> Int {
+    n * 2
+}
+
+run: fn() {
+    s: Shared{Score{value: 10}}
+    x: s.value
+    print("{x}")
+}
+`
+    asks: [EvalProbeAsk]{
+        EvalProbeAsk{offset: source.find(`print("{x}`), texts: [String]{"double_value(x)", "bump_indirect(s)"}},
+    }
+    probed: eval_probe_run(source, asks, failures)
+    if probed.errors.len() > 0 {
+        failures.push("program had errors: {probed.errors.join(" | ")}")
+    }
+    eval_probe_expect_value(probed, 0, 0, Type.Int, true, failures)
+    eval_probe_expect_refusal(probed, 0, 1, "E3401", "s", failures)
+    eval_probe_report(failures)
+}
