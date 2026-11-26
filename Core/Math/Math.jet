@@ -45876,3 +45876,342 @@ priv complex_atan: fn(z: Complex) -> Complex Never! {
     assert_eq(keep_f32(md.whole), F32{2.0})
     assert_eq(keep_f32(md.fract), F32{0.5})
 }
+
+#Test("C23 math.h census: every float and double function exists in core.math") {
+    // Exhaustive census of ISO/IEC 9899:2024 (C23) section 7.12 <math.h>
+    // binary floating-point operations: double and float (*f) forms, C23
+    // narrowing operations (fadd..fsqrt), total order, and classification.
+    c23_census: [String]{
+        // 7.12.3 Classification
+        "fpclassify", "isfinite", "isinf", "isnan", "isnormal",
+        "signbit", "iscanonical", "issignaling", "issubnormal", "iszero",
+        // 7.12.4 Trigonometric and half-turn (*pi) functions
+        "acos", "acosf", "asin", "asinf", "atan", "atanf", "atan2", "atan2f",
+        "cos", "cosf", "sin", "sinf", "tan", "tanf",
+        "acospi", "acospif", "asinpi", "asinpif", "atanpi", "atanpif",
+        "atan2pi", "atan2pif", "cospi", "cospif", "sinpi", "sinpif", "tanpi", "tanpif",
+        // 7.12.5 Hyperbolic functions
+        "acosh", "acoshf", "asinh", "asinhf", "atanh", "atanhf",
+        "cosh", "coshf", "sinh", "sinhf", "tanh", "tanhf",
+        // 7.12.6 Exponential and logarithmic functions
+        "exp", "expf", "exp10", "exp10f", "exp10m1", "exp10m1f",
+        "exp2", "exp2f", "exp2m1", "exp2m1f", "expm1", "expm1f",
+        "frexp", "frexpf", "ilogb", "ilogbf", "llogb", "llogbf",
+        "ldexp", "ldexpf", "log", "logf", "log10", "log10f",
+        "log10p1", "log10p1f", "log1p", "log1pf", "logp1", "logp1f",
+        "log2", "log2f", "log2p1", "log2p1f", "logb", "logbf",
+        "modf", "modff", "scalbn", "scalbnf", "scalbln", "scalblnf",
+        // 7.12.7 Power and absolute-value functions
+        "cbrt", "cbrtf", "compoundn", "compoundnf", "fabs", "fabsf",
+        "hypot", "hypotf", "pow", "powf", "pown", "pownf", "powr", "powrf",
+        "rootn", "rootnf", "rsqrt", "rsqrtf", "sqrt", "sqrtf",
+        // 7.12.8 Error and gamma functions
+        "erf", "erff", "erfc", "erfcf", "lgamma", "lgammaf", "tgamma", "tgammaf",
+        // 7.12.9 Nearest integer functions
+        "ceil", "ceilf", "floor", "floorf", "nearbyint", "nearbyintf",
+        "rint", "rintf", "lrint", "lrintf", "llrint", "llrintf",
+        "round", "roundf", "lround", "lroundf", "llround", "llroundf",
+        "roundeven", "roundevenf", "trunc", "truncf",
+        "fromfp", "fromfpf", "ufromfp", "ufromfpf", "fromfpx", "fromfpxf", "ufromfpx", "ufromfpxf",
+        // 7.12.10 Remainder functions
+        "fmod", "fmodf", "remainder", "remainderf", "remquo", "remquof",
+        // 7.12.11 Manipulation functions
+        "copysign", "copysignf", "nan", "nanf",
+        "nextafter", "nextafterf", "nexttoward", "nexttowardf",
+        "nextup", "nextupf", "nextdown", "nextdownf",
+        "canonicalize", "canonicalizef",
+        "getpayload", "getpayloadf", "setpayload", "setpayloadf",
+        "setpayloadsig", "setpayloadsigf",
+        // 7.12.12 Maximum, minimum, and positive difference functions
+        "fdim", "fdimf", "fmax", "fmaxf", "fmin", "fminf",
+        "fmaximum", "fmaximumf", "fminimum", "fminimumf",
+        "fmaximum_mag", "fmaximum_magf", "fminimum_mag", "fminimum_magf",
+        "fmaximum_num", "fmaximum_numf", "fminimum_num", "fminimum_numf",
+        "fmaximum_mag_num", "fmaximum_mag_numf", "fminimum_mag_num", "fminimum_mag_numf",
+        // 7.12.13 Floating multiply-add
+        "fma", "fmaf",
+        // 7.12.14 Narrowing arithmetic (Float -> F32 rounded once)
+        "fadd", "fsub", "fmul", "fdiv", "ffma", "fsqrt",
+        // 7.12.16 Total order functions
+        "totalorder", "totalorderf", "totalordermag", "totalordermagf",
+    }
+
+    ^verified: [String: Bool]{}
+    record: fn(name: String, ok: Bool) Never! {
+        if !ok -> panic("C23 math.h census check failed for `{name}`")
+        verified[name] = true
+    }
+    near: fn(a: Float, b: Float, tol: Float) -> Bool Never! { fabs(a - b) <= tol }
+    to_f32: fn(v: Float) -> F32 Never! {
+        F32.from_float(v) ?? panic("expected representable F32 in C23 census")
+    }
+    near_f32: fn(a: F32, b: Float, tol: Float) -> Bool Never! {
+        fabs(Float.from_f32(a) - b) <= tol
+    }
+
+    // 7.12.3 Classification (Float + F32)
+    class_count: fn(v: Float) -> Int Never! {
+        ^n: 0
+        if is_nan(v) -> n += 1
+        if is_inf(v) -> n += 1
+        if is_normal(v) -> n += 1
+        if is_subnormal(v) -> n += 1
+        if is_zero(v) -> n += 1
+        n
+    }
+    record("fpclassify", class_count(NAN) == 1 && class_count(INFINITY) == 1 && class_count(1.0) == 1 && class_count(from_bits(1)) == 1 && class_count(0.0) == 1)
+    record("isfinite", is_finite(1.0) && isfinite(1.0) && !is_finite(INFINITY) && __is_finite_f32(F32{1.0}))
+    record("isinf", is_inf(INFINITY) && isinf(-INFINITY) && !is_inf(1.0) && is_inf(Float.from_f32(F32.INFINITY)))
+    record("isnan", is_nan(NAN) && isnan(NAN) && !is_nan(1.0) && is_nan(Float.from_f32(F32{0.0} / F32{0.0})))
+    record("isnormal", is_normal(1.0) && !is_normal(0.0) && __is_normal_f32(F32{1.0}) && !__is_normal_f32(F32{1.0e-40}))
+    record("signbit", sign_bit(-0.0) && !sign_bit(0.0) && sign_bit(Float.from_f32(F32{-0.0})))
+    record("iscanonical", is_canonical(1.0) && is_canonical(NAN) && is_canonical(Float.from_f32(F32{1.0})))
+    snan64: set_payload_signaling(1.0) ?? 0.0
+    snan32: __set_payload_signaling_f32(F32{1.0}) ?? F32{0.0}
+    record("issignaling", is_signaling(snan64) && !is_signaling(1.0) && __is_signaling_f32(snan32) && !__is_signaling_f32(F32{1.0}))
+    record("issubnormal", is_subnormal(from_bits(1)) && !is_subnormal(1.0) && __is_subnormal_f32(F32{1.0e-40}))
+    record("iszero", is_zero(0.0) && is_zero(-0.0) && !is_zero(1.0) && is_zero(Float.from_f32(F32{-0.0})))
+
+    // 7.12.4 Trigonometric and half-turn (*pi) functions
+    record("acos", acos(1.0) == 0.0)
+    record("acosf", to_f32(__acos_f32(1.0)) == F32{0.0})
+    record("asin", asin(0.0) == 0.0)
+    record("asinf", to_f32(asin(Float.from_f32(F32{0.0}))) == F32{0.0})
+    record("atan", atan(0.0) == 0.0)
+    record("atanf", to_f32(__atan_f32(0.0)) == F32{0.0})
+    record("atan2", near(atan2(1.0, 1.0), PI * 0.25, 1.0e-15))
+    record("atan2f", near_f32(to_f32(__atan2_f32(1.0, 1.0)), 0.7853982, 1.0e-6))
+    record("cos", cos(0.0) == 1.0)
+    record("cosf", to_f32(__cos_f32(0.0)) == F32{1.0})
+    record("sin", sin(0.0) == 0.0)
+    record("sinf", to_f32(__sin_f32(0.0)) == F32{0.0})
+    record("tan", tan(0.0) == 0.0)
+    record("tanf", to_f32(tan(Float.from_f32(F32{0.0}))) == F32{0.0})
+    record("acospi", acos_pi(0.0) == 0.5)
+    record("acospif", to_f32(acos_pi(Float.from_f32(F32{0.0}))) == F32{0.5})
+    record("asinpi", asin_pi(1.0) == 0.5)
+    record("asinpif", to_f32(asin_pi(Float.from_f32(F32{1.0}))) == F32{0.5})
+    record("atanpi", atan_pi(1.0) == 0.25)
+    record("atanpif", to_f32(__atan_pi_f32(1.0)) == F32{0.25})
+    record("atan2pi", atan2_pi(1.0, 1.0) == 0.25)
+    record("atan2pif", to_f32(__atan2_pi_f32(1.0, 1.0)) == F32{0.25})
+    record("cospi", cos_pi(0.5) == 0.0)
+    record("cospif", to_f32(cos_pi(Float.from_f32(F32{0.5}))) == F32{0.0})
+    record("sinpi", sin_pi(0.5) == 1.0)
+    record("sinpif", to_f32(sin_pi(Float.from_f32(F32{0.5}))) == F32{1.0})
+    record("tanpi", tan_pi(0.25) == 1.0)
+    record("tanpif", to_f32(tan_pi(Float.from_f32(F32{0.25}))) == F32{1.0})
+
+    // 7.12.5 Hyperbolic functions
+    record("acosh", acosh(1.0) == 0.0)
+    record("acoshf", to_f32(__acosh_f32(1.0)) == F32{0.0})
+    record("asinh", asinh(0.0) == 0.0)
+    record("asinhf", to_f32(__asinh_f32(0.0)) == F32{0.0})
+    record("atanh", atanh(0.0) == 0.0)
+    record("atanhf", to_f32(atanh(Float.from_f32(F32{0.0}))) == F32{0.0})
+    record("cosh", cosh(0.0) == 1.0)
+    record("coshf", to_f32(cosh(Float.from_f32(F32{0.0}))) == F32{1.0})
+    record("sinh", sinh(0.0) == 0.0)
+    record("sinhf", to_f32(__sinh_f32(0.0)) == F32{0.0})
+    record("tanh", tanh(0.0) == 0.0)
+    record("tanhf", to_f32(tanh(Float.from_f32(F32{0.0}))) == F32{0.0})
+
+    // 7.12.6 Exponential and logarithmic functions
+    record("exp", exp(0.0) == 1.0)
+    record("expf", to_f32(exp(Float.from_f32(F32{0.0}))) == F32{1.0})
+    record("exp10", exp10(2.0) == 100.0)
+    record("exp10f", to_f32(exp10(Float.from_f32(F32{2.0}))) == F32{100.0})
+    record("exp10m1", exp10_m1(2.0) == 99.0)
+    record("exp10m1f", to_f32(__exp10_m1_f32(2.0)) == F32{99.0})
+    record("exp2", exp2(3.0) == 8.0)
+    record("exp2f", to_f32(__exp2_f32(3.0)) == F32{8.0})
+    record("exp2m1", exp2_m1(3.0) == 7.0)
+    record("exp2m1f", to_f32(exp2_m1(Float.from_f32(F32{3.0}))) == F32{7.0})
+    record("expm1", exp_m1(0.0) == 0.0 && expm1(0.0) == 0.0)
+    record("expm1f", to_f32(exp_m1(Float.from_f32(F32{0.0}))) == F32{0.0})
+    fr64: frexp(6.5)
+    record("frexp", fr64.frac == 0.8125 && fr64.exp == 3)
+    fr32: __frexp_f32(F32{6.5})
+    record("frexpf", fr32.frac == F32{0.8125} && fr32.exp == 3)
+    record("ilogb", ilogb(8.0) == Val(3))
+    record("ilogbf", ilogb(Float.from_f32(F32{8.0})) == Val(3))
+    record("llogb", ilogb(1024.0) == Val(10))
+    record("llogbf", ilogb(Float.from_f32(F32{1024.0})) == Val(10))
+    record("ldexp", ldexp(1.5, 3) == 12.0)
+    record("ldexpf", to_f32(ldexp(Float.from_f32(F32{1.5}), 3)) == F32{12.0})
+    record("log", ln(1.0) == 0.0)
+    record("logf", to_f32(__ln_f32(1.0)) == F32{0.0})
+    record("log10", log10(100.0) == 2.0)
+    record("log10f", to_f32(__log10_f32(100.0)) == F32{2.0})
+    record("log10p1", log10_1p(99.0) == 2.0)
+    record("log10p1f", to_f32(__log10_1p_f32(99.0)) == F32{2.0})
+    record("log1p", ln_1p(0.0) == 0.0 && log1p(0.0) == 0.0)
+    record("log1pf", to_f32(__ln_1p_f32(0.0)) == F32{0.0} && to_f32(__log1p_f32(0.0)) == F32{0.0})
+    record("logp1", near(ln_1p(1.0), ln(2.0), 1.0e-15))
+    record("logp1f", near_f32(to_f32(__ln_1p_f32(1.0)), 0.6931472, 1.0e-6))
+    record("log2", log2(8.0) == 3.0)
+    record("log2f", to_f32(log2(Float.from_f32(F32{8.0}))) == F32{3.0})
+    record("log2p1", log2_1p(7.0) == 3.0)
+    record("log2p1f", to_f32(__log2_1p_f32(7.0)) == F32{3.0})
+    record("logb", logb(8.0) == 3.0)
+    record("logbf", to_f32(logb(Float.from_f32(F32{8.0}))) == F32{3.0})
+    md64: modf(3.25)
+    record("modf", md64.whole == 3.0 && md64.fract == 0.25)
+    md32: __modf_f32(F32{3.25})
+    record("modff", md32.whole == F32{3.0} && md32.fract == F32{0.25})
+    record("scalbn", scaleb(1.5, 3) == 12.0)
+    record("scalbnf", to_f32(scaleb(Float.from_f32(F32{1.5}), 3)) == F32{12.0})
+    record("scalbln", scaleb(1.5, 4) == 24.0)
+    record("scalblnf", to_f32(scaleb(Float.from_f32(F32{1.5}), 4)) == F32{24.0})
+
+    // 7.12.7 Power and absolute-value functions
+    record("cbrt", cbrt(27.0) == 3.0)
+    record("cbrtf", to_f32(cbrt(Float.from_f32(F32{27.0}))) == F32{3.0})
+    record("compoundn", compound_n(1.0, 3) == 8.0)
+    record("compoundnf", to_f32(__compound_n_f32(1.0, 3)) == F32{8.0})
+    record("fabs", fabs(-3.5) == 3.5 && abs(Float{-3.5}) == 3.5)
+    record("fabsf", __fabs_f32(F32{-3.5}) == F32{3.5} && abs_f32(F32{-3.5}) == F32{3.5})
+    record("hypot", hypot(3.0, 4.0) == 5.0)
+    record("hypotf", to_f32(__hypot_f32(3.0, 4.0)) == F32{5.0})
+    record("pow", pow_float(2.0, 5.0) == 32.0)
+    record("powf", to_f32(pow_f32(2.0, 5.0)) == F32{32.0})
+    record("pown", pow_n(3.0, 4) == 81.0)
+    record("pownf", to_f32(__pow_n_f32(3.0, 4)) == F32{81.0})
+    record("powr", pow_r(2.0, 4.0) == 16.0)
+    record("powrf", to_f32(__pow_r_f32(2.0, 4.0)) == F32{16.0})
+    record("rootn", root_n(81.0, 4) == 3.0)
+    record("rootnf", to_f32(__root_n_f32(81.0, 4)) == F32{3.0})
+    record("rsqrt", rsqrt(4.0) == 0.5)
+    record("rsqrtf", to_f32(rsqrt(Float.from_f32(F32{4.0}))) == F32{0.5})
+    record("sqrt", sqrt(9.0) == 3.0)
+    record("sqrtf", to_f32(sqrt(Float.from_f32(F32{9.0}))) == F32{3.0})
+
+    // 7.12.8 Error and gamma functions
+    record("erf", erf(0.0) == 0.0 && near(erf(1.0), 0.8427007929497149, 1.0e-15))
+    record("erff", to_f32(__erf_f32(0.0)) == F32{0.0} && near_f32(to_f32(__erf_f32(1.0)), 0.8427008, 1.0e-6))
+    record("erfc", erfc(0.0) == 1.0)
+    record("erfcf", to_f32(__erfc_f32(0.0)) == F32{1.0})
+    record("lgamma", lgamma(1.0) == 0.0 && lgamma(2.0) == 0.0)
+    record("lgammaf", to_f32(__lgamma_f32(1.0)) == F32{0.0})
+    record("tgamma", gamma(5.0) == 24.0)
+    record("tgammaf", to_f32(__gamma_f32(5.0)) == F32{24.0})
+
+    // 7.12.9 Nearest integer functions
+    record("ceil", ceil(Float{1.25}) == 2.0)
+    record("ceilf", ceil(F32{1.25}) == F32{2.0})
+    record("floor", floor(Float{1.75}) == 1.0)
+    record("floorf", floor(F32{1.75}) == F32{1.0})
+    record("nearbyint", round_even(Float{2.5}) == 2.0)
+    record("nearbyintf", round_even(F32{2.5}) == F32{2.0})
+    record("rint", round_even(Float{3.5}) == 4.0)
+    record("rintf", round_even(F32{3.5}) == F32{4.0})
+    record("lrint", round_to_signed(2.5, Rounding.TiesToEven, 64) == Val(2))
+    record("lrintf", round_to_signed(Float.from_f32(F32{2.5}), Rounding.TiesToEven, 64) == Val(2))
+    record("llrint", round_to_signed(3.5, Rounding.TiesToEven, 64) == Val(4))
+    record("llrintf", round_to_signed(Float.from_f32(F32{3.5}), Rounding.TiesToEven, 64) == Val(4))
+    record("round", round(Float{2.5}) == 3.0)
+    record("roundf", round(F32{2.5}) == F32{3.0})
+    record("lround", round_to_signed(2.5, Rounding.TiesToAway, 64) == Val(3))
+    record("lroundf", round_to_signed(Float.from_f32(F32{2.5}), Rounding.TiesToAway, 64) == Val(3))
+    record("llround", round_to_signed(-2.5, Rounding.TiesToAway, 64) == Val(-3))
+    record("llroundf", round_to_signed(Float.from_f32(F32{-2.5}), Rounding.TiesToAway, 64) == Val(-3))
+    record("roundeven", round_even(Float{-2.5}) == -2.0)
+    record("roundevenf", round_even(F32{-2.5}) == F32{-2.0})
+    record("trunc", trunc(Float{-2.75}) == -2.0)
+    record("truncf", trunc(F32{-2.75}) == F32{-2.0})
+    record("fromfp", round_to_signed(-2.5, Rounding.TowardNegative, 8) == Val(-3))
+    record("fromfpf", round_to_signed(Float.from_f32(F32{-2.5}), Rounding.TowardNegative, 8) == Val(-3))
+    record("ufromfp", round_to_unsigned(2.5, Rounding.TowardPositive, 8) == Val(3))
+    record("ufromfpf", round_to_unsigned(Float.from_f32(F32{2.5}), Rounding.TowardPositive, 8) == Val(3))
+    record("fromfpx", round_to_signed(2.5, Rounding.TowardZero, 16) == Val(2))
+    record("fromfpxf", round_to_signed(Float.from_f32(F32{2.5}), Rounding.TowardZero, 16) == Val(2))
+    record("ufromfpx", round_to_unsigned(2.5, Rounding.TowardZero, 16) == Val(2))
+    record("ufromfpxf", round_to_unsigned(Float.from_f32(F32{2.5}), Rounding.TowardZero, 16) == Val(2))
+
+    // 7.12.10 Remainder functions
+    record("fmod", fmod(5.5, 2.0) == 1.5)
+    record("fmodf", to_f32(fmod(Float.from_f32(F32{5.5}), Float.from_f32(F32{2.0}))) == F32{1.5})
+    record("remainder", remainder(7.0, 2.0) == -1.0)
+    record("remainderf", to_f32(remainder(Float.from_f32(F32{7.0}), Float.from_f32(F32{2.0}))) == F32{-1.0})
+    rq64: rem_quo(7.0, 2.0)
+    record("remquo", rq64.rem == -1.0 && rq64.quo == 4)
+    rq32: __rem_quo_f32(F32{7.0}, F32{2.0})
+    record("remquof", rq32.rem == F32{-1.0} && rq32.quo == 4)
+
+    // 7.12.11 Manipulation functions
+    record("copysign", copysign(2.0, -1.0) == -2.0)
+    record("copysignf", __copysign_f32(F32{2.0}, F32{-1.0}) == F32{-2.0})
+    qnan64: set_payload(42.0) ?? 0.0
+    qnan32: __set_payload_f32(F32{42.0}) ?? F32{0.0}
+    record("nan", is_nan(qnan64) && is_nan(NAN))
+    record("nanf", is_nan(Float.from_f32(qnan32)))
+    record("nextafter", next_after(1.0, 2.0) > 1.0 && nextafter(1.0, 2.0) == next_after(1.0, 2.0))
+    record("nextafterf", to_f32(__next_after_f32(1.0, 2.0)) > F32{1.0} && __nextafter_f32(1.0, 2.0) == __next_after_f32(1.0, 2.0))
+    record("nexttoward", next_after(1.0, 0.0) < 1.0)
+    record("nexttowardf", to_f32(__next_after_f32(1.0, 0.0)) < F32{1.0})
+    record("nextup", next_up(1.0) > 1.0)
+    record("nextupf", to_f32(__next_up_f32(1.0)) > F32{1.0})
+    record("nextdown", next_down(1.0) < 1.0)
+    record("nextdownf", to_f32(__next_down_f32(1.0)) < F32{1.0})
+    record("canonicalize", !is_signaling(canonicalize(snan64)) && canonicalize(1.5) == 1.5)
+    record("canonicalizef", !__is_signaling_f32(__canonicalize_f32(snan32)) && __canonicalize_f32(F32{1.5}) == F32{1.5})
+    record("getpayload", get_payload(qnan64) == Val(42.0))
+    record("getpayloadf", __get_payload_f32(qnan32) == Val(F32{42.0}))
+    record("setpayload", get_payload(set_payload(7.0) ?? 0.0) == Val(7.0))
+    record("setpayloadf", __get_payload_f32(__set_payload_f32(F32{7.0}) ?? F32{0.0}) == Val(F32{7.0}))
+    record("setpayloadsig", is_signaling(set_payload_signaling(3.0) ?? 0.0))
+    record("setpayloadsigf", __is_signaling_f32(__set_payload_signaling_f32(F32{3.0}) ?? F32{0.0}))
+
+    // 7.12.12 Maximum, minimum, and positive difference functions
+    record("fdim", fdim(5.0, 3.0) == 2.0 && fdim(3.0, 5.0) == 0.0)
+    record("fdimf", to_f32(fdim(Float.from_f32(F32{5.0}), Float.from_f32(F32{3.0}))) == F32{2.0})
+    record("fmax", max_float(2.0, 5.0) == 5.0 && max_float(NAN, 3.0) == 3.0)
+    record("fmaxf", to_f32(max_float(Float.from_f32(F32{2.0}), Float.from_f32(F32{5.0}))) == F32{5.0})
+    record("fmin", min_float(2.0, 5.0) == 2.0 && min_float(NAN, 3.0) == 3.0)
+    record("fminf", to_f32(min_float(Float.from_f32(F32{2.0}), Float.from_f32(F32{5.0}))) == F32{2.0})
+    record("fmaximum", maximum(2.0, 5.0) == 5.0 && is_nan(maximum(NAN, 3.0)))
+    record("fmaximumf", to_f32(maximum(Float.from_f32(F32{2.0}), Float.from_f32(F32{5.0}))) == F32{5.0})
+    record("fminimum", minimum(2.0, 5.0) == 2.0 && is_nan(minimum(NAN, 3.0)))
+    record("fminimumf", to_f32(minimum(Float.from_f32(F32{2.0}), Float.from_f32(F32{5.0}))) == F32{2.0})
+    record("fmaximum_mag", maximum_mag(-4.0, 2.0) == -4.0)
+    record("fmaximum_magf", to_f32(maximum_mag(Float.from_f32(F32{-4.0}), Float.from_f32(F32{2.0}))) == F32{-4.0})
+    record("fminimum_mag", minimum_mag(-4.0, 2.0) == 2.0)
+    record("fminimum_magf", to_f32(minimum_mag(Float.from_f32(F32{-4.0}), Float.from_f32(F32{2.0}))) == F32{2.0})
+    record("fmaximum_num", maximum_num(NAN, 3.0) == 3.0)
+    record("fmaximum_numf", to_f32(maximum_num(Float.from_f32(F32{2.0}), Float.from_f32(F32{3.0}))) == F32{3.0})
+    record("fminimum_num", minimum_num(NAN, 3.0) == 3.0)
+    record("fminimum_numf", to_f32(minimum_num(Float.from_f32(F32{2.0}), Float.from_f32(F32{3.0}))) == F32{2.0})
+    record("fmaximum_mag_num", maximum_mag_num(NAN, -4.0) == -4.0)
+    record("fmaximum_mag_numf", to_f32(maximum_mag_num(Float.from_f32(F32{-4.0}), Float.from_f32(F32{2.0}))) == F32{-4.0})
+    record("fminimum_mag_num", minimum_mag_num(NAN, -4.0) == -4.0)
+    record("fminimum_mag_numf", to_f32(minimum_mag_num(Float.from_f32(F32{-4.0}), Float.from_f32(F32{2.0}))) == F32{2.0})
+
+    // 7.12.13 Floating multiply-add
+    record("fma", fma(2.0, 3.0, 4.0) == 10.0 && muladd(2.0, 3.0, 4.0) == 10.0)
+    record("fmaf", to_f32(__fma_f32(2.0, 3.0, 4.0)) == F32{10.0} && to_f32(__muladd_f32(2.0, 3.0, 4.0)) == F32{10.0})
+
+    // 7.12.14 Narrowing arithmetic (Float operands -> F32 rounded once)
+    record("fadd", f32_add(1.5, 2.25) == F32{3.75})
+    record("fsub", f32_sub(5.5, 2.25) == F32{3.25})
+    record("fmul", f32_mul(3.0, 2.5) == F32{7.5})
+    record("fdiv", f32_div(7.5, 2.5) == F32{3.0})
+    record("ffma", f32_fma(2.0, 3.0, 1.5) == F32{7.5})
+    record("fsqrt", f32_sqrt(9.0) == F32{3.0})
+
+    // 7.12.16 Total order
+    record("totalorder", total_order(-0.0, 0.0) && !total_order(0.0, -0.0))
+    record("totalorderf", __total_order_f32(F32{-0.0}, F32{0.0}) && !__total_order_f32(F32{0.0}, F32{-0.0}))
+    record("totalordermag", total_order_mag(-1.0, 2.0) && !total_order_mag(-3.0, 2.0))
+    record("totalordermagf", __total_order_mag_f32(F32{-1.0}, F32{2.0}) && !__total_order_mag_f32(F32{-3.0}, F32{2.0}))
+
+    // Fail on any missing or unverified C23 name in the census.
+    ^missing: [String]{}
+    loop name in c23_census {
+        if !(verified.get(name) ?? false) -> missing.push(name)
+    }
+    if missing.len() != 0 {
+        panic("Missing C23 math.h functions in core.math: {missing.join(", ")}")
+    }
+    assert_eq(verified.len(), c23_census.len())
+}
+
