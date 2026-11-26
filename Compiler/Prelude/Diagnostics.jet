@@ -23386,6 +23386,26 @@ CheckedTextRejected: struct {
     }
 }
 
+CheckedTextHoleSlot: struct {
+    impl Diagnostic {
+        code: "E2715",
+        safety_class: .Soundness,
+        safety_reason: "The hole's value would fill a place its type does not fit, so the literal would not mean what it says.",
+        expert_path: "none: the hole holds a value of a type its place accepts",
+        stage: [.Compile],
+        meaning: "A checked text hole whose type does not fit the place it sits in",
+        detail: true,
+
+        what: fn(self) -> String { "This checked text type refuses the hole's type where it sits" }
+
+        why: fn(self) -> String {
+            "A library's `CheckedText.accepts` function judges each hole's type for the place the hole sits in, and it refused this one."
+        }
+
+        fix: fn(self) -> String { "Pass a value of a type this place accepts, or move the hole to a place that accepts its type." }
+    }
+}
+
 RetiredDeriveTraitSpelling: struct {
     trait_name: String,
 

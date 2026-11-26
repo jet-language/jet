@@ -1,0 +1,37 @@
+// `accepts` judges each hole's type for the place the hole sits in; the
+// reason it gives for refusing one is E2715's Why, at the hole.
+
+#Error
+QueryError: struct {
+    reason: String,
+}
+
+Query: struct {
+    text: String,
+    params: [String],
+
+    impl CheckedText {
+        Error: QueryError,
+        Hole: String,
+
+        check: fn(parts: [String]) -[]> Checked<[String], TextSlot> QueryError! {
+            return Ok(Checked{shape: parts.copy(), slots: loop _ in 1..<parts.len() -> TextSlot.Text})
+        }
+
+        accepts: fn(_slot: TextSlot, hole: TypeId) -[]> String? {
+            if hole.name == "Bool" -> return Val("a query parameter is a number or text, not a Bool")
+            None
+        }
+
+        encode_hole: fn<T: Printable>(value: T, _slot: TextSlot) -[]> String { "{value}" }
+
+        build: fn(shape: [String], holes: [String]) -[]> Query { Query{text: shape.join("?"), params: holes.copy()} }
+    }
+}
+
+run: fn() {
+    ^id: 7
+    ^open: true
+    query: Query{"select * from t where id = {id} and open = {open}"}
+    print(query.text)
+}

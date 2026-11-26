@@ -118,7 +118,11 @@ vocabulary](vocabulary.md).
   returned for `["a ", " b"]`, so `build` never parses again at run time.
   `Owner.from(text)` is `check([text])`. Such a literal adds no failure route
   to the function it is in: a failure of `encode_hole` or `build` stops the
-  program at the literal, as a rejected run-time check does. `Hole` without
+  program at the literal, as a rejected run-time check does. A type that
+  declares `accepts: fn(slot: Slot, hole: TypeId) -[]> String?` judges each
+  hole of run-time code's literals before the program runs, given the slot
+  the hole sits in and its type's TypeId; a reason it gives is E2715 at the
+  hole, and a type without `accepts` accepts every hole. `Hole` without
   `build` is E0907, as is a `check` that does not return `Checked<Shape,
   Slot>` with the type's `Error` (D-TEXTHEAD-HOLES1=A;
   Examples/Text/CheckedText/CheckedTextBoundHoles.jet).

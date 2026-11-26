@@ -1706,13 +1706,15 @@ sema_expression_typed_literal_printable: fn(ty: Type, environment: SemaScopeEnvi
 
 // `build` is set when the type assembles its literal from the parts and the
 // encoded holes; without it the type is a `distinct String` and the literal
-// is the joined text.
+// is the joined text. `accepts` is set when the type judges each hole's type
+// for its slot; without it every hole is accepted.
 SemaExpressionCheckedTextTarget: struct {
     owner: Symbol,
     implementation_module_identity: ModuleID,
     check: SemaRegistrationFunction,
     encode_hole: SemaRegistrationFunction,
     build: SemaRegistrationFunction?,
+    accepts: SemaRegistrationFunction?,
 }
 
 SemaExpressionCheckedTextLiteral: struct {
@@ -1783,6 +1785,7 @@ sema_expression_checked_text_target: fn(head: Type, environment: SemaScopeEnviro
                 ^check: SemaRegistrationFunction?{None}
                 ^encode_hole: SemaRegistrationFunction?{None}
                 ^build: SemaRegistrationFunction?{None}
+                ^accepts: SemaRegistrationFunction?{None}
                 loop method in registered.methods {
                     ^written: false
                     loop declared in block.methods {
@@ -1792,6 +1795,7 @@ sema_expression_checked_text_target: fn(head: Type, environment: SemaScopeEnviro
                     if method.symbol.name == "check" -> check = Val(method)
                     if method.symbol.name == "encode_hole" -> encode_hole = Val(method)
                     if method.symbol.name == "build" -> build = Val(method)
+                    if method.symbol.name == "accepts" -> accepts = Val(method)
                 }
                 if check != None && encode_hole != None && (string_backed || build != None) {
                     return Val(SemaExpressionCheckedTextTarget{
@@ -1800,6 +1804,7 @@ sema_expression_checked_text_target: fn(head: Type, environment: SemaScopeEnviro
                         check: check ?? return None,
                         encode_hole: encode_hole ?? return None,
                         build: build,
+                        accepts: accepts,
                     })
                 }
             }
@@ -1827,6 +1832,7 @@ sema_expression_checked_text_impl_target: fn(graph: SemaRegistrationGraph, modul
     ^check: SemaRegistrationFunction?{None}
     ^encode_hole: SemaRegistrationFunction?{None}
     ^build: SemaRegistrationFunction?{None}
+    ^accepts: SemaRegistrationFunction?{None}
     loop method_index in 0..<graph.modules[module_index].impls[row].methods.len() {
         if graph.modules[module_index].impls[row].methods[method_index].symbol.name == "check" {
             check = Val(graph.modules[module_index].impls[row].methods[method_index])
@@ -1837,6 +1843,9 @@ sema_expression_checked_text_impl_target: fn(graph: SemaRegistrationGraph, modul
         if graph.modules[module_index].impls[row].methods[method_index].symbol.name == "build" {
             build = Val(graph.modules[module_index].impls[row].methods[method_index])
         }
+        if graph.modules[module_index].impls[row].methods[method_index].symbol.name == "accepts" {
+            accepts = Val(graph.modules[module_index].impls[row].methods[method_index])
+        }
     }
     if check == None || encode_hole == None || (!string_backed && build == None) -> return None
     Val(SemaExpressionCheckedTextTarget{
@@ -1845,6 +1854,7 @@ sema_expression_checked_text_impl_target: fn(graph: SemaRegistrationGraph, modul
         check: check ?? return None,
         encode_hole: encode_hole ?? return None,
         build: build,
+        accepts: accepts,
     })
 }
 
@@ -1858,15 +1868,22 @@ sema_expression_checked_text_static_method_call: fn(receiver: Expr, method_name:
     target: sema_expression_checked_text_target(Type.Named{name: type_name}, check.environment.*, check.program.*, check.scopes) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     // A type that assembles itself through `build` is no String wrapper:
     // its other statics (`SQL.raw`) are its own ordinary methods. `build`
-    // goes straight to the impl, which a runtime handle has no row to reach.
-    if target.build != None && method_name != "check" && method_name != "encode_hole" && method_name != "build" {
+    // and `accepts` go straight to the impl, which a runtime handle has no
+    // row to reach.
+    if target.build != None && method_name != "check" && method_name != "encode_hole" && method_name != "build" && method_name != "accepts" {
         return SemaMethodSpecialCheck{handled: false, value: None}
     }
     if method_name == "raw" {
         return sema_expression_checked_text_raw(target, type_name, method_span, args, expected, check)
     }
-    function: if method_name == "check" || method_name == "from" -> target.check else if method_name == "encode_hole" -> target.encode_hole else if method_name == "build" && target.build != None -> target.build ?? target.check else -> {
-        return SemaMethodSpecialCheck{handled: false, value: None}
+    function: if {
+        method_name == "check" || method_name == "from" -> target.check
+        method_name == "encode_hole" -> target.encode_hole
+        method_name == "build" && target.build != None -> target.build ?? target.check
+        method_name == "accepts" && target.accepts != None -> target.accepts ?? target.check
+        else -> {
+            return SemaMethodSpecialCheck{handled: false, value: None}
+        }
     }
     if owner_type_args.len() > 0 {
         check.diagnostics.push(sema_error("E0119", method_span, "`{type_name}.{method_name}` has no owner type parameters", "CheckedText implementations target one concrete string-backed distinct type", "remove the explicit owner type arguments"))
@@ -2097,6 +2114,13 @@ sema_expression_checked_text_literal: fn(head: Type, source_head: Type?, body: T
         check.diagnostics.push(sema_error("E0003", span, "the checked text checker call did not lower as a direct static call", "CheckedText methods are ordinary registered pure functions", "preserve the canonical registered call target"))
         return SemaExpressionCheckedTextLiteral{handled: true, value: None}
     }
+    // In run-time code `accepts` judges each hole while building; a text
+    // kind's holes all sit in `.Text`, so its answers need no landed check.
+    if !building && runtime_owner == .Val(accepts_owner) {
+        if sema_expression_checked_text_refused(type_name, target, holes, [TComptimeValue]{}, None, accepts_owner, span, check) {
+            return SemaExpressionCheckedTextLiteral{handled: true, value: None}
+        }
+    }
     // A hole the compiler cannot know (a local, a parameter, a call) makes
     // the complete text a run-time value: it is built and checked when the
     // literal runs. Only constant holes are checked here, before the program runs.
@@ -2119,6 +2143,9 @@ sema_expression_checked_text_literal: fn(head: Type, source_head: Type?, body: T
         hole_count: if building -> holes.len() else -> 0
         shape: sema_expression_checked_text_landed(type_name, landed.value, hole_count, span, check) ?? return SemaExpressionCheckedTextLiteral{handled: true, value: None}
         if !building -> return sema_expression_checked_text_distinct(head, checked, span, expected, check)
+        if sema_expression_checked_text_refused(type_name, target, holes, shape.slots, Val(types[1]), owner_key, span, check) {
+            return SemaExpressionCheckedTextLiteral{handled: true, value: None}
+        }
         return SemaExpressionCheckedTextLiteral{handled: true, value: sema_expression_checked_text_prepared(type_name, shape, types, holes, owner_key, span, expected, check)}
     }
     // Code that runs while building calls the check as it runs; the staged
@@ -2202,6 +2229,11 @@ SEMA_CHECKED_TEXT_SHAPE_LOCAL: "__checked_text_shape"
 SEMA_CHECKED_TEXT_SLOT_LOCAL: "__checked_text_slot_"
 // The local an inline built literal binds its accepted check to.
 SEMA_CHECKED_TEXT_CHECKED_LOCAL: "__checked_text_checked"
+// The locals a hole's staged `accepts` reads its slot and its type through.
+SEMA_CHECKED_TEXT_ACCEPTS_SLOT_LOCAL: "__checked_text_accepts_slot"
+SEMA_CHECKED_TEXT_ACCEPTS_HOLE_LOCAL: "__checked_text_accepts_hole"
+// What a refused hole's report (E2715) asks for.
+SEMA_CHECKED_TEXT_HOLE_SLOT_FIX: "pass a value of a type this place accepts, or move the hole to a place that accepts its type"
 
 // The reason a CheckedText `check` gave for rejecting a body: its error when
 // that is a String, or the error's String `reason`/`message` field or one
@@ -2282,6 +2314,60 @@ sema_expression_checked_text_landed: fn(type_name: String, value: TComptimeValue
         return None
     }
     Val(SemaExpressionCheckedTextShape{shape: found_shape, slots: found_slots})
+}
+
+// `accepts`, when the literal's type declares it, judges each hole while
+// building: given the slot the hole sits in (`slots[i]`, or `.Text` for a
+// text kind, whose `slots` is empty) and the TypeId of the hole's type. Each
+// call is staged through the body comptime evaluator, as the check is, at
+// the hole's own place, with the slot and the TypeId as prepared locals; a
+// reason it gives is E2715 at the hole. True when an answer refused its
+// hole. A hole whose type names a type parameter is judged by no answer
+// here.
+sema_expression_checked_text_refused: fn(type_name: String, target: SemaExpressionCheckedTextTarget, holes: [Expr], slots: [TComptimeValue], slot_type: Type?, owner_key: String, span: Span, check: ^SemaBodyCheck) -> Bool {
+    if target.accepts == None -> return false
+    graph: check.program.registration_graph
+    module_name: sema_scope_environment_module_text(check.environment.*, check.program.*)
+    caller: sema_scope_caller_row(check.environment.*, graph)
+    ^refused: false
+    loop (index, hole) in holes {
+        hole_span: expr_span(hole)
+        if sema_comptime_body_value_find(check.context, check.environment.module_identity, owner_key, hole_span, span) == .Val(landed) {
+            if landed.value == .Present(answer) && answer == .String(reason) {
+                check.diagnostics.push(sema_error("E2715", hole_span, "`{type_name}` refuses this hole's type where it sits", reason, SEMA_CHECKED_TEXT_HOLE_SLOT_FIX))
+                refused = true
+            }
+            next
+        }
+        ^probe_diagnostics: [Diagnostic]{}
+        probed: sema_probe_expression(hole, None, check, probe_diagnostics) ?? next
+        if sema_ownership_type_mentions_generic(probed.ty, check.environment.generic_params) -> next
+        owner: "{owner_key}/checked-text-accepts@{hole_span.start}"
+        mark: sema_scope_mark(check.scopes)
+        sema_scope_enter(check.scopes, check.state, owner)
+        type_id: sema_comptime_reflection_type_id(graph, check.context.type_delta, caller, probed.ty)
+        ^declared: sema_expression_checked_text_prepare(SEMA_CHECKED_TEXT_ACCEPTS_HOLE_LOCAL, Type.Named{name: "TypeId"}, type_id, owner, module_name, hole_span, check)
+        ^slot: sema_expression_checked_text_text_slot(hole_span)
+        if index < slots.len() && slot_type == .Val(ty) {
+            if !sema_expression_checked_text_prepare(SEMA_CHECKED_TEXT_ACCEPTS_SLOT_LOCAL, ty, slots[index], owner, module_name, hole_span, check) -> declared = false
+            slot = Expr.Ident{name: SEMA_CHECKED_TEXT_ACCEPTS_SLOT_LOCAL, span: hole_span, id: AST_NODE_GENERATED}
+        }
+        if declared {
+            call: Expr.MethodCall{
+                receiver: Expr.Ident{name: type_name, span: hole_span, id: AST_NODE_GENERATED},
+                method: "accepts",
+                method_span: hole_span,
+                owner_type_args: [Type]{},
+                type_args: [Type]{},
+                args: [CallArg]{sema_expression_checked_text_arg(slot, hole_span), sema_expression_checked_text_arg(Expr.Ident{name: SEMA_CHECKED_TEXT_ACCEPTS_HOLE_LOCAL, span: hole_span, id: AST_NODE_GENERATED}, hole_span)},
+                id: AST_NODE_GENERATED,
+            }
+            _: sema_comptime_body_capture(check.context, check.environment.*, check.program.*, check.scopes, "{type_name} hole accepts", call, Type.Option{inner: Type.String}, hole_span, span)
+        }
+        sema_scope_leave(check.scopes, check.state)
+        sema_scope_rollback(check.scopes, mark)
+    }
+    refused
 }
 
 // A text kind's literal: its complete text, the one part of the checked
