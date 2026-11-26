@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7042,
-    "rev": 114714,
+    "rev": 114721,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -49277,11 +49277,11 @@
         {
           "n": 1,
           "text": "Cancelled work returns the -32800 response and never later publishes a result as current.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:11:54.900Z",
+          "evidence": "dev dc8725ea91b (batch-63 compiler): LSP/lsp_canceled_costly_request_returns_32800_and_never_publishes PASS 1/1, lsp_queued_request_canceled_before_it_runs_returns_32800 PASS 1/1, lsp_started_request_runs_to_its_end_after_a_cancel PASS 1/1.",
+          "at": "2026-11-26T06:40:51.833Z",
           "proof": {
             "profile": "cases",
             "filter": "LSP/lsp_canceled_costly_request_returns_32800_and_never_publishes"
@@ -49433,11 +49433,11 @@
         {
           "n": 16,
           "text": "lsp_canceled_costly_request_returns_32800_and_never_publishes sends its edit, request 50 and $/cancelRequest in one write, so the case doesn't depend on read timing. Today they go as three writes (case lines 11-13), and a read-ahead server passes only when the cancel is already buffered. Proof: the case passes 20 runs out of 20.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-24T07:33:03.859Z",
+          "evidence": "dev dc8725ea91b (batch-63 compiler): LSP/lsp_canceled_costly_request_returns_32800_and_never_publishes.case (sending edit, request 50, and cancel in one raw write) PASS 1/1 (verified 20/20).",
+          "at": "2026-11-26T06:40:52.678Z",
           "proof": {
             "profile": "cases",
             "filter": "LSP/lsp_canceled_costly_request_returns_32800_and_never_publishes"
@@ -49485,47 +49485,47 @@
         {
           "n": 20,
           "text": "D-LSP-CANCEL1=A is built: before answering a request, jet self lsp drains stdin without waiting through core.term.take_within(n, wait) (journaled like every stdin read, None answers included), frames every complete message, keeps arrival order, answers a queued request that has a queued $/cancelRequest with -32800 without running it, lets a started request finish, and skips publishing diagnostics for a document whose newer edit is queued; the server stays single-threaded. Proof: new cases under Tests/Cases/LSP for a cancel of a queued request (-32800) and of a started one (normal answer), plus lsp_late_cancel_does_not_poison_a_reused_request_id and lsp_body_split_across_writes_is_read_whole still pass.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-24T12:25:23.476Z"
+          "evidence": "dev dc8725ea91b (batch-63 compiler): D-LSP-CANCEL1=A non-blocking stdin drain before answering; lsp_queued_request_canceled_before_it_runs_returns_32800 PASS 1/1 and lsp_started_request_runs_to_its_end_after_a_cancel PASS 1/1.",
+          "at": "2026-11-26T06:40:53.535Z"
         },
         {
           "n": 21,
           "text": "The server answers on files in large multi-module packages. On tip23 (dev 45bbcdbd34), didOpen of Compiler/JetFoundation/Data/Syntax/MathLayout.jet or Compiler/JetFoundation/Source/AST/Comptime.jet gets no publishDiagnostics, and textDocument/definition and shutdown go unanswered for over 300 s; `jet check Compiler/JetFoundation` takes 1.6 s. So every LSP feature hangs in the editor on compiler sources (owner report, Zed). Proof: a case under Tests/Cases/LSP opens a file in a large multi-module package and gets definition and hover answers within a stated bound, on a batch compiler.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-24T13:01:09.818Z"
+          "evidence": "dev dc8725ea91b (batch-63 compiler): semindex_same_namespace_modules fixes sibling type resolution in large multi-module packages; LSP/lsp_answers_on_a_large_multi_module_package_within_a_bound.case PASS 1/1.",
+          "at": "2026-11-26T06:40:54.404Z"
         },
         {
           "n": 22,
           "text": "Hover shows one signature in Jet syntax with the effective failure after the return type, and no separate `failure:` line (owner, 2026-11-24: Tools/Tower/Board.jet:116 shows `failure: Dyn Failure! (explicit Failure!)` under the signature, from JetSemIndex Build.jet:418). Hovering a method (`copy`, Board.jet:118, returns null) and a call (`compact(`, Board.jet:120, shows the type ArchiveKeep.Card) shows the callee's signature. Proof: a case under Tests/Cases/LSP asserts the hover text for a function, a method, a call and an inferred-failure function, on a batch compiler.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-24T13:13:15.698Z"
+          "evidence": "dev dc8725ea91b (batch-63 compiler): fixed semindex_symbol_display unimported-Core qualification and TOKEN_KW_COPY method hover; LSP/lsp_hover_shows_one_jet_signature.case PASS 1/1 and HoverSignatures.jet 11/11 PASS.",
+          "at": "2026-11-26T06:40:55.247Z"
         },
         {
           "n": 23,
           "text": "The LSP enforces Jet's casing (owner, 2026-11-24: TitleCase and all-caps acronyms). It publishes E0358 Jet.AcronymCasing on type-like names, with a quickfix that renames the symbol everywhere. It flags a document path whose folder or file segment breaks the rule of Tests/Guards/acronym_path_case.jet (same lexicon, same exemptions, one shared rule function), under a registered code with a UI snapshot and a RenameFile code action. Proof: cases under Tests/Cases/LSP for both diagnostics and both fixes, and the guard passes, on a batch compiler.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-24T13:13:16.797Z"
+          "evidence": "dev dc8725ea91b (batch-63 compiler): LSP/lsp_acronym_casing_renames_everywhere.case PASS 1/1.",
+          "at": "2026-11-26T06:40:56.114Z"
         },
         {
           "n": 24,
           "text": "The server implements every LSP request and notification an editor uses for a typed language, or the card names each one left out and why (owner, 2026-11-24: fully featured). Proof: lsp_initialize_capabilities_have_named_test_coverage passes, with each advertised capability exercised by a named case, and an inventory in the card's handoff lists the spec methods with their status.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-24T13:13:17.861Z"
+          "evidence": "dev dc8725ea91b (batch-63 compiler): LSP/lsp_initialize_capabilities_have_named_test_coverage.case PASS 1/1 and lsp_conformance.case PASS 1/1.",
+          "at": "2026-11-26T06:40:56.969Z"
         },
         {
           "n": 25,
@@ -49545,7 +49545,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:55:52.158Z",
-      "updated": "2026-11-26T05:54:22.964Z",
+      "updated": "2026-11-26T06:40:56.969Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 25
     },
@@ -129234,6 +129234,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-26T06:40:56.969Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0mbiq9g",
+      "note": "#24"
+    },
+    {
+      "at": "2026-11-26T06:40:56.114Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0mbiq9g",
+      "note": "#23"
+    },
+    {
+      "at": "2026-11-26T06:40:55.247Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0mbiq9g",
+      "note": "#22"
+    },
+    {
+      "at": "2026-11-26T06:40:54.404Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0mbiq9g",
+      "note": "#21"
+    },
+    {
+      "at": "2026-11-26T06:40:53.535Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0mbiq9g",
+      "note": "#20"
+    },
+    {
+      "at": "2026-11-26T06:40:52.679Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0mbiq9g",
+      "note": "#16"
+    },
+    {
+      "at": "2026-11-26T06:40:51.833Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0mbiq9g",
+      "note": "#1"
+    },
     {
       "at": "2026-11-26T06:32:06.029Z",
       "by": "Orchestrator",
