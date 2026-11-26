@@ -166,6 +166,17 @@ DebugItem: struct {
     value: String,
 }
 
+// Errors with two audiences: `public()` returns caller-safe text that never
+// exposes causes, file paths, stack or guest trap frames, SQL queries, internal
+// addresses, OS error codes, or secret values; `detail()` returns the full
+// operator-facing diagnostic text including any cause chain. Every Core boundary
+// (HTTP, CLI, jobs, MCP tool results) chooses `public()` for external callers
+// and records/logs `detail()` for operators.
+Describe: trait {
+    public: fn(self) -> String Never!,
+    detail: fn(self) -> String Never!,
+}
+
 // A type as a value. Where a `Type` is expected a type name is one
 // (`counts[Position] = 2`, `if t == { Position -> … }`); `Type{Rock}` names
 // one explicitly, and `type_of(p)` is the static type of a name or field

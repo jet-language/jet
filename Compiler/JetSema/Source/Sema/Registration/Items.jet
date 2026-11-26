@@ -3921,7 +3921,7 @@ sema_registration_source_owns_impl: fn(module_row: SemaRegistrationModule, name:
             next
         }
         if sema_registration_core_handle_owner(row.module_name, name) -> return true
-        if !sema_reserved_type_name(name) && !core_module_has_type(row.module_name, name) -> next
+        if !sema_reserved_type_name(name) && !core_module_has_type(row.module_name, name) && name != "Err" -> next
         loop owner in row.impl_types {
             if owner == name -> return true
         }
@@ -3957,7 +3957,7 @@ sema_registration_index_source_impls: fn(graph: ^SemaRegistrationGraph) Never! {
                 }
             }
             loop owner in row_owners {
-                if !sema_registration_core_handle_owner(row.module_name, owner) && !sema_reserved_type_name(owner) && !core_module_has_type(row.module_name, owner) {
+                if !sema_registration_core_handle_owner(row.module_name, owner) && !sema_reserved_type_name(owner) && !core_module_has_type(row.module_name, owner) && owner != "Err" {
                     next
                 }
                 slot: name_index(name_intern(owner_names, owner))

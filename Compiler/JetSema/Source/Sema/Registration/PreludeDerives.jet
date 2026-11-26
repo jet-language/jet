@@ -260,35 +260,6 @@ Err: struct {
         conversion_history: [__jet_ErrorConversion]{},
         details: None,
     }},
-
-    impl Describe {
-        public: fn(self) -> String Never! {
-            if self.code == .Val(code) {
-                raw: code.bytes()
-                if raw.len() > 0 && raw.len() <= 64 {
-                    ^safe: true
-                    loop byte in raw {
-                        n: Int{byte}
-                        ok: (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || (n >= 48 && n <= 57) || n == 95 || n == 45
-                        if !ok {
-                            safe = false
-                            break
-                        }
-                    }
-                    if safe -> return "Request failed ({code})."
-                }
-            }
-            "An internal error occurred."
-        }
-
-        detail: fn(self) -> String Never! {
-            head: if self.code == .Val(code) && code.bytes().len() > 0 -> "[{code}] {self.message}" else -> "{self.message}"
-            if self.cause == .Val(inner) {
-                return "{head}\ncaused by: {inner.detail()}"
-            }
-            head
-        }
-    }
 }
 
 // A refused allocation reports without allocating: the message is static

@@ -2556,7 +2556,7 @@ sema_type_graph_impl_matches_nominal: fn(graph: SemaRegistrationGraph, implement
 // reads it) name a type that has no row, so they match no nominal; any other
 // such target is unresolved.
 sema_type_graph_impl_rowless_target: fn(implementation: SemaRegistrationImpl) -> Bool? Never! {
-    if sema_data_is_json_name(implementation.target_type_name) -> Val(false) else -> None
+    if sema_data_is_json_name(implementation.target_type_name) || ir_runtime_handle_row(implementation.target_type_name) != None -> Val(false) else -> None
 }
 
 // The symbol id of the nominal an impl's target type names from the impl's
@@ -2636,7 +2636,7 @@ sema_type_bound_satisfied_resolved: fn(graph: SemaRegistrationGraph, actual_reso
 sema_type_bound_satisfied_builtin_target: fn(graph: SemaRegistrationGraph, actual_resolved: Type, bound_name: String, caller: Int) -> Bool? {
     builtin: if actual_resolved == {
         .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 | .List(_) | .Map(_, _, _) | .FixedList(_, _) | .Option(_) | .Tuple(_) | .Fn(_, _, _, _, _, _) -> true
-        .Named(name) -> name == "Decimal" || name == "Fraction"
+        .Named(name) -> name == "Decimal" || name == "Fraction" || ir_runtime_handle_row(name) != None
         .Shared(_) | .Result(_, _) | .Apply(_, _) | .TraitObject(_) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
     if !builtin || sema_type_builtin_trait_symbol(bound_name) != None -> return None

@@ -85,27 +85,26 @@
 
 ## 3. Exact Cutover List (2-Stage `seed: s1` Rollout)
 
-### Stage 1 (`seed: s1` — Compiler Prelude Trait, `Err.Describe`, and `Core.rows` Declarations)
+### Stage 1 (`seed: s1` — Ambient `Describe` in `core.prelude`, Bare Spellings, and `Core.rows` Declarations)
 1. `Docs/Audits/2026-11-26-errors-two-audiences-review.md` — this design review (`n1`).
-2. `Compiler/Prelude/Traits.jet` — declare ambient `Describe: trait` (`public: fn(self) -> String Never!`, `detail: fn(self) -> String Never!`, `local: true`, `bare_bound: true`, `raw_return: true`) (`n2`).
-3. `Compiler/JetFoundation/Source/Registry/OwnedTraitRows.jet` — regenerated via `Tools/Agent/OwnedTraitRows.jet --write` (`n2`).
-4. `Compiler/Prelude/Errors.jet` — implement safe `impl Describe` inside `Err: struct` (`n2`).
-5. `Compiler/JetSema/Source/Sema/Registration/PreludeDerives.jet` — synced via `Compiler/Toolchain/PreludeSources.jet --write` (`n2`).
-6. `Compiler/JetSema/Source/Sema/PreludeRows.jet` — regenerated via `Compiler/Toolchain/PreludeRows/Main.jet --write` (`n2`).
-7. `Compiler/Prelude/Core.rows` + boundary report data structs:
+2. `Core/Prelude/Prelude.jet` — declare ambient `Describe: trait` (`public: fn(self) -> String Never!`, `detail: fn(self) -> String Never!`) alongside `DebugView` so local user `Describe` traits/markers shadow cleanly without `OWNED_TRAITS` marker-hygiene collisions (`n2`).
+3. `Compiler/JetFoundation/Source/Registry/CoreModules.jet` — add `Describe`, `IOError`, `RangeError`, `TextError`, and `UTF8Error` to `CORE_BARE_SOURCE_MODULES` targeting `core.prelude` (`n2`, `n4`).
+4. `Compiler/JetSema/Source/Sema/Registration/Items.jet` — allow `core.prelude`'s `impls { Err }` in `sema_registration_source_owns_impl` and `sema_registration_index_source_impls` (`n2`).
+5. `Compiler/JetSema/Source/Sema/TypeRelations.jet` — treat IR runtime handles as known rowless impl targets in `sema_type_graph_impl_rowless_target` and resolve non-builtin trait bounds on them in `sema_type_bound_satisfied_builtin_target` so `Describe` bounds stay sound for both runtime handles and user structs (`n2`, `n4`).
+6. `Compiler/Prelude/Core.rows` + boundary report data structs:
    - `Core/HTTP/Server.jet` (`HTTPErrorRecord`)
    - `Core/Args/Args.jet` (`CLIErrorReport`)
    - `Core/Service/Service.jet` (`ToolErrorReport`)
-   - `Core.rows`: export `HTTPErrorRecord`, `CLIErrorReport`, `ToolErrorReport`; add `impls { IOError }` on `core.files`, `impls { TextError, UTF8Error }` on `core.text`, and `impls { RangeError }` on `core.prelude`; add `core.log` to `depends_on` of `core.http.server`, `core.args`, `core.jobs`, `core.service`.
+   - `Core.rows`: export `Describe`, `HTTPErrorRecord`, `CLIErrorReport`, `ToolErrorReport`; set `impls { Err, RangeError }` on `core.prelude`; add `core.log` to `depends_on` of `core.http.server`, `core.args`, `core.jobs`, `core.service`.
 
 ### Stage 2 (Verified Live on Rebuilt S1 Compiler — Boundaries, Core Errors, Proof Tests, Goldens, Docs)
 1. **Boundaries (`n3`)**:
-   - `Core/HTTP/Server.jet` — cut over `__dispatch` / `error_response`, add `HTTPMux.on_error`, `HTTPMux.error_records`, `HTTPMux.respond_error<E: Describe>`, `HTTPErrorRecord.log`.
-   - `Core/Args/Args.jet` — add `CLIErrorReport.from_error<E: Describe>`, `ArgsSpec.report_error<E: Describe>`, `ArgsSpec.fail_described<E: Describe>`.
-   - `Core/Jobs/Jobs.jet` — add `JobError.from_describe<E: Describe>`, `JobQueue.fail_described<E: Describe>`.
-   - `Core/Service/Service.jet` — add `ToolErrorReport.ok`, `ToolErrorReport.from_error<E: Describe>`, `ToolErrorReport.caller_json`, `ToolErrorReport.log`.
+   - `Core/HTTP/Server.jet` and `Core/Web/Web.jet` — cut over `__dispatch` / `mux_error_response` / `serve_connection` task-failure recovery and `AppHandler.run` / `app_page_answer`, add `HTTPMux.{on_error, error_records, respond_error<E: Describe>}`, `HTTPServer.{on_error, error_records}`, `App.{on_error, error_records, respond_error}`, `HTTPErrorRecord.log`.
+   - `Core/Args/Args.jet` — add `CLIErrorReport.{from_error<E: Describe>, log, emit, exit}`, `ArgsSpec.{report_error<E: Describe>, fail_described<E: Describe>}`.
+   - `Core/Jobs/Jobs.jet` — add `JobError.from_describe<E: Describe>`, `JobQueue.{fail_described<E: Describe>, fail_described_logged<E: Describe>}`.
+   - `Core/Service/Service.jet` — add `ToolErrorReport.{ok, from_error<E: Describe>, caller_json, log}`.
 2. **Core error `Describe` implementations & leak-proof tests (`n4`)**:
-   - Implement `Describe` on Core error types across `Core/Prelude/Prelude.jet`, `Core/Files/Files.jet`, `Core/HTTP/HTTP.jet`, `Core/DB/DB.jet`, `Core/Net/Net.jet`, `Core/Net/URL.jet`, `Core/Net/MIME.jet`, `Core/Net/Ws.jet`, `Core/Auth/Auth.jet`, `Core/Service/Service.jet`, `Core/Plugin/Plugin.jet`, `Core/App/App.jet`, `Core/Encoding/Encoding.jet`, `Core/Data/Data.jet`, `Core/Crypto/Crypto.jet`, `Core/Regex/Regex.jet`, `Core/Time/Time.jet`, `Core/Text/Text.jet`, `Core/Sys/Sys.jet`, `Core/Mem/Mem.jet`, `Core/Archive/Archive.jet`, `Core/Mod/Mod.jet`, `Core/Git/Git.jet`.
+   - Implement `Describe` on `Err`, `IOError`, `RangeError`, `TextError`, `UTF8Error`, `SendError<T>`, `TaskFailure`, and `ParseError` in `Core/Prelude/Prelude.jet`, plus Core error types across `Core/Files/Files.jet`, `Core/HTTP/HTTP.jet`, `Core/DB/DB.jet`, `Core/Net/{Net,URL,MIME,Ws}.jet`, `Core/Auth/Auth.jet`, `Core/Service/Service.jet`, `Core/Plugin/Plugin.jet`, `Core/App/App.jet`, `Core/Encoding/Encoding.jet`, `Core/Data/Data.jet`, `Core/Crypto/{Crypto,UUID}.jet`, `Core/Regex/Regex.jet`, `Core/Time/Time.jet`, `Core/Sys/Sys.jet`, `Core/Mem/Mem.jet`, `Core/Archive/Archive.jet`, `Core/Mod/Mod.jet`, `Core/Git/Git.jet`, `Core/Event/Event.jet`, `Core/Image/Image.jet`.
    - Add unit tests and end-to-end case tests proving:
      - `Err.public()` never leaks message, cause chain, file paths, stack frames, SQL, or unsafe codes, while `Err.detail()` preserves the full cause chain.
      - Core error types' `public()` strips internal paths/SQL/host:port/secrets/trap-frames while `detail()` retains full diagnostics.
