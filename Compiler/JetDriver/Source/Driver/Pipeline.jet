@@ -6531,7 +6531,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: ^JetD
     ^loop_values: owned_loop_values.move()
     grammar_plans: owned_grammar_plans.move()
     ^trace: jet_driver_empty_compile_trace()
-    if !load.complete {
+    if (!kg.enabled && !load.complete) || load.modules.len() == 0 || load.failed_stage == Val(JetDriverStage.Collect) {
         failure: load.failed_stage ?? JetDriverStage.Load
         // A load a package boundary stopped still names the edges its policy
         // decided, for `jet inspect structure`.
@@ -6564,11 +6564,15 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: ^JetD
     // reads its statements' lines from these sources (BuildDebug.jet).
     build_debug_keep_sources(load.source_files)
     ^foreign_provider_inputs: jet_driver_assemble_foreign_providers(request.authorized_sources, load)
-    if !load.complete || jet_driver_has_errors(load.diagnostics) {
+    if kg.enabled {
+        jet_driver_keep_going_diagnostics(kg, "load", load.diagnostics)
+        jet_driver_keep_going_flush(kg, request.trace_sink)
+    }
+    if (!kg.enabled && (!load.complete || jet_driver_has_errors(load.diagnostics))) || load.modules.len() == 0 || load.failed_stage == Val(JetDriverStage.Collect) {
         failure: load.failed_stage ?? JetDriverStage.Load
         return jet_driver_compile_result(load, Val(failure), false, trace)
     }
-    if !jet_driver_foreign_provider_owners_valid(load.modules, foreign_provider_inputs, load.diagnostics) {
+    if !jet_driver_foreign_provider_owners_valid(load.modules, foreign_provider_inputs, load.diagnostics) && !kg.enabled {
         return jet_driver_compile_result(load, Val(JetDriverStage.Load), false, trace)
     }
     if !jet_driver_retain_prelude_modules(load) {
@@ -6581,7 +6585,12 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: ^JetD
     setting_refusals: jet_driver_setting_writer_diagnostics(load, request)
     if setting_refusals.len() > 0 {
         loop diagnostic in setting_refusals -> load.diagnostics.push(diagnostic)
-        return jet_driver_compile_result(load, Val(JetDriverStage.Load), false, trace)
+        if kg.enabled {
+            jet_driver_keep_going_diagnostics(kg, "load", load.diagnostics)
+            jet_driver_keep_going_flush(kg, request.trace_sink)
+        } else {
+            return jet_driver_compile_result(load, Val(JetDriverStage.Load), false, trace)
+        }
     }
 
     ^target_machine_option: jet_driver_selected_target_machine(request, load.diagnostics)

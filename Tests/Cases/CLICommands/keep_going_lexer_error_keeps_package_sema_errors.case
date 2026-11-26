@@ -1,0 +1,9 @@
+# One lexer error (E0001) in a package file does not hide the package's sema
+# errors in `jet check` under keep-going.
+fixture: KeepGoingLexerErrorKeepsPackageSemaErrors.fixture
+env: NO_COLOR=1
+env: TERM=dumb
+step: jet check --keep-going main.jet
+exit: 1
+stderr: ~ "jet-lang.dev/e/Jet.StrayCharacter" # the lexer error in lex_bad.jet is reported
+stderr: ~ "Nothing named `missing_sibling_symbol` exists here" # the sibling sema error is still reported

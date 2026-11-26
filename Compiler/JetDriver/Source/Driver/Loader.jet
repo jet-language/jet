@@ -6834,7 +6834,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
     ^boundary_facts: [StructureFact]{}
     jet_driver_check_import_boundaries(catalog.packages, source_units, modules, resolved_imports, diagnostics, boundary_facts)
     jet_driver_check_package_layers(catalog.packages, source_units, modules, resolved_imports, diagnostics, boundary_facts)
-    if !jet_driver_has_errors(diagnostics) && !jet_driver_bind_package_namespaces(modules, source_units, catalog.packages, request, diagnostics) {
+    if modules.len() > 0 && !jet_driver_bind_package_namespaces(modules, source_units, catalog.packages, request, diagnostics) {
         failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Load)
     }
     jet_driver_expand_imported_cli_entry(modules, source_units, entry_module_identity)
@@ -6847,7 +6847,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
     if !provenance.complete {
         failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Collect)
     }
-    if failed_stage == None && !jet_driver_expand_imported_marker_groups(modules, resolved_imports, source_units, provenance.files, diagnostics, request.trace_sink) {
+    if modules.len() > 0 && failed_stage != Val(JetDriverStage.Collect) && !jet_driver_expand_imported_marker_groups(modules, resolved_imports, source_units, provenance.files, diagnostics, request.trace_sink) {
         failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Parse)
     }
     jet_driver_replaced_import_uses(request, modules, source_units)
@@ -7065,7 +7065,7 @@ jet_driver_load_walk: fn(
         jet_driver_apply_auto_derive_policy(program, unit, packages)
         if embedded -> jet_driver_underive_builtin_carriers(program, unit.module_name)
         module_identity: module_intern(table, jet_driver_unit_module_identity(unit))
-        if jet_driver_has_errors(parse_result.diagnostics) {
+        if jet_driver_has_errors(parse_result.diagnostics) && program.items.len() == 0 && program.imports.len() == 0 && program.script_body.len() == 0 {
             modules.push(jet_driver_loaded_module(source_unit_index, unit, module_identity, program, declared_modules.get(source_unit_index) ?? ""))
             next
         }

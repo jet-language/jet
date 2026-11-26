@@ -349,7 +349,7 @@ sema_check_parallel_jobs: fn(graph: SemaRegistrationGraph, module_index: Int, co
         if item == .Func(func) {
             key: sema_check_top_level_key(module_text(graph.module_table, source_module.module_identity), func.name)
             waiting: if core_wave -> name_find(graph.core_wave_rows, key) == None else -> sema_core_demand_deferred(graph, key)
-            if func.inline_foreign == None && !sema_function_is_guest_import(func) && sema_comptime_function_row(comptime_rows, source_module.module_identity, key) == None && !waiting && !sema_check_unusable_body(graph, key) {
+            if func.inline_foreign == None && !sema_function_is_guest_import(func) && sema_check_top_level_function_registered(graph, module_index, func.name) && sema_comptime_function_row(comptime_rows, source_module.module_identity, key) == None && !waiting && !sema_check_unusable_body(graph, key) {
                 jobs.push(SemaBodyJob.TopLevel{item_index: item_index})
                 weights.push(func.span.end - func.span.start)
             }

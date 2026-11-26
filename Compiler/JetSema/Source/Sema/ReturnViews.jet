@@ -439,6 +439,7 @@ sema_check_view_summaries: fn(environment: ^SemaScopeEnvironment, program: SemaP
 // (sema_check_registration_top_level).
 sema_check_view_summary_function: fn(graph: SemaRegistrationGraph, item_index: Int, module_index: Int, memory_plan: SemaFunctionMemoryPlan, environment: ^SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, host_hooks: SemaHostHookAccess?, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: SemaComptimeFunctionRows, return_view_rows: ^[U32:Int], summary_functions_checked: ^Int) -> ViewProvenanceMap? {
     if graph.modules[module_index].program.items[item_index] == .Func(declaration) {
+        if !sema_check_top_level_function_registered(graph, module_index, declaration.name) -> return None
         job: SemaBodyJob.TopLevel{item_index: item_index}
         owner_id: sema_check_registered_function_id(job, declaration, module_index, environment, program)
         ^cached: sema_comptime_find_checked_function(comptime_functions, comptime_rows, environment.module_identity, sema_program_symbol_key(program, owner_id))

@@ -1,0 +1,11 @@
+# A keep-going build reaches lowering over the clean and trapped items,
+# records a lowering census row in the keep-going report, and writes no
+# executable when check errors exist.
+fixture: KeepGoingCensusRecordsEveryTrap.fixture
+env: NO_COLOR=1
+step: jet build main.jet --keep-going --keep-going-report=census.tsv
+exit: nonzero
+stderr: ~ "2 problems found" # both broken functions are reported
+file: census.tsv ~ "`broken`: lowered as a keep-going trap" # front-end trap row
+file: census.tsv ~ "lower\tmain.jet\tCENSUS\tlowered " # lowering census row for clean/trapped items
+file: .jet/build/main absent # no output file written when errors occur

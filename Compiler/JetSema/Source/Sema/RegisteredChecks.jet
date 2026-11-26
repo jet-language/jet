@@ -340,6 +340,12 @@ sema_check_registered_function_id: fn(job: SemaBodyJob, declaration: Func, modul
     }
 }
 
+// Whether module `module_index`'s top-level function `name` has a registered
+// symbol (parse recovery can leave an unnamed or unregistrable Func item).
+sema_check_top_level_function_registered: fn(graph: SemaRegistrationGraph, module_index: Int, name: String) -> Bool Never! {
+    name != "" && symbol_find(graph.symbols, symbol_key_text(SymbolKind.Function, module_text(graph.module_table, graph.modules[module_index].module_identity), "", name)) != None
+}
+
 // The registered symbol of module `module_index`'s top-level function `name`.
 sema_check_top_level_function_id: fn(program: SemaProgramTables, module_index: Int, name: String) -> SymbolID {
     graph: program.registration_graph
