@@ -1,0 +1,66 @@
+# `jet perf` profiles a built Jet binary (including `jet` itself) with no
+# source rebuild:
+# 1. `jet perf run {jet} check <file>` runs and samples the built executable
+#    directly by path, even when later arguments end with `.jet`, and
+#    `jet perf view` names its `Compiler/JetSema` functions.
+# 2. `jet perf run jet check <file>` resolves a bare executable name on PATH
+#    and profiles it the same way.
+# 3. `jet perf attach <pid>` attaches to a running `{jet} check` started from
+#    another process with no external authorizer under default
+#    `kernel.yama.ptrace_scope=1`, and `jet perf view` names its
+#    `Compiler/JetSema` functions.
+requires: os-name:linux
+requires: arch:x86_64
+requires: probe sh -c 'test "$(cat /proc/sys/kernel/perf_event_paranoid)" -le 2' # this user may sample its own processes
+requires: probe test -r /proc/self/schedstat # the window's CPU is its threads' schedstat run time
+env: NO_COLOR=1
+step: jet perf run --out run_bin.jettrace {jet} check {root}/Tools/Agent/CoreSurfaceLedger.jet
+exit: 0
+stderr: ~ "functions samples="
+stderr: ~ " at Compiler/Jet"
+stderr: ~ "\ncpu by package\n"
+stderr: ~ "\n  Compiler/JetSema samples="
+stderr: ~ "Trace: "
+json: file run_bin.jettrace doc $.content.receipt_sections[?name="functions"][0].value.samples > 0
+json: file run_bin.jettrace doc $.content.receipt_sections[?name="functions"][0].value.functions[?file ^= "Compiler/JetSema"][?line >= 1] #>= 1
+json: file run_bin.jettrace doc $.content.profile.window_status = "exit"
+step: jet perf view run_bin.jettrace
+exit: 0
+stdout: ~ "functions samples="
+stdout: ~ "Compiler/JetSema/Source/Sema/"
+stdout: ~ "\ncpu by package\n"
+stdout: ~ "\n  Compiler/JetSema samples="
+step: sh -c 'mkdir -p bin && ln -sf "{jet}" bin/jet'
+exit: 0
+step: jet perf run --out run_path.jettrace jet check {root}/Tools/Agent/CoreSurfaceLedger.jet
+env: PATH={work}/bin
+exit: 0
+stderr: ~ "functions samples="
+stderr: ~ "\n  Compiler/JetSema samples="
+json: file run_path.jettrace doc $.content.receipt_sections[?name="functions"][0].value.samples > 0
+json: file run_path.jettrace doc $.content.receipt_sections[?name="functions"][0].value.functions[?file ^= "Compiler/JetSema"][?line >= 1] #>= 1
+step: jet perf view run_path.jettrace
+exit: 0
+stdout: ~ "Compiler/JetSema/Source/Sema/"
+spawn busy: {jet} check {root}/Compiler/JetCLI
+stdout: null
+stderr: null
+poll working: sh -c 'test "$(cut -d " " -f 14 /proc/{pid:busy}/stat)" -ge 30' until exit: 0 timeout 120s every 20ms # the check is running inside JetSema with no external authorizer
+step: jet perf attach {pid:busy} --for=1s --out attach_bin.jettrace
+exit: 0
+stderr: ~ "functions samples="
+stderr: ~ " at Compiler/Jet"
+stderr: ~ "\ncpu by package\n"
+stderr: ~ "\n  Compiler/JetSema samples="
+stderr: ~ "Trace: "
+json: file attach_bin.jettrace doc $.content.receipt_sections[?name="functions"][0].value.samples > 0
+json: file attach_bin.jettrace doc $.content.receipt_sections[?name="functions"][0].value.functions[?file ^= "Compiler/JetSema"][?line >= 1] #>= 1
+step: jet perf view attach_bin.jettrace
+exit: 0
+stdout: ~ "functions samples="
+stdout: ~ "Compiler/JetSema/Source/Sema/"
+stdout: ~ "\ncpu by package\n"
+stdout: ~ "\n  Compiler/JetSema samples="
+signal busy: KILL
+wait: busy
+exit: any # the case's KILL ends the check if it is still running

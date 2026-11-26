@@ -15,12 +15,14 @@ use {
         LINK_BASE,
         LINK_RUN_BASE,
         LINK_RUN_LOW_BASE,
+        OS_SYS_PRCTL,
         X64DebugSource,
         X64Executable,
         X64ImageFile,
         X64ImagePart,
         X64Launch,
         X64_SELF_EXECUTABLE,
+        os_syscall,
         x64_bind_runtime_image,
         x64_executable_add_section,
         x64_executable_bytes,
@@ -4866,12 +4868,36 @@ jet_cli_alias_args: fn(argv: [String]) -> [String] Never! {
 // This is round 3's entry shape: every seed (a0_001 included) checks and
 // lowers it. Under JET_ICE_SELF_TEST=1 it reports an internal compiler error
 // before it reads its command line, so the report is tested without a defect.
+// Linux Yama PR_SET_PTRACER (0x59616d61) with PR_SET_PTRACER_ANY (-1).
+JET_CLI_PR_SET_PTRACER: 1499557217
+
+// Lets same-UID `jet perf attach` and `jet debug --attach` from another shell
+// inspect this `jet` tool process under default `kernel.yama.ptrace_scope=1`.
+// Kernel DAC still rejects other users; `jet run` skips this so user programs
+// keep Yama's default ptrace restriction unless they opt in.
+jet_cli_allow_same_user_attach: fn() {
+    #Unsafe("prctl(PR_SET_PTRACER, PR_SET_PTRACER_ANY) only relaxes Yama for same-UID tracers of this tool process") {
+        ^_: os_syscall(OS_SYS_PRCTL, JET_CLI_PR_SET_PTRACER, -1, 0, 0, 0, 0)
+    }
+}
+
+// Whether `plan` runs the `jet` tool itself (not `jet run`, which execs a user
+// program that must keep Yama's default ptrace restriction).
+jet_cli_plan_allows_attach: fn(plan: JetCLIPlan) -> Bool Never! {
+    if plan == {
+        .Run(_, _, _, _, _, _, _, _, _, _, _, _) | .RunRemote(_, _, _, _, _, _, _, _) | .Done(_) | .Refused(_, _, _, _) | .Diagnostics(_, _, _, _, _) | .Output(_, _, _, _) -> false
+        .NativeSource(_, _, run, _, _) -> !run
+        .Check(_, _, _, _, _, _, _, _, _, _, _, _, _) | .CheckWorkspace(_, _, _, _, _, _, _, _, _, _) | .CheckPrelude(_, _, _, _, _, _) | .CheckCore(_, _, _, _, _) | .Build(_, _, _, _, _, _, _, _, _, _, _) | .LockedBuild(_, _) | .BuildPackage(_, _, _, _, _, _, _, _) | .DevWeb(_, _, _, _, _, _, _, _) | .DevCanvas(_, _, _, _, _, _) | .Jobs(_, _, _, _) | .Test(_, _, _, _, _, _) | .TestWorkspace(_, _, _, _, _, _, _, _) | .TestProfile(_, _, _, _, _, _) | .New(_, _, _, _, _, _) | .NewApp(_) | .Doc(_, _, _, _, _) | .Emit(_, _, _, _, _, _) | .Eval(_, _, _, _, _) | .Fill(_, _, _) | .Structural(_, _, _) | .Review(_, _, _) | .Keygen(_, _, _) | .KeyBackup(_, _, _) | .Publish(_, _, _, _) | .Yank(_, _, _) | .Lint(_, _, _, _, _, _, _) | .Fmt(_) | .FmtLang(_, _) | .Fix(_, _, _, _, _, _, _, _, _) | .Inspect(_) | .InspectB(_) | .ForeignBind(_, _, _) | .Perf(_, _) | .Semindex(_, _, _) | .Find(_, _, _, _) | .Cache(_, _) | .Remote(_, _, _) | .Comparison(_, _, _) | .Try(_, _, _) | .Maintenance(_, _, _, _) | .Completion(_, _, _) | .Schema(_, _, _, _, _) | .Codemod(_, _, _, _, _) | .PolicyExplain(_, _, _, _, _, _) | .DiagnosticTypeExplain(_, _, _, _) | .BuildFactExplain(_, _, _, _, _, _, _) | .Gates(_, _, _, _, _) | .Doctor(_, _, _, _) | .UpdateJet(_, _, _, _, _) | .AuditCopies(_, _, _, _, _) | .AuditWrites(_, _, _, _, _) | .AuditForeign(_, _, _, _, _) | .CompilerService(_) | .Repl(_, _, _, _) | .LSP | .ReplChild(_) | .EvalExpression(_, _, _) | .Prove(_, _, _, _, _, _) | .Budget(_, _, _, _) -> true
+    }
+}
+
 jet_cli_main: fn(args: [String]) {
     if (cli_sys.get(ENV_JET_ICE_SELF_TEST) ?? "") == "1" {
         jet_cli_finish(jet_cli_ice("ICE self-test triggered by JET_ICE_SELF_TEST"))
     }
     ^discovery: WorkspaceDeclarationCache.new()
     plan: jet_cli_front(args, discovery)
+    if jet_cli_plan_allows_attach(plan) -> jet_cli_allow_same_user_attach()
     ^recording: JetCLICheckRecording?{None}
     if jet_cli_check_receipt_begin(args, plan) == {
         .Replay(replayed) -> { jet_cli_finish(replayed) }
