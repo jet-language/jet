@@ -208,10 +208,12 @@ compute_fixture_size: fn(size: Int, failures: ^[String]) {
     compute_fixture_obligation(modules, compute_fixture_key("f_0"))
     ^work: SemaComputeValidationWork{counting: true}
     diagnostics: sema_compute_validate_autodiff_purity(modules, work)
+    ^total_functions: 0
+    loop module_row in modules -> total_functions += module_row.functions.len()
     // One target lookup, plus one per function the reach walk visits: `f_0`
     // calls nothing, so the walk visits only the target itself.
-    if diagnostics.len() != 0 || work.indexed_functions != size || work.function_queries != 2 || work.fact_queries != 1 {
-        failures.push("{size}: actual indexed row/query work is not N/2/1 (indexed {work.indexed_functions}, function queries {work.function_queries}, fact queries {work.fact_queries})")
+    if diagnostics.len() != 0 || total_functions < size || work.indexed_functions != total_functions || work.function_queries != 2 || work.fact_queries != 1 {
+        failures.push("{size}: actual indexed row/query work is not N/2/1 (indexed {work.indexed_functions} vs total {total_functions}, function queries {work.function_queries}, fact queries {work.fact_queries})")
     }
     compute_fixture_compare("{size} indexed functions", modules, [Diagnostic]{}, true, failures)
 }

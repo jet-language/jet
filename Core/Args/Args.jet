@@ -1408,6 +1408,15 @@ ParsedArgs: struct {
     subcommand: fn(self) -> String? Never! { self.command.copy() }
 }
 
+// Two-audience CLI failure report: `public_message` is safe to print to the
+// caller on stderr, while `detail` preserves the full diagnostic text and
+// cause chain for operator logs.
+CLIErrorReport: struct {
+    exit_code: Int,
+    public_message: String,
+    detail: String,
+}
+
 spec: fn() -> ArgsSpec Never! {
     ArgsSpec{levels: [ArgsLevel]{ArgsLevel{entries: [ArgEntry]{}, inherited: [ArgEntry]{}, description: None, version: None, inherited_version: false}}}
 }

@@ -61,6 +61,16 @@ service_error_show: fn(error: ServiceError) -> String Never! {
     }
 }
 
+// Two-audience MCP / tool-call result: `public_content` is rendered to external
+// callers and model contexts, while `operator_detail` preserves the full
+// diagnostic text and cause chain for operators.
+ToolErrorReport: struct {
+    tool: String,
+    is_error: Bool,
+    public_content: String,
+    operator_detail: String,
+}
+
 DeliveryState: enum {
     Pending,
     Accepted,

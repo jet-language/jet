@@ -182,6 +182,18 @@ HTTPShutdownReport: struct {
     canceled: Int,
 }
 
+/// Operator-facing record captured whenever the HTTP boundary turns a failure
+/// into a caller-safe response: `public_message` is what the client received,
+/// while `detail` carries the full diagnostic text and cause chain for operators.
+HTTPErrorRecord: struct {
+    request_id: String,
+    method: String,
+    path: String,
+    status: Int,
+    public_message: String,
+    detail: String,
+}
+
 /// Whether a server should be sent traffic, as `readiness()` and the built-in
 /// `GET /__jet/ready` probe read it. A bound server is NotReady until `serve`
 /// starts, then Ready. From `shutdown`, or an accept a signal canceled, it is
