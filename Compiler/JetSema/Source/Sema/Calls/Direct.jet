@@ -1878,7 +1878,7 @@ sema_call_direct_checked_from_target: fn(check: ^SemaBodyCheck, target: SemaCall
     }
     if sema_call_memory_place_target(target, check) {
         check.diagnostics.push(sema_error("E1004", call.name_span, "`{target.symbol.name}` is called through its module", "the compiler builds `{target.symbol.name}` where the call stands, on the caller's own storage, and only a call through `core.mem` reaches it", "write `mem.{target.symbol.name}(…)` after `use core.mem`"))
-        loop argument in call.args -> _ := sema_check_expression(argument.expr, None, check)
+        loop argument in call.args -> _: sema_check_expression(argument.expr, None, check)
         return None
     }
     if sema_call_service_out_of_phase(target, call.name_span, check) == .Val(refused) {
