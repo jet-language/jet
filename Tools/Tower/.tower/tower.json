@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7042,
-    "rev": 114403,
+    "rev": 114412,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -44,10 +44,12 @@
         "radar:G3",
         "radar:G5",
         "radar:G6",
-        "radar:G8"
+        "radar:G8",
+        "radar:G2",
+        "radar:G4"
       ]
     },
-    "completionCursor": "2026-11-25T23:38:27.064Z",
+    "completionCursor": "2026-11-26T00:38:46.621Z",
     "dayStart": {
       "date": "2026-11-26",
       "openCards": 321,
@@ -29719,7 +29721,7 @@
       "track": "sidequest",
       "epoch": "G2",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "checkSteps": null,
@@ -29758,11 +29760,12 @@
         {
           "n": 1,
           "text": "Implement ratified D-CORE-BOUNDARY1=A: typed instruction entries in Core (chip feature, Jet codegen encoding, LLVM operation, plain Jet body checked against the chip before a bundle ships); Core versioned against one kernel number; call-site expansion of kernel-only Core functions; #Instruction marker (spelling coordinated with #4570 jet_builtins); compiler keeps only the kernel, targets, calling conventions and register kinds; migration per Docs/Research/compiler-corelib-boundary-2026-10-04.md",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T12:55:07.812Z"
+          "evidence": "Duplicate of #6518 c7, which now carries all of it (typed instruction entries, kernel number, call-site expansion, instruction marker, compiler keeps only the kernel, lazy Core loading, migration per the 2026-10-04 research) with the proof Hw/chip_entry_is_a_core_change.",
+          "at": "2026-11-26T00:46:48.471Z",
+          "closure": "duplicate"
         }
       ],
       "refs": [
@@ -29775,8 +29778,9 @@
       "parentId": "c00dtttx",
       "needsAcceptance": false,
       "created": "2026-10-04T23:31:07.632Z",
-      "updated": "2026-11-24T00:40:39.484Z",
-      "updatedBy": "Orchestrator"
+      "updated": "2026-11-26T00:46:50.359Z",
+      "updatedBy": "Orchestrator",
+      "completedAt": "2026-11-26T00:46:50.359Z"
     },
     {
       "id": "c0a4g5k6",
@@ -44764,12 +44768,16 @@
         },
         {
           "n": 7,
-          "text": "Chip knowledge lives in Core (D-CORE-BOUNDARY1=A): typed instruction entries (chip feature, encoding, plain Jet body checked against the chip) are Core declarations, and a new chip entry lands as a Core change with no compiler edit; Core loads lazily. Proof: `jet test Compiler --profile cases --filter Hw/chip_entry_is_a_core_change`. The frozen #4565 holds the original item.",
+          "text": "Chip knowledge lives in Core (D-CORE-BOUNDARY1=A): typed instruction entries (chip feature, Jet codegen encoding, plain Jet body checked against the chip before a bundle ships) are Core declarations marked by the instruction marker (its spelling registered in the syntax registry and ratified with #4570's jet_builtins work); Core is versioned against one kernel number; kernel-only Core functions expand at the call site; the compiler keeps only the kernel, targets, calling conventions and register kinds, migrated per Docs/Research/compiler-corelib-boundary-2026-10-04.md. A new chip entry lands as a Core change with no compiler edit, and Core loads lazily. Proof: `jet test Compiler --profile cases --filter Hw/chip_entry_is_a_core_change`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T13:01:05.736Z"
+          "at": "2026-11-26T00:46:47.357Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "Hw/chip_entry_is_a_core_change"
+          }
         },
         {
           "n": 8,
@@ -44798,7 +44806,7 @@
       "parentId": "c085f598",
       "needsAcceptance": false,
       "created": "2026-11-01T01:14:49.683Z",
-      "updated": "2026-11-24T02:27:04.964Z",
+      "updated": "2026-11-26T00:46:47.357Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 9
     },
@@ -75815,11 +75823,11 @@
         {
           "n": 20,
           "text": "The compiler-data ratchet passes on dev (jet Tools/Agent/CompilerData.jet --check, which LaneCheck runs). On dev 70ff64f2288 it refuses 3 rises: Loader.jet 2 payload enums over its row's 1 (the c13 typed-decode/input work, 2026-11-25), and BodyPasses.jet 2 payload enums over 1 and 49 Shared cells over 48 (the G keep-going work, 2026-11-24). Batch 44 adds CoreUsage.jet 2 text-keyed lookups over 0 (cc495b15196, the UI capability index). Each is keyed by an id, as Docs/Spec/compiler-data.md requires, not met by raising its row.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T15:39:29.618Z",
+          "evidence": "dev e3bf920e00a, batch-49 compiler: `jet Tools/Agent/CompilerData.jet --check` → 'compiler-data ratchet: ok (172 files: 274 text-keyed lookups, 333 Shared cells, 213 payload enums)', rc 0. Loader.jet is 1 payload enum, BodyPasses.jet 1 payload enum and 47 Shared cells (lowered from 48 by 24519f9d01c), CoreUsage.jet has no row.",
+          "at": "2026-11-26T00:45:13.947Z",
           "proof": {
             "profile": "cmd",
             "args": [
@@ -75861,7 +75869,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-24T17:01:07.086Z",
-      "updated": "2026-11-25T21:02:02.103Z",
+      "updated": "2026-11-26T00:45:13.948Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 22
     },
@@ -145980,6 +145988,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-26T00:46:50.359Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0gac1l5",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-26T00:46:48.471Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0gac1l5",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-26T00:46:47.357Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c09brw5t",
+      "note": "#7: Folds in #4565 n1's remaining detail (kernel number, call-site expansion, instruction marker, compiler keeps only the kernel) so #4565 closes as its duplicate; was: Chip knowledge lives in Core (D-CORE-BOUNDARY1=A): typed instruction entries (chip feature, encoding, plain Jet body checked against the chip) are Core declarations, and a new chip entry lands as a Co; proof: jet test Compiler --profile cases --filter Hw/chip_entry_is_a_core_change"
+    },
+    {
+      "at": "2026-11-26T00:45:13.948Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0mhrplj",
+      "note": "#20"
+    },
+    {
+      "at": "2026-11-26T00:38:46.621Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-11-26T00:38:46.621Z"
+    },
     {
       "at": "2026-11-26T00:26:21.262Z",
       "by": "Orchestrator",
