@@ -1,0 +1,112 @@
+// Compiler-private part of core.encoding.csv: RFC 4180 CSV grammar.
+use {
+    core.grammar.[Grammar]
+}
+
+priv Sheet: Grammar{"""
+    sheet       : first=record rest+=next_record* EOF ;
+    next_record : EOL row=record ;
+    record      : first=field rest+=next_field* ;
+    next_field  : ',' item=field ;
+    field       : raw=QUOTED # Quoted
+                | raw=PLAIN # Plain
+                | # Empty
+                ;
+    QUOTED      : '"' ('""' | [^"])* '"' ;
+    PLAIN       : [^,"\r\n]+ ;
+    EOL         : '\r'? '\n' ;
+"""}
+
+CSVParsedRow: struct {
+    line: Int,
+    fields: [String],
+}
+
+priv csv_unquote: fn(raw: String) -> String Never! {
+    bytes: raw.bytes()
+    if bytes.len() < 2 -> return raw.copy()
+    ^out: [U8]{}
+    ^i: 1
+    end: bytes.len() - 1
+    loop i < end {
+        if bytes[i] == (U8{34}) && i + 1 < end && bytes[i + 1] == (U8{34}) {
+            out.push(U8{34})
+            i += 2
+        } else {
+            out.push(bytes[i])
+            i += 1
+        }
+    }
+    String.from_bytes(out) ?? ""
+}
+
+priv csv_count_newlines: fn(raw: String) -> Int Never! {
+    ^count: 0
+    loop b in raw.bytes() {
+        if b == (U8{10}) -> count += 1
+    }
+    count
+}
+
+priv csv_cell_text: fn(item: Field) -> String Never! {
+    if item == {
+        .Quoted(raw) -> csv_unquote(raw)
+        .Plain(raw) -> raw.copy()
+        .Empty -> ""
+    }
+}
+
+priv csv_cell_newlines: fn(item: Field) -> Int Never! {
+    if item == {
+        .Quoted(raw) -> csv_count_newlines(raw)
+        .Plain(_) | .Empty -> 0
+    }
+}
+
+priv csv_record_is_empty_sentinel: fn(rec: Record) -> Bool Never! {
+    rec.rest.len() == 0 && rec.first == .Empty
+}
+
+priv csv_is_blank_fields: fn(fields: [String]) -> Bool Never! {
+    loop f in fields {
+        if f.bytes().len() > 0 -> return false
+    }
+    true
+}
+
+csv_parse_rows: fn(text: String, header: Bool, skip_blank: Bool) -> [CSVParsedRow]? Never! {
+    if text.bytes().len() == 0 -> return Val([CSVParsedRow]{})
+    parsed: Sheet.parse(text) ?? return None
+    ^rows: [CSVParsedRow]{}
+    ^line: 1
+    ^record_index: 0
+    // Collect `first` record (never empty sentinel since text is non-empty,
+    // except if text is empty which returned early above).
+    ^first_fields: [String]{csv_cell_text(parsed.first.first)}
+    ^first_nl: csv_cell_newlines(parsed.first.first)
+    loop cell_item in parsed.first.rest {
+        first_fields.push(csv_cell_text(cell_item.item))
+        first_nl += csv_cell_newlines(cell_item.item)
+    }
+    keep_first: (!header || record_index > 0) && (!skip_blank || !csv_is_blank_fields(first_fields))
+    if keep_first -> rows.push(CSVParsedRow{line: line, fields: first_fields.move()})
+    line += first_nl + 1
+    record_index += 1
+    total_rest: parsed.rest.len()
+    loop (idx, next_rec) in parsed.rest {
+        is_last: idx + 1 == total_rest
+        if is_last && csv_record_is_empty_sentinel(next_rec.row) -> break
+        row_line: line
+        ^fields: [String]{csv_cell_text(next_rec.row.first)}
+        ^nl: csv_cell_newlines(next_rec.row.first)
+        loop cell_item in next_rec.row.rest {
+            fields.push(csv_cell_text(cell_item.item))
+            nl += csv_cell_newlines(cell_item.item)
+        }
+        keep: (!header || record_index > 0) && (!skip_blank || !csv_is_blank_fields(fields))
+        if keep -> rows.push(CSVParsedRow{line: row_line, fields: fields.move()})
+        line += nl + 1
+        record_index += 1
+    }
+    Val(rows)
+}
