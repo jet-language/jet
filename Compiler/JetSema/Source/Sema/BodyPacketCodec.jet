@@ -9,7 +9,7 @@
 // in declaration order (an enum its variant's position first), and a get,
 // which reads them back in that order. The hand-written halves are in
 // JetFoundation Facts/BodyCodecRows.jet.
-use jet_foundation.[BodyCodecIn, BodyCodecOut, CoreMarkerApplication, Diagnostic, DiagnosticBuildError, DiagnosticCallRewrite, DiagnosticCause, DiagnosticCryptoMisuseReason, DiagnosticErrorContextFrame, DiagnosticErrorConversion, DiagnosticErrorDetails, DiagnosticErrorField, DiagnosticErrorJourneyFrame, DiagnosticErrorSpan, DiagnosticFixApplicability, DiagnosticFixSafety, DiagnosticLabel, DiagnosticMoment, DiagnosticNoFixReason, DiagnosticNoFixReasonKind, DiagnosticOrigin, DiagnosticStructured, FnBody, SharedLifetime, SymbolKind, SymbolLocalKeys, TEffectFacts, TargetDMAOperation, TargetDMAOperationFact, TargetDMAOwner, TargetHardwareUnresolvedReference, TargetHardwareUse, TargetInterruptHandlerFact, TargetRegisterAccessFact, TargetRegisterOperation, TextEdit, Type, body_codec_get_bodyexpr, body_codec_get_bool, body_codec_get_count, body_codec_get_expr, body_codec_get_fnbody, body_codec_get_int, body_codec_get_list_int, body_codec_get_list_string, body_codec_get_list_tcapture, body_codec_get_list_tcomptimevalue, body_codec_get_list_tgenericparam, body_codec_get_list_type, body_codec_get_moduleid, body_codec_get_opt_int, body_codec_get_opt_list_effectrowentry, body_codec_get_opt_span, body_codec_get_opt_string, body_codec_get_opt_symbolid, body_codec_get_opt_type, body_codec_get_registerwidth, body_codec_get_sharedlifetime, body_codec_get_span, body_codec_get_string, body_codec_get_symbolid, body_codec_get_symbollocalkeys, body_codec_get_tag, body_codec_get_tcomptimevalue, body_codec_get_teffectfacts, body_codec_get_tfunckind, body_codec_get_type, body_codec_put_bodyexpr, body_codec_put_bool, body_codec_put_count, body_codec_put_expr, body_codec_put_fnbody, body_codec_put_int, body_codec_put_list_int, body_codec_put_list_string, body_codec_put_list_tcapture, body_codec_put_list_tcomptimevalue, body_codec_put_list_tgenericparam, body_codec_put_list_type, body_codec_put_moduleid, body_codec_put_opt_int, body_codec_put_opt_list_effectrowentry, body_codec_put_opt_span, body_codec_put_opt_string, body_codec_put_opt_symbolid, body_codec_put_opt_type, body_codec_put_registerwidth, body_codec_put_sharedlifetime, body_codec_put_span, body_codec_put_string, body_codec_put_symbolid, body_codec_put_symbollocalkeys, body_codec_put_tag, body_codec_put_tcomptimevalue, body_codec_put_teffectfacts, body_codec_put_tfunckind, body_codec_put_type]
+use jet_foundation.[BodyCodecIn, BodyCodecOut, CoreMarkerApplication, Diagnostic, DiagnosticBuildError, DiagnosticCallRewrite, DiagnosticCause, DiagnosticCryptoMisuseReason, DiagnosticErrorContextFrame, DiagnosticErrorConversion, DiagnosticErrorDetails, DiagnosticErrorField, DiagnosticErrorJourneyFrame, DiagnosticErrorSpan, DiagnosticFixApplicability, DiagnosticFixSafety, DiagnosticLabel, DiagnosticMoment, DiagnosticNoFixReason, DiagnosticNoFixReasonKind, DiagnosticOrigin, DiagnosticStructured, FnBody, SharedLifetime, SymbolKind, SymbolLocalKeys, TEffectFacts, TextEdit, Type, body_codec_get_bodyexpr, body_codec_get_bool, body_codec_get_count, body_codec_get_expr, body_codec_get_fnbody, body_codec_get_int, body_codec_get_list_int, body_codec_get_list_string, body_codec_get_list_tcapture, body_codec_get_list_tcomptimevalue, body_codec_get_list_tgenericparam, body_codec_get_list_type, body_codec_get_moduleid, body_codec_get_opt_int, body_codec_get_opt_list_effectrowentry, body_codec_get_opt_span, body_codec_get_opt_string, body_codec_get_opt_symbolid, body_codec_get_opt_type, body_codec_get_sharedlifetime, body_codec_get_span, body_codec_get_string, body_codec_get_symbolid, body_codec_get_symbollocalkeys, body_codec_get_tag, body_codec_get_tcomptimevalue, body_codec_get_teffectfacts, body_codec_get_tfunckind, body_codec_get_type, body_codec_put_bodyexpr, body_codec_put_bool, body_codec_put_count, body_codec_put_expr, body_codec_put_fnbody, body_codec_put_int, body_codec_put_list_int, body_codec_put_list_string, body_codec_put_list_tcapture, body_codec_put_list_tcomptimevalue, body_codec_put_list_tgenericparam, body_codec_put_list_type, body_codec_put_moduleid, body_codec_put_opt_int, body_codec_put_opt_list_effectrowentry, body_codec_put_opt_span, body_codec_put_opt_string, body_codec_put_opt_symbolid, body_codec_put_opt_type, body_codec_put_sharedlifetime, body_codec_put_span, body_codec_put_string, body_codec_put_symbolid, body_codec_put_symbollocalkeys, body_codec_put_tag, body_codec_put_tcomptimevalue, body_codec_put_teffectfacts, body_codec_put_tfunckind, body_codec_put_type]
 
 body_codec_put_opt_semafunctionresult: fn(out: ^BodyCodecOut, value: SemaFunctionResult?) Never! {
     if value == .Val(inner) {
@@ -257,7 +257,6 @@ body_codec_put_semafunctionresult: fn(out: ^BodyCodecOut, value: SemaFunctionRes
     body_codec_put_bool(out, value.complete)
     body_codec_put_bool(out, value.exact_int_reachable)
     body_codec_put_list_semacopyevent(out, value.copy_events)
-    body_codec_put_targethardwareuse(out, value.hardware_use)
     body_codec_put_list_semacomptimebodysource(out, value.comptime_body_sources)
     body_codec_put_semacomputefunctionfacts(out, value.compute_facts)
     body_codec_put_opt_semafunctionfailurefacts(out, value.failure)
@@ -273,16 +272,15 @@ body_codec_get_semafunctionresult: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaF
     f1: body_codec_get_bool(bytes, input)
     f2: body_codec_get_bool(bytes, input)
     f3: body_codec_get_list_semacopyevent(bytes, input)
-    f4: body_codec_get_targethardwareuse(bytes, input)
-    f5: body_codec_get_list_semacomptimebodysource(bytes, input)
-    f6: body_codec_get_semacomputefunctionfacts(bytes, input)
-    f7: body_codec_get_opt_semafunctionfailurefacts(bytes, input)
-    f8: body_codec_get_list_string(bytes, input)
-    f9: body_codec_get_opt_list_semapreludeconversiondemand(bytes, input)
-    f10: body_codec_get_opt_symbollocalkeys(bytes, input)
-    f11: body_codec_get_list_semaevalprobeanswer(bytes, input)
-    f12: body_codec_get_list_semarecordedcall(bytes, input)
-    SemaFunctionResult{value: f0, complete: f1, exact_int_reachable: f2, copy_events: f3, hardware_use: f4, comptime_body_sources: f5, compute_facts: f6, failure: f7, incomplete_reasons: f8, prelude_demands: f9, failed_locals: f10, eval_answers: f11, recorded_calls: f12}
+    f4: body_codec_get_list_semacomptimebodysource(bytes, input)
+    f5: body_codec_get_semacomputefunctionfacts(bytes, input)
+    f6: body_codec_get_opt_semafunctionfailurefacts(bytes, input)
+    f7: body_codec_get_list_string(bytes, input)
+    f8: body_codec_get_opt_list_semapreludeconversiondemand(bytes, input)
+    f9: body_codec_get_opt_symbollocalkeys(bytes, input)
+    f10: body_codec_get_list_semaevalprobeanswer(bytes, input)
+    f11: body_codec_get_list_semarecordedcall(bytes, input)
+    SemaFunctionResult{value: f0, complete: f1, exact_int_reachable: f2, copy_events: f3, comptime_body_sources: f4, compute_facts: f5, failure: f6, incomplete_reasons: f7, prelude_demands: f8, failed_locals: f9, eval_answers: f10, recorded_calls: f11}
 }
 
 body_codec_put_semacopyevent: fn(out: ^BodyCodecOut, value: SemaCopyEvent) Never! {
@@ -379,210 +377,6 @@ body_codec_get_semacopymemorykind: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaC
         1 -> SemaCopyMemoryKind.Allocation
         2 -> SemaCopyMemoryKind.RetainRelease
         else -> SemaCopyMemoryKind.NoEvent
-    }
-}
-
-body_codec_put_list_targetregisteraccessfact: fn(out: ^BodyCodecOut, values: [TargetRegisterAccessFact]) Never! {
-    body_codec_put_count(out, values.len())
-    loop value in values -> body_codec_put_targetregisteraccessfact(out, value)
-}
-
-body_codec_get_list_targetregisteraccessfact: fn(bytes: [U8], input: ^BodyCodecIn) -> [TargetRegisterAccessFact] Never! {
-    count: body_codec_get_count(bytes, input, 1)
-    ^values: [TargetRegisterAccessFact]{}
-    loop _ in 0..<count -> values.push(body_codec_get_targetregisteraccessfact(bytes, input))
-    values
-}
-
-body_codec_put_list_targetinterrupthandlerfact: fn(out: ^BodyCodecOut, values: [TargetInterruptHandlerFact]) Never! {
-    body_codec_put_count(out, values.len())
-    loop value in values -> body_codec_put_targetinterrupthandlerfact(out, value)
-}
-
-body_codec_get_list_targetinterrupthandlerfact: fn(bytes: [U8], input: ^BodyCodecIn) -> [TargetInterruptHandlerFact] Never! {
-    count: body_codec_get_count(bytes, input, 1)
-    ^values: [TargetInterruptHandlerFact]{}
-    loop _ in 0..<count -> values.push(body_codec_get_targetinterrupthandlerfact(bytes, input))
-    values
-}
-
-body_codec_put_list_targetdmaoperationfact: fn(out: ^BodyCodecOut, values: [TargetDMAOperationFact]) Never! {
-    body_codec_put_count(out, values.len())
-    loop value in values -> body_codec_put_targetdmaoperationfact(out, value)
-}
-
-body_codec_get_list_targetdmaoperationfact: fn(bytes: [U8], input: ^BodyCodecIn) -> [TargetDMAOperationFact] Never! {
-    count: body_codec_get_count(bytes, input, 1)
-    ^values: [TargetDMAOperationFact]{}
-    loop _ in 0..<count -> values.push(body_codec_get_targetdmaoperationfact(bytes, input))
-    values
-}
-
-body_codec_put_list_targethardwareunresolvedreference: fn(out: ^BodyCodecOut, values: [TargetHardwareUnresolvedReference]) Never! {
-    body_codec_put_count(out, values.len())
-    loop value in values -> body_codec_put_targethardwareunresolvedreference(out, value)
-}
-
-body_codec_get_list_targethardwareunresolvedreference: fn(bytes: [U8], input: ^BodyCodecIn) -> [TargetHardwareUnresolvedReference] Never! {
-    count: body_codec_get_count(bytes, input, 1)
-    ^values: [TargetHardwareUnresolvedReference]{}
-    loop _ in 0..<count {
-        values.push(body_codec_get_targethardwareunresolvedreference(bytes, input))
-    }
-    values
-}
-
-body_codec_put_targethardwareuse: fn(out: ^BodyCodecOut, value: TargetHardwareUse) Never! {
-    body_codec_put_list_targetregisteraccessfact(out, value.register_accesses)
-    body_codec_put_list_targetinterrupthandlerfact(out, value.interrupt_handlers)
-    body_codec_put_list_targetdmaoperationfact(out, value.dma_operations)
-    body_codec_put_list_targethardwareunresolvedreference(out, value.unresolved_references)
-}
-
-body_codec_get_targethardwareuse: fn(bytes: [U8], input: ^BodyCodecIn) -> TargetHardwareUse Never! {
-    f0: body_codec_get_list_targetregisteraccessfact(bytes, input)
-    f1: body_codec_get_list_targetinterrupthandlerfact(bytes, input)
-    f2: body_codec_get_list_targetdmaoperationfact(bytes, input)
-    f3: body_codec_get_list_targethardwareunresolvedreference(bytes, input)
-    TargetHardwareUse{register_accesses: f0, interrupt_handlers: f1, dma_operations: f2, unresolved_references: f3}
-}
-
-body_codec_put_targetregisteraccessfact: fn(out: ^BodyCodecOut, value: TargetRegisterAccessFact) Never! {
-    body_codec_put_string(out, value.block)
-    body_codec_put_string(out, value.register)
-    body_codec_put_targetregisteroperation(out, value.operation)
-    body_codec_put_registerwidth(out, value.width)
-}
-
-body_codec_get_targetregisteraccessfact: fn(bytes: [U8], input: ^BodyCodecIn) -> TargetRegisterAccessFact Never! {
-    f0: body_codec_get_string(bytes, input)
-    f1: body_codec_get_string(bytes, input)
-    f2: body_codec_get_targetregisteroperation(bytes, input)
-    f3: body_codec_get_registerwidth(bytes, input)
-    TargetRegisterAccessFact{block: f0, register: f1, operation: f2, width: f3}
-}
-
-body_codec_put_targetregisteroperation: fn(out: ^BodyCodecOut, value: TargetRegisterOperation) Never! {
-    if value == {
-        .Read -> { body_codec_put_tag(out, 0) }
-        .Write -> body_codec_put_tag(out, 1)
-    }
-}
-
-body_codec_get_targetregisteroperation: fn(bytes: [U8], input: ^BodyCodecIn) -> TargetRegisterOperation Never! {
-    position: body_codec_get_tag(bytes, input, 2, 0)
-    if position == {
-        1 -> TargetRegisterOperation.Write
-        else -> TargetRegisterOperation.Read
-    }
-}
-
-body_codec_put_targetinterrupthandlerfact: fn(out: ^BodyCodecOut, value: TargetInterruptHandlerFact) Never! {
-    body_codec_put_string(out, value.interrupt)
-    body_codec_put_string(out, value.handler)
-    body_codec_put_list_string(out, value.effects)
-    body_codec_put_list_string(out, value.forbidden_effects)
-    body_codec_put_bool(out, value.bounded)
-}
-
-body_codec_get_targetinterrupthandlerfact: fn(bytes: [U8], input: ^BodyCodecIn) -> TargetInterruptHandlerFact Never! {
-    f0: body_codec_get_string(bytes, input)
-    f1: body_codec_get_string(bytes, input)
-    f2: body_codec_get_list_string(bytes, input)
-    f3: body_codec_get_list_string(bytes, input)
-    f4: body_codec_get_bool(bytes, input)
-    TargetInterruptHandlerFact{interrupt: f0, handler: f1, effects: f2, forbidden_effects: f3, bounded: f4}
-}
-
-body_codec_put_targetdmaoperationfact: fn(out: ^BodyCodecOut, value: TargetDMAOperationFact) Never! {
-    body_codec_put_string(out, value.channel)
-    body_codec_put_string(out, value.buffer)
-    body_codec_put_targetdmaoperation(out, value.operation)
-    body_codec_put_targetdmaowner(out, value.owner)
-}
-
-body_codec_get_targetdmaoperationfact: fn(bytes: [U8], input: ^BodyCodecIn) -> TargetDMAOperationFact Never! {
-    f0: body_codec_get_string(bytes, input)
-    f1: body_codec_get_string(bytes, input)
-    f2: body_codec_get_targetdmaoperation(bytes, input)
-    f3: body_codec_get_targetdmaowner(bytes, input)
-    TargetDMAOperationFact{channel: f0, buffer: f1, operation: f2, owner: f3}
-}
-
-body_codec_put_targetdmaoperation: fn(out: ^BodyCodecOut, value: TargetDMAOperation) Never! {
-    if value == {
-        .Start -> { body_codec_put_tag(out, 0) }
-        .Wait -> { body_codec_put_tag(out, 1) }
-        .UseBuffer -> body_codec_put_tag(out, 2)
-    }
-}
-
-body_codec_get_targetdmaoperation: fn(bytes: [U8], input: ^BodyCodecIn) -> TargetDMAOperation Never! {
-    position: body_codec_get_tag(bytes, input, 3, 0)
-    if position == {
-        1 -> TargetDMAOperation.Wait
-        2 -> TargetDMAOperation.UseBuffer
-        else -> TargetDMAOperation.Start
-    }
-}
-
-body_codec_put_targetdmaowner: fn(out: ^BodyCodecOut, value: TargetDMAOwner) Never! {
-    if value == {
-        .CPU -> { body_codec_put_tag(out, 0) }
-        .Device -> body_codec_put_tag(out, 1)
-    }
-}
-
-body_codec_get_targetdmaowner: fn(bytes: [U8], input: ^BodyCodecIn) -> TargetDMAOwner Never! {
-    position: body_codec_get_tag(bytes, input, 2, 0)
-    if position == {
-        1 -> TargetDMAOwner.Device
-        else -> TargetDMAOwner.CPU
-    }
-}
-
-body_codec_put_targethardwareunresolvedreference: fn(out: ^BodyCodecOut, value: TargetHardwareUnresolvedReference) Never! {
-    if value == {
-        .RegisterBlock(p0) -> {
-            body_codec_put_tag(out, 0)
-            body_codec_put_string(out, p0)
-        }
-        .Register(p0, p1) -> {
-            body_codec_put_tag(out, 1)
-            body_codec_put_string(out, p0)
-            body_codec_put_string(out, p1)
-        }
-        .DMAChannel(p0) -> {
-            body_codec_put_tag(out, 2)
-            body_codec_put_string(out, p0)
-        }
-        .Interrupt(p0) -> {
-            body_codec_put_tag(out, 3)
-            body_codec_put_string(out, p0)
-        }
-    }
-}
-
-body_codec_get_targethardwareunresolvedreference: fn(bytes: [U8], input: ^BodyCodecIn) -> TargetHardwareUnresolvedReference Never! {
-    position: body_codec_get_tag(bytes, input, 4, 0)
-    if position == {
-        1 -> {
-            f0: body_codec_get_string(bytes, input)
-            f1: body_codec_get_string(bytes, input)
-            TargetHardwareUnresolvedReference.Register{block: f0, register: f1}
-        }
-        2 -> {
-            f0: body_codec_get_string(bytes, input)
-            TargetHardwareUnresolvedReference.DMAChannel{channel: f0}
-        }
-        3 -> {
-            f0: body_codec_get_string(bytes, input)
-            TargetHardwareUnresolvedReference.Interrupt{interrupt: f0}
-        }
-        else -> {
-            f0: body_codec_get_string(bytes, input)
-            TargetHardwareUnresolvedReference.RegisterBlock{block: f0}
-        }
     }
 }
 
@@ -2059,7 +1853,6 @@ body_codec_put_semacheckedtextevaluation: fn(out: ^BodyCodecOut, value: SemaChec
     body_codec_put_expr(out, value.source_expression)
     body_codec_put_bodyexpr(out, value.expression)
     body_codec_put_type(out, value.ty)
-    body_codec_put_targethardwareuse(out, value.hardware_use)
     body_codec_put_list_string(out, value.reachable_function_keys)
     body_codec_put_list_string(out, value.dependencies)
     body_codec_put_span(out, value.span)
@@ -2076,14 +1869,13 @@ body_codec_get_semacheckedtextevaluation: fn(bytes: [U8], input: ^BodyCodecIn) -
     f4: body_codec_get_expr(bytes, input)
     f5: body_codec_get_bodyexpr(bytes, input)
     f6: body_codec_get_type(bytes, input)
-    f7: body_codec_get_targethardwareuse(bytes, input)
+    f7: body_codec_get_list_string(bytes, input)
     f8: body_codec_get_list_string(bytes, input)
-    f9: body_codec_get_list_string(bytes, input)
-    f10: body_codec_get_span(bytes, input)
+    f9: body_codec_get_span(bytes, input)
+    f10: body_codec_get_string(bytes, input)
     f11: body_codec_get_string(bytes, input)
     f12: body_codec_get_string(bytes, input)
-    f13: body_codec_get_string(bytes, input)
-    SemaCheckedTextEvaluation{module_identity: f0, key: f1, type_name: f2, source_file: f3, source_expression: f4, expression: f5, ty: f6, hardware_use: f7, reachable_function_keys: f8, dependencies: f9, span: f10, code: f11, what: f12, fix: f13}
+    SemaCheckedTextEvaluation{module_identity: f0, key: f1, type_name: f2, source_file: f3, source_expression: f4, expression: f5, ty: f6, reachable_function_keys: f7, dependencies: f8, span: f9, code: f10, what: f11, fix: f12}
 }
 
 body_codec_put_opt_symbolkind: fn(out: ^BodyCodecOut, value: SymbolKind?) Never! {
