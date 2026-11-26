@@ -47,15 +47,67 @@ lsp_document_symbol_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> St
 // The most workspace symbols one answer carries.
 LSP_WORKSPACE_SYMBOL_LIMIT: 500
 
-// A query matches a name holding its characters in order, ignoring ASCII case.
-lsp_fuzzy_match: fn(query: String, name: String) -> Bool Never! {
-    wanted: query.to_lower().bytes()
-    have: name.to_lower().bytes()
-    ^at: 0
-    loop byte in have {
-        if at < wanted.len() && byte == wanted[at] -> at += 1
+// Lowercase ASCII letters in `byte` without allocating.
+lsp_ascii_lower_byte: fn(byte: U8) -> U8 Never! {
+    if byte >= 65 && byte <= 90 -> return U8{Int{byte} + 32}
+    byte
+}
+
+// Whether `byte` can appear inside a Jet identifier name (ASCII letter, digit,
+// `_`, or any non-ASCII UTF-8 byte).
+lsp_ident_byte: fn(byte: U8) -> Bool Never! {
+    (byte >= 97 && byte <= 122) || (byte >= 65 && byte <= 90) || (byte >= 48 && byte <= 57) || byte == 95 || byte >= 128
+}
+
+// The ASCII-lowercased bytes of `query`, computed once per request.
+lsp_query_wanted: fn(query: String) -> [U8] Never! {
+    loop byte in query.bytes() -> lsp_ascii_lower_byte(byte)
+}
+
+lsp_query_ident_only: fn(wanted: [U8]) -> Bool Never! {
+    loop byte in wanted {
+        if !lsp_ident_byte(byte) -> return false
     }
-    at == wanted.len()
+    true
+}
+
+// A query matches a name holding its characters in order, ignoring ASCII case.
+lsp_fuzzy_match_wanted: fn(wanted: [U8], name: String) -> Bool Never! {
+    if wanted.len() == 0 -> return true
+    ^at: 0
+    loop byte in name.bytes() {
+        if lsp_ascii_lower_byte(byte) == wanted[at] {
+            at += 1
+            if at == wanted.len() -> return true
+        }
+    }
+    false
+}
+
+lsp_fuzzy_match: fn(query: String, name: String) -> Bool Never! {
+    lsp_fuzzy_match_wanted(lsp_query_wanted(query), name)
+}
+
+// Fast sound prefilter for saved workspace files before parsing their AST:
+// every declaration `lsp_symbol_rows` can emit spells its name verbatim in
+// `source`, so a file with no single identifier (or non-whitespace token when
+// `query` contains non-identifier bytes) matching `wanted` cannot produce any
+// matching symbol.
+lsp_source_may_match_query: fn(source: String, wanted: [U8], ident_only: Bool) -> Bool Never! {
+    if wanted.len() == 0 -> return true
+    ^at: 0
+    loop byte in source.bytes() {
+        in_token: if ident_only -> lsp_ident_byte(byte) else -> byte > 32
+        if !in_token {
+            at = 0
+            next
+        }
+        if lsp_ascii_lower_byte(byte) == wanted[at] {
+            at += 1
+            if at == wanted.len() -> return true
+        }
+    }
+    false
 }
 
 // Declarations matching the query. With workspace folders: those of the files
@@ -64,11 +116,13 @@ lsp_fuzzy_match: fn(query: String, name: String) -> Bool Never! {
 // open documents' publications read.
 lsp_workspace_symbol_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
     query: lsp_text_member(params ?? Dyn.Null, "query") ?? ""
+    wanted: lsp_query_wanted(query)
+    ident_only: lsp_query_ident_only(wanted)
     ^seen: [String:Bool]{}
     ^rows: [String]{}
     if server.workspace_named {
         loop root in server.workspace_roots {
-            if !lsp_root_symbol_rows(server, root, query, seen, rows) -> break
+            if !lsp_root_symbol_rows(server, root, wanted, ident_only, seen, rows) -> break
         }
         return lsp_response(id, "[{rows.join(",")}]")
     }
@@ -76,24 +130,25 @@ lsp_workspace_symbol_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> S
     loop (uri, _) in server.published -> uris.push(uri.copy())
     uris.sort()
     loop uri in uris {
-        if !lsp_symbol_rows(server.published[uri], -1, query, seen, rows) -> break
+        if !lsp_symbol_rows_wanted(server.published[uri], -1, wanted, seen, rows) -> break
     }
     lsp_response(id, "[{rows.join(",")}]")
 }
 
 // The rows of one folder: each open document below it, then each saved file
 // below it that is not open. False once the answer is full.
-lsp_root_symbol_rows: fn(server: LSPServer, root: String, query: String, seen: ^[String:Bool], rows: ^[String]) -> Bool {
+lsp_root_symbol_rows: fn(server: LSPServer, root: String, wanted: [U8], ident_only: Bool, seen: ^[String:Bool], rows: ^[String]) -> Bool {
     loop (uri, doc) in server.diagnostic_state.docs {
         if !lsp_path_below(doc.path, root) -> next
         checked: server.published.get(uri) ?? server.check(doc)
         slot: lsp_checked_module_at(checked, doc.path) ?? next
-        if !lsp_symbol_rows(checked, slot, query, seen, rows) -> return false
+        if !lsp_symbol_rows_wanted(checked, slot, wanted, seen, rows) -> return false
     }
     saved: server.checker.sources(root)
     loop source in saved.move() {
         if lsp_path_open(server, source.path) -> next
-        if !lsp_symbol_rows(lsp_saved_outline(source), -1, query, seen, rows) -> return false
+        if !lsp_source_may_match_query(source.source, wanted, ident_only) -> next
+        if !lsp_symbol_rows_wanted(lsp_saved_outline(source), -1, wanted, seen, rows) -> return false
     }
     true
 }
@@ -206,15 +261,15 @@ lsp_file_stem: fn(path: String) -> String Never! {
     foundation_byte_text(bytes, start, end)
 }
 
-// Adds the rows of `checked`'s declarations that match `query`, only those of
+// Adds the rows of `checked`'s declarations that match `wanted`, only those of
 // the module at `slot` when it is not -1. Each declaration is one row. False
 // once the answer is full.
-lsp_symbol_rows: fn(checked: LSPChecked, slot: Int, query: String, seen: ^[String:Bool], rows: ^[String]) -> Bool Never! {
+lsp_symbol_rows_wanted: fn(checked: LSPChecked, slot: Int, wanted: [U8], seen: ^[String:Bool], rows: ^[String]) -> Bool Never! {
     index: checked.index ?? return true
     loop definition in index.definitions {
         def: definition.def
         kind: lsp_symbol_kind(def.kind) ?? next
-        if !lsp_fuzzy_match(query, def.name) -> next
+        if !lsp_fuzzy_match_wanted(wanted, def.name) -> next
         if slot >= 0 && checked.modules[slot].path != def.module_path -> next
         location: lsp_location(checked, def.module_path, def.def_span) ?? next
         key: "{location.uri}:{def.def_span.start}"
@@ -225,6 +280,10 @@ lsp_symbol_rows: fn(checked: LSPChecked, slot: Int, query: String, seen: ^[Strin
         if rows.len() >= LSP_WORKSPACE_SYMBOL_LIMIT -> return false
     }
     true
+}
+
+lsp_symbol_rows: fn(checked: LSPChecked, slot: Int, query: String, seen: ^[String:Bool], rows: ^[String]) -> Bool Never! {
+    lsp_symbol_rows_wanted(checked, slot, lsp_query_wanted(query), seen, rows)
 }
 
 lsp_folding_range_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String Never! {

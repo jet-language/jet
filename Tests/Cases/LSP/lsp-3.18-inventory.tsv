@@ -1,0 +1,95 @@
+method	category	status	witness	reason
+initialize	lifecycle	applicable	lsp_initialize_capabilities_have_named_test_coverage.case	advertised LSP 3.18 capability handshake
+initialized	lifecycle	applicable	lsp_hover_returns_signature.case	client ready notification after initialize
+shutdown	lifecycle	applicable	lsp_shutdown_with_null_params_answers_its_id_and_exits_0.case	graceful server shutdown handshake
+exit	lifecycle	applicable	lsp_shutdown_with_null_params_answers_its_id_and_exits_0.case	process termination after shutdown
+$/cancelRequest	general	applicable	lsp_queued_request_canceled_before_it_runs_returns_32800.case	single-threaded queued request cancellation returning -32800
+$/setTrace	general	na	-	jet self lsp logs diagnostics directly to stderr without client-configurable trace levels
+$/logTrace	general	na	-	server-initiated trace notifications are not emitted; server logs go to stderr
+$/progress	general	na	-	single-threaded synchronous request handling completes directly without async progress streams
+textDocument/didOpen	sync	applicable	lsp_hover_returns_signature.case	opens and checks a Jet document buffer
+textDocument/didChange	sync	applicable	lsp_incremental_sync_range_edit_updates_document.case	applies incremental TextDocumentSyncKind.Incremental edits
+textDocument/didClose	sync	applicable	lsp_conformance.case	drops resident buffer state and clears document diagnostics
+textDocument/willSave	sync	na	-	incremental open-buffer sync keeps live edits current on every didChange without pre-save hooks
+textDocument/willSaveWaitUntil	sync	na	-	formatting and fixes run through explicit formatting and codeAction requests rather than blocking save
+textDocument/didSave	sync	na	-	live checks read open buffer overlays directly from didOpen and didChange rather than save events
+notebookDocument/didOpen	notebook	na	-	Jet notebooks are served by the dedicated notebook kernel rather than jet self lsp
+notebookDocument/didChange	notebook	na	-	Jet notebooks are served by the dedicated notebook kernel rather than jet self lsp
+notebookDocument/didSave	notebook	na	-	Jet notebooks are served by the dedicated notebook kernel rather than jet self lsp
+notebookDocument/didClose	notebook	na	-	Jet notebooks are served by the dedicated notebook kernel rather than jet self lsp
+textDocument/declaration	navigation	applicable	lsp_conformance.case	Jet declarations coincide with definitions and resolve through the checked semantic index
+textDocument/definition	navigation	applicable	lsp_definition_returns_location.case	resolves symbol definitions across modules and Core declarations
+textDocument/typeDefinition	navigation	applicable	lsp_type_definition_value_types.case	navigates from a value to its nominal type declaration
+textDocument/implementation	navigation	applicable	lsp_implementation_trait_impls.case	resolves trait implementations from the checked semantic index
+textDocument/references	navigation	applicable	lsp_references_finds_all_uses.case	finds checked declaration references across modules
+textDocument/prepareCallHierarchy	hierarchy	applicable	lsp_wave3_prepare_rename_semantic_range_and_call_hierarchy.case	prepares call hierarchy items for functions
+callHierarchy/incomingCalls	hierarchy	applicable	lsp_wave3_prepare_rename_semantic_range_and_call_hierarchy.case	resolves checked callers of a function
+callHierarchy/outgoingCalls	hierarchy	applicable	lsp_wave3_prepare_rename_semantic_range_and_call_hierarchy.case	resolves checked callees of a function
+textDocument/prepareTypeHierarchy	hierarchy	applicable	lsp_type_hierarchy_trait_impls.case	prepares type hierarchy items for structs, enums, and traits
+typeHierarchy/supertypes	hierarchy	applicable	lsp_type_hierarchy_trait_impls.case	lists implemented traits for a type
+typeHierarchy/subtypes	hierarchy	applicable	lsp_type_hierarchy_trait_impls.case	lists concrete types implementing a trait
+textDocument/documentHighlight	navigation	applicable	lsp_wave2_navigation_features.case	highlights read and write occurrences within the open document
+textDocument/documentLink	navigation	applicable	lsp_document_links_and_code_lenses.case	links file imports to their target documents
+documentLink/resolve	navigation	na	-	target URIs are resolved eagerly in textDocument/documentLink with resolveProvider false
+textDocument/hover	intelligence	applicable	lsp_hover_returns_signature.case	renders checked Jet signature, docs, layout, and origin facts
+textDocument/codeLens	intelligence	applicable	lsp_document_links_and_code_lenses.case	attaches Run file and Run test lenses to run entries and #Test blocks
+codeLens/resolve	intelligence	na	-	command payloads are populated eagerly in textDocument/codeLens with resolveProvider false
+workspace/codeLens/refresh	intelligence	na	-	single-threaded server does not issue server-to-client refresh RPCs
+textDocument/foldingRange	structure	applicable	lsp_wave2_navigation_features.case	computes lexical block and comment folding ranges
+textDocument/selectionRange	structure	applicable	lsp_wave2_navigation_features.case	expands smart selection from identifier through enclosing syntax nodes
+textDocument/documentSymbol	structure	applicable	lsp_document_symbol_returns_checked_outline.case	returns checked written declarations in source order
+textDocument/semanticTokens/full	tokens	applicable	lsp_semantic_tokens_returns_data.case	classifies declarations, keywords, types, and calls
+textDocument/semanticTokens/full/delta	tokens	applicable	lsp_semantic_tokens_delta_returns_full_fallback.case	computes incremental semantic token edits against cached result ids
+textDocument/semanticTokens/range	tokens	applicable	lsp_wave3_prepare_rename_semantic_range_and_call_hierarchy.case	returns semantic tokens restricted to the requested line range
+workspace/semanticTokens/refresh	tokens	na	-	single-threaded server does not issue server-to-client refresh RPCs
+textDocument/inlayHint	intelligence	applicable	lsp_inlay_hints_returns_type_labels.case	renders inferred types, parameter names, call marks, and failure propagation marks
+inlayHint/resolve	intelligence	na	-	inlay hint labels and tooltips are materialized eagerly without deferred resolution
+workspace/inlayHint/refresh	intelligence	na	-	single-threaded server does not issue server-to-client refresh RPCs
+textDocument/inlineValue	debug	na	-	runtime debug variable values are served by jet debug (DAP) rather than static LSP
+workspace/inlineValue/refresh	debug	na	-	runtime debug variable values are served by jet debug (DAP) rather than static LSP
+textDocument/moniker	navigation	na	-	LSIF cross-repository monikers are superseded by Jet SemIndex stable definition identities
+textDocument/completion	intelligence	applicable	lsp_completion_returns_items.case	provides lexical, semantic, member, and auto-import completion items
+completionItem/resolve	intelligence	applicable	lsp_conformance.case	attaches full documentation markdown to a chosen completion item
+textDocument/publishDiagnostics	diagnostics	applicable	lsp_canceled_costly_request_returns_32800_and_never_publishes.case	pushes checked diagnostics with source origin and jet.report data
+textDocument/diagnostic	diagnostics	applicable	lsp_conformance.case	supports pull diagnostics per open document with resultId caching
+workspace/diagnostic	diagnostics	applicable	lsp_conformance.case	supports workspace-wide pull diagnostics across open documents
+workspace/diagnostic/refresh	diagnostics	na	-	single-threaded server does not issue server-to-client refresh RPCs
+textDocument/signatureHelp	intelligence	applicable	lsp_signature_help_returns_active_parameter.case	shows callee signatures and active parameter index inside calls
+textDocument/codeAction	editing	applicable	lsp_fix_edits_are_code_actions.case	offers checked quickfix, refactor.rewrite, and source.organizeImports actions
+codeAction/resolve	editing	applicable	lsp_conformance.case	materializes deferred workspace edits for a selected code action
+textDocument/documentColor	presentation	na	-	Jet source syntax has no built-in color-literal language construct
+textDocument/colorPresentation	presentation	na	-	Jet source syntax has no built-in color-literal language construct
+textDocument/formatting	formatting	applicable	lsp_formatting_and_range_formatting_return_edits.case	formats the full document with jet fmt
+textDocument/rangeFormatting	formatting	applicable	lsp_formatting_and_range_formatting_return_edits.case	formats the selected range with jet fmt
+textDocument/rangesFormatting	formatting	na	-	multi-range formatting is superseded by textDocument/formatting and textDocument/rangeFormatting
+textDocument/onTypeFormatting	formatting	applicable	lsp_on_type_formatting_returns_brace_edits.case	indents and closes blocks on newline and closing brace triggers
+textDocument/rename	refactoring	applicable	lsp_rename_produces_workspace_edit.case	renames checked symbols across modules with versioned edits
+textDocument/prepareRename	refactoring	applicable	lsp_wave3_prepare_rename_semantic_range_and_call_hierarchy.case	validates rename targets and returns the editable identifier span
+textDocument/linkedEditingRange	editing	applicable	lsp_conformance.case	links same-document local and parameter occurrences for synchronized editing
+textDocument/inlineCompletion	intelligence	na	-	ghost-text inline completion is model-client-driven outside deterministic semantic LSP
+workspace/symbol	workspace	applicable	lsp_workspace_symbols_follow_all_roots_and_folder_changes.case	fuzzy-searches workspace declarations across open and saved files
+workspaceSymbol/resolve	workspace	na	-	workspace/symbol populates full symbol locations eagerly with resolveProvider false
+workspace/configuration	workspace	na	-	Jet project settings live in checked package.jet manifests and #Policy declarations
+workspace/didChangeConfiguration	workspace	na	-	Jet project settings live in checked package.jet manifests and #Policy declarations
+workspace/workspaceFolders	workspace	na	-	workspace roots are established at initialize and updated via workspace/didChangeWorkspaceFolders
+workspace/didChangeWorkspaceFolders	workspace	applicable	lsp_workspace_symbols_follow_all_roots_and_folder_changes.case	adds and removes workspace roots dynamically
+workspace/willCreateFiles	workspace	na	-	creating a new Jet file requires no pre-create import rewrite across existing modules
+workspace/didCreateFiles	workspace	na	-	saved workspace files are discovered directly from workspace roots on demand
+workspace/willRenameFiles	workspace	applicable	lsp_conformance.case	computes relative file-import rewrites before files or folders are renamed
+workspace/didRenameFiles	workspace	na	-	import rewrites happen atomically in workspace/willRenameFiles before the rename commits
+workspace/willDeleteFiles	workspace	na	-	deleting a Jet file produces checked import diagnostics rather than automatic edits
+workspace/didDeleteFiles	workspace	na	-	deleted files disappear from workspace root scans automatically
+workspace/didChangeWatchedFiles	workspace	na	-	saved workspace files are read directly from workspace roots without client file watchers
+workspace/executeCommand	workspace	applicable	lsp_execute_command_impact_returns_report.case	executes jet.impact, jet.reasoning, and jet.budgetReports commands
+workspace/applyEdit	workspace	na	-	refactoring edits are returned directly in rename, codeAction, and willRenameFiles responses
+workspace/textDocumentContent	workspace	na	-	generated and Core sources are addressed via real file:// URIs on disk
+workspace/textDocumentContent/refresh	workspace	na	-	generated and Core sources are addressed via real file:// URIs on disk
+window/showMessage	window	na	-	single-threaded server logs operational notices to stderr rather than client UI popups
+window/showMessageRequest	window	na	-	single-threaded server does not initiate interactive client modal prompts
+window/showDocument	window	na	-	navigation returns Location responses rather than server-initiated editor focus commands
+window/logMessage	window	na	-	diagnostic server logs write directly to stderr so stdout carries only JSON-RPC frames
+window/workDoneProgress/create	window	na	-	single-threaded synchronous request handling completes without progress token creation
+window/workDoneProgress/cancel	window	na	-	request cancellation uses $/cancelRequest rather than work-done progress tokens
+client/registerCapability	client	na	-	all supported capabilities are registered statically in the initialize response
+client/unregisterCapability	client	na	-	all supported capabilities are registered statically in the initialize response
+telemetry/event	client	na	-	Jet language server emits zero telemetry events by design

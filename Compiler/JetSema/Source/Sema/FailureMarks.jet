@@ -21,6 +21,7 @@ use jet_foundation.[
     TextEdit,
     TryConvert,
     Type,
+    ast_generated_fragment_function_key,
     diagnostic_with_edit_grade,
     expr_node_id,
     expr_source_span,
@@ -116,12 +117,12 @@ sema_failure_marks_check_written: fn(value: Expr, span: Span, expected: Type?, c
 // report is an obligation of the bundle failure solve while the callee's
 // failure set is still inferred: a callee the solve finds infallible owes no
 // mark.
-sema_failure_marks_require: fn(expr: Expr, conversion: TTryConvert, callee: SemaFailureCallee?, environment: SemaScopeEnvironment, program: SemaProgramTables, context: SemaCheckContext, diagnostics: ^[Diagnostic]) {
+sema_failure_marks_require: fn(expr: Expr, conversion: TTryConvert, callee: SemaFailureCallee?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: ^[Diagnostic]) {
     if conversion == .Never {
         return
     }
     id: expr_node_id(expr)
-    if id == AST_NODE_GENERATED || id == context.failure_mark_written || context.compiler_generated {
+    if id == AST_NODE_GENERATED || id == context.failure_mark_written || context.compiler_generated || ast_generated_fragment_function_key(sema_scope_function_owner_key(scopes), context.compiler_generated) {
         return
     }
     ^name: "this call"
@@ -144,63 +145,53 @@ sema_failure_marks_require: fn(expr: Expr, conversion: TTryConvert, callee: Sema
     sema_failure_defer_obligation(callee, diagnostics).drop("the report is the obligation; the call's conversion is already settled")
 }
 
-// The byte just past a call's closing `)`. The tree keeps the callee's name
-// and each argument's span but not the parentheses, so the source is read on
-// from the last argument, or from the name through any type arguments and
-// the `(`, to the `)`. A trailing block argument ends the call itself. None
-// when the source does not show the call there.
+// E0434 for a loop header (`loop x in source`) whose `Iterator.next` step can
+// propagate a failure under `#Policy(failures: .Explicit)`. Because the step
+// call is implicit in the loop header rather than a parenthesized call site, no
+// source edit is attached.
+sema_failure_marks_require_loop_step: fn(span: Span, conversion: TTryConvert, callee: SemaFailureCallee?, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: ^[Diagnostic]) {
+    if conversion == .Never {
+        return
+    }
+    if context.compiler_generated || ast_generated_fragment_function_key(sema_scope_function_owner_key(scopes), context.compiler_generated) {
+        return
+    }
+    reported: sema_error("E0434", span, "`.next` can fail, so this loop propagates a failure without `?`", "`#Policy(failures: .Explicit)` writes `?` at every call that can pass a failure up, so each early exit shows in the text", "step the iterator explicitly with `iter.next()?`, or handle the failure locally")
+    diagnostics.push(reported)
+    sema_failure_defer_obligation(callee, diagnostics).drop("the report is the obligation; the loop step's conversion is already settled")
+}
+
+// The byte just past a call's closing `)`. Starting from the end of the call's
+// head (callee name, method name, or nested call value), skips spaces,
+// comments, and optional `<…>` type arguments, then matches the call's own
+// `(` to its balanced `)` across nested delimiters, strings (with `{…}`
+// interpolations), raw backtick strings, char literals, and `//` comments.
+// Returns None when the source has no parenthesized call list at that site.
 sema_failure_marks_call_end: fn(expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Int? {
     graph: program.registration_graph
     caller: sema_scope_caller_index(environment, graph) ?? return None
     raw: graph.modules[caller].source.bytes()
-    ^from: expr_span(expr).end
-    ^last: Span{start: 0, end: 0}
-    ^found: false
-    if expr == .Call(call, _) {
-        if call.args.len() > 0 {
-            last = call.args[call.args.len() - 1].span
-            found = true
-        }
+    from: if expr == {
+        .Call(call, _) -> call.name_span.end
+        .MethodCall(_, _, method_span, _, _, _, _) -> method_span.end
+        .OptMethodCall(_, _, method_span, _, _, _, _) -> method_span.end
+        .CallValue(callee, _, _, _) -> sema_failure_marks_call_end(callee, environment, program) ?? expr_source_span(callee).end
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return None
     }
-    if expr == .MethodCall(_, _, _, _, _, args, _) {
-        if args.len() > 0 {
-            last = args[args.len() - 1].span
-            found = true
-        }
-    }
-    if expr == .OptMethodCall(_, _, _, _, args, _, _) {
-        if args.len() > 0 {
-            last = args[args.len() - 1].span
-            found = true
-        }
-    }
-    if expr == .CallValue(callee, args, _, _) {
-        from = expr_source_span(callee).end
-        if args.len() > 0 {
-            last = args[args.len() - 1].span
-            found = true
-        }
-    }
-    if found -> from = last.end
     if from < 0 || from > raw.len() -> return None
     ^at: sema_failure_marks_skip_space(raw, from)
-    if !found {
-        at = sema_failure_marks_skip_type_args(raw, at)
-        if at >= raw.len() || raw[at] != (U8{40}) -> return None
-        at = sema_failure_marks_skip_space(raw, at + 1)
-    }
-    if at < raw.len() && raw[at] == (U8{41}) -> return Val(at + 1)
-    if found -> return Val(from)
-    None
+    at = sema_failure_marks_skip_type_args(raw, at)
+    if at >= raw.len() || raw[at] != (U8{40}) -> return None
+    sema_failure_marks_skip_parens(raw, at)
 }
 
-// The first byte at or past `at` that is not a space, a separating comma, or
-// part of a `//` comment.
+// The first byte at or past `at` that is not ASCII whitespace or part of a
+// `//` line comment.
 sema_failure_marks_skip_space: fn(raw: [U8], at: Int) -> Int Never! {
     ^position: at
     loop position < raw.len() {
         byte: raw[position]
-        if sema_stmt_ascii_space(byte) || byte == (U8{44}) {
+        if sema_stmt_ascii_space(byte) {
             position += 1
             next
         }
@@ -226,4 +217,128 @@ sema_failure_marks_skip_type_args: fn(raw: [U8], at: Int) -> Int Never! {
         }
     }
     at
+}
+
+// Past a `"` string literal starting at `start`, handling backslash escapes,
+// `{{` escaped braces, and nested `{…}` interpolation expressions.
+sema_failure_marks_skip_string: fn(raw: [U8], start: Int) -> Int Never! {
+    ^position: start + 1
+    loop position < raw.len() {
+        byte: raw[position]
+        if byte == (U8{92}) {
+            position += 2
+            next
+        }
+        if byte == (U8{34}) -> return position + 1
+        if byte == (U8{123}) {
+            if position + 1 < raw.len() && raw[position + 1] == (U8{123}) {
+                position += 2
+                next
+            }
+            position = sema_failure_marks_skip_braces(raw, position)
+            next
+        }
+        position += 1
+    }
+    raw.len()
+}
+
+// Past a raw backtick string starting at `start` (matching its opening fence
+// length of one or more `` ` `` bytes).
+sema_failure_marks_skip_raw_string: fn(raw: [U8], start: Int) -> Int Never! {
+    ^fence: 0
+    loop start + fence < raw.len() && raw[start + fence] == (U8{96}) -> fence += 1
+    ^position: start + fence
+    loop position < raw.len() {
+        if raw[position] != (U8{96}) {
+            position += 1
+            next
+        }
+        ^run: 0
+        loop position + run < raw.len() && raw[position + run] == (U8{96}) -> run += 1
+        position += run
+        if run >= fence -> return position
+    }
+    raw.len()
+}
+
+// Past a `'` character literal starting at `start`.
+sema_failure_marks_skip_char: fn(raw: [U8], start: Int) -> Int Never! {
+    ^position: start + 1
+    loop position < raw.len() {
+        byte: raw[position]
+        if byte == (U8{92}) {
+            position += 2
+            next
+        }
+        if byte == (U8{39}) -> return position + 1
+        if byte == (U8{10}) -> return position
+        position += 1
+    }
+    raw.len()
+}
+
+// Past a `{…}` interpolation block inside a string literal, starting at `{`.
+sema_failure_marks_skip_braces: fn(raw: [U8], open: Int) -> Int Never! {
+    ^depth: 1
+    ^position: open + 1
+    loop position < raw.len() {
+        byte: raw[position]
+        if byte == (U8{47}) && position + 1 < raw.len() && raw[position + 1] == (U8{47}) {
+            loop position < raw.len() && raw[position] != (U8{10}) -> position += 1
+            next
+        }
+        if byte == (U8{34}) {
+            position = sema_failure_marks_skip_string(raw, position)
+            next
+        }
+        if byte == (U8{96}) {
+            position = sema_failure_marks_skip_raw_string(raw, position)
+            next
+        }
+        if byte == (U8{39}) {
+            position = sema_failure_marks_skip_char(raw, position)
+            next
+        }
+        position += 1
+        if byte == (U8{123}) -> depth += 1
+        if byte == (U8{125}) {
+            depth -= 1
+            if depth == 0 -> return position
+        }
+    }
+    raw.len()
+}
+
+// Past a parenthesized argument list starting at `(` (`open`), returning the
+// byte offset immediately after its matching `)`, or None if unclosed.
+sema_failure_marks_skip_parens: fn(raw: [U8], open: Int) -> Int? Never! {
+    ^depth: 1
+    ^position: open + 1
+    loop position < raw.len() {
+        byte: raw[position]
+        if byte == (U8{47}) && position + 1 < raw.len() && raw[position + 1] == (U8{47}) {
+            loop position < raw.len() && raw[position] != (U8{10}) -> position += 1
+            next
+        }
+        if byte == (U8{34}) {
+            position = sema_failure_marks_skip_string(raw, position)
+            next
+        }
+        if byte == (U8{96}) {
+            position = sema_failure_marks_skip_raw_string(raw, position)
+            next
+        }
+        if byte == (U8{39}) {
+            position = sema_failure_marks_skip_char(raw, position)
+            next
+        }
+        position += 1
+        if byte == (U8{40}) -> depth += 1
+        if byte == (U8{41}) {
+            depth -= 1
+            if depth == 0 -> return Val(position)
+        }
+    }
+    None
 }

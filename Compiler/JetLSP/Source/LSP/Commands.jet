@@ -1,7 +1,16 @@
 // Code lenses and the commands `workspace/executeCommand` runs.
 use {
     core.encoding.[Dyn]
-    jet_foundation.[DerivationRecord, Span, derivation_record_json, foundation_json_integer, foundation_json_quote]
+    lsp_command_files: core.files
+    jet_foundation.[
+        CanonicalJSON,
+        DerivationRecord,
+        Span,
+        derivation_record_json,
+        foundation_json_integer,
+        foundation_json_quote,
+        perf_verify_budget_report,
+    ]
     jet_impact.[ImpactReport]
 }
 
@@ -14,6 +23,10 @@ LSP_IMPACT_MAX_DEPTH: 64
 LSP_IMPACT_USAGE: "jet.impact expects arguments [uri, symbol, depth?]"
 
 LSP_REASONING_USAGE: "jet.reasoning expects arguments [uri, selection?, expanded?]"
+
+LSP_BUDGET_REPORTS_USAGE: "jet.budgetReports expects arguments [uri]"
+
+LSP_BUDGET_REPORT_LIMIT: 16777216
 
 // How many derivations a `jet.reasoning` summary shows; an expanded
 // projection shows them all.
@@ -53,11 +66,12 @@ lsp_text_value: fn(value: Dyn) -> String? Never! {
     None
 }
 
-// The commands `workspace/executeCommand` runs: `jet.impact` and
-// `jet.reasoning`.
+// The commands `workspace/executeCommand` runs: `jet.impact`, `jet.reasoning`,
+// and `jet.budgetReports`.
 lsp_execute_command_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
     command: lsp_text_member(params ?? Dyn.Null, "command") ?? return lsp_error_response(id, -32602, "executeCommand names no command")
     if command == "jet.reasoning" -> return lsp_reasoning_response(server, params, id)
+    if command == "jet.budgetReports" -> return lsp_budget_reports_response(params, id)
     if command != "jet.impact" {
         return lsp_error_response(id, -32602, "unknown command: {command}")
     }
@@ -165,4 +179,127 @@ lsp_reasoning_lens: fn(record: DerivationRecord) -> String Never! {
         }
     }
     "relationships"
+}
+
+// The nearest enclosing directory holding `package.jet` or `.jet/perf/reports`,
+// else the file's own parent directory.
+lsp_budget_project_root: fn(path: String) -[FS.Read]> String Never! {
+    ^dir: if lsp_command_files.is_dir(path) -> "{path}" else -> lsp_command_files.dirname(path)
+    if dir == "" -> return "."
+    first: "{dir}"
+    loop {
+        if lsp_command_files.is_file(lsp_command_files.join(dir, "package.jet")) || lsp_command_files.is_dir(lsp_command_files.join(dir, ".jet/perf/reports")) {
+            return dir
+        }
+        parent: lsp_command_files.dirname(dir)
+        if parent == "" || parent == dir -> return first
+        dir = parent
+    }
+}
+
+lsp_budget_json_text: fn(value: CanonicalJSON, key: String) -> String? Never! {
+    if value == .Object(fields) {
+        loop field in fields {
+            if field.key == key {
+                if field.value == .String(text) -> return Val("{text}")
+            }
+        }
+    }
+    None
+}
+
+lsp_budget_json_nested_text: fn(value: CanonicalJSON, outer: String, inner: String) -> String? Never! {
+    if value == .Object(fields) {
+        loop field in fields {
+            if field.key == outer -> return lsp_budget_json_text(field.value, inner)
+        }
+    }
+    None
+}
+
+lsp_budget_measurement_json: fn(measurement: CanonicalJSON) -> String? Never! {
+    budget_id: lsp_budget_json_text(measurement, "budget_id") ?? return None
+    enforcement: lsp_budget_json_text(measurement, "enforcement") ?? return None
+    evidence: lsp_budget_json_nested_text(measurement, "decision", "evidence") ?? return None
+    outcome: lsp_budget_json_nested_text(measurement, "decision", "policy_outcome") ?? return None
+    comparison_kind: lsp_budget_json_nested_text(measurement, "comparison", "kind") ?? ""
+    source: lsp_budget_json_text(measurement, "source") ?? ""
+    metric: lsp_budget_json_text(measurement, "metric") ?? ""
+    Val("{{\"budget_id\":{foundation_json_quote(budget_id)},\"source\":{foundation_json_quote(source)},\"metric\":{foundation_json_quote(metric)},\"enforcement\":{foundation_json_quote(enforcement)},\"evidence\":{foundation_json_quote(evidence)},\"outcome\":{foundation_json_quote(outcome)},\"comparison_kind\":{foundation_json_quote(comparison_kind)}}}")
+}
+
+lsp_budget_report_entry_json: fn(report: CanonicalJSON) -> String? Never! {
+    report_id: lsp_budget_json_text(report, "report_id") ?? return None
+    ^evidence_id: ""
+    ^measurements: [String]{}
+    if report == .Object(fields) {
+        loop field in fields {
+            if field.key != "content" -> next
+            evidence_id = lsp_budget_json_text(field.value, "evidence_id") ?? return None
+            if field.value == .Object(content_fields) {
+                loop content_field in content_fields {
+                    if content_field.key != "measurements" -> next
+                    if content_field.value == .Array(items) {
+                        loop item in items {
+                            rendered: lsp_budget_measurement_json(item) ?? return None
+                            measurements.push(rendered)
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Val("{{\"report_id\":{foundation_json_quote(report_id)},\"evidence_id\":{foundation_json_quote(evidence_id)},\"measurements\":[{measurements.join(",")}]}}")
+}
+
+// `jet.budgetReports` with arguments [uri] projects the verified canonical
+// reports under `<root>/.jet/perf/reports` strictly read-only without
+// measuring or writing any file.
+lsp_budget_reports_response: fn(params: Dyn?, id: Dyn) -[FS.Read]> String Never! {
+    arguments: if (lsp_param(params, "arguments") ?? return lsp_error_response(id, -32602, LSP_BUDGET_REPORTS_USAGE)) == {
+        .Array(rows) -> rows
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> {
+            return lsp_error_response(id, -32602, LSP_BUDGET_REPORTS_USAGE)
+        }
+    }
+    if arguments.len() < 1 -> return lsp_error_response(id, -32602, LSP_BUDGET_REPORTS_USAGE)
+    uri: lsp_text_value(arguments[0]) ?? return lsp_error_response(id, -32602, LSP_BUDGET_REPORTS_USAGE)
+    root: lsp_budget_project_root(lsp_uri_to_path(uri))
+    reports_dir: lsp_command_files.join(root, ".jet/perf/reports")
+    ^reports: [String]{}
+    ^rejected: [String]{}
+    if lsp_command_files.is_dir(reports_dir) {
+        ^entries: lsp_command_files.list_dir(reports_dir) ?? [DirEntry]{}
+        entries.sort_by(fn(left: DirEntry, right: DirEntry) { left.name <=> right.name })
+        loop entry in entries {
+            if !entry.name.ends_with(".json") -> next
+            full_path: lsp_command_files.join(reports_dir, entry.name)
+            stat: lsp_command_files.stat(full_path) ?? {
+                rejected.push(foundation_json_quote("{entry.name}: unreadable"))
+                next
+            }
+            if stat.is_symlink || !stat.is_file {
+                rejected.push(foundation_json_quote("{entry.name}: not a regular no-follow report"))
+                next
+            }
+            if stat.size > LSP_BUDGET_REPORT_LIMIT {
+                rejected.push(foundation_json_quote("{entry.name}: report exceeds 16 MiB projection limit"))
+                next
+            }
+            bytes: lsp_command_files.read_bytes(full_path) ?? {
+                rejected.push(foundation_json_quote("{entry.name}: unreadable"))
+                next
+            }
+            verified: perf_verify_budget_report(bytes) ?? {
+                rejected.push(foundation_json_quote("{entry.name}: {err.message}"))
+                next
+            }
+            projected: lsp_budget_report_entry_json(verified) ?? {
+                rejected.push(foundation_json_quote("{entry.name}: report projection fields are invalid"))
+                next
+            }
+            reports.push(projected)
+        }
+    }
+    lsp_response(id, "{{\"kind\":\"jet.budget-reports/v1\",\"mode\":\"read_only\",\"source\":{foundation_json_quote(uri)},\"root\":{foundation_json_quote(root)},\"reports\":[{reports.join(",")}],\"rejected\":[{rejected.join(",")}]}}")
 }

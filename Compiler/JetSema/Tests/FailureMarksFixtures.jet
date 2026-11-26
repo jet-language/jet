@@ -1,0 +1,116 @@
+// Regression tests for #7034 n3, n4, and n5:
+// - n3: E0434 fix edits land at the call's closing `)`, never inside trailing
+//   typed list literals (`each_size([String]{...})`) or lambdas (`apply_all(..., fn(...) {...})`),
+//   and applying all edits produces valid parseable Jet source.
+// - n4: loop headers over failing `Iterable` sources emit E0434 under
+//   `#Policy(failures: .Explicit)` while infallible `Iterable` loops stay allowed.
+// - n5: compiler-generated `#CLI` wrappers (`__jet_cli_run`, `__jet_cli_parse`,
+//   `__jet_cli_decode`, `merge`) never emit E0434 while unmarked user calls
+//   inside `run(args: T)` still do.
+use {
+    files: core.files
+    jet_driver.[JetDriverCompileMode, jet_driver_present_diagnostics]
+    jet_cli.[jet_cli_compile_file]
+    jet_foundation.[DIAGNOSTIC_ERROR, Diagnostic, TextEdit]
+    jet_parser.[parse_source]
+}
+
+failure_marks_compile: fn(file: String) -> [Diagnostic] {
+    checked: jet_cli_compile_file(file, false, None, JetDriverCompileMode.Program)
+    if checked == {
+        .Refused(refusal) -> panic("{file}: {refusal.stderr}")
+        .Compiled(result, snapshot) -> {
+            if result.internal_problem != None -> panic("{file}: internal compiler failure")
+            ^errors: [Diagnostic]{}
+            loop diagnostic in jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files) {
+                if diagnostic.severity == DIAGNOSTIC_ERROR -> errors.push(diagnostic)
+            }
+            return errors
+        }
+    }
+}
+
+failure_marks_show: fn(diagnostics: [Diagnostic]) -> String {
+    rows: loop item in diagnostics -> "{item.code}: {item.what}"
+    rows.join(" | ")
+}
+
+FailureMarkEditRef: struct {
+    diag: Int,
+    edit: Int,
+}
+
+failure_marks_edit_at: fn(diagnostics: [Diagnostic], pair: FailureMarkEditRef) -> TextEdit {
+    if pair.edit < 0 {
+        return diagnostics[pair.diag].edit ?? panic("missing fix_edit")
+    }
+    diagnostics[pair.diag].fix_edits[pair.edit]
+}
+
+failure_marks_apply_edits: fn(source: String, diagnostics: [Diagnostic]) -> String {
+    ^refs: [FailureMarkEditRef]{}
+    loop d in 0..<diagnostics.len() {
+        if diagnostics[d].edit != None -> refs.push(FailureMarkEditRef{diag: d, edit: -1})
+        loop e in 0..<diagnostics[d].fix_edits.len() -> refs.push(FailureMarkEditRef{diag: d, edit: e})
+    }
+    refs.sort_by(fn(left: FailureMarkEditRef, right: FailureMarkEditRef) {
+        l: failure_marks_edit_at(diagnostics, left)
+        r: failure_marks_edit_at(diagnostics, right)
+        (r.span.start <=> l.span.start).then(r.span.end <=> l.span.end)
+    })
+    ^out: source
+    loop pair in refs {
+        edit: failure_marks_edit_at(diagnostics, pair)
+        head: out.slice(0..<edit.span.start)
+        tail: out.slice(edit.span.end..<out.len())
+        out = "{head}{edit.new_text}{tail}"
+    }
+    out
+}
+
+#Test("failure_marks_n3_edits_land_past_typed_list_and_lambda_and_parse") {
+    file: "Compiler/JetSema/Tests/Fixtures/FailureMarksCallEnd.fixture/CallEnd.jet"
+    diagnostics: failure_marks_compile(file)
+    if diagnostics.len() != 5 {
+        panic("expected 5 E0434 errors, got {diagnostics.len()}: {failure_marks_show(diagnostics)}")
+    }
+    loop item in diagnostics {
+        assert_eq(item.code, "E0434")
+        assert(item.edit != None, "expected Safe fix edit for {item.what}")
+    }
+    source: files.read(file) ?? panic("read {file}")
+    fixed: failure_marks_apply_edits(source, diagnostics)
+    assert(fixed.contains("each_size([String]{{\"a\", \"bb\"}})?"), "typed list literal call mark misplaced:\n{fixed}")
+    assert(fixed.contains("apply_all([String]{{\"a\"}}, fn(s: String) -> Int MarkFail! {{ parse_one(s)? }})?"), "lambda call mark misplaced:\n{fixed}")
+    assert(fixed.contains("with_tricky(\"a ) {{inner(\")\")}}\", `raw )`)?"), "string/raw-string call mark misplaced:\n{fixed}")
+    assert(fixed.contains("(make_box([String]{{\"x\"}})?).count"), "receiver typed list call mark misplaced:\n{fixed}")
+    assert(fixed.contains("parse_one(\"z\")?"), "plain call mark misplaced:\n{fixed}")
+    parsed: parse_source(fixed.bytes())
+    if parsed.diagnostics.len() > 0 {
+        panic("formatted output failed to parse ({parsed.diagnostics.len()} diagnostics):\n{fixed}")
+    }
+}
+
+#Test("failure_marks_n4_failing_iterable_loop_header_is_e0434") {
+    diagnostics: failure_marks_compile("Compiler/JetSema/Tests/Fixtures/FailureMarksLoopStep.fixture/LoopStep.jet")
+    if diagnostics.len() != 1 {
+        panic("expected 1 E0434 error on failing loop header, got {diagnostics.len()}: {failure_marks_show(diagnostics)}")
+    }
+    assert_eq(diagnostics[0].code, "E0434")
+    assert(diagnostics[0].what.contains("`.next`"))
+    assert(diagnostics[0].edit == None)
+    assert_eq(diagnostics[0].fix_edits.len(), 0)
+}
+
+#Test("failure_marks_n5_cli_entry_wrapper_exempt_user_body_checked") {
+    clean: failure_marks_compile("Compiler/JetSema/Tests/Fixtures/FailureMarksCLIEntry.fixture/CLIEntry.jet")
+    if clean.len() != 0 {
+        panic("expected 0 errors for marked CLI entry, got {clean.len()}: {failure_marks_show(clean)}")
+    }
+    unmarked: failure_marks_compile("Compiler/JetSema/Tests/Fixtures/FailureMarksCLIEntryUnmarked.fixture/CLIEntryUnmarked.jet")
+    if unmarked.len() != 1 {
+        panic("expected 1 E0434 error on user call only, got {unmarked.len()}: {failure_marks_show(unmarked)}")
+    }
+    assert_eq(unmarked[0].code, "E0434")
+    assert(unmarked[0].what.contains("`load_name`"))
+}

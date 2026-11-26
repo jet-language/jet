@@ -45,7 +45,7 @@
 // (jet_driver_reach_hold), so load time and memory follow reach, not the
 // size of the library.
 use {
-    jet_foundation.[BUILTIN_METHOD_ROWS, BUILTIN_STATIC_ROWS, CORE_CALLS, CompilerThreads, DIAGNOSTIC_LINT, Diagnostic, Func, ImportDecl, Item, MARKER_HTML, MARKER_NO_PRELUDE, MARKER_POLICY, MARKER_TARGET, NameTable, ParseResult, Span, TraitImplBlock, compiler_threads_admit, compiler_threads_joined, compiler_threads_partition, compiler_threads_single, core_call_source_member, core_module_has_member, diagnostic_with_source_path, name_find, name_index, name_intern, name_intern_bytes, name_table, name_table_sized, name_text, owned_trait, owned_trait_codec, sema_casing_marker_qualifier]
+    jet_foundation.[BOUNDARY_TYPED_HEADS, BUILTIN_METHOD_ROWS, BUILTIN_STATIC_ROWS, CORE_CALLS, CompilerThreads, DIAGNOSTIC_LINT, Diagnostic, Func, ImportDecl, Item, MARKER_HTML, MARKER_NO_PRELUDE, MARKER_POLICY, MARKER_TARGET, NameTable, ParseResult, Span, TraitImplBlock, compiler_threads_admit, compiler_threads_joined, compiler_threads_partition, compiler_threads_single, core_call_source_member, core_module_has_member, diagnostic_with_source_path, name_find, name_index, name_intern, name_intern_bytes, name_table, name_table_sized, name_text, owned_trait, owned_trait_codec, sema_casing_marker_qualifier]
     jet_lexer.[
         Lexed,
         STRING_PART_INTERPOLATION,
@@ -693,24 +693,32 @@ jet_driver_reach_rows: fn(items: [Item], held: [JetDriverReachDeclaration], part
         jet_driver_reach_name_rows(rows, JetDriverReachDeclaration{position: position, name: jet_driver_reach_item_name(item), name_start: span.start, span: span, constant: item == .Const(_)})
     }
     ^types: [String:Bool]{}
-    if routes.routed {
-        loop (position, item) in items {
-            span: jet_driver_reach_lazy_type(item) ?? next
-            if item == {
-                .Struct(value) -> {
+    loop (position, item) in items {
+        span: jet_driver_reach_lazy_type(item) ?? next
+        if item == {
+            .Struct(value) -> {
+                if routes.routed {
                     jet_driver_reach_type_rows(rows, types, position, value.name, value.methods, value.trait_impls, span)
+                } else if BOUNDARY_TYPED_HEADS.contains(value.name) {
+                    jet_driver_reach_type_rows(rows, types, position, value.name, [Func]{}, value.trait_impls, span)
                 }
-                .Enum(value) -> {
-                    jet_driver_reach_type_rows(rows, types, position, value.name, value.methods, value.trait_impls, span)
-                }
-                .Distinct(value) -> {
-                    jet_driver_reach_type_rows(rows, types, position, value.name, [Func]{}, [TraitImplBlock]{}, span)
-                }
-                .TypeAlias(value) -> {
-                    jet_driver_reach_type_rows(rows, types, position, value.name, [Func]{}, [TraitImplBlock]{}, span)
-                }
-                .Func(_) | .Const(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
             }
+            .Enum(value) -> {
+                if routes.routed {
+                    jet_driver_reach_type_rows(rows, types, position, value.name, value.methods, value.trait_impls, span)
+                }
+            }
+            .Distinct(value) -> {
+                if routes.routed {
+                    jet_driver_reach_type_rows(rows, types, position, value.name, [Func]{}, [TraitImplBlock]{}, span)
+                }
+            }
+            .TypeAlias(value) -> {
+                if routes.routed {
+                    jet_driver_reach_type_rows(rows, types, position, value.name, [Func]{}, [TraitImplBlock]{}, span)
+                }
+            }
+            .Func(_) | .Const(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     loop (position, item) in items {

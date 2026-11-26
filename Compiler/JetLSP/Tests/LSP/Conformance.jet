@@ -1,0 +1,214 @@
+// LSP 3.18 conformance inventory validator (#6903 c13): verifies every row of
+// `Tests/Cases/LSP/lsp-3.18-inventory.tsv` has a valid status (`applicable` or
+// `na`), every applicable row names a passing stdio witness `.case` exercising
+// that method over `jet self lsp`, every N/A row carries a concrete reason
+// (never "unimplemented"), and every LSP method handled in `Requests.jet` is
+// tracked in the inventory.
+use {
+    conf_files: core.files
+    conf_sys: core.sys
+}
+
+LSP_CONFORMANCE_INVENTORY: "Tests/Cases/LSP/lsp-3.18-inventory.tsv"
+LSP_CONFORMANCE_CASES_DIR: "Tests/Cases/LSP"
+LSP_CONFORMANCE_REQUESTS: "Compiler/JetLSP/Source/LSP/Requests.jet"
+LSP_CONFORMANCE_KNOWN_FAILING: "Tests/known-failing.tsv"
+
+lsp_conformance_repo_root: fn() -[FS.Read, Env]> String Never! {
+    if conf_files.is_file(LSP_CONFORMANCE_INVENTORY) -> return "."
+    conf_sys.get("JET_TOOLCHAIN_ROOT") ?? "."
+}
+
+LSPConformanceRow: struct {
+    line: Int,
+    method: String,
+    category: String,
+    status: String,
+    witness: String,
+    reason: String,
+}
+
+lsp_conformance_parse_inventory: fn(text: String, errors: ^[String]) -> [LSPConformanceRow] Never! {
+    ^rows: [LSPConformanceRow]{}
+    ^seen: [String:Bool]{}
+    lines: text.lines()
+    if lines.len() < 2 {
+        errors.push("inventory is empty")
+        return rows
+    }
+    if lines[0].trim() != "method\tcategory\tstatus\twitness\treason" {
+        errors.push("line 1: unexpected header `{lines[0].trim()}`")
+    }
+    loop index in 1..<lines.len() {
+        raw: lines[index].trim()
+        if raw == "" -> next
+        cols: raw.split("\t").to_list()
+        if cols.len() != 5 {
+            errors.push("line {index + 1}: expected 5 tab-separated columns, got {cols.len()}")
+            next
+        }
+        method: cols[0].trim()
+        if seen.has_key(method) {
+            errors.push("line {index + 1}: duplicate method `{method}`")
+            next
+        }
+        seen[method] = true
+        rows.push(LSPConformanceRow{
+            line: index + 1,
+            method: method,
+            category: cols[1].trim(),
+            status: cols[2].trim(),
+            witness: cols[3].trim(),
+            reason: cols[4].trim(),
+        })
+    }
+    rows
+}
+
+lsp_conformance_unimplemented_excuse: fn(reason: String) -> Bool Never! {
+    lower: reason.to_lower()
+    forbidden: [String]{"unimplemented", "not implemented", "not yet", "todo", "tbd", "planned", "stub", "coming soon"}
+    loop word in forbidden {
+        if lower.contains(word) -> return true
+    }
+    false
+}
+
+lsp_conformance_witness_corpus: fn(root: String, case_path: String) -[FS.Read]> String? Never! {
+    case_text: conf_files.read(case_path) ?? return None
+    ^combined: "{case_text}"
+    loop line in case_text.lines() {
+        split: line.partition("Messages/")
+        if split.sep == "" -> next
+        tail_words: split.tail.trim().split(" ").to_list()
+        if tail_words.len() == 0 -> next
+        msg_path: "{root}/{LSP_CONFORMANCE_CASES_DIR}/Messages/{tail_words[0].trim()}"
+        if conf_files.read(msg_path) == .Ok(msg_text) {
+            combined = "{combined}\n{msg_text}"
+        }
+    }
+    Val(combined)
+}
+
+lsp_conformance_known_failing_set: fn(root: String) -[FS.Read]> [String:Bool] Never! {
+    ^failing: [String:Bool]{}
+    text: conf_files.read("{root}/{LSP_CONFORMANCE_KNOWN_FAILING}") ?? return failing
+    loop line in text.lines() {
+        trimmed: line.trim()
+        if trimmed == "" || trimmed.starts_with("#") -> next
+        cols: trimmed.split("\t").to_list()
+        if cols.len() > 0 -> failing[cols[0].trim()] = true
+    }
+    failing
+}
+
+lsp_conformance_validate_rows: fn(root: String, rows: [LSPConformanceRow], check_files: Bool, failing: [String:Bool]) -[FS.Read]> [String] Never! {
+    ^errors: [String]{}
+    loop row in rows {
+        if row.status == "applicable" {
+            if row.witness == "" || row.witness == "-" {
+                errors.push("line {row.line} (`{row.method}`): applicable row has no witness")
+                next
+            }
+            if !row.witness.ends_with(".case") {
+                errors.push("line {row.line} (`{row.method}`): witness `{row.witness}` is not a .case file")
+                next
+            }
+            if check_files {
+                rel_path: "{LSP_CONFORMANCE_CASES_DIR}/{row.witness}"
+                case_path: "{root}/{rel_path}"
+                if failing.has_key(rel_path) {
+                    errors.push("line {row.line} (`{row.method}`): witness `{rel_path}` is in Tests/known-failing.tsv")
+                    next
+                }
+                corpus: lsp_conformance_witness_corpus(root, case_path) ?? {
+                    errors.push("line {row.line} (`{row.method}`): witness `{rel_path}` does not exist")
+                    next
+                }
+                if !corpus.contains("content-length: jet self lsp") {
+                    errors.push("line {row.line} (`{row.method}`): witness `{row.witness}` does not exercise real stdio transport (`jet self lsp`)")
+                }
+                if !corpus.contains(row.method) {
+                    errors.push("line {row.line} (`{row.method}`): witness `{row.witness}` and its frames do not mention `{row.method}`")
+                }
+            }
+        } else if row.status == "na" {
+            if row.witness != "-" && row.witness != "" {
+                errors.push("line {row.line} (`{row.method}`): N/A row should use `-` witness, got `{row.witness}`")
+            }
+            if row.reason.count_bytes() < 15 {
+                errors.push("line {row.line} (`{row.method}`): N/A row lacks a concrete reason")
+            }
+            if lsp_conformance_unimplemented_excuse(row.reason) {
+                errors.push("line {row.line} (`{row.method}`): N/A row may not mark an unimplemented method as N/A (`{row.reason}`)")
+            }
+        } else {
+            errors.push("line {row.line} (`{row.method}`): invalid status `{row.status}` (must be `applicable` or `na`)")
+        }
+    }
+    errors
+}
+
+// Extracts quoted method strings matched inside `lsp_handle_request` and
+// `lsp_handle_notification` in `Requests.jet` (excluding MCP `resources/*`).
+lsp_conformance_implemented_methods: fn(source: String) -> [String] Never! {
+    ^methods: [String]{}
+    ^in_dispatch: false
+    loop line in source.lines() {
+        trimmed: line.trim()
+        if trimmed.starts_with("lsp_handle_request:") || trimmed.starts_with("lsp_handle_notification:") {
+            in_dispatch = true
+            next
+        }
+        if trimmed == "}}" {
+            in_dispatch = false
+            next
+        }
+        if !in_dispatch -> next
+        if !trimmed.starts_with("\"") -> next
+        rest: trimmed.removeprefix("\"")
+        parts: rest.partition("\"")
+        if parts.sep == "" -> next
+        method: parts.head
+        if method.starts_with("resources/") -> next
+        if !methods.contains(method) -> methods.push("{method}")
+    }
+    methods
+}
+
+#Test("lsp_conformance_inventory_is_complete_witnessed_and_honest") {
+    root: lsp_conformance_repo_root()
+    text: conf_files.read("{root}/{LSP_CONFORMANCE_INVENTORY}") ?? panic("missing {LSP_CONFORMANCE_INVENTORY}")
+    ^errors: [String]{}
+    rows: lsp_conformance_parse_inventory(text, errors)
+    assert(rows.len() >= 80, "LSP 3.18 inventory must cover the specification surface")
+    failing: lsp_conformance_known_failing_set(root)
+    loop problem in lsp_conformance_validate_rows(root, rows, true, failing) -> errors.push(problem)
+
+    requests_src: conf_files.read("{root}/{LSP_CONFORMANCE_REQUESTS}") ?? panic("missing {LSP_CONFORMANCE_REQUESTS}")
+    ^applicable: [String:Bool]{}
+    loop row in rows {
+        if row.status == "applicable" -> applicable[row.method] = true
+    }
+    loop method in lsp_conformance_implemented_methods(requests_src) {
+        if !applicable.has_key(method) {
+            errors.push("implemented method `{method}` in Requests.jet is missing from {LSP_CONFORMANCE_INVENTORY} as `applicable`")
+        }
+    }
+    assert_eq(errors.join("\n"), "")
+}
+
+#Test("lsp_conformance_validator_rejects_unknown_unwitnessed_and_unimplemented_na") {
+    bad: [LSPConformanceRow]{
+        LSPConformanceRow{line: 2, method: "textDocument/foo", category: "test", status: "unknown", witness: "-", reason: "not reviewed"},
+        LSPConformanceRow{line: 3, method: "textDocument/bar", category: "test", status: "applicable", witness: "-", reason: "missing witness"},
+        LSPConformanceRow{line: 4, method: "textDocument/baz", category: "test", status: "na", witness: "-", reason: "unimplemented in current release"},
+        LSPConformanceRow{line: 5, method: "textDocument/qux", category: "test", status: "na", witness: "-", reason: "not yet built for Jet"},
+    }
+    problems: lsp_conformance_validate_rows(".", bad, false, [String:Bool]{})
+    assert_eq(problems.len(), 4)
+    assert(problems[0].contains("invalid status `unknown`"))
+    assert(problems[1].contains("applicable row has no witness"))
+    assert(problems[2].contains("may not mark an unimplemented method as N/A"))
+    assert(problems[3].contains("may not mark an unimplemented method as N/A"))
+}

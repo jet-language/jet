@@ -1666,3 +1666,19 @@ ast_const: fn(name: String, name_span: Span, span: Span, value: Expr) -> ConstDe
         resolved_output: None,
     }
 }
+
+// Whether `key` (with `synthetic` = `Func.compiler_generated`) names a
+// compiler-generated source fragment function: a typed-CLI entry or parser
+// (`__jet_cli_run`, `__jet_cli_run_<binding>`, `__jet_cli_parse`,
+// `__jet_cli_parse_<binding>`), a `#CLI` projection (`__jet_cli_decode`,
+// `merge`), or a numbered-enum helper (`to_int`, `from_int`).
+//
+// Shared across Sema (E0434), JetIR (failure journeys), and CLI review so
+// generated wrappers never demand marks or appear as user journey hops while
+// embedded Core library code stays checked normally.
+ast_generated_fragment_function_key: fn(key: String, synthetic: Bool) -> Bool Never! {
+    if key.ends_with(".__jet_cli_run") || key.contains(".__jet_cli_run_") -> return true
+    if key.ends_with(".__jet_cli_parse") || key.contains(".__jet_cli_parse_") -> return true
+    if !synthetic -> return false
+    symbol_key_names(key, "__jet_cli_decode") || symbol_key_names(key, "merge") || symbol_key_names(key, "to_int") || symbol_key_names(key, "from_int")
+}

@@ -2,7 +2,7 @@
 // `initialize` advertises: each one names a method the server answers.
 use {
     core.encoding.[Dyn]
-    jet_lsp.[lsp_error_response, lsp_member, lsp_parse_rpc_message, lsp_refused_id, lsp_response]
+    jet_lsp.[lsp_error_response, lsp_input, lsp_member, lsp_next_queued, lsp_parse_rpc_message, lsp_refused_id, lsp_response, lsp_take_in]
 }
 
 lsp_test_rpc_error: fn(body: String) -> Int Never! {
@@ -154,4 +154,19 @@ LSP_TEST_PROVIDER_METHODS: [String]{
     assert(!server.shutdown, "no shutdown yet")
     assert(lsp_test_result(server, "shutdown", "{{}}") == .Null, "shutdown answers null")
     assert(server.shutdown, "shutdown is recorded")
+}
+
+#Test("content-length framing accepts both CRLF and LF header terminators") {
+    ^input: lsp_input()
+    first: "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"shutdown\"}}"
+    second: "{{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}}"
+    payload: "Content-Length: {first.count_bytes()}\n\n{first}Content-Type: application/vscode-jsonrpc; charset=utf-8\r\nContent-Length: {second.count_bytes()}\r\n\r\n{second}"
+    lsp_take_in(input, payload.bytes())
+    one: lsp_next_queued(input) ?? panic("first LF-framed message queued")
+    assert_eq(one.stop, "")
+    assert_eq(lsp_test_text(one.message ?? panic("first message"), "method"), "shutdown")
+    two: lsp_next_queued(input) ?? panic("second CRLF-framed message queued")
+    assert_eq(two.stop, "")
+    assert_eq(lsp_test_text(two.message ?? panic("second message"), "method"), "exit")
+    assert(lsp_next_queued(input) == None)
 }

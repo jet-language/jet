@@ -67,9 +67,17 @@ lsp_read_more: fn(input: ^LSPInput) -[IO, Time.Wait]> {
     }
 }
 
+// The end of a message header block: byte `offset` of the blank line and its
+// separator byte length (`4` for `\r\n\r\n`, `2` for `\n\n`, or `0` when no
+// header terminator has arrived yet).
+LSPHeaderEnd: struct {
+    offset: Int,
+    sep_len: Int,
+}
+
 // A read that failed ends the session after the messages framed before it.
 lsp_read_failed: fn(input: ^LSPInput, failure: IOError) Never! {
-    part: if lsp_header_end(input.pending, 0) < 0 -> "header" else -> "body"
+    part: if lsp_header_end(input.pending, 0).offset < 0 -> "header" else -> "body"
     lsp_stop_input(input, "could not read a message {part}: {failure}")
 }
 
@@ -96,10 +104,10 @@ lsp_frame: fn(input: ^LSPInput) Never! {
     size: input.pending.len()
     loop at < size {
         end: lsp_header_end(input.pending, at)
-        if end < 0 && !input.ended -> break
-        length: lsp_content_length(foundation_byte_text(input.pending, at, if end < 0 -> size else -> end)) ?? return lsp_stop_input(input, err.message)
-        start: end + 4
-        if end < 0 || size - start < length {
+        if end.offset < 0 && !input.ended -> break
+        length: lsp_content_length(foundation_byte_text(input.pending, at, if end.offset < 0 -> size else -> end.offset)) ?? return lsp_stop_input(input, err.message)
+        start: end.offset + end.sep_len
+        if end.offset < 0 || size - start < length {
             if input.ended -> return lsp_stop_input(input, "input ended inside a message body")
             break
         }
@@ -110,23 +118,26 @@ lsp_frame: fn(input: ^LSPInput) Never! {
     if at > 0 -> input.pending = input.pending.slice(at, size)
 }
 
-// The offset of the first header's blank line (`\r\n\r\n`) at or after
-// `from` in `bytes`; -1 when none has arrived.
-lsp_header_end: fn(bytes: [U8], from: Int) -> Int Never! {
+// The offset and byte length of the first header's blank line (`\r\n\r\n` or
+// `\n\n`) at or after `from` in `bytes`; `offset: -1` when none has arrived.
+lsp_header_end: fn(bytes: [U8], from: Int) -> LSPHeaderEnd Never! {
     ^at: from
-    loop at + 4 <= bytes.len() {
-        if bytes[at] == 13 && bytes[at + 1] == 10 && bytes[at + 2] == 13 && bytes[at + 3] == 10 {
-            return at
+    loop at + 2 <= bytes.len() {
+        if at + 4 <= bytes.len() && bytes[at] == 13 && bytes[at + 1] == 10 && bytes[at + 2] == 13 && bytes[at + 3] == 10 {
+            return LSPHeaderEnd{offset: at, sep_len: 4}
+        }
+        if bytes[at] == 10 && bytes[at + 1] == 10 {
+            return LSPHeaderEnd{offset: at, sep_len: 2}
         }
         at += 1
     }
-    -1
+    LSPHeaderEnd{offset: -1, sep_len: 0}
 }
 
 // The body length a header names in its `Content-Length` line.
 lsp_content_length: fn(header: String) -> Int LSPRPCError! {
     ^length: -1
-    loop line in header.split("\r\n") {
+    loop line in header.split("\n") {
         colon: line.find(":")
         if colon < 0 -> next
         // `find` counts bytes, so the name and value are cut from the bytes.

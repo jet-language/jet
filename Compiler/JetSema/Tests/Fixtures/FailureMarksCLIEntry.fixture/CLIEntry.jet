@@ -1,0 +1,22 @@
+#Policy(failures: .Explicit)
+
+#Error
+CLIFail: enum {
+    Empty,
+}
+
+#CLI
+RunArgs: struct {
+    name: String{"world"},
+}
+
+load_name: fn(raw: String) -> String CLIFail! {
+    if raw == "" -> return Err(CLIFail.Empty)
+    Ok(raw)
+}
+
+run: fn(args: RunArgs) CLIFail! {
+    label: load_name(args.name)?
+    print("hello {label}")
+    Ok()
+}

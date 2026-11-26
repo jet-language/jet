@@ -1,7 +1,10 @@
-// Code lenses run the file and its tests, and `jet.impact` reports a
-// symbol's references, callers and callees over the checked index.
+// Code lenses run the file and its tests, and `jet.impact`, `jet.reasoning`,
+// and `jet.budgetReports` answer over the checked index or canonical reports.
 use {
     core.encoding.[Dyn]
+    cmd_files: core.files
+    cmd_process: core.process
+    cmd_sys: core.sys
     jet_foundation.[foundation_json_quote]
 }
 
@@ -119,4 +122,59 @@ lsp_test_reasoning_params: fn(arguments: String) -> String Never! {
     }
     assert_eq(lsp_test_error_code(server, "workspace/executeCommand", lsp_test_reasoning_params("[]")), -32602)
     assert_eq(lsp_test_error_code(server, "workspace/executeCommand", lsp_test_reasoning_params("[\"file:///w/closed.jet\"]")), -32602)
+}
+
+LSPBudgetTestRoot: struct {
+    path: String,
+
+    impl Close {
+        close: fn(^^self) -[FS]> { cmd_files.remove_all(self.path).drop("budget test cleanup") }
+    }
+}
+
+lsp_test_budget_params: fn(arguments: String) -> String Never! {
+    "{{\"command\":\"jet.budgetReports\",\"arguments\":{arguments}}}"
+}
+
+#Test("jet.budgetReports projects verified canonical reports read-only and flags corrupted files") {
+    root: "{cmd_sys.temp_dir()}/jet-lsp-budget-reports-{cmd_process.current_pid()}"
+    cmd_files.create_dir_all("{root}/src") ?? panic("create budget fixture dir")
+    owner: LSPBudgetTestRoot{path: root}
+    defer close(owner)
+    cmd_files.write("{root}/package.jet", `name: "app"
+version: "0.1.0"
+`) ?? panic("write package.jet")
+    cmd_files.write("{root}/src/run.jet", `perf.package: module {
+    budgets: [Budget{name: "api", scope: .Package, metric: .PublicApiItems, comparison: .Absolute, limit: .AtMost(10)}]
+}
+
+api: fn() {}
+
+run: fn() {}
+`) ?? panic("write src/run.jet")
+
+    jet_bin: cmd_sys.get("JET") ?? "jet"
+    checked: cmd_process.cmd([String]{jet_bin, "budget", "check", "--json"}).cwd(root).env("NO_COLOR", "1").run() ?? panic("run jet budget check")
+    if !checked.success {
+        panic("jet budget check failed ({checked.code}): {checked.output}\n{checked.errors}")
+    }
+    reports_dir: "{root}/.jet/perf/reports"
+    cmd_files.write("{reports_dir}/zzz_corrupt.json", "{{\"bad\":true}}\n") ?? panic("write corrupt report")
+    before_entries: cmd_files.list_dir(reports_dir) ?? panic("list reports before")
+
+    ^server: lsp_test_server()
+    uri: foundation_json_quote("file://{root}/src/run.jet")
+    result: lsp_test_result(server, "workspace/executeCommand", lsp_test_budget_params("[{uri}]"))
+    assert_eq(lsp_test_text(result, "kind"), "jet.budget-reports/v1")
+    assert_eq(lsp_test_text(result, "mode"), "read_only")
+    reports: lsp_test_rows(lsp_test_field(result, "reports"))
+    assert_eq(reports.len(), 1)
+    measurements: lsp_test_rows(lsp_test_field(reports[0], "measurements"))
+    assert_eq(measurements.len(), 1)
+    assert_eq(lsp_test_text(measurements[0], "budget_id"), "package:api")
+    rejected: lsp_test_rows(lsp_test_field(result, "rejected"))
+    assert_eq(rejected.len(), 1)
+    after_entries: cmd_files.list_dir(reports_dir) ?? panic("list reports after")
+    assert_eq(after_entries.len(), before_entries.len())
+    assert_eq(lsp_test_error_code(server, "workspace/executeCommand", lsp_test_budget_params("[]")), -32602)
 }
