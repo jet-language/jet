@@ -2251,9 +2251,9 @@ sema_checked_text_reason: fn(report: TComptimeReport) -> String? {
 // The `Shape` and `Slot` of a check's `Checked<Shape, Slot> Error!` result,
 // or None when `ty` is not that result.
 sema_expression_checked_text_result_types: fn(ty: Type) -> [Type]? Never! {
-    if ty == .Result(ok, _) {
-        if ok == .Apply(name, args) {
-            if name == "Checked" && args.len() == 2 -> return Val(args.copy())
+    if sema_expr_unwrap_tag(ty) == .Result(ok, _) {
+        if sema_expr_unwrap_tag(ok) == .Apply(name, args) {
+            if (name == "Checked" || name == "core.prelude.Checked" || name == "<corelib>/core.prelude.Checked") && args.len() == 2 -> return Val(args.copy())
         }
     }
     None
