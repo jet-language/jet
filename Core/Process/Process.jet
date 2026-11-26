@@ -13,6 +13,8 @@ package: {
 use {
     core: core
     files: core.files
+    core.grammar.error.[TextSpot]
+    sh_syntax: __core_process_syntax_sh
     builtin: jet_builtins
     rt: jet.runtime.process
     files_rt: jet.runtime.files
@@ -67,10 +69,27 @@ signals: fn(kinds: [ProcessSignal]) -[Exec]> SignalSubscription IOError! {
     Ok(SignalSubscription{id: id, receiver: rt.signal_receiver(id)})
 }
 
-// An argv-safe shell command. `Sh{"cmd {value}"}` splits its literal text on
-// whitespace and keeps every hole as exactly one argv item; `Sh.raw(text)` is
-// the audited whole-text split. A command runs in one call: `status()` with
-// the terminal's stdio (a plain shell line), `ok()` for its verdict (stdout
+/// Where a hole sits inside a `Sh{…}` command literal: word 0 (the program)
+/// or an argument word.
+ShSlot: enum {
+    Program,
+    Arg,
+}
+
+/// The build-time argv plan of a `Sh{…}` literal: each word consumes
+/// `word_counts[w]` pieces from `texts`/`holes`, where `holes[k] < 0` is
+/// literal text `texts[k]` and `holes[k] >= 0` is hole index `holes[k]`.
+ShShape: struct {
+    texts: [String],
+    holes: [Int],
+    word_counts: [Int],
+}
+
+// An argv-safe shell command. `Sh{"cmd {value}"}` checks shell-word syntax
+// with its grammar, refuses unquoted shell operators, and keeps every hole
+// (or glued word `a{x}b`) as one argv item; `Sh.raw(text)` is the audited
+// whole-text split. A command runs in one call: `status()` with the
+// terminal's stdio (a plain shell line), `ok()` for its verdict (stdout
 // discarded, stderr passed through), `text()`/`lines()` for its stdout
 // (`$(…)`), `run()` for the whole receipt, and `spec()` when it needs a
 // directory, environment or limit first.
@@ -88,14 +107,12 @@ Sh: struct {
     impl Equatable {
         equal: fn(self, rhs: Sh) -> Bool { self.argv == rhs.argv }
     }
+}
 
+impl Sh {
     args: fn(self) -> [String] Never! { self.argv.copy() }
 
-    raw: fn(text: String) -> Sh Never! {
-        ^argv: [String]{}
-        sh_split_into(text, argv)
-        Sh{argv: argv}
-    }
+    raw: fn(text: String) -> Sh Never! { Sh{argv: sh_syntax.sh_raw_argv(text)} }
 
     // The command with `items` appended, each one argv item (`"$@"`).
     extend: fn(self, items: [String]) -> Sh Never! { Sh{argv: self.argv.concat(items)} }
@@ -136,50 +153,71 @@ Sh: struct {
 
     // The receipt of the command run with its stdout and stderr captured.
     run: fn(self) -[Exec, Time.Wait]> ProcessReceipt IOError! { self.spec().run() }
+}
 
-    // A checked `Sh{…}` literal: literal text splits on whitespace and each
-    // hole's display text is one argv item.
-    impl CheckedText {
-        Error: ShLiteralError,
-        Hole: String,
+// A checked `Sh{…}` literal: the grammar splits and unquotes literal words at
+// build time, refusing unquoted shell metacharacters, bare newlines, unclosed
+// quotes, and `$`/backtick in double quotes. Each hole stays one argv item (or
+// glues into its surrounding word as `a{x}b`).
+impl Sh.CheckedText {
+    Error: ShLiteralError,
+    Hole: String,
+    Slot: ShSlot,
+    Shape: ShShape,
 
-        check: fn(parts: [String]) -[]> Checked<[String], TextSlot> ShLiteralError! {
-            Ok(Checked{shape: parts.copy(), slots: loop _ in 1..<parts.len() -> TextSlot.Text})
+    check: fn(parts: [String]) -[]> Checked<ShShape, ShSlot> ShLiteralError! {
+        plan: sh_syntax.sh_check_parts(parts) ?? return Err(ShLiteralError{reason: err.reason.copy(), at: TextSpot{part: err.part, offset: err.offset}})
+        slots: loop word_index in plan.hole_words -> if word_index == 0 -> ShSlot.Program else -> ShSlot.Arg
+        Ok(Checked{shape: ShShape{texts: plan.texts.copy(), holes: plan.holes.copy(), word_counts: plan.word_counts.copy()}, slots: slots})
+    }
+
+    accepts: fn(_slot: ShSlot, hole: TypeId) -[]> String? {
+        if hole.kind == .List || hole.kind == .FixedList {
+            return Val("a list (`{hole.name}`) cannot sit in one `Sh` hole because `Sh` keeps each hole as one argv item without splitting; use `.extend(items)` instead")
         }
+        None
+    }
 
-        encode_hole: fn<T: Printable>(value: T, _slot: TextSlot) -[]> String { "{value}" }
+    encode_hole: fn<T: Printable>(value: T, _slot: ShSlot) -[]> String { "{value}" }
 
-        build: fn(parts: [String], holes: [String]) -[]> Sh {
-            ^argv: [String]{}
-            sh_split_into(parts[0], argv)
-            loop index in 0..<holes.len() {
-                argv.push(holes[index].copy())
-                sh_split_into(parts[index + 1], argv)
+    build: fn(shape: ShShape, holes: [String]) -[]> Sh {
+        ^argv: [String]{}
+        ^at: 0
+        loop count in shape.word_counts {
+            if count == 1 {
+                hole: shape.holes[at]
+                argv.push(if hole >= 0 -> holes[hole].copy() else -> shape.texts[at].copy())
+                at += 1
+            } else {
+                ^pieces: [String]{}
+                loop _ in 0..<count {
+                    hole: shape.holes[at]
+                    pieces.push(if hole >= 0 -> holes[hole].copy() else -> shape.texts[at].copy())
+                    at += 1
+                }
+                argv.push(pieces.join(""))
             }
-            Sh{argv: argv}
         }
+        Sh{argv: argv}
     }
 }
 
 // Why a checked Sh literal was rejected: the compiler reports it under the
-// checked text rejection's code with this reason as its Why.
+// checked text rejection's code at `at`, with `reason` as its Why.
 #Error
 ShLiteralError: struct {
     reason: String,
-
-    impl Diagnostic {
-        code: "E2712",
-
-        what: fn(self) -> String { "this checked text type rejected its body" }
-
-        why: fn(self) -> String { "{self.reason}" }
-
-        fix: fn(self) -> String { "fix the body so it satisfies the type's declared text grammar" }
-    }
+    at: TextSpot,
 }
 
-sh_split_into: fn(text: String, argv: ^[String]) Never! {
-    loop word in text.words() -> argv.push(word)
+impl ShLiteralError.Diagnostic {
+    code: "E2712",
+
+    what: fn(self) -> String { "this checked text type rejected its body" }
+
+    why: fn(self) -> String { "{self.reason}" }
+
+    fix: fn(self) -> String { "fix the body so it satisfies the type's declared text grammar" }
 }
 
 args: fn() -[Exec.Args]> [String] Never! { args_from_argv(rt.argv()) }
@@ -1171,4 +1209,58 @@ trim_pipe_line: fn(bytes: ^[U8]) Never! {
     assert_eq(crlf, [U8]{120, 13})
     if pipe_line([U8]{10}) == .Ok(line) -> assert_eq(line, Val("")) else -> panic("empty line")
     if pipe_line([U8]{}) == .Ok(end) -> assert_eq(end, None) else -> panic("EOF")
+}
+
+#Test("Sh grammar splits words, unquotes literals, glues holes, and preserves empty holes and globs") {
+    msg: "hello; world | rm"
+    who: "Ada <ada@example.com>"
+    mid: "MID"
+    empty: ""
+    commit: Sh{"git commit -m {msg} --author={who} -- *.jet"}
+    assert_eq(commit.args(), [String]{"git", "commit", "-m", "hello; world | rm", "--author=Ada <ada@example.com>", "--", "*.jet"})
+    glued: Sh{"echo a{mid}b"}
+    assert_eq(glued.args(), [String]{"echo", "aMIDb"})
+    blank: Sh{"printf %s {empty} end"}
+    assert_eq(blank.args(), [String]{"printf", "%s", "", "end"})
+    quoted: Sh{"""
+        echo 'a  b' "c d" "say \"hi\"" \$raw
+        """}
+    assert_eq(quoted.args(), [String]{"echo", "a  b", "c d", "say \"hi\"", "$raw"})
+    cont: Sh{"""
+        echo \
+        continued
+        """}
+    assert_eq(cont.args(), [String]{"echo", "continued"})
+    piped_quoted: Sh{"grep 'a|b' '*.jet'"}
+    assert_eq(piped_quoted.args(), [String]{"grep", "a|b", "*.jet"})
+    #Unsafe("test raw command") {
+        raw_cmd: Sh.raw("echo 'a b' \"c d\" \\$x")
+        assert_eq(raw_cmd.args(), [String]{"echo", "a b", "c d", "$x"})
+    }
+}
+
+#Test("Sh grammar refuses shell metacharacters, bare newlines, unclosed quotes, and double-quoted expansions") {
+    bad_inputs: [String]{
+        "",
+        "   \t  ",
+        "ls | wc",
+        "echo a; echo b",
+        "cmd &",
+        "cmd && next",
+        "cmd || next",
+        "cat < in",
+        "echo a > out",
+        "(echo a)",
+        "echo `date`",
+        "echo $HOME",
+        "echo 'unclosed",
+        "echo \"unclosed",
+        "echo trailing\\",
+        "echo \"$HOME\"",
+        "echo \"`date`\"",
+        "echo a\necho b",
+    }
+    loop text in bad_inputs {
+        if Sh.check([String]{text}) == .Ok(_) -> panic("expected Sh.check to refuse `{text}`")
+    }
 }

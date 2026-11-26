@@ -1,0 +1,24 @@
+// Sh grammar head: glued holes (`a{x}b`, `--author={who}`), single/double
+// quotes, backslash escapes, line continuation, an empty hole keeping its own
+// argv slot, and `*` staying literal without glob expansion.
+show: fn(label: String, cmd: Sh) {
+    print("{label}: {cmd.args().len()} -> {cmd.args():Debug}")
+}
+
+run: fn() {
+    msg: "hello; world | rm"
+    who: "Ada <ada@example.com>"
+    empty: ""
+    mid: "MID"
+    show("commit", Sh{"git commit -m {msg} --author={who} -- *.jet"})
+    show("glued", Sh{"echo a{mid}b"})
+    show("empty", Sh{"printf %s {empty} end"})
+    show("quotes", Sh{"""
+        echo 'a  b' "c d" "say \"hi\"" \$raw
+        """})
+    show("cont", Sh{"""
+        echo \
+        continued
+        """})
+    show("quoted_pipe", Sh{"grep 'a|b' '*.jet'"})
+}

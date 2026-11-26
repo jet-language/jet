@@ -1,0 +1,16 @@
+// Sh refuses unquoted shell operators (`|`, `;`, etc.), unclosed quotes, bare
+// newlines, and `$`/backtick in double quotes at build time, pointing at the
+// offending character with its reason.
+run: fn() {
+    piped: Sh{"ls | wc"}
+    chained: Sh{"echo a; echo b"}
+    unclosed: Sh{"echo 'unclosed"}
+    dquote_dollar: Sh{"""
+        echo "$HOME"
+        """}
+    newline: Sh{"""
+        echo a
+        echo b
+        """}
+    print("{piped} {chained} {unclosed} {dquote_dollar} {newline}")
+}

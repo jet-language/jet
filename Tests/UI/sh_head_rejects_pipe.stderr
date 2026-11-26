@@ -1,0 +1,44 @@
+Error: Jet.CheckedTextRejected: This checked text type rejected its body
+  --> Tests/UI/sh_head_rejects_pipe.jet:5:19
+    |
+  5 |     piped: Sh{"ls | wc"}
+    |                   ^
+ Why: `|` is a shell pipe, and `Sh` runs one program without a shell; quote it as `'|'`, or run two commands
+ Fix: Fix the body so it satisfies the type's declared text grammar
+More: jet-lang.dev/e/Jet.CheckedTextRejected
+
+Error: Jet.CheckedTextRejected: This checked text type rejected its body
+  --> Tests/UI/sh_head_rejects_pipe.jet:6:24
+    |
+  6 |     chained: Sh{"echo a; echo b"}
+    |                        ^
+ Why: `;` is a shell command separator, and `Sh` runs one program without a shell; quote it as `';'`, or run two commands
+ Fix: Fix the body so it satisfies the type's declared text grammar
+More: jet-lang.dev/e/Jet.CheckedTextRejected
+
+Error: Jet.CheckedTextRejected: This checked text type rejected its body
+  --> Tests/UI/sh_head_rejects_pipe.jet:7:24
+    |
+  7 |     unclosed: Sh{"echo 'unclosed"}
+    |                        ^
+ Why: Unclosed quote
+ Fix: Fix the body so it satisfies the type's declared text grammar
+More: jet-lang.dev/e/Jet.CheckedTextRejected
+
+Error: Jet.CheckedTextRejected: This checked text type rejected its body
+  --> Tests/UI/sh_head_rejects_pipe.jet:9:15
+    |
+  9 |         echo "$HOME"
+    |               ^
+ Why: `$` starts shell expansion, and `Sh` runs without a shell; pass a Jet `{hole}` or quote it as `'$'`
+ Fix: Fix the body so it satisfies the type's declared text grammar
+More: jet-lang.dev/e/Jet.CheckedTextRejected
+
+Error: Jet.CheckedTextRejected: This checked text type rejected its body
+  --> Tests/UI/sh_head_rejects_pipe.jet:12:15
+    |
+ 12 |         echo a
+    |               ^
+ Why: A bare newline splits shell commands; continue the line with `\` or run two commands
+ Fix: Fix the body so it satisfies the type's declared text grammar
+More: jet-lang.dev/e/Jet.CheckedTextRejected

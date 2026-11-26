@@ -1,0 +1,239 @@
+// Compiler-private part of core.process: the Sh command-word grammar and argv
+// plan builder. Spaces are explicit tokens so glued pieces (`a{x}b`,
+// `--author={who}`) stay one argv item while unquoted shell metacharacters,
+// bare newlines, unclosed quotes, and `$`/backtick in double quotes are
+// refused at build time.
+use {
+    core.grammar.[Grammar]
+    core.grammar.error.[GrammarError]
+}
+
+#Allow(Jet.RawMultilineHtml, "grammar notation lists shell metacharacters including < and >")
+priv Command: Grammar{"""
+    command    : sep? body=words? EOF ;
+    words      : first=word tail=words_tail? ;
+    words_tail : sep next=words? ;
+    sep        : SP (CONT SP?)* # Spaces
+               | CONT (SP? CONT)* SP? # Cont
+               ;
+    word       : lead=BARE atoms+=word_atom+ # BareAndAtoms
+               | lead=BARE # OnlyBare
+               | atoms+=word_atom+ # Atoms
+               ;
+    word_atom  : item=atom tail=BARE? ;
+    atom       : text=BESC # Esc
+               | text=SINGLE # Single
+               | '"' lead=DTEXT? parts+=dpart* '"' # Double
+               | HOLE<slot=Arg> # Hole
+               ;
+    dpart      : item=datom tail=DTEXT? ;
+    datom      : text=DESC # Esc
+               | HOLE<slot=Arg> # Hole
+               ;
+    BARE       : [^ \t\r\n'"\\|&;<>()$`]+ ;
+    BESC       : '\\' [^\r\n] ;
+    SINGLE     : '\'' [^']* '\'' ;
+    DTEXT      : [^"\\$`]+ ;
+    DESC       : '\\' . ;
+    SP         : (' ' | '\t') [ \t]* ;
+    CONT       : '\\' '\r'? '\n' ;
+"""}
+
+/// Flat argv plan produced by `sh_check_parts`: each word consumes
+/// `word_counts[w]` entries from `texts`/`holes`, where `holes[k] < 0` means
+/// literal text `texts[k]` and `holes[k] >= 0` means hole index `holes[k]`.
+/// `hole_words[h]` is the 0-based word index holding hole `h`.
+ShParsedPlan: struct {
+    texts: [String],
+    holes: [Int],
+    word_counts: [Int],
+    hole_words: [Int],
+}
+
+/// Syntax refusal from the Sh grammar, with its part and byte offset.
+#Error
+ShSyntaxError: struct {
+    reason: String,
+    part: Int,
+    offset: Int,
+}
+
+priv sh_unescape_bare: fn(text: String) -> String Never! {
+    if text.len() <= 1 -> return ""
+    text.slice(1, text.len())
+}
+
+priv sh_unquote_single: fn(text: String) -> String Never! {
+    if text.len() <= 2 -> return ""
+    text.slice(1, text.len() - 1)
+}
+
+priv sh_unescape_double: fn(text: String) -> String Never! {
+    if text.len() <= 1 -> return ""
+    bytes: text.bytes()
+    second: Int{bytes[1]}
+    // POSIX double quotes strip `\` only before `"`, `\`, `$`, backtick, or LF.
+    if second == 34 || second == 92 || second == 36 || second == 96 -> return text.slice(1, text.len())
+    if second == 10 -> return ""
+    text.copy()
+}
+
+priv sh_push_lit: fn(texts: ^[String], holes: ^[Int], count: ^Int, piece: String) Never! {
+    if count > 0 && holes[holes.len() - 1] < 0 {
+        last: texts.len() - 1
+        texts[last] = "{texts[last]}{piece}"
+        return
+    }
+    texts.push(piece.copy())
+    holes.push(-1)
+    count += 1
+}
+
+priv sh_push_hole: fn(texts: ^[String], holes: ^[Int], hole_words: ^[Int], count: ^Int, word_index: Int) Never! {
+    hole_index: hole_words.len()
+    texts.push("")
+    holes.push(hole_index)
+    hole_words.push(word_index)
+    count += 1
+}
+
+priv sh_collect_atom: fn(item: Atom, texts: ^[String], holes: ^[Int], hole_words: ^[Int], count: ^Int, word_index: Int) Never! {
+    if item == {
+        .Esc(text) -> sh_push_lit(texts, holes, count, sh_unescape_bare(text))
+        .Single(text) -> sh_push_lit(texts, holes, count, sh_unquote_single(text))
+        .Double(lead, parts) -> {
+            if lead == .Val(text) -> sh_push_lit(texts, holes, count, text.copy())
+            loop part in parts {
+                if part.item == {
+                    .Esc(esc) -> sh_push_lit(texts, holes, count, sh_unescape_double(esc))
+                    .Hole -> sh_push_hole(texts, holes, hole_words, count, word_index)
+                }
+                if part.tail == .Val(tail) -> sh_push_lit(texts, holes, count, tail.copy())
+            }
+            // An empty double-quoted word `""` still produces one empty argv item.
+            if count == 0 -> sh_push_lit(texts, holes, count, "")
+        }
+        .Hole -> sh_push_hole(texts, holes, hole_words, count, word_index)
+    }
+}
+
+priv sh_collect_word: fn(word: Word, texts: ^[String], holes: ^[Int], word_counts: ^[Int], hole_words: ^[Int]) Never! {
+    word_index: word_counts.len()
+    ^count: 0
+    if word == {
+        .BareAndAtoms(lead, atoms) -> {
+            sh_push_lit(texts, holes, count, lead.copy())
+            loop atom in atoms {
+                sh_collect_atom(atom.item, texts, holes, hole_words, count, word_index)
+                if atom.tail == .Val(tail) -> sh_push_lit(texts, holes, count, tail.copy())
+            }
+        }
+        .OnlyBare(lead) -> sh_push_lit(texts, holes, count, lead.copy())
+        .Atoms(atoms) -> {
+            loop atom in atoms {
+                sh_collect_atom(atom.item, texts, holes, hole_words, count, word_index)
+                if atom.tail == .Val(tail) -> sh_push_lit(texts, holes, count, tail.copy())
+            }
+        }
+    }
+    word_counts.push(count)
+}
+
+priv sh_collect_words: fn(words: Words, texts: ^[String], holes: ^[Int], word_counts: ^[Int], hole_words: ^[Int]) Never! {
+    sh_collect_word(words.first, texts, holes, word_counts, hole_words)
+    if words.tail == .Val(tail) {
+        if tail.next == .Val(next_words) {
+            sh_collect_words(next_words, texts, holes, word_counts, hole_words)
+        }
+    }
+}
+
+priv sh_spot_in_parts: fn(parts: [String], joined_offset: Int) -> {part: Int, offset: Int} Never! {
+    ^at: 0
+    loop (i, piece) in parts {
+        len: piece.bytes().len()
+        if joined_offset <= at + len -> return {part: i, offset: joined_offset - at}
+        at += len
+    }
+    last: if parts.len() > 0 -> parts.len() - 1 else -> 0
+    {part: last, offset: if parts.len() > 0 -> parts[last].bytes().len() else -> 0}
+}
+
+priv sh_explain_error: fn(parts: [String], error: GrammarError) -> ShSyntaxError Never! {
+    joined: parts.join("")
+    bytes: joined.bytes()
+    spot: sh_spot_in_parts(parts, error.offset)
+    if error.offset < bytes.len() {
+        b: Int{bytes[error.offset]}
+        reason: if b == {
+            124 -> "`|` is a shell pipe, and `Sh` runs one program without a shell; quote it as `'|'`, or run two commands"
+            38 -> "`&` is a shell operator, and `Sh` runs one program without a shell; quote it as `'&'`"
+            59 -> "`;` is a shell command separator, and `Sh` runs one program without a shell; quote it as `';'`, or run two commands"
+            60 -> "`<` is a shell redirection, and `Sh` runs one program without a shell; use `.stdin(…)` on `.spec()`, or quote it as `'<'`"
+            62 -> "`>` is a shell redirection, and `Sh` runs one program without a shell; use `.stdout(…)` on `.spec()`, or quote it as `'>'`"
+            40 | 41 -> "parentheses start a shell subshell, and `Sh` runs one program without a shell; quote them"
+            36 -> "`$` starts shell expansion, and `Sh` runs without a shell; pass a Jet `{{hole}}` or quote it as `'$'`"
+            96 -> "backtick starts shell command substitution, and `Sh` runs without a shell; quote it or run the command in Jet"
+            10 | 13 -> "a bare newline splits shell commands; continue the line with `\\` or run two commands"
+            39 | 34 -> "unclosed quote"
+            92 -> "trailing backslash has nothing to escape"
+            else -> "{error}"
+        }
+        return ShSyntaxError{reason: reason, part: spot.part, offset: spot.offset}
+    }
+    if error.found == "end of input" {
+        return ShSyntaxError{reason: "unclosed quote", part: spot.part, offset: spot.offset}
+    }
+    ShSyntaxError{reason: "{error}", part: spot.part, offset: spot.offset}
+}
+
+/// Validates `Sh` literal `parts` with the `Command` grammar and builds the
+/// flat argv plan with literal pieces, hole positions, and per-hole word indices.
+sh_check_parts: fn(parts: [String]) -> ShParsedPlan ShSyntaxError! {
+    parsed: Command.parse_parts(parts) ?? return Err(sh_explain_error(parts, err))
+    ^texts: [String]{}
+    ^holes: [Int]{}
+    ^word_counts: [Int]{}
+    ^hole_words: [Int]{}
+    if parsed.body == .Val(words) {
+        sh_collect_words(words, texts, holes, word_counts, hole_words)
+    }
+    if word_counts.len() == 0 {
+        return Err(ShSyntaxError{reason: "an `Sh` command must name a program", part: 0, offset: 0})
+    }
+    Ok(ShParsedPlan{texts: texts, holes: holes, word_counts: word_counts, hole_words: hole_words})
+}
+
+/// Splits an audited `Sh.raw(text)` string into argv items using the `Command`
+/// grammar when it satisfies `Sh` syntax, falling back to whitespace words for
+/// raw text containing audited shell tokens.
+sh_raw_argv: fn(text: String) -> [String] Never! {
+    if Command.parse(text) == .Ok(parsed) {
+        ^texts: [String]{}
+        ^holes: [Int]{}
+        ^word_counts: [Int]{}
+        ^hole_words: [Int]{}
+        if parsed.body == .Val(words) {
+            sh_collect_words(words, texts, holes, word_counts, hole_words)
+        }
+        ^argv: [String]{}
+        ^at: 0
+        loop count in word_counts {
+            if count == 1 {
+                argv.push(texts[at].copy())
+                at += 1
+            } else {
+                ^pieces: [String]{}
+                loop _ in 0..<count {
+                    pieces.push(texts[at].copy())
+                    at += 1
+                }
+                argv.push(pieces.join(""))
+            }
+        }
+        return argv
+    }
+    ^fallback: [String]{}
+    loop word in text.words() -> fallback.push(word)
+    fallback
+}
