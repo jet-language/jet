@@ -426,7 +426,7 @@ priv parse_list: fn(rows: [String], places: [YAMLPlace], indent: Int, allow_dupl
 priv parse_scalar: fn(text: String, allow_duplicates: Bool) -> Dyn EncodingError! {
     clean: trim_yaml(strip_inline_comment(text))
     if clean.starts_with("&") || clean.starts_with("*") {
-        return Err(unsupported_error("YAML anchors and aliases (^name, *name) are not supported"))
+        return Err(unsupported_error("YAML anchors and aliases (&name, *name) are not supported"))
     }
     ^stamp_text: clean
     if clean.starts_with("!!timestamp") -> stamp_text = unquote(trim_yaml(drop_prefix(clean, 11)))
@@ -800,11 +800,11 @@ unquote: fn(text: String) -> String Never! {
 #Test("YAML reads a document marker and JSON flow values, and refuses anchors") {
     tree: parse("---\n# a config\nflowlist: [1, 2, 3]\nempty: {{}}\n") ?? panic("YAML")
     assert_eq(json.to_string(tree) ?? panic("JSON"), "{{\"flowlist\":[1,2,3],\"empty\":{{}}}}")
-    if parse("base: ^b\n  host: local\nuse: *b\n") == {
+    if parse("base: &b\n  host: local\nuse: *b\n") == {
         .Ok(_) -> { panic("an anchor must fail closed") }
         .Err(error) -> {
             assert(error.kind == EncodingErrorKind.Unsupported)
-            assert_eq(error.reason, "YAML anchors and aliases (^name, *name) are not supported")
+            assert_eq(error.reason, "YAML anchors and aliases (&name, *name) are not supported")
         }
     }
     if parse("items: [a, b]\n") == {

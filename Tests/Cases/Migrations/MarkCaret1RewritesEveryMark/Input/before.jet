@@ -81,6 +81,18 @@ run: fn() {
     core.files lock_owner &&String,Int FileLock
     """
     foreign: "extern rust \"std\" {{\n    consume: fn(s: &&String) -> String = \"std::convert::identity\"\n}}\n"
+    yaml: "base: &b\n  host: local\nuse: *b\n"
+    query: "&line={line}&column={column}"
+    com: "V_VT(&args[0])=VT_I8;goto bad;"
+    call: "VariantClear(&result);{c}"
+    guid: "&IID_IUnknown"
+    slice: "fn encode(data: &[u8]) -> String {{"
+    aliases: "  - *d\n"
+    document: "base: &d\n{aliases}"
+    variant: "V_VT(&args[{c}])=VT_R8;"
+    // The right side of `&&` reads the names the left side bound.
+    // Fields are `&`/`;`-separated; markup shows `&`, `<` and `>` escaped.
+    // C `g(x, &err)` compares them.
     print("{source} {quoted} {hint} {html} {rust} {c} {lines} {label} {plain} {rows} {foreign}")
 }
 

@@ -311,7 +311,7 @@ Validate and decode predefined and numeric references. Declared general
 references default to `Preserve`; `Reject` refuses them; `Resolve(values:
 [String:String])` expands only names in the explicit in-memory map as
 character data. Never reparse replacement strings as XML markup: `<`, `>`,
-`^`, quotes, and entity-looking text stay characters and render escaped.
+`&`, quotes, and entity-looking text stay characters and render escaped.
 Internal declaration replacement text remains inert preservation data.
 Parameter entities, external parsed entities, and replacement-text markup
 expansion are `Unsupported`; cycles and limits still reject. External

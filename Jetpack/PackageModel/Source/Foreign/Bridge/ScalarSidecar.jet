@@ -312,8 +312,8 @@ pkg_bridge_render_scalar_c: fn(abi: String, runtime: String, worker: String, sou
 // The C statement that parses a worker's `OK <value>` reply.
 pkg_bridge_scalar_parse_line: fn(scalar: ForeignScalar) -> String? Never! {
     if scalar == {
-        .Int -> Val("long long value = strtoll(output + 3, ^end, 10); if (errno || end == output + 3) {{ jet_failed = 4; return 0; }}\n")
-        .Float -> Val("double value = strtod(output + 3, ^end); if (errno || end == output + 3) {{ jet_failed = 4; return 0; }}\n")
+        .Int -> Val("long long value = strtoll(output + 3, &end, 10); if (errno || end == output + 3) {{ jet_failed = 4; return 0; }}\n")
+        .Float -> Val("double value = strtod(output + 3, &end); if (errno || end == output + 3) {{ jet_failed = 4; return 0; }}\n")
         .Bool -> Val("bool value; if (strncmp(output + 3, \"true\", 4) == 0) {{ value = true; end = output + 7; }} else if (strncmp(output + 3, \"false\", 5) == 0) {{ value = false; end = output + 8; }} else {{ jet_failed = 4; return false; }}\n")
         .Char | .String | .Unsupported -> None
     }

@@ -637,24 +637,24 @@ pkg_com_render_c: fn(lib: String, schema: ComSchema) -> String Never! {
             param: method.params[index]
             at: count - 1 - index
             set: if param.kind == {
-                .Int -> "V_VT(^args[{at}])=VT_I8;V_I8(^args[{at}])={param.name};"
-                .Float -> "V_VT(^args[{at}])=VT_R8;V_R8(^args[{at}])={param.name};"
-                .Bool -> "V_VT(^args[{at}])=VT_BOOL;V_BOOL(^args[{at}])={param.name}?VARIANT_TRUE:VARIANT_FALSE;"
-                .Text -> "if(!text_arg({param.name},^args[{at}]))goto bad;"
-                .Data -> "if(!json_arg({param.name},^args[{at}]))goto bad;"
-                .Object(_) -> "if(!object_arg({param.name},^args[{at}]))goto bad;"
+                .Int -> "V_VT(&args[{at}])=VT_I8;V_I8(&args[{at}])={param.name};"
+                .Float -> "V_VT(&args[{at}])=VT_R8;V_R8(&args[{at}])={param.name};"
+                .Bool -> "V_VT(&args[{at}])=VT_BOOL;V_BOOL(&args[{at}])={param.name}?VARIANT_TRUE:VARIANT_FALSE;"
+                .Text -> "if(!text_arg({param.name},&args[{at}]))goto bad;"
+                .Data -> "if(!json_arg({param.name},&args[{at}]))goto bad;"
+                .Object(_) -> "if(!object_arg({param.name},&args[{at}]))goto bad;"
                 .Unit -> ""
             }
             wrappers = "{wrappers}{set}"
         }
-        wrappers = "{wrappers}if(!invoke_member(handle,{method.dispid}, {method.flags},args,{count},^result))goto bad;"
+        wrappers = "{wrappers}if(!invoke_member(handle,{method.dispid}, {method.flags},args,{count},&result))goto bad;"
         ret: if method.result == {
-            .Unit -> "VariantClear(^result);{clear}return;"
+            .Unit -> "VariantClear(&result);{clear}return;"
             .Int -> "int64_t value=variant_int(&result);VariantClear(&result);{clear}return value;"
-            .Float -> "double value=variant_float(^result);VariantClear(^result);{clear}return value;"
+            .Float -> "double value=variant_float(&result);VariantClear(&result);{clear}return value;"
             .Bool -> "int64_t value=variant_bool(&result);VariantClear(&result);{clear}return value;"
-            .Text -> "const char*value=variant_text(^result);VariantClear(^result);{clear}return value;"
-            .Data -> "const char*value=variant_json(^result);VariantClear(^result);{clear}return value;"
+            .Text -> "const char*value=variant_text(&result);VariantClear(&result);{clear}return value;"
+            .Data -> "const char*value=variant_json(&result);VariantClear(&result);{clear}return value;"
             .Object(_) -> "int64_t value=variant_object(&result);VariantClear(&result);{clear}return value;"
         }
         fallback: if method.result == {
@@ -663,7 +663,7 @@ pkg_com_render_c: fn(lib: String, schema: ComSchema) -> String Never! {
             .Text | .Data -> "return \"\";}}\n"
             .Int | .Bool | .Object(_) -> "return 0;}}\n"
         }
-        wrappers = "{wrappers}{ret}bad:VariantClear(^result);{clear}{fallback}"
+        wrappers = "{wrappers}{ret}bad:VariantClear(&result);{clear}{fallback}"
     }
     COM_RUNTIME_C.replace("@ABI@", abi).replace("@CLASS@", schema.class_guid).replace("@WRAPPERS@", wrappers)
 }

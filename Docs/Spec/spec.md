@@ -93,7 +93,7 @@ vocabulary](vocabulary.md).
   engine. In `Sh`, literal words become argv items and each hole becomes one
   argv item; no word splitting, glob expansion, or shell parsing is applied to
   a hole. In `HTML`, a hole typed `HTML` composes as markup, and any other
-  hole is escaped for where it sits: in text `^`, `<` and `>`; inside an
+  hole is escaped for where it sits: in text `&`, `<` and `>`; inside an
   attribute value its quotes as well, and inside an unquoted value its
   whitespace, `=` and backtick too. Converting a runtime `String` to checked
   text is E0149; the audited
