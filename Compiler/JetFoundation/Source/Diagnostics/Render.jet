@@ -427,11 +427,49 @@ diagnostic_stop_footer: fn(code: String) -> String Never! {
     " Why: {row.why}\n Fix: {row.fix}\n{diagnostic_more_line(code)}"
 }
 
-// A batch of diagnostics, one blank line between each. Each source the batch
-// reads is indexed once (DiagnosticSourceTexts), and the reports are joined
-// once at the end.
+// A batch of diagnostics, one blank line between each. Identical rendered
+// diagnostics in one batch collapse to their first occurrence with a
+// repeat-count line. Each source the batch reads is indexed once
+// (DiagnosticSourceTexts), and the reports are joined once at the end.
 diagnostic_render_all: fn(file: String, source: String, diagnostics: [Diagnostic], color: Bool) -> String Never! {
     ^sources: diagnostic_source_texts()
-    rendered: loop diagnostic in diagnostics -> diagnostic_render_with(diagnostic, file, source, color, sources)
+    ^unique: [String]{}
+    ^counts: [Int]{}
+    ^seen: [String:[Int]]{}
+    loop diagnostic in diagnostics {
+        block: diagnostic_render_with(diagnostic, file, source, color, sources)
+        digest: sha256_hex(block)
+        ^existing: -1
+        if seen.get(digest) == .Val(bucket) {
+            loop index in bucket {
+                if unique[index] == block {
+                    existing = index
+                    break
+                }
+            }
+        }
+        if existing >= 0 {
+            counts[existing] = counts[existing] + 1
+        } else {
+            position: unique.len()
+            if seen.get(digest) == .Val(_) {
+                seen[digest].push(position)
+            } else {
+                seen[digest] = [Int]{position}
+            }
+            unique.push(block)
+            counts.push(1)
+        }
+    }
+    ^rendered: [String]{}
+    loop (index, block) in unique.move() {
+        if counts[index] > 1 {
+            extra: counts[index] - 1
+            plural: if extra == 1 -> "" else -> "s"
+            rendered.push("{block}{diagnostic_theme_dim(color, "Repeated:")} {extra} more time{plural}\n")
+        } else {
+            rendered.push(block)
+        }
+    }
     rendered.join("\n")
 }

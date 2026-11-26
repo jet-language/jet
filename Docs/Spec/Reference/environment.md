@@ -102,7 +102,7 @@ object. A URL's user and password never appear in that list.
 
 | Flag | Variable | Commands | Accepted value | Effect |
 | --- | --- | --- | --- | --- |
-| `--keep-going` | `JET_KEEP_GOING` | build, run, check, test, emit | boolean | Goes on past the first failure through every phase, and reports every failure. |
+| `--keep-going` | `JET_KEEP_GOING` | build, run, check, test, emit | boolean | Goes on past the first failure through every phase, and reports every failure (on by default; pass `--keep-going=off` or set `<command>.keep_going = false` to stop at the first failing phase). |
 | `--keep-going-report=PATH` | `JET_KEEP_GOING_REPORT` | build, run, check, test, emit | path | Writes the `--keep-going` failure census, one TSV row per failure, to PATH. |
 | `--keep-going-skip=ITEM` | `JET_KEEP_GOING_SKIP` | build, run, check, test, emit | list | Leaves ITEM out of the `--keep-going` collector. |
 | `--trace[=FILE]` | `JET_TRACE_FILE` | build, run, check, test, emit | bare, `off`, or a path | Streams the compiler's phases and progress to stderr, or to FILE (each `%p` in it this process's id); `off` streams nothing. |

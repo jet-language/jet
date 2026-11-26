@@ -480,7 +480,11 @@ sema_data_core_emit_with_accesses: fn(record: CoreCallRecord, call_name: String,
         params.push(sema_data_core_param("arg{index}", argument_types[index], access, ParamZone.PositionalOnly, None))
         if access == AccessConvention.Write {
             arguments.push(sema_tree_node(value.ty, TExprKind.Borrow{place: value, access: AccessConvention.Write}, value.span))
-        } else { arguments.push(sema_services_apply_access(value, access)) }
+        } else if access == AccessConvention.Move {
+            arguments.push(sema_tree_node(value.ty, TExprKind.Move{value: value}, value.span))
+        } else {
+            arguments.push(value)
+        }
         index += 1
     }
     ^ownership: sema_ownership_check_call_arguments(check.state, call_name, params, updated_source_args, check.scopes, check.diagnostics)

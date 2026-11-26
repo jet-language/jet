@@ -20,8 +20,8 @@ run: fn() {
     store: Path.from(temp).join("events.log").to_string()
     state: service.state_store(store) ?? panic("state store")
     tree.set_state_event_log(state, "partition-events", 1, "reversible") ?? panic("state")
-    api: tree.worker("api", worker, capacity: 1) ?? panic("worker")
-    drained: tree.worker("drained", worker, capacity: 1) ?? panic("drained worker")
+    api: tree.mailbox_worker("api", worker, capacity: 1) ?? panic("worker")
+    drained: tree.mailbox_worker("drained", worker, capacity: 1) ?? panic("drained worker")
     tree.group("api-group", ["api", "drained"]) ?? panic("group")
     tree.start() ?? panic("start")
     tree.append_event("before-partition") ?? panic("event")
@@ -30,7 +30,7 @@ run: fn() {
     tree.directory_register("drained", drained.copy()) ?? panic("drained directory")
 
     ^foreign: service.tree("outside")
-    foreign_api: foreign.worker("api", worker, capacity: 1) ?? panic("foreign worker")
+    foreign_api: foreign.mailbox_worker("api", worker, capacity: 1) ?? panic("foreign worker")
     foreign.start() ?? panic("foreign start")
     if tree.send(foreign_api, "intrude") == {
         .Ok(_) -> { print("foreign:accepted") }

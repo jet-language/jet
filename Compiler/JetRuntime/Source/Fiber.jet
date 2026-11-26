@@ -157,6 +157,10 @@ fiber_spin_yield: fn() {
         fiber_yield(fiber)
         return
     }
+    if (jet_rt_host_parallel() == I64{0} && jet_rt_host_can_wait() != I64{0}) {
+        ^_: jet_rt_host_wait(I64{0}, I64{0}, I64{0})
+        return
+    }
     #Unsafe("sched_yield retains no memory and yields this OS thread") {
         ^_: host_syscall(I64{24}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     }

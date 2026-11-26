@@ -14,7 +14,7 @@ run: fn() {
     retention: Duration.seconds(86400) ?? panic("retention")
     ^runtime: service.runtime(store, retention: retention)
     ^tree: service.tree("drain-empty-durable")
-    endpoint: tree.worker("api", worker, capacity: 1) ?? panic("worker")
+    endpoint: tree.mailbox_worker("api", worker, capacity: 1) ?? panic("worker")
     tree.start() ?? panic("start")
     tree.drain_worker(endpoint) ?? panic("drain")
     receipt: runtime.send(endpoint, "after", key: "after") ?? panic("send")

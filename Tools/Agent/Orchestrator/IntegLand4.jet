@@ -15,6 +15,7 @@ use {
     files: core.files
     process: core.process
     roots: "Roots"
+    sys: core.sys
 }
 
 // The directories the tree-only check never enters.
@@ -76,7 +77,7 @@ run: fn() {
         fail("integ-land: batch {batch} did not pass its census/ratchets")
     }
     // Every git step and tree path below is the dev worktree's.
-    files.chdir(r["JET_DEV_WORKTREE"]) ?? process.exit(2)
+    sys.set_current_dir(r["JET_DEV_WORKTREE"]) ?? process.exit(2)
     if (Sh{"git status --porcelain=v1 -uno"}.text()) != "" {
         fail("integ-land: dev worktree has changes")
     }

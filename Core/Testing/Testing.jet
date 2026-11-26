@@ -741,11 +741,7 @@ priv history_rng_new: fn(seed: Int) -> HistoryRNG Never! {
 
 priv history_rng_draw: fn(rng: HistoryRNG) -> U64 Never! {
     ^guard: rng.__state.guard_edit()
-    guard.value.word = wrapping(guard.value.word + U64{11400714819323198485})
-    ^value: guard.value.word
-    value = wrapping((value ~ value >> U64{30}) * U64{13787848793156543929})
-    value = wrapping((value ~ value >> U64{27}) * U64{10723151780598845931})
-    value ~ value >> U64{31}
+    core.math.random.seeded_next(guard.value.word)
 }
 
 priv history_rng_next: fn(rng: HistoryRNG) -> Int Never! { Int{history_rng_draw(rng)} }

@@ -1,0 +1,77 @@
+// Regression tests for keep-going recovery across lexer and parser errors:
+// - one lexer error (E0001) in a package file does not hide sibling sema errors
+// - one parse error in a file still lets the file's other items check
+use {
+    jet_cli.[jet_cli_driver_request]
+    jet_foundation.[Diagnostic]
+    jet_driver.[
+        JetDriverAuthorizedSourceFile,
+        JetDriverAuthorizedSourceRoot,
+        JetDriverAuthorizedSourceSnapshot,
+        JetDriverCompileMode,
+        JetDriverCoreSource,
+        JetDriverKeepGoing,
+        jet_driver_compile_keep_going,
+    ]
+}
+
+priv kg_recovery_file: fn(root: String, rel: String, source: String) -> JetDriverAuthorizedSourceFile {
+    JetDriverAuthorizedSourceFile{path: "{root}/{rel}", relative_path: rel, identity: "{root}:{rel}", source: source}
+}
+
+priv kg_recovery_check: fn(files: [JetDriverAuthorizedSourceFile], entry_path: String) -> [Diagnostic] {
+    root: JetDriverAuthorizedSourceRoot{canonical_path: "/app", identity: "app-root", allow_hardlinks: false, files: files, foreign_cache_files: []}
+    snapshot: JetDriverAuthorizedSourceSnapshot{roots: [JetDriverAuthorizedSourceRoot]{root}, entry_root_identity: "app-root", entry_path: entry_path}
+    request: jet_cli_driver_request(snapshot, [JetDriverCoreSource]{}, Val(1), JetDriverCompileMode.Check)
+    jet_driver_compile_keep_going(request, JetDriverKeepGoing{skip: [String]{}}).diagnostics
+}
+
+#Test("keep_going_lexer_error_does_not_hide_package_sema_errors") {
+    manifest: `name: "app"
+version: "0.1.0"
+edition: "2026"
+`
+    files: [JetDriverAuthorizedSourceFile]{
+        kg_recovery_file("/app", "package.jet", manifest),
+        kg_recovery_file("/app", "lex_bad.jet", `bad: fn() -> String { "\q" }
+`),
+        kg_recovery_file("/app", "sema_bad.jet", `broken: fn() -> Int { missing_name + 1 }
+`),
+        kg_recovery_file("/app", "run.jet", `run: fn() {}
+`),
+    }
+    diagnostics: kg_recovery_check(files, "/app/run.jet")
+    ^saw_lex: false
+    ^saw_sema: false
+    loop diagnostic in diagnostics {
+        if diagnostic.code == "E0001" -> saw_lex = true
+        if diagnostic.code == "E0107" && diagnostic.what.contains("missing_name") -> saw_sema = true
+    }
+    assert(saw_lex, "expected E0001 lexer error from lex_bad.jet")
+    assert(saw_sema, "expected E0107 sema error from sema_bad.jet alongside E0001")
+}
+
+#Test("keep_going_parse_error_still_checks_other_items_in_same_file") {
+    source: `broken_syntax: fn( -> Int {
+    1
+}
+
+other_item: fn() -> Int {
+    missing_after_parse_error + 1
+}
+
+run: fn() {}
+`
+    files: [JetDriverAuthorizedSourceFile]{
+        kg_recovery_file("/app", "main.jet", source),
+    }
+    diagnostics: kg_recovery_check(files, "/app/main.jet")
+    ^saw_parse: false
+    ^saw_sema: false
+    loop diagnostic in diagnostics {
+        if diagnostic.code == "E0002" || diagnostic.code == "E0003" -> saw_parse = true
+        if diagnostic.code == "E0107" && diagnostic.what.contains("missing_after_parse_error") -> saw_sema = true
+    }
+    assert(saw_parse, "expected parse error from broken_syntax")
+    assert(saw_sema, "expected E0107 sema error from other_item in the same file")
+}

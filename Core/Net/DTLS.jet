@@ -1715,7 +1715,8 @@ priv dtls_test_released: fn(dtls: DTLSState) -> Bool Never! {
     // Pump the retransmitted ClientHello; server must require HelloVerifyRequest
     // cookie exchange and emit HelloVerifyRequest.
     ^saw_hvr: false
-    ^fragmented_server_flight: false
+    ^saw_partial_fragment: false
+    ^saw_nonzero_offset: false
     ^rounds: 0
     loop cli.ssl.state != ssldefs.SSL_HANDSHAKE_OVER || srv.ssl.state != ssldefs.SSL_HANDSHAKE_OVER {
         rounds += 1
@@ -1729,14 +1730,24 @@ priv dtls_test_released: fn(dtls: DTLSState) -> Bool Never! {
             _: sslsrv12.ssl_set_client_transport_id(srv.ssl, peer_id.copy()) ?? panic("{dtls_ssl_text(err)}")
         } else {
             assert(srv_status == 0 || srv_status == C_DTLS_WANT_READ)
-            sent_by_srv: dtls_test_pump(srv, cli)
-            if sent_by_srv > 1 -> fragmented_server_flight = true
+            // Inspect DTLS 1.2 handshake record headers (13-byte record header + 12-byte handshake header)
+            // to prove a single handshake message was actually split across fragments.
+            loop dgram in srv.ssl.bio.tx_dgrams {
+                if dgram.len() >= 25 && dgram[0] == (U8{22}) {
+                    msg_len: (Int{dgram[14]} << 16) | (Int{dgram[15]} << 8) | Int{dgram[16]}
+                    frag_off: (Int{dgram[19]} << 16) | (Int{dgram[20]} << 8) | Int{dgram[21]}
+                    frag_len: (Int{dgram[22]} << 16) | (Int{dgram[23]} << 8) | Int{dgram[24]}
+                    if frag_len < msg_len -> saw_partial_fragment = true
+                    if frag_off > 0 -> saw_nonzero_offset = true
+                }
+            }
+            _: dtls_test_pump(srv, cli)
         }
         cli_status: dtls_test_step(cli)
         assert(cli_status == 0 || cli_status == C_DTLS_WANT_READ)
     }
     assert(saw_hvr)
-    assert(fragmented_server_flight)
+    assert(saw_partial_fragment && saw_nonzero_offset)
     assert_eq(ssltls.ssl_get_version(cli.ssl), "DTLSv1.2")
     assert_eq(ssltls.ssl_get_version(srv.ssl), "DTLSv1.2")
     // Application datagram + replay protection check.

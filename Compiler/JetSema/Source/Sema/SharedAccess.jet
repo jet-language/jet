@@ -517,23 +517,18 @@ sema_shared_access_place_call_transaction: fn(expr: Expr, check: ^SemaBodyCheck)
 // receive, or write to the polled field in its body, spins a core. Runs on the
 // parsed condition and body before they are checked.
 sema_shared_access_lint_busy_wait: fn(tables: ASTTables, condition: Expr, body: [Stmt], scopes: SemaScopeTable, diagnostics: ^[Diagnostic]) {
-    ^handles: [String]{}
-    ^members: [String]{}
-    ast_visit_expr(tables, condition, fn(expression: ExprNode) { sema_shared_access_note_field_read(handles, members, ast_expr(tables, expression)) })
-    ^poll: -1
-    loop index in 0..<handles.len() {
-        if sema_shared_access_name_is_shared(handles[index], scopes) {
-            poll = index
-            break
-        }
-    }
-    if poll < 0 {
-        return
-    }
+    ^poll: ExprNode?{None}
+    ast_visit_expr(tables, condition, fn(expression: ExprNode) { sema_shared_access_note_field_read(poll, tables, scopes, expression) })
+    polled: poll ?? return
     ^blocking: false
     ast_visit_body(tables, body, fn(expression: ExprNode) { sema_shared_access_note_blocking_call(blocking, ast_expr(tables, expression)) }, true)
-    if blocking || sema_shared_access_statements_write_field(body, handles[poll], members[poll]) {
+    if blocking {
         return
+    }
+    if ast_expr(tables, polled) == .Field(base, member, _, _) {
+        if sema_shared_access_without_parens_name(base) == .Val(handle) && sema_shared_access_statements_write_field(body, handle, member) {
+            return
+        }
     }
     diagnostics.push(sema_lint("L0207", sema_shared_access_condition_span(condition), "this unbounded loop polls `Shared` state without waiting", "an empty or non-blocking body reads a lock-backed value repeatedly and can consume a core while another task makes progress", "wait on a `Condition` through an edit guard, or receive from a channel; an empty plain-field predicate can use that wait directly"))
 }
@@ -553,13 +548,12 @@ sema_shared_access_name_is_shared: fn(name: String, scopes: SemaScopeTable) -> B
     sema_shared_access_is_shared_type(ty)
 }
 
-// A `handle.field` read whose base is a plain name: a poll candidate.
-sema_shared_access_note_field_read: fn(handles: ^[String], members: ^[String], expression: Expr) Never! {
-    if expression == .Field(base, member, _, _) {
-        if sema_shared_access_without_parens_name(base) == .Val(name) {
-            handles.push(name)
-            // copy: `member` is a payload of the visited expression, which the walk keeps
-            members.push(member.copy())
+// A `handle.field` read whose base is a plain `Shared` name: the first poll candidate.
+sema_shared_access_note_field_read: fn(poll: ^ExprNode?, tables: ASTTables, scopes: SemaScopeTable, expression: ExprNode) Never! {
+    if poll != None -> return
+    if ast_expr(tables, expression) == .Field(base, _, _, _) {
+        if sema_shared_access_without_parens_name(base) == .Val(name) && sema_shared_access_name_is_shared(name, scopes) {
+            poll = Val(expression)
         }
     }
 }

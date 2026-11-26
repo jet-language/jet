@@ -1,0 +1,28 @@
+package: {
+    name: "context_dir_cannot_escape_fs_effect_scope"
+    authority: { allow: [FS.Read("allowed/"), IO] }
+}
+
+use {
+    files: core.files
+}
+
+read_under: fn(dir: String, rel: String) -[FS.Read, IO]> String {
+    ^out: ""
+    #Context(dir: dir) {
+        out = files.read(rel) ?? "refused:{err}"
+    }
+    out
+}
+
+run: fn() -[FS.Read, IO]> {
+    // Positive control: reading inside the allowed directory via `#Context(dir: "allowed")` succeeds.
+    ok_text: read_under("allowed", "public.txt").trim()
+    print("allowed: {ok_text}")
+
+    // Escape attempt: switching `#Context(dir: "outside")` MUST NOT bypass `FS.Read("allowed/")`.
+    escaped: read_under("outside", "secret.txt")
+    assert(escaped.starts_with("refused:"), "expected refusal, got: {escaped}")
+    assert(!escaped.contains("No such file") && !escaped.contains("not found"), "expected authority refusal, not missing file: {escaped}")
+    print("escape: refused")
+}

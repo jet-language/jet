@@ -1,0 +1,20 @@
+package: {
+    name: "time_zone_missing_db_env"
+    version: "0.1.0"
+    authority: { allow: [Env, FS, IO, Mem.Alloc] }
+}
+
+use {
+    files: core.files
+    sys: core.sys
+    time: core.time
+}
+
+run: fn() {
+    empty_dir: sys.get("JET_TZDB_DIR") ?? sys.get("TZDIR") ?? panic("expected JET_TZDB_DIR or TZDIR")
+    files.create_dir_all(empty_dir) ?? panic("create empty tzdb dir")
+    if time.zone("America/New_York") == {
+        .Ok(_) -> print("missing_db_env: unexpected ok")
+        .Err(error) -> print("missing_db_env: err:{error.reason}")
+    }
+}

@@ -85,8 +85,7 @@ JetDriverComptimeCompiler: struct {
 
     impl JetEvalCompilerQueryHost {
         clone_compiler_host: fn(self) -[]> JetEvalCompilerQueryHost Never! {
-            // copy: the evaluator forks the host for each machine; the forks share one context.
-            JetDriverComptimeCompiler{context: self.context.copy()}
+            JetDriverComptimeCompiler{context: self.context}
         }
 
         compiler_query: fn(self, query: String, args: [TComptimeValue], span: Span) -[Env, Exec, FFI.Asm, FS, Net, Time]> JetEvalBuildReply? {
@@ -175,15 +174,14 @@ jet_driver_entry_root_sources: fn(snapshot: JetDriverAuthorizedSourceSnapshot) -
 
 // The compiler query host of `request`'s compile-time code.
 jet_driver_comptime_compiler_for: fn(request: JetDriverCompileRequest) -> JetEvalCompilerQueryHost {
-    // copy: the host keeps the facts a check query compiles under; the request keeps its own.
     context: Shared{JetDriverComptimeCompilerContext{
         root: jet_driver_entry_root_path(request.authorized_sources),
         facts: JetDriverComptimeCompilerFacts{
             sources: jet_driver_entry_root_sources(request.authorized_sources),
-            canonical_effects: request.canonical_effects.copy(),
-            core_sources: request.core_sources.copy(),
-            host_facts: request.host_facts.copy(),
-            compiler_threads: request.compiler_threads.copy(),
+            canonical_effects: request.canonical_effects,
+            core_sources: request.core_sources,
+            host_facts: request.host_facts,
+            compiler_threads: request.compiler_threads,
         },
         eval_config: jet_driver_comptime_eval_config(request.eval_config, None, None),
     }}
@@ -355,8 +353,7 @@ jet_driver_compiler_query_check: fn(context: Shared<JetDriverComptimeCompilerCon
     text: source ?? return jet_driver_compiler_query_lost("check", span)
     parsed: jet_eval_compiler_services_parse(jet_driver_compiler_source_input(text)) ?? return jet_driver_compiler_query_lost("check", span)
     permit: context.guard_read()
-    // copy: the check takes the facts whole; the host keeps its own for the next query.
-    ^facts: permit.value.facts.copy()
+    ^facts: permit.value.facts
     request: JetDriverCompileRequest{
         authorized_sources: jet_driver_compiler_source_snapshot(permit.value.root, text, facts.sources.move()),
         canonical_effects: facts.canonical_effects.move(),
@@ -370,7 +367,7 @@ jet_driver_compiler_query_check: fn(context: Shared<JetDriverComptimeCompilerCon
     }
     // The check takes the request. The text was handed to the query, so its
     // records, a failed check's too, name no file.
-    result: jet_driver_compiler_check(JetDriverCompilerCheckInput{parsed: parsed.copy(), request: request, retain_projection: false, entry_path: None}) ?? return JetEvalBuildReply.Failure{diagnostic: diagnostic_from_registry("E0003", Val(span), "`compiler.check` failed inside the compiler", "the check query failed before returning its diagnostics", "report this compiler bug")}
+    result: jet_driver_compiler_check(JetDriverCompilerCheckInput{parsed: parsed, request: request, retain_projection: false, entry_path: None}) ?? return JetEvalBuildReply.Failure{diagnostic: diagnostic_from_registry("E0003", Val(span), "`compiler.check` failed inside the compiler", "the check query failed before returning its diagnostics", "report this compiler bug")}
     if result.internal_problem == .Val(problem) {
         return JetEvalBuildReply.Failure{diagnostic: diagnostic_from_registry("E0003", Val(span), "`compiler.check` failed inside the compiler", problem, "report this compiler bug")}
     }

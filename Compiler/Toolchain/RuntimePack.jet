@@ -56,7 +56,7 @@
 // any `--test` writes a test package of the driver's one edition instead of
 // the runtime's package.jet. `unit OUT --check` composes every fragment of
 // Fragments.fixture, sorted, into one test unit and type-checks it with $JET
-// (default `jet`) under JET_KEEP_GOING=1: the compiler's output with each
+// (default `jet`) under `--keep-going`: the compiler's output with each
 // error location followed by the source it falls in, then one
 // `SOURCE<TAB>ERRORS` row per unit source; exit 0 only with no error. It is
 // the check of Fragments.fixture, whose files compile only in that unit.
@@ -990,7 +990,7 @@ unit_tests: fn(args: [String]) -> [String]? {
 
 // `unit OUT --check`: the runtime composed with every fragment of
 // Fragments.fixture (each .jet file but its package.jet), sorted,
-// type-checked by $JET (default `jet`) with JET_KEEP_GOING=1; the exit status.
+// type-checked by $JET (default `jet`) with `--keep-going`; the exit status.
 unit_check: fn(root: String, out: String) -> Int {
     dir: at(root, RUNTIME_FRAGMENTS)
     listed: files.list_dir(dir) ?? fail("`{RUNTIME_FRAGMENTS}` cannot be listed: {err}")
@@ -1005,7 +1005,7 @@ unit_check: fn(root: String, out: String) -> Int {
     ^unit_path: compose_unit(root, out, fragments)
     unit: files.read(unit_path) ?? fail("`{unit_path}` cannot be read: {err}")
     jet: process.env_get("JET") ?? "jet"
-    receipt: process.cmd([String]{jet.copy(), "check", unit_path.move()}).cwd(out).env("JET_KEEP_GOING", "1").output_limit(1073741824).run() ?? fail("{jet} check cannot run: {err}")
+    receipt: process.cmd([String]{jet.copy(), "check", "--keep-going", unit_path.move()}).cwd(out).output_limit(1073741824).run() ?? fail("{jet} check cannot run: {err}")
     ^sources: [String]{}
     ^owners: [String]{}
     ^current: ""

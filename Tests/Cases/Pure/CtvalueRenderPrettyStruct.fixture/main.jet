@@ -3,4 +3,14 @@ Point: struct {
     y: Int,
 }
 
-run: fn() { print(Point{x: 3, y: 4}) }
+CT_POINT: #run { Point{x: 3, y: 4} }
+CT_RENDERED: #run { "{Point{x: 3, y: 4}}" }
+
+run: fn() {
+    rt_point: Point{x: 3, y: 4}
+    rt_rendered: "{rt_point}"
+    ct_val_rendered: "{CT_POINT}"
+    assert_eq(CT_RENDERED, rt_rendered)
+    assert_eq(ct_val_rendered, rt_rendered)
+    print(rt_point)
+}

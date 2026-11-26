@@ -1,6 +1,6 @@
 package: {
     name: "context_dir_env_scoping_and_parallel_isolation"
-    authority: { allow: [FS, Env, Exec, IO, DB] }
+    authority: { allow: [FS, Env, Exec, IO, DB, Time.Wait] }
 }
 
 use {
@@ -21,7 +21,7 @@ early_exit_helper: fn(dir_target: String) -[FS, Env]> String {
     "unreachable"
 }
 
-run: fn() -[FS, Env, Exec, IO, DB]> {
+run: fn() -[FS, Env, Exec, IO, DB, Time.Wait]> {
     root: files.temp_dir("ctx-dir-env-case") ?? panic("temp_dir failed")
     build_root: files.join(root.path, "build_root")
     sub: files.join(build_root, "sub")
@@ -82,8 +82,8 @@ run: fn() -[FS, Env, Exec, IO, DB]> {
         assert_eq(sys.get("CC"), Val("clang"))
         assert_eq(sys.get("NESTED"), None)
 
-        // Imperative `chdir`/`set`/`unset` inside `#Context` unwinds on block exit.
-        files.chdir("sub") ?? panic("chdir sub")
+        // Imperative `set_current_dir`/`set`/`unset` inside `#Context` unwinds on block exit.
+        sys.set_current_dir("sub") ?? panic("set_current_dir sub")
         assert_eq(context.dir, sub)
         sys.set("CC", "tcc")
         assert_eq(sys.get("CC"), Val("tcc"))
@@ -125,16 +125,22 @@ run: fn() -[FS, Env, Exec, IO, DB]> {
     assert_eq(sys.get("INHERITED"), None)
     assert_eq(inherited_task.join() ?? panic("join"), "build_root|yes|world")
 
-    // 5. Parallel tasks setting different directories via `#Context(dir:)` AND imperative `chdir`/`set`
-    // never interfere with each other or the parent task.
+    // 5. Truly concurrent tasks setting different directories via `#Context(dir:)` AND imperative
+    // `set_current_dir`/`set` synchronize across a two-party channel rendezvous barrier (which
+    // would deadlock if executed sequentially) and never interfere with each other or the parent.
     dir_p1: files.join(root.path, "p1")
     dir_p2: files.join(root.path, "p2")
     files.create_dir_all(dir_p1) ?? panic("mkdir p1")
     files.create_dir_all(dir_p2) ?? panic("mkdir p2")
+    { sender: tx_a, receiver: rx_a }: channel<Int>(capacity: 1)
+    { sender: tx_b, receiver: rx_b }: channel<Int>(capacity: 1)
     parallel: (task.all {
         a: {
-            files.chdir(dir_p1) ?? panic("chdir p1")
+            sys.set_current_dir(dir_p1) ?? panic("set_current_dir p1")
             sys.set("PAR_WHO", "one")
+            // Barrier 1: prove both tasks are simultaneously in their distinct context dirs.
+            tx_a.send(1)
+            assert_eq(rx_b.receive() ?? panic("barrier1 b"), 1)
             ^i: 0
             loop i < 8 {
                 files.write("probe_{i}.txt", "one") ?? panic("write p1")
@@ -143,20 +149,34 @@ run: fn() -[FS, Env, Exec, IO, DB]> {
                 i += 1
             }
             c: process.cmd(["sh", "-c", "printf '%s:%s' \"$(basename \"$(pwd)\")\" \"$PAR_WHO\""]).stdout(.Capture).stderr(.Capture).run() ?? panic("child p1")
+            // Barrier 2: both tasks finish I/O and spawn before either leaves its context.
+            tx_a.send(2)
+            assert_eq(rx_b.receive() ?? panic("barrier2 b"), 2)
             c.output.trim()
         },
         b: {
-            files.chdir(dir_p2) ?? panic("chdir p2")
-            sys.set("PAR_WHO", "two")
-            ^i: 0
-            loop i < 8 {
-                files.write("probe_{i}.txt", "two") ?? panic("write p2")
-                assert_eq(context.dir, dir_p2)
-                assert_eq(sys.get("PAR_WHO"), Val("two"))
-                i += 1
+            run_b: fn() -> String {
+                ^out_b: ""
+                #Context(dir: dir_p2, env: {PAR_WHO: "two"}) {
+                    // Barrier 1: wait for task A while inside dir_p2, then release task A.
+                    assert_eq(rx_a.receive() ?? panic("barrier1 a"), 1)
+                    tx_b.send(1)
+                    ^i: 0
+                    loop i < 8 {
+                        files.write("probe_{i}.txt", "two") ?? panic("write p2")
+                        assert_eq(context.dir, dir_p2)
+                        assert_eq(sys.get("PAR_WHO"), Val("two"))
+                        i += 1
+                    }
+                    c: process.cmd(["sh", "-c", "printf '%s:%s' \"$(basename \"$(pwd)\")\" \"$PAR_WHO\""]).stdout(.Capture).stderr(.Capture).run() ?? panic("child p2")
+                    // Barrier 2: wait for task A to finish before exiting `#Context`.
+                    assert_eq(rx_a.receive() ?? panic("barrier2 a"), 2)
+                    tx_b.send(2)
+                    out_b = c.output.trim()
+                }
+                out_b
             }
-            c: process.cmd(["sh", "-c", "printf '%s:%s' \"$(basename \"$(pwd)\")\" \"$PAR_WHO\""]).stdout(.Capture).stderr(.Capture).run() ?? panic("child p2")
-            c.output.trim()
+            run_b()
         },
     }) ?? panic("task.all parallel")
     assert_eq(parallel.a, "p1:one")
@@ -171,7 +191,7 @@ run: fn() -[FS, Env, Exec, IO, DB]> {
     root: files.temp_dir("ctx-par-test-a") ?? panic("temp_dir a")
     dir_a: files.join(root.path, "work_a")
     files.create_dir_all(dir_a) ?? panic("mkdir work_a")
-    files.chdir(dir_a) ?? panic("chdir work_a")
+    sys.set_current_dir(dir_a) ?? panic("set_current_dir work_a")
     sys.set("TEST_LANE", "A")
     ^i: 0
     loop i < 16 {

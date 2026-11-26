@@ -60,12 +60,13 @@ contracts, generated collection/module indexes, and non-obvious invariants.
   implementation across O0, O1, O2, comptime, and web (I9).
 - **Splittable randomness:** In `core.math.random`, a caller-owned `RNG`
   (`random.rng(seed)`) supports pure, order-independent keyed splitting via
-  `rng.split(key…)` and direct `random.rng(seed, key…)`. Child streams depend
-  solely on the parent's root seed and length-prefixed, domain-separated keys
-  (never mutating `self.state` or depending on call order, prior draws, task
-  scheduling, or tier), and nested splits are associative (`r.split("a", "b")`
-  equals `r.split("a").split("b")`). Zero-argument `rng.split()` retains the
-  legacy stateful step, and `core.crypto.random` remains a separate OS CSPRNG.
+  `rng.split(key, …)` and direct `random.rng(seed, key…)`, accepting both
+  `Int` and `String` keys (`Int | String`). `RNG.split` takes immutable `self`
+  and never mutates `self.state`; child streams depend solely on the parent's
+  root seed and type-tagged, length-prefixed keys (never on call order, prior
+  draws, task scheduling, or tier), and nested splits are associative
+  (`r.split("chunk", x, y)` equals `r.split("chunk").split(x).split(y)`).
+  `core.crypto.random` remains a separate fail-closed OS CSPRNG.
   See [`Examples/Math/SplittableRandom.jet`](../../../Examples/Math/SplittableRandom.jet).
 - **Task-scoped working directory and environment (`#Context(dir:, env:)`):**
   `context.dir` (`String`) and `context.env` (`[String:String]`) carry the
@@ -74,7 +75,7 @@ contracts, generated collection/module indexes, and non-obvious invariants.
   relative paths in `core.files`, `core.db`, and `core.process`, environment
   reads in `core.sys` and `core.process`, and spawned child processes resolve
   against the task context. Imperative mutators (`core.sys.set_current_dir`,
-  `core.files.chdir`, `core.files.cd`, `core.sys.set`, `core.sys.unset`)
+  `core.sys.set`, `core.sys.unset`)
   update only the current task's context frame — no Core API reads or mutates
   a shared process-wide working directory or environment outside the task
   context, so parallel tests and tasks setting different directories never

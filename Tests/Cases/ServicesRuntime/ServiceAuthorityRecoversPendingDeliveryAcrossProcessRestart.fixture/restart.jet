@@ -26,7 +26,7 @@ run: fn() {
     retention: Duration.seconds(86400) ?? panic("retention")
     ^runtime: services.runtime(store, retention: retention)
     ^tree: services.tree("restart-orders")
-    endpoint: tree.worker("orders", orders_worker, capacity: 2) ?? panic("worker")
+    endpoint: tree.mailbox_worker("orders", orders_worker, capacity: 2) ?? panic("worker")
     tree.group("orders-supervisor", ["orders"]) ?? panic("group")
     tree.start() ?? panic("start")
     if phase == "send" {

@@ -1,0 +1,45 @@
+# Collect-all is the default across check, build, run, and test:
+# without passing --keep-going, every command runs past the first failing phase
+# and reports every root error (lexer + multiple sema errors), writes no output
+# artifact on build failure, retains cause fields in --json, and stops at the
+# first failing phase when opted out via --keep-going=off or the canonical
+# <command>.keep_going = false setting.
+fixture: CollectAllDefaultReportsEveryRootError.fixture
+env: NO_COLOR=1
+step: jet check main.jet
+exit: nonzero
+stderr: ~ "Jet.UnterminatedText" # lexer error from lex_bad.jet is reported
+stderr: ~ "but `bad_one` returns Int" # check continues past lex error into sema for bad_one
+stderr: ~ "but `bad_two` returns Bool" # check reports every root error in main.jet
+step: jet build main.jet
+exit: nonzero
+stderr: ~ "Jet.UnterminatedText" # build reports lexer error by default
+stderr: ~ "but `bad_one` returns Int" # build continues into sema by default
+stderr: ~ "but `bad_two` returns Bool" # build reports every root error
+file: .jet/build/collect_all_default absent
+step: jet run main.jet
+exit: nonzero
+stderr: ~ "Jet.UnterminatedText" # run reports lexer error by default
+stderr: ~ "but `bad_one` returns Int" # run reports sema errors by default
+stderr: ~ "but `bad_two` returns Bool" # run reports every root error
+step: jet test main.jet
+exit: nonzero
+stderr: ~ "Jet.UnterminatedText" # test reports lexer error by default
+stderr: ~ "but `bad_one` returns Int" # test reports sema errors by default
+stderr: ~ "but `bad_two` returns Bool" # test reports every root error
+step: jet check main.jet --json
+exit: nonzero
+stdout: ~ "\"name\":\"Jet.UnterminatedText\"" # json keeps lexer root error
+stdout: ~ "\"name\":\"Jet.ReturnTypeMismatch\"" # json keeps sema root errors
+stdout: ~ "\"cause\":" # json keeps cause arrays on every report
+step: jet check main.jet --keep-going=off
+exit: nonzero
+stderr: ~ "Jet.UnterminatedText" # opt-out flag still reports the first failing phase
+stderr: !~ "but `bad_one` returns Int" # opt-out flag stops before sema
+mkdir: config/jet
+copy: opt_out.settings config/jet/settings.jet
+step: jet check main.jet
+env: XDG_CONFIG_HOME={work}/config
+exit: nonzero
+stderr: ~ "Jet.UnterminatedText" # opt-out setting still reports the first failing phase
+stderr: !~ "but `bad_one` returns Int" # opt-out setting stops before sema

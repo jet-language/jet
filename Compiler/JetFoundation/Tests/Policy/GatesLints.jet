@@ -21,7 +21,9 @@ use jet_foundation.[
     diagnostic_caused_by,
     diagnostic_from_registry,
     diagnostic_order_root_first,
+    diagnostic_render_all,
     diagnostic_source_text,
+    diagnostic_split_roots,
     foundation_json_parse,
     foundation_parse_protocol_json_with_limit,
     import_alias,
@@ -104,6 +106,32 @@ gates_lints_test_diagnostic: fn(code: String, start: Int) -> Diagnostic Never! {
     assert_eq(ordered[0].span, Val(Span{start: 9, end: 10}))
     assert_eq(ordered[1].span, Val(Span{start: 1, end: 2}))
     assert_eq(ordered[2].span, Val(Span{start: 5, end: 6}))
+}
+
+#Test("identical diagnostics render once with a repeat count line and root split hides follow-ons") {
+    source: "alpha: 1\nbeta: 2\ngamma: 3\n"
+    rendered: diagnostic_render_all(
+        "demo.jet",
+        source,
+        [Diagnostic]{
+            gates_lints_test_diagnostic("first", 0),
+            gates_lints_test_diagnostic("first", 0),
+            gates_lints_test_diagnostic("second", 9),
+            gates_lints_test_diagnostic("first", 0),
+        },
+        false,
+    )
+    assert(rendered.contains("What first"))
+    assert(rendered.contains("What second"))
+    assert(rendered.contains("Repeated: 2 more times"))
+    assert_eq(rendered.split("What first").to_list().len(), 2)
+    first: gates_lints_test_diagnostic("first", 0)
+    second: gates_lints_test_diagnostic("second", 9)
+    follow: diagnostic_caused_by(gates_lints_test_diagnostic("follow", 17), first)
+    split: diagnostic_split_roots([Diagnostic]{follow, second, first})
+    assert_eq(split.roots.len(), 2)
+    assert_eq(split.follow_on.len(), 1)
+    assert_eq(split.follow_on[0].what, "What follow")
 }
 
 #Test("import bindings name each local binding of a declaration") {

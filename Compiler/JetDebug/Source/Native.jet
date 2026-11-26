@@ -687,6 +687,10 @@ NativeSession: struct {
     // image was built in (root_named), latest last, where source_file looks
     // for a source the line table records relative to that place.
     source_roots: [String]{[String]{}},
+    // Verified source_file paths cached while the session's sources stay
+    // unchanged (cleared whenever keep_current invalidates evals, reload/fix
+    // replaces the image, or root_named adds a root).
+    resolved_sources: [String:String]{[String:String]{}},
 
     // Load the debug facts of `binary` (a native image with debug info, its
     // own or in the side file its `.gnu_debuglink` names). The program's
@@ -729,7 +733,10 @@ NativeSession: struct {
             matched = source.len()
             root = file.slice(0, file.len() - source.len() - 1)
         }
-        if root != "" && !self.source_roots.contains(root) -> self.source_roots.push(root)
+        if root != "" && !self.source_roots.contains(root) {
+            self.source_roots.push(root)
+            self.resolved_sources = [String:String]{}
+        }
     }
 
     // Where a breakpoint on `line` of `file` traps: native_line_addresses,
@@ -1208,7 +1215,10 @@ NativeSession: struct {
     keep_current: fn(^self) Never! {
         ^current: true
         if self.evaluator == .Val(evaluator) -> current = evaluator.unchanged()
-        if !current -> self.evals = [String:Shared<NativeEval>]{}
+        if !current {
+            self.evals = [String:Shared<NativeEval>]{}
+            self.resolved_sources = [String:String]{}
+        }
     }
 
     // `text` compiled before the node at `line` and `column` of the source
@@ -1227,8 +1237,17 @@ NativeSession: struct {
         owned: facts.guard_read().value.owned
         ^made: NativeEval?{None}
         if self.evaluator == .Val(evaluator) {
-            found: self.source_file(path) ?? path
-            file: if found.starts_with(MODULE_CORE_PREFIX) -> found else -> native_files.resolve(found) ?? found
+            ^file: ""
+            if self.resolved_sources.get(path) == .Val(cached) {
+                file = cached
+            } else {
+                if self.source_file(path) == .Ok(found) {
+                    file = if found.starts_with(MODULE_CORE_PREFIX) -> found else -> native_files.resolve(found) ?? found
+                    self.resolved_sources[path] = file
+                } else {
+                    file = if path.starts_with(MODULE_CORE_PREFIX) -> path else -> native_files.resolve(path) ?? path
+                }
+            }
             made = Val(evaluator.compile(file, line, column, text, binders, owned, self.image.sources) ?? return Err(err))
         }
         code: made ?? return Err(native_eval_refused("this session has no compiler to evaluate expressions with"))
@@ -2244,6 +2263,7 @@ NativeSession: struct {
         self.shelved = [Int:NativeRule]{}
         self.watches = [NativeWatch]{}
         self.evals = [String:Shared<NativeEval>]{}
+        self.resolved_sources = [String:String]{}
         self.eval_image = None
         self.eval_read = None
         text: native_eval_reach(codes)
@@ -2991,6 +3011,7 @@ NativeSession: struct {
         // An expression compiled before the fix was checked against the
         // sources the fix replaced.
         self.evals = [String:Shared<NativeEval>]{}
+        self.resolved_sources = [String:String]{}
         self.image.sources = sources
         Ok("Fixed {shown.join(", ")}: the edit runs from the next call\n")
     }

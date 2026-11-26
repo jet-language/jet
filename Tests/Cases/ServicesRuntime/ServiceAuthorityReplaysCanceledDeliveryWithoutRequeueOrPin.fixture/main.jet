@@ -11,7 +11,7 @@ run: fn() {
     retention: Duration.seconds(86400) ?? panic("retention")
     ^runtime: services.runtime(store, retention: retention)
     ^tree: services.tree("cancel-restart")
-    endpoint: tree.worker("worker", worker, capacity: 1) ?? panic("worker")
+    endpoint: tree.mailbox_worker("worker", worker, capacity: 1) ?? panic("worker")
     tree.start() ?? panic("start")
     if phase == "send" {
         accepted: runtime.send(endpoint, "canceled", key: "canceled") ?? panic("send")

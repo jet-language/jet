@@ -9,3 +9,12 @@ stdout: = core_time_zone_dst_and_missing_db_are_typed_on_every_tier.out
 step o2: jet run -O2 main.jet
 exit: 0
 stdout: = core_time_zone_dst_and_missing_db_are_typed_on_every_tier.out
+step missing_db_jet_tzdb_env: jet run missing_db.jet
+env: JET_TZDB_DIR={work}/empty_jet_tzdb
+exit: 0
+stdout: = "missing_db_env: err:unknown IANA time zone: America/New_York; set JET_TZDB_DIR or TZDIR to an IANA TZif database\n"
+step missing_db_tzdir_env: jet run missing_db.jet
+env: TZDIR={work}/empty_tzdir
+exit: 0
+stdout: = "missing_db_env: err:unknown IANA time zone: America/New_York; set JET_TZDB_DIR or TZDIR to an IANA TZif database\n"
+

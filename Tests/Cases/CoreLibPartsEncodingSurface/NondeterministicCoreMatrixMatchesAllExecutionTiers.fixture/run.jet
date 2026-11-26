@@ -31,7 +31,7 @@ run: fn() -[IO, Rand, Time]> {
     print(shuffle_items[1])
     print(shuffle_items[2])
     shuffle_unit()
-    ^split_rng: random.split(9)
+    ^split_rng: random.rng(9, "child")
     print(split_rng.float() >= 0.0)
     print(random.bytes(4).len())
 
@@ -61,8 +61,8 @@ run: fn() -[IO, Rand, Time]> {
     twin.shuffle(twin_float_items)
     print(rng_float_items == twin_float_items)
     print(rng.bytes(3) == twin.bytes(3))
-    ^child: rng.split()
-    ^twin_child: twin.split()
+    ^child: rng.split("child")
+    ^twin_child: twin.split("child")
     print(child.int(1, 100) == twin_child.int(1, 100))
 
     print(time.now().to_timestamp() >= 0)

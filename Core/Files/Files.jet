@@ -417,6 +417,14 @@ FileLock: struct {
     path: String -> stored_path,
     priv handle: Int,
 
+    // Kept only for CacheLease, which passes one lease lock into many specs
+    // while keeping its own handle open; every other caller uses ProcessSpec.keep_open.
+    pass_to: fn(self, spec: ^^ProcessSpec, at: Int) -[FS]> ProcessSpec Never! {
+        fd: rt.lock_fd(self) ?? -1
+        child: if at < 3 || at > 2147483646 -> -1 else -> at
+        process_rt.keep_open_raw(spec, fd, child, false).spec
+    }
+
     // The runtime handle's drop releases the lock after this close, so the
     // close has nothing left to do; being `Close` keeps the lock to one owner.
     impl Close {
@@ -935,6 +943,12 @@ process_directory: fn(spec: ProcessSpec, directory: Directory, child_fd: Int, as
     slot: at ?? fd
     child: if slot < 3 || slot > 2147483646 -> -1 else -> slot
     process_rt.keep_open_raw(spec, fd, child, false).spec
+}
+
+/// Core bridge used by `ProcessSpec.keep_open` to extract the handle's
+/// descriptor without exposing `Directory`'s private handle.
+keep_open_spec: fn(spec: ^^ProcessSpec, handle: ^^Directory | FileLock | FileReader | FileWriter, at: Int?{None}) -[FS]> ProcessSpec Never! {
+    __spec_keep_open(spec, handle, at)
 }
 
 #Test("compiler process directories retain authority after rename and close") {
@@ -2785,22 +2799,11 @@ copyfile: fn(from: String, to: String) -[FS]> IOError! { copy2(from, to) }
 /// created, so `parents` does not change the result.
 mkdir: fn(path: String, parents: Bool) -[FS]> IOError! { create_dir_all(path) }
 
-rmdir: fn(path: String) -[FS]> IOError! { core.files.remove_dir(path) }
-
-unlink: fn(path: String) -[FS]> IOError! { core.files.remove(path) }
-
 joinpath: fn(a: String, b: String) -> String Never! { join(a, b) }
-
-/// Python `os` spellings backed by the same checked filesystem surface.
-getcwd: fn() -[FS, Env]> String IOError! { cwd() }
-
-chdir: fn(path: String) -[FS, Env]> IOError! { sys.set_current_dir(path) }
 
 scandir: fn(path: String) -[FS]> [DirEntry] IOError! { core.files.list_dir(path) }
 
 gettempdir: fn() -[Env]> String Never! { sys.temp_dir() }
-
-getenv: fn(name: String) -[Env]> String? Never! { sys.get(name) }
 
 read_lines: fn(path: String) -[FS]> [String] IOError! {
     text: read(path)
@@ -3041,23 +3044,15 @@ filesize: fn(path: String) -[FS]> Int IOError! {
     Ok(info.size)
 }
 
-delete: fn(path: String) -[FS]> IOError! { core.files.remove(path) }
-
 cp: fn(from: String, to: String) -[FS]> IOError! { copy2(from, to) }
 
-rm: fn(path: String) -[FS]> IOError! { core.files.remove(path) }
-
 realpath: fn(path: String) -[FS, Env]> String IOError! { core.files.canonicalize(path) }
-
-pwd: fn() -[FS, Env]> String IOError! { cwd() }
 
 /// A fresh directory under the system temp directory that stays until the caller removes it.
 /// `temp_dir` is the form that removes its directory when the `TempDir` drops.
 tmpdir: fn(prefix: String) -[FS]> String IOError! { mkdtemp(prefix) }
 
 topath: fn(path: String) -[FS, Env]> String IOError! { core.files.canonicalize(path) }
-
-cd: fn(path: String) -[FS, Env]> IOError! { sys.set_current_dir(path) }
 
 #Test("whole-file policy preserves UTF-8 error text and negative range clamping") {
     root: mktemp("whole-file-source-policy")

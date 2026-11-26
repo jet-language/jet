@@ -174,16 +174,24 @@ jet_cli_perf_file_is_executable: fn(path: String) -[FS.Read, Time.Wait]> Bool Ne
 }
 
 // Returns the command argv when `jet perf run` targets a built executable on
-// disk (not a `.jet` source file), even when later arguments end with `.jet`,
-// else None.
-jet_cli_perf_run_binary_command: fn(action: String, parsed: JetCLIPerfSessionArgs) -[FS, Time.Wait]> [String]? Never! {
+// disk or PATH (not a `.jet` source file), even when later arguments end with
+// `.jet`, else None.
+jet_cli_perf_run_binary_command: fn(action: String, parsed: JetCLIPerfSessionArgs) -[FS, Env, Time.Wait]> [String]? Never! {
     if action != "run" || parsed.child_args.len() == 0 -> return None
     start: if parsed.child_args[0] == "--" -> 1 else -> 0
     if start >= parsed.child_args.len() -> return None
     target: parsed.child_args[start]
     if target.starts_with("-") || target.ends_with(".jet") -> return None
-    if !perf_files.is_file(target) || !jet_cli_perf_file_is_executable(target) -> return None
-    resolved: if target.contains("/") -> "{target}" else -> "./{target}"
+    ^resolved: ""
+    if perf_files.is_file(target) && jet_cli_perf_file_is_executable(target) {
+        resolved = if target.contains("/") -> "{target}" else -> "./{target}"
+    } else if !target.contains("/") {
+        found: perf_process.which(target) ?? return None
+        if !perf_files.is_file(found) || !jet_cli_perf_file_is_executable(found) -> return None
+        resolved = found
+    } else {
+        return None
+    }
     ^command: [String]{resolved}
     loop index in (start + 1)..<parsed.child_args.len() {
         command.push("{parsed.child_args[index]}")

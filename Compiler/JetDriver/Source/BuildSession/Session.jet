@@ -422,14 +422,14 @@ build_session_place: fn(session: BuildSession, file: String, line: Int, column: 
 // The words after `--` on `jet build` (`b.args()`); a new session has none.
 build_session_set_args: fn(session: BuildSession, args: [String]) Never! {
     ^permit: session.storage.guard_edit()
-    permit.value.args = args.copy()
+    permit.value.args = args
 }
 
 // The source key the running compiler was built from, "" for none
 // (`b.jet_built_from`).
 build_session_set_jet_source: fn(session: BuildSession, key: String) Never! {
     ^permit: session.storage.guard_edit()
-    permit.value.jet_source = key.copy()
+    permit.value.jet_source = key
 }
 
 // The source key of the toolchain tree that holds this build, once the host
@@ -441,20 +441,20 @@ build_session_tree_source: fn(session: BuildSession) -> String Never! {
 
 build_session_set_tree_source: fn(session: BuildSession, key: String) Never! {
     ^permit: session.storage.guard_edit()
-    permit.value.tree_source = key.copy()
+    permit.value.tree_source = key
 }
 
 // The folders of the packages the build's package.jet lists, by name.
 build_session_set_dependencies: fn(session: BuildSession, dependencies: [String:String]) Never! {
     ^permit: session.storage.guard_edit()
-    permit.value.dependencies = dependencies.copy()
+    permit.value.dependencies = dependencies
 }
 
 // The loader's identity of the build's package (`package` may name it
 // otherwise, as a lone file's stem).
 build_session_set_identity: fn(session: BuildSession, identity: String) Never! {
     ^permit: session.storage.guard_edit()
-    permit.value.identity = identity.copy()
+    permit.value.identity = identity
 }
 
 // The type table of the build's checked program (BuildSessionState.types).
@@ -468,7 +468,7 @@ build_session_set_types: fn(session: BuildSession, types: ^^JetCompilerServicesT
 build_session_set_source: fn(session: BuildSession, file: String, source: String) Never! {
     build_session_add_source(session, file, source)
     ^permit: session.storage.guard_edit()
-    permit.value.build_file = file.copy()
+    permit.value.build_file = file
 }
 
 // The lines of source file `file`, where a Core method's `at` may place a
@@ -800,7 +800,7 @@ build_session_compiler_add: fn(state: ^BuildSessionState, call: BuildSessionCall
     source: call.generated ?? return build_session_fail(state, "`meta.add` requires a `#code` item block or source text")
     authority: build_session_text(args, 3) ?? return build_session_fail(state, "`meta.add` lost its Meta effects")
     path: ".jet/generated/{build_session_package_dir(state.package)}/{build_session_safe_name(name)}.jet"
-    added: build_session_add_generated(state, BuildSessionGeneratedModule{name: name, path: path, source: source, source_digest: "", plugin: None, start: call.start, end: call.end, producer: build_session_text(args, 2), authority: Val(authority), declares: build_session_text(args, 4), handoffs: state.compilers[compiler].handoffs.copy()})
+    added: build_session_add_generated(state, BuildSessionGeneratedModule{name: name, path: path, source: source, source_digest: "", plugin: None, start: call.start, end: call.end, producer: build_session_text(args, 2), authority: Val(authority), declares: build_session_text(args, 4), handoffs: state.compilers[compiler].handoffs})
     if added == .Value(_) {
         target: state.compilers[compiler].target
         if !build_session_contains_string(state.targets[target].sources, path) {
@@ -836,7 +836,7 @@ build_session_compiler_handoff: fn(state: ^BuildSessionState, call: BuildSession
     }
     compiler: build_session_handle(state, call.args[0], "Compiler") ?? return build_session_fail(state, "the `Compiler` value does not belong to this build")
     step: build_session_text(call.args, 1) ?? return build_session_fail(state, "a `Compiler` handoff lost its place")
-    ^chain: state.compilers[compiler].handoffs.copy()
+    ^chain: state.compilers[compiler].handoffs
     chain.push(step)
     target: state.compilers[compiler].target
     root: build_session_compiler_root(state, compiler)
@@ -884,7 +884,7 @@ build_session_compiler_rewrite_body: fn(state: ^BuildSessionState, call: BuildSe
         return BuildSessionReply.Failure{error: {code: "E3514", what: "`meta.rewrite_body` would rewrite `{function}` of package `{package_name}`, which this build has not allowed", why: "Rewriting a dependency's code needs the root's consent, one line a reviewer reads", fix: "Add `meta.allow_rewrite(package: \"{package_name}\")` after the root's `b.compiler` call", start: start, end: end}}
     }
     paste: "#{{{function}.body}}"
-    source: if pasted == "" || pasted == function -> written.copy() else -> build_session_replace_paste(written, "#{{{pasted}.body}}", paste)
+    source: if pasted == "" || pasted == function -> written else -> build_session_replace_paste(written, "#{{{pasted}.body}}", paste)
     producer: build_session_text(args, 2)
     ^earlier: -1
     loop (index, old) in state.generated {
@@ -903,7 +903,7 @@ build_session_compiler_rewrite_body: fn(state: ^BuildSessionState, call: BuildSe
     }
     path: ".jet/generated/{package_name}/rewrite_body/{build_session_safe_name(function)}.jet"
     name: if own -> "{function} body" else -> "{function} body of {package_name}"
-    added: build_session_add_generated(state, BuildSessionGeneratedModule{name: name, path: path, source: source, source_digest: "", plugin: None, start: start, end: end, rewrites: Val(function), package: if own -> None else -> Val(owner), producer: producer, authority: Val("Meta.Code.Rewrite"), consent: if own -> None else -> Val(package_name), handoffs: state.compilers[compiler].handoffs.copy()})
+    added: build_session_add_generated(state, BuildSessionGeneratedModule{name: name, path: path, source: source, source_digest: "", plugin: None, start: start, end: end, rewrites: Val(function), package: if own -> None else -> Val(owner), producer: producer, authority: Val("Meta.Code.Rewrite"), consent: if own -> None else -> Val(package_name), handoffs: state.compilers[compiler].handoffs})
     if added == .Value(_) {
         target: state.compilers[compiler].target
         if !build_session_contains_string(state.targets[target].sources, path) {

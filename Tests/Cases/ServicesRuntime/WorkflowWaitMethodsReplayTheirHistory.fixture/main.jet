@@ -11,7 +11,7 @@ run: fn() {
     ^tree: service.tree("checkout")
     store: service.state_store(path) ?? panic("state store")
     tree.set_state_event_log(store, "workflow-events", 1, "reversible") ?? panic("state")
-    tree.worker("activities", worker, capacity: 1) ?? panic("worker")
+    tree.mailbox_worker("activities", worker, capacity: 1) ?? panic("worker")
     tree.start() ?? panic("start")
 
     w: tree.workflow_start("checkout", 1) ?? panic("workflow")

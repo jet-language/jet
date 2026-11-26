@@ -36,6 +36,7 @@ use jet_foundation.[
     BodyPlace,
     BodyRequireKind,
     BodyTree,
+    CallArg,
     CompilerThreads,
     CompilerTraceSink,
     core_identity_is_module,
@@ -54,10 +55,15 @@ use jet_foundation.[
     effect_scope_published_effect,
     effect_scope_split,
     effect_value_is_valued,
+    Expr,
     FnBody,
     Func,
+    FunctionDefaultRef,
+    InternalTag,
     SharedLifetime,
     Item,
+    TagMarker,
+    TFailureCarrier,
     JetFrameTypes,
     Name,
     NamedSpan,
@@ -829,6 +835,86 @@ sema_effect_report_nondeterministic_intrinsic: fn(nodes: ^[SemaEffectNode], node
         return true
     }
     false
+}
+
+sema_clock_handle_receiver_name: fn(ty: Type) -> String Never! {
+    if ty == {
+        .Named(name) -> if sema_call_is_clock_type(ty) -> "Clock" else -> "{name}"
+        .Tagged(_, inner) -> sema_clock_handle_receiver_name(inner)
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> ""
+    }
+}
+
+sema_effect_record_clock_intrinsic: fn(result: Type, effect_name: String, api: String, span: Span, check: ^SemaBodyCheck) -> Bool Never! {
+    ^effects: [EffectRowEntry]{}
+    if effect_name != "" -> effects.push(EffectRowEntry{name: effect_name, span: span})
+    ^facts: SemaCallFacts{
+        return_type: result,
+        failure_carrier: TFailureCarrier.Infallible,
+        effect_bound: Val(effects),
+        type_args: [Type]{},
+        default_refs: [FunctionDefaultRef]{},
+    }
+    sema_effect_record_intrinsic_fact(check.environment.*, check.program.*, check.scopes, check.context, api, span, facts, check.diagnostics)
+}
+
+sema_clock_is_deterministic: fn(ty: Type) -> Bool Never! {
+    if ty == {
+        .Tagged(marker, inner) -> marker == TagMarker.Internal{internal_tag: InternalTag.DeterministicClock} && sema_clock_handle_receiver_name(inner) == "Clock"
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
+    }
+}
+
+sema_clock_is_system: fn(ty: Type) -> Bool Never! {
+    if ty == {
+        .Tagged(marker, inner) -> marker == TagMarker.Internal{internal_tag: InternalTag.SystemClock} && sema_clock_handle_receiver_name(inner) == "Clock"
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
+    }
+}
+
+// A pure function's Clock parameter is injected by its caller, so the body reads it
+// as a deterministic clock. None when `ty` is not an untagged Clock.
+sema_clock_injected: fn(ty: Type) -> Type? Never! {
+    if !sema_call_is_clock_type(ty) || sema_clock_is_deterministic(ty) -> return None
+    if ty == .Named(name) {
+        return Val(Type.Tagged{marker: TagMarker.Internal{internal_tag: InternalTag.DeterministicClock}, inner: Type.Named{name: "{name}"}})
+    }
+    None
+}
+
+// Records a Clock read's `Clock.{method}` site: `Time` unless the receiver is
+// the deterministic or system clock. None when `method` reads no time; false
+// when the transaction wall refused the site (its diagnostic is the report).
+sema_clock_record_read: fn(receiver_value: TExpr, method: String, args: [CallArg], span: Span, check: ^SemaBodyCheck) -> Bool? Never! {
+    result: if {
+        method == "now" && args.len() == 0 -> Val(Type.Int)
+        (method == "tick" || method == "advance") && args.len() == 1 -> Val(Type.Int)
+        method == "wait" && args.len() == 1 -> Val(Type.Int)
+        else -> None
+    }
+    if result == None -> return None
+    effect_name: if sema_clock_is_deterministic(receiver_value.ty) || sema_clock_is_system(receiver_value.ty) -> "" else -> "Time"
+    Val(sema_effect_record_clock_intrinsic(result, effect_name, "Clock.{method}", span, check))
+}
+
+sema_clock_retag: fn(value: ^^TExpr, tagged: Type, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
+    ^retagged: value.move()
+    if retagged.ty == .Result(_, err) {
+        tree_expr_retype(retagged, Type.Result{ok: tagged, err: err})
+        return Val(retagged)
+    }
+    tree_expr_retype(retagged, tagged)
+    sema_expr_expected(retagged, expected, check.environment.*, check.program.*, check.diagnostics)
+}
+
+sema_call_try_clock_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
+    if sema_clock_handle_receiver_name(receiver_value.ty) != "Clock" {
+        return SemaMethodSpecialCheck{handled: false, value: None}
+    }
+    recorded: sema_clock_record_read(receiver_value, method, args, span, check) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    if !recorded -> return SemaMethodSpecialCheck{handled: true, value: None}
+    ^value: sema_call_check_method(check, receiver, method, span, [Type]{}, [Type]{}, args, span, expected)
+    SemaMethodSpecialCheck{handled: true, value: value}
 }
 
 // A compile-time value's call site `fact` whose callee reads ambient time or

@@ -4,7 +4,7 @@ worker: fn() {}
 
 run: fn() {
     ^tree: service.tree("drain-handoff")
-    endpoint: tree.worker("api", worker, capacity: 2) ?? panic("worker")
+    endpoint: tree.mailbox_worker("api", worker, capacity: 2) ?? panic("worker")
     tree.start() ?? panic("start")
     tree.send(endpoint, "queued") ?? panic("queued")
     // copy: the drain, the late send and the restart registration still use the endpoint.

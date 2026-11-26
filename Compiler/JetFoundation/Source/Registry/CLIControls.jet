@@ -21,6 +21,7 @@ JetCLIControlSpec: struct {
     help: String,
     choices: [String]{[String]{}},
     path: Bool{false},
+    default_on: Bool{false},
 }
 
 // The commands that compile a program, as a flag's `With` scope.
@@ -30,7 +31,7 @@ JET_CLI_CONTROL_COMPILE_SCOPE: "build/run/check/test/emit"
 JET_CLI_CONTROL_OPTIMIZE_SCOPE: "build/run/test/inspect decisions"
 
 JET_CLI_CONTROLS: #run { [JetCLIControlSpec]{
-    {name: "keep_going", variable: "JET_KEEP_GOING", value: JetCLIFlagValue.Bool, scope: JET_CLI_CONTROL_COMPILE_SCOPE, help: "Go on past the first failure through every phase, and report every failure"},
+    {name: "keep_going", variable: "JET_KEEP_GOING", value: JetCLIFlagValue.Bool, scope: JET_CLI_CONTROL_COMPILE_SCOPE, help: "Go on past the first failure through every phase, and report every failure", default_on: true},
     {name: "keep_going_report", variable: "JET_KEEP_GOING_REPORT", value: JetCLIFlagValue.Value, scope: JET_CLI_CONTROL_COMPILE_SCOPE, help: "Write the --keep-going failure census, one TSV row per failure, to PATH", path: true},
     {name: "keep_going_skip", variable: "JET_KEEP_GOING_SKIP", value: JetCLIFlagValue.Repeated, scope: JET_CLI_CONTROL_COMPILE_SCOPE, help: "Leave ITEM out of the --keep-going collector; repeat for more"},
     {name: "trace", variable: "JET_TRACE_FILE", value: JetCLIFlagValue.Optional, scope: JET_CLI_CONTROL_COMPILE_SCOPE, help: "Stream the compiler's phases and progress to stderr, or to FILE with --trace=FILE; --trace=off streams nothing", path: true},

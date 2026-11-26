@@ -500,6 +500,118 @@ run_all_canceled: fn() -> IOError Never! {
     Set.from([String]{"terminal", "resize", "raw"})
 }
 
+priv terminal_fact_edit_distance: fn(left: String, right: String) -> Int Never! {
+    a: left.bytes()
+    b: right.bytes()
+    m: a.len()
+    n: b.len()
+    ^prev: loop j in 0..n -> j
+    ^prev2: loop j in 0..n -> j
+    loop i in 1..m {
+        ^curr: loop j in 0..n -> if j == 0 -> i else -> 0
+        loop j in 1..n {
+            cost: if a[i - 1] == b[j - 1] -> 0 else -> 1
+            ^best: prev[j] + 1
+            if curr[j - 1] + 1 < best -> best = curr[j - 1] + 1
+            if prev[j - 1] + cost < best -> best = prev[j - 1] + cost
+            if i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1] {
+                if prev2[j - 2] + 1 < best -> best = prev2[j - 2] + 1
+            }
+            curr[j] = best
+        }
+        prev2 = prev.move()
+        prev = curr.move()
+    }
+    prev[n]
+}
+
+priv terminal_fact_suggestion: fn(key: String) -> String? Never! {
+    facts: [String]{"terminal", "resize", "raw"}
+    loop fact in facts {
+        if fact == key -> return None
+    }
+    ^best: String?{None}
+    ^best_distance: 3
+    loop fact in facts {
+        distance: terminal_fact_edit_distance(key, fact)
+        if distance < best_distance {
+            best_distance = distance
+            best = Val(fact.copy())
+        }
+    }
+    best
+}
+
+// A string key one or two edits from a stable terminal fact is a typo of that
+// fact (E0302); any other string key stays an open preview fact.
+priv TerminalFactKey: struct {
+    impl Marker {
+        sites: [.Method],
+
+        check: fn(self, call: CompilerCall) {
+            if call.args.len() != 1 -> return None
+            if call.args[0].value == .Val(heard) && heard == .Text(key) {
+                if terminal_fact_suggestion(key) == .Val(fact) {
+                    reject(TerminalFactTypo{key: key, fact: fact}, at: call.args[0])
+                }
+            }
+        }
+    }
+}
+
+priv TerminalFactTypo: struct {
+    key: String,
+    fact: String,
+
+    impl Diagnostic {
+        code: "E0302",
+
+        what: fn(self) -> String { "terminal fact key `{self.key}` looks like `{self.fact}`" }
+
+        why: fn(self) -> String {
+            "preview string keys stay open, but close spellings of stable facts are probably typos"
+        }
+
+        fix: fn(self) -> String { "write `TerminalFact.{self.fact}`" }
+    }
+}
+
+/// The terminal facts a `ProcessSpec.abilities()` launch supports. Stable keys
+/// use `TerminalFact`; preview string keys stay open.
+TerminalFactSet: struct {
+    priv facts: Set<String>,
+
+    #TerminalFactKey has: fn(self, key: String) -> Bool Never! { self.facts.has(key) }
+}
+
+priv KeepOpenArgs: struct {
+    impl Marker {
+        sites: [.Method],
+
+        check: fn(self, call: CompilerCall) {
+            if call.args.len() != 1 && call.args.len() != 2 {
+                reject(KeepOpenArity{got: call.args.len()}, at: call.name)
+            }
+        }
+    }
+}
+
+priv KeepOpenArity: struct {
+    got: Int,
+
+    impl Diagnostic {
+        code: "E0104",
+
+        what: fn(self) -> String { "`keep_open` expects 1 or 2 arguments, got {self.got}" }
+
+        why: fn(self) -> String {
+            "`keep_open(handle)` keeps the handle at its own descriptor number; `keep_open(handle, at: slot)` keeps it at `slot`"
+        }
+
+        fix: fn(self) -> String { "pass the handle, then optionally `at:` and a descriptor slot" }
+    }
+}
+
 // The compiler's `ProcessSpec`: an opaque runtime handle over a command, its
 // environment, streams and limits. Every builder takes `^^self` by move and
 // hands the spec directly to its `jet.runtime.process` leaf without copying;
@@ -563,6 +675,12 @@ impl ProcessSpec {
     /// Delegates an authority policy to the child launch plan.
     under: fn(^^self, authority: Authority) -> ProcessSpec Never! { rt.spec_under(self, authority) }
 
+    /// Passes `handle` to the child process open at `at`, or at its own
+    /// descriptor number when `at` is omitted.
+    #KeepOpenArgs keep_open: fn(^^self, handle: ^^files.Directory | files.FileLock | files.FileReader | files.FileWriter, *, at: Int?{None}) -[FS]> ProcessSpec Never! {
+        files.keep_open_spec(self, handle, at)
+    }
+
     /// Configures the child's standard input stream mode.
     stdin: fn(^^self, mode: ProcessStreamMode) -> ProcessSpec Never! { rt.spec_stdin(self, mode) }
 
@@ -588,6 +706,9 @@ impl ProcessSpec {
     /// spec.plan() == .Err(.InvalidInput(_)) // => true
     /// ```
     plan: fn(self) -> ProcessPlan IOError! { rt.spec_plan(self) }
+
+    /// The open keyed report of what a terminal-backed launch can use.
+    abilities: fn(self) -> TerminalFactSet Never! { TerminalFactSet{facts: __spec_abilities(self)} }
 
     /// Runs the child, waits for it and answers its receipt.
     run: fn(self) -[Exec]> ProcessReceipt IOError! { rt.spec_run(self) }

@@ -13,12 +13,15 @@ use jet_foundation.[
     SymbolID,
     SymbolLocalKeys,
     TFuncKind,
+    diagnostic_from_registry,
+    module_text,
     symbol_is_local,
     symbol_local_keys_intern,
     symbol_local_keys_text_at,
+    symbol_table_key,
 ]
 
-// JET_KEEP_GOING (SemaRegistrationGraph.keep_going): the typed trap that
+// Keep-going (SemaRegistrationGraph.keep_going): the typed trap that
 // stands in for a function whose check failed. It is `func` checked again
 // with its body replaced by one `todo` (a Never value of the return type that
 // lowers to an unreachable stop) and its contracts dropped, so its signature,
@@ -215,4 +218,80 @@ sema_check_registered_method_stub: fn(declaration: Func, memory_plan: SemaFuncti
     ^stub: sema_keep_going_registered_stub(declaration, memory_plan, None, owner_id, function_kind, raw_protocol_return, environment, program, scopes, host_hooks)
     scopes.location_function = previous_location
     stub
+}
+
+// Records a runtime stop caught at a sema task join (E3010/E3012/panic) as
+// that item's failure diagnostic and incomplete result so keep-going replaces
+// it with a typed trap and the rest of the check run continues.
+sema_keep_going_stop_result: fn(span: Span, label: String, function_key: String, reason: String, diagnostics: ^[Diagnostic]) -> SemaFunctionResult Never! {
+    diagnostics.push(
+        diagnostic_from_registry(
+            "E0003",
+            Val(span),
+            "semantic checking stopped on {label}: {reason}",
+            "the compiler hit an internal runtime stop while checking this item; keep-going captures it per item so the rest of the check continues",
+            "report this compiler stop with the item shown above",
+        ),
+    )
+    SemaFunctionResult{
+        value: None,
+        complete: false,
+        exact_int_reachable: false,
+        copy_events: [SemaCopyEvent]{},
+        comptime_body_sources: [SemaComptimeBodySource]{},
+        compute_facts: sema_compute_facts_empty(function_key),
+        failure: None,
+        incomplete_reasons: [String]{"runtime stop during sema: {reason}"},
+    }
+}
+
+// Builds the failed SemaClaimedBody packet for a job whose sema worker task
+// stopped with a runtime stop (E3010/E3012/panic), so ModuleChecks installs a
+// typed trap for that item while every other item continues checking.
+sema_keep_going_stop_packet: fn(graph: SemaRegistrationGraph, module_index: Int, claim: SemaBodyClaim, reason: String) -> SemaClaimedBody Never! {
+    ^span: Span{start: 0, end: 0}
+    ^label: "item"
+    ^job_index: 0
+    ^function_key: ""
+    if claim.job == {
+        .TopLevel(item_index) -> {
+            job_index = item_index
+            if item_index >= 0 && item_index < graph.modules[module_index].program.items.len() {
+                if graph.modules[module_index].program.items[item_index] == .Func(func) {
+                    span = func.span
+                    label = "function `{func.name}`"
+                    function_key = sema_check_top_level_key(module_text(graph.module_table, graph.modules[module_index].module_identity), func.name)
+                }
+            }
+        }
+        .NominalMethod(ordinal, owner, row) -> {
+            job_index = ordinal
+            method: graph.modules[module_index].nominals[owner].methods[row]
+            span = method.declaration.span
+            label = "method `{method.symbol.name}`"
+            function_key = symbol_table_key(graph.symbols, method.symbol.id)
+        }
+        .ImplMethod(ordinal, owner, row) -> {
+            job_index = ordinal
+            method: graph.modules[module_index].impls[owner].methods[row]
+            span = method.declaration.span
+            label = "method `{method.symbol.name}`"
+            function_key = symbol_table_key(graph.symbols, method.symbol.id)
+        }
+    }
+    ^diagnostics: [Diagnostic]{}
+    ^failed: sema_keep_going_stop_result(span, label, function_key, reason, diagnostics)
+    body: SemaParallelBody{
+        job_index: job_index,
+        checked: Val(failed.move()),
+        diagnostics: diagnostics.move(),
+        call_facts: [SemaCallSiteFact]{},
+        comptime_requests: [SemaComptimeRequest]{},
+        name_references: [SemaNameReferenceFact]{},
+        method_input: None,
+        wanted_hooks: false,
+        memory_position: None,
+        memory_known: false,
+    }
+    SemaClaimedBody{body: body.move(), position: claim.position, delta: None}
 }

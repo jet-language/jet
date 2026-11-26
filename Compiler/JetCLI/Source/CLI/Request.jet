@@ -1160,8 +1160,10 @@ jet_cli_reach_sources: fn(root: String, entry: String, files: ^[JetDriverAuthori
         if relative != entry && jet_cli_is_script(source) -> next
         carrier: jet_driver_inline_package(source)
         if carrier.found || carrier.error != None -> return Ok(false)
-        if jet_cli_parsed_program(source) == .Val(program) {
-            if !jet_cli_reached_paths(root, relative, program, pending) -> return Ok(false)
+        if source.contains("use") || source.contains("routes") {
+            if jet_cli_parsed_program(source) == .Val(program) {
+                if !jet_cli_reached_paths(root, relative, program, pending) -> return Ok(false)
+            }
         }
         ^at: files.len()
         loop (position, file) in files {

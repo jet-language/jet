@@ -1116,41 +1116,50 @@ jet_cli_debug_eval_held_start: fn(held: JetCLIDebugEvalHeldShared, entry: String
     if entry == "" {
         return
     }
-    if jet_cli_debug_eval_held_cut_claim(held) {
-        if jet_cli_debug_eval_options(entry, argv, color: color) == {
-            .Ok(options) -> {
-                cutting: task jet_cli_debug_eval_held_cut_prepare(held, "{entry}", options, color: color)
-                cutting.detach()
-            }
-            .Err(_) -> {
-                uncut: JetCLIDebugEvalHeldOpen{held: None, missed: None}
-                jet_cli_debug_eval_held_cut_done(held, uncut)
-            }
-        }
+    if jet_cli_debug_eval_held_cut_claim(held, program: program) {
+        cutting: task jet_cli_debug_eval_held_cut_prepare_argv(held, "{entry}", argv, color: color)
+        cutting.detach()
+        return
     }
     if !jet_cli_debug_eval_held_claim(held, program: program) {
         return
     }
-    options: jet_cli_debug_eval_options(entry, argv, color: color) ?? {
-        unopened: JetCLIDebugEvalHeldOpen{held: None, missed: None}
-        jet_cli_debug_eval_held_done(held, unopened)
-        return
-    }
-    opening: task jet_cli_debug_eval_held_prepare(held, "{entry}", options, color: color)
+    opening: task jet_cli_debug_eval_held_prepare_argv(held, "{entry}", argv, color: color)
     opening.detach()
 }
 
 // Whether the held check of the package's cut `held` is to be opened now
 // (jet_cli_debug_eval_held_start), when it is marked opening and a stale
-// one is dropped.
-jet_cli_debug_eval_held_cut_claim: fn(held: JetCLIDebugEvalHeldShared) -[FS]> Bool Never! {
+// one is dropped. Records `program` when true so the full-program held check
+// opens right after the cut finishes without competing with the first stop.
+jet_cli_debug_eval_held_cut_claim: fn(held: JetCLIDebugEvalHeldShared, program: Bool{false}) -[FS]> Bool Never! {
     ^permit: held.slot.guard_edit()
+    if program -> permit.value.program = true
     if permit.value.cut_opening || !jet_cli_debug_eval_held_stale(permit.value.cut) || jet_cli_debug_eval_held_missed(permit.value.cut_missed) {
         return false
     }
     permit.value.cut = None
     permit.value.cut_opening = true
     true
+}
+
+// Resolves build options on the background task so session startup does no
+// synchronous source read before launching the target, opens the cut, wakes
+// any first-stop waiter, and then opens the full-program held check if needed.
+priv jet_cli_debug_eval_held_cut_prepare_argv: fn(held: JetCLIDebugEvalHeldShared, entry: String, argv: [String], color: Bool{false}) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> Never! {
+    options: jet_cli_debug_eval_options(entry, argv, color: color) ?? {
+        uncut: JetCLIDebugEvalHeldOpen{held: None, missed: None}
+        if jet_cli_debug_eval_held_cut_finish(held, uncut) {
+            unopened: JetCLIDebugEvalHeldOpen{held: None, missed: None}
+            jet_cli_debug_eval_held_done(held, unopened)
+        }
+        return
+    }
+    opening: task jet_cli_debug_eval_held_cut_open(entry, color, options)
+    opened: opening.join() ?? JetCLIDebugEvalHeldOpen{held: None, missed: None}
+    if jet_cli_debug_eval_held_cut_finish(held, opened) {
+        jet_cli_debug_eval_held_prepare(held, entry, options, color: color)
+    }
 }
 
 // The held check of the package's cut of `entry` opened with the image's
@@ -1174,6 +1183,26 @@ jet_cli_debug_eval_held_cut_done: fn(held: JetCLIDebugEvalHeldShared, opened: ^^
     held.opened.notify_all()
 }
 
+// Ends the cut open and atomically claims the full-program held open when
+// `program` is enabled and stale, before waking waiters, so no waiter can
+// observe both `cut_opening` and `opening` false while the full open is due.
+priv jet_cli_debug_eval_held_cut_finish: fn(held: JetCLIDebugEvalHeldShared, opened: ^^JetCLIDebugEvalHeldOpen) -[FS]> Bool Never! {
+    ^permit: held.slot.guard_edit()
+    permit.value.cut = opened.held.move()
+    permit.value.cut_missed = opened.missed.move()
+    if !permit.value.asked && permit.value.seed == None -> permit.value.seed = opened.seed.move()
+    permit.value.cut_opening = false
+    ^start_full: false
+    if permit.value.program && !permit.value.opening && jet_cli_debug_eval_held_stale(permit.value.held) && !jet_cli_debug_eval_held_missed(permit.value.missed) {
+        permit.value.held = None
+        permit.value.read = [String:[U8]]{}
+        permit.value.opening = true
+        start_full = true
+    }
+    held.opened.notify_all()
+    start_full
+}
+
 // The held check of the package of `entry` cut to Core and its carrier, as
 // jet_cli_debug_eval_alone cuts it for an expression that names nothing of
 // it (each of its sources keeps no item, the entry its `package` block and
@@ -1181,23 +1210,40 @@ jet_cli_debug_eval_held_cut_done: fn(held: JetCLIDebugEvalHeldShared, opened: ^^
 // (JetCLIDebugEvalHeldItems), and its held IR program built with the
 // image's build `options`, as jet_cli_debug_eval_held_open opens the
 // program's. Its stamp is the package's sources, not their cut, which seed
-// the session's first ask (JetCLIDebugEvalHeldOpen.seed).
+// the session's first ask (JetCLIDebugEvalHeldOpen.seed). Reuses the already
+// held snapshot in place instead of re-reading and re-parsing disk sources.
 jet_cli_debug_eval_held_cut_open: fn(entry: String, color: Bool, options: BuildOptions) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> JetCLIDebugEvalHeldOpen {
     since: debug_eval_time.unix_ns()
-    snapshot: jet_cli_debug_eval_snapshot(entry, color) ?? return JetCLIDebugEvalHeldOpen{held: None, missed: None}
-    stamp: jet_cli_debug_eval_stamp(snapshot, since)
-    seed: jet_cli_debug_eval_stamp(snapshot, since)
+    ^snapshot: jet_cli_debug_eval_snapshot(entry, color) ?? return JetCLIDebugEvalHeldOpen{held: None, missed: None}
+    ^stamps: jet_cli_debug_eval_stamp_pair(snapshot, since)
+    stamp: stamps.stamp.move()
+    seed: stamps.seed.move()
     read: jet_cli_debug_eval_digests(snapshot)
-    members: jet_cli_debug_eval_members_of(snapshot.move()) ?? return JetCLIDebugEvalHeldOpen{held: None, missed: Val(stamp.move())}
-    paths: members.paths.move()
-    declared: jet_cli_debug_eval_declared(members.sources.move())
+    ^entry_root: -1
+    loop (idx, root) in snapshot.roots {
+        if root.identity == snapshot.entry_root_identity {
+            entry_root = idx
+            break
+        }
+    }
+    if entry_root < 0 -> return JetCLIDebugEvalHeldOpen{held: None, missed: Val(stamp.move())}
+    picked: jet_cli_debug_eval_members(snapshot.roots[entry_root].files, snapshot.entry_path)
+    if picked.len() == 0 -> return JetCLIDebugEvalHeldOpen{held: None, missed: Val(stamp.move())}
+    ^paths: [String]{}
+    ^sources: [String]{}
+    loop row in picked {
+        paths.push("{snapshot.roots[entry_root].files[row].path}")
+        sources.push(snapshot.roots[entry_root].files[row].source.move())
+        snapshot.roots[entry_root].files[row].source = ""
+    }
+    declared: jet_cli_debug_eval_declared(sources.move())
     ^cut: jet_cli_debug_eval_alone("", [NativeEvalBinder]{}, declared) ?? return JetCLIDebugEvalHeldOpen{held: None, missed: Val(stamp.move())}
-    ^overlays: [JetDriverSourceDocument]{}
+    if cut.len() != picked.len() -> return JetCLIDebugEvalHeldOpen{held: None, missed: Val(stamp.move())}
     loop cut.len() > 0 {
         piece: cut.pop() ?? break
-        overlays.push(JetDriverSourceDocument{path: "{paths[cut.len()]}", source: piece})
+        snapshot.roots[entry_root].files[picked[cut.len()]].source = piece
     }
-    prepared: jet_cli_prepare_overlays(entry, entry, overlays.move(), color, None, JetDriverCompileMode.Check, appended: true)
+    prepared: jet_cli_prepare_request(snapshot.move(), color, None, JetDriverCompileMode.Check)
     compiled: jet_cli_compile_prepared(prepared, None, None, hold_check_state: true) ?? return JetCLIDebugEvalHeldOpen{held: None, missed: Val(stamp.move())}
     if compiled.move() == {
         .Refused(_) -> return JetCLIDebugEvalHeldOpen{held: None, missed: Val(stamp.move())}
@@ -1216,17 +1262,26 @@ jet_cli_debug_eval_held_cut_open: fn(entry: String, color: Bool, options: BuildO
 // Whether the held check `held` is to be opened now
 // (jet_cli_debug_eval_held_start), when it is marked opening and a stale
 // one is dropped. None opens before a start says `program`, that the
-// session's image records its sources.
+// session's image records its sources, or while the cut is still opening.
 jet_cli_debug_eval_held_claim: fn(held: JetCLIDebugEvalHeldShared, program: Bool{false}) -[FS]> Bool Never! {
     ^permit: held.slot.guard_edit()
     if program -> permit.value.program = true
-    if !permit.value.program || permit.value.opening || !jet_cli_debug_eval_held_stale(permit.value.held) || jet_cli_debug_eval_held_missed(permit.value.missed) {
+    if !permit.value.program || permit.value.cut_opening || permit.value.opening || !jet_cli_debug_eval_held_stale(permit.value.held) || jet_cli_debug_eval_held_missed(permit.value.missed) {
         return false
     }
     permit.value.held = None
     permit.value.read = [String:[U8]]{}
     permit.value.opening = true
     true
+}
+
+priv jet_cli_debug_eval_held_prepare_argv: fn(held: JetCLIDebugEvalHeldShared, entry: String, argv: [String], color: Bool{false}) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> Never! {
+    options: jet_cli_debug_eval_options(entry, argv, color: color) ?? {
+        unopened: JetCLIDebugEvalHeldOpen{held: None, missed: None}
+        jet_cli_debug_eval_held_done(held, unopened)
+        return
+    }
+    jet_cli_debug_eval_held_prepare(held, entry, options, color: color)
 }
 
 // The held check of the program of `entry` opened with the image's build
@@ -1669,9 +1724,10 @@ jet_cli_debug_eval_held_open: fn(entry: String, color: Bool, options: BuildOptio
     if compiled.move() == {
         .Refused(_) -> return JetCLIDebugEvalHeldOpen{held: None, missed: None}
         .Compiled(compile, snapshot) -> {
-            ^opened: jet_cli_debug_eval_held_of(compile.move(), jet_cli_debug_eval_stamp(snapshot, since), options)
+            ^stamps: jet_cli_debug_eval_stamp_pair(snapshot, since)
+            ^opened: jet_cli_debug_eval_held_of(compile.move(), stamps.stamp.move(), options)
             opened.read = jet_cli_debug_eval_digests(snapshot)
-            opened.seed = Val(jet_cli_debug_eval_stamp(snapshot, since))
+            opened.seed = Val(stamps.seed.move())
             return opened
         }
     }
@@ -1727,6 +1783,35 @@ jet_cli_debug_eval_held_change: fn(stamp: JetCLIDebugEvalHeldStamp) -[FS]> Strin
         if now != source -> return Val(file)
     }
     None
+}
+
+priv JetCLIDebugEvalStampPair: struct {
+    stamp: JetCLIDebugEvalHeldStamp,
+    seed: JetCLIDebugEvalHeldStamp,
+}
+
+// Two identical stamps of `snapshot` built with one stat per file.
+priv jet_cli_debug_eval_stamp_pair: fn(snapshot: JetDriverAuthorizedSourceSnapshot, since: Int) -[FS]> JetCLIDebugEvalStampPair Never! {
+    ^sources_a: [String:String]{}
+    ^sources_b: [String:String]{}
+    ^keys_a: [String:String]{}
+    ^keys_b: [String:String]{}
+    loop root in snapshot.roots {
+        loop file in root.files {
+            sources_a["{file.path}"] = file.source
+            sources_b["{file.path}"] = file.source
+            found: debug_eval_files.stat(file.path) ?? next
+            written: found.modified.to_unix_ns() ?? next
+            if written < since - JET_CLI_DEBUG_EVAL_RACY_NS && jet_cli_identity_key("file", found) == file.identity {
+                keys_a["{file.path}"] = file.identity
+                keys_b["{file.path}"] = file.identity
+            }
+        }
+    }
+    JetCLIDebugEvalStampPair{
+        stamp: JetCLIDebugEvalHeldStamp{sources: sources_a.move(), keys: keys_a.move()},
+        seed: JetCLIDebugEvalHeldStamp{sources: sources_b.move(), keys: keys_b.move()},
+    }
 }
 
 // The sources of the snapshot `snapshot`, read no earlier than the time

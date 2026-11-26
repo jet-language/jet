@@ -425,6 +425,7 @@ sema_taskgroup_check_statement: fn(name: String, name_span: Span, args: TaskGrou
 // children have nothing to run on: a web build refuses the group rather than
 // emitting code that cannot run.
 sema_taskgroup_web_refused: fn(span: Span, check: ^SemaBodyCheck) -> Bool {
+    // Snapshot: target machine selection lives on the full program graph, so a lone Snapshot program has none.
     if check.program.registration_graph.mode == .Snapshot -> return false
     machine: check.program.registration_graph.target_machine
     if machine.name != "wasm.browser" -> return false
@@ -1290,7 +1291,7 @@ sema_taskgroup_check_task_method: fn(receiver: Expr, receiver_value: TExpr, meth
     ^value: sema_tree_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{}}, span)
     checked: sema_expression_call_expected(value, expected, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     ^effect_name: if join -> "Time.Wait" else -> ""
-    if !sema_stream_handle_effect_fact(check, "Task.{method}", span, result_type, effect_name) {
+    if !sema_handle_effect_fact(check, "Task.{method}", span, result_type, effect_name) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     SemaMethodSpecialCheck{handled: true, value: Val(checked)}
@@ -1315,14 +1316,14 @@ sema_taskgroup_check_task_control: fn(receiver: Expr, receiver_value: TExpr, met
     if args.len() == 1 {
         params.push(SemaCallParam{label: "mode", name: "mode", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(Type.Named{name: "TaskPauseMode"}), variadic: false})
     }
-    typed: sema_stream_handle_checked_args("Task.{method}", params, args, None, None, AccessConvention.Read, -1, span, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    typed: sema_handle_checked_args("Task.{method}", params, args, None, None, AccessConvention.Read, -1, span, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     if !sema_ownership_check_call_receiver(check, receiver, AccessConvention.Read, span) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     result_type: Type.Named{name: "Unit"}
     ^value: sema_tree_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: typed}, span)
     checked: sema_expression_call_expected(value, expected, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    if !sema_stream_handle_effect_fact(check, "Task.{method}", span, result_type, "") {
+    if !sema_handle_effect_fact(check, "Task.{method}", span, result_type, "") {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     SemaMethodSpecialCheck{handled: true, value: Val(checked)}
@@ -1479,11 +1480,12 @@ sema_readiness_tree: fn(table: ^^SemaReadinessTable, branches: ^^[SemaStatementR
         ^branch: owned_branches.pop() ?? return None
         ^body: [TStmt]{}
         ^selected: 0
-        if arm == {
+        if arm.move() == {
             .Receive(local, receiver, ordinal) -> {
                 selected = ordinal
+                local_span: local.span
                 payload: sema_tree_node(element, TExprKind.HostCall{call: THostCall.OptionProbe{inner: sema_readiness_result_field(result_local, result_ty, 1, payload_ty, span), kind: TOptionProbe.Unwrap}}, span)
-                body.push(TStmt.Let{local: local.copy(), let_ty: TLetTy.Annotated{ty: element.copy(), wrapper: TLetWrapper.Plain}, init: payload, gc_promotion: None, gc_transferred: false, span: local.span})
+                body.push(TStmt.Let{local: local, let_ty: TLetTy.Annotated{ty: element.copy(), wrapper: TLetWrapper.Plain}, init: payload, gc_promotion: None, gc_transferred: false, span: local_span})
                 builder = sema_tree_node(builder_ty, TExprKind.SelectRecv{builder: builder.move(), channel: receiver}, span)
             }
             .After(duration, ordinal) -> {

@@ -738,6 +738,22 @@ ServiceTree: struct {
         group(self, name, workers)
     }
 
+    #ServiceWorkerShape worker: fn<Q, R>(^self, name: String, handler: ^^fn(Q) -> R Err!, *, capacity: Int, handler_name: String{#run (handler.reflect()).name}) -> Endpoint<Q, R> ServiceError! {
+        typed_declare(self, name, handler_name, capacity, false, fn(state: ^Bool, message: Q) -> R Err! { handler(message) })
+    }
+
+    #ServiceWorkerShape stateful_worker: fn<S, Q, R>(^self, name: String, handler: ^^fn(^S, Q) -> R Err!, *, state: ^^S, capacity: Int, handler_name: String{#run (handler.reflect()).name}) -> Endpoint<Q, R> ServiceError! {
+        typed_declare(self, name, handler_name, capacity, state, handler)
+    }
+
+    #ServiceWorkerShape batched_worker: fn<Q>(^self, name: String, handler: ^^fn([Q]) Err!, *, batch: Int, wait: service_time.Duration, capacity: Int, handler_name: String{#run (handler.reflect()).name}) -> Endpoint<Q, ()> ServiceError! {
+        batched_declare(self, name, handler, handler_name, batch, wait, capacity)
+    }
+
+    #ServiceWorkerShape mailbox_worker: fn(^self, name: String, handler: fn(), *, capacity: Int, handler_name: String{#run (handler.reflect()).name}) -> ServiceEndpoint ServiceError! {
+        declare_worker(self, name, handler_name, capacity, None)
+    }
+
     start: fn(^self) ServiceError! { start(self) }
 
     stop: fn(^self) ServiceError! { stop(self) }
@@ -1055,6 +1071,56 @@ priv ServiceDirectoryName: struct {
         check: fn(self, call: CompilerCall) {
             if call.args.len() > 0 && !service_known_name(call.args[0].value) {
                 reject(ServiceShape{what_text: "service directory name is outside the checked builder shape", why_text: "service names must be non-empty visible literals of at most 256 bytes", fix_text: "use a literal visible service name"}, at: call.args[0])
+            }
+        }
+    }
+}
+
+priv ServiceWorkerShape: struct {
+    impl Marker {
+        sites: [.Method],
+
+        check: fn(self, call: CompilerCall) {
+            if call.args.len() >= 2 {
+                if !service_known_name(call.args[0].value) {
+                    reject(ServiceShape{what_text: "service worker name is outside the checked builder shape", why_text: "worker names must be non-empty visible literals of at most 256 bytes", fix_text: "use a literal visible worker name"}, at: call.args[0])
+                }
+                loop argument in call.args {
+                    if argument.label == .Val(label) {
+                        if label == "capacity" {
+                            if argument.value == .Val(heard) && heard == .Int(number) && number <= 0 {
+                                reject(ServiceShape{what_text: "service worker capacity is outside the checked builder shape", why_text: "a service worker needs a positive mailbox capacity", fix_text: "use a positive integer capacity"}, at: argument)
+                            }
+                        } else if label == "batch" {
+                            if argument.value == .Val(heard) && heard == .Int(size) && size <= 0 {
+                                reject(ServiceShape{what_text: "service worker batch is outside the checked builder shape", why_text: "a batch hands the handler at least one message", fix_text: "use a positive batch size"}, at: argument)
+                            }
+                        }
+                    }
+                }
+                if call.args[1].function == .Val(info) {
+                    if info.name == "" {
+                        reject(ServiceShape{what_text: "service worker handler is outside the checked builder shape", why_text: "service handlers must be top-level functions and cannot capture local values", fix_text: "pass a top-level function name"}, at: call.args[1])
+                    }
+                } else {
+                    reject(ServiceShape{what_text: "service worker handler lifetime is outside the checked builder shape", why_text: "service topology values must stay visible to sema before runtime construction", fix_text: "pass a top-level function, not a local or captured function value"}, at: call.args[1])
+                }
+            }
+        }
+    }
+}
+
+priv ServiceEndpointSend: struct {
+    impl Marker {
+        sites: [.Method],
+
+        check: fn(self, call: CompilerCall) {
+            if call.receiver == .Val(receiver) {
+                loop binding in receiver.type.generic_bindings {
+                    if binding.name == "R" && binding.type.name != "Unit" && binding.type.name != "()" {
+                        reject(ServiceShape{what_text: "service send reaches a worker that answers", why_text: "this worker answers each message with {binding.type.name}, and `send` has no place for the answer", fix_text: "use `endpoint.call(message)`, which returns the answer"}, at: receiver)
+                    }
+                }
             }
         }
     }
@@ -5385,10 +5451,6 @@ pending_rollback_error: fn(error: ServiceError, authority_error: ServiceError?, 
 
 // Workers are declared before start. The tree mailbox and the endpoint
 // registry share one bounded channel per worker.
-worker: fn(tree: ^ServiceTree, name: String, handler: fn(), handler_name: String, capacity: Int) -> ServiceEndpoint ServiceError! {
-    declare_worker(tree, name, handler_name, capacity, None)
-}
-
 // Checks a worker declaration and registers its route, not yet published.
 priv declare_worker: fn(tree: ^ServiceTree, name: String, handler_name: String, capacity: Int, room: service_tasks.Semaphore?) -> ServiceEndpoint ServiceError! {
     if tree.started -> return Err(ServiceError.Policy("cannot add workers after start"))
@@ -5439,9 +5501,36 @@ Endpoint: struct<Q, R> {
     priv id: ServiceEndpoint,
     priv inbox: service_actor.Actor<Job<Q, R>>,
     priv room: service_tasks.Semaphore,
+    priv capacity: Int,
+    priv starved: Shared<Bool>,
+    priv wake: service_tasks.Semaphore,
+    priv feeder_started: Shared<Bool>,
+
+    /// Queues `message` for the worker behind this endpoint, which runs its
+    /// handler on it after every message sent before.
+    #ServiceEndpointSend send: fn(self, message: ^^Q) ServiceError! {
+        endpoint_typed_send<Q, R>(self, message)
+    }
+
+    /// Sends `message` and waits for the handler's answer. A handler that
+    /// fails while handling it leaves the outcome unknown: Ambiguous.
+    call: fn(self, message: ^^Q) -> R ServiceError! {
+        endpoint_typed_call<Q, R>(self, message)
+    }
 
     impl ServiceWorkerRef {
         __service_endpoint: fn(self) -> ServiceEndpoint Never! { self.id }
+    }
+}
+
+impl Endpoint<Q: [Encode, Decode], R> {
+    /// Durably queues `message` under the idempotency `key`: the authority keeps
+    /// it as JSON until the worker's handler succeeds on it, across restarts. A
+    /// key already used answers its first receipt; a full mailbox is Full before
+    /// the authority keeps anything.
+    send_durable: fn(self, message: ^^Q, *, key: String) -> Delivery ServiceError! {
+        endpoint_ensure_feeder<Q, R>(self)
+        endpoint_typed_send_durable<Q, R>(self, message, key)
     }
 }
 
@@ -5464,36 +5553,21 @@ priv BatchState: struct<Q> {
 
 /// Declares a worker whose handler takes each message: `fn(q: Q)` or, for
 /// a worker that answers `call`, `fn(q: Q) -> R`.
-typed_worker: fn<Q, R>(tree: ^ServiceTree, name: String, handler: ^^fn(Q) -> R Err!, handler_name: String, capacity: Int) -> Endpoint<Q, R> ServiceError! {
-    typed_declare(tree, name, handler_name, capacity, false, fn(state: ^Bool, message: Q) -> R Err! { handler(message) }, None)
+priv typed_worker: fn<Q, R>(tree: ^ServiceTree, name: String, handler: ^^fn(Q) -> R Err!, handler_name: String, capacity: Int) -> Endpoint<Q, R> ServiceError! {
+    typed_declare(tree, name, handler_name, capacity, false, fn(state: ^Bool, message: Q) -> R Err! { handler(message) })
 }
 
 /// Declares a worker whose task keeps `state` for its handler `fn(s: ^S,
 /// q: Q) -> R`; a restart begins again from `state`.
-stateful_worker: fn<S, Q, R>(tree: ^ServiceTree, name: String, handler: ^^fn(^S, Q) -> R Err!, handler_name: String, state: ^^S, capacity: Int) -> Endpoint<Q, R> ServiceError! {
-    typed_declare(tree, name, handler_name, capacity, state, handler, None)
+priv stateful_worker: fn<S, Q, R>(tree: ^ServiceTree, name: String, handler: ^^fn(^S, Q) -> R Err!, handler_name: String, state: ^^S, capacity: Int) -> Endpoint<Q, R> ServiceError! {
+    typed_declare(tree, name, handler_name, capacity, state, handler)
 }
 
 /// Declares a worker whose handler takes a list of up to `batch` messages:
 /// once a message arrives, the worker waits at most `wait` for the rest of
 /// its batch. A failed batch is handed over again on each restart.
-batched_worker: fn<Q>(tree: ^ServiceTree, name: String, handler: ^^fn([Q]) Err!, handler_name: String, batch: Int, wait: service_time.Duration, capacity: Int) -> Endpoint<Q, ()> ServiceError! {
-    batched_declare(tree, name, handler, handler_name, batch, wait, capacity, None)
-}
-
-/// The worker forms whose message decodes: the endpoint's pending durable
-/// receipts reach the handler too. `tree.worker` picks these for a message
-/// type that is Decode, the only kind send_durable can have queued.
-durable_worker: fn<Q: Decode, R>(tree: ^ServiceTree, name: String, handler: ^^fn(Q) -> R Err!, handler_name: String, capacity: Int) -> Endpoint<Q, R> ServiceError! {
-    typed_declare(tree, name, handler_name, capacity, false, fn(state: ^Bool, message: Q) -> R Err! { handler(message) }, Val(message_decoder<Q>()))
-}
-
-durable_stateful_worker: fn<S, Q: Decode, R>(tree: ^ServiceTree, name: String, handler: ^^fn(^S, Q) -> R Err!, handler_name: String, state: ^^S, capacity: Int) -> Endpoint<Q, R> ServiceError! {
-    typed_declare(tree, name, handler_name, capacity, state, handler, Val(message_decoder<Q>()))
-}
-
-durable_batched_worker: fn<Q: Decode>(tree: ^ServiceTree, name: String, handler: ^^fn([Q]) Err!, handler_name: String, batch: Int, wait: service_time.Duration, capacity: Int) -> Endpoint<Q, ()> ServiceError! {
-    batched_declare(tree, name, handler, handler_name, batch, wait, capacity, Val(message_decoder<Q>()))
+priv batched_worker: fn<Q>(tree: ^ServiceTree, name: String, handler: ^^fn([Q]) Err!, handler_name: String, batch: Int, wait: service_time.Duration, capacity: Int) -> Endpoint<Q, ()> ServiceError! {
+    batched_declare(tree, name, handler, handler_name, batch, wait, capacity)
 }
 
 priv message_decoder: fn<Q: Decode>() -> (fn(String) -> Q ServiceError!) Never! {
@@ -5503,7 +5577,7 @@ priv message_decoder: fn<Q: Decode>() -> (fn(String) -> Q ServiceError!) Never! 
     }
 }
 
-priv batched_declare: fn<Q>(tree: ^ServiceTree, name: String, handler: ^^fn([Q]) Err!, handler_name: String, batch: Int, wait: service_time.Duration, capacity: Int, decoder: ^^(fn(String) -> Q ServiceError!)?) -> Endpoint<Q, ()> ServiceError! {
+priv batched_declare: fn<Q>(tree: ^ServiceTree, name: String, handler: ^^fn([Q]) Err!, handler_name: String, batch: Int, wait: service_time.Duration, capacity: Int) -> Endpoint<Q, ()> ServiceError! {
     if batch < 1 || batch > capacity {
         return Err(ServiceError.Policy("batch must be positive and no larger than the mailbox capacity"))
     }
@@ -5537,8 +5611,7 @@ priv batched_declare: fn<Q>(tree: ^ServiceTree, name: String, handler: ^^fn([Q])
     inbox: service_actor.spawn(BatchState<Q>{pending: [Q]{}, receipts: [PendingEntry]{}, round: 0}, step) ?? return Err(worker_task_failed(name))
     ^slot: timer_inbox.guard_edit()
     slot.value = Val(inbox)
-    feed_start(id, inbox, room, starved, wake, decoder)
-    Ok(Endpoint<Q, ()>{id: id, inbox: inbox, room: room})
+    Ok(Endpoint<Q, ()>{id: id, inbox: inbox, room: room, capacity: capacity, starved: starved, wake: wake, feeder_started: Shared<Bool>{false}})
 }
 
 priv worker_task_failed: fn(name: String) -> ServiceError Never! {
@@ -5549,7 +5622,7 @@ priv worker_task_failed: fn(name: String) -> ServiceError Never! {
 // leaves the mailbox before the handler runs, so a failing handler frees
 // its place too; the answer goes to the asker of a `call`, and a durable
 // receipt is committed once its handler succeeds.
-priv typed_declare: fn<S, Q, R>(tree: ^ServiceTree, name: String, handler_name: String, capacity: Int, state: ^^S, handler: ^^fn(^S, Q) -> R Err!, decoder: ^^(fn(String) -> Q ServiceError!)?) -> Endpoint<Q, R> ServiceError! {
+priv typed_declare: fn<S, Q, R>(tree: ^ServiceTree, name: String, handler_name: String, capacity: Int, state: ^^S, handler: ^^fn(^S, Q) -> R Err!) -> Endpoint<Q, R> ServiceError! {
     room: service_tasks.Semaphore.new(capacity)
     id: declare_worker(tree, name, handler_name, capacity, Val(room))
     starved: Shared<Bool>{false}
@@ -5568,8 +5641,16 @@ priv typed_declare: fn<S, Q, R>(tree: ^ServiceTree, name: String, handler_name: 
         current
     }
     inbox: service_actor.supervise(fn() -> S { state }, step, .Restart{limit: tree.budget_max}) ?? return Err(worker_task_failed(name))
-    feed_start(id, inbox, room, starved, wake, decoder)
-    Ok(Endpoint<Q, R>{id: id, inbox: inbox, room: room})
+    Ok(Endpoint<Q, R>{id: id, inbox: inbox, room: room, capacity: capacity, starved: starved, wake: wake, feeder_started: Shared<Bool>{false}})
+}
+
+// Starts the durable receipt feeder for this typed endpoint once its first
+// durable send proves `Q: Decode`.
+priv endpoint_ensure_feeder: fn<Q: Decode, R>(endpoint: Endpoint<Q, R>) Never! {
+    ^started: endpoint.feeder_started.guard_edit()
+    if started.value -> return
+    started.value = true
+    feed_start(endpoint.id, endpoint.inbox, endpoint.room, endpoint.starved, endpoint.wake, Val(message_decoder<Q>()))
 }
 
 // A handled receipt is Delivered. One whose commit fails stays handed over
@@ -5687,55 +5768,75 @@ priv arm_flush: fn<Q>(inbox: Shared<service_actor.Actor<Job<Q, ()>>?>, wait: ser
     timer.detach()
 }
 
-// The checks every typed send passes: a started tree, a current endpoint of
-// this tree, and a running worker that is not draining.
-priv typed_gate: fn(tree: ServiceTree, endpoint: ServiceEndpoint) -> TreeWorker ServiceError! {
-    if !tree.started -> return Err(ServiceError.NotStarted("service tree is not started"))
-    validate_tree_endpoint(tree, endpoint)
-    index: worker_slot(tree, endpoint) ?? return Err(ServiceError.Unknown("endpoint {endpoint.tree}/{endpoint.worker} is not in this tree"))
-    worker: tree.workers[index]
-    if !worker.running || worker_contains(tree.draining, endpoint.worker) {
-        return Err(ServiceError.NotStarted("worker `{worker.name}` is not running"))
+// The checks every typed send passes via the process endpoint registry: a
+// current registered endpoint that is started, not draining, and not
+// partitioned.
+priv endpoint_typed_gate: fn(endpoint: ServiceEndpoint) ServiceError! {
+    validate_endpoint_identity(endpoint.authority, endpoint.tree, endpoint.worker, endpoint.generation)
+    registry: service_registry().guard_read()
+    index: registry_index(registry.value.endpoints, endpoint.authority, endpoint.worker, endpoint.generation)
+    if index < 0 {
+        loop candidate in registry.value.endpoints {
+            if candidate.tree == endpoint.tree && candidate.worker == endpoint.worker && candidate.generation == endpoint.generation {
+                return Err(ServiceError.Revoked("service endpoint authority does not match the registered worker"))
+            }
+        }
+        loop candidate in registry.value.endpoints {
+            if candidate.tree == endpoint.tree && candidate.worker == endpoint.worker && candidate.authority == endpoint.authority && candidate.generation > endpoint.generation && !candidate.partitioned {
+                return Err(ServiceError.Stale("service endpoint generation {endpoint.generation} is no longer current"))
+            }
+        }
+        return Err(ServiceError.Unknown("endpoint {endpoint.tree}/{endpoint.worker} is not in this tree"))
     }
-    Ok(worker)
+    state: registry.value.endpoints[index]
+    if state.tree != endpoint.tree || state.worker != endpoint.worker {
+        return Err(ServiceError.Revoked("service endpoint authority does not match its tree"))
+    }
+    if state.partitioned {
+        return Err(ServiceError.Partitioned("service endpoint authority is partitioned"))
+    }
+    if state.generation != endpoint.generation {
+        return Err(ServiceError.Stale("service endpoint generation {endpoint.generation} is not current (current generation {state.generation})"))
+    }
+    if state.draining {
+        return Err(ServiceError.NotStarted("worker `{endpoint.worker}` is not running"))
+    }
+    if !state.started {
+        return Err(ServiceError.NotStarted("service tree is not started"))
+    }
+    Ok()
+}
+
+priv endpoint_typed_durable_store: fn(endpoint: ServiceEndpoint) -> String ServiceError! {
+    endpoint_typed_gate(endpoint)
+    bound_opt: authority_bound_store(endpoint)
+    bound: bound_opt ?? return Err(ServiceError.Policy("send_durable requires DurableAtLeastOnce delivery"))
+    Ok(bound)
 }
 
 // Passes the gate and takes a mailbox place; a full mailbox is Full.
-priv typed_queue: fn<Q, R>(tree: ServiceTree, endpoint: Endpoint<Q, R>) -> TreeWorker ServiceError! {
-    worker: typed_gate(tree, endpoint.id)
-    if !endpoint.room.try_acquire() -> return Err(full_tree_mailbox(worker.name, worker.capacity))
-    Ok(worker)
+priv endpoint_typed_queue: fn<Q, R>(endpoint: Endpoint<Q, R>) ServiceError! {
+    endpoint_typed_gate(endpoint.id)
+    if !endpoint.room.try_acquire() -> return Err(full_tree_mailbox(endpoint.id.worker, endpoint.capacity))
+    Ok()
 }
 
-/// Queues `message` for the worker behind `endpoint`, which runs its
-/// handler on it after every message sent before.
-typed_send: fn<Q, R>(tree: ServiceTree, endpoint: Endpoint<Q, R>, message: ^^Q) ServiceError! {
-    worker: typed_queue(tree, endpoint)
+priv endpoint_typed_send: fn<Q, R>(endpoint: Endpoint<Q, R>, message: ^^Q) ServiceError! {
+    endpoint_typed_queue(endpoint)
     endpoint.inbox.send(Job<Q, R>.Message{message: message, reply: None, receipt: None}) ?? {
         endpoint.room.release()
-        return Err(ServiceError.Unavailable("worker `{worker.name}` stopped after its restart budget"))
+        return Err(ServiceError.Unavailable("worker `{endpoint.id.worker}` stopped after its restart budget"))
     }
 }
 
-/// Sends `message` and waits for the handler's answer. A handler that
-/// fails while handling it leaves the outcome unknown: Ambiguous.
-call: fn<Q, R>(tree: ServiceTree, endpoint: Endpoint<Q, R>, message: ^^Q) -> R ServiceError! {
-    worker: typed_queue(tree, endpoint)
+priv endpoint_typed_call: fn<Q, R>(endpoint: Endpoint<Q, R>, message: ^^Q) -> R ServiceError! {
+    endpoint_typed_queue(endpoint)
     answer: endpoint.inbox.ask<R, Never>(fn(reply: service_actor.Reply<R>) -> Job<Q, R> Never! { Job<Q, R>.Message{message: message, reply: Val(reply), receipt: None} })
-    handled: answer ?? return Err(ServiceError.Ambiguous("worker `{worker.name}` failed while handling the call"))
+    handled: answer ?? return Err(ServiceError.Ambiguous("worker `{endpoint.id.worker}` failed while handling the call"))
     Ok(handled)
 }
 
-/// Durably queues `message` under the idempotency `key`: the authority keeps
-/// it as JSON until the worker's handler succeeds on it, across restarts. A
-/// key already used answers its first receipt; a full mailbox is Full before
-/// the authority keeps anything.
-typed_send_durable: fn<Q: [Encode, Decode], R>(tree: ServiceTree, endpoint: Endpoint<Q, R>, message: ^^Q, key: String) -> Delivery ServiceError! {
-    if tree.delivery != ServiceDelivery.DurableAtLeastOnce {
-        return Err(ServiceError.Policy("send_durable requires DurableAtLeastOnce delivery"))
-    }
-    authority: tree.state_authority ?? return Err(ServiceError.Policy("durable service delivery needs its injected authority"))
-    runtime: ServiceRuntime{store: delivery_store(authority.store), retention_ms: 0}
+priv endpoint_typed_send_durable: fn<Q: [Encode, Decode], R>(endpoint: Endpoint<Q, R>, message: ^^Q, key: String) -> Delivery ServiceError! {
     if !valid_service_text(key, 256) {
         return Err(ServiceError.Policy("durable send requires a non-empty idempotency key"))
     }
@@ -5743,8 +5844,9 @@ typed_send_durable: fn<Q: [Encode, Decode], R>(tree: ServiceTree, endpoint: Endp
     if !valid_record_payload(text) {
         return Err(ServiceError.Policy("service message exceeds the 1 MiB limit"))
     }
-    worker: typed_gate(tree, endpoint.id)
-    if !endpoint.room.try_acquire() -> return Err(full_tree_mailbox(worker.name, worker.capacity))
+    store: endpoint_typed_durable_store(endpoint.id)
+    runtime: ServiceRuntime{store: store, retention_ms: 0}
+    if !endpoint.room.try_acquire() -> return Err(full_tree_mailbox(endpoint.id.worker, endpoint.capacity))
     endpoint.room.release()
     delivery: runtime_send(runtime, endpoint.id, text, key)
     feed_wake(endpoint.id)
@@ -5766,9 +5868,9 @@ typed_send_durable: fn<Q: [Encode, Decode], R>(tree: ServiceTree, endpoint: Endp
         8,
     ) ?? panic("typed worker must declare")
     start(services) ?? panic("typed tree must start")
-    typed_send(services, record, 1) ?? panic("send 1")
-    typed_send(services, record, 2) ?? panic("send 2")
-    assert_eq(call(services, record, 3) ?? panic("call"), 30)
+    endpoint_typed_send(record, 1) ?? panic("send 1")
+    endpoint_typed_send(record, 2) ?? panic("send 2")
+    assert_eq(record.call(3) ?? panic("call"), 30)
     log: seen.guard_read()
     assert_eq(log.value, [Int]{1, 2, 3})
 }
@@ -5787,12 +5889,12 @@ typed_send_durable: fn<Q: [Encode, Decode], R>(tree: ServiceTree, endpoint: Endp
         100,
         8,
     ) ?? panic("stateful worker must declare")
-    assert(typed_send(services, total, 1) == .Err(ServiceError.NotStarted("service tree is not started")))
+    assert(endpoint_typed_send(total, 1) == .Err(ServiceError.NotStarted("service tree is not started")))
     start(services) ?? panic("stateful tree must start")
-    typed_send(services, total, 2) ?? panic("send 2")
-    assert_eq(call(services, total, 5) ?? panic("call 5"), 107)
-    assert(call(services, total, -1) == .Err(ServiceError.Ambiguous("worker `total` failed while handling the call")))
-    assert_eq(call(services, total, 1) ?? panic("call 1"), 101)
+    endpoint_typed_send(total, 2) ?? panic("send 2")
+    assert_eq(total.call(5) ?? panic("call 5"), 107)
+    assert(total.call(-1) == .Err(ServiceError.Ambiguous("worker `total` failed while handling the call")))
+    assert_eq(total.call(1) ?? panic("call 1"), 101)
 }
 
 #Test("a typed send past the mailbox capacity is Full") {
@@ -5811,17 +5913,17 @@ typed_send_durable: fn<Q: [Encode, Decode], R>(tree: ServiceTree, endpoint: Endp
         1,
     ) ?? panic("slow worker must declare")
     start(services) ?? panic("bounded tree must start")
-    typed_send(services, slow, 1) ?? panic("send 1")
+    endpoint_typed_send(slow, 1) ?? panic("send 1")
     _: entered.acquire()
-    typed_send(services, slow, 2) ?? panic("send 2")
-    assert(typed_send(services, slow, 3) == .Err(ServiceError.Full("mailbox for `slow` is full (capacity 1)")))
+    endpoint_typed_send(slow, 2) ?? panic("send 2")
+    assert(endpoint_typed_send(slow, 3) == .Err(ServiceError.Full("mailbox for `slow` is full (capacity 1)")))
     // Message 2 leaves the mailbox before its handler runs; once it has
     // entered, the call has a place.
     gate.release()
     gate.release()
     gate.release()
     _: entered.acquire()
-    assert_eq(call(services, slow, 4) ?? panic("call 4"), 4)
+    assert_eq(slow.call(4) ?? panic("call 4"), 4)
 }
 
 #Test("a batched worker hands over full batches at once, the rest after its wait, and a failed batch again") {
@@ -5848,9 +5950,9 @@ typed_send_durable: fn<Q: [Encode, Decode], R>(tree: ServiceTree, endpoint: Endp
         8,
     ) ?? panic("batched worker must declare")
     start(services) ?? panic("batched tree must start")
-    typed_send(services, bulk, 1) ?? panic("send 1")
-    typed_send(services, bulk, 2) ?? panic("send 2")
-    typed_send(services, bulk, 3) ?? panic("send 3")
+    bulk.send(1) ?? panic("send 1")
+    bulk.send(2) ?? panic("send 2")
+    bulk.send(3) ?? panic("send 3")
     _: done.acquire()
     _: done.acquire()
     log: sizes.guard_read()
@@ -5867,7 +5969,7 @@ typed_send_durable: fn<Q: [Encode, Decode], R>(tree: ServiceTree, endpoint: Endp
     set_delivery(services, delivery_durable()) ?? panic("durable delivery")
     store: state_store(path) ?? panic("state store")
     set_state_event_log(services, store, "events", 1, "reversible") ?? panic("state adapter")
-    record: durable_worker(
+    record: typed_worker(
         services,
         "record",
         fn(n: Int) -> Int Err! {
@@ -5886,11 +5988,11 @@ typed_send_durable: fn<Q: [Encode, Decode], R>(tree: ServiceTree, endpoint: Endp
         8,
     ) ?? panic("durable worker must declare")
     start(services) ?? panic("durable tree must start")
-    first: typed_send_durable(services, record, 1, "one") ?? panic("send 1")
+    first: record.send_durable(1, key: "one") ?? panic("send 1")
     _: done.acquire()
-    again: typed_send_durable(services, record, 1, "one") ?? panic("send 1 again")
+    again: record.send_durable(1, key: "one") ?? panic("send 1 again")
     assert(again.duplicate)
-    second: typed_send_durable(services, record, 2, "two") ?? panic("send 2")
+    second: record.send_durable(2, key: "two") ?? panic("send 2")
     _: done.acquire()
     runtime: ServiceRuntime{store: delivery_store(path), retention_ms: 0}
     _: runtime_retry(runtime, second) ?? panic("retry 2")
@@ -5911,7 +6013,7 @@ typed_send_durable: fn<Q: [Encode, Decode], R>(tree: ServiceTree, endpoint: Endp
     set_delivery(services, delivery_durable()) ?? panic("durable delivery")
     store: state_store(path) ?? panic("state store")
     set_state_event_log(services, store, "events", 1, "reversible") ?? panic("state adapter")
-    record: durable_worker(
+    record: typed_worker(
         services,
         "record",
         fn(n: Int) -> Int Err! {
@@ -5924,7 +6026,7 @@ typed_send_durable: fn<Q: [Encode, Decode], R>(tree: ServiceTree, endpoint: Endp
         8,
     ) ?? panic("durable worker must declare")
     start(services) ?? panic("durable tree must start")
-    first: typed_send_durable(services, record, 1, "one") ?? panic("send 1")
+    first: record.send_durable(1, key: "one") ?? panic("send 1")
     // A handled receipt that is not yet Delivered would pin the worker at
     // its generation through the handoff.
     assert((delivery_settle(first) ?? panic("status 1")) == DeliveryState.Delivered)
@@ -5932,8 +6034,8 @@ typed_send_durable: fn<Q: [Encode, Decode], R>(tree: ServiceTree, endpoint: Endp
     assert_eq(services.workers[0].endpoint.generation, 2)
     // The worker runs at generation 2 now; its endpoint there keeps the
     // same mailbox.
-    moved: Endpoint<Int, Int>{id: services.workers[0].endpoint.copy(), inbox: record.inbox, room: record.room}
-    second: typed_send_durable(services, moved, 2, "two") ?? panic("send 2")
+    moved: Endpoint<Int, Int>{id: services.workers[0].endpoint.copy(), inbox: record.inbox, room: record.room, capacity: record.capacity, starved: record.starved, wake: record.wake, feeder_started: record.feeder_started}
+    second: moved.send_durable(2, key: "two") ?? panic("send 2")
     assert((delivery_settle(second) ?? panic("status 2")) == DeliveryState.Delivered)
     log: seen.guard_read()
     assert_eq(log.value, [Int]{1, 2})
@@ -5949,7 +6051,7 @@ typed_send_durable: fn<Q: [Encode, Decode], R>(tree: ServiceTree, endpoint: Endp
     set_delivery(services, delivery_durable()) ?? panic("durable delivery")
     store: state_store(path) ?? panic("state store")
     set_state_event_log(services, store, "events", 1, "reversible") ?? panic("state adapter")
-    record: durable_worker(
+    record: typed_worker(
         services,
         "record",
         fn(n: Int) -> Int Err! {
@@ -5966,9 +6068,9 @@ typed_send_durable: fn<Q: [Encode, Decode], R>(tree: ServiceTree, endpoint: Endp
         8,
     ) ?? panic("durable worker must declare")
     start(services) ?? panic("durable tree must start")
-    first: typed_send_durable(services, record, 1, "one") ?? panic("send 1")
-    second: typed_send_durable(services, record, 2, "two") ?? panic("send 2")
-    third: typed_send_durable(services, record, 3, "three") ?? panic("send 3")
+    first: record.send_durable(1, key: "one") ?? panic("send 1")
+    second: record.send_durable(2, key: "two") ?? panic("send 2")
+    third: record.send_durable(3, key: "three") ?? panic("send 3")
     // The worker runs in send order, so 2 has failed once 3 is Delivered.
     assert((delivery_settle(first) ?? panic("status 1")) == DeliveryState.Delivered)
     assert((delivery_settle(third) ?? panic("status 3")) == DeliveryState.Delivered)
@@ -6011,15 +6113,15 @@ priv delivery_settle: fn(delivery: Delivery) -> DeliveryState ServiceError! {
         4,
     ) ?? panic("typed worker must declare")
     start(services) ?? panic("typed tree must start")
-    typed_send(services, slow, 1) ?? panic("send 1")
+    endpoint_typed_send(slow, 1) ?? panic("send 1")
     // A running message has left the mailbox.
     _: ran.acquire()
-    typed_send(services, slow, 2) ?? panic("send 2")
-    typed_send(services, slow, 3) ?? panic("send 3")
+    endpoint_typed_send(slow, 2) ?? panic("send 2")
+    endpoint_typed_send(slow, 3) ?? panic("send 3")
     assert_eq(mailbox_depth(services, slow.id) ?? panic("depth"), 2)
     drain_worker(services, slow.id) ?? panic("drain")
     assert(services.workers[0].running)
-    if typed_send(services, slow, 4) == {
+    if endpoint_typed_send(slow, 4) == {
         .Ok(_) -> { panic("a draining worker takes no new message") }
         .Err(_) -> {}
     }

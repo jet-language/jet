@@ -420,10 +420,12 @@ strings: fn() {
     parts: "a,b,c".split(",").to_list()
     trimmed: "  hi  ".trim()
     loop c in "héllo".chars() { }              // Char iteration; no s[i] (S41)
+    body: "line one\nline two"
     block: """
         multi-line string
         with {trimmed} interpolation
-        """                                     // triple-quoted (S70)
+          {body}
+        """                                     // triple-quoted; multi-line holes keep column indent (S70)
 }
 
 // Typed-head bodies give backslashes to the head grammar (D-BOUND-RAW1=A).

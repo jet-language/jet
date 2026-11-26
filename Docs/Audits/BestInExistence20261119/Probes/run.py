@@ -334,7 +334,7 @@ def observed(argv, cwd, ready, limit=60):
     """Starts ARGV and waits for READY on its output. The pid to attach to is
     the started process's own, as a case's `{pid:NAME}` is."""
     print("$ " + shown(argv) + "  (in the background until {!r})".format(ready))
-    process = spawn(argv, cwd)
+    process = spawn(argv, cwd, preexec=any_ptracer)
     seen = b""
     deadline = time.monotonic() + limit
     os.set_blocking(process.stdout.fileno(), False)
@@ -428,10 +428,12 @@ def d8():
     found = dumps(work)
     if found:
         console([JET, "debug", found[-1]], work, stdin_lines("Debug", "deadlock_dump_holds_every_task"))
-    note("the 2026-11-18 review's two-task cycle, which hung then")
-    work = fresh("deadlock")
-    shutil.copy(os.path.join(EARLIER, "deadlock.jet"), work)
-    run([JET, "run", "deadlock.jet"], work, limit=60)
+    deadlock_src = os.path.join(EARLIER, "deadlock.jet")
+    if os.path.exists(deadlock_src):
+        note("the 2026-11-18 review's two-task cycle, which hung then")
+        work = fresh("deadlock")
+        shutil.copy(deadlock_src, work)
+        run([JET, "run", "deadlock.jet"], work, limit=60)
     note("tasks_lists_every_task")
     console([JET, "debug", "prog.jet"], fixture("Debug", "TasksListsEveryTask"), stdin_lines("Debug", "tasks_lists_every_task"))
 

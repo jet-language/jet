@@ -11,6 +11,7 @@ use jet_foundation.[
     authority_parse_right,
     authority_uncovered,
     BUILTIN_METHOD_ROWS,
+    BodyHandleOp,
     BinOp,
     COLLECTION_OPERATIONS,
     AccessConvention,
@@ -39,6 +40,7 @@ use jet_foundation.[
     AST_EMPTY_CALL_ARG_FLAGS,
     ast_empty_lambda_meta,
     builtin_method_receiver_accepts,
+    core_source_owns_type,
     core_source_receiver_method,
     core_source_receiver_method_routes,
     app_route_file_address,
@@ -2598,4 +2600,195 @@ sema_call_missing_method_diagnostic: fn(receiver: Type, method: String, actual: 
     }
     fix: sema_call_method_fix(method, nominal, candidates, suggestion, "define it inside `{display}: struct` or `impl {display}`")
     sema_call_method_error("E0102", span, "`{display}` has no method `{method}`", "check the method name on this type", fix, suggestion)
+}
+
+// ---- builtin reader, cursor, and line-stream handle methods -------------
+
+// Core's `StdinHandle` is a source-declared record whose only source method is
+// `read_line`; its `.lines()` stream stays the handle table's, as for the
+// canonical identity of every Core stream handle.
+sema_builtin_stream_source_lines_owner: fn(ty: Type, method: String) -> String? {
+    if method != "lines" -> return None
+    if ty == .Named(name) {
+        if name.ends_with(".StdinHandle") && core_source_owns_type(name) {
+            return Val("StdinHandle")
+        }
+    }
+    None
+}
+
+sema_builtin_stream_read_spec: fn(operation: BodyHandleOp, result_type: Type, params: [SemaCallParam]) -> SemaBuiltinHandleSpec Never! {
+    SemaBuiltinHandleSpec{operation: operation, result_type: result_type, params: params, receiver_convention: AccessConvention.Read, effect_name: ""}
+}
+
+sema_builtin_stream_spec: fn(owner: String, method: String) -> SemaBuiltinHandleSpec? {
+    ^unit: Type.Named{name: "Unit"}
+    ^string: Type.String
+    ^u8: Type.IntN{signed: false, bits: 8}
+    ^bytes: Type.List{element: u8}
+    // The cursor and reader methods record no receiver write, so a read binding
+    // or parameter calls them without a `^` mark.
+    if owner == "Cursor" {
+        if method == "take_until" {
+            return Val(sema_builtin_stream_read_spec(BodyHandleOp.CursorTakeUntil, Type.Result{ok: string, err: string}, [SemaCallParam]{sema_builtin_handle_param("delimiter", string, AccessConvention.Read)}))
+        }
+        if method == "skip_ws" {
+            return Val(sema_builtin_stream_read_spec(BodyHandleOp.CursorSkipWs, unit, [SemaCallParam]{}))
+        }
+    }
+    if owner == "Reader" {
+        none: [SemaCallParam]{}
+        if method == "read_u8" {
+            return Val(sema_builtin_stream_read_spec(BodyHandleOp.ReaderReadU8, Type.Result{ok: u8, err: string}, none))
+        }
+        if method == "read_i8" {
+            return Val(sema_builtin_stream_read_spec(BodyHandleOp.ReaderReadI8, Type.Result{ok: Type.IntN{signed: true, bits: 8}, err: string}, none))
+        }
+        if method == "read_u16_le" {
+            return Val(sema_builtin_stream_read_spec(BodyHandleOp.ReaderReadU16Le, Type.Result{ok: Type.IntN{signed: false, bits: 16}, err: string}, none))
+        }
+        if method == "read_u16_be" {
+            return Val(sema_builtin_stream_read_spec(BodyHandleOp.ReaderReadU16Be, Type.Result{ok: Type.IntN{signed: false, bits: 16}, err: string}, none))
+        }
+        if method == "read_i16_le" {
+            return Val(sema_builtin_stream_read_spec(BodyHandleOp.ReaderReadI16Le, Type.Result{ok: Type.IntN{signed: true, bits: 16}, err: string}, none))
+        }
+        if method == "read_i16_be" {
+            return Val(sema_builtin_stream_read_spec(BodyHandleOp.ReaderReadI16Be, Type.Result{ok: Type.IntN{signed: true, bits: 16}, err: string}, none))
+        }
+        if method == "read_u32_le" {
+            return Val(sema_builtin_stream_read_spec(BodyHandleOp.ReaderReadU32Le, Type.Result{ok: Type.IntN{signed: false, bits: 32}, err: string}, none))
+        }
+        if method == "read_u32_be" {
+            return Val(sema_builtin_stream_read_spec(BodyHandleOp.ReaderReadU32Be, Type.Result{ok: Type.IntN{signed: false, bits: 32}, err: string}, none))
+        }
+        if method == "read_i32_le" {
+            return Val(sema_builtin_stream_read_spec(BodyHandleOp.ReaderReadI32Le, Type.Result{ok: Type.IntN{signed: true, bits: 32}, err: string}, none))
+        }
+        if method == "read_i32_be" {
+            return Val(sema_builtin_stream_read_spec(BodyHandleOp.ReaderReadI32Be, Type.Result{ok: Type.IntN{signed: true, bits: 32}, err: string}, none))
+        }
+        if method == "read_u64_le" {
+            return Val(sema_builtin_stream_read_spec(BodyHandleOp.ReaderReadU64Le, Type.Result{ok: Type.IntN{signed: false, bits: 64}, err: string}, none))
+        }
+        if method == "read_u64_be" {
+            return Val(sema_builtin_stream_read_spec(BodyHandleOp.ReaderReadU64Be, Type.Result{ok: Type.IntN{signed: false, bits: 64}, err: string}, none))
+        }
+        if method == "read_i64_le" {
+            return Val(sema_builtin_stream_read_spec(BodyHandleOp.ReaderReadI64Le, Type.Result{ok: Type.IntN{signed: true, bits: 64}, err: string}, none))
+        }
+        if method == "read_i64_be" {
+            return Val(sema_builtin_stream_read_spec(BodyHandleOp.ReaderReadI64Be, Type.Result{ok: Type.IntN{signed: true, bits: 64}, err: string}, none))
+        }
+        if method == "read_f32_le" {
+            return Val(sema_builtin_stream_read_spec(BodyHandleOp.ReaderReadF32Le, Type.Result{ok: Type.Float32, err: string}, none))
+        }
+        if method == "read_f32_be" {
+            return Val(sema_builtin_stream_read_spec(BodyHandleOp.ReaderReadF32Be, Type.Result{ok: Type.Float32, err: string}, none))
+        }
+        if method == "read_f64_le" {
+            return Val(sema_builtin_stream_read_spec(BodyHandleOp.ReaderReadF64Le, Type.Result{ok: Type.Float, err: string}, none))
+        }
+        if method == "read_f64_be" {
+            return Val(sema_builtin_stream_read_spec(BodyHandleOp.ReaderReadF64Be, Type.Result{ok: Type.Float, err: string}, none))
+        }
+        if method == "peek" {
+            return Val(sema_builtin_stream_read_spec(BodyHandleOp.ReaderPeek, Type.Result{ok: u8, err: string}, none))
+        }
+        if method == "seek" {
+            return Val(sema_builtin_stream_read_spec(BodyHandleOp.ReaderSeek, Type.Result{ok: unit, err: string}, [SemaCallParam]{sema_builtin_handle_param("offset", Type.Int, AccessConvention.Read)}))
+        }
+        if method == "skip" {
+            return Val(sema_builtin_stream_read_spec(BodyHandleOp.ReaderSkip, Type.Result{ok: unit, err: string}, [SemaCallParam]{sema_builtin_handle_param("count", Type.Int, AccessConvention.Read)}))
+        }
+        if method == "take" {
+            return Val(sema_builtin_stream_read_spec(BodyHandleOp.ReaderTake, Type.Result{ok: bytes, err: string}, [SemaCallParam]{sema_builtin_handle_param("count", Type.Int, AccessConvention.Read)}))
+        }
+        if method == "remaining" {
+            return Val(sema_builtin_stream_read_spec(BodyHandleOp.ReaderRemaining, Type.Int, none))
+        }
+        if method == "is_at_end" {
+            return Val(sema_builtin_stream_read_spec(BodyHandleOp.ReaderAtEnd, Type.Bool, none))
+        }
+    }
+    None
+}
+
+sema_builtin_stream_method_ref: fn(owner: String, method: String, check: ^SemaBodyCheck) -> TMethodRef Never! {
+    ^owner_module: sema_builtin_handle_owner_module(owner)
+    TMethodRef{symbol: sema_symbol_id(check.program.*, check.context, SymbolKind.Function, owner_module, owner, method), name: method, mangled: false, trait_owner: None, operator_identity: None}
+}
+
+sema_builtin_stream_lines_value: fn(receiver: TExpr, owner: String, span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck Never! {
+    ^result_type: if owner == "FileReader" -> Type.Named{name: "FileLines"} else -> Type.Named{name: "StdinLines"}
+    method: sema_builtin_stream_method_ref(owner, "lines", check)
+    ^value: sema_tree_node(result_type, TExprKind.MethodCall{receiver: receiver, method: method, type_args: [Type]{}, args: [TCallArg]{}}, span)
+    checked: sema_expr_expected(value, expected, check.environment.*, check.program.*, check.diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    // `FileReader.lines` waits; `StdinHandle` records no handle effect.
+    ^effect_name: if owner == "FileReader" -> "Time.Wait" else -> ""
+    if !sema_handle_effect_fact(check, "{owner}.lines", span, result_type, effect_name) {
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    SemaMethodSpecialCheck{handled: true, value: Val(checked)}
+}
+
+sema_builtin_stream_receiver_leaf: fn(ty: Type) -> String Never! {
+    if ty == {
+        .Named(name) -> name
+        .Tagged(_, inner) -> sema_builtin_stream_receiver_leaf(inner)
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> ""
+    }
+}
+
+// Called before ordinary method lookup for canonical builtin stream, reader,
+// and cursor handle types.
+sema_call_try_builtin_stream_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
+    leaf: sema_builtin_stream_receiver_leaf(receiver_value.ty)
+    if (leaf == "ProcessStdoutStream" || leaf == "ProcessStderrStream") && method == "lines" {
+        if args.len() != 0 {
+            check.diagnostics.push(sema_call_core_arity_diagnostic(method, 0, args.len(), span))
+            sema_handle_infer_args(args, check)
+            return SemaMethodSpecialCheck{handled: true, value: None}
+        }
+        api: "{leaf}.lines"
+        ^updated_args: args
+        ^ownership: sema_ownership_check_method_call(check, api, receiver, AccessConvention.Read, [SemaCallParam]{}, updated_args, span)
+        if !ownership.accepted || !ownership.complete {
+            return SemaMethodSpecialCheck{handled: true, value: None}
+        }
+        return sema_handle_finish(receiver_value, BodyHandleOp.ProcessLines, [TExpr]{}, Type.Named{name: "ProcessLines"}, "Exec", api, span, expected, check)
+    }
+    source_lines: sema_builtin_stream_source_lines_owner(receiver_value.ty, method)
+    ^owner: source_lines ?? ""
+    if source_lines == None {
+        owner = sema_builtin_handle_owner(receiver_value.ty) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+        if !sema_builtin_handle_is_canonical(receiver_value.ty, owner, check.environment.*, check.program.*) {
+            return SemaMethodSpecialCheck{handled: false, value: None}
+        }
+    }
+    if (owner == "FileReader" && method == "lines") || (owner == "StdinHandle" && method == "lines") {
+        if args.len() != 0 {
+            sema_handle_infer_args(args, check)
+            check.diagnostics.push(sema_call_arity_diagnostic("{owner}.{method}", 0, args.len(), false, span))
+            return SemaMethodSpecialCheck{handled: true, value: None}
+        }
+        ^_: sema_ownership_check_call_receiver(check, receiver, AccessConvention.Read, span)
+        if sema_builtin_handle_reports_no_receiver_convention(owner) {
+            sema_receiver_mark_forget(check.state, receiver)
+        }
+        return sema_builtin_stream_lines_value(receiver_value, owner, span, expected, check)
+    }
+    spec: sema_builtin_stream_spec(owner, method) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    if args.len() != spec.params.len() {
+        sema_handle_infer_args(args, check)
+        check.diagnostics.push(sema_call_arity_diagnostic("{owner}.{method}", spec.params.len(), args.len(), false, span))
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    ^shift_argument: if owner == "Reader" && (method == "seek" || method == "skip" || method == "take") -> 0 else -> -1
+    checked_args: sema_handle_checked_args("{owner}.{method}", spec.params, args, Val(receiver), receiver_value, spec.receiver_convention, shift_argument, span, check)
+    if sema_builtin_handle_reports_no_receiver_convention(owner) {
+        sema_receiver_mark_forget(check.state, receiver)
+    }
+    typed_args: checked_args ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    sema_handle_finish(receiver_value, spec.operation, typed_args, spec.result_type, spec.effect_name, "{owner}.{method}", span, expected, check)
 }

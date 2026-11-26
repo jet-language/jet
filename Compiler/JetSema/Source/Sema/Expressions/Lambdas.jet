@@ -23,7 +23,6 @@ use jet_foundation.[
     PlaceAccess,
     Span,
     Stmt,
-    SwitchArm,
     Symbol,
     SymbolID,
     SymbolKind,
@@ -1720,9 +1719,8 @@ sema_expression_lambda_repeated_capture_move: fn(check: ^SemaBodyCheck, moved: S
             return
         }
     }
-    // copy: `ty` is a payload of read parameter `moved`; the new share site owns this one
     if moved.origin.share_ty == .Val(ty) {
-        sema_ownership_note_share_found(check.state, SemaOwnershipShareSite{span: span, ty: ty.copy()})
+        sema_ownership_note_share_found_span(check.state, span, ty)
     }
     name: sema_ownership_place_name(moved.place)
     check.diagnostics.push(diagnostic_with_label(sema_error("E0121", span, "`{name}` moves out of a lambda that can run more than once", "the lambda is passed on or stored, so it may be called again, and that call would use `{name}` after the first call gave it away", "pass a copy (`{name}.copy()`), or move `{name}` in as a parameter of the lambda instead of capturing it"), lambda_span, "this lambda may run more than once"))
@@ -1909,163 +1907,61 @@ sema_expression_lambda_host_callback_stored: fn(expr: Expr, expected: Type?, wri
     }
 }
 
-sema_expression_lambda_rewrite_arm_labels: fn(arms: [SwitchArm], old_label: String, new_label: String) -> [SwitchArm] Never! {
-    ^updated: arms.copy()
-    loop index in 0..<updated.len() {
-        ^body: updated[index].body
-        sema_expression_lambda_rewrite_loop_label(body, old_label, new_label)
-        updated[index].body = body
+priv sema_expression_lambda_rewrite_loop_label_statement: fn(statement: ^Stmt, old_label: String, new_label: String) Never! {
+    if statement.in_place() == {
+        .BreakLabel(name, _) -> { if name == old_label -> name = new_label }
+        .ContinueLabel(name, _) -> { if name == old_label -> name = new_label }
+        .BreakLabelValue(name, _, _, _) -> { if name == old_label -> name = new_label }
+        .Switch(_, arms, else_body, _) -> {
+            loop arm_index in 0..<arms.len() {
+                sema_expression_lambda_rewrite_loop_label(arms[arm_index].body, old_label, new_label)
+            }
+            if else_body.in_place() == .Val(else_statements) {
+                sema_expression_lambda_rewrite_loop_label(else_statements, old_label, new_label)
+            }
+        }
+        .ComptimeSwitch(_, arms, else_body, _) -> {
+            loop arm_index in 0..<arms.len() {
+                sema_expression_lambda_rewrite_loop_label(arms[arm_index].body, old_label, new_label)
+            }
+            if else_body.in_place() == .Val(else_statements) {
+                sema_expression_lambda_rewrite_loop_label(else_statements, old_label, new_label)
+            }
+        }
+        .ComptimeIf(_, _, then_body, else_body, _, _) -> {
+            sema_expression_lambda_rewrite_loop_label(then_body, old_label, new_label)
+            if else_body.in_place() == .Val(else_statements) {
+                sema_expression_lambda_rewrite_loop_label(else_statements, old_label, new_label)
+            }
+        }
+        .Loop(body, _, _, _) -> { sema_expression_lambda_rewrite_loop_label(body, old_label, new_label) }
+        .While(_, body, _, _, _) -> { sema_expression_lambda_rewrite_loop_label(body, old_label, new_label) }
+        .CountedLoop(_, _, _, body, _, _, _) -> { sema_expression_lambda_rewrite_loop_label(body, old_label, new_label) }
+        .For(_, _, _, _, body, _, _, _, _) -> { sema_expression_lambda_rewrite_loop_label(body, old_label, new_label) }
+        .Unsafe(_, _, body, _) -> { sema_expression_lambda_rewrite_loop_label(body, old_label, new_label) }
+        .Impure(_, _, body, _) -> { sema_expression_lambda_rewrite_loop_label(body, old_label, new_label) }
+        .Reactive(body, _) -> { sema_expression_lambda_rewrite_loop_label(body, old_label, new_label) }
+        .Shield(body, _) -> { sema_expression_lambda_rewrite_loop_label(body, old_label, new_label) }
+        .Defer(body, _) -> { sema_expression_lambda_rewrite_loop_label(body, old_label, new_label) }
+        .Switched(_, body, _) -> { sema_expression_lambda_rewrite_loop_label(body, old_label, new_label) }
+        .Region(_, _, body, _) -> { sema_expression_lambda_rewrite_loop_label(body, old_label, new_label) }
+        .Policy(_, body, _) -> { sema_expression_lambda_rewrite_loop_label(body, old_label, new_label) }
+        .TaskGroup(_, _, _, body, _) -> { sema_expression_lambda_rewrite_loop_label(body, old_label, new_label) }
+        .Layout(_, _, body, _) -> { sema_expression_lambda_rewrite_loop_label(body, old_label, new_label) }
+        .AuthorityScope(_, _, _, body, _) -> { sema_expression_lambda_rewrite_loop_label(body, old_label, new_label) }
+        .ComptimeBlock(body, _, _) -> { sema_expression_lambda_rewrite_loop_label(body, old_label, new_label) }
+        .ContextBlock(_, body, _) -> { sema_expression_lambda_rewrite_loop_label(body, old_label, new_label) }
+        .Live(body, _) -> { sema_expression_lambda_rewrite_loop_label(body, old_label, new_label) }
+        .AssumeDet(_, _, body, _) -> { sema_expression_lambda_rewrite_loop_label(body, old_label, new_label) }
+        .Transact(_, _, body, _, _) -> { sema_expression_lambda_rewrite_loop_label(body, old_label, new_label) }
+        .ScopeMember(_, _, _, _, body, _, _, _) -> { sema_expression_lambda_rewrite_loop_label(body, old_label, new_label) }
+        .Expr(_) | .Val(_) | .Assign(_, _, _, _) | .Return(_, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .Yield(_, _) | .DeferClose(_, _) -> {}
     }
-    updated
-}
-
-sema_expression_lambda_rewrite_optional_labels: fn(statements: [Stmt]?, old_label: String, new_label: String) -> [Stmt]? Never! {
-    present: statements ?? return None
-    ^body: present.copy()
-    sema_expression_lambda_rewrite_loop_label(body, old_label, new_label)
-    Val(body)
 }
 
 sema_expression_lambda_rewrite_loop_label: fn(statements: ^[Stmt], old_label: String, new_label: String) Never! {
-    ^index: 0
-    loop index < statements.len() {
-        ^statement: statements[index]
-        if statement == {
-            .BreakLabel(name, span) -> {
-                if name == old_label {
-                    statements[index] = Stmt.BreakLabel{name: new_label, span: span}
-                }
-            }
-            .ContinueLabel(name, span) -> {
-                if name == old_label {
-                    statements[index] = Stmt.ContinueLabel{name: new_label, span: span}
-                }
-            }
-            .BreakLabelValue(name, name_span, value, span) -> {
-                if name == old_label {
-                    statements[index] = Stmt.BreakLabelValue{name: new_label, name_span: name_span, value: value, span: span}
-                }
-            }
-            .Switch(subject, arms, else_body, span) -> {
-                statements[index] = Stmt.Switch{subject: subject, arms: sema_expression_lambda_rewrite_arm_labels(arms, old_label, new_label), else_body: sema_expression_lambda_rewrite_optional_labels(else_body, old_label, new_label), span: span}
-            }
-            .ComptimeSwitch(subject, arms, else_body, span) -> {
-                statements[index] = Stmt.ComptimeSwitch{subject: subject, arms: sema_expression_lambda_rewrite_arm_labels(arms, old_label, new_label), else_body: sema_expression_lambda_rewrite_optional_labels(else_body, old_label, new_label), span: span}
-            }
-            .ComptimeIf(condition, condition_span, then_body, else_body, span, selected_then) -> {
-                ^updated_then_body: then_body
-                sema_expression_lambda_rewrite_loop_label(updated_then_body, old_label, new_label)
-                statements[index] = Stmt.ComptimeIf{cond: condition, cond_span: condition_span, then_body: updated_then_body, else_body: sema_expression_lambda_rewrite_optional_labels(else_body, old_label, new_label), span: span, selected_then: selected_then}
-            }
-            .Loop(body, span, arrow_body, label) | .While(_, body, span, arrow_body, label) | .CountedLoop(_, _, _, body, span, arrow_body, label) -> {
-                ^updated_body: body
-                sema_expression_lambda_rewrite_loop_label(updated_body, old_label, new_label)
-                if statement == {
-                    .Loop(_, _, _, _) -> {
-                        statements[index] = Stmt.Loop{body: updated_body, span: span, arrow_body: arrow_body, label: label}
-                    }
-                    .While(condition, _, _, _, _) -> {
-                        statements[index] = Stmt.While{cond: condition, body: updated_body, span: span, arrow_body: arrow_body, label: label}
-                    }
-                    .CountedLoop(init, condition, step, _, _, _, _) -> {
-                        statements[index] = Stmt.CountedLoop{init: init, cond: condition, step: step, body: updated_body, span: span, arrow_body: arrow_body, label: label}
-                    }
-                    .Expr(_) | .Val(_) | .Assign(_, _, _, _) | .Return(_, _) | .For(_, _, _, _, _, _, _, _, _) | .Switch(_, _, _, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Defer(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .DeferClose(_, _) -> {}
-                }
-            }
-            .For(variable, variable_span, variable_two, kind, body, span, arrow_body, label, vectorization) -> {
-                ^updated_body: body
-                sema_expression_lambda_rewrite_loop_label(updated_body, old_label, new_label)
-                statements[index] = Stmt.For{var: variable, var_span: variable_span, var2: variable_two, kind: kind, body: updated_body, span: span, arrow_body: arrow_body, label: label, auto_vectorization: vectorization}
-            }
-            .Unsafe(audit, audit_expr, body, span) -> {
-                ^updated_body: body
-                sema_expression_lambda_rewrite_loop_label(updated_body, old_label, new_label)
-                statements[index] = Stmt.Unsafe{audit: audit, audit_expr: audit_expr, body: updated_body, span: span}
-            }
-            .Impure(reason, reason_expr, body, span) -> {
-                ^updated_body: body
-                sema_expression_lambda_rewrite_loop_label(updated_body, old_label, new_label)
-                statements[index] = Stmt.Impure{reason: reason, reason_expr: reason_expr, body: updated_body, span: span}
-            }
-            .Reactive(body, span) -> {
-                ^updated_body: body
-                sema_expression_lambda_rewrite_loop_label(updated_body, old_label, new_label)
-                statements[index] = Stmt.Reactive{body: updated_body, span: span}
-            }
-            .Shield(body, span) -> {
-                ^updated_body: body
-                sema_expression_lambda_rewrite_loop_label(updated_body, old_label, new_label)
-                statements[index] = Stmt.Shield{body: updated_body, span: span}
-            }
-            .Defer(body, span) -> {
-                ^updated_body: body
-                sema_expression_lambda_rewrite_loop_label(updated_body, old_label, new_label)
-                statements[index] = Stmt.Defer{body: updated_body, span: span}
-            }
-            .Switched(marker, body, span) -> {
-                ^updated_body: body
-                sema_expression_lambda_rewrite_loop_label(updated_body, old_label, new_label)
-                statements[index] = Stmt.Switched{marker: marker, body: updated_body, span: span}
-            }
-            .Region(name, name_span, body, span) -> {
-                ^updated_body: body
-                sema_expression_lambda_rewrite_loop_label(updated_body, old_label, new_label)
-                statements[index] = Stmt.Region{name: name, name_span: name_span, body: updated_body, span: span}
-            }
-            .Policy(declarations, body, span) -> {
-                ^updated_body: body
-                sema_expression_lambda_rewrite_loop_label(updated_body, old_label, new_label)
-                statements[index] = Stmt.Policy{declarations: declarations, body: updated_body, span: span}
-            }
-            .TaskGroup(name, name_span, args, body, span) -> {
-                ^updated_body: body
-                sema_expression_lambda_rewrite_loop_label(updated_body, old_label, new_label)
-                statements[index] = Stmt.TaskGroup{name: name, name_span: name_span, args: args, body: updated_body, span: span}
-            }
-            .Layout(name, name_span, body, span) -> {
-                ^updated_body: body
-                sema_expression_lambda_rewrite_loop_label(updated_body, old_label, new_label)
-                statements[index] = Stmt.Layout{name: name, name_span: name_span, body: updated_body, span: span}
-            }
-            .AuthorityScope(caps, caps_span, binding, body, span) -> {
-                ^updated_body: body
-                sema_expression_lambda_rewrite_loop_label(updated_body, old_label, new_label)
-                statements[index] = Stmt.AuthorityScope{caps: caps, caps_span: caps_span, binding: binding, body: updated_body, span: span}
-            }
-            .ComptimeBlock(body, is_template_loop, span) -> {
-                ^updated_body: body
-                sema_expression_lambda_rewrite_loop_label(updated_body, old_label, new_label)
-                statements[index] = Stmt.ComptimeBlock{body: updated_body, is_template_loop: is_template_loop, span: span}
-            }
-            .ContextBlock(fields, body, span) -> {
-                ^updated_body: body
-                sema_expression_lambda_rewrite_loop_label(updated_body, old_label, new_label)
-                statements[index] = Stmt.ContextBlock{fields: fields, body: updated_body, span: span}
-            }
-            .Live(body, span) -> {
-                ^updated_body: body
-                sema_expression_lambda_rewrite_loop_label(updated_body, old_label, new_label)
-                statements[index] = Stmt.Live{body: updated_body, span: span}
-            }
-            .AssumeDet(reason, reason_expr, body, span) -> {
-                ^updated_body: body
-                sema_expression_lambda_rewrite_loop_label(updated_body, old_label, new_label)
-                statements[index] = Stmt.AssumeDet{reason: reason, reason_expr: reason_expr, body: updated_body, span: span}
-            }
-            .Transact(name, name_span, body, implicit, span) -> {
-                ^updated_body: body
-                sema_expression_lambda_rewrite_loop_label(updated_body, old_label, new_label)
-                statements[index] = Stmt.Transact{name: name, name_span: name_span, body: updated_body, implicit: implicit, span: span}
-            }
-            .ScopeMember(name, name_span, args, args_span, body, dsl, dot_span, span) -> {
-                ^updated_body: body
-                sema_expression_lambda_rewrite_loop_label(updated_body, old_label, new_label)
-                statements[index] = Stmt.ScopeMember{name: name, name_span: name_span, args: args, args_span: args_span, body: updated_body, dsl: dsl, dot_span: dot_span, span: span}
-            }
-            .Expr(_) | .Val(_) | .Assign(_, _, _, _) | .Return(_, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .Yield(_, _) | .DeferClose(_, _) -> {}
-        }
-        index += 1
+    loop index in 0..<statements.len() {
+        sema_expression_lambda_rewrite_loop_label_statement(statements[index], old_label, new_label)
     }
 }
 
@@ -2588,9 +2484,10 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, o
             }
             lambda_work.meta.collect_item_type = Val(item_type)
             body_result_ty = Type.List{element: item_type}
-            if executable == .Val(.Block(checked_body)) {
-                lowered_body: sema_loop_value_lower_collecting_body(checked_body, item_type, lambda.span, check) ?? return None
-                executable = Val(TLambdaBody.Block{body: lowered_body})
+            if executable.in_place() == .Val(body_val) {
+                if body_val.in_place() == .Block(checked_body) {
+                    if !sema_loop_value_lower_collecting_body(checked_body, item_type, lambda.span, check) -> return None
+                }
             }
         }
         inline_loop && lambda_work.meta.result_loop -> {
@@ -2981,6 +2878,8 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, o
     }
     ^ret_slot: Type?{None}
     if ret_ty != (Type.Named{name: "Unit"}) -> ret_slot = Val(ret_ty)
+    ^lambda_return_provenance: lambda_context.return_view_provenance.move()
+    lambda_context.return_view_provenance = None
     // A one-expression body whose result carries a view proves its owners as a
     // `return` does, so a view into a local the enclosing function owns is
     // E2305. The enclosing function's receiver and parameters stay stable
@@ -2990,7 +2889,6 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, o
     if ast_lambda_single_expr_span(lambda.body) != None {
         ^view_seen: [U32:Bool]{}
         if sema_check_type_contains_view(view_graph, check.environment.module_identity, ret_ty, view_seen) {
-            ^saved_view_provenance: lambda_context.return_view_provenance.copy()
             was_empty_receiver: lambda_context.return_view_receiver_key == ""
             saved_keys_len: lambda_context.return_view_parameter_keys.len()
             if was_empty_receiver {
@@ -3011,7 +2909,7 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, o
                     }
                 }
             }
-            lambda_context.return_view_provenance = saved_view_provenance
+            lambda_context.return_view_provenance = None
             if was_empty_receiver {
                 lambda_context.return_view_receiver_key = ""
             }
@@ -3020,7 +2918,6 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, o
             }
         }
     }
-    ^lambda_return_provenance: lambda_context.return_view_provenance
     lambda_work.meta.return_view_provenance = lambda_return_provenance
     // A lambda whose body adds no effect publishes the empty bound, so it
     // reads `fn(T) -[]> R` and satisfies pure positions (spec.md:858-860).
@@ -3047,7 +2944,7 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, o
     }
     ^fn_ty: Type.Fn{params: param_types, ret: ret_slot, effect_bound: effect_bound, param_contract: expected_contract, call_metadata: lambda_metadata, return_view_provenance: lambda_return_provenance}
     ^captures_facts: TCaptureFacts{escapes: escapes, needs_fn_mut: lambda_work.meta.needs_fn_mut, mutable: lambda_work.meta.mut_captures, cloned: lambda_work.meta.cloned_captures, frozen: lambda_work.meta.frozen_captures, materialized: lambda_work.meta.materialized_captures, moved: lambda_work.meta.moved_captures, lent: left_captures}
-    sema_ownership_note_lambda(check.state, lambda_state, lambda.span, captures_facts)
+    sema_ownership_note_lambda_facts(check.state, lambda.span, captures_facts)
     sema_ownership_keep_mutations(check.state, lambda_state)
     // A deferred body's reads and writes of enclosing bindings count for
     // them (the unused-binding lints); its moves and write windows stay with
@@ -3092,7 +2989,12 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, o
         effect_scope: effect_scope_descriptor("a lambda in {check.context.function_name}", "", false, written_row),
     }
     ^result: sema_tree_node(fn_ty, TExprKind.Lambda{value: lambda_value}, lambda.span)
-    checked: if arity_reported || ((host_callback || open_result) && (expected_ret == None || failure_open)) -> result else -> sema_expr_expected(result, expected, check.environment.*, check.program.*, check.diagnostics) ?? return None
+    checked_opt: if arity_reported || ((host_callback || open_result) && (expected_ret == None || failure_open)) -> Val(result) else -> sema_expr_expected(result, expected, check.environment.*, check.program.*, check.diagnostics)
+    if checked_opt == .None {
+        sema_ownership_note_lambda_body(check.state, lambda_state.move())
+        return None
+    }
+    checked: checked_opt
     if inline_loop {
         sema_scope_leave(check.scopes, lambda_state)
         sema_ownership_join_paths(check.state, lambda_parent_state, lambda_state, lambda_parent_state, true)
@@ -3107,6 +3009,7 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, o
         check.context.inferred_failure_carrier = lambda_context.inferred_failure_carrier
         check.context.callback_return_row = lambda_context.callback_return_row
     }
+    sema_ownership_note_lambda_body(check.state, lambda_state.move())
     sema_expression_lambda_merge_context_facts(lambda_context, check.context, call_fact_start, name_reference_start, comptime_request_start, body_source_start, compute_call_start, autodiff_obligation_start, copy_event_start)
     // A crossing or generic call in the body is the enclosing function's.
     ^added_crossings: [SemaGenericCrossing]{}
@@ -3219,164 +3122,79 @@ sema_expression_lambda_lift_returns: fn(executable: ^^TLambdaBody, carrier: Type
 
 // Nested lambdas and reactive bodies are their own callables and keep their
 // own returns; every other statement body belongs to this callback.
+priv sema_expression_lambda_lift_statement: fn(statement: ^TStmt, carrier: Type) Never! {
+    if statement.in_place() == {
+        .Return(value, _) -> {
+            if value == .Val(returned) {
+                value = Val(sema_expression_lambda_lift_value(returned, carrier))
+            }
+        }
+        .ContractScope(_, body, _, _, _) -> { sema_expression_lambda_lift_block(body, carrier) }
+        .RefutableBind(_, _, body, _) -> { sema_expression_lambda_lift_block(body, carrier) }
+        .CountedLoop(_, _, _, _, _, body, _) -> { sema_expression_lambda_lift_block(body, carrier) }
+        .ForRange(_, _, _, _, _, _, body, _, _) -> { sema_expression_lambda_lift_block(body, carrier) }
+        .Range(_, _, _, _, _, _, _, _, body, _) -> { sema_expression_lambda_lift_block(body, carrier) }
+        .ForIn(_, _, _, _, _, _, _, _, _, _, body, _) -> { sema_expression_lambda_lift_block(body, carrier) }
+        .While(_, _, body, _) -> { sema_expression_lambda_lift_block(body, carrier) }
+        .Loop(_, body, _) -> { sema_expression_lambda_lift_block(body, carrier) }
+        .TaskGroup(_, _, body, _) -> { sema_expression_lambda_lift_block(body, carrier) }
+        .Layout(_, _, body, _) -> { sema_expression_lambda_lift_block(body, carrier) }
+        .ContextBlock(_, body, _) -> { sema_expression_lambda_lift_block(body, carrier) }
+        .Transact(_, _, _, body, _) -> { sema_expression_lambda_lift_block(body, carrier) }
+        .Unsafe(_, body) -> { sema_expression_lambda_lift_block(body, carrier) }
+        .Inline(body, _) -> { sema_expression_lambda_lift_block(body, carrier) }
+        .DebugOnly(body, _) -> { sema_expression_lambda_lift_block(body, carrier) }
+        .DeepCheck(body, _) -> { sema_expression_lambda_lift_block(body, carrier) }
+        .UnsafeBlock(_, body, _) -> { sema_expression_lambda_lift_block(body, carrier) }
+        .SentryPolicy(_, body, _) -> { sema_expression_lambda_lift_block(body, carrier) }
+        .Impure(body, _) -> { sema_expression_lambda_lift_block(body, carrier) }
+        .Region(body, _) -> { sema_expression_lambda_lift_block(body, carrier) }
+        .Live(body, _) -> { sema_expression_lambda_lift_block(body, carrier) }
+        .Shield(body, _) -> { sema_expression_lambda_lift_block(body, carrier) }
+        .Defer(body, _) -> { sema_expression_lambda_lift_block(body, carrier) }
+        .ScopeMember(_, body, _) -> { sema_expression_lambda_lift_block(body, carrier) }
+        .If(_, then_body, else_body, _, _) -> {
+            sema_expression_lambda_lift_block(then_body, carrier)
+            if else_body.in_place() == .Val(else_statements) {
+                sema_expression_lambda_lift_block(else_statements, carrier)
+            }
+        }
+        .Match(_, arms, _, _) -> {
+            loop arm_index in 0..<arms.len() {
+                sema_expression_lambda_lift_block(arms[arm_index].body, carrier)
+            }
+        }
+        .EnumMatch(_, arms, else_body, _, _) -> {
+            loop arm_index in 0..<arms.len() {
+                sema_expression_lambda_lift_block(arms[arm_index].body, carrier)
+            }
+            if else_body.in_place() == .Val(else_statements) {
+                sema_expression_lambda_lift_block(else_statements, carrier)
+            }
+        }
+        .RangeSwitch(_, arms, else_body, _) -> {
+            loop arm_index in 0..<arms.len() {
+                sema_expression_lambda_lift_block(arms[arm_index].body, carrier)
+            }
+            sema_expression_lambda_lift_block(else_body, carrier)
+        }
+        .MixedSwitch(_, _, arms, else_body, _) -> {
+            loop arm_index in 0..<arms.len() {
+                sema_expression_lambda_lift_block(arms[arm_index].body, carrier)
+            }
+            if else_body.in_place() == .Val(else_statements) {
+                sema_expression_lambda_lift_block(else_statements, carrier)
+            }
+        }
+        .GCEdit(_, _, _, _, _, nested, _) -> {
+            sema_expression_lambda_lift_statement(nested, carrier)
+        }
+        .Contract(_) | .Let(_, _, _, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .ExprStmt(_, _) | .DeferClose(_, _, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) | .Reactive(_, _) -> {}
+    }
+}
+
 sema_expression_lambda_lift_block: fn(statements: ^[TStmt], carrier: Type) Never! {
     loop index in 0..<statements.len() {
-        ^statement: statements[index]
-        if statement == {
-            .Return(value, span) -> {
-                if value == .Val(returned) {
-                    statements[index] = TStmt.Return{value: Val(sema_expression_lambda_lift_value(returned, carrier)), span: span}
-                }
-            }
-            .ContractScope(pre, body, post, result, span) -> {
-                ^updated: body
-                sema_expression_lambda_lift_block(updated, carrier)
-                statements[index] = TStmt.ContractScope{pre: pre, body: updated, post: post, result: result, span: span}
-            }
-            .RefutableBind(pattern, init, fallback, span) -> {
-                ^updated: fallback
-                sema_expression_lambda_lift_block(updated, carrier)
-                statements[index] = TStmt.RefutableBind{pattern: pattern, init: init, fallback: updated, span: span}
-            }
-            .CountedLoop(label, init, condition, step, vectorization, body, span) -> {
-                ^updated: body
-                sema_expression_lambda_lift_block(updated, carrier)
-                statements[index] = TStmt.CountedLoop{label: label, init: init, condition: condition, step: step, vectorization: vectorization, body: updated, span: span}
-            }
-            .ForRange(label, variable, start, end, step, exclusive, body, vectorization, span) -> {
-                ^updated: body
-                sema_expression_lambda_lift_block(updated, carrier)
-                statements[index] = TStmt.ForRange{label: label, local: variable, start: start, end: end, step: step, exclusive: exclusive, body: updated, vectorization: vectorization, span: span}
-            }
-            .Range(label, variable, source, start, end, step, exclusive, vectorization, body, span) -> {
-                ^updated: body
-                sema_expression_lambda_lift_block(updated, carrier)
-                statements[index] = TStmt.Range{label: label, variable: variable, source: source, start: start, end: end, step: step, exclusive: exclusive, vectorization: vectorization, body: updated, span: span}
-            }
-            .ForIn(label, variable, variable_two, source, collection, step, method_kind, columnar, by_value, source_stable, body, span) -> {
-                ^updated: body
-                sema_expression_lambda_lift_block(updated, carrier)
-                statements[index] = TStmt.ForIn{label: label, variable: variable, variable_two: variable_two, source: source, collection: collection, step: step, method_kind: method_kind, columnar: columnar, by_value: by_value, source_stable: source_stable, body: updated, span: span}
-            }
-            .While(label, condition, body, span) -> {
-                ^updated: body
-                sema_expression_lambda_lift_block(updated, carrier)
-                statements[index] = TStmt.While{label: label, condition: condition, body: updated, span: span}
-            }
-            .Loop(label, body, span) -> {
-                ^updated: body
-                sema_expression_lambda_lift_block(updated, carrier)
-                statements[index] = TStmt.Loop{label: label, body: updated, span: span}
-            }
-            .TaskGroup(group, args, body, span) -> {
-                ^updated: body
-                sema_expression_lambda_lift_block(updated, carrier)
-                statements[index] = TStmt.TaskGroup{group: group, args: args, body: updated, span: span}
-            }
-            .If(condition, then_body, else_body, else_is_elseif, span) -> {
-                ^updated_then: then_body
-                sema_expression_lambda_lift_block(updated_then, carrier)
-                updated_else: if else_body == .Val(else_statements) -> {
-                    ^lifted: else_statements.copy()
-                    sema_expression_lambda_lift_block(lifted, carrier)
-                    Val(lifted)
-                } else -> None
-                statements[index] = TStmt.If{condition: condition, then_body: updated_then, else_body: updated_else, else_is_elseif: else_is_elseif, span: span}
-            }
-            .Match(subject, arms, exhaustive, span) -> {
-                ^updated_arms: arms.copy()
-                loop arm_index in 0..<updated_arms.len() {
-                    sema_expression_lambda_lift_block(updated_arms[arm_index].body, carrier)
-                }
-                statements[index] = TStmt.Match{subject: subject, arms: updated_arms, exhaustive: exhaustive, span: span}
-            }
-            .EnumMatch(subject, arms, else_body, fallthrough, span) -> {
-                ^updated_arms: arms.copy()
-                loop arm_index in 0..<updated_arms.len() {
-                    sema_expression_lambda_lift_block(updated_arms[arm_index].body, carrier)
-                }
-                updated_else: if else_body == .Val(else_statements) -> {
-                    ^lifted: else_statements.copy()
-                    sema_expression_lambda_lift_block(lifted, carrier)
-                    Val(lifted)
-                } else -> None
-                statements[index] = TStmt.EnumMatch{scrutinee: subject, arms: updated_arms, else_body: updated_else, fallthrough: fallthrough, span: span}
-            }
-            .RangeSwitch(subject, arms, else_body, span) -> {
-                ^updated_arms: arms.copy()
-                loop arm_index in 0..<updated_arms.len() {
-                    sema_expression_lambda_lift_block(updated_arms[arm_index].body, carrier)
-                }
-                ^updated_else: else_body
-                sema_expression_lambda_lift_block(updated_else, carrier)
-                statements[index] = TStmt.RangeSwitch{subject: subject, arms: updated_arms, else_body: updated_else, span: span}
-            }
-            .MixedSwitch(subject, branch_class, arms, else_body, span) -> {
-                ^updated_arms: arms.copy()
-                loop arm_index in 0..<updated_arms.len() {
-                    sema_expression_lambda_lift_block(updated_arms[arm_index].body, carrier)
-                }
-                updated_else: if else_body == .Val(else_statements) -> {
-                    ^lifted: else_statements.copy()
-                    sema_expression_lambda_lift_block(lifted, carrier)
-                    Val(lifted)
-                } else -> None
-                statements[index] = TStmt.MixedSwitch{subject: subject, class: branch_class, arms: updated_arms, else_body: updated_else, span: span}
-            }
-            .Layout(handle, label, body, span) -> {
-                ^updated: body
-                sema_expression_lambda_lift_block(updated, carrier)
-                statements[index] = TStmt.Layout{handle: handle, label: label, body: updated, span: span}
-            }
-            .ContextBlock(guards, body, span) -> {
-                ^updated: body
-                sema_expression_lambda_lift_block(updated, carrier)
-                statements[index] = TStmt.ContextBlock{guards: guards, body: updated, span: span}
-            }
-            .Transact(handle, snapshots, stm, body, span) -> {
-                ^updated: body
-                sema_expression_lambda_lift_block(updated, carrier)
-                statements[index] = TStmt.Transact{handle: handle, snapshots: snapshots, stm: stm, body: updated, span: span}
-            }
-            .GCEdit(root, slot, edges, replace_all, index_temp, nested, span) -> {
-                ^updated: [TStmt]{nested}
-                sema_expression_lambda_lift_block(updated, carrier)
-                statements[index] = TStmt.GCEdit{root: root, slot: slot, edges: edges, replace_all: replace_all, index_temp: index_temp, statement: updated[0], span: span}
-            }
-            .Unsafe(gate, body) -> {
-                ^updated: body
-                sema_expression_lambda_lift_block(updated, carrier)
-                statements[index] = TStmt.Unsafe{gate: gate, body: updated}
-            }
-            .Inline(body, span) | .DebugOnly(body, span) | .DeepCheck(body, span) | .UnsafeBlock(_, body, span) | .SentryPolicy(_, body, span) | .Impure(body, span) | .Region(body, span) | .Live(body, span) | .Shield(body, span) | .Defer(body, span) | .ScopeMember(_, body, span) -> {
-                ^updated: body
-                sema_expression_lambda_lift_block(updated, carrier)
-                if statement == {
-                    .Inline(_, _) -> { statements[index] = TStmt.Inline{body: updated, span: span} }
-                    .DebugOnly(_, _) -> {
-                        statements[index] = TStmt.DebugOnly{body: updated, span: span}
-                    }
-                    .DeepCheck(_, _) -> {
-                        statements[index] = TStmt.DeepCheck{body: updated, span: span}
-                    }
-                    .UnsafeBlock(gate, _, _) -> {
-                        statements[index] = TStmt.UnsafeBlock{gate: gate, body: updated, span: span}
-                    }
-                    .SentryPolicy(enabled, _, _) -> {
-                        statements[index] = TStmt.SentryPolicy{enabled: enabled, body: updated, span: span}
-                    }
-                    .Impure(_, _) -> { statements[index] = TStmt.Impure{body: updated, span: span} }
-                    .Region(_, _) -> { statements[index] = TStmt.Region{body: updated, span: span} }
-                    .Live(_, _) -> { statements[index] = TStmt.Live{body: updated, span: span} }
-                    .Shield(_, _) -> { statements[index] = TStmt.Shield{body: updated, span: span} }
-                    .Defer(_, _) -> { statements[index] = TStmt.Defer{body: updated, span: span} }
-                    .ScopeMember(kind, _, _) -> {
-                        statements[index] = TStmt.ScopeMember{kind: kind, body: updated, span: span}
-                    }
-                    .Contract(_) | .ContractScope(_, _, _, _, _) | .Let(_, _, _, _, _, _) | .RefutableBind(_, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .ForRange(_, _, _, _, _, _, _, _, _) | .Range(_, _, _, _, _, _, _, _, _, _) | .ExprStmt(_, _) | .Return(_, _) | .TaskGroup(_, _, _, _) | .DeferClose(_, _, _) | .If(_, _, _, _, _) | .Loop(_, _, _) | .While(_, _, _, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) | .Match(_, _, _, _) | .EnumMatch(_, _, _, _, _) | .RangeSwitch(_, _, _, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, _, _) | .MixedSwitch(_, _, _, _, _) | .Unsafe(_, _) | .Reactive(_, _) | .Layout(_, _, _, _) | .ContextBlock(_, _, _) | .Transact(_, _, _, _, _) | .GCEdit(_, _, _, _, _, _, _) -> {}
-                }
-            }
-            .Contract(_) | .Let(_, _, _, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .ExprStmt(_, _) | .DeferClose(_, _, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) | .Reactive(_, _) -> {}
-        }
+        sema_expression_lambda_lift_statement(statements[index], carrier)
     }
 }

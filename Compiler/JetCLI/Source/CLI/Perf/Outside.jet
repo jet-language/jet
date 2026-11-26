@@ -395,7 +395,7 @@ jet_cli_perf_attach_sampled: fn(command: ^^[String], out: String?, allowlist: [S
     name: command[0]
     path: perf_process.which(name) ?? return jet_cli_perf_failed("Jet can't run `{name}`: no such program file{if name.contains("/") -> "" else -> " on PATH"}", color)
     cpus: jet_cli_perf_outside_cpus() ?? return jet_cli_perf_failed("Jet can't run `{name}`: {err.message}", color)
-    phased: perf_sys.getenv(JET_CLI_PERF_OUTSIDE_TRACE_FILE) == None
+    phased: perf_sys.get(JET_CLI_PERF_OUTSIDE_TRACE_FILE) == None
     stem: "jet-perf-{perf_process.current_pid()}-{perf_time.unix_ns()}-"
     ^fields: [String]{}
     loop (key, value) in perf_sys.environment() {

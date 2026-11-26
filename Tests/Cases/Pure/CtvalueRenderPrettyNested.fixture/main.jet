@@ -3,7 +3,14 @@ Report: struct {
     items: [String],
 }
 
+CT_REPORT: #run { Report{total: 42, items: ["a", "b"]} }
+CT_RENDERED: #run { "{Report{total: 42, items: ["a", "b"]}:Debug}" }
+
 run: fn() {
     report: Report{total: 42, items: ["a", "b"]}
-    print("{report:Debug}")
+    rt_rendered: "{report:Debug}"
+    ct_val_rendered: "{CT_REPORT:Debug}"
+    assert_eq(CT_RENDERED, rt_rendered)
+    assert_eq(ct_val_rendered, rt_rendered)
+    print(rt_rendered)
 }

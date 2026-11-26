@@ -294,7 +294,7 @@ sema_comptime_local_value_unstorable: fn(ty: Type) -> Bool Never! {
 }
 
 // The runtime handle a compile-time value of type `ty` would hold, by its
-// name: a stream or cursor handle (sema_stream_handle_owner) whose state
+// name: a builtin handle (sema_builtin_handle_owner) whose state
 // lives only in the run that made it, alone or in a list, option, map,
 // result or tuple. A `Path` is its text, which is data, and a program type
 // that shadows a handle's name is its own declaration.
@@ -318,8 +318,8 @@ sema_comptime_value_runtime_handle: fn(ty: Type, environment: SemaScopeEnvironme
             return None
         }
         .Named(_) | .Apply(_, _) -> {
-            owner: sema_stream_handle_owner(ty) ?? return None
-            if owner == "Path" || !sema_stream_handle_is_canonical(ty, owner, environment, program) {
+            owner: sema_builtin_handle_owner(ty) ?? return None
+            if owner == "Path" || !sema_builtin_handle_is_canonical(ty, owner, environment, program) {
                 return None
             }
             return Val(owner)

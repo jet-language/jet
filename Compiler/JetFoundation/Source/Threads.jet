@@ -246,6 +246,14 @@ compiler_threads_joined: fn<T>(handle: ^^Task<T>) -> T Never! {
     handle.join() ?? compiler_threads_failed(err)
 }
 
+// Joins a compiler task and returns its value, or its TaskFailure instead of
+// aborting the compile. Phase item boundaries use this one capture path so a
+// runtime stop (E3010/E3012/panic) inside an item becomes that item's failure
+// while the remaining items continue.
+compiler_threads_try_join: fn<T>(handle: ^^Task<T>) -> T TaskFailure! {
+    handle.join()
+}
+
 // Takes a value back from a handoff list: one in a phase's lock-guarded
 // shared state, or the local list a `task.group` block fills for the code
 // after the group (a group block is no expression, so its value leaves

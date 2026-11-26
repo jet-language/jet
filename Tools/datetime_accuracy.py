@@ -510,7 +510,7 @@ def make_zones_and_arithmetic(corpus: Corpus) -> None:
         zoned = corpus.declare(f"z_{decl_name}", f"time.zoned({dt}, {zone_vars[name]})")
         zone = zone_objects[name]
         rendered, offset, dst = local_view(milliseconds, zone, name)
-        pattern = '"yyyy-MM-dd HH:mm:ss VV XXX"'
+        pattern = '"%Y-%m-%d %H:%M:%S %Z %:z"'
         corpus.add(family, ident, f"{tag}_format", rendered, f"{zoned}.format({pattern})", metadata)
         corpus.add(family, ident, f"{tag}_offset", offset, f"{zoned}.offset_seconds()", metadata)
         corpus.add(family, ident, f"{tag}_dst", bool_text(dst), f"{zoned}.is_dst()", metadata)
@@ -594,7 +594,7 @@ def make_zones_and_arithmetic(corpus: Corpus) -> None:
             metadata = input_text(zone=name, base_utc=base_utc.isoformat(), base_local=base_local.isoformat(), transition_bases=True, base_utc_ms=seconds * 1000)
             for tag, value, variable in (("duration", absolute, absolute_var), ("period", period, period_var)):
                 rendered = f"{value:%Y-%m-%d %H:%M:%S} {name} {offset_text(int(value.utcoffset().total_seconds()))}"
-                corpus.add("F6", ident, f"{tag}_format", rendered, f'{variable}.format("yyyy-MM-dd HH:mm:ss VV XXX")', metadata)
+                corpus.add("F6", ident, f"{tag}_format", rendered, f'{variable}.format("%Y-%m-%d %H:%M:%S %Z %:z")', metadata)
                 corpus.add("F6", ident, f"{tag}_utc_ms", epoch_ms(value), f"{variable}.to_datetime().to_unix_ms()", metadata)
                 corpus.add("F6", ident, f"{tag}_offset", int(value.utcoffset().total_seconds()), f"{variable}.offset_seconds()", metadata)
                 corpus.add("F6", ident, f"{tag}_dst", bool_text(value.dst() not in (None, timedelta(0))), f"{variable}.is_dst()", metadata)
@@ -639,7 +639,7 @@ def make_zones_and_arithmetic(corpus: Corpus) -> None:
         absolute = (base_utc + timedelta(hours=24)).astimezone(zone)
         for tag, value, variable in (("duration", absolute, absolute_var), ("period", selected, period_var)):
             rendered = f"{value:%Y-%m-%d %H:%M:%S} {name} {offset_text(int(value.utcoffset().total_seconds()))}"
-            corpus.add("F6", ident, f"{tag}_format", rendered, f'{variable}.format("yyyy-MM-dd HH:mm:ss VV XXX")', metadata)
+            corpus.add("F6", ident, f"{tag}_format", rendered, f'{variable}.format("%Y-%m-%d %H:%M:%S %Z %:z")', metadata)
             corpus.add("F6", ident, f"{tag}_utc_ms", epoch_ms(value), f"{variable}.to_datetime().to_unix_ms()", metadata)
             corpus.add("F6", ident, f"{tag}_offset", int(value.utcoffset().total_seconds()), f"{variable}.offset_seconds()", metadata)
             corpus.add("F6", ident, f"{tag}_dst", bool_text(value.dst() not in (None, timedelta(0))), f"{variable}.is_dst()", metadata)
@@ -897,7 +897,7 @@ unix_ms: fn(meta: String) Int -> {
 
 shown: fn(op: String, meta: String) String -> {
     zone: time.zone(field(meta, "zone")) ?? panic("zone")
-    pattern: "yyyy-MM-dd HH:mm:ss VV XXX"
+    pattern: "%Y-%m-%d %H:%M:%S %Z %:z"
     if op == "view_format" || op == "skipped_format" -> return time.zoned(time.from_unix_ms(unix_ms(meta)), zone).format(pattern)
     if op == "view_offset" || op == "skipped_offset" -> return "{time.zoned(time.from_unix_ms(unix_ms(meta)), zone).offset_seconds()}"
     if op == "view_dst" || op == "skipped_dst" -> return "{time.zoned(time.from_unix_ms(unix_ms(meta)), zone).is_dst()}"

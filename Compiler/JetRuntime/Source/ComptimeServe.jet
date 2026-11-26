@@ -119,8 +119,16 @@ comptime_serve_filter: fn(frame: I64, handler: I64, length: I64, cookie: I64, tr
     trap_store(wrapping(action + I64{24}), I64{0})
     installed: trap_syscall(I64{13}, I64{31}, action, I64{0}, I64{8}, I64{0}, I64{0})
     private: trap_syscall(I64{157}, I64{38}, I64{1}, I64{0}, I64{0}, I64{0}, I64{0})
-    // PR_SET_PTRACER, before the filter that would refuse it.
-    traced: if (tracer != I64{0}) -> trap_syscall(I64{157}, I64{1499557217}, tracer, I64{0}, I64{0}, I64{0}, I64{0}) else -> I64{0}
+    // PR_SET_PTRACER, before the filter that would refuse it: a nonzero
+    // `tracer` names the compiler under `jet debug --build`, while 0 allows
+    // same-UID tracers (PR_SET_PTRACER_ANY = -1) so `jet perf attach` on a
+    // running `jet check` can sample its compile-time child under ptrace_scope=1.
+    ^traced: I64{0}
+    if (tracer != I64{0}) {
+        traced = trap_syscall(I64{157}, I64{1499557217}, tracer, I64{0}, I64{0}, I64{0}, I64{0})
+    } else {
+        ^_: trap_syscall(I64{157}, I64{1499557217}, I64{-1}, I64{0}, I64{0}, I64{0}, I64{0})
+    }
     fprog: jet_rt_alloc(I64{16}, I64{8})
     trap_store(fprog, length /% I64{8})
     trap_store(wrapping(fprog + I64{8}), program)

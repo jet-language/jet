@@ -12,8 +12,7 @@ err_spaces: fn(out: I64, depth: I64) {
     }
 }
 
-err_root_width: fn(out: I64, error: I64, depth: I64, width: I64) {
-    head_start: rt_text_len(out)
+err_root: fn(out: I64, error: I64, depth: I64) {
     if (depth == I64{0}) {
         code: rt_text_word(wrapping(error + ERR_CODE))
         rt_text_push_word(out, I64{9071462425195077}, I64{7})  // "Error: "
@@ -32,11 +31,10 @@ err_root_width: fn(out: I64, error: I64, depth: I64, width: I64) {
         err_append(out, identity)
         rt_text_push_scalar(out, I64{41})
     }
-    journey_fit_line(out, head_start, width)
     cause: rt_text_word(wrapping(error + ERR_CAUSE))
     if (cause != I64{0}) {
         rt_text_push_scalar(out, I64{10})
-        err_root_width(out, cause, depth + I64{1}, width)
+        err_root(out, cause, depth + I64{1})
     }
     count: rt_text_word(wrapping(error + ERR_CONTEXT))
     data: rt_text_word(wrapping(wrapping(error + ERR_CONTEXT) + I64{16}))
@@ -44,28 +42,14 @@ err_root_width: fn(out: I64, error: I64, depth: I64, width: I64) {
     loop row < count {
         frame: data + row * ERR_CONTEXT_BYTES
         rt_text_push_scalar(out, I64{10})
-        line_start: rt_text_len(out)
         err_spaces(out, depth + I64{1})
         rt_text_push_word(out, I64{2338626483652554595}, I64{8})
         rt_text_push_scalar(out, I64{40})
-        file: rt_text_word(wrapping(frame + I64{8}))
-        line_num: rt_text_word(wrapping(frame + I64{16}))
-        note: rt_text_word(frame)
-        if (width != I64{0} && file != I64{0}) {
-            fixed: (depth + I64{1}) * I64{2} + I64{9} + I64{1} + journey_digits(line_num) + I64{3} + jet_char_len(note)
-            file_budget: if width > fixed -> width - fixed else -> I64{0}
-            start: journey_path_start(file, file_budget)
-            if start.ellipsis {
-                rt_text_push_scalar(out, I64{8230})
-                rt_text_push_scalar(out, I64{47})
-            }
-            rt_text_append(out, wrapping(rt_text_data(file) + start.offset), rt_text_len(file) - start.offset)
-        } else { err_append(out, file) }
+        err_append(out, rt_text_word(wrapping(frame + I64{8})))
         rt_text_push_scalar(out, I64{58})
-        rt_text_push_number(out, line_num)
+        rt_text_push_number(out, rt_text_word(wrapping(frame + I64{16})))
         rt_text_push_word(out, I64{2112041}, I64{3})
-        err_append(out, note)
-        journey_fit_line(out, line_start, width)
+        err_append(out, rt_text_word(frame))
         row += I64{1}
     }
     conversions: rt_text_word(wrapping(wrapping(error + ERR_CONVERSIONS) + I64{16}))
@@ -73,25 +57,21 @@ err_root_width: fn(out: I64, error: I64, depth: I64, width: I64) {
     loop row < rt_text_word(wrapping(error + ERR_CONVERSIONS)) {
         frame: conversions + row * ERR_CONVERSION_BYTES
         rt_text_push_scalar(out, I64{10})
-        line_start: rt_text_len(out)
         err_spaces(out, depth + I64{1})
         rt_text_push_word(out, I64{7598542776408371043}, I64{8})
         rt_text_push_word(out, I64{540700271}, I64{4})
         err_append(out, rt_text_word(frame))
         rt_text_push_word(out, I64{540945696}, I64{4})
         err_append(out, rt_text_word(wrapping(frame + I64{8})))
-        journey_fit_line(out, line_start, width)
         row += I64{1}
     }
 }
 
-err_render_width: fn(error: I64, width: I64) -> I64 {
+#Export(c) jet_render_err: fn(error: I64) -> I64 {
     out: jet_rt_string_builder_new()
-    err_root_width(out, error, I64{0}, width)
+    err_root(out, error, I64{0})
     out
 }
-
-#Export(c) jet_render_err: fn(error: I64) -> I64 { err_render_width(error, I64{0}) }
 
 err_json_null: fn(out: I64) { rt_text_push_word(out, I64{1819047278}, I64{4}) }
 

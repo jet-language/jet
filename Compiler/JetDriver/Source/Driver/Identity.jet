@@ -375,7 +375,7 @@ JetDriverCompileRequest: struct {
     // sema_eval_entry_show).
     eval_entry: Bool{false},
     // `jet check Core`: every declaration of each loaded Core module loads
-    // and every Core body is checked, called or not, as under JET_KEEP_GOING.
+    // and every Core body is checked, called or not, as under keep-going.
     every_core_body: Bool{false},
     // The Core library's check (JetCLI CoreLibrary.jet): with every Core
     // body checked, sema also writes the Core seal, each Core function's
@@ -1067,7 +1067,7 @@ JetDriverCompileResult: struct {
     failed_stage: JetDriverStage?,
     complete: Bool,
     internal_problem: String?,
-    // JET_KEEP_GOING (jet_driver_compile_keep_going): every failure the
+    // Keep-going (jet_driver_compile_keep_going): every failure the
     // compile recorded, one TSV row each: phase, item, code, message, span.
     keep_going_rows: [String]{[String]{}},
     authority_policy: JetDriverAuthorityPolicy?{None},
@@ -1173,7 +1173,7 @@ jet_driver_entry_harden: fn(load: JetDriverLoadResult) -> Bool Never! {
     false
 }
 
-// The compiler-internal all-phases diagnostic mode (`JET_KEEP_GOING=1`, read
+// The all-phases diagnostic mode (`--keep-going`, read
 // by the CLI). Its output is never shipped: a failed item is
 // recorded and replaced by a typed trap so every later phase still runs.
 JetDriverKeepGoing: struct {

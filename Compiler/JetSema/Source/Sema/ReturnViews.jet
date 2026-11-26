@@ -397,7 +397,14 @@ sema_check_view_rounds_equal: fn(left: [ViewProvenanceMap?], right: [ViewProvena
 // (SemaDeclarationCheck), else None. Returns how many function jobs it checked,
 // which the trace counter `summary_functions_checked` reports.
 sema_check_view_summaries: fn(environment: ^SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, module_index: Int, host_hooks: SemaHostHookAccess?, memory_plan: SemaFunctionMemoryPlan, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: SemaComptimeFunctionRows, view_jobs: [Int]?, counter_phase: String, trace_sink: CompilerTraceSink?) -> Int {
-    summary_jobs: if view_jobs == .Val(found) -> found.copy() else -> sema_check_sorted_view_summary_jobs(environment, program, module_index)
+    if view_jobs == .Val(found) {
+        return sema_check_view_summaries_with(environment, program, scopes, module_index, host_hooks, memory_plan, comptime_functions, comptime_rows, found, counter_phase, trace_sink)
+    }
+    computed: sema_check_sorted_view_summary_jobs(environment, program, module_index)
+    sema_check_view_summaries_with(environment, program, scopes, module_index, host_hooks, memory_plan, comptime_functions, comptime_rows, computed, counter_phase, trace_sink)
+}
+
+priv sema_check_view_summaries_with: fn(environment: ^SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, module_index: Int, host_hooks: SemaHostHookAccess?, memory_plan: SemaFunctionMemoryPlan, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: SemaComptimeFunctionRows, summary_jobs: [Int], counter_phase: String, trace_sink: CompilerTraceSink?) -> Int {
     method_jobs: sema_check_view_summary_method_jobs(program, module_index)
     job_count: summary_jobs.len() + method_jobs.len()
     ^summary_functions_checked: 0
@@ -439,6 +446,7 @@ sema_check_view_summaries: fn(environment: ^SemaScopeEnvironment, program: SemaP
 // (sema_check_registration_top_level).
 sema_check_view_summary_function: fn(graph: SemaRegistrationGraph, item_index: Int, module_index: Int, memory_plan: SemaFunctionMemoryPlan, environment: ^SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, host_hooks: SemaHostHookAccess?, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: SemaComptimeFunctionRows, return_view_rows: ^[U32:Int], summary_functions_checked: ^Int) -> ViewProvenanceMap? {
     if graph.modules[module_index].program.items[item_index] == .Func(declaration) {
+        if !sema_check_top_level_function_registered(graph, module_index, declaration.name) -> return None
         job: SemaBodyJob.TopLevel{item_index: item_index}
         owner_id: sema_check_registered_function_id(job, declaration, module_index, environment, program)
         ^cached: sema_comptime_find_checked_function(comptime_functions, comptime_rows, environment.module_identity, sema_program_symbol_key(program, owner_id))

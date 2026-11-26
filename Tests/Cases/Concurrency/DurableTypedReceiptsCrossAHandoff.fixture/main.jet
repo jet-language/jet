@@ -39,12 +39,12 @@ run: fn() {
     tree.set_delivery(service.delivery_durable()) ?? panic("delivery")
     state: service.state_store(state_path) ?? panic("state")
     tree.set_state_event_log(state, "events", 1, "reversible") ?? panic("state adapter")
-    worker: tree.worker("tally", tally, state: Shared<Bool>{false}, capacity: 8) ?? panic("worker")
+    worker: tree.stateful_worker("tally", tally, state: Shared<Bool>{false}, capacity: 8) ?? panic("worker")
     tree.start() ?? panic("start")
 
-    first: tree.send_durable(worker, 1, key: "one") ?? panic("send 1")
-    second: tree.send_durable(worker, 2, key: "two") ?? panic("send 2")
-    third: tree.send_durable(worker, 3, key: "three") ?? panic("send 3")
+    first: worker.send_durable(1, key: "one") ?? panic("send 1")
+    second: worker.send_durable(2, key: "two") ?? panic("send 2")
+    third: worker.send_durable(3, key: "three") ?? panic("send 3")
     // The worker runs in send order, so 2 has failed once 3 is Delivered.
     print("first: {settle(first).show()}")
     print("third: {settle(third).show()}")

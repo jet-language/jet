@@ -31,24 +31,27 @@ run: fn() {
 
     print("order independent: {f_alpha.int(1, 1000) == r_alpha.int(1, 1000) && f_beta.int(1, 1000) == r_beta.int(1, 1000)}")
 
-    // 2. Hierarchical path associativity: multi-key split equals nested splits
-    //    and equals pure seed-plus-keys construction.
-    ^root: random.rng(2026)
-    ^flat: root.split("world", "chunk", "0")
+    // 2. Hierarchical path associativity with both String and Int keys:
+    //    multi-key split equals nested splits and pure seed-plus-keys construction.
+    root: random.rng(2026)
+    ^flat: root.split("world", "chunk", 12, 34)
     ^world: root.split("world")
     ^_: world.int(1, 100)
-    ^nested: world.split("chunk", "0")
-    ^from_seed: random.rng(2026, "world", "chunk", "0")
+    chunk: world.split("chunk")
+    ^nested: chunk.split(12, 34)
+    ^from_seed: random.rng(2026, "world", "chunk", 12, 34)
 
     flat_draw: flat.int(1, 1000000)
     nested_draw: nested.int(1, 1000000)
     seed_draw: from_seed.int(1, 1000000)
     print("associative: {flat_draw == nested_draw && flat_draw == seed_draw} ({flat_draw})")
 
-    // 3. Domain separation: distinct key splits never collide on concatenation.
+    // 3. Domain separation: concatenation and Int-vs-String keys never collide.
     ^ab_c: root.split("ab", "c")
     ^a_bc: root.split("a", "bc")
-    print("domain separated: {ab_c.int(1, 1000000) != a_bc.int(1, 1000000)}")
+    ^str_42: root.split("42")
+    ^int_42: root.split(42)
+    print("domain separated: {ab_c.int(1, 1000000) != a_bc.int(1, 1000000) && str_42.int(1, 1000000) != int_42.int(1, 1000000)}")
 
     // 4. Task-independence: concurrent tasks derive identical streams in any order.
     fwd_tasks: task.all {

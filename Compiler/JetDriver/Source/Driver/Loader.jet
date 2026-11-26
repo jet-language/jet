@@ -857,9 +857,7 @@ jet_driver_parse_allocator_bytes: fn(value: String, span: Span, diagnostics: ^[D
     loop (index, byte) in value_bytes {
         if (Int{byte}) == 46 -> dot = index
     }
-    // copy: `digits_text` is trimmed in place to its digits, while `value` is the caller's manifest
-    // field (a read parameter) and stays intact.
-    ^digits_text: value.copy()
+    ^digits_text: value
     ^multiplier: 1
     if dot >= 0 {
         digits_text = String.from_bytes(value_bytes[0..<dot]) ?? ""
@@ -6639,7 +6637,7 @@ jet_driver_load: fn(request: JetDriverCompileRequest) -> JetDriverLoadResult {
 // The load. `use_driven` loads Core declarations and private Core imports as
 // the program reaches them (CoreReach.jet); without it every declaration and
 // import of each loaded Core module loads, as a whole-library view
-// (jet_driver_load_with_names), JET_KEEP_GOING and `jet check Core` need.
+// (jet_driver_load_with_names), keep-going and `jet check Core` need.
 jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) -> JetDriverLoadResult {
     ^diagnostics: [Diagnostic]{}
     // Module ids, interned as the load meets each module.
@@ -6693,8 +6691,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
     // The organization floor, then the entry package's policy, apply to the
     // entire user-source closure, including imports, not each dependency's
     // own floor.
-    // copy: the request keeps its organization rows for the rest of the compile.
-    ^package_policy: request.organization_policy.copy()
+    ^package_policy: request.organization_policy
     loop package in catalog.packages {
         if package.identity == catalog.entry_package_identity {
             // copy: `catalog` keeps its package rows for the rest of the load (catalog.source_units
@@ -6714,8 +6711,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         }
     }
     ^pending: [Int]{entry_index ?? 0}
-    ^queued: [Bool]{}
-    loop _ in 0..<source_units.len() -> queued.push(false)
+    ^queued: loop _ in 0..<source_units.len() -> false
     queued[entry_index ?? 0] = true
     // The build plan selected these exact modules. Check every selected output,
     // including loose-file outputs not named by an import.
@@ -6726,8 +6722,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         }
     }
     ^modules: [JetDriverLoadedModule]{}
-    ^namespace_expanded: [Bool]{}
-    loop _ in 0..<request.authorized_sources.roots.len() -> namespace_expanded.push(false)
+    ^namespace_expanded: loop _ in 0..<request.authorized_sources.roots.len() -> false
     ^resolved_imports: [SemaRegistrationImportEdge]{}
     // Unit index -> the dotted `name: module` path that declared it
     // (JetDriverLoadedModule.declared_module); the first declaration wins.
@@ -6834,7 +6829,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
     ^boundary_facts: [StructureFact]{}
     jet_driver_check_import_boundaries(catalog.packages, source_units, modules, resolved_imports, diagnostics, boundary_facts)
     jet_driver_check_package_layers(catalog.packages, source_units, modules, resolved_imports, diagnostics, boundary_facts)
-    if !jet_driver_has_errors(diagnostics) && !jet_driver_bind_package_namespaces(modules, source_units, catalog.packages, request, diagnostics) {
+    if modules.len() > 0 && !jet_driver_bind_package_namespaces(modules, source_units, catalog.packages, request, diagnostics) {
         failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Load)
     }
     jet_driver_expand_imported_cli_entry(modules, source_units, entry_module_identity)
@@ -6847,7 +6842,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
     if !provenance.complete {
         failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Collect)
     }
-    if failed_stage == None && !jet_driver_expand_imported_marker_groups(modules, resolved_imports, source_units, provenance.files, diagnostics, request.trace_sink) {
+    if modules.len() > 0 && failed_stage != Val(JetDriverStage.Collect) && !jet_driver_expand_imported_marker_groups(modules, resolved_imports, source_units, provenance.files, diagnostics, request.trace_sink) {
         failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Parse)
     }
     jet_driver_replaced_import_uses(request, modules, source_units)
@@ -7065,7 +7060,7 @@ jet_driver_load_walk: fn(
         jet_driver_apply_auto_derive_policy(program, unit, packages)
         if embedded -> jet_driver_underive_builtin_carriers(program, unit.module_name)
         module_identity: module_intern(table, jet_driver_unit_module_identity(unit))
-        if jet_driver_has_errors(parse_result.diagnostics) {
+        if jet_driver_has_errors(parse_result.diagnostics) && program.items.len() == 0 && program.imports.len() == 0 && program.script_body.len() == 0 {
             modules.push(jet_driver_loaded_module(source_unit_index, unit, module_identity, program, declared_modules.get(source_unit_index) ?? ""))
             next
         }

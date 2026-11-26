@@ -1,0 +1,126 @@
+// Capturing a runtime stop (E3010/E3012) at a sema worker task join turns that
+// item into an E0003 failure packet under keep-going so the rest of the check
+// continues, while returning false when keep-going is off.
+use {
+    jet_driver.[jet_driver_canonical_effect_module]
+    jet_foundation.[
+        Span,
+        compiler_threads_failure_text,
+        compiler_threads_single,
+        compiler_threads_try_join,
+        effect_vocabulary_module,
+        jet_target_machine_hosted,
+        module_intern,
+        module_none,
+        module_table,
+    ]
+    jet_parser.[parse_generated_source]
+    jet_sema.[
+        SemaBodyClaim,
+        SemaBodyJob,
+        SemaBodyPart,
+        SemaBuildFacts,
+        SemaCheckShared,
+        SemaClaimedBody,
+        SemaForeignProviderInput,
+        SemaFunctionMemoryPlan,
+        SemaProgramTables,
+        SemaRegistrationForeignHandleFacts,
+        SemaRegistrationImportEdge,
+        SemaRegistrationModuleInput,
+        SemaScopeEnvironment,
+        SemaSourceOrigin,
+        SemaSourceSegment,
+        sema_check_body_part_recover,
+        sema_program_tables_snapshot,
+        sema_registration_prepare_graph,
+        sema_scope_init,
+    ]
+}
+
+keep_going_stop_shared: fn(keep_going: Bool) -> Shared<SemaCheckShared>? {
+    ^table: module_table()
+    main_id: module_intern(table, "stop_capture/main")
+    ^source: `f_stop: fn() -> Int { 1 }
+f_after: fn() -> Int { 2 }
+`
+    ^parsed: parse_generated_source(source.bytes())
+    if parsed.diagnostics.len() != 0 -> return None
+    segment: SemaSourceSegment{generated: Span{start: 0, end: source.len()}, source_file: "main.jet", source_start: 0, line_starts: [Int]{0}, origin: SemaSourceOrigin.Snapshot}
+    main_input: SemaRegistrationModuleInput{package_identity: "stop_capture", module_identity: main_id, module_name: "main", core_source_alias: "", module_path: "main.jet", source_file: "main.jet", source_segments: [SemaSourceSegment]{segment}, source_origin: SemaSourceOrigin.Snapshot, program: parsed.program.move(), foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: source.move()}
+    effects: jet_driver_canonical_effect_module(effect_vocabulary_module("IO: struct {{\n    impl Effect {{}}\n}}\nPanic: struct {{\n    impl Effect {{}}\n}}\n"), table) ?? return None
+    effects_id: effects.module_identity
+    facts: SemaBuildFacts{package_name: "stop_capture", package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}
+    ^graph: sema_registration_prepare_graph([SemaRegistrationModuleInput]{main_input, effects}, [SemaRegistrationImportEdge]{}, "stop_capture", main_id, effects_id, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single()) ?? return None
+    graph.keep_going = keep_going
+    ^program: sema_program_tables_snapshot()
+    program.registration_graph = graph.move()
+    ^programs: [SemaProgramTables]{}
+    programs.push(program)
+    Val(Shared{SemaCheckShared{environments: [SemaScopeEnvironment]{}, programs: programs.move(), memory_plans: [SemaFunctionMemoryPlan]{}}})
+}
+
+keep_going_set_claim: fn(slot: Shared<SemaBodyPart>, claim: SemaBodyClaim) {
+    permit: slot.guard_edit()
+    permit.value.active_claim = Val(claim)
+}
+
+keep_going_verify_packets: fn(slot: Shared<SemaBodyPart>) {
+    held: slot.guard_read()
+    assert_eq(held.value.bodies.len(), 2)
+    assert_eq(held.value.bodies[0].body.diagnostics.len(), 1)
+    assert_eq(held.value.bodies[0].body.diagnostics[0].code, "E0003")
+    assert(held.value.bodies[0].body.diagnostics[0].what.contains("f_stop"), "first stop names f_stop")
+    assert_eq(held.value.bodies[1].body.diagnostics.len(), 1)
+    assert_eq(held.value.bodies[1].body.diagnostics[0].code, "E0003")
+    assert(held.value.bodies[1].body.diagnostics[0].what.contains("f_after"), "second stop names f_after")
+}
+
+keep_going_trigger_e3010: fn() -> Int {
+    rows: [Int]{10}
+    rows[5]
+}
+
+keep_going_trigger_e3012: fn() -> Int {
+    entries: [String:Int]{"present": 1}
+    entries["missing"]
+}
+
+#Test("keep_going_worker_join_captures_e3010_and_e3012_per_item") {
+    shared: keep_going_stop_shared(true) ?? {
+        assert(false, "failed to prepare stop capture fixture")
+        return
+    }
+    ^e3010_reason: ""
+    task.group capture_e3010 {
+        worker: task keep_going_trigger_e3010()
+        ^_: compiler_threads_try_join(worker) ?? {
+            e3010_reason = compiler_threads_failure_text(err)
+            0
+        }
+    }
+    assert(e3010_reason != "", "E3010 task stop was captured at task join")
+
+    ^e3012_reason: ""
+    task.group capture_e3012 {
+        worker: task keep_going_trigger_e3012()
+        ^_: compiler_threads_try_join(worker) ?? {
+            e3012_reason = compiler_threads_failure_text(err)
+            0
+        }
+    }
+    assert(e3012_reason != "", "E3012 task stop was captured at task join")
+
+    slot: Shared{SemaBodyPart{scopes: sema_scope_init(module_none()), bodies: [SemaClaimedBody]{}, active_claim: Val(SemaBodyClaim{position: 0, job: SemaBodyJob.TopLevel{item_index: 0}, stream_module: -1, module_index: 0})}}
+    assert(sema_check_body_part_recover(shared, slot, 0, e3010_reason), "keep-going recovers the active claim on E3010")
+    keep_going_set_claim(slot, SemaBodyClaim{position: 1, job: SemaBodyJob.TopLevel{item_index: 1}, stream_module: -1, module_index: 0})
+    assert(sema_check_body_part_recover(shared, slot, 0, e3012_reason), "keep-going recovers a second item on E3012")
+    keep_going_verify_packets(slot)
+
+    strict_shared: keep_going_stop_shared(false) ?? {
+        assert(false, "failed to prepare strict stop capture fixture")
+        return
+    }
+    strict_slot: Shared{SemaBodyPart{scopes: sema_scope_init(module_none()), bodies: [SemaClaimedBody]{}, active_claim: Val(SemaBodyClaim{position: 0, job: SemaBodyJob.TopLevel{item_index: 0}, stream_module: -1, module_index: 0})}}
+    assert(!sema_check_body_part_recover(strict_shared, strict_slot, 0, e3010_reason), "without keep-going, recovery refuses to swallow the stop")
+}

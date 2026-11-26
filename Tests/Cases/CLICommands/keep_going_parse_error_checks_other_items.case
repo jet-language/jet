@@ -1,0 +1,9 @@
+# A file with one parse error still has its other items checked under
+# keep-going.
+fixture: KeepGoingParseErrorChecksOtherItems.fixture
+env: NO_COLOR=1
+env: TERM=dumb
+step: jet check --keep-going main.jet
+exit: 1
+stderr: ~ "broken_syntax" # the parse error in broken_syntax is reported
+stderr: ~ "Nothing named `missing_after_parse_error` exists here" # other_item in the same file is still checked

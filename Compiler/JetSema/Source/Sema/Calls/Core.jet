@@ -6,6 +6,7 @@
 use jet_foundation.[
     AST_NODE_GENERATED,
     AccessConvention,
+    BodyHandleOp,
     CORE_CALL_COVERAGE_SEMA,
     CORE_MODULE_EXPORTS,
     CORE_SOURCE_OWNED_ROWS,
@@ -21,6 +22,7 @@ use jet_foundation.[
     Expr,
     FunctionDefaultRef,
     NodeKind,
+    ParamZone,
     SharedLifetime,
     Span,
     SymbolID,
@@ -40,6 +42,7 @@ use jet_foundation.[
     core_call_source_role,
     core_call_projection,
     core_module_export,
+    core_source_owns_type,
     diagnostic_with_edit,
     expr_span,
     type_name,
@@ -1664,4 +1667,209 @@ sema_call_core_check_source_owned: fn(target: SemaCallDirectTarget, qualified_na
         tree_expr_retype(value, loaded)
     }
     Val(value)
+}
+
+// ---- shared builtin handle helpers --------------------------------------
+
+SemaBuiltinHandleSpec: struct {
+    operation: BodyHandleOp,
+    result_type: Type,
+    params: [SemaCallParam],
+    receiver_convention: AccessConvention,
+    effect_name: String,
+}
+
+sema_builtin_handle_param: fn(name: String, ty: Type, convention: AccessConvention) -> SemaCallParam Never! {
+    SemaCallParam{
+        label: name,
+        name: name,
+        zone: ParamZone.PositionalOnly,
+        default: None,
+        default_ref: None,
+        convention: convention,
+        ty: Val(ty),
+        variadic: false,
+    }
+}
+
+sema_builtin_handle_owner: fn(ty: Type) -> String? {
+    if ty == {
+        .Named(name) | .Apply(name, _) -> {
+            if core_source_owns_type(name) -> return None
+            loop owner in
+                ([String]{"Sender", "Receiver", "MappedFile", "FileScope", "FileReader", "FileWriter", "TempDir", "TempFile", "FileLock", "StdinHandle", "Stdout", "Stderr", "JSONLReader", "JSONLWriter", "CSVReader", "CSVWriter", "XMLReader", "XMLWriter", "Reader", "Cursor", "Path"}) {
+                // The built-in `Path` has no declaring module: a canonical
+                // `<module>.Path` is a different record (`core.files.path`).
+                if name == owner || (owner != "Path" && name.ends_with(".{owner}")) {
+                    return Val(owner)
+                }
+            }
+        }
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
+    }
+    None
+}
+
+sema_builtin_handle_owner_module: fn(owner: String) -> String Never! {
+    if owner == "MappedFile" || owner == "FileScope" || owner == "FileReader" || owner == "FileWriter" || owner == "TempDir" || owner == "TempFile" || owner == "FileLock" {
+        return "core.files"
+    }
+    if owner == "StdinHandle" || owner == "Stdout" || owner == "Stderr" || owner == "Reader" {
+        return "core.term"
+    }
+    if owner == "JSONLReader" || owner == "JSONLWriter" -> return "core.encoding.jsonl"
+    if owner == "CSVReader" || owner == "CSVWriter" -> return "core.encoding.csv"
+    if owner == "XMLReader" || owner == "XMLWriter" -> return "core.encoding.xml"
+    if owner == "Cursor" -> return "core.text"
+    ""
+}
+
+sema_builtin_handle_is_canonical: fn(ty: Type, owner: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
+    actual: sema_builtin_handle_owner(ty) ?? return false
+    if actual != owner -> return false
+    // The channel endpoints are compiler-owned builtins with no declaring
+    // module: a program's own `Sender` or `Receiver` is spelled by its
+    // owner, never bare (sema_type_is_builtin_handle).
+    if owner == "Sender" || owner == "Receiver" -> return sema_type_is_builtin_handle(ty, owner)
+    graph: program.registration_graph
+    resolved: sema_type_graph_lookup_symbol(graph, environment.module_identity, actual)
+    if resolved == .Val(row) {
+        ^owner_module: sema_builtin_handle_owner_module(owner)
+        // A declared or imported type named like a module-less built-in
+        // (`Path`) shadows it; the two never share an identity.
+        return sema_resolved_kind(graph, row) == SymbolKind.Type && owner_module != "" && (sema_registration_module_name(graph, sema_resolved_module_identity(graph, row)) ?? "") == owner_module
+    }
+    return true
+}
+
+// The methods of the text-cursor and binary-reader handles are typed without
+// recording a receiver convention, so a written mark has no convention to be
+// checked against; `lines` on the file and stdin readers records none either.
+sema_builtin_handle_reports_no_receiver_convention: fn(owner: String) -> Bool Never! {
+    owner == "FileReader" || owner == "StdinHandle" || owner == "Cursor" || owner == "Reader"
+}
+
+sema_handle_infer_args: fn(args: [CallArg], check: ^SemaBodyCheck) Never! {
+    loop argument in args -> ^_: sema_check_expression(argument.expr, None, check)
+}
+
+sema_handle_effect_fact: fn(check: ^SemaBodyCheck, api: String, span: Span, result_type: Type, effect_name: String) -> Bool Never! {
+    ^entries: [EffectRowEntry]{}
+    if effect_name != "" -> entries.push(EffectRowEntry{name: effect_name, span: span})
+    ^facts: SemaCallFacts{
+        return_type: result_type,
+        failure_carrier: sema_call_failure_carrier(Val(result_type)),
+        effect_bound: Val(entries),
+        type_args: [Type]{},
+        default_refs: [FunctionDefaultRef]{},
+    }
+    sema_effect_record_intrinsic_fact(check.environment.*, check.program.*, check.scopes, check.context, api, span, facts, check.diagnostics)
+}
+
+sema_handle_fixed_list_assignable: fn(required: Type, offered: Type, check: SemaBodyCheck) -> Bool Never! {
+    if required == {
+        .List(element) -> if offered == {
+            .FixedList(fixed_element, _) -> sema_call_type_assignable(element, fixed_element, check) ?? false
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
+        }
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
+    }
+}
+
+sema_handle_integer_width: fn(ty: Type) -> Bool Never! {
+    if ty == {
+        .IntN(signed, bits) -> return !signed && (bits == 8 || bits == 16 || bits == 32)
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> return false
+    }
+}
+
+// A `Reader`/`Cursor` byte-shift argument that does not fit its fixed parameter
+// is E0112 about the call; every other handle argument is the plain E0108
+// mismatch.
+sema_handle_argument_mismatch: fn(callee: String, required: Type, offered: Type, span: Span, program: SemaProgramTables) -> Diagnostic {
+    shift: callee == "Reader.over" || callee == "Reader.take" || callee == "Reader.seek" || callee == "Reader.skip" || callee == "Cursor.over" || callee == "Cursor.take_until"
+    if !shift -> return sema_type_mismatch(required, offered, span, program)
+    sema_error("E0112", span, "`{callee}` wants {sema_type_show(required)}, but this is {sema_type_show(offered)}", "every argument must match its parameter's type", sema_type_fix_hint(required, offered))
+}
+
+sema_handle_checked_args: fn(callee: String, params: [SemaCallParam], args: [CallArg], receiver_expr: Expr?, receiver_value: TExpr?, receiver_convention: AccessConvention, shift_argument: Int, span: Span, check: ^SemaBodyCheck) -> [TExpr]? {
+    ^checked_args: args
+    binding: sema_call_bind_args(callee, params, checked_args, span, check.diagnostics) ?? {
+        sema_handle_infer_args(args, check)
+        return None
+    }
+    if !sema_call_validate_binding(callee, params, binding, checked_args, span, check.diagnostics) {
+        return None
+    }
+    ^values: [TExpr]{}
+    loop index in 0..<checked_args.len() {
+        slot: sema_call_bound_slot(binding, binding.sources[index], checked_args[index])
+        if slot < 0 || slot >= params.len() -> return None
+        required_declared: sema_call_parameter_type(params[slot]) ?? return None
+        ^required: sema_call_resolved_type(required_declared, check.environment.*, check.program.*)
+        value_start: check.diagnostics.len()
+        value: if shift_argument == index -> sema_check_expression(checked_args[index].expr, None, check) else -> sema_check_expression(checked_args[index].expr, Val(required), check)
+        checked: value ?? {
+            // The parameter type is the value's hint: its own E0108 against
+            // it becomes the handle call's argument mismatch.
+            value_span: expr_span(checked_args[index].expr)
+            if sema_value_mismatch_index(check.diagnostics, value_start, value_span) == .Val(mismatch_index) {
+                ^probe_diagnostics: [Diagnostic]{}
+                if sema_probe_expression(checked_args[index].expr, None, check, probe_diagnostics) == .Val(offered) {
+                    check.diagnostics[mismatch_index] = sema_handle_argument_mismatch(callee, required, sema_call_resolved_type(offered.ty, check.environment.*, check.program.*), value_span, check.program.*)
+                }
+            }
+            return None
+        }
+        if shift_argument == index {
+            if checked.ty == .IntN(_, _) {
+                // U64 and the signed widths stay explicit (E0112 at the call).
+                if !sema_handle_integer_width(checked.ty) {
+                    check.diagnostics.push(sema_handle_argument_mismatch(callee, required, checked.ty, checked_args[index].span, check.program.*))
+                    return None
+                }
+                converted: sema_expr_numeric_conversion(checked, Type.Int, checked.span, sema_source_line_at(check.environment.source_segments, checked.span) ?? 0) ?? return None
+                values.push(converted)
+                next
+            }
+        }
+        ^compatible: sema_call_type_assignable(required_declared, checked.ty, check) ?? false
+        if !compatible && sema_handle_fixed_list_assignable(required_declared, checked.ty, check) {
+            compatible = true
+        }
+        if !compatible {
+            check.diagnostics.push(sema_handle_argument_mismatch(callee, required, checked.ty, checked_args[index].span, check.program.*))
+            return None
+        }
+        // A `^` argument keeps its Write borrow of the caller's place, so the
+        // route writes the original, never a copy (#5976).
+        if params[slot].convention == AccessConvention.Write {
+            borrow_type: checked.ty
+            borrow_span: checked.span
+            values.push(sema_tree_node(borrow_type, TExprKind.Borrow{place: checked, access: AccessConvention.Write}, borrow_span))
+            next
+        }
+        values.push(checked)
+    }
+    ownership: if receiver_expr == {
+        .Val(expr) -> {
+            ^convention: receiver_convention
+            if convention == AccessConvention.Write && sema_ownership_places_from_expr_in_state(expr, check.scopes, check.state).len() == 0 {
+                convention = AccessConvention.Read
+            }
+            sema_ownership_check_handle_method_call(check, callee, expr, convention, params, checked_args, span)
+        }
+        .None -> sema_ownership_check_call_arguments(check.state, callee, params, checked_args, check.scopes, check.diagnostics)
+    }
+    if !ownership.accepted || !ownership.complete -> return None
+    Val(values)
+}
+
+sema_handle_finish: fn(receiver: TExpr, operation: BodyHandleOp, args: [TExpr], result_type: Type, effect_name: String, api: String, span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck Never! {
+    ^value: sema_tree_node(result_type, TExprKind.HandleMethod{receiver: receiver, operation: operation, args: args}, span)
+    checked: sema_expression_call_expected(value, expected, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    if !sema_handle_effect_fact(check, api, span, result_type, effect_name) {
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    SemaMethodSpecialCheck{handled: true, value: Val(checked)}
 }

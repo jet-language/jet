@@ -17,6 +17,7 @@ use {
         CallArg,
         DIAGNOSTIC_ERROR,
         DIAGNOSTIC_LINT,
+        DeclID,
         Diagnostic,
         EnumDef,
         Expr,
@@ -42,6 +43,7 @@ use {
         codable_tag_field,
         codable_untagged,
         core_decl_utf8,
+        decl_table_key,
         diagnostic_from_registry,
         diagnostic_registry_row,
         diagnostic_sentence_case_line,
@@ -51,7 +53,6 @@ use {
         name_column_table,
         name_index,
         name_intern,
-        symbol_key_leaf,
     ]
     jet_parser.[parse_generated_source]
 }
@@ -575,7 +576,7 @@ sema_rule_heard_arg: fn(expression: Expr, check: ^SemaBodyCheck) -> SemaRuleHear
     probed: sema_rule_probe(expression, check)
     ty: if probed == .Val(checked) -> checked.ty else -> Type.Named{name: "_"}
     ^known: if probed == .Val(checked) -> sema_rule_known(checked, check) else -> TComptimeValue?{None}
-    if known == None && probed == .Val(checked) && (sema_stream_handle_owner(checked.ty) ?? "") == "Path" {
+    if known == None && probed == .Val(checked) && (sema_builtin_handle_owner(checked.ty) ?? "") == "Path" {
         known = sema_rule_known_path(expression, check)
     }
     SemaRuleHeardArg{ty: ty, known: known}
@@ -791,9 +792,37 @@ sema_rule_known: fn(value: TExpr, check: SemaBodyCheck) -> TComptimeValue? {
         }
         return None
     }
+    if value.kind == .Call(callee, _, args) && args.len() == 0 {
+        return sema_rule_known_zero_arg_call(callee, check)
+    }
     if value.kind == .Clone(inner, _) -> return sema_rule_known(inner, check)
     if value.kind == .ExplicitCopy(inner) -> return sema_rule_known(inner, check)
     sema_expr_comptime_value(value, check.context)
+}
+
+// A zero-parameter function whose body is a single literal or unit enum case
+// (`aria_role_button: fn() -> UIAriaRole { UIAriaRole.Button }`) is heard as
+// that constant value by any marker check rule.
+sema_rule_known_zero_arg_call: fn(callee: DeclID, check: SemaBodyCheck) -> TComptimeValue? {
+    graph: check.program.registration_graph
+    key: decl_table_key(graph.decls, graph.symbols, callee)
+    row: sema_registration_callable_row(graph, key) ?? return None
+    if row == .Function(module_index, func_index) {
+        func: graph.modules[module_index].functions[func_index].declaration
+        if func.params.len() != 0 || func.body.len() != 1 -> return None
+        ^body_expr: Expr?{None}
+        if func.body[0] == .Expr(expr) -> body_expr = Val(expr)
+        if func.body[0] == .Return(value, _) -> body_expr = value
+        expr: body_expr ?? return None
+        if sema_rule_literal(expr) == .Val(lit) -> return lit.known
+        if expr == .Field(_, variant, _, _) {
+            return Val(TComptimeValue.Enum{type_name: "", variant: "{variant}", args: [TComptimeEnumArg]{}})
+        }
+        if expr == .EnumLit(_, variant, _, args, _, _, _) && args.len() == 0 {
+            return Val(TComptimeValue.Enum{type_name: "", variant: "{variant}", args: [TComptimeEnumArg]{}})
+        }
+    }
+    None
 }
 
 // sema_rule_known over the items of a list literal.
@@ -843,8 +872,10 @@ sema_rule_known_row: fn(index: Int, check: SemaBodyCheck) -> TComptimeValue? {
         }
         return Val(TComptimeValue.Struct{type_name: "", fields: known})
     }
-    if check.context.arena.tree.nodes[row].kind == .EnumCtor(_, variant, payload) {
-        return sema_rule_known_case(symbol_key_leaf(sema_symbol_key(check.program.*, check.context, variant)), payload, check)
+    if check.context.arena.tree.nodes[row].kind == .EnumCtor(owner, variant, payload) {
+        owner_key: sema_symbol_key(check.program.*, check.context, owner)
+        variant_key: sema_symbol_key(check.program.*, check.context, variant)
+        return sema_rule_known_case(sema_comptime_fold_variant_name(owner_key, variant_key), payload, check)
     }
     if check.context.arena.tree.nodes[row].kind == .EnumLit(_, variant, payload) {
         return sema_rule_known_case("{variant}", payload, check)
@@ -865,6 +896,9 @@ sema_rule_known_row: fn(index: Int, check: SemaBodyCheck) -> TComptimeValue? {
             return sema_rule_known_row(receiver, check)
         }
         return None
+    }
+    if check.context.arena.tree.nodes[row].kind == .Call(callee, _, args) && args.len() == 0 {
+        return sema_rule_known_zero_arg_call(callee, check)
     }
     if check.context.arena.tree.nodes[row].kind == .Clone(inner, _) {
         return sema_rule_known_row(inner, check)
@@ -1050,7 +1084,7 @@ sema_rule_value_dyn: fn(graph: SemaRegistrationGraph, caller: Int, ty: Type, val
         return None
     }
     // The built-in Path handle has no Encode; it is heard as its text.
-    if ty == Type.String || (sema_stream_handle_owner(ty) ?? "") == "Path" {
+    if ty == Type.String || (sema_builtin_handle_owner(ty) ?? "") == "Path" {
         if value == .String(text) {
             return Val(sema_rule_dyn("Text", TComptimeValue.String{value: text}))
         }

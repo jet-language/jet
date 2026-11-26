@@ -2445,6 +2445,12 @@ perf_counts_test_lines: fn(counted: X64Counted, paranoid: Int?) -> [String] {
     assert(jet_cli_perf_run_binary_command("run", parsed_txt) == None)
     parsed_src: jet_cli_perf_session_args([String]{"main.jet"}) ?? panic(err.message)
     assert(jet_cli_perf_run_binary_command("run", parsed_src) == None)
+    if perf_test_process.which("sh") == .Val(sh_path) {
+        parsed_path: jet_cli_perf_session_args([String]{"--out", "out.jettrace", "sh", "-c", "true", "arg.jet"}) ?? panic(err.message)
+        assert_eq(jet_cli_perf_run_binary_command("run", parsed_path), Val([String]{sh_path, "-c", "true", "arg.jet"}))
+    }
+    parsed_missing: jet_cli_perf_session_args([String]{"jet-definitely-missing-executable-n119"}) ?? panic(err.message)
+    assert(jet_cli_perf_run_binary_command("run", parsed_missing) == None)
     perf_test_files.remove(elf_path) ?? panic("rm elf: {err}")
     perf_test_files.remove(txt_path) ?? panic("rm txt: {err}")
 }

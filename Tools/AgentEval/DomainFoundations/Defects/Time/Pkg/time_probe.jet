@@ -199,7 +199,7 @@ run: fn() {
     schedule_start: time.new(2024, 3, 8)
     scheduled: occurrences(schedule.copy(), schedule_start.copy(), 5)
     loop item in scheduled {
-        text: item.format("yyyy-MM-dd HH:mm:ss VV XXX")
+        text: item.format("%Y-%m-%d %H:%M:%S %Z %:z")
         offset: item.offset_seconds()
         print("occurrence={text} offset={offset}")
     }
@@ -218,10 +218,10 @@ run: fn() {
     gap_later: time.zoned_local(time.new(2024, 3, 10), time.time(2, 30, 0), zone, "later") ?? panic("gap later")
     overlap_earlier: time.zoned_local(time.new(2024, 11, 3), time.time(1, 30, 0), zone, "earlier") ?? panic("overlap earlier")
     overlap_later: time.zoned_local(time.new(2024, 11, 3), time.time(1, 30, 0), zone, "later") ?? panic("overlap later")
-    gap_compatible_text: gap_compatible.format("yyyy-MM-dd HH:mm:ss VV XXX")
-    gap_later_text: gap_later.format("yyyy-MM-dd HH:mm:ss VV XXX")
-    overlap_earlier_text: overlap_earlier.format("yyyy-MM-dd HH:mm:ss VV XXX")
-    overlap_later_text: overlap_later.format("yyyy-MM-dd HH:mm:ss VV XXX")
+    gap_compatible_text: gap_compatible.format("%Y-%m-%d %H:%M:%S %Z %:z")
+    gap_later_text: gap_later.format("%Y-%m-%d %H:%M:%S %Z %:z")
+    overlap_earlier_text: overlap_earlier.format("%Y-%m-%d %H:%M:%S %Z %:z")
+    overlap_later_text: overlap_later.format("%Y-%m-%d %H:%M:%S %Z %:z")
     print("gap_compatible={gap_compatible_text}")
     print("gap_later={gap_later_text}")
     print("overlap_earlier={overlap_earlier_text}")

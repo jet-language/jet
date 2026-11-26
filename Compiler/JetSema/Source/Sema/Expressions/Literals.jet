@@ -948,8 +948,9 @@ sema_expression_tuple: fn(fields: [TupleField], span: Span, expected: Type?, che
             compatible: sema_expr_expected_assignable(field_ty, value.ty, check.environment.*, check.program.*) ?? return None
             if !compatible -> return None
         }
-        values.push(value.copy())
-        types.push(TypeTupleField{name: field.name, ty: value.ty})
+        value_ty: value.ty
+        values.push(value)
+        types.push(TypeTupleField{name: field.name, ty: value_ty})
     }
     if expected_fields != None && fields.len() != (expected_fields ?? [TypeTupleField]{}).len() {
         check.diagnostics.push(sema_error("E0108", span, "tuple fields do not match the expected tuple type", "tuple arity is part of the tuple type", "provide every tuple field exactly once"))
@@ -968,12 +969,13 @@ sema_expression_tuple: fn(fields: [TupleField], span: Span, expected: Type?, che
             record: Type.Tuple{fields: rows.copy()}
             ^members: [TStructFieldValue]{}
             loop (index, written) in types {
-                member_ty: loop row in rows {
+                row_index: loop (ri, row) in rows {
                     if row.name == written.name {
-                        break row.ty.copy()
+                        break ri
                     }
-                } ?? written.ty.copy()
-                members.push(TStructFieldValue{field: sema_expression_tuple_field_ref(written.name, member_ty), value: values[index], boxed: false})
+                } ?? -1
+                field_ref: if row_index >= 0 -> sema_expression_tuple_field_ref(written.name, rows[row_index].ty) else -> sema_expression_tuple_field_ref(written.name, written.ty)
+                members.push(TStructFieldValue{field: field_ref, value: values[index], boxed: false})
             }
             return sema_expr_expected_owned(sema_tree_node(record, TExprKind.StructLit{fields: members}, span), expected, check.environment.*, check.program.*, check.diagnostics)
         }

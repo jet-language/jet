@@ -44,37 +44,37 @@ run: fn() {
     ^tree: service.tree("shop")
     email: tree.worker("email", send_email, capacity: 64) ?? return
     pricing: tree.worker("pricing", price, capacity: 8) ?? return
-    cart: tree.worker("cart", add_item, state: Cart{items: [String]{}}, capacity: 8) ?? return
-    bulk: tree.worker("bulk", send_bulk, batch: 2, wait: 20ms, capacity: 16) ?? return
+    cart: tree.stateful_worker("cart", add_item, state: Cart{items: [String]{}}, capacity: 8) ?? return
+    bulk: tree.batched_worker("bulk", send_bulk, batch: 2, wait: 20ms, capacity: 16) ?? return
     tree.start() ?? return
 
-    tree.send(email, Email{to: "ada"}) ?? return
-    tree.send(email, Email{to: "grace"}) ?? return
+    email.send(Email{to: "ada"}) ?? return
+    email.send(Email{to: "grace"}) ?? return
     // A call waits for every message sent before it.
-    tree.call(email, Email{to: "edsger"}) ?? return
+    email.call(Email{to: "edsger"}) ?? return
 
-    three: tree.call(pricing, Quote{items: 3}) ?? 0
+    three: pricing.call(Quote{items: 3}) ?? 0
     print("price {three}")
     // A handler that fails while handling a call leaves its outcome unknown.
-    if tree.call(pricing, Quote{items: -1}) == {
+    if pricing.call(Quote{items: -1}) == {
         .Ok(total) -> { print("price {total}") }
         .Err(.Ambiguous(why)) -> { print("ambiguous: {why}") }
         .Err(_) -> print("refused")
     }
-    four: tree.call(pricing, Quote{items: 4}) ?? 0
+    four: pricing.call(Quote{items: 4}) ?? 0
     print("price {four}")
 
-    first: tree.call(cart, "apple") ?? 0
-    second: tree.call(cart, "pear") ?? 0
+    first: cart.call("apple") ?? 0
+    second: cart.call("pear") ?? 0
     print("cart holds {first}, then {second}")
 
     // Two full batches go to the handler at once; the last message waits
     // for `wait:`.
-    tree.send(bulk, 1) ?? return
-    tree.send(bulk, 2) ?? return
-    tree.send(bulk, 3) ?? return
+    bulk.send(1) ?? return
+    bulk.send(2) ?? return
+    bulk.send(3) ?? return
     time.sleep(200ms)
-    tree.send(bulk, 4) ?? return
-    tree.send(bulk, 5) ?? return
+    bulk.send(4) ?? return
+    bulk.send(5) ?? return
     time.sleep(200ms)
 }

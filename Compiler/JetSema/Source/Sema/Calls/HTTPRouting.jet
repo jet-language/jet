@@ -418,7 +418,7 @@ sema_http_route_invalid_diagnostic: fn(pattern: String, reason: String, span: Sp
 // takes its path through this one conversion.
 sema_http_route_path_value: fn(argument: CallArg, check: ^SemaBodyCheck) -> TExpr? {
     checked: sema_check_expression(argument.expr, None, check) ?? return None
-    if (sema_stream_handle_owner(checked.ty) ?? "") == "Path" {
+    if (sema_builtin_handle_owner(checked.ty) ?? "") == "Path" {
         return sema_expr_check_declared_method(argument.expr, checked, "to_string", "to_string", argument.span, [Type]{}, [Type]{}, [CallArg]{}, Val(Type.String), check)
     }
     if type_identity_equal(checked.ty, Type.String) -> return Val(checked)

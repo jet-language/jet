@@ -45,32 +45,43 @@ seeded_next: fn(state: ^U64) -> U64 Never! {
     mix64(U64{state})
 }
 
-// One keyed-split transition from `seed` and `key`: domain-separated from the
-// parent seed, length-prefixed so `"a", "bc"` and `"ab", "c"` never collide,
-// and folded in 8-byte little-endian lanes through full-avalanche SplitMix64
-// mixing. Folding keys one at a time makes nested splits associative:
-// `r.split("a", "b")` equals `r.split("a").split("b")`.
-priv split_key_step: fn(seed: U64, key: String) -> U64 Never! {
-    raw: key.bytes()
-    ^acc: mix64(wrapping(seed + U64{11400714819323198485}) ~ U64{raw.len()})
-    ^lane: U64{0}
-    ^shift: 0
-    loop b in raw {
-        lane |= U64{Int{b}} << shift
-        shift += 8
-        if shift == 64 {
-            acc = mix64(wrapping(acc + U64{11400714819323198485}) ~ lane)
-            lane = U64{0}
-            shift = 0
+// One keyed-split transition from `seed` and `key` (`Int | String`): type-tagged
+// (1 for String, 2 for Int so `"42"` and `42` stay domain-separated),
+// length-prefixed for strings so `"a", "bc"` and `"ab", "c"` never collide,
+// and folded through full-avalanche SplitMix64 mixing. Folding keys one at a
+// time makes nested splits associative:
+// `r.split("chunk", x, y)` equals `r.split("chunk").split(x).split(y)`.
+priv split_key_step: fn(seed: U64, key: Int | String) -> U64 Never! {
+    if key == {
+        .Int(value) -> {
+            word: U64{Int{I64{value}} & 18446744073709551615}
+            acc: mix64(wrapping(seed + U64{11400714819323198485}) ~ U64{2})
+            return mix64(wrapping(acc + U64{11400714819323198485}) ~ word)
+        }
+        .String(text) -> {
+            raw: text.bytes()
+            ^acc: mix64(wrapping(seed + U64{11400714819323198485}) ~ U64{1})
+            acc = mix64(wrapping(acc + U64{11400714819323198485}) ~ U64{raw.len()})
+            ^lane: U64{0}
+            ^shift: 0
+            loop b in raw {
+                lane |= U64{Int{b}} << shift
+                shift += 8
+                if shift == 64 {
+                    acc = mix64(wrapping(acc + U64{11400714819323198485}) ~ lane)
+                    lane = U64{0}
+                    shift = 0
+                }
+            }
+            if shift > 0 {
+                acc = mix64(wrapping(acc + U64{11400714819323198485}) ~ lane)
+            }
+            return mix64(wrapping(acc + U64{7640891576956012809}))
         }
     }
-    if shift > 0 {
-        acc = mix64(wrapping(acc + U64{11400714819323198485}) ~ lane)
-    }
-    mix64(wrapping(acc + U64{7640891576956012809}))
 }
 
-priv derive_split_seed: fn(parent_seed: U64, keys: [String]) -> U64 Never! {
+priv derive_split_seed: fn(parent_seed: U64, keys: [Int | String]) -> U64 Never! {
     ^derived: parent_seed
     loop key in keys -> derived = split_key_step(derived, key)
     derived
@@ -157,18 +168,13 @@ RNG: struct {
         out
     }
 
-    /// Split a child RNG from this generator.
+    /// Split a child RNG from this generator using one or more integer or string keys.
     ///
-    /// With one or more string `keys`, the child stream depends only on this
-    /// generator's parent seed and `keys`, never on call order or prior draws,
-    /// and `self.state` is not mutated. With no keys, advances `self.state` by
-    /// one sequential SplitMix64 step.
-    split: fn(^self, keys: ...String) -> RNG Never! {
-        if keys.len() == 0 {
-            next: seeded_next(self.state)
-            return RNG{state: next, root_seed: next}
-        }
-        derived: derive_split_seed(self.root_seed, keys)
+    /// The child stream depends only on this generator's parent seed and the
+    /// keys, never on call order or prior draws, and `self` is never mutated.
+    split: fn(self, key: Int | String, rest: ...(Int | String)) -> RNG Never! {
+        ^derived: split_key_step(self.root_seed, key)
+        loop k in rest -> derived = split_key_step(derived, k)
         RNG{state: derived, root_seed: derived}
     }
 
@@ -291,24 +297,13 @@ normalize_angle: fn(angle: Float) -> Float Never! {
 seed: fn(value: Int) -[Rand]> Never! { rt.seed(value) }
 
 /// Construct a deterministic, caller-owned RNG capability from `seed_value`.
-/// Passing optional string `keys` derives the same order-independent child
-/// stream as `rng(seed_value).split(keys...)` without needing a mutable parent.
-rng: fn(seed_value: Int, keys: ...String) -> RNG Never! {
+/// Passing optional integer or string `keys` derives the same order-independent
+/// child stream as `rng(seed_value).split(keys...)`.
+rng: fn(seed_value: Int, keys: ...(Int | String)) -> RNG Never! {
     base: U64{Int{I64{seed_value}} & 18446744073709551615}
     if keys.len() == 0 -> return RNG{state: base, root_seed: base}
     derived: derive_split_seed(base, keys)
     RNG{state: derived, root_seed: derived}
-}
-
-/// Construct a deterministic child capability from `seed_value` while mixing
-/// one word from the ambient stream. The explicit effect documents that mix.
-split: fn(seed_value: Int) -[Rand]> RNG Never! {
-    word: __word()
-    rotated: ((word << 17) | (word >> 47)) & 18446744073709551615
-    mixed: (seed_value & 18446744073709551615) ~ rotated
-    ^signed: mixed
-    if signed > C_MASK63 -> signed -= 18446744073709551616
-    rng(signed)
 }
 
 /// Inclusive integer range. An empty range (`lo > hi`) returns `lo` and does
@@ -674,13 +669,12 @@ RNGAnswer: struct {
     stream.shuffle(items)
     assert_eq(items, [String]{"b", "d", "a", "e", "c"})
     assert_eq(stream.state, U64{9344711191398858127})
-    ^child: stream.split()
-    assert_eq(child.state, U64{9140336935745592861})
+    ^child: stream.split("child")
+    assert_eq(stream.state, U64{9344711191398858127})
+    assert_eq(child.state, rng(42, "child").state)
+    assert(child.int(1, 100) >= 1)
+    assert_eq(stream.int(1, 100), 50)
     assert_eq(stream.state, U64{2298681937012504996})
-    assert_eq(child.int(1, 100), 91)
-    assert_eq(child.state, U64{2094307681359239730})
-    assert_eq(stream.int(1, 100), 10)
-    assert_eq(stream.state, U64{13699396756335703481})
 }
 
 #Test("caller-owned empty or invalid draws preserve the stream") {
@@ -821,19 +815,19 @@ RNGAnswer: struct {
     }
 }
 
-#Test("keyed split is associative across nested splits and matches rng(seed, keys...)") {
-    ^root: rng(2026)
-    ^direct: root.split("world", "chunk", "12", "34")
-    ^via_seed: rng(2026, "world", "chunk", "12", "34")
+#Test("keyed split is associative across nested splits and matches rng(seed, keys...) for Int and String keys") {
+    root: rng(2026)
+    ^direct: root.split("world", "chunk", 12, 34)
+    ^via_seed: rng(2026, "world", "chunk", 12, 34)
     ^world: root.split("world")
     // Drawing from an intermediate split must not affect its own keyed children.
     ^_: world.int(1, 1000)
     ^_: world.float()
-    ^chunk: world.split("chunk")
-    ^nested: chunk.split("12", "34")
-    ^step1: world.split("chunk")
-    ^step2: step1.split("12")
-    ^step_by_step: step2.split("34")
+    chunk: world.split("chunk")
+    ^nested: chunk.split(12, 34)
+    step1: world.split("chunk")
+    step2: step1.split(12)
+    ^step_by_step: step2.split(34)
 
     assert_eq(direct.state, via_seed.state)
     assert_eq(direct.state, nested.state)
@@ -844,10 +838,17 @@ RNGAnswer: struct {
         assert_eq(nested.int(0, 1000000), want)
         assert_eq(step_by_step.int(0, 1000000), want)
     }
+    // Pure integer coordinate keys (chunk.x, chunk.y) are order-independent and associative.
+    assert_eq(root.split(-5, 19).state, root.split(-5).split(19).state)
+    assert_eq(root.split(-5, 19).state, rng(2026, -5, 19).state)
+    assert(root.split(1, 2).state != root.split(2, 1).state)
 }
 
 #Test("keyed split preserves domain separation and statistical independence across keys") {
-    ^root: rng(42)
+    root: rng(42)
+    // Type tagging separates Int and String keys ("42" != 42).
+    assert(root.split("42").state != root.split(42).state)
+    assert(root.split("0").state != root.split(0).state)
     // Length prefixing and step finalizers prevent concatenation collisions.
     assert(root.split("a", "bc").state != root.split("ab", "c").state)
     assert(root.split("a", "bc").state != root.split("abc").state)
@@ -856,8 +857,8 @@ RNGAnswer: struct {
     assert(root.split("", "a").state != root.split("a").state)
     assert(root.split("a", "").state != root.split("", "a").state)
     // Different parent seeds with identical keys produce distinct streams.
-    ^other_root: rng(43)
-    assert(root.split("worker", "0").state != other_root.split("worker", "0").state)
+    other_root: rng(43)
+    assert(root.split("worker", 0).state != other_root.split("worker", 0).state)
     // Multi-word keys (> 8 bytes) fold every byte cleanly.
     assert(root.split("simulation-worker-00000001").state != root.split("simulation-worker-00000002").state)
 

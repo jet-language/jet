@@ -1,76 +1,86 @@
-# Design Review: Splittable Randomness (Proposal Item P25)
+# Adversarial Design Review: Splittable Randomness (`#7022`, Proposal Item P25)
 
-**Date:** 2026-11-26
-**Scope:** Keyed, order-independent splittable randomness (`rng.split(key…)` and `random.rng(seed, key…)`) in `core.math.random`.
-**Status:** PASS (zero open ballots; zero duplicate RNG surfaces introduced).
-
----
-
-## 1. Problem Statement & Mechanism Under Review
-
-Proposal item P25 introduces **keyed splittable randomness**: deriving child deterministic `RNG` streams purely from `(parent_seed, keys…)` so that concurrent tasks, reordered call sites, and interleaved draws on a parent generator always produce identical child streams across every compilation tier (`O0`, `O1`, `O2`, comptime, and Web).
-
-Before this change, every split operation in Jet was **call-order-dependent**:
-- `RNG.split(^self) -> RNG` in `Core/Math/Random.jet` advanced `self.state` by one SplitMix64 step, so swapping `a: r.split(); b: r.split()` or drawing from `r` beforehand changed both child streams.
-- `core.math.random.split(seed_value: Int) -[Rand]> RNG` mixed one word from the process-global ambient `jet.runtime.random` stream, inheriting both the `Rand` effect and global call-order sensitivity.
+- **Date:** 2026-11-26
+- **Card:** #7022 (greenfield proposal item P25)
+- **Scope:** Keyed, order-independent splittable randomness (`rng.split(key…)` and `random.rng(seed, key…)`) in `core.math.random`, elimination of duplicate SplitMix64 implementations and competing `split` meanings, integer and string keys, and multi-tier parity (`O0`, `O1`, `O2`, comptime, and Web).
+- **Verdict:** **FAILS AS ORIGINALLY SHIPPED; PASSES ONLY AFTER ALL 4 BINDING CUTOVER FIXES BELOW LAND AND PASS FULL SUITE.**
+  The SplitMix64 keyed derivation (`root_seed` separated from `state`, length-prefixed mixing, path associativity) is mathematically sound, but adversarial review of the initial build uncovered **four real gaps**: three competing meanings of `split` left alive, a duplicate SplitMix64 copy left in `Core/Testing/Testing.jet:742-750`, integer keys (`chunk.x, chunk.y`) wrongly deferred to a nonexistent compiler card despite `...(Int | String)` working today, and missing Web-tier test coverage.
 
 ---
 
-## 2. Complete Inventory of Randomness & Seeding Sites Today
+## 1. Strongest Existing Solutions (with Primary Sources)
 
-Every location in the repository that defines, routes, or wraps deterministic or ambient randomness:
-
-| # | Path | Role | Verdict for P25 |
-|---|---|---|---|
-| 1 | `Core/Math/Random.jet` (`core.math.random`) | Canonical deterministic `RNG` (SplitMix64), pure `rng(seed)`, stateful `RNG.split()`, and ambient `Rand` xorshift helpers (`seed`, `split`, `int`, `float`, ...). | **Primary cutover target.** Extend `RNG` with immutable `root_seed: U64`, keyed `RNG.split(^self, keys: ...String)`, and pure `rng(seed_value: Int, keys: ...String)`. |
-| 2 | `Compiler/Prelude/Core.rows` | Authoritative `core.math.random` export/ownership row (`RNG`, `rng`, `split`, ...). | **No duplicate exports needed.** Keyed splitting lives on the existing `RNG.split` and `rng` symbols. |
-| 3 | `Compiler/JetFoundation/Source/CoreDeclarations/Calls.jet` (line 441) | Effect-row policy: `"core.math.random" -> if member == "rng" -> None else -> Val("Rand")`. | **Preserved cleanly.** `random.rng(seed, keys...)` stays effect-free (`None`); ambient `random.split(seed)` keeps `Rand` and is not overloaded with a pure path that would contradict its `Rand` effect row. |
-| 4 | `Compiler/JetFoundation/Source/Registry/CoreModules.jet` | Bare nominal `RNG` mapping (`CORE_BARE_SOURCE_MODULES`) and `RNG.bool(p)` single-arity route. | **No compiler change required.** Standard variadic `keys: ...String` needs no special Sema route. |
-| 5 | `Compiler/JetRuntime/Source/Public/Random.jet` (`jet.runtime.random`) | Host-backed ambient stream state (`rng_state`, `rng_try_update`, `seed`). | **Untouched.** Keyed splitting is 100% pure Jet arithmetic with zero host/runtime calls. |
-| 6 | `Core/Testing/Testing.jet` (`fake_rng`, `Fake`, `HistoryRNG`) | `fake_rng(seed)` delegates directly to `core.math.random.rng(seed)`. `Fake` delegates to `core.math.random.__seeded_int`. `HistoryRNG` (line 725) wraps a `Shared<HistoryRNGState>` SplitMix64 word exclusively for stateful `histories(...)` campaign replay. | **`fake_rng` inherits keyed `split(keys...)` automatically.** `HistoryRNG` is a `Shared`-locked mutable campaign driver rather than a value-owned splittable RNG; it is left untouched and explicitly noted as a non-splittable testing-internal driver. |
-| 7 | `Core/Crypto/Random.jet` (`core.crypto.random`) | Fail-closed OS CSPRNG (`Rand` / security entropy). | **Explicitly excluded.** Cryptographic randomness must never be deterministically split or merged with PRNG state. |
-| 8 | `Core/Math/Stats.jet` | `kde_random` ambient `Rand` consumer. | **Untouched.** |
-| 9 | `Tools/Editors/jet.tmGrammar` (and TreeSitter / VSCode / Zed) | Editor syntax grammars. | **Verified sufficient.** `rng.split("world", "chunk")` and `random.rng(seed, "worker", "0")` use existing method-call, variadic, and string-literal grammar rules; no new keyword or token is introduced. |
+1. **JAX PRNG Keys (`jax.random.key`, `split`, `fold_in`)** (`https://jax.readthedocs.io/en/latest/jep/263-prng.html`, `https://jax.readthedocs.io/en/latest/random-numbers.html`):
+   Pure functional counter-based PRNG (Threefry/Philox) where `fold_in(key, int_data)` deterministically folds integer indices into a key without mutating the parent, making parallel JIT/device execution completely independent of evaluation order. Strongest peer for keyed/order-independent derivation; JAX explicitly supports integer keys (`fold_in(key, step)`).
+2. **Java `java.util.SplittableRandom`** (`https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/SplittableRandom.html`; Steele, Lea, Flood, OOPSLA 2014 *Fast Splittable Pseudorandom Number Generators*):
+   Introduced the SplitMix64 (Stafford variant 13) construction used in Jet. Weakness: Java's zero-argument `split()` advances the parent's internal state, so child streams depend on call order and break if two branches reorder their splits. Jet's keyed `split(key…)` fixes Java's order-dependence while keeping SplitMix64's speed and statistical quality.
+3. **NumPy `numpy.random.SeedSequence.spawn`** (`https://numpy.org/doc/stable/reference/random/bit_generators/index.html#seeding-and-entropy`):
+   Uses a hierarchical `spawn_key` tuple of integers hashed through a mixing pool so each child's stream is determined by `(entropy, spawn_key)` path rather than mutable generator draws. Strongest peer for hierarchical path-keyed seeding (`(parent, k1, k2)`), though limited to integer spawn keys.
+4. **Haskell `splitmix` (`System.Random.SplitMix`)** (`https://hackage.haskell.org/package/splitmix`):
+   Pure functional `splitSMGen :: SMGen -> (SMGen, SMGen)` returns a pair of independent generators. Pure, but positional (binary tree path depends on left/right traversal order) rather than named/integer-keyed.
 
 ---
 
-## 3. Cutover Plan, Copies Avoided, and Adversarial Design Checks
+## 2. Adversarial Attack on Every Claim
 
-### 3.1 Single Canonical Mechanism (No Duplicate Surfaces)
-- **No `core.random` duplicate module:** Jet's established module path is `core.math.random` (`Docs/Spec/spec.md`, `Docs/Spec/stdlib-api-laws.md`). P25 extends `core.math.random.RNG` and `core.math.random.rng` directly rather than creating a second module or a second RNG struct.
-- **No duplicate `KeyedRNG` / `SplitRNG` type:** Every `RNG` carries `state: U64` (current draw position) and `root_seed: U64` (immutable origin seed for this stream). Drawing advances `state` only; keyed splitting reads `root_seed` only.
-- **Shared finalizer:** `mix64` (Stafford variant 13 SplitMix64 finalizer) is factored out once in `Core/Math/Random.jet` and shared by both `seeded_next` and `split_key_step` so sequential draws keep bit-for-bit identical legacy outputs while keyed splits inherit full 64-bit avalanche.
+### Attack 1: Three Competing Meanings of `split` Remain (Violates I8)
+- **Claim:** One canonical `split` mechanism exists for deriving child streams.
+- **Attack:** **FAILED in the original build.**
+  `Core/Math/Random.jet` kept **three** different `split` meanings simultaneously:
+  1. `RNG.split(^self, keys: ...String)` with >= 1 key: pure, order-independent derivation from `self.root_seed` (did not mutate `self.state`, yet forced `^self` because of meaning #2).
+  2. `RNG.split(^self)` with 0 keys (`Random.jet:167-170`): mutated `self.state` sequentially (order-dependent!).
+  3. Top-level `core.math.random.split(seed_value: Int) -[Rand]> RNG` (`Random.jet:305-312`): mutated the ambient `Rand` stream and mixed it with `seed_value`.
+- **Root fix (binding):** Consolidate onto **one** meaning for `split`:
+  - `RNG.split(self, key: Int | String, rest: ...(Int | String)) -> RNG Never!` takes **immutable `self`** and 1+ keys (`Int | String`), deriving purely from `self.root_seed` without mutating `self.state`.
+  - Delete top-level ambient `random.split(seed_value: Int)` from `Core/Math/Random.jet` and `Compiler/Prelude/Core.rows`, delete `Tests/Conformance/Corpus/Core/Math/Random/split.jet`, and migrate its 4 test callers + the 6 zero-argument `.split()` callers to explicit keyed `split(...)` / `rng(seed, ...)`.
 
-### 3.2 Attack 1: Prior Draws Mutating Parent State
-- **Failure mode attacked:** If keyed `split(keys...)` hashed `self.state`, then calling `parent.int(1, 10)` before `parent.split("enemy")` would alter the `"enemy"` child stream, breaking order-independence.
-- **Resolution:** `RNG` stores `root_seed: U64` separately from `state: U64`. Keyed `split(keys...)` reads `self.root_seed`, never reads or writes `self.state`, and initializes the child's `state` and `root_seed` both to the derived seed. Even drawing from an intermediate child (`^world: root.split("world"); world.int(1, 10)`) never affects `world.split("chunk")`.
+### Attack 2: Duplicate SplitMix64 Implementation Left Alive
+- **Claim:** SplitMix64 mixing has one source of truth in `Core/Math/Random.jet`.
+- **Attack:** **FAILED in the original build.**
+  `Core/Testing/Testing.jet:742-750` (`history_rng_draw`) duplicates the exact SplitMix64 step and Stafford-13 constants (`11400714819323198485`, `13787848793156543929`, `10723151780598845931`) even though `core.testing` already depends on `core.math.random` in `Compiler/Prelude/Core.rows:224`.
+- **Root fix (binding):** Delete the duplicate SplitMix64 arithmetic in `Core/Testing/Testing.jet:742-750` and delegate `history_rng_draw` to `core.math.random.seeded_next(guard.value.word)`.
 
-### 3.3 Attack 2: Concatenation & Prefix Collisions
-- **Failure mode attacked:** Naive string concatenation makes `split("a", "bc") == split("ab", "c") == split("abc")` and `split("") == parent`.
-- **Resolution:** Each key step `split_key_step(seed, key)` domain-separates with the golden-ratio constant (`0x9E3779B97F4A7C15`), mixes `key.bytes().len()` before absorbing 8-byte little-endian lanes, and finishes with an independent odd-constant Stafford-13 finalizer (`0x6A09E667F3BCC909`).
-- **Algebraic consequence:** Folding `split_key_step` left-to-right over `keys` guarantees **path associativity** (`r.split("a", "b")` == `r.split("a").split("b")` == `random.rng(seed, "a", "b")`) while preserving strict domain separation (`"a","bc"` != `"ab","c"` != `"abc"`, `""` != parent, `"a",""` != `"a"` != `"","a"`).
+### Attack 3: Integer Keys (`chunk.x, chunk.y`) Wrongly Deferred
+- **Claim:** Integer keys required a future compiler card for trait-bounded variadics.
+- **Attack:** **FAILED in the original build.**
+  Probing `keys: ...(Int | String)` on the live compiler proved union variadics already compile and execute identically across `O0`, `O2`, and `--target web` (`node .jet/build/app.js`) with zero compiler changes! Deferring integer keys to a nonexistent card was unnecessary and violated P25's core `rng.split(chunk.x, chunk.y)` use case.
+- **Root fix (binding):** Support `Int | String` directly in `RNG.split(self, key: Int | String, rest: ...(Int | String))` and `rng(seed_value: Int, keys: ...(Int | String))` with explicit type-tag domain separation (`U64{1}` for `String`, `U64{2}` for `Int` so `split("42")` != `split(42)`), preserving path associativity (`r.split("chunk", x, y) == r.split("chunk").split(x).split(y) == random.rng(seed, "chunk", x, y)`).
 
-### 3.4 Attack 3: Key Type Ergonomics & Compiler Surface
-- **Finding from probing the live compiler:** Heterogeneous trait-bounded variadic methods (`keys: ...SplitKey`) currently hit an unlowered IR fault (`ir.build unlowered: a value of String where SplitKey is expected`), and a generic variadic (`fn<T: SplitKey>(^self, keys: ...T)`) fails type inference on zero-argument `r.split()`.
-- **Resolution:** `keys: ...String` compiles cleanly across `O0`, `O1`, `O2`, comptime, and Web with zero compiler changes, preserves zero-argument `r.split()` backwards compatibility for all existing callers and known-answer tests, and composes idiomatically with Jet string interpolation (`r.split("chunk", "{x}", "{y}")`). If heterogeneous trait variadic lowering is completed in a future compiler card, widening `String` keys to a trait can be done cleanly without breaking existing `String` call sites.
+### Attack 4: Missing Web-Tier Coverage (Violates I9)
+- **Claim:** Keyed splittable randomness is verified on every applicable tier.
+- **Attack:** **FAILED in the original build.**
+  `Tests/Cases/CoreMathNumeric/core_math_splittable_rng_keyed_streams_match_across_orders_tasks_and_tiers.case` tested only `O0`, `O1`, and `O2`, omitting `--target web`.
+- **Root fix (binding):** Add `jet build --target web` + `node .jet/build/app.js` steps to `core_math_splittable_rng_keyed_streams_match_across_orders_tasks_and_tiers.case` asserting identical output to `O0`/`O1`/`O2`.
 
-### 3.5 Attack 4: Parallel Task Ergonomics with Non-Copy `RNG`
-- **Failure mode attacked:** `RNG` is intentionally non-implicitly-copyable (`core_math_rng_is_not_implicitly_copyable`), and `RNG.split` keeps `^self` to preserve backwards compatibility with stateful zero-argument `r.split()`. Two concurrent `task` closures therefore cannot both borrow `^parent` simultaneously.
-- **Resolution:** Two clean patterns work without sacrificing ownership safety or adding compiler overloads:
-  1. Pre-split children on the parent (`^c0: parent.split("worker", "0")`, `^c1: parent.split("worker", "1")`) and move each child into its task.
-  2. Derive directly from the immutable `seed: Int` inside any task via `random.rng(seed, "worker", "0")`, which is pure (no `Rand` effect) and produces the bit-for-bit identical stream to `random.rng(seed).split("worker", "0")`.
-
-### 3.6 Attack 5: Tier Parity (I9)
-- **Check:** `mix64`, `split_key_step`, and `derive_split_seed` use only exact `U64` `wrapping` arithmetic, bit shifts, XOR, and `String.bytes()`. There are zero floating-point operations, zero host/libc calls, and zero platform-endian assumptions. Output is bit-for-bit identical across `O0`, `O1`, `O2`, comptime, and Web.
+### Attack 5: Cryptographic Boundary, Draw Independence, and Collision Resistance
+- `core.crypto.random` stays strictly fail-closed OS CSPRNG (never deterministically split). **Holds.**
+- `RNG` stores `root_seed: U64` separately from `state: U64`; draws advance `state` only, while `split` reads `root_seed` only. **Holds.**
+- Type-tagged, length-prefixed SplitMix64 mixing prevents `"a","bc" == "ab","c"`, `"" == parent`, and `"42" == 42`. **Holds.**
 
 ---
 
-## 4. Verification & Cutover Checklist
+## 3. Binding Cutover List
 
-1. `Core/Math/Random.jet`: `mix64`, `split_key_step`, `derive_split_seed`, `RNG.root_seed`, `RNG.split(^self, keys: ...String)`, `random.rng(seed_value: Int, keys: ...String)`, plus unit `#Test` blocks proving order-independence, draw-independence, associativity, domain separation, and 64-key Hamming avalanche diffusion.
-2. `Tests/Cases/CoreMathNumeric/core_math_splittable_rng_keyed_streams_match_across_orders_tasks_and_tiers.case`: multi-order, concurrent `task.all`, and multi-tier (`O0`/`O1`/`O2`) verification.
-3. `Examples/Math/SplittableRandom.jet` + `.out` + `Examples/Math/README.md`: executable golden example verified across `O0`/`O1`/`O2`.
-4. `Docs/Spec/spec.md` and `Docs/Spec/Reference/core-library.md`: normative specification and Core library reference updates, plus editor grammar verification (`Tools/Editors/jet.tmGrammar`).
-5. `Tests/Guards/CoreDeclarations` and `Tools/Agent/AgentDocFlags.jet -- --policy-only`: all guards clean.
+Every item below MUST land and pass before #7022 closes:
 
-**Audit verdict:** PASS.
+1. **Unify `split` & add `Int | String` keys (`Core/Math/Random.jet`, `Compiler/Prelude/Core.rows`):**
+   - `RNG.split(self, key: Int | String, rest: ...(Int | String)) -> RNG Never!` (immutable `self`, type-tagged `Int` and `String` key steps, zero mutable fallback).
+   - `rng(seed_value: Int, keys: ...(Int | String)) -> RNG Never!`.
+   - Delete top-level ambient `split: fn(seed_value: Int) -[Rand]> RNG Never!` and remove `split` from `core.math.random` in `Compiler/Prelude/Core.rows`.
+   - Delete `Tests/Conformance/Corpus/Core/Math/Random/split.jet`.
+2. **Delete duplicate SplitMix64 (`Core/Testing/Testing.jet`):**
+   - Replace `history_rng_draw` inline SplitMix64 math with `random.seeded_next(guard.value.word)` (export `seeded_next` or keep internal Core seam in `Core/Math/Random.jet` / `Core.rows`).
+3. **Migrate all callers (`random.split(...)` and zero-arg `.split()`):**
+   - `Tests/Run/CoreMathNumeric/CoreMathCalls.jet`
+   - `Tests/Cases/CoreLibPartsEncodingSurface/NondeterministicCoreMatrixMatchesAllExecutionTiers.fixture/run.jet`
+   - `Tests/Cases/CoreLibPartsEncodingSurface/RandomDistributionSurfaceIsDeterministic.fixture/run.jet`
+   - `Tests/Cases/Repl/ReplCoreRandomWidenedDrawsDispatch.fixture/input9.txt`
+   - `Examples/Math/RandomAudit.jet` + `.out` & `Tests/Fuzz/Sema/Differential/ex_math_random_audit.jet`
+   - `Tests/Cases/CoreMathNumeric/CoreMathCallerRNGCoinProbabilityAndGenericDrawsMatchAcrossTiers/Input/run.jet`
+   - `Tests/Cases/ComptimeCorePureParity/RustcBackedSeededRNGMethodsMatchAllExecutionTiersExactly/Input/{o1,o2}/run.jet`
+4. **Update example, tests, web tier, and docs:**
+   - `Examples/Math/SplittableRandom.jet` + `.out` (demonstrate both string and integer keys `chunk.x, chunk.y` and immutable `root.split(...)`)
+   - `Tests/Cases/CoreMathNumeric/core_math_splittable_rng_keyed_streams_match_across_orders_tasks_and_tiers.case` + fixture (add integer keys + `--target web` + `node .jet/build/app.js` parity)
+   - `Docs/Spec/spec.md`, `Docs/Spec/Reference/core-library.md`
+5. **Full suite verification:**
+   - `Core/Math/Random.jet`, `Core/Testing/Testing.jet`, `CoreDeclarations`, `SplittableRandom` golden (`O0`/`O1`/`O2`), `core_math_splittable_rng_keyed_streams_match_across_orders_tasks_and_tiers` (`O0`/`O1`/`O2`/Web), and full suite.

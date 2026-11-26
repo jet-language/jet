@@ -383,16 +383,16 @@ sema_local_splice_diagnostic_texts: fn(diagnostics: [Diagnostic]) -> [String] Ne
 
 // Sorted `texts` less one of each text of sorted `taken`; None when `taken`
 // holds a text more often than `texts` does.
-sema_local_splice_texts_without: fn(texts: [String], taken: [String]) -> [String]? Never! {
+sema_local_splice_texts_without: fn(texts: ^^[String], taken: [String]) -> [String]? Never! {
     ^rest: [String]{}
     ^at: 0
-    loop text in texts {
+    loop text in texts.move() {
         if at < taken.len() && taken[at] < text -> return None
         if at < taken.len() && taken[at] == text {
             at += 1
             next
         }
-        rest.push(text.copy())
+        rest.push(text)
     }
     if at < taken.len() -> return None
     Val(rest)
@@ -530,9 +530,9 @@ SemaLocalSpliceSites: struct {
 // rows compare on up to `threads` threads (sema_local_splice_hold); the
 // reasons are then taken here, owner modules last first, as one thread
 // would.
-sema_local_splice_holds: fn(interner: Interner, modules: [SemaGraphModuleResult], owner_modules: [Int], sites: SemaLocalSpliceSites, replayed: [String], earlier: ^^[SemaModuleBodyRows], after: [SemaModuleBodyRows], into: SemaLocalSpliceInto, dropped: ^[[String]], aside: ^[SemaModuleBodyRows], threads: CompilerThreads) -> String? Never! {
+sema_local_splice_holds: fn(interner: Interner, modules: [SemaGraphModuleResult], owner_modules: [Int], sites: SemaLocalSpliceSites, replayed: ^^[String], earlier: ^^[SemaModuleBodyRows], after: [SemaModuleBodyRows], into: SemaLocalSpliceInto, dropped: ^[[String]], aside: ^[SemaModuleBodyRows], threads: CompilerThreads) -> String? Never! {
     ^holds: sema_local_splice_hold_all(interner, modules, owner_modules, sites, earlier.move(), after, into, threads)
-    ^unclaimed: replayed.copy()
+    ^unclaimed: replayed.move()
     ^settled_owners: 0
     loop holds.len() > 0 {
         hold: holds.pop() ?? break
@@ -543,9 +543,9 @@ sema_local_splice_holds: fn(interner: Interner, modules: [SemaGraphModuleResult]
             // does not; `diagnostics_unclaimed`: the first reports one no
             // comptime result brings; `diagnostics_module`: one the owner
             // module's rows do not hold.
-            extra: sema_local_splice_texts_without(hold.old_texts, hold.new_texts) ?? return Val("diagnostics_added")
-            unclaimed = sema_local_splice_texts_without(unclaimed, extra) ?? return Val("diagnostics_unclaimed")
-            if sema_local_splice_texts_without(hold.module_texts, extra) == None {
+            extra: sema_local_splice_texts_without(hold.old_texts.move(), hold.new_texts) ?? return Val("diagnostics_added")
+            unclaimed = sema_local_splice_texts_without(unclaimed.move(), extra) ?? return Val("diagnostics_unclaimed")
+            if sema_local_splice_texts_without(hold.module_texts.move(), extra) == None {
                 return Val("diagnostics_module")
             }
             dropped[position] = extra

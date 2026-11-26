@@ -35,10 +35,10 @@ JetCLIControlValue: struct {
     shadowed: Bool,
 }
 
-// The value a control has when nothing gives it one: off, or an empty list.
+// The value a control has when nothing gives it one: its default bool state, or an empty list.
 jet_cli_control_default: fn(control: JetCLIControlSpec) -> JetCLIStatusValue Never! {
     if control.value == {
-        .Switch | .Bool -> jet_cli_status_bool(false)
+        .Switch | .Bool -> jet_cli_status_bool(control.default_on)
         .Repeated -> jet_cli_status_texts([String]{})
         .Value | .Optional -> JetCLIStatusValue.Null
     }
@@ -54,6 +54,7 @@ jet_cli_control_written: fn(control: JetCLIControlSpec, words: [String]) -> JetC
     flag: jet_cli_control_flag(control)
     ^found: JetCLIStatusValue?{None}
     ^items: [String]{}
+    ^has_repeated: false
     loop word in words {
         if word == "--" -> break
         if word != flag && !word.starts_with("{flag}=") -> next
@@ -71,10 +72,11 @@ jet_cli_control_written: fn(control: JetCLIControlSpec, words: [String]) -> JetC
             .Value -> { found = Val(jet_cli_status_text(value)) }
             .Repeated -> {
                 items.push(value)
-                found = Val(jet_cli_status_texts(items.copy()))  // copy: later flags still add to the list.
+                has_repeated = true
             }
         }
     }
+    if has_repeated -> return Val(jet_cli_status_texts(items))
     found
 }
 
@@ -101,16 +103,31 @@ jet_cli_control_environment: fn(control: JetCLIControlSpec, input: String) -> Je
 // variable's input (`environment`).
 jet_cli_control_resolve: fn(control: JetCLIControlSpec, written: [String], settings: [String], environment: String?) -> JetCLIControlValue Never! {
     from_variable: if environment == .Val(input) -> jet_cli_control_environment(control, input) else -> JetCLIStatusValue?{None}
-    if jet_cli_control_written(control, written) == .Val(value) {
-        return JetCLIControlValue{control: control.copy(), value: value.copy(), source: JetCLIControlSource.Flag, location: "command line", variable: environment.copy(), shadowed: from_variable != None}  // copy: the caller keeps its control and input.
+    from_written: jet_cli_control_written(control, written)
+    from_settings: if from_written == None && from_variable == None -> jet_cli_control_written(control, settings) else -> JetCLIStatusValue?{None}
+    ^value: jet_cli_control_default(control)
+    ^source: JetCLIControlSource.Default
+    ^location: "default"
+    ^shadowed: false
+    if {
+        from_written.move() == .Val(found) -> {
+            value = found
+            source = JetCLIControlSource.Flag
+            location = "command line"
+            shadowed = from_variable != None
+        }
+        from_variable.move() == .Val(found) -> {
+            value = found
+            source = JetCLIControlSource.Environment
+            location = control.variable
+        }
+        from_settings.move() == .Val(found) -> {
+            value = found
+            source = JetCLIControlSource.Setting
+            location = "settings"
+        }
     }
-    if from_variable == .Val(value) {
-        return JetCLIControlValue{control: control.copy(), value: value.copy(), source: JetCLIControlSource.Environment, location: control.variable.copy(), variable: environment.copy(), shadowed: false}  // copy: the caller keeps its control and input.
-    }
-    if jet_cli_control_written(control, settings) == .Val(value) {
-        return JetCLIControlValue{control: control.copy(), value: value.copy(), source: JetCLIControlSource.Setting, location: "settings", variable: environment.copy(), shadowed: false}  // copy: the caller keeps its control and input.
-    }
-    JetCLIControlValue{control: control.copy(), value: jet_cli_control_default(control), source: JetCLIControlSource.Default, location: "default", variable: environment.copy(), shadowed: false}  // copy: the caller keeps its control and input.
+    JetCLIControlValue{control: control.copy(), value: value, source: source, location: location, variable: environment.copy(), shadowed: shadowed}  // copy: the caller keeps its control and input.
 }
 
 // This jet process's words before its program's (Host.jet `jet_cli_main`).
@@ -148,9 +165,9 @@ jet_cli_control_settings: fn(words: [String]) -[FS, Env]> [String] Never! {
 // (its default file; an Optional control on alone names it too).
 jet_cli_control_path: fn(name: String, command: String, words: [String], fallback: String) -[FS, Env]> String Never! {
     ^line: command.split(" ").to_list()
-    loop word in words -> line.push(word.copy())  // copy: the caller keeps its words.
-    if jet_cli_control_given(name, line).value == .Text(path) -> return path.copy()  // copy: the value is dropped here.
-    fallback.copy()  // copy: the caller keeps its default.
+    loop word in words -> line.push(word.copy())
+    if jet_cli_control_given(name, line).value == .Text(path) -> return path
+    fallback.copy()
 }
 
 // Is the Bool control `name` on?
@@ -158,7 +175,7 @@ jet_cli_control_on: fn(name: String) -> Bool Never! { jet_cli_control(name).valu
 
 // The string the Value or Optional control `name` holds, if one.
 jet_cli_control_text: fn(name: String) -> String? Never! {
-    if jet_cli_control(name).value == .Text(text) -> return Val(text.copy())  // copy: the value is dropped here.
+    if jet_cli_control(name).value == .Text(text) -> return Val(text)
     None
 }
 
@@ -167,7 +184,7 @@ jet_cli_control_items: fn(name: String) -> [String] Never! {
     ^items: [String]{}
     if jet_cli_control(name).value == .Array(values) {
         loop value in values {
-            if value == .Text(text) -> items.push(text.copy())  // copy: the value is dropped here.
+            if value == .Text(text) -> items.push(text)
         }
     }
     items
@@ -227,7 +244,7 @@ jet_cli_env_vars: fn(jet_argv: [String], passthrough: [String]?, color: Bool, js
     ^value_next: false
     loop word in jet_argv {
         if value_next {
-            command = Val(word.copy())  // copy: the argv keeps its word.
+            command = Val(word)
             value_next = false
             next
         }
@@ -277,7 +294,7 @@ jet_cli_env_vars: fn(jet_argv: [String], passthrough: [String]?, color: Bool, js
     // The word whose settings the command takes, as the front door picks it:
     // an action that keeps its group's word (`decisions`, which runs as `jet
     // inspect decisions`) has its group's settings (`inspect.opt_dump`).
-    settings_word: if command == .Val(word) -> jet_cli_settings_word(jet_cli_dispatch_form([String]{word.copy()}).split(" ").to_list()) else -> None  // copy: the command keeps its word.
+    settings_word: if command == .Val(word) -> jet_cli_settings_word(jet_cli_dispatch_form([String]{word}).split(" ").to_list()) else -> None
     // The front door refused a settings file's problem already.
     ^settings: [String]{}
     if settings_word == .Val(word) {
@@ -431,10 +448,10 @@ jet_cli_env_vars_redacted: fn(value: JetCLIStatusValue) -> JetCLIStatusValue Nev
 // it is.
 jet_cli_env_redact: fn(text: String) -> String Never! {
     scheme: text.partition("://")
-    if scheme.sep == "" -> return text.copy()  // copy: the caller keeps its text.
+    if scheme.sep == "" -> return text.copy()
     authority: scheme.tail.partition("/")
     user: authority.head.rpartition("@")
-    if user.sep == "" && !text.contains("?") -> return text.copy()  // copy: the caller keeps its text.
+    if user.sep == "" && !text.contains("?") -> return text.copy()
     host_and_rest: if user.sep != "" -> "***@{user.tail}{authority.sep}{authority.tail}" else -> "{authority.head}{authority.sep}{authority.tail}"
     query: host_and_rest.partition("?")
     if query.sep == "" -> return "{scheme.head}://{host_and_rest}"
@@ -443,14 +460,11 @@ jet_cli_env_redact: fn(text: String) -> String Never! {
 
 jet_cli_env_redact_query: fn(query: String) -> String Never! {
     fragment: query.partition("#")
-    ^parts: [String]{}
-    loop pair in fragment.head.split("&") {
+    parts: loop pair in fragment.head.split("&") -> {
         kv: pair.partition("=")
         if {
-            kv.sep != "" && kv.tail != "" && jet_cli_env_is_secret_query_key(kv.head) -> {
-                parts.push("{kv.head}=***")
-            }
-            else -> { parts.push("{pair}") }
+            kv.sep != "" && kv.tail != "" && jet_cli_env_is_secret_query_key(kv.head) -> "{kv.head}=***"
+            else -> "{pair}"
         }
     }
     "{parts.join("&")}{fragment.sep}{fragment.tail}"
@@ -466,25 +480,22 @@ jet_cli_env_is_secret_query_key: fn(key: String) -> Bool Never! {
 // its setting key under the settings of `settings_word`, and when `--all` is
 // requested, one object per set registered environment variable.
 jet_cli_env_vars_fields: fn(command: String?, settings_word: String?, values: [JetCLIControlValue], include_all: Bool, registered: ^^[JetCLIRegisteredEnvValue]) -> [JetCLIStatusField] Never! {
-    ^rows: [JetCLIStatusValue]{}
-    loop resolved in values {
+    rows: loop resolved in values -> {
         control: resolved.control
         input: if resolved.variable == .Val(text) -> jet_cli_status_text(jet_cli_env_redact_for(control.variable, text)) else -> JetCLIStatusValue.Null
-        rows.push(
-            jet_cli_status_object(
-                [JetCLIStatusField]{
-                    jet_cli_status_field("name", jet_cli_status_text(control.name.copy())),  // copy: the row keeps its control.
-                    jet_cli_status_field("flag", jet_cli_status_text(jet_cli_control_flag(control))),
-                    jet_cli_status_field("variable", jet_cli_status_text(control.variable.copy())),  // copy: the row keeps its control.
-                    jet_cli_status_field("kind", jet_cli_status_text(jet_cli_env_vars_kind(control.value))),
-                    jet_cli_status_field("setting", jet_cli_status_text(jet_cli_env_vars_setting(settings_word, control))),
-                    jet_cli_status_field("value", jet_cli_env_vars_redacted(resolved.value)),
-                    jet_cli_status_field("source", jet_cli_status_text(jet_cli_env_vars_source(resolved.source))),
-                    jet_cli_status_field("location", jet_cli_status_text(resolved.location.copy())),  // copy: the row keeps its location.
-                    jet_cli_status_field("variable_input", input),
-                    jet_cli_status_field("shadowed", jet_cli_status_bool(resolved.shadowed)),
-                },
-            ),
+        jet_cli_status_object(
+            [JetCLIStatusField]{
+                jet_cli_status_field("name", jet_cli_status_text(control.name)),
+                jet_cli_status_field("flag", jet_cli_status_text(jet_cli_control_flag(control))),
+                jet_cli_status_field("variable", jet_cli_status_text(control.variable)),
+                jet_cli_status_field("kind", jet_cli_status_text(jet_cli_env_vars_kind(control.value))),
+                jet_cli_status_field("setting", jet_cli_status_text(jet_cli_env_vars_setting(settings_word, control))),
+                jet_cli_status_field("value", jet_cli_env_vars_redacted(resolved.value)),
+                jet_cli_status_field("source", jet_cli_status_text(jet_cli_env_vars_source(resolved.source))),
+                jet_cli_status_field("location", jet_cli_status_text(resolved.location)),
+                jet_cli_status_field("variable_input", input),
+                jet_cli_status_field("shadowed", jet_cli_status_bool(resolved.shadowed)),
+            },
         )
     }
     ^fields: [JetCLIStatusField]{
@@ -492,20 +503,15 @@ jet_cli_env_vars_fields: fn(command: String?, settings_word: String?, values: [J
         jet_cli_status_field("controls", jet_cli_status_array(rows)),
     }
     if include_all {
-        ^var_rows: [JetCLIStatusValue]{}
-        loop entry in registered.move() {
-            var_rows.push(
-                jet_cli_status_object(
-                    [JetCLIStatusField]{
-                        jet_cli_status_field("name", jet_cli_status_text(entry.name)),
-                        jet_cli_status_field("section", jet_cli_status_text(entry.section)),
-                        jet_cli_status_field("value", jet_cli_status_text(entry.value)),
-                        jet_cli_status_field("source", jet_cli_status_text(entry.source)),
-                        jet_cli_status_field("redacted", jet_cli_status_bool(entry.redacted)),
-                    },
-                ),
-            )
-        }
+        var_rows: loop entry in registered.move() -> jet_cli_status_object(
+            [JetCLIStatusField]{
+                jet_cli_status_field("name", jet_cli_status_text(entry.name)),
+                jet_cli_status_field("section", jet_cli_status_text(entry.section)),
+                jet_cli_status_field("value", jet_cli_status_text(entry.value)),
+                jet_cli_status_field("source", jet_cli_status_text(entry.source)),
+                jet_cli_status_field("redacted", jet_cli_status_bool(entry.redacted)),
+            },
+        )
         fields.push(jet_cli_status_field("variables", jet_cli_status_array(var_rows)))
     }
     fields
@@ -521,7 +527,7 @@ jet_cli_env_vars_table: fn(settings_word: String?, values: [JetCLIControlValue])
         if resolved.shadowed && resolved.variable == .Val(input) {
             source = "{source} (hides {resolved.control.variable}={jet_cli_env_redact_for(resolved.control.variable, input)})"
         }
-        rows.push([String]{jet_cli_control_flag(resolved.control), resolved.control.variable.copy(), jet_cli_env_vars_setting(settings_word, resolved.control), jet_cli_env_vars_cell(resolved.value), source})  // copy: the row keeps its control.
+        rows.push([String]{jet_cli_control_flag(resolved.control), resolved.control.variable, jet_cli_env_vars_setting(settings_word, resolved.control), jet_cli_env_vars_cell(resolved.value), source})
     }
     ^widths: [Int]{0, 0, 0, 0}
     loop row in rows {

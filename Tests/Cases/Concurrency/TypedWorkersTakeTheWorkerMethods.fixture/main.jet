@@ -11,7 +11,7 @@ run: fn() {
     print("depth: {tree.mailbox_depth(worker) ?? panic("depth")}")
     print("restarts: {tree.restarts(worker) ?? panic("restarts")}")
     tree.drain_worker(worker) ?? panic("drain")
-    if tree.send(worker, 1) == {
+    if worker.send(1) == {
         .Ok(_) -> { print("sent") }
         .Err(_) -> print("drained")
     }

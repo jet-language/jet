@@ -35,14 +35,14 @@ run_all: fn(tasks: [Task]) {
 run: fn() {
     ^tree: service.tree("in-memory")
     plain: tree.worker("apply", apply, capacity: 8) ?? return
-    counted: tree.worker("tally", tally, state: 0, capacity: 8) ?? return
-    batched: tree.worker("run_all", run_all, batch: 2, wait: 20ms, capacity: 8) ?? return
+    counted: tree.stateful_worker("tally", tally, state: 0, capacity: 8) ?? return
+    batched: tree.batched_worker("run_all", run_all, batch: 2, wait: 20ms, capacity: 8) ?? return
     tree.start() ?? return
 
-    print("apply: {tree.call(plain, Task{label: "double", work: double}) ?? 0}")
-    print("tally: {tree.call(counted, Task{label: "square", work: square}) ?? 0}")
-    tree.send(batched, Task{label: "double", work: double}) ?? return
-    tree.send(batched, Task{label: "square", work: square}) ?? return
+    print("apply: {plain.call(Task{label: "double", work: double}) ?? 0}")
+    print("tally: {counted.call(Task{label: "square", work: square}) ?? 0}")
+    batched.send(Task{label: "double", work: double}) ?? return
+    batched.send(Task{label: "square", work: square}) ?? return
     time.sleep(200ms)
     tree.stop() ?? return
 }

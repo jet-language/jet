@@ -82,7 +82,7 @@ ProbeTiming: struct {
 // probe's own directory under it too), the checkout, the peers and the home
 // directory.
 probe_scrub: fn(probe: Probe, text: String) -> String Never! {
-    out := text.replace(probe.jet, "jet").replace(probe.scratch, "<work>").replace(probe.repo, "<repo>")
+    ^out: text.replace(probe.jet, "jet").replace(probe.scratch, "<work>").replace(probe.repo, "<repo>")
     if probe.lldb == .Val(path) -> out = out.replace(path, "lldb")
     if probe.gdb == .Val(path) -> out = out.replace(path, "gdb")
     if probe.chromium == .Val(path) -> out = out.replace(path, "chromium")
@@ -100,7 +100,7 @@ probe_quote: fn(word: String) -> String Never! {
 }
 
 probe_shown: fn(probe: Probe, argv: [String]) -> String Never! {
-    words := [String]{}
+    ^words: [String]{}
     loop word in argv -> words.push(probe_quote(probe_scrub(probe, word)))
     words.join(" ")
 }
@@ -115,7 +115,7 @@ probe_repr: fn(text: String) -> String Never! {
 // (the `—` of Jet.DebugSessionQuit) has more bytes than characters.
 probe_chomp: fn(text: String) -> String Never! {
     bytes: text.bytes()
-    end := bytes.len()
+    ^end: bytes.len()
     loop end > 0 && bytes[end - 1] == (U8{10}) -> end -= 1
     String.from_bytes_lossy(bytes[0..<end])
 }
@@ -148,7 +148,7 @@ probe_emit: fn(probe: Probe, text: String) -[IO]> Never! {
         print(body)
         return
     }
-    kept := [String]{}
+    ^kept: [String]{}
     loop index in 0..<60 -> kept.push("{lines[index]}")
     kept.push("... ({lines.len() - 80} lines not shown) ...")
     loop index in (lines.len() - 20)..<lines.len() -> kept.push("{lines[index]}")
@@ -166,7 +166,7 @@ probe_note: fn(text: String) -[IO]> Never! {
 }
 
 // A fresh work directory, `<name>-<n>`.
-probe_fresh: fn(probe: &Probe, name: String) -[FS, IO, Exec.Exit, Time.Wait]> String Never! {
+probe_fresh: fn(probe: ^Probe, name: String) -[FS, IO, Exec.Exit, Time.Wait]> String Never! {
     probe.count += 1
     path: files.join(probe.scratch, "{name}-{probe.count}")
     files.create_dir_all(path) ?? process.fail(1, "couldn't make {path}: {err}")
@@ -174,7 +174,7 @@ probe_fresh: fn(probe: &Probe, name: String) -[FS, IO, Exec.Exit, Time.Wait]> St
 }
 
 // A copy of Tests/Cases/SUITE/NAME.fixture.
-probe_fixture: fn(probe: &Probe, suite: String, name: String) -[FS, IO, Exec.Exit, Time.Wait]> String Never! {
+probe_fixture: fn(probe: ^Probe, suite: String, name: String) -[FS, IO, Exec.Exit, Time.Wait]> String Never! {
     probe.count += 1
     path: files.join(probe.scratch, "{name}-{probe.count}")
     from: "{probe.cases}/{suite}/{name}.fixture"
@@ -183,7 +183,7 @@ probe_fixture: fn(probe: &Probe, suite: String, name: String) -[FS, IO, Exec.Exi
 }
 
 // A directory holding copies of the programs `names` beside this file.
-probe_programs: fn(probe: &Probe, names: [String]) -[FS, IO, Exec.Exit, Time.Wait]> String Never! {
+probe_programs: fn(probe: ^Probe, names: [String]) -[FS, IO, Exec.Exit, Time.Wait]> String Never! {
     path: probe_fresh(probe, "probes")
     loop name in names {
         from: files.join(probe.here, name)
@@ -196,7 +196,7 @@ probe_programs: fn(probe: &Probe, names: [String]) -[FS, IO, Exec.Exit, Time.Wai
 probe_stdin_lines: fn(probe: Probe, suite: String, case: String) -[FS, IO, Exec.Exit, Time.Wait]> [String] Never! {
     path: "{probe.cases}/{suite}/{case}.stdin"
     text: files.read(path) ?? process.fail(1, "couldn't read {path}: {err}")
-    lines := [String]{}
+    ^lines: [String]{}
     loop line in probe_chomp(text).split("\n") -> lines.push("{line}")
     lines
 }
@@ -205,7 +205,7 @@ probe_stdin_lines: fn(probe: Probe, suite: String, case: String) -[FS, IO, Exec.
 // (the host's for a peer), NO_COLOR, JET_TOOLCHAIN_ROOT the checkout, and no
 // observation or devtools relay inherited.
 priv probe_spec: fn(probe: Probe, argv: [String], cwd: String, peer: Bool) -[Exec]> ProcessSpec Never! {
-    spec := process.cmd(argv).cwd(cwd).env_remove("JET_OBSERVE")
+    ^spec: process.cmd(argv).cwd(cwd).env_remove("JET_OBSERVE")
     loop name in probe.relay -> spec = spec.env_remove(name)
     spec.env("NO_COLOR", "1").env("JET_TOOLCHAIN_ROOT", probe.repo).env("PATH", if peer -> probe.host_path else -> probe.empty)
 }
@@ -223,7 +223,7 @@ probe_exit: fn(receipt: ProcessReceipt, limit: Int) -> String Never! {
 probe_run: fn(probe: Probe, argv: [String], cwd: String, stdin: String{""}, limit: Int{600}, show: Bool{true}, peer: Bool{false}) -[Env, Exec, FS, IO, Time, Time.Wait]> ProbeResult Never! {
     started_load: probe_load()
     watch: time.start()
-    result := ProbeResult{code: "", text: "", wall_ns: 0, cpu_ns: 0}
+    ^result: ProbeResult{code: "", text: "", wall_ns: 0, cpu_ns: 0}
     spec: probe_spec(probe, argv, cwd, peer).stdin(.Stream).stdout(.Capture).stderr(.Capture).timeout(time.duration_seconds(limit))
     if spec.spawn() == {
         .Err(error) -> { result.code = "not started: {error}" }
@@ -255,9 +255,9 @@ probe_run: fn(probe: Probe, argv: [String], cwd: String, stdin: String{""}, limi
 
 // Whether `bytes` holds `pattern` at `from` or after.
 probe_holds: fn(bytes: [U8], pattern: [U8], from: Int) -> Bool Never! {
-    at := from
+    ^at: from
     loop at + pattern.len() <= bytes.len() {
-        matched := true
+        ^matched: true
         loop index in 0..<pattern.len() {
             if bytes[at + index] != pattern[index] {
                 matched = false
@@ -272,9 +272,9 @@ probe_holds: fn(bytes: [U8], pattern: [U8], from: Int) -> Bool Never! {
 
 // Reads `child`'s output into `buffer` until a prompt follows `since`;
 // false, with `ended` set, when the output ends first.
-priv probe_until_prompt: fn(child: ProcessChild, buffer: &[U8], since: Int, ended: &Bool) -[Exec, Time.Wait]> Bool Never! {
+priv probe_until_prompt: fn(child: ProcessChild, buffer: ^[U8], since: Int, ended: ^Bool) -[Exec, Time.Wait]> Bool Never! {
     prompt: PROBE_PROMPT.bytes()
-    from := since
+    ^from: since
     loop {
         if probe_holds(buffer, prompt, from) -> return true
         // A prompt the next read completes starts in the last bytes.
@@ -303,9 +303,9 @@ probe_console: fn(probe: Probe, argv: [String], cwd: String, commands: [String],
         print("")
         return ""
     }
-    buffer := [U8]{}
-    ended := false
-    timings := [ProbeTiming]{}
+    ^buffer: [U8]{}
+    ^ended: false
+    ^timings: [ProbeTiming]{}
     if probe_until_prompt(child, buffer, 0, ended) {
         timings.push(ProbeTiming{command: "(start to the first prompt)", ns: Val(time.elapsed(watch).ns)})
     }
@@ -355,7 +355,7 @@ probe_took_ns: fn(text: String) -> Int? Never! {
 
 // The least of `values` above 0.
 probe_least: fn(values: [Int]) -> Int? Never! {
-    least := Int?{None}
+    ^least: Int?{None}
     loop value in values {
         if value <= 0 -> next
         if least == .Val(found) && found <= value -> next
@@ -368,7 +368,7 @@ probe_maybe: fn(value: Int?) -> String Never! {
     if value == .Val(found) -> "{found}" else -> "None"
 }
 
-probe_d2: fn(probe: &Probe) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
+probe_d2: fn(probe: ^Probe) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     probe_heading("D2: record, replay, reverse, why")
     work: probe_fixture(probe, "Debug", "ReplayReverse")
     _: probe_run(probe, [String]{probe.jet, "run", "--record=back", "prog.jet"}, work)
@@ -396,10 +396,10 @@ probe_d2: fn(probe: &Probe) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     _: probe_run(probe, [String]{probe.jet, "build", "-O2", "record_cost.jet"}, cost)
     loop mode in ([String]{"cpu", "sync"}) {
         size: if mode == "cpu" -> "36" else -> "20000"
-        plain := [Int]{}
-        recorded := [Int]{}
-        loads := [String]{}
-        name := ""
+        ^plain: [Int]{}
+        ^recorded: [Int]{}
+        ^loads: [String]{}
+        ^name: ""
         loop turn in 1..<3 {
             alone: probe_run(probe, [String]{probe.jet, "run", "-O2", "record_cost.jet", "--", "{mode}", "{size}"}, cost)
             if probe_took_ns(alone.text) == .Val(ns) -> plain.push(ns)
@@ -412,7 +412,7 @@ probe_d2: fn(probe: &Probe) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
         bytes: if files.stat(replay) == .Ok(found) -> "{found.size}" else -> "None"
         least_plain: probe_least(plain)
         least_recorded: probe_least(recorded)
-        ratio := "?"
+        ^ratio: "?"
         if least_plain == .Val(alone) {
             if least_recorded == .Val(kept) -> ratio = probe_ratio(kept, alone, 3)
         }
@@ -423,7 +423,7 @@ probe_d2: fn(probe: &Probe) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     _: probe_run(probe, [String]{probe.jet, "debug", "--replay=cost-sync-2", "record_cost.jet"}, cost, stdin: "c\n")
 }
 
-probe_d3: fn(probe: &Probe) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
+probe_d3: fn(probe: ^Probe) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     probe_heading("D3: Jet-typed values in an -O2 image, inlined frames included")
     inlined: probe_fixture(probe, "Debug", "LldbShowsO2InlinedFramesAndTheirLocals")
     _: probe_run(probe, [String]{probe.jet, "build", "-O2", "prog.jet"}, inlined)
@@ -454,7 +454,7 @@ probe_d3: fn(probe: &Probe) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     _: probe_console(probe, [String]{probe.jet, "debug", "prog.jet", "--break", "prog.jet:21"}, work, [String]{"print tally", "print tally.count", "locals", "c", "c", "c"})
 }
 
-probe_d4: fn(probe: &Probe) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
+probe_d4: fn(probe: ^Probe) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     probe_heading("D4: expression evaluation")
     names: [String]{"PrintEvaluatesCompiledExpressions", "PrintAFallibleCallShowsOkOrErr", "PrintRefusesEffectfulExpression"}
     cases: [String]{"print_evaluates_compiled_expressions", "print_a_fallible_call_shows_ok_or_err", "print_refuses_effectful_expression"}
@@ -497,7 +497,7 @@ probe_peer_condition: fn(probe: Probe, peer: String, argv: [String]?, work: Stri
     probe_note("{peer} not given: its condition per hit is not measured")
 }
 
-probe_d6: fn(probe: &Probe) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
+probe_d6: fn(probe: ^Probe) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     probe_heading("D6: conditions and logpoints")
     names: [String]{"ConditionalBreakpointRunsInProcess", "PlacedLogpointRunsInTheProgram"}
     cases: [String]{"conditional_breakpoint_runs_in_process", "placed_logpoint_runs_in_the_program"}
@@ -524,7 +524,7 @@ probe_d6: fn(probe: &Probe) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     probe_peer_condition(probe, "gdb", gdb, work)
 }
 
-probe_generic: fn(probe: &Probe) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
+probe_generic: fn(probe: ^Probe) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     probe_heading("Generic instances: a breakpoint in a generic module's instance at -O0, -O1 and -O2")
     work: probe_fixture(probe, "Debug", "BreakpointInGenericModuleInstance")
     first: probe_stdin_lines(probe, "Debug", "breakpoint_in_generic_module_instance")
@@ -546,11 +546,11 @@ probe_generic: fn(probe: &Probe) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
 // shows at a stop is matched to a Debug view panel in the window. RemedyBG
 // runs on Windows alone, so its time is not measured here; the bar is its
 // stop shown in well under a second.
-probe_canvas: fn(probe: &Probe) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
+probe_canvas: fn(probe: ^Probe) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     probe_heading("Canvas: the Debug and Profile views, their first paint and panels, against RemedyBG")
-    browser := ""
-    webdriver := ""
-    locker := ""
+    ^browser: ""
+    ^webdriver: ""
+    ^locker: ""
     if probe.chromium == .Val(path) -> browser = path.copy()
     if probe.chromedriver == .Val(path) -> webdriver = path.copy()
     if probe.jetpack == .Val(path) -> locker = path.copy()
@@ -565,7 +565,7 @@ probe_canvas: fn(probe: &Probe) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
 // would show it.
 PROBE_REMEDYBG_PANELS: [String]{"Source", "Call Stack", "Locals", "Watches", "Tasks", "Memory", "Registers", "Disassembly"}
 
-priv probe_canvas_run: fn(probe: &Probe, chromium: String, driver: String, jetpack: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
+priv probe_canvas_run: fn(probe: ^Probe, chromium: String, driver: String, jetpack: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     work: probe_fixture(probe, "Debug", "CanvasDebugValuesAtBreakpoint")
     told: probe_run(probe, [String]{chromium, "--version"}, work, show: false, peer: true)
     found: regex.match(Regex{"([0-9]+[.][0-9]+[.][0-9]+[.][0-9]+)"}, told.text) ?? {
@@ -599,13 +599,13 @@ priv probe_canvas_run: fn(probe: &Probe, chromium: String, driver: String, jetpa
         probe_note("the scenario did not pass: no panel or time is compared")
         return
     }
-    shown := [String]{}
+    ^shown: [String]{}
     loop line in result.text.split("\n") {
         if line.starts_with("debug panel: ") && line.contains(": in the window, ") {
             shown.push(line.slice(13..<line.len()).split(": ").to_list()[0])
         }
     }
-    missing := [String]{}
+    ^missing: [String]{}
     loop panel in PROBE_REMEDYBG_PANELS {
         if !shown.contains(panel) -> missing.push("{panel}")
     }
@@ -619,7 +619,7 @@ priv probe_canvas_run: fn(probe: &Probe, chromium: String, driver: String, jetpa
     print("Continue to the stop painted: {stop.groups[0]} ms, against RemedyBG's well under a second (not measured: RemedyBG runs on Windows alone)")
     quick: (Float.parse(stop.groups[0]) ?? 1000.0) < 1000.0
     if missing.len() == 0 && quick -> print("Verdict: holds") else {
-        reasons := [String]{}
+        ^reasons: [String]{}
         if missing.len() > 0 -> reasons.push("no {missing.join(", ")} panel at the stop")
         if !quick -> reasons.push("the stop painted a second or more after Continue")
         print("Verdict: does not hold: {reasons.join("; ")}")
@@ -632,13 +632,13 @@ run: fn() {
     if args.len() < 2 -> process.fail(2, PROBE_USAGE)
     jet: files.absolute(args[0]) ?? process.fail(2, "{args[0]}: {err}")
     repo: files.absolute(args[1]) ?? process.fail(2, "{args[1]}: {err}")
-    lldb := String?{None}
-    gdb := String?{None}
-    chromium := String?{None}
-    chromedriver := String?{None}
-    jetpack := String?{None}
-    chosen := [String]{}
-    at := 2
+    ^lldb: String?{None}
+    ^gdb: String?{None}
+    ^chromium: String?{None}
+    ^chromedriver: String?{None}
+    ^jetpack: String?{None}
+    ^chosen: [String]{}
+    ^at: 2
     loop at < args.len() {
         word: args[at]
         if word == "--lldb" || word == "--gdb" || word == "--chromium" || word == "--chromedriver" || word == "--jetpack" {
@@ -666,11 +666,11 @@ run: fn() {
     scratch: files.temp_dir("jet-best5-") ?? process.fail(1, "couldn't make a work directory: {err}")
     empty: files.join(scratch.path, "no-tools")
     files.create_dir_all(empty) ?? process.fail(1, "couldn't make {empty}: {err}")
-    relay := [String]{}
+    ^relay: [String]{}
     loop name in (process.env_keys() ?? [String]{}) {
         if name.starts_with("JET_DEVTOOLS_RELAY_") -> relay.push("{name}")
     }
-    probe := Probe{
+    ^probe: Probe{
         jet: jet,
         here: files.join(repo, "Docs/Audits/BestInExistence20261119/Probes"),
         cases: files.join(repo, "Tests/Cases"),
@@ -687,7 +687,7 @@ run: fn() {
         relay: relay,
         count: 0,
     }
-    out := term.stdout()
+    ^out: term.stdout()
     loop axis in chosen {
         if axis == {
             "d2" -> probe_d2(probe)

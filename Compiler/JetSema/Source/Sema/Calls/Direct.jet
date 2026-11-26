@@ -1255,9 +1255,6 @@ sema_call_core_direct_checked: fn(call: Call, expected: Type?, check: ^SemaBodyC
             if compute_alias.handled {
                 return SemaDirectSpecialCheck{handled: true, value: compute_alias.value}
             }
-            if module_name == "core.ui" && member == "node_role" {
-                sema_call_core_ui_node_role_lint(call.args, call.name_span, check)
-            }
             check.scopes.ownership_call_depth += 1
             ^value: sema_call_core_check_source_owned(target, call.name, call.type_args, call.args, call.name_span, expected, check)
             check.scopes.ownership_call_depth -= 1
@@ -1452,6 +1449,7 @@ sema_call_check_default_err: fn(call: Call, expected: Type?, check: ^SemaBodyChe
 // unwritten: a lone Snapshot program's come from its own declarations, the
 // rest from Registration.
 sema_call_target_default_values: fn(target: SemaCallDirectTarget, binding: SemaCallBinding, span: Span, check: ^SemaBodyCheck) -> [SemaCallDefaultValue]? {
+    // Snapshot: a lone Snapshot program has no Registration default rows, so read its own declaration defaults.
     if check.program.registration_graph.mode == .Snapshot {
         local_defaults: sema_call_local_default_values(target, binding, check) ?? {
             check.diagnostics.push(sema_error("E0906", span, "a default argument for this call could not be resolved", "callable defaults retain their owning declaration and source identity", "make the owning declaration available to Registration before checking this call"))
@@ -2209,7 +2207,7 @@ sema_call_try_direct_forms: fn(call: Call, expected: Type?, check: ^SemaBodyChec
 
 sema_call_check_freeze: fn(call: Call, expected: Type?, check: ^SemaBodyCheck) -> SemaDirectSpecialCheck {
     if call.args.len() != 1 {
-        sema_stream_handle_infer_args(call.args, check)
+        sema_handle_infer_args(call.args, check)
         check.diagnostics.push(sema_error("E0104", call.name_span, "`freeze` takes exactly one value, got {call.args.len()}", "`freeze(x)` creates one deeply immutable owned snapshot for a crossing", "write `freeze(value)` with exactly one value"))
         return SemaDirectSpecialCheck{handled: true, value: None}
     }

@@ -2094,6 +2094,7 @@ class Host {
   // its turn.
   wait(address, expected, deadline) {
     const at = Number(address);
+    if (at === 0) return this.park((record) => this.wake(record, 0n));
     if (this.view().getInt32(at, true) !== Number(BigInt.asIntN(32, expected))) return BigInt(-E.AGAIN);
     return this.park((record) => {
       const waiter = { record, timer: null };

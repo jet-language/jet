@@ -144,6 +144,7 @@ sema_serde_implementation: fn(environment: SemaScopeEnvironment, program: SemaPr
 // derived or written.
 sema_serde_registered_implementation: fn(program: SemaProgramTables, module_identity: ModuleID, name: String, direction: SemaSerdeDirection) -> Bool Never! {
     graph: program.registration_graph
+    // Snapshot: a lone Snapshot program has no registered cross-module codec impl rows.
     if graph.mode == .Snapshot -> return false
     resolved: sema_type_graph_lookup_symbol(graph, module_identity, name) ?? return false
     sema_serde_impl_rows(graph, resolved.target_module_identity, sema_resolved_name(graph, resolved), sema_serde_codec_name(direction))

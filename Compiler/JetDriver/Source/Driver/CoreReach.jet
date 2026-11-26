@@ -534,19 +534,11 @@ JET_DRIVER_SOURCE_ROUTES: [String]{
     "core.prelude.option_or_err",
     "core.reactive.signal",
     "core.regex.compile",
-    "core.service.batched_worker",
-    "core.service.durable_batched_worker",
-    "core.service.durable_stateful_worker",
-    "core.service.durable_worker",
-    "core.service.stateful_worker",
-    "core.service.typed_send",
-    "core.service.typed_send_durable",
-    "core.service.typed_worker",
-    "core.service.worker",
     "core.tasks.after",
     "core.term.eprint",
     "core.term.print",
     "core.term.progress",
+    "core.term.prompt_guided",
     "core.testing.snap",
     "core.text.fmt.pretty",
     "core.text.fmt.quantity",
@@ -1282,7 +1274,7 @@ jet_driver_reach_admit: fn(reach: ^JetDriverReach, loaded: Int, module_name: Str
 // any other lazy trait is "", an owned one's.
 jet_driver_reach_impl: fn(reach: ^JetDriverReach, module_name: String, type_name: String, written: String, imports: [ImportDecl]) -> Int {
     ^trait_module: ""
-    ^trait_name: written.copy()
+    ^trait_name: written
     ^triggers: [Int]{}
     ^dotted_triggers: [Int]{}
     if owned_trait(written) == .Val(owned) {
@@ -1300,7 +1292,7 @@ jet_driver_reach_impl: fn(reach: ^JetDriverReach, module_name: String, type_name
         trait_module = owned.declared_in.move()
     } else {
         parts: written.partition(".")
-        trait_module = module_name.copy()
+        trait_module = module_name
         loop declaration in imports {
             if declaration.alias == parts.head {
                 if jet_driver_core_import_module(declaration) == .Val(imported) {
@@ -1311,7 +1303,7 @@ jet_driver_reach_impl: fn(reach: ^JetDriverReach, module_name: String, type_name
         }
         trait_name = parts.tail.move()
     }
-    reach.impls.push(JetDriverReachImpl{item: reach.items.len(), row: JetDriverCoreImplRow{type_module: module_name.copy(), type_name: type_name.copy(), trait_module: trait_module, trait_name: trait_name}, written: written.copy(), triggers: triggers, dotted_triggers: dotted_triggers})
+    reach.impls.push(JetDriverReachImpl{item: reach.items.len(), row: JetDriverCoreImplRow{type_module: module_name, type_name: type_name, trait_module: trait_module, trait_name: trait_name}, written: written, triggers: triggers, dotted_triggers: dotted_triggers})
     reach.impls.len() - 1
 }
 

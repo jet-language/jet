@@ -4,11 +4,11 @@
 // Unset, the working directory is the root: `jet test Tests/Guards` from the
 // checkout runs as before.
 use {
-    guards_root_files: core.files
     guards_root_process: core.process
+    guards_root_sys: core.sys
 }
 
 guards_enter_root: fn() {
     root: guards_root_process.env_get("JET_GUARDS_ROOT") ?? return
-    guards_root_files.chdir(root) ?? panic("enter the repository root `{root}` named by JET_GUARDS_ROOT: {err}")
+    guards_root_sys.set_current_dir(root) ?? panic("enter the repository root `{root}` named by JET_GUARDS_ROOT: {err}")
 }

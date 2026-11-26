@@ -586,7 +586,7 @@ sema_check_registered_item_is_jet_function: fn(environment: SemaScopeEnvironment
     // Both stay registered. A body that reaches an unusable declaration
     // (sema_checked_unusable_bodies) is not checked either.
     if graph.modules[module_index].program.items[item_index] == .Func(func) {
-        return func.inline_foreign == None && !sema_function_is_guest_import(func) && !sema_check_unusable_body(graph, sema_check_top_level_key(module_text(graph.module_table, graph.modules[module_index].module_identity), func.name))
+        return func.inline_foreign == None && !sema_function_is_guest_import(func) && sema_check_top_level_function_registered(graph, module_index, func.name) && !sema_check_unusable_body(graph, sema_check_top_level_key(module_text(graph.module_table, graph.modules[module_index].module_identity), func.name))
     }
     false
 }

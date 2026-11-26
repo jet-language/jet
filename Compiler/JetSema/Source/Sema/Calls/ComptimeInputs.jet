@@ -29,6 +29,8 @@ use jet_foundation.[
     Span,
     TFailureCarrier,
     Type,
+    expr_span,
+    foundation_byte_text,
 ]
 
 sema_comptime_input_type: fn(name: String) -> Type Never! {
@@ -40,8 +42,11 @@ sema_comptime_input_type: fn(name: String) -> Type Never! {
 // The argument's source string literal, or None when it is computed.
 sema_comptime_input_literal: fn(expression: Expr) -> String? Never! {
     if expression == .Str(parts, _, _) {
-        if parts.len() == 0 -> return Val("")
-        if parts.len() == 1 && parts[0] == .Lit(text) -> return Val(text)
+        ^value: ""
+        loop part in parts {
+            if part == .Lit(text) -> value = "{value}{text}" else -> return None
+        }
+        return Val(value)
     }
     None
 }
@@ -175,4 +180,31 @@ sema_call_try_comptime_fetch: fn(module_name: String, member: String, args: [Cal
     }
     node: sema_tree_node(Type.String, TExprKind.HostCall{call: THostCall.ComptimeInput{builtin: "fetch", path: url, pin: Val(sha256)}}, span)
     SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(node, expected, check.environment.*, check.program.*, check.diagnostics)}
+}
+
+// `ui.asset(path)` names a file as `embed_bytes` does, from the calling file's
+// own directory: a literal path that breaks that path law is E0957, and one
+// the driver found no file for (Program.app_missing_assets) is E2822 naming
+// the path it resolved to, both at the path.
+sema_ui_asset_refused: fn(args: [CallArg], check: ^SemaBodyCheck) -> Bool {
+    if args.len() != 1 -> return false
+    path: sema_comptime_input_literal(args[0].expr) ?? return false
+    named: sema_comptime_input_named(path)
+    if sema_comptime_input_path_law(named) == .Val(problem) {
+        check.diagnostics.push(sema_comptime_input_path_error("ui.asset", problem, expr_span(args[0].expr)))
+        return true
+    }
+    graph: check.program.registration_graph
+    row: sema_app_module_row(check.environment.*, graph)
+    if row < 0 || !graph.modules[row].program.app_missing_assets.contains(path) -> return false
+    file: graph.modules[row].source_file
+    cut: file.rfind("/")
+    resolved: if cut < 0 -> named else -> "{foundation_byte_text(file.bytes(), 0, cut)}/{named}"
+    entry: sema_diagnostic_row("E2822")
+    check.diagnostics.push(sema_error("E2822", expr_span(args[0].expr), sema_ui_asset_text(entry.what, path, resolved), sema_ui_asset_text(entry.why, path, resolved), sema_ui_asset_text(entry.fix, path, resolved)))
+    true
+}
+
+sema_ui_asset_text: fn(text: String, path: String, resolved: String) -> String Never! {
+    text.replace("{{path}}", path).replace("{{resolved}}", resolved)
 }

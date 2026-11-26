@@ -30,10 +30,12 @@ use {
         TOKEN_BLOCK_COMMENT,
         TOKEN_BREAK,
         TOKEN_CHAR,
+        TOKEN_COLON,
         TOKEN_COMMA,
         TOKEN_EOF,
         TOKEN_FLOAT,
         TOKEN_GT,
+        TOKEN_HASH,
         TOKEN_INT,
         TOKEN_KW_CONST,
         TOKEN_KW_ENUM,
@@ -41,12 +43,15 @@ use {
         TOKEN_KW_IMPL,
         TOKEN_KW_IN,
         TOKEN_KW_MODULE,
+        TOKEN_KW_PRIV,
         TOKEN_KW_STRUCT,
+        TOKEN_KW_USE,
         TOKEN_IDENT,
         TOKEN_LBRACE,
         TOKEN_LBRACKET,
         TOKEN_LINE_COMMENT,
         TOKEN_LPAREN,
+        TOKEN_LT,
         TOKEN_NULL,
         TOKEN_PREP,
         TOKEN_RAW_STRING,
@@ -1345,19 +1350,37 @@ parser_recover_statement: fn(state: ^JetParserState) Never! {
     }
 }
 
-// After a failed top-level item: skip to the next plausible item start. A
-// `#run`, `#if` or `#loop` starts an item only at the start of a line; after
-// `NAME:` it is that binding's value, which goes with the skipped line.
+// After a failed top-level item: skip to the next plausible item start at
+// brace depth 0 (`name:`, `priv`, `use`, `impl`, `#`, or a line-start `#run`,
+// `#if`, `#loop`). Tracking braces skips the failed item's own body before
+// stopping on the next item so subsequent items keep their declared names.
 parser_sync_top: fn(state: ^JetParserState) Never! {
+    ^depth: 0
+    ^started: false
     loop {
         kind: parser_current_kind(state)
-        if kind == TOKEN_EOF || kind == TOKEN_KW_FN || kind == TOKEN_KW_STRUCT || kind == TOKEN_KW_ENUM || kind == TOKEN_KW_IMPL || kind == TOKEN_KW_CONST {
-            break
+        if kind == TOKEN_EOF -> break
+        if depth == 0 {
+            if kind == TOKEN_KW_FN || kind == TOKEN_KW_STRUCT || kind == TOKEN_KW_ENUM || kind == TOKEN_KW_IMPL || kind == TOKEN_KW_CONST {
+                break
+            }
+            at_boundary: state.position == 0 || state.tokens[state.position - 1].kind == TOKEN_SEMI || state.tokens[state.position - 1].kind == TOKEN_RBRACE
+            if at_boundary {
+                if kind == TOKEN_PREP -> break
+                if started {
+                    if kind == TOKEN_KW_USE || kind == TOKEN_KW_PRIV || kind == TOKEN_HASH {
+                        break
+                    }
+                    if kind == TOKEN_IDENT && state.position + 1 < state.tokens.len() {
+                        next_kind: state.tokens[state.position + 1].kind
+                        if next_kind == TOKEN_COLON || next_kind == TOKEN_LT -> break
+                    }
+                }
+            }
         }
-        if kind == TOKEN_PREP && (state.position == 0 || state.tokens[state.position - 1].kind == TOKEN_SEMI) {
-            break
-        }
+        if kind == TOKEN_LBRACE -> depth += 1 else if kind == TOKEN_RBRACE && depth > 0 -> depth -= 1
         parser_bump(state)
+        started = true
     }
 }
 
