@@ -1,22 +1,22 @@
-// A `Pool<T>` parameter without `^` is read-only: `add` and `remove` change
-// the pool, so each is refused through it. A changeable local and a `^` parameter
-// change their pool with no mark at the call.
+// A `Slots<T>` parameter without `^` is read-only: `add` and `remove` change
+// the store, so each is refused through it. A changeable local and a `^` parameter
+// change their store with no mark at the call.
 Player: struct {
     name: String,
     hp: Int,
 }
 
-spawn: fn(world: Pool<Player>) -> ID<Player> { world.add(Player{name: "Kai", hp: 100}) }
+spawn: fn(world: Slots<Player>) -> ID<Player> { world.add(Player{name: "Kai", hp: 100}) }
 
-despawn: fn(world: Pool<Player>, id: ID<Player>) { _: world.remove(id) }
+despawn: fn(world: Slots<Player>, id: ID<Player>) { _: world.remove(id) }
 
-respawn: fn(world: ^Pool<Player>, id: ID<Player>) -> ID<Player> {
+respawn: fn(world: ^Slots<Player>, id: ID<Player>) -> ID<Player> {
     _: world.remove(id)
     world.add(Player{name: "Kai", hp: 100})
 }
 
 run: fn() {
-    ^world: Pool<Player>.new()
+    ^world: Slots<Player>.new()
     kai: world.add(Player{name: "Kai", hp: 100})
     again: respawn(world, kai)
     print(world.ids().len())

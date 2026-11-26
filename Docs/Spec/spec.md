@@ -2526,7 +2526,7 @@ describe: fn(source: String, kind: String) {
 }
 ```
 
-Use `Shared<T>` or `Pool<T>`/`ID<T>` when many owners need one value. A plain
+Use `Shared<T>` or `Slots<T>`/`ID<T>` when many owners need one value. A plain
 owned `String` is not a borrowed window. A read-only view entering an owning
 slot is materialized as an owned copy, as though `.copy()` had been written. This
 covers bindings, returns, fields, collection elements, enum payloads, fallback
@@ -2806,13 +2806,13 @@ scope and may read it. `Cell`, `CellReadGuard`, and `CellEditGuard` cannot cross
 channel, `Shared`, task-group, or parallel-adapter boundary; use `Shared<T>` for
 synchronized cross-boundary state (D-LOCALCELL1=A).
 
-`Pool<T>` is a generational arena and `ID<T>` is copyable index-plus-generation
-data. The pool owns each `T`; an `ID<T>` never accesses `T` by itself. `add`
-returns an ID, `pool[id]` indexes for read or write, and `ids()` walks live
+`Slots<T>` is a generational value store and `ID<T>` is copyable index-plus-generation
+data. The store owns each `T`; an `ID<T>` never accesses `T` by itself. `add`
+returns an ID, `slots[id]` indexes for read or write, and `ids()` walks live
 entries. Removing an entry bumps its generation and returns `T?`. Indexing a
 stale ID panics, like an array bounds failure, rather than silently reading old
-storage. `add`, `remove` and `pool[id] = v` change the pool, so they need a
-writable pool: a changeable binding or a `^` parameter. Through an unmarked
+storage. `add`, `remove` and `slots[id] = v` change the store, so they need a
+writable binding: a changeable binding or a `^` parameter. Through an unmarked
 parameter, `add` and `remove` are **E0205**.
 
 ```jet
@@ -2824,7 +2824,7 @@ Player: struct {
 }
 
 run: fn() {
-    ^world: Pool<Player>.new()
+    ^world: Slots<Player>.new()
     kai: world.add(Player{name: "Kai", hp: 100, attack: 15, target: None})
     world[kai].hp += 1
     fallen: world.remove(kai) ?? return
@@ -2833,8 +2833,8 @@ run: fn() {
 ```
 
 See [`entity_world.jet`](../../Examples/Memory/EntityWorld.jet) and
-[`entity_tree.jet`](../../Examples/Memory/EntityTree.jet) for pool
-links and nested writes (D-POOLID-API1).
+[`entity_tree.jet`](../../Examples/Memory/EntityTree.jet) for generational slot
+links and nested writes.
 
 `Rows<T>` (`core.collections`) is an add-only table and `Row<T>` its 4-byte
 row handle. `rows.add(v)` appends `v` and returns its `Row<T>`; `rows[row]`

@@ -1072,7 +1072,7 @@ sema_expression_index_inner: fn(base: Expr, index: Expr, ast_kind: IndexKind, re
         .List(_) -> Val(Type.Int)
         .FixedList(_, _) -> Val(Type.Int)
         .Map(key, _, _) -> Val(key)
-        .Apply(name, args) -> if (name == "View" || name == "ViewMut") && args.len() == 1 -> Val(Type.Int) else if name == "Pool" && args.len() == 1 -> Val(Type.Apply{name: "ID", args: [Type]{args[0]}}) else -> None
+        .Apply(name, args) -> if (name == "View" || name == "ViewMut") && args.len() == 1 -> Val(Type.Int) else if name == "Slots" && args.len() == 1 -> Val(Type.Apply{name: "ID", args: [Type]{args[0]}}) else -> None
         .Named(_) -> if sema_call_math_lane_name(base_ty) != None -> Val(Type.Int) else -> None
         .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
     }
@@ -1264,12 +1264,12 @@ sema_expression_index_inner: fn(base: Expr, index: Expr, ast_kind: IndexKind, re
                 resolved_kind = IndexKind.List
                 result_ty = Val(args[0])
             }
-            // `pool[id]` reads the slot its own `ID<T>` names; a stale id
-            // panics at run time (`jet_pool_get`).
-            if name == "Pool" && args.len() == 1 {
+            // `slots[id]` reads the slot its own `ID<T>` names; a stale id
+            // panics at run time.
+            if name == "Slots" && args.len() == 1 {
                 id_type: Type.Apply{name: "ID", args: [Type]{args[0]}}
                 if !type_identity_equal(checked_index.ty, id_type) {
-                    check.diagnostics.push(sema_error("E0112", expr_span(index), "`Pool` indexes need a matching `ID<T>`, not {sema_type_show(checked_index.ty)}", "a pool slot is only reached through the `ID<T>` its own `.add()` returned", "index with the `ID<T>` handle from `.add(...)`"))
+                    check.diagnostics.push(sema_error("E0112", expr_span(index), "`Slots` indexes need a matching `ID<T>`, not {sema_type_show(checked_index.ty)}", "a slot is only reached through the `ID<T>` its own `.add()` returned", "index with the `ID<T>` handle from `.add(...)`"))
                     return None
                 }
                 location: sema_expression_panic_location(check.environment.*, check.program.*, check.scopes, span)
@@ -1313,7 +1313,7 @@ sema_expression_number_param: fn(params: [TGenericParam], name: String) -> Bool 
 }
 
 // An index of the wrong type is reported for the collection it addresses
-// (E0505, or E0112 for a pool), in place of the generic E0108 its check against
+// (E0505, or E0112 for `Slots`), in place of the generic E0108 its check against
 // the index type reported.
 sema_expression_index_replace_mismatch: fn(base_ty: Type, offered: Type, index_span: Span, diagnostic_start: Int, diagnostics: ^[Diagnostic]) {
     mismatch_index: sema_value_mismatch_index(diagnostics, diagnostic_start, index_span) ?? return
@@ -1327,8 +1327,8 @@ sema_expression_index_mismatch: fn(base_ty: Type, offered: Type, span: Span) -> 
         .Map(key, _, _) -> return Val(sema_error("E0505", span, "this map holds keys of type {sema_type_show(key)}, not {sema_type_show(offered)}", "the key in `map[key]` must match the map's key type", "use a {type_name(key)} key here"))
         .Apply(name, args) -> {
             if (name == "View" || name == "ViewMut") && args.len() == 1 -> return list_index
-            if name == "Pool" && args.len() == 1 {
-                return Val(sema_error("E0112", span, "`Pool` indexes need a matching `ID<T>`, not {sema_type_show(offered)}", "a pool slot is only reached through the `ID<T>` its own `.add()` returned", "index with the `ID<T>` handle from `.add(...)`"))
+            if name == "Slots" && args.len() == 1 {
+                return Val(sema_error("E0112", span, "`Slots` indexes need a matching `ID<T>`, not {sema_type_show(offered)}", "a slot is only reached through the `ID<T>` its own `.add()` returned", "index with the `ID<T>` handle from `.add(...)`"))
             }
         }
         .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}

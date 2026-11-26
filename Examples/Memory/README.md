@@ -11,7 +11,7 @@ Run a lesson from the repository root, for example `jet run Examples/Memory/<Les
 - [DeferConsume](DeferConsume.jet) — `defer close(resource)` consumes its resource when the scope exits.
 - [EffectDenials](EffectDenials.jet) — Memory floors are effect denials.
 - [EntityTree](EntityTree.jet)
-- [EntityWorld](EntityWorld.jet) — Pools: `Pool<T>`/`Id<T>` — a generational arena.
+- [EntityWorld](EntityWorld.jet) — Slots: `Slots<T>`/`ID<T>` — a generational value store.
 - [ExpiringSecret](ExpiringSecret.jet)
 - [LiveLinks](LiveLinks.jet) — Live links (`@T`): shared references with auto-deref reads/writes, value equality (`==`), identity comparison (`.same()`), and recursive optional links (`@Node?`).
 - [LocalCache](LocalCache.jet)

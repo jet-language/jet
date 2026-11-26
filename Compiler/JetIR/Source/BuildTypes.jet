@@ -336,8 +336,8 @@ ir_value_type_laid: fn(m: ^IRModule, p: IRProgram, ty: Type, tid: TypeID, laying
     }
     if ty == .Apply(name, args) {
         if name == "@" && args.len() == 1 -> return ir_link_row_for(m, p, ty, args[0], laying)
-        // A `Pool<T>` and its `ID<T>`s as BuildPools.jet lays them out.
-        if name == "Pool" && args.len() == 1 {
+        // A `Slots<T>` and its `ID<T>`s as BuildPools.jet lays them out.
+        if name == "Slots" && args.len() == 1 {
             return ir_value_type_in(m, p, ir_pool_carrier(args[0]), laying)
         }
         if name == "ID" && args.len() == 1 {

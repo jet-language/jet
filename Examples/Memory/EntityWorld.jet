@@ -1,8 +1,8 @@
-// Pools: `Pool<T>`/`Id<T>` — a generational arena.
-// `world.add(val)` inserts and returns an `Id<T>` (plain, copyable, comparable
-// data — never touches `T` itself); `pool[id]` indexes for both read and
-// write, including a nested `pool[id].field = v`; `.ids()` walks every live
-// entry; a stale `Id<T>` (removed slot, generation bumped) panics rather than
+// Slots: `Slots<T>`/`ID<T>` — a generational value store.
+// `world.add(val)` inserts and returns an `ID<T>` (plain, copyable, comparable
+// data — never touches `T` itself); `world[id]` indexes for both read and
+// write, including a nested `world[id].field = v`; `.ids()` walks every live
+// entry; a stale `ID<T>` (removed slot, generation bumped) panics rather than
 // silently reading garbage.
 Player: struct {
     name: String,
@@ -11,7 +11,7 @@ Player: struct {
     target: ID<Player>?,
 }
 
-tick: fn(world: ^Pool<Player>) {
+tick: fn(world: ^Slots<Player>) {
     loop id in world.ids() {
         target: world[id].target.copy()
         if target == .Val(t) {
@@ -22,7 +22,7 @@ tick: fn(world: ^Pool<Player>) {
 }
 
 run: fn() {
-    ^world: Pool<Player>.new()
+    ^world: Slots<Player>.new()
     kai: world.add(Player{name: "Kai", hp: 100, attack: 15, target: None})
     rem_id: world.add(Player{name: "Rem", hp: 100, attack: 10, target: None})
     world[kai].target = Val(rem_id.copy())

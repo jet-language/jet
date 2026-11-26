@@ -215,7 +215,7 @@ sema_core_generated_core_module: fn(module_name: String) -> Bool Never! {
 
 sema_core_generated_core_type: fn(module_name: String, type_name: String) -> Bool Never! {
     if module_name == {
-        "core.mem" -> type_name == "Pool" || type_name == "Cell" || type_name == "ID"
+        "core.mem" -> type_name == "Slots" || type_name == "Cell" || type_name == "ID"
         "core.compute" -> type_name == "Vec" || type_name == "Matrix"
         else -> false
     }
@@ -235,7 +235,7 @@ sema_core_generated_register_core_alias: fn(markers: ^NameTable, alias: String, 
     if !sema_core_generated_core_module(module_name) {
         return
     }
-    loop type_name in ([String]{"Pool", "Cell", "ID", "Vec", "Matrix"}) {
+    loop type_name in ([String]{"Slots", "Cell", "ID", "Vec", "Matrix"}) {
         if sema_core_generated_core_type(module_name, type_name) {
             sema_core_generated_register_core_name(markers, "{alias}.{type_name}", module_name, type_name)
             sema_core_generated_register_core_name(markers, "{alias}.{type_name}", module_name, type_name)
@@ -314,13 +314,13 @@ sema_core_generated_context_markers: fn(graph: SemaRegistrationGraph, registrati
     if !sema_core_generated_shadowed(markers, "Shared") {
         sema_core_generated_marker_add(markers, sema_core_generated_constructor_marker("Shared"))
     }
-    loop type_name in ([String]{"Pool", "Cell", "ID"}) {
+    loop type_name in ([String]{"Slots", "Cell", "ID"}) {
         sema_core_generated_register_unqualified(graph, registration_module, markers, "core.mem", type_name)
     }
     loop type_name in ([String]{"Vec", "Matrix"}) {
         sema_core_generated_register_unqualified(graph, registration_module, markers, "core.compute", type_name)
     }
-    loop type_name in ([String]{"Pool", "Cell", "ID"}) {
+    loop type_name in ([String]{"Slots", "Cell", "ID"}) {
         sema_core_generated_register_core_qualified(markers, "core.mem", type_name)
     }
     loop type_name in ([String]{"Vec", "Matrix"}) {
@@ -369,7 +369,7 @@ sema_core_generated_scope_import_markers: fn(declarations: [ImportDecl], markers
                         sema_core_generated_register_core_alias(markers, alias, name)
                     }
                     else -> {
-                        loop type_name in ([String]{"Pool", "Cell", "ID", "Vec", "Matrix"}) {
+                        loop type_name in ([String]{"Slots", "Cell", "ID", "Vec", "Matrix"}) {
                             sema_core_generated_marker_add(markers, sema_core_generated_shadow_marker("{alias}.{type_name}"))
                         }
                     }
@@ -737,7 +737,7 @@ sema_core_collect_type: fn(ty: Type, registered: NameTable, used: ^[String], spa
                 sema_core_note_usage(used, spans, "core.mem.atomic", span)
             }
             if args.len() > 0 && !sema_core_generated_shadowed(registered, name) {
-                if sema_core_generated_type_marked(registered, name, "core.mem", "Pool") || sema_core_generated_type_marked(registered, name, "core.mem", "Cell") || sema_core_generated_type_marked(registered, name, "core.mem", "ID") {
+                if sema_core_generated_type_marked(registered, name, "core.mem", "Slots") || sema_core_generated_type_marked(registered, name, "core.mem", "Cell") || sema_core_generated_type_marked(registered, name, "core.mem", "ID") {
                     sema_core_note_usage(used, spans, "core.mem.pool_shared", None)
                 }
                 if sema_core_generated_type_marked(registered, name, "core.compute", "Vec") || sema_core_generated_type_marked(registered, name, "core.compute", "Matrix") {

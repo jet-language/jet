@@ -355,9 +355,9 @@ sema_shared_access_place_type: fn(value: Expr, environment: SemaScopeEnvironment
             if owner_ty == {
                 .List(element) | .FixedList(element, _) -> return Val(element)
                 .Map(_, _, element) -> return Val(element)
-                // A pool slot `pool[id]` holds the pool's element type.
+                // A slot store index `slots[id]` holds the store's element type.
                 .Apply(name, args) -> {
-                    if name == "Pool" && args.len() == 1 -> return Val(args[0])
+                    if name == "Slots" && args.len() == 1 -> return Val(args[0])
                 }
                 .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
             }

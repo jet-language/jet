@@ -1,13 +1,13 @@
-// Pools: a stale `Id<T>` — its pool slot was
+// Slots: a stale `ID<T>` — its slot was
 // removed — panics at runtime, mirroring the array-out-of-bounds panic
-// precedent (jet_index_vec/jet_pool_get): a runtime report, not a new
+// precedent: a runtime report, not a new
 // diagnostic code.
 Player: struct {
     name: String,
 }
 
 run: fn() {
-    ^world: Pool<Player>.new()
+    ^world: Slots<Player>.new()
     kai: world.add(Player{name: "Kai"})
     world.remove(kai).drop("this example only needs the generation bump, not the removed value")
     print(world[kai].name)

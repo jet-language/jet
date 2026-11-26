@@ -1,17 +1,17 @@
 Error: Jet.FieldWriteWithoutMarker: `.add()` changes `world`, which has read access only
-  --> Tests/UI/pool_read_only_param_mutation.jet:9:48
+  --> Tests/UI/pool_read_only_param_mutation.jet:9:49
     |
-  9 | spawn: fn(world: Pool<Player>) -> ID<Player> { world.add(Player{name: "Kai", hp: 100}) }
-    |                                                ^^^^^
+  9 | spawn: fn(world: Slots<Player>) -> ID<Player> { world.add(Player{name: "Kai", hp: 100}) }
+    |                                                 ^^^^^
  Why: `add: fn(^self, value: ^^Player)` changes the value it's called on, but an unmarked parameter gives read access only
- Fix: Change the parameter to `world: ^Pool<Player>`
+ Fix: Change the parameter to `world: ^Slots<Player>`
 More: jet-lang.dev/e/Jet.FieldWriteWithoutMarker
 
 Error: Jet.FieldWriteWithoutMarker: `.remove()` changes `world`, which has read access only
-  --> Tests/UI/pool_read_only_param_mutation.jet:11:55
+  --> Tests/UI/pool_read_only_param_mutation.jet:11:56
     |
- 11 | despawn: fn(world: Pool<Player>, id: ID<Player>) { _: world.remove(id) }
-    |                                                       ^^^^^
+ 11 | despawn: fn(world: Slots<Player>, id: ID<Player>) { _: world.remove(id) }
+    |                                                        ^^^^^
  Why: `remove: fn(^self, id: ID<Player>)` changes the value it's called on, but an unmarked parameter gives read access only
- Fix: Change the parameter to `world: ^Pool<Player>`
+ Fix: Change the parameter to `world: ^Slots<Player>`
 More: jet-lang.dev/e/Jet.FieldWriteWithoutMarker

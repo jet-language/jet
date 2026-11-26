@@ -1009,11 +1009,11 @@ sema_expr_place_root_ident: fn(expression: Expr) -> String? {
     }
 }
 
-// The indexed-write gate: a Pool, ViewMut, Map, List, or fixed list slot.
+// The indexed-write gate: a Slots, ViewMut, Map, List, or fixed list slot.
 sema_stmt_index_write_is_collection: fn(ty: Type) -> Bool Never! {
     if sema_expr_unwrap_tag(ty) == {
         .Map(_, _, _) | .List(_) | .FixedList(_, _) -> true
-        .Apply(name, _) -> name == "Pool" || name == "ViewMut"
+        .Apply(name, _) -> name == "Slots" || name == "ViewMut"
         .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
 }

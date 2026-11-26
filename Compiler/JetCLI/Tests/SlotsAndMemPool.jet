@@ -1,0 +1,166 @@
+// `Slots<T>` is the ambient generational value store and `core.mem.Pool` is the
+// fixed-slot allocator. They occupy distinct names so both check, lower to IR,
+// pass IR lint, and close/drop cleanly in the same module (including when
+// `use core.mem.Pool` brings `Pool` into scope unqualified).
+use {
+    jet_cli.[jet_cli_builtin_core_rows, jet_cli_driver_request]
+    jet_driver.[
+        JetDriverAuthorizedSourceFile,
+        JetDriverAuthorizedSourceRoot,
+        JetDriverAuthorizedSourceSnapshot,
+        JetDriverCompileMode,
+        jet_driver_checked_declarations,
+        jet_driver_compile,
+        jet_driver_has_errors,
+        jet_driver_lowering_inputs,
+        jet_driver_runtime_interface_sources,
+    ]
+    jet_foundation.[compiler_threads_single]
+    jet_ir.[ir_build_program, ir_checks_stock, ir_lint_module, ir_lint_text]
+}
+
+priv slots_pool_snapshot: fn(source: String) -> JetDriverAuthorizedSourceSnapshot {
+    JetDriverAuthorizedSourceSnapshot{
+        roots: [JetDriverAuthorizedSourceRoot]{
+            JetDriverAuthorizedSourceRoot{
+                canonical_path: "/slots-mem-pool",
+                identity: "slots-mem-pool-root",
+                allow_hardlinks: false,
+                files: [JetDriverAuthorizedSourceFile]{
+                    JetDriverAuthorizedSourceFile{
+                        path: "/slots-mem-pool/main.jet",
+                        relative_path: "main.jet",
+                        identity: "slots-mem-pool-file",
+                        source: source,
+                    },
+                },
+                foreign_cache_files: [JetDriverAuthorizedSourceFile]{},
+            },
+        },
+        entry_root_identity: "slots-mem-pool-root",
+        entry_path: "/slots-mem-pool/main.jet",
+    }
+}
+
+priv slots_pool_build_and_lint: fn(source: String) {
+    ^core_rows: jet_cli_builtin_core_rows()
+    core_rows.extend(jet_driver_runtime_interface_sources())
+    request: jet_cli_driver_request(slots_pool_snapshot(source), core_rows, Val(1), JetDriverCompileMode.Program)
+    ^front: jet_driver_lowering_inputs(request, None)
+    ^errors: [String]{}
+    loop diagnostic in front.compile.diagnostics {
+        if diagnostic.severity == 1 -> errors.push("{diagnostic.code}: {diagnostic.what}")
+    }
+    assert(!jet_driver_has_errors(front.compile.diagnostics), "sema errors: {errors.join("; ")}")
+    assert(front.compile.internal_problem == None, "internal problem: {front.compile.internal_problem:Debug}")
+    ^checked: front.inputs ?? panic("expected lowering inputs")
+    declarations: jet_driver_checked_declarations(checked)
+    ^built: ir_build_program(checked.functions.move(), checked.decls, checked.symbols.move(), checked.interner.move(), declarations.type_defs.move(), declarations.impls.move(), checked.sources.move(), declarations.constants.move(), declarations.foreign.move(), checked.entry_key ?? "", ir_checks_stock(), compiler_threads_single(), None)
+    ^failures: [String]{}
+    loop failure in built.failures -> failures.push("{failure.name}: {failure.message}")
+    assert(failures.len() == 0, "IR lowering failures: {failures.join("; ")}")
+    findings: ir_lint_module(built.program, "build", compiler_threads_single())
+    assert(findings.len() == 0, "IR lint findings:\n{ir_lint_text(findings)}")
+}
+
+#Test("Slots<T> and mem.Pool coexist and lower cleanly with close and drop") {
+    source: [String]{
+        "use core.mem",
+        "",
+        "Player: struct {{",
+        "    name: String,",
+        "    hp: Int,",
+        "    target: ID<Player>?,",
+        "}}",
+        "",
+        "tick: fn(world: ^Slots<Player>) {{",
+        "    loop id in world.ids() {{",
+        "        world[id].hp += 1",
+        "    }}",
+        "}}",
+        "",
+        "run: fn() {{",
+        "    ^world: Slots<Player>.new()",
+        "    kai: world.add(Player{{name: \"Kai\", hp: 100, target: None}})",
+        "    tick(world)",
+        "    fallen: world.remove(kai)",
+        "    if fallen == .Val(p) -> print(p.name)",
+        "    scratch: mem.Pool.new(slots: 8)",
+        "    v: scratch.alloc(42)",
+        "    print(v)",
+        "    close(scratch)",
+        "    dropped_pool: mem.Pool.new(slots: 4)",
+        "    w: dropped_pool.alloc(7)",
+        "    print(w)",
+        "}}",
+        "",
+    }
+    slots_pool_build_and_lint(source.join("\n"))
+}
+
+#Test("unqualified use core.mem.Pool does not shadow ambient Slots<T>") {
+    source: [String]{
+        "use core.mem.Pool",
+        "",
+        "Node: struct {{",
+        "    value: Int,",
+        "}}",
+        "",
+        "run: fn() {{",
+        "    ^world: Slots<Node>.new()",
+        "    id: world.add(Node{{value: 1}})",
+        "    print(world[id].value)",
+        "    alloc: Pool.new(slots: 4)",
+        "    n: alloc.alloc(9)",
+        "    print(n)",
+        "}}",
+        "",
+    }
+    slots_pool_build_and_lint(source.join("\n"))
+}
+
+#Test("read-only Slots<T> parameter reports ^Slots<T> fix") {
+    source: [String]{
+        "Player: struct {{",
+        "    name: String,",
+        "}}",
+        "",
+        "spawn: fn(world: Slots<Player>) -> ID<Player> {{ world.add(Player{{name: \"Kai\"}}) }}",
+        "",
+        "run: fn() {{",
+        "    ^world: Slots<Player>.new()",
+        "    _: spawn(world)",
+        "}}",
+        "",
+    }
+    ^core_rows: jet_cli_builtin_core_rows()
+    core_rows.extend(jet_driver_runtime_interface_sources())
+    request: jet_cli_driver_request(slots_pool_snapshot(source.join("\n")), core_rows, Val(1), JetDriverCompileMode.Check)
+    result: jet_driver_compile(request)
+    ^saw_fix: false
+    loop diagnostic in result.diagnostics {
+        if diagnostic.code == "E0205" && diagnostic.fix.contains("world: ^Slots<Player>") {
+            saw_fix = true
+        }
+    }
+    assert(saw_fix, "expected E0205 with `world: ^Slots<Player>` fix")
+}
+
+#Test("ambient Pool<T> is retired in favor of Slots<T>") {
+    source: [String]{
+        "Player: struct {{",
+        "    name: String,",
+        "}}",
+        "",
+        "run: fn() {{",
+        "    ^world: Pool<Player>.new()",
+        "    _: world.add(Player{{name: \"Kai\"}})",
+        "}}",
+        "",
+    }
+    ^core_rows: jet_cli_builtin_core_rows()
+    core_rows.extend(jet_driver_runtime_interface_sources())
+    request: jet_cli_driver_request(slots_pool_snapshot(source.join("\n")), core_rows, Val(1), JetDriverCompileMode.Check)
+    result: jet_driver_compile(request)
+    assert(jet_driver_has_errors(result.diagnostics), "expected Pool<Player>.new() to be rejected after renaming to Slots<T>")
+}

@@ -4,23 +4,23 @@ Error: Jet.FieldWriteWithoutMarker: `.remove()` changes `world`, which has read 
   9 |     world.remove(id).drop("only the refusal matters here")
     |     ^^^^^
  Why: `remove: fn(^self, id: ID<Player>)` changes the value it's called on, but an unmarked parameter gives read access only
- Fix: Change the parameter to `world: ^Pool<Player>`
+ Fix: Change the parameter to `world: ^Slots<Player>`
 More: jet-lang.dev/e/Jet.FieldWriteWithoutMarker
 
 Error: Jet.FieldWriteWithoutMarker: `.add()` changes `world`, which has read access only
-  --> Tests/UI/pool_changes_need_a_writable_pool.jet:12:50
+  --> Tests/UI/pool_changes_need_a_writable_pool.jet:12:51
     |
- 12 | recruit: fn(world: Pool<Player>) -> ID<Player> { world.add(Player{name: "Ash"}) }
-    |                                                  ^^^^^
+ 12 | recruit: fn(world: Slots<Player>) -> ID<Player> { world.add(Player{name: "Ash"}) }
+    |                                                   ^^^^^
  Why: `add: fn(^self, value: ^^Player)` changes the value it's called on, but an unmarked parameter gives read access only
- Fix: Change the parameter to `world: ^Pool<Player>`
+ Fix: Change the parameter to `world: ^Slots<Player>`
 More: jet-lang.dev/e/Jet.FieldWriteWithoutMarker
 
 Error: Jet.FieldWriteWithoutMarker: Cannot write to `world` — it has read access only
-  --> Tests/UI/pool_changes_need_a_writable_pool.jet:14:56
+  --> Tests/UI/pool_changes_need_a_writable_pool.jet:14:57
     |
- 14 | rename: fn(world: Pool<Player>, id: ID<Player>) { world[id] = Player{name: "Rem"} }
-    |                                                        ^^^^
+ 14 | rename: fn(world: Slots<Player>, id: ID<Player>) { world[id] = Player{name: "Rem"} }
+    |                                                         ^^^^
  Why: An unmarked parameter gives read access only; assigning into it needs write access
- Fix: Change the parameter to `world: ^Pool<Player>`
+ Fix: Change the parameter to `world: ^Slots<Player>`
 More: jet-lang.dev/e/Jet.FieldWriteWithoutMarker
