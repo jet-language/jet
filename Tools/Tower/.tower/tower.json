@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7042,
-    "rev": 114705,
+    "rev": 114711,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -49374,11 +49374,11 @@
         {
           "n": 10,
           "text": "JetSemIndex and JetImpact compile against the current driver and sema API (no Rust-shim calls, no missing SemaCompilerModuleSource fields), and the Tests/Cases/LSP rows run instead of REFUSED. Proof: `jet check Compiler/JetSemIndex` and `jet check Compiler/JetImpact` exit 0, and `jet test Compiler --profile cases --filter LSP/` reports no REFUSED row. (was #4917 c8)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:12:04.272Z"
+          "evidence": "dev 4c2306fa995 (batch-61 compiler): jet check Compiler/JetSemIndex exits 0 (0 errors) and jet check Compiler/JetImpact exits 0 (0 errors).",
+          "at": "2026-11-26T05:54:21.206Z"
         },
         {
           "n": 11,
@@ -49401,11 +49401,11 @@
         {
           "n": 13,
           "text": "A Jet LSP conformance test runs every case of an LSP 3.18 inventory checked in beside the LSP tests. Each applicable row names a witness test that exercises it through the real stdio transport, each N/A row carries a concrete reason, and the test fails on any row that is unknown, has no witness, or is marked N/A because it is unimplemented. Proof: `jet test Compiler --profile cases --filter lsp_conformance` passes. (was #4917 c66)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T01:16:57.264Z"
+          "evidence": "dev 4c2306fa995 (batch-61 compiler): checked-in 94-method Tests/Cases/LSP/lsp-3.18-inventory.tsv, Conformance.jet validator (incl. negative tests), and Tests/Cases/LSP/lsp_conformance.case PASS 1/1.",
+          "at": "2026-11-26T05:54:22.072Z"
         },
         {
           "n": 14,
@@ -49529,11 +49529,11 @@
         {
           "n": 25,
           "text": "workspace/symbol never stops the server. In Zed (rootUri = the repository) it exits 70 with `can't slice 11548 characters from 11545 to 11550`: semindex_type_refs (JetSemIndex Build.jet:553) slices source characters with byte offsets, so Compiler/JetImpact/Tests/Impact/Report.jet, which has non-ASCII text, overruns. The same bug cuts wrong type names after any non-ASCII character, so definition, references and rename miss them. lsp_saved_outline also runs a full semindex_build per saved file in the root. Proof: a JetLSP test resolves a type reference written after non-ASCII text and at the file's end, and workspace/symbol on this repository answers in under 1 s without exiting, on a batch compiler.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-24T13:18:20.304Z"
+          "evidence": "dev 4c2306fa995 (batch-61 compiler): semindex_type_refs uses byte slicing (non-ASCII Navigation test PASS), workspace/symbol prefilters saved files without parsing non-matches and skips node_modules/target; full Compiler/JetLSP test suite 107/107 PASS.",
+          "at": "2026-11-26T05:54:22.964Z"
         }
       ],
       "refs": [],
@@ -49544,8 +49544,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:55:52.158Z",
-      "updated": "2026-11-25T00:37:15.859Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-26T05:54:22.964Z",
+      "updatedBy": "Orchestrator",
       "criteriaLastN": 25
     },
     {
@@ -63445,29 +63445,29 @@
         {
           "n": 3,
           "text": "Failure marks land at the call, never inside a trailing typed list literal or lambda: `jet fmt --explicit-failures` and the editor's faint marks place `?` correctly for `each_size([String]{…})` and `map(fn(…) {…})`, and the formatted output parses (FailureMarks.jet:184-193).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T18:01:35.588Z"
+          "evidence": "dev 4c2306fa995 (batch-61 compiler): sema_failure_marks_call_end scans balanced call parens across typed list/lambda args; failure_marks_n3_edits_land_past_typed_list_and_lambda_and_parse PASS 1/1.",
+          "at": "2026-11-26T05:54:18.579Z"
         },
         {
           "n": 4,
           "text": "`jet review` and `jet diff` list failure points inside lambdas and in loop headers over a failing source, and E0434 covers a loop header (Review.jet:1524-1541, ForIn.jet:233-285).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T18:01:35.588Z"
+          "evidence": "dev 4c2306fa995 (batch-61 compiler): Review.jet reports lambda & loop-header failure points and ForIn.jet/FailureMarks.jet emit E0434 on failing Iterable loop headers; Review/review_flags_lambda_and_loop_header_failure_points.case PASS 1/1, ReviewFailures 4/4 PASS, failure_marks_n4_failing_iterable_loop_header_is_e0434 PASS 1/1.",
+          "at": "2026-11-26T05:54:19.422Z"
         },
         {
           "n": 5,
           "text": "`jet review` publishes failure points as code-host pull-request annotations, as D-FAIL-VISIBLE1=A promised, and a compiler-generated entry call `run(args: T)` raises no E0434 without a fix.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T18:01:35.588Z"
+          "evidence": "dev 4c2306fa995 (batch-61 compiler): jet review --annotations auto|none|github publishes GitHub PR annotations and FailureMarks.jet exempts generated CLI run(args: T) wrappers; Review/review_publishes_github_failure_annotations.case PASS 1/1, ReviewFailures 4/4 PASS, failure_marks_n5_cli_entry_wrapper_exempt_user_body_checked PASS 1/1.",
+          "at": "2026-11-26T05:54:20.291Z"
         },
         {
           "n": 6,
@@ -63484,8 +63484,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-25T18:01:35.588Z",
-      "updated": "2026-11-25T23:55:39.364Z",
-      "updatedBy": "Pip"
+      "updated": "2026-11-26T05:54:20.291Z",
+      "updatedBy": "Orchestrator"
     },
     {
       "id": "c028o7uk",
@@ -129233,6 +129233,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-26T05:54:22.964Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0mbiq9g",
+      "note": "#25"
+    },
+    {
+      "at": "2026-11-26T05:54:22.072Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0mbiq9g",
+      "note": "#13"
+    },
+    {
+      "at": "2026-11-26T05:54:21.206Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0mbiq9g",
+      "note": "#10"
+    },
+    {
+      "at": "2026-11-26T05:54:20.291Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c05bs1oq",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-26T05:54:19.422Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c05bs1oq",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-26T05:54:18.579Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c05bs1oq",
+      "note": "#3"
+    },
     {
       "at": "2026-11-26T05:28:36.109Z",
       "by": "Orchestrator",
