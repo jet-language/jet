@@ -1,0 +1,509 @@
+// Private grammar and AST-to-Dyn lowering for `core.encoding.toml`.
+//
+// Declares the TOML v1.0 document syntax (tables, arrays of tables, dotted
+// keys, basic and literal strings, integers, floats, booleans, inline tables,
+// multiline arrays, and date-time scalars) as a checked `Grammar` literal.
+use {
+    core.encoding.[Dyn, EncodingLimits]
+    core.grammar.[Grammar]
+    stream: __core_encoding_stream
+}
+
+Document: Grammar{"""
+    document     : lines+=line (EOL lines+=line)* ;
+    line         : array_header | table_header | entry | blank ;
+    array_header : '[' '[' keys=dotted_key ']' ']' ;
+    table_header : '[' keys=dotted_key ']' ;
+    entry        : keys=dotted_key '=' val=value ;
+    blank        : ;
+    dotted_key   : keys+=key ('.' keys+=key)* ;
+    key          : text=BASIC_STR # Quoted
+                 | text=BARE      # Bare
+                 ;
+    value        : arr=list_val       # ListVal
+                 | tbl=inline_table   # InlineTable
+                 | text=BASIC_STR     # BasicString
+                 | text=LITERAL_STR   # LiteralString
+                 | text=BOOL          # BoolVal
+                 | text=DATETIME      # DateTimeVal
+                 | text=RADIX_INT     # RadixInt
+                 | text=FLOAT_SPECIAL # FloatSpecial
+                 | text=NUMBER        # NumberVal
+                 ;
+    list_val     : '[' EOL* head+=list_item? ']' ;
+    list_item    : val=value EOL* (',' EOL* rest+=list_item?)? ;
+    inline_table : '{{' (entries+=inline_entry (',' entries+=inline_entry)* ','?)? '}}' ;
+    inline_entry : name=key '=' val=value ;
+
+    BASIC_STR     : '"' ([^"\\\r\n] | '\\' [btnfr"\\])* '"' ;
+    LITERAL_STR   : '\'' [^']* '\'' ;
+    BOOL          : 'true' | 'false' ;
+    DATETIME      : [0-9] [0-9] [0-9] [0-9] '-' [0-9] [0-9] '-' [0-9] [0-9] ([Tt ] [0-9] [0-9] ':' [0-9] [0-9] ':' [0-9] [0-9] ('.' [0-9]+)? ([Zz] | [+\-] [0-9] [0-9] ':' [0-9] [0-9])?)?
+                  | [0-9] [0-9] ':' [0-9] [0-9] ':' [0-9] [0-9] ('.' [0-9]+)?
+                  ;
+    RADIX_INT     : [+\-]? '0' ('x' [0-9A-Fa-f_]+ | 'o' [0-7_]+ | 'b' [01_]+) ;
+    FLOAT_SPECIAL : [+\-]? ('inf' | 'nan') ;
+    NUMBER        : [+\-]? [0-9] [0-9_]* ('.' [0-9] [0-9_]*)? ([eE] [+\-]? [0-9] [0-9_]*)? ;
+    BARE          : [A-Za-z0-9_\-]+ ;
+    EOL           : '\r'? '\n' ;
+    WS            : [ \t]+ -> skip ;
+    COMMENT       : '#' [^\r\n]* -> skip ;
+"""}
+
+parse_document: fn(text: String, allow_duplicates: Bool) -> Dyn? Never! {
+    if Document.parse(text) == {
+        .Ok(doc) -> lower_document(doc, allow_duplicates)
+        .Err(_) -> None
+    }
+}
+
+print_document: fn(text: String) -> String? Never! {
+    if Document.parse(text) == {
+        .Ok(doc) -> {
+            if doc.print() == {
+                .Ok(printed) -> Val(printed)
+                .Err(_) -> None
+            }
+        }
+        .Err(_) -> None
+    }
+}
+
+priv lower_document: fn(doc: Document, allow_duplicates: Bool) -> Dyn? Never! {
+    ^root: Dyn.object()
+    ^current: [String]{}
+    loop line in doc.lines {
+        if line == {
+            .ArrayHeader(h) -> {
+                keys: lower_keys(h.keys) ?? return None
+                root = ensure_array_path(root, keys, 0)
+                current = keys
+            }
+            .TableHeader(h) -> {
+                keys: lower_keys(h.keys) ?? return None
+                root = ensure_table_path(root, keys, 0)
+                current = keys
+            }
+            .Entry(e) -> {
+                keys: lower_keys(e.keys) ?? return None
+                ^path: [String]{}
+                loop k in current -> path.push(k.copy())
+                loop k in keys -> path.push(k.copy())
+                if !allow_duplicates && has_path(root, path, 0) -> return None
+                v: lower_value(e.val, allow_duplicates, 0) ?? return None
+                root = put_path(root, path, 0, v)
+            }
+            .Blank(_) -> {}
+        }
+    }
+    Val(root)
+}
+
+priv lower_keys: fn(dotted: DottedKey) -> [String]? Never! {
+    ^keys: [String]{}
+    loop k in dotted.keys {
+        name: lower_key(k) ?? return None
+        keys.push(name)
+    }
+    Val(keys)
+}
+
+priv lower_key: fn(k: Key) -> String? Never! {
+    if k == {
+        .Quoted(text) -> unescape_basic(text)
+        .Bare(text) -> Val(text)
+    }
+}
+
+priv unescape_basic: fn(quoted: String) -> String? Never! {
+    raw: quoted.bytes()
+    if raw.len() < 2 -> return None
+    ^out: [U8]{}
+    ^i: 1
+    end: raw.len() - 1
+    loop i < end {
+        b: raw[i]
+        if b == (U8{92}) {
+            i += 1
+            if i >= end -> return None
+            esc: raw[i]
+            if esc == (U8{98}) -> out.push(U8{8}) else if esc == (U8{116}) -> out.push(U8{9}) else if esc == (U8{110}) {
+                out.push(U8{10})
+            } else if esc == (U8{102}) { out.push(U8{12}) } else if esc == (U8{114}) {
+                out.push(U8{13})
+            } else if esc == (U8{34}) || esc == (U8{92}) { out.push(esc) } else {
+                return None
+            }
+        } else {
+            out.push(b)
+        }
+        i += 1
+    }
+    s: String.from_bytes(out) ?? return None
+    Val(s)
+}
+
+priv lower_value: fn(val: Value, allow_duplicates: Bool, depth: Int) -> Dyn? Never! {
+    max_depth: EncodingLimits.safe().max_depth
+    if val == {
+        .ListVal(arr) -> {
+            if depth + 1 > max_depth -> return None
+            ^items: [Dyn]{}
+            ^cur: arr.head
+            loop cur.len() > 0 {
+                node: cur[0]
+                v: lower_value(node.val, allow_duplicates, depth + 1) ?? return None
+                items.push(v)
+                cur = node.rest
+            }
+            Val(Dyn.Array(items))
+        }
+        .InlineTable(tbl) -> {
+            if depth + 1 > max_depth -> return None
+            ^entries: Dyn.object()
+            loop entry in tbl.entries {
+                name: lower_key(entry.name) ?? return None
+                if !allow_duplicates && entries.has(name) -> return None
+                v: lower_value(entry.val, allow_duplicates, depth + 1) ?? return None
+                entries[name] = v
+            }
+            Val(entries)
+        }
+        .BasicString(text) -> {
+            s: unescape_basic(text) ?? return None
+            Val(Dyn.Text(s))
+        }
+        .LiteralString(text) -> {
+            raw: text.bytes()
+            if raw.len() < 2 -> return None
+            s: String.from_bytes(raw[1..<raw.len() - 1]) ?? return None
+            Val(Dyn.Text(s))
+        }
+        .BoolVal(text) -> Val(Dyn.Bool(text == "true"))
+        .DateTimeVal(text) -> lower_datetime(text)
+        .RadixInt(text) -> {
+            clean: remove_underscores(text)
+            n: parse_radix_int(clean) ?? return None
+            Val(stream.typed_number("{n}"))
+        }
+        .FloatSpecial(text) -> {
+            if Float.parse(text) == {
+                .Ok(n) -> Val(number_tree(text.copy(), n))
+                .Err(_) -> None
+            }
+        }
+        .NumberVal(text) -> {
+            clean: remove_underscores(text)
+            if Int.parse(clean) == {
+                .Ok(n) -> return Val(stream.typed_number("{n}"))
+                .Err(_) -> {}
+            }
+            if Float.parse(clean) == {
+                .Ok(n) -> return Val(number_tree(clean, n))
+                .Err(_) -> {}
+            }
+            None
+        }
+    }
+}
+
+priv lower_datetime: fn(spelling: String) -> Dyn? Never! {
+    ^normalized: spelling.bytes()
+    if normalized.len() >= 19 {
+        if normalized[10] == (U8{32}) || normalized[10] == (U8{116}) -> normalized[10] = U8{84}
+        if normalized[normalized.len() - 1] == (U8{122}) -> normalized[normalized.len() - 1] = U8{90}
+    }
+    token: String.from_bytes(normalized) ?? return None
+    raw: token.bytes()
+    if !looks_datetime(token) -> return None
+    stamp: Dyn.Text(token)
+    if stamp.decode<ZonedDateTime>() == {
+        .Ok(z) -> return Val(Dyn.DateTime(z))
+        .Err(_) -> {}
+    }
+    if raw.len() > 19 && (raw[raw.len() - 1] == (U8{90}) || raw[raw.len() - 1] == (U8{122}) || (raw.len() >= 25 && raw[raw.len() - 3] == (U8{58}))) {
+        return None
+    }
+    Val(stamp)
+}
+
+priv remove_underscores: fn(text: String) -> String Never! {
+    ^out: [U8]{}
+    loop b in text.bytes() {
+        if b != (U8{95}) -> out.push(b)
+    }
+    String.from_bytes(out) ?? text
+}
+
+priv parse_radix_int: fn(text: String) -> Int? Never! {
+    raw: text.bytes()
+    if raw.len() < 3 -> return None
+    ^sign: 1
+    ^start: 0
+    if raw[0] == (U8{43}) || raw[0] == (U8{45}) {
+        if raw[0] == (U8{45}) -> sign = -1
+        start = 1
+    }
+    if start + 2 > raw.len() || raw[start] != (U8{48}) -> return None
+    ^base: 0
+    if raw[start + 1] == (U8{120}) -> base = 16
+    if raw[start + 1] == (U8{111}) -> base = 8
+    if raw[start + 1] == (U8{98}) -> base = 2
+    if base == 0 || start + 2 >= raw.len() -> return None
+    ^n: 0
+    ^i: start + 2
+    loop i < raw.len() {
+        d: radix_digit(raw[i], base)
+        if d < 0 -> return None
+        n = n * base + d
+        i += 1
+    }
+    Val(sign * n)
+}
+
+priv radix_digit: fn(b: U8, base: Int) -> Int Never! {
+    n: Int{b}
+    ^d: -1
+    if n >= 48 && n <= 57 -> d = n - 48
+    if n >= 65 && n <= 70 -> d = n - 55
+    if n >= 97 && n <= 102 -> d = n - 87
+    if d >= base -> return -1
+    d
+}
+
+priv looks_datetime: fn(text: String) -> Bool Never! {
+    raw: text.bytes()
+    if valid_date(raw, 0, raw.len()) -> return true
+    if valid_time(raw, 0, raw.len()) -> return true
+    if raw.len() < 19 || !valid_date(raw, 0, 10) -> return false
+    if raw[10] != (U8{84}) && raw[10] != (U8{116}) -> return false
+    ^time_end: 19
+    if raw.len() > time_end && raw[time_end] == (U8{46}) {
+        time_end += 1
+        fraction_start: time_end
+        loop time_end < raw.len() {
+            n: raw[time_end]
+            if n < 48 || n > 57 -> break
+            time_end += 1
+        }
+        if time_end == fraction_start -> return false
+    }
+    if !valid_time(raw, 11, time_end) -> return false
+    if time_end == raw.len() -> return true
+    if time_end + 1 == raw.len() && raw[time_end] == (U8{90}) -> return true
+    if time_end + 6 != raw.len() || (raw[time_end] != (U8{43}) && raw[time_end] != (U8{45})) || raw[time_end + 3] != (U8{58}) {
+        return false
+    }
+    hour: two_digits(raw, time_end + 1, raw.len()) ?? return false
+    minute: two_digits(raw, time_end + 4, raw.len()) ?? return false
+    hour <= 23 && minute <= 59
+}
+
+priv valid_date: fn(raw: [U8], start: Int, end: Int) -> Bool Never! {
+    if start < 0 || end > raw.len() || start + 10 != end -> return false
+    if raw[start + 4] != (U8{45}) || raw[start + 7] != (U8{45}) -> return false
+    year: four_digits(raw, start, end) ?? return false
+    month: two_digits(raw, start + 5, end) ?? return false
+    day: two_digits(raw, start + 8, end) ?? return false
+    if month < 1 || month > 12 || day < 1 -> return false
+    ^max_day: 31
+    if month == 4 || month == 6 || month == 9 || month == 11 -> max_day = 30
+    if month == 2 {
+        max_day = 28
+        if year %% 4 == 0 && (year %% 100 != 0 || year %% 400 == 0) -> max_day = 29
+    }
+    day <= max_day
+}
+
+priv valid_time: fn(raw: [U8], start: Int, end: Int) -> Bool Never! {
+    if start < 0 || end > raw.len() || start + 8 > end -> return false
+    if raw[start + 2] != (U8{58}) || raw[start + 5] != (U8{58}) -> return false
+    hour: two_digits(raw, start, end) ?? return false
+    minute: two_digits(raw, start + 3, end) ?? return false
+    second: two_digits(raw, start + 6, end) ?? return false
+    if hour > 23 || minute > 59 || second > 59 -> return false
+    if start + 8 == end -> return true
+    if raw[start + 8] != (U8{46}) || start + 9 >= end -> return false
+    loop i in (start + 9)..<end {
+        if raw[i] < 48 || raw[i] > 57 -> return false
+    }
+    true
+}
+
+priv two_digits: fn(raw: [U8], start: Int, end: Int) -> Int? Never! {
+    if start < 0 || end > raw.len() || start + 2 > end -> return None
+    a: Int{raw[start]}
+    b: Int{raw[start + 1]}
+    if a < 48 || a > 57 || b < 48 || b > 57 -> return None
+    Val((a - 48) * 10 + (b - 48))
+}
+
+priv four_digits: fn(raw: [U8], start: Int, end: Int) -> Int? Never! {
+    if start < 0 || end > raw.len() || start + 4 > end -> return None
+    ^value: 0
+    loop i in start..<(start + 4) {
+        n: Int{raw[i]}
+        if n < 48 || n > 57 -> return None
+        value = value * 10 + (n - 48)
+    }
+    Val(value)
+}
+
+priv ensure_table_path: fn(entries: Dyn, path: [String], i: Int) -> Dyn Never! {
+    if i >= path.len() -> return entries.copy()
+    ^out: entries.copy()
+    key: path[i]
+    if i == path.len() - 1 {
+        if !out.has(key) -> out[key] = Dyn.object()
+        return out
+    }
+    ^child: out.get(key) ?? Dyn.object()
+    if child == {
+        .Array(items) -> {
+            ^mutable: items.copy()
+            if mutable.len() == 0 -> mutable.push(ensure_table_path(Dyn.object(), path, i + 1)) else {
+                last: mutable.len() - 1
+                mutable[last] = ensure_table_path(mutable[last], path, i + 1)
+            }
+            out[key] = Dyn.Array(mutable)
+            return out
+        }
+        .Object(_) -> {}
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> {
+            child = Dyn.object()
+        }
+    }
+    out[key] = ensure_table_path(child, path, i + 1)
+    out
+}
+
+priv ensure_array_path: fn(entries: Dyn, path: [String], i: Int) -> Dyn Never! {
+    if i >= path.len() -> return entries.copy()
+    ^out: entries.copy()
+    key: path[i]
+    ^child: out.get(key) ?? Dyn.object()
+    if i == path.len() - 1 {
+        if child == {
+            .Array(items) -> {
+                ^mutable: items.copy()
+                mutable.push(Dyn.object())
+                out[key] = Dyn.Array(mutable)
+            }
+            .Object(_) -> {
+                if out.has(key) -> out[key] = Dyn.Array([Dyn]{child, Dyn.object()}) else {
+                    out[key] = Dyn.Array([Dyn]{Dyn.object()})
+                }
+            }
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> {
+                out[key] = Dyn.Array([Dyn]{Dyn.object()})
+            }
+        }
+        return out
+    }
+    if child == {
+        .Array(items) -> {
+            ^mutable: items.copy()
+            if mutable.len() == 0 -> mutable.push(ensure_array_path(Dyn.object(), path, i + 1)) else {
+                last: mutable.len() - 1
+                mutable[last] = ensure_array_path(mutable[last], path, i + 1)
+            }
+            out[key] = Dyn.Array(mutable)
+            return out
+        }
+        .Object(_) -> {}
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> {
+            child = Dyn.object()
+        }
+    }
+    out[key] = ensure_array_path(child, path, i + 1)
+    out
+}
+
+priv has_path: fn(entries: Dyn, path: [String], i: Int) -> Bool Never! {
+    if i >= path.len() -> return false
+    key: path[i]
+    if i == path.len() - 1 -> return entries.has(key)
+    child: entries.get(key) ?? return false
+    if child == {
+        .Object(_) -> return has_path(child, path, i + 1)
+        .Array(items) -> {
+            if items.len() == 0 -> return false
+            last: items[items.len() - 1]
+            if last == {
+                .Object(_) -> return has_path(last, path, i + 1)
+                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> return false
+            }
+        }
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> return false
+    }
+}
+
+priv put_path: fn(entries: Dyn, path: [String], i: Int, value: Dyn) -> Dyn Never! {
+    ^out: entries.copy()
+    key: path[i]
+    if i == path.len() - 1 {
+        out[key] = value
+        return out
+    }
+    ^child: out.get(key) ?? Dyn.object()
+    if child == {
+        .Array(items) -> {
+            if items.len() > 0 {
+                ^mutable: items.copy()
+                last: mutable.len() - 1
+                if mutable[last] == {
+                    .Object(_) -> {
+                        mutable[last] = put_path(mutable[last], path, i + 1, value)
+                        out[key] = Dyn.Array(mutable)
+                        return out
+                    }
+                    .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> {}
+                }
+            }
+            child = Dyn.object()
+        }
+        .Object(_) -> {}
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> {
+            child = Dyn.object()
+        }
+    }
+    out[key] = put_path(child, path, i + 1, value)
+    out
+}
+
+priv number_tree: fn(clean: ^^String, value: Float) -> Dyn Never! {
+    ^unsigned: clean.move()
+    raw: unsigned.bytes()
+    if raw.len() > 0 && raw[0] == (U8{43}) {
+        unsigned = String.from_bytes(raw[1..<raw.len()]) ?? panic("removing an ASCII prefix preserves UTF-8")
+    }
+    if is_json_number_token(unsigned) -> return stream.typed_number(unsigned)
+    ^shown: "{value}"
+    if is_json_number_token(shown) -> return stream.typed_number(shown)
+    Dyn.Float(value)
+}
+
+priv is_json_number_token: fn(text: String) -> Bool Never! {
+    b: text.bytes()
+    ^i: 0
+    if i < b.len() && b[i] == (U8{45}) -> i += 1
+    if i >= b.len() -> return false
+    if b[i] == (U8{48}) -> i += 1 else {
+        if b[i] < (U8{49}) || b[i] > (U8{57}) -> return false
+        loop i < b.len() && b[i] >= (U8{48}) && b[i] <= (U8{57}) -> i += 1
+    }
+    if i < b.len() && b[i] == (U8{46}) {
+        i += 1
+        fraction: i
+        loop i < b.len() && b[i] >= (U8{48}) && b[i] <= (U8{57}) -> i += 1
+        if i == fraction -> return false
+    }
+    if i < b.len() && (b[i] == (U8{101}) || b[i] == (U8{69})) {
+        i += 1
+        if i < b.len() && (b[i] == (U8{43}) || b[i] == (U8{45})) -> i += 1
+        exponent: i
+        loop i < b.len() && b[i] >= (U8{48}) && b[i] <= (U8{57}) -> i += 1
+        if i == exponent -> return false
+    }
+    i == b.len()
+}
