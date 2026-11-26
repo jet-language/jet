@@ -165,7 +165,7 @@ fixed_less_magnitude: fn(a: FixedMagnitude, b: FixedMagnitude) -> Bool Never! {
 
 fixed_less: fn(a: FixedMagnitude, b: FixedMagnitude) -> Bool Never! {
     if a.negative != b.negative -> return a.negative
-    if a.negative -> return fixed_less_magnitude(b, a)
+    if a.negative -> return fixed_less_magnitude(a: b, b: a)
     fixed_less_magnitude(a, b)
 }
 
@@ -179,7 +179,7 @@ fixed_add: fn(a: FixedMagnitude, b: FixedMagnitude) -> FixedMagnitude Never! {
         carry: if low < a.low -> U64{1} else -> U64{0}
         return FixedMagnitude{negative: a.negative, high: wrapping(wrapping(a.high + b.high) + carry), low: low}
     }
-    if fixed_less_magnitude(a, b) -> return fixed_add(b, a)
+    if fixed_less_magnitude(a, b) -> return fixed_add(a: b, b: a)
     low: wrapping(a.low - b.low)
     borrow: if a.low < b.low -> U64{1} else -> U64{0}
     high: wrapping(wrapping(a.high - b.high) - borrow)

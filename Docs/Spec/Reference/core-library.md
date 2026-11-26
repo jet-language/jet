@@ -35,6 +35,24 @@ contracts, generated collection/module indexes, and non-obvious invariants.
 - **Byte streams:** Streaming readers/writers implement the shared `Reader` and
   `Writer` contracts (`Core/IO/`) so codecs, compression, TLS, and files compose
   without buffering whole payloads into memory.
+- **Time zones, DST, format patterns, and leap seconds (`core.time`):**
+  - `time.zone(name)` resolves IANA zones from embedded TZif data,
+    `JET_TZDB_DIR`, `TZDIR`, or system zoneinfo roots; a missing zone database,
+    unknown zone, or invalid traversal name returns a typed `TimeError` and
+    never crashes.
+  - `time.zoned_local(date, time, zone, disambiguation)` resolves DST gaps and
+    overlaps deterministically: `"compatible"` (default) shifts a gap forward
+    across the transition (`"later"`) and picks the first occurrence of an
+    overlap (`"earlier"`); `"earlier"` and `"later"` select the pre- or
+    post-transition offset explicitly; `"reject"` returns a typed `TimeError`.
+  - Formatting (`time.strftime`, `.format`, `.format_checked`) and pattern
+    parsing (`.parse_format`) share one single-pass `%`-code pattern table
+    (`%Y`/`%-Y`, `%m`, `%d`, `%H`, `%M`, `%S`, `%L`, `%f`, `%N`, `%z`, `%:z`,
+    `%Z`, `%%`, composites `%F`/`%T`/`%R`/`%D`/`%c`). Literal text and emitted
+    zone names are never re-scanned.
+  - UTC leap seconds (`23:59:60`) are accepted only on valid IERS UTC leap
+    dates, preserve `second() == 60` in formatting, and order strictly between
+    `23:59:59` and the following `00:00:00` (`Examples/Systems/Time/{FormatPatterns,LeapSeconds}.jet`).
 - **Measurement uncertainty:** The measurement operations in `core.units` use
   **first-order linear propagation with uncorrelated inputs**.
   **Correlated errors are out of scope**.

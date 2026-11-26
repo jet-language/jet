@@ -3177,7 +3177,7 @@ ir_x64_float_binary: fn(e: ^IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64A
         // Lt/Le compare the mirrored operands so every ordered test is
         // above/above-or-equal, which an unordered result (CF set) fails.
         if op == .Lt || op == .Le {
-            if single -> x64_ucomiss(e.code, right, left) else -> x64_ucomisd(e.code, right, left)
+            if single -> x64_ucomiss(e.code, left: right, right: left) else -> x64_ucomisd(e.code, left: right, right: left)
         } else {
             if single -> x64_ucomiss(e.code, left, right) else -> x64_ucomisd(e.code, left, right)
         }

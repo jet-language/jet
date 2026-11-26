@@ -116,7 +116,7 @@ ir_heap_sift_up: fn(m: ^IRModule, p: IRProgram, a: ^IRBuilder, kind: String, dat
     child_at: ir_element_address(m, a, data, at, stride)
     left: ir_load_at(m, a, parent_at, 0, elem_row)
     right: ir_load_at(m, a, child_at, 0, elem_row)
-    order: ir_map_order(m, p, a, kind, right, left)
+    order: ir_map_order(m, p, a, kind, left: right, right: left)
     ir_exit_unless(m, a, order.less, exit)
     ir_heap_swap(m, a, child_at, parent_at, width, scratch)
     ir_emit(a.f, IROp.Copy, at, parent, -1, -1, a.line)
@@ -152,7 +152,7 @@ ir_heap_sift_down: fn(m: ^IRModule, p: IRProgram, a: ^IRBuilder, kind: String, d
     right_at: ir_element_address(m, a, data, sibling, stride)
     left: ir_load_at(m, a, left_at, 0, elem_row)
     right: ir_load_at(m, a, right_at, 0, elem_row)
-    order: ir_map_order(m, p, a, kind, right, left)
+    order: ir_map_order(m, p, a, kind, left: right, right: left)
     ir_open_if(a.f, order.less, a.line)
     ir_emit(a.f, IROp.Copy, best, sibling, -1, -1, a.line)
     ir_end(a.f, a.line)
@@ -367,7 +367,7 @@ ir_list_sort_body: fn(m: ^IRModule, p: IRProgram, a: ^IRBuilder, kind: String, l
         left: if float -> ir_float_total_key(m, a, left_at) else -> ir_load_at(m, a, left_at, 0, elem_row)
         right: if float -> ir_float_total_key(m, a, right_at) else -> ir_load_at(m, a, right_at, 0, elem_row)
         order_kind: if float -> "word" else -> kind
-        order: if descending -> ir_map_order(m, p, a, order_kind, left, right) else -> ir_map_order(m, p, a, order_kind, right, left)
+        order: if descending -> ir_map_order(m, p, a, order_kind, left, right) else -> ir_map_order(m, p, a, order_kind, left: right, right: left)
         ir_emit(a.f, IROp.Copy, take_right, order.less, -1, -1, a.line)
     }
     ir_end(a.f, a.line)

@@ -826,9 +826,9 @@ crypt_block: fn(k: DESKey, src: [U8], off: Int, out: ^[U8], at: Int) Never! {
             at_key: 32 * p + 4 * i
             if p == 1 {
                 y = des_round(k.sk, at_key, x, y)
-                x = des_round(k.sk, at_key + 2, y, x)
+                x = des_round(k.sk, at_key + 2, x: y, y: x)
             } else {
-                x = des_round(k.sk, at_key, y, x)
+                x = des_round(k.sk, at_key, x: y, y: x)
                 y = des_round(k.sk, at_key + 2, x, y)
             }
         }

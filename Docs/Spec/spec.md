@@ -725,6 +725,18 @@ a bound value. An imported candidate set must have exactly one successful
 binding; two successes produce E0772 and require labels to disambiguate
 (D-CALLPOS1=A).
 
+When two or more unlabeled positional arguments of a call form a crossed name
+cycle across parameters of the same resolved type — such as `copy(dst, src)`
+into `fn(src, dst)` or `rotate(b, c, a)` into `fn(a, b, c)` — the call is
+rejected with E0773 (`Jet.CrossedArgumentNames`). Bare variable arguments
+(including `^x`, `^^x`, `x.move()`, and `x.copy()`) participate; labeled
+arguments opt out explicitly (`copy(src: dst, dst: src)`), positional-only
+parameters (`/`) and unnamed function-type parameters are excluded, duplicating
+one variable (`area(width, width)`) forms no cycle, and field projections
+(`area(a.height, b.width)`) are not bare variable names. See
+`Examples/Basics/CrossedArgumentNames.jet` and
+`Examples/Basics/CrossedArgumentNames.out`.
+
 Ranges are values. `a..b` is inclusive and `a..<b` is half-open; both are
 `Range` values over `Int` that can be stored, passed, returned, looped, or used
 as slice bounds. A range exposes `.start`, `.end`, and `.contains(value)`.

@@ -399,88 +399,11 @@ isoformat: fn(dt: DateTime) -> String Never! {
     "{isoformat_date(dt.date())}T{isoformat_time(dt.time())}"
 }
 
-// Copy literal UTF-8 bytes unchanged; only complete output is decoded.
-// Native cutover still requires borrowed String.bytes and consuming from_bytes
-// ownership; bootstrap materialization is not allocation/retention parity.
+// Format a UTC DateTime through the canonical single-pass percent-code engine
+// shared by strftime, Date/LocalTime/DateTime/ZonedDateTime.format,
+// format_checked, and parse_format.
 strftime: fn(format: String, dt: DateTime) -> String Never! {
-    days: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
-    days_long: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
-    months_short: ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-    months_long: ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
-    date: dt.date()
-    day: date.weekday()
-    day_of_year: date.day_of_year()
-    raw: format.bytes()
-    ^out: [U8]{}
-    ^i: 0
-    loop i < raw.len() {
-        if raw[i] != (U8{37}) {
-            start: i
-            loop i < raw.len() && raw[i] != (U8{37}) -> i += 1
-            loop j in start..<i -> out.push(raw[j])
-            next
-        }
-        if i + 1 >= raw.len() {
-            out.push(U8{37})
-            break
-        }
-        code: raw[i + 1]
-        // The glibc/BSD no-pad flag: `%-I` is 6, where `%I` is 06.
-        flagged: if code == 45 && i + 2 < raw.len() -> raw[i + 2] else -> U8{0}
-        unpadded: if flagged == {
-            72 -> "{dt.hour()}"
-            73 -> "{((dt.hour() + 11) %% 12) + 1}"
-            77 -> "{dt.minute()}"
-            83 -> "{dt.second()}"
-            100 -> "{date.day()}"
-            106 -> "{day_of_year}"
-            109 -> "{date.month()}"
-            else -> ""
-        }
-        if unpadded != "" {
-            loop b in unpadded.bytes() -> out.push(b)
-            i += 3
-            next
-        }
-        piece: if code == {
-            37 -> "%"
-            65 -> days_long[day]
-            97 -> days[day]
-            98 -> months_short[date.month() - 1]
-            66 -> months_long[date.month() - 1]
-            99 -> asctime(dt)
-            100 -> pad2(date.day(), 2)
-            102 -> pad2(dt.microsecond(), 6)
-            72 -> pad2(dt.hour(), 2)
-            73 -> pad2(((dt.hour() + 11) %% 12) + 1, 2)
-            106 -> pad2(day_of_year, 3)
-            109 -> pad2(date.month(), 2)
-            77 -> pad2(dt.minute(), 2)
-            83 -> pad2(dt.second(), 2)
-            112 -> if dt.hour() < 12 -> "AM" else -> "PM"
-            // A DateTime is UTC, as %Z says.
-            122 -> "+0000"
-            // #4458: C/POSIX week numbers. Days before the year's first Sunday
-            // (%U) or Monday (%W) are week 00; day is Sunday=0 weekday.
-            85 -> pad2((day_of_year + 6 - day) /% 7, 2)
-            87 -> pad2((day_of_year + 6 - (day + 6) %% 7) /% 7, 2)
-            119 -> "{day}"
-            121 -> pad2(date.year() %% 100, 2)
-            89 -> "{date.year()}"
-            90 -> "UTC"
-            else -> {
-                // An unsupported directive may start a multi-byte scalar.
-                // Keep both original bytes; the literal run keeps its remainder.
-                out.push(raw[i])
-                out.push(code)
-                ""
-            }
-        }
-        piece_raw: piece.bytes()
-        loop b in piece_raw -> out.push(b)
-        i += 2
-    }
-    String.from_bytes(out) ?? panic("strftime produced invalid UTF-8")
+    civil_format_canonical(format, Val(dt.date()), Val(dt.time()), Val({name: "UTC", offset: 0}))
 }
 
 unix_seconds: fn(dt: DateTime) -> Int Never! { dt.to_timestamp() }
@@ -838,11 +761,15 @@ LocalDate: struct {
     }
 
     format: fn(self, pattern: String) -> String Never! {
-        civil_format(pattern, self, local_time(0, 0, 0), None)
+        civil_format_canonical(pattern, Val(self), None, None)
     }
 
     format_checked: fn(self, pattern: String) -> String TextError! {
-        civil_format_checked(pattern, self, local_time(0, 0, 0), None)
+        civil_format_checked_canonical(pattern, Val(self), None, None)
+    }
+
+    parse_format: fn(text: String, pattern: String) -> LocalDate TimeError! {
+        civil_parse_date_format(text, pattern)
     }
 
     impl Equatable {
@@ -954,11 +881,15 @@ LocalTime: struct {
     }
 
     format: fn(self, pattern: String) -> String Never! {
-        civil_format(pattern, new(1970, 1, 1), self, None)
+        civil_format_canonical(pattern, None, Val(self), None)
     }
 
     format_checked: fn(self, pattern: String) -> String TextError! {
-        civil_format_checked(pattern, new(1970, 1, 1), self, None)
+        civil_format_checked_canonical(pattern, None, Val(self), None)
+    }
+
+    parse_format: fn(text: String, pattern: String) -> LocalTime TimeError! {
+        civil_parse_time_format(text, pattern)
     }
 
     impl Equatable {
@@ -1066,11 +997,15 @@ DateTime: struct {
     }
 
     format: fn(self, pattern: String) -> String Never! {
-        civil_format(pattern, self.date(), self.time(), None)
+        civil_format_canonical(pattern, Val(self.date()), Val(self.time()), Val({name: "UTC", offset: 0}))
     }
 
     format_checked: fn(self, pattern: String) -> String TextError! {
-        civil_format_checked(pattern, self.date(), self.time(), None)
+        civil_format_checked_canonical(pattern, Val(self.date()), Val(self.time()), Val({name: "UTC", offset: 0}))
+    }
+
+    parse_format: fn(text: String, pattern: String) -> DateTime TimeError! {
+        civil_parse_datetime_format(text, pattern)
     }
 
     add_nanoseconds: fn(self, value: Int) -> DateTime Never! {
@@ -1476,11 +1411,15 @@ ZonedDateTime: struct {
     hours_in_day: fn(self) -> Int Never! { self.zone_value.hours_in_day(self.date()) }
 
     format: fn(self, pattern: String) -> String Never! {
-        civil_format(pattern, self.date(), self.time(), Val({name: self.zone_value.name(), offset: self.offset_seconds()}))
+        civil_format_canonical(pattern, Val(self.date()), Val(self.time()), Val({name: self.zone_value.name(), offset: self.offset_seconds()}))
     }
 
     format_checked: fn(self, pattern: String) -> String TextError! {
-        civil_format_checked(pattern, self.date(), self.time(), Val({name: self.zone_value.name(), offset: self.offset_seconds()}))
+        civil_format_checked_canonical(pattern, Val(self.date()), Val(self.time()), Val({name: self.zone_value.name(), offset: self.offset_seconds()}))
+    }
+
+    parse_format: fn(text: String, pattern: String) -[Env, FS.Read]> ZonedDateTime TimeError! {
+        civil_parse_zoned_format(text, pattern)
     }
 
     to_string: fn(self) -> String Never! {
@@ -2561,7 +2500,9 @@ civil_zoned_parts: fn(value: ZonedDateTime) -> {date: LocalDate, time: LocalTime
     if value.instant.leap_second && value.zone_value.name_value == "UTC" {
         return {date: value.instant.date(), time: value.instant.time(), offset: 0}
     }
-    civil_local_parts(value.zone_value, value.instant.to_timestamp())
+    ^parts: civil_local_parts(value.zone_value, value.instant.to_timestamp())
+    parts.time.nanos = value.instant.nanos
+    parts
 }
 
 parse_zoned: fn(value: String) -[Env, FS.Read]> ZonedDateTime TimeError! {
@@ -2599,89 +2540,82 @@ civil_offset: fn(value: Int) -> String Never! {
     "{sign}{pad2(abs /% 3600, 2)}:{pad2((abs /% 60) %% 60, 2)}"
 }
 
-civil_format: fn(pattern: String, date: LocalDate, t: LocalTime, zone: {name: String, offset: Int}?) -> String Never! {
-    weekdays: [String]{"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"}
-    weekdays_full: [String]{"Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"}
-    months: [String]{"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"}
-    months_full: [String]{"January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"}
-    weekday: weekdays[date.iso_weekday() - 1]
-    weekday_full: weekdays_full[date.iso_weekday() - 1]
-    month_short: months[date.month() - 1]
-    month_full: months_full[date.month() - 1]
-    year: civil_year(date.year())
-    year_short: pad2(civil_mod(date.year(), 100), 2)
-    month: pad2(date.month(), 2)
-    day: pad2(date.day(), 2)
-    doy: pad2(date.day_of_year(), 3)
-    hour: pad2(t.hour(), 2)
-    hour12: pad2(((t.hour() + 11) %% 12) + 1, 2)
-    minute: pad2(t.minute(), 2)
-    second: pad2(t.second(), 2)
-    nanos: pad2(t.nanosecond(), 9)
-    micros: pad2(t.microsecond(), 6)
-    millis: pad2(t.millisecond(), 3)
-    meridiem: if t.hour() < 12 -> "AM" else -> "PM"
-    space_day: if date.day() < 10 -> " {date.day()}" else -> "{date.day()}"
-    ^name: ""
-    ^offset: ""
-    if zone == .Val(value) {
-        name = value.name
-        offset = civil_offset(value.offset)
-    }
-    // Ordered replacement is deliberately the permissive native contract.
-    // Inserted names are subject to subsequent replacements as well.
-    pairs: [{token: String, value: String}]{
-        {token: "%%", value: "%"},
-        {token: "%A", value: weekday_full},
-        {token: "%a", value: weekday},
-        // The glibc/BSD no-pad flag: `%-I:%M %p` is 6:09 AM.
-        {token: "%-H", value: "{t.hour()}"},
-        {token: "%-I", value: "{((t.hour() + 11) %% 12) + 1}"},
-        {token: "%-M", value: "{t.minute()}"},
-        {token: "%-S", value: "{t.second()}"},
-        {token: "%-d", value: "{date.day()}"},
-        {token: "%-m", value: "{date.month()}"},
-        {token: "%-j", value: "{date.day_of_year()}"},
-        {token: "%B", value: month_full},
-        {token: "%b", value: month_short},
-        {token: "%Y", value: year},
-        {token: "%y", value: year_short},
-        {token: "%m", value: month},
-        {token: "%d", value: day},
-        {token: "%e", value: space_day},
-        {token: "%j", value: doy},
-        {token: "%H", value: hour},
-        {token: "%I", value: hour12},
-        {token: "%M", value: minute},
-        {token: "%S", value: second},
-        {token: "%p", value: meridiem},
-        {token: "%z", value: offset},
-        {token: "%Z", value: name},
-        {token: "%F", value: "{year}-{month}-{day}"},
-        {token: "%T", value: "{hour}:{minute}:{second}"},
-        {token: "%R", value: "{hour}:{minute}"},
-        {token: "%D", value: "{month}/{day}/{year_short}"},
-        {token: "%f", value: nanos},
-        {token: "EEEE", value: weekday_full},
-        {token: "MMMM", value: month_full},
-        {token: "MMM", value: month_short},
-        {token: "yyyy", value: year},
-        {token: "DDD", value: doy},
-        {token: "EEE", value: weekday},
-        {token: "MM", value: month},
-        {token: "dd", value: day},
-        {token: "HH", value: hour},
-        {token: "mm", value: minute},
-        {token: "ss", value: second},
-        {token: "SSSSSSSSS", value: nanos},
-        {token: "SSSSSS", value: micros},
-        {token: "SSS", value: millis},
-    }
-    ^out: pattern.copy()
-    loop pair in pairs -> out = out.replace(pair.token, pair.value)
-    if zone != None -> out = out.replace("VV", name).replace("XXX", offset)
-    out
+civil_offset_compact: fn(value: Int) -> String Never! {
+    sign: if value < 0 -> "-" else -> "+"
+    abs: civil_abs(value)
+    "{sign}{pad2(abs /% 3600, 2)}{pad2((abs /% 60) %% 60, 2)}"
 }
+
+priv TimeFormatPart: enum {
+    Literal,
+    Date,
+    Clock,
+    DateTime,
+    Zone,
+}
+
+priv TimeFormatSpec: struct {
+    code: String,
+    part: TimeFormatPart,
+    allows_no_pad: Bool,
+}
+
+// One canonical pattern table driving formatting (`strftime`, `.format`,
+// `.format_checked`) and pattern parsing (`.parse_format`) across all time
+// receivers in one single pass.
+priv TIME_FORMAT_SPECS: [TimeFormatSpec]{
+    TimeFormatSpec{code: "%", part: TimeFormatPart.Literal, allows_no_pad: false},
+    TimeFormatSpec{code: "Y", part: TimeFormatPart.Date, allows_no_pad: true},
+    TimeFormatSpec{code: "y", part: TimeFormatPart.Date, allows_no_pad: false},
+    TimeFormatSpec{code: "m", part: TimeFormatPart.Date, allows_no_pad: true},
+    TimeFormatSpec{code: "d", part: TimeFormatPart.Date, allows_no_pad: true},
+    TimeFormatSpec{code: "e", part: TimeFormatPart.Date, allows_no_pad: false},
+    TimeFormatSpec{code: "j", part: TimeFormatPart.Date, allows_no_pad: true},
+    TimeFormatSpec{code: "a", part: TimeFormatPart.Date, allows_no_pad: false},
+    TimeFormatSpec{code: "A", part: TimeFormatPart.Date, allows_no_pad: false},
+    TimeFormatSpec{code: "b", part: TimeFormatPart.Date, allows_no_pad: false},
+    TimeFormatSpec{code: "B", part: TimeFormatPart.Date, allows_no_pad: false},
+    TimeFormatSpec{code: "w", part: TimeFormatPart.Date, allows_no_pad: false},
+    TimeFormatSpec{code: "U", part: TimeFormatPart.Date, allows_no_pad: false},
+    TimeFormatSpec{code: "W", part: TimeFormatPart.Date, allows_no_pad: false},
+    TimeFormatSpec{code: "F", part: TimeFormatPart.Date, allows_no_pad: false},
+    TimeFormatSpec{code: "D", part: TimeFormatPart.Date, allows_no_pad: false},
+    TimeFormatSpec{code: "H", part: TimeFormatPart.Clock, allows_no_pad: true},
+    TimeFormatSpec{code: "I", part: TimeFormatPart.Clock, allows_no_pad: true},
+    TimeFormatSpec{code: "M", part: TimeFormatPart.Clock, allows_no_pad: true},
+    TimeFormatSpec{code: "S", part: TimeFormatPart.Clock, allows_no_pad: true},
+    TimeFormatSpec{code: "p", part: TimeFormatPart.Clock, allows_no_pad: false},
+    TimeFormatSpec{code: "L", part: TimeFormatPart.Clock, allows_no_pad: false},
+    TimeFormatSpec{code: "f", part: TimeFormatPart.Clock, allows_no_pad: false},
+    TimeFormatSpec{code: "N", part: TimeFormatPart.Clock, allows_no_pad: false},
+    TimeFormatSpec{code: "T", part: TimeFormatPart.Clock, allows_no_pad: false},
+    TimeFormatSpec{code: "R", part: TimeFormatPart.Clock, allows_no_pad: false},
+    TimeFormatSpec{code: "c", part: TimeFormatPart.DateTime, allows_no_pad: false},
+    TimeFormatSpec{code: "z", part: TimeFormatPart.Zone, allows_no_pad: false},
+    TimeFormatSpec{code: ":z", part: TimeFormatPart.Zone, allows_no_pad: false},
+    TimeFormatSpec{code: "Z", part: TimeFormatPart.Zone, allows_no_pad: false},
+}
+
+priv civil_format_spec_lookup: fn(code: String) -> TimeFormatSpec? Never! {
+    loop entry in TIME_FORMAT_SPECS {
+        if entry.code == code -> return Val(entry)
+    }
+    None
+}
+
+priv TimeFormatToken: enum {
+    Text(String),
+    RawBytes([U8]),
+    Directive(code: String, no_pad: Bool, raw: String),
+}
+
+priv TIME_WEEKDAYS_SHORT: [String]{"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"}
+
+priv TIME_WEEKDAYS_LONG: [String]{"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"}
+
+priv TIME_MONTHS_SHORT: [String]{"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"}
+
+priv TIME_MONTHS_LONG: [String]{"January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"}
 
 civil_scalar_width: fn(byte: U8) -> Int Never! {
     if byte < (U8{128}) -> return 1
@@ -2695,22 +2629,20 @@ civil_byte_character: fn(byte: U8) -> String Never! {
     String.from_bytes([U8]{U8{192 + Int{byte} /% 64}, U8{128 + Int{byte} %% 64}}) ?? ""
 }
 
-civil_format_checked: fn(pattern: String, date: LocalDate, t: LocalTime, zone: {name: String, offset: Int}?) -> String TextError! {
-    tokens: [String]{"SSSSSSSSS", "EEEE", "MMMM", "yyyy", "DDD", "XXX", "SSSSSS", "MMM", "EEE", "VV", "MM", "dd", "HH", "mm", "ss", "SSS"}
+priv civil_format_tokenize: fn(pattern: String, strict: Bool, allow_quotes: Bool) -> [TimeFormatToken] TextError! {
     raw: pattern.bytes()
-    ^normalized: ""
-    ^literals: [{marker: String, value: String}]{}
+    ^tokens: [TimeFormatToken]{}
     ^i: 0
     loop i < raw.len() {
         byte: raw[i]
-        if byte == (U8{39}) {
+        if allow_quotes && byte == (U8{39}) {
             i += 1
-            ^literal: ""
+            ^lit: [U8]{}
             ^closed: false
             loop i < raw.len() {
                 if raw[i] == (U8{39}) {
                     if i + 1 < raw.len() && raw[i + 1] == (U8{39}) {
-                        literal = "{literal}'"
+                        lit.push(U8{39})
                         i += 2
                     } else {
                         i += 1
@@ -2718,77 +2650,509 @@ civil_format_checked: fn(pattern: String, date: LocalDate, t: LocalTime, zone: {
                         break
                     }
                 } else {
-                    width: civil_scalar_width(raw[i])
-                    literal = "{literal}{civil_slice(raw, i, i + width)}"
-                    i += width
+                    lit.push(raw[i])
+                    i += 1
                 }
             }
             if !closed {
                 return Err(TextError{message: "Jet.InvalidTimeFormat: unterminated format literal"})
             }
-            marker: "{literals.len()}"
-            normalized = "{normalized}{marker}"
-            literals.push({marker: marker, value: literal})
+            tokens.push(TimeFormatToken.RawBytes(lit))
             next
         }
         if byte == (U8{37}) {
             if i + 1 >= raw.len() {
-                return Err(TextError{message: "Jet.InvalidTimeFormat: format ends after `%`"})
-            }
-            code: civil_byte_character(raw[i + 1])
-            if code == "-" {
-                flagged: if i + 2 < raw.len() -> civil_byte_character(raw[i + 2]) else -> ""
-                if !([String]{"H", "I", "M", "S", "d", "m", "j"}.contains(flagged)) {
-                    return Err(TextError{message: "Jet.InvalidTimeFormat: unsupported format token `%-{flagged}`"})
+                if strict {
+                    return Err(TextError{message: "Jet.InvalidTimeFormat: format ends after `%`"})
                 }
-                normalized = "{normalized}%-{flagged}"
-                i += 3
-                next
+                tokens.push(TimeFormatToken.Text("%"))
+                break
             }
-            // A literal `%` stays out of the replacement, so `%%-d` is `%-d`.
-            if code == "%" {
-                marker: "{literals.len()}"
-                normalized = "{normalized}{marker}"
-                literals.push({marker: marker, value: "%"})
+            next_b: raw[i + 1]
+            // GNU no-pad flag: `%-Y`, `%-m`, `%-d`, `%-j`, `%-H`, `%-I`, `%-M`, `%-S`.
+            if next_b == (U8{45}) {
+                if i + 2 < raw.len() && raw[i + 2] < (U8{128}) {
+                    ch: civil_byte_character(raw[i + 2])
+                    if civil_format_spec_lookup(ch) == .Val(spec) && spec.allows_no_pad {
+                        tokens.push(TimeFormatToken.Directive{code: ch, no_pad: true, raw: "%-{ch}"})
+                        i += 3
+                        next
+                    }
+                    if strict {
+                        return Err(TextError{message: "Jet.InvalidTimeFormat: unsupported format token `%-{ch}`"})
+                    }
+                } else if strict {
+                    return Err(TextError{message: "Jet.InvalidTimeFormat: unsupported format token `%-`"})
+                }
+                tokens.push(TimeFormatToken.RawBytes([U8]{raw[i], next_b}))
                 i += 2
                 next
             }
-            if !([String]{"%", "A", "a", "B", "b", "Y", "y", "m", "d", "e", "j", "H", "I", "M", "S", "p", "z", "Z", "F", "T", "R", "D", "f"}.contains(code)) {
-                return Err(TextError{message: "Jet.InvalidTimeFormat: unsupported format token `%{code}`"})
+            // Colon offset directive: `%:z`.
+            if next_b == (U8{58}) {
+                if i + 2 < raw.len() && raw[i + 2] == (U8{122}) {
+                    tokens.push(TimeFormatToken.Directive{code: ":z", no_pad: false, raw: "%:z"})
+                    i += 3
+                    next
+                }
+                if strict {
+                    bad: if i + 2 < raw.len() -> civil_byte_character(raw[i + 2]) else -> ""
+                    return Err(TextError{message: "Jet.InvalidTimeFormat: unsupported format token `%:{bad}`"})
+                }
+                tokens.push(TimeFormatToken.RawBytes([U8]{raw[i], next_b}))
+                i += 2
+                next
             }
-            if (code == "z" || code == "Z") && zone == None {
-                return Err(TextError{message: "Jet.InvalidTimeFormat: format token `%{code}` requires a zone"})
+            if next_b < (U8{128}) {
+                ch: civil_byte_character(next_b)
+                if civil_format_spec_lookup(ch) != None {
+                    tokens.push(TimeFormatToken.Directive{code: ch, no_pad: false, raw: "%{ch}"})
+                    i += 2
+                    next
+                }
+                if strict {
+                    return Err(TextError{message: "Jet.InvalidTimeFormat: unsupported format token `%{ch}`"})
+                }
+            } else if strict {
+                return Err(TextError{message: "Jet.InvalidTimeFormat: unsupported format token `%{civil_byte_character(next_b)}`"})
             }
-            normalized = "{normalized}%{code}"
+            // Preserve the exact UTF-8 byte sequence of an unknown directive in lenient mode.
+            tokens.push(TimeFormatToken.RawBytes([U8]{raw[i], next_b}))
             i += 2
             next
         }
-        if (byte >= (U8{65}) && byte <= (U8{90})) || (byte >= (U8{97}) && byte <= (U8{122})) {
-            ^token: ""
-            rest: civil_slice(raw, i, raw.len())
-            loop candidate in tokens {
-                if rest.starts_with(candidate) {
-                    token = candidate
-                    break
+        start: i
+        loop i < raw.len() && raw[i] != (U8{37}) && (!allow_quotes || raw[i] != (U8{39})) -> i += 1
+        ^chunk: [U8]{}
+        loop j in start..<i -> chunk.push(raw[j])
+        tokens.push(TimeFormatToken.RawBytes(chunk))
+    }
+    Ok(tokens)
+}
+
+priv civil_format_render_directive: fn(code: String, no_pad: Bool, raw_token: String, date_opt: LocalDate?, time_opt: LocalTime?, zone_opt: {name: String, offset: Int}?, strict: Bool) -> String TextError! {
+    spec: civil_format_spec_lookup(code) ?? return if strict -> Err(TextError{message: "Jet.InvalidTimeFormat: unsupported format token `{raw_token}`"}) else -> Ok(raw_token)
+    if spec.part == .Literal -> return Ok("%")
+    if spec.part == .Date || spec.part == .DateTime {
+        if date_opt == None {
+            if strict -> return Err(TextError{message: "Jet.InvalidTimeFormat: format token `{raw_token}` requires a date"})
+            return Ok(raw_token)
+        }
+    }
+    if spec.part == .Clock || spec.part == .DateTime {
+        if time_opt == None {
+            if strict -> return Err(TextError{message: "Jet.InvalidTimeFormat: format token `{raw_token}` requires a time"})
+            return Ok(raw_token)
+        }
+    }
+    if spec.part == .Zone {
+        if zone_opt == None {
+            if strict -> return Err(TextError{message: "Jet.InvalidTimeFormat: format token `{raw_token}` requires a zone"})
+            return Ok(raw_token)
+        }
+    }
+    if spec.part == .Zone {
+        z: zone_opt ?? return Ok(raw_token)
+        if code == "z" -> return Ok(civil_offset_compact(z.offset))
+        if code == ":z" -> return Ok(civil_offset(z.offset))
+        return Ok(z.name)
+    }
+    if spec.part == .Date {
+        date: date_opt ?? return Ok(raw_token)
+        day: date.weekday()
+        doy: date.day_of_year()
+        if code == "Y" -> return Ok(if no_pad -> "{date.year()}" else -> civil_year(date.year()))
+        if code == "y" -> return Ok(pad2(civil_mod(date.year(), 100), 2))
+        if code == "m" -> return Ok(if no_pad -> "{date.month()}" else -> pad2(date.month(), 2))
+        if code == "d" -> return Ok(if no_pad -> "{date.day()}" else -> pad2(date.day(), 2))
+        if code == "e" -> return Ok(if date.day() < 10 -> " {date.day()}" else -> "{date.day()}")
+        if code == "j" -> return Ok(if no_pad -> "{doy}" else -> pad2(doy, 3))
+        if code == "a" -> return Ok(TIME_WEEKDAYS_SHORT[day])
+        if code == "A" -> return Ok(TIME_WEEKDAYS_LONG[day])
+        if code == "b" -> return Ok(TIME_MONTHS_SHORT[date.month() - 1])
+        if code == "B" -> return Ok(TIME_MONTHS_LONG[date.month() - 1])
+        if code == "w" -> return Ok("{day}")
+        if code == "U" -> return Ok(pad2((doy + 6 - day) /% 7, 2))
+        if code == "W" -> return Ok(pad2((doy + 6 - (day + 6) %% 7) /% 7, 2))
+        if code == "F" -> return Ok("{civil_year(date.year())}-{pad2(date.month(), 2)}-{pad2(date.day(), 2)}")
+        if code == "D" -> return Ok("{pad2(date.month(), 2)}/{pad2(date.day(), 2)}/{pad2(civil_mod(date.year(), 100), 2)}")
+        return Ok(raw_token)
+    }
+    if spec.part == .Clock {
+        t: time_opt ?? return Ok(raw_token)
+        h12: ((t.hour() + 11) %% 12) + 1
+        if code == "H" -> return Ok(if no_pad -> "{t.hour()}" else -> pad2(t.hour(), 2))
+        if code == "I" -> return Ok(if no_pad -> "{h12}" else -> pad2(h12, 2))
+        if code == "M" -> return Ok(if no_pad -> "{t.minute()}" else -> pad2(t.minute(), 2))
+        if code == "S" -> return Ok(if no_pad -> "{t.second()}" else -> pad2(t.second(), 2))
+        if code == "p" -> return Ok(if t.hour() < 12 -> "AM" else -> "PM")
+        if code == "L" -> return Ok(pad2(t.millisecond(), 3))
+        if code == "f" -> return Ok(pad2(t.microsecond(), 6))
+        if code == "N" -> return Ok(pad2(t.nanosecond(), 9))
+        if code == "T" -> return Ok("{pad2(t.hour(), 2)}:{pad2(t.minute(), 2)}:{pad2(t.second(), 2)}")
+        if code == "R" -> return Ok("{pad2(t.hour(), 2)}:{pad2(t.minute(), 2)}")
+        return Ok(raw_token)
+    }
+    // DateTime composite: `%c` (asctime form).
+    date: date_opt ?? return Ok(raw_token)
+    t: time_opt ?? return Ok(raw_token)
+    wday: TIME_WEEKDAYS_SHORT[date.weekday()]
+    mon: TIME_MONTHS_SHORT[date.month() - 1]
+    dstr: if date.day() < 10 -> " {date.day()}" else -> "{date.day()}"
+    Ok("{wday} {mon} {dstr} {pad2(t.hour(), 2)}:{pad2(t.minute(), 2)}:{pad2(t.second(), 2)} {date.year()}")
+}
+
+priv civil_format_engine: fn(pattern: String, date_opt: LocalDate?, time_opt: LocalTime?, zone_opt: {name: String, offset: Int}?, strict: Bool) -> String TextError! {
+    tokens: civil_format_tokenize(pattern, strict, strict)
+    ^out: [U8]{}
+    loop tok in tokens {
+        if tok == {
+            .Text(s) -> { loop b in s.bytes() -> out.push(b) }
+            .RawBytes(bs) -> { loop b in bs -> out.push(b) }
+            .Directive(code, no_pad, raw_token) -> {
+                piece: civil_format_render_directive(code, no_pad, raw_token, date_opt, time_opt, zone_opt, strict)
+                loop b in piece.bytes() -> out.push(b)
+            }
+        }
+    }
+    Ok(String.from_bytes(out) ?? panic("time format produced invalid UTF-8"))
+}
+
+civil_format_canonical: fn(pattern: String, date_opt: LocalDate?, time_opt: LocalTime?, zone_opt: {name: String, offset: Int}?) -> String Never! {
+    civil_format_engine(pattern, date_opt, time_opt, zone_opt, false) ?? pattern
+}
+
+civil_format_checked_canonical: fn(pattern: String, date_opt: LocalDate?, time_opt: LocalTime?, zone_opt: {name: String, offset: Int}?) -> String TextError! {
+    civil_format_engine(pattern, date_opt, time_opt, zone_opt, true)
+}
+
+civil_format: fn(pattern: String, date: LocalDate, t: LocalTime, zone: {name: String, offset: Int}?) -> String Never! {
+    civil_format_canonical(pattern, Val(date), Val(t), zone)
+}
+
+civil_format_checked: fn(pattern: String, date: LocalDate, t: LocalTime, zone: {name: String, offset: Int}?) -> String TextError! {
+    civil_format_checked_canonical(pattern, Val(date), Val(t), zone)
+}
+
+// ---- Pattern parsing driven by the same TIME_FORMAT_SPECS table ----
+
+priv TimeParsedFields: struct {
+    year: Int?,
+    month: Int?,
+    day: Int?,
+    doy: Int?,
+    hour: Int?,
+    hour12: Int?,
+    meridiem_pm: Bool?,
+    minute: Int?,
+    second: Int?,
+    nanos: Int,
+    offset_seconds: Int?,
+    zone_name: String?,
+}
+
+priv civil_parse_digits: fn(raw: [U8], pos: ^Int, min_w: Int, max_w: Int) -> Int TimeError! {
+    start: pos
+    ^value: 0
+    ^count: 0
+    loop pos < raw.len() && count < max_w {
+        b: raw[pos]
+        if b < (U8{48}) || b > (U8{57}) -> break
+        value = value * 10 + Int{b} - 48
+        pos += 1
+        count += 1
+    }
+    if count < min_w {
+        return Err(TimeError{reason: "expected at least {min_w} digits at byte {start}"})
+    }
+    Ok(value)
+}
+
+priv civil_parse_signed_year: fn(raw: [U8], pos: ^Int, min_w: Int) -> Int TimeError! {
+    ^neg: false
+    if pos < raw.len() && raw[pos] == (U8{45}) {
+        neg = true
+        pos += 1
+    } else if pos < raw.len() && raw[pos] == (U8{43}) {
+        pos += 1
+    }
+    mag: civil_parse_digits(raw, pos, min_w, 9)
+    Ok(if neg -> -mag else -> mag)
+}
+
+priv civil_parse_match_list: fn(raw: [U8], pos: ^Int, names: [String]) -> Int TimeError! {
+    rest: civil_slice(raw, pos, raw.len())
+    loop idx in 0..<names.len() {
+        name: names[idx]
+        if rest.starts_with(name) {
+            pos += name.bytes().len()
+            return Ok(idx)
+        }
+    }
+    Err(TimeError{reason: "unexpected name at byte {pos}"})
+}
+
+priv civil_parse_match_bytes: fn(raw: [U8], pos: ^Int, expected: [U8]) -> Int TimeError! {
+    if pos + expected.len() > raw.len() {
+        return Err(TimeError{reason: "input ended early at byte {pos}"})
+    }
+    loop j in 0..<expected.len() {
+        if raw[pos + j] != expected[j] {
+            return Err(TimeError{reason: "literal mismatch at byte {pos + j}"})
+        }
+    }
+    pos += expected.len()
+    Ok(0)
+}
+
+priv civil_parse_expand_tokens: fn(tokens: [TimeFormatToken]) -> [TimeFormatToken] Never! {
+    ^expanded: [TimeFormatToken]{}
+    loop tok in tokens {
+        if tok == {
+            .Directive(code, no_pad, raw_token) -> {
+                if code == "F" {
+                    expanded.push(TimeFormatToken.Directive{code: "Y", no_pad: false, raw: "%Y"})
+                    expanded.push(TimeFormatToken.RawBytes("-".bytes()))
+                    expanded.push(TimeFormatToken.Directive{code: "m", no_pad: false, raw: "%m"})
+                    expanded.push(TimeFormatToken.RawBytes("-".bytes()))
+                    expanded.push(TimeFormatToken.Directive{code: "d", no_pad: false, raw: "%d"})
+                } else if code == "D" {
+                    expanded.push(TimeFormatToken.Directive{code: "m", no_pad: false, raw: "%m"})
+                    expanded.push(TimeFormatToken.RawBytes("/".bytes()))
+                    expanded.push(TimeFormatToken.Directive{code: "d", no_pad: false, raw: "%d"})
+                    expanded.push(TimeFormatToken.RawBytes("/".bytes()))
+                    expanded.push(TimeFormatToken.Directive{code: "y", no_pad: false, raw: "%y"})
+                } else if code == "T" {
+                    expanded.push(TimeFormatToken.Directive{code: "H", no_pad: false, raw: "%H"})
+                    expanded.push(TimeFormatToken.RawBytes(":".bytes()))
+                    expanded.push(TimeFormatToken.Directive{code: "M", no_pad: false, raw: "%M"})
+                    expanded.push(TimeFormatToken.RawBytes(":".bytes()))
+                    expanded.push(TimeFormatToken.Directive{code: "S", no_pad: false, raw: "%S"})
+                } else if code == "R" {
+                    expanded.push(TimeFormatToken.Directive{code: "H", no_pad: false, raw: "%H"})
+                    expanded.push(TimeFormatToken.RawBytes(":".bytes()))
+                    expanded.push(TimeFormatToken.Directive{code: "M", no_pad: false, raw: "%M"})
+                } else if code == "c" {
+                    expanded.push(TimeFormatToken.Directive{code: "a", no_pad: false, raw: "%a"})
+                    expanded.push(TimeFormatToken.RawBytes(" ".bytes()))
+                    expanded.push(TimeFormatToken.Directive{code: "b", no_pad: false, raw: "%b"})
+                    expanded.push(TimeFormatToken.RawBytes(" ".bytes()))
+                    expanded.push(TimeFormatToken.Directive{code: "e", no_pad: false, raw: "%e"})
+                    expanded.push(TimeFormatToken.RawBytes(" ".bytes()))
+                    expanded.push(TimeFormatToken.Directive{code: "H", no_pad: false, raw: "%H"})
+                    expanded.push(TimeFormatToken.RawBytes(":".bytes()))
+                    expanded.push(TimeFormatToken.Directive{code: "M", no_pad: false, raw: "%M"})
+                    expanded.push(TimeFormatToken.RawBytes(":".bytes()))
+                    expanded.push(TimeFormatToken.Directive{code: "S", no_pad: false, raw: "%S"})
+                    expanded.push(TimeFormatToken.RawBytes(" ".bytes()))
+                    expanded.push(TimeFormatToken.Directive{code: "Y", no_pad: true, raw: "%-Y"})
+                } else {
+                    expanded.push(TimeFormatToken.Directive{code: code, no_pad: no_pad, raw: raw_token})
                 }
             }
-            if token == "" {
-                return Err(TextError{message: "Jet.InvalidTimeFormat: unsupported format token `{civil_byte_character(byte)}`"})
-            }
-            if (token == "VV" || token == "XXX") && zone == None {
-                return Err(TextError{message: "Jet.InvalidTimeFormat: format token `{token}` requires a zone"})
-            }
-            normalized = "{normalized}{token}"
-            i += token.bytes().len()
-            next
+            .Text(_) | .RawBytes(_) -> expanded.push(tok.copy())
         }
-        width: civil_scalar_width(byte)
-        normalized = "{normalized}{civil_slice(raw, i, i + width)}"
-        i += width
     }
-    ^out: civil_format(normalized, date, t, zone)
-    loop literal in literals -> out = out.replace(literal.marker, literal.value)
-    Ok(out)
+    expanded
+}
+
+priv civil_parse_fields: fn(text: String, pattern: String, allow_date: Bool, allow_clock: Bool, allow_zone: Bool) -> TimeParsedFields TimeError! {
+    tokens: civil_format_tokenize(pattern, true, true) ?? return Err(TimeError{reason: err.message})
+    expanded: civil_parse_expand_tokens(tokens)
+    raw: text.bytes()
+    ^pos: 0
+    ^fields: TimeParsedFields{year: None, month: None, day: None, doy: None, hour: None, hour12: None, meridiem_pm: None, minute: None, second: None, nanos: 0, offset_seconds: None, zone_name: None}
+    loop tok in expanded {
+        if tok == {
+            .Text(s) -> { ^_: civil_parse_match_bytes(raw, pos, s.bytes()) }
+            .RawBytes(bs) -> { ^_: civil_parse_match_bytes(raw, pos, bs) }
+            .Directive(code, no_pad, raw_token) -> {
+                spec: civil_format_spec_lookup(code) ?? return Err(TimeError{reason: "unsupported format token `{raw_token}`"})
+                if spec.part == .Literal {
+                    ^_: civil_parse_match_bytes(raw, pos, [U8]{U8{37}})
+                    next
+                }
+                if (spec.part == .Date || spec.part == .DateTime) && !allow_date {
+                    return Err(TimeError{reason: "format token `{raw_token}` requires a date"})
+                }
+                if (spec.part == .Clock || spec.part == .DateTime) && !allow_clock {
+                    return Err(TimeError{reason: "format token `{raw_token}` requires a time"})
+                }
+                if spec.part == .Zone && !allow_zone {
+                    return Err(TimeError{reason: "format token `{raw_token}` requires a zone"})
+                }
+                if code == "Y" {
+                    fields.year = Val(civil_parse_signed_year(raw, pos, if no_pad -> 1 else -> 4))
+                } else if code == "y" {
+                    yy: civil_parse_digits(raw, pos, 2, 2)
+                    fields.year = Val(if yy >= 69 -> 1900 + yy else -> 2000 + yy)
+                } else if code == "m" {
+                    fields.month = Val(civil_parse_digits(raw, pos, if no_pad -> 1 else -> 2, 2))
+                } else if code == "d" {
+                    fields.day = Val(civil_parse_digits(raw, pos, if no_pad -> 1 else -> 2, 2))
+                } else if code == "e" {
+                    if pos < raw.len() && raw[pos] == (U8{32}) -> pos += 1
+                    fields.day = Val(civil_parse_digits(raw, pos, 1, 2))
+                } else if code == "j" {
+                    fields.doy = Val(civil_parse_digits(raw, pos, if no_pad -> 1 else -> 3, 3))
+                } else if code == "b" {
+                    fields.month = Val((civil_parse_match_list(raw, pos, TIME_MONTHS_SHORT)) + 1)
+                } else if code == "B" {
+                    fields.month = Val((civil_parse_match_list(raw, pos, TIME_MONTHS_LONG)) + 1)
+                } else if code == "a" {
+                    ^_: civil_parse_match_list(raw, pos, TIME_WEEKDAYS_SHORT)
+                } else if code == "A" {
+                    ^_: civil_parse_match_list(raw, pos, TIME_WEEKDAYS_LONG)
+                } else if code == "w" {
+                    wd: civil_parse_digits(raw, pos, 1, 1)
+                    if wd > 6 -> return Err(TimeError{reason: "weekday out of range: {wd}"})
+                } else if code == "U" || code == "W" {
+                    wk: civil_parse_digits(raw, pos, 2, 2)
+                    if wk > 53 -> return Err(TimeError{reason: "week number out of range: {wk}"})
+                } else if code == "H" {
+                    fields.hour = Val(civil_parse_digits(raw, pos, if no_pad -> 1 else -> 2, 2))
+                } else if code == "I" {
+                    fields.hour12 = Val(civil_parse_digits(raw, pos, if no_pad -> 1 else -> 2, 2))
+                } else if code == "p" {
+                    idx: civil_parse_match_list(raw, pos, [String]{"AM", "PM"})
+                    fields.meridiem_pm = Val(idx == 1)
+                } else if code == "M" {
+                    fields.minute = Val(civil_parse_digits(raw, pos, if no_pad -> 1 else -> 2, 2))
+                } else if code == "S" {
+                    fields.second = Val(civil_parse_digits(raw, pos, if no_pad -> 1 else -> 2, 2))
+                } else if code == "L" {
+                    fields.nanos = (civil_parse_digits(raw, pos, 3, 3)) * 1000000
+                } else if code == "f" {
+                    fields.nanos = (civil_parse_digits(raw, pos, 6, 6)) * 1000
+                } else if code == "N" {
+                    fields.nanos = civil_parse_digits(raw, pos, 9, 9)
+                } else if code == "z" {
+                    if pos < raw.len() && raw[pos] == (U8{90}) {
+                        pos += 1
+                        fields.offset_seconds = Val(0)
+                    } else {
+                        if pos + 5 > raw.len() || (raw[pos] != (U8{43}) && raw[pos] != (U8{45})) {
+                            return Err(TimeError{reason: "bad compact offset at byte {pos}"})
+                        }
+                        neg: raw[pos] == (U8{45})
+                        pos += 1
+                        oh: civil_parse_digits(raw, pos, 2, 2)
+                        om: civil_parse_digits(raw, pos, 2, 2)
+                        if oh > 23 || om > 59 -> return Err(TimeError{reason: "offset out of range"})
+                        sec: oh * 3600 + om * 60
+                        fields.offset_seconds = Val(if neg -> -sec else -> sec)
+                    }
+                } else if code == ":z" {
+                    if pos < raw.len() && raw[pos] == (U8{90}) {
+                        pos += 1
+                        fields.offset_seconds = Val(0)
+                    } else {
+                        if pos + 6 > raw.len() -> return Err(TimeError{reason: "bad offset at byte {pos}"})
+                        piece: civil_slice(raw, pos, pos + 6)
+                        sec: civil_parse_offset(piece)
+                        pos += 6
+                        fields.offset_seconds = Val(sec)
+                    }
+                } else if code == "Z" {
+                    zstart: pos
+                    loop pos < raw.len() {
+                        b: raw[pos]
+                        ok: (b >= (U8{65}) && b <= (U8{90})) || (b >= (U8{97}) && b <= (U8{122})) || (b >= (U8{48}) && b <= (U8{57})) || b == (U8{47}) || b == (U8{95}) || b == (U8{45}) || b == (U8{43})
+                        if !ok -> break
+                        pos += 1
+                    }
+                    if pos == zstart -> return Err(TimeError{reason: "expected zone name at byte {zstart}"})
+                    fields.zone_name = Val(civil_slice(raw, zstart, pos))
+                }
+            }
+        }
+    }
+    if pos != raw.len() {
+        return Err(TimeError{reason: "unexpected trailing text at byte {pos}"})
+    }
+    Ok(fields)
+}
+
+priv civil_build_parsed_date: fn(fields: TimeParsedFields) -> LocalDate TimeError! {
+    y: fields.year ?? return Err(TimeError{reason: "parsed date is missing year"})
+    if fields.doy == .Val(doy) {
+        max_doy: if is_leap_year(y) -> 366 else -> 365
+        if doy < 1 || doy > max_doy -> return Err(TimeError{reason: "day of year out of range: {doy}"})
+        return Ok(new(y, 1, 1).add_days(doy - 1))
+    }
+    m: fields.month ?? return Err(TimeError{reason: "parsed date is missing month"})
+    d: fields.day ?? return Err(TimeError{reason: "parsed date is missing day"})
+    if m < 1 || m > 12 -> return Err(TimeError{reason: "month out of range: {m}"})
+    if d < 1 || d > days_in_month(y, m) -> return Err(TimeError{reason: "day out of range: {y}-{m}-{d}"})
+    Ok(new(y, m, d))
+}
+
+priv civil_build_parsed_clock: fn(fields: TimeParsedFields, allow_leap: Bool) -> {time: LocalTime, leap: Bool} TimeError! {
+    ^h: 0
+    if fields.hour == .Val(v) {
+        h = v
+    } else if fields.hour12 == .Val(v12) {
+        if v12 < 1 || v12 > 12 -> return Err(TimeError{reason: "12-hour value out of range: {v12}"})
+        pm: fields.meridiem_pm ?? false
+        h = if pm -> (if v12 == 12 -> 12 else -> v12 + 12) else -> (if v12 == 12 -> 0 else -> v12)
+    }
+    m: fields.minute ?? 0
+    s: fields.second ?? 0
+    if h < 0 || h > 23 || m < 0 || m > 59 {
+        return Err(TimeError{reason: "time out of range"})
+    }
+    if s == 60 {
+        if !allow_leap || h != 23 || m != 59 {
+            return Err(TimeError{reason: "second 60 is only valid at UTC 23:59:60"})
+        }
+        return Ok({time: civil_time(23, 59, 59, fields.nanos), leap: true})
+    }
+    if s < 0 || s > 59 -> return Err(TimeError{reason: "second out of range: {s}"})
+    Ok({time: civil_time(h, m, s, fields.nanos), leap: false})
+}
+
+priv civil_parse_date_format: fn(text: String, pattern: String) -> LocalDate TimeError! {
+    fields: civil_parse_fields(text, pattern, true, false, false)
+    civil_build_parsed_date(fields)
+}
+
+priv civil_parse_time_format: fn(text: String, pattern: String) -> LocalTime TimeError! {
+    fields: civil_parse_fields(text, pattern, false, true, false)
+    built: civil_build_parsed_clock(fields, false)
+    Ok(built.time)
+}
+
+priv civil_parse_datetime_format: fn(text: String, pattern: String) -> DateTime TimeError! {
+    fields: civil_parse_fields(text, pattern, true, true, true)
+    date: civil_build_parsed_date(fields)
+    clock: civil_build_parsed_clock(fields, true)
+    offset: fields.offset_seconds ?? 0
+    if clock.leap && offset != 0 -> return Err(TimeError{reason: "leap second requires UTC offset"})
+    seconds: saturating_sub_ns(civil_utc(date, clock.time), offset)
+    if clock.leap && !civil_leap_epoch(civil_i64(seconds + 1)) {
+        return Err(TimeError{reason: "no UTC leap second on {date}"})
+    }
+    Ok(civil_timestamp(seconds, clock.time.nanos, clock.leap))
+}
+
+priv civil_parse_zoned_format: fn(text: String, pattern: String) -[Env, FS.Read]> ZonedDateTime TimeError! {
+    fields: civil_parse_fields(text, pattern, true, true, true)
+    date: civil_build_parsed_date(fields)
+    clock: civil_build_parsed_clock(fields, true)
+    zname: fields.zone_name ?? return Err(TimeError{reason: "parsed zoned datetime is missing %Z zone name"})
+    z: zone(zname)
+    if fields.offset_seconds == .Val(offset) {
+        if clock.leap && (offset != 0 || z.name() != "UTC") {
+            return Err(TimeError{reason: "leap second requires UTC"})
+        }
+        seconds: saturating_sub_ns(civil_utc(date, clock.time), offset)
+        if clock.leap && !civil_leap_epoch(civil_i64(seconds + 1)) {
+            return Err(TimeError{reason: "no UTC leap second on {date}"})
+        }
+        return Ok(zoned(civil_timestamp(seconds, clock.time.nanos, clock.leap), z))
+    }
+    if clock.leap -> return Err(TimeError{reason: "leap second requires explicit UTC offset"})
+    zoned_local(date, clock.time, z, "compatible")
 }
 
 // Clock selection belongs beside the civil values; providers expose samples.
@@ -3025,7 +3389,7 @@ civil_dyn_datetime: fn(text: String) -> ZonedDateTime? Never! {
     assert_eq(t.add_duration(duration_seconds(2)).to_string(), "00:00:01.123456789")
     assert_eq(t.round("second").to_string(), "23:59:59")
     assert_eq(t.ceil("second").to_string(), "00:00:00")
-    assert_eq(t.format_checked("HH:mm:ss 'λ'") ?? panic("format"), "23:59:59 λ")
+    assert_eq(t.format_checked("%H:%M:%S 'λ'") ?? panic("format"), "23:59:59 λ")
 }
 
 #Test("Zoned local resolution keeps gap and overlap disambiguation") {
@@ -3209,8 +3573,8 @@ priv civil_footer_test_stamp: fn(text: String) -> Int Never! {
     assert_eq(date.truncate("year"), new(2024, 1, 1))
     assert_eq(date.truncate("month"), new(2024, 2, 1))
     assert_eq(date.truncate("unknown"), date)
-    assert_eq(date.format("yyyy-MM-dd"), "2024-02-29")
-    assert_eq(date.format_checked("yyyy-MM-dd 'λ'") ?? panic("checked date format"), "2024-02-29 λ")
+    assert_eq(date.format("%Y-%m-%d"), "2024-02-29")
+    assert_eq(date.format_checked("%Y-%m-%d 'λ'") ?? panic("checked date format"), "2024-02-29 λ")
     assert_eq(date.until(new(2024, 3, 1)).ns, 86400000000000)
     assert_eq(date.since(new(2024, 3, 1)).ns, -86400000000000)
     assert_eq(date.until(new(2024, 3, 1), "day", "day", "half_even", 2).ns, 0)
@@ -3226,7 +3590,7 @@ priv civil_footer_test_stamp: fn(text: String) -> Int Never! {
         .Err(error) -> { assert_eq(error.reason, "invalid overflow policy: unknown") }
         .Ok(_) -> assert(false)
     }
-    if date.format_checked("QQ") == {
+    if date.format_checked("%Q") == {
         .Err(_) -> { assert(true) }
         .Ok(_) -> assert(false)
     }
@@ -3262,3 +3626,76 @@ priv civil_footer_test_stamp: fn(text: String) -> Int Never! {
         }
     }
 }
+
+#Test("Canonical format patterns share one table across strftime, format, format_checked, and parse_format") {
+    dt: datetime(-5, 1, 2, 3, 4, 5).add_nanoseconds(123456789)
+    // One-pass percent semantics: strftime, .format, and .format_checked agree exactly.
+    patterns: [String]{"%Y %%Y %f %L %N %z %:z %Z", "%-Y-%-m-%-d %H:%M:%S class", "%F %T %R %D", "%a %A %b %B %e %j %w %U %W %c"}
+    loop pat in patterns {
+        s1: strftime(pat, dt)
+        s2: dt.format(pat)
+        s3: dt.format_checked(pat) ?? panic("checked pattern `{pat}`")
+        assert_eq(s1, s2)
+        assert_eq(s1, s3)
+    }
+    assert_eq(dt.format("%Y %%Y %f %L %N %z %:z %Z"), "-0005 %Y 123456 123 123456789 +0000 +00:00 UTC")
+    assert_eq(dt.format("%-Y %H:%M class"), "-5 03:04 class")
+
+    // Emitted zone names are never re-scanned (`ss` in Europe/Brussels stays intact).
+    brussels: Zone{name_value: "Europe/Brussels", data: ZoneData{transitions: [ZoneTransition]{}, infos: [ZoneInfo]{ZoneInfo{offset: 3600, is_dst: false}}}}
+    zb: zoned(datetime(2024, 3, 9, 12, 34, 56), brussels)
+    assert_eq(zb.format("%F %T %Z %:z %z"), "2024-03-09 13:34:56 Europe/Brussels +01:00 +0100")
+
+    // Receiver boundaries: LocalDate refuses clock/zone; LocalTime refuses date/zone.
+    if new(2024, 3, 9).format_checked("%H") == .Ok(_) -> panic("LocalDate must refuse %H")
+    if new(2024, 3, 9).format_checked("%z") == .Ok(_) -> panic("LocalDate must refuse %z")
+    if local_time(12, 34, 56).format_checked("%Y") == .Ok(_) -> panic("LocalTime must refuse %Y")
+    if local_time(12, 34, 56).format_checked("%Z") == .Ok(_) -> panic("LocalTime must refuse %Z")
+
+    // Round-trip formatting and parsing via the shared pattern table.
+    d: new(2024, 2, 29)
+    assert_eq(LocalDate.parse_format(d.format("%Y-%m-%d"), "%Y-%m-%d") ?? panic("parse date"), d)
+    assert_eq(LocalDate.parse_format(d.format("%a, %d %b %Y"), "%a, %d %b %Y") ?? panic("parse named date"), d)
+    assert_eq(LocalDate.parse_format(d.format("%Y-%j"), "%Y-%j") ?? panic("parse doy"), d)
+    lt: local_time(13, 4, 5).add_duration(duration_ns(123456789))
+    assert_eq(LocalTime.parse_format(lt.format("%H:%M:%S.%N"), "%H:%M:%S.%N") ?? panic("parse time ns"), lt)
+    assert_eq(LocalTime.parse_format(local_time(13, 4, 5).format("%-I:%M:%S %p"), "%-I:%M:%S %p") ?? panic("parse 12h"), local_time(13, 4, 5))
+    dt2: datetime(2024, 3, 9, 12, 34, 56).add_nanoseconds(123456789)
+    assert_eq(DateTime.parse_format(dt2.format("%Y-%m-%d %H:%M:%S.%N %:z"), "%Y-%m-%d %H:%M:%S.%N %:z") ?? panic("parse dt"), dt2)
+    assert_eq(DateTime.parse_format(dt.format("%Y-%m-%d %H:%M:%S.%N %z"), "%Y-%m-%d %H:%M:%S.%N %z") ?? panic("parse neg year"), dt)
+    zu: zoned(dt2, utc())
+    assert_eq(ZonedDateTime.parse_format(zu.format("%F %T.%N %Z %:z"), "%F %T.%N %Z %:z") ?? panic("parse zoned"), zu)
+}
+
+#Test("UTC leap second 23:59:60 parses, formats, orders strictly, and rejects invalid dates") {
+    before: parse_rfc3339("2016-12-31T23:59:59Z") ?? panic("before")
+    leap0: parse_rfc3339("2016-12-31T23:59:60Z") ?? panic("leap0")
+    leap_half: parse_rfc3339("2016-12-31T23:59:60.500000000Z") ?? panic("leap_half")
+    after: parse_rfc3339("2017-01-01T00:00:00Z") ?? panic("after")
+
+    assert(before < leap0)
+    assert(leap0 < leap_half)
+    assert(leap_half < after)
+    assert_eq(leap0.second(), 60)
+    assert_eq(leap0.format_rfc3339(), "2016-12-31T23:59:60Z")
+    assert_eq(leap0.to_string(), "2016-12-31 23:59:60 UTC")
+    assert_eq(leap0.format("%F %T %Z"), "2016-12-31 23:59:60 UTC")
+    assert_eq(DateTime.parse_format("2016-12-31 23:59:60 +0000", "%F %T %z") ?? panic("parse_format leap"), leap0)
+    if parse_rfc3339("2024-06-30T23:59:60Z") == .Ok(_) -> panic("non-leap date must fail")
+    if parse_rfc3339("2016-12-31T23:59:60+01:00") == .Ok(_) -> panic("non-UTC leap must fail")
+    if DateTime.parse_format("2024-06-30 23:59:60 +0000", "%F %T %z") == .Ok(_) -> panic("parse_format non-leap must fail")
+}
+
+#Test("Zone lookup resolves known zones and returns typed TimeError when zone or DB is missing") {
+    assert_eq((zone("UTC") ?? panic("UTC")).name(), "UTC")
+    assert_eq((zone("+05:30") ?? panic("fixed offset")).name(), "+05:30")
+    if zone("Mars/Olympus_Mons") == {
+        .Err(error) -> { assert(error.reason.contains("unknown IANA time zone")) }
+        .Ok(_) -> panic("missing zone must return TimeError")
+    }
+    if zone("../etc/passwd") == {
+        .Err(error) -> { assert(error.reason.contains("invalid time zone name")) }
+        .Ok(_) -> panic("traversal zone must return TimeError")
+    }
+}
+

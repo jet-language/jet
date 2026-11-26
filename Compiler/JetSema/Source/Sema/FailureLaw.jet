@@ -920,7 +920,7 @@ sema_error_conversion_routine: fn(definition: ErrorConvDef, param_name: String, 
         diagnostics.push(sema_error("E2405", span, "duplicate error conversion: `impl {to_ty}.From({from_ty})` is already declared", "there can be at most one declared way to convert a `Source` error into a `Target`", "remove one of the two `impl {to_ty}.From({from_ty})` blocks"))
         return None
     }
-    if from_ty == to_ty || sema_error_conversion_path_exists(edges, to_ty, from_ty) {
+    if from_ty == to_ty || sema_error_conversion_path_exists(edges, from_ty: to_ty, to_ty: from_ty) {
         diagnostics.push(sema_error("E2418", span, "Error conversion cycle: `impl {to_ty}.From({from_ty})` would make conversion loop", "Error conversions must form an acyclic route so a failure has one finite meaning.", "remove this edge or choose a target that is not already reachable back to the source."))
         return None
     }

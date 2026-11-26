@@ -1,0 +1,44 @@
+package: {
+    name: "time_leap_seconds"
+    version: "0.1.0"
+    authority: { allow: [Env, FS.Read, IO, Mem.Alloc] }
+}
+
+// UTC leap-second parsing, formatting, and strict ordering live in core.time,
+// alongside checked Civil and Period methods on every tier.
+use time: core.time
+
+run: fn() {
+    before: time.parse_rfc3339("2016-12-31T23:59:59Z") ?? panic("before")
+    leap: time.parse_rfc3339("2016-12-31T23:59:60Z") ?? panic("leap")
+    leap_frac: time.parse_rfc3339("2016-12-31T23:59:60.123456789Z") ?? panic("leap_frac")
+    after: time.parse_rfc3339("2017-01-01T00:00:00Z") ?? panic("after")
+    checked_lit: DateTime{"2016-12-31T23:59:60Z"}
+
+    print("leap second: {leap.second()} | rfc3339: {leap.format_rfc3339()} | display: {leap}")
+    print("leap pattern: {leap_frac.format("%F %T.%N %Z")} | strftime agrees: {time.strftime("%F %T.%N %Z", leap_frac) == leap_frac.format("%F %T.%N %Z")}")
+    print("checked literal matches: {checked_lit == leap}")
+    print("ordered: {before < leap && leap < leap_frac && leap_frac < after}")
+    parsed_pat: DateTime.parse_format("2016-12-31 23:59:60 +0000", "%F %T %z") ?? panic("parse_format leap")
+    print("pattern parse matches: {parsed_pat == leap}")
+
+    // Non-leap dates and non-UTC offsets refuse 23:59:60 with a typed TimeError.
+    if time.parse_rfc3339("2024-06-30T23:59:60Z") == {
+        .Ok(_) -> print("unexpected non-leap ok")
+        .Err(error) -> print("non-leap refused: {error.reason}")
+    }
+    if time.parse_rfc3339("2016-12-31T23:59:60+01:00") == {
+        .Ok(_) -> print("unexpected non-utc ok")
+        .Err(error) -> print("non-utc refused: {error.reason}")
+    }
+
+    // Checked Civil and Period methods share one core.time method identity.
+    anchor: time.new(2024, 1, 31)
+    p: time.period(0, 1, 2)
+    shifted: anchor.add_period(p)
+    print("period: {p.to_string()} -> {shifted} | total days: {time.period_months(1).total_in("days", anchor)}")
+    if anchor.with(2023, 2, 29, "reject") == {
+        .Ok(_) -> print("unexpected invalid date ok")
+        .Err(error) -> print("civil reject: {error.reason}")
+    }
+}

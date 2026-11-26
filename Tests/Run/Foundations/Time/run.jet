@@ -195,15 +195,15 @@ run: fn() {
     schedule_start: time.new(2024, 3, 8)
     scheduled: occurrences(schedule.copy(), schedule_start.copy(), 5)
     loop item in scheduled {
-        text: item.format("yyyy-MM-dd HH:mm:ss VV XXX")
+        text: item.format("%Y-%m-%d %H:%M:%S %Z %:z")
         offset: item.offset_seconds()
         print("occurrence={text} offset={offset}")
     }
     if scheduled.len() != 5 -> panic("schedule occurrence count")
     first: scheduled[0]
     last: scheduled[4]
-    first_text: first.format("yyyy-MM-dd HH:mm:ss VV XXX")
-    last_text: last.format("yyyy-MM-dd HH:mm:ss VV XXX")
+    first_text: first.format("%Y-%m-%d %H:%M:%S %Z %:z")
+    last_text: last.format("%Y-%m-%d %H:%M:%S %Z %:z")
     if !first_text.starts_with("2024-03-08 09:30:00") -> panic("schedule local start")
     if !last_text.starts_with("2024-03-12 09:30:00") -> panic("schedule local recurrence")
     if first.offset_seconds() == last.offset_seconds() -> panic("schedule DST transition")
@@ -221,10 +221,10 @@ run: fn() {
     gap_later: time.zoned_local(time.new(2024, 3, 10), time.time(2, 30, 0), zone, "later") ?? panic("gap later")
     overlap_earlier: time.zoned_local(time.new(2024, 11, 3), time.time(1, 30, 0), zone, "earlier") ?? panic("overlap earlier")
     overlap_later: time.zoned_local(time.new(2024, 11, 3), time.time(1, 30, 0), zone, "later") ?? panic("overlap later")
-    gap_compatible_text: gap_compatible.format("yyyy-MM-dd HH:mm:ss VV XXX")
-    gap_later_text: gap_later.format("yyyy-MM-dd HH:mm:ss VV XXX")
-    overlap_earlier_text: overlap_earlier.format("yyyy-MM-dd HH:mm:ss VV XXX")
-    overlap_later_text: overlap_later.format("yyyy-MM-dd HH:mm:ss VV XXX")
+    gap_compatible_text: gap_compatible.format("%Y-%m-%d %H:%M:%S %Z %:z")
+    gap_later_text: gap_later.format("%Y-%m-%d %H:%M:%S %Z %:z")
+    overlap_earlier_text: overlap_earlier.format("%Y-%m-%d %H:%M:%S %Z %:z")
+    overlap_later_text: overlap_later.format("%Y-%m-%d %H:%M:%S %Z %:z")
     if !gap_compatible_text.starts_with("2024-03-10 03:30:00") -> panic("gap compatible resolution")
     if !gap_later_text.starts_with("2024-03-10 03:30:00") -> panic("gap later resolution")
     if overlap_earlier.offset_seconds() == overlap_later.offset_seconds() {

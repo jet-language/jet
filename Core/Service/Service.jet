@@ -6256,7 +6256,7 @@ promote_worker_generation: fn(tree: ^ServiceTree, name: String) -> Bool ServiceE
         if bind_delivery_endpoint(tree, next) == {
             .Err(error) -> {
                 ^recovery: ServiceError?{None}
-                if authority_rotate(next, old, running, old_draining, Val(tree.workers[index].channel)) == {
+                if authority_rotate(old: next, next: old, started: running, draining: old_draining, channel: Val(tree.workers[index].channel)) == {
                     .Err(failure) -> { recovery = Val(failure) }
                     .Ok(_) -> {}
                 }

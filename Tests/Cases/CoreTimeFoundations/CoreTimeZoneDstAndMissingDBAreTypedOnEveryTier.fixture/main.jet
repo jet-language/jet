@@ -1,0 +1,59 @@
+package: {
+    name: "time_zone_dst_and_missing_db"
+    version: "0.1.0"
+    authority: { allow: [Env, FS.Read, IO, Mem.Alloc] }
+}
+
+use {
+    cal: core.time.calendar
+    time: core.time
+}
+
+run: fn() {
+    // 1. Real IANA zone lookup.
+    ny: time.zone("America/New_York") ?? panic("America/New_York")
+    print("zone: {ny.name()}")
+
+    // 2. Spring-forward DST gap (2024-03-10 02:30 does not exist in America/New_York).
+    gap_day: time.new(2024, 3, 10)
+    gap_time: time.local_time(2, 30, 0)
+    gap_compat: time.zoned_local(gap_day, gap_time, ny, "compatible") ?? panic("gap compatible")
+    gap_earlier: time.zoned_local(gap_day, gap_time, ny, "earlier") ?? panic("gap earlier")
+    gap_later: time.zoned_local(gap_day, gap_time, ny, "later") ?? panic("gap later")
+    print("gap compatible: {gap_compat.format("%F %T %Z %:z")}")
+    print("gap earlier: {gap_earlier.format("%F %T %Z %:z")}")
+    print("gap later: {gap_later.format("%F %T %Z %:z")}")
+    if time.zoned_local(gap_day, gap_time, ny, "reject") == {
+        .Ok(_) -> print("gap reject: unexpected ok")
+        .Err(error) -> print("gap reject: err:{error.reason}")
+    }
+
+    // 3. Fall-back DST overlap (2024-11-03 01:30 occurs twice in America/New_York).
+    ov_day: time.new(2024, 11, 3)
+    ov_time: time.local_time(1, 30, 0)
+    ov_compat: time.zoned_local(ov_day, ov_time, ny, "compatible") ?? panic("overlap compatible")
+    ov_earlier: time.zoned_local(ov_day, ov_time, ny, "earlier") ?? panic("overlap earlier")
+    ov_later: time.zoned_local(ov_day, ov_time, ny, "later") ?? panic("overlap later")
+    print("overlap compatible: {ov_compat.format("%F %T %Z %:z")}")
+    print("overlap earlier: {ov_earlier.format("%F %T %Z %:z")}")
+    print("overlap later: {ov_later.format("%F %T %Z %:z")}")
+    if time.zoned_local(ov_day, ov_time, ny, "reject") == {
+        .Ok(_) -> print("overlap reject: unexpected ok")
+        .Err(error) -> print("overlap reject: err:{error.reason}")
+    }
+
+    // 4. Calendar data matches civil Gregorian rules.
+    feb24: cal.monthrange(2024, 2)
+    feb23: cal.monthrange(2023, 2)
+    print("calendar: leap2024={cal.isleap(2024)} leap2023={cal.isleap(2023)} feb24={feb24.days} feb23={feb23.days}")
+
+    // 5. Missing zone or invalid zone name returns typed TimeError, never crashes.
+    if time.zone("NoSuch/Zone_Database_Missing") == {
+        .Ok(_) -> print("missing: unexpected ok")
+        .Err(error) -> print("missing: err:{error.reason}")
+    }
+    if time.zone("../escape") == {
+        .Ok(_) -> print("traversal: unexpected ok")
+        .Err(error) -> print("traversal: err:{error.reason}")
+    }
+}

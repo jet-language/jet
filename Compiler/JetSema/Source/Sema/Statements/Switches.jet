@@ -475,7 +475,7 @@ sema_stmt_check_unit_if: fn(expr: Expr, return_type: Type?, check: ^SemaBodyChec
             // test with the branches swapped, as in the value form.
             if sema_expression_absent_optional_test(condition) == .Val(test) {
                 if sema_expression_flow_optional_payload(check.scopes, test.name.name) != None && sema_expression_if_absent_test_swaps(else_value, test.name.name) {
-                    return sema_stmt_check_unit_if_parts(sema_expression_presence_test(test.name, test.span), else_body, else_value, then_body, then_value, span, return_type, check, loop_depth)
+                    return sema_stmt_check_unit_if_parts(sema_expression_presence_test(test.name, test.span), then_body: else_body, then_value: else_value, else_body: then_body, else_value: then_value, span: span, return_type: return_type, check: check, loop_depth: loop_depth)
                 }
             }
             sema_stmt_check_unit_if_parts(condition, then_body, then_value, else_body, else_value, span, return_type, check, loop_depth)

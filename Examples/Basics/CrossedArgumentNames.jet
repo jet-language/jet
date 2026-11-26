@@ -1,0 +1,55 @@
+// Crossed argument names (`E0773`): passing positional variables in a swapped
+// or rotated order across same-typed parameters is rejected at check time.
+// Matching order, explicit parameter labels for intentional reversals,
+// same-variable duplication, and positional-only (`/`) parameters stay concise
+// and readable.
+
+Box2: struct {
+    width: Int,
+    height: Int,
+}
+
+copy_pair: fn(src: String, dst: String) -> String { "{src}->{dst}" }
+
+rotate: fn(a: Int, b: Int, c: Int) -> String { "{a},{b},{c}" }
+
+area: fn(width: Int, height: Int) -> Int { width * height }
+
+pair_up: fn<T>(first: T, second: T) -> [T] { [T]{first, second} }
+
+raw_pair: fn(src: String, dst: String, /) -> String { "{src}->{dst}" }
+
+run: fn() {
+    // 1. Positional calls in matching order work with zero extra ceremony.
+    src: "input"
+    dst: "output"
+    print("normal {copy_pair(src, dst)}")
+
+    // 2. Intentional reversals opt out cleanly with explicit parameter labels.
+    print("reversed {copy_pair(src: dst, dst: src)}")
+
+    // 3. Multi-argument rotations also use explicit labels when intentional.
+    a: 1
+    b: 2
+    c: 3
+    print("rotated {rotate(a: b, b: c, c: a)}")
+
+    // 4. Duplicating one variable (such as a square) and field projections
+    //    never form a crossed-name cycle.
+    width: 6
+    height: 4
+    print("rect {area(width, height)} square {area(width, width)}")
+    box_a: Box2{width: 3, height: 5}
+    box_b: Box2{width: 7, height: 2}
+    print("projected {area(box_a.height, box_b.width)}")
+
+    // 5. Generic functions check crossed names after type inference settles;
+    //    labeling an intentional swap stays clear.
+    first: 10
+    second: 20
+    swapped: pair_up(first: second, second: first)
+    print("generic {swapped[0]} {swapped[1]}")
+
+    // 6. Positional-only parameters (`/`) keep their names private.
+    print("positional_only {raw_pair(dst, src)}")
+}

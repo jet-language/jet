@@ -11231,6 +11231,29 @@ AmbiguousCall: struct {
     }
 }
 
+CrossedArgumentNames: struct {
+    impl Diagnostic {
+        code: "E0773",
+        safety_class: .Opinion,
+        safety_reason: "Passing an argument named like a different same-typed parameter would typecheck and run, and Jet refuses it so swapped arguments fail at check time instead of silently running in the wrong order.",
+        meaning: "Crossed positional argument names at a call site",
+        no_fix: .Ambiguous,
+        fix_next: "Swap the crossed arguments to match the declaration order, or pass them with explicit labels.",
+
+        what: fn(self) -> String {
+            "A positional argument is named like a different parameter of the same type"
+        }
+
+        why: fn(self) -> String {
+            "Passing a variable by position when its name matches another parameter of the same type usually means the arguments were swapped"
+        }
+
+        fix: fn(self) -> String {
+            "Swap the arguments to match the declaration order, or label them explicitly."
+        }
+    }
+}
+
 MarkerRowOutsideContract: struct {
     marker: String,
     entry: String,

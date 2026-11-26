@@ -1,0 +1,57 @@
+package: {
+    name: "time_format_patterns"
+    version: "0.1.0"
+    authority: { allow: [Env, FS.Read, IO, Mem.Alloc] }
+}
+
+// One canonical percent-code pattern table drives time.strftime, .format,
+// .format_checked, and .parse_format across LocalDate, LocalTime, DateTime,
+// and ZonedDateTime in one single pass.
+use time: core.time
+
+run: fn() {
+    dt: time.datetime(-5, 1, 2, 3, 4, 5).add_nanoseconds(123456789)
+    // One-pass percent semantics: strftime, .format, and .format_checked agree.
+    pat: "%Y %%Y %f %L %N %z %:z %Z"
+    s_strftime: time.strftime(pat, dt)
+    s_format: dt.format(pat)
+    s_checked: dt.format_checked(pat) ?? panic("checked format failed")
+    print("agree: {s_strftime == s_format && s_strftime == s_checked}")
+    print("canonical: {s_format}")
+    print("no-pad and literals: {dt.format("%-Y-%-m-%-d %H:%M class")}")
+
+    // Zone names are emitted in one pass and never re-scanned (`ss` in Brussels stays intact).
+    brussels: time.zone("Europe/Brussels") ?? panic("Europe/Brussels")
+    zb: time.zoned(time.datetime(2024, 3, 9, 12, 34, 56), brussels)
+    print("zoned: {zb.format("%F %T %Z %:z %z")}")
+
+    // Formatting and parsing use the exact same pattern table.
+    d: time.new(2024, 2, 29)
+    d_text: d.format("%a, %d %b %Y")
+    d_back: LocalDate.parse_format(d_text, "%a, %d %b %Y") ?? panic("parse date")
+    print("date roundtrip: {d_back == d} ({d_text})")
+
+    lt: time.local_time(13, 4, 5).add_duration(time.duration_ns(123456789))
+    lt_text: lt.format("%H:%M:%S.%N")
+    lt_back: LocalTime.parse_format(lt_text, "%H:%M:%S.%N") ?? panic("parse time")
+    print("time roundtrip: {lt_back == lt} ({lt_text})")
+
+    dt2: time.datetime(2024, 3, 9, 12, 34, 56).add_nanoseconds(123456789)
+    dt_text: dt2.format("%F %T.%N %:z")
+    dt_back: DateTime.parse_format(dt_text, "%F %T.%N %:z") ?? panic("parse datetime")
+    print("datetime roundtrip: {dt_back == dt2} ({dt_text})")
+
+    // Receiver boundaries reject missing fields cleanly in format_checked.
+    if d.format_checked("%H") == {
+        .Ok(_) -> print("unexpected")
+        .Err(error) -> print("date-refuses-time: {error.message}")
+    }
+    if lt.format_checked("%Y") == {
+        .Ok(_) -> print("unexpected")
+        .Err(error) -> print("time-refuses-date: {error.message}")
+    }
+    if dt2.format_checked("%Q") == {
+        .Ok(_) -> print("unexpected")
+        .Err(error) -> print("unknown-code: {error.message}")
+    }
+}

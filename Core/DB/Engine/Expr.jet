@@ -253,14 +253,14 @@ binary_compare_coll_seq: fn(p: ^cg.Parse, a: ^ast.AST, l: Int, r: Int) -> Int Ne
 expr_compare_coll_seq: fn(p: ^cg.Parse, a: ^ast.AST, e: Int) -> Int Never! {
     l: a.exprs[e].left
     r: a.exprs[e].right
-    if ast.has(a, e, ast.EP_COMMUTED) -> return binary_compare_coll_seq(p, a, r, l)
+    if ast.has(a, e, ast.EP_COMMUTED) -> return binary_compare_coll_seq(p, a, l: r, r: l)
     binary_compare_coll_seq(p, a, l, r)
 }
 
 // codeCompare: a comparison opcode over registers in1 and in2.
 code_compare: fn(p: ^cg.Parse, a: ^ast.AST, l: Int, r: Int, opcode: Int, in1: Int, in2: Int, dest: Int, jump_if_null: Int, is_commuted: Bool) -> Int Never! {
     if cg.n_err(a) > 0 -> return 0
-    coll: if is_commuted -> binary_compare_coll_seq(p, a, r, l) else -> binary_compare_coll_seq(p, a, l, r)
+    coll: if is_commuted -> binary_compare_coll_seq(p, a, l: r, r: l) else -> binary_compare_coll_seq(p, a, l, r)
     p5: binary_compare_p5(p.db, a, l, r, jump_if_null)
     addr: cg.op4(p, opcode, in2, dest, in1, coll_p4(coll))
     cg.v_change_p5(p, p5)

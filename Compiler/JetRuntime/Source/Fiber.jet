@@ -592,7 +592,7 @@ fiber_heap_before: fn(a: I64, b: I64) -> Bool {
 fiber_heap_meld: fn(a: I64, b: I64) -> I64 {
     if (a == I64{0}) { return b }
     if (b == I64{0}) { return a }
-    if fiber_heap_before(b, a) -> return fiber_heap_meld(b, a)
+    if fiber_heap_before(a: b, b: a) -> return fiber_heap_meld(a: b, b: a)
     first: sync_load(wrapping(a + I64{160}))
     sync_store(wrapping(b + I64{168}), first)
     if (first != I64{0}) { sync_store(wrapping(first + I64{176}), b) }
