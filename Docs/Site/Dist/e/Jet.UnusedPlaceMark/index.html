@@ -5,9 +5,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Jet.UnusedPlaceMark — Jet diagnostic</title>
-<meta name="description" content="This mark does not match a call or move that writes or takes the marked place.">
+<meta name="description" content="This mark does not match a named argument that the call changes or takes, or sits on a receiver, fresh value, copied type, function item, or unmovable part.">
 <meta property="og:title" content="Jet.UnusedPlaceMark — Jet diagnostic">
-<meta property="og:description" content="This mark does not match a call or move that writes or takes the marked place.">
+<meta property="og:description" content="This mark does not match a named argument that the call changes or takes, or sits on a receiver, fresh value, copied type, function item, or unmovable part.">
 <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
 <link rel="stylesheet" href="../../assets/site.css">
 </head>
@@ -25,16 +25,16 @@
 <div class="page-header">
 <p class="eyebrow">// diagnostic E0225</p>
 <h1>Jet.UnusedPlaceMark</h1>
-<p>This mark does not match a call or move that writes or takes the marked place.</p>
+<p>This mark does not match a named argument that the call changes or takes, or sits on a receiver, fresh value, copied type, function item, or unmovable part.</p>
 </div>
 </section>
 <article class="wrap article">
 <h2>What</h2>
-<p class="diag-copy what" data-registry-field="what">This mark does not match a call or move that writes or takes the marked place.</p>
+<p class="diag-copy what" data-registry-field="what">This mark does not match a named argument that the call changes or takes, or sits on a receiver, fresh value, copied type, function item, or unmovable part.</p>
 <h2>Why</h2>
-<p class="diag-copy why" data-registry-field="why">A mark belongs only on a call&#39;s receiver or argument that the callee writes or takes, before a changeable name, and on `task ^^name`; a write window is `place.in_place()`, and `x.move()` takes a name or one of its fields. Read calls and fresh values such as literals and call results take no mark, and a collection element stays in its collection.</p>
+<p class="diag-copy why" data-registry-field="why">A call writes `^` before a named argument it changes (`grow(^xs)`) and may write `^^` before a whole non-copy name it takes (`seal(^^buf)`). Method receivers stay unmarked (`xs.push(4)`), read arguments, fresh values, copied types, and function items take no mark, a field moves with `owner.field.move()`, and a collection element stays owned by its collection.</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Remove the mark.</p>
+<p class="diag-copy fix" data-registry-field="fix">Remove the mark, or write `.move()` on a movable field.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>Jet.UnusedPlaceMark</code>: <code>Tests/UI/move_mark_borrowed.stderr</code>.</p>
 <pre class="diag">Error: Jet.MissingMoveMarker: `xs` cannot be moved from borrowed storage

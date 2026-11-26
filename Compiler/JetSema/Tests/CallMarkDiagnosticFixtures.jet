@@ -58,3 +58,114 @@ call_mark_diag_find: fn(diagnostics: [Diagnostic], code: String) -> [Int] {
     unwritten: call_mark_diag_find(diagnostics, "E0514")
     assert_eq(unwritten.len(), 0)
 }
+
+#Test("call_mark_default_accepts_write_marks_and_pipe_head") {
+    source: "Holder: struct {{ count: Int }}\nRunner: struct {{ action: fn(^Int) }}\nbump: fn(n: ^Int) {{ n += 1 }}\nload: fn(h: ^Holder) {{ bump(^h.count) }}\ngrow: fn(xs: ^[Int]) -> Int {{ xs.push(4); xs.len() }}\nsort_part: fn(xs: ^[Int]) {{ xs[0] = 9 }}\ncopy_to: fn(to: ^[Int], value: Int) {{ to.push(value) }}\nput_one: fn<T>(xs: ^[T], item: ^^T) {{ xs.push(item) }}\nrun: fn() {{\n    ^h: Holder{{count: 1}}\n    load(^h)\n    ^xs: [Int]{{1, 2, 3}}\n    _: grow(^xs)\n    sort_part(^xs[0..2])\n    bump(^xs[0])\n    copy_to(to: ^xs, value: 9)\n    put_one(^xs, 7)\n    xs.push(5)\n    _: xs |> grow(^<>)\n    runner: Runner{{action: bump}}\n    runner.action(^h.count)\n}}\n"
+    diagnostics: core_failure_record_diagnostics(source, "user/call_mark_default_write_ok")
+    assert_eq(diagnostics.len(), 0)
+}
+
+#Test("call_mark_default_accepts_and_checks_take_mark") {
+    ok_source: "seal: fn(buf: ^^[Int]) -> Int {{ buf.len() }}\nrun: fn() {{\n    buf: [Int]{{1, 2}}\n    _: seal(^^buf)\n}}\n"
+    ok_diags: core_failure_record_diagnostics(ok_source, "user/call_mark_default_take_ok")
+    assert_eq(ok_diags.len(), 0)
+
+    bad_source: "seal: fn(buf: ^^[Int]) -> Int {{ buf.len() }}\nrun: fn() {{\n    buf: [Int]{{1, 2}}\n    _: seal(^^buf)\n    _: buf.len()\n}}\n"
+    bad_diags: core_failure_record_diagnostics(bad_source, "user/call_mark_default_take_reuse")
+    assert(call_mark_diag_find(bad_diags, "E0209").len() >= 1)
+    assert_eq(call_mark_diag_find(bad_diags, "E0225").len(), 0)
+    assert_eq(call_mark_diag_find(bad_diags, "E0228").len(), 0)
+}
+
+#Test("call_mark_default_refuses_receiver_marks_with_e0225") {
+    source: "Boxed: struct {{\n    items: [Int],\n    seal: fn(^^self) -> Int {{ self.items.len() }}\n}}\nrun: fn() {{\n    ^xs: [Int]{{1, 2}}\n    ^xs.push(4)\n    _: ^xs.len()\n    b: Boxed{{items: [Int]{{1}}}}\n    _: ^^b.seal()\n}}\n"
+    diagnostics: core_failure_record_diagnostics(source, "user/call_mark_default_receiver_e0225")
+    marks: call_mark_diag_find(diagnostics, "E0225")
+    assert_eq(marks.len(), 3)
+    loop idx in marks {
+        diag: diagnostics[idx]
+        assert(!diag.what.contains("nothing writes"))
+        assert(diag.what.contains("receivers are never marked"))
+        edit: diag.edit ?? panic("expected Safe removal edit on receiver E0225")
+        assert_eq(edit.new_text, "")
+    }
+    assert(diagnostics[marks[0]].why.contains("changes its receiver"))
+    assert(diagnostics[marks[1]].why.contains("reads its receiver"))
+    assert(diagnostics[marks[2]].why.contains("takes its receiver"))
+}
+
+#Test("call_mark_default_refuses_read_and_fresh_marks_with_e0225") {
+    source: "make: fn() -> Int {{ 42 }}\ncount: fn(xs: [Int]) -> Int {{ xs.len() }}\ngrow: fn(n: ^Int) {{ n += 1 }}\nseal: fn(s: ^^String) -> Int {{ s.len() }}\nrun: fn() {{\n    ^xs: [Int]{{1, 2}}\n    _: count(^xs)\n    _: count(^^xs)\n    grow(^42)\n    grow(^make())\n    _: seal(^^\"hello\")\n}}\n"
+    diagnostics: core_failure_record_diagnostics(source, "user/call_mark_default_read_fresh_e0225")
+    marks: call_mark_diag_find(diagnostics, "E0225")
+    assert_eq(marks.len(), 5)
+    loop idx in marks {
+        edit: diagnostics[idx].edit ?? panic("expected Safe removal edit on E0225")
+        assert_eq(edit.new_text, "")
+    }
+}
+
+#Test("call_mark_default_field_take_mark_rewrites_to_move_method") {
+    source: "Holder: struct {{ buf: [Int] }}\nseal: fn(buf: ^^[Int]) -> Int {{ buf.len() }}\nrun: fn() {{\n    ^st: Holder{{buf: [Int]{{1}}}}\n    _: seal(^^st.buf)\n    ^rows: [[Int]]{{[Int]{{1}}}}\n    _: seal(^^rows[0])\n}}\n"
+    diagnostics: core_failure_record_diagnostics(source, "user/call_mark_default_field_take_e0225")
+    marks: call_mark_diag_find(diagnostics, "E0225")
+    assert_eq(marks.len(), 2)
+    field_diag: diagnostics[marks[0]]
+    assert(field_diag.why.contains("takes this input"))
+    first_edit: field_diag.edit ?? panic("expected Safe edit removing ^^ on field")
+    assert_eq(first_edit.new_text, "")
+    assert_eq(field_diag.fix_edits.len(), 1)
+    assert_eq(field_diag.fix_edits[0].new_text, ".move()")
+    needle: "seal(^^st.buf)"
+    call_at: source.index_of(needle) ?? panic("field call not found")
+    assert_eq(field_diag.fix_edits[0].span.start, call_at + "seal(^^st.buf".len())
+    assert_eq(field_diag.fix_edits[0].span.end, call_at + "seal(^^st.buf".len())
+    index_diag: diagnostics[marks[1]]
+    index_edit: index_diag.edit ?? panic("expected Safe removal edit on index ^^")
+    assert_eq(index_edit.new_text, "")
+    assert_eq(index_diag.fix_edits.len(), 0)
+}
+
+#Test("call_mark_default_copied_and_function_take_marks_refused_with_e0225") {
+    source: "take_n: fn(n: ^^Int) -> Int {{ n }}\nid: fn<T>(x: ^^T) -> T {{ x }}\nhelper: fn(x: Int) -> Int {{ x + 1 }}\ntake_fn: fn(f: ^^fn(Int) -> Int) -> Int {{ f(1) }}\nrun: fn() {{\n    n: 3\n    _: take_n(^^n)\n    _: id(^^n)\n    _: take_fn(^^helper)\n}}\n"
+    diagnostics: core_failure_record_diagnostics(source, "user/call_mark_default_copy_fn_e0225")
+    marks: call_mark_diag_find(diagnostics, "E0225")
+    assert_eq(marks.len(), 3)
+    loop idx in marks {
+        edit: diagnostics[idx].edit ?? panic("expected Safe removal edit on E0225")
+        assert_eq(edit.new_text, "")
+        assert(!diagnostics[idx].why.contains("reads this input"))
+    }
+}
+
+#Test("call_mark_default_wrong_argument_marks_e0228") {
+    source: "grow: fn(xs: ^[Int]) {{ xs.push(1) }}\nseal: fn(buf: ^^[Int]) -> Int {{ buf.len() }}\nrun: fn() {{\n    ^xs: [Int]{{1}}\n    grow(^^xs)\n    buf: [Int]{{2}}\n    _: seal(^buf)\n}}\n"
+    diagnostics: core_failure_record_diagnostics(source, "user/call_mark_default_wrong_e0228")
+    marks: call_mark_diag_find(diagnostics, "E0228")
+    assert_eq(marks.len(), 2)
+    write_edit: diagnostics[marks[0]].edit ?? panic("expected Safe edit fixing ^^ to ^")
+    assert_eq(write_edit.new_text, "^")
+    assert(!diagnostics[marks[0]].why.contains("#Policy"))
+    take_edit: diagnostics[marks[1]].edit ?? panic("expected Safe edit fixing ^ to ^^")
+    assert_eq(take_edit.new_text, "^^")
+    assert(!diagnostics[marks[1]].why.contains("#Policy"))
+}
+
+#Test("call_mark_named_pipe_head_names_diamond") {
+    policy_source: "#Policy(writes: .Explicit)\ngrow: fn(xs: ^[Int]) -> Int {{ xs.len() }}\nrun: fn() {{\n    ^xs: [Int]{{1}}\n    _: xs |> grow(<>)\n}}\n"
+    policy_diags: core_failure_record_diagnostics(policy_source, "user/call_mark_pipe_policy")
+    policy_marks: call_mark_diag_find(policy_diags, "E0228")
+    assert_eq(policy_marks.len(), 1)
+    assert(policy_diags[policy_marks[0]].what.contains("`<>`"))
+    assert(!policy_diags[policy_marks[0]].what.contains("`xs`"))
+    assert(policy_diags[policy_marks[0]].fix.contains("`^<>`"))
+
+    default_source: "grow: fn(xs: ^[Int]) -> Int {{ xs.len() }}\nrun: fn() {{\n    ^xs: [Int]{{1}}\n    _: xs |> grow(^^<>)\n}}\n"
+    default_diags: core_failure_record_diagnostics(default_source, "user/call_mark_pipe_default")
+    default_marks: call_mark_diag_find(default_diags, "E0228")
+    assert_eq(default_marks.len(), 1)
+    assert(default_diags[default_marks[0]].what.contains("`<>`"))
+    assert(!default_diags[default_marks[0]].what.contains("`xs`"))
+    edit: default_diags[default_marks[0]].edit ?? panic("expected Safe edit fixing ^^ to ^")
+    assert_eq(edit.new_text, "^")
+}

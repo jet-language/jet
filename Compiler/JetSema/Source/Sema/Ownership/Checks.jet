@@ -521,6 +521,7 @@ SemaReceiverMarkFrame: struct {
     receiver_span: Span,
     convention: AccessConvention?,
     signature: String{""},
+    written_mark: Bool{false},
 }
 
 SemaOwnershipCallViewFact: struct {
@@ -4719,7 +4720,7 @@ sema_ownership_check_method_receiver: fn(check: ^SemaBodyCheck, receiver: Expr, 
 // changeability error quotes.
 sema_ownership_check_call_receiver_as: fn(check: ^SemaBodyCheck, receiver: Expr, convention: AccessConvention, capability: Bool, method: String, consumer: String, params: [SemaCallParam], span: Span, change_span: Span) -> Bool {
     sema_ownership_note_call_receiver(check.state, receiver, convention)
-    if check.scopes.writes_explicit && convention != AccessConvention.Read {
+    if (check.scopes.writes_explicit && convention != AccessConvention.Read) || sema_receiver_mark_needs_signature(check.state, receiver) {
         sema_receiver_mark_sign(check.state, receiver, sema_ownership_signature_line(method, Val(convention), params))
     }
     places: sema_ownership_places_from_expr_in_state(receiver, check.scopes, check.state)
@@ -4806,6 +4807,7 @@ sema_receiver_mark_rank: fn(convention: AccessConvention) -> Int Never! {
 // (`g[1] = 99` through an index hook) is checked as its value; a write window
 // receiver (`values[0..1].sort()`) keeps its `^place` construction.
 sema_receiver_mark_begin: fn(state: ^SemaOwnershipState, receiver: Expr) -> Expr {
+    written_mark: sema_call_marks_written_receiver(receiver) != None
     ^unmarked: receiver
     if receiver == .Place(value, access, _, _) {
         window: if value == {
@@ -4814,8 +4816,21 @@ sema_receiver_mark_begin: fn(state: ^SemaOwnershipState, receiver: Expr) -> Expr
         }
         if access != PlaceAccess.Read && !window -> unmarked = value
     }
-    state.receiver_frames.push(SemaReceiverMarkFrame{receiver_span: expr_span(unmarked), convention: None})
+    state.receiver_frames.push(SemaReceiverMarkFrame{receiver_span: expr_span(unmarked), convention: None, written_mark: written_mark})
     unmarked
+}
+
+sema_receiver_mark_needs_signature: fn(state: SemaOwnershipState, receiver: Expr) -> Bool Never! {
+    span: expr_span(receiver)
+    ^index: state.receiver_frames.len() - 1
+    loop index >= 0 {
+        frame: state.receiver_frames[index]
+        if frame.receiver_span.start == span.start && frame.receiver_span.end == span.end {
+            return frame.written_mark
+        }
+        index -= 1
+    }
+    false
 }
 
 sema_receiver_mark_note: fn(state: ^SemaOwnershipState, receiver: Expr, convention: AccessConvention) {
@@ -4993,7 +5008,7 @@ sema_ownership_check_call_receiver_with_footprint: fn(check: ^SemaBodyCheck, rec
         return sema_ownership_check_call_receiver_as(check, receiver, convention, capability, method, consumer, params, span, change_span)
     }
     sema_ownership_note_call_receiver(check.state, receiver, convention)
-    if check.scopes.writes_explicit && convention != AccessConvention.Read {
+    if (check.scopes.writes_explicit && convention != AccessConvention.Read) || sema_receiver_mark_needs_signature(check.state, receiver) {
         sema_receiver_mark_sign(check.state, receiver, sema_ownership_signature_line(method, Val(convention), params))
     }
     base_places: sema_ownership_places_from_expr_in_state(receiver, check.scopes, check.state)
