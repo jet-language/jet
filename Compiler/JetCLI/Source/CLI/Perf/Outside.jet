@@ -1594,3 +1594,315 @@ jet_cli_perf_outside_flame_push: fn(pending: ^[Int], depths: ^[Int], nodes: [Int
         depths.push(depth)
     }
 }
+
+// The trace's `timeline` receipt section's value, None when it has none.
+jet_cli_perf_timeline_section: fn(trace: CanonicalJSON) -> CanonicalJSON? Never! {
+    items: jet_cli_perf_rows(trace, "receipt_sections") ?? return None
+    loop item in items {
+        section: trace_receipt_section_from_json(item) ?? next
+        if section.name == "timeline" -> return Val(section.value)
+    }
+    None
+}
+
+// Total sampled count recorded by the `functions` receipt section, or 0 when
+// absent.
+jet_cli_perf_outside_samples: fn(trace: CanonicalJSON) -> Int Never! {
+    value: jet_cli_perf_outside_section(trace) ?? return 0
+    jet_cli_perf_member_number(value, "samples") ?? 0
+}
+
+// One directed call-graph edge aggregated from a trace's call tree or folded
+// stacks: either `owner` -> `target` (measured callees) or `owner` <- `target`
+// (measured callers), weighted by `samples`.
+JetCLIPerfFunctionEdge: struct {
+    owner: String,
+    target: String,
+    samples: Int,
+}
+
+priv jet_cli_perf_json_int: fn(value: CanonicalJSON) -> Int? Never! {
+    if value == {
+        .Integer(text) -> {
+            parsed: Int.parse(text) ?? return None
+            Val(parsed)
+        }
+        .Null | .Bool(_) | .String(_) | .Array(_) | .Object(_) -> None
+    }
+}
+
+priv jet_cli_perf_timeline_edges: fn(trace: CanonicalJSON, want_callers: Bool) -> [JetCLIPerfFunctionEdge] Never! {
+    ^edges: [JetCLIPerfFunctionEdge]{}
+    value: jet_cli_perf_timeline_section(trace) ?? return edges
+    fields: jettrace_object_view(value, "receipt timeline") ?? return edges
+    fn_at: jet_cli_perf_key(fields, "functions") ?? return edges
+    nodes_at: jet_cli_perf_key(fields, "nodes") ?? return edges
+    samples_at: jet_cli_perf_key(fields, "samples") ?? return edges
+    fn_rows: jettrace_array(fields[fn_at].value, "receipt timeline.functions") ?? return edges
+    node_vals: jettrace_array(fields[nodes_at].value, "receipt timeline.nodes") ?? return edges
+    sample_vals: jettrace_array(fields[samples_at].value, "receipt timeline.samples") ?? return edges
+    ^fn_names: [String]{}
+    loop row in fn_rows {
+        fn_names.push(jet_cli_perf_member_text(row, "name") ?? "")
+    }
+    fn_count: fn_names.len()
+    node_count: node_vals.len() /% 2
+    if fn_count == 0 || node_count == 0 -> return edges
+    ^node_fn: [Int]{}
+    ^node_parent: [Int]{}
+    ^node_total: [Int]{}
+    loop index in 0..<node_count {
+        node_fn.push(jet_cli_perf_json_int(node_vals[index * 2]) ?? -1)
+        node_parent.push(jet_cli_perf_json_int(node_vals[index * 2 + 1]) ?? -1)
+        node_total.push(0)
+    }
+    sample_count: sample_vals.len() /% 2
+    loop index in 0..<sample_count {
+        leaf: jet_cli_perf_json_int(sample_vals[index * 2 + 1]) ?? -1
+        if leaf >= 0 && leaf < node_count {
+            node_total[leaf] = node_total[leaf] + 1
+        }
+    }
+    ^rev: node_count - 1
+    loop rev >= 0 {
+        parent: node_parent[rev]
+        if parent >= 0 && parent < node_count {
+            node_total[parent] = node_total[parent] + node_total[rev]
+        }
+        rev -= 1
+    }
+    ^edge_owners: [Int]{}
+    ^edge_targets: [Int]{}
+    ^edge_counts: [Int]{}
+    ^positions: [Int:Int]{}
+    loop index in 0..<node_count {
+        count: node_total[index]
+        if count <= 0 -> next
+        parent: node_parent[index]
+        if parent < 0 || parent >= node_count -> next
+        caller_idx: node_fn[parent]
+        callee_idx: node_fn[index]
+        if caller_idx < 0 || caller_idx >= fn_count || callee_idx < 0 || callee_idx >= fn_count || caller_idx == callee_idx {
+            next
+        }
+        owner_idx: if want_callers -> callee_idx else -> caller_idx
+        target_idx: if want_callers -> caller_idx else -> callee_idx
+        key: owner_idx * fn_count + target_idx
+        pos: positions[key, or: -1]
+        if pos >= 0 {
+            edge_counts[pos] = edge_counts[pos] + count
+        } else {
+            positions[key] = edge_counts.len()
+            edge_owners.push(owner_idx)
+            edge_targets.push(target_idx)
+            edge_counts.push(count)
+        }
+    }
+    loop index in 0..<edge_counts.len() {
+        owner_name: fn_names[edge_owners[index]]
+        target_name: fn_names[edge_targets[index]]
+        if owner_name == "" || target_name == "" -> next
+        edges.push(JetCLIPerfFunctionEdge{owner: "{owner_name}", target: "{target_name}", samples: edge_counts[index]})
+    }
+    edges.sort_by(fn(left: JetCLIPerfFunctionEdge, right: JetCLIPerfFunctionEdge) { (left.owner <=> right.owner).then(right.samples <=> left.samples).then(left.target <=> right.target) })
+    edges
+}
+
+priv jet_cli_perf_stack_edges_dir: fn(trace: CanonicalJSON, want_callers: Bool) -> [JetCLIPerfFunctionEdge] Never! {
+    from_timeline: jet_cli_perf_timeline_edges(trace, want_callers)
+    if from_timeline.len() > 0 -> return from_timeline
+    ^edges: [JetCLIPerfFunctionEdge]{}
+    value: jet_cli_perf_outside_section(trace) ?? return edges
+    fields: jettrace_object_view(value, "receipt functions") ?? return edges
+    at: jet_cli_perf_key(fields, "stacks") ?? return edges
+    rows: jettrace_array(fields[at].value, "receipt functions.stacks") ?? return edges
+    ^positions: [String:Int]{}
+    loop row in rows {
+        stack: jet_cli_perf_member_text(row, "stack") ?? next
+        count: jet_cli_perf_member_number(row, "samples") ?? next
+        if count <= 0 -> next
+        frames: stack.split(";").to_list()
+        if frames.len() < 2 -> next
+        loop index in 0..<(frames.len() - 1) {
+            caller: frames[index]
+            callee: frames[index + 1]
+            if caller == "" || callee == "" || caller == callee -> next
+            owner: if want_callers -> callee else -> caller
+            target: if want_callers -> caller else -> callee
+            key: "{owner}\n{target}"
+            pos: positions[key, or: -1]
+            if pos >= 0 {
+                edges[pos].samples += count
+            } else {
+                positions[key] = edges.len()
+                edges.push(JetCLIPerfFunctionEdge{owner: "{owner}", target: "{target}", samples: count})
+            }
+        }
+    }
+    edges.sort_by(fn(left: JetCLIPerfFunctionEdge, right: JetCLIPerfFunctionEdge) { (left.owner <=> right.owner).then(right.samples <=> left.samples).then(left.target <=> right.target) })
+    edges
+}
+
+// Direct callers (`owner` = callee, `target` = caller), sorted by owner then
+// hottest first. Reads the full `timeline` call tree when present, else
+// `functions.stacks`.
+jet_cli_perf_stack_callers: fn(trace: CanonicalJSON) -> [JetCLIPerfFunctionEdge] Never! {
+    jet_cli_perf_stack_edges_dir(trace, true)
+}
+
+// Direct callees (`owner` = caller, `target` = callee), sorted by owner then
+// hottest first. Reads the full `timeline` call tree when present, else
+// `functions.stacks`.
+jet_cli_perf_stack_callees: fn(trace: CanonicalJSON) -> [JetCLIPerfFunctionEdge] Never! {
+    jet_cli_perf_stack_edges_dir(trace, false)
+}
+
+// First index of each `edge.owner` in a sorted `[JetCLIPerfFunctionEdge]` list.
+jet_cli_perf_edge_starts: fn(edges: [JetCLIPerfFunctionEdge]) -> [String:Int] Never! {
+    ^starts: [String:Int]{}
+    loop (index, edge) in edges {
+        if !starts.has_key(edge.owner) {
+            starts["{edge.owner}"] = index
+        }
+    }
+    starts
+}
+
+// Formats a callee or caller symbol for human display, keeping hashed compiler
+// helper symbols beside their readable kind.
+jet_cli_perf_display_symbol: fn(name: String) -> String Never! {
+    if name.starts_with(JET_CLI_PERF_HELPER_PREFIX) -> return jet_cli_perf_helper_name(name)
+    "{name}"
+}
+
+// Top direct callers per hot function from the trace's call tree, covering
+// every function in `functions.functions` plus every function in
+// `hot_functions` (the per-line table's hot functions), hottest first.
+jet_cli_perf_callers_lines: fn(trace: CanonicalJSON, hot_functions: [String]) -> [String] Never! {
+    ^lines: [String]{}
+    edges: jet_cli_perf_stack_callers(trace)
+    if edges.len() == 0 -> return lines
+    starts: jet_cli_perf_edge_starts(edges)
+    ^ordered: [String]{}
+    ^seen: [String:Bool]{}
+    if jet_cli_perf_outside_section(trace) == .Val(value) {
+        if jettrace_object_view(value, "receipt functions") == .Ok(fields) {
+            if jet_cli_perf_key(fields, "functions") == .Val(at) {
+                if jettrace_array(fields[at].value, "receipt functions.functions") == .Ok(rows) {
+                    loop row in rows {
+                        name: jet_cli_perf_member_text(row, "name") ?? next
+                        if name != "" && !seen.has_key(name) {
+                            seen[name] = true
+                            ordered.push(name)
+                        }
+                    }
+                }
+            }
+        }
+    }
+    loop name in hot_functions {
+        if name != "" && !seen.has_key(name) {
+            seen[name] = true
+            ordered.push("{name}")
+        }
+    }
+    loop fn_name in ordered {
+        ^idx: starts[fn_name, or: -1]
+        if idx < 0 -> next
+        ^parts: [String]{}
+        loop idx < edges.len() && edges[idx].owner == fn_name {
+            label: jet_cli_perf_display_symbol(edges[idx].target)
+            parts.push("{label} ({edges[idx].samples})")
+            if parts.len() >= 5 -> break
+            idx += 1
+        }
+        if parts.len() > 0 {
+            lines.push("  {fn_name} <- {parts.join(", ")}")
+        }
+    }
+    lines
+}
+
+priv jet_cli_perf_timeline_folded_stacks: fn(trace: CanonicalJSON) -> [String] Never! {
+    ^lines: [String]{}
+    value: jet_cli_perf_timeline_section(trace) ?? return lines
+    fields: jettrace_object_view(value, "receipt timeline") ?? return lines
+    fn_at: jet_cli_perf_key(fields, "functions") ?? return lines
+    nodes_at: jet_cli_perf_key(fields, "nodes") ?? return lines
+    samples_at: jet_cli_perf_key(fields, "samples") ?? return lines
+    fn_rows: jettrace_array(fields[fn_at].value, "receipt timeline.functions") ?? return lines
+    node_vals: jettrace_array(fields[nodes_at].value, "receipt timeline.nodes") ?? return lines
+    sample_vals: jettrace_array(fields[samples_at].value, "receipt timeline.samples") ?? return lines
+    ^fn_names: [String]{}
+    loop row in fn_rows {
+        fn_names.push(jet_cli_perf_member_text(row, "name") ?? "")
+    }
+    fn_count: fn_names.len()
+    node_count: node_vals.len() /% 2
+    if fn_count == 0 || node_count == 0 -> return lines
+    ^node_fn: [Int]{}
+    ^node_parent: [Int]{}
+    ^node_own: [Int]{}
+    loop index in 0..<node_count {
+        node_fn.push(jet_cli_perf_json_int(node_vals[index * 2]) ?? -1)
+        node_parent.push(jet_cli_perf_json_int(node_vals[index * 2 + 1]) ?? -1)
+        node_own.push(0)
+    }
+    sample_count: sample_vals.len() /% 2
+    loop index in 0..<sample_count {
+        leaf: jet_cli_perf_json_int(sample_vals[index * 2 + 1]) ?? -1
+        if leaf >= 0 && leaf < node_count {
+            node_own[leaf] = node_own[leaf] + 1
+        }
+    }
+    ^stacks: [String:Int]{}
+    loop index in 0..<node_count {
+        count: node_own[index]
+        if count <= 0 -> next
+        ^rev_frames: [String]{}
+        ^cur: index
+        loop cur >= 0 && cur < node_count {
+            fidx: node_fn[cur]
+            if fidx >= 0 && fidx < fn_count && fn_names[fidx] != "" {
+                rev_frames.push("{fn_names[fidx]}")
+            }
+            cur = node_parent[cur]
+        }
+        if rev_frames.len() == 0 -> next
+        ^ordered_frames: [String]{}
+        ^pos: rev_frames.len() - 1
+        loop pos >= 0 {
+            ordered_frames.push("{rev_frames[pos]}")
+            pos -= 1
+        }
+        joined: ordered_frames.join(";")
+        stacks[joined] = stacks[joined, or: 0] + count
+    }
+    ^rows: [{stack: String, samples: Int}]{}
+    loop (stack, samples) in stacks {
+        rows.push({stack: "{stack}", samples: samples})
+    }
+    rows.sort_by(fn(left: {stack: String, samples: Int}, right: {stack: String, samples: Int}) { (right.samples <=> left.samples).then(left.stack <=> right.stack) })
+    loop row in rows {
+        lines.push("{row.stack} {row.samples}")
+    }
+    lines
+}
+
+// Folded stack lines (`frame1;frame2;... N`) from the trace's call tree
+// (`timeline` when present, else `functions.stacks`), for `jet perf export --stacks`.
+jet_cli_perf_folded_stack_lines: fn(trace: CanonicalJSON) -> [String] Never! {
+    from_timeline: jet_cli_perf_timeline_folded_stacks(trace)
+    if from_timeline.len() > 0 -> return from_timeline
+    ^lines: [String]{}
+    value: jet_cli_perf_outside_section(trace) ?? return lines
+    fields: jettrace_object_view(value, "receipt functions") ?? return lines
+    at: jet_cli_perf_key(fields, "stacks") ?? return lines
+    rows: jettrace_array(fields[at].value, "receipt functions.stacks") ?? return lines
+    loop row in rows {
+        stack: jet_cli_perf_member_text(row, "stack") ?? next
+        count: jet_cli_perf_member_number(row, "samples") ?? next
+        if stack != "" && count > 0 -> lines.push("{stack} {count}")
+    }
+    lines
+}

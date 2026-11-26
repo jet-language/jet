@@ -24,7 +24,7 @@ use {
 
 jet_cli_perf_export: fn(args: [String], color: Bool) -[FS, Env, Time]> JetDriverVerbOutput Never! {
     extension: artifact_extension()
-    usage: "run `jet perf export <path{extension}> [--json|--pprof|--otel|--chrome|--emit-profile-map] [--out <path>]`"
+    usage: "run `jet perf export <path{extension}> [--json|--pprof|--otel|--chrome|--emit-profile-map|--stacks] [--out <path>]`"
     ^path: String?{None}
     ^mode: "json"
     // The argument after `--out` is its path.
@@ -37,6 +37,7 @@ jet_cli_perf_export: fn(args: [String], color: Bool) -[FS, Env, Time]> JetDriver
             "--otel" -> mode = "otel"
             "--chrome" -> mode = "chrome"
             "--emit-profile-map" -> mode = "profile-map"
+            "--stacks" -> mode = "stacks"
             "--out" -> out_at = index + 1
             else -> {
                 if arg.starts_with("-") {
@@ -64,6 +65,10 @@ jet_cli_perf_export: fn(args: [String], color: Bool) -[FS, Env, Time]> JetDriver
         "json" -> jet_cli_perf_json("perf.export", jet_cli_perf_envelope(trace))
         "otel" -> "{jet_cli_perf_otlp(trace)}\n"
         "chrome" -> String.from_bytes(canonical_json_bytes(jet_cli_perf_chrome(trace))) ?? ""
+        "stacks" -> {
+            folded: jet_cli_perf_folded_stack_lines(trace)
+            if folded.len() == 0 -> "" else -> "{folded.join("\n")}\n"
+        }
         else -> String.from_bytes(canonical_json_bytes(jet_cli_perf_profile_map(trace))) ?? ""
     }
     if out_at < 0 {

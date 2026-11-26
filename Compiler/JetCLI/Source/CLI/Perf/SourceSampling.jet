@@ -1708,12 +1708,31 @@ jet_cli_perf_pc_entry: fn(sampled: ^JetCLIPerfSamples, pc: Int) -> Int Never! {
     sampled.pcs.len() - 1
 }
 
+jet_cli_perf_is_lower_hex: fn(byte: U8) -> Bool Never! {
+    (byte >= (U8{48}) && byte <= (U8{57})) || (byte >= (U8{97}) && byte <= (U8{102}))
+}
+
+jet_cli_perf_has_hex_hash_suffix: fn(text: String) -> Bool Never! {
+    bytes: text.bytes()
+    if bytes.len() <= 17 || bytes[bytes.len() - 17] != (U8{95}) -> return false
+    loop index in (bytes.len() - 16)..<bytes.len() {
+        if !jet_cli_perf_is_lower_hex(bytes[index]) -> return false
+    }
+    true
+}
+
 // A compiler-emitted helper's image function `name` in Jet's terms: each
-// stop poll (JetIR Build.jet ir_stop_poll) is `stop poll`, another helper
-// its name past JET_CLI_PERF_HELPER_PREFIX with spaces for `_`.
+// stop poll (JetIR Build.jet ir_stop_poll) is `stop poll`, a hashed helper
+// keeps its callee symbol beside the readable kind (`map grow
+// (jet_ir_map_grow_76e6573179fa7127)`), and another helper is its name past
+// JET_CLI_PERF_HELPER_PREFIX with spaces for `_`.
 jet_cli_perf_helper_name: fn(name: String) -> String Never! {
     if name.starts_with("jet_ir_stop_") -> return "stop poll"
     rest: if name.starts_with(JET_CLI_PERF_HELPER_PREFIX) -> name.slice(JET_CLI_PERF_HELPER_PREFIX.len()..<name.len()) else -> name
+    if jet_cli_perf_has_hex_hash_suffix(rest) {
+        stem: rest.slice(0..<(rest.len() - 17)).replace("_", " ")
+        return "{stem} ({name})"
+    }
     rest.replace("_", " ")
 }
 

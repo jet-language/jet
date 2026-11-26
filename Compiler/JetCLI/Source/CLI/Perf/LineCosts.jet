@@ -143,15 +143,40 @@ jet_cli_perf_site_text: fn(site: Dyn, key: String) -> String? Never! {
     None
 }
 
+// Static `body_cost_fact` labels that fire on every map-mutating builtin or
+// List/FixedList index regardless of whether that path actually ran. These are
+// never printed on a sampled line unless measured samples show that path ran.
+jet_cli_perf_cost_speculative: fn(kind: String) -> Bool Never! {
+    kind == "map copy-on-write" || kind == "generic representation fallback"
+}
+
+jet_cli_perf_cost_observed: fn(kind: String, helpers: [JetCLIPerfLineHelper], path: String, line: Int, function: String) -> Bool Never! {
+    if !jet_cli_perf_cost_speculative(kind) -> return true
+    loop held in helpers {
+        if held.samples <= 0 || held.line != line || held.path != path || held.function != function -> next
+        name: held.helper.to_lower()
+        if kind == "map copy-on-write" && (name.contains("copy") || name.contains("cow") || name.contains("detach") || name.contains("clone")) {
+            return true
+        }
+        if kind == "generic representation fallback" && (name.contains("generic") || name.contains("fallback")) {
+            return true
+        }
+    }
+    false
+}
+
 // The cost facts at `line` of `path`, each distinct one once with how many
 // sites share it (` · cost: exact Int spill ×2 — semantic remainder (loop
-// depth 1, repeats every loop turn)`); empty when the line has none.
-jet_cli_perf_line_cost_text: fn(costs: JetCLIPerfLineCosts, path: String, line: Int) -> String Never! {
+// depth 1, repeats every loop turn)`); empty when the line has none. Static
+// speculative `body_cost_fact` labels are omitted unless `helpers` shows that
+// path ran on the sampled line.
+jet_cli_perf_line_cost_text: fn(costs: JetCLIPerfLineCosts, path: String, line: Int, helpers: [JetCLIPerfLineHelper]{[JetCLIPerfLineHelper]{}}, function: String{""}) -> String Never! {
     // Each distinct fact's first cost, and how many costs it stands for.
     ^firsts: [Int]{}
     ^counts: [Int]{}
     loop (index, cost) in costs.costs {
         if cost.line != line || cost.path != path -> next
+        if !jet_cli_perf_cost_observed(cost.kind, helpers, path, line, function) -> next
         ^found: -1
         loop (place, first) in firsts {
             known: costs.costs[first]
