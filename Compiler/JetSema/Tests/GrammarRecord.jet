@@ -26,6 +26,8 @@ use {
         sema_core_module_bodies,
         sema_has_error_since,
         sema_host_hook_access,
+        sema_marker_module_canonical_registry,
+        sema_marker_rules_validate_repeatability,
         sema_registration_prepare_graph,
     ]
     jet_parser.[parse_source]
@@ -33,6 +35,7 @@ use {
     jet_foundation.[
         CtEnumArg,
         CtValue,
+        Diagnostic,
         ModuleTable,
         NamedCtValue,
         Span,
@@ -202,4 +205,22 @@ priv grammar_record_graph: fn(table: ^ModuleTable, plans: [NamedCtValue], captur
         failures.push("the diagnostics differ")
     }
     assert_eq(failures, [String]{})
+}
+
+#Test("generated Rule and Token #Layout enums sharing a span pass repeatability while one enum with two #Layout markers still fails E0999") {
+    ^table: module_table()
+    handed: grammar_record_graph(table, grammar_record_plans(), false)
+    registry: sema_marker_module_canonical_registry() ?? panic("no canonical marker registry")
+    ^grammar_diags: [Diagnostic]{}
+    loop row in handed.modules {
+        if row.module_name == "main" {
+            sema_marker_rules_validate_repeatability(registry, row.program, grammar_diags)
+        }
+    }
+    assert_eq(grammar_diags.len(), 0)
+    repeated: parse_source("#Layout(U8)\n#Layout(U16)\nColor: enum {{ Red, Green }}\n".bytes())
+    ^repeated_diags: [Diagnostic]{}
+    sema_marker_rules_validate_repeatability(registry, repeated.program, repeated_diags)
+    assert_eq(repeated_diags.len(), 1)
+    assert_eq(repeated_diags[0].code, "E0999")
 }
