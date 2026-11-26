@@ -22,7 +22,7 @@ use {
     parquet: __core_data_parquet
     core.crypto.[sha256]
     time: core.time
-    core.time.[DateTime]
+    core.time.[DateTime, Instant]
     quantile_select.[finite_quantile, select_rank]
     rank_order.[rank_select_prototype, rank_select_range, rank_test_before, rank_test_refusing, rank_test_text_before, rank_test_values]
 }
@@ -460,7 +460,7 @@ Query: struct<T> {
     // A watch over the query (DataWatch), which keeps its rows and maintains
     // them from the edits of the `data.track` rows the query reads. Only
     // such a query can be watched.
-    watch: fn(self) -> DataWatch<T> DataError! { query_watch<T>(self) }
+    watch: fn(self) -[Time]> DataWatch<T> DataError! { query_watch<T>(self) }
 
     // Grouped row counts over an `Int` key: runs a single SQL `GROUP BY` query
     // when `column` names a table's field column and the source supports SQL
@@ -745,6 +745,7 @@ priv WatchState: struct<T> {
     invalidation_cause: String,
     canceled: Bool,
     max_output_rows: Int,
+    published_at: Instant,
 }
 
 // `query.watch()`: the query's rows, kept and maintained from the changes of
@@ -758,9 +759,9 @@ DataWatch: struct<T> {
     __source: Shared<WatchSource<T>>,
     __state: Shared<WatchState<T>>,
 
-    get: fn(self) -> [T] DataError! { watch_get<T>(self) }
+    get: fn(self) -[Time]> [T] DataError! { watch_get<T>(self) }
 
-    status: fn(self) -> DataWatchStatus Never! { watch_status<T>(self) }
+    status: fn(self) -[Time]> DataWatchStatus Never! { watch_status<T>(self) }
 
     cancel: fn(self) Never! { watch_cancel<T>(self) }
 }
@@ -2713,7 +2714,7 @@ priv watch_group_view: fn<T, K: Comparable, V>(reduced: ^^GroupWatchState<K, V>,
 
 // `query.watch()` (DataWatch): a query with no maintained source is
 // Unsupported.
-priv query_watch: fn<T>(query: Query<T>) -> DataWatch<T> DataError! {
+priv query_watch: fn<T>(query: Query<T>) -[Time]> DataWatch<T> DataError! {
     source: query_watch_source<T>(query) ?? return Err(data_error(DataErrorKind.Unsupported, "watch requires a maintained data.track source", "query.watch"))
     view: source.initial() ?? return Err(err)
     limit: query.__limits.max_output_rows
@@ -2735,11 +2736,12 @@ priv query_watch: fn<T>(query: Query<T>) -> DataWatch<T> DataError! {
         invalidation_cause: "",
         canceled: false,
         max_output_rows: limit,
+        published_at: time.instant(),
     }
     Ok(DataWatch<T>{__source: Shared{source}, __state: Shared{state}})
 }
 
-priv watch_get: fn<T>(watch: DataWatch<T>) -> [T] DataError! {
+priv watch_get: fn<T>(watch: DataWatch<T>) -[Time]> [T] DataError! {
     publications: watch.__state.guard_read().value.publications
     dirty: watch.__state.guard_read().value.dirty
     view: watch_refresh<T>(watch) ?? {
@@ -2770,6 +2772,7 @@ priv watch_get: fn<T>(watch: DataWatch<T>) -> [T] DataError! {
     state.value.publications += 1
     state.value.dirty = false
     state.value.error = ""
+    state.value.published_at = time.instant()
     if view.changed -> state.value.entries = view.entries
     Ok(watch_values<T>(state.value.entries))
 }
@@ -2803,10 +2806,10 @@ priv watch_values: fn<T>(entries: [WatchEntry<T>]) -> [T] Never! {
     out
 }
 
-// `freshness_ms` stays 0: reading the clock is the Time effect, which
-// `get` and `status` do not have.
-priv watch_status: fn<T>(watch: DataWatch<T>) -> DataWatchStatus Never! {
+// `freshness_ms` reports milliseconds elapsed since the last fresh publish.
+priv watch_status: fn<T>(watch: DataWatch<T>) -[Time]> DataWatchStatus Never! {
     held: watch.__state.guard_read()
+    freshness: held.value.published_at.elapsed_millis()
     DataWatchStatus{
         mode: held.value.mode.copy(),
         revision: held.value.revision,
@@ -2816,7 +2819,7 @@ priv watch_status: fn<T>(watch: DataWatch<T>) -> DataWatchStatus Never! {
         generation: held.value.generation,
         dirty: held.value.dirty,
         error: held.value.error.copy(),
-        freshness_ms: 0,
+        freshness_ms: if freshness >= 0 -> freshness else -> 0,
         invalidation_cause: held.value.invalidation_cause.copy(),
         refreshing: false,
         canceled: held.value.canceled,

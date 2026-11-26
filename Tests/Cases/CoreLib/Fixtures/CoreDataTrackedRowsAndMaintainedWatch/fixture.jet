@@ -2,7 +2,10 @@
 // and DataWatch methods and Query.watch are Core methods. A get with no
 // change answers the kept rows without running the filter, and a get after
 // edits runs it only on the rows they changed.
-use data: core.data
+use {
+    data: core.data
+    testing: core.testing
+}
 
 Sale: struct {
     id: Int,
@@ -19,6 +22,11 @@ show_cents: fn(values: [Int]) {
     ^line: "doubled:"
     loop value in values -> line = "{line} {value}"
     print(line)
+}
+
+show_status: fn(status: data.DataWatchStatus) {
+    assert(status.freshness_ms >= 0)
+    print("DataWatchStatus{{mode: {status.mode}, revision: {status.revision}, retained_rows: {status.retained_rows}, recomputations: {status.recomputations}, active: {status.active}, generation: {status.generation}, dirty: {status.dirty}, error: {status.error}, freshness_nonneg: {status.freshness_ms >= 0}, invalidation_cause: {status.invalidation_cause}, refreshing: {status.refreshing}, canceled: {status.canceled}}}")
 }
 
 failure: fn(result: data.DataError!) {
@@ -44,7 +52,7 @@ run: fn() {
     show(big.get() ?? panic("get: {err}"))
     show(big.get() ?? panic("get again: {err}"))
     print("filter calls: {calls.guard_read().value}")
-    print(big.status())
+    show_status(big.status())
     show_cents(doubled.get() ?? panic("map get: {err}"))
     failure(sales.insert(Sale{id: 2, cents: 200}))
     failure(sales.insert(Sale{id: 2, cents: 999}))
@@ -56,10 +64,33 @@ run: fn() {
     show(sales.query().collect() ?? panic("collect: {err}"))
     show(big.get() ?? panic("get after edits: {err}"))
     print("filter calls: {calls.guard_read().value}")
-    print(big.status())
+    show_status(big.status())
     show_cents(doubled.get() ?? panic("map get after edits: {err}"))
     big.cancel()
     if big.get() == .Err(err) -> print("{err}")
-    print(big.status())
+    show_status(big.status())
     if data.query([Sale]{Sale{id: 9, cents: 9}}).watch() == .Err(err) -> print("{err}")
+
+    // Deterministic world clock proves exact freshness_ms aging, cache-hit preservation,
+    // fresh-publish reset, and post-cancel retention across every optimization tier.
+    testing.world(
+        fn(world) {
+            tracked: data.track([Sale]{Sale{id: 1, cents: 200}}, fn(sale: Sale) { sale.id }) ?? panic("world track: {err}")
+            watched: tracked.query().filter(fn(sale: Sale) { sale.cents > 150 }).watch() ?? panic("world watch: {err}")
+            f0: watched.status().freshness_ms
+            _: world.advance(25ms)
+            f1: watched.status().freshness_ms
+            _: watched.get() ?? panic("world cache-hit get: {err}")
+            f_hit: watched.status().freshness_ms
+            _: world.advance(10ms)
+            f2: watched.status().freshness_ms
+            _: tracked.insert(Sale{id: 2, cents: 300}) ?? panic("world insert: {err}")
+            _: watched.get() ?? panic("world publish get: {err}")
+            f_pub: watched.status().freshness_ms
+            watched.cancel()
+            _: world.advance(40ms)
+            st_cancel: watched.status()
+            print("world freshness: init={f0} +25ms={f1} hit={f_hit} +10ms={f2} publish={f_pub} cancel+40ms={st_cancel.freshness_ms} canceled={st_cancel.canceled} dirty={st_cancel.dirty}")
+        },
+    )
 }
