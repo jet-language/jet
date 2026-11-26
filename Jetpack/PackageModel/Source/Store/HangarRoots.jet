@@ -354,7 +354,7 @@ pkg_store_list_impl: fn(roots: HangarRoots, strict: Bool) -[FS, Env]> [StoreEntr
         kind: if files.stat(entry.path) == {
             .Ok(info) -> info
             .Err(error) -> {
-                if !strict -> next
+                if pkg_io_is_not_found(error) || !strict -> next
                 return Err(HangarReadError.IO(error))
             }
         }

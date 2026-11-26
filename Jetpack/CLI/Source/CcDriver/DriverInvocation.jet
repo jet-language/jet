@@ -328,6 +328,19 @@ cli_cc_resolve_toolchain: fn(verification: StoreVerification, roots: HangarRoots
             }
         }
     }
+    provider_cc_ensure_real_directory(hangar) ?? return Err(ProviderError.BadOutput(err.message()))
+    normalized: provider_cc_normalize_target(target) ?? return Err(ProviderError.Unsupported(err.message()))
+    lock_dir: files.join(hangar, "{STORE_BUILD_SCRATCH_DIR}/cc-target")
+    files.create_dir_all(lock_dir) ?? return Err(ProviderError.BadOutput("create C toolchain target lock directory: {err}"))
+    _held: files.lock(files.join(lock_dir, "{CC_TOOLCHAIN_PACKAGE}-{normalized}.lock")) ?? return Err(ProviderError.BadOutput("lock C toolchain target `{normalized}`: {err}"))
+    if provider_cc_toolchain_resolve_for_target(verification, hangar, target, fixtures != None) == {
+        .Ok(descriptor) -> return Ok(descriptor)
+        .Err(error) -> {
+            if !error.is_missing_descriptor(target) {
+                return Err(ProviderError.BadOutput(error.message()))
+            }
+        }
+    }
     ctx: ProviderCtx{
         fixtures: fixtures,
         store_dir: hangar,

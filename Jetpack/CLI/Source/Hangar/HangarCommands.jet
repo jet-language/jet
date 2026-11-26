@@ -91,8 +91,12 @@ cli_cmd_list: fn(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time.Wait]> Int
     EXIT_OK
 }
 
-cli_hangar_path: fn(theme: Theme, parsed: CLIParsed) -[IO, Env, Time.Wait]> Int Never! {
-    path: pkg_resolve_roots().hangar_dir()
+cli_hangar_path: fn(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time, Time.Wait]> Int Never! {
+    roots: pkg_resolve_roots()
+    store_migrate_legacy_user_hangar(roots) ?? {
+        return cli_hangar_report_error(theme, parsed, "E2604", err.message(), err.message(), "inspect or remove any incomplete `.hangar-migration.partial` directory and fix escaping links in the legacy Hangar, then retry.")
+    }
+    path: roots.hangar_dir()
     if parsed.flags.json {
         cli_hangar_status_json("path", StatusFields.new().with("path", Dyn.Text(path))) ?? return cli_status_encoding_error(err)
     } else { print(path) }
