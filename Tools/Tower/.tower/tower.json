@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7042,
-    "rev": 114686,
+    "rev": 114692,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -60532,11 +60532,11 @@
         {
           "n": 5,
           "text": "E. Sema architecture, as narrowed by its adversarial review (Docs/Audits/2026-11-24-sema-check-context-review.md, verdict: fails as proposed, holds narrowed): one body-check record (SemaBodyCheck) carries the three parts each body check creates for itself (ownership state, statement tail store, check context), while environment and program stay read parameters and scopes and diagnostics stay ^ parameters; CheckProgram.jet and Statements.jet are split by concern; string-built lookup keys become typed keys (name pair slots, SemaKeyRows, row slots, struct keys).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T16:28:45.744Z",
+          "evidence": "dev e4d595212c6 (batch-58 compiler): SemaBodyCheck (Scopes.jet:1213), CheckProgram.jet (566 lines) & Statements.jet split across 11 Statements/*.jet modules, typed SemaKeyRows (KeyRows.jet:15); full Compiler/JetSema/Tests 168 passed, 0 failed, 0 skipped (including LibraryEffectFixtures 2/2).",
+          "at": "2026-11-26T04:53:01.728Z",
           "proof": {
             "profile": "cmd",
             "args": [
@@ -60790,7 +60790,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-24T17:01:07.086Z",
-      "updated": "2026-11-26T04:29:40.161Z",
+      "updated": "2026-11-26T04:53:01.728Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 22
     },
@@ -63318,11 +63318,11 @@
         {
           "n": 6,
           "text": "The rules the ballot decides are built as ratified: whether a pure `-[]>` function may read a changeable global (today E3401 refuses writes only, Effects/Checks.jet:1441-1485), whether task.group workers may read and split-write globals as they do the opener's locals (today the ratified rule refuses every task), and what a detached task may do.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T18:25:44.521Z"
+          "evidence": "dev e4d595212c6 (batch-58 compiler): pure -[]> global reads refused (E3401), task.group workers borrow/split-write sendable globals with race refusal (E1101) and detach refusal (E1106), outliving/detached tasks refused (E1102); Compiler/JetSema/Tests 168/168 PASS (including global_state_* 7/7).",
+          "at": "2026-11-26T04:53:02.558Z"
         }
       ],
       "refs": [],
@@ -63330,7 +63330,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-25T17:59:00.830Z",
-      "updated": "2026-11-26T04:33:32.618Z",
+      "updated": "2026-11-26T04:53:02.558Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 6
     },
@@ -63641,11 +63641,11 @@
         {
           "n": 2,
           "text": "`Grammar{\"\"\"…\"\"\"}` is built in Core: the rules generate typed result types, `parse` with line:column errors and `print`, and a left-recursive or ambiguous grammar is a build error with a registered diagnostic.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T18:17:04.112Z"
+          "evidence": "dev e4d595212c6 (batch-58 compiler): Tests/Cases/GrammarLiterals 9/9 PASS, Tests/UI/grammar_*.jet 10/10 PASS, Tests/UI/checked_text_check_reason.jet 1/1 PASS, Examples/Text/Grammar/LogLine.jet golden 3/3 PASS (o0, o1, o2).",
+          "at": "2026-11-26T04:53:03.377Z"
         },
         {
           "n": 3,
@@ -63721,7 +63721,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-25T18:17:04.112Z",
-      "updated": "2026-11-26T02:27:07.175Z",
+      "updated": "2026-11-26T04:53:03.377Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 9
     },
@@ -63798,29 +63798,29 @@
         {
           "n": 6,
           "text": "Independent of the ballot: the call-mark fix for a slice argument lands in the wrong place (`sort_part(xs[0..2])` became `xs&[0..2]`, which does not compile) because `expr_source_start` has no slice arm (Compiler/JetFoundation/Source/AST/Expressions.jet:809-818, called from CallMarks.jet:122), and `jet fix` still prints \"applied 1 fix\" in file, package and --dry-run modes because its rollback check misses the new error (Compiler/JetCLI FixCommands.jet:427-456; cause not yet isolated between 47-66 and 102-110). Proof: a case where the slice fix compiles, and a case where a fix that adds an error is rolled back and reported.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T23:14:02.620Z"
+          "evidence": "dev e4d595212c6 (batch-58 compiler): expr_source_start slice arm + FixCommands.jet sibling-error rollback; UIFixes/fix_slice_call_mark_compiles PASS, UIFixes/fix_error_introducing_edit_rolls_back PASS, SourceTransaction fix_* 8/8 PASS.",
+          "at": "2026-11-26T04:53:04.211Z"
         },
         {
           "n": 7,
           "text": "Independent of the ballot: `jet fix` makes a binding immutable while a call that may change it is unresolved (with `badsig: fn(n: &Missing)`, it rewrote `k := 2` to `k: 2` although `badsig(k)` may change `k`), and `jet fix` on a file that does not parse prints \"no changes made\" without naming the parse error (probed on jet a0.0.46). Proof: one case for each.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T23:14:03.742Z"
+          "evidence": "dev e4d595212c6 (batch-58 compiler): unresolved calls preserve ^ bindings and jet fix reports parse errors; UIFixes/fix_unresolved_call_keeps_mutable_binding PASS, UIFixes/fix_unparseable_file_reports_parse_error PASS, SourceTransaction fix_unparseable_reports_parse_error PASS.",
+          "at": "2026-11-26T04:53:05.035Z"
         },
         {
           "n": 8,
           "text": "Independent of the ballot: the refusal of a write through a computed pipe head leaks the internal name `__jet_pipe_174` instead of naming `<>` (Compiler/JetSema/Source/Sema/Ownership/Checks.jet:3540-3570 never checks `pipe_value_is_name`, AST/Expressions.jet:87; location inferred), and E0228 says the callee \"reads this input\" for takes such as `seal(&&st.buf)` (CallMarks.jet:115, 184-185). Proof: corrected texts with UI snapshots.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T23:14:04.877Z"
+          "evidence": "dev e4d595212c6 (batch-58 compiler): pipe-head write names <> and E0228 take text truthful; Tests/UI/pipe_computed_head_write_names_pipe_value.jet PASS 1/1, Tests/UI/E0228_take_mark_explains_take.jet PASS 1/1.",
+          "at": "2026-11-26T04:53:05.980Z"
         }
       ],
       "refs": [],
@@ -63828,8 +63828,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-25T18:17:12.350Z",
-      "updated": "2026-11-25T23:22:02.867Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-26T04:53:05.980Z",
+      "updatedBy": "Orchestrator",
       "criteriaLastN": 8
     },
     {
@@ -129021,6 +129021,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-26T04:53:05.980Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0hnoa1d",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-26T04:53:05.035Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0hnoa1d",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-26T04:53:04.211Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0hnoa1d",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-26T04:53:03.377Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0pej44b",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-26T04:53:02.558Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c01wqict",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-26T04:53:01.728Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0mhrplj",
+      "note": "#5"
+    },
     {
       "at": "2026-11-26T04:33:33.492Z",
       "by": "Orchestrator",
