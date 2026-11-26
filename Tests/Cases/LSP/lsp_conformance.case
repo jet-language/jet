@@ -1,0 +1,57 @@
+# LSP 3.18 conformance witness and inventory gate (#6903 c13):
+# 1. Exercises textDocument/declaration, textDocument/linkedEditingRange,
+#    textDocument/diagnostic, workspace/diagnostic, completionItem/resolve,
+#    workspace/willRenameFiles, codeAction/resolve, and textDocument/didClose
+#    through the real stdio transport (`jet self lsp`).
+# 2. Validates every row of `Tests/Cases/LSP/lsp-3.18-inventory.tsv` via
+#    `Compiler/JetLSP/Tests/LSP/Conformance.jet`.
+fixture: Fixtures/LSPConformance
+session lsp content-length: jet self lsp
+send lsp: Messages/LSPConformance/0-init.json
+recv lsp
+stdout: ~ "\"declarationProvider\":true" # initialize advertises declarationProvider
+stdout: ~ "\"linkedEditingRangeProvider\":true" # initialize advertises linkedEditingRangeProvider
+stdout: ~ "\"diagnosticProvider\":" # initialize advertises diagnosticProvider
+send lsp: Messages/LSPConformance/1-initialized.json
+send lsp: Messages/LSPConformance/2-open-helper.json
+send lsp: Messages/LSPConformance/3-open-main.json
+send lsp: Messages/LSPConformance/4-declaration.json
+recv lsp
+stdout: ~ "helper.jet" # textDocument/declaration resolves helper.double to helper.jet
+send lsp: Messages/LSPConformance/5-linked-editing.json
+recv lsp
+stdout: ~ "\"ranges\":" # textDocument/linkedEditingRange returns linked local ranges
+send lsp: Messages/LSPConformance/6-doc-diagnostic.json
+recv lsp
+stdout: ~ "\"kind\":\"full\"" # textDocument/diagnostic returns a full pull diagnostic report
+stdout: ~ "\"code\":\"L0103\"" # unused core.math import reported by pull diagnostics
+send lsp: Messages/LSPConformance/7-ws-diagnostic.json
+recv lsp
+stdout: ~ "helper.jet" # workspace/diagnostic includes helper.jet report
+stdout: ~ "main.jet" # workspace/diagnostic includes main.jet report
+send lsp: Messages/LSPConformance/8-completion-resolve.json
+recv lsp
+stdout: ~ "\"label\":\"add_one\"" # completionItem/resolve echoes resolved item
+send lsp: Messages/LSPConformance/9-will-rename.json
+recv lsp
+stdout: ~ "\"newText\":\"\\\"./util\\\"\"" # workspace/willRenameFiles rewrites ./helper import to ./util
+send lsp: Messages/LSPConformance/10-code-action.json
+recv lsp
+stdout: ~ "\"title\":\"Organize imports\"" # textDocument/codeAction offers Organize imports
+send lsp: Messages/LSPConformance/11-code-action-resolve.json
+recv lsp
+stdout: ~ "\"edit\":" # codeAction/resolve materializes workspace edit
+send lsp: Messages/LSPConformance/12-close-main.json
+recv lsp
+stdout: ~ "textDocument/publishDiagnostics" # textDocument/didClose clears diagnostics
+stdout: ~ "\"diagnostics\":[]" # closed document receives empty diagnostics list
+send lsp: Messages/LSPConformance/13-shutdown.json
+recv lsp
+stdout: ~ "\"result\":null" # shutdown acknowledges with null result
+send lsp: Messages/LSPConformance/14-exit.json
+close lsp
+exit: 0
+step: jet test {root}/Compiler/JetLSP/Tests/LSP/Conformance.jet --filter=lsp_conformance
+env: JET_TOOLCHAIN_ROOT={root}
+exit: 0
+stdout: ~ "2 passed, 0 failed" # inventory validator passes both conformance checks
