@@ -7,7 +7,9 @@
 //   `<Start>Token`                 a case per token kind, numbered by kind
 //   `<Start>Slot`                  a case per hole, when the grammar has holes
 // and to the parser (GrammarParse.jet): each rule type's `parse(text)`, a
-// private function per parser rule, and the private scanner constant.
+// private function per parser rule, and the private scanner constant; to
+// the parse into a sink (GrammarInto.jet) and to the printer
+// (GrammarPrint.jet).
 // `<Start>` is the binding's name. The rule and token enums are
 // `#Layout(U32)`, so `PairRule.from_int(rule)` names the rule a sink
 // receives. Each type takes the binding's visibility, and every name and
@@ -187,6 +189,7 @@ sema_grammar_items: fn(definition: ConstDef, plan: SemaGrammarItemsPlan, value: 
         if parses {
             methods.push(sema_grammar_parse_method(gen, plan, shape, definition.is_pub, definition.is_package_pub))
             sema_grammar_print_methods(gen, plan, shape, definition.is_pub, definition.is_package_pub, methods)
+            methods.push(sema_grammar_into_method(gen, plan, shape, definition.is_pub, definition.is_package_pub))
         }
         if shape.is_enum {
             ^variants: [Variant]{}
@@ -231,6 +234,7 @@ sema_grammar_items: fn(definition: ConstDef, plan: SemaGrammarItemsPlan, value: 
     if parses {
         sema_grammar_parser_items(gen, plan, value, items)
         sema_grammar_printer_items(gen, plan, value, items)
+        sema_grammar_into_items(gen, plan, items)
     }
     items
 }

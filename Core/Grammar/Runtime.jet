@@ -2,10 +2,11 @@
 //
 // Every meaning a generated parser has lives here: the cursor, the
 // character columns, the token automata, keyword lookup, the depth bound,
-// error text and resynchronization. A generated printer writes through a
-// pen: token texts, the separator where two tokens would lex as one, and
-// the check that a field's text is its token. The generated code only
-// arranges calls.
+// error text and resynchronization. A parse into a sink sends each token,
+// skipped ones included, as the parser takes it. A generated printer writes
+// through a pen: token texts, the separator where two tokens would lex as
+// one, and the check that a field's text is its token. The generated code
+// only arranges calls.
 //
 // Lexing is contextual: the parser asks for the next token among the kinds
 // it can take there, so a word is a keyword only where the keyword can
@@ -15,6 +16,7 @@
 use {
     core.grammar.error.[GrammarError, expected_list, grammar_error_at, literal_name]
     core.grammar.plan.[GrammarDecision, GrammarKeywords, GrammarLexer, GrammarPlan, GrammarPrinter, GrammarScanner, GrammarToken]
+    core.grammar.sink.[GrammarSink]
 }
 
 /// The byte length of the UTF-8 sequence that starts with `lead`. Jet
@@ -601,6 +603,40 @@ parse_end: fn(cursor: ^GrammarCursor, scanner: GrammarScanner) -> Bool Never! {
 parse_error: fn(cursor: GrammarCursor) -> GrammarError Never! {
     // copy: the error outlives the cursor
     cursor.errors[0].copy()
+}
+
+/// Sends `sink` the skipped tokens from the cursor up to byte `to`.
+into_skips: fn<S: GrammarSink>(cursor: GrammarCursor, scanner: GrammarScanner, to: Int, sink: ^S) Never! {
+    ^at: cursor.at
+    loop at < to {
+        skipped: skip_at(scanner, cursor.bytes, at, to, cursor.hole)
+        if skipped.kind == NO_TOKEN -> return
+        sink.token(skipped.kind, skipped.start, skipped.end)
+        at = skipped.end
+    }
+}
+
+/// Takes the next token when it is of kind `kind`, sending `sink` the
+/// skipped tokens before it and then the token; otherwise it stays and the
+/// error is recorded. Whether it was taken.
+into_token: fn<S: GrammarSink>(cursor: ^GrammarCursor, scanner: GrammarScanner, kind: Int, sink: ^S) -> Bool Never! {
+    kinds: scanner.alone[kind]
+    lexeme: scan(scanner, cursor, kinds)
+    if lexeme.kind != kind {
+        cursor_fail(cursor, scanner, lexeme, kinds)
+        return false
+    }
+    into_skips(cursor, scanner, lexeme.start, sink)
+    sink.token(kind, lexeme.start, lexeme.end)
+    cursor_take(cursor, lexeme)
+    true
+}
+
+/// What a parse into a sink returns: the end of the last token taken, or
+/// the first error recorded.
+into_result: fn(cursor: GrammarCursor) -> Int GrammarError! {
+    if cursor.errors.len() > 0 -> return Err(parse_error(cursor))
+    Ok(cursor.at)
 }
 
 /// A print in progress: where it started in its output, the token kind it

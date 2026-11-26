@@ -10,7 +10,8 @@
 use {
     core.grammar.error.[GrammarFault, GrammarFaultKind, GrammarFaults, TextSpot, grammar_faults]
     core.grammar.plan.[GrammarKeywords, GrammarPlan, GrammarScanner, GrammarSource]
-    core.grammar.runtime.[GRAMMAR_MAX_DEPTH, NO_HOLE, NO_TOKEN, bounds_column, cursor_enter, cursor_expect, cursor_fail, cursor_leave, cursor_of, cursor_of_parts, cursor_resync, cursor_take, grammar_scanner, keyword_find, keyword_next, lexer_column, lexer_match, parse_decide, parse_end, parse_error, parse_text, parse_token, pen_of, print_error, print_result, print_text, print_text_in, print_token, scan, scan_after, word_end, word_shaped]
+    core.grammar.runtime.[GRAMMAR_MAX_DEPTH, NO_HOLE, NO_TOKEN, bounds_column, cursor_enter, cursor_expect, cursor_fail, cursor_leave, cursor_of, cursor_of_parts, cursor_resync, cursor_take, grammar_scanner, into_result, into_token, keyword_find, keyword_next, lexer_column, lexer_match, parse_decide, parse_end, parse_error, parse_text, parse_token, pen_of, print_error, print_result, print_text, print_text_in, print_token, scan, scan_after, word_end, word_shaped]
+    core.grammar.sink.[GrammarSink]
     __core_grammar_analyze.[mark_nullable, mark_parents, report_left_recursion, resolve, split_operators]
     __core_grammar_keywords.[plan_keywords]
     __core_grammar_lookahead.[assign_tokens, plan_decisions, plan_sets]
@@ -503,4 +504,37 @@ priv LIST: "s : '[' items+=NAME (',' items+=NAME)* ']' ;\nNAME : [a-z]+ ;\nWS : 
     ^blank: pen_of(empty)
     assert(!print_text(empty, blank, scanner, plan.printer, "name", "", name))
     assert_eq("{print_error(empty, blank)}", "1:1: expected NAME for `name`, found \"\"")
+}
+
+/// A sink that writes each event it receives as text.
+priv EventText: struct {
+    text: String,
+}
+
+impl EventText.GrammarSink {
+    open: fn(^self, rule: Int) Never! { self.text = "{self.text}({rule} " }
+    close: fn(^self, rule: Int) Never! { self.text = "{self.text}{rule}) " }
+    token: fn(^self, kind: Int, start: Int, end: Int) Never! { self.text = "{self.text}{kind}:{start}-{end} " }
+}
+
+#Test("a parse into a sink sends the skipped tokens before each token it takes") {
+    scanner: grammar_scanner(plan_of(LIST))
+    open: scanner_kind(scanner, "\"[\"")
+    close: scanner_kind(scanner, "\"]\"")
+    name: scanner_kind(scanner, "NAME")
+    space: scanner_kind(scanner, "WS")
+    ^cursor: cursor_of(" [ ab x")
+    ^sink: EventText{text: ""}
+    assert(into_token(cursor, scanner, open, sink))
+    assert(into_token(cursor, scanner, name, sink))
+    if into_result(cursor) == {
+        .Ok(at) -> assert_eq(at, 5)
+        .Err(error) -> panic("{error}")
+    }
+    assert(!into_token(cursor, scanner, close, sink))
+    assert_eq(sink.text, "{space}:0-1 {open}:1-2 {space}:2-3 {name}:3-5 ")
+    if into_result(cursor) == {
+        .Ok(at) -> panic("ended at {at}")
+        .Err(error) -> assert("{error}".starts_with("1:7: expected \"]\""))
+    }
 }

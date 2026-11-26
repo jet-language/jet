@@ -1,0 +1,63 @@
+// A parse into a sink builds no tree: the sink hears `open` and `close`
+// around each rule and every token in input order, the skipped spaces and
+// notes before the token they precede. An operator rule opens once for each
+// level it is parsed at. The result is the end of the last token taken, or
+// the first error, with the events sent before it.
+use {
+    core.grammar.[Grammar]
+    core.grammar.sink.[GrammarSink]
+}
+
+Doc: Grammar{"""
+    doc    : items+=item* EOF ;
+    item   : name=NAME '=' value=sum ';' # Set | '!' value=sum ';' # Show ;
+    sum    : left=sum op=('+' | '-') right=sum # Add | value=NUMBER # Num | name=NAME # Var | '(' inner=sum ')' # Group ;
+    NAME   : [a-z]+ ;
+    NUMBER : [0-9]+ ;
+    WS     : [ \n]+ -> skip ;
+    NOTE   : '#' [a-z ]* -> skip ;
+"""}
+
+rule_name: fn(rule: Int) -> String {
+    named: DocRule.from_int(rule) ?? return "?"
+    if named == {
+        .Doc -> "doc"
+        .Item -> "item"
+        .Sum -> "sum"
+    }
+}
+
+/// Writes each event it hears: `(rule` and `rule)` around a rule, and each
+/// token's text, quoted.
+Events: struct {
+    text: String,
+    shown: String,
+}
+
+impl Events.GrammarSink {
+    open: fn(^self, rule: Int) Never! { self.shown = "{self.shown}({rule_name(rule)} " }
+    close: fn(^self, rule: Int) Never! { self.shown = "{self.shown}{rule_name(rule)}) " }
+    token: fn(^self, _kind: Int, start: Int, end: Int) Never! {
+        piece: self.text.slice(start, end).replace("\n", "\\n")
+        self.shown = "{self.shown}'{piece}' "
+    }
+}
+
+report: fn(text: String) {
+    ^sink: Events{text: text, shown: ""}
+    if Doc.parse_into(text, sink) == {
+        .Ok(end) -> print("{sink.shown}=> {end}")
+        .Err(error) -> print("{sink.shown}=> error {error}")
+    }
+}
+
+run: fn() {
+    report("x = 1 + 2;  # note\n! (x - 3);\n")
+    report("x = 1;\ny 2;")
+    report("")
+    ^sink: Events{text: "1 + (2)", shown: ""}
+    if Sum.parse_into("1 + (2)", sink) == {
+        .Ok(end) -> print("{sink.shown}=> {end}")
+        .Err(error) -> print("{sink.shown}=> error {error}")
+    }
+}

@@ -1,0 +1,17 @@
+# A grammar's types parse into a sink without building a tree: `open` and
+# `close` around each rule, each token in input order with the skipped tokens
+# before it, an operator rule opened once per level, and the end of the last
+# token taken or the first error, the same at every tier. Any parser rule's
+# type starts one.
+fixture: SinkEvents.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 0
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = "(doc (item 'x' ' ' '=' (sum ' ' '1' ' ' '+' (sum ' ' '2' sum) sum) ';' item) (item '  ' '# note' '\\n' '!' (sum ' ' '(' (sum 'x' ' ' '-' (sum ' ' '3' sum) sum) ')' sum) ';' item) '\\n' '' doc) => 30\n(doc (item 'x' ' ' '=' (sum ' ' '1' sum) ';' item) (item '\\n' 'y' => error 2:3: expected \"=\", found \"2\"\n(doc '' doc) => 0\n(sum '1' ' ' '+' (sum ' ' '(' (sum '2' sum) ')' sum) sum) => 7\n"
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: == o0
