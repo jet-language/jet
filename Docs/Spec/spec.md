@@ -82,8 +82,18 @@ vocabulary](vocabulary.md).
 - A triple-quoted string, `"""…"""`, may span lines and has the ordinary
   escape and interpolation rules. The newline immediately after the opening
   delimiter and the newline immediately before the closing delimiter are
-  removed. The closing delimiter's indentation is removed from every line. An
-  unterminated triple-quoted string is E0002 (S70).
+  removed. The closing delimiter's indentation is removed from every line. When
+  an interpolation hole sits on a line that still has leading horizontal
+  whitespace (spaces or tabs) after that dedent, every non-empty line after the
+  first in the interpolated value is prefixed with that line's leading
+  whitespace — including mid-line holes, which use the line's leading
+  indentation rather than the hole's column. Empty lines (blank lines and a
+  trailing empty line after a final newline) receive no indentation prefix so
+  no trailing whitespace is added; single-quoted strings, raw backtick strings,
+  and checked text heads (`SQL`, `HTML`, `Sh`) do not rewrite interpolated
+  lines (see `Examples/Basics/MultilineInterpolationIndent.jet` and
+  `Examples/Basics/MultilineInterpolationIndent.out`). An unterminated
+  triple-quoted string is E0002 (S70).
 - A checked text head, such as `SQL{"select {table}"}`, is a nominal typed
   value. Its body is a raw boundary for that head's grammar: backslashes remain
   literal, while quote, brace, delimiter, and interpolation-hole rules still

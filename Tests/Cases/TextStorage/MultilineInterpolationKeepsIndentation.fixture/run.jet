@@ -1,0 +1,198 @@
+// End-to-end verification of indentation-preserving multi-line interpolation in
+// triple-quoted strings across native tiers (-O0, -O1, -O2), comptime, `print`,
+// and WebAssembly.
+
+CT_INNER: """
+const_a()
+
+const_b()
+"""
+
+CT_OUTER: """
+module {{
+    {CT_INNER}
+}}
+"""
+
+Block: struct {
+    first: String,
+    second: String,
+}
+
+impl Block.Display {
+    display: fn(self) -> String { "{self.first}\n{self.second}" }
+}
+
+Pair: struct {
+    left: String,
+    right: String,
+}
+
+render_pure: fn(body: String) -[]> String {
+    """
+    fn work() {{
+        {body}
+    }}
+    """
+}
+
+#Memo render_memo: fn(body: String) -[]> String {
+    """
+    section {{
+        {body}
+    }}
+    """
+}
+
+check_eq: fn(label: String, actual: String, expected: String) {
+    if actual != expected {
+        panic("mismatch in {label}:\nactual:\n[{actual}]\nexpected:\n[{expected}]")
+    }
+}
+
+run: fn() {
+    // 1. Basic indented multi-line body.
+    body: "x: 1\ny: 2"
+    basic: """
+    fn main() {{
+        {body}
+    }}
+    """
+    check_eq("basic", basic, "fn main() {{\n    x: 1\n    y: 2\n}}")
+
+    // 2. Mid-line hole uses the line's leading indentation, not the hole column.
+    note: "first\nsecond"
+    midline: """
+    fn main() {{
+        // {note}
+    }}
+    """
+    check_eq("midline", midline, "fn main() {{\n    // first\n    second\n}}")
+
+    // 3. Multiple holes on an indented line vs a column-0 line.
+    a: "a1\na2"
+    b: "b1\nb2"
+    multi_indented: """
+    pair:
+        {a}: {b}
+    """
+    check_eq("multi_indented", multi_indented, "pair:\n    a1\n    a2: b1\n    b2")
+
+    multi_col0: """
+    {a}    {b}
+    """
+    check_eq("multi_col0", multi_col0, "a1\na2    b1\nb2")
+
+    // 4. Nested triple-quoted templates compose relative indentation cleanly.
+    inner: """
+    if ready {{
+        go()
+    }}
+    """
+    middle: """
+    loop {{
+        {inner}
+    }}
+    """
+    outer: """
+    fn run_all() {{
+        {middle}
+    }}
+    """
+    check_eq("nested", outer, "fn run_all() {{\n    loop {{\n        if ready {{\n            go()\n        }}\n    }}\n}}")
+
+    // 5. Blank lines and trailing newlines never receive trailing whitespace.
+    with_blanks: "one\n\n\ntwo"
+    blank_res: """
+    start:
+        {with_blanks}
+    end
+    """
+    check_eq("blanks", blank_res, "start:\n    one\n\n\n    two\nend")
+
+    trailing_nl: "one\ntwo\n"
+    trailing_res: """
+    start:
+        {trailing_nl}
+    end
+    """
+    check_eq("trailing_nl", trailing_res, "start:\n    one\n    two\n\nend")
+
+    leading_nl: "\none\ntwo"
+    leading_res: """
+    start:
+        {leading_nl}
+    """
+    check_eq("leading_nl", leading_res, "start:\n    \n    one\n    two")
+
+    // 6. CRLF preserves line endings and keeps blank CRLF lines clean.
+    crlf: "r1\r\nr2\r\n\r\nr3"
+    crlf_res: """
+    head
+        {crlf}
+    """
+    check_eq("crlf", crlf_res, "head\n    r1\r\n    r2\r\n\r\n    r3")
+
+    // 7. Tab indentation preserves tabs.
+    tab_res: """
+    head
+    	{body}
+    """
+    check_eq("tab", tab_res, "head\n\tx: 1\n\ty: 2")
+
+    // 8. Single-line fast path, empty string, and scalars.
+    single: "single"
+    empty: ""
+    n: 42
+    fast_res: """
+    head
+        {single}
+        {empty}
+        {n}
+    """
+    check_eq("fast_and_scalar", fast_res, "head\n    single\n    \n    42")
+
+    // 9. Custom Display struct and :Pretty selector.
+    blk: Block{first: "alpha", second: "beta"}
+    disp_res: """
+    wrap:
+        {blk}
+    """
+    check_eq("display", disp_res, "wrap:\n    alpha\n    beta")
+
+    pair: Pair{left: "L", right: "R"}
+    pretty_res: """
+    data:
+        {pair:Pretty}
+    """
+    // Every non-empty line after the first line of `{pair:Pretty}` must start
+    // with the 4-space indentation of the hole's line.
+    pretty_lines: pretty_res.split("\n").to_list()
+    assert(pretty_lines.len() >= 3)
+    assert_eq(pretty_lines[0], "data:")
+    loop idx in 1..<pretty_lines.len() {
+        if pretty_lines[idx] != "" -> assert(pretty_lines[idx].starts_with("    "))
+    }
+
+    // 10. Single-quoted strings are unaffected.
+    single_q: "header\n    {body}"
+    check_eq("single_quoted", single_q, "header\n    x: 1\ny: 2")
+
+    // 11. Pure `-[]>` and `#Memo` functions.
+    check_eq("pure", render_pure(body), "fn work() {{\n    x: 1\n    y: 2\n}}")
+    check_eq("memo", render_memo(body), "section {{\n    x: 1\n    y: 2\n}}")
+
+    // 12. Comptime module constant and `#run` evaluation.
+    check_eq("comptime_const", CT_OUTER, "module {{\n    const_a()\n\n    const_b()\n}}")
+    ct_run: #run render_pure("c1\nc2")
+    check_eq("comptime_run", ct_run, "fn work() {{\n    c1\n    c2\n}}")
+
+    // 13. Direct `print("""...""")` uses the same lowering.
+    print(
+        """
+        printed:
+            {body}
+        """,
+    )
+    print("all-ok")
+}

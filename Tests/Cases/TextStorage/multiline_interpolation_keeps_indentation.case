@@ -1,0 +1,31 @@
+# Multi-line interpolations in triple-quoted strings keep the hole line's
+# leading horizontal whitespace on every non-empty later line, leave blank and
+# trailing empty lines clean, leave single-quoted strings untouched, and match
+# across native optimization tiers (-O0, -O1, --release), comptime, `print`,
+# and WebAssembly.
+fixture: MultilineInterpolationKeepsIndentation.fixture
+env: NO_COLOR=1
+step run: jet run run.jet
+exit: 0
+stdout: = multiline-interpolation-indent.out
+step: jet build -O0 run.jet
+exit: 0
+step: built
+exit: 0
+stdout: == run
+step: jet build -O1 run.jet
+exit: 0
+step: built
+exit: 0
+stdout: == run
+step: jet build --release run.jet
+exit: 0
+step: built
+exit: 0
+stdout: == run
+step: jet build --target web run.jet
+exit: 0
+step: node app.js
+cwd: .jet/build
+exit: 0
+stdout: == run

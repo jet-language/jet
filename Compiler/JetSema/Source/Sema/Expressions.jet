@@ -5366,14 +5366,26 @@ sema_expr_note_name_reference: fn(span: Span, binding_index: Int, check: ^SemaBo
 
 sema_expr_check_string: fn(parts: [StrPart], span: Span, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
     sema_expr_lint_raw_multiline_html(parts, span, expected, check)
+    triple: sema_expr_is_triple_quoted(span, check)
+    ^indent_state: SemaStringIndentState{indent: "", leading_ws: true}
     ^tree_parts: [TStrPart]{}
     ^failed: false
     ^index: 0
     loop index < parts.len() {
         if parts[index] == {
-            .Lit(text) -> { tree_parts.push(TStrPart.Literal{text: text}) }
-            .Byte(value) -> { tree_parts.push(TStrPart.Literal{text: sema_expr_byte_text(value)}) }
+            .Lit(text) -> {
+                if triple -> sema_expr_track_line_indent(text, indent_state)
+                tree_parts.push(TStrPart.Literal{text: text})
+            }
+            .Byte(value) -> {
+                text: sema_expr_byte_text(value)
+                if triple -> sema_expr_track_line_indent(text, indent_state)
+                tree_parts.push(TStrPart.Literal{text: text})
+            }
             .Interp(value, format) -> {
+                // Any hole ends the leading-whitespace prefix of its line, while
+                // keeping `indent_state.indent` intact for later holes on the same line.
+                indent_state.leading_ws = false
                 // Interpolation reads a string view through Display.
                 ^previous_string_view_read: check.context.allow_string_view_read
                 check.context.allow_string_view_read = true
@@ -5397,14 +5409,19 @@ sema_expr_check_string: fn(parts: [StrPart], span: Span, expected: Type?, check:
                 }
                 if format == .Val(selector) {
                     selected: sema_expr_check_selected(value, checked, selector, parts, index + 1, check) ?? return None
-                    loop part in selected -> tree_parts.push(part)
+                    emitted: if triple && indent_state.indent != "" -> sema_expr_indent_selected_parts(selected, indent_state.indent, span, index, check.context) else -> selected
+                    loop part in emitted -> tree_parts.push(part)
                     index += 1 + taken
                     next
                 }
                 if !sema_expression_interpolation_display(checked, check) -> return None
                 shown_span: checked.span
                 formatted: if sema_expr_measurement_type(checked.ty) -> sema_expression_measurement_source_call("MeasurementShow", [TExpr]{checked.move()}, Type.String, shown_span, check) ?? return None else -> checked
-                tree_parts.push(TStrPart.Interpolation{value: formatted, debug: false})
+                if triple && indent_state.indent != "" {
+                    tree_parts.push(sema_expr_indent_plain_part(formatted, indent_state.indent, shown_span, index, check.context))
+                } else {
+                    tree_parts.push(TStrPart.Interpolation{value: formatted, debug: false})
+                }
             }
         }
         index += 1

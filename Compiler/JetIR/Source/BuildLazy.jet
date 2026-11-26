@@ -1418,7 +1418,9 @@ ir_text_walk: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, label: String?, vari
     word_row: ir_word_row(m)
     int_row: ir_type_row(m, Type.Int) ?? 0
     row: ir_string_row(m)
-    splits: sep_node >= 0
+    // `-1` marks `text.lines()`; any other id (including negative flattened
+    // generated node ids <= TEXPR_FIRST_FLAT_ID) is a `text.split(sep)` separator.
+    splits: sep_node != -1
     text_value: ir_expr(m, p, b, text_node)
     if ir_failed(b) || text_value < 0 {
         return

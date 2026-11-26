@@ -1,0 +1,342 @@
+// Multi-line interpolation indentation for triple-quoted strings (`"""…"""`).
+//
+// When an interpolation hole sits on a line with leading horizontal whitespace
+// (after the closing `"""` delimiter's dedent has already been removed by the
+// lexer), every non-empty line after the first in the interpolated value is
+// prefixed with that line's leading whitespace. Single-line values take a fast
+// path with no line splitting, blank lines and trailing empty lines stay empty
+// (no trailing whitespace), and single-quoted strings, raw backtick strings,
+// and checked text heads (`SQL`, `HTML`, `Sh`) are unaffected.
+use jet_foundation.[
+    BinOp,
+    NodeKind,
+    Span,
+    TBuiltinOp,
+    TLetTy,
+    TLocal,
+    TUnaryOp,
+    Type,
+    checked_generated_local,
+]
+
+// Tracks the current line's leading horizontal whitespace while walking the
+// dedented parts of a triple-quoted string.
+SemaStringIndentState: struct {
+    indent: String,
+    leading_ws: Bool,
+}
+
+// Whether the string literal at `span` opens with `"""` in its module's source.
+// Checking the opening three bytes directly distinguishes triple-quoted strings
+// from single-quoted strings whose interpolation expressions span lines.
+sema_expr_is_triple_quoted: fn(span: Span, check: SemaBodyCheck) -> Bool Never! {
+    if span.end - span.start < 6 -> return false
+    graph: check.program.registration_graph
+    if sema_scope_caller_index(check.environment.*, graph) == .Val(caller) {
+        raw: graph.modules[caller].source.bytes()
+        if span.start >= 0 && span.end <= raw.len() {
+            return raw[span.start] == (U8{34}) && raw[span.start + 1] == (U8{34}) && raw[span.start + 2] == (U8{34})
+        }
+    }
+    false
+}
+
+// Advances the current line's leading horizontal whitespace tracker across the
+// literal `text` of a triple-quoted string. A newline resets the tracker; any
+// non-space, non-tab byte ends the leading-whitespace prefix for the line while
+// preserving `state.indent` for mid-line holes on that same line.
+sema_expr_track_line_indent: fn(text: String, state: ^SemaStringIndentState) Never! {
+    bytes: text.bytes()
+    ^index: 0
+    loop index < bytes.len() {
+        byte: bytes[index]
+        if {
+            byte == (U8{10}) -> {
+                state.indent = ""
+                state.leading_ws = true
+            }
+            state.leading_ws -> {
+                if {
+                    byte == (U8{32}) -> { state.indent = "{state.indent} " }
+                    byte == (U8{9}) -> { state.indent = "{state.indent}\t" }
+                    else -> { state.leading_ws = false }
+                }
+            }
+            else -> {}
+        }
+        index += 1
+    }
+}
+
+// Whether an interpolated value of `ty` can produce a newline in its `Display`
+// text. Scalar numeric, Bool, range, and measurement types never produce a
+// newline and skip indentation wrapping with zero runtime cost.
+sema_expr_needs_indent: fn(ty: Type) -> Bool Never! {
+    if ty == {
+        .Int | .Float | .Float32 | .Bool | .IntN(_, _) | .InlineRange(_, _, _) | .Quantity(_, _) | .Measure(_) -> false
+        .String | .Char | .List(_) | .FixedList(_, _) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .Tagged(_, _) | .Union(_) | .Case(_, _) -> true
+    }
+}
+
+// Wraps the checked parts of a format-selected interpolation (`{val:Pretty}`,
+// `{val:Debug}`, etc.) with `indent` when non-empty and the output can span
+// lines.
+sema_expr_indent_selected_parts: fn(selected: ^^[TStrPart], indent: String, span: Span, part_index: Int, context: ^SemaCheckContext) -> [TStrPart] Never! {
+    if indent == "" || selected.len() == 0 -> return selected
+    if selected.len() == 1 {
+        if selected[0] == .Interpolation(value, debug) {
+            if !debug && !sema_expr_needs_indent(value.ty) {
+                return [TStrPart]{TStrPart.Interpolation{value: value, debug: false}}
+            }
+            text: if !debug && value.ty == Type.String -> value else -> sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Interpolation{value: value, debug: debug}}}, span)
+            indented: sema_expr_indent_interpolation(text, indent, span, part_index, context)
+            return [TStrPart]{TStrPart.Interpolation{value: indented, debug: false}}
+        }
+    }
+    text: sema_tree_node(Type.String, TExprKind.StrLit{parts: selected}, span)
+    indented: sema_expr_indent_interpolation(text, indent, span, part_index, context)
+    [TStrPart]{TStrPart.Interpolation{value: indented, debug: false}}
+}
+
+// Wraps a plain interpolation value with `indent` when non-empty and the value's
+// type can format across multiple lines.
+sema_expr_indent_plain_part: fn(value: ^^TExpr, indent: String, span: Span, part_index: Int, context: ^SemaCheckContext) -> TStrPart Never! {
+    if indent == "" || !sema_expr_needs_indent(value.ty) {
+        return TStrPart.Interpolation{value: value, debug: false}
+    }
+    text: if value.ty == Type.String -> value else -> sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Interpolation{value: value, debug: false}}}, span)
+    TStrPart.Interpolation{value: sema_expr_indent_interpolation(text, indent, span, part_index, context), debug: false}
+}
+
+priv sema_expr_indent_local: fn(name: String, ty: Type, mutable: Bool, span: Span) -> TLocal Never! {
+    ^local: checked_generated_local(name, span, ty)
+    local.mutable = mutable
+    local
+}
+
+priv sema_expr_indent_local_read: fn(name: String, ty: Type, mutable: Bool, span: Span) -> TExpr Never! {
+    sema_tree_node(ty, TExprKind.Local{local: sema_expr_indent_local(name, ty, mutable, span)}, span)
+}
+
+priv sema_expr_indent_str_lit: fn(text: String, span: Span) -> TExpr Never! {
+    sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: text}}}, span)
+}
+
+// Lowers an indented interpolation hole into a pure `InlineBlock` using only
+// existing checked-tree primitives (`Contains`, `Split`, `ForIn`, `StrLit`):
+//
+//   __raw: <text_expr>
+//   if !__raw.contains("\n") -> __raw else -> {
+//       ^__out: ""
+//       ^__first: true
+//       loop __line in __raw.split("\n") {
+//           if __first {
+//               __out = __line
+//               __first = false
+//           } else {
+//               if __line == "" || __line == "\r" {
+//                   __out = "{__out}\n{__line}"
+//               } else {
+//                   __out = "{__out}\n{indent}{__line}"
+//               }
+//           }
+//       }
+//       __out
+//   }
+//
+// JetIR fuses `ForIn` over `TBuiltinOp.Split` into a zero-list-allocation text
+// walk (`ir_text_walk`) and lowers `__out = "{__out}..."` to in-place O(n)
+// appends (`ir_self_append`), preserving comptime, native O0/O1/O2, `print`,
+// and Wasm parity without adding runtime exports.
+priv sema_expr_indent_interpolation: fn(text_expr: ^^TExpr, indent: String, span: Span, part_index: Int, context: ^SemaCheckContext) -> TExpr Never! {
+    raw_name: "__jet_interp_raw_{span.start}_{part_index}"
+    out_name: "__jet_interp_out_{span.start}_{part_index}"
+    first_name: "__jet_interp_first_{span.start}_{part_index}"
+    line_name: "__jet_interp_line_{span.start}_{part_index}"
+
+    bind_raw: TStmt.Let{
+        local: sema_expr_indent_local(raw_name, Type.String, false, span),
+        let_ty: TLetTy.Inferred,
+        init: text_expr,
+        gc_promotion: None,
+        gc_transferred: false,
+        span: span,
+    }
+
+    has_newline: sema_tree_node(
+        Type.Bool,
+        TExprKind.BuiltinMethod{
+            receiver: sema_expr_indent_local_read(raw_name, Type.String, false, span),
+            operation: TBuiltinOp.Contains,
+            args: [TExpr]{sema_expr_indent_str_lit("\n", span)},
+        },
+        span,
+    )
+    single_line: sema_tree_node(Type.Bool, TExprKind.Unary{op: TUnaryOp.Not, operand: has_newline}, span)
+
+    bind_out: TStmt.Let{
+        local: sema_expr_indent_local(out_name, Type.String, true, span),
+        let_ty: TLetTy.Inferred,
+        init: sema_expr_indent_str_lit("", span),
+        gc_promotion: None,
+        gc_transferred: false,
+        span: span,
+    }
+    bind_first: TStmt.Let{
+        local: sema_expr_indent_local(first_name, Type.Bool, true, span),
+        let_ty: TLetTy.Inferred,
+        init: sema_node(context, Type.Bool, NodeKind.BoolLit{value: true}, span),
+        gc_promotion: None,
+        gc_transferred: false,
+        span: span,
+    }
+
+    // First line keeps whatever prefix precedes the hole on the template line.
+    first_assign_out: TStmt.Assign{
+        place: TPlace.Local{local: sema_expr_indent_local(out_name, Type.String, true, span)},
+        op: None,
+        value: sema_expr_indent_local_read(line_name, Type.String, false, span),
+        line: 0,
+        span: span,
+    }
+    first_clear_flag: TStmt.Assign{
+        place: TPlace.Local{local: sema_expr_indent_local(first_name, Type.Bool, true, span)},
+        op: None,
+        value: sema_node(context, Type.Bool, NodeKind.BoolLit{value: false}, span),
+        line: 0,
+        span: span,
+    }
+
+    // Blank lines (`""` or `"\r"` for CRLF) stay unindented to avoid trailing whitespace.
+    is_empty: sema_tree_node(
+        Type.Bool,
+        TExprKind.Binary{
+            op: BinOp.Eq,
+            overflow: false,
+            line: 0,
+            lhs: sema_expr_indent_local_read(line_name, Type.String, false, span),
+            rhs: sema_expr_indent_str_lit("", span),
+        },
+        span,
+    )
+    is_cr: sema_tree_node(
+        Type.Bool,
+        TExprKind.Binary{
+            op: BinOp.Eq,
+            overflow: false,
+            line: 0,
+            lhs: sema_expr_indent_local_read(line_name, Type.String, false, span),
+            rhs: sema_expr_indent_str_lit("\r", span),
+        },
+        span,
+    )
+    is_blank: sema_tree_node(
+        Type.Bool,
+        TExprKind.Binary{
+            op: BinOp.Or,
+            overflow: false,
+            line: 0,
+            lhs: is_empty,
+            rhs: is_cr,
+        },
+        span,
+    )
+
+    append_blank: TStmt.Assign{
+        place: TPlace.Local{local: sema_expr_indent_local(out_name, Type.String, true, span)},
+        op: None,
+        value: sema_tree_node(
+            Type.String,
+            TExprKind.StrLit{
+                parts: [TStrPart]{
+                    TStrPart.Interpolation{value: sema_expr_indent_local_read(out_name, Type.String, true, span), debug: false},
+                    TStrPart.Literal{text: "\n"},
+                    TStrPart.Interpolation{value: sema_expr_indent_local_read(line_name, Type.String, false, span), debug: false},
+                },
+            },
+            span,
+        ),
+        line: 0,
+        span: span,
+    }
+    append_indented: TStmt.Assign{
+        place: TPlace.Local{local: sema_expr_indent_local(out_name, Type.String, true, span)},
+        op: None,
+        value: sema_tree_node(
+            Type.String,
+            TExprKind.StrLit{
+                parts: [TStrPart]{
+                    TStrPart.Interpolation{value: sema_expr_indent_local_read(out_name, Type.String, true, span), debug: false},
+                    TStrPart.Literal{text: "\n{indent}"},
+                    TStrPart.Interpolation{value: sema_expr_indent_local_read(line_name, Type.String, false, span), debug: false},
+                },
+            },
+            span,
+        ),
+        line: 0,
+        span: span,
+    }
+
+    later_line: TStmt.If{
+        condition: TIfCond.Plain{value: is_blank},
+        then_body: [TStmt]{append_blank},
+        else_body: Val([TStmt]{append_indented}),
+        else_is_elseif: false,
+        span: span,
+    }
+    step_body: TStmt.If{
+        condition: TIfCond.Plain{value: sema_expr_indent_local_read(first_name, Type.Bool, true, span)},
+        then_body: [TStmt]{first_assign_out, first_clear_flag},
+        else_body: Val([TStmt]{later_line}),
+        else_is_elseif: false,
+        span: span,
+    }
+
+    split_iter_ty: Type.Apply{name: "Iter", args: [Type]{Type.String}}
+    split_call: sema_tree_node(
+        split_iter_ty,
+        TExprKind.BuiltinMethod{
+            receiver: sema_expr_indent_local_read(raw_name, Type.String, false, span),
+            operation: TBuiltinOp.Split,
+            args: [TExpr]{sema_expr_indent_str_lit("\n", span)},
+        },
+        span,
+    )
+    walk: TStmt.ForIn{
+        label: None,
+        variable: sema_expr_indent_local(line_name, Type.String, false, span),
+        variable_two: None,
+        source: sema_expr_indent_local_read(raw_name, Type.String, false, span),
+        collection: split_call,
+        step: None,
+        method_kind: None,
+        columnar: false,
+        by_value: false,
+        source_stable: false,
+        body: [TStmt]{step_body},
+        span: span,
+    }
+
+    choose: sema_tree_node(
+        Type.String,
+        TExprKind.IfExpr{
+            cond: TIfCond.Plain{value: single_line},
+            then_body: [TStmt]{},
+            then_value: sema_expr_indent_local_read(raw_name, Type.String, false, span),
+            else_body: [TStmt]{bind_out, bind_first, walk},
+            else_value: sema_expr_indent_local_read(out_name, Type.String, true, span),
+        },
+        span,
+    )
+
+    sema_tree_node(
+        Type.String,
+        TExprKind.InlineBlock{
+            body: [TStmt]{
+                bind_raw,
+                TStmt.ExprStmt{value: choose, span: span},
+            },
+        },
+        span,
+    )
+}
