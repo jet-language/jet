@@ -75,7 +75,8 @@ ir_raw_pointer: fn(ty: Type) -> Bool Never! {
 // declaration (core.mem) by its key; None for any other type.
 ir_pin_target: fn(p: IRProgram, ty: Type) -> Type? Never! {
     if ir_untag(ty) == .Apply(name, args) && args.len() == 1 && (name == "Pin" || ir_core_pin(p, name)) {
-        return Val(args[0].copy())
+        ^items: args
+        return items.pop()
     }
     None
 }
@@ -337,13 +338,13 @@ ir_value_type_laid: fn(m: ^IRModule, p: IRProgram, ty: Type, tid: TypeID, laying
         if name == "@" && args.len() == 1 -> return ir_link_row_for(m, p, ty, args[0], laying)
         // A `Pool<T>` and its `ID<T>`s as BuildPools.jet lays them out.
         if name == "Pool" && args.len() == 1 {
-            return ir_value_type_in(m, p, ir_pool_carrier(args[0].copy()), laying)
+            return ir_value_type_in(m, p, ir_pool_carrier(args[0]), laying)
         }
         if name == "ID" && args.len() == 1 {
             return ir_value_type_in(m, p, ir_pool_id_carrier(), laying)
         }
         if name == "SharedSnapshot" && args.len() == 2 {
-            return ir_value_type_in(m, p, ir_shared_snapshot_carrier(args[0].copy(), args[1].copy()), laying)
+            return ir_value_type_in(m, p, ir_shared_snapshot_carrier(args[0], args[1]), laying)
         }
     }
     // A `SharedRevisionError` is never built: an exhausted revision stops in
@@ -1255,7 +1256,7 @@ ir_record_in_helper: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, spa
         ir_emit(a.f, IROp.Unreachable, -1, -1, -1, -1, a.line)
         m.functions[id] = a.f.move()
         ir_function_bind(m, helper_key, -2)
-        ir_helper_failed(m, helper_key, a.error.copy())
+        ir_helper_failed(m, helper_key, a.error)
         ir_fail(b, span, a.error)
         return -1
     }
@@ -2352,7 +2353,7 @@ ir_render_helper: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, builde
         ir_emit(a.f, IROp.Unreachable, -1, -1, -1, -1, a.line)
         m.functions[id] = a.f.move()
         ir_function_bind(m, helper_key, -2)
-        ir_helper_failed(m, helper_key, a.error.copy())
+        ir_helper_failed(m, helper_key, a.error)
         ir_fail(b, span, a.error)
         return -1
     }
@@ -2461,12 +2462,11 @@ IRMember: struct {
 ir_struct_members: fn(m: ^IRModule, p: IRProgram, row: Int, args: [Type]) -> [IRMember]? Never! {
     // Memoized by the instance's arguments in the terms of the instance
     // being built, as its member types are laid out.
-    bound: args.copy()
-    memo: ir_instance_identity(p.types[row].key, bound)
+    memo: ir_instance_identity(p.types[row].key, args)
     if ir_members_memo(m, m.struct_members_keys, m.struct_members, memo) == .Val(known) {
         return Val(known)
     }
-    found: ir_struct_members_in(m, p, row, bound, [String]{}, true) ?? return None
+    found: ir_struct_members_in(m, p, row, args, [String]{}, true) ?? return None
     name_column_set(m.struct_members_keys, m.struct_members, memo, m.member_lists.len())
     m.member_lists.push(found.copy())
     Val(found)
@@ -2831,19 +2831,13 @@ ir_fixed_power: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, left: Int, right: 
 ir_time_binary: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, op: BinOp, site: Int, left: Int, left_record: IRWordRecord, right: Int, right_record: IRWordRecord, span: Span) -> Int Never! {
     duration_ty: Type.Named{name: "Duration"}
     duration_row: ir_value_type(m, p, duration_ty) ?? return ir_type_fail(b, span, duration_ty)
-    ^duration_record: ir_word_record(m, p, duration_row) ?? return ir_fail_slot(b, span, "Duration without its word record")
+    duration_record: ir_word_record(m, p, duration_row) ?? return ir_fail_slot(b, span, "Duration without its word record")
     left_duration: left_record.constructor == duration_record.constructor
     right_duration: right_record.constructor == duration_record.constructor
-    ^result_row: duration_row
-    ^result_record: duration_record.move()
-    if left_duration && !right_duration {
-        if op == .Sub -> return ir_fail_slot(b, span, "operator {op} with a Duration on the left")
-        result_row = b.f.slot_type[right]
-        result_record = right_record.copy()
-    } else if !left_duration && right_duration {
-        result_row = b.f.slot_type[left]
-        result_record = left_record.copy()
-    } else if !left_duration && op != .Sub {
+    if left_duration && !right_duration && op == .Sub {
+        return ir_fail_slot(b, span, "operator {op} with a Duration on the left")
+    }
+    if !left_duration && !right_duration && op != .Sub {
         return ir_fail_slot(b, span, "operator {op} on two time points")
     }
     int_row: ir_type_row(m, Type.Int) ?? 0
@@ -2854,7 +2848,9 @@ ir_time_binary: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, op: BinOp, site: I
     ir_stop_trap(m, b, at)
     ir_release(m, b, x)
     ir_release(m, b, y)
-    ir_word_record_new(m, b, result_record, exact, result_row)
+    if left_duration && !right_duration -> return ir_word_record_new(m, b, right_record, exact, b.f.slot_type[right])
+    if !left_duration && right_duration -> return ir_word_record_new(m, b, left_record, exact, b.f.slot_type[left])
+    ir_word_record_new(m, b, duration_record, exact, duration_row)
 }
 
 // `left <=> right`: the Less/Equal/Greater variant of Ordering. Exact Ints
@@ -3897,12 +3893,12 @@ ir_union_member_tag: fn(target: Type, member_ty: Type) -> String Never! {
 // `union_ty`. Releases `value`.
 ir_union_rewiden: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, value: Int, source_ty: Type, union_ty: Type, span: Span) -> Int Never! {
     source: ir_untag(source_ty)
-    ^members: [Type]{}
-    if source == .Union(found) -> members = found.copy()
+    key: ir_union_key(source)
+    members: if source == .Union(found) -> found else -> [Type]{}
     if members.len() == 0 {
         return ir_fail_slot(b, span, "{ir_type_name(source_ty)} is no union with members")
     }
-    row: ir_type_def(p, ir_union_key(source)) ?? return ir_fail_slot(b, span, "union {ir_type_name(source_ty)} without a definition")
+    row: ir_type_def(p, key) ?? return ir_fail_slot(b, span, "union {ir_type_name(source_ty)} without a definition")
     target: ir_untag(union_ty)
     slot_type: ir_value_type(m, p, target) ?? return ir_type_fail(b, span, target)
     out: ir_temp(m, b, slot_type)
@@ -3972,9 +3968,8 @@ ir_error_spelling_name: fn(p: IRProgram, name: String) -> String Never! {
 // the function carrier `success ! error`, its error converted as `conversion`
 // asks, then the hop of a journey `site` (ir_journey_hop).
 ir_try_reraise: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, subject: Int, conversion: TTryConvert, site: IRTrySite?, success: Type, error: Type, span: Span) -> Int Never! {
-    ^source: Type.Int
     held: ir_row_ty(m, p, b.f.slot_type[subject])
-    if ir_untag(held) == .Result(_, err) -> source = err.copy()
+    source: if ir_untag(held) == .Result(_, err) -> err else -> Type.Int
     ^framed: false
     if site == .Val(at) {
         if at.note != None {
@@ -4361,9 +4356,8 @@ ir_carrier_type: fn(ty: Type) -> Bool Never! {
 // the instance's arguments in the terms of the instance being built, as
 // ir_struct_members is.
 ir_variant_members: fn(m: ^IRModule, p: IRProgram, row: Int, args: [Type], index: Int) -> [IRMember]? Never! {
-    bound: args.copy()
-    identity: "{row}|{ir_instance_identity(p.types[row].key, bound)}"
-    ir_variant_members_bound(m, p, row, bound, identity, index)
+    identity: "{row}|{ir_instance_identity(p.types[row].key, args)}"
+    ir_variant_members_bound(m, p, row, args, identity, index)
 }
 
 ir_variant_members_bound: fn(m: ^IRModule, p: IRProgram, row: Int, bound: [Type], identity: String, index: Int) -> [IRMember]? Never! {
@@ -4453,15 +4447,14 @@ ir_variant_member_outsized: fn(m: IRModule, definition: TTypeDef, ty: Int) -> Bo
 // The end of the widest variant, in whole words. Memoized in m.enum_sizes by
 // instance identity, as ir_variant_members is.
 ir_enum_box_size: fn(m: ^IRModule, p: IRProgram, row: Int, args: [Type]) -> Int? Never! {
-    bound: args.copy()
-    identity: "{row}|{ir_instance_identity(p.types[row].key, bound)}"
+    identity: "{row}|{ir_instance_identity(p.types[row].key, args)}"
     if name_column_value(m.enum_sizes_keys, m.enum_sizes, identity) == .Val(known) {
         return Val(known)
     }
     ^end: 8
     if p.types[row].kind == .Enum(variants, _) {
         loop index in 0..<variants.len() {
-            members: ir_variant_members_bound(m, p, row, bound, identity, index) ?? return None
+            members: ir_variant_members_bound(m, p, row, args, identity, index) ?? return None
             loop member in members {
                 size: if member.boxed -> 8 else -> m.types[member.ty].size
                 if member.offset + size > end -> end = member.offset + size
@@ -5019,7 +5012,7 @@ ir_fixed_count: fn(m: IRModule, row: Int) -> Int? Never! { m.fixed_counts.get(ro
 ir_fixed_list_row: fn(m: ^IRModule, p: IRProgram, row: Int) -> Int? Never! {
     if ir_fixed_count(m, row) == None -> return None
     if ir_untag(ir_row_ty(m, p, row)) == .FixedList(element, _) {
-        return ir_value_type(m, p, Type.List{element: element.copy()})
+        return ir_value_type(m, p, Type.List{element: element})
     }
     None
 }
@@ -5035,7 +5028,7 @@ ir_list_operand: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, slot: Int, span: 
 // The element type of a List or fixed List `ty`.
 ir_sequence_element: fn(ty: Type) -> Type? Never! {
     if ir_untag(ty) == {
-        .List(element) | .FixedList(element, _) -> Val(element.copy())
+        .List(element) | .FixedList(element, _) -> Val(element)
         .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
     }
 }
@@ -5068,7 +5061,10 @@ ir_string_view: fn(ty: Type) -> Bool Never! {
 ir_view_element: fn(ty: Type) -> Type? Never! {
     if ir_string_view(ty) -> return None
     if ir_untag(ty) == .Apply(name, args) {
-        if (name == "View" || name == "ViewMut") && args.len() == 1 -> return Val(args[0].copy())
+        if (name == "View" || name == "ViewMut") && args.len() == 1 {
+            ^items: args
+            return items.pop()
+        }
     }
     None
 }
@@ -5079,7 +5075,8 @@ ir_view_element: fn(ty: Type) -> Type? Never! {
 ir_iter_element: fn(ty: Type) -> Type? Never! {
     if ir_untag(ty) == .Apply(name, args) {
         if (name == "Iter" || name == "ViewIter" || name == "Stream") && args.len() == 1 {
-            return Val(args[0].copy())
+            ^items: args
+            return items.pop()
         }
     }
     None
@@ -5088,7 +5085,10 @@ ir_iter_element: fn(ty: Type) -> Type? Never! {
 // The element of a `Set<T>` / `Rank<T>`.
 ir_set_element: fn(ty: Type) -> Type? Never! {
     if ir_untag(ty) == .Apply(name, args) {
-        if (name == "Set" || name == "Rank") && args.len() == 1 -> return Val(args[0].copy())
+        if (name == "Set" || name == "Rank") && args.len() == 1 {
+            ^items: args
+            return items.pop()
+        }
     }
     None
 }
@@ -5096,7 +5096,10 @@ ir_set_element: fn(ty: Type) -> Type? Never! {
 // The element of a `Queue<T>`.
 ir_queue_element: fn(ty: Type) -> Type? Never! {
     if ir_untag(ty) == .Apply(name, args) {
-        if name == "Queue" && args.len() == 1 -> return Val(args[0].copy())
+        if name == "Queue" && args.len() == 1 {
+            ^items: args
+            return items.pop()
+        }
     }
     None
 }
@@ -5104,7 +5107,10 @@ ir_queue_element: fn(ty: Type) -> Type? Never! {
 // The element of a `Tally<T>`.
 ir_tally_element: fn(ty: Type) -> Type? Never! {
     if ir_untag(ty) == .Apply(name, args) {
-        if name == "Tally" && args.len() == 1 -> return Val(args[0].copy())
+        if name == "Tally" && args.len() == 1 {
+            ^items: args
+            return items.pop()
+        }
     }
     None
 }
@@ -5113,7 +5119,10 @@ ir_tally_element: fn(ty: Type) -> Type? Never! {
 ir_cache_entry: fn(ty: Type) -> Type? Never! {
     if ir_untag(ty) == .Apply(name, args) {
         if name == "Cache" && args.len() == 2 {
-            return Val(Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "key", ty: args[0].copy()}, TypeTupleField{name: "value", ty: args[1].copy()}}})
+            ^items: args
+            value_ty: items.pop() ?? return None
+            key_ty: items.pop() ?? return None
+            return Val(Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "key", ty: key_ty}, TypeTupleField{name: "value", ty: value_ty}}})
         }
     }
     None

@@ -513,11 +513,11 @@ ir_list_split_write: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, lis
     }
     members: ir_tuple_members(m, p, fields) ?? return ir_type_fail(b, span, ok_ty)
     if members.len() != 2 -> return ir_fail_slot(b, span, "split_write pair {ir_type_name(ok_ty)}")
-    ^left_member: members[0]
-    ^right_member: members[1]
+    ^left_offset: members[0].offset
+    ^right_offset: members[1].offset
     loop member in members {
-        if member.name == "left" -> left_member = member.copy()
-        if member.name == "right" -> right_member = member
+        if member.name == "left" -> left_offset = member.offset
+        if member.name == "right" -> right_offset = member.offset
     }
     pair_row: ir_value_type(m, p, ok_ty) ?? return ir_type_fail(b, span, ok_ty)
     view_row: ir_write_view_row(m, p, b, element, span)
@@ -540,8 +540,8 @@ ir_list_split_write: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, lis
     right: ir_write_view(m, b, view_row, data, point, rest, stride)
     pair: ir_fresh_temp(m, b, pair_row)
     ir_emit(b.f, IROp.StackAddress, pair, m.types[pair_row].size, 8, -1, b.line)
-    ir_store_at(m, p, b, pair, left_member.offset, left)
-    ir_store_at(m, p, b, pair, right_member.offset, right)
+    ir_store_at(m, p, b, pair, left_offset, left)
+    ir_store_at(m, p, b, pair, right_offset, right)
     success: ir_result_box(m, p, b, ty, true, pair)
     ir_emit(b.f, IROp.Copy, result, success, -1, -1, b.line)
     ir_end(b.f, b.line)
@@ -1684,10 +1684,10 @@ ir_cache_shape: fn(m: ^IRModule, p: IRProgram, ty: Type) -> IRCacheShape? Never!
     }
     if entry_ty == .Tuple(fields) {
         shape.entry = ir_value_type(m, p, entry_ty) ?? return None
-        members: ir_tuple_members(m, p, fields) ?? return None
-        loop member in members {
-            if member.name == "key" -> shape.key = member.copy()
-            if member.name == "value" -> shape.value = member
+        ^members: ir_tuple_members(m, p, fields) ?? return None
+        loop members.len() > 0 {
+            member: members.pop() ?? break
+            if member.name == "key" -> shape.key = member else if member.name == "value" -> shape.value = member
         }
     }
     if shape.capacity < 0 || shape.list < 0 || shape.entry < 0 || shape.key.ty < 0 || shape.value.ty < 0 {
@@ -1957,11 +1957,11 @@ ir_list_indexed: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, iter_ty: Type, li
     }
     members: ir_tuple_members(m, p, fields) ?? return ir_type_fail(b, span, pair_ty)
     if members.len() != 2 -> return ir_fail_slot(b, span, "indexed pair {ir_type_name(pair_ty)}")
-    ^index_member: members[0]
-    ^item_member: members[1]
+    ^index_offset: members[0].offset
+    ^item_offset: members[1].offset
     loop member in members {
-        if member.name == "idx" -> index_member = member.copy()
-        if member.name == "item" -> item_member = member
+        if member.name == "idx" -> index_offset = member.offset
+        if member.name == "item" -> item_offset = member.offset
     }
     pair_row: ir_value_type(m, p, pair_ty) ?? return ir_type_fail(b, span, pair_ty)
     pairs_ty: Type.List{element: pair_ty}
@@ -1974,8 +1974,8 @@ ir_list_indexed: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, iter_ty: Type, li
     item: ir_copy_value(m, p, b, walk.item, span)
     pair: ir_fresh_temp(m, b, pair_row)
     ir_emit(b.f, IROp.StackAddress, pair, m.types[pair_row].size, 8, -1, b.line)
-    ir_store_at(m, p, b, pair, index_member.offset, position)
-    ir_store_at(m, p, b, pair, item_member.offset, item)
+    ir_store_at(m, p, b, pair, index_offset, position)
+    ir_store_at(m, p, b, pair, item_offset, item)
     ir_list_push(m, p, b, pairs, pair_row, pair)
     ir_walk_close(m, b, walk)
     ir_release(m, b, list)
@@ -2280,7 +2280,7 @@ ir_fn_widen: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, slot: Int, row: Int, 
     call: ir_node(m, p, b, from_result, NodeKind.IndirectCall{callee: inner, type_args: [Type]{}, args: args, signature: from_ty}, span)
     ^carrier: TFailureCarrier.Infallible
     ^narrows: false
-    ^body: call.copy()
+    ^body: call
     if ir_untag(to_result) == .Result(ok, err) {
         carrier = TFailureCarrier.Result{success: ok, error: err}
         if !ir_is_result(from_result) {
@@ -3164,12 +3164,14 @@ ir_option_zip_store: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, boxed: Int, o
 // A fallible `f` (checked type `ty`, the Result of the option) settles its
 // Result box: an Err becomes the call's Err, an Ok payload the option's.
 ir_option_lift2: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, function: Int, left: Int, right: Int, span: Span) -> Int Never! {
-    // copy: `ty` is still the call's checked type, which the Result box below is made of
-    ^option_ty: ty.copy()
+    untagged: ir_untag(ty)
+    ^option_ty: Type.Named{name: "Unit"}
     ^failure_ty: Type?{None}
-    if ir_untag(ty) == .Result(ok, err) {
-        option_ty = ok.copy()
-        failure_ty = Val(err.copy())
+    if untagged == .Result(ok, err) {
+        option_ty = ok
+        failure_ty = Val(err)
+    } else {
+        option_ty = untagged
     }
     result_ty: if ir_untag(option_ty) == .Option(inner) -> inner else -> {
         return ir_fail_slot(b, span, "Option.lift2 to {ir_type_name(ty)}")
@@ -3184,9 +3186,13 @@ ir_option_lift2: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, functio
         return ir_fail_slot(b, span, "Option.lift2 over {ir_type_name(right_checked)}")
     }
     called_ty: ir_callback_result(function_ty) ?? return ir_fail_slot(b, span, "Option.lift2 with {ir_type_name(function_ty)}")
-    produced: if failure_ty == .Val(err) -> Type.Result{ok: result_ty.copy(), err: err.copy()} else -> result_ty.copy()
-    if type_carrier_identity(called_ty) != type_carrier_identity(produced) {
-        return ir_fail_slot(b, span, "Option.lift2 boxing {ir_type_name(called_ty)} as {ir_type_name(produced)}")
+    if failure_ty == .Val(err) {
+        produced: Type.Result{ok: result_ty.copy(), err: err.copy()}
+        if type_carrier_identity(called_ty) != type_carrier_identity(produced) {
+            return ir_fail_slot(b, span, "Option.lift2 boxing {ir_type_name(called_ty)} as {ir_type_name(produced)}")
+        }
+    } else if type_carrier_identity(called_ty) != type_carrier_identity(result_ty) {
+        return ir_fail_slot(b, span, "Option.lift2 boxing {ir_type_name(called_ty)} as {ir_type_name(result_ty)}")
     }
     if ir_unit_type(left_ty) || ir_unit_type(right_ty) || ir_unit_type(result_ty) {
         return ir_fail_slot(b, span, "Option.lift2 over Unit")
@@ -4608,11 +4614,11 @@ ir_list_min_max: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, list: I
     }
     members: ir_tuple_members(m, p, fields) ?? return ir_type_fail(b, span, pair_ty)
     if members.len() != 2 -> return ir_fail_slot(b, span, "min_max producing {ir_type_name(ty)}")
-    ^least_member: members[0]
-    ^greatest_member: members[1]
+    ^least_offset: members[0].offset
+    ^greatest_offset: members[1].offset
     loop member in members {
-        if member.name == "min" -> least_member = member.copy()
-        if member.name == "max" -> greatest_member = member
+        if member.name == "min" -> least_offset = member.offset
+        if member.name == "max" -> greatest_offset = member.offset
     }
     result_row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     pair_row: ir_value_type(m, p, pair_ty) ?? return ir_type_fail(b, span, pair_ty)
@@ -4654,10 +4660,10 @@ ir_list_min_max: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, list: I
     // The stores copy the borrowed elements (ir_store_at owns a held value).
     least_chosen: ir_element_address(m, b, data, least, stride)
     least_item: ir_load_at(m, b, least_chosen, 0, row)
-    ir_store_at(m, p, b, pair, least_member.offset, least_item)
+    ir_store_at(m, p, b, pair, least_offset, least_item)
     greatest_chosen: ir_element_address(m, b, data, greatest, stride)
     greatest_item: ir_load_at(m, b, greatest_chosen, 0, row)
-    ir_store_at(m, p, b, pair, greatest_member.offset, greatest_item)
+    ir_store_at(m, p, b, pair, greatest_offset, greatest_item)
     pair_size: m.types[pair_row].size
     made: ir_option_make(m, p, b, result_row, pair, pair_size)
     ir_option_set(m, b, found, made)
@@ -4673,11 +4679,11 @@ ir_list_split: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, list: Int
     }
     members: ir_tuple_members(m, p, fields) ?? return ir_type_fail(b, span, ty)
     if members.len() != 2 -> return ir_fail_slot(b, span, "split producing {ir_type_name(ty)}")
-    ^left_member: members[0]
-    ^right_member: members[1]
-    loop member in members {
-        if member.name == "left" -> left_member = member.copy()
-        if member.name == "right" -> right_member = member
+    ^left_at: 0
+    ^right_at: 1
+    loop (index, member) in members {
+        if member.name == "left" -> left_at = index
+        if member.name == "right" -> right_at = index
     }
     pair_row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     count: ir_native_index(m, p, b, count_value, span)
@@ -4685,8 +4691,8 @@ ir_list_split: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, list: Int
     length: ir_load_word(m, b, list, 0)
     zero: ir_word_const(m, b, 0)
     cut: ir_word_clamp(m, b, count, zero, length)
-    left: ir_list_empty(m, p, b, left_member.ty)
-    right: ir_list_empty(m, p, b, right_member.ty)
+    left: ir_list_empty(m, p, b, members[left_at].ty)
+    right: ir_list_empty(m, p, b, members[right_at].ty)
     walk: ir_walk_open(m, b, list, row)
     before: ir_bool_op(m, b, IROp.Lt, walk.index, cut)
     ir_open_if(b.f, before, b.line)
@@ -4698,8 +4704,8 @@ ir_list_split: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, list: Int
     pair: ir_fresh_temp(m, b, pair_row)
     pair_size: m.types[pair_row].size
     ir_emit(b.f, IROp.StackAddress, pair, pair_size, 8, -1, b.line)
-    ir_store_at(m, p, b, pair, left_member.offset, left)
-    ir_store_at(m, p, b, pair, right_member.offset, right)
+    ir_store_at(m, p, b, pair, members[left_at].offset, left)
+    ir_store_at(m, p, b, pair, members[right_at].offset, right)
     pair
 }
 
@@ -6897,10 +6903,7 @@ ir_plugin_guest: fn(m: ^IRModule, artifact: String) -> Int Never! {
     key: "{IR_PLUGIN_GUEST_PREFIX}{artifact}>"
     known: ir_keyed_function(m, key) ?? -1
     if known >= 0 -> return known
-    id: m.functions.len()
-    m.functions.push(ir_hashed_function("plugin.guest", key, "jet_ir_plugin_guest_", "", 0))
-    ir_function_bind(m, key, id)
-    ^a: ir_builder_new(m.functions[id].copy())
+    ^a: ir_builder_new(ir_hashed_function("plugin.guest", key, "jet_ir_plugin_guest_", "", 0))
     word_row: ir_word_row(m)
     a.f.result = word_row
     _: ir_new_slot(a, word_row, IRSlotKind.Param, ir_intern_name(m, "op"))
@@ -6908,7 +6911,9 @@ ir_plugin_guest: fn(m: ^IRModule, artifact: String) -> Int Never! {
     _: ir_new_slot(a, word_row, IRSlotKind.Param, ir_intern_name(m, "area"))
     none: ir_word_const(m, a, 0)
     ir_emit(a.f, IROp.Return, -1, none, -1, -1, a.line)
-    m.functions[id] = a.f.move()
+    id: m.functions.len()
+    m.functions.push(a.f.move())
+    ir_function_bind(m, key, id)
     id
 }
 

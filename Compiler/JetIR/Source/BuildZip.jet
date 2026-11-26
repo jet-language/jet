@@ -41,36 +41,36 @@ ir_zip: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiver: Int, a
             if columns[index] < 0 -> return -1
         }
         if mode != .Pad -> next
-        target: field_types[index].copy()
         if fill_mode == .DefaultNone {
             // Each element becomes Present; the ended side stands in Absent.
             local: ir_zip_local(m, p, b, "zip_0", elements[index], span)
-            present: ir_node(m, p, b, target, NodeKind.Present{value: local}, span)
-            mapped: ir_zip_adapter(m, p, b, "zip_fill_{index}", [Type]{elements[index]}, [String]{"zip_0"}, target, present, span)
+            present: ir_node(m, p, b, field_types[index], NodeKind.Present{value: local}, span)
+            mapped: ir_zip_adapter(m, p, b, "zip_fill_{index}", [Type]{elements[index]}, [String]{"zip_0"}, field_types[index], present, span)
             if mapped.closure < 0 -> return -1
-            meta: ir_lazy_meta(m, p, b, target, span)
+            meta: ir_lazy_meta(m, p, b, field_types[index], span)
             if meta < 0 -> return -1
             release: mapped.release
-            iter_row: ir_value_type(m, p, Type.Apply{name: "Iter", args: [Type]{target.copy()}}) ?? return ir_type_fail(b, span, target)
+            iter_row: ir_value_type(m, p, Type.Apply{name: "Iter", args: [Type]{field_types[index].copy()}}) ?? return ir_type_fail(b, span, field_types[index])
             source: columns[index]
             columns[index] = ir_lazy_runtime(m, b, "jet_rt_native_iter_map", [Int]{source, mapped.closure, mapped.callback, release, meta}, iter_row, source)
-            absent_node: ir_node(m, p, b, target, NodeKind.Absent, span)
+            absent_node: ir_node(m, p, b, field_types[index], NodeKind.Absent, span)
             absent: ir_expr(m, p, b, absent_node)
             if ir_failed(b) || absent < 0 -> return -1
             made.push(absent)
             fills.push(absent)
             next
         }
-        ^actual: fill_ty.copy()
+        ^matches: fill_ty == field_types[index]
         ^column_fill: fill
         if fill_mode == .Columns {
-            actual = ir_zip_tuple_field(fill_ty, fields[index]) ?? return ir_fail_slot(b, span, "builtin Zip fills without column {fields[index]}")
+            actual: ir_zip_tuple_field(fill_ty, fields[index]) ?? return ir_fail_slot(b, span, "builtin Zip fills without column {fields[index]}")
+            matches = actual == field_types[index]
             member: ir_member_of(m, p, b, fill, fields[index]) ?? return ir_fail_slot(b, span, "builtin Zip fills without column {fields[index]}")
             column_fill = ir_member_read(m, b, fill, member)
         }
-        if actual != target {
+        if !matches {
             // A fill of another numeric type converts (ir_numeric_cast).
-            target_row: ir_value_type(m, p, target) ?? return ir_type_fail(b, span, target)
+            target_row: ir_value_type(m, p, field_types[index]) ?? return ir_type_fail(b, span, field_types[index])
             column_fill = ir_numeric_cast(m, p, b, column_fill, target_row, span)
             if ir_failed(b) || column_fill < 0 -> return -1
             made.push(column_fill)
@@ -83,7 +83,6 @@ ir_zip: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiver: Int, a
     loop index in 1..<input_count {
         row_fields: loop column in 0..<(index + 1) -> TypeTupleField{name: fields[column], ty: field_types[column].copy()}
         row_type: Type.Tuple{fields: row_fields}
-        right_type: field_types[index].copy()
         // The row so far and this column's value make the next row.
         ^values: [Int]{}
         prefix: ir_zip_local(m, p, b, "zip_0", left_type, span)
@@ -93,13 +92,15 @@ ir_zip: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiver: Int, a
                 values.push(ir_node(m, p, b, row_fields[column].ty, NodeKind.Field{receiver: prefix, field: field}, span))
             }
         }
-        values.push(ir_zip_local(m, p, b, "zip_1", right_type, span))
+        values.push(ir_zip_local(m, p, b, "zip_1", field_types[index], span))
         body: ir_node(m, p, b, row_type, NodeKind.Tuple{values: values}, span)
-        joined: ir_zip_adapter(m, p, b, "zip_{index}", [Type]{left_type.copy(), right_type.copy()}, [String]{"zip_0", "zip_1"}, row_type, body, span)
+        joined: ir_zip_adapter(m, p, b, "zip_{index}", [Type]{left_type.copy(), field_types[index].copy()}, [String]{"zip_0", "zip_1"}, row_type, body, span)
         if joined.closure < 0 -> return -1
         last: index + 1 == input_count
-        result_ty: if last -> ty.copy() else -> Type.Apply{name: "Iter", args: [Type]{row_type.copy()}}
-        result_row: ir_value_type(m, p, result_ty) ?? return ir_type_fail(b, span, result_ty)
+        result_row: if last -> (ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)) else -> {
+            iter_ty: Type.Apply{name: "Iter", args: [Type]{row_type.copy()}}
+            ir_value_type(m, p, iter_ty) ?? return ir_type_fail(b, span, iter_ty)
+        }
         meta: ir_lazy_meta(m, p, b, row_type, span)
         if meta < 0 -> return -1
         release: joined.release
@@ -117,7 +118,7 @@ ir_zip: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiver: Int, a
         call_args.push(meta)
         if mode == .Pad {
             left_meta: ir_lazy_meta(m, p, b, left_type, span)
-            right_meta: ir_lazy_meta(m, p, b, right_type, span)
+            right_meta: ir_lazy_meta(m, p, b, field_types[index], span)
             if left_meta < 0 || right_meta < 0 -> return -1
             // The node clones both fills: the build keeps and drops its own.
             copied: ir_word_const(m, b, 0)

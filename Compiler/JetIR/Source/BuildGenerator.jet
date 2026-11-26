@@ -26,8 +26,7 @@ IR_GENERATOR_ENV_HEADER: 16
 ir_generator_element: fn(p: IRProgram, b: ^IRBuilder, function: FnBody) -> Type? Never! {
     written: function.ret ?? return None
     declared: ir_untag(ir_fact(p, b, written, function.source_span))
-    ^stream: declared.copy()
-    if declared == .Result(ok, _) -> stream = ir_untag(ok)
+    stream: if declared == .Result(ok, _) -> ir_untag(ok) else -> declared
     if stream == .Apply(name, args) {
         if name == "Stream" && args.len() == 1 -> return Val(args[0].copy())
     }
@@ -118,9 +117,7 @@ ir_build_generator: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, function: FnBo
 // The producer(env, result) of generator `function`: the body, run as the
 // generator's child task over the parameters it takes from the env.
 ir_generator_producer: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, function: FnBody, captures: [IRGeneratorCapture]) -> Int Never! {
-    id: m.functions.len()
-    m.functions.push(ir_hashed_function("{b.f.name}.generator", "{b.f.key}#generator", "jet_ir_generator_", b.f.source_file, function.line))
-    ^a: ir_builder_new(m.functions[id].copy())
+    ^a: ir_builder_new(ir_hashed_function("{b.f.name}.generator", "{b.f.key}#generator", "jet_ir_generator_", b.f.source_file, function.line))
     a.instance = b.instance.copy()
     a.row = b.row
     a.bounds = b.bounds
@@ -161,9 +158,10 @@ ir_generator_producer: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, function: F
     loop row in a.failures {
         b.failures.push(IRFailureRow{message: row.message.copy(), span: row.span})
     }
-    if a.error != "" -> ir_fail(b, a.error_span, a.error.copy())
+    if a.error != "" -> ir_fail(b, a.error_span, a.error)
     ir_resolve_deferred(m, p, a)
-    m.functions[id] = a.f.move()
+    id: m.functions.len()
+    m.functions.push(a.f.move())
     if failed -> return -1
     id
 }
@@ -175,10 +173,7 @@ ir_generator_release: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, function: Fn
     key: "{b.f.key}#generator.release"
     known: ir_keyed_function(m, key) ?? -1
     if known >= 0 -> return known
-    id: m.functions.len()
-    m.functions.push(ir_hashed_function("{b.f.name}.generator.release", key, "jet_ir_generator_release_", b.f.source_file, function.line))
-    ir_function_bind(m, key, id)
-    ^r: ir_builder_new(m.functions[id].copy())
+    ^r: ir_builder_new(ir_hashed_function("{b.f.name}.generator.release", key, "jet_ir_generator_release_", b.f.source_file, function.line))
     r.instance = b.instance.copy()
     r.line = function.line
     pointer_row: ir_pointer_row(m)
@@ -203,9 +198,11 @@ ir_generator_release: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, function: Fn
     size: ir_word_const(m, r, ir_align8(bytes))
     ir_free(m, r, env, size)
     ir_emit(r.f, IROp.Return, -1, -1, -1, -1, r.line)
-    if r.error != "" -> ir_fail(b, r.error_span, r.error.copy())
+    if r.error != "" -> ir_fail(b, r.error_span, r.error)
     ir_resolve_deferred(m, p, r)
-    m.functions[id] = r.f.move()
+    id: m.functions.len()
+    m.functions.push(r.f.move())
+    ir_function_bind(m, key, id)
     if ir_failed(b) -> return -1
     id
 }

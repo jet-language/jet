@@ -1858,31 +1858,31 @@ ir_trait_method_slot: fn(methods: IRTraitMethods, trait_name: String, method: St
 // resolves in the implementing module, else as a plain Method of the owner,
 // which `impl_slots` (by "<module>|<owner key>|<method>") and `impl_traits`
 // name the traits of; `symbols` holds the TraitMethods' trait keys.
+ir_trait_methods_add: fn(methods: ^IRTraitMethods, trait_short: String, method: String, index: Int) Never! {
+    key: name_pair_slot(methods.names, trait_short, method)
+    id: methods.ids.get(key) ?? methods.rows.len()
+    if id == methods.rows.len() {
+        methods.ids[key] = id
+        methods.rows.push([Int]{})
+    }
+    methods.rows[id].push(index)
+}
+
 ir_trait_methods: fn(functions: [FnBody], symbols: SymbolTable, type_rows_keys: NameTable, type_rows: [Int], types: [TTypeDef], impl_slots_keys: NameTable, impl_slots: [Int], impl_traits: [[String]]) -> IRTraitMethods Never! {
     ^methods: IRTraitMethods{}
     loop (index, function) in functions {
-        ^traits: [String]{}
         if function.kind == {
             .TraitMethod(_, _, _, trait_name, _) -> {
-                traits.push(ir_short_name(symbol_table_key(symbols, trait_name)))
+                ir_trait_methods_add(methods, ir_short_name(symbol_table_key(symbols, trait_name)), function.name, index)
             }
             .Method(_, owner_type) -> {
                 owner_key: ir_render_type_key(type_rows_keys, type_rows, types, owner_type)
                 slot: name_column_value(impl_slots_keys, impl_slots, "{function.module_identity.id}|{owner_key}|{function.name}") ?? -1
                 if slot >= 0 {
-                    loop trait_short in impl_traits[slot] -> traits.push(trait_short.copy())
+                    loop trait_short in impl_traits[slot] -> ir_trait_methods_add(methods, trait_short, function.name, index)
                 }
             }
             .TopLevel -> {}
-        }
-        loop trait_short in traits {
-            key: name_pair_slot(methods.names, trait_short, function.name)
-            id: methods.ids.get(key) ?? methods.rows.len()
-            if id == methods.rows.len() {
-                methods.ids[key] = id
-                methods.rows.push([Int]{})
-            }
-            methods.rows[id].push(index)
         }
     }
     methods
@@ -2447,10 +2447,8 @@ ir_entry_function: fn(m: ^IRModule, p: IRProgram, entry: Int, failures: ^[IRBuil
     }
     ty: if row >= 0 -> ir_row_ty(m, p, row) else -> Type.Named{name: "Unit"}
     key: "{m.functions[entry].key}{IR_ENTRY_WRAPPER_SUFFIX}"
-    id: m.functions.len()
-    m.functions.push(ir_function_new("entry", key, "{m.functions[entry].symbol}__entry", m.functions[entry].source_file, m.functions[entry].line))
-    ir_function_bind(m, key, id)
-    ^b: ir_builder_new(m.functions[id].copy())
+    source_file: m.functions[entry].source_file
+    ^b: ir_builder_new(ir_function_new("entry", key, "{m.functions[entry].symbol}__entry", source_file, m.functions[entry].line))
     b.line = m.functions[entry].line
     span: Span{start: 0, end: 0}
     ir_sentry_release_link(m, p, b)
@@ -2483,10 +2481,12 @@ ir_entry_function: fn(m: ^IRModule, p: IRProgram, entry: Int, failures: ^[IRBuil
     ir_entry_call(m, p, b, entry, row, ty, span)
     ir_emit(b.f, IROp.Return, -1, -1, -1, -1, b.line)
     if b.error != "" {
-        failures.push(IRBuildFailure{key: key, name: "entry", message: b.error, source_file: m.functions[entry].source_file, span: b.error_span})
+        failures.push(IRBuildFailure{key: key, name: "entry", message: b.error, source_file: source_file, span: b.error_span})
     }
     ir_resolve_deferred(m, p, b)
-    m.functions[id] = b.f.move()
+    id: m.functions.len()
+    m.functions.push(b.f.move())
+    ir_function_bind(m, key, id)
     id
 }
 
@@ -2701,7 +2701,7 @@ ir_build_queue: fn(m: ^IRModule, p: IRProgram, failures: ^[IRBuildFailure], from
 
 // Builds the body of one queued function (a checked function or instance,
 // or a lambda job) into its row.
-ir_build_queued: fn(m: ^IRModule, p: IRProgram, failures: ^[IRBuildFailure], queued: IRQueued) Never! {
+ir_build_queued: fn(m: ^IRModule, p: IRProgram, failures: ^[IRBuildFailure], queued: ^^IRQueued) Never! {
     ^b: ir_builder_new(m.functions[queued.id].copy())
     if queued.lambda >= 0 {
         job: m.lambdas[queued.lambda].copy()
@@ -2717,10 +2717,10 @@ ir_build_queued: fn(m: ^IRModule, p: IRProgram, failures: ^[IRBuildFailure], que
     }
     if queued.args.len() > 0 {
         names: ir_generic_names(p, p.functions[queued.row])
-        b.instance = IRInstance{names: names, args: queued.args.copy()}
+        b.instance = IRInstance{names: names, args: queued.args}
     }
     ir_builder_from(p, b, Val(queued.row))
-    b.entry = queued.row == p.entry && queued.args.len() == 0
+    b.entry = queued.row == p.entry && b.instance.args.len() == 0
     ir_build_function(m, p, b, p.functions[queued.row])
     ir_keep_failures(failures, b, m.functions[queued.id].key, p.functions[queued.row].name, p.functions[queued.row].source_file, p.functions[queued.row].source_span)
     ir_resolve_deferred(m, p, b)
@@ -3164,8 +3164,7 @@ ir_pending_windows: fn(p: IRProgram, b: ^IRBuilder, subject: Int, from: Int) Nev
         return
     }
     loop index in from..<b.pending.len() {
-        row: b.pending[index]
-        b.pending[index] = IRPending{name: row.name.copy(), slot: row.slot, subject: row.subject, offset: row.offset, selector: row.selector, boxed: row.boxed, loaded: row.loaded, window: true}
+        b.pending[index].window = true
     }
 }
 
@@ -3561,9 +3560,10 @@ ir_movable_binding: fn(b: IRBuilder, slot: Int) -> Bool Never! {
 // The owned variables whose value is in `slot` no longer own it.
 ir_disown: fn(b: ^IRBuilder, slot: Int) Never! {
     loop index in 0..<b.bindings.len() {
-        binding: b.bindings[index]
-        if binding.slot != slot || binding.indirect >= 0 || !binding.owned -> next
-        b.bindings[index] = IRBinding{name: binding.name.copy(), slot: binding.slot, indirect: binding.indirect, owned: false, symbol: binding.symbol, write: binding.write, carrier: binding.carrier}
+        if b.bindings[index].slot != slot || b.bindings[index].indirect >= 0 || !b.bindings[index].owned -> next
+        b.bindings[index].owned = false
+        b.bindings[index].live = -1
+        b.bindings[index].cleanup = -1
     }
 }
 
@@ -3595,11 +3595,11 @@ ir_own_states: fn(b: IRBuilder, count: Int) -> [IROwnState] Never! {
 }
 
 ir_set_own_state: fn(b: ^IRBuilder, index: Int, state: IROwnState) Never! {
-    row: b.bindings[index]
-    if row.owned == state.owned && row.live == state.live {
+    if b.bindings[index].owned == state.owned && b.bindings[index].live == state.live {
         return
     }
-    b.bindings[index] = IRBinding{name: row.name.copy(), slot: row.slot, indirect: row.indirect, owned: state.owned, symbol: row.symbol, write: row.write, carrier: row.carrier, live: state.live, cleanup: row.cleanup}
+    b.bindings[index].owned = state.owned
+    b.bindings[index].live = state.live
 }
 
 // Restores the ownership `states` of the variables bound before it.
@@ -4723,7 +4723,8 @@ ir_stop_return: fn(m: ^IRModule, b: ^IRBuilder) Never! {
         // A restore's own code must not unwind again.
         open: b.transactions
         b.transactions = [IRTxFrame]{}
-        program: b.program.copy()
+        program: b.program
+        b.program = None
         ^index: open.len() - 1
         loop index >= 0 {
             frame: open[index]
@@ -4747,6 +4748,7 @@ ir_stop_return: fn(m: ^IRModule, b: ^IRBuilder) Never! {
             }
             ir_tx_leave_scopes(m, b, frame)
         }
+        b.program = program
         b.transactions = open
         ir_drop_bindings(m, b, 0)
         ir_set_own_states(b, states)
@@ -5294,10 +5296,8 @@ ir_result_rebox: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, slot: Int, row: I
     want_raw: ir_row_ty(m, p, row)
     have_ty: ir_untag(have_raw)
     want_ty: ir_untag(want_raw)
-    ^from: [Type]{}
-    ^to: [Type]{}
-    if have_ty == .Result(ok, err) -> from = [Type]{ok.copy(), err.copy()}
-    if want_ty == .Result(ok, err) -> to = [Type]{ok.copy(), err.copy()}
+    from: if have_ty == .Result(ok, err) -> [Type]{ok, err} else -> [Type]{}
+    to: if want_ty == .Result(ok, err) -> [Type]{ok, err} else -> [Type]{}
     if from.len() != 2 || to.len() != 2 {
         return ir_fail_slot(b, span, "a value of {ir_type_name(have_raw)} where {ir_type_name(want_raw)} is expected")
     }
