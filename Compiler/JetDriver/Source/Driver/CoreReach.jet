@@ -139,7 +139,7 @@ jet_driver_core_impl_reached: fn(row: JetDriverCoreImplRow, reached: NameTable) 
         return false
     }
     if owned_trait(row.trait_name) == .Val(owned) && owned.declared_in == row.trait_module {
-        return !owned_trait_codec(row.trait_name) || jet_driver_reach_holds(reached, row.trait_name)
+        return !jet_driver_reach_lazy_owned_trait(row.trait_name) || jet_driver_reach_holds(reached, row.trait_name)
     }
     jet_driver_reach_holds(reached, row.trait_module) || jet_driver_reach_holds(reached, "{row.trait_module}.{row.trait_name}")
 }
@@ -150,13 +150,19 @@ jet_driver_reach_holds: fn(reached: NameTable, text: String) -> Bool Never! {
     text != "" && name_find(reached, text) != None
 }
 
+// Whether the owned trait `trait_name` stays lazy until reached code names it
+// or calls one of its hooks: codec traits and CheckedText.
+jet_driver_reach_lazy_owned_trait: fn(trait_name: String) -> Bool Never! {
+    owned_trait_codec(trait_name) || trait_name == "CheckedText"
+}
+
 // Whether a Core implementation of `trait_name` (as written) is a lazy row:
-// a codec trait's, or one of a trait another module declares
+// a codec trait's, CheckedText's, or one of a trait another module declares
 // (`cipher.ForwardBlock`). Any other owned trait is one the compiler calls
 // without a name, and a trait the type's own module declares is reached
 // with it.
 jet_driver_reach_lazy_trait: fn(trait_name: String) -> Bool Never! {
-    if owned_trait(trait_name) != None -> return owned_trait_codec(trait_name)
+    if owned_trait(trait_name) != None -> return jet_driver_reach_lazy_owned_trait(trait_name)
     trait_name.contains(".")
 }
 
@@ -1088,6 +1094,7 @@ JetDriverReachImpl: struct {
     row: JetDriverCoreImplRow,
     written: String,
     triggers: [Int],
+    dotted_triggers: [Int],
 }
 
 // One loaded module whose source counts toward reach, at `loaded` in the
@@ -1232,6 +1239,11 @@ jet_driver_reach_admit: fn(reach: ^JetDriverReach, loaded: Int, module_name: Str
                 loop reach.by_name.len() <= trigger -> reach.by_name.push([Int]{})
                 reach.by_name[trigger].push(index)
             }
+            loop at in 0..<reach.impls[lazy_impl].dotted_triggers.len() {
+                trigger: reach.impls[lazy_impl].dotted_triggers[at]
+                loop reach.by_name.len() <= trigger -> reach.by_name.push([Int]{})
+                reach.by_name[trigger].push(index)
+            }
             reach.stack.push(index)
             next
         }
@@ -1260,9 +1272,16 @@ jet_driver_reach_impl: fn(reach: ^JetDriverReach, module_name: String, type_name
     ^trait_module: ""
     ^trait_name: written.copy()
     ^triggers: [Int]{}
+    ^dotted_triggers: [Int]{}
     if owned_trait(written) == .Val(owned) {
         triggers.push(jet_driver_reach_word(reach, owned.name))
         if owned.contract == .Codec(verb) -> triggers.push(jet_driver_reach_word(reach, verb))
+        if owned.name == "CheckedText" {
+            triggers.push(jet_driver_reach_word(reach, "encode_hole"))
+            dotted_triggers.push(jet_driver_reach_word(reach, "check"))
+            dotted_triggers.push(jet_driver_reach_word(reach, "accepts"))
+            dotted_triggers.push(jet_driver_reach_word(reach, "build"))
+        }
         if owned.auto_derive_family == .Val(family) {
             triggers.push(jet_driver_reach_word(reach, family))
         }
@@ -1280,7 +1299,7 @@ jet_driver_reach_impl: fn(reach: ^JetDriverReach, module_name: String, type_name
         }
         trait_name = parts.tail.move()
     }
-    reach.impls.push(JetDriverReachImpl{item: reach.items.len(), row: JetDriverCoreImplRow{type_module: module_name.copy(), type_name: type_name.copy(), trait_module: trait_module, trait_name: trait_name}, written: written.copy(), triggers: triggers})
+    reach.impls.push(JetDriverReachImpl{item: reach.items.len(), row: JetDriverCoreImplRow{type_module: module_name.copy(), type_name: type_name.copy(), trait_module: trait_module, trait_name: trait_name}, written: written.copy(), triggers: triggers, dotted_triggers: dotted_triggers})
     reach.impls.len() - 1
 }
 
@@ -1448,11 +1467,21 @@ jet_driver_reach_bodies: fn(functions: [Func]) -> Int Never! {
 jet_driver_reach_mark: fn(reach: ^JetDriverReach, unit: Int, spell: Int) {
     id: spell >> 2
     kind: spell & 3
-    if reach.units[unit].open || kind & 1 == 1 -> jet_driver_reach_global(reach, id) else {
-        jet_driver_reach_local(reach, unit, id)
-    }
+    newly_dotted: kind & 1 == 1 && reach.units[unit].dotted.get(id) == None
     if kind & 1 == 1 -> reach.units[unit].dotted[id] = true
     if kind == 2 -> reach.units[unit].heads[id] = true
+    if reach.units[unit].open || kind & 1 == 1 {
+        already_global: jet_driver_reach_has(reach.global, id)
+        jet_driver_reach_global(reach, id)
+        if already_global && newly_dotted && reach.units[unit].open && id < reach.by_name.len() {
+            loop at in 0..<reach.by_name[id].len() {
+                index: reach.by_name[id][at]
+                if reach.items[index].lazy_impl >= 0 -> reach.stack.push(index)
+            }
+        }
+    } else {
+        jet_driver_reach_local(reach, unit, id)
+    }
 }
 
 jet_driver_reach_global: fn(reach: ^JetDriverReach, id: Int) {
@@ -1493,13 +1522,30 @@ jet_driver_reach_spelled: fn(reach: ^JetDriverReach, id: Int) Never! {
 }
 
 // Whether the lazy implementation `at` is reached: reached code spells one
-// of its triggers (which reaches its owned trait), and
-// jet_driver_core_impl_reached holds.
+// of its triggers (or an open unit spells one of its dotted triggers), which
+// reaches its owned trait, and jet_driver_core_impl_reached holds.
 jet_driver_reach_impl_live: fn(reach: ^JetDriverReach, at: Int) -> Bool Never! {
+    ^triggered: false
     loop trigger in reach.impls[at].triggers {
         if jet_driver_reach_has(reach.spelled, trigger) {
             _: name_intern(reach.reached, reach.impls[at].row.trait_name)
+            triggered = true
             break
+        }
+    }
+    if !triggered && reach.impls[at].dotted_triggers.len() > 0 {
+        loop trigger in reach.impls[at].dotted_triggers {
+            ^hit: false
+            loop u in 0..<reach.units.len() {
+                if reach.units[u].open && reach.units[u].dotted.get(trigger) != None {
+                    hit = true
+                    break
+                }
+            }
+            if hit {
+                _: name_intern(reach.reached, reach.impls[at].row.trait_name)
+                break
+            }
         }
     }
     jet_driver_core_impl_reached(reach.impls[at].row, reach.reached)
@@ -2027,3 +2073,4 @@ jet_driver_reach_gone: fn(reach: JetDriverReach, index: Int, gone: ^[Bool], glob
     loop local_gone[unit].len() <= name -> local_gone[unit].push(false)
     local_gone[unit][name] = true
 }
+
