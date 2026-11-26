@@ -13,6 +13,7 @@ use {
     builtin: jet_builtins
     core: core
     rt: jet.runtime.time
+    rfc3339_syntax: __core_time_syntax_rfc3339
 }
 
 // Civil calendars, validation, codecs, wall-clock policy, and monotonic points
@@ -1201,25 +1202,30 @@ DateTime: struct {
         }
     }
 
-    // A checked `DateTime{"…"}` literal is one complete RFC 3339 instant, checked
-    // before the program runs by the same parser that reads runtime strings.
-    impl CheckedText {
-        Error: TimeError,
-        Hole: String,
+}
 
-        check: fn(parts: [String]) -[]> Checked<[String], TextSlot> TimeError! {
-            if parts.len() > 1 {
-                return Err(TimeError{reason: "a `DateTime` literal cannot contain interpolation"})
-            }
-            _: parse_rfc3339(parts.join(""))
-            Ok(Checked{shape: parts.copy(), slots: [TextSlot]{}})
+// A checked `DateTime{"…"}` literal is one complete RFC 3339 instant, checked
+// before the program runs by the RFC 3339 grammar and calendar rules.
+impl DateTime.CheckedText {
+    Error: TimeError,
+    Hole: String,
+
+    check: fn(parts: [String]) -[]> Checked<[String], TextSlot> TimeError! {
+        if parts.len() > 1 {
+            return Err(TimeError{reason: "a `DateTime` literal cannot contain interpolation"})
         }
-
-        encode_hole: fn<T: Printable>(value: T, _slot: TextSlot) -[]> String { "{value}" }
-
-        build: fn(parts: [String], _holes: [String]) -[]> DateTime {
-            parse_rfc3339(parts.join("")) ?? panic("a checked DateTime literal became invalid")
+        text: parts.join("")
+        if !rfc3339_syntax.rfc3339_syntax_ok(text) {
+            return Err(TimeError{reason: "invalid RFC3339 datetime: {text}"})
         }
+        _: parse_rfc3339(text)
+        Ok(Checked{shape: parts.copy(), slots: [TextSlot]{}})
+    }
+
+    encode_hole: fn<T: Printable>(value: T, _slot: TextSlot) -[]> String { "{value}" }
+
+    build: fn(parts: [String], _holes: [String]) -[]> DateTime {
+        parse_rfc3339(parts.join("")) ?? panic("a checked DateTime literal became invalid")
     }
 }
 

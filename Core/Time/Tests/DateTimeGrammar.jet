@@ -1,0 +1,25 @@
+use {
+    time: core.time
+    core.time.[DateTime]
+}
+
+datetime_refusal: fn(parts: [String]) -> String {
+    _: DateTime.check(parts) ?? return err.reason
+    ""
+}
+
+#Test("DateTime grammar accepts valid RFC 3339 timestamps with UTC, offset, and fractional seconds") {
+    assert_eq(datetime_refusal([String]{"2024-02-29T13:04:05Z"}), "")
+    assert_eq(datetime_refusal([String]{"2024-02-29T13:04:05.123456+02:30"}), "")
+    assert_eq(datetime_refusal([String]{"2024-12-31T23:59:59-05:00"}), "")
+    built: DateTime.build([String]{"2024-02-29T13:04:05Z"}, [String]{})
+    assert_eq(built, time.parse_rfc3339("2024-02-29T13:04:05Z") ?? panic("{err}"))
+}
+
+#Test("DateTime grammar rejects holes, wrong separators, missing zones, and invalid calendar dates") {
+    assert_eq(datetime_refusal([String]{"2024-02-29T", ":04:05Z"}), "a `DateTime` literal cannot contain interpolation")
+    assert(datetime_refusal([String]{"2024-02-29 13:04:05Z"}) != "")
+    assert(datetime_refusal([String]{"2024-02-29T13:04:05"}) != "")
+    assert(datetime_refusal([String]{"2024-02-30T13:04:05Z"}) != "")
+    assert(datetime_refusal([String]{"not-a-timestamp"}) != "")
+}

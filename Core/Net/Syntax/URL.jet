@@ -1,0 +1,218 @@
+// RFC 3986 / WHATWG URL template grammar for checked `URL{"..."}` literals.
+use core.grammar.[Grammar]
+
+URL_SLOT_AUTHORITY: 0
+URL_SLOT_PATH: 1
+URL_SLOT_OPAQUE: 2
+URL_SLOT_QUERY: 3
+URL_SLOT_FRAGMENT: 4
+
+#Error
+URLSyntaxError: struct {
+    reason: String,
+}
+
+#Allow(Jet.RawMultilineHtml, "URL grammar uses `HOLE<slot=...>` markers")
+priv Address: Grammar{"""
+    address          : scheme=SCHEME ':' rest=after_scheme EOF ;
+    after_scheme     : '/' slash=after_slash # Slash
+                     | body=opaque_body? query=query_part? frag=frag_part? # Opaque
+                     ;
+    after_slash      : '/' auth=host_part path=hier_path? query=query_part? frag=frag_part? # Hier
+                     | body=abs_path? query=query_part? frag=frag_part? # AbsPath
+                     ;
+    host_part        : lead=AUTH_TEXT? tail+=auth_after* ;
+    auth_after       : ipv6=IPV6 text=AUTH_TEXT? # IPv6
+                     | HOLE<slot=Authority> text=AUTH_TEXT? # Hole
+                     ;
+    hier_path        : '/' lead=SEG_TEXT? tail+=path_after* ;
+    abs_path         : lead=SEG_TEXT tail+=path_after* # Text
+                     | first=path_hole_first tail+=path_after* # Hole
+                     ;
+    path_hole_first  : HOLE<slot=Path> text=SEG_TEXT? ;
+    path_after       : '/' text=SEG_TEXT? # Slash
+                     | HOLE<slot=Path> text=SEG_TEXT? # Hole
+                     ;
+    opaque_body      : lead=SEG_TEXT tail+=opaque_after* # Text
+                     | first=opaque_hole_first tail+=opaque_after* # Hole
+                     ;
+    opaque_hole_first: HOLE<slot=Opaque> text=SEG_TEXT? ;
+    opaque_after     : '/' text=SEG_TEXT? # Slash
+                     | HOLE<slot=Opaque> text=SEG_TEXT? # Hole
+                     ;
+    query_part       : '?' lead=QUERY_TEXT? tail+=query_after* ;
+    query_after      : HOLE<slot=Query> text=QUERY_TEXT? ;
+    frag_part        : '#' lead=FRAG_TEXT? tail+=frag_after* ;
+    frag_after       : HOLE<slot=Fragment> text=FRAG_TEXT? ;
+    SCHEME           : [A-Za-z] [A-Za-z0-9+\-.]* ;
+    IPV6             : '[' [0-9A-Fa-f:.%]+ ']' ;
+    AUTH_TEXT        : [^/?#\[\]\u{{0}}]+ ;
+    SEG_TEXT         : [^/?#\u{{0}}]+ ;
+    QUERY_TEXT       : [^#\u{{0}}]+ ;
+    FRAG_TEXT        : [^\u{{0}}]+ ;
+"""}
+
+priv url_has_colon: fn(text: String) -> Bool Never! {
+    text.bytes().contains(U8{58})
+}
+
+priv url_ascii_lower: fn(text: String) -> String Never! {
+    raw: text.bytes()
+    ^out: [U8]{}
+    loop b in raw {
+        v: Int{b}
+        if v >= 65 && v <= 90 -> out.push(U8{v + 32}) else -> out.push(b)
+    }
+    String.from_bytes(out) ?? text
+}
+
+priv url_last_at_byte: fn(text: String) -> Int Never! {
+    bytes: text.bytes()
+    ^found: -1
+    loop i in 0..<bytes.len() {
+        if bytes[i] == (U8{64}) -> found = i
+    }
+    found
+}
+
+priv url_has_colon_after: fn(text: String, start: Int) -> Bool Never! {
+    bytes: text.bytes()
+    loop i in start..<bytes.len() {
+        if bytes[i] == (U8{58}) -> return true
+    }
+    false
+}
+
+priv url_authority_has_port_hole: fn(auth: HostPart) -> Bool Never! {
+    // Track the latest `@` (separating userinfo from host:port).
+    // Segment -1 is auth.lead; segments 0..tail.len()-1 are auth.tail[i].
+    ^last_at_seg: -2
+    ^last_at_byte: -1
+    if auth.lead == .Val(text) {
+        pos: url_last_at_byte(text)
+        if pos >= 0 {
+            last_at_seg = -1
+            last_at_byte = pos
+        }
+    }
+    loop (idx, item) in auth.tail {
+        text_opt: if item == {
+            .IPv6(_, t) -> t
+            .Hole(t) -> t
+        }
+        if text_opt == .Val(text) {
+            pos: url_last_at_byte(text)
+            if pos >= 0 {
+                last_at_seg = idx
+                last_at_byte = pos
+            }
+        }
+    }
+    // Scan from right after the last `@` (or start if none): once a `:` appears
+    // outside an IPv6 literal, any subsequent hole sits in the port slot.
+    ^in_port: false
+    if last_at_seg <= -1 {
+        if auth.lead == .Val(text) {
+            start: if last_at_seg == -1 -> last_at_byte + 1 else -> 0
+            if url_has_colon_after(text, start) -> in_port = true
+        }
+    }
+    loop (idx, item) in auth.tail {
+        if idx < last_at_seg -> next
+        if item == {
+            .IPv6(_, text_opt) -> {
+                if idx > last_at_seg -> in_port = false
+                if text_opt == .Val(text) {
+                    start: if idx == last_at_seg -> last_at_byte + 1 else -> 0
+                    if url_has_colon_after(text, start) -> in_port = true
+                }
+            }
+            .Hole(text_opt) -> {
+                if idx > last_at_seg && in_port -> return true
+                if text_opt == .Val(text) {
+                    start: if idx == last_at_seg -> last_at_byte + 1 else -> 0
+                    if url_has_colon_after(text, start) -> in_port = true
+                }
+            }
+        }
+    }
+    false
+}
+
+priv url_data_check_opaque: fn(body: OpaqueBody) -> String? Never! {
+    ^seen_comma: false
+    ^hole_before_comma: false
+    tail: if body == {
+        .Text(lead, rest) -> {
+            if lead.bytes().contains(U8{44}) -> seen_comma = true
+            rest
+        }
+        .Hole(first, rest) -> {
+            hole_before_comma = true
+            if first.text == .Val(t) {
+                if t.bytes().contains(U8{44}) -> seen_comma = true
+            }
+            rest
+        }
+    }
+    loop item in tail {
+        if item == {
+            .Slash(text_opt) -> {
+                if text_opt == .Val(text) {
+                    if text.bytes().contains(U8{44}) -> seen_comma = true
+                }
+            }
+            .Hole(text_opt) -> {
+                if !seen_comma -> hole_before_comma = true
+                if text_opt == .Val(text) {
+                    if text.bytes().contains(U8{44}) -> seen_comma = true
+                }
+            }
+        }
+    }
+    if hole_before_comma {
+        if seen_comma -> return Val("data URL MIME metadata cannot contain interpolation")
+        return Val("data URL payload needs a MIME separator")
+    }
+    None
+}
+
+url_check_parts: fn(trimmed_parts: [String]) -> [Int] URLSyntaxError! {
+    if trimmed_parts.len() == 0 {
+        return Err(URLSyntaxError{reason: "the text is not a valid URL (Syntax)"})
+    }
+    if trimmed_parts.len() > 1 && !url_has_colon(trimmed_parts[0]) {
+        return Err(URLSyntaxError{reason: "URL scheme cannot contain interpolation"})
+    }
+    parsed: Address.parse_parts(trimmed_parts) ?? return Err(URLSyntaxError{reason: "the text is not a valid URL (Syntax)"})
+    if parsed.rest == {
+        .Slash(slash) -> {
+            if slash == .Hier(auth, _, _, _) {
+                if url_authority_has_port_hole(auth) {
+                    return Err(URLSyntaxError{reason: "URL port cannot contain interpolation"})
+                }
+            }
+        }
+        .Opaque(body_opt, _, _) -> {
+            if url_ascii_lower(parsed.scheme) == "data" {
+                if body_opt == .Val(body) {
+                    if url_data_check_opaque(body) == .Val(reason) {
+                        return Err(URLSyntaxError{reason: reason})
+                    }
+                }
+            }
+        }
+    }
+    checked: Address.check_parts(trimmed_parts) ?? return Err(URLSyntaxError{reason: "the text is not a valid URL (Syntax)"})
+    ^slots: [Int]{}
+    loop slot in checked.slots {
+        if slot == {
+            .Authority -> slots.push(URL_SLOT_AUTHORITY)
+            .Path -> slots.push(URL_SLOT_PATH)
+            .Opaque -> slots.push(URL_SLOT_OPAQUE)
+            .Query -> slots.push(URL_SLOT_QUERY)
+            .Fragment -> slots.push(URL_SLOT_FRAGMENT)
+        }
+    }
+    Ok(slots)
+}

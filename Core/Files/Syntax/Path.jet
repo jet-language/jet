@@ -1,0 +1,16 @@
+// Path literal grammar for checked `Path{"..."}` literals.
+use core.grammar.[Grammar]
+
+#Allow(Jet.RawMultilineHtml, "Path grammar uses `HOLE<slot=Segment>`")
+priv PathLit: Grammar{"""
+    path_lit : lead=CHARS? tail+=after* EOF ;
+    after    : HOLE<slot=Segment> text=CHARS? ;
+    CHARS    : [^\u{{0}}]+ ;
+"""}
+
+path_check_parts_ok: fn(parts: [String]) -> Bool Never! {
+    if PathLit.check_parts(parts) == {
+        .Ok(_) -> true
+        .Err(_) -> false
+    }
+}
