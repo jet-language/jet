@@ -1,0 +1,47 @@
+#Error
+ParseError: enum {
+    Empty,
+}
+
+#Error
+ReadError: enum {
+    Torn,
+}
+
+parse: fn(text: String) -> Int ParseError! {
+    if text == "" -> return Err(ParseError.Empty)
+    text.count_bytes()
+}
+
+Reads: struct {
+    priv at: Int,
+    impl Iterator {
+        Item: Int,
+        next: fn(^self) -> Int? ReadError! {
+            if self.at > 0 -> return Err(ReadError.Torn)
+            self.at += 1
+            Val(1)
+        }
+    }
+}
+
+Source: struct {
+    impl Iterable {
+        Iter: Reads,
+        iter: fn(^^self) -> Reads { Reads{at: 0} }
+    }
+}
+
+use_lambda: fn() Never! {
+    f: fn(text: String) -> Int ParseError! { parse(text) + 1 }
+    print(f("ab") ?? 0)
+}
+
+total: fn() -> Int ReadError! {
+    ^sum: 0
+    src: Source{}
+    loop item in src {
+        sum += item
+    }
+    sum
+}
