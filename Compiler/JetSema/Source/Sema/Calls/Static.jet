@@ -2,6 +2,7 @@
 // The owner is a type name, never a runtime receiver; owner and method generic
 // arguments stay separate through inference and checked-tree construction.
 use jet_foundation.[
+    AST_NODE_GENERATED,
     BodyHandleOp,
     TYPE_NAMES,
     effect_vocabulary_list_view_count,
@@ -15,6 +16,7 @@ use jet_foundation.[
     Expr,
     Func,
     FunctionDefaultRef,
+    InternalTag,
     NodeKind,
     ParamZone,
     Span,
@@ -30,6 +32,7 @@ use jet_foundation.[
     TPreludeArg,
     TStaticOwner,
     TYPE_REFLECTION_TRAIT,
+    TagMarker,
     Type,
     SemaNameCase,
     sema_casing_canonical,
@@ -2020,4 +2023,108 @@ sema_call_ui_shortcut_cmd_key: fn(argument: CallArg, diagnostics: ^[Diagnostic])
     reason: if labeled -> "the key must be positional" else -> "the key must be one plain string literal"
     row: sema_diagnostic_row("E2938")
     diagnostics.push(sema_error("E2938", argument.span, "Invalid UI shortcut literal `<expression>`: {reason}", row.why, row.fix))
+}
+
+// ---- Clock and builtin reader/cursor static constructors ----------------
+
+sema_call_try_clock_static_method: fn(owner: String, method: String, args: [CallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
+    ^updated_args: args
+    if owner == "Clock" {
+        if method == "new" && updated_args.len() == 1 {
+            ^result: Type.Tagged{marker: TagMarker.Internal{internal_tag: InternalTag.DeterministicClock}, inner: Type.Named{name: "Clock"}}
+            if !sema_effect_record_clock_intrinsic(result, "", "Clock.new", span, check) {
+                return SemaMethodSpecialCheck{handled: true, value: None}
+            }
+            ^source: sema_call_try_static_method(Expr.Ident{name: "Clock", span: span, id: AST_NODE_GENERATED}, method, span, [Type]{}, [Type]{}, updated_args, span, None, check)
+            ^value: source.value ?? return SemaMethodSpecialCheck{handled: true, value: None}
+            return SemaMethodSpecialCheck{handled: true, value: sema_clock_retag(value, result, expected, check)}
+        }
+        if method == "system" && updated_args.len() == 0 {
+            ^result: Type.Tagged{marker: TagMarker.Internal{internal_tag: InternalTag.SystemClock}, inner: Type.Named{name: "Clock"}}
+            if !sema_effect_record_clock_intrinsic(result, "Time", "Clock.system", span, check) {
+                return SemaMethodSpecialCheck{handled: true, value: None}
+            }
+            ^source: sema_call_try_static_method(Expr.Ident{name: "Clock", span: span, id: AST_NODE_GENERATED}, method, span, [Type]{}, [Type]{}, updated_args, span, None, check)
+            ^value: source.value ?? return SemaMethodSpecialCheck{handled: true, value: None}
+            return SemaMethodSpecialCheck{handled: true, value: sema_clock_retag(value, result, expected, check)}
+        }
+        if method == "now" && updated_args.len() == 0 {
+            constructor: Expr.MethodCall{receiver: Expr.Ident{name: "Instant", span: span, id: AST_NODE_GENERATED}, method: "__now", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{}, id: AST_NODE_GENERATED}
+            return SemaMethodSpecialCheck{handled: true, value: sema_check_expression(constructor, expected, check)}
+        }
+    }
+    SemaMethodSpecialCheck{handled: false, value: None}
+}
+
+sema_builtin_stream_static_owner_is_canonical: fn(owner: String, check: SemaBodyCheck) -> Bool Never! {
+    index: sema_scope_resolve_index(check.scopes, owner) ?? return true
+    symbol: check.scopes.bindings[index].symbol
+    if symbol.kind != SymbolKind.Type -> return false
+    ^owner_module: sema_builtin_handle_owner_module(owner)
+    if owner_module == "" -> return false
+    graph: check.program.registration_graph
+    return (sema_registration_module_name(graph, symbol.module_identity) ?? "") == owner_module
+}
+
+// Static reserved constructors (`Reader.over`, `Cursor.over`). Callers still
+// prefer a shadowing user type.
+sema_call_try_builtin_stream_static: fn(owner: String, method: String, args: [CallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
+    ^known: (owner == "Reader" && method == "over") || (owner == "Cursor" && method == "over")
+    if !known || !sema_builtin_stream_static_owner_is_canonical(owner, check) {
+        return SemaMethodSpecialCheck{handled: false, value: None}
+    }
+    if args.len() != 1 {
+        sema_handle_infer_args(args, check)
+        check.diagnostics.push(sema_call_arity_diagnostic("{owner}.{method}", 1, args.len(), false, span))
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    ^operation: BodyHandleOp.CursorOver
+    ^result_type: Type.Named{name: "Cursor"}
+    ^params: [SemaCallParam]{}
+    ^ownership_args: args
+    ^shift_argument: -1
+    if owner == "Cursor" {
+        params.push(sema_builtin_handle_param("text", Type.String, AccessConvention.Read))
+    }
+    ^owned_reader: false
+    if owner == "Reader" {
+        operation = BodyHandleOp.ReaderOver{owned: false}
+        result_type = Type.Named{name: "Reader"}
+        params.push(sema_builtin_handle_param("bytes", Type.List{element: Type.IntN{signed: false, bits: 8}}, AccessConvention.Read))
+        shift_argument = -1
+        if args.len() == 1 {
+            if args[0].convention == AccessConvention.Move -> owned_reader = true
+            if args[0].convention == AccessConvention.Read {
+                // A last use moves the bytes into the reader; a later use or
+                // a live view of them keeps the borrowing clone.
+                if args[0].expr == {
+                    .Ident(name, _, _) -> {
+                        owned_reader = !sema_ownership_name_live_after(name, check) && !sema_ownership_view_reads_binding(check, args[0].expr)
+                    }
+                    .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
+                }
+            }
+            if owned_reader {
+                params[0].convention = AccessConvention.Move
+                if ownership_args[0].convention == AccessConvention.Read {
+                    ownership_args[0].convention = AccessConvention.Move
+                }
+            }
+            operation = BodyHandleOp.ReaderOver{owned: owned_reader}
+        }
+    }
+    typed_args: sema_handle_checked_args("{owner}.{method}", params, ownership_args, None, None, AccessConvention.Read, shift_argument, span, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    ^values: typed_args
+    if owner == "Reader" && owned_reader && values.len() == 1 {
+        if !(values[0].kind == .Move(_)) {
+            values[0] = sema_tree_node(values[0].ty, TExprKind.Move{value: values[0]}, values[0].span)
+        }
+    }
+    ^unit_receiver: sema_node(check.context, Type.Named{name: "Unit"}, NodeKind.Unit, span)
+    ^value: sema_tree_node(result_type, TExprKind.HandleMethod{receiver: unit_receiver, operation: operation, args: values}, span)
+    checked: sema_expression_call_expected(value, expected, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    if !sema_handle_effect_fact(check, "{owner}.{method}", span, result_type, "") {
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    SemaMethodSpecialCheck{handled: true, value: Val(checked)}
 }

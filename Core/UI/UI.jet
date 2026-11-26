@@ -55,6 +55,7 @@ UIIMEMode: enum {
     Disabled,
 }
 
+#Codable
 UIAriaRole: enum {
     Button,
     Container,
@@ -524,11 +525,59 @@ node_color: fn(label: String, width: Float, height: Float, color: Color) -> UINo
     leaf(label, width, height, Val(UIAriaRole.Label), UINodeKind.Custom, Val(color))
 }
 
-node_role: fn(label: String, width: Float, height: Float, role: UIAriaRole) -> UINode Never! {
+priv UINodeRoleA11y: struct {
+    impl Marker {
+        sites: [.Function],
+
+        check: fn(self, call: CompilerCall) {
+            if call.args.len() != 4 -> return None
+            if call.args[0].value != Val(Dyn.Text("")) -> return None
+            role: if call.args[3].value == {
+                .Val(.Text("Button")) -> "button"
+                .Val(.Text("TextInput")) -> "text input"
+                else -> return None
+            }
+            reject(MissingAccessibleLabel{role: role}, at: call.name)
+        }
+    }
+}
+
+priv MissingAccessibleLabel: struct {
+    role: String,
+
+    impl Diagnostic {
+        code: "E2930",
+        severity: .Lint,
+        tier: .Tidy,
+
+        what: fn(self) -> String { "This {self.role} has no accessible label" }
+
+        why: fn(self) -> String {
+            "Screen readers announce a control by its accessible label; an empty label is invisible to assistive tech."
+        }
+
+        fix: fn(self) -> String {
+            "Pass a real label, e.g. `ui.node_role(\"Submit\", w, h, ui.aria_role_button())`."
+        }
+    }
+}
+
+#UINodeRoleA11y node_role: fn(label: String, width: Float, height: Float, role: UIAriaRole) -> UINode Never! {
     ^kind: UINodeKind.Custom
     if role == .Button -> kind = UINodeKind.Button
     if role == .TextInput -> kind = UINodeKind.TextInput
     leaf(label, width, height, Val(role), kind, None)
+}
+
+/// Any UI backend that mounts a node tree within an optional viewport constraint.
+UIBackend: trait {
+    mount: fn(self, tree: UINode, constraint: SizeConstraint?{None}) Never!,
+}
+
+/// Mounts `tree` on `backend`, using the backend's viewport constraint when
+/// `constraint` is omitted.
+mount: fn<B: UIBackend>(backend: B, tree: UINode, constraint: SizeConstraint?{None}) Never! {
+    backend.mount(tree, constraint)
 }
 
 node_shortcut: fn(n: UINode, shortcut: UIShortcut) -> UINode Never! {
@@ -655,10 +704,12 @@ NullBackend: struct {
 
     // Clears the commands, then measures `tree` within `constraint` (80 x
     // 24 cells when absent), lays it out at the origin and paints it.
-    mount: fn(self, tree: UINode, constraint: SizeConstraint?{None}) {
-        ^guard: self.state.guard_edit()
-        guard.value.commands = [String]{}
-        mount_state(guard.value, tree, constraint)
+    impl UIBackend {
+        mount: fn(self, tree: UINode, constraint: SizeConstraint?{None}) Never! {
+            ^guard: self.state.guard_edit()
+            guard.value.commands = [String]{}
+            mount_state(guard.value, tree, constraint)
+        }
     }
 
     // Tab moves the focus to the next node of the ring; an empty key and a
@@ -711,9 +762,11 @@ TUIBackend: struct {
 
     // Measures `tree` within `constraint` (80 x 24 cells when absent), lays
     // it out at the origin and paints it.
-    mount: fn(self, tree: UINode, constraint: SizeConstraint?{None}) {
-        ^guard: self.state.guard_edit()
-        mount_state(guard.value, tree, constraint)
+    impl UIBackend {
+        mount: fn(self, tree: UINode, constraint: SizeConstraint?{None}) Never! {
+            ^guard: self.state.guard_edit()
+            mount_state(guard.value, tree, constraint)
+        }
     }
 
     // Tab moves the focus to the next node of the ring and a resize lays

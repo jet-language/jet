@@ -1291,7 +1291,7 @@ sema_taskgroup_check_task_method: fn(receiver: Expr, receiver_value: TExpr, meth
     ^value: sema_tree_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{}}, span)
     checked: sema_expression_call_expected(value, expected, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     ^effect_name: if join -> "Time.Wait" else -> ""
-    if !sema_stream_handle_effect_fact(check, "Task.{method}", span, result_type, effect_name) {
+    if !sema_handle_effect_fact(check, "Task.{method}", span, result_type, effect_name) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     SemaMethodSpecialCheck{handled: true, value: Val(checked)}
@@ -1316,14 +1316,14 @@ sema_taskgroup_check_task_control: fn(receiver: Expr, receiver_value: TExpr, met
     if args.len() == 1 {
         params.push(SemaCallParam{label: "mode", name: "mode", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(Type.Named{name: "TaskPauseMode"}), variadic: false})
     }
-    typed: sema_stream_handle_checked_args("Task.{method}", params, args, None, None, AccessConvention.Read, -1, span, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    typed: sema_handle_checked_args("Task.{method}", params, args, None, None, AccessConvention.Read, -1, span, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     if !sema_ownership_check_call_receiver(check, receiver, AccessConvention.Read, span) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     result_type: Type.Named{name: "Unit"}
     ^value: sema_tree_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: typed}, span)
     checked: sema_expression_call_expected(value, expected, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    if !sema_stream_handle_effect_fact(check, "Task.{method}", span, result_type, "") {
+    if !sema_handle_effect_fact(check, "Task.{method}", span, result_type, "") {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     SemaMethodSpecialCheck{handled: true, value: Val(checked)}

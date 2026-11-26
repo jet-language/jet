@@ -4303,9 +4303,6 @@ sema_expr_core_module_method_checked: fn(receiver: Expr, method: String, method_
             if module_name == "core.db.query" && method == "query" && type_args.len() == 1 && args.len() == 2 {
                 sema_data_check_analytics_sql_schema(type_args[0], args[1].expr, expr_span(args[1].expr), check)
             }
-            if module_name == "core.ui" && method == "node_role" {
-                sema_call_core_ui_node_role_lint(args, method_span, check)
-            }
             check.scopes.ownership_call_depth += 1
             first_fact: check.context.call_facts.len()
             ^value: sema_call_core_check_source_owned(target, "{module_name}.{method}", type_args, args, method_span, expected, check)
@@ -4388,9 +4385,9 @@ sema_expr_try_method_static_routes: fn(receiver: Expr, method: String, method_sp
     // owner reaches the reserved constructors too; each route matches only its
     // own owner names.
     if owner != "" && (qualified_owner || sema_scope_resolve_index(check.scopes, owner) == None || sema_expr_canonical_type_binding(owner, check)) {
-        ^stream: sema_call_try_stream_handle_static(owner, method, args, method_span, expected, check)
+        ^stream: sema_call_try_builtin_stream_static(owner, method, args, method_span, expected, check)
         if stream.handled -> return stream
-        ^time: sema_call_try_time_static_method(owner, method, args, method_span, expected, check)
+        ^time: sema_call_try_clock_static_method(owner, method, args, method_span, expected, check)
         if time.handled -> return time
         if owner == "Dyn" && !sema_data_check_explicit_type_args("Dyn.{method}", type_args, 0, method_span, check.diagnostics) {
             sema_data_check_discarded_arguments(args, check)
@@ -4482,9 +4479,10 @@ sema_expr_try_method_special_routes: fn(receiver: Expr, receiver_value: TExpr, m
                 if int_abs.handled -> return int_abs
             }
             // A child's optional `terminal` names its unwrap (E0311).
-            if method == "resize" && receiver_value.ty == .Option(_) {
-                ^process: sema_stream_handle_terminal_resize(receiver_value, args, span, check)
-                if process.handled -> return process
+            if method == "resize" && receiver_value.ty == .Option(inner) && sema_builtin_stream_receiver_leaf(inner) == "TerminalSession" {
+                check.diagnostics.push(sema_error("E0311", span, "`.resize()` needs `TerminalSession`, not `TerminalSession?`", "a child has a terminal session only when a terminal-backed launch succeeds", "unwrap the optional handle first, then call `session.resize(size)`"))
+                sema_handle_infer_args(args, check)
+                return SemaMethodSpecialCheck{handled: true, value: None}
             }
             ^value_method: sema_call_try_value_method(receiver, receiver_value, method, args, span, expected, check)
             if value_method.handled -> return value_method
@@ -4524,11 +4522,13 @@ sema_expr_try_method_special_routes: fn(receiver: Expr, receiver_value: TExpr, m
     }
     ^layout: sema_call_try_layout_method(receiver, receiver_value, method, args, span, expected, check)
     if layout.handled -> return layout
-    ^stream: sema_call_try_stream_handle_method(receiver, receiver_value, method, args, span, expected, check)
+    ^channel: sema_call_try_channel_handle_method(receiver, receiver_value, method, args, span, expected, check)
+    if channel.handled -> return channel
+    ^stream: sema_call_try_builtin_stream_method(receiver, receiver_value, method, args, span, expected, check)
     if stream.handled -> return stream
     duration: sema_call_try_duration_source(receiver, receiver_value, method, type_args, args, span, expected, check)
     if duration.handled -> return duration
-    ^time: sema_call_try_time_handle_method(receiver, receiver_value, method, args, span, expected, check)
+    ^time: sema_call_try_clock_method(receiver, receiver_value, method, args, span, expected, check)
     if time.handled -> return time
     ^app: sema_call_try_app_method(receiver, receiver_value, method, args, span, expected, check)
     if app.handled -> return app
@@ -5005,11 +5005,11 @@ sema_expr_check_method_on: fn(receiver: Expr, receiver_value: TExpr, method: Str
     if !declared {
         ^special: sema_expr_try_method_special_routes(receiver, receiver_value, method, owner_type_args, type_args, args, method_span, expected, check)
         if special.handled -> return special.value
-    } else if sema_time_handle_receiver_name(receiver_value.ty) == "Clock" {
+    } else if sema_clock_handle_receiver_name(receiver_value.ty) == "Clock" {
         // Core declares Clock's methods, but reading a Clock that is neither
         // deterministic nor the system clock still reads ambient time: the time
         // route records that site before the declared method checks the call.
-        if sema_time_clock_record(receiver_value, method, args, method_span, check) == .Val(recorded) && !recorded {
+        if sema_clock_record_read(receiver_value, method, args, method_span, check) == .Val(recorded) && !recorded {
             return None
         }
     }
@@ -5111,7 +5111,7 @@ sema_expr_check_expiring_secret_with: fn(receiver: Expr, receiver_value: TExpr, 
     }
     // Reading the expiry observes the secret's injected clock, a `Time`
     // read: a pure body refuses it (E3403).
-    if !sema_time_record_intrinsic(Type.Named{name: "Unit"}, "Time", "ExpiringSecret.with", method_span, check) {
+    if !sema_effect_record_clock_intrinsic(Type.Named{name: "Unit"}, "Time", "ExpiringSecret.with", method_span, check) {
         return None
     }
     loan_expected: Type.Fn{params: [Type]{sema_expiring_secret_loan_type(secret_type)}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}

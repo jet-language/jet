@@ -937,6 +937,12 @@ process_directory: fn(spec: ProcessSpec, directory: Directory, child_fd: Int, as
     process_rt.keep_open_raw(spec, fd, child, false).spec
 }
 
+/// Core bridge used by `ProcessSpec.keep_open` to extract the handle's
+/// descriptor without exposing `Directory`'s private handle.
+keep_open_spec: fn(spec: ^^ProcessSpec, handle: ^^Directory | FileLock | FileReader | FileWriter, at: Int?{None}) -[FS]> ProcessSpec Never! {
+    __spec_keep_open(spec, handle, at)
+}
+
 #Test("compiler process directories retain authority after rename and close") {
     if sys.name() == "linux" {
         root: mktemp("process-held-directory-test")

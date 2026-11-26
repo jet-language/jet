@@ -199,7 +199,7 @@ sema_app_caller_upload_check: fn(nominal: SemaRegistrationNominal, endpoint: Fun
     } ?? false
     if !signed_in -> return None
     at: sema_app_marker_arg_at(marker, "method", 0) ?? return None
-    name: if marker.args[at] == .Expr(value) -> sema_ui_handle_literal_string(value) ?? return None else -> {
+    name: if marker.args[at] == .Expr(value) -> sema_comptime_input_literal(value) ?? return None else -> {
         return None
     }
     loop checked in nominal.methods {
