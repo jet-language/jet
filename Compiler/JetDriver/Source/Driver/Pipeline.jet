@@ -3827,7 +3827,7 @@ jet_driver_comptime_run: fn(
                     // source, so each carries that module's location.
                     loop diagnostic in checked_item.diagnostics {
                         attached: jet_driver_attach_program_source_location(diagnostic, programs[0], source.module_identity)
-                        if !sema_core_lint_dropped(attached, own_check: programs[0].core_own_check) {
+                        if !sema_core_lint_dropped(attached, own_check: request.core_entry && request.every_core_body && !request.core_seal) {
                             diagnostics.push(attached)
                         }
                     }
