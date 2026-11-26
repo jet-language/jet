@@ -650,7 +650,8 @@ jet_driver_doc_modules: fn(request: JetDriverCompileRequest, load: JetDriverLoad
                         return [JetDriverDocModule]{}
                     }
                     row: request.core_sources[unit.file_index]
-                    if row.module_name != unit.module_name || row.path != unit.relative_path || row.source() != source {
+                    row_text: row.try_source() ?? return [JetDriverDocModule]{}
+                    if row.module_name != unit.module_name || row.path != unit.relative_path || row_text != source {
                         return [JetDriverDocModule]{}
                     }
                     path = row.path
@@ -3111,7 +3112,7 @@ jet_driver_comptime_stage: fn(
     values: [SemaComptimeItemValue],
     staging: ^JetDriverComptimeStaging,
     threads: CompilerThreads,
-) Never! {
+) {
     if staging.staged {
         return
     }
@@ -3131,7 +3132,7 @@ jet_driver_comptime_stage: fn(
         staging.staged = true
         return
     }
-    modules: sema_comptime_modules_with_values(programs, values, threads) ?? panic("the staged comptime declaration checks failed: {err}")
+    modules: sema_comptime_modules_with_values(programs, values, threads)
     ^types: 0
     ^impls: 0
     loop checked in modules {

@@ -126,13 +126,23 @@ link_image_view: fn(c: ^LinkContext, b: Int, gap_at: Int, gap: Int) -> LinkImage
         if v.alloc_headers == k - 1 && (link_s64(c.bufs, b, h + 8) & 2) != 0 -> v.alloc_headers = k
         name: v.names_at + link_u32(c.bufs, b, h)
         if {
-            link_u32(c.bufs, b, h + 4) == LINK_SHT_SYMTAB -> {
-                v.symtab_at = link_image_at(link_s64(c.bufs, b, h + 24), gap_at, gap)
-                v.symtab_count = link_s64(c.bufs, b, h + 32).div_euclid(24)
-                v.first_global = link_u32(c.bufs, b, h + 44)
-                strings: v.shoff + 64 * link_u32(c.bufs, b, h + 40)
-                v.strtab_at = link_image_at(link_s64(c.bufs, b, strings + 24), gap_at, gap)
-                v.strtab_size = link_s64(c.bufs, b, strings + 32)
+            link_u32(c.bufs, b, h + 4) == LINK_SHT_SYMTAB && v.symtab_count == 0 -> {
+                strings_index: link_u32(c.bufs, b, h + 40)
+                if strings_index < shnum {
+                    symtab_at: link_image_at(link_s64(c.bufs, b, h + 24), gap_at, gap)
+                    symtab_count: link_s64(c.bufs, b, h + 32).div_euclid(24)
+                    first_global: link_u32(c.bufs, b, h + 44)
+                    strings: v.shoff + 64 * strings_index
+                    strtab_at: link_image_at(link_s64(c.bufs, b, strings + 24), gap_at, gap)
+                    strtab_size: link_s64(c.bufs, b, strings + 32)
+                    if symtab_at >= 0 && symtab_count >= 1 && symtab_at + 24 * symtab_count <= size && first_global >= 1 && first_global <= symtab_count && strtab_at >= 0 && strtab_size >= 1 && strtab_at + strtab_size <= size {
+                        v.symtab_at = symtab_at
+                        v.symtab_count = symtab_count
+                        v.first_global = first_global
+                        v.strtab_at = strtab_at
+                        v.strtab_size = strtab_size
+                    }
+                }
             }
             link_name_has(c.bufs, b, name, LINK_IMAGE_BIND_SECTION, true) -> {
                 bind_at = link_image_at(link_s64(c.bufs, b, h + 24), gap_at, gap)
@@ -595,6 +605,18 @@ x64_executable_bytes: fn(exe: ^^X64Executable) -> [U8] Never! {
 // unreferenced bytes. The image's tables are read from `image`, the image
 // file without its bytes [gap_at, gap_at + gap). None when either has no
 // symbol table.
+// Whether both the runtime image (without its bytes [gap_at, gap_at + gap))
+// and the program part of `exe` hold readable symbol tables, as
+// link_bind_named_tail needs.
+link_bind_has_symbol_tables: fn(exe: X64Executable, image: [U8], gap_at: Int, gap: Int) -> Bool Never! {
+    ^header: -1
+    loop (k, at) in exe.patch_at {
+        if at == 0 -> header = k
+    }
+    if header < 0 -> return false
+    link_symbol_tables(image, image, 0, gap_at, gap).len() > 0 && link_symbol_tables(exe.patch_bytes[header], exe.tail, exe.tail_at, 0, 0).len() > 0
+}
+
 link_bind_named_tail: fn(exe: X64Executable, image: [U8], gap_at: Int, gap: Int) -> [U8]? Never! {
     ^header: -1
     loop (k, at) in exe.patch_at {

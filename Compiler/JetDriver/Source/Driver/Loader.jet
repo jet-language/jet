@@ -5156,7 +5156,7 @@ jet_driver_generated_module_path: fn(package_identity: String, relative_path: St
 jet_driver_source_unit_text: fn(request: JetDriverCompileRequest, unit: JetDriverSourceUnit) -> String? Never! {
     if unit.embedded {
         if unit.file_index < 0 || unit.file_index >= request.core_sources.len() -> return None
-        return Val(request.core_sources[unit.file_index].source())
+        return request.core_sources[unit.file_index].try_source()
     }
     if unit.source_origin == SemaSourceOrigin.CompilerGenerated {
         loop generated in request.generated_modules {
@@ -5224,14 +5224,15 @@ jet_driver_parse_job: fn(request: JetDriverCompileRequest, unit: JetDriverSource
         return JetDriverParseJob.Missing
     }
     row: request.core_sources[unit.file_index]
+    text: row.try_source() ?? return JetDriverParseJob.Missing
     tested: request.core_tests != "" && row.path == request.core_tests
     if interface.on && !tested && request.core_interface == .Val(reader) {
         block: jet_driver_core_interface_block(reader, interface, unit.file_index, row.path)
         if block.len() > 0 {
-            return JetDriverParseJob.CoreInterfaced{text: row.source(), module_name: row.module_name, owned_members: row.owned_members, runtime: row.runtime, path: row.path, interface: block, fragments_at: jet_driver_core_interface_fragments_at(interface, unit.file_index)}
+            return JetDriverParseJob.CoreInterfaced{text: text, module_name: row.module_name, owned_members: row.owned_members, runtime: row.runtime, path: row.path, interface: block, fragments_at: jet_driver_core_interface_fragments_at(interface, unit.file_index)}
         }
     }
-    JetDriverParseJob.Core{text: row.source(), module_name: row.module_name, owned_members: row.owned_members, runtime: row.runtime, tested: tested}
+    JetDriverParseJob.Core{text: text, module_name: row.module_name, owned_members: row.owned_members, runtime: row.runtime, tested: tested}
 }
 
 jet_driver_parse_job_bytes: fn(job: JetDriverParseJob) -> Int Never! {
@@ -5313,7 +5314,7 @@ jet_driver_core_heads_unit: fn(program: Program, rows: ^^JetDriverCoreInterfaceU
 // outside an entry) come back as `dropped`, each at its place among the
 // parsed items (`dropped_at`), so the Core interface rebuilds the whole
 // parse from them (jet_driver_core_interface_rows).
-jet_driver_parse_core_text: fn(text: String, text_bytes: ^^[U8], module_name: String, owned_members: [String], rows: ^^JetDriverCoreInterfaceUnit, threads: CompilerThreads, shared: NameTable, own: ^NameTable, runtime: Bool{false}, entry: Bool{false}, lazy: Bool{false}, keep_dropped: Bool{false}) -> JetDriverParsedUnit {
+jet_driver_parse_core_text: fn(text: String, text_bytes: ^^[U8], module_name: String, owned_members: [String], rows: ^^JetDriverCoreInterfaceUnit, threads: CompilerThreads, shared: NameTable, own: ^NameTable, runtime: Bool{false}, entry: Bool{false}, lazy: Bool{false}, keep_dropped: Bool{false}, no_hold: Bool{false}) -> JetDriverParsedUnit {
     ^source: text_bytes.move()
     carrier: jet_driver_inline_package_threads(text, source, threads)
     if carrier.found -> jet_driver_blank_bytes(source, carrier.start, carrier.end)
@@ -5334,7 +5335,7 @@ jet_driver_parse_core_text: fn(text: String, text_bytes: ^^[U8], module_name: St
     part_members: if module_name.starts_with("__") -> owned_members else -> [String]{}
     routes: jet_driver_core_routes(module_name)
     ^held: JetDriverReachHeld{declarations: [JetDriverReachDeclaration]{}, dropped: [Span]{}}
-    if !entry {
+    if !entry && !no_hold {
         held = jet_driver_reach_hold(scanned.lexed, if runtime -> "" else -> module_name, owned_members, part_members, routes)
     }
     // The lexer's runs index the tokens before the hold took any out.
@@ -5386,8 +5387,8 @@ jet_driver_parse_core_text: fn(text: String, text_bytes: ^^[U8], module_name: St
             dropped.push(item)
         }
     }
-    if next_held < held.declarations.len() && !jet_driver_has_errors(parsed.diagnostics) {
-        panic("{module_name}: {held.declarations.len() - next_held} held declarations left no stub")
+    if !no_hold && next_held < held.declarations.len() && !jet_driver_has_errors(parsed.diagnostics) {
+        return jet_driver_parse_core_text(text, text.bytes(), module_name, owned_members, jet_driver_core_interface_none(), threads, shared, own, runtime: runtime, entry: entry, lazy: false, keep_dropped: keep_dropped, no_hold: true)
     }
     // A lazy declaration of a Core module (public module, private part or
     // runtime unit) counts once the program reaches it; an entry is reached
@@ -5720,8 +5721,8 @@ jet_driver_unit_text_declares: fn(request: JetDriverCompileRequest, unit: JetDri
 jet_driver_runtime_entry_row: fn(core_sources: [JetDriverCoreSource], unit: JetDriverSourceUnit, source: String) -> Int? {
     loop (row_index, row) in core_sources {
         if !row.runtime -> next
-        if (unit.relative_path == row.path || unit.path.ends_with("/{row.path}")) && row.source() == source {
-            return Val(row_index)
+        if unit.relative_path == row.path || unit.path.ends_with("/{row.path}") {
+            if row.try_source() == .Val(text) && text == source -> return Val(row_index)
         }
     }
     None
@@ -6315,7 +6316,11 @@ jet_driver_core_unit: fn(
         if row.owner != "" || row.module_name != module_name || (row.runtime && !importer_core) {
             next
         }
-        target: jet_driver_add_core_unit(source_units, queued, generated, row.module_name, row.path, row_index, row.source())
+        row_text: row.try_source() ?? {
+            diagnostics.push(jet_driver_diagnostic("E1001", span, "can't read the Core library source `{row.source_file()}`", "the compiler needs the Core library source file to load `{module_name}`", "restore `{row.source_file()}` or point `JET_TOOLCHAIN_ROOT` to a complete toolchain tree"))
+            return None
+        }
+        target: jet_driver_add_core_unit(source_units, queued, generated, row.module_name, row.path, row_index, row_text)
         loop (part_index, part) in core_sources {
             if part.owner != module_name || part.owned_members.len() == 0 -> next
             // Each part module is scheduled once: an alias import may already
@@ -6327,7 +6332,11 @@ jet_driver_core_unit: fn(
                 }
             }
             if scheduled -> next
-            part_unit: jet_driver_add_core_unit(source_units, queued, generated, part.module_name, part.path, part_index, part.source())
+            part_text: part.try_source() ?? {
+                diagnostics.push(jet_driver_diagnostic("E1001", span, "can't read the Core library source `{part.source_file()}`", "the compiler needs the Core library source file to load `{part.module_name}`", "restore `{part.source_file()}` or point `JET_TOOLCHAIN_ROOT` to a complete toolchain tree"))
+                next
+            }
+            part_unit: jet_driver_add_core_unit(source_units, queued, generated, part.module_name, part.path, part_index, part_text)
             queued[part_unit] = true
             pending.push(part_unit)
         }
@@ -6390,7 +6399,8 @@ jet_driver_core_part_unit: fn(source_units: ^[JetDriverSourceUnit], queued: ^[Bo
                 return Val(index)
             }
         }
-        return Val(jet_driver_add_core_unit(source_units, queued, generated, row.module_name, row.path, row_index, row.source()))
+        row_text: row.try_source() ?? return None
+        return Val(jet_driver_add_core_unit(source_units, queued, generated, row.module_name, row.path, row_index, row_text))
     }
     None
 }

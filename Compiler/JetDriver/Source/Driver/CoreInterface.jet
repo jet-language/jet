@@ -212,7 +212,7 @@ jet_driver_core_interface_units: fn(rows: ^^[JetDriverCoreSource], threads: Comp
     ^weights: [Int]{}
     ^work: 0
     loop row in rows.move() {
-        text: row.source()
+        text: row.try_source() ?? return JetDriverCoreInterfaceMade{units: [JetDriverCoreInterfaceUnit]{}, problem: Val("can't read the Core library source `{row.source_file()}`")}
         weights.push(text.bytes().len())
         work += text.bytes().len()
         jobs.push(JetDriverCoreInterfaceJob{path: row.path.move(), module_name: row.module_name.move(), owned_members: row.owned_members.move(), runtime: row.runtime, text: text})

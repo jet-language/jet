@@ -363,13 +363,41 @@ jet_driver_rust_foreign_facts: fn(graph: SemaRegistrationGraph) -> JetDriverRust
         jet_driver_rust_foreign_collect_items(module_row.declarations, module_row.module_name, module_row.module_identity, entries, records)
     }
     if entries.len() == 0 -> return jet_driver_rust_foreign_empty()
+    // Keep only C records whose fields all have a native Rust representation
+    // (a non-FFI `#Layout(c)` struct or one with a sema error is skipped).
+    ^keep: (loop _ in 0..<records.records.len() -> true)
+    loop {
+        ^dropped: false
+        loop (index, record) in records.records {
+            if !keep[index] -> next
+            ^ok: true
+            loop field in record.fields {
+                if jet_driver_rust_foreign_record_type(field.ty, records, [String]{}) == None {
+                    ok = false
+                    break
+                }
+            }
+            if !ok {
+                keep[index] = false
+                dropped = true
+                ^drop_keys: [String]{}
+                loop (key, value) in records.names {
+                    if value == record.rust_name -> drop_keys.push(key)
+                }
+                loop key in drop_keys -> ^_: records.names.remove(key)
+            }
+        }
+        if !dropped -> break
+    }
     ^source: [String]{}
-    loop record in records.records {
+    loop (index, record) in records.records {
+        if !keep[index] -> next
         repr: if record.alignment == .Val(alignment) -> "#[repr(C, align({alignment}))]" else -> "#[repr(C)]"
         source.push("{repr}\nstruct {record.rust_name} {{\n")
         loop field in record.fields {
-            ty: jet_driver_rust_foreign_record_type(field.ty, records, [String]{}) ?? panic("checked C record field `{field.name}` has no native Rust representation")
-            source.push("    {jet_driver_rust_foreign_mangle(field.name)}: {ty},\n")
+            if jet_driver_rust_foreign_record_type(field.ty, records, [String]{}) == .Val(ty) {
+                source.push("    {jet_driver_rust_foreign_mangle(field.name)}: {ty},\n")
+            }
         }
         source.push("}}\n\n")
     }

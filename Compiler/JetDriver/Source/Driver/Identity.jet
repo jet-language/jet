@@ -223,16 +223,25 @@ JetDriverCoreSource: struct {
     runtime: Bool,
     text: Shared<JetDriverCoreText>,
 
-    source: fn(self) -> String Never! {
+    try_source: fn(self) -> String? Never! {
         permit: self.text.guard_edit()
-        if permit.value.text == .Val(text) -> return text
+        if permit.value.text == .Val(text) -> return Val(text)
         // Unreachable: jet_driver_core_text and jet_driver_core_text_file, the
         // only makers of a JetDriverCoreText, set one of the two, and nothing
         // clears either.
         reader: permit.value.reader ?? panic("the Core source `{self.path}` has neither text nor reader")
-        text: reader.read(permit.value.file) ?? panic("can't read the Core library source `{permit.value.file}`")
+        text: reader.read(permit.value.file) ?? return None
         permit.value.text = Val(text)
-        text
+        Val(text)
+    }
+
+    source_file: fn(self) -> String Never! {
+        permit: self.text.guard_read()
+        if permit.value.file != "" -> permit.value.file else -> self.path
+    }
+
+    source: fn(self) -> String Never! {
+        self.try_source() ?? ""
     }
 }
 

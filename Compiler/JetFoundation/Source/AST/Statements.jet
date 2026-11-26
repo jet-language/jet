@@ -163,10 +163,12 @@ AST_LOOP_ROW_PREFIX: "__jet_loop_row_"
 
 // Whether a loop over `var` whose body is `body` has a destructuring head:
 // `var` is a hidden row and `body` opens with the generated binding that
-// takes it apart.
+// takes it apart. A refutable binding (`row == Pattern ?? fallback`) has no
+// head form, so a loop that opens with one has none.
 ast_loop_destructures: fn(var: String, body: [Stmt]) -> Bool Never! {
     if !var.starts_with(AST_LOOP_ROW_PREFIX) || body.len() == 0 -> return false
     if body[0] == .Val(binding) {
+        if binding.pattern == .Val(.Refutable(_, _, _, _)) -> return false
         if binding.pattern != None && binding.init == .Ident(name, _, id) {
             return name == var && id == AST_NODE_GENERATED
         }
