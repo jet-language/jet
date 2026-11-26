@@ -1,0 +1,66 @@
+// Each parser rule's type parses text through the rule's generated function:
+// a sequence, a choice of rules or of labeled alternatives, an optional flag,
+// repeats of zero or more and one or more, list labels and the end of input.
+// A keyword is a keyword only where one may stand; elsewhere the word is a
+// name. An error is the first one, at its line and column, and nesting past
+// the depth bound is an error, not a crash.
+use core.grammar.[Grammar]
+
+Script: Grammar{"""
+    script     : items+=item* EOF ;
+    item       : assignment | display | block ;
+    assignment : 'let' name=NAME '=' value=term ';' ;
+    display    : 'show' loud='!'? values+=term (',' values+=term)* ';' ;
+    block      : 'do' items+=item+ 'end' ;
+    term       : text=NAME # Name | text=NUMBER # Number | sign=('+' | '-') digits=NUMBER # Signed ;
+    NAME       : [a-z]+ ;
+    NUMBER     : [0-9]+ ;
+    WS         : [ \t\n]+ -> skip ;
+"""}
+
+term_text: fn(term: Term) -> String {
+    if term == {
+        .Name(text) -> text
+        .Number(text) -> "#{text}"
+        .Signed(sign, digits) -> "{sign}#{digits}"
+    }
+}
+
+item_text: fn(item: Item) -> String {
+    if item == {
+        .Assignment(assignment) -> "let {assignment.name} = {term_text(assignment.value)}"
+        .Display(display) -> {
+            ^shown: [String]{}
+            loop value in display.values -> shown.push(term_text(value))
+            "show{if display.loud -> "!" else -> ""} {shown.join(", ")}"
+        }
+        .Block(block) -> {
+            ^inner: [String]{}
+            loop nested in block.items -> inner.push(item_text(nested))
+            "do [{inner.join("; ")}]"
+        }
+    }
+}
+
+report: fn(source: String) {
+    if Script.parse(source) == {
+        .Ok(script) -> {
+            ^shown: [String]{}
+            loop item in script.items -> shown.push(item_text(item))
+            print("[{shown.join(" | ")}]")
+        }
+        .Err(error) -> print("error {error}")
+    }
+}
+
+run: fn() {
+    report("")
+    report("let x = 5; show! x, -3, +4;\ndo let letter = y; show letter; end")
+    report("do do show end; end end")
+    report("let = 5;")
+    report("let end = 1;")
+    report("show x")
+    report("show x; ;")
+    report("do ".repeat(6000))
+    report("show 1 2;")
+}

@@ -1,0 +1,604 @@
+// The parser a grammar declares (GrammarItems.jet). Each parser rule's type
+// gets `parse(text) -> T GrammarError!`: the rule's generated function runs
+// from the start of the text, and the end of the input must follow it.
+// A rule's function takes the tokens its body names, deciding at each
+// choice, optional part and repeat by the plan's decision (the runtime's
+// `parse_decide`), and builds the rule's value from the fields its
+// alternative set. It returns None once an error is recorded, so the error
+// `parse` reports is the first. An operator rule parses by precedence
+// climbing: a primary, then each binary or suffix tail that binds at least
+// as tightly as the level it is parsed at, its leading operand the value so
+// far. Every meaning lives in core.grammar.runtime: the generated code only
+// arranges calls, through file-level aliases the expansion adds
+// (sema_grammar_imports), and reads one generated constant, the scanner of
+// the grammar's token tables and decisions.
+use {
+    jet_foundation.[
+        AST_NODE_GENERATED,
+        AccessConvention,
+        BinOp,
+        CtValue,
+        EnumLitArg,
+        Expr,
+        ExprField,
+        Func,
+        ImportDecl,
+        ImportKind,
+        Item,
+        OrFallback,
+        Param,
+        Span,
+        Stmt,
+        StrPart,
+        SwitchArm,
+        Type,
+        TypeParam,
+        ast_comptime_generated_path,
+        ast_const,
+    ]
+}
+
+// The Core modules generated grammar code reads, each through its alias.
+SEMA_GRAMMAR_MODULES: ["core.grammar.error", "core.grammar.plan", "core.grammar.runtime"]
+
+SEMA_GRAMMAR_ERROR_MODULE: "core.grammar.error"
+
+SEMA_GRAMMAR_PLAN_MODULE: "core.grammar.plan"
+
+SEMA_GRAMMAR_RUNTIME_MODULE: "core.grammar.runtime"
+
+// The parameters and locals of the generated functions.
+SEMA_GRAMMAR_CURSOR: "__jet_cursor"
+
+SEMA_GRAMMAR_SCANNER: "__jet_scanner"
+
+SEMA_GRAMMAR_LEVEL: "__jet_level"
+
+SEMA_GRAMMAR_LEFT: "__jet_left"
+
+SEMA_GRAMMAR_WRAPPED: "__jet_wrapped"
+
+// What the generated items of one grammar binding are named by: the
+// binding's name, each rule's type name ("" for a token rule) and the
+// literal's span.
+SemaGrammarGen: struct {
+    start: String,
+    types: [String],
+    span: Span,
+}
+
+// The file-level alias generated grammar code names Core module
+// `module_path` by.
+sema_grammar_alias: fn(module_path: String) -> String Never! { ast_comptime_generated_path("grammar.{module_path}") }
+
+// Whether `declaration` is an import sema_grammar_imports added;
+// registration binds it to the loaded Core module it names.
+sema_grammar_items_import: fn(declaration: ImportDecl) -> Bool Never! {
+    if declaration.kind == .Module(name, _) {
+        return SEMA_GRAMMAR_MODULES.contains(name) && declaration.alias == sema_grammar_alias(name)
+    }
+    false
+}
+
+// Adds the imports generated grammar code reads, once per file. Their span
+// is empty: no source wrote them.
+sema_grammar_imports: fn(imports: ^[ImportDecl]) Never! {
+    span: Span{start: 0, end: 0}
+    loop name in SEMA_GRAMMAR_MODULES {
+        alias: sema_grammar_alias(name)
+        ^present: false
+        loop declaration in imports {
+            if declaration.alias == alias -> present = true
+        }
+        if present -> next
+        // copy: the import names the module apart from the list
+        imports.push(ImportDecl{kind: ImportKind.Module{name: name.copy(), span: span}, alias: alias, alias_span: span, span: span, item_spans: [Span]{}, local_spans: [Span]{}, is_pub: false, is_package_pub: false, inline_version: None})
+    }
+}
+
+// The generated function of rule `rule`.
+sema_grammar_function: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan, rule: Int) -> String Never! {
+    "__jet_grammar_{gen.start}_{plan.rules[rule].name}"
+}
+
+// The generated function of operator rule `rule` that parses at a level.
+sema_grammar_level_function: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan, rule: Int) -> String Never! {
+    "__jet_grammar_{gen.start}_{plan.rules[rule].name}_at"
+}
+
+// The generated constant holding the grammar's scanner.
+sema_grammar_scanner_constant: fn(gen: SemaGrammarGen) -> String Never! { "__jet_grammar_{gen.start}_scanner" }
+
+// The local a generated function keeps field `field` in.
+sema_grammar_local: fn(field: SemaGrammarField) -> String Never! { "__jet_field_{field.name}" }
+
+// A generated function's span: a distinct empty span inside the literal,
+// as the function memory plan keys a function by module, owner and span.
+sema_grammar_span_at: fn(gen: SemaGrammarGen, offset: Int) -> Span Never! {
+    Span{start: gen.span.start + offset, end: gen.span.start + offset}
+}
+
+// ---------------------------------------------------------------------------
+// AST builders.
+
+sema_grammar_number: fn(value: Int, span: Span) -> Expr Never! {
+    Expr.Int{value: value, span: span, width: None, raw: None, id: AST_NODE_GENERATED}
+}
+
+sema_grammar_flag: fn(value: Bool, span: Span) -> Expr Never! {
+    Expr.Bool{value: value, span: span, id: AST_NODE_GENERATED}
+}
+
+sema_grammar_compare: fn(op: BinOp, left: Expr, right: Expr, span: Span) -> Expr Never! {
+    Expr.Binary{op: op, left: left, right: right, span: span, id: AST_NODE_GENERATED}
+}
+
+// `module.method(args…)` of a Core module the generated code reads.
+sema_grammar_core_call: fn(module_path: String, method: String, args: [Expr], span: Span) -> Expr Never! {
+    sema_serde_items_method_call(sema_serde_items_ident(sema_grammar_alias(module_path), span), method, args, span)
+}
+
+// `runtime.method(cursor, scanner, args…)`.
+sema_grammar_runtime_call: fn(method: String, args: ^^[Expr], span: Span) -> Expr Never! {
+    ^all: [Expr]{sema_serde_items_ident(SEMA_GRAMMAR_CURSOR, span), sema_serde_items_ident(SEMA_GRAMMAR_SCANNER, span)}
+    loop arg in args.move() -> all.push(arg)
+    sema_grammar_core_call(SEMA_GRAMMAR_RUNTIME_MODULE, method, all, span)
+}
+
+// `function(cursor, scanner, args…)`.
+sema_grammar_rule_call: fn(function: String, args: ^^[Expr], span: Span) -> Expr Never! {
+    ^all: [Expr]{sema_serde_items_ident(SEMA_GRAMMAR_CURSOR, span), sema_serde_items_ident(SEMA_GRAMMAR_SCANNER, span)}
+    loop arg in args.move() -> all.push(arg)
+    sema_serde_items_free_call(function, all, span)
+}
+
+// `value ?? return None`.
+sema_grammar_or_none: fn(value: Expr, span: Span) -> Expr Never! {
+    Expr.OrFallback{value: value, fallback: OrFallback.Return{value: Val(Expr.Absent{span: span, id: AST_NODE_GENERATED}), span: span}, is_option: true, span: span, id: AST_NODE_GENERATED}
+}
+
+// `return None`.
+sema_grammar_return_none: fn(span: Span) -> Stmt Never! {
+    Stmt.Return{value: Val(Expr.Absent{span: span, id: AST_NODE_GENERATED}), span: span}
+}
+
+// `name: runtime.parse_decide(cursor, scanner, decision)`.
+sema_grammar_decide: fn(name: String, decision: Int, span: Span) -> Stmt Never! {
+    sema_serde_items_binding(name, None, sema_grammar_runtime_call("parse_decide", [Expr]{sema_grammar_number(decision, span)}, span), false, span)
+}
+
+// `if name == value { body }`.
+sema_grammar_when: fn(name: String, value: Int, body: [Stmt], span: Span) -> Stmt Never! {
+    sema_serde_items_if(sema_grammar_compare(.Eq, sema_serde_items_ident(name, span), sema_grammar_number(value, span), span), body, span)
+}
+
+// `if name < 0 -> return None`.
+sema_grammar_failed: fn(name: String, span: Span) -> Stmt Never! {
+    sema_serde_items_if(sema_grammar_compare(.Lt, sema_serde_items_ident(name, span), sema_grammar_number(0, span), span), [Stmt]{sema_grammar_return_none(span)}, span)
+}
+
+// `if { name == 0 -> arms[0] … else -> return None }`.
+sema_grammar_branches: fn(name: String, arms: ^^[[Stmt]], span: Span) -> Stmt Never! {
+    ^switch_arms: [SwitchArm]{}
+    loop (i, arm) in arms.move() {
+        switch_arms.push(SwitchArm{cond: sema_grammar_compare(.Eq, sema_serde_items_ident(name, span), sema_grammar_number(i, span), span), body: arm, span: span})
+    }
+    Stmt.Switch{subject: sema_grammar_flag(true, span), arms: switch_arms, else_body: Val([Stmt]{sema_grammar_return_none(span)}), span: span}
+}
+
+// `cursor_leave(cursor)`.
+sema_grammar_leave: fn(span: Span) -> Stmt Never! {
+    Stmt.Expr{expr: sema_grammar_core_call(SEMA_GRAMMAR_RUNTIME_MODULE, "cursor_leave", [Expr]{sema_serde_items_ident(SEMA_GRAMMAR_CURSOR, span)}, span)}
+}
+
+// `if !cursor_enter(cursor) -> return None`: the depth bound.
+sema_grammar_enter: fn(span: Span) -> Stmt Never! {
+    entered: sema_grammar_core_call(SEMA_GRAMMAR_RUNTIME_MODULE, "cursor_enter", [Expr]{sema_serde_items_ident(SEMA_GRAMMAR_CURSOR, span)}, span)
+    sema_serde_items_if(sema_serde_items_not(entered, span), [Stmt]{sema_grammar_return_none(span)}, span)
+}
+
+sema_grammar_cursor_param: fn(span: Span) -> Param Never! {
+    ^param: sema_serde_items_param(SEMA_GRAMMAR_CURSOR, Type.Named{name: "{sema_grammar_alias(SEMA_GRAMMAR_RUNTIME_MODULE)}.GrammarCursor"}, span)
+    param.convention = AccessConvention.Write
+    param
+}
+
+sema_grammar_scanner_param: fn(span: Span) -> Param Never! {
+    sema_serde_items_param(SEMA_GRAMMAR_SCANNER, Type.Named{name: "{sema_grammar_alias(SEMA_GRAMMAR_PLAN_MODULE)}.GrammarScanner"}, span)
+}
+
+// A generated free function, private to the module.
+sema_grammar_free_function: fn(name: String, params: [Param], return_type: Type, body: ^^[Stmt], span: Span) -> Item Never! {
+    ^function: sema_serde_items_method(name, [TypeParam]{}, params, return_type, span)
+    function.body = body.move()
+    Item.Func{value: function}
+}
+
+// ---------------------------------------------------------------------------
+// Fields.
+
+// The field of `fields` each node of `plan` sets (-1 for none).
+sema_grammar_field_of: fn(plan: SemaGrammarItemsPlan, fields: [SemaGrammarField]) -> [Int] Never! {
+    ^field_of: [Int]{}
+    loop _ in plan.nodes -> field_of.push(-1)
+    loop (f, field) in fields {
+        loop n in field.nodes -> field_of[n] = f
+    }
+    field_of
+}
+
+// The locals `fields` are set in: an empty list, `false`, "", or None for
+// an optional field and for a required rule value not parsed yet.
+sema_grammar_locals: fn(gen: SemaGrammarGen, fields: [SemaGrammarField], body: ^[Stmt]) Never! {
+    span: gen.span
+    loop field in fields {
+        local: sema_grammar_local(field)
+        ty: sema_grammar_field_type(field, gen.types)
+        if {
+            field.list -> body.push(sema_serde_items_binding(local, Val(ty), Expr.ListLit{elements: [Expr]{}, span: span, id: AST_NODE_GENERATED}, true, span))
+            field.kind == .Flag -> body.push(sema_serde_items_binding(local, Val(ty), sema_grammar_flag(false, span), true, span))
+            field.optional -> body.push(sema_serde_items_binding(local, Val(ty), Expr.Absent{span: span, id: AST_NODE_GENERATED}, true, span))
+            field.kind == .Rule -> body.push(sema_serde_items_binding(local, Val(Type.Option{inner: ty}), Expr.Absent{span: span, id: AST_NODE_GENERATED}, true, span))
+            else -> body.push(sema_serde_items_binding(local, Val(ty), sema_serde_items_string("", span), true, span))
+        }
+    }
+}
+
+// Sets `field` to `value`: pushed onto a list, or assigned.
+sema_grammar_store: fn(field: SemaGrammarField, value: Expr, span: Span) -> Stmt Never! {
+    local: sema_grammar_local(field)
+    if field.list -> return Stmt.Expr{expr: sema_serde_items_method_call(sema_serde_items_ident(local, span), "push", [Expr]{value}, span)}
+    if field.optional || field.kind == .Rule -> return sema_serde_items_assign_local(local, Expr.Present{value: value, span: span, id: AST_NODE_GENERATED}, span)
+    sema_serde_items_assign_local(local, value, span)
+}
+
+// The value `field` gives the type its local is moved into.
+sema_grammar_field_value: fn(field: SemaGrammarField, span: Span) -> Expr Never! {
+    local: sema_grammar_local(field)
+    if field.kind == .Flag -> return sema_serde_items_ident(local, span)
+    if field.kind == .Rule && !field.list && !field.optional -> return sema_grammar_or_none(sema_serde_items_take(local, span), span)
+    sema_serde_items_take(local, span)
+}
+
+// The value of struct `type_name` of `fields`.
+sema_grammar_struct_value: fn(type_name: String, fields: [SemaGrammarField], span: Span) -> Expr Never! {
+    values: loop field in fields -> ExprField{name: field.name.copy(), name_span: span, value: sema_grammar_field_value(field, span)}
+    sema_serde_items_struct_literal(type_name, [Type]{}, values, span)
+}
+
+// The value of enum `type_name`'s case `case` of its fields.
+sema_grammar_case_value: fn(type_name: String, case: SemaGrammarCase, span: Span) -> Expr Never! {
+    args: loop field in case.fields -> EnumLitArg.Named{label: field.name.copy(), expr: sema_grammar_field_value(field, span)}
+    Expr.EnumLit{type_name: type_name, variant: case.name.copy(), variant_span: None, args: args, leading_dot: false, span: span, id: AST_NODE_GENERATED}
+}
+
+// Ends an alternative with its value: returned from the rule's function,
+// or, in an operator rule (`into_left`), kept as the left operand.
+sema_grammar_finish: fn(value: Expr, into_left: Bool, body: ^[Stmt], span: Span) Never! {
+    present: Expr.Present{value: value, span: span, id: AST_NODE_GENERATED}
+    if into_left {
+        body.push(sema_serde_items_assign_local(SEMA_GRAMMAR_LEFT, present, span))
+        return
+    }
+    body.push(sema_grammar_leave(span))
+    body.push(sema_serde_items_return(present, span))
+}
+
+// ---------------------------------------------------------------------------
+// Elements.
+
+// Takes token kind `kind`, setting text field `field` to its text, or flag
+// field `field` to true (-1: no field).
+sema_grammar_token: fn(fields: [SemaGrammarField], field: Int, kind: Int, body: ^[Stmt], span: Span) Never! {
+    if field >= 0 && fields[field].kind == .Text {
+        body.push(sema_grammar_store(fields[field], sema_grammar_or_none(sema_grammar_runtime_call("parse_text", [Expr]{sema_grammar_number(kind, span)}, span), span), span))
+        return
+    }
+    taken: sema_grammar_runtime_call("parse_token", [Expr]{sema_grammar_number(kind, span)}, span)
+    body.push(sema_serde_items_if(sema_serde_items_not(taken, span), [Stmt]{sema_grammar_return_none(span)}, span))
+    if field >= 0 -> body.push(sema_grammar_store(fields[field], sema_grammar_flag(true, span), span))
+}
+
+// Parses element `n` into the locals of `fields`. `inherited` is the field
+// of an enclosing labeled choice of tokens (-1 for none).
+sema_grammar_element: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan, fields: [SemaGrammarField], field_of: [Int], n: Int, inherited: Int, body: ^[Stmt]) Never! {
+    span: gen.span
+    node: plan.nodes[n]
+    ^field: field_of[n]
+    if field < 0 -> field = inherited
+    branch: "__jet_branch_{n}"
+    if node.kind == {
+        "Alt" -> loop child in node.children -> sema_grammar_element(gen, plan, fields, field_of, child, field, body)
+        "Choice" -> {
+            if node.children.len() == 1 {
+                sema_grammar_element(gen, plan, fields, field_of, node.children[0], field, body)
+                return
+            }
+            body.push(sema_grammar_decide(branch, plan.decision_of[n], span))
+            ^arms: [[Stmt]]{}
+            loop alt in node.children {
+                ^arm: [Stmt]{}
+                sema_grammar_element(gen, plan, fields, field_of, alt, field, arm)
+                arms.push(arm)
+            }
+            body.push(sema_grammar_branches(branch, arms.move(), span))
+        }
+        "Optional" -> {
+            body.push(sema_grammar_decide(branch, plan.decision_of[n], span))
+            body.push(sema_grammar_failed(branch, span))
+            ^taken: [Stmt]{}
+            sema_grammar_element(gen, plan, fields, field_of, node.children[0], field, taken)
+            body.push(sema_grammar_when(branch, 0, taken, span))
+        }
+        "Star" -> {
+            ^repeat: [Stmt]{sema_grammar_decide(branch, plan.decision_of[n], span), sema_grammar_failed(branch, span), sema_grammar_when(branch, 1, [Stmt]{Stmt.Break{span: span}}, span)}
+            sema_grammar_element(gen, plan, fields, field_of, node.children[0], field, repeat)
+            body.push(Stmt.Loop{body: repeat, span: span, arrow_body: false, label: None})
+        }
+        "Plus" -> {
+            ^repeat: [Stmt]{}
+            sema_grammar_element(gen, plan, fields, field_of, node.children[0], field, repeat)
+            repeat.push(sema_grammar_decide(branch, plan.decision_of[n], span))
+            repeat.push(sema_grammar_failed(branch, span))
+            repeat.push(sema_grammar_when(branch, 1, [Stmt]{Stmt.Break{span: span}}, span))
+            body.push(Stmt.Loop{body: repeat, span: span, arrow_body: false, label: None})
+        }
+        "Ref" -> {
+            if node.token >= 0 {
+                sema_grammar_token(fields, field, node.token, body, span)
+                return
+            }
+            value: sema_grammar_or_none(sema_grammar_rule_call(sema_grammar_function(gen, plan, node.rule), [Expr]{}, span), span)
+            if field >= 0 -> body.push(sema_grammar_store(fields[field], value, span)) else -> body.push(Stmt.Expr{expr: value})
+        }
+        "Literal" -> sema_grammar_token(fields, field, node.token, body, span)
+        "Hole" -> sema_grammar_token(fields, field, node.token, body, span)
+        "End" -> sema_grammar_token(fields, field, node.token, body, span)
+        // A class or `.` is a token rule's alone: no parser rule holds one.
+        else -> {}
+    }
+}
+
+// Parses the elements of alternative `alt` from element `from` on. An
+// element `operands` gives a level (an operator rule's operand) parses at
+// that level.
+sema_grammar_alt_elements: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan, rule: Int, fields: [SemaGrammarField], field_of: [Int], alt: Int, operands: [Int], from: Int, body: ^[Stmt]) Never! {
+    span: gen.span
+    kids: plan.nodes[alt].children
+    loop k in from..<kids.len() {
+        if k < operands.len() && operands[k] >= 0 {
+            value: sema_grammar_or_none(sema_grammar_rule_call(sema_grammar_level_function(gen, plan, rule), [Expr]{sema_grammar_number(operands[k], span)}, span), span)
+            f: field_of[kids[k]]
+            if f >= 0 -> body.push(sema_grammar_store(fields[f], value, span)) else -> body.push(Stmt.Expr{expr: value})
+            next
+        }
+        sema_grammar_element(gen, plan, fields, field_of, kids[k], -1, body)
+    }
+}
+
+// The statements that parse case `case` of rule `rule` and end with its
+// value. In an operator tail (`from` 1) the leading operand is the left
+// operand parsed so far.
+sema_grammar_case_body: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan, rule: Int, case: SemaGrammarCase, operands: [Int], from: Int, into_left: Bool, body: ^[Stmt]) Never! {
+    span: gen.span
+    type_name: gen.types[rule]
+    if case.wraps >= 0 {
+        body.push(sema_serde_items_binding(SEMA_GRAMMAR_WRAPPED, None, sema_grammar_or_none(sema_grammar_rule_call(sema_grammar_function(gen, plan, case.wraps), [Expr]{}, span), span), false, span))
+        wrapped: Expr.EnumLit{type_name: type_name.copy(), variant: case.name.copy(), variant_span: None, args: [EnumLitArg]{EnumLitArg.Positional{value: sema_serde_items_take(SEMA_GRAMMAR_WRAPPED, span)}}, leading_dot: false, span: span, id: AST_NODE_GENERATED}
+        sema_grammar_finish(wrapped, into_left, body, span)
+        return
+    }
+    field_of: sema_grammar_field_of(plan, case.fields)
+    sema_grammar_locals(gen, case.fields, body)
+    if from > 0 {
+        lead: field_of[plan.nodes[case.alt].children[0]]
+        if lead >= 0 -> body.push(sema_grammar_store(case.fields[lead], sema_grammar_or_none(sema_serde_items_take(SEMA_GRAMMAR_LEFT, span), span), span))
+    }
+    sema_grammar_alt_elements(gen, plan, rule, case.fields, field_of, case.alt, operands, from, body)
+    sema_grammar_finish(sema_grammar_case_value(type_name, case, span), into_left, body, span)
+}
+
+// The case of `shape` that alternative `alt` parses, or -1.
+sema_grammar_case_of: fn(shape: SemaGrammarShape, alt: Int) -> Int Never! {
+    ^found: -1
+    loop (i, case) in shape.cases {
+        if found < 0 && case.alt == alt -> found = i
+    }
+    found
+}
+
+// ---------------------------------------------------------------------------
+// Rule functions.
+
+// The return type of a rule's function: its type, None after an error.
+sema_grammar_rule_result: fn(gen: SemaGrammarGen, rule: Int) -> Type Never! {
+    Type.Option{inner: Type.Named{name: gen.types[rule].copy()}}
+}
+
+// The function that parses rule `shape.rule`, with the operator rule's
+// level function when it is one.
+sema_grammar_rule_functions: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan, shape: SemaGrammarShape, items: ^[Item]) Never! {
+    span: gen.span
+    r: shape.rule
+    ^operator_index: -1
+    loop (o, op_rule) in plan.operators {
+        if op_rule.rule == r -> operator_index = o
+    }
+    if operator_index >= 0 && shape.is_enum {
+        ^body: [Stmt]{sema_serde_items_return(sema_grammar_rule_call(sema_grammar_level_function(gen, plan, r), [Expr]{sema_grammar_number(0, span)}, span), span)}
+        params: [Param]{sema_grammar_cursor_param(span), sema_grammar_scanner_param(span)}
+        items.push(sema_grammar_free_function(sema_grammar_function(gen, plan, r), params, sema_grammar_rule_result(gen, r), body.move(), sema_grammar_span_at(gen, r)))
+        level_params: [Param]{sema_grammar_cursor_param(span), sema_grammar_scanner_param(span), sema_serde_items_param(SEMA_GRAMMAR_LEVEL, Type.Int, span)}
+        ^level_body: sema_grammar_operator_body(gen, plan, shape, plan.operators[operator_index])
+        items.push(sema_grammar_free_function(sema_grammar_level_function(gen, plan, r), level_params, sema_grammar_rule_result(gen, r), level_body.move(), sema_grammar_span_at(gen, plan.rules.len() + r)))
+        return
+    }
+    params: [Param]{sema_grammar_cursor_param(span), sema_grammar_scanner_param(span)}
+    ^body: [Stmt]{sema_grammar_enter(span)}
+    rule_body: plan.rules[r].body
+    if shape.is_enum {
+        branch: "__jet_branch"
+        body.push(sema_grammar_decide(branch, plan.decision_of[rule_body], span))
+        ^arms: [[Stmt]]{}
+        loop alt in plan.nodes[rule_body].children {
+            ^arm: [Stmt]{}
+            case: sema_grammar_case_of(shape, alt)
+            if case >= 0 -> sema_grammar_case_body(gen, plan, r, shape.cases[case], [Int]{}, 0, false, arm)
+            arms.push(arm)
+        }
+        body.push(sema_grammar_branches(branch, arms.move(), span))
+    } else {
+        field_of: sema_grammar_field_of(plan, shape.fields)
+        sema_grammar_locals(gen, shape.fields, body)
+        sema_grammar_element(gen, plan, shape.fields, field_of, rule_body, -1, body)
+        sema_grammar_finish(sema_grammar_struct_value(gen.types[r], shape.fields, span), false, body, span)
+    }
+    items.push(sema_grammar_free_function(sema_grammar_function(gen, plan, r), params, sema_grammar_rule_result(gen, r), body.move(), sema_grammar_span_at(gen, r)))
+}
+
+// An operator rule's level function: a primary, then each tail whose
+// operator binds at least as tightly as `__jet_level`, each taking the
+// value so far as its leading operand.
+sema_grammar_operator_body: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan, shape: SemaGrammarShape, op_rule: SemaGrammarOperatorRule) -> [Stmt] Never! {
+    span: gen.span
+    r: shape.rule
+    ^body: [Stmt]{sema_grammar_enter(span), sema_serde_items_binding(SEMA_GRAMMAR_LEFT, Val(sema_grammar_rule_result(gen, r)), Expr.Absent{span: span, id: AST_NODE_GENERATED}, true, span)}
+    primary: plan.nodes[op_rule.primary]
+    single_primary: primary.children.len() == 1
+    ^primary_arms: [[Stmt]]{}
+    loop alt in primary.children {
+        ^arm: [Stmt]{}
+        ^prefix: -1
+        loop (o, op) in op_rule.operators {
+            if op.alt == alt -> prefix = o
+        }
+        case: sema_grammar_case_of(shape, alt)
+        if case >= 0 {
+            ^operands: [Int]{}
+            if prefix >= 0 -> operands = op_rule.operators[prefix].operands.copy()
+            if single_primary -> sema_grammar_case_body(gen, plan, r, shape.cases[case], operands, 0, true, body) else -> sema_grammar_case_body(gen, plan, r, shape.cases[case], operands, 0, true, arm)
+        }
+        primary_arms.push(arm)
+    }
+    if !single_primary {
+        body.push(sema_grammar_decide("__jet_branch", plan.decision_of[op_rule.primary], span))
+        body.push(sema_grammar_branches("__jet_branch", primary_arms.move(), span))
+    }
+    more: "__jet_more"
+    ^repeat: [Stmt]{sema_grammar_decide(more, plan.decision_of[op_rule.repeat], span)}
+    repeat.push(sema_serde_items_if(sema_grammar_compare(.Ne, sema_serde_items_ident(more, span), sema_grammar_number(0, span), span), [Stmt]{Stmt.Break{span: span}}, span))
+    tails_node: plan.nodes[op_rule.repeat].children[0]
+    single_tail: plan.nodes[tails_node].children.len() == 1
+    ^tail_arms: [[Stmt]]{}
+    loop tail in plan.nodes[tails_node].children {
+        ^arm: [Stmt]{}
+        loop op in op_rule.operators {
+            if op.tail != tail -> next
+            looser: sema_grammar_compare(.Lt, sema_grammar_number(op.level, span), sema_serde_items_ident(SEMA_GRAMMAR_LEVEL, span), span)
+            stop: sema_serde_items_if(looser, [Stmt]{Stmt.Break{span: span}}, span)
+            case: sema_grammar_case_of(shape, op.alt)
+            if single_tail {
+                repeat.push(stop)
+                if case >= 0 -> sema_grammar_case_body(gen, plan, r, shape.cases[case], op.operands, 1, true, repeat)
+            } else {
+                arm.push(stop)
+                if case >= 0 -> sema_grammar_case_body(gen, plan, r, shape.cases[case], op.operands, 1, true, arm)
+            }
+        }
+        tail_arms.push(arm)
+    }
+    if !single_tail {
+        repeat.push(sema_grammar_decide("__jet_tail", plan.decision_of[tails_node], span))
+        repeat.push(sema_grammar_branches("__jet_tail", tail_arms.move(), span))
+    }
+    body.push(Stmt.Loop{body: repeat, span: span, arrow_body: false, label: None})
+    body.push(sema_grammar_leave(span))
+    body.push(sema_serde_items_return(sema_serde_items_take(SEMA_GRAMMAR_LEFT, span), span))
+    body
+}
+
+// `parse(text) -> T GrammarError!` of rule `shape.rule`'s type: its
+// function from the start of `text`, then the end of the input. A rule
+// function returns None only once an error is recorded, so the end check
+// fails first.
+sema_grammar_parse_method: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan, shape: SemaGrammarShape, is_pub: Bool, is_package_pub: Bool) -> Func Never! {
+    span: gen.span
+    scanner: sema_grammar_scanner_constant(gen)
+    value: "__jet_value"
+    start: sema_grammar_core_call(SEMA_GRAMMAR_RUNTIME_MODULE, "cursor_of", [Expr]{sema_serde_items_ident("text", span)}, span)
+    built: sema_serde_items_free_call(sema_grammar_function(gen, plan, shape.rule), [Expr]{sema_serde_items_ident(SEMA_GRAMMAR_CURSOR, span), sema_serde_items_ident(scanner, span)}, span)
+    ended: sema_grammar_core_call(SEMA_GRAMMAR_RUNTIME_MODULE, "parse_end", [Expr]{sema_serde_items_ident(SEMA_GRAMMAR_CURSOR, span), sema_serde_items_ident(scanner, span)}, span)
+    failed: Expr.Err{value: sema_grammar_core_call(SEMA_GRAMMAR_RUNTIME_MODULE, "parse_error", [Expr]{sema_serde_items_ident(SEMA_GRAMMAR_CURSOR, span)}, span), span: span, id: AST_NODE_GENERATED}
+    parsed: Expr.OrFallback{value: sema_serde_items_take(value, span), fallback: OrFallback.Return{value: Val(failed.copy()), span: span}, is_option: true, span: span, id: AST_NODE_GENERATED}
+    result: Type.Result{ok: Type.Named{name: shape.name.copy()}, err: Type.Named{name: "{sema_grammar_alias(SEMA_GRAMMAR_ERROR_MODULE)}.GrammarError"}}
+    ^method: sema_serde_items_method("parse", [TypeParam]{}, [Param]{sema_serde_items_param("text", Type.String, span)}, result, Span{start: span.start, end: span.start})
+    method.is_pub = is_pub
+    method.is_package_pub = is_package_pub
+    method.body = [Stmt]{
+        sema_serde_items_binding(SEMA_GRAMMAR_CURSOR, None, start, true, span),
+        sema_serde_items_binding(value, None, built, false, span),
+        sema_serde_items_if(sema_serde_items_not(ended, span), [Stmt]{sema_serde_items_return(failed, span)}, span),
+        sema_serde_items_return(Expr.Ok{value: parsed, span: span, id: AST_NODE_GENERATED}, span),
+    }
+    method
+}
+
+// ---------------------------------------------------------------------------
+// The scanner constant.
+
+// The plan record a member of a plan record holds, by the member's name
+// ("" for a member of scalars).
+sema_grammar_record: fn(member: String) -> String Never! {
+    if member == {
+        "lexer" -> "GrammarLexer"
+        "keywords" -> "GrammarKeywords"
+        "tokens" -> "GrammarToken"
+        "decisions" -> "GrammarDecision"
+        "steps" -> "GrammarStep"
+        else -> ""
+    }
+}
+
+// Computed plan data `value` as the literal that builds it: a record of
+// the plan module named `record`, a list, or a scalar literal.
+sema_grammar_literal: fn(value: CtValue, record: String, span: Span) -> Expr Never! {
+    if value == {
+        .Struct(_, entries) -> {
+            members: loop entry in entries -> ExprField{name: entry.name.copy(), name_span: span, value: sema_grammar_literal(entry.value, sema_grammar_record(entry.name), span)}
+            sema_serde_items_struct_literal("{sema_grammar_alias(SEMA_GRAMMAR_PLAN_MODULE)}.{record}", [Type]{}, members, span)
+        }
+        .List(values) -> {
+            elements: loop item in values -> sema_grammar_literal(item, record, span)
+            Expr.ListLit{elements: elements, span: span, id: AST_NODE_GENERATED}
+        }
+        .Int(number) -> sema_grammar_number(number, span)
+        .Bool(flag) -> Expr.Bool{value: flag, span: span, id: AST_NODE_GENERATED}
+        .Str(text) -> Expr.Str{parts: [StrPart.Lit{text: text.copy()}], span: span, id: AST_NODE_GENERATED}
+        // copy: the literal embeds the value apart from the plan
+        .Char(_) | .Unit | .Failed(_) | .Enum(_, _, _) | .Present(_) | .Float(_) | .BigInt(_) | .Bytes(_) | .Map(_) | .Closure(_) -> Expr.ComptimeName{name: "", span: span, value: Val(value.copy()), id: AST_NODE_GENERATED}
+    }
+}
+
+// `__jet_grammar_<Start>_scanner`: the scanner of plan `value`'s token
+// kinds and decisions.
+sema_grammar_scanner_item: fn(gen: SemaGrammarGen, value: CtValue) -> Item Never! {
+    span: gen.span
+    ^args: [Expr]{}
+    if value == .Struct(_, entries) {
+        loop member in ["lexer", "keywords", "tokens", "decisions"] {
+            loop entry in entries {
+                if entry.name == member -> args.push(sema_grammar_literal(entry.value, sema_grammar_record(member), span))
+            }
+        }
+    }
+    init: sema_grammar_core_call(SEMA_GRAMMAR_RUNTIME_MODULE, "grammar_scanner_of", args, span)
+    Item.Const{value: ast_const(sema_grammar_scanner_constant(gen), span, span, init)}
+}
+
+// The parser items of a grammar: the scanner constant and each parser
+// rule's functions.
+sema_grammar_parser_items: fn(gen: SemaGrammarGen, plan: SemaGrammarItemsPlan, value: CtValue, items: ^[Item]) Never! {
+    if plan.shapes.len() == 0 -> return
+    items.push(sema_grammar_scanner_item(gen, value))
+    loop shape in plan.shapes -> sema_grammar_rule_functions(gen, plan, shape, items)
+}

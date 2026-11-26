@@ -11,7 +11,7 @@
 // keyword matches a whole word only: the word is scanned and looked up.
 use {
     core.grammar.error.[GrammarError, grammar_error_at, literal_name]
-    core.grammar.plan.[GrammarKeywords, GrammarLexer, GrammarPlan, GrammarScanner]
+    core.grammar.plan.[GrammarDecision, GrammarKeywords, GrammarLexer, GrammarPlan, GrammarScanner, GrammarToken]
 }
 
 /// The byte length of the UTF-8 sequence that starts with `lead`. Jet
@@ -267,15 +267,17 @@ GrammarCursor: struct {
     errors: [GrammarError],
 }
 
-/// What a generated parser lexes `plan`'s input with.
-grammar_scanner: fn(plan: GrammarPlan) -> GrammarScanner Never! {
+/// What a generated parser lexes and decides with: the scanner of token
+/// kinds `tokens` over `lexer` and `keywords`, deciding by `decisions`.
+grammar_scanner_of: fn(lexer: GrammarLexer, keywords: GrammarKeywords, tokens: [GrammarToken], decisions: [GrammarDecision]) -> GrammarScanner Never! {
     ^names: [String]{}
     ^texts: [String]{}
     ^folds: [Bool]{}
     ^words: [Bool]{}
     ^skips: [Int]{}
     ^holes: [Int]{}
-    loop (k, token) in plan.tokens {
+    ^alone: [[Int]]{}
+    loop (k, token) in tokens {
         literal: k > 0 && token.rule < 0 && token.hole == ""
         names.push(token.name.copy())
         if literal -> texts.push(token.text.copy()) else -> texts.push("")
@@ -283,8 +285,35 @@ grammar_scanner: fn(plan: GrammarPlan) -> GrammarScanner Never! {
         words.push(literal && word_shaped(token.text))
         if token.skip -> skips.push(k)
         if token.hole != "" -> holes.push(k)
+        alone.push([Int]{k})
     }
-    GrammarScanner{lexer: plan.lexer, keywords: plan.keywords, names: names, texts: texts, folds: folds, words: words, skips: skips, holes: holes}
+    ^first_steps: [Int]{}
+    ^fallbacks: [Int]{}
+    ^step_kinds: [[Int]]{}
+    ^routes: [[Int]]{}
+    loop decision in decisions {
+        base: step_kinds.len()
+        first_steps.push(base)
+        fallbacks.push(decision.fallback)
+        loop step in decision.steps {
+            ^route: [Int]{}
+            loop _ in 0..<tokens.len() -> route.push(-1)
+            loop (i, kind) in step.kinds {
+                target: step.targets[i]
+                route[kind] = if target >= 0 -> target else -> -(base - target - 1) - 2
+            }
+            // copy: the scanner keeps the steps apart from the plan
+            step_kinds.push(step.kinds.copy())
+            routes.push(route)
+        }
+    }
+    // copy: the scanner keeps its own tables, the plan's or the literals'
+    GrammarScanner{lexer: lexer.copy(), keywords: keywords.copy(), names: names, texts: texts, folds: folds, words: words, skips: skips, holes: holes, alone: alone, first_steps: first_steps, fallbacks: fallbacks, step_kinds: step_kinds, routes: routes}
+}
+
+/// What a generated parser lexes `plan`'s input with.
+grammar_scanner: fn(plan: GrammarPlan) -> GrammarScanner Never! {
+    grammar_scanner_of(plan.lexer, plan.keywords, plan.tokens, plan.decisions)
 }
 
 /// A cursor at the start of `text`.
@@ -512,4 +541,61 @@ cursor_resync: fn(cursor: ^GrammarCursor, scanner: GrammarScanner, stops: [Int])
             cursor.at = lexeme.start + code_point_width(Int{cursor.bytes[lexeme.start]})
         }
     }
+}
+
+/// The text of `lexeme`, as the input spells it.
+lexeme_text: fn(cursor: GrammarCursor, lexeme: GrammarLexeme) -> String Never! {
+    ^out: [U8]{}
+    loop i in lexeme.start..<lexeme.end -> out.push(cursor.bytes[i])
+    String.from_bytes(out) ?? ""
+}
+
+/// The branch decision `decision` takes at the cursor, reading up to its
+/// depth in tokens and taking none. Where the token read leads nowhere,
+/// the decision takes its fallback, if it has one; otherwise the error is
+/// recorded and the branch is -1.
+parse_decide: fn(cursor: ^GrammarCursor, scanner: GrammarScanner, decision: Int) -> Int Never! {
+    ^step: scanner.first_steps[decision]
+    ^lexeme: scan(scanner, cursor, scanner.step_kinds[step])
+    loop {
+        ^target: -1
+        if lexeme.kind >= 0 -> target = scanner.routes[step][lexeme.kind]
+        if target >= 0 -> return target
+        if target == -1 {
+            fallback: scanner.fallbacks[decision]
+            if fallback >= 0 -> return fallback
+            cursor_fail(cursor, scanner, lexeme, scanner.step_kinds[step])
+            return -1
+        }
+        step = -target - 2
+        lexeme = scan_after(scanner, cursor, lexeme, scanner.step_kinds[step])
+    }
+}
+
+/// Takes the next token when it is of kind `kind`; otherwise it stays and
+/// the error is recorded. Whether it was taken.
+parse_token: fn(cursor: ^GrammarCursor, scanner: GrammarScanner, kind: Int) -> Bool Never! {
+    cursor_expect(cursor, scanner, scanner.alone[kind]).kind == kind
+}
+
+/// The text of the next token, taken, when it is of kind `kind`; otherwise
+/// it stays, the error is recorded and there is no text.
+parse_text: fn(cursor: ^GrammarCursor, scanner: GrammarScanner, kind: Int) -> String? Never! {
+    lexeme: cursor_expect(cursor, scanner, scanner.alone[kind])
+    if lexeme.kind != kind -> return None
+    Val(lexeme_text(cursor, lexeme))
+}
+
+/// Whether a parse that built its value reached the end of the input with
+/// no error; trailing input is recorded as the error.
+parse_end: fn(cursor: ^GrammarCursor, scanner: GrammarScanner) -> Bool Never! {
+    if cursor.errors.len() > 0 -> return false
+    parse_token(cursor, scanner, 0)
+}
+
+/// The error a failed parse reports: its first. Every failed parse has
+/// recorded one.
+parse_error: fn(cursor: GrammarCursor) -> GrammarError Never! {
+    // copy: the error outlives the cursor
+    cursor.errors[0].copy()
 }

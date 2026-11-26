@@ -47,6 +47,11 @@ Run a lesson from the repository root, for example `jet run Examples/Text/<Lesso
 - [CheckedTextSQL](CheckedText/CheckedTextSQL.jet) — SQL and HTML are library-defined, nominal String-backed types with ordinary `CheckedText` implementations.
 - [CheckedTextType](CheckedText/CheckedTextType.jet)
 
+## Grammar
+
+- [Ini](Grammar/Ini.jet) — A `Grammar` literal declares a parser: its rules give way to types, and `Ini.parse` reads a document into them or reports the first error by line and column.
+- [Calc](Grammar/Calc.jet) — A rule that names itself on the left is an operator rule: its alternatives bind from tightest to loosest, with `<assoc=right>`, prefix and suffix forms.
+
 ## Unicode
 
 - [Collation](Unicode/Collation.jet) — Dictionary order: `text.collate` is the Unicode default order (UCA with the CLDR root table), which is also English order.

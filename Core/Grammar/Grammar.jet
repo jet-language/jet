@@ -10,7 +10,7 @@
 use {
     core.grammar.error.[GrammarFault, GrammarFaultKind, GrammarFaults, TextSpot, grammar_faults]
     core.grammar.plan.[GrammarKeywords, GrammarPlan, GrammarScanner, GrammarSource]
-    core.grammar.runtime.[GRAMMAR_MAX_DEPTH, NO_HOLE, NO_TOKEN, bounds_column, cursor_enter, cursor_expect, cursor_fail, cursor_leave, cursor_of, cursor_of_parts, cursor_resync, cursor_take, grammar_scanner, keyword_find, keyword_next, lexer_column, lexer_match, scan, scan_after, word_end, word_shaped]
+    core.grammar.runtime.[GRAMMAR_MAX_DEPTH, NO_HOLE, NO_TOKEN, bounds_column, cursor_enter, cursor_expect, cursor_fail, cursor_leave, cursor_of, cursor_of_parts, cursor_resync, cursor_take, grammar_scanner, keyword_find, keyword_next, lexer_column, lexer_match, parse_decide, parse_end, parse_error, parse_text, parse_token, scan, scan_after, word_end, word_shaped]
     __core_grammar_analyze.[mark_nullable, mark_parents, report_left_recursion, resolve, split_operators]
     __core_grammar_keywords.[plan_keywords]
     __core_grammar_lookahead.[assign_tokens, plan_decisions, plan_sets]
@@ -430,4 +430,43 @@ priv LIST: "s : '[' items+=NAME (',' items+=NAME)* ']' ;\nNAME : [a-z]+ ;\nWS : 
     assert_eq("{cursor.errors[0]}", "1:1: unexpected nesting deeper than {GRAMMAR_MAX_DEPTH} rules")
     cursor_leave(cursor)
     assert_eq(cursor.depth, GRAMMAR_MAX_DEPTH)
+}
+
+#Test("a decision reads as far as it needs and takes no token") {
+    plan: plan_of("s : name=NAME '=' value=NAME # Set | name=NAME '(' ')' # Call ;\nNAME : [a-z]+ ;\nWS : ' '+ -> skip ;")
+    scanner: grammar_scanner(plan)
+    decision: plan.decision_of[plan.tree.rules[0].body]
+    ^set: cursor_of("a = b")
+    assert_eq(parse_decide(set, scanner, decision), 0)
+    assert_eq(set.at, 0)
+    ^call: cursor_of("a ( )")
+    assert_eq(parse_decide(call, scanner, decision), 1)
+    assert_eq(call.errors.len(), 0)
+    ^neither: cursor_of("a ;")
+    assert_eq(parse_decide(neither, scanner, decision), -1)
+    assert_eq(neither.errors.len(), 1)
+    assert("{neither.errors[0]}".starts_with("1:3: expected "))
+}
+
+#Test("a parse takes tokens by kind, reads their text and ends at the end of the input") {
+    scanner: grammar_scanner(plan_of("s : name=NAME '=' value=NAME ;\nNAME : [a-z]+ ;\nWS : ' '+ -> skip ;"))
+    name: scanner_kind(scanner, "NAME")
+    equals: scanner_kind(scanner, "\"=\"")
+    ^cursor: cursor_of("ab = cd")
+    assert_eq(parse_text(cursor, scanner, name) ?? "", "ab")
+    assert(parse_token(cursor, scanner, equals))
+    assert_eq(parse_text(cursor, scanner, name) ?? "", "cd")
+    assert(parse_end(cursor, scanner))
+    ^trailing: cursor_of("ab = cd ef")
+    _: parse_text(trailing, scanner, name)
+    _: parse_token(trailing, scanner, equals)
+    _: parse_text(trailing, scanner, name)
+    assert(!parse_end(trailing, scanner))
+    assert("{parse_error(trailing)}".starts_with("1:9: expected "))
+    ^wrong: cursor_of("ab cd")
+    _: parse_text(wrong, scanner, name)
+    assert(!parse_token(wrong, scanner, equals))
+    assert_eq(wrong.errors.len(), 1)
+    assert("{parse_error(wrong)}".starts_with("1:4: expected \"=\""))
+    assert(!parse_end(wrong, scanner))
 }

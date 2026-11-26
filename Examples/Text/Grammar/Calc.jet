@@ -1,0 +1,47 @@
+// A rule that names itself on the left is an operator rule: its alternatives,
+// in written order, bind from tightest to loosest. `<assoc=right>` makes `^`
+// group from the right, a call is a suffix and `-` a prefix. A number stays
+// text in the tree; code converts it.
+use core.grammar.[Grammar]
+
+Calc: Grammar{"""
+    calc : body=expr ;
+    expr : operand=expr '(' (args+=expr (',' args+=expr)*)? ')'   # Call
+         | <assoc=right> left=expr '^' right=expr                 # Pow
+         | '-' operand=expr                                       # Neg
+         | left=expr op=('*' | '/' | '%') right=expr              # Mul
+         | left=expr op=('+' | '-') right=expr                    # Add
+         | value=NUM                                              # Num
+         | name=IDENT                                             # Var
+         | '(' inner=expr ')'                                     # Group
+         ;
+    NUM   : [0-9]+ ('.' [0-9]+)? ;
+    IDENT : [A-Za-z_] [A-Za-z0-9_]* ;
+    WS    : [ \t\r\n]+ -> skip ;
+"""}
+
+show: fn(expr: Expr) -> String {
+    if expr == {
+        .Call(operand, args) -> {
+            ^parts: [String]{}
+            loop arg in args -> parts.push(show(arg))
+            "{show(operand)}({parts.join(", ")})"
+        }
+        .Pow(left, right) -> "Pow({show(left)}, {show(right)})"
+        .Neg(operand) -> "Neg({show(operand)})"
+        .Mul(left, op, right) -> "Mul({show(left)} {op} {show(right)})"
+        .Add(left, op, right) -> "Add({show(left)} {op} {show(right)})"
+        .Num(value) -> value
+        .Var(name) -> name
+        .Group(inner) -> "({show(inner)})"
+    }
+}
+
+run: fn() {
+    loop source in ["1 + 2 * 3", "1 - 2 - 3", "2 ^ 3 ^ 2", "-2 ^ 2", "2 ^ -1", "f(1, x)(2) - (3 - 4) % 5", "1 +", "(1 + 2"] {
+        if Calc.parse(source) == {
+            .Ok(calc) -> print("{source} => {show(calc.body)}")
+            .Err(error) -> print("{source} => error: {error}")
+        }
+    }
+}
