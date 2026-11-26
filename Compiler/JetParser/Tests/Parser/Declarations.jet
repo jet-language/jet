@@ -1,5 +1,5 @@
 use {
-    jet_foundation.[MARKER_SOURCE_SITES, Marker, MarkerDecl, Span, TextEdit, expr_span]
+    jet_foundation.[MARKER_SOURCE_SITES, Marker, MarkerDecl, Span, TextEdit, effect_access_name, expr_span]
     jet_parser.[jet_format_source, jfmt_check_parse_accepts, parse_source_layout, parse_type_text, parser_marker_placement_edits]
 }
 
@@ -943,6 +943,55 @@ impl Audit.Effect {
     )
     elsewhere.items[0] == .Impl(kept) ?? panic("a block whose type is declared elsewhere stays an impl")
     assert_eq(kept.type_name, "Audit")
+}
+
+#Test("an_effect_declares_and_inherits_its_access_class") {
+    source: `Journal: enum {
+    Read,
+    Append,
+    Truncate,
+
+    impl Effect {
+        access: fn(self) -> EffectAccess { if self == .Read -> .Reads else if self == .Append -> .Adds else -> .Replaces }
+    }
+}
+
+Archive: struct {
+    impl Effect {
+        parent: Meta.Generate,
+    }
+}
+`
+    program: parser_test_program(source)
+    ^classes: [String]{}
+    loop item in program.items {
+        if item == .EffectDecl(declaration) {
+            classes.push("{declaration.name}:{effect_access_name(declaration.access)}")
+        }
+    }
+    assert_eq(
+        classes,
+        [String]{
+            "Journal:Replaces",
+            "Journal.Read:Reads",
+            "Journal.Append:Adds",
+            "Journal.Truncate:Replaces",
+            "Archive:Adds",
+        },
+    )
+    assert_eq(parser_test_stable(source), source)
+    invalid: parser_test_diagnostic(
+        parser_test_errors(
+            `Broken: struct {
+    impl Effect {
+        access: fn(self) -> EffectAccess { .Other }
+    }
+}
+`,
+        ),
+        "E0633",
+    )
+    assert(invalid.what.contains("`access: fn`"))
 }
 
 #Test("an_effect_value_row_entry_reads_into_the_row") {

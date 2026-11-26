@@ -2516,7 +2516,7 @@ jfmt_fmt_marker_template: fn(f: ^JetFmt, declaration: MarkerDecl, expand: Span?)
 // and a toolchain effect's `expert` method on one line each.
 jfmt_fmt_effect_impl: fn(f: ^JetFmt, declared: EffectImpl) {
     jfmt_emit_leading(f, declared.span.start)
-    if declared.irreversible == None && declared.expert == None && declared.parent == None {
+    if declared.irreversible == None && declared.expert == None && declared.access == None && declared.parent == None {
         jfmt_write(f, "impl Effect {{}}")
         return
     }
@@ -2526,18 +2526,25 @@ jfmt_fmt_effect_impl: fn(f: ^JetFmt, declared: EffectImpl) {
     if declared.parent == .Val(written) {
         jfmt_emit_leading(f, written.span.start)
         jfmt_write(f, "parent: {written.name},")
-        if declared.irreversible != None || declared.expert != None -> jfmt_newline(f)
+        if declared.irreversible != None || declared.expert != None || declared.access != None -> jfmt_newline(f)
     }
     if declared.irreversible == .Val(body) {
         if declared.method_span == .Val(span) -> jfmt_emit_leading(f, span.start)
         jfmt_write(f, "irreversible: fn(self) -> Bool {{ ")
         jfmt_fmt_expr(f, body, JFMT_PREC_OR_FALLBACK)
         jfmt_write(f, " }}")
-        if declared.expert != None -> jfmt_newline(f)
+        if declared.expert != None || declared.access != None -> jfmt_newline(f)
     }
     if declared.expert == .Val(body) {
         if declared.expert_span == .Val(span) -> jfmt_emit_leading(f, span.start)
         jfmt_write(f, "expert: fn(self) -> Bool {{ ")
+        jfmt_fmt_expr(f, body, JFMT_PREC_OR_FALLBACK)
+        jfmt_write(f, " }}")
+        if declared.access != None -> jfmt_newline(f)
+    }
+    if declared.access == .Val(body) {
+        if declared.access_span == .Val(span) -> jfmt_emit_leading(f, span.start)
+        jfmt_write(f, "access: fn(self) -> EffectAccess {{ ")
         jfmt_fmt_expr(f, body, JFMT_PREC_OR_FALLBACK)
         jfmt_write(f, " }}")
     }

@@ -1,0 +1,82 @@
+// Effect safety classes (`EffectAccess`) and the `#Repeatable` marker contract.
+use jet_foundation.[
+    EFFECT_VOCABULARY_ROWS,
+    EffectAccess,
+    MARKER_REPEATABLE,
+    MARKER_SOURCE,
+    effect_access_max,
+    effect_access_name,
+    effect_access_parse,
+    effect_access_rank,
+    effect_vocabulary_access,
+    registration_marker_rules,
+]
+
+effect_access_test_is_irreversible: fn(name: String) -> Bool Never! {
+    loop row in EFFECT_VOCABULARY_ROWS {
+        if row.name == name -> return row.irreversible
+    }
+    false
+}
+
+#Test("effect_access_ordering_and_names_are_consistent") {
+    assert(effect_access_rank(EffectAccess.Reads) < effect_access_rank(EffectAccess.Adds))
+    assert(effect_access_rank(EffectAccess.Adds) < effect_access_rank(EffectAccess.Replaces))
+    assert_eq(effect_access_max(EffectAccess.Reads, EffectAccess.Adds), EffectAccess.Adds)
+    assert_eq(effect_access_max(EffectAccess.Adds, EffectAccess.Replaces), EffectAccess.Replaces)
+    assert_eq(effect_access_max(EffectAccess.Replaces, EffectAccess.Reads), EffectAccess.Replaces)
+    assert_eq(effect_access_name(EffectAccess.Reads), "Reads")
+    assert_eq(effect_access_name(EffectAccess.Adds), "Adds")
+    assert_eq(effect_access_name(EffectAccess.Replaces), "Replaces")
+    assert_eq(effect_access_parse(".Reads"), Val(EffectAccess.Reads))
+    assert_eq(effect_access_parse("EffectAccess.Adds"), Val(EffectAccess.Adds))
+    assert_eq(effect_access_parse(".Replaces"), Val(EffectAccess.Replaces))
+    assert_eq(effect_access_parse(".Unknown"), None)
+}
+
+#Test("effect_access_vocabulary_classifies_machine_and_core_effects") {
+    assert(EFFECT_VOCABULARY_ROWS.len() > 20, "EFFECT_VOCABULARY_ROWS must stay populated")
+    assert_eq(effect_vocabulary_access("FS.Read"), EffectAccess.Reads)
+    assert_eq(effect_vocabulary_access("FS.Write"), EffectAccess.Replaces)
+    assert_eq(effect_vocabulary_access("FS"), EffectAccess.Replaces)
+    assert_eq(effect_vocabulary_access("Log"), EffectAccess.Reads)
+    assert_eq(effect_vocabulary_access("Time"), EffectAccess.Reads)
+    assert_eq(effect_vocabulary_access("Rand"), EffectAccess.Reads)
+    assert_eq(effect_vocabulary_access("IO"), EffectAccess.Reads)
+    assert_eq(effect_vocabulary_access("Net"), EffectAccess.Replaces)
+    assert_eq(effect_vocabulary_access("Env"), EffectAccess.Replaces)
+    assert_eq(effect_vocabulary_access("Exec.Args"), EffectAccess.Reads)
+    assert_eq(effect_vocabulary_access("Exec.Exit"), EffectAccess.Replaces)
+    assert_eq(effect_vocabulary_access("Exec"), EffectAccess.Replaces)
+    assert(!effect_access_test_is_irreversible("Exec.Args"), "Exec.Args reads process arguments and is reversible")
+    assert(effect_access_test_is_irreversible("Exec.Exit"), "Exec.Exit terminates the process and is irreversible")
+    assert_eq(effect_vocabulary_access("DB.Read"), EffectAccess.Reads)
+    assert_eq(effect_vocabulary_access("DB.Write"), EffectAccess.Replaces)
+    assert_eq(effect_vocabulary_access("DB"), EffectAccess.Replaces)
+    assert_eq(effect_vocabulary_access("Secret"), EffectAccess.Reads)
+    assert_eq(effect_vocabulary_access("Meta.Host"), EffectAccess.Reads)
+    assert_eq(effect_vocabulary_access("Meta.Generate"), EffectAccess.Adds)
+    assert_eq(effect_vocabulary_access("Meta.Code"), EffectAccess.Replaces)
+    assert_eq(effect_vocabulary_access("Meta.Code.Rewrite"), EffectAccess.Replaces)
+    assert_eq(effect_vocabulary_access("Meta"), EffectAccess.Replaces)
+}
+
+#Test("repeatable_marker_is_registered_on_functions_and_methods") {
+    assert(MARKER_SOURCE.contains("{MARKER_REPEATABLE}: struct"), "MARKER_SOURCE must declare Repeatable")
+    assert(MARKER_SOURCE.contains("reason: String{{none}}"), "Repeatable must declare optional reason")
+    assert(MARKER_SOURCE.contains("key: Value{{none}}"), "Repeatable must declare optional key")
+    ^found: false
+    ^has_function: false
+    ^has_method: false
+    loop rule in registration_marker_rules() {
+        if rule.name != MARKER_REPEATABLE -> next
+        found = true
+        loop site in rule.sites {
+            if site == "Function" -> has_function = true
+            if site == "Method" -> has_method = true
+        }
+    }
+    assert(found, "registration_marker_rules must include Repeatable")
+    assert(has_function, "Repeatable must allow Function sites")
+    assert(has_method, "Repeatable must allow Method sites")
+}

@@ -12,15 +12,21 @@ DB: enum {
     Read,
     Write,
 
-    impl Effect {}
+    impl Effect {
+        access: fn(self) -> EffectAccess { if self == .Read -> .Reads else -> .Replaces }
+    }
 }
 
 #FX(IO, FS, Net)
 Log: struct {
-    impl Effect {}
+    impl Effect {
+        access: fn(self) -> EffectAccess { .Reads }
+    }
 }
 
 #FX(Env, FS, Net)
 Secret: struct {
-    impl Effect {}
+    impl Effect {
+        access: fn(self) -> EffectAccess { .Reads }
+    }
 }

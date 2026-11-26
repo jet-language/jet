@@ -21,6 +21,7 @@
 Net: struct {
     impl Effect {
         irreversible: fn(self) -> Bool { true }
+        access: fn(self) -> EffectAccess { .Replaces }
     }
 }
 
@@ -30,27 +31,36 @@ FS: enum {
 
     impl Effect {
         irreversible: fn(self) -> Bool { self == .Write }
+        access: fn(self) -> EffectAccess { if self == .Read -> .Reads else -> .Replaces }
     }
 }
 
 IO: struct {
-    impl Effect {}
+    impl Effect {
+        access: fn(self) -> EffectAccess { .Reads }
+    }
 }
 
 Time: enum {
     Wait,
 
-    impl Effect {}
+    impl Effect {
+        access: fn(self) -> EffectAccess { .Reads }
+    }
 }
 
 Rand: enum {
     Draw,
 
-    impl Effect {}
+    impl Effect {
+        access: fn(self) -> EffectAccess { .Reads }
+    }
 }
 
 Env: struct {
-    impl Effect {}
+    impl Effect {
+        access: fn(self) -> EffectAccess { .Replaces }
+    }
 }
 
 Exec: enum {
@@ -58,12 +68,15 @@ Exec: enum {
     Args,
 
     impl Effect {
-        irreversible: fn(self) -> Bool { true }
+        irreversible: fn(self) -> Bool { self == .Exit }
+        access: fn(self) -> EffectAccess { if self == .Exit -> .Replaces else -> .Reads }
     }
 }
 
 GPU: struct {
-    impl Effect {}
+    impl Effect {
+        access: fn(self) -> EffectAccess { .Reads }
+    }
 }
 
 // The foreign languages: a call into one has that language's leaf. This is
@@ -98,15 +111,20 @@ FFI: enum {
 
     impl Effect {
         irreversible: fn(self) -> Bool { true }
+        access: fn(self) -> EffectAccess { .Replaces }
     }
 }
 
 Browser: struct {
-    impl Effect {}
+    impl Effect {
+        access: fn(self) -> EffectAccess { .Replaces }
+    }
 }
 
 Panic: struct {
-    impl Effect {}
+    impl Effect {
+        access: fn(self) -> EffectAccess { .Reads }
+    }
 }
 
 // Hidden memory costs: allocation, reference counting, stack use and
@@ -119,7 +137,9 @@ Mem: enum {
     Stack,
     Gc,
 
-    impl Effect {}
+    impl Effect {
+        access: fn(self) -> EffectAccess { .Reads }
+    }
 }
 
 // Reaching `#Unsafe` code: a function that opens an `#Unsafe` gate (a block,
@@ -128,5 +148,7 @@ Mem: enum {
 // Core reaches none. `-[!Unsafe]>`, a cap's `!Unsafe` or a policy's
 // `deny: [Unsafe]` refuses every such path.
 Unsafe: struct {
-    impl Effect {}
+    impl Effect {
+        access: fn(self) -> EffectAccess { .Reads }
+    }
 }
