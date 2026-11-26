@@ -2141,7 +2141,7 @@ sema_expression_checked_text_literal: fn(head: Type, source_head: Type?, body: T
         }
         types: sema_expression_checked_text_result_types(checked.ty) ?? return SemaExpressionCheckedTextLiteral{handled: true, value: None}
         hole_count: if building -> holes.len() else -> 0
-        shape: sema_expression_checked_text_landed(type_name, landed.value, hole_count, span, check) ?? return SemaExpressionCheckedTextLiteral{handled: true, value: None}
+        shape: sema_expression_checked_text_landed(type_name, landed.value, hole_count, body_value, span, check) ?? return SemaExpressionCheckedTextLiteral{handled: true, value: None}
         if !building -> return sema_expression_checked_text_distinct(head, checked, span, expected, check)
         if sema_expression_checked_text_refused(type_name, target, holes, shape.slots, Val(types[1]), owner_key, span, check) {
             return SemaExpressionCheckedTextLiteral{handled: true, value: None}
@@ -2282,11 +2282,14 @@ SemaExpressionCheckedTextShape: struct {
 }
 
 // The landed value of a literal's staged check: a rejection is E2712 at the
-// literal, with the reason the error gives; an accepted `Checked` record
-// gives its shape and its slots, one per hole.
-sema_expression_checked_text_landed: fn(type_name: String, value: TComptimeValue, hole_count: Int, span: Span, check: ^SemaBodyCheck) -> SemaExpressionCheckedTextShape? {
+// spot of the quoted body `literal` its error points at
+// (sema_checked_text_spot_span), else at the literal, with the reason the
+// error gives; an accepted `Checked` record gives its shape and its slots,
+// one per hole.
+sema_expression_checked_text_landed: fn(type_name: String, value: TComptimeValue, hole_count: Int, literal: Expr, span: Span, check: ^SemaBodyCheck) -> SemaExpressionCheckedTextShape? {
     if value == .Failed(report) {
-        check.diagnostics.push(sema_error("E2712", span, SEMA_CHECKED_TEXT_REJECTED_WHAT, sema_checked_text_reason(report) ?? SEMA_CHECKED_TEXT_REJECTED_WHY, SEMA_CHECKED_TEXT_REJECTED_FIX))
+        at: sema_checked_text_spot_span(check.program.registration_graph, check.environment.module_identity, literal, report) ?? span
+        check.diagnostics.push(sema_error("E2712", at, SEMA_CHECKED_TEXT_REJECTED_WHAT, sema_checked_text_reason(report) ?? SEMA_CHECKED_TEXT_REJECTED_WHY, SEMA_CHECKED_TEXT_REJECTED_FIX))
         return None
     }
     ^shape: TComptimeValue?{None}
@@ -2314,6 +2317,172 @@ sema_expression_checked_text_landed: fn(type_name: String, value: TComptimeValue
         return None
     }
     Val(SemaExpressionCheckedTextShape{shape: found_shape, slots: found_slots})
+}
+
+// A spot a check's error names in its literal: the body part it is in (0
+// for the first) and the byte offset inside that part's text.
+SemaCheckedTextSpot: struct {
+    part: Int,
+    offset: Int,
+}
+
+// The source span a check's refusal `report` points at in its literal: the
+// error's `at: TextSpot` (core.grammar), read through the written body of
+// `literal` (`Type{"…"}`, or its quoted body) the way the lexer reads a
+// typed head's body. None when the error names no spot, the module's
+// source is not the text its spans index, or the spot is not in the
+// written text: a text kind's one part is its joined text, whose offsets
+// past its first hole count encoded hole text.
+sema_checked_text_spot_span: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, literal: Expr, report: TComptimeReport) -> Span? {
+    spot: sema_checked_text_spot(report) ?? return None
+    ^hole_ends: [Int]{}
+    body: sema_checked_text_quoted_body(literal, hole_ends) ?? return None
+    row: sema_registration_module_index(graph, module_identity) ?? return None
+    source_row: sema_span_source_row(graph, row)
+    if source_row < 0 -> return None
+    sema_checked_text_spot_at(graph.modules[source_row].source.bytes(), body, hole_ends, spot)
+}
+
+// The span of the quoted body of `literal`, with the end of each hole's
+// value pushed to `hole_ends`.
+sema_checked_text_quoted_body: fn(literal: Expr, hole_ends: ^[Int]) -> Span? Never! {
+    if literal == .TypedLit(_, written, _, _) && written == .Value(value) -> return sema_checked_text_quoted_body(value, hole_ends)
+    if literal == .Str(parts, span, _) {
+        loop part in parts {
+            if part == .Interp(value, _) -> hole_ends.push(expr_span(value).end)
+        }
+        return Val(span)
+    }
+    None
+}
+
+// The `at: TextSpot` of the error a refusal carries.
+sema_checked_text_spot: fn(report: TComptimeReport) -> SemaCheckedTextSpot? Never! {
+    if report == .Told(error) && error == .Struct(_, fields) {
+        loop field in fields {
+            if field.name != "at" -> next
+            if field.value == .Struct(spot_type, spot_fields) && (spot_type == "TextSpot" || spot_type.ends_with(".TextSpot")) {
+                ^part: -1
+                ^offset: -1
+                loop spot_field in spot_fields {
+                    if spot_field.name == "part" && spot_field.value == .Int(value) -> part = value
+                    if spot_field.name == "offset" && spot_field.value == .Int(value) -> offset = value
+                }
+                if part >= 0 && offset >= 0 -> return Val(SemaCheckedTextSpot{part: part, offset: offset})
+            }
+        }
+    }
+    None
+}
+
+// Byte `at` of `bytes`, -1 past either end.
+sema_checked_text_byte: fn(bytes: [U8], at: Int) -> Int Never! {
+    if at < 0 || at >= bytes.len() -> return -1
+    Int{bytes[at]}
+}
+
+// The span of `spot` in the quoted body written at `body` of `bytes`, whose
+// holes end where `hole_ends` say. It reads the body as the lexer reads a
+// typed head's (decode_string, decode_string_content): a triple-quoted
+// body drops its opening and closing lines and the closing line's indent
+// from each line, `{{` and `}}` are one brace, a backslash stays as
+// written, a `\${…}` payload is copied byte for byte, and a hole ends one
+// part, the next starting after its `}`.
+sema_checked_text_spot_at: fn(bytes: [U8], body: Span, hole_ends: [Int], spot: SemaCheckedTextSpot) -> Span? Never! {
+    if body.end > bytes.len() || body.end - body.start < 2 || sema_checked_text_byte(bytes, body.start) != 34 -> return None
+    triple: body.end - body.start >= 6 && sema_checked_text_byte(bytes, body.start + 1) == 34 && sema_checked_text_byte(bytes, body.start + 2) == 34
+    ^content_start: body.start + 1
+    ^content_end: body.end - 1
+    ^indent: 0
+    if triple {
+        open_end: body.start + 3
+        close: body.end - 3
+        ^close_line_start: close
+        loop close_line_start > open_end && sema_checked_text_byte(bytes, close_line_start - 1) != 10 -> close_line_start -= 1
+        ^only_indent: true
+        loop at in close_line_start..<close {
+            if sema_checked_text_byte(bytes, at) != 32 && sema_checked_text_byte(bytes, at) != 9 -> only_indent = false
+        }
+        if only_indent -> indent = close - close_line_start
+        content_start = open_end
+        ^line_end: open_end
+        loop line_end < close && sema_checked_text_byte(bytes, line_end) != 10 -> line_end += 1
+        if line_end < close -> content_start = line_end + 1
+        content_end = close_line_start
+        if content_end > content_start && sema_checked_text_byte(bytes, content_end - 1) == 10 -> content_end -= 1
+        if content_end < content_start -> content_end = content_start
+    }
+    ^cursor: content_start
+    ^at_line_start: triple
+    ^part: 0
+    ^offset: 0
+    ^hole: 0
+    ^payload: 0
+    loop cursor < content_end {
+        if at_line_start {
+            ^stripped: 0
+            loop stripped < indent && cursor < content_end && (sema_checked_text_byte(bytes, cursor) == 32 || sema_checked_text_byte(bytes, cursor) == 9) {
+                cursor += 1
+                stripped += 1
+            }
+            at_line_start = false
+            if cursor >= content_end -> break
+        }
+        if part == spot.part && offset == spot.offset -> return Val(sema_checked_text_spot_char(bytes, cursor, body.end))
+        value: sema_checked_text_byte(bytes, cursor)
+        following: sema_checked_text_byte(bytes, cursor + 1)
+        ^text_width: 1
+        ^source_width: 1
+        if {
+            payload > 0 -> {
+                if value == 123 -> payload += 1
+                if value == 125 -> payload -= 1
+            }
+            value == 10 -> {
+                if triple -> at_line_start = true
+            }
+            value == 92 && (following == 34 || following == 92) -> {
+                text_width = 2
+                source_width = 2
+            }
+            (value == 123 || value == 125) && following == value -> {
+                source_width = 2
+            }
+            value == 123 && sema_checked_text_byte(bytes, cursor - 1) == 36 && sema_checked_text_byte(bytes, cursor - 2) == 92 -> {
+                payload = 1
+            }
+            value == 123 -> {
+                if hole >= hole_ends.len() -> return None
+                ^close: hole_ends[hole]
+                loop close < content_end && sema_checked_text_byte(bytes, close) != 125 -> close += 1
+                hole += 1
+                part += 1
+                offset = 0
+                cursor = close + 1
+                next
+            }
+            else -> {}
+        }
+        if part == spot.part && spot.offset > offset && spot.offset < offset + text_width {
+            return Val(sema_checked_text_spot_char(bytes, cursor + spot.offset - offset, body.end))
+        }
+        offset += text_width
+        cursor += source_width
+    }
+    if part == spot.part && offset == spot.offset -> return Val(sema_checked_text_spot_char(bytes, cursor, body.end))
+    None
+}
+
+// The one character of `bytes` at `at` as a span, no further than `end`.
+sema_checked_text_spot_char: fn(bytes: [U8], at: Int, end: Int) -> Span Never! {
+    lead: sema_checked_text_byte(bytes, at)
+    width: if {
+        lead >= 240 -> 4
+        lead >= 224 -> 3
+        lead >= 192 -> 2
+        else -> 1
+    }
+    Span{start: at, end: if at + width > end -> end else -> at + width}
 }
 
 // `accepts`, when the literal's type declares it, judges each hole while

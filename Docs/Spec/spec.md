@@ -109,9 +109,12 @@ vocabulary](vocabulary.md).
   before the program runs and embedded as constant data, and `slots[i]` the
   kind of position hole `i` sits in. `Shape` defaults to `[String]` and
   `Slot` to `TextSlot`. The check always runs, even for an `Error: Never`
-  type, and a failure is E2712. A `distinct String` type's literal is the
-  joined text, with each hole passed through `encode_hole(value, slot)`, and
-  its `check` sees that one text. A type that binds `Hole: T` and declares
+  type, and a failure is E2712, at the line and column of the literal its
+  error names with an `at: TextSpot` field (`TextSpot{part, offset}`, the
+  byte offset in part `part`), else at the literal. A `distinct String`
+  type's literal is the joined text, with each hole passed through
+  `encode_hole(value, slot)`, and its `check` sees that one text. A type
+  that binds `Hole: T` and declares
   `build: fn(shape: Shape, holes: [Hole]) -[]> Owner` keeps its holes as
   values: `Owner{"a {x} b"}` is `Owner.build(shape,
   [Owner.encode_hole(x, slots[0])])` with the shape and slots `check`

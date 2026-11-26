@@ -88,6 +88,7 @@ use {
         sema_comptime_available_version,
         sema_comptime_body_work_flush,
         sema_checked_text_reason,
+        sema_checked_text_spot_span,
         sema_comptime_checked_text_source,
         sema_comptime_key_set_add,
         sema_comptime_key_set_has,
@@ -3349,7 +3350,8 @@ jet_driver_comptime_flush: fn(
                     return flushed
                 }
                 why: sema_checked_text_reason(report) ?? SEMA_CHECKED_TEXT_REJECTED_WHY
-                diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, source.module_identity, evaluation.code, evaluation.span, evaluation.what, why, evaluation.fix))
+                at: sema_checked_text_spot_span(graph, source.module_identity, evaluation.source_expression, report) ?? evaluation.span
+                diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, source.module_identity, evaluation.code, at, evaluation.what, why, evaluation.fix))
                 flushed.stop = Val(jet_driver_comptime_run_result(values, checked_functions, trace, false, false))
                 return flushed
             }
