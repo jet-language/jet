@@ -55,35 +55,35 @@ run: fn() {
     ^tree: service.tree("workers")
     events: tree.worker("events", record_event, capacity: 8) ?? panic("events worker")
     doubler: tree.worker("doubler", double, capacity: 8) ?? panic("doubler worker")
-    counter: tree.worker("counter", accumulate, state: 100, capacity: 8) ?? panic("counter worker")
-    bulk: tree.worker("bulk", flush_batch, batch: 2, wait: 20ms, capacity: 8) ?? panic("bulk worker")
+    counter: tree.stateful_worker("counter", accumulate, state: 100, capacity: 8) ?? panic("counter worker")
+    bulk: tree.batched_worker("bulk", flush_batch, batch: 2, wait: 20ms, capacity: 8) ?? panic("bulk worker")
     tree.start() ?? panic("start")
 
     seen: Shared<[String]>{[String]{}}
     events_done: tasks.Semaphore.new(0)
-    tree.send(events, EventMsg{ev: Event.Opened(1), log: seen, done: events_done}) ?? panic("send open")
-    tree.send(events, EventMsg{ev: Event.Closed(1), log: seen, done: events_done}) ?? panic("send close")
+    events.send(EventMsg{ev: Event.Opened(1), log: seen, done: events_done}) ?? panic("send open")
+    events.send(EventMsg{ev: Event.Closed(1), log: seen, done: events_done}) ?? panic("send close")
     _: events_done.acquire()
     _: events_done.acquire()
     event_log: seen.guard_read()
     print("events: {event_log.value.join(", ")}")
 
-    print("call double: {tree.call(doubler, 21) ?? panic("double")}")
+    print("call double: {doubler.call(21) ?? panic("double")}")
 
-    print("state 1: {tree.call(counter, 5) ?? panic("state 1")}")
-    print("state 2: {tree.call(counter, 10) ?? panic("state 2")}")
-    if tree.call(counter, -1) == {
+    print("state 1: {counter.call(5) ?? panic("state 1")}")
+    print("state 2: {counter.call(10) ?? panic("state 2")}")
+    if counter.call(-1) == {
         .Err(ServiceError.Ambiguous(_)) -> print("state fail: Ambiguous")
         .Err(other) -> print("state fail: {other:Debug}")
         .Ok(v) -> print("unexpected ok: {v}")
     }
-    print("state reset: {tree.call(counter, 1) ?? panic("state reset")}")
+    print("state reset: {counter.call(1) ?? panic("state reset")}")
 
     batch_sizes: Shared<[Int]>{[Int]{}}
     batches_done: tasks.Semaphore.new(0)
-    tree.send(bulk, BatchItem{value: 1, sizes: batch_sizes, done: batches_done}) ?? panic("bulk 1")
-    tree.send(bulk, BatchItem{value: 2, sizes: batch_sizes, done: batches_done}) ?? panic("bulk 2")
-    tree.send(bulk, BatchItem{value: 3, sizes: batch_sizes, done: batches_done}) ?? panic("bulk 3")
+    bulk.send(BatchItem{value: 1, sizes: batch_sizes, done: batches_done}) ?? panic("bulk 1")
+    bulk.send(BatchItem{value: 2, sizes: batch_sizes, done: batches_done}) ?? panic("bulk 2")
+    bulk.send(BatchItem{value: 3, sizes: batch_sizes, done: batches_done}) ?? panic("bulk 3")
     _: batches_done.acquire()
     _: batches_done.acquire()
     sizes: batch_sizes.guard_read()

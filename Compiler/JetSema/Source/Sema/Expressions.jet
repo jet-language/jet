@@ -4537,11 +4537,6 @@ sema_expr_try_method_special_routes: fn(receiver: Expr, receiver_value: TExpr, m
     ^compiler_value: sema_call_try_compiler_value_method(receiver, receiver_value, method, args, span, expected, check)
     if compiler_value.handled -> return compiler_value
 
-    ^tree: sema_check_service_tree_method(method, receiver, receiver_value, args, expected, span, check)
-    if tree == .Val(tree_check) {
-        if tree_check.handled -> return tree_check
-    }
-
     ^reactive: sema_call_try_reactive_handle_method(receiver, receiver_value, method, args, span, expected, check)
     if reactive.handled -> return reactive
     ^event_handle: sema_call_try_event_handle_method(receiver, receiver_value, method, args, span, expected, check)
@@ -4993,11 +4988,6 @@ sema_expr_check_method_on: fn(receiver: Expr, receiver_value: TExpr, method: Str
     // and holds `b.compiler` to the root build, ahead of the declared check.
     build: sema_call_try_build_context_method(receiver, receiver_value, method, args, method_span, expected, check)
     if build.handled -> return build.value
-    // Core declares ServiceTree's `send` and `send_durable` over a String
-    // ServiceEndpoint; a typed Endpoint<Q, R> sends, calls and sends durably
-    // at its own Q and R ahead of the declared check.
-    typed_delivery: sema_services_typed_delivery(method, receiver, receiver_value.ty, args, expected, method_span, check)
-    if typed_delivery == .Val(delivery) -> return delivery.value
     // A declared nominal owns the methods it declares, even when its leaf
     // spells a builtin carrier such as Core's `URL` or `MIME`; builtin handle
     // routes apply only when no declared method matches.

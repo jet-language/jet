@@ -12,7 +12,7 @@ run: fn() {
     store_path: Path.from(temp).join("delivery.state").to_string()
     store: services.state_store(store_path) ?? panic("state store")
     tree.set_state_event_log(store, "delivery-events", 1, "reversible") ?? panic("state")
-    worker: tree.worker("worker", failure_worker, capacity: 1) ?? panic("worker")
+    worker: tree.mailbox_worker("worker", failure_worker, capacity: 1) ?? panic("worker")
     tree.start() ?? panic("start")
 
     first: tree.send_durable(worker, "first", key: "k1") ?? panic("first")

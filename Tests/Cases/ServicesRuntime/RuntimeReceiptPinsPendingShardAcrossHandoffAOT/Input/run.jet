@@ -27,7 +27,7 @@ run: fn() {
     retention: Duration.seconds(86400) ?? panic("retention")
     ^runtime: service.runtime(store, retention: retention)
     ^tree: service.tree("runtime-handoff-pending")
-    endpoint: tree.worker("api", worker, capacity: 1) ?? panic("worker")
+    endpoint: tree.mailbox_worker("api", worker, capacity: 1) ?? panic("worker")
     tree.start() ?? panic("start")
 
     receipt: runtime.send(endpoint, "pending", key: "pending") ?? panic("send")

@@ -30,7 +30,7 @@ run: fn() {
     tree.set_delivery(service.delivery_durable()) ?? panic("delivery")
     state: service.state_store(state_path) ?? panic("state store")
     tree.set_state_event_log(state, "lifecycle-events", 1, "reversible") ?? panic("state")
-    endpoint: tree.worker("api", worker, capacity: 2) ?? panic("worker")
+    endpoint: tree.mailbox_worker("api", worker, capacity: 2) ?? panic("worker")
     tree.start() ?? panic("start")
 
     accepted: runtime.send(endpoint, "accepted", key: "same") ?? panic("accept")
@@ -117,7 +117,7 @@ run: fn() {
     print("partition_done:{recovered_state_done}:{recovered_events.len()}")
 
     ^foreign: service.tree("foreign")
-    foreign_endpoint: foreign.worker("api", worker, capacity: 1) ?? panic("foreign worker")
+    foreign_endpoint: foreign.mailbox_worker("api", worker, capacity: 1) ?? panic("foreign worker")
     foreign.start() ?? panic("foreign start")
     if tree.send_durable(foreign_endpoint, "revoked", key: "revoked") == {
         .Ok(delivery) -> {

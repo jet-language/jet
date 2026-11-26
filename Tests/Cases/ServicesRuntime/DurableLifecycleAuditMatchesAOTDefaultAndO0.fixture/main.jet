@@ -29,7 +29,7 @@ run: fn() {
     tree.set_delivery(service.delivery_durable()) ?? panic("delivery")
     state: service.state_store(state_path) ?? panic("state")
     tree.set_state_event_log(state, "audit-events", 1, "reversible") ?? panic("state adapter")
-    endpoint: tree.worker("worker", worker, capacity: 2) ?? panic("worker")
+    endpoint: tree.mailbox_worker("worker", worker, capacity: 2) ?? panic("worker")
     tree.start() ?? panic("start")
 
     accepted: runtime.send(endpoint, "accepted", key: "accepted") ?? panic("accepted")

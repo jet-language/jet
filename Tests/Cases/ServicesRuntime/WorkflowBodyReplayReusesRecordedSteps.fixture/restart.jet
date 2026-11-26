@@ -11,7 +11,7 @@ run: fn() {
     ^tree: services.tree("workflow-replay")
     store: services.state_store(store_path) ?? panic("state store")
     tree.set_state_event_log(store, "workflow-events", 1, "reversible") ?? panic("state")
-    tree.worker("worker", replay_worker, capacity: 1) ?? panic("worker")
+    tree.mailbox_worker("worker", replay_worker, capacity: 1) ?? panic("worker")
     tree.start() ?? panic("start")
     if phase == "mismatch" {
         run_id: tree.workflow_start("checkout", 1) ?? panic("workflow")

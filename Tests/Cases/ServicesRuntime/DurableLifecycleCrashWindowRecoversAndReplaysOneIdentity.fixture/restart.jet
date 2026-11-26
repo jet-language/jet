@@ -27,7 +27,7 @@ run: fn() {
     state_store: service.state_store(store) ?? panic("state")
     tree.set_state_event_log(state_store, "events", 1, "reversible") ?? panic("state adapter")
     tree.set_delivery(service.delivery_durable()) ?? panic("delivery")
-    endpoint: tree.worker("api", worker, capacity: 1) ?? panic("worker")
+    endpoint: tree.mailbox_worker("api", worker, capacity: 1) ?? panic("worker")
     tree.start() ?? panic("start")
 
     if phase == "accept" {
