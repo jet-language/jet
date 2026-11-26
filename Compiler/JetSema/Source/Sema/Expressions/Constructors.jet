@@ -2055,28 +2055,26 @@ sema_expression_checked_text_literal: fn(head: Type, source_head: Type?, body: T
     }
     // The literal's pieces, the text between its holes (one more than the
     // holes), and its holes.
-    ^pieces: [String]{}
     ^holes: [Expr]{}
-    ^current: ""
-    loop part in parts {
-        if part == {
-            .Lit(text) -> { current = "{current}{text}" }
-            .Byte(value) -> { current = "{current}{sema_expr_byte_text(value)}" }
-            .Interp(value, _) -> {
-                pieces.push(current.copy())
-                current = ""
-                holes.push(value.copy())
-            }
-        }
-    }
-    pieces.push(current)
     body_span: expr_span(body_value)
     // A type with `build` checks the pieces, since its holes stay values. A
     // text kind checks its complete text, each hole encoded in the one
     // `TextSlot`, as its one part.
     ^check_parts: [Expr]{}
     if building {
-        loop piece in pieces -> check_parts.push(sema_expression_checked_text_piece(piece, body_span))
+        ^current: ""
+        loop part in parts {
+            if part == {
+                .Lit(text) -> { current = "{current}{text}" }
+                .Byte(value) -> { current = "{current}{sema_expr_byte_text(value)}" }
+                .Interp(value, _) -> {
+                    check_parts.push(sema_expression_checked_text_piece(current.move(), body_span))
+                    current = ""
+                    holes.push(value.copy())
+                }
+            }
+        }
+        check_parts.push(sema_expression_checked_text_piece(current.move(), body_span))
     } else {
         ^encoded_parts: [StrPart]{}
         loop part in parts {
@@ -2084,13 +2082,14 @@ sema_expression_checked_text_literal: fn(head: Type, source_head: Type?, body: T
                 .Lit(_) -> { encoded_parts.push(part) }
                 .Byte(value) -> { encoded_parts.push(StrPart.Lit{text: sema_expr_byte_text(value)}) }
                 .Interp(value, _) -> {
+                    holes.push(value.copy())
                     encoded_parts.push(StrPart.Interp{expr: sema_expression_checked_text_encoder(type_name, value, sema_expression_checked_text_text_slot(expr_span(value))), format: None})
                 }
             }
         }
         check_parts.push(Expr.Str{parts: encoded_parts, span: body_span, id: AST_NODE_GENERATED})
     }
-    check_call: sema_expression_checked_text_check_call(type_name, check_parts, span)
+    check_call: sema_expression_checked_text_check_call(type_name, check_parts.move(), span)
     runtime_owner: sema_expr_runtime_body_owner(check)
     ^fact_start: check.context.call_facts.len()
     ^reference_start: check.context.name_references.len()
@@ -2136,7 +2135,7 @@ sema_expression_checked_text_literal: fn(head: Type, source_head: Type?, body: T
         }
         types: sema_expression_checked_text_result_types(checked.ty) ?? return SemaExpressionCheckedTextLiteral{handled: true, value: None}
         hole_count: if building -> holes.len() else -> 0
-        shape: sema_expression_checked_text_landed(type_name, landed.value, checked.ty, hole_count, body_value, span, check) ?? return SemaExpressionCheckedTextLiteral{handled: true, value: None}
+        shape: sema_expression_checked_text_landed(type_name, landed.value.move(), checked.ty, hole_count, body_value, span, check) ?? return SemaExpressionCheckedTextLiteral{handled: true, value: None}
         if !building -> return sema_expression_checked_text_distinct(head, checked, span, expected, check)
         if sema_expression_checked_text_refused(type_name, target, holes, shape.slots, Val(types[1]), owner_key, span, check) {
             return SemaExpressionCheckedTextLiteral{handled: true, value: None}
@@ -2288,20 +2287,29 @@ sema_checked_text_item_report: fn(graph: SemaRegistrationGraph, module_identity:
     if item == .Enum(_, variant, args) && args.len() == 1 {
         loop case in cases {
             if case.variant == variant {
-                return sema_checked_text_item_report(graph, module_identity, Val(case.report.copy()), [SemaCheckedTextCaseReport]{}, literal, args[0].value, span, code, what, fix)
+                return sema_checked_text_item_report_with_derive(graph, module_identity, case.report, literal, args[0].value, span, code, what, fix)
             }
         }
     }
+    if diagnostic == .Val(found) {
+        return sema_checked_text_item_report_with_derive(graph, module_identity, found, literal, item, span, code, what, fix)
+    }
     at: sema_checked_text_spot_span(graph, module_identity, literal, item) ?? span
-    if diagnostic == .Val(found) && sema_user_template_ct_value(item) == .Val(value) {
+    if item == .String(text) -> return sema_error(code, at, what, text, fix)
+    sema_error(code, at, what, SEMA_CHECKED_TEXT_REJECTED_WHY, fix)
+}
+
+sema_checked_text_item_report_with_derive: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, found: SemaDeriveReport, literal: Expr, item: TComptimeValue, span: Span, code: String, what: String, fix: String) -> Diagnostic Never! {
+    at: sema_checked_text_spot_span(graph, module_identity, literal, item) ?? span
+    if sema_user_template_ct_value(item) == .Val(value) {
         ^texts: [String]{}
         loop name in ([String]{"what", "why", "fix"}) {
             if sema_derive_report_text(found.definition, name, value) == .Val(text) -> texts.push(text)
         }
         if texts.len() == 3 -> return sema_derive_report_diagnostic(found, at, texts)
     }
-    why: if item == .String(text) -> text.copy() else -> SEMA_CHECKED_TEXT_REJECTED_WHY
-    sema_error(code, at, what, why, fix)
+    if item == .String(text) -> return sema_error(code, at, what, text, fix)
+    sema_error(code, at, what, SEMA_CHECKED_TEXT_REJECTED_WHY, fix)
 }
 
 // The `Shape` and `Slot` of a check's `Checked<Shape, Slot> Error!` result,
@@ -2325,7 +2333,7 @@ SemaExpressionCheckedTextShape: struct {
 // its error gives (sema_checked_text_reports); an accepted `Checked` record
 // gives its shape and its slots, one per hole. `result` is the check's
 // Result type and `literal` the literal's quoted body.
-sema_expression_checked_text_landed: fn(type_name: String, value: TComptimeValue, result: Type, hole_count: Int, literal: Expr, span: Span, check: ^SemaBodyCheck) -> SemaExpressionCheckedTextShape? {
+sema_expression_checked_text_landed: fn(type_name: String, value: ^^TComptimeValue, result: Type, hole_count: Int, literal: Expr, span: Span, check: ^SemaBodyCheck) -> SemaExpressionCheckedTextShape? {
     if value == .Failed(report) {
         check.diagnostics.extend(sema_checked_text_reports(check.program.registration_graph, check.environment.module_identity, result, literal, report, span, "E2712", SEMA_CHECKED_TEXT_REJECTED_WHAT, SEMA_CHECKED_TEXT_REJECTED_FIX))
         return None
@@ -2333,12 +2341,17 @@ sema_expression_checked_text_landed: fn(type_name: String, value: TComptimeValue
     ^shape: TComptimeValue?{None}
     ^slots: [TComptimeValue]?{None}
     // An accepted check's `Ok` lands as `.Present`.
-    accepted: if value == .Present(inner) -> inner.copy() else -> value.copy()
+    accepted: if value == {
+        .Present(inner) -> inner
+        .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Failed(_) | .Unit | .Function(_) -> value
+    }
     if accepted == .Struct(_, fields) {
-        loop field in fields {
-            if field.name == "shape" -> shape = Val(field.value.copy())
+        ^remaining: fields
+        loop remaining.len() > 0 {
+            field: remaining.pop() ?? break
+            if field.name == "shape" -> shape = Val(field.value)
             if field.name == "slots" {
-                if field.value == .List(values) -> slots = Val(values.copy())
+                if field.value == .List(values) -> slots = Val(values)
             }
         }
     }
@@ -2700,21 +2713,21 @@ sema_expression_checked_text_checked_ref: fn(span: Span) -> Expr Never! {
 }
 
 // `Type.check([part, …])`.
-sema_expression_checked_text_check_call: fn(type_name: String, parts: [Expr], span: Span) -> Expr Never! {
+sema_expression_checked_text_check_call: fn(type_name: String, parts: ^^[Expr], span: Span) -> Expr Never! {
     Expr.MethodCall{
         receiver: Expr.Ident{name: type_name, span: span, id: AST_NODE_GENERATED},
         method: "check",
         method_span: span,
         owner_type_args: [Type]{},
         type_args: [Type]{},
-        args: [CallArg]{sema_expression_checked_text_parts_arg(parts, span)},
+        args: [CallArg]{sema_expression_checked_text_parts_arg(parts.move(), span)},
         id: AST_NODE_GENERATED,
     }
 }
 
 // The parts list `[part, …]` as one read argument.
-sema_expression_checked_text_parts_arg: fn(parts: [Expr], span: Span) -> CallArg Never! {
-    sema_expression_checked_text_arg(Expr.ListLit{elements: parts.copy(), span: span, id: AST_NODE_GENERATED}, span)
+sema_expression_checked_text_parts_arg: fn(parts: ^^[Expr], span: Span) -> CallArg Never! {
+    sema_expression_checked_text_arg(Expr.ListLit{elements: parts.move(), span: span, id: AST_NODE_GENERATED}, span)
 }
 
 sema_expression_checked_text_arg: fn(value: Expr, span: Span) -> CallArg Never! {
@@ -2722,8 +2735,8 @@ sema_expression_checked_text_arg: fn(value: Expr, span: Span) -> CallArg Never! 
 }
 
 // One literal piece as a String part.
-sema_expression_checked_text_piece: fn(text: String, span: Span) -> Expr Never! {
-    Expr.Str{parts: [StrPart]{StrPart.Lit{text: text.copy()}}, span: span, id: AST_NODE_GENERATED}
+sema_expression_checked_text_piece: fn(text: ^^String, span: Span) -> Expr Never! {
+    Expr.Str{parts: [StrPart]{StrPart.Lit{text: text.move()}}, span: span, id: AST_NODE_GENERATED}
 }
 
 // `.Text`, the one slot of a text kind's holes.
@@ -3019,29 +3032,37 @@ sema_expression_field_is_shorthand: fn(field: ExprField) -> Bool Never! {
 // conversion impl (`impl From(Float)` in its body, or `impl Celsius.From(Float)`
 // elsewhere), so the literal is `Celsius.from(x)`; a field shorthand
 // (`shorthand`) that names one of the type's fields stays a struct literal.
-sema_expression_conversion_head: fn(head: Type?, shorthand: String?, check: ^SemaBodyCheck) -> String? {
-    written: head ?? return None
+sema_expression_conversion_head: fn(head: Type?, shorthand: String?, check: ^SemaBodyCheck) -> Bool {
+    written: head ?? return false
     if sema_expr_unwrap_tag(written) == .Named(written_name) {
         graph: check.program.registration_graph
-        symbol: sema_expression_type_symbol(check.scopes, check.environment.*, check.program.*, written_name) ?? return None
-        row: sema_type_graph_nominal_row(graph, symbol.id) ?? return None
+        symbol: sema_expression_type_symbol(check.scopes, check.environment.*, check.program.*, written_name) ?? return false
+        row: sema_type_graph_nominal_row(graph, symbol.id) ?? return false
         nominal: graph.modules[row.module_index].nominals[row.row]
         if shorthand == .Val(field_name) {
             loop field in nominal.fields {
-                if field.symbol.name == field_name -> return None
+                if field.symbol.name == field_name -> return false
             }
         }
         if nominal.source == .SourceAST(item) {
-            if sema_expression_item_has_conversion_block(item) -> return Val(written_name.copy())
+            if sema_expression_item_has_conversion_block(item) -> return true
         }
         loop impl_row in sema_registration_impl_rows_named(graph, nominal.symbol.name) {
             implementation: graph.modules[impl_row.module_index].impls[impl_row.row]
             trait_name: implementation.trait_name ?? next
             if !owned_trait_conversion(trait_name) -> next
             if implementation.target_identity_key == nominal.identity_key || (!module_is_none(implementation.target_module_identity) && implementation.target_module_identity == nominal.symbol.module_identity && implementation.target_type_name == nominal.symbol.name) {
-                return Val(written_name.copy())
+                return true
             }
         }
+    }
+    false
+}
+
+sema_expression_conversion_for_head: fn(head: Type?, value: Expr, span: Span, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
+    written: head ?? return None
+    if sema_expr_unwrap_tag(written) == .Named(written_name) {
+        return sema_expression_conversion(written_name, value, span, expected, check)
     }
     None
 }
@@ -3060,11 +3081,16 @@ sema_expression_item_has_conversion_block: fn(item: Item) -> Bool Never! {
 // which picks the impl by the type of `x`.
 sema_expression_conversion: fn(written_name: String, value: Expr, span: Span, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
     ^receiver: Expr?{None}
-    loop part in written_name.split(".") {
+    bytes: written_name.bytes()
+    ^segment_start: 0
+    loop index in 0..<(bytes.len() + 1) {
+        if index < bytes.len() && (Int{bytes[index]}) != 46 -> next
+        part: foundation_byte_text(bytes, segment_start, index)
         receiver = if receiver == {
-            .Val(base) -> Val(Expr.Field{base: base, member: part.copy(), span: span, id: AST_NODE_GENERATED})
-            .None -> Val(Expr.Ident{name: part.copy(), span: span, id: AST_NODE_GENERATED})
+            .Val(base) -> Val(Expr.Field{base: base, member: part, span: span, id: AST_NODE_GENERATED})
+            .None -> Val(Expr.Ident{name: part, span: span, id: AST_NODE_GENERATED})
         }
+        segment_start = index + 1
     }
     owner: receiver ?? return None
     argument: CallArg{convention: AccessConvention.Read, expr: value.copy(), span: expr_span(value), flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}
@@ -3072,21 +3098,12 @@ sema_expression_conversion: fn(written_name: String, value: Expr, span: Span, ex
     sema_check_expression(call, expected, check)
 }
 
-// The one value of `Float{c}` when a conversion into the built-in head
-// (`impl Float.From(Celsius)`) takes that value's type as its source; the
+// Whether `Float{c}` has a conversion into the built-in head
+// (`impl Float.From(Celsius)`) that takes `value`'s type as its source; the
 // value is probed, so its diagnostics and moves come from the call it becomes.
-sema_expression_builtin_conversion_value: fn(head: Type, body: TypedLitBody, check: ^SemaBodyCheck) -> Expr? {
-    value: if body == {
-        .Value(written) -> written
-        .Elements(elements) -> if elements.len() == 1 -> elements[0] else -> {
-            return None
-        }
-        .Fields(_) | .Entries(_) | .ByteText(_) | .Empty -> {
-            return None
-        }
-    }
+sema_expression_has_builtin_conversion: fn(head: Type, value: Expr, check: ^SemaBodyCheck) -> Bool {
     head_name: type_name(head)
-    if sema_registration_builtin_scalar(head_name) == None -> return None
+    if sema_registration_builtin_scalar(head_name) == None -> return false
     graph: check.program.registration_graph
     sources: loop impl_row in sema_registration_impl_rows_named(graph, head_name) -> {
         implementation: graph.modules[impl_row.module_index].impls[impl_row.row]
@@ -3097,11 +3114,10 @@ sema_expression_builtin_conversion_value: fn(head: Type, body: TypedLitBody, che
         source: implementation.declaration.operator_rhs ?? next
         sema_expression_type_leaf(type_name(source))
     }
-    if sources.len() == 0 -> return None
+    if sources.len() == 0 -> return false
     ^probe_diagnostics: [Diagnostic]{}
-    probed: sema_probe_expression(value, None, check, probe_diagnostics) ?? return None
-    if sources.contains(sema_expression_type_leaf(type_name(probed.ty))) -> return Val(value.copy())
-    None
+    probed: sema_probe_expression(value, None, check, probe_diagnostics) ?? return false
+    sources.contains(sema_expression_type_leaf(type_name(probed.ty)))
 }
 
 // The last segment of a written or resolved type name: `Celsius` for
@@ -3290,14 +3306,16 @@ sema_expression_typed_literal: fn(head: Type?, body: TypedLitBody, span: Span, e
                     // is its one-expression body (the parser reads `{n}` as a field
                     // shorthand before types are known) and reaches the E0753 conversion rule.
                     if fields.len() == 1 && sema_expression_field_is_shorthand(fields[0]) && sema_expr_distinct_facts(result_head, check) != None {
-                        // copy: `fields` is a payload of read parameter `body`, which keeps the original
-                        return sema_expression_typed_literal(head, TypedLitBody.Value{value: fields[0].value.copy()}, span, expected, check)
+                        if sema_expression_conversion_head(head, None, check) {
+                            return sema_expression_conversion_for_head(head, fields[0].value, span, expected, check)
+                        }
+                        return sema_expression_typed_literal_single_value(written_head, result_head, fields[0].value, word, true, span, expected, check)
                     }
                     // `Celsius{reading}` converts `reading` through `Celsius.From`
                     // when `reading` names no field of `Celsius`.
                     if fields.len() == 1 && sema_expression_field_is_shorthand(fields[0]) {
-                        if sema_expression_conversion_head(head, Val(fields[0].name), check) == .Val(written_name) {
-                            return sema_expression_conversion(written_name, fields[0].value, span, expected, check)
+                        if sema_expression_conversion_head(head, Val(fields[0].name), check) {
+                            return sema_expression_conversion_for_head(head, fields[0].value, span, expected, check)
                         }
                     }
                     checked: sema_expression_struct_literal(name, [Type]{}, fields, false, None, span, Val(result_head), check) ?? return None
@@ -3308,14 +3326,14 @@ sema_expression_typed_literal: fn(head: Type?, body: TypedLitBody, span: Span, e
                     return sema_expr_expected_owned(checked, expected, check.environment.*, check.program.*, check.diagnostics)
                 }
                 .Value(value) -> {
-                    if sema_expression_conversion_head(head, None, check) == .Val(written_name) {
-                        return sema_expression_conversion(written_name, value, span, expected, check)
+                    if sema_expression_conversion_head(head, None, check) {
+                        return sema_expression_conversion_for_head(head, value, span, expected, check)
                     }
                 }
                 .Elements(elements) -> {
                     if elements.len() == 1 {
-                        if sema_expression_conversion_head(head, None, check) == .Val(written_name) {
-                            return sema_expression_conversion(written_name, elements[0], span, expected, check)
+                        if sema_expression_conversion_head(head, None, check) {
+                            return sema_expression_conversion_for_head(head, elements[0], span, expected, check)
                         }
                     }
                 }
@@ -3351,106 +3369,24 @@ sema_expression_typed_literal: fn(head: Type?, body: TypedLitBody, span: Span, e
     }
 
     // `Float{c}` with `impl Float.From(Celsius)` is `Float.from(c)`.
-    if sema_expression_builtin_conversion_value(result_head, body, check) == .Val(source) {
-        return sema_expression_conversion(type_name(result_head), source, span, expected, check)
-    }
     if body == {
-        .Value(value) -> {
-            // The `Regex` head is the compile-checked pattern literal whether it is
-            // written (`Regex{…}`, which `use core.regex` may resolve to the
-            // source-owned record) or inferred from a Regex-typed slot (`{…}`).
-            if sema_expression_is_regex_head(result_head) || sema_expression_is_regex_head(written_head) {
-                return sema_expression_typed_literal_regex(value, span, expected, check)
+        .Value(source) -> {
+            if sema_expression_has_builtin_conversion(result_head, source, check) {
+                return sema_expression_conversion(type_name(result_head), source, span, expected, check)
             }
-            if word == .Val(name) {
-                if sema_expression_typed_literal_word_literal(name, result_head, value, check.diagnostics) {
-                    return None
-                }
-            }
-            ^distinct_literal: sema_expression_typed_literal_distinct_literal(result_head, value, span, expected, check)
-            if distinct_literal.handled -> return distinct_literal.value
-            checked: sema_check_expression(value, sema_expression_typed_literal_body_expected(value, result_head), check) ?? return None
-            if sema_expression_typed_literal_float_exact_applies(result_head, checked.ty) {
-                exact_line: sema_source_line_at(check.environment.source_segments, expr_span(value)) ?? 0
-                exact: sema_expression_typed_literal_float_exact(result_head, checked, value, word, exact_line, check.diagnostics) ?? return None
-                return sema_expr_expected_owned(exact, expected, check.environment.*, check.program.*, check.diagnostics)
-            }
-            if sema_expression_typed_literal_precise_source(result_head, checked.ty) == .Val(precise) {
-                exact: sema_expression_typed_literal_precise_int(precise, checked, word, expr_span(value), check.diagnostics) ?? return None
-                return sema_expr_expected_owned(exact, expected, check.environment.*, check.program.*, check.diagnostics)
-            }
-            if sema_expression_typed_literal_float_to_integer(result_head, checked.ty, checked.span, check.diagnostics) {
-                return None
-            }
-            ^converted: checked
-            value_span: expr_span(value)
-            ^line: sema_source_line_at(check.environment.source_segments, value_span) ?? 0
-            ^needs_conversion: sema_expression_typed_literal_needs_conversion(checked.ty, result_head)
-            if needs_conversion {
-                converted = sema_expr_numeric_literal_conversion(checked, result_head, value_span, line, check.diagnostics) ?? return None
-                outcome: sema_expr_narrow_outcome(word, check.context.arithmetic_policy)
-                if outcome != TNarrowOutcome.Stop && sema_expr_narrowing_with(converted, outcome, line) == .Val(narrowed) {
-                    return sema_expr_expected_owned(narrowed, expected, check.environment.*, check.program.*, check.diagnostics)
-                }
-            }
-            // `Millimeter{ 4meter }` converts another unit of the family.
-            if sema_expr_unit_implicit_applies(result_head, converted.ty, check) {
-                unit_value: sema_expr_unit_implicit_conversion(converted, result_head, check) ?? return None
-                return sema_expr_expected_owned(unit_value, expected, check.environment.*, check.program.*, check.diagnostics)
-            }
-            if sema_expression_typed_literal_distinct_mismatch(result_head, converted, check) {
-                return None
-            }
-            diagnostic_start: check.diagnostics.len()
-            typed: sema_expr_expected(converted, Val(result_head), check.environment.*, check.program.*, check.diagnostics) ?? {
-                sema_expression_typed_literal_text_mismatch(result_head, value, diagnostic_start, check.diagnostics)
-                return None
-            }
-            return sema_expr_expected_owned(typed, expected, check.environment.*, check.program.*, check.diagnostics)
         }
         .Elements(elements) -> {
+            if elements.len() == 1 && sema_expression_has_builtin_conversion(result_head, elements[0], check) {
+                return sema_expression_conversion(type_name(result_head), elements[0], span, expected, check)
+            }
+        }
+        .Fields(_) | .Entries(_) | .ByteText(_) | .Empty -> {}
+    }
+    if body == {
+        .Value(value) -> return sema_expression_typed_literal_single_value(written_head, result_head, value, word, true, span, expected, check)
+        .Elements(elements) -> {
             if elements.len() == 1 {
-                ^value: elements[0]
-                if word == .Val(name) {
-                    if sema_expression_typed_literal_word_literal(name, result_head, value, check.diagnostics) {
-                        return None
-                    }
-                }
-                ^distinct_literal: sema_expression_typed_literal_distinct_literal(result_head, value, span, expected, check)
-                if distinct_literal.handled -> return distinct_literal.value
-                checked: sema_check_expression(value, sema_expression_typed_literal_body_expected(value, result_head), check) ?? return None
-                if sema_expression_typed_literal_float_exact_applies(result_head, checked.ty) {
-                    exact_line: sema_source_line_at(check.environment.source_segments, expr_span(value)) ?? 0
-                    exact: sema_expression_typed_literal_float_exact(result_head, checked, value, word, exact_line, check.diagnostics) ?? return None
-                    return sema_expr_expected_owned(exact, expected, check.environment.*, check.program.*, check.diagnostics)
-                }
-                if sema_expression_typed_literal_precise_source(result_head, checked.ty) == .Val(precise) {
-                    exact: sema_expression_typed_literal_precise_int(precise, checked, word, expr_span(value), check.diagnostics) ?? return None
-                    return sema_expr_expected_owned(exact, expected, check.environment.*, check.program.*, check.diagnostics)
-                }
-                if sema_expression_typed_literal_float_to_integer(result_head, checked.ty, checked.span, check.diagnostics) {
-                    return None
-                }
-                ^converted: checked
-                value_span: expr_span(value)
-                ^line: sema_source_line_at(check.environment.source_segments, value_span) ?? 0
-                ^needs_conversion: sema_expression_typed_literal_needs_conversion(checked.ty, result_head)
-                if needs_conversion {
-                    converted = sema_expr_numeric_literal_conversion(checked, result_head, value_span, line, check.diagnostics) ?? return None
-                    outcome: sema_expr_narrow_outcome(word, check.context.arithmetic_policy)
-                    if outcome != TNarrowOutcome.Stop && sema_expr_narrowing_with(converted, outcome, line) == .Val(narrowed) {
-                        return sema_expr_expected_owned(narrowed, expected, check.environment.*, check.program.*, check.diagnostics)
-                    }
-                }
-                if sema_expression_typed_literal_distinct_mismatch(result_head, converted, check) {
-                    return None
-                }
-                diagnostic_start: check.diagnostics.len()
-                typed: sema_expr_expected(converted, Val(result_head), check.environment.*, check.program.*, check.diagnostics) ?? {
-                    sema_expression_typed_literal_text_mismatch(result_head, value, diagnostic_start, check.diagnostics)
-                    return None
-                }
-                return sema_expr_expected_owned(typed, expected, check.environment.*, check.program.*, check.diagnostics)
+                return sema_expression_typed_literal_single_value(written_head, result_head, elements[0], word, false, span, expected, check)
             }
         }
         // A scalar head reached through a type parameter (`T{ value }` in a
@@ -3461,14 +3397,72 @@ sema_expression_typed_literal: fn(head: Type?, body: TypedLitBody, span: Span, e
         // written around this literal (`checked(U32{value})` stays `U32?`).
         .Fields(fields) -> {
             if fields.len() == 1 && sema_expression_field_is_shorthand(fields[0]) {
-                check.context.overflow_word = word
-                // copy: `fields` is a payload of read parameter `body`, which keeps the original
-                return sema_expression_typed_literal(head, TypedLitBody.Value{value: fields[0].value.copy()}, span, expected, check)
+                return sema_expression_typed_literal_single_value(written_head, result_head, fields[0].value, word, true, span, expected, check)
             }
         }
         .Entries(_) | .ByteText(_) | .Empty -> {}
     }
     sema_expression_typed_literal_mismatch(result_head, span, check.diagnostics)
+}
+
+// One-expression typed literal body for scalar, distinct, regex, unit, and
+// precise conversions, borrowing `value` directly without re-wrapping it.
+sema_expression_typed_literal_single_value: fn(written_head: Type, result_head: Type, value: Expr, word: String?, allow_regex_and_unit: Bool, span: Span, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
+    if allow_regex_and_unit {
+        // The `Regex` head is the compile-checked pattern literal whether it is
+        // written (`Regex{…}`, which `use core.regex` may resolve to the
+        // source-owned record) or inferred from a Regex-typed slot (`{…}`).
+        if sema_expression_is_regex_head(result_head) || sema_expression_is_regex_head(written_head) {
+            return sema_expression_typed_literal_regex(value, span, expected, check)
+        }
+    }
+    if word == .Val(name) {
+        if sema_expression_typed_literal_word_literal(name, result_head, value, check.diagnostics) {
+            return None
+        }
+    }
+    ^distinct_literal: sema_expression_typed_literal_distinct_literal(result_head, value, span, expected, check)
+    if distinct_literal.handled -> return distinct_literal.value
+    checked: sema_check_expression(value, sema_expression_typed_literal_body_expected(value, result_head), check) ?? return None
+    if sema_expression_typed_literal_float_exact_applies(result_head, checked.ty) {
+        exact_line: sema_source_line_at(check.environment.source_segments, expr_span(value)) ?? 0
+        exact: sema_expression_typed_literal_float_exact(result_head, checked, value, word, exact_line, check.diagnostics) ?? return None
+        return sema_expr_expected_owned(exact, expected, check.environment.*, check.program.*, check.diagnostics)
+    }
+    if sema_expression_typed_literal_precise_source(result_head, checked.ty) == .Val(precise) {
+        exact: sema_expression_typed_literal_precise_int(precise.move(), checked.move(), word, expr_span(value), check.diagnostics) ?? return None
+        return sema_expr_expected_owned(exact, expected, check.environment.*, check.program.*, check.diagnostics)
+    }
+    if sema_expression_typed_literal_float_to_integer(result_head, checked.ty, checked.span, check.diagnostics) {
+        return None
+    }
+    ^converted: checked
+    value_span: expr_span(value)
+    ^line: sema_source_line_at(check.environment.source_segments, value_span) ?? 0
+    ^needs_conversion: sema_expression_typed_literal_needs_conversion(checked.ty, result_head)
+    if needs_conversion {
+        converted = sema_expr_numeric_literal_conversion(checked, result_head, value_span, line, check.diagnostics) ?? return None
+        outcome: sema_expr_narrow_outcome(word, check.context.arithmetic_policy)
+        if outcome != TNarrowOutcome.Stop && sema_expr_narrowing_with(converted, outcome, line) == .Val(narrowed) {
+            return sema_expr_expected_owned(narrowed, expected, check.environment.*, check.program.*, check.diagnostics)
+        }
+    }
+    if allow_regex_and_unit {
+        // `Millimeter{ 4meter }` converts another unit of the family.
+        if sema_expr_unit_implicit_applies(result_head, converted.ty, check) {
+            unit_value: sema_expr_unit_implicit_conversion(converted, result_head, check) ?? return None
+            return sema_expr_expected_owned(unit_value, expected, check.environment.*, check.program.*, check.diagnostics)
+        }
+    }
+    if sema_expression_typed_literal_distinct_mismatch(result_head, converted, check) {
+        return None
+    }
+    diagnostic_start: check.diagnostics.len()
+    typed: sema_expr_expected(converted, Val(result_head), check.environment.*, check.program.*, check.diagnostics) ?? {
+        sema_expression_typed_literal_text_mismatch(result_head, value, diagnostic_start, check.diagnostics)
+        return None
+    }
+    sema_expr_expected_owned(typed, expected, check.environment.*, check.program.*, check.diagnostics)
 }
 
 // A quoted body under a type head is a checked text literal (`SQL{"…"}`,
@@ -3517,7 +3511,7 @@ sema_expression_typed_literal_precise_source: fn(head: Type, offered: Type) -> S
 // Under `checked` it is None instead (`try_int`). An exact value converts
 // whole or not at all, so `saturating` and `wrapping` have nothing to keep,
 // and an active overflow mode leaves it alone.
-sema_expression_typed_literal_precise_int: fn(precise: String, checked: TExpr, word: String?, span: Span, diagnostics: ^[Diagnostic]) -> TExpr? {
+sema_expression_typed_literal_precise_int: fn(precise: ^^String, checked: ^^TExpr, word: String?, span: Span, diagnostics: ^[Diagnostic]) -> TExpr? {
     outcome: sema_expr_narrow_outcome(word, None)
     absent: outcome == TNarrowOutcome.Absent
     if word == .Val(name) {
@@ -3528,7 +3522,7 @@ sema_expression_typed_literal_precise_int: fn(precise: String, checked: TExpr, w
     }
     ty: if absent -> Type.Option{inner: Type.Int} else -> Type.Int
     function: if absent -> "try_int" else -> "to_int"
-    Val(TExpr{ty: ty, kind: TExprKind.PreciseBuiltin{type_name: precise.copy(), function: function, args: [TExpr]{checked.copy()}}, span: span})
+    Val(TExpr{ty: ty, kind: TExprKind.PreciseBuiltin{type_name: precise.move(), function: function, args: [TExpr]{checked.move()}}, span: span})
 }
 
 // `Int{f}`, `U8{f}` and every fixed-width head over a Float or F32 body: a

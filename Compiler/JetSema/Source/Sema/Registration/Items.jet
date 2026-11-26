@@ -7579,10 +7579,17 @@ sema_grammar_head_path: fn(imports: [ImportDecl], name: String) -> String? Never
 // `declaration`: the imported module or item its first segment binds, then
 // its other segments. None when the row binds no such name.
 sema_grammar_head_target: fn(declaration: ImportDecl, name: String) -> String? Never! {
-    loop binding in import_walk_bindings(declaration) {
-        target: if binding.original == .Val(original) -> "{binding.module_alias}.{original}" else -> binding.module_alias.copy()
-        if name == binding.local -> return Val(target)
-        if name.starts_with("{binding.local}.") -> return Val("{target}{name.slice(binding.local.len(), name.len())}")
+    ^bindings: import_walk_bindings(declaration)
+    bindings.reverse()
+    loop bindings.len() > 0 {
+        binding: bindings.pop() ?? break
+        if name == binding.local {
+            return if binding.original == .Val(original) -> Val("{binding.module_alias}.{original}") else -> Val(binding.module_alias)
+        }
+        if name.starts_with("{binding.local}.") {
+            suffix: name.slice(binding.local.len(), name.len())
+            return if binding.original == .Val(original) -> Val("{binding.module_alias}.{original}{suffix}") else -> Val("{binding.module_alias}{suffix}")
+        }
     }
     None
 }

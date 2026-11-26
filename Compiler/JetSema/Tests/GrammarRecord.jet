@@ -154,26 +154,24 @@ priv grammar_record_body: fn(plans: [NamedCtValue]) -> SemaCoreBody {
 // The registration graph of GRAMMAR_RECORD_SOURCE as Core module
 // GRAMMAR_RECORD_MODULE, beside the canonical effect module, handed `plans`:
 // recording each module's grammar plans with `capture`.
-priv grammar_record_graph: fn(table: ^ModuleTable, plans: [NamedCtValue], capture: Bool) -> SemaRegistrationGraph {
+priv grammar_record_graph: fn(plans: ^^[NamedCtValue], capture: Bool) -> SemaRegistrationGraph {
     parsed: parse_source(GRAMMAR_RECORD_SOURCE.bytes())
     if sema_has_error_since(parsed.diagnostics, 0) {
         panic("GrammarRecord: the source does not parse: {parsed.diagnostics:Debug}")
     }
+    ^table: module_table()
     main_id: module_intern(table, GRAMMAR_RECORD_MODULE)
     canonical: jet_driver_canonical_effect_module(effect_vocabulary_module("IO: struct {{\n    impl Effect {{}}\n}}\n"), table) ?? panic("GrammarRecord: the canonical effect module declares no effects")
     canonical_id: canonical.module_identity
     facts: SemaBuildFacts{package_name: "grammar-record", package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}
     segment: SemaSourceSegment{generated: Span{start: 0, end: GRAMMAR_RECORD_SOURCE.len()}, source_file: "main.jet", source_start: 0, line_starts: [Int]{0}, origin: SemaSourceOrigin.Snapshot}
-    // copy: each graph registers from its own plans
-    input: SemaRegistrationModuleInput{package_identity: "core", module_identity: main_id, module_name: "main", core_source_alias: "", module_path: "main.jet", source_file: "main.jet", source_segments: [SemaSourceSegment]{segment}, source_origin: SemaSourceOrigin.Snapshot, program: parsed.program, foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: GRAMMAR_RECORD_SOURCE, grammar_plans: plans.copy()}
-    // copy: prepare_graph takes the table, which the caller reads after
-    sema_registration_prepare_graph([SemaRegistrationModuleInput]{input, canonical}, [SemaRegistrationImportEdge]{}, "core", main_id, canonical_id, table.copy(), [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single(), capture_derives: capture)
+    input: SemaRegistrationModuleInput{package_identity: "core", module_identity: main_id, module_name: "main", core_source_alias: "", module_path: "main.jet", source_file: "main.jet", source_segments: [SemaSourceSegment]{segment}, source_origin: SemaSourceOrigin.Snapshot, program: parsed.program, foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: GRAMMAR_RECORD_SOURCE, grammar_plans: plans.move()}
+    sema_registration_prepare_graph([SemaRegistrationModuleInput]{input, canonical}, [SemaRegistrationImportEdge]{}, "core", main_id, canonical_id, table.move(), [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single(), capture_derives: capture)
 }
 
 #Test("a Core module registered with its recorded grammar plans registers as one handed them") {
     plans: grammar_record_plans()
-    ^table: module_table()
-    ^captured: grammar_record_graph(table, plans, true)
+    ^captured: grammar_record_graph(grammar_record_plans(), true)
     ^bodies: [SemaCoreBody]{}
     sema_core_module_bodies(captured, bodies)
     ^grammar_records: 0
@@ -182,11 +180,12 @@ priv grammar_record_graph: fn(table: ^ModuleTable, plans: [NamedCtValue], captur
     }
     assert_eq(grammar_records, 1)
     hooks: grammar_record_hooks(bodies.move())
+    ^table: module_table()
     recorded: module_intern(table, GRAMMAR_RECORD_MODULE)
     read: sema_core_grammar_plans(sema_host_hook_access(hooks), table, recorded) ?? panic("GrammarRecord: the module's record reads no plans")
     assert_eq("{read:Debug}", "{plans:Debug}")
-    loaded: grammar_record_graph(table, read, false)
-    handed: grammar_record_graph(table, plans, false)
+    loaded: grammar_record_graph(read.move(), false)
+    handed: grammar_record_graph(plans.move(), false)
     assert_eq(loaded.modules.len(), handed.modules.len())
     ^failures: [String]{}
     loop (position, row) in handed.modules {
@@ -208,8 +207,7 @@ priv grammar_record_graph: fn(table: ^ModuleTable, plans: [NamedCtValue], captur
 }
 
 #Test("generated Rule and Token #Layout enums sharing a span pass repeatability while one enum with two #Layout markers still fails E0999") {
-    ^table: module_table()
-    handed: grammar_record_graph(table, grammar_record_plans(), false)
+    handed: grammar_record_graph(grammar_record_plans(), false)
     registry: sema_marker_module_canonical_registry() ?? panic("no canonical marker registry")
     ^grammar_diags: [Diagnostic]{}
     loop row in handed.modules {
