@@ -49,6 +49,7 @@ use jet_foundation.[
     diagnostic_with_detail,
     expr_source_span,
     expr_span,
+    pipe_value_is_name,
     type_identity_equal,
     type_name,
     Field,
@@ -2740,6 +2741,14 @@ sema_ownership_note_binding_write: fn(state: ^SemaOwnershipState, binding: SemaS
     }
 }
 
+// A place passed to an unresolved or incomplete call that may change it
+// counts as a possible write so E0514 never strips its `^` mark.
+sema_ownership_note_possible_write: fn(state: ^SemaOwnershipState, expr: Expr, scopes: SemaScopeTable) {
+    if sema_ownership_binding_for_expr(state, expr, scopes) == .Val(info) {
+        sema_ownership_note_binding_write(state, info)
+    }
+}
+
 // The `^` bindings and writes a sub-state (a branch, a lambda body, an
 // unreached line, a deferred arm) saw belong to the function whatever
 // becomes of that state.
@@ -3529,6 +3538,10 @@ sema_ownership_write_capability: fn(state: ^SemaOwnershipState, expr: Expr, acti
             return false
         }
         call_why: if callee == "" -> "" else -> "{sema_ownership_signature_line(callee, receiver, params)} changes this input"
+        if pipe_value_is_name(places[0].root) {
+            diagnostics.push(sema_ownership_diag_pipe_head_write(expr_span(expr), call_why))
+            return false
+        }
         if info.access == {
             .Read -> {
                 // An unmarked parameter is read access for
@@ -3554,11 +3567,21 @@ sema_ownership_write_capability: fn(state: ^SemaOwnershipState, expr: Expr, acti
     !guard_refused
 }
 
+// E0205 for a write through a computed pipe value `<>`, which is a hidden
+// read-only temporary and never named by its internal `__jet_pipe_*` binding.
+sema_ownership_diag_pipe_head_write: fn(span: Span, call_why: String) -> Diagnostic {
+    why: if call_why == "" -> "a computed pipe head or later pipe step is a read-only value, so `<>` cannot be changed in place" else -> "{call_why}, but `<>` holds a computed pipe value with read access only"
+    sema_error("E0205", span, "cannot edit through `<>` — it has read access only", why, "bind the value with `^name: ...` before changing it")
+}
+
 // E0205 for a write through a read view. A payload binding of a pattern arm
 // whose subject is written without `^` (`.Point(p) -> { p.x = 5 }`) is
 // read-only whatever access the owner it reads has, so the report blames the
 // binding and asks for a write subject; any other read view blames `root`.
 sema_ownership_diag_read_view_write: fn(state: SemaOwnershipState, expr: Expr, root: String, span: Span, scopes: SemaScopeTable) -> Diagnostic {
+    if pipe_value_is_name(root) {
+        return sema_ownership_diag_pipe_head_write(span, "")
+    }
     loop fact in state.views {
         if !fact.active || !fact.pattern || fact.access != AccessConvention.Read || fact.carrier == root {
             next
@@ -4912,6 +4935,9 @@ sema_ownership_convention_mark: fn(convention: AccessConvention) -> String Never
 // E0111 for a change to a binding that can't change. `why` names what changes
 // it; a `:` binding that is not itself a window gets the `^` edit.
 sema_ownership_diag_unchangeable: fn(info: SemaScopeBinding, root: String, span: Span, why: String) -> Diagnostic {
+    if pipe_value_is_name(root) {
+        return sema_ownership_diag_pipe_head_write(span, "")
+    }
     if !info.place_alias && info.changeable_mark_at == .Val(at) {
         diagnostic: sema_error("E0111", span, "`{root}` was made with `:`, so it can't be changed", why, "add `^` before the name: `^{root}: ...`")
         return diagnostic_with_edit(diagnostic, TextEdit{span: at, new_text: "^"})
@@ -5043,7 +5069,11 @@ sema_ownership_check_call_receiver_with_footprint: fn(check: ^SemaBodyCheck, rec
     if capability {
         has_view: sema_ownership_view_exists_for_expr(check.state, receiver, check.scopes)
         if has_view && sema_ownership_view_has_access(check.state, receiver, check.scopes, AccessConvention.Read) {
-            check.diagnostics.push(sema_error("E0205", expr_span(receiver), "cannot edit through `{base_places[0].root}` — it has read access only", "a read window may inspect its place, but it cannot change the owner", "take a write window from a mutable owner instead"))
+            if pipe_value_is_name(base_places[0].root) {
+                check.diagnostics.push(sema_ownership_diag_pipe_head_write(expr_span(receiver), ""))
+            } else {
+                check.diagnostics.push(sema_error("E0205", expr_span(receiver), "cannot edit through `{base_places[0].root}` — it has read access only", "a read window may inspect its place, but it cannot change the owner", "take a write window from a mutable owner instead"))
+            }
             return false
         }
         binding: sema_ownership_binding_for_expr(check.state, receiver, check.scopes) ?? return false
@@ -5058,6 +5088,7 @@ sema_ownership_check_call_receiver_with_footprint: fn(check: ^SemaBodyCheck, rec
             root: sema_receiver_mark_place_root(receiver) ?? info.symbol.name
             why: "{sema_ownership_signature_line(method, Val(AccessConvention.Write), params)} changes the value it's called on"
             diagnostic: if {
+                pipe_value_is_name(root) -> sema_ownership_diag_pipe_head_write(change_span, why)
                 root == "self" -> sema_error("E0205", change_span, "`.{method}()` edits `self`, but this method has read access only", why, "declare the enclosing method with the write mark: `^self`")
                 info.symbol.kind == SymbolKind.Parameter -> sema_ownership_read_parameter_error("E0205", change_span, "`.{method}()` changes `{root}`, which has read access only", "{why}, but an unmarked parameter gives read access only", root, type_name(info.symbol.ty ?? Type.Named{name: "Unit"}))
                 else -> sema_ownership_diag_unchangeable(info, root, change_span, "{why}, so `{root}` must be changeable (`^`)")

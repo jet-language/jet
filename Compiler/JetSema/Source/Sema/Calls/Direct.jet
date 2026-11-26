@@ -1891,6 +1891,7 @@ sema_call_direct_checked_from_target: fn(check: ^SemaBodyCheck, target: SemaCall
     ^args: call.args
     root_mark: check.diagnostics.len()
     ^binding: sema_call_bind_direct(call.name, target.signature, args, call.name_span, check.diagnostics) ?? {
+        sema_call_note_possible_arg_writes(call.args, check)
         sema_call_direct_rejected_propagation(target, call, root_mark, expected, check)
         return None
     }
@@ -1915,13 +1916,16 @@ sema_call_direct_checked_from_target: fn(check: ^SemaBodyCheck, target: SemaCall
             }
         }
         if !sema_call_variadic_slot_bounds_met(target, call.name, params, binding, source_args, check) {
+            sema_call_note_possible_bound_writes(params, binding, source_args, check)
             return None
         }
         if !sema_call_numeric_slot_arguments_met(target, call.name, params, binding, source_args, check) {
+            sema_call_note_possible_bound_writes(params, binding, source_args, check)
             return None
         }
         ^inference_diagnostics: [Diagnostic]{}
         inferred: sema_call_infer_direct_target_from_types(target, inferred_facts.parameter_types, inferred_facts.argument_types, expected, check.environment.*, check.program.*, check.scopes, call.name_span, inference_diagnostics) ?? {
+            sema_call_note_possible_bound_writes(params, binding, source_args, check)
             // An argument still waiting on a compile-time value has no type
             // yet. Checking it records the wait, so the call is checked again
             // once the value lands, not reported as uninferrable.

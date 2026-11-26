@@ -1126,7 +1126,13 @@ sema_call_method_checked_visible: fn(check: ^SemaBodyCheck, receiver: Expr, rece
     abi: sema_call_method_callable_abi(resolved_candidate, check)
     host_stored: sema_shared_access_is_shared_type(receiver_value.ty) && resolved_candidate.method.name == "edit" && check.scopes.transaction_depth > 0
     typed_option: if host_method -> sema_call_typecheck_host_bound_arguments(resolved_candidate.method.name, params, abi, true, resolved_binding, checked_args, check, span, sema_shared_access_host_method_writes(receiver_value.ty, resolved_candidate.method.name), host_stored) else -> sema_call_typecheck_bound_arguments(resolved_candidate.method.name, params, abi, true, resolved_binding, checked_args, check, span, false)
-    typed: typed_option ?? return None
+    typed: typed_option ?? {
+        if resolved_candidate.receiver_convention == AccessConvention.Write {
+            sema_ownership_note_possible_write(check.state, receiver, check.scopes)
+        }
+        sema_call_note_possible_bound_writes(params, resolved_binding, checked_args, check)
+        return None
+    }
     consumer: "`{sema_call_method_leaf(sema_call_receiver_method_label(receiver_type))}.{resolved_candidate.method.name}`"
     // A taking receiver read in place (`items[i].lease.release()`, a field of a
     // read receiver) leaves its place still owning the value: a resource taken

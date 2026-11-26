@@ -27,6 +27,7 @@ use jet_foundation.[
     expr_node_id,
     expr_source_span,
     expr_source_start,
+    pipe_value_is_name,
     ModuleID,
 ]
 
@@ -92,6 +93,18 @@ sema_call_marks_written_receiver: fn(receiver: Expr) -> PlaceAccess? Never! {
     None
 }
 
+SemaCallMarkExtraKind: enum {
+    ReadInput,
+    NotNamedPlace,
+    MovePart,
+    MoveCopyType,
+    MoveFunctionItem,
+}
+
+sema_call_marks_shown_root: fn(root: String) -> String Never! {
+    if pipe_value_is_name(root) -> "<>" else -> root
+}
+
 // One argument of a checked call. `param` is the slot it binds; `signature`
 // is built only when a report needs it.
 sema_call_marks_check_argument: fn(scopes: SemaScopeTable, callee: String, receiver: AccessConvention?, params: [SemaCallParam], param: SemaCallParam, arg: CallArg, diagnostics: ^[Diagnostic]) {
@@ -106,14 +119,25 @@ sema_call_marks_check_argument: fn(scopes: SemaScopeTable, callee: String, recei
     }
     root: sema_receiver_mark_place_root(arg.expr) ?? {
         if arg.mark == .Val(mark) {
-            diagnostics.push(sema_call_marks_extra(callee, "", mark.access, mark.span, sema_ownership_signature_line(callee, receiver, params)))
+            diagnostics.push(sema_call_marks_extra("`{sema_window_plain_name(callee)}`", "", mark.access, mark.span, sema_ownership_signature_line(callee, receiver, params), SemaCallMarkExtraKind.NotNamedPlace, param.convention))
         }
         return
     }
     ^want: PlaceAccess?{None}
+    ^extra_kind: SemaCallMarkExtraKind.ReadInput
     if param.convention == AccessConvention.Write -> want = Val(PlaceAccess.Write)
-    if param.convention == AccessConvention.Move && arg.expr == .Ident(_, _, _) && !sema_ownership_type_is_copy(param.ty ?? Type.Named{name: "_"}) && !sema_ownership_argument_is_function_item(arg, scopes) {
-        want = Val(PlaceAccess.Take)
+    if param.convention == AccessConvention.Move {
+        if arg.expr == .Ident(_, _, _) {
+            if sema_ownership_type_is_copy(param.ty ?? Type.Named{name: "_"}) {
+                extra_kind = SemaCallMarkExtraKind.MoveCopyType
+            } else if sema_ownership_argument_is_function_item(arg, scopes) {
+                extra_kind = SemaCallMarkExtraKind.MoveFunctionItem
+            } else {
+                want = Val(PlaceAccess.Take)
+            }
+        } else {
+            extra_kind = SemaCallMarkExtraKind.MovePart
+        }
     }
     have: if arg.mark == .Val(mark) -> Val(mark.access) else -> PlaceAccess?{None}
     if have == want {
@@ -121,7 +145,7 @@ sema_call_marks_check_argument: fn(scopes: SemaScopeTable, callee: String, recei
     }
     at: expr_source_start(arg.expr)
     mark_span: if arg.mark == .Val(mark) -> mark.span else -> Span{start: at, end: at}
-    diagnostics.push(sema_call_marks_mismatch("`{sema_window_plain_name(callee)}`", root, want, have, expr_source_span(arg.expr), mark_span, sema_ownership_signature_line(callee, receiver, params)))
+    diagnostics.push(sema_call_marks_mismatch("`{sema_window_plain_name(callee)}`", sema_call_marks_shown_root(root), want, have, expr_source_span(arg.expr), mark_span, sema_ownership_signature_line(callee, receiver, params), extra_kind, param.convention))
 }
 
 // The receiver of a checked method call. `receiver` is the call's receiver
@@ -140,10 +164,17 @@ sema_call_marks_check_receiver: fn(check: ^SemaBodyCheck, receiver: Expr, unmark
         return
     }
     ^want: PlaceAccess?{None}
+    ^extra_kind: SemaCallMarkExtraKind.ReadInput
+    ^receiver_convention: AccessConvention.Read
     if frame.convention == .Val(convention) {
+        receiver_convention = convention
         if convention == AccessConvention.Write -> want = Val(PlaceAccess.Write)
-        if convention == AccessConvention.Move && unmarked == .Ident(_, _, _) {
-            want = Val(PlaceAccess.Take)
+        if convention == AccessConvention.Move {
+            if unmarked == .Ident(_, _, _) {
+                want = Val(PlaceAccess.Take)
+            } else {
+                extra_kind = SemaCallMarkExtraKind.MovePart
+            }
         }
     }
     if have == want {
@@ -152,7 +183,7 @@ sema_call_marks_check_receiver: fn(check: ^SemaBodyCheck, receiver: Expr, unmark
     at: expr_source_start(unmarked)
     mark_span: if have == .Val(access) -> sema_call_marks_receiver_mark_span(receiver, access) else -> Span{start: at, end: at}
     signature: if frame.signature == "" -> "`.{method}()`" else -> frame.signature
-    check.diagnostics.push(sema_call_marks_mismatch("`.{method}()`", root, want, have, expr_source_span(unmarked), mark_span, signature))
+    check.diagnostics.push(sema_call_marks_mismatch("`.{method}()`", sema_call_marks_shown_root(root), want, have, expr_source_span(unmarked), mark_span, signature, extra_kind, receiver_convention))
 }
 
 sema_call_marks_receiver_mark_span: fn(receiver: Expr, access: PlaceAccess) -> Span Never! {
@@ -167,7 +198,7 @@ sema_call_marks_text: fn(access: PlaceAccess) -> String Never! {
 // E0228 for a missing, wrong or extra mark. `place` is the marked value's
 // span and `mark_span` the written mark, or the empty span where the missing
 // one goes; a missing mark is reported at the value, a written one at itself.
-sema_call_marks_mismatch: fn(call: String, root: String, want: PlaceAccess?, have: PlaceAccess?, place: Span, mark_span: Span, signature: String) -> Diagnostic {
+sema_call_marks_mismatch: fn(call: String, root: String, want: PlaceAccess?, have: PlaceAccess?, place: Span, mark_span: Span, signature: String, extra_kind: SemaCallMarkExtraKind, convention: AccessConvention) -> Diagnostic {
     if want == .Val(needed) {
         verb: if needed == PlaceAccess.Take -> "takes" else -> "changes"
         mark: sema_call_marks_text(needed)
@@ -176,13 +207,38 @@ sema_call_marks_mismatch: fn(call: String, root: String, want: PlaceAccess?, hav
         diagnostic: sema_error("E0228", at, what, "{signature} {verb} this input, and `#Policy(writes: .Explicit)` writes every change and take at the call", "write `{mark}{root}`")
         return diagnostic_with_edit_grade(diagnostic, TextEdit{span: mark_span, new_text: mark}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving)
     }
-    sema_call_marks_extra(call, root, have ?? PlaceAccess.Write, mark_span, signature)
+    sema_call_marks_extra(call, root, have ?? PlaceAccess.Write, mark_span, signature, extra_kind, convention)
 }
 
-sema_call_marks_extra: fn(call: String, root: String, written: PlaceAccess, mark_span: Span, signature: String) -> Diagnostic {
+sema_call_marks_extra: fn(call: String, root: String, written: PlaceAccess, mark_span: Span, signature: String, extra_kind: SemaCallMarkExtraKind, convention: AccessConvention) -> Diagnostic {
     mark: sema_call_marks_text(written)
-    what: if root == "" -> "`{mark}` marks a named value, and this argument isn't one" else -> "{call} neither changes nor takes `{root}`, so it takes no `{mark}`"
-    diagnostic: sema_error("E0228", mark_span, what, "{signature} reads this input; a mark says the call changes or takes the value, so it would tell the reader something false", "remove the `{mark}`")
+    ^what: ""
+    ^why: ""
+    ^fix: "remove the `{mark}`"
+    if extra_kind == {
+        .NotNamedPlace -> {
+            what = "`{mark}` marks a named value, and this argument isn't one"
+            why = if convention == AccessConvention.Read -> "{signature} reads this input; a mark says the call changes or takes a named value" else -> "a call mark applies only to a named place; a computed expression has no binding to mark"
+        }
+        .MovePart -> {
+            what = "`{mark}` cannot mark a part of `{root}`"
+            why = "{signature} takes this input, but a `{mark}` call mark applies only to a whole named value, not a field or indexed part"
+            fix = "remove `{mark}`, or write `.move()` on the part if you intend to move it out"
+        }
+        .MoveCopyType -> {
+            what = "`{root}` is a copied type, so {call} takes no `{mark}`"
+            why = "{signature} takes this input by value, which copies `{root}` instead of moving it, so `{root}` stays usable after the call"
+        }
+        .MoveFunctionItem -> {
+            what = "`{root}` is a function item, so {call} takes no `{mark}`"
+            why = "{signature} takes this input, but passing a function item does not move or consume `{root}`"
+        }
+        .ReadInput -> {
+            what = "{call} neither changes nor takes `{root}`, so it takes no `{mark}`"
+            why = "{signature} reads this input; a mark says the call changes or takes the value, so it would tell the reader something false"
+        }
+    }
+    diagnostic: sema_error("E0228", mark_span, what, why, fix)
     diagnostic_with_edit_grade(diagnostic, TextEdit{span: mark_span, new_text: ""}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving)
 }
 

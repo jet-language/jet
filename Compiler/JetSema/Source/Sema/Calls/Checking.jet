@@ -1789,6 +1789,8 @@ sema_call_check_bound_arguments_owned: fn(check: ^SemaBodyCheck, callee: String,
                     }
                 }
             }
+        } else {
+            sema_call_note_possible_bound_writes(params, binding, args, check)
         }
         return None
     }
@@ -1800,6 +1802,28 @@ sema_call_check_bound_arguments_owned: fn(check: ^SemaBodyCheck, callee: String,
     ^packed: sema_call_pack_variadic_arguments(typed, params, lowered, check, span) ?? return None
     sema_call_compiler_handoffs(callee, packed, check, span)
     Val({lowered: packed.move(), pins: pins.move()})
+}
+
+// Record possible writes on bound `^` parameter arguments when argument typing
+// stops before ownership checks run (for example, a callee with an undeclared
+// parameter type), so E0514 never strips `^` from a binding that call may edit.
+sema_call_note_possible_bound_writes: fn(params: [SemaCallParam], binding: SemaCallBinding, args: [CallArg], check: ^SemaBodyCheck) {
+    loop index in 0..<args.len() {
+        if index >= binding.sources.len() -> break
+        slot: sema_call_bound_slot(binding, binding.sources[index], args[index])
+        if slot >= 0 && slot < params.len() && params[slot].convention == AccessConvention.Write {
+            sema_ownership_note_possible_write(check.state, args[index].expr, check.scopes)
+        }
+    }
+}
+
+// Record possible writes on every argument of a call whose callee signature
+// could not be resolved or bound, so E0514 never strips `^` while the call
+// remains unresolved.
+sema_call_note_possible_arg_writes: fn(args: [CallArg], check: ^SemaBodyCheck) {
+    loop arg in args {
+        sema_ownership_note_possible_write(check.state, arg.expr, check.scopes)
+    }
 }
 
 // A `Compiler` value passed to a function delegates the root's control, and

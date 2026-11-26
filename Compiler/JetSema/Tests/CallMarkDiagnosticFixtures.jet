@@ -1,0 +1,60 @@
+// Regression tests for slice call-mark edits (`expr_source_start`), pipe-value
+// write diagnostics (`<>` instead of hidden `__jet_pipe_*` names), truthful
+// E0228 messages for take (`^^`) parameters, and preserving `^` on bindings
+// passed to calls whose callee signature failed to resolve.
+use {
+    jet_foundation.[Diagnostic]
+}
+
+call_mark_diag_find: fn(diagnostics: [Diagnostic], code: String) -> [Int] {
+    ^found: [Int]{}
+    loop (index, item) in diagnostics {
+        if item.code == code -> found.push(index)
+    }
+    found
+}
+
+#Test("call_mark_diag_slice_edit_targets_base") {
+    source: "#Policy(writes: .Explicit)\nsort_part: fn(xs: ^[Int]) {{ xs[0] = 9 }}\nrun: fn() {{\n    ^xs: [Int]{{1, 2, 3}}\n    sort_part(xs[0..2])\n}}\n"
+    diagnostics: core_failure_record_diagnostics(source, "user/slice_edit")
+    marks: call_mark_diag_find(diagnostics, "E0228")
+    assert_eq(marks.len(), 1)
+    edit: diagnostics[marks[0]].edit ?? panic("expected a Safe edit on E0228 for slice argument")
+    needle: "sort_part(xs[0..2])"
+    call_at: source.index_of(needle) ?? panic("call not found in fixture")
+    xs_start: call_at + "sort_part(".len()
+    assert_eq(edit.span.start, xs_start)
+    assert_eq(edit.span.end, xs_start)
+    assert_eq(edit.new_text, "^")
+}
+
+#Test("call_mark_diag_pipe_head_write_names_diamond") {
+    source: "#Policy(writes: .Explicit)\nmake: fn() -> [Int] {{ [Int]{{1}} }}\ngrow: fn(xs: ^[Int]) {{ xs[0] = 2 }}\nrun: fn() {{\n    _: make() |> grow(<>)\n}}\n"
+    diagnostics: core_failure_record_diagnostics(source, "user/pipe_write")
+    writes: call_mark_diag_find(diagnostics, "E0205")
+    assert(writes.len() >= 1)
+    loop item in diagnostics {
+        assert(!item.what.contains("__jet_pipe_"))
+        assert(!item.why.contains("__jet_pipe_"))
+        assert(!item.fix.contains("__jet_pipe_"))
+    }
+    assert(diagnostics[writes[0]].what.contains("`<>`"))
+}
+
+#Test("call_mark_diag_take_extra_mark_is_truthful") {
+    source: "#Policy(writes: .Explicit)\nHolder: struct {{ buf: [Int] }}\nseal: fn(buf: ^^[Int]) -> Int {{ buf.len() }}\ntake_n: fn(n: ^^Int) -> Int {{ n }}\nrun: fn() {{\n    ^st: Holder{{buf: [Int]{{1}}}}\n    _: seal(^^st.buf)\n    n: 3\n    _: take_n(^^n)\n}}\n"
+    diagnostics: core_failure_record_diagnostics(source, "user/take_extra")
+    marks: call_mark_diag_find(diagnostics, "E0228")
+    assert_eq(marks.len(), 2)
+    loop idx in marks {
+        assert(!diagnostics[idx].why.contains("reads this input"))
+        assert(diagnostics[idx].why.contains("takes this input"))
+    }
+}
+
+#Test("call_mark_diag_unresolved_call_keeps_mutable_binding") {
+    source: "badsig: fn(n: ^Missing) {{}}\nrun: fn() {{\n    ^k: 2\n    badsig(k)\n    _: k\n}}\n"
+    diagnostics: core_failure_record_diagnostics(source, "user/unresolved_call_mut")
+    unwritten: call_mark_diag_find(diagnostics, "E0514")
+    assert_eq(unwritten.len(), 0)
+}
