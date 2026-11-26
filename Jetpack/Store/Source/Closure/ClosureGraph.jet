@@ -127,7 +127,9 @@ ClosureGraph: struct {
         loop record in self.sorted_records() {
             loop output in record.outputs {
                 ^current: index.get(output.value) ?? [String]{}
-                loop reference in record.references -> current.push(reference)
+                loop reference in record.references {
+                    if reference != output.value -> current.push(reference)
+                }
                 index[output.value] = store_sorted_unique(current)
             }
         }

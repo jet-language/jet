@@ -1,0 +1,21 @@
+use files: core.files
+
+// No declared effect row: its FS.Write effect is inferred by the effect pass.
+write_notice: fn(path: String, text: String) {
+    files.write(path, text) ?? panic("write failed")
+}
+
+cleanup_notice: fn(path: String) {
+    files.remove(path) ?? ()
+}
+
+run: fn() {
+    #Transact(tx) {
+        tx.on_commit(fn() {
+            write_notice("committed.txt", "ok")
+        })
+        tx.on_rollback(fn() {
+            cleanup_notice("committed.txt")
+        })
+    }
+}

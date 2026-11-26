@@ -1,0 +1,23 @@
+# An irreversible call inside `tx.on_commit(fn() { ... })` runs only after the
+# `#Transact` block commits, so E0746 must accept both declared and inferred-row
+# irreversible helpers inside `on_commit` while continuing to refuse direct
+# irreversible calls inside `#Transact`.
+fixture: TransactOnCommitIrreversibleCallRuns.fixture
+env: NO_COLOR=1
+step: jet check run.jet
+exit: 0
+step: jet run -O0 run.jet
+exit: 0
+stdout: = "aborted:ok\ncommitted:committed\n"
+stderr: empty
+step: jet run -O1 run.jet
+exit: 0
+stdout: = "aborted:ok\ncommitted:committed\n"
+stderr: empty
+step: jet run -O2 run.jet
+exit: 0
+stdout: = "aborted:ok\ncommitted:committed\n"
+stderr: empty
+step: jet check refused.jet
+exit: 1
+stderr: ~ "Error: Jet.IrreversibleEffectInTransaction: `write_receipt` has the `FS` effect, which can't be rolled back inside a `#Transact` block"
