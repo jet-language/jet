@@ -1,11 +1,12 @@
 package: {
     name: "time_zone_dst_and_missing_db"
     version: "0.1.0"
-    authority: { allow: [Env, FS.Read, IO, Mem.Alloc] }
+    authority: { allow: [Env, FS, IO, Mem.Alloc] }
 }
 
 use {
     cal: core.time.calendar
+    files: core.files
     time: core.time
 }
 
@@ -55,5 +56,20 @@ run: fn() {
     if time.zone("../escape") == {
         .Ok(_) -> print("traversal: unexpected ok")
         .Err(error) -> print("traversal: err:{error.reason}")
+    }
+
+    // 6. Missing zone database (empty directory via JET_TZDB_DIR and TZDIR) returns typed TimeError.
+    empty_db: files.temp_dir("jet-empty-tzdb") ?? panic("temp_dir")
+    #Context(env: {JET_TZDB_DIR: empty_db.path}) {
+        if time.zone("America/New_York") == {
+            .Ok(_) -> print("missing_db_jet_tzdb: unexpected ok")
+            .Err(error) -> print("missing_db_jet_tzdb: err:{error.reason}")
+        }
+    }
+    #Context(env: {TZDIR: empty_db.path}) {
+        if time.zone("America/New_York") == {
+            .Ok(_) -> print("missing_db_tzdir: unexpected ok")
+            .Err(error) -> print("missing_db_tzdir: err:{error.reason}")
+        }
     }
 }

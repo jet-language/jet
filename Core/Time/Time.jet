@@ -2088,15 +2088,23 @@ zone: fn(name: String) -[Env, FS.Read]> Zone TimeError! {
     ^rel: name.copy()
     loop rel.starts_with("posix/") -> rel = civil_slice(rel.bytes(), 6, rel.bytes().len())
     loop rel.starts_with("right/") -> rel = civil_slice(rel.bytes(), 6, rel.bytes().len())
-    if rt.embedded_zone_bytes(rel) == .Val(bytes) -> return civil_tzif(name, bytes)
+    ^explicit: false
     ^roots: [String]{}
-    if rt.zone_env("JET_TZDB_DIR") == .Val(dir) -> roots.push(dir)
-    if rt.zone_env("TZDIR") == .Val(dir) -> roots.push(dir)
-    if rt.zone_env("JET_ROOT") == .Val(dir) -> roots.push("{dir}/Core/Time/Tzdb")
-    roots.push("Core/Time/Tzdb")
-    roots.push("/usr/share/zoneinfo")
-    roots.push("/usr/share/lib/zoneinfo")
-    roots.push("/etc/zoneinfo")
+    if rt.zone_env("JET_TZDB_DIR") == .Val(dir) && dir != "" {
+        roots.push(dir)
+        explicit = true
+    } else if rt.zone_env("TZDIR") == .Val(dir) && dir != "" {
+        roots.push(dir)
+        explicit = true
+    }
+    if !explicit {
+        if rt.embedded_zone_bytes(rel) == .Val(bytes) -> return civil_tzif(name, bytes)
+        if rt.zone_env("JET_ROOT") == .Val(dir) -> roots.push("{dir}/Core/Time/Tzdb")
+        roots.push("Core/Time/Tzdb")
+        roots.push("/usr/share/zoneinfo")
+        roots.push("/usr/share/lib/zoneinfo")
+        roots.push("/etc/zoneinfo")
+    }
     loop root in roots {
         if rt.zone_file_bytes("{root}/{rel}") == .Val(bytes) -> return civil_tzif(name, bytes)
     }
@@ -3653,6 +3661,8 @@ priv civil_footer_test_stamp: fn(text: String) -> Int Never! {
     assert_eq(zb.format("%F %T %Z %:z %z"), "2024-03-09 13:34:56 Europe/Brussels +01:00 +0100")
 
     // Receiver boundaries: LocalDate refuses clock/zone; LocalTime refuses date/zone.
+    // Unchecked format preserves unsupported clock specifiers literally.
+    assert_eq(new(2024, 3, 9).format("%Y/%m/%d %H:%M"), "2024/03/09 %H:%M")
     if new(2024, 3, 9).format_checked("%H") == .Ok(_) -> panic("LocalDate must refuse %H")
     if new(2024, 3, 9).format_checked("%z") == .Ok(_) -> panic("LocalDate must refuse %z")
     if local_time(12, 34, 56).format_checked("%Y") == .Ok(_) -> panic("LocalTime must refuse %Y")

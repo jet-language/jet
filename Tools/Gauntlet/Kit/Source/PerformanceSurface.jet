@@ -1420,7 +1420,7 @@ performance_surface_main: fn(repo_dir: String, argv: [String]) -> Int Err! {
     }
     resolve: fn(path: String) -> String { files.resolve(path) ?? path }
     canonical_path: resolve(args.canonical ?? files.join(repo_dir, text_at(spec, "evidence_file") ?? "Tools/Gauntlet/performance-surface-evidence.json"))
-    generated_at: time.now_utc().format("yyyy-MM-ddTHH:mm:ss.SSSZ")
+    generated_at: time.now_utc().format("%Y-%m-%dT%H:%M:%S.%LZ")
     history: prepare_history(canonical_path, generated_at, repo_dir, if spec == Dyn.Null -> PS_HISTORY else -> [])
     validation_spec: first_present([spec, manifest_row(manifest, PS_PAIR_ID)])
     artifact_path: resolve(args.artifact ?? default_jet_binary())
