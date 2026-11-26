@@ -5615,19 +5615,20 @@ sema_expr_check_unary: fn(op: UnOp, operand: Expr, expected: Type?, span: Span, 
     }
     // The operand is checked under the surrounding expectation; only a Float
     // carrier changes how a decimal literal operand elaborates.
-    ^operand_expected: Type?{None}
     float_literal: op == UnOp.Neg && sema_expr_expects_machine_float(expected) && sema_expr_decimal_literal_operand(operand, true)
     // `~0` under a fixed width is that width's all-ones value, so the
     // operand takes an integer expectation.
     integer_complement: op == UnOp.Complement && (if expected == .Val(wanted) -> sema_expr_is_integer(wanted) else -> false)
-    // copy: `operand_expected` is the operand's own expectation, while `expected` (the caller's
-    // expectation, a read parameter) is still read below for the result. Under a Dyn
-    // expectation the literal operand is a Float that wraps after negation.
-    if {
-        float_literal && expected == (Val(sema_dyn_type())) -> operand_expected = Val(Type.Float)
-        float_literal || integer_complement -> operand_expected = expected.copy()
+    // Under a Dyn expectation the literal operand is a Float that wraps after negation.
+    ^checked_operand: TExpr?{None}
+    if float_literal && expected == (Val(sema_dyn_type())) {
+        checked_operand = sema_check_expression(operand, Val(Type.Float), check)
+    } else if float_literal || integer_complement {
+        checked_operand = sema_check_expression(operand, expected, check)
+    } else {
+        checked_operand = sema_check_expression(operand, None, check)
     }
-    value: sema_check_expression(operand, operand_expected, check) ?? return None
+    value: checked_operand ?? return None
     if sema_expr_fixed_unary_applies(op, value.ty, check) {
         return sema_expr_check_fixed_unary(op, value, span, expected, check)
     }
@@ -7004,8 +7005,7 @@ sema_expr_copy_fork: fn(value: Expr, ty: Type, span: Span, expected: Type?, chec
         return None
     }
     hidden: pipe_value_name(span.start)
-    subject: if place -> value.copy() else -> Expr.Ident{name: hidden.copy(), span: span, id: AST_NODE_GENERATED}
-    body: sema_expr_copy_fork_body(subject, ty, row, check.context.fork_copy_rebuilding.len(), span, check.program.*) ?? {
+    body: (if place -> sema_expr_copy_fork_body(value, ty, row, check.context.fork_copy_rebuilding.len(), span, check.program.*) else -> sema_expr_copy_fork_body(Expr.Ident{name: hidden.copy(), span: span, id: AST_NODE_GENERATED}, ty, row, check.context.fork_copy_rebuilding.len(), span, check.program.*)) ?? {
         check.diagnostics.push(sema_expr_copy_fork_refused(ty, span, "a copy forks every Clock the value holds, and Jet rebuilds only a list, fixed list, option, map value, result, tuple, union, struct or enum part by part"))
         return None
     }

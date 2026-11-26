@@ -343,22 +343,26 @@ sema_trait_constant_record: fn(graph: SemaRegistrationGraph, type_module: Module
     None
 }
 
+priv sema_trait_constant_type_matches_name: fn(ty: Type, name: String) -> Bool Never! {
+    if ty == .Named(actual) -> return actual == name
+    false
+}
+
 // A record constant: `Name{field: value, …}`, or `{field: value, …}` where
 // the type is known. Each stored field is a value of its declared type; a
 // field the value leaves out takes the default its declaration writes.
 sema_trait_constant_eval_record: fn(graph: SemaRegistrationGraph, expr: Expr, name: String, record: SemaTraitConstantRecord, module_identity: ModuleID) -> SemaTraitConstantEval Never! {
-    expected_type: Type.Named{name: name.copy()}
     if expr == {
         .StructLit(type_name, type_args, _, _, fields, _, _, _) -> {
             if type_args.len() > 0 -> return SemaTraitConstantEval.WrongType
-            if type_name != "" && sema_checked_qualify_type(graph, Type.Named{name: type_name.copy()}, module_identity) != expected_type {
+            if type_name != "" && !sema_trait_constant_type_matches_name(sema_checked_qualify_type(graph, Type.Named{name: type_name.copy()}, module_identity), name) {
                 return SemaTraitConstantEval.WrongType
             }
             return sema_trait_constant_eval_record_fields(graph, fields, name, record, module_identity)
         }
         .TypedLit(head, body, _, _) -> {
             if head == .Val(head_type) {
-                if sema_checked_qualify_type(graph, head_type, module_identity) != expected_type {
+                if !sema_trait_constant_type_matches_name(sema_checked_qualify_type(graph, head_type, module_identity), name) {
                     return SemaTraitConstantEval.WrongType
                 }
             }
@@ -483,8 +487,7 @@ sema_trait_constant_callable_path: fn(expr: Expr) -> String? Never! {
 sema_trait_constant_enum_case: fn(graph: SemaRegistrationGraph, written: String, variant: String, name: String, variants: [String], module_identity: ModuleID) -> SemaTraitConstantEval Never! {
     if written != "" {
         written_type: sema_checked_qualify_type(graph, Type.Named{name: written.copy()}, module_identity)
-        expected_type: Type.Named{name: name.copy()}
-        if written_type != expected_type -> return SemaTraitConstantEval.WrongType
+        if !sema_trait_constant_type_matches_name(written_type, name) -> return SemaTraitConstantEval.WrongType
     }
     loop known in variants {
         if known == variant {

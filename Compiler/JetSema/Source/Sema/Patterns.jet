@@ -1715,21 +1715,21 @@ sema_pattern_source_text: fn(pattern: Pattern) -> String? {
         .Variant(variant, slots, leading_dot, _) -> {
             head: if leading_dot -> ".{variant}" else -> variant
             if slots.len() == 0 -> return Val(head)
-            ^parts: [String]{}
+            ^joined: ""
             loop slot in slots {
+                sep: if joined == "" -> "" else -> ", "
                 if slot == {
-                    .Wildcard -> parts.push("_")
-                    .Bind(name, _) -> parts.push(name.copy())
-                    .Range(lo, hi) -> parts.push("{lo}..{hi}")
+                    .Wildcard -> joined = "{joined}{sep}_"
+                    .Bind(name, _) -> joined = "{joined}{sep}{name}"
+                    .Range(lo, hi) -> joined = "{joined}{sep}{lo}..{hi}"
                     .Nested(inner) -> {
                         text: sema_pattern_source_text(inner) ?? return None
-                        parts.push(text)
+                        joined = "{joined}{sep}{text}"
                     }
                     // The E0392 edit spells only the positional form.
                     .Named(_, _, _) | .Rest(_) | .Value(_) -> return None
                 }
             }
-            joined: parts.join(", ")
             return Val("{head}({joined})")
         }
         .Or(alternatives, _) -> {

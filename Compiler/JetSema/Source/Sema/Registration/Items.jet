@@ -276,13 +276,13 @@ sema_registration_unit_leaf_name: fn(ty: Type) -> String? {
 
 // One fact per unit type of each package: packages may mint the same leaf
 // (`tick` in two families), and each keeps its own family and dimension.
-sema_registration_unit_fact_push: fn(facts: ^[SemaRegistrationUnitFact], fact: SemaRegistrationUnitFact) Never! {
+sema_registration_unit_fact_push: fn(facts: ^[SemaRegistrationUnitFact], fact: ^^SemaRegistrationUnitFact) Never! {
     loop existing in facts {
         if existing.name == fact.name && existing.package == fact.package {
             return
         }
     }
-    facts.push(fact.copy())
+    facts.push(fact)
 }
 
 sema_registration_unit_family_facts: fn(definition: UnitFamilyDef, facts: ^[SemaRegistrationUnitFact]) Never! {
@@ -2653,11 +2653,11 @@ sema_registration_index_impl_traits: fn(graph: ^SemaRegistrationGraph, threads: 
                 symbol_name = Val(trait_symbol.name.copy())
             }
             if declared_name == .Val(name) {
-                sema_registration_impl_trait_name_push(graph, name, reference)
+                sema_registration_impl_trait_name_push(graph, name, module_index, row)
             }
             if symbol_name == .Val(name) {
                 if declared_name != Val((name)) {
-                    sema_registration_impl_trait_name_push(graph, name, reference)
+                    sema_registration_impl_trait_name_push(graph, name, module_index, row)
                 }
             }
             trait_id: item.trait_id ?? next
@@ -2673,12 +2673,12 @@ sema_registration_index_impl_traits: fn(graph: ^SemaRegistrationGraph, threads: 
     graph.impl_traits_indexed = true
 }
 
-sema_registration_impl_trait_name_push: fn(graph: ^SemaRegistrationGraph, trait_name: String, reference: SemaRegistrationRowRef) Never! {
+sema_registration_impl_trait_name_push: fn(graph: ^SemaRegistrationGraph, trait_name: String, module_index: Int, row: Int) Never! {
     slot: name_index(name_intern(graph.impl_trait_names, trait_name))
     loop graph.impl_trait_name_buckets.len() <= slot {
         graph.impl_trait_name_buckets.push([SemaRegistrationRowRef]{})
     }
-    graph.impl_trait_name_buckets[slot].push(reference.copy())
+    graph.impl_trait_name_buckets[slot].push(SemaRegistrationRowRef{module_index: module_index, row: row})
 }
 
 sema_registration_impl_trait_name_slot: fn(graph: SemaRegistrationGraph, trait_name: String) -> Int? Never! {
@@ -3950,25 +3950,28 @@ sema_registration_index_source_impls: fn(graph: ^SemaRegistrationGraph) Never! {
             if row.module_name != module_row.module_name || row.alias != module_row.core_source_alias {
                 next
             }
-            ^row_owners: row.impl_types.copy()
-            loop implementation in module_row.impls {
-                if sema_registration_core_handle_owner(row.module_name, implementation.target_type_name) && !row_owners.contains(implementation.target_type_name) {
-                    row_owners.push(implementation.target_type_name.copy())
-                }
+            loop owner in row.impl_types {
+                sema_registration_add_source_impl_owner(owner_names, owner_rows, row.module_name, owner, module_index)
             }
-            loop owner in row_owners {
-                if !sema_registration_core_handle_owner(row.module_name, owner) && !sema_reserved_type_name(owner) && !core_module_has_type(row.module_name, owner) && owner != "Err" {
-                    next
+            loop implementation in module_row.impls {
+                if sema_registration_core_handle_owner(row.module_name, implementation.target_type_name) {
+                    sema_registration_add_source_impl_owner(owner_names, owner_rows, row.module_name, implementation.target_type_name, module_index)
                 }
-                slot: name_index(name_intern(owner_names, owner))
-                loop owner_rows.len() <= slot -> owner_rows.push([Int]{})
-                if owner_rows[slot].contains(module_index) -> next
-                owner_rows[slot].push(module_index)
             }
         }
     }
     graph.source_impl_owner_names = owner_names.move()
     graph.source_impl_owner_rows = owner_rows.move()
+}
+
+priv sema_registration_add_source_impl_owner: fn(owner_names: ^NameTable, owner_rows: ^[[Int]], module_name: String, owner: String, module_index: Int) Never! {
+    if !sema_registration_core_handle_owner(module_name, owner) && !sema_reserved_type_name(owner) && !core_module_has_type(module_name, owner) && owner != "Err" {
+        return
+    }
+    slot: name_index(name_intern(owner_names, owner))
+    loop owner_rows.len() <= slot -> owner_rows.push([Int]{})
+    if owner_rows[slot].contains(module_index) -> return
+    owner_rows[slot].push(module_index)
 }
 
 sema_registration_source_impl_owners: fn(graph: SemaRegistrationGraph, name: String) -> [Int]? Never! {
@@ -4958,13 +4961,13 @@ sema_registration_as_fields: fn(items: [Item], diagnostics: ^[Diagnostic]) {
         if item == .Struct(definition) {
             ^first: String?{None}
             loop field in definition.fields {
-                marker: sema_registration_as_marker(field.serde_markers) ?? next
+                marker_span: sema_registration_as_marker(field.serde_markers) ?? next
                 if field.computed != None {
-                    diagnostics.push(sema_error("E1131", marker.span, "`#As` is on computed field `{field.name}`", "`#As` passes the struct as a stored field's value, and a computed field stores none", "put `#As` on a stored field, or remove it"))
+                    diagnostics.push(sema_error("E1131", marker_span, "`#As` is on computed field `{field.name}`", "`#As` passes the struct as a stored field's value, and a computed field stores none", "put `#As` on a stored field, or remove it"))
                     next
                 }
                 if first == .Val(earlier) {
-                    diagnostics.push(sema_error("E1129", marker.span, "`{definition.name}` already passes as its field `{earlier}`", "a struct passes as one field, so only one of its fields carries `#As`", "remove `#As` from all but one field"))
+                    diagnostics.push(sema_error("E1129", marker_span, "`{definition.name}` already passes as its field `{earlier}`", "a struct passes as one field, so only one of its fields carries `#As`", "remove `#As` from all but one field"))
                     next
                 }
                 first = Val(field.name)
@@ -4973,9 +4976,9 @@ sema_registration_as_fields: fn(items: [Item], diagnostics: ^[Diagnostic]) {
     }
 }
 
-sema_registration_as_marker: fn(markers: [Marker]) -> Marker? {
+sema_registration_as_marker: fn(markers: [Marker]) -> Span? {
     loop marker in markers {
-        if marker.name == MARKER_AS -> return Val(marker.copy())
+        if marker.name == MARKER_AS -> return Val(marker.span)
     }
     None
 }
@@ -5360,25 +5363,27 @@ sema_registration_serde_rename_all: fn(markers: [Marker], diagnostics: ^[Diagnos
     loop marker in markers {
         if marker.name != MARKER_RENAME || marker.negated || marker.args.len() == 0 -> next
         if marker.args[0] == .Expr(argument) {
-            ^written: ""
             if argument == {
                 .EnumLit(_, name, _, _, _, _, _) -> {
                     if sema_checked_wire_style_valid(sema_checked_rename_case_word(marker)) -> next
-                    written = ".{name}"
+                    sema_registration_push_rename_style_error(".{name}", expr_span(argument), diagnostics)
                 }
-                .Ident(name, _, _) -> { written = name.copy() }
+                .Ident(name, _, _) -> {
+                    sema_registration_push_rename_style_error(name, expr_span(argument), diagnostics)
+                }
                 .Str(_, _, _) -> {
                     text: sema_checked_marker_text(marker) ?? next
-                    written = "\"{text}\""
+                    sema_registration_push_rename_style_error("\"{text}\"", expr_span(argument), diagnostics)
                 }
-                .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .TypeValue(_, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) -> {
-                    next
-                }
+                .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .TypeValue(_, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) -> {}
             }
-            row: sema_diagnostic_row("E2409")
-            diagnostics.push(sema_error("E2409", expr_span(argument), row.what.replace("{{style}}", written), row.why.replace("{{style}}", written), row.fix.replace("{{style}}", written)))
         }
     }
+}
+
+priv sema_registration_push_rename_style_error: fn(written: String, span: Span, diagnostics: ^[Diagnostic]) {
+    row: sema_diagnostic_row("E2409")
+    diagnostics.push(sema_error("E2409", span, row.what.replace("{{style}}", written), row.why.replace("{{style}}", written), row.fix.replace("{{style}}", written)))
 }
 
 // Whether any struct or enum derives a codec explicitly (the only
@@ -5872,14 +5877,12 @@ sema_registration_module_name: fn(graph: SemaRegistrationGraph, module_id: Modul
     Val(graph.modules[index].module_name)
 }
 
-sema_registration_push_graph_diagnostic: fn(graph: ^SemaRegistrationGraph, module_index: Int, diagnostic: Diagnostic) Never! {
+sema_registration_push_graph_diagnostic: fn(graph: ^SemaRegistrationGraph, module_index: Int, diagnostic: ^^Diagnostic) Never! {
     if {
         module_index >= 0 && module_index < graph.modules.len() -> {
-            // copy: the graph's diagnostics list owns the located row, while `diagnostic` is the
-            // caller's row (a read parameter), still used below.
-            graph.diagnostics.push(sema_diagnostic_with_source_location(diagnostic.copy(), graph.modules[module_index].source_segments))
+            graph.diagnostics.push(sema_diagnostic_with_source_location(diagnostic, graph.modules[module_index].source_segments))
         }
-        else -> { graph.diagnostics.push(diagnostic.copy()) }
+        else -> { graph.diagnostics.push(diagnostic) }
     }
 }
 
@@ -5921,20 +5924,17 @@ sema_registration_direct_symbol: fn(module_row: SemaRegistrationModule, name: St
 // function that fills a role (CoreRoles.jet) is reached through that role
 // by the code the compiler generates into any module, so no row lists it;
 // its own visibility still decides who reaches it.
+priv sema_registration_core_exports: fn(owner: String, leaf: String) -> Bool {
+    if core_module_export(owner) == None -> return true
+    core_module_has_member(owner, leaf) || core_module_has_type(owner, leaf) || core_module_export("{owner}.{leaf}") != None
+}
+
 sema_registration_core_private: fn(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, name: String, requester_module: ModuleID) -> Bool {
     if !module_is_core(module_row.module_identity) || module_is_core(requester_module) {
         return false
     }
-    ^owner: module_row.module_name.copy()
-    ^leaf: name.copy()
-    if name.cut_last(".") == .Val(parts) {
-        owner = "{owner}.{parts.before}"
-        leaf = parts.after
-    }
-    if core_module_export(owner) == None -> return false
-    if core_module_has_member(owner, leaf) || core_module_has_type(owner, leaf) || core_module_export("{owner}.{leaf}") != None {
-        return false
-    }
+    exported: if name.cut_last(".") == .Val(parts) -> sema_registration_core_exports("{module_row.module_name}.{parts.before}", parts.after) else -> sema_registration_core_exports(module_row.module_name, name)
+    if exported -> return false
     !sema_core_role_filler(graph, module_row, name)
 }
 
@@ -7039,7 +7039,7 @@ sema_registration_prepare_graph: fn(inputs: ^^[SemaRegistrationModuleInput], edg
     // Every performance role elaborates into its canonical typed budgets once
     // every declaration is registered.
     budget_findings: sema_budget_validate_graph(graph)
-    loop finding in budget_findings {
+    loop finding in budget_findings.move() {
         sema_registration_push_graph_diagnostic(graph, finding.module_index, finding.diagnostic)
         graph.complete = false
     }

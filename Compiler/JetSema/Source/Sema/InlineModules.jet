@@ -562,11 +562,9 @@ sema_inline_alias_name: fn(rewrite: SemaInlineRewrite, name: String) -> String? 
 // (`core.math`) is no member.
 sema_inline_core_member: fn(path: String) -> SemaInlineTarget? Never! {
     if !path.starts_with("core.") || core_module_export(path) != None -> return None
-    segments: path.split(".").to_list()
-    ^module_path: segments[0].copy()
-    loop index in 1..<segments.len() - 1 -> module_path = "{module_path}.{segments[index]}"
-    if core_module_export(module_path) == None -> return None
-    Val(SemaInlineTarget{module_alias: sema_inline_core_alias(module_path), member: segments[segments.len() - 1].copy(), qualified: true})
+    parts: path.cut_last(".") ?? return None
+    if core_module_export(parts.before) == None -> return None
+    Val(SemaInlineTarget{module_alias: sema_inline_core_alias(parts.before), member: parts.after, qualified: true})
 }
 
 // The file-level alias of a Core module that lowered members read.
@@ -1782,13 +1780,13 @@ sema_inline_hoist_module: fn(code_module: CodeModule, source_path: String, hoist
         // A file imported under an alias can still carry the defining
         // module's compiler-owned spelling; normalize it to this identity.
         sema_inline_type_put(direct_types, sema_inline_type_name(display_alias, name), resolved.copy())
-        direct_names.push(name.copy())
         if !hides_members && sema_inline_private_type_span(inner) == .Val(declared) {
             sema_inline_private_put(hoist.private_types, "{source_path}.{name}", declared)
         }
         // The enclosing file reaches private member types by
         // their full module path too. Do not export a nested relative name.
         sema_inline_type_put(hoist.exported, "{source_path}.{name}", resolved)
+        direct_names.push(name)
         hoist.has_exported = true
     }
     ^kept: [Item]{}

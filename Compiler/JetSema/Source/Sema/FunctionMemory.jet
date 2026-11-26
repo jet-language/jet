@@ -834,7 +834,7 @@ sema_function_memory_annotate_scope: fn(stmts: ^[Stmt], chain: [PolicyDeclaratio
                     promoted_return = sema_function_memory_annotate_scope(arm_body, chain, diagnostics, complete) || promoted_return
                     updated_arms[arm_index].body = arm_body
                 }
-                ^updated_else_body: else_body.copy()
+                ^updated_else_body: [Stmt]?{None}
                 if else_body == .Val(else_statements) {
                     ^body: else_statements.copy()
                     promoted_return = sema_function_memory_annotate_scope(body, chain, diagnostics, complete) || promoted_return
@@ -1170,14 +1170,15 @@ sema_function_memory_sort_and_deduplicate_edges: fn(edges: ^[GCPromotionEdge]) N
         }
         index += 1
     }
-    ^unique: [GCPromotionEdge]{}
-    loop edge in edges {
-        if unique.len() == 0 || !sema_function_memory_edge_equal(unique[unique.len() - 1], edge) {
-            unique.push(edge.copy())
+    if edges.len() <= 1 -> return
+    ^write: 1
+    loop read in 1..<edges.len() {
+        if !sema_function_memory_edge_equal(edges[write - 1], edges[read]) {
+            if write != read -> edges[write] = edges[read]
+            write += 1
         }
     }
-    loop edges.len() > 0 -> ^_: edges.pop()
-    loop edge in unique -> edges.push(edge)
+    loop edges.len() > write -> ^_: edges.pop()
 }
 
 sema_function_memory_collection_len: fn(expression: Expr) -> Int? {

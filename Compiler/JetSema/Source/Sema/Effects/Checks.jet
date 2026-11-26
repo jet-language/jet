@@ -2255,13 +2255,13 @@ sema_effect_record_context: fn(interner: Interner, nodes: ^[SemaEffectNode], nod
     }
 }
 
-sema_effect_add_context_key: fn(keys: ^[TEffectContextKey], read: TEffectContextKey) Never! {
+sema_effect_add_context_key: fn(keys: ^[TEffectContextKey], read: ^^TEffectContextKey) Never! {
     loop known in keys {
         if known.key == read.key {
             return
         }
     }
-    keys.push(read.copy())
+    keys.push(read)
 }
 
 // The task context the function at `root` can read: each field
@@ -6408,16 +6408,22 @@ sema_effect_heap_bounds: fn(nodes: [SemaEffectNode], called: [Bool]) -> [String]
         }
         ^path: [String]{}
         ^seen: [Int:Bool]{}
-        ^why: ""
+        ^why_row: -1
         ^row: index
         loop row >= 0 && seen.get(row) == None {
             seen[row] = true
             path.push(nodes[row].display_key.copy())
-            why = walk.why[row].copy()
-            if why != "" -> break
+            if walk.why[row] != "" {
+                why_row = row
+                break
+            }
             row = walk.next[row]
         }
-        texts.push("unbounded, {why} via {path.join(" -> ")}")
+        if why_row >= 0 {
+            texts.push("unbounded, {walk.why[why_row]} via {path.join(" -> ")}")
+        } else {
+            texts.push("unbounded,  via {path.join(" -> ")}")
+        }
     }
     texts
 }

@@ -933,15 +933,17 @@ sema_unsafe_mode: fn(value: PolicyValue) -> String Never! {
 }
 
 sema_unsafe_assertion: fn(statement: Stmt) -> {names: [String], span: Span}? Never! {
-    // copy: `value` is a payload of read parameter `statement`, which keeps the original; the Val carrier owns this one
-    expression: (if statement == .Expr(value) -> Val(value.copy()) else -> Expr?{None}) ?? return None
-    call: (if expression == .Call(value, _) -> Val(value) else -> Call?{None}) ?? return None
-    if call.name != "__jet_unsafe_assert" -> return None
-    ^names: [String]{}
-    loop argument in call.args {
-        if argument.expr == .Ident(name, _, _) -> names.push(name)
+    if statement == .Expr(expression) {
+        if expression == .Call(call, _) {
+            if call.name != "__jet_unsafe_assert" -> return None
+            ^names: [String]{}
+            loop argument in call.args {
+                if argument.expr == .Ident(name, _, _) -> names.push(name.copy())
+            }
+            return Val({names: names, span: call.name_span})
+        }
     }
-    Val({names: names, span: call.name_span})
+    None
 }
 
 // Whether `statement` is an obligation assertion (`assert valid_ptr,

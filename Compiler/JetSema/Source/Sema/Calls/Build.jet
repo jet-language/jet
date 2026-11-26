@@ -120,13 +120,19 @@ sema_call_try_build_context_method: fn(receiver: Expr, receiver_value: TExpr, me
     if method == "generate" {
         loop argument in args {
             body: argument.flags.template_items ?? next
-            splices: sema_build_generate_splices(body, argument.span, false, check) ?? return failed
+            ^splices: sema_build_generate_splices(body, argument.span, false, check) ?? return failed
             generated.push(sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: splices.source}}}, argument.span))
+            ^splice_values: splices.values.move()
+            splice_values.reverse()
+            ^splice_args: splices.args.move()
+            splice_args.reverse()
             loop index in 0..<splices.markers.len() {
+                splice_value: splice_values.pop() ?? break
+                splice_arg: splice_args.pop() ?? break
+                params.push(SemaCallParam{label: "", name: "", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(splice_value.ty), variadic: false})
                 generated.push(sema_tree_node(Type.Int, TExprKind.IntLit{value: splices.markers[index], width: None}, argument.span))
-                generated.push(splices.values[index].copy())
-                ordinary.push(splices.args[index].copy())
-                params.push(SemaCallParam{label: "", name: "", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(splices.values[index].ty), variadic: false})
+                generated.push(splice_value)
+                ordinary.push(splice_arg)
             }
         }
     }
@@ -419,11 +425,14 @@ sema_build_code_value: fn(call: Call, expected: Type?, check: ^SemaBodyCheck) ->
     ownership: sema_ownership_check_call_arguments(check.state, "#code", params, splices.args, check.scopes, check.diagnostics)
     if !ownership.accepted || !ownership.complete -> return None
     ^args: [TExpr]{}
+    ^splice_values: splices.values.move()
+    splice_values.reverse()
     loop index in 0..<splices.markers.len() {
+        splice_value: splice_values.pop() ?? break
         name: if splices.args[index].expr == .Ident(written, _, _) -> written.copy() else -> ""
         args.push(sema_tree_node(Type.Int, TExprKind.IntLit{value: splices.markers[index], width: None}, span))
         args.push(sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: name}}}, span))
-        args.push(splices.values[index].copy())
+        args.push(splice_value)
     }
     pasted: sema_tree_node(Type.Named{name: "Code"}, TExprKind.HostCall{call: THostCall.Method{receiver: node, method: "pasted", args: args}}, span)
     sema_expr_expected(pasted, expected, check.environment.*, check.program.*, check.diagnostics)
@@ -509,19 +518,15 @@ sema_call_try_compiler_method: fn(receiver: Expr, receiver_value: TExpr, method:
     ^code: CallArg?{None}
     ^scope: CallArg?{None}
     loop argument in args {
-        label: if argument.label == .Val(written) -> written.name.copy() else -> ""
-        takes: if label == {
-            "" -> code == None
-            "scope" -> scope == None
-            else -> false
-        }
+        is_scope: if argument.label == .Val(written) -> written.name == "scope" else -> false
+        takes: if argument.label == None -> code == None else -> is_scope && scope == None
         if argument.spread || argument.flags.template_items != None || !takes {
             check.diagnostics.push(sema_error("E0764", argument.span, "`Compiler.add` doesn't take this argument", "`meta.add` takes one `Code` value or source text and the `scope:` module it joins", "write `{shape}`"))
             return failed
         }
         ^unlabeled: argument.copy()
         unlabeled.label = None
-        if label == "scope" -> scope = Val(unlabeled) else -> code = Val(unlabeled)
+        if is_scope -> scope = Val(unlabeled) else -> code = Val(unlabeled)
     }
     code_arg: code ?? {
         check.diagnostics.push(sema_error("E0104", span, "`Compiler.add` expects a `Code` value or source text", "`meta.add` adds the items of one `Code` value or of source text", "write `{shape}`"))
@@ -592,19 +597,15 @@ sema_call_compiler_add_struct: fn(receiver: Expr, receiver_value: TExpr, args: [
     ^positional: [CallArg]{}
     ^scope: CallArg?{None}
     loop argument in args {
-        label: if argument.label == .Val(written) -> written.name.copy() else -> ""
-        takes: if label == {
-            "" -> positional.len() < 2
-            "scope" -> scope == None
-            else -> false
-        }
+        is_scope: if argument.label == .Val(written) -> written.name == "scope" else -> false
+        takes: if argument.label == None -> positional.len() < 2 else -> is_scope && scope == None
         if argument.spread || argument.flags.template_items != None || !takes {
             check.diagnostics.push(sema_error("E0764", argument.span, "`Compiler.add_struct` doesn't take this argument", "`meta.add_struct` takes the struct's name, its fields and the `scope:` module it joins", "write `{shape}`"))
             return failed
         }
         ^unlabeled: argument.copy()
         unlabeled.label = None
-        if label == "scope" -> scope = Val(unlabeled) else -> positional.push(unlabeled)
+        if is_scope -> scope = Val(unlabeled) else -> positional.push(unlabeled)
     }
     if positional.len() != 2 {
         check.diagnostics.push(sema_error("E0104", span, "`Compiler.add_struct` expects a name and a list of fields", "`meta.add_struct` declares one struct of `CompilerField` records, each a field's name and its `TypeId`", "write `{shape}`"))
@@ -864,15 +865,17 @@ sema_call_compiler_events: fn(receiver: Expr, args: [CallArg], span: Span, expec
     watched_name: Expr.Str{parts: [StrPart]{StrPart.Lit{text: watched}}, span: expr_span(watch.value), id: AST_NODE_GENERATED}
     read_method: if watch.calls -> "events.calls" else -> "events.functions"
     read: Expr.MethodCall{receiver: receiver.copy(), method: read_method, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{sema_compiler_events_arg(watched_name, expr_span(watch.value))}, id: AST_NODE_GENERATED}
+    bind_items: sema_compiler_events_binding(items_name, None, read, span)
+    bind_handler: sema_compiler_events_binding(handler_name, Val(handler_type), args[1].expr, span)
     heard: Expr.Ident{name: item_name.copy(), span: span, id: AST_NODE_GENERATED}
     variant: if watch.calls -> "Call" else -> "Function"
     item: Expr.EnumLit{type_name: "CheckedItem", variant: variant, variant_span: Val(span), args: [EnumLitArg]{EnumLitArg.Positional{value: heard}}, leading_dot: false, span: span, id: AST_NODE_GENERATED}
     event: Expr.EnumLit{type_name: "CompilerEvent", variant: "Checked", variant_span: Val(span), args: [EnumLitArg]{EnumLitArg.Positional{value: item}}, leading_dot: false, span: span, id: AST_NODE_GENERATED}
-    hear: Expr.Call{call: Call{name: handler_name.copy(), name_span: span, type_args: [Type]{}, args: [CallArg]{sema_compiler_events_arg(event, span)}}, id: AST_NODE_GENERATED}
-    items: Expr.Ident{name: items_name.copy(), span: span, id: AST_NODE_GENERATED}
+    hear: Expr.Call{call: Call{name: handler_name, name_span: span, type_args: [Type]{}, args: [CallArg]{sema_compiler_events_arg(event, span)}}, id: AST_NODE_GENERATED}
+    items: Expr.Ident{name: items_name, span: span, id: AST_NODE_GENERATED}
     statements: [Stmt]{
-        sema_compiler_events_binding(items_name, None, read, span),
-        sema_compiler_events_binding(handler_name, Val(handler_type), args[1].expr, span),
+        bind_items,
+        bind_handler,
         Stmt.For{var: item_name, var_span: span, var2: None, kind: ForKind.In{collection: items, step: None}, body: [Stmt]{Stmt.Expr{expr: hear}}, span: span, arrow_body: false, label: None, auto_vectorization: None},
     }
     return_type: check.scopes.return_type
@@ -959,10 +962,11 @@ sema_call_compiler_report: fn(receiver: Expr, args: [CallArg], span: Span, expec
     }
     texts.push(sema_compiler_events_arg(Expr.Str{parts: [StrPart]{StrPart.Lit{text: rewrite.callee}}, span: span, id: AST_NODE_GENERATED}, span))
     texts.push(sema_compiler_events_arg(Expr.Str{parts: [StrPart]{StrPart.Lit{text: rewrite.replacement}}, span: span, id: AST_NODE_GENERATED}, span))
-    texts.push(sema_compiler_events_arg(Expr.Ident{name: place_name.copy(), span: span, id: AST_NODE_GENERATED}, span))
+    bind_place: sema_compiler_events_binding(place_name, Val(Type.Named{name: "CompilerCall"}), args[1].expr, span)
+    texts.push(sema_compiler_events_arg(Expr.Ident{name: place_name, span: span, id: AST_NODE_GENERATED}, span))
     raise: Expr.MethodCall{receiver: receiver.copy(), method: "report.finding", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: texts, id: AST_NODE_GENERATED}
     statements: [Stmt]{
-        sema_compiler_events_binding(place_name, Val(Type.Named{name: "CompilerCall"}), args[1].expr, span),
+        bind_place,
         Stmt.Expr{expr: raise},
     }
     ^checked: sema_check_statements(statements, return_type, check, check.scopes.loop_depth)
@@ -1177,7 +1181,10 @@ sema_type_diagnostic_report: fn(graph: SemaRegistrationGraph, finding: Type, mod
             .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
-    if reports.len() > 0 -> return Val(reports[0].copy())
+    if reports.len() > 0 {
+        reports.reverse()
+        return reports.pop()
+    }
     loop module_index in 0..<graph.modules.len() {
         loop item in graph.modules[module_index].program.items {
             if item == .Impl(definition) {
@@ -1328,8 +1335,8 @@ SemaCompilerEventsWatch: struct {
 // another shape.
 sema_compiler_events_watch: fn(args: [CallArg]) -> SemaCompilerEventsWatch? Never! {
     if args.len() != 2 || args[0].spread || args[1].spread -> return None
-    watch: if args[0].label == .Val(label) -> label.name.copy() else -> ""
-    if watch != "watch" -> return None
+    has_watch: if args[0].label == .Val(label) -> label.name == "watch" else -> false
+    if !has_watch -> return None
     if args[1].label == .Val(label) {
         if label.name != "handler" -> return None
     }
@@ -1369,14 +1376,14 @@ sema_compiler_events_call_target: fn(target: Expr, check: SemaBodyCheck) -> Stri
     None
 }
 
-sema_compiler_events_arg: fn(value: Expr, span: Span) -> CallArg Never! {
-    CallArg{convention: AccessConvention.Read, expr: value.copy(), span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}
+sema_compiler_events_arg: fn(value: ^^Expr, span: Span) -> CallArg Never! {
+    CallArg{convention: AccessConvention.Read, expr: value, span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}
 }
 
-sema_compiler_events_binding: fn(name: String, ty: Type?, init: Expr, span: Span) -> Stmt Never! {
+sema_compiler_events_binding: fn(name: String, ty: ^^Type?, init: Expr, span: Span) -> Stmt Never! {
     ^typed_span: Span?{None}
     if ty != None -> typed_span = Val(span)
-    Stmt.Val{binding: Binding{mutable: false, markers: [Marker]{}, reactive_upgrade: false, meta: None, name: name.copy(), name_span: span, sigil_span: None, pattern: None, ty: ty.copy(), ty_span: typed_span, init: init.copy(), is_comptime: false, ct: None, uninit: false, arena_view: false, string_view: false, gc_promotion: None, gc_transferred: false}}
+    Stmt.Val{binding: Binding{mutable: false, markers: [Marker]{}, reactive_upgrade: false, meta: None, name: name.copy(), name_span: span, sigil_span: None, pattern: None, ty: ty, ty_span: typed_span, init: init.copy(), is_comptime: false, ct: None, uninit: false, arena_view: false, string_view: false, gc_promotion: None, gc_transferred: false}}
 }
 
 // The marker struct whose value `m` is: the declaration of the struct `m`
@@ -1461,9 +1468,10 @@ sema_call_compiler_stages: fn(receiver: Expr, receiver_value: TExpr, args: [Call
 // session reads it (build_session_package_dir); the identity
 // itself when it has none.
 sema_build_package_name: fn(identity: String) -> String Never! {
-    parts: identity.split(":").to_list()
+    ^parts: identity.split(":").to_list()
     if parts.len() >= 3 && parts[0] == "package" && (Int.parse(parts[1]) ?? -1) == parts[2].len() {
-        return parts[2].copy()
+        loop parts.len() > 3 -> _: parts.pop()
+        return parts.pop() ?? ""
     }
     identity.copy()
 }
@@ -1611,34 +1619,35 @@ sema_call_build_option: fn(receiver: Expr, receiver_value: TExpr, method: String
             return failed
         }
     }
-    ^name: method.copy()
+    ^found: BuildOptionRow?{None}
     if pinned {
         // A lower-case `.optimize` parses as the implicit-receiver member
         // shorthand (a Field of the empty name), not as an enum value.
-        name = ""
         if args[0].expr == .Field(base, member, _, _) {
-            if base == .Ident(base_name, _, _) {
-                if base_name.len() == 0 && build_option_refusal(member) == .Val(refusal) {
+            if base == .Ident(base_name, _, _) && base_name.len() == 0 {
+                if build_option_refusal(member) == .Val(refusal) {
                     check.diagnostics.push(sema_error("E3502", args[0].span, "`.{member}` isn't a build option", refusal.law, "remove the `b.pin` call"))
                     return failed
                 }
-                if base_name.len() == 0 && build_option_row(member) != None -> name = member.copy()
+                found = build_option_row(member)
             }
         }
-        if name.len() == 0 {
+        if found == None {
             check.diagnostics.push(sema_error("E3502", args[0].span, "`b.pin` names a build option first", "the first argument is the option a pin holds, such as `.optimize`", "write `{shape}`"))
             return failed
         }
+    } else {
+        found = build_option_row(method)
     }
-    row: build_option_row(name) ?? return failed
+    row: found ?? return failed
     argument: args[wanted - 1]
-    shape_fix: "write `{sema_build_option_call_shape(method, name, pinned)}`"
+    shape_fix: "write `{sema_build_option_call_shape(method, row.name, pinned)}`"
     value: sema_build_option_value(row, argument.expr) ?? {
-        check.diagnostics.push(sema_error("E3502", argument.span, "this isn't a value of build option `{name}`", "`{name}` takes {build_option_variants_text(row)}", shape_fix))
+        check.diagnostics.push(sema_error("E3502", argument.span, "this isn't a value of build option `{row.name}`", "`{row.name}` takes {build_option_variants_text(row)}", shape_fix))
         return failed
     }
     if !build_option_accepts(row, value) {
-        check.diagnostics.push(sema_error("E3502", argument.span, "this isn't a value of build option `{name}`", "`{name}` takes {build_option_variants_text(row)}, each one line and none empty", shape_fix))
+        check.diagnostics.push(sema_error("E3502", argument.span, "this isn't a value of build option `{row.name}`", "`{row.name}` takes {build_option_variants_text(row)}, each one line and none empty", shape_fix))
         return failed
     }
     // Only the value is an ordinary argument: a pin's option name is a row
@@ -1651,7 +1660,7 @@ sema_call_build_option: fn(receiver: Expr, receiver_value: TExpr, method: String
         if !ownership.accepted || !ownership.complete -> return failed
     }
     values: [TExpr]{
-        sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: name}}}, args[0].span),
+        sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: row.name}}}, args[0].span),
         sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: value}}}, argument.span),
     }
     sent: if pinned -> "pin" else -> "option"

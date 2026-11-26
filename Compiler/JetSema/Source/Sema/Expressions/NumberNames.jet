@@ -124,9 +124,9 @@ sema_expr_number_name_read: fn(name: String, span: Span, index: Int, expected: T
     if sema_call_type_assignable(required, own, check) ?? true -> return unhandled
     if sema_expr_numeric_widening_to(own, required) == (Val(true)) -> return unhandled
     ^trial: [Diagnostic]{}
-    ^fitted: sema_probe_expression(literal, expected, check, trial) ?? return sema_expr_number_unfit(name, span, required, literal, trial, check.diagnostics)
+    ^fitted: sema_probe_expression(literal, expected, check, trial) ?? return sema_expr_number_unfit(name, span, required, literal, trial.move(), check.diagnostics)
     if sema_has_error_since(trial, 0) {
-        return sema_expr_number_unfit(name, span, required, literal, trial, check.diagnostics)
+        return sema_expr_number_unfit(name, span, required, literal, trial.move(), check.diagnostics)
     }
     binding: check.scopes.bindings[index].symbol.span
     if check.scopes.bindings[index].mutable {
@@ -178,9 +178,9 @@ sema_expr_number_constant_reread: fn(name: String, span: Span, index: Int, expec
     if sema_expr_numeric_widening_to(own, required) == (Val(true)) -> return unhandled
     literal: sema_expr_number_constant_literal(symbol, check.program.*) ?? return unhandled
     ^trial: [Diagnostic]{}
-    _: sema_probe_expression(literal, expected, check, trial) ?? return sema_expr_number_unfit(name, span, required, literal, trial, check.diagnostics)
+    _: sema_probe_expression(literal, expected, check, trial) ?? return sema_expr_number_unfit(name, span, required, literal, trial.move(), check.diagnostics)
     if sema_has_error_since(trial, 0) {
-        return sema_expr_number_unfit(name, span, required, literal, trial, check.diagnostics)
+        return sema_expr_number_unfit(name, span, required, literal, trial.move(), check.diagnostics)
     }
     ^value: sema_check_expression(literal, expected, check) ?? return SemaNumberNameRead{handled: true, value: None}
     value.span = span
@@ -220,16 +220,15 @@ sema_expr_number_constant_row: fn(name: String, check: SemaBodyCheck) -> Int? {
 // U8): the refusals the literal written at the use gets, reported at the use
 // and pointing at the number. Handled once one is reported; any other
 // refusal is the caller's ordinary mismatch.
-sema_expr_number_unfit: fn(name: String, span: Span, required: Type, literal: Expr, trial: [Diagnostic], diagnostics: ^[Diagnostic]) -> SemaNumberNameRead {
+sema_expr_number_unfit: fn(name: String, span: Span, required: Type, literal: Expr, trial: ^^[Diagnostic], diagnostics: ^[Diagnostic]) -> SemaNumberNameRead {
     ^reported: false
     if !sema_expr_is_numeric(required) && sema_expr_precise_name(required) == None {
         return SemaNumberNameRead{handled: false, value: None}
     }
     number: expr_span(literal)
-    loop refusal in trial {
+    loop refusal in trial.move() {
         if refusal.severity != DIAGNOSTIC_ERROR -> next
-        // copy: the trial's report moves to the use; the trial list is dropped.
-        ^moved: refusal.copy()
+        ^moved: refusal
         moved.span = Val(span)
         diagnostics.push(diagnostic_with_label(moved, number, "`{name}` is this number"))
         reported = true
@@ -341,9 +340,9 @@ sema_expr_number_retype: fn(binding: Span, known: [SemaNumberRetype]) -> Type? N
 // The refusals found by a check pass become known decisions: the earliest
 // use of each binding not yet decided. Returns whether one was added, which is
 // when another pass is due.
-sema_expr_number_accept_retypes: fn(known: ^[SemaNumberRetype], found: [SemaNumberRetype]) -> Bool Never! {
+sema_expr_number_accept_retypes: fn(known: ^[SemaNumberRetype], found: ^^[SemaNumberRetype]) -> Bool Never! {
     known_before: known.len()
-    loop retype in found {
+    loop retype in found.move() {
         ^decided: -1
         loop index in 0..<known.len() {
             if sema_expr_number_same_binding(known[index].binding, retype.binding) {
@@ -352,11 +351,9 @@ sema_expr_number_accept_retypes: fn(known: ^[SemaNumberRetype], found: [SemaNumb
             }
         }
         if decided < 0 {
-            // copy: `found` is the pass's list, which the pass drops.
-            known.push(retype.copy())
+            known.push(retype)
         } else if decided >= known_before && retype.use_span.start < known[decided].use_span.start {
-            // copy: `found` is the pass's list, which the pass drops.
-            known[decided] = retype.copy()
+            known[decided] = retype
         }
     }
     known.len() > known_before

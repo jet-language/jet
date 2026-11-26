@@ -114,7 +114,7 @@ sema_core_string_insert_sorted: fn(values: ^[String], value: String) Never! {
             break index
         }
     } ?? values.len()
-    values.push(value.copy())
+    values.push("")
     ^cursor: values.len() - 1
     loop cursor > index {
         values[cursor] = values[cursor - 1]
@@ -423,7 +423,7 @@ sema_core_generated_direct_item_roots: fn(items: [Item], used: ^[String], spans:
     }
 }
 
-sema_core_import_add: fn(imports: ^[SemaCoreImport], row: SemaCoreImport) Never! {
+sema_core_import_add: fn(imports: ^[SemaCoreImport], row: ^^SemaCoreImport) Never! {
     loop existing in imports {
         if existing.alias == row.alias {
             // Registration is authoritative. Keep the first resolved binding
@@ -431,7 +431,7 @@ sema_core_import_add: fn(imports: ^[SemaCoreImport], row: SemaCoreImport) Never!
             return
         }
     }
-    imports.push(row.copy())
+    imports.push(row)
 }
 
 sema_core_import_copy: fn(imports: [SemaCoreImport]) -> [SemaCoreImport] Never! {
@@ -1816,7 +1816,7 @@ sema_core_registration_imports_into: fn(registration_module: SemaRegistrationMod
 // Adds `row` as sema_core_import_add does. With `only`, a row of another
 // alias is skipped, and the first row of that alias (`imports` is empty
 // until then) is taken: true once it is.
-sema_core_import_offer: fn(imports: ^[SemaCoreImport], only: String?, row: SemaCoreImport) -> Bool Never! {
+sema_core_import_offer: fn(imports: ^[SemaCoreImport], only: String?, row: ^^SemaCoreImport) -> Bool Never! {
     if only == .Val(alias) && row.alias != alias -> return false
     sema_core_import_add(imports, row)
     only != None

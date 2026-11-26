@@ -272,7 +272,7 @@ sema_call_app_screen: fn(receiver_value: TExpr, args: [CallArg], span: Span, exp
         return rejected
     }
     text: if node -> [Type]{} else -> [Type]{shown}
-    opener: sema_app_screen_callback(sema_app_screen_opener(positional[1].expr, services, states[0], text, found, graph, span), sema_app_mux_param_type(receiver_value, SEMA_APP_SCREEN, 4, span, check) ?? return rejected, span, check) ?? return rejected
+    opener: sema_app_screen_callback(sema_app_screen_opener(positional[1].expr, services.move(), states[0], text, found, graph, span), sema_app_mux_param_type(receiver_value, SEMA_APP_SCREEN, 4, span, check) ?? return rejected, span, check) ?? return rejected
     query: loop field in found.query -> sema_app_text(field, span)
     listed: sema_app_strings(query, span)
     queried: sema_check_expression(listed, Val(sema_app_mux_param_type(receiver_value, SEMA_APP_SCREEN, 2, span, check) ?? return rejected), check) ?? return rejected
@@ -508,12 +508,12 @@ sema_app_remote_service: fn(graph: SemaRegistrationGraph, ty: Type, module_ident
 // `App.__remote<S>`) and the state one the state. The view runs in the
 // opener's own body, so it has the opener's unbounded effects
 // (`sema_app_screen_callback`): no inner callback bounds its Remotes' calls.
-sema_app_screen_opener: fn(view: Expr, services: [{ty: Type, key: String}?], state_ty: Type, text: [Type], found: SemaAppState, graph: SemaRegistrationGraph, span: Span) -> Expr Never! {
+sema_app_screen_opener: fn(view: Expr, services: ^^[{ty: Type, key: String}?], state_ty: Type, text: [Type], found: SemaAppState, graph: SemaRegistrationGraph, span: Span) -> Expr Never! {
     graph_name: "__jet_app_graph_{span.start}"
     fields_name: "__jet_app_fields_{span.start}"
     state_name: "__jet_app_state_{span.start}"
-    view_args: loop service in services -> {
-        argument: if service == .Val(remote) -> sema_app_member_call(sema_app_ident(graph_name, span), "__remote", [Type]{remote.ty.copy()}, [CallArg]{sema_app_arg(sema_app_text(remote.key.copy(), span), AccessConvention.Read, span)}, span) else -> sema_app_ident(state_name, span)
+    view_args: loop service in services.move() -> {
+        argument: if service != None -> sema_app_member_call(sema_app_ident(graph_name, span), "__remote", [Type]{service.ty}, [CallArg]{sema_app_arg(sema_app_text(service.key, span), AccessConvention.Read, span)}, span) else -> sema_app_ident(state_name, span)
         sema_app_arg(argument, AccessConvention.Read, span)
     }
     called: if {
@@ -724,9 +724,9 @@ sema_call_app_address: fn(member: String, alias: String, args: [CallArg], type_a
     }
     opened: locals[state_slot] ?? panic("the state's argument was bound above")
     ^names: [Expr]{}
-    texts: loop field in found.fields -> {
+    texts: loop field in found.fields.move() -> {
         names.push(sema_app_text(field, view_span))
-        read: Expr.Field{base: opened.copy(), member: field.copy(), span: view_span, id: AST_NODE_GENERATED}  // copy: each field reads the one bound state
+        read: Expr.Field{base: opened.copy(), member: field, span: view_span, id: AST_NODE_GENERATED}  // copy: each field reads the one bound state
         sema_app_graph_call(alias, SEMA_APP_ADDRESS_ARG, [Type]{}, [CallArg]{sema_live_arg(read, view_span)}, view_span)
     }
     taken: if member == "go" -> SEMA_APP_GO else -> SEMA_APP_URL_OF

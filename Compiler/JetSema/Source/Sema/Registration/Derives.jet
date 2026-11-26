@@ -3408,16 +3408,30 @@ sema_derive_distinct_forward_source: fn(items: [Item]) -> SemaDistinctForwards {
     count: expanded.len()
     ^problems: [Diagnostic]{}
     sema_derive_expand_builtin_items(expanded, problems)
-    loop name in names {
-        ^generated: [Item]{}
-        loop index in count..<expanded.len() {
-            if expanded[index] == .Impl(implementation) {
-                if implementation.type_name == name -> generated.push(expanded[index].copy())
+    ^buckets: [[Item]]{}
+    loop _ in 0..<names.len() -> buckets.push([Item]{})
+    ^appended: [Item]{}
+    loop expanded.len() > count {
+        item: expanded.pop() ?? break
+        appended.push(item)
+    }
+    loop appended.len() > 0 {
+        item: appended.pop() ?? break
+        ^slot: -1
+        if item == .Impl(implementation) {
+            loop name_index_value in 0..<names.len() {
+                if implementation.type_name == names[name_index_value] {
+                    slot = name_index_value
+                    break
+                }
             }
         }
-        if generated.len() > 0 {
-            id: name_index(name_intern(output.names, name))
-            text: sema_build_generate_format(generated)
+        if slot >= 0 -> buckets[slot].push(item)
+    }
+    loop name_index_value in 0..<names.len() {
+        if buckets[name_index_value].len() > 0 {
+            id: name_index(name_intern(output.names, names[name_index_value]))
+            text: sema_build_generate_format(buckets[name_index_value])
             if id == output.sources.len() -> output.sources.push(text) else {
                 output.sources[id] = text
             }
@@ -3641,10 +3655,12 @@ sema_computed_field_memo_helper_func: fn(definition: StructDef, field: Field, ma
     }
     helper.params = params
     reads_only: sema_computed_formula_reads_only(formula, definition.fields, 0)
-    helper.return_type = Val(field.ty.copy())
-    if reads_only && sema_failure_contract_is_default(helper.return_type) {
-        helper.return_type = Val(Type.Result{ok: field.ty.copy(), err: Type.Named{name: "Never"}})
+    ^return_type: Type?{Val(field.ty.copy())}
+    if reads_only && sema_failure_contract_is_default(return_type) {
+        ok_type: return_type ?? Type.Named{name: "Unit"}
+        return_type = Val(Type.Result{ok: ok_type, err: Type.Named{name: "Never"}})
     }
+    helper.return_type = return_type
     helper.return_type_span = Val(field.ty_span)
     helper.body = [Stmt]{Stmt.Return{value: Val(formula.copy()), span: field.name_span}}
     if reads_only {

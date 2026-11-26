@@ -49,26 +49,26 @@ sema_expr_pipe_step_without_value: fn(step: PipeStep, check: ^SemaBodyCheck) -> 
     why: "Each `|>` step receives the value of the line above as `<>`; a step that never reads it drops that value"
     // The method form is a placement only when no function placement fits.
     placements: sema_expr_pipe_placements(step, check)
-    ^fits: [SemaPipePlacement]{}
+    ^fits: [Int]{}
     forms: [Bool]{false, true}
     loop method in forms {
         if fits.len() > 0 -> break
-        loop placement in placements {
+        loop (index, placement) in placements {
             if placement.method != method -> next
-            // copy: the placement list is dropped once the fitting ones are kept.
-            if sema_expr_pipe_fits(placement.value, check) -> fits.push(placement.copy())
+            if sema_expr_pipe_fits(placement.value, check) -> fits.push(index)
         }
     }
     if fits.len() == 0 {
         return sema_error("E0438", step.span, what, why, "Write `<>` where the value goes, such as `|> f(<>)`, or end the pipe before this step")
     }
     if fits.len() == 1 {
-        return diagnostic_with_edit(sema_error("E0438", step.span, what, why, "Write `<>` where the value goes: `{fits[0].shown}`"), fits[0].edit)
+        fit: placements[fits[0]]
+        return diagnostic_with_edit(sema_error("E0438", step.span, what, why, "Write `<>` where the value goes: `{fit.shown}`"), fit.edit)
     }
-    shown: (loop fit in fits -> "`{fit.shown}`").join(", ")
-    ^diagnostic: diagnostic_with_edit_grade(sema_error("E0438", step.span, what, why, "`<>` fits in more than one place: {shown}; write it where the value goes"), fits[0].edit, DiagnosticFixApplicability.Suggested, DiagnosticFixSafety.NeedsReview)
+    shown: (loop fit_index in fits -> "`{placements[fit_index].shown}`").join(", ")
+    ^diagnostic: diagnostic_with_edit_grade(sema_error("E0438", step.span, what, why, "`<>` fits in more than one place: {shown}; write it where the value goes"), placements[fits[0]].edit, DiagnosticFixApplicability.Suggested, DiagnosticFixSafety.NeedsReview)
     loop index in 1..<fits.len() {
-        diagnostic = diagnostic_with_alternative_edit(diagnostic, fits[index].edit)
+        diagnostic = diagnostic_with_alternative_edit(diagnostic, placements[fits[index]].edit)
     }
     diagnostic
 }
@@ -104,25 +104,24 @@ sema_expr_pipe_placements: fn(step: PipeStep, check: ^SemaBodyCheck) -> [SemaPip
         close: step.span.end - 1
         loop slot in 0..call.args.len() {
             ^args: [CallArg]{}
-            ^shown: [String]{}
+            ^shown: ""
             loop index in 0..<call.args.len() {
                 if index == slot {
                     args.push(sema_expr_pipe_argument(step))
-                    shown.push("<>")
+                    shown = if shown == "" -> "<>" else -> "{shown}, <>"
                 }
                 // copy: each placement owns its rewritten step.
                 args.push(call.args[index].copy())
-                // copy: each placement's text lists every written argument.
-                shown.push(written[index].copy())
+                shown = if shown == "" -> written[index] else -> "{shown}, {written[index]}"
             }
             if slot == call.args.len() {
                 args.push(sema_expr_pipe_argument(step))
-                shown.push("<>")
+                shown = if shown == "" -> "<>" else -> "{shown}, <>"
             }
             edit: sema_expr_pipe_slot_edit(call.args, slot, close)
             // copy: each placement owns its rewritten step.
             rewritten: Call{name: call.name.copy(), name_span: call.name_span, type_args: call.type_args.copy(), args: args}
-            placements.push(SemaPipePlacement{value: Expr.Call{call: rewritten, id: id}, edit: edit, shown: "{call.name}({shown.join(", ")})", method: false})
+            placements.push(SemaPipePlacement{value: Expr.Call{call: rewritten, id: id}, edit: edit, shown: "{call.name}({shown})", method: false})
         }
         if !call.name.contains(".") {
             // copy: each placement owns its rewritten step.
