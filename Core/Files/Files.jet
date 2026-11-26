@@ -417,6 +417,14 @@ FileLock: struct {
     path: String -> stored_path,
     priv handle: Int,
 
+    // Kept only for CacheLease, which passes one lease lock into many specs
+    // while keeping its own handle open; every other caller uses ProcessSpec.keep_open.
+    pass_to: fn(self, spec: ^^ProcessSpec, at: Int) -[FS]> ProcessSpec Never! {
+        fd: rt.lock_fd(self) ?? -1
+        child: if at < 3 || at > 2147483646 -> -1 else -> at
+        process_rt.keep_open_raw(spec, fd, child, false).spec
+    }
+
     // The runtime handle's drop releases the lock after this close, so the
     // close has nothing left to do; being `Close` keeps the lock to one owner.
     impl Close {

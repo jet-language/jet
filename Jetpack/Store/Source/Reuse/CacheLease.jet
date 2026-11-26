@@ -384,7 +384,7 @@ CacheLease: struct {
             // The lock is lent: the spec duplicates its descriptor and the
             // lease keeps its own.
             if self.live_lock == {
-                .Val(live) -> { out = out.keep_open(live.owner, at: self.live_lock_child_fd) }
+                .Val(live) -> { out = live.owner.pass_to(out, self.live_lock_child_fd) }
                 .None -> {}
             }
         }
