@@ -1,14 +1,24 @@
-# Exact tests/jetpack_platform.rs:286-325; runtime PENDING-SAME-HEAD.
+# Exact tests/jetpack_platform.rs:286-325
 fixture: PlatformTierGateRecoversHostilePartialLeaseWithoutLosingGoodOutput.fixture
+env: NO_COLOR=1
 mkdir: package-root
 mkdir: missing-tools
+mkdir: fixtures
+mkdir: staging/bin
+mkdir: good-src
 step: jet build native.jet
 exit: 0
-step: jet test {root}/Jetpack/Store/Tests/PkgIntegrationPlatformSetup.jet --filter "S3 platform authentic fixture setup"
-env: JET_TEST_PLATFORM_SETUP={work}
-env: JET_TEST_PLATFORM_MODE=recover
+copy: .jet/build/native staging/bin/jetpack
+step: jetpack hangar ingest staging --name native-jetpack --version 1.0.0 --ref native-jetpack@jetpack --json --no-color
+env: JETPACK_ROOT={work}/package-root
 exit: 0
-capture: object = text file fixture-object
+capture: native_digest stdout doc $.output_hash
+write: fixtures/jetpack-native-jetpack.json = "[{\"drvPath\":\"/nix/store/0fixture00000000000000000000-native-jetpack.drv\",\"outputs\":{\"out\":\"{work}/package-root/hangar/objects/{cap:native_digest}\"}}]\n"
+write: good-src/payload = "fixture payload: platform-hostile-good"
+step: jetpack hangar ingest good-src --name platform-hostile-good --version 1.0 --ref fixture:platform-hostile-good --source-fingerprint sha256-fixture-source-platform-hostile-good --recipe-fingerprint sha256-fixture-recipe-platform-hostile-good --policy-fingerprint policy=fixture --provenance fixture --json --no-color
+env: JETPACK_ROOT={work}/package-root
+exit: 0
+capture: good_id stdout doc $.id
 mkdir: package-root/leases/4294967294-1-platform-hostile-good/snapshot/bin
 write: package-root/leases/4294967294-1-platform-hostile-good/snapshot/bin/partial = "interrupted"
 step: jetpack hangar recover --no-color
@@ -17,4 +27,4 @@ env: JETPACK_FIXTURES={work}/fixtures
 env: PATH={work}/missing-tools
 exit: 0
 file: package-root/leases/4294967294-1-platform-hostile-good absent
-file: {cap:object}/meta.json is-file
+file: package-root/hangar/{cap:good_id}/meta.json is-file

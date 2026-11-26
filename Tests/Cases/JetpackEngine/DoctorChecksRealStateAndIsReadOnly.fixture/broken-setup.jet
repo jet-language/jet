@@ -23,7 +23,9 @@ run: fn() {
     text: files.read(meta) ?? panic("meta")
     files.write(meta, text.replace("\"last_used_at\": \"{old_used}\"", "\"last_used_at\": \"0\"")) ?? panic("stale meta")
     doctor_setup_writable(output)
-    files.write(files.join(output, "payload"), "corrupt bytes") ?? panic("corrupt output")
+    payload: files.join(output, "payload")
+    files.remove(payload) ?? panic("unlink shared payload")
+    files.write(payload, "corrupt bytes") ?? panic("corrupt output")
     files.create_dir_all(files.join(root, ".locks")) ?? panic("locks")
     files.write(files.join(root, ".locks/abandoned.lock"), "pid=4294967294\n") ?? panic("stale lock")
 }

@@ -12,8 +12,13 @@ env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
 step: jetpack hangar ingest source --name repairable --ref repairable@fixture --no-color
 exit: 0 # rs:1094-1108 exit 0
-step: jetpack hangar export repairable@fixture --to unsigned.hangar --yes --no-color
+step: jetpack hangar export repairable@fixture --to unsigned.hangar --unsigned --yes --no-color
 exit: 0 # rs:1121-1134 exit 0
+capture: obj = sole-entry jetpack/hangar/objects kind dir
+chmod: {cap:obj} 0755
+chmod: {cap:obj}/payload 0644
+write: {cap:obj}/payload = "tampered bytes"
 step: jetpack hangar repair repairable@fixture --from unsigned.hangar --yes --no-color
 exit: 2 # rs:1149-1168
-stderr: ~ "unsigned Hangar archives" # rs:1149-1168
+stderr: ~ "Unsigned Hangar archives" # rs:1149-1168
+file: {cap:obj}/payload = "tampered bytes" # rs:1163-1169 untouched after unsigned repair refusal

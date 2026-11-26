@@ -1,49 +1,25 @@
 # HAND-PORT tests/jetpack_engine.rs:6019-6044 env_dash_p_merges_with_project_declared_packages
-# PENDING-GRAMMAR / PENDING-SAME-HEAD: authored, not runtime-proven.
 fixture: EnvDashPMergesWithProjectDeclaredPackages.fixture
 env: NO_COLOR=1
-refused: hangar-verified-fixture
-# Verbatim original setup and ALL predicates; no passing substitute for the named seam.
-# #[test]
-# fn env_dash_p_merges_with_project_declared_packages() {
-#     // The project's own declared package (`hello`, a `core` ref) and the
-#     // ad-hoc `-p greet` (nixpkgs) both land on PATH in the same shell.
-#     let (base, proj, root) = core_hello_project("dashp-merge");
-#     let fixtures = base.join("fixtures");
-#     let out = base.join("greet-out");
-#     write_runnable_fixture(&fixtures, &root, &out);
-#     let output = jetpack()
-#         .args(["env", "--no-color", "--trust", "--offline", "--fixtures"])
-#         .arg(&fixtures)
-#         .args(["-p", "greet", "--", "sh", "-c", "hello && greet"])
-#         .current_dir(&proj)
-#         .env("JETPACK_ROOT", &root)
-#         .env("HOME", base.join("home"))
-#         .output()
-#         .unwrap();
-#     assert!(
-#         output.status.success(),
-#         "stderr: {}",
-#         String::from_utf8_lossy(&output.stderr)
-#     );
-#     let stdout = String::from_utf8_lossy(&output.stdout);
-#     assert!(stdout.contains("hello from jet-pkgs"), "stdout: {stdout}");
-#     assert!(stdout.contains("hello from jetpack"), "stdout: {stdout}");
-# }
 env: JETPACK_ROOT={work}/root
+env: JETPACK_FIXTURES={work}/fixtures
+env: HOME={work}/home
+requires: os:unix
 mkdir: root
 mkdir: project
 mkdir: fixtures
-env: JETPACK_FIXTURES={work}/fixtures
-env: JETPACK_ROOT={work}/root
-mkdir: root
-mkdir: project
 mkdir: home
-when os unix: chmod: jet-pkgs/pkgs/hello/bin/hello 755
+mkdir: greet-src/bin
+write: greet-src/bin/greet = "#!/bin/sh\necho hello from jetpack\n"
+chmod: greet-src/bin/greet 0755
+chmod: jet-pkgs/pkgs/hello/bin/hello 0755
 write: project/env.jet env.template
+step: jetpack hangar ingest greet-src --name greet --version 1.0 --ref greet@jetpack --json --no-color
+exit: 0
+capture: greet_digest stdout doc $.output_hash
+write: fixtures/jetpack-greet.json = "[{\"drvPath\":\"/nix/store/0fixture00000000000000000000-greet.drv\",\"outputs\":{\"out\":\"{work}/root/hangar/objects/{cap:greet_digest}\"}}]\n"
 step: jetpack env --no-color --trust --offline --fixtures {work}/fixtures -p greet -- sh -c "hello && greet"
 cwd: project
 exit: 0
 stdout: ~ "hello from jet-pkgs" # original contains predicate
 stdout: ~ "hello from jetpack" # original contains predicate
-

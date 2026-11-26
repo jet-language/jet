@@ -56,6 +56,11 @@ cli_hangar_archive: fn(verification: StoreVerification, theme: Theme, parsed: CL
             if !(cli_hangar_confirm_apply(theme, parsed, action.label()) ?? return cli_status_encoding_error(err)) {
                 return EXIT_OK
             }
+            if parsed.flags.archive_unsigned {
+                bytes: store_export_unsigned_archive(verification, roots, entry, !parsed.flags.archive_no_deps) ?? return cli_hangar_archive_error(theme, parsed, action, err)
+                store_write_archive_file(destination, bytes) ?? return cli_hangar_archive_error(theme, parsed, action, err)
+                return cli_hangar_archive_done(theme, parsed, action, HangarArchiveReport{objects: 1, bytes: bytes.len(), signed: false, root: entry})
+            }
             exported: store_export_archive(verification, roots, entry, !parsed.flags.archive_no_deps, key) ?? return cli_hangar_archive_error(theme, parsed, action, err)
             store_write_archive_file(destination, exported.bytes) ?? return cli_hangar_archive_error(theme, parsed, action, err)
             cli_hangar_archive_done(theme, parsed, action, exported.report)
@@ -136,12 +141,16 @@ cli_hangar_archive_done: fn(theme: Theme, parsed: CLIParsed, action: HangarArchi
     EXIT_OK
 }
 
-// A rejected ingest found by `verify` keeps its E1315 identity; every other
-// archive failure is the E1340 Hangar operation failure.
+// A rejected ingest found by `verify` keeps its E1315 identity; a corrupt
+// closure journal found by `verify` reports the Hangar read failure; every
+// other archive failure is the E1340 Hangar operation failure.
 cli_hangar_archive_error: fn(theme: Theme, parsed: CLIParsed, action: HangarArchiveAction, error: StoreError) -[IO, FS, Env, Time.Wait]> Int Never! {
     message: error.message()
     if action == HangarArchiveAction.Verify && message.starts_with("hangar ingest ") {
         return cli_hangar_report_error(theme, parsed, "E1315", message, message, "Fix the rejected tree (path law, special files, or unsupported xattrs) and ingest again.")
+    }
+    if action == HangarArchiveAction.Verify && message.to_lower().starts_with("closure journal ") {
+        return cli_hangar_report_error(theme, parsed, "E1340", "could not read the Hangar", message, "repair the Hangar journal, then retry verification.")
     }
     cli_hangar_report_error(theme, parsed, "E1340", "Hangar {action.label()} failed", message, "check the archive signature and paths, or retry from a verified source archive.")
 }

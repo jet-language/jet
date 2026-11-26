@@ -1,12 +1,11 @@
-# Port of tests/jetpack_nix_closure_replay.rs:558-603; public assertions exact, runtime PENDING-SAME-HEAD.
-# Setup requires the named authentic fixture seam; no forged Store receipts/output identities.
-# Direct library claims LEDGER-ONLY in SEAMS.tsv; full original setup and predicates below.
-refused: lock-fixture
-# ORACLE-DERIVED refused: record_nix_realization Lock.rs3426 captures runtime BuildStamp timestamp3171-3219.
-# Therefore literal inputs407-442 do NOT determine every serialized byte; no approximated lock authored.
+# Port of tests/jetpack_nix_closure_replay.rs:558-603
+requires: os-name:linux
+requires: arch:x86_64
 fixture: LockedNixMissingBundleReportsRegisteredDiagnosticBeforeStoreMutation.fixture
 mkdir: package-root
 mkdir: home
+mkdir: project/.jet
+write: project/.jet/lock lock.template
 step: jetpack env --offline --no-color --trust -- true
 cwd: project
 env-clear: true

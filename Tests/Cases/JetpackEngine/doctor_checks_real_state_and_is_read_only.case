@@ -1,9 +1,7 @@
 # HAND-PORT tests/jetpack_engine.rs:2373-2630 doctor_checks_real_state_and_is_read_only
-# PENDING-GRAMMAR(batch-four) / PENDING-SAME-HEAD: source only.
 fixture: DoctorChecksRealStateAndIsReadOnly.fixture
 env: NO_COLOR=1
 requires: tool:git
-refused: store-ingest
 # Verbatim original setup/predicates; signing-bridge cache artifact subclaims RETIRE at Rust exit.
 # #[test]
 # fn doctor_checks_real_state_and_is_read_only() {
@@ -314,8 +312,8 @@ stderr: !~ "super-secret" # original negative contains predicate
 copy: matching-public keys/jet.ed25519.pub
 
 write: root/owned-output/payload trusted.template
-# store-ingest seam supplies the exact original IngestRequest at 2538-2558;
-# it must NOT use hangar ingest with CacheIdentity.empty() as a substitute.
+step: jetpack hangar ingest root/owned-output --name demo --version 1 --ref ./demo --source-fingerprint sha256-test-source --recipe-fingerprint sha256-test-recipe --policy-fingerprint sha256-test-policy --provenance "./demo via test" --no-color
+exit: 0
 step: jetpack explain demo --json --no-color
 cwd: project
 exit: 0

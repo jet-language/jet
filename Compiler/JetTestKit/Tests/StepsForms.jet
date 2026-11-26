@@ -106,6 +106,9 @@ use {
     assert(lines.detail.contains("stream predicate lines failed: >= 3: actual 2"))
     count: cases_test_advanced(root, "count", "step: printf abab\nstdout: count ab = 1 # original predicate\n").verdict
     assert(count.detail.contains("stream predicate count failed: = 1: actual 2"))
+    file_count: "write: hits = \"ab-ab-ab\"\nfile: hits count \"ab\" >= 2 # original count predicate\nfile: hits count \"ab\" > 2 # original count predicate\nfile: hits count \"ab\" <= 3 # original count predicate\nfile: hits count \"ab\" = 3 # original count predicate\n"
+    assert_eq(cases_test_advanced(root, "file-count-pass", file_count).verdict.status, "PASS")
+    assert_eq(cases_test_advanced(root, "file-count-fail", "write: hits = \"ab-ab\"\nfile: hits count \"ab\" >= 3 # original count predicate\n").verdict.status, "FAIL")
     files.remove_all(root) ?? panic("remove forms capture scratch")
 }
 

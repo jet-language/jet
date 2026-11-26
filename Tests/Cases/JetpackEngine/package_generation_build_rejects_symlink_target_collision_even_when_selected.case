@@ -1,50 +1,26 @@
 # HAND-PORT tests/jetpack_engine.rs:1668-1702 package_generation_build_rejects_symlink_target_collision_even_when_selected
-# PENDING-GRAMMAR(batch-four) / PENDING-SAME-HEAD: source only.
 fixture: PackageGenerationBuildRejectsSymlinkTargetCollisionEvenWhenSelected.fixture
 env: NO_COLOR=1
 requires: os:unix
-refused: store-ingest
-# Full original setup, observations and predicates preserved: this refusal is NOT a passing replacement.
-# #[test]
-# fn package_generation_build_rejects_symlink_target_collision_even_when_selected() {
-#     use std::os::unix::fs::symlink;
-# 
-#     let project = Scratch::new("profile-generation-symlink-collision-project");
-#     let root = Scratch::new("profile-generation-symlink-collision-root");
-#     let fixtures = Scratch::new("profile-generation-symlink-collision-fixtures");
-# 
-#     for (package, target) in [("left", "left-target"), ("right", "right-target")] {
-#         seed_profile_fixture(&root.path, &fixtures.path, package, |staging| {
-#             let bin = staging.join("bin");
-#             fs::create_dir_all(&bin).unwrap();
-#             fs::write(bin.join(target), format!("{target}\n")).unwrap();
-#             symlink(target, bin.join("editor")).unwrap();
-#         });
-#     }
-#     fs::write(
-#         project.join("env.jet"),
-#         "module profile.dev { packages: [default.left, default.right] collisions: {\"bin/editor\": \"left@default\"} }\n",
-#     )
-#     .unwrap();
-#     let output = jetpack()
-#         .args(["profile", "build", "dev", "--no-color", "--offline"])
-#         .current_dir(&project.path)
-#         .env("JETPACK_ROOT", &root.path)
-#         .env("JETPACK_FIXTURES", &fixtures.path)
-#         .output()
-#         .unwrap();
-#     assert_eq!(output.status.code(), Some(2));
-#     let stderr = String::from_utf8_lossy(&output.stderr);
-#     assert!(stderr.contains("E1335"), "{stderr}");
-#     assert!(stderr.contains("symlink-target mismatch"), "{stderr}");
-#     assert!(stderr.contains("left@default"), "{stderr}");
-#     assert!(stderr.contains("right@default"), "{stderr}");
-# }
 env: JETPACK_ROOT={work}/root
+env: JETPACK_FIXTURES={work}/fixtures
 mkdir: root
 mkdir: project
 mkdir: fixtures
-env: JETPACK_FIXTURES={work}/fixtures
+mkdir: left-src/bin
+mkdir: right-src/bin
+write: left-src/bin/left-target = "left-target\n"
+symlink: left-target left-src/bin/editor
+write: right-src/bin/right-target = "right-target\n"
+symlink: right-target right-src/bin/editor
+step: jetpack hangar ingest left-src --name left --version 1.0 --ref left@default --json --no-color
+exit: 0
+capture: left_digest stdout doc $.output_hash
+step: jetpack hangar ingest right-src --name right --version 1.0 --ref right@default --json --no-color
+exit: 0
+capture: right_digest stdout doc $.output_hash
+write: fixtures/jetpack-left.json = "[{\"drvPath\":\"/nix/store/0fixture00000000000000000000-left.drv\",\"outputs\":{\"out\":\"{work}/root/hangar/objects/{cap:left_digest}\"}}]\n"
+write: fixtures/jetpack-right.json = "[{\"drvPath\":\"/nix/store/0fixture00000000000000000000-right.drv\",\"outputs\":{\"out\":\"{work}/root/hangar/objects/{cap:right_digest}\"}}]\n"
 step: jetpack profile build dev --no-color --offline
 cwd: project
 exit: 2
