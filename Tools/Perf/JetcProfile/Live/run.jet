@@ -25,7 +25,7 @@ run: fn() -> Never Err! {
     }
     pid: args[0]
     step(Sh{"kill -0 {pid}"}.status())
-    jet: process.env_nonempty("JET") ?? "jet"
+    jet: Path.from(process.env_nonempty("JET") ?? "jet")
     // What sourcing roots.sh leaves set: the environment with the machine's
     // env file over it, and the output directory under the scratch root,
     // single quoted so any path reads back as itself.

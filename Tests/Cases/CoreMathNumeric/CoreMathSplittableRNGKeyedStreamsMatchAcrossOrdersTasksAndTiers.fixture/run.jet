@@ -1,0 +1,83 @@
+package: {
+    name: "splittable_rng_tiers"
+    version: "0.1.0"
+    authority: { allow: [IO, Mem.Alloc, Time.Wait] }
+}
+
+use random: core.math.random
+
+worker_fingerprint: fn(seed: Int, name: String) -> String {
+    ^stream: random.rng(seed, "worker", name)
+    a: stream.int(0, 1000000)
+    b: stream.int(0, 1000000)
+    c: stream.bool()
+    "{name}:{a}:{b}:{c}"
+}
+
+run_pre_split: fn(stream: ^^random.RNG, label: String) -> String {
+    ^owned: stream
+    a: owned.int(0, 1000000)
+    b: owned.int(0, 1000000)
+    c: owned.bool()
+    "{label}:{a}:{b}:{c}"
+}
+
+run: fn() {
+    // Forward vs reverse split order with interleaved draws.
+    ^fwd: random.rng(1337)
+    ^fa: fwd.split("alpha", "1")
+    ^fb: fwd.split("beta", "2")
+    ^fc: fwd.split("gamma", "3")
+
+    ^rev: random.rng(1337)
+    ^_: rev.int(1, 50)
+    ^rc: rev.split("gamma", "3")
+    ^_: rev.float()
+    ^rb: rev.split("beta", "2")
+    ^_: rev.bool()
+    ^ra: rev.split("alpha", "1")
+
+    print("order:{fa.int(0, 1000000) == ra.int(0, 1000000)}:{fb.int(0, 1000000) == rb.int(0, 1000000)}:{fc.int(0, 1000000) == rc.int(0, 1000000)}")
+
+    // Concurrent tasks in forward and reversed schedules match pre-split children.
+    ^parent: random.rng(1337)
+    pre_0: parent.split("worker", "0")
+    pre_1: parent.split("worker", "1")
+    pre_2: parent.split("worker", "2")
+    pre_3: parent.split("worker", "3")
+
+    seq_0: run_pre_split(^^pre_0, "0")
+    seq_1: run_pre_split(^^pre_1, "1")
+    seq_2: run_pre_split(^^pre_2, "2")
+    seq_3: run_pre_split(^^pre_3, "3")
+
+    par_fwd: task.all {
+        worker_fingerprint(1337, "0"),
+        worker_fingerprint(1337, "1"),
+        worker_fingerprint(1337, "2"),
+        worker_fingerprint(1337, "3"),
+    } ?? panic("par_fwd failed")
+
+    par_rev: task.all {
+        worker_fingerprint(1337, "3"),
+        worker_fingerprint(1337, "2"),
+        worker_fingerprint(1337, "1"),
+        worker_fingerprint(1337, "0"),
+    } ?? panic("par_rev failed")
+
+    print("tasks_fwd:{par_fwd[0] == seq_0}:{par_fwd[1] == seq_1}:{par_fwd[2] == seq_2}:{par_fwd[3] == seq_3}")
+    print("tasks_rev:{par_rev[3] == seq_0}:{par_rev[2] == seq_1}:{par_rev[1] == seq_2}:{par_rev[0] == seq_3}")
+
+    // Distinct keys and distinct parent seeds yield distinct streams.
+    ^k1: parent.split("a", "bc")
+    ^k2: parent.split("ab", "c")
+    ^k3: random.rng(1338, "a", "bc")
+    d1: k1.int(0, 1000000000)
+    d2: k2.int(0, 1000000000)
+    d3: k3.int(0, 1000000000)
+    print("distinct:{d1 != d2 && d1 != d3 && d2 != d3}")
+    print(seq_0)
+    print(seq_1)
+    print(seq_2)
+    print(seq_3)
+}

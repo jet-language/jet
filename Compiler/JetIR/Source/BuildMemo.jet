@@ -143,13 +143,28 @@ ir_memo_enter: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, function: FnBody) N
         ir_store_at(m, p, b, opened, offsets[at], duplicate)
         ir_move_stored(m, p, b, rows[at], opened, offsets[at])
     }
+    if m.test_reset {
+        cell_object: ir_memo_cell_object(m, key)
+        ^seen: false
+        loop existing in m.test_memo_resets {
+            if existing.cell == cell_object {
+                seen = true
+                break
+            }
+        }
+        if !seen {
+            ^reset_rows: [Int]{}
+            loop row in rows -> reset_rows.push(row)
+            ^reset_offsets: [Int]{}
+            loop offset in offsets -> reset_offsets.push(offset)
+            m.test_memo_resets.push(IRTestMemoReset{cell: cell_object, rows: reset_rows, offsets: reset_offsets, value_offset: value_offset, result_row: result_row, size: size})
+        }
+    }
     b.memo = Val(IRMemo{cell: cell, entry: opened, rows: rows, offsets: offsets, value_offset: value_offset, size: size, bound: bound})
 }
 
-// The slot holding the address of the store cell of the function keyed
-// `key`, a zeroed writable static object (Memo.jet's [mutex, count,
-// capacity, entries, hits, misses]) per function instance.
-ir_memo_cell: fn(m: ^IRModule, b: ^IRBuilder, key: String) -> Int Never! {
+// The static data row index of the store cell of the function keyed `key`.
+ir_memo_cell_object: fn(m: ^IRModule, key: String) -> Int Never! {
     object_key: "memo:{key}"
     ^object: name_column_value(m.constant_rows_keys, m.constant_rows, object_key) ?? -1
     if object < 0 {
@@ -161,6 +176,14 @@ ir_memo_cell: fn(m: ^IRModule, b: ^IRBuilder, key: String) -> Int Never! {
         m.data_relocs[object] = [IRDataReloc]{}
         name_column_set(m.constant_rows_keys, m.constant_rows, object_key, object)
     }
+    object
+}
+
+// The slot holding the address of the store cell of the function keyed
+// `key`, a zeroed writable static object (Memo.jet's [mutex, count,
+// capacity, entries, hits, misses]) per function instance.
+ir_memo_cell: fn(m: ^IRModule, b: ^IRBuilder, key: String) -> Int Never! {
+    object: ir_memo_cell_object(m, key)
     pointer_row: ir_pointer_row(m)
     address: ir_temp(m, b, pointer_row)
     ir_emit(b.f, IROp.DataAddress, address, object, -1, -1, b.line)

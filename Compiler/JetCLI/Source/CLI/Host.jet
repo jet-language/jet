@@ -4202,6 +4202,8 @@ jet_cli_fmt_package_manifest: fn(source: String, origin: String) -> JetCLIFmtSou
 // The module policy that turns every implicit copy site into a Safe `.copy()` edit.
 JET_CLI_FMT_EXPLICIT_COPIES_POLICY: "#Policy(copies: .Explicit)\n"
 
+JET_CLI_FMT_EXPLICIT_COPIES_TEXT: ".copy()"
+
 // The module policy that turns every unmarked call that can pass a failure
 // up into a Safe `?` edit (E0434).
 JET_CLI_FMT_EXPLICIT_FAILURES_POLICY: "#Policy(failures: .Explicit)\n"
@@ -4214,85 +4216,18 @@ JetCLIFmtMark: struct {
     report: Int,
 }
 
-// The `jet fmt` copy materialization: `origin` must check clean as written,
-// then `.copy()` goes in at every implicit copy site. The sites are sema's one
-// copy-site rule (#3738): the Safe `.copy()` edits it gives the same bytes
-// under `#Policy(copies: .Explicit)` are the copies the default policy makes
-// implicitly. Sema spans point into the source as read, so marks go in before
-// any package-target migration.
+// The `jet fmt` copy materialization: `.copy()` goes in at every implicit copy
+// site using sema's Safe `.copy()` edits through the shared per-package pass.
 jet_cli_fmt_explicit_copies: fn(source: String, origin: String, color: Bool) -> JetCLIFmtSource {
-    jet_cli_fmt_policy_marks(source, origin, color, JET_CLI_FMT_EXPLICIT_COPIES_POLICY, "", [String]{".copy()"})
+    ^checks: jet_cli_fmt_check_memo()
+    jet_cli_fmt_explicit_copies_memo(source, origin, color, checks)
 }
 
-// `?` at every call that passes a failure up by itself: the Safe edits of
-// E0434 under `#Policy(failures: .Explicit)`, `(call()?)` for a call read as
-// a receiver. A file already under the policy may owe marks, so its own
-// E0434 reports don't stop the run.
+// `?` at every call that passes a failure up by itself, backed by the shared
+// per-package checked-insertion pass (`FormatMarks.jet`).
 jet_cli_fmt_explicit_failures: fn(source: String, origin: String, color: Bool) -> JetCLIFmtSource {
-    jet_cli_fmt_policy_marks(source, origin, color, JET_CLI_FMT_EXPLICIT_FAILURES_POLICY, "E0434", [String]{"?", "(", "?)"})
-}
-
-// `source` with the insertions `policy` asks for: `origin` must check clean
-// as written, apart from the reports `code` names ("" for none); then each
-// Safe insertion of a text in `texts` that sema gives with `policy` prepended
-// goes in, from the reports `code` names (any report for ""). A file that
-// already declares the policy owes its marks as written: the prepended copy
-// is a second module declaration of the policy, which the check refuses, so
-// the file's own `code` reports give them.
-jet_cli_fmt_policy_marks: fn(source: String, origin: String, color: Bool, policy: String, code: String, texts: [String]) -> JetCLIFmtSource {
-    if jet_cli_compile_file(origin, color, None, JetDriverCompileMode.Program) == {
-        .Refused(refusal) -> return JetCLIFmtSource{text: "", diagnostics: [Diagnostic]{}, report: Val(refusal.stderr)}
-        .Compiled(result, snapshot) -> {
-            diagnostics: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
-            ^blocking: [Diagnostic]{}
-            loop diagnostic in jet_cli_errors(diagnostics) {
-                if code == "" || diagnostic.code != code -> blocking.push(diagnostic)
-            }
-            if blocking.len() > 0 -> return jet_cli_fmt_rejected(diagnostics)
-        }
-    }
-    // Mark sites are byte offsets, so the source is cut from its bytes.
-    bytes: source.bytes()
-    prepended: jet_cli_compile_entry(origin, color, None, JetDriverCompileMode.Program, Val("{policy}{source}"), None)
-    ^marks: jet_cli_fmt_marks_of(prepended, code, texts, policy.len(), bytes.len()) ?? jet_cli_fmt_marks_of(jet_cli_compile_entry(origin, color, None, JetDriverCompileMode.Program, Val(source), None), code, texts, 0, bytes.len()) ?? [JetCLIFmtMark]{}
-    marks.sort_by(fn(left: JetCLIFmtMark, right: JetCLIFmtMark) { left.site <=> right.site })
-    ^marked: ""
-    ^cursor: 0
-    loop mark in marks {
-        marked = "{marked}{foundation_byte_text(bytes, cursor, mark.site)}{mark.text}"
-        cursor = mark.site
-    }
-    jet_cli_fmt_formatted("{marked}{foundation_byte_text(bytes, cursor, bytes.len())}")
-}
-
-// The marks the Safe edits of the checked `compiled` give, `shift` bytes of
-// prepended policy ahead of the `length`-byte source. None when the check
-// gives no result, or, for a `code`, reports any other error.
-jet_cli_fmt_marks_of: fn(compiled: JetCLICompiled, code: String, texts: [String], shift: Int, length: Int) -> [JetCLIFmtMark]? {
-    if compiled == .Compiled(result, snapshot) {
-        diagnostics: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
-        if code != "" {
-            loop diagnostic in jet_cli_errors(diagnostics) {
-                if diagnostic.code != code -> return None
-            }
-        }
-        ^marks: [JetCLIFmtMark]{}
-        loop diagnostic in diagnostics {
-            owner: diagnostic.origin ?? next
-            first: diagnostic.edit ?? next
-            if owner.path != snapshot.entry_path || (code != "" && diagnostic.code != code) -> next
-            // Every report at one copy site asks for the one copy; a failure
-            // mark's report names its call, and a receiver chain's calls can
-            // all open at one byte, each with its own `(`.
-            report: if code != "" && diagnostic.span == .Val(at) -> at.start else -> 0
-            jet_cli_fmt_add_mark(marks, first, texts, shift, length, report)
-            loop edit in diagnostic.fix_edits {
-                jet_cli_fmt_add_mark(marks, edit, texts, shift, length, report)
-            }
-        }
-        return Val(marks)
-    }
-    None
+    ^checks: jet_cli_fmt_check_memo()
+    jet_cli_fmt_explicit_failures_memo(source, origin, color, checks)
 }
 
 jet_cli_fmt_add_mark: fn(marks: ^[JetCLIFmtMark], edit: TextEdit, texts: [String], shift: Int, length: Int, report: Int) Never! {
@@ -4313,21 +4248,32 @@ jet_cli_fmt_add_mark: fn(marks: ^[JetCLIFmtMark], edit: TextEdit, texts: [String
 
 // `format_source_for_fmt`: `package.jet` through the Package model, whose
 // manifest syntax is not Jet; every other source (a `Config` record too)
-// through the one Jet formatter, after optional copy and failure marks.
-// `hooks` keeps what the run learned of each package's block hooks.
+// through the one Jet formatter, after optional checked call, copy, and
+// failure marks. `hooks` keeps what the run learned of each package's block
+// hooks; `checks` caches at most one compile per package across the run.
 jet_cli_fmt_format_source: fn(source: String, origin: String, explicit_copies: Bool, explicit_failures: Bool, simplify: Bool, color: Bool, hooks: ^JetCLIToolStageMemo) -> JetCLIFmtSource {
+    ^checks: jet_cli_fmt_check_memo()
+    jet_cli_fmt_format_source_with_memo(source, origin, explicit_copies, explicit_failures, simplify, color, hooks, checks)
+}
+
+jet_cli_fmt_format_source_with_memo: fn(source: String, origin: String, explicit_copies: Bool, explicit_failures: Bool, simplify: Bool, color: Bool, hooks: ^JetCLIToolStageMemo, checks: ^JetCLIFmtCheckMemo) -> JetCLIFmtSource {
     if jet_cli_fmt_is_package_manifest_file(origin) {
         return jet_cli_fmt_package_manifest(source, origin)
     }
     ^marked: source
+    if cli_files.is_file(origin) {
+        call_marks: jet_cli_fmt_call_marks(marked, origin, color, checks)
+        if call_marks.report != None || call_marks.diagnostics.len() > 0 -> return call_marks
+        marked = call_marks.text
+    }
     if explicit_copies && cli_files.is_file(origin) {
-        copies: jet_cli_fmt_explicit_copies(source, origin, color)
+        copies: jet_cli_fmt_explicit_copies_memo(marked, origin, color, checks)
         if copies.report != None || copies.diagnostics.len() > 0 -> return copies
         marked = copies.text
     }
-    copy_marks_inserted: marked != source
+    copy_marks_inserted: explicit_copies && marked != source
     if explicit_failures && cli_files.is_file(origin) {
-        failures: jet_cli_fmt_explicit_failures(marked, origin, color)
+        failures: jet_cli_fmt_explicit_failures_memo(marked, origin, color, checks)
         if failures.report != None || failures.diagnostics.len() > 0 -> return failures
         marked = failures.text
     }
@@ -4404,8 +4350,8 @@ jet_cli_fmt_is_library_source: fn(origin: String) -> Bool {
 JET_CLI_FMT_LIBRARY_DIRECTORIES: [String]{"Core", "Compiler/Prelude"}
 
 // Format one source (`run_fmt` preflight).
-jet_cli_fmt_one: fn(path: String, source: String, request: JetCLIFmtRequest, hooks: ^JetCLIToolStageMemo) -> JetCLIFmtFile {
-    formatted: jet_cli_fmt_format_source(source, path, request.explicit_copies, request.explicit_failures, request.simplify, request.color, hooks)
+jet_cli_fmt_one: fn(path: String, source: String, request: JetCLIFmtRequest, hooks: ^JetCLIToolStageMemo, checks: ^JetCLIFmtCheckMemo) -> JetCLIFmtFile {
+    formatted: jet_cli_fmt_format_source_with_memo(source, path, request.explicit_copies, request.explicit_failures, request.simplify, request.color, hooks, checks)
     if formatted.report != None || formatted.diagnostics.len() > 0 {
         return JetCLIFmtFile{path: path, original: source, formatted: "", changed: false, io_error: None, diagnostics: formatted.diagnostics, report: formatted.report}
     }

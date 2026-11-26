@@ -946,6 +946,21 @@ TASK_EXIT_DRAIN_NS: I64{1000000000}
     task_live_unfinished(root)
 }
 
+// Waits for any leftover tasks a test started before the test harness resets
+// module globals, Shared holders and `#Memo` stores for the next test.
+// Zero-cost when no scheduler was started or every task already finished.
+task_test_drain: fn() {
+    root: scheduler_root
+    if root == (I64{0}) -> return
+    if task_live_unfinished(root) == (I64{0}) {
+        sync_thread_lock(root)
+        settled: sync_load(wrapping(root + I64{256})) == I64{0} && sync_load(wrapping(root + I64{168})) == I64{0} && sync_load(wrapping(root + I64{40})) == sync_load(wrapping(root + I64{48}))
+        sync_thread_unlock(root)
+        if settled -> return
+    }
+    ^_: jet_rt_task_exit_settle(I64{0})
+}
+
 // RuntimeLower resolves this checked address through its sole intrinsic table.
 rt_task_exit_settle_address: fn() -> I64 {
     loop { jet_rt_unreachable(I64{0}, I64{0}) }

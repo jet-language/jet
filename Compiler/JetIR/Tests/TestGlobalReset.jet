@@ -1,0 +1,356 @@
+// Per-test world reset (#7032 n2): test builds emit `test.reset` to drop and
+// restore baked mutable globals, reset deferred-start globals, reset registered
+// World sites / module `Shared{X}` holders, and drain `#Memo` caches between
+// tests — while shipped builds (`ir_build_program`) emit zero reset data or
+// code. Verifies IR lint and x86-64 codegen across O0, O1, and O2.
+use {
+    jet_foundation.[
+        AccessConvention,
+        BodyCallArg,
+        BodyNode,
+        BodyParameter,
+        BodyPlace,
+        BodyRequireKind,
+        BodyTree,
+        DeclTable,
+        FnBody,
+        NameVisibility,
+        NodeKind,
+        ParamZone,
+        Span,
+        StmtKind,
+        Symbol,
+        SymbolID,
+        SymbolKind,
+        TComptimeValue,
+        TConstantDef,
+        TEffectFacts,
+        TEffectSpan,
+        TExprType,
+        TFailureCarrier,
+        TFuncKind,
+        TGenericParam,
+        TImplDef,
+        TLocal,
+        TPanicLoc,
+        TPanicLocal,
+        TTypeDef,
+        TWebParamReconstruction,
+        TYPE_ID_INT,
+        TYPE_ID_UNIT,
+        Type,
+        body_tree_new,
+        compiler_threads_single,
+        decl_table_add,
+        decl_table_index,
+        interner,
+        module_none,
+        symbol_intern,
+        symbol_table,
+        type_intern_syntax,
+    ]
+    jet_ir.[
+        IRBacktrace,
+        IRBoundsMode,
+        IRBuildResult,
+        IRChecks,
+        IRModule,
+        IROp,
+        IROutputCheck,
+        IRSourceTexts,
+        IRTestCase,
+        IRTestHarness,
+        ir_build_program,
+        ir_build_tests,
+        ir_lint_module,
+        ir_lint_text,
+        ir_opt_options,
+        ir_optimize_module,
+        ir_x64_compile_module,
+    ]
+    jet_sema.[SemaCheckedForeignFunction]
+}
+
+priv tgr_checks: fn() -> IRChecks {
+    IRChecks{bounds: IRBoundsMode.Fatal, modules: [U32:Bool]{}, backtrace: IRBacktrace.Off, keep: false}
+}
+
+priv tgr_fn_body: fn(name: String, key: String, params: [BodyParameter], ret: Type?, body: [Int], tree: ^^BodyTree, memo: Bool) -> FnBody {
+    FnBody{
+        name: name,
+        module_name: "demo",
+        module_identity: module_none(),
+        key: key,
+        source_file: "demo.jet",
+        source_span: Span{start: 0, end: 1},
+        failure_carrier: TFailureCarrier.Infallible,
+        effects: TEffectFacts{direct: [String]{}, solved: [String]{}, call_edges: [String]{}, maximal: false, direct_spans: [TEffectSpan]{}},
+        web_bucket: None,
+        web_marker: None,
+        visibility: NameVisibility.Public,
+        foreign: None,
+        params: params,
+        web_param_reconstructions: [TWebParamReconstruction]{},
+        ret: ret,
+        gc_return: false,
+        gc_scope: false,
+        return_view_provenance: None,
+        generic_params: [TGenericParam]{},
+        is_main: false,
+        line: 1,
+        synthetic: false,
+        is_unsafe: false,
+        unsafe_gate: None,
+        is_pure: memo,
+        memo_bound: if memo -> Val(16) else -> None,
+        memo_unbounded: false,
+        is_reactive: false,
+        reactive_upgrades: [String]{},
+        is_inline: false,
+        is_inline_always: false,
+        is_scalar: false,
+        kernel_proof: None,
+        uses_stack_sentry: false,
+        body: body,
+        kind: TFuncKind.TopLevel,
+        tree: tree.move(),
+    }
+}
+
+priv tgr_storage_def: fn(key: String, name: String, ty: Type, value: TComptimeValue, shared_holder: Bool) -> TConstantDef {
+    TConstantDef{
+        module_identity: module_none(),
+        key: key,
+        name: name,
+        symbol_key: key,
+        span: Span{start: 0, end: 1},
+        visibility: NameVisibility.Public,
+        ty: ty,
+        is_comptime: false,
+        is_storage: !shared_holder,
+        value: value,
+        shared_holder: shared_holder,
+    }
+}
+
+// Builds either a shipped program (`as_tests == false`) or a native test
+// harness (`as_tests == true`) whose body touches and mutates:
+// - baked scalar mutable global (`score: Int`, asserts 0 then assigns 42)
+// - baked heap list mutable global (`items: [Int]`, reads then assigns `[99]`)
+// - deferred-start mutable global (`cell: Shared<Int>`)
+// - module `Shared<Int>` holder (`counter: Shared<Int>`)
+// - `#Memo` pure function (`cost(x: Int) -> Int`, called twice)
+priv tgr_build: fn(as_tests: Bool) -> IRBuildResult {
+    span: Span{start: 0, end: 1}
+    ^symbols: symbol_table()
+    ^decls: DeclTable{}
+    ^types: interner()
+
+    int_list_ty: Type.List{element: Type.Int}
+    shared_int_ty: Type.Shared{inner: Type.Int}
+    int_list_tid: type_intern_syntax(types, int_list_ty)
+    shared_int_tid: type_intern_syntax(types, shared_int_ty)
+
+    score_key: "constant:demo.score"
+    items_key: "constant:demo.items"
+    cell_key: "constant:demo.cell"
+    counter_key: "constant:demo.counter"
+    memo_key: "function:demo.cost"
+    entry_key: "function:demo.test_one"
+
+    score_sym: symbol_intern(symbols, score_key)
+    items_sym: symbol_intern(symbols, items_key)
+    cell_sym: symbol_intern(symbols, cell_key)
+    counter_sym: symbol_intern(symbols, counter_key)
+    memo_sym: symbol_intern(symbols, memo_key)
+    entry_sym: symbol_intern(symbols, entry_key)
+
+    memo_decl: decl_table_add(decls, Symbol{id: memo_sym, kind: SymbolKind.Function, name: "cost", module_identity: module_none(), owner: None, span: span, ty: None, visibility: 0})
+    _: decl_table_add(decls, Symbol{id: entry_sym, kind: SymbolKind.Function, name: "test_one", module_identity: module_none(), owner: None, span: span, ty: None, visibility: 0})
+    decl_table_index(decls)
+
+    // #Memo(16) cost: fn(x: Int) -[]> Int { return x }
+    x_local: TLocal{name: "x", symbol_id: None, span: span, ty: Type.Int, generated: false, deref: false, address_lifetime: None, persist_key: None, persist_ty: None, mutable: false, string_bytes_source: None, integer_bounds: None, uninit_scalar: false, uninit_fixed: false}
+    ^memo_tree: body_tree_new()
+    memo_tree.nodes.push(BodyNode{id: 1, kind: NodeKind.Local{local: x_local}, span: span})
+    memo_tree.expr_types.push(TExprType{id: 1, ty: TYPE_ID_INT})
+    memo_tree.stmts.push(StmtKind.Return{value: Val(1), span: span})
+    memo_fn: tgr_fn_body(
+        "cost",
+        memo_key,
+        [BodyParameter]{BodyParameter{local: x_local, name: "x", span: span, ty: Type.Int, convention: AccessConvention.Read, public_label: "x", zone: ParamZone.Either, default: None, variadic: false}},
+        Val(Type.Int),
+        [Int]{0},
+        memo_tree.move(),
+        true,
+    )
+
+    // test_one / run:
+    //   assert_eq(score, 0)
+    //   score = 42
+    //   items = [Int]{99}
+    //   _: cell
+    //   _: counter
+    //   _: cost(5)
+    //   _: cost(5)
+    loc: TPanicLoc{file: "demo.jet", source_line: "assert_eq(score, 0)", line: 1, column: 1, caret: 1, function: "test_one", locals: [TPanicLocal]{}}
+    score_local: TLocal{name: "score", symbol_id: Val(score_sym), span: span, ty: Type.Int, generated: false, deref: false, address_lifetime: None, persist_key: Val(score_key), persist_ty: Val(Type.Int), mutable: true, string_bytes_source: None, integer_bounds: None, uninit_scalar: false, uninit_fixed: false}
+    items_local: TLocal{name: "items", symbol_id: Val(items_sym), span: span, ty: int_list_ty, generated: false, deref: false, address_lifetime: None, persist_key: Val(items_key), persist_ty: Val(int_list_ty), mutable: true, string_bytes_source: None, integer_bounds: None, uninit_scalar: false, uninit_fixed: false}
+    ^entry_tree: body_tree_new()
+    entry_tree.nodes.push(BodyNode{id: 1, kind: NodeKind.ConstRef{symbol: score_sym}, span: span})
+    entry_tree.expr_types.push(TExprType{id: 1, ty: TYPE_ID_INT})
+    entry_tree.nodes.push(BodyNode{id: 2, kind: NodeKind.IntLit{value: 0, width: None}, span: span})
+    entry_tree.expr_types.push(TExprType{id: 2, ty: TYPE_ID_INT})
+    entry_tree.nodes.push(BodyNode{id: 3, kind: NodeKind.RequireStop{kind: BodyRequireKind.RequireEq{left: 1, right: 2, hook: None}, location: loc, always_stops: false}, span: span})
+    entry_tree.expr_types.push(TExprType{id: 3, ty: TYPE_ID_UNIT})
+    entry_tree.nodes.push(BodyNode{id: 4, kind: NodeKind.IntLit{value: 42, width: None}, span: span})
+    entry_tree.expr_types.push(TExprType{id: 4, ty: TYPE_ID_INT})
+    entry_tree.nodes.push(BodyNode{id: 5, kind: NodeKind.IntLit{value: 99, width: None}, span: span})
+    entry_tree.expr_types.push(TExprType{id: 5, ty: TYPE_ID_INT})
+    entry_tree.nodes.push(BodyNode{id: 6, kind: NodeKind.List{values: [Int]{5}, trait_coercion: None}, span: span})
+    entry_tree.expr_types.push(TExprType{id: 6, ty: int_list_tid})
+    entry_tree.nodes.push(BodyNode{id: 7, kind: NodeKind.ConstRef{symbol: cell_sym}, span: span})
+    entry_tree.expr_types.push(TExprType{id: 7, ty: shared_int_tid})
+    entry_tree.nodes.push(BodyNode{id: 8, kind: NodeKind.ConstRef{symbol: counter_sym}, span: span})
+    entry_tree.expr_types.push(TExprType{id: 8, ty: shared_int_tid})
+    entry_tree.nodes.push(BodyNode{id: 9, kind: NodeKind.IntLit{value: 5, width: None}, span: span})
+    entry_tree.expr_types.push(TExprType{id: 9, ty: TYPE_ID_INT})
+    entry_tree.nodes.push(
+        BodyNode{
+            id: 10,
+            kind: NodeKind.Call{
+                callee: memo_decl,
+                type_args: [Type]{},
+                args: [BodyCallArg]{BodyCallArg{value: 9, template_items: [SymbolID]{}, borrow: true, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}},
+            },
+            span: span,
+        },
+    )
+    entry_tree.expr_types.push(TExprType{id: 10, ty: TYPE_ID_INT})
+    entry_tree.nodes.push(BodyNode{id: 11, kind: NodeKind.IntLit{value: 5, width: None}, span: span})
+    entry_tree.expr_types.push(TExprType{id: 11, ty: TYPE_ID_INT})
+    entry_tree.nodes.push(
+        BodyNode{
+            id: 12,
+            kind: NodeKind.Call{
+                callee: memo_decl,
+                type_args: [Type]{},
+                args: [BodyCallArg]{BodyCallArg{value: 11, template_items: [SymbolID]{}, borrow: true, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}},
+            },
+            span: span,
+        },
+    )
+    entry_tree.expr_types.push(TExprType{id: 12, ty: TYPE_ID_INT})
+    entry_tree.nodes.push(BodyNode{id: 13, kind: NodeKind.Local{local: score_local}, span: span})
+    entry_tree.expr_types.push(TExprType{id: 13, ty: TYPE_ID_INT})
+    entry_tree.nodes.push(BodyNode{id: 14, kind: NodeKind.Local{local: items_local}, span: span})
+    entry_tree.expr_types.push(TExprType{id: 14, ty: int_list_tid})
+    entry_tree.stmts.push(StmtKind.ExprStmt{value: 3, span: span})
+    entry_tree.stmts.push(StmtKind.Assign{place: BodyPlace.Expr{value: 13}, op: None, value: 4, line: 1, span: span})
+    entry_tree.stmts.push(StmtKind.Assign{place: BodyPlace.Expr{value: 14}, op: None, value: 6, line: 1, span: span})
+    entry_tree.stmts.push(StmtKind.ExprStmt{value: 7, span: span})
+    entry_tree.stmts.push(StmtKind.ExprStmt{value: 8, span: span})
+    entry_tree.stmts.push(StmtKind.ExprStmt{value: 10, span: span})
+    entry_tree.stmts.push(StmtKind.ExprStmt{value: 12, span: span})
+    entry_fn: tgr_fn_body("test_one", entry_key, [BodyParameter]{}, None, [Int]{0, 1, 2, 3, 4, 5, 6}, entry_tree.move(), false)
+
+    constants: [TConstantDef]{
+        tgr_storage_def(score_key, "score", Type.Int, TComptimeValue.Int{value: 0}, false),
+        tgr_storage_def(items_key, "items", int_list_ty, TComptimeValue.List{values: [TComptimeValue]{TComptimeValue.Int{value: 1}, TComptimeValue.Int{value: 2}}}, false),
+        tgr_storage_def(cell_key, "cell", shared_int_ty, TComptimeValue.Int{value: 10}, false),
+        tgr_storage_def(counter_key, "counter", shared_int_ty, TComptimeValue.Int{value: 0}, true),
+    }
+    functions: [FnBody]{memo_fn, entry_fn}
+    type_defs: [TTypeDef]{}
+    impls: [TImplDef]{}
+    sources: IRSourceTexts{}
+    foreign: [SemaCheckedForeignFunction]{}
+
+    if as_tests {
+        harness: IRTestHarness{
+            tests: [IRTestCase]{IRTestCase{id: 1, key: entry_key, name: "first", expected_failure: false}, IRTestCase{id: 2, key: entry_key, name: "second", expected_failure: false}},
+            checks: [IROutputCheck]{},
+            serial: true,
+        }
+        return ir_build_tests(functions.move(), decls, symbols.move(), types.move(), type_defs.move(), impls.move(), sources.move(), constants.move(), foreign.move(), harness, tgr_checks())
+    }
+    ir_build_program(functions.move(), decls, symbols.move(), types.move(), type_defs.move(), impls.move(), sources.move(), constants.move(), foreign.move(), entry_key, tgr_checks(), compiler_threads_single(), None)
+}
+
+priv tgr_find_fn: fn(m: IRModule, key: String) -> Int? {
+    loop (index, f) in m.functions {
+        if f.key == key -> return Val(index)
+    }
+    None
+}
+
+priv tgr_fn_calls_runtime: fn(m: IRModule, fn_id: Int, runtime_name: String) -> Bool {
+    f: m.functions[fn_id]
+    loop at in 0..<f.op.len() {
+        if f.op[at] == IROp.CallRuntime && m.names[f.a[at]] == runtime_name -> return true
+    }
+    false
+}
+
+priv tgr_fn_has_op: fn(m: IRModule, fn_id: Int, target: IROp) -> Bool {
+    f: m.functions[fn_id]
+    loop at in 0..<f.op.len() {
+        if f.op[at] == target -> return true
+    }
+    false
+}
+
+priv tgr_fn_calls_fn: fn(m: IRModule, fn_id: Int, target_id: Int) -> Bool {
+    f: m.functions[fn_id]
+    loop at in 0..<f.op.len() {
+        if f.op[at] == IROp.Call && f.a[at] == target_id -> return true
+    }
+    false
+}
+
+#Test("global_reset_shipped_build_has_zero_test_reset_overhead") {
+    built: tgr_build(false)
+    assert_eq(built.failures.len(), 0)
+    ^m: built.program
+    assert(!m.test_reset)
+    assert_eq(m.test_storage_resets.len(), 0)
+    assert_eq(m.test_memo_resets.len(), 0)
+    assert_eq(tgr_find_fn(m, "jet_ir_test_reset"), None)
+    loop id in 0..<m.functions.len() {
+        assert(!tgr_fn_calls_runtime(m, id, "jet_rt_global_reset_registered"))
+    }
+    lint: ir_lint_module(m, "shipped", compiler_threads_single())
+    assert(lint.len() == 0, "shipped IR lint failed: {ir_lint_text(lint)}")
+}
+
+#Test("global_reset_test_build_emits_reset_and_compiles_o0_o1_o2") {
+    loop level in ([Int]{0, 1, 2}) {
+        built: tgr_build(true)
+        assert_eq(built.failures.len(), 0)
+        ^m: built.program
+        reset_id: tgr_find_fn(m, "jet_ir_test_reset") ?? panic("expected jet_ir_test_reset in test build")
+        assert(tgr_fn_calls_fn(m, m.entry, reset_id))
+        assert(tgr_fn_calls_runtime(m, reset_id, "jet_rt_global_reset_registered"))
+        assert(tgr_fn_calls_runtime(m, reset_id, "jet_rt_mem_move"))
+        assert(tgr_fn_calls_runtime(m, reset_id, "jet_rt_atomic_i64_load"))
+        assert(tgr_fn_calls_runtime(m, reset_id, "jet_rt_atomic_i64_store"))
+        assert(tgr_fn_calls_runtime(m, reset_id, "jet_rt_memo_lock"))
+        assert(tgr_fn_calls_runtime(m, reset_id, "jet_rt_memo_entry"))
+        assert(tgr_fn_calls_runtime(m, reset_id, "jet_rt_free"))
+        assert(tgr_fn_calls_runtime(m, reset_id, "jet_rt_memo_unlock"))
+        assert(tgr_fn_has_op(m, reset_id, IROp.Drop))
+
+        pre_lint: ir_lint_module(m, "pre-opt", compiler_threads_single())
+        assert(pre_lint.len() == 0, "pre-opt lint failed at O{level}: {ir_lint_text(pre_lint)}")
+
+        if level > 0 {
+            ^_: ir_optimize_module(m, ir_opt_options(level), compiler_threads_single())
+            post_lint: ir_lint_module(m, "post-opt", compiler_threads_single())
+            assert(post_lint.len() == 0, "post-opt lint failed at O{level}: {ir_lint_text(post_lint)}")
+        }
+
+        m.fast_o0 = level == 0
+        compiled: ir_x64_compile_module(m, compiler_threads_single())
+        assert(compiled.errors.len() == 0, "x64 compile failed at O{level}: {compiled.errors.join("; ")}")
+    }
+}

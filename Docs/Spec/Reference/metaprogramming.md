@@ -113,8 +113,9 @@ values its build took, so an input edited after the build changes nothing
 it prints until the next build. `build: fn` runs only for a command that
 makes an artifact (`jet run`, `jet test`, `jet build`); `jet check` runs it
 only to load the modules it adds. Only a pure function keeps results
-(`#Memo` on one that prints is E0938), so a cache hit never drops or
-reorders a print
+(`#Memo` on one that prints or reads/writes changeable module state is E0938),
+so a cache hit never drops a print, reorders an effect, or returns a stale
+answer after module state changes
 ([`meta_ladder_levels_run_build_artifacts_and_cache_hits`](../../../Tests/Cases/BuildEntry/meta_ladder_levels_run_build_artifacts_and_cache_hits.case)).
 
 `jet debug --build` runs that build under the debugger: a breakpoint in a

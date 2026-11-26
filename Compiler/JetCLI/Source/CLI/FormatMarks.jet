@@ -1,0 +1,259 @@
+// Shared per-package checked-insertion pass for `jet fmt` (#7037 n3):
+// serves call-mark (`^`) insertion, `--explicit-copies` materialization, and
+// `--explicit-failures` (`?` / `(` / `?)`) through one checked compile per
+// package root rather than multiple compiles per file.
+use {
+    cli_files: core.files
+    jet_driver.[
+        JetDriverCompileMode,
+        JetDriverSourceDocument,
+        JetDriverVerbOutput,
+        jet_driver_inline_package,
+        jet_driver_present_diagnostics,
+    ]
+    jet_foundation.[
+        Diagnostic,
+        DiagnosticFixApplicability,
+        DiagnosticOrigin,
+        Span,
+        foundation_byte_text,
+        sha256_hex,
+    ]
+}
+
+// One cached package-level checked compile shared across every file in the same
+// package root during a single `jet fmt` invocation.
+JetCLIFmtPackageCheck: struct {
+    refusal: String?,
+    diagnostics: [Diagnostic],
+    shifts: [String:Int],
+    sources: [String:String],
+}
+
+// Memo passed across files in one `jet fmt` invocation so each package compiles
+// at most once per active checked-insertion pass.
+JetCLIFmtCheckMemo: struct {
+    packages: [String:JetCLIFmtPackageCheck],
+    compiles: Int{0},
+}
+
+jet_cli_fmt_check_memo: fn() -> JetCLIFmtCheckMemo Never! {
+    JetCLIFmtCheckMemo{packages: [String:JetCLIFmtPackageCheck]{}, compiles: 0}
+}
+
+// Package root cache key for `origin`: canonical package root when `origin`
+// belongs to a `package.jet` package, else `origin`'s own canonical path.
+jet_cli_fmt_package_key: fn(origin: String) -[FS, Env]> String Never! {
+    canonical: jet_cli_overlay_path(origin)
+    parent: jet_cli_parent(canonical) ?? "."
+    if jet_cli_manifest_root(parent) == .Val(root) {
+        return jet_cli_overlay_path(root)
+    }
+    canonical
+}
+
+// Whether explicit writes policy is active for `origin` (module header or
+// enclosing `package.jet`), so check failures refuse and keep the file as
+// written while missing `^` marks stay gated during staged cutover.
+jet_cli_fmt_writes_policy_active: fn(origin: String, source: String) -[FS, Env]> Bool Never! {
+    if source.contains("#Policy(writes: .Explicit)") -> return true
+    canonical: jet_cli_overlay_path(origin)
+    parent: jet_cli_parent(canonical) ?? "."
+    if jet_cli_manifest_root(parent) == .Val(root) {
+        manifest: cli_files.read(jet_cli_authority_path(root, "package.jet")) ?? return false
+        if manifest.contains("writes:") && manifest.contains(".Explicit") -> return true
+    }
+    false
+}
+
+// Compile the package of `origin` at most once per `(mode_key, package_key)`
+// and store its presented diagnostics and per-file byte shifts in `memo`.
+jet_cli_fmt_package_compile: fn(origin: String, source: String, policy: String, policy_marker: String, mode_key: String, color: Bool, memo: ^JetCLIFmtCheckMemo) -> String {
+    cache_key: "{mode_key}|{jet_cli_fmt_package_key(origin)}"
+    canonical: jet_cli_overlay_path(origin)
+    if memo.packages.get(cache_key) == .Val(existing) {
+        if existing.refusal != None -> return cache_key
+        if existing.sources.get(canonical) == .Val(cached) && cached == source -> return cache_key
+    }
+    ^shifts: [String:Int]{}
+    ^sources: [String:String]{}
+    ^compiled: JetCLICompiled.Refused{output: JetDriverVerbOutput{stdout: "", stderr: "", exit_code: 1}}
+    if {
+        policy == "" -> {
+            prepared: jet_cli_prepare_overlays(origin, origin, [JetDriverSourceDocument]{JetDriverSourceDocument{path: canonical, source: source}}, color, None, JetDriverCompileMode.Check)
+            if prepared == {
+                .Refused(refusal) -> {
+                    memo.packages[cache_key] = JetCLIFmtPackageCheck{refusal: Val(refusal.stderr), diagnostics: [Diagnostic]{}, shifts: shifts, sources: sources}
+                    return cache_key
+                }
+                .Prepared(request, snapshot) -> {
+                    loop root in snapshot.roots {
+                        if root.identity != snapshot.entry_root_identity -> next
+                        loop file in root.files {
+                            if !file.path.ends_with(".jet") || jet_cli_fmt_is_package_manifest_file(file.path) -> next
+                            shifts[file.path] = 0
+                            sources[file.path] = file.source
+                        }
+                    }
+                    compiled = jet_cli_compile_prepared(JetCLIPrepared.Prepared{request: request.move(), snapshot: snapshot.move()}, None, None)
+                    memo.compiles += 1
+                }
+            }
+        }
+        else -> {
+            held: if jet_cli_prepare_snapshot(origin, origin, [JetDriverSourceDocument]{JetDriverSourceDocument{path: canonical, source: source}}, color) == {
+                .Refused(refusal) -> {
+                    memo.packages[cache_key] = JetCLIFmtPackageCheck{refusal: Val(refusal.stderr), diagnostics: [Diagnostic]{}, shifts: shifts, sources: sources}
+                    return cache_key
+                }
+                .Held(snapshot) -> snapshot
+            }
+            ^overlays: [JetDriverSourceDocument]{}
+            policy_len: policy.count_bytes()
+            loop root in held.roots {
+                if root.identity != held.entry_root_identity -> next
+                loop member in root.files {
+                    if !member.path.ends_with(".jet") || jet_cli_fmt_is_package_manifest_file(member.path) -> next
+                    sources[member.path] = member.source
+                    needs_prepend: !member.source.contains(policy_marker) && !jet_driver_inline_package(member.source).found
+                    if {
+                        needs_prepend -> {
+                            shifts[member.path] = policy_len
+                            overlays.push(JetDriverSourceDocument{path: member.path, source: "{policy}{member.source}"})
+                        }
+                        else -> {
+                            shifts[member.path] = 0
+                            overlays.push(JetDriverSourceDocument{path: member.path, source: member.source})
+                        }
+                    }
+                }
+            }
+            compiled = jet_cli_compile_overlays(origin, origin, overlays, color, None, JetDriverCompileMode.Check, None)
+            memo.compiles += 1
+        }
+    }
+    if compiled == {
+        .Refused(refusal) -> {
+            memo.packages[cache_key] = JetCLIFmtPackageCheck{refusal: Val(refusal.stderr), diagnostics: [Diagnostic]{}, shifts: shifts, sources: sources}
+        }
+        .Compiled(result, snapshot) -> {
+            presented: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
+            memo.packages[cache_key] = JetCLIFmtPackageCheck{refusal: None, diagnostics: presented, shifts: shifts, sources: sources}
+        }
+    }
+    cache_key
+}
+
+// Whether `diagnostic` is a requested Safe mark insertion rather than a
+// blocking check error.
+jet_cli_fmt_is_mark_diagnostic: fn(diagnostic: Diagnostic, code: String, texts: [String]) -> Bool Never! {
+    if code != "" -> return diagnostic.code == code
+    edit: diagnostic.edit ?? return false
+    edit.span.start == edit.span.end && texts.contains(edit.new_text)
+}
+
+// Whether `diagnostic` is a receiver-mark E0228 (receivers are never marked in
+// Jet, so `jet fmt` never inserts a mark before a method receiver).
+jet_cli_fmt_is_receiver_call_mark: fn(diagnostic: Diagnostic) -> Bool Never! {
+    diagnostic.code == "E0228" && diagnostic.what.starts_with("`.")
+}
+
+// Adjust a blocking diagnostic's span and origin back past a prepended policy
+// line so reported line and column numbers point into the user's real file.
+jet_cli_fmt_unshifted_diagnostic: fn(diagnostic: ^^Diagnostic, shifts: [String:Int], sources: [String:String]) -> Diagnostic Never! {
+    origin: diagnostic.origin ?? return diagnostic
+    shift: shifts.get(origin.path) ?? 0
+    if shift <= 0 -> return diagnostic
+    raw_source: sources.get(origin.path) ?? return diagnostic
+    ^out: diagnostic
+    if out.span == .Val(span) {
+        start: if span.start >= shift -> span.start - shift else -> 0
+        end: if span.end >= shift -> span.end - shift else -> start
+        out.span = Val(Span{start: start, end: end})
+    }
+    out.origin = Val(DiagnosticOrigin{path: "{origin.path}", display: "{origin.display}", source: "{raw_source}", revision: sha256_hex(raw_source)})
+    out
+}
+
+// Shared checked-insertion pass for one file using the cached per-package
+// compile in `memo`. Inserts only requested Safe zero-width marks for `origin`.
+// When `strict` is true, any blocking check error keeps `origin` untouched and
+// returns the blocking diagnostics so the caller reports why.
+jet_cli_fmt_checked_marks: fn(
+    source: String,
+    origin: String,
+    color: Bool,
+    policy: String,
+    policy_marker: String,
+    mode_key: String,
+    code: String,
+    texts: [String],
+    skip_receivers: Bool,
+    strict: Bool,
+    memo: ^JetCLIFmtCheckMemo,
+) -> JetCLIFmtSource {
+    cache_key: jet_cli_fmt_package_compile(origin, source, policy, policy_marker, mode_key, color, memo)
+    pkg: memo.packages.get(cache_key) ?? return jet_cli_fmt_formatted(source)
+    if pkg.refusal == .Val(refusal) {
+        if strict -> return JetCLIFmtSource{text: "", diagnostics: [Diagnostic]{}, report: Val(refusal)}
+        return jet_cli_fmt_formatted(source)
+    }
+    canonical: jet_cli_overlay_path(origin)
+    ^blocking: [Diagnostic]{}
+    loop diagnostic in jet_cli_errors(pkg.diagnostics) {
+        if !jet_cli_fmt_is_mark_diagnostic(diagnostic, code, texts) {
+            blocking.push(jet_cli_fmt_unshifted_diagnostic(diagnostic.move(), pkg.shifts, pkg.sources))
+        }
+    }
+    if blocking.len() > 0 {
+        if strict -> return jet_cli_fmt_rejected(blocking)
+        return jet_cli_fmt_formatted(source)
+    }
+    shift: pkg.shifts.get(canonical) ?? 0
+    bytes: source.bytes()
+    length: bytes.len()
+    ^marks: [JetCLIFmtMark]{}
+    loop diagnostic in pkg.diagnostics {
+        owner: diagnostic.origin ?? next
+        if owner.path != canonical -> next
+        if code != "" && diagnostic.code != code -> next
+        if skip_receivers && jet_cli_fmt_is_receiver_call_mark(diagnostic) -> next
+        if code == "E0228" && diagnostic.applicability != Val(DiagnosticFixApplicability.Safe) -> next
+        first: diagnostic.edit ?? next
+        // A failure mark's receiver chain can open multiple `(` at one byte,
+        // each keyed by its call's span start; call marks (`^`) and explicit
+        // copies deduplicate per `(site, text)`.
+        report: if code == "E0434" && diagnostic.span == .Val(at) -> at.start else -> 0
+        jet_cli_fmt_add_mark(marks, first, texts, shift, length, report)
+        loop edit in diagnostic.fix_edits {
+            jet_cli_fmt_add_mark(marks, edit, texts, shift, length, report)
+        }
+    }
+    if marks.len() == 0 -> return jet_cli_fmt_formatted(source)
+    marks.sort_by(fn(left: JetCLIFmtMark, right: JetCLIFmtMark) { left.site <=> right.site })
+    ^marked: ""
+    ^cursor: 0
+    loop mark in marks {
+        marked = "{marked}{foundation_byte_text(bytes, cursor, mark.site)}{mark.text}"
+        cursor = mark.site
+    }
+    jet_cli_fmt_formatted("{marked}{foundation_byte_text(bytes, cursor, length)}")
+}
+
+// Call-mark insertion pass (`#7037 n3`): plain checked compile (one compile per
+// package, no prepended policy), inserting only Safe `^` marks from E0228
+// without touching receivers or valid `^^`.
+jet_cli_fmt_call_marks: fn(source: String, origin: String, color: Bool, memo: ^JetCLIFmtCheckMemo) -> JetCLIFmtSource {
+    strict: jet_cli_fmt_writes_policy_active(origin, source)
+    jet_cli_fmt_checked_marks(source, origin, color, "", "", "call_marks", "E0228", [String]{"^"}, skip_receivers: true, strict: strict, memo: memo)
+}
+
+// Shared per-package `--explicit-copies` pass (one compile per package).
+jet_cli_fmt_explicit_copies_memo: fn(source: String, origin: String, color: Bool, memo: ^JetCLIFmtCheckMemo) -> JetCLIFmtSource {
+    jet_cli_fmt_checked_marks(source, origin, color, JET_CLI_FMT_EXPLICIT_COPIES_POLICY, "#Policy(copies: .Explicit)", "explicit_copies", "", [String]{JET_CLI_FMT_EXPLICIT_COPIES_TEXT}, skip_receivers: false, strict: true, memo: memo)
+}
+
+// Shared per-package `--explicit-failures` pass (one compile per package).
+jet_cli_fmt_explicit_failures_memo: fn(source: String, origin: String, color: Bool, memo: ^JetCLIFmtCheckMemo) -> JetCLIFmtSource {
+    jet_cli_fmt_checked_marks(source, origin, color, JET_CLI_FMT_EXPLICIT_FAILURES_POLICY, "#Policy(failures: .Explicit)", "explicit_failures", "E0434", [String]{"?", "(", "?)"}, skip_receivers: false, strict: true, memo: memo)
+}

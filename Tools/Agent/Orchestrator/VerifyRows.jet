@@ -38,7 +38,7 @@ run: fn() {
     out: args[1]
     given: args.get(2) ?? "jet"
     // A JET given as a relative path still names it from the worktree.
-    jet: if given.contains("/") && !given.starts_with("/") -> "{files.cwd()}/{given}" else -> given
+    jet: Path.from(if given.contains("/") && !given.starts_with("/") -> "{files.cwd()}/{given}" else -> given)
     rows: files.read(args[0]).tsv_records().filter(fn(cells) { cells.len() >= 3 })
     files.create_dir_all(out)
     worktree: roots.all()["JET_DEV_WORKTREE"]

@@ -40,6 +40,15 @@ contracts, generated collection/module indexes, and non-obvious invariants.
   **Correlated errors are out of scope**.
 - **One semantic home:** Every Core API executes the same compiled Jet runtime
   implementation across O0, O1, O2, comptime, and web (I9).
+- **Splittable randomness:** In `core.math.random`, a caller-owned `RNG`
+  (`random.rng(seed)`) supports pure, order-independent keyed splitting via
+  `rng.split(key…)` and direct `random.rng(seed, key…)`. Child streams depend
+  solely on the parent's root seed and length-prefixed, domain-separated keys
+  (never mutating `self.state` or depending on call order, prior draws, task
+  scheduling, or tier), and nested splits are associative (`r.split("a", "b")`
+  equals `r.split("a").split("b")`). Zero-argument `rng.split()` retains the
+  legacy stateful step, and `core.crypto.random` remains a separate OS CSPRNG.
+  See [`Examples/Math/SplittableRandom.jet`](../../../Examples/Math/SplittableRandom.jet).
 
 ## Collection operations
 

@@ -5,16 +5,22 @@ CHECK: Output.Check{name: "state-check", entry: verify}
 #Persist ^state: 0
 
 #Test("first") {
+    assert_eq(state, 0)
     state = 41
+    assert_eq(state, 41)
     contract_files.append_all("events.txt", "first\n") ?? panic("write first event")
 }
 
 #Test("second") {
+    assert_eq(state, 0)
     state += 1
+    assert_eq(state, 1)
     contract_files.append_all("events.txt", "second\n") ?? panic("write second event")
 }
 
 verify: fn() {
+    if state != 0 -> return Err("the check saw leaked state {state}, expected fresh 0")
+    recorded: contract_files.read("events.txt") ?? return Err("could not read events.txt")
+    if recorded != "first\nsecond\n" -> return Err("unexpected events: {recorded}")
     contract_files.append_all("events.txt", "check\n") ?? panic("write check event")
-    if state != 42 -> return Err("the check saw state {state}, not the batch's 42")
 }
