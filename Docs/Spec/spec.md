@@ -1780,7 +1780,10 @@ level makes it a record. After a declared result that carries a value, one
 stays a labeled loop. `{x}` and `{}` stay blocks, a lambda with no declared
 result keeps one field as a binding (**L0101** shows the `{ {name: value} }`
 fix), and a record body where no value is taken is thrown away (**L0508**)
-(D-RECORD-BRACE1=A, D-BODY-RECORD1=A).
+(D-RECORD-BRACE1=A, D-BODY-RECORD1=A). `jet fmt` drops a record's inner braces,
+`{ {width: w, height: h} }` to `{ width: w, height: h }`, wherever the bare
+body reads as the same record; one field with no declared value result, one
+pun, `{}` and a record with a comment beside it keep them.
 
 ```jet
 Rect: struct { width: Int, height: Int }

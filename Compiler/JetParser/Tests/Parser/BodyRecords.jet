@@ -36,8 +36,31 @@ body_record_function: fn(source: String, name: String) -> Func {
     formatted: parser_test_stable(source)
     assert(formatted.contains("-> Rect {{ width: w, height: h }}\n"), formatted)
     assert_eq(body_record_fields(body_record_function(formatted, "mk").body), 2)
+}
+
+#Test("a record braced inside a body prints bare where the bare body reads the same record") {
     doubled: parser_test_stable("Rect: struct {{ width: Int, height: Int }}\nmk: fn(w: Int, h: Int) -> Rect {{ {{width: w, height: h}} }}\n")
-    assert(doubled.contains("-> Rect {{ {{width: w, height: h}} }}\n"), doubled)
+    assert(doubled.contains("-> Rect {{ width: w, height: h }}\n"), doubled)
+    assert_eq(body_record_fields(body_record_function(doubled, "mk").body), 2)
+    one: parser_test_stable("Box: struct {{ value: Int }}\nwrap: fn(v: Int) -> Box {{ {{value: v}} }}\n")
+    assert(one.contains("-> Box {{ value: v }}\n"), one)
+    lambda: parser_test_stable("run: fn() {{\n    f: fn(r: Int) {{ {{n: r, sq: r * r}} }}\n}}\n")
+    assert(lambda.contains("f: fn(r: Int) {{ n: r, sq: r * r }}"), lambda)
+    declared: parser_test_stable("Box: struct {{ value: Int }}\nrun: fn() {{\n    f: fn(r: Int) -> Box {{ {{value: r}} }}\n}}\n")
+    assert(declared.contains("f: fn(r: Int) -> Box {{ value: r }}"), declared)
+    run: parser_test_stable("LIMITS: #run {{ {{low: 1, high: 2}} }}\nrun: fn() {{ print(LIMITS.low) }}\n")
+    assert(run.contains("LIMITS: #run {{ low: 1, high: 2 }}\n"), run)
+}
+
+#Test("a record braced inside a body keeps its braces where bare braces hold code or a comment sits between them") {
+    no_result: parser_test_stable("run: fn() {{\n    f: fn(r: Int) {{ {{name: r}} }}\n}}\n")
+    assert(no_result.contains("f: fn(r: Int) {{ {{name: r}} }}"), no_result)
+    pun: parser_test_stable("P: struct {{ x: Int }}\nmk: fn(x: Int) -> P {{ {{x}} }}\n")
+    assert(pun.contains("-> P {{ {{x}} }}\n"), pun)
+    run: parser_test_stable("ONE: #run {{ {{low: 1}} }}\nrun: fn() {{ print(ONE.low) }}\n")
+    assert(run.contains("ONE: #run {{ {{low: 1}} }}\n"), run)
+    noted: parser_test_stable("Rect: struct {{ width: Int, height: Int }}\nmk: fn(w: Int, h: Int) -> Rect {{\n    // the corner\n    {{width: w, height: h}}\n}}\n")
+    assert(noted.contains("    // the corner\n    {{width: w, height: h}}\n"), noted)
 }
 
 #Test("a record body written over several lines keeps one field per line") {

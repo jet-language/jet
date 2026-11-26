@@ -1158,12 +1158,49 @@ jfmt_fmt_record_fields: fn(f: ^JetFmt, fields: [ExprField], span: Span, multilin
 
 // A value body written as fields, `{ width: w, height: h }`: the body's one
 // line `value` is an unnamed record whose braces are the body's own, with no
-// `{` of a block before it.
-jfmt_is_record_body: fn(f: JetFmt, value: Expr) -> Bool Never! {
-    if value == .StructLit(type_name, _, _, _, _, inferred, _, _) {
-        return inferred && type_name == "" && !jfmt_value_was_braced(f, value)
+// `{` of a block before it. A record the author braced inside the body,
+// `{ {width: w, height: h} }`, prints bare too wherever the bare form reads
+// back as the same record (parser_brace_record_value_at): two or more members,
+// or with `one_field` (a declared result that carries a value) one
+// `name: value` member whose value is no `loop`. One pun, `{ {x} }`, an empty
+// record, and a record with a comment between its braces and the body's keep
+// their inner braces.
+jfmt_is_record_body: fn(f: JetFmt, value: Expr, one_field: Bool) -> Bool Never! {
+    value == .StructLit(type_name, _, _, _, fields, inferred, _, _) ?? return false
+    if !inferred || type_name != "" -> return false
+    if !jfmt_value_was_braced(f, value) -> return true
+    if jfmt_braced_value_has_outer_comment(f, value) -> return false
+    if fields.len() >= 2 -> return true
+    if !one_field || fields.len() != 1 || jfmt_shorthand_field(fields[0]) -> return false
+    !jfmt_value_starts_with_loop(f, fields[0].value)
+}
+
+// Whether a comment sits between a braced value and the braces around it: in
+// `{ // note` before `{a: 1, b: 2}`, or after it before the closing `}`.
+jfmt_braced_value_has_outer_comment: fn(f: JetFmt, value: Expr) -> Bool Never! {
+    start: jfmt_expr_start(value)
+    end: expr_span(value).end
+    ^open_end: start
+    ^close_start: end
+    loop token in f.source_toks {
+        if jfmt_is_comment_kind(token.kind) || token.kind == TOKEN_SEMI -> next
+        if token.span.end <= start -> open_end = token.span.end
+        if token.span.start >= end {
+            close_start = token.span.start
+            break
+        }
     }
-    false
+    jfmt_span_has_comment(f, open_end, start) || jfmt_span_has_comment(f, end, close_start)
+}
+
+// Whether a value's source starts with the word `loop`, as a labeled loop's
+// `outer: loop { … }` does.
+jfmt_value_starts_with_loop: fn(f: JetFmt, value: Expr) -> Bool Never! {
+    start: jfmt_expr_start(value)
+    if !jfmt_src_valid(f, start, start + 4) || jfmt_src_text(f, start, start + 4) != "loop" -> return false
+    if !jfmt_src_valid(f, start + 4, start + 5) -> return true
+    next: f.src_bytes[start + 4]
+    !((next >= 97 && next <= 122) || (next >= 65 && next <= 90) || (next >= 48 && next <= 57) || next == 95)
 }
 
 // Writes a record body after the caller's ` {`: `{ a: 1, b: 2 }` on one line
@@ -2361,7 +2398,7 @@ jfmt_fmt_lambda: fn(f: ^JetFmt, lambda: Lambda) {
         jfmt_write(f, " {{}}")
         return
     }
-    if statements.len() == 1 && statements[0] == .Expr(value) && jfmt_is_record_body(f, value) {
+    if statements.len() == 1 && statements[0] == .Expr(value) && jfmt_is_record_body(f, value, parser_return_type_has_value(lambda.result)) {
         jfmt_write(f, " {{")
         jfmt_fmt_record_body(f, value)
         return

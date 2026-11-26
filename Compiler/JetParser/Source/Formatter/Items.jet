@@ -2033,7 +2033,7 @@ jfmt_fmt_func: fn(f: ^JetFmt, func: Func) {
     }
     // A one-line `fn` body the author wrote inline survives, and so does a
     // body written as fields.
-    if func.body.len() == 1 && func.body[0] == .Expr(value) && jfmt_is_record_body(f, value) {
+    if func.body.len() == 1 && func.body[0] == .Expr(value) && jfmt_is_record_body(f, value, parser_return_type_has_value(func.return_type)) {
         jfmt_fmt_record_body(f, value)
     } else { jfmt_fmt_body(f, func.body) }
     f.value_tail_at = saved_tail
