@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7042,
-    "rev": 114694,
+    "rev": 114700,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -60790,8 +60790,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-24T17:01:07.086Z",
-      "updated": "2026-11-26T04:53:01.728Z",
-      "updatedBy": "Orchestrator",
+      "updated": "2026-11-26T05:27:28.358Z",
+      "updatedBy": "AdversarialReviewer-f890d291",
       "criteriaLastN": 22
     },
     {
@@ -126792,6 +126792,217 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-25T23:55:33.674Z"
+    },
+    {
+      "id": "D-WATCH-FRESHNESS1",
+      "cardId": "c0mhrplj",
+      "group": "library",
+      "title": "How DataWatchStatus reports freshness_ms while watch(), get() and status() stay honest about Time",
+      "situation": "Core/Data/Data.jet owns DataWatch and DataWatchStatus after their Core port under card #6999. DataWatchStatus exposes `freshness_ms: Int`, which the old Rust runtime computed as `now - last_fresh_publish_ms`. Today Core/Data/Data.jet:2819 hardcodes `freshness_ms: 0`, because `Query.watch()` (line 463), `DataWatch.get()` (line 761) and `DataWatch.status()` (line 763) declare no `Time` effect.\n\nMeanwhile, the only sibling status struct with `freshness_ms` in Core is `JobQueueStatus` (Core/Jobs/Jobs.jet:110-126). `JobQueue.status()` (line 317) computes a real age by declaring `-[DB, Time]>`. You are asked how `DataWatch` and `DataWatchStatus` should handle `freshness_ms`. We recommend A: declare `-[Time]>` on `Query.watch`, `DataWatch.get` and `DataWatch.status` so `WatchState` stamps monotonic `published_at: Instant` and `status()` computes real `freshness_ms`.",
+      "gist": "DataWatchStatus.freshness_ms reads 0 because watch(), get() and status() have no Time effect. Add Time, drop freshness_ms, pass Instant, or add an untracked clock leaf?",
+      "lesson": "In Jet, reading a clock requires the Time effect so pure functions stay deterministic. After moving DataWatch into Core/Data/Data.jet, watch(), get() and status() kept effect-free signatures. Without Time, a watch cannot stamp when it published a snapshot or measure elapsed age, so DataWatchStatus.freshness_ms is hardcoded to 0.",
+      "explainer": "Today `watch.status()` is effect-free, so `freshness_ms` is always 0:\n\n```jet\nuse {\n    data: core.data\n}\n\nSale: struct {\n    id: Int,\n    cents: Int,\n}\n\ncheck_watch: fn(sales: data.DataTracked<Sale, Int>) -[IO]> {\n    big: sales.query().filter(fn(s: Sale) { s.cents > 150 }).watch() ?? return\n    _rows: big.get() ?? return\n    status: big.status()\n    print(status.freshness_ms) // always 0 today\n}\n```",
+      "story": "An engineer inspects a live maintained query with `watch.status()` to check whether cached rows have gone stale. Every status snapshot reports `freshness_ms: 0`, even ten seconds after the last refresh, because `watch_status` in Core/Data/Data.jet cannot read `time.instant()` without declaring the `Time` effect.",
+      "inWild": "Most languages read a monotonic clock without an effect system, so Go, Rust and Java record `Instant::now()` inside cache or watch handles invisibly.\n\nEffect-tracked languages make clock reads explicit. Koka and Unison either require a Clock/Time effect on age-measuring methods, or take a timestamp parameter so pure callers stay effect-free.",
+      "detail": "Facts verified at dev 0504a53a6fb.\n\nDataWatch in Core/Data/Data.jet: `DataWatchStatus` (lines 315-336) declares 12 fields including `freshness_ms: Int` (line 324). `data_watch_status_text` (lines 338-340) formats all 12 fields. `DataTracked` (line 599) is `DataTracked<T, K: Comparable>`. Its `insert`, `replace` and `remove` methods (lines 1093-1147) are pure mutations in a pull model.\n\n`Query.watch` (line 463) delegates to `query_watch` (lines 2716-2740) and initializes `WatchState<T>` (line 735) with no timestamp. `DataWatch.get` (line 761) delegates to `watch_get` (lines 2742-2775). On an unchanged clean cache hit (`!view.changed && !dirty`, lines 2749-2751), it returns early under `guard_read()`. Otherwise it publishes or recovers dirty state under `guard_edit()` (lines 2758-2774).\n\n`DataWatch.status` (line 763) calls `watch_status` (lines 2808-2824), which hardcodes `freshness_ms: 0` at line 2819. `DataWatch.cancel` (line 765) delegates to `watch_cancel` (lines 2827-2834) and needs no `Time`.\n\nSame-file sibling: `DataLoaderStatus` (Core/Data/Data.jet:303-312, Core/Data/Loader.jet:65) models freshness as a pure `DataFreshness` enum (`Pending|Fresh|Stale|Error|Offline|Canceled`). It has no millisecond age and stays separate.\n\nCore sibling: `JobQueueStatus` (Core/Jobs/Jobs.jet:110-126) is the only other Core struct with `freshness_ms: Int` (line 125). `JobQueue.status` (line 317) declares `-[DB, Time]>`. It calls `queue_now()` -> `rt.wall_sample()` (lines 422-428) and `queue_age` (lines 1840-1881) because SQLite timestamps persist across restarts. Read-only `receipt`, `inspect` and `events` (lines 232-255) declare `-[DB]>`; `wait` (line 328) declares `-[DB, Time, Time.Wait]>`.\n\nOther registries and siblings: `BrowserPanelFact` and `BrowserPanelView.freshness_ms` (Compiler/JetDevServer/Source/BrowserHost.jet:154,257) are internal devtools projections. `DataWatchStatus` appears in `RuntimeLayouts.jet:127`, `Core.rows:73`, and `Reflection.jet:380`.\n\nCallers across Core/, Compiler/, Jetpack/, Examples/ and Tests/: only `Tests/Cases/CoreLib/Fixtures/CoreDataTrackedRowsAndMaintainedWatch/fixture.jet` (lines 42-64) calls `watch()`, `get()` and `status()`, inside `run: fn()` (which already has `Time`). Its `.out` file (lines 5, 17, 20) pins literal `freshness_ms: 0`.\n\nClock API: `time.instant` (`Core/Time/Time.jet:2811`) is `-[Time]>` and reads `world_monotonic_ns` under `core.testing.world`, else `rt.host_monotonic_ns()`. `Instant.elapsed_millis` (`Time.jet:1555`) is `-[Time]>`; `Instant.difference` (`Time.jet:1565`) is pure.\n\nRuntime leaves: `Compiler/JetRuntime/Source/Public/Time.jet:14,22` marks `host_monotonic_ns` as `-[Time]>` and `clock_mono_ns` as `-[Time.Wait]>`. `RuntimeInterfacePurity.jet:265` enforces this, so no pure monotonic leaf exists. Web monotonic time is backed by `Compiler/JetWeb/Source/Web/Host.jet:886-890`.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Declare `-[Time]>` on `watch()`, `get()` and `status()` and compute real `freshness_ms`",
+          "detail": "`Query.watch()`, `DataWatch.get()` and `DataWatch.status()` declare `-[Time]>`, matching `JobQueue.status()`. `WatchState<T>` stores monotonic `published_at: Instant` set by `time.instant()` in `query_watch` and on writes in `watch_get`. `watch_status` computes `freshness_ms: held.value.published_at.elapsed_millis()`. `DataWatchStatus` keeps all 12 fields.\n\nBeginner path: `watch.status().freshness_ms` works with zero extra arguments. Expert path: callers in strict effect rows see `Time` honestly. Tests advance monotonic time deterministically via `core.testing.world` and `w.advance(Duration.millis(25))`.",
+          "technical": "Cutover in `Core/Data/Data.jet`: extend line 25 to `core.time.[DateTime, Instant]` (`Core.rows:73` already lists `core.time`). Add `-[Time]>` to `Query.watch` (line 463), `DataWatch.get` (line 761), and `DataWatch.status` (line 763). Add `published_at: Instant` to `priv WatchState<T>` (line 735).\n\nStamp rules: `query_watch` sets `published_at: time.instant()`. `watch_get` stamps `published_at = time.instant()` only inside the write path (lines 2758-2774: new publish or dirty recovery). Read-only cache hits (`!view.changed && !dirty`, lines 2749-2751) stay under `guard_read()` and leave `published_at` unchanged. Failed refreshes (`watch_fail`) also leave `published_at` unchanged.\n\nStatus and tests: `watch_status` (lines 2808-2824) computes `published_at.elapsed_millis()`. Update `CoreDataTrackedRowsAndMaintainedWatch` to assert `freshness_ms >= 0`. Add a `core.testing.world` test with `w.advance(Duration.millis(25))` proving exact `freshness_ms` growth on O0, O1, O2 and Web.\n\nEdge cases: canceled watches (`watch_cancel`, lines 2827-2834) retain `published_at`, so `freshness_ms` keeps advancing while `canceled: true, dirty: true`. `DataTracked` mutations stay pure (pull model). `-[Time]>` beats deny-only `-[Time.Wait]>` because `time.instant()` respects `core.testing.world` and explicit clock authority. `#run` rejects `-[Time]>`.",
+          "code": "use {\n    data: core.data\n}\n\nSale: struct {\n    id: Int,\n    cents: Int,\n}\n\ncheck_watch: fn(sales: data.DataTracked<Sale, Int>) -[IO, Time]> {\n    big: sales.query().filter(fn(s: Sale) { s.cents > 150 }).watch() ?? return\n    _rows: big.get() ?? return\n    status: big.status()\n    print(status.freshness_ms)\n}"
+        },
+        {
+          "key": "B",
+          "name": "Keep `DataWatch` pure and remove `freshness_ms` from `DataWatchStatus`",
+          "detail": "`Query.watch()`, `DataWatch.get()` and `DataWatch.status()` stay completely pure (no `Time` effect). Because a pure watch has no clock, `freshness_ms: Int` is deleted from `DataWatchStatus` and `data_watch_status_text`. Staleness is still reported by `revision`, `generation` and `dirty`, and callers who want elapsed time measure it with `time.instant()` themselves.\n\nBeginner path: `DataWatch` works in pure `-[]>` functions and `#run` without `Time`, with no misleading always-0 field. Expert path: callers who need age store a `time.Instant` alongside the watch when `get()` succeeds.",
+          "technical": "Cutover: remove `freshness_ms: Int` from `DataWatchStatus` (`Core/Data/Data.jet:324`), `data_watch_status_text` (line 339), and `watch_status` (line 2819). Keep `RuntimeLayouts.jet:127`, `Core.rows:73`, and `Reflection.jet:380` in sync with the 11-field struct. Update `core_data_tracked_rows_and_maintained_watch.out` lines 5, 17 and 20.\n\nEdge cases: `DataWatchStatus` diverges from `JobQueueStatus.freshness_ms`. Callers wanting staleness age must wrap `get()` with their own `Instant`.",
+          "code": "use {\n    data: core.data\n    time: core.time\n}\n\nSale: struct {\n    id: Int,\n    cents: Int,\n}\n\ncheck_watch: fn(sales: data.DataTracked<Sale, Int>) -[IO, Time]> {\n    big: sales.query().filter(fn(s: Sale) { s.cents > 150 }).watch() ?? return\n    _rows: big.get() ?? return\n    published: time.instant()\n    status: big.status()\n    print(published.elapsed_millis())\n}"
+        },
+        {
+          "key": "C",
+          "name": "Keep `status()` pure with `published_at: Instant?` and pass explicit `now: Instant` on publish",
+          "detail": "Replace `freshness_ms: Int` on `DataWatchStatus` with `published_at: Instant?`. Add pure `status.freshness_ms_at(now: Instant) -> Int?` (returning `None` when `published_at == None`) and `status.freshness_ms() -[Time]> Int?`. `watch()` and `get()` take optional `now: Instant?{None}` so pure callers need no `Time`.\n\nNote on `Clock`: injecting `core.time.Clock` at `watch(clock)` still infers `-[Time.Wait]>` via `rt.clock_mono_ns()` (`Time.jet:89-92,183`). Only explicit `Instant` arguments keep strict `-[]>` purity.\n\nBeginner path: callers must pass `time.instant()` at `watch` and `get`, or `published_at` stays `None`. Expert path: deterministic pure code can inject synthetic `Instant` values without `Time`.",
+          "technical": "Cutover: replace `freshness_ms` with `published_at: Instant?` (`Core/Data/Data.jet:324`), update `data_watch_status_text` (lines 338-340), and add `freshness_ms_at` and `freshness_ms`. Add `now: Instant?{None}` to `Query.watch` (line 463) and `DataWatch.get` (line 761). Sync `RuntimeLayouts.jet:127`, `Core.rows:73`, `Reflection.jet:380`, and the CoreLib test.\n\nEdge cases: `freshness_ms_at(now)` returns `None` when `published_at == None`. Omitting `now:` on `get()` leaves `published_at` stale or `None`. Duplicates Jet's `Time` effect and `core.testing.world`.",
+          "code": "use {\n    data: core.data\n    time: core.time\n}\n\nSale: struct {\n    id: Int,\n    cents: Int,\n}\n\ncheck_watch: fn(sales: data.DataTracked<Sale, Int>) -[IO, Time]> {\n    big: sales.query().filter(fn(s: Sale) { s.cents > 150 }).watch(now: time.instant()) ?? return\n    _rows: big.get(now: time.instant()) ?? return\n    status: big.status()\n    print(status.freshness_ms_at(time.instant()))\n}"
+        },
+        {
+          "key": "D",
+          "name": "Add an untracked pure monotonic clock leaf in `jet.runtime` so `DataWatch` reads time without `Time`",
+          "detail": "Keep `watch()`, `get()` and `status()` effect-free by adding a new untracked monotonic clock leaf in `Compiler/JetRuntime/Source/Public/Time.jet`. No pure leaf exists today: `host_monotonic_ns` is `-[Time]>` and `clock_mono_ns` is `-[Time.Wait]>`.\n\nBeginner path: no signature changes. Expert path: breaks `RuntimeInterfacePurity`, lets a `-[]>` pure function observe clock ticks, and risks compile-time constant folding of impure clock reads.",
+          "technical": "Cutover: add an untracked pure monotonic leaf to `Compiler/JetRuntime/Source/Public/Time.jet:14-22`, exempt it in `RuntimeInterfacePurity.jet:265`, and call it in `Core/Data/Data.jet:2716-2824` without `-[Time]>`.\n\nEdge cases: breaks effect honesty, `#Memo` soundness, and `RuntimeInterfacePurity`. Risks sema constant folding (`Public/Time.jet:18-21`) and diverges from `JobQueue.status()` and `time.instant()`.",
+          "code": "use {\n    data: core.data\n}\n\nSale: struct {\n    id: Int,\n    cents: Int,\n}\n\ncheck_watch: fn(sales: data.DataTracked<Sale, Int>) -[IO]> {\n    big: sales.query().filter(fn(s: Sale) { s.cents > 150 }).watch() ?? return\n    _rows: big.get() ?? return\n    status: big.status()\n    print(status.freshness_ms) // reads untracked clock without Time\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "No effect system: a watch or cache stores `std::time::Instant::now()` on publish and computes `published_at.elapsed().as_millis()` in `status()`.",
+          "code": "let age_ms = state.published_at.elapsed().as_millis();"
+        },
+        {
+          "lang": "Go",
+          "note": "No effect system: `time.Since(w.publishedAt).Milliseconds()` reads the monotonic clock directly in `Status()`.",
+          "code": "ageMs := time.Since(w.publishedAt).Milliseconds()"
+        },
+        {
+          "lang": "Koka",
+          "note": "Clock reads carry an explicit time/clock effect on the function signature so pure code cannot observe elapsed time.",
+          "code": "fun watch-status(w : watch<a>) : <time> watch-status"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A restores real monotonic `freshness_ms` with zero caller ceremony while keeping Jet's effect system honest. It matches `JobQueue.status()` (`Core/Jobs/Jobs.jet:317`), which declares `-[DB, Time]>`. Using monotonic `time.instant()` also avoids wall-clock jumps and integrates with `core.testing.world`. No caller outside `CoreDataTrackedRowsAndMaintainedWatch/fixture.jet` (which already runs with `Time`) breaks.\n\nB keeps watches pure but drops `freshness_ms` and pushes manual timing onto callers. C adds error-prone `now:` plumbing that duplicates `Time` and `core.testing.world`. D requires an untracked pure runtime leaf that breaks `RuntimeInterfacePurity` and `#Memo` soundness.",
+        "gains": [
+          "`DataWatchStatus.freshness_ms` reports true monotonic age in milliseconds on every tier (O0, O1, O2, Web).",
+          "Matches `JobQueueStatus.freshness_ms` and `JobQueue.status() -[DB, Time]>` across Core.",
+          "Zero hidden ambient clock reads; pure `-[]>` functions stay deterministic and testable via `core.testing.world`.",
+          "Zero extra arguments for beginners calling `watch()`, `get()` and `status()`."
+        ],
+        "losses": [
+          {
+            "loss": "Pure `-[]>` functions and `#run` blocks can no longer call `Query.watch()`, `DataWatch.get()` or `DataWatch.status()` without `Time`.",
+            "mitigation": "Pure query evaluation (`Query.collect()`) and `DataTracked` mutations stay effect-free. Tests control monotonic time deterministically via `core.testing.world` and `w.advance(...)`."
+          },
+          {
+            "loss": "Golden output tests that print `DataWatchStatus` directly can no longer pin literal `freshness_ms: 0`.",
+            "mitigation": "Update `CoreDataTrackedRowsAndMaintainedWatch` to assert `freshness_ms >= 0` and verify exact monotonic growth under `core.testing.world`."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Removes `freshness_ms` altogether, breaking parity with `JobQueueStatus` and pushing manual timestamp bookkeeping onto every watch caller."
+          },
+          {
+            "key": "C",
+            "reason": "Adds manual `now: Instant` plumbing that callers can omit or let drift, duplicating Jet's `Time` effect and `core.testing.world`."
+          },
+          {
+            "key": "D",
+            "reason": "Requires an untracked pure clock leaf in `jet.runtime.time`, violating `RuntimeInterfacePurity`, effect honesty, and `#Memo` soundness."
+          }
+        ],
+        "tradeoff": "A trades purity of `watch()`/`get()`/`status()` for an honest `Time` effect and automatic monotonic `freshness_ms`, matching `JobQueueStatus`. Choose B if pure maintained watches matter more than built-in `freshness_ms`."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Gemini. Adversarial model family: Gemini. Fresh agent: f890d291-b6bc-4b9a-a097-114b206b2d65. Review caught DataTracked arity, stale Time.jet lines, an Option A watch_get contradiction, missing DataLoaderStatus and BrowserPanelFact inventory items, and an inaccurate Option D leaf claim. All six findings are fixed and Option A stands."
+      },
+      "checkInstructions": "Verify at dev 0504a53a6fb in `Core/Data/Data.jet`: `DataLoaderStatus` and `DataWatchStatus` (lines 303-340), `Query.watch` (line 463), and `DataTracked` (line 599). Also check `WatchState`/`DataWatch` (lines 735-765), mutations (lines 1093-1147), and watch helpers (lines 2716-2834).\n\nCheck `Core/Jobs/Jobs.jet`: `JobQueueStatus` (lines 110-126), read-only methods (lines 232-255), `status` and `wait` (lines 317-328), `queue_now` (lines 422-428), and `queue_age` (lines 1840-1885).\n\nCheck `Core/Time/Time.jet` (`Clock` 80-188, `Instant` 1548-1567, `time.instant` 2805-2811), `Compiler/JetRuntime/Source/Public/Time.jet:14,22`, `RuntimeInterfacePurity.jet:265`, and `Core/Testing/Testing.jet:1689-1708`.",
+      "surface": {
+        "gist": "`DataWatchStatus.freshness_ms` reads 0 because `DataWatch` has no `Time` effect. Add `Time`, drop it, pass `Instant`, or hide clock?",
+        "lesson": "Reading a clock in Jet requires the `Time` effect. `DataWatch` was moved to pure Core code without `Time`, so it cannot timestamp publishes or measure age.",
+        "trio": {
+          "current": {
+            "note": "`status()` is pure, so `freshness_ms` is hardcoded to 0.",
+            "code": "big: sales.query().watch() ?? return\n_rows: big.get() ?? return\nprint(big.status().freshness_ms) // always 0"
+          },
+          "wild": {
+            "lang": "Koka",
+            "note": "Effect-tracked languages declare a time effect on clock-reading status calls.",
+            "code": "fun watch-status(w : watch<a>) : <time> watch-status"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Add `Time` effect",
+            "gist": "`watch()`, `get()` and `status()` declare `-[Time]>` and compute real monotonic `freshness_ms`, matching `JobQueue.status()`.",
+            "gains": [
+              "Real monotonic `freshness_ms` with zero caller plumbing.",
+              "Matches `JobQueueStatus`, stays honest about `Time`, and works with `core.testing.world`."
+            ],
+            "losses": [
+              "Pure `-[]>` functions and `#run` need `Time` to use `DataWatch`."
+            ],
+            "proposed": {
+              "code": "check: fn(s: data.DataTracked<Sale, Int>) -[IO, Time]> {\n    big: s.query().watch() ?? return\n    print(big.status().freshness_ms)\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Keep pure, drop `freshness_ms`",
+            "gist": "`DataWatch` stays pure and removes `freshness_ms` from `DataWatchStatus`.",
+            "gains": [
+              "`DataWatch` stays pure and deterministic."
+            ],
+            "losses": [
+              "Loses built-in age reporting; diverges from `JobQueueStatus`."
+            ],
+            "proposed": {
+              "code": "published: time.instant()\nstatus: big.status()\nprint(published.elapsed_millis())"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Pass explicit `Instant`",
+            "gist": "Store `published_at: Instant?` via `now:` parameter and compute age with `freshness_ms_at(now)`.",
+            "gains": [
+              "Pure callers stay effect-free."
+            ],
+            "losses": [
+              "Manual clock plumbing on every `watch()` and `get()`."
+            ],
+            "proposed": {
+              "code": "big: s.query().watch(now: time.instant()) ?? return\nprint(big.status().freshness_ms_at(time.instant()))"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Untracked pure clock leaf",
+            "gist": "Add an effect-free clock leaf to `jet.runtime.time` so `DataWatch` reads time without `Time`.",
+            "gains": [
+              "No signature change."
+            ],
+            "losses": [
+              "Violates `RuntimeInterfacePurity`, effect honesty, and `#Memo` soundness."
+            ],
+            "proposed": {
+              "code": "print(big.status().freshness_ms) // untracked clock read"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A gives real monotonic `freshness_ms` with honest `Time` effects and zero caller boilerplate, matching `JobQueue.status()`.",
+          "gains": [
+            "Real monotonic `freshness_ms` on every tier.",
+            "Consistent with `JobQueueStatus`, `core.testing.world`, and Jet's effect system."
+          ],
+          "losses": [
+            {
+              "loss": "`watch()`, `get()` and `status()` require `Time`.",
+              "mitigation": "`Query.collect()` and `DataTracked` mutations stay pure; tests advance time via `core.testing.world`."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Drops `freshness_ms` and pushes manual timing onto callers."
+            },
+            {
+              "key": "C",
+              "reason": "Adds error-prone manual `now:` plumbing."
+            },
+            {
+              "key": "D",
+              "reason": "Requires an untracked clock leaf, violating `RuntimeInterfacePurity` and effect honesty."
+            }
+          ],
+          "tradeoff": "Declaring `Time` on live watch methods keeps effects honest while restoring real monotonic `freshness_ms`."
+        }
+      },
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "AdversarialReviewer-f890d291",
+      "draft": true,
+      "status": "open",
+      "created": "2026-11-26T05:25:32.667Z"
     }
   ],
   "questions": [
@@ -129021,6 +129232,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-26T05:27:28.358Z",
+      "by": "AdversarialReviewer-f890d291",
+      "action": "decision.review",
+      "ref": "D-WATCH-FRESHNESS1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-26T05:27:27.529Z",
+      "by": "Orchestrator",
+      "action": "decision.update",
+      "ref": "D-WATCH-FRESHNESS1",
+      "note": "review cleared by the edit"
+    },
+    {
+      "at": "2026-11-26T05:26:58.267Z",
+      "by": "AdversarialReviewer-f890d291",
+      "action": "decision.review",
+      "ref": "D-WATCH-FRESHNESS1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-26T05:26:56.975Z",
+      "by": "Orchestrator",
+      "action": "decision.update",
+      "ref": "D-WATCH-FRESHNESS1",
+      "note": "review cleared by the edit"
+    },
+    {
+      "at": "2026-11-26T05:25:45.895Z",
+      "by": "AdversarialReviewer-f890d291",
+      "action": "decision.review",
+      "ref": "D-WATCH-FRESHNESS1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-26T05:25:32.667Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-WATCH-FRESHNESS1",
+      "note": "How DataWatchStatus reports freshness_ms while watch(), get() and status() stay honest about Time (draft)"
+    },
     {
       "at": "2026-11-26T05:12:10.268Z",
       "by": "Orchestrator",
