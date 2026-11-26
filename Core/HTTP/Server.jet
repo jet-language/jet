@@ -933,6 +933,10 @@ priv mount_static_files: fn(mux: HTTPMux, prefix: String, root: String, index: B
     route_add(mux, "GET", "{base}/*jet_static_path", __handler(fn(request: HTTPRequest) { Ok(static_serve(mount, request)) }), "", at)
 }
 
+// A handler's calls of `response` and `json` are `#Recorded`: a rule reads
+// the ones its return paths return, with their status and body type, from
+// the handler's FunctionInfo.
+#Recorded
 response: fn(status: Int, body: String) -> HTTPResponse Never! {
     payload: core.http.body_text(body)
     fields: core.http.headers()
@@ -953,6 +957,7 @@ priv status_text: fn(status: Int) -> String Never! { "{status} {http.reason_phra
 
 priv status_page: fn(status: Int) -> HTTPResponse Never! { response(status, status_text(status)) }
 
+#Recorded
 json: fn<T: Encode>(status: Int, body: T) -> HTTPResponse HTTPError! {
     text: json_codec.to_string(body.encode()) ?? return Err(HTTPError.InvalidFraming)
     fields: core.http.headers_set(core.http.headers(), "content-type", "application/json; charset=utf-8")
