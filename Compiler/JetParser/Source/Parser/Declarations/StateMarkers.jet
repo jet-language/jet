@@ -321,17 +321,18 @@ parser_state_marker_list: fn(state: StateDecl, moves: [[String]], source: [U8]) 
 // The edits as one replacement of the source from the first to the last;
 // None when two of them overlap.
 parser_state_marker_combine: fn(edits: [TextEdit], source: [U8]) -> TextEdit? Never! {
-    ^sorted: [TextEdit]{}
-    loop edit in edits {
-        ^at: sorted.len()
-        loop at > 0 && sorted[at - 1].span.start > edit.span.start -> at -= 1
-        sorted.insert(at, edit.copy())
+    ^order: [Int]{}
+    loop (index, edit) in edits {
+        ^at: order.len()
+        loop at > 0 && edits[order[at - 1]].span.start > edit.span.start -> at -= 1
+        order.insert(at, index)
     }
-    if sorted.len() == 0 -> return None
-    start: sorted[0].span.start
+    if order.len() == 0 -> return None
+    start: edits[order[0]].span.start
     ^cursor: start
     ^parts: [String]{}
-    loop edit in sorted {
+    loop idx in order {
+        edit: edits[idx]
         if edit.span.start < cursor -> return None
         parts.push(foundation_byte_text(source, cursor, edit.span.start))
         parts.push(edit.new_text.copy())
@@ -341,8 +342,8 @@ parser_state_marker_combine: fn(edits: [TextEdit], source: [U8]) -> TextEdit? Ne
 }
 
 parser_state_marker_leaf: fn(path: String) -> String Never! {
-    parts: path.split(".").to_list()
-    parts[parts.len() - 1].copy()
+    ^parts: path.split(".").to_list()
+    parts.pop() ?? ""
 }
 
 parser_state_marker_text_is: fn(source: [U8], at: Int, word: String) -> Bool Never! {

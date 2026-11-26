@@ -62,17 +62,16 @@ parser_split_type_markers: fn(markers: [Marker]) -> {derives: [NamedSpan], serde
     {derives: derives.move(), serde_markers: serde.move()}
 }
 
-parser_apply_struct_type_markers: fn(state: JetParserState, value: ^StructDef, markers: [Marker]) Never! {
-    value.type_markers = markers.copy()
+parser_apply_struct_type_markers: fn(state: JetParserState, value: ^StructDef, markers: ^^[Marker]) Never! {
     {derives, serde_markers}: parser_split_type_markers(markers)
     value.serde_markers = serde_markers
     value.derives = derives
     value.auto_derive_default = true
     parser_apply_type_markers(state, value, markers)
+    value.type_markers = markers.move()
 }
 
-parser_apply_enum_type_markers: fn(state: JetParserState, value: ^EnumDef, markers: [Marker]) Never! {
-    value.type_markers = markers.copy()
+parser_apply_enum_type_markers: fn(state: JetParserState, value: ^EnumDef, markers: ^^[Marker]) Never! {
     {derives, serde_markers}: parser_split_type_markers(markers)
     value.serde_markers = serde_markers
     value.derives = derives
@@ -88,6 +87,7 @@ parser_apply_enum_type_markers: fn(state: JetParserState, value: ^EnumDef, marke
             value.must_use_span = Val(marker.span)
         }
     }
+    value.type_markers = markers.move()
 }
 
 // `marker_argument_shape_error`: E0930 names the rule's registered signature at
@@ -367,9 +367,8 @@ parser_marker_binding_slots: fn(marker: Marker, names: [String], flags: [String]
     ^saw_named: false
     loop index in 0..<marker.args.len() {
         ^label: parser_marker_label(marker, index)
-        // copy: the flag word is read from the marker; the label owns its text.
         if label == "" && parser_marker_expression(marker, index) == .Val(value) && value == .Ident(word, _, _) && flags.contains(word) {
-            label = word.copy()
+            label = word
         }
         ^parameter: -1
         if {

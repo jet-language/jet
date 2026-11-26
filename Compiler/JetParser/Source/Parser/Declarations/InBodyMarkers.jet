@@ -218,12 +218,22 @@ parser_marker_has_simple_value: fn(marker: Marker) -> Bool Never! {
 // Writing both is E0942, whose edits move the whole set above (primary) or
 // into the body. `head` is where the declaration's text starts and `close`
 // the offset of its body's `}`.
-parser_merge_inbody_markers: fn(state: ^JetParserState, above: [Marker], inside: [Marker], head: Int, close: Int, noun: String) -> [Marker] {
-    if inside.len() == 0 -> return above.copy()
+parser_merge_inbody_markers: fn(state: ^JetParserState, above: [Marker], inside: ^^[Marker], head: Int, close: Int, noun: String) -> [Marker] {
     ^merged: above.copy()
-    loop marker in inside -> merged.push(marker.copy())
+    if inside.len() == 0 -> return merged
+    ^source: inside.move()
+    ^reversed: [Marker]{}
+    loop source.len() > 0 {
+        marker: source.pop() ?? break
+        reversed.push(marker)
+    }
+    first_inside_span: reversed[reversed.len() - 1].span
+    loop reversed.len() > 0 {
+        marker: reversed.pop() ?? break
+        merged.push(marker)
+    }
     if above.len() == 0 || parser_aborting(state) -> return merged
-    diagnostic: diagnostic_from_registry("E0942", Val(inside[0].span), "{noun} writes markers both above it and inside its body", "a declaration's markers are one set, written in one place, so a reader finds all of them together", "move every marker above {noun}, or every marker into its body as `#X: value` lines")
+    diagnostic: diagnostic_from_registry("E0942", Val(first_inside_span), "{noun} writes markers both above it and inside its body", "a declaration's markers are one set, written in one place, so a reader finds all of them together", "move every marker above {noun}, or every marker into its body as `#X: value` lines")
     if state.source_offset != 0 {
         state.diagnostics.push(diagnostic)
         return merged
@@ -257,20 +267,17 @@ parser_marker_inside_text: fn(marker: Marker) -> String {
 
 // The lines of a marker set above a declaration: one bare marker per line
 // while every marker names the same rule, else one `#[A, B]` list.
-parser_marker_above_lines: fn(markers: [Marker]) -> [String] {
+parser_marker_above_lines: fn(markers: [Marker], order: [Int]) -> [String] {
     ^distinct: [String]{}
-    loop marker in markers {
-        if !distinct.contains(marker.name) -> distinct.push(marker.name)
+    loop idx in order {
+        if !distinct.contains(markers[idx].name) -> distinct.push(markers[idx].name)
     }
-    ^texts: [String]{}
-    loop marker in markers -> texts.push(parser_marker_above_text(marker))
+    texts: loop idx in order -> parser_marker_above_text(markers[idx])
     if distinct.len() > 1 {
         joined: texts.join(", ")
         return [String]{"#[{joined}]"}
     }
-    ^lines: [String]{}
-    loop text in texts -> lines.push("#{text}")
-    lines
+    loop text in texts -> "#{text}"
 }
 
 parser_marker_byte: fn(source: [U8], index: Int) -> Int Never! {
@@ -296,8 +303,8 @@ parser_marker_line_indent: fn(source: [U8], offset: Int) -> String Never! {
 
 // The source of the markers written above a declaration, from the first `#`
 // through the last marker or closing `]`.
-parser_marker_above_region: fn(source: [U8], above: [Marker]) -> Span Never! {
-    ^start: above[0].span.start
+parser_marker_above_region: fn(source: [U8], markers: [Marker], above: [Int]) -> Span Never! {
+    ^start: markers[above[0]].span.start
     if parser_marker_byte(source, start) != 35 {
         loop parser_marker_byte(source, start - 1) == 32 || parser_marker_byte(source, start - 1) == 9 {
             start -= 1
@@ -308,7 +315,7 @@ parser_marker_above_region: fn(source: [U8], above: [Marker]) -> Span Never! {
         }
         if parser_marker_byte(source, start - 1) == 35 -> start -= 1
     }
-    ^end: above[above.len() - 1].span.end
+    ^end: markers[above[above.len() - 1]].span.end
     ^probe: end
     loop parser_marker_byte(source, probe) == 32 || parser_marker_byte(source, probe) == 9 {
         probe += 1
@@ -348,15 +355,16 @@ parser_marker_move_edit: fn(source: [U8], markers: [Marker], head: Int, close: I
         if marker.inside != inside -> placed = false
     }
     if placed -> return None
-    ^above: [Marker]{}
-    ^within: [Marker]{}
-    loop marker in markers {
-        if marker.inside -> within.push(marker.copy()) else -> above.push(marker.copy())
+    ^above: [Int]{}
+    ^within: [Int]{}
+    loop (idx, marker) in markers {
+        if marker.inside -> within.push(idx) else -> above.push(idx)
     }
-    ^ordered: above.copy()
-    loop marker in within -> ordered.push(marker)
+    ^ordered: [Int]{}
+    loop idx in above -> ordered.push(idx)
+    loop idx in within -> ordered.push(idx)
     ^region: Span{start: head, end: head}
-    if above.len() > 0 -> region = parser_marker_above_region(source, above)
+    if above.len() > 0 -> region = parser_marker_above_region(source, markers, above)
     indent: parser_marker_line_indent(source, region.start)
     ^splices: [ParserMarkerSplice]{}
     if {
@@ -370,7 +378,7 @@ parser_marker_move_edit: fn(source: [U8], markers: [Marker], head: Int, close: I
             }
         }
         else -> {
-            lines: parser_marker_above_lines(ordered)
+            lines: parser_marker_above_lines(markers, ordered)
             joined: lines.join("\n{indent}")
             if {
                 above.len() > 0 -> {
@@ -385,10 +393,10 @@ parser_marker_move_edit: fn(source: [U8], markers: [Marker], head: Int, close: I
             }
         }
     }
-    loop marker in within -> splices.push(parser_marker_line_cut(source, marker.span))
+    loop idx in within -> splices.push(parser_marker_line_cut(source, markers[idx].span))
     if inside {
         ^text: ""
-        loop marker in ordered -> text = "{text}{indent}    {parser_marker_inside_text(marker)}\n"
+        loop idx in ordered -> text = "{text}{indent}    {parser_marker_inside_text(markers[idx])}\n"
         brace_line: parser_marker_line_start(source, close)
         ^blank: true
         loop offset in brace_line..<close {
@@ -405,9 +413,9 @@ parser_marker_move_edit: fn(source: [U8], markers: [Marker], head: Int, close: I
 // Join `splices` (each cut or insertion over the original text) into one edit
 // over the span they cover. Splices are applied in start order; at one offset
 // a cut applies before an insertion.
-parser_marker_apply_splices: fn(source: [U8], splices: [ParserMarkerSplice]) -> TextEdit? {
+parser_marker_apply_splices: fn(source: [U8], splices: ^^[ParserMarkerSplice]) -> TextEdit? {
     if splices.len() == 0 -> return None
-    ^ordered: splices.copy()
+    ^ordered: splices.move()
     loop index in 1..<ordered.len() {
         ^at: index
         loop at > 0 && ordered[at - 1].start > ordered[at].start {

@@ -559,7 +559,7 @@ jfmt_emit_block_close_comments: fn(f: ^JetFmt, first_start: Int, last_end: Int) 
     }
     close: f.source_toks[f.brace_closes[before]].span.start
     loop f.comment_i < f.comments.len() && f.comments[f.comment_i].span.start < close {
-        span: f.comments[f.comment_i].span.copy()
+        span: f.comments[f.comment_i].span
         text: f.comments[f.comment_i].text.copy()
         ^previous: jfmt_first_token_at(f, span.start) - 1
         loop previous >= 0 && (f.source_toks[previous].span.start >= span.start || f.source_toks[previous].kind == TOKEN_SEMI) {
@@ -738,7 +738,7 @@ jfmt_emit_leading_statement_gap: fn(f: ^JetFmt, start: Int, end: Int) {
     ^cursor: start
     loop f.comment_i < f.comments.len() {
         text: f.comments[f.comment_i].text.copy()
-        span: f.comments[f.comment_i].span.copy()
+        span: f.comments[f.comment_i].span
         if span.start >= end -> break
         if span.start < start {
             jfmt_emit_comment_line(f, text)
