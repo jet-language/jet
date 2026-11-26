@@ -3405,12 +3405,13 @@ jet_driver_comptime_batch_names: fn(batch: JetDriverComptimeBatch) -> String Nev
 }
 
 // `known` holds the module and key of every source already pending or staged.
-jet_driver_comptime_checked_text_source_add: fn(sources: ^[SemaComptimeItemSource], known: ^SemaComptimeKeySet, evaluation: SemaCheckedTextEvaluation) Never! {
+jet_driver_comptime_checked_text_source_add: fn(sources: ^[SemaComptimeItemSource], known: ^SemaComptimeKeySet, evaluation: SemaCheckedTextEvaluation) -> Bool Never! {
     ^source: sema_comptime_checked_text_source(evaluation)
     if !sema_comptime_key_set_add(known, source.module_identity, source.key) {
-        return
+        return false
     }
     sources.push(source)
+    true
 }
 
 // Each function joins the first module with its identity, in place: the
@@ -3625,6 +3626,8 @@ jet_driver_comptime_run: fn(
     ^pending: sources
     // The module and key of every source pending or staged in this run.
     ^known_sources: SemaComptimeKeySet{}
+    ^accepted_checked_text: SemaComptimeKeySet{}
+    ^rejected_checked_text: SemaComptimeKeySet{}
     loop source in sources {
         ^_: sema_comptime_key_set_add(known_sources, source.module_identity, source.key)
     }
@@ -4107,15 +4110,32 @@ jet_driver_comptime_run: fn(
                     next_pending.push(source.copy())
                     next
                 }
+                ^waiting_checked_text: false
+                ^rejected_checked_text_call: false
                 loop call in comptime_request.calls {
                     if call.checked_text == .Val(evaluation) {
-                        jet_driver_comptime_checked_text_source_add(next_pending, known_sources, evaluation)
+                        checked_source: sema_comptime_checked_text_source(evaluation)
+                        if sema_comptime_key_set_has(rejected_checked_text, checked_source.module_identity, checked_source.key) {
+                            rejected_checked_text_call = true
+                        } else if !sema_comptime_key_set_has(accepted_checked_text, checked_source.module_identity, checked_source.key) {
+                            if jet_driver_comptime_checked_text_source_add(next_pending, known_sources, evaluation) {
+                                made_progress = true
+                            }
+                            waiting_checked_text = true
+                        }
                     }
+                }
+                if rejected_checked_text_call -> next
+                if waiting_checked_text && source.kind != SemaComptimeItemKind.CheckedText {
+                    next_pending.push(source.copy())
+                    next
                 }
                 loop function_index in scanned_functions..<checked_functions.len() {
                     loop call in checked_functions[function_index].calls {
                         if call.checked_text == .Val(evaluation) {
-                            jet_driver_comptime_checked_text_source_add(next_pending, known_sources, evaluation)
+                            if jet_driver_comptime_checked_text_source_add(next_pending, known_sources, evaluation) {
+                                made_progress = true
+                            }
                         }
                     }
                     // The local values the closure's function checks staged
@@ -4169,6 +4189,13 @@ jet_driver_comptime_run: fn(
                 if flushed.stop == .Val(stopped) {
                     sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
                     return stopped
+                }
+                if source.kind == SemaComptimeItemKind.CheckedText {
+                    if flushed.rejected {
+                        ^_: sema_comptime_key_set_add(rejected_checked_text, source.module_identity, source.key)
+                    } else if flushed.progressed {
+                        ^_: sema_comptime_key_set_add(accepted_checked_text, source.module_identity, source.key)
+                    }
                 }
                 if jet_driver_module_values_refused(environments[0], programs[0], comptime_scopes, available, flushed.refused, diagnostics) || flushed.rejected {
                     refused_any = true
