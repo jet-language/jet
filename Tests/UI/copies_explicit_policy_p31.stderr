@@ -1,0 +1,17 @@
+Error: Jet.ReadOnlyValueNotOwned: `name` was not moved here, so it cannot fill an owned field
+  --> Tests/UI/copies_explicit_policy_p31.jet:9:16
+    |
+  9 |     User{name: name, tags: [String]{}}
+    |                ^^^^
+ Why: This function has read access only and does not own the value
+ Fix: Copy it explicitly with `name.copy()`
+More: jet-lang.dev/e/Jet.ReadOnlyValueNotOwned
+
+Error: Jet.ReadOnlyValueNotOwned: `names` is still used later, so filling this field would copy it
+  --> Tests/UI/copies_explicit_policy_p31.jet:18:35
+    |
+ 18 |     kept: User{name: label, tags: names}
+    |                                   ^^^^^
+ Why: `copies: .Explicit` is active, so a copy into an owned field must be written
+ Fix: Copy it explicitly with `names.copy()`
+More: jet-lang.dev/e/Jet.ReadOnlyValueNotOwned
