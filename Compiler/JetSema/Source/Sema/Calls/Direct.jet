@@ -1881,7 +1881,7 @@ sema_call_direct_checked_from_target: fn(check: ^SemaBodyCheck, target: SemaCall
         ^source_args: call.args
         ^inferred_facts: sema_call_collect_inference_facts(params, binding, source_args, check)
         sema_call_lambda_failure_facts(inferred_facts, target.generic_params, params, binding, source_args, check)
-        if sema_call_http_source_json_target(target, check) {
+        if target.symbol.name == "json" && sema_call_core_module_is(check, "core.http.server", target.symbol.module_identity) {
             loop parameter in target.generic_params {
                 loop bound in parameter.bounds {
                     if bound != "Encode" -> next
@@ -1889,7 +1889,7 @@ sema_call_direct_checked_from_target: fn(check: ^SemaBodyCheck, target: SemaCall
                         if inferred_facts.parameter_types[index] == (Type.Named{name: parameter.name}) {
                             body_type: inferred_facts.argument_types[index]
                             if !sema_serde_type_is_admissible(check.environment.*, check.program.*, body_type, SemaSerdeDirection.Encode) {
-                                sema_call_http_check_serde(SemaSerdeDirection.Encode, body_type, expr_span(source_args[index].expr), check)
+                                sema_serde_check_admissible(SemaSerdeDirection.Encode, body_type, expr_span(source_args[index].expr), check)
                                 return None
                             }
                         }

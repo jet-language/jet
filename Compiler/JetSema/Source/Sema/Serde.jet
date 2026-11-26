@@ -1,4 +1,5 @@
 use jet_foundation.[
+    Span,
     TField,
     TTypeDef,
     Type,
@@ -90,6 +91,12 @@ SemaSerdeLack: struct {
 sema_serde_lack_why: fn(lacking: String, shown: String) -> String Never! {
     if lacking == shown -> return "{shown} has no wire form"
     "{lacking} has no wire form, so {shown} has none"
+}
+
+sema_serde_check_admissible: fn(direction: SemaSerdeDirection, ty: Type, span: Span, check: ^SemaBodyCheck) {
+    lack: sema_serde_lack(check, ty, direction) ?? return
+    shown: sema_type_show_quoted(ty)
+    check.diagnostics.push(sema_error("E2411", span, "{shown} can't be {if direction == SemaSerdeDirection.Encode -> "serialized" else -> "decoded"}", sema_serde_lack_why(lack.shown, shown), lack.fix))
 }
 
 // The type on `ty`'s path with no `direction` codec, innermost first: an
