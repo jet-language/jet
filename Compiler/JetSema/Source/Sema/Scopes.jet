@@ -24,7 +24,6 @@ use jet_foundation.[
     Expr,
     Field,
     Item,
-    TargetHardwareUse,
     SharedLifetime,
     PolicyDeclaration,
     PolicyKey,
@@ -58,7 +57,6 @@ use jet_foundation.[
     Variant,
     ViewProvenanceMap,
     ViewSourcePath,
-    type_identity_equal,
     type_name,
     expr_node_id,
     Effect,
@@ -581,7 +579,6 @@ SemaCheckedTextEvaluation: struct {
     // The checked literal's flat form (sema_publish_expression) and its type.
     expression: BodyExpr,
     ty: Type,
-    hardware_use: TargetHardwareUse,
     reachable_function_keys: [String],
     dependencies: [String],
     span: Span,
@@ -958,7 +955,6 @@ SemaCheckContext: struct {
     compiler_records: Bool{false},
     // The tables the body's heard calls add rows to (sema_rule_table).
     rule_tables: SemaRuleTables{SemaRuleTables{}},
-    hardware_use: TargetHardwareUse,
     call_return_views: [SemaCallReturnView],
     local_view_provenance: [SemaLocalViewProvenance],
     return_view_receiver_key: String,
@@ -1253,9 +1249,6 @@ SemaScopeTable: struct {
     base_table: [SemaScopeTable]{[SemaScopeTable]{}},
     base_binding_count: Int{0},
     loop_labels: [SemaScopeLoopLabel],
-    hardware_transfers: [SemaHardwareDMATransferFact],
-    hardware_definite_transfers: [SemaHardwareDMATransferFact],
-    hardware_pending_transfers: [SemaHardwareDMATransferFact],
     current: Int,
     return_type: Type?,
     failure_carrier: TFailureCarrier?,
@@ -1347,9 +1340,6 @@ SemaScopeMark: struct {
     bindings: Int,
     undo: Int,
     loop_labels: [SemaScopeLoopLabel],
-    hardware_transfers: [SemaHardwareDMATransferFact],
-    hardware_definite_transfers: [SemaHardwareDMATransferFact],
-    hardware_pending_transfers: [SemaHardwareDMATransferFact],
     current: Int,
     knowledge_gate: SemaKnowledgeGate?,
     return_type: Type?,
@@ -1366,13 +1356,6 @@ SemaScopeMark: struct {
     context_allocation: Int,
     open_marks: Int,
     deep_check: SemaDeepFrame?,
-}
-
-// The hardware transfer facts of one path, joined at a control-flow merge.
-SemaScopeHardwareFacts: struct {
-    transfers: [SemaHardwareDMATransferFact],
-    definite: [SemaHardwareDMATransferFact],
-    pending: [SemaHardwareDMATransferFact],
 }
 
 // The program half of a check's environment (FRONTEND-300X §3.1 J): the
@@ -1765,7 +1748,6 @@ sema_check_context_init: fn() -> SemaCheckContext Never! {
         lending_view_parameter_keys: [String]{},
         lambda_statement_tails: [SemaStatementTailFrame]{},
         call_facts: [SemaCallSiteFact]{},
-        hardware_use: sema_hardware_empty_use(),
         call_return_views: [SemaCallReturnView]{},
         local_view_provenance: [SemaLocalViewProvenance]{},
         return_view_receiver_key: "",
@@ -1888,7 +1870,6 @@ sema_check_context_snapshot: fn(source: SemaCheckContext) -> SemaCheckContext Ne
         call_facts: source.call_facts.copy(),
         module_writes: source.module_writes.copy(),
         rule_tables: if source.rule_tables.calls_at.len() == 0 -> SemaRuleTables{} else -> source.rule_tables.copy(),
-        hardware_use: sema_hardware_use_snapshot(source.hardware_use),
         call_return_views: source.call_return_views.copy(),
         local_view_provenance: source.local_view_provenance.copy(),
         return_view_receiver_key: source.return_view_receiver_key,
@@ -2046,7 +2027,6 @@ SemaCheckContextSaved: struct {
     lending_view_parameter_keys: [String],
     lambda_statement_tails: [SemaStatementTailFrame],
     rule_tables: SemaRuleTables,
-    hardware_use: TargetHardwareUse,
     return_view_receiver_key: String,
     return_view_parameter_keys: [String],
     return_view_provenance: ViewProvenanceMap?,
@@ -2142,7 +2122,6 @@ sema_check_context_save: fn(context: SemaCheckContext) -> SemaCheckContextMark N
             lending_view_parameter_keys: if context.lending_view_parameter_keys.len() == 0 -> [String]{} else -> context.lending_view_parameter_keys.copy(),
             lambda_statement_tails: if context.lambda_statement_tails.len() == 0 -> [SemaStatementTailFrame]{} else -> context.lambda_statement_tails.copy(),
             rule_tables: if context.rule_tables.calls_at.len() == 0 -> SemaRuleTables{} else -> context.rule_tables.copy(),
-            hardware_use: sema_hardware_use_snapshot(context.hardware_use),
             return_view_receiver_key: context.return_view_receiver_key,
             return_view_parameter_keys: if context.return_view_parameter_keys.len() == 0 -> [String]{} else -> context.return_view_parameter_keys.copy(),
             return_view_provenance: context.return_view_provenance,
@@ -2266,7 +2245,6 @@ sema_check_context_rollback: fn(context: ^SemaCheckContext, mark: ^^SemaCheckCon
     context.lambda_lending_views = saved.lambda_lending_views
     context.lending_view_parameter_keys = saved.lending_view_parameter_keys.move()
     context.lambda_statement_tails = saved.lambda_statement_tails.move()
-    context.hardware_use = saved.hardware_use.move()
     context.rule_tables = saved.rule_tables.move()
     context.return_view_receiver_key = saved.return_view_receiver_key.move()
     context.return_view_parameter_keys = saved.return_view_parameter_keys.move()
@@ -2389,11 +2367,6 @@ sema_check_context_rollback_keep_calls: fn(context: ^SemaCheckContext, mark: ^^S
     context.call_facts.extend(calls.move())
 }
 
-sema_scope_hardware_transfers_snapshot: fn(source: [SemaHardwareDMATransferFact]) -> [SemaHardwareDMATransferFact] Never! {
-    result: loop fact in source -> fact.copy()
-    result
-}
-
 // copy: a deferred arm is checked later against the scope table as it is now,
 // while the live table goes on to the sibling arm; the snapshot is that table.
 sema_scope_snapshot: fn(source: SemaScopeTable) -> SemaScopeTable Never! {
@@ -2406,9 +2379,6 @@ sema_scope_snapshot: fn(source: SemaScopeTable) -> SemaScopeTable Never! {
         base_table: source.base_table,
         base_binding_count: source.base_binding_count,
         loop_labels: source.loop_labels.copy(),
-        hardware_transfers: sema_scope_hardware_transfers_snapshot(source.hardware_transfers),
-        hardware_definite_transfers: sema_scope_hardware_transfers_snapshot(source.hardware_definite_transfers),
-        hardware_pending_transfers: sema_scope_hardware_transfers_snapshot(source.hardware_pending_transfers),
         current: source.current,
         knowledge_gate: source.knowledge_gate,
         return_type: source.return_type,
@@ -2442,9 +2412,6 @@ sema_scope_mark: fn(table: ^SemaScopeTable) -> SemaScopeMark Never! {
         bindings: table.bindings.len(),
         undo: table.binding_undo.len(),
         loop_labels: if table.loop_labels.len() == 0 -> [SemaScopeLoopLabel]{} else -> table.loop_labels.copy(),
-        hardware_transfers: if table.hardware_transfers.len() == 0 -> [SemaHardwareDMATransferFact]{} else -> sema_scope_hardware_transfers_snapshot(table.hardware_transfers),
-        hardware_definite_transfers: if table.hardware_definite_transfers.len() == 0 -> [SemaHardwareDMATransferFact]{} else -> sema_scope_hardware_transfers_snapshot(table.hardware_definite_transfers),
-        hardware_pending_transfers: if table.hardware_pending_transfers.len() == 0 -> [SemaHardwareDMATransferFact]{} else -> sema_scope_hardware_transfers_snapshot(table.hardware_pending_transfers),
         current: table.current,
         knowledge_gate: table.knowledge_gate,
         return_type: table.return_type,
@@ -2489,27 +2456,6 @@ sema_scope_rollback: fn(table: ^SemaScopeTable, mark: SemaScopeMark) Never! {
     if mark.loop_labels.len() == 0 {
         if table.loop_labels.len() > 0 -> table.loop_labels = [SemaScopeLoopLabel]{}
     } else { table.loop_labels = mark.loop_labels.copy() }
-    if mark.hardware_transfers.len() == 0 {
-        if table.hardware_transfers.len() > 0 {
-            table.hardware_transfers = [SemaHardwareDMATransferFact]{}
-        }
-    } else {
-        table.hardware_transfers = sema_scope_hardware_transfers_snapshot(mark.hardware_transfers)
-    }
-    if mark.hardware_definite_transfers.len() == 0 {
-        if table.hardware_definite_transfers.len() > 0 {
-            table.hardware_definite_transfers = [SemaHardwareDMATransferFact]{}
-        }
-    } else {
-        table.hardware_definite_transfers = sema_scope_hardware_transfers_snapshot(mark.hardware_definite_transfers)
-    }
-    if mark.hardware_pending_transfers.len() == 0 {
-        if table.hardware_pending_transfers.len() > 0 {
-            table.hardware_pending_transfers = [SemaHardwareDMATransferFact]{}
-        }
-    } else {
-        table.hardware_pending_transfers = sema_scope_hardware_transfers_snapshot(mark.hardware_pending_transfers)
-    }
     table.current = mark.current
     table.knowledge_gate = mark.knowledge_gate
     table.return_type = mark.return_type
@@ -2541,14 +2487,6 @@ sema_scope_note_binding_edit: fn(table: ^SemaScopeTable, index: Int) Never! {
     table.binding_undo.push(SemaScopeBindingUndo{index: index, binding: previous})
 }
 
-sema_scope_hardware_facts: fn(table: SemaScopeTable) -> SemaScopeHardwareFacts Never! {
-    SemaScopeHardwareFacts{
-        transfers: sema_scope_hardware_transfers_snapshot(table.hardware_transfers),
-        definite: sema_scope_hardware_transfers_snapshot(table.hardware_definite_transfers),
-        pending: sema_scope_hardware_transfers_snapshot(table.hardware_pending_transfers),
-    }
-}
-
 sema_scope_init: fn(module_identity: ModuleID) -> SemaScopeTable Never! {
     SemaScopeTable{
         module_identity: module_identity,
@@ -2557,9 +2495,6 @@ sema_scope_init: fn(module_identity: ModuleID) -> SemaScopeTable Never! {
         name_slots: name_table_sized(16),
         name_positions: [[Int]]{},
         loop_labels: [SemaScopeLoopLabel]{},
-        hardware_transfers: [SemaHardwareDMATransferFact]{},
-        hardware_definite_transfers: [SemaHardwareDMATransferFact]{},
-        hardware_pending_transfers: [SemaHardwareDMATransferFact]{},
         current: 0,
         return_type: None,
         failure_carrier: None,
@@ -2616,78 +2551,9 @@ sema_scope_leave: fn(table: ^SemaScopeTable, state: ^SemaOwnershipState) Never! 
     if table.current <= 0 {
         return
     }
-    ^leaving: table.current
-    ^index: table.hardware_transfers.len()
-    loop index > 0 {
-        index -= 1
-        if table.hardware_transfers[index].buffer_frame == leaving {
-            ^_: table.hardware_transfers.remove(index, .Slot)
-        }
-    }
-    index = table.hardware_definite_transfers.len()
-    loop index > 0 {
-        index -= 1
-        if table.hardware_definite_transfers[index].scope_frame == leaving || table.hardware_definite_transfers[index].buffer_frame == leaving {
-            ^_: table.hardware_definite_transfers.remove(index, .Slot)
-        }
-    }
-    index = table.hardware_pending_transfers.len()
-    loop index > 0 {
-        index -= 1
-        if table.hardware_pending_transfers[index].buffer_frame == leaving {
-            ^_: table.hardware_pending_transfers.remove(index, .Slot)
-        }
-    }
+    leaving: table.current
     sema_ownership_leave_scope(state)
     table.current = table.frames[leaving].parent
-}
-
-sema_scope_hardware_fact_equal: fn(left: SemaHardwareDMATransferFact, right: SemaHardwareDMATransferFact) -> Bool Never! {
-    left.transfer_key == right.transfer_key && left.buffer_key == right.buffer_key && left.profile_id == right.profile_id && left.channel == right.channel && left.buffer_name == right.buffer_name && type_identity_equal(left.buffer_type, right.buffer_type)
-}
-
-sema_scope_hardware_intersection: fn(left: [SemaHardwareDMATransferFact], right: [SemaHardwareDMATransferFact]) -> [SemaHardwareDMATransferFact] Never! {
-    ^result: [SemaHardwareDMATransferFact]{}
-    loop candidate in left {
-        loop other in right {
-            if sema_scope_hardware_fact_equal(candidate, other) {
-                result.push(candidate.copy())
-                break
-            }
-        }
-    }
-    result
-}
-
-sema_scope_hardware_union: fn(left: [SemaHardwareDMATransferFact], right: [SemaHardwareDMATransferFact]) -> [SemaHardwareDMATransferFact] Never! {
-    ^result: sema_scope_hardware_transfers_snapshot(left)
-    loop candidate in right {
-        ^found: false
-        loop existing in result {
-            if sema_scope_hardware_fact_equal(candidate, existing) -> found = true
-        }
-        if !found -> result.push(candidate.copy())
-    }
-    result
-}
-
-sema_scope_hardware_join: fn(before: SemaScopeHardwareFacts, then_path: SemaScopeHardwareFacts, else_path: SemaScopeHardwareFacts, has_else: Bool) -> SemaScopeHardwareFacts Never! {
-    ^transfers: sema_scope_hardware_union(before.transfers, then_path.transfers)
-    ^definite: sema_scope_hardware_intersection(before.definite, then_path.definite)
-    ^pending: sema_scope_hardware_union(before.pending, then_path.pending)
-    if has_else {
-        transfers = sema_scope_hardware_union(transfers, else_path.transfers)
-        definite = sema_scope_hardware_intersection(definite, else_path.definite)
-        pending = sema_scope_hardware_union(pending, else_path.pending)
-    }
-    SemaScopeHardwareFacts{transfers: transfers, definite: definite, pending: pending}
-}
-
-sema_scope_join_hardware_paths: fn(table: ^SemaScopeTable, before: SemaScopeHardwareFacts, then_path: SemaScopeHardwareFacts, else_path: SemaScopeHardwareFacts, has_else: Bool) Never! {
-    joined: sema_scope_hardware_join(before, then_path, else_path, has_else)
-    table.hardware_transfers = sema_scope_hardware_transfers_snapshot(joined.transfers)
-    table.hardware_definite_transfers = sema_scope_hardware_transfers_snapshot(joined.definite)
-    table.hardware_pending_transfers = sema_scope_hardware_transfers_snapshot(joined.pending)
 }
 
 // Module declarations share one root namespace. The declaration pass reports
@@ -3403,9 +3269,6 @@ sema_scope_light_copy: fn(source: SemaScopeTable) -> SemaScopeTable Never! {
             base_table: source.base_table,
             base_binding_count: source.base_binding_count,
             loop_labels: source.loop_labels,
-            hardware_transfers: source.hardware_transfers,
-            hardware_definite_transfers: source.hardware_definite_transfers,
-            hardware_pending_transfers: source.hardware_pending_transfers,
             current: source.current,
             knowledge_gate: source.knowledge_gate,
             return_type: source.return_type,
@@ -3469,9 +3332,6 @@ sema_scope_light_copy: fn(source: SemaScopeTable) -> SemaScopeTable Never! {
         base_table: if source.base_binding_count > 0 -> source.base_table else -> [SemaScopeTable]{source},
         base_binding_count: if source.base_binding_count > 0 -> source.base_binding_count else -> count,
         loop_labels: source.loop_labels.copy(),
-        hardware_transfers: sema_scope_hardware_transfers_snapshot(source.hardware_transfers),
-        hardware_definite_transfers: sema_scope_hardware_transfers_snapshot(source.hardware_definite_transfers),
-        hardware_pending_transfers: sema_scope_hardware_transfers_snapshot(source.hardware_pending_transfers),
         current: source.current,
         knowledge_gate: source.knowledge_gate,
         return_type: source.return_type,

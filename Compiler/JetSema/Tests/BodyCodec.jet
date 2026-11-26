@@ -53,7 +53,6 @@ use {
         sema_core_bodies_read,
         sema_core_bodies_unread,
         sema_core_bodies_record,
-        sema_hardware_empty_use,
         sema_collect_comptime_declarations,
         sema_finalize_graph,
         sema_graph_trail_init,
@@ -281,10 +280,9 @@ body_codec_packets: fn(failures: ^[String]) -> [SemaParallelBody] {
         loop row.functions.len() > 0 {
             function: row.functions.pop() ?? break
             compute: row.compute_facts.pop() ?? break
-            result: SemaFunctionResult{value: Val(function.move()), complete: row.complete, exact_int_reachable: row.exact_int_reachable, copy_events: row.copy_events.move(), hardware_use: row.hardware_use.move(), comptime_body_sources: row.comptime_body_sources.move(), compute_facts: compute.move(), failure: row.failure_facts.pop(), incomplete_reasons: row.incomplete_reasons.move()}
+            result: SemaFunctionResult{value: Val(function.move()), complete: row.complete, exact_int_reachable: row.exact_int_reachable, copy_events: row.copy_events.move(), comptime_body_sources: row.comptime_body_sources.move(), compute_facts: compute.move(), failure: row.failure_facts.pop(), incomplete_reasons: row.incomplete_reasons.move()}
             packets.push(SemaParallelBody{job_index: packets.len(), checked: Val(result.move()), diagnostics: row.diagnostics.move(), call_facts: row.call_facts.move(), comptime_requests: row.comptime_requests.move(), name_references: row.name_references.move(), method_input: if packets.len() == 0 -> Val(body_codec_method_input()) else -> None, wanted_hooks: false, memory_position: Val(packets.len()), memory_known: true})
             row.copy_events = [SemaCopyEvent]{}
-            row.hardware_use = sema_hardware_empty_use()
             row.comptime_body_sources = [SemaComptimeBodySource]{}
             row.incomplete_reasons = [String]{}
             row.diagnostics = [Diagnostic]{}

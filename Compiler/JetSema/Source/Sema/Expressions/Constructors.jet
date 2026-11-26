@@ -25,7 +25,6 @@ use {
         ExprField,
         ExprPair,
         Field,
-        TargetHardwareUse,
         ParamZone,
         PlaceAccess,
         Span,
@@ -2095,10 +2094,6 @@ sema_expression_checked_text_literal: fn(head: Type, source_head: Type?, body: T
     runtime_owner: sema_expr_runtime_body_owner(check)
     ^fact_start: check.context.call_facts.len()
     ^reference_start: check.context.name_references.len()
-    ^register_access_start: check.context.hardware_use.register_accesses.len()
-    ^interrupt_handler_start: check.context.hardware_use.interrupt_handlers.len()
-    ^dma_operation_start: check.context.hardware_use.dma_operations.len()
-    ^unresolved_hardware_start: check.context.hardware_use.unresolved_references.len()
     // A built literal's check runs only while building: in run-time code its
     // pieces are constant, and the shape it returns lands as a value.
     staged: building && runtime_owner != None
@@ -2191,12 +2186,6 @@ sema_expression_checked_text_literal: fn(head: Type, source_head: Type?, body: T
             source_expression: Expr.TypedLit{head: source_head, body: body, span: span, id: AST_NODE_GENERATED},
             expression: sema_publish_expression(checked, check.program.*, check.context),
             ty: checked.ty,
-            hardware_use: TargetHardwareUse{
-                register_accesses: loop index in register_access_start..<check.context.hardware_use.register_accesses.len() -> check.context.hardware_use.register_accesses[index],
-                interrupt_handlers: loop index in interrupt_handler_start..<check.context.hardware_use.interrupt_handlers.len() -> check.context.hardware_use.interrupt_handlers[index],
-                dma_operations: loop index in dma_operation_start..<check.context.hardware_use.dma_operations.len() -> check.context.hardware_use.dma_operations[index],
-                unresolved_references: loop index in unresolved_hardware_start..<check.context.hardware_use.unresolved_references.len() -> check.context.hardware_use.unresolved_references[index],
-            },
             reachable_function_keys: reachable,
             dependencies: dependencies,
             span: span,

@@ -1626,7 +1626,6 @@ sema_check_comptime_item: fn(environment: ^SemaScopeEnvironment, program: SemaPr
             span: evaluation.span,
             dependencies: dependencies,
             calls: [SemaComptimeRequest]{},
-            hardware_use: sema_hardware_use_snapshot(evaluation.hardware_use),
             reachable_function_keys: evaluation.reachable_function_keys,
         }
         return SemaComptimeItemCheck{request: Val(request), dependencies: dependencies, waiting_dependencies: waiting, diagnostics: [Diagnostic]{}, complete: true}
@@ -1787,7 +1786,6 @@ sema_check_comptime_item_in: fn(environment: SemaScopeEnvironment, program: Sema
         span: source.span,
         dependencies: dependencies,
         calls: check.context.comptime_requests,
-        hardware_use: sema_hardware_use_snapshot(check.context.hardware_use),
         reachable_function_keys: reachable,
         call_facts: if source.module_value || source.runtime_check -> check.context.call_facts else -> [SemaCallSiteFact]{},
         effect_call: sema_effect_comptime_call_name(check.context.call_facts, program, check.context),

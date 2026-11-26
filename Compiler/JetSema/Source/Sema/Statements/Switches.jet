@@ -386,7 +386,6 @@ sema_stmt_check_unit_if_arms: fn(
     // Both arms check in place on the live ownership state, each rolled back
     // to the fork (sema_ownership_fork), and their paths join after.
     fork: sema_ownership_fork(check.state)
-    before_hardware: sema_scope_hardware_facts(check.scopes)
     then_mark: sema_scope_mark(check.scopes)
     ^then_return: return_type.copy()
     if type_param == .Val(param) && type_target == .Val(target) {
@@ -401,7 +400,6 @@ sema_stmt_check_unit_if_arms: fn(
     then_result: sema_stmt_check_unit_branch(then_body, then_value, condition_bindings, then_return, check, "if.then@{span.start}", loop_depth)
     then_path: sema_ownership_fork_path(check.state, fork)
     sema_ownership_fork_rollback(check.state, fork)
-    then_hardware: sema_scope_hardware_facts(check.scopes)
     sema_scope_rollback(check.scopes, then_mark)
     else_mark: sema_scope_mark(check.scopes)
     ^else_is_elseif: false
@@ -422,7 +420,6 @@ sema_stmt_check_unit_if_arms: fn(
     else_path: sema_ownership_fork_path(check.state, fork)
     sema_ownership_fork_rollback(check.state, fork)
     sema_leave_source_nesting(check.context)
-    else_hardware: sema_scope_hardware_facts(check.scopes)
     sema_scope_rollback(check.scopes, else_mark)
     // A branch that leaves (`return`, `break`, `next`) does not reach the
     // code after the `if`, so its moves are not moves there.
@@ -446,7 +443,6 @@ sema_stmt_check_unit_if_arms: fn(
     if else_reaches_merge && !then_reaches_merge -> check.state.uninit = else_path.uninit
     loop site in then_path.share_found -> sema_ownership_note_share_found(check.state, site)
     loop site in else_path.share_found -> sema_ownership_note_share_found(check.state, site)
-    sema_scope_join_hardware_paths(check.scopes, before_hardware, then_hardware, else_hardware, true)
     if checked_condition == None || !then_result.complete || !else_result.complete {
         return SemaStatementResult{value: [TStmt]{}, complete: false}
     }
@@ -541,11 +537,9 @@ sema_stmt_check_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?,
     // holds each condition's rows once, in the fallthrough state, not once
     // more in the path of every arm after it.
     fork: sema_ownership_fork(check.state)
-    before_hardware: sema_scope_hardware_facts(check.scopes)
     fallthrough_mark: sema_scope_mark(check.scopes)
     ^conditions: [SemaCheckedCondition?]{}
     ^branches: [SemaStatementResult]{}
-    ^branch_hardware: [SemaScopeHardwareFacts]{}
     // The fallthrough state after the condition of the last arm that reaches
     // the merge.
     ^reach: SemaOwnershipFork?{None}
@@ -637,7 +631,6 @@ sema_stmt_check_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?,
         branch_path: sema_ownership_fork_path(check.state, branch_fork)
         sema_ownership_fork_rollback(check.state, branch_fork)
         sema_ownership_fork_close(check.state, branch_fork)
-        branch_hardware.push(sema_scope_hardware_facts(check.scopes))
         sema_scope_rollback(check.scopes, branch_mark)
         falls_through: sema_stmt_tree_block_can_fall_through(branch.value)
         branches.push(branch)
@@ -674,18 +667,8 @@ sema_stmt_check_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?,
     else_path: sema_ownership_fork_path(check.state, else_fork)
     sema_ownership_fork_rollback(check.state, else_fork)
     sema_ownership_fork_close(check.state, else_fork)
-    else_hardware: sema_scope_hardware_facts(check.scopes)
     sema_scope_rollback(check.scopes, else_mark)
     sema_scope_rollback(check.scopes, fallthrough_mark)
-    ^hardware_merged: sema_scope_hardware_facts(check.scopes)
-    if branch_hardware.len() > 0 {
-        hardware_merged = branch_hardware[0]
-        ^branch_hardware_index: 1
-        loop branch_hardware_index < branch_hardware.len() {
-            hardware_merged = sema_scope_hardware_join(before_hardware, hardware_merged, branch_hardware[branch_hardware_index], true)
-            branch_hardware_index += 1
-        }
-    }
     // A blocking readiness wait always selects an arm, so without an `else` no
     // path skips the table.
     else_reaches_merge: if else_body == None -> !readiness else -> sema_stmt_tree_block_can_fall_through(else_result ?? [TStmt]{})
@@ -724,7 +707,6 @@ sema_stmt_check_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?,
     sema_ownership_fork_close(check.state, fork)
     loop site in arm_found -> sema_ownership_note_share_found(check.state, site)
     loop site in else_path.share_found -> sema_ownership_note_share_found(check.state, site)
-    sema_scope_join_hardware_paths(check.scopes, before_hardware, hardware_merged, else_hardware, true)
     // Types are an open set, so a type table ends in `else`.
     if type_param != None && else_body == None {
         check.diagnostics.push(sema_error("E0003", span, "a type table needs an `else` arm", "types are an open set, so no list of type arms covers every `{type_param ?? ""}`", "add `else -> {{ ... }}` after the last arm"))

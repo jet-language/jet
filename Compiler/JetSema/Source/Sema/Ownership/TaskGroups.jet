@@ -410,7 +410,8 @@ sema_taskgroup_check_statement: fn(name: String, name_span: Span, args: TaskGrou
 // children have nothing to run on: a web build refuses the group rather than
 // emitting code that cannot run.
 sema_taskgroup_web_refused: fn(span: Span, check: ^SemaBodyCheck) -> Bool {
-    machine: sema_hardware_target_machine(check.environment.*, check.program.*) ?? return false
+    if check.program.registration_graph.mode == .Snapshot -> return false
+    machine: check.program.registration_graph.target_machine
     if machine.name != "wasm.browser" -> return false
     check.diagnostics.push(sema_error("E-WEB-UNSUPPORTED", span, "the web target `{machine.name}` cannot run a task group", "the browser host runs the program on one JavaScript thread, so a group's children have no thread of their own to run on", "do this work without `task.group` on the web, or build it for a native target"))
     true
