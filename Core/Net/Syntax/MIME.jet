@@ -1,0 +1,62 @@
+// Compiler-private part of core.net.mime: RFC 9110 media-type grammar.
+use {
+    core.grammar.[Grammar]
+}
+
+priv MediaType: Grammar{"""
+    media_type  : top=TOKEN '/' sub=TOKEN params+=param_item* EOF ;
+    param_item  : ';' entry=param_entry? ;
+    param_entry : name=TOKEN '=' val=param_val? ;
+    param_val   : raw=QUOTED # Quoted
+                | raw=BARE # Bare
+                ;
+    TOKEN       : [A-Za-z0-9!#$&\-^_.+]+ ;
+    QUOTED      : '"' [^";]* '"' ;
+    BARE        : [^; \t\r\n"] ([^;]* [^; \t\r\n])? ;
+    WS          : [ \t\r\n]+ -> skip ;
+"""}
+
+MIMEParsed: struct {
+    top: String,
+    sub: String,
+    params: [[String]],
+}
+
+priv mime_ascii_lower: fn(text: String) -> String Never! {
+    ^out: [U8]{}
+    loop b in text.bytes() {
+        if b >= 65 && b <= 90 -> out.push(U8{b + 32}) else -> out.push(b)
+    }
+    String.from_bytes(out) ?? ""
+}
+
+priv mime_unquote: fn(raw: String) -> String Never! {
+    bytes: raw.bytes()
+    if bytes.len() < 2 -> return raw.copy()
+    ^out: [U8]{}
+    loop i in 1..<(bytes.len() - 1) -> out.push(bytes[i])
+    String.from_bytes(out) ?? ""
+}
+
+mime_parse_media_type: fn(text: String) -> MIMEParsed? Never! {
+    parsed: MediaType.parse(text) ?? return None
+    top: mime_ascii_lower(parsed.top)
+    sub: mime_ascii_lower(parsed.sub)
+    ^params: [[String]]{}
+    loop item in parsed.params {
+        if item.entry == .Val(entry) {
+            name: mime_ascii_lower(entry.name)
+            val_text: if entry.val == {
+                .Val(v) -> {
+                    if v == {
+                        .Quoted(q) -> mime_unquote(q)
+                        .Bare(b) -> b.copy()
+                    }
+                }
+                .None -> ""
+            }
+            params.push([String]{name, val_text})
+        }
+    }
+    Val(MIMEParsed{top: top, sub: sub, params: params})
+}

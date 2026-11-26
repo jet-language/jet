@@ -4,6 +4,10 @@
 // subtype, and parameter names are folded to lowercase. The extension
 // table is the same one CoreLib uses for static HTTP files; unknown
 // extensions are absent, never `application/octet-stream`.
+use {
+    mime_syntax: __core_net_syntax_mime
+}
+
 #Error
 MIMEError: enum {
     Syntax,
@@ -46,54 +50,8 @@ MIME: struct {
 }
 
 parse: fn(text: String) -> MIME MIMEError! {
-    raw: trim_ascii(text)
-    bytes: raw.bytes()
-    ^semi: bytes.len()
-    ^i: 0
-    loop i < bytes.len() {
-        if bytes[i] == (U8{59}) {
-            semi = i
-            break
-        }
-        i += 1
-    }
-    essence: slice(bytes, 0, semi)
-    ^slash: -1
-    i = 0
-    loop i < essence.bytes().len() {
-        if essence.bytes()[i] == (U8{47}) {
-            if slash >= 0 -> return Err(MIMEError.Syntax)
-            slash = i
-        }
-        i += 1
-    }
-    if slash <= 0 -> return Err(MIMEError.Syntax)
-    top: ascii_lower(trim_ascii(slice(essence.bytes(), 0, slash)))
-    sub: ascii_lower(trim_ascii(slice(essence.bytes(), slash + 1, essence.bytes().len())))
-    if !mime_token(top) || !mime_token(sub) -> return Err(MIMEError.Syntax)
-
-    ^parameters: [[String]]{}
-    ^start: semi + 1
-    i = start
-    loop i <= bytes.len() {
-        if i == bytes.len() || bytes[i] == (U8{59}) {
-            parameter: trim_ascii(slice(bytes, start, i))
-            if parameter.bytes().len() > 0 {
-                eq: index_of(parameter.bytes(), 61)
-                if eq <= 0 -> return Err(MIMEError.Syntax)
-                name: ascii_lower(trim_ascii(slice(parameter.bytes(), 0, eq)))
-                if !mime_token(name) -> return Err(MIMEError.Syntax)
-                raw_value: trim_ascii(slice(parameter.bytes(), eq + 1, parameter.bytes().len()))
-                vb: raw_value.bytes()
-                quoted: vb.len() >= 2 && vb[0] == (U8{34}) && vb[vb.len() - 1] == (U8{34})
-                value: if quoted -> slice(vb, 1, vb.len() - 1) else -> raw_value
-                parameters.push([String]{name, value})
-            }
-            start = i + 1
-        }
-        i += 1
-    }
-    Ok(MIME{top: top, sub: sub, parameters: parameters})
+    parsed: mime_syntax.mime_parse_media_type(text) ?? return Err(MIMEError.Syntax)
+    Ok(MIME{top: parsed.top, sub: parsed.sub, parameters: parsed.params})
 }
 
 from_extension: fn(ext: String) -> String? Never! {
@@ -231,3 +189,18 @@ slice: fn(raw: [U8], start: Int, end: Int) -> String Never! {
     assert(value.param("CHARSET") == charset)
     assert(value.param("missing") == None)
 }
+
+#Test("MIME grammar parses trimmed, structured, and empty-semicolon types and rejects malformed ones") {
+    svg: parse("  image/svg+xml ; ; charset=utf-8 ; ") ?? panic("valid svg mime")
+    assert_eq(svg.essence(), "image/svg+xml")
+    assert_eq(svg.param("charset"), Val("utf-8"))
+    vnd: parse("application/vnd.api+json; version=1") ?? panic("valid vnd mime")
+    assert_eq(vnd.media_type(), "application")
+    assert_eq(vnd.subtype(), "vnd.api+json")
+    assert_eq(vnd.param("version"), Val("1"))
+    for_bad: [String]{"", "text", "text/", "/plain", "a/b/c", "text/plain; badparam", "text/plain; =v"}
+    loop bad in for_bad {
+        if parse(bad) == .Ok(_) -> panic("expected MIME parse to reject `{bad}`")
+    }
+}
+
