@@ -12,6 +12,7 @@ package: {
 use {
     core: core
     rt: jet.runtime.log
+    filter_syntax: __core_log_syntax_filter
     internal.[code_level, covering_rank, emit, enabled_for, level_name, level_rank, module_path_valid, parse_filter, render_filter]
 }
 
@@ -425,15 +426,9 @@ priv internal: module {
         loop raw in split_csv(text) {
             item: trim(raw)
             if item.len() == 0 -> next
-            pair: split_once(item, "=")
-            if trim(pair.right) == "" {
-                rank: name_rank(item)
-                if rank > 0 -> put_pair(pairs, "", rank)
-            } else {
-                path: trim(pair.left)
-                rank: name_rank(trim(pair.right))
-                if rank > 0 && module_path_valid(path) -> put_pair(pairs, path, rank)
-            }
+            parsed: filter_syntax.parse_entry(item) ?? next
+            rank: name_rank(parsed.level)
+            if rank > 0 -> put_pair(pairs, parsed.path, rank)
         }
         pairs
     }
@@ -850,6 +845,8 @@ priv otlp_attribute_json: fn(attribute: LogField) -> String Never! {
 #Test("log filters take the longest covering module path") {
     pairs: parse_filter("warn, shop.db=debug,shop.db.pool=error,bad pair,shop=nope")
     assert_eq(render_filter(pairs), "warn,shop.db=debug,shop.db.pool=error")
+    printed: filter_syntax.print_spec("warn, shop.db=debug, shop.db.pool=error") ?? panic("log filter print")
+    assert_eq(render_filter(parse_filter(printed)), "warn,shop.db=debug,shop.db.pool=error")
     assert_eq(covering_rank(pairs, "shop"), 3)
     assert_eq(covering_rank(pairs, "shop.db"), 1)
     assert_eq(covering_rank(pairs, "shop.db.pool.conn"), 4)
