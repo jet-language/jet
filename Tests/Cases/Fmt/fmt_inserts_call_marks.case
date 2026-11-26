@@ -1,0 +1,44 @@
+# `jet fmt` checked-compile call-mark insertion pass (#7037 n3):
+# 1. Unit tests prove one compile per package across multi-file packages for
+#    both call marks and `--explicit-failures`, receiver and valid `^^`
+#    preservation, and non-checking refusal.
+# 2. End-to-end `jet fmt` on a multi-file package inserts every required `^`
+#    from E0228 Safe fixes (including forwarded `^` params, field places, and
+#    indexed places), never marks receivers, preserves valid `^^`, and is
+#    idempotent.
+# 3. On a file that fails to check, `jet fmt` keeps the file's text untouched
+#    and reports why on stderr.
+env: NO_COLOR=1
+env: JET_TOOLCHAIN_ROOT={root}
+
+step: jet test {root}/Compiler/JetCLI/Tests/FormatMarks.jet --filter=fmt_marks_
+exit: 0
+stdout: ~ "4 passed, 0 failed" # per-package compile count, call-mark rules, refusal, and syntax-only safety all pass
+
+write: pkg/package.jet = "name: \"call_marks_fmt\"\nversion: \"0.0.1\"\nedition: \"2026\"\n"
+write: pkg/lib.jet = "#Policy(writes: .Explicit)\n\nHolder: struct {\n    items: [Int],\n}\n\ngrow: fn(items: ^[Int]) {\n    items.push(1)\n}\n\nbump: fn(n: ^Int) {\n    n += 1\n}\n\narchive: fn(title: ^^String) -> Int {\n    title.len()\n}\n\nrelay: fn(ys: ^[Int]) {\n    grow(ys)\n}\n"
+write: pkg/main.jet = "#Policy(writes: .Explicit)\n\nrun: fn() {\n    ^xs: [Int]{1}\n    grow(xs)\n    xs.push(4)\n    ^st: Holder{items: [Int]{2}}\n    grow(st.items)\n    ^nums: [Int]{3}\n    bump(nums[0])\n    relay(xs)\n    title: \"kept\"\n    n: archive(^^title)\n    print(\"{xs.len()} {st.items.len()} {nums[0]} {n}\")\n}\n"
+
+step: jet fmt pkg
+exit: 0
+file: pkg/lib.jet ~ "grow(^ys)" # forwarded ^ parameter gains ^
+file: pkg/lib.jet ~ "items.push(1)" # mutating receiver stays unmarked
+file: pkg/lib.jet !~ "^items.push" # receiver never gains ^
+file: pkg/main.jet ~ "grow(^xs)" # named write argument gains ^
+file: pkg/main.jet ~ "grow(^st.items)" # field write argument gains ^ at root
+file: pkg/main.jet ~ "bump(^nums[0])" # indexed write argument gains ^ at root
+file: pkg/main.jet ~ "relay(^xs)" # cross-file write argument gains ^
+file: pkg/main.jet ~ "xs.push(4)" # receiver stays unmarked
+file: pkg/main.jet !~ "^xs.push" # receiver never gains ^
+file: pkg/main.jet ~ "archive(^^title)" # valid ^^ is preserved untouched
+
+step: jet fmt --check pkg
+exit: 0
+
+write: broken.jet = "#Policy(writes: .Explicit)\n\ngrow: fn(items: ^[Int]) {\n    items.push(1)\n}\n\nbad: fn() -> Int {\n    \"nope\"\n}\n\nrun: fn() {\n    ^xs: [Int]{1}\n    grow(xs)\n    print(\"{bad()} {xs.len()}\")\n}\n"
+
+step: jet fmt broken.jet
+exit: 2
+stderr: ~ "Jet.ReturnTypeMismatch" # non-checking file reports why checking failed
+file: broken.jet ~ "grow(xs)" # file text stays untouched when check fails
+file: broken.jet !~ "grow(^xs)" # no partial mark written on non-checking file

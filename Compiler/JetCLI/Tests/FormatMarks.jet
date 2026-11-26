@@ -1,0 +1,140 @@
+// Unit tests for the shared per-package checked-insertion pass in `jet fmt`
+// (#7037 n3): one compile per package, required `^` insertion from E0228 Safe
+// fixes without marking receivers or touching valid `^^`, non-checking files
+// kept untouched with error reported, and staged-cutover safety on syntax-only
+// snippets.
+use {
+    cli_files: core.files
+    cli_process: core.process
+    cli_sys: core.sys
+    jet_cli.[
+        JetCLIFmtRequest,
+        jet_cli_fmt_check_memo,
+        jet_cli_fmt_one,
+        jet_cli_format_run,
+        jet_cli_tool_stage_memo,
+    ]
+    jet_driver.[JET_DRIVER_EXIT_OK]
+}
+
+fmt_marks_request: fn(paths: [String], explicit_copies: Bool{false}, explicit_failures: Bool{false}) -> JetCLIFmtRequest Never! {
+    JetCLIFmtRequest{
+        paths: paths,
+        stdin_mode: false,
+        stdin_path: None,
+        check: false,
+        diff: false,
+        changed: false,
+        explicit_copies: explicit_copies,
+        explicit_failures: explicit_failures,
+        simplify: false,
+        color: false,
+        json: false,
+    }
+}
+
+#Test("fmt_marks_call_marks_uses_one_compile_per_package_and_inserts_only_required_write_marks") {
+    root: "{cli_sys.temp_dir()}/jet-fmt-marks-pkg-{cli_process.current_pid()}"
+    cli_files.remove_all(root).drop("cleanup prior temp dir")
+    cli_files.create_dir_all(root) ?? panic("create pkg dir")
+    manifest: "{root}/package.jet"
+    lib_path: "{root}/lib.jet"
+    a_path: "{root}/a.jet"
+    b_path: "{root}/b.jet"
+    cli_files.write(manifest, "name: \"fmt_marks_demo\"\nversion: \"0.0.1\"\nedition: \"2026\"\n") ?? panic("write package.jet")
+    lib_src: "#Policy(writes: .Explicit)\n\nHolder: struct {{\n    items: [Int],\n}}\n\ngrow: fn(items: ^[Int]) {{\n    items.push(1)\n}}\n\nbump: fn(n: ^Int) {{\n    n += 1\n}}\n\narchive: fn(title: ^^String) -> Int {{\n    title.len()\n}}\n\nrelay: fn(ys: ^[Int]) {{\n    grow(ys)\n}}\n"
+    a_src: "#Policy(writes: .Explicit)\n\nuse_all: fn() -> Int {{\n    ^xs: [Int]{{1}}\n    grow(xs)\n    xs.push(4)\n    ^st: Holder{{items: [Int]{{2}}}}\n    grow(st.items)\n    ^nums: [Int]{{3}}\n    bump(nums[0])\n    title: \"kept\"\n    n: archive(^^title)\n    plain: \"moved\"\n    m: archive(plain)\n    xs.len() + st.items.len() + nums[0] + n + m\n}}\n"
+    b_src: "#Policy(writes: .Explicit)\n\nrun: fn() {{\n    ^zs: [Int]{{9}}\n    relay(zs)\n    print(\"{{use_all()}} {{zs.len()}}\")\n}}\n"
+    cli_files.write(lib_path, lib_src) ?? panic("write lib.jet")
+    cli_files.write(a_path, a_src) ?? panic("write a.jet")
+    cli_files.write(b_path, b_src) ?? panic("write b.jet")
+
+    request: fmt_marks_request([String]{})
+    ^hooks: jet_cli_tool_stage_memo()
+    ^checks: jet_cli_fmt_check_memo()
+    lib_out: jet_cli_fmt_one(lib_path, lib_src, request, hooks, checks)
+    a_out: jet_cli_fmt_one(a_path, a_src, request, hooks, checks)
+    b_out: jet_cli_fmt_one(b_path, b_src, request, hooks, checks)
+
+    assert_eq(checks.compiles, 1)
+    assert_eq(lib_out.diagnostics.len(), 0)
+    assert_eq(a_out.diagnostics.len(), 0)
+    assert_eq(b_out.diagnostics.len(), 0)
+
+    assert(lib_out.formatted.contains("grow(^ys)"), "forwarded ^ param must be marked: {lib_out.formatted}")
+    assert(lib_out.formatted.contains("items.push(1)") && !lib_out.formatted.contains("^items.push(1)"), "receiver must never be marked: {lib_out.formatted}")
+    assert(a_out.formatted.contains("grow(^xs)"), "named write arg must be marked: {a_out.formatted}")
+    assert(a_out.formatted.contains("grow(^st.items)"), "field write arg must be marked at root: {a_out.formatted}")
+    assert(a_out.formatted.contains("bump(^nums[0])"), "indexed write arg must be marked at root: {a_out.formatted}")
+    assert(a_out.formatted.contains("xs.push(4)") && !a_out.formatted.contains("^xs.push(4)"), "receiver must never be marked: {a_out.formatted}")
+    assert(a_out.formatted.contains("archive(^^title)"), "valid ^^ must be preserved untouched: {a_out.formatted}")
+    assert(a_out.formatted.contains("archive(plain)") && !a_out.formatted.contains("archive(^^plain)"), "unmarked last-use move must not gain ^^: {a_out.formatted}")
+    assert(b_out.formatted.contains("relay(^zs)"), "cross-file write call must be marked: {b_out.formatted}")
+
+    cli_files.write(lib_path, lib_out.formatted) ?? panic("rewrite lib.jet")
+    cli_files.write(a_path, a_out.formatted) ?? panic("rewrite a.jet")
+    cli_files.write(b_path, b_out.formatted) ?? panic("rewrite b.jet")
+    ^checks2: jet_cli_fmt_check_memo()
+    lib_again: jet_cli_fmt_one(lib_path, lib_out.formatted, request, hooks, checks2)
+    a_again: jet_cli_fmt_one(a_path, a_out.formatted, request, hooks, checks2)
+    b_again: jet_cli_fmt_one(b_path, b_out.formatted, request, hooks, checks2)
+    assert_eq(checks2.compiles, 1)
+    assert(!lib_again.changed && !a_again.changed && !b_again.changed, "call-mark formatting must be idempotent")
+    cli_files.remove_all(root).drop("cleanup pkg dir")
+}
+
+#Test("fmt_marks_call_marks_keeps_file_untouched_and_reports_why_when_check_fails") {
+    root: "{cli_sys.temp_dir()}/jet-fmt-marks-broken-{cli_process.current_pid()}"
+    cli_files.remove_all(root).drop("cleanup prior broken dir")
+    cli_files.create_dir_all(root) ?? panic("create broken dir")
+    broken_path: "{root}/broken.jet"
+    broken_src: "#Policy(writes: .Explicit)\n\ngrow: fn(items: ^[Int]) {{\n    items.push(1)\n}}\n\nbad: fn() -> Int {{\n    \"nope\"\n}}\n\nrun: fn() {{\n    ^xs: [Int]{{1}}\n    grow(xs)\n    print(\"{{bad()}} {{xs.len()}}\")\n}}\n"
+    cli_files.write(broken_path, broken_src) ?? panic("write broken.jet")
+
+    output: jet_cli_format_run(fmt_marks_request([String]{broken_path}), false)
+    assert(output.exit_code != JET_DRIVER_EXIT_OK, "non-checking file must fail fmt under explicit writes")
+    assert(output.stderr.contains("Jet.ReturnTypeMismatch"), "stderr must report why checking failed: {output.stderr}")
+    assert_eq(cli_files.read(broken_path) ?? "", broken_src)
+    cli_files.remove_all(root).drop("cleanup broken dir")
+}
+
+#Test("fmt_marks_explicit_failures_uses_one_compile_per_package") {
+    root: "{cli_sys.temp_dir()}/jet-fmt-failures-pkg-{cli_process.current_pid()}"
+    cli_files.remove_all(root).drop("cleanup prior failures dir")
+    cli_files.create_dir_all(root) ?? panic("create failures dir")
+    cli_files.write("{root}/package.jet", "name: \"fmt_fail_demo\"\nversion: \"0.0.1\"\nedition: \"2026\"\n") ?? panic("write package.jet")
+    a_path: "{root}/a.jet"
+    b_path: "{root}/b.jet"
+    a_src: "#Error\nBoom: struct {{ message: String, }}\n\nfallible_a: fn() -> Int Boom! {{\n    Ok(1)\n}}\n\ncaller_a: fn() -> Int Boom! {{\n    v: fallible_a()\n    Ok(v + 1)\n}}\n"
+    b_src: "caller_b: fn() -> Int Boom! {{\n    v: caller_a()\n    Ok(v + 2)\n}}\n"
+    cli_files.write(a_path, a_src) ?? panic("write a.jet")
+    cli_files.write(b_path, b_src) ?? panic("write b.jet")
+
+    request: fmt_marks_request([String]{}, explicit_failures: true)
+    ^hooks: jet_cli_tool_stage_memo()
+    ^checks: jet_cli_fmt_check_memo()
+    a_out: jet_cli_fmt_one(a_path, a_src, request, hooks, checks)
+    b_out: jet_cli_fmt_one(b_path, b_src, request, hooks, checks)
+
+    assert_eq(a_out.diagnostics.len(), 0)
+    assert_eq(b_out.diagnostics.len(), 0)
+    assert(a_out.formatted.contains("fallible_a()?"), "a.jet must receive failure mark: {a_out.formatted}")
+    assert(b_out.formatted.contains("caller_a()?"), "b.jet must receive failure mark: {b_out.formatted}")
+    // 1 plain compile for call_marks + 1 policy compile for explicit_failures across BOTH files (not 4-6!).
+    assert_eq(checks.compiles, 2)
+    cli_files.remove_all(root).drop("cleanup failures dir")
+}
+
+#Test("fmt_marks_plain_syntax_only_snippet_stays_green_during_staged_cutover") {
+    root: "{cli_sys.temp_dir()}/jet-fmt-snippet-{cli_process.current_pid()}"
+    cli_files.remove_all(root).drop("cleanup prior snippet dir")
+    cli_files.create_dir_all(root) ?? panic("create snippet dir")
+    path: "{root}/snippet.jet"
+    cli_files.write(path, "run:fn(){{x:foo().bar()}}\n") ?? panic("write snippet.jet")
+
+    output: jet_cli_format_run(fmt_marks_request([String]{path}), false)
+    assert_eq(output.exit_code, JET_DRIVER_EXIT_OK)
+    formatted: cli_files.read(path) ?? ""
+    assert(formatted.contains("run: fn()"), "syntax-only snippet still formats cleanly: {formatted}")
+    cli_files.remove_all(root).drop("cleanup snippet dir")
+}
