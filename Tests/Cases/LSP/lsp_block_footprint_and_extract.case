@@ -28,23 +28,23 @@ json: stdout doc $.params.diagnostics[?severity=1] #= 0
 # 1. Code lens on the `if` block reports its inferred footprint.
 send lsp: "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/codeLens\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/demo.jet\"}}}"
 recv lsp until $.id = 2
-stdout: ~ "Footprint: reads c.limit, step, local_copy | writes ^c.hits, ^xs | takes ^^drop_me"
+stdout: ~ "Footprint: reads c.limit, step, local_copy | writes ^c.hits, ^xs | takes ^^drop_me" # code lens summarizes read/write/take footprint
 
 # 2. Hover on the `if` block header shows the exact read/write/take breakdown.
 send lsp: "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/demo.jet\"},\"position\":{\"line\":14,\"character\":4}}}"
 recv lsp until $.id = 3
-stdout: ~ "**Block footprint** (`fn work`)"
-stdout: ~ "`write` `c.hits: Int`"
-stdout: ~ "`read` `c.limit: Int`"
-stdout: ~ "`take` `drop_me: String`"
+stdout: ~ "**Block footprint** (`fn work`)" # hover heading names enclosing function
+stdout: ~ "`write` `c.hits: Int`" # hover lists field-precise write
+stdout: ~ "`read` `c.limit: Int`" # hover lists field-precise read
+stdout: ~ "`take` `drop_me: String`" # hover lists consuming take
 
 # 3. Code action `refactor.extract` over lines 15-18 turns the selected block into
 #    a local helper function carrying the exact inferred footprint signature.
 send lsp: "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"textDocument/codeAction\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/demo.jet\"},\"range\":{\"start\":{\"line\":15,\"character\":8},\"end\":{\"line\":18,\"character\":43}},\"context\":{\"diagnostics\":[],\"only\":[\"refactor.extract\"]}}}"
 recv lsp until $.id = 4
-stdout: ~ "\"kind\":\"refactor.extract\""
-stdout: ~ "_extracted: fn(c: ^Counter, step: Int, xs: ^[Int], drop_me: ^^String, local_copy: String) -> Int"
-stdout: ~ "return _extracted(^c, step, ^xs, ^^drop_me, local_copy)"
+stdout: ~ "\"kind\":\"refactor.extract\"" # code action advertises refactor.extract kind
+stdout: ~ "_extracted: fn(c: ^Counter, step: Int, xs: ^[Int], drop_me: ^^String, local_copy: String) -> Int" # generated helper signature carries inferred parameter conventions
+stdout: ~ "return _extracted(^c, step, ^xs, ^^drop_me, local_copy)" # replacement call carries exact call-site sigils
 
 send lsp: "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"shutdown\",\"params\":null}"
 recv lsp until $.id = 5

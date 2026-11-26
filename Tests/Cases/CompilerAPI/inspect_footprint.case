@@ -27,13 +27,13 @@ stdout: !~ "taken_len" # block-local binding excluded from footprint
 
 step: jet inspect footprint --json sample.jet:15-20
 exit: 0
-stdout: ~ "\"ok\":true"
-stdout: ~ "\"function\":\"work\""
-stdout: ~ "\"name\":\"c.limit\",\"root\":\"c\",\"kind\":\"read\""
-stdout: ~ "\"name\":\"c.hits\",\"root\":\"c\",\"kind\":\"write\""
-stdout: ~ "\"name\":\"xs\",\"root\":\"xs\",\"kind\":\"write\""
-stdout: ~ "\"name\":\"drop_me\",\"root\":\"drop_me\",\"kind\":\"take\""
-stdout: ~ "\"name\":\"c\",\"kind\":\"write\",\"sigil\":\"^\""
+stdout: ~ "\"ok\":true" # JSON envelope reports ok
+stdout: ~ "\"function\":\"work\"" # JSON envelope names enclosing function
+stdout: ~ "\"name\":\"c.limit\",\"root\":\"c\",\"kind\":\"read\"" # JSON entry records field read
+stdout: ~ "\"name\":\"c.hits\",\"root\":\"c\",\"kind\":\"write\"" # JSON entry records field write
+stdout: ~ "\"name\":\"xs\",\"root\":\"xs\",\"kind\":\"write\"" # JSON entry records collection write
+stdout: ~ "\"name\":\"drop_me\",\"root\":\"drop_me\",\"kind\":\"take\"" # JSON entry records consuming take
+stdout: ~ "\"name\":\"c\",\"kind\":\"write\",\"sigil\":\"^\"" # JSON parameter summary carries write sigil
 
 step: jet inspect footprint sample.jet
 exit: 2
