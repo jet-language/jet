@@ -35,10 +35,10 @@ JetCLIControlValue: struct {
     shadowed: Bool,
 }
 
-// The value a control has when nothing gives it one: off, or an empty list.
+// The value a control has when nothing gives it one: its default bool state, or an empty list.
 jet_cli_control_default: fn(control: JetCLIControlSpec) -> JetCLIStatusValue Never! {
     if control.value == {
-        .Switch | .Bool -> jet_cli_status_bool(false)
+        .Switch | .Bool -> jet_cli_status_bool(control.default_on)
         .Repeated -> jet_cli_status_texts([String]{})
         .Value | .Optional -> JetCLIStatusValue.Null
     }

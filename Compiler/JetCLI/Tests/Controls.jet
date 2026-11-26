@@ -146,3 +146,20 @@ controls_test_refused: fn(argv: [String]) -> String Never! {
     assert_eq(jet_cli_env_redact("https://user:secret@example.com/r.tsv?token=tok123&mode=fast"), "https://***@example.com/r.tsv?token=***&mode=fast")
     assert_eq(jet_cli_env_redact("https://example.com/r.tsv?api_key=abc&ok=1"), "https://example.com/r.tsv?api_key=***&ok=1")
 }
+
+#Test("keep_going defaults on and opts out through flag, setting, or variable") {
+    keep_going: controls_test_control("keep_going")
+    assert_eq(controls_test_resolved(jet_cli_control_resolve(keep_going, [String]{}, [String]{}, None)), "on from default")
+    assert_eq(controls_test_resolved(jet_cli_control_resolve(keep_going, [String]{}, [String]{"--keep-going=false"}, None)), "off from setting")
+    assert_eq(controls_test_resolved(jet_cli_control_resolve(keep_going, [String]{}, [String]{}, Val("0"))), "off from environment")
+    assert_eq(controls_test_resolved(jet_cli_control_resolve(keep_going, [String]{"--keep-going=off"}, [String]{}, None)), "off from flag")
+    assert_eq(controls_test_resolved(jet_cli_control_resolve(keep_going, [String]{"--keep-going=false"}, [String]{}, Val("1"))), "off from flag")
+    assert_eq(controls_test_resolved(jet_cli_control_resolve(keep_going, [String]{"--keep-going=true"}, [String]{"--keep-going=false"}, Val("0"))), "on from flag")
+    if jet_cli_plan([String]{"env", "vars", "--command=check"}) == .Done(output) {
+        assert_eq(output.exit_code, JET_DRIVER_EXIT_OK)
+        keep: output.stdout.split("\n").to_list().filter(fn(line) { line.starts_with("--keep-going ") })
+        assert_eq(keep.len(), 1)
+        assert(keep[0].contains(" on ") && keep[0].contains("default"), "--keep-going defaults on in env vars: {keep[0]}")
+    } else { assert(false, "`jet env vars --command=check` lists keep_going default on") }
+}
+
