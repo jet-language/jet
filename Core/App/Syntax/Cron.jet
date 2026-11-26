@@ -1,0 +1,96 @@
+// Private 5-field UTC cron expression grammar for `app`.
+use {
+    core.grammar.[Grammar]
+}
+
+priv Schedule: Grammar{"""
+    schedule : min=field hr=field dom=field mon=field dow=field ;
+    field    : items+=part (',' items+=part)* ;
+    part     : span=range_spec ('/' step=NUM)? ;
+    range_spec : '*'                      # Wild
+               | start=NUM ('-' end=NUM)? # Range
+               ;
+    NUM      : [0-9] [0-9]? ;
+    WS       : ' '+ -> skip ;
+"""}
+
+ParsedCron: struct {
+    minutes: [Bool],
+    hours: [Bool],
+    days: [Bool],
+    months: [Bool],
+    weekdays: [Bool],
+    any_day: Bool,
+    any_weekday: Bool,
+}
+
+parse_cron: fn(text: String) -> ParsedCron? Never! {
+    sched: if Schedule.parse(text) == {
+        .Ok(parsed) -> parsed
+        .Err(_) -> return None
+    }
+    ^weekdays: eval_field(sched.dow, 0, 7) ?? return None
+    if weekdays[7] -> weekdays[0] = true
+    _: weekdays.pop()
+    minutes: eval_field(sched.min, 0, 59) ?? return None
+    hours: eval_field(sched.hr, 0, 23) ?? return None
+    days: eval_field(sched.dom, 1, 31) ?? return None
+    months: eval_field(sched.mon, 1, 12) ?? return None
+    Val(ParsedCron{
+        minutes: minutes,
+        hours: hours,
+        days: days,
+        months: months,
+        weekdays: weekdays,
+        any_day: starts_wild(sched.dom),
+        any_weekday: starts_wild(sched.dow),
+    })
+}
+
+print_cron: fn(text: String) -> String? Never! {
+    if Schedule.parse(text) == {
+        .Ok(sched) -> {
+            if sched.print() == {
+                .Ok(printed) -> Val(printed)
+                .Err(_) -> None
+            }
+        }
+        .Err(_) -> None
+    }
+}
+
+priv starts_wild: fn(f: Field) -> Bool Never! {
+    if f.items.len() == 0 -> return false
+    f.items[0].span == .Wild
+}
+
+priv eval_field: fn(f: Field, low: Int, high: Int) -> [Bool]? Never! {
+    ^allowed: [Bool]{}
+    loop _ in 0..<(high + 1) -> allowed.push(false)
+    loop item in f.items {
+        step: if item.step == {
+            .Val(s) -> Int.parse(s) ?? return None
+            .None -> 1
+        }
+        if step < 1 -> return None
+        ^first: low
+        ^last: high
+        if item.span == {
+            .Wild -> {}
+            .Range(start, end) -> {
+                first = Int.parse(start) ?? return None
+                last = if end == {
+                    .Val(e) -> Int.parse(e) ?? return None
+                    .None -> if item.step != None -> high else -> first
+                }
+            }
+        }
+        if first < low || last > high || first > last -> return None
+        ^at: first
+        loop at <= last {
+            allowed[at] = true
+            at += step
+        }
+    }
+    Val(allowed)
+}

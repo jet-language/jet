@@ -1,0 +1,57 @@
+// Private grammar for RFC 7468 / RFC 1421 PEM armor blocks (`core.crypto`).
+use {
+    core.grammar.[Grammar]
+}
+
+priv Armor: Grammar{"""
+    armor    : '-----BEGIN ' begin_label=LABEL '-----' trail=SP? eol1=EOL enc=enc_hdr? lines+=b64_line+ '-----END ' end_label=LABEL '-----' end_sp=SP? end_eol=EOL? ;
+    enc_hdr  : 'Proc-Type: 4,ENCRYPTED' eol1=EOL 'DEK-Info: ' alg=ALG ',' iv=HEX eol2=EOL ;
+    b64_line : text=B64 eol=EOL ;
+
+    LABEL    : [A-Z0-9 ]+ ;
+    ALG      : [A-Z0-9\-]+ ;
+    HEX      : [0-9A-Fa-f]+ ;
+    B64      : [A-Za-z0-9+/=] [A-Za-z0-9+/= \t]* ;
+    SP       : ' ' ;
+    EOL      : '\r'? '\n' ;
+"""}
+
+ParsedArmor: struct {
+    label: String,
+    cipher: String,
+    iv_hex: String,
+    body: String,
+}
+
+/// Parses a complete PEM armor block via the checked grammar, verifying that
+/// the BEGIN and END labels match.
+parse_armor: fn(text: String) -> ParsedArmor? Never! {
+    block: if Armor.parse(text) == {
+        .Ok(parsed) -> parsed
+        .Err(_) -> return None
+    }
+    if block.begin_label != block.end_label -> return None
+    ^cipher: ""
+    ^iv_hex: ""
+    if block.enc == .Val(hdr) {
+        cipher = hdr.alg
+        iv_hex = hdr.iv
+    }
+    ^body: ""
+    loop line in block.lines -> body = "{body}{line.text}{line.eol}"
+    Val(ParsedArmor{label: block.begin_label, cipher: cipher, iv_hex: iv_hex, body: body})
+}
+
+/// Parses a PEM block and formats it back through the grammar's checked printer.
+print_armor: fn(text: String) -> String? Never! {
+    if Armor.parse(text) == {
+        .Ok(block) -> {
+            if block.begin_label != block.end_label -> return None
+            if block.print() == {
+                .Ok(printed) -> Val(printed)
+                .Err(_) -> None
+            }
+        }
+        .Err(_) -> None
+    }
+}

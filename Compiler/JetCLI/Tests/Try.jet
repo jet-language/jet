@@ -4,6 +4,7 @@
 use {
     jet_driver.[
         JET_DRIVER_EXIT_OK,
+        JET_DRIVER_EXIT_USER_ERROR,
         JetDriverAuthorizedSourceFile,
         JetDriverAuthorizedSourceRoot,
         JetDriverAuthorizedSourceSnapshot,
@@ -41,7 +42,7 @@ use {
         jet_cli_try_verdict,
     ]
     jet_sema.[SchemaSnapshot]
-    jet_foundation.[Diagnostic, Span, TextEdit]
+    jet_foundation.[Diagnostic, Span, TextEdit, sha256_hex]
     cli_sys: core.sys
     cli_files: core.files
     cli_process: core.process
@@ -230,4 +231,30 @@ try_service_ownership: fn(request: ^^JetDriverCompileRequest, expected_source_ro
         }
     }
     cli_files.remove_all(root).drop("try fixture cleanup")
+}
+
+#Test("try_session_presents_imported_diagnostics_canonically") {
+    root: "{cli_sys.temp_dir()}/jet-try-canonical-{cli_process.current_pid()}"
+    cli_files.remove_all(root).drop("cleanup prior temp dir")
+    cli_files.create_dir_all(root) ?? panic("try canonical root")
+    dep_file: "{root}/dep.jet"
+    entry: "{root}/main.jet"
+    plan_file: "{root}/plan.json"
+    dep_ok: "answer: fn() -> Int {{\n    1\n}}\n"
+    dep_bad: "answer: fn() -> Int {{\n    \"bad\"\n}}\n"
+    main_src: "use dep: \"./dep\"\n\nrun: fn() {{\n    print(dep.answer())\n}}\n"
+    cli_files.write(dep_file, dep_ok) ?? panic("write dep.jet")
+    cli_files.write(entry, main_src) ?? panic("write main.jet")
+    cli_files.write(plan_file, "{{\"version\":1,\"name\":\"BreakDep\",\"entry\":\"main.jet\",\"edits\":[{{\"path\":\"dep.jet\",\"start\":26,\"end\":27,\"new_text\":\"\\\"bad\\\"\"}}]}}") ?? panic("write plan.json")
+
+    res: jet_cli_try_run(plan_file, false, true)
+    assert(res.exit_code == JET_DRIVER_EXIT_USER_ERROR, "expected failed try verdict: {res.stdout} / {res.stderr}")
+    dep_digest: sha256_hex(dep_bad)
+    dep_path: jet_cli_try_canonical(dep_file)
+    assert(res.stdout.contains("\"code\":\"E0113\""), "missing E0113 in try report: {res.stdout}")
+    assert(res.stdout.contains("\"span\":{{\"file\":\"{dep_path}\",\"start\":26,\"end\":31}}"), "try report span must name dep.jet: {res.stdout}")
+    assert(res.stdout.contains("\"origin\":{{\"path\":\"{dep_path}\",\"source_digest\":\"{dep_digest}\"}}"), "try report origin must hash speculative dep.jet: {res.stdout}")
+    assert(res.stdout.contains("\"line\":2,\"col\":5"), "try report line/col must index dep.jet: {res.stdout}")
+    assert((cli_files.read(dep_file) ?? "") == dep_ok, "rolled-back try must not mutate dep.jet on disk")
+    cli_files.remove_all(root).drop("try canonical cleanup")
 }

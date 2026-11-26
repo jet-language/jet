@@ -1,0 +1,54 @@
+// Private grammar for `core.log` filter expressions (`level` or `mod.path=level`).
+use {
+    core.grammar.[Grammar]
+}
+
+priv FilterSpec: Grammar{"""
+    filter_spec : entries+=entry (',' entries+=entry)* ;
+    entry       : head=WORD rest+=dotted* tail=assign? ;
+    dotted      : '.' seg=WORD ;
+    assign      : '=' level=WORD ;
+
+    WORD        : [A-Za-z_] [A-Za-z0-9_]* ;
+    WS          : [ \t]+ -> skip ;
+"""}
+
+ParsedFilterEntry: struct {
+    path: String,
+    level: String,
+}
+
+/// Parses a single `level` or `module.path=level` filter entry via the checked
+/// grammar, returning `None` for any malformed item.
+parse_entry: fn(text: String) -> ParsedFilterEntry? Never! {
+    if Entry.parse(text) == {
+        .Ok(entry) -> {
+            if entry.tail == {
+                .Val(assign) -> {
+                    ^path: entry.head.copy()
+                    loop seg in entry.rest -> path = "{path}.{seg.seg}"
+                    Val(ParsedFilterEntry{path: path, level: assign.level})
+                }
+                .None -> {
+                    if entry.rest.len() > 0 -> return None
+                    Val(ParsedFilterEntry{path: "", level: entry.head})
+                }
+            }
+        }
+        .Err(_) -> None
+    }
+}
+
+/// Parses a complete comma-separated filter spec and formats it back through
+/// the grammar's checked printer.
+print_spec: fn(text: String) -> String? Never! {
+    if FilterSpec.parse(text) == {
+        .Ok(spec) -> {
+            if spec.print() == {
+                .Ok(printed) -> Val(printed)
+                .Err(_) -> None
+            }
+        }
+        .Err(_) -> None
+    }
+}

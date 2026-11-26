@@ -9,6 +9,7 @@ use {
         comptime_char_text,
     ]
     jet_driver.[
+        JetDriverAuthorizedSourceSnapshot,
         JetDriverSourceDocument,
         JetDriverVerbOutput,
         JetDriverCompileMode,
@@ -89,20 +90,36 @@ jet_cli_compiler_checked_value: fn(value: TComptimeValue) -> JetCLIStatusValue N
     }
 }
 
-jet_cli_inspect_compiler_check: fn(file: String, source: String) -> JetDriverVerbOutput Never! {
+jet_cli_snapshot_entry_source: fn(snapshot: JetDriverAuthorizedSourceSnapshot) -> String? Never! {
+    loop root in snapshot.roots {
+        if root.identity != snapshot.entry_root_identity -> next
+        loop file in root.files {
+            if file.path == snapshot.entry_path -> return Val(file.source)
+        }
+    }
+    loop root in snapshot.roots {
+        loop file in root.files {
+            if file.path == snapshot.entry_path -> return Val(file.source)
+        }
+    }
+    None
+}
+
+jet_cli_inspect_compiler_check: fn(file: String, fallback_source: String) -> JetDriverVerbOutput Never! {
     core_sources: if jet_cli_core_sources(file) == {
         .Loaded(sources) -> sources
         .Missing(what, fix) -> {
             return jet_cli_report_output("", "E2105", what, jet_cli_why("E2105"), fix, false, 1)
         }
     }
-    parsed: jet_eval_compiler_services_parse(jet_driver_compiler_source_input(source)) ?? return jet_cli_ice("the compiler source query could not parse its source input")
     held: if jet_cli_prepare_snapshot(file, file, [JetDriverSourceDocument]{}, false) == {
         .Refused(output) -> {
             return output
         }
         .Held(snapshot) -> snapshot
     }
+    source: jet_cli_snapshot_entry_source(held) ?? fallback_source
+    parsed: jet_eval_compiler_services_parse(jet_driver_compiler_source_input(source)) ?? return jet_cli_ice("the compiler source query could not parse its source input")
     snapshot: jet_driver_compiler_source_snapshot(jet_driver_entry_root_path(held), source, jet_driver_entry_root_sources(held))
     // The check takes the snapshot; its records, a failed check's too, name
     // the file it was read from.

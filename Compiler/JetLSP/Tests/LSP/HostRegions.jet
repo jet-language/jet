@@ -1,12 +1,15 @@
 // Host documents with embedded Jet regions (`JetDriverSourceDocument` /
 // `JetDriverHostDocument`) and inline-package source matching (#6903 c4, c6).
 use {
-    jet_driver.[jet_driver_host_span, jet_driver_source_document_problem, jet_driver_utf16_offset]
-    jet_foundation.[Span, foundation_json_quote]
+    jet_driver.[JetDriverDocModule, jet_driver_host_span, jet_driver_source_document_problem, jet_driver_utf16_offset]
+    jet_foundation.[Diagnostic, DiagnosticOrigin, Span, diagnostic_from_registry, foundation_json_quote, sha256_hex]
     jet_pkg_model.[pkg_mask_inline_package_source]
+    jet_semindex.[SemSymbol]
     jet_lsp.[
+        LSPChecked,
         lsp_checked_source_matches,
         lsp_diagnostic_groups,
+        lsp_doc_map_diagnostics,
         lsp_document_group_json,
         lsp_extract_host_document,
         lsp_member,
@@ -93,4 +96,30 @@ LSP_HOST_TWO_REGION_TEXT: "🙂\n<script lang=\"jet\">\nscale_val: fn() -> Int {
     assert(lsp_checked_source_matches(raw, raw), "identical source matches")
     assert(lsp_checked_source_matches(masked, raw), "masked inline package source matches raw text")
     assert(!lsp_checked_source_matches("run: fn() {{}}\n", raw), "unrelated source does not match")
+}
+
+#Test("host document maps placed origin to host version and skips virtual corelib URIs") {
+    ^server: lsp_test_server()
+    open: lsp_test_json("{{\"textDocument\":{{\"uri\":\"{LSP_HOST_TWO_REGION_URI}\",\"languageId\":\"html\",\"version\":3,\"text\":{foundation_json_quote(LSP_HOST_TWO_REGION_TEXT)}}}}}")
+    assert_eq(lsp_update_document(server.diagnostic_state, Val(open), is_open: true), Val(LSP_HOST_TWO_REGION_URI))
+    doc: server.diagnostic_state.docs.get(LSP_HOST_TWO_REGION_URI) ?? panic("open host doc")
+    host_doc: doc.host_doc ?? panic("extracted host doc")
+    jet_at: host_doc.source.find("scale_val() + 1")
+    assert(jet_at >= 0, "expected region 2 call in projected Jet source")
+    ^host_diag: diagnostic_from_registry("E0109", Val(Span{start: jet_at, end: jet_at + 9}), "bad op", "why", "fix")
+    host_diag.origin = Val(DiagnosticOrigin{path: "{host_doc.path}", display: "{host_doc.path}", source: "{host_doc.source}", revision: sha256_hex(host_doc.source)})
+    ^core_diag: diagnostic_from_registry("L0523", Val(Span{start: 0, end: 4}), "core lint", "why", "fix")
+    core_diag.origin = Val(DiagnosticOrigin{path: "<corelib>/Core/Encoding/Syntax/JSON.jet", display: "<corelib>/Core/Encoding/Syntax/JSON.jet", source: "x: 1\n", revision: sha256_hex("x: 1\n")})
+    mapped: lsp_doc_map_diagnostics(host_doc, [Diagnostic]{host_diag, core_diag})
+    checked: LSPChecked{diagnostics: mapped, modules: [JetDriverDocModule]{}, index: None, symbols: [SemSymbol]{}}
+    ^targets: [String:Bool]{}
+    groups: lsp_diagnostic_groups(server.diagnostic_state, LSP_HOST_TWO_REGION_URI, checked, targets)
+    assert_eq(groups.len(), 1)
+    assert(groups.has_key(LSP_HOST_TWO_REGION_URI), "only the host URI is published, never virtual <corelib> URIs")
+    msg: lsp_test_json(lsp_document_group_json(server.diagnostic_state, LSP_HOST_TWO_REGION_URI, checked, groups[LSP_HOST_TWO_REGION_URI]))
+    params: lsp_test_field(msg, "params")
+    assert_eq(lsp_test_int(params, "version"), 3)
+    diags: lsp_test_rows(lsp_test_field(params, "diagnostics"))
+    assert_eq(diags.len(), 1)
+    assert_eq(lsp_test_range(lsp_test_field(diags[0], "range")), "9:4-9:13")
 }

@@ -1,0 +1,47 @@
+// Private service authority record grammar for `core.service`.
+use {
+    core.grammar.[Grammar]
+}
+
+priv AuthorityRecord: Grammar{"""
+    authority_record : op=OP fields+=field* ;
+    field            : '|' length=COUNT ':' hex=HEX? ;
+
+    OP               : [A-Za-z0-9_\-]+ ;
+    COUNT            : [0-9]+ ;
+    HEX              : [0-9A-Fa-f]+ ;
+"""}
+
+ParsedAuthorityField: struct {
+    length: String,
+    hex: String,
+}
+
+ParsedAuthorityRecord: struct {
+    op: String,
+    fields: [ParsedAuthorityField],
+}
+
+parse_record: fn(line: String) -> ParsedAuthorityRecord? Never! {
+    rec: if AuthorityRecord.parse(line) == {
+        .Ok(parsed) -> parsed
+        .Err(_) -> return None
+    }
+    ^fields: [ParsedAuthorityField]{}
+    loop f in rec.fields {
+        fields.push(ParsedAuthorityField{length: f.length, hex: f.hex ?? ""})
+    }
+    Val(ParsedAuthorityRecord{op: rec.op, fields: fields})
+}
+
+print_record: fn(line: String) -> String? Never! {
+    if AuthorityRecord.parse(line) == {
+        .Ok(rec) -> {
+            if rec.print() == {
+                .Ok(printed) -> Val(printed)
+                .Err(_) -> None
+            }
+        }
+        .Err(_) -> None
+    }
+}

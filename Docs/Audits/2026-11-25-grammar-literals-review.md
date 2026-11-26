@@ -161,3 +161,38 @@ manual, the Lark reference, the pest book and W3C XML §6. One read-only
 count (§10 of the design: 315 parser-named functions in 77 Core files) ran
 as an inline `node -e` with no files written. Every *planned* proof above is
 unrun.
+
+## 8. Core grammar inventory and kept hand-written parsers
+
+All Core checked-text heads and Core text format/protocol grammars live in
+deferrable private `Syntax/*.jet` parts registered with empty `owns` in
+`Compiler/Prelude/CoreSourceParts.tsv`:
+
+- **Checked-text heads:** `Core/Process/Syntax/Sh.jet` (`Sh`),
+  `Core/Text/Syntax/HTML.jet` (`HTML`), `Core/DB/Syntax/SQL.jet` (`SQL`),
+  `Core/Net/Syntax/URL.jet` (`URL`), `Core/Time/Syntax/RFC3339.jet`
+  (`DateTime`), `Core/Files/Syntax/Path.jet` (`Path`), and
+  `Core/Regex/Syntax/Regex.jet` (`Regex`).
+- **Format and protocol grammars:** `Core/Net/Syntax/{MIME,IP}.jet`,
+  `Core/Encoding/Syntax/{Ini,JSON,CSV,TOML,XML,JSON5}.jet`,
+  `Core/Log/Syntax/Filter.jet`, `Core/Crypto/Syntax/{UUID,PEM}.jet`,
+  `Core/HTTP/Syntax/{Head,Route}.jet`,
+  `Core/App/Syntax/{Cron,SyncDocument}.jet`, `Core/UI/Syntax/Xkb.jet`, and
+  `Core/Service/Syntax/Record.jet`.
+
+### Kept hand-written parsers and rationale
+
+| File(s) | Reason kept hand-written |
+|---|---|
+| `Core/Encoding/YAML.jet` | Indentation- and context-sensitive block/flow layout outside context-free grammars |
+| `Core/Encoding/Stream.jet` | Incremental resumable pull/push codec over chunked `Reader`/`Writer` streams |
+| `Core/Encoding/CSV.jet` (custom delimiter path) | Runtime-selected delimiter, quote, and header policy; default RFC 4180 comma CSV runs on `Core/Encoding/Syntax/CSV.jet` |
+| `Core/Text/Parse.jet`, `Core/Math/Math.jet` (`decimal_parse`) | Primitive scalar number parsers called by grammar tree lowerers |
+| `Core/Files/Runtime/KernelPathComponents.jet` | Byte-level OS path separator and drive/UNC prefix splitting (`Path{…}` literals run on `Core/Files/Syntax/Path.jet`) |
+| `Core/Data/Data.jet` (`parse_format`) | Fixed format-name keyword lookup table, not a grammar |
+| `Core/Args/Args.jet` | Operates on already-split `[String]` argv lists, not raw text |
+| Binary format modules (`Core/Crypto/{ASN1,X509*,PKCS*,Jetc}`, `Core/Net/SSL/*`, `Core/Data/Parquet.jet`, `Core/Archive/*`, `Core/Encoding/{CBOR*,Binary,Eetf}`, `Core/DB/Engine/{Btree,Record}`, `Core/Image/*`, `Core/UI/Font.jet`) | Binary wire and container layouts, not text grammars |
+| `Core/DB/Engine/{Parse,ParseTables,Tokenize}.jet` | SQLite 3.45.0 Lemon SQL execution engine retained for full SQLite statement/bytecode fidelity alongside `Core/DB/Syntax/SQL.jet` (`SQL{…}`) |
+| `Core/Encoding/XMLEngine.jet`, `Core/Encoding/{JSON,TOML}.jet`, `Core/Regex/Regex.jet`, `Core/HTTP/{HTTP,Server}.jet`, `Core/Service/Service.jet`, `Core/UI/Xkb.jet`, `Core/Crypto/PEM.jet` | Lossless lexical/UTF-16/C14N/entity-policy engines, constant-time secret decoding, and diagnostic fallback paths retained where exact UTF-8 byte/scalar offsets, first-seen duplicate-key coordinates, or nesting beyond `GRAMMAR_MAX_DEPTH` are required alongside their checked `Syntax/*.jet` grammars |
+| `Core/Compiler/Compiler.jet` | Jet's own language frontend parser |
+

@@ -1,4 +1,24 @@
-use jet_devserver.[CoreCatalogMember, core_member_direct_exclusion, core_member_return_type]
+use {
+    jet_devserver.[
+        CoreCatalogMember,
+        WebErrorActionLink,
+        WebErrorPage,
+        WebErrorPageIdentity,
+        WebErrorSourceExcerpt,
+        core_member_direct_exclusion,
+        core_member_return_type,
+        diagnostics_json,
+        graph_json_error_for_file,
+    ]
+    jet_foundation.[
+        Diagnostic,
+        DiagnosticOrigin,
+        Span,
+        TextEdit,
+        diagnostic_from_registry,
+        sha256_hex,
+    ]
+}
 
 event_member: fn(name: String) -> CoreCatalogMember {
     signature: if name == "scope" -> "event.scope()" else -> "core.event.{name}"
@@ -16,4 +36,30 @@ event_member: fn(name: String) -> CoreCatalogMember {
     policy: core_member_direct_exclusion("core.event", event_member("policy_sync")) ?? panic("sema-only event policy constructor must remain excluded")
     assert_eq(policy.code, "needs_signature")
     assert_eq(core_member_return_type("core.event", "policy_sync"), "EventPolicy")
+}
+
+sample_dep_diagnostic: fn(dep_src: String, dep_digest: String) -> Diagnostic Never! {
+    ^diag: diagnostic_from_registry("E0113", Val(Span{start: 26, end: 31}), "This value is String (text), but `answer` returns Int", "expected Int", "return an Int")
+    diag.origin = Val(DiagnosticOrigin{path: "dep.jet", display: "dep.jet", source: dep_src, revision: dep_digest})
+    diag.fix_edits = [TextEdit]{TextEdit{span: Span{start: 26, end: 31}, new_text: "0"}}
+    diag
+}
+
+#Test("canvas_and_web_error_consumers_keep_canonical_origin_digest_and_fix_edits") {
+    dep_src: "answer: fn() -> Int {{\n    \"bad\"\n}}\n"
+    main_src: "use dep: \"./dep\"\n\nrun: fn() {{\n    print(dep.answer())\n}}\n"
+    dep_digest: sha256_hex(dep_src)
+
+    rendered: diagnostics_json("main.jet", main_src, [Diagnostic]{sample_dep_diagnostic(dep_src, dep_digest)})
+    assert(rendered.contains("\"file\":\"dep.jet\""), "Canvas diagnostics_json must report canonical origin file: {rendered}")
+    assert(rendered.contains("\"origin\":{{\"path\":\"dep.jet\",\"source_digest\":\"{dep_digest}\"}}"), "Canvas diagnostics_json must include canonical origin digest: {rendered}")
+    assert(rendered.contains("\"line\":2,\"col\":5"), "Canvas diagnostics_json must compute line/col against origin source: {rendered}")
+
+    graph_err: graph_json_error_for_file("nonexistent-unopened.jet", main_src, [Diagnostic]{sample_dep_diagnostic(dep_src, dep_digest)})
+    assert(graph_err.contains("dep.jet:2:5") && graph_err.contains("Jet.ReturnTypeMismatch"), "graph_json_error_for_file must render from canonical source/origin without disk re-read: {graph_err}")
+
+    identity: WebErrorPageIdentity.new("req-1", "sess-1", "dep.jet", "build-1", dep_digest) ?? panic("web error identity")
+    page: WebErrorPage.from_diagnostic(identity, sample_dep_diagnostic(dep_src, dep_digest), [WebErrorSourceExcerpt]{}, [WebErrorActionLink]{}) ?? panic("web error page from canonical diagnostic")
+    assert_eq(page.edits.len(), 1)
+    assert_eq(page.edits[0].new_text, "0")
 }

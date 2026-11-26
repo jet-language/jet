@@ -16,6 +16,7 @@ use {
     hashes: __core_crypto_md
     ctime: __core_crypto_ctime
     des: __core_crypto_des
+    pem_syntax: __core_crypto_syntax_pem
 }
 
 /// Why Base64 decoding failed (MBEDTLS_ERR_BASE64_*).
@@ -527,6 +528,10 @@ pem_write_buffer: fn(header: String, footer: String, der: [U8]) -> [U8] Never! {
     out
 }
 
+priv parse_armor_syntax: fn(text: String) -> Bool Never! {
+    pem_syntax.parse_armor(text) != None
+}
+
 #Test("Base64 and PEM round trips") {
     assert(base64_encode("foobar".bytes()) == "Zm9vYmFy".bytes())
     assert(base64_encode("fo".bytes()) == "Zm8=".bytes())
@@ -545,4 +550,18 @@ pem_write_buffer: fn(header: String, footer: String, der: [U8]) -> [U8] Never! {
     assert(block.der == der)
     assert(block.used == text.len())
     assert(pem_read_buffer("-----BEGIN Y-----", "-----END Y-----", text, None) == .Err(.NoHeaderFooterPresent))
+    pem_text: String.from_bytes(text) ?? panic("pem utf8")
+    assert(parse_armor_syntax(pem_text))
+    parsed: pem_syntax.parse_armor(pem_text) ?? panic("pem grammar")
+    assert_eq(parsed.label, "X")
+    assert_eq(parsed.cipher, "")
+    printed: pem_syntax.print_armor(pem_text) ?? panic("pem print")
+    assert(parse_armor_syntax(printed))
+    enc_pem: "-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nDEK-Info: AES-128-CBC,0123456789ABCDEF0123456789ABCDEF\nQUJDRA==\n-----END RSA PRIVATE KEY-----\n"
+    enc_parsed: pem_syntax.parse_armor(enc_pem) ?? panic("encrypted pem grammar")
+    assert_eq(enc_parsed.label, "RSA PRIVATE KEY")
+    assert_eq(enc_parsed.cipher, "AES-128-CBC")
+    assert_eq(enc_parsed.iv_hex, "0123456789ABCDEF0123456789ABCDEF")
+    assert(pem_syntax.print_armor(enc_pem) != None)
+    assert(pem_syntax.parse_armor("-----BEGIN A-----\nQUJD\n-----END B-----\n") == None)
 }

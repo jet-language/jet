@@ -5,6 +5,7 @@
 use {
     crypto: core.crypto
     random: core.crypto.random
+    uuid_syntax: __core_crypto_syntax_uuid
 }
 
 #Error
@@ -81,23 +82,7 @@ copy_bytes: fn(bytes: [U8]) -> [U8] Never! {
 }
 
 parse_uuid: fn(text: String) -> [U8]? {
-    raw: text.bytes()
-    if raw.len() != 36 -> return None
-    if raw[8] != (U8{45}) || raw[13] != (U8{45}) || raw[18] != (U8{45}) || raw[23] != (U8{45}) {
-        return None
-    }
-    ^digits: [U8]{}
-    loop i in 0..<raw.len() {
-        if raw[i] != (U8{45}) -> digits.push(raw[i])
-    }
-    if digits.len() != 32 -> return None
-    ^out: [U8]{}
-    loop i in 0..<16 {
-        hi: hex_value(digits[i * 2]) ?? return None
-        lo: hex_value(digits[i * 2 + 1]) ?? return None
-        out.push(wrapping(U8{((hi << 4)) | lo}))
-    }
-    Val(out.copy())
+    uuid_syntax.parse_uuid_bytes(text)
 }
 
 hex_value: fn(b: U8) -> Int? {
@@ -144,4 +129,15 @@ hex_decode: fn(text: String) -> [U8]? {
     bytes: parse_uuid(value) ?? panic("UUID encoding")
     assert_eq(Int{bytes[6]} >> 4, 7)
     assert_eq(Int{bytes[8]} & 192, 128)
+}
+
+#Test("UUID grammar parses canonical hex groups, prints back, and refuses malformed input") {
+    upper: "550E8400-E29B-41D4-A716-446655440000"
+    assert_eq(parse(upper) ?? panic("parse UUID"), "550e8400-e29b-41d4-a716-446655440000")
+    printed: uuid_syntax.print_uuid(upper) ?? panic("print UUID")
+    assert_eq(printed, upper)
+    loop bad in ["550e8400e29b41d4a716446655440000", "550e8400-e29b-41d4-a716-44665544000g", "short"] {
+        assert(parse_uuid(bad) == None)
+        assert(uuid_syntax.print_uuid(bad) == None)
+    }
 }

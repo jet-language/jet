@@ -52,4 +52,5 @@ Run a lesson from the repository root, for example `jet run Examples/Concurrency
 - [ServicePartitionReconcile](Services/ServicePartitionReconcile.jet)
 - [ServiceProjection](Services/ServiceProjection.jet) — Runtime retention and delivery policy are explicit values.
 - [ServiceTree](Services/ServiceTree.jet) — A typed tree promotes an ordinary function into a named worker.
+- [ServiceWorkers](Services/ServiceWorkers.jet) — Typed, replying (`call`), stateful (`state:`), and batched (`batch:`/`wait:`) service workers.
 - [ServiceWorkflowOutcome](Services/ServiceWorkflowOutcome.jet)

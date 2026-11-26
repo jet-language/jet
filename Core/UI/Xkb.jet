@@ -1,5 +1,6 @@
 use {
     tables: __core_ui_xkb_tables
+    xkb_syntax: __core_ui_syntax_xkb
     core.term.[Key]
     core.ui.[UIError]
     internal.[lex, keysym_names, parse_keymap, compile, key_at, press_text, ui_key, refresh, update_key, one_sym, real_mod_index, hex, test_keymap_source, test_keymap, exercise]
@@ -2211,4 +2212,19 @@ priv internal: module {
     assert(keymap(huge.bytes()) == .Err(.Protocol("xkb keymap line 1: keycode 4294967296 is out of range")))
     ^km: test_keymap()
     exercise(km)
+}
+
+priv check_xkb_syntax: fn(text: String) -> Int? Never! {
+    xkb_syntax.count_sections(text)
+}
+
+#Test("XKB grammar parses the full US+DE keymap, prints back, and refuses broken syntax") {
+    source: String.from_bytes(test_keymap_source()) ?? panic("test keymap utf8")
+    assert_eq(check_xkb_syntax(source), Val(4))
+    printed: xkb_syntax.print_keymap(source) ?? panic("XKB grammar print")
+    assert_eq(check_xkb_syntax(printed), Val(4))
+    km: keymap(printed.bytes()) ?? panic("XKB printed keymap compiles")
+    assert_eq(km.layout(), "English (US)")
+    assert(check_xkb_syntax("not a keymap") == None)
+    assert(check_xkb_syntax("xkb_keymap {{ unclosed") == None)
 }

@@ -1,0 +1,63 @@
+// Private grammar for `core.crypto.uuid` canonical RFC 4122 / 9562 UUIDs.
+use {
+    core.grammar.[Grammar]
+}
+
+priv Identifier: Grammar{"""
+    identifier : p1=HEX8 '-' p2=HEX4 '-' p3=HEX4 '-' p4=HEX4 '-' p5=HEX12 ;
+    HEX8       : [0-9A-Fa-f] [0-9A-Fa-f] [0-9A-Fa-f] [0-9A-Fa-f] [0-9A-Fa-f] [0-9A-Fa-f] [0-9A-Fa-f] [0-9A-Fa-f] ;
+    HEX4       : [0-9A-Fa-f] [0-9A-Fa-f] [0-9A-Fa-f] [0-9A-Fa-f] ;
+    HEX12      : [0-9A-Fa-f] [0-9A-Fa-f] [0-9A-Fa-f] [0-9A-Fa-f] [0-9A-Fa-f] [0-9A-Fa-f] [0-9A-Fa-f] [0-9A-Fa-f] [0-9A-Fa-f] [0-9A-Fa-f] [0-9A-Fa-f] [0-9A-Fa-f] ;
+"""}
+
+/// Parses canonical 8-4-4-4-12 UUID text into 16 raw bytes via the checked
+/// grammar, or `None` when malformed.
+parse_uuid_bytes: fn(text: String) -> [U8]? Never! {
+    id: if Identifier.parse(text) == {
+        .Ok(parsed) -> parsed
+        .Err(_) -> return None
+    }
+    ^out: [U8]{}
+    if !push_hex(id.p1, out) -> return None
+    if !push_hex(id.p2, out) -> return None
+    if !push_hex(id.p3, out) -> return None
+    if !push_hex(id.p4, out) -> return None
+    if !push_hex(id.p5, out) -> return None
+    if out.len() != 16 -> return None
+    Val(out)
+}
+
+/// Parses a UUID string and prints it back through the grammar's checked printer.
+print_uuid: fn(text: String) -> String? Never! {
+    if Identifier.parse(text) == {
+        .Ok(id) -> {
+            if id.print() == {
+                .Ok(printed) -> Val(printed)
+                .Err(_) -> None
+            }
+        }
+        .Err(_) -> None
+    }
+}
+
+priv push_hex: fn(part: String, out: ^[U8]) -> Bool Never! {
+    raw: part.bytes()
+    if raw.len() % 2 != 0 -> return false
+    ^i: 0
+    loop i < raw.len() {
+        hi: hex_nibble(raw[i])
+        lo: hex_nibble(raw[i + 1])
+        if hi < 0 || lo < 0 -> return false
+        out.push(U8{(hi << 4) | lo})
+        i += 2
+    }
+    true
+}
+
+priv hex_nibble: fn(b: U8) -> Int Never! {
+    n: Int{b}
+    if n >= 48 && n <= 57 -> return n - 48
+    if n >= 65 && n <= 70 -> return n - 55
+    if n >= 97 && n <= 102 -> return n - 87
+    return -1
+}

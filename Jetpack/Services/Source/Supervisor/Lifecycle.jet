@@ -187,7 +187,9 @@ services_launch: fn(project_dir: String, env: ^ShellEnv, plan: DevServicePlan, r
             return Err(ServicesError.new("couldn't publish service ports: {error}{cleanup}"))
         }
     }
+    if sys.get(SERVICES_SUPERVISOR_ENV) != None -> services_publish_supervisor_state(resolved.dir)
     _: services_publish_identity(child, state, services_pid_path(resolved.dir), attached) ?? {
+        services_remove_quiet(services_supervisor_pid_path(resolved.dir))
         services_remove_quiet(services_ports_path(resolved.dir))
         return Err(err)
     }
@@ -196,6 +198,7 @@ services_launch: fn(project_dir: String, env: ^ShellEnv, plan: DevServicePlan, r
     if services_write_lifecycle(resolved.dir, lifecycle) == .Err(error) {
         cleanup: services_cleanup_child_with_authority(child, attached)
         services_remove_quiet(services_pid_path(resolved.dir))
+        services_remove_quiet(services_supervisor_pid_path(resolved.dir))
         services_remove_quiet(services_ports_path(resolved.dir))
         return Err(ServicesError.new("couldn't publish service lifecycle state: {error}{cleanup}"))
     }
@@ -427,7 +430,7 @@ services_monitor_service: fn(host: ServiceHost, first: StartedService, project_d
                 next
             }
         }
-        time.sleep(time.duration_ms(200))
+        time.sleep(time.duration_ms(25))
     }
 }
 
@@ -527,30 +530,47 @@ services_mark_lifecycle_ready: fn(project_dir: String, plan: DevServicePlan) -[F
     }
 }
 
+services_remove_own_supervisor_pid: fn(dir: String) -[FS, Env]> Never! {
+    if services_read_supervisor_state(dir) == .Val(recorded) {
+        if recorded.pid == sys.pid() -> services_remove_quiet(services_supervisor_pid_path(dir))
+    }
+}
+
 // Close one supervised generation under the services-state lock: stop its
 // persisted authority, record the outcome, remove runtime files, and on
 // failure stop every dependent.
 services_finish_supervisor: fn(host: ServiceHost, project_dir: String, plan: DevServicePlan, started: StartedService, error: String?) -[FS, Env, Exec, Rand, Time, Time.Wait]> {
     dir: services_service_dir(project_dir, plan.name)
+    if !files.is_dir(dir) {
+        return
+    }
     // Never remove state without the lock `up`/`down` use: stale evidence is
     // safer than racing a live supervisor or a user-issued shutdown.
     _guard: services_state_lock(project_dir) ?? return
+    if !files.is_dir(dir) {
+        return
+    }
     existing: if services_read_lifecycle(dir) == {
         .Ok(found) -> found
         .Err(_) -> LifecycleFacts?{None}
     }
     if existing == .Val(facts) {
         // An old supervisor can see its child exit after a new generation
-        // published state; it must not touch that generation.
+        // published state (including a fresh generation 1 at a recreated
+        // project path); it must not touch that generation.
         if services_authority_from_lifecycle(facts) == .Ok(current) {
             if current != started.authority {
                 return
             }
         }
+        if facts.pid == .Val(live_pid) && live_pid != started.state.pid {
+            return
+        }
     }
     preserve_terminal_state: if existing == .Val(facts) -> services_is_terminal_evidence(facts) else -> false
     if services_stop_supervisor_authority(host, project_dir, plan, started) == .Err(cleanup_error) {
         if preserve_terminal_state {
+            services_remove_own_supervisor_pid(dir)
             return
         }
         message: if error == .Val(text) -> "{text}; supervisor cleanup failed: {cleanup_error.message}" else -> "supervisor cleanup failed: {cleanup_error.message}"
@@ -563,6 +583,7 @@ services_finish_supervisor: fn(host: ServiceHost, project_dir: String, plan: Dev
                 services_write_lifecycle_quiet(dir, updated)
             }
         }
+        services_remove_own_supervisor_pid(dir)
         return
     }
     if !preserve_terminal_state {
@@ -582,6 +603,7 @@ services_finish_supervisor: fn(host: ServiceHost, project_dir: String, plan: Dev
     services_remove_quiet(services_pid_path(dir))
     services_remove_quiet(services_ports_path(dir))
     services_remove_quiet(services_stopping_path(dir))
+    services_remove_own_supervisor_pid(dir)
     if error != None && !preserve_terminal_state {
         ^visited: [String]{}
         services_stop_dependents(project_dir, plan.name, visited)
@@ -728,17 +750,36 @@ services_watch_changed_debounced: fn(project_dir: String, paths: [String], stamp
     Ok(false)
 }
 
+services_wait_supervisor_exit: fn(dir: String, supervisor: ServiceProcessState?) -[FS, Env, Time, Time.Wait]> Never! {
+    state: supervisor ?? return
+    if state.pid == sys.pid() {
+        return
+    }
+    deadline: services_now_ms() + 2000
+    loop {
+        alive: services_process_matches_start(state) ?? false
+        if !alive || services_now_ms() >= deadline -> break
+        time.sleep(time.duration_ms(10))
+    }
+    if !(services_process_matches_start(state) ?? false) {
+        services_remove_quiet(services_supervisor_pid_path(dir))
+    }
+}
+
 // Stop `plan` if a verified service process is on record: TERM, a bounded
 // grace wait, then KILL. A PID-only legacy record is dropped, never signaled.
 services_down_one: fn(host: ServiceHost, project_dir: String, plan: DevServicePlan) -[FS, Env, Exec, Rand, Time, Time.Wait]> ServicesError! {
     services_validate_service_name(plan.name)
     ^guard: env_acquire_lock(pkg_managed_dir(project_dir), SERVICES_STATE_LOCK_SCOPE) ?? return Err(ServicesError.new("couldn't lock service state: {err}"))
     dir: services_service_dir(project_dir, plan.name)
+    supervisor: services_read_supervisor_state(dir)
     persisted: services_read_process_state(dir)
     record: persisted ?? {
         services_remove_quiet(services_ports_path(dir))
         services_remove_quiet(services_stopping_path(dir))
         services_remove_quiet(services_supervisor_error_path(dir))
+        close(guard)
+        services_wait_supervisor_exit(dir, supervisor)
         return
     }
     state: services_verified_state(record) ?? {
@@ -751,6 +792,8 @@ services_down_one: fn(host: ServiceHost, project_dir: String, plan: DevServicePl
         services_remove_quiet(services_stopping_path(dir))
         services_remove_quiet(services_ports_path(dir))
         services_remove_quiet(services_supervisor_error_path(dir))
+        close(guard)
+        services_wait_supervisor_exit(dir, supervisor)
         if removed == .Val(message) {
             return Err(ServicesError.new("couldn't remove legacy service state: {message}"))
         }
@@ -778,6 +821,8 @@ services_down_one: fn(host: ServiceHost, project_dir: String, plan: DevServicePl
             updated.pid = None
             services_write_lifecycle_quiet(dir, updated)
         }
+        close(guard)
+        services_wait_supervisor_exit(dir, supervisor)
         return
     }
     if files.write(services_stopping_path(dir), "down\n") == .Err(error) {
@@ -812,6 +857,8 @@ services_down_one: fn(host: ServiceHost, project_dir: String, plan: DevServicePl
             services_write_lifecycle_quiet(dir, updated)
         }
     }
+    close(guard)
+    services_wait_supervisor_exit(dir, supervisor)
     if removed == .Val(message) {
         return Err(ServicesError.new("couldn't remove service state: {message}"))
     }

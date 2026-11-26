@@ -6,7 +6,7 @@
 session lsp content-length: jet self lsp
 stderr: null
 
-send lsp: "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"capabilities\":{}}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"capabilities\":{\"workspace\":{\"workspaceEdit\":{\"documentChanges\":true}}}}}"
 recv lsp until $.id = 1
 stdout: ~ "\"hoverProvider\":true" # initialize advertises hover
 send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
@@ -14,7 +14,7 @@ send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
 # 1. UTF-8 25..46 / UTF-16 23..44 emoji host document: region checks cleanly,
 # cursor on emoji (host text) returns null, cursor inside region hovers cleanly.
 send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/panel.html\",\"languageId\":\"html\",\"version\":1,\"text\":\"🙂\\n<script lang=\\\"jet\\\">\\nrun: fn() {print(1)}\\n</script>\\n\"}}}"
-recv lsp until $.method = "textDocument/publishDiagnostics"
+recv lsp until $.params.uri = "file://{work}/panel.html"
 json: stdout doc $.params.uri = "file://{work}/panel.html"
 json: stdout doc $.params.diagnostics[?severity=1] #= 0
 send lsp: "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/panel.html\"},\"position\":{\"line\":0,\"character\":0}}}"
@@ -28,7 +28,7 @@ json: stdout doc $.result.range = {"start":{"line":2,"character":0},"end":{"line
 # 2. Two Jet regions in one host document (with emoji prefix + host text between regions):
 # cross-region hover, definition, and rename edits map to host coordinates.
 send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/page.html\",\"languageId\":\"html\",\"version\":1,\"text\":\"🙂\\n<script lang=\\\"jet\\\">\\nscale_val: fn() -> Int {\\n    3\\n}\\n</script>\\n<p>middle</p>\\n<script lang=\\\"jet\\\">\\nuse_val: fn() -> Int {\\n    scale_val() + 1\\n}\\n</script>\\n\"}}}"
-recv lsp until $.method = "textDocument/publishDiagnostics"
+recv lsp until $.params.uri = "file://{work}/page.html"
 json: stdout doc $.params.uri = "file://{work}/page.html"
 json: stdout doc $.params.diagnostics[?severity=1] #= 0
 send lsp: "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/page.html\"},\"position\":{\"line\":9,\"character\":6}}}"
@@ -40,9 +40,12 @@ json: stdout doc $.result.range = {"start":{"line":2,"character":0},"end":{"line
 send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didChange\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/page.html\",\"version\":2},\"contentChanges\":[{\"range\":{\"start\":{\"line\":3,\"character\":0},\"end\":{\"line\":3,\"character\":0}},\"text\":\"    // shifted\\n\"}]}}"
 send lsp: "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"textDocument/rename\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/page.html\"},\"position\":{\"line\":10,\"character\":6},\"newName\":\"factor\"}}"
 recv lsp collect until ndjson $[?id=5] #>= 1
-json: stdout ndjson $[?id=5][0].result.changes."file://{work}/page.html" #= 2
-json: stdout ndjson $[?id=5][0].result.changes."file://{work}/page.html"[0].range = {"start":{"line":2,"character":0},"end":{"line":2,"character":9}}
-json: stdout ndjson $[?id=5][0].result.changes."file://{work}/page.html"[1].range = {"start":{"line":10,"character":4},"end":{"line":10,"character":13}}
+json: stdout ndjson $[?id=5][0].result.documentChanges #= 1
+json: stdout ndjson $[?id=5][0].result.documentChanges[0].textDocument.uri = "file://{work}/page.html"
+json: stdout ndjson $[?id=5][0].result.documentChanges[0].textDocument.version = 2
+json: stdout ndjson $[?id=5][0].result.documentChanges[0].edits #= 2
+json: stdout ndjson $[?id=5][0].result.documentChanges[0].edits[0].range = {"start":{"line":2,"character":0},"end":{"line":2,"character":9}}
+json: stdout ndjson $[?id=5][0].result.documentChanges[0].edits[1].range = {"start":{"line":10,"character":4},"end":{"line":10,"character":13}}
 
 # 4. Stale version didChange is refused without overwriting current version or returning false results.
 send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didChange\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/page.html\",\"version\":1},\"contentChanges\":[{\"text\":\"<script lang=\\\"jet\\\">\\nbroken: (\\n</script>\\n\"}]}}"

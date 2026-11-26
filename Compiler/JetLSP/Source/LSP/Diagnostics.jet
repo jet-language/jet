@@ -103,6 +103,9 @@ lsp_diagnostic_group_add: fn(groups: ^[String:[Int]], state: LSPDiagnosticState,
                 return
             }
         }
+        // Compiler-embedded virtual sources (`<corelib>/...`, `<prelude>`) are
+        // not workspace files and must never be published as bogus `file://` URIs.
+        if origin.path.starts_with("<") -> return
         lsp_group_add(groups, lsp_path_to_uri(origin.path), index)
         return
     }

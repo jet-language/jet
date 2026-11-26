@@ -167,6 +167,8 @@ services_supervisor_error_path: fn(dir: String) -> String Never! {
     files.join(dir, "supervisor.error")
 }
 
+services_supervisor_pid_path: fn(dir: String) -> String Never! { files.join(dir, "supervisor.pid") }
+
 services_ports_path: fn(dir: String) -> String Never! { files.join(dir, "ports") }
 
 services_lifecycle_path: fn(dir: String) -> String Never! { files.join(dir, "lifecycle") }
@@ -267,7 +269,25 @@ services_parse_pid: fn(text: String) -> Int? Never! {
 
 // The saved process identity, a legacy PID-only record, or None.
 services_read_process_state: fn(dir: String) -[FS]> PersistedProcessState? ServicesError! {
-    path: services_pid_path(dir)
+    services_read_process_state_at(services_pid_path(dir))
+}
+
+services_read_supervisor_state: fn(dir: String) -[FS]> ServiceProcessState? Never! {
+    record: services_read_process_state_at(services_supervisor_pid_path(dir)) ?? return None
+    services_verified_state(record)
+}
+
+services_publish_supervisor_state: fn(dir: String) -[FS, Env]> Never! {
+    pid: sys.pid()
+    if pid <= 0 {
+        return
+    }
+    start_identity: services_process_start_identity(pid) ?? return
+    state: ServiceProcessState{pid: pid, start_identity: start_identity, containment: None}
+    services_write_atomic(services_supervisor_pid_path(dir), state.encode().bytes()).drop("supervisor pid evidence is best-effort")
+}
+
+services_read_process_state_at: fn(path: String) -[FS]> PersistedProcessState? ServicesError! {
     invalid: ServicesError.new("service process state `{path}` is invalid")
     text: if services_read_text_bounded(path, SERVICES_MAX_STATE_BYTES) == {
         .Ok(text) -> text

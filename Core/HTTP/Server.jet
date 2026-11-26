@@ -12,6 +12,7 @@ use {
     net_rt: jet.runtime.net
     realtime_rt: jet.runtime.rt
     sys_rt: jet.runtime.sys
+    route_syntax: __core_http_syntax_route
 }
 
 // core.http.server — HTTP/1.1 serving over core.net TCP, or over core.net.tls
@@ -1361,6 +1362,37 @@ priv route_name_ok: fn(name: [U8]) -> Bool Never! {
 }
 
 priv route_parse: fn(pattern: String) -> HTTPParsedRoute Never! {
+    if route_syntax.parse_route_segments(pattern) == .Val(parsed_segs) {
+        ^segments: [HTTPSegment]{}
+        ^names: [String]{}
+        ^ok: true
+        loop seg in parsed_segs {
+            if seg.kind == {
+                .Param -> {
+                    if list_contains(names, seg.text) {
+                        return route_problem("parameter `{seg.text}` appears twice")
+                    }
+                    names.push(seg.text.copy())
+                    segments.push(HTTPSegment.Param(seg.text))
+                }
+                .CatchAll -> {
+                    if list_contains(names, seg.text) {
+                        return route_problem("parameter `{seg.text}` appears twice")
+                    }
+                    names.push(seg.text.copy())
+                    segments.push(HTTPSegment.CatchAll(seg.text))
+                }
+                .Static -> {
+                    text: segment_decode(seg.text.bytes()) ?? {
+                        ok = false
+                        break
+                    }
+                    segments.push(HTTPSegment.Static(text))
+                }
+            }
+        }
+        if ok -> return HTTPParsedRoute{segments: segments, problem: ""}
+    }
     raw: pattern.bytes()
     if raw.len() == 0 || raw[0] != (U8{47}) -> return route_problem("a route starts with `/`")
     ^segments: [HTTPSegment]{}
@@ -2733,6 +2765,7 @@ priv imf_date: fn(seconds: Int) -> String Never! {
     routed: route_parse("/api/:name/*path")
     assert(routed.problem == "")
     assert(route_shape(routed.segments) == "/s3:api/p/w")
+    assert_eq(route_syntax.print_route_pattern("/api/:name/*path"), Val("/api/:name/*path"))
     assert(route_parse("api").problem != "")
     assert(route_parse("/a//b").problem != "")
     assert(route_parse("/a/{{id}}").problem != "")

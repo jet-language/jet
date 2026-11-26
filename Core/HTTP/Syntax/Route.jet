@@ -1,0 +1,56 @@
+// Private route-template grammar for `core.http.server`.
+use {
+    core.grammar.[Grammar]
+}
+
+priv RoutePattern: Grammar{"""
+    route_pattern : '/' (segs+=non_wild ('/' segs+=non_wild)* ('/' wild=catch_all)? | wild=catch_all)? ;
+    non_wild      : ':' name=PARAM_NAME # Param
+                  | text=STATIC_SEG     # Static
+                  ;
+    catch_all     : '*' name=PARAM_NAME ;
+
+    PARAM_NAME    : [A-Za-z_] [A-Za-z0-9_]* ;
+    STATIC_SEG    : [^/:*{{}}\r\n] [^/{{}}\r\n]* ;
+"""}
+
+ParsedRouteSegKind: enum {
+    Static,
+    Param,
+    CatchAll,
+}
+
+ParsedRouteSeg: struct {
+    kind: ParsedRouteSegKind,
+    text: String,
+}
+
+parse_route_segments: fn(pattern: String) -> [ParsedRouteSeg]? Never! {
+    parsed: if RoutePattern.parse(pattern) == {
+        .Ok(route) -> route
+        .Err(_) -> return None
+    }
+    ^out: [ParsedRouteSeg]{}
+    loop seg in parsed.segs {
+        if seg == {
+            .Param(name) -> out.push(ParsedRouteSeg{kind: .Param, text: name})
+            .Static(text) -> out.push(ParsedRouteSeg{kind: .Static, text: text})
+        }
+    }
+    if parsed.wild == .Val(w) {
+        out.push(ParsedRouteSeg{kind: .CatchAll, text: w.name})
+    }
+    Val(out)
+}
+
+print_route_pattern: fn(pattern: String) -> String? Never! {
+    if RoutePattern.parse(pattern) == {
+        .Ok(route) -> {
+            if route.print() == {
+                .Ok(printed) -> Val(printed)
+                .Err(_) -> None
+            }
+        }
+        .Err(_) -> None
+    }
+}

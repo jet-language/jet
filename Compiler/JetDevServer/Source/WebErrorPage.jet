@@ -533,10 +533,16 @@ WebErrorPage: struct {
         }
         ^safety: String?{None}
         if diagnostic.safety == .Val(value) -> safety = Val(web_error_safety_name(value))
-        // The diagnostic's primary edit, then its structured suggestions.
+        // The diagnostic's primary edit, its canonical fix_edits, then its structured suggestions.
         ^edits: [WebErrorEdit]{}
         if diagnostic.edit == .Val(edit) {
             edits.push(WebErrorEdit.from_diagnostic(identity.source_id, edit, applicability, safety))
+        }
+        loop other in diagnostic.fix_edits {
+            if diagnostic.edit == .Val(primary) && primary.span == other.span && primary.new_text == other.new_text && primary.path == other.path {
+                next
+            }
+            edits.push(WebErrorEdit.from_diagnostic(identity.source_id, other, applicability, safety))
         }
         if diagnostic.structured == .Val(.SuggestedEdits(suggested)) {
             loop edit in suggested {

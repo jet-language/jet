@@ -10,13 +10,14 @@ write: root_a/unicode.jet = "// 🙂 café\nunicode_greet: fn() -> String {\n   
 write: root_a/dep.jet = "dep_value: fn() -> Int {\n    1\n}\n"
 write: root_a/consumer.jet = "use dep: \"./dep\"\n\nuse_dep: fn() -> Int {\n    dep.dep_value() + 1\n}\n"
 write: root_b/target.jet = "symlink_target_fn: fn() -> Int {\n    11\n}\n"
+mkdir: root_sym
 symlink: {work}/root_b/target.jet root_sym/linked.jet
 when os unix: chmod: root_a/readonly.jet 444
 
 # Verify canonical formatter output via `jet fmt` for comparison.
 step: jet fmt root_a/unformatted_ref.jet
 exit: 0
-capture: canonical_formatted = text file root_a/unformatted_ref.jet
+file: root_a/unformatted_ref.jet = "messy: fn(a: Int, b: Int) -> Int { a + b }\n"
 
 session lsp content-length: jet self lsp
 
@@ -43,7 +44,7 @@ recv lsp until $.method = "textDocument/publishDiagnostics"
 send lsp: "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"textDocument/formatting\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/root_a/unformatted.jet\"},\"options\":{\"tabSize\":4,\"insertSpaces\":true}}}"
 recv lsp until $.id = 4
 json: stdout doc $.result #= 1
-json: stdout doc $.result[0].newText = "{cap:canonical_formatted}"
+json: stdout doc $.result[0].newText = "messy: fn(a: Int, b: Int) -> Int { a + b }\n"
 
 # 4. Unsaved buffer (does not exist on disk): checks and hovers without poisoning other roots.
 send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/root_a/unsaved_only.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"unsaved_fn: fn(n: Int) -> Int {\\n    n + 1\\n}\\n\"}}}"

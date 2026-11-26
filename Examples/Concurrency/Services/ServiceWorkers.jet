@@ -1,0 +1,93 @@
+// Typed service workers: a worker is its function, run once per message in
+// send order. A replying handler returns `Endpoint<Q, R>` answered by `call`,
+// a `^S` first parameter keeps state from `state:` (restarting from it after
+// a failure, which answers `.Ambiguous`), and `batch:` with `wait:` hands a
+// `[T]` handler up to `batch` waiting messages.
+use {
+    service: core.service
+    core.service.[ServiceError]
+    tasks: core.tasks
+}
+
+Event: enum {
+    Opened(Int),
+    Closed(Int),
+}
+
+EventMsg: struct {
+    ev: Event,
+    log: Shared<[String]>,
+    done: tasks.Semaphore,
+}
+
+BatchItem: struct {
+    value: Int,
+    sizes: Shared<[Int]>,
+    done: tasks.Semaphore,
+}
+
+record_event: fn(msg: EventMsg) {
+    label: if msg.ev == {
+        .Opened(id) -> "open:{id}"
+        .Closed(id) -> "close:{id}"
+    }
+    ^out: msg.log.guard_edit()
+    out.value.push(label)
+    msg.done.release()
+}
+
+double: fn(n: Int) -> Int { n * 2 }
+
+accumulate: fn(total: ^Int, delta: Int) -> Int Err! {
+    if delta < 0 -> return Err("negative delta")
+    total += delta
+    total
+}
+
+flush_batch: fn(items: [BatchItem]) {
+    if items.len() == 0 -> return
+    ^out: items[0].sizes.guard_edit()
+    out.value.push(items.len())
+    items[0].done.release()
+}
+
+run: fn() {
+    ^tree: service.tree("workers")
+    events: tree.worker("events", record_event, capacity: 8) ?? panic("events worker")
+    doubler: tree.worker("doubler", double, capacity: 8) ?? panic("doubler worker")
+    counter: tree.worker("counter", accumulate, state: 100, capacity: 8) ?? panic("counter worker")
+    bulk: tree.worker("bulk", flush_batch, batch: 2, wait: 20ms, capacity: 8) ?? panic("bulk worker")
+    tree.start() ?? panic("start")
+
+    seen: Shared<[String]>{[String]{}}
+    events_done: tasks.Semaphore.new(0)
+    tree.send(events, EventMsg{ev: Event.Opened(1), log: seen, done: events_done}) ?? panic("send open")
+    tree.send(events, EventMsg{ev: Event.Closed(1), log: seen, done: events_done}) ?? panic("send close")
+    _: events_done.acquire()
+    _: events_done.acquire()
+    event_log: seen.guard_read()
+    print("events: {event_log.value.join(", ")}")
+
+    print("call double: {tree.call(doubler, 21) ?? panic("double")}")
+
+    print("state 1: {tree.call(counter, 5) ?? panic("state 1")}")
+    print("state 2: {tree.call(counter, 10) ?? panic("state 2")}")
+    if tree.call(counter, -1) == {
+        .Err(ServiceError.Ambiguous(_)) -> print("state fail: Ambiguous")
+        .Err(other) -> print("state fail: {other:Debug}")
+        .Ok(v) -> print("unexpected ok: {v}")
+    }
+    print("state reset: {tree.call(counter, 1) ?? panic("state reset")}")
+
+    batch_sizes: Shared<[Int]>{[Int]{}}
+    batches_done: tasks.Semaphore.new(0)
+    tree.send(bulk, BatchItem{value: 1, sizes: batch_sizes, done: batches_done}) ?? panic("bulk 1")
+    tree.send(bulk, BatchItem{value: 2, sizes: batch_sizes, done: batches_done}) ?? panic("bulk 2")
+    tree.send(bulk, BatchItem{value: 3, sizes: batch_sizes, done: batches_done}) ?? panic("bulk 3")
+    _: batches_done.acquire()
+    _: batches_done.acquire()
+    sizes: batch_sizes.guard_read()
+    print("batches: {sizes.value}")
+
+    tree.stop() ?? panic("stop")
+}
