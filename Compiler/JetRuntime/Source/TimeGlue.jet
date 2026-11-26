@@ -92,3 +92,23 @@ time_glue_pad: fn(target: I64, value: I64, width: I64) {
 #Export(c) jet_rt_handle_debug_duration: fn(value: I64) -> I64 {
     jet_rt_handle_show_duration(value)
 }
+
+#Export(c) jet_rt_record_new_core_instant: fn(start_ns: I64) -> I64 {
+    raw: jet_int_owned_to_i64(start_ns)
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
+    result: jet_rt_alloc(TIME_DURATION_BYTES, I64{8})
+    time_glue_store(wrapping(result + TIME_DURATION_NS), raw)
+    result
+}
+
+#Export(c) jet_rt_handle_clone_core_instant: fn(value: I64) -> I64 {
+    time_glue_clone(value, TIME_DURATION_BYTES)
+}
+
+#Export(c) jet_rt_handle_drop_core_instant: fn(value: I64) {
+    time_glue_drop(value, TIME_DURATION_BYTES)
+}
+
+#Export(c) jet_rt_record_get_core_instant_start_ns: fn(value: I64) -> I64 {
+    time_glue_int(value, TIME_DURATION_NS)
+}
