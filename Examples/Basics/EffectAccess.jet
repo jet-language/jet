@@ -1,0 +1,18 @@
+// Effect safety classes (`EffectAccess`) and derived MCP `ToolAnnotations`.
+// Every effect operation states what it does to kept data (`Reads`, `Adds`, or
+// `Replaces`); repeatability and open-world reachability stay separate facts
+// and map directly onto MCP's four tool hints.
+
+format_annotations: fn(label: String, access: EffectAccess, repeatable: Bool, open_world: Bool) -> String Never! {
+    hints: access.tool_annotations(repeatable, open_world)
+    "{label}: readOnly={hints.readOnlyHint}, destructive={hints.destructiveHint}, idempotent={hints.idempotentHint}, openWorld={hints.openWorldHint}"
+}
+
+run: fn() -[IO]> {
+    print(format_annotations("read_note", EffectAccess.Reads, false, false))
+    print(format_annotations("append_log", EffectAccess.Adds, false, false))
+    print(format_annotations("send_email", EffectAccess.Adds, false, true))
+    print(format_annotations("put_note", EffectAccess.Replaces, true, false))
+    print(format_annotations("delete_remote", EffectAccess.Replaces, true, true))
+    print(format_annotations("charge_card", EffectAccess.Replaces, false, true))
+}

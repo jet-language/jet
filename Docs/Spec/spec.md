@@ -3138,6 +3138,33 @@ FS: enum {
 ```
 
 An `FS.Read` call inside `#Transact` is allowed; an `FS.Write` call is E0746.
+An effect also declares its access class with `access: fn(self) -> EffectAccess`,
+returning `.Reads`, `.Adds`, or `.Replaces` (or an ordered `if { ... }` arm
+table over its cases; omitted `access` defaults to `.Reads` or inherits from
+`parent:`). `Reads` only looks at kept data (including `Log` and `IO` output,
+which record the run rather than modifying kept state); `Adds` creates new data
+without overwriting existing data; `Replaces` overwrites or removes existing
+data. Irreversibility (`irreversible: fn(self) -> Bool`) stays separate: an
+operation may be `Adds` and irreversible (sending a message) or `Replaces` and
+reversible (a transactional database update).
+
+Repeatability is a separate checked operation fact, marked with `#Repeatable`:
+read-only functions are automatically repeatable; leaf primitives audit their
+promise with `#Repeatable("reason")`; checked `#Repeatable` functions are
+refused (E0778) if they reach a non-repeatable callee; and `#Repeatable(key:
+expr)` deduplicates retries using a key built from stable parameters and
+constants (E0779 when the key reaches `Rand` or `Time`). Retried `#App.Job`
+methods (`retries > 0`) must guard every reached irreversible call with
+`#Repeatable`, `#Repeatable(key: ...)`, or `app.enqueue`, unless the job opts
+into duplicate delivery with `#App.Job(at_least_once: true)` (E0780).
+
+`jet run --preview <file>` inspects the entry without running it, lists every
+`Adds` and `Replaces` effect the run would reach (highlighting `Replaces`), and
+emits derived MCP `ToolAnnotations` (`readOnlyHint`, `destructiveHint`,
+`idempotentHint`, `openWorldHint`) from the checked effect classes and
+repeatability fact (`jet inspect rights --json` and `EffectAccess.tool_annotations`
+expose the same annotations).
+
 An effect is a type that implements `Effect`, in its body or in an
 `impl Name.Effect { … }` block beside it in the same file, which joins the
 type as if the body held it; a second block is E0908. `effect` is not a

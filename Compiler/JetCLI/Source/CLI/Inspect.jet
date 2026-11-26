@@ -1820,7 +1820,7 @@ jet_cli_inspect_run_job: fn(job: JetCLIInspectJob) -> JetDriverVerbOutput {
         return jet_cli_inspect_checked_build_host(job)
     }
     ^output: JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    semantic: job.action == "rights" || job.action == "impact" || job.action == "shapes" || job.action == "expand" || job.action == "web-graph" || job.action == "routes" || job.action == "explain-effects" || job.action == "explain-derivation"
+    semantic: job.action == "rights" || job.action == "preview" || job.action == "impact" || job.action == "shapes" || job.action == "expand" || job.action == "web-graph" || job.action == "routes" || job.action == "explain-effects" || job.action == "explain-derivation"
     mode: if semantic -> JetDriverCompileMode.Doc else -> JetDriverCompileMode.Program
     watch: cli_time.start()
     compiled: jet_cli_compile_entry(job.file, job.color, job.threads, mode, None, None, target_machine: job.target_machine)
@@ -1850,6 +1850,9 @@ jet_cli_inspect_run_job: fn(job: JetCLIInspectJob) -> JetDriverVerbOutput {
                 }
                 job.action == "rights" -> {
                     output = jet_cli_inspect_rights(result, job.project, job.file, job.json)
+                }
+                job.action == "preview" -> {
+                    output = jet_cli_run_preview(result, job.file, job.json, job.color)
                 }
                 job.action == "impact" -> {
                     output = jet_cli_inspect_impact_report(job, result, diagnostics.len(), watch.elapsed_millis())

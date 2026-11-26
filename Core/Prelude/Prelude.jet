@@ -649,6 +649,28 @@ EffectAccess: enum {
     Reads,
     Adds,
     Replaces,
+
+    // Derives MCP ToolAnnotations from this EffectAccess class, repeatability
+    // fact, and whether the operation's effect row reaches an open-world
+    // external boundary (`Net`, `Browser`, `Exec`, or `FFI`).
+    tool_annotations: fn(self, repeatable: Bool, open_world: Bool) -> ToolAnnotations Never! {
+        read_only: self == EffectAccess.Reads
+        ToolAnnotations{
+            readOnlyHint: read_only,
+            destructiveHint: self == EffectAccess.Replaces,
+            idempotentHint: read_only || repeatable,
+            openWorldHint: open_world,
+        }
+    }
+}
+
+// MCP tool safety annotations derived from checked effect access, repeatability,
+// and external open-world reachability.
+ToolAnnotations: struct {
+    readOnlyHint: Bool,
+    destructiveHint: Bool,
+    idempotentHint: Bool,
+    openWorldHint: Bool,
 }
 
 // A compiler fact plane is a field-less struct that implements Fact: the
