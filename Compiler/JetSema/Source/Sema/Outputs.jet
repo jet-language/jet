@@ -191,7 +191,10 @@ sema_output_callable_target: fn(graph: SemaRegistrationGraph, declaring_index: I
             callable: if registered == .Val(found) -> sema_registration_callable_row_of(graph, sema_resolved_id(graph, found)) else -> None
             if callable == .Val(row) {
                 if row == .Function(module_index, function_index) {
-                    return Val(SemaOutputTarget{module_index: module_index, function_index: function_index, source_name: path.members[0].name.copy(), references: references.move()})
+                    ^members: path.members
+                    members.reverse()
+                    first_member: members.pop() ?? ExprMember{name: "", span: path.root_span}
+                    return Val(SemaOutputTarget{module_index: module_index, function_index: function_index, source_name: first_member.name, references: references.move()})
                 }
             }
             diagnostics.push(sema_output_error(path.members[0].span, "module `{path.root}` has no function `{path.members[0].name}`", "Output entries use ordinary module member resolution", "update `entry:` to a function that exists"))
@@ -259,7 +262,9 @@ sema_output_callable_target: fn(graph: SemaRegistrationGraph, declaring_index: I
                     if nested_visible == (Val(true)) {
                         if sema_registration_resolve_export(graph, current, lifted, owner.module_identity, owner.package_identity) == .Val(found) {
                             references.push(sema_output_import_reference(graph, graph.modules[current], exported.source_module_identity, member.name, exported.symbol.span, exported.visibility))
-                            source_name = Val(last.name.copy())
+                            ^members: path.members
+                            last_member: members.pop() ?? ExprMember{name: "", span: path.root_span}
+                            source_name = Val(last_member.name)
                             resolved = Val(SemaRegistrationResolvedSymbol{place: SemaRegistrationSymbolPlace.Detached{symbol: found.symbol}, source_module_identity: found.source_module_identity, target_module_identity: found.source_module_identity, visibility: found.visibility})
                             break
                         }

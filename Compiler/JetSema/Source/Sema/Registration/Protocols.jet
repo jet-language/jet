@@ -31,8 +31,12 @@ sema_protocols_expand: fn(items: ^[Item], diagnostics: ^[Diagnostic]) {
     if !has_protocol {
         return
     }
-    ^expanded: [Item]{}
-    loop item in items {
+    ^reversed: [Item]{}
+    loop items.len() > 0 {
+        if items.pop() == .Val(item) -> reversed.push(item)
+    }
+    loop reversed.len() > 0 {
+        item: reversed.pop() ?? break
         if item == .ProtocolDecl(declaration) {
             parsed: parse_source(sema_protocol_source(declaration).bytes())
             if parsed.diagnostics.len() > 0 {
@@ -44,15 +48,14 @@ sema_protocols_expand: fn(items: ^[Item], diagnostics: ^[Diagnostic]) {
                 // registers; the generated handles name theirs here.
                 ^owners: sema_state_types_owners()
                 sema_state_types_collect(generated, owners)
-                loop value in sema_state_types_rewrite_items(generated, owners) {
-                    expanded.push(value)
+                rewritten: sema_state_types_rewrite_items(generated, owners)
+                loop value in rewritten.move() {
+                    items.push(value)
                 }
             }
         }
-        expanded.push(item.copy())
+        items.push(item)
     }
-    loop items.len() > 0 -> ^_: items.pop()
-    loop item in expanded -> items.push(item)
 }
 
 // The generated methods are compiler scaffolding: they keep their declared
@@ -60,25 +63,36 @@ sema_protocols_expand: fn(items: ^[Item], diagnostics: ^[Diagnostic]) {
 // (`Client: struct`); they take the protocol's qualified names
 // (`Payment.Client`) here, because a written struct name is one identifier.
 sema_protocol_mark_generated: fn(items: ^[Item], protocol: String) Never! {
-    loop index in 0..<items.len() {
-        if items[index] == {
-            .Impl(definition) -> {
-                ^updated: definition
+    ^reversed: [Item]{}
+    loop items.len() > 0 {
+        if items.pop() == .Val(item) -> reversed.push(item)
+    }
+    loop reversed.len() > 0 {
+        item: reversed.pop() ?? break
+        is_impl: item == .Impl(_)
+        is_struct: item == .Struct(_)
+        is_enum: item == .Enum(_)
+        if is_impl {
+            if item.move() == .Impl(source_definition) {
+                ^updated: source_definition.move()
                 sema_protocol_mark_methods(updated.methods)
-                items[index] = Item.Impl{value: updated}
+                items.push(Item.Impl{value: updated})
             }
-            .Struct(definition) -> {
-                ^updated: definition.copy()
-                updated.name = "{protocol}.{definition.name}"
+        } else if is_struct {
+            if item.move() == .Struct(source_definition) {
+                ^updated: source_definition.move()
+                updated.name = "{protocol}.{updated.name}"
                 sema_protocol_mark_methods(updated.methods)
-                items[index] = Item.Struct{value: updated}
+                items.push(Item.Struct{value: updated})
             }
-            .Enum(definition) -> {
-                ^updated: definition
+        } else if is_enum {
+            if item.move() == .Enum(source_definition) {
+                ^updated: source_definition.move()
                 sema_protocol_mark_methods(updated.methods)
-                items[index] = Item.Enum{value: updated}
+                items.push(Item.Enum{value: updated})
             }
-            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+        } else {
+            items.push(item)
         }
     }
 }

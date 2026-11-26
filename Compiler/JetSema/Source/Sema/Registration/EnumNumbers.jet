@@ -42,42 +42,59 @@ use {
 }
 
 sema_enum_numbers_expand: fn(items: ^[Item], source: String, diagnostics: ^[Diagnostic]) {
-    loop index in 0..<items.len() {
-        if items[index] == .Struct(definition) {
-            if sema_enum_numbers_marker(definition.type_markers, "Specified") == .Val(specified) {
-                diagnostics.push(sema_enum_numbers_unnumbered_specified(specified, "struct `{definition.name}`, which has no cases"))
+    ^reversed: [Item]{}
+    loop items.len() > 0 {
+        if items.pop() == .Val(item) -> reversed.push(item)
+    }
+    loop reversed.len() > 0 {
+        item: reversed.pop() ?? break
+        if item == .Struct(definition) {
+            if sema_enum_numbers_marker(definition.type_markers, "Specified") == .Val(marker_index) {
+                diagnostics.push(sema_enum_numbers_unnumbered_specified(definition.type_markers[marker_index], "struct `{definition.name}`, which has no cases"))
             }
+            items.push(item)
+            next
         }
-        if items[index] == .Enum(definition) {
+        ^generated_methods: [Func]?{None}
+        if item == .Enum(definition) {
             sema_enum_numbers_check_specified(definition, diagnostics)
-            backing: jet_target_layout_enum_backing(definition) ?? next
-            // The backing is the `#Layout` marker's argument, so the marker is there.
-            layout: sema_enum_numbers_marker(definition.type_markers, "Layout") ?? next
-            numbers: sema_enum_numbers_checked(definition, layout, backing, source, diagnostics) ?? next
-            methods: sema_enum_numbers_methods(definition, backing, numbers, diagnostics) ?? next
-            ^updated: definition.copy()
-            // The methods are the compiler's: they report at the enum, and
-            // their bodies' spans index the generated fragment, not the
-            // user's file, so a refused number is no journey site (JetIR
-            // ir_generated_fragment_function).
-            loop method in methods {
-                ^generated: method
-                generated.span = definition.span
-                generated.name_span = definition.name_span
-                generated.compiler_generated = true
-                updated.methods.push(generated)
+            if jet_target_layout_enum_backing(definition) == .Val(backing) {
+                // The backing is the `#Layout` marker's argument, so the marker is there.
+                if sema_enum_numbers_marker(definition.type_markers, "Layout") == .Val(layout_index) {
+                    if sema_enum_numbers_checked(definition, definition.type_markers[layout_index], backing, source, diagnostics) == .Val(numbers) {
+                        generated_methods = sema_enum_numbers_methods(definition, backing, numbers, diagnostics)
+                    }
+                }
             }
-            items[index] = Item.Enum{value: updated}
         }
+        if generated_methods.move() == .Val(methods) {
+            if item.move() == .Enum(source_definition) {
+                ^updated: source_definition.move()
+                // The methods are the compiler's: they report at the enum, and
+                // their bodies' spans index the generated fragment, not the
+                // user's file, so a refused number is no journey site (JetIR
+                // ir_generated_fragment_function).
+                loop method in methods.move() {
+                    ^generated: method
+                    generated.span = updated.span
+                    generated.name_span = updated.name_span
+                    generated.compiler_generated = true
+                    updated.methods.push(generated)
+                }
+                items.push(Item.Enum{value: updated})
+            }
+            next
+        }
+        items.push(item)
     }
 }
 
 // E1124 for each case of a `#Specified` enum that states no number, E1125
 // when the enum numbers no case.
 sema_enum_numbers_check_specified: fn(definition: EnumDef, diagnostics: ^[Diagnostic]) {
-    specified: sema_enum_numbers_marker(definition.type_markers, "Specified") ?? return
+    marker_index: sema_enum_numbers_marker(definition.type_markers, "Specified") ?? return
     if jet_target_layout_enum_backing(definition) == None && jet_target_layout_enum_c_tag(definition) == None {
-        diagnostics.push(sema_enum_numbers_unnumbered_specified(specified, "enum `{definition.name}`, whose cases have no numbers"))
+        diagnostics.push(sema_enum_numbers_unnumbered_specified(definition.type_markers[marker_index], "enum `{definition.name}`, whose cases have no numbers"))
         return
     }
     ^next_number: 0
@@ -97,9 +114,9 @@ sema_enum_numbers_unnumbered_specified: fn(specified: Marker, subject: String) -
     sema_error("E1125", specified.span, "`#Specified` is on {subject}", "`#Specified` makes every case of a numbered enum state its number, and only a `#Layout(U8)`-style or `#Layout(c)` enum numbers its cases", "number the cases with a backing such as `#Layout(U8)`, or remove `#Specified`")
 }
 
-sema_enum_numbers_marker: fn(markers: [Marker], name: String) -> Marker? {
-    loop candidate in markers {
-        if candidate.name == name -> return Val(candidate.copy())
+sema_enum_numbers_marker: fn(markers: [Marker], name: String) -> Int? {
+    loop (index, candidate) in markers {
+        if candidate.name == name -> return Val(index)
     }
     None
 }

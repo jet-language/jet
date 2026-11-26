@@ -159,10 +159,10 @@ sema_data_filter_binary: fn(op: BinOp, left: Expr, right: Expr, parameter: Strin
         word: if op == BinOp.And -> "AND" else -> "OR"
         return Val("({first}) {word} ({second})")
     }
-    if sema_data_filter_field(left, parameter, fields) == .Val(field) && sema_data_filter_value(right, parameter) {
-        return sema_data_filter_compare(field, op, right, values)
+    if sema_data_filter_field(left, parameter, fields) == .Val(field_index) && sema_data_filter_value(right, parameter) {
+        return sema_data_filter_compare(fields[field_index], op, right, values)
     }
-    if sema_data_filter_field(right, parameter, fields) == .Val(field) && sema_data_filter_value(left, parameter) {
+    if sema_data_filter_field(right, parameter, fields) == .Val(field_index) && sema_data_filter_value(left, parameter) {
         flipped: if op == {
             .Lt -> BinOp.Gt
             .Gt -> BinOp.Lt
@@ -170,7 +170,7 @@ sema_data_filter_binary: fn(op: BinOp, left: Expr, right: Expr, parameter: Strin
             .Ge -> BinOp.Le
             .Add | .Sub | .Mul | .Div | .FloorDiv | .Mod | .Rem | .Pow | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Compare | .And | .Or -> op
         }
-        return sema_data_filter_compare(field, flipped, left, values)
+        return sema_data_filter_compare(fields[field_index], flipped, left, values)
     }
     None
 }
@@ -192,13 +192,13 @@ sema_data_filter_compare: fn(field: SemaDataFilterField, op: BinOp, value: Expr,
     Val("\"{SEMA_DATA_FILTER_ROW_COLUMN}.{field.name}\" {word} {field.bound}")
 }
 
-// The field of `fields` that `expression` reads off the row `parameter`
-// names, if it is one.
-sema_data_filter_field: fn(expression: Expr, parameter: String, fields: [SemaDataFilterField]) -> SemaDataFilterField? Never! {
+// Index of the field of `fields` that `expression` reads off the row
+// `parameter` names, if it is one.
+sema_data_filter_field: fn(expression: Expr, parameter: String, fields: [SemaDataFilterField]) -> Int? Never! {
     if expression == .Paren(inner, _, _) -> return sema_data_filter_field(inner, parameter, fields)
     if expression == .Field(base, member, _, _) && base == .Ident(name, _, _) && name == parameter {
-        loop field in fields {
-            if field.name == member -> return Val(field.copy())
+        loop (index, field) in fields {
+            if field.name == member -> return Val(index)
         }
     }
     None
@@ -232,9 +232,12 @@ sema_data_filter_path: fn(expression: Expr, parameter: String) -> Bool Never! {
     false
 }
 
-// The values of `sql` as the text each `?` binds: `"{value}"`.
-sema_data_filter_texts: fn(sql: SemaDataFilterSQL, span: Span) -> Expr Never! {
-    texts: loop value in sql.values -> Expr.Str{parts: [StrPart]{StrPart.Interp{expr: value.copy(), format: None}}, span: span, id: AST_NODE_GENERATED}
+// The values of `values` as the text each `?` binds: `"{value}"`.
+sema_data_filter_texts: fn(values: ^^[Expr], span: Span) -> Expr Never! {
+    ^texts: [Expr]{}
+    loop value in values.move() {
+        texts.push(Expr.Str{parts: [StrPart]{StrPart.Interp{expr: value, format: None}}, span: span, id: AST_NODE_GENERATED})
+    }
     Expr.ListLit{elements: texts, span: span, id: AST_NODE_GENERATED}
 }
 
@@ -244,7 +247,7 @@ sema_data_filter_texts: fn(sql: SemaDataFilterSQL, span: Span) -> Expr Never! {
 // reports what is wrong with them.
 sema_data_filter_push: fn(callback: Expr, row: Type, span: Span, check: ^SemaBodyCheck, source_args: ^[CallArg], argument_types: ^[Type], typed: ^[TExpr]) {
     ^sql: sema_data_filter_sql(callback, row, check)
-    ^texts: sema_data_filter_texts(sql, span)
+    ^texts: sema_data_filter_texts(sql.values.move(), span)
     text_list: Type.List{element: Type.String}
     ^probe: [Diagnostic]{}
     sema_body_check_swap_diagnostics(check, probe)
@@ -252,7 +255,7 @@ sema_data_filter_push: fn(callback: Expr, row: Type, span: Span, check: ^SemaBod
     sema_body_check_swap_diagnostics(check, probe)
     if bound == None || sema_has_error_since(probe, 0) {
         sql = sema_data_filter_none()
-        texts = sema_data_filter_texts(sql, span)
+        texts = Expr.ListLit{elements: [Expr]{}, span: span, id: AST_NODE_GENERATED}
         bound = Val(sema_tree_node(text_list, TExprKind.ListLit{values: [TExpr]{}}, span))
     }
     condition: Expr.Str{parts: [StrPart]{StrPart.Lit{text: sql.condition}}, span: span, id: AST_NODE_GENERATED}
@@ -279,7 +282,8 @@ sema_data_count_by_target: fn(callback: Expr, row: Type, check: SemaBodyCheck) -
         selected: body ?? return None
         fields: sema_data_filter_fields(row, check)
         if fields.len() == 0 -> return None
-        field: sema_data_filter_field(selected, lambda.params[0].name, fields) ?? return None
+        field_index: sema_data_filter_field(selected, lambda.params[0].name, fields) ?? return None
+        field: fields[field_index]
         method: if field.bound == {
             "CAST(? AS INTEGER)" -> "__count_by_int"
             "?" -> "__count_by_string"

@@ -110,7 +110,6 @@ sema_dyn_try_member: fn(receiver: Expr, receiver_value: TExpr, method: String, a
     if count == 1 {
         sema_data_check_labels(method, args, [String]{}, span, check.diagnostics)
         argument: sema_check_expression(args[0].expr, if method == "get" -> None else -> Val(Type.String), check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-        typed.push(argument.copy())
         result_ty = Type.Option{inner: sema_dyn_type()}
         if method == "get" {
             index_ty: sema_expr_expected_type(argument.ty, check.environment.*, check.program.*)
@@ -125,6 +124,7 @@ sema_dyn_try_member: fn(receiver: Expr, receiver_value: TExpr, method: String, a
             result_ty = Type.Bool
         }
         if method == "remove" -> operation = BodyHandleOp.DynRemove
+        typed.push(argument)
     }
     convention: if method == "remove" -> AccessConvention.Write else -> AccessConvention.Read
     if !sema_ownership_check_call_receiver(check, receiver, convention, span) {
@@ -160,11 +160,15 @@ sema_data_label: fn(argument: CallArg) -> String? {
     }
 }
 
+sema_data_check_label: fn(name: String, argument: CallArg, allowed: [String], span: Span, diagnostics: ^[Diagnostic]) {
+    label: sema_data_label(argument) ?? return
+    if sema_serde_has_name(allowed, label) -> return
+    diagnostics.push(sema_error("E0104", argument.span, "`{name}` does not accept the argument label `{label}`", "this builtin has a fixed argument-label contract", "remove the label or use one of the documented labels"))
+}
+
 sema_data_check_labels: fn(name: String, args: [CallArg], allowed: [String], span: Span, diagnostics: ^[Diagnostic]) {
     loop argument in args {
-        label: sema_data_label(argument) ?? next
-        if sema_serde_has_name(allowed, label) -> next
-        diagnostics.push(sema_error("E0104", argument.span, "`{name}` does not accept the argument label `{label}`", "this builtin has a fixed argument-label contract", "remove the label or use one of the documented labels"))
+        sema_data_check_label(name, argument, allowed, span, diagnostics)
     }
 }
 
@@ -260,7 +264,7 @@ sema_data_try_accessor: fn(receiver: Expr, receiver_value: TExpr, name: String, 
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     typed: loop (index, argument) in args -> {
-        sema_data_check_labels(method, [CallArg]{argument.copy()}, [String]{}, span, check.diagnostics)
+        sema_data_check_label(method, argument, [String]{}, span, check.diagnostics)
         value: sema_data_check_argument(method, index, argument, contract.argument_types[index], check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         value
     }

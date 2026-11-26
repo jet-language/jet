@@ -359,7 +359,7 @@ sema_comparability_generated_in: fn(blocks: [TraitImplBlock], trait_name: String
 // The shapes whose ordering is the language's own lexicographic order.
 // `aliases` holds the non-generic aliases being expanded on this path, so an
 // alias cycle answers false.
-sema_comparability_native_ordering: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_identity: ModuleID, ty: Type, aliases: [String], query: ^SemaComparabilityQuery) -> Bool Never! {
+sema_comparability_native_ordering: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_identity: ModuleID, ty: Type, aliases: ^[String], query: ^SemaComparabilityQuery) -> Bool Never! {
     if ty == {
         .Int | .Bool | .Float | .String | .Char | .IntN(_, _) | .Float32 -> true
         .List(inner) | .Option(inner) | .FixedList(inner, _) | .Tagged(_, inner) -> sema_comparability_native_ordering(environment, program, module_identity, inner, aliases, query)
@@ -382,10 +382,10 @@ sema_comparability_native_ordering: fn(environment: SemaScopeEnvironment, progra
             }
             if definition.kind == {
                 .Alias(target) -> {
-                    ^nested: [String]{}
-                    loop alias in aliases -> nested.push(alias.copy())
-                    nested.push(definition.key)
-                    sema_comparability_native_ordering(environment, program, definition.module_identity, target, nested, query)
+                    aliases.push(definition.key)
+                    ordered: sema_comparability_native_ordering(environment, program, definition.module_identity, target, aliases, query)
+                    ^_: aliases.pop()
+                    ordered
                 }
                 .Struct(_, _) | .Enum(_, _) | .Distinct(_, _) | .UnitFamily(_, _) -> false
             }
@@ -399,11 +399,18 @@ sema_comparability_structural: fn(environment: SemaScopeEnvironment, program: Se
     if sema_call_reflection_secret_bearing(ty) -> return false
     if ty == {
         .Int | .Bool | .Float | .String | .Char | .IntN(_, _) | .Float32 -> true
-        .Option(inner) | .List(inner) | .FixedList(inner, _) | .Tagged(_, inner) -> sema_comparability_native_ordering(environment, program, module_identity, inner, [String]{}, query)
-        .Result(ok, err) -> sema_comparability_native_ordering(environment, program, module_identity, ok, [String]{}, query) && sema_comparability_native_ordering(environment, program, module_identity, err, [String]{}, query)
+        .Option(inner) | .List(inner) | .FixedList(inner, _) | .Tagged(_, inner) -> {
+            ^aliases: [String]{}
+            sema_comparability_native_ordering(environment, program, module_identity, inner, aliases, query)
+        }
+        .Result(ok, err) -> {
+            ^aliases: [String]{}
+            sema_comparability_native_ordering(environment, program, module_identity, ok, aliases, query) && sema_comparability_native_ordering(environment, program, module_identity, err, aliases, query)
+        }
         .Tuple(fields) -> {
+            ^aliases: [String]{}
             loop field in fields {
-                if !sema_comparability_native_ordering(environment, program, module_identity, field.ty, [String]{}, query) {
+                if !sema_comparability_native_ordering(environment, program, module_identity, field.ty, aliases, query) {
                     return false
                 }
             }

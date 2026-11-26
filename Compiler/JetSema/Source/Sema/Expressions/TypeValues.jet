@@ -64,9 +64,10 @@ sema_type_value_of: fn(ty: Type, value_type: Type, span: Span, check: ^SemaBodyC
                 if field.name != "path" -> next
                 text: sema_type_value_path(sema_expr_expected_type(ty, check.environment.*, check.program.*), span, graph, check.environment.*, check.context)
                 fact: sema_expression_struct_field_fact(field, owner, [String]{}, [Type]{}, check.environment.*, check.program.*, check.context)
+                boxed: fact.boxed
                 ^reference: sema_expression_field_ref(fact.symbol, Val(owner.id), fact.field_ty)
-                reference.boxed = fact.boxed
-                return Val(sema_tree_node(value_type, TExprKind.StructLit{fields: [TStructFieldValue]{TStructFieldValue{field: reference.copy(), value: text, boxed: reference.boxed}}}, span))
+                reference.boxed = boxed
+                return Val(sema_tree_node(value_type, TExprKind.StructLit{fields: [TStructFieldValue]{TStructFieldValue{field: reference, value: text, boxed: boxed}}}, span))
             }
         }
     }

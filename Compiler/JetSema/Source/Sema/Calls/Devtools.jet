@@ -14,7 +14,6 @@ use jet_foundation.[
     MARKER_DEV_PANEL,
     Span,
     StrPart,
-    StructDef,
     Type,
     AST_EMPTY_CALL_ARG_FLAGS,
     type_name,
@@ -121,15 +120,15 @@ sema_call_devtools_marks_panel: fn(function: Func) -> Bool Never! {
 // declares `field`.
 sema_call_devtools_state_declares: fn(graph: SemaRegistrationGraph, package: String, function: Func, field: String) -> Bool Never! {
     if function.params.len() != 1 -> return false
-    ^state_name: ""
-    if function.params[0].ty == .Named(name) -> state_name = name.copy() else -> return false
-    loop module_index in 0..<graph.modules.len() {
-        if graph.modules[module_index].package_identity != package -> next
-        loop item_index in 0..<graph.modules[module_index].program.items.len() {
-            if graph.modules[module_index].program.items[item_index] == .Struct(definition) {
-                if definition.name != state_name -> next
-                loop declared in definition.fields {
-                    if declared.name == field -> return true
+    if function.params[0].ty == .Named(state_name) {
+        loop module_index in 0..<graph.modules.len() {
+            if graph.modules[module_index].package_identity != package -> next
+            loop item_index in 0..<graph.modules[module_index].program.items.len() {
+                if graph.modules[module_index].program.items[item_index] == .Struct(definition) {
+                    if definition.name != state_name -> next
+                    loop declared in definition.fields {
+                        if declared.name == field -> return true
+                    }
                 }
             }
         }
@@ -172,18 +171,18 @@ sema_check_devtools_panel: fn(func: Func, environment: SemaScopeEnvironment, pro
         diagnostics.push(sema_devtools_panel_error("E1411", func.name, "a devtools panel returns `{sema_type_show(return_type)}` instead of `UINode`", "return the portable `UINode` tree from the panel function", func.return_type_span ?? func.name_span))
         return
     }
-    ^state_name: ""
-    if func.params[0].ty == .Named(name) -> state_name = name.copy() else {
-        return
-    }
-    state: sema_devtools_package_struct(environment, program, state_name) ?? {
-        diagnostics.push(sema_devtools_panel_error("E1411", func.name, "panel state type `{state_name}` is not a declared struct", "declare `{state_name}: struct` in the same package", func.params[0].ty_span))
-        return
-    }
-    loop field in state.fields {
-        if field.default != None -> next
-        if field.ty == .Option(_) -> next
-        diagnostics.push(sema_devtools_panel_error("E1411", func.name, "state field `{field.name}` has neither an absence default nor an optional type", "give `{field.name}` a default value or declare it as `{type_name(field.ty)}?`", field.name_span))
+    if func.params[0].ty == .Named(state_name) {
+        found: sema_devtools_package_struct(environment, program, state_name) ?? {
+            diagnostics.push(sema_devtools_panel_error("E1411", func.name, "panel state type `{state_name}` is not a declared struct", "declare `{state_name}: struct` in the same package", func.params[0].ty_span))
+            return
+        }
+        if program.registration_graph.modules[found.module_index].program.items[found.item_index] == .Struct(state) {
+            loop field in state.fields {
+                if field.default != None -> next
+                if field.ty == .Option(_) -> next
+                diagnostics.push(sema_devtools_panel_error("E1411", func.name, "state field `{field.name}` has neither an absence default nor an optional type", "give `{field.name}` a default value or declare it as `{type_name(field.ty)}?`", field.name_span))
+            }
+        }
     }
 }
 
@@ -191,8 +190,8 @@ sema_devtools_panel_error: fn(code: String, panel: String, why: String, fix: Str
     sema_error(code, span, "devtools panel `{panel}` is invalid", why, fix)
 }
 
-// The struct `name` declared by a module of the caller's package.
-sema_devtools_package_struct: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, name: String) -> StructDef? {
+// Location of the struct `name` declared by a module of the caller's package.
+sema_devtools_package_struct: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, name: String) -> {module_index: Int, item_index: Int}? {
     graph: program.registration_graph
     caller: sema_scope_caller_index(environment, graph) ?? return None
     package: graph.modules[caller].package_identity
@@ -200,7 +199,7 @@ sema_devtools_package_struct: fn(environment: SemaScopeEnvironment, program: Sem
         if graph.modules[module_index].package_identity != package -> next
         loop item_index in 0..<graph.modules[module_index].program.items.len() {
             if graph.modules[module_index].program.items[item_index] == .Struct(definition) {
-                if definition.name == name -> return Val(definition.copy())
+                if definition.name == name -> return Val({module_index: module_index, item_index: item_index})
             }
         }
     }

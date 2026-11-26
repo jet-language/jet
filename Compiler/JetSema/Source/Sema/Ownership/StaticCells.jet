@@ -41,13 +41,13 @@ sema_ownership_place_refuses_write: fn(state: SemaOwnershipState, place: SemaOwn
     sema_ownership_place_is_static(place, scopes) && !state.persist_roots.contains(place.root_id)
 }
 
-sema_ownership_push_once: fn(diagnostic: Diagnostic, diagnostics: ^[Diagnostic]) {
+sema_ownership_push_once: fn(diagnostic: ^^Diagnostic, diagnostics: ^[Diagnostic]) {
     loop previous in diagnostics {
         if previous.code == diagnostic.code && previous.span == diagnostic.span && previous.what == diagnostic.what {
             return
         }
     }
-    diagnostics.push(diagnostic.copy())
+    diagnostics.push(diagnostic.move())
 }
 
 // A write to a static storage cell is refused as a mutable borrow; any other

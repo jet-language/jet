@@ -794,7 +794,7 @@ sema_finalize_program: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail
     // each module's masked branches and fixed tags mark its functions. The
     // Core usage walk ran beside the side checks.
     if trace_sink == .Val(sink) -> sink.begin("sema.walks", "", -1, -1)
-    loop found in walked.found -> sema_taint_join_reports(taint_reports, diagnostics, found)
+    loop found in walked.found.move() -> sema_taint_join_reports(taint_reports, diagnostics, found)
     loop module_index in 0..<walked.masked.len() {
         sema_mark_masked_branches(final_graph.interner, modules[module_index].functions, walked.masked[module_index], walked.fixed[module_index])
     }

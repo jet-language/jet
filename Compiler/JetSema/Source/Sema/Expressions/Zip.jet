@@ -95,7 +95,7 @@ sema_expression_zip_numeric_fill: fn(fill: Type, literal: Int?, element: Type, c
     }
 }
 
-sema_expression_zip_family: fn(method: String, inputs: [TExpr], fields: [String], common_fill: TExpr?, column_fills: TExpr?, fill_args: ^^[TExpr], span: Span, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
+sema_expression_zip_family: fn(method: String, inputs: [TExpr], fields: [String], common_fill_index: Int, column_fills_index: Int, fill_args: ^^[TExpr], span: Span, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
     ^elements: [Type]{}
     loop input in inputs {
         if sema_expression_zip_sequence_elem(input.ty) == {
@@ -140,16 +140,18 @@ sema_expression_zip_family: fn(method: String, inputs: [TExpr], fields: [String]
 
     ^output_elements: elements
     if method == "zip_pad" {
-        if common_fill != None && column_fills != None {
+        if common_fill_index >= 0 && column_fills_index >= 0 {
             sema_expression_zip_type_error("`zip_pad` accepts either `fill:` or `fills:`, not both", span, check.diagnostics)
         }
-        if common_fill == .Val(fill) {
+        if common_fill_index >= 0 {
+            fill: fill_args[common_fill_index]
             sema_expression_zip_cloneable(fill.ty, span, "zip fill type `{type_name(fill.ty)}` is not cloneable", check)
             loop element in elements {
                 sema_expression_zip_numeric_fill(fill.ty, sema_expr_integer_literal_value(fill), element, true, "", 0, span, check)
             }
         }
-        if column_fills == .Val(fills) {
+        if column_fills_index >= 0 {
+            fills: fill_args[column_fills_index]
             if fills.ty == {
                 .Tuple(fill_fields) -> {
                     loop (index, element) in elements {
@@ -184,7 +186,7 @@ sema_expression_zip_family: fn(method: String, inputs: [TExpr], fields: [String]
                 }
             }
         }
-        if common_fill == None && column_fills == None {
+        if common_fill_index < 0 && column_fills_index < 0 {
             output_elements = [Type]{}
             loop element in elements -> output_elements.push(Type.Option{inner: element})
         }
@@ -238,26 +240,8 @@ sema_expression_zip_free_call: fn(call: Call, expected: Type?, check: ^SemaBodyC
         inputs.push(checked)
     }
 
-    ^common_fill_arg: CallArg?{None}
-    ^column_fills_arg: CallArg?{None}
-    loop arg_index in 0..<call.args.len() {
-        ^label: if call.args[arg_index].label == {
-            .Val(value) -> Val(value.name)
-            .None -> None
-        }
-        if is_pad && label == (Val("fill")) -> common_fill_arg = Val(call.args[arg_index])
-        if is_pad && label == (Val("fills")) -> column_fills_arg = Val(call.args[arg_index])
-    }
-    ^common_fill: TExpr?{None}
-    ^column_fills: TExpr?{None}
-    if common_fill_arg == .Val(arg) {
-        checked: sema_expression_zip_infer_arg(arg, check) ?? return None
-        common_fill = Val(checked)
-    }
-    if column_fills_arg == .Val(arg) {
-        checked: sema_expression_zip_infer_arg(arg, check) ?? return None
-        column_fills = Val(checked)
-    }
+    ^common_fill_index: -1
+    ^column_fills_index: -1
     ^fill_args: [TExpr]{}
     loop arg_index in 0..<call.args.len() {
         ^label: if call.args[arg_index].label == {
@@ -266,14 +250,18 @@ sema_expression_zip_free_call: fn(call: Call, expected: Type?, check: ^SemaBodyC
         }
         if {
             is_pad && label == (Val("fill")) -> {
-                if common_fill == .Val(fill) -> fill_args.push(fill.copy())
+                checked: sema_expression_zip_infer_arg(call.args[arg_index], check) ?? return None
+                common_fill_index = fill_args.len()
+                fill_args.push(checked)
             }
             is_pad && label == (Val("fills")) -> {
-                if column_fills == .Val(fill) -> fill_args.push(fill.copy())
+                checked: sema_expression_zip_infer_arg(call.args[arg_index], check) ?? return None
+                column_fills_index = fill_args.len()
+                fill_args.push(checked)
             }
         }
     }
-    sema_expression_zip_family(method, inputs, fields, common_fill, column_fills, fill_args.move(), call.name_span, expected, check)
+    sema_expression_zip_family(method, inputs, fields, common_fill_index, column_fills_index, fill_args.move(), call.name_span, expected, check)
 }
 
 sema_expression_zip_consume_receiver: fn(receiver: Expr, receiver_type: Type, method: String, check: ^SemaBodyCheck) -> Bool {
@@ -302,8 +290,8 @@ sema_expression_zip_method: fn(receiver: Expr, receiver_value: TExpr, method: St
     ^is_pad: method == "zip_pad"
     ^inputs: [TExpr]{receiver_value}
     ^fields: [String]{sema_expression_zip_field_name(0, None)}
-    ^common_fill: TExpr?{None}
-    ^column_fills: TExpr?{None}
+    ^common_fill_index: -1
+    ^column_fills_index: -1
     ^fill_args: [TExpr]{}
     loop arg in args {
         ^label: if arg.label == {
@@ -313,12 +301,12 @@ sema_expression_zip_method: fn(receiver: Expr, receiver_value: TExpr, method: St
         if {
             is_pad && label == (Val("fill")) -> {
                 checked: sema_expression_zip_infer_arg(arg, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-                common_fill = Val(checked)
+                common_fill_index = fill_args.len()
                 fill_args.push(checked)
             }
             is_pad && label == (Val("fills")) -> {
                 checked: sema_expression_zip_infer_arg(arg, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-                column_fills = Val(checked)
+                column_fills_index = fill_args.len()
                 fill_args.push(checked)
             }
             else -> {
@@ -333,7 +321,7 @@ sema_expression_zip_method: fn(receiver: Expr, receiver_value: TExpr, method: St
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
     }
-    value: sema_expression_zip_family(method, inputs, fields, common_fill, column_fills, fill_args.move(), span, expected, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    value: sema_expression_zip_family(method, inputs, fields, common_fill_index, column_fills_index, fill_args.move(), span, expected, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     SemaMethodSpecialCheck{handled: true, value: Val(value)}
 }
 

@@ -314,29 +314,21 @@ sema_name_reference_seen: fn(keys: ^SemaNameReferenceKeys, path: Int, kind: Int,
 // definition span and semantic identity (present or not): the strings are
 // interned in one table, so two rows have the same key exactly when their
 // ids, span bounds and identity ids agree.
-sema_name_first_references: fn(rows: [NameReference]) -> [NameReference] Never! {
+sema_name_first_references: fn(rows: ^^[NameReference]) -> [NameReference] Never! {
     ^parts: name_table()
     ^seen: sema_name_reference_keys()
     ^kept: [NameReference]{}
-    // A module's rows are contiguous, so the current path keeps its part id;
-    // kinds and identities are interned row by row.
-    ^path_text: ""
-    ^path: -1
-    loop row in rows {
+    loop row in rows.move() {
         identity: if row.semantic_identity == {
             .Val(value) -> name_index(name_intern(parts, value)) + 1
             .None -> 0
         }
-        if path < 0 || row.module_path != path_text {
-            path = name_index(name_intern(parts, row.module_path))
-            // copy: the row stays in `rows`; the current path outlives it.
-            path_text = row.module_path.copy()
-        }
+        path: name_index(name_intern(parts, row.module_path))
         kind: name_index(name_intern(parts, row.kind))
         if sema_name_reference_seen(seen, path, kind, row.def_span.start, row.def_span.end, identity, 0) {
             next
         }
-        kept.push(row.copy())
+        kept.push(row)
     }
     kept
 }
@@ -625,7 +617,7 @@ sema_name_join_facts: fn(graph: SemaRegistrationGraph, owner_names: [Int:String]
         modules: facts.modules,
         declarations: sema_name_first_declarations(facts.declarations.move()),
         aliases: sema_name_first_aliases(facts.aliases.move()),
-        references: sema_name_first_references(facts.references),
+        references: sema_name_first_references(facts.references.move()),
         structure_facts: structure_facts,
         display_paths: facts.display_paths,
     }

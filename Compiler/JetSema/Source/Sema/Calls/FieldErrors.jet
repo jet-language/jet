@@ -41,10 +41,10 @@ SemaFieldErrorPath: struct {
 sema_app_field_error_refused: fn(module_name: String, member: String, args: [CallArg], check: ^SemaBodyCheck) -> Bool {
     if module_name != SEMA_APP_MARKER_MODULE || member != SEMA_FIELD_ERROR_MEMBER -> return false
     graph: check.program.registration_graph
-    at: sema_field_error_at(args) ?? return false
-    at_span: expr_span(at.expr)
+    at_index: sema_field_error_at(args) ?? return false
+    at_span: expr_span(args[at_index].expr)
     roots: sema_field_error_roots(graph, check)
-    path: sema_field_error_path(at.expr) ?? {
+    path: sema_field_error_path(args[at_index].expr) ?? {
         check.diagnostics.push(sema_field_error_computed(graph, roots, at_span))
         return true
     }
@@ -52,7 +52,7 @@ sema_app_field_error_refused: fn(module_name: String, member: String, args: [Cal
         check.diagnostics.push(sema_field_error_unknown(graph, path.shown, roots, at_span))
         return true
     }
-    ^holders: roots.copy()  // copy: `roots` names the fields the report lists
+    ^holders: roots
     loop (position, step) in steps {
         ^found: Type?{None}
         ^owner: -1
@@ -77,7 +77,7 @@ sema_app_field_error_refused: fn(module_name: String, member: String, args: [Cal
             indexes -= 1
         }
         if position + 1 == steps.len() -> return false
-        inner: sema_field_error_struct_row(graph, sema_field_error_unwrap(ty), owner) ?? {
+        inner: sema_field_error_struct_row(graph, ty, owner) ?? {
             check.diagnostics.push(sema_field_error_unknown(graph, path.shown, holders, at_span))
             return true
         }
@@ -86,14 +86,14 @@ sema_app_field_error_refused: fn(module_name: String, member: String, args: [Cal
     false
 }
 
-// The `at:` argument: labeled `at:`, or the first positional one.
-sema_field_error_at: fn(args: [CallArg]) -> CallArg? {
-    loop argument in args {
+// The index of the `at:` argument: labeled `at:`, or the first positional one.
+sema_field_error_at: fn(args: [CallArg]) -> Int? {
+    loop (index, argument) in args {
         if argument.label == .Val(label) {
-            if label.name == "at" -> return Val(argument.copy())  // copy: the call keeps its arguments
+            if label.name == "at" -> return Val(index)
         }
     }
-    if args.len() > 0 && args[0].label == None -> return Val(args[0].copy())  // copy: the call keeps its arguments
+    if args.len() > 0 && args[0].label == None -> return Val(0)
     None
 }
 
@@ -161,7 +161,7 @@ sema_field_error_roots: fn(graph: SemaRegistrationGraph, check: SemaBodyCheck) -
                 next
             }
             ty: binding.symbol.ty ?? next
-            row: sema_field_error_struct_row(graph, sema_field_error_unwrap(ty), caller) ?? next
+            row: sema_field_error_struct_row(graph, ty, caller) ?? next
             known: loop root in roots {
                 if root.module_index == row.module_index && root.row == row.row {
                     break true
@@ -174,9 +174,10 @@ sema_field_error_roots: fn(graph: SemaRegistrationGraph, check: SemaBodyCheck) -
     roots
 }
 
-// The struct row `ty` names from the module row `caller`, or None when it
-// names no struct.
+// The struct row `ty` names (through optionals) from the module row `caller`,
+// or None when it names no struct.
 sema_field_error_struct_row: fn(graph: SemaRegistrationGraph, ty: Type, caller: Int) -> SemaRegistrationRowRef? {
+    if ty == .Option(inner) -> return sema_field_error_struct_row(graph, inner, caller)
     row: sema_type_resolve_nominal_row_at(graph, ty, caller) ?? return None
     if graph.modules[row.module_index].nominals[row.row].source == .SourceAST(item) {
         if item == .Struct(_) -> return Val(row)
@@ -213,16 +214,13 @@ sema_field_error_field_names: fn(graph: SemaRegistrationGraph, rows: [SemaRegist
     names
 }
 
-// `ty` without the optional around it: a path reads through an absent value.
-sema_field_error_unwrap: fn(ty: Type) -> Type {
-    if ty == .Option(inner) -> return sema_field_error_unwrap(inner)
-    ty.copy()  // copy: the caller keeps the type it walks
-}
-
 // The element type of the list `ty` names, through an optional.
 sema_field_error_element: fn(ty: Type) -> Type? {
-    if sema_field_error_unwrap(ty) == .List(element) -> return Val(element.copy())  // copy: the caller walks on from it
-    None
+    if ty == {
+        .Option(inner) -> sema_field_error_element(inner)
+        .List(element) -> Val(element.copy())  // copy: the caller walks on from it
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
+    }
 }
 
 // The fields a path can start with here, as the fix lists them.

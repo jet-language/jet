@@ -1307,15 +1307,15 @@ sema_http_mount_prefix: fn(text: String) -> String Never! {
     text.slice(0, end)
 }
 
-sema_http_collect_mounted: fn(tree: BodyTree, expression: Int, graph: SemaRegistrationGraph, module_identity: ModuleID, mounted: ^[SymbolID]) Never! {
+sema_http_collect_mounted: fn(tree: BodyTree, expression: Int, graph: SemaRegistrationGraph, module_identity: ModuleID, mounted: ^[U32]) Never! {
     node: body_node(tree, expression)
     if node.kind == .InlineBlock(body) {
         loop statement in body {
             if tree.stmts[statement] == .Let(local, _, init, _, _, _) {
                 if !local.name.starts_with("__jet_http_mount_value_") -> next
                 row: sema_type_resolve_nominal_row(graph, body_type(graph.interner, tree, init), module_identity) ?? next
-                id: graph.modules[row.module_index].nominals[row.row].symbol.id
-                if !mounted.contains(id) -> mounted.push(id.copy())
+                id: graph.modules[row.module_index].nominals[row.row].symbol.id.id
+                if !mounted.contains(id) -> mounted.push(id)
             }
         }
     }
@@ -1325,7 +1325,7 @@ sema_http_collect_mounted: fn(tree: BodyTree, expression: Int, graph: SemaRegist
 // One function body's mounts. Its own function so the visitor closure lends
 // the `mounted` write parameter and `graph` is lent to the closure instead of
 // copying the whole registration graph per function.
-sema_http_collect_mounted_body: fn(function: FnBody, graph: SemaRegistrationGraph, identity: ModuleID, mounted: ^[SymbolID]) Never! {
+sema_http_collect_mounted_body: fn(function: FnBody, graph: SemaRegistrationGraph, identity: ModuleID, mounted: ^[U32]) Never! {
     loop statement in function.body {
         body_each_stmt_child(function.tree, function.tree.stmts[statement], fn(expression: Int) { sema_http_collect_mounted(function.tree, expression, graph, identity, mounted) })
     }
@@ -1351,7 +1351,7 @@ sema_http_unmounted_warnings: fn(graph: SemaRegistrationGraph, modules: [SemaGra
     // Only a route method can be unmounted: a program without one skips the
     // walk of every checked function body for mounts.
     if !sema_http_has_route_method(graph) -> return [Diagnostic]{}
-    ^mounted: [SymbolID]{}
+    ^mounted: [U32]{}
     loop module_row in modules {
         identity: module_row.module_identity
         loop function in module_row.functions {
@@ -1362,7 +1362,7 @@ sema_http_unmounted_warnings: fn(graph: SemaRegistrationGraph, modules: [SemaGra
     loop module_row_index in 0..<graph.modules.len() {
         diagnostic_start: diagnostics.len()
         loop nominal_index in 0..<graph.modules[module_row_index].nominals.len() {
-            if mounted.contains(graph.modules[module_row_index].nominals[nominal_index].symbol.id) {
+            if mounted.contains(graph.modules[module_row_index].nominals[nominal_index].symbol.id.id) {
                 next
             }
             loop method_index in 0..<graph.modules[module_row_index].nominals[nominal_index].methods.len() {

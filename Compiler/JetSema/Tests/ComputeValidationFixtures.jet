@@ -101,7 +101,7 @@ compute_fixture_fact: fn(modules: ^[SemaGraphModuleResult], name: String, safe_p
     ^context: sema_check_context_init()
     if safe_panic -> sema_compute_note_panic(context, true)
     if unsafe_panic -> sema_compute_note_panic(context, false)
-    fact: sema_function_compute_facts(key, context)
+    fact: sema_function_compute_facts(key, context.move())
     loop row in 0..<modules[0].compute_facts.len() {
         if modules[0].compute_facts[row].function_key == key {
             modules[0].compute_facts[row] = fact
@@ -114,7 +114,7 @@ compute_fixture_fact: fn(modules: ^[SemaGraphModuleResult], name: String, safe_p
 compute_fixture_obligation: fn(modules: ^[SemaGraphModuleResult], target: String) {
     ^context: sema_check_context_init()
     sema_compute_record_autodiff_obligation("grad", target, Span{start: 17, end: 23}, context)
-    modules[0].compute_facts.push(sema_function_compute_facts("compute-fixture.proof", context))
+    modules[0].compute_facts.push(sema_function_compute_facts("compute-fixture.proof", context.move()))
 }
 
 // The diagnostic names the target by its effect-graph display spelling
@@ -189,7 +189,7 @@ compute_fixture_cases: fn(failures: ^[String]) {
     ^trace: original.copy()
     ^context: sema_check_context_init()
     context.compute_calls.push(SemaComputeCallFact{method: "det", span: Span{start: 31, end: 34}})
-    fact: sema_function_compute_facts(compute_fixture_key("pure"), context)
+    fact: sema_function_compute_facts(compute_fixture_key("pure"), context.move())
     trace[0].compute_facts[0] = fact
     trace[0].compute_facts.push(sema_function_compute_facts(compute_fixture_key("pure"), sema_check_context_init()))
     compute_fixture_compare("compute calls without obligations still skip indexing", trace, [Diagnostic]{}, false, failures)
