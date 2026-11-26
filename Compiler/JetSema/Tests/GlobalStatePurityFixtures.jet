@@ -1,0 +1,70 @@
+// Regression tests for #7032 (c3 and c6): pure (`-[]>`) and `#Memo`
+// functions cannot read changeable module state (`^name: ...`, `#Persist`, or
+// module-level `Shared`/`Cell` holders), directly or transitively, while
+// immutable module constants, parameter holders, and local cells stay allowed.
+use {
+    jet_driver.[JetDriverCompileMode, jet_driver_present_diagnostics]
+    jet_cli.[jet_cli_compile_file]
+    jet_foundation.[DIAGNOSTIC_ERROR, Diagnostic]
+}
+
+global_state_purity_compile: fn(file: String) -> [Diagnostic] {
+    checked: jet_cli_compile_file(file, false, None, JetDriverCompileMode.Program)
+    if checked == {
+        .Refused(refusal) -> panic("{file}: {refusal.stderr}")
+        .Compiled(result, snapshot) -> {
+            if result.internal_problem != None -> panic("{file}: internal compiler failure")
+            ^errors: [Diagnostic]{}
+            loop diagnostic in jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files) {
+                if diagnostic.severity == DIAGNOSTIC_ERROR -> errors.push(diagnostic)
+            }
+            return errors
+        }
+    }
+}
+
+global_state_purity_show: fn(diagnostics: [Diagnostic]) -> String {
+    rows: loop item in diagnostics -> "{item.code}: {item.what} ({item.why})"
+    rows.join(" | ")
+}
+
+#Test("global_state_purity_pure_reads_mutable_global_is_e3401") {
+    diagnostics: global_state_purity_compile("Compiler/JetSema/Tests/Fixtures/GlobalStatePureReads.fixture/PureReads.jet")
+    if diagnostics.len() != 5 {
+        panic("expected 5 E3401 errors, got {diagnostics.len()}: {global_state_purity_show(diagnostics)}")
+    }
+    loop item in diagnostics -> assert_eq(item.code, "E3401")
+    assert(diagnostics[0].what.contains("reads module state `level`"))
+    assert(diagnostics[1].what.contains("reads module state `pinned`"))
+    assert(diagnostics[2].what.contains("reads module state `HITS`"))
+    assert(diagnostics[3].what.contains("reaches a read of module state `level`"))
+    assert(diagnostics[4].what.contains("reads module state `level`"))
+}
+
+#Test("global_state_purity_memo_reads_mutable_global_is_e0938") {
+    diagnostics: global_state_purity_compile("Compiler/JetSema/Tests/Fixtures/GlobalStateMemoReads.fixture/MemoReads.jet")
+    if diagnostics.len() != 4 {
+        panic("expected 4 E0938 errors, got {diagnostics.len()}: {global_state_purity_show(diagnostics)}")
+    }
+    loop item in diagnostics -> assert_eq(item.code, "E0938")
+    assert(diagnostics[0].why.contains("reads module state `level`"))
+    assert(diagnostics[1].why.contains("reads module state `HITS`"))
+    assert(diagnostics[2].why.contains("reads module state `level`"))
+    assert(diagnostics[3].why.contains("writes module state `pinned`"))
+}
+
+#Test("global_state_purity_immutable_const_and_param_holder_stay_allowed") {
+    diagnostics: global_state_purity_compile("Compiler/JetSema/Tests/Fixtures/GlobalStateAllowed.fixture/Allowed.jet")
+    if diagnostics.len() != 0 {
+        panic("expected 0 errors, got {diagnostics.len()}: {global_state_purity_show(diagnostics)}")
+    }
+}
+
+#Test("global_state_purity_pure_write_keeps_write_e3401") {
+    diagnostics: global_state_purity_compile("Compiler/JetSema/Tests/Fixtures/GlobalStateWritePrecedence.fixture/WritePrecedence.jet")
+    if diagnostics.len() != 1 {
+        panic("expected 1 E3401 error, got {diagnostics.len()}: {global_state_purity_show(diagnostics)}")
+    }
+    assert_eq(diagnostics[0].code, "E3401")
+    assert(diagnostics[0].what.contains("writes module state `pinned`"))
+}

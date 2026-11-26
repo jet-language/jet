@@ -38,6 +38,11 @@ TEffectFacts: struct {
     // parameter or local (`held`). It is no effect, but a pure function may
     // not reach one.
     module_writes: [TEffectSpan]{[TEffectSpan]{}},
+    // The changeable module state this body reads (`name` and the read's span):
+    // a module `^name: ...` binding (including `#Persist`) or a module-level
+    // `Shared`/`Cell` holder. It is no effect, so `solved` never shows it, but
+    // a pure (`-[]>`) or `#Memo` function may not reach one.
+    module_reads: [TEffectSpan]{[TEffectSpan]{}},
     // For a `#Memo` function, the task context fields it can read
     // (`context.<field>`) and the context keys (`context.get(key)`),
     // JetSema sema_effect_context_reach, in key order: its memo key holds

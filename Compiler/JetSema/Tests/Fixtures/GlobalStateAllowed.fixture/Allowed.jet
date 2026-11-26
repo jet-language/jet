@@ -1,0 +1,22 @@
+Count: struct {
+    value: Int,
+}
+
+LIMIT: 10
+
+scale: fn(x: Int) -[]> Int { x * LIMIT }
+#Memo cached: fn(x: Int) -> Int { x + LIMIT }
+peek: fn(c: Shared<Count>) -[]> Int { c.value }
+
+fresh: fn(n: Int) -[]> Int {
+    cell: Shared{Count{value: n}}
+    cell.value
+}
+
+run: fn() {
+    held: Shared{Count{value: 4}}
+    print(scale(2))
+    print(cached(3))
+    print(peek(held))
+    print(fresh(5))
+}

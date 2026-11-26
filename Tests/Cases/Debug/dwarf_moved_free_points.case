@@ -1,0 +1,78 @@
+# DWARF debug info records each moved value's free point across O0, O1 and O2,
+# and all three tiers agree on program output (I9).
+# The fixture must stay in jet fmt form:
+#   line 19: last use of `first` (`borrow_len(first)`), where `first` is freed
+#   line 20: `first` is already freed; `seed` is read for the last time and freed
+#   line 21: `second` is moved into `wrap_text(second.move())`
+#   line 22: `first`, `seed`, and `second` are all past their free/move points
+fixture: DwarfMovedFreePoints.fixture
+env: NO_COLOR=1
+env: SEED=7
+step: jet run -O0 main.jet
+exit: 0
+stdout: = dwarf_moved_free_points.out
+step: jet run -O1 main.jet
+exit: 0
+stdout: = dwarf_moved_free_points.out
+step: jet run -O2 main.jet
+exit: 0
+stdout: = dwarf_moved_free_points.out
+step: jet build --profile=debug main.jet
+unset: JET_OPT_VERIFY
+exit: 0
+step: jet debug {work}/.jet/build/main --break main.jet:19
+stdin: dwarf_moved_free_points.stdin
+exit: 0
+stdout: ~ "first: String = \"alpha-7\"\n" # `first` is live before its last use
+stdout: ~ "seed: String = \"7\"\n" # `seed` is live before its last use
+stdout: !~ "second: String" # `second` is not bound yet
+stdout: ~ "Program finished\n" # debugger runs to completion
+step: jet debug {work}/.jet/build/main --break main.jet:20
+stdin: dwarf_moved_free_points.stdin
+exit: 0
+stdout: ~ "n1: Int = 7\n" # `n1` is bound after line 19
+stdout: ~ "seed: String = \"7\"\n" # `seed` is still live for line 20
+stdout: !~ "first: String" # `first` was freed at line 19
+stdout: ~ "Program finished\n" # debugger runs to completion
+step: jet debug {work}/.jet/build/main --break main.jet:22
+stdin: dwarf_moved_free_points.stdin
+exit: 0
+stdout: ~ "n1: Int = 7\n" # `n1` remains live at line 22
+stdout: !~ "first: String" # `first` was freed at line 19; must not read reused memory
+stdout: !~ "seed: String" # `seed` was freed at line 20
+stdout: !~ "second: String" # `second` was moved at line 21
+stdout: ~ "Program finished\n" # debugger runs to completion
+step: jet build -O1 --debug-info=true main.jet
+exit: 0
+step: jet debug {work}/.jet/build/main --break main.jet:20
+stdin: dwarf_moved_free_points.stdin
+exit: 0
+stdout: ~ "n1: Int = 7\n" # `n1` is live at line 20 under -O1
+stdout: ~ "seed: String = \"7\"\n" # `seed` is live at line 20 under -O1
+stdout: !~ "first: String" # `first` was freed at line 19 under -O1
+stdout: ~ "Program finished\n" # debugger runs to completion
+step: jet debug {work}/.jet/build/main --break main.jet:22
+stdin: dwarf_moved_free_points.stdin
+exit: 0
+stdout: ~ "n1: Int = 7\n" # `n1` is live at line 22 under -O1
+stdout: !~ "first: String" # `first` was freed at line 19 under -O1
+stdout: !~ "seed: String" # `seed` was freed at line 20 under -O1
+stdout: !~ "second: String" # `second` was moved at line 21 under -O1
+stdout: ~ "Program finished\n" # debugger runs to completion
+step: jet build -O2 --debug-info=true main.jet
+exit: 0
+step: jet debug {work}/.jet/build/main --break main.jet:20
+stdin: dwarf_moved_free_points.stdin
+exit: 0
+stdout: ~ "n1: Int = 7\n" # `n1` is live at line 20 under -O2
+stdout: ~ "seed: String = \"7\"\n" # `seed` is live at line 20 under -O2
+stdout: !~ "first: String" # `first` was freed at line 19 under -O2
+stdout: ~ "Program finished\n" # debugger runs to completion
+step: jet debug {work}/.jet/build/main --break main.jet:22
+stdin: dwarf_moved_free_points.stdin
+exit: 0
+stdout: ~ "n1: Int = 7\n" # `n1` is live at line 22 under -O2
+stdout: !~ "first: String" # `first` was freed at line 19 under -O2
+stdout: !~ "seed: String" # `seed` was freed at line 20 under -O2
+stdout: !~ "second: String" # `second` was moved at line 21 under -O2
+stdout: ~ "Program finished\n" # debugger runs to completion

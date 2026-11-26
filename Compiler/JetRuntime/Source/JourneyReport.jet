@@ -23,13 +23,39 @@ journey_fixed_columns: fn(hop: I64, index: I64, note: Bool) -> I64 {
     cols
 }
 
-journey_label: fn(out: I64, index: I64) {
+journey_label: fn(out: I64, index: I64, compact: Bool) {
     if (index == I64{0}) {
-        rt_text_push_word(out, I64{7503107365972566374}, I64{8})
-        rt_text_push_word(out, I64{979726949}, I64{4})
+        if compact -> jet_rt_string_builder_push(out, rt_static_text("failed:")) else {
+            rt_text_push_word(out, I64{7503107365972566374}, I64{8})
+            rt_text_push_word(out, I64{979726949}, I64{4})
+        }
     } else {
         rt_text_push_number(out, index)
         rt_text_push_scalar(out, I64{46})
+    }
+}
+
+// Truncate the current line appended to `out` starting at byte offset `line_start`
+// to at most `width` Unicode scalars (ending with `…` when cut).
+journey_fit_line: fn(out: I64, line_start: I64, width: I64) {
+    if (width <= I64{0}) {
+        return
+    }
+    length: rt_text_len(out)
+    data: rt_text_data(out)
+    ^at: line_start
+    ^chars: I64{0}
+    ^cut_at: line_start
+    limit: width - I64{1}
+    loop at < length {
+        if chars == limit -> cut_at = at
+        at += rt_text_width(wrapping(data + at))
+        chars += I64{1}
+        if chars > width {
+            rt_text_store(wrapping(out + I64{8}), cut_at)
+            rt_text_push_scalar(out, I64{8230})
+            return
+        }
     }
 }
 
@@ -77,8 +103,13 @@ journey_hop_line: fn(out: I64, hop: I64, index: I64, width: I64, budget: I64, co
     }
     note: rt_text_word(wrapping(hop + HOP_NOTE))
     note_columns: jet_char_len(note)
-    identity: journey_fixed_columns(hop, index, false) + path_columns
-    full: journey_fixed_columns(hop, index, true) + path_columns
+    ^identity: journey_fixed_columns(hop, index, false) + path_columns
+    ^full: journey_fixed_columns(hop, index, true) + path_columns
+    compact: index == I64{0} && width != I64{0} && identity > width
+    if compact {
+        identity -= I64{5}
+        full -= I64{5}
+    }
     ^shown: note_columns
     ^truncated: false
     if (width != I64{0} && full > width) {
@@ -86,8 +117,9 @@ journey_hop_line: fn(out: I64, hop: I64, index: I64, width: I64, budget: I64, co
         truncated = shown != I64{0}
     }
     journey_color_start(out, color)
+    line_start: rt_text_len(out)
     rt_text_push_word(out, I64{8224}, I64{2})
-    journey_label(out, index)
+    journey_label(out, index, compact)
     rt_text_push_scalar(out, I64{32})
     err_append(out, rt_text_word(wrapping(hop + HOP_FUNCTION)))
     rt_text_push_word(out, I64{10272}, I64{2})  // space + (
@@ -119,6 +151,7 @@ journey_hop_line: fn(out: I64, hop: I64, index: I64, width: I64, budget: I64, co
         rt_text_append(out, note_data, note_at)
         if truncated -> rt_text_push_scalar(out, I64{8230})
     }
+    journey_fit_line(out, line_start, width)
     journey_color_end(out, color)
     journey_source_line(out, hop, width, color)
 }

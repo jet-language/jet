@@ -1255,6 +1255,7 @@ body_codec_put_teffectfacts: fn(out: ^BodyCodecOut, value: TEffectFacts) Never! 
     body_codec_put_opt_span(out, value.maximal_span)
     body_codec_put_list_string(out, value.value_edges)
     body_codec_put_list_teffectspan(out, value.module_writes)
+    body_codec_put_list_teffectspan(out, value.module_reads)
     body_codec_put_list_string(out, value.context)
     body_codec_put_list_teffectcontextkey(out, value.context_keys)
 }
@@ -1268,9 +1269,10 @@ body_codec_get_teffectfacts: fn(bytes: [U8], input: ^BodyCodecIn) -> TEffectFact
     f5: body_codec_get_opt_span(bytes, input)
     f6: body_codec_get_list_string(bytes, input)
     f7: body_codec_get_list_teffectspan(bytes, input)
-    f8: body_codec_get_list_string(bytes, input)
-    f9: body_codec_get_list_teffectcontextkey(bytes, input)
-    TEffectFacts{direct: f0, solved: f1, call_edges: f2, maximal: f3, direct_spans: f4, maximal_span: f5, value_edges: f6, module_writes: f7, context: f8, context_keys: f9}
+    f8: body_codec_get_list_teffectspan(bytes, input)
+    f9: body_codec_get_list_string(bytes, input)
+    f10: body_codec_get_list_teffectcontextkey(bytes, input)
+    TEffectFacts{direct: f0, solved: f1, call_edges: f2, maximal: f3, direct_spans: f4, maximal_span: f5, value_edges: f6, module_writes: f7, module_reads: f8, context: f9, context_keys: f10}
 }
 
 body_codec_put_teffectspan: fn(out: ^BodyCodecOut, value: TEffectSpan) Never! {

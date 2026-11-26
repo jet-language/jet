@@ -1274,6 +1274,7 @@ sema_expression_module_constant_read: fn(graph: SemaRegistrationGraph, resolved:
         sema_check_unsupported(check.context, "constant `{label}` (read at offset {span.start}) has no staged compile-time value")
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
+    sema_scope_record_module_constant_read(check.environment.*, check.program.*, check.context, symbol, label, ty, span)
     value: sema_node(check.context, ty, NodeKind.ConstRef{symbol: symbol.id}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, check.environment.*, check.program.*, check.diagnostics)}
 }

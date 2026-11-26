@@ -140,6 +140,13 @@ IRPatchEmitter: struct {
     int_static_vals: [Int],
     // Reusable per-worker frame & per-block constant state:
     homes: [Int],
+    slot_start: [Int],
+    slot_start_depth: [Int],
+    slot_end: [Int],
+    slot_end_depth: [Int],
+    slot_last: [Int],
+    slot_last_depth: [Int],
+    slot_dropped: [Bool],
     const_epoch: [Int],
     const_val: [Int],
     block_epoch: Int,
@@ -225,6 +232,13 @@ ir_patch_emitter_new: fn() -> IRPatchEmitter Never! {
         int_text_vals: [Int]{},
         int_static_vals: [Int]{},
         homes: [Int]{},
+        slot_start: [Int]{},
+        slot_start_depth: [Int]{},
+        slot_end: [Int]{},
+        slot_end_depth: [Int]{},
+        slot_last: [Int]{},
+        slot_last_depth: [Int]{},
+        slot_dropped: [Bool]{},
         const_epoch: [Int]{},
         const_val: [Int]{},
         block_epoch: 1,
@@ -305,11 +319,25 @@ patch_emitter_reset: fn(p: ^IRPatchEmitter, op_count: Int, slot_count: Int) Neve
     if p.int_static_vals.len() > 0 -> p.int_static_vals.clear()
     if p.homes.len() < slot_count {
         p.homes.try_reserve(slot_count) ?? ()
+        p.slot_start.try_reserve(slot_count) ?? ()
+        p.slot_start_depth.try_reserve(slot_count) ?? ()
+        p.slot_end.try_reserve(slot_count) ?? ()
+        p.slot_end_depth.try_reserve(slot_count) ?? ()
+        p.slot_last.try_reserve(slot_count) ?? ()
+        p.slot_last_depth.try_reserve(slot_count) ?? ()
+        p.slot_dropped.try_reserve(slot_count) ?? ()
         p.const_epoch.try_reserve(slot_count) ?? ()
         p.const_val.try_reserve(slot_count) ?? ()
         p.edge_def_epoch.try_reserve(slot_count) ?? ()
         loop p.homes.len() < slot_count {
             p.homes.push(0)
+            p.slot_start.push(-1)
+            p.slot_start_depth.push(0)
+            p.slot_end.push(-1)
+            p.slot_end_depth.push(0)
+            p.slot_last.push(-1)
+            p.slot_last_depth.push(0)
+            p.slot_dropped.push(false)
             p.const_epoch.push(0)
             p.const_val.push(0)
             p.edge_def_epoch.push(0)
@@ -2072,10 +2100,10 @@ patch_drop: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f: IRFunc
         patch_call_out(p, f, patch_make_rt_name(fast, m, 0, f.b[at]), false, -1)
         return
     }
-    patch_drop_slot(p, fast, m, f, slot, at)
+    patch_drop_slot(p, fast, m, f, slot, at, ir_code_line_source(f.code_line[at]))
 }
 
-patch_drop_slot: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f: IRFunction, slot: Int, at: Int) Never! {
+patch_drop_slot: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f: IRFunction, slot: Int, at: Int, line: Int) Never! {
     trow: f.slot_type[slot]
     if !fast.type_has_drop[trow] {
         return
@@ -2123,6 +2151,7 @@ patch_drop_slot: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f: I
         cold.sym_id = O0_RT_STRING_DROP
         cold.left = slot
         cold.at = at
+        cold.line = line
         p.colds.push(cold)
         return
     }
@@ -3430,6 +3459,8 @@ patch_emit_colds: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f: 
         patch_cf_barrier(p)
         p.at = if cold.kind == .Poll || cold.kind == .Release -> -1 else -> cold.at
         here: p.pos
+        cold_line: if cold.line > 0 -> cold.line else if cold.at >= 0 && cold.at < f.code_line.len() -> ir_code_line_source(f.code_line[cold.at]) else -> 0
+        if cold_line > 0 -> ir_x64_debug_line(p.lines, here, cold_line)
         loop k in cold.site_start..<(cold.site_start + cold.site_len) {
             patch_rel32(p.code, p.cold_sites[k], here)
         }
@@ -3632,6 +3663,73 @@ patch_stack_grow: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, row: Int, entere
     IRX64Grow{start: start, pushed: pushed, based: based, returned: returned, resumed: resumed, left: left}
 }
 
+patch_note_read: fn(p: ^IRPatchEmitter, f: IRFunction, slot: Int, slot_count: Int, pos: Int, depth: Int) Never! {
+    if slot < 0 || slot >= slot_count || f.slot_name[slot] < 0 {
+        return
+    }
+    p.slot_end[slot] = -1
+    p.slot_last[slot] = pos
+    p.slot_last_depth[slot] = depth
+}
+
+patch_note_op: fn(p: ^IRPatchEmitter, f: IRFunction, at: Int, slot_count: Int, depth: Int) Never! {
+    op: f.op[at]
+    pos: p.pos
+    if op == .Drop {
+        slot: f.a[at]
+        if slot >= 0 && slot < slot_count && f.slot_name[slot] >= 0 {
+            p.slot_end[slot] = pos
+            p.slot_end_depth[slot] = depth
+            p.slot_dropped[slot] = true
+        }
+        return
+    }
+    if op == .Move {
+        src: f.a[at]
+        dst: f.dst[at]
+        if src >= 0 && src < slot_count && f.slot_name[src] >= 0 && src != dst {
+            p.slot_end[src] = pos
+            p.slot_end_depth[src] = depth
+            p.slot_dropped[src] = true
+        }
+        if dst >= 0 && dst < slot_count && f.slot_name[dst] >= 0 {
+            if p.slot_start[dst] < 0 {
+                p.slot_start[dst] = pos
+                p.slot_start_depth[dst] = depth
+            }
+            p.slot_end[dst] = -1
+            p.slot_last[dst] = pos
+            p.slot_last_depth[dst] = depth
+        }
+        return
+    }
+    form: ir_x64_read_form(op)
+    if form != IR_X64_READS_NONE {
+        a: f.a[at]
+        if form != IR_X64_READS_ARGS && (form != IR_X64_READS_RESULT || a >= 0) {
+            patch_note_read(p, f, a, slot_count, pos, depth)
+        }
+        if form == IR_X64_READS_AB -> patch_note_read(p, f, f.b[at], slot_count, pos, depth)
+        if form == IR_X64_READS_AC -> patch_note_read(p, f, f.c[at], slot_count, pos, depth)
+        if form == IR_X64_READS_ARGS || form == IR_X64_READS_A_ARGS {
+            b: f.b[at]
+            loop index in b..<(b + f.c[at]) {
+                patch_note_read(p, f, f.args[index], slot_count, pos, depth)
+            }
+        }
+    }
+    w: f.dst[at]
+    if w >= 0 && w < slot_count && f.slot_name[w] >= 0 {
+        if p.slot_start[w] < 0 {
+            p.slot_start[w] = pos
+            p.slot_start_depth[w] = depth
+        }
+        p.slot_end[w] = -1
+        p.slot_last[w] = pos
+        p.slot_last_depth[w] = depth
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Main entry point for copy-and-patch O0 function compilation.
 
@@ -3715,6 +3813,15 @@ ir_x64_patch_function_in: fn(m: IRModule, fast: IRX64FastModule, row: Int, poll:
     p.rax_slot = -1
     body: p.pos
     if f.line > 0 -> ir_x64_debug_line(p.lines, body, f.line)
+    loop slot in 0..<slot_count {
+        p.slot_start[slot] = if slot < f.param_count -> body else -> -1
+        p.slot_start_depth[slot] = 0
+        p.slot_end[slot] = -1
+        p.slot_end_depth[slot] = 0
+        p.slot_last[slot] = -1
+        p.slot_last_depth[slot] = 0
+        p.slot_dropped[slot] = false
+    }
     // 5. Single forward pass over all IR instructions.
     ^traps: 0
     ^at: 0
@@ -3725,9 +3832,17 @@ ir_x64_patch_function_in: fn(m: IRModule, fast: IRX64FastModule, row: Int, poll:
                 p.fused_slot = -1
                 p.fused_cc = -1
                 p.rax_slot = -1
+                drop_depth: p.ctrl_open.len()
                 loop dk >= 0 {
-                    ir_x64_debug_line(p.lines, p.pos, ir_code_line_source(p.drop.lines[dk]))
-                    patch_drop_slot(p, fast, m, f, p.drop.slots[dk], -1)
+                    drop_slot: p.drop.slots[dk]
+                    drop_line: ir_code_line_source(p.drop.lines[dk])
+                    ir_x64_debug_line(p.lines, p.pos, drop_line)
+                    patch_drop_slot(p, fast, m, f, drop_slot, -1, drop_line)
+                    if drop_slot >= 0 && drop_slot < slot_count && f.slot_name[drop_slot] >= 0 {
+                        p.slot_end[drop_slot] = p.pos
+                        p.slot_end_depth[drop_slot] = drop_depth
+                        p.slot_dropped[drop_slot] = true
+                    }
                     dk = p.drop.chain[dk]
                 }
             }
@@ -3747,7 +3862,21 @@ ir_x64_patch_function_in: fn(m: IRModule, fast: IRX64FastModule, row: Int, poll:
             at = stop_end + 1
             next
         }
+        depth_before: p.ctrl_open.len()
         patch_emit_op(p, fast, m, f, at)
+        patch_note_op(p, f, at, slot_count, depth_before)
+        if p.skip_to > at {
+            loop k in (at + 1)..<(p.skip_to + 1) {
+                if f.op[k] == .Drop {
+                    s: f.a[k]
+                    if s >= 0 && s < slot_count && f.slot_name[s] >= 0 {
+                        p.slot_end[s] = p.pos
+                        p.slot_end_depth[s] = depth_before
+                        p.slot_dropped[s] = true
+                    }
+                }
+            }
+        }
         at += 1
     }
     p.at = -1
@@ -3871,7 +4000,7 @@ ir_x64_patch_function_in: fn(m: IRModule, fast: IRX64FastModule, row: Int, poll:
         dwarf_cfa_def_cfa(cfi, x64_dwarf_register(X64_RSP), 8)
         dwarf_cfa_same_value(cfi, x64_dwarf_register(X64_RBP))
     }
-    // 12. Flat fixed-frame debug variables over [body..epilogue] (no O0 call sites).
+    // 12. Fixed-frame debug variables bounded by binding and free/move points (no O0 call sites).
     ^variables: [X64DebugVariable]{}
     ^ranges: [X64VariableRange]{}
     loop slot in 0..<slot_count {
@@ -3889,8 +4018,19 @@ ir_x64_patch_function_in: fn(m: IRModule, fast: IRX64FastModule, row: Int, poll:
                 site: f.slot_site[slot],
             },
         )
-        if epilogue > body {
-            ranges.push(X64VariableRange{variable: var_id, start: body, end: epilogue, location: X64DebugLocation.Frame{offset: p.homes[slot]}})
+        ^start: p.slot_start[slot]
+        if start < 0 -> next
+        if start < body -> start = body
+        ^stop: epilogue
+        if p.slot_end[slot] >= start && p.slot_end[slot] < epilogue && p.slot_end_depth[slot] <= p.slot_start_depth[slot] {
+            stop = p.slot_end[slot]
+        } else if !p.slot_dropped[slot] && slot >= f.param_count && fast.type_has_drop[f.slot_type[slot]] && !fast.type_drop_is_int[f.slot_type[slot]] {
+            if p.slot_last[slot] >= start && p.slot_last[slot] < epilogue && p.slot_last_depth[slot] <= p.slot_start_depth[slot] {
+                stop = p.slot_last[slot]
+            }
+        }
+        if stop > start {
+            ranges.push(X64VariableRange{variable: var_id, start: start, end: stop, location: X64DebugLocation.Frame{offset: p.homes[slot]}})
         }
     }
     allocs: loop (k, reloc) in p.alloc_relocs -> X64AllocSite{at: p.relocs[reloc].at + 4, ty: p.alloc_rows[k]}
@@ -3962,4 +4102,67 @@ ir_x64_patch_function_in: fn(m: IRModule, fast: IRX64FastModule, row: Int, poll:
     assert(compiled.errors.is_empty())
     assert(compiled.function.code.len() > 20)
     assert(O0_STENCIL_COUNT >= 300)
+}
+
+#Test("copy-and-patch O0 DWARF records moved String free points in ranges and cold drop lines") {
+    ^m: ir_module_new()
+    m.fast_o0 = true
+    m.single_thread = true
+    word_row: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
+    int_row: ir_scalar_type_row(m, Type.Int)
+    str_row: ir_scalar_type_row(m, Type.String)
+    m.types[str_row].drop = "jet_rt_string_drop"
+    ^f: ir_function_new("free_points", "test:patch.jet.free_points", "", "patch.jet", 1)
+    seed: ir_slot(f, word_row, IRSlotKind.Param, ir_intern_name(m, "seed"), 1)
+    f.result = word_row
+    a: ir_slot(f, str_row, IRSlotKind.Local, ir_intern_name(m, "a"), 2)
+    n1: ir_slot(f, int_row, IRSlotKind.Local, ir_intern_name(m, "n1"), 3)
+    b: ir_slot(f, str_row, IRSlotKind.Local, ir_intern_name(m, "b"), 4)
+    n2: ir_slot(f, word_row, IRSlotKind.Local, ir_intern_name(m, "n2"), 5)
+    total: ir_slot(f, word_row, IRSlotKind.Local, ir_intern_name(m, "total"), 6)
+    make_name: ir_intern_name(m, "test_make_string")
+    borrow_name: ir_intern_name(m, "test_borrow_string")
+    consume_name: ir_intern_name(m, "test_consume_string")
+    args_seed1: ir_args(f, [Int]{seed})
+    ^_: ir_emit(f, IROp.CallRuntime, a, make_name, args_seed1, 1, 2)
+    args_a: ir_args(f, [Int]{a})
+    ^_: ir_emit(f, IROp.CallRuntime, n1, borrow_name, args_a, 1, 3)
+    args_seed2: ir_args(f, [Int]{seed})
+    ^_: ir_emit(f, IROp.CallRuntime, b, make_name, args_seed2, 1, 4)
+    args_b: ir_args(f, [Int]{b})
+    ^_: ir_emit(f, IROp.CallRuntime, n2, consume_name, args_b, 1, 5)
+    ^_: ir_emit(f, IROp.Add, total, seed, n2, IR_OVERFLOW_WRAP, 6)
+    ^_: ir_emit(f, IROp.Drop, -1, a, -1, -1, 6)
+    ^_: ir_emit(f, IROp.Return, -1, total, -1, -1, 6)
+    m.functions.push(f)
+    compiled: ir_x64_patch_function(m, 0, -1, -1, -1)
+    assert(compiled.errors.is_empty())
+    ^line4_at: -1
+    ^line6_at: -1
+    ^cold_drop_line3: false
+    loop row in compiled.debug.lines {
+        if row.line == 4 && line4_at < 0 -> line4_at = row.at
+        if row.line == 6 && line6_at < 0 -> line6_at = row.at
+        if line6_at >= 0 && row.at > line6_at && row.line == 3 -> cold_drop_line3 = true
+    }
+    assert(line4_at > compiled.debug.body)
+    assert(line6_at > line4_at)
+    assert(cold_drop_line3, "cold jet_rt_string_drop stub should record the moved free-point line 3")
+    ^a_end: -1
+    ^a_start: -1
+    ^b_end: -1
+    ^b_start: -1
+    loop range in compiled.debug.ranges {
+        name: compiled.variables[range.variable].name
+        if name == "a" {
+            a_start = range.start
+            a_end = range.end
+        }
+        if name == "b" {
+            b_start = range.start
+            b_end = range.end
+        }
+    }
+    assert(a_start > compiled.debug.body && a_end > a_start && a_end <= line4_at, "early-dropped String `a` must end at its line 3 free point before line 4")
+    assert(b_start > line4_at && b_end > b_start && b_end <= line6_at, "moved-out String `b` must end at its line 5 move point before line 6")
 }

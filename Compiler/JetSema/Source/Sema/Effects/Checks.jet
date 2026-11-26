@@ -561,6 +561,8 @@ SemaEffectNodeRare: struct {
     value_targets: [Int]{[Int]{}},
     // The module state this body writes (TEffectFacts.module_writes).
     module_writes: [TEffectSpan]{[TEffectSpan]{}},
+    // The changeable module state this body reads (TEffectFacts.module_reads).
+    module_reads: [TEffectSpan]{[TEffectSpan]{}},
     // The comptime inputs this body makes (`embed_file`, `embed_bytes`,
     // `find`, `net.fetch`), by name and call span: the compiler answers them
     // while compiling only (sema_effect_runtime_input_paths).
@@ -1471,6 +1473,60 @@ sema_effect_state_writer_path: fn(nodes: [SemaEffectNode], index: Int, seen: ^[B
         target: if position < calls -> nodes[index].call_targets[position] else -> sema_effect_node_value_target(nodes[index], position - calls)
         if target < 0 -> next
         tail: sema_effect_state_writer_path(nodes, target, seen, visited)
+        if tail.len() == 0 -> next
+        ^path: [Int]{index}
+        loop step in tail -> path.push(step)
+        return path
+    }
+    [Int]{}
+}
+
+// A pure function that reads changeable module state (`path` is the function
+// alone) or reaches a function that does (`path` runs from the pure function
+// to it). The report points at the read.
+sema_effect_pure_read_diagnostic: fn(nodes: [SemaEffectNode], path: [Int]) -> Diagnostic {
+    node: nodes[path[0]]
+    reader: nodes[path[path.len() - 1]]
+    reads: reader.rare ?? SEMA_EFFECT_NODE_NO_RARE
+    read: reads.module_reads[0]
+    chain: loop step in path -> nodes[step].chain_name
+    if path.len() == 1 {
+        diagnostic: sema_error("E3401", read.span, "`{node.name}` reads module state `{read.name}`", "changeable module state can vary between calls with the same arguments, so `{node.name}` cannot stay pure under `-[]>`", "pass `{read.name}` in as a parameter, or drop the `-[]>` bound from `{node.name}` so its effects are inferred")
+        return diagnostic_with_rights(diagnostic, "pure", chain, [String]{}, None)
+    }
+    diagnostic: sema_error("E3401", read.span, "`{node.name}` reaches a read of module state `{read.name}`", "{chain.join(" → ")} reads changeable module state `{read.name}`, which can vary between calls — the whole call chain must be pure inside `{node.name}`", "pass `{read.name}` in as a parameter, move the read out of `{reader.chain_name}`, or drop the `-[]>` bound from `{node.name}` so its effects are inferred")
+    diagnostic_with_rights(diagnostic, "pure", chain, [String]{}, None)
+}
+
+// E0938: a `#Memo` function that writes or reads changeable module state (directly
+// or through a call) cannot safely reuse cached results across calls.
+sema_effect_memo_state_diagnostic: fn(nodes: [SemaEffectNode], path: [Int], memo_span: Span, is_write: Bool) -> Diagnostic {
+    node: nodes[path[0]]
+    leaf: nodes[path[path.len() - 1]]
+    rare: leaf.rare ?? SEMA_EFFECT_NODE_NO_RARE
+    entry: if is_write -> rare.module_writes[0] else -> rare.module_reads[0]
+    chain: loop step in path -> nodes[step].chain_name
+    subject: sema_effect_memo_subject(node.name)
+    verb: if is_write -> "writes" else -> "reads"
+    target: if entry.held -> "a cell through `{entry.name}`" else -> "module state `{entry.name}`"
+    why: if path.len() == 1 -> "memoization reuses a completed result, but {subject} {verb} {target}, which can change between calls" else -> "memoization reuses a completed result, but {chain.join(" → ")} {verb} {target}, which can change between calls"
+    fix: if is_write -> "move the write of {target} out of {subject}, or drop `#Memo`" else -> "pass `{entry.name}` in as a parameter so the cache keys on it, or drop `#Memo`"
+    diagnostic: sema_error("E0938", memo_span, "`#Memo` requires a pure function", why, fix)
+    diagnostic_with_rights(diagnostic, "pure", chain, [String]{}, None)
+}
+
+// The call path from `index` to the first function reached depth-first that
+// reads changeable module state, `index` first; empty when none does.
+sema_effect_state_reader_path: fn(nodes: [SemaEffectNode], index: Int, seen: ^[Bool], visited: ^[Int]) -> [Int] Never! {
+    if seen[index] -> return [Int]{}
+    seen[index] = true
+    visited.push(index)
+    if nodes[index].rare == .Val(rare) && rare.module_reads.len() > 0 -> return [Int]{index}
+    calls: nodes[index].call_targets.len()
+    loop position in 0..<(calls + sema_effect_node_value_count(nodes[index])) {
+        target: if position < calls -> nodes[index].call_targets[position] else -> sema_effect_node_value_target(nodes[index], position - calls)
+        if target < 0 -> next
+        tail: sema_effect_state_reader_path(nodes, target, seen, visited)
         if tail.len() == 0 -> next
         ^path: [Int]{index}
         loop step in tail -> path.push(step)
@@ -2686,11 +2742,12 @@ sema_effect_node_from_source: fn(function: FnBody, sources: [SemaEffectFunctionS
             node.direct_spans.push(TEffectSpan{name: "Unsafe", span: function.source_span})
         }
     }
-    if function.effects.value_edges.len() > 0 || function.effects.module_writes.len() > 0 {
+    if function.effects.value_edges.len() > 0 || function.effects.module_writes.len() > 0 || function.effects.module_reads.len() > 0 {
         ^rare: SemaEffectNodeRare{}
         loop edge in function.effects.value_edges -> sema_effect_set_add(rare.value_edges, edge)
         // copy: the node keeps the writes; the function keeps its effect facts.
         rare.module_writes = function.effects.module_writes.copy()
+        rare.module_reads = (loop item in function.effects.module_reads -> TEffectSpan{name: item.name, span: item.span, held: item.held})
         node.rare = Val(rare)
     }
     if function.effects.maximal {
@@ -5149,7 +5206,7 @@ sema_effect_secret_reach: fn(nodes: [SemaEffectNode], callers: [[Int]]) -> [Bool
 
 sema_effect_tfacts: fn(node: SemaEffectNode, solved: [String]) -> TEffectFacts Never! {
     rare: node.rare ?? SEMA_EFFECT_NODE_NO_RARE
-    TEffectFacts{direct: node.direct, solved: solved, call_edges: node.call_edges, maximal: node.maximal, direct_spans: node.direct_spans, maximal_span: node.maximal_span, value_edges: rare.value_edges, module_writes: rare.module_writes}
+    TEffectFacts{direct: node.direct, solved: solved, call_edges: node.call_edges, maximal: node.maximal, direct_spans: node.direct_spans, maximal_span: node.maximal_span, value_edges: rare.value_edges, module_writes: rare.module_writes, module_reads: rare.module_reads}
 }
 
 // The span is the first entry of the declared effect row, or the function's
@@ -7091,29 +7148,72 @@ sema_effects_check_modules: fn(modules: ^[SemaGraphModuleResult], inputs: [SemaE
     sema_eval_probe_judge_effects(modules, nodes, calls, solved)
     sema_effect_check_compiler_hooks(table, modules, inputs, nodes, calls.node_by_key, solved, diagnostics)
     ^any_module_writes: false
+    ^any_module_reads: false
     ^any_comptime_inputs: false
     loop node in nodes {
         if node.rare == .Val(rare) {
             if rare.module_writes.len() > 0 -> any_module_writes = true
+            if rare.module_reads.len() > 0 -> any_module_reads = true
             if rare.comptime_inputs.len() > 0 -> any_comptime_inputs = true
-            if any_module_writes && any_comptime_inputs -> break
+            if any_module_writes && any_module_reads && any_comptime_inputs -> break
         }
     }
-    // A pure function may not write module state, itself or through any
-    // function it calls or takes as a value. Reuse one seen bitmap + undo list
-    // instead of allocating O(nodes) bools per pure function.
-    if any_module_writes {
+    // A pure (`-[]>`) or `#Memo` function may not write or read changeable
+    // module state, itself or through any function it calls or takes as a
+    // value. Reuse one seen bitmap + undo list instead of allocating O(nodes)
+    // bools per function.
+    if any_module_writes || any_module_reads {
         ^state_seen: (loop _ in nodes -> false)
         ^state_visited: [Int]{}
         loop node_index in 0..<nodes.len() {
-            if !nodes[node_index].is_pure -> next
-            path: sema_effect_state_writer_path(nodes, node_index, state_seen, state_visited)
-            loop row in state_visited -> state_seen[row] = false
-            state_visited.clear()
-            if path.len() == 0 -> next
-            ^state_diagnostics: [Diagnostic]{sema_effect_pure_state_diagnostic(nodes, path)}
-            // The report points at the write, which may be in another module.
-            sema_effect_publish_diagnostics(diagnostics, inputs[nodes[path[path.len() - 1]].module_index].source_segments, state_diagnostics)
+            is_pure: nodes[node_index].is_pure
+            memo_span: nodes[node_index].memo_span
+            if !is_pure && memo_span == None -> next
+            if is_pure {
+                if any_module_writes {
+                    write_path: sema_effect_state_writer_path(nodes, node_index, state_seen, state_visited)
+                    loop row in state_visited -> state_seen[row] = false
+                    state_visited.clear()
+                    if write_path.len() > 0 {
+                        ^state_diagnostics: [Diagnostic]{sema_effect_pure_state_diagnostic(nodes, write_path)}
+                        // The report points at the write, which may be in another module.
+                        sema_effect_publish_diagnostics(diagnostics, inputs[nodes[write_path[write_path.len() - 1]].module_index].source_segments, state_diagnostics)
+                        next
+                    }
+                }
+                if any_module_reads {
+                    read_path: sema_effect_state_reader_path(nodes, node_index, state_seen, state_visited)
+                    loop row in state_visited -> state_seen[row] = false
+                    state_visited.clear()
+                    if read_path.len() > 0 {
+                        ^state_diagnostics: [Diagnostic]{sema_effect_pure_read_diagnostic(nodes, read_path)}
+                        // The report points at the read, which may be in another module.
+                        sema_effect_publish_diagnostics(diagnostics, inputs[nodes[read_path[read_path.len() - 1]].module_index].source_segments, state_diagnostics)
+                    }
+                }
+                next
+            }
+            if memo_span == .Val(at_memo) && sema_effect_uncovered(solved[node_index], [String]{}).len() == 0 {
+                if any_module_writes {
+                    write_path: sema_effect_state_writer_path(nodes, node_index, state_seen, state_visited)
+                    loop row in state_visited -> state_seen[row] = false
+                    state_visited.clear()
+                    if write_path.len() > 0 {
+                        ^memo_diagnostics: [Diagnostic]{sema_effect_memo_state_diagnostic(nodes, write_path, at_memo, true)}
+                        sema_effect_publish_diagnostics(diagnostics, inputs[nodes[node_index].module_index].source_segments, memo_diagnostics)
+                        next
+                    }
+                }
+                if any_module_reads {
+                    read_path: sema_effect_state_reader_path(nodes, node_index, state_seen, state_visited)
+                    loop row in state_visited -> state_seen[row] = false
+                    state_visited.clear()
+                    if read_path.len() > 0 {
+                        ^memo_diagnostics: [Diagnostic]{sema_effect_memo_state_diagnostic(nodes, read_path, at_memo, false)}
+                        sema_effect_publish_diagnostics(diagnostics, inputs[nodes[node_index].module_index].source_segments, memo_diagnostics)
+                    }
+                }
+            }
         }
     }
     // No function a runtime entry reaches may make a comptime input.

@@ -23,7 +23,6 @@ stdout.replace("\r", ""): = error_report_tty_ansi.txt # original transcript.repl
 stdout.replace("\r", "").strip_sgr.line(0): = error_report_matrix_tty_pipe_no_color_and_narrow_widths.first-line # original transcript.replace('\r', "")
 stdout: ~ "\u001b" # original TTY output carries escape bytes
 step plain: script -qfec "stty rows 24 cols 80; exec {jet} run --quiet Examples/features/errors/error_context.jet" /dev/null
-unset: NO_COLOR
 unset: FORCE_COLOR
 unset: COLUMNS
 env: NO_COLOR=
@@ -33,7 +32,6 @@ stdout.replace("\r", ""): = error_report_tty_no_color.txt # original transcript.
 stdout.replace("\r", "").strip_sgr.line(0): = error_report_matrix_tty_pipe_no_color_and_narrow_widths.first-line # original transcript.replace('\r', "")
 stdout.replace("\r", "").strip_sgr: == ansi # original transcript.replace('\r', "")
 step narrow: script -qfec "stty rows 24 cols 40; export COLUMNS=40; exec {jet} run --quiet Examples/features/errors/error_context.jet" /dev/null
-unset: NO_COLOR
 unset: FORCE_COLOR
 unset: COLUMNS
 env: NO_COLOR=
