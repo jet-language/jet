@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7042,
-    "rev": 114931,
+    "rev": 114938,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -51,7 +51,7 @@
         "radar:G8"
       ]
     },
-    "completionCursor": "2026-11-26T16:25:52.709Z",
+    "completionCursor": "2026-11-26T21:22:32.377Z",
     "dayStart": {
       "date": "2026-11-26",
       "openCards": 321,
@@ -42824,7 +42824,7 @@
             "profile": "cases",
             "filter": "generic_resource_closes_once"
           },
-          "blockedBy": "D-MEM-POOL-NAME1"
+          "unblockedFrom": "D-MEM-POOL-NAME1"
         }
       ],
       "refs": [],
@@ -42835,8 +42835,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:08.392Z",
-      "updated": "2026-11-26T16:11:36.961Z",
-      "updatedBy": "Orchestrator",
+      "updated": "2026-11-26T21:25:32.611Z",
+      "updatedBy": "owner",
       "criteriaLastN": 16
     },
     {
@@ -44390,7 +44390,7 @@
       "track": "epoch",
       "epoch": "G3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -44399,6 +44399,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-26",
+          "by": "orchestrator",
+          "text": "Re-closed after personally verifying all 4 FIXES-for-orchestrator.md items on Batch 83 S2==S3 (6ddabba3af0 / 41e06744a41) full suite: Gauntlet strftime callers migrated (0 legacy callers left), LocalDate.format('%Y/%m/%d %H:%M') pinned, empty TZDB dir test O0/O1/O2 PASS, LeapSeconds + Civil/Period O0/O1/O2 + web_run PASS, 20/20 CoreTime cases PASS."
+        },
         {
           "at": "2026-11-26",
           "by": "Orchestrator",
@@ -44427,11 +44432,11 @@
         {
           "n": 2,
           "text": "Date and time format patterns have one meaning in formatting and parsing (D-TIME-FORMAT-CANONICAL1=A), driven by one pattern table. Proof: `jet test Compiler --profile golden --filter Time/FormatPatterns` on O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-26T16:15:33.673Z"
+          "evidence": "Commit 6ddabba3af0 / 41e06744a41 (jet@a0.0.46#bc46b6d42ba8829b056a2f1f40179f2c0fe5302902eec9b1a15a4c09b6266e85): canonical percent format patterns verified across Examples/Systems/Time/FormatPatterns.jet (PASS O0/O1/O2 in Batch 83 full suite), Tools/Gauntlet/Kit/Source/PerformanceSurface.jet:1423 and Tools/Gauntlet/Optimization/Optimization/run.jet:58 migrated to %Y-%m-%dT%H:%M:%S.%LZ (0 legacy yyyy/HH:mm .format callers left), and LocalDate.format('%Y/%m/%d %H:%M') pinned at Core/Time/Time.jet:3665.",
+          "at": "2026-11-26T21:30:37.068Z"
         },
         {
           "n": 3,
@@ -44445,11 +44450,11 @@
         {
           "n": 4,
           "text": "Time zone and calendar data: a lookup resolves a zone, a DST gap and an overlap resolve as core-library.md states, and a missing zone database is a typed error, not a crash.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-26T16:15:35.034Z",
+          "evidence": "Commit 6ddabba3af0 / 41e06744a41 (jet@a0.0.46#bc46b6d42ba8829b056a2f1f40179f2c0fe5302902eec9b1a15a4c09b6266e85): all 20/20 CoreTime cases PASS in Batch 83 full suite including core_time_zone_dst_and_missing_db_are_typed_on_every_tier (empty JET_TZDB_DIR missing database -> typed TimeError on O0/O1/O2) and core_time_calendar_zone_and_dst_run.",
+          "at": "2026-11-26T21:30:38.030Z",
           "proof": {
             "profile": "cases",
             "filter": "Time/zone_data_"
@@ -44458,11 +44463,11 @@
         {
           "n": 5,
           "text": "UTC leap-second parsing, formatting and ordering live in Core time (23:59:60 is accepted and labelled), and checked Civil and Period methods route through one core.time method identity on O0, O1, O2 and web. Proof: `jet test Compiler --profile golden --filter Time/LeapSeconds` and its UI snapshots.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-26T16:15:35.871Z"
+          "evidence": "Commit 6ddabba3af0 / 41e06744a41 (jet@a0.0.46#bc46b6d42ba8829b056a2f1f40179f2c0fe5302902eec9b1a15a4c09b6266e85): Examples/Systems/Time/LeapSeconds.jet PASS on O0/O1/O2 in Batch 83 full suite, and core_time_leap_seconds_and_civil_period_match_on_every_tier.case PASS on O0, O1, O2, and web_run alongside CoreTimeMembersCallTheirOwnJetBodiesInsideTheModuleOnEveryTier.",
+          "at": "2026-11-26T21:30:38.987Z"
         },
         {
           "n": 6,
@@ -44482,9 +44487,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:03:08.645Z",
-      "updated": "2026-11-26T16:15:37.412Z",
-      "updatedBy": "Orchestrator",
-      "criteriaLastN": 6
+      "updated": "2026-11-26T21:30:41.169Z",
+      "updatedBy": "orchestrator",
+      "criteriaLastN": 6,
+      "completedAt": "2026-11-26T21:30:41.169Z"
     },
     {
       "id": "c0qpy1t3",
@@ -61349,8 +61355,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-25T17:38:31.481Z",
-      "updated": "2026-11-26T10:42:17.589Z",
-      "updatedBy": "Orchestrator",
+      "updated": "2026-11-26T21:26:15.404Z",
+      "updatedBy": "owner",
       "criteriaLastN": 12
     },
     {
@@ -63373,8 +63379,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-25T17:58:57.851Z",
-      "updated": "2026-11-26T10:42:14.573Z",
-      "updatedBy": "Orchestrator"
+      "updated": "2026-11-26T21:26:15.404Z",
+      "updatedBy": "owner"
     },
     {
       "id": "c0clpv28",
@@ -63729,8 +63735,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-25T18:01:35.588Z",
-      "updated": "2026-11-26T10:42:18.511Z",
-      "updatedBy": "Orchestrator"
+      "updated": "2026-11-26T21:26:15.404Z",
+      "updatedBy": "owner"
     },
     {
       "id": "c028o7uk",
@@ -123057,8 +123063,10 @@
       "draftedBy": "Orchestrator",
       "reviewedBy": "Main",
       "draft": false,
-      "status": "open",
-      "created": "2026-11-25T15:46:55.793Z"
+      "status": "ratified",
+      "created": "2026-11-25T15:46:55.793Z",
+      "outcome": "B",
+      "ratifiedAt": "2026-11-26"
     },
     {
       "id": "D-BODY-RECORD1",
@@ -124587,8 +124595,10 @@
       "draftedBy": "Pip",
       "reviewedBy": "ReviewEffectTrait1",
       "draft": false,
-      "status": "open",
-      "created": "2026-11-25T21:50:13.266Z"
+      "status": "ratified",
+      "created": "2026-11-25T21:50:13.266Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-26"
     },
     {
       "id": "D-FOREIGN-MARKER1",
@@ -125165,8 +125175,10 @@
       "draftedBy": "Pip",
       "reviewedBy": "ReviewTierTwo",
       "draft": false,
-      "status": "open",
-      "created": "2026-11-25T22:34:27.079Z"
+      "status": "ratified",
+      "created": "2026-11-25T22:34:27.079Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-26"
     },
     {
       "id": "D-TABLE-IT1",
@@ -125830,8 +125842,10 @@
       "draftedBy": "Pip",
       "reviewedBy": "ReviewFailVisible3",
       "draft": false,
-      "status": "open",
-      "created": "2026-11-25T23:55:33.674Z"
+      "status": "ratified",
+      "created": "2026-11-25T23:55:33.674Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-26"
     },
     {
       "id": "D-WATCH-FRESHNESS1",
@@ -128274,6 +128288,69 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-26T21:30:41.169Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0blttm0",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-26T21:30:38.987Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0blttm0",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-26T21:30:38.030Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0blttm0",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-26T21:30:37.068Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0blttm0",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-26T21:26:15.404Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-FAIL-VISIBLE2",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-26T21:26:15.404Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-YIELD-EMIT1",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-26T21:26:15.404Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-EFFECT-TRAIT1",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-26T21:25:32.611Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-MEM-POOL-NAME1",
+      "note": "B"
+    },
+    {
+      "at": "2026-11-26T21:22:32.377Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-11-26T21:22:32.377Z"
+    },
     {
       "at": "2026-11-26T21:21:18.301Z",
       "by": "orchestrator",
