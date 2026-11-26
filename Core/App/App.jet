@@ -31,6 +31,8 @@ use {
     world_rt: jet.runtime.testing
     log_rt: jet.runtime.log
     push_wire: __core_app_push
+    cron_syntax: __core_app_syntax_cron
+    sync_syntax: __core_app_syntax_sync
     dbus: __core_ui_dbus
     url: core.net.url
     files: core.files
@@ -9063,22 +9065,15 @@ CRON_SEARCH_DAYS: 2928
 
 // `text` as a cron line; None when it isn't one.
 priv cron_parse: fn(text: String) -> CronLine? {
-    ^fields: [String]{}
-    loop part in text.split(" ") {
-        if part != "" -> fields.push(part)
-    }
-    if fields.len() != 5 -> return None
-    ^weekdays: cron_field(fields[4], 0, 7) ?? return None
-    if weekdays[7] -> weekdays[0] = true
-    _: weekdays.pop()
+    parsed: cron_syntax.parse_cron(text) ?? return None
     Val(CronLine{
-        minutes: cron_field(fields[0], 0, 59) ?? return None,
-        hours: cron_field(fields[1], 0, 23) ?? return None,
-        days: cron_field(fields[2], 1, 31) ?? return None,
-        months: cron_field(fields[3], 1, 12) ?? return None,
-        weekdays: weekdays,
-        any_day: fields[2].starts_with("*"),
-        any_weekday: fields[4].starts_with("*"),
+        minutes: parsed.minutes,
+        hours: parsed.hours,
+        days: parsed.days,
+        months: parsed.months,
+        weekdays: parsed.weekdays,
+        any_day: parsed.any_day,
+        any_weekday: parsed.any_weekday,
     })
 }
 
@@ -9225,8 +9220,20 @@ priv cron_due_after: fn(line: CronLine, minute: Int) -> Int? {
     assert_eq(cron_due_by(cron_parse("0 8 * * 7") ?? panic("a Sunday line"), monday_seven), Val(29912160))
     assert_eq(cron_due_after(cron_parse("0 0 31 2 *") ?? panic("a line no day matches"), monday_seven), Int?{None})
     assert(schedules.valid("5/15 1-3,9 * 1-12/2 1-5"))
+    printed: cron_syntax.print_cron("5/15 1-3,9 * 1-12/2 1-5") ?? panic("cron print")
+    assert(schedules.valid(printed))
     malformed_lines: [String]{"0 8 * *", "0 8 * * * *", "60 * * * *", "*/0 * * * *", "a * * * *", "5-1 * * * *", "1,,2 * * * *", "* * 0 * *", "* * * 13 *", "* * * * 8", "1-2-3 * * * *", "*/100 * * * *"}
     loop malformed in malformed_lines { assert(!schedules.valid(malformed), malformed) }
+}
+
+#Test("SyncDocument grammar parses SyncText, SyncMap, SyncList, PNCounter and prints back") {
+    loop sample in ["SyncText(hello)", "SyncMap(a=1,b=two\\,three)", "SyncList(r1:alpha|r2:beta)", "PNCounter(a=+3/-1,b=+0/-2)"] {
+        assert(sync_syntax.check_sync_document(sample))
+        printed: sync_syntax.print_sync_document(sample) ?? panic("sync print")
+        assert_eq(sync_document_parse(printed), Val(sample))
+    }
+    assert(!sync_syntax.check_sync_document("Unknown(x)"))
+    assert(!sync_syntax.check_sync_document("PNCounter(a=+x/-1)"))
 }
 
 // An outbox that keeps nothing, for the calls of the test below, which queue
@@ -9904,6 +9911,10 @@ sync_document_parse: fn(value: String) -> String? {
     } else { return None }
     if canonical != value -> return None
     Val(canonical)
+}
+
+priv check_sync_syntax: fn(value: String) -> Bool Never! {
+    sync_syntax.check_sync_document(value)
 }
 
 sync_document_merge: fn(left: String, right: String) -> String? {

@@ -1,0 +1,35 @@
+// Private SyncDocument grammar (`SyncText`, `SyncMap`, `SyncList`, `PNCounter`) for `app`.
+use {
+    core.grammar.[Grammar]
+}
+
+priv SyncDoc: Grammar{"""
+    sync_doc    : 'SyncText(' body=RAW_TEXT? ')'                                      # TextDoc
+                | 'SyncMap(' (entries+=map_entry (',' entries+=map_entry)*)? ')'      # MapDoc
+                | 'SyncList(' (items+=list_entry ('|' items+=list_entry)*)? ')'       # ListDoc
+                | 'PNCounter(' (counts+=cnt_entry (',' counts+=cnt_entry)*)? ')'      # CounterDoc
+                ;
+    map_entry   : key=ESC_TEXT '=' val=ESC_TEXT? ;
+    list_entry  : replica=ESC_TEXT ':' val=ESC_TEXT? ;
+    cnt_entry   : replica=ESC_TEXT '=+' pos=DIGITS '/-' neg=DIGITS ;
+
+    RAW_TEXT    : [^)\u{{0}}-\u{{1F}}]+ ;
+    ESC_TEXT    : ([^\\,=|:\/)\u{{0}}-\u{{1F}}] | '\\' [\\,=|:\/])+ ;
+    DIGITS      : [0-9]+ ;
+"""}
+
+check_sync_document: fn(value: String) -> Bool Never! {
+    SyncDoc.parse(value) == .Ok(_)
+}
+
+print_sync_document: fn(value: String) -> String? Never! {
+    if SyncDoc.parse(value) == {
+        .Ok(doc) -> {
+            if doc.print() == {
+                .Ok(printed) -> Val(printed)
+                .Err(_) -> None
+            }
+        }
+        .Err(_) -> None
+    }
+}
