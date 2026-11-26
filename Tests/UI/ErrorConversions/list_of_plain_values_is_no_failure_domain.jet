@@ -1,0 +1,12 @@
+// A list is a failure domain only when its element is an Error type: a
+// list of plain values describes no failure.
+Plain: struct {
+    why: String,
+}
+
+check: fn(x: Int) -> Int [Plain]! {
+    if x < 0 -> return Err([Plain]{Plain{why: "negative"}})
+    Ok(x)
+}
+
+run: fn() { _: check(1) ?? 0 }
