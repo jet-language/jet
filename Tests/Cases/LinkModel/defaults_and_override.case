@@ -99,15 +99,15 @@ stdout: ~ "libc.so.6" # dynamic override links glibc
 step inspect_driver: jet inspect choices main.jet
 cwd: driver
 exit: 0
-stdout: ~ "Linkage: GL = dynamic (default: OS driver)" # inspect output includes other settings
-stdout: ~ "Linkage: libc = dynamic (implied by dynamic part `GL`)" # inspect output includes other settings
+stdout: ~ "Linkage: vulkan = dynamic (default: OS driver)" # inspect output includes other settings
+stdout: ~ "Linkage: libc = dynamic (implied by dynamic part `vulkan`)" # inspect output includes other settings
 
 step refuse_driver_static_whole: jet inspect choices --linkage=static main.jet
 cwd: driver
 exit: nonzero
-stderr: ~ "OS driver library `GL`" # diagnostic includes full explanation and help
+stderr: ~ "OS driver library `vulkan`" # diagnostic includes full explanation and help
 
-step refuse_driver_static_part: jet build --link-parts=GL=static main.jet
+step refuse_driver_static_part: jet build --link-parts=vulkan=static main.jet
 cwd: driver
 exit: nonzero
-stderr: ~ "OS driver library `GL`" # diagnostic includes full explanation and help
+stderr: ~ "OS driver library `vulkan`" # diagnostic includes full explanation and help
