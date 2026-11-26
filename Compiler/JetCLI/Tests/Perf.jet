@@ -21,6 +21,8 @@ use {
         JetCLIPerfHeapSnapshot,
         JetCLIPerfIO,
         JetCLIPerfInlines,
+        JetCLIPerfLineCost,
+        JetCLIPerfLineCosts,
         JetCLIPerfLineHelper,
         JetCLIPerfLineTotal,
         JetCLIPerfLineTotals,
@@ -47,6 +49,7 @@ use {
         jet_cli_perf_attach_zoned,
         jet_cli_perf_bare_name,
         jet_cli_perf_browser_decode,
+        jet_cli_perf_callers_lines,
         jet_cli_perf_causal_section,
         jet_cli_perf_causal_tasks_section,
         jet_cli_perf_capture_bytes,
@@ -58,6 +61,7 @@ use {
         jet_cli_perf_dropped_label,
         jet_cli_perf_file_pid,
         jet_cli_perf_flame_profile,
+        jet_cli_perf_folded_stack_lines,
         jet_cli_perf_head,
         jet_cli_perf_heap_retain,
         jet_cli_perf_heap_retention_lines,
@@ -69,8 +73,11 @@ use {
         jet_cli_perf_instructions_view,
         jet_cli_perf_io_read,
         jet_cli_perf_live_from,
+        jet_cli_perf_line_cost_text,
         jet_cli_perf_line_costs_none,
+        jet_cli_perf_line_hot_functions,
         jet_cli_perf_line_table,
+        jet_cli_perf_line_totals,
         jet_cli_perf_log_spans_read,
         jet_cli_perf_observed,
         jet_cli_perf_outside_code_at,
@@ -95,12 +102,14 @@ use {
         jet_cli_perf_profile_fold,
         jet_cli_perf_profile_summary,
         jet_cli_perf_records_section,
+        jet_cli_perf_run_binary_command,
         jet_cli_perf_run_place,
         jet_cli_perf_sampler_reason,
         jet_cli_perf_sample_us,
         jet_cli_perf_samples_count,
         jet_cli_perf_samples_profile,
         jet_cli_perf_samples_records,
+        jet_cli_perf_session_args,
         jet_cli_perf_sites,
         jet_cli_perf_sites_text,
         jet_cli_perf_source,
@@ -2377,4 +2386,65 @@ perf_counts_test_lines: fn(counted: X64Counted, paranoid: Int?) -> [String] {
     assert_eq(jet_cli_perf_bare_name("spawn_pipe"), "spawn_pipe")
     opened: jet_cli_perf_outside_span(`{"name":"lädt","cat":"lädt","ph":"B","ts":1,"pid":7,"tid":1}`) ?? panic("a phase's begin opens a span")
     assert_eq(opened.name, "lädt")
+}
+
+#Test("perf view omits unmeasured speculative cost labels and keeps hashed helper callee symbols") {
+    assert_eq(jet_cli_perf_helper_name("jet_ir_map_grow_76e6573179fa7127"), "map grow (jet_ir_map_grow_76e6573179fa7127)")
+    assert_eq(jet_cli_perf_helper_name("jet_ir_unique_27201188a33070ae"), "unique (jet_ir_unique_27201188a33070ae)")
+    assert_eq(jet_cli_perf_helper_name("jet_ir_stop_poll"), "stop poll")
+    assert_eq(jet_cli_perf_helper_name("jet_ir_stack_mark"), "stack mark")
+    costs: JetCLIPerfLineCosts{
+        costs: [JetCLIPerfLineCost]{
+            JetCLIPerfLineCost{path: "Names.jet", line: 142, kind: "generic representation fallback", detail: "generic index"},
+            JetCLIPerfLineCost{path: "Flow.jet", line: 92, kind: "map copy-on-write", detail: "map put"},
+            JetCLIPerfLineCost{path: "Spin.jet", line: 5, kind: "exact Int spill", detail: "semantic remainder"},
+        },
+        notes: [String]{},
+    }
+    // Unmeasured speculative labels are never printed; non-speculative costs stay.
+    assert_eq(jet_cli_perf_line_cost_text(costs, "Names.jet", 142, [JetCLIPerfLineHelper]{}, "Names.name_find_hashed"), "")
+    assert_eq(jet_cli_perf_line_cost_text(costs, "Flow.jet", 92, [JetCLIPerfLineHelper]{}, "Flow.sema_flow_put"), "")
+    assert(jet_cli_perf_line_cost_text(costs, "Spin.jet", 5, [JetCLIPerfLineHelper]{}, "spin").contains("exact Int spill"))
+    // When measured helpers show a copy-on-write detach ran on that line, the cost prints.
+    cow_helpers: [JetCLIPerfLineHelper]{JetCLIPerfLineHelper{path: "Flow.jet", line: 92, function: "Flow.sema_flow_put", helper: "map cow detach (jet_ir_map_cow_detach_1234567890abcdef)", samples: 15}}
+    assert(jet_cli_perf_line_cost_text(costs, "Flow.jet", 92, cow_helpers, "Flow.sema_flow_put").contains("map copy-on-write"))
+}
+
+#Test("perf view shows measured callee sub-rows, callers from timeline call tree, and folded stacks") {
+    timeline_val: `{"dropped":0,"functions":[{"name":"Scopes.sema_scope_name_slot","self":1,"total":10},{"name":"Names.name_find_hashed","self":4,"total":10},{"name":"Flow.sema_flow_put","self":2,"total":8},{"name":"jet_ir_unique_27201188a33070ae","self":5,"total":5},{"name":"jet_rt_mem_move","self":1,"total":1}],"nodes":[0,-1,1,0,2,-1,3,2,4,2],"origin_unix_ns":0,"period_ns":125000,"samples":[1,1,2,1,3,1,4,1,5,3,6,3,7,3,8,3,9,3,10,4]}`
+    functions_val: `{"broken":0,"cut":0,"exited_ms":null,"functions":[{"file":"Compiler/JetSema/Source/Sema/Flow.jet","line":92,"name":"Flow.sema_flow_put","self":2,"total":8}],"lost":0,"packages":[],"period_ns":125000,"phases":[],"processes":1,"samples":10,"stacks":[],"threads":1,"unnamed":0,"unwound":10,"window_ms":1}`
+    timeline_digest: sha256_hex("{timeline_val}\n")
+    functions_digest: sha256_hex("{functions_val}\n")
+    timeline: "{{\"digest\":\"{timeline_digest}\",\"name\":\"timeline\",\"type_name\":\"JetPerfTimeline\",\"value\":{timeline_val}}}"
+    functions: "{{\"digest\":\"{functions_digest}\",\"name\":\"functions\",\"type_name\":\"JetPerfFunctions\",\"value\":{functions_val}}}"
+    profile_rows: `[{"clock":"cpu","sample_count":2,"source":{"end_column":1,"end_line":92,"path":"Flow.jet","sha256":"a","start_column":1,"start_line":92},"symbol":{"name":"Flow.sema_flow_put","path":"Flow.jet"}},{"clock":"cpu","sample_count":4,"source":{"end_column":1,"end_line":142,"path":"Names.jet","sha256":"b","start_column":1,"start_line":142},"symbol":{"name":"Names.name_find_hashed","path":"Names.jet"}}]`
+    raw: "{{\"content\":{{\"profile\":{{\"rows\":{profile_rows}}},\"receipt_sections\":[{functions},{timeline}]}}}}\n"
+    trace: canonical_json_parse(raw.bytes()) ?? panic(err.message)
+    totals: jet_cli_perf_line_totals(trace)
+    assert_eq(totals.callee_total, 10)
+    table: jet_cli_perf_line_table(totals, jet_cli_perf_line_costs_none())
+    assert(table.contains("    -> unique (jet_ir_unique_27201188a33070ae) samples=5 share=50%"), table.join("\n"))
+    assert(table.contains("    -> jet_rt_mem_move samples=1 share=10%"), table.join("\n"))
+    hot: jet_cli_perf_line_hot_functions(totals)
+    callers: jet_cli_perf_callers_lines(trace, hot)
+    assert(callers.contains("  Names.name_find_hashed <- Scopes.sema_scope_name_slot (4)"), callers.join("\n"))
+    folded: jet_cli_perf_folded_stack_lines(trace)
+    assert(folded.contains("Flow.sema_flow_put;jet_ir_unique_27201188a33070ae 5"), folded.join("\n"))
+    assert(folded.contains("Scopes.sema_scope_name_slot;Names.name_find_hashed 4"), folded.join("\n"))
+}
+
+#Test("jet perf run detects a built executable target even when later arguments end with .jet") {
+    elf_path: "{perf_test_sys.temp_dir()}/jet-perf-bin-detect-{perf_test_process.current_pid()}"
+    perf_test_files.write_bytes(elf_path, [U8]{U8{127}, U8{69}, U8{76}, U8{70}, U8{2}, U8{1}, U8{1}, U8{0}}) ?? panic("write elf: {err}")
+    txt_path: "{perf_test_sys.temp_dir()}/jet-perf-txt-detect-{perf_test_process.current_pid()}.txt"
+    perf_test_files.write(txt_path, "plain text") ?? panic("write txt: {err}")
+    parsed_bin: jet_cli_perf_session_args([String]{"--out", "out.jettrace", elf_path, "check", "main.jet"}) ?? panic(err.message)
+    assert_eq(jet_cli_perf_run_binary_command("run", parsed_bin), Val([String]{elf_path, "check", "main.jet"}))
+    assert(jet_cli_perf_run_binary_command("test", parsed_bin) == None)
+    parsed_txt: jet_cli_perf_session_args([String]{txt_path}) ?? panic(err.message)
+    assert(jet_cli_perf_run_binary_command("run", parsed_txt) == None)
+    parsed_src: jet_cli_perf_session_args([String]{"main.jet"}) ?? panic(err.message)
+    assert(jet_cli_perf_run_binary_command("run", parsed_src) == None)
+    perf_test_files.remove(elf_path) ?? panic("rm elf: {err}")
+    perf_test_files.remove(txt_path) ?? panic("rm txt: {err}")
 }

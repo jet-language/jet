@@ -164,10 +164,40 @@ jet_cli_perf_capture_allowlist: fn(raw: String) -> [String] JetCLIReadError! {
     Ok(items)
 }
 
+jet_cli_perf_file_is_executable: fn(path: String) -[FS.Read, Time.Wait]> Bool Never! {
+    ^reader: perf_files.open(path) ?? return false
+    head: reader.read_bytes(4) ?? return false
+    if head.len() >= 4 && head[0] == (U8{127}) && head[1] == (U8{69}) && head[2] == (U8{76}) && head[3] == (U8{70}) {
+        return true
+    }
+    head.len() >= 2 && head[0] == (U8{35}) && head[1] == (U8{33})
+}
+
+// Returns the command argv when `jet perf run` targets a built executable on
+// disk (not a `.jet` source file), even when later arguments end with `.jet`,
+// else None.
+jet_cli_perf_run_binary_command: fn(action: String, parsed: JetCLIPerfSessionArgs) -[FS, Time.Wait]> [String]? Never! {
+    if action != "run" || parsed.child_args.len() == 0 -> return None
+    start: if parsed.child_args[0] == "--" -> 1 else -> 0
+    if start >= parsed.child_args.len() -> return None
+    target: parsed.child_args[start]
+    if target.starts_with("-") || target.ends_with(".jet") -> return None
+    if !perf_files.is_file(target) || !jet_cli_perf_file_is_executable(target) -> return None
+    resolved: if target.contains("/") -> "{target}" else -> "./{target}"
+    ^command: [String]{resolved}
+    loop index in (start + 1)..<parsed.child_args.len() {
+        command.push("{parsed.child_args[index]}")
+    }
+    Val(command)
+}
+
 // `run_session`. The exit code is the child's.
-jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Bool) -[FS, Env, Exec, Time]> JetDriverVerbOutput Never! {
+jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Bool) -[FS, Env, Exec, Time, FFI.Asm]> JetDriverVerbOutput Never! {
     extension: artifact_extension()
-    parsed: jet_cli_perf_session_args(args) ?? return jet_cli_perf_error(err.message, "run `jet perf {action} <file.jet> [--lens=cpu,memory,alloc,topdown|causal] [--out <path{extension}>]`", color)
+    parsed: jet_cli_perf_session_args(args) ?? return jet_cli_perf_error(err.message, "run `jet perf {action} <file.jet|executable> [--lens=cpu,memory,alloc,topdown|causal] [--out <path{extension}>]`", color)
+    if jet_cli_perf_run_binary_command(action, parsed) == .Val(binary_cmd) {
+        return jet_cli_perf_attach_sampled(binary_cmd.move(), parsed.out, parsed.allowlist, quiet, color)
+    }
     memory: parsed.lenses.contains("memory")
     if memory && action != "run" {
         return jet_cli_perf_error("the `memory` lens samples a program's counters, which only `jet perf run` samples", "run `jet perf run <file.jet> --lens=memory`", color)

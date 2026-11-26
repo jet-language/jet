@@ -242,14 +242,17 @@ jet_cli_perf_view: fn(args: [String], color: Bool) -[FS, Env, Exec, Time]> JetDr
     explained: mode != "json" && totals.rows.len() > 0 && jet_cli_perf_outside_section(trace) == None
     costs: if explained -> jet_cli_perf_line_costs(trace) else -> jet_cli_perf_line_costs_none()
     table: jet_cli_perf_line_table(totals, costs)
+    hot_functions: jet_cli_perf_line_hot_functions(totals)
+    callers: jet_cli_perf_callers_lines(trace, hot_functions)
     if mode == "html" {
         return JetDriverVerbOutput{stdout: jet_cli_perf_view_html(trace_id(trace) ?? "unknown", frames, flame, timeline, table), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     }
     if mode == "text" {
-        return JetDriverVerbOutput{stdout: jet_cli_perf_view_text(trace, frames, flame, timeline, table, costs.notes, color), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+        return JetDriverVerbOutput{stdout: jet_cli_perf_view_text(trace, frames, flame, timeline, table, callers, costs.notes, color), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     }
     view: CanonicalJSON.Object(
         [CanonicalJSONField]{
+            {key: "callers", value: jet_cli_perf_strings(callers)},
             {key: "flamegraph", value: jet_cli_perf_strings(flame)},
             {key: "frames", value: CanonicalJSON.String(frames)},
             {key: "kind", value: CanonicalJSON.String("jet.trace.view")},
@@ -270,7 +273,7 @@ jet_cli_perf_strings: fn(lines: [String]) -> CanonicalJSON Never! {
 // `render_view_text`, with `notes` on the sources whose lines have no cost
 // facts (LineCosts.jet) before the sections and the heap snapshots the
 // alloc lens kept (jet_cli_perf_heap_lines) after them.
-jet_cli_perf_view_text: fn(trace: CanonicalJSON, frames: String, flame: [String], timeline: [String], table: [String], notes: [String], color: Bool) -> String Never! {
+jet_cli_perf_view_text: fn(trace: CanonicalJSON, frames: String, flame: [String], timeline: [String], table: [String], callers: [String], notes: [String], color: Bool) -> String Never! {
     ^out: "{diagnostic_theme_paint(color, "1", "schema")} {TRACE_SCHEMA} v{TRACE_VERSION}\n"
     out = "{out}{diagnostic_theme_paint(color, "1", "trace")} {trace_id(trace) ?? "unknown"}\n"
     out = "{out}{diagnostic_theme_paint(color, "1", "command")} {jet_cli_perf_content_text(trace, "command") ?? "unknown"}\n"
@@ -303,6 +306,10 @@ jet_cli_perf_view_text: fn(trace: CanonicalJSON, frames: String, flame: [String]
     loop line in jet_cli_perf_off_cpu_lines(trace) -> out = "{out}{line}\n"
     loop line in jet_cli_perf_thread_lines(trace) -> out = "{out}{line}\n"
     loop line in jet_cli_perf_function_lines(trace) -> out = "{out}{line}\n"
+    if callers.len() > 0 {
+        out = "{out}{diagnostic_theme_paint(color, "1", "callers")}\n"
+        loop line in callers -> out = "{out}{line}\n"
+    }
     loop line in jet_cli_perf_syscall_lines(trace) -> out = "{out}{line}\n"
     loop line in jet_cli_perf_game_lines(trace) -> out = "{out}{line}\n"
     loop line in jet_cli_perf_receipt_lines(trace) -> out = "{out}{line}\n"
@@ -2055,6 +2062,8 @@ JetCLIPerfLineTotals: struct {
     names: [String],
     rows: [JetCLIPerfLineTotal],
     helpers: [JetCLIPerfLineHelper]{[JetCLIPerfLineHelper]{}},
+    callees: [JetCLIPerfFunctionEdge]{[JetCLIPerfFunctionEdge]{}},
+    callee_total: Int{0},
 }
 
 JetCLIPerfLineTotal: struct {
@@ -2088,7 +2097,25 @@ jet_cli_perf_line_totals: fn(trace: CanonicalJSON) -> JetCLIPerfLineTotals Never
         totals.rows.push(JetCLIPerfLineTotal{path: path_at, line: line, function: name_at, samples: samples})
     }
     totals.helpers = jet_cli_perf_line_helpers(trace)
+    totals.callees = jet_cli_perf_stack_callees(trace)
+    totals.callee_total = jet_cli_perf_outside_samples(trace)
     totals
+}
+
+// Distinct hot function names in the per-line table's order (up to
+// JET_CLI_PERF_LINE_ROWS).
+jet_cli_perf_line_hot_functions: fn(totals: JetCLIPerfLineTotals) -> [String] Never! {
+    ^names: [String]{}
+    ^seen: [String:Bool]{}
+    loop row in totals.rows {
+        if row.samples <= 0 -> next
+        name: totals.names[row.function]
+        if name == "" || seen.has_key(name) -> next
+        seen[name] = true
+        names.push("{name}")
+        if names.len() >= JET_CLI_PERF_LINE_ROWS -> break
+    }
+    names
 }
 
 // The rows of the trace's `helpers` receipt section
@@ -2120,9 +2147,9 @@ jet_cli_perf_line_helpers: fn(trace: CanonicalJSON) -> [JetCLIPerfLineHelper] Ne
 // of every line's samples, its typed cost facts from `costs`, then the
 // samples of those in each compiler-emitted helper it called with their
 // share of every line's (`  main.jet:5 spin samples=812 share=64% · cost:
-// exact Int spill — semantic remainder (loop depth 1, repeats every loop
-// turn) · stop poll samples=203 share=16%`). Empty when no line has a
-// sample.
+// exact Int spill ×2 — semantic remainder (loop depth 1, repeats every loop
+// turn) · stop poll samples=203 share=16%`), followed by measured callee
+// sub-rows when call-tree stacks are present. Empty when no line has a sample.
 jet_cli_perf_line_table: fn(totals: JetCLIPerfLineTotals, costs: JetCLIPerfLineCosts) -> [String] Never! {
     // Each distinct line's first row, and the samples of all of its rows.
     ^firsts: [Int]{}
@@ -2155,6 +2182,9 @@ jet_cli_perf_line_table: fn(totals: JetCLIPerfLineTotals, costs: JetCLIPerfLineC
     }
     ^total: 0
     loop place in order -> total += sums[place]
+    callee_starts: jet_cli_perf_edge_starts(totals.callees)
+    callee_denom: if totals.callee_total > 0 -> totals.callee_total else -> total
+    ^shown_fn_callees: [String:Bool]{}
     ^lines: [String]{}
     loop (at, place) in order {
         if at == JET_CLI_PERF_LINE_ROWS {
@@ -2163,15 +2193,31 @@ jet_cli_perf_line_table: fn(totals: JetCLIPerfLineTotals, costs: JetCLIPerfLineC
         }
         row: totals.rows[firsts[place]]
         share: sums[place] * 100 /% total
-        facts: jet_cli_perf_line_cost_text(costs, totals.names[row.path], row.line)
+        fn_name: totals.names[row.function]
+        facts: jet_cli_perf_line_cost_text(costs, totals.names[row.path], row.line, totals.helpers, fn_name)
         ^helpers: ""
         loop held in totals.helpers {
-            if held.line != row.line || held.path != totals.names[row.path] || held.function != totals.names[row.function] {
+            if held.line != row.line || held.path != totals.names[row.path] || held.function != fn_name {
                 next
             }
             helpers = "{helpers} · {held.helper} samples={held.samples} share={held.samples * 100 /% total}%"
         }
-        lines.push("  {totals.names[row.path]}:{row.line} {totals.names[row.function]} samples={sums[place]} share={share}%{facts}{helpers}")
+        lines.push("  {totals.names[row.path]}:{row.line} {fn_name} samples={sums[place]} share={share}%{facts}{helpers}")
+        if !shown_fn_callees.has_key(fn_name) {
+            shown_fn_callees["{fn_name}"] = true
+            ^idx: callee_starts[fn_name, or: -1]
+            if idx >= 0 {
+                ^shown_callees: 0
+                loop idx < totals.callees.len() && totals.callees[idx].owner == fn_name {
+                    edge: totals.callees[idx]
+                    label: jet_cli_perf_display_symbol(edge.target)
+                    lines.push("    -> {label} samples={edge.samples} share={edge.samples * 100 /% callee_denom}%")
+                    shown_callees += 1
+                    if shown_callees >= 4 -> break
+                    idx += 1
+                }
+            }
+        }
     }
     lines
 }
