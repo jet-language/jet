@@ -87,8 +87,6 @@ use {
         sema_comptime_available_constants_add,
         sema_comptime_available_version,
         sema_comptime_body_work_flush,
-        sema_checked_text_reason,
-        sema_checked_text_spot_span,
         sema_comptime_checked_text_source,
         sema_comptime_key_set_add,
         sema_comptime_key_set_has,
@@ -164,7 +162,7 @@ use {
         sema_unsafe_path_within,
         SEMA_PRELUDE_ERROR_SOURCE_PATH,
         SEMA_PRELUDE_RULE_SOURCE_PATH,
-        SEMA_CHECKED_TEXT_REJECTED_WHY,
+        sema_checked_text_reports,
         sema_cli_command_record,
         sema_marker_is_guest_export,
         sema_guest_runtime_binding,
@@ -2390,6 +2388,9 @@ JetDriverComptimeFlush: struct {
     // refused their code, evaluation trapped, failed or ran out of budget),
     // each refused (jet_driver_module_value_refused), reporting nothing here.
     refused: [JetDriverModuleValueRefusal]{[JetDriverModuleValueRefusal]{}},
+    // Whether a checked-text item's check refused its literal, reporting
+    // here: the run goes on and fails at its end.
+    rejected: Bool{false},
 }
 
 // Work counters of one comptime run (#4601 scaling gate), written to the
@@ -2767,7 +2768,7 @@ jet_driver_first_error_since: fn(diagnostics: [Diagnostic], start: Int) -> Strin
 jet_driver_module_value_eval_reason: fn(result: JetEvalIRResult) -> String {
     if result.error == .Val(error) -> return "computing it stops ({error.diagnostic.what})"
     if result.value == .Val(value) {
-        if value == .Failed(report) && sema_checked_text_reason(report) == .Val(text) {
+        if value == .Failed(report) && report == .Told(error) && error == .String(text) {
             return "computing it returns an error ({text})"
         }
     }
@@ -3219,6 +3220,7 @@ jet_driver_comptime_flush: fn(
                 ^single: jet_driver_comptime_flush(request, jet_driver_comptime_batch_single(batch, index), values, checked_functions, trace, program, staging, counters, diagnostics)
                 if single.progressed -> flushed.progressed = true
                 loop refusal in single.refused -> flushed.refused.push(refusal)
+                if single.rejected -> flushed.rejected = true
                 if single.stop == .Val(stopped) {
                     flushed.stop = Val(stopped)
                     return flushed
@@ -3349,11 +3351,11 @@ jet_driver_comptime_flush: fn(
                     flushed.stop = Val(jet_driver_comptime_run_result(values, checked_functions, trace, false, false))
                     return flushed
                 }
-                why: sema_checked_text_reason(report) ?? SEMA_CHECKED_TEXT_REJECTED_WHY
-                at: sema_checked_text_spot_span(graph, source.module_identity, evaluation.source_expression, report) ?? evaluation.span
-                diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, source.module_identity, evaluation.code, at, evaluation.what, why, evaluation.fix))
-                flushed.stop = Val(jet_driver_comptime_run_result(values, checked_functions, trace, false, false))
-                return flushed
+                diagnostics.extend(loop diagnostic in sema_checked_text_reports(graph, source.module_identity, evaluation.ty, evaluation.source_expression, report, evaluation.span, evaluation.code, evaluation.what, evaluation.fix) -> jet_driver_attach_registration_source_location(diagnostic, graph, source.module_identity))
+                // The run goes on, so every refused literal reports; it
+                // fails at its end (refused_any).
+                flushed.rejected = true
+                next
             }
             flushed.progressed = true
             next
@@ -3618,9 +3620,10 @@ jet_driver_comptime_run: fn(
     // Constants' AST values, which staged values never change, read in place.
     ^available: jet_driver_comptime_program_available(programs[0], values)
     ^run_index: jet_driver_comptime_run_index(checked_functions, values)
-    // A refused module value (jet_driver_module_value_refused) does not stop
-    // the run: the other items still check, so every refusal and real error
-    // is reported once, and the run fails at its end. `stop_mark` is where
+    // A refused module value (jet_driver_module_value_refused) or checked
+    // text literal (JetDriverComptimeFlush.rejected) does not stop the run:
+    // the other items still check, so every refusal and real error is
+    // reported once, and the run fails at its end. `stop_mark` is where
     // the reports after the last refusal start; before one, the run's own
     // reports start where the list stood on entry.
     ^refused_any: false
@@ -3709,7 +3712,7 @@ jet_driver_comptime_run: fn(
                 sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
                 return stopped
             }
-            if jet_driver_module_values_refused(environments[0], programs[0], comptime_scopes, available, flushed.refused, diagnostics) {
+            if jet_driver_module_values_refused(environments[0], programs[0], comptime_scopes, available, flushed.refused, diagnostics) || flushed.rejected {
                 refused_any = true
                 stop_mark = diagnostics.len()
             }
@@ -3774,7 +3777,7 @@ jet_driver_comptime_run: fn(
                         sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
                         return stopped
                     }
-                    if jet_driver_module_values_refused(environments[0], programs[0], comptime_scopes, available, flushed.refused, diagnostics) {
+                    if jet_driver_module_values_refused(environments[0], programs[0], comptime_scopes, available, flushed.refused, diagnostics) || flushed.rejected {
                         refused_any = true
                         stop_mark = diagnostics.len()
                     }
@@ -3996,7 +3999,7 @@ jet_driver_comptime_run: fn(
                         sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
                         return stopped
                     }
-                    if jet_driver_module_values_refused(environments[0], programs[0], comptime_scopes, available, flushed.refused, diagnostics) {
+                    if jet_driver_module_values_refused(environments[0], programs[0], comptime_scopes, available, flushed.refused, diagnostics) || flushed.rejected {
                         refused_any = true
                         stop_mark = diagnostics.len()
                     }
@@ -4140,7 +4143,7 @@ jet_driver_comptime_run: fn(
                         sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
                         return stopped
                     }
-                    if jet_driver_module_values_refused(environments[0], programs[0], comptime_scopes, available, flushed.refused, diagnostics) {
+                    if jet_driver_module_values_refused(environments[0], programs[0], comptime_scopes, available, flushed.refused, diagnostics) || flushed.rejected {
                         refused_any = true
                         stop_mark = diagnostics.len()
                     }
@@ -4153,7 +4156,7 @@ jet_driver_comptime_run: fn(
                     sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
                     return stopped
                 }
-                if jet_driver_module_values_refused(environments[0], programs[0], comptime_scopes, available, flushed.refused, diagnostics) {
+                if jet_driver_module_values_refused(environments[0], programs[0], comptime_scopes, available, flushed.refused, diagnostics) || flushed.rejected {
                     refused_any = true
                     stop_mark = diagnostics.len()
                 }
@@ -4174,7 +4177,7 @@ jet_driver_comptime_run: fn(
                 sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
                 return stopped
             }
-            if jet_driver_module_values_refused(environments[0], programs[0], comptime_scopes, available, flushed.refused, diagnostics) {
+            if jet_driver_module_values_refused(environments[0], programs[0], comptime_scopes, available, flushed.refused, diagnostics) || flushed.rejected {
                 refused_any = true
                 stop_mark = diagnostics.len()
             }

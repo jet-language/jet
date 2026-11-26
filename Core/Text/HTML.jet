@@ -146,10 +146,21 @@ HTML: struct {
     }
 }
 
-// Why a checked HTML literal was rejected.
+// Why a checked HTML literal was rejected: the compiler reports it under the
+// checked text rejection's code with this reason as its Why.
 #Error
 HTMLLiteralError: struct {
     reason: String,
+
+    impl Diagnostic {
+        code: "E2712",
+
+        what: fn(self) -> String { "this checked text type rejected its body" }
+
+        why: fn(self) -> String { "{self.reason}" }
+
+        fix: fn(self) -> String { "fix the body so it satisfies the type's declared text grammar" }
+    }
 }
 
 // Where the markup so far leaves the next hole: in text, in a tag's attribute

@@ -3,9 +3,21 @@
 // `$2`, … in the query text, and `check` rejects unbalanced brackets before
 // the program runs.
 
+// A refused query reports under the checked text rejection's code, with the
+// package's reason as its Why.
 #Error
 CypherError: struct {
     reason: String,
+
+    impl Diagnostic {
+        code: "E2712",
+
+        what: fn(self) -> String { "this checked text type rejected its body" }
+
+        why: fn(self) -> String { "{self.reason}" }
+
+        fix: fn(self) -> String { "fix the body so it satisfies the type's declared text grammar" }
+    }
 }
 
 Param: enum {

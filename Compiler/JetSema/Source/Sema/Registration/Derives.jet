@@ -2120,6 +2120,14 @@ sema_derive_reject: fn(expansion: ^SemaDeriveExpansion, args: [CallArg], span: S
         }
         texts.push(text)
     }
+    sema_derive_fail(expansion, sema_derive_report_diagnostic(report, site, texts))
+}
+
+// The diagnostic `report`'s value raises at `site`, given its what, why and
+// fix `texts`: under the impl's `code` constant (else the type path
+// `module.T`), a code with a Jet registry row taking that row's rendering,
+// and a `.Warning` or `.Lint` `severity` reporting as a lint.
+sema_derive_report_diagnostic: fn(report: SemaDeriveReport, site: Span, texts: [String]) -> Diagnostic Never! {
     ^code: "{report.module_name}.{report.definition.type_name}"
     ^severity: DIAGNOSTIC_ERROR
     loop constant in report.definition.constants {
@@ -2134,11 +2142,8 @@ sema_derive_reject: fn(expansion: ^SemaDeriveExpansion, args: [CallArg], span: S
             }
         }
     }
-    if diagnostic_registry_row(code) != None {
-        sema_derive_fail(expansion, diagnostic_from_registry(code, Val(site), texts[0], texts[1], texts[2]))
-        return
-    }
-    sema_derive_fail(expansion, Diagnostic{severity: severity, code: code, span: Val(site), what: diagnostic_sentence_case_line(texts[0]), why: diagnostic_sentence_case_line(texts[1]), fix: diagnostic_sentence_case_line(texts[2])})
+    if diagnostic_registry_row(code) != None -> return diagnostic_from_registry(code, Val(site), texts[0], texts[1], texts[2])
+    Diagnostic{severity: severity, code: code, span: Val(site), what: diagnostic_sentence_case_line(texts[0]), why: diagnostic_sentence_case_line(texts[1]), fix: diagnostic_sentence_case_line(texts[2])}
 }
 
 // The span `reject(…, at: part)` raises at: the `span` SourceSpan of the

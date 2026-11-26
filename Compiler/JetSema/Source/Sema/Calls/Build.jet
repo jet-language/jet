@@ -1127,46 +1127,13 @@ SemaCompilerReportRewrite: struct {
     replacement: Expr,
 }
 
-// The `impl Diagnostic` of a finding's type `ty`, written inside the type's
-// body or as an `impl T.Diagnostic` in any module, matched by the type's
-// registered row (a checked type is spelled by its resolved identity, never
-// as written): its `code` constant (else the type path `module.T`) and the
-// variant its `tier` constant names (else `Error`). None when the type has
-// none.
+// The code and tier the `impl Diagnostic` of a finding's type `ty`
+// (sema_type_diagnostic_report) declares: its `code` constant (else the type
+// path `module.T`) and the variant its `tier` constant names (else `Error`).
+// None when the type has none.
 sema_compiler_report_facts: fn(ty: Type?, check: SemaBodyCheck) -> SemaCompilerReportFacts? Never! {
     finding: ty ?? return None
-    graph: check.program.registration_graph
-    owner: sema_type_resolve_nominal_row(graph, finding, check.environment.module_identity) ?? return None
-    owner_module: graph.modules[owner.module_index].module_name
-    owner_name: graph.modules[owner.module_index].nominals[owner.row].symbol.name
-    ^reports: [SemaDeriveReport]{}
-    if sema_registration_nominal_source_item(graph.modules[owner.module_index].nominals[owner.row].source) == .Val(source) {
-        if source == {
-            .Struct(definition) -> {
-                sema_user_rule_nested_reports(owner_module, owner_name, definition.name_span, definition.trait_impls, reports)
-            }
-            .Enum(definition) -> {
-                sema_user_rule_nested_reports(owner_module, owner_name, definition.name_span, definition.trait_impls, reports)
-            }
-            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
-        }
-    }
-    loop module_index in 0..<graph.modules.len() {
-        loop item in graph.modules[module_index].program.items {
-            if item == .Impl(definition) {
-                trait_name: definition.trait_name ?? next
-                if trait_name != "Diagnostic" -> next
-                // The impl's type resolves from the module that writes it.
-                written: Type.Named{name: definition.type_name.copy()}
-                row: sema_type_resolve_nominal_row(graph, written, graph.modules[module_index].module_identity) ?? next
-                if row.module_index == owner.module_index && row.row == owner.row {
-                    reports.push(SemaDeriveReport{module_name: owner_module.copy(), definition: definition})
-                }
-            }
-        }
-    }
-    if reports.len() == 0 -> return None
-    report: reports[0]
+    report: sema_type_diagnostic_report(check.program.registration_graph, finding, check.environment.module_identity) ?? return None
     ^code: "{report.module_name}.{report.definition.type_name}"
     ^tier: "Error"
     ^rewrite: SemaCompilerReportRewrite?{None}
@@ -1184,6 +1151,44 @@ sema_compiler_report_facts: fn(ty: Type?, check: SemaBodyCheck) -> SemaCompilerR
         }
     }
     Val(SemaCompilerReportFacts{code: code, tier: tier, rewrite: rewrite})
+}
+
+// The `impl Diagnostic` of type `finding`, read from `module_identity`,
+// written inside the type's body or as an `impl T.Diagnostic` in any
+// module, matched by the type's registered row (a checked type is spelled by
+// its resolved identity, never as written). None when the type has none.
+sema_type_diagnostic_report: fn(graph: SemaRegistrationGraph, finding: Type, module_identity: ModuleID) -> SemaDeriveReport? Never! {
+    owner: sema_type_resolve_nominal_row(graph, finding, module_identity) ?? return None
+    owner_module: graph.modules[owner.module_index].module_name
+    owner_name: graph.modules[owner.module_index].nominals[owner.row].symbol.name
+    ^reports: [SemaDeriveReport]{}
+    if sema_registration_nominal_source_item(graph.modules[owner.module_index].nominals[owner.row].source) == .Val(source) {
+        if source == {
+            .Struct(definition) -> {
+                sema_user_rule_nested_reports(owner_module, owner_name, definition.name_span, definition.trait_impls, reports)
+            }
+            .Enum(definition) -> {
+                sema_user_rule_nested_reports(owner_module, owner_name, definition.name_span, definition.trait_impls, reports)
+            }
+            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+        }
+    }
+    if reports.len() > 0 -> return Val(reports[0].copy())
+    loop module_index in 0..<graph.modules.len() {
+        loop item in graph.modules[module_index].program.items {
+            if item == .Impl(definition) {
+                trait_name: definition.trait_name ?? next
+                if trait_name != "Diagnostic" -> next
+                // The impl's type resolves from the module that writes it.
+                written: Type.Named{name: definition.type_name.copy()}
+                row: sema_type_resolve_nominal_row(graph, written, graph.modules[module_index].module_identity) ?? next
+                if row.module_index == owner.module_index && row.row == owner.row {
+                    return Val(SemaDeriveReport{module_name: owner_module.copy(), definition: definition})
+                }
+            }
+        }
+    }
+    None
 }
 
 // The callee and replacement of a `structured_fix: syntax.rewrite(callee: f,

@@ -304,10 +304,21 @@ priv db_error: fn(message: String) -> DBError Never! { DBError.Failed(message.co
 
 priv db_closed: fn() -> DBError Never! { db_error("database connection is closed") }
 
-// Why a checked SQL literal was rejected.
+// Why a checked SQL literal was rejected: the compiler reports it under the
+// checked text rejection's code with this reason as its Why.
 #Error
 SQLLiteralError: struct {
     reason: String,
+
+    impl Diagnostic {
+        code: "E2712",
+
+        what: fn(self) -> String { "this checked text type rejected its body" }
+
+        why: fn(self) -> String { "{self.reason}" }
+
+        fix: fn(self) -> String { "fix the body so it satisfies the type's declared text grammar" }
+    }
 }
 
 // Checked SQL: the template text with `?` placeholders plus its bound values.

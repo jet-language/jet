@@ -6,7 +6,6 @@ use core.grammar.error.[TextSpot]
 #Error
 SpotError: struct {
     at: TextSpot,
-    reason: String,
 }
 
 Spot: struct {
@@ -19,7 +18,7 @@ Spot: struct {
         check: fn(parts: [String]) -[]> Checked<[String], TextSlot> SpotError! {
             loop (part, piece) in parts {
                 loop (offset, byte) in piece.bytes() {
-                    if byte == 33 -> return Err(SpotError{at: TextSpot{part: part, offset: offset}, reason: "`!` has no place in a spot"})
+                    if byte == 33 -> return Err(SpotError{at: TextSpot{part: part, offset: offset}})
                 }
             }
             return Ok(Checked{shape: parts.copy(), slots: loop _ in 1..<parts.len() -> TextSlot.Text})

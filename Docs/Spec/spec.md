@@ -111,7 +111,11 @@ vocabulary](vocabulary.md).
   `Slot` to `TextSlot`. The check always runs, even for an `Error: Never`
   type, and a failure is E2712, at the line and column of the literal its
   error names with an `at: TextSpot` field (`TextSpot{part, offset}`, the
-  byte offset in part `part`), else at the literal. A `distinct String`
+  byte offset in part `part`), else at the literal. An `Error` that is a
+  list reports each item that way. An error whose type implements
+  `Diagnostic` reports under that impl's code and texts; any other gives
+  E2712, whose Why is the error when it is a `String`. Every refused
+  literal reports in one build. A `distinct String`
   type's literal is the joined text, with each hole passed through
   `encode_hole(value, slot)`, and its `check` sees that one text. A type
   that binds `Hole: T` and declares

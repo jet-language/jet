@@ -207,10 +207,21 @@ userinfo_text: fn(url: URL) -> String Never! {
     "{url.user_text}:{url.password_text}"
 }
 
-// Why a checked URL literal was rejected.
+// Why a checked URL literal was rejected: the compiler reports it under the
+// checked text rejection's code with this reason as its Why.
 #Error
 URLLiteralError: struct {
     reason: String,
+
+    impl Diagnostic {
+        code: "E2712",
+
+        what: fn(self) -> String { "this checked text type rejected its body" }
+
+        why: fn(self) -> String { "{self.reason}" }
+
+        fix: fn(self) -> String { "fix the body so it satisfies the type's declared text grammar" }
+    }
 }
 
 // A marker that occurs in none of `literals`, standing for each hole while the

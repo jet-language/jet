@@ -737,11 +737,23 @@ totime: fn(dt: DateTime) -> LocalTime Never! { time_of(dt) }
 }
 
 // Civil carriers own their validation and arithmetic here, not in an emitter.
+// A refused `DateTime{…}` literal reports its error under the checked text
+// rejection's code with this reason as its Why.
 #Error
 TimeError: struct {
     reason: String,
 
     new: fn(reason: String) -> TimeError Never! { TimeError{reason: reason} }
+
+    impl Diagnostic {
+        code: "E2712",
+
+        what: fn(self) -> String { "this checked text type rejected its body" }
+
+        why: fn(self) -> String { "{self.reason}" }
+
+        fix: fn(self) -> String { "fix the body so it satisfies the type's declared text grammar" }
+    }
 }
 
 LocalDate: struct {

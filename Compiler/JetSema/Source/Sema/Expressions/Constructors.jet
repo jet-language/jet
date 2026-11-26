@@ -2141,7 +2141,7 @@ sema_expression_checked_text_literal: fn(head: Type, source_head: Type?, body: T
         }
         types: sema_expression_checked_text_result_types(checked.ty) ?? return SemaExpressionCheckedTextLiteral{handled: true, value: None}
         hole_count: if building -> holes.len() else -> 0
-        shape: sema_expression_checked_text_landed(type_name, landed.value, hole_count, body_value, span, check) ?? return SemaExpressionCheckedTextLiteral{handled: true, value: None}
+        shape: sema_expression_checked_text_landed(type_name, landed.value, checked.ty, hole_count, body_value, span, check) ?? return SemaExpressionCheckedTextLiteral{handled: true, value: None}
         if !building -> return sema_expression_checked_text_distinct(head, checked, span, expected, check)
         if sema_expression_checked_text_refused(type_name, target, holes, shape.slots, Val(types[1]), owner_key, span, check) {
             return SemaExpressionCheckedTextLiteral{handled: true, value: None}
@@ -2218,8 +2218,9 @@ sema_expression_checked_text_literal: fn(head: Type, source_head: Type?, body: T
     SemaExpressionCheckedTextLiteral{handled: true, value: sema_expression_checked_text_inline(type_name, check_call, holes, span, expected, check)}
 }
 
-// What a refused checked text literal reports (E2712), with the reason its
-// error gives (sema_checked_text_reason) as the Why, or this one.
+// What a refused checked text literal reports (E2712) for an error that
+// implements no `Diagnostic` (sema_checked_text_reports): its Why is the
+// error when that is text, else this one.
 SEMA_CHECKED_TEXT_REJECTED_WHAT: "this checked text type rejected its body"
 SEMA_CHECKED_TEXT_REJECTED_WHY: "the type's pure `CheckedText.check` method must accept the complete literal body"
 SEMA_CHECKED_TEXT_REJECTED_FIX: "fix the body so it satisfies the type's declared text grammar"
@@ -2235,33 +2236,44 @@ SEMA_CHECKED_TEXT_ACCEPTS_HOLE_LOCAL: "__checked_text_accepts_hole"
 // What a refused hole's report (E2715) asks for.
 SEMA_CHECKED_TEXT_HOLE_SLOT_FIX: "pass a value of a type this place accepts, or move the hole to a place that accepts its type"
 
-// The reason a CheckedText `check` gave for rejecting a body: its error when
-// that is a String, or the error's String `reason`/`message` field or one
-// String payload. Any other error shape gives the generic reason.
-sema_checked_text_reason: fn(report: TComptimeReport) -> String? {
-    error: if report == {
-        .Told(value) -> value
-        .Clean(_) -> {
-            return None
+// What a refused check reports: its error, or each item of an error type
+// that is a list, at the spot its `at: TextSpot` names in the quoted body of
+// `literal` (sema_checked_text_spot_span), else at `span`. An item whose type
+// implements `Diagnostic`, each text one literal over `self` fields, reports
+// under the impl's code (sema_derive_report_diagnostic); any other reports
+// `code` with `what` and `fix`, its Why the item when that is text, else
+// SEMA_CHECKED_TEXT_REJECTED_WHY. `result` is the check's Result type.
+sema_checked_text_reports: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, result: Type, literal: Expr, report: TComptimeReport, span: Span, code: String, what: String, fix: String) -> [Diagnostic] Never! {
+    ^reports: [Diagnostic]{}
+    ^diagnostic: SemaDeriveReport?{None}
+    ^listed: false
+    if result == .Result(_, error_type) {
+        diagnostic = sema_type_diagnostic_report(graph, error_type, module_identity)
+        if error_type == .List(item_type) {
+            listed = true
+            diagnostic = sema_type_diagnostic_report(graph, item_type, module_identity)
         }
     }
-    if error == {
-        .String(text) -> return Val(text.copy())
-        .Struct(_, fields) -> {
-            loop field in fields {
-                if field.name == "reason" || field.name == "message" {
-                    if field.value == .String(text) -> return Val(text.copy())
-                }
-            }
-        }
-        .Enum(_, _, args) -> {
-            if args.len() == 1 {
-                if args[0].value == .String(text) -> return Val(text.copy())
-            }
-        }
-        .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Present(_) | .Failed(_) | .Unit | .Function(_) -> {}
+    if report == .Told(error) && listed && error == .List(items) {
+        loop item in items -> reports.push(sema_checked_text_item_report(graph, module_identity, diagnostic, literal, item, span, code, what, fix))
     }
-    None
+    if report == .Told(error) && !listed -> reports.push(sema_checked_text_item_report(graph, module_identity, diagnostic, literal, error, span, code, what, fix))
+    if reports.len() == 0 -> reports.push(sema_error(code, span, what, SEMA_CHECKED_TEXT_REJECTED_WHY, fix))
+    reports
+}
+
+// The report of one error `item` of a refused check (sema_checked_text_reports).
+sema_checked_text_item_report: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, diagnostic: SemaDeriveReport?, literal: Expr, item: TComptimeValue, span: Span, code: String, what: String, fix: String) -> Diagnostic Never! {
+    at: sema_checked_text_spot_span(graph, module_identity, literal, item) ?? span
+    if diagnostic == .Val(found) && sema_user_template_ct_value(item) == .Val(value) {
+        ^texts: [String]{}
+        loop name in ([String]{"what", "why", "fix"}) {
+            if sema_derive_report_text(found.definition, name, value) == .Val(text) -> texts.push(text)
+        }
+        if texts.len() == 3 -> return sema_derive_report_diagnostic(found, at, texts)
+    }
+    why: if item == .String(text) -> text.copy() else -> SEMA_CHECKED_TEXT_REJECTED_WHY
+    sema_error(code, at, what, why, fix)
 }
 
 // The `Shape` and `Slot` of a check's `Checked<Shape, Slot> Error!` result,
@@ -2281,15 +2293,13 @@ SemaExpressionCheckedTextShape: struct {
     slots: [TComptimeValue],
 }
 
-// The landed value of a literal's staged check: a rejection is E2712 at the
-// spot of the quoted body `literal` its error points at
-// (sema_checked_text_spot_span), else at the literal, with the reason the
-// error gives; an accepted `Checked` record gives its shape and its slots,
-// one per hole.
-sema_expression_checked_text_landed: fn(type_name: String, value: TComptimeValue, hole_count: Int, literal: Expr, span: Span, check: ^SemaBodyCheck) -> SemaExpressionCheckedTextShape? {
+// The landed value of a literal's staged check: a rejection reports what
+// its error gives (sema_checked_text_reports); an accepted `Checked` record
+// gives its shape and its slots, one per hole. `result` is the check's
+// Result type and `literal` the literal's quoted body.
+sema_expression_checked_text_landed: fn(type_name: String, value: TComptimeValue, result: Type, hole_count: Int, literal: Expr, span: Span, check: ^SemaBodyCheck) -> SemaExpressionCheckedTextShape? {
     if value == .Failed(report) {
-        at: sema_checked_text_spot_span(check.program.registration_graph, check.environment.module_identity, literal, report) ?? span
-        check.diagnostics.push(sema_error("E2712", at, SEMA_CHECKED_TEXT_REJECTED_WHAT, sema_checked_text_reason(report) ?? SEMA_CHECKED_TEXT_REJECTED_WHY, SEMA_CHECKED_TEXT_REJECTED_FIX))
+        check.diagnostics.extend(sema_checked_text_reports(check.program.registration_graph, check.environment.module_identity, result, literal, report, span, "E2712", SEMA_CHECKED_TEXT_REJECTED_WHAT, SEMA_CHECKED_TEXT_REJECTED_FIX))
         return None
     }
     ^shape: TComptimeValue?{None}
@@ -2326,15 +2336,15 @@ SemaCheckedTextSpot: struct {
     offset: Int,
 }
 
-// The source span a check's refusal `report` points at in its literal: the
-// error's `at: TextSpot` (core.grammar), read through the written body of
-// `literal` (`Type{"…"}`, or its quoted body) the way the lexer reads a
-// typed head's body. None when the error names no spot, the module's
-// source is not the text its spans index, or the spot is not in the
-// written text: a text kind's one part is its joined text, whose offsets
-// past its first hole count encoded hole text.
-sema_checked_text_spot_span: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, literal: Expr, report: TComptimeReport) -> Span? {
-    spot: sema_checked_text_spot(report) ?? return None
+// The source span an error item of a check's refusal points at in its
+// literal: the item's `at: TextSpot` (core.grammar), read through the
+// written body of `literal` (`Type{"…"}`, or its quoted body) the way the
+// lexer reads a typed head's body. None when the item names no spot, the
+// module's source is not the text its spans index, or the spot is not in
+// the written text: a text kind's one part is its joined text, whose
+// offsets past its first hole count encoded hole text.
+sema_checked_text_spot_span: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, literal: Expr, item: TComptimeValue) -> Span? {
+    spot: sema_checked_text_spot(item) ?? return None
     ^hole_ends: [Int]{}
     body: sema_checked_text_quoted_body(literal, hole_ends) ?? return None
     row: sema_registration_module_index(graph, module_identity) ?? return None
@@ -2356,9 +2366,9 @@ sema_checked_text_quoted_body: fn(literal: Expr, hole_ends: ^[Int]) -> Span? Nev
     None
 }
 
-// The `at: TextSpot` of the error a refusal carries.
-sema_checked_text_spot: fn(report: TComptimeReport) -> SemaCheckedTextSpot? Never! {
-    if report == .Told(error) && error == .Struct(_, fields) {
+// The `at: TextSpot` of an error item.
+sema_checked_text_spot: fn(item: TComptimeValue) -> SemaCheckedTextSpot? Never! {
+    if item == .Struct(_, fields) {
         loop field in fields {
             if field.name != "at" -> next
             if field.value == .Struct(spot_type, spot_fields) && (spot_type == "TextSpot" || spot_type.ends_with(".TextSpot")) {

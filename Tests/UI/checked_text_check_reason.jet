@@ -1,9 +1,20 @@
-// When `check` rejects a literal with an error that carries a String reason,
-// E2712's Why line is that reason.
+// When `check` rejects a literal with an error whose type implements
+// `Diagnostic`, E2712's Why line is the impl's `why`: here the reason the
+// error carries.
 
 #Error
 RouteError: struct {
     reason: String,
+
+    impl Diagnostic {
+        code: "E2712",
+
+        what: fn(self) -> String { "this checked text type rejected its body" }
+
+        why: fn(self) -> String { "{self.reason}" }
+
+        fix: fn(self) -> String { "fix the body so it satisfies the type's declared text grammar" }
+    }
 }
 
 Route: struct {

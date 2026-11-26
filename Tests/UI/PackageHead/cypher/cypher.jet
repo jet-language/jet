@@ -1,9 +1,20 @@
 // @fixture_module
 // A package's checked text head: `check` rejects an unbalanced query with
-// the package's own reason.
+// the package's own reason, reported as E2712's Why through the error's
+// `Diagnostic` impl.
 #Error
 CypherError: struct {
     reason: String,
+
+    impl Diagnostic {
+        code: "E2712",
+
+        what: fn(self) -> String { "this checked text type rejected its body" }
+
+        why: fn(self) -> String { "{self.reason}" }
+
+        fix: fn(self) -> String { "fix the body so it satisfies the type's declared text grammar" }
+    }
 }
 
 Cypher: struct {
