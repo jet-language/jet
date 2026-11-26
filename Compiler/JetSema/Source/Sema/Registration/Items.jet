@@ -112,6 +112,7 @@ use {
         expr_span,
         core_bare_source_module,
         ir_runtime_handle_row,
+        ir_native_provider_handle_row,
         builtin_codec_trait_ref,
         ModuleID,
         ModuleTable,
@@ -3913,10 +3914,11 @@ sema_registration_source_owns_impl: fn(module_row: SemaRegistrationModule, name:
     false
 }
 
-// A runtime handle belongs to the Core module that exports it or, for a bare
-// prelude spelling (`Path`), to the module that declares that spelling.
+// A runtime handle, or a native provider handle (a child's pipes), belongs to
+// the Core module that exports it or, for a bare prelude spelling (`Path`),
+// to the module that declares that spelling.
 sema_registration_core_handle_owner: fn(module_name: String, name: String) -> Bool Never! {
-    if ir_runtime_handle_row(name) == None -> return false
+    if ir_runtime_handle_row(name) == None && ir_native_provider_handle_row(name) == None -> return false
     core_module_has_type(module_name, name) || core_bare_source_module(name) == Val((module_name))
 }
 
