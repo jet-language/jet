@@ -136,6 +136,25 @@ vocabulary](vocabulary.md).
   `build` is E0907, as is a `check` that does not return `Checked<Shape,
   Slot>` with the type's `Error` (D-TEXTHEAD-HOLES1=A;
   Examples/Text/CheckedText/CheckedTextBoundHoles.jet).
+- A grammar literal `Name: Grammar{"""…"""}` (with `Grammar` resolved to
+  `core.grammar.Grammar`) checks its rule notation while building and expands
+  into one nominal struct or enum per parser rule, plus `NameRule` and
+  `NameToken` enums (`Name` names the start rule in PascalCase). Lowercase
+  rules are parser rules, uppercase rules are tokens (with `fragment` helpers
+  and `-> skip` rules), `'…'i` matches ASCII case-insensitively, `<assoc=right>`
+  marks right-associative left-recursive operator alternatives, and `# Case`
+  labels enum alternatives; fields bind with `name=…` and list fields with
+  `name+=…`. Each generated rule type carries `parse(text)` returning the value
+  or `GrammarError`, `parse_into(text, ^sink)` streaming events into a
+  `GrammarSink`, and `print()` / `print_into(^out)` formatting values back
+  through the grammar's checked printer plan. A grammar that declares
+  interpolation holes via `HOLE<slot=SlotName>` also generates a `NameSlot`
+  enum plus `parse_parts(parts)` and `check_parts(parts)` returning
+  `Checked<[String], NameSlot> [GrammarError]!` for `CheckedText` heads.
+  Grammar analysis refuses notation errors, undefined rules, start-rule
+  mismatches, non-operator left recursion, ambiguity within three tokens,
+  empty repeats, token clashes, invalid field shapes, and unprintable token
+  pairs while building (`Examples/Text/Grammar/{Ini,Calc,LogLine,Heads}.jet`).
 - A marker is a struct whose fields are its arguments, with one
   `impl Marker { … }` block in its body. `Marker` is a Core trait
   (core.prelude) whose constants are the settings: `sites: [Site]`,

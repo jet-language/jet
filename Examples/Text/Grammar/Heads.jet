@@ -1,0 +1,46 @@
+// Jet's built-in checked text heads (`SQL`, `HTML`, `Sh`, `URL`, `DateTime`,
+// `Path`, and `Regex`) validate their literal bodies before the program runs
+// and keep every interpolated hole safely typed or escaped for its position.
+use {
+    core.db.[SQL]
+    core.net.url.[URL]
+    core.process.[Sh]
+    regex: core.regex
+    core.text.html.[HTML]
+    core.time.[DateTime]
+}
+
+run: fn() {
+    user_id: 42
+    who: "O'Hara"
+    query: SQL{"SELECT id, name FROM users WHERE id = {user_id} AND name = {who}"}
+    print("sql template: {query.template()}")
+    print("sql params: {query.params().len()}")
+
+    link: "https://example.com/search?q=a&b=c"
+    tip: "Say \"hi\" & <wave>"
+    label: "<b>safe</b>"
+    badge: HTML{"<em>ok</em>"}
+    card: HTML{"<a href='{link}' title='{tip}'>{label} {badge}</a>"}
+    print("html: {card.text()}")
+
+    count: 5
+    author: "Ada Lovelace"
+    cmd: Sh{"git log -n {count} --author {author} -- *.jet"}
+    print("sh argv: {cmd.args().join(" | ")}")
+
+    item: "a b/c"
+    term: "x&y"
+    addr: URL{"https://example.com/items/{item}?q={term}"}
+    print("url: {addr}")
+
+    stamp: DateTime{"2026-11-26T00:00:00Z"}
+    print("datetime: {stamp}")
+
+    segment: "../secret"
+    target: Path{"/srv/data/{segment}/report.txt"}
+    print("path: {target}")
+
+    version: Regex{"^v[0-9]+\.[0-9]+$"}
+    print("regex: {regex.is_match(version, "v1.42")} {regex.is_match(version, "bad")}")
+}
