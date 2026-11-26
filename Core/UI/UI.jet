@@ -535,7 +535,7 @@ priv UINodeRoleA11y: struct {
             role: if call.args[3].value == {
                 .Val(.Text("Button")) -> "button"
                 .Val(.Text("TextInput")) -> "text input"
-                else -> return None
+                .Val(_) | .None -> return None
             }
             reject(MissingAccessibleLabel{role: role}, at: call.name)
         }

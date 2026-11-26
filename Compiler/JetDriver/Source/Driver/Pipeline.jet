@@ -2213,7 +2213,7 @@ jet_driver_comptime_prefetch_keep_in: fn(program: SemaProgramTables, index: ^Jet
     ^next_jobs: [SemaComptimeFunctionJob]{}
     graph: program.registration_graph
     ^eligible: [Int]{}
-    loop (_, row) in done {
+    loop (pos, row) in done {
         check: row.check
         if check.waiting_dependencies.len() > 0 -> next
         if check.foreign == None && (check.obligations_pending || (check.complete && !jet_driver_has_errors(check.diagnostics))) && check.function != None {
