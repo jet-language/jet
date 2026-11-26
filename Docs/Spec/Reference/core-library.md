@@ -470,7 +470,7 @@ The built-module inventory is a source-facing registry, not a missing-domain led
 - `core.sync`
 - `core.sys`
 - `core.tasks`
-- `core.term`
+- `core.term` — stdio handles, terminal style, and the `Interaction` provider trait (`TerminalInteraction` default; `ask`, `readline`, `choose`, `confirm`, `secret`, `input_secret`, `progress`, and `prompt_guided` dispatched via `context.interaction` / `#Context(interaction:)`; see [`Examples/Systems/Terminal/InteractionProvider.jet`](../../../Examples/Systems/Terminal/InteractionProvider.jet))
 - `core.testing` — deterministic tests, goldens, snapshots, and fake clocks; ambient `assert` renders aligned subexpression values on failure across `O0`/`O1`/`O2` with zero passing-path formatting, and `assert_eq` prints path-level structural diffs for structs, lists, maps, and text
 - `core.text`
 - `core.text.fmt`

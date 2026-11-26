@@ -4099,7 +4099,7 @@ unbuilt:
   [`Examples/Memory/Unsafe/UnsafeSentriesProvenance.jet`](../../Examples/Memory/Unsafe/UnsafeSentriesProvenance.jet),
   and [`Examples/Memory/Unsafe/UnsafeSentriesPackageOff/run.jet`](../../Examples/Memory/Unsafe/UnsafeSentriesPackageOff/run.jet).
 - **`#Context`**: `#Context(allocator:)`, `context.allocator`, `#ContextKey` /
-  `context.get`, `context.logger`, `context.print`, `context.on_stop`,
+  `context.get`, `context.logger`, `context.print`, `context.interaction`, `context.on_stop`,
   `context.trace`, `context.deadline`, `context.thread`, and spawned-task
   inheritance are built and proven by
   [`Examples/Memory/Allocation/ContextAllocator.jet`](../../Examples/Memory/Allocation/ContextAllocator.jet),
@@ -4107,6 +4107,7 @@ unbuilt:
   [`Examples/Concurrency/ContextKeys.jet`](../../Examples/Concurrency/ContextKeys.jet),
   [`Examples/Concurrency/ContextLogger.jet`](../../Examples/Concurrency/ContextLogger.jet),
   [`Examples/Concurrency/ContextPrintStyle.jet`](../../Examples/Concurrency/ContextPrintStyle.jet),
+  [`Examples/Systems/Terminal/InteractionProvider.jet`](../../Examples/Systems/Terminal/InteractionProvider.jet),
   [`Examples/Concurrency/ContextOnStop.jet`](../../Examples/Concurrency/ContextOnStop.jet),
   [`Examples/Concurrency/ContextTrace.jet`](../../Examples/Concurrency/ContextTrace.jet),
   [`Examples/Concurrency/ContextReads.jet`](../../Examples/Concurrency/ContextReads.jet),
@@ -5014,6 +5015,23 @@ unchanged, so `print("x = {255}")` shows `x = 255`; interpolation, Debug,
 `to_string`, `eprint` and the text of a Display or Printable implementation
 do not read the style. The defaults print as a program without a block
 does. A program that spells either form loads core.term.
+
+`context.interaction` is the task's interaction provider, a `core.term.Interaction`
+trait object (`ask`, `choose`, `confirm`, `secret`, and `progress`) whose
+default implementation is `core.term.TerminalInteraction`. `#Context(interaction:
+provider) { ... }` installs any type implementing `core.term.Interaction`
+(such as a scripted test harness, GUI dialog adapter, or agent tool-call
+bridge) for the block and any tasks spawned inside it, and restores the
+enclosing provider on normal exit or early return. `core.term.ask`,
+`readline`, `choose`, `confirm`, `secret`, `input_secret`, and `progress`
+all delegate to `context.interaction`. `core.term.prompt_guided` (used by
+`#CLI` parsers for missing required non-flag inputs) returns `Ok(None)` when
+running non-interactively on `TerminalInteraction` so piped runs preserve
+exit-2 refusals, and delegates to `context.interaction` whenever a custom
+provider is installed or on an interactive terminal. Stateful providers
+implement the immutable `self` methods with a `Shared<State>` cell so prompt
+state stays synchronized across copies and spawned tasks. A program that
+spells `context.interaction` or `#Context(interaction: ...)` loads `core.term`.
 
 `context.dir` (`String`) and `context.env` (`[String:String]`) are the
 current task's working directory and effective environment.

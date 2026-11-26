@@ -761,14 +761,8 @@ sema_cli_entry_direct: fn(lines: ^[String], spec: SemaCLIEntrySpec, help_end: St
         sema_cli_entry_store(lines, input, slot, "__p", projection, false)
         lines.push("    __bare += 1")
         lines.push("    }}")
-        lines.push("    if __v{slot} == None {{")
         fallback: sema_cli_entry_fallback(input, slot)
-        missing: "__missing.push({sema_cli_entry_text(input.name)})"
-        if fallback == .Val(value) {
-            lines.push("    __v{slot} = {value}")
-            if input.default == None -> lines.push("    if __v{slot} == None -> {missing}")
-        } else { lines.push("    {missing}") }
-        lines.push("    }}")
+        if fallback == .Val(value) -> lines.push("    if __v{slot} == None -> __v{slot} = {value}")
     }
     sema_cli_entry_fail(lines, "{bare} < __pos.len()", sema_cli_entry_usage("{sema_cli_call("CLISurplus")}(__pos, {bare})"), projection)
     loop (slot, input) in root {
@@ -776,7 +770,26 @@ sema_cli_entry_direct: fn(lines: ^[String], spec: SemaCLIEntrySpec, help_end: St
         fallback: sema_cli_entry_fallback(input, slot) ?? next
         lines.push("    if __v{slot} == None -> __v{slot} = {fallback}")
     }
+    // Missing required non-flag inputs ask the active `Interaction` provider
+    // via `core.term.prompt_guided` (returns `None` on non-TTY default
+    // terminals so piped runs keep exact exit-2 refusals). `T.merge` only
+    // inspects explicit argv and never prompts.
+    if !marks {
+        loop (slot, input) in root {
+            if !input.required || input.flag -> next
+            ^choice_items: [String]{}
+            loop choice in input.choices -> choice_items.push(sema_cli_entry_text(choice))
+            choices_expr: "[String]{{{choice_items.join(", ")}}}"
+            lines.push("    if __v{slot} == None && !__asked {{")
+            lines.push("    if __jet_cli_term.prompt_guided({sema_cli_entry_text(input.name)}, {sema_cli_entry_text(input.help)}, {choices_expr}) == .Val(__g) -> __v{slot} = Val(__g)")
+            lines.push("    }}")
+        }
+    }
     if missable {
+        loop (slot, input) in root {
+            if !input.positional || input.default != None -> next
+            lines.push("    if __v{slot} == None -> __missing.push({sema_cli_entry_text(input.name)})")
+        }
         sema_cli_entry_fail(lines, "__missing.len() > 0 && !__asked", sema_cli_entry_usage("{sema_cli_call("CLIMissing")}(__missing)"), projection)
     }
     loop (slot, input) in root {
@@ -794,11 +807,11 @@ sema_cli_entry_direct: fn(lines: ^[String], spec: SemaCLIEntrySpec, help_end: St
         lines.push("    {help_end}")
         lines.push("    }}")
     }
-    // Environment and default values decode like argv values; argv values
-    // of an Int or Float input were checked as they were read.
+    // Environment, default, and guided-prompt values decode like argv values;
+    // argv values of an Int or Float input were checked as they were read.
     loop (slot, input) in root {
         if input.flag -> next
-        fallback: input.default != None || input.env.bytes().len() > 0
+        fallback: input.default != None || input.env.bytes().len() > 0 || (input.required && !marks)
         test: if {
             input.kind == 1 && fallback -> sema_cli_call("CLIIsInt")
             input.kind == 2 && fallback -> sema_cli_call("CLIIsFloat")
@@ -852,16 +865,16 @@ sema_cli_entry_table: fn(lines: ^[String], subject: String, arms: ^^[SemaCLIArm]
         loop pattern in arm.patterns {
             if seen.contains(pattern) -> next
             seen.push(pattern.copy())
-            if joined.bytes().len() > 0 -> joined = "{joined} | {pattern}" else -> joined = "{pattern}"
+            if joined.bytes().len() > 0 -> joined = "{joined} | {pattern}" else {
+                joined = "{pattern}"
+            }
         }
         if joined.bytes().len() == 0 -> next
         table.push("    {joined} -> {{")
         table.extend(arm.body.move())
         table.push("    }}")
     }
-    if table.len() == 0 {
-        lines.extend(fallback)
-    } else {
+    if table.len() == 0 -> lines.extend(fallback) else {
         lines.push("    if {subject} == {{")
         lines.extend(table.move())
         lines.push("    else -> {{")
