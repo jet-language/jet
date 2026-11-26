@@ -1,0 +1,23 @@
+# Under `dead_code: remove`, `#CLI` command dispatch and the helpers reached by
+# command methods stay lowered, while an unreached sibling function in the entry
+# package is checked by sema but omitted from IR lowering until
+# `dead_code: keep` is selected.
+fixture: CoreLowerEntryRootsCLICommands.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JET_TRACE_DETAIL=functions
+step: jet build -O0 --trace=trace.json main.jet
+exit: 0
+file: trace.json ~ "{\"name\":\"never_called\",\"cat\":\"sema.function\"" # the unreached function is still checked
+file: trace.json !~ "{\"name\":\"never_called\",\"cat\":\"ir.function\"" # the unreached function is not lowered
+file: trace.json ~ "{\"name\":\"format_greet\",\"cat\":\"ir.function\"" # the helper reached by the greet command is lowered
+file: trace.json ~ "{\"name\":\"format_count\",\"cat\":\"ir.function\"" # the helper reached by the count command is lowered
+step: jet build -O0 --dead-code=keep --trace=keep.json main.jet
+exit: 0
+file: keep.json ~ "{\"name\":\"never_called\",\"cat\":\"ir.function\"" # dead_code=keep lowers the unreached sibling
+step: jet run main.jet -- greet jet
+exit: 0
+stdout: = "hi, jet\n"
+step: jet run main.jet -- count --times 4
+exit: 0
+stdout: = "count=4\n"

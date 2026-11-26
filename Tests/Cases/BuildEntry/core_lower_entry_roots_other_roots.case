@@ -1,0 +1,23 @@
+# Under `dead_code: remove`, a selected `Output` entrypoint and the functions it
+# reaches across entry-package modules stay lowered, while unreached functions
+# in both the entry file and sibling entry-package modules are checked by sema
+# but omitted from IR lowering until `dead_code: keep` is selected.
+fixture: CoreLowerEntryRootsOtherRoots.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JET_TRACE_DETAIL=functions
+step: jet build -O0 --trace=trace.json main.jet
+exit: 0
+file: trace.json ~ "{\"name\":\"never_called\",\"cat\":\"sema.function\"" # the unreached entry function is still checked
+file: trace.json !~ "{\"name\":\"never_called\",\"cat\":\"ir.function\"" # the unreached entry function is not lowered
+file: trace.json ~ "{\"name\":\"unused_helper\",\"cat\":\"sema.function\"" # the unreached sibling-module function is still checked
+file: trace.json !~ "{\"name\":\"unused_helper\",\"cat\":\"ir.function\"" # the unreached sibling-module function is not lowered
+file: trace.json ~ "{\"name\":\"launch\",\"cat\":\"ir.function\"" # the selected Output entrypoint is lowered
+file: trace.json ~ "{\"name\":\"reached_helper\",\"cat\":\"ir.function\"" # the sibling-module helper reached by launch is lowered
+step: jet build -O0 --dead-code=keep --trace=keep.json main.jet
+exit: 0
+file: keep.json ~ "{\"name\":\"never_called\",\"cat\":\"ir.function\"" # dead_code=keep lowers the unreached entry function
+file: keep.json ~ "{\"name\":\"unused_helper\",\"cat\":\"ir.function\"" # dead_code=keep lowers the unreached sibling-module function
+step: jet run main.jet
+exit: 0
+stdout: = "launched: ok\n"

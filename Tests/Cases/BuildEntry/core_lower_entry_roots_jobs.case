@@ -1,0 +1,26 @@
+# Under `dead_code: remove`, `#Job` and scheduled `#Job(every: ...)` roots and
+# the helpers they call are lowered, while an unreached sibling function in the
+# entry package is checked by sema but omitted from IR lowering until
+# `dead_code: keep` is selected.
+fixture: CoreLowerEntryRootsJobs.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JET_TRACE_DETAIL=functions
+step: jet build -O0 --trace=trace.json main.jet
+exit: 0
+file: trace.json ~ "{\"name\":\"never_called\",\"cat\":\"sema.function\"" # the unreached function is still checked
+file: trace.json !~ "{\"name\":\"never_called\",\"cat\":\"ir.function\"" # the unreached function is not lowered
+file: trace.json ~ "{\"name\":\"run\",\"cat\":\"ir.function\"" # the entry is lowered
+file: trace.json ~ "{\"name\":\"tidy\",\"cat\":\"ir.function\"" # the uncalled #Job root is lowered
+file: trace.json ~ "{\"name\":\"format_tidy\",\"cat\":\"ir.function\"" # the helper reached by tidy is lowered
+file: trace.json ~ "{\"name\":\"sweep\",\"cat\":\"ir.function\"" # the scheduled #Job(every: ...) root is lowered
+file: trace.json ~ "{\"name\":\"sweep_step\",\"cat\":\"ir.function\"" # the helper reached by sweep is lowered
+step: jet build -O0 --dead-code=keep --trace=keep.json main.jet
+exit: 0
+file: keep.json ~ "{\"name\":\"never_called\",\"cat\":\"ir.function\"" # dead_code=keep lowers the unreached sibling
+step: jet run main.jet
+exit: 0
+stdout: = "main ready\n"
+step: jet run main.jet -- tidy
+exit: 0
+stdout: = "tidied: cache\n"

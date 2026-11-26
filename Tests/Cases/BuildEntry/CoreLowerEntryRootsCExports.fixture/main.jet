@@ -1,0 +1,40 @@
+RunQueue: struct {
+    held: [I64],
+    pushes: Int,
+}
+
+QUEUE: Shared{RunQueue{held: [I64]{}, pushes: 0}}
+
+// Helper reached only from the C export `exported_tick`.
+tick_step: fn(dt: Int) -> Int { dt + 1 }
+
+// Uncalled C export kept as an entry root.
+#Export(c) exported_tick: fn(dt: Int) -> Int { tick_step(dt) }
+
+// Runtime scheduler hooks exported for C without any Jet caller.
+#Export(c) jet_rt_scheduler_queue_push: fn(task: I64) {
+    QUEUE.held.push(task)
+    QUEUE.pushes += 1
+}
+
+#Export(c) jet_rt_scheduler_queue_pop: fn() -> I64 {
+    front: QUEUE.held.get(0) ?? return I64{0}
+    QUEUE.held.remove(front) ?? I64{0}
+}
+
+// Nothing reaches `never_called`.
+never_called: fn(count: Int) -> Int { count * 3 + 1 }
+
+double: fn(value: Int) -> Int { value * 2 }
+
+run: fn() {
+    ^total: 0
+    task.group work {
+        a: task double(1)
+        b: task double(2)
+        c: task double(3)
+        total = (a.join() ?? 0) + (b.join() ?? 0) + (c.join() ?? 0)
+    }
+    print("sum {total}")
+    print("hooked {QUEUE.pushes >= 3}")
+}

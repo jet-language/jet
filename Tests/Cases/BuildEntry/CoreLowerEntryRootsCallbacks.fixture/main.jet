@@ -1,0 +1,17 @@
+use {
+    bridge
+    callbacks
+}
+
+apply: fn(f: fn(Int) -> Int, value: Int) -> Int { f(value) }
+
+HELD_CALLBACKS: #run { [callbacks.triple] }
+
+// Nothing reaches `never_called`.
+never_called: fn(count: Int) -> Int { count * 3 + 1 }
+
+run: fn() {
+    print(apply(callbacks.double, 21))
+    print(apply(HELD_CALLBACKS[0], 7))
+    print(bridge.invoke_c_twice(40))
+}
