@@ -232,6 +232,7 @@ use {
         decl_table_key,
         Diagnostic,
         Expr,
+        diagnostic_caused_by,
         diagnostic_is_report,
         ModuleID,
         ModuleTable,
@@ -504,6 +505,79 @@ jet_driver_summarize_dependency_reports: fn(load: JetDriverLoadResult, diagnosti
     kept
 }
 
+// Downstream unresolved-name/function/private-item/module-as-value reports
+// that reference a binding from an import declaration that already errored in
+// the same file are linked as follow-ons via `diagnostic_caused_by`.
+priv jet_driver_import_failed_names: fn(declaration: ImportDecl, names: ^[String]) -> Bool Never! {
+    ^wildcard: false
+    if declaration.alias != "" -> names.push(declaration.alias)
+    if declaration.kind == .Unqualified(_, _, items, _, _) {
+        loop item in items {
+            if item.original == "*" {
+                wildcard = true
+                next
+            }
+            local: item.alias ?? {
+                parts: item.original.split(".").to_list()
+                parts[parts.len() - 1]
+            }
+            if local != "" -> names.push(local)
+        }
+    }
+    wildcard
+}
+
+priv jet_driver_is_import_cascade_code: fn(code: String) -> Bool Never! {
+    code == "E0107" || code == "E0102" || code == "E0605" || code == "E0629"
+}
+
+priv jet_driver_link_import_cascades: fn(load: JetDriverLoadResult, diagnostics: ^[Diagnostic]) Never! {
+    if diagnostics.len() < 2 -> return
+    loop loaded in load.modules {
+        if loaded.source_unit_index < 0 || loaded.source_unit_index >= load.source_units.len() -> next
+        unit: load.source_units[loaded.source_unit_index]
+        if loaded.program.imports.len() == 0 -> next
+        loop declaration in loaded.program.imports {
+            ^root_index: -1
+            loop idx in 0..<diagnostics.len() {
+                candidate: diagnostics[idx]
+                if candidate.severity != DIAGNOSTIC_ERROR || candidate.source_path != Val(unit.path) -> next
+                span: candidate.span ?? next
+                if span.start <= declaration.span.end && declaration.span.start <= span.end {
+                    root_index = idx
+                    break
+                }
+            }
+            if root_index < 0 -> next
+            root: diagnostics[root_index]
+            ^names: [String]{}
+            ^wildcard: jet_driver_import_failed_names(declaration, names)
+            if root.code == "E0612" -> wildcard = true
+            if names.len() == 0 && !wildcard -> next
+            loop idx in 0..<diagnostics.len() {
+                if idx == root_index -> next
+                if diagnostics[idx].cause.len() > 0 -> next
+                if diagnostics[idx].source_path != root.source_path || diagnostics[idx].source_offset != root.source_offset -> next
+                code: diagnostics[idx].code
+                if !jet_driver_is_import_cascade_code(code) -> next
+                ^matched: wildcard && (code == "E0107" || code == "E0102")
+                if !matched {
+                    what: diagnostics[idx].what
+                    loop name in names {
+                        if what.contains("`{name}`") {
+                            matched = true
+                            break
+                        }
+                    }
+                }
+                if matched {
+                    diagnostics[idx] = diagnostic_caused_by(diagnostics[idx], root)
+                }
+            }
+        }
+    }
+}
+
 jet_driver_compile_result: fn(
     load: ^JetDriverLoadResult,
     failed_stage: JetDriverStage?,
@@ -513,6 +587,7 @@ jet_driver_compile_result: fn(
     // Advice leaves the diagnostic stream for `jet lint <file>`; a lint the
     // entry package denies is an E1293 error by now and stays.
     ^raw_diagnostics: compiler_take_rows<Diagnostic>(load.diagnostics)
+    jet_driver_link_import_cascades(load, raw_diagnostics)
     summarized: jet_driver_summarize_dependency_reports(load, raw_diagnostics.move())
     ^shown: [Diagnostic]{}
     ^advice: [Diagnostic]{}
@@ -2374,6 +2449,10 @@ JetDriverComptimeEntry: struct {
     // which read it by calling its item function (TConstantDef.item_function):
     // its type landed as it joined (jet_driver_comptime_type_land).
     computed: Bool{false},
+    // Constant keys from earlier entries in the same batch that this entry
+    // reads (`jet_driver_comptime_computed_waits`), used under keep-going to
+    // skip evaluating dependents after an earlier entry fails.
+    dependencies: [String]{[String]{}},
 }
 
 // Checked items evaluated together on one IR build, in order.
@@ -3039,7 +3118,7 @@ jet_driver_comptime_batch_new: fn() -> JetDriverComptimeBatch Never! {
 // adding the foreign functions it reaches that the batch does not hold yet.
 // `computed`: the build computes the item's constant for the entries after
 // it (JetDriverComptimeEntry.computed).
-jet_driver_comptime_batch_add: fn(batch: ^JetDriverComptimeBatch, source: SemaComptimeItemSource, request: SemaComptimeItemRequest, functions: ^[FnBody], foreign: ^^[SemaCheckedForeignFunction], computed: Bool) Never! {
+jet_driver_comptime_batch_add: fn(batch: ^JetDriverComptimeBatch, source: SemaComptimeItemSource, request: SemaComptimeItemRequest, functions: ^[FnBody], foreign: ^^[SemaCheckedForeignFunction], computed: Bool, dependencies: [String]{[String]{}}) Never! {
     loop row in foreign.move() {
         held: loop previous in batch.foreign {
             if previous.symbol_id == row.symbol_id {
@@ -3066,7 +3145,7 @@ jet_driver_comptime_batch_add: fn(batch: ^JetDriverComptimeBatch, source: SemaCo
     }
     if !jet_driver_comptime_entry_bare(request, function_rows) -> batch.bare = false
     name_column_set(batch.keys, batch.key_computed, source.key, if computed -> 1 else -> 0)
-    batch.entries.push(JetDriverComptimeEntry{source: source, request: request, function_rows: function_rows, computed: computed})
+    batch.entries.push(JetDriverComptimeEntry{source: source, request: request, function_rows: function_rows, computed: computed, dependencies: dependencies})
 }
 
 // The batch holding only entry `index` of `batch`, with that entry's own
@@ -3287,10 +3366,19 @@ jet_driver_comptime_flush: fn(
     ^native: jet_eval_native_load(built, jet_driver_comptime_eval_config(request.eval_config, None, None), threads: request.compiler_threads)
     compiler_queries: jet_driver_comptime_compiler_for(request)
     if request.trace_sink == .Val(sink) -> sink.end("comptime.load", 1)
+    ^failed_keys: name_table()
     loop item in 0..<batch.entries.len() {
         entry: batch.entries[item]
-        counters.item_functions_evaluated += 1
         source: entry.source
+        dep_failed: loop dep in entry.dependencies {
+            if name_find(failed_keys, dep) != None -> break true
+        } ?? false
+        if dep_failed {
+            ^_: name_intern(failed_keys, source.key)
+            flushed.rejected = true
+            next
+        }
+        counters.item_functions_evaluated += 1
         comptime_request: entry.request
         if request.trace_sink == .Val(sink) {
             sink.begin_item("comptime.eval", source.source_file, source.name)
@@ -3336,6 +3424,7 @@ jet_driver_comptime_flush: fn(
         // it is refused (jet_driver_module_value_refused).
         failed_value: if eval_result.value == .Val(evaluated_value) -> evaluated_value == .Failed(_) else -> false
         if source.module_value && eval_result.internal_problem == None && (eval_result.error != None || failed_value) {
+            ^_: name_intern(failed_keys, source.key)
             flushed.refused.push(JetDriverModuleValueRefusal{source: source.copy(), reason: jet_driver_module_value_eval_reason(eval_result)})
             next
         }
@@ -3344,6 +3433,8 @@ jet_driver_comptime_flush: fn(
                 diagnostics.push(jet_driver_attach_registration_source_location(eval_error.diagnostic.move(), graph, comptime_request.module_identity))
             }
             if graph.keep_going {
+                ^_: name_intern(failed_keys, source.key)
+                flushed.rejected = true
                 if eval_result.internal_problem == .Val(problem) {
                     diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, comptime_request.module_identity, "E0003", comptime_request.span, "keep-going: the native comptime run failed internally: {problem.message}", "keep-going drops the item and runs the rest", "fix the comptime run defect"))
                 }
@@ -3790,13 +3881,16 @@ jet_driver_comptime_run: fn(
                 // A check that waits only on constants the batch computes
                 // reads them in the batch's program, and goes on as one that
                 // waits on nothing.
+                ^batch_deps: [String]{}
                 if jet_driver_comptime_computed_waits(batch, checked_item) {
+                    batch_deps = checked_item.waiting_dependencies.move()
                     checked_item.waiting_dependencies = [String]{}
                 }
                 // A settled check that waits on a batch key waits below.
                 if batch.entries.len() > 0 && !jet_driver_comptime_settled(source.local_value, jet_driver_has_errors(checked_item.diagnostics), checked_item.complete, checked_item.waiting_dependencies) {
                     ^flushed: jet_driver_comptime_staged_flush(request, batch, values, checked_functions, trace, programs, staging, counters, diagnostics)
                     batch = jet_driver_comptime_batch_new()
+                    batch_deps = [String]{}
                     if flushed.progressed -> made_progress = true
                     if flushed.stop == .Val(stopped) {
                         sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
@@ -3837,7 +3931,10 @@ jet_driver_comptime_run: fn(
                     // Keep-going: an item whose own check reported an error is
                     // dropped (its value never lands) and the run goes on.
                     if keep_going {
-                        if jet_driver_has_errors_since(diagnostics, item_diagnostic_start) -> next
+                        if jet_driver_has_errors_since(diagnostics, item_diagnostic_start) {
+                            refused_any = true
+                            next
+                        }
                     } else if jet_driver_has_errors_since(diagnostics, stop_mark) {
                         sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
                         return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
@@ -4078,7 +4175,10 @@ jet_driver_comptime_run: fn(
                     }
                 }
                 if keep_going {
-                    if jet_driver_has_errors_since(diagnostics, item_diagnostic_start) -> next
+                    if jet_driver_has_errors_since(diagnostics, item_diagnostic_start) {
+                        refused_any = true
+                        next
+                    }
                 } else if jet_driver_has_errors_since(diagnostics, stop_mark) {
                     sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
                     return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
@@ -4086,6 +4186,7 @@ jet_driver_comptime_run: fn(
                 if !closure.complete && closure.waiting_dependencies.len() == 0 && keep_going {
                     reasons: loop row in closure.incomplete -> "{jet_driver_totality_function(row)}: {row.reason}"
                     diagnostics.push(jet_driver_diagnostic_at_program_site(programs[0], source.module_identity, "E0003", source.span, "keep-going: comptime item `{source.name}` has an incomplete function closure: {reasons.join("; ")}", "keep-going drops the item and runs the rest", "see the closure's other reports"))
+                    refused_any = true
                     next
                 }
                 if !closure.complete && closure.waiting_dependencies.len() == 0 {
@@ -4180,7 +4281,7 @@ jet_driver_comptime_run: fn(
                     if computed {
                         jet_driver_comptime_type_land(programs[0], available, staging.sites, source, comptime_request.expression, trail)
                     }
-                    jet_driver_comptime_batch_add(batch, source, comptime_request, closure.functions, closure.foreign.move(), computed)
+                    jet_driver_comptime_batch_add(batch, source, comptime_request, closure.functions, closure.foreign.move(), computed, dependencies: batch_deps.move())
                     next
                 }
                 if batch.entries.len() > 0 {
@@ -5734,6 +5835,23 @@ jet_driver_registration_module_inputs: fn(
         }
         ^program: modules[loaded_index].program
         if release_programs -> compiler_transfer_rows<Item>(program.items, items)
+        ^load_error_spans: [Span]{}
+        loop diagnostic in diagnostics {
+            if diagnostic.severity != DIAGNOSTIC_ERROR -> next
+            span: diagnostic.span ?? next
+            path: diagnostic.source_path ?? next
+            if path == unit.path {
+                load_error_spans.push(Span{start: span.start, end: span.end})
+                next
+            }
+            loop segment in unit.source_segments {
+                if segment.source_file == path {
+                    delta: segment.generated.start - segment.source_start
+                    load_error_spans.push(Span{start: span.start + delta, end: span.end + delta})
+                    break
+                }
+            }
+        }
         inputs.push(
             SemaRegistrationModuleInput{
                 package_identity: modules[loaded_index].package_identity,
@@ -5754,6 +5872,7 @@ jet_driver_registration_module_inputs: fn(
                 source: jet_driver_source_text_at(source_files, source_positions, unit.path),
                 units_mentions: modules[loaded_index].units_mentions,
                 meta: jet_driver_module_meta_source(unit, packages),
+                load_error_spans: load_error_spans.move(),
             },
         )
     }
@@ -6007,7 +6126,7 @@ jet_driver_compile_stages: fn(request: JetDriverCompileRequest, preloaded: ^[Jet
     // record for a Core module (jet_driver_grammar_plans), and each
     // registration of the program (a root `#loop`'s first pass too) takes
     // its module's plans.
-    grammar_plans: jet_driver_grammar_plans(request, load)
+    grammar_plans: jet_driver_grammar_plans(request, load, kg.enabled)
     // A root `#loop` over a module value computed while building (`#loop
     // row in ROWS` over `ROWS: #run rows()`) waits on that value. A first
     // pass registers the program without such loops and computes the
@@ -6068,9 +6187,9 @@ jet_driver_root_loop_waits: fn(load: JetDriverLoadResult) -> [SemaRootLoopValue]
 // takes from the record register them from their plans. Its reports are
 // dropped: the compile proper checks each literal again and reports its
 // faults.
-jet_driver_grammar_plans: fn(request: JetDriverCompileRequest, load: JetDriverLoadResult) -> [SemaRootLoopValue] {
+jet_driver_grammar_plans: fn(request: JetDriverCompileRequest, load: JetDriverLoadResult, keep_going: Bool{false}) -> [SemaRootLoopValue] {
     ^waits: jet_driver_grammar_waits(load)
-    if waits.len() == 0 || !load.complete || jet_driver_has_errors(load.diagnostics) -> return waits
+    if waits.len() == 0 || (!keep_going && (!load.complete || jet_driver_has_errors(load.diagnostics))) -> return waits
     if !request.core_seal -> jet_driver_grammar_recorded(request, load, waits)
     ^known: [SemaRootLoopValue]{}
     ^pending: [SemaRootLoopValue]{}
@@ -6080,7 +6199,7 @@ jet_driver_grammar_plans: fn(request: JetDriverCompileRequest, load: JetDriverLo
     if pending.len() == 0 -> return known
     if request.trace_sink == .Val(sink) -> sink.begin("grammar", "", -1, -1)
     batch_load: jet_driver_grammar_load(load, pending)
-    ^batch_log: jet_driver_keep_going_log(None)
+    ^batch_log: jet_driver_keep_going_log(if keep_going -> Val(JetDriverKeepGoing{skip: [String]{}}) else -> None)
     ^batch_capture: JetDriverCheckedProjectionCapture{}
     // copy: a batch that stops hands back no values, so the result keeps the
     // waits and the known plans the batch's registration takes
@@ -6775,20 +6894,19 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: ^JetD
     check_lookups = jet_driver_stage_lookup_counts(comptime_stage.graph, check_lookups)
     jet_driver_trace_lookup_counters(request.trace_sink, "sema.check", check_lookups, register_lookups)
     if kg.enabled {
-        // Finalization drops Core's lints (sema_finalize_graph); the stage's own
-        // reports land here before it, so they are dropped here too.
-        loop diagnostic in comptime_stage.diagnostics {
-            if !sema_core_lint_dropped(diagnostic, own_check: core_own_check) {
-                load.diagnostics.push(diagnostic)
-            }
-        }
-        jet_driver_keep_going_diagnostics(kg, "sema.check", load.diagnostics)
+        // Finalization filters `#Allow` lint allowances and drops Core's lints
+        // before merging `comptime_stage.diagnostics` into `load.diagnostics`;
+        // record the stage's non-Core-lint reports to the keep-going log only.
+        stage_logged: loop diagnostic in comptime_stage.diagnostics if !sema_core_lint_dropped(diagnostic, own_check: core_own_check) -> diagnostic
+        jet_driver_keep_going_diagnostics(kg, "sema.check", stage_logged)
         jet_driver_keep_going_incomplete_modules(kg, "sema.check", comptime_stage.modules)
         jet_driver_keep_going_flush(kg, request.trace_sink)
     }
     if (!kg.enabled && (!comptime_stage.complete || registration_errors)) || comptime_stage.modules.len() != registration_module_count {
-        if !kg.enabled {
-            loop diagnostic in comptime_stage.diagnostics -> load.diagnostics.push(diagnostic)
+        loop diagnostic in comptime_stage.diagnostics {
+            if !kg.enabled || !sema_core_lint_dropped(diagnostic, own_check: core_own_check) {
+                load.diagnostics.push(diagnostic)
+            }
         }
         had_errors: jet_driver_has_errors(load.diagnostics)
         ^result: jet_driver_compile_result(load, Val(JetDriverStage.Check), false, trace)
@@ -6842,7 +6960,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: ^JetD
     }
     // The stage's reports reach the result through finalization; a run that
     // stops first carries them itself, so a declaration's error is never lost.
-    if !kg.enabled && (comptime_run.soft_stop || !comptime_run.complete) {
+    if comptime_run.soft_stop || (!kg.enabled && !comptime_run.complete) {
         jet_driver_comptime_diagnostics_add(load.diagnostics, comptime_stage.diagnostics)
     }
     if comptime_run.soft_stop {
@@ -7301,6 +7419,14 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: ^JetD
             repeated: repeated_rows[checked_row]
             checked_row += 1
             if repeated {
+                // Keep-going: duplicate declarations already reported E0105 /
+                // E0503 during registration; keep the first function of a key
+                // for lowering without adding an internal symbol-key cascade.
+                if kg.enabled && jet_driver_has_errors(load.diagnostics) {
+                    failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Check)
+                    lowering_candidates.push(false)
+                    next
+                }
                 load.diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, graph_module.module_identity, "E0003", module_functions[function_index].source_span, "two checked functions share one canonical symbol key", "every lowered function identity names exactly one declaration in the package graph", "report the duplicate Sema function key"))
                 failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Check)
                 // Keep-going: the first function of a key lowers.

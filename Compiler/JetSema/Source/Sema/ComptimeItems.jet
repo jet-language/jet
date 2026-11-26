@@ -1178,6 +1178,7 @@ sema_comptime_struct_bakes_defaults: fn(derives: [NamedSpan]) -> Bool Never! {
 sema_comptime_collect_module_sources: fn(graph: SemaRegistrationGraph, source_module: SemaRegistrationModule) -> [SemaComptimeItemSource] {
     ^sources: SemaComptimeSourceList{items: [SemaComptimeItemSource]{}}
     loop constant in source_module.constants {
+        if sema_span_overlaps_any(constant.declaration.span, source_module.load_error_spans) -> next
         if sema_output_metadata_binding(constant.declaration) -> next
         if constant.declaration.ct != None -> next
         // Registration reports a `#Persist` binding whose value is not a

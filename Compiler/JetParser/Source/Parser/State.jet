@@ -770,7 +770,17 @@ parser_recover_aborted_statement: fn(state: ^JetParserState, start: Int) Never! 
 }
 
 parser_recover_aborted_item: fn(state: ^JetParserState, start: Int) Never! {
-    if parser_take_abort(state, start) -> parser_sync_top(state)
+    if !parser_take_abort(state, start) {
+        return
+    }
+    ^open: 0
+    loop index in start..<state.position {
+        if index >= state.tokens.len() -> break
+        kind: state.tokens[index].kind
+        if kind == TOKEN_LBRACE -> open += 1
+        if kind == TOKEN_RBRACE && open > 0 -> open -= 1
+    }
+    parser_sync_top_from(state, open)
 }
 
 parser_add_error_here: fn(state: ^JetParserState, what: String, why: String, fix: String) {
@@ -1354,8 +1364,10 @@ parser_recover_statement: fn(state: ^JetParserState) Never! {
 // brace depth 0 (`name:`, `priv`, `use`, `impl`, `#`, or a line-start `#run`,
 // `#if`, `#loop`). Tracking braces skips the failed item's own body before
 // stopping on the next item so subsequent items keep their declared names.
-parser_sync_top: fn(state: ^JetParserState) Never! {
-    ^depth: 0
+parser_sync_top: fn(state: ^JetParserState) Never! { parser_sync_top_from(state, 0) }
+
+parser_sync_top_from: fn(state: ^JetParserState, open: Int) Never! {
+    ^depth: open
     ^started: false
     loop {
         kind: parser_current_kind(state)

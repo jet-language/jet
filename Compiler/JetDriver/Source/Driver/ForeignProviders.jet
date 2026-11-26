@@ -8,6 +8,7 @@ use {
         AppliedRuleApplication,
         CModule,
         CModuleKind,
+        DIAGNOSTIC_ERROR,
         Diagnostic,
         ExternFn,
         FencedStatement,
@@ -1146,7 +1147,22 @@ jet_driver_foreign_canonical_assembly: fn(load: JetDriverLoadResult, surface: Je
     }
     ^canonical_overlays: [ExternFn]{}
     loop overlay_index in 0..<overlay_paths.len() {
-        parsed_overlay: jet_driver_foreign_parse_shifted(overlay_paths[overlay_index], overlay_sources[overlay_index], overlay_bases[overlay_index], diagnostics) ?? return None
+        overlay_path: overlay_paths[overlay_index]
+        already_errored: loop existing in load.diagnostics {
+            if existing.severity == DIAGNOSTIC_ERROR && existing.source_path == .Val(existing_path) && existing_path == overlay_path {
+                break true
+            }
+        } ?? false
+        ^overlay_diagnostics: [Diagnostic]{}
+        parsed_overlay: jet_driver_foreign_parse_shifted(overlay_path, overlay_sources[overlay_index], overlay_bases[overlay_index], overlay_diagnostics) ?? {
+            if !already_errored {
+                loop diagnostic in overlay_diagnostics.move() -> diagnostics.push(diagnostic)
+            }
+            return None
+        }
+        if !already_errored {
+            loop diagnostic in overlay_diagnostics.move() -> diagnostics.push(diagnostic)
+        }
         jet_driver_foreign_collect_canonical_overlay_items(parsed_overlay.items, overlay_bases, overlay_ends, surface.library, canonical_overlays)
     }
     ^canonical_adapters: [Func]{}

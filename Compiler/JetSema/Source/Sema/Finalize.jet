@@ -956,7 +956,7 @@ sema_finalize_program: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail
         sink.progress("counters.sema.core_seal.stand_ins", stood_in, -1)
         if rerun != "" -> sink.progress("counters.sema.core_seal.reruns.{rerun}", 1, -1)
     }
-    reported: loop diagnostic in diagnostics if !sema_core_lint_dropped(diagnostic, own_check: final_graph.core_own_check) && !sema_lint_allowed(diagnostic, allowances) -> diagnostic
+    reported: loop diagnostic in diagnostics if !sema_core_lint_dropped(diagnostic, own_check: final_graph.core_own_check) && !sema_lint_allowed(diagnostic, allowances) && !sema_synthetic_error_placeholder_diagnostic(diagnostic) && !sema_load_error_overlapped(diagnostic, final_graph) -> diagnostic
     diagnostics = reported
     sema_crypto_misuse_precedence(diagnostics)
     sema_name_display_diagnostics(final_graph, diagnostics)
@@ -1621,4 +1621,25 @@ sema_check_pure_live_blocks: fn(name: String, body: [Stmt], diagnostics: ^[Diagn
 priv sema_finalize_root_denials: fn(root_policy: ^^SemaRegistrationPackagePolicy?) -> {package_denials: [String], organization_denials: [String], organization_source: String} Never! {
     policy: root_policy ?? return {package_denials: [String]{}, organization_denials: [String]{}, organization_source: ""}
     {package_denials: policy.authority_deny ?? [String]{}, organization_denials: policy.organization_deny, organization_source: policy.organization_source}
+}
+
+priv sema_load_error_overlapped: fn(diagnostic: Diagnostic, graph: SemaRegistrationGraph) -> Bool Never! {
+    span: diagnostic.span ?? return false
+    path: diagnostic.source_path ?? return false
+    loop module_row in graph.modules {
+        if module_row.load_error_spans.len() == 0 -> next
+        ^matches_path: module_row.source_file == path
+        if !matches_path {
+            loop segment in module_row.source_segments {
+                if segment.source_file == path {
+                    matches_path = true
+                    break
+                }
+            }
+        }
+        if matches_path && sema_span_overlaps_any(span, module_row.load_error_spans) {
+            return true
+        }
+    }
+    false
 }

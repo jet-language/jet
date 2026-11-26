@@ -503,6 +503,7 @@ sema_check_module_tests: fn(graph: SemaRegistrationGraph, module_index: Int) -> 
 sema_check_registration_module_test: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, item_index: Int, scopes: SemaScopeTable, host_hooks: SemaHostHookAccess?, module_result: ^SemaGraphModuleResult) {
     graph: program.registration_graph
     if graph.modules[module_index].program.items[item_index] == .Test(test) {
+        if sema_span_overlaps_any(test.span, graph.modules[module_index].load_error_spans) -> return
         if sema_check_module_tests(graph, module_index) && test.name != None && !sema_check_unusable_body(graph, sema_check_test_key(module_text(graph.module_table, graph.modules[module_index].module_identity), test.span)) {
             loop diagnostic in sema_property_param_diagnostics(graph, module_index, test) {
                 module_result.diagnostics.push(diagnostic)

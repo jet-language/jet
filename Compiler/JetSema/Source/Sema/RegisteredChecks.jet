@@ -137,12 +137,18 @@ sema_function_check_registered: fn(job: SemaBodyJob, declaration: Func, module_i
 
 sema_function_check_registered_unregistered: fn(job: SemaBodyJob, declaration: Func, module_index: Int, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?, owner_id: SymbolID, function_kind: TFuncKind, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> SemaFunctionResult? {
     owner_key: sema_program_symbol_key(program, owner_id)
+    graph: program.registration_graph
+    if module_index >= 0 && module_index < graph.modules.len() {
+        load_errors: graph.modules[module_index].load_error_spans
+        if load_errors.len() > 0 && sema_span_overlaps_any(declaration.span, load_errors) {
+            return Val(sema_function_check_unavailable(owner_key, "declaration contains a parse error"))
+        }
+    }
     if memory_position == .Val(position) {
         if memory_plan.functions[position].function == .Val(planned) {
             return sema_function_check_unregistered(planned, owner_key, function_kind, scopes, program)
         }
     }
-    graph: program.registration_graph
     sema_function_check_unregistered_in_graph(graph, job, declaration, module_index, owner_key, function_kind, scopes, program)
 }
 

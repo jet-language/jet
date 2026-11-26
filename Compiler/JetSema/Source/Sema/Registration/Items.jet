@@ -751,6 +751,10 @@ SemaRegistrationModuleInput: struct {
     // literal the grammar check refused has none and stays; the compile
     // proper reports the literal.
     grammar_plans: [NamedCtValue]{[NamedCtValue]{}},
+    // Spans of error diagnostics already reported for this module during load
+    // or parse (in module aggregate coordinates), used under keep-going to
+    // suppress internal graph-edge cascades and isolate broken items.
+    load_error_spans: [Span]{[Span]{}},
 }
 
 SemaForeignImportBinding: struct {
@@ -795,6 +799,7 @@ SemaRegistrationModule: struct {
     program: Program,
     inline_bindings: SemaInlinePreparedBindings{SemaInlinePreparedBindings{}},
     source: String{""},
+    load_error_spans: [Span]{[Span]{}},
     // The `#FX(…)` cap of each generic-module template erased from
     // `program.items` once expanded: the cap's names are still checked
     // where it is written (E0119, E0750), instantiated or not.
@@ -4207,6 +4212,7 @@ sema_registration_prepare_module_row: fn(input: ^^SemaRegistrationModuleInput, m
         source_origin: owned.source_origin,
         program: owned.program,
         source: owned.source,
+        load_error_spans: owned.load_error_spans,
         symbols: [Symbol]{},
         declarations: [Item]{},
         symbol_names: name_table_sized(16),
@@ -5877,9 +5883,27 @@ sema_registration_module_name: fn(graph: SemaRegistrationGraph, module_id: Modul
     Val(graph.modules[index].module_name)
 }
 
+// Whether `span` overlaps any span in `spans` (in the same coordinate space).
+sema_span_overlaps_any: fn(span: Span, spans: [Span]) -> Bool Never! {
+    loop error_span in spans {
+        if span.start <= error_span.end && error_span.start <= span.end -> return true
+    }
+    false
+}
+
+// Parser error recovery inserts synthetic names (`__jet_error`, `__jet_policy_*`)
+// that are never authored by users and must not leak as Sema diagnostics.
+sema_synthetic_error_placeholder_diagnostic: fn(diagnostic: Diagnostic) -> Bool Never! {
+    diagnostic.what.contains("`__jet_error`") || diagnostic.what.contains("`__jet_policy_")
+}
+
 sema_registration_push_graph_diagnostic: fn(graph: ^SemaRegistrationGraph, module_index: Int, diagnostic: ^^Diagnostic) Never! {
+    if sema_synthetic_error_placeholder_diagnostic(diagnostic) -> return
     if {
         module_index >= 0 && module_index < graph.modules.len() -> {
+            if diagnostic.span == .Val(span) && sema_span_overlaps_any(span, graph.modules[module_index].load_error_spans) {
+                return
+            }
             graph.diagnostics.push(sema_diagnostic_with_source_location(diagnostic, graph.modules[module_index].source_segments))
         }
         else -> { graph.diagnostics.push(diagnostic) }
@@ -6951,7 +6975,7 @@ sema_registration_prepare_graph: fn(inputs: ^^[SemaRegistrationModuleInput], edg
                 sema_registration_add_import(graph, registered, aliased_module, "", lifted, edge.target_module_identity, target_package)
                 bound = true
             }
-            if !bound {
+            if !bound && graph.modules[aliased_module].load_error_spans.len() == 0 {
                 sema_registration_push_graph_diagnostic(graph, aliased_module, sema_error("E0003", declaration.span, "an inline module's own import has no resolved graph edge", "a lowered inline module reads its own import through the module that import's edge names", "keep the loader's scoped edge for the inline module's import"))
             }
         }
@@ -6959,12 +6983,15 @@ sema_registration_prepare_graph: fn(inputs: ^^[SemaRegistrationModuleInput], edg
     ^module_index: 0
     loop module_index < graph.modules.len() {
         // Every source import must have one exact edge. A missing edge is not
-        // recovered by matching a module name or alias.
+        // recovered by matching a module name or alias. Under keep-going a
+        // module whose loader pass already reported an error on its imports or
+        // declarations keeps those load diagnostics instead of adding E0003.
         import_count: graph.modules[module_index].program.imports.len()
+        has_load_errors: graph.modules[module_index].load_error_spans.len() > 0
         loop import_index in 0..<import_count {
             ^declaration: graph.modules[module_index].program.imports[import_index]
             found: edge_spans[module_index].get(sema_registration_span_key(declaration.span)) != None
-            if !found && !sema_module_meta_import(declaration) && !sema_grammar_items_import(declaration) {
+            if !found && !has_load_errors && !sema_module_meta_import(declaration) && !sema_grammar_items_import(declaration) {
                 sema_registration_push_graph_diagnostic(graph, module_index, sema_error("E0003", declaration.span, "an import declaration has no resolved graph edge", "semantic preparation never resolves private or dependency imports by bare name", "provide the loader-resolved target module identity"))
             }
         }

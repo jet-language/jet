@@ -19,6 +19,7 @@
 use {
     unicode: core.text
     jet_foundation.[
+        AccessConvention,
         Expr,
         Item,
         Marker,
@@ -422,6 +423,7 @@ sema_cli_entry_spec: fn(definition: StructDef, items: [Item], type_ref: String) 
         if sema_computed_field_getter_function(function) -> next
         has_self: loop param in function.params {
             if param.name == "self" {
+                if param.convention != AccessConvention.Read -> return None
                 break true
             }
         } ?? false
