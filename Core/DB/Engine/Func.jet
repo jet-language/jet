@@ -26,6 +26,7 @@
 // GroupConcatCtx is described at its routines.
 use {
     math: core.math
+    json5_syntax: __core_encoding_syntax_json5
     base: __core_db_base
     __core_db_base.[Mem]
     util: __core_db_util
@@ -2174,6 +2175,11 @@ json_parse_nan_inf: fn(p: ^JSONParse, i: Int) -> Int Never! {
 // jsonConvertTextToBlob: parse the whole of json into blob; true after an
 // error, the call's result then "malformed JSON".
 json_convert_text_to_blob: fn(db: conn.Conn, v: ^conn.Vdbe, p: ^JSONParse) -> Bool Never! {
+    if json5_syntax.translate_to_jsonb(p.json) == .Val(res) {
+        p.blob = res.blob
+        p.has_nonstd = res.has_nonstd
+        return false
+    }
     ^i: json_translate_text_to_blob(p, 0)
     if i > 0 {
         loop json_is_space(json_byte(p, i)) -> i += 1
@@ -2927,6 +2933,9 @@ json_test_text: fn(s: String) -[DB]> String Never! {
     assert_eq(json_test_text("'x\\'y\\x41'"), "\"x'y\\u0041\"")
     assert_eq(json_test_text("[nan,-inf]"), "[null,-9e999]")
     assert_eq(json_test_text("/* c */ [1] // x"), "[1]")
+    printed: json5_syntax.print_document("/* c */ {{a: .5, b: [0x1F, 'hi',],}} // tail") ?? panic("JSON5 print")
+    assert_eq(json_test_text(printed), "{{\"a\":0.5,\"b\":[31,\"hi\"]}}")
+    assert(json5_syntax.translate_to_jsonb("{{".bytes()) == None)
     assert_eq(json_test_text("{{"), "malformed JSON")
     assert_eq(func_test_text(cat.FI_JSON_REMOVE, 0, [Mem]{base.mem_blob([U8]{U8{19}})}), "malformed JSON")
     assert_eq(func_test_text(cat.FI_JSON_REMOVE, 0, [Mem]{base.mem_null()}), "<null>")

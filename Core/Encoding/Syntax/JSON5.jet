@@ -1,0 +1,318 @@
+// Private JSON5 grammar and SQLite JSONB lowering for `core.db` json1.
+//
+// Declares the full JSON5 grammar (RFC 8259 JSON plus unquoted identifier
+// keys, single-quoted strings, trailing commas, line and block comments, hex
+// integers, leading/trailing decimal dots, leading `+`, and case-insensitive
+// Infinity/NaN) as a checked printable `Grammar` literal.
+use {
+    core.grammar.[Grammar]
+}
+
+priv JSONB_NULL: 0
+priv JSONB_TRUE: 1
+priv JSONB_FALSE: 2
+priv JSONB_INT: 3
+priv JSONB_INT5: 4
+priv JSONB_FLOAT: 5
+priv JSONB_FLOAT5: 6
+priv JSONB_TEXT: 7
+priv JSONB_TEXTJ: 8
+priv JSONB_TEXT5: 9
+priv JSONB_ARRAY: 11
+priv JSONB_OBJECT: 12
+priv JSON5_MAX_DEPTH: 1000
+
+priv Document: Grammar{"""
+    document : val=value ;
+    value    : obj=object       # Obj
+             | arr=array        # Arr
+             | text=DSTR        # DoubleString
+             | text=SSTR        # SingleString
+             | text=BOOL        # BoolVal
+             | text=NULL        # NullVal
+             | text=SPECIAL     # SpecialNum
+             | text=HEX         # HexNum
+             | text=NUMBER      # NumberVal
+             ;
+    object   : '{{' (members+=member (',' members+=member)* trailing=','?)? '}}' ;
+    member   : key=key_name ':' val=value ;
+    key_name : text=DSTR        # KeyDouble
+             | text=SSTR        # KeySingle
+             | text=IDENT       # KeyIdent
+             ;
+    array    : '[' (items+=value (',' items+=value)* trailing=','?)? ']' ;
+
+    DSTR          : '"' ([^"\\\u{{0}}-\u{{1F}}] | '\\' ([^\r\n] | '\r'? '\n'))* '"' ;
+    SSTR          : '\'' ([^'\\\u{{0}}-\u{{1F}}] | '\\' ([^\r\n] | '\r'? '\n'))* '\'' ;
+    BOOL          : 'true' | 'false' ;
+    NULL          : 'null' ;
+    SPECIAL       : [+\-]? ('Infinity'i | 'Inf'i | 'NaN'i | 'QNaN'i | 'SNaN'i) ;
+    HEX           : [+\-]? '0' [xX] [0-9A-Fa-f]+ ;
+    NUMBER        : [+\-]? ( ('0' | [1-9] [0-9]*) ('.' [0-9]*)? ([eE] [+\-]? [0-9]+)? | '.' [0-9]+ ([eE] [+\-]? [0-9]+)? ) ;
+    IDENT         : ([A-Za-z_$\u{{80}}-\u{{9F}}\u{{A1}}-\u{{FEFE}}\u{{FF00}}-\u{{10FFFF}}] | '\\u' [0-9A-Fa-f] [0-9A-Fa-f] [0-9A-Fa-f] [0-9A-Fa-f])
+                    ([A-Za-z0-9_$\u{{80}}-\u{{9F}}\u{{A1}}-\u{{FEFE}}\u{{FF00}}-\u{{10FFFF}}] | '\\u' [0-9A-Fa-f] [0-9A-Fa-f] [0-9A-Fa-f] [0-9A-Fa-f])*
+                  ;
+    WS            : [ \t\r\n\u{{B}}\u{{C}}\u{{A0}}\u{{FEFF}}]+ -> skip ;
+    LINE_COMMENT  : '//' [^\r\n]* -> skip ;
+    BLOCK_COMMENT : '/*' ([^*] | '*' [^/])* '*/' -> skip ;
+"""}
+
+JSONBResult: struct {
+    blob: [U8],
+    has_nonstd: Bool,
+}
+
+/// Parses JSON5 UTF-8 bytes via `Document.parse` and encodes SQLite 3.45.0
+/// JSONB bytes, reporting whether any JSON5-only extension was used.
+translate_to_jsonb: fn(raw: [U8]) -> JSONBResult? Never! {
+    text: String.from_bytes(raw) ?? return None
+    doc: if Document.parse(text) == {
+        .Ok(parsed) -> parsed
+        .Err(_) -> return None
+    }
+    ^out: [U8]{}
+    ^nonstd: has_nonstd_trivia(raw)
+    if !emit_value(doc.val, out, nonstd, 0) -> return None
+    Val(JSONBResult{blob: out, has_nonstd: nonstd})
+}
+
+/// Parses JSON5 `text` and formats it back through the grammar's checked printer.
+print_document: fn(text: String) -> String? Never! {
+    if Document.parse(text) == {
+        .Ok(doc) -> {
+            if doc.print() == {
+                .Ok(printed) -> Val(printed)
+                .Err(_) -> None
+            }
+        }
+        .Err(_) -> None
+    }
+}
+
+priv has_nonstd_trivia: fn(raw: [U8]) -> Bool Never! {
+    ^i: 0
+    ^in_str: U8{0}
+    loop i < raw.len() {
+        b: raw[i]
+        if in_str != (U8{0}) {
+            if b == (U8{92}) {
+                i += 2
+                next
+            }
+            if b == in_str -> in_str = U8{0}
+            i += 1
+            next
+        }
+        if b == (U8{34}) || b == (U8{39}) {
+            in_str = b
+            i += 1
+            next
+        }
+        if b == (U8{47}) || b == (U8{11}) || b == (U8{12}) || b == (U8{194}) || b == (U8{239}) {
+            return true
+        }
+        i += 1
+    }
+    false
+}
+
+priv append_header: fn(out: ^[U8], e_type: Int, sz: Int) Never! {
+    if sz <= 11 {
+        out.push(U8{(sz << 4) | e_type})
+    } else if sz <= 255 {
+        out.push(U8{192 | e_type})
+        out.push(U8{sz & 255})
+    } else if sz <= 65535 {
+        out.push(U8{208 | e_type})
+        out.push(U8{(sz >> 8) & 255})
+        out.push(U8{sz & 255})
+    } else {
+        out.push(U8{224 | e_type})
+        out.push(U8{(sz >> 24) & 255})
+        out.push(U8{(sz >> 16) & 255})
+        out.push(U8{(sz >> 8) & 255})
+        out.push(U8{sz & 255})
+    }
+}
+
+priv append_node: fn(out: ^[U8], e_type: Int, payload: [U8]) Never! {
+    append_header(out, e_type, payload.len())
+    loop b in payload -> out.push(b)
+}
+
+priv append_slice: fn(out: ^[U8], e_type: Int, raw: [U8], start: Int, end: Int) Never! {
+    append_header(out, e_type, end - start)
+    loop i in start..<end -> out.push(raw[i])
+}
+
+priv is_hex_byte: fn(b: U8) -> Bool Never! {
+    n: Int{b}
+    (n >= 48 && n <= 57) || (n >= 65 && n <= 70) || (n >= 97 && n <= 102)
+}
+
+priv emit_string: fn(quoted: String, is_single: Bool, out: ^[U8], nonstd: ^Bool) -> Bool Never! {
+    if is_single -> nonstd = true
+    raw: quoted.bytes()
+    if raw.len() < 2 -> return false
+    ^opcode: JSONB_TEXT
+    ^j: 1
+    end: raw.len() - 1
+    loop j < end {
+        c: Int{raw[j]}
+        if c == 92 {
+            j += 1
+            if j >= end -> return false
+            e: Int{raw[j]}
+            if e == 34 || e == 92 || e == 47 || e == 98 || e == 102 || e == 110 || e == 114 || e == 116 {
+                if opcode == JSONB_TEXT -> opcode = JSONB_TEXTJ
+            } else if e == 117 && j + 4 < end && is_hex_byte(raw[j + 1]) && is_hex_byte(raw[j + 2]) && is_hex_byte(raw[j + 3]) && is_hex_byte(raw[j + 4]) {
+                if opcode == JSONB_TEXT -> opcode = JSONB_TEXTJ
+                j += 4
+            } else if e == 39 || e == 48 || e == 118 || e == 10 {
+                opcode = JSONB_TEXT5
+                nonstd = true
+            } else if e == 13 {
+                if j + 1 < end && raw[j + 1] == (U8{10}) -> j += 1
+                opcode = JSONB_TEXT5
+                nonstd = true
+            } else if e == 226 && j + 2 < end && raw[j + 1] == (U8{128}) && (raw[j + 2] == (U8{168}) || raw[j + 2] == (U8{169})) {
+                opcode = JSONB_TEXT5
+                nonstd = true
+                j += 2
+            } else if e == 120 && j + 2 < end && is_hex_byte(raw[j + 1]) && is_hex_byte(raw[j + 2]) {
+                opcode = JSONB_TEXT5
+                nonstd = true
+                j += 2
+            } else {
+                return false
+            }
+        } else if c <= 31 {
+            return false
+        } else if c == 34 {
+            opcode = JSONB_TEXT5
+        }
+        j += 1
+    }
+    append_slice(out, opcode, raw, 1, end)
+    true
+}
+
+priv emit_ident: fn(text: String, out: ^[U8], nonstd: ^Bool) Never! {
+    nonstd = true
+    raw: text.bytes()
+    ^opcode: JSONB_TEXT
+    loop b in raw {
+        if b == (U8{92}) {
+            opcode = JSONB_TEXTJ
+            break
+        }
+    }
+    append_node(out, opcode, raw)
+}
+
+priv emit_special: fn(text: String, out: ^[U8], nonstd: ^Bool) Never! {
+    nonstd = true
+    raw: text.bytes()
+    if raw.len() == 0 -> return
+    negative: raw[0] == (U8{45})
+    start: if raw[0] == (U8{43}) || raw[0] == (U8{45}) -> 1 else -> 0
+    if start < raw.len() && (raw[start] == (U8{73}) || raw[start] == (U8{105})) {
+        if negative -> append_node(out, JSONB_FLOAT, "-9e999".bytes()) else {
+            append_node(out, JSONB_FLOAT, "9e999".bytes())
+        }
+        return
+    }
+    out.push(U8{JSONB_NULL})
+}
+
+priv emit_hex: fn(text: String, out: ^[U8], nonstd: ^Bool) Never! {
+    nonstd = true
+    raw: text.bytes()
+    start: if raw.len() > 0 && raw[0] == (U8{43}) -> 1 else -> 0
+    append_slice(out, JSONB_INT5, raw, start, raw.len())
+}
+
+priv emit_number: fn(text: String, out: ^[U8], nonstd: ^Bool) Never! {
+    raw: text.bytes()
+    if raw.len() == 0 -> return
+    ^start: 0
+    if raw[0] == (U8{43}) {
+        nonstd = true
+        start = 1
+    }
+    ^t: 0
+    body_start: if start < raw.len() && raw[start] == (U8{45}) -> start + 1 else -> start
+    if body_start < raw.len() && raw[body_start] == (U8{46}) {
+        nonstd = true
+        t |= 3
+    }
+    loop i in body_start..<raw.len() {
+        b: raw[i]
+        if b == (U8{46}) {
+            t |= 2
+            if i + 1 == raw.len() || raw[i + 1] == (U8{101}) || raw[i + 1] == (U8{69}) {
+                nonstd = true
+                t |= 1
+            }
+        } else if b == (U8{101}) || b == (U8{69}) {
+            t |= 2
+        }
+    }
+    append_slice(out, JSONB_INT + t, raw, start, raw.len())
+}
+
+priv emit_value: fn(val: Value, out: ^[U8], nonstd: ^Bool, depth: Int) -> Bool Never! {
+    if val == {
+        .Obj(obj) -> {
+            if depth + 1 > JSON5_MAX_DEPTH -> return false
+            if obj.trailing -> nonstd = true
+            ^body: [U8]{}
+            loop m in obj.members {
+                if m.key == {
+                    .KeyDouble(s) -> {
+                        if !emit_string(s, false, body, nonstd) -> return false
+                    }
+                    .KeySingle(s) -> {
+                        if !emit_string(s, true, body, nonstd) -> return false
+                    }
+                    .KeyIdent(s) -> emit_ident(s, body, nonstd)
+                }
+                if !emit_value(m.val, body, nonstd, depth + 1) -> return false
+            }
+            append_node(out, JSONB_OBJECT, body)
+            true
+        }
+        .Arr(arr) -> {
+            if depth + 1 > JSON5_MAX_DEPTH -> return false
+            if arr.trailing -> nonstd = true
+            ^body: [U8]{}
+            loop item in arr.items {
+                if !emit_value(item, body, nonstd, depth + 1) -> return false
+            }
+            append_node(out, JSONB_ARRAY, body)
+            true
+        }
+        .DoubleString(s) -> emit_string(s, false, out, nonstd)
+        .SingleString(s) -> emit_string(s, true, out, nonstd)
+        .BoolVal(s) -> {
+            out.push(U8{if s == "true" -> JSONB_TRUE else -> JSONB_FALSE})
+            true
+        }
+        .NullVal(_) -> {
+            out.push(U8{JSONB_NULL})
+            true
+        }
+        .SpecialNum(s) -> {
+            emit_special(s, out, nonstd)
+            true
+        }
+        .HexNum(s) -> {
+            emit_hex(s, out, nonstd)
+            true
+        }
+        .NumberVal(s) -> {
+            emit_number(s, out, nonstd)
+            true
+        }
+    }
+}
