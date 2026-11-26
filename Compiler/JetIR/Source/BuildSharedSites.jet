@@ -81,8 +81,8 @@ ir_shared_holder_read: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, definition:
     candidate: ir_shared_new(m, p, b, [Int]{payload}, definition.ty, span)
     if ir_failed(b) -> return -1
     _: ir_runtime(m, b, "jet_rt_move_leave", [Int]{held}, -1)
-    process: ir_word_const(m, b, 0)
-    _: ir_runtime(m, b, "jet_rt_shared_site_publish", [Int]{site, candidate, process}, word_row)
+    lifetime: ir_word_const(m, b, if m.test_reset -> 1 else -> 0)
+    _: ir_runtime(m, b, "jet_rt_shared_site_publish", [Int]{site, candidate, lifetime}, word_row)
     b.fresh[candidate] = false
     ir_end(b.f, b.line)
     owner: ir_load_at(m, b, site, 0, shared_row)
@@ -112,7 +112,7 @@ ir_computed_constant_read: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, item_ke
     held: ir_process_cell_open(m, b, site)
     value: ir_call_row_values(m, p, b, item, [Int]{}, span)
     if ir_failed(b) -> return -1
-    ir_process_cell_read(m, p, b, site, held, value, inner, row, span)
+    ir_process_cell_read(m, p, b, site, held, value, inner, row, false, span)
 }
 
 // A read of declared point `definition` (`clicked: event.point<Int>()`, an
@@ -120,14 +120,15 @@ ir_computed_constant_read: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, item_ke
 // construction option, sema_comptime_module_point): a Process site keyed by
 // the constant holds the cell of the carrier its first reader made, and
 // every read borrows that carrier in place, so every reader shares its
-// listeners. The cell lives as long as the program.
+// listeners. In a test build the cell resets between tests so listeners do
+// not leak from one test to the next.
 ir_point_holder_read: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, definition: TConstantDef, span: Span) -[]> Int {
     row: ir_value_type(m, p, definition.ty) ?? return ir_type_fail(b, span, definition.ty)
     site: ir_shared_site_word(m, b, "point:{definition.key}")
     held: ir_process_cell_open(m, b, site)
     point: ir_point_new(m, p, b, definition, span)
     if ir_failed(b) -> return -1
-    ir_process_cell_read(m, p, b, site, held, point, definition.ty, row, span)
+    ir_process_cell_read(m, p, b, site, held, point, definition.ty, row, m.test_reset, span)
 }
 
 // Opens the first reader's branch of Process cell site `site`, taken while
@@ -148,14 +149,14 @@ ir_process_cell_open: fn(m: ^IRModule, b: ^IRBuilder, site: Int) -> Int Never! {
 // first reader's cell standing, and borrows the published cell's value in
 // place. The published cell is never edited, so its value is read without
 // a permit.
-ir_process_cell_read: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, site: Int, held: Int, value: Int, inner: Type, row: Int, span: Span) -> Int Never! {
+ir_process_cell_read: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, site: Int, held: Int, value: Int, inner: Type, row: Int, world_reset: Bool, span: Span) -> Int Never! {
     candidate: ir_shared_new(m, p, b, [Int]{value}, Type.Shared{inner: inner}, span)
     if ir_failed(b) -> return -1
     _: ir_runtime(m, b, "jet_rt_move_leave", [Int]{held}, -1)
     word_row: ir_word_row(m)
     pointer_row: ir_pointer_row(m)
-    process: ir_word_const(m, b, 0)
-    _: ir_runtime(m, b, "jet_rt_shared_site_publish", [Int]{site, candidate, process}, word_row)
+    lifetime: ir_word_const(m, b, if world_reset -> 1 else -> 0)
+    _: ir_runtime(m, b, "jet_rt_shared_site_publish", [Int]{site, candidate, lifetime}, word_row)
     b.fresh[candidate] = false
     ir_end(b.f, b.line)
     owner: ir_load_at(m, b, site, 0, pointer_row)
@@ -164,9 +165,8 @@ ir_process_cell_read: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, site: Int, h
     ir_load_at(m, b, payload, 0, row)
 }
 
-// The slot holding the address of the site word of the initializer keyed
-// `key`.
-ir_shared_site_word: fn(m: ^IRModule, b: ^IRBuilder, key: String) -> Int Never! {
+// The static data row index of the site word keyed `key`.
+ir_shared_site_object: fn(m: ^IRModule, key: String) -> Int Never! {
     object_key: "shared-site:{key}"
     ^object: name_column_value(m.constant_rows_keys, m.constant_rows, object_key) ?? -1
     if object < 0 {
@@ -178,6 +178,13 @@ ir_shared_site_word: fn(m: ^IRModule, b: ^IRBuilder, key: String) -> Int Never! 
         m.data_relocs[object] = [IRDataReloc]{}
         name_column_set(m.constant_rows_keys, m.constant_rows, object_key, object)
     }
+    object
+}
+
+// The slot holding the address of the site word of the initializer keyed
+// `key`.
+ir_shared_site_word: fn(m: ^IRModule, b: ^IRBuilder, key: String) -> Int Never! {
+    object: ir_shared_site_object(m, key)
     pointer_row: ir_pointer_row(m)
     address: ir_temp(m, b, pointer_row)
     ir_emit(b.f, IROp.DataAddress, address, object, -1, -1, b.line)

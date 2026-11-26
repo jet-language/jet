@@ -766,6 +766,37 @@ IRModule: struct {
     // the image's cell, which x86-64 selection addresses instead of the
     // row's own copy (X64Select.jet DataAddress).
     core_cells: [Int:String]{[Int:String]{}},
+    // Active only in native unit-test harness builds (BuildTests.jet
+    // ir_build_tests): records mutable module storage globals and `#Memo`
+    // stores so each test starts from a fresh world, with zero cost in
+    // shipped builds.
+    test_reset: Bool{false},
+    test_storage_resets: [IRTestStorageReset]{[IRTestStorageReset]{}},
+    test_memo_resets: [IRTestMemoReset]{[IRTestMemoReset]{}},
+}
+
+// A mutable module storage global (BuildStatic.jet ir_storage_address) to
+// drop and restore between tests in a test build. When `template >= 0`,
+// `template` is the read-only copy of the baked starting bytes (`size` bytes);
+// when `site >= 0`, the global has deferred startup whose atomic ready word
+// sits at `site`.
+IRTestStorageReset: struct {
+    object: Int,
+    template: Int,
+    site: Int,
+    row: Int,
+    size: Int,
+}
+
+// A `#Memo` store (BuildMemo.jet ir_memo_enter) to drain and clear between
+// tests in a test build.
+IRTestMemoReset: struct {
+    cell: Int,
+    rows: [Int],
+    offsets: [Int],
+    value_offset: Int,
+    result_row: Int,
+    size: Int,
 }
 
 // The `host_literal_values` row of compile-time literal `key`, if `m` holds

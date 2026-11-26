@@ -21,6 +21,7 @@
     returned: coll_call1(invoke, env)
     record: jet_rt_root_take_stop(root, wrapping(save + I64{32}))
     jet_rt_root_leave(root, save)
+    task_test_drain()
     // A stop that is not a failed assert/assert_eq is an uncaught runtime
     // stop (proof-replay-decisions.md: caught assertions exit 1, runtime
     // stops 70); the outcome's runtime_stop flag carries it to the host.
@@ -147,6 +148,7 @@ test_fault_report: fn(outcome: I64, selector: I64, nth: I64) {
 // `invoke(env)` returns one owned outcome; `release(env)` runs shielded once.
 #Export(c) jet_rt_test_spawn: fn(env: I64, invoke: I64, release: I64) -> I64 {
     outcome: coll_call1(invoke, env)
+    task_test_drain()
     jet_scheduler_shield_enter()
     coll_call1_unit(release, env)
     jet_scheduler_shield_leave()

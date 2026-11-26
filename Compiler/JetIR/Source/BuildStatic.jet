@@ -459,15 +459,26 @@ ir_storage_address: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, definition: TC
         // exact Int node is static data a write's drop leaves alone
         // (IR_STATIC_INT_COUNT).
         frozen: if ir_untag(definition.ty) == .Shared(_) || ir_point_type(p, definition.ty) -> false else -> ir_static_into(m, p, s, cell, 0, definition.ty, row, definition.value)
+        ^template_local: -1
         if !frozen {
             s = IRStaticBuild{bytes: [[U8]]{}, relocs: [[IRStaticReloc]]{}}
             _: ir_static_new(s, size)
             // The mark names no data row (-1), so a merge shares no row by
             // it (BuildMerge.jet ir_merge_prepare).
             name_column_set(m.constant_rows_keys, m.constant_rows, deferred, -1)
+        } else if m.test_reset {
+            template_local = ir_static_new(s, size)
+            loop byte_index in 0..<size -> s.bytes[template_local][byte_index] = s.bytes[cell][byte_index]
+            loop reloc in s.relocs[cell] -> s.relocs[template_local].push(reloc)
         }
-        object = ir_static_commit(m, s.move()) + cell
+        base: ir_static_commit(m, s.move())
+        object = base + cell
         name_column_set(m.constant_rows_keys, m.constant_rows, memo, object)
+        if m.test_reset {
+            template_object: if template_local >= 0 -> base + template_local else -> -1
+            site_object: if !frozen -> ir_shared_site_object(m, "storage:{definition.key}") else -> -1
+            m.test_storage_resets.push(IRTestStorageReset{object: object, template: template_object, site: site_object, row: row, size: size})
+        }
     }
     pointer: ir_pointer_row(m)
     address: ir_temp(m, b, pointer)
