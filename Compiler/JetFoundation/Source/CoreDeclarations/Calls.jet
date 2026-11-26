@@ -461,7 +461,7 @@ core_decl_call_effect: fn(module_name: String, member: String) -> String? Never!
         // A service's state store reads and writes its file. Its host
         // leaves are jet.runtime bindings that carry their own rows.
         "core.service" -> if member == "state_store" -> Val("FS") else -> None
-        "core.net.tls" | "core.net.ws" | "core.http.client" | "core.http.server" | "core.http.middleware" -> Val("Net")
+        "core.net.tls" | "core.net.dtls" | "core.net.ws" | "core.http.client" | "core.http.server" | "core.http.middleware" -> Val("Net")
         "core.http" -> if member == "get" -> Val("Net") else -> None
         // Key generation draws from the OS generator, like crypto.random.bytes.
         "core.crypto" -> if member == "__x25519_generate" || member == "__signing_generate" -> Val("Rand") else -> None
@@ -520,6 +520,10 @@ core_decl_call_effect_leaf: fn(module_name: String, member: String) -> String? N
         }
         "core.net.tls" -> if member == {
             "client" | "read" | "read_bytes" | "write" | "write_some" | "write_bytes" | "close" -> Val("Time.Wait")
+            else -> None
+        }
+        "core.net.dtls" -> if member == {
+            "connect" | "client" | "server" | "read" | "read_bytes" | "write" | "write_bytes" | "close" -> Val("Time.Wait")
             else -> None
         }
         // A WebSocket connect and upgrade both wait on the handshake.

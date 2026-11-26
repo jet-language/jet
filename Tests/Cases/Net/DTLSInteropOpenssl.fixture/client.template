@@ -1,0 +1,48 @@
+use {
+    files: core.files
+    net: core.net
+    dtls: core.net.dtls
+    tls: core.net.tls
+    core.net.tls.[ClientIdentity, RootCertificates]
+}
+
+Row: struct {
+    name: String,
+    port: String,
+    ping: String,
+    identity: Bool,
+}
+
+exchange: fn(r: Row, roots: RootCertificates, id: ClientIdentity) -[Net, Time.Wait]> String {
+    ^cfg: dtls.DTLSClientConfig.default().with_trust(.CustomOnly(roots)) ?? panic("trust")
+    if r.identity {
+        cfg = cfg.with_client_identity(id) ?? panic("client identity")
+    }
+    addr: net.socket_addr_parse("127.0.0.1:{r.port}") ?? panic("addr {r.name}")
+    budget: 10s
+    sess: dtls.connect(addr, server_name: "localhost", config: cfg, deadline: budget) ?? return "{r.name}: {err}"
+    peer: sess.peer_identity()
+    sess.write("{r.ping}\n", deadline: budget) ?? return "{r.name}: write: {err}"
+    reply: sess.read(4096, deadline: budget) ?? return "{r.name}: read: {err}"
+    version: sess.protocol_version()
+    sess.close() ?? return "{r.name}: close: {err}"
+    "{r.name}: {version} {peer.cipher_suite} {peer.verified_server_name} {reply.trim()}"
+}
+
+run: fn() {
+    rsa_ca: files.read_bytes("rsa-ca.pem") ?? panic("RSA CA")
+    ec_ca: files.read_bytes("ec-ca.pem") ?? panic("EC CA")
+    ^bundle: rsa_ca.copy()
+    bundle.extend(ec_ca)
+    roots: tls.RootCertificates.from_pem(bundle) ?? panic("roots")
+    cert: files.read_bytes("client.cert.pem") ?? panic("client cert")
+    key: files.read_bytes("client.key.pem") ?? panic("client key")
+    id: tls.ClientIdentity.from_pem(cert, key) ?? panic("client identity")
+    rows: [Row]{
+        Row{name: "DTLS 1.2 ECDHE-ECDSA AES-128-GCM", port: "{free-port:ecdsa12}", ping: "ping-ecdsa12", identity: false},
+        Row{name: "DTLS 1.2 ECDHE-RSA AES-256-GCM", port: "{free-port:rsa12}", ping: "ping-rsa12", identity: false},
+        Row{name: "DTLS 1.2 ECDHE-RSA ChaCha20-Poly1305", port: "{free-port:chacha12}", ping: "ping-chacha12", identity: false},
+        Row{name: "DTLS 1.2 client certificate", port: "{free-port:mtls12}", ping: "ping-mtls12", identity: true},
+    }
+    loop r in rows -> print(exchange(r, roots.copy(), id.copy()))
+}

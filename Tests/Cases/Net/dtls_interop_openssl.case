@@ -1,0 +1,87 @@
+# core.net.dtls interoperates with OpenSSL DTLS 1.2 both ways over UDP.
+# The client (core.net.dtls) completes a DTLS 1.2 handshake with `openssl s_server -dtls1_2 -listen`
+# (performing HelloVerifyRequest cookie exchange), verifies its chain and hostname,
+# and exchanges application datagrams for ECDSA AES-128-GCM, RSA AES-256-GCM,
+# RSA ChaCha20-Poly1305, and mTLS client authentication.
+# The server (core.net.dtls DTLSListener with cookie exchange) answers
+# `openssl s_client -dtls1_2` for ECDSA, RSA, and mTLS, and echoes each datagram.
+requires: tool:openssl
+fixture: DTLSInteropOpenssl.fixture
+copy: {root}/Tests/Fixtures/TLS/custom-root.ca.cert.pem rsa-ca.pem
+copy: {root}/Tests/Fixtures/TLS/custom-root.server.cert.pem rsa.cert.pem
+copy: {root}/Tests/Fixtures/TLS/custom-root.server.key.pem rsa.key.pem
+copy: {root}/Tests/Fixtures/TLS/ec-root.ca.cert.pem ec-ca.pem
+copy: {root}/Tests/Fixtures/TLS/ec-root.server.cert.pem ec.cert.pem
+copy: {root}/Tests/Fixtures/TLS/ec-root.server.key.pem ec.key.pem
+copy: {root}/Tests/Fixtures/TLS/localhost.cert.pem client.cert.pem
+copy: {root}/Tests/Fixtures/TLS/localhost.key.pem client.key.pem
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+session ecdsa12 raw: openssl s_server -dtls1_2 -listen -quiet -accept 127.0.0.1:{free-port:ecdsa12} -cert ec.cert.pem -key ec.key.pem -cipher ECDHE-ECDSA-AES128-GCM-SHA256
+session rsa12 raw: openssl s_server -dtls1_2 -listen -quiet -accept 127.0.0.1:{free-port:rsa12} -cert rsa.cert.pem -key rsa.key.pem -cipher ECDHE-RSA-AES256-GCM-SHA384
+session chacha12 raw: openssl s_server -dtls1_2 -listen -quiet -accept 127.0.0.1:{free-port:chacha12} -cert rsa.cert.pem -key rsa.key.pem -cipher ECDHE-RSA-CHACHA20-POLY1305
+session mtls12 raw: openssl s_server -dtls1_2 -listen -quiet -accept 127.0.0.1:{free-port:mtls12} -cert ec.cert.pem -key ec.key.pem -cipher ECDHE-ECDSA-AES128-GCM-SHA256 -Verify 1 -CAfile client.cert.pem -verify_return_error
+sleep: 250ms
+send ecdsa12: "pong-ecdsa12"
+send rsa12: "pong-rsa12"
+send chacha12: "pong-chacha12"
+send mtls12: "pong-mtls12"
+write: client/main.jet DTLSInteropOpenssl.fixture/client.template
+write: server/main.jet DTLSInteropOpenssl.fixture/server.template
+step client: jet build client/main.jet
+exit: 0
+step client_run: built
+exit: 0
+stdout: = dtls_interop_openssl.client.out
+step server: jet build server/main.jet
+exit: 0
+session srv raw: built
+recv srv until = "ready\n"
+stdout: = "ready\n"
+step s_client_ecdsa12: openssl s_client -dtls1_2 -brief -ign_eof -connect 127.0.0.1:{free-port:srv_ec} -servername localhost -CAfile ec-ca.pem -verify_return_error -cipher ECDHE-ECDSA-AES128-GCM-SHA256
+stdin: ping.txt
+exit: 0
+stdout: ~ "echo:ping-to-jet"
+stderr: ~ "Protocol version: DTLSv1.2"
+stderr: ~ "Ciphersuite: ECDHE-ECDSA-AES128-GCM-SHA256"
+stderr: ~ "Verification: OK"
+step s_client_ecdsa256: openssl s_client -dtls1_2 -brief -ign_eof -connect 127.0.0.1:{free-port:srv_ec} -servername localhost -CAfile ec-ca.pem -verify_return_error -cipher ECDHE-ECDSA-AES256-GCM-SHA384
+stdin: ping.txt
+exit: 0
+stdout: ~ "echo:ping-to-jet"
+stderr: ~ "Protocol version: DTLSv1.2"
+stderr: ~ "Ciphersuite: ECDHE-ECDSA-AES256-GCM-SHA384"
+stderr: ~ "Verification: OK"
+step s_client_rsa_chacha: openssl s_client -dtls1_2 -brief -ign_eof -connect 127.0.0.1:{free-port:srv_rsa} -servername localhost -CAfile rsa-ca.pem -verify_return_error -cipher ECDHE-RSA-CHACHA20-POLY1305
+stdin: ping.txt
+exit: 0
+stdout: ~ "echo:ping-to-jet"
+stderr: ~ "Protocol version: DTLSv1.2"
+stderr: ~ "Ciphersuite: ECDHE-RSA-CHACHA20-POLY1305"
+stderr: ~ "Verification: OK"
+step s_client_mtls: openssl s_client -dtls1_2 -brief -ign_eof -connect 127.0.0.1:{free-port:srv_mtls} -servername localhost -CAfile ec-ca.pem -verify_return_error -cert client.cert.pem -key client.key.pem -cipher ECDHE-ECDSA-AES128-GCM-SHA256
+stdin: ping.txt
+exit: 0
+stdout: ~ "echo:ping-to-jet"
+stderr: ~ "Protocol version: DTLSv1.2"
+stderr: ~ "Verification: OK"
+signal srv: KILL
+close srv
+exit: any
+signal ecdsa12: KILL
+close ecdsa12
+exit: any
+stdout: ~ "ping-ecdsa12"
+signal rsa12: KILL
+close rsa12
+exit: any
+stdout: ~ "ping-rsa12"
+signal chacha12: KILL
+close chacha12
+exit: any
+stdout: ~ "ping-chacha12"
+signal mtls12: KILL
+close mtls12
+exit: any
+stdout: ~ "ping-mtls12"
+stderr: ~ "Peer certificate: CN=localhost"

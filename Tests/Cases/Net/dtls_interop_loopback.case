@@ -1,0 +1,19 @@
+# core.net.dtls loopback DTLS 1.2 client and server interop over UDP:
+# cookie exchange, ECDSA and RSA chains, ALPN, MTU fragmentation, mTLS client
+# certificate verification (both valid and missing-cert refusal), and clean close.
+fixture: DTLSInteropLoopback.fixture
+copy: {root}/Tests/Fixtures/TLS/custom-root.ca.cert.pem rsa-ca.pem
+copy: {root}/Tests/Fixtures/TLS/custom-root.server.cert.pem rsa.cert.pem
+copy: {root}/Tests/Fixtures/TLS/custom-root.server.key.pem rsa.key.pem
+copy: {root}/Tests/Fixtures/TLS/ec-root.ca.cert.pem ec-ca.pem
+copy: {root}/Tests/Fixtures/TLS/ec-root.server.cert.pem ec.cert.pem
+copy: {root}/Tests/Fixtures/TLS/ec-root.server.key.pem ec.key.pem
+copy: {root}/Tests/Fixtures/TLS/localhost.cert.pem client.cert.pem
+copy: {root}/Tests/Fixtures/TLS/localhost.key.pem client.key.pem
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step build: jet build main.jet
+exit: 0
+step run: built
+exit: 0
+stdout: = dtls_interop_loopback.out
