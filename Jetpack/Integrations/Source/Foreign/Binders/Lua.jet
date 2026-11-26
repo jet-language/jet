@@ -343,10 +343,10 @@ PKG_LUA_JET_FUNCTION: #run { `@@name@@: fn(session: Session, input: Dyn, deadlin
 
 @@name@@_typed: fn<T: [Encode, Decode]>(session: Session, input: T, deadline_ms: Int) -> T LuaError! {
     input_json: json.to_string(input) ?? return Err(LuaError.Protocol)
-    tree := json.parse(input_json) ?? return Err(LuaError.Protocol)
-    value := @@name@@(session, tree, deadline_ms)
+    ^tree: json.parse(input_json) ?? return Err(LuaError.Protocol)
+    ^value: @@name@@(session, tree, deadline_ms)
     output_json: json.to_string(value) ?? return Err(LuaError.Protocol)
-    decoded := json.decode<T>(output_json) ?? return Err(LuaError.Protocol)
+    ^decoded: json.decode<T>(output_json) ?? return Err(LuaError.Protocol)
     return Ok(decoded)
 }
 

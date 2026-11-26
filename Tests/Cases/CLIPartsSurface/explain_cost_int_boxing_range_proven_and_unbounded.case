@@ -24,7 +24,7 @@ step: jet explain --cost {work}/tests/cli/cost_rows.jet
 env: NO_COLOR=1
 exit: 0
 stdout: count "cost_rows.jet:11 fn run — view materialization of `String` — semantic remainder (loop depth 1, repeats every loop turn; tier=shared-tir)" = 1 # copy: `out.push(view)` makes the trimmed view owned
-stdout: count "cost_rows.jet:12 fn run — implicit copy of `[Int]` — semantic remainder (loop depth 1, repeats every loop turn; tier=shared-tir)" = 1 # copy: `held := row` copies a list still read later
+stdout: count "cost_rows.jet:12 fn run — implicit copy of `[Int]` — semantic remainder (loop depth 1, repeats every loop turn; tier=shared-tir)" = 1 # copy: `^held: row` copies a list still read later
 stdout: count "cost_rows.jet:15 fn run — map copy-on-write — semantic remainder (loop depth 1, repeats every loop turn; tier=shared-tir)" = 1 # copy: the edit of `counts` may clone it
 stdout: count "cost_rows.jet:16 fn run — exact Int spill — semantic remainder (loop depth 1, repeats every loop turn; tier=shared-tir)" = 1 # boxing: `total += index` has no range bounding `total`
 stdout: count "cost_rows.jet:17 fn run — generic representation fallback — semantic remainder (loop depth 1, repeats every loop turn; tier=shared-tir)" = 1 # fallback: the indexed read of `values`

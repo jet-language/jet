@@ -10,27 +10,27 @@ use {
 
 // Expat reads a document as C bytes; ASCII text fits I8 unchanged.
 xml_bytes: fn(text: String) -> [I8] {
-    out := [I8]{}
+    ^out: [I8]{}
     loop byte in text.bytes() -> out.push(I8{Int{byte}})
     out
 }
 
 run: fn() {
-    gzip := zlib.gzopen("Examples/Interop/FFI/OpaqueHandles/Sample.txt.gz", "rb")
-    bytes := [I8]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+    ^gzip: zlib.gzopen("Examples/Interop/FFI/OpaqueHandles/Sample.txt.gz", "rb")
+    ^bytes: [I8]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
     expected: [I8]{99, 112, 112, 32, 98, 114, 105, 100, 103, 101, 32, 108, 105, 110, 101, 32}
     capacity: bytes.len()
     shelf: xml_bytes("<shelf><book/><book/></shelf>")
     broken: xml_bytes("<shelf>\n<book></shelf>")
-    parser := xml.xml_parser_create("UTF-8")
-    rejecting := xml.xml_parser_create("UTF-8")
-    read_count := 0
-    close_status := 0
-    parsed := 0
-    rejected := 0
-    error_code := 0
-    error_line := 0
-    error_column := 0
+    ^parser: xml.xml_parser_create("UTF-8")
+    ^rejecting: xml.xml_parser_create("UTF-8")
+    ^read_count: 0
+    ^close_status: 0
+    ^parsed: 0
+    ^rejected: 0
+    ^error_code: 0
+    ^error_line: 0
+    ^error_column: 0
 
     // Keep only capability-bearing C calls in the audited region.
     #Unsafe("fixed headers define handle close ownership, exclusive buffers, and bounded output lengths") {

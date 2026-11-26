@@ -116,7 +116,7 @@ web_host_html: fn(status: Int, body: String) -> HTTPResponse Never! {
 
 // Every answer is fresh: the preview never caches.
 web_host_bytes: fn(status: Int, content_type: String, bytes: [U8]) -> HTTPResponse Never! {
-    reply := webhost_server.response(status, "")
+    ^reply: webhost_server.response(status, "")
     reply.body = webhost_http.body_bytes(bytes)
     typed: webhost_http.headers_set(reply.headers, "content-type", content_type)
     reply.headers = webhost_http.headers_set(typed, "cache-control", "no-store")
@@ -456,8 +456,8 @@ live_reload_script: fn(nonce: String, secret: String) -> String {
 // appends it when there is none; byte offsets are kept.
 inject_live_reload_with_script: fn(html: String, script: String) -> String {
     bytes: html.bytes()
-    out := [U8]{}
-    inserted := false
+    ^out: [U8]{}
+    ^inserted: false
     loop index in 0..<bytes.len() {
         if !inserted && webhost_body_close_at(bytes, index) {
             loop byte in script.bytes() -> out.push(byte)

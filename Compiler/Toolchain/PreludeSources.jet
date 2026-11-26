@@ -67,7 +67,7 @@ render_copy: fn(row: PreludeCopy, source: String) -> String PreludeSourcesError!
     if source.contains(FENCE) {
         return Err(sources_fail("{row.source} holds ``` and cannot be a raw string"))
     }
-    lines := [String]{}
+    ^lines: [String]{}
     loop line in row.comment.split("\n") -> lines.push("// {line}")
     path: if row.path == "" -> "" else -> "{row.constant}_PATH: \"{row.path}\"\n\n"
     Ok("{lines.join("\n")}\n{path}{row.constant}: #run {{ {FENCE}{source}{FENCE} }}\n")
@@ -75,10 +75,10 @@ render_copy: fn(row: PreludeCopy, source: String) -> String PreludeSourcesError!
 
 // Every target, generated whole from `copies`, whose sources `read` holds.
 render_targets: fn(copies: [PreludeCopy], read: [TextFile]) -> [TextFile] PreludeSourcesError! {
-    out := [TextFile]{}
+    ^out: [TextFile]{}
     loop row in copies {
-        source := ""
-        known := false
+        ^source: ""
+        ^known: false
         loop file in read {
             if file.path == row.source {
                 source = file.text.copy()
@@ -87,7 +87,7 @@ render_targets: fn(copies: [PreludeCopy], read: [TextFile]) -> [TextFile] Prelud
         }
         if !known -> return Err(sources_fail("no text for {row.source}"))
         block: render_copy(row, source) ?? return Err(err)
-        found := -1
+        ^found: -1
         loop (index, file) in out {
             if file.path == row.target -> found = index
         }
@@ -100,7 +100,7 @@ render_targets: fn(copies: [PreludeCopy], read: [TextFile]) -> [TextFile] Prelud
 }
 
 generated_files: fn() -[FS]> [TextFile] PreludeSourcesError! {
-    read := [TextFile]{}
+    ^read: [TextFile]{}
     loop row in COPIES {
         read.push(TextFile{path: row.source.copy(), text: read_text(row.source) ?? return Err(err)})
     }
@@ -113,7 +113,7 @@ prelude_sources_main: fn(args: [String]) -[FS]> String PreludeSourcesError! {
         return Err(sources_fail("usage: jet Toolchain/PreludeSources.jet [--check|--write]"))
     }
     generated: generated_files() ?? return Err(err)
-    differing := [String]{}
+    ^differing: [String]{}
     loop file in generated {
         current: if files.exists(file.path) -> read_text(file.path) ?? return Err(err) else -> ""
         if current == file.text -> next

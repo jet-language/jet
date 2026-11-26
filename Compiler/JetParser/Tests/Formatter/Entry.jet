@@ -76,22 +76,22 @@ run: fn() {
 }
 
 run: fn() {
-    compact := [Point{x: 1}, Point{x: 2}]
-    spread := [
+    ^compact: [Point{x: 1}, Point{x: 2}]
+    ^spread: [
         Point{x: 3},
         Point{x: 4},
     ]
 }
 `
     plain: fmt_core_ok(source)
-    fragment: "compact := [Point{{x: 1}}, Point{{x: 2}}]"
+    fragment: "^compact: [Point{{x: 1}}, Point{{x: 2}}]"
     assert(plain.contains(fragment))
-    assert(!plain.contains("compact := [Point]"))
+    assert(!plain.contains("^compact: [Point]"))
     simplified_result: jet_format_source(source, true)
     assert(simplified_result.ok)
     simplified: simplified_result.text
     assert(simplified.contains(fragment))
-    assert(!simplified.contains("compact := [Point]"))
+    assert(!simplified.contains("^compact: [Point]"))
     assert_eq(jet_format_source(simplified, true).text, simplified)
 }
 
@@ -396,10 +396,10 @@ SUM: #run { count() + 1 }
 // core.web forms and store conformance sources.
 #Test("a one-line empty lambda body stays on its line, and a second pass changes nothing") {
     source: `run: fn() {
-    hook := EnvelopeWalkHook{events: [EnvelopeWalkEvent]{}, react: fn(path: String, stage: EnvelopeWalkStage) {}}
+    ^hook: EnvelopeWalkHook{events: [EnvelopeWalkEvent]{}, react: fn(path: String, stage: EnvelopeWalkStage) {}}
     print(api.typed_validate_field(form, "jet", .Change, fn(value) {}) == .Ok(_))
     print(api.subscribe_selector<String, String, Never>(store, fn(value) { value }, fn(value) {}).active)
-    open := fn() {
+    ^open: fn() {
     }
 }
 `
@@ -409,7 +409,7 @@ SUM: #run { count() + 1 }
     assert(formatted.contains("    print(api.typed_validate_field(form, \"jet\", .Change, fn(value) {{}}) == .Ok(_))\n"), formatted)
     assert(formatted.contains("react: fn(path: String, stage: EnvelopeWalkStage) {{}}"), formatted)
     assert_eq(formatted.split("fn(value) {{}}").to_list().len(), 3)
-    assert(!formatted.contains("open := fn() {{}}"), "a body written open stays open")
+    assert(!formatted.contains("^open: fn() {{}}"), "a body written open stays open")
 }
 
 // A scalar escape formats to the character's one spelling: `\n`, `\t` and
@@ -529,10 +529,10 @@ upload: fn() -[Bucket{name: "photos"}]> {}
 }
 
 main: fn() {
-    ps := [P]{P{x: 0}}
-    counts := [String:Int]{}
-    total := 0
-    p := P{x: 0}
+    ^ps: [P]{P{x: 0}}
+    ^counts: [String:Int]{}
+    ^total: 0
+    ^p: P{x: 0}
     loop key in ([String]{"a", "b"}) {
         #Allow(Jet.HiddenCopyInLoop, "the key is small") counts[key] = 1
         #Allow(Jet.HiddenCopyInLoop, "an index's field") ps[0].x = 2

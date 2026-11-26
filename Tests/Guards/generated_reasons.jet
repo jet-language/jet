@@ -20,7 +20,7 @@ GENERATED_REASONS_HEADER_BYTES: 2048
 // The words of the first `count` lines of `text`, lowercased and joined by
 // single spaces, without the comment markers that open or close a line.
 generated_reasons_head: fn(text: String, count: Int) -> String {
-    words := [String]{}
+    ^words: [String]{}
     loop (index, line) in text.lines() {
         if index == count -> break
         loop word in line.to_lower().words() {
@@ -64,7 +64,7 @@ generated_reasons_scan: fn(path: String, covered: Bool, problems: ^[String]) {
         return
     }
     marker: "{path}/{GENERATED_REASONS_MARKER}"
-    marked := covered
+    ^marked: covered
     if generated_reasons_files.exists(marker) {
         problem: generated_reasons_marker_problem(marker, generated_reasons_files.read(marker) ?? panic("read {marker}: {err}"))
         if problem != "" -> problems.push(problem) else -> marked = true
@@ -78,7 +78,7 @@ generated_reasons_scan: fn(path: String, covered: Bool, problems: ^[String]) {
 
 #Test("every committed generated copy says why it stays committed, in its header or its tree's marker") {
     guards_enter_root()
-    problems := [String]{}
+    ^problems: [String]{}
     loop root in GENERATED_REASONS_ROOTS {
         assert(generated_reasons_files.is_dir(root), "the generated-reasons root {root} must exist")
         generated_reasons_scan(root, false, problems)

@@ -8,7 +8,7 @@ use {
 run: fn() {
     limits: encoding.EncodingLimits.safe()
     output: files.create("{work}/events.json") ?? panic("create")
-    writer := json.writer(output, limits, false) ?? panic("writer")
+    ^writer: json.writer(output, limits, false) ?? panic("writer")
     writer.write(encoding.DataEvent.ObjectStart) ?? panic("write")
     writer.write(encoding.DataEvent.Key("message")) ?? panic("write")
     writer.write(encoding.DataEvent.Text("hi ☺")) ?? panic("write")
@@ -23,8 +23,8 @@ run: fn() {
     writer.finish() ?? panic("finish")
 
     input: files.open("{work}/events.json") ?? panic("open")
-    reader := json.reader(input, encoding.EncodingLimits.safe()) ?? panic("reader")
-    count := 0
+    ^reader: json.reader(input, encoding.EncodingLimits.safe()) ?? panic("reader")
+    ^count: 0
     loop count < 11 {
         if reader.next() == {
             .None -> print("eof")

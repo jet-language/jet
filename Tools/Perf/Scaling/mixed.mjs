@@ -106,8 +106,8 @@ function unit(m, u, r, stats) {
     const index = r.int(0, 7);
     const text = [
       `${name}: fn(seed: Int) -> Int {`,
-      `    accumulator := seed % ${MODULUS}`,
-      `    records := [${rec}]{}`,
+      `    ^accumulator: seed % ${MODULUS}`,
+      `    ^records: [${rec}]{}`,
       `    loop index in 0..<${count} {`,
       `        marker: (index * ${a} + seed) % 97`,
       `        records.push(${rec}{identifier: index + marker, weight: (index * ${b} + ${c}) % 31, label: "record-{index}-{marker}", markers: [Int]{index, marker}})`,
@@ -153,8 +153,8 @@ function unit(m, u, r, stats) {
     const e = r.int(7, 97);
     const text = [
       `${name}: fn(seed: Int) -> Int {`,
-      `    accumulator := (seed * ${a}) % ${MODULUS}`,
-      `    shapes := [${shape}]{}`,
+      `    ^accumulator: (seed * ${a}) % ${MODULUS}`,
+      `    ^shapes: [${shape}]{}`,
       `    loop index in 0..<${count} {`,
       `        next_shape: if (seed + index) % 4 == {`,
       `            0 -> ${shape}.Dot((seed + index * ${b}) % 101)`,
@@ -199,17 +199,17 @@ function unit(m, u, r, stats) {
     const limit = r.int(20, 32);
     const text = [
       `${name}: fn(seed: Int) -> Int {`,
-      '    counts := [String:Int]{}',
+      '    ^counts: [String:Int]{}',
       `    words: [String]{${words.map(word => `"${word}"`).join(', ')}}`,
       '    loop (index, word) in words {',
       `        key: "{word}-{(seed + index) % ${buckets}}"`,
       '        counts[key] = (counts.get(key) ?? 0) + index + 1',
       '    }',
-      '    accumulator := counts.len()',
+      '    ^accumulator: counts.len()',
       '    loop (key, value) in counts {',
       `        accumulator = (accumulator + key.len() * value * 17) % ${MODULUS}`,
       '    }',
-      `    label := "${tag}"`,
+      `    ^label: "${tag}"`,
       `    loop index in 0..<${rounds} {`,
       `        label = "{label}:{index * ${a} % 10}"`,
       '    }',
@@ -248,7 +248,7 @@ function unit(m, u, r, stats) {
       `${name}: fn(seed: Int) -> Int {`,
       `    table: [Int:Int]{${keys.map((key, i) => `${key}: ${values[i]}`).join(', ')}}`,
       `    probes: [Int]{${keys[0]}, ${keys[1]}, ${keys[2]}, seed % 100}`,
-      `    accumulator := seed % ${MODULUS}`,
+      `    ^accumulator: seed % ${MODULUS}`,
       `    loop round in 0..<${rounds} {`,
       `        probe: probes[round % 4] + (round /% 4) * ${spread}`,
       '        found: table.get(probe)',
@@ -283,8 +283,8 @@ function unit(m, u, r, stats) {
     const b = r.int(1, 30);
     const text = [
       `${name}: fn(seed: Int) -> Int {`,
-      '    value := seed % 1000 + 2',
-      '    steps := 0',
+      '    ^value: seed % 1000 + 2',
+      '    ^steps: 0',
       `    loop value > 1 && steps < ${limit} {`,
       '        value = if {',
       '            value % 2 == 0 -> value /% 2',
@@ -292,7 +292,7 @@ function unit(m, u, r, stats) {
       '        }',
       '        steps += 1',
       '    }',
-      `    weight := ${b}`,
+      `    ^weight: ${b}`,
       '    loop step in 0..<steps {',
       '        weight = if step % 3 == {',
       `            0 -> (weight * ${a} + step) % ${MODULUS}`,
@@ -321,7 +321,7 @@ function unit(m, u, r, stats) {
   }
 
   const start = constant ?? String(constantValue);
-  const totalText = [`${tag}_total: fn() -> Int {`, `    accumulator := ${start} % ${MODULUS}`];
+  const totalText = [`${tag}_total: fn() -> Int {`, `    ^accumulator: ${start} % ${MODULUS}`];
   let accumulator = mod(constantValue);
   for (const [index, worker] of workers.entries()) {
     // Every worker folds its result through the section's three-argument
@@ -339,7 +339,7 @@ function unit(m, u, r, stats) {
       `    trace_label: "${worker.name}:{worker_result % 1000}:{checkpoint % 1000}"`,
       `    trace_weight: if trace_label.len() > ${labelLimit} -> blend_m${m}(checkpoint, trace_label.len(), ${third}) else -> blend_m${m}(checkpoint, 1, ${third})`,
       '    blended_parts: [Int]{worker_result % 997, checkpoint % 991, trace_weight % 983}',
-      '    combined := 0',
+      '    ^combined: 0',
       `    loop part in blended_parts -> combined = blend_m${m}(combined, part, ${fourth})`,
       `    blend_m${m}(combined, worker_result % 997, ${second})`,
       '}'];
@@ -374,7 +374,7 @@ function sectionHeader(m) {
     '    fallback',
     '}', '',
     `total_score_m${m}: fn(items: [${trait}]) -> Int {`,
-    '    sum := 0',
+    '    ^sum: 0',
     `    loop item in items -> sum = (sum + item.score()) % ${MODULUS}`,
     '    sum',
     '}', '',
@@ -395,7 +395,7 @@ export function mixedSources(codeLines, seed) {
   const lines = [`// Deterministic mixed compile-throughput workload: --code-lines ${codeLines} --seed ${seed}`, ''];
   const sectionTotals = [];
   const codeOf = list => list.filter(isCodeLine).length;
-  // `run: fn() {`, `checksum := 0`, the print and `}`, plus one sum line per section.
+  // `run: fn() {`, `^checksum: 0`, the print and `}`, plus one sum line per section.
   let code = 4;
   while (code < codeLines) {
     const m = stats.sections;
@@ -411,7 +411,7 @@ export function mixedSources(codeLines, seed) {
       code += codeOf(generated.lines);
       units.push(generated);
     }
-    const total = [`section_total_m${m}: fn() -> Int {`, '    accumulator := 0'];
+    const total = [`section_total_m${m}: fn() -> Int {`, '    ^accumulator: 0'];
     let value = 0;
     for (const generated of units) {
       total.push(`    accumulator = (accumulator * 13 + ${generated.totalName}()) % ${MODULUS}`);
@@ -425,7 +425,7 @@ export function mixedSources(codeLines, seed) {
     stats.sections += 1;
   }
   let checksum = 0;
-  lines.push('run: fn() {', '    checksum := 0');
+  lines.push('run: fn() {', '    ^checksum: 0');
   for (const [m, value] of sectionTotals.entries()) {
     lines.push(`    checksum = (checksum * 31 + section_total_m${m}()) % ${MODULUS}`);
     checksum = mod(checksum * 31 + value);

@@ -110,10 +110,9 @@ PRIV_PACKAGE_QUALIFIER: "package"
 /// declarations such as extern bindings.
 SIGIL_BIND_IMMUT: ":"
 
-/// S2 (ratified 2026-06-18): mutable binding sigil `name := expr`
-/// (was the keyword `var`). `=` stays reassignment of an existing `:=` (S17).
-/// This rule retires typed bindings (`name: Type := expr`).
-SIGIL_BIND_MUT: ":="
+// S2: a changeable binding is `^name: value`, marked with SIGIL_WRITE on
+// the name; `=` reassigns it (S17). Typed bindings stay retired: a type
+// rides the value (`^limit: U8{250}`).
 
 /// Open/close a lock-step statement-expansion fence.
 /// Binding fences carry plain names; expression fences carry names or
@@ -125,7 +124,7 @@ SIGIL_FENCE_OPEN: "<:"
 SIGIL_FENCE_CLOSE: ":>"
 
 /// Binding-level tracking marker, written before the binding:
-/// `#Track name: expr` / `#Track name := expr`.
+/// `#Track name: expr` / `#Track ^name: expr`.
 MARKER_TRACK: "Track"
 
 /// The `$` of a config-surface `$NAME` environment read. Program source has
@@ -362,10 +361,11 @@ SIZED_NUMERIC_TYPES: [String]{
 /// (ratified, supersedes): memory model v5 sigils. Two
 /// sigils plus unmarked: unmarked = read (enforced in S2), `^T` = exclusive
 /// write, `^^T` = take (consume). A deliberate copy is the
-/// built-in method `x.copy()` and an early move `x.move()`. Marks live in
-/// signatures: calls are plain (`buf.append(x)`,
-/// `buf.seal()`, `edit(buf)`); a mark stays only on a write window bound to a
-/// name, a match that writes into its subject, and `task ^^name`.
+/// built-in method `x.copy()`, an early move `x.move()` and a write window
+/// `place.in_place()`. Marks live in signatures: calls are plain
+/// (`buf.append(x)`, `buf.seal()`, `edit(buf)`). Outside a signature `^`
+/// marks a changeable name (`^count: 0`) and `^^` stays only in
+/// `task ^^name`.
 SIGIL_MOVE: "^^"
 
 SIGIL_WRITE: "^"
@@ -456,7 +456,7 @@ TYPE_UNION_SEP: "|"
 /// fixed first; the lift then adds exactly one `Present`, so every tier lowers
 /// it as `Val(x)`. `x == 5` holds only when `x` holds 5 (`!=` is its
 /// opposite); only `x == Val(v)` binds. Nested optionals stay E0309, and
-/// `Val(x)` stays where nothing expects an optional (`limit := Val(10)`).
+/// `Val(x)` stays where nothing expects an optional (`^limit: Val(10)`).
 /// `jet fmt --simplify` drops a redundant `Val(x)` in a `-> T?` return.
 LIT_VALUE: "Val"
 
@@ -692,7 +692,7 @@ MARKER_UNINIT: "Uninit"
 
 /// (ratified 2026-07-24; amends):
 /// contextual keyword `uninit`, legal only as the whole body of a typed-literal
-/// head — `name := Type{ uninit }`. Bare `name := uninit` is E0421. Still gated
+/// head — `^name: Type{ uninit }`. Bare `^name: uninit` is E0421. Still gated
 /// by `use core.mem` (E0424) and restricted to plain-data types (E0423). Flow
 /// proof E0420 is unchanged. Contextual like `region`/`state`/`migration`: the
 /// word `uninit` stays usable as an ordinary identifier everywhere else; the

@@ -42,7 +42,7 @@ semicolon_line_errors: fn(source: String) -> String {
 }
 
 #Test("a semicolon where a line break would continue the statement is refused") {
-    joined: "run: fn() {{ x := 1; -1; print(x) }}\n"
+    joined: "run: fn() {{ ^x: 1; -1; print(x) }}\n"
     joined_at: parser_test_find(joined, "; -")
     assert_eq(semicolon_line_errors(joined), "E0447@{joined_at}")
     dotted: "run: fn() {{ note(); .Red }}\n"

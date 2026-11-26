@@ -9,13 +9,13 @@ use {
 }
 
 connect: fn(name: String, config: ClientConfig) -[Net, Time.Wait]> TLSStream NetError! {
-    tcp := net.tcp_connect("127.0.0.1:{free-port:tls}") ?? panic("connect")
+    ^tcp: net.tcp_connect("127.0.0.1:{free-port:tls}") ?? panic("connect")
     tls.client(tcp, server_name: name, config: config, deadline: 5s)
 }
 
 exchange: fn(^secure: TLSStream) -[Net, Time.Wait]> String {
     secure.write_bytes("ping\n".bytes(), deadline: 5s) ?? panic("write: {err}")
-    reply := [U8]{}
+    ^reply: [U8]{}
     loop reply.len() < 5 {
         chunk: secure.read_bytes(64, deadline: 5s) ?? panic("read: {err}")
         if chunk.len() == 0 -> panic("early end of stream")
@@ -37,7 +37,7 @@ run: fn() {
     trusted: tls.ClientConfig.default().with_trust(.CustomOnly(roots)) ?? panic("trust policy")
     config: trusted.with_alpn(["http/1.1"]) ?? panic("alpn policy")
 
-    secure := connect("localhost", config) ?? panic("TLS handshake: {err}")
+    ^secure: connect("localhost", config) ?? panic("TLS handshake: {err}")
     peer: secure.peer_identity()
     print(peer.verified_server_name)
     print(peer.leaf.subject)
@@ -56,7 +56,7 @@ run: fn() {
     print(secure.write_bytes("late".bytes(), deadline: 5s) == .Err(_))
 
     tls12: config.with_version_bounds(min: TLSVersion.TLS12, max: TLSVersion.TLS12) ?? panic("version policy")
-    older := connect("localhost", tls12) ?? panic("TLS 1.2 handshake: {err}")
+    ^older: connect("localhost", tls12) ?? panic("TLS 1.2 handshake: {err}")
     print(tls.version_name(older.peer_identity().tls_version))
     print(older.peer_identity().cipher_suite.starts_with("TLS_ECDHE_RSA_WITH_"))
     print(exchange(older))

@@ -345,8 +345,8 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, check: ^SemaBo
                         if !binding.mutable && binding.pattern == None && sema_scope_own_cell_init(binding.init) {
                             sema_scope_mark_own_cell(check.scopes, binding.name)
                         }
-                        if binding.mutable && !binding.uninit && !binding.is_comptime && binding.name != "_" && binding.sigil_span == .Val(sigil) {
-                            sema_ownership_note_mutable_binding(check.state, sema_stmt_mutable_binding(binding, sigil))
+                        if binding.mutable && !binding.uninit && !binding.is_comptime && binding.name != "_" && binding.sigil_span != None {
+                            sema_ownership_note_mutable_binding(check.state, sema_stmt_mutable_binding(binding))
                         }
                     }
                     .None -> {
@@ -575,7 +575,7 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, check: ^SemaBo
                             if task_list_consume {
                                 check.diagnostics.push(sema_stmt_for_in_borrowed_task_list(collection_expr, collection.ty, check))
                             } else {
-                                check.diagnostics.push(sema_error("E0120", expr_span(collection_expr), "this loop can't take a stream or iterator out of a field or index", "each step pulls from the source itself, so the loop must take a whole value this scope owns", "bind it into a local this scope owns first (`src := …`), then write `loop x in src {{ … }}`"))
+                                check.diagnostics.push(sema_error("E0120", expr_span(collection_expr), "this loop can't take a stream or iterator out of a field or index", "each step pulls from the source itself, so the loop must take a whole value this scope owns", "bind it into a local this scope owns first (`^src: …`), then write `loop x in src {{ … }}`"))
                             }
                             valid = false
                         }

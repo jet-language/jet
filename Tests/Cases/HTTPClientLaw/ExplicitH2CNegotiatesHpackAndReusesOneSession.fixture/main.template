@@ -10,8 +10,8 @@ Observed: struct {
     reused: Bool
 }
 observe: fn(response: HTTPResponse) -> Observed {
-    body := ""
-    count := 0
+    ^body: ""
+    ^count: 0
     // Exact original max64, cardinality and NORMAL FIRST EOF; transparent HTTPMessage.rs746-773 mapping.
     loop chunk in response.body().chunks(64) {
         bytes: chunk ?? panic("read")
@@ -38,7 +38,7 @@ run: fn() {
     files.write_atomic("{work}/barrier.go", "go".bytes()) ?? panic("release barrier")
     first: first_task.join() ?? panic("first task")
     second: second_task.join() ?? panic("second task")
-    bodies := [String]{first.body, second.body}
+    ^bodies: [String]{first.body, second.body}
     bodies.sort()
     print(warm.body)
     print(warm.chunks)

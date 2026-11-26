@@ -88,7 +88,7 @@ run: fn() Never! {
     ^structure: GateLedger{}
     sema_gate_append_structure(structure, names)
     gate_test_require(structure.rows.len() == 1 && structure.rows[0].kind == GateKind.Structure && structure.rows[0].reason == (Val("_name")), "structure facts use canonical ledger")
-    parsed: parse_source("_helper: fn(_input: Int) {{\n_unused := approx(7)\n#Unsafe(\"live\") {{ value := pointer.* }}\n}}".bytes())
+    parsed: parse_source("_helper: fn(_input: Int) {{\n^_unused: approx(7)\n#Unsafe(\"live\") {{ ^value: pointer.* }}\n}}".bytes())
     gate_test_require(parsed.diagnostics.len() == 0, "source fixture parse")
     rows: [SemaGateModule]{SemaGateModule{source: "app.jet", program: parsed.program}}
     projected: sema_gate_ledger_collect(rows, gate_test_names(), GateSet{build_flag: true, session_flag: true}, [GateEntry]{}, sema_gate_checked_text_names([parsed.program]))

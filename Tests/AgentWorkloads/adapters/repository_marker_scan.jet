@@ -8,11 +8,11 @@ WorkloadArgs: struct {
 run: fn(args: WorkloadArgs) {
     root: args.root
     paths: fs.walk(root).list() ?? panic("cannot walk input root")
-    rows := [String]{}
+    ^rows: [String]{}
     loop file in paths {
         if !file.is_dir {
             text: fs.read(file.path) ?? panic("cannot read input")
-            count := 0
+            ^count: 0
             loop line in text.split("\n") {
                 if line.contains("agent_workload:") -> count += 1
             }

@@ -466,7 +466,7 @@ CacheLease: struct {
         self.validate()
         index: store_lease_member_index(self.executables, member) ?? return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("verified receipt lost executable member")}))
         expected_id: self.executables[index].id
-        if ^self.executables[index].file == {
+        if self.executables[index].file.in_place() == {
             .Val(input) -> {
                 if input.stat().id != expected_id {
                     return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("leased executable member changed")}))
@@ -541,7 +541,7 @@ CacheLease: struct {
         resolved: if files.is_abs(requested) -> requested else -> files.join(caller_dir, requested)
         index: self.executable_index_at(requested, resolved) ?? return Ok(None)
         expected_id: self.executables[index].id
-        if ^self.executables[index].file == {
+        if self.executables[index].file.in_place() == {
             .Val(input) -> {
                 if input.stat().id != expected_id {
                     return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("leased executable member changed")}))

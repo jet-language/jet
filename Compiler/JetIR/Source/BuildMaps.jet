@@ -1631,9 +1631,9 @@ IRMapTake: struct {
 }
 
 // The index in `body` of the store of the group update statement `at`
-// starts (-1: none). A group update is `group := map.get(key) ?? fallback`,
+// starts (-1: none). A group update is `^group: map.get(key) ?? fallback`,
 // statements, then `map[key] = group`. It builds as the write window
-// `group := ^map[key]`, a missing key first seeded with the fallback
+// `group: map[key].in_place()`, a missing key first seeded with the fallback
 // (ir_map_take), and its store builds nothing: each write of `group` lands
 // in the map's entry, so growing a group row by row is linear in the group,
 // not a copy of it per row. That is the same program when only `group` can
@@ -1667,7 +1667,7 @@ ir_map_take_fuses: fn(p: IRProgram, b: IRBuilder, body: [Int], at: Int) -> Int N
     -1
 }
 
-// The group update `statement` starts, when it is `group := map.get(key) ??
+// The group update `statement` starts, when it is `^group: map.get(key) ??
 // fallback` binding a plain variable, with `map` a variable this frame owns
 // that no closure of the body names and `key` a variable or a field of one.
 ir_map_take_let: fn(p: IRProgram, b: IRBuilder, statement: Int) -> IRMapTake? Never! {
@@ -1936,7 +1936,7 @@ ir_map_take_store: fn(p: IRProgram, b: IRBuilder, update: IRMapTake, place: Body
     false
 }
 
-// `local := map.get(key) ?? fallback` of a group update (ir_map_take_fuses):
+// `^local: map.get(key) ?? fallback` of a group update (ir_map_take_fuses):
 // `local` binds the write window of the key's entry, which a missing key
 // first gets with the fallback's value (a fallback that stops leaves).
 ir_map_take: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, local: TLocal, init: Int, span: Span) Never! {
@@ -2083,7 +2083,7 @@ ir_map_ordered_end: fn(m: IRModule, b: ^IRBuilder, map: Int, header: Int) Never!
 }
 
 // Before a walk of the hashed Map at `map` that expression `collection`
-// reads: a variable that owns it and may write it (a `:=` binding, a write
+// reads: a variable that owns it and may write it (a changeable binding, a write
 // parameter) settles it (map.settle), its out-of-order entries merged into
 // its own buffer, so the walk reads that buffer instead of a sorted copy.
 ir_map_settle_for: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, collection: Int, map: Int) Never! {

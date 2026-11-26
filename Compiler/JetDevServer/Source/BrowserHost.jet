@@ -130,19 +130,19 @@ BrowserNode: struct {
     }
 
     with_value: fn(self, value: String) -> BrowserNode {
-        node := self
+        ^node: self
         node.value = Val(value)
         node
     }
 
     with_status: fn(self, status: String) -> BrowserNode {
-        node := self
+        ^node: self
         node.status = Val(status)
         node
     }
 
     with_children: fn(self, children: [BrowserNode]) -> BrowserNode {
-        node := self
+        ^node: self
         node.children = children
         node
     }
@@ -161,7 +161,7 @@ BrowserPanelFact: struct {
     }
 
     with_cursor: fn(self, cursor: Int?) -> BrowserPanelFact {
-        panel := self
+        ^panel: self
         panel.cursor = cursor
         panel
     }
@@ -187,8 +187,8 @@ BrowserHostEvent: struct {
         if self.panels.len() > MAX_BROWSER_PANELS {
             return Err(BrowserHostError.InvalidEvent{message: "browser event exceeds the panel bound"})
         }
-        panel_ids := [String:Bool]{}
-        node_count := 0
+        ^panel_ids: [String:Bool]{}
+        ^node_count: 0
         loop panel in self.panels {
             validate_browser_panel(panel, node_count)
             if panel_ids.get(panel.panel_id) != None {
@@ -334,10 +334,10 @@ BrowserHost: struct {
             }
         }
         // Panels absent from the event are dropped; present panels keep their layout.
-        panels := [String:BrowserPanelState]{}
+        ^panels: [String:BrowserPanelState]{}
         loop index in 0..<event.panels.len() {
             fact: event.panels[index]
-            layout := [BrowserPanelLayout]{}
+            ^layout: [BrowserPanelLayout]{}
             if self.panels.get(fact.panel_id) == .Val(previous) -> layout = previous.layout else {
                 layout.push(BrowserPanelLayout{open: false, dock: .Left})
                 layout.push(BrowserPanelLayout{open: false, dock: .Left})
@@ -377,14 +377,14 @@ BrowserHost: struct {
                 return Err(BrowserHostError.CursorExpired{cursor: requested.sequence, earliest: 0})
             }
         }
-        events := [BrowserHostEvent]{}
+        ^events: [BrowserHostEvent]{}
         loop index in 0..<self.history.len() {
             if cursor == .Val(from) {
                 if self.history[index].sequence <= from.sequence -> next
             }
             events.push(self.history[index])
         }
-        latest := BrowserReconnectCursor?{None}
+        ^latest: BrowserReconnectCursor?{None}
         if self.sequence == .Val(sequence) {
             latest = Val(BrowserReconnectCursor{sequence: sequence})
         }
@@ -417,7 +417,7 @@ BrowserHost: struct {
     }
 
     set_panel_open: fn(^self, placement: BrowserPlacement, panel_id: String, open: Bool) -> BrowserHostEffect BrowserHostError! {
-        panel := self.panels.get(panel_id) ?? return Err(BrowserHostError.UnknownPanel{panel_id: panel_id})
+        ^panel: self.panels.get(panel_id) ?? return Err(BrowserHostError.UnknownPanel{panel_id: panel_id})
         panel.layout[placement.index()].open = open
         self.panels[panel_id] = panel
         if open -> return BrowserHostEffect.PanelOpened{placement: placement, panel_id: panel_id}
@@ -428,7 +428,7 @@ BrowserHost: struct {
     }
 
     dock_panel: fn(^self, placement: BrowserPlacement, panel_id: String, dock: DevtoolsDock) -> BrowserHostEffect BrowserHostError! {
-        panel := self.panels.get(panel_id) ?? return Err(BrowserHostError.UnknownPanel{panel_id: panel_id})
+        ^panel: self.panels.get(panel_id) ?? return Err(BrowserHostError.UnknownPanel{panel_id: panel_id})
         panel.layout[placement.index()].dock = dock
         self.panels[panel_id] = panel
         BrowserHostEffect.PanelDocked{placement: placement, panel_id: panel_id, dock: dock}
@@ -457,9 +457,9 @@ BrowserHost: struct {
     }
 
     view_model: fn(self, placement: BrowserPlacement) -> BrowserHTMLViewModel {
-        keys := self.panels.keys().to_list()
+        ^keys: self.panels.keys().to_list()
         keys.sort()
-        views := [BrowserPanelView]{}
+        ^views: [BrowserPanelView]{}
         loop key in keys {
             panel: self.panels[key]
             layout: panel.layout[placement.index()]
@@ -467,9 +467,9 @@ BrowserHost: struct {
         }
         ranks: browser_catalog_ranks()
         views.sort_by(fn(left, right) { browser_panel_rank(ranks, left.panel_id) <=> browser_panel_rank(ranks, right.panel_id) })
-        sequence_text := String?{None}
+        ^sequence_text: String?{None}
         if self.sequence == .Val(sequence) -> sequence_text = Val("{sequence}")
-        elements := [BrowserHTMLElement]{}
+        ^elements: [BrowserHTMLElement]{}
         elements.push(BrowserHTMLElement{id: "jet-devtools-{placement.as_str()}", kind: "host", panel_id: None, node_id: None, label: self.state.as_str(), value: sequence_text, status: Val(self.state.as_str())})
         loop view in views {
             elements.push(BrowserHTMLElement{id: browser_element_id(placement, view.panel_id, None), kind: "panel", panel_id: Val(view.panel_id), node_id: None, label: view.title, value: None, status: Val(view.status)})
@@ -516,8 +516,8 @@ BrowserHost: struct {
 
 // Catalog position of each canonical panel; the first listing of an id wins.
 browser_catalog_ranks: fn() -> [String:Int] {
-    ranks := [String:Int]{}
-    index := 0
+    ^ranks: [String:Int]{}
+    ^index: 0
     loop descriptor in descriptors() {
         id: descriptor.id.as_str()
         if ranks.get(id) == None -> ranks[id] = index
@@ -534,7 +534,7 @@ validate_browser_panel: fn(panel: BrowserPanelFact, node_count: ^Int) BrowserHos
     validate_browser_text(panel.panel_id, "panel identity", MAX_BROWSER_TEXT)
     validate_browser_text(panel.title, "panel title", MAX_BROWSER_TEXT)
     validate_browser_text(panel.status, "panel status", MAX_BROWSER_TEXT)
-    node_ids := [String:Bool]{}
+    ^node_ids: [String:Bool]{}
     loop node in panel.nodes -> validate_browser_node(node, 0, node_count, node_ids)
 }
 
@@ -578,7 +578,7 @@ validate_source_id: fn(source_id: String) BrowserHostError! {
 }
 
 derive_browser_session_state: fn(panels: [BrowserPanelFact]) -> BrowserSessionState {
-    state := BrowserSessionState.Idle
+    ^state: BrowserSessionState.Idle
     loop panel in panels {
         value: panel.status.trim().to_ascii_lower()
         candidate: if value == {
@@ -610,7 +610,7 @@ browser_element_id: fn(placement: BrowserPlacement, panel_id: String, node_id: S
 
 // ASCII letters, digits, `_` and `-` survive; every other character becomes one `-`.
 browser_stable_fragment: fn(value: String) -> String {
-    out := [U8]{}
+    ^out: [U8]{}
     loop byte in value.bytes() {
         // UTF-8 continuation bytes belong to the character already replaced.
         if byte >= 128 && byte <= 191 -> next

@@ -8,7 +8,7 @@
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JET_RECHECK_VERIFY=1
-write: main.jet = "fact: fn(n: Int) -> Int {\n    if n <= 1 -> return 1\n    n * fact(n - 1)\n}\n\nrepeat: fn(word: String, times: Int) -> String {\n    out := \"\"\n    loop _ in 0..<times -> out = \"{out}{word}\"\n    out\n}\n\nshout: fn(text: String) -> String {\n    \"{text}!\"\n}\n\nrun: fn() {\n    big: #run fact(10)\n    word: #run repeat(\"ab\", 3)\n    print(\"{big} {big + 1} {shout(word)} {shout(word)}\")\n}\n"
+write: main.jet = "fact: fn(n: Int) -> Int {\n    if n <= 1 -> return 1\n    n * fact(n - 1)\n}\n\nrepeat: fn(word: String, times: Int) -> String {\n    ^out: \"\"\n    loop _ in 0..<times -> out = \"{out}{word}\"\n    out\n}\n\nshout: fn(text: String) -> String {\n    \"{text}!\"\n}\n\nrun: fn() {\n    big: #run fact(10)\n    word: #run repeat(\"ab\", 3)\n    print(\"{big} {big + 1} {shout(word)} {shout(word)}\")\n}\n"
 step: jet run --trace main.jet
 exit: 0
 stdout: = "3628800 3628801 ababab! ababab!\n"

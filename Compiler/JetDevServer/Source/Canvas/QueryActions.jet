@@ -114,7 +114,7 @@ canvas_find: fn(checker: LSPChecker, path: String, src: String, query: String) -
     if needle.is_empty() -> return Ok(query_ok("find", src, "[]", "\"impact\":null,\"diff\":null"))
     // Lowered once: each search below compares against it.
     lowered: needle.to_ascii_lower()
-    results := [String]{}
+    ^results: [String]{}
     loop definition in context.index.definitions {
         def: definition.def
         if contains_lowered(def.name, lowered) || contains_lowered(def.identity, lowered) {
@@ -143,8 +143,8 @@ canvas_project_find: fn(checker: LSPChecker, entry: String, selected_path: Strin
     needle: "{query.trim()}"
     // Lowered once: each search below compares against it.
     lowered: needle.to_ascii_lower()
-    results := [String]{}
-    seen := [String:Bool]{}
+    ^results: [String]{}
+    ^seen: [String:Bool]{}
     if !needle.is_empty() {
         projection: project_file(checker, selected_path) ?? return Err(query_diagnostics_error(selected_path, selected_src, err.diagnostics))
         loop at in 0..<context.sources.len() {
@@ -188,7 +188,7 @@ contains_lowered: fn(text: String, lowered: String) -> Bool Never! {
 
 canvas_references: fn(checker: LSPChecker, path: String, src: String, symbol: String) -> String Err! {
     context: open_query_context(checker, path, src)
-    results := [String]{}
+    ^results: [String]{}
     loop definition in context.index.definitions {
         def: definition.def
         if def.name != symbol -> next
@@ -206,13 +206,13 @@ canvas_project_references: fn(checker: LSPChecker, entry: String, selected_path:
     context: open_project_query_context(checker, entry, selected_path, selected_src, expected_project_revision)
     projection: project_file(checker, selected_path) ?? return Err(query_diagnostics_error(selected_path, selected_src, err.diagnostics))
     definitions: project_symbol_definitions(context, symbol, true)
-    results := [String]{}
-    seen := [String:Bool]{}
+    ^results: [String]{}
+    ^seen: [String:Bool]{}
     loop hit in definitions {
         push_project_result(results, seen, "definition", hit.def.name, hit.def.module_path, hit.def.def_span, context.sources[hit.source], Val(projection), context.selected_source_id)
     }
     push_project_references(results, seen, context, symbol, definitions, projection)
-    impact := "null"
+    ^impact: "null"
     loop source in context.sources {
         if index_defines(source.index, symbol) {
             impact = ImpactReport.analyze(source.index, symbol, 3).to_json()
@@ -230,12 +230,12 @@ canvas_project_preview_rename: fn(checker: LSPChecker, entry: String, selected_p
     }
     projection: project_file(checker, selected_path) ?? return Err(query_diagnostics_error(selected_path, selected_src, err.diagnostics))
     plan: prepare_project_rename(checker, project, selected_path, symbol, to, None) ?? return Err(query_error(err.kind, err.message))
-    changes := plan.changes
+    ^changes: plan.changes
     normalize_and_format_project_changes(project, changes) ?? return Err(query_error("check", err.message))
     validate_project_rename_overlay(checker, project, changes) ?? return Err(query_error("check", err.message))
     definitions: project_symbol_definitions(context, symbol, false)
-    results := [String]{}
-    seen := [String:Bool]{}
+    ^results: [String]{}
+    ^seen: [String:Bool]{}
     loop hit in definitions {
         push_project_result(results, seen, "definition", hit.def.name, hit.def.module_path, hit.def.def_span, context.sources[hit.source], Val(projection), context.selected_source_id)
     }
@@ -243,7 +243,7 @@ canvas_project_preview_rename: fn(checker: LSPChecker, entry: String, selected_p
     files: loop change in changes -> "{{\"path\":{json_str(change.rel)},\"revision\":{json_str(source_revision(change.before))},\"after_revision\":{json_str(source_revision(change.after))},\"changed\":{json_bool(change.before != change.after)}}}"
     diffs: loop change in changes -> "diff -- {change.rel}\n{simple_diff(change.before, change.after)}"
     after_project_revision: project_revision_after_changes(project, changes)
-    selected_after_revision := "null"
+    ^selected_after_revision: "null"
     loop change in changes {
         if change.rel == context.selected_source_id {
             selected_after_revision = json_str(source_revision(change.after))
@@ -266,7 +266,7 @@ open_project_query_context: fn(checker: LSPChecker, entry: String, selected_path
         }
     }
     selected_source_id: rel_path(project.project_root, selected_path)
-    sources := [ProjectSourceIndex]{}
+    ^sources: [ProjectSourceIndex]{}
     loop file in project.files {
         if file.kind != "source" -> next
         path: query_files.join(project.project_root, file.path)
@@ -322,7 +322,7 @@ project_source_owner: fn(context: ProjectQueryContext, fallback: Int, module_pat
 // Every definition named `symbol` in the project's indexes; `by_owner`
 // credits each to the source that holds its module.
 project_symbol_definitions: fn(context: ProjectQueryContext, symbol: String, by_owner: Bool) -> [ProjectDefinitionHit] {
-    hits := [ProjectDefinitionHit]{}
+    ^hits: [ProjectDefinitionHit]{}
     loop at in 0..<context.sources.len() {
         loop definition in context.sources[at].index.definitions {
             if definition.def.name != symbol -> next
@@ -374,7 +374,7 @@ push_project_result: fn(results: ^[String], seen: ^[String:Bool], kind: String, 
         return
     }
     seen[key] = true
-    node := NodeQueryRef?{None}
+    ^node: NodeQueryRef?{None}
     if source.source_id == selected_source_id && projection == .Val(value) {
         node = node_for_span(value, span)
     }
@@ -388,14 +388,14 @@ project_query_ok: fn(op: String, context: ProjectQueryContext, results: ^[String
     truncated: results.len() > PROJECT_QUERY_RESULT_LIMIT
     loop results.len() > PROJECT_QUERY_RESULT_LIMIT {
         last: results.len() - 1
-        _ := results.remove(last, .Slot)
+        ^_: results.remove(last, .Slot)
     }
     "{{\"protocol\":\"jet.canvas.query\",\"schema_version\":{QUERY_SCHEMA_VERSION},\"ok\":true,\"op\":{json_str(op)},\"revision\":{json_str(source_revision(context.selected_source))},\"source_id\":{json_str(context.selected_source_id)},\"project_revision\":{json_str(context.project_revision)},\"results\":[{results.join(",")}],\"result_limit\":{PROJECT_QUERY_RESULT_LIMIT},\"truncated\":{json_bool(truncated)},{extra_fields} }}"
 }
 
 canvas_source_to_graph: fn(checker: LSPChecker, path: String, src: String, span: Span) -> String Err! {
     projection: project_file(checker, path) ?? return Err(query_diagnostics_error(path, src, err.diagnostics))
-    results := [String]{}
+    ^results: [String]{}
     loop node in projection.node_refs {
         if spans_overlap(node.span, span) {
             results.push(query_result_json("source_to_graph", node.title, node.title, "", node.span, Val(node), src))
@@ -409,8 +409,8 @@ canvas_source_to_graph: fn(checker: LSPChecker, path: String, src: String, span:
 
 canvas_preview_rename: fn(checker: LSPChecker, path: String, src: String, symbol: String, to: String) -> String Err! {
     context: open_query_context(checker, path, src)
-    edits := [TextEdit]{}
-    results := [String]{}
+    ^edits: [TextEdit]{}
+    ^results: [String]{}
     loop definition in context.index.definitions {
         def: definition.def
         if def.name != symbol -> next
@@ -434,8 +434,8 @@ canvas_preview_rename: fn(checker: LSPChecker, path: String, src: String, symbol
 canvas_actions: fn(checker: LSPChecker, path: String, src: String) -> String Err! {
     context: open_query_context(checker, path, src)
     authority: canvas_authority_context(path)
-    entries := [String]{}
-    project_functions := [String]{}
+    ^entries: [String]{}
+    ^project_functions: [String]{}
     loop definition in context.index.definitions {
         def: definition.def
         if def.kind == .Function(callable) {
@@ -499,7 +499,7 @@ canvas_core_catalog: fn(src: String, query: String) -> String Err! {
 
 canvas_core_catalog_action_jsons: fn(src: String, authority: CanvasAuthority) -> [String] {
     exports: core_module_exports()
-    out := [String]{}
+    ^out: [String]{}
     loop module_ref in core_catalog_entries("", exports) {
         source_callee: core_source_callee(src, module_ref.path)
         loop member in module_ref.members {
@@ -525,9 +525,9 @@ core_catalog_entries: fn(query: String, exports: [CoreCatalogExport]) -> [CoreCa
     // Lowered once: each search below compares against it.
     lowered: query.trim().to_ascii_lower()
     merged: core_registry_modules(exports)
-    modules := [CoreCatalogModule]{}
+    ^modules: [CoreCatalogModule]{}
     loop module_ref in merged {
-        members := [CoreCatalogMember]{}
+        ^members: [CoreCatalogMember]{}
         loop member in module_ref.members {
             if lowered.is_empty() || contains_lowered(member.name, lowered) || contains_lowered(member.signature, lowered) || contains_lowered(member.summary, lowered) {
                 members.push(member)
@@ -545,7 +545,7 @@ core_catalog_entries: fn(query: String, exports: [CoreCatalogExport]) -> [CoreCa
 
 // The compiler-known Core module exports, keyed by user-facing module path.
 core_module_exports: fn() -> [CoreCatalogExport] Never! {
-    out := [CoreCatalogExport]{}
+    ^out: [CoreCatalogExport]{}
     loop row in CORE_MODULE_EXPORTS {
         if row.module_name == "core" || row.module_name.starts_with("core.") {
             out.push(CoreCatalogExport{path: row.module_name, names: row.members})
@@ -556,12 +556,12 @@ core_module_exports: fn() -> [CoreCatalogExport] Never! {
 
 // One module per exported path, holding every name its rows export.
 core_registry_modules: fn(exports: [CoreCatalogExport]) -> [CoreCatalogModule] {
-    merged := [CoreCatalogModule]{}
-    seen := [String:Bool]{}
+    ^merged: [CoreCatalogModule]{}
+    ^seen: [String:Bool]{}
     loop export in exports {
         if seen.has_key(export.path) -> next
         seen[export.path] = true
-        members := [CoreCatalogMember]{}
+        ^members: [CoreCatalogMember]{}
         loop other in exports {
             if other.path != export.path -> next
             loop name in other.names {
@@ -767,7 +767,7 @@ core_member_status_json: fn(status: CoreMemberStatus) -> String Never! {
 
 // The input pins, after a `receiver` pin when the entry is a method.
 core_member_pins_json: fn(params: [CanvasParam], receiver_type: String) -> String Never! {
-    pins := [String]{}
+    ^pins: [String]{}
     if !receiver_type.is_empty() {
         pins.push("{{\"name\":\"receiver\",\"direction\":\"input\",\"type\":{json_str(receiver_type)}}}")
     }
@@ -813,14 +813,14 @@ params_from_signature: fn(signature: String) -> [CanvasParam]? Never! {
     open: signature.split_once("(") ?? return None
     close: open.after.split_once(")") ?? return None
     body: close.before.trim()
-    params := [CanvasParam]{}
+    ^params: [CanvasParam]{}
     if body.is_empty() -> return Val(params)
     parts: body.split(",").to_list()
     loop at in 0..<parts.len() {
         part: parts[at].trim()
         if part.is_empty() -> next
-        name := ""
-        ty := ""
+        ^name: ""
+        ^ty: ""
         if part.split_once(":") == .Val(typed) {
             name = typed.before.trim()
             ty = normalize_param_type(typed.after.trim())
@@ -836,13 +836,13 @@ params_from_signature: fn(signature: String) -> [CanvasParam]? Never! {
 
 // A written parameter type without its default and optional marks.
 normalize_param_type: fn(ty: String) -> String Never! {
-    written := ty
+    ^written: ty
     if written.split_once("=") == .Val(parts) -> written = parts.before
     without_optional(written.trim()).trim()
 }
 
 without_optional: fn(ty: String) -> String Never! {
-    text := ty
+    ^text: ty
     loop text.ends_with("?") -> text = text.removesuffix("?")
     text
 }
@@ -879,8 +879,8 @@ canvas_game_action_json: fn(fact: CanvasGameFact, authority: CanvasAuthority, re
 canvas_game_patch_value: fn(fact: CanvasGameFact) -> String Never! {
     value: fact.value_source.trim()
     if value.len() < 2 || !value.starts_with("\"") || !value.ends_with("\"") -> return value
-    out := [String]{}
-    escaped := false
+    ^out: [String]{}
+    ^escaped: false
     loop character in value.slice(1, value.len() - 1).chars() {
         text: "{character}"
         if !escaped {
@@ -921,7 +921,7 @@ canvas_structural_action_json: fn(name: String, title: String, transaction: Stri
 
 canvas_command_action_jsons: fn(authority: CanvasAuthority) -> [String] {
     source: authority.touched_file
-    actions := [String]{
+    ^actions: [String]{
         canvas_command_action_json("run", "Run program", [String]{"jet", "run", source}, "none", [String]{"canvas.command:run", authority.grant}, true, None, authority),
         canvas_command_action_json("check", "Check project", [String]{"jet", "check", source}, "none", [String]{"canvas.command:check", authority.grant}, true, None, authority),
         canvas_command_action_json("test", "Test project", [String]{"jet", "test", source}, "test_outputs", [String]{"canvas.command:test", "canvas.build_output:test", authority.grant}, true, None, authority),
@@ -943,7 +943,7 @@ canvas_command_action_json: fn(name: String, title: String, command: [String], w
 // from the package facts, else the single file's.
 canvas_authority_context: fn(path: String) -> CanvasAuthority {
     dir: entry_parent(path)
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     if pkg_package_facts_for_entry(cache, path) == {
         .Val(package) -> {
             root: if pkg_find_manifest_root_checked(cache, dir) == {

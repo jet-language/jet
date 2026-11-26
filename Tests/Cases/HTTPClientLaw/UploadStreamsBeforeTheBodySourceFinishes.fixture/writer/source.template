@@ -7,7 +7,7 @@ use {
 }
 run: fn() {
     child: process.cmd([String]{"dd", "of={work}/upload.fifo", "bs=4096"}).stdin(.Stream).spawn() ?? panic("FIFO byte pipe")
-    first := [U8]{}
+    ^first: [U8]{}
     loop i in 0..<32768 { first.push(U8{97}) }
     child.stdin.write(String.from_bytes(first) ?? panic("first ASCII payload")) ?? panic("first exact FIFO payload")
     deadline: time.instant() + 5s
@@ -15,7 +15,7 @@ run: fn() {
         assert(time.instant() < deadline)
         // Original yield_now: this is a synchronization poll, not a replacement readiness assertion.
     }
-    rest := [U8]{}
+    ^rest: [U8]{}
     loop i in 0..<172032 { rest.push(U8{98}) }
     child.stdin.write(String.from_bytes(rest) ?? panic("rest ASCII payload")) ?? panic("exact remainder")
     child.stdin.close()

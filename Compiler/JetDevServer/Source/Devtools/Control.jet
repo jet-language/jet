@@ -119,7 +119,7 @@ JetDevtoolsDatabaseExplainResult: struct {
     }
 
     render_json: fn(self) -> String Never! {
-        rows := [String]{}
+        ^rows: [String]{}
         loop row in self.plan_rows -> rows.push(row.render_json())
         "{{\"session_id\":{foundation_json_quote(self.session_id)},\"request_id\":{foundation_json_quote(self.request_id)},\"statement_identity\":{foundation_json_quote(self.statement_identity)},\"status\":{foundation_json_quote(self.status)},\"elapsed_ns\":{self.elapsed_ns},\"truncated\":{self.truncated},\"row_count\":{self.row_count},\"plan_rows\":[{rows.join(",")}],\"error_code\":{devtools_control_optional_json(self.error_code)},\"error_message\":{devtools_control_optional_json(self.error_message)}}}"
     }
@@ -427,7 +427,7 @@ JetDevtoolsCommandQueue: struct {
 
     // The oldest database command; every other queued command keeps its place.
     poll_database_explain: fn(^self) -> JetDevtoolsDatabaseExplainRequest? Never! {
-        found := Int?{None}
+        ^found: Int?{None}
         loop (index, command) in self.command_list {
             if command == .DatabaseExplain(_) {
                 found = Val(index)

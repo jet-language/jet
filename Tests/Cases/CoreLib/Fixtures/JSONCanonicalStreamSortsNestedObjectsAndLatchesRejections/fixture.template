@@ -7,7 +7,7 @@ use {
 
 run: fn() {
     output: files.create("{work}/canonical.json") ?? panic("create")
-    writer := json.writer(output, encoding.EncodingLimits.safe(), true) ?? panic("writer")
+    ^writer: json.writer(output, encoding.EncodingLimits.safe(), true) ?? panic("writer")
     writer.write(encoding.DataEvent.ObjectStart) ?? panic("object")
     writer.write(encoding.DataEvent.Key("z")) ?? panic("key")
     writer.write(encoding.DataEvent.ArrayStart) ?? panic("array")
@@ -25,14 +25,14 @@ run: fn() {
     writer.finish() ?? panic("finish")
     writer.finish() ?? panic("finish twice")
 
-    data := Dyn.Object([
+    ^data: Dyn.Object([
         "z": Dyn.Array([Dyn.Int(1), Dyn.Object(["b": Dyn.Int(2), "a": Dyn.Text("x")])]),
         "a": Dyn.Bool(true),
     ])
     print(json.canonical(data) ?? panic("value is not canonical JSON"))
 
     duplicate_output: files.create("{work}/duplicate.json") ?? panic("duplicate create")
-    duplicate_writer := json.writer(duplicate_output, encoding.EncodingLimits.safe(), true) ?? panic("duplicate writer")
+    ^duplicate_writer: json.writer(duplicate_output, encoding.EncodingLimits.safe(), true) ?? panic("duplicate writer")
     duplicate_writer.write(encoding.DataEvent.ObjectStart) ?? panic("duplicate object")
     duplicate_writer.write(encoding.DataEvent.Key("same")) ?? panic("first key")
     duplicate_writer.write(encoding.DataEvent.Int(1)) ?? panic("first value")
@@ -46,10 +46,10 @@ run: fn() {
         }
     }
 
-    limits := encoding.EncodingLimits.safe()
+    ^limits: encoding.EncodingLimits.safe()
     limits.max_item_bytes = 8
     limited_output: files.create("{work}/limited.json") ?? panic("limited create")
-    limited_writer := json.writer(limited_output, limits, true) ?? panic("limited writer")
+    ^limited_writer: json.writer(limited_output, limits, true) ?? panic("limited writer")
     limited_writer.write(encoding.DataEvent.ObjectStart) ?? panic("limited object")
     limited_writer.write(encoding.DataEvent.Key("long")) ?? panic("limited key")
     limited_writer.write(encoding.DataEvent.Text("value")) ?? panic("limited value")

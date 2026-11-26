@@ -91,8 +91,8 @@ ListScan: struct {
 
 apply_reorder_statements: fn(checker: LSPChecker, path: String, src: String, graph_id: String, moved: Span, anchor: Span, position: String) -> String Err! {
     func: checked_func_for_graph(checker, path, src, graph_id)
-    locs := [StatementLoc]{}
-    block := [Int]{}
+    ^locs: [StatementLoc]{}
+    ^block: [Int]{}
     collect_statement_locs(func.tables, src, func.body, block, locs)
     moved_at: loc_by_anchor(locs, moved) ?? return Err(edit_error("not_found", "Canvas step to move no longer exists"))
     anchor_at: loc_by_anchor(locs, anchor) ?? return Err(edit_error("not_found", "Canvas anchor step no longer exists"))
@@ -105,7 +105,7 @@ apply_reorder_statements: fn(checker: LSPChecker, path: String, src: String, gra
     if moved_full.start <= anchor_full.start && anchor_full.start < moved_full.end {
         return Err(edit_error("bad_request", "can't anchor a step inside the moved source yet"))
     }
-    insert := 0
+    ^insert: 0
     if position == "before" -> insert = anchor_full.start else if position == "after" {
         insert = anchor_full.end
     } else {
@@ -162,7 +162,7 @@ apply_exec_convergence: fn(checker: LSPChecker, path: String, src: String, graph
     if target_text == "" {
         return Err(edit_error("ambiguous", "Canvas needs one or more complete ordinary source statements to converge"))
     }
-    scan := InsertionScan{node_span: from_span, pin_name: from_pin_name, found: None, problem: None}
+    ^scan: InsertionScan{node_span: from_span, pin_name: from_pin_name, found: None, problem: None}
     find_exec_insertion(func.tables, src, func.body, scan)
     if scan.problem == .Val(problem) -> return Err(edit_error("ambiguous", problem))
     insertion: scan.found ?? return Err(edit_error("not_found", "Canvas convergence source path no longer exists"))
@@ -173,8 +173,8 @@ apply_exec_convergence: fn(checker: LSPChecker, path: String, src: String, graph
     params: convergence_params(index, doc.path, target.span)
     arg_names: loop param in params -> param.name
     args: arg_names.join(", ")
-    call_name := function
-    edits := [TextEdit]{}
+    ^call_name: function
+    ^edits: [TextEdit]{}
     if strategy == "helper" {
         name: helper_name ?? ""
         if name == "" {
@@ -207,14 +207,14 @@ apply_exec_convergence: fn(checker: LSPChecker, path: String, src: String, graph
 // The locals and parameters `target` reads, in source order, each with the
 // type its definition records.
 convergence_params: fn(index: SemIndex, module_path: String, target: Span) -> [NamedType] Err! {
-    order := [Int]{}
+    ^order: [Int]{}
     loop (at, reference) in index.references {
         if reference.module_path == module_path && reference.span.start >= target.start && reference.span.end <= target.end {
             order.push(at)
         }
     }
     loop at in 1..<order.len() {
-        cursor := at
+        ^cursor: at
         loop cursor > 0 && span_before(index.references[order[cursor]].span, index.references[order[cursor - 1]].span) {
             held: order[cursor]
             order[cursor] = order[cursor - 1]
@@ -222,12 +222,12 @@ convergence_params: fn(index: SemIndex, module_path: String, target: Span) -> [N
             cursor -= 1
         }
     }
-    params := [NamedType]{}
-    seen := [String:Bool]{}
+    ^params: [NamedType]{}
+    ^seen: [String:Bool]{}
     loop at in order {
         reference: index.references[at]
         anchor: reference.target ?? next
-        shown := String?{None}
+        ^shown: String?{None}
         loop definition in index.definitions {
             def: definition.def
             if def.module_path != anchor.module_path || !same_span(def.def_span, anchor.def_span) {
@@ -253,7 +253,7 @@ span_before: fn(left: Span, right: Span) -> Bool Never! {
 
 find_expression_selection: fn(tables: ASTTables, stmts: [StmtNode], target: Span, src: String) -> ExpressionSelection? Never! {
     if expression_selection_in_block(tables, stmts, target, src) == .Val(found) -> return Val(found)
-    scan := SelectionScan{target: target, found: None}
+    ^scan: SelectionScan{target: target, found: None}
     loop stmt in stmts {
         stmt_each_body(tables, stmt, fn(body: [StmtNode]) { note_expression_selection(tables, scan, body, src) })
         if scan.found != None -> break
@@ -271,8 +271,8 @@ note_expression_selection: fn(tables: ASTTables, scan: ^SelectionScan, body: [St
 // The run of expression statements of this block that `target` touches,
 // first through last; any other statement inside the run refuses it.
 expression_selection_in_block: fn(tables: ASTTables, stmts: [StmtNode], target: Span, src: String) -> ExpressionSelection? Never! {
-    first := -1
-    last := -1
+    ^first: -1
+    ^last: -1
     loop (at, stmt) in stmts {
         if ast_stmt(tables, stmt) == .Expr(expression) {
             anchor: ast_expr_span(tables, expression)
@@ -284,8 +284,8 @@ expression_selection_in_block: fn(tables: ASTTables, stmts: [StmtNode], target: 
         }
     }
     if first < 0 -> return None
-    start := 0
-    end := 0
+    ^start: 0
+    ^end: 0
     stop: last + 1
     loop at in first..<stop {
         if ast_stmt(tables, stmts[at]) == .Expr(expression) {
@@ -383,7 +383,7 @@ exec_branch_index: fn(tables: ASTTables, stmt: StmtNode, pin_name: String) -> In
         if pin_name == "else" -> return Val(1)
         return None
     }
-    arm_count := 0
+    ^arm_count: 0
     if view == .Switch(_, arms, _, _) -> arm_count = arms.len()
     if view == .ComptimeSwitch(_, arms, _, _) -> arm_count = arms.len()
     if pin_name == "else" -> return Val(arm_count)
@@ -403,7 +403,7 @@ branch_source_span: fn(src: String, stmt: StmtNode) -> Span Never! {
     stmt_span: jfmt_stmt_span(stmt)
     keyword: find_word(src, line_start(src, stmt_span.start), "if") ?? stmt_span.start
     open: find_unquoted_byte(src, keyword, 123) ?? return stmt_span
-    close := matching_delimiter(src, open, 123, 125) ?? stmt_span.end
+    ^close: matching_delimiter(src, open, 123, 125) ?? stmt_span.end
     loop {
         else_start: find_word(src, close + 1, "else") ?? break
         if foundation_byte_text(src.bytes(), close + 1, else_start).trim() != "" -> break
@@ -457,8 +457,8 @@ body_matches_expression: fn(tables: ASTTables, src: String, body: [StmtNode], ta
 
 expression_body_source: fn(tables: ASTTables, src: String, body: [StmtNode]) -> String? Never! {
     if body.len() == 0 -> return None
-    start := 0
-    end := 0
+    ^start: 0
+    ^end: 0
     loop (at, stmt) in body {
         if ast_stmt(tables, stmt) == .Expr(expression) {
             span: source_expression_span(tables, src, expression)
@@ -486,13 +486,13 @@ canvas_match_source: fn(expression: String) -> String Never! {
 // `source` without whitespace outside string and character literals.
 normalized_source_shape: fn(source: String) -> String Never! {
     bytes: source.bytes()
-    parts := [String]{}
-    quote := 0
-    escaped := false
-    run := -1
+    ^parts: [String]{}
+    ^quote: 0
+    ^escaped: false
+    ^run: -1
     loop at in 0..<bytes.len() {
         byte: Int{bytes[at]}
-        keep := true
+        ^keep: true
         if quote != 0 {
             if escaped -> escaped = false else if byte == 92 -> escaped = true else if byte == quote {
                 quote = 0
@@ -538,7 +538,7 @@ apply_add_pattern_arm: fn(checker: LSPChecker, path: String, src: String, graph_
     func: checked_func_for_graph(checker, path, src, graph_id)
     head: normalize_pattern_arm_head(pattern)
     if head == "" -> return Err(edit_error("bad_request", "pattern arm text is empty"))
-    scan := ArmInsertScan{node_span: node_span, head: head, fresh: fresh_arm_body(func.return_type), found: None}
+    ^scan: ArmInsertScan{node_span: node_span, head: head, fresh: fresh_arm_body(func.return_type), found: None}
     find_arm_insert(func.tables, src, func.body, scan)
     found: scan.found ?? return Err(edit_error("not_found", "Canvas pattern node no longer exists"))
     changed: jet_driver_apply_edits(src, [TextEdit]{found}) ?? return Err(edit_error("overlap", "Canvas pattern arm insert overlapped"))
@@ -549,7 +549,7 @@ apply_edit_pattern_arm: fn(checker: LSPChecker, path: String, src: String, graph
     func: checked_func_for_graph(checker, path, src, graph_id)
     head: normalize_pattern_arm_head(pattern)
     if head == "" -> return Err(edit_error("bad_request", "pattern arm text is empty"))
-    scan := ArmSpanScan{pattern_span: pattern_span, found: false, remove_span: Span{start: 0, end: 0}, only_arm: false}
+    ^scan: ArmSpanScan{pattern_span: pattern_span, found: false, remove_span: Span{start: 0, end: 0}, only_arm: false}
     find_arm_span(func.tables, src, func.body, scan)
     if !scan.found -> return Err(edit_error("not_found", "Canvas pattern arm no longer exists"))
     changed: jet_driver_apply_edits(src, [TextEdit]{edit(pattern_span, head)}) ?? return Err(edit_error("overlap", "Canvas pattern arm edit overlapped"))
@@ -558,7 +558,7 @@ apply_edit_pattern_arm: fn(checker: LSPChecker, path: String, src: String, graph
 
 apply_remove_pattern_arm: fn(checker: LSPChecker, path: String, src: String, graph_id: String, pattern_span: Span) -> String Err! {
     func: checked_func_for_graph(checker, path, src, graph_id)
-    scan := ArmSpanScan{pattern_span: pattern_span, found: false, remove_span: Span{start: 0, end: 0}, only_arm: false}
+    ^scan: ArmSpanScan{pattern_span: pattern_span, found: false, remove_span: Span{start: 0, end: 0}, only_arm: false}
     find_arm_span(func.tables, src, func.body, scan)
     if !scan.found -> return Err(edit_error("not_found", "Canvas pattern arm no longer exists"))
     if scan.only_arm {
@@ -598,7 +598,7 @@ find_arm_insert: fn(tables: ASTTables, src: String, stmts: [StmtNode], scan: ^Ar
 }
 
 switch_arm_insert: fn(src: String, arms: [SwitchArm], else_body: [StmtNode]?, span: Span, head: String, fresh: String) -> TextEdit Never! {
-    insert := dispatch_body_insert_offset(src, span)
+    ^insert: dispatch_body_insert_offset(src, span)
     if arms.len() > 0 -> insert = line_after(src, arms[arms.len() - 1].span.end) else if else_body == .Val(body) {
         insert = if body.len() > 0 -> line_start(src, jfmt_stmt_span(body[0]).start) else -> line_start(src, span.end)
     }
@@ -609,14 +609,14 @@ switch_arm_insert: fn(src: String, arms: [SwitchArm], else_body: [StmtNode]?, sp
 // `if subject == { head -> then; new_head -> fresh; else -> … }` for a
 // classic single-pattern branch.
 classic_switch_source: fn(tables: ASTTables, src: String, arm: SwitchArm, else_body: [StmtNode]?, new_head: String, fresh: String) -> String Never! {
-    subject_src := ""
+    ^subject_src: ""
     if ast_expr(tables, arm.cond) == .PatternTest(subject, _, _, _) {
         subject_src = snippet(src, ast_expr_span(tables, subject))
     }
     head_span: pattern_arm_edit_span(tables, src, arm.cond)
     head: if head_span.start >= 0 && head_span.end <= src.count_bytes() && head_span.start <= head_span.end -> foundation_byte_text(src.bytes(), head_span.start, head_span.end) else -> snippet(src, ast_expr_span(tables, arm.cond))
     then_body: block_body_source(tables, src, arm.body, "        ")
-    else_text := ""
+    ^else_text: ""
     if else_body == .Val(body) {
         else_text = "    else -> {{\n{block_body_source(tables, src, body, "        ")}    }}\n"
     }
@@ -625,18 +625,18 @@ classic_switch_source: fn(tables: ASTTables, src: String, arm: SwitchArm, else_b
 
 block_body_source: fn(tables: ASTTables, src: String, stmts: [StmtNode], indent: String) -> String Never! {
     bytes: src.bytes()
-    parts := [String]{}
+    ^parts: [String]{}
     loop stmt in stmts {
         span: stmt_text_span(tables, src, stmt)
         // The statement's lines, each trimmed, less the blank ones before its
         // first line of text and after its last, cut from `src` by their byte
         // bounds.
         first: parts.len()
-        kept := first
+        ^kept: first
         end: if span.end < bytes.len() -> span.end else -> bytes.len()
-        at := span.start
+        ^at: span.start
         loop at < end {
-            stop := at
+            ^stop: at
             loop stop < end && bytes[stop] != (U8{10}) -> stop += 1
             line: foundation_byte_text(bytes, at, stop)
             at = stop + 1
@@ -698,7 +698,7 @@ arm_text_span: fn(src: String, span: Span) -> Span Never! {
 }
 
 normalize_pattern_arm_head: fn(pattern: String) -> String Never! {
-    head := pattern.trim()
+    ^head: pattern.trim()
     if head.starts_with("==") -> head = head.slice(2, head.len()).trim()
     loop head.ends_with("->") -> head = head.slice(0, head.len() - 2)
     head.trim()
@@ -715,7 +715,7 @@ fresh_arm_body: fn(return_type: String?) -> String Never! {
 
 apply_toggle_switch_state: fn(checker: LSPChecker, path: String, src: String, graph_id: String, node_span: Span) -> String Err! {
     func: checked_func_for_graph(checker, path, src, graph_id)
-    scan := SwitchedScan{node_span: node_span, marker: None, nested: false}
+    ^scan: SwitchedScan{node_span: node_span, marker: None, nested: false}
     find_switched_node(func.tables, func.body, scan)
     if scan.marker == .Val(marker_span) {
         removed: jet_driver_apply_edits(src, [TextEdit]{edit(marker_span, "")}) ?? return Err(edit_error("overlap", "Canvas statement-state toggle overlapped"))
@@ -770,7 +770,7 @@ apply_append_multi_input: fn(checker: LSPChecker, path: String, src: String, nod
     if node_span.start < 0 || node_span.end > src.count_bytes() || node_span.start > node_span.end {
         return Err(edit_error("bad_request", "Canvas multi-input source span is stale"))
     }
-    insert := 0
+    ^insert: 0
     if list.items.len() > 0 -> insert = list.items[list.items.len() - 1].end else {
         close: foundation_byte_text(src.bytes(), node_span.start, node_span.end).rfind("]")
         if close < 0 {
@@ -797,7 +797,7 @@ apply_remove_multi_input_element: fn(checker: LSPChecker, path: String, src: Str
 
 // The list literal at `node_span` in `body`, with its element spans.
 find_list_literal: fn(tables: ASTTables, body: [StmtNode], node_span: Span) -> ListScan Never! {
-    scan := ListScan{node_span: node_span, found: false, items: [Span]{}}
+    ^scan: ListScan{node_span: node_span, found: false, items: [Span]{}}
     ast_visit_body(tables, body, fn(expression: ExprNode) { note_list_literal(tables, scan, expression) }, true)
     scan
 }
@@ -852,14 +852,14 @@ clamp_offset: fn(offset: Int, limit: Int) -> Int Never! {
 
 consume_trailing_space: fn(src: String, offset: Int, limit: Int) -> Int Never! {
     bytes: src.bytes()
-    cursor := offset
+    ^cursor: offset
     loop cursor < limit && cursor < bytes.len() && is_space_byte(Int{bytes[cursor]}) -> cursor += 1
     cursor
 }
 
 consume_leading_space_back: fn(before: String, comma: Int) -> Int Never! {
     bytes: before.bytes()
-    start := comma
+    ^start: comma
     loop start > 0 && is_space_byte(Int{bytes[start - 1]}) -> start -= 1
     start
 }
@@ -885,7 +885,7 @@ checked_source: fn(checker: LSPChecker, path: String, src: String) -> CheckedSou
 }
 
 error_diagnostics: fn(diagnostics: [Diagnostic]) -> [Diagnostic] Never! {
-    errors := [Diagnostic]{}
+    ^errors: [Diagnostic]{}
     loop at in 0..<diagnostics.len() {
         if diagnostics[at].severity == DIAGNOSTIC_ERROR -> errors.push(diagnostics[at])
     }
@@ -900,7 +900,7 @@ checked_func_for_graph: fn(checker: LSPChecker, path: String, src: String, graph
 }
 
 canvas_func: fn(tables: ASTTables, function: Func) -> CanvasFunc Never! {
-    return_type := String?{None}
+    ^return_type: String?{None}
     if function.return_type == .Val(ty) -> return_type = Val(type_name(ty))
     CanvasFunc{name: function.name, name_span: function.name_span, span: canvas_func_span(function), body: function.body, tables: tables, return_type: return_type}
 }
@@ -1035,8 +1035,8 @@ stmt_source_span: fn(tables: ASTTables, stmt: StmtNode) -> Span Never! {
 source_expression_span: fn(tables: ASTTables, src: String, expression: ExprNode) -> Span Never! {
     span: ast_expr_span(tables, expression)
     view: ast_expr(tables, expression)
-    start := span.start
-    end := span.end
+    ^start: span.start
+    ^end: span.end
     if view == .Call(call, _) {
         start = call.name_span.start
         end = call_source_end(src, call.name_span.end, span.end)
@@ -1116,10 +1116,10 @@ spans_cross: fn(left: Span, right: Span) -> Bool Never! {
 // The first `wanted` byte at or after `start` outside quotes and `//` comments.
 find_unquoted_byte: fn(src: String, start: Int, wanted: Int) -> Int? Never! {
     bytes: src.bytes()
-    quote := 0
-    escaped := false
-    comment := false
-    cursor := if start < 0 -> 0 else -> start
+    ^quote: 0
+    ^escaped: false
+    ^comment: false
+    ^cursor: if start < 0 -> 0 else -> start
     loop cursor < bytes.len() {
         byte: Int{bytes[cursor]}
         following: if cursor + 1 < bytes.len() -> Int{bytes[cursor + 1]} else -> 0
@@ -1141,11 +1141,11 @@ find_unquoted_byte: fn(src: String, start: Int, wanted: Int) -> Int? Never! {
 // The `closing` byte that balances the `opening` byte at `open`.
 matching_delimiter: fn(src: String, open: Int, opening: Int, closing: Int) -> Int? Never! {
     bytes: src.bytes()
-    depth := 0
-    quote := 0
-    escaped := false
-    comment := false
-    cursor := if open < 0 -> 0 else -> open
+    ^depth: 0
+    ^quote: 0
+    ^escaped: false
+    ^comment: false
+    ^cursor: if open < 0 -> 0 else -> open
     loop cursor < bytes.len() {
         byte: Int{bytes[cursor]}
         following: if cursor + 1 < bytes.len() -> Int{bytes[cursor + 1]} else -> 0
@@ -1170,7 +1170,7 @@ matching_delimiter: fn(src: String, open: Int, opening: Int, closing: Int) -> In
 // The first `word` at or after `start` that is not part of a longer name.
 find_word: fn(src: String, start: Int, word: String) -> Int? Never! {
     bytes: src.bytes()
-    cursor := if start < 0 -> 0 else -> start
+    ^cursor: if start < 0 -> 0 else -> start
     loop cursor < bytes.len() {
         relative: foundation_byte_text(bytes, cursor, bytes.len()).find(word)
         if relative < 0 -> return None

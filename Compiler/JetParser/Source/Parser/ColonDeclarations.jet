@@ -43,6 +43,7 @@ use {
     jet_lexer.[
         TOKEN_BANG,
         TOKEN_BLOCK_COMMENT,
+        TOKEN_CARET,
         TOKEN_COMMA,
         TOKEN_COLON,
         TOKEN_DOLLAR,
@@ -481,14 +482,17 @@ parser_colon_member_frame: fn(frame: Int) -> Bool Never! {
 // `{ step: Int step: fn(self) {} }`: a `priv`, or a declaration head
 // right after the last token of a type (`previous`). A `name: fn`-style head
 // starts a member after any other token too: a line the lexer continued
-// (`use math.*` before `run: fn() {`) still ends before it.
+// (`use math.*` before `run: fn() {`) still ends before it. The name after a
+// `^` is the changeable binding's own (`^scaled: fn(x: Int) -> Int { … }`).
 parser_colon_member_break: fn(tokens: [Token], index: Int, previous: Int) -> Bool Never! {
     kind: tokens[index].kind
     if kind == TOKEN_KW_PRIV -> return true
     if previous < 0 -> return false
     before: tokens[previous].kind
     if before != TOKEN_IDENT && before != TOKEN_RPAREN && before != TOKEN_RBRACKET && before != TOKEN_GT {
-        if kind != TOKEN_IDENT || before == TOKEN_DOT || before == TOKEN_COLON -> return false
+        if kind != TOKEN_IDENT || before == TOKEN_DOT || before == TOKEN_COLON || before == TOKEN_CARET {
+            return false
+        }
         colon: parser_colon_head_colon(tokens, index)
         if colon < 0 -> return false
         keyword: parser_colon_code_at(tokens, colon + 1)

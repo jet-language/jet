@@ -181,7 +181,7 @@ sema_call_memory_check_fixed_buffer: fn(argument: CallArg, value: TExpr, check: 
     // buffer's name passed plain is that window.
     ^direct_write: argument.convention != AccessConvention.Move && direct_expr
     if !fixed_bytes || !direct_write {
-        check.diagnostics.push(sema_error("E0103", argument.span, "`Fixed.over` needs one mutable fixed-size byte buffer", "the allocator exclusively borrows that exact inline buffer until the Fixed handle is closed", "bind `[Byte#N]` storage with `:=`, then write `fixed: mem.Fixed.over(storage)`"))
+        check.diagnostics.push(sema_error("E0103", argument.span, "`Fixed.over` needs one mutable fixed-size byte buffer", "the allocator exclusively borrows that exact inline buffer until the Fixed handle is closed", "bind `[Byte#N]` storage to a `^` name, then write `fixed: mem.Fixed.over(storage)`"))
         return false
     }
     ^parameter: SemaCallParam{label: "buffer", name: "buffer", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Write, ty: Val(value.ty), variadic: false}

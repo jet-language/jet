@@ -459,7 +459,7 @@ ssl_cli12_parse_server_dh_params: fn(ssl: ^ssldefs.SSLContext, p: ^Int, end: Int
     ssltls.ssl_dhm_ready(ssl)
     data: ssldefs.ssl_bytes_of(ssl.in_buf, p, end - p)
     ^at: 0
-    ^bitlen: if ^ssl.handshake.dhm_ctx == {
+    ^bitlen: if ssl.handshake.dhm_ctx.in_place() == {
         .Val(ctx) -> {
             dhm.dhm_read_params(ctx, data, at, data.len()) ?? return Err(.DHM(err))
             dhm.dhm_get_bitlen(ctx)
@@ -489,7 +489,7 @@ ssl_cli12_check_server_ecdh_params: fn(ssl: ^ssldefs.SSLContext) -> Bool Never! 
 ssl_cli12_parse_server_ecdh_params: fn(ssl: ^ssldefs.SSLContext, p: ^Int, end: Int) ssldefs.SSLError! {
     ssltls.ssl_ecdh_ready(ssl)
     data: ssldefs.ssl_bytes_of(ssl.in_buf, p, end - p)
-    ^used: if ^ssl.handshake.ecdh_ctx == {
+    ^used: if ssl.handshake.ecdh_ctx.in_place() == {
         .Val(ctx) -> ecdh.ecdh_read_params(ctx, data) ?? return Err(.ECP(err))
         None -> {
             return Err(.InternalError)
@@ -525,7 +525,7 @@ ssl_cli12_write_encrypted_pms: fn<R: RNG>(ssl: ^ssldefs.SSLContext, offset: Int,
     if !ssltls.ssl_peer_pk_can_do(ssl, .RSA) -> return Err(.PKTypeMismatch)
     ^plain: ssldefs.ssl_bytes_of(ssl.handshake.premaster, pms_offset, 48)
     sn: ssl.session_negotiate
-    ^enc: if ^ssl.spool[sn].peer_cert == {
+    ^enc: if ssl.spool[sn].peer_cert.in_place() == {
         .Val(chain) -> if pk.pk_encrypt(chain[0].pk, plain, ssldefs.SSL_OUT_CONTENT_LEN - offset - 2, rng) == {
             .Ok(e) -> e
             .Err(e) -> {
@@ -550,7 +550,7 @@ ssl_cli12_get_ecdh_params_from_cert: fn(ssl: ^ssldefs.SSLContext) ssldefs.SSLErr
     if !ssltls.ssl_peer_pk_can_do(ssl, .ECKey) -> return Err(.PKTypeMismatch)
     ssltls.ssl_ecdh_ready(ssl)
     sn: ssl.session_negotiate
-    ^failure: if ^ssl.handshake.ecdh_ctx == {
+    ^failure: if ssl.handshake.ecdh_ctx.in_place() == {
         .Val(ctx) -> if ssl.spool[sn].peer_cert == {
             .Val(chain) -> ssltls.ssl_ecdh_get_params_failure(ctx, chain[0].pk.ec, .Theirs)
             None -> None
@@ -683,7 +683,7 @@ ssl_cli12_parse_server_key_exchange: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^
         }
         sig: ssldefs.ssl_bytes_of(ssl.in_buf, p, sig_len)
         sn: ssl.session_negotiate
-        ^failure: if ^ssl.spool[sn].peer_cert == {
+        ^failure: if ssl.spool[sn].peer_cert.in_place() == {
             .Val(chain) -> ssl_cli12_verify_signature(chain[0].pk, parts, hash, sig)
             None -> {
                 return Err(.InternalError)
@@ -802,7 +802,7 @@ ssl_cli12_write_client_key_exchange: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^
     if kx == {
         .DHERSA -> {
             ssltls.ssl_dhm_ready(ssl)
-            ^public: if ^ssl.handshake.dhm_ctx == {
+            ^public: if ssl.handshake.dhm_ctx.in_place() == {
                 .Val(ctx) -> {
                     size: dhm.dhm_get_len(ctx)
                     dhm.dhm_make_public(ctx, size, size, rng) ?? return Err(.DHM(err))
@@ -815,7 +815,7 @@ ssl_cli12_write_client_key_exchange: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^
             ssldefs.ssl_put_u16(ssl.out_buf, out + 4, content_len)
             header_len = 6
             ssldefs.ssl_copy_into(ssl.out_buf, out + header_len, public, 0, content_len)
-            ^secret: if ^ssl.handshake.dhm_ctx == {
+            ^secret: if ssl.handshake.dhm_ctx.in_place() == {
                 .Val(ctx) -> {
                     // The premaster buffer must hold a value as long as p.
                     if dhm.dhm_get_len(ctx) > ssldefs.SSL_PREMASTER_SIZE {
@@ -832,7 +832,7 @@ ssl_cli12_write_client_key_exchange: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^
         .ECDHERSA | .ECDHEECDSA | .ECDHRSA | .ECDHECDSA -> {
             header_len = 4
             ssltls.ssl_ecdh_ready(ssl)
-            ^public: if ^ssl.handshake.ecdh_ctx == {
+            ^public: if ssl.handshake.ecdh_ctx.in_place() == {
                 .Val(ctx) -> ecdh.ecdh_make_public(ctx, 1000, rng) ?? return Err(.ECP(err))
                 None -> {
                     return Err(.InternalError)
@@ -840,7 +840,7 @@ ssl_cli12_write_client_key_exchange: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^
             }
             content_len = public.len()
             ssldefs.ssl_copy_into(ssl.out_buf, out + header_len, public, 0, content_len)
-            ^secret: if ^ssl.handshake.ecdh_ctx == {
+            ^secret: if ssl.handshake.ecdh_ctx.in_place() == {
                 .Val(ctx) -> ecdh.ecdh_calc_secret(ctx, ssldefs.SSL_PREMASTER_SIZE, rng) ?? return Err(.ECP(err))
                 None -> {
                     return Err(.InternalError)
@@ -884,7 +884,7 @@ ssl_cli12_write_client_key_exchange: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^
                     }
                     ssldefs.ssl_put_u16(ssl.out_buf, out + header_len, content_len)
                     header_len += 2
-                    ^public: if ^ssl.handshake.dhm_ctx == {
+                    ^public: if ssl.handshake.dhm_ctx.in_place() == {
                         .Val(ctx) -> dhm.dhm_make_public(ctx, size, size, rng) ?? return Err(.DHM(err))
                         None -> {
                             return Err(.InternalError)
@@ -894,7 +894,7 @@ ssl_cli12_write_client_key_exchange: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^
                 }
                 .NoExchange | .RSA | .DHERSA | .ECDHERSA | .ECDHEECDSA | .ECDHEPSK | .ECDHRSA | .ECDHECDSA -> {
                     ssltls.ssl_ecdh_ready(ssl)
-                    ^public: if ^ssl.handshake.ecdh_ctx == {
+                    ^public: if ssl.handshake.ecdh_ctx.in_place() == {
                         .Val(ctx) -> ecdh.ecdh_make_public(ctx, ssldefs.SSL_OUT_CONTENT_LEN - header_len, rng) ?? return Err(.ECP(err))
                         None -> {
                             return Err(.InternalError)

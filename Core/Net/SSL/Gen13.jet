@@ -213,7 +213,7 @@ ssl_tls13_parse_certificate_verify: fn(ssl: ^ssldefs.SSLContext, buf: Int, end: 
         }
     }
     sn: ssl.session_negotiate
-    key_fits: if ^ssl.spool[sn].peer_cert == {
+    key_fits: if ssl.spool[sn].peer_cert.in_place() == {
         .Val(chain) -> chain.len() > 0 && ssl_tls13_key_fits(chain[0].pk, algorithm, parts.pk_type)
         None -> false
     }
@@ -225,7 +225,7 @@ ssl_tls13_parse_certificate_verify: fn(ssl: ^ssldefs.SSLContext, buf: Int, end: 
     verify_hash: hashes.hash(parts.md_alg, verify_buffer)
     options: ssl_tls13_pss_options(parts.pk_type, parts.md_alg)
     signature: ssldefs.ssl_bytes_of(ssl.in_buf, p, signature_len)
-    verified: if ^ssl.spool[sn].peer_cert == {
+    verified: if ssl.spool[sn].peer_cert.in_place() == {
         .Val(chain) -> if pk.pk_verify_ext(parts.pk_type, options, chain[0].pk, Val(parts.md_alg), verify_hash, signature) == {
             .Ok(_) -> true
             .Err(_) -> false

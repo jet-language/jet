@@ -19,7 +19,7 @@ check: fn(key: [U8], nonce: [U8], plain: [U8], aad: [U8], cipher: [U8], fail: Bo
         } else {
             assert_eq(expert.aes256gcm_seal(key, nonce, plain, aad) ?? panic("seal"), cipher)
             assert_eq(expert.aes256gcm_open(key, nonce, cipher, aad) ?? panic("open"), plain)
-            bad := cipher.copy()
+            ^bad: cipher.copy()
             bad[bad.len() - 1] = bad[bad.len() - 1] ~| U8{1}
             if expert.aes256gcm_open(key, nonce, bad, aad) == {
                 .Err(error) -> assert_eq(error, CryptoError.OpenFailed)

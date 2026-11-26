@@ -30,7 +30,7 @@ use jobs: core.jobs
 plain: fn(payload: String) { print(payload) }
 
 run: fn() {
-    queue := jobs.queue() ?? return
+    ^queue: jobs.queue() ?? return
     first: queue.enqueue(process, "now") ?? return
     keyed: queue.enqueue(process, "keyed", key: "first") ?? return
     later: queue.delay(process, "later", for: 1s) ?? return

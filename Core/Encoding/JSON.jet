@@ -1261,7 +1261,7 @@ parse_json: fn(text: String, allow_duplicates: Bool, limits: EncodingLimits) -> 
 // a whole String in memory, so its size is not bounded here; nesting stays
 // bounded by the safe max_depth. The parameter is not spelled `T`:
 // explicit-argument inference binds by name, so a generic caller's
-// `decode<[T]>` would read as `T := [T]`.
+// `decode<[T]>` would read as `^T: [T]`.
 #Builtin.Role(.JSONTypedDecode) priv __decode_typed: fn<Target: Decode>(text: String) -> Target [FieldError]! {
     decode_typed_from<Target>(text, 1)
 }
@@ -1600,7 +1600,7 @@ write_json_float: fn(out: ^[U8], n: Float) EncodingError! {
 /// levels in (`step` 0 is the compact form).
 ///
 /// ```jet
-/// out := [U8]{}
+/// ^out: [U8]{}
 /// write_stringify(out, Dyn.Array([Dyn]{Dyn.Bool(true), Dyn.Null, Dyn.Int(3)}), 0, 0)
 /// String.from_bytes_lossy(out) == "[true,null,3]" // => true
 /// ```
@@ -1648,7 +1648,7 @@ write_stringify: fn(out: ^[U8], value: Dyn, step: Int, depth: Int) Never! {
 /// A finite number in ECMAScript spelling; NaN and the infinities are null.
 ///
 /// ```jet
-/// out := [U8]{}
+/// ^out: [U8]{}
 /// write_stringify_number(out, 1e21)
 /// write_stringify_number(out, math.NAN)
 /// String.from_bytes_lossy(out) == "1e+21null" // => true
@@ -1660,7 +1660,7 @@ write_stringify_number: fn(out: ^[U8], n: Float) Never! {
 /// A line break and `step * depth` spaces; nothing in the compact form.
 ///
 /// ```jet
-/// out := [U8]{}
+/// ^out: [U8]{}
 /// write_stringify_break(out, 2, 2)
 /// out.len() // => 5
 /// write_stringify_break(out, 0, 3)

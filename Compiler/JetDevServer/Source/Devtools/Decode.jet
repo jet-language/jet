@@ -50,7 +50,7 @@ devtools_decode_events: fn(object: [{key: String, value: Dyn}], session_id: ^^St
     if items.len() > JET_DEVTOOLS_MAX_EVENTS {
         return Err("devtools envelope exceeds the retained event limit")
     }
-    envelope := JetDevtoolsEnvelope.new(session_id, started_at_ms)
+    ^envelope: JetDevtoolsEnvelope.new(session_id, started_at_ms)
     loop item in items {
         event: devtools_decode_event(item)
         _: envelope.push(event)
@@ -116,7 +116,7 @@ devtools_decode_event: fn(value: Dyn) -> JetDevtoolsEvent Err! {
     fields_value: recording_lookup(event, "fields") ?? return Err("devtools envelope missing `fields`")
     field_list: recording_object_fields(fields_value) ?? return Err("devtools envelope `fields` must be an object")
     fields: recording_canonical_json(fields_value)
-    payload := String?{None}
+    ^payload: String?{None}
     if recording_lookup(event, "payload") == .Val(published) {
         if published == .Object(_) -> payload = Val(recording_canonical_json(published)) else if !(published == .Null) {
             return Err("devtools event payload must be an object or null")
@@ -297,7 +297,7 @@ devtools_decode_commands: fn(object: [{key: String, value: Dyn}], session_id: ^^
     if items.len() > JET_DEVTOOLS_MAX_COMMANDS {
         return Err("devtools envelope exceeds the retained command limit")
     }
-    envelope := JetDevtoolsCommandEnvelope.new(session_id, started_at_ms)
+    ^envelope: JetDevtoolsCommandEnvelope.new(session_id, started_at_ms)
     loop item in items {
         command: devtools_decode_command(item)
         envelope.enqueue_command(command)
@@ -467,7 +467,7 @@ devtools_decode_optional_string: fn(object: [{key: String, value: Dyn}], key: St
 
 devtools_decode_string_array: fn(object: [{key: String, value: Dyn}], key: String) -> [String] Err! {
     items: devtools_decode_array(object, key)
-    strings := [String]{}
+    ^strings: [String]{}
     loop item in items {
         text: recording_text(item) ?? return Err("devtools event `{key}` must contain strings")
         if text == "" -> return Err("devtools event `{key}` has an empty string")
@@ -541,7 +541,7 @@ devtools_decode_launch_phases: fn(object: [{key: String, value: Dyn}], key: Stri
     if items.len() > JET_DEVTOOLS_MAX_LAUNCH_PHASES {
         return Err("devtools event `{key}` exceeds {JET_DEVTOOLS_MAX_LAUNCH_PHASES} entries")
     }
-    phases := [JetDevtoolsGameLaunchPhase]{}
+    ^phases: [JetDevtoolsGameLaunchPhase]{}
     loop item in items {
         phase: recording_object_fields(item) ?? return Err("devtools event `{key}` must contain objects")
         devtools_decode_require_exact(phase, [String]{"phase", "status", "detail"})

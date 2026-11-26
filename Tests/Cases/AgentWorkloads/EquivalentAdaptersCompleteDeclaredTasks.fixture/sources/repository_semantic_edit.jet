@@ -19,7 +19,7 @@ run: fn(args: WorkloadArgs) {
     scratch: fs.tmpdir("jet-semantic-edit-") ?? panic("cannot create scratch directory")
     project: "{scratch}/project"
     fs.copy_dir(input, project) ?? panic("cannot copy input project")
-    object := "{project}/migration.codemod.json"
+    ^object: "{project}/migration.codemod.json"
     result: process.cmd([String]{jet.copy(), "inspect", "codemod", "apply", object, "--yes"})
         .stdout(.Capture)
         .stderr(.Capture)

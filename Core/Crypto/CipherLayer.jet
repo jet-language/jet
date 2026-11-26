@@ -740,7 +740,7 @@ cipher_write_tag: fn(ctx: ^CipherContext, tag_len: Int) -> [U8] CipherLayerError
 /// The first `tag_len` bytes of the running GCM or ChaCha20-Poly1305 tag.
 finish_tag: fn(ctx: ^CipherContext, tag_len: Int) -> [U8] CipherLayerError! {
     if ctx.info.mode == {
-        .GCM -> if ^ctx.base == {
+        .GCM -> if ctx.base.in_place() == {
             .GCMAES(g) -> gcm_tag(g, tag_len)
             .GCMCamellia(g) -> gcm_tag(g, tag_len)
             .GCMARIA(g) -> gcm_tag(g, tag_len)
@@ -748,7 +748,7 @@ finish_tag: fn(ctx: ^CipherContext, tag_len: Int) -> [U8] CipherLayerError! {
         }
         .ChaChaPoly -> {
             if tag_len != 16 -> return Err(.BadInputData)
-            if ^ctx.base == {
+            if ctx.base.in_place() == {
                 .ChaChaPoly(cp) -> {
                     mac: aead.chachapoly_finish(cp) ?? return Err(.ChaChaPolyBadState)
                     Ok(mac)
@@ -898,7 +898,7 @@ cipher_auth_encrypt_ext: fn(ctx: ^CipherContext, iv: [U8], ad: [U8], input: [U8]
         }
         .ChaChaPoly -> {
             if iv.len() != ctx.info.iv_size || tag_len != 16 -> return Err(.BadInputData)
-            if ^ctx.base == {
+            if ctx.base.in_place() == {
                 .ChaChaPoly(cp) -> chachapoly_seal(cp, iv, ad, input)
                 .Unset | .AES(_) | .XTS(_) | .DES(_) | .Camellia(_) | .ARIA(_) | .GCMAES(_) | .GCMCamellia(_) | .GCMARIA(_) | .CCMAES(_) | .CCMCamellia(_) | .CCMARIA(_) | .ChaCha20(_) | .KW(_) -> Err(.BadInputData)
             }
@@ -941,7 +941,7 @@ cipher_auth_decrypt_ext: fn(ctx: ^CipherContext, iv: [U8], ad: [U8], input: [U8]
         }
         .ChaChaPoly -> {
             if iv.len() != ctx.info.iv_size || tag_len != 16 -> return Err(.BadInputData)
-            if ^ctx.base == {
+            if ctx.base.in_place() == {
                 .ChaChaPoly(cp) -> chachapoly_open(cp, iv, ad, input, input.len() - 16)
                 .Unset | .AES(_) | .XTS(_) | .DES(_) | .Camellia(_) | .ARIA(_) | .GCMAES(_) | .GCMCamellia(_) | .GCMARIA(_) | .CCMAES(_) | .CCMCamellia(_) | .CCMARIA(_) | .ChaCha20(_) | .KW(_) -> Err(.BadInputData)
             }

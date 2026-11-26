@@ -24,7 +24,7 @@ names_a_type: fn(word: String) -> Bool {
 
 // Whether one source line declares something with a retired word.
 old_declaration: fn(line: String) -> Bool {
-    words := [String]{}
+    ^words: [String]{}
     loop word in line.trim().split(" ") {
         if word != "" -> words.push(word)
     }
@@ -56,9 +56,9 @@ run: fn() {
     args: process.args()
     if args.len() == 0 -> panic("usage: jet run scan.jet -- <repository root>")
     root: args[args.len() - 1]
-    hits := [String]{}
+    ^hits: [String]{}
     loop name in ROOTS {
-        count := 0
+        ^count: 0
         scan("{root}/{name}", hits, count)
         print("{name}: {if count > 0 -> "scanned" else -> "empty"}")
     }

@@ -52,7 +52,7 @@ const SMALL_BODIES = [
   (i, a, b) => [`helper_${i}: fn(x: Int) -> Int { (x * ${a} + ${b}) % ${M} }`],
   (i, a, b) => [`helper_${i}: fn(x: Int) -> Int {`, `    if x % ${a} == 0 -> return x /% ${a}`, `    x + ${b}`, '}'],
   (i, a, b) => [`helper_${i}: fn(x: Int) -> Int {`, `    label: "h${i}-{x % ${a}}"`, `    label.len() + ${b}`, '}'],
-  (i, a, b) => [`helper_${i}: fn(x: Int) -> Int {`, '    total := 0', `    loop k in 0..<${a % 4 + 1} -> total += x + k * ${b}`, `    total % ${M}`, '}'],
+  (i, a, b) => [`helper_${i}: fn(x: Int) -> Int {`, '    ^total: 0', `    loop k in 0..<${a % 4 + 1} -> total += x + k * ${b}`, `    total % ${M}`, '}'],
 ];
 
 function smallFns(n, r) {
@@ -75,7 +75,7 @@ function hugeFns(n, r) {
   const files = {};
   const entries = [];
   for (let f = 0; f < 4; f++) {
-    const lines = [`huge_${f}: fn(seed: Int) -> Int {`, `    acc := seed % ${M}`];
+    const lines = [`huge_${f}: fn(seed: Int) -> Int {`, `    ^acc: seed % ${M}`];
     const count = Math.ceil(n / 4);
     for (let s = 0; s < count; s++) {
       const c = r.int(1, 997);
@@ -101,7 +101,7 @@ function deepNesting(n, r) {
   const files = {};
   const lines = [];
   for (let f = 0; f < 3; f++) {
-    lines.push(`nested_${f}: fn(seed: Int) -> Int {`, `    acc := seed % ${M}`);
+    lines.push(`nested_${f}: fn(seed: Int) -> Int {`, `    ^acc: seed % ${M}`);
     let indent = '    ';
     for (let d = 0; d < n; d++) {
       const kind = (d + f) % 3;
@@ -148,7 +148,7 @@ function wideEnums(n, r) {
   name.push('    }', '}', '');
   from.push(`        else -> Opcode.${variant(0)}`, '    }', '}', '');
   keyword.push('        else -> 0', '    }', '}', '');
-  const consumer = ['opcode_total: fn(seed: Int) -> Int {', `    acc := seed % ${M}`, `    loop code in 0..<${n} {`,
+  const consumer = ['opcode_total: fn(seed: Int) -> Int {', `    ^acc: seed % ${M}`, `    loop code in 0..<${n} {`,
     '        op: opcode_from_code(code)',
     `        acc = (acc * 7 + opcode_cost(op) + keyword_code(opcode_name(op))) % ${M}`, '    }', '    acc', '}', ''];
   files['opcodes.jet'] = [...decl, ...cost, ...name, ...from, ...keyword, ...consumer].join('\n');
@@ -163,7 +163,7 @@ function implsTraits(n, r) {
   const traits = [];
   for (let k = 0; k < traitCount; k++) {
     traits.push([`Capability${k}: trait {`, `    measure_${k}: fn(self) -> Int,`, `    label_${k}: fn(self) -> String`, '}', '',
-      `capability_${k}_total: fn(items: [Capability${k}]) -> Int {`, '    total := 0',
+      `capability_${k}_total: fn(items: [Capability${k}]) -> Int {`, '    ^total: 0',
       `    loop item in items -> total = (total + item.measure_${k}() + item.label_${k}().len()) % ${M}`, '    total', '}']);
   }
   pack(files, 'traits/traits', traits);
@@ -181,7 +181,7 @@ function implsTraits(n, r) {
         `    label_${k}: fn(self) -> String { "e${i}-c${k}-{self.name}" }`, '}', '');
     }
     lines.push(`impl Entity${i} {`, `    bump: fn(^self) { self.id += ${r.int(1, 9)} }`, '    weight: fn(self) -> Int { self.id + self.name.len() }', '}', '',
-      `entity_${i}_use: fn(seed: Int) -> Int {`, `    entity := Entity${i}{id: seed % 101, name: "n{seed % 13}"}`, '    entity.bump()', '    total := entity.weight()');
+      `entity_${i}_use: fn(seed: Int) -> Int {`, `    ^entity: Entity${i}{id: seed % 101, name: "n{seed % 13}"}`, '    entity.bump()', '    ^total: entity.weight()');
     for (const k of chosen) lines.push(`    total = (total + capability_${k}_total([Capability${k}]{entity})) % ${M}`);
     lines.push('    total', '}');
     types.push(lines);
@@ -201,8 +201,8 @@ function generics(n, r) {
     'Slot: struct<T> {', '    value: T,', '    mark: Int', '}', '',
     'wrap: fn<T>(value: T, mark: Int) -> Slot<T> { Slot<T>{value: value, mark: mark} }', '',
     'first_or: fn<T>(items: [T], fallback: T) -> T {', '    if items.len() > 0 -> return items[0]', '    fallback', '}', '',
-    'count_where: fn<T>(items: [T], keep: fn(T) -> Bool) -> Int {', '    total := 0', '    loop item in items {', '        if keep(item) -> total += 1', '    }', '    total', '}', '',
-    'marks_of: fn<T>(slots: [Slot<T>]) -> Int {', '    total := 0', '    loop slot in slots -> total += slot.mark', '    total', '}', '',
+    'count_where: fn<T>(items: [T], keep: fn(T) -> Bool) -> Int {', '    ^total: 0', '    loop item in items {', '        if keep(item) -> total += 1', '    }', '    total', '}', '',
+    'marks_of: fn<T>(slots: [Slot<T>]) -> Int {', '    ^total: 0', '    loop slot in slots -> total += slot.mark', '    total', '}', '',
   ];
   for (let i = 0; i < n; i++) {
     const a = r.int(2, 97);
@@ -263,7 +263,7 @@ function dataTables(n, r) {
   lines.push('    }', '}', '', 'name_table: fn() -> [String:Int] {', '    [String:Int]{');
   for (let i = 0; i < rows; i++) lines.push(`        "key-${i}": ${r.int(0, 999)},`);
   lines.push('    }', '}', '', `banner: fn() -> String { "${'abcdefgh'.repeat(n)}" }`, '',
-    'tables_total: fn(seed: Int) -> Int {', `    acc := seed % ${M}`,
+    'tables_total: fn(seed: Int) -> Int {', `    ^acc: seed % ${M}`,
     `    loop k in 0..<4 {`, '        table: if k == {', '            0 -> table_0()', '            1 -> table_1()', '            2 -> table_2()', '            else -> table_3()', '        }',
     `        loop value in table -> acc = (acc * 3 + value) % ${M}`, '    }',
     `    loop row in row_table() -> acc = (acc + row.id + row.weight + row.name.len()) % ${M}`,
@@ -374,7 +374,7 @@ function fanIn(n, r) {
   const items = [];
   const entries = [];
   for (let g = 0; g < Math.ceil(n / 32); g++) {
-    const lines = [`callers_${g}: fn(seed: Int) -> Int {`, `    acc := seed % ${M}`];
+    const lines = [`callers_${g}: fn(seed: Int) -> Int {`, `    ^acc: seed % ${M}`];
     for (let c = 0; c < 32 && g * 32 + c < n; c++) {
       lines.push(c % 2 === 0 ? `    acc = (acc + shared_scale(acc + ${r.int(1, 99)})) % ${M}` : `    acc = (acc + shared_label(acc)) % ${M}`);
     }

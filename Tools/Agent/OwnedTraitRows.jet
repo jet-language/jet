@@ -849,7 +849,7 @@ render_role_kind: fn(marks: [RoleMark]) -> String OwnedTraitRowsError! {
         }
     }
     cases: loop mark in marks -> "    {mark.role},\n"
-    Ok("{ROLE_KIND_OPEN}\nRoleKind: enum {{\n{cases.join("")}}}\n{ROLE_KIND_CLOSE}\n")
+    Ok("{ROLE_KIND_OPEN}\nRoleKind: enum {{\n{cases.join("")}}}\n\n{ROLE_KIND_CLOSE}\n")
 }
 
 generated_files: fn() -[FS]> [TextFile] OwnedTraitRowsError! {
@@ -986,7 +986,7 @@ HOME_SOURCE: "// A value read back.\nDecode: trait {{\n    decode: fn(tree: Dyn)
     function_roles("Core/Math/Math.jet", "// #Builtin.Role(.Note)\n#Builtin.Role(.AbsFloat) abs_float: fn(x: Float) -> Float {{ x }}\n#Builtin.Role(.Bare)\n#[Builtin.Role(.Copy), Unsafe(\"why\")]\ncopy: fn() {{}}\nTree: struct {{\n    #Builtin.Role(.TreeOpen) new: fn() -> Tree {{ Tree{{}} }}\n}}\n", marks)
     trait_roles(read_traits(MINIMAL_TRAITS) ?? panic(err.message), marks)
     block: render_role_kind(marks) ?? panic(err.message)
-    assert_eq(block, "{ROLE_KIND_OPEN}\nRoleKind: enum {{\n    AbsFloat,\n    Copy,\n    TreeOpen,\n    Add,\n}}\n{ROLE_KIND_CLOSE}\n")
+    assert_eq(block, "{ROLE_KIND_OPEN}\nRoleKind: enum {{\n    AbsFloat,\n    Copy,\n    TreeOpen,\n    Add,\n}}\n\n{ROLE_KIND_CLOSE}\n")
     builtins: "x\n{ROLE_KIND_OPEN}\nRoleKind: enum {{\n    Old,\n}}\n{ROLE_KIND_CLOSE}\ny\n"
     assert_eq(replace_block(builtins, ROLE_KIND_OPEN, ROLE_KIND_CLOSE, BUILTINS_PATH, block) ?? panic(err.message), "x\n{block}y\n")
     function_roles("Core/Event/Event.jet", "#Builtin.Role(.Add) plus: fn(a: Int, b: Int) -> Int {{ a + b }}\n", marks)

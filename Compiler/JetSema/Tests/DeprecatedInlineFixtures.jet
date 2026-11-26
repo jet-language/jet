@@ -120,7 +120,7 @@ DEPRECATED_INLINE_LIBRARY: "scaled: fn(n: Int, by: Int) -> Int {{\n    n * by\n}
     deprecated_inline_expect(failures, "twice(scaled(1, 3))", "")
     deprecated_inline_expect(failures, "after(scaled(1, 3))", "")
     // A local at the call takes a name the body reads: by hand.
-    shadowed: deprecated_inline_results(failures, "{DEPRECATED_INLINE_LIBRARY}run: fn() -> Int {{\n    scaled := 3\n    double(scaled)\n}}\n") ?? [String]{}
+    shadowed: deprecated_inline_results(failures, "{DEPRECATED_INLINE_LIBRARY}run: fn() -> Int {{\n    ^scaled: 3\n    double(scaled)\n}}\n") ?? [String]{}
     if shadowed.len() != 1 || !shadowed[0].starts_with("by hand: ") {
         failures.push("a local named like the body's callee should leave the call to edit by hand: [{shadowed.join("; ")}]")
     }

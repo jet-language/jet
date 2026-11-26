@@ -170,7 +170,7 @@ BrowserAssetWatcher: struct {
     known: [String:BrowserAssetStamp],
 
     for_entry: fn(entry: String) -> BrowserAssetWatcher {
-        watcher := BrowserAssetWatcher{root: browser_asset_root(entry), known: [String:BrowserAssetStamp]{}}
+        ^watcher: BrowserAssetWatcher{root: browser_asset_root(entry), known: [String:BrowserAssetStamp]{}}
         watcher.snapshot()
         watcher
     }
@@ -181,18 +181,18 @@ BrowserAssetWatcher: struct {
     }
 
     snapshot: fn(^self) {
-        files := [String:BrowserAssetStamp]{}
-        skipped := 0
+        ^files: [String:BrowserAssetStamp]{}
+        ^skipped: 0
         browser_asset_collect(self.root, files, skipped)
         self.known = files
     }
 
     poll: fn(^self) -> BrowserAssetPoll {
-        current := [String:BrowserAssetStamp]{}
-        skipped := 0
+        ^current: [String:BrowserAssetStamp]{}
+        ^skipped: 0
         browser_asset_collect(self.root, current, skipped)
-        changes := [BrowserAssetChange]{}
-        paths := current.keys().to_list()
+        ^changes: [BrowserAssetChange]{}
+        ^paths: current.keys().to_list()
         paths.sort()
         loop path in paths {
             stamp: current[path]
@@ -205,14 +205,14 @@ BrowserAssetWatcher: struct {
                 }
             }
         }
-        old_paths := self.known.keys().to_list()
+        ^old_paths: self.known.keys().to_list()
         old_paths.sort()
         loop path in old_paths {
             if !current.has_key(path) {
                 changes.push(BrowserAssetChange{path: path, kind: "deleted"})
             }
         }
-        kept := [BrowserAssetChange]{}
+        ^kept: [BrowserAssetChange]{}
         loop change in changes {
             if kept.len() >= BROWSER_ASSET_WATCH_MAX_EVENTS {
                 skipped += 1
@@ -227,7 +227,7 @@ BrowserAssetWatcher: struct {
     frame: fn(^self, session_id: String) -> String {
         polled: self.poll()
         prefix: "{self.root}/"
-        events := [String]{}
+        ^events: [String]{}
         loop change in polled.changes {
             if !change.path.starts_with(prefix) -> next
             logical: change.path.slice(prefix.len()..<change.path.len())
@@ -272,7 +272,7 @@ browser_asset_collect: fn(path: String, files: ^[String:BrowserAssetStamp], skip
         skipped += 1
         return
     }
-    children := [String]{}
+    ^children: [String]{}
     loop entry in entries -> children.push(session_files.join(path, entry.name))
     children.sort()
     loop child in children {
@@ -387,7 +387,7 @@ ResidentDevSession: struct {
     }
 
     expire_clients: fn(^self, now: Int) {
-        kept := [String:Int]{}
+        ^kept: [String:Int]{}
         loop client in self.clients.keys().to_list() {
             seen: self.clients[client]
             if now - seen <= SESSION_CLIENT_TTL_MS -> kept[client] = seen
@@ -403,8 +403,8 @@ ResidentDevSession: struct {
     // Up to 32 queued browser game controls as one command frame; on a
     // serialization failure every taken control returns to the queue front.
     browser_game_control_frame: fn(^self) -> String Err! {
-        frame := JetDevtoolsCommandEnvelope.new("{self.session_id}", session_unix_ms())
-        request_ids := [String]{}
+        ^frame: JetDevtoolsCommandEnvelope.new("{self.session_id}", session_unix_ms())
+        ^request_ids: [String]{}
         loop request_ids.len() < SESSION_MAX_GAME_CONTROL_FRAME && self.browser_game_controls.len() > 0 {
             request: self.browser_game_controls.remove(0, .Slot) ?? break
             request_ids.push("{request.request_id}")
@@ -412,7 +412,7 @@ ResidentDevSession: struct {
         }
         body: frame.serialize() ?? {
             taken: frame.commands()
-            at := 0
+            ^at: 0
             loop command in taken.move() {
                 if command.move() == .GameControl(request) {
                     self.browser_game_controls.insert(at, request.move())
@@ -439,10 +439,10 @@ ResidentDevSession: struct {
     devtools_events_since: fn(self, cursor: Int?) -> DevtoolsProjection {
         envelope: self.devtools
         source_identity: envelope.source_identity
-        revision := self.current_revision_text
-        source_id := String?{None}
-        build_id := String?{None}
-        world_id := String?{None}
+        ^revision: self.current_revision_text
+        ^source_id: String?{None}
+        ^build_id: String?{None}
+        ^world_id: String?{None}
         if source_identity == .Val(identity) {
             if identity.revision == .Val(published) -> revision = published
             source_id = identity.source_id
@@ -450,14 +450,14 @@ ResidentDevSession: struct {
             world_id = identity.world_id
         }
         oldest: envelope.oldest_sequence()
-        truncation := envelope.truncated
+        ^truncation: envelope.truncated
         if cursor == .Val(after) {
             if oldest == .Val(first) {
                 if after + 1 < first -> truncation = true
             }
         }
         reset: envelope.reset || cursor == None || truncation
-        selection := DevtoolsSelectionFact?{None}
+        ^selection: DevtoolsSelectionFact?{None}
         if envelope.selection() == .Val(selected) {
             selection = Val(DevtoolsSelectionFact{panel_id: selected.panel_id, item_key: selected.item_key ?? ""})
         }
@@ -570,7 +570,7 @@ ResidentDevSession: struct {
     }
 
     devtools_command_capabilities: fn(self) -> DevtoolsCommandCapabilities Never! {
-        reason := String?{None}
+        ^reason: String?{None}
         if !self.project_rebuild_executor {
             reason = Val("no rebuild executor is registered for this host")
         } else if self.current_revision_text == "" {
@@ -700,7 +700,7 @@ ResidentDevSession: struct {
                     self.set_devtools_source_identity(identity.source_id, identity.build_id, identity.revision, identity.world_id)
                 }
                 events: envelope.events()
-                count := 0
+                ^count: 0
                 loop event in events.move() {
                     _: self.push_devtools_event(event.move())
                     count += 1
@@ -719,7 +719,7 @@ ResidentDevSession: struct {
             .Commands(envelope) -> {
                 commands: envelope.commands()
                 total: commands.len()
-                game_count := 0
+                ^game_count: 0
                 loop command in commands {
                     self.validate_devtools_command_admission(command)
                     if command == .GameControl(_) -> game_count += 1
@@ -745,7 +745,7 @@ ResidentDevSession: struct {
     }
 
     publish_panel_events: fn(^self, events: ^^[JetDevtoolsEvent]) -> Int Err! {
-        count := 0
+        ^count: 0
         loop event in events.move() {
             _: self.push_devtools_event(event.move())
             count += 1

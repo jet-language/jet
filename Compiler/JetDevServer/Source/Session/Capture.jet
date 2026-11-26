@@ -81,7 +81,7 @@ CaptureLocation: struct {
     }
 
     with_column: fn(^^self, column: U32) -> CaptureLocation Never! {
-        updated := self.move()
+        ^updated: self.move()
         updated.column = Val(column)
         updated.move()
     }
@@ -284,8 +284,8 @@ plan_current_eviction: fn<I: RecordIndexRetention>(budget: CaptureBudget, record
 
 plan_eviction_inner: fn<I: RecordIndexRetention>(budget: CaptureBudget, records: [I], incoming: I?) -> CaptureEvictionPlan CaptureBudgetError! {
     budget.validate() ?? return Err(err)
-    seen := [String:Bool]{}
-    retained_bytes := U64{0}
+    ^seen: [String:Bool]{}
+    ^retained_bytes: U64{0}
     loop record in records {
         id: record.artifact_id()
         if id.len() == 0 -> return Err(CaptureBudgetError.EmptyArtifactID)
@@ -308,14 +308,14 @@ plan_eviction_inner: fn<I: RecordIndexRetention>(budget: CaptureBudget, records:
             retained_bytes = capture_checked_add(retained_bytes, size_bytes) ?? return Err(CaptureBudgetError.ArithmeticOverflow)
         }
     }
-    order := [Int]{}
+    ^order: [Int]{}
     loop index in 0..<records.len() {
         if records[index].evictable() -> order.push(index)
     }
     // Stable bottom-up mergesort of indices by (sequence, id), O(n log n).
-    scratch := order.copy()
-    width := 1
-    in_scratch := false
+    ^scratch: order.copy()
+    ^width: 1
+    ^in_scratch: false
     loop width < order.len() {
         // Swap the two buffers' roles, not their contents. Moving and then
         // reinitializing loop locals currently hits night12 E0121.
@@ -326,7 +326,7 @@ plan_eviction_inner: fn<I: RecordIndexRetention>(budget: CaptureBudget, records:
         width *= 2
     }
     if in_scratch -> order = scratch.move()
-    evicted := [CaptureEviction]{}
+    ^evicted: [CaptureEviction]{}
     loop index in order {
         if retained_bytes <= budget.max_bytes -> break
         size: records[index].size_bytes()
@@ -349,15 +349,15 @@ capture_checked_add: fn(left: U64, right: U64) -> U64? Never! {
 // One pass of the same stable bottom-up index mergesort. Both caller-owned
 // buffers stay allocated; the caller alternates read/write roles each pass.
 capture_merge_indices: fn<I: RecordIndexRetention>(records: [I], order: [Int], scratch: ^[Int], width: Int) Never! {
-    start := 0
+    ^start: 0
     loop start < order.len() {
         middle: if start + width < order.len() -> start + width else -> order.len()
         end: if middle + width < order.len() -> middle + width else -> order.len()
-        left := start
-        right := middle
-        out := start
+        ^left: start
+        ^right: middle
+        ^out: start
         loop out < end {
-            take_left := right >= end
+            ^take_left: right >= end
             if left < middle && right < end {
                 left_seq: records[order[left]].recorded_sequence()
                 right_seq: records[order[right]].recorded_sequence()

@@ -71,7 +71,7 @@ small_body: fn(i: Int, a: Int, b: Int) -> String {
         """,
         """
         helper_{i}: fn(x: Int) -> Int {{
-            total := 0
+            ^total: 0
             loop k in 0..<{a % 4 + 1} -> total += x + k * {b}
             total % {M}
         }}
@@ -105,7 +105,7 @@ huge_fns: fn(n: Int, r: ^Seeded) -> [String:String] {
     ^files: [String:String]{}
     ^entries: [String]{}
     loop f in 0..<4 {
-        ^body: [String]{"huge_{f}: fn(seed: Int) -> Int {{", "    acc := seed % {M}"}
+        ^body: [String]{"huge_{f}: fn(seed: Int) -> Int {{", "    ^acc: seed % {M}"}
         count: (n + 3) /% 4
         loop s in 0..<count {
             c: r.int(1, 997)
@@ -134,7 +134,7 @@ deep_nesting: fn(n: Int, r: ^Seeded) -> [String:String] {
     ^files: [String:String]{}
     ^body: [String]{}
     loop f in 0..<3 {
-        body.extend(["nested_{f}: fn(seed: Int) -> Int {{", "    acc := seed % {M}"])
+        body.extend(["nested_{f}: fn(seed: Int) -> Int {{", "    ^acc: seed % {M}"])
         ^indent: "    "
         loop d in 0..<n {
             kind: (d + f) % 3
@@ -199,7 +199,7 @@ wide_enums: fn(n: Int, r: ^Seeded) -> [String:String] {
     keyword.extend(["        else -> 0", "    }}", "}}", ""])
     consumer: """
     opcode_total: fn(seed: Int) -> Int {{
-        acc := seed % {M}
+        ^acc: seed % {M}
         loop code in 0..<{n} {{
             op: opcode_from_code(code)
             acc = (acc * 7 + opcode_cost(op) + keyword_code(opcode_name(op))) % {M}
@@ -235,7 +235,7 @@ impls_traits: fn(n: Int, r: ^Seeded) -> [String:String] {
                 }}
 
                 capability_{k}_total: fn(items: [{named}{k}]) -> Int {{
-                    total := 0
+                    ^total: 0
                     loop item in items -> total = (total + item.measure_{k}() + item.label_{k}().len()) % {M}
                     total
                 }}
@@ -273,9 +273,9 @@ impls_traits: fn(n: Int, r: ^Seeded) -> [String:String] {
                 }}
 
                 entity_{i}_use: fn(seed: Int) -> Int {{
-                    entity := Entity{i}{{id: seed % 101, name: "n{{seed % 13}}"}}
+                    ^entity: Entity{i}{{id: seed % 101, name: "n{{seed % 13}}"}}
                     entity.bump()
-                    total := entity.weight()
+                    ^total: entity.weight()
                 """,
             ),
         )
@@ -310,7 +310,7 @@ generics: fn(n: Int, r: ^Seeded) -> [String:String] {
     }}
 
     count_where: fn<T>(items: [T], keep: fn(T) -> Bool) -> Int {{
-        total := 0
+        ^total: 0
         loop item in items {{
             if keep(item) -> total += 1
         }}
@@ -318,7 +318,7 @@ generics: fn(n: Int, r: ^Seeded) -> [String:String] {
     }}
 
     marks_of: fn<T>(slots: [Slot<T>]) -> Int {{
-        total := 0
+        ^total: 0
         loop slot in slots -> total += slot.mark
         total
     }}
@@ -427,7 +427,7 @@ data_tables: fn(n: Int, r: ^Seeded) -> [String:String] {
             banner: fn() -> String {{ "{"abcdefgh".repeat(n)}" }}
 
             tables_total: fn(seed: Int) -> Int {{
-                acc := seed % {M}
+                ^acc: seed % {M}
                 loop k in 0..<4 {{
                     table: if k == {{
                         0 -> table_0()
@@ -615,7 +615,7 @@ fan_in: fn(n: Int, r: ^Seeded) -> [String:String] {
     ^items: [[String]]{}
     ^entries: [String]{}
     loop g in 0..<(n + 31) /% 32 {
-        ^body: [String]{"callers_{g}: fn(seed: Int) -> Int {{", "    acc := seed % {M}"}
+        ^body: [String]{"callers_{g}: fn(seed: Int) -> Int {{", "    ^acc: seed % {M}"}
         loop c in 0..<min(32, n - g * 32) {
             body.push(if c % 2 == 0 -> "    acc = (acc + shared_scale(acc + {r.int(1, 99)})) % {M}" else -> "    acc = (acc + shared_label(acc)) % {M}")
         }

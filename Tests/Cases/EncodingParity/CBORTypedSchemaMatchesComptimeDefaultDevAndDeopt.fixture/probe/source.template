@@ -15,10 +15,10 @@ ROOT: #run hex.encode(cbor.to_bytes_canonical([U8]{222, 173}) ?? panic("root"))
 PACKET: #run hex.encode(cbor.to_bytes_canonical(Packet{ id: 7, payload: [222, 173] }) ?? panic("packet"))
 
 gap: fn() -[]> String {
-    folded := text.casefold("Straße")
+    ^folded: text.casefold("Straße")
     if folded != "strasse" { panic("casefold") }
-    actual_root := hex.encode(cbor.to_bytes_canonical([U8]{222, 173}) ?? panic("root"))
-    actual_packet := hex.encode(cbor.to_bytes_canonical(Packet{ id: 7, payload: [222, 173] }) ?? panic("packet"))
+    ^actual_root: hex.encode(cbor.to_bytes_canonical([U8]{222, 173}) ?? panic("root"))
+    ^actual_packet: hex.encode(cbor.to_bytes_canonical(Packet{ id: 7, payload: [222, 173] }) ?? panic("packet"))
     return "{actual_root}|{actual_packet}"
 }
 

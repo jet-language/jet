@@ -62,7 +62,7 @@ run: fn() { print(if 2 > 1 -> "yes" else -> "no") }
 
 ```jet
 run: fn() {
-    total := 0
+    ^total: 0
     loop n in 1..=3 -> total += n
     print("{total}")
 }

@@ -103,11 +103,11 @@ BrowserWebState: struct {
         self.tools.rebuild_reason = browser_web_bounded_optional(projection.command_capabilities.project_rebuild_reason, MAX_BROWSER_TEXT)
         self.receipts = projection.command_receipts
         sequence: projection.sequence
-        apply := true
+        ^apply: true
         if self.host.sequence == .Val(current) -> apply = sequence > current
         if apply {
             panels: loop panel in canonical_panels -> browser_web_panel_fact(panel)
-            revision := self.host.revision ?? 0
+            ^revision: self.host.revision ?? 0
             stated: Int.parse(projection.revision) ?? sequence
             if stated > revision -> revision = stated
             event: BrowserHostEvent.new(self.host.session_id, revision, sequence, projection.observed_at, panels)
@@ -115,7 +115,7 @@ BrowserWebState: struct {
         }
         if projection.selection == .Val(selection) {
             if self.host.panel(selection.panel_id) != None {
-                node_id := String?{None}
+                ^node_id: String?{None}
                 if selection.item_key != "" && self.host.node_exists(selection.panel_id, Val(selection.item_key)) {
                     node_id = Val(selection.item_key)
                 }
@@ -168,7 +168,7 @@ browser_web_session_state: fn(state: JetDevtoolsLifecycleState) -> BrowserSessio
 // node with its source, kind, entity, fields and payload.
 browser_web_panel_fact: fn(panel: JetDevtoolsPanelProjection) -> BrowserPanelFact {
     descriptor: panel.availability.descriptor
-    status := "available"
+    ^status: "available"
     if panel.availability.is_available() {
         if panel.events.len() > 0 -> status = panel.events[panel.events.len() - 1].kind()
     } else {
@@ -176,11 +176,11 @@ browser_web_panel_fact: fn(panel: JetDevtoolsPanelProjection) -> BrowserPanelFac
         status = "unavailable:{reasons.join(",")}"
     }
     shown: browser_web_bounded_text(status, "unavailable", MAX_BROWSER_TEXT)
-    nodes := [BrowserNode]{}
+    ^nodes: [BrowserNode]{}
     loop event in panel.events {
         prefix: "event:{event.sequence()}"
         payload: event.payload_json() ?? "(absent)"
-        children := [BrowserNode]{}
+        ^children: [BrowserNode]{}
         children.push(BrowserNode.new("{prefix}:source", .Text, "source").with_value(browser_web_bounded_value(event.source())))
         children.push(BrowserNode.new("{prefix}:kind", .Text, "kind").with_value(browser_web_bounded_value(event.kind())))
         children.push(BrowserNode.new("{prefix}:entity", .Text, "entity").with_value(browser_web_bounded_value(event.entity())))
@@ -206,8 +206,8 @@ browser_web_bounded_optional: fn(value: String?, limit: Int) -> String? {
 // within `limit` bytes. Empty text shows `fallback`.
 browser_web_bounded_text: fn(value: String, fallback: String, limit: Int) -> String {
     source: if value == "" -> fallback else -> value
-    pieces := [String]{}
-    used := 0
+    ^pieces: [String]{}
+    ^used: 0
     loop character in source.chars() {
         text: if browser_web_is_control("{character}") -> " " else -> "{character}"
         width: text.bytes().len()
@@ -246,11 +246,11 @@ browser_web_release_panel_json: fn(panel: JetDevtoolsPanelProjection) -> String 
 }
 
 browser_web_frame_json: fn(frame: BrowserDevtoolsFrame) -> String {
-    cursor := Int?{None}
+    ^cursor: Int?{None}
     if frame.cursor == .Val(at) -> cursor = Val(at.sequence)
     tools: "{{\"source\":{{\"available\":{browser_web_flag(frame.tools.source)},\"reason\":{browser_web_maybe(frame.tools.source_reason)}}},\"rebuild\":{{\"available\":{browser_web_flag(frame.tools.rebuild)},\"reason\":{browser_web_maybe(frame.tools.rebuild_reason)}}}}}"
     receipts: loop receipt in frame.receipts -> "{{\"sequence\":{receipt.sequence},\"request_id\":{foundation_json_quote(receipt.request_id)},\"kind\":{foundation_json_quote(receipt.kind)},\"status\":{foundation_json_quote(receipt.status)},\"error\":{browser_web_maybe(receipt.error)}}}"
-    selection := "null"
+    ^selection: "null"
     if frame.selection == .Val(selected) {
         selection = "{{\"panel_id\":{foundation_json_quote(selected.panel_id)},\"node_id\":{browser_web_maybe(selected.node_id)}}}"
     }
@@ -277,9 +277,9 @@ browser_web_event_json: fn(event: BrowserHostEvent) -> String {
 // The retained host events after the `after` sequence, with the workbench
 // view. A truncated replay sends no events and is not complete.
 browser_web_reconnect_json: fn(state: BrowserWebState, after: Int?, reset: Bool, truncation: Bool) -> String Err! {
-    events := [String]{}
+    ^events: [String]{}
     if !truncation {
-        cursor := BrowserReconnectCursor?{None}
+        ^cursor: BrowserReconnectCursor?{None}
         if after == .Val(at) -> cursor = Val(BrowserReconnectCursor{sequence: at})
         replay: state.host.resume_from(cursor) ?? return Err("{err}")
         loop event in replay.events -> events.push(browser_web_event_json(event))
@@ -456,7 +456,7 @@ browser_web_panel_available: fn(panel: BrowserPanelView) -> Bool {
 }
 
 browser_web_unavailable_reason_text: fn(status: String) -> String {
-    rest := status
+    ^rest: status
     if rest.starts_with("unavailable:") -> rest = status.slice(12, status.len())
     reasons: loop reason in rest.split(",").to_list() -> browser_web_reason_text(reason)
     reasons.join(", ")
@@ -473,7 +473,7 @@ browser_web_reason_text: fn(reason: String) -> String {
 // The `.jet` file a diagnostic's first `-->` location names.
 browser_web_diagnostic_file: fn(diagnostic: String) -> String? {
     parts: diagnostic.split_once("-->") ?? return None
-    pieces := [String]{}
+    ^pieces: [String]{}
     loop character in parts.after.trim().chars() {
         text: "{character}"
         if text == " " || text == "\n" || text == "\t" || text == "\r" || text == ":" -> break
@@ -488,8 +488,8 @@ browser_web_render_page: fn(state: BrowserWebState, placement: BrowserPlacement)
     frame: state.frame(placement)
     state_json: browser_web_frame_json(frame)
     workbench: placement == .Workbench
-    any_open := false
-    any_available := false
+    ^any_open: false
+    ^any_available: false
     loop panel in frame.panels {
         if !browser_web_panel_available(panel) -> next
         any_available = true
@@ -497,7 +497,7 @@ browser_web_render_page: fn(state: BrowserWebState, placement: BrowserPlacement)
     }
     state_word: frame.status.state.as_str()
     title_suffix: if workbench -> " workbench" else -> ""
-    html := [String]{}
+    ^html: [String]{}
     html.push("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; connect-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'\"><title>Jet devtools{title_suffix}</title><style>")
     html.push(PAGE_CSS)
     html.push("</style></head><body><main data-schema=\"{BROWSER_PAGE_SCHEMA}\" data-placement=\"{placement.as_str()}\" data-session-id=\"{browser_web_html_escape(frame.session_id)}\" data-state=\"{state_word}\"><header class=\"bar\"><span class=\"mark\"></span><strong>Jet devtools</strong><span class=\"state\"><i class=\"status-mark\" aria-hidden=\"true\"></i>{state_word}</span><span class=\"grow\"></span><span class=\"note\" role=\"status\"></span>")
@@ -526,10 +526,10 @@ browser_web_render_page: fn(state: BrowserWebState, placement: BrowserPlacement)
 }
 
 browser_web_render_group: fn(html: ^[String], frame: BrowserDevtoolsFrame, index: Int, workbench: Bool, any_open: Bool) {
-    member_count := 0
-    available_count := 0
-    open_count := 0
-    selected_here := false
+    ^member_count: 0
+    ^available_count: 0
+    ^open_count: 0
+    ^selected_here: false
     loop panel in frame.panels {
         if browser_web_intent_group(panel.panel_id) != index -> next
         member_count += 1
@@ -548,7 +548,7 @@ browser_web_render_group: fn(html: ^[String], frame: BrowserDevtoolsFrame, index
     initially_open: forced || (workbench && index == 0 && !any_open && frame.selection == None)
     active: if forced -> " data-active=\"true\"" else -> ""
     open_attribute: if initially_open -> " open" else -> ""
-    meta := "{available_count} available"
+    ^meta: "{available_count} available"
     if selected_here -> meta = "Selected" else if open_count > 0 {
         suffix: if available_count == 1 -> "" else -> "s"
         meta = "{open_count} open · {available_count} panel{suffix}"
@@ -575,7 +575,7 @@ browser_web_render_group: fn(html: ^[String], frame: BrowserDevtoolsFrame, index
 
 browser_web_render_attention: fn(html: ^[String], frame: BrowserDevtoolsFrame) {
     status: frame.status
-    failing_file := String?{None}
+    ^failing_file: String?{None}
     if status.diagnostic == .Val(diagnostic) {
         failing_file = browser_web_diagnostic_file(diagnostic)
     }
@@ -605,7 +605,7 @@ browser_web_render_attention: fn(html: ^[String], frame: BrowserDevtoolsFrame) {
     html.push("<div class=\"acts\">")
     if frame.tools.source {
         if status.state == .Error {
-            file_attribute := ""
+            ^file_attribute: ""
             if failing_file == .Val(file) {
                 file_attribute = " data-file=\"{browser_web_html_escape(file)}\""
             }
@@ -618,7 +618,7 @@ browser_web_render_attention: fn(html: ^[String], frame: BrowserDevtoolsFrame) {
         html.push("<button class=\"btn\" type=\"button\" data-tool=\"rebuild\" data-focus=\"tool:rebuild\">Rebuild</button>")
     }
     html.push("<span class=\"receipt\" role=\"status\"></span><span class=\"result\" role=\"status\"></span>")
-    reasons := [String]{}
+    ^reasons: [String]{}
     if frame.tools.source_reason == .Val(reason) -> reasons.push("{reason}")
     if !frame.tools.rebuild {
         if frame.tools.rebuild_reason == .Val(reason) -> reasons.push("{reason}")
@@ -638,7 +638,7 @@ browser_web_render_source_tool: fn(html: ^[String], frame: BrowserDevtoolsFrame)
 }
 
 browser_web_render_panel: fn(html: ^[String], panel: BrowserPanelView, selection: BrowserSelection?) {
-    node_id := String?{None}
+    ^node_id: String?{None}
     if selection == .Val(selected) {
         if selected.panel_id == panel.panel_id -> node_id = selected.node_id
     }
@@ -687,7 +687,7 @@ browser_web_find_panel: fn(panels: [BrowserPanelView], panel_id: String) -> Brow
 // selected or the panel no longer holds it.
 browser_web_render_focus: fn(html: ^[String], panel: BrowserPanelView, node_id: String?) -> Bool {
     id: node_id ?? ""
-    path := [BrowserWebCrumb]{}
+    ^path: [BrowserWebCrumb]{}
     found: id != "" && browser_web_crumbs(panel.nodes, id, path)
     browser_web_render_crumbs(html, panel, path)
     found && browser_web_render_found(html, panel.panel_id, panel.nodes, id)
@@ -726,7 +726,7 @@ browser_web_render_found: fn(html: ^[String], panel_id: String, nodes: [BrowserN
 
 // A node's leaf children render as a key/value list, the rest as a node list.
 browser_web_render_node_detail: fn(html: ^[String], panel_id: String, node: BrowserNode) {
-    status := ""
+    ^status: ""
     if node.status == .Val(text) {
         status = " <small class=\"mono\">{browser_web_html_escape(text)}</small>"
     }
@@ -734,7 +734,7 @@ browser_web_render_node_detail: fn(html: ^[String], panel_id: String, node: Brow
     if node.value == .Val(value) {
         html.push("<code class=\"value\">{browser_web_html_escape(value)}</code>")
     }
-    leaves := 0
+    ^leaves: 0
     loop child in node.children {
         if browser_web_is_leaf(child) -> leaves += 1
     }
@@ -762,12 +762,12 @@ browser_web_render_nodes: fn(html: ^[String], panel_id: String, nodes: [BrowserN
     panel: browser_web_html_escape(panel_id)
     loop node in nodes {
         if skip_leaves && browser_web_is_leaf(node) -> next
-        is_selected := false
+        ^is_selected: false
         if selected == .Val(selected_id) -> is_selected = selected_id == node.id
         marked: if is_selected || browser_web_contains_node(node.children, selected) -> "true" else -> "false"
         pressed: if is_selected -> "true" else -> "false"
         id: browser_web_html_escape(node.id)
-        status := ""
+        ^status: ""
         if node.status == .Val(text) -> status = "<b>{browser_web_html_escape(text)}</b>"
         html.push("<li data-selected=\"{marked}\"><button class=\"node\" data-select=\"1\" data-panel=\"{panel}\" data-node=\"{id}\" data-focus=\"node:{panel}:{id}\" aria-pressed=\"{pressed}\"><span class=\"lbl\">{browser_web_html_escape(node.label)}</span>{status}</button></li>")
     }
@@ -789,7 +789,7 @@ browser_web_parse_selection: fn(payload: [U8]) -> DevtoolsSelectionFact? Err! {
     if value == .Null -> return Ok(None)
     selection: recording_object_fields(value) ?? return Err("browser selection must be an object or null")
     panel_id: browser_web_string(selection, "panel_id", "browser selection")
-    item_key := ""
+    ^item_key: ""
     if recording_lookup(selection, "item_key") == .Val(key) {
         if !(key == .Null) {
             item_key = recording_text(key) ?? return Err("browser selection item_key must be a string")
@@ -801,7 +801,7 @@ browser_web_parse_selection: fn(payload: [U8]) -> DevtoolsSelectionFact? Err! {
 browser_web_parse_action: fn(payload: [U8], default_placement: BrowserPlacement) -> BrowserHostAction Err! {
     object: browser_web_body_object(payload, "browser action")
     name: if recording_lookup(object, "action") != None -> browser_web_string(object, "action", "browser action") else -> browser_web_string(object, "op", "browser action")
-    placement := default_placement
+    ^placement: default_placement
     if recording_lookup(object, "placement") == .Val(value) {
         placement = browser_web_placement(value)
     }
@@ -818,9 +818,9 @@ browser_web_parse_action: fn(payload: [U8], default_placement: BrowserPlacement)
 browser_web_source_grant: fn(object: [{key: String, value: Dyn}]) -> BrowserSourceGrant Err! {
     grant: browser_web_nested(object, "grant")
     source: browser_web_nested(grant, "source")
-    function := String?{None}
+    ^function: String?{None}
     if recording_lookup(source, "function") == .Val(value) -> function = recording_text(value)
-    column := 0
+    ^column: 0
     if recording_lookup(source, "column") == .Val(value) {
         column = foundation_json_integer(value) ?? 0
     }
@@ -899,7 +899,7 @@ browser_web_dispatch: fn(state: ^BrowserWebState, action: BrowserHostAction) -> 
 }
 
 browser_web_html_escape: fn(value: String) -> String {
-    pieces := [String]{}
+    ^pieces: [String]{}
     loop character in value.chars() {
         text: "{character}"
         pieces.push(
@@ -918,7 +918,7 @@ browser_web_html_escape: fn(value: String) -> String {
 
 // Text safe inside a double-quoted script literal within an HTML script element.
 browser_web_js_string: fn(value: String) -> String {
-    pieces := [String]{}
+    ^pieces: [String]{}
     loop character in value.chars() {
         text: "{character}"
         bytes: text.bytes()

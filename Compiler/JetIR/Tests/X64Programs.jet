@@ -801,7 +801,7 @@ xp_structs: fn() -> IRModule {
     first: xp_temp(f, t.int)
     xp_call(f, total_row, [Int]{point}, first)
     xp_print_int(m, f, t, first)
-    // q := p copies the bytes into storage of its own.
+    // ^q: p copies the bytes into storage of its own.
     duplicate: xp_local(m, f, t.point, "q")
     ^_: ir_emit(f, IROp.StackAddress, duplicate, 16, 8, -1, 17)
     ^_: ir_emit(f, IROp.CopyBytes, -1, duplicate, point, 16, 17)
@@ -821,7 +821,7 @@ xp_structs: fn() -> IRModule {
     start: ir_args(f, [Int]{duplicate})
     ^_: ir_emit(f, IROp.CallIndirect, second, code, start, 1, 20)
     xp_print_int(m, f, t, second)
-    // r := q into temporary storage: its address folds into the CopyBytes,
+    // ^r: q into temporary storage: its address folds into the CopyBytes,
     // a Load, an Offset and a call argument.
     scratch: xp_temp(f, t.point)
     ^_: ir_emit(f, IROp.StackAddress, scratch, 16, 8, -1, 21)

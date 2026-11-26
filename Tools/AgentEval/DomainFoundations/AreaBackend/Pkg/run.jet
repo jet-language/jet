@@ -111,7 +111,7 @@ report_latency: fn(tx: Sender<Int>, latency: Int) Err! {
 
 load_test: fn(address: String) Never! {
     { sender, receiver: samples_channel }: channel<Int>(capacity: 2048)
-    workers := [Task<()>]{}
+    ^workers: [Task<()>]{}
     loop _user in 1..1000 {
         tx: sender.copy()
         workers.push(task {
@@ -123,7 +123,7 @@ load_test: fn(address: String) Never! {
         worker.join() ?? panic("load worker failed")
     }
     sender.close()
-    samples := [Int]{}
+    ^samples: [Int]{}
     loop value in samples_channel -> samples.push(value)
     if samples.len() != 1000 -> panic("load test dropped requests")
     samples.sort()
@@ -152,7 +152,7 @@ run: fn() (HTTPError | IOError | NetError | TaskFailure | DBError)! {
     session: auth.password_login("ada", "argon2id:demo", time.now(), 600000) ?? panic("auth login")
     session_id: auth.session_id(session)
 
-    tree := service.tree("backend")
+    ^tree: service.tree("backend")
     tree.set_delivery(service.delivery_durable()) ?? panic("delivery")
     scratch_root: Path.from("$JET_STATE_ROOT/scratch").join("area-backend-{time.now()}")
     files.create_dir_all(scratch_root) ?? panic("scratch")

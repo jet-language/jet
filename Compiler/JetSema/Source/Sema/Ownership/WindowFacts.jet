@@ -452,7 +452,7 @@ sema_window_scan_statement: fn(statement: Stmt, param: String, scan: ^SemaWindow
 sema_window_scan_expr: fn(expr: Expr, param: String, scan: ^SemaWindowScan) {
     if expr == {
         .Place(inner, access, _, _) -> {
-            // A write window of the whole list (`edit: ^xs`) can reach a resize.
+            // A write window of the whole list (`edit: xs.in_place()`) can reach a resize.
             if access == PlaceAccess.Write && sema_window_is_param(inner, param) {
                 scan.resizes = true
             }

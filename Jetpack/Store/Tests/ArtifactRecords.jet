@@ -111,7 +111,7 @@ store_records_test_diagnostic: fn(origin: DiagnosticOrigin, core: DiagnosticOrig
 #Test("receipt round trips typed diagnostics through the store") {
     root: store_records_test_root("receipt")
     store: ArtifactStore.new(root) ?? panic("store opens")
-    module_source: "run: fn() {{\n    x := 1\n}}\n"
+    module_source: "run: fn() {{\n    ^x: 1\n}}\n"
     origin: store_records_test_origin("main.jet", "/p/main.jet", module_source)
     core: store_records_test_origin("math", "<corelib>/math", "one: fn() {{}}\n")
     record: ReceiptRecord.new("check", "a".repeat(64), [ReceiptInput]{ReceiptInput{path: "main.jet", digest: origin.revision}}, [ReceiptInput]{}, [Diagnostic]{store_records_test_diagnostic(origin, core)}, [ReceiptFact]{ReceiptFact{name: "goal_report", value: "goal: main.jet:2\n"}})
@@ -132,7 +132,7 @@ store_records_test_diagnostic: fn(origin: DiagnosticOrigin, core: DiagnosticOrig
     payload: record.to_bytes() ?? panic("encode record")
     json: record_json(payload).value ?? panic("record json")
     assert(json.starts_with("{{\"schema\":\"jet.receipt/v1\""))
-    assert(!json.contains("x := 1"))
+    assert(!json.contains("^x: 1"))
     assert(json.contains("one: fn() {{}}"))
 
     // A closure whose module bytes changed cannot resolve the stored origin:

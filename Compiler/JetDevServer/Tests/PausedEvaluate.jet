@@ -93,10 +93,10 @@ test_rejection: fn(request: InspectRequest, session: PausedSession) -> RejectRea
 
 #Test("stale_running_and_wrong_source_fail_closed") {
     request: test_inspect_request("request-2", test_identity())
-    stale := test_session()
+    ^stale: test_session()
     stale.state = .Stale
     assert(test_rejection(request, stale) == RejectReason.StaleSession)
-    running := test_session()
+    ^running: test_session()
     running.state = .Running
     assert(test_rejection(request, running) == RejectReason.SessionNotPaused)
     wrong: SessionIdentity.new("session-1", "src/other.jet", "rev-1", "pause-1", "frame-1") ?? panic("identity")
@@ -110,16 +110,16 @@ test_rejection: fn(request: InspectRequest, session: PausedSession) -> RejectRea
     response: evaluate(paused, request, evaluator_completed(test_identity(), "scope-1", Val(value), test_usage(1, 1, 64, 2))) ?? panic("evaluate")
     projected: response.value ?? panic("value")
     assert(projected.value == Val(DebugValue.Int{value: 8}))
-    mutation := test_evaluate_request("request-5", "count = 8", DEFAULT_EVALUATION_BUDGET)
+    ^mutation: test_evaluate_request("request-5", "count = 8", DEFAULT_EVALUATION_BUDGET)
     mutation.mode = .Mutate
     mutation.effects = ["fs.write"]
     observation: ObservationFact{event_id: "event-1", kind: "paused.update", session_id: "session-1", source_id: "src/main.jet", source_revision: "rev-1", scope_id: "scope-1", target_id: "value-public", effect_ref: "fs.write"}
-    mutated := evaluator_completed(test_identity(), "scope-1", None, test_usage(1, 1, 32, 2))
+    ^mutated: evaluator_completed(test_identity(), "scope-1", None, test_usage(1, 1, 32, 2))
     mutated.changed = true
     mutated.observation = Val(observation)
     accepted: evaluate(paused, mutation, mutated) ?? panic("observed mutation")
     assert(accepted.changed)
-    denied := mutation.copy()
+    ^denied: mutation.copy()
     denied.authority.push(AuthorityRequirement.new("fs.read", "scope-1") ?? panic("requirement"))
     if evaluate(paused, denied, evaluator_completed(test_identity(), "scope-1", None, test_usage(1, 0, 0, 1))) == {
         .Err(failure) -> { assert(failure.reason == RejectReason.InsufficientAuthority) }
@@ -137,7 +137,7 @@ test_rejection: fn(request: InspectRequest, session: PausedSession) -> RejectRea
 
 #Test("cancellation_budget_and_absent_result_are_fail_closed") {
     paused: test_session()
-    canceled := test_inspect_request("request-canceled", test_identity())
+    ^canceled: test_inspect_request("request-canceled", test_identity())
     canceled.cancellation = cancellation_requested("user stopped") ?? panic("cancellation")
     assert(test_rejection(canceled, paused) == RejectReason.Canceled)
     budget: EvaluationBudget.new(4, 16, 4096, 1) ?? panic("budget")

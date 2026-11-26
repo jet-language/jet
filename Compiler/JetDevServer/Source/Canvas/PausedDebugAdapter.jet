@@ -43,11 +43,11 @@ PausedDebugSessionAdapter: struct {
             return Ok()
         }
         location: self.source_location()
-        bindings := [ValueProjection]{}
+        ^bindings: [ValueProjection]{}
         loop index in 0..<self.snapshot.locals.len() {
             local: self.snapshot.locals[index]
             id: self.value_id(index, local.name)
-            projection := value_projection_redacted(id, paused_debug_bounded_name(local.name), paused_debug_type_name(local.type_name), location)
+            ^projection: value_projection_redacted(id, paused_debug_bounded_name(local.name), paused_debug_type_name(local.type_name), location)
             if evaluate_snapshot(self.snapshot, local.name) == .Ok(evaluation) {
                 if self.projection_value(evaluation, id, location) == .Ok(published) {
                     projection = published
@@ -64,7 +64,7 @@ PausedDebugSessionAdapter: struct {
     }
 
     evaluate: fn(self, request: EvaluateRequest) -> EvaluatorResult Never! {
-        usage := EvaluationUsage{depth: 0, nodes: 0, bytes: 0, steps: 0}
+        ^usage: EvaluationUsage{depth: 0, nodes: 0, bytes: 0, steps: 0}
         if request.identity != self.identity || request.scope_id != self.scope_id {
             return evaluator_failed(request.identity, request.scope_id, "paused debugger request does not match the published stop", usage)
         }
@@ -78,7 +78,7 @@ PausedDebugSessionAdapter: struct {
             return evaluator_failed(request.identity, request.scope_id, "paused debugger evaluation is read-only; mutation is unsupported", usage)
         }
         requirement: AuthorityRequirement.new(EVALUATE_AUTHORITY, self.scope_id) ?? return evaluator_failed(request.identity, request.scope_id, err.message, usage)
-        allowed := self.authority.allows(requirement)
+        ^allowed: self.authority.allows(requirement)
         loop requested in request.authority {
             if !self.authority.allows(requested) -> allowed = false
         }
@@ -89,7 +89,7 @@ PausedDebugSessionAdapter: struct {
         bytes: if evaluation.usage.bytes < MAX_VALUE_BYTES -> evaluation.usage.bytes else -> MAX_VALUE_BYTES
         usage = EvaluationUsage{depth: evaluation.usage.depth, nodes: evaluation.usage.nodes, bytes: bytes, steps: evaluation.usage.steps}
         location: self.source_location() ?? return evaluator_failed(request.identity, request.scope_id, err.message, usage)
-        index := 0
+        ^index: 0
         loop position in 0..<self.snapshot.locals.len() {
             if self.snapshot.locals[position].name == evaluation.name {
                 index = position
@@ -169,7 +169,7 @@ PausedDebugSessionAdapter: struct {
     }
 
     projection_value: fn(self, evaluation: DebugEvaluation, id: String, location: SourceLocation) -> ValueProjection PausedEvaluateError! {
-        projection := value_projection_published(id, paused_debug_bounded_name(evaluation.name), paused_debug_type_name(evaluation.type_name), location, evaluation.value)
+        ^projection: value_projection_published(id, paused_debug_bounded_name(evaluation.name), paused_debug_type_name(evaluation.type_name), location, evaluation.value)
         if projection.value == .Val(.Text(text)) {
             bounded: paused_debug_bounded_text(text)
             projection.value = Val(DebugValue.Text{text: bounded.text})
@@ -216,7 +216,7 @@ paused_debug_type_name: fn(value: String) -> String Never! {
 // `value` without control scalars, cut at a scalar boundary to the component
 // bound; `Unknown` when nothing is left.
 paused_debug_bounded_name: fn(value: String) -> String Never! {
-    name := ""
+    ^name: ""
     loop ch in value.chars() {
         text: "{ch}"
         if paused_has_control(text) -> next
@@ -233,8 +233,8 @@ PausedDebugBoundedText: struct {
 
 // Control scalars shown as `\n`, `\r`, `\t` or U+FFFD; at most MAX_VALUE_BYTES.
 paused_debug_bounded_text: fn(value: String) -> PausedDebugBoundedText Never! {
-    pieces := [String]{}
-    length := 0
+    ^pieces: [String]{}
+    ^length: 0
     loop ch in value.chars() {
         text: "{ch}"
         shown: if {

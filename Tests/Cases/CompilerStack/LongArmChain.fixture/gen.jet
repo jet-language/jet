@@ -28,7 +28,7 @@ run: fn() {
     arms: table.join("")
     links: chain.join("")
     limit: count + 76
-    source: "classify: fn(n: Int) -> Int {{\n    if n == {{\n{arms}        else -> -1\n    }}\n}}\n\nclassify_chain: fn(n: Int) -> Int {{\n    out := 0\n    {links}{{\n        out = -1\n    }}\n    out\n}}\n\nrun: fn() {{\n    table := 0\n    chain := 0\n    loop i in 0..<{limit} {{\n        table += classify(i)\n        chain += classify_chain(i)\n    }}\n    print(\"{{table}}\")\n    print(\"{{chain}}\")\n}}\n"
+    source: "classify: fn(n: Int) -> Int {{\n    if n == {{\n{arms}        else -> -1\n    }}\n}}\n\nclassify_chain: fn(n: Int) -> Int {{\n    ^out: 0\n    {links}{{\n        out = -1\n    }}\n    out\n}}\n\nrun: fn() {{\n    ^table: 0\n    ^chain: 0\n    loop i in 0..<{limit} {{\n        table += classify(i)\n        chain += classify_chain(i)\n    }}\n    print(\"{{table}}\")\n    print(\"{{chain}}\")\n}}\n"
     files.write("table.jet", source) ?? panic("gen.jet: write table.jet: {err}")
     ^opens: [String]{}
     ^closes: [String]{}
@@ -38,6 +38,6 @@ run: fn() {
     }
     inner: opens.join("")
     outer: closes.join("")
-    nested: "deep: fn(n: Int) -> Int {{\n    out := 0\n    {inner}        out = 1\n{outer}    out\n}}\n\nrun: fn() {{\n    print(\"{{deep(0)}}\")\n}}\n"
+    nested: "deep: fn(n: Int) -> Int {{\n    ^out: 0\n    {inner}        out = 1\n{outer}    out\n}}\n\nrun: fn() {{\n    print(\"{{deep(0)}}\")\n}}\n"
     files.write("nested.jet", nested) ?? panic("gen.jet: write nested.jet: {err}")
 }

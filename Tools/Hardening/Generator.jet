@@ -131,7 +131,7 @@ print("value_$K {value_$K}")`,
             name: "compound-assign",
             markers: [String]{"value_$K += $B", "value_$K = value_$K * $C"},
             decls: "",
-            body: `value_$K := $A
+            body: `^value_$K: $A
 value_$K += $B
 value_$K = value_$K * $C
 print("value_$K {value_$K}")`,
@@ -152,7 +152,7 @@ print("value_$K {value_$K}")`,
             name: "range-loop",
             markers: [String]{"loop i_$K in 0..<$A"},
             decls: "",
-            body: `sum_$K := 0
+            body: `^sum_$K: 0
 loop i_$K in 0..<$A -> sum_$K += i_$K * $B
 value_$K: if sum_$K > $C -> sum_$K else -> -sum_$K
 print("value_$K {value_$K}")`,
@@ -309,7 +309,7 @@ print("value_$K {value_$K}")`,
             name: "view-param",
             markers: [String]{"total_$K: fn(values: View<Int>)"},
             decls: `total_$K: fn(values: View<Int>) -> Int Never! {
-    sum := 0
+    ^sum: 0
     loop item in values -> sum += item
     sum
 }`,
@@ -334,7 +334,7 @@ print("value_$K {value_$K}")`,
             name: "comptime-if",
             markers: [String]{`FLAG_$K: #run { $F }`, "#if FLAG_$K"},
             decls: `FLAG_$K: #run { $F }`,
-            body: `value_$K := 0
+            body: `^value_$K: 0
 #if FLAG_$K {
     value_$K = $A
 } else {
@@ -350,7 +350,7 @@ print("value_$K {value_$K}")`,
     x: Int
     y: Int
 }`,
-            body: `points_$K := [Point$K]{Point$K{x: $B, y: 2}, Point$K{x: 3, y: $C}}
+            body: `^points_$K: [Point$K]{Point$K{x: $B, y: 2}, Point$K{x: 3, y: $C}}
 points_$K[1].y = $A
 value_$K: points_$K[1].y * 10 + points_$K[0].x
 print("value_$K {value_$K}")`,
@@ -360,7 +360,7 @@ print("value_$K {value_$K}")`,
             name: "nested-index",
             markers: [String]{"grid_$K[1][0] = grid_$K[1][0] + $A"},
             decls: "",
-            body: `grid_$K := [[Int]]{[Int]{$A, $B}, [Int]{$C, 4}}
+            body: `^grid_$K: [[Int]]{[Int]{$A, $B}, [Int]{$C, 4}}
 grid_$K[1][0] = grid_$K[1][0] + $A
 value_$K: grid_$K[1][0] * 10 + grid_$K[0][1]
 print("value_$K {value_$K}")`,
@@ -377,7 +377,7 @@ Outer$K: struct {
     inner: Inner$K
     label: String
 }`,
-            body: `outer_$K := Outer$K{inner: Inner$K{count: $A}, label: "$W"}
+            body: `^outer_$K: Outer$K{inner: Inner$K{count: $A}, label: "$W"}
 outer_$K.inner.count = outer_$K.inner.count + $B
 value_$K: "{outer_$K.label}:{outer_$K.inner.count}"
 print("value_$K {value_$K}")`,

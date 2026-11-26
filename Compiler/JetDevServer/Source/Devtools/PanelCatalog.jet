@@ -356,7 +356,7 @@ JetDevtoolsPanelCatalog: struct {
                 }
             }
         }
-        sorted := descriptors.move()
+        ^sorted: descriptors.move()
         sorted.sort_by(fn(a: JetDevtoolsPanelDescriptor, b: JetDevtoolsPanelDescriptor) { a.order <=> b.order })
         Ok(JetDevtoolsPanelCatalog{descriptor_list: sorted})
     }
@@ -397,10 +397,10 @@ JetDevtoolsPanelCatalog: struct {
             None -> ""
         }
         events: envelope.events()
-        projections := [JetDevtoolsPanelProjection]{}
+        ^projections: [JetDevtoolsPanelProjection]{}
         loop availability in self.available_for(host, grants) {
             id: availability.descriptor.id
-            matching := [Int]{}
+            ^matching: [Int]{}
             loop (index, event) in events {
                 if id.accepts_event(event) -> matching.push(index)
             }
@@ -421,12 +421,12 @@ JetDevtoolsPanelCatalog: struct {
 }
 
 devtools_panel_availability: fn(descriptor: JetDevtoolsPanelDescriptor, host: JetDevtoolsHostKind, grants: [JetDevtoolsPanelCapability]) -> JetDevtoolsPanelAvailability Never! {
-    reasons := [JetDevtoolsPanelUnavailableReason]{}
+    ^reasons: [JetDevtoolsPanelUnavailableReason]{}
     if !descriptor.supports_host(host) {
         reasons.push(JetDevtoolsPanelUnavailableReason.UnsupportedHost{host: host})
     }
     loop capability in descriptor.required_capabilities {
-        granted := false
+        ^granted: false
         loop grant in grants {
             if grant == capability -> granted = true
         }

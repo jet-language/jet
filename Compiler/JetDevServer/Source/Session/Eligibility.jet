@@ -27,7 +27,7 @@ CapturePolicy: struct {
     budget: fn(self) -> CaptureBudget Never! { self.package.budget }
 
     consent_scope: fn(self, attempt: CaptureAttempt) -> CaptureConsentScope Never! {
-        scope := attempt.base_consent_scope()
+        ^scope: attempt.base_consent_scope()
         scope.mode = self.mode
         scope.byte_limit = self.budget().max_bytes
         scope.canonicalize()

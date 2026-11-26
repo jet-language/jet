@@ -16,7 +16,7 @@ exit: 0
 stdout: = "4\n3\n2\nbig\n"
 step: jet fmt --simplify one/inline.jet
 exit: 0
-file: one/inline.jet = "total: fn(prices: [Int]) -> Int {\n    sum := 0\n    loop price in prices -> sum += price\n    sum\n}\n\nspread: fn(prices: [Int]) -> Int { return total(prices) - prices.len() }\n\nrun: fn() {\n    words: \"a b c\".split(\" \").to_list()\n    print(spread([2, 4]))\n    print(words.len())\n    print(total([1]) * 2)\n    if total([5]) > 4 -> print(\"big\")\n}\n"
+file: one/inline.jet = "total: fn(prices: [Int]) -> Int {\n    ^sum: 0\n    loop price in prices -> sum += price\n    sum\n}\n\nspread: fn(prices: [Int]) -> Int { return total(prices) - prices.len() }\n\nrun: fn() {\n    words: \"a b c\".split(\" \").to_list()\n    print(spread([2, 4]))\n    print(words.len())\n    print(total([1]) * 2)\n    if total([5]) > 4 -> print(\"big\")\n}\n"
 step: jet fmt --simplify --check one/inline.jet
 exit: 0 # a second pass keeps it
 step: jet run one/inline.jet

@@ -226,7 +226,7 @@ EditorStreamEvent: struct {
     }
 
     serialize: fn(self) -> String Never! {
-        out := [U8]{}
+        ^out: [U8]{}
         self.render(out)
         editor_finish(out)
     }
@@ -238,7 +238,7 @@ EditorStreamSnapshot: struct {
     next_cursor: U64?,
 
     serialize: fn(self) -> String Never! {
-        out := [U8]{}
+        ^out: [U8]{}
         editor_append(out, `{"events":`)
         editor_render_events(self.events, out)
         editor_append(out, ",\"resumed_from\":")
@@ -266,7 +266,7 @@ EditorWorkbenchSnapshot: struct {
     time_cursor: U64?,
 
     serialize: fn(self) -> String Never! {
-        out := [U8]{}
+        ^out: [U8]{}
         editor_append(out, `{"protocol":`)
         editor_render_string(self.protocol, out)
         editor_append(out, ",\"protocol_version\":{self.protocol_version},\"editor\":")
@@ -318,7 +318,7 @@ EditorSourceNavigation: struct {
     source_url: String,
 
     serialize: fn(self) -> String Never! {
-        out := [U8]{}
+        ^out: [U8]{}
         editor_render_response_context(self.host, self.identity, true, out)
         editor_append(out, ",\"line\":{self.line},\"column\":{self.column},\"source_url\":")
         editor_render_string(self.source_url, out)
@@ -334,7 +334,7 @@ EditorCommandReceipt: struct {
     required_grant: String,
 
     serialize: fn(self) -> String Never! {
-        out := [U8]{}
+        ^out: [U8]{}
         editor_render_response_context(self.host, self.identity, false, out)
         editor_append(out, ",\"command\":")
         editor_render_string(self.command.wire_name(), out)
@@ -358,7 +358,7 @@ EditorHostResponse: enum {
             .Stream(value) -> value.serialize()
             .Navigation(value) -> value.serialize()
             .Selection(value) -> {
-                out := [U8]{}
+                ^out: [U8]{}
                 editor_render_selection(value, out)
                 editor_finish(out)
             }
@@ -382,7 +382,7 @@ EditorWorkbenchOpenRequest: struct {
     }
 
     serialize: fn(self) -> String Never! {
-        out := [U8]{}
+        ^out: [U8]{}
         editor_render_request_context(self.host, self.session_id, self.source_id, self.source_path, self.revision, out)
         editor_append(out, ",\"panel_id\":")
         editor_render_optional_string(self.panel_id, out)
@@ -461,7 +461,7 @@ EditorHostTransport: struct {
     new: fn(workbench_url: ^^String, session_id: ^^String, source_id: ^^String, source_path: ^^String, revision: ^^String, grants: [String]) -> EditorHostTransport EditorHostError! {
         editor_validate_loopback_url(workbench_url)
         identity: EditorSessionIdentity.new(session_id, source_id, source_path, revision)
-        set := [String:Bool]{}
+        ^set: [String:Bool]{}
         loop grant in grants {
             editor_validate_stable_text(grant, "command grant")
             set[grant] = true
@@ -475,7 +475,7 @@ EditorHostTransport: struct {
     workbench_url: fn(self) -> String Never! { self.workbench }
 
     grants: fn(self) -> [String] Never! {
-        out := [String]{}
+        ^out: [String]{}
         loop (grant, _) in self.grant_set -> out.push(grant.copy())
         out.sort()
         out
@@ -527,14 +527,14 @@ EditorHostTransport: struct {
                 }
             }
         }
-        events := [EditorStreamEvent]{}
+        ^events: [EditorStreamEvent]{}
         loop index in 0..<self.count {
             if cursor == .Val(requested) {
                 if self.sequence_at(index) <= requested -> next
             }
             events.push(self.event_at(index))
         }
-        next_cursor := cursor
+        ^next_cursor: cursor
         if events.len() != 0 -> next_cursor = Val(events[events.len() - 1].sequence) else if next_cursor == None {
             next_cursor = self.latest_cursor()
         }
@@ -544,7 +544,7 @@ EditorHostTransport: struct {
     panel_catalog: fn(self) -> [JetDevtoolsPanelDescriptor] Never! { descriptors() }
 
     panel_availability: fn(self) -> [JetDevtoolsPanelAvailability] Never! {
-        grants := [JetDevtoolsPanelCapability]{}
+        ^grants: [JetDevtoolsPanelCapability]{}
         loop capability in JetDevtoolsPanelCapability.all() {
             if self.grant_set.has_key(capability.grant()) -> grants.push(capability)
         }
@@ -576,12 +576,12 @@ EditorHostTransport: struct {
     open: fn(^self, request: EditorWorkbenchOpenRequest) -> EditorWorkbenchSnapshot EditorHostError! {
         self.validate_request(request.host, request.session_id, request.source_id, request.source_path, request.revision)
         stream: self.stream_after(request.cursor)
-        panel := "build"
+        ^panel: "build"
         if request.panel_id == .Val(value) -> panel = value.copy() else if self.shared_view.selection == .Val(selection) {
             panel = selection.panel_id.copy()
         }
         canonical: editor_ensure_panel(panel)
-        item := String?{None}
+        ^item: String?{None}
         if request.item_key == .Val(value) {
             editor_validate_stable_text(value, "selection item_key")
             item = Val(value.copy())
@@ -636,9 +636,9 @@ EditorHostTransport: struct {
         }
         self.check_projection_identity(projection.session_id, projection.source_id, Val(projection.revision))
         // Construct a temporary ring so failed conversion cannot mutate self.
-        replacement := editor_empty_ring()
-        head := 0
-        count := 0
+        ^replacement: editor_empty_ring()
+        ^head: 0
+        ^count: 0
         loop event in projection.panels {
             editor_ring_push(replacement, head, count, editor_event_from_event(event))
         }
@@ -705,9 +705,9 @@ EditorHostTransport: struct {
                         }
                     }
                 }
-                replacement := editor_empty_ring()
-                head := 0
-                count := 0
+                ^replacement: editor_empty_ring()
+                ^head: 0
+                ^count: 0
                 loop event in envelope.events() {
                     editor_ring_push(replacement, head, count, editor_event_from_event(event))
                 }
@@ -759,7 +759,7 @@ EditorHostTransport: struct {
         revision: editor_field_text(params, "revision")
         response: if method == {
             EDITOR_WORKBENCH_METHOD -> {
-                request := EditorWorkbenchOpenRequest.new(host, session, source, path, revision)
+                ^request: EditorWorkbenchOpenRequest.new(host, session, source, path, revision)
                 request.panel_id = editor_optional_text(params, "panel_id")
                 request.item_key = editor_optional_text(params, "item_key")
                 request.cursor = editor_optional_cursor(params)
@@ -790,7 +790,7 @@ EditorHostTransport: struct {
 }
 
 editor_empty_ring: fn() -> [EditorStreamEvent?] Never! {
-    slots := [EditorStreamEvent?]{}
+    ^slots: [EditorStreamEvent?]{}
     loop _ in 0..<EDITOR_MAX_EVENTS -> slots.push(.None)
     slots
 }
@@ -851,7 +851,7 @@ editor_clean_source_path: fn(value: String) -> String EditorHostError! {
 }
 
 editor_validate_loopback_url: fn(value: String) EditorHostError! {
-    whitespace := false
+    ^whitespace: false
     loop byte in value.bytes() {
         code: Int{byte}
         if code == 32 || (code >= 9 && code <= 13) -> whitespace = true
@@ -862,20 +862,20 @@ editor_validate_loopback_url: fn(value: String) EditorHostError! {
     if !value.starts_with("http://") {
         return Err(EditorHostError.LoopbackViolation("only an http loopback URL is accepted"))
     }
-    rest := value.slice(7, value.len())  // #4303
+    ^rest: value.slice(7, value.len())  // #4303
     if rest.contains("?") || rest.contains("#") || rest.contains("@") {
         return Err(EditorHostError.LoopbackViolation("workbench URL cannot contain query, fragment, or userinfo"))
     }
     slash_at: rest.find("/")
     slash: if slash_at < 0 -> rest.len() else -> slash_at
-    authority := rest.slice(0, slash)  // #4303
-    host := ""
-    port := ""
+    ^authority: rest.slice(0, slash)  // #4303
+    ^host: ""
+    ^port: ""
     if authority.starts_with("[::1]:") {
         host = "[::1]"
         port = authority.slice(6, authority.len())
     } else {
-        colon := Int?{None}
+        ^colon: Int?{None}
         loop (index, byte) in authority.bytes() {
             if byte == (U8{58}) -> colon = Val(index)
         }
@@ -887,9 +887,9 @@ editor_validate_loopback_url: fn(value: String) EditorHostError! {
         return Err(EditorHostError.LoopbackViolation("host `{host}` is not loopback"))
     }
     // A port accepts a leading +, but not whitespace or negatives.
-    digits := port  // #4303
+    ^digits: port  // #4303
     if digits.starts_with("+") -> digits = digits.slice(1, digits.len())
-    number := 0
+    ^number: 0
     if digits.len() == 0 {
         return Err(EditorHostError.LoopbackViolation("URL port must be an integer from 1 to 65535"))
     }
@@ -905,7 +905,7 @@ editor_validate_loopback_url: fn(value: String) EditorHostError! {
     }
     // Exclude the first separator: the path starts after that separator.
     if slash < rest.len() {
-        tail := rest.slice(slash + 1, rest.len())
+        ^tail: rest.slice(slash + 1, rest.len())
         if tail.contains("//") {
             return Err(EditorHostError.LoopbackViolation("workbench URL path must be canonical"))
         }
@@ -926,11 +926,11 @@ editor_ensure_panel: fn(panel_id: String) -> String EditorHostError! {
 }
 
 editor_event_from_event: fn(event: JetDevtoolsEvent) -> EditorStreamEvent EditorHostError! {
-    fields := [String:EditorFactValue]{}
+    ^fields: [String:EditorFactValue]{}
     fields["fields"] = EditorFactValue.text(event.fields_json().copy())
-    payload := [String:EditorFactValue]?{None}
+    ^payload: [String:EditorFactValue]?{None}
     if event.payload_json() == .Val(text) {
-        values := [String:EditorFactValue]{}
+        ^values: [String:EditorFactValue]{}
         values["payload"] = EditorFactValue.text(text.copy())
         payload = Val(values)
     }
@@ -942,9 +942,9 @@ editor_event_from_event: fn(event: JetDevtoolsEvent) -> EditorStreamEvent Editor
 editor_source_url: fn(workbench_url: String, source_id: String, line: U32, column: U32) -> String Never! {
     // The trailing slashes are trimmed by byte, so the base is copied by byte.
     bytes: workbench_url.bytes()
-    end := bytes.len()
+    ^end: bytes.len()
     loop end > 0 && bytes[end - 1] == (U8{47}) -> end -= 1
-    out := [U8]{}
+    ^out: [U8]{}
     loop index in 0..<end -> out.push(bytes[index])
     editor_append(out, "?source_id=")
     editor_percent_encode(source_id, out)
@@ -1062,7 +1062,7 @@ editor_command_arguments: fn(params: Dyn) -> [String] EditorHostError! {
     values: if value == .Array(items) -> items else -> {
         return Err(EditorHostError.InvalidRequest("editor command arguments must be an array"))
     }
-    arguments := [String]{}
+    ^arguments: [String]{}
     loop argument in values {
         if argument == .Text(text) -> arguments.push(text.copy()) else {
             return Err(EditorHostError.InvalidRequest("editor command arguments must be text"))
@@ -1098,7 +1098,7 @@ editor_valid_request_id: fn(id: Dyn) -> Bool Never! {
 }
 
 editor_fact_keys: fn(values: [String:EditorFactValue]) -> [String] Never! {
-    keys := [String]{}
+    ^keys: [String]{}
     loop (key, _) in values -> keys.push(key.copy())
     keys.sort()
     keys

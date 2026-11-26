@@ -6,10 +6,10 @@ use {
 }
 
 run: fn() {
-    limits := encoding.EncodingLimits.safe()
+    ^limits: encoding.EncodingLimits.safe()
     limits.max_item_bytes = 1
     output: files.create("{work}/partial.json") ?? panic("create")
-    writer := json.writer(output, limits) ?? panic("writer")
+    ^writer: json.writer(output, limits) ?? panic("writer")
     writer.write(encoding.DataEvent.ArrayStart) ?? panic("array")
     if writer.write(encoding.DataEvent.Text("ab")) == {
         .Ok(_) -> { print("missed-limit") }
@@ -23,6 +23,6 @@ run: fn() {
             }
         }
     }
-    wire := files.read("{work}/partial.json") ?? panic("read")
+    ^wire: files.read("{work}/partial.json") ?? panic("read")
     print(wire)
 }

@@ -69,10 +69,10 @@ canvas_reasoning_family: fn(record: DerivationRecord) -> String {
 }
 
 canvas_reasoning_json: fn(source_path: String, index: SemIndex) -> String {
-    records := [String]{}
-    lens_rows := [String:[String]]{}
+    ^records: [String]{}
+    ^lens_rows: [String:[String]]{}
     loop record in index.derivations.records {
-        source_span := "null"
+        ^source_span: "null"
         loop fact in index.definition_facts {
             if fact.stable_id == record.subject {
                 source_span = span_json(fact.span)
@@ -81,11 +81,11 @@ canvas_reasoning_json: fn(source_path: String, index: SemIndex) -> String {
         }
         records.push("{{\"derivation\":{derivation_record_json(record)},\"source_span\":{source_span}}}")
         family: canvas_reasoning_family(record)
-        rows := lens_rows.get(family) ?? [String]{}
+        ^rows: lens_rows.get(family) ?? [String]{}
         rows.push(json_str(record.id))
         lens_rows[family] = rows
     }
-    names := [String]{}
+    ^names: [String]{}
     loop family in canvas_reasoning_families() -> names.push(family.name)
     names.push("relationships")
     lenses: loop name in names -> {
@@ -131,7 +131,7 @@ canvas_module_at_name_index: fn(modules: [JetDriverDocModule], name_index: Int) 
 // Every function of the program's own modules the entry module can call,
 // with the callee spelling an insertion there writes.
 canvas_callable_exports: fn(modules: [JetDriverDocModule], entry: Int) -> [CanvasCallableExport] {
-    exports := [CanvasCallableExport]{}
+    ^exports: [CanvasCallableExport]{}
     if entry >= modules.len() -> return exports
     entry_module: modules[entry]
     storage: entry_module.name_ledger ?? return exports
@@ -167,12 +167,12 @@ canvas_callable_callee: fn(ledger: NameLedger, entry_index: Int, declaration: Na
 }
 
 canvas_blueprint_facts_json: fn(path: String, src: String, modules: [JetDriverDocModule], index: SemIndex, runtime_events: String?, game_facts: [CanvasGameFact]) -> String {
-    interfaces := [String]{}
+    ^interfaces: [String]{}
     loop doc_module in modules -> collect_module_interfaces(doc_module, interfaces)
     outputs: loop output in index.outputs -> output_fact_json(output)
     state_graphs: loop graph in index.state_graphs -> state_graph_json(graph)
-    assets := [String]{}
-    components := [String]{}
+    ^assets: [String]{}
+    ^components: [String]{}
     loop fact in game_facts {
         if fact.kind == "asset" -> assets.push(canvas_game_fact_json(fact))
         if fact.kind == "component" -> components.push(canvas_game_fact_json(fact))
@@ -189,7 +189,7 @@ canvas_game_fact_json: fn(fact: CanvasGameFact) -> String {
 // The asset and component calls the entry module's function bodies make, in
 // source order.
 canvas_game_facts: fn(source_id: String, src: String, entry_module: JetDriverDocModule) -> [CanvasGameFact] {
-    facts := [CanvasGameFact]{}
+    ^facts: [CanvasGameFact]{}
     collect_game_items(entry_module.tables, entry_module.items, source_id, src, facts)
     facts.sort_by(fn(left: CanvasGameFact, right: CanvasGameFact) { (left.source_span.start <=> right.source_span.start).then(left.source_span.end <=> right.source_span.end) })
     facts
@@ -220,10 +220,10 @@ collect_game_items: fn(tables: ASTTables, items: [Item], source_id: String, src:
 note_game_call: fn(tables: ASTTables, out: ^[CanvasGameFact], source_id: String, src: String, expression: ExprNode) {
     if ast_expr(tables, expression) == .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, _) {
         source_span: game_method_call_span(tables, src, receiver, method_span)
-        operation := ""
-        field := ""
-        value_source := ""
-        field_span := Span?{None}
+        ^operation: ""
+        ^field: ""
+        ^value_source: ""
+        ^field_span: Span?{None}
         if (method == "image" || method == "sound") && game_assets_receiver(tables, receiver) {
             if args.len() == 0 {
                 return
@@ -291,12 +291,12 @@ game_method_call_span: fn(tables: ASTTables, src: String, receiver: ExprNode, me
 call_close_after: fn(src: String, from: Int) -> Int? {
     bytes: src.bytes()
     if from < 0 || from > bytes.len() -> return None
-    open := from
+    ^open: from
     loop open < bytes.len() && bytes[open] != (U8{40}) -> open += 1
     if open == bytes.len() -> return None
-    depth := 0
-    in_string := false
-    escaped := false
+    ^depth: 0
+    ^in_string: false
+    ^escaped: false
     loop index in open..<bytes.len() {
         byte: Int{bytes[index]}
         if in_string {
@@ -380,7 +380,7 @@ collect_interface_facts: fn(items: [Item], out: ^[String], scope: String, src: S
 // The path source in the module writes for an item, without the module's
 // own alias.
 source_item_path: fn(ledger: NameLedger, module_index: Int, module_alias: String, internal_name: String, span: Span, scope: String) -> String {
-    candidates := [String]{"{module_alias}.{internal_name}"}
+    ^candidates: [String]{"{module_alias}.{internal_name}"}
     if scope != "" -> candidates.push("{module_alias}.{scope}{internal_name}")
     loop candidate in candidates {
         if name_ledger_display_path(ledger, module_index, candidate, Val(module_index)) == .Val(path) {
@@ -410,7 +410,7 @@ trait_fact_json: fn(src: String, definition: TraitDef, display_path: String) -> 
 }
 
 trait_method_json: fn(src: String, method: TraitMethodSig) -> String {
-    effects := [String]{}
+    ^effects: [String]{}
     if method.declared_effects == .Val(row) {
         loop entry in row -> effects.push(json_str(entry.name))
     }
@@ -436,7 +436,7 @@ trait_impl_fact_json: fn(type_path: String, trait_path: String, methods: [Func],
 // The `core.event` operations the module read from `path` performs, one
 // fact per checked call.
 event_dispatcher_facts: fn(path: String, source: String, modules: [JetDriverDocModule], index: SemIndex) -> [String] {
-    facts := [String]{}
+    ^facts: [String]{}
     position: canvas_event_module(path, source, modules) ?? return facts
     doc_module: modules[position]
     src: doc_module.source
@@ -446,13 +446,13 @@ event_dispatcher_facts: fn(path: String, source: String, modules: [JetDriverDocM
         call_source_span: event_call_span(src, call.span) ?? call.span
         call_source: if call_source_span.end <= src.count_bytes() -> foundation_byte_text(src.bytes(), call_source_span.start, call_source_span.end) else -> call.callee
         receiver: event_receiver(src, index, call.span, doc_module.path)
-        kind := event_constructor_kind(src, call.span, call.callee, aliases)
+        ^kind: event_constructor_kind(src, call.span, call.callee, aliases)
         if kind == None && receiver == .Val(found) {
             kind = event_method_kind(found.ty, call.callee)
         }
         found_kind: kind ?? next
         scope: event_scope_argument(index, call_source_span, doc_module.path)
-        receiver_type := constructor_type(call.callee, call_source)
+        ^receiver_type: constructor_type(call.callee, call_source)
         if receiver_type == None && receiver == .Val(found) -> receiver_type = Val(found.ty)
         receiver_name: if receiver == .Val(found) -> json_str(found.name) else -> "null"
         receiver_span: if receiver == .Val(found) -> span_json(found.span) else -> "null"
@@ -475,7 +475,7 @@ canvas_event_module: fn(path: String, source: String, modules: [JetDriverDocModu
 
 // The names the module imports `core.event` under.
 event_module_aliases: fn(imports: [ImportDecl]) -> [String] {
-    aliases := [String]{}
+    ^aliases: [String]{}
     loop import in imports {
         if import.kind == .Module(name, _) && name == "core.event" && import.alias != "" && !aliases.contains(import.alias) {
             aliases.push(import.alias)
@@ -488,7 +488,7 @@ event_constructor_kind: fn(src: String, call_span: Span, callee: String, aliases
     src_bytes: src.bytes()
     end: if call_span.start < src_bytes.len() -> call_span.start else -> src_bytes.len()
     before: foundation_byte_text(src_bytes, 0, end).trim_end()
-    qualified := false
+    ^qualified: false
     loop alias in aliases {
         if before.ends_with("{alias}.") -> qualified = true
     }
@@ -541,7 +541,7 @@ definition_for_anchor: fn(index: SemIndex, target: SemAnchor) -> SemDef? {
 
 // The local or parameter written just before `.callee(…)`, with its type.
 event_receiver: fn(src: String, index: SemIndex, call_span: Span, module_path: String) -> CanvasEventOperand? {
-    best := SemRef?{None}
+    ^best: SemRef?{None}
     loop reference in index.references {
         if reference.module_path != module_path || reference.span.end > call_span.start || call_span.start > src.count_bytes() {
             next
@@ -567,7 +567,7 @@ event_receiver: fn(src: String, index: SemIndex, call_span: Span, module_path: S
 
 // The first `EventScope` local the call's text reads.
 event_scope_argument: fn(index: SemIndex, call_span: Span, module_path: String) -> CanvasEventOperand? {
-    best := CanvasEventOperand?{None}
+    ^best: CanvasEventOperand?{None}
     loop reference in index.references {
         if reference.module_path != module_path || reference.span.start < call_span.start || reference.span.end > call_span.end {
             next
@@ -639,7 +639,7 @@ task_flow_facts: fn(src: String) -> [String] {
         CanvasTaskNeedle{needle: ".receive(", kind: "channel_receive"},
         CanvasTaskNeedle{needle: "#Deadline", kind: "deadline_context"},
     }
-    facts := [String]{}
+    ^facts: [String]{}
     loop entry in needles {
         loop span in text_matches(src, entry.needle) {
             facts.push("{{\"kind\":{json_str(entry.kind)},\"source\":{json_str(entry.needle)},\"source_span\":{span_json(span)},\"rail\":\"async\",\"semantics\":\"core.tasks_source_truth\"}}")

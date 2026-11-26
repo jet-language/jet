@@ -26,7 +26,7 @@ browser_trace_test_manifest: fn() -> String {
 browser_trace_test_lines: fn(action: String) -> [String] {
     text: browser_trace_test_files.read(browser_trace_relay_path(browser_trace_test_sys.pid())) ?? panic("cannot read relay: {err}")
     marker: "\"action\":\"{action}\""
-    out := [String]{}
+    ^out: [String]{}
     loop line in text.split("\n") {
         if line.contains(marker) -> out.push(line)
     }
@@ -39,7 +39,7 @@ browser_trace_test_lines: fn(action: String) -> [String] {
     if !browser_trace_test_supported() {
         return
     }
-    relay := BrowserTraceRelay.new(browser_trace_test_manifest()) ?? panic("relay failed: {err.message}")
+    ^relay: BrowserTraceRelay.new(browser_trace_test_manifest()) ?? panic("relay failed: {err.message}")
     path: browser_trace_relay_path(browser_trace_test_sys.pid())
     stat: browser_trace_test_files.stat(path) ?? panic("cannot stat relay: {err}")
     assert((stat.mode & 0o777) == 0o600, "relay mode must be atomic owner-only")
@@ -78,12 +78,12 @@ browser_trace_test_lines: fn(action: String) -> [String] {
     path: browser_trace_request_path(pid)
     started: browser_trace_process_start(pid) ?? panic("process start marker is unavailable")
     assert_eq(browser_trace_take_request() ?? panic("no request is not an error: {err.message}"), false)
-    writer := browser_trace_test_files.create(path, if_exists: .Refuse, mode: Val(0o600), links: .Refuse) ?? panic("cannot create request: {err}")
+    ^writer: browser_trace_test_files.create(path, if_exists: .Refuse, mode: Val(0o600), links: .Refuse) ?? panic("cannot create request: {err}")
     writer.write_bytes("{BROWSER_TRACE_REQUEST_SCHEMA}\t{pid}\t{started}\n".bytes()) ?? panic("cannot write request: {err}")
     writer.flush() ?? panic("cannot flush request: {err}")
     assert_eq(browser_trace_take_request() ?? panic("cannot take request: {err.message}"), true)
     assert(!browser_trace_test_files.exists(path), "a taken request must be consumed")
-    stale := browser_trace_test_files.create(path, if_exists: .Refuse, mode: Val(0o600), links: .Refuse) ?? panic("cannot create request: {err}")
+    ^stale: browser_trace_test_files.create(path, if_exists: .Refuse, mode: Val(0o600), links: .Refuse) ?? panic("cannot create request: {err}")
     stale.write_bytes("{BROWSER_TRACE_REQUEST_SCHEMA}\t{pid}\tnot-{started}\n".bytes()) ?? panic("cannot write request: {err}")
     stale.flush() ?? panic("cannot flush request: {err}")
     assert(browser_trace_take_request() == .Err(_))

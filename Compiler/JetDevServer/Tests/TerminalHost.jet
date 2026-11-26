@@ -16,13 +16,13 @@ terminal_test_event: fn(sequence: Int, panel_id: JetDevtoolsPanelID, kind: Strin
 }
 
 terminal_test_panel_ids: fn() -> [Int:JetDevtoolsPanelID] {
-    ids := [Int:JetDevtoolsPanelID]{}
+    ^ids: [Int:JetDevtoolsPanelID]{}
     ids[1] = JetDevtoolsPanelID.Build
     ids
 }
 
 terminal_test_projection: fn() -> DevtoolsProjection {
-    envelope := JetDevtoolsEnvelope.new("session", 0)
+    ^envelope: JetDevtoolsEnvelope.new("session", 0)
     _: envelope.push(JetDevtoolsEvent.from_parts_with_payload(1200, "devserver", "Build", "build", `{"accepted":true}`, Val(`{"output":"ok"}`)) ?? panic("devtools event"))
     DevtoolsProjection{
         protocol: JET_DEVTOOLS_PROTOCOL,
@@ -54,7 +54,7 @@ terminal_test_projection: fn() -> DevtoolsProjection {
 
 // Visible characters: every byte that does not continue a UTF-8 sequence.
 terminal_test_columns: fn(text: String) -> Int {
-    count := 0
+    ^count: 0
     loop byte in text.bytes() {
         if byte < 128 || byte >= 192 -> count += 1
     }
@@ -78,7 +78,7 @@ terminal_test_diff_id: fn(operation: TerminalDiffOperation) -> String {
 
 #Test("sync_projection_preserves_canonical_identity_and_status") {
     capabilities: TerminalHostCapabilities.new(false, false, true, 32, true, false, TerminalHostAccess{local: true, release: false, read_only: true})
-    host := TerminalHost.new(TerminalHostConfig.new(TerminalViewport.new(80, 24), capabilities))
+    ^host: TerminalHost.new(TerminalHostConfig.new(TerminalViewport.new(80, 24), capabilities))
     frame: host.sync_projection(terminal_test_projection(), terminal_test_panel_ids()) ?? panic("projection syncs")
     assert_eq(frame.session_id, "session")
     assert_eq(frame.source_id, Val("src/main.jet"))
@@ -100,15 +100,15 @@ terminal_test_diff_id: fn(operation: TerminalDiffOperation) -> String {
 
 #Test("quiet_suppresses_text_without_dropping_typed_tree") {
     capabilities: TerminalHostCapabilities.new(false, false, true, 20, false, true, TerminalHostAccess.interactive())
-    host := TerminalHost.new(TerminalHostConfig.new(TerminalViewport.new(80, 24), capabilities))
+    ^host: TerminalHost.new(TerminalHostConfig.new(TerminalViewport.new(80, 24), capabilities))
     frame: host.sync_projection(terminal_test_projection(), terminal_test_panel_ids()) ?? panic("projection syncs")
     assert_eq(frame.lines.len(), 0)
     assert_eq(frame.tree.panel_count, descriptors().len())
 }
 
 #Test("same_facts_keep_nodes_stable_across_capabilities") {
-    plain := TerminalHost.new(TerminalHostConfig.new(TerminalViewport.new(80, 24), TerminalHostCapabilities.plain()))
-    color := TerminalHost.new(TerminalHostConfig.new(TerminalViewport.new(80, 24), TerminalHostCapabilities.color()))
+    ^plain: TerminalHost.new(TerminalHostConfig.new(TerminalViewport.new(80, 24), TerminalHostCapabilities.plain()))
+    ^color: TerminalHost.new(TerminalHostConfig.new(TerminalViewport.new(80, 24), TerminalHostCapabilities.color()))
     plain.append_event(terminal_test_event(1, JetDevtoolsPanelID.Build, "Build", "build")) ?? panic("plain event")
     color.append_event(terminal_test_event(1, JetDevtoolsPanelID.Build, "Build", "build")) ?? panic("color event")
     plain_frame: plain.render()
@@ -120,7 +120,7 @@ terminal_test_diff_id: fn(operation: TerminalDiffOperation) -> String {
 }
 
 #Test("keyboard_paths_update_explicit_focus_and_return_actions") {
-    host := TerminalHost.new(TerminalHostConfig.standard())
+    ^host: TerminalHost.new(TerminalHostConfig.standard())
     host.append_event(terminal_test_event(1, JetDevtoolsPanelID.Tests, "Tests", "fails")) ?? panic("event")
     assert_eq(host.handle_key(TerminalKey.Enter), TerminalAction.Inspect{panel_id: "tests", item_key: "event:revision-a:1:Tests:fails"})
     assert_eq(host.handle_key(TerminalKey.Escape), TerminalAction.ReturnToPanel)
@@ -128,7 +128,7 @@ terminal_test_diff_id: fn(operation: TerminalDiffOperation) -> String {
 }
 
 #Test("diff_operations_are_ordered_and_bounded") {
-    host := TerminalHost.new(TerminalHostConfig.standard())
+    ^host: TerminalHost.new(TerminalHostConfig.standard())
     host.append_event(terminal_test_event(1, JetDevtoolsPanelID.Build, "Build", "one")) ?? panic("first event")
     first: host.render()
     host.append_event(terminal_test_event(2, JetDevtoolsPanelID.Jobs, "Jobs", "two")) ?? panic("second event")

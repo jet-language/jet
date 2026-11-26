@@ -38,12 +38,12 @@ effect_stack_threads_source: fn(count: Int) -> String {
     ^calls: [String]{}
     loop group in 0..<count {
         parts.push("step{group}: fn(value: Int) -> Int {{\n    value + {group}\n}}\n")
-        parts.push("apply{group}: fn(values: [Int], f: fn(Int) -> Int) -> Int {{\n    total := 0\n    loop value in values -> total += f(value)\n    total\n}}\n")
+        parts.push("apply{group}: fn(values: [Int], f: fn(Int) -> Int) -> Int {{\n    ^total: 0\n    loop value in values -> total += f(value)\n    total\n}}\n")
         parts.push("named{group}: fn() -> Int {{\n    values: [Int]{{1, 2, {group}}}\n    apply{group}(values, step{group})\n}}\n")
         parts.push("lambda{group}: fn() -> Int {{\n    values: [Int]{{{group}, 3}}\n    apply{group}(values, fn(value: Int) {{ value * {group} }})\n}}\n")
         if group % 2 == 0 -> calls.push("    total += named{group}() + lambda{group}()\n")
     }
-    parts.push("run: fn() {{\n    total := 0\n{calls.join("")}    print(\"{{total}}\")\n}}\n")
+    parts.push("run: fn() {{\n    ^total: 0\n{calls.join("")}    print(\"{{total}}\")\n}}\n")
     parts.join("")
 }
 

@@ -310,7 +310,7 @@ Codec: struct {
 // failure is one FieldError at the failing item, its path spelled as the
 // decoder spells paths (`$["id"]` reads `["id"]`). The parameter is not
 // spelled `T`: explicit-argument inference binds by name, so a generic
-// caller's `decode<[T]>` would read as `T := [T]`.
+// caller's `decode<[T]>` would read as `^T: [T]`.
 decode: fn<Target: Decode>(bytes: [U8], options: CBOROptions{CBOROptions.safe()}) -> Target [FieldError]! {
     tree: parser.parse(bytes, options) ?? return Err([FieldError]{typed_parse_error(err)})
     value: tree.decode<Target>() ?? return Err(err)

@@ -593,10 +593,10 @@ EnvScope: struct {
 /// comment, or commands, else what keeps the line from being read.
 ///
 /// ```jet
-/// scope := EnvScope{vars: [String: String]{"C": "c"}, assigned: [String: String]{}, readonly: [String]{}}
-/// line := EnvLine{raw: "A=1 B=$A; export C+=x D # a note".bytes(), at: 0}
+/// ^scope: EnvScope{vars: [String: String]{"C": "c"}, assigned: [String: String]{}, readonly: [String]{}}
+/// ^line: EnvLine{raw: "A=1 B=$A; export C+=x D # a note".bytes(), at: 0}
 /// env_line(line, scope) == None && scope.assigned.get("B") == Val("1") && scope.assigned.get("C") == Val("cx") // => true
-/// bad := EnvLine{raw: "1X=y".bytes(), at: 0}
+/// ^bad: EnvLine{raw: "1X=y".bytes(), at: 0}
 /// env_line(bad, scope) != None // => true
 /// ```
 env_line: fn(line: ^EnvLine, scope: ^EnvScope) -> String? Never! {
@@ -616,10 +616,10 @@ env_line: fn(line: ^EnvLine, scope: ^EnvScope) -> String? Never! {
 /// as a shell runs a builtin on its expanded words.
 ///
 /// ```jet
-/// scope := EnvScope{vars: [String: String]{}, assigned: [String: String]{"A": "0"}, readonly: [String]{}}
-/// line := EnvLine{raw: "export A=1 B=$A; C=2".bytes(), at: 0}
+/// ^scope: EnvScope{vars: [String: String]{}, assigned: [String: String]{"A": "0"}, readonly: [String]{}}
+/// ^line: EnvLine{raw: "export A=1 B=$A; C=2".bytes(), at: 0}
 /// env_command(line, scope) == None && scope.assigned.get("B") == Val("0") && line.at == 15 // => true
-/// command := EnvLine{raw: "A=1 echo".bytes(), at: 0}
+/// ^command: EnvLine{raw: "A=1 echo".bytes(), at: 0}
 /// env_command(command, scope) != None // => true
 /// ```
 env_command: fn(line: ^EnvLine, scope: ^EnvScope) -> String? Never! {
@@ -682,9 +682,9 @@ env_command: fn(line: ^EnvLine, scope: ^EnvScope) -> String? Never! {
 /// it; else "".
 ///
 /// ```jet
-/// line := EnvLine{raw: "readonly A=1".bytes(), at: 0}
+/// ^line: EnvLine{raw: "readonly A=1".bytes(), at: 0}
 /// env_keyword(line) == "readonly" && line.at == 8 // => true
-/// assignment := EnvLine{raw: "export=1".bytes(), at: 0}
+/// ^assignment: EnvLine{raw: "export=1".bytes(), at: 0}
 /// env_keyword(assignment) == "" && assignment.at == 0 // => true
 /// ```
 env_keyword: fn(line: ^EnvLine) -> String Never! {
@@ -702,7 +702,7 @@ env_keyword: fn(line: ^EnvLine) -> String Never! {
 /// None when it is assigned, else why not.
 ///
 /// ```jet
-/// scope := EnvScope{vars: [String: String]{}, assigned: [String: String]{}, readonly: [String]{"R"}}
+/// ^scope: EnvScope{vars: [String: String]{}, assigned: [String: String]{}, readonly: [String]{"R"}}
 /// env_assign(scope, "A", "1") == None && scope.assigned.get("A") == Val("1") // => true
 /// env_assign(scope, "R", "1") == Val("R: readonly variable") // => true
 /// ```
@@ -718,13 +718,13 @@ env_assign: fn(scope: ^EnvScope, name: String, value: String) -> String? Never! 
 /// it.
 ///
 /// ```jet
-/// scope := EnvScope{vars: [String: String]{"X": "1", "HOME": "/h"}, assigned: [String: String]{}, readonly: [String]{}}
-/// line := EnvLine{raw: "a\\ b'c d'\"$X\" rest".bytes(), at: 0}
-/// out := [U8]{}
+/// ^scope: EnvScope{vars: [String: String]{"X": "1", "HOME": "/h"}, assigned: [String: String]{}, readonly: [String]{}}
+/// ^line: EnvLine{raw: "a\\ b'c d'\"$X\" rest".bytes(), at: 0}
+/// ^out: [U8]{}
 /// env_word(line, scope, out, true, false) == None // => true
 /// String.from_bytes_lossy(out) == "a bc d1" && line.at == 13 // => true
-/// paths := EnvLine{raw: "~/a:~/b;".bytes(), at: 0}
-/// joined := [U8]{}
+/// ^paths: EnvLine{raw: "~/a:~/b;".bytes(), at: 0}
+/// ^joined: [U8]{}
 /// env_word(paths, scope, joined, true, false) == None && String.from_bytes_lossy(joined) == "/h/a:/h/b" && paths.at == 7 // => true
 /// ```
 env_word: fn(line: ^EnvLine, scope: ^EnvScope, out: ^[U8], live: Bool, braced: Bool) -> String? Never! {
@@ -778,11 +778,11 @@ env_word: fn(line: ^EnvLine, scope: ^EnvScope, out: ^[U8], live: Bool, braced: B
 /// `~-` are refused.
 ///
 /// ```jet
-/// scope := EnvScope{vars: [String: String]{"HOME": "/h"}, assigned: [String: String]{}, readonly: [String]{}}
-/// line := EnvLine{raw: "~/x".bytes(), at: 0}
-/// out := [U8]{}
+/// ^scope: EnvScope{vars: [String: String]{"HOME": "/h"}, assigned: [String: String]{}, readonly: [String]{}}
+/// ^line: EnvLine{raw: "~/x".bytes(), at: 0}
+/// ^out: [U8]{}
 /// env_tilde(line, scope, out, true, false) == None && String.from_bytes_lossy(out) == "/h" && line.at == 1 // => true
-/// user := EnvLine{raw: "~ada/x".bytes(), at: 0}
+/// ^user: EnvLine{raw: "~ada/x".bytes(), at: 0}
 /// env_tilde(user, scope, out, true, false) != None // => true
 /// ```
 env_tilde: fn(line: ^EnvLine, scope: ^EnvScope, out: ^[U8], live: Bool, braced: Bool) -> String? Never! {
@@ -803,12 +803,12 @@ env_tilde: fn(line: ^EnvLine, scope: ^EnvScope, out: ^[U8], live: Bool, braced: 
 /// Reads a `"…"` word part after its opening quote, through the closing one.
 ///
 /// ```jet
-/// scope := EnvScope{vars: [String: String]{}, assigned: [String: String]{}, readonly: [String]{}}
-/// line := EnvLine{raw: "a\\\"b\"rest".bytes(), at: 0}
-/// out := [U8]{}
+/// ^scope: EnvScope{vars: [String: String]{}, assigned: [String: String]{}, readonly: [String]{}}
+/// ^line: EnvLine{raw: "a\\\"b\"rest".bytes(), at: 0}
+/// ^out: [U8]{}
 /// env_double(line, scope, out, true) == None // => true
 /// String.from_bytes_lossy(out) == "a\"b" && line.at == 5 // => true
-/// open := EnvLine{raw: "no end".bytes(), at: 0}
+/// ^open: EnvLine{raw: "no end".bytes(), at: 0}
 /// env_double(open, scope, out, true) != None // => true
 /// ```
 env_double: fn(line: ^EnvLine, scope: ^EnvScope, out: ^[U8], live: Bool) -> String? Never! {
@@ -837,14 +837,14 @@ env_double: fn(line: ^EnvLine, scope: ^EnvScope, out: ^[U8], live: Bool) -> Stri
 /// `$` that starts none is itself. `$1` to `$9` are unset.
 ///
 /// ```jet
-/// scope := EnvScope{vars: [String: String]{"NAME": "v"}, assigned: [String: String]{}, readonly: [String]{}}
-/// line := EnvLine{raw: "$NAME/x".bytes(), at: 0}
-/// out := [U8]{}
+/// ^scope: EnvScope{vars: [String: String]{"NAME": "v"}, assigned: [String: String]{}, readonly: [String]{}}
+/// ^line: EnvLine{raw: "$NAME/x".bytes(), at: 0}
+/// ^out: [U8]{}
 /// env_dollar(line, scope, out, true) == None // => true
 /// String.from_bytes_lossy(out) == "v" && line.at == 5 // => true
-/// argument := EnvLine{raw: "$10".bytes(), at: 0}
+/// ^argument: EnvLine{raw: "$10".bytes(), at: 0}
 /// env_dollar(argument, scope, out, true) == None && String.from_bytes_lossy(out) == "v" && argument.at == 2 // => true
-/// command := EnvLine{raw: "$(date)".bytes(), at: 0}
+/// ^command: EnvLine{raw: "$(date)".bytes(), at: 0}
 /// env_dollar(command, scope, out, true) != None // => true
 /// ```
 env_dollar: fn(line: ^EnvLine, scope: ^EnvScope, out: ^[U8], live: Bool) -> String? Never! {
@@ -881,16 +881,16 @@ env_dollar: fn(line: ^EnvLine, scope: ^EnvScope, out: ^[U8], live: Bool) -> Stri
 /// unset argument.
 ///
 /// ```jet
-/// scope := EnvScope{vars: [String: String]{}, assigned: [String: String]{"NAME": ""}, readonly: [String]{}}
-/// line := EnvLine{raw: "NAME:-fallback}}".bytes(), at: 0}
-/// out := [U8]{}
+/// ^scope: EnvScope{vars: [String: String]{}, assigned: [String: String]{"NAME": ""}, readonly: [String]{}}
+/// ^line: EnvLine{raw: "NAME:-fallback}}".bytes(), at: 0}
+/// ^out: [U8]{}
 /// env_braced(line, scope, out, true) == None // => true
 /// String.from_bytes_lossy(out) == "fallback" && line.at == 15 // => true
-/// assign := EnvLine{raw: "NEW=made}}".bytes(), at: 0}
+/// ^assign: EnvLine{raw: "NEW=made}}".bytes(), at: 0}
 /// env_braced(assign, scope, out, true) == None && scope.assigned.get("NEW") == Val("made") // => true
-/// other := EnvLine{raw: "NEW:+other}}".bytes(), at: 0}
+/// ^other: EnvLine{raw: "NEW:+other}}".bytes(), at: 0}
 /// env_braced(other, scope, out, true) == None && String.from_bytes_lossy(out) == "fallbackmadeother" // => true
-/// required := EnvLine{raw: "MISSING?is required}}".bytes(), at: 0}
+/// ^required: EnvLine{raw: "MISSING?is required}}".bytes(), at: 0}
 /// env_braced(required, scope, out, true) == Val("MISSING: is required") // => true
 /// ```
 env_braced: fn(line: ^EnvLine, scope: ^EnvScope, out: ^[U8], live: Bool) -> String? Never! {
@@ -947,7 +947,7 @@ env_braced: fn(line: ^EnvLine, scope: ^EnvScope, out: ^[U8], live: Bool) -> Stri
 /// unset.
 ///
 /// ```jet
-/// scope := EnvScope{vars: [String: String]{"A": "env", "B": "env"}, assigned: [String: String]{"A": "file"}, readonly: [String]{}}
+/// ^scope: EnvScope{vars: [String: String]{"A": "env", "B": "env"}, assigned: [String: String]{"A": "file"}, readonly: [String]{}}
 /// env_lookup("A", scope) == Val("file") && env_lookup("B", scope) == Val("env") && env_lookup("C", scope) == None // => true
 /// ```
 env_lookup: fn(name: String, scope: EnvScope) -> String? Never! {
@@ -959,7 +959,7 @@ env_lookup: fn(name: String, scope: EnvScope) -> String? Never! {
 /// Steps `line` past blanks: spaces, tabs and carriage returns.
 ///
 /// ```jet
-/// line := EnvLine{raw: " \t x".bytes(), at: 0}
+/// ^line: EnvLine{raw: " \t x".bytes(), at: 0}
 /// env_blanks(line)
 /// line.at // => 3
 /// ```

@@ -17,7 +17,7 @@ unsafe_test_inspect: fn(source: String, policy: PolicyValue) -> UnsafeInspection
 }
 
 run: fn() Never! {
-    source: "run: fn() {{\n#Unsafe(\"cell stays live\") {{\np := *cell\nassert no_alias\nx := p.*\nassert aligned, valid_ptr, valid_ptr\n}}\n}}\n"
+    source: "run: fn() {{\n#Unsafe(\"cell stays live\") {{\n^p: *cell\nassert no_alias\n^x: p.*\nassert aligned, valid_ptr, valid_ptr\n}}\n}}\n"
     tracked: unsafe_test_inspect(source, PolicyValue.Obligations)
     unsafe_test_require(tracked.gates.len() == 1, "one gate")
     unsafe_test_require(tracked.gates[0].mode == "Obligations", "resolved obligation mode")
@@ -26,12 +26,12 @@ run: fn() Never! {
     unsafe_test_require(tracked.gates[0].operations[0].discharged && tracked.gates[0].operations[1].discharged, "adjacent proofs discharge")
     unsafe_test_require(tracked.gates[0].operations[1].asserted == ([String]{"aligned", "valid_ptr"}), "assertions sorted and deduplicated")
     unsafe_test_require(tracked.diagnostics.len() == 0, "valid obligations")
-    missing: unsafe_test_inspect("run: fn() {{ #Unsafe(\"live\") {{ x := p.* }} }}", PolicyValue.Obligations)
+    missing: unsafe_test_inspect("run: fn() {{ #Unsafe(\"live\") {{ ^x: p.* }} }}", PolicyValue.Obligations)
     unsafe_test_require(missing.diagnostics.len() == 1 && missing.diagnostics[0].diagnostic.code == "E3107", "missing proof diagnostic")
     unsafe_test_require(!missing.gates[0].operations[0].discharged, "missing proof retained")
-    ordinary: unsafe_test_inspect("run: fn() {{ #Unsafe(\"live\") {{ x := p.* }} }}", PolicyValue.Default)
+    ordinary: unsafe_test_inspect("run: fn() {{ #Unsafe(\"live\") {{ ^x: p.* }} }}", PolicyValue.Default)
     unsafe_test_require(ordinary.gates[0].operations[0].discharged && ordinary.diagnostics.len() == 0, "gate-only mode retains operation without demanding proof")
-    nested: unsafe_test_inspect("run: fn() {{ #Unsafe(\"outer\") {{ x := p.*\n#Unsafe(\"inner\") {{ y := q.*\nassert valid_ptr, aligned }}\nassert valid_ptr, aligned }} }}", PolicyValue.Obligations)
+    nested: unsafe_test_inspect("run: fn() {{ #Unsafe(\"outer\") {{ ^x: p.*\n#Unsafe(\"inner\") {{ ^y: q.*\nassert valid_ptr, aligned }}\nassert valid_ptr, aligned }} }}", PolicyValue.Obligations)
     unsafe_test_require(nested.gates.len() == 2 && nested.gates[0].operations.len() == 1 && nested.gates[1].operations.len() == 1, "nested gate proofs remain independent")
     unsafe_test_require(nested.diagnostics.len() == 2, "nested gate breaks proof adjacency")
     outside: unsafe_test_inspect("run: fn() {{ assert valid_ptr }}", PolicyValue.Default)
@@ -43,7 +43,7 @@ run: fn() Never! {
     parsed: parse_source(source.bytes())
     restricted: sema_unsafe_inspect([SemaGateModule{source: "app.jet", program: parsed.program, policy_path: Val("src/app.jet"), unsafe_paths: Val([String]{"src/audited"})}], GateSet{})
     unsafe_test_require(restricted.diagnostics[0].diagnostic.code == "E2960", "package path refusal")
-    raw: parse_source("run: fn() {{ #Unsafe(\"live\") {{ q := mem.alloc_raw(16, 8)\nx := q.offset(1)\nmem.copy(x, q, 1) }} }}".bytes())
+    raw: parse_source("run: fn() {{ #Unsafe(\"live\") {{ ^q: mem.alloc_raw(16, 8)\n^x: q.offset(1)\nmem.copy(x, q, 1) }} }}".bytes())
     outside_kernel: sema_unsafe_inspect([SemaGateModule{source: "app.jet", program: raw.program, policy_path: Val("src/app.jet"), memory_kernel: Val([String]{"src/kernel"})}], GateSet{})
     // alloc_raw, offset and copy: each is refused.
     unsafe_test_require(outside_kernel.diagnostics.len() == 3, "each raw memory call outside the kernel is refused")
@@ -55,7 +55,7 @@ run: fn() Never! {
     unsafe_test_require(inside_kernel.diagnostics.len() == 0, "a kernel file holds raw memory calls")
     // A bulk List move reads or writes raw memory too; its address is the
     // raw pointer, never the List.
-    moves: parse_source("run: fn() {{ #Unsafe(\"live\") {{ _ := mem.list_append<U8>(bytes, p, n)\nmem.list_copy<U8>(q, bytes, 0, n) }} }}".bytes())
+    moves: parse_source("run: fn() {{ #Unsafe(\"live\") {{ ^_: mem.list_append<U8>(bytes, p, n)\nmem.list_copy<U8>(q, bytes, 0, n) }} }}".bytes())
     moves_refused: sema_unsafe_inspect([SemaGateModule{source: "app.jet", program: moves.program, policy_path: Val("src/app.jet"), memory_kernel: Val([String]{"src/kernel"})}], GateSet{})
     unsafe_test_require(moves_refused.diagnostics.len() == 2 && moves_refused.diagnostics[0].diagnostic.what.contains("`list_append`") && moves_refused.diagnostics[1].diagnostic.what.contains("`list_copy`"), "each bulk List move outside the kernel is refused: {moves_refused.diagnostics:Debug}")
     moved: moves_refused.gates[0].memory_operations
@@ -76,7 +76,7 @@ run: fn() Never! {
     unsafe_test_require(single_program.diagnostics.len() == 0, "a single program is its own kernel")
     // The runtime's raw intrinsics are raw memory operations too, a system
     // call only when it maps memory (mmap is 9, exit 231).
-    intrinsics: parse_source("run: fn() {{ #Unsafe(\"live\") {{ x := os_load_i64(p)\nos_store_u8(p, I64{{1}})\n_ := os_syscall_i64(I64{{9}}, I64{{0}})\n_ := os_syscall_i64(I64{{231}}, I64{{1}})\nos_copy_ascending_i64(p, q, n) }} }}".bytes())
+    intrinsics: parse_source("run: fn() {{ #Unsafe(\"live\") {{ ^x: os_load_i64(p)\nos_store_u8(p, I64{{1}})\n^_: os_syscall_i64(I64{{9}}, I64{{0}})\n^_: os_syscall_i64(I64{{231}}, I64{{1}})\nos_copy_ascending_i64(p, q, n) }} }}".bytes())
     os_refused: sema_unsafe_inspect([SemaGateModule{source: "app.jet", program: intrinsics.program, policy_path: Val("src/app.jet"), memory_kernel: Val([String]{"src/kernel"})}], GateSet{})
     unsafe_test_require(os_refused.diagnostics.len() == 4, "each raw intrinsic outside the kernel is refused: {os_refused.diagnostics:Debug}")
     loop refused in os_refused.diagnostics {
@@ -86,14 +86,14 @@ run: fn() Never! {
     os_kernel: sema_unsafe_inspect([SemaGateModule{source: "app.jet", program: intrinsics.program, policy_path: Val("src/kernel/app.jet"), memory_kernel: Val([String]{"src/kernel"})}], GateSet{})
     unsafe_test_require(os_kernel.diagnostics.len() == 0, "a kernel file holds raw intrinsics")
     // The kernel map primitive's untracked forms are raw mapping calls too.
-    untracked: parse_source("run: fn() {{ #Unsafe(\"fresh\") {{ p := os_map_untracked_i64(I64{{0}}, n, I64{{3}}, I64{{34}}, I64{{-1}}, I64{{0}})\nq := os_remap_untracked_i64(p, n, m, I64{{1}})\n_ := os_unmap_untracked_i64(q, m) }} }}".bytes())
+    untracked: parse_source("run: fn() {{ #Unsafe(\"fresh\") {{ ^p: os_map_untracked_i64(I64{{0}}, n, I64{{3}}, I64{{34}}, I64{{-1}}, I64{{0}})\n^q: os_remap_untracked_i64(p, n, m, I64{{1}})\n^_: os_unmap_untracked_i64(q, m) }} }}".bytes())
     untracked_refused: sema_unsafe_inspect([SemaGateModule{source: "app.jet", program: untracked.program, policy_path: Val("src/app.jet"), memory_kernel: Val([String]{"src/kernel"})}], GateSet{})
     unsafe_test_require(untracked_refused.diagnostics.len() == 3 && untracked_refused.diagnostics[0].diagnostic.code == "E3113" && untracked_refused.diagnostics[0].diagnostic.what.contains("`os_map_untracked_i64`") && untracked_refused.diagnostics[1].diagnostic.what.contains("`os_remap_untracked_i64`") && untracked_refused.diagnostics[2].diagnostic.what.contains("`os_unmap_untracked_i64`"), "the untracked map, remap and unmap outside the kernel are refused: {untracked_refused.diagnostics:Debug}")
     untracked_kernel: sema_unsafe_inspect([SemaGateModule{source: "app.jet", program: untracked.program, policy_path: Val("src/kernel/app.jet"), memory_kernel: Val([String]{"src/kernel"})}], GateSet{})
     unsafe_test_require(untracked_kernel.diagnostics.len() == 0, "a kernel file maps untracked: {untracked_kernel.diagnostics:Debug}")
     // A composed runtime unit answers per source: its marks name each
     // source, and a refusal names the source's own path and line.
-    unit_text: "\n// [unit source: R/Kernel.jet]\nkeep: fn() {{ #Unsafe(\"live\") {{ x := os_load_i64(p) }} }}\n// [unit source: R/Host.jet]\n\nrun: fn() {{ #Unsafe(\"live\") {{ y := os_load_i64(p) }} }}\n"
+    unit_text: "\n// [unit source: R/Kernel.jet]\nkeep: fn() {{ #Unsafe(\"live\") {{ ^x: os_load_i64(p) }} }}\n// [unit source: R/Host.jet]\n\nrun: fn() {{ #Unsafe(\"live\") {{ ^y: os_load_i64(p) }} }}\n"
     unit_parsed: parse_source(unit_text.bytes())
     unit_map: sema_unsafe_unit_map("package:11:jet_runtime:", unit_text) ?? panic("UnsafeObligations: a runtime unit maps its sources")
     unsafe_test_require(unit_map.sources.len() == 2 && unit_map.sources[1].path == "R/Host.jet" && unit_map.sources[1].line == 5, "unit sources and their first lines")

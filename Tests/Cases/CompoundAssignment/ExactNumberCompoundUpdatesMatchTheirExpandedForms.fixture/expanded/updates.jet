@@ -5,7 +5,7 @@ Wallet: struct {
 }
 
 sum: fn(values: [Decimal]) -> Decimal {
-    total := Decimal("0")
+    ^total: Decimal("0")
     loop value in values -> total = total + value
     total = total + 2
     total = total - Decimal("0.25")
@@ -16,7 +16,7 @@ sum: fn(values: [Decimal]) -> Decimal {
 credit: fn(wallet: ^Wallet, value: Decimal) { wallet.total = wallet.total + value }
 
 share: fn(values: [Fraction]) -> Fraction {
-    total := Decimal("0") / Decimal("1")
+    ^total: Decimal("0") / Decimal("1")
     loop value in values -> total = total + value
     total = total + 1
     total
@@ -24,7 +24,7 @@ share: fn(values: [Fraction]) -> Fraction {
 
 run: fn() {
     print(sum([Decimal]{Decimal("1.5"), Decimal("2.25")}))
-    wallet := Wallet{total: Decimal("10")}
+    ^wallet: Wallet{total: Decimal("10")}
     credit(wallet, Decimal("0.75"))
     print(wallet.total)
     print(share([Fraction]{Decimal("1") / Decimal("3"), Decimal("1") / Decimal("6")}))

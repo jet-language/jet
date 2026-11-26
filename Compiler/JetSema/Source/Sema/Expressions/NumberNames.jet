@@ -6,7 +6,7 @@
 // passed to a U8 parameter reads as the U8 200. A use the name's own type
 // serves reads the name, so a program that checked before means the same.
 //
-// A `:=` name keeps its default type (Int or Decimal) unless a use refuses
+// A changeable name keeps its default type (Int or Decimal) unless a use refuses
 // it. The first refusing use whose type the literal takes decides the
 // binding's type: the function is checked again with the binding declared at
 // that type (sema_function_check_passes). A later use that needs yet another
@@ -269,7 +269,7 @@ sema_expr_number_name_operand: fn(expr: Expr, check: SemaBodyCheck) -> Bool {
 // operand's type `other` refuses reads at `other` (sema_expr_number_name_read,
 // sema_expr_number_constant_read): `price * rate` with `price: Float` and
 // `rate: 0.5` multiplies two Floats, as does `price * RATE` with a module
-// constant `RATE: 0.5`, and `total + price` makes a `:=` name `total` a Float.
+// constant `RATE: 0.5`, and `total + price` makes a changeable name `total` a Float.
 sema_expr_number_operand_read: fn(operand: Expr, other: Type, noted: Bool, check: ^SemaBodyCheck) -> SemaNumberNameRead {
     unhandled: SemaNumberNameRead{handled: false, value: None}
     if operand == .Ident(name, span, _) {
@@ -286,7 +286,7 @@ sema_expr_number_operand_read: fn(operand: Expr, other: Type, noted: Bool, check
     unhandled
 }
 
-// Whether the scope row `index` is a `:=` number name no pass has decided a
+// Whether the scope row `index` is a changeable number name no pass has decided a
 // type for yet, so a write may decide it (sema_expr_number_target_retype).
 sema_expr_number_target_open: fn(index: Int, check: SemaBodyCheck) -> Bool Never! {
     if !check.scopes.bindings[index].mutable || check.scopes.bindings[index].number_literal == None {
@@ -295,7 +295,7 @@ sema_expr_number_target_open: fn(index: Int, check: SemaBodyCheck) -> Bool Never
     sema_expr_number_retype(check.scopes.bindings[index].symbol.span, check.context.number_retypes_known) == None
 }
 
-// A value a written `:=` number name reads without a type asked for: a name
+// A value a written changeable number name reads without a type asked for: a name
 // that is not itself a number name, a field, or an element. It has its own
 // type, which may decide the target's (`total = price`).
 sema_expr_number_target_value_typed: fn(expr: Expr, check: SemaBodyCheck) -> Bool {
@@ -305,7 +305,7 @@ sema_expr_number_target_value_typed: fn(expr: Expr, check: SemaBodyCheck) -> Boo
     false
 }
 
-// A write `total = price` or `total += price` to the open `:=` number name
+// A write `total = price` or `total += price` to the open changeable number name
 // at scope row `index` (sema_expr_number_target_open), whose value has the
 // type `offered` that the name's own type refuses, is a use of that type:
 // when the name's literal takes it, the next pass declares the name at it.
@@ -328,7 +328,7 @@ sema_expr_number_target_retype: fn(index: Int, offered: Type, name_span: Span, c
     check.context.number_retypes_found.push(SemaNumberRetype{binding: check.scopes.bindings[index].symbol.span, ty: fitted.ty.move(), use_span: name_span})
 }
 
-// The type an earlier pass decided for the `:=` number binding `binding`, or
+// The type an earlier pass decided for the changeable number binding `binding`, or
 // None.
 sema_expr_number_retype: fn(binding: Span, known: [SemaNumberRetype]) -> Type? Never! {
     loop decided in known {
@@ -362,16 +362,16 @@ sema_expr_number_accept_retypes: fn(known: ^[SemaNumberRetype], found: [SemaNumb
     known.len() > known_before
 }
 
-// E0112 for a `:=` number name that an earlier use already made `decided.ty`,
+// E0112 for a changeable number name that an earlier use already made `decided.ty`,
 // at a use that needs `wanted`: one error that names both uses.
 sema_expr_number_retype_conflict: fn(name: String, decided: SemaNumberRetype, wanted: Type, span: Span, environment: SemaScopeEnvironment) -> Diagnostic {
     line: sema_source_line_at(environment.source_segments, decided.use_span) ?? 0
-    report: sema_error("E0112", span, "`{name}` is a {type_name(decided.ty)} for its use on line {line}, but this use needs a {type_name(wanted)}", "a `:=` number name takes the type of the first use that refuses its default, and one name holds one type", "convert the value at one of the two uses, or give each use its own name")
+    report: sema_error("E0112", span, "`{name}` is a {type_name(decided.ty)} for its use on line {line}, but this use needs a {type_name(wanted)}", "a changeable number name takes the type of the first use that refuses its default, and one name holds one type", "convert the value at one of the two uses, or give each use its own name")
     diagnostic_with_label(report, decided.use_span, "this use makes `{name}` a {type_name(decided.ty)}")
 }
 
-// A write to the `:=` number name `name` whose value the type an earlier use
-// decided refuses (`count := 0`, made a U8 by `take8(count)`, then
+// A write to the changeable number name `name` whose value the type an earlier use
+// decided refuses (`^count: 0`, made a U8 by `take8(count)`, then
 // `count = line.len()`): each E0108 reported since `since` at the written
 // value or at the name also points at the use that decided the type.
 sema_expr_number_label_write: fn(name: String, name_span: Span, value: Span, since: Int, check: ^SemaBodyCheck) {

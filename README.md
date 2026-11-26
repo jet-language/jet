@@ -32,7 +32,7 @@ Args: struct {
 }
 
 count_words: fn(text: String) -> [String:Int] {
-    counts := [String:Int]{}
+    ^counts: [String:Int]{}
     loop word in text.lower().replace("\n", " ").split(" ") {
         if word != "" -> counts[word] = (counts.get(word) ?? 0) + 1
     }
@@ -47,7 +47,7 @@ count_words: fn(text: String) -> [String:Int] {
 
 run: fn(args: Args) {
     text: fs.read(args.path)
-    rows := [{word: String, n: Int}]{}
+    ^rows: [{word: String, n: Int}]{}
     loop (word, n) in count_words(text) -> rows.push({word: word, n: n})
     rows.sort_by(fn(a, b) { (b.n <=> a.n).then(a.word <=> b.word) })
     loop row in rows.take(args.top) -> print("{row.n}  {row.word}")
@@ -85,7 +85,7 @@ What that one file shows:
   until you allow it, either in that line or for one run with
   `jet run --allow=FS.Read`.
 - **One way to declare anything.** Types, functions and values are all written
-  `name: value`, and `name := value` is the one way to make something
+  `name: value`, and `^name: value` is the one way to make something
   changeable.
 - **Tests live beside the code** and run with `jet test`.
 - **Failures are values with a trail.** If the file is missing, the run stops
@@ -110,8 +110,8 @@ Error: Jet.ImmutableAssignment: `total` was made with `:`, so it can't change
     |
   3 |     loop n in 1..3 -> total = total + n
     |                       ^^^^^
- Why: Only `:=` bindings and parameters declared with the write mark `^` can be changed
- Fix: Declare it with `total := ...` instead
+ Why: Only changeable bindings and parameters declared with the write mark `^` can be changed
+ Fix: Declare it with `^total: ...` instead
 More: jet-lang.dev/e/Jet.ImmutableAssignment
 ```
 

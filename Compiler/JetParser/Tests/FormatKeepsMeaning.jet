@@ -1,0 +1,44 @@
+// Sources the formatter once rewrote into text that parsed to another
+// program, or to none: each now formats to itself.
+use jet_parser.[jet_format_source]
+
+format_keeps: fn(name: String, source: String) Never! {
+    formatted: jet_format_source(source, false)
+    if formatted.structure_change == .Val(change) {
+        panic("{name}: the format changes the program: {change}")
+    }
+    if !formatted.ok -> panic("{name}: does not format")
+    if formatted.text != source {
+        panic("{name}: formatted to\n{formatted.text}\nexpected\n{source}")
+    }
+}
+
+// A service import names its symbol in its marker and has no body, so the
+// formatter writes the declaration back without one.
+#Test("a service import formats with no body") {
+    format_keeps("service import", "#Import(jet.build, symbol: \"Build.source_key\") source_key: fn(b: Int) -> String Never!\n")
+}
+
+// The rule's target starts at the `^` of the name it allows.
+#Test("an allow marker stays on the changeable name it allows") {
+    format_keeps("allow on a changeable name", "run: fn() {{\n    #Allow(Jet.CompleteAsciiCaseLadder, \"r\") ^allowed: \"x\"\n    allowed = \"y\"\n}}\n")
+}
+
+#Test("a value table's window subject keeps its in_place") {
+    format_keeps(
+        "window subject of a value table",
+        "Box: struct {{\n    slot: Int?,\n}}\n\nhas: fn(box: ^Box) -> Bool {{\n    if box.slot.in_place() == {{\n        .Val(value) -> {{\n            value += 1\n            true\n        }}\n        None -> false\n    }}\n}}\n",
+    )
+}
+
+// A line that is a bare value is no template item, so a one-line block of
+// one value stays on its line.
+#Test("a one-line code value stays on its line") {
+    format_keeps("one-line code value", "run: fn(meta: Compiler, f: Int) {{\n    if f > 0 -> meta.rewrite_body(f, #code {{ \"traced\" }})\n}}\n")
+}
+
+// A changeable fence's `^` marks each name the fence binds, and the fence
+// begins its own line after a statement that ends in a value.
+#Test("a changeable fence formats to itself") {
+    format_keeps("changeable fence", "run: fn() {{\n    ^c: 1\n    ^<: a, b :>: 0\n    a += c\n    b += c\n    print(a + b)\n}}\n")
+}

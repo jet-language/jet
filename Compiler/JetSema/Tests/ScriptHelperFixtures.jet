@@ -1,6 +1,6 @@
 // A script's variables get the types its own statements give them, from one
 // check of the generated `run: fn` (sema_script_entry_local_types), and a
-// `:=` binding is marked as one a function may change. Functions that name
+// changeable binding is marked as one a function may change. Functions that name
 // the variables don't stop the probe: their reports are dropped. A second
 // probe finds which `^` script parameters a function's body writes
 // (sema_script_helper_writes).
@@ -64,7 +64,7 @@ script_helper_variable: fn(variables: [String:SemaScriptVariable], name: String)
 #Test("script variables take the types the script's statements give them") {
     counted: script_helper_types(
         `limit: 3
-count := 0
+^count: 0
 note: fn(word: String) {
     count += 1
     print("{count}/{limit} {word}")
@@ -77,13 +77,13 @@ print("done: {count}")
     assert_eq(counted.len(), 2)
     assert(script_helper_variable(counted, "limit").ty == Type.Int, "`limit: 3` is an Int")
     assert(!script_helper_variable(counted, "limit").mutable, "`limit: 3` is fixed")
-    assert(script_helper_variable(counted, "count").ty == Type.Int, "`count := 0` is an Int")
-    assert(script_helper_variable(counted, "count").mutable, "`count := 0` may change")
+    assert(script_helper_variable(counted, "count").ty == Type.Int, "`^count: 0` is an Int")
+    assert(script_helper_variable(counted, "count").mutable, "`^count: 0` may change")
 
     shaped: script_helper_types(
         `Point: struct { x: Int, y: Int }
 origin: Point{x: 1, y: 2}
-words := [String]{}
+^words: [String]{}
 ratio: 0.5
 words.push("a")
 show: fn() { print("{origin.x} {words.len()} {ratio}") }
@@ -92,15 +92,15 @@ show()
     )
     assert_eq(type_name(type_unqualified_nominals(script_helper_variable(shaped, "origin").ty)), "Point")
     assert_eq(type_name(type_unqualified_nominals(script_helper_variable(shaped, "words").ty)), "[String]")
-    assert(script_helper_variable(shaped, "words").mutable, "`words := …` may change")
+    assert(script_helper_variable(shaped, "words").mutable, "`^words: …` may change")
     // An untyped decimal literal checks as an exact Decimal.
     assert_eq(type_name(script_helper_variable(shaped, "ratio").ty), "Decimal")
 }
 
 #Test("a function's `^` script parameters stay `^` only where its body writes them") {
     ^probe: script_helper_probe(
-        `count := 0
-words := [String]{}
+        `^count: 0
+^words: [String]{}
 limit: 3
 print(count)
 note: fn(word: String, *, count: ^Int, words: ^[String], limit: Int) {
@@ -112,7 +112,7 @@ show: fn(*, count: ^Int, words: ^[String]) {
     print("{count} {words.len()}")
 }
 own: fn(*, count: ^Int) {
-    total := count
+    ^total: count
     total += 1
     print(total)
 }

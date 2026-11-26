@@ -199,7 +199,7 @@ WebErrorSourceExcerpt: struct {
         if !web_error_position_valid(line) || !web_error_position_valid(column) {
             return Err(WebErrorPageError.InvalidSpan)
         }
-        located := self
+        ^located: self
         located.line = line
         located.column = column
         located
@@ -216,7 +216,7 @@ WebErrorSourceExcerpt: struct {
     }
 
     json: fn(self) -> String {
-        fields := [String]{"\"source_id\":{foundation_json_quote(self.source_id)}", "\"label\":{foundation_json_quote(self.label)}"}
+        ^fields: [String]{"\"source_id\":{foundation_json_quote(self.source_id)}", "\"label\":{foundation_json_quote(self.label)}"}
         if self.span == .Val(span) -> fields.push("\"span\":{span.json()}")
         if self.line == .Val(line) -> fields.push("\"line\":{line}")
         if self.column == .Val(column) -> fields.push("\"column\":{column}")
@@ -260,7 +260,7 @@ WebErrorEdit: struct {
     safety: String?,
 
     new: fn(source_id: String, span: WebErrorSpan, new_text: String, applicability: String?, safety: String?) -> WebErrorEdit WebErrorPageError! {
-        edit := WebErrorEdit{source_id: normalize_source_identity(source_id), span: span, new_text: normalize_text(new_text, "fix edit", MAX_WEB_ERROR_TEXT_BYTES), applicability: None, safety: None}
+        ^edit: WebErrorEdit{source_id: normalize_source_identity(source_id), span: span, new_text: normalize_text(new_text, "fix edit", MAX_WEB_ERROR_TEXT_BYTES), applicability: None, safety: None}
         if applicability == .Val(value) {
             edit.applicability = Val(normalize_identity(value, "fix applicability"))
         }
@@ -290,7 +290,7 @@ WebErrorEdit: struct {
     }
 
     json: fn(self) -> String {
-        fields := [String]{"\"source_id\":{foundation_json_quote(self.source_id)}", "\"span\":{self.span.json()}", "\"new_text\":{foundation_json_quote(self.new_text)}"}
+        ^fields: [String]{"\"source_id\":{foundation_json_quote(self.source_id)}", "\"span\":{self.span.json()}", "\"new_text\":{foundation_json_quote(self.new_text)}"}
         if self.applicability == .Val(value) {
             fields.push("\"applicability\":{foundation_json_quote(value)}")
         }
@@ -365,7 +365,7 @@ WebErrorDiagnosticFact: struct {
 
     from_diagnostic: fn(diagnostic: Diagnostic) -> WebErrorDiagnosticFact WebErrorPageError! {
         validate_code(diagnostic.code)
-        span := WebErrorSpan?{None}
+        ^span: WebErrorSpan?{None}
         if diagnostic.span == .Val(value) -> span = Val(WebErrorSpan.from_span(value))
         fact: WebErrorDiagnosticFact{
             code: Val(diagnostic.code),
@@ -382,7 +382,7 @@ WebErrorDiagnosticFact: struct {
     }
 
     from_report: fn(report: JetErrorReport) -> WebErrorDiagnosticFact WebErrorPageError! {
-        fact := WebErrorDiagnosticFact{
+        ^fact: WebErrorDiagnosticFact{
             code: None,
             what: Val(normalize_required_text(report.message, "diagnostic what", MAX_WEB_ERROR_TEXT_BYTES)),
             why: None,
@@ -409,7 +409,7 @@ WebErrorDiagnosticFact: struct {
     }
 
     from_dev_status: fn(facts: WebErrorDevStatusFacts) -> WebErrorDiagnosticFact WebErrorPageError! {
-        fact := WebErrorDiagnosticFact{code: None, what: Val(normalize_required_text(facts.diagnostic, "diagnostic what", MAX_WEB_ERROR_TEXT_BYTES)), why: None, fix: None, severity: None, moment: None, typed_identity: None, span: None}
+        ^fact: WebErrorDiagnosticFact{code: None, what: Val(normalize_required_text(facts.diagnostic, "diagnostic what", MAX_WEB_ERROR_TEXT_BYTES)), why: None, fix: None, severity: None, moment: None, typed_identity: None, span: None}
         if facts.code != "" {
             validate_code(facts.code)
             fact.code = Val(facts.code)
@@ -424,7 +424,7 @@ WebErrorDiagnosticFact: struct {
 
     with_span: fn(self, span: WebErrorSpan?) -> WebErrorDiagnosticFact WebErrorPageError! {
         if span == .Val(value) -> value.validate()
-        updated := self
+        ^updated: self
         updated.span = span
         updated.validate()
         updated
@@ -445,7 +445,7 @@ WebErrorDiagnosticFact: struct {
     json: fn(self) -> String { self.json_with_edits([WebErrorEdit]{}) }
 
     json_with_edits: fn(self, edits: [WebErrorEdit]) -> String {
-        fields := [String]{}
+        ^fields: [String]{}
         if self.code == .Val(value) -> fields.push("\"code\":{foundation_json_quote(value)}")
         if self.what == .Val(value) -> fields.push("\"what\":{foundation_json_quote(value)}")
         if self.why == .Val(value) -> fields.push("\"why\":{foundation_json_quote(value)}")
@@ -507,11 +507,11 @@ WebErrorPage: struct {
         }
         loop excerpt in source_excerpts -> excerpt.validate()
         loop link in action_links -> link.validate()
-        excerpts := source_excerpts
+        ^excerpts: source_excerpts
         excerpts.sort_by(source_excerpt_order)
-        links := action_links
+        ^links: action_links
         links.sort_by(action_link_order)
-        page := WebErrorPage{identity: identity, diagnostic: diagnostic, internal: None, edits: [WebErrorEdit]{}, source_excerpts: excerpts, related_cause: related_cause, action_links: links, status: status, failure_id: ""}
+        ^page: WebErrorPage{identity: identity, diagnostic: diagnostic, internal: None, edits: [WebErrorEdit]{}, source_excerpts: excerpts, related_cause: related_cause, action_links: links, status: status, failure_id: ""}
         page.validate_size()
         page.failure_id = page.compute_failure_id()
         page
@@ -519,7 +519,7 @@ WebErrorPage: struct {
 
     from_report: fn(identity: WebErrorPageIdentity, report: JetErrorReport, action_links: [WebErrorActionLink]) -> WebErrorPage WebErrorPageError! {
         diagnostic: WebErrorDiagnosticFact.from_report(report)
-        related_cause := WebErrorDiagnosticFact?{None}
+        ^related_cause: WebErrorDiagnosticFact?{None}
         if report.causes.len() > 0 {
             related_cause = Val(WebErrorDiagnosticFact.from_report(report.causes[0]))
         }
@@ -527,14 +527,14 @@ WebErrorPage: struct {
     }
 
     from_diagnostic: fn(identity: WebErrorPageIdentity, diagnostic: Diagnostic, source_excerpts: [WebErrorSourceExcerpt], action_links: [WebErrorActionLink]) -> WebErrorPage WebErrorPageError! {
-        applicability := String?{None}
+        ^applicability: String?{None}
         if diagnostic.applicability == .Val(value) {
             applicability = Val(web_error_applicability_name(value))
         }
-        safety := String?{None}
+        ^safety: String?{None}
         if diagnostic.safety == .Val(value) -> safety = Val(web_error_safety_name(value))
         // The diagnostic's primary edit, then its structured suggestions.
-        edits := [WebErrorEdit]{}
+        ^edits: [WebErrorEdit]{}
         if diagnostic.edit == .Val(edit) {
             edits.push(WebErrorEdit.from_diagnostic(identity.source_id, edit, applicability, safety))
         }
@@ -549,7 +549,7 @@ WebErrorPage: struct {
 
     from_internal: fn(identity: WebErrorPageIdentity, code: String, message: String, action_links: [WebErrorActionLink]) -> WebErrorPage WebErrorPageError! {
         internal: WebErrorInternalFact.new(code, message)
-        page := WebErrorPage.new(identity, WebErrorDiagnosticFact.internal_placeholder(), [WebErrorSourceExcerpt]{}, None, action_links)
+        ^page: WebErrorPage.new(identity, WebErrorDiagnosticFact.internal_placeholder(), [WebErrorSourceExcerpt]{}, None, action_links)
         page.internal = Val(internal)
         page.failure_id = page.compute_failure_id()
         page.validate_size()
@@ -569,7 +569,7 @@ WebErrorPage: struct {
             return Err(WebErrorPageError.TooManyItems{field: "fix edits"})
         }
         loop edit in edits -> edit.validate()
-        page := self
+        ^page: self
         page.edits = edits
         page.edits.sort_by(web_error_edit_order)
         page.failure_id = page.compute_failure_id()
@@ -579,7 +579,7 @@ WebErrorPage: struct {
 
     with_status: fn(self, status: Int) -> WebErrorPage WebErrorPageError! {
         validate_status(status)
-        page := self
+        ^page: self
         page.status = status
         page.failure_id = page.compute_failure_id()
         page.validate_size()
@@ -591,7 +591,7 @@ WebErrorPage: struct {
             return Err(WebErrorPageError.TooManyItems{field: "source excerpts"})
         }
         loop excerpt in source_excerpts -> excerpt.validate()
-        page := self
+        ^page: self
         page.source_excerpts = source_excerpts
         page.source_excerpts.sort_by(source_excerpt_order)
         page.failure_id = page.compute_failure_id()
@@ -643,7 +643,7 @@ WebErrorPage: struct {
     }
 
     validate_size: fn(self) WebErrorPageError! {
-        bytes := self.identity.byte_count() + self.diagnostic.byte_count()
+        ^bytes: self.identity.byte_count() + self.diagnostic.byte_count()
         if self.internal == .Val(internal) {
             bytes += internal.code.bytes().len() + internal.message.bytes().len()
         }
@@ -674,8 +674,8 @@ WebErrorFacts: struct {
     redacted: Bool,
 
     from_page: fn(page: WebErrorPage, local: Bool) -> WebErrorFacts Never! {
-        diagnostic := page.diagnostic
-        internal := page.internal
+        ^diagnostic: page.diagnostic
+        ^internal: page.internal
         if !local {
             diagnostic.why = None
             diagnostic.fix = None
@@ -706,7 +706,7 @@ WebErrorFacts: struct {
     json: fn(self, include_failure_id: Bool) -> String Never! {
         excerpts: loop excerpt in self.source_excerpts -> excerpt.json()
         links: loop link in self.action_links -> link.json()
-        fields := [String]{"\"schema\":{foundation_json_quote(WEB_ERROR_PAGE_SCHEMA)}", "\"status\":{self.status}"}
+        ^fields: [String]{"\"schema\":{foundation_json_quote(WEB_ERROR_PAGE_SCHEMA)}", "\"status\":{self.status}"}
         if include_failure_id {
             fields.push("\"failure_id\":{foundation_json_quote(self.failure_id)}")
         }
@@ -729,7 +729,7 @@ WebErrorFacts: struct {
     }
 
     render_html: fn(self) -> String {
-        html := "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'\"><title>Jet development error</title><style>body{{font:16px system-ui,sans-serif;max-width:58rem;margin:2rem auto;padding:0 1rem;color:#202124}}main{{border:1px solid #d0d7de;border-radius:.5rem;padding:1.5rem}}h1{{font-size:1.5rem;margin:.25rem 0 1rem}}h2{{font-size:1rem;margin:1.5rem 0 .5rem}}dl{{display:grid;grid-template-columns:max-content 1fr;gap:.35rem .9rem}}dt{{font-weight:600}}dd{{margin:0;overflow-wrap:anywhere}}pre{{background:#f6f8fa;padding:.75rem;overflow:auto;white-space:pre-wrap}}a{{display:inline-block;margin:.25rem .5rem .25rem 0}}code{{font-family:ui-monospace,monospace}}.muted{{color:#57606a}}.redacted{{background:#fff8c5;padding:.75rem}}</style></head><body><main data-schema=\"jet.dev.error/v1\">"
+        ^html: "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'\"><title>Jet development error</title><style>body{{font:16px system-ui,sans-serif;max-width:58rem;margin:2rem auto;padding:0 1rem;color:#202124}}main{{border:1px solid #d0d7de;border-radius:.5rem;padding:1.5rem}}h1{{font-size:1.5rem;margin:.25rem 0 1rem}}h2{{font-size:1rem;margin:1.5rem 0 .5rem}}dl{{display:grid;grid-template-columns:max-content 1fr;gap:.35rem .9rem}}dt{{font-weight:600}}dd{{margin:0;overflow-wrap:anywhere}}pre{{background:#f6f8fa;padding:.75rem;overflow:auto;white-space:pre-wrap}}a{{display:inline-block;margin:.25rem .5rem .25rem 0}}code{{font-family:ui-monospace,monospace}}.muted{{color:#57606a}}.redacted{{background:#fff8c5;padding:.75rem}}</style></head><body><main data-schema=\"jet.dev.error/v1\">"
         html = "{html}<p class=\"muted\">Jet local development error</p><h1>"
         if self.diagnostic.what == .Val(value) -> html = "{html}{browser_web_html_escape(value)}"
         code: if self.diagnostic.code == {
@@ -776,7 +776,7 @@ WebErrorFacts: struct {
 }
 
 report_source_excerpts: fn(report: JetErrorReport) -> [WebErrorSourceExcerpt] WebErrorPageError! {
-    excerpts := [WebErrorSourceExcerpt]{}
+    ^excerpts: [WebErrorSourceExcerpt]{}
     if report.origin == .Val(origin) -> excerpts.push(source_excerpt_from_journey(origin))
     loop frame in report.source_journey -> excerpts.push(source_excerpt_from_journey(frame))
     loop frame in report.context_frames -> excerpts.push(source_excerpt_from_context(frame))
@@ -890,8 +890,8 @@ normalize_optional_text: fn(value: String?, field: String, limit: Int) -> String
 normalize_text: fn(value: String, field: String, limit: Int) -> String WebErrorPageError! {
     bytes: value.bytes()
     if bytes.len() > limit -> return Err(WebErrorPageError.TextTooLarge{field: field})
-    out := [U8]{}
-    index := 0
+    ^out: [U8]{}
+    ^index: 0
     loop index < bytes.len() {
         code: Int{bytes[index]}
         if code == 194 && index + 1 < bytes.len() {
@@ -1006,7 +1006,7 @@ html_pair: fn(label: String, value: String) -> String {
 
 render_source_html: fn(excerpts: [WebErrorSourceExcerpt]) -> String {
     if excerpts.len() == 0 -> return ""
-    html := "<h2>Source</h2>"
+    ^html: "<h2>Source</h2>"
     loop excerpt in excerpts {
         html = "{html}<section><h3>{browser_web_html_escape(excerpt.label)}</h3><p><code>{browser_web_html_escape(excerpt.source_id)}"
         if excerpt.line == .Val(line) {
@@ -1034,20 +1034,20 @@ accept_candidate_better: fn(candidate: WebErrorAcceptCandidate, current: WebErro
 
 negotiate_content_type: fn(accept: String) -> WebErrorContentType {
     // Specificity wins within a representation before comparing qualities.
-    html := WebErrorAcceptCandidate?{None}
-    json := WebErrorAcceptCandidate?{None}
+    ^html: WebErrorAcceptCandidate?{None}
+    ^json: WebErrorAcceptCandidate?{None}
     items: accept.split(",").to_list()
     loop index in 0..<items.len() {
         pieces: items[index].split(";").to_list()
         media: pieces[0].trim().to_ascii_lower()
         if media == "" -> next
-        quality := 1000
-        valid := true
+        ^quality: 1000
+        ^valid: true
         loop position in 1..<pieces.len() {
             parts: pieces[position].trim().split("=").to_list()
             if parts.len() < 2 -> next
             if parts[0].trim().to_ascii_lower() == "q" {
-                rest := parts[1]
+                ^rest: parts[1]
                 loop extra in 2..<parts.len() -> rest = "{rest}={parts[extra]}"
                 if parse_quality(rest.trim()) == {
                     .Val(value) -> { quality = value }
@@ -1056,8 +1056,8 @@ negotiate_content_type: fn(accept: String) -> WebErrorContentType {
             }
         }
         if !valid -> next
-        specificity := 0
-        target := WebErrorContentType?{None}
+        ^specificity: 0
+        ^target: WebErrorContentType?{None}
         if {
             media == "text/html" -> {
                 target = Val(WebErrorContentType.HTML)
@@ -1110,9 +1110,9 @@ parse_quality: fn(value: String) -> Int? {
     if whole != "0" && whole != "1" -> return None
     digits: fraction.bytes()
     if digits.len() == 0 || digits.len() > 3 -> return None
-    fractional := 0
+    ^fractional: 0
     loop position in 0..<3 {
-        digit := 0
+        ^digit: 0
         if position < digits.len() {
             code: Int{digits[position]}
             if code < 48 || code > 57 -> return None

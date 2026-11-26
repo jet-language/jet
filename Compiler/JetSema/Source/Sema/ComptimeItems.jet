@@ -810,7 +810,7 @@ sema_callable_runtime_only: fn(graph: SemaRegistrationGraph, row: SemaRegistrati
 // program reads its result store (`name.cache()`), so each call must reach the
 // store at run time. So is a body that reads `#phase`: the program's copy
 // reads `.Runtime` there, which a value computed while compiling would turn
-// into `.Preparation`. So is a body that reads module state (a `name := …`
+// into `.Preparation`. So is a body that reads module state (a `^name: …`
 // binding not prepared while building): the program may have changed it by
 // the time the call runs, and a value computed while building would read its
 // initializer instead.
@@ -848,7 +848,7 @@ sema_comptime_body_unfoldable: fn(graph: SemaRegistrationGraph, function: FnBody
     None
 }
 
-// The first module binding written `name := …` and not prepared while
+// The first module binding written `^name: …` and not prepared while
 // building that checked tree `tree` reads, or None.
 sema_comptime_tree_module_state: fn(graph: SemaRegistrationGraph, tree: BodyTree) -> String? Never! {
     ^read: [U32:Bool]{}

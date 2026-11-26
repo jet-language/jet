@@ -8,8 +8,8 @@ run: fn() {
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     address: listener.local_addr() ?? panic("address")
     files.write_atomic("{work}/addr.txt", address.bytes()) ?? panic("publish address")
-    peer := listener.accept() ?? panic("accept")
-    request := [U8]{}
+    ^peer: listener.accept() ?? panic("accept")
+    ^request: [U8]{}
     loop request.len() < 4 || request[request.len() - 4] != (U8{13}) || request[request.len() - 1] != (U8{10}) {
         block: peer.read_bytes(512, deadline: 5s) ?? panic("request read")
         assert(block.len() > 0)

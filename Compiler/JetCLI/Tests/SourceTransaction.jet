@@ -151,14 +151,14 @@ JetCLITransactionFixtureRoot: struct {
 
 // A body with an unresolved name records no reads or writes under that
 // name's expression, so no fix renames a binding or parameter read there, or
-// swaps the `:=` of one written there, though the file alone shows no read.
+// drops the `^` of one written there, though the file alone shows no read.
 #Test("fix_keeps_bindings_beside_an_unresolved_name") {
     root: "{cli_sys.temp_dir()}/jet-fix-bindings-{cli_process.current_pid()}"
     cli_files.create_dir_all(root) ?? panic("test project")
     owner: JetCLITransactionFixtureRoot{path: root}
     defer close(owner)
     file: "{root}/run.jet"
-    source: "run: fn() {{\n    print(\"{{same(2, 3)}} {{count(4)}}\")\n}}\n\nsame: fn(left: Int, right: Int) -> Bool {{\n    (left + MISSING_OFFSET) == (right + MISSING_OFFSET)\n}}\n\ncount: fn(limit: Int) -> Int {{\n    at := 0\n    loop at < limit {{\n        at += 1\n    }}\n    seen := false\n    seen = (at + MISSING_OFFSET) == limit && seen\n    at\n}}\n"
+    source: "run: fn() {{\n    print(\"{{same(2, 3)}} {{count(4)}}\")\n}}\n\nsame: fn(left: Int, right: Int) -> Bool {{\n    (left + MISSING_OFFSET) == (right + MISSING_OFFSET)\n}}\n\ncount: fn(limit: Int) -> Int {{\n    ^at: 0\n    loop at < limit {{\n        at += 1\n    }}\n    ^seen: false\n    seen = (at + MISSING_OFFSET) == limit && seen\n    at\n}}\n"
     cli_files.write(file, source) ?? panic("run source")
     if jet_cli_fix_collect(file, source, [JetCLIFixFile]{}, [String?]{}, false, "") == {
         .Refused(_) -> { panic("the compiler refused the fixture") }
@@ -184,7 +184,7 @@ JetCLITransactionFixtureRoot: struct {
     defer close(owner)
     file: "{root}/run.jet"
     slot: "Slot: struct {{\n    start_ns: Int,\n    label: String,\n\n    impl Equatable {{\n        equal: fn(self, rhs: Slot) -> Bool {{ self.start_ns == rhs.start_ns }}\n    }}\n\n    impl Comparable {{\n        compare: fn(self, rhs: Slot) -> Ordering {{ self.start_ns.compare(rhs.start_ns) }}\n    }}\n}}\n"
-    source: "{slot}\nrun: fn() {{\n    owners := [Slot:String]{{}}\n    owners[Slot{{start_ns: 10, label: \"a\"}}] = \"ann\"\n    print(owners.len())\n}}\n"
+    source: "{slot}\nrun: fn() {{\n    ^owners: [Slot:String]{{}}\n    owners[Slot{{start_ns: 10, label: \"a\"}}] = \"ann\"\n    print(owners.len())\n}}\n"
     cli_files.write(file, source) ?? panic("run source")
     if jet_cli_fix_collect(file, source, [JetCLIFixFile]{}, [String?]{}, false, "") == {
         .Refused(_) -> { panic("the compiler refused the fixture") }

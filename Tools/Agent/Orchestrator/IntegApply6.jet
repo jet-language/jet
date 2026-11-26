@@ -79,9 +79,9 @@ lead: fn(name: String) -> String {
 // A file whose every conflict lies inside a generated region keeps ours there
 // ("ours"); any other conflict is "none".
 marker_mode: fn(path: String) -> String {
-    generated := false
+    ^generated: false
     // For each conflict marker line, whether it lies inside a generated region.
-    inside := [Bool]{}
+    ^inside: [Bool]{}
     loop line in files.read_or(path, "").lines() {
         if REGION_BEGIN.is_match(line) -> generated = true
         if CONFLICT_MARKER.is_match(line) -> inside.push(generated)
@@ -110,7 +110,7 @@ staged_mode: fn(tree: String, integ: String, g: String, path: String) -> String 
     hunks: diff3.count_where(fn(line) { line.starts_with("<<<<<<< ") })
     // A hunk's base part holds a line when its `|||||||` marker is not followed at once by `=======`.
     filled_base: diff3.windows(2).any(fn(pair) { pair[0].starts_with("||||||| ") && pair[1] != "=======" })
-    mode := if hunks > 0 && !filled_base -> "union" else -> "none"
+    ^mode: if hunks > 0 && !filled_base -> "union" else -> "none"
     if mode == "none" {
         merged: Sh{"node {"{g}/linemerge.mjs"} {"{work}/o"} {"{work}/b"} {"{work}/t"}"}.run()
         files.write("{integ}/linemerge.tmp", merged.output)
@@ -133,7 +133,7 @@ apply_sub: fn(tree: String, integ: String, g: String, sub: String, order: ^[Stri
     n: files.basename(s)
     listed: Sh{"git apply --numstat {"{s}/patch"}"}.run().output.tsv_records().map(fn(cells) { cells.get(2) ?? "" })
     files.write("{integ}/{n}.files", listed.map(fn(path) { "{path}\n" }).join(""))
-    excluded := [String]{}
+    ^excluded: [String]{}
     loop f in listed.filter(fn(f) { f != "" }) {
         path: "{tree}/{f}"
         // An edit of a file an earlier SUB in this batch deleted is dropped (the deleting SUB replaced the file's
@@ -158,7 +158,7 @@ apply_sub: fn(tree: String, integ: String, g: String, sub: String, order: ^[Stri
     // The SUBs its meta's stack lines name (`stack: a, b`; a bare number is a SUB of the same lead); with no
     // meta file, a SUB stacks on the previous SUB of the same lead in this batch.
     meta: files.read_or("{s}/meta", "")
-    stacked := [String]{}
+    ^stacked: [String]{}
     loop line in meta.lines().filter(fn(line) { line.starts_with("stack:") }) {
         loop d in line.removeprefix("stack:").replace(",", " ").words().filter(fn(d) { d != "none" }) {
             stacked.push(if d.contains("-") -> d else -> "{his}-{d}")
@@ -188,9 +188,9 @@ apply_sub: fn(tree: String, integ: String, g: String, sub: String, order: ^[Stri
     //    (union); the census then checks the composed file.
     // Any other conflict makes the SUB NOAPPLY.
     conflicts: Sh{"git -C {tree} diff --name-only --diff-filter=U"}.lines()
-    clean := applied.code == 0 || conflicts.len() > 0
+    ^clean: applied.code == 0 || conflicts.len() > 0
     loop f in conflicts {
-        mode := if f.ends_with(".tsv") -> "union" else -> marker_mode("{tree}/{f}")
+        ^mode: if f.ends_with(".tsv") -> "union" else -> marker_mode("{tree}/{f}")
         if mode == "none" -> mode = staged_mode(tree, integ, g, f)
         if mode == "none" {
             clean = false
@@ -205,7 +205,7 @@ apply_sub: fn(tree: String, integ: String, g: String, sub: String, order: ^[Stri
                 files.remove_all(work)
             }
         }
-        _ := Sh{"git -C {tree} add -- {f}"}.ok()
+        ^_: Sh{"git -C {tree} add -- {f}"}.ok()
         files.append_all(apply_log, "resolved {f} ({mode})\n")
         if mode == "ours" {
             files.append_all("{integ}/generators", "{if files.read("{tree}/{f}").contains("unsafe-ratchet:begin") -> "Tools/Agent/UnsafeRatchet.jet" else -> "Tools/Agent/CoreSourceRows.jet"}\t{f}\n")
@@ -220,8 +220,8 @@ apply_sub: fn(tree: String, integ: String, g: String, sub: String, order: ^[Stri
         return false
     }
     if !clean {
-        _ := Sh{"git -C {tree} reset -q --hard HEAD"}.ok()
-        _ := Sh{"git -C {tree} clean -qfd"}.ok()
+        ^_: Sh{"git -C {tree} reset -q --hard HEAD"}.ok()
+        ^_: Sh{"git -C {tree} clean -qfd"}.ok()
         failed(integ, n)
         failures.push(n)
         return false
@@ -244,7 +244,7 @@ regenerate: fn(tree: String, integ: String) {
     // The runtime generator outputs (RuntimeCExports and the rest) go stale whenever a SUB changes a runtime
     // export, and no SUB names them: regenerate them in every batch.
     files.append_all("{integ}/generators", "Tools/Agent/RuntimeGenerators.jet\tall\n")
-    names := files.read("{integ}/generators").lines().map(fn(line) { line.partition("\t").head })
+    ^names: files.read("{integ}/generators").lines().map(fn(line) { line.partition("\t").head })
     names.sort()
     identity: files.read("{seed}/IDENTITY").trim()
     loop gen in names.dedup().to_list() {
@@ -279,9 +279,9 @@ run: fn() {
     g: "{r["JET_STATE_ROOT"]}/scratch/Main"
     if !based(tree, r["JET_DEV_WORKTREE"]) -> stop("integ-apply: init failed", 2)
     files.write("{integ}/generators", "")
-    order := [String]{}
-    failures := [String]{}
-    applied := [String]{}
+    ^order: [String]{}
+    ^failures: [String]{}
+    ^applied: [String]{}
     loop sub in args.slice(2, args.len()) {
         if apply_sub(tree, integ, g, sub, order, failures) -> applied.push(sub.removesuffix("/"))
     }

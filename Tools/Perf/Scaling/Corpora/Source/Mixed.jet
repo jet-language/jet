@@ -228,8 +228,8 @@ records_worker: fn(unit_name: String, m: Int, rec: String, trait_name: String, s
     index: r.int(0, 7)
     text: [String]{
         "{name}: fn(seed: Int) -> Int {{",
-        "    accumulator := seed % {M}",
-        "    records := [{rec}]{{}}",
+        "    ^accumulator: seed % {M}",
+        "    ^records: [{rec}]{{}}",
         "    loop index in 0..<{count} {{",
         "        marker: (index * {a} + seed) % 97",
         "        records.push({rec}{{identifier: index + marker, weight: (index * {b} + {c}) % 31, label: \"record-{{index}}-{{marker}}\", markers: [Int]{{index, marker}}}})",
@@ -263,8 +263,8 @@ shapes_worker: fn(unit_name: String, shape: String, r: ^Seeded) -> Worker {
     e: r.int(7, 97)
     text: [String]{
         "{name}: fn(seed: Int) -> Int {{",
-        "    accumulator := (seed * {a}) % {M}",
-        "    shapes := [{shape}]{{}}",
+        "    ^accumulator: (seed * {a}) % {M}",
+        "    ^shapes: [{shape}]{{}}",
         "    loop index in 0..<{count} {{",
         "        next_shape: if (seed + index) % 4 == {{",
         "            0 -> {shape}.Dot((seed + index * {b}) % 101)",
@@ -301,17 +301,17 @@ words_worker: fn(unit_name: String, r: ^Seeded) -> Worker {
     quoted: words.map(fn(word) { "\"{word}\"" }).join(", ")
     text: [String]{
         "{name}: fn(seed: Int) -> Int {{",
-        "    counts := [String:Int]{{}}",
+        "    ^counts: [String:Int]{{}}",
         "    words: [String]{{{quoted}}}",
         "    loop (index, word) in words {{",
         "        key: \"{{word}}-{{(seed + index) % {buckets}}}\"",
         "        counts[key] = (counts.get(key) ?? 0) + index + 1",
         "    }}",
-        "    accumulator := counts.len()",
+        "    ^accumulator: counts.len()",
         "    loop (key, value) in counts {{",
         "        accumulator = (accumulator + key.len() * value * 17) % {M}",
         "    }}",
-        "    label := \"{unit_name}\"",
+        "    ^label: \"{unit_name}\"",
         "    loop index in 0..<{rounds} {{",
         "        label = \"{{label}}:{{index * {a} % 10}}\"",
         "    }}",
@@ -345,7 +345,7 @@ options_worker: fn(unit_name: String, constant_value: Int, r: ^Seeded) -> Worker
         "{name}: fn(seed: Int) -> Int {{",
         "    table: [Int:Int]{{{k0}: {v0}, {k1}: {v1}, {k2}: {v2}}}",
         "    probes: [Int]{{{k0}, {k1}, {k2}, seed % 100}}",
-        "    accumulator := seed % {M}",
+        "    ^accumulator: seed % {M}",
         "    loop round in 0..<{rounds} {{",
         "        probe: probes[round % 4] + (round /% 4) * {spread}",
         "        found: table.get(probe)",
@@ -370,8 +370,8 @@ numbers_worker: fn(unit_name: String, r: ^Seeded) -> Worker {
     b: r.int(1, 30)
     text: [String]{
         "{name}: fn(seed: Int) -> Int {{",
-        "    value := seed % 1000 + 2",
-        "    steps := 0",
+        "    ^value: seed % 1000 + 2",
+        "    ^steps: 0",
         "    loop value > 1 && steps < {limit} {{",
         "        value = if {{",
         "            value % 2 == 0 -> value /% 2",
@@ -379,7 +379,7 @@ numbers_worker: fn(unit_name: String, r: ^Seeded) -> Worker {
         "        }}",
         "        steps += 1",
         "    }}",
-        "    weight := {b}",
+        "    ^weight: {b}",
         "    loop step in 0..<steps {{",
         "        weight = if step % 3 == {{",
         "            0 -> (weight * {a} + step) % {M}",
@@ -426,7 +426,7 @@ mixed_unit: fn(m: Int, u: Int, r: ^Seeded, stats: ^Stats) -> Generated {
         numbers_worker(unit_name, r),
     }
     start: if constant != "" -> constant else -> "{constant_value}"
-    ^total: [String]{"{unit_name}_total: fn() -> Int {{", "    accumulator := {start} % {M}"}
+    ^total: [String]{"{unit_name}_total: fn() -> Int {{", "    ^accumulator: {start} % {M}"}
     ^accumulator: md(constant_value)
     words: renamed()
     loop (index, worker) in workers {
@@ -447,7 +447,7 @@ mixed_unit: fn(m: Int, u: Int, r: ^Seeded, stats: ^Stats) -> Generated {
                 "    trace_label: \"{worker.name}:{{worker_result % 1000}}:{{checkpoint % 1000}}\"",
                 "    trace_weight: if trace_label.len() > {label_limit} -> blend_m{m}(checkpoint, trace_label.len(), {third}) else -> blend_m{m}(checkpoint, 1, {third})",
                 "    blended_parts: [Int]{{worker_result % 997, checkpoint % 991, trace_weight % 983}}",
-                "    combined := 0",
+                "    ^combined: 0",
                 "    loop part in blended_parts -> combined = blend_m{m}(combined, part, {fourth})",
                 "    blend_m{m}(combined, worker_result % 997, {second})",
                 "}}",
@@ -492,7 +492,7 @@ section_header: fn(m: Int) -> [String] {
         "}}",
         "",
         "total_score_m{m}: fn(items: [{trait_name}]) -> Int {{",
-        "    sum := 0",
+        "    ^sum: 0",
         "    loop item in items -> sum = (sum + item.score()) % {M}",
         "    sum",
         "}}",
@@ -518,7 +518,7 @@ mixed_sources: fn(code_lines: Int, seed: Int) -> MixedPackage {
     ^stats: Stats{functions: 1, types: 0, comptime_items: 0, sections: 0}
     ^lines: [String]{"// Deterministic mixed compile-throughput workload: --code-lines {code_lines} --seed {seed}", ""}
     ^section_totals: [Int]{}
-    // `run: fn() {`, `checksum := 0`, the print and `}`, plus one sum line per section.
+    // `run: fn() {`, `^checksum: 0`, the print and `}`, plus one sum line per section.
     ^code: 4
     loop code < code_lines {
         m: stats.sections
@@ -527,7 +527,7 @@ mixed_sources: fn(code_lines: Int, seed: Int) -> MixedPackage {
         lines.extend(header)
         stats.functions += 4
         stats.types += 1
-        ^total: [String]{"section_total_m{m}: fn() -> Int {{", "    accumulator := 0"}
+        ^total: [String]{"section_total_m{m}: fn() -> Int {{", "    ^accumulator: 0"}
         ^value: 0
         ^u: 0
         loop u < UNITS_PER_SECTION && (u == 0 || code < code_lines) {
@@ -546,7 +546,7 @@ mixed_sources: fn(code_lines: Int, seed: Int) -> MixedPackage {
         stats.sections += 1
     }
     ^checksum: 0
-    lines.extend(["run: fn() {{", "    checksum := 0"])
+    lines.extend(["run: fn() {{", "    ^checksum: 0"])
     loop (m, value) in section_totals {
         lines.push("    checksum = (checksum * 31 + section_total_m{m}()) % {M}")
         checksum = md(checksum * 31 + value)

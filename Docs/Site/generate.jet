@@ -116,7 +116,7 @@ values_code: fn() -> HTML {
         name<span class="g">:</span> <span class="s">"Jet"</span>
         year<span class="g">:</span> <span class="n">2026</span>
         <span class="f">print</span>(<span class="s">"values: {{name}} {{year}}"</span>)
-        count <span class="g">:=</span> <span class="n">0</span>
+        <span class="g">^</span>count<span class="g">:</span> <span class="n">0</span>
         count += <span class="n">3</span>
         <span class="f">print</span>(<span class="s">"count: {{count}}"</span>)
     }}
@@ -204,7 +204,7 @@ loops_code: fn() -> HTML {
         }}
         nested<span class="g">:</span> <span class="k">loop</span> left <span class="k">in</span> [<span class="n">1</span>, <span class="n">2</span>] <span class="g">-&gt;</span> <span class="k">loop</span> right <span class="k">in</span> [<span class="n">10</span>, <span class="n">20</span>] <span class="g">-&gt;</span> left + right
 
-        by_value <span class="g">:=</span> [<span class="t">Int</span>:<span class="t">Int</span>]{{}}
+        <span class="g">^</span>by_value<span class="g">:</span> [<span class="t">Int</span>:<span class="t">Int</span>]{{}}
         <span class="k">loop</span> value <span class="k">in</span> values <span class="g">-&gt;</span> by_value.<span class="f">add</span>(value, value * <span class="n">10</span>).<span class="f">drop</span>(<span class="s">"keys are unique"</span>)
         unique<span class="g">:</span> <span class="t">Set</span>.<span class="f">from</span>(<span class="k">loop</span> value <span class="k">in</span> [<span class="n">1</span>, <span class="n">2</span>, <span class="n">2</span>, <span class="n">3</span>] <span class="g">-&gt;</span> value)
         lazy<span class="g">:</span> values.<span class="f">lazy</span>().<span class="f">map</span>(value <span class="g">-&gt;</span> value + <span class="n">10</span>)
@@ -398,8 +398,8 @@ index_body: fn() -> HTML {
     <span class="f">run</span><span class="g">:</span> <span class="k">fn</span>() {{
         count<span class="g">:</span> reactive.<span class="f">signal</span>(<span class="n">0</span>)
         ui.<span class="f">reactive_render</span>(() <span class="g">-&gt;</span> {{
-            n <span class="g">:=</span> count.<span class="f">get</span>()
-            color <span class="g">:=</span> Color{{r: <span class="n">46</span>, g: <span class="n">46</span>, b: <span class="n">51</span>, a: <span class="n">255</span>}}
+            <span class="g">^</span>n<span class="g">:</span> count.<span class="f">get</span>()
+            <span class="g">^</span>color<span class="g">:</span> Color{{r: <span class="n">46</span>, g: <span class="n">46</span>, b: <span class="n">51</span>, a: <span class="n">255</span>}}
             <span class="k">if</span> n % <span class="n">2</span> == <span class="n">1</span> <span class="g">-&gt;</span> color = Color{{r: <span class="n">232</span>, g: <span class="n">35</span>, b: <span class="n">42</span>, a: <span class="n">255</span>}}
             backend<span class="g">:</span> ui.<span class="f">null_backend</span>()
             tree<span class="g">:</span> ui.<span class="f">box</span>([
@@ -492,7 +492,7 @@ tour_body: fn() -> HTML {
 
       <section>
         <h2 id="values">Values</h2>
-        <p>:: binds a value and it stays put. := binds a place you can reassign. Types mostly stay out of the way: they ride signatures and struct fields, and values carry them everywhere else.</p>
+        <p><code>name: value</code> binds a value and it stays put. <code>^name: value</code> binds a name you can reassign. Types mostly stay out of the way: they ride signatures and struct fields, and values carry them everywhere else.</p>
         {values}
       </section>
 

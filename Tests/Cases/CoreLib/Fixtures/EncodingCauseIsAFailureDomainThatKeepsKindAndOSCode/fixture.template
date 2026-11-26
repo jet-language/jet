@@ -10,7 +10,7 @@ use {
 // propagates unchanged.
 read_cause: fn(path: String) -> Int encoding.EncodingCause! {
     input: files.open(path) ?? panic("directory open")
-    reader := json.reader(input) ?? panic("reader")
+    ^reader: json.reader(input) ?? panic("reader")
     if reader.next() == {
         .Err(error) -> return Err(error.cause ?? panic("read without a cause"))
         .Val(_) | .None -> return Ok(0)
@@ -20,7 +20,7 @@ read_cause: fn(path: String) -> Int encoding.EncodingCause! {
 
 write_cause: fn(path: String) -> Int encoding.EncodingCause! {
     output: files.create(path) ?? panic("full open")
-    writer := json.writer(output) ?? panic("writer")
+    ^writer: json.writer(output) ?? panic("writer")
     writer.write(encoding.DataEvent.Null) ?? return Err(err.cause ?? panic("write without a cause"))
     writer.flush() ?? return Err(err.cause ?? panic("flush without a cause"))
     Ok(0)

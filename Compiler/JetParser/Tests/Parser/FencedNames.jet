@@ -95,10 +95,10 @@ use_pair(<: t1, t2, t3 :>, <: a, b, c :>)
 
 // (`seen.insert` is true for a new name)
 #Test("binding_fence_accepts_distinct_names_and_rejects_only_a_repeat") {
-    ^distinct: lex(`run: fn() { <: first, second, third :> := 0 }`.bytes())
+    ^distinct: lex(`run: fn() { ^<: first, second, third :>: 0 }`.bytes())
     assert(distinct.diagnostics.is_empty())
     assert(parser_prepare_tokens(distinct.tokens.move(), distinct.tables).diagnostics.is_empty())
-    ^repeated: lex(`run: fn() { <: first, second, first :> := 0 }`.bytes())
+    ^repeated: lex(`run: fn() { ^<: first, second, first :>: 0 }`.bytes())
     assert(repeated.diagnostics.is_empty())
     _: parser_test_diagnostic(parser_prepare_tokens(repeated.tokens.move(), repeated.tables).diagnostics, "E0369")
 }

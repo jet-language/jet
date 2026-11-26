@@ -21,7 +21,7 @@ migration Score {
 }
 
 total: fn(points: [Point], pick: fn(Point) -> Int) -> Int {
-    sum := 0
+    ^sum: 0
     loop point in points -> sum += pick(point)
     sum
 }
@@ -37,7 +37,7 @@ run: fn() {
     scaled: points.map(p ->
         p.x * 10)
     print(scaled)
-    sorted := [3, 1, 2]
+    ^sorted: [3, 1, 2]
     sorted.sort_by((left, right) -> left <=> right)
     print(sorted)
     nested: points.map(p -> [1, 2].map(n -> n * p.x))
@@ -45,11 +45,11 @@ run: fn() {
     handlers: Handlers{on_point: p -> p.y}
     print(handlers.on_point(points[0]))
     print("{points.map(p -> p.x)}")
-    square := (n: Int) -> n * n
+    ^square: (n: Int) -> n * n
     print(square(3))
     notify: (p: Point) -[IO]> print(p.x)
     notify(points[1])
-    adder := (n: Int) -> (m: Int) -> m + n
+    ^adder: (n: Int) -> (m: Int) -> m + n
     add_one: adder(1)
     print(add_one(2))
     makers: [1].map((n: Int) -> (m: Int) -> m + n)
@@ -59,7 +59,7 @@ run: fn() {
         count -> "{count} points"
     }
     print(label)
-    done := false
+    ^done: false
     if done -> print("never")
     source: "run: fn() {{\n    print([1].map(n -> n + 1))\n}}\n"
     print(source)

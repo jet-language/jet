@@ -7119,7 +7119,7 @@ sema_expr_copy_fork_body: fn(subject: Expr, ty: Type, row: SemaRegistrationRowRe
 
 // A map keeps its keys and takes each value's semantic copy, written over a
 // share of the map so the result keeps the map's type and order:
-// `(() -> { made := m; loop key in made.keys() -> made[key] = made[key].copy(); made })()`.
+// `(() -> { ^made: m; loop key in made.keys() -> made[key] = made[key].copy(); made })()`.
 // A key never holds a Clock (E0502 admits only scalar, payload-free enum and
 // tuple or struct keys of those), so keeping the keys forks nothing away.
 sema_expr_copy_fork_map: fn(subject: Expr, depth: Int, span: Span) -> Expr Never! {
@@ -7135,7 +7135,7 @@ sema_expr_copy_fork_map: fn(subject: Expr, depth: Int, span: Span) -> Expr Never
 // A union takes its member's own copy, written over a share of the value so
 // each arm's copy widens to the union as it is stored; a named case wraps
 // its payload's copy back in the case:
-// `(() -> { made := u; if u == { .A(member) -> made = member.copy() … } made })()`.
+// `(() -> { ^made: u; if u == { .A(member) -> made = member.copy() … } made })()`.
 sema_expr_copy_fork_union: fn(subject: Expr, members: [Type], depth: Int, span: Span) -> Expr Never! {
     made: "__fork_union{depth}"
     member: "__fork_member{depth}"
@@ -7150,7 +7150,7 @@ sema_expr_copy_fork_union: fn(subject: Expr, members: [Type], depth: Int, span: 
     sema_expr_copy_fork_over_share(made, subject, each, span)
 }
 
-// `(() -> { made := subject; step; made })()`: `step` replaces the parts of
+// `(() -> { ^made: subject; step; made })()`: `step` replaces the parts of
 // the share `made` that hold a Clock with their copies.
 sema_expr_copy_fork_over_share: fn(made: String, subject: Expr, step: Stmt, span: Span) -> Expr Never! {
     start: Stmt.Val{binding: Binding{mutable: true, markers: [Marker]{}, reactive_upgrade: false, meta: None, name: made.copy(), name_span: span, sigil_span: None, pattern: None, ty: None, ty_span: None, init: subject, is_comptime: false, ct: None, uninit: false, arena_view: false, string_view: false, gc_promotion: None, gc_transferred: false}}

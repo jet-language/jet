@@ -7,7 +7,7 @@ recording_test_event: fn(sequence: Int, timestamp_ms: Int) -> SessionEvent {
 }
 
 recording_test_with_events: fn(max_events: Int, count: Int) -> SessionRecording {
-    recording := SessionRecording.with_limits(recording_test_identity("src-a", "build-a"), SessionRecordingLimits{max_events, max_bytes: 64 * 1024}) ?? panic("recording")
+    ^recording: SessionRecording.with_limits(recording_test_identity("src-a", "build-a"), SessionRecordingLimits{max_events, max_bytes: 64 * 1024}) ?? panic("recording")
     loop index in 1..<(count + 1) {
         _: recording.append_event(recording_test_event(index, index * 10)) ?? panic("append")
     }
@@ -15,14 +15,14 @@ recording_test_with_events: fn(max_events: Int, count: Int) -> SessionRecording 
 }
 
 recording_test_bytes: fn(text: String) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     loop byte in text.bytes() -> out.push(byte)
     out
 }
 
 #Test("replay_steps_and_checkpoint_restore_are_deterministic") {
     recording: recording_test_with_events(8, 3)
-    cursor := recording.replay()
+    ^cursor: recording.replay()
     first: cursor.step(recording, ReplayStep.Forward) ?? panic("step 1")
     assert_eq(first.sequence, Val(1))
     checkpoint: recording.checkpoint(cursor) ?? panic("checkpoint")
@@ -63,7 +63,7 @@ recording_test_bytes: fn(text: String) -> [U8] {
 }
 
 #Test("envelope_preserves_explicit_payload_and_rejects_time_regressions") {
-    recording := SessionRecording.new(recording_test_identity("src-a", "build-a")) ?? panic("recording")
+    ^recording: SessionRecording.new(recording_test_identity("src-a", "build-a")) ?? panic("recording")
     envelope: `{"protocol":"jet.devtools.v1","events":[{"sequence":1,"timestamp_ms":7,"source":"host","kind":"Custom","entity":"item","fields":{"state":"ready"},"payload":{"published":true}}]}`
     recorded: recording.record_envelope(recording_test_bytes(envelope)) ?? panic("envelope")
     assert_eq(recorded, 1)

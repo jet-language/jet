@@ -292,7 +292,7 @@ ssl_srv12_ciphersuite_match: fn(ssl: ^ssldefs.SSLContext, suite_id: Int) -> suit
         return Ok(None)
     }
     if suites.ssl_ciphersuite_uses_ec(cs) {
-        no_curve: if ^ssl.handshake.curves_tls_id == {
+        no_curve: if ssl.handshake.curves_tls_id.in_place() == {
             .Val(ids) -> ids.len() == 0
             None -> true
         }
@@ -373,7 +373,7 @@ ssl_srv12_parse_client_hello: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssld
                 .Val(cb) -> {
                     checked = true
                     check: cb.call
-                    cli_id: if ^ssl.cli_id == {
+                    cli_id: if ssl.cli_id.in_place() == {
                         .Val(id) -> id.copy()
                         None -> [U8]{}
                     }
@@ -668,7 +668,7 @@ ssl_srv12_write_hello_verify_request: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: 
             return Err(.InternalError)
         }
     }
-    cli_id: if ^ssl.cli_id == {
+    cli_id: if ssl.cli_id.in_place() == {
         .Val(id) -> id.copy()
         None -> [U8]{}
     }
@@ -945,7 +945,7 @@ ssl_srv12_prepare_server_key_exchange: fn<R: RNG>(ssl: ^ssldefs.SSLContext, cs: 
         // ServerDHParams: dh_p, dh_g, dh_Ys.
         if ssl.conf.dhm_p == None || ssl.conf.dhm_g == None -> return Err(.BadInputData)
         ssltls.ssl_dhm_ready(ssl)
-        ^params: if ^ssl.handshake.dhm_ctx == {
+        ^params: if ssl.handshake.dhm_ctx.in_place() == {
             .Val(ctx) -> {
                 ssl_srv12_dhm_set_group(ctx, ssl.conf) ?? return Err(err)
                 x_size: dhm.dhm_get_len(ctx)
@@ -980,7 +980,7 @@ ssl_srv12_prepare_server_key_exchange: fn<R: RNG>(ssl: ^ssldefs.SSLContext, cs: 
         }
         if chosen == 0 -> return Err(.HandshakeFailure)
         ssltls.ssl_ecdh_ready(ssl)
-        ^params: if ^ssl.handshake.ecdh_ctx == {
+        ^params: if ssl.handshake.ecdh_ctx.in_place() == {
             .Val(ctx) -> {
                 ecdh.ecdh_setup(ctx, ssltls.ssl_get_ecp_group_id_from_tls_id(chosen)) ?? return Err(.ECP(err))
                 ecdh.ecdh_make_params(ctx, ssldefs.SSL_OUT_CONTENT_LEN - ssl.out_msglen, rng) ?? return Err(.ECP(err))
@@ -1202,7 +1202,7 @@ ssl_srv12_parse_client_key_exchange: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^
         .DHERSA -> {
             ssl_srv12_parse_client_dh_public(ssl, p, end) ?? return Err(err)
             if p != end -> return Err(.DecodeError)
-            ^secret: if ^ssl.handshake.dhm_ctx == {
+            ^secret: if ssl.handshake.dhm_ctx.in_place() == {
                 .Val(ctx) -> {
                     // The premaster buffer must hold a value as long as p.
                     if dhm.dhm_get_len(ctx) > ssldefs.SSL_PREMASTER_SIZE -> return Err(.DecodeError)
@@ -1215,7 +1215,7 @@ ssl_srv12_parse_client_key_exchange: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^
             ssltls.ssl_set_premaster(ssl, secret)
         }
         .ECDHERSA | .ECDHEECDSA | .ECDHRSA | .ECDHECDSA -> {
-            ^secret: if ^ssl.handshake.ecdh_ctx == {
+            ^secret: if ssl.handshake.ecdh_ctx.in_place() == {
                 .Val(ctx) -> {
                     ecdh.ecdh_read_public(ctx, ssldefs.ssl_bytes_of(ssl.in_buf, p, end - p)) ?? return Err(.DecodeError)
                     ecdh.ecdh_calc_secret(ctx, ssldefs.SSL_PREMASTER_SIZE, rng) ?? return Err(.DecodeError)
@@ -1302,7 +1302,7 @@ ssl_srv12_parse_certificate_verify: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R
     ^hash: ssltls.ssl_calc_verify(ssl) ?? return Err(err)
     sig: ssldefs.ssl_bytes_of(ssl.in_buf, msg + i, sig_len)
     sn: ssl.session_negotiate
-    ^failure: if ^ssl.spool[sn].peer_cert == {
+    ^failure: if ssl.spool[sn].peer_cert.in_place() == {
         .Val(chain) -> ssl_srv12_verify_signature(chain[0].pk, md, hash, sig)
         None -> {
             return Err(.InternalError)

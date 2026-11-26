@@ -236,9 +236,9 @@ jet_cli_import_translate_foreign_body: fn(language: String, function: JetCLIImpo
                 }
                 converted: jet_cli_import_foreign_expression(language, pair.right, float_literals) ?? return Err(JetCLIImportBodyError{line: row.line, message: err.message.copy()})
                 value: jet_cli_import_materialize_borrowed_string(function, pair.right, converted)
-                operator: if bindings.has_key(name) -> "=" else -> ":="
+                target: if bindings.has_key(name) -> "{name} =" else -> "^{name}:"
                 bindings.add(name.copy(), true).drop("only membership matters for binding operators")
-                output.push("{name} {operator} {value}")
+                output.push("{target} {value}")
                 next
             }
             converted: jet_cli_import_foreign_expression(language, line, float_literals) ?? return Err(JetCLIImportBodyError{line: row.line, message: err.message.copy()})

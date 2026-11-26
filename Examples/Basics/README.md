@@ -9,6 +9,7 @@ Run a lesson from the repository root, for example `jet run Examples/Basics/<Les
 - [BodyRules](BodyRules.jet) — a result follows the one arrow, named bodies use braces, a body's last expression is its value, and `return` exits early.
 - [Branches](Branches.jet) — Ordered decisions with Jet's pattern-arm table.
 - [ChainedComparison](ChainedComparison.jet) — A same-direction relational chain reads like the range guard it is — `0 <= sev < 10` means "sev is between 0 and 10", not two separate comparisons the…
+- [ChangeableNames](ChangeableNames.jet) — `^count: 0` makes a name you will change, and `place.in_place()` is a write window into the place itself.
 - [Compound](Compound.jet)
 - [ComprehensionForms](ComprehensionForms.jet)
 - [DefaultRefs](DefaultRefs.jet) — A default may reference an earlier parameter.

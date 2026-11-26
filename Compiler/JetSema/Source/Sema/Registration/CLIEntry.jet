@@ -615,8 +615,8 @@ sema_cli_entry_direct: fn(lines: ^[String], spec: SemaCLIEntrySpec, help_end: St
     loop (slot, input) in root {
         names.push(sema_cli_entry_text(input.name))
         if input.short.bytes().len() > 0 -> shorts = true
-        if input.flag -> lines.push("    __f{slot} := false") else {
-            lines.push("    __v{slot} := String?{{None}}")
+        if input.flag -> lines.push("    ^__f{slot}: false") else {
+            lines.push("    ^__v{slot}: String?{{None}}")
             if input.env.bytes().len() > 0 {
                 lines.push("    __e{slot}: __jet_cli_process.env_get({sema_cli_entry_text(input.env)})")
             }
@@ -625,13 +625,13 @@ sema_cli_entry_direct: fn(lines: ^[String], spec: SemaCLIEntrySpec, help_end: St
             positionals = true
             if input.default == None -> missable = true
         }
-        if marks -> lines.push("    __x{slot} := false")
+        if marks -> lines.push("    ^__x{slot}: false")
     }
     known: "[String]{{{names.join(", ")}}}"
-    lines.push("    __asked := false")
-    if spec.standard -> lines.push("    __version := false")
-    lines.push("    __pos := [String]{{}}")
-    lines.push("    __i := 1")
+    lines.push("    ^__asked: false")
+    if spec.standard -> lines.push("    ^__version: false")
+    lines.push("    ^__pos: [String]{{}}")
+    lines.push("    ^__i: 1")
     lines.push("    loop __i < __argv.len() {{")
     lines.push("    __a: __argv[__i].copy()")
     lines.push("    if __a == \"--\" {{")
@@ -706,7 +706,7 @@ sema_cli_entry_direct: fn(lines: ^[String], spec: SemaCLIEntrySpec, help_end: St
     lines.push("    if {sema_cli_call("CLIShort")}(__a) {{")
     if shorts {
         lines.push("    __r: {sema_cli_call("CLIRest")}(__a, 1)")
-        lines.push("    __k := 0")
+        lines.push("    ^__k: 0")
         lines.push("    loop __k < __r.bytes().len() {{")
         lines.push("    __s: {sema_cli_call("CLISlice")}(__r, __k, __k + 1)")
         ^clustered: [SemaCLIArm]{}
@@ -719,7 +719,7 @@ sema_cli_entry_direct: fn(lines: ^[String], spec: SemaCLIEntrySpec, help_end: St
                 body.push("    __k += 1")
                 body.push("    next")
             } else {
-                body.push("    __w := {sema_cli_call("CLIRest")}(__r, __k + 1)")
+                body.push("    ^__w: {sema_cli_call("CLIRest")}(__r, __k + 1)")
                 body.push("    if __w.bytes().len() == 0 {{")
                 body.push("    __i += 1")
                 sema_cli_entry_fail(body, "__i >= __argv.len()", sema_cli_entry_usage(sema_cli_entry_text("`-{input.short}` requires a value")), projection)
@@ -747,10 +747,10 @@ sema_cli_entry_direct: fn(lines: ^[String], spec: SemaCLIEntrySpec, help_end: St
     // consumes one bare value without shifting later positionals.
     ^bare: "0"
     if positionals {
-        lines.push("    __bare := 0")
+        lines.push("    ^__bare: 0")
         bare = "__bare"
     }
-    if missable -> lines.push("    __missing := [String]{{}}")
+    if missable -> lines.push("    ^__missing: [String]{{}}")
     loop (slot, input) in root {
         if !input.positional -> next
         lines.push("    if __v{slot} != None {{")
@@ -904,8 +904,8 @@ sema_cli_entry_fallback: fn(input: SemaCLIInput, slot: Int) -> String? Never! {
 
 // The `__args` binding of the decoded value.
 sema_cli_entry_bind: fn(lines: ^[String], spec: SemaCLIEntrySpec, type_ref: String) {
-    binder: if spec.assigned.len() > 0 -> " :=" else -> ":"
-    lines.push("    __args{binder} {type_ref}{{{spec.literal.join(", ")}}}")
+    mark: if spec.assigned.len() > 0 -> "^" else -> ""
+    lines.push("    {mark}__args: {type_ref}{{{spec.literal.join(", ")}}}")
     loop line in spec.assigned -> lines.push(line.copy())
 }
 
@@ -989,7 +989,7 @@ sema_cli_entry_projections: fn(items: [Item]) -> [String] {
 // `T.{method}({params})`: runs the parser call `parse` and returns its value,
 // or its refusal as the one `FieldError`.
 sema_cli_entry_refusing: fn(name: String, method: String, params: String, parse: String) -> String Never! {
-    "{name}.{method}: fn({params}) -> {name} [FieldError]! {{\n    __refusal := \"\"\n    __value: {name}.{parse} ?? return Err([FieldError]{{FieldError{{path: \"\", reason: __refusal}}}})\n    Ok(__value)\n}}\n"
+    "{name}.{method}: fn({params}) -> {name} [FieldError]! {{\n    ^__refusal: \"\"\n    __value: {name}.{parse} ?? return Err([FieldError]{{FieldError{{path: \"\", reason: __refusal}}}})\n    Ok(__value)\n}}\n"
 }
 
 // Whether `definition` already has the member `name`: a method, a command

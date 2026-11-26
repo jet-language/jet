@@ -96,12 +96,16 @@ plan_keywords: fn(work: ^GrammarWork) -> GrammarKeywords Never! {
         }
     }
     words: heads.len()
-    if words == 0 -> return GrammarKeywords{displace: [Int]{}, slots: [Int]{}, kinds: kinds, texts: texts, folds: folds, next: chain}
+    if words == 0 {
+        return GrammarKeywords{displace: [Int]{}, slots: [Int]{}, kinds: kinds, texts: texts, folds: folds, next: chain}
+    }
     buckets: words /% 2 + 1
     ^size: words + words /% 4 + 1
     loop {
         table: place_keywords(work, hashes, heads, buckets, size)
-        if table.len() == 2 -> return GrammarKeywords{displace: table[0].copy(), slots: table[1].copy(), kinds: kinds, texts: texts, folds: folds, next: chain}
+        if table.len() == 2 {
+            return GrammarKeywords{displace: table[0].copy(), slots: table[1].copy(), kinds: kinds, texts: texts, folds: folds, next: chain}
+        }
         size += size /% 4 + 1
     }
 }

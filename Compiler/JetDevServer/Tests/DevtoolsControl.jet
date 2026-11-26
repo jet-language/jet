@@ -22,7 +22,7 @@ control_test_pause: fn(session_id: String, request_id: String) -> JetDevtoolsCom
 }
 
 #Test("game control spans need both ordered bounds") {
-    request := JetDevtoolsGameControlRequest.new("s1", "r1", .Pause) ?? panic("pause request")
+    ^request: JetDevtoolsGameControlRequest.new("s1", "r1", .Pause) ?? panic("pause request")
     request.source_span_start = Val(4)
     assert(request.validate() == .Err(_))
     request.source_span_end = Val(4)
@@ -32,7 +32,7 @@ control_test_pause: fn(session_id: String, request_id: String) -> JetDevtoolsCom
 }
 
 #Test("the queue keeps FIFO order and polls database commands in place") {
-    queue := JetDevtoolsCommandQueue.new("s1")
+    ^queue: JetDevtoolsCommandQueue.new("s1")
     queue.enqueue(control_test_pause("s1", "g1")) ?? panic("enqueue pause")
     queue.enqueue(control_test_explain("s1", "d1")) ?? panic("enqueue explain")
     assert(queue.enqueue(control_test_pause("s2", "g2")) == .Err(_))
@@ -47,7 +47,7 @@ control_test_pause: fn(session_id: String, request_id: String) -> JetDevtoolsCom
 }
 
 #Test("receipts are sequenced and updated in place") {
-    queue := JetDevtoolsCommandQueue.new("s1")
+    ^queue: JetDevtoolsCommandQueue.new("s1")
     queue.enqueue(control_test_pause("s1", "g1")) ?? panic("enqueue pause")
     queue.record_receipt(control_test_explain("s1", "d1"), "waiting", None) ?? panic("receipt")
     queue.update_receipt("g1", "completed", None) ?? panic("update")
@@ -63,7 +63,7 @@ control_test_pause: fn(session_id: String, request_id: String) -> JetDevtoolsCom
 }
 
 #Test("the command envelope serializes host to runtime") {
-    envelope := JetDevtoolsCommandEnvelope.new("s1", 5)
+    ^envelope: JetDevtoolsCommandEnvelope.new("s1", 5)
     envelope.enqueue_command(control_test_explain("s1", "d1")) ?? panic("enqueue")
     assert(envelope.enqueue_command(control_test_explain("s2", "d2")) == .Err(_))
     text: envelope.serialize() ?? panic("serialize")

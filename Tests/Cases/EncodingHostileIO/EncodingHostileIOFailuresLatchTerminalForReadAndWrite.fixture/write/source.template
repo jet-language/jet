@@ -15,7 +15,7 @@ writer_io: fn(writer: ^cbor.CBORWriter<files.FileWriter>) -[IO]> Bool {
 
 run: fn() {
     full_output: files.create("/dev/full") ?? panic("full open")
-    full_writer := cbor.writer(full_output) ?? panic("full writer")
+    ^full_writer: cbor.writer(full_output) ?? panic("full writer")
     if full_writer.write(encoding.DataEvent.Null) == {
         .Err(first) -> {
             print(first.kind == encoding.EncodingErrorKind.IO)

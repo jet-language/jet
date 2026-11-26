@@ -240,7 +240,7 @@ WebModuleSwapSnapshot: struct {
     state: [WebModuleSwapStateFact],
 
     new: fn(identity: WebModuleSwapIdentity, source_revision: String, build_revision: String, page: WebPageFact, modules: [WebModuleFact], state: [WebModuleSwapStateFact]) -> WebModuleSwapSnapshot WebModuleSwapError! {
-        snapshot := WebModuleSwapSnapshot{identity, source_revision, build_revision, page, modules, state}
+        ^snapshot: WebModuleSwapSnapshot{identity, source_revision, build_revision, page, modules, state}
         snapshot.normalize()
         snapshot
     }
@@ -374,8 +374,8 @@ WebModuleSwapPlan: struct {
     // A plan reads Sema's checked hot-swap decision, which this compiler
     // does not produce yet, so the swap refuses once both snapshots check.
     from_hot_swap_decision: fn(base: WebModuleSwapSnapshot, candidate: WebModuleSwapSnapshot) -> WebModuleSwapPlan WebModuleSwapError! {
-        checked_base := base
-        checked_candidate := candidate
+        ^checked_base: base
+        ^checked_candidate: candidate
         checked_base.normalize()
         checked_candidate.normalize()
         Err(WebModuleSwapError.Unavailable{feature: "checked hot-swap decision"})
@@ -386,8 +386,8 @@ WebModuleSwapPlan: struct {
     changed_module_set: fn(self) -> [String] { self.changed_modules }
 
     applied_snapshot: fn(self) -> WebModuleSwapSnapshot {
-        snapshot := self.candidate
-        preserved := self.preserved
+        ^snapshot: self.candidate
+        ^preserved: self.preserved
         preserved.reverse()
         loop preserved.len() > 0 {
             kept: preserved.pop() ?? break
@@ -465,10 +465,10 @@ WebModuleSwapReceipt: struct {
 
     audit: fn(self) -> String {
         changed: self.changed_modules.join(",")
-        reason_names := [String]{}
+        ^reason_names: [String]{}
         loop reason in self.reason_codes -> reason_names.push(reason.as_str())
         reasons: reason_names.join(",")
-        preserved_names := [String]{}
+        ^preserved_names: [String]{}
         loop fact in self.preserved -> preserved_names.push("{fact.kind().as_str()}:{fact.key()}")
         preserved: preserved_names.join(",")
         reset_names: loop fact in self.reset -> "{fact.state.kind().as_str()}:{fact.state.key()}({fact.reason.as_str()})"
@@ -513,7 +513,7 @@ WebModuleSwapState: struct {
     current_phase: WebModuleSwapPhase,
 
     new: fn(snapshot: WebModuleSwapSnapshot) -> WebModuleSwapState WebModuleSwapError! {
-        checked := snapshot
+        ^checked: snapshot
         checked.normalize()
         WebModuleSwapState{committed_snapshot: checked, pending_plan: None, active_snapshot: checked, current_phase: WebModuleSwapPhase.Committed}
     }
@@ -662,7 +662,7 @@ web_swap_sort_state: fn(facts: ^[WebModuleSwapStateFact]) {
 }
 
 web_swap_reason_list: fn(codes: [WebModuleSwapReasonCode]) -> String {
-    names := [String]{}
+    ^names: [String]{}
     loop code in codes -> names.push(code.as_str())
     names.join(",")
 }

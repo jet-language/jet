@@ -403,7 +403,7 @@ FileLock: struct {
 
 // The fd is guarded before it becomes the native FileLock carrier. Failed
 // opens, waits and identity checks therefore close without unlinking a name.
-// Close reads the consumed receiver in place. Rebinding it (`held := self.move()`)
+// Close reads the consumed receiver in place. Rebinding it (`^held: self.move()`)
 // would make a second owner whose scope-end Close re-enters this one.
 priv LockFd: struct {
     fd: Int,
@@ -1921,7 +1921,7 @@ BestEffort: struct {
     }
 }
 
-/// A new, empty best-effort record: `done := files.best_effort()`.
+/// A new, empty best-effort record: `^done: files.best_effort()`.
 best_effort: fn() -> BestEffort Never! { {failures: [IOError]{}} }
 
 hard_link: fn(original: Path | String, link: Path | String) -[FS.Write]> IOError! {

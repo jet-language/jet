@@ -7,7 +7,7 @@ stderr: null
 send lsp: "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"capabilities\":{}}}"
 recv lsp until $.id = 1
 send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
-send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"grow: fn(nums: ^[Int]) {\\n    nums.app\\n    nums.si\\n    nums.leng\\n    nums.push_b\\n}\\n\\nrun: fn() {\\n    nums := [1, 2]\\n    grow(nums)\\n    print(nums)\\n}\\n\"}}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"grow: fn(nums: ^[Int]) {\\n    nums.app\\n    nums.si\\n    nums.leng\\n    nums.push_b\\n}\\n\\nrun: fn() {\\n    ^nums: [1, 2]\\n    grow(nums)\\n    print(nums)\\n}\\n\"}}}"
 send lsp: "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/completion\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\"},\"position\":{\"line\":1,\"character\":12}}}"
 send lsp: "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"textDocument/completion\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\"},\"position\":{\"line\":2,\"character\":11}}}"
 send lsp: "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"textDocument/completion\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\"},\"position\":{\"line\":3,\"character\":13}}}"
@@ -35,7 +35,7 @@ json: stdout ndjson $[?id=5][0].result.items[?filterText="push_back"][0].textEdi
 json: stdout ndjson $[?id=5][0].result.items[?filterText="push_back"][0].textEdit.range.end.character = 15
 json: stdout ndjson $[?id=2][0].result.items[?label="append"] #= 0 # the foreign word is never an item of its own
 # The accepted names, each called, check with no diagnostic.
-send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didChange\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\",\"version\":2},\"contentChanges\":[{\"text\":\"grow: fn(nums: ^[Int]) {\\n    nums.push(4)\\n    print(nums.len())\\n    print(nums.len())\\n    nums.push(5)\\n}\\n\\nrun: fn() {\\n    nums := [1, 2]\\n    grow(nums)\\n    print(nums)\\n}\\n\"}]}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didChange\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\",\"version\":2},\"contentChanges\":[{\"text\":\"grow: fn(nums: ^[Int]) {\\n    nums.push(4)\\n    print(nums.len())\\n    print(nums.len())\\n    nums.push(5)\\n}\\n\\nrun: fn() {\\n    ^nums: [1, 2]\\n    grow(nums)\\n    print(nums)\\n}\\n\"}]}}"
 send lsp: "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{}}"
 recv lsp collect until ndjson $[?id=99] #>= 1
 json: stdout ndjson $[?method="textDocument/publishDiagnostics"][?params.version=2] #= 1

@@ -47,21 +47,21 @@ Notes: struct {
     #Doc("search files while honoring simple .gitignore rules")
     search: fn(self, pattern: String, root: String) {
         ignore_path: Path.from(root).join(".gitignore")
-        patterns := [String]{}
+        ^patterns: [String]{}
         if fs.exists(ignore_path) {
             ignore_text: fs.read(ignore_path) ?? ""
             loop raw in ignore_text.split("\n") {
-                candidate := raw.trim()
+                ^candidate: raw.trim()
                 if candidate != "" && !candidate.starts_with("#") -> patterns.push(candidate)
             }
         }
         rx: re.compile(pattern) ?? panic("bad pattern")
         entries: fs.walk_files(root).list() ?? panic("walk")
-        matches := 0
+        ^matches: 0
         loop entry in entries {
             if entry.relative == ".gitignore" || ignored(entry.relative, patterns) -> next
             text: fs.read(entry.path) ?? ""
-            line_no := 0
+            ^line_no: 0
             loop line in text.split("\n") {
                 line_no += 1
                 if re.is_match(rx, line) {

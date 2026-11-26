@@ -235,9 +235,9 @@ jet_cli_doctest_rewrite: fn(source: String, rewrites: [JetCLIDocExpectation]) ->
 }
 
 #Test("doctest claims append after the source and frame each rendering") {
-    doctests: jet_cli_doctest_file("/work/run.jet", "run.jet", "/// ```jet\n/// n := 21\n/// n * 2 // => 42\n/// // => skipped\n/// ```\nf: fn() {{}}")
+    doctests: jet_cli_doctest_file("/work/run.jet", "run.jet", "/// ```jet\n/// ^n: 21\n/// n * 2 // => 42\n/// // => skipped\n/// ```\nf: fn() {{}}")
     assert_eq(doctests.tests.len(), 1)
-    assert_eq(jet_cli_doctest_source(doctests), "/// ```jet\n/// n := 21\n/// n * 2 // => 42\n/// // => skipped\n/// ```\nf: fn() {{}}\n\n#Test(\"doctest 1 of f in run.jet\") {{\n    n := 21\n    print(\"\\tjet-doctest\\t{{n * 2}}\\tjet-doctest-end\\t\")\n}}\n")
+    assert_eq(jet_cli_doctest_source(doctests), "/// ```jet\n/// ^n: 21\n/// n * 2 // => 42\n/// // => skipped\n/// ```\nf: fn() {{}}\n\n#Test(\"doctest 1 of f in run.jet\") {{\n    ^n: 21\n    print(\"\\tjet-doctest\\t{{n * 2}}\\tjet-doctest-end\\t\")\n}}\n")
 }
 
 #Test("a doctest is named by the item it documents and its ordinal there, not by its line") {

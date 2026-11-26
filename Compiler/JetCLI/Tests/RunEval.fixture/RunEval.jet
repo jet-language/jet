@@ -88,12 +88,12 @@ run: fn() {
         fail("rerun: {cached(cache)}, expected the first run's entry file and no kept program")
     }
 
-    lines: eval(jet, repo, work, cache, "name := 1; print(name)")
+    lines: eval(jet, repo, work, cache, "^name: 1; print(name)")
     if lines.code != 0 || lines.output != "1\n" {
-        fail("name := 1; print(name): code={lines.code} stdout {lines.output.debug()}\n{lines.errors}")
+        fail("^name: 1; print(name): code={lines.code} stdout {lines.output.debug()}\n{lines.errors}")
     }
 
-    typo: eval(jet, repo, work, cache, "name := 1; print(nmae)")
+    typo: eval(jet, repo, work, cache, "^name: 1; print(nmae)")
     if typo.code == 0 || typo.signal != 0 {
         fail("typo: code={typo.code} signal={typo.signal}, expected a refusal\n{typo.errors}")
     }
@@ -110,14 +110,14 @@ run: fn() {
     // The value of the last statement is shown, as `node -p` shows it.
     shows: [[String]]{
         [String]{"1 + 2", "3\n"},
-        [String]{"name := 2; name * 3", "6\n"},
+        [String]{"^name: 2; name * 3", "6\n"},
         [String]{"[1, 2, 3]", "1\n2\n3\n"},
         [String]{"\"GET /a 200\".words()", "GET\n/a\n200\n"},
         [String]{"\"x,y\".split(\",\")", "x\ny\n"},
         [String]{"\"a b\".words()[1]", "b\n"},
         [String]{"if 1 > 0 {{ print(4) }}", "4\n"},
         [String]{"answer: if 1 > 0 -> \"yes\" else -> \"no\"; answer", "yes\n"},
-        [String]{"name := 5", ""},
+        [String]{"^name: 5", ""},
     }
     loop row in shows {
         shown: eval(jet, repo, work, cache, row[0])

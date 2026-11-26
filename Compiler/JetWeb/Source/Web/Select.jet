@@ -4,7 +4,7 @@
 // fixed-width traps and their stop texts, and the same stop protocol.
 //
 // IR control flow is already structured, so Block, Loop, If/Else, End, Br and
-// BrIf map one to one. A stop point (`stopped := poll(); if stopped { edge }`)
+// BrIf map one to one. A stop point (`^stopped: poll(); if stopped { edge }`)
 // keeps its If: the edge runs inline, and a return from inside it is a stop
 // return. A body's stop return leaves global WEB_GLOBAL_EDX 1, any other
 // return 0, as x86-64 leaves edx, so the stop point right after a call of a
@@ -68,7 +68,7 @@ web_call_reports: fn(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
     f.op[at] == .Call && web_reports_stop(m, f.a[at])
 }
 
-// Whether `at` starts a stop point: `stopped := poll()` then `if stopped`
+// Whether `at` starts a stop point: `^stopped: poll()` then `if stopped`
 // with no Else.
 web_is_stop_point: fn(st: WebState, f: IRFunction, at: Int) -> Bool Never! {
     if at < 0 || at + 1 >= f.op.len() || f.op[at] != .Call || f.a[at] < 0 -> return false

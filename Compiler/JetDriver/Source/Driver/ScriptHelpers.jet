@@ -5,7 +5,7 @@
 // The types come from one probe check of the entry's statements before the
 // real registration (sema_script_entry_local_types); a variable a function
 // writes is a `^` parameter, from a second probe that checks each function
-// with its `:=` variables as `^` (sema_script_helper_writes).
+// with its changeable variables as `^` (sema_script_helper_writes).
 use {
     jet_foundation.[AST_NODE_GENERATED, AccessConvention, Diagnostic, Expr, Item, Param, ParamZone, Program, Span, TargetMachine]
     jet_sema.[
@@ -157,7 +157,7 @@ jet_driver_script_reach_chains: fn(named: ^[[String]], calls: [[Int]], hidden: [
 }
 
 // Appends each reached variable that the probe typed to its function as a
-// label-only parameter, `^` for a `:=` variable. Answers, per function, the
+// label-only parameter, `^` for a changeable variable. Answers, per function, the
 // `^` parameters, which the write probe settles.
 jet_driver_script_add_parameters: fn(load: ^JetDriverLoadResult, reach: [String:[String]], variables: [String:SemaScriptVariable]) -> [String:[String]] {
     ^candidates: [String:[String]]{}

@@ -1162,14 +1162,14 @@ call_sites: fn(source_text: String, table: Table, initial: [String:String]) -> [
         // nothing.
         follow: token(tokens, i + 1)
         listed: token(tokens, i - 1) == "(" || token(tokens, i - 1) == ","
-        if is_identifier(value) && (follow == ":" || follow == ":=") {
+        if is_identifier(value) && follow == ":" {
             ^at: i + 2
             loop token(tokens, at) == "^" || token(tokens, at) == "~" || token(tokens, at) == "comptime" {
                 at += 1
             }
             rhs: chain(tokens, at)
             if rhs.found {
-                // A method of a typed receiver (`first := region.claim(…)`) is
+                // A method of a typed receiver (`^first: region.claim(…)`) is
                 // resolved through the receiver's type, as a call is below.
                 owner: receivers.get(rhs.parts[0]) ?? ""
                 target: if owner != "" && rhs.parts.len() > 1 -> with_head(owner, rhs.parts) else -> expand(rhs.parts, aliases)
@@ -2190,11 +2190,11 @@ function_ids: fn(rows: [Function]) -> [String] Never! { rows.map(fn(row) { row.i
 }
 
 #Test("a binding from a typed receiver's method or a generic result holds the declared type") {
-    assert_eq(ids("use mem: core.mem\n    run: fn() {{\n      region := mem.reserve()\n      first := region.claim() ?? panic(\"none\")\n      first.address()\n      cells := mem.window<Int>()\n      cells.len()\n    }}", ""), [String]{"core.mem.reserve", "core.mem.Region.claim", "core.mem.Block.address", "core.mem.window", "core.mem.Window.len"})
+    assert_eq(ids("use mem: core.mem\n    run: fn() {{\n      ^region: mem.reserve()\n      ^first: region.claim() ?? panic(\"none\")\n      first.address()\n      ^cells: mem.window<Int>()\n      cells.len()\n    }}", ""), [String]{"core.mem.reserve", "core.mem.Region.claim", "core.mem.Block.address", "core.mem.window", "core.mem.Window.len"})
 }
 
 #Test("a binding holds the type a method chain, a local function or an imported result gives") {
-    found: ids("use mem: core.mem\n    use process: core.process\n    local: fn(n: Int) -[FS]> mem.Region Never! {{ mem.reserve() }}\n    run: fn() {{\n      chained := mem.reserve().next().claim() ?? panic(\"none\")\n      chained.address()\n      made := local(1)\n      made.claim()\n      imported := process.block()\n      imported.address()\n    }}", "")
+    found: ids("use mem: core.mem\n    use process: core.process\n    local: fn(n: Int) -[FS]> mem.Region Never! {{ mem.reserve() }}\n    run: fn() {{\n      ^chained: mem.reserve().next().claim() ?? panic(\"none\")\n      chained.address()\n      ^made: local(1)\n      made.claim()\n      ^imported: process.block()\n      imported.address()\n    }}", "")
     ^addressed: 0
     ^claimed: 0
     loop id in found {
@@ -2210,7 +2210,7 @@ function_ids: fn(rows: [Function]) -> [String] Never! { rows.map(fn(row) { row.i
 }
 
 #Test("an interpolation that ends in a typed value calls its display") {
-    assert_eq(ids("use mem: core.mem\n    run: fn() {{\n      region := mem.reserve()\n      block := region.claim() ?? panic(\"none\")\n      print(\"{{block}} {{region.last()}} {{region.claim()}} {{block.address()}}\")\n    }}", ""), [String]{"core.mem.reserve", "core.mem.Region.claim", "core.mem.Block.display", "core.mem.Region.last", "core.mem.Region.claim", "core.mem.Block.address", "core.mem.Block.display"})
+    assert_eq(ids("use mem: core.mem\n    run: fn() {{\n      ^region: mem.reserve()\n      ^block: region.claim() ?? panic(\"none\")\n      print(\"{{block}} {{region.last()}} {{region.claim()}} {{block.address()}}\")\n    }}", ""), [String]{"core.mem.reserve", "core.mem.Region.claim", "core.mem.Block.display", "core.mem.Region.last", "core.mem.Region.claim", "core.mem.Block.address", "core.mem.Block.display"})
 }
 
 #Test("a built-in scalar that a Core impl gives methods is named unqualified") {

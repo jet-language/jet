@@ -34,7 +34,7 @@ training_loss: fn(w1: Tensor, w2: Tensor, x: Tensor, target: Tensor) -> Tensor {
 }
 
 batch_inputs: fn(order: [Int], start: Int) -> Tensor {
-    values := [Float]{}
+    ^values: [Float]{}
     loop offset in 0..<2 {
         index: order[start + offset]
         if index % 2 == 0 {
@@ -50,7 +50,7 @@ batch_inputs: fn(order: [Int], start: Int) -> Tensor {
 }
 
 batch_targets: fn(order: [Int], start: Int) -> Tensor {
-    values := [Float]{}
+    ^values: [Float]{}
     loop offset in 0..<2 {
         index: order[start + offset]
         if index % 2 == 0 {
@@ -84,9 +84,9 @@ manual_grad_w2: fn(w1: Tensor, w2: Tensor, x: Tensor, target: Tensor) -> Tensor 
 }
 
 train: fn() -> Tensor {
-    w1 := compute.eye(2) ?? panic("w1")
-    w2 := compute.zeros([2, 2]) ?? panic("w2")
-    order := [0, 1, 2, 3]
+    ^w1: compute.eye(2) ?? panic("w1")
+    ^w2: compute.zeros([2, 2]) ?? panic("w2")
+    ^order: [0, 1, 2, 3]
     random.seed(42)
     loop epoch in 0..<4 {
         order = order.shuffle().to_list()

@@ -56,14 +56,14 @@ run: fn() {
 }
 `
     in_field: `run: fn() {
-    k := 0
+    ^k: 0
     h: Holder{action: fn() { k += 1 }}
     h.action()
     print(k)
 }
 `
     in_list: `run: fn() {
-    j := 0
+    ^j: 0
     list: [fn() -[]>]{fn() { j += 1 }}
     act: list[0]
     act()
@@ -71,14 +71,14 @@ run: fn() {
 }
 `
     by_method: `run: fn() {
-    items := [Int]{}
+    ^items: [Int]{}
     h: Holder{action: fn() { items.push(1) }}
     h.action()
     print(items.len())
 }
 `
     assigned_later: `run: fn() {
-    n := 0
+    ^n: 0
     stored: fn() { n += 1 }
     kept: [stored]
     act: kept[0]
@@ -92,7 +92,7 @@ run: fn() {
         assert(found.len() == 1 && found[0].starts_with("E0204") && found[0].contains("stored lambda"), "{found.join("; ")}: {source}")
     }
     accepted: `counter: fn() -> fn() -> Int {
-    n := 0
+    ^n: 0
     fn() {
         n += 1
         n
@@ -104,15 +104,15 @@ fill: fn(values: ^[Int]) {
     print(values.len())
 }
 run: fn() {
-    k := 0
+    ^k: 0
     bump: fn(n: Int) { k += n }
     bump(2)
     print(k)
     tick: counter()
     print(tick())
-    values := [Int]{}
+    ^values: [Int]{}
     fill(values)
-    base := 10
+    ^base: 10
     reads: [fn() -[]> Int]{fn() { base + 1 }}
     base = 20
     read: reads[0]

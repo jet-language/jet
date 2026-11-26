@@ -70,7 +70,7 @@ package_outputs_declared_callable: fn(line: String) -> String? {
     loop end < bytes.len() && s3_truth_ascii_word_byte(bytes[end]) -> end += 1
     if end == 0 -> return None
     rest: policy_slice_bytes(head, end, bytes.len()).trim_start().copy()
-    if !rest.starts_with(":") || rest.starts_with("::") || rest.starts_with(":=") -> return None
+    if !rest.starts_with(":") || rest.starts_with("::") -> return None
     value: policy_slice_bytes(rest, 1, rest.bytes().len()).trim_start().copy()
     if !value.starts_with("fn(") && !value.starts_with("fn<") -> return None
     Val(policy_slice_bytes(head, 0, end))

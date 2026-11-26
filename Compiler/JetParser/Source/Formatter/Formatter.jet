@@ -188,12 +188,6 @@ JetFmt: struct {
     // `.Name(…) {` is a scope member, so a named payload there keeps its
     // parens.
     stmt_head_at: Int{-1},
-    // D-BIND-MARK1 stage 1, temporary: the migration format
-    // (jet_format_source_bind_mark1) rewrites `name := value` to
-    // `^name: value` and a written `^place` window to `place.in_place()`;
-    // an ordinary format keeps the spelling the author wrote. Stage 2 makes
-    // the new spelling the only one and deletes this switch.
-    bind_mark1: Bool{false},
 }
 
 // An optional (span, index) from `source_list_span_after`.
@@ -471,7 +465,8 @@ jfmt_stmt_start: fn(stmt: Stmt) -> Int Never! {
     if stmt == {
         .Expr(expr) -> expr_span(expr).start
         .DeferClose(_, span) -> span.start
-        .Val(binding) -> binding.name_span.start
+        // A changeable name's statement starts at the `^` touching its name.
+        .Val(binding) -> if binding.mutable && binding.pattern == None -> binding.name_span.start - 1 else -> binding.name_span.start
         .Assign(target, _, _, _) -> if target == {
             .Local(_, name_span) -> name_span.start
             .Index(_, _, span, _) -> span.start
@@ -2793,14 +2788,7 @@ jfmt_trailing_marker_followed: fn(f: JetFmt, prog: Program, ordered_file_rules: 
 
 // Lex, parse, then format. Parse errors propagate; sema is not required.
 jet_format_source: fn(src: String, simplify_requested: Bool) -> JetFormatResult {
-    jfmt_format_source_in(src, simplify_requested, false, true, false)
-}
-
-// D-BIND-MARK1 stage 1, temporary: jet_format_source (or, for `library`,
-// jet_format_library_source) that also writes every changeable name as
-// `^name: value` and every window as `place.in_place()` (JetFmt.bind_mark1).
-jet_format_source_bind_mark1: fn(src: String, simplify_requested: Bool, library: Bool) -> JetFormatResult {
-    jfmt_format_source_in(src, simplify_requested, library, true, true)
+    jfmt_format_source_in(src, simplify_requested, false, true)
 }
 
 // jet_format_source for a Core library or compiler prelude source. Those
@@ -2808,14 +2796,14 @@ jet_format_source_bind_mark1: fn(src: String, simplify_requested: Bool, library:
 // reads embedded Core (parse_generated_layout); a user file never formats
 // this way.
 jet_format_library_source: fn(src: String, simplify_requested: Bool) -> JetFormatResult {
-    jfmt_format_source_in(src, simplify_requested, true, true, false)
+    jfmt_format_source_in(src, simplify_requested, true, true)
 }
 
 // `settle` lets a `--simplify` format read its printed text once more: the
 // printer's own rewrites (an `else if` chain written as an arm table) can
 // leave a shape the source rewrites write in the current form. The settling
 // pass does not settle again, so an unstable print cannot recurse forever.
-jfmt_format_source_in: fn(src: String, simplify_requested: Bool, library: Bool, settle: Bool, bind_mark1: Bool) -> JetFormatResult {
+jfmt_format_source_in: fn(src: String, simplify_requested: Bool, library: Bool, settle: Bool) -> JetFormatResult {
     source: src.bytes()
     lexed: if library -> lex_generated(source) else -> lex(source)
     if lexed.diagnostics.len() > 0 {
@@ -2842,7 +2830,6 @@ jfmt_format_source_in: fn(src: String, simplify_requested: Bool, library: Bool, 
     // The formatter's own items serve declaration lookups only, which
     // `--simplify` leaves alone, so they can be the program as parsed.
     ^f: jfmt_new(prog, src, lexed.tokens, simplify)
-    f.bind_mark1 = bind_mark1
     // Under `--simplify` each body rewrite is applied before the format and
     // the rewritten source is formatted again, one rewrite at a time, so
     // each reads the program the last one left: a trailing if/else whose
@@ -2857,7 +2844,7 @@ jfmt_format_source_in: fn(src: String, simplify_requested: Bool, library: Bool, 
             jfmt_body_rewrites(f, prog.items, JfmtBodyRewrite.ValueTails, body_rewrites)
         }
         if body_rewrites.len() > 0 && jfmt_apply_source_edits(src, body_rewrites) == .Val(rewritten) {
-            again: jfmt_format_source_in(rewritten, true, library, true, bind_mark1)
+            again: jfmt_format_source_in(rewritten, true, library, true)
             if again.ok -> return again
         }
     }
@@ -2868,11 +2855,11 @@ jfmt_format_source_in: fn(src: String, simplify_requested: Bool, library: Bool, 
     // source again reaches the form a second pass keeps; a rewrite that
     // would not parse is left out.
     if simplify && f.inline_rewrites.len() > 0 && jfmt_apply_source_edits(src, f.inline_rewrites) == .Val(rewritten) {
-        again: jfmt_format_source_in(rewritten, true, library, true, bind_mark1)
+        again: jfmt_format_source_in(rewritten, true, library, true)
         if again.ok -> return again
     }
     if simplify && settle && text != src {
-        again: jfmt_format_source_in(text, true, library, false, bind_mark1)
+        again: jfmt_format_source_in(text, true, library, false)
         if again.ok -> return again
     }
     // Without simplify, a format changes layout only: the text must parse to

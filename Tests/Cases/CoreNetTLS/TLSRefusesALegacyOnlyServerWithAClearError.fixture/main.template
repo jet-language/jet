@@ -9,7 +9,7 @@ use {
 }
 
 connect: fn(port: String, config: ClientConfig) -[Net, Time.Wait]> TLSStream NetError! {
-    tcp := net.tcp_connect("127.0.0.1:{port}") ?? panic("connect")
+    ^tcp: net.tcp_connect("127.0.0.1:{port}") ?? panic("connect")
     tls.client(tcp, server_name: "localhost", config: config, deadline: 5s)
 }
 

@@ -2276,15 +2276,15 @@ render_host_errors: fn(messages: [ErrnoMessage]) -> String GeneratorError! {
         "// by LF. An errno whose line is empty, or past the last, has line 0's.",
         "host_errno_append: fn(text: I64, errno: I64) {{",
         "    table: rt_text_data(rt_static_text(\"{table}\"))",
-        "    index := if (errno > I64{{0}} && errno <= I64{{{highest}}}) -> errno else -> I64{{0}}",
+        "    ^index: if (errno > I64{{0}} && errno <= I64{{{highest}}}) -> errno else -> I64{{0}}",
         "    loop {{",
-        "        start := I64{{0}}",
-        "        line := I64{{0}}",
+        "        ^start: I64{{0}}",
+        "        ^line: I64{{0}}",
         "        loop line < index {{",
         "            if (rt_text_byte(wrapping(table + start)) == I64{{10}}) {{ line += I64{{1}} }}",
         "            start += I64{{1}}",
         "        }}",
-        "        end := start",
+        "        ^end: start",
         "        loop rt_text_byte(wrapping(table + end)) != (I64{{10}}) -> end += I64{{1}}",
         "        if (end > start || index == I64{{0}}) {{",
         "            rt_text_append(text, wrapping(table + start), end - start)",
@@ -3050,13 +3050,10 @@ left_operand: fn(text: String) -> String Never! {
     text.copy()
 }
 
-// The name a line binds when it ends with `name:` or `name :=`, else "".
+// The name a line binds when it ends with `name:` or `^name:`, else "".
 bound_name: fn(head: String) -> String Never! {
-    name: if {
-        head.ends_with(":=") -> byte_slice(head, 0, byte_len(head) - 2).trim()
-        head.ends_with(":") -> byte_slice(head, 0, byte_len(head) - 1).trim()
-        else -> ""
-    }
+    if !head.ends_with(":") -> return ""
+    name: byte_slice(head, 0, byte_len(head) - 1).trim().removeprefix("^")
     if leading_name(name) == name -> name else -> ""
 }
 
@@ -3167,7 +3164,7 @@ exit_guard: fn() -[FS]> [String] GeneratorError! {
 }
 
 #Test("a bare 70 or 101 in an exit position is a copy; bytes, errnos, HTTP statuses and named codes are not") {
-    copies: "a: fn() {{\n    trap_exit(I64{{70}})\n    if run.code == 101 -> x()\n    rt.exit(if code == 101 -> 1 else -> code)\n    sync_store(exit_code_out, I64{{70}})\n    code := I64{{70}}\n}}\nJET_CLI_EXIT_ICE: 101\n"
+    copies: "a: fn() {{\n    trap_exit(I64{{70}})\n    if run.code == 101 -> x()\n    rt.exit(if code == 101 -> 1 else -> code)\n    sync_store(exit_code_out, I64{{70}})\n    ^code: I64{{70}}\n}}\nJET_CLI_EXIT_ICE: 101\n"
     found: exit_literal_problems("p", copies) ?? panic(err.message)
     assert_eq(found.len(), 6)
     assert(found[0].starts_with("p:2: a bare 70 fills an exit position"))

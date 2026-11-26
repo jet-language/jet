@@ -931,11 +931,11 @@ reconstruct cost from emitted code.
 ```jet
 loop item in items {
     out.push(item.view())        // view materialization: hidden-cost lint when semantic
-    held := items                // implicit copy: `items` is read again below
+    ^held: items                // implicit copy: `items` is read again below
     counts[item.key] += 1        // map copy-on-write: hidden-cost lint when semantic
     total += item                // exact-Int spill: hidden-cost lint when semantic
     result: read(item)         // outcome construction: hidden-cost lint when semantic
-    value := items[index]        // generic fallback: hidden-cost lint when semantic
+    ^value: items[index]        // generic fallback: hidden-cost lint when semantic
 }
 ```
 

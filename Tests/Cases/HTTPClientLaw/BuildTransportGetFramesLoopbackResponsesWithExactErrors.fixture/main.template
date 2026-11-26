@@ -8,7 +8,7 @@ use {
 // peers never answer and keep the connection until the client gives up.
 
 text: fn(row: [U8]) -> String {
-    out := ""
+    ^out: ""
     loop byte in row {
         n: Int{byte}
         out = if n >= 32 && n < 127 -> "{out}{String.from_bytes([U8]{byte}) ?? "?"}" else -> "{out}\\x{n}"
@@ -17,14 +17,14 @@ text: fn(row: [U8]) -> String {
 }
 
 show: fn(rows: [[U8]]) -> String {
-    out := ""
+    ^out: ""
     loop row in rows -> out = "{out}[{text(row)}]"
     out
 }
 
 serve: fn(listener: TCPListener, response: [U8], hold: Bool) -[Net, Time.Wait]> String Never! {
-    stream := net.tcp_accept(listener) ?? return "accept failed"
-    request := [U8]{}
+    ^stream: net.tcp_accept(listener) ?? return "accept failed"
+    ^request: [U8]{}
     loop {
         chunk: stream.read_bytes(4096, deadline: 10s) ?? return "read failed"
         if chunk.len() == 0 -> break
@@ -32,9 +32,9 @@ serve: fn(listener: TCPListener, response: [U8], hold: Bool) -[Net, Time.Wait]> 
         n: request.len()
         if !hold && n >= 4 && request[n - 4] == (U8{13}) && request[n - 3] == (U8{10}) && request[n - 2] == (U8{13}) && request[n - 1] == (U8{10}) -> break
     }
-    at := 0
+    ^at: 0
     loop at < response.len() {
-        rest := [U8]{}
+        ^rest: [U8]{}
         loop index in at..<response.len() -> rest.push(response[index])
         sent: stream.write_some(rest, deadline: 10s) ?? return "write failed"
         at += sent
@@ -71,12 +71,12 @@ run: fn() {
     answer("hints", "HTTP/1.1 103 Early Hints\r\nLink: </asset>\r\n\r\nHTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nraw", 1024)
 
     // Chunked binary bodies with extensions; the bound returns one excess byte.
-    chunked := "HTTP/1.1 200 OK\r\nTransfer-Encoding: gzip, Chunked\r\n\r\n2\r\n".bytes()
+    ^chunked: "HTTP/1.1 200 OK\r\nTransfer-Encoding: gzip, Chunked\r\n\r\n2\r\n".bytes()
     chunked.push(U8{255})
     chunked.push(U8{0})
     loop byte in "\r\n3;extension=x\r\nabc\r\n0\r\n\r\n".bytes() -> chunked.push(byte)
     exchange("chunked", chunked, 512, 5000, false)
-    bounded := "HTTP/1.1 200 OK\r\nContent-Length: 514\r\n\r\n".bytes()
+    ^bounded: "HTTP/1.1 200 OK\r\nContent-Length: 514\r\n\r\n".bytes()
     loop _ in 0..<514 -> bounded.push(U8{120})
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     port: net.socket_port(net.listener_local_socket_addr(listener) ?? panic("address"))

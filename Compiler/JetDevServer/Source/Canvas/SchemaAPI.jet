@@ -96,12 +96,12 @@ runtime_event_fields: fn() -> [RuntimeEventField] Never! {
 // The Canvas JSON of one `key=value` observation line; None when a field is
 // missing.
 runtime_event_json: fn(line: String) -> String? Never! {
-    values := [String:String]{}
+    ^values: [String:String]{}
     loop word in debug_words(line) {
         pair: word.split_once("=") ?? next
         values[pair.before] = pair.after
     }
-    members := [String]{}
+    ^members: [String]{}
     loop field in runtime_event_fields() {
         value: values.get(field.key) ?? return None
         rendered: if field.text -> json_str(value) else -> value
@@ -112,7 +112,7 @@ runtime_event_json: fn(line: String) -> String? Never! {
 
 runtime_events_json: fn(snapshot: String) -> String Err! {
     rendered: render_event_observations(snapshot) ?? return Err(query_error("live", err.message))
-    events := [String]{}
+    ^events: [String]{}
     loop line in canvas_debug_lines(rendered) {
         event: runtime_event_json(line) ?? return Err(query_error("live", "runtime event observation is incomplete"))
         events.push(event)
@@ -148,7 +148,7 @@ resolve_entry_source_path: fn(entry: String, source_id: String?) -> String Err! 
 
 project_source_roots: fn(ctx: ProjectContext) -> [String] {
     if ctx.workspace_root == .Val(workspace_root) {
-        cache := WorkspaceDeclarationCache.new()
+        ^cache: WorkspaceDeclarationCache.new()
         view: workspace_view(cache, workspace_root)
         if !view.source_failed && view.members.len() > 0 {
             roots: loop member in view.members -> schema_files.join(workspace_root, member.path)
@@ -163,7 +163,7 @@ project_source_roots: fn(ctx: ProjectContext) -> [String] {
 project_capabilities_json: fn(packages: String, targets: String, environment: EnvProjectJSON) -> String Never! {
     target_text: "{packages}{targets}".lower()
     service: environment.services != "" || target_text.contains("\"kind\":\"service\"") || target_text.contains("\"target\":\"service\"")
-    has_checked_output := false
+    ^has_checked_output: false
     checked_kinds: [String]{"library", "executable", "service", "check", "environment", "image", "bundle", "system", "fleet"}
     loop kind in checked_kinds {
         if target_text.contains("\"kind\":\"{kind}\"") -> has_checked_output = true
@@ -171,7 +171,7 @@ project_capabilities_json: fn(packages: String, targets: String, environment: En
     runtime_output: !has_checked_output || target_text.contains("\"kind\":\"executable\"") || target_text.contains("\"kind\":\"service\"") || service
     designer: target_text.contains("\"kind\":\"ui\"") || target_text.contains("\"kind\":\"game\"") || target_text.contains("\"target\":\"ui\"") || target_text.contains("\"target\":\"game\"")
     preview: designer || target_text.contains("\"target\":\"web\"")
-    capabilities := [String]{"\"graph\":true", "\"code\":true", "\"diagnostics\":true"}
+    ^capabilities: [String]{"\"graph\":true", "\"code\":true", "\"diagnostics\":true"}
     if runtime_output -> capabilities.push("\"runtime_output\":true")
     if runtime_output && !preview -> capabilities.push("\"terminal\":true")
     if service -> capabilities.push("\"service\":true")
@@ -193,7 +193,7 @@ project_json_for_entry_inner: fn(path: String) -> String {
     locks_json: lock_project_json(ctx.project_root)
     environment: env_project_json(ctx.project_root)
     capabilities_json: project_capabilities_json(packages_json, targets_json, environment)
-    diagnostics := [String]{}
+    ^diagnostics: [String]{}
     if ctx.authority_diagnostic == .Val(diagnostic) -> diagnostics.push(diagnostic_json(diagnostic))
     if environment.diagnostics != "" -> diagnostics.push(environment.diagnostics)
     mode: if {
@@ -348,19 +348,19 @@ source_control_json_for_entry: fn(path: String) -> String {
 source_control_json_for_entry_inner: fn(path: String) -> String {
     ctx: project_context_for_entry(path)
     root: git_root(path)
-    dirty_files := 0
-    statuses := [String]{}
-    files := [String]{}
+    ^dirty_files: 0
+    ^statuses: [String]{}
+    ^files: [String]{}
     loop file in ctx.files {
         abs: schema_files.join(ctx.project_root, file.path)
         src: read_source_without_symlinks(abs) ?? ""
-        state := GitFileState{status: "", diff: "", dirty: false}
+        ^state: GitFileState{status: "", diff: "", dirty: false}
         if root == .Val(git) -> state = git_file_state(git, abs, src)
         if state.dirty -> dirty_files += 1
         if state.status != "" -> statuses.push(state.status)
         files.push("{{\"path\":{json_str(file.path)},\"revision\":{json_str(file.revision)},\"kind\":{json_str(file.kind)},\"available\":{json_bool(root != None)},\"dirty\":{json_bool(state.dirty)},\"status\":{json_str(state.status)},\"diff\":{json_str(state.diff)}}}")
     }
-    history := [String]{}
+    ^history: [String]{}
     if root == .Val(git) {
         log: git_output(git, [String]{"log", "--oneline", "-5", "--", git_relative_path(git, path)}) ?? ""
         loop line in canvas_debug_lines(log) -> history.push(json_str(line))
@@ -382,7 +382,7 @@ proof_payload: fn(checker: LSPChecker, entry: String, source_id: String?, comman
         .Ok(_) -> "{{\"state\":\"ok\",\"diagnostics_count\":0,\"message\":\"front end check passed\"}}"
         .Err(failure) -> "{{\"state\":\"diagnostic\",\"diagnostics_count\":{failure.diagnostics.len()},\"message\":{json_str(diagnostic_render_all(path, src, failure.diagnostics, false))}}}"
     }
-    git := "{{\"truth\":\"git-text\",\"available\":false,\"dirty\":false,\"status\":\"not a Git worktree\"}}"
+    ^git: "{{\"truth\":\"git-text\",\"available\":false,\"dirty\":false,\"status\":\"not a Git worktree\"}}"
     if git_root(path) == .Val(root) {
         state: git_file_state(root, path, src)
         git = "{{\"truth\":\"git-text\",\"available\":true,\"dirty\":{json_bool(state.dirty)},\"status\":{json_str(state.status)}}}"
@@ -403,7 +403,7 @@ CommandPlan: struct {
 }
 
 command_plan: fn(action_id: String, source: String, request: String) -> CommandPlan? Never! {
-    plan := if action_id == {
+    ^plan: if action_id == {
         "canvas.command:run" -> CommandPlan{title: "Run program", args: [String]{"run", source}, writes: "none", requires_confirmation: false}
         "canvas.command:check" -> CommandPlan{title: "Check project", args: [String]{"check", source}, writes: "none", requires_confirmation: false}
         "canvas.command:test" -> CommandPlan{title: "Test project", args: [String]{"test", source}, writes: "test_outputs", requires_confirmation: true}
@@ -454,13 +454,13 @@ command_receipt_payload: fn(checker: LSPChecker, entry: String, request: String)
     }
     started: schema_time.instant()
     check_src: json_string_field(request, "source_text") ?? src
-    outcome := CommandOutcome{success: false, exit_code: None, stdout: "", stderr: "", diagnostics: ""}
+    ^outcome: CommandOutcome{success: false, exit_code: None, stdout: "", stderr: "", diagnostics: ""}
     if action_id == "canvas.command:check" {
         outcome = check_command_outcome(checker, source_path, check_src)
     } else { outcome = run_jet_command(authority.project_root, plan.args) }
     elapsed_ms: started.elapsed().ns /% 1000000
     exit_code: if outcome.exit_code == .Val(code) -> "{code}" else -> "null"
-    command := [String]{json_str("jet")}
+    ^command: [String]{json_str("jet")}
     loop arg in plan.args -> command.push(json_str(arg))
     Ok("{{\"protocol\":\"jet.canvas.command_receipt\",\"schema_version\":1,\"ok\":true,\"action_id\":{json_str(action_id)},\"title\":{json_str(plan.title)},\"source_id\":{json_str(source_label)},\"revision\":{json_str(revision)},\"checked_revision\":{json_str(source_revision(check_src))},\"command\":[{command.join(",")}],\"writes\":{json_str(plan.writes)},\"success\":{json_bool(outcome.success)},\"exit_code\":{exit_code},\"elapsed_ms\":{elapsed_ms},\"stdout\":{json_str(outcome.stdout)},\"stderr\":{json_str(outcome.stderr)},\"diagnostics\":[{outcome.diagnostics}]}}")
 }
@@ -468,7 +468,7 @@ command_receipt_payload: fn(checker: LSPChecker, entry: String, request: String)
 // The check command checks `src` as the text of `path` in its project.
 check_command_outcome: fn(checker: LSPChecker, path: String, src: String) -> CommandOutcome {
     checked: checker.check(path, [JetDriverSourceDocument]{JetDriverSourceDocument{path: canonical_path(path), source: src}})
-    errors := [Diagnostic]{}
+    ^errors: [Diagnostic]{}
     loop diagnostic in checked.diagnostics {
         if diagnostic.severity == DIAGNOSTIC_ERROR -> errors.push(diagnostic)
     }
@@ -492,7 +492,7 @@ apply_transaction_json: fn(checker: LSPChecker, path: String, request: String) -
 }
 
 apply_transaction_payload: fn(checker: LSPChecker, path: String, request: String) -> String Err! {
-    target := path
+    ^target: path
     if json_string_field(request, "source_id") == .Val(source_id) {
         target = project_path_for_source_id(path, source_id) ?? return Err(edit_error("not_found", "Canvas source_id must name a projected Jet source file"))
     }

@@ -528,9 +528,9 @@ jet_cli_import_translate_body: fn(function: JetCLIImportFunction) -> [String] Je
             }
             value: jet_cli_import_parse_expression(pair.right) ?? return Err(JetCLIImportBodyError{line: row.line, message: err.message.copy()})
             materialized: jet_cli_import_materialize_borrowed_string(function, pair.right, value)
-            operator: if bindings.has_key(name) -> "=" else -> ":="
+            target: if bindings.has_key(name) -> "{name} =" else -> "^{name}:"
             bindings[name.copy()] = true
-            output.push("{name} {operator} {materialized}")
+            output.push("{target} {materialized}")
             next
         }
         output.push(jet_cli_import_parse_expression(line) ?? return Err(JetCLIImportBodyError{line: row.line, message: err.message.copy()}))

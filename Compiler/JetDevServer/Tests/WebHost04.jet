@@ -126,7 +126,7 @@ use {
 }
 
 #Test("failed_edit_revision_facts_agree") {
-    facts := web_host_facts("app.jet", 8123)
+    ^facts: web_host_facts("app.jet", 8123)
     facts.building()
     assert(facts.accepted() == None)
     assert_eq(facts.candidate ?? 0, 1)
@@ -158,7 +158,7 @@ use {
 }
 
 #Test("reconnect_overrides_ready_building_and_error_without_losing_snapshot") {
-    facts := web_host_facts("app.jet", 8123)
+    ^facts: web_host_facts("app.jet", 8123)
     facts.ready(425, false)
     facts.reconnecting = true
     ready: facts.json()
@@ -182,7 +182,7 @@ use {
 }
 
 #Test("status_words_count_the_leased_pages") {
-    facts := web_host_facts("app.jet", 8123)
+    ^facts: web_host_facts("app.jet", 8123)
     facts.clients = 1
     facts.ready(1500, false)
     words: facts.words()

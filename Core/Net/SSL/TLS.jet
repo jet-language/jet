@@ -559,7 +559,7 @@ ssl_own_key_decrypt_fixed: fn<R: RNG>(ssl: ^ssldefs.SSLContext, input: [U8], len
 /// Give the handshake an ECDH context if it has none yet (C's
 /// ssl_handshake_params_init sets one up with mbedtls_ecdh_init).
 ssl_ecdh_ready: fn(ssl: ^ssldefs.SSLContext) Never! {
-    have: if ^ssl.handshake.ecdh_ctx == {
+    have: if ssl.handshake.ecdh_ctx.in_place() == {
         .Val(_) -> true
         None -> false
     }
@@ -568,7 +568,7 @@ ssl_ecdh_ready: fn(ssl: ^ssldefs.SSLContext) Never! {
 
 /// Give the handshake a DHM context if it has none yet (mbedtls_dhm_init).
 ssl_dhm_ready: fn(ssl: ^ssldefs.SSLContext) Never! {
-    have: if ^ssl.handshake.dhm_ctx == {
+    have: if ssl.handshake.dhm_ctx.in_place() == {
         .Val(_) -> true
         None -> false
     }
@@ -1904,7 +1904,7 @@ ssl_psk_derive_premaster: fn<R: RNG>(ssl: ^ssldefs.SSLContext, key_ex: suites.SS
             p += 50
         }
         .DHEPSK -> {
-            ^secret: if ^ssl.handshake.dhm_ctx == {
+            ^secret: if ssl.handshake.dhm_ctx.in_place() == {
                 .Val(ctx) -> dhm.dhm_calc_secret(ctx, rng) ?? return Err(.DHM(err))
                 None -> {
                     return Err(.InternalError)
@@ -1921,7 +1921,7 @@ ssl_psk_derive_premaster: fn<R: RNG>(ssl: ^ssldefs.SSLContext, key_ex: suites.SS
         }
         .ECDHEPSK -> {
             plen: end - (p + 2)
-            ^z: if ^ssl.handshake.ecdh_ctx == {
+            ^z: if ssl.handshake.ecdh_ctx.in_place() == {
                 .Val(ctx) -> ecdh.ecdh_calc_secret(ctx, plen, rng) ?? return Err(.ECP(err))
                 None -> {
                     return Err(.InternalError)

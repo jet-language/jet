@@ -1440,7 +1440,7 @@ sema_serde_items_migration_change: fn(entries: String, key: String, from_ty: Typ
     sema_serde_items_migration_rebuild(entries, changed, visit, span)
 }
 
-// `{ next := []; loop jet_serde_pair in entries { visit }; entries = next }`.
+// `{ ^next: []; loop jet_serde_pair in entries { visit }; entries = next }`.
 sema_serde_items_migration_rebuild: fn(entries: String, next_entries: String, visit: Stmt, span: Span) -> Stmt Never! {
     sema_serde_items_if(
         Expr.Bool{value: true, span: span, id: AST_NODE_GENERATED},

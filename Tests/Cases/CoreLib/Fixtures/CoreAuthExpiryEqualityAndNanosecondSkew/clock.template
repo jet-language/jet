@@ -17,7 +17,7 @@ check: fn(token: String, key: [U8], label: String, skew: Duration) {
 
 run: fn() {
     key: [U8]{ 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102 }
-    skew_token := "SKEW_TOKEN"
+    ^skew_token: "SKEW_TOKEN"
     skew_expiry: SKEW_EXPIRY
     base_ns: NOW_NS - skew_expiry * 1000000000
     boundary_ns: base_ns
@@ -33,7 +33,7 @@ run: fn() {
     accepted_skew: Duration.nanoseconds(base_ns + margin_ns) ?? panic("accepted skew")
     check(skew_token, key, "skew-margin-before", expired_skew)
     check(skew_token, key, "skew-margin-after", accepted_skew)
-    token := "TOKEN"
+    ^token: "TOKEN"
     zero: Duration.milliseconds(0) ?? panic("zero")
     check(token, key, "future", zero)
     check("EQUALITY", key, "equality", zero)

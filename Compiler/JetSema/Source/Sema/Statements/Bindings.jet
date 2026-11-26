@@ -1,4 +1,4 @@
-// Bindings and local writes: destructuring, `name: value` and `name := value`
+// Bindings and local writes: destructuring, `name: value` and `^name: value`
 // bindings, uninitialized bindings and their fill loops, compile-time locals,
 // and assignments to locals and module storage.
 use jet_foundation.[
@@ -63,11 +63,11 @@ sema_stmt_destructure_names: fn(pattern: BindPattern) -> [BindName] Never! {
     }
 }
 
-// The E0514 candidate a written `:=` binding declares: the start of each name
-// it binds (as that name's symbol carries it) and the text from the end of the
-// name or pattern through `:=`.
-sema_stmt_mutable_binding: fn(binding: Binding, sigil: Span) -> SemaOwnershipMutableBinding Never! {
-    pattern: binding.pattern ?? return SemaOwnershipMutableBinding{name: binding.name, name_span: binding.name_span, sigil: Span{start: binding.name_span.end, end: sigil.end}, starts: [Int]{binding.name_span.start}}
+// The E0514 candidate a written `^name: value` binding declares: the start of
+// each name it binds (as that name's symbol carries it); the `^` touching
+// each name ends just there.
+sema_stmt_mutable_binding: fn(binding: Binding) -> SemaOwnershipMutableBinding Never! {
+    pattern: binding.pattern ?? return SemaOwnershipMutableBinding{name: binding.name, name_span: binding.name_span, starts: [Int]{binding.name_span.start}}
     ^starts: [Int]{}
     ^names: [String]{}
     loop bound in sema_stmt_destructure_names(pattern) {
@@ -79,7 +79,7 @@ sema_stmt_mutable_binding: fn(binding: Binding, sigil: Span) -> SemaOwnershipMut
             names.push(bound.name)
         }
     }
-    SemaOwnershipMutableBinding{name: names.join(", "), name_span: binding.name_span, sigil: Span{start: binding.name_span.end, end: sigil.end}, starts: starts}
+    SemaOwnershipMutableBinding{name: names.join(", "), name_span: binding.name_span, starts: starts}
 }
 
 // `binding_mutable` is the whole binding's mark; `^name` in the pattern makes
@@ -667,7 +667,7 @@ sema_stmt_check_binding: fn(binding: Binding, lambda_escapes: Bool?, check: ^Sem
     }
     // A declared type (a generated binding's) resolves in this module's scope,
     // so an alias-qualified name such as `crypto.Secret` names its nominal. A
-    // `:=` number name a use decided on an earlier pass declares that type
+    // changeable number name a use decided on an earlier pass declares that type
     // (Expressions/NumberNames.jet).
     declared: if binding.ty == .Val(written) -> Val(sema_expr_expected_type(written, check.environment.*, check.program.*)) else if binding.mutable -> sema_expr_number_retype(binding.name_span, check.context.number_retypes_known) else -> None
     init_diagnostic_start: check.diagnostics.len()
@@ -712,7 +712,7 @@ sema_stmt_check_binding: fn(binding: Binding, lambda_escapes: Bool?, check: ^Sem
     }
     // This rule stage S5: `x: s.trim()`, `s.after(sep)` or `s.before(sep)` on a
     // local or parameter `String` binds a scope-bound zero-copy view into `s`;
-    // a `:=` binding keeps the owned result, since it may later be reassigned
+    // a changeable binding keeps the owned result, since it may later be reassigned
     // an owned `String`. A `s.slice(..)` binding stays owned too: a slice is a
     // view only where a `View<str>` slot (a return or a field) asks for one.
     ^view_sources: if binding.mutable || sema_string_view_is_slice_call(binding.init) -> [SemaOwnershipPlace]{} else -> sema_string_view_call_sources(binding.init, check.scopes, check.state)
@@ -749,8 +749,8 @@ sema_stmt_check_binding: fn(binding: Binding, lambda_escapes: Bool?, check: ^Sem
     if !binding.mutable && !string_view && sema_stmt_binding_reads_projection(binding.init, check.scopes) {
         sema_scope_mark_place_alias(check.scopes, binding.name)
     }
-    if !binding.mutable && binding.sigil_span == .Val(sigil) {
-        sema_scope_mark_binding_sigil(check.scopes, binding.name, Span{start: binding.name_span.end, end: sigil.end})
+    if !binding.mutable && binding.sigil_span != None {
+        sema_scope_mark_changeable_mark_at(check.scopes, binding.name, Span{start: binding.name_span.start, end: binding.name_span.start})
     }
     if number_literal != None {
         sema_scope_mark_number_literal(check.scopes, binding.name, number_literal)
@@ -803,7 +803,7 @@ sema_stmt_check_binding: fn(binding: Binding, lambda_escapes: Bool?, check: ^Sem
     sema_stmt_note_normalized_path_text(binding, init, check.scopes)
     ^_: sema_hardware_bind_pending_dma_transfer(binding_expr, symbol, key, check.scopes)
     view_diagnostics_before: check.diagnostics.len()
-    // An owning copy of a read view (`entries := stream.object_entries(tree)`)
+    // An owning copy of a read view (`^entries: stream.object_entries(tree)`)
     // is new storage: the binding holds no window into the view's source.
     owned_copy: init.kind == .MaterializeView(_)
     if !owned_copy && !sema_stmt_record_binding_views(binding, init.ty, check.scopes, check.state, check.context, check.diagnostics) {
@@ -855,7 +855,7 @@ sema_stmt_check_binding: fn(binding: Binding, lambda_escapes: Bool?, check: ^Sem
     Val(TStmt.Let{local: local, let_ty: let_ty, init: stored, gc_promotion: gc_promotion, gc_transferred: binding.gc_transferred, span: span})
 }
 
-// A `:=` binding, or a value `if` bound as a non-view, owns its value, so a
+// A changeable binding, or a value `if` bound as a non-view, owns its value, so a
 // read-view initializer (`View<T>`, `View<str>`) materializes one owned copy
 // (`[T]`, `String`) under the default copy policy. A binding declared
 // `View`/`ViewMut` keeps the view.
@@ -935,7 +935,7 @@ sema_stmt_check_range_conversion: fn(init: Expr, head: String, expected: Type?, 
     sema_expr_expected(value, expected, check.environment.*, check.program.*, check.diagnostics)
 }
 
-// `name := Type{ uninit }` needs `use core.mem` (E0424) and a plain-data type
+// `^name: Type{ uninit }` needs `use core.mem` (E0424) and a plain-data type
 // (E0423). The binding is declared without a value and recorded as not yet
 // written, so a read before every path writes it is E0420; it lowers to the
 // uninitialized-local let.
@@ -1077,8 +1077,8 @@ sema_stmt_uninit_fill_range: fn(tables: ASTTables, state: ^SemaOwnershipState, s
     }
 }
 
-// `loop index := 0; index < count; index += 1 { root[index] = value }`, and
-// the same loop as `index := 0` then `loop index < count { root[index] =
+// `loop ^index: 0; index < count; index += 1 { root[index] = value }`, and
+// the same loop as `^index: 0` then `loop index < count { root[index] =
 // value; index += 1 }`: the body is only the write (and the step), so the
 // index changes nowhere else.
 sema_stmt_uninit_fill_counted: fn(tables: ASTTables, state: ^SemaOwnershipState, scopes: SemaScopeTable, start: Binding, condition: Expr, step: Stmt?, body: [Stmt]) Never! {
@@ -1324,15 +1324,15 @@ sema_stmt_compound_result: fn(op: BinOp, place: Type, offered: Type, value: Expr
 }
 
 // `total = 0` where nothing declares `total`: another language's first
-// assignment, which Jet writes as the declaration `total := 0`. A name with
+// assignment, which Jet writes as the declaration `^total: 0`. A name with
 // its own report (a near name, a script local) keeps that report.
 sema_stmt_unknown_assignment_target: fn(name: String, name_span: Span, op: BinOp?, op_span: Span, check: SemaBodyCheck) -> Diagnostic {
     unknown: sema_unknown_name_at(name, name_span, check.environment.*, check.program.*, check.scopes)
     if op != None || unknown.edit != None || unknown.code != "E0107" -> return unknown
     plain: sema_unknown_name(name, name_span)
     if unknown.what != plain.what || unknown.fix != plain.fix -> return unknown
-    declared: sema_error("E0107", name_span, "nothing named `{name}` exists here", "an assignment changes a binding that is already declared, and nothing declares `{name}`", "declare it with `:=`, a binding you can assign again: `{name} := …`")
-    diagnostic_with_edit(declared, TextEdit{span: op_span, new_text: ":="})
+    declared: sema_error("E0107", name_span, "nothing named `{name}` exists here", "an assignment changes a binding that is already declared, and nothing declares `{name}`", "declare it as a binding you can assign again: `^{name}: …`")
+    diagnostic_with_edit(declared, TextEdit{span: Span{start: name_span.start, end: op_span.end}, new_text: "^{name}:"})
 }
 
 sema_stmt_check_local_assignment: fn(name: String, name_span: Span, op: BinOp?, op_span: Span, expr: Expr, check: ^SemaBodyCheck) -> TStmt? {
@@ -1351,7 +1351,7 @@ sema_stmt_check_local_assignment: fn(name: String, name_span: Span, op: BinOp?, 
     if sema_ownership_reject_frozen_write(check.state, Expr.Ident{name: name, span: name_span, id: AST_NODE_GENERATED}, "be assigned", name_span, check.scopes, check.diagnostics) {
         return None
     }
-    // A module-level `name := …` is the one module-level write target; it
+    // A module-level `^name: …` is the one module-level write target; it
     // writes the binding's runtime storage cell. A function writes it only when
     // it is `#Persist` or inside `#Unsafe`: every task sees module state, and
     // two plain writes at once can lose one.
@@ -1380,12 +1380,12 @@ sema_stmt_check_local_assignment: fn(name: String, name_span: Span, op: BinOp?, 
         // gives each name one meaning (E0118).
         copy_name: if name == "n" -> "m" else -> "n"
         ^diagnostic: if {
-            binding.loop_item -> sema_error("E0111", name_span, "`{name}` is a loop variable, so it can't change", "a loop variable holds the item of the current pass, and each pass binds it afresh", "make a changeable copy inside the loop body: `{copy_name} := {name}`")
+            binding.loop_item -> sema_error("E0111", name_span, "`{name}` is a loop variable, so it can't change", "a loop variable holds the item of the current pass, and each pass binds it afresh", "make a changeable copy inside the loop body: `^{copy_name}: {name}`")
             is_param -> sema_ownership_read_parameter_error("E0111", name_span, "`{name}` is a read parameter, so it can't change", "an unmarked parameter gives read access only; assigning to it needs write access", name, param_type)
-            else -> sema_error("E0111", name_span, "`{name}` was made with `:`, so it can't change", "only `:=` bindings and parameters declared with the write mark `^` can be changed", "declare it with `{name} := ...` instead")
+            else -> sema_error("E0111", name_span, "`{name}` was made with `:`, so it can't change", "only `^` bindings and parameters declared with the write mark `^` can be changed", "add `^` before the name: `^{name}: ...`")
         }
-        if binding.binding_sigil == .Val(sigil) {
-            diagnostic = diagnostic_with_edit(diagnostic, TextEdit{span: sigil, new_text: " :="})
+        if binding.changeable_mark_at == .Val(at) {
+            diagnostic = diagnostic_with_edit(diagnostic, TextEdit{span: at, new_text: "^"})
         }
         check.diagnostics.push(diagnostic)
         // The refused value is still checked, so the names it reads count as
@@ -1412,8 +1412,8 @@ sema_stmt_check_local_assignment: fn(name: String, name_span: Span, op: BinOp?, 
     }
     required: binding.symbol.ty ?? Type.Named{name: "Unit"}
     ^expected: Type?{None}
-    // A `:=` number name whose type no use has decided yet takes the type of a
-    // typed value written to it (`total := 0` then `total = price` or
+    // A changeable number name whose type no use has decided yet takes the type of a
+    // typed value written to it (`^total: 0` then `total = price` or
     // `total += price`), so a plain write's value is checked on its own and
     // decides it (sema_expr_number_target_retype).
     number_target: sema_expr_number_target_open(index, check)
@@ -1494,7 +1494,7 @@ sema_stmt_check_local_assignment: fn(name: String, name_span: Span, op: BinOp?, 
     Val(TStmt.Assign{place: TPlace.Local{local: local}, op: tree_op, value: value, line: line, span: span})
 }
 
-// This module's own `name := …` binding that is not prepared while building,
+// This module's own `^name: …` binding that is not prepared while building,
 // with whether it is `#Persist`; None for any other binding. A checker on the
 // registration graph has no local declarations (sema_scope_environment for a
 // graph module), so the binding is read from the module's registered constant

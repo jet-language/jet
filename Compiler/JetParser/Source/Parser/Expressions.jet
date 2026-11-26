@@ -383,21 +383,15 @@ parser_parse_operators: fn(state: ^JetParserState, minimum: Int, depth: Int, all
         return ParsedExpr{expr: Expr.Unit{span: span, id: parser_node_id(state)}, span: span}
     }
 
-    // `^place == pattern` is a one-arm match that writes
-    // into its subject (`if ^slot == .Val(item) -> item.count += 1`); a `^`
-    // that a pattern test does not follow is not a value. `^^` opens a take
-    // mark on a receiver (parser_parse_take_mark).
-    ^marked_subject: parser_write_mark(parser_current_kind(state))
+    // `^` and `^^` open a call mark on a receiver
+    // (parser_parse_receiver_mark).
     ^left: if {
-        marked_subject -> parser_parse_marked_place(state, depth + 1, allow_struct_lit, true)
-        parser_take_mark(parser_current_kind(state)) -> parser_parse_take_mark(state, depth + 1, allow_struct_lit, stop_before_comparison)
+        parser_write_mark(parser_current_kind(state)) || parser_take_mark(parser_current_kind(state)) -> parser_parse_receiver_mark(state, depth + 1, allow_struct_lit, stop_before_comparison)
         else -> {
             prefix: parser_parse_prefix(state, depth + 1, allow_struct_lit, stop_before_comparison)
             parser_parse_postfix(state, prefix, depth + 1, allow_struct_lit, false)
         }
     }
-    // A non-place after `^` was reported where it was read.
-    if marked_subject && !(left.expr == .Place(_, _, _, _)) -> marked_subject = false
     loop {
         ^operator: parser_current_kind(state)
         // `<>` only ever stands for a value, so after a value it joins
@@ -425,8 +419,6 @@ parser_parse_operators: fn(state: ^JetParserState, minimum: Int, depth: Int, all
         if power -> parser_bump(state)
         operator_token: parser_bump(state)
         pattern_test: operator == TOKEN_EQ_EQ && parser_comparison_pattern_rhs_ahead(state, allow_struct_lit)
-        if marked_subject && !pattern_test -> parser_report_marked_value(state, left.span)
-        marked_subject = false
         if operator == TOKEN_QUESTION_QUESTION {
             fallback: parser_parse_or_fallback(state, depth + 1, allow_struct_lit, stop_before_comparison)
             fallback_span: parser_fallback_span(fallback)
@@ -536,13 +528,7 @@ parser_parse_operators: fn(state: ^JetParserState, minimum: Int, depth: Int, all
         }
         if operator_token.span.end > left.span.end -> left.span.end = operator_token.span.end
     }
-    if marked_subject -> parser_report_marked_value(state, left.span)
     left
-}
-
-// The ordinary "expected a value" report, at the `^` that starts `span`.
-parser_report_marked_value: fn(state: ^JetParserState, span: Span) {
-    parser_add_error(state, Span{start: span.start, end: span.start + 1}, "expected a value, found `^`", "a value can be a name, literal, collection, call, or parenthesized expression", "write an expression such as `x`, `42`, or `\"hello\"`")
 }
 
 parser_report_condition_xor_update: fn(state: ^JetParserState) {
@@ -2434,32 +2420,16 @@ parser_parse_call_type_args: fn(state: ^JetParserState, depth: Int) -> [Type] {
     args
 }
 
-// A mark in a body stays only where a name holds the
-// access: a write window bound to a name (`edit: ^values[2..3]`), a match
-// that writes into its subject (`if ^shape == {…}`), and a writing loop
-// source (`loop v in ^values`). Those positions parse the `^` here; sema
-// requires its operand to be a place (E0213), so a window over a call result
-// teaches binding the temporary first. A mark before a call on a place
-// (`^xs.push(4)`) marks that call's receiver instead (parser_receiver_mark).
-parser_parse_marked_place: fn(state: ^JetParserState, depth: Int, allow_struct_lit: Bool, stop_before_comparison: Bool) -> ParsedExpr {
-    mark: parser_bump(state)
-    operand: parser_parse_expression_restricted(state, 13, depth + 1, allow_struct_lit, stop_before_comparison)
-    span: parser_cover(mark.span, operand.span)
-    if parser_receiver_mark(state, operand.expr, PlaceAccess.Write, mark.span) == .Val(call) {
-        return ParsedExpr{expr: call, span: span}
-    }
-    ParsedExpr{expr: Expr.Place{value: operand.expr, access: PlaceAccess.Write, span: span, id: parser_node_id(state)}, span: span}
-}
-
-// `place.in_place()` makes the write window `^place` makes. A binding's
-// value, a match subject, a one-arm writing match and a loop source read it
-// here, so `.in_place()` is never a method call there. It ends the place:
-// `shape.inner.in_place()`. Anywhere else it is an ordinary call, which no
-// type declares.
+// `place.in_place()` makes a write window. A binding's value, a match
+// subject, a one-arm writing match and a loop source read it here, so
+// `.in_place()` is never a method call there; sema requires its receiver to
+// be a place (E0213), so `make()[0].in_place()` is that report. It ends the
+// place: `shape.inner.in_place()`. Anywhere else it is an ordinary call,
+// which no type may declare (E0436).
 // The window takes the call's node id: the call is gone.
 parser_in_place_window: fn(parsed: ^^ParsedExpr) -> ParsedExpr {
     if parsed.expr == .MethodCall(receiver, method, _, owner_type_args, type_args, args, id) {
-        if method == "in_place" && owner_type_args.len() == 0 && type_args.len() == 0 && args.len() == 0 && parser_mark_place(receiver) {
+        if method == "in_place" && owner_type_args.len() == 0 && type_args.len() == 0 && args.len() == 0 {
             return ParsedExpr{expr: Expr.Place{value: receiver, access: PlaceAccess.Write, span: parsed.span, id: id}, span: parsed.span}
         }
     }
@@ -2471,13 +2441,15 @@ parser_is_write_window: fn(expr: Expr) -> Bool Never! {
     false
 }
 
-// `^^buf.seal()`: the take mark on a receiver. Any other `^^` in value
-// position is the ordinary "expected a value" report.
-parser_parse_take_mark: fn(state: ^JetParserState, depth: Int, allow_struct_lit: Bool, stop_before_comparison: Bool) -> ParsedExpr {
+// `^xs.push(4)` / `^^buf.seal()`: a call mark on a receiver, under
+// `#Policy(writes: .Explicit)` (parser_receiver_mark). Any other `^` or `^^`
+// in value position is the ordinary "expected a value" report.
+parser_parse_receiver_mark: fn(state: ^JetParserState, depth: Int, allow_struct_lit: Bool, stop_before_comparison: Bool) -> ParsedExpr {
     mark: parser_bump(state)
+    access: if parser_write_mark(mark.kind) -> PlaceAccess.Write else -> PlaceAccess.Take
     operand: parser_parse_expression_restricted(state, 13, depth + 1, allow_struct_lit, stop_before_comparison)
     span: parser_cover(mark.span, operand.span)
-    if parser_receiver_mark(state, operand.expr, PlaceAccess.Take, mark.span) == .Val(call) {
+    if parser_receiver_mark(state, operand.expr, access, mark.span) == .Val(call) {
         return ParsedExpr{expr: call, span: span}
     }
     parser_report_mark_not_value(state, mark)
@@ -2489,8 +2461,8 @@ parser_report_mark_not_value: fn(state: ^JetParserState, mark: Token) {
     parser_add_error(state, mark.span, "expected a value, found `{found}`", "a value can be a name, literal, collection, call, or parenthesized expression", "write an expression such as `x`, `42`, or `\"hello\"`")
 }
 
-// The write mark: `^` (`^T`, `^self`, `edit: ^xs[a..<b]`). `^` is only the
-// bit-and operator.
+// The write mark: `^` (`^T`, `^self`, `^count: 0`). `^` is only the bit-and
+// operator.
 parser_write_mark: fn(kind: Int) -> Bool Never! { kind == TOKEN_CARET }
 
 // The take mark: `^^` (`^^T`, `^^self`, `task ^^name`). `^^` is only the

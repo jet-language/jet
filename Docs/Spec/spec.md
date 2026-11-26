@@ -288,7 +288,7 @@ vocabulary](vocabulary.md).
   `y: 2.5` passed to a `Float` parameter is the `Float` 2.5. A use its own
   type serves reads the name unchanged, and a number that does not fit the
   use is the error that number written there gets (`big: 300` read as a `U8`
-  is E1003), pointing at the number. A `:=` binding takes the type of the
+  is E1003), pointing at the number. A changeable binding takes the type of the
   first use that refuses its default, where the literal fits; a second use
   that needs another type is one E0112 naming both uses, and a later write of
   a value that type refuses is E0108 pointing at the use that decided it.
@@ -371,14 +371,15 @@ body     = "{" { stmt } [ expr ] "}" | "->" expr ;
 params   = param-or-zone { "," param-or-zone } ;
 param-or-zone = param | "/" | "*" ;
 param    = [ "#Root" ] ( [ "&" | "^" ] "self"
-           | [ "&" | "^" ] ident [ ident ] ":" [ "&" | "^" ]
+           | ident [ ident ] ":" [ "&" | "^" ]
              [ "..." ] type [ "from" ident { "|" ident } ]
              [ "{" expr "}" ] ) ;
-module-binding = [ "#Track" ] ident ( "::" | ":=" ) expr NL ;
+module-binding = [ "#Track" ] [ "^" ] ident ":" expr NL ;
 comptime = "@" ident "::" expr NL ;
 alias    = ident [ type-params ] "::" type NL ;
 stmt     = binding | assign | if | loop | "break" | "next"
          | "return" [ expr ] | result-handler | expr ;
+binding  = [ "^" ] ident ":" expr NL | pattern ":" expr NL ;
 pattern  = ident | ".{" ident { "," ident } [ "," ".." ] "}"
          | "[" [ ident { "," ident } ] "]" ;
 fence    = "<:" ( ident | expr ) { "," ( ident | expr ) } ":>" ;
@@ -415,7 +416,7 @@ arm      = arm-head "->" arm-body NL ;
 loop     = [ ident "::" ] "loop" loop-head loop-body ;
 loop-head= [ cond ]
          | source-clauses [ "if" cond ]
-         | ident ":=" expr "," cond [ "," expr ] ;
+         | "^" ident ":" expr "," cond [ "," expr ] ;
 source-clauses = source-clause { "," source-clause } ;
 source-clause = ( ident | "(" ident "," ident ")" ) "in" expr
                 [ "," expr ] ;
@@ -456,7 +457,7 @@ an explicit entry for the submitted fragment (S12, D-CLIFLAG1,
 D-FAIL-EXIT1=A).
 
 At ordinary file scope, `name: value` declares an immutable module global and
-`name := value` declares a mutable module global. Either initializer is any
+`^name: value` declares a mutable module global. Either initializer is any
 expression, computed while building and stored in the program
 (D-MODULE-VALUE1, D-MODULE-BUILD1). Every read of an immutable global is an
 ordinary copy. A mutable global starts from its computed value, which may be
@@ -478,14 +479,14 @@ initializers that read each other in a cycle, one that reads itself included
 so no such value is ever stored. A `name: Shared{value}`
 global holds one process-wide cell: the build computes `value`, which must be
 literal data, and every read shares the one cell; a mutable
-`name := Shared{value}` global holds such a cell until an assignment replaces
+`^name: Shared{value}` global holds such a cell until an assignment replaces
 it. A declared point, a global whose whole value is `event.point<T>()`,
 `event.hook_point<T, R>(fallback)` or `event.decision_point<T, E>(policy)`,
 is one process-wide event, hook or decision hook, and the global is its
 identity: a carrier is a runtime handle the build can't make, so the build
 keeps only the fallback or policy, which must be literal data, and the
 program makes the carrier at its first read, once, and every read, from any
-task, shares it and its listeners; a mutable `name := event.point<T>()`
+task, shares it and its listeners; a mutable `^name: event.point<T>()`
 global starts from a fresh carrier made at its first use. A point's name may
 be snake_case or ALL_CAPS, and its constructor is refused anywhere else
 (E0644). `NAME: event.new<T>()` still declares an event point while Core's
@@ -553,7 +554,7 @@ ranges remain one `Range` value. Expression fences accept expressions, as in
 not a list or destructure (D-EACH1=C, D-FENCE-GLYPH1=A, D-FENCE-RANGE1,
 D-FENCE2=A).
 
-`#Track name: value` and `#Track name := value` attach the origin fact. Read
+`#Track name: value` and `#Track ^name: value` attach the origin fact. Read
 that fact as `value.reflect().origin -> OriginInfo?`; there is no runtime origin
 projection (D-TRACK-ORIGIN1=A).
 
@@ -565,7 +566,7 @@ numeric widening law and return `Bool`; nonnumeric operands must have matching
 types. `&&`, `||`, and `!` operate on `Bool` (E0110). `&&` and `||` are boolean
 operators; a value alternative in an arm head uses `|`.
 
-A `:=` Float binding seeded with infinity (`Float.INFINITY`,
+A changeable Float binding seeded with infinity (`Float.INFINITY`,
 `Float.NEG_INFINITY`, `math.INFINITY` or its negation) whose every assignment
 sets it to an `Int` uses the Float only as a sentinel. Each Int widens as it
 is assigned, so the result reads `5.0` where the input held `5`. `jet check`
@@ -795,7 +796,7 @@ forms:
 ```jet
 loop value in source, stride if keep(value) -> value
 loop (key, value) in source -> key
-loop i := init, i < limit {
+loop ^i: init, i < limit {
     print(i)
     i += 1
 }
@@ -834,7 +835,7 @@ edge; bare infinite and condition-only headers are rejected with E0072.
 ordinary-name label, `outer: loop … { … }`; `break(outer)`,
 `break(outer, value)`, and `next(outer)` target it from a nested loop. E0987
 reports an out-of-scope label. E0988 teaches retired loop-name and `@` forms,
-rejects `outer := loop`, and explains that a loop name is not a runtime value.
+rejects `^outer: loop`, and explains that a loop name is not a runtime value.
 Normal explicit-state fallthrough and targeted `next` run the afterthought once
 and retest. Source fallthrough and targeted `next` pull the stride and use the
 final pull. `break`, `return`, propagated failure, and panic skip the target
@@ -873,7 +874,7 @@ while building: a failure stops the build with E3010 (D-PREP-SURFACE2=A).
 Names bound inside a `#run { … }` statement block stay readable after it.
 A `#run` inside a larger value, such as a field of a literal or an argument,
 is E0391: bind it as `name: #run value` first and use the name.
-At file scope, `name := value` bindings remain runtime module globals; they do
+At file scope, `^name: value` bindings remain runtime module globals; they do
 not require `#Persist`. `#Static NAME: value` requests a
 stable-address static when the contract needs one, and `#Inline NAME:
 value` copies the value into use sites (D-CONSTMARK1). Without a marker, an
@@ -881,7 +882,7 @@ immutable constant whose value is a number, text, or a small record or enum
 case of those is copied into its use sites; any other value (a list, map, or
 larger record) is built once, every read borrows that one value in place, and
 a use that must own it copies only the part it takes. The retired `@NAME`
-spelling teaches E0388. `#Persist name := value` additionally marks hot-reload state on a bare
+spelling teaches E0388. `#Persist ^name: value` additionally marks hot-reload state on a bare
 binding (D-VERDICT-1308-1, D-PERSIST1).
 
 `embed_file("path") -> String` embeds UTF-8 text, `embed_bytes("path") -> [U8]` embeds raw
@@ -1658,7 +1659,7 @@ letter past the slots is **E3110**, and a write that names one slot twice is
 **E3111**.
 
 ```jet
-rgba := [U8#4]{255, 128, 0, 255}
+^rgba: [U8#4]{255, 128, 0, 255}
 print(rgba.bgr)  // [0, 128, 255]
 rgba.a = 0
 ```
@@ -1860,13 +1861,13 @@ make_adder: fn(base: Int) -> fn(Int) -[]> Int {
 ### Captures and escaping lambdas
 
 A lambda captures a name for shared read access when the body only reads it.
-Writing a captured name requires a mutable `:=` binding; otherwise the compiler
+Writing a captured name requires a changeable binding; otherwise the compiler
 reports **E0111**. A lambda bound to a local that is only ever called directly
-in that scope does not escape: it borrows each `:=` local it writes, so the
-write lands on the owner (`count := 0; bump: (n: Int) -> { count += n };
+in that scope does not escape: it borrows each changeable local it writes, so the
+write lands on the owner (`^count: 0; bump: (n: Int) -> { count += n };
 bump(2)` leaves `count` at 2). It reads its own copy of each name it only
 reads, made when the lambda is made, so a call after that name changed is
-**E0204** (`v := [1]; f: fn() -> Int { v.len() }; v.push(2); f()`): make the
+**E0204** (`^v: [1]; f: fn() -> Int { v.len() }; v.push(2); f()`): make the
 lambda after the change, or pass the value as a parameter. An escaping
 lambda—one stored in a binding that is passed, stored, or returned, returned
 itself, stored in a struct field, or passed to a `^^T` parameter—must own its
@@ -2186,7 +2187,7 @@ it to write or take access from body usage. The public surface is:
 | Source type | Access | Call site |
 | --- | --- | --- |
 | `T` | read; the callee cannot mutate the caller's value | plain |
-| `^T` | exclusive write/edit access | plain; needs a `:=` binding |
+| `^T` | exclusive write/edit access | plain; needs a changeable binding |
 | `^^T` | take; ownership moves to the callee | plain; the name is gone after the call |
 
 Calls carry no marks (D-CALLSITE-MARK2=A): the signature decides. For
@@ -2228,7 +2229,7 @@ bump: fn(n: ^Int) { n += 1 }
 archive: fn(name: ^^String) -> String { name }
 
 run: fn() {
-    score := 41
+    ^score: 41
     bump(score)
     saved: archive("vault")
     print(saved)
@@ -2249,7 +2250,7 @@ impl Player {
 }
 
 run: fn() {
-    player := Player{hp: 10}
+    ^player: Player{hp: 10}
     player.heal(2)
     print(player.show())
 }
@@ -2268,8 +2269,8 @@ scalar in `add(n, n)`); a later argument the call keeps holding, moves, or
 writes is still E0204, and so is `x` passed on to a nested call
 (`grow(xs, f(xs))`), whose parameter may keep or take it. A part of a list
 passed to a writing parameter is a write window by itself
-(`sort_part(values[0..2])`). A write window bound to a name keeps its mark:
-`edit: ^values[2..3]`.
+(`sort_part(values[0..2])`). A write window bound to a name is made by
+`in_place`: `edit: values[2..3].in_place()`.
 
 ### Copies, moves, and owned destinations
 
@@ -2316,8 +2317,8 @@ explicit-copy form.
 
 The compiler chooses when a name is unmarked, and `.move()` and `.copy()` give
 exact control (D-COPY-DEFAULT1=A, D-COPY-MOVE-SPELL1=A). `ys: xs` reads a place
-through a view, `ys := xs.copy()` makes an independent copy, and
-`ys := xs.move()` moves `xs` exactly: `.move()` is accepted in every value
+through a view, `^ys: xs.copy()` makes an independent copy, and
+`^ys: xs.move()` moves `xs` exactly: `.move()` is accepted in every value
 position (binding, assignment, field initializer, collection element, result),
 and any later use of `xs` is E0121 naming the move. `.move()` below a collection
 element (`items[i].tags.move()`, whose copy is spelled `items[i].tags.copy()`)
@@ -2357,14 +2358,14 @@ name, including nested structs and views already bound to local names. This
 does not turn a local owner into a caller-owned one: returning such an aggregate
 still rejects views into values made here or consumed by a `^^` parameter.
 A positional enum constructor preserves the payload's access: with
-`edit: ^values[0..1]`, `Choice.First(edit)` fills a declared `ViewMut<Int>`
+`edit: values[0..1].in_place()`, `Choice.First(edit)` fills a declared `ViewMut<Int>`
 payload with that write window. It cannot grant write access to a read-only
 parameter or turn an unmarked owned slice into a write view.
-A name bound to one map value (`w: ^m[key]`) reads and writes as that value.
+A name bound to one map value (`w: m[key].in_place()`) reads and writes as that value.
 Where a `ViewMut<V>` of the value's type is expected (a return, a parameter),
 it is a window over that one value, used as `w[0]` like the one-element list
-window `^xs[i..i]`. A `slot: fn(m: ^[String: [Int]], key: String) ->
-ViewMut<[Int]> from m` whose body binds `w: ^m[key]` and returns `w` lets the
+window `xs[i..i].in_place()`. A `slot: fn(m: ^[String: [Int]], key: String) ->
+ViewMut<[Int]> from m` whose body binds `w: m[key].in_place()` and returns `w` lets the
 caller edit the entry by `s[0].push(1)`. A missing key stops as `m[key]` does,
 and while the window lives the map cannot gain or lose entries (E0220, E0212).
 At a string boundary, fill `View<str>` only from `.trim()`, `.after()`,
@@ -2399,13 +2400,13 @@ rule is shared by AOT, interpreter, comptime, and web lowering; each engine
 marshals the sema-approved result.
 
 A place is a name followed by its maximal field, index, or range projection. A
-bare place is a checked read window; `^place` is the exclusive write window; and
-`place.copy()` creates independent owned storage.
+bare place is a checked read window; `place.in_place()` is the exclusive write
+window; and `place.copy()` creates independent owned storage.
 
 ```jet
-values := [10, 20, 30, 40]
+^values: [10, 20, 30, 40]
 read: values[0..1]
-edit: ^values[2..3]
+edit: values[2..3].in_place()
 copy: values[0..1].copy()
 ```
 
@@ -2491,7 +2492,7 @@ zero-copy view into the receiver's buffer when sema proves the binding cannot
 outlive its owner. The Jet-level type remains `String`.
 
 ```jet
-padded := "  user@jet-lang.dev  "
+^padded: "  user@jet-lang.dev  "
 email: padded.trim()
 domain: email.after("@")
 print("padded still readable: {padded}")
@@ -2649,7 +2650,7 @@ returns an ID, `pool[id]` indexes for read or write, and `ids()` walks live
 entries. Removing an entry bumps its generation and returns `T?`. Indexing a
 stale ID panics, like an array bounds failure, rather than silently reading old
 storage. `add`, `remove` and `pool[id] = v` change the pool, so they need a
-writable pool: a `:=` binding or a `^` parameter. Through an unmarked
+writable pool: a changeable binding or a `^` parameter. Through an unmarked
 parameter, `add` and `remove` are **E0205**.
 
 ```jet
@@ -2661,7 +2662,7 @@ Player: struct {
 }
 
 run: fn() {
-    world := Pool<Player>.new()
+    ^world: Pool<Player>.new()
     kai: world.add(Player{name: "Kai", hp: 100, attack: 15, target: None})
     world[kai].hp += 1
     fallen: world.remove(kai) ?? return
@@ -2808,29 +2809,33 @@ damage: fn(player: ^Player, amount: Int) {
 consume: fn(resource: ^^String) { print(resource) }
 
 run: fn() {
-    player := Player{hp: 10}
+    ^player: Player{hp: 10}
     damage(player, 3)
     consume("resource")
 }
 ```
 
 An access marker composes with the optional mark: `^User?` is write access to
-an optional `User`, and `^^Texture?` takes an optional `Texture`. A marker both
-before the parameter name and on its type is E0029:
+an optional `User`, and `^^Texture?` takes an optional `Texture`. Before a
+parameter name only `self` takes a mark (`^self`, `^^self`); a receiver marked
+both before `self` and on its type is E0029:
 
 ```text
-Error: Jet.DuplicateAccessMarker: `p` has two access markers
-  --> file.jet:4:10
+Error: Jet.DuplicateAccessMarker: `self` has two access markers
+  --> file.jet:7:15
     |
-  4 | bad: fn(^p: ^^Player) { print(p.hp) }
-    |          ^
- Why: The write-access marker `^` before the parameter name conflicts with the take marker `^^` on its type; a parameter can declare only one access marker
+  7 |     bump: fn(^self: ^Counter) { self.n += 1 }
+    |               ^^^^
+ Why: The write-access marker `^` before the parameter name conflicts with the write-access marker `^` on its type; a parameter can declare only one access marker
  Fix: Keep one access marker on the type or receiver and remove the other
 ```
 
-The three marks outside signatures are a write window bound to a name
-(`edit: ^values[2..3]`), a match that writes into its subject
-(`if ^shape == { … }`), and `task ^^name`. `&` and `&&` are only operators.
+The marks outside signatures are a receiver or argument mark at a writing call
+(`^buf.push(x)`, `fill(^xs)`), the changeable-name mark (`^count: 0`), and
+`task ^^name`. A write window is a method, not a mark: `edit:
+values[2..3].in_place()` binds a window, and `if shape.in_place() == { … }` is
+a match that writes into its subject (D-BIND-MARK1=A). `&` and `&&` are only
+operators.
 
 `.copy()` is a method call, not an access marker. Raw-pointer access (`p.*` or
 prefix `*x`) is a separate `#Unsafe`-gated mechanism. It does not change the
@@ -3079,7 +3084,7 @@ may read `context.<field>`. Its input is the task's current context record,
 which the code reads where it runs, not a parameter its caller passes.
 Writing module state is not an effect, but a `-[]>` function may not do it,
 itself or through any function it calls (E3401): a module `Shared` holder's
-value, a module `Cell`, and a `#Persist` or `#Unsafe` module `:=` binding all
+value, a module `Cell`, and a `#Persist` or `#Unsafe` module changeable binding all
 outlive the call, so a later call could see the write. A cell reached through
 a read parameter, `self`, an alias or a lambda capture may be such a cell, so
 writing it, taking its `guard_edit()` lease included, is E3401 too. Its own
@@ -3482,7 +3487,7 @@ body, through a `:` local bound to it, adds nothing more: a `-[IO]>` function
 may call a local lambda that prints. The same call from inside another
 lambda's body adds the called lambda's effects to that lambda's own row, so a
 callback that calls a local lambda that prints fits a `-[IO]>` parameter. A
-directly named function contributes its known row. A `:=` local, a parameter,
+directly named function contributes its known row. A changeable local, a parameter,
 a returned, stored, or otherwise unknown function value contributes the
 maximal set, which is conservative and sound.
 
@@ -4255,7 +4260,7 @@ value-argument example is `Examples/Modules/FactValueArguments.jet`.
 An instance's member bodies are its template's text, checked once per
 instance. An error in one is reported at the instance line
 (`int_cache: cache<Int>(64)`), with the template text it came from as a
-label. A report whose fix edits that text, such as **E0514** for a `:=`
+label. A report whose fix edits that text, such as **E0514** for a changeable
 binding nothing writes, is reported at the text itself, because the edit
 changes it for every instance. If it is not an error, only the template's
 first instance in the module reports it. Inline-module and instance members

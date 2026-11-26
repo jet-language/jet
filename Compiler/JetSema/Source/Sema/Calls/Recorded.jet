@@ -170,7 +170,7 @@ sema_recorded_info_filled: fn(info: ^^TComptimeValue, source: SemaRuleFunctionSo
 // `info`, a FunctionInfo, with `lists` as its `recorded` and `returns`.
 sema_recorded_info_with: fn(info: ^^TComptimeValue, lists: ^^SemaRecordedLists) -> TComptimeValue {
     ^value: info.move()
-    if ^value == .Struct(_, fields) {
+    if value.in_place() == .Struct(_, fields) {
         sema_recorded_field_put(fields, "recorded", lists.recorded.move())
         sema_recorded_field_put(fields, "returns", lists.returns.move())
     }

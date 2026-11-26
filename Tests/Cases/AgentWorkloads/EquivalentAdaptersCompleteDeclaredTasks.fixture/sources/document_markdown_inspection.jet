@@ -8,13 +8,13 @@ WorkloadArgs: struct {
 run: fn(args: WorkloadArgs) {
     root: args.root
     entries: fs.walk(root).list() ?? panic("cannot walk documents")
-    rows := [String]{}
+    ^rows: [String]{}
     loop entry in entries {
         if !entry.is_dir {
             text: fs.read(entry.path) ?? panic("cannot read document")
-            headings := 0
-            bullets := 0
-            malformed := false
+            ^headings: 0
+            ^bullets: 0
+            ^malformed: false
             loop line in text.split("\n") {
                 trimmed: line.trim()
                 if line.starts_with("#") {

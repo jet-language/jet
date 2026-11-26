@@ -50,12 +50,12 @@ graph_id_name_span: fn(graph_id: String) -> Span? Never! {
 function_signature_span: fn(src: String, name_span: Span) -> Span Err! {
     start: line_start(src, name_span.start)
     bytes: src.bytes()
-    brace := if name_span.end < bytes.len() -> name_span.end else -> bytes.len()
+    ^brace: if name_span.end < bytes.len() -> name_span.end else -> bytes.len()
     loop brace < bytes.len() && bytes[brace] != (U8{123}) -> brace += 1
     if brace == bytes.len() {
         return Err(edit_error("not_found", "Canvas function signature no longer has a body"))
     }
-    end := brace
+    ^end: brace
     loop end > start && is_space_byte(Int{bytes[end - 1]}) -> end -= 1
     Ok(Span{start: start, end: end})
 }
@@ -64,7 +64,7 @@ indentation_at: fn(src: String, offset: Int) -> String Never! {
     start: line_start(src, offset)
     bytes: src.bytes()
     limit: if offset < bytes.len() -> offset else -> bytes.len()
-    end := start
+    ^end: start
     loop end < limit && (bytes[end] == 32 || bytes[end] == 9) -> end += 1
     foundation_byte_text(bytes, start, end)
 }
@@ -74,12 +74,12 @@ edit: fn(span: Span, text: String) -> TextEdit Never! { TextEdit{span: span, new
 spans_overlap: fn(a: Span, b: Span) -> Bool Never! { a.start <= b.end && b.start <= a.end }
 
 text_matches: fn(src: String, needle: String) -> [Span] Never! {
-    out := [Span]{}
+    ^out: [Span]{}
     if needle.is_empty() -> return out
     hay: src.to_ascii_lower()
     lower_needle: needle.to_ascii_lower()
     hay_bytes: hay.bytes()
-    offset := 0
+    ^offset: 0
     loop offset <= hay_bytes.len() {
         pos: foundation_byte_text(hay_bytes, offset, hay_bytes.len()).find(lower_needle)
         if pos < 0 -> break
@@ -114,9 +114,9 @@ query_ok: fn(op: String, src: String, results_json: String, extra_fields: String
 }
 
 query_result_json: fn(kind: String, title: String, symbol: String, module_path: String, span: Span, node: NodeQueryRef?, src: String) -> String Never! {
-    graph_id := ""
-    node_id := ""
-    node_kind := ""
+    ^graph_id: ""
+    ^node_id: ""
+    ^node_kind: ""
     if node == .Val(found) {
         graph_id = found.graph_id
         node_id = found.node_id
@@ -130,8 +130,8 @@ open_query_context: fn(checker: LSPChecker, path: String, src: String) -> QueryC
 }
 
 node_for_span: fn(projection: Projection, span: Span) -> NodeQueryRef? Never! {
-    best := NodeQueryRef?{None}
-    best_width := 0
+    ^best: NodeQueryRef?{None}
+    ^best_width: 0
     loop node in projection.node_refs {
         if !spans_overlap(node.span, span) -> next
         width: if node.span.end > node.span.start -> node.span.end - node.span.start else -> 0
@@ -144,8 +144,8 @@ node_for_span: fn(projection: Projection, span: Span) -> NodeQueryRef? Never! {
 }
 
 nearest_node: fn(projection: Projection, offset: Int) -> NodeQueryRef? Never! {
-    best := NodeQueryRef?{None}
-    best_distance := 0
+    ^best: NodeQueryRef?{None}
+    ^best_distance: 0
     loop node in projection.node_refs {
         distance: if {
             offset < node.span.start -> node.span.start - offset
@@ -166,20 +166,20 @@ contains_ci: fn(text: String, needle: String) -> Bool Never! {
 
 // Keeps the first of each equal result, in order.
 dedupe_results: fn(results: ^[String]) {
-    index := 0
+    ^index: 0
     loop index < results.len() {
-        seen := false
+        ^seen: false
         loop earlier in 0..<index {
             if results[earlier] == results[index] -> seen = true
         }
-        if seen -> _ := results.remove(index, .Slot) else -> index += 1
+        if seen -> ^_: results.remove(index, .Slot) else -> index += 1
     }
 }
 
 line_number_for: fn(src: String, offset: Int) -> Int Never! {
     bytes: src.bytes()
     limit: if offset < bytes.len() -> offset else -> bytes.len()
-    count := 1
+    ^count: 1
     loop i in 0..<limit {
         if bytes[i] == 10 -> count += 1
     }
@@ -189,7 +189,7 @@ line_number_for: fn(src: String, offset: Int) -> Int Never! {
 source_line_for: fn(src: String, offset: Int) -> String Never! {
     start: line_start(src, offset)
     bytes: src.bytes()
-    end := if offset < bytes.len() -> offset else -> bytes.len()
+    ^end: if offset < bytes.len() -> offset else -> bytes.len()
     loop end < bytes.len() && bytes[end] != (U8{10}) -> end += 1
     foundation_byte_text(bytes, start, end).trim()
 }
@@ -197,11 +197,11 @@ source_line_for: fn(src: String, offset: Int) -> String Never! {
 simple_diff: fn(before: String, after: String) -> String Never! {
     before_lines: before.lines()
     after_lines: after.lines()
-    before_set := [String:Bool]{}
-    after_set := [String:Bool]{}
+    ^before_set: [String:Bool]{}
+    ^after_set: [String:Bool]{}
     loop line in before_lines -> before_set[line] = true
     loop line in after_lines -> after_set[line] = true
-    out := "--- before\n+++ after\n"
+    ^out: "--- before\n+++ after\n"
     loop line in before_lines {
         if !after_set.has_key(line) -> out = "{out}-{line}\n"
     }
@@ -251,7 +251,7 @@ query_diagnostics_error: fn(path: String, src: String, diags: [Diagnostic]) -> S
 
 // One report object per diagnostic: what Canvas shows beside a refused edit.
 diagnostics_json: fn(path: String, src: String, diags: [Diagnostic]) -> String Never! {
-    sources := diagnostic_source_texts()
+    ^sources: diagnostic_source_texts()
     reports: loop diagnostic in diags -> {
         severity: if diagnostic_is_warning(diagnostic) -> "warning" else -> "error"
         position: if diagnostic.span == .Val(span) -> {

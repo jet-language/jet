@@ -132,8 +132,8 @@ HOLE_ARMS: " {{\n        4 -> print(\"four\")\n        else -> print(\"other\")\
     // A table that doesn't start its statement only shows the fix.
     hole_header_expect(failures, "{HOLE_NOISY}pick: fn(n: Int) -> Int {{\n    return if noisy(n) % <> == 0 {{\n        4 -> 1\n        else -> 2\n    }}\n}}\n", "E0442", "calls `noisy`", "`value: noisy(n)` on the line above", "")
     // A call that changes a value it is given, or the value it is called on.
-    hole_header_expect(failures, "{HOLE_GROW}run: fn() {{\n    items := [Int]{{1, 2}}\n    if grow(items) % <> == 0{HOLE_ARMS}", "E0442", "calls `grow`, which changes a value it is given", "`value: grow(items)`", "{HOLE_GROW}run: fn() {{\n    items := [Int]{{1, 2}}\n    value: grow(items)\n    if value % <> == 0{HOLE_ARMS}")
-    hole_header_expect(failures, "run: fn() {{\n    items := [Int]{{1, 2}}\n    if (items.pop() ?? 0) % <> == 0{HOLE_ARMS}", "E0442", "calls `pop`, which changes the value it is called on", "`pop: items.pop()`", "run: fn() {{\n    items := [Int]{{1, 2}}\n    pop: items.pop()\n    if (pop ?? 0) % <> == 0{HOLE_ARMS}")
+    hole_header_expect(failures, "{HOLE_GROW}run: fn() {{\n    ^items: [Int]{{1, 2}}\n    if grow(items) % <> == 0{HOLE_ARMS}", "E0442", "calls `grow`, which changes a value it is given", "`value: grow(items)`", "{HOLE_GROW}run: fn() {{\n    ^items: [Int]{{1, 2}}\n    value: grow(items)\n    if value % <> == 0{HOLE_ARMS}")
+    hole_header_expect(failures, "run: fn() {{\n    ^items: [Int]{{1, 2}}\n    if (items.pop() ?? 0) % <> == 0{HOLE_ARMS}", "E0442", "calls `pop`, which changes the value it is called on", "`pop: items.pop()`", "run: fn() {{\n    ^items: [Int]{{1, 2}}\n    pop: items.pop()\n    if (pop ?? 0) % <> == 0{HOLE_ARMS}")
     // A call that holds the `<>` can't be named: its fix shows plain tests.
     hole_header_expect(failures, "fits: fn(n: Int, size: Int) -> Bool {{\n    print(\"fits\")\n    n <= size\n}}\nrun: fn() {{\n    if fits(<>, 4){HOLE_ARMS}", "E0442", "calls `fits`, which has an effect", "`if {{ fits(4, 4) -> … }}`", "")
     if failures.len() > 0 {

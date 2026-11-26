@@ -2171,7 +2171,7 @@ policy_ast_test_reintroduced_ceremony: fn() PolicyError! {
         PolicyShapeCase{path: "Examples/Systems/reintroduced.jet", source: "use fs: core.files\nrun: fn() {{\n    path: \"input.txt\"\n    text: fs.read(path) ?? return Err(\"read\")\n}}", rule: "error-identity", present: true},
         PolicyShapeCase{path: "Examples/Concurrency/reintroduced.jet", source: "run: fn() {{\n    task.group g {{\n        task.race {{1, 2}}\n    }}\n}}", rule: "task-one-child", present: true},
         PolicyShapeCase{path: "Examples/Concurrency/reintroduced.jet", source: "run: fn() {{\n    task.group g {{\n        task.any {{1, 2}}\n    }}\n}}", rule: "task-one-child", present: true},
-        PolicyShapeCase{path: "Tests/AgentWorkloads/adapters/reintroduced.jet", source: "run: fn() {{\n    line_number := 0\n    loop item in items {{\n        line_number += 1\n        seen: line_number\n    }}\n}}", rule: "indexed-sequence", present: true},
+        PolicyShapeCase{path: "Tests/AgentWorkloads/adapters/reintroduced.jet", source: "run: fn() {{\n    ^line_number: 0\n    loop item in items {{\n        line_number += 1\n        seen: line_number\n    }}\n}}", rule: "indexed-sequence", present: true},
         PolicyShapeCase{path: "Tools/Gauntlet/Entries/Bulkrename/Jet/run.jet", source: "run: fn() {{\n    value: Regex{{\"IMG\"}}\n}}", rule: "regex-capture-recipe", present: true},
     }
     manifest: policy_manifest()
@@ -2470,7 +2470,7 @@ policy_ast_test_planted_rule_pairs: fn() PolicyError! {
         PolicyPlantedPair{rule: "codable-structural", kind: "type:Record", rejected: "#Codable\nRecord: struct {{ value: Int }}", clean: "Record: struct {{ value: Int }}"},
         PolicyPlantedPair{rule: "effect-row-inference", kind: "fn:run", rejected: "run: fn() -[IO]> {{ print(\"hello\") }}", clean: "run: fn() {{ print(\"hello\") }}"},
         PolicyPlantedPair{rule: "task-one-child", kind: "stmt:task.group", rejected: "run: fn() {{ task.group g {{ task.race {{1, 2}} }} }}", clean: "run: fn() {{ task.race {{1, 2}} }}"},
-        PolicyPlantedPair{rule: "indexed-sequence", kind: "loop:manual-counter", rejected: "run: fn() {{\n    count := 0\n    loop item in items {{\n        count += 1\n        print(count)\n    }}\n}}", clean: "run: fn() {{ loop (index, item) in items -> print(index) }}"},
+        PolicyPlantedPair{rule: "indexed-sequence", kind: "loop:manual-counter", rejected: "run: fn() {{\n    ^count: 0\n    loop item in items {{\n        count += 1\n        print(count)\n    }}\n}}", clean: "run: fn() {{ loop (index, item) in items -> print(index) }}"},
         PolicyPlantedPair{rule: "dyn-domain-policy", kind: "fn:duplicate", rejected: "duplicate: fn(left: Dyn, right: Dyn) -> Bool {{ true }}", clean: "duplicate: fn(left: Dyn, right: Dyn) -> Bool {{ left.equal_unordered(right) }}"},
         PolicyPlantedPair{rule: "walk-files-filter", kind: "call:fs.walk", rejected: "use fs: core.files\nrun: fn() {{ loop entry in fs.walk(root) {{ if !entry.is_dir -> print(entry.path) }} }}", clean: "use fs: core.files\nrun: fn() {{ loop entry in fs.walk_files(root) -> print(entry.path) }}"},
         PolicyPlantedPair{rule: "regex-capture-recipe", kind: "recipe:regex-capture", rejected: "run: fn() {{ Regex{{\"x\"}} }}", clean: "run: fn() {{\n    pattern: Regex{{\"^x$\"}}\n    matched: re.match(pattern, value)\n    print(matched.group(1) ?? \"\")\n}}"},
@@ -2527,7 +2527,7 @@ policy_ast_test_explicit_entry: fn() PolicyError! {
         }
     }
     // The statement-file lesson runs its top-level lines.
-    lesson: policy_evaluate_source(manifest, "Examples/Basics/ScriptStatements.jet", "total := 1\nprint(total)\n")
+    lesson: policy_evaluate_source(manifest, "Examples/Basics/ScriptStatements.jet", "^total: 1\nprint(total)\n")
     assert(!policy_has_rule(lesson, "entry-explicit"), "a script-statements lesson is a program: {policy_occurrence_messages(lesson)}")
     loop exception in manifest.exceptions {
         assert(exception.rule != "entry-explicit", "entry-explicit has no occurrence exceptions")

@@ -213,8 +213,8 @@ ir_nodes_have_cells: fn(nodes: [BodyNode]) -> Bool Never! {
 }
 
 // `captured` and the variables a write window opens on: as an inline Option
-// (`if ^x == .Val(n) -> n = ..`) the word is the payload's storage, and as a
-// named scalar window (`w := ^x`) the binding is the variable's address, so
+// (`if x.in_place() == .Val(n) -> n = ..`) the word is the payload's storage, and as a
+// named scalar window (`w: x.in_place()`) the binding is the variable's address, so
 // such a variable lives in a frame cell from its declaration (ir_borrow,
 // ir_bind_pin), as a closure's written capture does. Most bodies have no
 // write borrow.
@@ -245,7 +245,7 @@ ir_window_cells_in: fn(m: ^IRModule, p: IRProgram, b: IRBuilder, nodes: [BodyNod
     }
 }
 
-// The variables a named write window binds the address of: `w := ^x` over a
+// The variables a named write window binds the address of: `w: x.in_place()` over a
 // scalar `x` (ir_scalar_window).
 ir_window_cells_named: fn(m: ^IRModule, p: IRProgram, b: IRBuilder, stmts: [StmtKind], names: ^[String]) Never! {
     loop statement in stmts {
@@ -469,7 +469,7 @@ ir_stmt_body_in: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, statement: Int, s
                 return ir_map_take(m, p, b, local, init, span)
             }
             ir_stmt_line(p, b, span)
-            // `name := ^place` binds an alias of the place, never a copy: a
+            // `name: place.in_place()` binds an alias of the place, never a copy: a
             // write borrow's edits reach the owner. A range borrow keeps its
             // View value below, and a `Pin<T>` (`mem.pin(place)`) the
             // place's address.
@@ -675,8 +675,8 @@ ir_stmt_body_in: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, statement: Int, s
             // holds its values where it was bound (BuildMove.jet).
             ir_move_binding(m, p, b, binding.slot)
             // The variable owns its new value again, also when an earlier
-            // statement moved its old one out (`moved := f(x); x = moved.move()`)
-            // or it held none yet (`x := T{ uninit }`): its scope end drops it.
+            // statement moved its old one out (`^moved: f(x); x = moved.move()`)
+            // or it held none yet (`^x: T{ uninit }`): its scope end drops it.
             if binding.owned || ir_has_drop(m, b, binding.slot) -> ir_reown(b, binding)
             ir_close_rearm(b, binding.slot)
         }
@@ -1317,7 +1317,7 @@ ir_bind_pin: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, local: TLocal, init: 
     b.bindings.push(IRBinding{name: local.name, slot: value, symbol: symbol, write: access != .Read})
 }
 
-// `w := ^place` over a scalar place, or a handle or box element or member:
+// `w: place.in_place()` over a scalar place, or a handle or box element or member:
 // the binding is the place's address, so a read of `w` loads through it and a
 // write drops the old value and stores through it, as through a write
 // parameter. A variable place lives in a frame cell (ir_window_cells_named),
@@ -1502,7 +1502,7 @@ ir_task_outcome: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, export: String, a
     boxed
 }
 
-// `name := T{ uninit }`: the variable's storage without a value; checking
+// `^name: T{ uninit }`: the variable's storage without a value; checking
 // proves every read follows a write. A scalar starts as zero; a fixed list
 // `[T#N]{ uninit }` is its inline storage, or else the List of its N
 // unwritten elements.
@@ -3129,7 +3129,7 @@ ir_payload_binding: fn(m: IRModule, b: IRBuilder, carrier: Int) -> Bool Never! {
 // scope then no longer runs. Either way it is `consume(x)` with a Unit
 // result. A part of a value (`close(self.source.move())` in a Close method) runs
 // its close glue in place, as a variable bound to it would
-// (`source := ^^self.source; close(source)`): the part's owner keeps its
+// (`^source: ^^self.source; close(source)`): the part's owner keeps its
 // buffers, and a closing owner no longer closes that part.
 ir_close_value: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, inner: Int, span: Span) -> Int Never! {
     if !ir_unit_type(ty) -> return ir_fail_slot(b, span, "close with a {ir_type_name(ty)} result")
@@ -8463,7 +8463,7 @@ ir_borrow: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, value: Int, a
             return word
         }
         // An Option or enum box is written through its payload in place
-        // (`if ^x == .Variant(payload) -> ... &payload`): the box at the
+        // (`if x.in_place() == .Variant(payload) -> ... &payload`): the box at the
         // place, made its holder's own first (ir_window_subject).
         if ir_window_box(m, p, value_ty) {
             if ir_body_node(p, b, value).kind == {
@@ -8552,9 +8552,9 @@ ir_window_box: fn(m: ^IRModule, p: IRProgram, ty: Type) -> Bool Never! {
     m.types[row].kind == .Pointer && (ir_is_option(ty) || ir_enum_def(m, p, row) != None)
 }
 
-// The box a write window (`if ^place == .Variant(payload)`) writes through:
+// The box a write window (`if place.in_place() == .Variant(payload)`) writes through:
 // the box at `place`, first made its holder's own and stored back, so a write
-// through a payload never reaches a box another holder shares: a copy (`b :=
+// through a payload never reaches a box another holder shares: a copy (`^b:
 // a`), the caller's value behind a write parameter, or another thread's view
 // of the same data. A variable that does not own its box keeps it as is.
 ir_window_subject: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, place: Int, place_ty: Type, span: Span) -> Int Never! {

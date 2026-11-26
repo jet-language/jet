@@ -2069,7 +2069,7 @@ ImmutableAssignment: struct {
         code: "E0111",
         safety_class: .Soundness,
         safety_reason: "Views and borrows rely on a `:` binding never changing, so a write could change bytes a reader holds.",
-        expert_path: "none: declare the binding with `:=` to make it changeable",
+        expert_path: "none: mark the name with `^` to make it changeable",
         meaning: "Changing a `:`, const, or read-only parameter",
         detail: true,
         structured_fix: .SourceEdit,
@@ -2078,9 +2078,9 @@ ImmutableAssignment: struct {
 
         what: fn(self) -> String { "This name was made with `:`, so it can't change" }
 
-        why: fn(self) -> String { "Only `:=` bindings (and `^` parameters) can be changed" }
+        why: fn(self) -> String { "Only `^` names (and `^` parameters) can be changed" }
 
-        fix: fn(self) -> String { "Declare the name with `:=` instead of `:`" }
+        fix: fn(self) -> String { "Add `^` before the name: `^name: value`" }
     }
 }
 
@@ -3164,7 +3164,7 @@ CompoundAssignNotPlace: struct {
         stage: [.Parse],
         meaning: "Compound assignment target is not an assignable place",
         detail: true,
-        fix_next: "Bind the value with `:=`, then use a supported update operator.",
+        fix_next: "Bind the value to a `^` name, then use a supported update operator.",
 
         what: fn(self) -> String { "Compound assignment needs a mutable place." }
 
@@ -3172,7 +3172,9 @@ CompoundAssignNotPlace: struct {
             "Updates are allowed only on a mutable name or an `^` parameter; a computed value has no place to update."
         }
 
-        fix: fn(self) -> String { "Bind the value with `:=`, then write `name {self.op} value`" }
+        fix: fn(self) -> String {
+            "Bind the value to a `^` name, then write `name {self.op} value`"
+        }
     }
 }
 
@@ -4153,7 +4155,7 @@ PinWithoutWriteWindow: struct {
             "A pin promises one storage location will not move, so it has to name that location instead of a temporary value."
         }
 
-        fix: fn(self) -> String { "Bind the value to a `:=` name, then write `mem.pin(place)`." }
+        fix: fn(self) -> String { "Bind the value to a `^` name, then write `mem.pin(place)`." }
     }
 }
 
@@ -4293,7 +4295,7 @@ UnusedPlaceMark: struct {
         }
 
         why: fn(self) -> String {
-            "A mark belongs only on a write window bound to a name, a match that writes into its subject, and `task ^^name`, and `x.move()` takes a name or one of its fields. Read calls and fresh values such as literals and call results take no mark, and a collection element stays in its collection."
+            "A mark belongs only on a call's receiver or argument that the callee writes or takes, before a changeable name, and on `task ^^name`; a write window is `place.in_place()`, and `x.move()` takes a name or one of its fields. Read calls and fresh values such as literals and call results take no mark, and a collection element stays in its collection."
         }
 
         fix: fn(self) -> String { "Remove the mark." }
@@ -6368,7 +6370,7 @@ RetiredCounterLoop: struct {
         }
 
         fix: fn(self) -> String {
-            "Write `loop i in 0..<n {{ … }}` or `loop i in 0..n, 2 {{ … }}`; keep `loop name := value, condition {{ … }}` for mutable state."
+            "Write `loop i in 0..<n {{ … }}` or `loop i in 0..n, 2 {{ … }}`; keep `loop ^name: value, condition {{ … }}` for mutable state."
         }
     }
 }
@@ -7327,7 +7329,7 @@ UntypedUninit: struct {
         safety_reason: "An uninitialized binding has no value to infer a type from, so it would have no type or layout.",
         expert_path: "none: the type is written before `uninit`",
         stage: [.Parse],
-        meaning: "Bare `:= uninit` needs an explicit type `Type{{ uninit }}`",
+        meaning: "Bare `uninit` needs an explicit type `Type{{ uninit }}`",
         detail: true,
         fix_next: "Initialize the binding with the supported `uninit` form.",
 
@@ -7338,7 +7340,7 @@ UntypedUninit: struct {
         }
 
         fix: fn(self) -> String {
-            "Write `` `{self.name} := <Type>{{ uninit }}` ``, e.g. `` `buffer := [U8#4096]{{ uninit }}` ``."
+            "Write `` `^{self.name}: <Type>{{ uninit }}` ``, e.g. `` `^buffer: [U8#4096]{{ uninit }}` ``."
         }
     }
 }
@@ -7425,17 +7427,17 @@ RetiredUninitMarker: struct {
     impl Diagnostic {
         code: "E0426",
         status: .Retired,
-        meaning: "Teaching: retired `#Uninit name: Type` marker → `name := Type{{ uninit }}`",
+        meaning: "Teaching: retired `#Uninit name: Type` marker → `^name: Type{{ uninit }}`",
         detail: true,
         no_fix: None,
 
         what: fn(self) -> String { "`` `#Uninit` is retired ``." }
 
         why: fn(self) -> String {
-            "Uninitialized storage is a fact about the value — it now reads `` `name := Type{{ uninit }}` ``."
+            "Uninitialized storage is a fact about the value — it now reads `` `^name: Type{{ uninit }}` ``."
         }
 
-        fix: fn(self) -> String { "Write `` `{self.name} := <Type>{{ uninit }}` ``." }
+        fix: fn(self) -> String { "Write `` `^{self.name}: <Type>{{ uninit }}` ``." }
     }
 }
 
@@ -7918,7 +7920,7 @@ StateLoopNeverAdvances: struct {
         }
 
         fix: fn(self) -> String {
-            "Change `{self.name}` in the body or in a step, as in `loop i := 0, i < n, i += 1`; read repeated input with `loop line in io.stdin().lines()`; or stop from the body with `if test {{ break }}`"
+            "Change `{self.name}` in the body or in a step, as in `loop ^i: 0, i < n, i += 1`; read repeated input with `loop line in io.stdin().lines()`; or stop from the body with `if test {{ break }}`"
         }
     }
 }
@@ -7929,20 +7931,20 @@ MutableNeverReassigned: struct {
     impl Diagnostic {
         code: "E0514",
         safety_class: .Opinion,
-        safety_reason: "A `:=` name nothing writes runs exactly like a `:` name, and Jet refuses it so the binding says what the code does.",
-        meaning: "A `:=` name is never written",
+        safety_reason: "A `^` name nothing writes runs exactly like a `:` name, and Jet refuses it so the binding says what the code does.",
+        meaning: "A `^` name is never written",
         detail: true,
         structured_fix: .SourceEdit,
         no_fix: None,
         fix_safety: .BehaviorPreserving,
 
-        what: fn(self) -> String { "`{self.name}` never changes, so declare it with `:`" }
+        what: fn(self) -> String { "`{self.name}` never changes, so drop its `^`" }
 
         why: fn(self) -> String {
-            "`:=` tells the reader the value changes later, but nothing in its scope writes it"
+            "`^` tells the reader the value changes later, but nothing in its scope writes it"
         }
 
-        fix: fn(self) -> String { "Write `{self.name}: …` instead of `{self.name} := …`" }
+        fix: fn(self) -> String { "Write `{self.name}: …` instead of `^{self.name}: …`" }
     }
 }
 
@@ -8551,7 +8553,7 @@ RetiredMutableNeverReassigned: struct {
         status: .Retired,
         no_fix: None,
 
-        what: fn(self) -> String { "*Retired* (was: a `:=` name is never written)" }
+        what: fn(self) -> String { "*Retired* (was: a changeable name is never written)" }
 
         why: fn(self) -> String {
             "Jet has no warnings, so such a binding is the error Jet.MutableNeverReassigned"
@@ -15095,7 +15097,7 @@ FixedListLengthChange: struct {
         }
 
         fix: fn(self) -> String {
-            "If you need a growable list, bind it with `:=` (e.g. `r := [...]`) so its length can change."
+            "If you need a growable list, bind it to a `^` name (e.g. `^r: [...]`) so its length can change."
         }
     }
 }
@@ -24830,26 +24832,27 @@ BitLogicMixup: struct {
 
 MethodNamedCopyOrMove: struct {
     name: String,
+    kind: String,
     verb: String,
 
     impl Diagnostic {
         code: "E0436",
         safety_class: .Opinion,
-        safety_reason: "The method would never be called, since `.copy()` and `.move()` are the compiler's own, and Jet refuses the dead name.",
+        safety_reason: "The function would never be called, since `.copy()`, `.move()` and `.in_place()` are the compiler's own, and Jet refuses the dead name.",
         stage: [.Parse],
-        meaning: "A method is named `copy` or `move`, the compiler's own copy and take",
+        meaning: "A method is named `copy` or `move`, or a function `in_place`: the compiler's own copy, take and write window",
         detail: true,
         no_fix: .Behavior,
-        fix_next: "Rename the method and its calls.",
+        fix_next: "Rename the function and its calls.",
 
-        what: fn(self) -> String { "A method can't be named `{self.name}`" }
+        what: fn(self) -> String { "A {self.kind} can't be named `{self.name}`" }
 
         why: fn(self) -> String {
-            "`x.{self.name}()` is the compiler's own {self.verb} of a named value, so a method with that name would be shadowed at every call"
+            "`x.{self.name}()` is the compiler's own {self.verb} a named value, so a {self.kind} with that name would be shadowed at every call"
         }
 
         fix: fn(self) -> String {
-            "Rename the method and its calls, for example to `emit_{self.name}`"
+            "Rename the {self.kind} and its calls, for example to `emit_{self.name}`"
         }
     }
 }

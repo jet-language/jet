@@ -29,7 +29,7 @@ browser_web_test_projection: fn(sequence: Int) -> DevtoolsProjection {
 }
 
 browser_web_test_panels: fn(sequence: Int) -> [JetDevtoolsPanelProjection] {
-    envelope := JetDevtoolsEnvelope.new("s1", 0)
+    ^envelope: JetDevtoolsEnvelope.new("s1", 0)
     event: JetDevtoolsEvent.from_parts(100 + sequence, "devserver", "state", "session", "{{\"state\":\"ready\"}}") ?? panic("event")
     _: envelope.push(event)
     catalog: JetDevtoolsPanelCatalog.canonical() ?? panic("catalog")
@@ -37,7 +37,7 @@ browser_web_test_panels: fn(sequence: Int) -> [JetDevtoolsPanelProjection] {
 }
 
 #Test("typed_projection_renders_both_placements_from_one_state") {
-    state := BrowserWebState.new("s1")
+    ^state: BrowserWebState.new("s1")
     state.sync(browser_web_test_projection(1), browser_web_test_panels(1)) ?? panic("sync")
     in_app: state.host.view_model(.InApp)
     workbench: state.host.view_model(.Workbench)
@@ -48,12 +48,12 @@ browser_web_test_panels: fn(sequence: Int) -> [JetDevtoolsPanelProjection] {
 }
 
 #Test("typed_status_and_identity_stay_frame_metadata") {
-    projected := browser_web_test_projection(1)
+    ^projected: browser_web_test_projection(1)
     projected.source_id = Val("src/main.jet")
     projected.build_id = Val("build-1")
     projected.world_id = Val("world-1")
     projected.status = DevtoolsStatusFact{state: .Building, diagnostic_code: Val("E0102"), diagnostic: Val("missing name"), accepted_revision: Val("accepted"), last_good_revision: Val("good"), run_target: Val("browser"), run_output: Val("web"), test_state: Val("idle")}
-    state := BrowserWebState.new("s1")
+    ^state: BrowserWebState.new("s1")
     state.sync(projected, browser_web_test_panels(1)) ?? panic("sync")
     frame: state.frame(.InApp)
     assert_eq(frame.source_id, Val("src/main.jet"))
@@ -70,11 +70,11 @@ browser_web_test_panels: fn(sequence: Int) -> [JetDevtoolsPanelProjection] {
 }
 
 #Test("page_offers_tools_only_where_the_host_has_them") {
-    projected := browser_web_test_projection(1)
+    ^projected: browser_web_test_projection(1)
     projected.status.state = .Error
     projected.status.diagnostic_code = Val("E0102")
     projected.status.diagnostic = Val("Error: Jet.UnknownFunction: unknown symbol\n  --> app.jet:12:9\n")
-    state := BrowserWebState.new("s1")
+    ^state: BrowserWebState.new("s1")
     state.sync(projected, browser_web_test_panels(1)) ?? panic("sync")
     page: browser_web_render_page(state, .InApp)
     assert(!page.contains("data-tool=\"source\""))
@@ -89,7 +89,7 @@ browser_web_test_panels: fn(sequence: Int) -> [JetDevtoolsPanelProjection] {
 }
 
 #Test("reconnect_reset_returns_bounded_snapshot_events") {
-    state := BrowserWebState.new("s1")
+    ^state: BrowserWebState.new("s1")
     state.sync(browser_web_test_projection(1), browser_web_test_panels(1)) ?? panic("sync")
     body: browser_web_reconnect_json(state, None, true, false) ?? panic("reconnect")
     assert(body.contains("\"reset\":true"))

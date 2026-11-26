@@ -1,5 +1,5 @@
 // A read-only binding of a value `if` whose arms copy places
-// (`n: if c -> a.f else -> b[i]`, or a `:=` of it nothing writes) borrows
+// (`n: if c -> a.f else -> b[i]`, or a `^` of it nothing writes) borrows
 // the place of the arm taken when its scope leaves every arm's root alone and
 // never consumes it. So does a value match whose arm reads a payload
 // of its own pattern over such a root (`n: if s == { .V(p) -> p ... }`). An
@@ -40,7 +40,7 @@ whole: fn(k: Int) -> Int {
     picked.data.len() + a.data.len()
 }
 
-// A `:=` binding nothing writes, made on every turn of a loop: the holder of
+// A changeable binding nothing writes, made on every turn of a loop: the holder of
 // the padding arm is dropped at the end of each turn.
 looped: fn(rows: [Blob]) -> Int {
     ^total: 0

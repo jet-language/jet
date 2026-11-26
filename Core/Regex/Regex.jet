@@ -800,10 +800,10 @@ PatternParser: struct {
     /// comes from the text the match consumes.
     ///
     /// ```jet
-    /// p := PatternParser{cps: decode_all("(?<!x)y".bytes()), i: 2, depth: 0, nodes: [Node]{}, kids: [Int]{}, kinds: [Int]{}, los: [Int]{}, his: [Int]{}, groups: 0, names: [String]{}, looks: [Int]{}, look_behind: [Bool]{}, look_neg: [Bool]{}}
+    /// ^p: PatternParser{cps: decode_all("(?<!x)y".bytes()), i: 2, depth: 0, nodes: [Node]{}, kids: [Int]{}, kinds: [Int]{}, los: [Int]{}, his: [Int]{}, groups: 0, names: [String]{}, looks: [Int]{}, look_behind: [Bool]{}, look_neg: [Bool]{}}
     /// node: p.parse_look(0, 60, 33) ?? panic("{err.reason}")
-    /// q := PatternParser{cps: decode_all("(?=(a))".bytes()), i: 2, depth: 0, nodes: [Node]{}, kids: [Int]{}, kinds: [Int]{}, los: [Int]{}, his: [Int]{}, groups: 0, names: [String]{}, looks: [Int]{}, look_behind: [Bool]{}, look_neg: [Bool]{}}
-    /// refused := "parsed"
+    /// ^q: PatternParser{cps: decode_all("(?=(a))".bytes()), i: 2, depth: 0, nodes: [Node]{}, kids: [Int]{}, kinds: [Int]{}, los: [Int]{}, his: [Int]{}, groups: 0, names: [String]{}, looks: [Int]{}, look_behind: [Bool]{}, look_neg: [Bool]{}}
+    /// ^refused: "parsed"
     /// if q.parse_look(0, 61, 40) == .Err(e) -> refused = "{e.offset}: {e.reason}"
     /// want: "0: a lookaround holds no capture group; write `(?:…)` inside it"
     /// p.i // => 6
@@ -2310,7 +2310,7 @@ look_tables: fn(re: Regex, text: [U8]) -> [Bool] Never! {
 ///
 /// ```jet
 /// ahead: compile("a(?=b)") ?? panic("compiles")
-/// row := [Bool]{true}
+/// ^row: [Bool]{true}
 /// steps: look_pass(ahead, "abac".bytes(), 0, row)
 /// want: [Bool]{true, false, true, false, false, false}
 /// row == want // => true
@@ -2604,9 +2604,9 @@ backtrack: fn(re: Regex, text: [U8], single: Bool, full: Bool, capture: Bool, lo
 /// shout: compile("(\\w+)(?=!)") ?? panic("compiles")
 /// said: "hi there!".bytes()
 /// looks: look_tables(shout, said)
-/// visited := filled((shout.ops.len() * (said.len() + 1) + 31) >> 5, 0)
-/// jobs := [Int]{}
-/// caps := filled(4, -1)
+/// ^visited: filled((shout.ops.len() * (said.len() + 1) + 31) >> 5, 0)
+/// ^jobs: [Int]{}
+/// ^caps: filled(4, -1)
 /// from_start: backtrack_from(shout, said, 0, false, true, visited, jobs, caps, looks)
 /// restored: caps == filled(4, -1) && jobs.len() == 0
 /// from_word: backtrack_from(shout, said, 3, false, true, visited, jobs, caps, looks)

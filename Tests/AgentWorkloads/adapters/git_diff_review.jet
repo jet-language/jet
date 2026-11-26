@@ -29,10 +29,10 @@ run: fn(args: WorkloadArgs) {
     if result.code != 0 && result.code != 1 -> panic("git diff exit {result.code}: {result.errors.trim()}")
 
     output: result.output.copy()
-    added := 0
-    deleted := 0
-    modified := 0
-    rows := [String]{}
+    ^added: 0
+    ^deleted: 0
+    ^modified: 0
+    ^rows: [String]{}
     // Raw git --name-status protocol: it is not RFC-4180 CSV.
     loop line in output.split("\n") {
         if line != "" {
@@ -40,9 +40,9 @@ run: fn(args: WorkloadArgs) {
             if fields.len() != 2 -> panic("bad git name-status row: {line}")
             status: fields[0]
             raw_path: fields[1]
-            pieces := [String]{}
-            root_name := ""
-            index := 0
+            ^pieces: [String]{}
+            ^root_name: ""
+            ^index: 0
             loop piece in raw_path.split("/") {
                 if index == 0 -> root_name = piece else -> pieces.push(piece)
                 index += 1
@@ -51,7 +51,7 @@ run: fn(args: WorkloadArgs) {
                 panic("git path escaped roots: {raw_path}")
             }
             path: pieces.join("/")
-            kind := ""
+            ^kind: ""
             if status == {
                 "A" -> {
                     kind = "added"

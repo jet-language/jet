@@ -72,7 +72,7 @@ idiom_in_run: fn(body: String) -> String { "run: fn() {{\n{body}}}\n" }
 }
 
 #Test("an undeclared name or type is declared or renamed") {
-    assert_idiom_fix(idiom_in_run("    total = 0\n    print(total)\n"), idiom_in_run("    total := 0\n    print(total)\n"))
+    assert_idiom_fix(idiom_in_run("    total = 0\n    print(total)\n"), idiom_in_run("    ^total: 0\n    print(total)\n"))
     point: "Point: struct {{\n    x: Int,\n    y: Int,\n}}\n\n"
     assert_idiom_fix("{point}{idiom_in_run("    p: Pont{{x: 1, y: 2}}\n    print(p.x)\n")}", "{point}{idiom_in_run("    p: Point{{x: 1, y: 2}}\n    print(p.x)\n")}")
 }

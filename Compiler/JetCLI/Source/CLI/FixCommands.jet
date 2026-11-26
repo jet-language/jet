@@ -4,7 +4,7 @@ use {
     cli_files: core.files
     jet_driver.[JetDriverBuildQueryScope, JetDriverCompileMode, JetDriverSourceDocument, JetDriverVerbOutput, jet_driver_entry_package_has_build, jet_driver_present_diagnostics, jet_driver_query_build_plan, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
     jet_foundation.[Diagnostic, DiagnosticFixApplicability, DiagnosticFixSafety, SourceFile, Span, TextEdit, DIAGNOSTIC_ERROR, diagnostic_headline, foundation_byte_text]
-    jet_lexer.[lex, Token, TOKEN_BLOCK_COMMENT, TOKEN_COLON, TOKEN_COLON_EQ, TOKEN_EQ, TOKEN_IDENT, TOKEN_LBRACE, TOKEN_LINE_COMMENT, TOKEN_RBRACE, TOKEN_SEMI]
+    jet_lexer.[lex, Token, TOKEN_BLOCK_COMMENT, TOKEN_COLON, TOKEN_EQ, TOKEN_IDENT, TOKEN_LBRACE, TOKEN_LINE_COMMENT, TOKEN_RBRACE, TOKEN_SEMI]
     jet_parser.[jet_format_unified_diff, parser_marker_placement_edits]
     jet_semindex.[SemDefinitionFact]
 }
@@ -178,7 +178,7 @@ jet_cli_fix_retired_run: fn(site: Span) -> JetCLIFix {
 }
 
 // Each `comptime` word right before a `{` where a value or a statement
-// starts: after `:`, `:=`, `=`, `{`, `}` or `;`, or first on its line. A
+// starts: after `:`, `=`, `{`, `}` or `;`, or first on its line. A
 // word in a condition (`if comptime {`) or an operand stays.
 jet_cli_fix_retired_run_words: fn(source: String) -> [Span] {
     bytes: source.bytes()
@@ -212,7 +212,7 @@ jet_cli_fix_next_opens_block: fn(tokens: [Token], from: Int) -> Bool {
 jet_cli_fix_starts_value: fn(bytes: [U8], tokens: [Token], previous: Int, start: Int) -> Bool {
     if previous < 0 -> return true
     before: tokens[previous]
-    if before.kind == TOKEN_COLON || before.kind == TOKEN_COLON_EQ || before.kind == TOKEN_EQ || before.kind == TOKEN_LBRACE || before.kind == TOKEN_RBRACE || before.kind == TOKEN_SEMI {
+    if before.kind == TOKEN_COLON || before.kind == TOKEN_EQ || before.kind == TOKEN_LBRACE || before.kind == TOKEN_RBRACE || before.kind == TOKEN_SEMI {
         return true
     }
     loop at in before.span.end..<start {

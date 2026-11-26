@@ -50,7 +50,6 @@ use {
         TOKEN_CARET,
         TOKEN_CHAR,
         TOKEN_COLON,
-        TOKEN_COLON_EQ,
         TOKEN_COMMA,
         TOKEN_DOLLAR,
         TOKEN_LT_GT,
@@ -127,8 +126,7 @@ parser_statement_is_keyword: fn(state: ^JetParserState) -> Bool Never! {
     if token.kind == TOKEN_IDENT {
         word: parser_value(state, token)
         if parser_next_statement_ahead(state) || word == "defer" -> return true
-        next_kind: parser_kind_at(state, 1)
-        if next_kind == TOKEN_COLON || next_kind == TOKEN_COLON_EQ -> return true
+        if parser_kind_at(state, 1) == TOKEN_COLON -> return true
     }
     if parser_changeable_name_ahead(state, 0) -> return true
     false
@@ -594,7 +592,7 @@ parser_parse_statement: fn(state: ^JetParserState) -> Stmt {
             word: parser_value(state, token)
             // `defer` opens a scheduled close unless it is the name a binding
             // or an assignment starts with: no keyword table row holds it.
-            defer_named: parser_kind_at(state, 1) == TOKEN_COLON || parser_kind_at(state, 1) == TOKEN_COLON_EQ || parser_kind_at(state, 1) == TOKEN_EQ
+            defer_named: parser_kind_at(state, 1) == TOKEN_COLON || parser_kind_at(state, 1) == TOKEN_EQ
             if word == "defer" && !defer_named -> return parser_parse_defer_statement(state)
             if parser_task_group_ahead(state) -> return parser_parse_task_group(state)
             if word == "assert" && parser_kind_at(state, 1) == TOKEN_IDENT {
@@ -605,7 +603,7 @@ parser_parse_statement: fn(state: ^JetParserState) -> Stmt {
             }
             binding_kind: parser_kind_at(state, 1)
             if {
-                binding_kind == TOKEN_COLON_EQ || binding_kind == TOKEN_COLON -> parser_parse_binding_statement(state)
+                binding_kind == TOKEN_COLON -> parser_parse_binding_statement(state)
                 (binding_kind == TOKEN_LBRACE || binding_kind == TOKEN_DOT) && parser_pattern_binding_ahead(state) -> parser_parse_pattern_binding_statement(state)
                 else -> parser_parse_assignment_or_expression(state)
             }
@@ -734,7 +732,7 @@ parser_parse_scope_member: fn(state: ^JetParserState) -> Stmt {
 
 // `next` is the loop-control word only before a line end, `}`, the `,` that
 // ends a compact table arm, or a `(name)` target; anywhere else it is an
-// ordinary name (`next := 0`).
+// ordinary name (`next: 0`).
 parser_next_statement_ahead: fn(state: ^JetParserState) -> Bool Never! {
     if state.words.id_next < 0 -> return false
     token: parser_current(state)
@@ -778,7 +776,7 @@ parser_parse_if_statement: fn(state: ^JetParserState) -> Stmt {
     saved_diagnostics: state.diagnostics.len()
     saved_blocks: state.block_spans.len()
     saved_else_arms: state.else_arms.len()
-    subject: if parser_write_mark(parser_current_kind(state)) -> parser_parse_marked_place(state, 1, false, true) else -> parser_in_place_window(parser_parse_expression_no_struct_lit_no_cmp(state, 1))
+    subject: parser_in_place_window(parser_parse_expression_no_struct_lit_no_cmp(state, 1))
     dispatch: parser_expression_form_dispatch_op(parser_current_kind(state))
     if dispatch == .Val(op) && parser_kind_at(state, 1) == TOKEN_LBRACE && !parser_expression_form_record_test_ahead(state) {
         parser_bump(state)
@@ -1387,7 +1385,7 @@ parser_loop_source_separator: fn(state: ^JetParserState) {
 }
 
 // S19-amend: `loop` reads all loop forms by header: `loop {}` (infinite),
-// `loop name := value, cond {}` (state), `loop x in source[, stride] {}`
+// `loop ^name: value, cond {}` (state), `loop x in source[, stride] {}`
 // (iteration, `(key, value)` for two names, `{a, b}` or `Row{a, b}` to take
 // each item apart) and `loop cond {}` (conditional).
 parser_parse_loop_after_keyword: fn(state: ^JetParserState, start: Span, label: NamedSpan?) -> Stmt {
@@ -1399,9 +1397,9 @@ parser_parse_loop_after_keyword: fn(state: ^JetParserState, start: Span, label: 
         body: parser_parse_loop_effect_body(state)
         return Stmt.Loop{body: body.statements, span: parser_cover(start, body.span), arrow_body: arrow_body, label: label}
     }
-    if (first_kind == TOKEN_IDENT && second_kind == TOKEN_COLON_EQ) || parser_changeable_name_ahead(state, 0) {
+    if parser_changeable_name_ahead(state, 0) {
         // A state loop starts with one changeable name binding (`loop ^i: 0, …`).
-        if first_kind == TOKEN_CARET -> parser_bump(state)
+        parser_bump(state)
         name: parser_bump(state)
         sigil: parser_bump(state)
         initial: parser_parse_expression(state, 1, 0)
@@ -1417,7 +1415,7 @@ parser_parse_loop_after_keyword: fn(state: ^JetParserState, start: Span, label: 
     if (first_kind == TOKEN_IDENT && (second_kind == TOKEN_SEMI || second_kind == TOKEN_COMMA || second_kind == TOKEN_KW_IN)) || first_kind == TOKEN_LPAREN || pattern_head {
         binding: parser_loop_source_binding(state)
         parser_loop_source_separator(state)
-        first: if parser_write_mark(parser_current_kind(state)) -> parser_parse_marked_place(state, 1, false, false) else -> parser_in_place_window(parser_parse_expression_no_struct_lit(state, 1))
+        first: parser_in_place_window(parser_parse_expression_no_struct_lit(state, 1))
         ^kind: ForKind.In{collection: first.expr, step: None}
         if first.expr == {
             .Range(range_start, range_end, exclusive, _, _) -> {
@@ -1668,14 +1666,14 @@ parser_parse_prep_loop: fn(state: ^JetParserState) -> Stmt {
     Stmt.ComptimeBlock{body: [Stmt]{body}, is_template_loop: state.derive_template_depth > 0, span: parser_cover(start.span, end)}
 }
 
-// `^name:` at `offset`: the write mark before a name and its binding colon
-// declares a changeable name (`^count: 0`).
+// `^name:` at `offset`: the write mark touching a name, then its binding
+// colon, declares a changeable name (`^count: 0`).
 parser_changeable_name_ahead: fn(state: ^JetParserState, offset: Int) -> Bool Never! {
-    parser_kind_at(state, offset) == TOKEN_CARET && parser_kind_at(state, offset + 1) == TOKEN_IDENT && parser_kind_at(state, offset + 2) == TOKEN_COLON
+    parser_kind_at(state, offset) == TOKEN_CARET && parser_kind_at(state, offset + 1) == TOKEN_IDENT && parser_kind_at(state, offset + 2) == TOKEN_COLON && parser_lookahead(state, offset).span.end == parser_lookahead(state, offset + 1).span.start
 }
 
 // S74: a `[ … ]`, `{ … }` or `Type{ … }` target whose matching close is
-// followed by `:` or `:=`. Bounded by the bracket depth.
+// followed by `:`. Bounded by the bracket depth.
 parser_pattern_binding_ahead: fn(state: ^JetParserState) -> Bool Never! {
     ^offset: 0
     if parser_current_kind(state) == TOKEN_IDENT {
@@ -1693,10 +1691,7 @@ parser_pattern_binding_ahead: fn(state: ^JetParserState) -> Bool Never! {
         if kind == open -> depth += 1
         if kind == close {
             depth -= 1
-            if depth == 0 {
-                after: parser_kind_at(state, offset + 1)
-                return after == TOKEN_COLON || after == TOKEN_COLON_EQ
-            }
+            if depth == 0 -> return parser_kind_at(state, offset + 1) == TOKEN_COLON
         }
         offset += 1
     }
@@ -1733,21 +1728,20 @@ parser_loop_pattern_head_end: fn(state: JetParserState, index: Int) -> Int Never
 }
 
 // S74: a destructuring binding `[a, b]: list`, `{a, b}: record`,
-// `{ a: x, b: y }: record` or `Type{x, y: local, ..}: value`. A written
-// `:=`, or `^` before every bound name, makes the whole binding changeable;
-// `^` before some names makes only those changeable (`{^lo, hi}: bounds`).
+// `{ a: x, b: y }: record` or `Type{x, y: local, ..}: value`. A `^` before a
+// bound name makes that name changeable (`{^lo, hi}: bounds`).
 parser_parse_pattern_binding_statement: fn(state: ^JetParserState) -> Stmt {
     pattern: parser_parse_bind_pattern(state)
-    sigil: parser_bump(state)
+    sigil: parser_expect(state, TOKEN_COLON, "after a destructuring pattern")
     value: parser_parse_expression(state, 1, 0)
     ^all_marked: false
     loop name in parser_bind_pattern_names(pattern) {
         all_marked = name.mutable
         if !all_marked -> break
     }
-    // Every name marked is the whole binding changeable, which `:=` also
-    // spells; the names then carry no mark of their own.
-    ^binding: ast_binding("", parser_bind_pattern_span(pattern), sigil.kind == TOKEN_COLON_EQ || all_marked, value.expr, Val(sigil.span))
+    // Every name marked is the whole binding changeable; the names then carry
+    // no mark of their own.
+    ^binding: ast_binding("", parser_bind_pattern_span(pattern), all_marked, value.expr, Val(sigil.span))
     binding.pattern = Val(if all_marked -> parser_bind_pattern_unmarked(pattern) else -> pattern)
     parser_finish_statement(state)
     Stmt.Val{binding: binding}
@@ -1868,25 +1862,15 @@ parser_bind_pattern_span: fn(pattern: BindPattern) -> Span Never! {
     }
 }
 
-// `name: value` is fixed; `^name: value` (or `name := value`) is changeable.
+// `name: value` is fixed; `^name: value` is changeable.
 parser_parse_binding_statement: fn(state: ^JetParserState) -> Stmt {
     marked: parser_current_kind(state) == TOKEN_CARET
     if marked -> parser_bump(state)
     name: parser_expect_name(state, "in a binding")
     sigil: parser_current(state)
-    mutable: if {
-        sigil.kind == TOKEN_COLON -> {
-            parser_bump(state)
-            marked
-        }
-        sigil.kind == TOKEN_COLON_EQ && !marked -> {
-            parser_bump(state)
-            true
-        }
-        else -> {
-            parser_add_error(state, sigil.span, "expected `:=` or `:` in a binding", "the binding sigil distinguishes a mutable value from an immutable one", "write `:=` for mutable or `:` for immutable")
-            false
-        }
+    mutable: marked && sigil.kind == TOKEN_COLON
+    if sigil.kind == TOKEN_COLON -> parser_bump(state) else {
+        parser_add_error(state, sigil.span, "expected `:` in a binding", "a binding names its value with `:`, and a `^` before the name makes it changeable", "write `name: value`, or `^name: value` for a name you will change")
     }
     // `name: #run value` is the prepared-value
     // binding. A block holding only its final expression lowers to the one
@@ -1912,20 +1896,19 @@ parser_parse_binding_statement: fn(state: ^JetParserState) -> Stmt {
         parser_finish_statement(state)
         return Stmt.Val{binding: prepared}
     }
-    // Bare `name := uninit` — an explicit type must precede the literal body.
+    // Bare `^name: uninit` — an explicit type must precede the literal body.
     if parser_current_kind(state) == TOKEN_IDENT && parser_value_at(state, 0) == "uninit" {
         after: parser_kind_at(state, 1)
         if after == TOKEN_SEMI || after == TOKEN_RBRACE || after == TOKEN_EOF {
             uninit_token: parser_current(state)
             binding_name: parser_value(state, name)
-            parser_add_error_code(state, "E0421", uninit_token.span, "`uninit` needs an explicit type", "an uninitialized binding has no value to infer its type from, so the type must appear before the literal body", "write `{binding_name} := <Type>{{ uninit }}`, e.g. `buffer := [U8#4096]{{ uninit }}`")
+            parser_add_error_code(state, "E0421", uninit_token.span, "`uninit` needs an explicit type", "an uninitialized binding has no value to infer its type from, so the type must appear before the literal body", "write `^{binding_name}: <Type>{{ uninit }}`, e.g. `^buffer: [U8#4096]{{ uninit }}`")
             parser_sync_stmt(state)
             return Stmt.Expr{expr: Expr.Unit{span: uninit_token.span, id: parser_node_id(state)}}
         }
     }
-    value: if parser_write_mark(parser_current_kind(state)) -> parser_parse_marked_place(state, 0, true, false) else -> parser_in_place_window(parser_parse_expression(state, 1, 0))
-    // A window can't be re-pointed, so it is bound with `:` only, and
-    // `name := ^place` binds the same window `name: place.in_place()` does.
+    value: parser_in_place_window(parser_parse_expression(state, 1, 0))
+    // A window can't be re-pointed, so it is bound with `:` only.
     window: parser_is_write_window(value.expr)
     if marked && window {
         parser_add_error(state, name.span, "a write window can't be a changeable name", "a window writes into the place it was made from, and can't be pointed at another place", "remove the `^` before the name")
@@ -1942,7 +1925,7 @@ parser_parse_binding_statement: fn(state: ^JetParserState) -> Stmt {
         return Stmt.Layout{name: binding_name, name_span: name.span, body: body, span: parser_cover(name.span, value.span)}
     }
     ^binding: ast_binding(parser_value(state, name), name.span, mutable && !window, value.expr, Val(sigil.span))
-    // `name := Type{ uninit }` — `uninit` only as the
+    // `^name: Type{ uninit }` — `uninit` only as the
     // whole typed-literal body, and only on a mutable binding. Sema proves
     // write-before-read; the type rides on the binding.
     if mutable && value.expr == .TypedLit(head, body, literal_span, _) {
@@ -2327,10 +2310,10 @@ parser_expression_lvalue: fn(state: ^JetParserState, expr: Expr, fallback_span: 
     if {
         operator.kind != TOKEN_EQ -> {
             operator_text: parser_text(state, operator)
-            parser_add_fatal_code(state, "E0165", expr_span(expr), "Compound assignment needs a mutable place.", "Updates are allowed only on a mutable name or an `^` parameter; a computed value has no place to update.", "Bind the value with `:=`, then write `name {operator_text} value`")
+            parser_add_fatal_code(state, "E0165", expr_span(expr), "Compound assignment needs a mutable place.", "Updates are allowed only on a mutable name or an `^` parameter; a computed value has no place to update.", "Bind the value with `^name: value`, then write `name {operator_text} value`")
         }
         else -> {
-            parser_add_error(state, expr_span(expr), "this value can't be assigned to", "only a name or an indexed slot like `items[0]` can appear on the left of `=`", "use `name := ...` or `map[key] = ...`")
+            parser_add_error(state, expr_span(expr), "this value can't be assigned to", "only a name or an indexed slot like `items[0]` can appear on the left of `=`", "use `^name: ...` or `map[key] = ...`")
         }
     }
     LValue.Local{name: "__jet_error", name_span: fallback_span}
@@ -2467,8 +2450,7 @@ parser_parse_marked_statement: fn(state: ^JetParserState) -> Stmt {
     if word == "Track" || word == "Meta" || word == "Local" || word == "Shared" {
         ^offset: 0
         loop parser_kind_at(state, offset) == TOKEN_SEMI -> offset += 1
-        binding_kind: parser_kind_at(state, offset + 1)
-        if (parser_kind_at(state, offset) == TOKEN_IDENT && (binding_kind == TOKEN_COLON_EQ || binding_kind == TOKEN_COLON)) || parser_changeable_name_ahead(state, offset) {
+        if (parser_kind_at(state, offset) == TOKEN_IDENT && parser_kind_at(state, offset + 1) == TOKEN_COLON) || parser_changeable_name_ahead(state, offset) {
             parser_skip_semicolons(state)
             statement: parser_parse_binding_statement(state)
             if statement == .Val(binding) {

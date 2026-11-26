@@ -230,11 +230,11 @@ cancel: fn(session: Session) -[FFI.Octave]> { abi.cancel(session.value) }
 // One generated tensor call. Hole: `function`.
 PKG_OCTAVE_JET_FUNCTION: #run { `@@function@@: fn(session: Session, input: Tensor, deadline_ms: Int) -[FFI.Octave, GPU]> Tensor OctaveError! {
     if compute.rank(input) != 2 -> return Err(OctaveError.Shape)
-    shape_wire := [Dyn]{}
+    ^shape_wire: [Dyn]{}
     loop dimension in compute.shape(input) {
         shape_wire.push(Dyn.Int(dimension))
     }
-    data_wire := [Dyn]{}
+    ^data_wire: [Dyn]{}
     loop value in compute.to_list(input) {
         data_wire.push(Dyn.Float(value))
     }
@@ -254,7 +254,7 @@ PKG_OCTAVE_JET_FUNCTION: #run { `@@function@@: fn(session: Session, input: Tenso
         dyn_value: value.field("data") ?? return Err(OctaveError.Protocol)
         if dyn_value == .Array(items) {
             if items.len() != rows * cols -> return Err(OctaveError.Width)
-            flat := [Float]{}
+            ^flat: [Float]{}
             loop item in items {
                 number: item.float() ?? return Err(OctaveError.Width)
                 flat.push(number)

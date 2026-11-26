@@ -1767,12 +1767,20 @@ jfmt_fmt_expr: fn(f: ^JetFmt, expr: Expr, prec: Int) {
             jfmt_write(f, ".copy()")
         }
         .Place(inner, access, span, id) -> {
-            // Parsed places are write windows (`^values[2..3]`), plain reads,
-            // and marked receivers (`^xs.push(4)`, `^^buf.seal()`), which start
-            // at their mark; a take sema builds is spelled `.move()` here.
+            // Parsed places are write windows (`values[2..3].in_place()`),
+            // plain reads, and marked receivers (`^xs.push(4)`,
+            // `^^buf.seal()`), which start at their mark; a take sema builds
+            // is spelled `.move()` here.
             written_take: access == PlaceAccess.Take && id != AST_NODE_GENERATED && span.start < expr_source_start(inner)
             if access == {
-                .Write -> { jfmt_write(f, jfmt_access_mark(AccessConvention.Write)) }
+                .Write -> {
+                    if !jfmt_src_valid(f, span.start, span.start + 1) || f.src_bytes[span.start] != 94 {
+                        jfmt_fmt_expr(f, inner, JFMT_PREC_POSTFIX)
+                        jfmt_write(f, ".in_place()")
+                        return
+                    }
+                    jfmt_write(f, jfmt_access_mark(AccessConvention.Write))
+                }
                 .Take -> {
                     if written_take -> jfmt_write(f, jfmt_access_mark(AccessConvention.Move))
                 }
@@ -1850,7 +1858,7 @@ jfmt_fmt_expr: fn(f: ^JetFmt, expr: Expr, prec: Int) {
         // Card #1440: the synthesized end of an else-less table; never printed.
         .NoElse(_, _) -> {}
         .PatternTest(subject, pattern, _, _) -> {
-            jfmt_fmt_window(f, subject, JFMT_PREC_CMP)
+            jfmt_fmt_expr(f, subject, JFMT_PREC_CMP)
             jfmt_write(f, " == ")
             jfmt_fmt_pattern(f, pattern)
         }
@@ -2158,23 +2166,6 @@ jfmt_fmt_value_loop: fn(f: ^JetFmt, body: [Stmt], route_attached: Bool) {
             .Val(_) | .Assign(_, _, _, _) | .While(_, _, _, _, _) | .For(_, _, _, _, _, _, _, _, _) | .Switch(_, _, _, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .Loop(_, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Defer(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .DeferClose(_, _) -> {}
         }
     }
-}
-
-// A write window where one may stand (a binding's value, a match subject, a
-// one-arm writing match, a loop source) prints `place.in_place()`. D-BIND-MARK1
-// stage 1, temporary: an ordinary format keeps a written `^place` there, the
-// migration format (JetFmt.bind_mark1) rewrites it.
-jfmt_fmt_window: fn(f: ^JetFmt, e: Expr, prec: Int) {
-    if e == .Place(inner, access, span, _) && access == PlaceAccess.Write {
-        call: ".in_place()"
-        written_call: span.end >= call.len() && jfmt_src_valid(f, span.end - call.len(), span.end) && jfmt_src_text(f, span.end - call.len(), span.end) == call
-        if f.bind_mark1 || written_call {
-            jfmt_fmt_expr(f, inner, JFMT_PREC_POSTFIX)
-            jfmt_write(f, ".in_place()")
-            return
-        }
-    }
-    jfmt_fmt_expr(f, e, prec)
 }
 
 // One `name in source` clause of a loop head; a destructuring head prints
@@ -2901,8 +2892,20 @@ jfmt_fmt_call_args_with_template: fn(f: ^JetFmt, args: [CallArg], source_start: 
     if template == .Val(template_arg) -> jfmt_fmt_template_block(f, template_arg)
 }
 
-// A typed template's ` { items }` block.
+// A typed template's ` { items }` block. A block written on one line that
+// holds one value stays on its line: `#code { "traced" }`, since a line that
+// is a bare value is no template item of its own.
 jfmt_fmt_template_block: fn(f: ^JetFmt, template_arg: CallArg) {
+    if template_arg.flags.template_items == .Val(items) && items.len() == 1 && items[0] == .Stmt(.Expr(value)) && !jfmt_source_span_multiline(f, template_arg.span) {
+        mark: jfmt_mark(f)
+        jfmt_write(f, " {{ ")
+        jfmt_fmt_expr(f, value, JFMT_PREC_OR_FALLBACK)
+        if !jfmt_out_since_has_newline(f, mark.out_len) {
+            jfmt_write(f, " }}")
+            return
+        }
+        jfmt_rollback(f, mark)
+    }
     jfmt_write(f, " {{")
     jfmt_newline(f)
     f.indent += 1

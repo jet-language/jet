@@ -470,7 +470,7 @@ sema_stmt_for_in_borrowed_task_list: fn(collection: Expr, collection_type: Type,
         fix: if is_param -> "take the list: `{name}: ^^{sema_type_show(collection_type)}`, or collect the work in a canonical `task.all` or `task.group` block" else -> "move the list into a local this scope owns before the loop consumes its task handles"
         return sema_error("E0120", expr_span(collection), "`{name}` was not moved here, so this loop can't take its handles", why, fix)
     }
-    sema_error("E0120", expr_span(collection), "this loop can't take handles out of a field or index", why, "bind the list into a local this scope owns first (`hs := …`), then write `loop h in hs {{ … }}`")
+    sema_error("E0120", expr_span(collection), "this loop can't take handles out of a field or index", why, "bind the list into a local this scope owns first (`^hs: …`), then write `loop h in hs {{ … }}`")
 }
 
 // The local a loop reads, through `.chars()`.
@@ -486,7 +486,7 @@ sema_stmt_for_in_collection_root: fn(expression: Expr) -> String? {
 }
 
 // The collection a `loop x in xs` holds across its body (E0507). A written
-// drive (`loop x in ^items`) holds the same source as a by-value one.
+// drive (`loop x in items.in_place()`) holds the same source as a by-value one.
 sema_stmt_for_in_driven_root: fn(expression: Expr) -> String? {
     if expression == {
         .Place(inner, _, _, _) -> return sema_stmt_for_in_collection_root(inner)

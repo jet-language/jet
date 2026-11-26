@@ -429,7 +429,7 @@ receipt: fn(path: String) -> RunReceipt MetadataError!
 /// `MetadataError`, never a shorter list: more matches than `limit` is
 /// `Truncated`, and a kind the source's store doesn't hold is `Unsupported`.
 query: fn(source: FactSource, kind: FactKind, at: QueryTime?{None}, limit: Int?{None}) -> [Fact] MetadataError! {
-    rows := [Fact]{}
+    ^rows: [Fact]{}
     if source == {
         .Schema(snapshot) -> {
             if at != None {
@@ -452,7 +452,7 @@ query: fn(source: FactSource, kind: FactKind, at: QueryTime?{None}, limit: Int?{
             revision: SnapshotID{digest: program.revision()}
             loop package in program.packages() {
                 loop info in package.types {
-                    seen := [String]{}
+                    ^seen: [String]{}
                     scope: FactScope{package: package.name.copy(), module: info.module.copy(), item: info.name.copy()}
                     if kind == FactKind.Marker {
                         loop marker in info.markers {
@@ -474,7 +474,7 @@ query: fn(source: FactSource, kind: FactKind, at: QueryTime?{None}, limit: Int?{
             if kind == FactKind.Read {
                 loop package in program.packages() {
                     loop function in package.functions {
-                        seen := [String]{}
+                        ^seen: [String]{}
                         scope: FactScope{package: package.name.copy(), module: function.module.copy(), item: function.name.copy()}
                         loop fact in function.facts {
                             rows.push(program_fact(kind, fact.name, function.identity, scope, revision, seen))
@@ -551,7 +551,7 @@ priv query_rows: module {
     // so a repeated name gets its `@n` identity.
     program_fact: fn(kind: FactKind, name: String, subject: String, scope: FactScope, revision: SnapshotID, seen: ^[String]) -> Fact Never! {
         word: fact_kind_word(kind)
-        repeat := 0
+        ^repeat: 0
         loop earlier in seen {
             if earlier == name -> repeat += 1
         }

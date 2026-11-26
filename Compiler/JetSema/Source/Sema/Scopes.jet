@@ -156,10 +156,9 @@ SemaScopeBinding: struct {
     // L0517: a `:` name bound to `path.normalize().to_string()` holds the
     // text of a typed normalized Path (sema_stmt_note_normalized_path_text).
     normalized_path_text: Bool{false},
-    // The text from the end of a `name: value` binding's name through its
-    // `:`: the E0111 machine edit replaces it with ` :=`, so `x: 1` becomes
-    // `x := 1`.
-    binding_sigil: Span?{None},
+    // The empty span before a `name: value` binding's name: the E0111
+    // machine edit inserts `^` there, so `x: 1` becomes `^x: 1`.
+    changeable_mark_at: Span?{None},
     // A `loop name in source` item name: each pass binds it afresh, so an
     // assignment to it is the E0111 that teaches a copy in the loop body.
     loop_item: Bool{false},
@@ -1187,7 +1186,7 @@ SemaCheckContext: struct {
     // keep a view into their source inside the literal; any other field owns
     // its value (sema_stmt_local_view_facts_fields).
     view_field_values: [Span]{[Span]{}},
-    // The `:=` number names whose type a use decided on an earlier check pass
+    // The changeable number names whose type a use decided on an earlier check pass
     // of this function, and the refusals this pass found. A probe's rollback
     // keeps the refusals it found: each is a use the source writes, and the
     // earliest one decides (Expressions/NumberNames.jet).
@@ -1222,7 +1221,7 @@ SemaBodyCheck: struct {
     scopes: SemaScopeTable,
 }
 
-// A `:=` number name (`binding`, its name's span) takes `ty`, the type its use
+// A changeable number name (`binding`, its name's span) takes `ty`, the type its use
 // at `use_span` needs where its default type is refused.
 SemaNumberRetype: struct {
     binding: Span,
@@ -3724,12 +3723,12 @@ sema_scope_mark_closure: fn(table: ^SemaScopeTable, name: String, info: ^^TCompt
     table.bindings[index].closure = Val(info)
 }
 
-// Keeps the name-end-through-`:` span of the binding `name` just declared
-// (see SemaScopeBinding.binding_sigil).
-sema_scope_mark_binding_sigil: fn(table: ^SemaScopeTable, name: String, sigil: Span) Never! {
+// Keeps where the binding `name` just declared takes the changeable mark
+// (see SemaScopeBinding.changeable_mark_at).
+sema_scope_mark_changeable_mark_at: fn(table: ^SemaScopeTable, name: String, at: Span) Never! {
     index: sema_scope_resolve_index(table, name) ?? return
     sema_scope_note_binding_edit(table, index)
-    table.bindings[index].binding_sigil = Val(sigil)
+    table.bindings[index].changeable_mark_at = Val(at)
 }
 
 // A proven payload refines a stable Optional name for the rest
