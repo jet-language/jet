@@ -7,7 +7,7 @@ use {
     jet_foundation.[Span, foundation_byte_text, foundation_json_quote]
     jet_lexer.[Lexed, Token, TOKEN_IDENT]
     jet_pkg_model.[pkg_mask_inline_package_source]
-    jet_semindex.[SemDef, SemIndex, SemKind, SemRef, SemSymbol]
+    jet_semindex.[SemDef, SemIndex, SemKind, SemSymbol]
 }
 
 LSPView: struct {
@@ -181,26 +181,39 @@ lsp_target_at: fn(view: LSPView, offset: Int) -> LSPTarget? Never! {
     best
 }
 
+// One occurrence of a target in a `SemIndex`: either the declaration itself
+// (`ref_index < 0`, span = `def.def_span`) or `index.references[ref_index]`.
+LSPOccurrence: struct {
+    is_declaration: Bool,
+    ref_index: Int,
+    span: Span,
+}
+
 // Every checked occurrence of the declaration: its name when `declaration`,
 // then each reference to it, each once.
-lsp_occurrences: fn(index: SemIndex, target: LSPTarget, declaration: Bool{false}) -> [SemRef] Never! {
-    ^found: [SemRef]{}
+lsp_occurrences: fn(index: SemIndex, target: LSPTarget, declaration: Bool{false}) -> [LSPOccurrence] Never! {
+    ^found: [LSPOccurrence]{}
     ^seen: [String:Bool]{}
     if declaration {
         if lsp_definition_at(index, target) == .Val(def) {
             seen["{def.module_path}:{def.def_span.start}"] = true
-            found.push(SemRef{name: def.name, span: def.def_span, module_path: def.module_path, scope_identity: None, target: None, fact: None})
+            found.push(LSPOccurrence{is_declaration: true, ref_index: -1, span: def.def_span})
         }
     }
-    loop reference in index.references {
+    loop (ref_index, reference) in index.references {
         anchor: reference.target ?? next
         if !lsp_same_target(target, anchor.module_path, anchor.def_span) -> next
         key: "{reference.module_path}:{reference.span.start}"
         if seen.has_key(key) -> next
         seen[key] = true
-        found.push(reference.copy())
+        found.push(LSPOccurrence{is_declaration: false, ref_index: ref_index, span: reference.span})
     }
     found
+}
+
+lsp_occurrence_module_path: fn(index: SemIndex, target: LSPTarget, occurrence: LSPOccurrence) -> String Never! {
+    if occurrence.is_declaration -> return target.module_path
+    index.references[occurrence.ref_index].module_path
 }
 
 // An occurrence placed in its file, with the text the check that found it read.
@@ -259,7 +272,8 @@ lsp_place_occurrences: fn(checked: LSPChecked, target: LSPTarget, seen: ^[String
     index: checked.index ?? return false
     ^placed: false
     loop occurrence in lsp_occurrences(index, target, declaration: declaration) {
-        module_ref: checked.modules[lsp_module_index(checked, occurrence.module_path) ?? next]
+        occ_path: lsp_occurrence_module_path(index, target, occurrence)
+        module_ref: checked.modules[lsp_module_index(checked, occ_path) ?? next]
         if module_ref.physical_path == "" -> next
         if occurrence.span.end > module_ref.source.count_bytes() -> next
         key: "{module_ref.physical_path}:{occurrence.span.start}"

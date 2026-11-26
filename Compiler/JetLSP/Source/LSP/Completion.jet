@@ -347,7 +347,7 @@ lsp_member_scope: fn(view: LSPView, receiver_end: Int) -> LSPMemberScope? Never!
         }
         .Param(ty) -> Val(LSPMemberScope.Owner{name: lsp_type_owner(type_name(ty))})
         .Field(ty, _) -> Val(LSPMemberScope.Owner{name: lsp_type_owner(type_name(ty))})
-        .Struct(_, _) | .Enum(_, _) | .Trait | .Type(_) -> Val(LSPMemberScope.Owner{name: def.name.copy()})
+        .Struct(_, _) | .Enum(_, _) | .Trait | .Type(_) -> Val(LSPMemberScope.Owner{name: def.name})
         .Module -> {
             module_path: view.module_path ?? return None
             doc_module: view.checked.modules[lsp_module_index(view.checked, module_path) ?? return None]

@@ -126,8 +126,7 @@ lsp_workspace_symbol_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> S
         }
         return lsp_response(id, "[{rows.join(",")}]")
     }
-    ^uris: [String]{}
-    loop (uri, _) in server.published -> uris.push(uri.copy())
+    ^uris: server.published.keys().to_list()
     uris.sort()
     loop uri in uris {
         if !lsp_symbol_rows_wanted(server.published[uri], -1, wanted, seen, rows) -> break
