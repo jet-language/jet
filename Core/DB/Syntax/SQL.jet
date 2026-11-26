@@ -1,0 +1,856 @@
+// SQLite 3.45.0 SQL grammar and checked-text slot checker for `SQL{"..."}`.
+use {
+    core.grammar.[Grammar]
+    core.grammar.sink.[GrammarSink]
+}
+
+SQL_SLOT_OPERAND: 0
+SQL_SLOT_NAME: 1
+SQL_SLOT_IN_STRING: 2
+
+#Error
+SQLSyntaxError: struct {
+    reason: String,
+    part: Int,
+    offset: Int,
+}
+
+#Allow(Jet.RawMultilineHtml, "SQL grammar uses `<` and `>` comparison operators and `HOLE<slot=...>` markers")
+priv Script: Grammar{"""
+    script          : ';'* first=statement rest+=script_sep* EOF ;
+    script_sep      : ';' next=statement? ;
+
+    statement       : explain=explain_prefix? body=stmt_body ;
+    explain_prefix  : 'EXPLAIN'i (plan='QUERY'i 'PLAN'i)? ;
+
+    stmt_body       : dml_stmt # Dml
+                    | create_stmt # Create
+                    | alter_stmt # Alter
+                    | drop_stmt # Drop
+                    | begin_stmt # Begin
+                    | commit_stmt # Commit
+                    | rollback_stmt # Rollback
+                    | savepoint_stmt # Savepoint
+                    | release_stmt # Release
+                    | pragma_stmt # Pragma
+                    | attach_stmt # Attach
+                    | detach_stmt # Detach
+                    | vacuum_stmt # Vacuum
+                    | analyze_stmt # Analyze
+                    | reindex_stmt # Reindex
+                    ;
+
+    dml_stmt        : with=with_clause? body=dml_body ;
+    dml_body        : select_body # Select
+                    | insert_body # Insert
+                    | update_body # Update
+                    | delete_body # Delete
+                    ;
+
+    // -----------------------------------------------------------------------
+    // Transactions & utility statements
+
+    begin_stmt      : 'BEGIN'i kind=('DEFERRED'i | 'IMMEDIATE'i | 'EXCLUSIVE'i)? ('TRANSACTION'i tx=name?)? ;
+    commit_stmt     : ('COMMIT'i | 'END'i) ('TRANSACTION'i tx=name?)? ;
+    rollback_stmt   : 'ROLLBACK'i 'TRANSACTION'i? ('TO'i 'SAVEPOINT'i? target=name)? ;
+    savepoint_stmt  : 'SAVEPOINT'i target=name ;
+    release_stmt    : 'RELEASE'i 'SAVEPOINT'i? target=name ;
+
+    pragma_stmt     : 'PRAGMA'i target=qualified_name rhs=pragma_rhs? ;
+    pragma_rhs      : '=' value=pragma_value # Assign
+                    | '(' value=pragma_value ')' # Call
+                    ;
+    pragma_value    : signed_number # Num
+                    | text=STRING_LIT # Str
+                    | text=ID # Ident
+                    | kw=pragma_kw # Kw
+                    ;
+    pragma_kw       : 'ON'i # On | 'OFF'i # Off | 'DEFAULT'i # Default | 'NULL'i # Null | 'TRUE'i # True | 'FALSE'i # False | kw=fallback_keyword # Fallback ;
+
+    attach_stmt     : 'ATTACH'i body=attach_body 'AS'i schema=name ;
+    attach_body     : 'DATABASE'i file=expr # WithKw
+                    | file=non_db_expr # Bare
+                    ;
+    detach_stmt     : 'DETACH'i 'DATABASE'i? schema=name ;
+    vacuum_stmt     : 'VACUUM'i schema=name? ('INTO'i file=expr)? ;
+    analyze_stmt    : 'ANALYZE'i target=qualified_name? ;
+    reindex_stmt    : 'REINDEX'i target=qualified_name? ;
+
+    drop_stmt       : 'DROP'i kind=('TABLE'i | 'INDEX'i | 'VIEW'i | 'TRIGGER'i) (if_exists='IF'i 'EXISTS'i)? target=qualified_name ;
+
+    alter_stmt      : 'ALTER'i 'TABLE'i target=qualified_name action=alter_action ;
+    alter_action    : 'RENAME'i rename=alter_rename # Rename
+                    | 'ADD'i added=alter_add # AddColumn
+                    | 'DROP'i dropped=alter_drop # DropColumn
+                    ;
+    alter_rename    : 'TO'i target=name # Table
+                    | 'COLUMN'i old_name=name 'TO'i new_name=name # ColumnKw
+                    | old_name=name_no_column 'TO'i new_name=name # ColumnBare
+                    ;
+    alter_add       : 'COLUMN'i col=column_def # Kw
+                    | col=column_def_no_col # Bare
+                    ;
+    alter_drop      : 'COLUMN'i col=name # Kw
+                    | col=name_no_column # Bare
+                    ;
+
+    // -----------------------------------------------------------------------
+    // CREATE statements
+
+    create_stmt     : 'CREATE'i body=create_body ;
+    create_body     : temp=('TEMP'i | 'TEMPORARY'i)? kind=create_temp_kind # Tempable
+                    | unique='UNIQUE'i? 'INDEX'i (if_not_exists='IF'i 'NOT'i 'EXISTS'i)? target=qualified_name 'ON'i table=name '(' cols+=indexed_col (',' cols+=indexed_col)* ')' ('WHERE'i cond=expr)? # Index
+                    | 'VIRTUAL'i 'TABLE'i (if_not_exists='IF'i 'NOT'i 'EXISTS'i)? target=qualified_name 'USING'i module_name=name ('(' args+=vtab_arg (',' args+=vtab_arg)* ')')? # VirtualTable
+                    ;
+    create_temp_kind: 'TABLE'i (if_not_exists='IF'i 'NOT'i 'EXISTS'i)? target=qualified_name def=table_def # Table
+                    | 'VIEW'i (if_not_exists='IF'i 'NOT'i 'EXISTS'i)? target=qualified_name ('(' cols+=name (',' cols+=name)* ')')? 'AS'i query=select_stmt # View
+                    | 'TRIGGER'i (if_not_exists='IF'i 'NOT'i 'EXISTS'i)? target=qualified_name timing=trigger_timing? event=trigger_event 'ON'i table=name ('FOR'i 'EACH'i 'ROW'i)? ('WHEN'i cond=expr)? 'BEGIN'i body+=trigger_stmt+ 'END'i # Trigger
+                    ;
+    table_def       : '(' items+=table_item (',' items+=table_item)* ')' opts=table_options? # Columns
+                    | 'AS'i query=select_stmt # AsSelect
+                    ;
+    table_options   : opts+=table_option (',' opts+=table_option)* ;
+    table_option    : 'WITHOUT'i 'ROWID'i # WithoutRowid
+                    | 'STRICT'i # Strict
+                    ;
+    table_item      : table_constraint # Constraint
+                    | column_def # Column
+                    ;
+    column_def      : col=name ty=type_name? constraints+=col_constraint* ;
+    column_def_no_col
+                    : col=name_no_column ty=type_name? constraints+=col_constraint* ;
+    type_name       : parts+=type_word+ args=type_args? ;
+    type_word       : text=ID # Bare | text=QUOTED_ID # Quoted | kw=type_keyword # Kw ;
+    type_args       : '(' first=signed_number (',' second=signed_number)? ')' ;
+    signed_number   : sign=('+' | '-')? num=numeric_lit ;
+    numeric_lit     : text=INT_LIT # Int | text=FLOAT_LIT # Float | text=HEX_INT # Hex ;
+
+    col_constraint  : ('CONSTRAINT'i cname=name)? body=col_constraint_body ;
+    col_constraint_body
+                    : 'PRIMARY'i 'KEY'i dir=('ASC'i | 'DESC'i)? conflict=conflict_clause? auto='AUTOINCREMENT'i? # PrimaryKey
+                    | 'NOT'i 'NULL'i conflict=conflict_clause? # NotNull
+                    | 'NULL'i conflict=conflict_clause? # Nullable
+                    | 'UNIQUE'i conflict=conflict_clause? # Unique
+                    | 'CHECK'i '(' cond=expr ')' # Check
+                    | 'DEFAULT'i value=default_value # Default
+                    | 'COLLATE'i collation=name # Collate
+                    | foreign_key_clause # ForeignKey
+                    | ('GENERATED'i 'ALWAYS'i)? 'AS'i '(' value=expr ')' storage=('STORED'i | 'VIRTUAL'i)? # Generated
+                    ;
+    default_value   : '(' value=expr ')' # Expr
+                    | sign=('+' | '-') num=numeric_lit # SignedNum
+                    | literal_value # Literal
+                    ;
+
+    table_constraint: ('CONSTRAINT'i cname=name)? body=table_constraint_body ;
+    table_constraint_body
+                    : 'PRIMARY'i 'KEY'i '(' cols+=indexed_col (',' cols+=indexed_col)* ')' conflict=conflict_clause? # PrimaryKey
+                    | 'UNIQUE'i '(' cols+=indexed_col (',' cols+=indexed_col)* ')' conflict=conflict_clause? # Unique
+                    | 'CHECK'i '(' cond=expr ')' # Check
+                    | 'FOREIGN'i 'KEY'i '(' cols+=name (',' cols+=name)* ')' fk=foreign_key_clause # ForeignKey
+                    ;
+
+    conflict_clause : 'ON'i 'CONFLICT'i action=conflict_action ;
+    conflict_action : 'ROLLBACK'i | 'ABORT'i | 'FAIL'i | 'IGNORE'i | 'REPLACE'i ;
+
+    foreign_key_clause
+                    : 'REFERENCES'i table=name ('(' cols+=name (',' cols+=name)* ')')? actions+=fk_action* defer=fk_defer? ;
+    fk_action       : 'ON'i event=('DELETE'i | 'UPDATE'i) reaction=fk_reaction # On
+                    | 'MATCH'i matcher=name # Match
+                    ;
+    fk_reaction     : 'SET'i target=('NULL'i | 'DEFAULT'i) # Set
+                    | 'CASCADE'i # Cascade
+                    | 'RESTRICT'i # Restrict
+                    | 'NO'i 'ACTION'i # NoAction
+                    ;
+    fk_defer        : not_kw='NOT'i? 'DEFERRABLE'i init=fk_init? ;
+    fk_init         : 'INITIALLY'i mode=('DEFERRED'i | 'IMMEDIATE'i) ;
+
+    indexed_col     : value=expr dir=('ASC'i | 'DESC'i)? ;
+
+    trigger_timing  : 'BEFORE'i # Before | 'AFTER'i # After | 'INSTEAD'i 'OF'i # InsteadOf ;
+    trigger_event   : 'DELETE'i # Delete
+                    | 'INSERT'i # Insert
+                    | 'UPDATE'i ('OF'i cols+=name (',' cols+=name)*)? # Update
+                    ;
+    trigger_stmt    : body=dml_stmt ';'+ ;
+    vtab_arg        : parts+=vtab_token+ ;
+    vtab_token      : text=ID # Id | text=QUOTED_ID # QId | text=STRING_LIT # Str | text=INT_LIT # Int | text=FLOAT_LIT # Float | '=' # Eq | '(' args+=vtab_arg (',' args+=vtab_arg)* ')' # Group ;
+
+    // -----------------------------------------------------------------------
+    // WITH / SELECT / VALUES
+
+    with_clause     : 'WITH'i recursive='RECURSIVE'i? ctes+=cte (',' ctes+=cte)* ;
+    cte             : table=name ('(' cols+=name (',' cols+=name)* ')')? 'AS'i mat=cte_mat? '(' query=select_stmt ')' ;
+    cte_mat         : not_kw='NOT'i? 'MATERIALIZED'i ;
+
+    select_stmt     : with=with_clause? body=select_body ;
+    select_body     : first=select_core rest+=compound_part* order=order_clause? limit=limit_clause? ;
+    compound_part   : op=compound_op core=select_core ;
+    compound_op     : 'UNION'i all='ALL'i? # Union
+                    | 'INTERSECT'i # Intersect
+                    | 'EXCEPT'i # Except
+                    ;
+    select_core     : 'SELECT'i quant=('DISTINCT'i | 'ALL'i)? cols+=result_col (',' cols+=result_col)* from=from_clause? where=where_clause? group=group_clause? window=window_clause? # Select
+                    | 'VALUES'i rows+=value_row (',' rows+=value_row)* # Values
+                    ;
+    value_row       : '(' items+=expr (',' items+=expr)* ')' ;
+
+    result_col      : '*' # Star
+                    | value=expr alias=col_alias? # Expr
+                    ;
+    col_alias       : 'AS'i alias=name # As
+                    | alias=alias_name # Bare
+                    ;
+    alias_name      : text=ID # Bare | text=QUOTED_ID # Quoted | text=STRING_LIT # Str | word=fallback_keyword # Keyword ;
+
+    from_clause     : 'FROM'i first=table_or_subquery joins+=join_part* ;
+    join_part       : op=join_op right=table_or_subquery constraint=join_constraint? ;
+    join_op         : ',' # Comma
+                    | natural='NATURAL'i? kind=join_kind? 'JOIN'i # Join
+                    ;
+    join_kind       : 'LEFT'i outer='OUTER'i? # Left
+                    | 'RIGHT'i outer='OUTER'i? # Right
+                    | 'FULL'i outer='OUTER'i? # Full
+                    | 'INNER'i # Inner
+                    | 'CROSS'i # Cross
+                    ;
+    join_constraint : 'ON'i cond=non_conflict_expr # On
+                    | 'USING'i '(' cols+=name (',' cols+=name)* ')' # Using
+                    ;
+    table_or_subquery
+                    : '(' body=paren_table ')' alias=table_alias? # Paren
+                    | target=qualified_name call=table_call? alias=table_alias? indexed=indexed_by? # Table
+                    ;
+    paren_table     : select_stmt # Subquery
+                    | first=table_or_subquery_no_with joins+=join_part* # JoinGroup
+                    ;
+    table_or_subquery_no_with
+                    : '(' body=paren_table ')' alias=table_alias? # Paren
+                    | target=qualified_name_no_with call=table_call? alias=table_alias? indexed=indexed_by? # Table
+                    ;
+    table_call      : '(' (args+=expr (',' args+=expr)*)? ')' ;
+    table_alias     : 'AS'i alias=name # As
+                    | alias=table_bare_alias # Bare
+                    ;
+    table_bare_alias: text=ID # Bare | text=QUOTED_ID # Quoted | word=fallback_keyword # Keyword ;
+    indexed_by      : 'INDEXED'i 'BY'i idx=name # By
+                    | 'NOT'i 'INDEXED'i # NotIndexed
+                    ;
+
+    where_clause    : 'WHERE'i cond=expr ;
+    group_clause    : 'GROUP'i 'BY'i items+=expr (',' items+=expr)* ('HAVING'i having=expr)? ;
+    window_clause   : 'WINDOW'i defs+=window_named (',' defs+=window_named)* ;
+    window_named    : wname=name 'AS'i defn=window_defn ;
+    window_defn     : '(' base=window_base_name? part=partition_clause? order=order_clause? frame=frame_spec? ')' ;
+    partition_clause: 'PARTITION'i 'BY'i items+=expr (',' items+=expr)* ;
+    frame_spec      : mode=('RANGE'i | 'ROWS'i | 'GROUPS'i) bounds=frame_bounds excl=frame_exclude? ;
+    frame_bounds    : 'BETWEEN'i start=frame_bound 'AND'i stop=frame_bound # Between
+                    | start=frame_bound # Single
+                    ;
+    frame_bound     : 'UNBOUNDED'i dir=('PRECEDING'i | 'FOLLOWING'i) # Unbounded
+                    | 'CURRENT'i 'ROW'i # CurrentRow
+                    | value=frame_expr dir=('PRECEDING'i | 'FOLLOWING'i) # Offset
+                    ;
+    frame_exclude   : 'EXCLUDE'i kind=frame_exclude_kind ;
+    frame_exclude_kind
+                    : 'NO'i 'OTHERS'i # NoOthers
+                    | 'CURRENT'i 'ROW'i # CurrentRow
+                    | 'GROUP'i # Group
+                    | 'TIES'i # Ties
+                    ;
+
+    order_clause    : 'ORDER'i 'BY'i items+=ordering_term (',' items+=ordering_term)* ;
+    ordering_term   : value=expr dir=('ASC'i | 'DESC'i)? nulls=nulls_order? ;
+    nulls_order     : 'NULLS'i pos=('FIRST'i | 'LAST'i) ;
+    limit_clause    : 'LIMIT'i count=expr offset=limit_offset? ;
+    limit_offset    : 'OFFSET'i skip=expr # Offset
+                    | ',' skip=expr # Comma
+                    ;
+
+    // -----------------------------------------------------------------------
+    // INSERT / UPDATE / DELETE
+
+    insert_body     : verb=insert_verb 'INTO'i target=qualified_name ('AS'i alias=name)? ('(' cols+=name (',' cols+=name)* ')')? source=insert_source returning=returning_clause? ;
+    insert_verb     : 'REPLACE'i # Replace
+                    | 'INSERT'i ('OR'i action=conflict_action)? # Insert
+                    ;
+    insert_source   : 'DEFAULT'i 'VALUES'i # DefaultValues
+                    | query=select_stmt upserts+=upsert_clause* # Query
+                    ;
+    upsert_clause   : 'ON'i 'CONFLICT'i target=upsert_target? 'DO'i action=upsert_action ;
+    upsert_target   : '(' cols+=indexed_col (',' cols+=indexed_col)* ')' ('WHERE'i cond=expr)? ;
+    upsert_action   : 'NOTHING'i # Nothing
+                    | 'UPDATE'i 'SET'i sets+=set_item (',' sets+=set_item)* where=where_clause? # Update
+                    ;
+
+    update_body     : 'UPDATE'i ('OR'i action=conflict_action)? target=qualified_name alias=table_alias? indexed=indexed_by? 'SET'i sets+=set_item (',' sets+=set_item)* from=from_clause? where=where_clause? returning=returning_clause? order=order_clause? limit=limit_clause? ;
+    set_item        : target=set_target '=' value=expr ;
+    set_target      : col=name # Single
+                    | '(' cols+=name (',' cols+=name)* ')' # Multi
+                    ;
+
+    delete_body     : 'DELETE'i 'FROM'i target=qualified_name alias=table_alias? indexed=indexed_by? where=where_clause? returning=returning_clause? order=order_clause? limit=limit_clause? ;
+
+    returning_clause: 'RETURNING'i items+=returning_item (',' items+=returning_item)* ;
+    returning_item  : '*' # Star
+                    | value=expr alias=col_alias? # Expr
+                    ;
+
+    // -----------------------------------------------------------------------
+    // Expressions
+
+    expr            : 'NOT'i operand=expr # Not
+                    | left=expr 'AND'i right=expr # And
+                    | left=expr 'OR'i right=expr # Or
+                    | pred_expr # Pred
+                    ;
+
+    non_db_expr     : 'NOT'i operand=expr # Not
+                    | left=non_db_val tails+=pred_tail* rest=logic_tail? # Pred
+                    ;
+    non_conflict_expr
+                    : 'NOT'i operand=expr # Not
+                    | left=non_conflict_val tails+=pred_tail* rest=logic_tail? # Pred
+                    ;
+    frame_expr      : left=non_frame_val tails+=pred_tail* rest=logic_tail? ;
+    paren_first_expr: 'NOT'i operand=expr # Not
+                    | left=non_with_val tails+=pred_tail* rest=logic_tail? # Pred
+                    ;
+    logic_tail      : op=('AND'i | 'OR'i) right=expr ;
+
+    pred_expr       : left=val_expr tails+=pred_tail* ;
+    pred_tail       : op=('=' | '==' | '!=' | '<>' | '<' | '<=' | '>' | '>=') right=val_expr # Compare
+                    | 'IS'i not_kw='NOT'i? (distinct='DISTINCT'i 'FROM'i)? right=val_expr # Is
+                    | 'ISNULL'i # IsNull
+                    | 'NOTNULL'i # NotNull
+                    | 'IN'i rhs=in_rhs # In
+                    | 'BETWEEN'i low=val_expr 'AND'i high=val_expr # Between
+                    | op=('LIKE'i | 'GLOB'i | 'REGEXP'i | 'MATCH'i) pattern=val_expr ('ESCAPE'i esc=val_expr)? # Like
+                    | 'NOT'i neg=not_pred_tail # NotPred
+                    ;
+    not_pred_tail   : 'NULL'i # Null
+                    | 'IN'i rhs=in_rhs # In
+                    | 'BETWEEN'i low=val_expr 'AND'i high=val_expr # Between
+                    | op=('LIKE'i | 'GLOB'i | 'REGEXP'i | 'MATCH'i) pattern=val_expr ('ESCAPE'i esc=val_expr)? # Like
+                    ;
+    in_rhs          : '(' body=in_paren? ')' # Paren
+                    | target=qualified_name call=table_call? # Table
+                    ;
+    in_paren        : select_stmt # Subquery
+                    | first=paren_first_expr (',' rest+=expr)* # List
+                    ;
+
+    val_expr        : operand=val_expr 'COLLATE'i collation=plain_name # Collate
+                    | op=('+' | '-' | '~') operand=val_expr # Unary
+                    | left=val_expr op=('||' | '->' | '->>') right=val_expr # Concat
+                    | left=val_expr op=('*' | '/' | '%') right=val_expr # Mul
+                    | left=val_expr op=('+' | '-') right=val_expr # Add
+                    | left=val_expr op=('&' | '|' | '<<' | '>>') right=val_expr # Bit
+                    | atom_expr # Atom
+                    ;
+    val_tail        : 'COLLATE'i collation=plain_name # Collate
+                    | op=('||' | '->' | '->>' | '*' | '/' | '%' | '+' | '-' | '&' | '|' | '<<' | '>>') right=val_expr # Bin
+                    ;
+    non_db_val      : op=('+' | '-' | '~') operand=val_expr # Unary
+                    | head=atom_no_db tails+=val_tail* # Primary
+                    ;
+    non_conflict_val: op=('+' | '-' | '~') operand=val_expr # Unary
+                    | head=atom_no_conflict tails+=val_tail* # Primary
+                    ;
+    non_frame_val   : op=('+' | '-' | '~') operand=val_expr # Unary
+                    | head=atom_no_frame tails+=val_tail* # Primary
+                    ;
+    non_with_val    : op=('+' | '-' | '~') operand=val_expr # Unary
+                    | head=atom_no_with tails+=val_tail* # Primary
+                    ;
+
+    atom_expr       : atom_common # Common
+                    | first=expr_plain_name tail=name_expr_tail? # NameOrCall
+                    ;
+    atom_no_db      : atom_common # Common
+                    | first=expr_name_no_db tail=name_expr_tail? # NameOrCall
+                    ;
+    atom_no_conflict
+                    : atom_common # Common
+                    | first=expr_name_no_conflict tail=name_expr_tail? # NameOrCall
+                    ;
+    atom_no_frame   : atom_common # Common
+                    | first=expr_name_no_frame tail=name_expr_tail? # NameOrCall
+                    ;
+    atom_no_with    : atom_common # Common
+                    | first=expr_name_no_with tail=name_expr_tail? # NameOrCall
+                    ;
+
+    atom_common     : literal_value # Literal
+                    | text=BIND_PARAM # Bind
+                    | HOLE<slot=Operand> # Hole
+                    | 'CAST'i cast_tail=cast_or_col # CastOrCol
+                    | 'CASE'i target=expr? whens+=case_when+ ('ELSE'i else_val=expr)? 'END'i # Case
+                    | 'RAISE'i raise_tail=raise_or_col # RaiseOrCol
+                    | 'EXISTS'i '(' query=select_stmt ')' # Exists
+                    | '(' body=paren_expr ')' # Paren
+                    ;
+    cast_or_col     : '(' value=expr 'AS'i ty=type_name ')' # Cast
+                    | tail=qual_tail? # Col
+                    ;
+    raise_or_col    : '(' body=raise_body ')' # Raise
+                    | tail=qual_tail? # Col
+                    ;
+    case_when       : 'WHEN'i cond=expr 'THEN'i result=expr ;
+    raise_body      : 'IGNORE'i # Ignore
+                    | kind=('ROLLBACK'i | 'ABORT'i | 'FAIL'i) ',' msg=expr # Error
+                    ;
+    paren_expr      : select_stmt # Subquery
+                    | first=paren_first_expr (',' rest+=expr)* # ExprOrTuple
+                    ;
+    name_expr_tail  : '(' args=call_args? ')' filter=filter_clause? over=over_clause? # Call
+                    | qual_tail # Qualified
+                    ;
+    qual_tail       : '.' rhs=qual_rhs ;
+    qual_rhs        : '*' # Star
+                    | second=name ('.' third=qual_third)? # Name
+                    ;
+    qual_third      : '*' # Star
+                    | third=name # Name
+                    ;
+    call_args       : '*' # Star
+                    | distinct='DISTINCT'i? items+=expr (',' items+=expr)* order=order_clause? # Args
+                    ;
+    filter_clause   : 'FILTER'i '(' 'WHERE'i cond=expr ')' ;
+    over_clause     : 'OVER'i spec=over_spec ;
+    over_spec       : window_defn # Defn
+                    | wname=plain_name # Ref
+                    ;
+
+    literal_value   : numeric_lit # Num
+                    | text=STRING_LIT # Str
+                    | text=BLOB_LIT # Blob
+                    | 'NULL'i # Null
+                    | 'TRUE'i # True
+                    | 'FALSE'i # False
+                    | 'CURRENT_TIME'i # CurrentTime
+                    | 'CURRENT_DATE'i # CurrentDate
+                    | 'CURRENT_TIMESTAMP'i # CurrentTimestamp
+                    ;
+
+    // -----------------------------------------------------------------------
+    // Names & fallback keywords (exact 73 non-zero YY_FALLBACK entries / 78 spellings)
+
+    qualified_name  : first=name ('.' second=name)? ;
+    qualified_name_no_with : first=name_no_with ('.' second=name)? ;
+
+    name            : text=ID # Bare
+                    | text=QUOTED_ID # Quoted
+                    | word=fallback_keyword # Keyword
+                    | word=join_keyword # JoinKw
+                    | 'INDEXED'i # Indexed
+                    | HOLE<slot=Name> # Hole
+                    ;
+
+    plain_name      : text=ID # Bare
+                    | text=QUOTED_ID # Quoted
+                    | word=fallback_keyword # Keyword
+                    | word=join_keyword # JoinKw
+                    | 'INDEXED'i # Indexed
+                    ;
+
+    name_no_column  : text=ID # Bare | text=QUOTED_ID # Quoted | word=fb_core # Core | word=fb_expr_special # ExprSp | word=fb_window_kw # WinKw | word=fb_frame_kw # FrameKw | word=fb_db_kw # DbKw | word=fb_conflict_kw # ConfKw | word=fb_with_kw # WithKw | word=fb_gen_kw # GenKw | word=join_keyword # JoinKw | 'INDEXED'i # Indexed | HOLE<slot=Name> # Hole ;
+    name_no_with    : text=ID # Bare | text=QUOTED_ID # Quoted | word=fb_core # Core | word=fb_expr_special # ExprSp | word=fb_window_kw # WinKw | word=fb_frame_kw # FrameKw | word=fb_db_kw # DbKw | word=fb_conflict_kw # ConfKw | word=fb_col_kw # ColKw | word=fb_gen_kw # GenKw | word=join_keyword # JoinKw | 'INDEXED'i # Indexed | HOLE<slot=Name> # Hole ;
+    window_base_name: text=ID # Bare | text=QUOTED_ID # Quoted | word=fb_core # Core | word=fb_expr_special # ExprSp | word=fb_frame_kw # FrameKw | word=fb_db_kw # DbKw | word=fb_conflict_kw # ConfKw | word=fb_col_kw # ColKw | word=fb_with_kw # WithKw | word=fb_gen_kw # GenKw | word=join_keyword # JoinKw | 'INDEXED'i # Indexed ;
+    type_keyword    : fb_core | fb_expr_special | fb_window_kw | fb_frame_kw | fb_db_kw | fb_conflict_kw | fb_col_kw | fb_with_kw ;
+    expr_plain_name : text=ID # Bare | text=QUOTED_ID # Quoted | word=fb_core # Core | word=fb_window_kw # WinKw | word=fb_frame_kw # FrameKw | word=fb_db_kw # DbKw | word=fb_conflict_kw # ConfKw | word=fb_col_kw # ColKw | word=fb_with_kw # WithKw | word=fb_gen_kw # GenKw | word=join_keyword # JoinKw | 'INDEXED'i # Indexed ;
+    expr_name_no_db : text=ID # Bare | text=QUOTED_ID # Quoted | word=fb_core # Core | word=fb_window_kw # WinKw | word=fb_frame_kw # FrameKw | word=fb_conflict_kw # ConfKw | word=fb_col_kw # ColKw | word=fb_with_kw # WithKw | word=fb_gen_kw # GenKw | word=join_keyword # JoinKw | 'INDEXED'i # Indexed ;
+    expr_name_no_conflict
+                    : text=ID # Bare | text=QUOTED_ID # Quoted | word=fb_core # Core | word=fb_window_kw # WinKw | word=fb_frame_kw # FrameKw | word=fb_db_kw # DbKw | word=fb_col_kw # ColKw | word=fb_with_kw # WithKw | word=fb_gen_kw # GenKw | word=join_keyword # JoinKw | 'INDEXED'i # Indexed ;
+    expr_name_no_frame
+                    : text=ID # Bare | text=QUOTED_ID # Quoted | word=fb_core # Core | word=fb_window_kw # WinKw | word=fb_db_kw # DbKw | word=fb_conflict_kw # ConfKw | word=fb_col_kw # ColKw | word=fb_with_kw # WithKw | word=fb_gen_kw # GenKw | word=join_keyword # JoinKw | 'INDEXED'i # Indexed ;
+    expr_name_no_with
+                    : text=ID # Bare | text=QUOTED_ID # Quoted | word=fb_core # Core | word=fb_window_kw # WinKw | word=fb_frame_kw # FrameKw | word=fb_db_kw # DbKw | word=fb_conflict_kw # ConfKw | word=fb_col_kw # ColKw | word=fb_gen_kw # GenKw | word=join_keyword # JoinKw | 'INDEXED'i # Indexed ;
+
+    join_keyword    : 'CROSS'i | 'FULL'i | 'INNER'i | 'LEFT'i | 'NATURAL'i | 'OUTER'i | 'RIGHT'i ;
+
+    fallback_keyword: fb_core | fb_expr_special | fb_window_kw | fb_frame_kw | fb_db_kw | fb_conflict_kw | fb_col_kw | fb_with_kw | fb_gen_kw ;
+
+    fb_expr_special : 'CAST'i | 'RAISE'i | 'CURRENT_DATE'i | 'CURRENT_TIME'i | 'CURRENT_TIMESTAMP'i ;
+    fb_window_kw    : 'PARTITION'i | 'RANGE'i | 'ROWS'i | 'GROUPS'i ;
+    fb_frame_kw     : 'UNBOUNDED'i | 'CURRENT'i ;
+    fb_db_kw        : 'DATABASE'i ;
+    fb_conflict_kw  : 'CONFLICT'i ;
+    fb_col_kw       : 'COLUMN'i ;
+    fb_with_kw      : 'WITH'i ;
+    fb_gen_kw       : 'GENERATED'i ;
+    fb_core         : 'ABORT'i | 'ACTION'i | 'AFTER'i | 'ALWAYS'i | 'ANALYZE'i | 'ASC'i
+                    | 'ATTACH'i | 'BEFORE'i | 'BEGIN'i | 'BY'i | 'CASCADE'i
+                    | 'DEFERRED'i | 'DESC'i | 'DETACH'i | 'DO'i | 'EACH'i | 'END'i
+                    | 'EXCLUDE'i | 'EXCLUSIVE'i | 'EXPLAIN'i | 'FAIL'i | 'FIRST'i
+                    | 'FOLLOWING'i | 'FOR'i | 'GLOB'i | 'IF'i | 'IGNORE'i
+                    | 'IMMEDIATE'i | 'INITIALLY'i | 'INSTEAD'i | 'KEY'i | 'LAST'i
+                    | 'LIKE'i | 'MATCH'i | 'MATERIALIZED'i | 'NO'i | 'NULLS'i | 'OF'i
+                    | 'OFFSET'i | 'OTHERS'i | 'PLAN'i | 'PRAGMA'i | 'PRECEDING'i
+                    | 'QUERY'i | 'RECURSIVE'i | 'REGEXP'i | 'REINDEX'i
+                    | 'RELEASE'i | 'RENAME'i | 'REPLACE'i | 'RESTRICT'i | 'ROLLBACK'i
+                    | 'ROW'i | 'SAVEPOINT'i | 'TEMP'i | 'TEMPORARY'i | 'TIES'i
+                    | 'TRIGGER'i | 'VACUUM'i | 'VIEW'i | 'VIRTUAL'i | 'WITHOUT'i
+                    ;
+
+    // -----------------------------------------------------------------------
+    // Tokens
+
+    BLOB_LIT        : [Xx] '\'' [0-9A-Fa-f]* '\'' ;
+    STRING_LIT      : '\'' ('\'\'' | [^'])* '\'' ;
+    QUOTED_ID       : '"' ('""' | [^"])* '"' | '`' ('``' | [^`])* '`' | '[' [^\]]* ']' ;
+    HEX_INT         : '0' [xX] [0-9A-Fa-f]+ ;
+    FLOAT_LIT       : [0-9]+ '.' [0-9]* ([eE] [+\-]? [0-9]+)? | '.' [0-9]+ ([eE] [+\-]? [0-9]+)? | [0-9]+ [eE] [+\-]? [0-9]+ ;
+    INT_LIT         : [0-9]+ ;
+    BIND_PARAM      : '?' [0-9]* | [:@$] [A-Za-z0-9_:$]+ ;
+    ID              : [A-Za-z_] [A-Za-z0-9_$]* ;
+    LINE_COMMENT    : '--' [^\r\n]* -> skip ;
+    BLOCK_COMMENT   : '/*' .*? '*/' -> skip ;
+    WS              : [ \t\r\n]+ -> skip ;
+"""}
+
+priv sql_slice_str: fn(bytes: [U8], start: Int, end: Int) -> String Never! {
+    ^out: [U8]{}
+    ^i: start
+    loop i < end {
+        out.push(bytes[i])
+        i += 1
+    }
+    String.from_bytes(out) ?? ""
+}
+
+priv sql_is_ident_start: fn(b: Int) -> Bool Never! {
+    (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 95
+}
+
+priv sql_is_ident_cont: fn(b: Int) -> Bool Never! {
+    sql_is_ident_start(b) || (b >= 48 && b <= 57) || b == 36
+}
+
+priv sql_word_at: fn(text: String, offset: Int) -> String Never! {
+    bytes: text.bytes()
+    if offset < 0 || offset >= bytes.len() -> return ""
+    b0: Int{bytes[offset]}
+    if !sql_is_ident_start(b0) -> return ""
+    ^end: offset + 1
+    loop end < bytes.len() {
+        b: Int{bytes[end]}
+        if !sql_is_ident_cont(b) -> break
+        end += 1
+    }
+    sql_slice_str(bytes, offset, end)
+}
+
+// SQLite 3.45.0 hard-reserved keywords (keywords with YY_FALLBACK == 0 that
+// are not JOIN_KW or INDEXED).
+priv sql_is_reserved_keyword: fn(upper: String) -> Bool Never! {
+    if upper == {
+        "ADD" | "ALL" | "ALTER" | "AND" | "AS" | "AUTOINCREMENT" | "BETWEEN"
+        | "CASE" | "CHECK" | "COLLATE" | "COMMIT" | "CONSTRAINT" | "CREATE"
+        | "DEFAULT" | "DEFERRABLE" | "DELETE" | "DISTINCT" | "DROP" | "ELSE"
+        | "ESCAPE" | "EXCEPT" | "EXISTS" | "FILTER" | "FOREIGN" | "FROM"
+        | "GROUP" | "HAVING" | "IN" | "INDEX" | "INSERT" | "INTERSECT" | "INTO"
+        | "IS" | "ISNULL" | "JOIN" | "LIMIT" | "NOT" | "NOTHING" | "NOTNULL"
+        | "NULL" | "ON" | "OR" | "ORDER" | "OVER" | "PRIMARY" | "REFERENCES"
+        | "RETURNING" | "SELECT" | "SET" | "TABLE" | "THEN" | "TO"
+        | "TRANSACTION" | "UNION" | "UNIQUE" | "UPDATE" | "USING" | "VALUES"
+        | "WHEN" | "WHERE" | "WINDOW" -> true
+        else -> false
+    }
+}
+
+priv SQLStringScan: struct {
+    sanitized: [String],
+    in_string: [Bool],
+}
+
+// Scans `parts` for holes sitting inside a closed single-quoted SQL string
+// literal (`'...'`). When found, marks each enclosed hole in `in_string` and
+// produces a `sanitized` copy where the enclosing string span is replaced with
+// valid expression separators so `Script.check_parts` still validates the
+// surrounding SQL syntax and classifies every other hole accurately.
+priv sql_scan_string_holes: fn(parts: [String]) -> SQLStringScan Never! {
+    hole_count: if parts.len() > 0 -> parts.len() - 1 else -> 0
+    ^in_string: [Bool]{}
+    loop _ in 0..<hole_count -> in_string.push(false)
+    ^sanitized: [String]{}
+    loop part in parts -> sanitized.push(part.copy())
+    if hole_count == 0 -> return SQLStringScan{sanitized: sanitized, in_string: in_string}
+
+    ^in_sq: false
+    ^sq_open_part: -1
+    ^sq_open_offset: -1
+    ^in_dq: false
+    ^in_bq: false
+    ^in_br: false
+    ^in_block: false
+
+    // Per-part edits collected only when a cross-part `'...'` closes cleanly.
+    ^cut_tail_at: [Int]{}
+    ^cut_head_at: [Int]{}
+    ^mid_replace: [Bool]{}
+    loop _ in 0..<parts.len() {
+        cut_tail_at.push(-1)
+        cut_head_at.push(-1)
+        mid_replace.push(false)
+    }
+
+    loop p in 0..<parts.len() {
+        bytes: parts[p].bytes()
+        n: bytes.len()
+        ^i: 0
+        ^in_line: false
+        loop i < n {
+            b: Int{bytes[i]}
+            if in_line {
+                if b == 10 || b == 13 -> in_line = false
+                i += 1
+                next
+            }
+            if in_block {
+                if b == 42 && i + 1 < n && (Int{bytes[i + 1]}) == 47 {
+                    in_block = false
+                    i += 2
+                    next
+                }
+                i += 1
+                next
+            }
+            if in_sq {
+                if b == 39 {
+                    if i + 1 < n && (Int{bytes[i + 1]}) == 39 {
+                        i += 2
+                        next
+                    }
+                    // Closing quote of single-quoted string.
+                    in_sq = false
+                    if sq_open_part >= 0 && sq_open_part < p {
+                        loop h in sq_open_part..<p -> in_string[h] = true
+                        cut_tail_at[sq_open_part] = sq_open_offset
+                        loop m in (sq_open_part + 1)..<p -> mid_replace[m] = true
+                        cut_head_at[p] = i + 1
+                    }
+                    sq_open_part = -1
+                    sq_open_offset = -1
+                    i += 1
+                    next
+                }
+                i += 1
+                next
+            }
+            if in_dq {
+                if b == 34 {
+                    if i + 1 < n && (Int{bytes[i + 1]}) == 34 {
+                        i += 2
+                        next
+                    }
+                    in_dq = false
+                }
+                i += 1
+                next
+            }
+            if in_bq {
+                if b == 96 {
+                    if i + 1 < n && (Int{bytes[i + 1]}) == 96 {
+                        i += 2
+                        next
+                    }
+                    in_bq = false
+                }
+                i += 1
+                next
+            }
+            if in_br {
+                if b == 93 -> in_br = false
+                i += 1
+                next
+            }
+            if b == 45 && i + 1 < n && (Int{bytes[i + 1]}) == 45 {
+                in_line = true
+                i += 2
+                next
+            }
+            if b == 47 && i + 1 < n && (Int{bytes[i + 1]}) == 42 {
+                in_block = true
+                i += 2
+                next
+            }
+            if b == 39 {
+                in_sq = true
+                sq_open_part = p
+                sq_open_offset = i
+                i += 1
+                next
+            }
+            if b == 34 {
+                in_dq = true
+                i += 1
+                next
+            }
+            if b == 96 {
+                in_bq = true
+                i += 1
+                next
+            }
+            if b == 91 {
+                in_br = true
+                i += 1
+                next
+            }
+            i += 1
+        }
+    }
+
+    loop p in 0..<parts.len() {
+        if mid_replace[p] {
+            sanitized[p] = " + "
+            next
+        }
+        bytes: parts[p].bytes()
+        head: if cut_head_at[p] >= 0 -> cut_head_at[p] else -> 0
+        tail: if cut_tail_at[p] >= 0 -> cut_tail_at[p] else -> bytes.len()
+        if cut_head_at[p] >= 0 || cut_tail_at[p] >= 0 {
+            prefix: if cut_head_at[p] >= 0 -> " " else -> ""
+            suffix: if cut_tail_at[p] >= 0 -> " " else -> ""
+            mid: if head <= tail -> sql_slice_str(bytes, head, tail) else -> ""
+            sanitized[p] = "{prefix}{mid}{suffix}"
+        }
+    }
+    SQLStringScan{sanitized: sanitized, in_string: in_string}
+}
+
+priv SQLSpot: struct {
+    part: Int,
+    offset: Int,
+}
+
+priv sql_spot_of_offset: fn(parts: [String], flat: Int) -> SQLSpot Never! {
+    ^rem: if flat < 0 -> 0 else -> flat
+    loop p in 0..<parts.len() {
+        n: parts[p].bytes().len()
+        if rem <= n || p + 1 == parts.len() {
+            return SQLSpot{part: p, offset: if rem > n -> n else -> rem}
+        }
+        rem -= n
+    }
+    SQLSpot{part: 0, offset: 0}
+}
+
+priv SQLReservedSink: struct {
+    bytes: [U8],
+    bad_word: String,
+    bad_offset: Int,
+
+    impl GrammarSink {
+        open: fn(^self, _rule: Int) Never! {}
+
+        close: fn(^self, _rule: Int) Never! {}
+
+        token: fn(^self, kind: Int, start: Int, end: Int) Never! {
+            if self.bad_offset >= 0 -> return
+            if ScriptToken.from_int(kind) == .Ok(.Id) {
+                word: sql_slice_str(self.bytes, start, end)
+                if sql_is_reserved_keyword(word.upper()) {
+                    self.bad_word = word
+                    self.bad_offset = start
+                }
+            }
+        }
+    }
+}
+
+priv sql_spot_of_flat: fn(part_starts: [Int], part_lens: [Int], flat: Int) -> SQLSpot Never! {
+    loop p in 0..<part_starts.len() {
+        start: part_starts[p]
+        len: part_lens[p]
+        if flat >= start && flat <= start + len {
+            return SQLSpot{part: p, offset: flat - start}
+        }
+    }
+    SQLSpot{part: 0, offset: 0}
+}
+
+sql_check_parts: fn(parts: [String]) -> [Int] SQLSyntaxError! {
+    if parts.len() == 0 {
+        return Err(SQLSyntaxError{reason: "SQL literal cannot be empty", part: 0, offset: 0})
+    }
+    scan: sql_scan_string_holes(parts)
+    checked: Script.check_parts(scan.sanitized) ?? {
+        if err.len() == 0 {
+            return Err(SQLSyntaxError{reason: "malformed SQL literal", part: 0, offset: 0})
+        }
+        first: err[0]
+        spot: sql_spot_of_offset(scan.sanitized, first.offset)
+        word: if spot.part >= 0 && spot.part < scan.sanitized.len() -> sql_word_at(scan.sanitized[spot.part], spot.offset) else -> ""
+        detail: "{first}"
+        reason: if word != "" && sql_is_reserved_keyword(word.upper()) -> "\"{word}\" is a reserved SQL word here; quote it as \"{word}\" if you meant an identifier ({detail})" else -> detail
+        return Err(SQLSyntaxError{reason: reason, part: spot.part, offset: spot.offset})
+    }
+
+    // Verify no bare `ID` token in the parsed query is a hard-reserved SQLite
+    // keyword (keywords with YY_FALLBACK == 0 outside JOIN_KW/INDEXED).
+    ^flat_pieces: [String]{}
+    ^part_starts: [Int]{}
+    ^part_lens: [Int]{}
+    ^cursor: 0
+    loop p in 0..<scan.sanitized.len() {
+        part_starts.push(cursor)
+        plen: scan.sanitized[p].bytes().len()
+        part_lens.push(plen)
+        flat_pieces.push(scan.sanitized[p].copy())
+        cursor += plen
+        if p < checked.slots.len() {
+            placeholder: if checked.slots[p] == .Name -> " __jet_name " else -> " 0 "
+            cursor += placeholder.bytes().len()
+            flat_pieces.push(placeholder)
+        }
+    }
+    flat: flat_pieces.join("")
+    ^sink: SQLReservedSink{bytes: flat.bytes(), bad_word: "", bad_offset: -1}
+    if Script.parse_into(flat, sink) == .Ok(_) && sink.bad_offset >= 0 {
+        spot: sql_spot_of_flat(part_starts, part_lens, sink.bad_offset)
+        return Err(SQLSyntaxError{reason: "\"{sink.bad_word}\" is a reserved SQL word here; quote it as \"{sink.bad_word}\"", part: spot.part, offset: spot.offset})
+    }
+
+    ^out: [Int]{}
+    loop i in 0..<checked.slots.len() {
+        if i < scan.in_string.len() && scan.in_string[i] {
+            out.push(SQL_SLOT_IN_STRING)
+            next
+        }
+        if checked.slots[i] == .Name -> out.push(SQL_SLOT_NAME) else -> out.push(SQL_SLOT_OPERAND)
+    }
+    Ok(out)
+}
+
+sql_parse_ok: fn(text: String) -> Bool Never! {
+    if Script.parse(text) == {
+        .Ok(_) -> true
+        .Err(_) -> false
+    }
+}
+
+sql_quote_identifier: fn(name: String) -> String Never! {
+    "\"{name.replace("\"", "\"\"")}\""
+}
+
+// The 78 SQLite 3.45.0 spellings corresponding to the 73 non-zero YY_FALLBACK
+// entries in Core/DB/Engine/ParseTables.jet.
+sql_fallback_keywords: fn() -> [String] Never! {
+    [String]{
+        "ABORT", "ACTION", "AFTER", "ALWAYS", "ANALYZE", "ASC", "ATTACH",
+        "BEFORE", "BEGIN", "BY", "CASCADE", "CAST", "COLUMN", "CONFLICT",
+        "CURRENT", "CURRENT_DATE", "CURRENT_TIME", "CURRENT_TIMESTAMP",
+        "DATABASE", "DEFERRED", "DESC", "DETACH", "DO", "EACH", "END",
+        "EXCLUDE", "EXCLUSIVE", "EXPLAIN", "FAIL", "FIRST", "FOLLOWING",
+        "FOR", "GENERATED", "GLOB", "GROUPS", "IF", "IGNORE", "IMMEDIATE",
+        "INITIALLY", "INSTEAD", "KEY", "LAST", "LIKE", "MATCH",
+        "MATERIALIZED", "NO", "NULLS", "OF", "OFFSET", "OTHERS",
+        "PARTITION", "PLAN", "PRAGMA", "PRECEDING", "QUERY", "RAISE",
+        "RANGE", "RECURSIVE", "REGEXP", "REINDEX", "RELEASE", "RENAME",
+        "REPLACE", "RESTRICT", "ROLLBACK", "ROW", "ROWS", "SAVEPOINT",
+        "TEMP", "TEMPORARY", "TIES", "TRIGGER", "UNBOUNDED", "VACUUM",
+        "VIEW", "VIRTUAL", "WITH", "WITHOUT",
+    }
+}

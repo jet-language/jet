@@ -1,0 +1,11 @@
+// SQL identifier slots require SQLName (not String), holes inside single-quoted
+// SQL string literals are refused, and non-blob lists cannot bind as SQL values.
+run: fn() {
+    table_name: "users"
+    q1: SQL{"SELECT * FROM {table_name}"}
+    owner: "alice"
+    q2: SQL{"SELECT * FROM users WHERE owner = '{owner}'"}
+    ids: [Int]{1, 2, 3}
+    q3: SQL{"SELECT * FROM users WHERE id = {ids}"}
+    print("{q1} {q2} {q3}")
+}

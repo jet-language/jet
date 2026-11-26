@@ -1,0 +1,26 @@
+Error: Jet.CheckedTextHoleSlot: `db.SQL` refuses this hole's type where it sits
+  --> Tests/UI/sql_head_name_hole_needs_sqlname.jet:5:29
+    |
+  5 |     q1: SQL{"SELECT * FROM {table_name}"}
+    |                             ^^^^^^^^^^
+ Why: A SQL identifier slot expects `SQLName`, not `String`; construct one with `SQLName.new(...)`
+ Fix: Pass a value of a type this place accepts, or move the hole to a place that accepts its type
+More: jet-lang.dev/e/Jet.CheckedTextHoleSlot
+
+Error: Jet.CheckedTextHoleSlot: `db.SQL` refuses this hole's type where it sits
+  --> Tests/UI/sql_head_name_hole_needs_sqlname.jet:7:50
+    |
+  7 |     q2: SQL{"SELECT * FROM users WHERE owner = '{owner}'"}
+    |                                                  ^^^^^
+ Why: A hole cannot sit inside a SQL string literal; drop the quotes and write `{value}` so it binds as a parameter
+ Fix: Pass a value of a type this place accepts, or move the hole to a place that accepts its type
+More: jet-lang.dev/e/Jet.CheckedTextHoleSlot
+
+Error: Jet.CheckedTextHoleSlot: `db.SQL` refuses this hole's type where it sits
+  --> Tests/UI/sql_head_name_hole_needs_sqlname.jet:9:46
+    |
+  9 |     q3: SQL{"SELECT * FROM users WHERE id = {ids}"}
+    |                                              ^^^
+ Why: A SQL value hole binds one scalar or `[U8]` blob, not `[Int]`
+ Fix: Pass a value of a type this place accepts, or move the hole to a place that accepts its type
+More: jet-lang.dev/e/Jet.CheckedTextHoleSlot
