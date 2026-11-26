@@ -2,10 +2,10 @@
 // A command whose executable comes from a verified Nix closure runs inside a
 // private user and mount namespace (`unshare`) where an empty tmpfs `/nix`
 // receives exact read-only binds of the leased closure objects, so the
-// program never sees the host store. The tools that build the namespace are
-// regular files that must reach the child by descriptor so a path swap after
-// verification cannot redirect them; Core passes held directories to a child
-// but not open files, so the projection fails closed once it is resolved.
+// program never sees the host store. The host tools (`unshare`, `sh`, `mount`)
+// and generated fstab are opened as `FileReader` handles and passed to the
+// child by reserved descriptor (`ProcessSpec.keep_open`), so a path swap after
+// opening cannot redirect them.
 //
 // Failures use two EnvironmentError kinds: `Unsupported` (the host cannot
 // build the namespace, reported as E1351) and `InvalidData` (the leased
@@ -72,11 +72,14 @@ ENV_SHELL_SH_CANDIDATES: [String]{"/run/current-system/sw/bin/sh", "/usr/bin/sh"
 
 ENV_SHELL_NAMESPACE_FLAGS: [String]{"--user", "--map-root-user", "--mount", "--propagation", "private"}
 
-ENV_SHELL_PROJECTION_HANDOFF_UNSUPPORTED: "running a leased Nix closure in its rootless `/nix/store` projection is not supported yet: Core cannot pass the namespace tools' open files to a child process"
-
 // Build the namespace command for `program`, or None when no leased Nix
 // closure is involved. Linux only: elsewhere a projection request fails.
 env_shell_nix_projection_command: fn(env: ShellEnv, program: String, rest: [String]) -[FS, Env, Exec, Time, Time.Wait]> ShellLaunch? EnvironmentError! {
+    caller_dir: sys.current_dir() ?? "."
+    env_shell_nix_projection_command_at(env, program, caller_dir, None, rest)
+}
+
+env_shell_nix_projection_command_at: fn(env: ShellEnv, program: String, caller_dir: String, stable_program: LeaseText?, rest: [String]) -[FS, Env, Exec, Time, Time.Wait]> ShellLaunch? EnvironmentError! {
     if !sys.is_linux() {
         loop lease in env.cache_leases {
             if lease.nix_store_projection().len() > 0 {
@@ -86,6 +89,7 @@ env_shell_nix_projection_command: fn(env: ShellEnv, program: String, rest: [Stri
         return Ok(None)
     }
     ^projections: [String:LeaseText]{}
+    ^projection_sources: [String:String]{}
     loop lease in env.cache_leases {
         loop path in lease.nix_store_projection() {
             if projections.get(path.logical) == .Val(existing) {
@@ -96,26 +100,85 @@ env_shell_nix_projection_command: fn(env: ShellEnv, program: String, rest: [Stri
             }
             projections[path.logical] = path.source
         }
+        loop src in lease.nix_store_projection_sources() {
+            if projection_sources.get(src.logical) == .Val(existing) {
+                if !store_reuse_same_path(existing, src.source) {
+                    return Err(EnvironmentError.InvalidData("conflicting `/nix/store` projection for `{src.logical}`"))
+                }
+                next
+            }
+            projection_sources[src.logical] = src.source
+        }
     }
     if projections.len() == 0 -> return Ok(None)
-    if !env.leases_executable(program) && env_shell_strip_path_prefix(program, ENV_SHELL_NIX_STORE) == None {
+    if stable_program == None && !env.leases_executable(program) && env_shell_strip_path_prefix(program, ENV_SHELL_NIX_STORE) == None {
         return Ok(None)
     }
     if !files.is_dir("/proc/self/fd") {
         return Err(EnvironmentError.Unsupported("`/proc/self/fd` is unavailable for stable projection handles"))
     }
     unshare: env_shell_first_file(ENV_SHELL_UNSHARE_CANDIDATES) ?? return Err(EnvironmentError.Unsupported("rootless `/nix/store` projection needs `unshare`"))
-    _: env_shell_first_file(ENV_SHELL_MOUNT_CANDIDATES) ?? return Err(EnvironmentError.Unsupported("rootless `/nix/store` projection needs `mount`"))
+    mount: env_shell_first_file(ENV_SHELL_MOUNT_CANDIDATES) ?? return Err(EnvironmentError.Unsupported("rootless `/nix/store` projection needs `mount`"))
     shell: env_shell_first_file(ENV_SHELL_SH_CANDIDATES) ?? return Err(EnvironmentError.Unsupported("rootless `/nix/store` projection needs `sh`"))
     // Probe with an absolute shell rather than a bare `true`: the projection
     // may itself run inside a sandbox with an empty PATH, where a PATH lookup
     // fails with exit 127 and looks like a refused namespace.
     env_shell_check_rootless_namespace(unshare, shell)
-    // The unshare, shell, mount, and binary descriptors must reach the
-    // namespace so a path swap after verification cannot redirect it. Those
-    // are open files, which Core cannot pass to a child, so the projection
-    // fails closed here, after the host proved it can build the namespace.
-    Err(EnvironmentError.Unsupported(ENV_SHELL_PROJECTION_HANDOFF_UNSUPPORTED))
+    binary: env_shell_resolve_projected_binary(env, projection_sources, program, caller_dir, stable_program)
+    ^scratch: ShellScratch.empty()
+    mounts: env_shell_projection_fstab(projection_sources, scratch)
+    unshare_file: files.open(unshare) ?? return Err(EnvironmentError.Unsupported("could not open `unshare` for descriptor handoff: {err}"))
+    mount_file: files.open(mount) ?? return Err(EnvironmentError.Unsupported("could not open `mount` for descriptor handoff: {err}"))
+    shell_file: files.open(shell) ?? return Err(EnvironmentError.Unsupported("could not open `sh` for descriptor handoff: {err}"))
+    fstab_file: files.open(mounts.fstab_path) ?? return Err(EnvironmentError.InvalidData("could not open projection fstab: {err}"))
+    unshare_fd: store_lease_reserve_child_fd()
+    mount_fd: store_lease_reserve_child_fd()
+    shell_fd: store_lease_reserve_child_fd()
+    fstab_fd: store_lease_reserve_child_fd()
+    ^argv: [String]{store_lease_child_fd_path(unshare_fd)}
+    loop flag in ENV_SHELL_NAMESPACE_FLAGS -> argv.push(flag)
+    argv.push(store_lease_child_fd_path(shell_fd))
+    argv.push("-c")
+    argv.push(ENV_SHELL_NIX_PROJECTION_SCRIPT)
+    argv.push("jetpack-nix-projection")
+    argv.push(store_lease_child_fd_path(mount_fd))
+    argv.push(store_lease_child_fd_path(fstab_fd))
+    argv.push("{mounts.bound_logicals.len()}")
+    loop logical in mounts.bound_logicals -> argv.push(logical)
+    argv.push(binary)
+    argv.push("")
+    loop arg in rest -> argv.push(arg.copy())
+    ^spec: process.cmd(argv)
+    spec = spec.keep_open(unshare_file, at: unshare_fd)
+    spec = spec.keep_open(mount_file, at: mount_fd)
+    spec = spec.keep_open(shell_file, at: shell_fd)
+    spec = spec.keep_open(fstab_file, at: fstab_fd)
+    Ok(Val(ShellLaunch{spec: spec, scratch: scratch}))
+}
+
+// Resolve the executable path the projected namespace should `exec`: prefer
+// the logical `/nix/store/<name>/...` path so `argv[0]` preserves symlinked
+// command names (`sh`, multicall tools, wrappers), falling back to the
+// leased descriptor path when the executable lives outside `/nix/store`.
+env_shell_resolve_projected_binary: fn(env: ShellEnv, projection_sources: [String:String], program: String, caller_dir: String, stable_program: LeaseText?) -[FS, Env]> String EnvironmentError! {
+    loop lease in env.cache_leases {
+        if lease.executable_host_location_at(program, caller_dir) == .Val(loc) {
+            canon_root: files.canonicalize(loc.root) ?? loc.root
+            bin_dir: if loc.bin == "" -> canon_root else -> files.join(canon_root, loc.bin)
+            host_path: files.join(bin_dir, loc.member)
+            if env_shell_logical_executable_path(projection_sources, host_path) == .Val(logical) {
+                return Ok(logical)
+            }
+        }
+    }
+    if env_shell_logical_executable_path(projection_sources, program) == .Val(logical) {
+        return Ok(logical)
+    }
+    if stable_program == .Val(leased) {
+        rendered: leased.render(env.planned_binding()) ?? return Err(EnvironmentError.InvalidData(err.message()))
+        return Ok(rendered)
+    }
+    Ok(program)
 }
 
 // The fstab for one namespace and the logicals it bind-mounts.
@@ -167,6 +230,8 @@ env_shell_projection_fstab: fn(projections: [String:String], scratch: ^ShellScra
     ^writer: files.create(fstab_path, if_exists: .Refuse) ?? return Err(EnvironmentError.InvalidData("{err}"))
     scratch.scratch_files.push(fstab_path.copy())
     writer.write_bytes(fstab.bytes()) ?? return Err(EnvironmentError.InvalidData("{err}"))
+    writer.flush() ?? return Err(EnvironmentError.InvalidData("{err}"))
+    close(writer)
     Ok(ShellProjectionMounts{fstab_path: fstab_path, bound_logicals: bound_logicals})
 }
 

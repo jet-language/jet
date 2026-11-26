@@ -292,6 +292,12 @@ NixProjectionPath: struct {
     source: LeaseText,
 }
 
+// A logical `/nix/store/<name>` path and its verified Hangar object path.
+NixProjectionSource: struct {
+    logical: String,
+    source: String,
+}
+
 // A leased output root, how a child names it, and the descriptor reserved
 // for its held directory (None when the child gets the canonical source).
 LeasedOutputRoot: struct {
@@ -480,6 +486,30 @@ CacheLease: struct {
     }
 
     nix_store_projection: fn(self) -> [NixProjectionPath] Never! { self.nix_store_projection_paths }
+
+    // Each projected `/nix/store/<name>` paired with its verified Hangar
+    // object path, for building rootless bind-mount tables.
+    nix_store_projection_sources: fn(self) -> [NixProjectionSource] Never! {
+        ^out: [NixProjectionSource]{}
+        loop binding in self.nix_projection_bindings {
+            out.push(NixProjectionSource{logical: binding.logical, source: binding.source})
+        }
+        out
+    }
+
+    // The verified output root, relative bin directory, and member name for
+    // `requested` when this lease owns that executable.
+    executable_host_location_at: fn(self, requested: String, caller_dir: String) -> {root: String, bin: String, member: String}? Never! {
+        if self.require_consumable() == {
+            .Err(_) -> return None
+            .Ok(_) -> {}
+        }
+        resolved: if files.is_abs(requested) -> requested else -> files.join(caller_dir, requested)
+        index: self.executable_index_at(requested, resolved) ?? return None
+        bin: self.bin_relative ?? return None
+        root: self.projected_bin_root ?? self.snapshot_root
+        Val({root: root, bin: bin, member: self.executables[index].relative})
+    }
 
     original_output: fn(self) -> String Never! { self.out }
 

@@ -257,22 +257,23 @@ ShellEnv: struct {
                 }
             }
         }
-        launch: if stable_program == {
-            .Val(leased) -> {
-                // The child holds the leased bin root at the descriptor this
-                // path names: `apply_in_mode` below passes it into the spec.
-                path: leased.render(self.planned_binding()) ?? {
-                    Theme.resolve_choice(ColorChoice.Auto).error_coded("E1340", "could not run `{program}`", err.message(), "re-realize the package so its lease holds the executable's output")
-                    return 126
+        launch: if env_shell_nix_projection_command_at(self, program, caller_dir, stable_program, rest) == {
+            .Val(projected) -> projected
+            .None -> if stable_program == {
+                .Val(leased) -> {
+                    // The child holds the leased bin root at the descriptor this
+                    // path names: `apply_in_mode` below passes it into the spec.
+                    path: leased.render(self.planned_binding()) ?? {
+                        Theme.resolve_choice(ColorChoice.Auto).error_coded("E1340", "could not run `{program}`", err.message(), "re-realize the package so its lease holds the executable's output")
+                        return 126
+                    }
+                    ShellLaunch.plain(process.cmd([String]{path}).args_extend(rest))
                 }
-                ShellLaunch.plain(process.cmd([String]{path}).args_extend(rest))
+                .None -> ShellLaunch.plain(process.cmd([String]{program}).args_extend(rest))
             }
-            .None -> if env_shell_nix_projection_command(self, program, rest) == {
-                .Ok(projected) -> projected ?? ShellLaunch.plain(process.cmd([String]{program}).args_extend(rest))
-                .Err(error) -> {
-                    env_shell_report_nix_projection_error(Theme.resolve_choice(ColorChoice.Auto), program, error)
-                    return 126
-                }
+            .Err(error) -> {
+                env_shell_report_nix_projection_error(Theme.resolve_choice(ColorChoice.Auto), program, error)
+                return 126
             }
         }
         scratch: launch.scratch

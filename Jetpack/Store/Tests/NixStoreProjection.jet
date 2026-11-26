@@ -500,3 +500,204 @@ store_test_verify_pooled_spec_handoff: fn(leases: ^[CacheLease]) Never! {
     receipt: spec.run() ?? panic("child with 30 pooled leases must launch cleanly: {err}")
     assert(receipt.success)
 }
+
+store_test_push_u16_le: fn(out: ^[U8], value: Int) Never! {
+    out.push(U8{value & 255})
+    out.push(U8{(value >> 8) & 255})
+}
+
+store_test_push_u32_le: fn(out: ^[U8], value: Int) Never! {
+    out.push(U8{value & 255})
+    out.push(U8{(value >> 8) & 255})
+    out.push(U8{(value >> 16) & 255})
+    out.push(U8{(value >> 24) & 255})
+}
+
+store_test_push_u64_le: fn(out: ^[U8], value: Int) Never! {
+    store_test_push_u32_le(out, value)
+    store_test_push_u32_le(out, value >> 32)
+}
+
+// Build a minimal static Linux x86_64 ELF executable that calls
+// `openat(AT_FDCWD, target_path, O_RDONLY, 0)` and exits 0 if it opens,
+// else exits 42. Has zero dynamic-linker or host `/nix/store` dependencies.
+store_test_static_open_check_elf_x86_64: fn(target_path: String) -> [U8] Never! {
+    vaddr: 4194304
+    ehdr_size: 64
+    phdr_size: 56
+    code_off: ehdr_size + phdr_size
+    code: [U8]{
+        // mov eax, 257 (SYS_openat)
+        U8{184},
+        U8{1},
+        U8{1},
+        U8{0},
+        U8{0},
+        // mov rdi, -100 (AT_FDCWD)
+        U8{72},
+        U8{199},
+        U8{199},
+        U8{156},
+        U8{255},
+        U8{255},
+        U8{255},
+        // lea rsi, [rip + 26] (target_path immediately after code)
+        U8{72},
+        U8{141},
+        U8{53},
+        U8{26},
+        U8{0},
+        U8{0},
+        U8{0},
+        // xor edx, edx (O_RDONLY)
+        U8{49},
+        U8{210},
+        // xor r10d, r10d (mode = 0)
+        U8{69},
+        U8{49},
+        U8{210},
+        // syscall
+        U8{15},
+        U8{5},
+        // xor edi, edi (exit code 0)
+        U8{49},
+        U8{255},
+        // test rax, rax; jns +5
+        U8{72},
+        U8{133},
+        U8{192},
+        U8{121},
+        U8{5},
+        // mov edi, 42
+        U8{191},
+        U8{42},
+        U8{0},
+        U8{0},
+        U8{0},
+        // mov eax, 231 (SYS_exit_group); syscall
+        U8{184},
+        U8{231},
+        U8{0},
+        U8{0},
+        U8{0},
+        U8{15},
+        U8{5},
+    }
+    path_bytes: target_path.bytes()
+    total_size: code_off + code.len() + path_bytes.len() + 1
+    ^out: [U8]{
+        // ELF64 little-endian magic + padding (16 bytes)
+        U8{127},
+        U8{69},
+        U8{76},
+        U8{70},
+        U8{2},
+        U8{1},
+        U8{1},
+        U8{0},
+        U8{0},
+        U8{0},
+        U8{0},
+        U8{0},
+        U8{0},
+        U8{0},
+        U8{0},
+        U8{0},
+    }
+    store_test_push_u16_le(out, 2)
+    store_test_push_u16_le(out, 62)
+    store_test_push_u32_le(out, 1)
+    store_test_push_u64_le(out, vaddr + code_off)
+    store_test_push_u64_le(out, ehdr_size)
+    store_test_push_u64_le(out, 0)
+    store_test_push_u32_le(out, 0)
+    store_test_push_u16_le(out, ehdr_size)
+    store_test_push_u16_le(out, phdr_size)
+    store_test_push_u16_le(out, 1)
+    store_test_push_u16_le(out, 0)
+    store_test_push_u16_le(out, 0)
+    store_test_push_u16_le(out, 0)
+    // PT_LOAD (RX)
+    store_test_push_u32_le(out, 1)
+    store_test_push_u32_le(out, 5)
+    store_test_push_u64_le(out, 0)
+    store_test_push_u64_le(out, vaddr)
+    store_test_push_u64_le(out, vaddr)
+    store_test_push_u64_le(out, total_size)
+    store_test_push_u64_le(out, total_size)
+    store_test_push_u64_le(out, 4096)
+    loop byte in code -> out.push(byte)
+    loop byte in path_bytes -> out.push(byte)
+    out.push(U8{0})
+    out
+}
+
+#Test("store nix store projection runs leased executable inside isolated rootless /nix/store namespace") {
+    if !sys.is_linux() || sys.arch() != "x86_64" {
+        return
+    }
+    unshare: env_shell_first_file(ENV_SHELL_UNSHARE_CANDIDATES) ?? return
+    _: env_shell_first_file(ENV_SHELL_MOUNT_CANDIDATES) ?? return
+    shell: env_shell_first_file(ENV_SHELL_SH_CANDIDATES) ?? return
+    if env_shell_check_rootless_namespace(unshare, shell) == .Err(_) {
+        return
+    }
+
+    roots: store_test_temp_roots()
+    verification: StoreVerification.new()
+    source: files.join(roots.root, "nix-projection-exec-source")
+    files.create_dir_all(files.join(source, "root/bin")) ?? panic("root dir")
+    files.create_dir_all(files.join(source, "leaf")) ?? panic("leaf dir")
+    probe_path: files.join(source, "root/bin/probe")
+    elf: store_test_static_open_check_elf_x86_64("{STORE_TEST_PROJECTION_LEAF}/payload")
+    files.write_bytes(probe_path, elf) ?? panic("write probe")
+    files.set_mode(probe_path, 493) ?? panic("chmod probe")
+    files.write(files.join(source, "leaf/payload"), "leaf") ?? panic("leaf payload")
+
+    // On the host (outside the projection), the logical leaf path is absent.
+    host_run: process.cmd([String]{probe_path}).run() ?? panic("host probe")
+    assert_eq(host_run.code, 42)
+
+    root_nar: (store_write_nar(files.join(source, "root")) ?? panic("root nar")).bytes
+    leaf_nar: (store_write_nar(files.join(source, "leaf")) ?? panic("leaf nar")).bytes
+    ^seed: [U8]{}
+    loop _ in 0..<32 -> seed.push(U8{13})
+    key_id: "jetpack-projection-exec-1"
+    routes: [String:[U8]]{
+        "/nix-cache-info": "StoreDir: /nix/store\nWantMassQuery: 1\n".bytes(),
+        "/00000000000000000000000000000000.narinfo": store_test_signed_narinfo(STORE_TEST_PROJECTION_ROOT, "root.nar", root_nar, [String]{STORE_TEST_PROJECTION_LEAF}, key_id, seed).bytes(),
+        "/11111111111111111111111111111111.narinfo": store_test_signed_narinfo(STORE_TEST_PROJECTION_LEAF, "leaf.nar", leaf_nar, [String]{}, key_id, seed).bytes(),
+        "/nar/root.nar": root_nar,
+        "/nar/leaf.nar": leaf_nar,
+    }
+    cache: store_test_start_cache_server(roots, routes)
+    files.create_dir_all(files.join(roots.root, "config")) ?? panic("config dir")
+    files.create_dir_all(files.join(roots.root, "trust")) ?? panic("trust dir")
+    files.write(files.join(roots.root, "config/nix-cache-v1.endpoint"), cache.endpoint) ?? panic("endpoint")
+    public_key: crypto.SigningKey{bytes: seed}.public_key().bytes
+    files.write(files.join(roots.root, "trust/nix-cache-v1.ed25519.pub"), "{key_id}:{base64.encode(public_key)}\n") ?? panic("trust key")
+    admitted: store_admit_nix_closure(verification, roots, [NixOutputRequest]{NixOutputRequest{name: "out", store_path: STORE_TEST_PROJECTION_ROOT}}, false) ?? panic("admit closure")
+    store_test_stop_cache_server(cache)
+
+    entries: store_test_canonicalize_admitted_records(verification, roots, admitted)
+    ^entry: store_test_find_entry(entries, STORE_TEST_PROJECTION_ROOT)
+    entry.bin = files.join(entry.out, "bin")
+    lease: store_snapshot_lease(verification, roots, entry) ?? panic("lease")
+    assert(lease.executable_for("probe") != None)
+    ^env: ShellEnv{
+        bin_dirs: [String]{},
+        vars: [String:String]{},
+        unset_vars: [String]{},
+        refs: [String]{"probe@nixpkgs"},
+        label: JETPACK_PROMPT_LABEL,
+        prompt_path: PromptPathMode.Short,
+        prompt_strip: PromptStripMode.Off,
+        cache_leases: [CacheLease]{lease},
+    }
+    // Through ShellEnv, `probe` runs inside the isolated rootless `/nix/store`
+    // namespace where the leased leaf object is bind-mounted at its logical path.
+    code: env.run_command([String]{"probe"})
+    assert_eq(code, 0)
+    loop held in env.cache_leases.move() -> held.release()
+    store_test_drop_roots(roots)
+}
