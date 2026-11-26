@@ -12,7 +12,7 @@ CaptureTestRecord: struct {
     protected: Bool,
 
     impl RecordIndexRetention {
-        artifact_id: fn(self) -> String Never! { self.id.copy() }
+        artifact_id: fn(self) -> String Never! { self.id }
 
         recorded_sequence: fn(self) -> U64 Never! { self.seq }
 
@@ -27,7 +27,7 @@ CaptureProtectedRecord: struct {
     bytes: U64,
 
     impl RecordIndexRetention {
-        artifact_id: fn(self) -> String Never! { self.id.copy() }
+        artifact_id: fn(self) -> String Never! { self.id }
 
         recorded_sequence: fn(self) -> U64 Never! { U64{0} }
 
@@ -39,8 +39,18 @@ CaptureProtectedRecord: struct {
     }
 }
 
-capture_test_record: fn(id: String, seq: U64, bytes: U64, protected: Bool) -> CaptureTestRecord Never! {
-    CaptureTestRecord{id: id.copy(), seq, bytes, protected}
+capture_test_record: fn(id: ^^String, seq: U64, bytes: U64, protected: Bool) -> CaptureTestRecord Never! {
+    CaptureTestRecord{id: id.move(), seq, bytes, protected}
+}
+
+capture_eviction_order_records: fn() -> [CaptureTestRecord] Never! {
+    [CaptureTestRecord]{
+        capture_test_record("z", U64{8}, U64{3}, false),
+        capture_test_record("b", U64{1}, U64{3}, false),
+        capture_test_record("a", U64{1}, U64{3}, false),
+        capture_test_record("c", U64{2}, U64{3}, false),
+        capture_test_record("saved", U64{0}, U64.MAX, true),
+    }
 }
 
 capture_test_error: fn(budget: CaptureBudget, records: [CaptureTestRecord], incoming: CaptureTestRecord?) -> CaptureBudgetError Never! {
@@ -66,10 +76,8 @@ capture_test_error: fn(budget: CaptureBudget, records: [CaptureTestRecord], inco
     }
     fact: CaptureSourceFact.at(CaptureSource.Randomness, "run.jet", U32{9})
     assert_eq(fact.reason_text(), "Rand at run.jet:9")
-    source_id: "λ.jet"
-    located: CaptureLocation.new(source_id.copy(), U32{0}).with_column(U32.MAX)
+    located: CaptureLocation.new("λ.jet", U32{0}).with_column(U32.MAX)
     assert_eq(located.render(), "λ.jet:0:4294967295")
-    assert_eq(source_id, "λ.jet")
     assert_eq(CaptureSourceFact.new(CaptureSource.Network, Val(located.move())).reason_text(), "Net at λ.jet:0:4294967295")
 }
 
@@ -113,14 +121,7 @@ capture_test_error: fn(budget: CaptureBudget, records: [CaptureTestRecord], inco
 }
 
 #Test("capture_eviction_is_oldest_first_by_sequence_then_id_and_never_incoming") {
-    records: [CaptureTestRecord]{
-        capture_test_record("z", U64{8}, U64{3}, false),
-        capture_test_record("b", U64{1}, U64{3}, false),
-        capture_test_record("a", U64{1}, U64{3}, false),
-        capture_test_record("c", U64{2}, U64{3}, false),
-        capture_test_record("saved", U64{0}, U64.MAX, true),
-    }
-    original: records.copy()
+    records: capture_eviction_order_records()
     // Incoming sequence zero would sort first if mistakenly made a candidate.
     incoming: capture_test_record("incoming", U64{0}, U64{4}, false)
     plan: CaptureBudget.new_unchecked(U64{7}).plan_eviction(records, incoming) ?? panic("plan")
@@ -134,7 +135,7 @@ capture_test_error: fn(budget: CaptureBudget, records: [CaptureTestRecord], inco
             {artifact_id: "c", recorded_sequence: U64{2}, size_bytes: U64{3}},
         },
     )
-    assert_eq(records, original)
+    assert_eq(records, capture_eviction_order_records())
 }
 
 #Test("capture_current_eviction_and_exact_fit_keep_saved_bytes_outside_budget") {

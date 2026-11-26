@@ -155,10 +155,7 @@ evidence_completeness_reason: fn(value: EvidenceCompleteness) -> String? Never! 
 }
 
 evidence_completeness_merge: fn(value: ^EvidenceCompleteness, other: EvidenceCompleteness) Never! {
-    // copy: the merged completeness (owner: `value`, the merged report) takes the more severe state
-    // while `other` stays with its record (owner: the caller's record or report, read again
-    // afterwards).
-    if evidence_completeness_code(other) > evidence_completeness_code(value) -> value = other.copy()
+    if evidence_completeness_code(other) > evidence_completeness_code(value) -> value = other
 }
 
 evidence_source_empty: fn() -> EvidenceSource Never! {
@@ -283,9 +280,9 @@ evidence_report_try_from_records: fn(report_id: String, records: ^^[EvidenceReco
     ^report: evidence_report_new(report_id, EvidenceProducerKind.Test, evidence_source_empty(), evidence_build_empty(), evidence_revision_empty())
     if records.len() > 0 {
         report.producer = records[0].producer
-        report.source = records[0].source.copy()
-        report.build = records[0].build.copy()
-        report.revision = records[0].revision.copy()
+        report.source = records[0].source
+        report.build = records[0].build
+        report.revision = records[0].revision
     }
     loop derivation_item in derivations {
         _: evidence_report_intern_derivation(report, derivation_item)
@@ -323,8 +320,7 @@ evidence_report_query: fn(report: EvidenceReport, claim_id: String?) -> [Evidenc
 }
 
 evidence_projection_from_record: fn(record: EvidenceRecord) -> EvidenceProjection Never! {
-    ^chain: record.chain.copy()
-    chain = loop fresh_item in chain -> fresh_item
+    ^chain: record.chain
     chain.sort_by(fn(left: EvidenceChainLink, right: EvidenceChainLink) { evidence_chain_order(left, right) })
     EvidenceProjection{evidence_id: record.identity.evidence_id, claim_id: record.identity.claim_id, kind: record.kind, facet: record.facet, producer: record.producer, expectation: record.expectation, outcome: record.outcome, source: record.source, completeness: record.completeness, chain: chain, derivation: record.derivation}
 }

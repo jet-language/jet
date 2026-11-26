@@ -621,12 +621,9 @@ COLLECTION_OPERATIONS: #run { [CollectionOperationRow]{
 sema_collection_kind: fn(ty: Type) -> SemaCollectionKind? {
     if ty == {
         .Tagged(_, inner) -> sema_collection_kind(inner)
-        // copy: `element` is a payload of read parameter `ty`, which keeps the original; field `element` of the new SemaCollectionKind.List owns this one
-        .List(element) -> Val(SemaCollectionKind.List{element: element.copy()})
-        // copy: `element` is a payload of read parameter `ty`, which keeps the original; field `element` of the new SemaCollectionKind.FixedList owns this one
-        .FixedList(element, _) -> Val(SemaCollectionKind.FixedList{element: element.copy()})
-        // copy: `key` and `value` are payloads of read parameter `ty`, which keeps the originals; the new SemaCollectionKind.Map's fields own `key` and `value`
-        .Map(key, _, value) -> Val(SemaCollectionKind.Map{key: key.copy(), value: value.copy()})
+        .List(element) -> Val(SemaCollectionKind.List{element: element})
+        .FixedList(element, _) -> Val(SemaCollectionKind.FixedList{element: element})
+        .Map(key, _, value) -> Val(SemaCollectionKind.Map{key: key, value: value})
         .Apply(name, args) -> {
             if name == "Iter" && args.len() == 1 {
                 return Val(SemaCollectionKind.Iter{element: args[0]})
@@ -864,7 +861,7 @@ sema_collection_method_contract_in: fn(rows: [CollectionOperationRow], receiver:
                 if arg == CollectionArg.Seed -> seeds.push(index)
                 if arg == CollectionArg.Comparator -> comparator = true
             }
-            return Val(SemaCollectionMethodContract{receiver: receiver, kind: kind.copy(), row: row.copy(), minimum_arity: row.minimum_arity, maximum_arity: row.maximum_arity, receiver_access: collection_access_convention(row.access, family), callback_indices: callbacks, seed_indices: seeds, accepts_comparator: comparator})
+            return Val(SemaCollectionMethodContract{receiver: receiver, kind: kind, row: row.copy(), minimum_arity: row.minimum_arity, maximum_arity: row.maximum_arity, receiver_access: collection_access_convention(row.access, family), callback_indices: callbacks, seed_indices: seeds, accepts_comparator: comparator})
         }
     }
     None
@@ -1086,12 +1083,9 @@ sema_collection_method_operation: fn(contract: SemaCollectionMethodContract, arg
     }
     remove_mode: if argument_count == 1 -> TListRemoveMode.Value else -> literal_remove_mode ?? TListRemoveMode.Dynamic
     if contract.row.op == {
-        // copy: `op` is a payload of read parameter `contract`, which keeps the original; field `operation` of the new SemaCollectionOperation.Builtin owns this one
-        .Builtin(op) -> SemaCollectionOperation.Builtin{operation: op.copy()}
-        // copy: `op` is a payload of read parameter `contract`, which keeps the original; field `operation` of the new SemaCollectionOperation.Closure owns this one
-        .Closure(op) -> SemaCollectionOperation.Closure{operation: op.copy()}
-        // copy: `op` is a payload of read parameter `contract`, which keeps the original; field `operation` of the new SemaCollectionOperation.SetClosure owns this one
-        .SetClosure(op) -> SemaCollectionOperation.SetClosure{operation: op.copy()}
+        .Builtin(op) -> SemaCollectionOperation.Builtin{operation: op}
+        .Closure(op) -> SemaCollectionOperation.Closure{operation: op}
+        .SetClosure(op) -> SemaCollectionOperation.SetClosure{operation: op}
         .SetMinimum -> SemaCollectionOperation.SetMinimum
         .IterToSet -> SemaCollectionOperation.IterToSet
         .SetBits -> SemaCollectionOperation.SetBits

@@ -218,7 +218,7 @@ diagnostic_with_cause: fn(diagnostic: ^^Diagnostic, cause: DiagnosticCause) -> D
 // existing order.
 diagnostic_caused_by: fn(diagnostic: ^^Diagnostic, cause: Diagnostic) -> Diagnostic Never! {
     ^updated: diagnostic
-    updated.cause.push(DiagnosticCause{code: cause.code.copy(), span: cause.span, origin: cause.origin.copy()})
+    updated.cause.push(DiagnosticCause{code: cause.code, span: cause.span, origin: cause.origin})
     loop link in cause.cause -> updated.cause.push(link.copy())
     updated
 }
@@ -252,7 +252,10 @@ diagnostic_order_root_first: fn(diagnostics: ^^[Diagnostic]) -> [Diagnostic] Nev
             }
         }
         if next < 0 {
-            loop rest in pending -> ordered.push(rest.copy())
+            loop pending.len() > 0 {
+                rest: pending.remove(0, .Slot) ?? break
+                ordered.push(rest)
+            }
             break
         }
         // `next` indexes `pending`, so its slot is always there to take.

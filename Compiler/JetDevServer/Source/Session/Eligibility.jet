@@ -84,7 +84,7 @@ CaptureStartFact: struct {
     eligibility: CaptureEligibility,
 
     new: fn(policy: CapturePolicy, attempt: CaptureAttempt) -> CaptureStartFact Never! {
-        CaptureStartFact{identity: attempt.identity.copy(), mode: policy.mode, package: policy.package, no_capture: policy.no_capture, explicit_capture: policy.explicit_capture, budget: policy.budget(), eligibility: policy.eligibility(attempt)}
+        CaptureStartFact{identity: attempt.identity, mode: policy.mode, package: policy.package, no_capture: policy.no_capture, explicit_capture: policy.explicit_capture, budget: policy.budget(), eligibility: policy.eligibility(attempt)}
     }
 
     capture_kind: fn(self) -> CaptureKind? Never! { self.eligibility.kind() }
@@ -102,7 +102,7 @@ CaptureFaultFact: struct {
     eligibility: CaptureEligibility,
 
     new: fn(start: CaptureStartFact, fault_code: ^^String, location: ^^CaptureLocation?) -> CaptureFaultFact Never! {
-        CaptureFaultFact{identity: start.identity.copy(), mode: start.mode, fault_code: fault_code.move(), location: location.move(), eligibility: start.eligibility.copy()}
+        CaptureFaultFact{identity: start.identity, mode: start.mode, fault_code: fault_code.move(), location: location.move(), eligibility: start.eligibility}
     }
 
     captured: fn(self) -> Bool Never! { self.eligibility.is_allowed() }

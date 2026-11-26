@@ -35,14 +35,13 @@ use jet_foundation.[
 }
 
 #Test("JetTrace wrapper exact keys schema version and lowercase Hex64") {
-    content: trace_skeleton_content_json(jettrace_sample_skeleton()) ?? panic(err.message)
-    ^wrapper: jettrace_artifact(content.copy()) ?? panic(err.message)
+    ^wrapper: jettrace_artifact(trace_skeleton_content_json(jettrace_sample_skeleton()) ?? panic(err.message)) ?? panic(err.message)
     jettrace_test_set(wrapper, "schema", .String("jet.gc.trace"))
     assert_eq(jettrace_test_error_bytes(canonical_json_bytes(wrapper)), "unsupported jettrace schema (need jet.trace)")
-    wrapper = jettrace_artifact(content.copy()) ?? panic(err.message)
+    wrapper = jettrace_artifact(trace_skeleton_content_json(jettrace_sample_skeleton()) ?? panic(err.message)) ?? panic(err.message)
     jettrace_test_set(wrapper, "version", .String("1"))
     assert_eq(jettrace_test_error_bytes(canonical_json_bytes(wrapper)), "jettrace version is not an integer")
-    wrapper = jettrace_artifact(content) ?? panic(err.message)
+    wrapper = jettrace_artifact(trace_skeleton_content_json(jettrace_sample_skeleton()) ?? panic(err.message)) ?? panic(err.message)
     jettrace_test_set(wrapper, "trace_id", .String("A".repeat(64)))
     assert_eq(jettrace_test_error_bytes(canonical_json_bytes(wrapper)), "jettrace trace_id is not lowercase Hex64")
     assert_eq(jettrace_test_error_bytes("[]\n".bytes()), "jettrace wrapper is not an object")
@@ -178,8 +177,10 @@ jettrace_test_profile_skeleton: fn() -> TraceSkeleton Never! {
     ^skeleton: jettrace_sample_skeleton()
     value: canonical_json_object([CanonicalJSONField]{CanonicalJSONField{key: "proof", value: .Bool(true)}}) ?? panic(err.message)
     digest: canonical_json_sha256(value)
-    skeleton.receipt_sections.push(TraceReceiptSection{name: "b", type_name: "Evidence", value: value.copy(), digest: digest.copy()})
-    skeleton.receipt_sections.push(TraceReceiptSection{name: "a", type_name: "Evidence", value: value.copy(), digest: digest.copy()})
+    second_value: canonical_json_object([CanonicalJSONField]{CanonicalJSONField{key: "proof", value: .Bool(true)}}) ?? panic(err.message)
+    second_digest: canonical_json_sha256(second_value)
+    skeleton.receipt_sections.push(TraceReceiptSection{name: "b", type_name: "Evidence", value: value, digest: digest})
+    skeleton.receipt_sections.push(TraceReceiptSection{name: "a", type_name: "Evidence", value: second_value, digest: second_digest})
     _: jettrace_test_valid(skeleton)
     skeleton.receipt_sections[0].name = "é".repeat(64)
     _: jettrace_test_valid(skeleton)
@@ -221,10 +222,9 @@ jettrace_test_profile_skeleton: fn() -> TraceSkeleton Never! {
 }
 
 #Test("JetTrace game projection retains every typed frame and draw identity") {
-    function: jet_devtools_function_identity_new("fn:draw", "draw", jet_devtools_source_span_new("source:scene", "scene.jet", U32{2}, U32{3}, U32{4}, U32{5}))
     bodies: [JetDevtoolsEventBody]{
-        .GameFrameSample{sequence: U64{8}, frame_id: U64{7}, scene: "scene", frame_index: U64{6}, build: "build", revision: "rev", trace_id: "trace", start_ns: U64{100}, cpu_ns: U64{42}, gpu_ns: Val(U64{31}), responsible_function: Val(function.copy())},
-        .GameDrawEvent{sequence: U64{9}, frame_id: U64{7}, scene: "scene", frame_index: U64{6}, build: "build", revision: "rev", trace_id: "trace", event_index: U64{2}, event_id: U64{3}, function: function.copy(), phase: "draw", domain: "gpu", start_ns: U64{110}, duration_ns: U64{12}, object_id: Val("object"), resource_id: Val("resource")},
+        .GameFrameSample{sequence: U64{8}, frame_id: U64{7}, scene: "scene", frame_index: U64{6}, build: "build", revision: "rev", trace_id: "trace", start_ns: U64{100}, cpu_ns: U64{42}, gpu_ns: Val(U64{31}), responsible_function: Val(jet_devtools_function_identity_new("fn:draw", "draw", jet_devtools_source_span_new("source:scene", "scene.jet", U32{2}, U32{3}, U32{4}, U32{5})))},
+        .GameDrawEvent{sequence: U64{9}, frame_id: U64{7}, scene: "scene", frame_index: U64{6}, build: "build", revision: "rev", trace_id: "trace", event_index: U64{2}, event_id: U64{3}, function: jet_devtools_function_identity_new("fn:draw", "draw", jet_devtools_source_span_new("source:scene", "scene.jet", U32{2}, U32{3}, U32{4}, U32{5})), phase: "draw", domain: "gpu", start_ns: U64{110}, duration_ns: U64{12}, object_id: Val("object"), resource_id: Val("resource")},
         .Gate{name: "not game", status: "ready", detail: ""},
     }
     projected: project_game_devtools_bodies(bodies) ?? panic(err.message)

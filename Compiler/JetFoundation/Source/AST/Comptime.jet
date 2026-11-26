@@ -129,10 +129,8 @@ failure_contract_effective_type: fn(contract: FailureContract) -> Type Never! {
     if contract == {
         .DeclaredNever -> Type.Named{name: "Never"}
         .Default(success, error) | .Explicit(success, error) | .Inferred(success, error) -> Type.Result{ok: success, err: error}
-        // copy: `success` is a payload of read parameter `contract`, which keeps the original; field `inner` of the new Type.Option owns this one
-        .Optional(success) -> Type.Option{inner: success.copy()}
-        // copy: `success` and `target` are payloads of read parameter `contract`, which keeps the originals; the new Type.Result's fields own `success` and `target`
-        .Converted(success, _, target) -> Type.Result{ok: success.copy(), err: target.copy()}
+        .Optional(success) -> Type.Option{inner: success}
+        .Converted(success, _, target) -> Type.Result{ok: success, err: target}
         .ProvenUnreachable(success) | .InferredNever(success) -> Type.Result{ok: success, err: Type.Named{name: "Never"}}
     }
 }
@@ -143,8 +141,7 @@ failure_contract_effective_type: fn(contract: FailureContract) -> Type Never! {
 // show the default and never the solved set.
 failure_contract_written: fn(contract: FailureContract) -> FailureContract Never! {
     if contract == {
-        // copy: `success` is a payload of read parameter `contract`, which keeps the original; the new Default owns this one
-        .InferredNever(success) | .Inferred(success, _) -> FailureContract.Default{success: success.copy(), error: Type.Named{name: "Err"}}
+        .InferredNever(success) | .Inferred(success, _) -> FailureContract.Default{success: success, error: Type.Named{name: "Err"}}
         // copy: `contract` is a read parameter; the caller keeps it and the result owns this one
         .Default(_, _) | .Optional(_) | .DeclaredNever | .Explicit(_, _) | .Converted(_, _, _) | .ProvenUnreachable(_) -> contract.copy()
     }

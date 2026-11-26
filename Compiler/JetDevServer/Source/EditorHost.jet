@@ -41,7 +41,7 @@ EditorHost: enum {
         if value == {
             "vscode" -> Ok(.VsCode)
             "zed" -> Ok(.Zed)
-            else -> Err(EditorHostError.UnsupportedEditor(value.copy()))
+            else -> Err(EditorHostError.UnsupportedEditor(value))
         }
     }
 
@@ -84,7 +84,7 @@ EditorCommand: enum {
             "test" -> Ok(.Test)
             "run" -> Ok(.Run)
             "debug" -> Ok(.Debug)
-            else -> Err(EditorHostError.UnsupportedCommand(value.copy()))
+            else -> Err(EditorHostError.UnsupportedCommand(value))
         }
     }
 
@@ -137,9 +137,9 @@ EditorSessionIdentity: struct {
     new: fn(session_id: ^^String, source_id: ^^String, source_path: ^^String, revision: ^^String) -> EditorSessionIdentity EditorHostError! {
         editor_validate_stable_text(session_id, "session_id")
         editor_validate_source_identity(source_id)
-        path: editor_clean_source_path(source_path)
+        editor_validate_source_path(source_path)
         editor_validate_stable_text(revision, "revision")
-        Ok(EditorSessionIdentity{session_id: session_id.move(), source_id: source_id, source_path: path, revision: revision.move()})
+        Ok(EditorSessionIdentity{session_id: session_id.move(), source_id: source_id, source_path: source_path.move(), revision: revision.move()})
     }
 }
 
@@ -475,8 +475,7 @@ EditorHostTransport: struct {
     workbench_url: fn(self) -> String Never! { self.workbench }
 
     grants: fn(self) -> [String] Never! {
-        ^out: [String]{}
-        loop (grant, _) in self.grant_set -> out.push(grant.copy())
+        ^out: self.grant_set.keys().to_list()
         out.sort()
         out
     }
@@ -497,7 +496,7 @@ EditorHostTransport: struct {
 
     event_at: fn(self, index: Int) -> EditorStreamEvent Never! {
         if self.events[(self.head + index) % EDITOR_MAX_EVENTS] == .Val(event) {
-            return event.copy()
+            return event
         }
         panic("occupied editor event ring slot")
     }
@@ -556,37 +555,33 @@ EditorHostTransport: struct {
     validate_request: fn(self, host: EditorHost, session_id: String, source_id: String, source_path: String, revision: String) EditorHostError! {
         editor_validate_stable_text(session_id, "session_id")
         editor_validate_source_identity(source_id)
-        path: editor_clean_source_path(source_path)
+        editor_validate_source_path(source_path)
         editor_validate_stable_text(revision, "revision")
         expected: self.session_identity
         if session_id != expected.session_id {
-            return Err(EditorHostError.SessionMismatch{expected: expected.session_id.copy(), actual: session_id.copy()})
+            return Err(EditorHostError.SessionMismatch{expected: expected.session_id, actual: session_id})
         }
         if source_id != expected.source_id {
-            return Err(EditorHostError.SourceMismatch{expected: expected.source_id.copy(), actual: source_id.copy()})
+            return Err(EditorHostError.SourceMismatch{expected: expected.source_id, actual: source_id})
         }
-        if path != expected.source_path {
-            return Err(EditorHostError.SourceMismatch{expected: expected.source_path.copy(), actual: path})
+        if source_path != expected.source_path {
+            return Err(EditorHostError.SourceMismatch{expected: expected.source_path, actual: source_path})
         }
         if revision != expected.revision {
-            return Err(EditorHostError.RevisionMismatch{expected: expected.revision.copy(), actual: revision.copy()})
+            return Err(EditorHostError.RevisionMismatch{expected: expected.revision, actual: revision})
         }
     }
 
     open: fn(^self, request: EditorWorkbenchOpenRequest) -> EditorWorkbenchSnapshot EditorHostError! {
         self.validate_request(request.host, request.session_id, request.source_id, request.source_path, request.revision)
         stream: self.stream_after(request.cursor)
-        ^panel: "build"
-        if request.panel_id == .Val(value) -> panel = value.copy() else if self.shared_view.selection == .Val(selection) {
-            panel = selection.panel_id.copy()
-        }
-        canonical: editor_ensure_panel(panel)
+        canonical: if request.panel_id == .Val(value) -> editor_ensure_panel(value) else if self.shared_view.selection == .Val(selection) -> editor_ensure_panel(selection.panel_id) else -> editor_ensure_panel("build")
         ^item: String?{None}
         if request.item_key == .Val(value) {
             editor_validate_stable_text(value, "selection item_key")
-            item = Val(value.copy())
+            item = Val(value)
         } else if request.panel_id == None {
-            if self.shared_view.selection == .Val(selection) -> item = selection.item_key.copy()
+            if self.shared_view.selection == .Val(selection) -> item = selection.item_key
         }
         self.shared_view.selection = Val(JetDevtoolsSelection.new(canonical, item))
         Ok(self.snapshot(request.host, stream))
@@ -600,7 +595,7 @@ EditorHostTransport: struct {
 
     navigate_source: fn(self, request: EditorSourceNavigationRequest) -> EditorSourceNavigation EditorHostError! {
         self.validate_request(request.host, request.session_id, request.source_id, request.source_path, request.revision)
-        Ok(EditorSourceNavigation{host: request.host, identity: self.session_identity.copy(), line: request.line, column: request.column, source_url: editor_source_url(self.workbench, self.session_identity.source_id, request.line, request.column)})
+        Ok(EditorSourceNavigation{host: request.host, identity: self.session_identity, line: request.line, column: request.column, source_url: editor_source_url(self.workbench, self.session_identity.source_id, request.line, request.column)})
     }
 
     select_panel: fn(^self, request: EditorPanelSelectionRequest) -> JetDevtoolsSelection EditorHostError! {
@@ -609,8 +604,8 @@ EditorHostTransport: struct {
         if request.item_key == .Val(value) {
             editor_validate_stable_text(value, "selection item_key")
         }
-        selection: JetDevtoolsSelection.new(panel, request.item_key.copy())
-        self.shared_view.selection = Val(selection.copy())
+        selection: JetDevtoolsSelection.new(panel, request.item_key)
+        self.shared_view.selection = Val(selection)
         Ok(selection)
     }
 
@@ -623,11 +618,11 @@ EditorHostTransport: struct {
         if !self.grant_set.has_key(grant) {
             return Err(EditorHostError.CommandDenied{command: request.command, required_grant: grant})
         }
-        Ok(EditorCommandReceipt{host: request.host, identity: self.session_identity.copy(), command: request.command, required_grant: grant})
+        Ok(EditorCommandReceipt{host: request.host, identity: self.session_identity, command: request.command, required_grant: grant})
     }
 
     snapshot: fn(self, host: EditorHost, stream: ^^EditorStreamSnapshot) -> EditorWorkbenchSnapshot Never! {
-        EditorWorkbenchSnapshot{host, protocol: JET_DEVTOOLS_PROTOCOL, protocol_version: EDITOR_PROTOCOL_VERSION, workbench_url: self.workbench.copy(), identity: self.session_identity.copy(), started_at_ms: self.started_at_ms, panels: self.panel_catalog(), panel_availability: self.panel_availability(), selection: (self.shared_view.selection ?? JetDevtoolsSelection.new("build", None)).copy(), events: stream.events.move(), resumed_from: stream.resumed_from, cursor: stream.next_cursor, time_cursor: editor_wire_cursor(self.shared_view.cursor)}
+        EditorWorkbenchSnapshot{host, protocol: JET_DEVTOOLS_PROTOCOL, protocol_version: EDITOR_PROTOCOL_VERSION, workbench_url: self.workbench, identity: self.session_identity, started_at_ms: self.started_at_ms, panels: self.panel_catalog(), panel_availability: self.panel_availability(), selection: self.shared_view.selection ?? JetDevtoolsSelection.new("build", None), events: stream.events.move(), resumed_from: stream.resumed_from, cursor: stream.next_cursor, time_cursor: editor_wire_cursor(self.shared_view.cursor)}
     }
 
     replace_projection: fn(^self, projection: DevtoolsProjection) EditorHostError! {
@@ -651,7 +646,7 @@ EditorHostTransport: struct {
         self.shared_view.selection = Val(JetDevtoolsSelection.new("build", None))
         if projection.selection == .Val(selection) {
             if editor_canonical_panel_id(selection.panel_id) == .Val(panel) {
-                item: if selection.item_key.len() != 0 -> Val(selection.item_key.copy()) else -> None
+                item: if selection.item_key.len() != 0 -> Val(selection.item_key) else -> None
                 self.shared_view.selection = Val(JetDevtoolsSelection.new(panel, item))
             }
         }
@@ -659,23 +654,23 @@ EditorHostTransport: struct {
 
     check_projection_identity: fn(self, session_id: String, source_id: String?, revision: String?) EditorHostError! {
         if session_id != self.session_identity.session_id {
-            return Err(EditorHostError.SessionMismatch{expected: self.session_identity.session_id.copy(), actual: session_id.copy()})
+            return Err(EditorHostError.SessionMismatch{expected: self.session_identity.session_id, actual: session_id})
         }
         if revision == .Val(value) {
             if value.len() != 0 && value != self.session_identity.revision {
-                return Err(EditorHostError.RevisionMismatch{expected: self.session_identity.revision.copy(), actual: value.copy()})
+                return Err(EditorHostError.RevisionMismatch{expected: self.session_identity.revision, actual: value})
             }
         }
         if source_id == .Val(value) {
             if value != self.session_identity.source_id {
-                return Err(EditorHostError.SourceMismatch{expected: self.session_identity.source_id.copy(), actual: value.copy()})
+                return Err(EditorHostError.SourceMismatch{expected: self.session_identity.source_id, actual: value})
             }
         }
     }
 
     sync_session: fn(^self, session: ResidentDevSession) EditorHostError! {
         if session.id() != self.session_identity.session_id {
-            return Err(EditorHostError.SessionMismatch{expected: self.session_identity.session_id.copy(), actual: session.id().copy()})
+            return Err(EditorHostError.SessionMismatch{expected: self.session_identity.session_id, actual: session.id()})
         }
         projection: session.devtools_events_since(.None)
         self.replace_projection(projection)
@@ -690,18 +685,18 @@ EditorHostTransport: struct {
             }
             .Events(envelope) -> {
                 if envelope.session_id != self.session_identity.session_id {
-                    return Err(EditorHostError.SessionMismatch{expected: self.session_identity.session_id.copy(), actual: envelope.session_id.copy()})
+                    return Err(EditorHostError.SessionMismatch{expected: self.session_identity.session_id, actual: envelope.session_id})
                 }
                 if envelope.source_identity == .Val(identity) {
                     // Wire precedence is source before revision (projection is opposite).
                     if identity.source_id == .Val(source) {
                         if source != self.session_identity.source_id {
-                            return Err(EditorHostError.SourceMismatch{expected: self.session_identity.source_id.copy(), actual: source.copy()})
+                            return Err(EditorHostError.SourceMismatch{expected: self.session_identity.source_id, actual: source})
                         }
                     }
                     if identity.revision == .Val(revision) {
                         if revision.len() != 0 && revision != self.session_identity.revision {
-                            return Err(EditorHostError.RevisionMismatch{expected: self.session_identity.revision.copy(), actual: revision.copy()})
+                            return Err(EditorHostError.RevisionMismatch{expected: self.session_identity.revision, actual: revision})
                         }
                     }
                 }
@@ -720,7 +715,7 @@ EditorHostTransport: struct {
                 self.shared_view.selection = Val(JetDevtoolsSelection.new("build", None))
                 if envelope.selection() == .Val(selection) {
                     if editor_canonical_panel_id(selection.panel_id) == .Val(panel) {
-                        self.shared_view.selection = Val(JetDevtoolsSelection.new(panel, selection.item_key.copy()))
+                        self.shared_view.selection = Val(JetDevtoolsSelection.new(panel, selection.item_key))
                     }
                 }
             }
@@ -741,7 +736,7 @@ EditorHostTransport: struct {
             return Err(EditorHostError.InvalidRequest("JSON-RPC id must be null, a string, or a number"))
         }
         method_value: root.field("method") ?? return Err(EditorHostError.InvalidRequest("JSON-RPC request requires a method"))
-        method: if method_value == .Text(value) -> value.copy() else -> {
+        method: if method_value == .Text(value) -> value else -> {
             return Err(EditorHostError.InvalidRequest("JSON-RPC request requires a method"))
         }
         params: root.field("params") ?? return Err(EditorHostError.InvalidRequest("JSON-RPC request requires an object params value"))
@@ -837,17 +832,14 @@ editor_rejected_path_shape: fn(value: String) -> Bool Never! {
 editor_validate_source_identity: fn(value: String) EditorHostError! {
     editor_validate_stable_text(value, "source_id")
     if editor_rejected_path_shape(value) {
-        return Err(EditorHostError.SourcePathRejected(value.copy()))
+        return Err(EditorHostError.SourcePathRejected(value))
     }
 }
 
-editor_clean_source_path: fn(value: String) -> String EditorHostError! {
-    if value.bytes().len() == 0 || value.bytes().len() > EDITOR_MAX_TEXT_BYTES || editor_has_control(value) || editor_rejected_path_shape(value) {
-        return Err(EditorHostError.SourcePathRejected(value.copy()))
+editor_validate_source_path: fn(value: String) EditorHostError! {
+    if value.bytes().len() == 0 || value.bytes().len() > EDITOR_MAX_TEXT_BYTES || editor_has_control(value) || editor_rejected_path_shape(value) || !value.ends_with(".jet") {
+        return Err(EditorHostError.SourcePathRejected(value))
     }
-    // Every accepted component is already canonical; no split/join copy needed.
-    if !value.ends_with(".jet") -> return Err(EditorHostError.SourcePathRejected(value.copy()))
-    Ok(value.copy())
 }
 
 editor_validate_loopback_url: fn(value: String) EditorHostError! {
@@ -922,21 +914,21 @@ editor_canonical_panel_id: fn(panel_id: String) -> String? Never! {
 }
 
 editor_ensure_panel: fn(panel_id: String) -> String EditorHostError! {
-    Ok(editor_canonical_panel_id(panel_id) ?? return Err(EditorHostError.PanelNotFound(panel_id.copy())))
+    Ok(editor_canonical_panel_id(panel_id) ?? return Err(EditorHostError.PanelNotFound(panel_id)))
 }
 
 editor_event_from_event: fn(event: JetDevtoolsEvent) -> EditorStreamEvent EditorHostError! {
     ^fields: [String:EditorFactValue]{}
-    fields["fields"] = EditorFactValue.text(event.fields_json().copy())
+    fields["fields"] = EditorFactValue.text(event.fields_json())
     ^payload: [String:EditorFactValue]?{None}
     if event.payload_json() == .Val(text) {
         ^values: [String:EditorFactValue]{}
-        values["payload"] = EditorFactValue.text(text.copy())
+        values["payload"] = EditorFactValue.text(text)
         payload = Val(values)
     }
     sequence: checked(U64{event.sequence()}) ?? return Err(EditorHostError.InvalidEnvelope("devtools event sequence must be nonnegative"))
     timestamp_ms: checked(U64{event.timestamp_ms}) ?? return Err(EditorHostError.InvalidEnvelope("devtools event timestamp must be nonnegative"))
-    EditorStreamEvent.new(sequence, timestamp_ms, event.source().copy(), event.kind().copy(), event.entity().copy(), fields, payload)
+    EditorStreamEvent.new(sequence, timestamp_ms, event.source(), event.kind(), event.entity(), fields, payload)
 }
 
 editor_source_url: fn(workbench_url: String, source_id: String, line: U32, column: U32) -> String Never! {
@@ -1000,7 +992,7 @@ editor_validate_fact_value: fn(value: EditorFactValue) EditorHostError! {
 
 editor_field_text: fn(params: Dyn, key: String) -> String EditorHostError! {
     value: params.field(key) ?? return Err(EditorHostError.InvalidRequest("editor request field `{key}` must be text"))
-    if value == .Text(text) -> return Ok(text.copy())
+    if value == .Text(text) -> return Ok(text)
     Err(EditorHostError.InvalidRequest("editor request field `{key}` must be text"))
 }
 
@@ -1008,7 +1000,7 @@ editor_optional_text: fn(params: Dyn, key: String) -> String? EditorHostError! {
     value: params.field(key) ?? return Ok(None)
     if value == {
         .Null -> Ok(None)
-        .Text(text) -> Ok(Val(text.copy()))
+        .Text(text) -> Ok(Val(text))
         .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> Err(EditorHostError.InvalidRequest("editor request field `{key}` must be text or null"))
     }
 }
@@ -1064,7 +1056,7 @@ editor_command_arguments: fn(params: Dyn) -> [String] EditorHostError! {
     }
     ^arguments: [String]{}
     loop argument in values {
-        if argument == .Text(text) -> arguments.push(text.copy()) else {
+        if argument == .Text(text) -> arguments.push(text) else {
             return Err(EditorHostError.InvalidRequest("editor command arguments must be text"))
         }
     }
@@ -1098,8 +1090,7 @@ editor_valid_request_id: fn(id: Dyn) -> Bool Never! {
 }
 
 editor_fact_keys: fn(values: [String:EditorFactValue]) -> [String] Never! {
-    ^keys: [String]{}
-    loop (key, _) in values -> keys.push(key.copy())
+    ^keys: values.keys().to_list()
     keys.sort()
     keys
 }

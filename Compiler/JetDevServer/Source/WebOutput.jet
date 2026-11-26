@@ -110,7 +110,7 @@ web_output_open: fn(out_dir: String, root: String) -[FS, Env]> WebOutputAuthorit
     anchor: files.canonicalize(root)
     web_output_ensure_directory(out_dir)
     real: files.canonicalize(out_dir)
-    prefix: if anchor.ends_with("/") -> anchor.copy() else -> "{anchor}/"
+    prefix: if anchor.ends_with("/") -> anchor else -> "{anchor}/"
     if real != anchor && !real.starts_with(prefix) {
         return Err(web_output_denied(real, "web output directory escapes `{anchor}`"))
     }
@@ -169,32 +169,35 @@ web_output_publish: fn(staging: String, out_dir: String, root: String) -[FS, Env
     }
     staging_root: output_root.open_existing_child(staging_name)
     // The members every web bundle publishes, then its optional source maps.
-    members: [String]{"web.manifest.json", "jet_dom_runtime.js", "app.js", "app.wasm", "index.html"}
-    maps: [String]{"app.js.map", "app.wasm.map"}
-    ^names: [String]{}
-    ^staged_names: [String]{}
-    loop name in members {
+    all_members: [String]{"web.manifest.json", "jet_dom_runtime.js", "app.js", "app.wasm", "index.html", "app.js.map", "app.wasm.map"}
+    required_count: 5
+    ^names: [Int]{}
+    ^staged_names: [Int]{}
+    loop index in 0..<required_count {
+        name: all_members[index]
         staging_root.require_file(name)
         ^_: output_root.has_file(name)
-        names.push(name.copy())
-        staged_names.push(name.copy())
+        names.push(index)
+        staged_names.push(index)
     }
-    loop name in maps {
+    loop index in required_count..<all_members.len() {
+        name: all_members[index]
         staged: staging_root.has_file(name)
         current: output_root.has_file(name)
-        if staged || current -> names.push(name.copy())
-        if staged -> staged_names.push(name.copy())
+        if staged || current -> names.push(index)
+        if staged -> staged_names.push(index)
     }
     backup: output_root.create_unique_child(".jet-web-publication")
-    ^backed_up: [String]{}
-    ^published: [String]{}
+    ^backed_up: [Int]{}
+    ^published: [Int]{}
     ^failure: IOError?{None}
-    loop name in names {
+    loop index in names {
         if failure != None -> break
+        name: all_members[index]
         if output_root.has_file(name) == {
             .Ok(present) -> {
                 if present {
-                    backed_up.push(name.copy())
+                    backed_up.push(index)
                     if output_root.rename_file_to(name, backup) == .Err(error) {
                         failure = Val(error)
                     }
@@ -203,27 +206,27 @@ web_output_publish: fn(staging: String, out_dir: String, root: String) -[FS, Env
             .Err(error) -> failure = Val(error)
         }
     }
-    loop name in staged_names {
+    loop index in staged_names {
         if failure != None -> break
-        published.push(name.copy())
-        if staging_root.rename_file_to(name, output_root) == .Err(error) -> failure = Val(error)
+        published.push(index)
+        if staging_root.rename_file_to(all_members[index], output_root) == .Err(error) -> failure = Val(error)
     }
     if failure == .Val(error) {
         published.reverse()
-        loop name in published {
-            output_root.remove_file_if_exists(name).drop("rollback continues past a member it can't remove")
+        loop index in published {
+            output_root.remove_file_if_exists(all_members[index]).drop("rollback continues past a member it can't remove")
         }
         backed_up.reverse()
-        loop name in backed_up {
-            backup.rename_file_to(name, output_root).drop("rollback continues past a member it can't restore")
+        loop index in backed_up {
+            backup.rename_file_to(all_members[index], output_root).drop("rollback continues past a member it can't restore")
         }
-        loop name in names {
-            backup.remove_file_if_exists(name).drop("the backup directory is removed below when empty")
+        loop index in names {
+            backup.remove_file_if_exists(all_members[index]).drop("the backup directory is removed below when empty")
         }
         output_root.remove_child_directory(files.basename(backup.path)).drop("a leftover backup directory holds no published bytes")
         return Err(error)
     }
-    loop name in names -> backup.remove_file_if_exists(name)
+    loop index in names -> backup.remove_file_if_exists(all_members[index])
     output_root.remove_child_directory(files.basename(backup.path))
 }
 

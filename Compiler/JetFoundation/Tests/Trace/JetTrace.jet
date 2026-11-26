@@ -91,7 +91,7 @@ jettrace_test_text: fn(value: TraceSkeleton) -> String Never! {
 jettrace_test_set: fn(value: ^CanonicalJSON, key: String, replacement: ^^CanonicalJSON) Never! {
     if value == {
         .Object(original) -> {
-            ^fields: original.copy()
+            ^fields: original
             loop index in 0..<fields.len() {
                 if fields[index].key == key {
                     fields[index].value = replacement.move()
@@ -117,17 +117,17 @@ jettrace_test_task: fn(id: U64, parent: U64, state: ^^String, wait: ^^String) ->
 // test compares, so no view outlives the call.
 jettrace_test_wrapper_lookup: fn(value: CanonicalJSON, key: String) -> CanonicalJSON JetTraceError! {
     fields: jettrace_wrapper_fields(value)
-    Ok(fields[jettrace_get(fields, key)].value.copy())
+    Ok(fields[jettrace_get(fields, key)].value)
 }
 
 jettrace_test_object_lookup: fn(value: CanonicalJSON, key: String) -> CanonicalJSON JetTraceError! {
     fields: jettrace_object_view(value, "fixture object")
-    Ok(fields[jettrace_get(fields, key)].value.copy())
+    Ok(fields[jettrace_get(fields, key)].value)
 }
 
 jettrace_test_array_item: fn(value: CanonicalJSON, index: Int) -> CanonicalJSON JetTraceError! {
     items: jettrace_array(value, "fixture array")
-    Ok(items[index].copy())
+    Ok(items[index])
 }
 
 #Test("trace_version_has_one_typed_home") {
