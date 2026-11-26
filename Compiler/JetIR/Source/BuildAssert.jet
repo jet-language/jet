@@ -99,13 +99,34 @@ ir_assert_is_plain_scalar: fn(ty: Type) -> Bool Never! {
     untagged == .Int || untagged == .IntN(_, _) || untagged == .Float || untagged == .Float32 || untagged == .Bool || untagged == .Char
 }
 
-ir_assert_can_capture_type: fn(m: ^IRModule, p: IRProgram, ty: Type) -> Bool Never! {
+ir_assert_type_renderable: fn(m: ^IRModule, p: IRProgram, ty: Type, depth: Int) -> Bool Never! {
+    if depth > 4 -> return false
     untagged: ir_untag(ty)
     if ir_unit_type(untagged) || ir_never_type(untagged) -> return false
     if untagged == .Fn(_, _, _, _, _, _) || untagged == .Measure(_) || untagged == .TraitObject(_) -> return false
     if ir_native_carrier(untagged) -> return false
-    if ir_value_type(m, p, ty) == None -> return false
+    row: ir_value_type(m, p, ty) ?? return false
+    if ir_is_handle(m, row) && !ir_carrier_type(ty) {
+        return ir_render_handle_symbol(p, ty, IRRender.Debug) != None
+    }
+    if m.types[row].kind == .Pointer && !ir_carrier_type(ty) && !ir_is_handle(m, row) -> return false
+    if untagged == {
+        .Option(inner) -> return ir_assert_type_renderable(m, p, inner, depth + 1)
+        .Result(ok_ty, err_ty) -> return ir_assert_type_renderable(m, p, ok_ty, depth + 1) && ir_assert_type_renderable(m, p, err_ty, depth + 1)
+        .List(elem) -> return ir_assert_type_renderable(m, p, elem, depth + 1)
+        .Tuple(fields) -> {
+            loop f in fields {
+                if !ir_assert_type_renderable(m, p, f, depth + 1) -> return false
+            }
+            return true
+        }
+        .Int | .IntN(_, _) | .Float | .Float32 | .Bool | .Char | .String | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
+    }
     true
+}
+
+ir_assert_can_capture_type: fn(m: ^IRModule, p: IRProgram, ty: Type) -> Bool Never! {
+    ir_assert_type_renderable(m, p, ty, 0)
 }
 
 ir_assert_anchor_offset: fn(p: IRProgram, b: IRBuilder, src_row: Int, line_start: Int, line_end: Int, node_idx: Int) -> Int? Never! {

@@ -53,18 +53,22 @@ run: fn() -[FS, Env, Exec, IO]> {
 
     both: (task.all {
         left: {
+            ^out: ""
             #Context(dir: dir_a, env: {TAG: "alpha"}) {
                 files.write("marker.txt", "alpha") ?? panic("write a failed")
                 res: process.cmd(["sh", "-c", "printf '%s:%s' \"$(basename \"$(pwd)\")\" \"$TAG\""]).stdout(.Capture).stderr(.Capture).run() ?? panic("child a failed")
-                res.output.trim()
+                out = res.output.trim()
             }
+            out
         },
         right: {
+            ^out: ""
             #Context(dir: dir_b, env: {TAG: "beta"}) {
                 files.write("marker.txt", "beta") ?? panic("write b failed")
                 res: process.cmd(["sh", "-c", "printf '%s:%s' \"$(basename \"$(pwd)\")\" \"$TAG\""]).stdout(.Capture).stderr(.Capture).run() ?? panic("child b failed")
-                res.output.trim()
+                out = res.output.trim()
             }
+            out
         },
     }) ?? panic("task.all failed")
     print("parallel={both.left}|{both.right}")

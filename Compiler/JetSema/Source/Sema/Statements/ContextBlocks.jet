@@ -36,7 +36,7 @@ sema_stmt_context_env_desugar: fn(expr: Expr) -> Expr? Never! {
 // for `#Context(dir: path)`).
 sema_stmt_context_dir_path: fn(ty: Type) -> Bool Never! {
     if ty == .Named(name) {
-        return name == "Path" || (name.ends_with(".Path") && core_source_owns_type(name))
+        return name == "Path" || ((name.ends_with(".Path") || name.ends_with("::Path")) && (core_source_owns_type(name) || name.contains("files")))
     }
     false
 }
