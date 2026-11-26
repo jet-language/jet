@@ -91,6 +91,12 @@ jet fill <file.jet[:line]>           Propose checked code for typed goals
   version bump.
 - **Remembered flags:** Workspace-local remembered CLI defaults live under
   `.jet/` and never silently override explicit command-line flags.
+- **Test isolation:** Each `#Test` and `Output.Check` runs with fresh module
+  state — leftover test tasks settle, mutable module globals (`^name` and
+  `#Persist ^name`) restore to their starting values, module `Shared{…}`
+  holders and declared points reset, and `#Memo` caches clear between
+  tests. Shipped `jet run` and `jet build` binaries emit zero test-reset
+  overhead.
 - **Exit codes:** `0` success, `1` user/check/test/unhandled-error failure, `2`
   CLI usage error, `70` runtime fault/panic, `101` internal compiler error (ICE).
   See `Docs/Spec/architecture.md`.

@@ -545,6 +545,20 @@ form may be assigned after initialization. A local value whose call reads a
 mutable global, itself or through any function it calls, is computed when
 the program runs it, never while building, on every tier: the program may
 have assigned the global by then.
+Ordinary single-task code reads and writes a mutable module global directly.
+Inside a lexical `task.group`, children borrow sendable globals for reading
+with zero copies and may disjointly write separate globals (conflicts report
+E1101; detaching a child that borrows a global reports E1106); `task.all`,
+`task.race`, `task.any`, and `para_*` workers borrow sendable globals for
+reading and refuse writes (E1101). Outliving tasks outside a lexical
+`task.group` (or spawned through a `Group` parameter) cannot touch a mutable
+module global (E1102), `#Export(c)` functions and C callbacks cannot touch an
+ordinary mutable global (E3203), and pure (`-[]>`) or `#Memo` functions cannot
+read or write changeable module state (E3401 / E0938). Use `Shared{…}` for
+shared concurrent mutation, or a raw word whose every write sits inside
+`#Unsafe` for low-level synchronization. Under `jet test`, every mutable module
+global, `Shared{…}` holder, event point, and `#Memo` cache resets between tests
+after any leftover tasks settle (see `Examples/Concurrency/GlobalStateSafety.jet`).
 Typed scalar literals such as `I64{0}`, `I64{-1}`, and `F32{1.25}` retain their
 checked scalar type in module storage (D-BIND-BARE1); in a `#Persist` global the
 inner value must still be literal data, not a call or arithmetic expression.
@@ -1295,6 +1309,10 @@ Its default bound is 128 entries; `#Memo(bound: none)` makes it unbounded.
 `name.cache()` reads hits, misses, size, and bound from that same result store,
 including before the first call. The shared Prelude owns eviction and counters;
 emitters only marshal the checked function identity, argument key, and bound.
+A `#Memo` function cannot read or write changeable module state, directly or
+through any function it calls (E0938), so changing a global never makes cached
+results stale. Under `jet test`, every `#Memo` cache clears between tests so
+hits, misses, and entries do not leak across tests.
 
 A value tag is a field-less struct whose `impl Marker` block names
 `sites: [.TypeUse]`; it declares an erased dataflow fact and its policy. Its
@@ -3132,14 +3150,17 @@ positive right. Ambient effects such as `IO` still violate that empty ceiling.
 Reading the task context is not an effect: pure code (`-[]>`, a bare `#FX`)
 may read `context.<field>`. Its input is the task's current context record,
 which the code reads where it runs, not a parameter its caller passes.
-Writing module state is not an effect, but a `-[]>` function may not do it,
-itself or through any function it calls (E3401): a module `Shared` holder's
-value, a module `Cell`, and a `#Persist` or `#Unsafe` module changeable binding all
-outlive the call, so a later call could see the write. A cell reached through
-a read parameter, `self`, an alias or a lambda capture may be such a cell, so
-writing it, taking its `guard_edit()` lease included, is E3401 too. Its own
-locals, a cell it builds (`Shared{…}`, `Cell.new(…)`), and a `^` parameter
-its caller lends for writing stay free to change.
+Reading or writing changeable module state is not an effect, but a `-[]>`
+function may do neither, itself or through any function it calls (E3401): a
+module `Shared` holder's value, a module `Cell`, and a `^name` or `#Persist`
+mutable module binding can vary between calls with the same arguments when
+read and outlive the call when written. A cell reached through a read
+parameter, `self`, an alias or a lambda capture may be such a cell, so writing
+it, taking its `guard_edit()` lease included, is E3401 too. Pass the needed
+global value in as a parameter instead; the function's own locals, a cell it
+builds (`Shared{…}`, `Cell.new(…)`), and a `^` parameter its caller lends for
+writing stay free to change. Interactive debugger and `--pure` evaluation
+probes remain writes-only so inspecting live module globals stays possible.
 `Mem.Alloc(above: N)` and `Mem.Stack(above: N)` are the parameterized
 memory-denial spellings. An explicit memory, waiting, or panic denial still
 rejects a reachable operation
@@ -4917,6 +4938,8 @@ are not rolled back. Ordinary mutable captures, hidden callback capture facts,
 non-sendable values, and function-typed worker values are rejected with
 **E1101** or **E1102** before code generation; there is no implicit
 serialization or capture merge (D-PARCAPTURE1=D).
+Workers may borrow sendable mutable module globals for reading with zero copies,
+while direct or transitive writes to changeable module globals report **E1101**.
 
 ### Structured tasks and combinators
 
@@ -5018,6 +5041,21 @@ An owner declared inside the group drops before the group can join it, and a
 `Group` passed as a parameter joins in another frame; both cases report
 **E1102**. Channels and task bodies still require sendable owned values
 (D-TASKBORROW1=A).
+
+Mutable module globals (`^name: value` and `#Persist ^name: value`) participate
+in the same group-loan discipline. Inside a lexical `task.group`, children may
+borrow sendable mutable globals for reading with zero copies and may disjointly
+write separate globals (or provably separate projected places) until the group
+joins; direct or transitive sibling conflicts, or an opener read or write while
+a child holds a global loan, report **E1101**, and detaching a group child that
+borrows a mutable global reports **E1106**. Branches of `task.all`, `task.race`,
+and `task.any` may borrow sendable globals for reading while refusing direct or
+transitive writes with **E1101**. A task started outside a lexical `task.group`
+(or through a `Group` parameter) can outlive its starter and cannot directly or
+transitively read or write a mutable module global (**E1102**); pass a value in,
+freeze a snapshot, or share state through `Shared{…}`. See
+`Examples/Concurrency/GlobalStateSafety.jet` and
+`Examples/Concurrency/GlobalStateSafety.out`.
 
 ### Select and scheduling
 
@@ -6093,6 +6131,15 @@ fails. A failing assertion carries the E3001 report and Jet
 source location. A test target with no tests or doctests reports E0601; bare
 package testing skips source members with neither, then reports the resolved
 package contains no testable member at all. (R9)
+
+Each `#Test` and `Output.Check` starts with fresh module state. After each test
+finishes, the runtime settles any leftover tasks started by that test, and the
+test harness resets every mutable module global (`^name: value` and
+`#Persist ^name: value`) by dropping its live value and restoring its starting
+value (or clearing deferred-start storage to re-initialize on next use), resets
+module `Shared{…}` holders and declared event points, and clears every `#Memo`
+cache (entries and `name.cache()` counts). Shipped `jet run` and `jet build`
+artifacts emit none of this test-reset code or template data.
 
 A package's `policy: { claims: { min: <rung> } }` sets its claims floor
 (D-GRADE-POLICY1). The rungs, weakest first, are `.Unchecked`, `.Checked`,
@@ -7257,7 +7304,10 @@ verify_release: fn() {}
 An Executable takes zero or one supported typed CLI parameter; a Service or
 Check takes no parameters. Each returns `Unit` or `Unit ?`. Sema resolves and
 validates the reference before the IR is built and publishes its definition
-and effect row to semantic tooling.
+and effect row to semantic tooling. Each `Output.Check` runs after the test
+batch with fresh module state (after the test harness resets mutable module
+globals, `Shared{…}` holders, and `#Memo` caches), verifying persisted outputs
+such as files written by the tests rather than mutated in-memory globals.
 With no explicit selection, a legacy `run: fn` wins; otherwise one compatible
 Executable is selected. Multiple candidates are E1321 with a sorted list
 (D-SHAPE-OUTPUT-CALLABLE1).
@@ -7625,6 +7675,11 @@ a native `#Export(c)` function is, independently, one C primitive: `Int`
 pair), `I8`–`I64` and `U8`–`U64` (`int8_t`–`uint64_t`), or `F32` (`float`); a
 unit result is `void`. A sandbox export uses the Component shapes above. Both
 boundaries publish the success value of a function's failure contract.
+Because foreign C callers may enter from any thread without Jet's structured
+task ownership, an `#Export(c)` function or C callback lambda cannot directly
+or transitively read or write an ordinary mutable module global (**E3203**).
+Share cross-thread state across the C boundary through a `Shared{…}` holder,
+or use a raw word whose every write sits inside `#Unsafe`.
 
 `jet build --lib` emits a linkable native static or shared library and a C
 header. It needs no Component runtime, but the native artifact is trusted code:
