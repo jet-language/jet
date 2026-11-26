@@ -4483,7 +4483,7 @@ sema_expr_try_method_special_routes: fn(receiver: Expr, receiver_value: TExpr, m
             }
             // A child's optional `terminal` names its unwrap (E0311).
             if method == "resize" && receiver_value.ty == .Option(_) {
-                ^process: sema_call_try_process_handle_method(receiver, receiver_value, method, args, span, expected, check)
+                ^process: sema_stream_handle_terminal_resize(receiver_value, args, span, check)
                 if process.handled -> return process
             }
             ^value_method: sema_call_try_value_method(receiver, receiver_value, method, args, span, expected, check)
@@ -4526,8 +4526,6 @@ sema_expr_try_method_special_routes: fn(receiver: Expr, receiver_value: TExpr, m
     if layout.handled -> return layout
     ^stream: sema_call_try_stream_handle_method(receiver, receiver_value, method, args, span, expected, check)
     if stream.handled -> return stream
-    ^process: sema_call_try_process_handle_method(receiver, receiver_value, method, args, span, expected, check)
-    if process.handled -> return process
     duration: sema_call_try_duration_source(receiver, receiver_value, method, type_args, args, span, expected, check)
     if duration.handled -> return duration
     ^time: sema_call_try_time_handle_method(receiver, receiver_value, method, args, span, expected, check)
@@ -5419,9 +5417,7 @@ sema_expr_check_string: fn(parts: [StrPart], span: Span, expected: Type?, check:
                 formatted: if sema_expr_measurement_type(checked.ty) -> sema_expression_measurement_source_call("MeasurementShow", [TExpr]{checked.move()}, Type.String, shown_span, check) ?? return None else -> checked
                 if triple && indent_state.indent != "" {
                     tree_parts.push(sema_expr_indent_plain_part(formatted, indent_state.indent, shown_span, index, check.context))
-                } else {
-                    tree_parts.push(TStrPart.Interpolation{value: formatted, debug: false})
-                }
+                } else { tree_parts.push(TStrPart.Interpolation{value: formatted, debug: false}) }
             }
         }
         index += 1
@@ -5900,9 +5896,7 @@ sema_expr_missing_operator_hook: fn(op: BinOp, owner: Type, span: Span) -> Diagn
 sema_expr_generic_bound_operator: fn(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span, line: Int, check: SemaBodyCheck) -> TExpr? {
     if op != BinOp.Add && op != BinOp.Sub && op != BinOp.Mul && op != BinOp.Div -> return None
     is_generic: if lhs.ty == .Named(name) -> sema_type_name_is_generic(check.environment.generic_params, name) else -> false
-    if !is_generic || !type_identity_equal(lhs.ty, rhs.ty) {
-        return None
-    }
+    if !is_generic || !type_identity_equal(lhs.ty, rhs.ty) -> return None
     trait_name: sema_expr_operator_trait(op) ?? return None
     graph: check.program.registration_graph
     bound: sema_type_bound_satisfied_at(graph, lhs.ty, trait_name, sema_scope_caller_row(check.environment.*, graph), check.environment.generic_params) ?? return None

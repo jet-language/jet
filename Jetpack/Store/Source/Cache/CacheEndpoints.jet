@@ -458,7 +458,7 @@ CacheTransportOutput: struct {
 // Run a host transport with a hard stdout bound. The child is killed as soon
 // as the bound is crossed; stderr is captured by the process runtime so a
 // noisy failed transport cannot deadlock the transfer.
-store_cache_run_bounded_output: fn(spec: ProcessSpec, input: [U8]?, limit: Int, label: String, adapter: String) -> CacheTransportOutput StoreError! {
+store_cache_run_bounded_output: fn(spec: ^^ProcessSpec, input: [U8]?, limit: Int, label: String, adapter: String) -> CacheTransportOutput StoreError! {
     streamed: if input == {
         .Val(_) -> spec.stdin(.Stream)
         .None -> spec

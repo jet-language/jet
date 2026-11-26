@@ -3574,9 +3574,7 @@ sema_ownership_diag_pipe_head_write: fn(span: Span, call_why: String) -> Diagnos
 // read-only whatever access the owner it reads has, so the report blames the
 // binding and asks for a write subject; any other read view blames `root`.
 sema_ownership_diag_read_view_write: fn(state: SemaOwnershipState, expr: Expr, root: String, span: Span, scopes: SemaScopeTable) -> Diagnostic {
-    if pipe_value_is_name(root) {
-        return sema_ownership_diag_pipe_head_write(span, "")
-    }
+    if pipe_value_is_name(root) -> return sema_ownership_diag_pipe_head_write(span, "")
     loop fact in state.views {
         if !fact.active || !fact.pattern || fact.access != AccessConvention.Read || fact.carrier == root {
             next
@@ -4879,8 +4877,8 @@ sema_receiver_mark_sign: fn(state: ^SemaOwnershipState, receiver: Expr, signatur
     }
 }
 
-// The handle builders (`ProcessSpec` methods) report no receiver convention: a
-// builder chain `spec = spec.env(…)` neither writes nor takes.
+// Core stream and dynamic handle methods that report no receiver convention
+// drop the open receiver frame so callers are not checked against one.
 sema_receiver_mark_forget: fn(state: ^SemaOwnershipState, receiver: Expr) {
     span: expr_span(receiver)
     ^index: state.receiver_frames.len() - 1
@@ -4959,9 +4957,7 @@ sema_ownership_convention_mark: fn(convention: AccessConvention) -> String Never
 // E0111 for a change to a binding that can't change. `why` names what changes
 // it; a `:` binding that is not itself a window gets the `^` edit.
 sema_ownership_diag_unchangeable: fn(info: SemaScopeBinding, root: String, span: Span, why: String) -> Diagnostic {
-    if pipe_value_is_name(root) {
-        return sema_ownership_diag_pipe_head_write(span, "")
-    }
+    if pipe_value_is_name(root) -> return sema_ownership_diag_pipe_head_write(span, "")
     if !info.place_alias && info.changeable_mark_at == .Val(at) {
         diagnostic: sema_error("E0111", span, "`{root}` was made with `:`, so it can't be changed", why, "add `^` before the name: `^{root}: ...`")
         return diagnostic_with_edit(diagnostic, TextEdit{span: at, new_text: "^"})
@@ -5934,10 +5930,14 @@ sema_ownership_collect_evaluated_expr_accesses: fn(state: ^SemaOwnershipState, e
 priv sema_ownership_collect_pattern_accesses: fn(state: ^SemaOwnershipState, pattern: Pattern, mode: SemaOwnershipAccessWalk, bound: ^[String], nested: Bool, scopes: SemaScopeTable, events: ^[SemaOwnershipEvaluatedAccess], checks: ^[SemaOwnershipNestedCheck]) {
     if pattern == {
         .Variant(_, bindings, _, _) -> {
-            loop slot in bindings -> sema_ownership_collect_slot_accesses(state, slot, mode, bound, nested, scopes, events, checks)
+            loop slot in bindings {
+                sema_ownership_collect_slot_accesses(state, slot, mode, bound, nested, scopes, events, checks)
+            }
         }
         .Present(_, _, inner, _) | .Ok(_, _, inner, _) | .Err(_, _, inner, _) -> {
-            if inner == .Val(nested_pattern) -> sema_ownership_collect_pattern_accesses(state, nested_pattern, mode, bound, nested, scopes, events, checks)
+            if inner == .Val(nested_pattern) {
+                sema_ownership_collect_pattern_accesses(state, nested_pattern, mode, bound, nested, scopes, events, checks)
+            }
         }
         .Or(alternatives, _) -> {
             loop alternative in alternatives {
@@ -5958,7 +5958,9 @@ priv sema_ownership_collect_pattern_accesses: fn(state: ^SemaOwnershipState, pat
             }
         }
         .List(items, _, _) -> {
-            loop slot in items -> sema_ownership_collect_slot_accesses(state, slot, mode, bound, nested, scopes, events, checks)
+            loop slot in items {
+                sema_ownership_collect_slot_accesses(state, slot, mode, bound, nested, scopes, events, checks)
+            }
         }
         .Map(entries, _, _) -> {
             loop entry in entries {
@@ -5978,7 +5980,9 @@ priv sema_ownership_collect_slot_accesses: fn(state: ^SemaOwnershipState, slot: 
         .Nested(pattern) -> {
             sema_ownership_collect_pattern_accesses(state, pattern, mode, bound, nested, scopes, events, checks)
         }
-        .Named(_, _, inner) -> sema_ownership_collect_slot_accesses(state, inner, mode, bound, nested, scopes, events, checks)
+        .Named(_, _, inner) -> {
+            sema_ownership_collect_slot_accesses(state, inner, mode, bound, nested, scopes, events, checks)
+        }
         .Wildcard | .Bind(_, _) | .Range(_, _) | .Rest(_) -> {}
     }
 }
@@ -6163,9 +6167,7 @@ priv sema_ownership_collect_evaluated_one_stmt: fn(state: ^SemaOwnershipState, s
                         }
                         merged.through_call = merged.through_call || existing.through_call
                         merged.moves_owner = merged.moves_owner || existing.moves_owner
-                    } else {
-                        events.push(existing)
-                    }
+                    } else { events.push(existing) }
                 }
                 events.push(merged)
             }

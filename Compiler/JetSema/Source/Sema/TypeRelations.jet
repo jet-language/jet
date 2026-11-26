@@ -1138,6 +1138,15 @@ sema_type_written_name_unknown: fn(graph: SemaRegistrationGraph, caller: Int, na
     !sema_type_graph_declares_assoc_type(graph, name)
 }
 
+// The Core process and terminal handle types typed without standalone struct
+// declarations in Core.rows.
+sema_process_handle_type: fn(name: String) -> Bool Never! {
+    if name == {
+        "ProcessChild" | "ProcessPlan" | "ProcessStdin" | "ProcessStdoutStream" | "ProcessStderrStream" | "ProcessLines" | "TerminalPolicy" | "TerminalSize" | "TerminalSession" -> true
+        else -> false
+    }
+}
+
 // Whether qualified type name `name`, `alias.leaf`, written in module row
 // `caller`, names nothing. A capitalized head (`Self.Item`) is a type's, not
 // a module's, and a spelling that resolves names its declaration. Any other
