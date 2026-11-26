@@ -63,7 +63,12 @@ ir_build_function: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, function: FnBod
     if ir_failed(b) {
         return
     }
-    executable: ir_executable_return_in(function, declared)
+    ^executable: ir_executable_return_in(function, declared)
+    if executable == None {
+        if b.failure == .Result(ok, err) {
+            executable = Val(Type.Result{ok: ok, err: err})
+        }
+    }
     if executable == .Val(ret) {
         if !ir_unit_type(ret) && !ir_never_type(ret) {
             result_row: ir_value_type(m, p, ret) ?? return ir_fail(b, function.source_span, "result type {ir_type_name(ret)}")
