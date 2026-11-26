@@ -113,7 +113,7 @@ ir_dyn_checked: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, row: Int
     ir_open_if(b.f, failed, b.line)
     message: ir_load_at(m, b, outcome, 8, string_row)
     null: ir_word_const(m, b, 0)
-    ^at: location.copy()
+    ^at: location
     at.column = 0
     at.caret = 0
     ir_stop(m, p, b, 2, message, null, null, ir_report_location(p, at))
@@ -586,10 +586,10 @@ ir_dyn_fixed_decode: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, rec
     fixed_row: ir_value_type(m, p, fixed) ?? return ir_type_fail(b, span, fixed)
     key: ir_codec_decode_key(p, "DecodeFixedList") ?? return ir_fail_slot(b, span, "Dyn.decode into {ir_type_name(fixed)}: the Core decode helper of role DecodeFixedList is outside the checked program")
     length: ir_node(m, p, b, Type.Int, NodeKind.IntLit{value: count, width: None}, span)
-    listed: ir_call(m, p, b, key, [Type]{element.copy()}, -1, [IRWriteBack]{}, [BodyCallArg]{ir_codec_arg(receiver), ir_codec_arg(length)}, span)
+    listed: ir_call(m, p, b, key, [Type]{element}, -1, [IRWriteBack]{}, [BodyCallArg]{ir_codec_arg(receiver), ir_codec_arg(length)}, span)
     if ir_failed(b) || listed < 0 -> return -1
     if ir_fixed_count(m, fixed_row) == None -> return ir_adapt(m, p, b, listed, result_row, span)
-    list_ty: Type.List{element: element.copy()}
+    list_ty: Type.List{element: element}
     list_row: ir_value_type(m, p, list_ty) ?? return ir_type_fail(b, span, list_ty)
     err_row: ir_value_type(m, p, err_ty) ?? return ir_type_fail(b, span, err_ty)
     out: ir_temp(m, b, result_row)
@@ -639,7 +639,7 @@ ir_dyn_union_decode: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, rec
     tree_ty: ir_ty(m, p, b, receiver)
     tree_local: checked_generated_local("decode_union_{tree}", span, tree_ty)
     tree_owned: b.fresh[tree] && ir_has_drop(m, b, tree)
-    b.bindings.push(IRBinding{name: tree_local.name.copy(), slot: tree, owned: tree_owned})
+    b.bindings.push(IRBinding{name: tree_local.name, slot: tree, owned: tree_owned})
     b.fresh[tree] = false
     out: ir_temp(m, b, result_row)
     loop (index, member) in members {
@@ -728,7 +728,7 @@ ir_codec_decode_helper: fn(target: Type) -> {role: String, type_args: [Type]}? N
 // does not hold it.
 ir_codec_decode_key: fn(p: IRProgram, role: String) -> String? Never! {
     row: ir_core_role_row(p, role) ?? return None
-    Val(p.functions[row].key.copy())
+    Val(p.functions[row].key)
 }
 
 // The runtime scalar Decode adapter's suffix for `target`, or None for a
@@ -767,7 +767,7 @@ ir_serde_encode: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receive
     }
     if ir_dyn_def(p, ty) != None {
         receiver_node: ir_body_node(p, b, receiver)
-        typed: ir_node(m, p, b, concrete, receiver_node.kind.copy(), receiver_node.span)
+        typed: ir_node(m, p, b, concrete, receiver_node.kind, receiver_node.span)
         if ir_untag(concrete) == .Map(map_key, _, _) {
             if ir_untag(map_key) == Type.String {
                 return ir_dyn_object_encode(m, p, b, ty, typed, span)
@@ -839,13 +839,13 @@ ir_dyn_array_encode: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, val
     value_ty: ir_ty(m, p, b, value)
     source_local: checked_generated_local("encode_source_{source}", span, value_ty)
     source_owned: b.fresh[source] && ir_has_drop(m, b, source)
-    b.bindings.push(IRBinding{name: source_local.name.copy(), slot: source, owned: source_owned})
+    b.bindings.push(IRBinding{name: source_local.name, slot: source, owned: source_owned})
     b.fresh[source] = false
     // The item List leaves the scope as the payload: its binding never owns it.
     output: ir_list_empty(m, p, b, output_row)
     b.fresh[output] = false
     output_local: checked_generated_local("encode_output_{output}", span, output_ty)
-    b.bindings.push(IRBinding{name: output_local.name.copy(), slot: output})
+    b.bindings.push(IRBinding{name: output_local.name, slot: output})
     item_local: checked_user_local("encode_item_{output}", span, element)
     item_expr: ir_node(m, p, b, element, NodeKind.Local{local: item_local}, span)
     encoded: ir_node(m, p, b, ty, NodeKind.HandleMethod{receiver: item_expr, operation: BodyHandleOp.SerdeEncode{stored: false}, args: [Int]{}}, span)
@@ -959,7 +959,7 @@ ir_dyn_encode_source: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, value: Int, 
 // generated local `name` bound to it.
 ir_dyn_encode_slot: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, slot: Int, slot_ty: Type, name: String, span: Span) -> Int Never! {
     local: checked_generated_local(name, span, slot_ty)
-    b.bindings.push(IRBinding{name: local.name.copy(), slot: slot})
+    b.bindings.push(IRBinding{name: local.name, slot: slot})
     item: ir_node(m, p, b, slot_ty, NodeKind.Local{local: local}, span)
     encoded: ir_node(m, p, b, ty, NodeKind.HandleMethod{receiver: item, operation: BodyHandleOp.SerdeEncode{stored: false}, args: [Int]{}}, span)
     ir_expr(m, p, b, encoded)
@@ -999,7 +999,7 @@ ir_codec_impl: fn(p: IRProgram, concrete: Type, codec: String, method: String) -
             .TopLevel -> None
         }
         if found_args == .Val(args) {
-            return Val({key: p.functions[row].key.copy(), args: args})
+            return Val({key: p.functions[row].key, args: args})
         }
     }
     None

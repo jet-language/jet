@@ -470,7 +470,7 @@ The built-module inventory is a source-facing registry, not a missing-domain led
 - `core.sync`
 - `core.sys`
 - `core.tasks`
-- `core.term`
+- `core.term` — stdio handles, terminal style, and the `Interaction` provider trait (`TerminalInteraction` default; `ask`, `readline`, `choose`, `confirm`, `secret`, `input_secret`, `progress`, and `prompt_guided` dispatched via `context.interaction` / `#Context(interaction:)`; see [`Examples/Systems/Terminal/InteractionProvider.jet`](../../../Examples/Systems/Terminal/InteractionProvider.jet))
 - `core.testing` — deterministic tests, goldens, snapshots, and fake clocks; ambient `assert` renders aligned subexpression values on failure across `O0`/`O1`/`O2` with zero passing-path formatting, and `assert_eq` prints path-level structural diffs for structs, lists, maps, and text
 - `core.text`
 - `core.text.fmt`
@@ -552,6 +552,14 @@ directly, all as ordinary Jet declarations in `Core/` without dispatcher rows.
 An App's route, mount and middleware registrations lower to its Jet `__http_*`
 methods after the existing escaping-callback admission. The original effects and
 resource conventions remain in force.
+
+Network streams (`TCPStream`, `UnixStream`, `TLSStream`, `DTLSSession`,
+`DTLSListener`, and `WsConn`) implement infallible `Close` (`close(handle)` and
+scope-exit cleanup) with zero network or wait effects leaked at scope exit, and
+separate explicit fallible goodbye operations (`shutdown(.Both)` on `TCPStream`
+and `UnixStream`; `finish(...)` on `TLSStream`, `DTLSSession`, `DTLSListener`,
+and `WsConn`) so resource ownership comes solely from `impl Close` declarations,
+identical to any user-declared `Close` type.
 
 ### Database crash consistency and storage model
 

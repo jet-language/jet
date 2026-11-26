@@ -25,7 +25,7 @@ handle_ws: fn(req: HTTPRequest) -> HTTPResponse HTTPError! {
         text: message.text() ?? "bad"
         sock.send_text("echo:{text}") ?? return Ok(http_server.response(500, "send failed"))
     }
-    sock.close(1000, "") ?? return Ok(http_server.response(500, "close failed"))
+    sock.finish(1000, "") ?? return Ok(http_server.response(500, "close failed"))
     return Ok(http_server.response(500, "unused"))
 }
 
@@ -48,7 +48,7 @@ run: fn() (HTTPError | RangeError | TaskFailure | WsError)! {
     if !echoed.is_binary() || (echoed.bytes() ?? panic("echoed bytes")) != sent {
         panic("the binary echo differs")
     }
-    client.close(1000, "") ?? panic("close")
+    client.finish(1000, "") ?? panic("close")
     grace: 100ms
     server.shutdown(grace) ?? panic("shutdown")
     serving.join() ?? panic("server")

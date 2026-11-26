@@ -10,9 +10,9 @@ serve_n: fn(listener: dtls.DTLSListener, count: Int) -[Net, Time.Wait]> {
         sess: listener.accept(deadline: budget) ?? panic("accept: {err}")
         msg: sess.read(4096, deadline: budget) ?? panic("read: {err}")
         sess.write("echo:{msg.trim()}\n", deadline: budget) ?? panic("write: {err}")
-        sess.close() ?? panic("close: {err}")
+        sess.finish() ?? panic("close: {err}")
     }
-    listener.close() ?? panic("listener close: {err}")
+    listener.finish() ?? panic("listener close: {err}")
 }
 
 run: fn() {

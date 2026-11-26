@@ -80,7 +80,10 @@ store_snapshot_lease_unlocked: fn(verification: StoreVerification, roots: Hangar
     lease_root: files.join(leases, lease_name)
     files.create_dir_all(lease_root)
     lease_lock_path: env_lock_path_for_scope(lease_root, "live")
-    live_lock: env_acquire_lease_lock(lease_root, "live") ?? {
+    // Keep only the kernel FileLock for the lease lifetime; the directory
+    // authority chains validate the lock path during acquisition and drop
+    // immediately so each leased package holds 1 lock descriptor.
+    live_lock: env_acquire_lease_lock_owner(lease_root, "live") ?? {
         store_reuse_discard_tree(lease_root)
         return Err(StoreError.IO(err))
     }
@@ -121,7 +124,7 @@ store_reuse_hold_directory: fn(path: String) -> LeasedDirectory StoreError! {
     Ok(LeasedDirectory{path: path, directory: Val(directory), id: info.id, child_fd: store_lease_reserve_child_fd()})
 }
 
-store_reuse_build_lease: fn(verification: StoreVerification, roots: HangarRoots, entry: StoreEntry, projection_index: NixProjectionIndex?, direct_cas: Bool, lease_root: String, lease_lock_path: String, live_lock: ^^RuntimeLock, snapshot_root: String, lease_snapshot_root: String) -> CacheLease StoreError! {
+store_reuse_build_lease: fn(verification: StoreVerification, roots: HangarRoots, entry: StoreEntry, projection_index: NixProjectionIndex?, direct_cas: Bool, lease_root: String, lease_lock_path: String, live_lock: ^^FileLock, snapshot_root: String, lease_snapshot_root: String) -> CacheLease StoreError! {
     if !files.exists(entry.out) {
         store_ensure_real_directory(snapshot_root, "cache lease snapshot")
         return Ok(
@@ -131,7 +134,7 @@ store_reuse_build_lease: fn(verification: StoreVerification, roots: HangarRoots,
                 out: entry.out,
                 lease_root: lease_root,
                 lease_lock_path: lease_lock_path,
-                live_lock: Val(live_lock),
+                live_lock: Val(LeaseLiveLock{owner: live_lock}),
                 live_lock_child_fd: store_lease_reserve_child_fd(),
                 handed_off: false,
                 protocol_lease_id: "",
@@ -194,7 +197,7 @@ store_reuse_build_lease: fn(verification: StoreVerification, roots: HangarRoots,
         }
         output_sources.push(LeaseOutputSource{output_root: store_reuse_object_path(roots, digest), source: source})
     }
-    opened: store_reuse_open_nix_projection_sources(projections)
+    opened: store_reuse_open_nix_projection_sources(verification, projections)
     ^leased_output_roots: [LeasedOutputRoot]{}
     loop output in output_sources {
         if store_reuse_same_path(output.source, snapshot_root) {
@@ -240,7 +243,7 @@ store_reuse_build_lease: fn(verification: StoreVerification, roots: HangarRoots,
             }
         }
     }
-    ^executables: store_reuse_open_snapshot_executables(projected_bin_root ?? snapshot_root, bin_relative, projections)
+    ^executables: store_reuse_open_snapshot_executables(projected_bin_root ?? snapshot_root, bin_relative, projections, keep_open: !direct_cas)
     bin_root_fd: if bin_output_index == {
         .Val(index) -> leased_output_roots[index].child_fd
         .None -> None
@@ -273,7 +276,7 @@ store_reuse_build_lease: fn(verification: StoreVerification, roots: HangarRoots,
             out: entry.out,
             lease_root: lease_root,
             lease_lock_path: lease_lock_path,
-            live_lock: Val(live_lock),
+            live_lock: Val(LeaseLiveLock{owner: live_lock}),
             live_lock_child_fd: store_lease_reserve_child_fd(),
             handed_off: false,
             protocol_lease_id: protocol_lease_id,
@@ -360,8 +363,10 @@ store_reuse_resolve_projected_path: fn(entry_path: String, projections: [NixStor
 // Open the regular-file executables of `<snapshot_root>/<bin>` in name
 // order. Links to regular files are resolved hermetically through the Nix
 // store projection (and relative links inside the closure); dangling or
-// unprojected links are skipped cleanly.
-store_reuse_open_snapshot_executables: fn(snapshot_root: String, bin: String?, projections: [NixStoreProjection]) -> [SnapshotFile] StoreError! {
+// unprojected links are skipped cleanly. When `keep_open` is false (direct
+// sealed CAS leases), each file is opened no-follow to verify its type and
+// identity and then closed so idle executables hold no file descriptors.
+store_reuse_open_snapshot_executables: fn(snapshot_root: String, bin: String?, projections: [NixStoreProjection], *, keep_open: Bool) -> [SnapshotFile] StoreError! {
     relative: bin ?? return Ok([SnapshotFile]{})
     path: files.join(snapshot_root, relative)
     ^out: [SnapshotFile]{}
@@ -388,7 +393,8 @@ store_reuse_open_snapshot_executables: fn(snapshot_root: String, bin: String?, p
         file: files.open(resolved.path, links: .Refuse)
         info: file.stat()
         if !info.is_file -> next
-        out.push(SnapshotFile{relative: entry.name, file: Val(file), id: info.id})
+        held: if keep_open -> Val(file) else -> None
+        out.push(SnapshotFile{relative: entry.name, resolved_path: resolved.path, file: held, id: info.id})
     }
     Ok(out)
 }

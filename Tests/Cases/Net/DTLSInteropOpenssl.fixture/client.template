@@ -25,7 +25,7 @@ exchange: fn(r: Row, roots: RootCertificates, id: ClientIdentity) -[Net, Time.Wa
     sess.write("{r.ping}\n", deadline: budget) ?? return "{r.name}: write: {err}"
     reply: sess.read(4096, deadline: budget) ?? return "{r.name}: read: {err}"
     version: sess.protocol_version()
-    sess.close() ?? return "{r.name}: close: {err}"
+    sess.finish() ?? return "{r.name}: close: {err}"
     "{r.name}: {version} {peer.cipher_suite} {peer.verified_server_name} {reply.trim()}"
 }
 

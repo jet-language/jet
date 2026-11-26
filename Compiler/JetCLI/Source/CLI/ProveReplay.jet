@@ -351,7 +351,7 @@ jet_cli_prove_replay_checks: fn(identity: JetCLIProveIdentity, members: [JetCLIP
     }
     raw: replay ?? return Err(JetCLIProveStop{output: jet_cli_ice("prove replay checks ran without --capture or --replay")})
     artifact: jet_cli_replay_input(root, raw, sites, expected, rand_site_id, io_site_id, net_site_id) ?? return Err(JetCLIProveStop{output: jet_cli_prove_refused(err, color, json)})
-    Ok(JetCLIReplayRun{time_ms: artifact.unix_ns /% 1000000, identity: expected, site_id: site_id, rand_site_id: rand_site_id, io_site_id: io_site_id, net_site_id: net_site_id, sensitive: artifact.sensitive, roots: artifact.roots.copy(), replayed: Val(artifact)})
+    Ok(JetCLIReplayRun{time_ms: artifact.unix_ns /% 1000000, identity: expected, site_id: site_id, rand_site_id: rand_site_id, io_site_id: io_site_id, net_site_id: net_site_id, sensitive: artifact.sensitive, roots: artifact.roots, replayed: Val(artifact)})
 }
 
 // The roots a capture records, in byte order: IO when a sensitive target
@@ -690,8 +690,8 @@ jet_cli_replay_encode: fn(run: JetCLIReplayRun, reads: [JetCLIReplayRead], salt:
         jet_cli_replay_put_le(frame, kinds[sequence], 2)
         jet_cli_replay_put_le(frame, sequence, 8)
         jet_cli_replay_put_le(frame, payload.len(), 4)
-        frame.extend(payload.copy())
-        out.extend(frame.copy())
+        loop byte in payload -> frame.push(byte)
+        loop byte in frame -> out.push(byte)
         out.extend(prove_crypto.sha256(frame).as_bytes())
         payload_bytes += payload.len()
     }
@@ -814,7 +814,7 @@ jet_cli_replay_net_request_fields: fn(hop: JetCLIReplayNetHop, call: Int, reques
 jet_cli_replay_net_digest: fn(domain: String, salt: [U8], parts: [[U8]]) -> String Never! {
     ^out: domain.bytes()
     out.push(U8{0})
-    out.extend(salt.copy())
+    loop byte in salt -> out.push(byte)
     loop part in parts {
         loop step in 0..<8 {
             shift: 7 - step
@@ -822,7 +822,7 @@ jet_cli_replay_net_digest: fn(domain: String, salt: [U8], parts: [[U8]]) -> Stri
             loop _ in 0..<shift -> rest = rest /% 256
             out.push(checked(U8{rest %% 256}) ?? panic("replay digest byte"))
         }
-        out.extend(part.copy())
+        loop byte in part -> out.push(byte)
     }
     prove_crypto.sha256(out).hex()
 }
@@ -892,7 +892,7 @@ jet_cli_replay_net_request_read: fn(cursor: ^JetCLIReplayCursor) -> JetCLIReplay
 // One whole hop record as Core's `__client_net_tape` wrote it, or None
 // when it is malformed.
 jet_cli_replay_net_hop: fn(bytes: [U8]) -> JetCLIReplayNetHop? Never! {
-    ^cursor: JetCLIReplayCursor{bytes: bytes.copy(), at: 0, bad: false}
+    ^cursor: JetCLIReplayCursor{bytes: bytes, at: 0, bad: false}
     ^hop: jet_cli_replay_net_request_read(cursor)
     hop.stage = jet_cli_replay_cursor_u64(cursor)
     count: jet_cli_replay_cursor_u64(cursor)
@@ -971,8 +971,7 @@ jet_cli_replay_bytes_value: fn(bytes: [U8]) -> CanonicalJSON Never! {
 
 // The canonical header, without its trailing LF.
 jet_cli_replay_header_bytes: fn(artifact_id: String, run: JetCLIReplayRun, salt: String, status: Int) -> [U8] Never! {
-    ^roots: [CanonicalJSON]{}
-    loop root in run.roots -> roots.push(CanonicalJSON.String(root.copy()))
+    roots: loop root in run.roots -> CanonicalJSON.String(root.copy())
     header: canonical_json_bytes(
         CanonicalJSON.Object(
             [CanonicalJSONField]{
@@ -986,7 +985,7 @@ jet_cli_replay_header_bytes: fn(artifact_id: String, run: JetCLIReplayRun, salt:
                         },
                     ),
                 },
-                CanonicalJSONField{key: "identity", value: CanonicalJSON.Object(run.identity.copy())},
+                CanonicalJSONField{key: "identity", value: CanonicalJSON.Object(run.identity)},
                 CanonicalJSONField{
                     key: "limits",
                     value: CanonicalJSON.Object(
@@ -1048,8 +1047,7 @@ jet_cli_replay_capture_write: fn(identity: JetCLIProveIdentity, request: JetCLIP
     jet_cli_replay_publish(root, [String]{".jet", "replays"}, name, bytes)
     if request.path == .Val(path) {
         parts: path.split("/").to_list()
-        ^folders: [String]{}
-        loop index in 0..<(parts.len() - 1) -> folders.push(parts[index].copy())
+        folders: loop index in 0..<(parts.len() - 1) -> parts[index].copy()
         jet_cli_replay_publish(root, folders, parts[parts.len() - 1], bytes)
     }
     indexed: ".jet/replays/{name}"
@@ -1085,17 +1083,17 @@ jet_cli_replay_record_begin: fn(file: String, files: [String], name: String, pro
     source: jet_cli_replay_source_identity(file, files) ?? return Err(err)
     members: source.members.move()
     base: source.identity.move()
-    // copy: `base` moves whole into `identity` below.
-    selected: if profile == "" -> base.profile.copy() else -> profile
+    selected: if profile == "" -> base.profile else -> profile
     ^fields: [JetCLIProveField]{jet_cli_prove_field("mir", base.mir_hash), jet_cli_prove_field("profile", selected)}
     loop setting in settings {
         fields.push(jet_cli_prove_field("set {setting.name}", setting.value))
     }
     mir_hash: jet_cli_prove_digest("jet-record-mir-v1", fields)
+    mir_json: jet_cli_prove_mir_json(mir_hash, members)
     ^identity: base.move()
-    identity.profile = selected.copy()
-    identity.mir_hash = mir_hash.copy()
-    identity.mir_json = jet_cli_prove_mir_json(mir_hash, members)
+    identity.profile = selected
+    identity.mir_hash = mir_hash
+    identity.mir_json = mir_json
     path: jet_cli_replay_record_path(name)
     if cli_time.unix_ns() < 0 {
         return Err(jet_cli_replay_refusal("E3629", "replay artifact could not be finalized", "the system clock is before the Unix epoch", "fix the system clock and record again"))
@@ -1356,14 +1354,14 @@ jet_cli_replay_net_divergence: fn(request: [U8], artifact: JetCLIReplayArtifact,
         return Val(jet_cli_replay_diverged("the replayed run made HTTP request {index + 1}, but the recording holds {artifact.requests.len()}"))
     }
     seen: artifact.requests[index]
-    ^cursor: JetCLIReplayCursor{bytes: request.copy(), at: 0, bad: false}
+    ^cursor: JetCLIReplayCursor{bytes: request, at: 0, bad: false}
     hop: jet_cli_replay_net_request_read(cursor)
     if cursor.bad || cursor.at != request.len() {
         return Val(jet_cli_replay_diverged("HTTP request {index + 1} of the replayed run reached the trace malformed"))
     }
     parsed: jet_cli_replay_json(seen.payload, "NetRequest payload") ?? return Val(jet_cli_replay_diverged("the recorded HTTP request {index + 1} is not valid JSON"))
     recorded: if parsed == {
-        .Object(found) -> found.copy()
+        .Object(found) -> found
         .Null | .Bool(_) | .Integer(_) | .String(_) | .Array(_) -> [CanonicalJSONField]{}
     }
     fresh: jet_cli_replay_net_request_fields(hop, index, seen.request_id, jet_cli_replay_field_value(recorded, "site_id"), artifact.salt)
@@ -1517,7 +1515,7 @@ jet_cli_replay_input: fn(root: String, raw: String, sites: [JetCLIReplaySite], e
             return Err(jet_cli_replay_refusal("E3622", "replay artifact path is invalid", problem, "use an indexed replay id or a canonical `.jetproof-replay` path"))
         }
     }
-    relative: if found == .Val(entry) -> entry.path.copy() else -> raw.copy()
+    relative: if found == .Val(entry) -> entry.path else -> raw
     present: cli_files.lexists(jet_cli_entry_join(root, relative))
     if !present {
         if jet_cli_replay_target_refusal(sites, [String]{"Time"}) == .Val(refusal) {
@@ -1642,7 +1640,7 @@ jet_cli_replay_fault_refusal: fn(fault: JetCLIReplayFault) -> JetCLIProveRefusal
 // the bytes. `shown` is the input as the user wrote it.
 jet_cli_replay_verify_file: fn(root: String, relative: String, shown: String) -> JetCLIReplayArtifact JetCLIReplayFault! {
     parts: relative.split("/").to_list()
-    ^current: root.copy()
+    ^current: root
     ^parent: ""
     loop index in 0..<(parts.len() - 1) {
         current = jet_cli_entry_join(current, parts[index])
@@ -2154,9 +2152,9 @@ jet_cli_replay_io_chunk_payload: fn(payload: [U8], open: JetCLIReplayRead, strea
     if bytes.len() == 0 || bytes.len() > JET_CLI_REPLAY_IO_CHUNK_BYTES || open.result != chunk * JET_CLI_REPLAY_IO_CHUNK_BYTES || open.result + bytes.len() > open.request {
         return Err(jet_cli_replay_corrupt("IOChunk payload bytes disagree with their IORead"))
     }
-    ^delivered: open.bytes.copy()
+    ^delivered: open.bytes
     delivered.extend(bytes)
-    Ok(JetCLIReplayRead{kind: JET_CLI_REPLAY_JOURNAL_STDIN, site_id: open.site_id.copy(), request: open.request, result: delivered.len(), bytes: delivered})
+    Ok(JetCLIReplayRead{kind: JET_CLI_REPLAY_JOURNAL_STDIN, site_id: open.site_id, request: open.request, result: delivered.len(), bytes: delivered})
 }
 
 // An IOEnd record: `{chunks, outcome, stream_id, total_bytes}`, ending the
@@ -2177,14 +2175,14 @@ jet_cli_replay_io_end_payload: fn(payload: [U8], open: JetCLIReplayRead, stream:
     jet_cli_replay_keys(outcome, "IOEnd outcome", [String]{"kind"}, [String]{"error"}, "E3622")
     ending: jet_cli_replay_text(outcome, "kind", "IOEnd outcome")
     if ending == "eof" && outcome.len() == 1 {
-        return Ok(JetCLIReplayRead{kind: JET_CLI_REPLAY_JOURNAL_STDIN, site_id: open.site_id.copy(), request: open.request, result: 0, bytes: [U8]{}})
+        return Ok(JetCLIReplayRead{kind: JET_CLI_REPLAY_JOURNAL_STDIN, site_id: open.site_id, request: open.request, result: 0, bytes: [U8]{}})
     }
     if ending != "error" || outcome.len() != 2 {
         return Err(jet_cli_replay_corrupt("IOEnd outcome is neither `eof` nor an error"))
     }
     name: jet_cli_replay_text(outcome, "error", "IOEnd outcome")
     errno: jet_cli_replay_io_errno(name) ?? return Err(jet_cli_replay_corrupt("IOEnd outcome error `{name}` is not a portable I/O error this reader replays"))
-    Ok(JetCLIReplayRead{kind: JET_CLI_REPLAY_JOURNAL_STDIN_FAILED, site_id: open.site_id.copy(), request: open.request, result: errno, bytes: [U8]{}})
+    Ok(JetCLIReplayRead{kind: JET_CLI_REPLAY_JOURNAL_STDIN_FAILED, site_id: open.site_id, request: open.request, result: errno, bytes: [U8]{}})
 }
 
 // A NetRequest record: `{body_digest, call_id, header_digests, host, method,
@@ -2328,7 +2326,7 @@ jet_cli_replay_net_end_payload: fn(payload: [U8], open: JetCLIReplayNetOpen) -> 
     jet_cli_replay_put_le(record, open.stream.len(), 8)
     record.extend(open.stream)
     record.extend(ending.bytes())
-    Ok(JetCLIReplayRead{kind: JET_CLI_REPLAY_JOURNAL_NET, site_id: open.site_id.copy(), request: 0, result: record.len(), bytes: record})
+    Ok(JetCLIReplayRead{kind: JET_CLI_REPLAY_JOURNAL_NET, site_id: open.site_id, request: 0, result: record.len(), bytes: record})
 }
 
 // A Net record's `request_id`: the sequence of its hop's NetRequest frame.
@@ -2343,7 +2341,7 @@ jet_cli_replay_net_pairs: fn(fields: [CanonicalJSONField], key: String, keys: [S
     ^entries: [[CanonicalJSONField]]{}
     loop item in jet_cli_replay_array(fields, key, what) {
         entry: if item == {
-            .Object(found) -> found.copy()
+            .Object(found) -> found
             .Null | .Bool(_) | .Integer(_) | .String(_) | .Array(_) -> {
                 return Err(jet_cli_replay_corrupt("{what} {key} must hold objects"))
             }
@@ -2558,7 +2556,7 @@ jet_cli_replay_act_local: fn(item: CanonicalJSON) JetCLIReplayFault! {
 // `bytes` parsed as canonical JSON: one value, nothing after it, and exactly
 // the bytes its canonical rendering writes.
 jet_cli_replay_json: fn(bytes: [U8], name: String) -> CanonicalJSON JetCLIReplayFault! {
-    ^parser: CanonicalJSONParser{bytes: bytes.copy(), at: 0}
+    ^parser: CanonicalJSONParser{bytes: bytes, at: 0}
     value: canonical_json_value(parser) ?? return Err(jet_cli_replay_corrupt("{name} is not valid JSON"))
     if parser.at != bytes.len() -> return Err(jet_cli_replay_corrupt("{name} is not valid JSON"))
     rendered: canonical_json_bytes(value)

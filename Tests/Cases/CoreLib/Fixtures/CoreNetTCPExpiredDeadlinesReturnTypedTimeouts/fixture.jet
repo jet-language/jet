@@ -13,10 +13,10 @@ run: fn() {
     server: task {
         ^first: net.tcp_accept(listener) ?? return
         time.sleep(100ms)
-        first.close() ?? return
+        close(first)
         ^second: net.tcp_accept(listener) ?? return
         time.sleep(100ms)
-        second.close() ?? return
+        close(second)
     }
 
     ^first: net.tcp_connect(address) ?? panic("first connect")
@@ -24,7 +24,7 @@ run: fn() {
         .Ok(_) -> { print("unexpected first read") }
         .Err(error) -> print(net.error_message(error))
     }
-    first.close() ?? panic("first close")
+    close(first)
 
     ^second: net.tcp_connect(address) ?? panic("second connect")
     #Deadline(0ms) {
@@ -33,6 +33,6 @@ run: fn() {
             .Err(error) -> print(net.error_message(error))
         }
     }
-    second.close() ?? panic("second close")
+    close(second)
     server.join() ?? panic("server task failed")
 }

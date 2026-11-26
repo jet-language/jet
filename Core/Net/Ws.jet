@@ -68,7 +68,16 @@ WsConn: struct {
 
     /// Sends a close frame with `code` (1000 when outside 1000 through 4999) and
     /// `reason` (cut to 123 bytes), then shuts the connection.
-    close: fn(self, code: Int, reason: String) -[Net]> WsError! { rt.ws_close(self, code, reason) }
+    finish: fn(self, code: Int{1000}, reason: String{""}) -[Net]> WsError! {
+        rt.ws_close(self, code, reason)
+    }
+
+    /// Closes the WebSocket connection and releases its underlying socket
+    /// without failing. Call `finish(code, reason)` first to send a close
+    /// frame and observe network errors.
+    impl Close {
+        close: fn(^^self) Never! {}
+    }
 }
 
 /// One received WebSocket message: text, binary, or the peer's close.

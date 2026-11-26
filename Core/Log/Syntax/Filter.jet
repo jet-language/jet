@@ -21,8 +21,11 @@ ParsedFilterEntry: struct {
 /// Parses a single `level` or `module.path=level` filter entry via the checked
 /// grammar, returning `None` for any malformed item.
 parse_entry: fn(text: String) -> ParsedFilterEntry? Never! {
-    if Entry.parse(text) == {
-        .Ok(entry) -> {
+    if text.contains(",") -> return None
+    if FilterSpec.parse(text) == {
+        .Ok(spec) -> {
+            if spec.entries.len() != 1 -> return None
+            entry: spec.entries[0]
             if entry.tail == {
                 .Val(assign) -> {
                     ^path: entry.head.copy()

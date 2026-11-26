@@ -51,8 +51,8 @@ run: fn() {
     print(tls.version_name(peer.tls_version))
     print(peer.cipher_suite.starts_with("TLS13_"))
     print(exchange(secure))
-    secure.close() ?? panic("close: {err}")
-    print(secure.close() == .Ok(_))
+    secure.finish() ?? panic("close: {err}")
+    print(secure.finish() == .Ok(_))
     print(secure.write_bytes("late".bytes(), deadline: 5s) == .Err(_))
 
     tls12: config.with_version_bounds(min: TLSVersion.TLS12, max: TLSVersion.TLS12) ?? panic("version policy")
@@ -60,7 +60,7 @@ run: fn() {
     print(tls.version_name(older.peer_identity().tls_version))
     print(older.peer_identity().cipher_suite.starts_with("TLS_ECDHE_RSA_WITH_"))
     print(exchange(older))
-    older.close() ?? panic("close TLS 1.2: {err}")
+    older.finish() ?? panic("close TLS 1.2: {err}")
 
     // The leaf names only `localhost`; the default trust (SSL_CERT_FILE here)
     // does not contain the test CA.

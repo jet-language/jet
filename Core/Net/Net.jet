@@ -145,7 +145,11 @@ TCPStream: struct {
 
     local_addr: fn(self) -[Net]> String NetError! { rt.tcp_local_addr(self) }
 
-    close: fn(self) -[Net]> NetError! { rt.tcp_close(self) }
+    /// Closes the stream and releases its socket descriptor without failing.
+    /// Call `shutdown(.Both)` first when you need to observe shutdown errors.
+    impl Close {
+        close: fn(^^self) Never! {}
+    }
 }
 
 /// A bound UDP socket. Only Core's binds fill the `priv handle`.
@@ -204,16 +208,23 @@ UnixStream: struct {
         rt.unix_write_all_bytes_deadline(self, bytes, deadline.ns)
     }
 
+    /// Closes the `how` direction of the stream.
+    shutdown: fn(^self, how: NetShutdown) -[Net]> NetError! { rt.unix_shutdown(self, how) }
+
     /// Waits until the stream is ready for `interest`, at most `deadline`.
     ready: fn(self, interest: NetReadyInterest, *, deadline: Duration) -[Net, Time.Wait]> NetReady NetError! {
         rt.unix_ready(self, interest, deadline.ns)
     }
 
-    close: fn(self) -[Net]> NetError! { rt.unix_close(self) }
-
     /// The read and write timeout of every later call without a deadline.
     set_timeout: fn(self, timeout: Duration) -[Net]> NetError! {
         rt.unix_set_timeout(self, timeout.ns)
+    }
+
+    /// Closes the stream and releases its socket descriptor without failing.
+    /// Call `shutdown(.Both)` first when you need to observe shutdown errors.
+    impl Close {
+        close: fn(^^self) Never! {}
     }
 }
 
@@ -568,7 +579,7 @@ tcp_shutdown: fn(stream: TCPStream, how: NetShutdown) -[Net]> NetError! {
     return stream.shutdown(how)
 }
 
-tcp_close: fn(stream: TCPStream) -[Net]> NetError! { return stream.close() }
+tcp_close: fn(stream: TCPStream) -[Net]> NetError! { rt.tcp_close(stream) }
 
 tcp_ready: fn(stream: TCPStream, interest: NetReadyInterest, deadline_ms: Int) -[Net, Time.Wait]> NetReady NetError! {
     if !valid_timeout(deadline_ms) {
@@ -761,7 +772,7 @@ unix_shutdown: fn(stream: ^UnixStream, how: NetShutdown) -[Net]> NetError! {
     rt.unix_shutdown(stream, how)
 }
 
-unix_close: fn(stream: UnixStream) -[Net]> NetError! { stream.close() }
+unix_close: fn(stream: UnixStream) -[Net]> NetError! { rt.unix_close(stream) }
 
 // A lookup waits at most C_DNS_WAIT_MS, or less when the `#Deadline` in force
 // ends sooner.

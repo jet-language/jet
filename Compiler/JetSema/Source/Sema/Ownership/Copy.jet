@@ -24,7 +24,6 @@ use jet_foundation.[
     core_record_literal_fields,
     type_name,
     core_type_modules,
-    core_identity_is,
     IR_RUNTIME_HANDLES,
     core_record_field_types,
     ir_host_value_name,
@@ -360,15 +359,6 @@ sema_copy_walk_key: fn(identity: String, actual: Type) -> String Never! {
         }
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> identity
     }
-}
-
-// The Core streams whose public `close` returns an error: `impl Close` beside
-// that method would define `close` twice, so these four are resources by
-// their Core identity until the pending fallible-close ballot decides how a
-// fallible close meets `Close`. Every other resource says so with its `impl Close`.
-sema_copy_fallible_close_stream: fn(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal) -> Bool Never! {
-    key: "{module_text(graph.module_table, nominal.symbol.module_identity)}.{nominal.symbol.name}"
-    core_identity_is(key, "core.net", "TCPStream") || core_identity_is(key, "core.net", "UnixStream") || core_identity_is(key, "core.net.tls", "TLSStream") || core_identity_is(key, "core.net.dtls", "DTLSSession") || core_identity_is(key, "core.net.dtls", "DTLSListener") || core_identity_is(key, "core.net.ws", "WsConn")
 }
 
 // A runtime handle no declaration lays out is the value its registration
@@ -843,9 +833,8 @@ sema_copy_nominal_facts: fn(
     bindings: bindings_result.bindings
     ^complete: bindings_result.complete
     resource_impl: sema_copy_nominal_close(graph, table, nominal, row)
-    ^resource: resource_impl.value
+    resource: resource_impl.value
     if !resource_impl.known -> complete = false
-    if sema_copy_fallible_close_stream(graph, nominal) -> resource = true
     single_use: sema_copy_nominal_single_use(nominal)
     move_only: sema_copy_nominal_declares(nominal, MarkerHook.MoveOnly)
     distinct: nominal.kind == SemaRegistrationNominalKind.Distinct

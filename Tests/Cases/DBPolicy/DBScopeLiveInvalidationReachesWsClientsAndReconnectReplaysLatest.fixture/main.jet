@@ -63,7 +63,7 @@ run: fn() {
     print("replayed {next_text(client)}")
     insert(alice, "two")
     print("pushed {next_text(client)}")
-    client.close(1000, "") ?? panic("close")
+    client.finish(1000, "") ?? panic("close")
     serving.join() ?? panic("server join")
 
     insert(alice, "three")
@@ -75,7 +75,7 @@ run: fn() {
     again_serving: task { again_mux.serve_once(again_listener) ?? panic("serve again") }
     again: ws.connect("ws://{again_addr}/live") ?? panic("reconnect")
     print("reconnect replayed {next_text(again)}")
-    again.close(1000, "") ?? panic("close again")
+    again.finish(1000, "") ?? panic("close again")
     again_serving.join() ?? panic("server join again")
     print(app.live_stats())
 }

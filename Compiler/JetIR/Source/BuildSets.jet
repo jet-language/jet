@@ -181,11 +181,9 @@ ir_set_helper: fn(m: ^IRModule, p: IRProgram, set_row: Int, name: String) -> Int
     key: "{name}<{type_carrier_identity(ir_row_ty(m, p, set_row))}>"
     if ir_keyed_function(m, key) == .Val(known) -> return Val(known)
     shape: ir_set_shape(m, p, set_row) ?? return None
-    id: m.functions.len()
+    id: ir_reserve_slot(m, key)
     symbol: if name == "set.find" -> "find" else if name == "set.insert" -> "insert" else if name == "set.take" -> "take" else if name == "set.remove" -> "remove" else -> "equal"
-    m.functions.push(ir_hashed_function(name, key, "jet_ir_set_{symbol}_", "", 0))
-    ir_function_bind(m, key, id)
-    ^a: ir_builder_new(m.functions[id].copy())
+    ^a: ir_builder_new(ir_hashed_function(name, key, "jet_ir_set_{symbol}_", "", 0))
     set: ir_new_slot(a, set_row, IRSlotKind.Param, ir_intern_name(m, "set"))
     if name == "set.equal" {
         other: ir_new_slot(a, set_row, IRSlotKind.Param, ir_intern_name(m, "other"))

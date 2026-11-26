@@ -29,7 +29,7 @@ run: fn() (Closed | IOError | NetError | RangeError | TaskFailure)! {
         ready_tx.send(addr_text) ?? panic("ready")
         stream: server_side.accept() ?? panic("accept")
         stream.write_bytes(C_PAYLOAD.bytes()) ?? panic("tcp write")
-        stream.close() ?? panic("tcp close")
+        close(stream)
     }
     addr: ready_rx.receive() ?? panic("ready")
     client: net.tcp_connect(addr) ?? panic("connect")
@@ -48,7 +48,7 @@ run: fn() (Closed | IOError | NetError | RangeError | TaskFailure)! {
     _: client.peer_addr() ?? panic("peer address")
     _: client.local_addr() ?? panic("local address")
     client.shutdown(.Write) ?? panic("tcp shutdown")
-    client.close() ?? panic("close")
+    close(client)
     tcp_task.join() ?? panic("tcp server")
 
     // Unix: the deadline form, appending after what the buffer holds.
@@ -97,7 +97,7 @@ run: fn() (Closed | IOError | NetError | RangeError | TaskFailure)! {
         .Ok(_) -> { print("tls limit 0: accepted") }
         .Err(err) -> print("tls limit 0: {err}")
     }
-    secure.close() ?? panic("close TLS")
+    secure.finish() ?? panic("close TLS")
     _: https.shutdown(100ms) ?? panic("shutdown TLS server")
     _: serving.join() ?? panic("join TLS server")
 

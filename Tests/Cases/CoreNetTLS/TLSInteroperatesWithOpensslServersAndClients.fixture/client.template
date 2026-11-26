@@ -45,7 +45,7 @@ exchange: fn(r: Row, roots: RootCertificates, identity: ClientIdentity) -[Net, T
         reply.extend(got)
         if reply[reply.len() - 1] == 10 -> break
     }
-    secure.close() ?? return "{r.name}: close: {err}"
+    secure.finish() ?? return "{r.name}: close: {err}"
     text: String.from_bytes(reply) ?? panic("reply text {r.name}")
     "{r.name}: {version} {peer.cipher_suite} {peer.verified_server_name} {text.trim()}"
 }

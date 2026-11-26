@@ -137,5 +137,27 @@ Before editing a terminal surface, cite this document and record:
 7. The capture that covers normal output, color suppression, cancellation, and
    diagnostics.
 
+## Interaction provider (`core.term.Interaction`)
+
+User programs and `#CLI` guided prompts do not hard-code terminal I/O at each
+call site. [`Core/Term/Term.jet`](../../../Core/Term/Term.jet) defines one
+`Interaction` trait (`ask`, `choose`, `confirm`, `secret`, and `progress`) and
+one default `TerminalInteraction` implementation. The task context carries the
+active provider in `context.interaction`, scoped and inherited across spawned
+tasks by `#Context(interaction: provider) { ... }`.
+
+- `core.term.ask`, `readline`, `choose`, `confirm`, `secret`, `input_secret`,
+  and `progress` all delegate to `context.interaction`.
+- `core.term.prompt_guided(name, help, choices)` (called by `#CLI` parsers in
+  [`CLIEntry.jet`](../../../Compiler/JetSema/Source/Sema/Registration/CLIEntry.jet)
+  for missing required non-flag inputs) returns `Ok(None)` when running
+  non-interactively on `TerminalInteraction` so piped CI runs keep exit-2
+  refusals, and delegates to `context.interaction.choose` / `ask` whenever a
+  custom provider (scripted harness, GUI dialog, or agent tool-call bridge) is
+  installed or when connected to a real TTY.
+- See [`Examples/Systems/Terminal/InteractionProvider.jet`](../../../Examples/Systems/Terminal/InteractionProvider.jet)
+  for default, scripted, nested, task-inherited, and agent-runner JSON
+  tool-call providers.
+
 The interaction contract is maintained here; implementation checks belong in the
 TUI fixtures and tests for each surface.

@@ -1,0 +1,182 @@
+package: {
+    name: "interaction_provider"
+    authority: { allow: [IO, Time.Wait] }
+}
+
+use term: core.term
+
+// Interactive prompts and progress updates (`ask`, `choose`, `confirm`,
+// `secret`, `progress`, and guided CLI prompts) dispatch through the task's
+// `context.interaction` provider (`core.term.Interaction`). The default
+// provider is `term.TerminalInteraction`; installing a scripted test harness
+// or an agent tool-call bridge via `#Context(interaction: provider)` routes
+// every prompt in the lexical scope and its spawned tasks without touching
+// stdio or a PTY.
+
+ScriptState: struct {
+    answers: [String],
+    cursor: Int,
+    confirm_reply: Bool,
+    log: [String],
+}
+
+ScriptProvider: struct {
+    state: Shared<ScriptState>,
+
+    impl term.Interaction {
+        ask: fn(self, prompt: String) -[IO, Time.Wait]> String IOError! {
+            ^guard: self.state.guard_edit()
+            guard.value.log.push("ask({prompt})")
+            reply: guard.value.answers[guard.value.cursor].copy()
+            guard.value.cursor += 1
+            Ok(reply)
+        }
+
+        choose: fn(self, prompt: String, options: [String]) -[IO, Time.Wait]> String IOError! {
+            ^guard: self.state.guard_edit()
+            guard.value.log.push("choose({prompt}, [{options.join(", ")}])")
+            reply: guard.value.answers[guard.value.cursor].copy()
+            guard.value.cursor += 1
+            Ok(reply)
+        }
+
+        confirm: fn(self, prompt: String) -[IO, Time.Wait]> Bool Never! {
+            ^guard: self.state.guard_edit()
+            guard.value.log.push("confirm({prompt})")
+            guard.value.confirm_reply
+        }
+
+        secret: fn(self, prompt: String) -[IO, Time.Wait]> String IOError! {
+            ^guard: self.state.guard_edit()
+            guard.value.log.push("secret({prompt})")
+            reply: guard.value.answers[guard.value.cursor].copy()
+            guard.value.cursor += 1
+            Ok(reply)
+        }
+
+        progress: fn(self, label: String) -[IO, Time.Wait]> IOError! {
+            ^guard: self.state.guard_edit()
+            guard.value.log.push("progress({label})")
+            Ok()
+        }
+    }
+}
+
+AgentState: struct {
+    tool_calls: [String],
+    replies: [String:String],
+}
+
+AgentProvider: struct {
+    state: Shared<AgentState>,
+
+    impl term.Interaction {
+        ask: fn(self, prompt: String) -[IO, Time.Wait]> String IOError! {
+            ^guard: self.state.guard_edit()
+            guard.value.tool_calls.push("{{\"tool\":\"interaction.ask\",\"prompt\":\"{prompt}\"}}")
+            Ok((guard.value.replies.get(prompt) ?? "").copy())
+        }
+
+        choose: fn(self, prompt: String, options: [String]) -[IO, Time.Wait]> String IOError! {
+            ^guard: self.state.guard_edit()
+            ^quoted: [String]{}
+            loop opt in options -> quoted.push("\"{opt}\"")
+            guard.value.tool_calls.push("{{\"tool\":\"interaction.choose\",\"prompt\":\"{prompt}\",\"options\":[{quoted.join(",")}]}}")
+            Ok((guard.value.replies.get(prompt) ?? options[0]).copy())
+        }
+
+        confirm: fn(self, prompt: String) -[IO, Time.Wait]> Bool Never! {
+            ^guard: self.state.guard_edit()
+            guard.value.tool_calls.push("{{\"tool\":\"interaction.confirm\",\"prompt\":\"{prompt}\"}}")
+            (guard.value.replies.get(prompt) ?? "false") == "true"
+        }
+
+        secret: fn(self, prompt: String) -[IO, Time.Wait]> String IOError! {
+            ^guard: self.state.guard_edit()
+            guard.value.tool_calls.push("{{\"tool\":\"interaction.secret\",\"prompt\":\"{prompt}\"}}")
+            Ok((guard.value.replies.get(prompt) ?? "").copy())
+        }
+
+        progress: fn(self, label: String) -[IO, Time.Wait]> IOError! {
+            ^guard: self.state.guard_edit()
+            guard.value.tool_calls.push("{{\"tool\":\"interaction.progress\",\"label\":\"{label}\"}}")
+            Ok()
+        }
+    }
+}
+
+run_release_flow: fn() -[IO, Time.Wait]> String IOError! {
+    service: term.ask("Service: ")
+    env: term.choose("Environment:", [String]{"staging", "prod"})
+    ok: term.confirm("Ship {service} to {env}?")
+    token: term.secret("API token: ")
+    term.progress("Deploying {service} to {env}")
+    region: term.prompt_guided("region", "target region", [String]{}) ?? "unset"
+    Ok("{service}/{env}/confirmed={ok}/token_len={token.len()}/region={region}")
+}
+
+run: fn() -[IO, Time.Wait]> IOError! {
+    // 1. Default TerminalInteraction: non-TTY guided prompts return None.
+    is_default: if context.interaction == {
+        .TerminalInteraction(_) -> true
+        else -> false
+    }
+    print("default_terminal={is_default}")
+    non_tty: term.prompt_guided("target", "target name", [String]{})
+    print("default_non_tty_guided={non_tty == None}")
+
+    // 2. Scripted provider: deterministic testing, nested shadow/restore, task inheritance.
+    script_state: Shared{ScriptState{
+        answers: [String]{"payments", "prod", "s3cr3t", "us-west", "task-reply"},
+        cursor: 0,
+        confirm_reply: true,
+        log: [String]{},
+    }}
+    inner_state: Shared{ScriptState{
+        answers: [String]{"override"},
+        cursor: 0,
+        confirm_reply: false,
+        log: [String]{},
+    }}
+    script: ScriptProvider{state: script_state.copy()}
+    inner: ScriptProvider{state: inner_state.copy()}
+    #Context(interaction: script) {
+        summary: run_release_flow()
+        print("script_summary={summary}")
+        #Context(interaction: inner) {
+            nested: term.ask("Inner: ")
+            print("nested_answer={nested}")
+        }
+        worker: task {
+            term.ask("Worker: ") ?? ""
+        }
+        print("worker_answer={worker.join() ?? ""}")
+    }
+    loop entry in script_state.guard_read().value.log { print("script_event={entry}") }
+
+    // 3. Agent-runner provider: every prompt becomes a structured JSON tool call.
+    agent_state: Shared{AgentState{
+        tool_calls: [String]{},
+        replies: [String:String]{
+            "Service: ": "search",
+            "Environment:": "staging",
+            "Ship search to staging?": "true",
+            "API token: ": "agent-tok",
+            "region (target region): ": "eu-central",
+        },
+    }}
+    agent: AgentProvider{state: agent_state.copy()}
+    #Context(interaction: agent) {
+        summary: run_release_flow()
+        print("agent_summary={summary}")
+    }
+    loop call in agent_state.guard_read().value.tool_calls { print("agent_tool={call}") }
+
+    // 4. Outer scope restores default TerminalInteraction.
+    restored: if context.interaction == {
+        .TerminalInteraction(_) -> true
+        else -> false
+    }
+    print("restored_terminal={restored}")
+    Ok()
+}

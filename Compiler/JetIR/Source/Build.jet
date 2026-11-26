@@ -1832,7 +1832,7 @@ ir_module_for: fn(p: IRProgram) -> IRModule Never! {
     if p.checks.quiet_exports.len() > 0 {
         m.quiet_exports = p.checks.quiet_exports
         m.quiet_stops = p.checks.quiet_stops
-    } else { m.quiet_routes = p.checks.quiet_routes.copy() }
+    } else { m.quiet_routes = p.checks.quiet_routes }
     m
 }
 
@@ -1919,19 +1919,14 @@ ir_keyed_nominals: fn(p: IRProgram, ty: Type) -> Type Never! {
         .List(inner) -> Type.List{element: ir_keyed_nominals(p, inner)}
         .Shared(inner) -> Type.Shared{inner: ir_keyed_nominals(p, inner)}
         .Option(inner) -> Type.Option{inner: ir_keyed_nominals(p, inner)}
-        // copy: `key_span` is a payload of read parameter `ty`; field `key_span` of the new Type.Map owns this one
-        .Map(key, key_span, value) -> Type.Map{key: ir_keyed_nominals(p, key), key_span: key_span.copy(), value: ir_keyed_nominals(p, value)}
+        .Map(key, key_span, value) -> Type.Map{key: ir_keyed_nominals(p, key), key_span: key_span, value: ir_keyed_nominals(p, value)}
         .Result(ok, err) -> Type.Result{ok: ir_keyed_nominals(p, ok), err: ir_keyed_nominals(p, err)}
-        // copy: `len` is a payload of read parameter `ty`; field `len` of the new Type.FixedList owns this one
-        .FixedList(elem, len) -> Type.FixedList{elem: ir_keyed_nominals(p, elem), len: len.copy()}
-        // copy: `marker` is a payload of read parameter `ty`; field `marker` of the new Type.Tagged owns this one
-        .Tagged(marker, inner) -> Type.Tagged{marker: marker.copy(), inner: ir_keyed_nominals(p, inner)}
+        .FixedList(elem, len) -> Type.FixedList{elem: ir_keyed_nominals(p, elem), len: len}
+        .Tagged(marker, inner) -> Type.Tagged{marker: marker, inner: ir_keyed_nominals(p, inner)}
         .Union(members) -> Type.Union{members: loop member in members -> ir_keyed_nominals(p, member)}
         .Case(name, payload) -> Type.Case{name: name, payload: ir_keyed_nominals(p, payload)}
         .Tuple(fields) -> Type.Tuple{fields: loop field in fields -> TypeTupleField{name: field.name, ty: ir_keyed_nominals(p, field.ty)}}
-        // copy: a type with no nominal head is returned as a new tree; the
-        // caller keeps the read parameter.
-        .Int | .Float | .Bool | .String | .Char | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Quantity(_, _) | .Measure(_) -> ty.copy()
+        .Int | .Float | .Bool | .String | .Char | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Quantity(_, _) | .Measure(_) -> ty
     }
 }
 
@@ -1981,7 +1976,6 @@ ir_function_row_id: fn(m: ^IRModule, p: IRProgram, row: Int, type_args: [Type]) 
     // An instance binds every one of its type parameters.
     if type_args.len() != ir_generic_names(p, p.functions[row]).len() -> return None
     spelled: loop arg in type_args -> type_carrier_identity(arg)
-    concrete: type_args.copy()
     instance: "{p.functions[row].key}<{spelled.join(", ")}>"
     if name_column_value(m.instances_keys, m.instances, instance) == .Val(known) {
         return Val(known)
@@ -1993,7 +1987,7 @@ ir_function_row_id: fn(m: ^IRModule, p: IRProgram, row: Int, type_args: [Type]) 
     m.functions.push(made)
     ir_function_bind(m, instance, id)
     name_column_set(m.instances_keys, m.instances, instance, id)
-    m.queue.push(IRQueued{row: row, id: id, args: concrete})
+    m.queue.push(IRQueued{row: row, id: id, args: type_args})
     Val(id)
 }
 
@@ -2098,7 +2092,7 @@ ir_call_return: fn(p: IRProgram, b: IRBuilder, row: Int, type_args: [Type], span
 // sema's row for it (IRInstance). None when sema published no row for a type
 // that names one of the instance's type parameters.
 ir_fact_type: fn(p: IRProgram, b: IRBuilder, ty: Type) -> Type? Never! {
-    if b.instance.names.len() == 0 -> return Val(ty.copy())
+    if b.instance.names.len() == 0 -> return Val(ty)
     Val(sema_inference_substitute_type(ty, b.instance.names, b.instance.args))
 }
 
@@ -2129,7 +2123,7 @@ ir_fact_failure: fn(p: IRProgram, b: ^IRBuilder, failure: TFailureCarrier, span:
 // Error conversion `conversion` of a `?` with each type ir_fact reads.
 ir_fact_conversion: fn(p: IRProgram, b: ^IRBuilder, conversion: TTryConvert, span: Span) -> TTryConvert Never! {
     if conversion == .Typed(fn_name, source, target) {
-        return TTryConvert.Typed{fn_name: fn_name.copy(), source: ir_fact(p, b, source, span), target: ir_fact(p, b, target, span)}
+        return TTryConvert.Typed{fn_name: fn_name, source: ir_fact(p, b, source, span), target: ir_fact(p, b, target, span)}
     }
     conversion.copy()
 }
@@ -2190,7 +2184,7 @@ ir_build_program: fn(functions: ^^[FnBody], decls: DeclTable, symbols: ^^SymbolT
         return IRBuildResult{program: ir_module_for(p), failures: failures}
     }
     p.entry = row
-    ^roots: [IRWaveJob]{IRWaveJob{key: p.functions[row].key.copy(), row: row, args: [Type]{}, lambda: -1, part: -1, local: -1}}
+    ^roots: [IRWaveJob]{IRWaveJob{key: p.functions[row].key, row: row, args: [Type]{}, lambda: -1, part: -1, local: -1}}
     ^kept_rows: [Int]{}
     if p.checks.keep {
         loop kept in 0..<p.functions.len() {
@@ -2372,7 +2366,7 @@ ir_build_held_root: fn(program: ^^IRProgram, root: ^^FnBody, text: String, threa
     // copy: the build moved the program's Interner into the merged module,
     // whose lowering reads it, and the held program's next check and build
     // read it too: a superset of the one it held, as IR-made types append.
-    kept.program.interner = kept.result.program.interner[0].copy()
+    kept.program.interner = kept.result.program.interner[0]
     kept
 }
 
@@ -2735,8 +2729,17 @@ ir_keep_failures: fn(failures: ^[IRBuildFailure], b: IRBuilder, key: String, nam
         failures.push(IRBuildFailure{key: key.copy(), name: name.copy(), message: row.message.copy(), source_file: source_file.copy(), span: if row.span.end > 0 -> row.span else -> whole})
     }
     if b.error != "" {
-        failures.push(IRBuildFailure{key: key.copy(), name: name.copy(), message: b.error.copy(), source_file: source_file.copy(), span: if b.error_span.end > 0 -> b.error_span else -> whole})
+        failures.push(IRBuildFailure{key: key, name: name, message: b.error, source_file: source_file, span: if b.error_span.end > 0 -> b.error_span else -> whole})
     }
+}
+
+// Reserves a module function slot for a generated helper so its builder can
+// take ownership of the fresh IRFunction directly without copying the header.
+ir_reserve_slot: fn(m: ^IRModule, key: String) -> Int Never! {
+    id: m.functions.len()
+    m.functions.push(ir_function_new("", "", "", "", 0))
+    ir_function_bind(m, key, id)
+    id
 }
 
 ir_builder_new: fn(f: ^^IRFunction) -> IRBuilder Never! {
@@ -3151,7 +3154,7 @@ ir_bind_pending: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder) Never! {
         }
         if !row.loaded -> ir_pending_load(m, b, row, row.slot)
         ir_close_note(m, p, b, row.slot, row.subject, IRPartStep{selector: row.selector, offset: row.offset})
-        b.bindings.push(IRBinding{name: row.name, slot: row.slot, carrier: if row.boxed -> -1 else -> row.subject})
+        b.bindings.push(IRBinding{name: row.name, slot: row.slot, write: row.window, carrier: if row.boxed -> -1 else -> row.subject})
     }
 }
 
@@ -4807,7 +4810,7 @@ ir_alloc_row: fn(m: ^IRModule, p: IRProgram, row: Int, ty: Type) -> Int Never! {
 // (IRModule.alloc_held).
 ir_alloc_row_holding: fn(m: ^IRModule, p: IRProgram, row: Int, ty: Type, held: Int) -> Int Never! {
     if !m.alloc_types -> return row
-    ^layout: m.types[row].copy()
+    ^layout: m.types[row]
     layout.ty = ir_intern_tid(m, p, Type.Apply{name: IR_ALLOC_TYPE, args: [Type]{ir_untag(ty)}})
     interned: ir_intern_type(m, "{IR_ALLOC_TYPE}:{type_carrier_identity(ty)}", layout)
     if held >= 0 && m.alloc_held.get(interned) == None -> m.alloc_held[interned] = held

@@ -117,7 +117,7 @@ run: fn() {
             }
         }
         files.write_atomic(stop, "stop".bytes()) ?? panic("stop server")
-        _: client.close()
+        close(client)
         output: runner.join() ?? panic("server runner")
         assert(read_ok && prefix(response, "HTTP/1.1 ".bytes()))
         assert(time.instant() < started + 35s)

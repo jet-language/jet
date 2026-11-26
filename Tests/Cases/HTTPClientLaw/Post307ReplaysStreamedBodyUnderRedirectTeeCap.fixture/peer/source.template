@@ -55,7 +55,7 @@ run: fn() {
         if got >= 65536 -> seen_first = true
     }
     first.write_bytes("HTTP/1.1 307 Temporary Redirect{PEER_CRLF}Location: /to{PEER_CRLF}Content-Length: 0{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}".bytes()) ?? panic("response write")
-    first.close() ?? panic("close first")
+    close(first)
     ^second: listener.accept() ?? panic("replay accept")
     replay: request_head(second)
     assert(prefix(replay, "POST /to HTTP/1.1{PEER_CRLF}".bytes()))

@@ -1,0 +1,20 @@
+default_terminal=true
+default_non_tty_guided=true
+script_summary=payments/prod/confirmed=true/token_len=6/region=us-west
+nested_answer=override
+worker_answer=task-reply
+script_event=ask(Service: )
+script_event=choose(Environment:, [staging, prod])
+script_event=confirm(Ship payments to prod?)
+script_event=secret(API token: )
+script_event=progress(Deploying payments to prod)
+script_event=ask(region (target region): )
+script_event=ask(Worker: )
+agent_summary=search/staging/confirmed=true/token_len=9/region=eu-central
+agent_tool={"tool":"interaction.ask","prompt":"Service: "}
+agent_tool={"tool":"interaction.choose","prompt":"Environment:","options":["staging","prod"]}
+agent_tool={"tool":"interaction.confirm","prompt":"Ship search to staging?"}
+agent_tool={"tool":"interaction.secret","prompt":"API token: "}
+agent_tool={"tool":"interaction.progress","label":"Deploying search to staging"}
+agent_tool={"tool":"interaction.ask","prompt":"region (target region): "}
+restored_terminal=true

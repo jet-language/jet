@@ -256,14 +256,14 @@ jet_cli_build_package_as: fn(file: String, color: Bool, options: BuildOptions, b
             ^scope: JetDriverBuildQueryScope{next_session_id: 1}
             moment_hooks = jet_driver_moment_hooks(snapshot)
             ^query_request: request.move()
-            query_request.build_args = build_args.copy()
+            query_request.build_args = build_args
             query_request.trace_sink = jet_cli_trace_boxed(trace_sink)
             // The run's `--gate` flags open their audited gates for
             // `build: fn`, as they do a compile's.
-            query_request.gate_set.allowed = options.gates.copy()
+            query_request.gate_set.allowed = options.gates
             log: Shared{JetDriverComptimeInputLog{records: [JetDriverComptimeInputRecord]{}}}
-            // copy: the build query records into the one shared log; this build reads it back.
-            query_request.comptime_input_log = Val(log.copy())
+            // The build query records into the one shared log; this build reads it back.
+            query_request.comptime_input_log = Val(log)
             response: jet_driver_query_build_plan(query_request, scope)
             build_reads = jet_cli_comptime_inputs_read(log)
             ^query: response.query.move()
@@ -293,10 +293,10 @@ jet_cli_build_package_as: fn(file: String, color: Bool, options: BuildOptions, b
                     generated = build_plan_generated(plan)
                     ^keyed: response.request.move()
                     if options.profile != "" -> keyed.profile = options.profile
-                    keyed.setting_overrides = options.settings.copy()
-                    if jet_cli_entry_lock(snapshot) == .Val(lock) {
-                        // copy: `lock` is a payload view of the loaded lock.
-                        keyed.build_contributions = lock.build_contributions.copy()
+                    keyed.setting_overrides = options.settings
+                    entry_lock: jet_cli_entry_lock(snapshot)
+                    if entry_lock.move() == .Val(lock) {
+                        keyed.build_contributions = lock.build_contributions
                     }
                     settings_request = Val(keyed.move())
                     // `query` reports no failure past this branch.
@@ -343,7 +343,7 @@ jet_cli_build_package_as: fn(file: String, color: Bool, options: BuildOptions, b
     selected_options.locked = locked
     // Resolving drops the options' other fields; the `--set` writers ride on
     // to every target compile (jet_cli_compile_executable).
-    selected_options.settings = options.settings.copy()
+    selected_options.settings = options.settings
     // A web build is one entry's `app.*` files (BuildWeb.jet), so a package's
     // build targets are built native only.
     if build_options_value(selected_options, "os") == "web" {
@@ -430,7 +430,7 @@ jet_cli_build_package_as: fn(file: String, color: Bool, options: BuildOptions, b
     if selected.executables.len() == 0 {
         source: build_files.read(file) ?? ""
         if jet_cli_top_level_function_lines(source, "run").len() > 0 {
-            output = jet_cli_compile_target(file, jet_cli_stem(file), source, [String]{}, target_generated, color, selected_options.copy(), threads, invocation, trace_sink)
+            output = jet_cli_compile_target(file, jet_cli_stem(file), source, [String]{}, target_generated, color, selected_options.move(), threads, invocation, trace_sink)
             if output.exit_code != JET_DRIVER_EXIT_OK -> return output
         }
     }
@@ -505,14 +505,12 @@ jet_cli_action_output_paths: fn(produced: [String]) -> [String] Never! {
 
 // What each action output `produced` names holds under `root` now.
 jet_cli_action_outputs_snapshot: fn(root: String, produced: [String]) -[FS]> [JetCLIActionOutput] Never! {
-    ^outputs: [JetCLIActionOutput]{}
-    loop path in jet_cli_action_output_paths(produced) {
+    loop path in jet_cli_action_output_paths(produced) -> {
         full: jet_cli_entry_join(root, path)
         present: build_files.is_file(full)
         bytes: if present -> build_files.read_bytes(full) ?? [U8]{} else -> [U8]{}
-        outputs.push(JetCLIActionOutput{path: path.copy(), present: present, bytes: bytes})
+        JetCLIActionOutput{path: path, present: present, bytes: bytes}
     }
-    outputs
 }
 
 // Put each snapshotted action output back: its old bytes, or no file. One
@@ -538,7 +536,7 @@ jet_cli_action_output_lock_rows: fn(root: String, produced: [String]) -[FS]> [Co
     ^rows: [ComptimeInput]{}
     loop path in jet_cli_action_output_paths(produced) {
         bytes: build_files.read_bytes(jet_cli_entry_join(root, path)) ?? next
-        rows.push(ComptimeInput{path: path.copy(), hash: "sha256:{pkg_sha256_hex(bytes)}"})
+        rows.push(ComptimeInput{path: path, hash: "sha256:{pkg_sha256_hex(bytes)}"})
     }
     rows
 }
@@ -546,7 +544,8 @@ jet_cli_action_output_lock_rows: fn(root: String, produced: [String]) -[FS]> [Co
 // The first of `outputs` the unified lock under `root` doesn't hold with the
 // same hash.
 jet_cli_locked_action_drift: fn(root: String, outputs: [ComptimeInput]) -[FS]> String? Never! {
-    recorded: if pkg_lock_load(root) == .Val(lock) -> lock.comptime_inputs.copy() else -> [ComptimeInput]{}
+    loaded: pkg_lock_load(root)
+    recorded: if loaded.move() == .Val(lock) -> lock.comptime_inputs else -> [ComptimeInput]{}
     loop output in outputs {
         if !recorded.contains(output) -> return Val(output.path.copy())
     }
@@ -560,7 +559,8 @@ jet_cli_locked_action_drift: fn(root: String, outputs: [ComptimeInput]) -[FS]> S
 // additive, so a hand-written file is never overwritten or shadowed. The
 // report points at the `b.generate` call in the build file `file`.
 jet_cli_generated_shadow: fn(file: String, root: String, generated: [BuildSessionGeneratedModule], color: Bool) -[FS]> JetDriverVerbOutput? Never! {
-    recorded: if pkg_lock_load(root) == .Val(lock) -> lock.comptime_inputs.copy() else -> [ComptimeInput]{}
+    loaded: pkg_lock_load(root)
+    recorded: if loaded.move() == .Val(lock) -> lock.comptime_inputs else -> [ComptimeInput]{}
     loop source_file in generated {
         path: jet_cli_entry_join(root, source_file.path)
         ^prefix: root.copy()
@@ -709,10 +709,9 @@ jet_cli_workspace_index_of: fn(file: String, color: Bool) -[FS]> JetCLIWorkspace
 // `members` with each after the members its manifest names as path `deps:`,
 // index order among those ready; members in a dependency cycle keep index order.
 jet_cli_workspace_build_order: fn(root: String, members: [JetCLIWorkspaceMember]) -[FS, Env]> [JetCLIWorkspaceMember] Never! {
-    ^directories: [String]{}
-    loop member in members {
+    directories: loop member in members -> {
         member_root: jet_cli_entry_join(root, member.path)
-        directories.push(build_files.realpath(member_root) ?? member_root)
+        build_files.realpath(member_root) ?? member_root
     }
     needs: (loop directory in directories -> jet_cli_workspace_member_needs(directory, directories))
     ^placed: (loop _ in directories -> false)
@@ -832,8 +831,7 @@ jet_cli_root_package_facts: fn(root: JetDriverAuthorizedSourceRoot) -> PackageFa
                     return None
                 }
             }
-            // copy: `carrier` is a payload view of `inline`.
-            if inline == .Val(carrier) -> return Val(carrier.facts.copy())
+            if inline.move() == .Val(carrier) -> return Val(carrier.facts.move())
         }
     }
     None
@@ -891,14 +889,13 @@ jet_cli_contributed_request: fn(owned_request: ^^JetDriverCompileRequest, load_g
     package: settings ?? return {request: contributed.move(), refusal: None}
     plan: query.plan ?? return {request: contributed.move(), refusal: None}
     recorded: jet_cli_record_build_contributions(plan, package, contributed, color)
-    if recorded == .Val(refusal) {
-        // copy: `refusal` is a payload view of `recorded`.
-        return JetCLIContributedRequest{request: contributed.move(), refusal: Val(refusal.copy())}
+    if recorded.move() == .Val(refusal) {
+        return JetCLIContributedRequest{request: contributed.move(), refusal: Val(refusal)}
     }
-    if pkg_lock_load(package.root) == .Val(lock) {
-        // copy: `lock` is a payload view of the loaded lock.
-        contributed.build_stamp = lock.build_stamp.copy()
-        contributed.build_contributions = lock.build_contributions.copy()
+    loaded: pkg_lock_load(package.root)
+    if loaded.move() == .Val(lock) {
+        contributed.build_stamp = lock.build_stamp
+        contributed.build_contributions = lock.build_contributions
     }
     {request: contributed.move(), refusal: None}
 }
@@ -964,12 +961,12 @@ jet_cli_record_build_contributions: fn(plan: BuildSessionPlan, package: JetCLISe
         value: jet_cli_build_fact_value(contribution.value) ?? return Val(jet_cli_ice("`build: fn` contributed `{contribution.key}` a value no setting holds"))
         facts.push(
             FactContribution{
-                key: contribution.key.copy(),
+                key: contribution.key,
                 value: value,
                 scope: SourceScope.Function,
                 layer: ContributionLayer.Environment,
                 span: Span{start: contribution.start, end: contribution.end},
-                source: contribution.source.copy(),
+                source: contribution.source,
                 reason: Val("computed by fn build"),
             },
         )
@@ -998,8 +995,8 @@ jet_cli_build_fact_value: fn(value: BuildSessionValue) -> FactValue? Never! {
         .Bool(flag) -> Val(FactValue.Bool{value: flag})
         .Int(number) -> Val(FactValue.Int{value: number})
         .Char(character) -> Val(FactValue.Char{value: character})
-        .Text(text) -> Val(FactValue.Text{value: text.copy()})
-        .Enum(variant) -> Val(FactValue.Enum{variant: variant.copy()})
+        .Text(text) -> Val(FactValue.Text{value: text})
+        .Enum(variant) -> Val(FactValue.Enum{variant: variant})
         .Unit | .List(_) | .Handle(_, _, _) | .Span(_, _, _) -> None
     }
 }
@@ -1007,9 +1004,8 @@ jet_cli_build_fact_value: fn(value: BuildSessionValue) -> FactValue? Never! {
 // A lock check or update the project refused: its registered diagnostic,
 // carried for `--json` (E3512 for a locked build's drift).
 jet_cli_lock_refusal: fn(error: LockError, color: Bool) -> JetDriverVerbOutput Never! {
-    // copy: `diagnostic` is a payload view of `error`.
     if error == .Reported(diagnostic) {
-        return jet_cli_lock_reports([Diagnostic]{diagnostic.copy()}, color)
+        return jet_cli_lock_reports([Diagnostic]{diagnostic}, color)
     }
     jet_cli_ice("the project lock refused the build: {error.message()}")
 }
@@ -1017,7 +1013,7 @@ jet_cli_lock_refusal: fn(error: LockError, color: Bool) -> JetDriverVerbOutput N
 // The registered diagnostics a locked build stopped on, every one in one
 // report, carried for `--json`.
 jet_cli_lock_reports: fn(reports: [Diagnostic], color: Bool) -> JetDriverVerbOutput Never! {
-    JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all("", "", reports, color), exit_code: JET_DRIVER_EXIT_USER_ERROR, failure: Val(JetDriverFailure{reports: reports.copy(), notice: ""})}
+    JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all("", "", reports, color), exit_code: JET_DRIVER_EXIT_USER_ERROR, failure: Val(JetDriverFailure{reports: reports, notice: ""})}
 }
 
 // After a build's or a run's checks pass: record each dependency's inferred
@@ -1060,7 +1056,7 @@ jet_cli_lock_comptime_inputs: fn(file: String, result: JetDriverCompileResult, l
     recorded: JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     if locked || result.comptime_inputs.len() == 0 -> return recorded
     root: jet_cli_manifest_root(jet_cli_parent(file) ?? ".") ?? return recorded
-    physical: build_files.realpath(root) ?? root.copy()
+    physical: build_files.realpath(root) ?? root
     inputs: jet_cli_comptime_lock_rows(physical, result.comptime_inputs)
     if inputs.len() == 0 -> return recorded
     stamp: pkg_lock_build_stamp(root, false) ?? return jet_cli_lock_refusal(err, color)
@@ -1097,8 +1093,7 @@ jet_cli_build_code_options: fn(file: String, set: [BuildSessionOption]) -> [Buil
     if set.len() == 0 -> return choices
     directory: jet_cli_parent(file) ?? "."
     root: jet_cli_manifest_root(directory) ?? directory
-    ^relative: file.copy()
-    if file.starts_with("{root}/") -> relative = file.slice(root.len() + 1..<file.len())
+    relative: if file.starts_with("{root}/") -> file.slice(root.len() + 1..<file.len()) else -> file
     // A dependency's site (`../tool/tool.jet`) resolves against the root's
     // canonical path, which a relative root (`handed`, `.`) is not.
     physical: build_files.realpath(root) ?? root

@@ -103,7 +103,7 @@ run: fn() {
     ann_client.send_text("read") ?? panic("ann read")
     print("ann received: {texts_until(ann_client, "sees")}")
 
-    ben_client.close(1000, "") ?? panic("close ben")
+    ben_client.finish(1000, "") ?? panic("close ben")
     print("ben closed task 1")
     // Only the leave signal of Ben's closed connection re-runs Ann's binding,
     // so this event follows Ben's handler's return.
@@ -116,7 +116,7 @@ run: fn() {
     }
     print("present at /tasks/1: [{present.join(", ")}]")
 
-    ann_client.close(1000, "") ?? panic("close ann")
+    ann_client.finish(1000, "") ?? panic("close ann")
     grace: 100ms
     listening.shutdown(grace) ?? panic("shutdown")
     _: serving.join() ?? panic("server join")

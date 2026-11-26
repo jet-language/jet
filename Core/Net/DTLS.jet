@@ -189,9 +189,9 @@ DTLSSession: struct {
     }
 
     // Sends `close_notify`, frees the engine, wipes its buffers, and closes
-    // the underlying UDP socket when the session owns it. Closing an already
-    // closed session succeeds.
-    close: fn(self) -[Net, Time.Wait]> IOError! {
+    // the underlying UDP socket when the session owns it. Finishing an already
+    // finished session succeeds.
+    finish: fn(self) -[Net, Time.Wait]> IOError! {
         state: session_state(self) ?? return Ok()
         ^guard: state.guard_edit()
         if guard.value.closed -> return Ok()
@@ -254,6 +254,22 @@ DTLSSession: struct {
         if guard.value.closed -> return 0
         ssltls.ssl_get_max_out_record_payload(guard.value.ssl) ?? 0
     }
+
+    // Frees the DTLS engine, wipes its buffers, and releases the session
+    // without failing. Call `finish()` first to send `close_notify` and
+    // observe I/O errors.
+    impl Close {
+        close: fn(^^self) Never! {
+            state: session_state(self) ?? return
+            ^guard: state.guard_edit()
+            if guard.value.closed {
+                return
+            }
+            guard.value.closed = true
+            ssltls.ssl_free(guard.value.ssl)
+            ssldefs.ssl_wipe(guard.value.buffer)
+        }
+    }
 }
 
 // A bound UDP DTLS 1.2 server listener with a shared stateless cookie key.
@@ -277,13 +293,26 @@ DTLSListener: struct {
     }
 
     // Closes the listener's UDP socket and wipes the cookie key. Idempotent.
-    close: fn(self) -[Net]> IOError! {
+    finish: fn(self) -[Net]> IOError! {
         state: listener_state(self) ?? return Ok()
         ^guard: state.guard_edit()
         if guard.value.closed -> return Ok()
         guard.value.closed = true
         dtls_listener_release(guard.value)
         Ok()
+    }
+
+    // Wipes the cookie key and releases the listener without failing.
+    impl Close {
+        close: fn(^^self) Never! {
+            state: listener_state(self) ?? return
+            ^guard: state.guard_edit()
+            if guard.value.closed {
+                return
+            }
+            guard.value.closed = true
+            dtls_cookie_release(guard.value.cookie)
+        }
     }
 }
 
@@ -511,7 +540,7 @@ write: fn(session: DTLSSession, text: String) -[Net, Time.Wait]> IOError! {
     session.write(text, deadline: dtls_forever())
 }
 
-close: fn(session: DTLSSession) -[Net, Time.Wait]> IOError! { session.close() }
+close: fn(session: DTLSSession) -[Net, Time.Wait]> IOError! { session.finish() }
 
 // ---- config helpers ---------------------------------------------------------
 
@@ -1754,10 +1783,10 @@ priv dtls_test_released: fn(dtls: DTLSState) -> Bool Never! {
         sess.write("echo:{msg}", deadline: budget) ?? panic("server write: {err}")
         eof: sess.read_bytes(4096, deadline: budget) ?? panic("server eof: {err}")
         assert_eq(eof.len(), 0)
-        sess.close() ?? panic("server close: {err}")
-        sess.close() ?? panic("server second close: {err}")
-        listener.close() ?? panic("listener close: {err}")
-        listener.close() ?? panic("listener second close: {err}")
+        sess.finish() ?? panic("server finish: {err}")
+        sess.finish() ?? panic("server second finish: {err}")
+        listener.finish() ?? panic("listener finish: {err}")
+        listener.finish() ?? panic("listener second finish: {err}")
     }
     session: connect(addr, server_name: "localhost", config: cli_cfg, deadline: budget) ?? panic("connect: {err}")
     assert_eq(session.protocol_version(), "DTLSv1.2")
@@ -1769,7 +1798,7 @@ priv dtls_test_released: fn(dtls: DTLSState) -> Bool Never! {
     session.write("hello dtls", deadline: budget) ?? panic("client write: {err}")
     reply: session.read(4096, deadline: budget) ?? panic("client read: {err}")
     assert_eq(reply, "echo:hello dtls")
-    session.close() ?? panic("client close: {err}")
-    session.close() ?? panic("client second close: {err}")
+    session.finish() ?? panic("client finish: {err}")
+    session.finish() ?? panic("client second finish: {err}")
     serving.join() ?? panic("server task: {err}")
 }

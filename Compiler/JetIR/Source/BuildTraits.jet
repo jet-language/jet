@@ -376,10 +376,8 @@ ir_trait_last_helper: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int) ->
     helper_key: "#trait.last<{ir_row_key(m, row)}>"
     known: ir_keyed_function(m, helper_key) ?? -1
     if known >= 0 -> return known
-    id: m.functions.len()
-    m.functions.push(ir_hashed_function(IR_LAST_OWNER, helper_key, "jet_ir_last_", "", 0))
-    ir_function_bind(m, helper_key, id)
-    ^a: ir_builder_new(m.functions[id].copy())
+    id: ir_reserve_slot(m, helper_key)
+    ^a: ir_builder_new(ir_hashed_function(IR_LAST_OWNER, helper_key, "jet_ir_last_", "", 0))
     at: ir_new_slot(a, row, IRSlotKind.Param, ir_intern_name(m, "value"))
     ^owners: [Type]{}
     if ir_untag(ir_row_ty(m, p, row)) == .TraitObject(bounds) {

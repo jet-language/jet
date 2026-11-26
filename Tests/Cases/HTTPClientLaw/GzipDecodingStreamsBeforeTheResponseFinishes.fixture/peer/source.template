@@ -53,7 +53,7 @@ run: fn() {
     // Original2sec decoder-buffering signal deadline; no suffix until the exact hello chunk was delivered.
     _: signal.accept(deadline: 2s) ?? panic("decoder buffered the unfinished gzip response")
     stream.write_bytes(suffix) ?? panic("gzip suffix")
-    _: stream.close()
+    close(stream)
     ^second: listener.accept() ?? panic("br accept")
     _: request_head(second)
     second.write_bytes("HTTP/1.1 200 OK{PEER_CRLF}Content-Encoding: br{PEER_CRLF}Content-Length: 2{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}ok".bytes()) ?? panic("response write")

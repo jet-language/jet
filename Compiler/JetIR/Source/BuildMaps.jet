@@ -152,11 +152,9 @@ ir_map_helper: fn(m: ^IRModule, p: IRProgram, map_row: Int, name: String) -> Int
     key: "{name}<{type_carrier_identity(ir_row_ty(m, p, map_row))}>"
     if ir_keyed_function(m, key) == .Val(known) -> return Val(known)
     shape: ir_keyed_shape(m, p, map_row) ?? return None
-    id: m.functions.len()
+    id: ir_reserve_slot(m, key)
     symbol: ir_map_helper_symbol(name)
-    m.functions.push(ir_hashed_function(name, key, "jet_ir_map_{symbol}_", "", 0))
-    ir_function_bind(m, key, id)
-    ^a: ir_builder_new(m.functions[id].copy())
+    ^a: ir_builder_new(ir_hashed_function(name, key, "jet_ir_map_{symbol}_", "", 0))
     map: ir_new_slot(a, map_row, IRSlotKind.Param, ir_intern_name(m, "map"))
     if name == "map.order" -> ir_map_order_body(m, p, a, shape, map_row, map) else if name == "map.settle" {
         ir_map_settle_body(m, p, a, shape, map_row, map)
@@ -2168,11 +2166,9 @@ ir_map_rest_glue: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, shape:
         name_column_set(m.close_glue_keys, m.close_glue, key, -1)
         return -1
     }
-    id: m.functions.len()
-    m.functions.push(ir_hashed_function("close", key, "jet_ir_close_", "", 0))
-    ir_function_bind(m, key, id)
+    id: ir_reserve_slot(m, key)
     name_column_set(m.close_glue_keys, m.close_glue, key, id)
-    ^a: ir_builder_new(m.functions[id].copy())
+    ^a: ir_builder_new(ir_hashed_function("close", key, "jet_ir_close_", "", 0))
     value_name: ir_intern_name(m, "value")
     value: ir_new_slot(a, row, IRSlotKind.Param, value_name)
     length: ir_load_word(m, a, value, 0)

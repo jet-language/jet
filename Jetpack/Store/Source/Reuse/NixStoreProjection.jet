@@ -310,11 +310,13 @@ OpenedNixProjection: struct {
     bindings: [NixProjectionBinding],
 }
 
-// Pin each source no-follow. A held directory reaches the child at its reserved
-// descriptor; a single-file object, whose identity validation re-checks, and a
-// symlink root, whose target is the witness, project as their canonical source.
-// Other hosts project the verified sources directly.
-store_reuse_open_nix_projection_sources: fn(projections: [NixStoreProjection]) -> OpenedNixProjection StoreError! {
+// Pin each source no-follow, reusing refcounted handles held in
+// `verification` so shared closure objects open at most one descriptor per
+// invocation. A held directory reaches the child at its reserved descriptor;
+// a single-file object, whose identity validation re-checks, and a symlink
+// root, whose target is the witness, project as their canonical source. Other
+// hosts project the verified sources directly.
+store_reuse_open_nix_projection_sources: fn(verification: StoreVerification, projections: [NixStoreProjection]) -> OpenedNixProjection StoreError! {
     ^stable: [NixProjectionPath]{}
     ^bindings: [NixProjectionBinding]{}
     if sys.name() != "linux" {
@@ -331,22 +333,79 @@ store_reuse_open_nix_projection_sources: fn(projections: [NixStoreProjection]) -
         if info.is_symlink {
             target: files.read_link(projection.source) ?? return Err(StoreError.Other("Nix output `{projection.logical}` Hangar object `{projection.digest}` is unavailable: {err}"))
             stable.push(NixProjectionPath{logical: projection.logical, source: LeaseText.plain(projection.source)})
-            bindings.push(NixProjectionBinding{logical: projection.logical, digest: projection.digest, primary: projection.primary, source: projection.source, handle: None, pinned_id: None, pinned_dir: false, symlink_target: Val(target)})
+            bindings.push(NixProjectionBinding{logical: projection.logical, digest: projection.digest, primary: projection.primary, source: projection.source, handle: None, pooled: false, pinned_id: None, pinned_dir: false, symlink_target: Val(target)})
             next
         }
-        handle: store_reuse_open_projection_handle(projection, info.is_dir)
-        opened: store_reuse_projection_handle_stat(handle)
-        if opened.id != info.id {
-            return Err(StoreError.Other("Nix projection source `{projection.source}` changed while opening"))
-        }
-        source: if handle == {
-            .Directory(held) -> held.child_text("")
-            .File(_) -> LeaseText.plain(projection.source)
-        }
+        acquired: store_reuse_acquire_pooled_projection(verification, projection, info)
+        source: store_reuse_projection_shared_source(acquired.handle, projection.source)
         stable.push(NixProjectionPath{logical: projection.logical, source: source})
-        bindings.push(NixProjectionBinding{logical: projection.logical, digest: projection.digest, primary: projection.primary, source: projection.source, handle: Val(handle), pinned_id: Val(opened.id), pinned_dir: info.is_dir, symlink_target: None})
+        bindings.push(NixProjectionBinding{logical: projection.logical, digest: projection.digest, primary: projection.primary, source: projection.source, handle: Val(acquired.handle), pooled: acquired.pooled, pinned_id: Val(info.id), pinned_dir: info.is_dir, symlink_target: None})
     }
     Ok(OpenedNixProjection{stable: stable, bindings: bindings})
+}
+
+store_reuse_projection_shared_source: fn(shared: Shared<ProjectionHandle>, fallback: String) -> LeaseText Never! {
+    guard: shared.guard_read()
+    if guard.value == {
+        .Directory(held) -> held.child_text("")
+        .File(_) -> LeaseText.plain(fallback)
+    }
+}
+
+// Check whether `verification` already holds a live pooled handle for `source`
+// with the same file identity and kind, incrementing its refcount if so.
+store_reuse_try_pooled_projection: fn(verification: StoreVerification, source: String, info: Stat) -> Shared<ProjectionHandle>? Never! {
+    state: verification.state
+    ^permit: state.guard_edit()
+    if permit.value.pinned_projections.get(source) == .Val(existing) {
+        if existing.id == info.id && existing.is_dir == info.is_dir {
+            shared: existing.handle
+            permit.value.pinned_projections[source] = PooledProjection{handle: existing.handle, id: existing.id, is_dir: existing.is_dir, refs: existing.refs + 1}
+            return Val(shared)
+        }
+    }
+    None
+}
+
+// Acquire a pinned handle for `projection`, reusing an existing refcounted
+// entry in `verification` when its path, file identity, and kind still match.
+store_reuse_acquire_pooled_projection: fn(verification: StoreVerification, projection: NixStoreProjection, info: Stat) -> {handle: Shared<ProjectionHandle>, pooled: Bool} StoreError! {
+    if store_reuse_try_pooled_projection(verification, projection.source, info) == .Val(shared) {
+        return Ok({handle: shared, pooled: true})
+    }
+    handle: store_reuse_open_projection_handle(projection, info.is_dir)
+    opened: store_reuse_projection_handle_stat(handle)
+    if opened.id != info.id {
+        return Err(StoreError.Other("Nix projection source `{projection.source}` changed while opening"))
+    }
+    shared: Shared{handle}
+    state: verification.state
+    ^permit: state.guard_edit()
+    if permit.value.pinned_projections.get(projection.source) == .Val(existing) {
+        if existing.id == info.id && existing.is_dir == info.is_dir {
+            reused: existing.handle
+            permit.value.pinned_projections[projection.source] = PooledProjection{handle: existing.handle, id: existing.id, is_dir: existing.is_dir, refs: existing.refs + 1}
+            return Ok({handle: reused, pooled: true})
+        }
+        return Ok({handle: shared, pooled: false})
+    }
+    permit.value.pinned_projections[projection.source] = PooledProjection{handle: shared, id: opened.id, is_dir: info.is_dir, refs: 1}
+    Ok({handle: shared, pooled: true})
+}
+
+// Decrement the refcount for a pooled projection handle on lease release and
+// drop the pool entry once no active lease references it.
+store_reuse_release_pooled_projection: fn(verification: StoreVerification, source: String, expected_id: FileID) Never! {
+    state: verification.state
+    ^permit: state.guard_edit()
+    if permit.value.pinned_projections.get(source) == .Val(existing) {
+        if existing.id != expected_id {
+            return
+        }
+        if existing.refs <= 1 -> _: permit.value.pinned_projections.remove(source) else {
+            permit.value.pinned_projections[source] = PooledProjection{handle: existing.handle, id: existing.id, is_dir: existing.is_dir, refs: existing.refs - 1}
+        }
+    }
 }
 
 // Open a projection source without following a final link.

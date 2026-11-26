@@ -34,10 +34,8 @@ ir_scope_guard_row: fn(m: ^IRModule, p: IRProgram, ty: Type) -> Int Never! {
     if ir_keyed_function(m, symbol) == None {
         // The function key is its symbol, so x64 resolves the row's drop
         // symbol to this module function.
-        id: m.functions.len()
-        m.functions.push(ir_function_new("scope.guard.drop", symbol, symbol, "", 0))
-        ir_function_bind(m, symbol, id)
-        ^a: ir_builder_new(m.functions[id].copy())
+        id: ir_reserve_slot(m, symbol)
+        ^a: ir_builder_new(ir_function_new("scope.guard.drop", symbol, symbol, "", 0))
         pointer_row: ir_pointer_row(m)
         guard: ir_new_slot(a, pointer_row, IRSlotKind.Param, ir_intern_name(m, "guard"))
         _: ir_call_closure(m, p, a, guard, [Int]{}, -1)
@@ -85,10 +83,8 @@ ir_closure_row: fn(m: ^IRModule, p: IRProgram, ty: Type) -> Int Never! {
     if ir_keyed_function(m, symbol) == None {
         // The function key is its symbol, so x64 resolves the row's drop
         // symbol to this module function.
-        id: m.functions.len()
-        m.functions.push(ir_function_new("closure.drop", symbol, symbol, "", 0))
-        ir_function_bind(m, symbol, id)
-        ^a: ir_builder_new(m.functions[id].copy())
+        id: ir_reserve_slot(m, symbol)
+        ^a: ir_builder_new(ir_function_new("closure.drop", symbol, symbol, "", 0))
         pointer_row: ir_pointer_row(m)
         boxed: ir_new_slot(a, pointer_row, IRSlotKind.Param, ir_intern_name(m, "boxed"))
         none: ir_word_const(m, a, 0)
@@ -192,10 +188,8 @@ ir_closure_release: fn(m: ^IRModule, p: IRProgram, bytes: Int, captures: [IRCapt
     key = "{key}>"
     known: ir_keyed_function(m, key) ?? -1
     if known >= 0 -> return known
-    id: m.functions.len()
-    m.functions.push(ir_hashed_function("closure.release", key, "jet_ir_closure_release_", "", 0))
-    ir_function_bind(m, key, id)
-    ^a: ir_builder_new(m.functions[id].copy())
+    id: ir_reserve_slot(m, key)
+    ^a: ir_builder_new(ir_hashed_function("closure.release", key, "jet_ir_closure_release_", "", 0))
     boxed: ir_new_slot(a, ir_pointer_row(m), IRSlotKind.Param, ir_intern_name(m, "boxed"))
     if unstarted.len() > 0 {
         word_row: ir_word_row(m)

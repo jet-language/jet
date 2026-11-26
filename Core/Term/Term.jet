@@ -321,33 +321,36 @@ eprint: fn(text: String) -[IO, Time.Wait]> Never! {
     _: rt.stdio_put_text("{text}\n", false, true)
 }
 
-ask: fn(prompt: String{""}) -[IO, Time.Wait]> String IOError! { TerminalInteraction{}.ask(prompt) }
+ask: fn(prompt: String{""}) -[IO, Time.Wait]> String IOError! { context.interaction.ask(prompt) }
 
 // jet_std_io_input: the prompt is written and stdout flushed, then one line
 // is read without its line ending; a closed stream reads as "".
 readline: fn(prompt: String{""}) -[IO, Time.Wait]> String IOError! {
-    TerminalInteraction{}.ask(prompt)
+    context.interaction.ask(prompt)
 }
 
-secret: fn(prompt: String) -[IO, Time.Wait]> String IOError! {
-    TerminalInteraction{}.secret(prompt)
-}
+secret: fn(prompt: String) -[IO, Time.Wait]> String IOError! { context.interaction.secret(prompt) }
 
 input_secret: fn(prompt: String) -[IO, Time.Wait]> String IOError! {
-    TerminalInteraction{}.secret(prompt)
+    context.interaction.secret(prompt)
 }
 
 // Guided prompt for a missing required CLI input: returns `None` when running
 // non-interactively on the default terminal provider (preserving exit-2 CLI
 // refusals), otherwise delegates to the active `Interaction` provider.
 prompt_guided: fn(name: String, help: String, choices: [String]) -[IO, Time.Wait]> String? IOError! {
-    if !rt.terminal8_stdin_tty() || !rt.terminal8_stdout_tty() -> return Ok(None)
+    provider: context.interaction
+    interactive: if provider == {
+        .TerminalInteraction(_) -> rt.terminal8_stdin_tty() && rt.terminal8_stdout_tty()
+        else -> true
+    }
+    if !interactive -> return Ok(None)
     label: if help.is_empty() -> "{name}: " else -> "{name} ({help}): "
     if choices.len() > 0 {
-        chosen: TerminalInteraction{}.choose(label, choices)
+        chosen: provider.choose(label, choices)
         return Ok(Val(chosen))
     }
-    answer: TerminalInteraction{}.ask(label)
+    answer: provider.ask(label)
     if answer.trim().is_empty() -> return Ok(None)
     Ok(Val(answer))
 }
@@ -414,10 +417,10 @@ binwrite: fn(path: String, bytes: [U8]) -[FS, IO, Time.Wait]> IOError! {
     core.files.write_bytes(path, bytes)
 }
 
-confirm: fn(prompt: String) -[IO, Time.Wait]> Bool Never! { TerminalInteraction{}.confirm(prompt) }
+confirm: fn(prompt: String) -[IO, Time.Wait]> Bool Never! { context.interaction.confirm(prompt) }
 
 choose: fn(prompt: String, options: [String]) -[IO, Time.Wait]> String IOError! {
-    TerminalInteraction{}.choose(prompt, options)
+    context.interaction.choose(prompt, options)
 }
 
 stdin: fn() -> StdinHandle Never! { StdinHandle{fd: 0} }
@@ -524,7 +527,7 @@ WinSize: struct {
     __progress_items<T>(items, description, template)
 }
 
-progress: fn(label: String) -[IO, Time.Wait]> IOError! { TerminalInteraction{}.progress(label) }
+progress: fn(label: String) -[IO, Time.Wait]> IOError! { context.interaction.progress(label) }
 
 decode_key: fn(raw: [U8], platform: Int) -> Key Never! {
     if platform == 0 || raw.len() == 0 -> return .Unknown
@@ -938,4 +941,203 @@ stdio_flush: fn(stderr: Bool) -[IO]> IOError! {
         .Err(_) -> {}
         .Ok(_) -> panic("a negative take must fail")
     }
+}
+
+priv TestScriptState: struct {
+    answers: [String],
+    cursor: Int,
+    confirm_result: Bool,
+    events: [String],
+}
+
+priv TestScriptProvider: struct {
+    state: Shared<TestScriptState>,
+
+    impl Interaction {
+        ask: fn(self, prompt: String) -[IO, Time.Wait]> String IOError! {
+            ^guard: self.state.guard_edit()
+            guard.value.events.push("ask:{prompt}")
+            if guard.value.cursor >= guard.value.answers.len() {
+                return Err(terminal_invalid("scripted answers exhausted"))
+            }
+            reply: guard.value.answers[guard.value.cursor].copy()
+            guard.value.cursor += 1
+            Ok(reply)
+        }
+
+        choose: fn(self, prompt: String, options: [String]) -[IO, Time.Wait]> String IOError! {
+            if options.len() == 0 -> return Err(terminal_invalid("choose needs at least one item"))
+            ^guard: self.state.guard_edit()
+            guard.value.events.push("choose:{prompt}:[{options.join(",")}]")
+            if guard.value.cursor >= guard.value.answers.len() -> return Ok(options[0].copy())
+            reply: guard.value.answers[guard.value.cursor].copy()
+            guard.value.cursor += 1
+            Ok(reply)
+        }
+
+        confirm: fn(self, prompt: String) -[IO, Time.Wait]> Bool Never! {
+            ^guard: self.state.guard_edit()
+            guard.value.events.push("confirm:{prompt}")
+            guard.value.confirm_result
+        }
+
+        secret: fn(self, prompt: String) -[IO, Time.Wait]> String IOError! {
+            ^guard: self.state.guard_edit()
+            guard.value.events.push("secret:{prompt}")
+            if guard.value.cursor >= guard.value.answers.len() {
+                return Err(terminal_invalid("scripted secret exhausted"))
+            }
+            reply: guard.value.answers[guard.value.cursor].copy()
+            guard.value.cursor += 1
+            Ok(reply)
+        }
+
+        progress: fn(self, label: String) -[IO, Time.Wait]> IOError! {
+            ^guard: self.state.guard_edit()
+            guard.value.events.push("progress:{label}")
+            Ok()
+        }
+    }
+}
+
+priv test_json_escape: fn(text: String) -> String Never! {
+    text.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
+}
+
+priv TestAgentState: struct {
+    calls: [String],
+    responses: [String:String],
+}
+
+priv TestAgentProvider: struct {
+    state: Shared<TestAgentState>,
+
+    impl Interaction {
+        ask: fn(self, prompt: String) -[IO, Time.Wait]> String IOError! {
+            ^guard: self.state.guard_edit()
+            guard.value.calls.push("{{\"tool\":\"interaction.ask\",\"prompt\":\"{test_json_escape(prompt)}\"}}")
+            Ok((guard.value.responses.get(prompt) ?? "default-ask").copy())
+        }
+
+        choose: fn(self, prompt: String, options: [String]) -[IO, Time.Wait]> String IOError! {
+            ^guard: self.state.guard_edit()
+            ^quoted: [String]{}
+            loop opt in options -> quoted.push("\"{test_json_escape(opt)}\"")
+            guard.value.calls.push("{{\"tool\":\"interaction.choose\",\"prompt\":\"{test_json_escape(prompt)}\",\"options\":[{quoted.join(",")}]}}")
+            Ok((guard.value.responses.get(prompt) ?? options[0]).copy())
+        }
+
+        confirm: fn(self, prompt: String) -[IO, Time.Wait]> Bool Never! {
+            ^guard: self.state.guard_edit()
+            guard.value.calls.push("{{\"tool\":\"interaction.confirm\",\"prompt\":\"{test_json_escape(prompt)}\"}}")
+            (guard.value.responses.get(prompt) ?? "false") == "true"
+        }
+
+        secret: fn(self, prompt: String) -[IO, Time.Wait]> String IOError! {
+            ^guard: self.state.guard_edit()
+            guard.value.calls.push("{{\"tool\":\"interaction.secret\",\"prompt\":\"{test_json_escape(prompt)}\"}}")
+            Ok((guard.value.responses.get(prompt) ?? "redacted-token").copy())
+        }
+
+        progress: fn(self, label: String) -[IO, Time.Wait]> IOError! {
+            ^guard: self.state.guard_edit()
+            guard.value.calls.push("{{\"tool\":\"interaction.progress\",\"label\":\"{test_json_escape(label)}\"}}")
+            Ok()
+        }
+    }
+}
+
+#Test("scripted interaction provider handles all prompts, nested scopes, tasks, and guided input") {
+    outer_state: Shared{TestScriptState{
+        answers: [String]{"alice", "bob", "prod", "tok-1", "tok-2", "us-east", "canary", "from-task"},
+        cursor: 0,
+        confirm_result: true,
+        events: [String]{},
+    }}
+    inner_state: Shared{TestScriptState{
+        answers: [String]{"inner-override"},
+        cursor: 0,
+        confirm_result: false,
+        events: [String]{},
+    }}
+    outer: TestScriptProvider{state: outer_state.copy()}
+    inner: TestScriptProvider{state: inner_state.copy()}
+    #Context(interaction: outer) {
+        assert_eq(ask("Name: ") ?? panic("ask"), "alice")
+        assert_eq(readline("Alias: ") ?? panic("readline"), "bob")
+        assert_eq(choose("Env:", [String]{"dev", "prod"}) ?? panic("choose"), "prod")
+        assert(confirm("Deploy?"))
+        assert_eq(secret("Token: ") ?? panic("secret"), "tok-1")
+        assert_eq(input_secret("Backup: ") ?? panic("input_secret"), "tok-2")
+        progress("Uploading") ?? panic("progress")
+        assert_eq(prompt_guided("region", "AWS region", [String]{}) ?? panic("guided ask"), "us-east")
+        assert_eq(prompt_guided("tier", "Release tier", [String]{"stable", "canary"}) ?? panic("guided choose"), "canary")
+        // Nested #Context shadows the outer provider and restores it on exit.
+        #Context(interaction: inner) {
+            assert_eq(ask("Nested: ") ?? panic("nested ask"), "inner-override")
+            assert(!confirm("Nested confirm?"))
+        }
+        // Spawned tasks inherit the installed Interaction provider.
+        worker: task {
+            ask("Task: ") ?? ""
+        }
+        assert_eq(worker.join() ?? panic("join"), "from-task")
+    }
+    outer_events: outer_state.guard_read().value.events.copy()
+    assert_eq(outer_events.len(), 10)
+    assert_eq(outer_events[0], "ask:Name: ")
+    assert_eq(outer_events[1], "ask:Alias: ")
+    assert_eq(outer_events[2], "choose:Env::[dev,prod]")
+    assert_eq(outer_events[3], "confirm:Deploy?")
+    assert_eq(outer_events[4], "secret:Token: ")
+    assert_eq(outer_events[5], "secret:Backup: ")
+    assert_eq(outer_events[6], "progress:Uploading")
+    assert_eq(outer_events[7], "ask:region (AWS region): ")
+    assert_eq(outer_events[8], "choose:tier (Release tier): :[stable,canary]")
+    assert_eq(outer_events[9], "ask:Task: ")
+    inner_events: inner_state.guard_read().value.events.copy()
+    assert_eq(inner_events, [String]{"ask:Nested: ", "confirm:Nested confirm?"})
+    // Outside #Context, default TerminalInteraction is active again.
+    is_default: if context.interaction == {
+        .TerminalInteraction(_) -> true
+        else -> false
+    }
+    assert(is_default)
+}
+
+#Test("agent-runner interaction provider bridges prompts, progress, and guided input as JSON tool calls") {
+    agent_state: Shared{TestAgentState{
+        calls: [String]{},
+        responses: [String:String]{
+            "Target host: ": "api.example.internal",
+            "Release channel:": "canary",
+            "Proceed with rollout?": "true",
+            "Deploy key: ": "k-live-99",
+            "service (Service name): ": "billing",
+            "mode (Rollout mode): ": "blue-green",
+        },
+    }}
+    agent: TestAgentProvider{state: agent_state.copy()}
+    #Context(interaction: agent) {
+        assert_eq(ask("Target host: ") ?? panic("agent ask"), "api.example.internal")
+        assert_eq(choose("Release channel:", [String]{"stable", "canary"}) ?? panic("agent choose"), "canary")
+        assert(confirm("Proceed with rollout?"))
+        assert_eq(secret("Deploy key: ") ?? panic("agent secret"), "k-live-99")
+        progress("Rollout 50%") ?? panic("agent progress")
+        ^guided_service: String?{None}
+        if prompt_guided("service", "Service name", [String]{}) == .Val(g) {
+            guided_service = Val(g)
+        }
+        assert_eq(guided_service, Val("billing"))
+        assert_eq(prompt_guided("mode", "Rollout mode", [String]{"rolling", "blue-green"}) ?? panic("agent guided choose"), "blue-green")
+    }
+    calls: agent_state.guard_read().value.calls.copy()
+    assert_eq(calls.len(), 7)
+    assert_eq(calls[0], "{{\"tool\":\"interaction.ask\",\"prompt\":\"Target host: \"}}")
+    assert_eq(calls[1], "{{\"tool\":\"interaction.choose\",\"prompt\":\"Release channel:\",\"options\":[\"stable\",\"canary\"]}}")
+    assert_eq(calls[2], "{{\"tool\":\"interaction.confirm\",\"prompt\":\"Proceed with rollout?\"}}")
+    assert_eq(calls[3], "{{\"tool\":\"interaction.secret\",\"prompt\":\"Deploy key: \"}}")
+    assert_eq(calls[4], "{{\"tool\":\"interaction.progress\",\"label\":\"Rollout 50%\"}}")
+    assert_eq(calls[5], "{{\"tool\":\"interaction.ask\",\"prompt\":\"service (Service name): \"}}")
+    assert_eq(calls[6], "{{\"tool\":\"interaction.choose\",\"prompt\":\"mode (Rollout mode): \",\"options\":[\"rolling\",\"blue-green\"]}}")
 }

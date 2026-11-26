@@ -57,11 +57,9 @@ ir_heap_helper: fn(m: ^IRModule, p: IRProgram, row: Int, elem_row: Int, name: St
         option_row = ir_value_type(m, p, Type.Option{inner: elem_ty}) ?? return None
     }
     kind: ir_heap_kind(m, p, elem_row)
-    id: m.functions.len()
+    id: ir_reserve_slot(m, key)
     symbol: name.split(".").to_list().join("_")
-    m.functions.push(ir_hashed_function(name, key, "jet_ir_{symbol}_", "", 0))
-    ir_function_bind(m, key, id)
-    ^a: ir_builder_new(m.functions[id].copy())
+    ^a: ir_builder_new(ir_hashed_function(name, key, "jet_ir_{symbol}_", "", 0))
     heap: ir_new_slot(a, row, IRSlotKind.Param, ir_intern_name(m, "heap"))
     if name == "priority_queue.push" {
         value: ir_new_slot(a, elem_row, IRSlotKind.Param, ir_intern_name(m, "value"))
@@ -570,10 +568,8 @@ ir_key_order: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, key: Int, elem_row: 
 ir_key_order_helper: fn(m: ^IRModule, p: IRProgram, closure_ty: Type, elem_row: Int, key_row: Int, descending: Bool) -> Int Never! {
     key: "key_order.before<{type_carrier_identity(closure_ty)}|{if descending -> "desc" else -> "asc"}>"
     if ir_keyed_function(m, key) == .Val(known) -> return known
-    id: m.functions.len()
-    m.functions.push(ir_hashed_function("key_order.before", key, "jet_ir_key_order_before_", "", 0))
-    ir_function_bind(m, key, id)
-    ^a: ir_builder_new(m.functions[id].copy())
+    id: ir_reserve_slot(m, key)
+    ^a: ir_builder_new(ir_hashed_function("key_order.before", key, "jet_ir_key_order_before_", "", 0))
     pointer_row: ir_pointer_row(m)
     bool_row: ir_type_row(m, Type.Bool) ?? 0
     boxed: ir_new_slot(a, pointer_row, IRSlotKind.Param, ir_intern_name(m, "boxed"))

@@ -123,7 +123,7 @@ run: fn() (HTTPError | IOError | NetError | TaskFailure)! {
 
     // cy hangs up before the reply; the payment still commits.
     cy: send(addr, "cy", "slow", 0)
-    cy.close() ?? panic("hang up")
+    close(cy)
     ^polls: 0
     loop ledger_size(ledger) < 3 && polls < 400 {
         time.sleep(5ms)

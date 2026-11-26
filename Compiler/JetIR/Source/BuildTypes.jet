@@ -583,7 +583,7 @@ ir_value_type_laid: fn(m: ^IRModule, p: IRProgram, ty: Type, tid: TypeID, laying
             // of a parallel build holds one type, and one DWARF name, for one
             // row.
             // copy: the row owns its spelling; the program keeps the declaration's key.
-            key: definition.key.copy()
+            key: definition.key
             keyed: if args.len() == 0 -> Type.Named{name: key} else -> Type.Apply{name: key, args: ir_type_args(ty)}
             keyed_tid: ir_intern_tid(m, p, keyed)
             loop variant in variants {
@@ -700,7 +700,7 @@ ir_struct_row_laid: fn(m: ^IRModule, p: IRProgram, ty: Type, row: Int, args: [Ty
     ^members: ir_struct_members_in(m, p, row, args, laying, false) ?? return None
     size: ir_struct_size(m, members) ?? return None
     // copy: the row owns its spelling; the program keeps the declaration's key.
-    key: p.types[row].key.copy()
+    key: p.types[row].key
     keyed: if args.len() == 0 -> Type.Named{name: key} else -> Type.Apply{name: key, args: ir_type_args(ty)}
     keyed_tid: ir_intern_tid(m, p, keyed)
     interned: ir_intern_type(m, "struct:{identity}", ir_layout(IRTypeKind.Aggregate, keyed_tid, size, 8, IRClass.Pointer, false, 64, ""))
@@ -1244,10 +1244,8 @@ ir_record_in_helper: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, spa
         return ir_fail_slot(b, span, message)
     }
     if known >= 0 -> return known
-    id: m.functions.len()
-    m.functions.push(ir_hashed_function("record.in", helper_key, "jet_ir_record_in_", "", 0))
-    ir_function_bind(m, helper_key, id)
-    ^a: ir_builder_new(m.functions[id].copy())
+    id: ir_reserve_slot(m, helper_key)
+    ^a: ir_builder_new(ir_hashed_function("record.in", helper_key, "jet_ir_record_in_", "", 0))
     pointer_row: ir_pointer_row(m)
     handle: ir_new_slot(a, pointer_row, IRSlotKind.Param, ir_intern_name(m, "handle"))
     target: ir_new_slot(a, pointer_row, IRSlotKind.Param, ir_intern_name(m, "target"))
@@ -2339,10 +2337,8 @@ ir_render_helper: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, builde
         return -1
     }
     if known >= 0 -> return known
-    id: m.functions.len()
-    m.functions.push(ir_hashed_function("render", helper_key, "jet_ir_render_", "", 0))
-    ir_function_bind(m, helper_key, id)
-    ^a: ir_builder_new(m.functions[id].copy())
+    id: ir_reserve_slot(m, helper_key)
+    ^a: ir_builder_new(ir_hashed_function("render", helper_key, "jet_ir_render_", "", 0))
     value: ir_new_slot(a, row, IRSlotKind.Param, ir_intern_name(m, "value"))
     builder: ir_new_slot(a, builder_row, IRSlotKind.Param, ir_intern_name(m, "builder"))
     ir_render_nominal(m, p, a, builder, value, mode, span)
@@ -3096,10 +3092,8 @@ ir_order_helper: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, span: S
     helper_key: "#order<{ir_row_key(m, row)}>"
     known: ir_keyed_function(m, helper_key) ?? -1
     if known >= 0 -> return known
-    id: m.functions.len()
-    m.functions.push(ir_hashed_function("order", helper_key, "jet_ir_order_", "", 0))
-    ir_function_bind(m, helper_key, id)
-    ^a: ir_builder_new(m.functions[id].copy())
+    id: ir_reserve_slot(m, helper_key)
+    ^a: ir_builder_new(ir_hashed_function("order", helper_key, "jet_ir_order_", "", 0))
     left: ir_new_slot(a, row, IRSlotKind.Param, ir_intern_name(m, "left"))
     right: ir_new_slot(a, row, IRSlotKind.Param, ir_intern_name(m, "right"))
     word_row: ir_word_row(m)
@@ -3504,10 +3498,8 @@ ir_equal_helper: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, span: S
     helper_key: "#equal<{ir_row_key(m, row)}>"
     known: ir_keyed_function(m, helper_key) ?? -1
     if known >= 0 -> return known
-    id: m.functions.len()
-    m.functions.push(ir_hashed_function("equal", helper_key, "jet_ir_equal_", "", 0))
-    ir_function_bind(m, helper_key, id)
-    ^a: ir_builder_new(m.functions[id].copy())
+    id: ir_reserve_slot(m, helper_key)
+    ^a: ir_builder_new(ir_hashed_function("equal", helper_key, "jet_ir_equal_", "", 0))
     left: ir_new_slot(a, row, IRSlotKind.Param, ir_intern_name(m, "left"))
     right: ir_new_slot(a, row, IRSlotKind.Param, ir_intern_name(m, "right"))
     a.f.result = ir_type_row(m, Type.Bool) ?? 0
@@ -3625,7 +3617,7 @@ ir_add_union_types: fn(types: ^[TTypeDef], functions: [FnBody], interner: Intern
             pending_keep[name_index(found_id)] = false
         }
     }
-    module_identity: types[0].module_identity.copy()
+    module_identity: types[0].module_identity
     loop index in 0..<found.len() {
         found_id: name_find(pending_names, keys[index]) ?? next
         id: name_index(found_id)
@@ -3663,7 +3655,7 @@ ir_add_function_union_types: fn(types: ^[TTypeDef], type_rows_keys: ^NameTable, 
 // Adds the structural enum of each union of `found` that `types` lacks
 // (ir_add_signature_union_types).
 ir_add_found_union_types: fn(types: ^[TTypeDef], type_rows_keys: ^NameTable, type_rows: ^[Int], found: [Type]) Never! {
-    module_identity: types[0].module_identity.copy()
+    module_identity: types[0].module_identity
     loop ty in found {
         key: ir_union_key(ty)
         if name_column_value(type_rows_keys, type_rows, key) != None -> next
@@ -3985,7 +3977,7 @@ ir_try_reraise: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, subject: Int, conv
     // function carrier's box: a box is freed with its own type's size
     // (ir_box_bytes), so a callee carrier whose Ok is narrower or wider
     // reboxes its error below.
-    carrier_row: ir_value_type(m, p, Type.Result{ok: success.copy(), err: error.copy()}) ?? return ir_fail_slot(b, span, "layout of the {ir_type_name(error)} failure carrier")
+    carrier_row: ir_value_type(m, p, Type.Result{ok: success, err: error}) ?? return ir_fail_slot(b, span, "layout of the {ir_type_name(error)} failure carrier")
     if conversion == .NoConversion && !framed && ir_box_bytes(m, p, b.f.slot_type[subject]) == ir_box_bytes(m, p, carrier_row) {
         if site == .Val(at) -> _: ir_journey_hop(m, p, b, at, -1, false, span)
         return subject
@@ -4260,7 +4252,7 @@ ir_add_compiler_owned_types: fn(types: ^[TTypeDef]) Never! {
     if types.len() == 0 {
         return
     }
-    module_identity: types[0].module_identity.copy()
+    module_identity: types[0].module_identity
     ^declared: name_column_table(types.len() + IR_COMPILER_OWNED_TYPE_ROWS.len())
     ^core_enum_keys: name_column_table()
     ^core_enums: name_column()
@@ -4287,10 +4279,10 @@ ir_add_compiler_owned_types: fn(types: ^[TTypeDef]) Never! {
 ir_compiler_owned_variant: fn(name: String, payload: IRCompilerOwnedPayload) -> TVariant Never! {
     checked: if payload == {
         .Unit -> TVariantPayload.Unit
-        .Single(ty) -> TVariantPayload.Single{value: ty.copy()}
+        .Single(ty) -> TVariantPayload.Single{value: ty}
         .Named(fields) -> TVariantPayload.Named{fields: ir_compiler_owned_fields(fields)}
     }
-    TVariant{name: name.copy(), wire_name: name.copy(), span: Span{start: 0, end: 0}, payload: checked, discriminant: None}
+    TVariant{name: name, wire_name: name, span: Span{start: 0, end: 0}, payload: checked, discriminant: None}
 }
 
 // The public stored fields of a compiler-owned row.
@@ -4314,9 +4306,9 @@ ir_compiler_owned_fields: fn(record_fields: [TypeTupleField]) -> [TField] Never!
 ir_compiler_owned_def: fn(module_identity: ModuleID, name: String, kind: ^^TTypeDefKind) -> TTypeDef Never! {
     generic_params: loop param in ir_compiler_owned_generic_params(name) -> TGenericParam{name: param, bounds: [SymbolID]{}}
     TTypeDef{
-        module_identity: module_identity.copy(),
-        key: name.copy(),
-        name: name.copy(),
+        module_identity: module_identity,
+        key: name,
+        name: name,
         span: Span{start: 0, end: 0},
         public: true,
         package_public: false,

@@ -805,7 +805,8 @@ context_frame_pop_match: fn(match_kind: I64, match_id: I64, out_text: I64, out_s
 
 // `#Frame(text) { ... }` entry: push a task-inherited breadcrumb frame.
 #Export(c) jet_ctx_push_frame: fn(text: I64, file: I64, line: I64) -> I64 {
-    start_ns: if (perf_spans_fd >= I64{0} || perf_zones_on != I64{0}) -> perf_zone_now() else -> I64{0}
+    ^start_ns: I64{0}
+    if (perf_spans_fd >= I64{0} || perf_zones_on != I64{0}) { start_ns = perf_zone_now() }
     id: context_frame_push(text, file, line, I64{0}, start_ns, CONTEXT_FRAME_KIND_BLOCK)
     observe_task_count(OBSERVE_TASK_SPANS, I64{1})
     id
