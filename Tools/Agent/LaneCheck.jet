@@ -145,12 +145,13 @@ run: fn() {
 // census gives their passes (Tools/Agent/Land.jet LANE_CHECKS), then the
 // known-failing owner check, which the census holds through its guards pass
 // (Tests/Guards/known_failing_owner.jet runs the same tool).
-TREE_CHECKS: [String]{"personal-info", "assembly", "unsafe-ratchet", "vocabulary-rows", "body-tree-rows", "core-enum-cases", "diagnostic-census", "compiler-data", "script-pairing", "known-failing-owner"}
+TREE_CHECKS: [String]{"personal-info", "commit-hygiene", "assembly", "unsafe-ratchet", "vocabulary-rows", "body-tree-rows", "core-enum-cases", "diagnostic-census", "compiler-data", "script-pairing", "known-failing-owner"}
 
 // Run the tree check `name`; one that refuses ends the run with exit 1.
 tree_check: fn(name: String, repo: String) -[Env, Exec, FS, IO, Time.Wait]> () {
     if {
         name == "personal-info" -> personal_info(repo)
+        name == "commit-hygiene" -> commit_hygiene(repo)
         name == "assembly" -> assembly(repo)
         name == "unsafe-ratchet" -> unsafe_ratchet(repo)
         name == "vocabulary-rows" -> vocabulary_rows(repo)
@@ -161,6 +162,33 @@ tree_check: fn(name: String, repo: String) -[Env, Exec, FS, IO, Time.Wait]> () {
         name == "script-pairing" -> script_pairing(repo)
         name == "known-failing-owner" -> known_failing_owner(repo)
         else -> usage("jet Tools/Agent/LaneCheck.jet --check [{TREE_CHECKS.join(" | ")}]")
+    }
+}
+
+// Refuse tracked temporary directories, build outputs, and non-fixture object/archive files.
+commit_hygiene: fn(repo: String) -[Env, Exec, FS, IO, Time.Wait]> () {
+    listed: process.cmd([String]{"git", "ls-files"}).cwd(repo).run() ?? {
+        print("CHECK FAILED — commit-hygiene could not run git ls-files: {err}")
+        process.exit(1)
+    }
+    if listed.code != 0 || listed.signal != None {
+        print("CHECK FAILED — commit-hygiene git ls-files exited {listed.code}")
+        process.exit(1)
+    }
+    ^bad: [String]{}
+    loop raw in process.combined_output(listed).split("\n") {
+        path: raw.trim()
+        if path == "" -> next
+        in_fixtures: path.contains("/Fixtures/")
+        stray_root: path.starts_with("jet-") || path.starts_with("tmp-") || path.starts_with("tmp.")
+        build_out: !in_fixtures && !path.starts_with("Tests/") && (path.starts_with(".jet/build/") || path.contains("/.jet/build/"))
+        object_file: !in_fixtures && (path.ends_with(".o") || path.ends_with(".a") || path.ends_with(".obj") || path.ends_with(".pdb"))
+        if stray_root || build_out || object_file -> bad.push(path)
+    }
+    if bad.len() > 0 {
+        print("CHECK FAILED — temporary directories, build outputs, or non-fixture object files tracked in git:")
+        loop path in bad -> print("  {path}")
+        process.exit(1)
     }
 }
 
