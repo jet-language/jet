@@ -15,7 +15,6 @@ use jet_foundation.[
     interner_merge_delta,
     module_index,
     module_is_core,
-    module_none,
     module_text,
     StructureFact,
     NameTable,
@@ -614,10 +613,10 @@ sema_finalize_program: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail
     final_graph = sema_finalize_side_checks(final_graph, modules, threads, diagnostics, complete, effect_inputs, effect_prepared, liveness, taint_prepared, typestate_found, core_modules, field_caps)
     if trace_sink == .Val(sink) -> sink.end("sema.side", liveness.facts.len())
     if trace_sink == .Val(sink) -> sink.begin("sema.effects", "", -1, -1)
-    root_policy: sema_comptime_policy_for_package(stage.package_policies, final_graph.package_identity)
-    package_denials: if root_policy == .Val(policy) -> policy.authority_deny ?? [String]{} else -> [String]{}
-    organization_denials: if root_policy == .Val(policy) -> policy.organization_deny.copy() else -> [String]{}
-    organization_source: if root_policy == .Val(policy) -> policy.organization_source.copy() else -> ""
+    root_denials: sema_finalize_root_denials(sema_comptime_policy_for_package(stage.package_policies, final_graph.package_identity))
+    package_denials: root_denials.package_denials
+    organization_denials: root_denials.organization_denials
+    organization_source: root_denials.organization_source
     // The root package's `authority.deny` row, and the organization's, bind
     // the root package's own modules.
     denial_modules: loop graph_module in final_graph.modules -> graph_module.package_identity == final_graph.package_identity
@@ -1258,12 +1257,12 @@ sema_finalize_walk_claimed: fn(graph: SemaRegistrationGraph, inputs: SemaFinaliz
     ^claimed: [SemaTaintWalked]{}
     ^rank: sema_finalize_core_claim(queue)
     if rank >= inputs.taint_order.len() -> return claimed
-    ^state: SemaTaintFlowState{catalog: inputs.catalog.copy(), module_identity: module_none(), flow: sema_taint_flow_start(), diagnostics: [Diagnostic]{}, open_switches: inputs.open_switches.copy(), fixed_tags: [String]{}}
+    ^state: sema_taint_flow_state_new(inputs.catalog.copy(), inputs.open_switches.copy())
     loop rank < inputs.taint_order.len() {
         module_index: inputs.taint_order[rank]
         ^found: [Diagnostic]{}
         sema_taint_check_module(graph, state, module_index, found)
-        claimed.push(SemaTaintWalked{module_index: module_index, found: found.move(), masked: state.masked, fixed_tags: state.fixed_tags})
+        claimed.push(SemaTaintWalked{module_index: module_index, found: found.move(), masked: state.frames[state.top].masked, fixed_tags: state.frames[state.top].fixed_tags})
         rank = sema_finalize_core_claim(queue)
     }
     claimed
@@ -1617,4 +1616,9 @@ sema_check_pure_live_blocks: fn(name: String, body: [Stmt], diagnostics: ^[Diagn
             sema_check_pure_live_blocks(name, nested, diagnostics)
         }
     }
+}
+
+priv sema_finalize_root_denials: fn(root_policy: ^^SemaRegistrationPackagePolicy?) -> {package_denials: [String], organization_denials: [String], organization_source: String} Never! {
+    policy: root_policy ?? return {package_denials: [String]{}, organization_denials: [String]{}, organization_source: ""}
+    {package_denials: policy.authority_deny ?? [String]{}, organization_denials: policy.organization_deny, organization_source: policy.organization_source}
 }

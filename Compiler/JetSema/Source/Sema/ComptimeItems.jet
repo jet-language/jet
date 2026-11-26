@@ -251,8 +251,7 @@ sema_comptime_close_methods_add: fn(graph: SemaRegistrationGraph, ty: Type, modu
             seen[nominal_id.id] = true
             loop reference in sema_registration_impl_rows_named(graph, graph.modules[row.module_index].nominals[row.row].symbol.name) {
                 implementation: graph.modules[reference.module_index].impls[reference.row]
-                symbol_name: if implementation.trait_symbol == .Val(trait_symbol) -> trait_symbol.name.copy() else -> ""
-                if implementation.trait_name != Val("Close") && symbol_name != "Close" -> next
+                if !sema_comptime_impl_matches_trait(implementation, "Close") -> next
                 if sema_type_graph_impl_target_nominal(graph, implementation) != Val(nominal_id) {
                     next
                 }
@@ -291,11 +290,17 @@ sema_comptime_close_methods_add: fn(graph: SemaRegistrationGraph, ty: Type, modu
     }
 }
 
-sema_comptime_close_key_add: fn(graph: SemaRegistrationGraph, keys: ^[String], key: String) {
+priv sema_comptime_impl_matches_trait: fn(implementation: SemaRegistrationImpl, name: String) -> Bool Never! {
+    if implementation.trait_name == .Val(written) && written == name -> return true
+    if implementation.trait_symbol == .Val(trait_symbol) -> return trait_symbol.name == name
+    false
+}
+
+sema_comptime_close_key_add: fn(graph: SemaRegistrationGraph, keys: ^[String], key: ^^String) {
     if keys.contains(key) || sema_comptime_find_function_source_by_key(graph, key) == None {
         return
     }
-    keys.push(key.copy())
+    keys.push(key)
 }
 
 // The `encode` (under `encode`) and `decode` (under `decode`) methods a codec
@@ -344,10 +349,9 @@ sema_comptime_codec_methods_add: fn(graph: SemaRegistrationGraph, ty: Type, modu
             nominal_id: graph.modules[row.module_index].nominals[row.row].symbol.id
             loop reference in sema_registration_impl_rows_named(graph, nominal_name) {
                 implementation: graph.modules[reference.module_index].impls[reference.row]
-                symbol_name: if implementation.trait_symbol == .Val(trait_symbol) -> trait_symbol.name.copy() else -> ""
                 method_name: if {
-                    decode && (implementation.trait_name == Val("Decode") || symbol_name == "Decode") -> "decode"
-                    encode && (implementation.trait_name == Val("Encode") || symbol_name == "Encode") -> "encode"
+                    decode && sema_comptime_impl_matches_trait(implementation, "Decode") -> "decode"
+                    encode && sema_comptime_impl_matches_trait(implementation, "Encode") -> "encode"
                     else -> ""
                 }
                 if method_name == "" -> next
@@ -485,9 +489,7 @@ sema_comptime_render_nominal: fn(graph: SemaRegistrationGraph, memo: ^SemaCompti
     ^found: [{module_identity: ModuleID, key: String}]{}
     loop reference in sema_registration_impl_rows_named(graph, nominal.symbol.name) {
         implementation: graph.modules[reference.module_index].impls[reference.row]
-        symbol_name: if implementation.trait_symbol == .Val(trait_symbol) -> trait_symbol.name.copy() else -> ""
-        written: if implementation.trait_name == .Val(name) -> name.copy() else -> ""
-        method_name: sema_comptime_render_method_name(written, symbol_name)
+        method_name: if implementation.trait_name == .Val(written) -> if implementation.trait_symbol == .Val(trait_symbol) -> sema_comptime_render_method_name(written, trait_symbol.name) else -> sema_comptime_render_method_name(written, "") else -> if implementation.trait_symbol == .Val(trait_symbol) -> sema_comptime_render_method_name("", trait_symbol.name) else -> ""
         if method_name == "" -> next
         if sema_type_graph_impl_target_nominal(graph, implementation) != Val(nominal.symbol.id) {
             next
@@ -565,8 +567,7 @@ sema_comptime_close_methods: fn(graph: SemaRegistrationGraph, ty: Type, module_i
     nominal: graph.modules[row.module_index].nominals[row.row]
     loop reference in sema_registration_impl_rows_named(graph, nominal.symbol.name) {
         implementation: graph.modules[reference.module_index].impls[reference.row]
-        symbol_name: if implementation.trait_symbol == .Val(trait_symbol) -> trait_symbol.name.copy() else -> ""
-        if implementation.trait_name != Val("Close") && symbol_name != "Close" -> next
+        if !sema_comptime_impl_matches_trait(implementation, "Close") -> next
         if sema_type_graph_impl_target_nominal(graph, implementation) != Val(nominal.symbol.id) {
             next
         }
@@ -667,9 +668,7 @@ sema_comptime_trait_methods_add: fn(graph: SemaRegistrationGraph, ty: Type, boun
     }
     loop reference in sema_registration_impl_rows_named(graph, target) {
         implementation: graph.modules[reference.module_index].impls[reference.row]
-        // copy: the written name is compared once; the impl row stays in the graph.
-        symbol_name: if implementation.trait_symbol == .Val(trait_symbol) -> trait_symbol.name.copy() else -> ""
-        if implementation.trait_name != Val((trait_name)) && symbol_name != trait_name -> next
+        if !sema_comptime_impl_matches_trait(implementation, trait_name) -> next
         implemented: if nominal == .Val(id) -> sema_type_graph_impl_target_nominal(graph, implementation) == Val((id)) else -> implementation.target_type == owner
         if !implemented -> next
         loop method in implementation.methods {

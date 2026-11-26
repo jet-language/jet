@@ -1198,12 +1198,9 @@ sema_derive_expand_or_fallback: fn(expansion: ^SemaDeriveExpansion, fallback: Or
 
 sema_derive_expand_lambda: fn(expansion: ^SemaDeriveExpansion, lambda: Lambda) -> Lambda Never! {
     ^updated: lambda
-    params: loop param in lambda.params -> {
-        ^expanded: param.copy()
-        expanded.ty = param.ty.map(fn(value) { sema_derive_expand_type(expansion, value) })
-        expanded
+    loop index in 0..<updated.params.len() {
+        updated.params[index].ty = updated.params[index].ty.map(fn(value) { sema_derive_expand_type(expansion, value) })
     }
-    updated.params = params
     updated.result = lambda.result.map(fn(value) { sema_derive_expand_type(expansion, value) })
     updated.body = if lambda.body == {
         .Expr(value) -> LambdaBody.Expr{value: sema_derive_expand_expr(expansion, value)}
@@ -1228,8 +1225,7 @@ sema_derive_expand_expr_node: fn(expansion: ^SemaDeriveExpansion, expression: Ex
         .MemberSpread(base, members, span, node) -> return Expr.MemberSpread{base: sema_derive_expand_expr(expansion, base), members: members, span: span, id: node}
         .Spread(value, span, node) -> return Expr.Spread{value: sema_derive_expand_expr(expansion, value), span: span, id: node}
         .MapLit(entries, span, node) -> return Expr.MapLit{entries: sema_derive_expand_pairs(expansion, entries), span: span, id: node}
-        // copy: `kind` is a payload of read parameter `expression`, which keeps the original; field `kind` of the new Expr.Index owns this one
-        .Index(base, index, span, kind, node) -> return Expr.Index{base: sema_derive_expand_expr(expansion, base), index: sema_derive_expand_expr(expansion, index), span: span, kind: kind.copy(), id: node}
+        .Index(base, index, span, kind, node) -> return Expr.Index{base: sema_derive_expand_expr(expansion, base), index: sema_derive_expand_expr(expansion, index), span: span, kind: kind, id: node}
         .Slice(base, start, end, range, span, node) -> return Expr.Slice{base: sema_derive_expand_expr(expansion, base), start: sema_derive_expand_expr(expansion, start), end: sema_derive_expand_expr(expansion, end), range: sema_derive_expand_optional_expr(expansion, range), span: span, id: node}
         .Range(start, end, exclusive, span, node) -> return Expr.Range{start: sema_derive_expand_expr(expansion, start), end: sema_derive_expand_expr(expansion, end), exclusive: exclusive, span: span, id: node}
         .Ident(name, span, _) -> {
@@ -1569,8 +1565,7 @@ sema_derive_expand_optional_body: fn(expansion: ^SemaDeriveExpansion, body: [Stm
 
 sema_derive_expand_lvalue: fn(expansion: ^SemaDeriveExpansion, target: LValue) -> LValue Never! {
     if target == {
-        // copy: `kind` is a payload of read parameter `target`, which keeps the original; field `kind` of the new LValue.Index owns this one
-        .Index(base, index, span, kind) -> LValue.Index{base: sema_derive_expand_expr(expansion, base), index: sema_derive_expand_expr(expansion, index), span: span, kind: kind.copy()}
+        .Index(base, index, span, kind) -> LValue.Index{base: sema_derive_expand_expr(expansion, base), index: sema_derive_expand_expr(expansion, index), span: span, kind: kind}
         // A pasted target member `out.#{name} = …` splices its binding like a read does.
         .Field(base, field, span) -> LValue.Field{base: sema_derive_expand_expr(expansion, base), field: if sema_derive_splice(field) && sema_derive_scope_index(expansion, field) != None -> sema_derive_expand_name(expansion, field, span) else -> field, span: span}
         // copy: the assignment target is unchanged by expansion, but the derive template keeps it
@@ -1583,8 +1578,7 @@ sema_derive_expand_stmt: fn(expansion: ^SemaDeriveExpansion, stmt: Stmt) -> Stmt
     if stmt == {
         .Expr(value) -> Stmt.Expr{expr: sema_derive_expand_expr(expansion, value)}
         .Val(binding) -> Stmt.Val{binding: sema_derive_expand_binding(expansion, binding)}
-        // copy: `op` is a payload of read parameter `stmt`, which keeps the original; field `op` of the new Stmt.Assign owns this one
-        .Assign(target, op, op_span, value) -> Stmt.Assign{target: sema_derive_expand_lvalue(expansion, target), op: op.copy(), op_span: op_span, value: sema_derive_expand_expr(expansion, value)}
+        .Assign(target, op, op_span, value) -> Stmt.Assign{target: sema_derive_expand_lvalue(expansion, target), op: op, op_span: op_span, value: sema_derive_expand_expr(expansion, value)}
         .Return(value, span) -> Stmt.Return{value: sema_derive_expand_optional_expr(expansion, value), span: span}
         // copy: `label` is a payload of read parameter `stmt`, which keeps the original; field `label` of the new Stmt.While owns this one
         .While(cond, body, span, arrow_body, label) -> Stmt.While{cond: sema_derive_expand_expr(expansion, cond), body: sema_derive_expand_stmts(expansion, body), span: span, arrow_body: arrow_body, label: label.copy()}
@@ -1626,8 +1620,8 @@ sema_derive_expand_stmt: fn(expansion: ^SemaDeriveExpansion, stmt: Stmt) -> Stmt
         .Layout(name, name_span, body, span) -> Stmt.Layout{name: name, name_span: name_span, body: sema_derive_expand_stmts(expansion, body), span: span}
         // copy: `binding` is a payload of read parameter `stmt`, which keeps the original; field `binding` of the new Stmt.AuthorityScope owns this one
         .AuthorityScope(caps, caps_span, binding, body, span) -> Stmt.AuthorityScope{caps: caps, caps_span: caps_span, binding: binding.copy(), body: sema_derive_expand_stmts(expansion, body), span: span}
-        // copy: `cond` and `selected_then` are payloads of read parameter `stmt`, which keeps the originals; the new Stmt.ComptimeIf's fields own `cond` and `selected_then`
-        .ComptimeIf(cond, cond_span, then_body, else_body, span, selected_then) -> Stmt.ComptimeIf{cond: cond.copy(), cond_span: cond_span, then_body: sema_derive_expand_stmts(expansion, then_body), else_body: sema_derive_expand_optional_body(expansion, else_body), span: span, selected_then: selected_then.copy()}
+        // copy: `cond` is a payload of read parameter `stmt`, which keeps the original; field `cond` of the new Stmt.ComptimeIf owns this one
+        .ComptimeIf(cond, cond_span, then_body, else_body, span, selected_then) -> Stmt.ComptimeIf{cond: cond.copy(), cond_span: cond_span, then_body: sema_derive_expand_stmts(expansion, then_body), else_body: sema_derive_expand_optional_body(expansion, else_body), span: span, selected_then: selected_then}
         .ComptimeBlock(body, is_template_loop, span) -> Stmt.ComptimeBlock{body: sema_derive_expand_stmts(expansion, body), is_template_loop: is_template_loop, span: span}
         .ContextBlock(fields, body, span) -> {
             expanded: loop field in fields -> ContextField{name: field.name, value: sema_derive_expand_expr(expansion, field.value), span: field.span}
@@ -1651,22 +1645,14 @@ sema_derive_expand_stmt: fn(expansion: ^SemaDeriveExpansion, stmt: Stmt) -> Stmt
 // ---------------------------------------------------------------------------
 // Items.
 
-sema_derive_expand_markers: fn(expansion: ^SemaDeriveExpansion, markers: [Marker]) -> [Marker] Never! {
-    expanded: loop marker in markers -> {
-        ^updated: marker.copy()
-        ^args: [MarkerCallArg]{}
-        loop arg in marker.args {
-            if arg == {
-                .Expr(value) -> {
-                    args.push(MarkerCallArg.Expr{value: sema_derive_expand_expr(expansion, value)})
-                }
-                .EffectRow(_, _) -> args.push(arg.copy())
+sema_derive_expand_markers: fn(expansion: ^SemaDeriveExpansion, markers: ^[Marker]) Never! {
+    loop marker_index in 0..<markers.len() {
+        loop arg_index in 0..<markers[marker_index].args.len() {
+            if markers[marker_index].args[arg_index] == .Expr(value) {
+                markers[marker_index].args[arg_index] = MarkerCallArg.Expr{value: sema_derive_expand_expr(expansion, value)}
             }
         }
-        updated.args = args
-        updated
     }
-    expanded
 }
 
 // A clause is rebuilt around its expanded condition and message, so neither
@@ -1675,24 +1661,21 @@ sema_derive_expand_clauses: fn(expansion: ^SemaDeriveExpansion, clauses: [Contra
     loop clause in clauses -> ContractClause{cond: sema_derive_expand_expr(expansion, clause.cond), message_expr: sema_derive_expand_expr(expansion, clause.message_expr), message_span: clause.message_span, span: clause.span, required: clause.required}
 }
 
-sema_derive_expand_params: fn(expansion: ^SemaDeriveExpansion, params: [Param]) -> [Param] Never! {
-    expanded: loop param in params -> {
-        ^updated: param.copy()
-        updated.ty = sema_derive_expand_type(expansion, param.ty)
-        updated.default = sema_derive_expand_optional_expr(expansion, param.default)
-        updated
+sema_derive_expand_params: fn(expansion: ^SemaDeriveExpansion, params: ^[Param]) Never! {
+    loop index in 0..<params.len() {
+        params[index].ty = sema_derive_expand_type(expansion, params[index].ty)
+        params[index].default = sema_derive_expand_optional_expr(expansion, params[index].default)
     }
-    expanded
 }
 
 sema_derive_expand_func: fn(expansion: ^SemaDeriveExpansion, function: Func) -> Func Never! {
     first_paste: expansion.pasted.len()
     ^updated: function
     updated.name = sema_derive_expand_name(expansion, function.name, function.name_span)
-    updated.params = sema_derive_expand_params(expansion, function.params)
+    sema_derive_expand_params(expansion, updated.params)
     updated.return_type = function.return_type.map(fn(value) { sema_derive_expand_type(expansion, value) })
     updated.head_pattern = function.head_pattern.map(fn(value) { sema_derive_expand_pattern(expansion, value, None) })
-    updated.markers = sema_derive_expand_markers(expansion, function.markers)
+    sema_derive_expand_markers(expansion, updated.markers)
     updated.pre = sema_derive_expand_clauses(expansion, function.pre)
     updated.post = sema_derive_expand_clauses(expansion, function.post)
     updated.body = sema_derive_expand_stmts(expansion, function.body)
@@ -1718,16 +1701,13 @@ sema_derive_expand_impl_constants: fn(expansion: ^SemaDeriveExpansion, constants
     loop constant in constants -> ImplConstValue{name: constant.name, name_span: constant.name_span, value: sema_derive_expand_expr(expansion, constant.value), span: constant.span}
 }
 
-sema_derive_expand_trait_blocks: fn(expansion: ^SemaDeriveExpansion, blocks: [TraitImplBlock]) -> [TraitImplBlock] Never! {
-    expanded: loop block in blocks -> {
-        ^updated: block.copy()
-        updated.trait_name = sema_derive_expand_name(expansion, block.trait_name, block.trait_span)
-        updated.methods = sema_derive_expand_funcs(expansion, block.methods)
-        updated.assoc_type_impls = sema_derive_expand_named_types(expansion, block.assoc_type_impls)
-        updated.constants = sema_derive_expand_impl_constants(expansion, block.constants)
-        updated
+sema_derive_expand_trait_blocks: fn(expansion: ^SemaDeriveExpansion, blocks: ^[TraitImplBlock]) Never! {
+    loop index in 0..<blocks.len() {
+        blocks[index].trait_name = sema_derive_expand_name(expansion, blocks[index].trait_name, blocks[index].trait_span)
+        blocks[index].methods = sema_derive_expand_funcs(expansion, blocks[index].methods)
+        blocks[index].assoc_type_impls = sema_derive_expand_named_types(expansion, blocks[index].assoc_type_impls)
+        blocks[index].constants = sema_derive_expand_impl_constants(expansion, blocks[index].constants)
     }
-    expanded
 }
 
 // A generated #Test's name as fixed text: a `#loop` template's
@@ -1784,7 +1764,7 @@ sema_derive_expand_item: fn(expansion: ^SemaDeriveExpansion, item: Item) -> Item
             updated.name_expr = sema_derive_expand_optional_expr(expansion, definition.name_expr)
             updated.faults_expr = sema_derive_expand_optional_expr(expansion, definition.faults_expr)
             updated.expected_fail_expr = sema_derive_expand_optional_expr(expansion, definition.expected_fail_expr)
-            updated.params = sema_derive_expand_params(expansion, definition.params)
+            sema_derive_expand_params(expansion, updated.params)
             updated.pre = sema_derive_expand_clauses(expansion, definition.pre)
             updated.body = sema_derive_expand_stmts(expansion, definition.body)
             if updated.name == None {
@@ -1795,28 +1775,24 @@ sema_derive_expand_item: fn(expansion: ^SemaDeriveExpansion, item: Item) -> Item
         .Struct(definition) -> {
             ^updated: definition
             updated.name = sema_derive_expand_name(expansion, definition.name, definition.name_span)
-            fields: loop field in definition.fields -> {
-                ^expanded_field: field.copy()
-                expanded_field.name = sema_derive_expand_name(expansion, field.name, field.name_span)
-                expanded_field.ty = sema_derive_expand_type(expansion, field.ty)
-                expanded_field.computed = sema_derive_expand_optional_expr(expansion, field.computed)
-                expanded_field.default = sema_derive_expand_optional_expr(expansion, field.default)
-                expanded_field
+            loop index in 0..<updated.fields.len() {
+                updated.fields[index].name = sema_derive_expand_name(expansion, updated.fields[index].name, updated.fields[index].name_span)
+                updated.fields[index].ty = sema_derive_expand_type(expansion, updated.fields[index].ty)
+                updated.fields[index].computed = sema_derive_expand_optional_expr(expansion, updated.fields[index].computed)
+                updated.fields[index].default = sema_derive_expand_optional_expr(expansion, updated.fields[index].default)
             }
-            updated.fields = fields
-            updated.serde_markers = sema_derive_expand_markers(expansion, definition.serde_markers)
-            updated.type_markers = sema_derive_expand_markers(expansion, definition.type_markers)
+            sema_derive_expand_markers(expansion, updated.serde_markers)
+            sema_derive_expand_markers(expansion, updated.type_markers)
             updated.methods = sema_derive_expand_funcs(expansion, definition.methods)
-            updated.trait_impls = sema_derive_expand_trait_blocks(expansion, definition.trait_impls)
+            sema_derive_expand_trait_blocks(expansion, updated.trait_impls)
             updated.validate_block = sema_derive_expand_stmts(expansion, definition.validate_block)
             Item.Struct{value: updated}
         }
         .Enum(definition) -> {
             ^updated: definition
             updated.name = sema_derive_expand_name(expansion, definition.name, definition.name_span)
-            variants: loop variant in definition.variants -> {
-                ^expanded_variant: variant.copy()
-                expanded_variant.payload = if variant.payload == {
+            loop index in 0..<updated.variants.len() {
+                updated.variants[index].payload = if updated.variants[index].payload == {
                     .Unit -> VariantPayload.Unit
                     .Single(ty, span) -> VariantPayload.Single{ty: sema_derive_expand_type(expansion, ty), span: span}
                     .Named(fields) -> {
@@ -1824,15 +1800,13 @@ sema_derive_expand_item: fn(expansion: ^SemaDeriveExpansion, item: Item) -> Item
                         VariantPayload.Named{fields: expanded_fields}
                     }
                 }
-                expanded_variant.discriminant_expr = sema_derive_expand_optional_expr(expansion, variant.discriminant_expr)
-                expanded_variant.serde_markers = sema_derive_expand_markers(expansion, variant.serde_markers)
-                expanded_variant
+                updated.variants[index].discriminant_expr = sema_derive_expand_optional_expr(expansion, updated.variants[index].discriminant_expr)
+                sema_derive_expand_markers(expansion, updated.variants[index].serde_markers)
             }
-            updated.variants = variants
-            updated.serde_markers = sema_derive_expand_markers(expansion, definition.serde_markers)
-            updated.type_markers = sema_derive_expand_markers(expansion, definition.type_markers)
+            sema_derive_expand_markers(expansion, updated.serde_markers)
+            sema_derive_expand_markers(expansion, updated.type_markers)
             updated.methods = sema_derive_expand_funcs(expansion, definition.methods)
-            updated.trait_impls = sema_derive_expand_trait_blocks(expansion, definition.trait_impls)
+            sema_derive_expand_trait_blocks(expansion, updated.trait_impls)
             Item.Enum{value: updated}
         }
         // copy: the item kind is unchanged by expansion, but the derive template keeps it for the
@@ -2466,13 +2440,10 @@ sema_derive_expand_builtin_provider: fn(providers: [MarkerDecl], trait_name: Str
         if item == .Impl(definition) && (definition.trait_name ?? "") == trait_name {
             loop function in definition.methods {
                 ^method: function.copy()
-                params: loop param in function.params -> {
-                    ^updated: param.copy()
-                    updated.ty = sema_derive_replace_provider_type(param.ty, target_name, owner_type)
-                    updated.ty_span = target_span
-                    updated
+                loop param_index in 0..<method.params.len() {
+                    method.params[param_index].ty = sema_derive_replace_provider_type(method.params[param_index].ty, target_name, owner_type)
+                    method.params[param_index].ty_span = target_span
                 }
-                method.params = params
                 if function.return_type == .Val(return_type) {
                     method.return_type = Val(sema_derive_replace_provider_type(return_type, target_name, owner_type))
                     method.return_type_span = Val(target_span)

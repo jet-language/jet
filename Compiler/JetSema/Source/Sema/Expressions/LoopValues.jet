@@ -162,55 +162,47 @@ sema_loop_value_rewrite_collecting_statements: fn(statements: ^[TStmt], local: T
                 if !sema_loop_value_rewrite_collecting_statements(updated_then_body, local, item_type, check) {
                     return false
                 }
-                ^updated_else_body: else_body.copy()
-                if else_body == .Val(else_statements) {
+                updated_else_body: if else_body == .Val(else_statements) -> {
                     ^rewritten: else_statements.copy()
                     if !sema_loop_value_rewrite_collecting_statements(rewritten, local, item_type, check) {
                         return false
                     }
-                    updated_else_body = Val(rewritten)
-                }
+                    Val(rewritten)
+                } else -> None
                 statements[index] = TStmt.If{condition: condition, then_body: updated_then_body, else_body: updated_else_body, else_is_elseif: else_is_elseif, span: span}
             }
             .Match(subject, arms, exhaustive, span) -> {
                 ^updated_arms: arms.copy()
                 loop arm_index in 0..<updated_arms.len() {
-                    ^arm_body: updated_arms[arm_index].body
-                    if !sema_loop_value_rewrite_collecting_statements(arm_body, local, item_type, check) {
+                    if !sema_loop_value_rewrite_collecting_statements(updated_arms[arm_index].body, local, item_type, check) {
                         return false
                     }
-                    updated_arms[arm_index].body = arm_body
                 }
                 statements[index] = TStmt.Match{subject: subject, arms: updated_arms, exhaustive: exhaustive, span: span}
             }
             .EnumMatch(subject, arms, else_body, fallthrough, span) -> {
                 ^updated_arms: arms.copy()
                 loop arm_index in 0..<updated_arms.len() {
-                    ^arm_body: updated_arms[arm_index].body
-                    if !sema_loop_value_rewrite_collecting_statements(arm_body, local, item_type, check) {
+                    if !sema_loop_value_rewrite_collecting_statements(updated_arms[arm_index].body, local, item_type, check) {
                         return false
                     }
-                    updated_arms[arm_index].body = arm_body
                 }
-                ^updated_else_body: else_body.copy()
-                if else_body == .Val(else_statements) {
+                updated_else_body: if else_body == .Val(else_statements) -> {
                     ^rewritten: else_statements.copy()
                     if !sema_loop_value_rewrite_collecting_statements(rewritten, local, item_type, check) {
                         return false
                     }
-                    updated_else_body = Val(rewritten)
-                }
+                    Val(rewritten)
+                } else -> None
                 statements[index] = TStmt.EnumMatch{scrutinee: subject, arms: updated_arms, else_body: updated_else_body, fallthrough: fallthrough, span: span}
             }
             .RangeSwitch(subject, arms, else_body, span) -> {
                 ^updated_else_body: else_body
                 ^updated_arms: arms.copy()
                 loop arm_index in 0..<updated_arms.len() {
-                    ^arm_body: updated_arms[arm_index].body
-                    if !sema_loop_value_rewrite_collecting_statements(arm_body, local, item_type, check) {
+                    if !sema_loop_value_rewrite_collecting_statements(updated_arms[arm_index].body, local, item_type, check) {
                         return false
                     }
-                    updated_arms[arm_index].body = arm_body
                 }
                 if !sema_loop_value_rewrite_collecting_statements(updated_else_body, local, item_type, check) {
                     return false
@@ -220,20 +212,17 @@ sema_loop_value_rewrite_collecting_statements: fn(statements: ^[TStmt], local: T
             .MixedSwitch(subject, branch_class, arms, else_body, span) -> {
                 ^updated_arms: arms.copy()
                 loop arm_index in 0..<updated_arms.len() {
-                    ^arm_body: updated_arms[arm_index].body
-                    if !sema_loop_value_rewrite_collecting_statements(arm_body, local, item_type, check) {
+                    if !sema_loop_value_rewrite_collecting_statements(updated_arms[arm_index].body, local, item_type, check) {
                         return false
                     }
-                    updated_arms[arm_index].body = arm_body
                 }
-                ^updated_else_body: else_body.copy()
-                if else_body == .Val(else_statements) {
+                updated_else_body: if else_body == .Val(else_statements) -> {
                     ^rewritten: else_statements.copy()
                     if !sema_loop_value_rewrite_collecting_statements(rewritten, local, item_type, check) {
                         return false
                     }
-                    updated_else_body = Val(rewritten)
-                }
+                    Val(rewritten)
+                } else -> None
                 statements[index] = TStmt.MixedSwitch{subject: subject, class: branch_class, arms: updated_arms, else_body: updated_else_body, span: span}
             }
             .RefutableBind(pattern, init, fallback, span) -> {
@@ -424,55 +413,47 @@ sema_loop_value_widen_result_breaks_in: fn(statements: ^[TStmt], root_label: Str
                 if !sema_loop_value_widen_result_breaks_in(updated_then_body, root_label, result_type, allow_unlabeled, check) {
                     return false
                 }
-                ^updated_else_body: else_body.copy()
-                if else_body == .Val(else_statements) {
+                updated_else_body: if else_body == .Val(else_statements) -> {
                     ^rewritten: else_statements.copy()
                     if !sema_loop_value_widen_result_breaks_in(rewritten, root_label, result_type, allow_unlabeled, check) {
                         return false
                     }
-                    updated_else_body = Val(rewritten)
-                }
+                    Val(rewritten)
+                } else -> None
                 statements[index] = TStmt.If{condition: condition, then_body: updated_then_body, else_body: updated_else_body, else_is_elseif: else_is_elseif, span: span}
             }
             .Match(subject, arms, exhaustive, span) -> {
                 ^updated_arms: arms.copy()
                 loop arm_index in 0..<updated_arms.len() {
-                    ^arm_body: updated_arms[arm_index].body
-                    if !sema_loop_value_widen_result_breaks_in(arm_body, root_label, result_type, allow_unlabeled, check) {
+                    if !sema_loop_value_widen_result_breaks_in(updated_arms[arm_index].body, root_label, result_type, allow_unlabeled, check) {
                         return false
                     }
-                    updated_arms[arm_index].body = arm_body
                 }
                 statements[index] = TStmt.Match{subject: subject, arms: updated_arms, exhaustive: exhaustive, span: span}
             }
             .EnumMatch(subject, arms, else_body, fallthrough, span) -> {
                 ^updated_arms: arms.copy()
                 loop arm_index in 0..<updated_arms.len() {
-                    ^arm_body: updated_arms[arm_index].body
-                    if !sema_loop_value_widen_result_breaks_in(arm_body, root_label, result_type, allow_unlabeled, check) {
+                    if !sema_loop_value_widen_result_breaks_in(updated_arms[arm_index].body, root_label, result_type, allow_unlabeled, check) {
                         return false
                     }
-                    updated_arms[arm_index].body = arm_body
                 }
-                ^updated_else_body: else_body.copy()
-                if else_body == .Val(else_statements) {
+                updated_else_body: if else_body == .Val(else_statements) -> {
                     ^rewritten: else_statements.copy()
                     if !sema_loop_value_widen_result_breaks_in(rewritten, root_label, result_type, allow_unlabeled, check) {
                         return false
                     }
-                    updated_else_body = Val(rewritten)
-                }
+                    Val(rewritten)
+                } else -> None
                 statements[index] = TStmt.EnumMatch{scrutinee: subject, arms: updated_arms, else_body: updated_else_body, fallthrough: fallthrough, span: span}
             }
             .RangeSwitch(subject, arms, else_body, span) -> {
                 ^updated_else_body: else_body
                 ^updated_arms: arms.copy()
                 loop arm_index in 0..<updated_arms.len() {
-                    ^arm_body: updated_arms[arm_index].body
-                    if !sema_loop_value_widen_result_breaks_in(arm_body, root_label, result_type, allow_unlabeled, check) {
+                    if !sema_loop_value_widen_result_breaks_in(updated_arms[arm_index].body, root_label, result_type, allow_unlabeled, check) {
                         return false
                     }
-                    updated_arms[arm_index].body = arm_body
                 }
                 if !sema_loop_value_widen_result_breaks_in(updated_else_body, root_label, result_type, allow_unlabeled, check) {
                     return false
@@ -482,20 +463,17 @@ sema_loop_value_widen_result_breaks_in: fn(statements: ^[TStmt], root_label: Str
             .MixedSwitch(subject, branch_class, arms, else_body, span) -> {
                 ^updated_arms: arms.copy()
                 loop arm_index in 0..<updated_arms.len() {
-                    ^arm_body: updated_arms[arm_index].body
-                    if !sema_loop_value_widen_result_breaks_in(arm_body, root_label, result_type, allow_unlabeled, check) {
+                    if !sema_loop_value_widen_result_breaks_in(updated_arms[arm_index].body, root_label, result_type, allow_unlabeled, check) {
                         return false
                     }
-                    updated_arms[arm_index].body = arm_body
                 }
-                ^updated_else_body: else_body.copy()
-                if else_body == .Val(else_statements) {
+                updated_else_body: if else_body == .Val(else_statements) -> {
                     ^rewritten: else_statements.copy()
                     if !sema_loop_value_widen_result_breaks_in(rewritten, root_label, result_type, allow_unlabeled, check) {
                         return false
                     }
-                    updated_else_body = Val(rewritten)
-                }
+                    Val(rewritten)
+                } else -> None
                 statements[index] = TStmt.MixedSwitch{subject: subject, class: branch_class, arms: updated_arms, else_body: updated_else_body, span: span}
             }
             .RefutableBind(pattern, init, fallback, span) -> {

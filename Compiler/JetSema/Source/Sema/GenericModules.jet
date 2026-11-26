@@ -228,12 +228,12 @@ sema_genmod_find_alias: fn(aliases: [ModuleAliasDef], name: String) -> ModuleAli
 
 // Keeps `diagnostic` once per (code, span, what); a missing span counts as
 // the empty span at 0.
-sema_genmod_push: fn(check: ^SemaGenericModuleCheck, diagnostic: Diagnostic) {
+sema_genmod_push: fn(check: ^SemaGenericModuleCheck, diagnostic: ^^Diagnostic) {
     span: diagnostic.span ?? Span{start: 0, end: 0}
     if !sema_key_report_first(check.seen, diagnostic.code, Val(span), diagnostic.what) {
         return
     }
-    check.diagnostics.push(diagnostic.copy())
+    check.diagnostics.push(diagnostic)
 }
 
 // Enum names declared by a module's items (and nested template bodies), each
@@ -845,8 +845,8 @@ sema_genmod_visit: fn(node: String, nodes: [SemaGenericModuleNode], state_keys: 
                 chain.push(edge.target)
                 text: chain.join(" -> ")
                 if !reported.contains(text) {
-                    reported.push(text.copy())
                     sema_genmod_push(check, sema_error("E0855", edge.span, "generic module instantiation forms a cycle: {text}", "module aliases must form an acyclic dependency graph so specialization reaches one stable result", "break the cycle: {text}"))
+                    reported.push(text)
                 }
             }
         }
@@ -1277,7 +1277,7 @@ sema_genmod_rewrite_item: fn(rewrite: ^SemaInlineRewrite, item: Item) -> Item {
         .Test(definition) -> {
             ^updated: definition
             saved: rewrite.locals.len()
-            updated.params = sema_inline_rewrite_params(rewrite, definition.params)
+            sema_inline_rewrite_params(rewrite, updated.params)
             updated.body = sema_inline_rewrite_stmts(rewrite, definition.body)
             sema_inline_restore_locals(rewrite, saved)
             Item.Test{value: updated}
@@ -1308,8 +1308,8 @@ sema_genmod_bind: fn(alias: ModuleAliasDef, source: SemaGenericModuleSource, val
                     }
                 }
                 binding.type_names.push(name.copy())
-                binding.type_actuals.push(ty.copy())
                 binding.argument_keys.push(type_identity_key(ty))
+                binding.type_actuals.push(ty)
                 binding.key = "{binding.key}|{binding.argument_keys[index]}"
             }
             .Value(name, _, ty) -> {
@@ -1327,8 +1327,8 @@ sema_genmod_bind: fn(alias: ModuleAliasDef, source: SemaGenericModuleSource, val
                 actual_key: sema_genmod_literal_key(folded) ?? return None
                 if sema_genmod_tier0_key(ty) != Val(actual_key) -> return None
                 binding.value_names.push(name.copy())
-                binding.value_actuals.push(folded.copy())
                 binding.argument_keys.push(sema_genmod_literal_text(folded))
+                binding.value_actuals.push(folded)
                 binding.key = "{binding.key}|{binding.argument_keys[index]}"
             }
         }
@@ -1415,16 +1415,18 @@ sema_genmod_expand_alias: fn(alias: ModuleAliasDef, source: SemaGenericModuleSou
             value: sema_inline_rewrite_expr(rewrite, definition.value)
             ^mapped: definition.copy()
             mapped.name = sema_genmod_value_name(alias.name, definition.name)
-            mapped.value = value.copy()
             mapped.ty = sema_inline_rewrite_optional_type(rewrite, definition.ty)
-            mapped.markers = sema_inline_rewrite_markers(rewrite, definition.markers)
+            sema_inline_rewrite_markers(rewrite, mapped.markers)
             mapped.meta = sema_inline_rewrite_meta(rewrite, definition.meta)
             mapped.ct = None
             folded: sema_genmod_fold(value, rewrite.values, enums)
-            if folded == .Val(literal) {
-                sema_inline_value_put(rewrite.values, definition.name, literal.copy())
-                mapped.value = literal.copy()
+            if folded == .Val(_) {
+                literal: folded ?? value
                 if mapped.ty == None -> mapped.ty = sema_genmod_literal_type(literal)
+                sema_inline_value_put(rewrite.values, definition.name, literal.copy())
+                mapped.value = literal
+            } else {
+                mapped.value = value
             }
             declarations.push(Item.Const{value: mapped})
         }
@@ -1553,7 +1555,7 @@ sema_genmod_rewrite_body: fn(rewrite: ^SemaInlineRewrite, body: [Item]) -> [Item
             ^updated: definition.copy()
             updated.value = sema_inline_rewrite_expr(rewrite, definition.value)
             updated.ty = sema_inline_rewrite_optional_type(rewrite, definition.ty)
-            updated.markers = sema_inline_rewrite_markers(rewrite, definition.markers)
+            sema_inline_rewrite_markers(rewrite, updated.markers)
             updated.meta = sema_inline_rewrite_meta(rewrite, definition.meta)
             mapped.push(Item.Const{value: updated})
         } else if item == .CodeModule(child) {
@@ -1644,7 +1646,7 @@ sema_genmod_specialize_nested: fn(rewrite: ^SemaInlineRewrite, body: [Item], mod
                 ^updated: definition.copy()
                 updated.value = sema_inline_rewrite_expr(rewrite, definition.value)
                 updated.ty = sema_inline_rewrite_optional_type(rewrite, definition.ty)
-                updated.markers = sema_inline_rewrite_markers(rewrite, definition.markers)
+                sema_inline_rewrite_markers(rewrite, updated.markers)
                 updated.meta = sema_inline_rewrite_meta(rewrite, definition.meta)
                 mapped.push(Item.Const{value: updated})
             }
@@ -1706,8 +1708,8 @@ sema_genmod_specialize_test: fn(rewrite: ^SemaInlineRewrite, definition: TestDef
     updated.expected_fail = false
     updated.faults = [String]{}
     saved: rewrite.locals.len()
-    updated.params = sema_inline_rewrite_params(rewrite, definition.params)
-    updated.pre = sema_inline_rewrite_clauses(rewrite, definition.pre)
+    sema_inline_rewrite_params(rewrite, updated.params)
+    sema_inline_rewrite_clauses(rewrite, updated.pre)
     updated.body = sema_inline_rewrite_stmts(rewrite, definition.body)
     sema_inline_restore_locals(rewrite, saved)
     updated

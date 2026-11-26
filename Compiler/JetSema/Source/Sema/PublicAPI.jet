@@ -125,13 +125,15 @@ sema_public_api_scope: fn(items: [Item], functions: [FnBody], prefix: String, mo
                 if definition.is_pub {
                     name: sema_public_api_row_name(definition.name, prefix, modules) ?? next
                     range: if definition.range == .Val(bounds) -> " in {bounds.lo}..={bounds.hi}" else -> ""
-                    rows.push(PublicAPIItem{kind: "distinct", name: name.copy(), signature: "distinct {name}: {sema_public_api_type(definition.base, spellings)}{range}"})
+                    signature: "distinct {name}: {sema_public_api_type(definition.base, spellings)}{range}"
+                    rows.push(PublicAPIItem{kind: "distinct", name: name, signature: signature})
                 }
             }
             .TypeAlias(definition) -> {
                 if definition.is_pub {
                     name: sema_public_api_row_name(definition.name, prefix, modules) ?? next
-                    rows.push(PublicAPIItem{kind: "type", name: name.copy(), signature: "type {name}{sema_public_api_type_params(definition.type_params, spellings)} = {sema_public_api_type(definition.target, spellings)}"})
+                    signature: "type {name}{sema_public_api_type_params(definition.type_params, spellings)} = {sema_public_api_type(definition.target, spellings)}"
+                    rows.push(PublicAPIItem{kind: "type", name: name, signature: signature})
                 }
             }
             .UnitFamily(definition) -> {
@@ -147,7 +149,8 @@ sema_public_api_scope: fn(items: [Item], functions: [FnBody], prefix: String, mo
                 if definition.is_pub && sema_public_api_named(definition.name) {
                     name: "{prefix}{definition.name}"
                     ty: if definition.ty == .Val(value) -> ": {sema_public_api_type(value, spellings)}" else -> ""
-                    rows.push(PublicAPIItem{kind: "const", name: name.copy(), signature: "const {name}{ty}"})
+                    signature: "const {name}{ty}"
+                    rows.push(PublicAPIItem{kind: "const", name: name, signature: signature})
                 }
             }
             .CodeModule(module_value) -> {
@@ -189,10 +192,10 @@ sema_public_api_lifted_name: fn(name: String, prefix: String, modules: [String:B
     if name.starts_with("__jet_") {
         decoded: sema_inline_decode_generated_suffix(String.from_bytes(name.bytes()[6..<name.bytes().len()]) ?? "") ?? return None
         if !decoded.contains(".") || ast_comptime_generated_path(decoded) != name -> return None
-        segments: decoded.split(".").to_list()
-        ^module_path: segments[0].copy()
-        loop index in 1..<segments.len() - 1 -> module_path = "{module_path}.{segments[index]}"
-        if modules.get(module_path) == Val(true) && sema_public_api_named(segments[segments.len() - 1]) {
+        ^segments: decoded.split(".").to_list()
+        leaf: segments.pop() ?? return None
+        module_path: segments.join(".")
+        if modules.get(module_path) == Val(true) && sema_public_api_named(leaf) {
             return Val("{prefix}{decoded}")
         }
         return None
@@ -365,9 +368,17 @@ sema_public_api_params: fn(params: [Param], units: SemaPublicAPISpellings) -> St
 }
 
 sema_public_api_effects: fn(effects: [String]) -> String Never! {
-    ^sorted: loop name in effects -> name.copy()
+    sema_public_api_effects_owned(loop name in effects -> name.copy())
+}
+
+priv sema_public_api_effects_owned: fn(effects: ^^[String]) -> String Never! {
+    ^sorted: effects
     sorted.sort()
     " -[{sorted.join(", ")}]>"
+}
+
+priv sema_public_api_declared_effects: fn(declared: [EffectRowEntry]) -> String Never! {
+    sema_public_api_effects_owned(loop entry in declared -> entry.name.copy())
 }
 
 // The solved effect row of the checked body this declaration produced; a
@@ -380,7 +391,7 @@ sema_public_api_solved_effects: fn(function: Func, functions: [FnBody]) -> Strin
         }
     }
     if function.declared_effects == .Val(declared) {
-        return sema_public_api_effects(loop entry in declared -> entry.name.copy())
+        return sema_public_api_declared_effects(declared)
     }
     " -[*]>"
 }
@@ -405,9 +416,14 @@ sema_public_api_method_footprint: fn(function: Func, functions: [FnBody]) -> Str
     ""
 }
 
-sema_public_api_fn: fn(name: String, function: Func, functions: [FnBody], units: SemaPublicAPISpellings) -> PublicAPIItem Never! {
+priv sema_public_api_fn_signature: fn(name: String, function: Func, functions: [FnBody], units: SemaPublicAPISpellings) -> String Never! {
     ret: if function.return_type == .Val(ty) -> " {sema_public_api_type(ty, units)}" else -> ""
-    PublicAPIItem{kind: "fn", name: name.copy(), signature: "fn {name}{sema_public_api_type_params(function.type_params, units)}({sema_public_api_params(function.params, units)}){sema_public_api_solved_effects(function, functions)}{ret}"}
+    "fn {name}{sema_public_api_type_params(function.type_params, units)}({sema_public_api_params(function.params, units)}){sema_public_api_solved_effects(function, functions)}{ret}"
+}
+
+sema_public_api_fn: fn(name: ^^String, function: Func, functions: [FnBody], units: SemaPublicAPISpellings) -> PublicAPIItem Never! {
+    signature: sema_public_api_fn_signature(name, function, functions, units)
+    PublicAPIItem{kind: "fn", name: name, signature: signature}
 }
 
 sema_public_api_methods: fn(owner: String, methods: [Func], functions: [FnBody], units: SemaPublicAPISpellings, rows: ^[PublicAPIItem]) Never! {
@@ -454,15 +470,18 @@ sema_public_api_cap: fn(cap: ModuleCap?, name: String, rows: ^[PublicAPIItem]) N
 // ends in `= _`. A `#CLI` field that fills a bare positional ends in
 // `[positional N]`: declaration order is part of the command interface
 // (spec.md "Field mapping"), the binding the checked CLISchema records.
-sema_public_api_struct: fn(definition: StructDef, functions: [FnBody], name: String, units: SemaPublicAPISpellings, rows: ^[PublicAPIItem]) Never! {
+sema_public_api_struct: fn(definition: StructDef, functions: [FnBody], name: ^^String, units: SemaPublicAPISpellings, rows: ^[PublicAPIItem]) Never! {
     ^positions: [String:String]{}
     ^cli: false
     loop derive_item in definition.derives {
         if derive_item.name == "CLI" -> cli = true
     }
     if cli {
-        loop input in sema_cli_schema_fields(definition) {
-            if input.positional == .Val(at) -> positions[input.field.copy()] = " [positional {at}]"
+        ^cli_fields: sema_cli_schema_fields(definition)
+        cli_fields.reverse()
+        loop cli_fields.len() > 0 {
+            input: cli_fields.pop() ?? break
+            if input.positional == .Val(at) -> positions[input.field] = " [positional {at}]"
         }
     }
     ^hidden: false
@@ -476,16 +495,17 @@ sema_public_api_struct: fn(definition: StructDef, functions: [FnBody], name: Str
         rows.push(PublicAPIItem{kind: "field", name: "{name}.{field.name}", signature: "field {name}.{field.name}: {sema_public_api_type(field.ty, units)}{default}{positional}"})
     }
     sealed: if hidden -> " {{ .. }}" else -> ""
-    rows.push(PublicAPIItem{kind: "struct", name: name.copy(), signature: "struct {name}{sema_public_api_type_params(definition.type_params, units)}{sealed}"})
+    signature: "struct {name}{sema_public_api_type_params(definition.type_params, units)}{sealed}"
     sema_public_api_cap(definition.cap, name, rows)
     sema_public_api_methods(name, definition.methods, functions, units, rows)
     sema_public_api_impls(name, definition.trait_impls, rows)
+    rows.push(PublicAPIItem{kind: "struct", name: name, signature: signature})
 }
 
 // An enum is its row plus one `variant` row per variant. An `#Open` enum's row
 // ends in ` #Open`, so adding a variant is non-breaking while adding or
 // removing `#Open` changes the row signature.
-sema_public_api_enum: fn(definition: EnumDef, functions: [FnBody], name: String, units: SemaPublicAPISpellings, rows: ^[PublicAPIItem]) Never! {
+sema_public_api_enum: fn(definition: EnumDef, functions: [FnBody], name: ^^String, units: SemaPublicAPISpellings, rows: ^[PublicAPIItem]) Never! {
     loop variant in definition.variants {
         payload: if variant.payload == {
             .Unit -> ""
@@ -504,15 +524,16 @@ sema_public_api_enum: fn(definition: EnumDef, functions: [FnBody], name: String,
             break
         }
     }
-    rows.push(PublicAPIItem{kind: "enum", name: name.copy(), signature: "enum {name}{sema_public_api_type_params(definition.type_params, units)}{open_mark}"})
+    signature: "enum {name}{sema_public_api_type_params(definition.type_params, units)}{open_mark}"
     sema_public_api_cap(definition.cap, name, rows)
     sema_public_api_methods(name, definition.methods, functions, units, rows)
     sema_public_api_impls(name, definition.trait_impls, rows)
+    rows.push(PublicAPIItem{kind: "enum", name: name, signature: signature})
 }
 
 sema_public_api_trait_method: fn(name: String, method: TraitMethodSig, units: SemaPublicAPISpellings) -> String Never! {
     ret: if method.return_type == .Val(ty) -> " {sema_public_api_type(ty, units)}" else -> ""
-    effects: if method.declared_effects == .Val(declared) -> sema_public_api_effects(loop entry in declared -> entry.name.copy()) else -> ""
+    effects: if method.declared_effects == .Val(declared) -> sema_public_api_declared_effects(declared) else -> ""
     "{name}.{method.name}({sema_public_api_params(method.params, units)}){effects}{ret}"
 }
 
@@ -521,7 +542,7 @@ sema_public_api_trait_method: fn(name: String, method: TraitMethodSig, units: Se
 // without a default and methods without a body. A defaulted constant or
 // method is a `const` or `fn` row ending in `= _`, so adding one breaks no
 // implementor.
-sema_public_api_trait: fn(definition: TraitDef, name: String, units: SemaPublicAPISpellings, rows: ^[PublicAPIItem]) Never! {
+sema_public_api_trait: fn(definition: TraitDef, name: ^^String, units: SemaPublicAPISpellings, rows: ^[PublicAPIItem]) Never! {
     loop assoc in definition.assoc_types {
         rows.push(PublicAPIItem{kind: "require", name: "{name}.{assoc.name}", signature: "require {name}.{assoc.name}: type"})
     }
@@ -542,8 +563,9 @@ sema_public_api_trait: fn(definition: TraitDef, name: String, units: SemaPublicA
         }
     }
     supertraits: if definition.supertraits.len() == 0 -> "" else -> ": {definition.supertraits.join(" + ")}"
-    rows.push(PublicAPIItem{kind: "trait", name: name.copy(), signature: "trait {name}{supertraits}"})
+    signature: "trait {name}{supertraits}"
     sema_public_api_cap(definition.cap, name, rows)
+    rows.push(PublicAPIItem{kind: "trait", name: name, signature: signature})
 }
 
 sema_public_api_unit_family: fn(definition: UnitFamilyDef, prefix: String) -> PublicAPIItem Never! {
@@ -691,10 +713,10 @@ sema_public_api_reexport_signature: fn(graph: SemaRegistrationGraph, result: Sem
     if graph.modules[owner].declarations[position] == .Func(function) {
         loop checked in result.modules {
             if checked.module_identity == graph.modules[owner].module_identity {
-                return Val(sema_public_api_fn(target, function, checked.functions, sema_public_api_spellings_none()).signature)
+                return Val(sema_public_api_fn_signature(target, function, checked.functions, sema_public_api_spellings_none()))
             }
         }
-        return Val(sema_public_api_fn(target, function, [FnBody]{}, sema_public_api_spellings_none()).signature)
+        return Val(sema_public_api_fn_signature(target, function, [FnBody]{}, sema_public_api_spellings_none()))
     }
     None
 }
@@ -708,6 +730,7 @@ sema_public_api_reexport_rows: fn(reexports: [SemaPublicAPIReexport], prefix: St
     loop reexport in reexports {
         if !reexport.public || !sema_public_api_named(reexport.name) -> next
         name: if reexport.parent == "" -> "{prefix}{reexport.name}" else -> "{prefix}{reexport.parent}.{reexport.name}"
-        rows.push(PublicAPIItem{kind: "reexport", name: name.copy(), signature: "reexport {name} = {reexport.signature}"})
+        signature: "reexport {name} = {reexport.signature}"
+        rows.push(PublicAPIItem{kind: "reexport", name: name, signature: signature})
     }
 }
