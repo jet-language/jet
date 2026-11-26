@@ -1,0 +1,9 @@
+// A hole in the program position (argv[0]) of `Sh` accepts only a `Path`,
+// never a plain `String`, while a `Path` in program position is accepted.
+run: fn() {
+    bad_prog: "git"
+    bad_cmd: Sh{"{bad_prog} status"}
+    ok_prog: Path.from("/usr/bin/env")
+    ok_cmd: Sh{"{ok_prog} echo hi"}
+    print("{bad_cmd} {ok_cmd}")
+}

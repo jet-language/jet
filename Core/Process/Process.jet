@@ -171,9 +171,12 @@ impl Sh.CheckedText {
         Ok(Checked{shape: ShShape{texts: plan.texts.copy(), holes: plan.holes.copy(), word_counts: plan.word_counts.copy()}, slots: slots})
     }
 
-    accepts: fn(_slot: ShSlot, hole: TypeId) -[]> String? {
+    accepts: fn(slot: ShSlot, hole: TypeId) -[]> String? {
         if hole.kind == .List || hole.kind == .FixedList {
             return Val("a list (`{hole.name}`) cannot sit in one `Sh` hole because `Sh` keeps each hole as one argv item without splitting; use `.extend(items)` instead")
+        }
+        if slot == .Program && hole.name != "Path" && !hole.name.ends_with(".Path") {
+            return Val("the program position of `Sh` accepts only a literal program name or a `Path`, not `{hole.name}`; pass a `Path` (e.g. `Path.from(…)`) or write the program name literally")
         }
         None
     }
