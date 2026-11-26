@@ -11,6 +11,9 @@ TEffectSpan: struct {
     // Whether the module state is a `^name: ...` / `#Persist ^name: ...`
     // storage binding (as opposed to a thread-safe `Shared` holder).
     storage: Bool{false},
+    // Whether this storage write sits inside an `#Unsafe` gate (`unsafe_depth > 0`):
+    // a global whose every write sits inside `#Unsafe` is a raw word.
+    in_unsafe: Bool{false},
 }
 
 // A `#ContextKey` value a `#Memo` function can read (`context.get(key)`):
@@ -46,6 +49,10 @@ TEffectFacts: struct {
     // `Shared`/`Cell` holder. It is no effect, so `solved` never shows it, but
     // a pure (`-[]>`) or `#Memo` function may not reach one.
     module_reads: [TEffectSpan]{[TEffectSpan]{}},
+    // The first module state name this function writes directly or transitively
+    // through calls or function values, stamped by the effect solve so held
+    // debugger/eval checks read it directly without walking the call graph.
+    solved_module_write: String?{None},
     // For a `#Memo` function, the task context fields it can read
     // (`context.<field>`) and the context keys (`context.get(key)`),
     // JetSema sema_effect_context_reach, in key order: its memo key holds

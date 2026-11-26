@@ -395,7 +395,7 @@ sema_call_c_callback_unsafe: fn(argument: Expr, check: SemaBodyCheck) -> Bool {
             function: sema_http_route_find_function(check, name) ?? return false
             return !sema_call_foreign_thread_safe_func(function.declaration, sema_call_registered_function_body(check.program.*, function))
         }
-        .Lambda(lambda, _) -> return !sema_call_foreign_thread_safe_lambda(lambda) || sema_call_lambda_captures_local(check.environment.tables, lambda, check.scopes)
+        .Lambda(lambda, _) -> return !sema_call_foreign_thread_safe_lambda(lambda) || sema_call_lambda_captures_local(check.environment.*, check.program.*, lambda, check.scopes)
         .Field(base, _, _, _) -> {
             if base == .Ident(name, _, _) {
                 index: sema_scope_resolve_index(check.scopes, name) ?? return false
@@ -487,8 +487,10 @@ sema_call_c_callback_context_error: fn(member: String, argument: Expr) -> Diagno
 }
 
 // A C callback lambda is capture-free: no name it reads, other than its own
-// parameters and bindings, may be a local of the enclosing function.
-sema_call_lambda_captures_local: fn(tables: ASTTables, lambda: Lambda, scopes: SemaScopeTable) -> Bool {
+// parameters and bindings, may be a local of the enclosing function or a
+// changeable module storage binding.
+sema_call_lambda_captures_local: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, lambda: Lambda, scopes: SemaScopeTable) -> Bool {
+    tables: environment.tables
     ^inner: (loop parameter in lambda.params -> parameter.name)
     ^names: [String]{}
     if lambda.body == {
@@ -520,6 +522,9 @@ sema_call_lambda_captures_local: fn(tables: ASTTables, lambda: Lambda, scopes: S
         index: sema_scope_resolve_index(scopes, name) ?? next
         kind: scopes.bindings[index].symbol.kind
         if kind == SymbolKind.Local || kind == SymbolKind.Parameter -> return true
+        if kind == SymbolKind.Constant && sema_scope_module_storage_binding(environment, program, scopes.bindings[index].symbol) != None {
+            return true
+        }
     }
     false
 }

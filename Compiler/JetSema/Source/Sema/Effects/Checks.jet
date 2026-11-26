@@ -26,6 +26,7 @@ use jet_foundation.[
     BodyContract,
     BodyCoreClosureKind,
     BodyFnValueKind,
+    BodyHandleOp,
     BodyHostCall,
     BodyIfCond,
     BodyLambda,
@@ -84,6 +85,7 @@ use jet_foundation.[
     Stmt,
     StmtKind,
     TBuiltinOp,
+    TClosureOp,
     TEffectFacts,
     TEffectSpan,
     TFuncKind,
@@ -97,6 +99,9 @@ use jet_foundation.[
     compiler_transfer_rows,
     diagnostic_with_label,
     diagnostic_with_rights,
+    body_each_if_cond_child,
+    body_each_node_kind_child,
+    body_each_stmt_child,
     body_node,
     body_node_index,
     Interner,
@@ -182,6 +187,9 @@ SemaEffectFunctionSource: struct {
     // The trait this impl method implements, resolved where its `impl`
     // block is written; None for any other function (E0754).
     trait_symbol: SymbolID?{None},
+    // Whether this function carries `#Export(c)` (E3203 if it touches
+    // changeable module storage globals that are not raw words).
+    is_guest_export: Bool{false},
 }
 
 // One `#FX(…)` region: its parsed caps, the head span E0712 points at, and
@@ -547,6 +555,8 @@ SemaEffectNode: struct {
     instantiations: [SemaEffectInstantiation]{[SemaEffectInstantiation]{}},
     // Whether the first parameter is `path`, as a Core scope publisher's is.
     path_first: Bool{false},
+    // Whether this function carries `#Export(c)`.
+    is_guest_export: Bool{false},
     // The rows few bodies fill, boxed apart: None until one of them gains an
     // entry (sema_effect_node_rare_open), so a node that fills none holds
     // one empty word in their place.
@@ -687,6 +697,7 @@ sema_effect_source_from_header: fn(func: Func, key: String, facts: ^^SemaEffectB
         memo_span: sema_effect_memo_span(func),
         kernel: owned.kernel.move(),
         module_caps: func.module_caps,
+        is_guest_export: sema_function_is_guest_export(func),
     }
 }
 
@@ -1535,6 +1546,100 @@ sema_effect_state_reader_path: fn(nodes: [SemaEffectNode], index: Int, seen: ^[B
     [Int]{}
 }
 
+// Solves the first module state name written directly or transitively (through
+// `call_targets` or `value_targets`) for every node in `nodes`. Returns an
+// empty list when no node writes module state so programs without module writes
+// pay zero cost.
+sema_effect_solve_module_writes: fn(nodes: [SemaEffectNode], callers: [[Int]], any_module_writes: Bool) -> [String?] Never! {
+    if !any_module_writes -> return [String?]{}
+    count: nodes.len()
+    ^value_callers: (loop _ in 0..<count -> [Int]{})
+    loop index in 0..<count {
+        if nodes[index].rare == .Val(rare) {
+            loop target in rare.value_targets {
+                if target >= 0 && target < count -> value_callers[target].push(index)
+            }
+        }
+    }
+    ^can_write: (loop _ in 0..<count -> false)
+    ^pending: [Int]{}
+    loop index in 0..<count {
+        if nodes[index].rare == .Val(rare) && rare.module_writes.len() > 0 {
+            can_write[index] = true
+            pending.push(index)
+        }
+    }
+    ^cursor: 0
+    loop cursor < pending.len() {
+        incoming: pending[cursor]
+        cursor += 1
+        loop caller in callers[incoming] {
+            if !can_write[caller] {
+                can_write[caller] = true
+                pending.push(caller)
+            }
+        }
+        loop caller in value_callers[incoming] {
+            if !can_write[caller] {
+                can_write[caller] = true
+                pending.push(caller)
+            }
+        }
+    }
+    ^out: (loop _ in 0..<count -> String?{None})
+    ^seen: (loop _ in 0..<count -> false)
+    ^visited: [Int]{}
+    loop index in 0..<count {
+        if !can_write[index] -> next
+        if nodes[index].rare == .Val(rare) && rare.module_writes.len() > 0 {
+            out[index] = Val(rare.module_writes[0].name)
+            next
+        }
+        path: sema_effect_state_writer_path(nodes, index, seen, visited)
+        loop row in visited -> seen[row] = false
+        visited.clear()
+        if path.len() > 0 {
+            writer: nodes[path[path.len() - 1]]
+            writes: writer.rare ?? SEMA_EFFECT_NODE_NO_RARE
+            if writes.module_writes.len() > 0 {
+                out[index] = Val(writes.module_writes[0].name)
+            }
+        }
+    }
+    out
+}
+
+// A changeable module storage global whose every write sits inside `#Unsafe`
+// (and that has at least one such write) is a raw word: it skips the task and
+// `#Export(c)` concurrency checks while purity (`-[]>`) and `#Memo` still see
+// it. A single plain write outside `#Unsafe` makes the global tracked.
+sema_effect_raw_storage_words: fn(nodes: [SemaEffectNode]) -> NameTable Never! {
+    ^unsafe_written: name_table_sized(8)
+    ^unsafe_names: [String]{}
+    ^plain_written: name_table_sized(8)
+    loop node in nodes {
+        rare: node.rare ?? next
+        loop write in rare.module_writes {
+            if !write.storage -> next
+            if write.in_unsafe {
+                if name_find(unsafe_written, write.name) == None {
+                    ^_: name_intern(unsafe_written, write.name)
+                    unsafe_names.push(write.name)
+                }
+            } else {
+                ^_: name_intern(plain_written, write.name)
+            }
+        }
+    }
+    ^raw: name_table_sized(unsafe_names.len() + 2)
+    loop name in unsafe_names {
+        if name_find(plain_written, name) == None {
+            ^_: name_intern(raw, name)
+        }
+    }
+    raw
+}
+
 // First changeable module storage binding (`^name: ...` / `#Persist`) this
 // node reads or writes directly; None for nodes that touch only thread-safe
 // `Shared` holders or no module state.
@@ -1549,18 +1654,41 @@ sema_effect_node_storage_touch: fn(node: SemaEffectNode) -> TEffectSpan? Never! 
     None
 }
 
+// First tracked (non-raw-word) changeable module storage binding this node
+// reads or writes directly.
+sema_effect_node_tracked_storage_touch: fn(node: SemaEffectNode, raw_words: NameTable) -> TEffectSpan? Never! {
+    rare: node.rare ?? return None
+    loop write in rare.module_writes {
+        if write.storage && name_find(raw_words, write.name) == None -> return Val(write)
+    }
+    loop read in rare.module_reads {
+        if read.storage && name_find(raw_words, read.name) == None -> return Val(read)
+    }
+    None
+}
+
+// First tracked (non-raw-word) changeable module storage binding this node
+// writes directly.
+sema_effect_node_tracked_storage_write: fn(node: SemaEffectNode, raw_words: NameTable) -> TEffectSpan? Never! {
+    rare: node.rare ?? return None
+    loop write in rare.module_writes {
+        if write.storage && name_find(raw_words, write.name) == None -> return Val(write)
+    }
+    None
+}
+
 // The call path from `index` to the first function reached depth-first that
-// reads or writes a changeable module storage binding (`storage: true`).
-sema_effect_storage_touch_path: fn(nodes: [SemaEffectNode], index: Int, seen: ^[Bool], visited: ^[Int]) -> [Int] Never! {
+// reads or writes a tracked (non-raw-word) changeable module storage binding.
+sema_effect_tracked_storage_touch_path: fn(nodes: [SemaEffectNode], index: Int, raw_words: NameTable, seen: ^[Bool], visited: ^[Int]) -> [Int] Never! {
     if seen[index] -> return [Int]{}
     seen[index] = true
     visited.push(index)
-    if sema_effect_node_storage_touch(nodes[index]) != None -> return [Int]{index}
+    if sema_effect_node_tracked_storage_touch(nodes[index], raw_words) != None -> return [Int]{index}
     calls: nodes[index].call_targets.len()
     loop position in 0..<(calls + sema_effect_node_value_count(nodes[index])) {
         target: if position < calls -> nodes[index].call_targets[position] else -> sema_effect_node_value_target(nodes[index], position - calls)
         if target < 0 -> next
-        tail: sema_effect_storage_touch_path(nodes, target, seen, visited)
+        tail: sema_effect_tracked_storage_touch_path(nodes, target, raw_words, seen, visited)
         if tail.len() == 0 -> next
         ^path: [Int]{index}
         loop step in tail -> path.push(step)
@@ -1569,14 +1697,58 @@ sema_effect_storage_touch_path: fn(nodes: [SemaEffectNode], index: Int, seen: ^[
     [Int]{}
 }
 
+// The call path from `index` to the first function reached depth-first that
+// writes a tracked (non-raw-word) changeable module storage binding.
+sema_effect_tracked_storage_write_path: fn(nodes: [SemaEffectNode], index: Int, raw_words: NameTable, seen: ^[Bool], visited: ^[Int]) -> [Int] Never! {
+    if seen[index] -> return [Int]{}
+    seen[index] = true
+    visited.push(index)
+    if sema_effect_node_tracked_storage_write(nodes[index], raw_words) != None -> return [Int]{index}
+    calls: nodes[index].call_targets.len()
+    loop position in 0..<(calls + sema_effect_node_value_count(nodes[index])) {
+        target: if position < calls -> nodes[index].call_targets[position] else -> sema_effect_node_value_target(nodes[index], position - calls)
+        if target < 0 -> next
+        tail: sema_effect_tracked_storage_write_path(nodes, target, raw_words, seen, visited)
+        if tail.len() == 0 -> next
+        ^path: [Int]{index}
+        loop step in tail -> path.push(step)
+        return path
+    }
+    [Int]{}
+}
+
+// Collects every tracked (non-raw-word) storage global read and written
+// transitively from `index`.
+sema_effect_collect_tracked_storage_touches: fn(nodes: [SemaEffectNode], index: Int, raw_words: NameTable, seen: ^[Bool], visited: ^[Int], reads: ^[String], writes: ^[String]) Never! {
+    if seen[index] -> return
+    seen[index] = true
+    visited.push(index)
+    if nodes[index].rare == .Val(rare) {
+        loop write in rare.module_writes {
+            if write.storage && name_find(raw_words, write.name) == None && !writes.contains(write.name) {
+                writes.push(write.name)
+            }
+        }
+        loop read in rare.module_reads {
+            if read.storage && name_find(raw_words, read.name) == None && !reads.contains(read.name) {
+                reads.push(read.name)
+            }
+        }
+    }
+    calls: nodes[index].call_targets.len()
+    loop position in 0..<(calls + sema_effect_node_value_count(nodes[index])) {
+        target: if position < calls -> nodes[index].call_targets[position] else -> sema_effect_node_value_target(nodes[index], position - calls)
+        if target < 0 -> next
+        sema_effect_collect_tracked_storage_touches(nodes, target, raw_words, seen, visited, reads, writes)
+    }
+}
+
 // Whether a `BodyCoreClosureKind.Spawn` is unscoped: either started outside
 // any `task.group` (`group == None`) or spawned through a `Group` parameter
 // (whose opener cannot see the child's borrows).
 sema_effect_spawn_is_unscoped: fn(function: FnBody, group: Int?) -> Bool Never! {
     group_node: group ?? return true
-    offset: group_node - function.tree.node_base
-    if offset < 0 || offset >= function.tree.nodes.len() -> return false
-    if function.tree.nodes[offset].kind == .Local(local) {
+    if body_node(function.tree, group_node).kind == .Local(local) {
         loop param in function.params {
             if param.name == local.name -> return true
         }
@@ -1584,13 +1756,435 @@ sema_effect_spawn_is_unscoped: fn(function: FnBody, group: Int?) -> Bool Never! 
     false
 }
 
-sema_effect_unscoped_task_storage_diagnostic: fn(nodes: [SemaEffectNode], path: [Int], spawn_span: Span) -> Diagnostic {
+sema_effect_guest_export_storage_diagnostic: fn(nodes: [SemaEffectNode], path: [Int], raw_words: NameTable) -> Diagnostic {
+    node: nodes[path[0]]
     leaf: nodes[path[path.len() - 1]]
-    touch: sema_effect_node_storage_touch(leaf) ?? TEffectSpan{name: leaf.name, span: spawn_span, storage: true}
+    touch: sema_effect_node_tracked_storage_touch(leaf, raw_words) ?? TEffectSpan{name: leaf.name, span: node.name_span, storage: true}
+    chain: loop step in path -> nodes[step].chain_name
+    what: if path.len() == 1 -> "`#Export(c)` `{node.name}` uses changeable module state `{touch.name}`" else -> "`#Export(c)` `{node.name}` reaches changeable module state `{touch.name}`"
+    why: if path.len() == 1 -> "a C host can call `#Export(c)` `{node.name}` on any thread, where accessing changeable module state `{touch.name}` would race Jet tasks" else -> "a C host can call `#Export(c)` `{node.name}` on any thread, and {chain.join(" → ")} touches changeable module state `{touch.name}`"
+    diagnostic: sema_error("E3203", node.name_span, what, why, "pass `{touch.name}` as a parameter, keep shared state in `Shared{{…}}`, or confine every write to `{touch.name}` inside `#Unsafe`")
+    diagnostic_with_rights(diagnostic, "export", chain, [String]{}, None)
+}
+
+sema_effect_unscoped_task_storage_diagnostic: fn(nodes: [SemaEffectNode], path: [Int], raw_words: NameTable, spawn_span: Span) -> Diagnostic {
+    leaf: nodes[path[path.len() - 1]]
+    touch: sema_effect_node_tracked_storage_touch(leaf, raw_words) ?? TEffectSpan{name: leaf.name, span: spawn_span, storage: true}
     chain: loop step in path -> nodes[step].chain_name
     why: "a task started outside a lexical `task.group` may outlive its starter and race other accesses to `{touch.name}` ({chain.join(" → ")})"
     diagnostic: sema_error("E1102", spawn_span, "this task reaches changeable module state `{touch.name}` through `{nodes[path[0]].chain_name}`", why, "spawn the task inside a `task.group`, pass `{touch.name}` in by value, or keep shared state in `Shared{{…}}`")
     diagnostic_with_rights(diagnostic, "task", chain, [String]{}, None)
+}
+
+sema_effect_combinator_write_diagnostic: fn(nodes: [SemaEffectNode], path: [Int], raw_words: NameTable, span: Span) -> Diagnostic {
+    leaf: nodes[path[path.len() - 1]]
+    write: sema_effect_node_tracked_storage_write(leaf, raw_words) ?? TEffectSpan{name: leaf.name, span: span, storage: true}
+    chain: loop step in path -> nodes[step].chain_name
+    why: "branches of `task.all`, `task.race`, and `task.any` run concurrently, and {chain.join(" → ")} writes changeable module state `{write.name}`"
+    diagnostic: sema_error("E1101", span, "`{write.name}` cannot be written inside a concurrent task combinator", why, "read `{write.name}` only, move the write after the combinator, or share it with `Shared{{…}}`")
+    diagnostic_with_rights(diagnostic, "task", chain, [String]{}, None)
+}
+
+sema_effect_para_write_diagnostic: fn(nodes: [SemaEffectNode], path: [Int], raw_words: NameTable, span: Span) -> Diagnostic {
+    leaf: nodes[path[path.len() - 1]]
+    write: sema_effect_node_tracked_storage_write(leaf, raw_words) ?? TEffectSpan{name: leaf.name, span: span, storage: true}
+    chain: loop step in path -> nodes[step].chain_name
+    why: "parallel workers run concurrently over items, and {chain.join(" → ")} writes changeable module state `{write.name}`"
+    diagnostic: sema_error("E1101", span, "`{write.name}` cannot be written inside a parallel worker", why, "read `{write.name}` only, return values from the worker instead, or share it with `Shared{{…}}`")
+    diagnostic_with_rights(diagnostic, "parallel worker", chain, [String]{}, None)
+}
+
+SemaEffectGroupChild: struct {
+    binding: String?,
+    span: Span,
+    direct_reads: [String],
+    direct_writes: [String],
+    trans_reads: [String],
+    trans_writes: [String],
+}
+
+// Collects every `CoreClosureCall(.Spawn(...))` node offset reachable inside a
+// `TaskGroupAll` / `TaskGroupRace` / `TaskGroupAny` branch expression.
+sema_effect_collect_combinator_spawns: fn(tree: BodyTree, node_id: Int, out: ^[Int:Bool]) Never! {
+    offset: body_node_index(tree, node_id)
+    node: tree.nodes[offset]
+    if node.kind == .CoreClosureCall(closure_kind) {
+        if closure_kind == .Spawn(_, _, _, _) {
+            out[offset] = true
+            return
+        }
+    }
+    body_each_node_kind_child(tree, node.kind, fn(child: Int) { sema_effect_collect_combinator_spawns(tree, child, out) })
+}
+
+// Collects direct tracked storage reads and writes inside a BodyTree expression
+// or statement block (for matching against transitive writes in `task.group`).
+sema_effect_collect_direct_storage_in_expr: fn(tree: BodyTree, node_id: Int, tracked: NameTable, calls: SemaEffectCallIndex, reads: ^[String], writes: ^[String], skip_spawns: Bool) Never! {
+    node: body_node(tree, node_id)
+    if node.kind == .CoreClosureCall(closure_kind) {
+        if skip_spawns && closure_kind == .Spawn(_, _, _, _) -> return
+    }
+    if node.kind == .ConstRef(symbol_id) {
+        if sema_effect_run_key(calls.symbols, symbol_id) == .Val(key) {
+            leaf: symbol_key_leaf(key)
+            if name_find(tracked, leaf) != None && !reads.contains(leaf) -> reads.push(leaf)
+        }
+        return
+    }
+    if node.kind == .Lambda(lambda) {
+        sema_effect_collect_direct_storage_in_lambda(tree, lambda, tracked, calls, reads, writes)
+        return
+    }
+    body_each_node_kind_child(tree, node.kind, fn(child: Int) { sema_effect_collect_direct_storage_in_expr(tree, child, tracked, calls, reads, writes, skip_spawns) })
+}
+
+sema_effect_collect_direct_storage_in_lambda: fn(tree: BodyTree, lambda: BodyLambda, tracked: NameTable, calls: SemaEffectCallIndex, reads: ^[String], writes: ^[String]) Never! {
+    if lambda.executable == {
+        .Expr(value) -> sema_effect_collect_direct_storage_in_expr(tree, value, tracked, calls, reads, writes, false)
+        .Block(body) -> {
+            loop stmt_id in body {
+                sema_effect_collect_direct_storage_in_stmt(tree, stmt_id, tracked, calls, reads, writes)
+            }
+        }
+    }
+}
+
+sema_effect_collect_direct_storage_in_stmt: fn(tree: BodyTree, stmt_id: Int, tracked: NameTable, calls: SemaEffectCallIndex, reads: ^[String], writes: ^[String]) Never! {
+    offset: stmt_id - tree.stmt_base
+    if offset < 0 || offset >= tree.stmts.len() -> return
+    statement: tree.stmts[offset]
+    if statement == .Assign(place, _, value, _, _) {
+        if place == .Expr(target_id) {
+            if body_node(tree, target_id).kind == .Local(local) {
+                if local.persist_key != None && name_find(tracked, local.name) != None && !writes.contains(local.name) {
+                    writes.push(local.name)
+                }
+            }
+        }
+        sema_effect_collect_direct_storage_in_expr(tree, value, tracked, calls, reads, writes, false)
+        return
+    }
+    body_each_stmt_child(tree, statement, fn(child: Int) { sema_effect_collect_direct_storage_in_expr(tree, child, tracked, calls, reads, writes, false) })
+}
+
+// Checks a single `task.group` body for data races involving at least one
+// transitive storage global touch through a called function (direct-vs-direct
+// races are already reported at expression spans in TaskGroups.jet), and for
+// `.detach()` on a handle whose child transitively touches a storage global.
+sema_effect_group_record_child: fn(tree: BodyTree, group_name: String, binding: String?, executable: BodyLambda, spawn_span: Span, in_loop: Bool, tracked: NameTable, nodes: [SemaEffectNode], calls: SemaEffectCallIndex, raw_words: NameTable, seen: ^[Bool], visited: ^[Int], children: ^[SemaEffectGroupChild], out: ^[Diagnostic]) Never! {
+    ^direct_reads: [String]{}
+    ^direct_writes: [String]{}
+    ^trans_reads: [String]{}
+    ^trans_writes: [String]{}
+    sema_effect_collect_direct_storage_in_lambda(tree, executable, tracked, calls, direct_reads, direct_writes)
+    loop edge in executable.effects.call_edges {
+        target: sema_effect_node_index(calls.node_by_key, edge) ?? next
+        sema_effect_collect_tracked_storage_touches(nodes, target, raw_words, seen, visited, trans_reads, trans_writes)
+        loop row in visited -> seen[row] = false
+        visited.clear()
+    }
+    if in_loop && trans_writes.len() > 0 {
+        global_name: trans_writes[0]
+        out.push(sema_error("E1101", spawn_span, "`{global_name}` is written by concurrent children of `{group_name}`", "each iteration spawns a child that calls a function writing changeable module state `{global_name}`, which holds the whole global and races sibling iterations", "move the write after `{group_name}` ends, or share `{global_name}` with `Shared{{…}}`"))
+    }
+    ^reported: name_table_sized(4)
+    loop prev in children {
+        loop g in trans_writes {
+            if name_find(reported, g) == None && (prev.direct_reads.contains(g) || prev.direct_writes.contains(g) || prev.trans_reads.contains(g) || prev.trans_writes.contains(g)) {
+                ^_: name_intern(reported, g)
+                out.push(sema_error("E1101", spawn_span, "`{g}` is already lent to another task in `{group_name}`", "children of `{group_name}` run concurrently, and a write through a called function holds the whole global `{g}`", "move the write after `{group_name}` ends, pass values in, or share `{g}` with `Shared{{…}}`"))
+            }
+        }
+        loop g in prev.trans_writes {
+            if name_find(reported, g) == None && (direct_reads.contains(g) || direct_writes.contains(g) || trans_reads.contains(g) || trans_writes.contains(g)) {
+                ^_: name_intern(reported, g)
+                out.push(sema_error("E1101", spawn_span, "`{g}` is already lent to another task in `{group_name}`", "children of `{group_name}` run concurrently, and a write through a called function holds the whole global `{g}`", "move the write after `{group_name}` ends, pass values in, or share `{g}` with `Shared{{…}}`"))
+            }
+        }
+        loop g in trans_reads {
+            if name_find(reported, g) == None && prev.direct_writes.contains(g) {
+                ^_: name_intern(reported, g)
+                out.push(sema_error("E1101", spawn_span, "`{g}` is already lent to another task in `{group_name}`", "children of `{group_name}` run concurrently, so reading `{g}` through a call races a sibling child's write", "move the write after `{group_name}` ends, pass values in, or share `{g}` with `Shared{{…}}`"))
+            }
+        }
+        loop g in direct_writes {
+            if name_find(reported, g) == None && prev.trans_reads.contains(g) {
+                ^_: name_intern(reported, g)
+                out.push(sema_error("E1101", spawn_span, "`{g}` is already lent to another task in `{group_name}`", "children of `{group_name}` run concurrently, so writing `{g}` races a sibling child's read through a call", "move the write after `{group_name}` ends, pass values in, or share `{g}` with `Shared{{…}}`"))
+            }
+        }
+    }
+    children.push(SemaEffectGroupChild{binding: binding, span: spawn_span, direct_reads: direct_reads, direct_writes: direct_writes, trans_reads: trans_reads, trans_writes: trans_writes})
+}
+
+sema_effect_group_check_opener_expr: fn(tree: BodyTree, group_name: String, node_id: Int, tracked: NameTable, nodes: [SemaEffectNode], calls: SemaEffectCallIndex, raw_words: NameTable, seen: ^[Bool], visited: ^[Int], children: ^[SemaEffectGroupChild], in_loop: Bool, let_binding: String?, out: ^[Diagnostic]) Never! {
+    node: body_node(tree, node_id)
+    if node.kind == .CoreClosureCall(closure_kind) {
+        if closure_kind == .Spawn(group, _, _, executable) {
+            if group == .Val(group_id) {
+                if body_node(tree, group_id).kind == .Local(local) && local.name == group_name {
+                    sema_effect_group_record_child(tree, group_name, let_binding, executable, node.span, in_loop, tracked, nodes, calls, raw_words, seen, visited, children, out)
+                    return
+                }
+            }
+            return
+        }
+    }
+    if node.kind == .HandleMethod(receiver_id, operation, _) && operation == BodyHandleOp.TaskDetach {
+        if body_node(tree, receiver_id).kind == .Local(local) {
+            loop child in children {
+                if child.binding == Val(local.name) && child.direct_reads.len() == 0 && child.direct_writes.len() == 0 && (child.trans_reads.len() > 0 || child.trans_writes.len() > 0) {
+                    out.push(sema_error("E1106", node.span, "can't detach task `{local.name}` — it borrows changeable module state through a call", "a detached task runs unsupervised and may outlive `{group_name}` and race accesses to module state", "join `{local.name}` inside `{group_name}`, pass the value in, or share it with `Shared{{…}}`"))
+                    break
+                }
+            }
+        }
+    }
+    if children.len() > 0 {
+        if node.kind == .ConstRef(symbol_id) {
+            if sema_effect_run_key(calls.symbols, symbol_id) == .Val(key) {
+                leaf: symbol_key_leaf(key)
+                if name_find(tracked, leaf) != None {
+                    loop child in children {
+                        if child.trans_writes.contains(leaf) {
+                            out.push(sema_error("E1101", node.span, "`{leaf}` cannot be read while a child of `{group_name}` writes it", "a running child of `{group_name}` calls a function writing `{leaf}`, so reading `{leaf}` here would race that child", "read `{leaf}` after the `{group_name}` block ends, or share it with `Shared{{…}}`"))
+                            break
+                        }
+                    }
+                }
+            }
+            return
+        }
+        ^callee_node: -1
+        if node.kind == .Call(callee_decl, _, _) {
+            callee_node = sema_effect_decl_node(calls, callee_decl)
+        } else if node.kind == .MethodCall(_, method, _, _) {
+            if sema_effect_run_key(calls.symbols, method.symbol) == .Val(key) {
+                callee_node = sema_effect_node_index(calls.node_by_key, key) ?? -1
+            }
+        }
+        if callee_node >= 0 {
+            ^op_reads: [String]{}
+            ^op_writes: [String]{}
+            sema_effect_collect_tracked_storage_touches(nodes, callee_node, raw_words, seen, visited, op_reads, op_writes)
+            loop row in visited -> seen[row] = false
+            visited.clear()
+            ^hit: false
+            loop child in children {
+                loop g in op_writes {
+                    if child.direct_reads.contains(g) || child.direct_writes.contains(g) || child.trans_reads.contains(g) || child.trans_writes.contains(g) {
+                        out.push(sema_error("E1101", node.span, "`{g}` cannot be written while `{group_name}` has children using it", "this call writes changeable module state `{g}` while a child of `{group_name}` runs concurrently", "call this after `{group_name}` ends, or share `{g}` with `Shared{{…}}`"))
+                        hit = true
+                        break
+                    }
+                }
+                if hit -> break
+                loop g in op_reads {
+                    if child.direct_writes.contains(g) || child.trans_writes.contains(g) {
+                        out.push(sema_error("E1101", node.span, "`{g}` cannot be read while a child of `{group_name}` writes it", "this call reads changeable module state `{g}` while a child of `{group_name}` writes it concurrently", "call this after `{group_name}` ends, or share `{g}` with `Shared{{…}}`"))
+                        hit = true
+                        break
+                    }
+                }
+                if hit -> break
+            }
+        }
+    }
+    body_each_node_kind_child(tree, node.kind, fn(child: Int) { sema_effect_group_check_opener_expr(tree, group_name, child, tracked, nodes, calls, raw_words, seen, visited, children, in_loop, None, out) })
+}
+
+sema_effect_group_check_stmts: fn(tree: BodyTree, group_name: String, stmts: [Int], tracked: NameTable, nodes: [SemaEffectNode], calls: SemaEffectCallIndex, raw_words: NameTable, seen: ^[Bool], visited: ^[Int], children: ^[SemaEffectGroupChild], in_loop: Bool, out: ^[Diagnostic]) Never! {
+    loop stmt_id in stmts {
+        offset: stmt_id - tree.stmt_base
+        if offset < 0 || offset >= tree.stmts.len() -> next
+        statement: tree.stmts[offset]
+        if statement == {
+            .TaskGroup(_, _, _, _) -> next
+            .Let(local, _, init_id, _, _, _) -> {
+                sema_effect_group_check_opener_expr(tree, group_name, init_id, tracked, nodes, calls, raw_words, seen, visited, children, in_loop, Val(local.name), out)
+            }
+            .Assign(place, _, value, _, span) -> {
+                if children.len() > 0 && place == .Expr(target_id) {
+                    if body_node(tree, target_id).kind == .Local(local) && local.persist_key != None && name_find(tracked, local.name) != None {
+                        loop child in children {
+                            if child.trans_reads.contains(local.name) || child.trans_writes.contains(local.name) {
+                                out.push(sema_error("E1101", span, "`{local.name}` cannot be written while a child of `{group_name}` uses it", "a running child of `{group_name}` accesses `{local.name}` through a call, so writing `{local.name}` here would race that child", "write `{local.name}` after the `{group_name}` block ends, or share it with `Shared{{…}}`"))
+                                break
+                            }
+                        }
+                    }
+                }
+                sema_effect_group_check_opener_expr(tree, group_name, value, tracked, nodes, calls, raw_words, seen, visited, children, in_loop, None, out)
+            }
+            .If(condition, then_body, else_body, _, _) -> {
+                body_each_if_cond_child(tree, condition, fn(child: Int) { sema_effect_group_check_opener_expr(tree, group_name, child, tracked, nodes, calls, raw_words, seen, visited, children, in_loop, None, out) })
+                sema_effect_group_check_stmts(tree, group_name, then_body, tracked, nodes, calls, raw_words, seen, visited, children, in_loop, out)
+                if else_body == .Val(else_stmts) {
+                    sema_effect_group_check_stmts(tree, group_name, else_stmts, tracked, nodes, calls, raw_words, seen, visited, children, in_loop, out)
+                }
+            }
+            .Loop(_, body, _) -> {
+                sema_effect_group_check_stmts(tree, group_name, body, tracked, nodes, calls, raw_words, seen, visited, children, true, out)
+            }
+            .While(_, condition, body, _) -> {
+                sema_effect_group_check_opener_expr(tree, group_name, condition, tracked, nodes, calls, raw_words, seen, visited, children, true, None, out)
+                sema_effect_group_check_stmts(tree, group_name, body, tracked, nodes, calls, raw_words, seen, visited, children, true, out)
+            }
+            .ForRange(_, _, start_id, end_id, step_id, _, body, _, _) -> {
+                sema_effect_group_check_opener_expr(tree, group_name, start_id, tracked, nodes, calls, raw_words, seen, visited, children, in_loop, None, out)
+                sema_effect_group_check_opener_expr(tree, group_name, end_id, tracked, nodes, calls, raw_words, seen, visited, children, in_loop, None, out)
+                if step_id == .Val(sid) -> sema_effect_group_check_opener_expr(tree, group_name, sid, tracked, nodes, calls, raw_words, seen, visited, children, in_loop, None, out)
+                sema_effect_group_check_stmts(tree, group_name, body, tracked, nodes, calls, raw_words, seen, visited, children, true, out)
+            }
+            .ForIn(_, _, _, source_id, coll_id, step_id, _, _, _, _, body, _) -> {
+                sema_effect_group_check_opener_expr(tree, group_name, source_id, tracked, nodes, calls, raw_words, seen, visited, children, in_loop, None, out)
+                sema_effect_group_check_opener_expr(tree, group_name, coll_id, tracked, nodes, calls, raw_words, seen, visited, children, in_loop, None, out)
+                if step_id == .Val(sid) -> sema_effect_group_check_opener_expr(tree, group_name, sid, tracked, nodes, calls, raw_words, seen, visited, children, in_loop, None, out)
+                sema_effect_group_check_stmts(tree, group_name, body, tracked, nodes, calls, raw_words, seen, visited, children, true, out)
+            }
+            .CountedLoop(_, init_stmt, cond_id, step_stmt, _, body, _) -> {
+                sema_effect_group_check_stmts(tree, group_name, [Int]{init_stmt}, tracked, nodes, calls, raw_words, seen, visited, children, in_loop, out)
+                sema_effect_group_check_opener_expr(tree, group_name, cond_id, tracked, nodes, calls, raw_words, seen, visited, children, true, None, out)
+                if step_stmt == .Val(s_id) -> sema_effect_group_check_stmts(tree, group_name, [Int]{s_id}, tracked, nodes, calls, raw_words, seen, visited, children, true, out)
+                sema_effect_group_check_stmts(tree, group_name, body, tracked, nodes, calls, raw_words, seen, visited, children, true, out)
+            }
+            .ExprStmt(value, _) -> {
+                sema_effect_group_check_opener_expr(tree, group_name, value, tracked, nodes, calls, raw_words, seen, visited, children, in_loop, None, out)
+            }
+            .Unsafe(_, body) | .UnsafeBlock(_, body, _) | .Inline(body, _) | .DebugOnly(body, _) | .DeepCheck(body, _) | .SentryPolicy(_, body, _) | .Impure(body, _) | .Region(body, _) | .Layout(_, _, body, _) | .ContextBlock(_, body, _) | .Live(body, _) | .Shield(body, _) | .Defer(body, _) | .ScopeMember(_, body, _) | .Transact(_, _, _, body, _) | .ContractScope(_, body, _, _, _) -> {
+                sema_effect_group_check_stmts(tree, group_name, body, tracked, nodes, calls, raw_words, seen, visited, children, in_loop, out)
+            }
+            .Contract(_) | .RefutableBind(_, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Range(_, _, _, _, _, _, _, _, _, _) | .Return(_, _) | .DeferClose(_, _, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) | .Match(_, _, _, _) | .EnumMatch(_, _, _, _, _) | .RangeSwitch(_, _, _, _) | .MixedSwitch(_, _, _, _, _) | .Reactive(_, _) | .GCEdit(_, _, _, _, _, _, _) -> {
+                body_each_stmt_child(tree, statement, fn(child: Int) { sema_effect_group_check_opener_expr(tree, group_name, child, tracked, nodes, calls, raw_words, seen, visited, children, in_loop, None, out) })
+            }
+        }
+    }
+}
+
+// Checks `#Export(c)`, combinator branches, parallel collection callbacks,
+// unscoped task spawns, and lexical `task.group` transitive races against
+// tracked (non-raw-word) changeable module storage globals.
+sema_effect_check_storage_concurrency: fn(modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], nodes: [SemaEffectNode], calls: SemaEffectCallIndex, raw_words: NameTable, state_seen: ^[Bool], state_visited: ^[Int], diagnostics: ^[Diagnostic]) {
+    // 1. `#Export(c)` functions may be called by a C host on any thread, so
+    // touching any non-raw-word storage global (directly or transitively) is E3203.
+    loop node_index in 0..<nodes.len() {
+        if !nodes[node_index].is_guest_export -> next
+        touch_path: sema_effect_tracked_storage_touch_path(nodes, node_index, raw_words, state_seen, state_visited)
+        loop row in state_visited -> state_seen[row] = false
+        state_visited.clear()
+        if touch_path.len() == 0 -> next
+        ^export_diagnostics: [Diagnostic]{sema_effect_guest_export_storage_diagnostic(nodes, touch_path, raw_words)}
+        sema_effect_publish_diagnostics(diagnostics, inputs[nodes[node_index].module_index].source_segments, export_diagnostics)
+    }
+    // Collect all tracked storage global names referenced in the program for
+    // matching direct reads/writes inside `task.group` bodies.
+    ^tracked_names: name_table_sized(8)
+    loop node in nodes {
+        rare: node.rare ?? next
+        loop write in rare.module_writes {
+            if write.storage && name_find(raw_words, write.name) == None -> ^_: name_intern(tracked_names, write.name)
+        }
+        loop read in rare.module_reads {
+            if read.storage && name_find(raw_words, read.name) == None -> ^_: name_intern(tracked_names, read.name)
+        }
+    }
+    if name_count(tracked_names) == 0 -> return
+    // 2-5. Task combinators, parallel callbacks, unscoped spawns, and lexical
+    // `task.group` transitive races.
+    loop input_index in 0..<inputs.len() {
+        module_row: inputs[input_index]
+        ^module_diags: [Diagnostic]{}
+        loop function in modules[module_row.module_index].functions {
+            ^combinator_spawns: [Int:Bool]{}
+            loop body_node in function.tree.nodes {
+                if body_node.kind == {
+                    .TaskGroupAll(tasks) | .TaskGroupRace(tasks) | .TaskGroupAny(tasks) -> {
+                        sema_effect_collect_combinator_spawns(function.tree, tasks, combinator_spawns)
+                    }
+                    .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .TypePath(_) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> {}
+                }
+            }
+            loop (node_offset, item_node) in function.tree.nodes {
+                if item_node.kind == .CoreClosureCall(closure_kind) {
+                    if closure_kind == .Spawn(group, _, _, executable) {
+                        if combinator_spawns.get(node_offset) != None {
+                            loop edge in executable.effects.call_edges {
+                                target: sema_effect_node_index(calls.node_by_key, edge) ?? next
+                                write_path: sema_effect_tracked_storage_write_path(nodes, target, raw_words, state_seen, state_visited)
+                                loop row in state_visited -> state_seen[row] = false
+                                state_visited.clear()
+                                if write_path.len() == 0 -> next
+                                module_diags.push(sema_effect_combinator_write_diagnostic(nodes, write_path, raw_words, item_node.span))
+                                break
+                            }
+                            next
+                        }
+                        if !sema_effect_spawn_is_unscoped(function, group) -> next
+                        loop edge in executable.effects.call_edges {
+                            target: sema_effect_node_index(calls.node_by_key, edge) ?? next
+                            touch_path: sema_effect_tracked_storage_touch_path(nodes, target, raw_words, state_seen, state_visited)
+                            loop row in state_visited -> state_seen[row] = false
+                            state_visited.clear()
+                            if touch_path.len() == 0 -> next
+                            module_diags.push(sema_effect_unscoped_task_storage_diagnostic(nodes, touch_path, raw_words, item_node.span))
+                            break
+                        }
+                    }
+                } else if item_node.kind == .ClosureMethod(_, operation, args) {
+                    is_para: operation == TClosureOp.ParaMap || operation == TClosureOp.ParaFilter || operation == TClosureOp.ParaPartition || operation == TClosureOp.ParaFold
+                    if !is_para -> next
+                    loop arg_id in args {
+                        arg_node: body_node(function.tree, arg_id)
+                        if arg_node.kind == .Lambda(cb_lambda) {
+                            loop edge in cb_lambda.effects.call_edges {
+                                target: sema_effect_node_index(calls.node_by_key, edge) ?? next
+                                write_path: sema_effect_tracked_storage_write_path(nodes, target, raw_words, state_seen, state_visited)
+                                loop row in state_visited -> state_seen[row] = false
+                                state_visited.clear()
+                                if write_path.len() == 0 -> next
+                                module_diags.push(sema_effect_para_write_diagnostic(nodes, write_path, raw_words, arg_node.span))
+                                break
+                            }
+                        } else if arg_node.kind == .FnValue(fn_val) {
+                            if fn_val == .NamedFn(decl_opt, _) {
+                                if decl_opt == .Val(decl_id) {
+                                    target: sema_effect_decl_node(calls, decl_id)
+                                    if target >= 0 {
+                                        write_path: sema_effect_tracked_storage_write_path(nodes, target, raw_words, state_seen, state_visited)
+                                        loop row in state_visited -> state_seen[row] = false
+                                        state_visited.clear()
+                                        if write_path.len() > 0 {
+                                            module_diags.push(sema_effect_para_write_diagnostic(nodes, write_path, raw_words, arg_node.span))
+                                        }
+                                    }
+                                }
+                            }
+                        } else if arg_node.kind == .ConstRef(symbol_id) {
+                            if sema_effect_run_key(calls.symbols, symbol_id) == .Val(key) {
+                                if sema_effect_node_index(calls.node_by_key, key) == .Val(target) {
+                                    write_path: sema_effect_tracked_storage_write_path(nodes, target, raw_words, state_seen, state_visited)
+                                    loop row in state_visited -> state_seen[row] = false
+                                    state_visited.clear()
+                                    if write_path.len() > 0 {
+                                        module_diags.push(sema_effect_para_write_diagnostic(nodes, write_path, raw_words, arg_node.span))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            loop statement in function.tree.stmts {
+                if statement == .TaskGroup(group_local, _, body, _) {
+                    ^children: [SemaEffectGroupChild]{}
+                    sema_effect_group_check_stmts(function.tree, group_local.name, body, tracked_names, nodes, calls, raw_words, state_seen, state_visited, children, false, module_diags)
+                }
+            }
+        }
+        if module_diags.len() > 0 {
+            sema_effect_publish_diagnostics(diagnostics, module_row.source_segments, module_diags)
+        }
+    }
 }
 
 // A comptime input call (`embed_file`, `embed_bytes`, `find`, `net.fetch`)
@@ -2834,6 +3428,7 @@ sema_effect_node_from_source: fn(function: FnBody, sources: [SemaEffectFunctionS
     node.is_pure = actual.is_pure
     node.is_replayable = actual.is_replayable
     node.is_unsafe = actual.is_unsafe
+    node.is_guest_export = actual.is_guest_export
     node.replayable_span = actual.replayable_span
     node.unsafe_reason = actual.unsafe_reason
     node.effect_via = actual.effect_via
@@ -5262,9 +5857,9 @@ sema_effect_secret_reach: fn(nodes: [SemaEffectNode], callers: [[Int]]) -> [Bool
     reached
 }
 
-sema_effect_tfacts: fn(node: SemaEffectNode, solved: [String]) -> TEffectFacts Never! {
+sema_effect_tfacts: fn(node: SemaEffectNode, solved: [String], solved_module_write: String?) -> TEffectFacts Never! {
     rare: node.rare ?? SEMA_EFFECT_NODE_NO_RARE
-    TEffectFacts{direct: node.direct, solved: solved, call_edges: node.call_edges, maximal: node.maximal, direct_spans: node.direct_spans, maximal_span: node.maximal_span, value_edges: rare.value_edges, module_writes: rare.module_writes, module_reads: rare.module_reads}
+    TEffectFacts{direct: node.direct, solved: solved, call_edges: node.call_edges, maximal: node.maximal, direct_spans: node.direct_spans, maximal_span: node.maximal_span, value_edges: rare.value_edges, module_writes: rare.module_writes, module_reads: rare.module_reads, solved_module_write: solved_module_write}
 }
 
 // The span is the first entry of the declared effect row, or the function's
@@ -7203,9 +7798,6 @@ sema_effects_check_modules: fn(modules: ^[SemaGraphModuleResult], inputs: [SemaE
         sema_effect_check_callback_bounds(nodes, calls.node_by_key, solved, node_index, callback_diagnostics)
         sema_effect_publish_diagnostics(diagnostics, inputs[nodes[node_index].module_index].source_segments, callback_diagnostics)
     }
-    // The debugger's probe answers take their verdicts from the solved rows.
-    sema_eval_probe_judge_effects(modules, nodes, calls, solved)
-    sema_effect_check_compiler_hooks(table, modules, inputs, nodes, calls.node_by_key, solved, diagnostics)
     ^any_module_writes: false
     ^any_module_reads: false
     ^any_storage_globals: false
@@ -7219,6 +7811,11 @@ sema_effects_check_modules: fn(modules: ^[SemaGraphModuleResult], inputs: [SemaE
             if any_module_writes && any_module_reads && any_storage_globals && any_comptime_inputs -> break
         }
     }
+    solved_writes: sema_effect_solve_module_writes(nodes, callers, any_module_writes)
+    // The debugger's probe answers take their verdicts from the solved rows
+    // and solved module-write touch facts.
+    sema_eval_probe_judge_effects(modules, nodes, calls, solved, solved_writes)
+    sema_effect_check_compiler_hooks(table, modules, inputs, nodes, calls.node_by_key, solved, diagnostics)
     // A pure (`-[]>`) or `#Memo` function may not write or read changeable
     // module state, itself or through any function it calls or takes as a
     // value. Reuse one seen bitmap + undo list instead of allocating O(nodes)
@@ -7276,33 +7873,12 @@ sema_effects_check_modules: fn(modules: ^[SemaGraphModuleResult], inputs: [SemaE
                 }
             }
         }
-        // A task started outside a lexical `task.group` (or through a `Group`
-        // parameter) may outlive its starter and therefore cannot call any
-        // function that transitively reads or writes a changeable module
-        // storage binding (`^name: ...` / `#Persist`).
+        // `#Export(c)`, combinator branches, parallel callbacks, unscoped task
+        // spawns, and `task.group` transitive races against tracked (non-raw-word)
+        // changeable module storage globals.
         if any_storage_globals {
-            loop input_index in 0..<inputs.len() {
-                module_row: inputs[input_index]
-                loop function in modules[module_row.module_index].functions {
-                    loop body_node in function.tree.nodes {
-                        if body_node.kind == .CoreClosureCall(closure_kind) {
-                            if closure_kind == .Spawn(group, _, _, executable) {
-                                if !sema_effect_spawn_is_unscoped(function, group) -> next
-                                loop edge in executable.effects.call_edges {
-                                    target: sema_effect_node_index(calls.node_by_key, edge) ?? next
-                                    touch_path: sema_effect_storage_touch_path(nodes, target, state_seen, state_visited)
-                                    loop row in state_visited -> state_seen[row] = false
-                                    state_visited.clear()
-                                    if touch_path.len() == 0 -> next
-                                    ^task_diagnostics: [Diagnostic]{sema_effect_unscoped_task_storage_diagnostic(nodes, touch_path, body_node.span)}
-                                    sema_effect_publish_diagnostics(diagnostics, module_row.source_segments, task_diagnostics)
-                                    break
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            raw_words: sema_effect_raw_storage_words(nodes)
+            sema_effect_check_storage_concurrency(modules, inputs, nodes, calls, raw_words, state_seen, state_visited, diagnostics)
         }
     }
     // No function a runtime entry reaches may make a comptime input.
@@ -7496,7 +8072,7 @@ sema_effects_check_modules: fn(modules: ^[SemaGraphModuleResult], inputs: [SemaE
         heaps = sema_effect_heap_bounds(nodes, called)
         stacks = sema_effect_stack_bounds(stack, frames, nodes, called)
     }
-    ^stamps: sema_effect_build_tfacts_parallel(modules, inputs, function_nodes, nodes, solved, threads)
+    ^stamps: sema_effect_build_tfacts_parallel(modules, inputs, function_nodes, nodes, solved, solved_writes, threads)
     stamps.reverse()
     loop {
         stamp: stamps.pop() ?? break
@@ -7750,14 +8326,15 @@ SemaEffectStamp: struct {
     effects: TEffectFacts,
 }
 
-sema_effect_build_tfacts_range: fn(modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], function_nodes: [[Int]], nodes: [SemaEffectNode], solved: [[String]], from: Int, to: Int) -> [SemaEffectStamp] {
+sema_effect_build_tfacts_range: fn(modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], function_nodes: [[Int]], nodes: [SemaEffectNode], solved: [[String]], solved_writes: [String?], from: Int, to: Int) -> [SemaEffectStamp] {
     ^out: [SemaEffectStamp]{}
     loop input_position in from..<to {
         target: inputs[input_position].module_index
         loop function_index in 0..<modules[target].functions.len() {
             node_index: function_nodes[input_position][function_index]
             if node_index < 0 -> next
-            ^effects: sema_effect_tfacts(nodes[node_index], solved[node_index])
+            solved_write: if node_index < solved_writes.len() -> solved_writes[node_index] else -> String?{None}
+            ^effects: sema_effect_tfacts(nodes[node_index], solved[node_index], solved_write)
             memoized: modules[target].functions[function_index].memo_bound != None || modules[target].functions[function_index].memo_unbounded
             if memoized -> sema_effect_context_reach(nodes, node_index, effects)
             out.push(SemaEffectStamp{module_index: target, function_index: function_index, node_index: node_index, effects: effects.move()})
@@ -7766,25 +8343,25 @@ sema_effect_build_tfacts_range: fn(modules: [SemaGraphModuleResult], inputs: [Se
     out
 }
 
-sema_effect_build_tfacts_parts: fn(modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], function_nodes: [[Int]], nodes: [SemaEffectNode], solved: [[String]], bounds: [Int], at: Int) -> [[SemaEffectStamp]] {
+sema_effect_build_tfacts_parts: fn(modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], function_nodes: [[Int]], nodes: [SemaEffectNode], solved: [[String]], solved_writes: [String?], bounds: [Int], at: Int) -> [[SemaEffectStamp]] {
     ^done: [[SemaEffectStamp]]{}
     if at + 1 >= bounds.len() -> return done
     from: bounds[at]
     to: bounds[at + 1]
     if at + 2 == bounds.len() {
-        done.push(sema_effect_build_tfacts_range(modules, inputs, function_nodes, nodes, solved, from, to))
+        done.push(sema_effect_build_tfacts_range(modules, inputs, function_nodes, nodes, solved, solved_writes, from, to))
         return done
     }
     task.group sema_effect_tfacts_group {
-        head: task sema_effect_build_tfacts_range(modules, inputs, function_nodes, nodes, solved, from, to)
-        ^rest: sema_effect_build_tfacts_parts(modules, inputs, function_nodes, nodes, solved, bounds, at + 1)
+        head: task sema_effect_build_tfacts_range(modules, inputs, function_nodes, nodes, solved, solved_writes, from, to)
+        ^rest: sema_effect_build_tfacts_parts(modules, inputs, function_nodes, nodes, solved, solved_writes, bounds, at + 1)
         done.push(compiler_threads_joined(head))
         loop part in rest.move() -> done.push(part)
     }
     done
 }
 
-sema_effect_build_tfacts_parallel: fn(modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], function_nodes: [[Int]], nodes: [SemaEffectNode], solved: [[String]], threads: CompilerThreads) -> [SemaEffectStamp] {
+sema_effect_build_tfacts_parallel: fn(modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], function_nodes: [[Int]], nodes: [SemaEffectNode], solved: [[String]], solved_writes: [String?], threads: CompilerThreads) -> [SemaEffectStamp] {
     ^weights: [Int]{}
     ^work: 0
     loop input_position in 0..<inputs.len() {
@@ -7794,9 +8371,9 @@ sema_effect_build_tfacts_parallel: fn(modules: [SemaGraphModuleResult], inputs: 
     }
     workers: compiler_threads_admit(threads, weights.len(), work, 512, 0, 0)
     if workers <= 1 {
-        return sema_effect_build_tfacts_range(modules, inputs, function_nodes, nodes, solved, 0, inputs.len())
+        return sema_effect_build_tfacts_range(modules, inputs, function_nodes, nodes, solved, solved_writes, 0, inputs.len())
     }
-    ^parts: sema_effect_build_tfacts_parts(modules, inputs, function_nodes, nodes, solved, compiler_threads_partition(weights, workers), 0)
+    ^parts: sema_effect_build_tfacts_parts(modules, inputs, function_nodes, nodes, solved, solved_writes, compiler_threads_partition(weights, workers), 0)
     parts.reverse()
     ^out: [SemaEffectStamp]{}
     loop parts.len() > 0 {

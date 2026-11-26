@@ -1359,7 +1359,7 @@ sema_stmt_check_local_assignment: fn(name: String, name_span: Span, op: BinOp?, 
             if sema_taskgroup_check_global_opener_write(check, binding.symbol.id, name, name_span) {
                 return None
             }
-            check.context.module_writes.push(TEffectSpan{name: name, span: name_span, storage: true})
+            check.context.module_writes.push(TEffectSpan{name: name, span: name_span, storage: true, in_unsafe: check.context.unsafe_depth > 0})
             sema_taskgroup_note_global_access(check.context, binding.symbol, name, name_span, AccessConvention.Write)
             return sema_stmt_check_module_storage_assignment(binding.symbol, name, name_span, op, op_span, expr, check)
         }
