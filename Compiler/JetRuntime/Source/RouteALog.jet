@@ -1,16 +1,16 @@
 // core.log host cells and sinks. (state cells, flush, spans, JSON/text
 // records), (trace id), (record emit, span allocate) and the AOT
 // jet_log_write_line/jet_log_process_exit leaves. Each OS thread owns one
-// LogState80 block (allocated on first use, freed by the TLS destructor):
+// LogState56 block (allocated on first use, freed by the TLS destructor):
 // level0 disabled8 sample_every16 sample_count24 next_span32 trace40 (owned E4
-// or 0) spans: data48 len56 cap64, each span a LOG_SPAN_SLOT {id0, owned name
-// E4 8, start16: its monotonic ns when `jet perf run` keeps spans, else 0}, and
-// the code's level filter72 (owned E4 or 0). The sink and the record format are
+// or 0) and the code's level filter48 (owned E4 or 0). Active log spans live
+// on the task's shared Context.jet breadcrumb frame stack (CONTEXT_FRAME_KEY),
+// never a parallel thread-local array. The sink and the record format are
 // the process's (log_process), so a sink one thread sets receives the records
 // of every thread. The devtools publication (:316-590) reaches only installed
 // event sinks; the native runtime installs none, so it has no native
 // counterpart.
-LOG_STATE_BYTES: I64{80}
+LOG_STATE_BYTES: I64{56}
 
 LOG_STATE_LEVEL: I64{0}
 
@@ -24,15 +24,7 @@ LOG_STATE_NEXT_SPAN: I64{32}
 
 LOG_STATE_TRACE: I64{40}
 
-LOG_STATE_SPANS: I64{48}
-
-LOG_STATE_SPANS_LEN: I64{56}
-
-LOG_STATE_SPANS_CAP: I64{64}
-
-LOG_STATE_FILTER: I64{72}
-
-LOG_SPAN_SLOT: I64{24}
+LOG_STATE_FILTER: I64{48}
 
 ^log_state_key: I64{0}
 
@@ -237,28 +229,24 @@ log_filter_level_valid: fn(data: I64, first: I64, last: I64) -> Bool {
     log_spans_report_open(state)
     log_text_drop(rt_text_word(wrapping(state + LOG_STATE_TRACE)))
     log_text_drop(rt_text_word(wrapping(state + LOG_STATE_FILTER)))
-    capacity: rt_text_word(wrapping(state + LOG_STATE_SPANS_CAP))
-    if (capacity != I64{0}) {
-        jet_rt_free(rt_text_word(wrapping(state + LOG_STATE_SPANS)), capacity * LOG_SPAN_SLOT, I64{8})
-    }
     jet_rt_free(state, LOG_STATE_BYTES, I64{8})
     I64{0}
 }
 
-// Each span still open on the thread of `state`, innermost first, becomes one
+// Each span still open on the task of `state`, innermost first, becomes one
 // `warn` record naming it, whose spans are the ones still open around it, and
 // leaves the stack: a span block that never ended (its owner outlived the
 // thread) is never dropped in silence.
 log_spans_report_open: fn(state: I64) {
+    name_slot: jet_rt_alloc(I64{8}, I64{8})
     loop {
-        length: rt_text_word(wrapping(state + LOG_STATE_SPANS_LEN))
-        if (length == I64{0}) {
+        rt_text_store(name_slot, I64{0})
+        if !context_frame_pop_match(CONTEXT_FRAME_KIND_LOG_SPAN, I64{0}, name_slot, I64{0}, I64{0}) {
+            jet_rt_free(name_slot, I64{8}, I64{8})
             return
         }
-        slot: wrapping(rt_text_word(wrapping(state + LOG_STATE_SPANS)) + (length - I64{1}) * LOG_SPAN_SLOT)
-        name: rt_text_word(wrapping(slot + I64{8}))
-        rt_text_store(wrapping(state + LOG_STATE_SPANS_LEN), length - I64{1})
-        if (rt_text_word(wrapping(state + LOG_STATE_DISABLED)) == I64{0}) {
+        name: rt_text_word(name_slot)
+        if (rt_text_word(wrapping(state + LOG_STATE_DISABLED)) == I64{0} && name != I64{0}) {
             message: jet_rt_string_builder_new()
             jet_rt_string_builder_push(message, rt_static_text("Log span `"))
             jet_rt_string_builder_push(message, name)
@@ -270,7 +258,7 @@ log_spans_report_open: fn(state: I64) {
             } else { log_emit_json(state, rt_static_text("warn"), text, ts, I64{0}, I64{0}) }
             jet_rt_string_drop(text)
         }
-        jet_rt_string_drop(name)
+        log_text_drop(name)
     }
 }
 
@@ -406,57 +394,41 @@ log_sink_open: fn(path: I64) -> I64 {
     rt_text_store(item1, jet_rt_string_clone(name))
 }
 
-// Push a clone of the span on the thread's active stack, with its start on
-// the monotonic clock when `jet perf run` keeps the spans' rows. The span
-// counts as open for the running task (Observe.jet) until it closes.
+// Push the span onto the current task's shared Context.jet frame stack, with
+// its start on the monotonic clock when `jet perf run` keeps the spans' rows.
+// The span counts as open for the running task (Observe.jet) until it closes.
 #Export(c) jet_ring_log_enter: fn(span: I64) {
-    state: log_state()
-    length: rt_text_word(wrapping(state + LOG_STATE_SPANS_LEN))
-    capacity: rt_text_word(wrapping(state + LOG_STATE_SPANS_CAP))
-    if (length == capacity) {
-        grown: if (capacity == I64{0}) -> I64{4} else -> capacity * I64{2}
-        data: jet_rt_alloc(grown * LOG_SPAN_SLOT, I64{8})
-        old: rt_text_word(wrapping(state + LOG_STATE_SPANS))
-        coll_copy(old, data, length * LOG_SPAN_SLOT)
-        if (capacity != I64{0}) { jet_rt_free(old, capacity * LOG_SPAN_SLOT, I64{8}) }
-        rt_text_store(wrapping(state + LOG_STATE_SPANS), data)
-        rt_text_store(wrapping(state + LOG_STATE_SPANS_CAP), grown)
-    }
-    slot: wrapping(rt_text_word(wrapping(state + LOG_STATE_SPANS)) + length * LOG_SPAN_SLOT)
-    rt_text_store(slot, dyn_word(wrapping(span + LOG_SPAN_ID)))
-    rt_text_store(wrapping(slot + I64{8}), jet_rt_string_clone(dyn_word(wrapping(span + LOG_SPAN_NAME))))
-    rt_text_store(wrapping(slot + I64{16}), if (perf_spans_fd >= I64{0}) -> time_host_monotonic_i64() else -> I64{0})
-    rt_text_store(wrapping(state + LOG_STATE_SPANS_LEN), length + I64{1})
+    ^_: log_state()
+    id: dyn_word(wrapping(span + LOG_SPAN_ID))
+    name: dyn_word(wrapping(span + LOG_SPAN_NAME))
+    start_ns: if (perf_spans_fd >= I64{0}) -> time_host_monotonic_i64() else -> I64{0}
+    ^_: context_frame_push(name, I64{0}, I64{0}, id, start_ns, CONTEXT_FRAME_KIND_LOG_SPAN)
     observe_task_count(OBSERVE_TASK_SPANS, I64{1})
 }
 
-// Remove the last active span with this id (rposition), if any; under
+// Remove the innermost active log span with this id, if any; under
 // `jet perf run` its row is kept first.
 #Export(c) jet_ring_log_close: fn(span: I64) {
-    state: log_state()
     id: dyn_word(wrapping(span + LOG_SPAN_ID))
-    spans: rt_text_word(wrapping(state + LOG_STATE_SPANS))
-    length: rt_text_word(wrapping(state + LOG_STATE_SPANS_LEN))
-    ^at: length
-    loop at > (I64{0}) {
-        at -= I64{1}
-        slot: wrapping(spans + at * LOG_SPAN_SLOT)
-        if (rt_text_word(slot) == id) {
-            if (perf_spans_fd >= I64{0}) { log_span_row_write(slot) }
-            jet_rt_string_drop(rt_text_word(wrapping(slot + I64{8})))
-            coll_copy(wrapping(slot + LOG_SPAN_SLOT), slot, (length - at - I64{1}) * LOG_SPAN_SLOT)
-            rt_text_store(wrapping(state + LOG_STATE_SPANS_LEN), length - I64{1})
+    if (perf_spans_fd < I64{0}) {
+        if context_frame_pop_match(CONTEXT_FRAME_KIND_LOG_SPAN, id, I64{0}, I64{0}, I64{0}) {
             observe_task_count(OBSERVE_TASK_SPANS, I64{-1})
-            return
         }
+        return
     }
-}
-
-// The row of the closing span in `slot` for `jet perf run`
-// (PerfSamples.jet perf_zone_row): from its start to now on the monotonic
-// clock.
-log_span_row_write: fn(slot: I64) {
-    perf_zone_row(PERF_ZONE_LOG, rt_text_word(wrapping(slot + I64{16})), time_host_monotonic_i64(), rt_text_word(wrapping(slot + I64{8})))
+    out: jet_rt_alloc(I64{16}, I64{8})
+    rt_text_store(out, I64{0})
+    rt_text_store(wrapping(out + I64{8}), I64{0})
+    if context_frame_pop_match(CONTEXT_FRAME_KIND_LOG_SPAN, id, out, wrapping(out + I64{8}), I64{0}) {
+        name: rt_text_word(out)
+        start_ns: rt_text_word(wrapping(out + I64{8}))
+        if (name != I64{0}) {
+            perf_zone_row(PERF_ZONE_LOG, start_ns, time_host_monotonic_i64(), name)
+            jet_rt_string_drop(name)
+        }
+        observe_task_count(OBSERVE_TASK_SPANS, I64{-1})
+    }
+    jet_rt_free(out, I64{16}, I64{8})
 }
 
 // jet_log_json_escape: only " \ LF CR TAB are escaped.
@@ -508,23 +480,9 @@ log_fields_json_push: fn(target: I64, data: I64, count: I64) {
     }
 }
 
-// `,"spans":["name",...]` for a nonempty active stack.
-log_spans_json_push: fn(target: I64, state: I64) {
-    length: rt_text_word(wrapping(state + LOG_STATE_SPANS_LEN))
-    if (length == I64{0}) {
-        return
-    }
-    spans: rt_text_word(wrapping(state + LOG_STATE_SPANS))
-    jet_rt_string_builder_push(target, rt_static_text(",\"spans\":["))
-    ^at: I64{0}
-    loop at < length {
-        if (at != I64{0}) { jet_rt_string_builder_push(target, rt_static_text(",")) }
-        jet_rt_string_builder_push(target, rt_static_text("\""))
-        log_json_escape_push(target, rt_text_word(wrapping(wrapping(spans + at * LOG_SPAN_SLOT) + I64{8})))
-        jet_rt_string_builder_push(target, rt_static_text("\""))
-        at += I64{1}
-    }
-    jet_rt_string_builder_push(target, rt_static_text("]"))
+// `,"spans":["name",...]` for a nonempty active frame stack.
+log_spans_json_push: fn(target: I64, _state: I64) {
+    context_frame_push_json(target)
 }
 
 // Append `line` + LF to the process's file sink, else eprintln to stderr.
@@ -673,6 +631,7 @@ log_emit_text: fn(state: I64, level: I64, message: I64, ts: I64, fields: I64, co
         jet_rt_string_builder_push(line, rt_text_word(wrapping(field + LOG_FIELD_VALUE)))
         at += I64{1}
     }
+    context_frame_push_text(line)
     log_write(line)
     jet_rt_string_drop(line)
 }

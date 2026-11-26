@@ -154,22 +154,20 @@ sema_stmt_check_loop_value_break: fn(value: Expr, label: String?, label_span: Sp
         check.diagnostics.push(sema_error("E0115", label_span, "`break value` only works inside a loop", "a loop value needs an active target", "move this inside a loop"))
         return None
     }
-    // copy: `frame` is read after sema_check_expression and loop-value recording, which write
-    // context.loop_value_frames (`^context`). A view would be live across those writes.
-    frame: check.context.loop_value_frames[frame_index].copy()
+    frame_kind: check.context.loop_value_frames[frame_index].kind
     ^payload_expected: Type?{None}
-    if frame.ty == .Val(expected_type) && !sema_expr_is_numeric(expected_type) {
+    if check.context.loop_value_frames[frame_index].ty == .Val(expected_type) && !sema_expr_is_numeric(expected_type) {
         payload_expected = Val(expected_type)
     }
     checked: sema_check_expression(value, payload_expected, check) ?? return None
     if !sema_copy_site_check_guard_owned(checked, check, false) -> return None
     // A payload the loop cannot carry is reported on the `break` keyword.
     keyword_span: Span{start: span.start, end: span.start + "break".len()}
-    if frame.kind == SemaLoopValueKind.Collecting {
+    if frame_kind == SemaLoopValueKind.Collecting {
         check.diagnostics.push(sema_error("E0075", keyword_span, "this collecting loop cannot use a break payload", "its result is already the accumulated List, so a second payload would give one exit two result channels", "write `break` to return the accumulated list"))
         return None
     }
-    if frame.kind == SemaLoopValueKind.Effect {
+    if frame_kind == SemaLoopValueKind.Effect {
         check.diagnostics.push(sema_error("E0079", keyword_span, "this effect-only loop uses a result exit", "a break payload makes an effect-only loop a value expression", "bind the loop with `:`, or remove the payload"))
         return None
     }

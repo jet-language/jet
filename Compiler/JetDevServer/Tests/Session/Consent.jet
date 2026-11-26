@@ -9,15 +9,50 @@ capture_consent_test_scope: fn() -> CaptureConsentScope Never! {
     CaptureConsentScope.new([String]{"Net", "Rand"}, [String]{"example.test"}, [String]{"out"}, [String]{"raw input"}, "record", U64{123})
 }
 
+capture_consent_incomplete_identity: fn(field: Int) -> CaptureIdentity Never! {
+    ^incomplete: capture_consent_test_identity()
+    if field == 0 -> incomplete.target_inputs_sha256 = ""
+    if field == 1 -> incomplete.tool_version = ""
+    if field == 2 -> incomplete.engine = ""
+    if field == 3 -> incomplete.session_id = ""
+    if field == 4 -> incomplete.source_id = ""
+    if field == 5 -> incomplete.build_id = ""
+    if field == 6 -> incomplete.revision = ""
+    incomplete
+}
+
+capture_consent_unsorted_scope: fn() -> CaptureConsentScope Never! {
+    ^scope: CaptureConsentScope.new([String]{"z", "a", "a"}, [String]{"b", "a", "b"}, [String]{"s", "s"}, [String]{"y", "x", "x"}, "record", U64{123})
+    scope.source_kinds = [CaptureSource]{CaptureSource.Network, CaptureSource.Clock, CaptureSource.Randomness, CaptureSource.RawInput, CaptureSource.Clock}
+    scope
+}
+
+capture_consent_sorted_scope: fn() -> CaptureConsentScope Never! {
+    ^scope: CaptureConsentScope.new([String]{"a", "z"}, [String]{"a", "b"}, [String]{"s"}, [String]{"x", "y"}, "record", U64{123})
+    scope.source_kinds = [CaptureSource]{CaptureSource.Clock, CaptureSource.Randomness, CaptureSource.RawInput, CaptureSource.Network}
+    scope
+}
+
+capture_consent_observed_facts: fn() -> [CaptureSourceFact] Never! {
+    [CaptureSourceFact]{CaptureSourceFact.at(CaptureSource.Network, "source.jet", U32{8}), CaptureSourceFact.at(CaptureSource.Clock, "source.jet", U32{3}), CaptureSourceFact.at(CaptureSource.Network, "source.jet", U32{9})}
+}
+
+capture_consent_attempt_with_stale_kinds: fn() -> CaptureAttempt Never! {
+    ^attempt: CaptureAttempt.new(capture_consent_test_identity())
+    attempt.scope = capture_consent_test_scope()
+    attempt.scope.source_kinds = [CaptureSource]{CaptureSource.Randomness}
+    attempt
+}
+
 #Test("capture_identity_binds_every_canonical_receipt_fact") {
     identity: capture_consent_test_identity()
     scope: capture_consent_test_scope()
-    grant: SensitiveCaptureConsent.new(identity.copy(), scope.copy())
+    grant: SensitiveCaptureConsent.new(capture_consent_test_identity(), capture_consent_test_scope())
     assert(identity.is_exact())
     assert(grant.matches(identity, scope))
     assert(identity.matches(capture_consent_test_identity()))
     loop field in 0..<7 {
-        ^changed: identity.copy()
+        ^changed: capture_consent_test_identity()
         if field == 0 -> changed.target_inputs_sha256 = "other inputs"
         if field == 1 -> changed.tool_version = "other version"
         if field == 2 -> changed.engine = "other engine"
@@ -27,21 +62,20 @@ capture_consent_test_scope: fn() -> CaptureConsentScope Never! {
         if field == 6 -> changed.revision = "other revision"
         assert(!identity.matches(changed))
         assert(!grant.matches(changed, scope))
-        assert(grant.digest() != SensitiveCaptureConsent.new(changed, scope.copy()).digest())
+        assert(grant.digest() != SensitiveCaptureConsent.new(changed, capture_consent_test_scope()).digest())
     }
 }
 
 #Test("capture_live_consent_matches_incomplete_supplied_lineage_without_substitution") {
-    ^identity: capture_consent_test_identity()
     // The live caller supplied these facts explicitly; no constructor defaults.
-    identity.revision = ""
+    identity: capture_consent_incomplete_identity(6)
     scope: CaptureConsentScope.default()
-    grant: SensitiveCaptureConsent.new(identity.copy(), scope.copy())
+    grant: SensitiveCaptureConsent.new(capture_consent_incomplete_identity(6), CaptureConsentScope.default())
     assert(grant.matches(identity, scope))
     assert(!grant.matches(capture_consent_test_identity(), scope))
-    attempt: CaptureAttempt.new(identity.copy())
+    attempt: CaptureAttempt.new(capture_consent_incomplete_identity(6))
     assert(grant.matches(attempt.identity, attempt.base_consent_scope()))
-    ^changed: scope.copy()
+    ^changed: CaptureConsentScope.default()
     changed.destination = "record"
     assert(!grant.matches(identity, changed))
 }
@@ -51,23 +85,16 @@ capture_consent_test_scope: fn() -> CaptureConsentScope Never! {
     identity: capture_consent_test_identity()
     scope: CaptureConsentScope.default()
     loop field in 0..<7 {
-        ^incomplete: identity.copy()
-        if field == 0 -> incomplete.target_inputs_sha256 = ""
-        if field == 1 -> incomplete.tool_version = ""
-        if field == 2 -> incomplete.engine = ""
-        if field == 3 -> incomplete.session_id = ""
-        if field == 4 -> incomplete.source_id = ""
-        if field == 5 -> incomplete.build_id = ""
-        if field == 6 -> incomplete.revision = ""
+        incomplete: capture_consent_incomplete_identity(field)
         assert(!incomplete.is_exact())
-        grant: SensitiveCaptureConsent.new(incomplete.copy(), scope.copy())
+        grant: SensitiveCaptureConsent.new(capture_consent_incomplete_identity(field), CaptureConsentScope.default())
         // Legitimately incomplete live lineage still matches its supplied facts.
         assert(grant.matches(incomplete, scope))
         assert(!grant.matches(identity, scope))
     }
     invalid: [String]{"\n", "\r", "\t", String.from_bytes([U8]{0}) ?? panic("NUL"), String.from_bytes([U8]{127}) ?? panic("DEL"), String.from_bytes([U8]{194, 133}) ?? panic("C1")}
     loop text in invalid {
-        ^changed: identity.copy()
+        ^changed: capture_consent_test_identity()
         changed.revision = "rev{text}"
         assert(!changed.is_exact())
     }
@@ -77,17 +104,15 @@ capture_consent_test_scope: fn() -> CaptureConsentScope Never! {
 }
 
 #Test("capture_scope_canonicalizes_order_duplicates_and_source_declaration_order") {
-    ^left: CaptureConsentScope.new([String]{"z", "a", "a"}, [String]{"b", "a", "b"}, [String]{"s", "s"}, [String]{"y", "x", "x"}, "record", U64{123})
-    ^right: CaptureConsentScope.new([String]{"a", "z"}, [String]{"a", "b"}, [String]{"s"}, [String]{"x", "y"}, "record", U64{123})
-    left.source_kinds = [CaptureSource]{CaptureSource.Network, CaptureSource.Clock, CaptureSource.Randomness, CaptureSource.RawInput, CaptureSource.Clock}
-    right.source_kinds = [CaptureSource]{CaptureSource.Clock, CaptureSource.Randomness, CaptureSource.RawInput, CaptureSource.Network}
-    ^canonical: left.copy()
+    ^left: capture_consent_unsorted_scope()
+    right: capture_consent_sorted_scope()
+    ^canonical: capture_consent_unsorted_scope()
     canonical.canonicalize()
     assert_eq(canonical, right)
     identity: capture_consent_test_identity()
-    grant: SensitiveCaptureConsent.new(identity.copy(), left.copy())
+    grant: SensitiveCaptureConsent.new(capture_consent_test_identity(), capture_consent_unsorted_scope())
     assert(grant.matches(identity, right))
-    assert_eq(grant.digest(), SensitiveCaptureConsent.new(identity.copy(), right.copy()).digest())
+    assert_eq(grant.digest(), SensitiveCaptureConsent.new(capture_consent_test_identity(), capture_consent_sorted_scope()).digest())
     // matches is exact equality: do not normalize the caller's supplied scope.
     assert(!grant.matches(identity, left))
     left.canonicalize()
@@ -100,9 +125,9 @@ capture_consent_test_scope: fn() -> CaptureConsentScope Never! {
 #Test("capture_scope_changes_revoke_consent_in_every_dimension") {
     identity: capture_consent_test_identity()
     scope: capture_consent_test_scope()
-    grant: SensitiveCaptureConsent.new(identity.copy(), scope.copy())
+    grant: SensitiveCaptureConsent.new(capture_consent_test_identity(), capture_consent_test_scope())
     loop dimension in 0..<8 {
-        ^changed: scope.copy()
+        ^changed: capture_consent_test_scope()
         if dimension == 0 -> changed.authorities.push("Time")
         if dimension == 1 -> changed.hosts.push("other.test")
         if dimension == 2 -> changed.streams.push("error")
@@ -112,8 +137,8 @@ capture_consent_test_scope: fn() -> CaptureConsentScope Never! {
         if dimension == 6 -> changed.mode = CaptureMode.Release
         if dimension == 7 -> changed.source_kinds.push(CaptureSource.Clock)
         assert(!grant.matches(identity, changed))
-        assert(grant.digest() != SensitiveCaptureConsent.new(identity.copy(), changed.copy()).digest())
         assert(scope.digest() != changed.digest())
+        assert(grant.digest() != SensitiveCaptureConsent.new(capture_consent_test_identity(), changed).digest())
     }
 }
 
@@ -135,14 +160,11 @@ capture_consent_test_scope: fn() -> CaptureConsentScope Never! {
 }
 
 #Test("capture_attempt_scope_uses_observed_sources_not_stale_scope_kinds") {
-    identity: capture_consent_test_identity()
-    clock: CaptureAttempt.safe_clock(identity.copy())
+    clock: CaptureAttempt.safe_clock(capture_consent_test_identity())
     assert_eq(clock.base_consent_scope().source_kinds, [CaptureSource]{CaptureSource.Clock})
-    ^attempt: CaptureAttempt.new(identity)
-    attempt.scope = capture_consent_test_scope()
-    attempt.scope.source_kinds = [CaptureSource]{CaptureSource.Randomness}
-    facts: [CaptureSourceFact]{CaptureSourceFact.at(CaptureSource.Network, "source.jet", U32{8}), CaptureSourceFact.at(CaptureSource.Clock, "source.jet", U32{3}), CaptureSourceFact.at(CaptureSource.Network, "source.jet", U32{9})}
-    observed: (attempt.copy()).with_sources(facts.copy())
+    attempt: capture_consent_attempt_with_stale_kinds()
+    facts: capture_consent_observed_facts()
+    observed: capture_consent_attempt_with_stale_kinds().with_sources(capture_consent_observed_facts())
     base: observed.base_consent_scope()
     assert_eq(base.source_kinds, [CaptureSource]{CaptureSource.Clock, CaptureSource.Network})
     assert_eq(base.authorities, attempt.scope.authorities)
@@ -150,7 +172,7 @@ capture_consent_test_scope: fn() -> CaptureConsentScope Never! {
     assert_eq(base.byte_limit, U64{123})
     assert_eq(observed.sources, facts)
     assert_eq(attempt.sources.len(), 0)
-    appended: (observed.copy()).with_source(CaptureSourceFact.at(CaptureSource.RawInput, "input.jet", U32{2}))
+    appended: capture_consent_attempt_with_stale_kinds().with_sources(capture_consent_observed_facts()).with_source(CaptureSourceFact.at(CaptureSource.RawInput, "input.jet", U32{2}))
     assert_eq(appended.sources.len(), 4)
     assert_eq(observed.sources.len(), 3)
     assert_eq(appended.base_consent_scope().source_kinds, [CaptureSource]{CaptureSource.Clock, CaptureSource.RawInput, CaptureSource.Network})

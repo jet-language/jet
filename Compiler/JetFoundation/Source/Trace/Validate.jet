@@ -132,7 +132,7 @@ jettrace_validate_hardware: fn(value: CanonicalJSON) JetTraceError! {
     if !jettrace_hex64(claimed) {
         return Err(jettrace_error("content.hardware.fingerprint is not lowercase Hex64"))
     }
-    body: jettrace_object([CanonicalJSONField]{jettrace_field("cpu_arch", fields[jettrace_get(fields, "cpu_arch")].value.copy()), jettrace_field("logical_cpus", fields[jettrace_get(fields, "logical_cpus")].value.copy()), jettrace_field("os", fields[jettrace_get(fields, "os")].value.copy()), jettrace_field("target", fields[jettrace_get(fields, "target")].value.copy())})
+    body: jettrace_object([CanonicalJSONField]{jettrace_field("cpu_arch", fields[jettrace_get(fields, "cpu_arch")].value), jettrace_field("logical_cpus", fields[jettrace_get(fields, "logical_cpus")].value), jettrace_field("os", fields[jettrace_get(fields, "os")].value), jettrace_field("target", fields[jettrace_get(fields, "target")].value)})
     jettrace_verify_digest(body, claimed)
 }
 
@@ -414,7 +414,7 @@ trace_receipt_section_from_json_at: fn(value: CanonicalJSON, label: String) -> T
     fields: jettrace_object_keys(value, label, [String]{"digest", "name", "type_name", "value"})
     type_name: jettrace_text(fields[jettrace_get(fields, "type_name")].value, "{label}.type_name")
     digest: jettrace_text(fields[jettrace_get(fields, "digest")].value, "{label}.digest")
-    Ok(TraceReceiptSection{name: name.move(), type_name: type_name.move(), value: fields[jettrace_get(fields, "value")].value.copy(), digest: digest.move()})
+    Ok(TraceReceiptSection{name: name.move(), type_name: type_name.move(), value: fields[jettrace_get(fields, "value")].value, digest: digest.move()})
 }
 
 jettrace_validate_receipt_sections: fn(value: CanonicalJSON) JetTraceError! {

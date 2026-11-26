@@ -48,74 +48,105 @@ sema_event_handle_owner: fn(ty: Type, check: SemaBodyCheck) -> String? {
     Val(owner)
 }
 
-// (arity, result) of a known method over the receiver's type arguments
-// `args` (checked by sema_event_handle_family), or None.
-sema_event_method_shape: fn(owner: String, method: String, args: [Type]) -> {arity: Int, result: Type}? {
-    subscription: Type.Named{name: "Subscription"}
+// Arity of a known method on `owner`, or None when `owner` has no such method.
+sema_event_method_arity: fn(owner: String, method: String) -> Int? Never! {
     if owner == "Event" || owner == "Hook" || owner == "DecisionHook" || owner == "AsyncEvent" {
-        if method == "on" || method == "once" -> return Val({arity: 2, result: subscription})
-        if method == "on_priority" -> return Val({arity: 3, result: subscription})
-        if method == "listener_count" -> return Val({arity: 0, result: Type.Int})
+        if method == "on" || method == "once" -> return Val(2)
+        if method == "on_priority" -> return Val(3)
+        if method == "listener_count" -> return Val(0)
     }
     if owner == "Event" {
-        if method == "emit" -> return Val({arity: 1, result: Type.Named{name: "EventTrace"}})
-        if method == "trace" -> return Val({arity: 0, result: Type.String})
+        if method == "emit" -> return Val(1)
+        if method == "trace" -> return Val(0)
         return None
     }
     if owner == "Hook" {
-        if method == "run" -> return Val({arity: 2, result: args[1].copy()})
-        if method == "trace" -> return Val({arity: 0, result: Type.String})
+        if method == "run" -> return Val(2)
+        if method == "trace" -> return Val(0)
         return None
     }
     if owner == "DecisionHook" {
-        if method == "run" {
-            return Val({arity: 1, result: Type.Apply{name: "HookOutcome", args: args.copy()}})
-        }
+        if method == "run" -> return Val(1)
         return None
     }
     if owner == "AsyncEvent" {
-        report: Type.Apply{name: "DispatchReport", args: [Type]{args[1].copy()}}
-        if method == "emit_async" {
-            return Val({arity: 1, result: Type.Apply{name: "Task", args: [Type]{report}}})
-        }
-        if method == "close" -> return Val({arity: 0, result: sema_event_unit()})
-        if method == "queued_count" || method == "running_count" || method == "blocked_count" {
-            return Val({arity: 0, result: Type.Int})
-        }
+        if method == "emit_async" -> return Val(1)
+        if method == "close" || method == "queued_count" || method == "running_count" || method == "blocked_count" -> return Val(0)
         return None
     }
     if owner == "DispatchReport" {
-        if method == "state" -> return Val({arity: 0, result: Type.Named{name: "DispatchState"}})
-        if method == "accepted" -> return Val({arity: 0, result: Type.Bool})
-        if method == "delivered_handlers" -> return Val({arity: 0, result: Type.Int})
-        if method == "failures" {
-            return Val({arity: 0, result: Type.List{element: Type.Apply{name: "DispatchFailure", args: args.copy()}}})
-        }
-        if method == "trace" -> return Val({arity: 0, result: Type.Named{name: "EventTrace"}})
+        if method == "state" || method == "accepted" || method == "delivered_handlers" || method == "failures" || method == "trace" -> return Val(0)
         return None
     }
     if owner == "EventScope" {
-        if method == "cancel" -> return Val({arity: 0, result: sema_event_unit()})
-        if method == "active_count" -> return Val({arity: 0, result: Type.Int})
+        if method == "cancel" || method == "active_count" -> return Val(0)
         return None
     }
     if owner == "Subscription" {
-        if method == "unsubscribe" -> return Val({arity: 0, result: sema_event_unit()})
-        if method == "is_active" -> return Val({arity: 0, result: Type.Bool})
+        if method == "unsubscribe" || method == "is_active" -> return Val(0)
         return None
     }
     if owner == "EventTrace" {
-        if method == "summary" -> return Val({arity: 0, result: Type.String})
-        if method == "delivered" || method == "queued" || method == "dropped" {
-            return Val({arity: 0, result: Type.Int})
-        }
+        if method == "summary" || method == "delivered" || method == "queued" || method == "dropped" -> return Val(0)
         return None
     }
     if owner == "FfiCallbackEvent" {
-        if method == "stop" -> return Val({arity: 0, result: sema_event_unit()})
+        if method == "stop" -> return Val(0)
         return None
     }
     None
+}
+
+// Result type of a known method over the receiver's owned type arguments
+// `args` (checked by sema_event_handle_family).
+sema_event_method_result: fn(owner: String, method: String, args: ^^[Type]) -> Type Never! {
+    ^owned_args: args.move()
+    if owner == "Event" || owner == "Hook" || owner == "DecisionHook" || owner == "AsyncEvent" {
+        if method == "on" || method == "once" || method == "on_priority" -> return Type.Named{name: "Subscription"}
+        if method == "listener_count" -> return Type.Int
+    }
+    if owner == "Event" {
+        if method == "emit" -> return Type.Named{name: "EventTrace"}
+        return Type.String
+    }
+    if owner == "Hook" {
+        if method == "run" -> return owned_args.pop() ?? sema_event_unit()
+        return Type.String
+    }
+    if owner == "DecisionHook" {
+        return Type.Apply{name: "HookOutcome", args: owned_args.move()}
+    }
+    if owner == "AsyncEvent" {
+        if method == "emit_async" {
+            err_ty: owned_args.pop() ?? sema_event_unit()
+            report: Type.Apply{name: "DispatchReport", args: [Type]{err_ty}}
+            return Type.Apply{name: "Task", args: [Type]{report}}
+        }
+        if method == "close" -> return sema_event_unit()
+        return Type.Int
+    }
+    if owner == "DispatchReport" {
+        if method == "state" -> return Type.Named{name: "DispatchState"}
+        if method == "accepted" -> return Type.Bool
+        if method == "delivered_handlers" -> return Type.Int
+        if method == "failures" {
+            return Type.List{element: Type.Apply{name: "DispatchFailure", args: owned_args.move()}}
+        }
+        return Type.Named{name: "EventTrace"}
+    }
+    if owner == "EventScope" {
+        if method == "cancel" -> return sema_event_unit()
+        return Type.Int
+    }
+    if owner == "Subscription" {
+        if method == "unsubscribe" -> return sema_event_unit()
+        return Type.Bool
+    }
+    if owner == "EventTrace" {
+        if method == "summary" -> return Type.String
+        return Type.Int
+    }
+    sema_event_unit()
 }
 
 sema_event_parameter: fn(name: String, ty: Type, convention: AccessConvention) -> SemaCallParam Never! {
@@ -145,14 +176,21 @@ sema_event_value_parameters: fn(owner: String, method: String, args: [Type]) -> 
 // `fn(T)` (Event), `fn(T) -> R` (Hook), `fn(T) -> HookDecision<T, E>`
 // (DecisionHook), and `fn(T) -> R` for AsyncEvent, where a handler returns
 // through a `Result<Unit, E>` carrier, so a unit body is its Ok.
-sema_event_handler_type: fn(owner: String, args: [Type]) -> Type Never! {
+sema_event_handler_type: fn(owner: String, args: ^^[Type]) -> Type Never! {
+    ^owned_args: args.move()
+    if owner == "DecisionHook" {
+        payload: owned_args[0]
+        ret: Type.Apply{name: "HookDecision", args: owned_args.move()}
+        return Type.Fn{params: [Type]{payload}, ret: Val(ret), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
+    }
+    owned_args.reverse()
+    payload: owned_args.pop() ?? sema_event_unit()
     ret: if owner == {
-        "Hook" -> args[1].copy()
-        "DecisionHook" -> Type.Apply{name: "HookDecision", args: args.copy()}
-        "AsyncEvent" -> Type.Result{ok: sema_event_unit(), err: args[1].copy()}
+        "Hook" -> owned_args.pop() ?? sema_event_unit()
+        "AsyncEvent" -> Type.Result{ok: sema_event_unit(), err: owned_args.pop() ?? sema_event_unit()}
         else -> sema_event_unit()
     }
-    Type.Fn{params: [Type]{args[0].copy()}, ret: Val(ret), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
+    Type.Fn{params: [Type]{payload}, ret: Val(ret), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
 }
 
 // The provider route a checked method lowers through (JetIR BuildEvents.jet
@@ -172,11 +210,11 @@ sema_call_try_event_handle_method: fn(receiver: Expr, receiver_value: TExpr, met
             type_args.push(sema_call_resolved_type(arg, check.environment.*, check.program.*))
         }
     }
-    shape: sema_event_method_shape(owner, method, type_args) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    arity: sema_event_method_arity(owner, method) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     callee: "{owner}.{method}"
-    if args.len() != shape.arity {
+    if args.len() != arity {
         ^_: sema_reactive_infer_args(args, check)
-        check.diagnostics.push(sema_call_arity_diagnostic(callee, shape.arity, args.len(), false, span))
+        check.diagnostics.push(sema_call_arity_diagnostic(callee, arity, args.len(), false, span))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     registers: method == "on" || method == "once" || method == "on_priority"
@@ -193,11 +231,12 @@ sema_call_try_event_handle_method: fn(receiver: Expr, receiver_value: TExpr, met
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     ^values: typed.values
-    if registers {
-        handler: sema_expression_lambda_host_callback_stored(args[args.len() - 1].expr, Val(sema_event_handler_type(owner, type_args)), false, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    result_type: if registers -> {
+        handler: sema_expression_lambda_host_callback_stored(args[args.len() - 1].expr, Val(sema_event_handler_type(owner, type_args.move())), false, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         values.push(handler)
-    }
-    ^value: sema_tree_node(shape.result, TExprKind.HandleMethod{receiver: receiver_value, operation: BodyHandleOp.EventMethod{symbol: sema_event_route_symbol(owner, method)}, args: values}, span)
+        Type.Named{name: "Subscription"}
+    } else -> sema_event_method_result(owner, method, type_args.move())
+    ^value: sema_tree_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: BodyHandleOp.EventMethod{symbol: sema_event_route_symbol(owner, method)}, args: values}, span)
     checked: sema_expression_call_expected(value, expected, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     SemaMethodSpecialCheck{handled: true, value: Val(checked)}
 }

@@ -117,6 +117,16 @@ sema_stmt_check_context_block: fn(fields: [ContextField], body: [Stmt], span: Sp
             if signature_valid -> guards.push(sema_stmt_deadline_guard(checked, field.span))
             next
         }
+        if field.name == "frame" {
+            if signature_valid {
+                framed: sema_expr_expected_owned(checked, Val(Type.String), check.environment.*, check.program.*, check.diagnostics) ?? {
+                    complete = false
+                    next
+                }
+                guards.push(TContextGuard{field: field.name, value: framed})
+            }
+            next
+        }
         if signature_valid && field.name == "allocator" && !sema_stmt_context_allocator_type(checked.ty) {
             if !sema_stmt_context_user_allocator(checked.ty, check) {
                 check.diagnostics.push(sema_error("E0762", field.span, "`allocator` needs an allocator, got {sema_type_show(checked.ty)}", "the `allocator` field takes an `Arena`, `Bump`, `Pool`, or `Fixed` value, or a value whose type implements `mem.Allocator`", "pass an allocator, e.g. `mem.Arena.new()`"))
@@ -150,10 +160,10 @@ sema_stmt_check_context_block: fn(fields: [ContextField], body: [Stmt], span: Sp
             check.state.block_allocators.push(SemaOwnershipBlockAllocator{name: sema_ownership_place_name(places[0]), id: SymbolID{id: places[0].root_id.id}})
         }
     }
-    // A `#Deadline` block, the block of the one `deadline` field, sets no
-    // allocation context of its own; L0506 reads the enclosing one.
-    deadline_only: fields.len() == 1 && fields[0].name == "deadline"
-    check.scopes.context_allocation = if names_allocator || previous_allocation == 2 -> 2 else if deadline_only -> previous_allocation else -> 1
+    // A `#Deadline` or `#Frame` block sets no allocation context of its own;
+    // L0506 reads the enclosing one.
+    no_alloc_block: fields.len() == 1 && (fields[0].name == "deadline" || fields[0].name == "frame")
+    check.scopes.context_allocation = if names_allocator || previous_allocation == 2 -> 2 else if no_alloc_block -> previous_allocation else -> 1
     nested: sema_stmt_check_block(body, return_type, check, "context@{span.start}", loop_depth)
     loop check.state.block_allocators.len() > open_allocators {
         ^_: check.state.block_allocators.pop()

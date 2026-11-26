@@ -1073,12 +1073,14 @@ x64_executable_keep: fn(exe: X64Executable, path: String) -> String {
     }
     ^out: [U8]{}
     image_path: if exe.image_end > 0 -> exe.image_path.bytes() else -> [U8]{}
-    stamp: if exe.image_end > 0 -> exe.image_stamp.copy() else -> [Int]{}
+    stamp_len: if exe.image_end > 0 -> exe.image_stamp.len() else -> 0
     image_size: if exe.image_end > 0 -> exe.image.len() + exe.image_gap else -> 0
     left: if exe.image_end > 0 && exe.image_symbols_left -> 1 else -> 0
-    words: [Int]{LOADER_KEPT_MAGIC, exe.image_end, exe.tail_at, exe.patch_at.len(), exe.tail.len(), stamp.len(), image_path.len(), exe.image_at, image_size, left}
+    words: [Int]{LOADER_KEPT_MAGIC, exe.image_end, exe.tail_at, exe.patch_at.len(), exe.tail.len(), stamp_len, image_path.len(), exe.image_at, image_size, left}
     loop value in words -> loader_kept_word(out, value)
-    loop value in stamp -> loader_kept_word(out, value)
+    if exe.image_end > 0 {
+        loop value in exe.image_stamp -> loader_kept_word(out, value)
+    }
     loader_kept_run(out, image_path)
     loop (k, at) in exe.patch_at {
         loader_kept_word(out, at)
@@ -1098,7 +1100,7 @@ loader_kept_word: fn(out: ^[U8], value: Int) Never! {
 
 // `bytes`, then zeros up to the next word.
 loader_kept_run: fn(out: ^[U8], bytes: [U8]) Never! {
-    out.extend(bytes.copy())
+    out.extend(bytes[0..<bytes.len()])
     end: out.len() + (8 - out.len() % 8) % 8
     link_pad_to(out, end, 0)
 }

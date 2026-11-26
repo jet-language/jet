@@ -15,14 +15,26 @@ capture_eligibility_test_attempt: fn() -> CaptureAttempt Never! {
     attempt
 }
 
+capture_eligibility_raw_input_source: fn() -> CaptureSourceFact Never! {
+    CaptureSourceFact.at(CaptureSource.RawInput, "input.jet", U32{7})
+}
+
+capture_eligibility_first_source: fn(kind: CaptureSource) -> CaptureSourceFact Never! {
+    CaptureSourceFact.new(kind, Val(CaptureLocation.new("first.jet", U32{13}).with_column(U32{4})))
+}
+
+capture_eligibility_fault_location: fn() -> CaptureLocation Never! {
+    CaptureLocation.new("fault.jet", U32{21}).with_column(U32{8})
+}
+
 capture_eligibility_test_granted: fn(policy: CapturePolicy) -> CaptureAttempt Never! {
     ^attempt: capture_eligibility_test_attempt()
-    attempt.consent = Val(SensitiveCaptureConsent.new(attempt.identity.copy(), policy.consent_scope(attempt)))
+    attempt.consent = Val(SensitiveCaptureConsent.new(capture_eligibility_test_identity(), policy.consent_scope(attempt)))
     attempt
 }
 
-capture_eligibility_assert_skip: fn(outcome: CaptureEligibility, reason: CaptureSkipReason, terminal_available: Bool) Never! {
-    assert(outcome == CaptureEligibility.Skipped{skip: CaptureSkip{reason: reason.copy(), terminal_available}})
+capture_eligibility_assert_skip: fn(outcome: CaptureEligibility, reason: ^^CaptureSkipReason, terminal_available: Bool) Never! {
+    assert(outcome == CaptureEligibility.Skipped{skip: CaptureSkip{reason: reason.move(), terminal_available}})
     assert(!outcome.is_allowed())
     assert(outcome.kind() == None)
     assert(outcome.budget() == None)
@@ -47,7 +59,7 @@ capture_eligibility_assert_skip: fn(outcome: CaptureEligibility, reason: Capture
                         } else if release && !explicit_capture {
                             capture_eligibility_assert_skip(outcome, CaptureSkipReason.ReleaseMode, terminal_available)
                         } else if !terminal_available {
-                            capture_eligibility_assert_skip(outcome, CaptureSkipReason.UnsafeSource{source: attempt.sources[1].copy()}, false)
+                            capture_eligibility_assert_skip(outcome, CaptureSkipReason.UnsafeSource{source: capture_eligibility_raw_input_source()}, false)
                         } else {
                             assert(outcome == CaptureEligibility.Sensitive{budget: CaptureBudget.new_unchecked(U64{41})})
                         }
@@ -71,13 +83,13 @@ capture_eligibility_assert_skip: fn(outcome: CaptureEligibility, reason: Capture
 #Test("capture_empty_and_clock_sources_are_safe_without_terminal_or_consent") {
     ^policy: CapturePolicy.development()
     policy.package.budget = CaptureBudget.new_unchecked(U64{29})
-    loop sources in
-        ([[CaptureSourceFact]]{([CaptureSourceFact]{}), ([CaptureSourceFact]{CaptureSourceFact.new(CaptureSource.Clock, None), CaptureSourceFact.at(CaptureSource.Clock, "clock.jet", (U32{3}))})}) {
-        ^attempt: CaptureAttempt.new(capture_eligibility_test_identity()).with_sources(sources.copy())
+    loop case_index in 0..<2 {
+        sources: if case_index == 0 -> [CaptureSourceFact]{} else -> [CaptureSourceFact]{CaptureSourceFact.new(CaptureSource.Clock, None), CaptureSourceFact.at(CaptureSource.Clock, "clock.jet", U32{3})}
+        ^attempt: CaptureAttempt.new(capture_eligibility_test_identity()).with_sources(sources)
         attempt.terminal_available = false
         assert(policy.eligibility(attempt) == CaptureEligibility.SafeClock{budget: CaptureBudget.new_unchecked(U64{29})})
         // A stale grant is irrelevant to a safe run, too.
-        ^other: attempt.identity.copy()
+        ^other: capture_eligibility_test_identity()
         other.build_id = "old"
         attempt.consent = Val(SensitiveCaptureConsent.new(other, CaptureConsentScope.default()))
         assert(policy.eligibility(attempt) == CaptureEligibility.SafeClock{budget: CaptureBudget.new_unchecked(U64{29})})
@@ -88,13 +100,12 @@ capture_eligibility_assert_skip: fn(outcome: CaptureEligibility, reason: Capture
     policy: CapturePolicy.development()
     loop first_kind in
         ([CaptureSource]{CaptureSource.Randomness, CaptureSource.RawInput, CaptureSource.Network}) {
-        first: CaptureSourceFact.new(first_kind, Val(CaptureLocation.new("first.jet", U32{13}).with_column(U32{4})))
-        ^attempt: CaptureAttempt.new(capture_eligibility_test_identity()).with_sources([CaptureSourceFact]{CaptureSourceFact.new(CaptureSource.Clock, None), first.copy(), CaptureSourceFact.at(CaptureSource.Network, "later.jet", U32{99})})
-        capture_eligibility_assert_skip(policy.eligibility(attempt), CaptureSkipReason.UnsafeSource{source: first.copy()}, true)
-        ^wrong: attempt.identity.copy()
+        ^attempt: CaptureAttempt.new(capture_eligibility_test_identity()).with_sources([CaptureSourceFact]{CaptureSourceFact.new(CaptureSource.Clock, None), capture_eligibility_first_source(first_kind), CaptureSourceFact.at(CaptureSource.Network, "later.jet", U32{99})})
+        capture_eligibility_assert_skip(policy.eligibility(attempt), CaptureSkipReason.UnsafeSource{source: capture_eligibility_first_source(first_kind)}, true)
+        ^wrong: capture_eligibility_test_identity()
         wrong.revision = "old"
         attempt.consent = Val(SensitiveCaptureConsent.new(wrong, policy.consent_scope(attempt)))
-        capture_eligibility_assert_skip(policy.eligibility(attempt), CaptureSkipReason.SensitiveConsentScopeChanged{source: first.copy()}, true)
+        capture_eligibility_assert_skip(policy.eligibility(attempt), CaptureSkipReason.SensitiveConsentScopeChanged{source: capture_eligibility_first_source(first_kind)}, true)
     }
 }
 
@@ -102,13 +113,13 @@ capture_eligibility_assert_skip: fn(outcome: CaptureEligibility, reason: Capture
     policy: CapturePolicy.development()
     ^attempt: capture_eligibility_test_granted(policy)
     attempt.terminal_available = false
-    capture_eligibility_assert_skip(policy.eligibility(attempt), CaptureSkipReason.UnsafeSource{source: attempt.sources[1].copy()}, false)
-    ^wrong: attempt.identity.copy()
+    capture_eligibility_assert_skip(policy.eligibility(attempt), CaptureSkipReason.UnsafeSource{source: capture_eligibility_raw_input_source()}, false)
+    ^wrong: capture_eligibility_test_identity()
     wrong.source_id = "other"
     attempt.consent = Val(SensitiveCaptureConsent.new(wrong, policy.consent_scope(attempt)))
-    capture_eligibility_assert_skip(policy.eligibility(attempt), CaptureSkipReason.UnsafeSource{source: attempt.sources[1].copy()}, false)
+    capture_eligibility_assert_skip(policy.eligibility(attempt), CaptureSkipReason.UnsafeSource{source: capture_eligibility_raw_input_source()}, false)
     attempt.consent = None
-    capture_eligibility_assert_skip(policy.eligibility(attempt), CaptureSkipReason.UnsafeSource{source: attempt.sources[1].copy()}, false)
+    capture_eligibility_assert_skip(policy.eligibility(attempt), CaptureSkipReason.UnsafeSource{source: capture_eligibility_raw_input_source()}, false)
 }
 
 #Test("capture_policy_scope_uses_actual_sources_policy_mode_budget_and_all_scope_fields") {
@@ -133,7 +144,7 @@ capture_eligibility_assert_skip: fn(outcome: CaptureEligibility, reason: Capture
     original: capture_eligibility_test_granted(policy)
     assert(policy.eligibility(original) == CaptureEligibility.Sensitive{budget: policy.budget()})
     loop field in 0..<7 {
-        ^changed: original.copy()
+        ^changed: capture_eligibility_test_granted(policy)
         if field == 0 -> changed.identity.target_inputs_sha256 = "other inputs"
         if field == 1 -> changed.identity.tool_version = "other version"
         if field == 2 -> changed.identity.engine = "other engine"
@@ -141,16 +152,15 @@ capture_eligibility_assert_skip: fn(outcome: CaptureEligibility, reason: Capture
         if field == 4 -> changed.identity.source_id = "other source"
         if field == 5 -> changed.identity.build_id = "other build"
         if field == 6 -> changed.identity.revision = "other revision"
-        capture_eligibility_assert_skip(policy.eligibility(changed), CaptureSkipReason.SensitiveConsentScopeChanged{source: original.sources[1].copy()}, true)
+        capture_eligibility_assert_skip(policy.eligibility(changed), CaptureSkipReason.SensitiveConsentScopeChanged{source: capture_eligibility_raw_input_source()}, true)
     }
 }
 
 #Test("capture_sensitive_grant_binds_full_scope_budget_mode_and_source_kinds") {
     policy: CapturePolicy.development()
-    original: capture_eligibility_test_granted(policy)
     loop field in 0..<8 {
-        ^changed: original.copy()
-        ^changed_policy: policy.copy()
+        ^changed: capture_eligibility_test_granted(policy)
+        ^changed_policy: CapturePolicy.development()
         if field == 0 -> changed.scope.authorities.push("extra authority")
         if field == 1 -> changed.scope.hosts.push("other.test")
         if field == 2 -> changed.scope.streams.push("stderr")
@@ -162,11 +172,11 @@ capture_eligibility_assert_skip: fn(outcome: CaptureEligibility, reason: Capture
             changed_policy.explicit_capture = true
         }
         if field == 7 -> changed.sources.push(CaptureSourceFact.new(CaptureSource.Randomness, None))
-        capture_eligibility_assert_skip(changed_policy.eligibility(changed), CaptureSkipReason.SensitiveConsentScopeChanged{source: original.sources[1].copy()}, true)
+        capture_eligibility_assert_skip(changed_policy.eligibility(changed), CaptureSkipReason.SensitiveConsentScopeChanged{source: capture_eligibility_raw_input_source()}, true)
     }
     // Duplicate/order changes and obsolete base mode/limit are canonicalized;
     // locations anchor denials but are not an additional consent scope field.
-    ^equivalent: original.copy()
+    ^equivalent: capture_eligibility_test_granted(policy)
     equivalent.scope.authorities = [String]{"Input", "Rand", "Input"}
     equivalent.scope.byte_limit = U64{1}
     equivalent.scope.mode = CaptureMode.Release
@@ -180,7 +190,10 @@ capture_eligibility_assert_skip: fn(outcome: CaptureEligibility, reason: Capture
     ^attempt: capture_eligibility_test_attempt()
     attempt.identity.revision = ""
     attempt.identity.source_id = "\n"
-    attempt.consent = Val(SensitiveCaptureConsent.new(attempt.identity.copy(), policy.consent_scope(attempt)))
+    ^granted_identity: capture_eligibility_test_identity()
+    granted_identity.revision = ""
+    granted_identity.source_id = "\n"
+    attempt.consent = Val(SensitiveCaptureConsent.new(granted_identity, policy.consent_scope(attempt)))
     assert(policy.eligibility(attempt) == CaptureEligibility.Sensitive{budget: policy.budget()})
     assert(policy.start_fact(attempt).identity == attempt.identity)
 }
@@ -193,7 +206,7 @@ capture_eligibility_assert_skip: fn(outcome: CaptureEligibility, reason: Capture
         ^attempt: capture_eligibility_test_attempt()
         if state == 0 -> attempt.sources = [CaptureSourceFact]{}
         if state == 1 {
-            attempt.consent = Val(SensitiveCaptureConsent.new(attempt.identity.copy(), policy.consent_scope(attempt)))
+            attempt.consent = Val(SensitiveCaptureConsent.new(capture_eligibility_test_identity(), policy.consent_scope(attempt)))
         }
         start: policy.start_fact(attempt)
         assert(start == CaptureStartFact.new(policy, attempt))
@@ -204,13 +217,12 @@ capture_eligibility_assert_skip: fn(outcome: CaptureEligibility, reason: Capture
         assert(start.explicit_capture)
         assert(start.budget == CaptureBudget.new_unchecked(U64{53}))
         assert(start.eligibility == policy.eligibility(attempt))
-        location: CaptureLocation.new("fault.jet", U32{21}).with_column(U32{8})
-        fault: start.fault("E1801", Val(location.copy()))
-        assert(fault == CaptureFaultFact.new(start, "E1801", Val(location.copy())))
+        fault: start.fault("E1801", Val(capture_eligibility_fault_location()))
+        assert(fault == CaptureFaultFact.new(start, "E1801", Val(capture_eligibility_fault_location())))
         assert(fault.identity == attempt.identity)
         assert(fault.mode == start.mode)
         assert(fault.fault_code == "E1801")
-        assert(fault.location == (Val(location)))
+        assert(fault.location == (Val(capture_eligibility_fault_location())))
         assert(fault.eligibility == start.eligibility)
         assert(fault.capture_kind() == start.capture_kind())
         assert(fault.captured() == (state != 2))

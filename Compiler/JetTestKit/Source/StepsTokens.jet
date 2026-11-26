@@ -257,7 +257,7 @@ kit_steps_free_ports: fn(context: KitStepCtx, count: Int, ports: ^[Int], locks: 
         }
         ^drawn: [Int]{}
         loop line in result.stdout.trim().split("\n") {
-            port: Int.parse(line.copy()) ?? return Val(kit_expect_verdict("ERROR", "free-port probe printed a line that is not a port"))
+            port: Int.parse(line) ?? return Val(kit_expect_verdict("ERROR", "free-port probe printed a line that is not a port"))
             if port < 1 || port > 65535 {
                 return Val(kit_expect_verdict("ERROR", "free-port probe returned an invalid port"))
             }

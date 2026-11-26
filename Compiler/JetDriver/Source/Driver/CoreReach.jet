@@ -45,7 +45,7 @@
 // (jet_driver_reach_hold), so load time and memory follow reach, not the
 // size of the library.
 use {
-    jet_foundation.[BOUNDARY_TYPED_HEADS, BUILTIN_METHOD_ROWS, BUILTIN_STATIC_ROWS, CORE_CALLS, CompilerThreads, DIAGNOSTIC_LINT, Diagnostic, Func, ImportDecl, Item, MARKER_HTML, MARKER_NO_PRELUDE, MARKER_POLICY, MARKER_TARGET, NameTable, ParseResult, Span, TraitImplBlock, compiler_threads_admit, compiler_threads_joined, compiler_threads_partition, compiler_threads_single, core_call_source_member, core_module_has_member, diagnostic_with_source_path, name_find, name_index, name_intern, name_intern_bytes, name_table, name_table_sized, name_text, owned_trait, owned_trait_codec, sema_casing_marker_qualifier]
+    jet_foundation.[BOUNDARY_TYPED_HEADS, BUILTIN_METHOD_ROWS, BUILTIN_STATIC_ROWS, CORE_CALLS, CompilerThreads, DIAGNOSTIC_LINT, Diagnostic, Func, ImportDecl, Item, MARKER_HTML, MARKER_NO_PRELUDE, MARKER_POLICY, MARKER_TARGET, NameTable, ParseResult, Span, TraitImplBlock, compiler_threads_admit, compiler_threads_joined, compiler_threads_partition, compiler_threads_single, core_call_source_member, core_module_export, core_module_has_member, diagnostic_with_source_path, name_find, name_index, name_intern, name_intern_bytes, name_table, name_table_sized, name_text, owned_trait, owned_trait_codec, sema_casing_marker_qualifier]
     jet_lexer.[
         Lexed,
         STRING_PART_INTERPOLATION,
@@ -464,6 +464,7 @@ JET_DRIVER_MEMBER_ROUTES: [String]{
     "asinh",
     "atan",
     "atanh",
+    "check",
     "conj",
     "cos",
     "cosh",
@@ -528,6 +529,8 @@ JET_DRIVER_SOURCE_ROUTES: [String]{
     "core.mem.unmapping",
     "core.mem.volatile_read",
     "core.mem.volatile_write",
+    "core.plugin.load",
+    "core.prelude.keep",
     "core.prelude.option_or_err",
     "core.reactive.signal",
     "core.regex.compile",
@@ -539,8 +542,11 @@ JET_DRIVER_SOURCE_ROUTES: [String]{
     "core.service.typed_send",
     "core.service.typed_send_durable",
     "core.service.typed_worker",
+    "core.service.worker",
+    "core.tasks.after",
     "core.term.eprint",
     "core.term.print",
+    "core.term.progress",
     "core.testing.snap",
     "core.text.fmt.pretty",
     "core.text.fmt.quantity",
@@ -1118,12 +1124,15 @@ JetDriverReachUnit: struct {
 
 // A private import a Core module defers until its alias is a reached head:
 // `alias`, or `marker`, the alias as a qualified marker's library part
-// spells it after its `#` (`#Builtin` for `builtin`; jet_driver_spell_push).
+// spells it after its `#` (`#Builtin` for `builtin`; jet_driver_spell_push),
+// or `types`, the bare-exported types of a deferred Core module import whose
+// bare or enum-head spelling requires that module's type declarations.
 JetDriverReachEdge: struct {
     unit: Int,
     scoped: JetDriverScopedImport,
     alias: Int,
     marker: Int,
+    types: [Int],
     followed: Bool,
 }
 
@@ -1349,15 +1358,32 @@ jet_driver_reach_open_typed_head: fn(reach: ^JetDriverReach, module_name: String
 jet_driver_reach_defer: fn(reach: ^JetDriverReach, unit: Int, scoped: JetDriverScopedImport) {
     alias: Int{name_intern(reach.names, scoped.declaration.alias).id}
     marker: Int{name_intern(reach.names, "#{sema_casing_marker_qualifier(scoped.declaration.alias)}").id}
-    reach.edges.push(JetDriverReachEdge{unit: unit, scoped: scoped, alias: alias, marker: marker, followed: false})
+    ^types: [Int]{}
+    if jet_driver_core_import_module(scoped.declaration) == .Val(module_name) {
+        if core_module_export(module_name) == .Val(exported) {
+            loop type_name in exported.type_exports {
+                types.push(Int{name_intern(reach.names, type_name).id})
+            }
+        }
+    }
+    reach.edges.push(JetDriverReachEdge{unit: unit, scoped: scoped, alias: alias, marker: marker, types: types, followed: false})
 }
 
 // Whether reached code of the deferring module now spells the edge's alias as
-// a path head, or as a marker's library part.
+// a path head, as a marker's library part, or spells one of the deferred Core
+// module's bare-exported types.
 jet_driver_reach_wants: fn(reach: JetDriverReach, edge: Int) -> Bool Never! {
     if reach.edges[edge].followed -> return false
     unit: reach.edges[edge].unit
-    reach.units[unit].heads.get(reach.edges[edge].alias) != None || reach.units[unit].heads.get(reach.edges[edge].marker) != None
+    if reach.units[unit].heads.get(reach.edges[edge].alias) != None || reach.units[unit].heads.get(reach.edges[edge].marker) != None {
+        return true
+    }
+    loop type_id in reach.edges[edge].types {
+        if reach.units[unit].local.get(type_id) != None || reach.units[unit].heads.get(type_id) != None || (reach.units[unit].open && jet_driver_reach_has(reach.global, type_id)) {
+            return true
+        }
+    }
+    false
 }
 
 // Defers what the source of the Core module at `unit` demands

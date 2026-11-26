@@ -58,6 +58,9 @@ NATIVE_DUMP_SECTION_TASKS: 3
 // cut off, its row count, then each cut range's [address, bytes].
 NATIVE_DUMP_SECTION_CUT: 4
 
+// The active breadcrumb frames of the stopping task, UTF-8 `outer > inner`.
+NATIVE_DUMP_SECTION_FRAMES: 5
+
 // A task row's words: its task's id, how its registers were had, its rip,
 // rsp and rbp, its thread's tid (0 for a parked task's), which of its
 // general registers are known (bit k for the k-th), then
@@ -112,6 +115,7 @@ NativeDump: struct {
     memory: NativeMemory,
     registry: Int,
     image: String{""},
+    frames: String{""},
 }
 
 // One readout of a dump's console, and whether it refused the command (a
@@ -197,6 +201,7 @@ native_dump_open: fn(path: String) -[FS.Read]> NativeDumpOpened NativeDebugError
     ^budget: 0
     ^memory: 0
     ^cut_off: 0
+    ^dump_frames: ""
     ^tasks: [NativeDumpTask]{}
     ^at: header
     loop at + 24 <= bytes.len() {
@@ -223,6 +228,9 @@ native_dump_open: fn(path: String) -[FS.Read]> NativeDumpOpened NativeDebugError
                 row += 16
             }
         }
+        if kind == NATIVE_DUMP_SECTION_FRAMES && size > 0 {
+            dump_frames = String.from_bytes_lossy(bytes.slice(at, at + size))
+        }
         at += native_dump_pad(size)
     }
     // The image's bytes follow the dump's in the memory's backing, and the
@@ -248,7 +256,7 @@ native_dump_open: fn(path: String) -[FS.Read]> NativeDumpOpened NativeDebugError
     routines: x64_image_functions(elf).functions
     ^backing: bytes.move()
     backing.extend(elf.move())
-    dump: NativeDump{tasks: tasks, memory: NativeMemory{trace: None, blocks: blocks, backing: backing.move(), cut: cut}, registry: registry, image: "{image_file}"}
+    dump: NativeDump{tasks: tasks, memory: NativeMemory{trace: None, blocks: blocks, backing: backing.move(), cut: cut}, registry: registry, image: "{image_file}", frames: dump_frames}
     session: NativeSession{binary: path, image: image, trace: X64Trace{pid: -1, scratch: 0, failure: ""}, output_path: "", output_read: 0, started: true, threads: [NativeThread]{}, observe_root: 0, breakpoints: [NativeBreakpoint]{}, rules: [Int:NativeRule]{}, numbered: 0, sites: [Int:Int]{}, selected: 0, watches: [NativeWatch]{}, watched: "", notes: "", openings: openings, dump: Val(dump), task: 0, program_entry: program_entry, eval_image: Val(facts)}
     Ok(NativeDumpOpened{session: session, ring: ring, pid: pid, seconds: seconds, build: build, image_file: image_file, image: length, memory: memory, records: records, budget: budget, cut_off: cut_off, routines: routines})
 }
@@ -779,7 +787,9 @@ native_dump_frame: fn(session: ^NativeSession, frames: [NativeFrame], index: Int
     frame: frames[index]
     source: session.frame_source(frame, file, lines)
     locals: native_dump_locals(session) ?? return Err(err)
-    Ok("Stopped  {frame.file}:{frame.line}  in {frame.function}()\n{frame.line} | {source}        <- here\n{native_debug_locals_line(locals)}\n")
+    active: session.context_frames()
+    frames_line: if active != "" -> "frames=[{active}]\n" else -> ""
+    Ok("Stopped  {frame.file}:{frame.line}  in {frame.function}()\n{frame.line} | {source}        <- here\n{native_debug_locals_line(locals)}\n{frames_line}")
 }
 
 #Test("a dump's relative source is in the directory whose .jet/dumps holds the dump") {

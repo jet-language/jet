@@ -68,7 +68,7 @@ CaptureConsentScope: struct {
         capture_consent_sort_unique(self.disclosures)
         // Declaration order, not lexical order of Time/Rand/Input/Net.
         loop index in 1..<self.source_kinds.len() {
-            value: self.source_kinds[index].copy()
+            value: self.source_kinds[index]
             ^cursor: index
             loop cursor > 0 && capture_consent_source_rank(self.source_kinds[cursor - 1]) > capture_consent_source_rank(value) {
                 self.source_kinds[cursor] = self.source_kinds[cursor - 1]
@@ -216,7 +216,7 @@ CaptureAttempt: struct {
 
     // Copy only the retained scope fields; stale scope kinds are never cloned.
     base_consent_scope: fn(self) -> CaptureConsentScope Never! {
-        ^scope: CaptureConsentScope{authorities: self.scope.authorities.copy(), hosts: self.scope.hosts.copy(), streams: self.scope.streams.copy(), disclosures: self.scope.disclosures.copy(), destination: self.scope.destination.copy(), byte_limit: self.scope.byte_limit, mode: self.scope.mode, source_kinds: [CaptureSource]{}}
+        ^scope: CaptureConsentScope{authorities: self.scope.authorities, hosts: self.scope.hosts, streams: self.scope.streams, disclosures: self.scope.disclosures, destination: self.scope.destination, byte_limit: self.scope.byte_limit, mode: self.scope.mode, source_kinds: [CaptureSource]{}}
         loop fact in self.sources -> scope.source_kinds.push(fact.source)
         scope.canonicalize()
         scope

@@ -13,33 +13,39 @@ sema_checked_shape_defaults: fn(program: ^^Program, registered: SemaRegistration
         if defaults.get(destination.id) == .None -> defaults[destination.id] = value.value
     }
     if defaults.len() == 0 -> return updated_program
-    loop index in 0..<updated_program.items.len() {
-        if updated_program.items[index] == .Struct(definition) {
-            ^nominal: SemaRegistrationNominal?{None}
-            loop candidate in registered.nominals {
-                if candidate.symbol.name == definition.name -> nominal = Val(candidate)
+    ^reversed: [Item]{}
+    loop updated_program.items.len() > 0 {
+        if updated_program.items.pop() == .Val(item) -> reversed.push(item)
+    }
+    loop reversed.len() > 0 {
+        item: reversed.pop() ?? break
+        ^nominal_index: Int?{None}
+        if item == .Struct(definition) {
+            loop (candidate_index, candidate) in registered.nominals {
+                if candidate.symbol.name == definition.name -> nominal_index = Val(candidate_index)
             }
-            owner: nominal ?? next
-            // copy: `definition` is a read view of updated_program.items[index], and the slot is
-            // rewritten with `updated` only when a default changes. Jet has no writable binding for
-            // an enum payload.
-            ^updated: definition.copy()
-            ^changed: false
-            loop field_index in 0..<updated.fields.len() {
-                field: updated.fields[field_index]
-                if field.default_ct != None -> next
-                ^destination: SymbolID?{None}
-                loop checked in owner.fields {
-                    if checked.symbol.name == field.name -> destination = Val(checked.symbol.id)
-                }
-                found: destination ?? next
-                value: defaults.get(found.id) ?? next
-                retained: sema_user_template_ct_value(value) ?? next
-                updated.fields[field_index].default_ct = Val(retained)
-                changed = true
-            }
-            if changed -> updated_program.items[index] = Item.Struct{value: updated}
         }
+        if nominal_index == .Val(owner_index) {
+            if item.move() == .Struct(source_definition) {
+                ^updated: source_definition.move()
+                owner: registered.nominals[owner_index]
+                loop field_index in 0..<updated.fields.len() {
+                    field: updated.fields[field_index]
+                    if field.default_ct != None -> next
+                    ^destination: SymbolID?{None}
+                    loop checked in owner.fields {
+                        if checked.symbol.name == field.name -> destination = Val(checked.symbol.id)
+                    }
+                    found: destination ?? next
+                    value: defaults.get(found.id) ?? next
+                    retained: sema_user_template_ct_value(value) ?? next
+                    updated.fields[field_index].default_ct = Val(retained)
+                }
+                updated_program.items.push(Item.Struct{value: updated})
+            }
+            next
+        }
+        updated_program.items.push(item)
     }
     updated_program
 }

@@ -221,8 +221,8 @@ sema_divergence_union: fn(left: SemaDivergenceFlow, right: SemaDivergenceFlow) -
 
 // `next` after every path of `first` that still reaches a statement; a
 // path that already ended never reaches `next`.
-sema_divergence_then: fn(first: SemaDivergenceFlow, next: SemaDivergenceFlow) -> SemaDivergenceFlow Never! {
-    if !first.normal -> return first.copy()
+sema_divergence_then: fn(first: ^^SemaDivergenceFlow, next: SemaDivergenceFlow) -> SemaDivergenceFlow Never! {
+    if !first.normal -> return first.move()
     sema_divergence_union(SemaDivergenceFlow{normal: false, returned: first.returned, diverged: first.diverged, broke: first.broke, continued: first.continued}, next)
 }
 
@@ -235,8 +235,8 @@ sema_divergence_break: fn(flow: SemaDivergenceFlow) -> SemaDivergenceFlow Never!
 }
 
 // A call that stops the program, after arguments that may end first.
-sema_divergence_stop: fn(args: SemaDivergenceFlow) -> SemaDivergenceFlow Never! {
-    if !args.normal -> return args.copy()
+sema_divergence_stop: fn(args: ^^SemaDivergenceFlow) -> SemaDivergenceFlow Never! {
+    if !args.normal -> return args.move()
     SemaDivergenceFlow{normal: false, returned: args.returned, diverged: true, broke: args.broke, continued: args.continued}
 }
 
@@ -452,19 +452,19 @@ sema_divergence_expr: fn(graph: SemaRegistrationGraph, scope: ^SemaDivergenceSco
         .MethodCall(receiver, method, _, _, _, args, _) -> {
             flow: sema_divergence_then(sema_divergence_expr(graph, scope, receiver), sema_divergence_args(graph, scope, args))
             if flow.normal && sema_divergence_member_call_diverges(graph, scope, receiver, method) {
-                return sema_divergence_stop(flow)
+                return sema_divergence_stop(flow.move())
             }
             flow
         }
         // `receiver?.method(…)` runs nothing past a missing receiver.
         .OptMethodCall(receiver, _, _, _, args, _, _) -> {
             head: sema_divergence_expr(graph, scope, receiver)
-            sema_divergence_union(head, sema_divergence_then(head, sema_divergence_args(graph, scope, args)))
+            if !head.normal -> head else -> sema_divergence_union(head, sema_divergence_args(graph, scope, args))
         }
         .Call(call, _) -> {
             args: sema_divergence_args(graph, scope, call.args)
             if call.name == "panic" || sema_divergence_call_diverges(graph, scope, call.name) {
-                return sema_divergence_stop(args)
+                return sema_divergence_stop(args.move())
             }
             args
         }

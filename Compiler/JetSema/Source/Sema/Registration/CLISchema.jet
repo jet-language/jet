@@ -90,14 +90,16 @@ sema_cli_schema_fields: fn(definition: StructDef) -> [CLIInputSchema] {
                 CLIInputShape.Value{kind: sema_cli_schema_kind(field.ty), optional: false, default: None}
             }
         }
+        help: sema_cli_entry_doc(field.serde_markers) ?? "value for --{flag}"
+        metavar: if field.ty == .Bool -> None else -> Val(unicode.upper(flag.replace("-", "_")))
         inputs.push(
             CLIInputSchema{
                 field: field.name.copy(),
-                flag: flag.copy(),
+                flag: flag,
                 short: sema_registration_cli_arg_text(field.serde_markers, "short"),
                 env: sema_registration_cli_arg_text(field.serde_markers, "env"),
-                help: sema_cli_entry_doc(field.serde_markers) ?? "value for --{flag}",
-                metavar: if field.ty == .Bool -> None else -> Val(unicode.upper(flag.replace("-", "_"))),
+                help: help,
+                metavar: metavar,
                 shape: shape,
                 positional: at,
             },
@@ -161,14 +163,16 @@ sema_cli_schema_params: fn(params: [Param], shared_type: String) -> [CLIInputSch
             }
             shape = CLIInputShape.Value{kind: sema_cli_schema_kind(param.ty), optional: false, default: default}
         }
+        help: "value for --{flag}"
+        metavar: if param.ty == .Bool -> None else -> Val(unicode.upper(flag.replace("-", "_")))
         inputs.push(
             CLIInputSchema{
                 field: param.name.copy(),
-                flag: flag.copy(),
+                flag: flag,
                 short: None,
                 env: None,
-                help: "value for --{flag}",
-                metavar: if param.ty == .Bool -> None else -> Val(unicode.upper(flag.replace("-", "_"))),
+                help: help,
+                metavar: metavar,
                 shape: shape,
                 positional: at,
             },

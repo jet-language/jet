@@ -234,23 +234,23 @@ AuthorityGrant: struct {
     }
 }
 
+AuthorityKeyRow: struct {
+    key: String,
+    index: Int,
+}
+
 AuthoritySet: struct {
     grants: [AuthorityGrant],
 
     // The grants in canonical `capability@scope` order, each once.
     new: fn(grants: [AuthorityGrant]) -> AuthoritySet Never! {
-        ^keys: [String]{}
-        loop grant in grants -> keys.push("{grant.capability}@{grant.scope_id}")
-        ^order: [Int]{}
-        loop index in 0..<grants.len() -> order.push(index)
-        order_keys: keys.copy()
-        order.sort_by(fn(a: Int, b: Int) { order_keys[a] <=> order_keys[b] })
+        ^rows: [AuthorityKeyRow]{}
+        loop (index, grant) in grants -> rows.push(AuthorityKeyRow{key: "{grant.capability}@{grant.scope_id}", index: index})
+        rows.sort_by(fn(a: AuthorityKeyRow, b: AuthorityKeyRow) { a.key <=> b.key })
         ^kept: [AuthorityGrant]{}
-        ^last: ""
-        loop index in order {
-            if kept.len() > 0 && keys[index] == last -> next
-            last = keys[index]
-            kept.push(grants[index])
+        loop (row_index, row) in rows {
+            if row_index > 0 && row.key == rows[row_index - 1].key -> next
+            kept.push(grants[row.index])
         }
         AuthoritySet{grants: kept}
     }
@@ -1107,13 +1107,13 @@ PausedEvaluateHost: struct {
 }
 
 inspect_authority: fn(request: InspectRequest) -> [AuthorityRequirement] Never! {
-    ^authority: request.authority.copy()
+    ^authority: request.authority
     authority.push(AuthorityRequirement{capability: INSPECT_AUTHORITY, scope_id: request.scope_id})
     authority
 }
 
 evaluate_authority: fn(request: EvaluateRequest) -> [AuthorityRequirement] Never! {
-    ^authority: request.authority.copy()
+    ^authority: request.authority
     authority.push(AuthorityRequirement{capability: EVALUATE_AUTHORITY, scope_id: request.scope_id})
     if request.mode == .Mutate {
         authority.push(AuthorityRequirement{capability: MUTATE_AUTHORITY, scope_id: request.scope_id})
@@ -1189,10 +1189,7 @@ project_node: fn(value: ValueProjection, identity: SessionIdentity, budget: Eval
             stats.truncated = true
         }
     }
-    ^projected: value.copy()
-    projected.value = None
-    projected.children = [ValueProjection]{}
-    projected.truncated = value.truncated || !metadata_fits
+    ^projected: ValueProjection{id: value.id, name: value.name, type_name: value.type_name, source: value.source, publication: value.publication, value: None, children: [ValueProjection]{}, truncated: value.truncated || !metadata_fits}
     if value.publication == .Published {
         if value.value == .Val(typed) {
             payload: paused_value_bytes(typed)

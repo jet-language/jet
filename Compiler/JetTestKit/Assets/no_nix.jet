@@ -152,15 +152,19 @@ no_nix_ldd: fn(ldd: String, path: String, host_path: String) -> [String] {
     words
 }
 
+// The /nix/store/NAME root of `candidate`, if it lies in the Nix store.
+no_nix_store_root_one: fn(candidate: String, roots: ^[String]) {
+    if !candidate.starts_with("/nix/store/") -> return
+    rest: candidate.slice(11, candidate.len())
+    name: if rest.index("/") == .Val(slash) -> rest.slice(0, slash) else -> rest
+    root: "/nix/store/{name}"
+    if !roots.contains(root) -> roots.push(root)
+}
+
 // The /nix/store/NAME root of `path` and of what it resolves to.
 no_nix_store_root: fn(path: String, roots: ^[String]) {
-    loop candidate in [path.copy(), no_nix_real(path)] {
-        if !candidate.starts_with("/nix/store/") -> next
-        rest: candidate.slice(11, candidate.len())
-        name: if rest.index("/") == .Val(slash) -> rest.slice(0, slash) else -> rest.copy()
-        root: "/nix/store/{name}"
-        if !roots.contains(root) -> roots.push(root)
-    }
+    no_nix_store_root_one(path, roots)
+    no_nix_store_root_one(no_nix_real(path), roots)
 }
 
 no_nix_roots_of: fn(ldd: String, path: String, host_path: String, roots: ^[String]) {
@@ -170,14 +174,10 @@ no_nix_roots_of: fn(ldd: String, path: String, host_path: String, roots: ^[Strin
     no_nix_store_root(path, roots)
 }
 
-// The Nix loader that runs the staged Nix tools and any dynamic ELF subject.
-// A static subject (the Jet-built `jet` and `jetpack` are static) names none,
-// so the tools are searched after the subjects.
-no_nix_loader: fn(ldd: String, candidates: [String], host_path: String) -> String {
-    loop path in candidates {
-        loop word in no_nix_ldd(ldd, path, host_path) {
-            if word.contains("/ld-linux") && word.contains(".so") -> return word
-        }
+// The Nix loader that runs `path`, or "" if `ldd` finds none.
+no_nix_loader_one: fn(ldd: String, path: String, host_path: String) -> String {
+    loop word in no_nix_ldd(ldd, path, host_path) {
+        if word.contains("/ld-linux") && word.contains(".so") -> return word
     }
     ""
 }
@@ -227,10 +227,16 @@ no_nix_inner: fn(args: [String]) -> Never {
     }
     roots.sort()
 
-    ^candidates: [String]{}
-    loop i in 0..<count -> candidates.push(pairs[2 * i].copy())
-    loop tool in [mount_real, umount_real, shell] -> candidates.push(tool.copy())
-    loader: no_nix_loader(ldd, candidates, host_path)
+    // The Nix loader that runs the staged Nix tools and any dynamic ELF subject.
+    // A static subject (the Jet-built `jet` and `jetpack` are static) names none,
+    // so the tools are searched after the subjects.
+    ^loader: ""
+    loop i in 0..<count {
+        if loader == "" -> loader = no_nix_loader_one(ldd, pairs[2 * i], host_path)
+    }
+    loop tool in [mount_real, umount_real, shell] {
+        if loader == "" -> loader = no_nix_loader_one(ldd, tool, host_path)
+    }
     // The loader's directory is held before /nix is hidden and passed to the
     // subject at fd 9: the kit rewrote each staged Nix image's interpreter to
     // /proc/self/fd/9/LOADER, so the subject's own children still start.
@@ -309,14 +315,14 @@ no_nix_dynamic: fn(ldd: String, path: String, host_path: String) -> Bool {
 }
 
 // `argv` through the staged loader, or as it is on a host without one.
-no_nix_via: fn(loader: String, library_path: String, argv: [String]) -> [String] {
-    if loader == "" -> return argv.copy()
+no_nix_via: fn(loader: String, library_path: String, argv: ^^[String]) -> [String] {
+    if loader == "" -> return argv.move()
     ^result: [String]{loader.copy()}
     if library_path != "" {
         result.push("--library-path")
         result.push(library_path.copy())
     }
-    loop argument in argv -> result.push(argument.copy())
+    loop argument in argv.move() -> result.push(argument)
     result
 }
 

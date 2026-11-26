@@ -2783,20 +2783,6 @@ PERF_ZONE_RING_RECORD_MOST: I64{4096}
 // fiber borrows from the carrier it runs on (perf_rings_lend).
 PERF_ZONE_TCB_RING: I64{760}
 
-// The zones open on a thread while no process root runs (Main.jet
-// main_root_control): a main that owns its process (JetIR EntryOwned.jet)
-// has no stop edge to close them at a stop or a process.exit, so the
-// observation's exit step closes them (perf_zones_close_open). They follow
-// the thread's zone ring, at PERF_ZONE_OPEN_AT (PERF_ZONE_RING_AT plus
-// PERF_ZONE_RING_BYTES): their count@0, then each one's start and borrowed
-// name, a word each, the innermost last. Past PERF_ZONE_OPEN_MOST a zone
-// is counted only.
-PERF_ZONE_OPEN_AT: I64{65664}
-
-PERF_ZONE_OPEN_BYTES: I64{4096}
-
-PERF_ZONE_OPEN_MOST: I64{255}
-
 // A site's opcode byte: `test eax, imm32`, whose flags nothing reads,
 // falls through while zones are off; `jmp rel32`, over the same four bytes,
 // enters the site's stub while they are on, which makes the call and jumps
@@ -3039,7 +3025,7 @@ perf_zones_refused: fn() {
 #Export(c) jet_perf_zone_open_named: fn(name: I64) -> I64 {
     if (perf_zones_on == I64{0}) { return jet_int_owned_from_i64(I64{0}) }
     start: perf_zone_edge()
-    if (main_root_control == I64{0}) { perf_zone_open_push(start, name) }
+    if (start != I64{0}) { perf_zone_open_push(start, name) }
     jet_int_owned_from_i64(start)
 }
 
@@ -3186,80 +3172,55 @@ perf_zone_task: fn() -> I64 {
     perf_causal_progress(name)
 }
 
-// Keeps the zone that opened at `start`, named by `name`, as open on this
-// thread (PERF_ZONE_OPEN_AT); a thread without a ring keeps none.
+// Pushes the zone that opened at `start`, named by `name`, onto the current
+// task's shared Context.jet frame stack.
 perf_zone_open_push: fn(start: I64, name: I64) {
-    ring: perf_zone_ring()
-    if (ring == I64{0}) {
-        return
-    }
-    open: wrapping(ring + PERF_ZONE_OPEN_AT)
-    count: rt_text_word(open)
-    if (count < PERF_ZONE_OPEN_MOST) {
-        entry: wrapping(open + wrapping(I64{8} + (count << I64{4})))
-        rt_text_store(entry, start)
-        rt_text_store(wrapping(entry + I64{8}), name)
-    }
-    rt_text_store(open, wrapping(count + I64{1}))
+    ^_: context_frame_push(name, I64{0}, I64{0}, start, start, CONTEXT_FRAME_KIND_PERF_ZONE)
 }
 
-// Forgets the open zone that started at `start` on this thread, the
-// innermost first: a zone moved out of its block may close out of order.
-// Past PERF_ZONE_OPEN_MOST an unkept zone only lowers the count.
+// Pops the innermost open perf zone that started at `start` from the current
+// task's shared Context.jet frame stack.
 perf_zone_open_drop: fn(start: I64) {
-    ring: sync_load(wrapping(thread_base() + PERF_ZONE_TCB_RING))
-    if (ring == I64{0}) {
-        return
-    }
-    open: wrapping(ring + PERF_ZONE_OPEN_AT)
-    count: rt_text_word(open)
-    if (count == I64{0}) {
-        return
-    }
-    if (count > PERF_ZONE_OPEN_MOST) {
-        rt_text_store(open, wrapping(count - I64{1}))
-        return
-    }
-    ^at: count
-    loop at > (I64{0}) {
-        at = wrapping(at - I64{1})
-        entry: wrapping(open + wrapping(I64{8} + (at << I64{4})))
-        if (rt_text_word(entry) == start) {
-            // The ones opened after it move down a place.
-            ^next: wrapping(at + I64{1})
-            loop next < count {
-                from: wrapping(open + wrapping(I64{8} + (next << I64{4})))
-                to: wrapping(from - I64{16})
-                rt_text_store(to, rt_text_word(from))
-                rt_text_store(wrapping(to + I64{8}), rt_text_word(wrapping(from + I64{8})))
-                next = wrapping(next + I64{1})
-            }
-            rt_text_store(open, wrapping(count - I64{1}))
-            return
-        }
-    }
+    ^_: context_frame_pop_match(CONTEXT_FRAME_KIND_PERF_ZONE, start, I64{0}, I64{0}, I64{0})
 }
 
-// At the observation's exit step (perf_samples_exit): each zone still open
-// on this thread (PERF_ZONE_OPEN_AT) records its row, ending now, the
+// At the observation's exit step (perf_samples_exit): each perf zone or
+// `#Frame` block still open on this task records its row, ending now, the
 // innermost first, as its stop edge would under a process root.
 perf_zones_close_open: fn() {
-    if (perf_zones_on == I64{0}) {
+    if (perf_zones_on == I64{0} && perf_spans_fd < I64{0}) {
         return
     }
-    ring: sync_load(wrapping(thread_base() + PERF_ZONE_TCB_RING))
-    if (ring == I64{0}) {
-        return
+    out: jet_rt_alloc(I64{16}, I64{8})
+    if (perf_zones_on != I64{0}) {
+        loop {
+            rt_text_store(out, I64{0})
+            rt_text_store(wrapping(out + I64{8}), I64{0})
+            if !context_frame_pop_match(CONTEXT_FRAME_KIND_PERF_ZONE, I64{0}, out, wrapping(out + I64{8}), I64{0}) {
+                break
+            }
+            name: rt_text_word(out)
+            start: rt_text_word(wrapping(out + I64{8}))
+            if (name != I64{0}) {
+                perf_zone_ring_put(start, perf_zone_edge(), name)
+                jet_rt_string_drop(name)
+            }
+        }
     }
-    open: wrapping(ring + PERF_ZONE_OPEN_AT)
-    ^count: rt_text_word(open)
-    if (count > PERF_ZONE_OPEN_MOST) { count = PERF_ZONE_OPEN_MOST }
-    loop count > (I64{0}) {
-        count = wrapping(count - I64{1})
-        entry: wrapping(open + wrapping(I64{8} + (count << I64{4})))
-        perf_zone_ring_put(rt_text_word(entry), perf_zone_edge(), rt_text_word(wrapping(entry + I64{8})))
+    loop {
+        rt_text_store(out, I64{0})
+        rt_text_store(wrapping(out + I64{8}), I64{0})
+        if !context_frame_pop_match(CONTEXT_FRAME_KIND_BLOCK, I64{0}, I64{0}, out, wrapping(out + I64{8})) {
+            break
+        }
+        start_ns: rt_text_word(out)
+        path: rt_text_word(wrapping(out + I64{8}))
+        if (start_ns != I64{0} && path != I64{0}) {
+            perf_zone_row(PERF_ZONE_ZONE, start_ns, perf_zone_now(), path)
+        }
+        if (path != I64{0}) { jet_rt_string_drop(path) }
     }
-    rt_text_store(open, I64{0})
+    jet_rt_free(out, I64{16}, I64{8})
 }
 
 // The zone's record in this thread's ring: plain stores, then one store of
@@ -3306,9 +3267,8 @@ perf_zone_ring: fn() -> I64 {
     base: thread_base()
     held: sync_load(wrapping(base + PERF_ZONE_TCB_RING))
     if (held != I64{0}) { return held }
-    // Fresh pages read zero: an empty ring, its head and tail at 0, and no
-    // open zone.
-    ring: alloc_map_try(wrapping(PERF_ZONE_OPEN_AT + PERF_ZONE_OPEN_BYTES))
+    // Fresh pages read zero: an empty ring, its head and tail at 0.
+    ring: alloc_map_try(wrapping(PERF_ZONE_RING_AT + PERF_ZONE_RING_BYTES))
     if (ring == I64{0}) { return I64{0} }
     rings: perf_zone_rings
     loop {
@@ -6216,6 +6176,8 @@ PERF_FLIGHT_SECTION_TASKS: I64{3}
 
 PERF_FLIGHT_SECTION_CUT: I64{4}
 
+PERF_FLIGHT_SECTION_FRAMES: I64{5}
+
 // A row of the dump's tasks: the task's id, how its registers were had,
 // its rip, rsp and rbp, its thread's tid (0 for a parked task's), which of
 // the general registers that follow are known (bit k for the k-th), then
@@ -7470,6 +7432,7 @@ perf_flight_dump: fn(fault: I64) {
     }
     if (good) { good = perf_flight_tasks(fd, state, words, zeros) }
     if (good) { good = perf_flight_reach(fd, state, words, zeros) }
+    if (good) { good = perf_flight_frames(fd, state, words, zeros) }
     if (good) {
         ^_: perf_flight_section(fd, state, words, zeros, PERF_FLIGHT_SECTION_END, I64{0}, I64{0}, I64{0})
     }
@@ -7486,6 +7449,55 @@ perf_flight_dump: fn(fault: I64) {
     ^_: perf_flight_syscall(I64{1}, I64{2}, text, perf_flight_length(text))
     newline: rt_static_text("\n")
     ^_: perf_flight_syscall(I64{1}, I64{2}, rt_text_data(newline), rt_text_len(newline))
+}
+
+// Writes the stopping task's active breadcrumb frames (Context.jet
+// CONTEXT_FRAME_KEY) as `outer > inner` in PERF_FLIGHT_SECTION_FRAMES, using
+// only the dump's scratch buffer (zero allocations). Writes nothing when no
+// frames are active.
+perf_flight_frames: fn(fd: I64, state: I64, words: I64, zeros: I64) -> Bool {
+    record: context_current_safe()
+    if (record == I64{0}) { return true }
+    ptrs: wrapping(state + PERF_FLIGHT_SCRATCH_AT)
+    buf: wrapping(ptrs + I64{512})
+    ^count: I64{0}
+    ^at: sync_load(wrapping(record + CONTEXT_VALUES))
+    loop at != (I64{0}) && count < (I64{64}) {
+        if ((sync_load(wrapping(at + CONTEXT_NODE_KEY)) & CONTEXT_KEY_MASK) == CONTEXT_FRAME_KEY && sync_load(wrapping(at + CONTEXT_FRAME_KIND)) >= I64{0}) {
+            text: sync_load(wrapping(at + CONTEXT_FRAME_TEXT))
+            if (text != I64{0}) {
+                rt_text_store(wrapping(ptrs + count * I64{8}), text)
+                count += I64{1}
+            }
+        }
+        at = sync_load(wrapping(at + CONTEXT_NODE_NEXT))
+    }
+    if (count == I64{0}) { return true }
+    ^used: I64{0}
+    limit: I64{4096}
+    ^i: count - I64{1}
+    loop i >= (I64{0}) {
+        if (used > I64{0}) {
+            if (wrapping(used + I64{3}) > limit) { break }
+            rt_text_put(wrapping(buf + used), I64{32})
+            rt_text_put(wrapping(buf + wrapping(used + I64{1})), I64{62})
+            rt_text_put(wrapping(buf + wrapping(used + I64{2})), I64{32})
+            used = wrapping(used + I64{3})
+        }
+        text: rt_text_word(wrapping(ptrs + i * I64{8}))
+        len: rt_text_len(text)
+        data: rt_text_data(text)
+        room: wrapping(limit - used)
+        chunk: if (len > room) -> room else -> len
+        if (chunk > I64{0}) {
+            rt_text_bytes_copy(wrapping(buf + used), data, chunk)
+            used = wrapping(used + chunk)
+        }
+        if (used >= limit) { break }
+        i -= I64{1}
+    }
+    if (used == I64{0}) { return true }
+    perf_flight_section(fd, state, words, zeros, PERF_FLIGHT_SECTION_FRAMES, I64{0}, buf, used)
 }
 
 // A task of a deadlock whose cycle holds the root (WaitCycle.jet

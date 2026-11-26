@@ -2580,6 +2580,7 @@ parser_parse_marked_statement: fn(state: ^JetParserState) -> Stmt {
         // binding, E0930) and no `#ContextKey` takes it.
         "Context" -> Stmt.ContextBlock{fields: parser_context_fields(state, marker, args, [String]{"allocator", "logger"}, None), body: body.statements, span: span}
         "Deadline" -> Stmt.ContextBlock{fields: parser_context_fields(state, marker, args, [String]{"limit"}, Val("deadline")), body: body.statements, span: span}
+        "Frame" -> Stmt.ContextBlock{fields: parser_context_fields(state, marker, args, [String]{"text"}, Val("frame")), body: body.statements, span: span}
         "Live" -> Stmt.Live{body: body.statements, span: span}
         "Nondeterministic" -> {
             if args.len() != 1 -> parser_marker_shape_error(state, marker)

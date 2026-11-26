@@ -47,47 +47,55 @@ sema_target_denial_check: fn(modules: [SemaGraphModuleResult], graph: SemaRegist
     roots: sema_target_entry_keys(modules, graph)
     // The functions the entry reaches through calls and function values,
     // in the order the walk first meets them.
-    ^reached: [String]{}
+    ^reached_modules: [Int]{}
+    ^reached_rows: [Int]{}
     ^seen: [String:Bool]{}
     loop key in roots {
         if seen.get(key) != None -> next
+        slot: slots.get(key) ?? next
         seen[key] = true
-        reached.push(key)
+        reached_modules.push(slot.module_index)
+        reached_rows.push(slot.row)
     }
     ^at: 0
-    loop at < reached.len() {
-        key: reached[at]
+    loop at < reached_modules.len() {
+        module_index: reached_modules[at]
+        row: reached_rows[at]
         at += 1
-        slot: slots.get(key) ?? next
-        effects: modules[slot.module_index].functions[slot.row].effects
+        effects: modules[module_index].functions[row].effects
         if sema_effect_covered(effects.solved, denied).len() == 0 -> next
         loop edge in effects.call_edges {
-            if slots.get(edge) == None || seen.get(edge) != None -> next
+            if seen.get(edge) != None -> next
+            next_slot: slots.get(edge) ?? next
             seen[edge] = true
-            reached.push(edge.copy())
+            reached_modules.push(next_slot.module_index)
+            reached_rows.push(next_slot.row)
         }
         loop edge in effects.value_edges {
-            if slots.get(edge) == None || seen.get(edge) != None -> next
+            if seen.get(edge) != None -> next
+            next_slot: slots.get(edge) ?? next
             seen[edge] = true
-            reached.push(edge.copy())
+            reached_modules.push(next_slot.module_index)
+            reached_rows.push(next_slot.row)
         }
     }
     target: graph.target_machine.triple
-    loop key in reached {
-        slot: slots.get(key) ?? next
-        function: modules[slot.module_index].functions[slot.row]
+    loop reached_index in 0..<reached_modules.len() {
+        module_index: reached_modules[reached_index]
+        row: reached_rows[reached_index]
+        function: modules[module_index].functions[row]
         if module_is_core(function.module_identity) -> next
         if sema_effect_covered(function.effects.solved, denied).len() == 0 -> next
         ^found: [Diagnostic]{}
-        ^reported: [String]{}
+        ^reported: (loop _ in 0..<denied.len() -> false)
         loop site in function.effects.direct_spans {
-            denial: sema_target_denied_by(site.name, denied) ?? next
-            if reported.contains(denial) -> next
-            reported.push(denial.copy())
-            found.push(sema_target_denied_diagnostic(function.name, denial, target, site.span))
+            denial_index: sema_target_denied_by_index(site.name, denied) ?? next
+            if reported[denial_index] -> next
+            reported[denial_index] = true
+            found.push(sema_target_denied_diagnostic(function.name, denied[denial_index], target, site.span))
         }
-        loop call in modules[slot.module_index].call_facts {
-            if call.caller_key != key -> next
+        loop call in modules[module_index].call_facts {
+            if call.caller_key != function.key -> next
             callee: call.callee ?? next
             if symbol_is_local(callee) -> next
             callee_slot: slots.get(symbol_table_key(graph.symbols, callee)) ?? next
@@ -95,10 +103,10 @@ sema_target_denial_check: fn(modules: [SemaGraphModuleResult], graph: SemaRegist
             // A call into a program function reports inside that function.
             if !module_is_core(callee_function.module_identity) -> next
             loop effect_name in callee_function.effects.solved {
-                denial: sema_target_denied_by(effect_name, denied) ?? next
-                if reported.contains(denial) -> next
-                reported.push(denial.copy())
-                found.push(sema_target_denied_diagnostic(function.name, denial, target, call.span))
+                denial_index: sema_target_denied_by_index(effect_name, denied) ?? next
+                if reported[denial_index] -> next
+                reported[denial_index] = true
+                found.push(sema_target_denied_diagnostic(function.name, denied[denial_index], target, call.span))
             }
         }
         if found.len() == 0 -> next
@@ -250,15 +258,16 @@ SemaTargetSlot: struct {
     row: Int,
 }
 
-// The effect of `denied` that covers `effect_name`, None when none does. An
-// `Exec` leaf acting on the program's own process (reading its arguments,
-// ending it) needs no process service, so only a denial that names it exactly
-// refuses it; the `Exec` root's denial refuses starting other programs.
-sema_target_denied_by: fn(effect_name: String, denied: [String]) -> String? Never! {
+// Index in `denied` of the effect that covers `effect_name`, None when none
+// does. An `Exec` leaf acting on the program's own process (reading its
+// arguments, ending it) needs no process service, so only a denial that names
+// it exactly refuses it; the `Exec` root's denial refuses starting other
+// programs.
+sema_target_denied_by_index: fn(effect_name: String, denied: [String]) -> Int? Never! {
     own_process: authority_own_process_leaf(effect_name)
-    loop denial in denied {
+    loop (index, denial) in denied {
         if own_process && denial != effect_name -> next
-        if sema_effect_covers(denial, effect_name) -> return Val(denial.copy())
+        if sema_effect_covers(denial, effect_name) -> return Val(index)
     }
     None
 }

@@ -1073,10 +1073,9 @@ kit_execute_finish: fn(jet: String, results: [KitCaseResult], ran_suites: [Strin
         ^code: if failures.any(fn(failure) { !kit_expect_named(suites, failure.suite) }) -> 2 else -> 0
         loop suite in suites {
             path: paths.get(suite) ?? ""
-            // Each lambda captures its own copy: a capture moves the name it reads.
-            in_suite: suite.copy()
-            ran_suite: suite.copy()
-            suite_code: kit_report_finish(jet, results.filter(fn(result) { result.suite == in_suite }), path, ran_suites.filter(fn(name) { name == ran_suite }))
+            suite_results: loop result in results if result.suite == suite -> result
+            suite_ran: loop name in ran_suites if name == suite -> name
+            suite_code: kit_report_finish(jet, suite_results, path, suite_ran)
             ^reported: false
             loop failure in failures {
                 if failure.suite == suite -> reported = true

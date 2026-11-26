@@ -57,16 +57,21 @@ sema_data_check_field_error_under: fn(args: [CallArg], span: Span, expected: Typ
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, check.environment.*, check.program.*, check.diagnostics)}
 }
 
-sema_data_without_user_tags: fn(ty: Type) -> Type Never! {
+sema_data_query_row_type: fn(ty: Type) -> Type? Never! {
     if ty == {
         .Tagged(marker, inner) -> {
             if marker == {
-                .User(_) -> return sema_data_without_user_tags(inner)
-                // copy: the untagged type is a new owned Type; `ty` stays the caller's.
-                .Internal(_) -> return ty.copy()
+                .User(_) -> return sema_data_query_row_type(inner)
+                .Internal(_) -> return None
             }
         }
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> return ty.copy()
+        .Apply(other_name, other_parameters) -> {
+            if sema_data_nominal_is(other_name, "Query") && other_parameters.len() == 1 {
+                return Val(other_parameters[0].copy())
+            }
+            return None
+        }
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> return None
     }
 }
 
@@ -223,15 +228,7 @@ sema_data_try_query_method: fn(receiver: Expr, receiver_value: TExpr, name: Stri
             if args.len() > 0 {
                 ^other: sema_check_expression(args[0].expr, None, check)
                 if other == .Val(value) {
-                    ^query_row: Type?{None}
-                    if sema_data_without_user_tags(value.ty) == {
-                        .Apply(other_name, other_parameters) -> {
-                            if sema_data_nominal_is(other_name, "Query") && other_parameters.len() == 1 {
-                                query_row = Val(other_parameters[0])
-                            }
-                        }
-                        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
-                    }
+                    query_row: sema_data_query_row_type(value.ty)
                     if query_row == .Val(found) -> right_row = found else {
                         check.diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`{method}` wants a Query as argument 1, but this is {sema_type_show(value.ty)}", "keyed joins combine two typed deferred queries", "pass another `Query<Row>` value"))
                         other = None
@@ -459,17 +456,17 @@ sema_data_core_param_access: fn(record: CoreCallRecord, index: Int, span: Span, 
     None
 }
 
-sema_data_core_emit: fn(record: CoreCallRecord, call_name: String, source_args: [CallArg], argument_types: [Type], typed_args: [TExpr], type_args: [Type], result_type: Type, span: Span, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
+sema_data_core_emit: fn(record: CoreCallRecord, call_name: String, source_args: [CallArg], argument_types: [Type], typed_args: ^^[TExpr], type_args: [Type], result_type: Type, span: Span, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
     accesses: loop index in 0..<typed_args.len() -> {
         access: sema_data_core_param_access(record, index, span, check.diagnostics) ?? return None
         access
     }
-    sema_data_core_emit_with_accesses(record, call_name, source_args, argument_types, typed_args, accesses, type_args, result_type, span, expected, check)
+    sema_data_core_emit_with_accesses(record, call_name, source_args, argument_types, typed_args.move(), accesses, type_args, result_type, span, expected, check)
 }
 
 // One checked Core call over explicit parameter accesses: a `^` slot lends the
 // caller's place for the call (the registry row only says it is borrowed).
-sema_data_core_emit_with_accesses: fn(record: CoreCallRecord, call_name: String, source_args: [CallArg], argument_types: [Type], typed_args: [TExpr], accesses: [AccessConvention], type_args: [Type], result_type: Type, span: Span, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
+sema_data_core_emit_with_accesses: fn(record: CoreCallRecord, call_name: String, source_args: [CallArg], argument_types: [Type], typed_args: ^^[TExpr], accesses: [AccessConvention], type_args: [Type], result_type: Type, span: Span, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
     ^updated_source_args: source_args
     if argument_types.len() != typed_args.len() || updated_source_args.len() != typed_args.len() || accesses.len() != typed_args.len() {
         check.diagnostics.push(sema_error("E0003", span, "`{call_name}` has an incomplete checked argument list", "the checked Core call stores every checked argument in the registry ABI order", "repair the Core call body"))
@@ -477,12 +474,14 @@ sema_data_core_emit_with_accesses: fn(record: CoreCallRecord, call_name: String,
     }
     ^params: [SemaCallParam]{}
     ^arguments: [TExpr]{}
-    loop (index, value) in typed_args {
+    ^index: 0
+    loop value in typed_args.move() {
         access: accesses[index]
         params.push(sema_data_core_param("arg{index}", argument_types[index], access, ParamZone.PositionalOnly, None))
         if access == AccessConvention.Write {
             arguments.push(sema_tree_node(value.ty, TExprKind.Borrow{place: value, access: AccessConvention.Write}, value.span))
         } else { arguments.push(sema_services_apply_access(value, access)) }
+        index += 1
     }
     ^ownership: sema_ownership_check_call_arguments(check.state, call_name, params, updated_source_args, check.scopes, check.diagnostics)
     if !ownership.accepted || !ownership.complete -> return None
@@ -604,10 +603,11 @@ sema_data_args_decode: fn(args: [CallArg], type_args: [Type], span: Span, expect
     }
     ^receiver: Expr?{None}
     if type_args[0] == .Named(name) {
-        loop part in name.split(".") {
+        parts: name.split(".").to_list()
+        loop part in parts.move() {
             receiver = if receiver == {
-                .Val(base) -> Val(Expr.Field{base: base, member: part.copy(), span: span, id: AST_NODE_GENERATED})
-                .None -> Val(Expr.Ident{name: part.copy(), span: span, id: AST_NODE_GENERATED})
+                .Val(base) -> Val(Expr.Field{base: base, member: part, span: span, id: AST_NODE_GENERATED})
+                .None -> Val(Expr.Ident{name: part, span: span, id: AST_NODE_GENERATED})
             }
         }
     }

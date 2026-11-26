@@ -375,20 +375,15 @@ TerminalStyleDocument: struct {
             line_number += 1
             line: raw_line.trim()
             if line == "" || line.starts_with("#") || line.starts_with(COMMENT_PREFIX) -> next
-            parts: line.copy().split("=").to_list()
-            if parts.len() < 2 {
-                return Err(terminal_style_parse_error(line_number, .InvalidStyle, "expected role=value"))
-            }
-            role: TerminalStyleRole.parse(parts[0].trim()) ?? return Err(terminal_style_parse_error(line_number, .InvalidStyle, "unknown semantic style role"))
+            pair: raw_line.split_once("=") ?? return Err(terminal_style_parse_error(line_number, .InvalidStyle, "expected role=value"))
+            role: TerminalStyleRole.parse(pair.before.trim()) ?? return Err(terminal_style_parse_error(line_number, .InvalidStyle, "unknown semantic style role"))
             if roles.get(role.as_str()) != None {
                 return Err(terminal_style_parse_error(line_number, .InvalidStyle, "style role is declared more than once"))
             }
             if roles.len() >= MAX_TERMINAL_STYLE_ROLES {
                 return Err(terminal_style_parse_error(line_number, .TooManyRoles, "style exceeds {MAX_TERMINAL_STYLE_ROLES} roles"))
             }
-            ^raw_value: parts[1]
-            loop index in 2..<parts.len() -> raw_value = "{raw_value}={parts[index]}"
-            value: terminal_style_parse_value(raw_value.trim()) ?? return Err(terminal_style_parse_error(line_number, .InvalidStyle, err.message))
+            value: terminal_style_parse_value(pair.after.trim()) ?? return Err(terminal_style_parse_error(line_number, .InvalidStyle, err.message))
             roles[role.as_str()] = value
         }
         if roles.len() == 0 {

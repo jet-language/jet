@@ -239,7 +239,7 @@ cases_test_source: fn(root: String, name: String, text: String) {
     cases_test_source(root, "stray", "step: jet -c 'set -m; sleep 300 >/dev/null 2>&1 & echo $!'\n")
     outcome: kit_cases_run(cases_test_entry("stray"), cases_test_context(root, scratch))[0]
     assert_eq(outcome.verdict.status, "PASS")
-    pid: Int.parse(outcome.run.stdout.trim().copy()) ?? panic("stray pid: {outcome.run.stdout}")
+    pid: Int.parse(outcome.run.stdout.trim()) ?? panic("stray pid: {outcome.run.stdout}")
     assert(kit_steps_process_nonzombie(pid, "proc-readable-nonzombie"))
     kit_exec_stop_strays(scratch)
     ^stopped: false

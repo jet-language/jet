@@ -77,8 +77,9 @@ sema_generic_crossing_note: fn(ty: Type, crossing: SemaSendCrossing, moved: Bool
     if context.generic_params.len() == 0 {
         return
     }
-    loop reach in sema_ownership_crossing_generic_reach(ty, crossing, environment, program, context) {
-        ^_: sema_generic_crossing_add(context.generic_crossings, SemaGenericCrossing{param: reach.param.copy(), crossing: crossing, whole: reach.whole, moved: moved, captured: captured})
+    reaches: sema_ownership_crossing_generic_reach(ty, crossing, environment, program, context)
+    loop reach in reaches.move() {
+        ^_: sema_generic_crossing_add(context.generic_crossings, SemaGenericCrossing{param: reach.param, crossing: crossing, whole: reach.whole, moved: moved, captured: captured})
     }
 }
 
@@ -177,18 +178,20 @@ sema_generic_crossings_validate: fn(modules: [SemaGraphModuleResult]) -> [SemaGe
                 loop call in facts.generic_calls {
                     callee: sema_generic_crossings_id(keys, call.callee)
                     if callee == 0 -> next
-                    // copy: a recursive caller adds to its own rows while reading them.
-                    callee_rows: crossings[callee].copy()
-                    loop crossing in callee_rows {
+                    ^pending_adds: [SemaGenericCrossing]{}
+                    loop crossing in crossings[callee] {
                         loop argument in call.arguments {
                             if argument.param != crossing.param -> next
                             loop reach in argument.reaches {
-                                ^inherited: SemaGenericCrossing{param: reach.param.copy(), crossing: crossing.crossing, whole: crossing.whole && reach.whole, moved: crossing.moved, captured: crossing.captured}
-                                caller: sema_generic_crossings_slot(keys, crossings, facts.function_key)
-                                if sema_generic_crossing_add(crossings[caller], inherited.move()) {
-                                    changed = true
-                                }
+                                pending_adds.push(SemaGenericCrossing{param: reach.param.copy(), crossing: crossing.crossing, whole: crossing.whole && reach.whole, moved: crossing.moved, captured: crossing.captured})
                             }
+                        }
+                    }
+                    if pending_adds.len() == 0 -> next
+                    caller: sema_generic_crossings_slot(keys, crossings, facts.function_key)
+                    loop inherited in pending_adds.move() {
+                        if sema_generic_crossing_add(crossings[caller], inherited) {
+                            changed = true
                         }
                     }
                 }

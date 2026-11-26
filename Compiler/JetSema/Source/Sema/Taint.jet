@@ -1581,9 +1581,9 @@ sema_taint_fixed_in: fn(state: ^SemaTaintFlowState, value: Expr) -> String? {
     sema_taint_fixed_of(state, sema_taint_tags_of(state, value))
 }
 
-sema_taint_untagged: fn(ty: Type) -> Type Never! {
-    if ty == .Tagged(_, inner) -> return sema_taint_untagged(inner)
-    ty.copy()
+sema_taint_untagged_name: fn(ty: Type) -> String Never! {
+    if ty == .Tagged(_, inner) -> return sema_taint_untagged_name(inner)
+    type_name(ty)
 }
 
 sema_taint_is_str: fn(value: Expr) -> Bool Never! {
@@ -1902,14 +1902,14 @@ sema_taint_exit_arms: fn(state: SemaTaintFlowState, arms: [SwitchArm], first: In
 
 // An early exit's branch (sema_taint_exit_arms), settled at the end of its
 // body's walk; a refusal is reported where the walk reached it.
-sema_taint_pend_exit: fn(state: ^SemaTaintFlowState, tag_value: String, span: Span, test_span: Span) {
+sema_taint_pend_exit: fn(state: ^SemaTaintFlowState, tag_value: String, span: Span, test_span: ^^Span) {
     loop pending in state.frames[state.top].exits {
         if pending.start == span.start && pending.end == span.end {
             return
         }
     }
     state.frames[state.top].exits.push(span.copy())
-    state.frames[state.top].exit_tests.push(test_span.copy())
+    state.frames[state.top].exit_tests.push(test_span)
     state.frames[state.top].exit_tags.push(tag_value.copy())
     state.frames[state.top].exit_marks.push(state.frames[state.top].diagnostics.len())
 }
@@ -2239,7 +2239,7 @@ sema_taint_fixed_wide: fn(state: SemaTaintFlowState, ty: Type) -> String? Never!
 // E0738 when the written type `ty` puts a fixed tag over an `Int` or a `Float`.
 sema_taint_check_wide_type: fn(state: ^SemaTaintFlowState, ty: Type, span: Span) {
     tag_value: sema_taint_fixed_wide(state, ty) ?? return
-    sema_taint_e0738(state, tag_value, type_name(sema_taint_untagged(ty)), span)
+    sema_taint_e0738(state, tag_value, sema_taint_untagged_name(ty), span)
 }
 
 // E0738 for `Int.from_…(x)` or `Float.from_…(x)` of a fixed value.
@@ -3394,10 +3394,10 @@ sema_taint_check_module: fn(graph: SemaRegistrationGraph, state: ^SemaTaintFlowS
 
 // A module's reports join `reports` in order, each unless `reports` or
 // `existing_diagnostics` already holds it.
-sema_taint_join_reports: fn(reports: ^[Diagnostic], existing_diagnostics: [Diagnostic], found: [Diagnostic]) {
-    loop diagnostic in found {
+sema_taint_join_reports: fn(reports: ^[Diagnostic], existing_diagnostics: [Diagnostic], found: ^^[Diagnostic]) {
+    loop diagnostic in found.move() {
         if !sema_taint_has_diagnostic(reports, diagnostic) && !sema_taint_has_diagnostic(existing_diagnostics, diagnostic) {
-            reports.push(diagnostic.copy())
+            reports.push(diagnostic)
         }
     }
 }

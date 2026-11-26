@@ -91,16 +91,17 @@ effect_vocabulary_module_source: fn(source: String, decls: [EffectDecl]) -> Effe
 effect_vocabulary_rows: fn(machine_source: String, core_source: String, meta_source: String) -> [EffectVocabularyRow] {
     machine: effect_vocabulary_source_rows(machine_source, EFFECT_VOCABULARY_MACHINE_PATH, None)
     core_rows: effect_vocabulary_source_rows(core_source, "Core/Effects/Effects.jet", Val(machine))
-    meta_rows: effect_vocabulary_source_rows(meta_source, "Core/Compiler/Meta.jet", Val(machine))
+    ^meta_rows: effect_vocabulary_source_rows(meta_source, "Core/Compiler/Meta.jet", Val(machine))
     ^rows: machine
-    loop row in core_rows -> rows.push(row.copy())
-    loop row in meta_rows {
+    rows.extend(core_rows)
+    loop meta_rows.len() > 0 {
+        row: meta_rows.remove(0, .Slot) ?? break
         loop seen in rows {
             if seen.name == row.name {
                 build_time_refused("Core/Compiler/Meta.jet: duplicate effect {row.name}")
             }
         }
-        rows.push(row.copy())
+        rows.push(row)
     }
     rows
 }

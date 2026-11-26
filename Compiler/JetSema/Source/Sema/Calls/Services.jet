@@ -123,24 +123,22 @@ sema_services_bind_labels: fn(api: String, args: ^[CallArg], labels: [String], s
     true
 }
 
-sema_services_apply_access: fn(value: TExpr, access: AccessConvention) -> TExpr Never! {
+sema_services_apply_access: fn(value: ^^TExpr, access: AccessConvention) -> TExpr Never! {
     if access == AccessConvention.Move {
         return sema_tree_node(value.ty, TExprKind.Move{value: value}, value.span)
     }
-    // copy: the converted value is a new owned TExpr. For a plain access it equals `value`, the
-    // caller's checked argument (a read parameter), which the caller keeps.
-    value.copy()
+    value
 }
 
 // `resolved_accesses` marks `fallback_accesses` as the call's final accesses
 // (a method contract already applied its explicit and record accesses).
-sema_services_core_call: fn(record: CoreCallRecord, arguments: [TExpr], fallback_accesses: [AccessConvention], method_receiver: Bool, resolved_accesses: Bool, result_type: Type, expected: Type?, span: Span, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck Never! {
+sema_services_core_call: fn(record: CoreCallRecord, arguments: ^^[TExpr], fallback_accesses: [AccessConvention], method_receiver: Bool, resolved_accesses: Bool, result_type: Type, expected: Type?, span: Span, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck Never! {
     ^call_arguments: [TExpr]{}
     ^index: 0
-    loop index < arguments.len() {
+    loop value in arguments.move() {
         ^fallback: if index < fallback_accesses.len() -> fallback_accesses[index] else -> AccessConvention.Read
         ^access: if resolved_accesses || (method_receiver && index == 0) -> fallback else -> sema_call_core_access(record, index) ?? fallback
-        call_arguments.push(sema_services_apply_access(arguments[index], access))
+        call_arguments.push(sema_services_apply_access(value, access))
         index += 1
     }
     ^failure: sema_services_result_carrier(result_type)
@@ -365,10 +363,11 @@ sema_services_typed_worker: fn(receiver: Expr, handler_params: [Type], handler_r
     }
     // The handler's name follows the handler, as Core's declaration takes it.
     ^source_args: [CallArg]{}
+    ^name_args: [CallArg]{CallArg{convention: AccessConvention.Read, expr: Expr.Str{parts: [StrPart]{StrPart.Lit{text: handler_name}}, span: handler_span, id: AST_NODE_GENERATED}, span: handler_span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}}
     loop (index, argument) in updated_args {
         source_args.push(argument)
         if index == 1 {
-            source_args.push(CallArg{convention: AccessConvention.Read, expr: Expr.Str{parts: [StrPart]{StrPart.Lit{text: handler_name.copy()}}, span: handler_span, id: AST_NODE_GENERATED}, span: handler_span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false})
+            if name_args.pop() == .Val(name_arg) -> source_args.push(name_arg)
         }
     }
     sema_services_source_call(api, member, [Type]{}, receiver, AccessConvention.Write, source_args, span, expected, check)
@@ -487,7 +486,7 @@ sema_check_service_tree_method: fn(method: String, receiver: Expr, receiver_valu
             return Val(SemaMethodSpecialCheck{handled: true, value: None})
         }
         ^fallbacks: [AccessConvention]{AccessConvention.Write, AccessConvention.Read, AccessConvention.Read, AccessConvention.Read, AccessConvention.Read}
-        return Val(sema_services_core_call(record, core_args, fallbacks, true, false, sema_services_result_type(Type.Named{name: "ServiceEndpoint"}), expected, span, check))
+        return Val(sema_services_core_call(record, core_args.move(), fallbacks, true, false, sema_services_result_type(Type.Named{name: "ServiceEndpoint"}), expected, span, check))
     }
     None
 }
@@ -510,7 +509,7 @@ SemaServiceFunctionRow: struct {
 // checked #Job identity is normalized BEFORE the registered source target, a
 // compiler-owned contract: enqueue/delay are not string-selected public
 // operations.
-sema_core_module_nominal: fn(program: SemaProgramTables, module_name: String, leaf: String) -> String Never! {
+sema_core_module_nominal: fn(program: SemaProgramTables, module_name: String, leaf: ^^String) -> String Never! {
     graph: program.registration_graph
     loop module_index in 0..<graph.modules.len() {
         if graph.modules[module_index].module_name != module_name -> next
@@ -518,11 +517,11 @@ sema_core_module_nominal: fn(program: SemaProgramTables, module_name: String, le
             // Read in place: binding the row copied each module nominal.
             if graph.modules[module_index].nominals[nominal_index].symbol.name == leaf {
                 if graph.modules[module_index].nominals[nominal_index].compiler_owned {
-                    return leaf.copy()
+                    return leaf
                 }
                 return "{module_text(graph.module_table, graph.modules[module_index].nominals[nominal_index].symbol.module_identity)}.{leaf}"
             }
         }
     }
-    leaf.copy()
+    leaf
 }

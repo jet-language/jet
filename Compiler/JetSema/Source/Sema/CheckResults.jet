@@ -313,15 +313,15 @@ SemaFunctionResult: struct {
     recorded_calls: [SemaRecordedCall]{[SemaRecordedCall]{}},
 }
 
-sema_function_compute_facts: fn(function_key: String, context: SemaCheckContext) -> SemaComputeFunctionFacts Never! {
+sema_function_compute_facts: fn(function_key: String, context: ^^SemaCheckContext) -> SemaComputeFunctionFacts Never! {
     SemaComputeFunctionFacts{
         function_key: function_key,
-        compute_calls: context.compute_calls.copy(),
-        autodiff_obligations: context.autodiff_obligations.copy(),
+        compute_calls: context.compute_calls.move(),
+        autodiff_obligations: context.autodiff_obligations.move(),
         autodiff_safe_panic: context.autodiff_safe_panic,
         autodiff_unsafe_panic: context.autodiff_unsafe_panic,
-        generic_crossings: context.generic_crossings.copy(),
-        generic_calls: context.generic_calls.copy(),
+        generic_crossings: context.generic_crossings.move(),
+        generic_calls: context.generic_calls.move(),
     }
 }
 

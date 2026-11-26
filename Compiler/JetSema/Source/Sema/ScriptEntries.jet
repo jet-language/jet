@@ -158,13 +158,17 @@ sema_script_entry: fn(program: ^Program) {
     ^locals: [Stmt]{}
     loop {
         ^item: reversed.pop() ?? break
-        if item == .Const(definition) && sema_script_entry_local(definition) {
-            ^binding: ast_binding(definition.name.copy(), definition.name_span, definition.mutable, definition.value.copy(), None)
-            binding.ty = definition.ty
-            binding.meta = definition.meta
-            binding.markers = definition.markers
-            program.entry_locals.push(definition.name)
-            locals.push(Stmt.Val{binding: binding})
+        is_local_const: if item == .Const(definition) -> sema_script_entry_local(definition) else -> false
+        if is_local_const {
+            if item.move() == .Const(source_definition) {
+                definition: source_definition.move()
+                ^binding: ast_binding(definition.name.copy(), definition.name_span, definition.mutable, definition.value, None)
+                binding.ty = definition.ty
+                binding.meta = definition.meta
+                binding.markers = definition.markers
+                program.entry_locals.push(definition.name)
+                locals.push(Stmt.Val{binding: binding})
+            }
             next
         }
         program.items.push(item)

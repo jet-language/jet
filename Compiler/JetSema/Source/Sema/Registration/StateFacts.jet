@@ -48,31 +48,35 @@ sema_state_graph_contains: fn(values: [String], name: String) -> Bool Never! {
 // A function whose result names states of `owner` and whose first parameter
 // does not is an entry into those states; one whose first parameter does too
 // is a move. The list's arrows give the edges.
+priv sema_state_graph_add_typed_method: fn(method: Func, owner: String, state_names: [String], entries: ^[String], transitions: ^[SemaStateGraphTransition]) Never! {
+    ^sources: [String]{}
+    ^targets: [String]{}
+    loop typed in method.state_types {
+        if typed.owner != owner -> next
+        if typed.position == 0 {
+            sources = loop name in typed.states if sema_state_graph_contains(state_names, name) -> name
+        }
+        if typed.position == -1 {
+            targets = loop name in typed.states if sema_state_graph_contains(state_names, name) -> name
+        }
+    }
+    loop target in targets {
+        if sources.len() == 0 {
+            entries.push(target.copy())
+            transitions.push(SemaStateGraphTransition{operation: method.name, from: None, to: target})
+            next
+        }
+        loop source in sources {
+            if source != target {
+                transitions.push(SemaStateGraphTransition{operation: method.name, from: Val(source), to: target.copy()})
+            }
+        }
+    }
+}
+
 sema_state_graph_add_typed_transitions: fn(methods: [Func], owner: String, state_names: [String], entries: ^[String], transitions: ^[SemaStateGraphTransition]) Never! {
     loop method in methods {
-        ^sources: [String]{}
-        ^targets: [String]{}
-        loop typed in method.state_types {
-            if typed.owner != owner -> next
-            if typed.position == 0 {
-                sources = loop name in typed.states if sema_state_graph_contains(state_names, name) -> name
-            }
-            if typed.position == -1 {
-                targets = loop name in typed.states if sema_state_graph_contains(state_names, name) -> name
-            }
-        }
-        loop target in targets {
-            if sources.len() == 0 {
-                entries.push(target.copy())
-                transitions.push(SemaStateGraphTransition{operation: method.name, from: None, to: target})
-                next
-            }
-            loop source in sources {
-                if source != target {
-                    transitions.push(SemaStateGraphTransition{operation: method.name, from: Val(source), to: target.copy()})
-                }
-            }
-        }
+        sema_state_graph_add_typed_method(method, owner, state_names, entries, transitions)
     }
 }
 
@@ -95,7 +99,7 @@ sema_state_graph_for_struct: fn(definition: StructDef, items: [Item]) -> SemaSta
                 }
             }
             .Func(function) -> {
-                sema_state_graph_add_typed_transitions([Func]{function.copy()}, definition.name, state_names, entries, transitions)
+                sema_state_graph_add_typed_method(function, definition.name, state_names, entries, transitions)
             }
             .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
@@ -110,29 +114,32 @@ sema_state_graph_for_struct: fn(definition: StructDef, items: [Item]) -> SemaSta
             edges.push(SemaStateGraphEdge{from: arrow.from.name, to: target.name})
         }
     }
+    has_entries: entries.len() > 0
     ^reachable_states: [String]{}
-    if entries.len() > 0 {
-        ^queue: entries
+    if has_entries {
+        loop entry in entries.move() {
+            if !sema_state_graph_contains(reachable_states, entry) -> reachable_states.push(entry)
+        }
         ^cursor: 0
-        loop cursor < queue.len() {
-            current: queue[cursor]
+        loop cursor < reachable_states.len() {
+            current: reachable_states[cursor]
             cursor += 1
-            if sema_state_graph_contains(reachable_states, current) -> next
-            reachable_states.push(current.copy())
             loop edge in edges {
                 if edge.from == current && !sema_state_graph_contains(reachable_states, edge.to) {
-                    queue.push(edge.to)
+                    reachable_states.push(edge.to)
                 }
             }
         }
     }
     ^nodes: [SemaStateGraphNode]{}
-    loop name in state_names {
+    loop name in state_names.move() {
+        terminal: !sema_state_graph_contains(outgoing, name)
+        reachable: if !has_entries -> None else -> Val(sema_state_graph_contains(reachable_states, name))
         nodes.push(
             SemaStateGraphNode{
-                name: name.copy(),
-                terminal: !sema_state_graph_contains(outgoing, name),
-                reachable: if entries.len() == 0 -> None else -> Val(sema_state_graph_contains(reachable_states, name)),
+                name: name,
+                terminal: terminal,
+                reachable: reachable,
             },
         )
     }

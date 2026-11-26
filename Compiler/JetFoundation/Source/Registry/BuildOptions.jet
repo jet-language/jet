@@ -724,7 +724,7 @@ build_option_variants_text: fn(row: BuildOptionRow) -> String Never! {
 // its Bool literals, since `debug_info`'s `split` is a profile field's and a
 // flag's value only.
 build_option_method_values: fn(row: BuildOptionRow) -> [String] Never! {
-    if row.kind != BuildOptionKind.Bool -> return row.values.copy()
+    if row.kind != BuildOptionKind.Bool -> return row.values
     loop value in row.values if value == "true" || value == "false" -> if value == "true" -> "true" else -> "false"
 }
 
@@ -888,21 +888,23 @@ build_options_resolve: fn(command: String, profile: String, written: [BuildOptio
     ^notes: [String]{}
     loop row in JET_BUILD_OPTIONS {
         stock: if command == "build" -> row.stock_build else -> row.stock_run
-        ^current: BuildOptionChoice{name: row.name, value: stock, layer: BuildOptionLayer.Stock, written: "", site: "", pinned: false}
-        loop choice in written {
+        ^winner: -1
+        loop (at, choice) in written {
             if choice.name != row.name -> next
-            if choice.layer == BuildOptionLayer.Flag {
-                if current.pinned && current.value != choice.value {
-                    return BuildOptionsResolved.Refused{code: "E2113", what: "`{row.name}` is pinned to `{current.value}` {current.site}, so `{choice.written}` can't change it", fix: "remove the flag, or remove the pin {current.site}"}
+            if choice.layer == BuildOptionLayer.Flag && winner >= 0 {
+                prior: written[winner]
+                if prior.pinned && prior.value != choice.value {
+                    return BuildOptionsResolved.Refused{code: "E2113", what: "`{row.name}` is pinned to `{prior.value}` {prior.site}, so `{choice.written}` can't change it", fix: "remove the flag, or remove the pin {prior.site}"}
                 }
-                if current.layer == BuildOptionLayer.Profile || current.layer == BuildOptionLayer.Code {
-                    if current.value != choice.value {
-                        notes.push("note: {choice.written} replaces {current.written} {current.site} for this run")
+                if prior.layer == BuildOptionLayer.Profile || prior.layer == BuildOptionLayer.Code {
+                    if prior.value != choice.value {
+                        notes.push("note: {choice.written} replaces {prior.written} {prior.site} for this run")
                     }
                 }
             }
-            current = choice.copy()
+            winner = at
         }
+        current: if winner >= 0 -> written[winner].copy() else -> BuildOptionChoice{name: row.name, value: stock, layer: BuildOptionLayer.Stock, written: "", site: "", pinned: false}
         // Each layer's reader refuses a value outside its row (build_option_flags,
         // a profile's fields in JetCLI Front.jet, the build session's option
         // calls); one written by any other way is refused here, so every

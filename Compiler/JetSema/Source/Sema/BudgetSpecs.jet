@@ -1009,10 +1009,10 @@ sema_budget_digits: fn(text: String) -> Bool Never! {
 sema_budget_normalize_percent: fn(value: Expr) -> BudgetPercent? Never! {
     if value == .UnitLit(raw, _, _, suffix, _, _, _) {
         if sema_units_catalog_scale("Percent", suffix) == None -> return None
-        parts: raw.split(".").to_list()
+        ^parts: raw.split(".").to_list()
         if parts.len() > 2 -> return None
+        fraction: if parts.len() == 2 -> parts.pop() ?? "" else -> ""
         whole_text: parts[0]
-        fraction: if parts.len() == 2 -> parts[1].copy() else -> ""
         if fraction.bytes().len() > 2 || whole_text == "" || !sema_budget_digits(whole_text) || !sema_budget_digits(fraction) {
             return None
         }

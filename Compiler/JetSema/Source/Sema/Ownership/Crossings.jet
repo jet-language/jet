@@ -64,9 +64,9 @@ sema_ownership_crossing_new_problem: fn(kind: SemaSendProblemKind) -> SemaSendab
     SemaSendabilityProblem{root: None, path: [String]{}, kind: kind}
 }
 
-sema_ownership_crossing_prepend: fn(root: String, field: String, problem: SemaSendabilityProblem) -> SemaSendabilityProblem Never! {
+sema_ownership_crossing_prepend: fn(root: String, field: String, problem: ^^SemaSendabilityProblem) -> SemaSendabilityProblem Never! {
     ^path: [String]{field}
-    loop segment in problem.path -> path.push(segment.copy())
+    loop segment in problem.path.move() -> path.push(segment)
     SemaSendabilityProblem{root: Val(root), path: path, kind: problem.kind}
 }
 
@@ -122,10 +122,7 @@ sema_ownership_crossing_stored_types: fn(types: [Type], crossing: SemaSendCrossi
 
 sema_ownership_crossing_type_leaf: fn(name: String) -> String Never! {
     ^parts: name.split(".").to_list()
-    if parts.len() > 1 -> return parts[parts.len() - 1]
-    parts = name.split(".").to_list()
-    if parts.len() > 1 -> return parts[parts.len() - 1]
-    name.copy()
+    parts.pop() ?? ""
 }
 
 sema_ownership_crossing_intrinsic_apply: fn(ty: Type, name: String, environment: SemaScopeEnvironment, program: SemaProgramTables, allow_without_nominal: Bool) -> Bool Never! {

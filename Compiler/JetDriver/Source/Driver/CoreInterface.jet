@@ -739,13 +739,16 @@ jet_driver_core_open_parse: fn(text: String, threads: CompilerThreads) -> JetDri
                 }
             }
             .Struct(value) -> {
+                last_const: jet_driver_core_last_const_start(value.trait_impls)
                 loop method in value.methods {
+                    if method.span.start < last_const -> next
                     if !jet_driver_core_body_blank(method) {
                         jet_driver_core_body_push(spans, braces, opens, method.name_span.end, method.span.end)
                     }
                 }
                 loop block in value.trait_impls {
                     loop method in block.methods {
+                        if method.span.start < last_const -> next
                         if !jet_driver_core_body_blank(method) {
                             jet_driver_core_body_push(spans, braces, opens, method.name_span.end, method.span.end)
                         }
@@ -753,13 +756,16 @@ jet_driver_core_open_parse: fn(text: String, threads: CompilerThreads) -> JetDri
                 }
             }
             .Enum(value) -> {
+                last_const: jet_driver_core_last_const_start(value.trait_impls)
                 loop method in value.methods {
+                    if method.span.start < last_const -> next
                     if !jet_driver_core_body_blank(method) {
                         jet_driver_core_body_push(spans, braces, opens, method.name_span.end, method.span.end)
                     }
                 }
                 loop block in value.trait_impls {
                     loop method in block.methods {
+                        if method.span.start < last_const -> next
                         if !jet_driver_core_body_blank(method) {
                             jet_driver_core_body_push(spans, braces, opens, method.name_span.end, method.span.end)
                         }
@@ -784,6 +790,19 @@ jet_driver_core_open_parse: fn(text: String, threads: CompilerThreads) -> JetDri
         }
     }
     JetDriverCoreOpenParse{parsed: parsed, bodies: spans}
+}
+
+// Latest start byte among associated constant values in `blocks`, or -1 when
+// none exist. Methods before it stay unblanked in the heads parse so those
+// constant expressions keep the same sequential ExprIDs as a whole parse.
+jet_driver_core_last_const_start: fn(blocks: [TraitImplBlock]) -> Int Never! {
+    ^last: -1
+    loop block in blocks {
+        loop constant in block.constants {
+            if constant.span.start > last -> last = constant.span.start
+        }
+    }
+    last
 }
 
 // Pushes the body of the function whose name ends at `name_end` and whose

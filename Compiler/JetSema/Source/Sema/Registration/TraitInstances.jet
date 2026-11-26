@@ -112,14 +112,15 @@ sema_trait_instances_rewrite_items: fn(items: ^^[Item], diagnostics: ^[Diagnosti
                 sema_trait_instances_blocks(instances, definition.trait_impls, scope, diagnostics)
             }
             .Trait(definition) -> {
-                scope: sema_trait_instances_param_names(definition.type_params)
+                ^scope: sema_trait_instances_param_names(definition.type_params)
                 loop supertrait in definition.supertraits {
                     sema_trait_instances_note(instances, supertrait, definition.name_span, scope, diagnostics)
                 }
+                base_len: scope.len()
                 loop method in definition.methods {
-                    ^method_scope: scope.copy()
-                    method_scope.extend(sema_trait_instances_param_names(method.type_params))
-                    sema_trait_instances_params(instances, method.type_params, method_scope, diagnostics)
+                    scope.extend(sema_trait_instances_param_names(method.type_params))
+                    sema_trait_instances_params(instances, method.type_params, scope, diagnostics)
+                    loop scope.len() > base_len -> ^_: scope.pop()
                 }
             }
             .Impl(definition) -> {

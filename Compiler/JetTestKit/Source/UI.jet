@@ -204,16 +204,15 @@ kit_ui_invocation: fn(source: String, file: String, lint: Bool) -> KitUICall {
         if call.check_core {
             // FILE, or FILE after "LINE": the anchor keeps its quotes, which
             // staging checks (kit_ui_core_insert).
-            call.core_top = argument.copy()
             after: kit_steps_byte_index(argument, " after ") ?? -1
             if after >= 0 {
                 call.core_top = kit_steps_byte_slice(argument, 0, after).trim()
                 call.core_after = kit_steps_byte_slice(argument, after + 7, argument.count_bytes()).trim()
-            }
+            } else { call.core_top = argument }
         }
         if row.name == "repl_deny" {
             loop line in source.split("\n") {
-                trimmed: line.trim().copy()
+                trimmed: line.trim()
                 if trimmed != "" && !trimmed.starts_with("//") {
                     call.stdin = "{call.stdin}{line}\n"
                 }
@@ -867,7 +866,6 @@ kit_ui_set_coverage: fn(rows: [KitUIRegistryRow], emitted: [String], rendered: [
         if !kit_ui_excluded(code) -> kit_ui_add_code(right, code)
     }
     ^allowances: [KitUIAllowance]{}
-    ^seen: [String]{}
     ^errors: [String]{}
     loop raw in allowance_text.split("\n") {
         line: raw.trim().copy()
@@ -883,9 +881,12 @@ kit_ui_set_coverage: fn(rows: [KitUIRegistryRow], emitted: [String], rendered: [
         }
         code: fields[0]
         side: fields[1]
-        valid: kit_ui_report_code(code) && (side == "right-only" || kit_expect_named(registered, code)) && !kit_expect_named(seen, code) && (side == "left-only" || side == "right-only") && fields[2].trim() != ""
+        ^duplicate: false
+        loop existing in allowances {
+            if existing.code == code -> duplicate = true
+        }
+        valid: kit_ui_report_code(code) && (side == "right-only" || kit_expect_named(registered, code)) && !duplicate && (side == "left-only" || side == "right-only") && fields[2].trim() != ""
         if !valid -> errors.push("invalid coverage allowlist row: {line}")
-        seen.push(code.copy())
         allowances.push(KitUIAllowance{code: code, side: side, card: fields[2]})
         needed: if side == "left-only" -> kit_expect_named(left, code) && !kit_expect_named(right, code) else -> kit_expect_named(right, code) && !kit_expect_named(left, code)
         if valid && !needed {

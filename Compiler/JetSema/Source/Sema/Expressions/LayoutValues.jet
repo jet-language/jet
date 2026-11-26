@@ -245,8 +245,9 @@ sema_call_try_layout_method: fn(receiver: Expr, receiver_value: TExpr, method: S
             sema_expression_layout_argument_mismatch(owner, method, required, value.ty, argument.span, check.diagnostics)
             valid = false
         }
-        values.push(value.copy())
-        required_types.push(wanted ?? value.ty)
+        required_type: wanted ?? value.ty
+        values.push(value)
+        required_types.push(required_type)
     }
     ^ownership: sema_ownership_check_method_call(check, "{owner}.{method}", receiver, AccessConvention.Read, sema_expression_layout_method_params(required_types), updated_args, span)
     if !ownership.accepted || !ownership.complete -> valid = false

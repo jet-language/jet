@@ -221,7 +221,7 @@ reach_test_load_module: fn(source: String, module_name: String, owned: [String],
 
 #Test("a routed Core module's `__` helpers and F32 forms load by use, and its compiler routes always load") {
     // An F32 form is the function that fills its member's F32 role.
-    text: "plain: fn() -> Int Never! {{ 1 }}\n\n__TABLE: 4\n\n__tabled: fn() -> Int Never! {{ __TABLE }}\n\n__WIDTH: 2.0\n\n#Builtin.Role(.SinF32) narrow_sin: fn(x: Float) -> Float Never! {{ x * __WIDTH }}\n\n__RATIO: 3.0\n\n__to_bits_i64: fn(x: Float) -> Float Never! {{ x * __RATIO }}\n"
+    text: "plain: fn() -> Int Never! {{ 1 }}\n\n__TABLE: 4\n\n__tabled: fn() -> Int Never! {{ __TABLE }}\n\n__WIDTH: 2.0\n\n#Builtin.Role(.SinF32) narrow_sin: fn(x: Float) -> Float Never! {{ x * __WIDTH }}\n\n__RATIO: 3.0\n\n#Builtin.Role(.InlineFloatBits) __to_bits_i64: fn(x: Float) -> Float Never! {{ x * __RATIO }}\n"
     routed: reach_test_load_module("use m: core.math\nrun: fn() {{ print(m.plain()) }}\n", "core.math", [String]{"narrow_sin", "__to_bits_i64"}, text)
     assert_eq(reach_test_constants(routed, "core.math"), [String]{"__RATIO"})
     assert_eq(reach_test_functions(routed, "core.math"), [String]{"plain", "__to_bits_i64"})
@@ -263,7 +263,6 @@ reach_test_read: fn(path: String) -> String {
     ^files: [String]{}
     reach_test_sources("Compiler", files)
     ^failures: [String]{}
-    ^checked: 0
     loop module_name in JET_DRIVER_ROUTED_MODULES {
         routes: jet_driver_core_routes(module_name)
         loop path in files {
@@ -280,18 +279,15 @@ reach_test_read: fn(path: String) -> String {
                     if between != "," && between != ",name:" && between != ",member:" -> next
                     route: parts[index + 2]
                     if !route.starts_with("__") -> next
-                    checked += 1
                     if !jet_driver_core_route(routes, route) -> failures.push("{path}: {route}")
                 }
             }
         }
     }
+    // Bit-cast helpers (`#Builtin.Role(.InlineFloatBits)`) and exact-type
+    // operations reach core.math through their role markers rather than
+    // compiler-spelled `"__..."` literals, so any new literal must stay routed.
     assert_eq(failures, [String]{})
-    // The calls that route into core.math: the bit casts. An exact type's
-    // operations reach core.math through its precise family
-    // (sema_precise_bind), and the Core call rows are computed from Core's
-    // own declarations, so neither spells a route here.
-    assert(checked >= 2, "the scan found {checked} routes")
 }
 
 #Test("a unit's spellings come from its code tokens: a string spells only its interpolations, and comments spell nothing") {

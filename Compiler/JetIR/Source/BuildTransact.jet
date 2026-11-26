@@ -53,6 +53,7 @@ IRTxFrame: struct {
     closure_lock: Int{-1},
     values: Int{0},
     allocator: Int{-1},
+    frame_id: Int{-1},
     bindings: Int{0},
 }
 
@@ -332,6 +333,7 @@ ir_context_block: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, guards: [BodyCon
     ^handler: -1
     ^arena: -1
     ^arena_owned: false
+    ^frame_id: -1
     loop guard in guards {
         if guard.field == "allocator" && handler < 0 && arena < 0 && ir_context_scratch(p, b, guard.value) {
             arena = ir_word_const(m, b, 0)
@@ -353,6 +355,17 @@ ir_context_block: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, guards: [BodyCon
         }
         if value < 0 {
             return
+        }
+        if guard.field == "frame" && frame_id < 0 {
+            string_row: ir_string_row(m)
+            file_text: ir_temp(m, b, string_row)
+            file_id: ir_intern_text(m, b.f.source_file)
+            ir_emit(b.f, IROp.ConstText, file_text, file_id, -1, -1, b.line)
+            line_word: ir_word_const(m, b, b.line)
+            word_row: ir_word_row(m)
+            frame_id = ir_runtime(m, b, "jet_ctx_push_frame", [Int]{value, file_text, line_word}, word_row)
+            ir_release(m, b, value)
+            next
         }
         if guard.field == "allocator" && handler < 0 && arena < 0 && ir_context_arena(ir_untag(ir_ty(m, p, b, guard.value))) {
             arena = value
@@ -403,9 +416,9 @@ ir_context_block: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, guards: [BodyCon
         b.young_slots = b.f.slot_type.len()
         b.young_ops = b.f.op.len()
     }
-    framed: save >= 0 || keys.len() > 0 || carrier >= 0
+    framed: save >= 0 || keys.len() > 0 || carrier >= 0 || frame_id >= 0
     if framed {
-        b.transactions.push(IRTxFrame{handle: -1, stm: -1, snapshots: [IRTxSnapshot]{}, loops: b.loops.len(), shield: false, deadline: save, values: keys.len(), allocator: carrier, bindings: b.bindings.len()})
+        b.transactions.push(IRTxFrame{handle: -1, stm: -1, snapshots: [IRTxSnapshot]{}, loops: b.loops.len(), shield: false, deadline: save, values: keys.len(), allocator: carrier, frame_id: frame_id, bindings: b.bindings.len()})
     }
     ir_scope_open(b)
     ir_stmts(m, p, b, body)
@@ -696,6 +709,7 @@ ir_tx_leave_scopes: fn(m: ^IRModule, b: ^IRBuilder, frame: IRTxFrame) Never! {
     }
     if frame.shield -> _: ir_runtime(m, b, "jet_rt_session_shield_leave", [Int]{}, -1)
     if frame.deadline >= 0 -> _: ir_runtime(m, b, "jet_ctx_pop_deadline", [Int]{frame.deadline}, -1)
+    if frame.frame_id >= 0 -> _: ir_runtime(m, b, "jet_ctx_pop_frame", [Int]{frame.frame_id}, -1)
     if frame.values > 0 {
         count: ir_word_const(m, b, frame.values)
         _: ir_runtime(m, b, "jet_ctx_value_pop", [Int]{count}, -1)

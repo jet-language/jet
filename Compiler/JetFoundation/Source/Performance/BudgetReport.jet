@@ -355,12 +355,12 @@ perf_validate_phase_totals: fn(value: CanonicalJSON, name: String) -> [String:In
                 if phase == "" || (prior != "" && prior >= phase) {
                     return Err(perf_error("{name} is not sorted by phase name"))
                 }
-                prior = phase.copy()
                 ns: perf_report_unsigned(f[perf_report_index(f, "ns")].value, "{name}.ns")
                 if totals.has_key(phase) {
                     return Err(perf_error("{name} contains a duplicate phase"))
                 }
                 totals[phase] = ns
+                prior = phase
             }
         }
     }
@@ -849,8 +849,8 @@ perf_validate_report_content: fn(value: CanonicalJSON) PerfBudgetError! {
                 hash_content: perf_report_object_new(
                     [CanonicalJSONField]{
                         CanonicalJSONField{key: "measurements", value: CanonicalJSON.Array(sanitized)},
-                        CanonicalJSONField{key: "subject", value: f[s].value.copy()},
-                        CanonicalJSONField{key: "toolchain", value: f[tool_index].value.copy()},
+                        CanonicalJSONField{key: "subject", value: f[s].value},
+                        CanonicalJSONField{key: "toolchain", value: f[tool_index].value},
                     },
                 )
                 perf_verify_stable_id(hash_content, evidence) ?? return Err(perf_error("evidence_id mismatch"))

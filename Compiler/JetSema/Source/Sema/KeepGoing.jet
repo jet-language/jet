@@ -100,13 +100,14 @@ sema_keep_going_trap_references: fn(references: ^[SemaNameReferenceFact], start:
 // every one when `owner` is None (sema_keep_going_trap_references).
 sema_keep_going_drop_local_references: fn(references: ^[SemaNameReferenceFact], start: Int, owner: String?) Never! {
     ^kept: [SemaNameReferenceFact]{}
-    loop index in start..<references.len() {
-        ^dropped: symbol_is_local(references[index].symbol.id)
-        if owner == .Val(key) -> dropped = dropped && references[index].body == key
-        if !dropped -> kept.push(references[index].copy())
+    loop references.len() > start {
+        reference: references.pop() ?? break
+        ^dropped: symbol_is_local(reference.symbol.id)
+        if owner == .Val(key) -> dropped = dropped && reference.body == key
+        if !dropped -> kept.push(reference)
     }
-    loop references.len() > start -> ^_: references.pop()
-    references.extend(kept)
+    kept.reverse()
+    references.extend(kept.move())
 }
 
 // Re-keys the local references from `start` on that body `owner` recorded,

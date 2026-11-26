@@ -226,8 +226,13 @@ sema_link_reports_to_first_error: fn(diagnostics: ^[Diagnostic], root_start: Int
     if root < 0 {
         return
     }
-    loop index in start..<diagnostics.len() {
-        diagnostics[index] = diagnostic_caused_by(diagnostics[index].copy(), diagnostics[root])
+    ^tail: [Diagnostic]{}
+    loop diagnostics.len() > start {
+        if diagnostics.pop() == .Val(item) -> tail.push(item)
+    }
+    loop tail.len() > 0 {
+        item: tail.pop() ?? break
+        diagnostics.push(diagnostic_caused_by(item, diagnostics[root]))
     }
 }
 
@@ -433,7 +438,7 @@ sema_unknown_name_in: fn(name: String, span: Span, scopes: SemaScopeTable) -> Di
     if dead_key_circumflex_base(name) == .Val(base) && sema_scope_resolve_index(scopes, base) != None {
         return diagnostic_with_edit(sema_error("E0107", span, what, dead_key_circumflex_why(name, "^{base}"), dead_key_circumflex_fix("^{base}")), TextEdit{span: span, new_text: "^{base}"})
     }
-    near: sema_scope_near_visible_names(scopes, name)
+    ^near: sema_scope_near_visible_names(scopes, name)
     if near.len() == 0 {
         return sema_error("E0107", span, what, why, sema_unknown_name_declare_fix(name))
     }
@@ -445,8 +450,9 @@ sema_unknown_name_in: fn(name: String, span: Span, scopes: SemaScopeTable) -> Di
             else -> "{names}, `{candidate}`"
         }
     }
-    // copy: the edit keeps the nearest name past the candidate list.
-    diagnostic_with_edit(sema_error("E0107", span, what, why, "did you mean {names}?"), TextEdit{span: span, new_text: near[0].copy()})
+    near.reverse()
+    first: near.pop() ?? ""
+    diagnostic_with_edit(sema_error("E0107", span, what, why, "did you mean {names}?"), TextEdit{span: span, new_text: first})
 }
 
 // E0107 for a `core.<module>.<item>` path where nothing is named `core`: a

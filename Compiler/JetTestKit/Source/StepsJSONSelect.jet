@@ -53,7 +53,7 @@ kit_steps_json_filter: fn(part: String) -> KitJSONFilter? {
         if operator == "" -> next
         key: kit_steps_byte_slice(part, 1, index).trim().copy()
         if kit_steps_json_path("$.{key}") == None -> return None
-        literal: kit_steps_byte_slice(rest, width, rest.count_bytes()).trim().copy()
+        literal: kit_steps_byte_slice(rest, width, rest.count_bytes()).trim()
         if literal.starts_with("@.") {
             return Val(KitJSONFilter{key: key, op: operator, expected: Dyn.Null, reference: kit_steps_byte_slice(literal, 1, literal.count_bytes())})
         }

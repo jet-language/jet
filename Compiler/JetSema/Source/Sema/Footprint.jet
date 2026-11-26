@@ -16,7 +16,7 @@ use {
 // calls on `self`, and the first use of the whole `self`.
 SemaFootprintUses: struct {
     known: [String],
-    names: [String],
+    fields: [Int],
     spans: [Span],
     calls: [NamedSpan],
     whole: Span?,
@@ -59,10 +59,10 @@ SemaFootprintUses: struct {
     }
 }
 
-// A solved footprint: each field with the span that first reaches it, or the
-// whole record (`whole`) with the span that first uses it.
+// A solved footprint: each field index into `known` with the span that first
+// reaches it, or the whole record (`whole`) with the span that first uses it.
 SemaFootprint: struct {
-    names: [String],
+    fields: [Int],
     spans: [Span],
     whole: Span?,
 }
@@ -79,14 +79,17 @@ sema_footprint_self_span: fn(expression: Expr) -> Span? Never! {
 // A stored field joins the footprint at its first use; any other member (a
 // method value or computed field) reads the whole record.
 sema_footprint_note_field: fn(uses: ^SemaFootprintUses, name: String, span: Span) Never! {
-    if !uses.known.contains(name) {
+    field_index: loop (index, known_name) in uses.known {
+        if known_name == name -> break index
+    } ?? -1
+    if field_index < 0 {
         if uses.whole == None -> uses.whole = Val(span)
         return
     }
-    if uses.names.contains(name) {
+    if uses.fields.contains(field_index) {
         return
     }
-    uses.names.push(name.copy())
+    uses.fields.push(field_index)
     uses.spans.push(span.copy())
 }
 
@@ -98,17 +101,23 @@ sema_footprint_has_receiver: fn(method: Func) -> Bool Never! {
 }
 
 sema_footprint_body_uses: fn(tables: ASTTables, method: Func, known: [String]) -> SemaFootprintUses {
-    ^uses: SemaFootprintUses{known: known, names: [String]{}, spans: [Span]{}, calls: [NamedSpan]{}, whole: None, settled: [Int:Bool]{}}
+    ^uses: SemaFootprintUses{known: known, fields: [Int]{}, spans: [Span]{}, calls: [NamedSpan]{}, whole: None, settled: [Int:Bool]{}}
     loop statement in method.body {
         ast_visit_statement(tables, statement, fn(expression: ExprNode) { uses.visit(tables, expression) }, true)
     }
     uses
 }
 
+SemaFootprintMethodRef: struct {
+    item_index: Int,
+    block_index: Int,
+    method_index: Int,
+}
+
 // One owner (a struct or an impl target) and its methods, each declared once.
 SemaFootprintOwner: struct {
     name: String,
-    methods: [Func],
+    methods: [SemaFootprintMethodRef],
 }
 
 // One method's solved or stated receiver field footprint: `fields` holds the
@@ -165,23 +174,28 @@ sema_footprint_solve_module: fn(tables: ASTTables, items: [Item]) -> SemaFootpri
     }
     ^owners: [SemaFootprintOwner]{}
     ^fields: [String:[String]]{}
-    ^stated: false
-    loop item in items {
+    loop (item_index, item) in items {
         if item == {
             .Struct(definition) -> {
                 stored: loop field in definition.fields if field.computed == None -> field.name
                 fields[definition.name] = stored
-                ^methods: definition.methods
-                loop block in definition.trait_impls {
-                    loop method in block.methods -> methods.push(method.copy())
+                ^methods: [SemaFootprintMethodRef]{}
+                loop method_index in 0..<definition.methods.len() {
+                    methods.push(SemaFootprintMethodRef{item_index: item_index, block_index: -1, method_index: method_index})
+                }
+                loop (block_index, block) in definition.trait_impls {
+                    loop method_index in 0..<block.methods.len() {
+                        methods.push(SemaFootprintMethodRef{item_index: item_index, block_index: block_index, method_index: method_index})
+                    }
                 }
                 if methods.len() > 0 {
-                    sema_footprint_add_owner(owners, definition.name, methods, stated)
+                    sema_footprint_add_owner(owners, definition.name, methods.move())
                 }
             }
             .Impl(definition) -> {
                 if definition.methods.len() > 0 {
-                    sema_footprint_add_owner(owners, definition.type_name, definition.methods, stated)
+                    methods: loop method_index in 0..<definition.methods.len() -> SemaFootprintMethodRef{item_index: item_index, block_index: -1, method_index: method_index}
+                    sema_footprint_add_owner(owners, definition.type_name, methods.move())
                 }
             }
             .Func(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
@@ -190,7 +204,7 @@ sema_footprint_solve_module: fn(tables: ASTTables, items: [Item]) -> SemaFootpri
     owners.sort_by(fn(left: SemaFootprintOwner, right: SemaFootprintOwner) { left.name <=> right.name })
     loop owner in owners {
         known: fields.get(owner.name) ?? next
-        sema_footprint_solve_owner(tables, owner, known, diagnostics, footprints)
+        sema_footprint_solve_owner(tables, items, owner, known, diagnostics, footprints)
     }
     SemaFootprintModuleResult{diagnostics: diagnostics, footprints: footprints}
 }
@@ -241,17 +255,30 @@ sema_footprint_for_method_span: fn(module_row: SemaRegistrationModule, span: Spa
     None
 }
 
-sema_footprint_add_owner: fn(owners: ^[SemaFootprintOwner], name: String, methods: [Func], stated: ^Bool) Never! {
-    loop method in methods {
-        if method.params.len() > 0 && method.params[0].declared_footprint != None -> stated = true
-    }
+sema_footprint_add_owner: fn(owners: ^[SemaFootprintOwner], name: String, methods: ^^[SemaFootprintMethodRef]) Never! {
     loop index in 0..<owners.len() {
         if owners[index].name == name {
-            loop method in methods -> owners[index].methods.push(method.copy())
+            owners[index].methods.extend(methods.move())
             return
         }
     }
-    owners.push(SemaFootprintOwner{name: name, methods: methods})
+    owners.push(SemaFootprintOwner{name: name, methods: methods.move()})
+}
+
+priv sema_footprint_visit_method: fn(items: [Item], at: SemaFootprintMethodRef, visit: fn(Func)) {
+    if items[at.item_index] == {
+        .Struct(definition) -> {
+            if at.block_index < 0 {
+                visit(definition.methods[at.method_index])
+            } else {
+                visit(definition.trait_impls[at.block_index].methods[at.method_index])
+            }
+        }
+        .Impl(definition) -> {
+            visit(definition.methods[at.method_index])
+        }
+        .Func(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+    }
 }
 
 sema_footprint_sorted_unique: fn(names: [String]) -> [String] Never! {
@@ -268,26 +295,40 @@ sema_footprint_sorted_unique: fn(names: [String]) -> [String] Never! {
 // each receiver method's effective footprint (stated when valid, else inferred).
 // A name declared twice (an inherent and a trait method) resolves to the whole
 // record at its call sites, as does a consuming, static or unknown callee.
-sema_footprint_solve_owner: fn(tables: ASTTables, owner: SemaFootprintOwner, known: [String], diagnostics: ^[Diagnostic], footprints: ^[SemaSolvedMethodFootprint]) {
+sema_footprint_solve_owner: fn(tables: ASTTables, items: [Item], owner: SemaFootprintOwner, known: [String], diagnostics: ^[Diagnostic], footprints: ^[SemaSolvedMethodFootprint]) {
     // The method position each name calls, or -1 when it has no footprint
     // receiver or is declared more than once.
     ^index: [String:Int]{}
-    loop (position, method) in owner.methods {
-        if index.get(method.name) != None -> index[method.name] = -1 else {
-            index[method.name] = if sema_footprint_has_receiver(method) -> position else -> -1
+    loop (position, method_ref) in owner.methods {
+        if items[method_ref.item_index] == {
+            .Struct(definition) -> {
+                method: if method_ref.block_index < 0 -> definition.methods[method_ref.method_index] else -> definition.trait_impls[method_ref.block_index].methods[method_ref.method_index]
+                if index.get(method.name) != None -> index[method.name] = -1 else {
+                    index[method.name] = if sema_footprint_has_receiver(method) -> position else -> -1
+                }
+            }
+            .Impl(definition) -> {
+                method: definition.methods[method_ref.method_index]
+                if index.get(method.name) != None -> index[method.name] = -1 else {
+                    index[method.name] = if sema_footprint_has_receiver(method) -> position else -> -1
+                }
+            }
+            .Func(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     ^uses: [SemaFootprintUses?]{}
     ^solved: [SemaFootprint?]{}
-    loop method in owner.methods {
-        if !sema_footprint_has_receiver(method) {
-            uses.push(None)
-            solved.push(None)
-            next
-        }
-        body: sema_footprint_body_uses(tables, method, known)
-        solved.push(Val(SemaFootprint{names: body.names, spans: body.spans, whole: body.whole}))
-        uses.push(Val(body))
+    loop method_ref in owner.methods {
+        sema_footprint_visit_method(items, method_ref, fn(method: Func) {
+            if !sema_footprint_has_receiver(method) {
+                uses.push(None)
+                solved.push(None)
+                return
+            }
+            body: sema_footprint_body_uses(tables, method, known)
+            solved.push(Val(SemaFootprint{fields: body.fields, spans: body.spans, whole: body.whole}))
+            uses.push(Val(body))
+        })
     }
     ^changed: true
     loop changed {
@@ -295,67 +336,83 @@ sema_footprint_solve_owner: fn(tables: ASTTables, owner: SemaFootprintOwner, kno
         loop position in 0..<uses.len() {
             body: uses[position] ?? next
             loop call in body.calls {
-                own: solved[position] ?? next
-                if own.whole != None -> next
+                already_whole: if solved[position] == .Val(own) -> own.whole != None else -> true
+                if already_whole -> next
                 target: index.get(call.name) ?? -1
-                ^next_footprint: own.copy()
-                ^called: SemaFootprint?{None}
-                if target >= 0 -> called = solved[target]
-                if called == .Val(callee) && callee.whole == None {
-                    loop name in callee.names {
-                        if !next_footprint.names.contains(name) {
-                            next_footprint.names.push(name)
-                            next_footprint.spans.push(call.span)
+                if target == position -> next
+                ^becomes_whole: false
+                ^missing: [Int]{}
+                if target >= 0 && solved[target] == .Val(callee) && callee.whole == None {
+                    if solved[position] == .Val(own) {
+                        loop field_index in callee.fields {
+                            if !own.fields.contains(field_index) -> missing.push(field_index)
                         }
                     }
-                } else { next_footprint.whole = Val(call.span) }
-                if next_footprint.whole != None || next_footprint.names.len() != own.names.len() {
-                    solved[position] = Val(next_footprint)
-                    changed = true
+                } else {
+                    becomes_whole = true
+                }
+                if becomes_whole {
+                    if solved[position].in_place() == .Val(entry) {
+                        entry.whole = Val(call.span)
+                        changed = true
+                    }
+                } else if missing.len() > 0 {
+                    if solved[position].in_place() == .Val(entry) {
+                        loop field_index in missing {
+                            entry.fields.push(field_index)
+                            entry.spans.push(call.span)
+                        }
+                        changed = true
+                    }
                 }
             }
         }
     }
-    loop (position, method) in owner.methods {
+    loop (position, method_ref) in owner.methods {
         footprint: solved[position] ?? next
-        ^effective: [String]?{None}
-        if footprint.whole == None -> effective = Val(sema_footprint_sorted_unique(footprint.names))
-        if method.params[0].declared_footprint == .Val(declared) {
-            ^stated_names: (loop entry in declared -> entry.name)
-            shown: if stated_names.len() == 1 -> "self.{stated_names[0]}" else -> "self.[{stated_names.join(", ")}]"
-            ^named_fields: true
-            loop entry in declared {
-                if !known.contains(entry.name) {
-                    named_fields = false
-                    diagnostics.push(sema_error("E0231", entry.span, "`self.{entry.name}` in the receiver of `{method.name}` names no field of `{owner.name}`", "a stated footprint lists the stored fields the method may read or change", "name fields of `{owner.name}` only, or remove `.{entry.name}` from the receiver"))
-                }
+        sema_footprint_visit_method(items, method_ref, fn(method: Func) {
+            ^effective: [String]?{None}
+            if footprint.whole == None {
+                footprint_names: loop field_index in footprint.fields -> known[field_index]
+                effective = Val(sema_footprint_sorted_unique(footprint_names))
             }
-            if named_fields {
-                effective = Val(sema_footprint_sorted_unique(stated_names))
-                ^outside: {what: "", span: Span{start: 0, end: 0}}
-                ^found: false
-                if footprint.whole == .Val(whole_span) {
-                    outside = {what: "all of `self`", span: whole_span}
-                    found = true
-                } else {
-                    // The first field outside the stated set, in field-name order.
-                    ^order: (loop position_in in 0..<footprint.names.len() -> position_in)
-                    sorted_names: footprint.names
-                    order.sort_by(fn(at: Int) { sorted_names[at] })
-                    loop at in order {
-                        if !stated_names.contains(footprint.names[at]) {
-                            outside = {what: "`self.{footprint.names[at]}`", span: footprint.spans[at]}
-                            found = true
-                            break
-                        }
+            if method.params[0].declared_footprint == .Val(declared) {
+                ^stated_names: (loop entry in declared -> entry.name)
+                shown: if stated_names.len() == 1 -> "self.{stated_names[0]}" else -> "self.[{stated_names.join(", ")}]"
+                ^named_fields: true
+                loop entry in declared {
+                    if !known.contains(entry.name) {
+                        named_fields = false
+                        diagnostics.push(sema_error("E0231", entry.span, "`self.{entry.name}` in the receiver of `{method.name}` names no field of `{owner.name}`", "a stated footprint lists the stored fields the method may read or change", "name fields of `{owner.name}` only, or remove `.{entry.name}` from the receiver"))
                     }
                 }
-                if found {
-                    diagnostics.push(sema_error("E0231", outside.span, "`{method.name}` uses {outside.what} outside its stated footprint `{shown}`", "callers and the published API see the stated footprint, so the body must stay inside it", "add the field to the receiver's footprint, or change `{method.name}` to stay inside `{shown}`"))
+                if named_fields {
+                    effective = Val(sema_footprint_sorted_unique(stated_names))
+                    ^outside: {what: "", span: Span{start: 0, end: 0}}
+                    ^found: false
+                    if footprint.whole == .Val(whole_span) {
+                        outside = {what: "all of `self`", span: whole_span}
+                        found = true
+                    } else {
+                        // The first field outside the stated set, in field-name order.
+                        ^order: (loop position_in in 0..<footprint.fields.len() -> position_in)
+                        order.sort_by(fn(at: Int) { known[footprint.fields[at]] })
+                        loop at in order {
+                            field_name: known[footprint.fields[at]]
+                            if !stated_names.contains(field_name) {
+                                outside = {what: "`self.{field_name}`", span: footprint.spans[at]}
+                                found = true
+                                break
+                            }
+                        }
+                    }
+                    if found {
+                        diagnostics.push(sema_error("E0231", outside.span, "`{method.name}` uses {outside.what} outside its stated footprint `{shown}`", "callers and the published API see the stated footprint, so the body must stay inside it", "add the field to the receiver's footprint, or change `{method.name}` to stay inside `{shown}`"))
+                    }
                 }
             }
-        }
-        footprints.push(SemaSolvedMethodFootprint{owner: owner.name, method: method.name, span: method.span, fields: effective})
+            footprints.push(SemaSolvedMethodFootprint{owner: owner.name, method: method.name, span: method.span, fields: effective})
+        })
     }
 }
 

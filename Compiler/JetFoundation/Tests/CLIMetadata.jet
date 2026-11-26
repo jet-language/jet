@@ -140,11 +140,11 @@ cli_metadata_wasm: fn(record: [U8], count: Int) -> [U8] Never! {
     ^payload: [U8]{}
     cli_metadata_leb(payload, 11)
     payload.extend("jet.command".bytes())
-    payload.extend(record.copy())
+    loop byte in record -> payload.push(byte)
     loop _ in 0..<count {
         out.push(U8{0})
         cli_metadata_leb(out, payload.len())
-        out.extend(payload.copy())
+        loop byte in payload -> out.push(byte)
     }
     out
 }
@@ -165,7 +165,7 @@ cli_metadata_refuse: fn(bytes: [U8], expected: RecordDecodeError, maximum: U64) 
 #Test("cli_metadata") {
     input: CLIInputSchema{field: "output_file", flag: "output-file", short: Val("o"), env: Val("OUTPUT_FILE"), help: "destination", metavar: Val("OUTPUT_FILE"), shape: CLIInputShape.Value{kind: CLIValueKind.Path, optional: false, default: None}, positional: Val(U16{0})}
     job: JobFact{name: "release", scope: JobScope.Ship, doc: Val("ship"), arguments: [JobArgumentSchema]{}, after: [String]{}, packages: [String]{"."}, cwd: None, inputs: [String]{"a"}, outputs: [String]{"b"}, skip: Val(JobSkip.UnlessPlatform{platform: "linux"}), cache: JobCachePolicy.Shared, parallel: 2, limits: [StringMapEntry]{StringMapEntry{key: "cpu", value: "2"}}, schedule: Val("daily")}
-    ^hidden: job.copy()
+    ^hidden: job
     hidden.scope = JobScope.Internal
     schema: CLICommandSchema{entry_type: "Options", description: Val("example"), inputs: [CLIInputSchema]{input}, commands: [CLISubcommandSchema]{CLISubcommandSchema{name: "send", description: None, inputs: [CLIInputSchema]{}}}, jobs: [JobFact]{job, job, hidden}, standard: true, version: Val("1.2.3")}
     record: encode_record(schema)
@@ -194,10 +194,10 @@ cli_metadata_refuse: fn(bytes: [U8], expected: RecordDecodeError, maximum: U64) 
     cli_metadata_refuse(cli_metadata_wasm(record, 2), RecordDecodeError.Duplicate, max)
     nested: cli_metadata_fat(cli_metadata_mach(record, true), cli_metadata_mach(record, true), false, false)
     cli_metadata_refuse(cli_metadata_fat(nested, nested, false, false), RecordDecodeError.Malformed{why: "nested universal Mach-O slice"}, max)
-    ^unsupported: record.copy()
+    ^unsupported: record
     unsupported[8] = U8{6}
     cli_metadata_refuse(cli_metadata_wasm(unsupported, 1), RecordDecodeError.UnsupportedVersion{version: U16{6}}, max)
-    ^corrupt: record.copy()
+    ^corrupt: record
     corrupt[corrupt.len() - 1] = corrupt[corrupt.len() - 1] ~ U8{1}
     cli_metadata_refuse(cli_metadata_wasm(corrupt, 1), RecordDecodeError.Malformed{why: "digest mismatch"}, max)
     disagreement: cli_metadata_fat(cli_metadata_mach(record, true), cli_metadata_mach(corrupt, true), false, false)

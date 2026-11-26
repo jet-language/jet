@@ -87,7 +87,7 @@ sema_alias_classify_inputs: fn(inputs: ^[SemaRegistrationModuleInput], edges: [S
         sema_alias_collect_types(inputs, edges, rows, globals, index, inputs[index].program.items, [String]{}, keys)
         if keys.len() > 0 {
             sema_alias_globals_add(globals, inputs[index].program.items, -1)
-            inputs[index].program.items = sema_alias_rewrite_items(inputs[index].program.items, keys)
+            sema_alias_rewrite_items(inputs[index].program.items, keys)
             sema_alias_globals_add(globals, inputs[index].program.items, 1)
         }
     }
@@ -222,28 +222,35 @@ sema_alias_collect_types: fn(inputs: [SemaRegistrationModuleInput], edges: [Sema
     }
 }
 
-sema_alias_rewrite_items: fn(items: [Item], keys: [SemaAliasKey]) -> [Item] Never! {
-    rewritten: loop item in items -> {
-        ^value: item.copy()
-        if item == {
-            .Const(definition) -> {
-                if sema_alias_keyed(keys, definition) {
-                    path: sema_alias_binding_path(definition) ?? [String]{}
-                    value = Item.TypeAlias{value: TypeAliasDef{is_pub: definition.is_pub, is_package_pub: definition.is_package_pub, name: definition.name, name_span: definition.name_span, type_params: [TypeParam]{}, target: foundation_named_type(path.join(".")), target_span: sema_alias_expr_path_span(definition.value), span: definition.span}}
-                }
-            }
-            .CodeModule(code_module) -> {
-                ^row: code_module.copy()
-                if code_module.body == .Val(body) {
-                    row.body = Val(sema_alias_rewrite_items(body, keys))
-                }
-                value = Item.CodeModule{value: row}
-            }
-            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
-        }
-        value
+sema_alias_rewrite_items: fn(items: ^[Item], keys: [SemaAliasKey]) Never! {
+    ^reversed: [Item]{}
+    loop items.len() > 0 {
+        if items.pop() == .Val(item) -> reversed.push(item)
     }
-    rewritten
+    loop reversed.len() > 0 {
+        item: reversed.pop() ?? break
+        is_alias: if item == .Const(definition) -> sema_alias_keyed(keys, definition) else -> false
+        if is_alias {
+            if item.move() == .Const(source_definition) {
+                definition: source_definition.move()
+                path: sema_alias_binding_path(definition) ?? [String]{}
+                items.push(Item.TypeAlias{value: TypeAliasDef{is_pub: definition.is_pub, is_package_pub: definition.is_package_pub, name: definition.name, name_span: definition.name_span, type_params: [TypeParam]{}, target: foundation_named_type(path.join(".")), target_span: sema_alias_expr_path_span(definition.value), span: definition.span}})
+            }
+            next
+        }
+        is_code_module: item == .CodeModule(_)
+        if is_code_module {
+            if item.move() == .CodeModule(source_module) {
+                ^row: source_module.move()
+                if row.body.in_place() == .Val(body) {
+                    sema_alias_rewrite_items(body, keys)
+                }
+                items.push(Item.CodeModule{value: row})
+            }
+            next
+        }
+        items.push(item)
+    }
 }
 
 // The meaning of `path` written in `site`: each scope from the innermost

@@ -121,11 +121,15 @@ err_new_take: fn(message: I64, code: I64, cause: I64) -> I64 {
 
 // borrow+clone message/code, TAKE cause, borrow option box.
 #Export(c) jet_rt_record_new_jet_err: fn(message: I64, code: I64, cause: I64) -> I64 {
-    err_new_take(jet_rt_string_clone(message), if (code == I64{0}) -> I64{0} else -> jet_rt_string_clone(rt_text_word(code)), cause)
+    result: err_new_take(jet_rt_string_clone(message), if (code == I64{0}) -> I64{0} else -> jet_rt_string_clone(rt_text_word(code)), cause)
+    context_frame_snapshot_to_err(result)
+    result
 }
 
 #Export(c) jet_err_from_message: fn(message: I64) -> I64 {
-    err_new_take(jet_rt_string_clone(message), I64{0}, I64{0})
+    result: err_new_take(jet_rt_string_clone(message), I64{0}, I64{0})
+    context_frame_snapshot_to_err(result)
+    result
 }
 
 #Export(c) jet_rt_record_get_jet_err_message: fn(error: I64) -> I64 {
