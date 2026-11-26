@@ -1,0 +1,97 @@
+// Private HTTP/1.x message-head grammar for `core.http`.
+//
+// Declares checked printable grammars for HTTP/1.x request heads, status-line
+// response heads, and header lines (RFC 9110 / 9112).
+use {
+    core.grammar.[Grammar]
+}
+
+priv RequestHead: Grammar{"""
+    request_head : method=TOKEN ' ' target=TARGET ' ' version=VERSION lines+=req_header* ;
+    req_header   : CRLF name=TOKEN ':' val=FIELD_VAL? ;
+
+    TOKEN     : [A-Za-z0-9!#$%&'*+\-.\^_`|~]+ ;
+    TARGET    : [^ \t\r\n]+ ;
+    VERSION   : 'HTTP/' [0-9] '.' [0-9] ;
+    FIELD_VAL : [\u{{20}}-\u{{7E}}\u{{80}}-\u{{FF}}\t]+ ;
+    CRLF      : '\r\n' ;
+"""}
+
+priv ResponseHead: Grammar{"""
+    response_head : version=VERSION ' ' code=STATUS (' ' reason=REASON?)? lines+=resp_header* ;
+    resp_header   : CRLF name=TOKEN ':' val=FIELD_VAL? ;
+
+    VERSION   : 'HTTP/' [0-9] '.' [0-9] ;
+    STATUS    : [0-9] [0-9] [0-9] ;
+    REASON    : [\u{{21}}-\u{{7E}}\u{{80}}-\u{{FF}}] [\u{{20}}-\u{{7E}}\u{{80}}-\u{{FF}}\t]* ;
+    TOKEN     : [A-Za-z0-9!#$%&'*+\-.\^_`|~]+ ;
+    FIELD_VAL : [\u{{20}}-\u{{7E}}\u{{80}}-\u{{FF}}\t]+ ;
+    CRLF      : '\r\n' ;
+"""}
+
+ParsedHeader: struct {
+    name: String,
+    value: String,
+}
+
+ParsedRequestHead: struct {
+    method: String,
+    target: String,
+    version: String,
+    headers: [ParsedHeader],
+}
+
+ParsedResponseHead: struct {
+    version: String,
+    status: String,
+    reason: String,
+    headers: [ParsedHeader],
+}
+
+parse_request_head: fn(text: String) -> ParsedRequestHead? Never! {
+    head: if RequestHead.parse(text) == {
+        .Ok(parsed) -> parsed
+        .Err(_) -> return None
+    }
+    ^headers: [ParsedHeader]{}
+    loop line in head.lines {
+        headers.push(ParsedHeader{name: line.name, value: line.val ?? ""})
+    }
+    Val(ParsedRequestHead{method: head.method, target: head.target, version: head.version, headers: headers})
+}
+
+parse_response_head: fn(text: String) -> ParsedResponseHead? Never! {
+    head: if ResponseHead.parse(text) == {
+        .Ok(parsed) -> parsed
+        .Err(_) -> return None
+    }
+    ^headers: [ParsedHeader]{}
+    loop line in head.lines {
+        headers.push(ParsedHeader{name: line.name, value: line.val ?? ""})
+    }
+    Val(ParsedResponseHead{version: head.version, status: head.code, reason: head.reason ?? "", headers: headers})
+}
+
+print_request_head: fn(text: String) -> String? Never! {
+    if RequestHead.parse(text) == {
+        .Ok(head) -> {
+            if head.print() == {
+                .Ok(printed) -> Val(printed)
+                .Err(_) -> None
+            }
+        }
+        .Err(_) -> None
+    }
+}
+
+print_response_head: fn(text: String) -> String? Never! {
+    if ResponseHead.parse(text) == {
+        .Ok(head) -> {
+            if head.print() == {
+                .Ok(printed) -> Val(printed)
+                .Err(_) -> None
+            }
+        }
+        .Err(_) -> None
+    }
+}

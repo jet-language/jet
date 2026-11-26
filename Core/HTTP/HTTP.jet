@@ -19,6 +19,7 @@ use {
     routes: core.http.server
     core.http.server.[HTTPMux]
     core.prelude.[SourceLocation]
+    head_syntax: __core_http_syntax_head
 }
 
 C_MAX_BODY_BYTES: 1048576
@@ -1998,6 +1999,33 @@ form_decode_strict: fn(text: String) -> Query FormDecodeError! { query_decode_st
     sent: request_with(Method.Post, "http://example/", headers(), body_bytes([U8]{255, 0}))
     assert_eq(body_as_bytes(sent.body), [U8]{255, 0})
     assert_eq(body_as_bytes(response_ok(body_bytes([U8]{255, 0})).body), [U8]{255, 0})
+}
+
+priv check_http_head_syntax: fn(raw: String, is_request: Bool) -> Bool Never! {
+    if is_request -> head_syntax.parse_request_head(raw) != None else -> head_syntax.parse_response_head(raw) != None
+}
+
+#Test("HTTP head grammar parses request and response heads, prints back, and refuses malformed lines") {
+    req_head: "GET /api/items?q=1 HTTP/1.1\r\nHost: example.com\r\nX-Empty:\r\nX-Trace: abc 123"
+    assert(check_http_head_syntax(req_head, true))
+    parsed_req: head_syntax.parse_request_head(req_head) ?? panic("request head grammar")
+    assert_eq(parsed_req.method, "GET")
+    assert_eq(parsed_req.target, "/api/items?q=1")
+    assert_eq(parsed_req.version, "HTTP/1.1")
+    assert_eq(parsed_req.headers.len(), 3)
+    req_printed: head_syntax.print_request_head(req_head) ?? panic("request head print")
+    assert(check_http_head_syntax(req_printed, true))
+    resp_head: "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 4"
+    assert(check_http_head_syntax(resp_head, false))
+    parsed_resp: head_syntax.parse_response_head(resp_head) ?? panic("response head grammar")
+    assert_eq(parsed_resp.version, "HTTP/1.1")
+    assert_eq(parsed_resp.status, "200")
+    assert_eq(parsed_resp.reason, "OK")
+    assert_eq(parsed_resp.headers.len(), 2)
+    resp_printed: head_syntax.print_response_head(resp_head) ?? panic("response head print")
+    assert(check_http_head_syntax(resp_printed, false))
+    assert(head_syntax.parse_request_head("BAD LINE") == None)
+    assert(head_syntax.parse_response_head("HTTP/1.1 20 OK") == None)
 }
 
 cookie: fn(name: String, value: String) -> Cookie Never! {
