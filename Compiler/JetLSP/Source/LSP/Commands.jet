@@ -50,6 +50,7 @@ lsp_code_lens_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
             rows.push(lsp_code_lens_json(view, test.span.start, "Run test", "jet.testFile"))
         }
     }
+    loop lens in lsp_footprint_code_lenses(view, doc_module) -> rows.push(lens)
     lsp_response(id, "[{rows.join(",")}]")
 }
 

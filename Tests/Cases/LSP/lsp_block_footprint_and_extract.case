@@ -1,0 +1,52 @@
+# JetLSP block footprint hover, code lens, and `Extract function` refactoring (#7033 n3):
+# 1. Unit tests prove hover, range hover, code lens, and `Extract function`
+#    (including re-checking the refactored document with 0 errors).
+# 2. Live stdio `jet self lsp` session proves `initialize` advertises
+#    `refactor.extract`, `textDocument/codeLens` emits the exact block footprint
+#    lens, `textDocument/hover` shows the exact read/write/take footprint, and
+#    `textDocument/codeAction` returns the `Extract function` edit with exact
+#    `x: T`, `x: ^T`, `x: ^^T` parameter conventions.
+env: NO_COLOR=1
+env: JET_TOOLCHAIN_ROOT={root}
+
+step: jet test {root}/Compiler/JetCLI/Tests/LSPFootprint.jet --filter=lsp_footprint_
+exit: 0
+stdout: ~ "1 passed, 0 failed" # real-checker LSP unit test passes including post-extract clean check
+
+session lsp content-length: jet self lsp
+stderr: null
+
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"capabilities\":{}}}"
+recv lsp until $.id = 1
+stdout: ~ "\"refactor.extract\"" # initialize advertises refactor.extract
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
+
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/demo.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"Counter: struct {\\n    hits: Int,\\n    limit: Int,\\n    bump: fn(^self.[hits], delta: Int) {\\n        self.hits += delta\\n    }\\n}\\n\\narchive: fn(title: ^^String) -> Int {\\n    title.len()\\n}\\n\\nwork: fn(c: ^Counter, xs: ^[Int], step: Int, note: String, drop_me: ^^String) -> Int {\\n    local_copy: \\\"{note}\\\"\\n    if c.hits < c.limit {\\n        c.bump(step)\\n        xs.push(c.hits)\\n        taken_len: archive(^^drop_me)\\n        return taken_len + local_copy.len()\\n    }\\n    local_copy.len()\\n}\\n\"}}}"
+recv lsp until $.params.uri = "file://{work}/demo.jet"
+json: stdout doc $.params.diagnostics[?severity=1] #= 0
+
+# 1. Code lens on the `if` block reports its inferred footprint.
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/codeLens\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/demo.jet\"}}}"
+recv lsp until $.id = 2
+stdout: ~ "Footprint: reads c.limit, step, local_copy | writes ^c.hits, ^xs | takes ^^drop_me"
+
+# 2. Hover on the `if` block header shows the exact read/write/take breakdown.
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/demo.jet\"},\"position\":{\"line\":14,\"character\":4}}}"
+recv lsp until $.id = 3
+stdout: ~ "**Block footprint** (`fn work`)"
+stdout: ~ "`write` `c.hits: Int`"
+stdout: ~ "`read` `c.limit: Int`"
+stdout: ~ "`take` `drop_me: String`"
+
+# 3. Code action `refactor.extract` over lines 15-18 turns the selected block into
+#    a local helper function carrying the exact inferred footprint signature.
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"textDocument/codeAction\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/demo.jet\"},\"range\":{\"start\":{\"line\":15,\"character\":8},\"end\":{\"line\":18,\"character\":43}},\"context\":{\"diagnostics\":[],\"only\":[\"refactor.extract\"]}}}"
+recv lsp until $.id = 4
+stdout: ~ "\"kind\":\"refactor.extract\""
+stdout: ~ "_extracted: fn(c: ^Counter, step: Int, xs: ^[Int], drop_me: ^^String, local_copy: String) -> Int"
+stdout: ~ "return _extracted(^c, step, ^xs, ^^drop_me, local_copy)"
+
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"shutdown\",\"params\":null}"
+recv lsp until $.id = 5
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"exit\",\"params\":null}"
+wait lsp: 0

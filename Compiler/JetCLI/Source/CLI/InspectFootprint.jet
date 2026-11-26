@@ -1,0 +1,233 @@
+// `jet inspect footprint FILE:LINE[-LINE] [--json]` (#7033 n2):
+// reports the names and fields a checked block or line range reads, writes,
+// and takes using the single-source `semindex_block_footprint` analyzer.
+use {
+    jet_driver.[
+        JetDriverCompileMode,
+        JetDriverCompileResult,
+        JetDriverVerbOutput,
+        JET_DRIVER_EXIT_OK,
+        JET_DRIVER_EXIT_USAGE,
+        JET_DRIVER_EXIT_USER_ERROR,
+        jet_driver_present_diagnostics,
+    ]
+    jet_foundation.[
+        Span,
+        foundation_json_quote,
+    ]
+    jet_semindex.[
+        SemBlockFootprint,
+        SemFootprintEntry,
+        SemFootprintParam,
+        semindex_block_footprint,
+        semindex_block_footprint_params,
+        semindex_block_footprint_summary,
+        semindex_footprint_access_name,
+        semindex_footprint_access_sigil,
+        semindex_footprint_display_type,
+    ]
+}
+
+// Parsed `FILE:LINE[-LINE]` specifier.
+JetCLIFootprintSpec: struct {
+    file: String,
+    start_line: Int,
+    end_line: Int,
+}
+
+JetCLIFootprintParse: enum {
+    Parsed(spec: JetCLIFootprintSpec),
+    Failed(message: String),
+}
+
+// Parse a positive 1-based integer line number.
+jet_cli_inspect_footprint_line_number: fn(raw: String) -> Int? Never! {
+    if raw == "" -> return None
+    parsed: Int.parse(raw) ?? return None
+    if parsed <= 0 -> return None
+    Val(parsed)
+}
+
+// Parse `FILE:LINE` or `FILE:LINE-LINE`, splitting at the last `:` so file
+// paths stay intact.
+jet_cli_inspect_footprint_parse_spec: fn(raw: String) -> JetCLIFootprintParse Never! {
+    bytes: raw.bytes()
+    ^colon: -1
+    loop idx in 0..<bytes.len() {
+        if bytes[idx] == (U8{58}) -> colon = idx
+    }
+    if colon <= 0 || colon + 1 >= bytes.len() {
+        return JetCLIFootprintParse.Failed{message: "`jet inspect footprint` expects `FILE:LINE` or `FILE:LINE-LINE`, got `{raw}`"}
+    }
+    file: raw.slice(0..<colon)
+    range_part: raw.slice(colon + 1..<bytes.len())
+    if range_part.contains("-") {
+        parts: range_part.split("-").to_list()
+        if parts.len() != 2 {
+            return JetCLIFootprintParse.Failed{message: "line range `{range_part}` must be `LINE` or `START-END`"}
+        }
+        start_line: jet_cli_inspect_footprint_line_number(parts[0]) ?? return JetCLIFootprintParse.Failed{message: "start line `{parts[0]}` must be a positive integer"}
+        end_line: jet_cli_inspect_footprint_line_number(parts[1]) ?? return JetCLIFootprintParse.Failed{message: "end line `{parts[1]}` must be a positive integer"}
+        if end_line < start_line {
+            return JetCLIFootprintParse.Failed{message: "end line {end_line} is before start line {start_line}"}
+        }
+        return JetCLIFootprintParse.Parsed{spec: JetCLIFootprintSpec{file: file, start_line: start_line, end_line: end_line}}
+    }
+    line: jet_cli_inspect_footprint_line_number(range_part) ?? return JetCLIFootprintParse.Failed{message: "line `{range_part}` must be a positive integer"}
+    JetCLIFootprintParse.Parsed{spec: JetCLIFootprintSpec{file: file, start_line: line, end_line: line}}
+}
+
+// Convert a 1-based inclusive `[start_line, end_line]` range to its UTF-8 byte
+// span in `source`, excluding the trailing newline of `end_line`.
+jet_cli_inspect_footprint_line_span: fn(source: String, start_line: Int, end_line: Int) -> Span? Never! {
+    if start_line <= 0 || end_line < start_line -> return None
+    bytes: source.bytes()
+    ^line_starts: [Int]{0}
+    loop idx in 0..<bytes.len() {
+        if bytes[idx] == (U8{10}) -> line_starts.push(idx + 1)
+    }
+    // A trailing newline opens no extra empty line past the last written line.
+    line_count: if bytes.len() > 0 && bytes[bytes.len() - 1] == (U8{10}) -> line_starts.len() - 1 else -> line_starts.len()
+    if start_line > line_count || end_line > line_count -> return None
+    start_byte: line_starts[start_line - 1]
+    ^end_byte: if end_line < line_starts.len() -> line_starts[end_line] else -> bytes.len()
+    if end_byte > start_byte && bytes[end_byte - 1] == (U8{10}) -> end_byte -= 1
+    if end_byte > start_byte && bytes[end_byte - 1] == (U8{13}) -> end_byte -= 1
+    Val(Span{start: start_byte, end: end_byte})
+}
+
+// Front-half plan builder for `jet inspect footprint FILE:LINE[-LINE] [--json]`.
+jet_cli_inspect_footprint: fn(argv: [String], color: Bool, json: Bool, threads: Int?) -[FS, Env]> JetCLIPlan Never! {
+    fix: "run `jet inspect footprint path/to/file.jet:12-20`"
+    ^positional: [String]{}
+    loop argument in jet_cli_tail(argv, 1) {
+        if !argument.starts_with("-") -> positional.push(argument)
+    }
+    if positional.len() != 1 {
+        return jet_cli_fail("E2104", "`jet inspect footprint` needs one `FILE:LINE[-LINE]` target", jet_cli_why("E2104"), fix, color, JET_DRIVER_EXIT_USAGE)
+    }
+    parsed: if jet_cli_inspect_footprint_parse_spec(positional[0]) == {
+        .Failed(message) -> return jet_cli_fail("E2104", message, jet_cli_why("E2104"), fix, color, JET_DRIVER_EXIT_USAGE)
+        .Parsed(spec) -> spec
+    }
+    subject: "{parsed.start_line}-{parsed.end_line}"
+    JetCLIPlan.Inspect{job: JetCLIInspectJob{
+        action: "footprint",
+        file: jet_cli_inspect_absolute(parsed.file),
+        subject: Val(subject),
+        json: json,
+        color: color,
+        threads: threads,
+        notice: "",
+        project: false,
+    }}
+}
+
+JetCLIFootprintLines: struct {
+    start_line: Int,
+    end_line: Int,
+}
+
+jet_cli_inspect_footprint_parse_subject: fn(subject: String) -> JetCLIFootprintLines? Never! {
+    parts: subject.split("-").to_list()
+    if parts.len() != 2 -> return None
+    s: jet_cli_inspect_footprint_line_number(parts[0]) ?? return None
+    e: jet_cli_inspect_footprint_line_number(parts[1]) ?? return None
+    if e < s -> return None
+    Val(JetCLIFootprintLines{start_line: s, end_line: e})
+}
+
+jet_cli_inspect_footprint_entry_json: fn(entry: SemFootprintEntry) -> String Never! {
+    "{{\"name\":{foundation_json_quote(entry.path)},\"root\":{foundation_json_quote(entry.root)},\"kind\":{foundation_json_quote(semindex_footprint_access_name(entry.access))},\"sigil\":{foundation_json_quote(semindex_footprint_access_sigil(entry.access))},\"type\":{foundation_json_quote(semindex_footprint_display_type(entry.ty))},\"origin\":{foundation_json_quote(entry.origin)}}}"
+}
+
+jet_cli_inspect_footprint_param_json: fn(param: SemFootprintParam) -> String Never! {
+    "{{\"name\":{foundation_json_quote(param.name)},\"kind\":{foundation_json_quote(semindex_footprint_access_name(param.access))},\"sigil\":{foundation_json_quote(semindex_footprint_access_sigil(param.access))},\"type\":{foundation_json_quote(semindex_footprint_display_type(param.ty))}}}"
+}
+
+jet_cli_inspect_footprint_json: fn(file: String, start_line: Int, end_line: Int, footprint: SemBlockFootprint) -> String Never! {
+    reads: loop e in footprint.reads -> jet_cli_inspect_footprint_entry_json(e)
+    writes: loop e in footprint.writes -> jet_cli_inspect_footprint_entry_json(e)
+    takes: loop e in footprint.takes -> jet_cli_inspect_footprint_entry_json(e)
+    entries: loop e in footprint.entries -> jet_cli_inspect_footprint_entry_json(e)
+    params: loop p in semindex_block_footprint_params(footprint) -> jet_cli_inspect_footprint_param_json(p)
+    summary: semindex_block_footprint_summary(footprint)
+    "{{\"schema_version\":1,\"ok\":true,\"file\":{foundation_json_quote(file)},\"function\":{foundation_json_quote(footprint.function_name)},\"start_line\":{start_line},\"end_line\":{end_line},\"span\":{{\"start\":{footprint.span.start},\"end\":{footprint.span.end}}},\"summary\":{foundation_json_quote(summary)},\"reads\":[{reads.join(",")}],\"writes\":[{writes.join(",")}],\"takes\":[{takes.join(",")}],\"entries\":[{entries.join(",")}],\"params\":[{params.join(",")}]}}\n"
+}
+
+jet_cli_inspect_footprint_human: fn(file: String, start_line: Int, end_line: Int, footprint: SemBlockFootprint) -> String Never! {
+    range_label: if start_line == end_line -> "{start_line}" else -> "{start_line}-{end_line}"
+    ^lines: [String]{
+        "footprint {file}:{range_label} (fn {footprint.function_name})",
+        "summary: {semindex_block_footprint_summary(footprint)}",
+    }
+    loop entry in footprint.entries {
+        kind: semindex_footprint_access_name(entry.access)
+        pad: if kind == "write" -> " " else -> "  "
+        lines.push("{kind}{pad}{entry.path}: {semindex_footprint_display_type(entry.ty)}")
+    }
+    "{lines.join("\n")}\n"
+}
+
+jet_cli_inspect_footprint_fail: fn(code: String, what: String, color: Bool, json: Bool, exit_code: Int) -> JetDriverVerbOutput Never! {
+    if json {
+        return JetDriverVerbOutput{
+            stdout: "{{\"schema_version\":1,\"ok\":false,\"code\":{foundation_json_quote(code)},\"error\":{foundation_json_quote(what)}}}\n",
+            stderr: "",
+            exit_code: exit_code,
+        }
+    }
+    JetDriverVerbOutput{
+        stdout: "",
+        stderr: jet_cli_report(code, what, jet_cli_why(code), "run `jet inspect footprint path/to/file.jet:12-20`", color),
+        exit_code: exit_code,
+    }
+}
+
+// Host-half renderer for `jet inspect footprint FILE:LINE[-LINE] [--json]`.
+jet_cli_inspect_footprint_report: fn(job: JetCLIInspectJob, result: JetDriverCompileResult) -> JetDriverVerbOutput {
+    range_pair: jet_cli_inspect_footprint_parse_subject(job.subject ?? "") ?? {
+        return jet_cli_inspect_footprint_fail("E2104", "malformed footprint line range `{job.subject ?? ""}`", job.color, job.json, JET_DRIVER_EXIT_USAGE)
+    }
+    start_line: range_pair.start_line
+    end_line: range_pair.end_line
+    ^target_source: String?{None}
+    ^target_path: job.file
+    loop doc_module in result.doc_modules {
+        if doc_module.path == job.file || doc_module.physical_path == job.file {
+            target_source = Val(doc_module.source)
+            target_path = doc_module.path
+            break
+        }
+    }
+    source: target_source ?? {
+        return jet_cli_inspect_footprint_fail("E2105", "checked compilation did not include `{job.file}`", job.color, job.json, JET_DRIVER_EXIT_USER_ERROR)
+    }
+    span: jet_cli_inspect_footprint_line_span(source, start_line, end_line) ?? {
+        return jet_cli_inspect_footprint_fail("E2104", "line range {start_line}-{end_line} is outside `{job.file}`", job.color, job.json, JET_DRIVER_EXIT_USAGE)
+    }
+    index: jet_cli_checked_semindex(result)
+    footprint: semindex_block_footprint(result.doc_modules, Val(index), target_path, span) ?? {
+        return jet_cli_inspect_footprint_fail("E2105", "no checked function or statements found at `{job.file}:{start_line}-{end_line}`", job.color, job.json, JET_DRIVER_EXIT_USER_ERROR)
+    }
+    if job.json {
+        return JetDriverVerbOutput{stdout: jet_cli_inspect_footprint_json(job.file, start_line, end_line, footprint), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    }
+    JetDriverVerbOutput{stdout: jet_cli_inspect_footprint_human(job.file, start_line, end_line, footprint), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+}
+
+// Standalone host handler for `jet inspect footprint` returning
+// `JetDriverVerbOutput` cleanly (without calling process exit).
+jet_cli_inspect_footprint_host: fn(job: JetCLIInspectJob, source: String) -> JetDriverVerbOutput {
+    compiled: jet_cli_compile_entry(job.file, job.color, job.threads, JetDriverCompileMode.Doc, None, None, target_machine: job.target_machine)
+    if compiled == {
+        .Refused(refusal) -> refusal.move()
+        .Compiled(result, snapshot) -> {
+            diagnostics: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
+            errors: jet_cli_errors(diagnostics)
+            if errors.len() > 0 -> return jet_cli_inspect_check_failed(job, source, errors)
+            if result.internal_problem != None -> return jet_cli_ice(result.internal_problem ?? "")
+            jet_cli_inspect_footprint_report(job, result)
+        }
+    }
+}

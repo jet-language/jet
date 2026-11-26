@@ -1,0 +1,46 @@
+# `jet inspect footprint FILE:LINE[-LINE] [--json]` (#7033 n2):
+# 1. Unit tests prove single-source checked footprint inference (reads, writes,
+#    takes, field paths, solved `^self.[a, b]` receiver footprint expansion,
+#    explicit copy staying `read`, block-local exclusion, inner-range descent,
+#    and fail-closed refusal on malformed ranges / non-checking files).
+# 2. End-to-end CLI invocation checks both human and `--json` output on a real
+#    checked Jet program, plus refusal on a broken file and malformed range.
+env: NO_COLOR=1
+env: JET_TOOLCHAIN_ROOT={root}
+
+step: jet test {root}/Compiler/JetCLI/Tests/InspectFootprint.jet --filter=footprint_inspect_
+exit: 0
+stdout: ~ "3 passed, 0 failed" # unit tests cover single-source footprint inference and CLI plumbing
+
+write: sample.jet = "Counter: struct {\n    hits: Int,\n    limit: Int,\n    bump: fn(^self.[hits], delta: Int) {\n        self.hits += delta\n    }\n}\n\narchive: fn(title: ^^String) -> Int {\n    title.len()\n}\n\nwork: fn(c: ^Counter, xs: ^[Int], step: Int, note: String, drop_me: ^^String) -> Int {\n    local_copy: note.copy()\n    if c.hits < c.limit {\n        c.bump(step)\n        xs.push(c.hits)\n        taken_len: archive(^^drop_me)\n        return taken_len + local_copy.len()\n    }\n    local_copy.len()\n}\n\nrun: fn() {\n    ^c: Counter{hits: 0, limit: 5}\n    ^xs: [Int]{}\n    drop_val: \"bye\"\n    n: work(^c, ^xs, 2, \"hi\", ^^drop_val)\n    print(\"{n} {c.hits} {xs.len()}\")\n}\n"
+
+step: jet inspect footprint sample.jet:16-19
+exit: 0
+stdout: ~ "fn work" # enclosing checked function reported
+stdout: ~ "write c.hits: Int" # solved ^self.[hits] receiver footprint expanded onto c.hits
+stdout: !~ "write c: Counter" # receiver footprint stays field-precise
+stdout: ~ "read  step: Int" # read parameter reported
+stdout: ~ "write xs: [Int]" # mutating builtin method records write on receiver
+stdout: ~ "take  drop_me: String" # consuming move records take
+stdout: ~ "read  local_copy: String" # outer local read reported
+stdout: !~ "taken_len" # block-local binding excluded from footprint
+
+step: jet inspect footprint --json sample.jet:15-20
+exit: 0
+stdout: ~ "\"ok\":true"
+stdout: ~ "\"function\":\"work\""
+stdout: ~ "\"name\":\"c.limit\",\"root\":\"c\",\"kind\":\"read\""
+stdout: ~ "\"name\":\"c.hits\",\"root\":\"c\",\"kind\":\"write\""
+stdout: ~ "\"name\":\"xs\",\"root\":\"xs\",\"kind\":\"write\""
+stdout: ~ "\"name\":\"drop_me\",\"root\":\"drop_me\",\"kind\":\"take\""
+stdout: ~ "\"name\":\"c\",\"kind\":\"write\",\"sigil\":\"^\""
+
+step: jet inspect footprint sample.jet
+exit: 2
+stderr: ~ "FILE:LINE" # missing :LINE[-LINE] suffix rejected cleanly
+
+write: broken.jet = "bad: fn() -> Int {\n    \"nope\"\n}\n"
+
+step: jet inspect footprint broken.jet:2
+exit: 1
+stderr: ~ "Jet.ReturnTypeMismatch" # non-checking file fails closed with diagnostics

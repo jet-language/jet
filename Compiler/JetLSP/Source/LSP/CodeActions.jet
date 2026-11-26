@@ -64,6 +64,11 @@ lsp_code_actions: fn(server: LSPServer, view: LSPView, start: Int, end: Int, onl
             actions.push(LSPCodeAction{title: fix.title.move(), kind: "quickfix", preferred: preferred, edits: whole.move()})
         }
     }
+    if lsp_code_action_wanted(only, "refactor.extract") {
+        if lsp_extract_function_action(view, start, end) == .Val(extracted) {
+            actions.push(extracted)
+        }
+    }
     if lsp_code_action_wanted(only, "refactor.rewrite") {
         bytes: view.doc.text.bytes()
         if parser_marker_placement_edit_at(bytes, start, false) == .Val(edit) {

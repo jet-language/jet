@@ -437,6 +437,7 @@ jet_cli_inspect: fn(argv: [String], jet_argv: [String], args: [String], color: B
         "facts" -> return jet_cli_inspect_facts(jet_argv, color: color, json: json)
         "provenance" -> return jet_cli_inspect_provenance(jet_cli_tail(args, 1), color, json, threads)
         "impact" -> return jet_cli_inspect_impact(argv, color, json, threads)
+        "footprint" -> return jet_cli_inspect_footprint(argv, color, json, threads)
         else -> {}
     }
     if jet_cli_inspect_b(argv, command, jet_argv, args, color, quiet, json, threads) == .Val(plan) {
@@ -1811,6 +1812,7 @@ jet_cli_inspect_run_job: fn(job: JetCLIInspectJob) -> JetDriverVerbOutput {
     if job.action == "memory" -> return jet_cli_inspect_memory_host(job, source)
     if job.action == "choices" -> return jet_cli_inspect_choices_host(job, source)
     if job.action == "facts" -> return jet_cli_inspect_facts_host(job, source)
+    if job.action == "footprint" -> return jet_cli_inspect_footprint_host(job, source)
     if job.action == "explain-cost" {
         return jet_cli_explain_cost(job.file, source, job.color, job.json, job.threads)
     }

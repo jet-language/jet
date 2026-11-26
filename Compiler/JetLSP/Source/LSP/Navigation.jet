@@ -187,6 +187,11 @@ lsp_hover_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
     if lsp_choices_markdown(at) == .Val(choices) {
         markdown = if markdown == .Val(shown) -> Val("{shown}\n\n{choices}") else -> Val(choices)
     }
+    // On a selected range or compound block header, show the block's inferred
+    // read/write/take footprint (#7033 n3).
+    if lsp_footprint_hover_markdown(at, params) == .Val(footprint_note) {
+        markdown = if markdown == .Val(shown) -> Val("{shown}\n\n{footprint_note}") else -> Val(footprint_note)
+    }
     if at.view.doc.host_doc != None -> return lsp_host_hover_response(at, markdown, id)
     text: markdown ?? return lsp_response(id, "null")
     ^range: ""
