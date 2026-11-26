@@ -1,0 +1,199 @@
+// Regression fixtures for triple-quoted string interpolation indentation:
+// - indented holes wrap with the line's leading horizontal whitespace
+// - mid-line holes use the line's leading indentation, not the hole column
+// - multiple holes on an indented line share that line's leading whitespace
+// - column-0 lines and single-quoted strings (including multi-line expressions
+//   inside `{…}`) do not wrap
+// - scalar types (`Int`, `Float`, `Bool`) skip wrapping at zero cost
+// - `Char`, user `Display`, `:Debug`, string views, pure `-[]>`, and `#Memo`
+//   all check cleanly with zero errors
+use {
+    jet_foundation.[
+        Span,
+        compiler_threads_single,
+        effect_vocabulary_module,
+        jet_target_machine_hosted,
+        module_intern,
+        module_table,
+    ]
+    jet_parser.[parse_generated_source]
+    jet_driver.[jet_driver_canonical_effect_module]
+    jet_sema.[
+        SemaBuildFacts,
+        SemaComptimeFunctionResult,
+        SemaComptimeItemValue,
+        SemaForeignProviderInput,
+        SemaGraphResult,
+        SemaRegistrationForeignHandleFacts,
+        SemaRegistrationHostHooks,
+        SemaRegistrationImportEdge,
+        SemaRegistrationModuleInput,
+        SemaRegistrationPackagePolicy,
+        SemaSourceOrigin,
+        SemaSourceSegment,
+        sema_collect_comptime_declarations,
+        sema_finalize_registration_graph,
+        sema_registration_prepare_graph,
+    ]
+}
+
+priv interp_indent_check: fn(source: String) -> SemaGraphResult {
+    ^parsed: parse_generated_source(source.bytes())
+    if parsed.diagnostics.len() != 0 -> panic("fixture did not parse: {source}")
+    ^table: module_table()
+    module_id: module_intern(table, "user/interp_indent")
+    effects: jet_driver_canonical_effect_module(effect_vocabulary_module("IO: struct {{\n    impl Effect {{}}\n}}\nPanic: struct {{\n    impl Effect {{}}\n}}\n"), table) ?? panic("canonical effect module declares no effects")
+    effects_id: effects.module_identity
+    facts: SemaBuildFacts{package_name: "user", package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}
+    segment: SemaSourceSegment{generated: Span{start: 0, end: source.len()}, source_file: "user/interp_indent/fixture.jet", source_start: 0, line_starts: [Int]{0}, origin: SemaSourceOrigin.Snapshot}
+    input: SemaRegistrationModuleInput{package_identity: "user", module_identity: module_id, module_name: "fixture", core_source_alias: "", module_path: "fixture.jet", source_file: "user/interp_indent/fixture.jet", source_segments: [SemaSourceSegment]{segment}, source_origin: SemaSourceOrigin.Snapshot, program: parsed.program.move(), foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: "{source}"}
+    ^graph: sema_registration_prepare_graph([SemaRegistrationModuleInput]{input, effects}, [SemaRegistrationImportEdge]{}, "user", module_id, effects_id, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single()) ?? panic("registration failed {err}")
+    hooks: Shared{SemaRegistrationHostHooks{numeric_unit_conversion_exact: None}}
+    ^stage: sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, compiler_threads_single(), None) ?? panic("declaration checking failed {err}")
+    ^declared: stage.graph.move()
+    stage.graph = None
+    ^registration: declared.move() ?? panic("declaration pass lost registration graph")
+    checked: sema_finalize_registration_graph(registration, None, stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, hooks, compiler_threads_single(), None) ?? panic("finalization failed {err}")
+    loop diagnostic in checked.diagnostics {
+        if diagnostic.code.starts_with("E") {
+            panic("unexpected error {diagnostic.code}: {diagnostic.what}")
+        }
+    }
+    checked
+}
+
+// Collects the `"\n<indent>"` prefixes emitted by `StringIndent` in function `fn_name`.
+priv interp_indent_prefixes: fn(checked: SemaGraphResult, fn_name: String) -> [String] {
+    ^found: [String]{}
+    loop mod_row in checked.modules {
+        loop func in mod_row.functions {
+            if func.name != fn_name -> next
+            // Each wrapped hole binds `__jet_interp_raw_*` and appends `"\n<indent>"`
+            // inside its else branch.
+            loop stmt in func.tree.stmts {
+                if stmt == .Let(local, _, _, _, _, _) {
+                    if local.name.starts_with("__jet_interp_raw_") -> found.push("WRAP")
+                }
+            }
+            loop node in func.tree.nodes {
+                if node.kind == .StrLit(parts) {
+                    if parts.len() == 3 {
+                        if parts[1] == .Literal(text) {
+                            if text.starts_with("\n") && text.len() > 1 -> found.push("{text}")
+                        }
+                    }
+                }
+            }
+        }
+    }
+    found
+}
+
+#Test("interpolation_indent_triple_and_midline_holes") {
+    source: `
+render: fn(body: String, note: String) -> String {
+    """
+    fn main() {{
+        {body}
+        // {note}
+    }}
+    """
+}
+`
+    checked: interp_indent_check(source)
+    prefixes: interp_indent_prefixes(checked, "render")
+    // Both `{body}` (leading indent `"    "`) and `// {note}` (same leading indent `"    "`)
+    // wrap with `"\n    "`.
+    assert_eq(prefixes.len(), 4)
+    assert_eq(prefixes[0], "WRAP")
+    assert_eq(prefixes[1], "WRAP")
+    assert_eq(prefixes[2], "\n    ")
+    assert_eq(prefixes[3], "\n    ")
+}
+
+#Test("interpolation_indent_multiple_holes_same_line_and_col0") {
+    source: `
+both_indented: fn(a: String, b: String) -> String {
+    """
+        {a}: {b}
+    """
+}
+col_zero: fn(a: String, b: String) -> String {
+    """
+    {a}    {b}
+    """
+}
+tab_indented: fn(a: String) -> String {
+    """
+    	{a}
+    """
+}
+`
+    checked: interp_indent_check(source)
+    both: interp_indent_prefixes(checked, "both_indented")
+    assert_eq(both.len(), 4)
+    assert_eq(both[2], "\n    ")
+    assert_eq(both[3], "\n    ")
+
+    zero: interp_indent_prefixes(checked, "col_zero")
+    assert_eq(zero.len(), 0)
+
+    tabbed: interp_indent_prefixes(checked, "tab_indented")
+    assert_eq(tabbed.len(), 2)
+    assert_eq(tabbed[1], "\n\t")
+}
+
+#Test("interpolation_indent_skips_single_quoted_and_scalars") {
+    source: `
+single_quoted: fn(body: String) -> String {
+    "line1\n    {body}"
+}
+single_quoted_indented: fn(body: String) -> String {
+    "    {body}"
+}
+scalars: fn(n: Int, f: Float, b: Bool) -> String {
+    """
+        {n} {f} {b}
+    """
+}
+`
+    checked: interp_indent_check(source)
+    assert_eq(interp_indent_prefixes(checked, "single_quoted").len(), 0)
+    assert_eq(interp_indent_prefixes(checked, "single_quoted_indented").len(), 0)
+    assert_eq(interp_indent_prefixes(checked, "scalars").len(), 0)
+}
+
+#Test("interpolation_indent_display_debug_pure_and_memo") {
+    source: `
+Note: struct {
+    lines: String,
+}
+impl Note.Display {
+    display: fn(self) -> String { self.lines }
+}
+render_pure: fn(note: Note, ch: Char, text: String) -[]> String {
+    """
+        {note}
+        {ch}
+        {text:Debug}
+    """
+}
+#Memo
+render_memo: fn(body: String) -[]> String {
+    """
+        {body}
+    """
+}
+`
+    checked: interp_indent_check(source)
+    pure_prefixes: interp_indent_prefixes(checked, "render_pure")
+    // All three (`Note`, `Char`, `:Debug`) wrap with `"\n    "`.
+    assert_eq(pure_prefixes.len(), 6)
+    assert_eq(pure_prefixes[3], "\n    ")
+    assert_eq(pure_prefixes[4], "\n    ")
+    assert_eq(pure_prefixes[5], "\n    ")
+
+    memo_prefixes: interp_indent_prefixes(checked, "render_memo")
+    assert_eq(memo_prefixes.len(), 2)
+    assert_eq(memo_prefixes[1], "\n    ")
+}

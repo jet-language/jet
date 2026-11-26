@@ -1,0 +1,28 @@
+// Triple-quoted strings keep the line's leading indentation for multi-line
+// interpolations: later non-empty lines receive the hole line's leading spaces
+// or tabs, blank lines stay empty without trailing whitespace, and mid-line
+// holes use the line's leading indentation rather than the hole's column.
+
+render_block: fn(body: String, note: String) -> String {
+    """
+    fn main() {{
+        {body}
+        // {note}
+    }}
+    """
+}
+
+run: fn() {
+    inner: """
+    step_one()
+
+    step_two()
+    """
+    note: "first note\nsecond note"
+    print(render_block(inner, note))
+
+    // Single-quoted strings keep their exact literal bytes with no indenting.
+    plain: "header\n    {note}"
+    print("---")
+    print(plain)
+}
