@@ -9,6 +9,10 @@ package: {
     }
 }
 
+use {
+    ini_syntax: __core_encoding_syntax_ini
+}
+
 // core.encoding.ini — Python `configparser` without interpolation.
 //
 // Sections keep source order. Duplicate keys in a section keep the last
@@ -40,42 +44,17 @@ Ini: struct {
 empty: fn() -> Ini Never! { Ini{sections: [Section]{}} }
 
 parse: fn(text: String) -> Ini INIError! {
+    parsed_items: ini_syntax.ini_parse_items(text) ?? return Err(INIError{line: err.line, reason: err.reason})
     ^doc: empty()
     ^current: ""
-    ^line: 0
-    loop raw_line in split_lines(text) {
-        line += 1
-        trimmed: trim(strip_comment(raw_line))
-        if trimmed.bytes().len() == 0 -> next
-        raw: trimmed.bytes()
-        if raw[0] == (U8{91}) {
-            if raw[raw.len() - 1] != (U8{93}) {
-                return Err(INIError{line: line, reason: "ini section is missing a closing bracket"})
-            }
-            current = trim(String.from_bytes(slice_b(raw, 1, raw.len() - 1)) ?? "")
-            if current.bytes().len() == 0 {
-                return Err(INIError{line: line, reason: "ini section name is empty"})
-            }
+    loop item in parsed_items {
+        if item.is_section {
+            current = item.key.copy()
             doc = ensure_section(doc, current)
-            next
+        } else {
+            if current.bytes().len() == 0 -> current = "DEFAULT"
+            doc = set(doc, current, item.key, item.value)
         }
-        eq: index_of(raw, 61)
-        ^colon: index_of(raw, 58)
-        ^sep: eq
-        if sep < 0 || (colon >= 0 && colon < sep) -> sep = colon
-        if sep <= 0 -> return Err(INIError{line: line, reason: "ini line is not a key=value pair"})
-        key: trim(String.from_bytes(slice_b(raw, 0, sep)) ?? "")
-        value_text: trim(String.from_bytes(slice_b(raw, sep + 1, raw.len())) ?? "")
-        value_raw: value_text.bytes()
-        if value_raw.len() > 0 && (value_raw[0] == (U8{34}) || value_raw[0] == (U8{39})) {
-            if value_raw.len() < 2 || value_raw[value_raw.len() - 1] != value_raw[0] {
-                return Err(INIError{line: line, reason: "ini quoted value is missing its closing quote"})
-            }
-        }
-        value: unquote(value_text)
-        if key.bytes().len() == 0 -> return Err(INIError{line: line, reason: "ini key is empty"})
-        if current.bytes().len() == 0 -> current = "DEFAULT"
-        doc = set(doc, current, key, value)
     }
     Ok(doc)
 }
@@ -391,3 +370,28 @@ parse_float: fn(text: String) -> Float? {
     if !seen || i != raw.len() -> return None
     Val(sign * (whole + frac))
 }
+
+#Test("INI grammar parses sections, comments, quoted values, colons, defaults, and round-trips") {
+    text: "# top comment\norphan = 1\n[server]\nhost = 127.0.0.1 ; inline comment\nport: 8080\ntitle = \"hello # world\"\nsingle = 'a;b'\nempty_val =\nflag = yes\n"
+    doc: parse(text) ?? panic("valid INI failed: {err.reason}")
+    assert_eq(sections(doc), [String]{"DEFAULT", "server"})
+    assert_eq(get(doc, "DEFAULT", "orphan"), Val("1"))
+    assert_eq(get(doc, "server", "host"), Val("127.0.0.1"))
+    assert_eq(get_int(doc, "server", "port"), Val(8080))
+    assert_eq(get(doc, "server", "title"), Val("hello # world"))
+    assert_eq(get(doc, "server", "single"), Val("a;b"))
+    assert_eq(get(doc, "server", "empty_val"), Val(""))
+    assert_eq(get_bool(doc, "server", "flag"), Val(true))
+    rendered: to_string(doc)
+    reparsed: parse(rendered) ?? panic("reparse failed: {err.reason}")
+    assert_eq(get(reparsed, "server", "title"), Val("hello # world"))
+    assert_eq(get(reparsed, "server", "single"), Val("a;b"))
+}
+
+#Test("INI grammar rejects unclosed sections, empty sections, missing separators, and unclosed quotes") {
+    bad_cases: [String]{"[unclosed\n", "[]\n", "[   ]\n", "just_a_word\n", "=no_key\n", "[s]\na = \"unclosed\n"}
+    loop bad in bad_cases {
+        if parse(bad) == .Ok(_) -> panic("expected INI parse to reject `{bad}`")
+    }
+}
+
