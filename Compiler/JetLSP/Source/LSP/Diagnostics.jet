@@ -27,20 +27,19 @@ lsp_strip_dot_slash: fn(path: String) -> String Never! {
 // The dirty documents, sorted, then each open document whose last check read
 // one of them. Draining clears the dirty set.
 lsp_dirty_documents: fn(state: ^LSPDiagnosticState) -> [String] Never! {
-    ^dirty: [String]{}
+    ^dirty: state.dirty.keys().to_list()
     ^dirty_set: [String:Bool]{}
     ^changed: [String]{}
-    loop (uri, _) in state.dirty {
-        dirty.push(uri.copy())
+    loop uri in dirty {
         dirty_set[uri] = true
-        if state.docs.get(uri) == .Val(doc) -> changed.push(doc.path.copy())
+        if state.docs.get(uri) == .Val(doc) -> changed.push(doc.path)
     }
     state.dirty = [String:Bool]{}
     dirty.sort()
     ^dependents: [String]{}
-    loop (root, modules) in state.checked_modules {
+    loop root in state.checked_modules.keys() {
         if dirty_set.has_key(root) || !state.docs.has_key(root) -> next
-        if lsp_reads_any(modules, changed) -> dependents.push(root.copy())
+        if state.checked_modules.get(root) == .Val(modules) && lsp_reads_any(modules, changed) -> dependents.push(root)
     }
     dependents.sort()
     loop root in dependents -> dirty.push(root)
@@ -338,8 +337,7 @@ lsp_workspace_diagnostic_response: fn(server: LSPServer, params: Dyn?, id: Dyn) 
         uri: lsp_text_member(row, "uri") ?? next
         previous[uri] = lsp_text_member(row, "value") ?? next
     }
-    ^uris: [String]{}
-    loop (uri, _) in server.diagnostic_state.docs -> uris.push(uri.copy())
+    ^uris: server.diagnostic_state.docs.keys().to_list()
     uris.sort()
     ^reports: [String]{}
     loop uri in uris {
@@ -361,12 +359,10 @@ lsp_close_document: fn(server: ^LSPServer, uri: String, stdout: ^lsp_diag_term.S
 lsp_close_document_state: fn(state: ^LSPDiagnosticState, uri: String, stdout: ^lsp_diag_term.Stdout) -[IO]> IOError! {
     if state.docs.remove(uri) == .Val(doc) {
         closed: [String]{doc.path}
-        ^readers: [String]{}
         loop (root, modules) in state.checked_modules {
             if root == uri || !state.docs.has_key(root) -> next
-            if lsp_reads_any(modules, closed) -> readers.push(root.copy())
+            if lsp_reads_any(modules, closed) -> state.dirty[root] = true
         }
-        loop root in readers -> state.dirty[root] = true
     }
     ^_: state.checked_modules.remove(uri)
     ^_: state.dirty.remove(uri)

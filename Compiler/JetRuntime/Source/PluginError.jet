@@ -1,5 +1,14 @@
 // Derived Clone/PartialEq/Debug, Display. show/display message only; debug is
-// the full derived form.
+// the full derived form. CoreEnumABI.jet owns the variant tags; the packed
+// runtime carrier places the shared PluginFault at offset 8 for every variant.
+PLUGIN_ERROR_BYTES: I64{24}
+
+PLUGIN_ERROR_TAG: I64{0}
+
+PLUGIN_ERROR_FAULT: I64{8}
+
+PLUGIN_ERROR_LIMIT: I64{16}
+
 #Export(c) jet_rt_handle_clone_plugin_error: fn(value: I64) -> I64 {
     kind: dyn_word(wrapping(value + PLUGIN_ERROR_TAG))
     result: jet_rt_alloc(PLUGIN_ERROR_BYTES, I64{8})

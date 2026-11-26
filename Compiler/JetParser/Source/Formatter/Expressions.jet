@@ -1992,10 +1992,14 @@ jfmt_fmt_expr: fn(f: ^JetFmt, expr: Expr, prec: Int) {
                         jfmt_newline(f)
                         jfmt_write(f, "|> ")
                     }
-                    // copy: the stack keeps its own name while the step prints.
-                    if index == 0 && in_place != "" -> f.pipe_names.push(in_place.copy())
+                    pushed_pipe_name: index == 0 && in_place != ""
+                    if pushed_pipe_name {
+                        moved_name: in_place
+                        in_place = ""
+                        f.pipe_names.push(moved_name)
+                    }
                     jfmt_fmt_expr(f, value, JFMT_PREC_OR_FALLBACK)
-                    if index == 0 && in_place != "" -> ^_: f.pipe_names.pop()
+                    if pushed_pipe_name -> ^_: f.pipe_names.pop()
                 }
                 f.indent -= if rest.len() == 1 -> 0 else -> 1
                 if prec > JFMT_PREC_OR_FALLBACK -> jfmt_write(f, ")")
@@ -2222,25 +2226,20 @@ jfmt_is_subjectless_guard: fn(subject: Expr, span: Span) -> Bool Never! {
     false
 }
 
-// A loop body that is one subjectless single-arm guard prints as `if cond`;
-// returns the statements that remain for the braces.
-jfmt_guarded_loop_body: fn(f: ^JetFmt, body: [Stmt], loop_span: Span?) -> [Stmt] {
-    if body.len() != 1 -> return body.copy()
+// Whether `body` is a single subjectless single-arm guard matching `loop_span`.
+jfmt_has_guarded_loop_body: fn(body: [Stmt], loop_span: Span?) -> Bool Never! {
+    if body.len() != 1 -> return false
     if body[0] == .Switch(subject, arms, else_body, span) {
-        if else_body != None -> return body.copy()
+        if else_body != None -> return false
         if loop_span == .Val(required) {
-            if !jfmt_same_span(span, required) -> return body.copy()
+            if !jfmt_same_span(span, required) -> return false
         }
-        if !jfmt_is_subjectless_guard(subject, span) || arms.len() != 1 -> return body.copy()
-        jfmt_write(f, " if ")
-        jfmt_fmt_expr(f, arms[0].cond, JFMT_PREC_OR_FALLBACK)
-        return arms[0].body.copy()
+        return jfmt_is_subjectless_guard(subject, span) && arms.len() == 1
     }
-    body.copy()
+    false
 }
 
-jfmt_fmt_value_loop_body: fn(f: ^JetFmt, body: [Stmt], loop_span: Span) {
-    statements: jfmt_guarded_loop_body(f, body, Val(loop_span))
+jfmt_fmt_value_loop_body_stmts: fn(f: ^JetFmt, statements: [Stmt]) {
     jfmt_write(f, " {{")
     jfmt_newline(f)
     f.indent += 1
@@ -2248,6 +2247,18 @@ jfmt_fmt_value_loop_body: fn(f: ^JetFmt, body: [Stmt], loop_span: Span) {
     f.indent -= 1
     jfmt_newline(f)
     jfmt_write(f, "}}")
+}
+
+jfmt_fmt_value_loop_body: fn(f: ^JetFmt, body: [Stmt], loop_span: Span) {
+    if jfmt_has_guarded_loop_body(body, Val(loop_span)) {
+        if body[0] == .Switch(_, arms, _, _) {
+            jfmt_write(f, " if ")
+            jfmt_fmt_expr(f, arms[0].cond, JFMT_PREC_OR_FALLBACK)
+            jfmt_fmt_value_loop_body_stmts(f, arms[0].body)
+            return
+        }
+    }
+    jfmt_fmt_value_loop_body_stmts(f, body)
 }
 
 jfmt_fmt_collecting_loop: fn(f: ^JetFmt, lambda: Lambda) {
@@ -2292,7 +2303,18 @@ jfmt_fmt_collecting_loop: fn(f: ^JetFmt, lambda: Lambda) {
 }
 
 jfmt_fmt_collecting_body: fn(f: ^JetFmt, body: [Stmt]) {
-    statements: jfmt_guarded_loop_body(f, body, None)
+    if jfmt_has_guarded_loop_body(body, None) {
+        if body[0] == .Switch(_, arms, _, _) {
+            jfmt_write(f, " if ")
+            jfmt_fmt_expr(f, arms[0].cond, JFMT_PREC_OR_FALLBACK)
+            jfmt_fmt_collecting_body_stmts(f, arms[0].body)
+            return
+        }
+    }
+    jfmt_fmt_collecting_body_stmts(f, body)
+}
+
+jfmt_fmt_collecting_body_stmts: fn(f: ^JetFmt, statements: [Stmt]) {
     if statements.len() == 0 {
         jfmt_write(f, " -> {{}}")
         return

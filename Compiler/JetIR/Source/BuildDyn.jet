@@ -688,7 +688,7 @@ ir_dyn_union_decode: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, rec
 // passes a success through.
 ir_decode_under: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, segment: Int, inner: Int, span: Span) -> Int Never! {
     success: if ir_untag(ty) == {
-        .Result(ok, _) -> ok.copy()
+        .Result(ok, _) -> ok
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {
             return ir_fail_slot(b, span, "FieldError.under as {ir_type_name(ty)}")
         }
@@ -712,12 +712,12 @@ ir_codec_decode_helper: fn(target: Type) -> {role: String, type_args: [Type]}? N
             if ir_untag(element) == (Type.IntN{signed: false, bits: 8}) {
                 return Val({role: "DecodeBytes", type_args: [Type]{}})
             }
-            Val({role: "DecodeList", type_args: [Type]{element.copy()}})
+            Val({role: "DecodeList", type_args: [Type]{element}})
         }
-        .Option(inner) -> Val({role: "DecodeOption", type_args: [Type]{inner.copy()}})
+        .Option(inner) -> Val({role: "DecodeOption", type_args: [Type]{inner}})
         .Map(key, _, value) -> {
             if ir_untag(key) != Type.String -> return None
-            Val({role: "DecodeMap", type_args: [Type]{value.copy()}})
+            Val({role: "DecodeMap", type_args: [Type]{value}})
         }
         .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
     }
@@ -970,41 +970,37 @@ ir_dyn_encode_slot: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, slot
 // derived `Wrap<T>` at `Wrap<Int>`), or None when it has none. A generic
 // owner matches any instance of its declaration; any other owner matches
 // only its own type.
+ir_codec_impl_args: fn(p: IRProgram, function: FnBody, implementer: Type, identity: String, declaration: String, concrete: Type) -> [Type]? Never! {
+    if ir_owner_binders(p, function).len() == 0 {
+        if ir_trait_identity(p, implementer) == identity -> return Val([Type]{})
+        // A derived codec of a generic declaration (SerdeItems) declares
+        // the declaration's parameters on the method itself: its instance
+        // binds each to the concrete type's argument in that position.
+        if function.generic_params.len() == 0 || ir_render_type_key(p.type_rows_keys, p.type_rows, p.types, implementer) != declaration {
+            return None
+        }
+        return ir_codec_method_args(p, function, concrete)
+    }
+    if ir_render_type_key(p.type_rows_keys, p.type_rows, p.types, implementer) != declaration {
+        return None
+    }
+    ir_owner_args(p, function, concrete)
+}
+
 ir_codec_impl: fn(p: IRProgram, concrete: Type, codec: String, method: String) -> {key: String, args: [Type]}? Never! {
     identity: ir_trait_identity(p, concrete)
     declaration: ir_render_type_key(p.type_rows_keys, p.type_rows, p.types, concrete)
     candidates: p.trait_methods.rows[ir_trait_method_slot(p.trait_methods, codec, method)]
     loop row in candidates {
         if ir_function_row(p, p.functions[row].key) != (Val(row)) -> next
-        ^owner: Type?{None}
-        if p.functions[row].kind == {
-            .Method(_, owner_type) -> { owner = Val(owner_type.copy()) }
-            .TraitMethod(_, _, owner_type, trait_name, _) -> {
-                if ir_short_name(ir_symbol_key(p, trait_name)) == codec {
-                    owner = Val(owner_type.copy())
-                }
-            }
-            .TopLevel -> {}
+        found_args: if p.functions[row].kind == {
+            .Method(_, owner_type) -> ir_codec_impl_args(p, p.functions[row], owner_type, identity, declaration, concrete)
+            .TraitMethod(_, _, owner_type, trait_name, _) -> if ir_short_name(ir_symbol_key(p, trait_name)) == codec -> ir_codec_impl_args(p, p.functions[row], owner_type, identity, declaration, concrete) else -> None
+            .TopLevel -> None
         }
-        implementer: owner ?? next
-        if ir_owner_binders(p, p.functions[row]).len() == 0 {
-            if ir_trait_identity(p, implementer) == identity {
-                return Val({key: p.functions[row].key.copy(), args: [Type]{}})
-            }
-            // A derived codec of a generic declaration (SerdeItems) declares
-            // the declaration's parameters on the method itself: its instance
-            // binds each to the concrete type's argument in that position.
-            if p.functions[row].generic_params.len() == 0 || ir_render_type_key(p.type_rows_keys, p.type_rows, p.types, implementer) != declaration {
-                next
-            }
-            method_args: ir_codec_method_args(p, p.functions[row], concrete) ?? next
-            return Val({key: p.functions[row].key.copy(), args: method_args})
+        if found_args == .Val(args) {
+            return Val({key: p.functions[row].key.copy(), args: args})
         }
-        if ir_render_type_key(p.type_rows_keys, p.type_rows, p.types, implementer) != declaration {
-            next
-        }
-        args: ir_owner_args(p, p.functions[row], concrete) ?? next
-        return Val({key: p.functions[row].key.copy(), args: args})
     }
     None
 }
@@ -1046,9 +1042,9 @@ ir_decoding_read: fn(p: IRProgram, function: FnBody, type_args: [Type]) -> {key:
     target: type_args[0]
     source: type_args[1]
     if ir_codec_impl(p, target, "Decode", "__read") == .Val(own) {
-        ^args: own.args.copy()
+        ^args: own.args
         args.push(source.copy())
-        return Val({key: own.key.copy(), args: args})
+        return Val({key: own.key, args: args})
     }
     ^helper: ""
     ^args: [Type]{}
@@ -1060,17 +1056,17 @@ ir_decoding_read: fn(p: IRProgram, function: FnBody, type_args: [Type]) -> {key:
             }
             if !bytes {
                 helper = "read_list"
-                args.push(element.copy())
+                args.push(element)
             }
         }
         .Option(inner) -> {
             helper = "read_option"
-            args.push(inner.copy())
+            args.push(inner)
         }
         .Map(key, _, value) -> {
             if ir_untag(key) == .String {
                 helper = "read_map"
-                args.push(value.copy())
+                args.push(value)
             }
         }
         .Int -> { helper = "read_int" }

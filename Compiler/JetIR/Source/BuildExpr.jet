@@ -366,10 +366,13 @@ ir_stmt_collecting: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, statement: Int
         return
     }
     if !ir_failure_follows(b, b.error) {
-        b.failures.push(IRFailureRow{message: b.error.copy(), span: b.error_span})
+        message: b.error
+        b.error = ""
+        b.failures.push(IRFailureRow{message: message, span: b.error_span})
+    } else {
+        b.error = ""
     }
     ir_poison_binders(p, b, statement)
-    b.error = ""
     b.error_span = Span{start: 0, end: 0}
     loop b.f.open.len() > open -> ir_end(b.f, b.line)
     ir_truncate_bindings(b, bindings)
@@ -2623,8 +2626,7 @@ ir_expr_slot_in: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, expression: Int, 
                 // `contribute`).
                 if host_owner == None {
                     if ir_untag(host_receiver_ty) == .Named(record) {
-                        if ir_host_value_name(record) -> host_owner = Val(record.copy())
-                        if core_identity_is(record, "core.build", "Build") {
+                        if ir_host_value_name(record) -> host_owner = Val(record) else if core_identity_is(record, "core.build", "Build") {
                             host_owner = Val("Build")
                         }
                     }
@@ -3109,7 +3111,11 @@ ir_drop_value: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, value: Int, span: S
         ir_drop_binding(m, b, binding)
         loop index in 0..<b.bindings.len() {
             if b.bindings[index].slot == binding.slot {
-                b.bindings[index] = IRBinding{name: binding.name.copy(), slot: binding.slot, indirect: binding.indirect, owned: false, symbol: binding.symbol}
+                b.bindings[index].owned = false
+                b.bindings[index].write = false
+                b.bindings[index].carrier = -1
+                b.bindings[index].live = -1
+                b.bindings[index].cleanup = -1
             }
         }
         return -1
@@ -3362,7 +3368,7 @@ ir_plugin_invoke: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiv
         kind: ir_plugin_value_kind(signature.params[index]) ?? return ir_fail_slot(b, span, "plugin export {export_name} compound Component argument {index + 1}")
         value: ir_expr(m, p, b, arg)
         if ir_failed(b) || value < 0 -> return -1
-        _: ir_route(m, p, b, "jet_plugin_arg_{kind}", [Int]{plugin, value}, [Bool]{true, true}, unit.copy(), span)
+        _: ir_route(m, p, b, "jet_plugin_arg_{kind}", [Int]{plugin, value}, [Bool]{true, true}, unit, span)
         if ir_failed(b) -> return -1
     }
     b.fresh[plugin] = owned
@@ -5197,23 +5203,22 @@ ir_default_err_drift: fn(p: IRProgram, ty: Type) -> String? Never! {
         if definition.name != record.name {
             return Val("{definition.name} stands where {record.name} belongs")
         }
-        ^fields: [TField]{}
-        if definition.kind == {
-            .Struct(declared, _) -> fields = declared.copy()
-            .Enum(_, _) | .Distinct(_, _) | .Alias(_) | .UnitFamily(_, _) -> return Val("{record.name} is no struct")
-        }
-        spelled: loop field in fields -> "{field.name}: {ir_err_abi_spelling(p, field.ty)}"
-        if spelled != record.fields {
-            return Val("{record.name} declares ({spelled.join(", ")}), the native layout stores ({record.fields.join(", ")})")
-        }
-        loop field in fields {
-            if ir_err_abi_record_row(p, field.ty) == .Val(owned) {
-                ^known: false
-                loop row in rows {
-                    if row == owned -> known = true
-                }
-                if !known -> rows.push(owned)
+        if definition.kind == .Struct(fields, _) {
+            spelled: loop field in fields -> "{field.name}: {ir_err_abi_spelling(p, field.ty)}"
+            if spelled != record.fields {
+                return Val("{record.name} declares ({spelled.join(", ")}), the native layout stores ({record.fields.join(", ")})")
             }
+            loop field in fields {
+                if ir_err_abi_record_row(p, field.ty) == .Val(owned) {
+                    ^known: false
+                    loop row in rows {
+                        if row == owned -> known = true
+                    }
+                    if !known -> rows.push(owned)
+                }
+            }
+        } else {
+            return Val("{record.name} is no struct")
         }
     }
     if rows.len() != IR_DEFAULT_ERR_ABI.len() {
@@ -6081,9 +6086,8 @@ ir_binary_pattern_test: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, subject: I
 // matches inline (ir_take_inline) and calls the runtime only on a miss. The
 // Ok payload is the captures' tuple in canonical field order (Unit with none).
 ir_take_pattern: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiver: Int, binary: Bool, text_parts: [StrMatchPart], binary_parts: [BinMatchPart], canonical: [TCanonicalField], span: Span) -> Int Never! {
-    ^ok_ty: Type.Named{name: "Unit"}
-    if ir_untag(ty) == {
-        .Result(ok, _) -> ok_ty = ok.copy()
+    ok_ty: if ir_untag(ty) == {
+        .Result(ok, _) -> ok
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> return ir_fail_slot(b, span, "take_pattern as {ir_type_name(ty)}")
     }
     handle: ir_expr(m, p, b, receiver)
@@ -9058,10 +9062,7 @@ ir_function_value: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, key: 
             callee_row = callee_ret_row
         }
         target: ir_function_id(m, p, key, [Type]{}) ?? return ir_fail_slot(b, span, "named function {p.functions[function_row].name} as a value")
-        adapter = m.functions.len()
-        m.functions.push(ir_hashed_function("{p.functions[function_row].name}.value", adapter_key, "{ir_symbol_name(p.functions[function_row])}__value_", p.functions[function_row].source_file, p.functions[function_row].line))
-        ir_function_bind(m, adapter_key, adapter)
-        ^a: ir_builder_new(m.functions[adapter].copy())
+        ^a: ir_builder_new(ir_hashed_function("{p.functions[function_row].name}.value", adapter_key, "{ir_symbol_name(p.functions[function_row])}__value_", p.functions[function_row].source_file, p.functions[function_row].line))
         a.line = p.functions[function_row].line
         _: ir_new_slot(a, ir_pointer_row(m), IRSlotKind.Param, ir_intern_name(m, "closure"))
         values: loop (index, value_row) in value_rows -> ir_new_slot(a, value_row, IRSlotKind.Param, ir_intern_name(m, p.functions[function_row].params[index].local.name))
@@ -9096,11 +9097,15 @@ ir_function_value: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, key: 
         }
         if a.error != "" {
             ir_emit(a.f, IROp.Unreachable, -1, -1, -1, -1, a.line)
-            m.functions[adapter] = a.f.move()
+            adapter = m.functions.len()
+            m.functions.push(a.f.move())
+            ir_function_bind(m, adapter_key, adapter)
             return ir_fail_slot(b, span, a.error)
         }
         ir_emit(a.f, IROp.Return, -1, result, -1, -1, a.line)
-        m.functions[adapter] = a.f.move()
+        adapter = m.functions.len()
+        m.functions.push(a.f.move())
+        ir_function_bind(m, adapter_key, adapter)
     }
     boxed: ir_closure_box(m, p, b, row, 24, [IRCaptureSlot]{})
     pointer_row: ir_pointer_row(m)
@@ -9227,12 +9232,12 @@ ir_comptime_fraction_handle: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: T
     ^parts: [Int]{}
     names: [String]{"num_value", "den_value"}
     loop name in names {
-        ^found: TComptimeValue?{None}
-        loop field in fields {
-            if field.name == name -> found = Val(field.value.copy())
+        ^found: -1
+        loop (index, field) in fields {
+            if field.name == name -> found = index
         }
-        value: found ?? return ir_fail_slot(b, span, "Fraction constant without its {name}")
-        slot: ir_comptime(m, p, b, Type.Int, value, span)
+        if found < 0 -> return ir_fail_slot(b, span, "Fraction constant without its {name}")
+        slot: ir_comptime(m, p, b, Type.Int, fields[found].value, span)
         if ir_failed(b) -> return -1
         parts.push(slot)
     }
@@ -9390,10 +9395,9 @@ ir_comptime_default_err: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type,
     if ir_default_err_drift(p, ty) == .Val(drift) {
         return ir_fail_slot(b, span, "the default Err declaration against the native JetErr: {drift}")
     }
-    ^absent_text: TComptimeValue.Failed{report: .Clean{ty: Type.String}}
     message_value: ir_comptime_field(fields, "message") ?? return ir_fail_slot(b, span, "default Err constant without a message")
     message: ir_comptime(m, p, b, Type.String, message_value, span)
-    code: ir_comptime(m, p, b, Type.Option{inner: Type.String}, ir_comptime_field(fields, "code") ?? absent_text.copy(), span)
+    code: ir_comptime(m, p, b, Type.Option{inner: Type.String}, ir_comptime_field(fields, "code") ?? TComptimeValue.Failed{report: .Clean{ty: Type.String}}, span)
     cause: ir_comptime(m, p, b, Type.Option{inner: ty.copy()}, ir_comptime_field(fields, "cause") ?? TComptimeValue.Failed{report: .Clean{ty: ty.copy()}}, span)
     if ir_failed(b) -> return -1
     error: ir_default_err_new(m, b, row, message, code, cause)
@@ -9419,7 +9423,7 @@ ir_comptime_default_err: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type,
             }
         }
         holder: ir_list_buffer_alloc(m, p, b, Int{ERR_DETAILS_BYTES}, -1)
-        variant: ir_comptime_field(details, "variant") ?? absent_text.move()
+        variant: ir_comptime_field(details, "variant") ?? TComptimeValue.Failed{report: .Clean{ty: Type.String}}
         ir_comptime_err_text(m, p, b, holder, Int{ERR_DETAILS_VARIANT}, variant, span)
         detail_fields: ir_comptime_field(details, "fields") ?? TComptimeValue.List{values: []}
         ir_comptime_err_rows(m, p, b, holder, Int{ERR_DETAILS_FIELDS}, Int{ERR_FIELD_BYTES}, detail_fields, [String]{"name", "value"}, None, span)

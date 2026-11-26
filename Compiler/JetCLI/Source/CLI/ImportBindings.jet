@@ -31,12 +31,12 @@ jet_cli_import_collect_foreign_body: fn(lines: [String], open_line: Int) -> JetC
     ^body: [JetCLIImportBodyLine]{}
     loop index in open_line..<lines.len() {
         raw: lines[index]
-        fragment: if index == open_line -> jet_cli_import_byte_slice(raw.bytes(), open + 1, raw.bytes().len()) else -> raw.copy()
         before: level
-        delta: jet_cli_import_brace_delta(fragment)
-        content: jet_cli_import_strip_unquoted_braces(fragment).trim().copy()
+        delta: if index == open_line -> jet_cli_import_brace_delta(jet_cli_import_byte_slice(raw.bytes(), open + 1, raw.bytes().len())) else -> jet_cli_import_brace_delta(raw)
+        stripped: if index == open_line -> jet_cli_import_strip_unquoted_braces(jet_cli_import_byte_slice(raw.bytes(), open + 1, raw.bytes().len())) else -> jet_cli_import_strip_unquoted_braces(raw)
+        content: stripped.trim()
         if !content.is_empty() && (index != open_line || before > 0 || delta < 0) {
-            body.push(JetCLIImportBodyLine{line: index + 1, text: content.move()})
+            body.push(JetCLIImportBodyLine{line: index + 1, text: content.copy()})
         }
         level += delta
         if index == open_line -> level += 1
@@ -95,7 +95,7 @@ jet_cli_import_trim_edge_bytes: fn(raw: String, first: U8, second: U8) -> String
 jet_cli_import_javascript_doc_types: fn(lines: [String], at: Int) -> JetCLIImportJavaScriptDocs Never! {
     ^cursor: at
     loop cursor > 0 {
-        line: lines[cursor - 1].trim().copy()
+        line: lines[cursor - 1].trim()
         if line.is_empty() || !jet_cli_import_foreign_comment_line(line) -> break
         cursor -= 1
     }
@@ -103,7 +103,7 @@ jet_cli_import_javascript_doc_types: fn(lines: [String], at: Int) -> JetCLIImpor
     param_tags: [String]{"@param", "@arg", "@argument"}
     return_tags: [String]{"@returns", "@return"}
     loop index in cursor..<at {
-        line: lines[index].trim().copy()
+        line: lines[index].trim()
         loop doc_tag in param_tags {
             position: jet_cli_import_find_bytes(line.bytes(), doc_tag, false) ?? next
             rest: jet_cli_import_byte_slice(line.bytes(), position + doc_tag.bytes().len(), line.bytes().len())
@@ -120,13 +120,13 @@ jet_cli_import_javascript_doc_types: fn(lines: [String], at: Int) -> JetCLIImpor
         }
         loop doc_tag in return_tags {
             position: jet_cli_import_find_bytes(line.bytes(), doc_tag, false) ?? next
-            rest: jet_cli_import_byte_slice(line.bytes(), position + doc_tag.bytes().len(), line.bytes().len()).trim().copy()
+            rest: jet_cli_import_trimmed_slice(line.bytes(), position + doc_tag.bytes().len(), line.bytes().len())
             close: if rest.starts_with("{{") -> jet_cli_import_find_bytes(rest.bytes(), "}}", false) else -> None
             end: close ?? {
                 docs.error = Val("JavaScript return JSDoc needs a type")
                 break
             }
-            ty: jet_cli_import_byte_slice(rest.bytes(), 1, end).trim().copy()
+            ty: jet_cli_import_trimmed_slice(rest.bytes(), 1, end)
             if jet_cli_import_map_javascript_doc_type(ty) == {
                 .Ok(mapped) -> { docs.result = Val(mapped) }
                 .Err(error) -> docs.error = Val(error.message.copy())
@@ -138,10 +138,10 @@ jet_cli_import_javascript_doc_types: fn(lines: [String], at: Int) -> JetCLIImpor
 }
 
 jet_cli_import_parse_javascript_param_doc: fn(raw: String) -> {ty: String, name: String}? Never! {
-    text: raw.trim().copy()
+    text: raw.trim()
     if !text.starts_with("{{") -> return None
     close: jet_cli_import_find_bytes(text.bytes(), "}}", false) ?? return None
-    ty: jet_cli_import_byte_slice(text.bytes(), 1, close).trim().copy()
+    ty: jet_cli_import_trimmed_slice(text.bytes(), 1, close)
     words: jet_cli_import_words(jet_cli_import_byte_slice(text.bytes(), close + 1, text.bytes().len()))
     if words.is_empty() -> return None
     name: jet_cli_import_trim_edge_bytes(words[0], U8{91}, U8{93})
@@ -150,7 +150,7 @@ jet_cli_import_parse_javascript_param_doc: fn(raw: String) -> {ty: String, name:
 }
 
 jet_cli_import_map_javascript_doc_type: fn(raw: String) -> String JetCLIImportTextError! {
-    ty: raw.trim().copy()
+    ty: raw.trim()
     if ty == {
         "number" -> Ok("Float")
         "integer" | "int" -> Ok("Int")
@@ -163,7 +163,7 @@ jet_cli_import_map_javascript_doc_type: fn(raw: String) -> String JetCLIImportTe
 
 // Infer JavaScript types. Mutate in declaration order, including before errors.
 jet_cli_import_infer_javascript_types: fn(function: ^JetCLIImportFunction, docs: JetCLIImportJavaScriptDocs) JetCLIImportTextError! {
-    if docs.error == .Val(error) -> return Err(jet_cli_import_text_error(error.copy()))
+    if docs.error == .Val(error) -> return Err(jet_cli_import_text_error(error))
     ^body_bytes: [U8]{}
     loop index in 0..<function.body.len() {
         if index > 0 -> body_bytes.push(U8{32})
@@ -175,7 +175,7 @@ jet_cli_import_infer_javascript_types: fn(function: ^JetCLIImportFunction, docs:
         name: function.params[index].name
         if function.params[index].ty == "__js__" {
             mapped: docs.params.get(name) ?? (jet_cli_import_infer_javascript_parameter_type(body, name) ?? "__js__")
-            function.params[index].ty = mapped.copy()
+            function.params[index].ty = mapped.move()
         }
         ty: function.params[index].ty
         if ty != "__js__" {
@@ -190,7 +190,7 @@ jet_cli_import_infer_javascript_types: fn(function: ^JetCLIImportFunction, docs:
             if docs.result == .Val(result) -> function.result = result.copy() else {
                 ^result: String?{None}
                 loop statement in body.split(";") {
-                    trimmed: statement.trim().copy()
+                    trimmed: statement.trim()
                     if trimmed.starts_with("return ") {
                         expression: jet_cli_import_byte_slice(trimmed.bytes(), 7, trimmed.bytes().len())
                         result = Val(jet_cli_import_infer_javascript_value_type(expression, known) ?? "__js__")
@@ -221,21 +221,22 @@ jet_cli_import_infer_javascript_types: fn(function: ^JetCLIImportFunction, docs:
 jet_cli_import_infer_javascript_parameter_type: fn(body: String, name: String) -> String? Never! {
     pieces: body.split("+").to_list()
     // Same any(other != piece && quote(other)) contract, linear rather than nested split.
-    ^quoted: String?{None}
+    ^quoted_index: -1
     ^different_quotes: false
-    loop piece in pieces {
+    loop (index, piece) in pieces {
         if jet_cli_import_contains_quote(piece) {
             if {
-                quoted == .Val(first) -> {
-                    if piece != first -> different_quotes = true
+                quoted_index >= 0 -> {
+                    if piece != pieces[quoted_index] -> different_quotes = true
                 }
-                else -> { quoted = Val(piece.copy()) }
+                else -> quoted_index = index
             }
         }
     }
-    loop piece in pieces {
-        if jet_cli_import_contains_identifier(piece, name) {
-            if quoted == .Val(first) {
+    if quoted_index >= 0 {
+        first: pieces[quoted_index]
+        loop piece in pieces {
+            if jet_cli_import_contains_identifier(piece, name) {
                 if different_quotes || piece != first -> return Val("String")
             }
         }
@@ -264,8 +265,10 @@ jet_cli_import_contains_identifier: fn(text: String, wanted: String) -> Bool Nev
 }
 
 jet_cli_import_infer_javascript_value_type: fn(raw: String, known: [String:String]) -> String? Never! {
-    expression: (jet_cli_import_trim_suffix(raw.trim().copy(), ";").trim().copy()).replace("!==", "!=").replace("===", "==")
-    if known.get(expression) == .Val(ty) -> return Val(ty.copy())
+    no_semi: jet_cli_import_trim_suffix(raw.trim(), ";")
+    expression: no_semi.trim().replace("!==", "!=").replace("===", "==")
+    found: known.get(expression)
+    if found != None -> return found
     tokens: jet_cli_import_lex(expression) ?? return None
     ^saw_value: false
     ^has_numeric: false
@@ -338,15 +341,12 @@ jet_cli_import_enterprise_unit_name: fn(language: String, raw: String, source: S
         // Path components ignore repeated separators and terminal '.', but '..' has no stem.
         ^name: String?{None}
         loop part in source.split("/") {
-            if !part.is_empty() && part != "." -> name = Val(part.copy())
+            if !part.is_empty() && part != "." -> name = Val(part)
         }
         file: name ?? return None
         if file == ".." -> return None
         dot: jet_cli_import_find_bytes(file.bytes(), ".", true)
-        ^stem: file.copy()
-        if dot == .Val(at) {
-            if at > 0 -> stem = jet_cli_import_byte_slice(file.bytes(), 0, at)
-        }
+        stem: if dot == .Val(at) && at > 0 -> jet_cli_import_byte_slice(file.bytes(), 0, at) else -> file.move()
         if jet_cli_import_identifier(stem) -> return Val(stem)
         return None
     }
@@ -358,7 +358,7 @@ jet_cli_import_enterprise_unit_name: fn(language: String, raw: String, source: S
         }
     }
     loop raw_line in raw.lines() {
-        line: raw_line.trim_start().copy()
+        line: raw_line.trim_start()
         if line.starts_with("//") || line.starts_with("/*") || line.starts_with("*") || !line.starts_with(keyword) {
             next
         }
@@ -367,7 +367,8 @@ jet_cli_import_enterprise_unit_name: fn(language: String, raw: String, source: S
         if bytes.is_empty() || !jet_cli_import_space_at(bytes, 0, jet_cli_import_utf8_width(bytes[0])) {
             next
         }
-        tail: jet_cli_import_trim_suffix(jet_cli_import_trim_suffix(rest.trim().copy(), ";"), "{{").trim().copy()
+        raw_tail: jet_cli_import_trim_suffix(jet_cli_import_trim_suffix(rest.trim(), ";"), "{{")
+        tail: raw_tail.trim()
         bytes_tail: tail.bytes()
         ^end: 0
         loop end < bytes_tail.len() && (jet_cli_import_alpha(bytes_tail[end]) || jet_cli_import_digit(bytes_tail[end]) || bytes_tail[end] == (U8{95}) || bytes_tail[end] == (U8{46})) {
@@ -408,7 +409,7 @@ jet_cli_import_first_ascii_identifier_part: fn(raw: String) -> String Never! {
 
 jet_cli_import_pascal_library_name: fn(raw: String) -> String? Never! {
     loop raw_line in raw.lines() {
-        line: raw_line.trim_start().copy()
+        line: jet_cli_import_trimmed_start(raw_line)
         if line.starts_with("//") || line.starts_with("{{") || line.starts_with("(*") -> next
         lower: jet_cli_import_ascii_lower(line)
         if !lower.starts_with("library ") -> next
@@ -421,7 +422,7 @@ jet_cli_import_pascal_library_name: fn(raw: String) -> String? Never! {
 
 jet_cli_import_ada_package_name: fn(raw: String) -> String? Never! {
     loop raw_line in raw.lines() {
-        line: raw_line.trim_start().copy()
+        line: jet_cli_import_trimmed_start(raw_line)
         if line.starts_with("--") -> next
         lower: jet_cli_import_ascii_lower(line)
         if !lower.starts_with("package ") -> next
@@ -442,26 +443,26 @@ jet_cli_import_parse_header: fn(line: String) -> JetCLIImportFunction JetCLIImpo
     body: jet_cli_import_byte_slice(line.bytes(), 4, line.bytes().len() - 1)
     open: jet_cli_import_find_bytes(body.bytes(), "(", false) ?? return Err(jet_cli_import_text_error("function needs ("))
     close: jet_cli_import_find_bytes(body.bytes(), ")", true) ?? return Err(jet_cli_import_text_error("function needs )"))
-    raw_name: jet_cli_import_byte_slice(body.bytes(), 0, open).trim().copy()
+    raw_name: jet_cli_import_trimmed_slice(body.bytes(), 0, open)
     if close < open || !jet_cli_import_identifier(raw_name) {
         return Err(jet_cli_import_text_error("function name is not a safe Jet identifier"))
     }
     name: jet_cli_import_canonical_identifier(raw_name)
-    suffix: jet_cli_import_byte_slice(body.bytes(), close + 1, body.bytes().len()).trim().copy()
+    suffix: jet_cli_import_trimmed_slice(body.bytes(), close + 1, body.bytes().len())
     if !suffix.starts_with("->") {
         return Err(jet_cli_import_text_error("function needs a return annotation"))
     }
-    result: jet_cli_import_map_type(jet_cli_import_byte_slice(suffix.bytes(), 2, suffix.bytes().len()).trim().copy())
+    result: jet_cli_import_map_type(jet_cli_import_trimmed_slice(suffix.bytes(), 2, suffix.bytes().len()))
     ^params: [{name: String, ty: String}]{}
-    raw_params: jet_cli_import_byte_slice(body.bytes(), open + 1, close).trim().copy()
+    raw_params: jet_cli_import_trimmed_slice(body.bytes(), open + 1, close)
     if !raw_params.is_empty() {
         loop raw in jet_cli_import_split_commas(raw_params) {
             colon: jet_cli_import_find_bytes(raw.bytes(), ":", false) ?? return Err(jet_cli_import_text_error("parameter {raw} needs a type annotation"))
-            param: jet_cli_import_byte_slice(raw.bytes(), 0, colon).trim().copy()
+            param: jet_cli_import_trimmed_slice(raw.bytes(), 0, colon)
             if !jet_cli_import_identifier(param) || param == "self" || param.contains("=") {
                 return Err(jet_cli_import_text_error("parameter {param} has no safe importer mapping"))
             }
-            ty: jet_cli_import_map_type(jet_cli_import_byte_slice(raw.bytes(), colon + 1, raw.bytes().len()).trim().copy())
+            ty: jet_cli_import_map_type(jet_cli_import_trimmed_slice(raw.bytes(), colon + 1, raw.bytes().len()))
             params.push({name: jet_cli_import_canonical_identifier(param), ty: ty})
         }
     }
@@ -500,11 +501,11 @@ jet_cli_import_translate_body: fn(function: JetCLIImportFunction) -> [String] Je
     ^bindings: [String:Bool]{}
     ^output: [String]{}
     loop row in function.body {
-        line: row.text.trim().copy()
+        line: row.text.trim()
         if line == "pass" && function.result == "()" -> next
         if line.starts_with("return ") {
             source_value: jet_cli_import_byte_slice(line.bytes(), 7, line.bytes().len())
-            value: jet_cli_import_parse_expression(source_value) ?? return Err(JetCLIImportBodyError{line: row.line, message: err.message.copy()})
+            value: jet_cli_import_parse_expression(source_value) ?? return Err(JetCLIImportBodyError{line: row.line, message: err.message.move()})
             materialized: jet_cli_import_materialize_borrowed_string(function, source_value, value)
             output.push("return {materialized}")
             next
@@ -516,8 +517,8 @@ jet_cli_import_translate_body: fn(function: JetCLIImportFunction) -> [String] Je
         if line.starts_with("assert ") {
             value: jet_cli_import_byte_slice(line.bytes(), 7, line.bytes().len())
             pair: jet_cli_import_split_top(value, "==") ?? return Err(JetCLIImportBodyError{line: row.line, message: "only equality assertions have a proven Jet test mapping"})
-            left: jet_cli_import_parse_expression(pair.left) ?? return Err(JetCLIImportBodyError{line: row.line, message: err.message.copy()})
-            right: jet_cli_import_parse_expression(pair.right) ?? return Err(JetCLIImportBodyError{line: row.line, message: err.message.copy()})
+            left: jet_cli_import_parse_expression(pair.left) ?? return Err(JetCLIImportBodyError{line: row.line, message: err.message.move()})
+            right: jet_cli_import_parse_expression(pair.right) ?? return Err(JetCLIImportBodyError{line: row.line, message: err.message.move()})
             output.push("assert_eq({left}, {right})")
             next
         }
@@ -526,14 +527,14 @@ jet_cli_import_translate_body: fn(function: JetCLIImportFunction) -> [String] Je
             if !jet_cli_import_identifier(name) {
                 return Err(JetCLIImportBodyError{line: row.line, message: "assignment target is not a local name"})
             }
-            value: jet_cli_import_parse_expression(pair.right) ?? return Err(JetCLIImportBodyError{line: row.line, message: err.message.copy()})
+            value: jet_cli_import_parse_expression(pair.right) ?? return Err(JetCLIImportBodyError{line: row.line, message: err.message.move()})
             materialized: jet_cli_import_materialize_borrowed_string(function, pair.right, value)
             target: if bindings.has_key(name) -> "{name} =" else -> "^{name}:"
-            bindings[name.copy()] = true
+            bindings[name.move()] = true
             output.push("{target} {materialized}")
             next
         }
-        output.push(jet_cli_import_parse_expression(line) ?? return Err(JetCLIImportBodyError{line: row.line, message: err.message.copy()}))
+        output.push(jet_cli_import_parse_expression(line) ?? return Err(JetCLIImportBodyError{line: row.line, message: err.message.move()}))
     }
     Ok(output)
 }

@@ -1,0 +1,11 @@
+# `jet check` reports every upward layer import in a package in one pass,
+# naming both modules and both layers for every violation.
+fixture: CheckReportsEveryLayerViolationInOnePass.fixture
+env: NO_COLOR=1
+step: jet check run.jet
+exit: 1
+stderr: ~ "`app.storage` in layer `storage` cannot import `app.domain` in higher layer `domain`" # first upward import in storage.jet
+stderr: ~ "`app.storage` in layer `storage` cannot import `app.ui` in higher layer `ui`" # second upward import in storage.jet
+stderr: ~ "`app.domain` in layer `domain` cannot import `app.ui` in higher layer `ui`" # upward import in domain.jet
+stderr: ~ "jet-lang.dev/e/Jet.ImportPointsUpALayer" # registered diagnostic identity for layer violations
+stderr: ~ "3 problems found" # all three violations reported together in one pass

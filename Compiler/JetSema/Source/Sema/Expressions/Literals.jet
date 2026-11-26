@@ -311,9 +311,7 @@ sema_expression_list_mark_owned_value: fn(value: Expr, check: ^SemaBodyCheck) ->
             }
             if !sema_ownership_type_is_copy(binding.symbol.ty ?? Type.Named{name: "Unit"}) {
                 origin: sema_ownership_move_origin(value, binding.symbol.ty ?? Type.Named{name: "Unit"}, "the list literal", true, check.scopes.copies_explicit)
-                loop place in sema_ownership_moved_record_places(value, places, check.scopes, true) {
-                    check.state.moved.push(SemaOwnershipMovedPlace{place: place, origin: origin.copy()})
-                }
+                sema_ownership_record_moved_places(check.state, value, places, check.scopes, true, origin)
                 loop place in places {
                     if !sema_ownership_note_place_reference(check.state, value, place, span, check.scopes, AccessConvention.Move) {
                         return false

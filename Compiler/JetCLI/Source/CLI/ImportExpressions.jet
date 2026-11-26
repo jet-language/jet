@@ -61,6 +61,37 @@ jet_cli_import_space_at: fn(bytes: [U8], at: Int, width: Int) -> Bool Never! {
     point == 32 || (point >= 9 && point <= 13) || point == 133 || point == 160 || point == 5760 || (point >= 8192 && point <= 8202) || point == 8232 || point == 8233 || point == 8239 || point == 8287 || point == 12288
 }
 
+// Slice `[start..<end]` of `bytes` with leading and trailing Unicode whitespace
+// trimmed before materializing one owned String (no intermediate slice+copy).
+jet_cli_import_trimmed_slice: fn(bytes: [U8], start: Int, end: Int) -> String Never! {
+    ^lo: start
+    loop lo < end {
+        width: jet_cli_import_utf8_width(bytes[lo])
+        if lo + width > end || !jet_cli_import_space_at(bytes, lo, width) -> break
+        lo += width
+    }
+    ^hi: lo
+    ^at: lo
+    loop at < end {
+        width: jet_cli_import_utf8_width(bytes[at])
+        if at + width > end -> break
+        if !jet_cli_import_space_at(bytes, at, width) -> hi = at + width
+        at += width
+    }
+    jet_cli_import_byte_slice(bytes, lo, hi)
+}
+
+jet_cli_import_trimmed_start: fn(text: String) -> String Never! {
+    bytes: text.bytes()
+    ^lo: 0
+    loop lo < bytes.len() {
+        width: jet_cli_import_utf8_width(bytes[lo])
+        if lo + width > bytes.len() || !jet_cli_import_space_at(bytes, lo, width) -> break
+        lo += width
+    }
+    jet_cli_import_byte_slice(bytes, lo, bytes.len())
+}
+
 // Unicode whitespace, scanned once without character-index slicing.
 jet_cli_import_words: fn(text: String) -> [String] Never! {
     bytes: text.bytes()
@@ -133,11 +164,11 @@ jet_cli_import_split_commas: fn(raw: String) -> [String] Never! {
         if byte == (U8{40}) || byte == (U8{91}) -> depth += 1
         if byte == (U8{41}) || byte == (U8{93}) -> depth -= 1
         if byte == (U8{44}) && depth == 0 {
-            out.push(jet_cli_import_byte_slice(bytes, start, at).trim().copy())
+            out.push(jet_cli_import_trimmed_slice(bytes, start, at))
             start = at + 1
         }
     }
-    out.push(jet_cli_import_byte_slice(bytes, start, bytes.len()).trim().copy())
+    out.push(jet_cli_import_trimmed_slice(bytes, start, bytes.len()))
     out
 }
 
@@ -179,8 +210,9 @@ jet_cli_import_translate_foreign_body: fn(language: String, function: JetCLIImpo
     ^returned: false
     loop row in function.body {
         loop statement in jet_cli_import_split_foreign_statements(row.text) {
-            uncommented: jet_cli_import_strip_foreign_line_comment(statement).trim().copy()
-            line: jet_cli_import_trim_suffix(uncommented, ";").trim().copy()
+            raw_uncommented: jet_cli_import_strip_foreign_line_comment(statement)
+            raw_line: jet_cli_import_trim_suffix(jet_cli_import_trimmed_slice(raw_uncommented.bytes(), 0, raw_uncommented.bytes().len()), ";")
+            line: jet_cli_import_trimmed_slice(raw_line.bytes(), 0, raw_line.bytes().len())
             if line.is_empty() -> next
             if jet_cli_import_foreign_control_statement(line) {
                 return Err(JetCLIImportBodyError{line: row.line, message: "control flow, exceptions, and foreign runtime operations have no proven mapping in this importer"})
@@ -199,7 +231,7 @@ jet_cli_import_translate_foreign_body: fn(language: String, function: JetCLIImpo
                     return Err(JetCLIImportBodyError{line: row.line, message: "unit function cannot return a value"})
                 }
                 value: jet_cli_import_byte_slice(line.bytes(), 7, line.bytes().len())
-                converted: jet_cli_import_foreign_expression(language, value, float_literals) ?? return Err(JetCLIImportBodyError{line: row.line, message: err.message.copy()})
+                converted: jet_cli_import_foreign_expression(language, value, float_literals) ?? return Err(JetCLIImportBodyError{line: row.line, message: err.message.move()})
                 materialized: jet_cli_import_materialize_borrowed_string(function, value, converted)
                 output.push("return {materialized}")
                 next
@@ -207,15 +239,15 @@ jet_cli_import_translate_foreign_body: fn(language: String, function: JetCLIImpo
             if line.starts_with("assert ") {
                 value: jet_cli_import_byte_slice(line.bytes(), 7, line.bytes().len())
                 pair: jet_cli_import_split_top(value, "==") ?? return Err(JetCLIImportBodyError{line: row.line, message: "only equality assertions have a proven Jet mapping"})
-                left: jet_cli_import_foreign_expression(language, pair.left, float_literals) ?? return Err(JetCLIImportBodyError{line: row.line, message: err.message.copy()})
-                right: jet_cli_import_foreign_expression(language, pair.right, float_literals) ?? return Err(JetCLIImportBodyError{line: row.line, message: err.message.copy()})
+                left: jet_cli_import_foreign_expression(language, pair.left, float_literals) ?? return Err(JetCLIImportBodyError{line: row.line, message: err.message.move()})
+                right: jet_cli_import_foreign_expression(language, pair.right, float_literals) ?? return Err(JetCLIImportBodyError{line: row.line, message: err.message.move()})
                 output.push("assert_eq({left}, {right})")
                 next
             }
             short: jet_cli_import_split_top(line, ":=")
             assignment: if short == .Val(pair) -> Val(pair) else -> jet_cli_import_split_top(line, "=")
             if assignment == .Val(pair) {
-                left: pair.left.trim().copy()
+                left: pair.left.trim()
                 ^name: ""
                 if {
                     short != None -> {
@@ -226,22 +258,22 @@ jet_cli_import_translate_foreign_body: fn(language: String, function: JetCLIImpo
                     }
                     else -> {
                         local: jet_cli_import_foreign_local_name(language, left)
-                        if local == .Val(local_name) -> name = local_name.copy() else {
+                        name = local ?? {
                             if !jet_cli_import_identifier(left) {
                                 return Err(JetCLIImportBodyError{line: row.line, message: "assignment or declaration has no safe scalar mapping"})
                             }
-                            name = left.move()
+                            left.copy()
                         }
                     }
                 }
-                converted: jet_cli_import_foreign_expression(language, pair.right, float_literals) ?? return Err(JetCLIImportBodyError{line: row.line, message: err.message.copy()})
+                converted: jet_cli_import_foreign_expression(language, pair.right, float_literals) ?? return Err(JetCLIImportBodyError{line: row.line, message: err.message.move()})
                 value: jet_cli_import_materialize_borrowed_string(function, pair.right, converted)
                 target: if bindings.has_key(name) -> "{name} =" else -> "^{name}:"
-                bindings.add(name.copy(), true).drop("only membership matters for binding operators")
+                bindings.add(name.move(), true).drop("only membership matters for binding operators")
                 output.push("{target} {value}")
                 next
             }
-            converted: jet_cli_import_foreign_expression(language, line, float_literals) ?? return Err(JetCLIImportBodyError{line: row.line, message: err.message.copy()})
+            converted: jet_cli_import_foreign_expression(language, line, float_literals) ?? return Err(JetCLIImportBodyError{line: row.line, message: err.message.move()})
             output.push(converted)
         }
     }
@@ -328,7 +360,8 @@ jet_cli_import_foreign_local_name: fn(language: String, left: String) -> String?
 }
 
 jet_cli_import_foreign_expression: fn(language: String, raw: String, float_literals: Bool) -> String JetCLIImportTextError! {
-    ^expression: jet_cli_import_trim_suffix(raw.trim().copy(), ";").trim().copy()
+    no_semi: jet_cli_import_trim_suffix(raw.trim(), ";")
+    ^expression: no_semi.trim().copy()
     if expression.contains("`") {
         return Err(jet_cli_import_text_error("raw/template strings need an explicit migration adapter"))
     }
@@ -359,8 +392,8 @@ jet_cli_import_foreign_expression: fn(language: String, raw: String, float_liter
 // A borrowed String parameter returned by value is copied, in the current
 // explicit-copy spelling.
 jet_cli_import_materialize_borrowed_string: fn(function: JetCLIImportFunction, source: String, expression: String) -> String Never! {
-    trimmed: jet_cli_import_trim_suffix(source.trim().copy(), ";").trim().copy()
-    canonical: jet_cli_import_canonical_identifier(trimmed)
+    no_semi: jet_cli_import_trim_suffix(source.trim(), ";")
+    canonical: jet_cli_import_canonical_identifier(no_semi.trim())
     loop param in function.params {
         if param.ty == "String" && jet_cli_import_canonical_identifier(param.name) == canonical {
             if !expression.ends_with(".move()") && !expression.ends_with(".copy()") {

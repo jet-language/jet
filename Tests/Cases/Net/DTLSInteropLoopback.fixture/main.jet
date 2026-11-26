@@ -1,0 +1,108 @@
+use {
+    files: core.files
+    dtls: core.net.dtls
+    tls: core.net.tls
+    core.net.tls.[ClientIdentity, RootCertificates]
+}
+
+run_ecdsa_cookie: fn(ec_roots: RootCertificates, ec_cert: [U8], ec_key: [U8], budget: Duration) -[IO, Net, Time.Wait]> {
+    srv_cfg0: dtls.DTLSServerConfig.from_pem(ec_cert, ec_key) ?? panic("ec server cfg")
+    srv_cfg: srv_cfg0.with_alpn([String]{"dtls-echo"}) ?? panic("ec server alpn")
+    cli_cfg0: dtls.DTLSClientConfig.default().with_trust(.CustomOnly(ec_roots)) ?? panic("ec client trust")
+    cli_cfg: cli_cfg0.with_alpn([String]{"dtls-echo"}) ?? panic("ec client alpn")
+    listener: dtls.listen("127.0.0.1:0", srv_cfg) ?? panic("ec listen")
+    addr: listener.local_addr() ?? panic("ec addr")
+    srv_task: task {
+        sess: listener.accept(deadline: budget) ?? panic("ec accept")
+        msg: sess.read(4096, deadline: budget) ?? panic("ec srv read")
+        sess.write("echo:{msg}", deadline: budget) ?? panic("ec srv write")
+        eof: sess.read_bytes(4096, deadline: budget) ?? panic("ec srv eof")
+        if eof.len() != 0 -> panic("ec expected eof")
+        sess.close() ?? panic("ec srv close")
+        listener.close() ?? panic("ec listener close")
+    }
+    sess: dtls.connect(addr, server_name: "localhost", config: cli_cfg, deadline: budget) ?? panic("ec connect")
+    sess.write("hello-ecdsa", deadline: budget) ?? panic("ec cli write")
+    reply: sess.read(4096, deadline: budget) ?? panic("ec cli read")
+    peer: sess.peer_identity()
+    print("ecdsa-cookie: {sess.protocol_version()} {peer.verified_server_name} {sess.alpn_protocol() ?? "none"} {reply}")
+    sess.close() ?? panic("ec cli close")
+    srv_task.join() ?? panic("ec join")
+}
+
+run_rsa_fragmented: fn(rsa_roots: RootCertificates, rsa_cert: [U8], rsa_key: [U8], budget: Duration) -[IO, Net, Time.Wait]> {
+    srv_cfg0: dtls.DTLSServerConfig.from_pem(rsa_cert, rsa_key) ?? panic("rsa server cfg")
+    srv_cfg: srv_cfg0.with_mtu(576) ?? panic("rsa server mtu")
+    cli_cfg0: dtls.DTLSClientConfig.default().with_trust(.CustomOnly(rsa_roots)) ?? panic("rsa client trust")
+    cli_cfg: cli_cfg0.with_mtu(576) ?? panic("rsa client mtu")
+    listener: dtls.listen("127.0.0.1:0", srv_cfg) ?? panic("rsa listen")
+    addr: listener.local_addr() ?? panic("rsa addr")
+    srv_task: task {
+        sess: listener.accept(deadline: budget) ?? panic("rsa accept")
+        ^buf: [U8]{}
+        n: sess.read_into(buf, 4096, deadline: budget) ?? panic("rsa srv read_into")
+        if n <= 0 -> panic("rsa empty read")
+        msg: String.from_bytes(buf) ?? panic("rsa utf8")
+        sess.write("echo:{msg}", deadline: budget) ?? panic("rsa srv write")
+        _: sess.read_bytes(4096, deadline: budget) ?? panic("rsa srv eof")
+        sess.close() ?? panic("rsa srv close")
+        listener.close() ?? panic("rsa listener close")
+    }
+    sess: dtls.connect(addr, server_name: "localhost", config: cli_cfg, deadline: budget) ?? panic("rsa connect")
+    sess.write("hello-rsa-mtu", deadline: budget) ?? panic("rsa cli write")
+    reply: sess.read(4096, deadline: budget) ?? panic("rsa cli read")
+    peer: sess.peer_identity()
+    print("rsa-fragmented: {sess.protocol_version()} {peer.verified_server_name} {reply}")
+    sess.close() ?? panic("rsa cli close")
+    srv_task.join() ?? panic("rsa join")
+}
+
+run_mtls: fn(ec_roots: RootCertificates, ec_cert: [U8], ec_key: [U8], cli_roots: RootCertificates, cli_id: ClientIdentity, budget: Duration) -[IO, Net, Time.Wait]> {
+    srv_cfg0: dtls.DTLSServerConfig.from_pem(ec_cert, ec_key) ?? panic("mtls server cfg")
+    srv_cfg: srv_cfg0.with_client_roots(cli_roots, required: true) ?? panic("mtls client roots")
+    cli_good0: dtls.DTLSClientConfig.default().with_trust(.CustomOnly(ec_roots.copy())) ?? panic("mtls trust")
+    cli_good: cli_good0.with_client_identity(cli_id) ?? panic("mtls id")
+    cli_bad: dtls.DTLSClientConfig.default().with_trust(.CustomOnly(ec_roots)) ?? panic("mtls bad trust")
+    listener: dtls.listen("127.0.0.1:0", srv_cfg) ?? panic("mtls listen")
+    addr: listener.local_addr() ?? panic("mtls addr")
+    srv_task: task {
+        sess: listener.accept(deadline: budget) ?? panic("mtls accept")
+        cli_peer: sess.peer_identity()
+        msg: sess.read(4096, deadline: budget) ?? panic("mtls srv read")
+        sess.write("echo:{msg}", deadline: budget) ?? panic("mtls srv write")
+        _: sess.read_bytes(4096, deadline: budget) ?? panic("mtls srv eof")
+        sess.close() ?? panic("mtls srv close")
+        refused: listener.accept(deadline: budget) == .Err(_)
+        if !refused -> panic("mtls server accepted client without cert")
+        listener.close() ?? panic("mtls listener close")
+        cli_peer.leaf.subject
+    }
+    sess: dtls.connect(addr, server_name: "localhost", config: cli_good, deadline: budget) ?? panic("mtls connect")
+    sess.write("hello-mtls", deadline: budget) ?? panic("mtls cli write")
+    reply: sess.read(4096, deadline: budget) ?? panic("mtls cli read")
+    version: sess.protocol_version()
+    sess.close() ?? panic("mtls cli close")
+    bad_refused: dtls.connect(addr, server_name: "localhost", config: cli_bad, deadline: budget) == .Err(_)
+    subject: srv_task.join() ?? panic("mtls join")
+    print("mtls-accepted: {version} {subject} {reply}")
+    print("mtls-refused: {bad_refused}")
+}
+
+run: fn() {
+    ec_ca: files.read_bytes("ec-ca.pem") ?? panic("ec CA")
+    ec_cert: files.read_bytes("ec.cert.pem") ?? panic("ec cert")
+    ec_key: files.read_bytes("ec.key.pem") ?? panic("ec key")
+    rsa_ca: files.read_bytes("rsa-ca.pem") ?? panic("rsa CA")
+    rsa_cert: files.read_bytes("rsa.cert.pem") ?? panic("rsa cert")
+    rsa_key: files.read_bytes("rsa.key.pem") ?? panic("rsa key")
+    cli_cert: files.read_bytes("client.cert.pem") ?? panic("client cert")
+    cli_key: files.read_bytes("client.key.pem") ?? panic("client key")
+    ec_roots: tls.RootCertificates.from_pem(ec_ca) ?? panic("ec roots")
+    rsa_roots: tls.RootCertificates.from_pem(rsa_ca) ?? panic("rsa roots")
+    cli_roots: tls.RootCertificates.from_pem(cli_cert) ?? panic("client roots")
+    cli_id: tls.ClientIdentity.from_pem(cli_cert, cli_key) ?? panic("client identity")
+    budget: 10s
+    run_ecdsa_cookie(ec_roots.copy(), ec_cert.copy(), ec_key.copy(), budget)
+    run_rsa_fragmented(rsa_roots, rsa_cert, rsa_key, budget)
+    run_mtls(ec_roots, ec_cert, ec_key, cli_roots, cli_id, budget)
+}

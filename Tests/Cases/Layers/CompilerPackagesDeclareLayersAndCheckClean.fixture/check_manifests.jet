@@ -1,0 +1,44 @@
+// Verifies that `Compiler/package.jet` and every compiler package manifest
+// directly under `Compiler/` declares a `layers:` table.
+// Usage: jet run check_manifests.jet -- <repository root>
+use {
+    files: core.files
+    process: core.process
+}
+
+has_layers_block: fn(source: String) -> Bool {
+    loop line in source.lines() {
+        trimmed: line.trim()
+        if trimmed == `layers: {` || trimmed.starts_with(`layers: {`) -> return true
+    }
+    false
+}
+
+run: fn() {
+    args: process.args()
+    if args.len() == 0 -> panic("usage: jet run check_manifests.jet -- <repository root>")
+    root: args[args.len() - 1]
+    compiler_dir: "{root}/Compiler"
+
+    ^checked: 0
+    ^missing: [String]{}
+
+    workspace_manifest: "{compiler_dir}/package.jet"
+    workspace_source: files.read(workspace_manifest) ?? panic("cannot read {workspace_manifest}: {err}")
+    checked += 1
+    if !has_layers_block(workspace_source) -> missing.push("Compiler/package.jet")
+
+    loop entry in files.list_dir(compiler_dir) ?? panic("cannot list {compiler_dir}: {err}") {
+        if !entry.is_dir || entry.name.starts_with(".") -> next
+        manifest: "{compiler_dir}/{entry.name}/package.jet"
+        if !files.exists(manifest) -> next
+        source: files.read(manifest) ?? panic("cannot read {manifest}: {err}")
+        checked += 1
+        if !has_layers_block(source) -> missing.push("Compiler/{entry.name}/package.jet")
+    }
+
+    loop path in missing -> print("missing layers: {path}")
+    print("compiler manifests checked: {checked}")
+    print("missing layers count: {missing.len()}")
+    if missing.len() > 0 -> panic("compiler package manifests missing `layers:`")
+}

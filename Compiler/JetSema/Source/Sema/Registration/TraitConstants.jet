@@ -257,13 +257,17 @@ sema_trait_constant_int_fits: fn(value: Int, signed: Bool, bits: Int) -> Bool Ne
 
 // An optional constant: `None` is the clean failure of `ty`; `Val(x)` or a
 // bare value is present.
+priv sema_trait_constant_clean: fn(ty: Type) -> SemaTraitConstantEval Never! {
+    SemaTraitConstantEval.Value{value: TComptimeValue.Failed{report: TComptimeReport.Clean{ty: ty.copy()}}}
+}
+
 sema_trait_constant_eval_option: fn(graph: SemaRegistrationGraph, expr: Expr, ty: Type, inner: Type, module_identity: ModuleID, type_module: ModuleID) -> SemaTraitConstantEval Never! {
     if expr == {
-        .Absent(_, _) -> return SemaTraitConstantEval.Value{value: TComptimeValue.Failed{report: TComptimeReport.Clean{ty: ty.copy()}}}
+        .Absent(_, _) -> return sema_trait_constant_clean(ty)
         .Present(value, _, _) -> return sema_trait_constant_present(sema_trait_constant_eval(graph, value, inner, module_identity, type_module))
         .EnumLit(type_name, variant, _, args, _, _, _) -> {
             if type_name == "" && variant == "None" && args.len() == 0 {
-                return SemaTraitConstantEval.Value{value: TComptimeValue.Failed{report: TComptimeReport.Clean{ty: ty.copy()}}}
+                return sema_trait_constant_clean(ty)
             }
             if type_name == "" && variant == "Val" && args.len() == 1 {
                 if args[0] == .Positional(value) {
@@ -344,14 +348,13 @@ sema_trait_constant_record: fn(graph: SemaRegistrationGraph, type_module: Module
 // field the value leaves out takes the default its declaration writes.
 sema_trait_constant_eval_record: fn(graph: SemaRegistrationGraph, expr: Expr, name: String, record: SemaTraitConstantRecord, module_identity: ModuleID) -> SemaTraitConstantEval Never! {
     expected_type: Type.Named{name: name.copy()}
-    ^written: [ExprField]{}
     if expr == {
         .StructLit(type_name, type_args, _, _, fields, _, _, _) -> {
             if type_args.len() > 0 -> return SemaTraitConstantEval.WrongType
             if type_name != "" && sema_checked_qualify_type(graph, Type.Named{name: type_name.copy()}, module_identity) != expected_type {
                 return SemaTraitConstantEval.WrongType
             }
-            written = fields.copy()
+            return sema_trait_constant_eval_record_fields(graph, fields, name, record, module_identity)
         }
         .TypedLit(head, body, _, _) -> {
             if head == .Val(head_type) {
@@ -360,13 +363,16 @@ sema_trait_constant_eval_record: fn(graph: SemaRegistrationGraph, expr: Expr, na
                 }
             }
             if body == {
-                .Fields(fields) -> written = fields.copy()
-                .Empty -> {}
+                .Fields(fields) -> return sema_trait_constant_eval_record_fields(graph, fields, name, record, module_identity)
+                .Empty -> return sema_trait_constant_eval_record_fields(graph, [ExprField]{}, name, record, module_identity)
                 .Elements(_) | .Entries(_) | .Value(_) | .ByteText(_) -> return SemaTraitConstantEval.WrongType
             }
         }
         .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .TypeValue(_, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) -> return sema_trait_constant_other(expr)
     }
+}
+
+priv sema_trait_constant_eval_record_fields: fn(graph: SemaRegistrationGraph, written: [ExprField], name: String, record: SemaTraitConstantRecord, module_identity: ModuleID) -> SemaTraitConstantEval Never! {
     loop field in written {
         ^known: false
         loop declared in record.definition.fields {
@@ -547,13 +553,15 @@ sema_expression_trait_constant_in: fn(graph: SemaRegistrationGraph, type_name: S
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
     }
+    found.reverse()
+    first: found.pop() ?? return unhandled
     if generic {
-        value: sema_node(check.context, found[0].ty, NodeKind.TraitConst{owner: Type.Named{name: type_name.copy()}, trait_name: found[0].trait_name.copy(), name: member.copy()}, span)
+        value: sema_node(check.context, first.ty, NodeKind.TraitConst{owner: Type.Named{name: type_name.copy()}, trait_name: first.trait_name, name: member.copy()}, span)
         return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, check.environment.*, check.program.*, check.diagnostics)}
     }
     // The implementation's value was reported where the impl gives it.
-    stored: found[0].value ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    value: sema_tree_node(found[0].ty, TExprKind.CtLit{value: stored.copy()}, span)
+    stored: first.value ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    value: sema_tree_node(first.ty, TExprKind.CtLit{value: stored}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, check.environment.*, check.program.*, check.diagnostics)}
 }
 
@@ -579,10 +587,9 @@ sema_trait_constant_head: fn(ty: Type) -> String? Never! {
     }
 }
 
-// What follows the last `.` or `.` of a type name.
+// What follows the last `.` of a type name.
 sema_trait_constant_leaf: fn(name: String) -> String Never! {
     if name.cut_last(".") == .Val(parts) -> return sema_trait_constant_leaf(parts.after)
-    if name.cut_last(".") == .Val(parts) -> return parts.after.copy()
     name.copy()
 }
 

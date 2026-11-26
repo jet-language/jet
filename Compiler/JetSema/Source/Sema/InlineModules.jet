@@ -62,7 +62,6 @@ use {
         LValue,
         Lambda,
         LambdaBody,
-        LambdaParam,
         Marker,
         MarkerCallArg,
         Measure,
@@ -894,14 +893,10 @@ sema_inline_rewrite_or_fallback: fn(rewrite: ^SemaInlineRewrite, fallback: OrFal
 sema_inline_rewrite_lambda: fn(rewrite: ^SemaInlineRewrite, lambda: Lambda) -> Lambda Never! {
     ^updated: lambda
     saved: rewrite.locals.len()
-    ^params: [LambdaParam]{}
-    loop param in lambda.params {
-        ^mapped: param.copy()
-        mapped.ty = sema_inline_rewrite_optional_type(rewrite, param.ty)
-        params.push(mapped)
-        rewrite.locals.push(param.name)
+    loop index in 0..<updated.params.len() {
+        updated.params[index].ty = sema_inline_rewrite_optional_type(rewrite, updated.params[index].ty)
+        rewrite.locals.push(updated.params[index].name)
     }
-    updated.params = params
     updated.result = sema_inline_rewrite_optional_type(rewrite, lambda.result)
     updated.body = if lambda.body == {
         .Expr(value) -> LambdaBody.Expr{value: sema_inline_rewrite_expr(rewrite, value)}
@@ -1134,7 +1129,7 @@ sema_inline_rewrite_expr: fn(rewrite: ^SemaInlineRewrite, expression: Expr) -> E
         .Spread(value, span, node) -> return Expr.Spread{value: sema_inline_rewrite_expr(rewrite, value), span: span, id: node}
         .MapLit(entries, span, node) -> return Expr.MapLit{entries: sema_inline_rewrite_pairs(rewrite, entries), span: span, id: node}
         // copy: `kind` is a payload of read parameter `expression`, which keeps the original; field `kind` of the new Expr.Index owns this one
-        .Index(base, index, span, kind, node) -> return Expr.Index{base: sema_inline_rewrite_expr(rewrite, base), index: sema_inline_rewrite_expr(rewrite, index), span: span, kind: kind.copy(), id: node}
+        .Index(base, index, span, kind, node) -> return Expr.Index{base: sema_inline_rewrite_expr(rewrite, base), index: sema_inline_rewrite_expr(rewrite, index), span: span, kind: kind, id: node}
         .Slice(base, start, end, range, span, node) -> return Expr.Slice{base: sema_inline_rewrite_expr(rewrite, base), start: sema_inline_rewrite_expr(rewrite, start), end: sema_inline_rewrite_expr(rewrite, end), range: sema_inline_rewrite_optional_expr(rewrite, range), span: span, id: node}
         .Range(start, end, exclusive, span, node) -> return Expr.Range{start: sema_inline_rewrite_expr(rewrite, start), end: sema_inline_rewrite_expr(rewrite, end), exclusive: exclusive, span: span, id: node}
         .Ident(name, span, node) -> {
@@ -1376,7 +1371,7 @@ sema_inline_rewrite_binding: fn(rewrite: ^SemaInlineRewrite, binding: Binding) -
     }
     updated.ty = sema_inline_rewrite_optional_type(rewrite, binding.ty)
     updated.init = sema_inline_rewrite_expr(rewrite, binding.init)
-    updated.markers = sema_inline_rewrite_markers(rewrite, binding.markers)
+    sema_inline_rewrite_markers(rewrite, updated.markers)
     updated.meta = sema_inline_rewrite_meta(rewrite, binding.meta)
     if binding.pattern == .Val(pattern) {
         updated.pattern = Val(if pattern == {
@@ -1470,8 +1465,7 @@ sema_inline_rewrite_optional_body: fn(rewrite: ^SemaInlineRewrite, body: [Stmt]?
 
 sema_inline_rewrite_lvalue: fn(rewrite: ^SemaInlineRewrite, target: LValue) -> LValue Never! {
     if target == {
-        // copy: `kind` is a payload of read parameter `target`, which keeps the original; field `kind` of the new LValue.Index owns this one
-        .Index(base, index, span, kind) -> LValue.Index{base: sema_inline_rewrite_expr(rewrite, base), index: sema_inline_rewrite_expr(rewrite, index), span: span, kind: kind.copy()}
+        .Index(base, index, span, kind) -> LValue.Index{base: sema_inline_rewrite_expr(rewrite, base), index: sema_inline_rewrite_expr(rewrite, index), span: span, kind: kind}
         .Field(base, field, span) -> LValue.Field{base: sema_inline_rewrite_expr(rewrite, base), field: field, span: span}
         // copy: the rewrite walks the module program by borrowed payload views (Jet has no
         // consuming match), so an unchanged assignment target is copied into the rebuilt program,
@@ -1496,8 +1490,7 @@ sema_inline_rewrite_stmt: fn(rewrite: ^SemaInlineRewrite, stmt: Stmt) -> Stmt Ne
             sema_inline_declare_binding(rewrite, binding)
             Stmt.Val{binding: mapped}
         }
-        // copy: `op` is a payload of read parameter `stmt`, which keeps the original; field `op` of the new Stmt.Assign owns this one
-        .Assign(target, op, op_span, value) -> Stmt.Assign{target: sema_inline_rewrite_lvalue(rewrite, target), op: op.copy(), op_span: op_span, value: sema_inline_rewrite_expr(rewrite, value)}
+        .Assign(target, op, op_span, value) -> Stmt.Assign{target: sema_inline_rewrite_lvalue(rewrite, target), op: op, op_span: op_span, value: sema_inline_rewrite_expr(rewrite, value)}
         .Return(value, span) -> Stmt.Return{value: sema_inline_rewrite_optional_expr(rewrite, value), span: span}
         // copy: `label` is a payload of read parameter `stmt`, which keeps the original; field `label` of the new Stmt.While owns this one
         .While(cond, body, span, arrow_body, label) -> Stmt.While{cond: sema_inline_rewrite_expr(rewrite, cond), body: sema_inline_rewrite_stmts(rewrite, body), span: span, arrow_body: arrow_body, label: label.copy()}
@@ -1544,8 +1537,7 @@ sema_inline_rewrite_stmt: fn(rewrite: ^SemaInlineRewrite, stmt: Stmt) -> Stmt Ne
         .Layout(name, name_span, body, span) -> Stmt.Layout{name: name, name_span: name_span, body: sema_inline_rewrite_stmts(rewrite, body), span: span}
         // copy: `binding` is a payload of read parameter `stmt`, which keeps the original; field `binding` of the new Stmt.AuthorityScope owns this one
         .AuthorityScope(caps, caps_span, binding, body, span) -> Stmt.AuthorityScope{caps: caps, caps_span: caps_span, binding: binding.copy(), body: sema_inline_rewrite_stmts(rewrite, body), span: span}
-        // copy: `selected_then` is a payload of read parameter `stmt`, which keeps the original; field `selected_then` of the new Stmt.ComptimeIf owns this one
-        .ComptimeIf(cond, cond_span, then_body, else_body, span, selected_then) -> Stmt.ComptimeIf{cond: sema_inline_rewrite_expr(rewrite, cond), cond_span: cond_span, then_body: sema_inline_rewrite_stmts(rewrite, then_body), else_body: sema_inline_rewrite_optional_body(rewrite, else_body), span: span, selected_then: selected_then.copy()}
+        .ComptimeIf(cond, cond_span, then_body, else_body, span, selected_then) -> Stmt.ComptimeIf{cond: sema_inline_rewrite_expr(rewrite, cond), cond_span: cond_span, then_body: sema_inline_rewrite_stmts(rewrite, then_body), else_body: sema_inline_rewrite_optional_body(rewrite, else_body), span: span, selected_then: selected_then}
         .ComptimeBlock(body, is_template_loop, span) -> Stmt.ComptimeBlock{body: sema_inline_rewrite_stmts(rewrite, body), is_template_loop: is_template_loop, span: span}
         .ContextBlock(fields, body, span) -> {
             mapped: loop field in fields -> ContextField{name: field.name, value: sema_inline_rewrite_expr(rewrite, field.value), span: field.span}
@@ -1567,22 +1559,14 @@ sema_inline_rewrite_stmt: fn(rewrite: ^SemaInlineRewrite, stmt: Stmt) -> Stmt Ne
     }
 }
 
-sema_inline_rewrite_markers: fn(rewrite: ^SemaInlineRewrite, markers: [Marker]) -> [Marker] Never! {
-    mapped: loop marker in markers -> {
-        ^updated: marker.copy()
-        ^args: [MarkerCallArg]{}
-        loop arg in marker.args {
-            if arg == {
-                .Expr(value) -> {
-                    args.push(MarkerCallArg.Expr{value: sema_inline_rewrite_expr(rewrite, value)})
-                }
-                .EffectRow(_, _) -> args.push(arg.copy())
+sema_inline_rewrite_markers: fn(rewrite: ^SemaInlineRewrite, markers: ^[Marker]) Never! {
+    loop marker_index in 0..<markers.len() {
+        loop arg_index in 0..<markers[marker_index].args.len() {
+            if markers[marker_index].args[arg_index] == .Expr(value) {
+                markers[marker_index].args[arg_index] = MarkerCallArg.Expr{value: sema_inline_rewrite_expr(rewrite, value)}
             }
         }
-        updated.args = args
-        updated
     }
-    mapped
 }
 
 // `#Meta(category: label)` inside a template reads the instance's value
@@ -1609,56 +1593,46 @@ sema_inline_rewrite_meta: fn(rewrite: ^SemaInlineRewrite, meta: MetaAttr?) -> Me
     Val(updated)
 }
 
-sema_inline_rewrite_clauses: fn(rewrite: ^SemaInlineRewrite, clauses: [ContractClause]) -> [ContractClause] Never! {
-    mapped: loop clause in clauses -> {
-        ^updated: clause.copy()
-        updated.cond = sema_inline_rewrite_expr(rewrite, clause.cond)
-        updated.message_expr = sema_inline_rewrite_expr(rewrite, clause.message_expr)
-        updated
+sema_inline_rewrite_clauses: fn(rewrite: ^SemaInlineRewrite, clauses: ^[ContractClause]) Never! {
+    loop index in 0..<clauses.len() {
+        clauses[index].cond = sema_inline_rewrite_expr(rewrite, clauses[index].cond)
+        clauses[index].message_expr = sema_inline_rewrite_expr(rewrite, clauses[index].message_expr)
     }
-    mapped
 }
 
-sema_inline_rewrite_params: fn(rewrite: ^SemaInlineRewrite, params: [Param]) -> [Param] Never! {
-    ^mapped: [Param]{}
-    loop param in params {
-        ^updated: param.copy()
-        sema_inline_private_types(rewrite, param.ty, param.ty_span)
-        updated.ty = sema_inline_rewrite_type(rewrite, param.ty)
-        updated.default = sema_inline_rewrite_optional_expr(rewrite, param.default)
-        mapped.push(updated)
-        rewrite.locals.push(param.name)
+sema_inline_rewrite_params: fn(rewrite: ^SemaInlineRewrite, params: ^[Param]) Never! {
+    loop index in 0..<params.len() {
+        sema_inline_private_types(rewrite, params[index].ty, params[index].ty_span)
+        params[index].ty = sema_inline_rewrite_type(rewrite, params[index].ty)
+        params[index].default = sema_inline_rewrite_optional_expr(rewrite, params[index].default)
+        rewrite.locals.push(params[index].name)
     }
-    mapped
 }
 
 // A bound names a trait the rewrite may rename (`<M: Native>` inside an
 // instance whose `Native` became the generated nominal).
-sema_inline_rewrite_type_params: fn(rewrite: SemaInlineRewrite, params: [TypeParam]) -> [TypeParam] Never! {
-    mapped: loop param in params -> {
-        ^updated: param.copy()
-        updated.bounds = loop bound in param.bounds -> sema_inline_mapped_name(rewrite, bound)
-        updated
+sema_inline_rewrite_type_params: fn(rewrite: SemaInlineRewrite, params: ^[TypeParam]) Never! {
+    loop index in 0..<params.len() {
+        params[index].bounds = loop bound in params[index].bounds -> sema_inline_mapped_name(rewrite, bound)
     }
-    mapped
 }
 
 // Function specialization plus the call routes.
 sema_inline_rewrite_func: fn(rewrite: ^SemaInlineRewrite, function: Func) -> Func Never! {
     ^updated: function
     saved: rewrite.locals.len()
-    updated.type_params = sema_inline_rewrite_type_params(rewrite, function.type_params)
-    updated.params = sema_inline_rewrite_params(rewrite, function.params)
+    sema_inline_rewrite_type_params(rewrite, updated.type_params)
+    sema_inline_rewrite_params(rewrite, updated.params)
     if function.return_type == .Val(return_type) {
         if function.return_type_span == .Val(span) {
             sema_inline_private_types(rewrite, return_type, span)
         } else { sema_inline_private_types(rewrite, return_type, function.name_span) }
     }
     updated.return_type = sema_inline_rewrite_optional_type(rewrite, function.return_type)
-    updated.markers = sema_inline_rewrite_markers(rewrite, function.markers)
+    sema_inline_rewrite_markers(rewrite, updated.markers)
     updated.meta = sema_inline_rewrite_meta(rewrite, function.meta)
-    updated.pre = sema_inline_rewrite_clauses(rewrite, function.pre)
-    updated.post = sema_inline_rewrite_clauses(rewrite, function.post)
+    sema_inline_rewrite_clauses(rewrite, updated.pre)
+    sema_inline_rewrite_clauses(rewrite, updated.post)
     updated.body = sema_inline_rewrite_stmts(rewrite, function.body)
     sema_inline_restore_locals(rewrite, saved)
     updated
@@ -1669,26 +1643,20 @@ sema_inline_rewrite_funcs: fn(rewrite: ^SemaInlineRewrite, functions: [Func]) ->
     mapped
 }
 
-sema_inline_rewrite_named_types: fn(rewrite: SemaInlineRewrite, types: [NamedType]) -> [NamedType] Never! {
-    mapped: loop entry in types -> {
-        ^updated: entry.copy()
-        updated.ty = sema_inline_rewrite_type(rewrite, entry.ty)
-        updated
+sema_inline_rewrite_named_types: fn(rewrite: SemaInlineRewrite, types: ^[NamedType]) Never! {
+    loop index in 0..<types.len() {
+        types[index].ty = sema_inline_rewrite_type(rewrite, types[index].ty)
     }
-    mapped
 }
 
-sema_inline_rewrite_trait_blocks: fn(rewrite: ^SemaInlineRewrite, blocks: [TraitImplBlock]) -> [TraitImplBlock] Never! {
-    mapped: loop block in blocks -> {
-        ^updated: block.copy()
-        updated.trait_name = sema_inline_mapped_name(rewrite, block.trait_name)
-        updated.methods = sema_inline_rewrite_funcs(rewrite, block.methods)
-        updated.operator_rhs = sema_inline_rewrite_optional_type(rewrite, block.operator_rhs)
-        updated.assoc_type_impls = sema_inline_rewrite_named_types(rewrite, block.assoc_type_impls)
-        updated.constants = sema_inline_rewrite_impl_constants(rewrite, block.constants)
-        updated
+sema_inline_rewrite_trait_blocks: fn(rewrite: ^SemaInlineRewrite, blocks: ^[TraitImplBlock]) Never! {
+    loop index in 0..<blocks.len() {
+        blocks[index].trait_name = sema_inline_mapped_name(rewrite, blocks[index].trait_name)
+        blocks[index].methods = sema_inline_rewrite_funcs(rewrite, blocks[index].methods)
+        blocks[index].operator_rhs = sema_inline_rewrite_optional_type(rewrite, blocks[index].operator_rhs)
+        sema_inline_rewrite_named_types(rewrite, blocks[index].assoc_type_impls)
+        blocks[index].constants = sema_inline_rewrite_impl_constants(rewrite, blocks[index].constants)
     }
-    mapped
 }
 
 sema_inline_rewrite_impl_constants: fn(rewrite: ^SemaInlineRewrite, constants: [ImplConstValue]) -> [ImplConstValue] Never! {
@@ -1699,19 +1667,16 @@ sema_inline_rewrite_impl_constants: fn(rewrite: ^SemaInlineRewrite, constants: [
 sema_inline_rewrite_struct: fn(rewrite: ^SemaInlineRewrite, definition: StructDef, alias: String) -> StructDef Never! {
     ^updated: definition
     if alias != "" -> updated.name = sema_inline_type_name(alias, definition.name)
-    updated.type_params = sema_inline_rewrite_type_params(rewrite, definition.type_params)
-    fields: loop field_index in 0..<definition.fields.len() -> {
-        ^mapped: definition.fields[field_index]
-        mapped.ty = sema_inline_rewrite_type(rewrite, definition.fields[field_index].ty)
-        mapped.computed = sema_inline_rewrite_optional_expr(rewrite, definition.fields[field_index].computed)
-        mapped.serde_markers = sema_inline_rewrite_markers(rewrite, definition.fields[field_index].serde_markers)
-        mapped
+    sema_inline_rewrite_type_params(rewrite, updated.type_params)
+    loop field_index in 0..<updated.fields.len() {
+        updated.fields[field_index].ty = sema_inline_rewrite_type(rewrite, updated.fields[field_index].ty)
+        updated.fields[field_index].computed = sema_inline_rewrite_optional_expr(rewrite, updated.fields[field_index].computed)
+        sema_inline_rewrite_markers(rewrite, updated.fields[field_index].serde_markers)
     }
-    updated.fields = fields
     updated.methods = sema_inline_rewrite_funcs(rewrite, definition.methods)
-    updated.trait_impls = sema_inline_rewrite_trait_blocks(rewrite, definition.trait_impls)
-    updated.serde_markers = sema_inline_rewrite_markers(rewrite, definition.serde_markers)
-    updated.type_markers = sema_inline_rewrite_markers(rewrite, definition.type_markers)
+    sema_inline_rewrite_trait_blocks(rewrite, updated.trait_impls)
+    sema_inline_rewrite_markers(rewrite, updated.serde_markers)
+    sema_inline_rewrite_markers(rewrite, updated.type_markers)
     updated.derives = sema_inline_mapped_names(rewrite, definition.derives)
     updated
 }
@@ -1720,10 +1685,9 @@ sema_inline_rewrite_struct: fn(rewrite: ^SemaInlineRewrite, definition: StructDe
 sema_inline_rewrite_enum: fn(rewrite: ^SemaInlineRewrite, definition: EnumDef, alias: String) -> EnumDef Never! {
     ^updated: definition
     if alias != "" -> updated.name = sema_inline_type_name(alias, definition.name)
-    updated.type_params = sema_inline_rewrite_type_params(rewrite, definition.type_params)
-    variants: loop variant_index in 0..<definition.variants.len() -> {
-        ^mapped: definition.variants[variant_index]
-        mapped.payload = if definition.variants[variant_index].payload == {
+    sema_inline_rewrite_type_params(rewrite, updated.type_params)
+    loop variant_index in 0..<updated.variants.len() {
+        updated.variants[variant_index].payload = if updated.variants[variant_index].payload == {
             .Unit -> VariantPayload.Unit
             .Single(ty, span) -> VariantPayload.Single{ty: sema_inline_rewrite_type(rewrite, ty), span: span}
             .Named(fields) -> {
@@ -1731,15 +1695,13 @@ sema_inline_rewrite_enum: fn(rewrite: ^SemaInlineRewrite, definition: EnumDef, a
                 VariantPayload.Named{fields: mapped_fields}
             }
         }
-        mapped.discriminant_expr = sema_inline_rewrite_optional_expr(rewrite, definition.variants[variant_index].discriminant_expr)
-        mapped.serde_markers = sema_inline_rewrite_markers(rewrite, definition.variants[variant_index].serde_markers)
-        mapped
+        updated.variants[variant_index].discriminant_expr = sema_inline_rewrite_optional_expr(rewrite, updated.variants[variant_index].discriminant_expr)
+        sema_inline_rewrite_markers(rewrite, updated.variants[variant_index].serde_markers)
     }
-    updated.variants = variants
     updated.methods = sema_inline_rewrite_funcs(rewrite, definition.methods)
-    updated.trait_impls = sema_inline_rewrite_trait_blocks(rewrite, definition.trait_impls)
-    updated.serde_markers = sema_inline_rewrite_markers(rewrite, definition.serde_markers)
-    updated.type_markers = sema_inline_rewrite_markers(rewrite, definition.type_markers)
+    sema_inline_rewrite_trait_blocks(rewrite, updated.trait_impls)
+    sema_inline_rewrite_markers(rewrite, updated.serde_markers)
+    sema_inline_rewrite_markers(rewrite, updated.type_markers)
     updated.derives = sema_inline_mapped_names(rewrite, definition.derives)
     updated
 }
@@ -1747,17 +1709,14 @@ sema_inline_rewrite_enum: fn(rewrite: ^SemaInlineRewrite, definition: EnumDef, a
 sema_inline_rewrite_trait: fn(rewrite: ^SemaInlineRewrite, definition: TraitDef) -> TraitDef Never! {
     ^updated: definition
     updated.name = sema_inline_mapped_name(rewrite, definition.name)
-    methods: loop method_index in 0..<definition.methods.len() -> {
-        ^mapped: definition.methods[method_index]
+    loop method_index in 0..<updated.methods.len() {
         saved: rewrite.locals.len()
-        mapped.params = sema_inline_rewrite_params(rewrite, definition.methods[method_index].params)
-        mapped.return_type = sema_inline_rewrite_optional_type(rewrite, definition.methods[method_index].return_type)
-        mapped.default_body = sema_inline_rewrite_optional_body(rewrite, definition.methods[method_index].default_body)
-        mapped.markers = sema_inline_rewrite_markers(rewrite, definition.methods[method_index].markers)
+        sema_inline_rewrite_params(rewrite, updated.methods[method_index].params)
+        updated.methods[method_index].return_type = sema_inline_rewrite_optional_type(rewrite, updated.methods[method_index].return_type)
+        updated.methods[method_index].default_body = sema_inline_rewrite_optional_body(rewrite, updated.methods[method_index].default_body)
+        sema_inline_rewrite_markers(rewrite, updated.methods[method_index].markers)
         sema_inline_restore_locals(rewrite, saved)
-        mapped
     }
-    updated.methods = methods
     updated.constants = loop constant in definition.constants -> TraitConstDecl{name: constant.name, name_span: constant.name_span, ty: sema_inline_rewrite_type(rewrite, constant.ty), ty_span: constant.ty_span, default: sema_inline_rewrite_optional_expr(rewrite, constant.default), span: constant.span}
     updated
 }
@@ -1781,7 +1740,7 @@ sema_inline_rewrite_impl: fn(rewrite: ^SemaInlineRewrite, definition: ImplDef) -
     }
     updated.operator_rhs = sema_inline_rewrite_optional_type(rewrite, definition.operator_rhs)
     updated.methods = sema_inline_rewrite_funcs(rewrite, definition.methods)
-    updated.assoc_type_impls = sema_inline_rewrite_named_types(rewrite, definition.assoc_type_impls)
+    sema_inline_rewrite_named_types(rewrite, updated.assoc_type_impls)
     updated.constants = sema_inline_rewrite_impl_constants(rewrite, definition.constants)
     updated
 }
@@ -1794,7 +1753,7 @@ sema_inline_hoist_module: fn(code_module: CodeModule, source_path: String, hoist
     if code_module.instance_identity != None {
         return SemaInlineHoisted{code_module: updated, paths: [String]{}, types: SemaInlineTypes{}}
     }
-    body: code_module.body ?? return SemaInlineHoisted{code_module: updated, paths: [String]{}, types: SemaInlineTypes{}}
+    ^body: code_module.body ?? return SemaInlineHoisted{code_module: updated, paths: [String]{}, types: SemaInlineTypes{}}
     module_alias: sema_inline_type_alias(source_path)
     module_name: code_module.name
     display_alias: sema_inline_type_alias(module_name)
@@ -1836,7 +1795,9 @@ sema_inline_hoist_module: fn(code_module: CodeModule, source_path: String, hoist
     ^lifted: [Item]{}
     ^descendant_types: SemaInlineTypes{}
     ^descendant_paths: [String]{}
-    loop inner in body {
+    body.reverse()
+    loop body.len() > 0 {
+        inner: body.pop() ?? break
         if inner == {
             .CodeModule(child) -> {
                 child_path: "{source_path}.{child.name}"
@@ -1848,10 +1809,10 @@ sema_inline_hoist_module: fn(code_module: CodeModule, source_path: String, hoist
                 kept.push(Item.CodeModule{value: hoisted.code_module})
             }
             .Struct(_) | .Enum(_) | .Trait(_) | .Tag(_) | .Impl(_) | .Distinct(_) | .TypeAlias(_) -> {
-                lifted.push(inner.copy())
+                lifted.push(inner)
             }
             .Func(_) | .UnitFamily(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {
-                kept.push(inner.copy())
+                kept.push(inner)
             }
         }
     }
@@ -1929,9 +1890,13 @@ sema_inline_hoist_module: fn(code_module: CodeModule, source_path: String, hoist
         all_paths.push("{source_path}.{name}")
         sema_inline_type_put(all_types, "{source_path}.{name}", ty)
     }
-    loop full_path in descendant_paths {
-        all_paths.push(full_path.copy())
-        sema_inline_type_put(all_types, full_path, sema_inline_type_of(descendant_types, full_path) ?? next)
+    descendant_paths.reverse()
+    loop descendant_paths.len() > 0 {
+        full_path: descendant_paths.pop() ?? break
+        if sema_inline_type_of(descendant_types, full_path) == .Val(ty) {
+            sema_inline_type_put(all_types, full_path, ty)
+            all_paths.push(full_path)
+        }
     }
     SemaInlineHoisted{code_module: updated, paths: all_paths, types: all_types}
 }
@@ -1963,12 +1928,12 @@ sema_inline_private_type_span: fn(item: Item) -> Span? Never! {
     None
 }
 
-// `constant` with its value, declared type, markers and meta attribute
+// Rewrites `constant` with its value, declared type, markers and meta attribute
 // naming the member types and modules `rewrite` maps.
 sema_inline_rewrite_const: fn(rewrite: ^SemaInlineRewrite, constant: ^ConstDef) Never! {
     constant.value = sema_inline_rewrite_expr(rewrite, constant.value)
     constant.ty = sema_inline_rewrite_optional_type(rewrite, constant.ty)
-    constant.markers = sema_inline_rewrite_markers(rewrite, constant.markers)
+    sema_inline_rewrite_markers(rewrite, constant.markers)
     constant.meta = sema_inline_rewrite_meta(rewrite, constant.meta)
 }
 
@@ -2618,8 +2583,8 @@ sema_inline_rewrite_item: fn(rewrite: ^SemaInlineRewrite, item: Item) -> Item Ne
         .Test(definition) -> {
             ^updated: definition
             saved: rewrite.locals.len()
-            updated.params = sema_inline_rewrite_params(rewrite, definition.params)
-            updated.pre = sema_inline_rewrite_clauses(rewrite, definition.pre)
+            sema_inline_rewrite_params(rewrite, updated.params)
+            sema_inline_rewrite_clauses(rewrite, updated.pre)
             updated.body = sema_inline_rewrite_stmts(rewrite, definition.body)
             sema_inline_restore_locals(rewrite, saved)
             Item.Test{value: updated}

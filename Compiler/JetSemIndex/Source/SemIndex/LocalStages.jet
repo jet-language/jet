@@ -177,25 +177,32 @@ semindex_local_stage_effect: fn(function: FnBody, span: Span, summaries: [SemSum
         callee_id: fact.callee ?? next
         // The fact's caller is `function`, so a local callee is one of its own.
         target: symbol_key(permit.value.symbols, function.tree.symbols, callee_id)
-        ^row: [String]{}
         indexed: by_raw_key.get(target)
+        ^first_effect: String?{None}
         if {
-            indexed == .Val(index) -> row = summaries[index].solved.copy()
+            indexed == .Val(index) -> {
+                loop effect_name in summaries[index].solved {
+                    if !authority_is_deny_only(effect_name) {
+                        first_effect = Val(semindex_local_stage_call(summaries[index].local, effect_name))
+                        break
+                    }
+                }
+            }
             fact.facts.effect_bound == .Val(bound) -> {
-                row = loop entry in bound -> entry.name.copy()
+                loop entry in bound {
+                    if !authority_is_deny_only(entry.name) {
+                        // An indexed callee is named by its summary's local key, any
+                        // other by its key cut at Core's modules (semindex_function_key).
+                        callee_label: if semindex_function_key(target, [String:String]{}) == .Val(key) -> key.local else -> target
+                        first_effect = Val(semindex_local_stage_call(callee_label, entry.name))
+                        break
+                    }
+                }
             }
         }
-        loop effect_name in row {
-            if authority_is_deny_only(effect_name) -> next
-            // An indexed callee is named by its summary's local key, any
-            // other by its key cut at Core's modules (semindex_function_key).
-            found = Val(if {
-                indexed == .Val(index) -> semindex_local_stage_call(summaries[index].local, effect_name)
-                semindex_function_key(target, [String:String]{}) == .Val(key) -> semindex_local_stage_call(key.local, effect_name)
-                else -> semindex_local_stage_call(target, effect_name)
-            })
+        if first_effect == .Val(reason) {
+            found = Val(reason)
             found_at = fact.span.start
-            break
         }
     }
     found

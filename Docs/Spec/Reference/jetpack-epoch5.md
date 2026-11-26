@@ -93,6 +93,30 @@ import-edge facts for inspection, and narrows the graph before code generation;
 it is not runtime code. Omitting `boundaries` preserves ordinary import
 resolution.
 
+### Layer rules
+
+A Package may also order its modules (or workspace dependency packages) into
+named layers, lowest layer first, using `layers`:
+
+```jet
+layers: {
+    storage: ["storage"]
+    domain: ["domain"]
+    ui: ["ui"]
+}
+```
+
+Each entry maps a layer name to a list of module or package prefixes; the
+longest listed prefix assigns a module's layer, and listing the same module in
+more than one layer is a manifest error. Imports may only point to the same
+layer or a lower one. Every import edge pointing to a higher layer is refused
+with E0646 (`Jet.ImportPointsUpALayer`) in one pass, naming both modules and
+both layers, and is recorded as a denied `Structure.ImportEdge` fact. Dedicated
+test files are exempt so tests can exercise across layers, while production
+modules containing inline `#Test` blocks remain checked. Layer rules are
+erased before lowering and carry no runtime representation. See
+`Examples/Modules/Packages/LayerRules/package.jet`.
+
 `jet fmt` uses the typed Package and Config model for package files and declared
 Config files. Comment placement is fail-closed until that formatter owns it;
 Jet does not report a comment-bearing file clean after silently leaving it

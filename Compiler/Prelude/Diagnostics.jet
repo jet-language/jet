@@ -9475,6 +9475,35 @@ PublicDunderName: struct {
     }
 }
 
+ImportPointsUpALayer: struct {
+    from: String,
+    from_layer: String,
+    to: String,
+    to_layer: String,
+
+    impl Diagnostic {
+        code: "E0646",
+        safety_class: .Opinion,
+        safety_reason: "The import would run safely, and the package's `layers` table refuses upward dependencies so modules only depend downward.",
+        stage: [.Jet],
+        meaning: "A module imports a module placed in a higher package layer",
+        no_fix: .Design,
+        fix_next: "Move the shared logic down to the lower layer, depend on a trait in the lower layer, or update `layers:` in `package.jet`.",
+
+        what: fn(self) -> String {
+            "`{self.from}` in layer `{self.from_layer}` cannot import `{self.to}` in higher layer `{self.to_layer}`"
+        }
+
+        why: fn(self) -> String {
+            "The package's `layers:` table orders layers lowest first, and imports may only point to the same layer or a lower one"
+        }
+
+        fix: fn(self) -> String {
+            "Move the code that imports `{self.to}` up to layer `{self.to_layer}`, move what it needs down to `{self.from_layer}` or lower, or invert the dependency through a trait in `{self.from_layer}`"
+        }
+    }
+}
+
 CompileTimeReadsRuntimeValue: struct {
     name: String,
 

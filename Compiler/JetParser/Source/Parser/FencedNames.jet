@@ -175,6 +175,19 @@ parser_fence_reserve: fn(budget: ^ParserFenceBudget, entries: Int, bytes: Int) -
     true
 }
 
+parser_fence_single_token_cost: fn(token: Token, tables: TokenTables) -> ParserFenceCost Never! {
+    ^pending: [[Token]]{}
+    ^cost: ParserFenceCost{valid: true, count: 1, bytes: PARSER_FENCE_TOKEN_BYTES + parser_fence_token_extra_bytes(token, tables, pending)}
+    loop pending.len() > 0 {
+        batch: pending.pop() ?? [Token]{}
+        loop nested in batch {
+            cost.count += 1
+            cost.bytes += PARSER_FENCE_TOKEN_BYTES + parser_fence_token_extra_bytes(nested, tables, pending)
+        }
+    }
+    cost
+}
+
 parser_fence_token_cost: fn(tokens: [Token], tables: TokenTables) -> ParserFenceCost Never! {
     ^cost: ParserFenceCost{valid: true, count: 0, bytes: 0}
     ^pending: [[Token]]{tokens}
@@ -253,7 +266,7 @@ parser_fence_expand: fn(tokens: [Token], tables: ^TokenTables) -> ParserFenceExp
         if kind == TOKEN_LBRACE && top_level -> lambda_head = false
         if boundary {
             lambda_head = false
-            parser_fence_flush_segment(expansion, segment, brace_depth, tables)
+            parser_fence_flush_segment(expansion, segment.move(), brace_depth, tables)
             segment = [Token]{}
             expansion.tokens.push(token.copy())
             if kind == TOKEN_LBRACE -> brace_depth += 1
@@ -271,26 +284,39 @@ parser_fence_expand: fn(tokens: [Token], tables: ^TokenTables) -> ParserFenceExp
             kind == TOKEN_RBRACE && nested_brace_depth > 0 -> nested_brace_depth -= 1
         }
     }
-    if segment.len() > 0 -> parser_fence_flush_segment(expansion, segment, brace_depth, tables)
+    if segment.len() > 0 -> parser_fence_flush_segment(expansion, segment.move(), brace_depth, tables)
     expansion
+}
+
+parser_fence_push_owned_tokens: fn(dst: ^[Token], src: ^^[Token]) Never! {
+    ^source: src.move()
+    ^reversed: [Token]{}
+    loop source.len() > 0 {
+        token: source.pop() ?? break
+        reversed.push(token)
+    }
+    loop reversed.len() > 0 {
+        token: reversed.pop() ?? break
+        dst.push(token)
+    }
 }
 
 // A statement whose fences are rejected keeps its authored tokens; the
 // diagnostics stop the parse before those tokens are read.
-parser_fence_flush_segment: fn(expansion: ^ParserFenceExpansion, segment: [Token], brace_depth: Int, tables: ^TokenTables) {
+parser_fence_flush_segment: fn(expansion: ^ParserFenceExpansion, segment: ^^[Token], brace_depth: Int, tables: ^TokenTables) {
     has_fence: loop token in segment {
         if token.kind == TOKEN_FENCE_OPEN || token.kind == TOKEN_FENCE_CLOSE {
             break true
         }
     } ?? false
     if !has_fence {
-        loop token in segment -> expansion.tokens.push(token.copy())
+        parser_fence_push_owned_tokens(expansion.tokens, segment)
         return
     }
     result: parser_fence_expand_segment(segment, brace_depth, expansion.budget, tables)
     expansion.budget = ParserFenceBudget{entries: result.budget.entries, bytes: result.budget.bytes}
     if !result.valid {
-        loop token in segment -> expansion.tokens.push(token.copy())
+        parser_fence_push_owned_tokens(expansion.tokens, segment)
         loop diagnostic in result.diagnostics -> expansion.diagnostics.push(diagnostic)
         return
     }
@@ -526,7 +552,7 @@ parser_fence_parse_entries: fn(content: [Token], open_span: Span, binding_fence:
             current = [Token]{}
             next
         }
-        token_cost: parser_fence_token_cost([Token]{token.copy()}, tables)
+        token_cost: parser_fence_single_token_cost(token, tables)
         if !parser_fence_reserve(used, 1, token_cost.bytes) {
             return parser_fence_entries_failure(open_span, parser_fence_rejected_entry(token.span, "a fenced entry exceeds the expansion resource budget"), used)
         }

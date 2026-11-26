@@ -229,15 +229,15 @@ core_decl_runtime_locals: fn(entry: CoreDeclUse, units: [String]) -> [CoreDeclRu
     }
     segments: entry.target.split(".").to_list()
     if units.contains(entry.target) {
-        name: if entry.alias != "" -> entry.alias.copy() else -> segments[segments.len() - 1]
-        out.push(CoreDeclRuntimeLocal{local: "{name}.", unit: entry.target.copy()})
+        local: if entry.alias != "" -> "{entry.alias}." else -> "{segments[segments.len() - 1]}."
+        out.push(CoreDeclRuntimeLocal{local: local, unit: entry.target.copy()})
         return out
     }
     if segments.len() < 2 -> return out
     unit: segments[0..<segments.len() - 1].join(".")
     if !units.contains(unit) -> return out
-    name: if entry.alias != "" -> entry.alias.copy() else -> segments[segments.len() - 1]
-    out.push(CoreDeclRuntimeLocal{local: "{name}(", unit: unit})
+    local: if entry.alias != "" -> "{entry.alias}(" else -> "{segments[segments.len() - 1]}("
+    out.push(CoreDeclRuntimeLocal{local: local, unit: unit})
     out
 }
 
@@ -366,7 +366,7 @@ core_decl_enum_variants: fn(text: String, open: Int) -> [String] Never! {
         }
         end += 1
     }
-    kept: loop line in foundation_byte_text(bytes, open, end - 1).split("\n") -> if line.find(COMMENT_PREFIX) < 0 -> line.copy() else -> foundation_byte_text(line.bytes(), 0, line.find(COMMENT_PREFIX))
+    kept: loop line in foundation_byte_text(bytes, open, end - 1).split("\n") -> if line.find(COMMENT_PREFIX) < 0 -> line else -> foundation_byte_text(line.bytes(), 0, line.find(COMMENT_PREFIX))
     body: kept.join("\n")
     code_bytes: body.bytes()
     ^variants: [String]{}
@@ -631,8 +631,8 @@ core_decl_embedded_names: fn(text: String) -> [String] Never! {
             loop rest.contains(call) {
                 after: rest.partition(call).tail
                 name: after.partition("\"").head
-                if name != "" && !names.contains(name) -> names.push(name.copy())
-                rest = after.copy()
+                if name != "" && !names.contains(name) -> names.push(name)
+                rest = after
             }
         }
     }
@@ -643,11 +643,8 @@ core_decl_embedded_names: fn(text: String) -> [String] Never! {
 // `Core/UI/Xkb.jet`).
 core_decl_directory: fn(path: String) -> String Never! {
     parts: path.split("/").to_list()
-    ^kept: [String]{}
-    loop (index, part) in parts {
-        if index + 1 < parts.len() -> kept.push(part.copy())
-    }
-    kept.join("/")
+    if parts.len() <= 1 -> return ""
+    parts[0..<parts.len() - 1].join("/")
 }
 
 // Every Core asset: each file a source embeds, as a repository path beside

@@ -1,0 +1,40 @@
+// Compile-time checks for core.net.dtls: verifies Examples/Network/DTLSEcho.jet,
+// Tests/Cases/Net/DTLSInteropLoopback.fixture/main.jet, and move-only resource
+// semantics on DTLSSession and DTLSListener.
+use {
+    dtls_files: core.files
+    jet_cli.[
+        jet_cli_compile_check,
+        jet_cli_toolchain_root,
+    ]
+    jet_foundation.[BuildSettingOverride]
+}
+
+dtls_test_root: fn() -> String {
+    if jet_cli_toolchain_root(dtls_files.cwd() ?? ".") == {
+        .Found(found) -> found
+        .Missing(what, fix) -> panic("{what}; {fix}")
+    }
+}
+
+#Test("dtls12: Examples/Network/DTLSEcho.jet and DTLSInteropLoopback check cleanly") {
+    root: dtls_test_root()
+    echo_entry: "{root}/Examples/Network/DTLSEcho.jet"
+    echo_source: dtls_files.read(echo_entry) ?? panic("read DTLSEcho.jet: {err}")
+    echo_checked: jet_cli_compile_check(echo_entry, echo_source, false, false, None, false, false, false, [BuildSettingOverride]{}, "", false, None, false)
+    assert(echo_checked.exit_code == 0, "DTLSEcho.jet check failed (exit={echo_checked.exit_code}):\n{echo_checked.stdout}\n{echo_checked.stderr}")
+    loopback_entry: "{root}/Tests/Cases/Net/DTLSInteropLoopback.fixture/main.jet"
+    loopback_source: dtls_files.read(loopback_entry) ?? panic("read loopback main.jet: {err}")
+    loopback_checked: jet_cli_compile_check(loopback_entry, loopback_source, false, false, None, false, false, false, [BuildSettingOverride]{}, "", false, None, false)
+    assert(loopback_checked.exit_code == 0, "DTLSInteropLoopback check failed (exit={loopback_checked.exit_code}):\n{loopback_checked.stdout}\n{loopback_checked.stderr}")
+}
+
+#Test("dtls12: DTLSSession and DTLSListener enforce move-only resource semantics") {
+    tmp: dtls_files.temp_dir("jet-dtls-move") ?? panic("temp_dir: {err}")
+    file: "{tmp.path}/main.jet"
+    source: "package: {{\n    name: \"dtls_move_check\"\n    authority: {{ allow: [Mem.Alloc, Net, Time.Wait] }}\n}}\n\nuse dtls: core.net.dtls\n\nrun: fn() {{\n    cfg: dtls.DTLSServerConfig{{}}\n    listener: dtls.listen(\"127.0.0.1:0\", cfg) ?? panic(\"listen\")\n    t: task {{\n        _: listener.close()\n    }}\n    _: listener.close()\n    _: t.join()\n}}\n"
+    dtls_files.write(file, source) ?? panic("write main.jet: {err}")
+    checked: jet_cli_compile_check(file, source, false, false, None, false, false, false, [BuildSettingOverride]{}, "", false, None, false)
+    assert(checked.exit_code != 0, "expected UseAfterMove for moved DTLSListener")
+    assert(checked.stderr.contains("Jet.UseAfterMove"), "expected Jet.UseAfterMove, got:\n{checked.stderr}")
+}

@@ -239,13 +239,11 @@ sema_coverage_pattern_subject: fn(condition: TExpr) -> TExpr? {
 // it adds no shape and the other arms must cover the subject.
 sema_coverage_table: fn(conditions: [TExpr]) -> SemaCoverageTable? {
     if conditions.len() == 0 -> return None
-    ^head: conditions[0].copy()
-    if sema_coverage_guard_test(conditions[0]) == .Val(test) -> head = test
-    subject: sema_coverage_pattern_subject(head) ?? return None
+    subject: sema_coverage_guard_subject(conditions[0]) ?? sema_coverage_pattern_subject(conditions[0]) ?? return None
     ^shapes: [TPatternShape]{}
     loop condition in conditions {
-        if sema_coverage_guard_test(condition) == .Val(test) {
-            if test.kind == .PatternMatches(tested, _) && tested.span == subject.span -> next
+        if sema_coverage_guard_subject_span(condition) == .Val(tested_span) {
+            if tested_span == subject.span -> next
             return None
         }
         if condition.kind == {
@@ -259,12 +257,20 @@ sema_coverage_table: fn(conditions: [TExpr]) -> SemaCoverageTable? {
     SemaCoverageTable{subject: subject, shapes: shapes}
 }
 
-// The pattern test that starts a guarded arm's `&&` chain.
-sema_coverage_guard_test: fn(condition: TExpr) -> TExpr? {
+// The subject of the pattern test that starts a guarded arm's `&&` chain.
+priv sema_coverage_guard_subject: fn(condition: TExpr) -> TExpr? {
     if condition.kind == .Binary(op, _, _, lhs, _) && op == BinOp.And {
-        // copy: `lhs` is a payload of read parameter `condition`; the Val carrier owns this one
-        if lhs.kind == .PatternMatches(_, _) -> return Val(lhs.copy())
-        return sema_coverage_guard_test(lhs)
+        if lhs.kind == .PatternMatches(tested, _) -> return Val(tested.copy())
+        return sema_coverage_guard_subject(lhs)
+    }
+    None
+}
+
+// The span of the subject tested by a guarded arm's `&&` chain.
+priv sema_coverage_guard_subject_span: fn(condition: TExpr) -> Span? Never! {
+    if condition.kind == .Binary(op, _, _, lhs, _) && op == BinOp.And {
+        if lhs.kind == .PatternMatches(tested, _) -> return Val(tested.span)
+        return sema_coverage_guard_subject_span(lhs)
     }
     None
 }
@@ -677,7 +683,7 @@ sema_coverage_arm_heads: fn(shape: TPatternShape, full: ^[String], partial: ^[St
                     .Wildcard | .Bind(_, _) | .Value(_) -> {}
                 }
             }
-            if nested -> partial.push(variant.copy()) else if !ranged -> full.push(variant.copy())
+            if nested || !ranged -> sema_coverage_push_head(variant.copy(), !nested, full, partial)
         }
         .Present(_, _, inner, _) -> { sema_coverage_push_head("Val", inner == None, full, partial) }
         .Absent(_) -> { full.push("None") }
@@ -687,8 +693,8 @@ sema_coverage_arm_heads: fn(shape: TPatternShape, full: ^[String], partial: ^[St
     }
 }
 
-sema_coverage_push_head: fn(head: String, full_cover: Bool, full: ^[String], partial: ^[String]) {
-    if full_cover -> full.push(head.copy()) else -> partial.push(head.copy())
+sema_coverage_push_head: fn(head: ^^String, full_cover: Bool, full: ^[String], partial: ^[String]) {
+    if full_cover -> full.push(head) else -> partial.push(head)
 }
 
 sema_coverage_shape_span: fn(shape: TPatternShape) -> Span Never! {

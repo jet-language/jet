@@ -286,7 +286,7 @@ core_decl_rust_string: fn(expression: String, context: String, constants: CoreDe
         return core_decl_rust_string_text(literal, context)
     }
     name: core_decl_rust_constant(value) ?? return Err(core_decl_fail("unsupported Rust string value in {context}: {value}"))
-    if core_decl_text_of(constants, name) == .Val(text) -> return Ok(text.copy())
+    if core_decl_text_of(constants, name) == .Val(text) -> return Ok(text)
     Err(core_decl_fail("unknown Rust string constant `{value}` in {context}"))
 }
 
@@ -376,18 +376,20 @@ core_decl_coverage: fn(expression: String, context: String) -> CoreCallCoverage 
         return Err(core_decl_fail("unsupported CoreCallCoverage in {context}: {expression.trim()}"))
     }
     ^bits: 0
+    prefix: "CoreCallCoverage."
     loop raw in call.args[0].split("|") {
         part: raw.trim()
-        if part.starts_with("CoreCallCoverage.") {
-            name: part.after("CoreCallCoverage.")
-            bit: core_decl_coverage_bit(name.copy())
+        if part.starts_with(prefix) {
+            part_bytes: part.bytes()
+            name: foundation_byte_text(part_bytes, core_decl_len(prefix), part_bytes.len())
+            bit: core_decl_coverage_bit(name)
             if bit < 0 {
                 return Err(core_decl_fail("CoreCallCoverage.{name} has no Jet coverage bit in {context}"))
             }
             bits |= bit
             next
         }
-        bits |= core_decl_rust_int(part.copy(), context) ?? return Err(err)
+        bits |= core_decl_rust_int(raw, context) ?? return Err(err)
     }
     Ok(CoreCallCoverage{bits: bits})
 }
@@ -398,16 +400,27 @@ core_decl_pure_capability: fn() -> CoreCapabilityContract Never! {
 
 core_decl_capability: fn(expression: String, context: String, constants: CoreDeclTexts) -> CoreCapabilityContract CoreDeclarationError! {
     call: core_decl_whole_call(expression, context, "CoreCapabilityContract") ?? return Err(err)
-    ^strings: [String]{}
-    loop arg in call.args {
-        strings.push(core_decl_rust_string(arg, context, constants) ?? return Err(err))
-    }
-    count: strings.len()
+    count: call.args.len()
     if {
         call.name == "CoreCapabilityContract.pure" && count == 0 -> return Ok(core_decl_pure_capability())
-        call.name == "CoreCapabilityContract.native_required" && count == 2 -> return Ok(CoreCapabilityContract{kind: CoreCapabilityKind.NativeRequired, provider: Val(strings[0].copy()), fallback: None, failure: Val(strings[1].copy())})
-        call.name == "CoreCapabilityContract.portable_fallback" && count == 3 -> return Ok(CoreCapabilityContract{kind: CoreCapabilityKind.PortableFallback, provider: Val(strings[0].copy()), fallback: Val(strings[1].copy()), failure: Val(strings[2].copy())})
-        call.name == "CoreCapabilityContract.explicit_simulation" && count == 2 -> return Ok(CoreCapabilityContract{kind: CoreCapabilityKind.ExplicitSimulation, provider: Val(strings[0].copy()), fallback: None, failure: Val(strings[1].copy())})
+        call.name == "CoreCapabilityContract.native_required" && count == 2 -> return Ok(CoreCapabilityContract{
+            kind: CoreCapabilityKind.NativeRequired,
+            provider: Val(core_decl_rust_string(call.args[0], context, constants) ?? return Err(err)),
+            fallback: None,
+            failure: Val(core_decl_rust_string(call.args[1], context, constants) ?? return Err(err)),
+        })
+        call.name == "CoreCapabilityContract.portable_fallback" && count == 3 -> return Ok(CoreCapabilityContract{
+            kind: CoreCapabilityKind.PortableFallback,
+            provider: Val(core_decl_rust_string(call.args[0], context, constants) ?? return Err(err)),
+            fallback: Val(core_decl_rust_string(call.args[1], context, constants) ?? return Err(err)),
+            failure: Val(core_decl_rust_string(call.args[2], context, constants) ?? return Err(err)),
+        })
+        call.name == "CoreCapabilityContract.explicit_simulation" && count == 2 -> return Ok(CoreCapabilityContract{
+            kind: CoreCapabilityKind.ExplicitSimulation,
+            provider: Val(core_decl_rust_string(call.args[0], context, constants) ?? return Err(err)),
+            fallback: None,
+            failure: Val(core_decl_rust_string(call.args[1], context, constants) ?? return Err(err)),
+        })
     }
     Err(core_decl_fail("unsupported CoreCapabilityContract in {context}: {call.name}"))
 }
@@ -461,7 +474,7 @@ core_decl_call_effect: fn(module_name: String, member: String) -> String? Never!
         // A service's state store reads and writes its file. Its host
         // leaves are jet.runtime bindings that carry their own rows.
         "core.service" -> if member == "state_store" -> Val("FS") else -> None
-        "core.net.tls" | "core.net.ws" | "core.http.client" | "core.http.server" | "core.http.middleware" -> Val("Net")
+        "core.net.tls" | "core.net.dtls" | "core.net.ws" | "core.http.client" | "core.http.server" | "core.http.middleware" -> Val("Net")
         "core.http" -> if member == "get" -> Val("Net") else -> None
         // Key generation draws from the OS generator, like crypto.random.bytes.
         "core.crypto" -> if member == "__x25519_generate" || member == "__signing_generate" -> Val("Rand") else -> None
@@ -520,6 +533,10 @@ core_decl_call_effect_leaf: fn(module_name: String, member: String) -> String? N
         }
         "core.net.tls" -> if member == {
             "client" | "read" | "read_bytes" | "write" | "write_some" | "write_bytes" | "close" -> Val("Time.Wait")
+            else -> None
+        }
+        "core.net.dtls" -> if member == {
+            "connect" | "client" | "server" | "read" | "read_bytes" | "write" | "write_bytes" | "close" -> Val("Time.Wait")
             else -> None
         }
         // A WebSocket connect and upgrade both wait on the handshake.
@@ -587,7 +604,7 @@ core_decl_constructor_record: fn(call: CoreDeclRustCall, context: String, consta
         "CoreCallRecord.source_owned" -> {
             core_decl_expect_args(call, 3, context) ?? return Err(err)
             member: core_decl_rust_string(call.args[1], context, constants) ?? return Err(err)
-            record: core_decl_plain_record(core_decl_rust_string(call.args[0], context, constants) ?? return Err(err), member.copy(), member.copy(), core_decl_rust_bools(call.args[2], context) ?? return Err(err))
+            record: core_decl_plain_record(core_decl_rust_string(call.args[0], context, constants) ?? return Err(err), member, "", core_decl_rust_bools(call.args[2], context) ?? return Err(err))
             Ok(core_decl_source_owned(record))
         }
         "sema_web_call" -> {
@@ -633,18 +650,18 @@ core_decl_apply_builder: fn(record: CoreCallRecord, call: CoreDeclRustCall, cont
 
 // One Rust CoreCallRecord builder chain evaluated into its record.
 core_decl_call_record: fn(expression: String, context: String, constants: CoreDeclTexts) -> CoreDeclarationCall CoreDeclarationError! {
-    value: expression.trim()
-    root: core_decl_read_call(value, 0, context) ?? return Err(err)
+    bytes: expression.bytes()
+    start: core_decl_skip_space(bytes, 0)
+    root: core_decl_read_call(expression, start, context) ?? return Err(err)
     ^record: core_decl_constructor_record(root, context, constants) ?? return Err(err)
-    bytes: value.bytes()
     ^position: root.end
     loop position < bytes.len() {
         position = core_decl_skip_space(bytes, position)
         if position >= bytes.len() -> break
         if (Int{bytes[position]}) != 46 {
-            return Err(core_decl_fail("unsupported CoreCallRecord expression in {context}: {value}"))
+            return Err(core_decl_fail("unsupported CoreCallRecord expression in {context}: {expression.trim()}"))
         }
-        builder: core_decl_read_call(value.copy(), position + 1, context) ?? return Err(err)
+        builder: core_decl_read_call(expression, position + 1, context) ?? return Err(err)
         record = core_decl_apply_builder(record, builder, context, constants) ?? return Err(err)
         position = builder.end
     }

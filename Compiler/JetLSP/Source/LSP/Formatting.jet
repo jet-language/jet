@@ -167,6 +167,7 @@ lsp_newline_format_edits: fn(src: String, pair: LSPTokenBracePair, position: LSP
     }
     first: indent_end
     bytes: src.bytes()
+    closing_edit_text: if close_on_line == .Val(close) && close.close.start > indent_end -> Val("{lsp_line_ending_before(src, line_start)}{base_indent}") else -> None
     ^expected: "{base_indent}    "
     if first < line_end && bytes[first] == (U8{125}) {
         if pair.close.start != first -> return [TextEdit]{}
@@ -180,19 +181,19 @@ lsp_newline_format_edits: fn(src: String, pair: LSPTokenBracePair, position: LSP
             opened.push(TextEdit{span: Span{start: indent_end, end: indent_end}, new_text: "{lsp_line_ending_before(src, line_start)}{base_indent}"})
             return opened
         }
-        expected = base_indent.copy()
+        expected = base_indent
     }
     ^edits: [TextEdit]{}
     if foundation_byte_text(bytes, line_start, indent_end) != expected {
         edits.push(TextEdit{span: Span{start: line_start, end: indent_end}, new_text: expected})
     }
     if close_on_line == .Val(close) {
-        if close.close.start > indent_end {
+        if closing_edit_text == .Val(closing_text) {
             ^gap_start: close.close.start
             loop gap_start > line_start && (bytes[gap_start - 1] == (U8{32}) || bytes[gap_start - 1] == (U8{9})) {
                 gap_start -= 1
             }
-            edits.push(TextEdit{span: Span{start: gap_start, end: close.close.start}, new_text: "{lsp_line_ending_before(src, line_start)}{base_indent}"})
+            edits.push(TextEdit{span: Span{start: gap_start, end: close.close.start}, new_text: closing_text})
         }
     }
     edits
@@ -268,18 +269,15 @@ lsp_format_requested_lines: fn(src: String, requested: LSPRange) -> TextEdit? Ne
         }
     }
     indent: foundation_byte_text(bytes, first_line, lsp_leading_indent_end(src, first_line, lsp_line_content_end(src, first_line)))
-    replacement: lsp_indent_formatted_fragment(formatted.text, indent)
+    replacement: lsp_indent_formatted_fragment(formatted.text.move(), indent)
     if selected == replacement -> return None
     Val(TextEdit{span: Span{start: start, end: end}, new_text: replacement})
 }
 
 // Each nonblank line of the formatted fragment gets the fragment's indent.
-lsp_indent_formatted_fragment: fn(formatted: String, indent: String) -> String Never! {
-    if indent.is_empty() -> return formatted.copy()
-    ^out: [String]{}
-    loop line in formatted.split("\n") {
-        if line.trim().is_empty() -> out.push(line) else -> out.push("{indent}{line}")
-    }
+lsp_indent_formatted_fragment: fn(formatted: ^^String, indent: String) -> String Never! {
+    if indent.is_empty() -> return formatted
+    out: loop line in formatted.split("\n") -> if line.trim().is_empty() -> line else -> "{indent}{line}"
     out.join("\n")
 }
 

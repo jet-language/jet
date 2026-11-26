@@ -171,7 +171,10 @@ sema_expression_panic_locals: fn(scopes: SemaScopeTable, span: Span) -> [TPanicL
         rows[name] = row
     }
     names.sort()
-    locals: loop name in names -> {
+    names.reverse()
+    ^locals: [TPanicLocal]{}
+    loop names.len() > 0 {
+        name: names.pop() ?? break
         row: rows.get(name) ?? {
             next
         }
@@ -179,7 +182,8 @@ sema_expression_panic_locals: fn(scopes: SemaScopeTable, span: Span) -> [TPanicL
         local_ty: symbol.ty ?? {
             next
         }
-        TPanicLocal{display_name: name.copy(), local: checked_symbol_local(name, symbol.span, symbol.id, local_ty)}
+        local: checked_symbol_local(name, symbol.span, symbol.id, local_ty)
+        locals.push(TPanicLocal{display_name: name, local: local})
     }
     locals
 }
@@ -908,9 +912,8 @@ sema_failure_method_callee: fn(checked: TExpr, check: SemaBodyCheck) -> SemaFail
 // The registered key of method `key`. A call resolved from the caller's own
 // declarations names its method by the owner's type name
 // (sema_call_method_candidate_from_func), not by the registered owner key.
-sema_failure_method_key: fn(graph: SemaRegistrationGraph, key: String) -> String? {
-    // copy: the call keeps its reference.
-    if sema_registration_callable_row(graph, key) != None -> return Val(key.copy())
+sema_failure_method_key: fn(graph: SemaRegistrationGraph, key: ^^String) -> String? {
+    if sema_registration_callable_row(graph, key) != None -> return Val(key)
     loop module_index in 0..<graph.modules.len() {
         module_identity: module_text(graph.module_table, graph.modules[module_index].module_identity)
         if !key.starts_with("function:{module_identity}.") -> next
@@ -1574,31 +1577,31 @@ sema_control_value_loop_fallback_stmt: fn(fallback: OrFallback, loop_label: Name
     }
 }
 
-sema_control_value_loop_append_route: fn(statements: ^[Stmt], route: Stmt) -> Bool Never! {
+sema_control_value_loop_append_route: fn(statements: ^[Stmt], route: ^^Stmt) -> Bool Never! {
     if statements.len() == 0 -> return false
     ^root: statements[0]
     if root == {
         .Loop(body, span, arrow_body, label) -> {
             ^updated_body: body.copy()
-            updated_body.push(route.copy())
+            updated_body.push(route)
             statements[0] = Stmt.Loop{body: updated_body, span: span, arrow_body: arrow_body, label: label}
             return true
         }
         .While(condition, body, span, arrow_body, label) -> {
             ^updated_body: body.copy()
-            updated_body.push(route.copy())
+            updated_body.push(route)
             statements[0] = Stmt.While{cond: condition, body: updated_body, span: span, arrow_body: arrow_body, label: label}
             return true
         }
         .For(variable, variable_span, variable_two, kind, body, span, arrow_body, label, vectorization) -> {
             ^updated_body: body.copy()
-            updated_body.push(route.copy())
+            updated_body.push(route)
             statements[0] = Stmt.For{var: variable, var_span: variable_span, var2: variable_two, kind: kind, body: updated_body, span: span, arrow_body: arrow_body, label: label, auto_vectorization: vectorization}
             return true
         }
         .CountedLoop(init, condition, step, body, span, arrow_body, label) -> {
             ^updated_body: body.copy()
-            updated_body.push(route.copy())
+            updated_body.push(route)
             statements[0] = Stmt.CountedLoop{init: init, cond: condition, step: step, body: updated_body, span: span, arrow_body: arrow_body, label: label}
             return true
         }
@@ -1793,7 +1796,7 @@ sema_expression_or_fallback_route: fn(fallback: OrFallback, span: Span, subject_
         key: symbol_key_text(SymbolKind.Local, local_module, owner, "err")
         symbol: Symbol{id: sema_symbol_id_of(check.program.*, check.context, key), kind: SymbolKind.Local, name: "err", module_identity: check.environment.module_identity, owner: Val(owner), span: span, ty: Val(error_type), visibility: 0}
         frame: check.scopes.current
-        sema_scope_push_binding(check.scopes, SemaScopeBinding{frame: frame, symbol: symbol, key: key.copy(), mutable: false, access: AccessConvention.Read, integer_bounds: None, string_view: false, compiler_builtin: false})
+        sema_scope_push_binding(check.scopes, SemaScopeBinding{frame: frame, symbol: symbol, key: key, mutable: false, access: AccessConvention.Read, integer_bounds: None, string_view: false, compiler_builtin: false})
         sema_ownership_declare_ambient_binding(check.state, symbol)
         ambient_err = Val(checked_symbol_local("err", span, symbol.id, error_type))
     }
@@ -2394,7 +2397,7 @@ sema_expression_check_pattern_condition: fn(subject: Expr, pattern: Pattern, spa
     // A failed pattern (an arm E0305 refused) still declares every name it
     // binds: a recovered binding with its type, the rest untyped, so the
     // arm's uses add no E0107 after the pattern's own report.
-    checked: checked_pattern.checked ?? {
+    ^checked: checked_pattern.checked ?? {
         ^recovered: sema_expression_recovery_condition_bindings(checked_pattern.bindings, window_names, owner, local_module, check.environment.module_identity, check.program.*, check.context)
         ^names: [BindName]{}
         sema_pattern_test_binding_names(pattern, names)
@@ -2405,19 +2408,20 @@ sema_expression_check_pattern_condition: fn(subject: Expr, pattern: Pattern, spa
     }
     ^facts: [TPatternBindingFact]{}
     ^bindings: [SemaConditionBinding]{}
-    loop fact in checked.bindings {
-        ^updated: fact.copy()
-        if fact.name != "" && fact.name != "_" {
-            window: window_names.contains(fact.name)
-            key: symbol_key_text(SymbolKind.Local, local_module, owner, fact.name)
+    checked.bindings.reverse()
+    loop checked.bindings.len() > 0 {
+        ^updated: checked.bindings.pop() ?? break
+        if updated.name != "" && updated.name != "_" {
+            window: window_names.contains(updated.name)
+            key: symbol_key_text(SymbolKind.Local, local_module, owner, updated.name)
             id: sema_symbol_id_of(check.program.*, check.context, key)
             updated.symbol_id = Val(id)
             if window -> updated.mutable = true
-            symbol: Symbol{id: id, kind: SymbolKind.Local, name: fact.name, module_identity: check.environment.module_identity, owner: Val(owner.copy()), span: fact.span, ty: Val(fact.ty), visibility: 0}
+            symbol: Symbol{id: id, kind: SymbolKind.Local, name: updated.name, module_identity: check.environment.module_identity, owner: Val(owner.copy()), span: updated.span, ty: Val(updated.ty), visibility: 0}
             ^sources: [Expr]{}
-            sema_expression_pattern_binding_sources(checked.pattern.shape, checked_subject.ty, source ?? subject, fact.name, check, sources)
+            sema_expression_pattern_binding_sources(checked.pattern.shape, checked_subject.ty, source ?? subject, updated.name, check, sources)
             if !window && !sema_expression_subject_moved(subject) {
-                sema_expression_reject_read_write_view_payload(check, subject, checked_subject.ty, fact.ty)
+                sema_expression_reject_read_write_view_payload(check, subject, checked_subject.ty, updated.ty)
             }
             // An explicit `name.move()` takes this payload out of its subject
             // (sema_ownership_move_pattern_payload) when the subject stays
@@ -2794,24 +2798,30 @@ sema_expression_condition_binding_names: fn(condition: Expr, names: ^[BindName])
     }
 }
 
-sema_expression_if_next_body: fn(body: [Stmt], value: Expr, scopes: SemaScopeTable, condition: Expr, then_arm: Bool) -> [Stmt] {
+priv sema_expression_if_append_continue: fn(body: [Stmt], span: Span) -> [Stmt] {
     ^out: body.copy()
-    if sema_expression_if_next_word(value, scopes, condition, then_arm) {
-        out.push(Stmt.Continue{span: expr_span(value)})
-    }
+    out.push(Stmt.Continue{span: span})
     out
 }
 
-sema_expression_if_next_value: fn(value: Expr, scopes: SemaScopeTable, condition: Expr, then_arm: Bool) -> Expr {
-    if sema_expression_if_next_word(value, scopes, condition, then_arm) {
-        return Expr.NoElse{span: expr_span(value), id: AST_NODE_GENERATED}
-    }
-    value.copy()
-}
-
 sema_expression_if: fn(condition: Expr, then_body: [Stmt], then_value: Expr, else_body: [Stmt], else_value: Expr, span: Span, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
-    if sema_expression_if_next_word(then_value, check.scopes, condition, true) || sema_expression_if_next_word(else_value, check.scopes, condition, false) {
-        return sema_expression_if(condition, sema_expression_if_next_body(then_body, then_value, check.scopes, condition, true), sema_expression_if_next_value(then_value, check.scopes, condition, true), sema_expression_if_next_body(else_body, else_value, check.scopes, condition, false), sema_expression_if_next_value(else_value, check.scopes, condition, false), span, expected, check)
+    then_next: sema_expression_if_next_word(then_value, check.scopes, condition, true)
+    else_next: sema_expression_if_next_word(else_value, check.scopes, condition, false)
+    if {
+        then_next && else_next -> {
+            then_span: expr_span(then_value)
+            else_span: expr_span(else_value)
+            return sema_expression_if(condition, sema_expression_if_append_continue(then_body, then_span), Expr.NoElse{span: then_span, id: AST_NODE_GENERATED}, sema_expression_if_append_continue(else_body, else_span), Expr.NoElse{span: else_span, id: AST_NODE_GENERATED}, span, expected, check)
+        }
+        then_next -> {
+            then_span: expr_span(then_value)
+            return sema_expression_if(condition, sema_expression_if_append_continue(then_body, then_span), Expr.NoElse{span: then_span, id: AST_NODE_GENERATED}, else_body, else_value, span, expected, check)
+        }
+        else_next -> {
+            else_span: expr_span(else_value)
+            return sema_expression_if(condition, then_body, then_value, sema_expression_if_append_continue(else_body, else_span), Expr.NoElse{span: else_span, id: AST_NODE_GENERATED}, span, expected, check)
+        }
+        else -> {}
     }
     type_param: sema_expression_type_table_param(condition, check)
     if type_param == .Val(param) {
@@ -3043,8 +3053,8 @@ sema_expression_if: fn(condition: Expr, then_body: [Stmt], then_value: Expr, els
                 // arms with plain success values; the plain side lifts into
                 // the expected carrier through the one `Ok` constructor.
                 .Val(carrier) -> {
-                    joined_then = sema_expression_lift_into_carrier(then_checked, carrier)
-                    joined_else = sema_expression_lift_into_carrier(else_checked, carrier)
+                    joined_then = sema_expression_lift_into_carrier(joined_then, carrier)
+                    joined_else = sema_expression_lift_into_carrier(joined_else, carrier)
                     carrier
                 }
                 .None -> {
@@ -3105,32 +3115,71 @@ sema_expression_type_table_param: fn(condition: Expr, check: SemaBodyCheck) -> S
 // table's span; the whole chain is checked here as the statement table is
 // (sema_stmt_check_switch): each arm with `T` read as its type, then rebuilt
 // as the same IfExpr levels on TypeTest conditions the IR folds per instance.
-sema_expression_type_table: fn(param: String, condition: Expr, then_body: [Stmt], then_value: Expr, else_body: [Stmt], else_value: Expr, span: Span, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
-    ^heads: [Expr]{condition.copy()}
-    ^bodies: [[Stmt]]{then_body.copy()}
-    ^values: [Expr]{then_value.copy()}
-    ^rest_body: else_body.copy()
-    ^rest_value: else_value.copy()
-    loop rest_body.len() == 0 {
-        ^next_body: [Stmt]{}
-        ^next_value: Expr?{None}
-        if rest_value == {
-            .If(level_condition, level_body, level_value, level_else_body, level_else_value, level_span, _) -> {
-                if level_span == span {
-                    heads.push(level_condition)
-                    bodies.push(level_body)
-                    values.push(level_value)
-                    next_body = level_else_body
-                    next_value = Val(level_else_value)
-                }
-            }
-            .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
-        }
-        level_next: next_value ?? break
-        rest_body = next_body
-        rest_value = level_next
+priv sema_expression_type_table_check_arm: fn(arm_body: [Stmt], arm_value: Expr, arm_span: Span, arm_return: Type?, arm_expected: Type?, fork: SemaOwnershipFork, mark: SemaScopeMark, check: ^SemaBodyCheck, reaching: ^[SemaOwnershipPath], arm_found: ^[SemaOwnershipShareSite], arm_bodies: ^[[TStmt]], arm_values: ^[TExpr]) -> Bool {
+    branch_fork: sema_ownership_fork(check.state)
+    sema_scope_enter(check.scopes, check.state, "if.arm@{arm_span.start}")
+    ^body: sema_check_statements(arm_body, arm_return, check, mark.loop_depth)
+    ^value: TExpr?{None}
+    if body.complete -> value = sema_check_expression(arm_value, arm_expected, check)
+    sema_single_use_leave_scope(check)
+    path: sema_ownership_fork_path(check.state, fork)
+    sema_ownership_fork_rollback(check.state, branch_fork)
+    sema_ownership_fork_close(check.state, branch_fork)
+    sema_scope_rollback(check.scopes, mark)
+    loop site in path.share_found -> arm_found.push(site)
+    checked: value ?? return false
+    never: Type.Named{name: "Never"}
+    if !sema_stmt_block_has_no_fallthrough(arm_body) && checked.ty != never {
+        reaching.push(path)
     }
-    no_else: rest_body.len() == 0 && rest_value == .NoElse(_, _)
+    ^body_value: body.value.move()
+    body.value = [TStmt]{}
+    arm_bodies.push(body_value)
+    arm_values.push(checked)
+    true
+}
+
+priv sema_expression_type_table_walk: fn(param: String, names: [String], condition: Expr, then_body: [Stmt], then_value: Expr, else_body: [Stmt], else_value: Expr, span: Span, expected: Type?, fork: SemaOwnershipFork, check: ^SemaBodyCheck, targets: ^[Type], tests: ^[TExpr], arm_bodies: ^[[TStmt]], arm_values: ^[TExpr], reaching: ^[SemaOwnershipPath], arm_found: ^[SemaOwnershipShareSite]) -> {no_else: Bool, complete: Bool} {
+    ^complete: true
+    target: sema_stmt_type_switch_target(param, condition, targets, check.environment.*, check.program.*, check.scopes, check.diagnostics)
+    if target == .Val(_) {
+        arm_type: target ?? return {no_else: false, complete: false}
+        mark: sema_scope_mark(check.scopes)
+        ^substituted_expected: Type?{None}
+        ^substituted_return: Type?{None}
+        actuals: [Type]{arm_type.copy()}
+        if expected == .Val(declared) {
+            substituted_expected = Val(sema_inference_substitute_type(declared, names, actuals))
+        }
+        if mark.return_type == .Val(declared) {
+            substituted_return = Val(sema_inference_substitute_type(declared, names, actuals))
+        }
+        // After the mark, so the rollback below puts the rebound rows back.
+        sema_stmt_type_switch_rebind(check.scopes, param, arm_type)
+        tests.push(sema_stmt_type_test_condition(param, arm_type, expr_span(condition), check.context).value)
+        targets.push(arm_type)
+        arm_ok: sema_expression_type_table_check_arm(then_body, then_value, expr_span(condition), if substituted_return == .Val(_) -> substituted_return else -> mark.return_type, if substituted_expected == .Val(_) -> substituted_expected else -> expected, fork, mark, check, reaching, arm_found, arm_bodies, arm_values)
+        if !arm_ok {
+            complete = false
+        }
+    } else {
+        complete = false
+    }
+    if else_body.len() == 0 {
+        if else_value == .If(level_condition, level_body, level_value, level_else_body, level_else_value, level_span, _) && level_span == span {
+            rest: sema_expression_type_table_walk(param, names, level_condition, level_body, level_value, level_else_body, level_else_value, span, expected, fork, check, targets, tests, arm_bodies, arm_values, reaching, arm_found)
+            return {no_else: rest.no_else, complete: complete && rest.complete}
+        }
+        if else_value == .NoElse(_, _) -> return {no_else: true, complete: complete}
+    }
+    mark: sema_scope_mark(check.scopes)
+    if !sema_expression_type_table_check_arm(else_body, else_value, span, mark.return_type, expected, fork, mark, check, reaching, arm_found, arm_bodies, arm_values) {
+        complete = false
+    }
+    {no_else: false, complete: complete}
+}
+
+sema_expression_type_table: fn(param: String, condition: Expr, then_body: [Stmt], then_value: Expr, else_body: [Stmt], else_value: Expr, span: Span, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
     names: [String]{param}
     fork: sema_ownership_fork(check.state)
     ^targets: [Type]{}
@@ -3141,63 +3190,9 @@ sema_expression_type_table: fn(param: String, condition: Expr, then_body: [Stmt]
     // arm found, in arm order.
     ^reaching: [SemaOwnershipPath]{}
     ^arm_found: [SemaOwnershipShareSite]{}
-    ^complete: true
-    // The type arms, then `else` (index heads.len()), which sees only
-    // `T`'s bounds.
-    loop index in 0..<(heads.len() + 1) {
-        is_else: index == heads.len()
-        if is_else && no_else -> break
-        ^target: Type?{None}
-        if !is_else {
-            target = sema_stmt_type_switch_target(param, heads[index], targets, check.environment.*, check.program.*, check.scopes, check.diagnostics)
-            if target == None {
-                complete = false
-                next
-            }
-        }
-        mark: sema_scope_mark(check.scopes)
-        ^arm_expected: expected.copy()
-        ^arm_return: mark.return_type.copy()
-        if target == .Val(arm_type) {
-            actuals: [Type]{arm_type.copy()}
-            if expected == .Val(declared) {
-                arm_expected = Val(sema_inference_substitute_type(declared, names, actuals))
-            }
-            if mark.return_type == .Val(declared) {
-                arm_return = Val(sema_inference_substitute_type(declared, names, actuals))
-            }
-            // After the mark, so the rollback below puts the rebound rows back.
-            sema_stmt_type_switch_rebind(check.scopes, param, arm_type)
-            targets.push(arm_type.copy())
-            tests.push(sema_stmt_type_test_condition(param, arm_type, expr_span(heads[index]), check.context).value)
-        }
-        branch_fork: sema_ownership_fork(check.state)
-        arm_span: if is_else -> span else -> expr_span(heads[index])
-        sema_scope_enter(check.scopes, check.state, "if.arm@{arm_span.start}")
-        arm_body: if is_else -> rest_body else -> bodies[index]
-        arm_value: if is_else -> rest_value else -> values[index]
-        ^body: sema_check_statements(arm_body, arm_return, check, mark.loop_depth)
-        ^value: TExpr?{None}
-        if body.complete -> value = sema_check_expression(arm_value, arm_expected, check)
-        sema_single_use_leave_scope(check)
-        path: sema_ownership_fork_path(check.state, fork)
-        sema_ownership_fork_rollback(check.state, branch_fork)
-        sema_ownership_fork_close(check.state, branch_fork)
-        sema_scope_rollback(check.scopes, mark)
-        loop site in path.share_found -> arm_found.push(site)
-        checked: value ?? {
-            complete = false
-            next
-        }
-        never: Type.Named{name: "Never"}
-        if !sema_stmt_block_has_no_fallthrough(arm_body) && checked.ty != never {
-            reaching.push(path)
-        }
-        ^body_value: body.value.move()
-        body.value = [TStmt]{}
-        arm_bodies.push(body_value)
-        arm_values.push(checked)
-    }
+    walk: sema_expression_type_table_walk(param, names, condition, then_body, then_value, else_body, else_value, span, expected, fork, check, targets, tests, arm_bodies, arm_values, reaching, arm_found)
+    no_else: walk.no_else
+    complete: walk.complete
     sema_ownership_fork_rollback(check.state, fork)
     single_use_moves: loop path in reaching -> sema_single_use_path_moves(check.state, path)
     sema_single_use_check_paths(check, single_use_moves)
@@ -3248,11 +3243,10 @@ sema_expression_if_carrier: fn(expected: Type?, then_ty: Type, else_ty: Type) ->
     }
 }
 
-sema_expression_lift_into_carrier: fn(value: TExpr, carrier: Type) -> TExpr {
-    // copy: the lifted value is a new owned TExpr. When the carrier already matches it equals
-    // `value`, the caller's checked operand (a read parameter), which the caller keeps.
-    if type_identity_equal(value.ty, carrier) -> return value.copy()
-    sema_tree_node(carrier, TExprKind.Ok{value: value}, value.span)
+sema_expression_lift_into_carrier: fn(value: ^^TExpr, carrier: Type) -> TExpr {
+    if type_identity_equal(value.ty, carrier) -> return value
+    span: value.span
+    sema_tree_node(carrier, TExprKind.Ok{value: value}, span)
 }
 
 sema_expression_compare_chain: fn(operands: [Expr], ops: [BinOp], hooks: [Bool], span: Span, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {

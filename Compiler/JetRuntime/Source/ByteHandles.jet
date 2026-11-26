@@ -1,4 +1,14 @@
 // Byte lists use the composed U8 stride; a cursor is an unsigned raw word.
+BYTE_BUFFER_BYTES: I64{16}
+
+BYTE_BUFFER_SEQUENCE: I64{0}
+
+BYTE_BUFFER_POSITION: I64{8}
+
+PATH_HANDLE_BYTES: I64{8}
+
+PATH_HANDLE_SEQUENCE: I64{0}
+
 #Export(c) jet_rt_handle_clone_jet_byte_buffer: fn(buffer: I64) -> I64 {
     result: jet_rt_alloc(BYTE_BUFFER_BYTES, I64{8})
     dyn_store(wrapping(result + BYTE_BUFFER_SEQUENCE), data_sequence_clone(dyn_word(wrapping(buffer + BYTE_BUFFER_SEQUENCE)), DYN_BYTE_LIST))

@@ -124,14 +124,14 @@ core_record_source_demands: fn(declared: CoreDeclarations, rows: [CoreRecordFiel
     ^modules: [String:String]{}
     loop source in declared.source_rows {
         loop owned in source.owned_types {
-            if modules.get(owned) == None -> modules[owned.copy()] = source.module_name.copy()
+            if modules.get(owned) == None -> modules[owned] = source.module_name.copy()
         }
     }
     loop entry in declared.modules {
         loop leaf in entry.types {
             if {
-                leaf.generic_arity == 0 && leaf.variants.len() > 0 -> modules[leaf.name.copy()] = ""
-                modules.get(leaf.name) == None -> { modules[leaf.name.copy()] = entry.name.copy() }
+                leaf.generic_arity == 0 && leaf.variants.len() > 0 -> modules[leaf.name] = ""
+                modules.get(leaf.name) == None -> { modules[leaf.name] = entry.name.copy() }
             }
         }
     }
@@ -146,7 +146,7 @@ core_record_source_demands: fn(declared: CoreDeclarations, rows: [CoreRecordFiel
             key: "{owner_module} {name}"
             if module_name == "" || module_name == owner_module || seen.get(key) != None -> next
             seen[key] = true
-            demands.push(CoreRecordSourceDemand{owner_module: owner_module.copy(), type_name: name.copy(), module_name: module_name.copy()})
+            demands.push(CoreRecordSourceDemand{owner_module: owner_module.copy(), type_name: name.copy(), module_name: module_name})
         }
     }
     demands

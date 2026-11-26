@@ -444,11 +444,7 @@ jfmt_decode_named_shapes: fn(items: [Item], name: String, args: [Type], seen: ^[
     }
     seen.push(name.copy())
     result: jfmt_decode_named_shapes_inner(items, name, args, seen)
-    ^kept: [String]{}
-    loop seen_name in seen {
-        if seen_name != name -> kept.push(seen_name.copy())
-    }
-    seen = kept
+    ^_: seen.pop()
     result
 }
 
@@ -1102,12 +1098,12 @@ jfmt_fmt_generic_module: fn(f: ^JetFmt, generic: GenericModuleDef) {
     jfmt_write(f, generic.name)
     jfmt_write(f, ": module")
 
-    ^type_params: [GenericModuleParam]{}
-    ^value_params: [GenericModuleParam]{}
-    loop param in generic.params {
+    ^type_params: [Int]{}
+    ^value_params: [Int]{}
+    loop (index, param) in generic.params {
         if param == {
-            .Type(_, _, _) -> { type_params.push(param.copy()) }
-            .Value(_, _, _) -> value_params.push(param.copy())
+            .Type(_, _, _) -> { type_params.push(index) }
+            .Value(_, _, _) -> value_params.push(index)
         }
     }
     type_source: jfmt_source_list_span_after(f, generic.name_span.end, JFMT_DELIM_ANGLE)
@@ -1115,9 +1111,10 @@ jfmt_fmt_generic_module: fn(f: ^JetFmt, generic: GenericModuleDef) {
         jfmt_write(f, "<")
         multiline: jfmt_comma_begin(f, type_params.len(), type_source)
         loop index in 0..<type_params.len() {
-            param_span: jfmt_generic_module_param_span(type_params[index])
+            param: generic.params[type_params[index]]
+            param_span: jfmt_generic_module_param_span(param)
             jfmt_comma_before(f, index, multiline, param_span.start)
-            if type_params[index] == .Type(name, _, bound) {
+            if param == .Type(name, _, bound) {
                 jfmt_write(f, name)
                 if bound == .Val(bound_type) {
                     jfmt_write(f, ": ")
@@ -1136,9 +1133,10 @@ jfmt_fmt_generic_module: fn(f: ^JetFmt, generic: GenericModuleDef) {
         jfmt_write(f, "(")
         multiline: jfmt_comma_begin(f, value_params.len(), value_source)
         loop index in 0..<value_params.len() {
-            param_span: jfmt_generic_module_param_span(value_params[index])
+            param: generic.params[value_params[index]]
+            param_span: jfmt_generic_module_param_span(param)
             jfmt_comma_before(f, index, multiline, param_span.start)
-            if value_params[index] == .Value(name, _, ty) {
+            if param == .Value(name, _, ty) {
                 jfmt_write(f, name)
                 jfmt_write(f, ": ")
                 jfmt_fmt_type(f, ty)
@@ -1997,10 +1995,7 @@ jfmt_fmt_func: fn(f: ^JetFmt, func: Func) {
             }
         }
     }
-    // copy: the enclosing return type (owner: f, a write parameter the body formatting reads) is
-    // restored after this function (owner: `saved_return_type`); a write parameter's field cannot
-    // be left moved out across the calls that borrow f.
-    saved_return_type: f.expected_return_type.copy()
+    saved_return_type: f.expected_return_type
     f.expected_return_type = func.return_type
     // (card #501): an inline foreign fn's body is a single
     // foreign-source string. Reconstruct the triple-quoted shape exactly,
@@ -2227,11 +2222,17 @@ jfmt_fmt_view_source_union: fn(f: ^JetFmt, provenance: ViewProvenance, params: [
         if path.source == {
             .Receiver -> { jfmt_write(f, "self") }
             .Parameter(position) -> {
-                ^ordinary: [Param]{}
-                loop param in params {
-                    if param.name != "self" -> ordinary.push(param.copy())
+                ^seen_ordinary: 0
+                ^found: -1
+                loop (param_index, param) in params {
+                    if param.name == "self" -> next
+                    if seen_ordinary == position {
+                        found = param_index
+                        break
+                    }
+                    seen_ordinary += 1
                 }
-                if position < ordinary.len() -> jfmt_write(f, ordinary[position].name) else {
+                if found >= 0 -> jfmt_write(f, params[found].name) else {
                     jfmt_write(f, "param{position}")
                 }
             }
@@ -2899,7 +2900,7 @@ jfmt_enum_entries_at_prefix: fn(e: EnumDef, prefix: String) -> [JetFmtEnumEntry]
     ^sorted: items
     ^position_index: 1
     loop position_index < sorted.len() {
-        current: sorted[position_index].copy()
+        current: sorted[position_index]
         ^position: position_index
         loop position > 0 && current.order < sorted[position - 1].order {
             sorted[position] = sorted[position - 1]

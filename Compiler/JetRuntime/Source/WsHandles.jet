@@ -1,4 +1,40 @@
-// Native-private carriers in WsABI.
+// WsError's carrier and tags live in CoreEnumABI.jet; WsMessage and WsConn80
+// are runtime-private carriers owned here.
+WS_MESSAGE_BYTES: I64{24}
+
+WS_MESSAGE_TAG: I64{0}
+
+WS_MESSAGE_PAYLOAD: I64{8}
+
+WS_MESSAGE_REASON: I64{16}
+
+// WsConn80: the Stream64 it owns, whether it is the client (which masks the
+// frames it sends), closed, the per-operation I/O timeout, the read buffer
+// (bytes start..length of capacity are received and not yet decoded), the
+// write lock that keeps each frame whole, and whether it joined the live
+// transport hub.
+WS_CONN_BYTES: I64{80}
+
+WS_CONN_STREAM: I64{0}
+
+WS_CONN_CLIENT: I64{8}
+
+WS_CONN_CLOSED: I64{16}
+
+WS_CONN_TIMEOUT_MS: I64{24}
+
+WS_CONN_BUFFER: I64{32}
+
+WS_CONN_LENGTH: I64{40}
+
+WS_CONN_CAPACITY: I64{48}
+
+WS_CONN_START: I64{56}
+
+WS_CONN_WRITE_LOCK: I64{64}
+
+WS_CONN_HUB: I64{72}
+
 #Export(c) jet_rt_handle_clone_jet_ws_error: fn(value: I64) -> I64 {
     kind: dyn_word(wrapping(value + WS_ERROR_TAG))
     result: jet_rt_alloc(WS_ERROR_BYTES, I64{8})

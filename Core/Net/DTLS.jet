@@ -1,0 +1,1775 @@
+use {
+    core: core
+    net: core.net
+    tls: core.net.tls
+    core.net.tls.[ClientIdentity, RootCertificates]
+    crypto: core.crypto
+    ssldefs: __core_net_ssl_defs
+    ssltls: __core_net_ssl_tls
+    sslmsg: __core_net_ssl_msg
+    sslsrv12: __core_net_ssl_srv12
+    sslcookie: __core_net_ssl_cookie
+    suites: __core_net_ssl_ciphersuites
+    x509crt: __core_crypto_x509crt
+    pk: __core_crypto_pk
+    x509: __core_crypto_x509
+    asn1: __core_crypto_asn1
+    pkparse: __core_crypto_pkparse
+    drbg: __core_crypto_drbg
+    hashes: __core_crypto_md
+    cipher: __core_crypto_cipher
+    rt: jet.runtime.time
+    net_rt: jet.runtime.net
+}
+
+// core.net.dtls — DTLS 1.2 (RFC 6347) client and server datagram sessions
+// over UDP on the Jet port of Mbed TLS 3.6.7 (Core/Net/SSL).
+//
+// The engine drives the DTLS 1.2 record layer, flight retransmission state
+// machine, handshake fragmentation/reassembly, anti-replay sliding window,
+// HelloVerifyRequest cookie exchange, and AEAD cipher transforms through
+// datagram queues (SSLBio.rx_dgrams / tx_dgrams) and its monotonic timer.
+// This module moves datagrams between those queues and a UDPSocket, binds
+// client transport IDs for stateless cookies, enforces Jet's modern DTLS 1.2
+// cipher/group/signature policy, and exposes typed configuration, Result
+// errors, verified peer identity, and deterministic Close cleanup.
+
+DTLSClientConfig: struct {
+    alpn: [String]{[]},
+    trust: TLSClientTrust{TLSClientTrust.System},
+    identity: ClientIdentity?{None},
+    mtu: Int{0},
+    retransmit_min_ms: Int{1000},
+    retransmit_max_ms: Int{60000},
+    anti_replay: Bool{true},
+
+    // System roots, no client certificate, default MTU, 1s..60s retransmit
+    // backoff, anti-replay enabled, no ALPN.
+    default: fn() -> DTLSClientConfig Never! { DTLSClientConfig{} }
+
+    with_alpn: fn(self, protocols: [String]) -> DTLSClientConfig IOError! {
+        message: dtls_alpn_problem(protocols)
+        if message != "" -> return Err(dtls_config_error("DTLSClientConfig.with_alpn", message))
+        Ok(client_config_with(self, protocols.copy(), self.trust.copy(), self.identity.copy(), self.mtu, self.retransmit_min_ms, self.retransmit_max_ms, self.anti_replay))
+    }
+
+    with_trust: fn(self, trust: TLSClientTrust) -> DTLSClientConfig IOError! {
+        Ok(client_config_with(self, self.alpn.copy(), trust.copy(), self.identity.copy(), self.mtu, self.retransmit_min_ms, self.retransmit_max_ms, self.anti_replay))
+    }
+
+    with_client_identity: fn(self, identity: ClientIdentity) -> DTLSClientConfig IOError! {
+        Ok(client_config_with(self, self.alpn.copy(), self.trust.copy(), Val(identity.copy()), self.mtu, self.retransmit_min_ms, self.retransmit_max_ms, self.anti_replay))
+    }
+
+    with_mtu: fn(self, mtu: Int) -> DTLSClientConfig IOError! {
+        message: dtls_mtu_problem(mtu)
+        if message != "" -> return Err(dtls_config_error("DTLSClientConfig.with_mtu", message))
+        Ok(client_config_with(self, self.alpn.copy(), self.trust.copy(), self.identity.copy(), mtu, self.retransmit_min_ms, self.retransmit_max_ms, self.anti_replay))
+    }
+
+    with_retransmit_timeouts: fn(self, /, *, min_ms: Int, max_ms: Int) -> DTLSClientConfig IOError! {
+        message: dtls_timeout_problem(min_ms, max_ms)
+        if message != "" {
+            return Err(dtls_config_error("DTLSClientConfig.with_retransmit_timeouts", message))
+        }
+        Ok(client_config_with(self, self.alpn.copy(), self.trust.copy(), self.identity.copy(), self.mtu, min_ms, max_ms, self.anti_replay))
+    }
+
+    with_anti_replay: fn(self, enabled: Bool) -> DTLSClientConfig IOError! {
+        Ok(client_config_with(self, self.alpn.copy(), self.trust.copy(), self.identity.copy(), self.mtu, self.retransmit_min_ms, self.retransmit_max_ms, enabled))
+    }
+}
+
+DTLSServerConfig: struct {
+    cert: String{""},
+    key: String{""},
+    alpn: [String]{[]},
+    client_roots: RootCertificates?{None},
+    require_client_cert: Bool{false},
+    require_cookie: Bool{true},
+    cookie_timeout_sec: Int{60},
+    mtu: Int{0},
+    retransmit_min_ms: Int{1000},
+    retransmit_max_ms: Int{60000},
+    anti_replay: Bool{true},
+
+    // Validates a PEM certificate chain and the leaf's PEM private key eagerly.
+    from_pem: fn(cert_chain: [U8], private_key: [U8]) -> DTLSServerConfig IOError! {
+        validated: ClientIdentity.from_pem(cert_chain, private_key) ?? return Err(dtls_config_error("DTLSServerConfig.from_pem", "{err}"))
+        Ok(DTLSServerConfig{cert: validated.cert, key: validated.key})
+    }
+
+    with_alpn: fn(self, protocols: [String]) -> DTLSServerConfig IOError! {
+        message: dtls_alpn_problem(protocols)
+        if message != "" -> return Err(dtls_config_error("DTLSServerConfig.with_alpn", message))
+        Ok(server_config_with(self, protocols.copy(), self.client_roots.copy(), self.require_client_cert, self.require_cookie, self.cookie_timeout_sec, self.mtu, self.retransmit_min_ms, self.retransmit_max_ms, self.anti_replay))
+    }
+
+    with_client_roots: fn(self, roots: RootCertificates, /, *, required: Bool) -> DTLSServerConfig IOError! {
+        Ok(server_config_with(self, self.alpn.copy(), Val(roots.copy()), required, self.require_cookie, self.cookie_timeout_sec, self.mtu, self.retransmit_min_ms, self.retransmit_max_ms, self.anti_replay))
+    }
+
+    with_cookie: fn(self, enabled: Bool) -> DTLSServerConfig IOError! {
+        Ok(server_config_with(self, self.alpn.copy(), self.client_roots.copy(), self.require_client_cert, enabled, self.cookie_timeout_sec, self.mtu, self.retransmit_min_ms, self.retransmit_max_ms, self.anti_replay))
+    }
+
+    with_cookie_timeout: fn(self, seconds: Int) -> DTLSServerConfig IOError! {
+        if seconds < 0 {
+            return Err(dtls_config_error("DTLSServerConfig.with_cookie_timeout", "DTLS cookie timeout must be non-negative"))
+        }
+        Ok(server_config_with(self, self.alpn.copy(), self.client_roots.copy(), self.require_client_cert, self.require_cookie, seconds, self.mtu, self.retransmit_min_ms, self.retransmit_max_ms, self.anti_replay))
+    }
+
+    with_mtu: fn(self, mtu: Int) -> DTLSServerConfig IOError! {
+        message: dtls_mtu_problem(mtu)
+        if message != "" -> return Err(dtls_config_error("DTLSServerConfig.with_mtu", message))
+        Ok(server_config_with(self, self.alpn.copy(), self.client_roots.copy(), self.require_client_cert, self.require_cookie, self.cookie_timeout_sec, mtu, self.retransmit_min_ms, self.retransmit_max_ms, self.anti_replay))
+    }
+
+    with_retransmit_timeouts: fn(self, /, *, min_ms: Int, max_ms: Int) -> DTLSServerConfig IOError! {
+        message: dtls_timeout_problem(min_ms, max_ms)
+        if message != "" {
+            return Err(dtls_config_error("DTLSServerConfig.with_retransmit_timeouts", message))
+        }
+        Ok(server_config_with(self, self.alpn.copy(), self.client_roots.copy(), self.require_client_cert, self.require_cookie, self.cookie_timeout_sec, self.mtu, min_ms, max_ms, self.anti_replay))
+    }
+
+    with_anti_replay: fn(self, enabled: Bool) -> DTLSServerConfig IOError! {
+        Ok(server_config_with(self, self.alpn.copy(), self.client_roots.copy(), self.require_client_cert, self.require_cookie, self.cookie_timeout_sec, self.mtu, self.retransmit_min_ms, self.retransmit_max_ms, enabled))
+    }
+}
+
+// A connected DTLS 1.2 datagram session. `DTLSSession{}` is a closed session.
+DTLSSession: struct {
+    priv state: Shared<DTLSState>?{None},
+
+    // Reads one decrypted DTLS datagram (up to `max_bytes`), or an empty list
+    // after the peer sent `close_notify`.
+    read_bytes: fn(self, max_bytes: Int, /, *, deadline: Duration) -[Net, Time.Wait]> [U8] IOError! {
+        if max_bytes <= 0 {
+            return Err(IOError.InvalidInput(dtls_io_context(.Read, "DTLS read limit must be positive")))
+        }
+        end_ns: dtls_deadline_end(deadline, "dtls read") ?? return Err(dtls_net_to_io(err))
+        state: session_state(self) ?? return Err(dtls_io_error(.Read, "DTLS session is closed"))
+        ^guard: state.guard_edit()
+        dtls_read_locked(guard.value, max_bytes, end_ns)
+    }
+
+    // Appends one decrypted DTLS datagram (up to `limit` bytes) to `buffer`
+    // and returns the count, or 0 after `close_notify`.
+    read_into: fn(self, buffer: ^[U8], limit: Int, /, *, deadline: Duration) -[Net, Time.Wait]> Int IOError! {
+        if limit <= 0 {
+            return Err(IOError.InvalidInput(dtls_io_context(.Read, "DTLS read_into limit must be positive")))
+        }
+        end_ns: dtls_deadline_end(deadline, "dtls read") ?? return Err(dtls_net_to_io(err))
+        state: session_state(self) ?? return Err(dtls_io_error(.Read, "DTLS session is closed"))
+        ^guard: state.guard_edit()
+        dtls_read_into_locked(guard.value, buffer, limit, end_ns)
+    }
+
+    // Reads one decrypted DTLS datagram as UTF-8 text.
+    read: fn(self, max_bytes: Int, /, *, deadline: Duration) -[Net, Time.Wait]> String IOError! {
+        bytes: self.read_bytes(max_bytes, deadline: deadline) ?? return Err(err)
+        if bytes.len() == 0 -> return Ok("")
+        text: String.from_bytes(bytes) ?? return Err(IOError.InvalidInput(dtls_io_context(.Read, "DTLS datagram bytes are not valid UTF-8")))
+        Ok(text)
+    }
+
+    // Sends `bytes` as one encrypted DTLS 1.2 application datagram.
+    write_bytes: fn(self, bytes: [U8], /, *, deadline: Duration) -[Net, Time.Wait]> IOError! {
+        end_ns: dtls_deadline_end(deadline, "dtls write") ?? return Err(dtls_net_to_io(err))
+        state: session_state(self) ?? return Err(dtls_io_error(.Write, "DTLS session is closed"))
+        ^guard: state.guard_edit()
+        dtls_write_locked(guard.value, bytes, end_ns)
+    }
+
+    // Sends `text` as one encrypted DTLS 1.2 application datagram.
+    write: fn(self, text: String, /, *, deadline: Duration) -[Net, Time.Wait]> IOError! {
+        self.write_bytes(text.bytes(), deadline: deadline)
+    }
+
+    // Sends `close_notify`, frees the engine, wipes its buffers, and closes
+    // the underlying UDP socket when the session owns it. Closing an already
+    // closed session succeeds.
+    close: fn(self) -[Net, Time.Wait]> IOError! {
+        state: session_state(self) ?? return Ok()
+        ^guard: state.guard_edit()
+        if guard.value.closed -> return Ok()
+        _: dtls_send_close_notify(guard.value, C_DTLS_NO_DEADLINE, "dtls close") ?? {
+            guard.value.closed = true
+            dtls_release(guard.value)
+            return Err(err)
+        }
+        guard.value.closed = true
+        dtls_release(guard.value)
+        Ok()
+    }
+
+    // The verified peer identity (server certificate chain on clients, or
+    // verified client certificate chain on mTLS servers); empty when none.
+    peer_identity: fn(self) -> TLSPeerIdentity Never! {
+        state: session_state(self) ?? return dtls_empty_identity()
+        ^guard: state.guard_edit()
+        if guard.value.peer == .Val(peer) -> return peer.copy()
+        dtls_empty_identity()
+    }
+
+    // The remote UDP peer address, or None on a closed session.
+    peer_addr: fn(self) -> SocketAddr? Never! {
+        state: session_state(self) ?? return None
+        ^guard: state.guard_edit()
+        if guard.value.closed -> return None
+        Val(guard.value.peer_addr.copy())
+    }
+
+    // The negotiated protocol version name ("DTLSv1.2"), or "" when closed.
+    protocol_version: fn(self) -> String Never! {
+        state: session_state(self) ?? return ""
+        ^guard: state.guard_edit()
+        if guard.value.closed -> return ""
+        guard.value.protocol.copy()
+    }
+
+    // The negotiated IANA cipher suite name, or "" when closed.
+    cipher_suite: fn(self) -> String Never! {
+        state: session_state(self) ?? return ""
+        ^guard: state.guard_edit()
+        if guard.value.closed -> return ""
+        guard.value.suite.copy()
+    }
+
+    // The negotiated ALPN protocol, if any.
+    alpn_protocol: fn(self) -> String? Never! {
+        state: session_state(self) ?? return None
+        ^guard: state.guard_edit()
+        if guard.value.closed -> return None
+        guard.value.alpn.copy()
+    }
+
+    // Maximum application payload length for a single outgoing DTLS datagram,
+    // or 0 on a closed session.
+    max_payload: fn(self) -> Int Never! {
+        state: session_state(self) ?? return 0
+        ^guard: state.guard_edit()
+        if guard.value.closed -> return 0
+        ssltls.ssl_get_max_out_record_payload(guard.value.ssl) ?? 0
+    }
+}
+
+// A bound UDP DTLS 1.2 server listener with a shared stateless cookie key.
+DTLSListener: struct {
+    priv state: Shared<DTLSListenerState>?{None},
+
+    local_addr: fn(self) -[Net]> SocketAddr IOError! {
+        state: listener_state(self) ?? return Err(dtls_io_error(.Accept, "DTLS listener is closed"))
+        ^guard: state.guard_edit()
+        if guard.value.closed -> return Err(dtls_io_error(.Accept, "DTLS listener is closed"))
+        net.udp_local_addr(guard.value.socket) ?? return Err(dtls_net_to_io(err))
+    }
+
+    // Waits for a client handshake (performing HelloVerifyRequest cookie
+    // exchange when enabled) and returns the established DTLS 1.2 session.
+    accept: fn(self, /, *, deadline: Duration) -[Net, Time.Wait]> DTLSSession IOError! {
+        end_ns: dtls_deadline_end(deadline, "dtls accept") ?? return Err(dtls_net_to_io(err))
+        state: listener_state(self) ?? return Err(dtls_io_error(.Accept, "DTLS listener is closed"))
+        snap: dtls_listener_snapshot(state) ?? return Err(err)
+        dtls_accept_on(snap.socket, snap.config, snap.cookie, false, end_ns)
+    }
+
+    // Closes the listener's UDP socket and wipes the cookie key. Idempotent.
+    close: fn(self) -[Net]> IOError! {
+        state: listener_state(self) ?? return Ok()
+        ^guard: state.guard_edit()
+        if guard.value.closed -> return Ok()
+        guard.value.closed = true
+        dtls_listener_release(guard.value)
+        Ok()
+    }
+}
+
+// ---- internal state and cleanup ---------------------------------------------
+
+priv DTLSContext: struct {
+    conf: ssldefs.SSLConfig,
+    ca: [x509crt.X509Crt],
+    rng: drbg.HMACDrbg,
+}
+
+priv DTLSState: struct {
+    ssl: ssldefs.SSLContext,
+    rng: drbg.HMACDrbg,
+    socket: UDPSocket,
+    peer_addr: SocketAddr,
+    owns_socket: Bool,
+    socket_closed: Bool,
+    buffer: [U8],
+    peer: TLSPeerIdentity?,
+    protocol: String,
+    suite: String,
+    alpn: String?,
+    read_eof: Bool,
+    write_closed: Bool,
+    closed: Bool,
+
+    impl Close {
+        close: fn(^^self) {
+            ^ssl: self.ssl.move()
+            ssltls.ssl_free(ssl)
+            ^buffer: self.buffer.move()
+            ssldefs.ssl_wipe(buffer)
+        }
+    }
+}
+
+priv DTLSListenerState: struct {
+    socket: UDPSocket,
+    config: DTLSServerConfig,
+    cookie: Shared<sslcookie.SSLCookieContext>,
+    closed: Bool,
+    socket_closed: Bool,
+
+    impl Close {
+        close: fn(^^self) {
+            ^guard: self.cookie.guard_edit()
+            sslcookie.ssl_cookie_free(guard.value)
+        }
+    }
+}
+
+priv DTLSListenerSnapshot: struct {
+    socket: UDPSocket,
+    config: DTLSServerConfig,
+    cookie: Shared<sslcookie.SSLCookieContext>,
+}
+
+priv dtls_listener_snapshot: fn(state: Shared<DTLSListenerState>) -> DTLSListenerSnapshot IOError! {
+    ^guard: state.guard_edit()
+    if guard.value.closed -> return Err(dtls_io_error(.Accept, "DTLS listener is closed"))
+    Ok(DTLSListenerSnapshot{socket: guard.value.socket, config: guard.value.config.copy(), cookie: guard.value.cookie.copy()})
+}
+
+priv dtls_close_udp: fn(socket: UDPSocket) -[Net]> Never! {
+    if socket.close() == {
+        .Ok(_) -> {}
+        .Err(_) -> {}
+    }
+}
+
+priv dtls_release: fn(dtls: ^DTLSState) -[Net]> Never! {
+    ssltls.ssl_free(dtls.ssl)
+    ssldefs.ssl_wipe(dtls.buffer)
+    if dtls.owns_socket && !dtls.socket_closed {
+        dtls.socket_closed = true
+        dtls_close_udp(dtls.socket)
+    }
+}
+
+priv dtls_cookie_release: fn(cookie: Shared<sslcookie.SSLCookieContext>) Never! {
+    ^guard: cookie.guard_edit()
+    sslcookie.ssl_cookie_free(guard.value)
+}
+
+priv dtls_listener_release: fn(listener: ^DTLSListenerState) -[Net]> Never! {
+    dtls_cookie_release(listener.cookie)
+    if !listener.socket_closed {
+        listener.socket_closed = true
+        dtls_close_udp(listener.socket)
+    }
+}
+
+#Error
+priv DTLSFailure: struct {
+    message: String,
+
+    impl Display {
+        display: fn(self) -> String { self.message.copy() }
+    }
+
+    impl Debug {
+        debug: fn(^^self) -> String { self.message }
+    }
+}
+
+priv dtls_fail: fn(message: String) -> DTLSFailure Never! { DTLSFailure{message: message} }
+
+priv C_DTLS_WANT_READ: -26880  // MBEDTLS_ERR_SSL_WANT_READ -0x6900
+
+priv C_DTLS_WANT_WRITE: -26752  // MBEDTLS_ERR_SSL_WANT_WRITE -0x6880
+
+priv C_DTLS_HELLO_VERIFY_REQUIRED: -27264  // MBEDTLS_ERR_SSL_HELLO_VERIFY_REQUIRED -0x6A80
+
+priv C_DTLS_TIMEOUT: -26624  // MBEDTLS_ERR_SSL_TIMEOUT -0x6800
+
+priv C_DTLS_PEER_CLOSE_NOTIFY: -30848  // MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY -0x7880
+
+priv C_DTLS_NET_CONN_RESET: -80
+
+priv C_DTLS_NET_RECV_FAILED: -76
+
+priv C_DTLS_NET_SEND_FAILED: -78
+
+priv C_DTLS_PK_FILE_IO_ERROR: -15872
+
+priv C_DTLS_X509_FILE_IO_ERROR: -10496
+
+priv C_DTLS_NO_DEADLINE: 9223372036854775807
+
+priv C_DTLS_WAIT_SLICE_NS: 3600000000000
+
+priv C_DTLS_RECORD_BYTES: 16384
+
+priv C_DTLS_DATAGRAM_BYTES: 16765
+
+priv C_DTLS_SEED_BYTES: 48
+
+// ---- public entry points ----------------------------------------------------
+
+client_config: fn() -> DTLSClientConfig Never! { DTLSClientConfig{} }
+
+version_name: fn() -> String Never! { "DTLSv1.2" }
+
+// Binds an ephemeral UDP socket matching `address`'s family and performs a
+// DTLS 1.2 client handshake verifying `server_name` against `config.trust`.
+connect: fn(address: SocketAddr, /, *, server_name: String, config: DTLSClientConfig, deadline: Duration) -[Net, Time.Wait]> DTLSSession IOError! {
+    end_ns: dtls_deadline_end(deadline, "dtls connect") ?? return Err(dtls_net_to_io(err))
+    bind_addr: if net.socket_host(address).contains(":") -> "[::]:0" else -> "0.0.0.0:0"
+    ^socket: net.udp_bind(bind_addr) ?? return Err(dtls_net_to_io(err))
+    dtls_client_handshake(socket, address, server_name, config, true, end_ns)
+}
+
+// Consumes a caller-bound UDP socket and performs a DTLS 1.2 client handshake
+// with `peer`, verifying `server_name` against `config.trust`.
+client: fn(socket: ^^UDPSocket, peer: SocketAddr, /, *, server_name: String, config: DTLSClientConfig, deadline: Duration) -[Net, Time.Wait]> DTLSSession IOError! {
+    end_ns: dtls_deadline_end(deadline, "dtls client") ?? {
+        ^owned: socket.move()
+        dtls_close_udp(owned)
+        return Err(dtls_net_to_io(err))
+    }
+    ^owned: socket.move()
+    dtls_client_handshake(owned, peer, server_name, config, true, end_ns)
+}
+
+// Validates `config` eagerly, binds a UDP listener on `addr`, and initializes
+// a stateless HMAC-SHA-256 DTLS cookie context from system entropy.
+listen: fn(addr: String, config: DTLSServerConfig) -[Net]> DTLSListener IOError! {
+    _: validate_server_config(config) ?? return Err(dtls_config_error("listen", err.message))
+    ^cookie: dtls_cookie_new(config.cookie_timeout_sec) ?? return Err(dtls_io_error(.Accept, err.message))
+    ^socket: net.udp_bind(addr) ?? {
+        sslcookie.ssl_cookie_free(cookie)
+        return Err(dtls_net_to_io(err))
+    }
+    Ok(DTLSListener{state: Val(Shared{DTLSListenerState{socket: socket, config: config.copy(), cookie: Shared{cookie}, closed: false, socket_closed: false}})})
+}
+
+// Validates `config` eagerly, binds a UDP listener on `addr`, and initializes
+// a stateless HMAC-SHA-256 DTLS cookie context from system entropy.
+listen_addr: fn(addr: SocketAddr, config: DTLSServerConfig) -[Net]> DTLSListener IOError! {
+    _: validate_server_config(config) ?? return Err(dtls_config_error("listen_addr", err.message))
+    ^cookie: dtls_cookie_new(config.cookie_timeout_sec) ?? return Err(dtls_io_error(.Accept, err.message))
+    ^socket: net.udp_bind_addr(addr) ?? {
+        sslcookie.ssl_cookie_free(cookie)
+        return Err(dtls_net_to_io(err))
+    }
+    Ok(DTLSListener{state: Val(Shared{DTLSListenerState{socket: socket, config: config.copy(), cookie: Shared{cookie}, closed: false, socket_closed: false}})})
+}
+
+// Consumes a caller-bound UDP socket and completes one DTLS 1.2 server
+// handshake on it.
+server: fn(socket: ^^UDPSocket, config: DTLSServerConfig, /, *, deadline: Duration) -[Net, Time.Wait]> DTLSSession IOError! {
+    ^owned: socket.move()
+    end_ns: dtls_deadline_end(deadline, "dtls server") ?? {
+        dtls_close_udp(owned)
+        return Err(dtls_net_to_io(err))
+    }
+    _: validate_server_config(config) ?? {
+        dtls_close_udp(owned)
+        return Err(dtls_config_error("server", err.message))
+    }
+    ^cookie: dtls_cookie_new(config.cookie_timeout_sec) ?? {
+        dtls_close_udp(owned)
+        return Err(dtls_io_error(.Accept, err.message))
+    }
+    shared_cookie: Shared{cookie}
+    result: dtls_accept_on(owned, config, shared_cookie, true, end_ns)
+    dtls_cookie_release(shared_cookie)
+    result
+}
+
+read_bytes: fn(session: DTLSSession, n: Int) -[Net, Time.Wait]> [U8] IOError! {
+    session.read_bytes(n, deadline: dtls_forever())
+}
+
+read: fn(session: DTLSSession, n: Int) -[Net, Time.Wait]> String IOError! {
+    session.read(n, deadline: dtls_forever())
+}
+
+write_bytes: fn(session: DTLSSession, bytes: [U8]) -[Net, Time.Wait]> IOError! {
+    session.write_bytes(bytes, deadline: dtls_forever())
+}
+
+write: fn(session: DTLSSession, text: String) -[Net, Time.Wait]> IOError! {
+    session.write(text, deadline: dtls_forever())
+}
+
+close: fn(session: DTLSSession) -[Net, Time.Wait]> IOError! { session.close() }
+
+// ---- config helpers ---------------------------------------------------------
+
+priv client_config_with: fn(config: DTLSClientConfig, alpn: [String], trust: TLSClientTrust, identity: ClientIdentity?, mtu: Int, min_ms: Int, max_ms: Int, anti_replay: Bool) -> DTLSClientConfig Never! {
+    DTLSClientConfig{alpn: alpn, trust: trust, identity: identity, mtu: mtu, retransmit_min_ms: min_ms, retransmit_max_ms: max_ms, anti_replay: anti_replay}
+}
+
+priv server_config_with: fn(config: DTLSServerConfig, alpn: [String], client_roots: RootCertificates?, require_client_cert: Bool, require_cookie: Bool, cookie_timeout_sec: Int, mtu: Int, min_ms: Int, max_ms: Int, anti_replay: Bool) -> DTLSServerConfig Never! {
+    DTLSServerConfig{
+        cert: config.cert.copy(),
+        key: config.key.copy(),
+        alpn: alpn,
+        client_roots: client_roots,
+        require_client_cert: require_client_cert,
+        require_cookie: require_cookie,
+        cookie_timeout_sec: cookie_timeout_sec,
+        mtu: mtu,
+        retransmit_min_ms: min_ms,
+        retransmit_max_ms: max_ms,
+        anti_replay: anti_replay,
+    }
+}
+
+priv dtls_config_error: fn(operation: String, message: String) -> IOError Never! {
+    IOError.InvalidInput(IOContext{operation: .Connect, resource: Val("DTLS configuration"), os_code: None, cause: Val("{operation} failed: {message}")})
+}
+
+priv dtls_alpn_problem: fn(protocols: [String]) -> String Never! {
+    if protocols.len() > 16 -> return "DTLS ALPN offers at most 16 protocols"
+    loop protocol in protocols {
+        length: protocol.bytes().len()
+        if length == 0 || length > 255 || dtls_has_nul(protocol) {
+            return "DTLS ALPN protocols must contain 1 to 255 bytes"
+        }
+    }
+    ""
+}
+
+priv dtls_mtu_problem: fn(mtu: Int) -> String Never! {
+    if mtu < 0 || (mtu > 0 && mtu < 256) || mtu > C_DTLS_DATAGRAM_BYTES {
+        return "DTLS MTU must be 0 (default) or between 256 and {C_DTLS_DATAGRAM_BYTES} bytes"
+    }
+    ""
+}
+
+priv dtls_timeout_problem: fn(min_ms: Int, max_ms: Int) -> String Never! {
+    if min_ms <= 0 || max_ms <= 0 -> return "DTLS retransmit timeouts must be positive"
+    if min_ms > max_ms -> return "DTLS minimum retransmit timeout exceeds maximum"
+    ""
+}
+
+// ---- contexts, cookies, trust and identity ----------------------------------
+
+priv dtls_cookie_new: fn(timeout_sec: Int) -> sslcookie.SSLCookieContext DTLSFailure! {
+    ^seed: net_rt.tls_entropy(C_DTLS_SEED_BYTES) ?? return Err(dtls_fail("DTLS could not initialize cookie generator: the system entropy source failed"))
+    if seed.len() != C_DTLS_SEED_BYTES {
+        crypto.wipe(seed)
+        return Err(dtls_fail("DTLS could not initialize cookie generator: the system entropy source failed"))
+    }
+    custom: "jet_dtls_cookie".bytes()
+    ^material: [U8]{}
+    cipher.reserve(material, seed.len() + custom.len())
+    loop b in seed -> material.push(b)
+    crypto.wipe(seed)
+    loop b in custom -> material.push(b)
+    ^rng: drbg.hmac_drbg_new(hashes.Md.SHA256)
+    drbg.hmac_drbg_seed_buf(rng, material)
+    crypto.wipe(material)
+    ^cookie: sslcookie.ssl_cookie_init()
+    sslcookie.ssl_cookie_set_timeout(cookie, timeout_sec)
+    if sslcookie.ssl_cookie_setup(cookie, rng) == .Err(e) {
+        sslcookie.ssl_cookie_free(cookie)
+        return Err(dtls_fail("DTLS could not initialize cookie context: {dtls_ssl_text(e)}"))
+    }
+    Ok(cookie)
+}
+
+priv dtls_context_new: fn(endpoint: Int) -> DTLSContext DTLSFailure! {
+    ^seed: net_rt.tls_entropy(C_DTLS_SEED_BYTES) ?? return Err(dtls_fail("DTLS could not create a context: the system entropy source failed"))
+    if seed.len() != C_DTLS_SEED_BYTES {
+        crypto.wipe(seed)
+        return Err(dtls_fail("DTLS could not create a context: the system entropy source failed"))
+    }
+    dtls_context_seeded(endpoint, seed)
+}
+
+priv dtls_context_seeded: fn(endpoint: Int, seed: ^[U8]) -> DTLSContext DTLSFailure! {
+    custom: "jet_dtls".bytes()
+    ^material: [U8]{}
+    cipher.reserve(material, seed.len() + custom.len())
+    loop b in seed -> material.push(b)
+    crypto.wipe(seed)
+    loop b in custom -> material.push(b)
+    ^rng: drbg.hmac_drbg_new(hashes.Md.SHA256)
+    drbg.hmac_drbg_seed_buf(rng, material)
+    crypto.wipe(material)
+    ^conf: ssldefs.SSLConfig{}
+    if ssltls.ssl_config_defaults(conf, endpoint, ssldefs.SSL_TRANSPORT_DATAGRAM, ssldefs.SSL_PRESET_DEFAULT) == .Err(e) {
+        return Err(dtls_fail("DTLS could not create a context: {dtls_ssl_text(e)}"))
+    }
+    conf.min_tls_version = ssldefs.SSL_VERSION_TLS1_2
+    conf.max_tls_version = ssldefs.SSL_VERSION_TLS1_2
+    conf.ciphersuite_list = dtls_policy_suites()
+    conf.group_list = dtls_policy_groups()
+    conf.sig_algs = dtls_policy_sig_algs()
+    Ok(DTLSContext{conf: conf, ca: [x509crt.X509Crt]{}, rng: rng})
+}
+
+priv dtls_policy_suites: fn() -> [Int] Never! {
+    [Int]{
+        suites.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,
+        suites.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
+        suites.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+        suites.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+        suites.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+        suites.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+    }
+}
+
+priv dtls_policy_groups: fn() -> [Int] Never! {
+    [Int]{ssldefs.SSL_IANA_TLS_GROUP_X25519, ssldefs.SSL_IANA_TLS_GROUP_SECP256R1, ssldefs.SSL_IANA_TLS_GROUP_SECP384R1}
+}
+
+priv dtls_policy_sig_algs: fn() -> [Int] Never! {
+    [Int]{
+        ssldefs.TLS1_3_SIG_ECDSA_SECP256R1_SHA256,
+        ssldefs.TLS1_3_SIG_ECDSA_SECP384R1_SHA384,
+        ssldefs.TLS1_3_SIG_RSA_PSS_RSAE_SHA512,
+        ssldefs.TLS1_3_SIG_RSA_PSS_RSAE_SHA384,
+        ssldefs.TLS1_3_SIG_RSA_PSS_RSAE_SHA256,
+        ssldefs.TLS1_3_SIG_RSA_PKCS1_SHA512,
+        ssldefs.TLS1_3_SIG_RSA_PKCS1_SHA384,
+        ssldefs.TLS1_3_SIG_RSA_PKCS1_SHA256,
+    }
+}
+
+priv dtls_client_context: fn(server_name: String, config: DTLSClientConfig) -> DTLSContext DTLSFailure! {
+    if !dtls_valid_server_name(server_name) {
+        return Err(dtls_fail("invalid DTLS server name `{server_name}`"))
+    }
+    mtu_problem: dtls_mtu_problem(config.mtu)
+    if mtu_problem != "" -> return Err(dtls_fail(mtu_problem))
+    timeout_problem: dtls_timeout_problem(config.retransmit_min_ms, config.retransmit_max_ms)
+    if timeout_problem != "" -> return Err(dtls_fail(timeout_problem))
+    ^context: dtls_context_new(ssldefs.SSL_IS_CLIENT) ?? return Err(err)
+    _: dtls_load_trust(context, config.trust) ?? return Err(err)
+    if config.identity == .Val(identity) {
+        if dtls_has_nul(identity.cert) || dtls_has_nul(identity.key) {
+            return Err(dtls_fail("DTLS client identity is invalid: PEM text contains a NUL byte"))
+        }
+        status: dtls_own_identity(context, identity.cert, identity.key)
+        if status != 0 -> return Err(dtls_fail(dtls_identity_message(status)))
+    }
+    _: dtls_add_alpn(context, config.alpn) ?? return Err(err)
+    context.conf.hs_timeout_min = config.retransmit_min_ms
+    context.conf.hs_timeout_max = config.retransmit_max_ms
+    context.conf.anti_replay = if config.anti_replay -> ssldefs.SSL_ANTI_REPLAY_ENABLED else -> ssldefs.SSL_ANTI_REPLAY_DISABLED
+    context.conf.authmode = ssldefs.SSL_VERIFY_REQUIRED
+    Ok(context)
+}
+
+priv validate_server_config: fn(config: DTLSServerConfig) DTLSFailure! {
+    mtu_problem: dtls_mtu_problem(config.mtu)
+    if mtu_problem != "" -> return Err(dtls_fail(mtu_problem))
+    timeout_problem: dtls_timeout_problem(config.retransmit_min_ms, config.retransmit_max_ms)
+    if timeout_problem != "" -> return Err(dtls_fail(timeout_problem))
+    if config.cookie_timeout_sec < 0 {
+        return Err(dtls_fail("DTLS cookie timeout must be non-negative"))
+    }
+    alpn_problem: dtls_alpn_problem(config.alpn)
+    if alpn_problem != "" -> return Err(dtls_fail(alpn_problem))
+    ^context: dtls_server_context(config, None) ?? return Err(err)
+    _: context
+    Ok()
+}
+
+priv dtls_server_context: fn(config: DTLSServerConfig, cookie: Shared<sslcookie.SSLCookieContext>?) -> DTLSContext DTLSFailure! {
+    if !config.cert.contains("-----BEGIN CERTIFICATE-----") {
+        return Err(dtls_fail("DTLS certificate PEM did not contain a certificate"))
+    }
+    if !config.key.contains("-----BEGIN PRIVATE KEY-----") && !config.key.contains("-----BEGIN RSA PRIVATE KEY-----") && !config.key.contains("-----BEGIN EC PRIVATE KEY-----") {
+        return Err(dtls_fail("DTLS private key PEM did not contain a private key"))
+    }
+    if dtls_has_nul(config.cert) || dtls_has_nul(config.key) {
+        return Err(dtls_fail("DTLS server identity is invalid: PEM text contains a NUL byte"))
+    }
+    ^context: dtls_context_new(ssldefs.SSL_IS_SERVER) ?? return Err(err)
+    identity: dtls_own_identity(context, config.cert, config.key)
+    if identity != 0 {
+        return Err(dtls_fail("DTLS certificate and private key do not match: {dtls_mbedtls_text(identity)}"))
+    }
+    _: dtls_add_alpn(context, config.alpn) ?? return Err(err)
+    if config.client_roots == .Val(roots) {
+        _: dtls_load_custom_roots(context, roots) ?? return Err(err)
+        context.conf.authmode = if config.require_client_cert -> ssldefs.SSL_VERIFY_REQUIRED else -> ssldefs.SSL_VERIFY_OPTIONAL
+    } else {
+        if config.require_client_cert {
+            return Err(dtls_fail("DTLS server requires client certificates but no client root certificates were configured"))
+        }
+        context.conf.authmode = ssldefs.SSL_VERIFY_NONE
+    }
+    if config.require_cookie {
+        if cookie == .Val(ctx) {
+            context.conf.f_cookie_write = Val(sslcookie.ssl_cookie_write_cb(ctx))
+            context.conf.f_cookie_check = Val(sslcookie.ssl_cookie_check_cb(ctx))
+        }
+    } else {
+        context.conf.f_cookie_write = None
+        context.conf.f_cookie_check = None
+    }
+    context.conf.hs_timeout_min = config.retransmit_min_ms
+    context.conf.hs_timeout_max = config.retransmit_max_ms
+    context.conf.anti_replay = if config.anti_replay -> ssldefs.SSL_ANTI_REPLAY_ENABLED else -> ssldefs.SSL_ANTI_REPLAY_DISABLED
+    Ok(context)
+}
+
+priv dtls_open: fn(context: ^^DTLSContext, socket: UDPSocket, peer_addr: SocketAddr, owns_socket: Bool, hostname: String, mtu: Int) -> DTLSState ssldefs.SSLError! {
+    ^ctx: context.move()
+    ^conf: ctx.conf.move()
+    if ctx.ca.len() > 0 -> conf.ca_chain = Val(ctx.ca.move())
+    ^ssl: ssldefs.SSLContext{}
+    _: ssltls.ssl_setup(ssl, conf) ?? return Err(err)
+    ssltls.ssl_set_timer_cb(ssl, true)
+    if mtu > 0 -> ssl.mtu = mtu
+    if hostname != "" -> _: ssltls.ssl_set_hostname(ssl, Val(hostname.copy())) ?? return Err(err)
+    Ok(
+        DTLSState{
+            ssl: ssl,
+            rng: ctx.rng.move(),
+            socket: socket,
+            peer_addr: peer_addr,
+            owns_socket: owns_socket,
+            socket_closed: false,
+            buffer: ssldefs.ssl_zeros(C_DTLS_RECORD_BYTES),
+            peer: None,
+            protocol: "",
+            suite: "",
+            alpn: None,
+            read_eof: false,
+            write_closed: false,
+            closed: false,
+        },
+    )
+}
+
+priv dtls_own_identity: fn(context: ^DTLSContext, cert: String, key: String) -> Int Never! {
+    ^chain: [x509crt.X509Crt]{}
+    if x509crt.x509_crt_parse(chain, cert.bytes()) == {
+        .Ok(skipped) -> {
+            if skipped != 0 -> return skipped
+        }
+        .Err(e) -> { return ssldefs.x509_code(e) }
+    }
+    ^private: if pkparse.pk_parse_key(key.bytes(), None, context.rng) == {
+        .Ok(parsed) -> parsed
+        .Err(e) -> {
+            return ssldefs.pk_code(e)
+        }
+    }
+    if pk.pk_check_pair(chain[0].pk, private, context.rng) == .Err(e) -> return ssldefs.pk_code(e)
+    ssltls.ssl_conf_own_cert(context.conf, Val(ssldefs.SSLKeyCert{cert: chain, key: private}))
+    0
+}
+
+priv dtls_add_alpn: fn(context: ^DTLSContext, protocols: [String]) DTLSFailure! {
+    message: dtls_alpn_problem(protocols)
+    if message != "" -> return Err(dtls_fail(message))
+    ^offered: [String]{}
+    loop protocol in protocols {
+        offered.push(protocol.copy())
+        if ssltls.ssl_conf_alpn_protocols(context.conf, offered) == .Err(e) {
+            return Err(dtls_fail("DTLS could not offer ALPN protocol `{protocol}`: {dtls_ssl_text(e)}"))
+        }
+    }
+    Ok()
+}
+
+priv dtls_load_trust: fn(context: ^DTLSContext, trust: TLSClientTrust) DTLSFailure! {
+    if trust == {
+        .System -> { _: dtls_load_system_roots(context, true) ?? return Err(err) }
+        .SystemPlus(roots) -> {
+            _: dtls_load_system_roots(context, false) ?? return Err(err)
+            _: dtls_load_custom_roots(context, roots) ?? return Err(err)
+        }
+        .CustomOnly(roots) -> { _: dtls_load_custom_roots(context, roots) ?? return Err(err) }
+    }
+    Ok()
+}
+
+priv dtls_load_custom_roots: fn(context: ^DTLSContext, roots: RootCertificates) DTLSFailure! {
+    before: context.ca.len()
+    if {
+        roots.pem != "" -> {
+            if dtls_has_nul(roots.pem) {
+                return Err(dtls_fail("DTLS custom CA PEM must contain only certificate blocks"))
+            }
+            status: dtls_ca_parse(context.ca, roots.pem.bytes())
+            if status != 0 {
+                return Err(dtls_fail("DTLS could not use a custom certificate root: {dtls_ca_status_text(status)}"))
+            }
+        }
+        roots.path != "" -> {
+            if dtls_has_nul(roots.path) {
+                return Err(dtls_fail("DTLS could not load custom certificate roots from `{roots.path}`: the path contains a NUL byte"))
+            }
+            status: dtls_ca_file(context.ca, roots.path)
+            if status != 0 {
+                return Err(dtls_fail("DTLS could not load custom certificate roots from `{roots.path}`: {dtls_ca_status_text(status)}"))
+            }
+        }
+    }
+    if context.ca.len() == before {
+        return Err(dtls_fail("DTLS custom CA PEM did not contain a certificate"))
+    }
+    Ok()
+}
+
+priv dtls_ca_status_text: fn(status: Int) -> String Never! {
+    if status > 0 -> return "{status} certificate(s) could not be parsed"
+    dtls_mbedtls_text(status)
+}
+
+priv dtls_ca_parse: fn(ca: ^[x509crt.X509Crt], bytes: [U8]) -> Int Never! {
+    if x509crt.x509_crt_parse(ca, bytes) == {
+        .Ok(skipped) -> skipped
+        .Err(e) -> ssldefs.x509_code(e)
+    }
+}
+
+priv dtls_ca_file: fn(ca: ^[x509crt.X509Crt], path: String) -> Int Never! {
+    bytes: net_rt.tls_read_bytes(path) ?? return C_DTLS_PK_FILE_IO_ERROR
+    dtls_ca_parse(ca, bytes)
+}
+
+priv dtls_ca_dir: fn(ca: ^[x509crt.X509Crt], path: String) -> Int Never! {
+    handle: net_rt.tls_open_directory(-1, path) ?? return C_DTLS_X509_FILE_IO_ERROR
+    rows: net_rt.tls_list_directory(handle) ?? {
+        net_rt.tls_close_directory(handle)
+        return C_DTLS_X509_FILE_IO_ERROR
+    }
+    net_rt.tls_close_directory(handle)
+    ^count: 0
+    loop row in rows {
+        if row.len() < 2 || row[0] == (U8{1}) -> next
+        name: String.from_bytes(dtls_byte_range(row, 1, row.len())) ?? {
+            count += 1
+            next
+        }
+        status: dtls_ca_file(ca, "{path}/{name}")
+        if status < 0 -> count += 1 else -> count += status
+    }
+    count
+}
+
+priv dtls_load_system_roots: fn(context: ^DTLSContext, required: Bool) DTLSFailure! {
+    file: dtls_env_text("SSL_CERT_FILE")
+    dirs: dtls_env_text("SSL_CERT_DIR")
+    if {
+        file != "" || dirs != "" -> {
+            if file != "" && !dtls_has_nul(file) -> _: dtls_ca_file(context.ca, file)
+            loop dir in dtls_split_colon(dirs) {
+                if dir != "" && !dtls_has_nul(dir) -> _: dtls_ca_dir(context.ca, dir)
+            }
+        }
+        else -> {
+            loop path in dtls_system_root_files() {
+                if context.ca.len() > 0 -> break
+                _: dtls_ca_file(context.ca, path)
+            }
+            if context.ca.len() == 0 -> _: dtls_ca_dir(context.ca, "/etc/ssl/certs")
+        }
+    }
+    if required && context.ca.len() == 0 {
+        return Err(dtls_fail("DTLS could not find system certificate roots"))
+    }
+    Ok()
+}
+
+priv dtls_env_text: fn(name: String) -> String Never! {
+    bytes: net_rt.tls_env_value(name) ?? return ""
+    String.from_bytes(bytes) ?? ""
+}
+
+priv dtls_system_root_files: fn() -> [String] Never! {
+    [String]{
+        "/etc/ssl/certs/ca-certificates.crt",
+        "/etc/pki/tls/certs/ca-bundle.crt",
+        "/etc/ssl/ca-bundle.pem",
+        "/etc/pki/tls/cacert.pem",
+        "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem",
+        "/etc/ssl/cert.pem",
+    }
+}
+
+priv dtls_split_colon: fn(text: String) -> [String] Never! {
+    ^parts: [String]{}
+    raw: text.bytes()
+    ^start: 0
+    loop at in 0..<raw.len() {
+        if raw[at] == (U8{58}) {
+            parts.push(String.from_bytes(dtls_byte_range(raw, start, at)) ?? "")
+            start = at + 1
+        }
+    }
+    parts.push(String.from_bytes(dtls_byte_range(raw, start, raw.len())) ?? "")
+    parts
+}
+
+priv dtls_identity_message: fn(status: Int) -> String Never! {
+    high: dtls_mbedtls_high(status)
+    if high == 16128 || high == 16000 || high == 16896 || high == 20352 || status == -16128 || status == -16000 {
+        return "DTLS certificate does not match the private key"
+    }
+    "DTLS identity is invalid: {dtls_mbedtls_text(status)}"
+}
+
+// ---- handshake and datagram transport ---------------------------------------
+
+priv dtls_client_handshake: fn(socket: UDPSocket, peer_addr: SocketAddr, server_name: String, config: DTLSClientConfig, owns_socket: Bool, end_ns: Int) -[Net, Time.Wait]> DTLSSession IOError! {
+    ^context: dtls_client_context(server_name, config) ?? {
+        if owns_socket -> dtls_close_udp(socket)
+        return Err(dtls_io_error(.Connect, err.message))
+    }
+    ^state: dtls_open(context, socket, peer_addr, owns_socket, server_name, config.mtu) ?? {
+        if owns_socket -> dtls_close_udp(socket)
+        return Err(dtls_io_error(.Connect, "DTLS handshake with `{server_name}` failed: {dtls_ssl_text(err)}"))
+    }
+    _: dtls_run_client_handshake(state, server_name, end_ns) ?? return Err(dtls_net_to_io(err))
+    peer: dtls_verified_peer_identity(state.ssl, server_name) ?? {
+        dtls_release(state)
+        return Err(dtls_io_error(.Connect, err.message))
+    }
+    state.peer = Val(peer)
+    state.protocol = ssltls.ssl_get_version(state.ssl)
+    state.suite = dtls_suite_name(ssltls.ssl_get_ciphersuite(state.ssl) ?? "")
+    state.alpn = state.ssl.alpn_chosen.copy()
+    Ok(DTLSSession{state: Val(Shared{state})})
+}
+
+priv dtls_accept_on: fn(socket: UDPSocket, config: DTLSServerConfig, cookie: Shared<sslcookie.SSLCookieContext>, owns_socket: Bool, end_ns: Int) -[Net, Time.Wait]> DTLSSession IOError! {
+    // Wait for the initial epoch-0 ClientHello datagram from a peer, skipping
+    // trailing alerts or non-ClientHello datagrams left over from prior sessions.
+    first: dtls_wait_client_hello(socket, end_ns) ?? {
+        if owns_socket -> dtls_close_udp(socket)
+        return Err(dtls_net_to_io(err))
+    }
+    peer_addr: net.udp_packet_addr(first)
+    peer_id: net.socket_to_string(peer_addr).bytes()
+    ^context: dtls_server_context(config, Val(cookie)) ?? {
+        if owns_socket -> dtls_close_udp(socket)
+        return Err(dtls_io_error(.Accept, err.message))
+    }
+    ^state: dtls_open(context, socket, peer_addr, owns_socket, "", config.mtu) ?? {
+        if owns_socket -> dtls_close_udp(socket)
+        return Err(dtls_io_error(.Accept, "DTLS handshake failed: {dtls_ssl_text(err)}"))
+    }
+    if sslsrv12.ssl_set_client_transport_id(state.ssl, peer_id.copy()) == .Err(e) {
+        dtls_release(state)
+        return Err(dtls_io_error(.Accept, "DTLS server transport ID failed: {dtls_ssl_text(e)}"))
+    }
+    state.ssl.bio.rx_dgrams.push(first.data)
+    _: dtls_run_server_handshake(state, peer_id, end_ns) ?? return Err(dtls_net_to_io(err))
+    if state.ssl.session >= 0 && state.ssl.session < state.ssl.spool.len() && state.ssl.spool[state.ssl.session].peer_cert != None {
+        if dtls_verified_peer_identity(state.ssl, "") == .Ok(peer) -> state.peer = Val(peer)
+    }
+    state.protocol = ssltls.ssl_get_version(state.ssl)
+    state.suite = dtls_suite_name(ssltls.ssl_get_ciphersuite(state.ssl) ?? "")
+    state.alpn = state.ssl.alpn_chosen.copy()
+    Ok(DTLSSession{state: Val(Shared{state})})
+}
+
+// Whether `dgram` starts with an epoch-0 DTLS handshake record containing a
+// ClientHello (record type 22, epoch 0, handshake type 1).
+priv dtls_is_initial_client_hello: fn(dgram: [U8]) -> Bool Never! {
+    if dgram.len() < 25 -> return false
+    rec_type: Int{dgram[0]}
+    epoch_hi: Int{dgram[3]}
+    epoch_lo: Int{dgram[4]}
+    hs_type: Int{dgram[13]}
+    if rec_type != ssldefs.SSL_MSG_HANDSHAKE -> return false
+    if epoch_hi != 0 || epoch_lo != 0 -> return false
+    hs_type == ssldefs.SSL_HS_CLIENT_HELLO
+}
+
+priv dtls_wait_client_hello: fn(socket: UDPSocket, end_ns: Int) -[Net, Time.Wait]> UDPPacket NetError! {
+    loop {
+        remaining: end_ns - rt.clock_mono_ns()
+        if remaining <= 0 -> return Err(dtls_deadline_error("dtls accept"))
+        slice: Duration{ns: if remaining > C_DTLS_WAIT_SLICE_NS -> C_DTLS_WAIT_SLICE_NS else -> remaining}
+        if socket.receive(C_DTLS_DATAGRAM_BYTES, deadline: slice) == {
+            .Ok(packet) -> {
+                if dtls_is_initial_client_hello(packet.data) -> return Ok(packet)
+            }
+            .Err(err) -> {
+                if dtls_timed_out(err) {
+                    if rt.clock_mono_ns() >= end_ns {
+                        return Err(dtls_deadline_error("dtls accept"))
+                    }
+                    next
+                }
+                return Err(err)
+            }
+        }
+    }
+}
+
+priv dtls_run_client_handshake: fn(dtls: ^DTLSState, server_name: String, end_ns: Int) -[Net, Time.Wait]> NetError! {
+    if dtls_client_handshake_steps(dtls, server_name, end_ns) == .Err(error) {
+        dtls_release(dtls)
+        return Err(error)
+    }
+    Ok()
+}
+
+priv dtls_client_handshake_steps: fn(dtls: ^DTLSState, server_name: String, end_ns: Int) -[Net, Time.Wait]> NetError! {
+    loop {
+        ^status: 0
+        if ssltls.ssl_handshake(dtls.ssl, dtls.rng) == .Err(e) -> status = dtls_engine_status(e)
+        sent: dtls_flush(dtls, end_ns, "dtls handshake") ?? return Err(err)
+        status = dtls_settle(status, sent)
+        if status == 0 -> return Ok()
+        if status == C_DTLS_WANT_READ || status == C_DTLS_WANT_WRITE {
+            status = dtls_await(dtls, status, end_ns, "dtls handshake") ?? return Err(err)
+            if status == 0 -> next
+        }
+        return Err(dtls_net_error("dtls handshake", dtls_handshake_message(dtls.ssl, server_name, status)))
+    }
+}
+
+priv dtls_run_server_handshake: fn(dtls: ^DTLSState, peer_id: [U8], end_ns: Int) -[Net, Time.Wait]> NetError! {
+    if dtls_server_handshake_steps(dtls, peer_id, end_ns) == .Err(error) {
+        dtls_release(dtls)
+        return Err(error)
+    }
+    Ok()
+}
+
+priv dtls_server_handshake_steps: fn(dtls: ^DTLSState, peer_id: [U8], end_ns: Int) -[Net, Time.Wait]> NetError! {
+    loop {
+        ^status: 0
+        if ssltls.ssl_handshake(dtls.ssl, dtls.rng) == .Err(e) -> status = dtls_engine_status(e)
+        sent: dtls_flush(dtls, end_ns, "dtls accept") ?? return Err(err)
+        status = dtls_settle(status, sent)
+        if status == 0 -> return Ok()
+        if status == C_DTLS_HELLO_VERIFY_REQUIRED {
+            ssltls.ssl_session_reset(dtls.ssl)
+            if sslsrv12.ssl_set_client_transport_id(dtls.ssl, peer_id.copy()) == .Err(e) {
+                return Err(dtls_net_error("dtls accept", "DTLS handshake failed: {dtls_ssl_text(e)}"))
+            }
+            next
+        }
+        if status == C_DTLS_WANT_READ || status == C_DTLS_WANT_WRITE {
+            status = dtls_await(dtls, status, end_ns, "dtls accept") ?? return Err(err)
+            if status == 0 -> next
+        }
+        return Err(dtls_net_error("dtls accept", dtls_handshake_message(dtls.ssl, "", status)))
+    }
+}
+
+priv dtls_flush: fn(dtls: ^DTLSState, end_ns: Int, operation: String) -[Net, Time.Wait]> Int NetError! {
+    if dtls.ssl.bio.tx_dgrams.len() == 0 -> return Ok(0)
+    ^status: 0
+    loop index in 0..<dtls.ssl.bio.tx_dgrams.len() {
+        dgram: dtls.ssl.bio.tx_dgrams[index]
+        remaining: end_ns - rt.clock_mono_ns()
+        if remaining <= 0 {
+            dtls.ssl.bio.tx_dgrams.clear()
+            return Err(dtls_deadline_error(operation))
+        }
+        slice: Duration{ns: if remaining > C_DTLS_WAIT_SLICE_NS -> C_DTLS_WAIT_SLICE_NS else -> remaining}
+        if dtls.socket.send_to(dgram, dtls.peer_addr, deadline: slice) == {
+            .Ok(_) -> {}
+            .Err(err) -> {
+                dtls.ssl.bio.tx_dgrams.clear()
+                if dtls_timed_out(err) -> return Err(dtls_deadline_error(operation))
+                if dtls_stopped(err) -> return Err(err)
+                status = dtls_socket_status(err, C_DTLS_NET_SEND_FAILED)
+                break
+            }
+        }
+    }
+    dtls.ssl.bio.tx_dgrams.clear()
+    Ok(status)
+}
+
+// Compute the next wait deadline: the earlier of `end_ns` and the engine's
+// active DTLS retransmission timer (if running).
+priv dtls_wait_end: fn(ssl: ssldefs.SSLContext, end_ns: Int) -> Int Never! {
+    if !ssl.timer.enabled || ssl.timer.fin_ms <= 0 -> return end_ns
+    timer_ns: ssl.timer.fin_ms * 1000000
+    timer_end: if timer_ns > C_DTLS_NO_DEADLINE - ssl.timer.start_ns -> C_DTLS_NO_DEADLINE else -> ssl.timer.start_ns + timer_ns
+    if timer_end < end_ns -> timer_end else -> end_ns
+}
+
+priv dtls_same_peer: fn(a: SocketAddr, b: SocketAddr) -> Bool Never! {
+    net.socket_port(a) == net.socket_port(b) && net.socket_host(a) == net.socket_host(b)
+}
+
+// Waits for one datagram from `dtls.peer_addr` (or write readiness) bounded by
+// both `end_ns` and the engine's DTLS retransmit timer. If the retransmit timer
+// expires before `end_ns`, returns 0 so the next engine call triggers resend.
+priv dtls_await: fn(dtls: ^DTLSState, status: Int, end_ns: Int, operation: String) -[Net, Time.Wait]> Int NetError! {
+    if status == C_DTLS_WANT_WRITE {
+        remaining: end_ns - rt.clock_mono_ns()
+        if remaining <= 0 -> return Err(dtls_deadline_error(operation))
+        slice: Duration{ns: if remaining > C_DTLS_WAIT_SLICE_NS -> C_DTLS_WAIT_SLICE_NS else -> remaining}
+        if dtls.socket.ready(NetReadyInterest.Write, deadline: slice) == {
+            .Ok(_) -> return Ok(0)
+            .Err(err) -> {
+                if dtls_timed_out(err) {
+                    if rt.clock_mono_ns() >= end_ns -> return Err(dtls_deadline_error(operation))
+                    return Ok(0)
+                }
+                if dtls_stopped(err) -> return Err(err)
+                return Ok(dtls_socket_status(err, C_DTLS_NET_SEND_FAILED))
+            }
+        }
+    }
+    loop {
+        now: rt.clock_mono_ns()
+        if now >= end_ns -> return Err(dtls_deadline_error(operation))
+        wait_until: dtls_wait_end(dtls.ssl, end_ns)
+        if wait_until <= now {
+            // The DTLS retransmit timer has expired; return to the engine so
+            // ssl_fetch_input calls ssl_resend.
+            return Ok(0)
+        }
+        remaining: wait_until - now
+        slice: Duration{ns: if remaining > C_DTLS_WAIT_SLICE_NS -> C_DTLS_WAIT_SLICE_NS else -> remaining}
+        if dtls.socket.receive(C_DTLS_DATAGRAM_BYTES, deadline: slice) == {
+            .Ok(packet) -> {
+                sender: net.udp_packet_addr(packet)
+                if !dtls_same_peer(sender, dtls.peer_addr) -> next
+                dtls.ssl.bio.rx_dgrams.push(packet.data)
+                return Ok(0)
+            }
+            .Err(err) -> {
+                if dtls_timed_out(err) {
+                    if rt.clock_mono_ns() >= end_ns -> return Err(dtls_deadline_error(operation))
+                    // Either the DTLS retransmit timer or a wait slice expired;
+                    // hand control back to the engine.
+                    return Ok(0)
+                }
+                if dtls_stopped(err) -> return Err(err)
+                return Ok(dtls_socket_status(err, C_DTLS_NET_RECV_FAILED))
+            }
+        }
+    }
+}
+
+// ---- application data I/O and close -----------------------------------------
+
+priv dtls_engine_read_status: fn(dtls: ^DTLSState, limit: Int, end_ns: Int, operation: String) -[Net, Time.Wait]> Int NetError! {
+    size: if limit < C_DTLS_RECORD_BYTES -> limit else -> C_DTLS_RECORD_BYTES
+    ^status: 0
+    if sslmsg.ssl_read(dtls.ssl, dtls.buffer, size, dtls.rng) == {
+        .Ok(count) -> { status = count }
+        .Err(e) -> status = dtls_engine_status(e)
+    }
+    sent: dtls_flush(dtls, end_ns, operation) ?? return Err(err)
+    if status > 0 -> return Ok(status)
+    Ok(dtls_settle(status, sent))
+}
+
+priv dtls_read_locked: fn(dtls: ^DTLSState, max_bytes: Int, end_ns: Int) -[Net, Time.Wait]> [U8] IOError! {
+    if dtls.closed -> return Err(dtls_io_error(.Read, "DTLS session is closed"))
+    if dtls.read_eof -> return Ok([U8]{})
+    loop {
+        ^status: dtls_engine_read_status(dtls, max_bytes, end_ns, "dtls read") ?? return Err(dtls_net_to_io(err))
+        if status > 0 -> return Ok(dtls_byte_range(dtls.buffer, 0, status))
+        if status == C_DTLS_PEER_CLOSE_NOTIFY {
+            dtls.read_eof = true
+            return Ok([U8]{})
+        }
+        if status == 0 {
+            dtls.read_eof = true
+            return Ok([U8]{})
+        }
+        if status == C_DTLS_WANT_READ || status == C_DTLS_WANT_WRITE {
+            status = dtls_await(dtls, status, end_ns, "dtls read") ?? return Err(dtls_net_to_io(err))
+            if status == 0 -> next
+        }
+        return Err(dtls_io_error(.Read, "DTLS read failed: {dtls_mbedtls_text(status)}"))
+    }
+}
+
+priv dtls_read_into_locked: fn(dtls: ^DTLSState, buffer: ^[U8], limit: Int, end_ns: Int) -[Net, Time.Wait]> Int IOError! {
+    if dtls.closed -> return Err(dtls_io_error(.Read, "DTLS session is closed"))
+    if dtls.read_eof -> return Ok(0)
+    loop {
+        ^status: dtls_engine_read_status(dtls, limit, end_ns, "dtls read") ?? return Err(dtls_net_to_io(err))
+        if status > 0 {
+            loop index in 0..<status -> buffer.push(dtls.buffer[index])
+            return Ok(status)
+        }
+        if status == C_DTLS_PEER_CLOSE_NOTIFY {
+            dtls.read_eof = true
+            return Ok(0)
+        }
+        if status == 0 {
+            dtls.read_eof = true
+            return Ok(0)
+        }
+        if status == C_DTLS_WANT_READ || status == C_DTLS_WANT_WRITE {
+            status = dtls_await(dtls, status, end_ns, "dtls read") ?? return Err(dtls_net_to_io(err))
+            if status == 0 -> next
+        }
+        return Err(dtls_io_error(.Read, "DTLS read failed: {dtls_mbedtls_text(status)}"))
+    }
+}
+
+priv dtls_write_locked: fn(dtls: ^DTLSState, bytes: [U8], end_ns: Int) -[Net, Time.Wait]> IOError! {
+    if dtls.closed || dtls.write_closed {
+        return Err(dtls_io_error(.Write, "DTLS session is closed"))
+    }
+    max_len: ssltls.ssl_get_max_out_record_payload(dtls.ssl) ?? C_DTLS_RECORD_BYTES
+    if bytes.len() > max_len {
+        return Err(IOError.InvalidInput(dtls_io_context(.Write, "DTLS datagram exceeds maximum payload size ({bytes.len()} > {max_len} bytes)")))
+    }
+    loop {
+        ^status: 0
+        if sslmsg.ssl_write(dtls.ssl, bytes, bytes.len(), dtls.rng) == {
+            .Ok(count) -> { status = count }
+            .Err(e) -> status = dtls_engine_status(e)
+        }
+        sent: dtls_flush(dtls, end_ns, "dtls write") ?? return Err(dtls_net_to_io(err))
+        status = dtls_settle(status, sent)
+        if status >= 0 -> return Ok()
+        if status == C_DTLS_WANT_READ || status == C_DTLS_WANT_WRITE {
+            status = dtls_await(dtls, status, end_ns, "dtls write") ?? return Err(dtls_net_to_io(err))
+            if status == 0 -> next
+        }
+        return Err(dtls_io_error(.Write, "DTLS write failed: {dtls_mbedtls_text(status)}"))
+    }
+}
+
+priv dtls_send_close_notify: fn(dtls: ^DTLSState, end_ns: Int, operation: String) -[Net, Time.Wait]> IOError! {
+    if dtls.write_closed -> return Ok()
+    loop {
+        ^status: 0
+        if sslmsg.ssl_close_notify(dtls.ssl, dtls.rng) == .Err(e) -> status = dtls_engine_status(e)
+        sent: dtls_flush(dtls, end_ns, operation) ?? return Err(dtls_net_to_io(err))
+        status = dtls_settle(status, sent)
+        if status == 0 -> break
+        if status == C_DTLS_WANT_READ || status == C_DTLS_WANT_WRITE {
+            status = dtls_await(dtls, status, end_ns, operation) ?? return Err(dtls_net_to_io(err))
+            if status == 0 -> next
+        }
+        return Err(dtls_io_error(.Close, "DTLS close-notify flush failed: {dtls_mbedtls_text(status)}"))
+    }
+    dtls.write_closed = true
+    Ok()
+}
+
+// ---- deadlines, peer identity, errors ---------------------------------------
+
+priv session_state: fn(session: DTLSSession) -> Shared<DTLSState>? Never! {
+    if session.state == .Val(state) -> return Val(state.copy())
+    None
+}
+
+priv listener_state: fn(listener: DTLSListener) -> Shared<DTLSListenerState>? Never! {
+    if listener.state == .Val(state) -> return Val(state.copy())
+    None
+}
+
+priv dtls_forever: fn() -> Duration Never! { Duration{ns: C_DTLS_NO_DEADLINE} }
+
+priv dtls_deadline_end: fn(deadline: Duration, operation: String) -> Int NetError! {
+    if deadline.ns < 0 {
+        return Err(NetError.InvalidInput(dtls_error_detail(operation, "network timeout must be non-negative")))
+    }
+    now: rt.clock_mono_ns()
+    if deadline.ns > C_DTLS_NO_DEADLINE - now -> return Ok(C_DTLS_NO_DEADLINE)
+    Ok(now + deadline.ns)
+}
+
+priv dtls_engine_status: fn(e: ssldefs.SSLError) -> Int Never! { ssldefs.ssl_error_code(e) }
+
+priv dtls_ssl_text: fn(e: ssldefs.SSLError) -> String Never! {
+    dtls_mbedtls_text(ssldefs.ssl_error_code(e))
+}
+
+priv dtls_settle: fn(status: Int, sent: Int) -> Int Never! {
+    if sent != 0 && (status >= 0 || status == C_DTLS_WANT_READ || status == C_DTLS_WANT_WRITE) {
+        return sent
+    }
+    status
+}
+
+priv dtls_socket_status: fn(err: NetError, fallback: Int) -> Int Never! {
+    if err == {
+        .ConnectionReset(_) | .Closed(_) -> C_DTLS_NET_CONN_RESET
+        .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .NotConnected(_) | .Timeout(_) | .Canceled(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> fallback
+    }
+}
+
+priv dtls_timed_out: fn(err: NetError) -> Bool Never! {
+    if err == {
+        .Timeout(_) -> true
+        .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Canceled(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> false
+    }
+}
+
+priv dtls_stopped: fn(err: NetError) -> Bool Never! {
+    if err == {
+        .Canceled(_) -> true
+        .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Timeout(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> false
+    }
+}
+
+priv dtls_handshake_message: fn(ssl: ssldefs.SSLContext, server_name: String, status: Int) -> String Never! {
+    prefix: if server_name == "" -> "DTLS handshake failed" else -> "DTLS handshake with `{server_name}` failed"
+    flags: ssltls.ssl_get_verify_result(ssl)
+    if flags != 0 && flags != 4294967295 {
+        return "{prefix}: invalid peer certificate: {dtls_verify_reason(flags)}"
+    }
+    if status == -0x7780 && ssl.in_msgtype == ssldefs.SSL_MSG_ALERT && ssl.in_msg + 1 < ssl.in_buf.len() {
+        alert: ssldefs.ssl_u8(ssl.in_buf, ssl.in_msg + 1)
+        if alert == ssldefs.SSL_ALERT_MSG_HANDSHAKE_FAILURE || alert == ssldefs.SSL_ALERT_MSG_INSUFFICIENT_SECURITY {
+            return "{prefix}: the peer refused every cipher suite, group and signature algorithm Core's DTLS 1.2 offers (ECDHE with AES-GCM or ChaCha20-Poly1305 over x25519, P-256 or P-384)"
+        }
+        if alert == ssldefs.SSL_ALERT_MSG_PROTOCOL_VERSION {
+            return "{prefix}: the peer refused DTLS 1.2"
+        }
+    }
+    "{prefix}: {dtls_mbedtls_text(status)}"
+}
+
+priv dtls_verify_reason: fn(flags: Int) -> String Never! {
+    if flags & 8 != 0 -> return "UnknownIssuer"
+    if flags & 1 != 0 -> return "Expired"
+    if flags & 512 != 0 -> return "NotValidYet"
+    if flags & 2 != 0 -> return "Revoked"
+    if flags & 4 != 0 -> return "NotValidForName"
+    "Other"
+}
+
+priv dtls_error_detail: fn(operation: String, message: String) -> NetErrorDetail Never! {
+    NetErrorDetail{operation: operation, address: None, name: None, message: message, os_code: None}
+}
+
+priv dtls_deadline_error: fn(operation: String) -> NetError Never! {
+    NetError.Timeout(dtls_error_detail(operation, "deadline exceeded while waiting in {operation}"))
+}
+
+priv dtls_net_error: fn(operation: String, message: String) -> NetError Never! {
+    if message.contains("closed") -> return NetError.Closed(dtls_error_detail(operation, message))
+    if message.contains("timed out") || message.contains("deadline") {
+        return NetError.Timeout(dtls_error_detail(operation, message))
+    }
+    NetError.TLS(dtls_error_detail(operation, message))
+}
+
+priv dtls_io_context: fn(operation: IOOperation, message: String) -> IOContext Never! {
+    IOContext{operation: operation, resource: Val("DTLS session"), os_code: None, cause: Val(message)}
+}
+
+priv dtls_io_error: fn(operation: IOOperation, message: String) -> IOError Never! {
+    if message.contains("closed") -> return IOError.Closed(dtls_io_context(operation, message))
+    if message.contains("timed out") || message.contains("deadline") {
+        return IOError.TimedOut(dtls_io_context(operation, message))
+    }
+    if message.contains("canceled") -> return IOError.Canceled(dtls_io_context(operation, message))
+    IOError.Other(dtls_io_context(operation, message))
+}
+
+priv dtls_net_io_context: fn(detail: NetErrorDetail) -> IOContext Never! {
+    operation: if {
+        detail.operation.contains("read") -> IOOperation.Read
+        detail.operation.contains("write") || detail.operation.contains("send") -> IOOperation.Write
+        detail.operation.contains("connect") || detail.operation.contains("client") -> IOOperation.Connect
+        detail.operation.contains("accept") || detail.operation.contains("server") -> IOOperation.Accept
+        detail.operation.contains("close") -> IOOperation.Close
+        detail.operation.contains("resolve") || detail.operation.contains("dns") -> IOOperation.Resolve
+        else -> IOOperation.Codec
+    }
+    resource: if detail.address == .Val(address) -> Val(address.copy()) else -> detail.name.copy()
+    IOContext{operation: operation, resource: resource, os_code: detail.os_code, cause: Val(detail.message.copy())}
+}
+
+priv dtls_net_to_io: fn(err: NetError) -> IOError Never! {
+    if err == {
+        .InvalidInput(detail) -> IOError.InvalidInput(dtls_net_io_context(detail))
+        .PermissionDenied(detail) -> IOError.PermissionDenied(dtls_net_io_context(detail))
+        .Timeout(detail) -> IOError.TimedOut(dtls_net_io_context(detail))
+        .Canceled(detail) -> IOError.Canceled(dtls_net_io_context(detail))
+        .Closed(detail) -> IOError.Closed(dtls_net_io_context(detail))
+        .NotConnected(detail) -> IOError.Closed(dtls_net_io_context(detail))
+        .Protocol(detail) -> IOError.Protocol(dtls_net_io_context(detail))
+        .AddressInUse(detail) -> IOError.Other(dtls_net_io_context(detail))
+        .AddressUnavailable(detail) -> IOError.Other(dtls_net_io_context(detail))
+        .ConnectionRefused(detail) -> IOError.Other(dtls_net_io_context(detail))
+        .ConnectionReset(detail) -> IOError.Other(dtls_net_io_context(detail))
+        .Unsupported(detail) -> IOError.Other(dtls_net_io_context(detail))
+        .TLS(detail) -> IOError.Other(dtls_net_io_context(detail))
+        .Other(detail) -> IOError.Other(dtls_net_io_context(detail))
+        .DNS(_) -> IOError.Other(IOContext{operation: .Resolve, resource: None, os_code: None, cause: Val("{err}")})
+    }
+}
+
+priv dtls_mbedtls_high: fn(status: Int) -> Int Never! { 0 - ((0 - status) & 32640) }
+
+priv dtls_mbedtls_text: fn(status: Int) -> String Never! {
+    positive: 0 - status
+    high: positive & 32640
+    low: positive & 127
+    text: dtls_mbedtls_known(if high != 0 -> high else -> low)
+    if text != "" -> return text
+    "Mbed TLS error -0x{dtls_hex(positive, 4)}"
+}
+
+priv dtls_mbedtls_known: fn(code: Int) -> String Never! {
+    if code == {
+        0x7780 -> "received a fatal alert from the peer"
+        0x7A00 -> "the peer certificate could not be processed"
+        0x6E00 -> "the handshake negotiation failed"
+        0x6E80 -> "no DTLS version in common with the peer"
+        0x7700 -> "received an unexpected message"
+        0x7300 -> "received a message that could not be decoded"
+        0x7200 -> "received an invalid record"
+        0x7180 -> "a record failed its integrity check"
+        0x7580 -> "no application protocol in common with the peer"
+        0x7800 -> "the peer did not recognize the server name"
+        0x7F00 -> "memory allocation failed"
+        0x6C00 -> "internal error"
+        0x6800 -> "the operation timed out"
+        0x5E80 -> "the DTLS configuration is invalid"
+        0x7280 -> "the peer ended the connection during the exchange"
+        0x7100 -> "invalid input"
+        0x2700 -> "the peer certificate could not be verified"
+        0x2180 -> "the certificate format is invalid"
+        0x2900 -> "the certificate file could not be read"
+        0x2800 -> "invalid certificate input"
+        0x3D00 -> "the private key format is invalid"
+        0x3C80 -> "the private key algorithm is not supported"
+        0x3B00 -> "the private key is encrypted"
+        0x3F00 -> "the key types do not match"
+        0x3E80 -> "invalid key input"
+        0x0050 -> "connection reset by peer"
+        0x004C -> "receiving from the socket failed"
+        0x004E -> "sending to the socket failed"
+        else -> ""
+    }
+}
+
+priv dtls_hex: fn(value: Int, width: Int) -> String Never! {
+    ^digits: [U8]{}
+    ^rest: value
+    loop rest > 0 || digits.len() < width {
+        digit: rest %% 16
+        digits.push(U8{if digit < 10 -> 48 + digit else -> 55 + digit})
+        rest = rest /% 16
+    }
+    ^out: [U8]{}
+    ^at: digits.len()
+    loop at > 0 {
+        at -= 1
+        out.push(digits[at])
+    }
+    String.from_bytes(out) ?? ""
+}
+
+priv dtls_byte_range: fn(raw: [U8], start: Int, end: Int) -> [U8] Never! {
+    ^out: [U8]{}
+    loop at in start..<end -> out.push(raw[at])
+    out
+}
+
+priv dtls_has_nul: fn(text: String) -> Bool Never! {
+    loop byte in text.bytes() {
+        if byte == (U8{0}) -> return true
+    }
+    false
+}
+
+priv dtls_valid_server_name: fn(name: String) -> Bool Never! {
+    raw: name.bytes()
+    if raw.len() == 0 || raw.len() > 253 -> return false
+    ^colons: 0
+    loop byte in raw {
+        n: Int{byte}
+        if n == 58 -> colons += 1
+    }
+    if colons == 0 -> return tls.valid_dns_name(raw)
+    if colons < 2 -> return false
+    loop byte in raw {
+        n: Int{byte}
+        if !((n >= 48 && n <= 58) || (n >= 65 && n <= 70) || (n >= 97 && n <= 102) || n == 46) {
+            return false
+        }
+    }
+    true
+}
+
+// ---- verified peer identity -------------------------------------------------
+
+priv dtls_empty_certificate: fn() -> TLSCertificate Never! {
+    TLSCertificate{der: [U8]{}, sha256: [U8]{}, spki_sha256: [U8]{}, dns_names: [String]{}, valid_from_unix_ms: 0, valid_until_unix_ms: 0, subject: "", issuer: ""}
+}
+
+priv dtls_empty_identity: fn() -> TLSPeerIdentity Never! {
+    TLSPeerIdentity{verified_server_name: "", leaf: dtls_empty_certificate(), certificate_chain: [TLSCertificate]{}, cipher_suite: "", tls_version: TLSVersion.TLS12}
+}
+
+priv dtls_verified_peer_identity: fn(ssl: ssldefs.SSLContext, server_name: String) -> TLSPeerIdentity DTLSFailure! {
+    ^chain: [TLSCertificate]{}
+    if ssl.session >= 0 && ssl.session < ssl.spool.len() && ssl.spool[ssl.session].peer_cert == .Val(certs) {
+        loop crt in certs -> chain.push(dtls_certificate(crt))
+    }
+    if chain.len() == 0 {
+        return Err(dtls_fail("DTLS verified peer did not provide a certificate chain"))
+    }
+    suite: ssltls.ssl_get_ciphersuite(ssl) ?? ""
+    if suite == "" {
+        return Err(dtls_fail("DTLS verified peer did not expose a negotiated cipher suite"))
+    }
+    version: ssl.tls_version
+    tls_version: TLSVersion.from_int(version) ?? return Err(dtls_fail("DTLS verified peer negotiated unsupported protocol version: {version}"))
+    leaf: chain[0].copy()
+    Ok(TLSPeerIdentity{verified_server_name: server_name.copy(), leaf: leaf, certificate_chain: chain, cipher_suite: dtls_suite_name(suite), tls_version: tls_version})
+}
+
+priv dtls_certificate: fn(crt: x509crt.X509Crt) -> TLSCertificate Never! {
+    ^dns_names: [String]{}
+    loop san in crt.subject_alt_names {
+        if x509crt.x509_crt_san_type(san) != x509.X509_SAN_DNS_NAME -> next
+        bytes: x509crt.x509_crt_san_bytes(crt, san)
+        dns_names.push(String.from_bytes(bytes) ?? dtls_escaped(bytes))
+    }
+    TLSCertificate{
+        der: crt.raw.copy(),
+        sha256: crypto.sha256(crt.raw).bytes,
+        spki_sha256: crypto.sha256(dtls_byte_range(crt.raw, crt.pk_raw.p, crt.pk_raw.p + crt.pk_raw.len)).bytes,
+        dns_names: dns_names,
+        valid_from_unix_ms: dtls_unix_ms(crt.valid_from),
+        valid_until_unix_ms: dtls_unix_ms(crt.valid_to),
+        subject: dtls_name_text(crt.subject),
+        issuer: dtls_name_text(crt.issuer),
+    }
+}
+
+priv dtls_suite_name: fn(name: String) -> String Never! { name.replace("-", "_") }
+
+priv dtls_name_text: fn(names: [asn1.NamedData]) -> String Never! {
+    ^parts: [String]{}
+    loop name in names {
+        ^text: dtls_escaped(name.val)
+        if name.val_tag == 12 -> text = String.from_bytes(name.val) ?? text
+        parts.push("{dtls_name_label(name.oid)}={text}")
+    }
+    parts.join(",")
+}
+
+priv dtls_name_label: fn(oid: [U8]) -> String Never! {
+    if oid.len() != 3 || oid[0] != (U8{85}) || oid[1] != (U8{4}) -> return "OID"
+    if (Int{oid[2]}) == {
+        3 -> "CN"
+        6 -> "C"
+        7 -> "L"
+        8 -> "ST"
+        10 -> "O"
+        11 -> "OU"
+        else -> "OID"
+    }
+}
+
+priv dtls_escaped: fn(bytes: [U8]) -> String Never! {
+    ^out: [U8]{}
+    loop byte in bytes {
+        n: Int{byte}
+        if {
+            n == 92 || n == 44 || n == 61 -> {
+                out.push(U8{92})
+                out.push(byte)
+            }
+            n >= 32 && n <= 126 -> { out.push(byte) }
+            else -> {
+                loop b in "\\x{tls.ascii_lower(dtls_hex(n, 2))}".bytes() -> out.push(b)
+            }
+        }
+    }
+    String.from_bytes(out) ?? ""
+}
+
+priv dtls_unix_ms: fn(time: x509.X509Time) -> Int Never! {
+    y: if time.mon <= 2 -> time.year - 1 else -> time.year
+    era: y /% 400
+    yoe: y - era * 400
+    mp: if time.mon > 2 -> time.mon - 3 else -> time.mon + 9
+    doy: (153 * mp + 2) /% 5 + time.day - 1
+    doe: yoe * 365 + yoe /% 4 - yoe /% 100 + doy
+    days: era * 146097 + doe - 719468
+    (days * 86400 + time.hour * 3600 + time.min * 60 + time.sec) * 1000
+}
+
+// ---- unit tests -------------------------------------------------------------
+
+priv dtls_test_pump: fn(from: ^DTLSState, to: ^DTLSState) -> Int Never! {
+    count: from.ssl.bio.tx_dgrams.len()
+    loop dgram in from.ssl.bio.tx_dgrams -> to.ssl.bio.rx_dgrams.push(dgram.copy())
+    from.ssl.bio.tx_dgrams.clear()
+    count
+}
+
+priv dtls_test_step: fn(dtls: ^DTLSState) -> Int Never! {
+    if dtls.ssl.state == ssldefs.SSL_HANDSHAKE_OVER -> return 0
+    if ssltls.ssl_handshake(dtls.ssl, dtls.rng) == .Err(e) -> return dtls_engine_status(e)
+    0
+}
+
+priv dtls_test_zero: fn(bytes: [U8]) -> Bool Never! {
+    loop b in bytes {
+        if b != (U8{0}) -> return false
+    }
+    true
+}
+
+priv dtls_test_released: fn(dtls: DTLSState) -> Bool Never! {
+    !dtls.ssl.has_conf && dtls.ssl.tpool.len() == 0 && dtls.ssl.spool.len() == 0 && dtls.ssl.in_buf.len() == 0 && dtls_test_zero(dtls.buffer)
+}
+
+#Test("DTLS 1.2 config builders validate MTU, retransmit bounds, ALPN, and server PEM pairs") {
+    assert(DTLSClientConfig.default().with_mtu(100) == .Err(_))
+    assert(DTLSClientConfig.default().with_mtu(0) == .Ok(_))
+    assert(DTLSClientConfig.default().with_mtu(1200) == .Ok(_))
+    assert(DTLSClientConfig.default().with_retransmit_timeouts(min_ms: 0, max_ms: 1000) == .Err(_))
+    assert(DTLSClientConfig.default().with_retransmit_timeouts(min_ms: 2000, max_ms: 1000) == .Err(_))
+    assert(DTLSClientConfig.default().with_retransmit_timeouts(min_ms: 50, max_ms: 500) == .Ok(_))
+    assert(DTLSClientConfig.default().with_alpn([String]{""}) == .Err(_))
+    assert(DTLSClientConfig.default().with_alpn([String]{"dtls-echo"}) == .Ok(_))
+    assert(DTLSServerConfig.from_pem("not a cert".bytes(), "not a key".bytes()) == .Err(_))
+    cert: core.files.read_bytes("Tests/Fixtures/TLS/ec-root.server.cert.pem") ?? panic("{err}")
+    key: core.files.read_bytes("Tests/Fixtures/TLS/ec-root.server.key.pem") ?? panic("{err}")
+    wrong_key: core.files.read_bytes("Tests/Fixtures/TLS/custom-root.server.key.pem") ?? panic("{err}")
+    assert(DTLSServerConfig.from_pem(cert, wrong_key) == .Err(_))
+    cfg: DTLSServerConfig.from_pem(cert, key) ?? panic("valid server PEM: {err}")
+    assert(cfg.with_cookie_timeout(-1) == .Err(_))
+    assert(cfg.with_cookie_timeout(30) == .Ok(_))
+    assert_eq(version_name(), "DTLSv1.2")
+}
+
+#Test("DTLS 1.2 in-memory handshake completes cookie exchange, fragmentation, anti-replay, retransmission, and close wipe") {
+    ca_bytes: core.files.read_bytes("Tests/Fixtures/TLS/ec-root.ca.cert.pem") ?? panic("{err}")
+    cert_bytes: core.files.read_bytes("Tests/Fixtures/TLS/ec-root.server.cert.pem") ?? panic("{err}")
+    key_bytes: core.files.read_bytes("Tests/Fixtures/TLS/ec-root.server.key.pem") ?? panic("{err}")
+    roots: RootCertificates.from_pem(ca_bytes) ?? panic("{err}")
+    cli_cfg0: DTLSClientConfig.default().with_trust(.CustomOnly(roots)) ?? panic("{err}")
+    cli_cfg1: cli_cfg0.with_mtu(300) ?? panic("{err}")
+    cli_cfg: cli_cfg1.with_retransmit_timeouts(min_ms: 15, max_ms: 200) ?? panic("{err}")
+    srv_cfg0: DTLSServerConfig.from_pem(cert_bytes, key_bytes) ?? panic("{err}")
+    srv_cfg1: srv_cfg0.with_mtu(300) ?? panic("{err}")
+    srv_cfg: srv_cfg1.with_retransmit_timeouts(min_ms: 15, max_ms: 200) ?? panic("{err}")
+    ^cookie: dtls_cookie_new(60) ?? panic("{err}")
+    shared_cookie: Shared{cookie}
+    dummy_sock: net.udp_bind("127.0.0.1:0") ?? panic("{err}")
+    dummy_addr: net.udp_local_addr(dummy_sock) ?? panic("{err}")
+    peer_id: "127.0.0.1:54321".bytes()
+    ^cli_ctx: dtls_client_context("localhost", cli_cfg) ?? panic("{err}")
+    ^srv_ctx: dtls_server_context(srv_cfg, Val(shared_cookie)) ?? panic("{err}")
+    ^cli: dtls_open(cli_ctx, dummy_sock, dummy_addr, false, "localhost", cli_cfg.mtu) ?? panic("{dtls_ssl_text(err)}")
+    ^srv: dtls_open(srv_ctx, dummy_sock, dummy_addr, false, "", srv_cfg.mtu) ?? panic("{dtls_ssl_text(err)}")
+    _: sslsrv12.ssl_set_client_transport_id(srv.ssl, peer_id.copy()) ?? panic("{dtls_ssl_text(err)}")
+    // Step 1: client sends ClientHello; simulate dropping it once and letting
+    // the DTLS retransmit timer fire to resend it.
+    assert_eq(dtls_test_step(cli), C_DTLS_WANT_READ)
+    assert(cli.ssl.bio.tx_dgrams.len() >= 1)
+    cli.ssl.bio.tx_dgrams.clear()
+    rt.sleep_ns(25000000)
+    assert_eq(dtls_test_step(cli), C_DTLS_WANT_READ)
+    assert(cli.ssl.bio.tx_dgrams.len() >= 1)
+    // Pump the retransmitted ClientHello; server must require HelloVerifyRequest
+    // cookie exchange and emit HelloVerifyRequest.
+    ^saw_hvr: false
+    ^fragmented_server_flight: false
+    ^rounds: 0
+    loop cli.ssl.state != ssldefs.SSL_HANDSHAKE_OVER || srv.ssl.state != ssldefs.SSL_HANDSHAKE_OVER {
+        rounds += 1
+        assert(rounds < 40)
+        _: dtls_test_pump(cli, srv)
+        srv_status: dtls_test_step(srv)
+        if srv_status == C_DTLS_HELLO_VERIFY_REQUIRED {
+            saw_hvr = true
+            _: dtls_test_pump(srv, cli)
+            ssltls.ssl_session_reset(srv.ssl)
+            _: sslsrv12.ssl_set_client_transport_id(srv.ssl, peer_id.copy()) ?? panic("{dtls_ssl_text(err)}")
+        } else {
+            assert(srv_status == 0 || srv_status == C_DTLS_WANT_READ)
+            sent_by_srv: dtls_test_pump(srv, cli)
+            if sent_by_srv > 1 -> fragmented_server_flight = true
+        }
+        cli_status: dtls_test_step(cli)
+        assert(cli_status == 0 || cli_status == C_DTLS_WANT_READ)
+    }
+    assert(saw_hvr)
+    assert(fragmented_server_flight)
+    assert_eq(ssltls.ssl_get_version(cli.ssl), "DTLSv1.2")
+    assert_eq(ssltls.ssl_get_version(srv.ssl), "DTLSv1.2")
+    // Application datagram + replay protection check.
+    payload: "secret dtls datagram".bytes()
+    wrote: sslmsg.ssl_write(cli.ssl, payload, payload.len(), cli.rng) ?? panic("{dtls_ssl_text(err)}")
+    assert_eq(wrote, payload.len())
+    assert_eq(cli.ssl.bio.tx_dgrams.len(), 1)
+    replayed_wire: cli.ssl.bio.tx_dgrams[0].copy()
+    _: dtls_test_pump(cli, srv)
+    got: sslmsg.ssl_read(srv.ssl, srv.buffer, C_DTLS_RECORD_BYTES, srv.rng) ?? panic("{dtls_ssl_text(err)}")
+    assert_eq(got, payload.len())
+    assert_eq(dtls_byte_range(srv.buffer, 0, got), payload)
+    // Inject the exact same encrypted datagram a second time: anti-replay must
+    // drop it and return WantRead rather than delivering duplicate plaintext.
+    srv.ssl.bio.rx_dgrams.push(replayed_wire)
+    ^replay_dropped: false
+    if sslmsg.ssl_read(srv.ssl, srv.buffer, C_DTLS_RECORD_BYTES, srv.rng) == .Err(.WantRead) {
+        replay_dropped = true
+    }
+    assert(replay_dropped)
+    // Close wipes buffers and frees engines.
+    dtls_release(cli)
+    dtls_release(srv)
+    assert(dtls_test_released(cli))
+    assert(dtls_test_released(srv))
+    dtls_close_udp(dummy_sock)
+}
+
+#Test("DTLS 1.2 loopback UDP client and server exchange datagrams and verify peer identity") {
+    ca_bytes: core.files.read_bytes("Tests/Fixtures/TLS/ec-root.ca.cert.pem") ?? panic("{err}")
+    cert_bytes: core.files.read_bytes("Tests/Fixtures/TLS/ec-root.server.cert.pem") ?? panic("{err}")
+    key_bytes: core.files.read_bytes("Tests/Fixtures/TLS/ec-root.server.key.pem") ?? panic("{err}")
+    roots: RootCertificates.from_pem(ca_bytes) ?? panic("{err}")
+    cli_cfg0: DTLSClientConfig.default().with_trust(.CustomOnly(roots)) ?? panic("{err}")
+    cli_cfg: cli_cfg0.with_alpn([String]{"jet-dtls"}) ?? panic("{err}")
+    srv_cfg0: DTLSServerConfig.from_pem(cert_bytes, key_bytes) ?? panic("{err}")
+    srv_cfg: srv_cfg0.with_alpn([String]{"jet-dtls"}) ?? panic("{err}")
+    listener: listen("127.0.0.1:0", srv_cfg) ?? panic("listen: {err}")
+    addr: listener.local_addr() ?? panic("local_addr: {err}")
+    budget: 5s
+    serving: task {
+        sess: listener.accept(deadline: budget) ?? panic("accept: {err}")
+        msg: sess.read(4096, deadline: budget) ?? panic("server read: {err}")
+        sess.write("echo:{msg}", deadline: budget) ?? panic("server write: {err}")
+        eof: sess.read_bytes(4096, deadline: budget) ?? panic("server eof: {err}")
+        assert_eq(eof.len(), 0)
+        sess.close() ?? panic("server close: {err}")
+        sess.close() ?? panic("server second close: {err}")
+        listener.close() ?? panic("listener close: {err}")
+        listener.close() ?? panic("listener second close: {err}")
+    }
+    session: connect(addr, server_name: "localhost", config: cli_cfg, deadline: budget) ?? panic("connect: {err}")
+    assert_eq(session.protocol_version(), "DTLSv1.2")
+    assert_eq(session.alpn_protocol() ?? "", "jet-dtls")
+    peer: session.peer_identity()
+    assert_eq(peer.verified_server_name, "localhost")
+    assert(peer.leaf.der.len() > 0)
+    assert(peer.cipher_suite != "")
+    session.write("hello dtls", deadline: budget) ?? panic("client write: {err}")
+    reply: session.read(4096, deadline: budget) ?? panic("client read: {err}")
+    assert_eq(reply, "echo:hello dtls")
+    session.close() ?? panic("client close: {err}")
+    session.close() ?? panic("client second close: {err}")
+    serving.join() ?? panic("server task: {err}")
+}

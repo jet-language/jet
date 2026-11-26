@@ -9,6 +9,7 @@ Run a lesson from the repository root, for example `jet run Examples/Network/<Le
 - [AppComposition](AppComposition.jet) — An app built by an ordinary function of what it needs, with no container: one catalog is shared by every request, a missing one stops before anything binds and names the calling line, and a fake catalog changes the answers with no global state.
 - [AppLifecycle](AppLifecycle.jet) — A web app over a database pool: the pool is ready before the listener binds, shutdown stops admission before the pool drains, a handler still blocked when the shutdown grace runs out is canceled and sends nothing, and the pool closes last.
 - [DNSLookup](DNSLookup.jet) — DNS PTR + well-known service port table (core.net).
+- [DTLSEcho](DTLSEcho.jet) — core.net.dtls client/server echo over loopback UDP with DTLS 1.2 cookie exchange, custom CA verification, ALPN negotiation, and close_notify.
 - [IPPublicDestination](IPPublicDestination.jet) — Reachable versus safe to fetch.
 - [IPSpecialProfile](IPSpecialProfile.jet) — IANA IPv4 Special-Purpose Address Space, updated 2025-10-09.
 - [NetworkProjection](NetworkProjection.jet) — Loopback TCP/UDP, readiness, typed addresses, and DNS records.

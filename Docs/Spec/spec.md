@@ -7563,9 +7563,44 @@ behavior remains. Checked edges enter the `Structure.ImportEdge` and GateLedger
 facts, while manifest policy is erased before native, interpreter, and web
 lowering (D-STRUCT-EDGE1).
 
+### Package layers
+
+Any `package.jet` may order its modules (and, for a multi-package workspace or
+entry package, its loaded dependency packages) into named layers, lowest layer
+first:
+
+```text
+layers: {
+    storage: ["storage"]
+    domain: ["domain"]
+    ui: ["ui"]
+}
+```
+
+Each key names a layer and lists quoted module or package names. A listed name
+covers the modules under it (`storage` covers `storage.repo`; `core.net` covers
+`core.net.tls`). The longest listed name decides a module's layer, and each
+module is listed in at most one layer. Unlisted modules (such as an application
+entry point or an external dependency) are unconstrained.
+
+An import from a module in layer `L` may only target a module in layer `L` or a
+lower layer. An import pointing to a higher layer is refused with E0646
+(`Jet.ImportPointsUpALayer`) at the `use`, naming both modules and both layers.
+`jet check` reports every layer violation in a package in one pass. Dedicated
+test files (under `Tests/` or `tests/`, named `test.jet` / `*_test.jet` /
+`*Test.jet`, or containing only `#Test` items) are exempt so tests can exercise
+code across layers; production modules with inline `#Test` blocks remain
+subject to layer rules. Lower layers invoke higher-layer behavior by defining a
+trait or function type in the lower layer and receiving an implementation from
+above (dependency inversion). Checked layer edges enter `Structure.ImportEdge`
+facts and have no runtime representation. See
+`Examples/Modules/Packages/LayerRules/package.jet` and
+`Examples/Modules/Packages/LayerRules.out`.
+
 ### Core layers
 
-`Core/package.jet` orders the Core library's modules into layers, lowest first:
+`Core/package.jet` uses the same `layers:` table, lowest first, to order Core's
+own modules:
 
 ```text
 layers: {
@@ -7575,16 +7610,11 @@ layers: {
 }
 ```
 
-Each key names a layer and lists quoted module names. A listed name also covers
-the modules under it (`core.net` covers `core.net.tls`); the longest listed name
-decides a module's layer, and a module is listed in at most one layer. A Core
-module names only modules of its own layer or a lower one.
-
-`jet check Core` reports each name of a higher layer's module where it is
-written (E1012): a `core.<area>` path, in a `use` or in code, or a private part
-of a higher area's module. Comments and quoted text name nothing. Such a name
-still binds, so the check goes on and reports Core's body errors as well. A
-program's check reads no layer table.
+In addition to import edges, `jet check Core` scans every `core.<area>` path
+written in Core sources — in a `use`, in code, or in a private part of a higher
+area's module — and reports each upward reference where it is written (E1012).
+Comments and quoted text name nothing. Such a name still binds, so the check
+goes on and reports Core's body errors as well.
 
 ### Permission purposes
 

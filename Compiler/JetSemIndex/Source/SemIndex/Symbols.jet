@@ -225,15 +225,16 @@ semindex_language_symbols: fn() -> [SemSymbol] Never! {
 }
 
 // `SemanticSymbolIndex.new` (`push` keeps the last row of one identity).
-semindex_symbol_index: fn(symbols: [SemSymbol]) -> [SemSymbol] Never! {
+semindex_symbol_index: fn(symbols: ^^[SemSymbol]) -> [SemSymbol] Never! {
     ^unique: [SemSymbol]{}
     ^positions: [String:Int]{}
-    loop symbol in symbols {
-        existing: positions.get(symbol.identity)
-        if existing == .Val(position) -> unique[position] = symbol.copy()
-        if existing == None {
-            positions[symbol.identity] = unique.len()
-            unique.push(symbol.copy())
+    loop symbol in symbols.move() {
+        if positions.get(symbol.identity) == {
+            .Val(position) -> unique[position] = symbol
+            .None -> {
+                positions[symbol.identity] = unique.len()
+                unique.push(symbol)
+            }
         }
     }
     // `SemanticSymbolIndex.sort`: qualified name, module, identity.
@@ -433,10 +434,11 @@ semindex_symbol_is_lexical_slot: fn(slot: String) -> Bool Never! {
 
 // The smallest node enclosing `start..end` (optionally item nodes only); among
 // equal sizes, the earliest structural node.
-semindex_symbol_smallest: fn(nodes: [SemNode], start: Int, end: Int, items_only: Bool) -> Int? Never! {
+semindex_symbol_smallest: fn(all_nodes: [SemNode], indices: [Int], start: Int, end: Int, items_only: Bool) -> Int? Never! {
     ^best: Int?{None}
     ^best_size: 0
-    loop node in nodes {
+    loop idx in indices {
+        node: all_nodes[idx]
         if items_only && node.class != "item" -> next
         if node.span.start > start || end > node.span.end -> next
         size: if node.span.end > node.span.start -> node.span.end - node.span.start else -> 0
@@ -457,7 +459,7 @@ SemSymbolScopes: struct {
     enclosing_item: [String:Int],
     first_lexical_child: [String:Int],
     boundaries: [String:Span],
-    nodes_by_id: [String:SemNode],
+    nodes_by_id: [String:Int],
 }
 
 semindex_symbol_scope_key: fn(module_path: String, start: Int, end: Int) -> String Never! {
@@ -465,12 +467,12 @@ semindex_symbol_scope_key: fn(module_path: String, start: Int, end: Int) -> Stri
 }
 
 semindex_symbol_scopes: fn(index: SemIndex) -> SemSymbolScopes Never! {
-    ^scopes: SemSymbolScopes{enclosing: [String:Int]{}, enclosing_item: [String:Int]{}, first_lexical_child: [String:Int]{}, boundaries: [String:Span]{}, nodes_by_id: [String:SemNode]{}}
+    ^scopes: SemSymbolScopes{enclosing: [String:Int]{}, enclosing_item: [String:Int]{}, first_lexical_child: [String:Int]{}, boundaries: [String:Span]{}, nodes_by_id: [String:Int]{}}
     ^module_paths: [String]{}
     // A module path -> its group in `spans_by_module` and `nodes_by_module`.
     ^groups: [String:Int]{}
     ^spans_by_module: [[Span]]{}
-    ^nodes_by_module: [[SemNode]]{}
+    ^nodes_by_module: [[Int]]{}
     loop definition in index.definitions {
         def: definition.def
         if def.kind == {
@@ -481,17 +483,17 @@ semindex_symbol_scopes: fn(index: SemIndex) -> SemSymbolScopes Never! {
                     module_paths.push(def.module_path)
                     groups[def.module_path] = group
                     spans_by_module.push([Span]{})
-                    nodes_by_module.push([SemNode]{})
+                    nodes_by_module.push([Int]{})
                 }
                 spans_by_module[group].push(def.def_span)
             }
             .Module | .Function(_) | .Struct(_, _) | .Enum(_, _) | .Trait | .Tag | .Type(_) | .Const | .EnumVariant(_) | .Field(_, _) -> {}
         }
     }
-    loop node in index.nodes {
-        scopes.nodes_by_id["{node.module_path}\n{node.id}"] = node.copy()
+    loop (node_idx, node) in index.nodes {
+        scopes.nodes_by_id["{node.module_path}\n{node.id}"] = node_idx
         group: groups.get(node.module_path) ?? next
-        nodes_by_module[group].push(node.copy())
+        nodes_by_module[group].push(node_idx)
         if node.parent == .Val(parent) {
             child_key: "{node.module_path}\n{parent}"
             if semindex_symbol_is_lexical_slot(node.slot) && scopes.first_lexical_child.get(child_key) == None {
@@ -506,59 +508,60 @@ semindex_symbol_scopes: fn(index: SemIndex) -> SemSymbolScopes Never! {
     loop (group, module_path) in module_paths {
         // Stable: equal spans and equal starts keep their index order.
         spans_by_module[group].sort_by(fn(left: Span, right: Span) { (left.start <=> right.start).then(left.end <=> right.end) })
-        nodes_by_module[group].sort_by(fn(left: SemNode, right: SemNode) { left.span.start <=> right.span.start })
-        semindex_symbol_module_scopes(scopes, module_path, spans_by_module[group], nodes_by_module[group])
+        nodes_by_module[group].sort_by(fn(left: Int, right: Int) { index.nodes[left].span.start <=> index.nodes[right].span.start })
+        semindex_symbol_module_scopes(scopes, index.nodes, module_path, spans_by_module[group], nodes_by_module[group])
     }
     scopes
 }
 
 // The scopes of one module's definition spans (`spans`, in order) among its
 // structural nodes (`nodes`, in start order).
-semindex_symbol_module_scopes: fn(scopes: ^SemSymbolScopes, module_path: String, spans: [Span], nodes: [SemNode]) Never! {
+semindex_symbol_module_scopes: fn(scopes: ^SemSymbolScopes, all_nodes: [SemNode], module_path: String, spans: [Span], nodes: [Int]) Never! {
     ^next_node: 0
-    ^active: [SemNode]{}
+    ^active: [Int]{}
     loop span in spans {
-        loop next_node < nodes.len() && nodes[next_node].span.start <= span.start {
+        loop next_node < nodes.len() && all_nodes[nodes[next_node]].span.start <= span.start {
             active.push(nodes[next_node])
             next_node += 1
         }
-        ^kept: [SemNode]{}
-        loop node in active {
-            if node.span.end >= span.start -> kept.push(node)
+        ^kept: [Int]{}
+        loop idx in active {
+            if all_nodes[idx].span.end >= span.start -> kept.push(idx)
         }
         active = kept
         key: semindex_symbol_scope_key(module_path, span.start, span.end)
         if {
-            span.end < span.start -> semindex_symbol_enclose(scopes, key, nodes, span)
-            else -> semindex_symbol_enclose(scopes, key, active, span)
+            span.end < span.start -> semindex_symbol_enclose(scopes, all_nodes, key, nodes, span)
+            else -> semindex_symbol_enclose(scopes, all_nodes, key, active, span)
         }
     }
 }
 
-semindex_symbol_enclose: fn(scopes: ^SemSymbolScopes, key: String, candidates: [SemNode], span: Span) Never! {
-    if semindex_symbol_smallest(candidates, span.start, span.end, false) == .Val(found) {
+semindex_symbol_enclose: fn(scopes: ^SemSymbolScopes, all_nodes: [SemNode], key: String, candidates: [Int], span: Span) Never! {
+    if semindex_symbol_smallest(all_nodes, candidates, span.start, span.end, false) == .Val(found) {
         scopes.enclosing[key] = found
     }
-    if semindex_symbol_smallest(candidates, span.start, span.end, true) == .Val(found) {
+    if semindex_symbol_smallest(all_nodes, candidates, span.start, span.end, true) == .Val(found) {
         scopes.enclosing_item[key] = found
     }
 }
 
 // `LexicalScopeIndex.scope`.
-semindex_symbol_scope: fn(scopes: SemSymbolScopes, module_path: String, def_span: Span, is_param: Bool) -> SemSymbolScope? Never! {
+semindex_symbol_scope: fn(scopes: SemSymbolScopes, all_nodes: [SemNode], module_path: String, def_span: Span, is_param: Bool) -> SemSymbolScope? Never! {
     key: semindex_symbol_scope_key(module_path, def_span.start, def_span.end)
     initial: scopes.enclosing.get(key) ?? return None
     ^innermost_parent: Int?{None}
     ^innermost_slot: ""
     if scopes.first_lexical_child.get("{module_path}\n{initial}") == .Val(child) {
-        child_node: scopes.nodes_by_id.get("{module_path}\n{child}") ?? return None
+        child_idx: scopes.nodes_by_id.get("{module_path}\n{child}") ?? return None
         innermost_parent = Val(initial)
-        innermost_slot = child_node.slot
+        innermost_slot = all_nodes[child_idx].slot
     }
     ^depth: if innermost_parent == None -> 0 else -> 1
     ^current: initial
     loop {
-        node: scopes.nodes_by_id.get("{module_path}\n{current}") ?? return None
+        node_idx: scopes.nodes_by_id.get("{module_path}\n{current}") ?? return None
+        node: all_nodes[node_idx]
         if semindex_symbol_is_lexical_slot(node.slot) {
             depth += 1
             if innermost_parent == None {
@@ -726,39 +729,48 @@ semindex_symbol_alias_identity: fn(module_path: String, span: Span) -> String? N
     Val("import:{module_path}@{span.start}..{span.end}")
 }
 
+// Match one import candidate against `module_alias` (`File` or `Module` import).
+semindex_symbol_match_import: fn(modules: [JetDriverDocModule], doc_module: JetDriverDocModule, candidate: ImportDecl, module_alias: String) -> {matched: Bool, path: String?} Never! {
+    if candidate.alias != module_alias -> return {matched: false, path: None}
+    if candidate.kind == {
+        .File(path, _) -> {
+            directory: semindex_symbol_files.dirname(doc_module.path)
+            parent: if directory == "" -> "." else -> directory
+            // `"./helper"`, `"helper"` and `"helper.jet"` name one file.
+            ^name: path
+            loop name.starts_with("./") -> name = name.slice(2, name.len())
+            if !name.ends_with(".jet") -> name = "{name}.jet"
+            relative: "{parent}/{name}"
+            name_parts: name.split("/").to_list()
+            leaf: name_parts[name_parts.len() - 1]
+            loop other in modules {
+                parts: other.path.split("/").to_list()
+                file: parts[parts.len() - 1]
+                if other.path == relative || file == leaf -> return {matched: true, path: Val(other.path)}
+            }
+            return {matched: true, path: None}
+        }
+        .Module(name, _) -> {
+            loop other in modules {
+                if other.alias == name -> return {matched: true, path: Val(other.path)}
+            }
+            return {matched: true, path: None}
+        }
+        .Unqualified(_, _, _, _, _) -> {}
+    }
+    {matched: false, path: None}
+}
+
 // The module an unqualified import's alias names: its `File` or `Module`
 // import.
 semindex_symbol_imported_module: fn(modules: [JetDriverDocModule], doc_module: JetDriverDocModule, imports: [ImportDecl], module_alias: String) -> String? Never! {
-    ^candidates: imports
-    loop import in doc_module.imports -> candidates.push(import.copy())
-    loop candidate in candidates {
-        if candidate.alias != module_alias -> next
-        if candidate.kind == {
-            .File(path, _) -> {
-                directory: semindex_symbol_files.dirname(doc_module.path)
-                parent: if directory == "" -> "." else -> directory
-                // `"./helper"`, `"helper"` and `"helper.jet"` name one file.
-                ^name: path
-                loop name.starts_with("./") -> name = name.slice(2, name.len())
-                if !name.ends_with(".jet") -> name = "{name}.jet"
-                relative: "{parent}/{name}"
-                name_parts: name.split("/").to_list()
-                leaf: name_parts[name_parts.len() - 1]
-                loop other in modules {
-                    parts: other.path.split("/").to_list()
-                    file: parts[parts.len() - 1]
-                    if other.path == relative || file == leaf -> return Val(other.path)
-                }
-                return None
-            }
-            .Module(name, _) -> {
-                loop other in modules {
-                    if other.alias == name -> return Val(other.path)
-                }
-                return None
-            }
-            .Unqualified(_, _, _, _, _) -> {}
-        }
+    loop candidate in imports {
+        hit: semindex_symbol_match_import(modules, doc_module, candidate, module_alias)
+        if hit.matched -> return hit.path
+    }
+    loop candidate in doc_module.imports {
+        hit: semindex_symbol_match_import(modules, doc_module, candidate, module_alias)
+        if hit.matched -> return hit.path
     }
     None
 }
@@ -970,10 +982,7 @@ semindex_build_symbols: fn(index: SemIndex, modules: [JetDriverDocModule]) -> [S
             }
         }
         display_name: semindex_symbol_display(modules, module_at, indexed_modules, def.module_path, def.name)
-        ^display_owner: owner.copy()
-        if owner == .Val(value) {
-            display_owner = Val(semindex_symbol_display(modules, module_at, indexed_modules, def.module_path, value))
-        }
+        display_owner: if owner == .Val(value) -> Val(semindex_symbol_display(modules, module_at, indexed_modules, def.module_path, value)) else -> None
         qualified_name: semindex_symbol_canonical_name(modules, module_at, def.module_path, def.name, owner, def.def_span)
         shape: semindex_symbol_shape(display_name, def.kind, display_owner)
         ^signature: shape.signature
@@ -1007,13 +1016,13 @@ semindex_build_symbols: fn(index: SemIndex, modules: [JetDriverDocModule]) -> [S
                 if def.local_stage == .Val(stage) {
                     docs.summary = "{docs.summary}\n\n{semindex_local_stage_text(stage)}"
                 }
-                scope = semindex_symbol_scope(scopes, def.module_path, def.def_span, false)
+                scope = semindex_symbol_scope(scopes, index.nodes, def.module_path, def.def_span, false)
             }
             .Param(_) -> {
                 if semindex_symbol_alias_shown(modules, path_at, def.module_path, def.def_span.start) == .Val(shown) {
                     docs.summary = if docs.summary == "" -> "Type: {shown}" else -> "{docs.summary}\n\nType: {shown}"
                 }
-                scope = semindex_symbol_scope(scopes, def.module_path, def.def_span, true)
+                scope = semindex_symbol_scope(scopes, index.nodes, def.module_path, def.def_span, true)
             }
             .Module | .Function(_) | .Struct(_, _) | .Enum(_, _) | .Trait | .Tag | .Type(_) | .Const | .EnumVariant(_) | .Field(_, _) -> {}
         }
@@ -1039,7 +1048,7 @@ semindex_build_symbols: fn(index: SemIndex, modules: [JetDriverDocModule]) -> [S
         semindex_symbol_collect_imports(symbols, modules, doc_module, doc_module.imports, None)
         semindex_symbol_collect_inline_imports(index, symbols, modules, doc_module, doc_module.items, None)
     }
-    semindex_symbol_index(symbols)
+    semindex_symbol_index(symbols.move())
 }
 
 // How hover names a parameter whose written type applies a generic alias

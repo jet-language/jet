@@ -514,7 +514,7 @@ ir_method_key: fn(m: IRModule, p: IRProgram, receiver: Type, method: TMethodRef)
 // impl heads (`impl [T].Trait`); None for any other type.
 ir_trait_head_identity: fn(p: IRProgram, ty: Type) -> String? Never! {
     if ir_untag(ty) == .Apply(name, _) {
-        return Val(ir_trait_identity(p, Type.Named{name: name.copy()}))
+        return Val(ir_trait_identity(p, Type.Named{name: name}))
     }
     if type_structural_family(ir_untag(ty)) == .Val(family) -> return Val("shape {family}")
     None

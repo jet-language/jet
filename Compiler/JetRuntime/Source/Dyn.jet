@@ -1,9 +1,54 @@
-// Canonical native Dyn provider; DataABI.jet is the only offset/tag table.
+// Canonical native Dyn provider; owns its private offset/tag table.
 // Tags, structural equality and ordered JSON render semantics are fixed.
 // Exact Int words retain shared owners. Text constructors clone, sequence
 // constructors adopt, sequence getters lend; Dyn is the sole public carrier.
 // Reads borrow an initialized word of a live native Dyn or List; writes own a
 // word of one. RawWords.jet performs the access.
+DYN_BYTES: I64{16}
+
+DYN_TAG: I64{0}
+
+DYN_PAYLOAD: I64{8}
+
+DYN_NULL: I64{0}
+
+DYN_BOOL: I64{1}
+
+DYN_INT: I64{2}
+
+DYN_FLOAT: I64{3}
+
+DYN_NUMBER: I64{4}
+
+DYN_TEXT: I64{5}
+
+DYN_BYTE_LIST: I64{6}
+
+DYN_DATETIME: I64{7}
+
+// DynDateTime is not JetDateTime: frozen offset participates in equality.
+DYN_DATETIME_BYTES: I64{32}
+
+DYN_DATETIME_SECS: I64{0}
+
+DYN_DATETIME_NANOS: I64{8}
+
+DYN_DATETIME_LEAP: I64{16}
+
+DYN_DATETIME_OFFSET: I64{24}
+
+DYN_ARRAY: I64{8}
+
+DYN_OBJECT: I64{9}
+
+DYN_ELEMENT_BYTES: I64{8}
+
+DYN_ENTRY_BYTES: I64{16}
+
+DYN_ENTRY_KEY: I64{0}
+
+DYN_ENTRY_VALUE: I64{8}
+
 dyn_word: fn(address: I64) -> I64 { rt_text_word(address) }
 
 dyn_store: fn(address: I64, value: I64) { rt_text_store(address, value) }

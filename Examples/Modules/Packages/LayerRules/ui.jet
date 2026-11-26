@@ -1,0 +1,21 @@
+// Top layer: depends downward on `domain` and `storage`, and implements
+// `storage.Presenter` to handle lower-layer callbacks without upward imports.
+use {
+    domain
+    storage
+}
+
+CardPresenter: struct {
+    prefix: String,
+}
+
+impl CardPresenter.storage.Presenter {
+    present: fn(self, row: storage.Row) -> String { "{self.prefix}#{row.id}: {row.title}" }
+}
+
+render_dashboard: fn() -> String {
+    total: domain.summary_count()
+    row: domain.first_row()
+    card: storage.deliver(CardPresenter{prefix: "item"}, row)
+    "count={total} first={card}"
+}

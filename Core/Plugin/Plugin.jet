@@ -22,7 +22,7 @@ use {
 // native `jet_plugin_load` route, which decodes the host's load wire into the
 // typed handle; `load`'s body is what a compiler that does not lower it runs.
 // Every export call fails with a `PluginError`; each case carries a
-// compiler-owned `PluginFault { export, message, frames }` whose frames are
+// `PluginFault { export, message, frames }` whose frames are
 // `PluginFrame { function, component, offset }`.
 
 // Loads the WebAssembly Component at `path` under `authority`, which must
@@ -45,6 +45,21 @@ Limits: struct {
     memory_bytes: Int{16_777_216},
     table_elements: Int{10_000},
     timeout: Duration{1s},
+}
+
+// One frame of a plugin trap trace.
+PluginFrame: struct {
+    function: String,
+    component: String,
+    offset: Int,
+}
+
+// Details carried by a PluginError: the export that failed, the message, and
+// any guest trap frames.
+PluginFault: struct {
+    export: String,
+    message: String,
+    frames: [PluginFrame],
 }
 
 // The budget a plugin call ran out of, the `limit` of `PluginError.Budget`.

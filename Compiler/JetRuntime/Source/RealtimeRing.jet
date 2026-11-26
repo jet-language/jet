@@ -1,5 +1,17 @@
 // Bounded two-slot SPSC ring, allocation only owner-side. Fields and samples
 // use Sync's x86 acquire/release aligned word operations.
+RT_RING_BYTES: I64{40}
+
+RT_RING_FRAMES: I64{0}
+
+RT_RING_READ: I64{8}
+
+RT_RING_WRITE: I64{16}
+
+RT_RING_FIRST: I64{24}
+
+RT_RING_SECOND: I64{32}
+
 #Export(c) jet_rt_native_realtime_ring_new: fn(frames: I64) -> I64 {
     if (frames <= I64{0}) {
         realtime_raise(scheduler_msg_rt_ring_frames())

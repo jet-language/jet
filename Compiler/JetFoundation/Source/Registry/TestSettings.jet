@@ -226,7 +226,7 @@ test_setting_value: fn(row: TestSettingRow, text: String) -> String? Never! {
     trimmed: text.trim()
     if row.kind == {
         .Switch -> {
-            if trimmed == "true" || trimmed == "false" -> return Val(trimmed.copy())
+            if trimmed == "true" || trimmed == "false" -> return Val(trimmed)
             None
         }
         .Count | .Seed | .Retries -> {
@@ -238,7 +238,7 @@ test_setting_value: fn(row: TestSettingRow, text: String) -> String? Never! {
         .Text | .Path -> {
             if trimmed == "" || trimmed.contains("\n") || trimmed.contains("\t") -> return None
             if row.name == "grade" && trimmed != "generated" -> return None
-            Val(trimmed.copy())
+            Val(trimmed)
         }
         .Capture -> if {
             trimmed == "failed" || trimmed == "failure" || trimmed == "failures" -> Val("failed")
@@ -255,10 +255,7 @@ test_setting_value: fn(row: TestSettingRow, text: String) -> String? Never! {
             Val("{index}/{count}")
         }
         .Levels -> {
-            ^inner: trimmed.copy()
-            if inner.starts_with("[") && inner.ends_with("]") {
-                inner = inner.slice(1..<inner.len() - 1)
-            }
+            inner: if trimmed.starts_with("[") && trimmed.ends_with("]") -> trimmed.slice(1..<trimmed.len() - 1) else -> trimmed
             ^levels: [String]{}
             loop part in inner.split(",").to_list() {
                 level: part.trim().replace("\"", "")
@@ -270,18 +267,17 @@ test_setting_value: fn(row: TestSettingRow, text: String) -> String? Never! {
         }
         .Duration -> {
             ^unit: 1000
-            ^digits: trimmed.copy()
-            if {
+            digits: if {
                 trimmed.ends_with("ms") -> {
                     unit = 1
-                    digits = trimmed.removesuffix("ms")
+                    trimmed.removesuffix("ms")
                 }
-                trimmed.ends_with("s") -> { digits = trimmed.removesuffix("s") }
+                trimmed.ends_with("s") -> trimmed.removesuffix("s")
                 trimmed.ends_with("m") -> {
                     unit = 60000
-                    digits = trimmed.removesuffix("m")
+                    trimmed.removesuffix("m")
                 }
-                else -> { return None }
+                else -> return None
             }
             // At most nine digits, so the product stays far inside Int.
             plain: digits.replace("_", "")
@@ -293,7 +289,7 @@ test_setting_value: fn(row: TestSettingRow, text: String) -> String? Never! {
         .Size -> {
             loop unit in TEST_SETTING_SIZE_UNITS {
                 if !trimmed.ends_with(unit.suffix) -> next
-                plain: trimmed.copy().removesuffix(unit.suffix).trim().replace("_", "")
+                plain: trimmed.removesuffix(unit.suffix).trim().replace("_", "")
                 count: test_setting_whole(plain) ?? return None
                 if count < 1 -> return None
                 return Val("{count * unit.bytes}")
@@ -343,14 +339,14 @@ test_setting_whole: fn(text: String) -> Int? Never! {
 }
 
 // Writes `setting` into `settings`, replacing an earlier value of its row.
-test_settings_put: fn(settings: ^[TestSetting], setting: TestSetting) Never! {
+test_settings_put: fn(settings: ^[TestSetting], setting: ^^TestSetting) Never! {
     loop index in 0..<settings.len() {
         if settings[index].name == setting.name {
-            settings[index] = setting
+            settings[index] = setting.move()
             return
         }
     }
-    settings.push(setting.copy())
+    settings.push(setting.move())
 }
 
 // `later` over `earlier`: every row `later` writes replaces the earlier value.
@@ -434,8 +430,7 @@ test_settings_parse_lines: fn(text: String, source: String) -> [TestSetting] Tes
         if late {
             return Err(TestSettingError{message: "`t.{row.name}(…)` comes after `t.run()`, whose tests already ran without it"})
         }
-        raw: if parts.len() > 1 -> parts[1].copy() else -> ""
-        value: test_setting_value(row, raw) ?? return Err(TestSettingError{message: "`t.{row.name}(…)` needs {test_setting_hint(row)}, not `{raw}`"})
+        value: test_setting_value(row, if parts.len() > 1 -> parts[1] else -> "") ?? return Err(TestSettingError{message: "`t.{row.name}(…)` needs {test_setting_hint(row)}, not `{if parts.len() > 1 -> parts[1] else -> ""}`"})
         if !row.ported {
             return Err(TestSettingError{message: "`t.{row.name}(…)` is not ported to the Jet test runner yet"})
         }

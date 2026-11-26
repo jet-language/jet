@@ -47,6 +47,7 @@ use {
         PolicyKey,
         PolicyScope,
         PolicyValue,
+        ModuleLayer,
         Program,
         Span,
         StructureFact,
@@ -1484,6 +1485,7 @@ jet_driver_parse_package_root: fn(snapshot: JetDriverAuthorizedSourceSnapshot, r
     // inline package that names none is a single program and its own kernel.
     ^policy_memory_kernel: if inline_carrier == None -> Val([String]{}) else -> [String]?{None}
     ^boundaries: [ImportBoundary]{}
+    ^layers: [ModuleLayer]{}
     ^purposes: [String]{}
     ^machine_profile: ""
     ^policy_expert: Bool?{None}
@@ -1503,6 +1505,7 @@ jet_driver_parse_package_root: fn(snapshot: JetDriverAuthorizedSourceSnapshot, r
     ^policy_seen: false
     ^strictness_seen: false
     ^boundaries_seen: false
+    ^layers_seen: false
     ^purposes_seen: false
     ^targets_seen: false
     ^settings_seen: false
@@ -1655,6 +1658,20 @@ jet_driver_parse_package_root: fn(snapshot: JetDriverAuthorizedSourceSnapshot, r
                         }
                     }
                     index = boundaries_value.next_index - 1
+                }
+                "layers" -> {
+                    if layers_seen {
+                        diagnostics.push(pkg_manifest_parse_diagnostic(manifest_path, PackageParseError.Composition("`layers` is declared more than once")))
+                    }
+                    layers_seen = true
+                    layers_value: jet_driver_manifest_field_value(source, tokens, value_index)
+                    if jet_driver_read_package_layers(layers_value.text) == {
+                        .Ok(read) -> { layers = read }
+                        .Err(error) -> {
+                            diagnostics.push(pkg_manifest_parse_diagnostic(manifest_path, error))
+                        }
+                    }
+                    index = layers_value.next_index - 1
                 }
                 "purposes" -> {
                     if purposes_seen {
@@ -1912,7 +1929,7 @@ jet_driver_parse_package_root: fn(snapshot: JetDriverAuthorizedSourceSnapshot, r
     identity: jet_driver_package_identity(name, version ?? "")
     manifest_directory: jet_driver_dependency_path(root.canonical_path, "{root.files[manifest].relative_path}/..")
     read_scope: jet_driver_package_read_scope(authority_allow, if manifest_directory.valid -> manifest_directory.path else -> root.canonical_path)
-    JetDriverPackageInfo{root_index: root_index, root_path: root.canonical_path, identity: identity, name: name, version: version, edition: edition, runtime_ceiling: runtime_ceiling, allocator_policy: allocator_policy, log_filter: log_filter, authority_allow: authority_allow, authority_deny: authority_deny, authority_needs: authority_needs, authority_grants: authority_grants.move(), authority_read_scope: read_scope, entry: entry, manifest_path: Val(manifest_path), policy_declarations: policy_declarations.move(), policy_unsafe_paths: policy_unsafe_paths.move(), policy_memory_kernel: policy_memory_kernel.move(), policy_expert: policy_expert, policy_lints_deny: policy_lints_deny.move(), policy_harden: policy_harden, inline_package: inline_carrier != None, configs: configs.move(), dependencies: dependencies, outputs: outputs, settings: settings.move(), profile_settings: profile_settings.move(), boundaries: boundaries.move(), purposes: purposes.move(), machine_profile: machine_profile, markers: markers.move()}
+    JetDriverPackageInfo{root_index: root_index, root_path: root.canonical_path, identity: identity, name: name, version: version, edition: edition, runtime_ceiling: runtime_ceiling, allocator_policy: allocator_policy, log_filter: log_filter, authority_allow: authority_allow, authority_deny: authority_deny, authority_needs: authority_needs, authority_grants: authority_grants.move(), authority_read_scope: read_scope, entry: entry, manifest_path: Val(manifest_path), policy_declarations: policy_declarations.move(), policy_unsafe_paths: policy_unsafe_paths.move(), policy_memory_kernel: policy_memory_kernel.move(), policy_expert: policy_expert, policy_lints_deny: policy_lints_deny.move(), policy_harden: policy_harden, inline_package: inline_carrier != None, configs: configs.move(), dependencies: dependencies, outputs: outputs, settings: settings.move(), profile_settings: profile_settings.move(), boundaries: boundaries.move(), layers: layers.move(), purposes: purposes.move(), machine_profile: machine_profile, markers: markers.move()}
 }
 
 // The header markers of `package.jet` as the Jet parser reads them, each
@@ -6796,10 +6813,11 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
     if request.trace_sink == .Val(sink) {
         sink.progress("counters.load.core_bodies_parsed", bodies_parsed, -1)
     }
-    // Each package's denied edges (E0619) and unused rules (L0619), and the
-    // import-edge facts its boundary policy decided.
+    // Each package's denied edges (E0619), unused rules (L0619), and upward
+    // layer imports (E0646), plus the import-edge facts those policies decided.
     ^boundary_facts: [StructureFact]{}
     jet_driver_check_import_boundaries(catalog.packages, source_units, modules, resolved_imports, diagnostics, boundary_facts)
+    jet_driver_check_package_layers(catalog.packages, source_units, modules, resolved_imports, diagnostics, boundary_facts)
     if !jet_driver_has_errors(diagnostics) && !jet_driver_bind_package_namespaces(modules, source_units, catalog.packages, request, diagnostics) {
         failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Load)
     }

@@ -865,16 +865,15 @@ sema_call_method_candidate_types_compatible: fn(candidate: SemaCallMethodCandida
 }
 
 sema_call_resolve_method_with_inference: fn(receiver_type: Type, method: String, args: [CallArg], argument_types: [Type?], expected: Type?, candidates: [SemaCallMethodCandidate], check: ^SemaBodyCheck, span: Span) -> SemaCallMethodCandidate? {
-    ^shape_matches: [SemaCallMethodCandidate]{}
-    ^receiver_matches: [SemaCallMethodCandidate]{}
-    loop candidate in candidates {
+    ^shape_matches: [Int]{}
+    ^receiver_matches: [Int]{}
+    loop (index, candidate) in candidates {
         if candidate.method.name == method {
             if sema_call_method_receiver_candidate_type(candidate) == .Val(expected_value) {
                 receiver_compatible: sema_call_type_assignable(expected_value, receiver_type, check) ?? false
-                // copy: `candidate` is a row of read parameter `candidates`; the receiver-match list owns this one and the shape-match list may own another
-                if receiver_compatible -> receiver_matches.push(candidate.copy())
+                if receiver_compatible -> receiver_matches.push(index)
                 if receiver_compatible && sema_call_method_shape_matches(candidate, method, args, span) {
-                    shape_matches.push(candidate.copy())
+                    shape_matches.push(index)
                 }
             }
         }
@@ -883,14 +882,15 @@ sema_call_resolve_method_with_inference: fn(receiver_type: Type, method: String,
         if receiver_matches.len() == 1 {
             reported: check.diagnostics.len()
             ^probe: args
-            _: sema_call_bind_method(method, receiver_matches[0].signature, receiver_matches[0].receiver_offset, probe, span, check.diagnostics)
+            _: sema_call_bind_method(method, candidates[receiver_matches[0]].signature, candidates[receiver_matches[0]].receiver_offset, probe, span, check.diagnostics)
             if check.diagnostics.len() > reported -> return None
         }
         check.diagnostics.push(sema_call_missing_method_diagnostic(receiver_type, method, args.len(), span, check.environment.*, check.program.*))
         return None
     }
     ^viable: [SemaCallMethodCandidate]{}
-    loop candidate in shape_matches {
+    loop match_index in shape_matches {
+        candidate: candidates[match_index]
         ^probe_args: args
         ^probe_diagnostics: [Diagnostic]{}
         if sema_call_bind_method(method, candidate.signature, candidate.receiver_offset, probe_args, span, probe_diagnostics) == .Val(binding) {
@@ -926,7 +926,7 @@ sema_call_resolve_method_with_inference: fn(receiver_type: Type, method: String,
             check.diagnostics.push(sema_error("E0772", span, "this call to `{method}` matches more than one callable body", "generic inference left more than one method candidate viable", "add labels or explicit type arguments that select one method"))
             None
         }
-        shape_matches.len() == 1 -> Val(shape_matches[0])
+        shape_matches.len() == 1 -> Val(candidates[shape_matches[0]].copy())
         else -> {
             check.diagnostics.push(sema_error("E0772", span, "this call to `{method}` matches more than one callable body", "the overload set has no unique inferred method", "add labels or type arguments that select one method"))
             None

@@ -1,0 +1,39 @@
+use {
+    files: core.files
+    dtls: core.net.dtls
+    tls: core.net.tls
+}
+
+serve_n: fn(listener: dtls.DTLSListener, count: Int) -[Net, Time.Wait]> {
+    budget: 15s
+    loop _ in 0..<count {
+        sess: listener.accept(deadline: budget) ?? panic("accept: {err}")
+        msg: sess.read(4096, deadline: budget) ?? panic("read: {err}")
+        sess.write("echo:{msg.trim()}\n", deadline: budget) ?? panic("write: {err}")
+        sess.close() ?? panic("close: {err}")
+    }
+    listener.close() ?? panic("listener close: {err}")
+}
+
+run: fn() {
+    ec_cert: files.read_bytes("ec.cert.pem") ?? panic("ec cert")
+    ec_key: files.read_bytes("ec.key.pem") ?? panic("ec key")
+    rsa_cert: files.read_bytes("rsa.cert.pem") ?? panic("rsa cert")
+    rsa_key: files.read_bytes("rsa.key.pem") ?? panic("rsa key")
+    cli_cert: files.read_bytes("client.cert.pem") ?? panic("client cert")
+    cli_roots: tls.RootCertificates.from_pem(cli_cert) ?? panic("client roots")
+    ec_cfg: dtls.DTLSServerConfig.from_pem(ec_cert, ec_key) ?? panic("ec cfg")
+    rsa_cfg: dtls.DTLSServerConfig.from_pem(rsa_cert, rsa_key) ?? panic("rsa cfg")
+    mtls_cfg0: dtls.DTLSServerConfig.from_pem(ec_cert, ec_key) ?? panic("mtls cfg")
+    mtls_cfg: mtls_cfg0.with_client_roots(cli_roots, required: true) ?? panic("mtls roots")
+    ec_listener: dtls.listen("127.0.0.1:{free-port:srv_ec}", ec_cfg) ?? panic("ec listen")
+    rsa_listener: dtls.listen("127.0.0.1:{free-port:srv_rsa}", rsa_cfg) ?? panic("rsa listen")
+    mtls_listener: dtls.listen("127.0.0.1:{free-port:srv_mtls}", mtls_cfg) ?? panic("mtls listen")
+    t_ec: task { serve_n(ec_listener, 2) }
+    t_rsa: task { serve_n(rsa_listener, 1) }
+    t_mtls: task { serve_n(mtls_listener, 1) }
+    print("ready")
+    t_ec.join() ?? panic("t_ec")
+    t_rsa.join() ?? panic("t_rsa")
+    t_mtls.join() ?? panic("t_mtls")
+}

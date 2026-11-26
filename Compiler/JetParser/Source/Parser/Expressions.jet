@@ -1361,7 +1361,7 @@ parser_parse_interpolation: fn(state: ^JetParserState, part: StringPart, depth: 
     ^label: ""
     if parser_current_kind(nested) == TOKEN_EQ {
         loop index in 0..<nested.position {
-            token: nested.tokens[index].copy()
+            token: nested.tokens[index]
             piece: parser_debug_label_piece(nested, token)
             if piece == "" {
                 found: parser_describe_token(nested, token)
@@ -1424,11 +1424,20 @@ parser_debug_label_piece: fn(state: JetParserState, token: Token) -> String Neve
 
 // A nested hole parser failed: its diagnostics reach the file and the enclosing
 // statement stops.
-parser_take_nested_failure: fn(state: ^JetParserState, diagnostics: [Diagnostic]) {
+parser_take_nested_failure: fn(state: ^JetParserState, diagnostics: ^^[Diagnostic]) {
     if parser_aborting(state) {
         return
     }
-    loop diagnostic in diagnostics -> state.diagnostics.push(diagnostic.copy())
+    ^source: diagnostics.move()
+    ^reversed: [Diagnostic]{}
+    loop source.len() > 0 {
+        diagnostic: source.pop() ?? break
+        reversed.push(diagnostic)
+    }
+    loop reversed.len() > 0 {
+        diagnostic: reversed.pop() ?? break
+        state.diagnostics.push(diagnostic)
+    }
     state.abort_mark = state.diagnostics.len()
     state.abort_position = state.position
 }

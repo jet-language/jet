@@ -127,7 +127,7 @@ ir_build_tests: fn(functions: ^^[FnBody], decls: DeclTable, symbols: ^^SymbolTab
     }
     override: if harness.stock -> -1 else -> ir_test_override(m, p)
     built: ir_build_queue(m, p, failures, 0)
-    reset_id: ir_test_function(m, "test.reset", -1, "reset")
+    reset_id: ir_test_reserve(m, "test.reset", -1, "reset")
     m.entry = ir_test_main(m, p, harness, bodies, check_ids, override, reset_id, failures)
     // The functions the harness's renders reached (a Printable impl).
     built_renders: ir_build_queue(m, p, failures, built)
@@ -178,33 +178,48 @@ ir_test_override_key: fn(functions: [FnBody]) -> String Never! {
     ""
 }
 
-// A generated harness function: `name`, keyed and symbolled after the
+// A generated harness function builder: `name`, keyed and symbolled after the
 // function `from` (`suffix` appended), at its source location; a shared
 // helper (`from` < 0) is keyed `jet_ir_test_<suffix>`.
-ir_test_function: fn(m: ^IRModule, name: String, from: Int, suffix: String) -> Int Never! {
-    ^key: "jet_ir_test_{suffix}"
-    ^symbol: key.copy()
-    ^source_file: ""
-    ^line: 0
-    if from >= 0 {
-        key = "{m.functions[from].key}#test.{suffix}"
-        symbol = "{m.functions[from].symbol}__test_{suffix}"
-        source_file = m.functions[from].source_file.copy()
-        line = m.functions[from].line
+ir_test_builder: fn(m: IRModule, name: String, from: Int, suffix: String) -> IRBuilder Never! {
+    key: if from >= 0 -> "{m.functions[from].key}#test.{suffix}" else -> "jet_ir_test_{suffix}"
+    symbol: if from >= 0 -> "{m.functions[from].symbol}__test_{suffix}" else -> "jet_ir_test_{suffix}"
+    line: if from >= 0 -> m.functions[from].line else -> 0
+    function: ir_function_new(name, key, symbol, if from >= 0 -> m.functions[from].source_file else -> "", line)
+    ir_builder_new(function)
+}
+
+// Ends a generated function: records its failure, resolves its deferred
+// calls, stores it in `m.functions` and returns its id.
+ir_test_finish: fn(m: ^IRModule, p: IRProgram, b: ^^IRBuilder, failures: ^[IRBuildFailure]) -> Int Never! {
+    ^built: b.move()
+    if built.error != "" {
+        failures.push(IRBuildFailure{key: built.f.key, name: built.f.name, message: built.error, source_file: built.f.source_file, span: built.error_span})
     }
+    ir_resolve_deferred(m, p, built)
     id: m.functions.len()
-    function: ir_function_new(name, key, symbol, source_file, line)
-    m.functions.push(function)
+    key: built.f.key
+    m.functions.push(built.f.move())
     ir_function_bind(m, key, id)
     id
 }
 
-// Ends a generated function: records its failure, resolves its deferred
-// calls and stores it.
-ir_test_finish: fn(m: ^IRModule, p: IRProgram, b: ^^IRBuilder, id: Int, failures: ^[IRBuildFailure]) Never! {
+// Reserves a function slot for a harness helper whose body is built after
+// its callers are lowered (such as `test.reset`).
+ir_test_reserve: fn(m: ^IRModule, name: String, from: Int, suffix: String) -> Int Never! {
+    ^b: ir_test_builder(m, name, from, suffix)
+    id: m.functions.len()
+    key: b.f.key
+    m.functions.push(b.f.move())
+    ir_function_bind(m, key, id)
+    id
+}
+
+// Completes a pre-reserved harness function slot without adding a new slot.
+ir_test_finish_at: fn(m: ^IRModule, p: IRProgram, b: ^^IRBuilder, id: Int, failures: ^[IRBuildFailure]) Never! {
     ^built: b.move()
     if built.error != "" {
-        failures.push(IRBuildFailure{key: m.functions[id].key, name: m.functions[id].name, message: built.error, source_file: m.functions[id].source_file, span: built.error_span})
+        failures.push(IRBuildFailure{key: built.f.key, name: built.f.name, message: built.error, source_file: built.f.source_file, span: built.error_span})
     }
     ir_resolve_deferred(m, p, built)
     m.functions[id] = built.f.move()
@@ -266,8 +281,7 @@ ir_test_exit: fn(m: ^IRModule, b: ^IRBuilder, code: Int) Never! {
 
 // test.invoke(env) for the test body `body`.
 ir_test_invoke: fn(m: ^IRModule, p: IRProgram, body: Int, failures: ^[IRBuildFailure]) -> Int Never! {
-    id: ir_test_function(m, "test.invoke", body, "invoke")
-    ^b: ir_builder_new(m.functions[id].copy())
+    ^b: ir_test_builder(m, "test.invoke", body, "invoke")
     b.line = m.functions[body].line
     span: Span{start: 0, end: 0}
     pointer_row: ir_pointer_row(m)
@@ -327,8 +341,7 @@ ir_test_invoke: fn(m: ^IRModule, p: IRProgram, body: Int, failures: ^[IRBuildFai
         ir_test_drop(m, b, result)
     }
     ir_emit(b.f, IROp.Return, -1, null, -1, -1, b.line)
-    ir_test_finish(m, p, b, id, failures)
-    id
+    ir_test_finish(m, p, b, failures)
 }
 
 // The pointer word test.invoke returns for the owned failure message `text`:
@@ -532,8 +545,7 @@ ir_test_generate_list: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ctx: Int, r
 // over its test.invoke.
 ir_test_unit: fn(m: ^IRModule, p: IRProgram, test: IRTestCase, body: Int, failures: ^[IRBuildFailure]) -> Int Never! {
     invoke: ir_test_invoke(m, p, body, failures)
-    id: ir_test_function(m, "test.unit", body, "unit")
-    ^b: ir_builder_new(m.functions[id].copy())
+    ^b: ir_test_builder(m, "test.unit", body, "unit")
     b.line = m.functions[body].line
     pointer_row: ir_pointer_row(m)
     env_name: ir_intern_name(m, "env")
@@ -556,21 +568,18 @@ ir_test_unit: fn(m: ^IRModule, p: IRProgram, test: IRTestCase, body: Int, failur
     }
     ir_test_drop(m, b, name)
     ir_emit(b.f, IROp.Return, -1, outcome, -1, -1, b.line)
-    ir_test_finish(m, p, b, id, failures)
-    id
+    ir_test_finish(m, p, b, failures)
 }
 
 // test.release(env): the harness spawns with a null environment, so it owns
 // nothing.
 ir_test_release: fn(m: ^IRModule, p: IRProgram, failures: ^[IRBuildFailure]) -> Int Never! {
-    id: ir_test_function(m, "test.release", -1, "release")
-    ^b: ir_builder_new(m.functions[id].copy())
+    ^b: ir_test_builder(m, "test.release", -1, "release")
     pointer_row: ir_pointer_row(m)
     env_name: ir_intern_name(m, "env")
     _: ir_new_slot(b, pointer_row, IRSlotKind.Param, env_name)
     ir_emit(b.f, IROp.Return, -1, -1, -1, -1, b.line)
-    ir_test_finish(m, p, b, id, failures)
-    id
+    ir_test_finish(m, p, b, failures)
 }
 
 // Appends `text` to the records file `path`; a write failure is a protocol
@@ -658,9 +667,7 @@ ir_test_call_override: fn(m: ^IRModule, b: ^IRBuilder, override: Int) Never! {
 // dropped unclassified. It carries the check function's name, which the
 // stop report shows.
 ir_test_check: fn(m: ^IRModule, p: IRProgram, check: IROutputCheck, function: Int, failures: ^[IRBuildFailure]) -> Int Never! {
-    name: m.functions[function].name.copy()
-    id: ir_test_function(m, name, function, "check")
-    ^b: ir_builder_new(m.functions[id].copy())
+    ^b: ir_test_builder(m, m.functions[function].name, function, "check")
     b.line = m.functions[function].line
     span: Span{start: 0, end: 0}
     if m.functions[function].param_count > 0 {
@@ -678,15 +685,14 @@ ir_test_check: fn(m: ^IRModule, p: IRProgram, check: IROutputCheck, function: In
             ir_open_if(b.f, rejected, b.line)
             message: ir_test_text(m, b, "output check {check.name}")
             null: ir_word_const(m, b, 0)
-            location: TPanicLoc{file: m.functions[function].source_file.copy(), source_line: "", line: m.functions[function].line, column: 0, caret: 0, function: name, locals: [TPanicLocal]{}}
+            location: TPanicLoc{file: m.functions[function].source_file.copy(), source_line: "", line: m.functions[function].line, column: 0, caret: 0, function: m.functions[function].name.copy(), locals: [TPanicLocal]{}}
             ir_stop(m, p, b, 2, message, null, null, location)
             ir_end(b.f, b.line)
         }
         ir_test_drop(m, b, result)
     }
     ir_emit(b.f, IROp.Return, -1, -1, -1, -1, b.line)
-    ir_test_finish(m, p, b, id, failures)
-    id
+    ir_test_finish(m, p, b, failures)
 }
 
 // The harness entry `main` (see the head of this file).
@@ -694,8 +700,7 @@ ir_test_main: fn(m: ^IRModule, p: IRProgram, harness: IRTestHarness, bodies: [In
     units: loop (index, test) in harness.tests -> ir_test_unit(m, p, test, bodies[index], failures)
     release_id: ir_test_release(m, p, failures)
     check_helpers: loop (index, check) in harness.checks -> ir_test_check(m, p, check, check_ids[index], failures)
-    id: ir_test_function(m, "main", -1, "main")
-    ^b: ir_builder_new(m.functions[id].copy())
+    ^b: ir_test_builder(m, "main", -1, "main")
     pointer_row: ir_pointer_row(m)
     ir_sentry_release_link(m, p, b)
     ir_checked_alloc_link(m, p, b)
@@ -782,8 +787,7 @@ ir_test_main: fn(m: ^IRModule, p: IRProgram, harness: IRTestHarness, bodies: [In
     ir_test_drop(m, b, selected)
     ir_test_drop(m, b, records_path)
     ir_emit(b.f, IROp.Return, -1, -1, -1, -1, b.line)
-    ir_test_finish(m, p, b, id, failures)
-    id
+    ir_test_finish(m, p, b, failures)
 }
 
 // Per-test world reset (`test.reset`): runs after each test finishes (and its
@@ -898,7 +902,7 @@ ir_test_reset_body: fn(m: ^IRModule, p: IRProgram, id: Int, failures: ^[IRBuildF
         b.stopping = stopping
     }
     ir_emit(b.f, IROp.Return, -1, -1, -1, -1, b.line)
-    ir_test_finish(m, p, b, id, failures)
+    ir_test_finish_at(m, p, b, id, failures)
 }
 
 // A test's scope members (JetRuntime TestScope.jet), each region scoped by

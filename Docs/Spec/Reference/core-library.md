@@ -454,6 +454,7 @@ The built-module inventory is a source-facing registry, not a missing-domain led
 - `core.net.mime`
 - `core.net.url`
 - `core.net.tls`
+- `core.net.dtls`
 - `core.net.ws`
 - `core.net.ip`
 - `core.perf`

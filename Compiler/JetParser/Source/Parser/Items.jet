@@ -1203,13 +1203,20 @@ parser_parse_function: fn(state: ^JetParserState, modifiers: ParsedItemModifiers
             // markers; a nested block or a lambda body reads them as
             // statements, which report the Block site.
             outer_depth: state.inbody_marker_depth
-            outer_markers: state.inbody_markers.copy()
+            outer_len: state.inbody_markers.len()
             state.inbody_marker_depth = state.block_depth + 1
-            state.inbody_markers = [Marker]{}
             body: parser_parse_callable_body(state, parser_return_type_has_value(return_type), parser_return_type_has_value(return_type))
-            inside: state.inbody_markers.copy()
             state.inbody_marker_depth = outer_depth
-            state.inbody_markers = outer_markers
+            ^reversed_inside: [Marker]{}
+            loop state.inbody_markers.len() > outer_len {
+                marker: state.inbody_markers.pop() ?? break
+                reversed_inside.push(marker)
+            }
+            ^inside: [Marker]{}
+            loop reversed_inside.len() > 0 {
+                marker: reversed_inside.pop() ?? break
+                inside.push(marker)
+            }
             func.body = body.statements
             func.span = parser_cover(modifiers.start_span, body.span)
             merged: parser_merge_inbody_markers(state, modifiers.markers, inside, modifiers.start_span.start, body.span.end - 1, "function `{func_name}`")
@@ -2274,8 +2281,8 @@ parser_parse_struct: fn(state: ^JetParserState, modifiers: ParsedItemModifiers) 
     close: parser_expect(state, TOKEN_RBRACE, "`}}` after struct fields")
     value.span = parser_cover(modifiers.start_span, close.span)
     markers: parser_merge_inbody_markers(state, modifiers.markers, inside, modifiers.start_span.start, close.span.start, "struct `{value.name}`")
-    parser_apply_struct_markers(state, value, markers, modifiers.grouped_markers)
     value.cap = parser_type_fx_cap(state, markers, value.name, "type")
+    parser_apply_struct_markers(state, value, markers, modifiers.grouped_markers)
     parser_finish_marker_struct(state, value)
     parser_finish_fact_struct(state, value)
     value.effect_impl = parser_finish_effect_type(state, value.name, value.name_span, value.effect_impl, [Variant]{})
@@ -2286,11 +2293,11 @@ parser_parse_struct: fn(state: ^JetParserState, modifiers: ParsedItemModifiers) 
 // auto-derive default and the SingleUse/MustUse/ published-schema facts. They
 // apply once the whole body is read, so a marker line anywhere in the body
 // counts the same as the markers above.
-parser_apply_struct_markers: fn(state: ^JetParserState, value: ^StructDef, markers: [Marker], grouped: Bool) {
-    parser_apply_struct_type_markers(state, value, markers)
+parser_apply_struct_markers: fn(state: ^JetParserState, value: ^StructDef, markers: ^^[Marker], grouped: Bool) {
     value.layout = parser_layout_marker_fact(state, markers, grouped, false)
     value.layout_span = parser_layout_marker_span(markers, grouped, value.layout)
     value.layout_alignment_span = if value.layout != None -> parser_layout_alignment_span(markers) else -> None
+    parser_apply_struct_type_markers(state, value, markers)
 }
 
 // A struct field name, or a record literal's: a keyword followed by `:`
@@ -2359,9 +2366,9 @@ parser_parse_enum: fn(state: ^JetParserState, modifiers: ParsedItemModifiers) ->
     // the package auto-derive default and SingleUse/MustUse, applied once the
     // body (and every marker line in it) is read.
     markers: parser_merge_inbody_markers(state, modifiers.markers, inside, modifiers.start_span.start, close.span.start, "enum `{value.name}`")
-    parser_apply_enum_type_markers(state, value, markers)
     value.cap = parser_type_fx_cap(state, markers, value.name, "type")
     ^_: parser_layout_marker_fact(state, markers, modifiers.grouped_markers, true)
+    parser_apply_enum_type_markers(state, value, markers)
     value.effect_impl = parser_finish_effect_type(state, value.name, value.name_span, value.effect_impl, value.variants)
     value
 }

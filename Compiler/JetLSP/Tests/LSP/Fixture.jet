@@ -29,14 +29,14 @@ LSPFixtureChecker: struct {
                         physical_path: overlay.path.copy(),
                         alias: alias.copy(),
                         source: overlay.source.copy(),
-                        items: parsed.program.items.copy(),
-                        block_spans: parsed.program.block_spans.copy(),
-                        imports: parsed.program.imports.copy(),
+                        items: parsed.program.items.move(),
+                        block_spans: parsed.program.block_spans.move(),
+                        imports: parsed.program.imports.move(),
                         tables: parsed.program.tables.move(),
                         module_name: alias,
                     },
                 )
-                if overlay.path == entry -> diagnostics = parsed.diagnostics.copy()
+                if overlay.path == entry -> diagnostics = parsed.diagnostics.move()
             }
             index: semindex_build(modules, interner_empty(), SemEffectProjection{required: [String]{}, granted: [String]{}, denied: [String]{}, authority: ""})
             symbols: semindex_build_symbols(index, modules)
@@ -103,10 +103,10 @@ LSPFixtureChecker: struct {
 
 // `/w/main.jet` is the module `main`.
 lsp_fixture_alias: fn(path: String) -> String Never! {
-    parts: path.split("/").to_list()
-    name: parts[parts.len() - 1]
+    ^parts: path.split("/").to_list()
+    name: parts.pop() ?? ""
     if name.ends_with(".jet") -> return name.removesuffix(".jet")
-    name.copy()
+    name
 }
 
 LSP_TEST_MAIN_URI: "file:///w/main.jet"
@@ -188,7 +188,7 @@ lsp_test_int: fn(value: Dyn, key: String) -> Int Never! {
 }
 
 lsp_test_text: fn(value: Dyn, key: String) -> String Never! {
-    if lsp_test_field(value, key) == .Text(text) -> return text.copy()
+    if lsp_test_field(value, key) == .Text(text) -> return text
     panic("`{key}` is not a string")
 }
 

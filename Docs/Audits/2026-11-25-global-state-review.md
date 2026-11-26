@@ -110,7 +110,7 @@ criterion, and a "Decided here" block with five items, each naming what it
 amends: group loans (D-MODULE-VAR1 rule 3), other tasks and `#Export(c)`
 (new), `-[]>` reads (spec.md:3075-3082), `#Memo` (card #7032 c3), and the test
 mechanism (rule 6's mechanism, one sentence of D-CORE-GLOBAL-STATE1, and
-output-check behaviour in `Docs/Spec/Reference/cli.md:1169`). The cutover now
+output-check behavior in `Docs/Spec/Reference/cli.md:1169`). The cutover now
 lists only this ballot's work.
 
 Verdict: **failed in the draft; holds after repair.**
@@ -151,7 +151,7 @@ reset retires them" missed that `jet_rt_global_reset_registered`
 `Tests/shared-publication-fixture.c`.
 
 Repair. The block is restated at `8f4309b5023` with current line numbers,
-the probes, the corrected E0111 case, the real runner behaviour and the
+the probes, the corrected E0111 case, the real runner behavior and the
 uncalled reset.
 
 Verdict: **failed in parts; holds after repair.**

@@ -36,23 +36,14 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Remove the mark, or write `.move()` on a movable field.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>Jet.UnusedPlaceMark</code>: <code>Tests/UI/move_mark_borrowed.stderr</code>.</p>
-<pre class="diag">Error: Jet.MissingMoveMarker: `xs` cannot be moved from borrowed storage
-  --&gt; Tests/UI/move_mark_borrowed.jet:7:38
+<p>First UI snapshot mentioning <code>Jet.UnusedPlaceMark</code>: <code>Tests/UI/call_mark_outside_writes_policy.stderr</code>.</p>
+<pre class="diag">Error: Jet.UnusedPlaceMark: Method receivers are never marked in Jet, so remove `^` before `xs`
+  --&gt; Tests/UI/call_mark_outside_writes_policy.jet:6:5
     |
-  7 | wrap: fn(xs: [Int]) -&gt; Box { Box{xs: xs.move()} }
-    |                                      ^^^^^^^
- Why: Read and write parameters and named windows keep ownership with their source
- Fix: Copy the value with `xs.copy()`, or declare the parameter `xs: ^^[Int]` to take ownership
-More: jet-lang.dev/e/Jet.MissingMoveMarker
-
-Error: Jet.UnusedPlaceMark: `.move()` takes a named place, not this value
-  --&gt; Tests/UI/move_mark_borrowed.jet:13:13
-    |
- 13 |     ^first: grid[0].move()
-    |             ^^^^^^^^^^^^
- Why: `.move()` moves a name or one of its fields out of its owner; an element stays owned by its collection, and a call result or literal is already new
- Fix: Move the whole collection or name, or drop `.move()` from a fresh value
+  6 |     ^xs.push(5)
+    |     ^
+ Why: `push: fn(^self, ^^Int)` changes its receiver, and Jet marks only changed arguments (`f(^x)`), never method receivers (`x.m()`)
+ Fix: Remove the `^`
 More: jet-lang.dev/e/Jet.UnusedPlaceMark
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

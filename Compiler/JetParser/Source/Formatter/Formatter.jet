@@ -415,18 +415,17 @@ jfmt_is_comment_kind: fn(kind: Int) -> Bool Never! {
 // (`priv step: fn…`), `priv(package) ` (`priv(package) width: fn…`), else
 // nothing.
 jfmt_source_privacy_before: fn(f: JetFmt, name_start: Int) -> String Never! {
-    ^code: [Token]{}
+    ^code: [Int]{}
     ^index: jfmt_first_token_at(f, name_start) - 1
     loop index >= 0 && code.len() < 4 {
-        token: f.source_toks[index]
-        if !jfmt_is_comment_kind(token.kind) -> code.push(token.copy())
+        if !jfmt_is_comment_kind(f.source_toks[index].kind) -> code.push(index)
         index -= 1
     }
-    if code.len() > 0 && code[0].kind == TOKEN_KW_PRIV -> return "priv "
-    if code.len() < 4 || code[0].kind != TOKEN_RPAREN || code[1].kind != TOKEN_IDENT || code[2].kind != TOKEN_LPAREN || code[3].kind != TOKEN_KW_PRIV {
+    if code.len() > 0 && f.source_toks[code[0]].kind == TOKEN_KW_PRIV -> return "priv "
+    if code.len() < 4 || f.source_toks[code[0]].kind != TOKEN_RPAREN || f.source_toks[code[1]].kind != TOKEN_IDENT || f.source_toks[code[2]].kind != TOKEN_LPAREN || f.source_toks[code[3]].kind != TOKEN_KW_PRIV {
         return ""
     }
-    if jfmt_src_text(f, code[1].span.start, code[1].span.end) == "package" -> "priv(package) " else -> ""
+    if jfmt_src_text(f, f.source_toks[code[1]].span.start, f.source_toks[code[1]].span.end) == "package" -> "priv(package) " else -> ""
 }
 
 jfmt_is_generated_label: fn(name: String) -> Bool Never! { name.starts_with("__jet_") }
@@ -1074,16 +1073,28 @@ jfmt_hold_item_comments: fn(f: ^JetFmt, items: [Item], imports: [ImportDecl]) ->
     loop import in imports {
         if import.span.end > limit -> limit = import.span.end
     }
-    ^kept: [JetFmtComment]{}
-    ^held: [JetFmtComment]{}
+    ^any_held: false
     loop index in f.comment_i..<f.comments.len() {
         comment: f.comments[index]
-        held_back: comment.span.start < limit && jfmt_comment_belongs_to_item(f, comment.span, items, imports)
-        if held_back -> held.push(comment.copy()) else -> kept.push(comment.copy())
+        if comment.span.start < limit && jfmt_comment_belongs_to_item(f, comment.span, items, imports) {
+            any_held = true
+            break
+        }
     }
-    if held.len() > 0 {
-        loop f.comments.len() > f.comment_i -> ^_: f.comments.pop()
-        loop comment in kept -> f.comments.push(comment.copy())
+    if !any_held -> return [JetFmtComment]{}
+    ^tail: [JetFmtComment]{}
+    loop f.comments.len() > f.comment_i {
+        comment: f.comments.pop() ?? break
+        tail.push(comment)
+    }
+    ^held: [JetFmtComment]{}
+    loop tail.len() > 0 {
+        comment: tail.pop() ?? break
+        if comment.span.start < limit && jfmt_comment_belongs_to_item(f, comment.span, items, imports) {
+            held.push(comment)
+        } else {
+            f.comments.push(comment)
+        }
     }
     held
 }
@@ -1108,15 +1119,29 @@ jfmt_comment_belongs_to_item: fn(f: JetFmt, span: Span, items: [Item], imports: 
 
 // The held item comments rejoin the queue ahead of every comment the imports
 // left: they sit before the last import in source.
-jfmt_return_item_comments: fn(f: ^JetFmt, held: [JetFmtComment]) Never! {
+jfmt_return_item_comments: fn(f: ^JetFmt, held: ^^[JetFmtComment]) Never! {
     if held.len() == 0 {
         return
     }
     ^rest: [JetFmtComment]{}
-    loop index in f.comment_i..<f.comments.len() -> rest.push(f.comments[index].copy())
-    loop f.comments.len() > f.comment_i -> ^_: f.comments.pop()
-    loop comment in held -> f.comments.push(comment.copy())
-    loop comment in rest -> f.comments.push(comment.copy())
+    loop f.comments.len() > f.comment_i {
+        comment: f.comments.pop() ?? break
+        rest.push(comment)
+    }
+    ^source: held.move()
+    ^reversed_held: [JetFmtComment]{}
+    loop source.len() > 0 {
+        comment: source.pop() ?? break
+        reversed_held.push(comment)
+    }
+    loop reversed_held.len() > 0 {
+        comment: reversed_held.pop() ?? break
+        f.comments.push(comment)
+    }
+    loop rest.len() > 0 {
+        comment: rest.pop() ?? break
+        f.comments.push(comment)
+    }
 }
 
 jfmt_emit_trailing: fn(f: ^JetFmt, end: Int) Never! {
@@ -1744,45 +1769,82 @@ jfmt_self_typed: fn(expr: Expr) -> Bool Never! {
     }
 }
 
-jfmt_unwrap_redundant_optional_value: fn(value: Expr) -> Expr Never! {
+jfmt_is_redundant_optional_value: fn(value: Expr) -> Bool Never! {
     if value == .EnumLit(type_name, variant, _, args, _, _, _) {
-        // copy: a read-parameter rewriter returns a value that is not a redundant `Val(..)`
-        // unchanged as a new tree (owner: the result) while the caller keeps the input (owner: the
-        // read parameter, a payload view of the caller's tree); taking the input would need a
-        // consuming match of every rebuilt variant (children arrive as payload views).
-        if type_name.len() > 0 || variant != "Val" || args.len() != 1 -> return value.copy()
-        if args[0] == .Positional(inner) {
-            if jfmt_self_typed(inner) -> return inner
+        if type_name.len() == 0 && variant == "Val" && args.len() == 1 {
+            if args[0] == .Positional(inner) -> return jfmt_self_typed(inner)
         }
     }
-    // copy: a read-parameter rewriter returns a value that is not a redundant `Val(..)` unchanged
-    // as a new tree (owner: the result) while the caller keeps the input (owner: the read
-    // parameter, a payload view of the caller's tree); taking the input would need a consuming
-    // match of every rebuilt variant (children arrive as payload views).
-    value.copy()
+    false
 }
 
-jfmt_strip_optional_returns_in_if: fn(expr: Expr) -> Expr Never! {
+jfmt_unwrap_redundant_optional_value: fn(value: ^^Expr) -> Expr Never! {
+    if !jfmt_is_redundant_optional_value(value) -> return value
+    if value == .EnumLit(_, _, _, args, _, _, _) {
+        ^list: args
+        if list.pop() == .Val(.Positional(inner)) -> return inner
+    }
+    Expr.Unit{span: Span{start: 0, end: 0}, id: AST_NODE_GENERATED}
+}
+
+jfmt_is_if_expr: fn(expr: Expr) -> Bool Never! {
+    expr == .If(_, _, _, _, _, _, _)
+}
+
+jfmt_strip_optional_returns_in_if: fn(expr: ^^Expr) -> Expr Never! {
+    if !jfmt_is_if_expr(expr) -> return expr
     if expr == .If(cond, then_body, then_value, else_body, else_value, span, _) {
         return Expr.If{cond: cond, then_body: jfmt_strip_optional_returns_in_body(then_body), then_value: then_value, else_body: jfmt_strip_optional_returns_in_body(else_body), else_value: jfmt_strip_optional_returns_in_if(else_value), span: span, id: AST_NODE_GENERATED}
     }
-    // copy: a read-parameter rewriter returns an expression that is not an `if` unchanged as a new
-    // tree (owner: the result) while the caller keeps the input (owner: the read parameter, a
-    // payload view of the caller's tree); taking the input would need a consuming match of every
-    // rebuilt variant (children arrive as payload views).
-    expr.copy()
+    Expr.Unit{span: Span{start: 0, end: 0}, id: AST_NODE_GENERATED}
 }
 
-jfmt_strip_optional_returns_in_body: fn(body: [Stmt]) -> [Stmt] Never! {
+jfmt_stmt_strips_optional: fn(stmt: Stmt) -> Bool Never! {
+    if stmt == {
+        .Return(value, _) -> value != None
+        .Expr(_) | .While(_, _, _, _, _) | .For(_, _, _, _, _, _, _, _, _) | .Loop(_, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .Switch(_, _, _, _) -> true
+        .Val(_) | .Assign(_, _, _, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Defer(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .DeferClose(_, _) -> false
+    }
+}
+
+jfmt_strip_optional_switch_arms: fn(arms: ^^[SwitchArm]) -> [SwitchArm] Never! {
+    ^source: arms.move()
+    ^reversed: [SwitchArm]{}
+    loop source.len() > 0 {
+        arm: source.pop() ?? break
+        reversed.push(arm)
+    }
+    ^out: [SwitchArm]{}
+    loop reversed.len() > 0 {
+        ^arm: reversed.pop() ?? break
+        body: arm.body.move()
+        arm.body = [Stmt]{}
+        arm.body = jfmt_strip_optional_returns_in_body(body)
+        out.push(arm)
+    }
+    out
+}
+
+jfmt_strip_optional_returns_in_body: fn(body: ^^[Stmt]) -> [Stmt] Never! {
+    ^source: body.move()
+    ^reversed: [Stmt]{}
+    loop source.len() > 0 {
+        stmt: source.pop() ?? break
+        reversed.push(stmt)
+    }
     ^out: [Stmt]{}
-    loop stmt in body {
+    loop reversed.len() > 0 {
+        stmt: reversed.pop() ?? break
+        if !jfmt_stmt_strips_optional(stmt) {
+            out.push(stmt)
+            next
+        }
         if stmt == {
             .Return(value, span) -> {
-                if {
-                    value == .Val(inner) -> {
-                        out.push(Stmt.Return{value: Val(jfmt_unwrap_redundant_optional_value(inner)), span: span})
-                    }
-                    else -> { out.push(stmt.copy()) }
+                if value == .Val(inner) {
+                    out.push(Stmt.Return{value: Val(jfmt_unwrap_redundant_optional_value(inner)), span: span})
+                } else {
+                    out.push(Stmt.Return{value: None, span: span})
                 }
             }
             .Expr(expr) -> { out.push(Stmt.Expr{expr: jfmt_strip_optional_returns_in_if(expr)}) }
@@ -1799,94 +1861,136 @@ jfmt_strip_optional_returns_in_body: fn(body: [Stmt]) -> [Stmt] Never! {
                 out.push(Stmt.CountedLoop{init: init, cond: cond, step: step, body: jfmt_strip_optional_returns_in_body(inner), span: span, arrow_body: arrow_body, label: label})
             }
             .Switch(subject, arms, else_body, span) -> {
-                ^stripped_arms: [SwitchArm]{}
-                loop arm in arms {
-                    stripped_arms.push(SwitchArm{cond: arm.cond, body: jfmt_strip_optional_returns_in_body(arm.body), span: arm.span, through: arm.through})
-                }
+                stripped_arms: jfmt_strip_optional_switch_arms(arms)
                 ^stripped_else: [Stmt]?{None}
                 if else_body == .Val(inner) {
                     stripped_else = Val(jfmt_strip_optional_returns_in_body(inner))
                 }
-                out.push(Stmt.Switch{subject: subject, arms: stripped_arms.move(), else_body: stripped_else.move(), span: span})
+                out.push(Stmt.Switch{subject: subject, arms: stripped_arms, else_body: stripped_else, span: span})
             }
-            .Val(_) | .Assign(_, _, _, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Defer(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .DeferClose(_, _) -> {
-                out.push(stmt.copy())
-            }
+            .Val(_) | .Assign(_, _, _, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Defer(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .DeferClose(_, _) -> {}
         }
     }
     out
 }
 
-jfmt_strip_optional_func: fn(function: Func) -> Func Never! {
-    if function.return_type == .Val(declared) {
-        if declared == .Option(_) {
-            ^updated: function
-            ^body: jfmt_strip_optional_returns_in_body(function.body)
-            if body.len() > 0 {
-                if body[body.len() - 1] == .Expr(tail) {
-                    body[body.len() - 1] = Stmt.Expr{expr: jfmt_unwrap_redundant_optional_value(tail)}
-                }
-            }
-            updated.body = body
-            return updated
+jfmt_strip_optional_func: fn(function: ^^Func) -> Func Never! {
+    ^updated: function.move()
+    if updated.return_type == .Val(.Option(_)) {
+        raw_body: updated.body.move()
+        updated.body = [Stmt]{}
+        ^body: jfmt_strip_optional_returns_in_body(raw_body)
+        if body.len() > 0 && body[body.len() - 1] == .Expr(_) {
+            last: body.pop() ?? Stmt.Break{span: Span{start: 0, end: 0}}
+            if last == .Expr(tail) -> body.push(Stmt.Expr{expr: jfmt_unwrap_redundant_optional_value(tail)})
         }
+        updated.body = body
     }
-    // copy: a read-parameter rewriter returns a function with nothing to strip unchanged as a new
-    // tree (owner: the result) while the caller keeps the input (owner: the read parameter, a
-    // payload view of the caller's tree); taking the input would need a consuming match of every
-    // rebuilt variant (children arrive as payload views).
-    function.copy()
+    updated
 }
 
-jfmt_strip_optional_funcs: fn(functions: [Func]) -> [Func] Never! {
+jfmt_strip_optional_funcs: fn(functions: ^^[Func]) -> [Func] Never! {
+    ^source: functions.move()
+    ^reversed: [Func]{}
+    loop source.len() > 0 {
+        function: source.pop() ?? break
+        reversed.push(function)
+    }
     ^out: [Func]{}
-    loop function in functions -> out.push(jfmt_strip_optional_func(function))
+    loop reversed.len() > 0 {
+        function: reversed.pop() ?? break
+        out.push(jfmt_strip_optional_func(function))
+    }
     out
+}
+
+jfmt_strip_optional_trait_impls: fn(impls: ^^[TraitImplBlock]) -> [TraitImplBlock] Never! {
+    ^source: impls.move()
+    ^reversed: [TraitImplBlock]{}
+    loop source.len() > 0 {
+        entry: source.pop() ?? break
+        reversed.push(entry)
+    }
+    ^out: [TraitImplBlock]{}
+    loop reversed.len() > 0 {
+        ^entry: reversed.pop() ?? break
+        methods: entry.methods.move()
+        entry.methods = [Func]{}
+        entry.methods = jfmt_strip_optional_funcs(methods)
+        out.push(entry)
+    }
+    out
+}
+
+jfmt_item_strips_optional: fn(item: Item) -> Bool Never! {
+    if item == {
+        .Func(_) | .Struct(_) | .Enum(_) | .Impl(_) | .CodeModule(_) | .GenericModule(_) -> true
+        .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> false
+    }
 }
 
 // Visit every callable body the simplify catalog rewrites: free functions,
 // type and impl methods, and functions nested in code modules.
-jfmt_strip_redundant_optional_returns: fn(items: [Item]) -> [Item] Never! {
+jfmt_strip_redundant_optional_returns: fn(items: ^^[Item]) -> [Item] Never! {
+    ^source: items.move()
+    ^reversed: [Item]{}
+    loop source.len() > 0 {
+        item: source.pop() ?? break
+        reversed.push(item)
+    }
     ^out: [Item]{}
-    loop item in items {
+    loop reversed.len() > 0 {
+        item: reversed.pop() ?? break
+        if !jfmt_item_strips_optional(item) {
+            out.push(item)
+            next
+        }
         if item == {
             .Func(function) -> { out.push(Item.Func{value: jfmt_strip_optional_func(function)}) }
             .Struct(definition) -> {
-                ^updated: definition.copy()
-                updated.methods = jfmt_strip_optional_funcs(definition.methods)
-                loop index in 0..<updated.trait_impls.len() {
-                    updated.trait_impls[index].methods = jfmt_strip_optional_funcs(updated.trait_impls[index].methods)
-                }
+                ^updated: definition
+                methods: updated.methods.move()
+                updated.methods = [Func]{}
+                updated.methods = jfmt_strip_optional_funcs(methods)
+                trait_impls: updated.trait_impls.move()
+                updated.trait_impls = [TraitImplBlock]{}
+                updated.trait_impls = jfmt_strip_optional_trait_impls(trait_impls)
                 out.push(Item.Struct{value: updated})
             }
             .Enum(definition) -> {
-                ^updated: definition.copy()
-                updated.methods = jfmt_strip_optional_funcs(definition.methods)
-                loop index in 0..<updated.trait_impls.len() {
-                    updated.trait_impls[index].methods = jfmt_strip_optional_funcs(updated.trait_impls[index].methods)
-                }
+                ^updated: definition
+                methods: updated.methods.move()
+                updated.methods = [Func]{}
+                updated.methods = jfmt_strip_optional_funcs(methods)
+                trait_impls: updated.trait_impls.move()
+                updated.trait_impls = [TraitImplBlock]{}
+                updated.trait_impls = jfmt_strip_optional_trait_impls(trait_impls)
                 out.push(Item.Enum{value: updated})
             }
             .Impl(definition) -> {
-                ^updated: definition.copy()
-                updated.methods = jfmt_strip_optional_funcs(definition.methods)
+                ^updated: definition
+                methods: updated.methods.move()
+                updated.methods = [Func]{}
+                updated.methods = jfmt_strip_optional_funcs(methods)
                 out.push(Item.Impl{value: updated})
             }
             .CodeModule(decl) -> {
-                ^updated: decl.copy()
-                if decl.body == .Val(body) {
-                    updated.body = Val(jfmt_strip_redundant_optional_returns(body))
+                ^updated: decl
+                body: updated.body.move()
+                updated.body = None
+                if body == .Val(inner) {
+                    updated.body = Val(jfmt_strip_redundant_optional_returns(inner))
                 }
                 out.push(Item.CodeModule{value: updated})
             }
             .GenericModule(decl) -> {
-                ^updated: decl.copy()
-                updated.body = jfmt_strip_redundant_optional_returns(decl.body)
+                ^updated: decl
+                body: updated.body.move()
+                updated.body = [Item]{}
+                updated.body = jfmt_strip_redundant_optional_returns(body)
                 out.push(Item.GenericModule{value: updated})
             }
-            .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {
-                out.push(item.copy())
-            }
+            .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     out
@@ -2849,7 +2953,11 @@ jfmt_format_source_in: fn(src: String, simplify_requested: Bool, library: Bool, 
         }
     }
     // Dropping a redundant `Val(x)` rewrites the program itself.
-    if simplify -> prog.items = jfmt_strip_redundant_optional_returns(prog.items)
+    if simplify {
+        items: prog.items.move()
+        prog.items = [Item]{}
+        prog.items = jfmt_strip_redundant_optional_returns(items)
+    }
     text: jfmt_format_program_with(f, prog)
     // Each inlined temporary removes a binding, so formatting the rewritten
     // source again reaches the form a second pass keeps; a rewrite that
@@ -2897,7 +3005,7 @@ jet_format_redundant_grouping: fn(src: String) -> [Span]? {
         ^at: 0
         loop at < spans.len() && spans[at].start < span.start -> at += 1
         if at < spans.len() && spans[at].start == span.start -> next
-        spans.insert(at, span.copy())
+        spans.insert(at, span)
     }
     Val(spans)
 }

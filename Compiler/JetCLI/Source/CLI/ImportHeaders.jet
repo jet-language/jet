@@ -73,8 +73,8 @@ jet_cli_import_parse_foreign_header: fn(language: String, line: String) -> JetCL
     if close < open {
         return Err(jet_cli_import_text_error("function declaration has no complete parameter list"))
     }
-    prefix: jet_cli_import_byte_slice(bytes, 0, open).trim().copy()
-    suffix: jet_cli_import_byte_slice(bytes, close + 1, bytes.len()).trim().copy()
+    prefix: jet_cli_import_trimmed_slice(bytes, 0, open)
+    suffix: jet_cli_import_trimmed_slice(bytes, close + 1, bytes.len())
     arrow: (language == "ts" || language == "js") && line.contains("=>")
     ^name: ""
     ^result_text: ""
@@ -115,11 +115,8 @@ jet_cli_import_parse_foreign_header: fn(language: String, line: String) -> JetCL
                         return Err(jet_cli_import_text_error("async arrow functions need an explicit migration adapter"))
                     }
                     equals: jet_cli_import_find_bytes(prefix.bytes(), "=", true) ?? return Err(jet_cli_import_text_error("arrow function has no bound name"))
-                    tokens: jet_cli_import_words(jet_cli_import_byte_slice(prefix.bytes(), 0, equals))
-                    if tokens.is_empty() {
-                        return Err(jet_cli_import_text_error("arrow function has no bound name"))
-                    }
-                    name = tokens[tokens.len() - 1].copy()
+                    ^tokens: jet_cli_import_words(jet_cli_import_byte_slice(prefix.bytes(), 0, equals))
+                    name = tokens.pop() ?? return Err(jet_cli_import_text_error("arrow function has no bound name"))
                     if !jet_cli_import_identifier(name) {
                         return Err(jet_cli_import_text_error("function name `{name}` is not a safe Jet identifier"))
                     }
@@ -127,7 +124,7 @@ jet_cli_import_parse_foreign_header: fn(language: String, line: String) -> JetCL
                         suffix.starts_with(":") -> {
                             annotation: jet_cli_import_byte_slice(suffix.bytes(), 1, suffix.bytes().len())
                             marker: jet_cli_import_find_bytes(annotation.bytes(), "=>", false) ?? return Err(jet_cli_import_text_error("arrow function has no complete return annotation"))
-                            result_text = jet_cli_import_byte_slice(annotation.bytes(), 0, marker).trim().copy()
+                            result_text = jet_cli_import_trimmed_slice(annotation.bytes(), 0, marker)
                             if result_text.is_empty() {
                                 return Err(jet_cli_import_text_error("arrow function has no complete return annotation"))
                             }
@@ -144,11 +141,11 @@ jet_cli_import_parse_foreign_header: fn(language: String, line: String) -> JetCL
                     if {
                         language == "ts" || language == "js" -> {
                             marker: jet_cli_import_find_bytes(prefix.bytes(), "function", true) ?? return Err(jet_cli_import_text_error("function declaration has no function keyword"))
-                            before: jet_cli_import_byte_slice(prefix.bytes(), 0, marker).trim().copy()
+                            before: jet_cli_import_trimmed_slice(prefix.bytes(), 0, marker)
                             if jet_cli_import_words(before).contains("async") {
                                 return Err(jet_cli_import_text_error("async functions need an explicit migration adapter"))
                             }
-                            after: jet_cli_import_byte_slice(prefix.bytes(), marker + 8, prefix.bytes().len()).trim().copy()
+                            after: jet_cli_import_trimmed_slice(prefix.bytes(), marker + 8, prefix.bytes().len())
                             if after.starts_with("*") {
                                 return Err(jet_cli_import_text_error("generator functions need an explicit migration adapter"))
                             }
@@ -180,7 +177,7 @@ jet_cli_import_parse_foreign_header: fn(language: String, line: String) -> JetCL
                             if !prefix.starts_with("func") {
                                 return Err(jet_cli_import_text_error("Go function needs `func`"))
                             }
-                            after: jet_cli_import_byte_slice(prefix.bytes(), 4, prefix.bytes().len()).trim().copy()
+                            after: jet_cli_import_trimmed_slice(prefix.bytes(), 4, prefix.bytes().len())
                             if after.starts_with("(") {
                                 return Err(jet_cli_import_text_error("Go methods with receivers need an explicit migration adapter"))
                             }
@@ -211,7 +208,7 @@ jet_cli_import_parse_foreign_header: fn(language: String, line: String) -> JetCL
     if {
         arrow -> {
             if jet_cli_import_find_bytes(suffix.bytes(), "=>", false) == .Val(marker) {
-                expression: jet_cli_import_byte_slice(suffix.bytes(), marker + 2, suffix.bytes().len()).trim().copy()
+                expression: jet_cli_import_trimmed_slice(suffix.bytes(), marker + 2, suffix.bytes().len())
                 if !expression.is_empty() && !expression.starts_with("{{") {
                     expression_body = Val(jet_cli_import_trim_suffix(expression, ";"))
                 }
@@ -219,7 +216,7 @@ jet_cli_import_parse_foreign_header: fn(language: String, line: String) -> JetCL
         }
         else -> {
             if suffix.starts_with("=>") {
-                expression: jet_cli_import_byte_slice(suffix.bytes(), 2, suffix.bytes().len()).trim().copy()
+                expression: jet_cli_import_trimmed_slice(suffix.bytes(), 2, suffix.bytes().len())
                 expression_body = Val(jet_cli_import_trim_suffix(expression, ";"))
             }
         }
@@ -236,18 +233,18 @@ jet_cli_import_parse_foreign_params: fn(language: String, raw: String) -> [{name
     if language == "go" -> return Ok(jet_cli_import_parse_go_params(raw))
     ^output: [{name: String, ty: String}]{}
     loop raw_part in jet_cli_import_split_commas(raw) {
-        part: raw_part.trim().copy()
+        part: jet_cli_import_trimmed_slice(raw_part.bytes(), 0, raw_part.bytes().len())
         if part.contains("...") || part.contains("?") || part.contains("=") {
             return Err(jet_cli_import_text_error("optional, default, or variadic parameters need an explicit migration adapter"))
         }
         if {
             language == "ts" -> {
                 colon: jet_cli_import_find_bytes(part.bytes(), ":", false) ?? return Err(jet_cli_import_text_error("TypeScript parameter needs a type"))
-                name: jet_cli_import_byte_slice(part.bytes(), 0, colon).trim().copy()
+                name: jet_cli_import_trimmed_slice(part.bytes(), 0, colon)
                 if !jet_cli_import_identifier(name) {
                     return Err(jet_cli_import_text_error("parameter `{name}` is not a safe Jet identifier"))
                 }
-                ty: jet_cli_import_byte_slice(part.bytes(), colon + 1, part.bytes().len()).trim().copy()
+                ty: jet_cli_import_trimmed_slice(part.bytes(), colon + 1, part.bytes().len())
                 output.push({name: name, ty: jet_cli_import_map_foreign_type(language, ty)})
             }
             else -> {
@@ -289,10 +286,10 @@ jet_cli_import_parse_go_params: fn(raw: String) -> [{name: String, ty: String}] 
     // #4366: Set.add has no Bool result. Membership only, never iterated.
     ^names: [String:Bool]{}
     loop part in jet_cli_import_split_commas(raw) {
-        tokens: jet_cli_import_words(part)
+        ^tokens: jet_cli_import_words(part)
         if {
             tokens.len() == 1 && jet_cli_import_identifier(tokens[0]) -> {
-                pending.push(tokens[0].copy())
+                pending.push(tokens.pop() ?? "")
             }
             else -> {
                 if tokens.len() != 2 || !jet_cli_import_identifier(tokens[0]) {
@@ -300,12 +297,12 @@ jet_cli_import_parse_go_params: fn(raw: String) -> [{name: String, ty: String}] 
                 }
                 mapped: jet_cli_import_map_foreign_type("go", tokens[1])
                 pending.push(tokens[0].copy())
-                loop name in pending {
+                loop name in pending.move() {
                     if names.has_key(name) {
                         return Err(jet_cli_import_text_error("duplicate Go parameter `{name}`"))
                     }
                     names.add(name.copy(), true).drop("duplicate Go names were refused")
-                    params.push({name: name.copy(), ty: mapped.copy()})
+                    params.push({name: name.move(), ty: mapped.copy()})
                 }
                 pending = []
             }
@@ -319,7 +316,7 @@ jet_cli_import_parse_go_params: fn(raw: String) -> [{name: String, ty: String}] 
 
 // Map a foreign type; qualification stripping applies in every language.
 jet_cli_import_map_foreign_type: fn(language: String, raw: String) -> String JetCLIImportTextError! {
-    ^ty: jet_cli_import_trim_suffix(raw.trim().copy(), ";")
+    ^ty: jet_cli_import_trim_suffix(raw.trim(), ";")
     if ty.starts_with("java.lang.") {
         ty = jet_cli_import_byte_slice(ty.bytes(), 10, ty.bytes().len())
     }
