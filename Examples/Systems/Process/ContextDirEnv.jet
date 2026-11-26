@@ -52,24 +52,18 @@ run: fn() -[FS, Env, Exec, IO]> {
     print("restored_outer={restored_dir && restored_cc}")
 
     both: (task.all {
-        left: {
-            ^out: ""
-            #Context(dir: dir_a, env: {TAG: "alpha"}) {
-                files.write("marker.txt", "alpha") ?? panic("write a failed")
-                res: process.cmd(["sh", "-c", "printf '%s:%s' \"$(basename \"$(pwd)\")\" \"$TAG\""]).stdout(.Capture).stderr(.Capture).run() ?? panic("child a failed")
-                out = res.output.trim()
-            }
-            out
-        },
-        right: {
-            ^out: ""
-            #Context(dir: dir_b, env: {TAG: "beta"}) {
-                files.write("marker.txt", "beta") ?? panic("write b failed")
-                res: process.cmd(["sh", "-c", "printf '%s:%s' \"$(basename \"$(pwd)\")\" \"$TAG\""]).stdout(.Capture).stderr(.Capture).run() ?? panic("child b failed")
-                out = res.output.trim()
-            }
-            out
-        },
+        left: run_in_context(dir_a, "alpha"),
+        right: run_in_context(dir_b, "beta"),
     }) ?? panic("task.all failed")
     print("parallel={both.left}|{both.right}")
+}
+
+run_in_context: fn(dir: String, tag: String) -[FS, Exec, Env]> String {
+    ^out: ""
+    #Context(dir: dir, env: {TAG: tag}) {
+        files.write("marker.txt", tag) ?? panic("write failed")
+        res: process.cmd(["sh", "-c", "printf '%s:%s' \"$(basename \"$(pwd)\")\" \"$TAG\""]).stdout(.Capture).stderr(.Capture).run() ?? panic("child failed")
+        out = res.output.trim()
+    }
+    out
 }

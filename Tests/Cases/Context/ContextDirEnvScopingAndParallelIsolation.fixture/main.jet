@@ -57,8 +57,8 @@ run: fn() -[FS, Env, Exec, IO, DB]> {
 
         // Relative DB open resolves against `#Context(dir:)`.
         store: db.open("local.db") ?? panic("db.open")
-        _: store.execute(SQL{"CREATE TABLE kv(k TEXT, v TEXT)"}) ?? panic("create table")
-        _: store.execute(SQL{"INSERT INTO kv VALUES ('a', '1')"}) ?? panic("insert")
+        rows: store.query(SQL{"SELECT 1"}) ?? panic("query")
+        assert_eq(rows.len(), 1)
         _: store.close()
         assert(files.exists(files.join(build_root, "local.db")))
 
