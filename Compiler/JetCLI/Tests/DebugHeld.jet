@@ -158,3 +158,12 @@ held_test_names: fn(declared: JetCLIDebugEvalDeclared, order: [Int]?) -> [String
     assert(unrecorded.message == "`scaled` can't be checked against the code the program runs: its image records no sources; rebuild the program")
     assert(jet_cli_debug_eval_stale(built, [String:[U8]]{}, "k + 1", k) == None)
 }
+
+#Test("the full held check defers while the cut is opening and claims after the cut finishes") {
+    held: jet_cli_debug_eval_held_slot()
+    assert(jet_cli_debug_eval_held_cut_claim(held, program: true))
+    assert(!jet_cli_debug_eval_held_claim(held, program: true))
+    unopened: JetCLIDebugEvalHeldOpen{held: None, missed: None}
+    jet_cli_debug_eval_held_cut_done(held, unopened)
+    assert(jet_cli_debug_eval_held_claim(held))
+}
