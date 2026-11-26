@@ -16,51 +16,55 @@ requires: probe test -r /proc/self/schedstat # the window's CPU is its threads' 
 env: NO_COLOR=1
 step: jet perf run --out run_bin.jettrace {jet} check {root}/Tools/Agent/CoreSurfaceLedger.jet
 exit: 0
-stderr: ~ "functions samples="
-stderr: ~ " at Compiler/Jet"
-stderr: ~ "\ncpu by package\n"
-stderr: ~ "\n  Compiler/JetSema samples="
-stderr: ~ "Trace: "
-json: file run_bin.jettrace doc $.content.receipt_sections[?name="functions"][0].value.samples > 0
-json: file run_bin.jettrace doc $.content.receipt_sections[?name="functions"][0].value.functions[?file ^= "Compiler/JetSema"][?line >= 1] #>= 1
-json: file run_bin.jettrace doc $.content.profile.window_status = "exit"
+stderr: ~ "functions samples=" # the kernel sampled the built jet binary directly
+stderr: ~ " at Compiler/Jet" # hot compiler functions resolve to their source files
+stderr: ~ "\ncpu by package\n" # the samples split by compiler package
+stderr: ~ "\n  Compiler/JetSema samples=" # sema accounts for a share of the check
+stderr: ~ "Trace: " # and the path of the trace it wrote
+json: file run_bin.jettrace doc $.content.receipt_sections[?name="functions"][0].value.samples > 0 # samples were collected from the built binary
+json: file run_bin.jettrace doc $.content.receipt_sections[?name="functions"][0].value.functions[?file ^= "Compiler/Jet"][?line >= 1] #>= 1 # hot compiler functions resolve with file and line
+json: file run_bin.jettrace doc $.content.receipt_sections[?name="functions"][0].value.packages[?package="Compiler/JetSema"][0].samples > 0 # JetSema package samples recorded
+json: file run_bin.jettrace doc $.content.receipt_sections[?name="timeline"][0].value.functions[?file ^= "Compiler/JetSema"][?line >= 1] #>= 1 # sema functions resolve with file and line in the timeline
+json: file run_bin.jettrace doc $.content.profile.window_status = "exit" # the window spans the binary's full run
 step: jet perf view run_bin.jettrace
 exit: 0
-stdout: ~ "functions samples="
-stdout: ~ "Compiler/JetSema/Source/Sema/"
-stdout: ~ "\ncpu by package\n"
-stdout: ~ "\n  Compiler/JetSema samples="
+stdout: ~ "functions samples=" # the view shows the sampled functions
+stdout: ~ "Compiler/JetSema/Source/Sema/" # with sema function source locations
+stdout: ~ "\ncpu by package\n" # the package split
+stdout: ~ "\n  Compiler/JetSema samples=" # naming JetSema
 step: sh -c 'mkdir -p bin && ln -sf "{jet}" bin/jet'
 exit: 0
 step: jet perf run --out run_path.jettrace jet check {root}/Tools/Agent/CoreSurfaceLedger.jet
 env: PATH={work}/bin
 exit: 0
-stderr: ~ "functions samples="
-stderr: ~ "\n  Compiler/JetSema samples="
-json: file run_path.jettrace doc $.content.receipt_sections[?name="functions"][0].value.samples > 0
-json: file run_path.jettrace doc $.content.receipt_sections[?name="functions"][0].value.functions[?file ^= "Compiler/JetSema"][?line >= 1] #>= 1
+stderr: ~ "functions samples=" # bare executable name resolved on PATH and sampled
+stderr: ~ "\n  Compiler/JetSema samples=" # with sema samples
+json: file run_path.jettrace doc $.content.receipt_sections[?name="functions"][0].value.samples > 0 # samples were collected via PATH lookup
+json: file run_path.jettrace doc $.content.receipt_sections[?name="functions"][0].value.packages[?package="Compiler/JetSema"][0].samples > 0 # JetSema package samples recorded via PATH
+json: file run_path.jettrace doc $.content.receipt_sections[?name="timeline"][0].value.functions[?file ^= "Compiler/JetSema"][?line >= 1] #>= 1 # sema functions resolved with file and line
 step: jet perf view run_path.jettrace
 exit: 0
-stdout: ~ "Compiler/JetSema/Source/Sema/"
+stdout: ~ "Compiler/JetSema/Source/Sema/" # the view names its sema functions
 spawn busy: {jet} check {root}/Compiler/JetCLI
 stdout: null
 stderr: null
 poll working: sh -c 'test "$(cut -d " " -f 14 /proc/{pid:busy}/stat)" -ge 30' until exit: 0 timeout 120s every 20ms # the check is running inside JetSema with no external authorizer
 step: jet perf attach {pid:busy} --for=1s --out attach_bin.jettrace
 exit: 0
-stderr: ~ "functions samples="
-stderr: ~ " at Compiler/Jet"
-stderr: ~ "\ncpu by package\n"
-stderr: ~ "\n  Compiler/JetSema samples="
-stderr: ~ "Trace: "
-json: file attach_bin.jettrace doc $.content.receipt_sections[?name="functions"][0].value.samples > 0
-json: file attach_bin.jettrace doc $.content.receipt_sections[?name="functions"][0].value.functions[?file ^= "Compiler/JetSema"][?line >= 1] #>= 1
+stderr: ~ "functions samples=" # attach succeeded without an external authorizer under ptrace_scope=1
+stderr: ~ " at Compiler/Jet" # hot compiler functions resolve to their source files
+stderr: ~ "\ncpu by package\n" # the package split
+stderr: ~ "\n  Compiler/JetSema samples=" # naming JetSema
+stderr: ~ "Trace: " # and the trace path
+json: file attach_bin.jettrace doc $.content.receipt_sections[?name="functions"][0].value.samples > 0 # attach collected samples from the running check
+json: file attach_bin.jettrace doc $.content.receipt_sections[?name="functions"][0].value.functions[?file ^= "Compiler/Jet"][?line >= 1] #>= 1 # compiler functions resolved with file and line
+json: file attach_bin.jettrace doc $.content.receipt_sections[?name="functions"][0].value.packages[?package="Compiler/JetSema"][0].samples > 0 # JetSema package samples recorded via attach
 step: jet perf view attach_bin.jettrace
 exit: 0
-stdout: ~ "functions samples="
-stdout: ~ "Compiler/JetSema/Source/Sema/"
-stdout: ~ "\ncpu by package\n"
-stdout: ~ "\n  Compiler/JetSema samples="
+stdout: ~ "functions samples=" # the view shows the sampled functions
+stdout: ~ "Compiler/JetSema/Source/Sema/" # with sema function source locations
+stdout: ~ "\ncpu by package\n" # the package split
+stdout: ~ "\n  Compiler/JetSema samples=" # naming JetSema
 signal busy: KILL
 wait: busy
 exit: any # the case's KILL ends the check if it is still running
