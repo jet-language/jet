@@ -240,7 +240,7 @@ store_reuse_build_lease: fn(verification: StoreVerification, roots: HangarRoots,
             }
         }
     }
-    ^executables: store_reuse_open_snapshot_executables(projected_bin_root ?? snapshot_root, bin_relative)
+    ^executables: store_reuse_open_snapshot_executables(projected_bin_root ?? snapshot_root, bin_relative, projections)
     bin_root_fd: if bin_output_index == {
         .Val(index) -> leased_output_roots[index].child_fd
         .None -> None
@@ -309,16 +309,83 @@ store_reuse_binding_index: fn(bindings: [NixProjectionBinding], source: String) 
     None
 }
 
+// Map a logical `/nix/store/...` symlink target onto its projected Hangar
+// object source so lease executable resolution never reads a host Nix store.
+store_reuse_project_nix_target: fn(target: String, projections: [NixStoreProjection]) -> String? Never! {
+    loop projection in projections {
+        if store_path_strip_prefix(target, projection.logical) == {
+            .Val(relative) -> {
+                if relative == "" -> return Val(projection.source)
+                return Val(files.join(projection.source, relative))
+            }
+            .None -> {}
+        }
+    }
+    None
+}
+
+// Follow symlinks up to a bounded depth, rewriting `/nix/store/...` targets
+// strictly through `projections`. Unprojected `/nix/store` links, dangling
+// symlink targets, and link loops return `None` rather than failing the lease.
+store_reuse_resolve_projected_path: fn(entry_path: String, projections: [NixStoreProjection], *, allow_missing_root: Bool) -> {path: String, info: Stat}? StoreError! {
+    ^current: entry_path
+    ^followed_link: false
+    loop _ in 0..<16 {
+        info: if files.stat(current) == {
+            .Ok(found) -> found
+            .Err(error) -> {
+                if error == {
+                    .NotFound(_) -> {
+                        if followed_link || allow_missing_root -> return Ok(None)
+                        return Err(StoreError.IO(error))
+                    }
+                    .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Canceled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> return Err(StoreError.IO(error))
+                }
+            }
+        }
+        if !info.is_symlink -> return Ok(Val({path: current, info: info}))
+        followed_link = true
+        target: files.read_link(current)
+        if target == "" -> return Ok(None)
+        if store_path_starts_with(target, "/nix/store") {
+            mapped: store_reuse_project_nix_target(target, projections) ?? return Ok(None)
+            current = mapped
+            next
+        }
+        current = if files.is_abs(target) -> target else -> files.join(files.dirname(current), target)
+    }
+    Ok(None)
+}
+
 // Open the regular-file executables of `<snapshot_root>/<bin>` in name
-// order. A link to a regular file is followed, as a launcher would.
-store_reuse_open_snapshot_executables: fn(snapshot_root: String, bin: String?) -> [SnapshotFile] StoreError! {
+// order. Links to regular files are resolved hermetically through the Nix
+// store projection (and relative links inside the closure); dangling or
+// unprojected links are skipped cleanly.
+store_reuse_open_snapshot_executables: fn(snapshot_root: String, bin: String?, projections: [NixStoreProjection]) -> [SnapshotFile] StoreError! {
     relative: bin ?? return Ok([SnapshotFile]{})
     path: files.join(snapshot_root, relative)
     ^out: [SnapshotFile]{}
-    if !files.is_dir(path) -> return Ok(out)
-    entries: files.list_dir(path)
+    bin_dir: if store_reuse_resolve_projected_path(path, projections, allow_missing_root: true) == {
+        .Val(found) -> found
+        .None -> {
+            return Ok(out)
+        }
+        .Err(error) -> {
+            return Err(error)
+        }
+    }
+    if !bin_dir.info.is_dir -> return Ok(out)
+    entries: files.list_dir(bin_dir.path)
     loop entry in entries {
-        file: files.open(entry.path)
+        resolved: if store_reuse_resolve_projected_path(entry.path, projections, allow_missing_root: false) == {
+            .Val(found) -> found
+            .None -> next
+            .Err(error) -> {
+                return Err(error)
+            }
+        }
+        if !resolved.info.is_file -> next
+        file: files.open(resolved.path, links: .Refuse)
         info: file.stat()
         if !info.is_file -> next
         out.push(SnapshotFile{relative: entry.name, file: Val(file), id: info.id})
