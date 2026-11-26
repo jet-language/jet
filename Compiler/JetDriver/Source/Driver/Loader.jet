@@ -7162,7 +7162,7 @@ jet_driver_load_walk: fn(
         // `t.suite(…)` on a `Test` and `expect(value).snapshot()` run `core.testing`
         // source bodies, even when the caller has no explicit core.testing
         // import.
-        if demand.test_suite && !defers {
+        if demand.test_suite && !defers && !request.runtime_library {
             if !bare_modules.contains("core.testing") -> bare_modules.push("core.testing")
             jet_driver_reach_open(reach, "core.testing")
             testing_index: jet_driver_core_unit(source_units, queued, pending, generated_records, request.core_sources, "core.testing", importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, diagnostics)
@@ -7176,7 +7176,7 @@ jet_driver_load_walk: fn(
         // `stream.with_event_time(…)` and its `.key_by`/`.window` stages run
         // their core.data source stages, even when the caller has no explicit
         // core.data import.
-        if demand.stream_event_time && !defers {
+        if demand.stream_event_time && !defers && !request.runtime_library {
             if !bare_modules.contains("core.data") -> bare_modules.push("core.data")
             jet_driver_reach_open(reach, "core.data")
             data_index: jet_driver_core_unit(source_units, queued, pending, generated_records, request.core_sources, "core.data", importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, diagnostics)
@@ -7200,7 +7200,7 @@ jet_driver_load_walk: fn(
                 }
             }
         }
-        if demand.codec_decode && !defers {
+        if demand.codec_decode && !defers && !request.runtime_library {
             jet_driver_reach_open(reach, "core.encoding")
             encoding_index: jet_driver_core_unit(source_units, queued, pending, generated_records, request.core_sources, "core.encoding", importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, diagnostics)
             if encoding_index == .Val(index) {
