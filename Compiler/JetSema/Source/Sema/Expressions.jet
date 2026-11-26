@@ -4529,7 +4529,7 @@ sema_expr_try_method_special_routes: fn(receiver: Expr, receiver_value: TExpr, m
                     err_as: sema_expr_try_err_as(receiver, receiver_value, method, type_args, args, span, expected, check)
                     if err_as.handled -> return err_as
                 }
-                if method != "enqueue" && method != "delay" && method != "cast" && method != "swizzle" && method != "wait" && method != "start" && method != "read" && method != "write" && method != "set" && method != "clear" && method != "send" && method != "join" && method != "detach" && method != "para_map" && method != "para_filter" && method != "para_partition" && method != "para_fold" {
+                if method != "cast" && method != "swizzle" && method != "wait" && method != "start" && method != "read" && method != "write" && method != "set" && method != "clear" && method != "send" && method != "join" && method != "detach" && method != "para_map" && method != "para_filter" && method != "para_partition" && method != "para_fold" {
                     ^value_method: sema_call_try_value_method(receiver, receiver_value, method, args, span, expected, check)
                     if value_method.handled -> return value_method
                     ^builtin: sema_call_try_builtin_method(receiver, receiver_value, method, args, span, expected, check)
@@ -4564,9 +4564,6 @@ sema_expr_try_method_special_routes: fn(receiver: Expr, receiver_value: TExpr, m
     if reflection.handled -> return reflection
     ^compiler_value: sema_call_try_compiler_value_method(receiver, receiver_value, method, args, span, expected, check)
     if compiler_value.handled -> return compiler_value
-
-    ^queue: sema_call_try_job_queue_method(receiver, receiver_value, method, args, span, expected, check)
-    if queue.handled -> return queue
 
     ^tree: sema_check_service_tree_method(method, receiver, receiver_value, args, expected, span, check)
     if tree == .Val(tree_check) {

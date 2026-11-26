@@ -162,6 +162,44 @@ queue: fn() -[DB, Env, FS, Rand, Time]> JobQueue ServiceError! {
     Ok(queue)
 }
 
+// The rule a queue's `enqueue` and `delay` are heard by: the job is named by
+// a `#Job` function that takes the one payload, so the queue identity comes
+// from that declaration and never from an arbitrary function value (E0112).
+priv QueueJobShape: struct {
+    what_text: String,
+
+    impl Diagnostic {
+        code: "E0112",
+
+        what: fn(self) -> String { self.what_text }
+
+        why: fn(self) -> String { "the queue identity is attached to the declared #Job and cannot be selected by an arbitrary function value" }
+
+        fix: fn(self) -> String { "pass the name of a #Job function with exactly one payload parameter" }
+    }
+}
+
+priv queue_declared_job: fn(heard: FunctionInfo?) -> Bool Never! {
+    info: heard ?? return false
+    if info.signature.params.len() != 1 -> return false
+    loop marker in info.markers {
+        if marker.name == "Job" -> return true
+    }
+    false
+}
+
+priv QueueJob: struct {
+    impl Marker {
+        sites: [.Method],
+
+        check: fn(self, call: CompilerCall) {
+            if call.args.len() > 0 && !queue_declared_job(call.args[0].function) {
+                reject(QueueJobShape{what_text: "`JobQueue.{call.name.text}` expects a checked `#Job` function"}, at: call.args[0])
+            }
+        }
+    }
+}
+
 QueueData: struct {
     driver: db.DBDriver,
 }
@@ -171,6 +209,25 @@ JobQueue: struct {
     endpoint: ServiceEndpoint,
     authority: String,
     name: String,
+
+    /// Queues one run of the `#Job` function `job` with `payload`, encoded as
+    /// canonical CBOR. A `key` makes the enqueue idempotent: a second enqueue
+    /// with the same key answers the first receipt.
+    #QueueJob enqueue: fn<T: Encode>(^self, job: fn(T), payload: T, key: String?{None}, job_type: String{#run job.reflect().name}) -[DB, Time]> JobQueueReceipt ServiceError! {
+        encoded: queue_encoded_payload(job_type, payload) ?? return Err(err)
+        queue_enqueue_request(self, EnqueueRequest{job_type: job_type, payload: encoded, idempotency_key: key, request_id: None, delay_ms: 0})
+    }
+
+    /// Queues one run of the `#Job` function `job` with `payload`, claimable
+    /// once `duration` has passed.
+    #QueueJob delay: fn<T: Encode>(^self, job: fn(T), payload: T, for duration: Duration, job_type: String{#run job.reflect().name}) -[DB, Time]> JobQueueReceipt ServiceError! {
+        encoded: queue_encoded_payload(job_type, payload) ?? return Err(err)
+        millis: duration.ns /% 1000000
+        if millis < 0 || millis > 9223372036854775807 {
+            return Err(queue_unavailable("queue delay duration is outside the supported range"))
+        }
+        queue_enqueue_request(self, EnqueueRequest{job_type: job_type, payload: encoded, idempotency_key: None, request_id: None, delay_ms: millis})
+    }
 
     receipt: fn(self, id: String) -[DB]> JobQueueReceipt ServiceError! {
         service.__authority_validate(self.endpoint) ?? return Err(err)
@@ -393,22 +450,6 @@ queue_encoded_payload: fn<T: Encode>(job_type: String, payload: T) -> JobPayload
             Err(ServiceError.Policy("job payload cannot be encoded as canonical CBOR ({error.kind:Debug}, {location}): {error.reason}"))
         }
     }
-}
-
-// Checked #Job receiver normalization forwards here, after its payload schema
-// and declared job identity have been checked (no string-selected public job).
-#Builtin.Role(.JobEnqueue) priv __enqueue: fn<T: Encode>(queue: JobQueue, job_type: String, payload: T, key: String?{None}) -[DB, Time]> JobQueueReceipt ServiceError! {
-    encoded: queue_encoded_payload(job_type, payload) ?? return Err(err)
-    queue_enqueue_request(queue, EnqueueRequest{job_type: job_type, payload: encoded, idempotency_key: key, request_id: None, delay_ms: 0})
-}
-
-#Builtin.Role(.JobDelay) priv __delay: fn<T: Encode>(queue: JobQueue, job_type: String, payload: T, duration: Duration) -[DB, Time]> JobQueueReceipt ServiceError! {
-    encoded: queue_encoded_payload(job_type, payload) ?? return Err(err)
-    millis: duration.ns /% 1000000
-    if millis < 0 || millis > 9223372036854775807 {
-        return Err(queue_unavailable("queue delay duration is outside the supported range"))
-    }
-    queue_enqueue_request(queue, EnqueueRequest{job_type: job_type, payload: encoded, idempotency_key: None, request_id: None, delay_ms: millis})
 }
 
 queue_enqueue_request: fn(queue: JobQueue, request: EnqueueRequest) -[DB, Time]> JobQueueReceipt ServiceError! {
