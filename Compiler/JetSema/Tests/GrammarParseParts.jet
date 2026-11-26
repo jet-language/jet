@@ -82,12 +82,18 @@ priv expand_items: fn(with_hole: Bool, is_enum: Bool) -> [Item] {
 
 #Test("hole-bearing grammar generates parse_parts and check_parts while hole-free grammar omits both") {
     with_holes_items: expand_items(true, false)
-    ^with_holes: [String]{}
+    ^with_holes_parse: false
+    ^with_holes_parse_parts: false
+    ^with_holes_check_parts: false
     ^checked_helpers: 0
     bool_never: Val(Type.Result{ok: Type.Bool, err: Type.Named{name: "Never"}})
     loop item in with_holes_items {
         if item == .Struct(def) && def.name == "Item" {
-            loop method in def.methods -> with_holes.push(method.name.copy())
+            loop method in def.methods {
+                if method.name == "parse" -> with_holes_parse = true
+                if method.name == "parse_parts" -> with_holes_parse_parts = true
+                if method.name == "check_parts" -> with_holes_check_parts = true
+            }
         }
         if item == .Func(func) {
             if func.name.ends_with("_print") || func.name.ends_with("_into") || func.name.ends_with("_check") {
@@ -96,17 +102,23 @@ priv expand_items: fn(with_hole: Bool, is_enum: Bool) -> [Item] {
             }
         }
     }
-    assert(with_holes.contains("parse"))
-    assert(with_holes.contains("parse_parts"))
-    assert(with_holes.contains("check_parts"))
+    assert(with_holes_parse)
+    assert(with_holes_parse_parts)
+    assert(with_holes_check_parts)
     assert_eq(checked_helpers, 3)
 
     without_holes_items: expand_items(false, true)
-    ^without_holes: [String]{}
+    ^without_holes_parse: false
+    ^without_holes_parse_parts: false
+    ^without_holes_check_parts: false
     ^enum_parse_ends_with_return: false
     loop item in without_holes_items {
         if item == .Enum(def) && def.name == "Item" {
-            loop method in def.methods -> without_holes.push(method.name.copy())
+            loop method in def.methods {
+                if method.name == "parse" -> without_holes_parse = true
+                if method.name == "parse_parts" -> without_holes_parse_parts = true
+                if method.name == "check_parts" -> without_holes_check_parts = true
+            }
         }
         if item == .Func(func) && func.name == "__jet_grammar_Item_item" {
             if func.body.len() > 0 && func.body[func.body.len() - 1] == .Return(_, _) {
@@ -114,8 +126,8 @@ priv expand_items: fn(with_hole: Bool, is_enum: Bool) -> [Item] {
             }
         }
     }
-    assert(without_holes.contains("parse"))
-    assert(!without_holes.contains("parse_parts"))
-    assert(!without_holes.contains("check_parts"))
+    assert(without_holes_parse)
+    assert(!without_holes_parse_parts)
+    assert(!without_holes_check_parts)
     assert(enum_parse_ends_with_return)
 }

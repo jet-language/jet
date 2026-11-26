@@ -1,0 +1,113 @@
+# Per-part native linkage defaults, fn build overrides, impossible-combination
+# diagnostics, and jet inspect reporting of each part with its linkage and source.
+requires: os:unix
+fixture: DefaultsAndOverride.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+
+# 1. Pure Jet stays one static file with no libc.
+step inspect_pure: jet inspect choices main.jet
+cwd: pure
+exit: 0
+stdout: ~ "Linkage: jet.program = static (default: pure Jet)"
+stdout: ~ "Linkage: jet.runtime = static (default: pure Jet)"
+stdout: !~ "Linkage: libc"
+
+step build_pure: jet build main.jet
+cwd: pure
+exit: 0
+
+step run_pure: {work}/pure/.jet/build/main
+exit: 0
+stdout: = "pure-ok\n"
+
+step elf_pure: node {work}/elf_check.mjs {work}/pure/.jet/build/main
+exit: 0
+stdout: = "dynamic: false\ninterpreter: none\nneeded: none\n"
+
+# 2. CLI --linkage=dynamic overrides pure Jet to link dynamically against glibc.
+step inspect_pure_dyn: jet inspect choices --linkage=dynamic main.jet
+cwd: pure
+exit: 0
+stdout: ~ "Linkage: libc = dynamic (`--linkage=dynamic`)"
+
+step build_pure_dyn: jet build --linkage=dynamic main.jet
+cwd: pure
+exit: 0
+
+step run_pure_dyn: {work}/pure/.jet/build/main
+exit: 0
+stdout: = "pure-ok\n"
+
+step elf_pure_dyn: node {work}/elf_check.mjs {work}/pure/.jet/build/main
+exit: 0
+stdout: ~ "dynamic: true"
+stdout: ~ "interpreter: /lib64/ld-linux-x86-64.so.2"
+stdout: ~ "libc.so.6"
+
+# 3. Bundled C defaults static and stays one static file.
+step inspect_bundled: jet inspect choices main.jet
+cwd: bundled
+exit: 0
+stdout: ~ "Linkage: jet.program = static (default: pure Jet)"
+stdout: ~ "Linkage: jet.runtime = static (default: pure Jet)"
+stdout: ~ "Linkage: helper = static (default: bundled C)"
+stdout: ~ "Linkage: libc = static (default: bundled C)"
+
+step inspect_bundled_json: jet inspect choices main.jet --json
+cwd: bundled
+exit: 0
+json: stdout doc $.action = "inspect.choices"
+json: stdout doc $.linkage[2].part = "helper"
+json: stdout doc $.linkage[2].linkage = "static"
+json: stdout doc $.linkage[2].source = "default: bundled C"
+
+step build_bundled: jet build main.jet
+cwd: bundled
+exit: 0
+
+step run_bundled: {work}/bundled/.jet/build/main
+exit: 0
+stdout: = "42\n"
+
+step elf_bundled: node {work}/elf_check.mjs {work}/bundled/.jet/build/main
+exit: 0
+stdout: = "dynamic: false\ninterpreter: none\nneeded: none\n"
+
+# 4. fn build overrides a bundled C part to dynamic; jet inspect reports the source.
+step inspect_override: jet inspect choices main.jet
+cwd: override_fn_build
+exit: 0
+stdout: ~ "Linkage: helper = dynamic (`b.link_parts([\"helper=dynamic\"])` at build.jet:2)"
+stdout: ~ "Linkage: libc = dynamic (implied by dynamic part `helper`)"
+
+step build_override: jet build
+cwd: override_fn_build
+exit: 0
+
+step run_override: {work}/override_fn_build/.jet/build/app
+exit: 0
+stdout: = "42\n"
+
+step elf_override: node {work}/elf_check.mjs {work}/override_fn_build/.jet/build/app
+exit: 0
+stdout: ~ "dynamic: true"
+stdout: ~ "libhelper.so"
+stdout: ~ "libc.so.6"
+
+# 5. OS drivers default dynamic, and forcing static is refused as a diagnostic.
+step inspect_driver: jet inspect choices main.jet
+cwd: driver
+exit: 0
+stdout: ~ "Linkage: GL = dynamic (default: OS driver)"
+stdout: ~ "Linkage: libc = dynamic (implied by dynamic part `GL`)"
+
+step refuse_driver_static_whole: jet inspect choices --linkage=static main.jet
+cwd: driver
+exit: nonzero
+stderr: ~ "OS driver library `GL`"
+
+step refuse_driver_static_part: jet build --link-parts=GL=static main.jet
+cwd: driver
+exit: nonzero
+stderr: ~ "OS driver library `GL`"

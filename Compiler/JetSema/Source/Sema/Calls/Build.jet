@@ -449,8 +449,12 @@ sema_build_code_statements: fn(statements: [Stmt]) -> String {
     ^text: ""
     loop index in 1..<(lines.len() - 1) {
         line: lines[index]
-        body_line: if line.starts_with("    ") -> line.removeprefix("    ") else -> line.copy()
-        text = "{text}{body_line}\n"
+        if line.starts_with("    ") {
+            body_line: line.removeprefix("    ")
+            text = "{text}{body_line}\n"
+        } else {
+            text = "{text}{line}\n"
+        }
     }
     text
 }

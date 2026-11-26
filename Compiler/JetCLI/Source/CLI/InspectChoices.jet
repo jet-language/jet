@@ -45,13 +45,13 @@
 //   that changes such a row; any other predicate reads the whole table, and its
 //   live query re-runs for every write to it.
 use {
-    jet_driver.[JetDriverCompileMode, JetDriverSourceDocument, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, jet_driver_present_diagnostics]
-    jet_foundation.[CompilerThreads, DeclTable, FnBody, SymbolTable, body_node, build_options_stock, decl_table_key, module_is_core, symbol_key_leaf]
+    jet_driver.[BuildSessionOption, JetDriverBuildQueryScope, JetDriverCompileMode, JetDriverSourceDocument, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, build_plan_selection, jet_driver_entry_build_probe, jet_driver_present_diagnostics, jet_driver_query_build_plan]
+    jet_foundation.[CompilerThreads, DeclTable, FnBody, SymbolTable, body_node, build_options_stock, build_options_with_code, decl_table_key, module_is_core, symbol_key_leaf]
     jet_ir.[IROptInlined]
 }
 
 // The choice kinds the report lists, in order; a kind with no row says none.
-JET_CLI_CHOICE_KINDS: [String]{"storage form", "inlining", "collection", "copies", "placement", "exposure", "rights", "context", "live reads"}
+JET_CLI_CHOICE_KINDS: [String]{"storage form", "inlining", "collection", "copies", "placement", "exposure", "rights", "context", "live reads", "linkage"}
 
 // One automatic choice: its kind, the function it was made in, and what was
 // chosen with its reason.
@@ -64,6 +64,10 @@ JetCLIChoice: struct {
 }
 
 jet_cli_choice_order: fn(left: JetCLIChoice, right: JetCLIChoice) -> Ordering Never! {
+    left_link: left.kind == "linkage"
+    right_link: right.kind == "linkage"
+    if !left_link && right_link -> return Ordering.Less
+    if left_link && !right_link -> return Ordering.Greater
     file: left.file <=> right.file
     if file != Ordering.Equal -> return file
     line: left.line <=> right.line
@@ -333,7 +337,7 @@ jet_cli_policy_choices: fn(functions: [FnBody], _decls: DeclTable, _symbols: Sym
     }
 }
 
-jet_cli_choices_report: fn(choices: [JetCLIChoice], scope: String, file: String, profile: String, json: Bool) -> String Never! {
+jet_cli_choices_report: fn(choices: [JetCLIChoice], scope: String, file: String, profile: String, json: Bool, linkage: [JetCLILinkPart]{[JetCLILinkPart]{}}) -> String Never! {
     if !json {
         ^text: "Choices: scope={scope} source={file} profile={profile}\n"
         loop kind in JET_CLI_CHOICE_KINDS {
@@ -341,7 +345,9 @@ jet_cli_choices_report: fn(choices: [JetCLIChoice], scope: String, file: String,
             ^count: 0
             loop choice in choices {
                 if choice.kind != kind -> next
-                text = "{text}{label}: {choice.file}:{choice.line} in {choice.function}: {choice.choice}\n"
+                if kind == "linkage" -> text = "{text}{label}: {choice.choice}\n" else {
+                    text = "{text}{label}: {choice.file}:{choice.line} in {choice.function}: {choice.choice}\n"
+                }
                 count += 1
             }
             if count == 0 -> text = "{text}{label}: none\n"
@@ -362,12 +368,26 @@ jet_cli_choices_report: fn(choices: [JetCLIChoice], scope: String, file: String,
             ),
         )
     }
+    ^linkage_rows: [JetCLIStatusValue]{}
+    loop part in linkage {
+        linkage_rows.push(
+            jet_cli_status_object(
+                [
+                    jet_cli_status_field("part", jet_cli_status_text(part.part)),
+                    jet_cli_status_field("kind", jet_cli_status_text(part.kind)),
+                    jet_cli_status_field("linkage", jet_cli_status_text(part.linkage)),
+                    jet_cli_status_field("source", jet_cli_status_text(part.source)),
+                ],
+            ),
+        )
+    }
     fields: [JetCLIStatusField]{
         jet_cli_status_field("scope", jet_cli_status_text(scope)),
         jet_cli_status_field("source", jet_cli_status_text(file)),
         jet_cli_status_field("profile", jet_cli_status_text(profile)),
         jet_cli_status_field("kinds", jet_cli_status_texts(JET_CLI_CHOICE_KINDS)),
         jet_cli_status_field("choices", jet_cli_status_array(rows)),
+        jet_cli_status_field("linkage", jet_cli_status_array(linkage_rows)),
     }
     "{jet_cli_status_render("inspect.choices", true, fields)}\n"
 }
@@ -384,6 +404,27 @@ jet_cli_inspect_choices_host: fn(job: JetCLIInspectJob, source: String) -> JetDr
         .Prepared(value, _) -> {
             ^request: value.move()
             request.profile = job.profile
+            ^build: build_options_stock("build")
+            if job.build == .Val(given) -> build = given.copy()
+            ^code_options: [BuildSessionOption]{}
+            if jet_driver_entry_build_probe(request).has_build {
+                request.mode = JetDriverCompileMode.Doc
+                ^scope: JetDriverBuildQueryScope{next_session_id: 1}
+                queried: jet_driver_query_build_plan(request, scope)
+                request = queried.request.move()
+                request.mode = JetDriverCompileMode.Program
+                if queried.query.plan == .Val(plan) {
+                    code_options = build_plan_selection(plan).options
+                }
+            }
+            if code_options.len() > 0 {
+                if build_options_with_code(build, jet_cli_build_code_options(job.file, code_options)) == {
+                    .Refused(code, what, fix) -> {
+                        jet_cli_inspect_finish(job, jet_cli_report_output("", code, what, jet_cli_why(code), fix, job.color, JET_DRIVER_EXIT_USAGE))
+                    }
+                    .Resolved(merged, _) -> build = merged.move()
+                }
+            }
             sources: request.authorized_sources
             compiler_threads: request.compiler_threads.copy()
             front: jet_cli_lowering_inputs(request, None)
@@ -406,14 +447,26 @@ jet_cli_inspect_choices_host: fn(job: JetCLIInspectJob, source: String) -> JetDr
             jet_cli_policy_choices(inputs.functions, inputs.decls, inputs.symbols, choices)
             if inputs.entry_key != None {
                 threads: CompilerThreads{cap: compiler_threads.cap, cores: compiler_threads.cores, memory_available: jet_cli_memory_available()}
-                ^build: build_options_stock("build")
-                if job.build == .Val(given) -> build = given.copy()
                 decisions: jet_cli_decisions(inputs, build, threads, job.profile, front.compile.harden, false)
                 jet_cli_inline_choices(decisions.report.inlines, choices)
             }
+            ^linkage_parts: [JetCLILinkPart]{}
+            if jet_cli_native_c_sources(sources, build) == .Ok(foreign_sources) {
+                if jet_cli_link_plan(front.compile.foreign_link, foreign_sources, build, None) == {
+                    .Refused(code, what, fix) -> {
+                        jet_cli_inspect_finish(job, jet_cli_report_output("", code, what, jet_cli_why(code), fix, job.color, JET_DRIVER_EXIT_USAGE))
+                    }
+                    .Planned(parts, _) -> {
+                        loop part in parts {
+                            choices.push(JetCLIChoice{kind: "linkage", file: "", line: 0, function: "{part.part}", choice: "{part.part} = {part.linkage} ({part.source})"})
+                        }
+                        linkage_parts = parts
+                    }
+                }
+            }
             // A closure comparator: a compiler older than JetIR's named-comparator fix frees a named one's result twice.
             choices.sort_by(fn(left: JetCLIChoice, right: JetCLIChoice) { jet_cli_choice_order(left, right) })
-            report: jet_cli_choices_report(choices, job.scope, job.file, job.profile, job.json)
+            report: jet_cli_choices_report(choices, job.scope, job.file, job.profile, job.json, linkage_parts)
             jet_cli_inspect_finish(job, JetDriverVerbOutput{stdout: report, stderr: "", exit_code: JET_DRIVER_EXIT_OK})
         }
     }

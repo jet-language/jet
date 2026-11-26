@@ -1,0 +1,115 @@
+# The declared native package and module closure feeds linker inputs and
+# missing-library errors, including the canonical `z` package key for `-lz`,
+# proven by link execution on O0, O1 and O2.
+requires: os:unix
+fixture: NativeClosureFeedsLinker.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+
+# 1. Dependency package `codec` declares canonical `z: c@"c"` and root `app`
+#    links and executes it on O0, O1, and O2.
+step closure_o0: jet build -O0 main.jet
+cwd: app
+exit: 0
+
+step run_closure_o0: {work}/app/.jet/build/main
+exit: 0
+stdout: = "37\n"
+
+step closure_o1: jet build -O1 main.jet
+cwd: app
+exit: 0
+
+step run_closure_o1: {work}/app/.jet/build/main
+exit: 0
+stdout: = "37\n"
+
+step closure_o2: jet build -O2 main.jet
+cwd: app
+exit: 0
+
+step run_closure_o2: {work}/app/.jet/build/main
+exit: 0
+stdout: = "37\n"
+
+# 2. Same closure linked dynamically via per-part override on O0, O1, and O2.
+step closure_dyn_o0: jet build -O0 --link-parts=z=dynamic main.jet
+cwd: app
+exit: 0
+
+step run_closure_dyn_o0: {work}/app/.jet/build/main
+exit: 0
+stdout: = "37\n"
+
+step closure_dyn_o1: jet build -O1 --link-parts=z=dynamic main.jet
+cwd: app
+exit: 0
+
+step run_closure_dyn_o1: {work}/app/.jet/build/main
+exit: 0
+stdout: = "37\n"
+
+step closure_dyn_o2: jet build -O2 --link-parts=z=dynamic main.jet
+cwd: app
+exit: 0
+
+step run_closure_dyn_o2: {work}/app/.jet/build/main
+exit: 0
+stdout: = "37\n"
+
+# 3. Canonical `z` package key feeds `-lz` on O0, O1, and O2.
+step z_flag_o0: jet build -O0 --link-args=-lz main.jet
+cwd: z_flag
+exit: 0
+
+step run_z_flag_o0: {work}/z_flag/.jet/build/main
+exit: 0
+stdout: = "37\n"
+
+step z_flag_o1: jet build -O1 --link-args=-lz main.jet
+cwd: z_flag
+exit: 0
+
+step run_z_flag_o1: {work}/z_flag/.jet/build/main
+exit: 0
+stdout: = "37\n"
+
+step z_flag_o2: jet build -O2 --link-args=-lz main.jet
+cwd: z_flag
+exit: 0
+
+step run_z_flag_o2: {work}/z_flag/.jet/build/main
+exit: 0
+stdout: = "37\n"
+
+# 4. Missing declared native library produces a clear missing-library error on O0, O1, and O2.
+step missing_declared_o0: jet build -O0 main.jet
+cwd: missing_pkg
+exit: 1
+stderr: ~ "ghostlib"
+
+step missing_declared_o1: jet build -O1 main.jet
+cwd: missing_pkg
+exit: 1
+stderr: ~ "ghostlib"
+
+step missing_declared_o2: jet build -O2 main.jet
+cwd: missing_pkg
+exit: 1
+stderr: ~ "ghostlib"
+
+# 5. Missing undeclared `-l` library produces a clear missing-library error on O0, O1, and O2.
+step missing_flag_o0: jet build -O0 --link-args=-lno_such_jet_lib main.jet
+cwd: z_flag
+exit: 1
+stderr: ~ "no_such_jet_lib"
+
+step missing_flag_o1: jet build -O1 --link-args=-lno_such_jet_lib main.jet
+cwd: z_flag
+exit: 1
+stderr: ~ "no_such_jet_lib"
+
+step missing_flag_o2: jet build -O2 --link-args=-lno_such_jet_lib main.jet
+cwd: z_flag
+exit: 1
+stderr: ~ "no_such_jet_lib"

@@ -367,6 +367,9 @@ loader_segments: fn(header: [U8], table: [U8], table_at: Int, size: Int) -> X64S
     loop k in 0..<phnum {
         at: phoff - table_at + k * 56
         kind: loader_u32(table, at)
+        if kind == 2 || kind == 3 {
+            return loader_segments_failed("the image is dynamically linked and runs through the operating system loader")
+        }
         if kind == 6 {
             phdr = loader_u64(table, at + 16)
             phdr_known = true

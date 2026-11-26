@@ -710,14 +710,11 @@ jet_cli_native_c_closure: fn(closure: ^JetCLIClosureCTools, facts: JetDriverFore
     // every project and every compiler stage; a fresh project starts warm.
     cache: "{jet_cli_rust_foreign_cache()}/clinks"
     declarations: sources.declarations
-    ^libraries: facts.direct_links.copy()
-    if libraries.len() == 0 {
-        loop lib in facts.libraries -> libraries.push(lib.copy())
-    }
-    loop lib in facts.transitive_links -> libraries.push(lib.copy())
+    libraries: jet_cli_closure_libraries(facts, sources)
     // The `libs` and `link_args` build options: more libraries, each found
     // in the `-L` directories first, and archives linked as they are.
-    ^requested: sources.libs.copy()
+    ^requested: [String]{}
+    loop lib in sources.libs -> requested.push("{lib}")
     ^link_dirs: [String]{}
     ^archives: [String]{}
     loop word in sources.link_args {
@@ -729,11 +726,9 @@ jet_cli_native_c_closure: fn(closure: ^JetCLIClosureCTools, facts: JetDriverFore
             else -> archives.push(jet_cli_foreign_option_path(root, word))
         }
     }
-    loop lib in requested -> libraries.push(lib)
-    libraries = jet_cli_sorted_set(libraries)
     loop lib in libraries {
         // These names select the program's one implicit musl platform below.
-        if ([String]{"c", "m", "pthread", "dl", "rt", "util"}).contains(lib) -> next
+        if jet_cli_is_libc_family(lib) -> next
         ^directories: [String]{}
         ^declared_system: false
         loop declaration in declarations {
@@ -774,26 +769,33 @@ jet_cli_native_c_closure: fn(closure: ^JetCLIClosureCTools, facts: JetDriverFore
             next
         }
         // Undeclared imports require pkg-config; an explicit c@system falls
-        // back to the same nixpkgs provisioning as the seed resolver, and a
-        // library the build options name to the C compiler's search path.
+        // back to the C compiler's search path and then to nixpkgs provisioning
+        // (using the canonical nixpkgs attribute, such as `zlib` for `z`).
         ^output: ""
         ^configured: false
-        if cli_process.cmd([String]{"pkg-config", "--static", "--libs", lib.copy()}).run() == .Ok(receipt) {
-            if receipt.success {
-                output = receipt.output
-                configured = true
+        loop pc_name in jet_cli_foreign_canonical_pkg_config(lib) {
+            if configured -> break
+            if cli_process.cmd([String]{"pkg-config", "--static", "--libs", pc_name}).run() == .Ok(receipt) {
+                if receipt.success {
+                    output = receipt.output
+                    configured = true
+                }
             }
         }
-        if !configured && requested.contains(lib) && !declared_system {
-            path: jet_cli_foreign_static_archive(closure, lib, [String]{}, cache, false) ?? return Err(err)
-            jet_cli_foreign_add(inputs, path) ?? return Err(err)
-            next
+        if !configured && (requested.contains(lib) || declared_system) {
+            if jet_cli_foreign_static_archive(closure, lib, [String]{}, cache, false) == .Ok(path) {
+                jet_cli_foreign_add(inputs, path) ?? return Err(err)
+                next
+            }
+            if !declared_system {
+                return Err(jet_cli_foreign_link_error("C static archive `{lib}` was not found"))
+            }
         }
         if !configured {
             if !declared_system {
                 return Err(jet_cli_foreign_link_error("C dependency `{lib}` was not declared and pkg-config did not find it"))
             }
-            directory: jet_cli_foreign_nix_directory(lib, lib, root) ?? return Err(err)
+            directory: jet_cli_foreign_nix_directory(lib, jet_cli_foreign_canonical_nix_attr(lib), root) ?? return Err(err)
             path: jet_cli_foreign_static_archive(closure, lib, [String]{directory}, cache, false) ?? return Err(err)
             jet_cli_foreign_add(inputs, path) ?? return Err(err)
             next
