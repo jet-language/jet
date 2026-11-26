@@ -208,7 +208,7 @@ Why this and not the alternatives:
 
 ```jet
 CheckedText: trait {
-    Error: type                       // as today; may be a list whose items implement Diagnostic
+    Error: type                       // as today; may be a list of error types
     Hole: type{String}                // as today
     Slot: type{TextSlot}              // new: the kind of position a hole sits in
     Shape: type{[String]}             // new: what check learned; embedded as constant data
@@ -237,6 +237,8 @@ How each part is used:
 - **`Error` may be a list.** Each item that implements `Diagnostic` is
   reported under its own registered code, at the span its `at: TextSpot`
   maps to. This replaces the field sniffing in `jet_driver_checked_text_reason`.
+  A list of error types (`#Error`) is a failure domain like `[FieldError]`, so
+  `[GrammarFault]!` passes E2417.
 
 Paths the first draft left undefined (R-C2):
 

@@ -58,20 +58,19 @@ Grammar: struct {
     impl CheckedText {
         Error: [GrammarFault],
         Hole: String,
-        Slot: Never,
         Shape: GrammarPlan,
 
-        check: fn(parts: [String]) -[]> Checked<GrammarPlan, Never> [GrammarFault]! {
+        check: fn(parts: [String]) -[]> Checked<GrammarPlan, TextSlot> [GrammarFault]! {
             if parts.len() > 1 -> return Err(grammar_hole_faults(parts))
             if analyze(parts[0], "", [GrammarSource]{}) == {
-                .Ok(plan) -> Ok(Checked{shape: plan, slots: [Never]{}})
+                .Ok(plan) -> Ok(Checked{shape: plan, slots: [TextSlot]{}})
                 .Err(faults) -> Err(faults.faults)
             }
         }
 
-        accepts: fn(_slot: Never, _hole: TypeId) -[]> String? { Val(GRAMMAR_HOLE_MESSAGE) }
+        accepts: fn(_slot: TextSlot, _hole: TypeId) -[]> String? { Val(GRAMMAR_HOLE_MESSAGE) }
 
-        encode_hole: fn<T: Printable>(value: T, _slot: Never) -[]> String { "{value}" }
+        encode_hole: fn<T: Printable>(value: T, _slot: TextSlot) -[]> String { "{value}" }
 
         build: fn(shape: GrammarPlan, _holes: [String]) -[]> Grammar { Grammar{plan: shape} }
     }
