@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7042,
-    "rev": 114525,
+    "rev": 114545,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -14202,6 +14202,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-26",
+          "by": "Orchestrator",
+          "text": "Owner order 2026-11-22: JetOS is removed from the project entirely."
+        },
+        {
           "at": "2026-11-09",
           "by": "Main",
           "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). Owner gate: D-NIX-FREE1=A (ratified 2026-11-01) authorizes this build. It waits only for #3590 (its blocker)."
@@ -14325,12 +14330,12 @@
         },
         {
           "n": 8,
-          "text": "The native build-and-boot no-Nix contract (#410) holds: the adapter is bypassed for native Jet packages and supplies no boot-time Nix authority.",
+          "text": "The adapter is bypassed for native Jet packages and supplies no Nix authority to a native build or its run.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T05:05:30.658Z",
+          "at": "2026-11-26T00:58:17.872Z",
           "proof": {
             "profile": "packages",
             "filter": "NixTranslate/native_packages_bypass_adapter"
@@ -14430,8 +14435,8 @@
       "parentId": "c06osxzz",
       "needsAcceptance": false,
       "created": "2026-09-13T11:40:48.925Z",
-      "updated": "2026-11-22T02:10:23.708Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-26T00:58:19.636Z",
+      "updatedBy": "Orchestrator",
       "criteriaLastN": 15
     },
     {
@@ -14921,7 +14926,7 @@
       "track": "sidequest",
       "epoch": "G2",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -14931,12 +14936,33 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-26",
+          "by": "Orchestrator",
+          "text": "Superseded by #5025."
+        },
+        {
+          "at": "2026-11-26",
+          "by": "Orchestrator",
+          "text": "Closed in the duplicate sweep: superseded by #5025 (D-JAI-CONTEXT1). #5025 holds this card's whole scope: typed keys (#ContextKey, c3), the visibility fork (settled by D-CONTEXT-EFFECT1=F, c2/c13), task inheritance (c3) and the foreign-thread edge (D-CONTEXT-CALLBACK1=A, c20). This card had no criteria of its own."
+        },
+        {
           "at": "2026-11-22",
           "by": "owner",
           "text": "Owner order 2026-11-21: unfrozen after log audit (agent-frozen core Jet work, not cross-platform/FFI/JetOS)."
         }
       ],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Context visibility, typed keys and the task and foreign-thread edges on top of D-CTX1 are delivered.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "Duplicate of #5025: typed keys c3, visibility settled by D-CONTEXT-EFFECT1=F (c2, c13), task inheritance c3, foreign-thread edge D-CONTEXT-CALLBACK1=A c20.",
+          "at": "2026-11-26T00:58:39.670Z",
+          "closure": "duplicate"
+        }
+      ],
       "refs": [
         "D-CTX1",
         "D-DEADLINE1",
@@ -14953,8 +14979,10 @@
       "parentId": "c0tgcov8",
       "needsAcceptance": false,
       "created": "2026-09-16T19:41:19.102Z",
-      "updated": "2026-11-22T02:10:23.709Z",
-      "updatedBy": "owner"
+      "updated": "2026-11-26T00:58:41.429Z",
+      "updatedBy": "Orchestrator",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-26T00:58:41.429Z"
     },
     {
       "id": "c0l5ld15",
@@ -17627,7 +17655,7 @@
       "id": "c0jm0xjt",
       "num": 4275,
       "title": "Close package roots, typed configuration and environment ownership",
-      "body": "Ratified contract scope; no new ballot or default is authorized.\n\n\n**Scope:** Reserved Package source-file law; Jet root noun for the complete checked graph; runtime: package field for runtime PATH deps; First-class cargo build field: Recipe.cargo(lock:); What should changing a JetOS machine feel like?; Should packages and JetOS live in one project?; How much must plain jet check prove?; Build/config: one plane of typed facts; Facts in text, actions in the function; One meaning for the word profile; What jet split does with inline Package facts; formatter: passthrough for non-.jet files; jet split/fold law (Fold-only); Public typed package model for Jet tools; Build file versions without lost locks or rewritten evidence; Package policy and exception source surface\n\n**Decision IDs:** D-ECO-FILEROOT1, D-ECO-ROOTNAME2, D-ECO11, D-ECO2, D-ECO-JETOS2, D-ECO1, D-CHECKSCOPE1, D-CONF-PLANE1, D-CONF-SPLIT1, D-CONF-WORD1, D-ECO-SPLITPOLICY1, D-ECO12, D-ECO13, D-PACKAGE-MODEL1, D-BUILDCOMPAT1, D-JPK-POLICYSURFACE1\n\n**Acceptance criteria / missing boundary:**\n\n- **D-BUILDCOMPAT1:** Use version in a clear scope, preserve originals, and automatically read supported older data without changing its meaning. Version-1 locks from older Jet releases remain readable.\n  - **Gap witness:** PARTIAL: Jet has registered unsupported lock-version diagnostics and refuses unknown required marker meanings (Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet:11310-11312). Complete original-evidence preservation, linked readable views and automatic older-version translation in Rust and Jet were not established.\n- **D-CHECKSCOPE1:** Resolve the owning project and every declared runnable output; Validate imports, reachable Core closure, canonical TIR, and every applicable execution-tier lowering; Preserve isolated single-file checks.\n  - **Gap witness:** PARTIAL: Rust project check explicitly sets inspect-only execute:false/no authority grant (crates/jet-driver/src/Driver/mod.rs:3477-3481); tests/project_check.rs is the consumer suite. Jet CLI exposes file check (Compiler/JetCli/Source/Cli/Host.jet:47-61; Front.jet:502), not an established all-runnable-output/workspace check.\n- **D-CONF-PLANE1:** Adopt the model; Configuration is the program's knowledge about itself: every build fact (identity, machine, profile, settings, policy) is a typed value on one registered plane, with one contribution law and one audit command; The ratified role-typed Package shape becomes the only manifest vocabulary; the legacy flat parser is deleted. build.os, which already works this way, becomes the plane's first row; Later D-CONF ballots (fact reads, settings, contribution law) land on this substrate.\n  - **Gap witness:** PARTIAL: Rust folded fact vocabulary is registered (crates/jet-foundation/src/Syntax.rs:36-37). Jet has folded snapshots (Compiler/JetSema/Source/Sema/Registration/Items.jet:462-464), but loader explicitly lacks declared manifest settings (Expressions/FactReads.jet:640-643); complete typed single fact plane/cutover missing.\n- **D-CONF-SPLIT1:** Manifest text is the complete index of what is configurable: every fact is declared there with its type and default. fn build performs actions — probes, steps, generated code — and may contribute a value to a declared fact; Every computed contribution is recorded in .jet/lock and named by jet explain. fn build can never mint an undeclared fact; The pushback the owner asked for is honest: a flat facts-in-text-only rule fails, because a probed toolchain or a find() member list is only knowable by computation; The law keeps those as computed contributions instead of banning them.\n  - **Gap witness:** PARTIAL: Rust pipeline records contributions/generated modules in .jet/lock (Source/CmdCompile.rs:3682-3686). Jet loader still declares no manifest settings (Compiler/JetSema/Source/Sema/Expressions/FactReads.jet:640-643), so text-declared facts plus checked computed contributions are not complete.\n- **D-CONF-WORD1:** release, debug, and ci keep the word, matching --profile and its ratified sugar --release; The board identity is a machine description; before its unbuilt surface ships, it is renamed into the machine vocabulary and selected beside triples with --target; Environment profiles become presets (amends D-ENV-PROFILE1's field and flag spelling). Package/user profiles are already generation snapshots and take the generation word (amends D-JPK-PROFILE1's wording only). Each rename is an amendment named here; none changes behavior.\n  - **Gap witness:** PARTIAL: Rust machine axis is selected by target (Source/main.rs:2879-2882); Jet CLI registers separate env/preset selectors (Compiler/JetCli/Source/Cli/Commands.jet:961-964). Jet environment command is unavailable (Front.jet:491-506); full profile/generation manifest vocabulary cutover not established.\n- **D-ECO-FILEROOT1:** package.jet is the sole reserved source filename, for the root Config contribution. Other source files may contribute named typed Config values; legacy project/workspace/env source-role filenames do not remain independent reserved authorities.\n  - **Gap witness:** CONTRADICTED — Rust Syntax/jetpack_config.rs:404 has package.jet, but :412 still defines workspace.jet and Source/CmdCompile.rs:2056-2057 loads env.jet as an active environment root; ModuleEval/mod.rs:1772 reads repository env.jet. Jet module tooling likewise retains role contributions. Sole-reserved-file cutover is not complete.\n- **D-ECO-JETOS2:** A System is another typed project value. Jet builds a complete generation, shows its changes, proves it is ready, switches once, and keeps the previous generation.\n  - **Gap witness:** PARTIAL — Rust JetOS commands/plan/store/generation/proof owners exist; ModuleEval/PackageOutput.rs:4-5 lowers System/Fleet from outputs. A complete checked-build/diff/readiness/atomic-switch/retained-rollback machine generation acceptance remains open; Compiler/ only prepares semantics.\n- **D-ECO-ROOTNAME2:** Jetspace names the whole checked graph of sources, environments, outputs, systems and fleets. Package names the graph’s package nodes, not the complete root graph.\n  - **Gap witness:** CONTRADICTED — The checked root remains called Package in Rust Package/mod.rs:3-5 and Manifest.rs:555, with PackageOutputPlan.graph_identity at ModuleEval/PackageOutput.rs:47-49. No Jetspace public type/diagnostic surface was found in Rust Package or Jet PackageModel searches.\n- **D-ECO-SPLITPOLICY1:** Split creates the closed Config needed to move inline facts and records a reversible ledger.\n  - **Gap witness:** PARTIAL: Rust: production split seam exists at Source/main.rs:3667-3671; its complete decision contract was not established by this static read (dispatch is not semantic proof). Jet port: the executable front door dispatches only help, explain, check and build (Compiler/JetCli/Source/Cli/Front.jet:491-506); this decision's command path is refused by jet_cli_not_ported at :94-102, not implemented by its help/registry row.\n- **D-ECO1:** One checked Jetspace graph connects package sources, environments, outputs, services, images, systems and fleets; a machine can point to the package it runs. Final names/file law are D-ECO-ROOTNAME2 and D-ECO-FILEROOT1.\n  - **Gap witness:** PARTIAL — Rust Package/Config/output/System/Fleet graph owners exist, but complete checked Jetspace identity/names and one source-to-machine proof graph are not established; the root still uses Package (Package/mod.rs:3-5). Jet port package engine is outside compiler and in progress.\n- **D-ECO11:** runtime is the package field for external tools required on PATH at runtime, separate from build dependencies. Output wrappers consume that same typed list.\n  - **Gap witness:** CONTRADICTED — Rust crates/jet-pkg-model/src/Manifest.rs:536-541 now parses runtime as core/alloc/hosted, not a list of PATH dependencies; no later ratified decision was found reversing this specific chosen field meaning. Jet PackageModel consumes the same changed schema.\n- **D-ECO12:** formatter names an external formatter for non-Jet files. jet fmt formats .jet natively and delegates other languages to the named tool, so one command formats the whole tree, matching the flake's formatter attribute.\n  - **Gap witness:** PARTIAL: Rust: production fmt seam exists at Source/main.rs:3604-3607; its complete decision contract was not established by this static read (dispatch is not semantic proof). Jet port: the executable front door dispatches only help, explain, check and build (Compiler/JetCli/Source/Cli/Front.jet:491-506); this decision's command path is refused by jet_cli_not_ported at :94-102, not implemented by its help/registry row.\n- **D-ECO13:** Split moves whole modules plus attached comments into the conventional file, computed fields verbatim; A STABILITY test pins byte-identical round-trip; If a top-level binding is shared across the split boundary, split refuses with E13xx naming both referents and the fix; Reversibility is guaranteed for whole modules.\n  - **Gap witness:** PARTIAL: Rust: production split seam exists at Source/main.rs:3667-3671; its complete decision contract was not established by this static read (dispatch is not semantic proof). Jet port: the executable front door dispatches only help, explain, check and build (Compiler/JetCli/Source/Cli/Front.jet:491-506); this decision's command path is refused by jet_cli_not_ported at :94-102, not implemented by its help/registry row.\n- **D-ECO2:** build takes a typed recipe. Recipe.cargo(lock:) maps buildRustPackage and cargoLock.lockFile in one line.\n  - **Gap witness:** PARTIAL — Recipe.cargo is registered at Rust Syntax/package_files.rs:648, but inspected ModuleEval/Eval.rs:2400-2439 parses copy/prebuilt/build recipes and not cargo. No complete lock-driven Recipe.cargo consumer was established; finite Recipe.build is a different ratified feature.\n- **D-JPK-POLICYSURFACE1:** All package policy — sources, licenses, advisories, maturity, hooks, cache roles, exceptions — lives in the one ratified `policy:` namespace of the workspace manifest beside `policy.trust`, `policy.providers`, and `policy.replacements` (D-JPK-GRANTSCHEMA1, D-JPK-PROVIDERAUTH1, D-JPK-REPLACEPOLICY1); no second config file and no inline dependency markers. Absent policy means the ratified safe defaults; effective policy is the auditable intersection of the source request/max with stronger org/host policy, which may refuse or narrow but never weaken, and source exceptions cannot override stronger policy.\n  - **Gap witness:** PARTIAL — Rust Source/Publish/Policy.rs:1-5 implements manifest-side package policy/source mapping receipts. Jetpack Foundation/Source/Syntax.jet:531-534 declares the shared policy namespace. Complete expiring exception drafts, org/host intersection, inspect receipts and all policy families were not established in both ecosystem implementations.\n- **D-PACKAGE-MODEL1:** Add one immutable typed package model to the existing compile-time-only core.compiler seam. Reuse jet-pkg-model and jet-env-model.\n  - **Gap witness:** PARTIAL: Rust exposes compile-time compiler package values (crates/jet-sema/src/Sema/CheckerCoreLib/core_types.rs:520-523), and Jet CompilerServices has the ordinary compiler-value seam (Compiler/JetSema/Source/Sema/Calls/CompilerServices.jet:251-265). Full immutable package/lock/resolved-profile data, shared package/env-model reuse and runtime rejection consumer proof were not established.\n\n\nEffective-scope corrections:\n\n\nAll named tests/goldens below are REQUIRED delivery artifacts, proposed here unless an existing owner already names them; none was executed by this audit. Each runs the production Jet path, records compiler/source/provider identity, asserts exit/diagnostic/output or real side effects, and fails if the owning implementation is bypassed. Registry presence, mocks and fixed echo output cannot satisfy behavioral criteria. Unavailable hosts and inconclusive measurement cells remain open.\n\nAlso covers V43 (D-NAME-ROLEMOD1):\nDecision IDs: D-NAME-ROLEMOD1\n\nActive contract: Complete the ratified ruling. Ecosystem entries are typed values in package.jet; role declarations like module env.dev respell as those values.\n\nGap evidence (static source witness, not a passing test): Rust EnvFile.rs:183-199 still reads ENV_FILE and parses legacy pkg.source calls; jet-env-model/ModuleEval/Source.rs:554-555,834-835 still uses env.jet and teaches module env.<name>. Jetpack EnvModel/ModuleEval/EnvPlanBuilder.jet:213,348-349 retains the matching ENV_FILE root and role-module teaching path. The ruling requires typed package values, not a second role-module/role-file interpretation; parser aliases unrelated to this ruling are not evidence.\n\nCoverage disposition: Same contract boundary is already assigned to P11.json; this amendment adds violation-specific regression evidence and criteria to that draft, not another implementation card.\n\nAll named tests/goldens below are REQUIRED delivery artifacts, proposed here unless an existing owner already names them; none was executed by this audit. Each runs the production Jet path, records compiler/source/provider identity, asserts exit/diagnostic/output or real side effects, and fails if the owning implementation is bypassed. Registry presence, mocks and fixed echo output cannot satisfy behavioral criteria. Unavailable hosts and inconclusive measurement cells remain open.\n\nAlso covers V26 (D-ECO11):\nDecision IDs: D-ECO11\n\nActive contract: runtime is the package field for external tools required on PATH at runtime, separate from build dependencies. Output wrappers consume that same typed list.\n\nGap evidence (static source witness, not a passing test): Rust crates/jet-pkg-model/src/Manifest.rs:536-541 now parses runtime as core/alloc/hosted, not a list of PATH dependencies; no later ratified decision was found reversing this specific chosen field meaning. Jet PackageModel consumes the same changed schema.\n\nCoverage disposition: Same contract boundary is already assigned to P11.json; this amendment adds violation-specific regression evidence and criteria to that draft, not another implementation card.\n\nAll named tests/goldens below are REQUIRED delivery artifacts, proposed here unless an existing owner already names them; none was executed by this audit. Each runs the production Jet path, records compiler/source/provider identity, asserts exit/diagnostic/output or real side effects, and fails if the owning implementation is bypassed. Registry presence, mocks and fixed echo output cannot satisfy behavioral criteria. Unavailable hosts and inconclusive measurement cells remain open.\n\nAlso covers V56 (D-ECO-ROOTNAME2):\nDecision IDs: D-ECO-ROOTNAME2\n\nActive contract: Jetspace names the whole checked graph of sources, environments, outputs, systems and fleets. Package names the graph’s package nodes, not the complete root graph.\n\nGap evidence (static source witness, not a passing test): The checked root remains called Package in Rust Package/mod.rs:3-5 and Manifest.rs:555, with PackageOutputPlan.graph_identity at ModuleEval/PackageOutput.rs:47-49. No Jetspace public type/diagnostic surface was found in Rust Package or Jet PackageModel searches.\n\nCoverage disposition: Same contract boundary is already assigned to P11.json; this amendment adds violation-specific regression evidence and criteria to that draft, not another implementation card.\n\nAll named tests/goldens below are REQUIRED delivery artifacts, proposed here unless an existing owner already names them; none was executed by this audit. Each runs the production Jet path, records compiler/source/provider identity, asserts exit/diagnostic/output or real side effects, and fails if the owning implementation is bypassed. Registry presence, mocks and fixed echo output cannot satisfy behavioral criteria. Unavailable hosts and inconclusive measurement cells remain open.\n\nAlso covers V25 (D-ECO-FILEROOT1):\nDecision IDs: D-ECO-FILEROOT1\n\nActive contract: package.jet is the sole reserved source filename, for the root Config contribution. Other source files may contribute named typed Config values; legacy project/workspace/env source-role filenames do not remain independent reserved authorities.\n\nGap evidence (static source witness, not a passing test): Rust Syntax/jetpack_config.rs:404 has package.jet, but :412 still defines workspace.jet and Source/CmdCompile.rs:2056-2057 loads env.jet as an active environment root; ModuleEval/mod.rs:1772 reads repository env.jet. Jet module tooling likewise retains role contributions. Sole-reserved-file cutover is not complete.\n\nCoverage disposition: Same contract boundary is already assigned to P11.json; this amendment adds violation-specific regression evidence and criteria to that draft, not another implementation card.\n\nAll named tests/goldens below are REQUIRED delivery artifacts, proposed here unless an existing owner already names them; none was executed by this audit. Each runs the production Jet path, records compiler/source/provider identity, asserts exit/diagnostic/output or real side effects, and fails if the owning implementation is bypassed. Registry presence, mocks and fixed echo output cannot satisfy behavioral criteria. Unavailable hosts and inconclusive measurement cells remain open.",
+      "body": "Ratified contract scope; no new ballot or default is authorized.\n\n\n**Scope:** Reserved Package source-file law; Jet root noun for the complete checked graph; runtime: package field for runtime PATH deps; First-class cargo build field: Recipe.cargo(lock:); How much must plain jet check prove?; Build/config: one plane of typed facts; Facts in text, actions in the function; One meaning for the word profile; What jet split does with inline Package facts; formatter: passthrough for non-.jet files; jet split/fold law (Fold-only); Public typed package model for Jet tools; Build file versions without lost locks or rewritten evidence; Package policy and exception source surface\n\n**Decision IDs:** D-ECO-FILEROOT1, D-ECO-ROOTNAME2, D-ECO11, D-ECO2, D-ECO1, D-CHECKSCOPE1, D-CONF-PLANE1, D-CONF-SPLIT1, D-CONF-WORD1, D-ECO-SPLITPOLICY1, D-ECO12, D-ECO13, D-PACKAGE-MODEL1, D-BUILDCOMPAT1, D-JPK-POLICYSURFACE1\n\n**Acceptance criteria / missing boundary:**\n\n- **D-BUILDCOMPAT1:** Use version in a clear scope, preserve originals, and automatically read supported older data without changing its meaning. Version-1 locks from older Jet releases remain readable.\n  - **Gap witness:** PARTIAL: Jet has registered unsupported lock-version diagnostics and refuses unknown required marker meanings (Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet:11310-11312). Complete original-evidence preservation, linked readable views and automatic older-version translation in Rust and Jet were not established.\n- **D-CHECKSCOPE1:** Resolve the owning project and every declared runnable output; Validate imports, reachable Core closure, canonical TIR, and every applicable execution-tier lowering; Preserve isolated single-file checks.\n  - **Gap witness:** PARTIAL: Rust project check explicitly sets inspect-only execute:false/no authority grant (crates/jet-driver/src/Driver/mod.rs:3477-3481); tests/project_check.rs is the consumer suite. Jet CLI exposes file check (Compiler/JetCli/Source/Cli/Host.jet:47-61; Front.jet:502), not an established all-runnable-output/workspace check.\n- **D-CONF-PLANE1:** Adopt the model; Configuration is the program's knowledge about itself: every build fact (identity, machine, profile, settings, policy) is a typed value on one registered plane, with one contribution law and one audit command; The ratified role-typed Package shape becomes the only manifest vocabulary; the legacy flat parser is deleted. build.os, which already works this way, becomes the plane's first row; Later D-CONF ballots (fact reads, settings, contribution law) land on this substrate.\n  - **Gap witness:** PARTIAL: Rust folded fact vocabulary is registered (crates/jet-foundation/src/Syntax.rs:36-37). Jet has folded snapshots (Compiler/JetSema/Source/Sema/Registration/Items.jet:462-464), but loader explicitly lacks declared manifest settings (Expressions/FactReads.jet:640-643); complete typed single fact plane/cutover missing.\n- **D-CONF-SPLIT1:** Manifest text is the complete index of what is configurable: every fact is declared there with its type and default. fn build performs actions — probes, steps, generated code — and may contribute a value to a declared fact; Every computed contribution is recorded in .jet/lock and named by jet explain. fn build can never mint an undeclared fact; The pushback the owner asked for is honest: a flat facts-in-text-only rule fails, because a probed toolchain or a find() member list is only knowable by computation; The law keeps those as computed contributions instead of banning them.\n  - **Gap witness:** PARTIAL: Rust pipeline records contributions/generated modules in .jet/lock (Source/CmdCompile.rs:3682-3686). Jet loader still declares no manifest settings (Compiler/JetSema/Source/Sema/Expressions/FactReads.jet:640-643), so text-declared facts plus checked computed contributions are not complete.\n- **D-CONF-WORD1:** release, debug, and ci keep the word, matching --profile and its ratified sugar --release; The board identity is a machine description; before its unbuilt surface ships, it is renamed into the machine vocabulary and selected beside triples with --target; Environment profiles become presets (amends D-ENV-PROFILE1's field and flag spelling). Package/user profiles are already generation snapshots and take the generation word (amends D-JPK-PROFILE1's wording only). Each rename is an amendment named here; none changes behavior.\n  - **Gap witness:** PARTIAL: Rust machine axis is selected by target (Source/main.rs:2879-2882); Jet CLI registers separate env/preset selectors (Compiler/JetCli/Source/Cli/Commands.jet:961-964). Jet environment command is unavailable (Front.jet:491-506); full profile/generation manifest vocabulary cutover not established.\n- **D-ECO-FILEROOT1:** package.jet is the sole reserved source filename, for the root Config contribution. Other source files may contribute named typed Config values; legacy project/workspace/env source-role filenames do not remain independent reserved authorities.\n  - **Gap witness:** CONTRADICTED — Rust Syntax/jetpack_config.rs:404 has package.jet, but :412 still defines workspace.jet and Source/CmdCompile.rs:2056-2057 loads env.jet as an active environment root; ModuleEval/mod.rs:1772 reads repository env.jet. Jet module tooling likewise retains role contributions. Sole-reserved-file cutover is not complete.\n- **D-ECO-ROOTNAME2:** Jetspace names the whole checked graph of sources, environments and outputs. Package names the graph’s package nodes, not the complete root graph.\n  - **Gap witness:** CONTRADICTED — The checked root remains called Package in Rust Package/mod.rs:3-5 and Manifest.rs:555, with PackageOutputPlan.graph_identity at ModuleEval/PackageOutput.rs:47-49. No Jetspace public type/diagnostic surface was found in Rust Package or Jet PackageModel searches.\n- **D-ECO-SPLITPOLICY1:** Split creates the closed Config needed to move inline facts and records a reversible ledger.\n  - **Gap witness:** PARTIAL: Rust: production split seam exists at Source/main.rs:3667-3671; its complete decision contract was not established by this static read (dispatch is not semantic proof). Jet port: the executable front door dispatches only help, explain, check and build (Compiler/JetCli/Source/Cli/Front.jet:491-506); this decision's command path is refused by jet_cli_not_ported at :94-102, not implemented by its help/registry row.\n- **D-ECO1:** One checked Jetspace graph connects package sources, environments, outputs, services and images. Final names/file law are D-ECO-ROOTNAME2 and D-ECO-FILEROOT1.\n  - **Gap witness:** PARTIAL — Rust Package/Config/output graph owners exist, but complete checked Jetspace identity/names are not established; the root still uses Package (Package/mod.rs:3-5). Jet port package engine is outside compiler and in progress.\n- **D-ECO11:** runtime is the package field for external tools required on PATH at runtime, separate from build dependencies. Output wrappers consume that same typed list.\n  - **Gap witness:** CONTRADICTED — Rust crates/jet-pkg-model/src/Manifest.rs:536-541 now parses runtime as core/alloc/hosted, not a list of PATH dependencies; no later ratified decision was found reversing this specific chosen field meaning. Jet PackageModel consumes the same changed schema.\n- **D-ECO12:** formatter names an external formatter for non-Jet files. jet fmt formats .jet natively and delegates other languages to the named tool, so one command formats the whole tree, matching the flake's formatter attribute.\n  - **Gap witness:** PARTIAL: Rust: production fmt seam exists at Source/main.rs:3604-3607; its complete decision contract was not established by this static read (dispatch is not semantic proof). Jet port: the executable front door dispatches only help, explain, check and build (Compiler/JetCli/Source/Cli/Front.jet:491-506); this decision's command path is refused by jet_cli_not_ported at :94-102, not implemented by its help/registry row.\n- **D-ECO13:** Split moves whole modules plus attached comments into the conventional file, computed fields verbatim; A STABILITY test pins byte-identical round-trip; If a top-level binding is shared across the split boundary, split refuses with E13xx naming both referents and the fix; Reversibility is guaranteed for whole modules.\n  - **Gap witness:** PARTIAL: Rust: production split seam exists at Source/main.rs:3667-3671; its complete decision contract was not established by this static read (dispatch is not semantic proof). Jet port: the executable front door dispatches only help, explain, check and build (Compiler/JetCli/Source/Cli/Front.jet:491-506); this decision's command path is refused by jet_cli_not_ported at :94-102, not implemented by its help/registry row.\n- **D-ECO2:** build takes a typed recipe. Recipe.cargo(lock:) maps buildRustPackage and cargoLock.lockFile in one line.\n  - **Gap witness:** PARTIAL — Recipe.cargo is registered at Rust Syntax/package_files.rs:648, but inspected ModuleEval/Eval.rs:2400-2439 parses copy/prebuilt/build recipes and not cargo. No complete lock-driven Recipe.cargo consumer was established; finite Recipe.build is a different ratified feature.\n- **D-JPK-POLICYSURFACE1:** All package policy — sources, licenses, advisories, maturity, hooks, cache roles, exceptions — lives in the one ratified `policy:` namespace of the workspace manifest beside `policy.trust`, `policy.providers`, and `policy.replacements` (D-JPK-GRANTSCHEMA1, D-JPK-PROVIDERAUTH1, D-JPK-REPLACEPOLICY1); no second config file and no inline dependency markers. Absent policy means the ratified safe defaults; effective policy is the auditable intersection of the source request/max with stronger org/host policy, which may refuse or narrow but never weaken, and source exceptions cannot override stronger policy.\n  - **Gap witness:** PARTIAL — Rust Source/Publish/Policy.rs:1-5 implements manifest-side package policy/source mapping receipts. Jetpack Foundation/Source/Syntax.jet:531-534 declares the shared policy namespace. Complete expiring exception drafts, org/host intersection, inspect receipts and all policy families were not established in both ecosystem implementations.\n- **D-PACKAGE-MODEL1:** Add one immutable typed package model to the existing compile-time-only core.compiler seam. Reuse jet-pkg-model and jet-env-model.\n  - **Gap witness:** PARTIAL: Rust exposes compile-time compiler package values (crates/jet-sema/src/Sema/CheckerCoreLib/core_types.rs:520-523), and Jet CompilerServices has the ordinary compiler-value seam (Compiler/JetSema/Source/Sema/Calls/CompilerServices.jet:251-265). Full immutable package/lock/resolved-profile data, shared package/env-model reuse and runtime rejection consumer proof were not established.\n\n\nEffective-scope corrections:\n\n\nAll named tests/goldens below are REQUIRED delivery artifacts, proposed here unless an existing owner already names them; none was executed by this audit. Each runs the production Jet path, records compiler/source/provider identity, asserts exit/diagnostic/output or real side effects, and fails if the owning implementation is bypassed. Registry presence, mocks and fixed echo output cannot satisfy behavioral criteria. Unavailable hosts and inconclusive measurement cells remain open.\n\nAlso covers V43 (D-NAME-ROLEMOD1):\nDecision IDs: D-NAME-ROLEMOD1\n\nActive contract: Complete the ratified ruling. Ecosystem entries are typed values in package.jet; role declarations like module env.dev respell as those values.\n\nGap evidence (static source witness, not a passing test): Rust EnvFile.rs:183-199 still reads ENV_FILE and parses legacy pkg.source calls; jet-env-model/ModuleEval/Source.rs:554-555,834-835 still uses env.jet and teaches module env.<name>. Jetpack EnvModel/ModuleEval/EnvPlanBuilder.jet:213,348-349 retains the matching ENV_FILE root and role-module teaching path. The ruling requires typed package values, not a second role-module/role-file interpretation; parser aliases unrelated to this ruling are not evidence.\n\nCoverage disposition: Same contract boundary is already assigned to P11.json; this amendment adds violation-specific regression evidence and criteria to that draft, not another implementation card.\n\nAll named tests/goldens below are REQUIRED delivery artifacts, proposed here unless an existing owner already names them; none was executed by this audit. Each runs the production Jet path, records compiler/source/provider identity, asserts exit/diagnostic/output or real side effects, and fails if the owning implementation is bypassed. Registry presence, mocks and fixed echo output cannot satisfy behavioral criteria. Unavailable hosts and inconclusive measurement cells remain open.\n\nAlso covers V26 (D-ECO11):\nDecision IDs: D-ECO11\n\nActive contract: runtime is the package field for external tools required on PATH at runtime, separate from build dependencies. Output wrappers consume that same typed list.\n\nGap evidence (static source witness, not a passing test): Rust crates/jet-pkg-model/src/Manifest.rs:536-541 now parses runtime as core/alloc/hosted, not a list of PATH dependencies; no later ratified decision was found reversing this specific chosen field meaning. Jet PackageModel consumes the same changed schema.\n\nCoverage disposition: Same contract boundary is already assigned to P11.json; this amendment adds violation-specific regression evidence and criteria to that draft, not another implementation card.\n\nAll named tests/goldens below are REQUIRED delivery artifacts, proposed here unless an existing owner already names them; none was executed by this audit. Each runs the production Jet path, records compiler/source/provider identity, asserts exit/diagnostic/output or real side effects, and fails if the owning implementation is bypassed. Registry presence, mocks and fixed echo output cannot satisfy behavioral criteria. Unavailable hosts and inconclusive measurement cells remain open.\n\nAlso covers V56 (D-ECO-ROOTNAME2):\nDecision IDs: D-ECO-ROOTNAME2\n\nActive contract: Jetspace names the whole checked graph of sources, environments and outputs. Package names the graph’s package nodes, not the complete root graph.\n\nGap evidence (static source witness, not a passing test): The checked root remains called Package in Rust Package/mod.rs:3-5 and Manifest.rs:555, with PackageOutputPlan.graph_identity at ModuleEval/PackageOutput.rs:47-49. No Jetspace public type/diagnostic surface was found in Rust Package or Jet PackageModel searches.\n\nCoverage disposition: Same contract boundary is already assigned to P11.json; this amendment adds violation-specific regression evidence and criteria to that draft, not another implementation card.\n\nAll named tests/goldens below are REQUIRED delivery artifacts, proposed here unless an existing owner already names them; none was executed by this audit. Each runs the production Jet path, records compiler/source/provider identity, asserts exit/diagnostic/output or real side effects, and fails if the owning implementation is bypassed. Registry presence, mocks and fixed echo output cannot satisfy behavioral criteria. Unavailable hosts and inconclusive measurement cells remain open.\n\nAlso covers V25 (D-ECO-FILEROOT1):\nDecision IDs: D-ECO-FILEROOT1\n\nActive contract: package.jet is the sole reserved source filename, for the root Config contribution. Other source files may contribute named typed Config values; legacy project/workspace/env source-role filenames do not remain independent reserved authorities.\n\nGap evidence (static source witness, not a passing test): Rust Syntax/jetpack_config.rs:404 has package.jet, but :412 still defines workspace.jet and Source/CmdCompile.rs:2056-2057 loads env.jet as an active environment root; ModuleEval/mod.rs:1772 reads repository env.jet. Jet module tooling likewise retains role contributions. Sole-reserved-file cutover is not complete.\n\nCoverage disposition: Same contract boundary is already assigned to P11.json; this amendment adds violation-specific regression evidence and criteria to that draft, not another implementation card.\n\nAll named tests/goldens below are REQUIRED delivery artifacts, proposed here unless an existing owner already names them; none was executed by this audit. Each runs the production Jet path, records compiler/source/provider identity, asserts exit/diagnostic/output or real side effects, and fails if the owning implementation is bypassed. Registry presence, mocks and fixed echo output cannot satisfy behavioral criteria. Unavailable hosts and inconclusive measurement cells remain open.",
       "kind": "task",
       "track": "epoch",
       "epoch": "G5",
@@ -17641,6 +17669,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-26",
+          "by": "Orchestrator",
+          "text": "Owner order 2026-11-22: JetOS is removed from the project entirely."
+        },
         {
           "at": "2026-11-15",
           "by": "TowerKeeper-1",
@@ -17783,22 +17816,13 @@
           "at": "2026-11-13T02:21:28.427Z"
         },
         {
-          "n": 7,
-          "text": "D-ECO-JETOS2: A System is another typed project value. Jet builds a complete generation, shows its changes, proves it is ready, switches once, and keeps the previous generation. Proof: `jet test Compiler --profile packages --filter d_eco_jetos2_contract` passes, a Jet #Test that drives the ratified contract through the production path with a reviewed golden.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T02:21:29.909Z"
-        },
-        {
           "n": 8,
-          "text": "D-ECO-ROOTNAME2: Jetspace names the whole checked graph of sources, environments, outputs, systems and fleets. Package names the graph’s package nodes, not the complete root graph. Proof: `jet test Compiler --profile packages --filter d_eco_rootname2_contract` passes, a Jet #Test that drives the ratified contract through the production path with a reviewed golden.",
+          "text": "D-ECO-ROOTNAME2: Jetspace names the whole checked graph of sources, environments and outputs. Package names the graph’s package nodes, not the complete root graph. Proof: `jet test Compiler --profile packages --filter d_eco_rootname2_contract` passes, a Jet #Test that drives the ratified contract through the production path with a reviewed golden.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T02:21:31.392Z"
+          "at": "2026-11-26T00:58:03.336Z"
         },
         {
           "n": 9,
@@ -17811,12 +17835,12 @@
         },
         {
           "n": 10,
-          "text": "D-ECO1: One checked Jetspace graph connects package sources, environments, outputs, services, images, systems and fleets; a machine can point to the package it runs. Final names/file law are D-ECO-ROOTNAME2 and D-ECO-FILEROOT1. Proof: `jet test Compiler --profile packages --filter d_eco1_contract` passes, a Jet #Test that drives the ratified contract through the production path with a reviewed golden.",
+          "text": "D-ECO1: One checked Jetspace graph connects package sources, environments, outputs, services and images. Final names/file law are D-ECO-ROOTNAME2 and D-ECO-FILEROOT1. Proof: `jet test Compiler --profile packages --filter d_eco1_contract` passes, a Jet #Test that drives the ratified contract through the production path with a reviewed golden.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T02:21:34.327Z"
+          "at": "2026-11-26T00:58:04.559Z"
         },
         {
           "n": 11,
@@ -18213,7 +18237,7 @@
       "parentId": "c0jmyt4x",
       "needsAcceptance": false,
       "created": "2026-10-02T18:24:54.174Z",
-      "updated": "2026-11-24T02:40:32.837Z",
+      "updated": "2026-11-26T00:58:04.559Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 171
     },
@@ -24676,85 +24700,10 @@
       "criteriaLastN": 32
     },
     {
-      "id": "c00tizy7",
-      "num": 5455,
-      "title": "Secure, current and reproducible systems in the AI-attack era (JetOS and Jetpack)",
-      "body": "Owner discussion 2026-10-23: Jet aims to replace Nix. Nix buys reproducibility by pinning, while current security advice (AI shortens patch-to-exploit from weeks to hours) is \"update everything fast\". These goals conflict less than they seem: a declarative system can make updates atomic, reversible and verifiable, so it should be the easiest system to keep current. This umbrella collects the directions to discuss and plan later; nothing here is scheduled now.\n\nDirections (child cards):\n1. Need fewer updates: memory safety (I1) removes the largest CVE class; per-program authority limits blast radius.\n2. Make updating cheap and safe: a security lane separate from feature pins, atomic generations, health checks, automatic rollback, exact advisory matching, optional targeted patching (grafts).\n3. Make updates trustworthy: capability diffs on update, independent-builder reproducibility checks, signed trust root and transparency log (#2199), hermetic builds with no install scripts (#4760), bootstrappability from a small seed (#4154).\n4. Declarative plus imperative: imperative changes write back to the declaration, giving an audit trail, drift detection and attested generations.\n5. AI agents as users: capability-limited agent sessions by default.\n\nChoices for ballots (Q1 and Q3 are on Main's ballot list (2026-11-15); Q2 is settled by D-AUTH-DEFAULT1=A, #5459):\nQ1. Should JetOS apply security fixes automatically by default, or only when the declaration opts in?\nQ2. Should a dependency update that widens authority (new network, file write, #Unsafe) be blocked until approved, or only flagged?\nQ3. Is temporarily breaking bit-reproducibility for patch speed (grafts) acceptable if recorded and reconciled, or should reproducibility be absolute with a faster build farm instead?\n\nRelated existing cards: #2199 trust root, #3033 release updates without breaking the app, #3418 inferred effects and policy, #4154 bootstrap resilience, #4195 portable sandboxed app format, #4268 authority and sandbox boundaries, #4760 build hooks in the sandbox, #5070 package effects block.",
-      "kind": "idea",
-      "track": "epoch",
-      "epoch": "G5",
-      "milestoneId": null,
-      "phase": "planning",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-15",
-          "by": "TowerKeeper-2",
-          "text": "Owner-wait sweep 2026-11-15 (TowerKeeper-2, for Main): body reworded; the owner-only choices are on Main's ballot list (2026-11-15) ($JET_SCRATCH_ROOT/lanes/TowerKeeper-2/ballots-needed.tsv); no question for the owner stays on this card."
-        },
-        {
-          "at": "2026-11-09",
-          "by": "Main",
-          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). c1-c3 (generations, VM tests) are JetOS work and wait while JetOS is frozen. The children: #5457, #5460 and #5462 are concrete; #5459 follows D-AUTH-DEFAULT1=A (report, and --locked refuses); #5458 (grafts) needs a ballot before any work."
-        },
-        {
-          "at": "2026-11-04",
-          "by": "Main",
-          "text": "#6563 c1 precut audit re-added 3 criteria from archived #2, #236, #320: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "JetOS generations are nameable, listed newest first, and rollback activates the prior one. Proof: `jet test Compiler --profile cases --filter JetpackJetOS/os_generations_are_newest_first_and_rollback_activates_prior` (failing at 9c7ddf1359).",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T12:57:05.397Z"
-        },
-        {
-          "n": 2,
-          "text": "A JetOS switch first runs a risk-aware proof of the new generation and refuses the switch when it fails.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T12:57:06.352Z",
-          "proof": {
-            "profile": "cases",
-            "filter": "JetpackJetOS/os_switch_requires_proof"
-          }
-        },
-        {
-          "n": 3,
-          "text": "A declarative VM integration test (NixOS test-driver parity) runs a declared scenario and records its proof. Proof: `jet test Compiler --profile cases --filter JetpackJetOS/os_vm_test_runs_declared_scenario_and_records_proof` (failing at 9c7ddf1359).",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T12:57:07.314Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-10-23T08:10:29.670Z",
-      "updated": "2026-11-22T02:10:23.713Z",
-      "updatedBy": "owner"
-    },
-    {
       "id": "c0nr5mre",
       "num": 5457,
       "title": "Supply-chain security: exact advisory matching, targeted grafts, capability diff on update, verified reproducibility and a declarative audit trail",
-      "body": "Jetpack and JetOS know every input a system is built from (lock and closure). Match security advisories against that exact graph, down to the version and build options, so \"am I affected?\" is an exact query instead of a guess, and the security lane knows exactly what to update. Covers both packages and whole JetOS generations.",
+      "body": "Jetpack knows every input a package is built from (lock and closure). Match security advisories against that exact graph, down to the version and build options, so \"am I affected?\" is an exact query instead of a guess, and the security lane knows exactly what to update.",
       "kind": "idea",
       "track": "epoch",
       "epoch": "G5",
@@ -24768,6 +24717,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-26",
+          "by": "Orchestrator",
+          "text": "Owner order 2026-11-22: JetOS is removed from the project entirely."
+        },
         {
           "at": "2026-11-15",
           "by": "Main",
@@ -24777,12 +24731,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "jetpack answers \"is this package affected by advisory X?\" from the exact lock and closure, down to version and build options (JetOS generations stay out of scope while JetOS is frozen). Proof: `jet test Compiler --profile packages --filter Advisory/exact_match_affected_and_unaffected` on a fixture graph with one affected and one unaffected path.",
+          "text": "jetpack answers \"is this package affected by advisory X?\" from the exact lock and closure, down to version and build options. Proof: `jet test Compiler --profile packages --filter Advisory/exact_match_affected_and_unaffected` on a fixture graph with one affected and one unaffected path.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T12:57:08.297Z"
+          "at": "2026-11-26T00:58:12.912Z"
         },
         {
           "n": 2,
@@ -24817,12 +24771,12 @@
         },
         {
           "n": 5,
-          "text": "An imperative change to a package writes back into its declaration, and drift from the last good state is reported (system-root and boot attestation wait while JetOS is frozen).",
+          "text": "An imperative change to a package writes back into its declaration, and drift from the last good state is reported.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-24T02:40:43.823Z",
+          "at": "2026-11-26T00:58:13.769Z",
           "proof": {
             "profile": "packages",
             "filter": "AuditTrail/imperative_change_written_back"
@@ -24874,7 +24828,7 @@
       "parentId": "c00tizy7",
       "needsAcceptance": false,
       "created": "2026-10-23T08:10:33.234Z",
-      "updated": "2026-11-25T23:36:11.801Z",
+      "updated": "2026-11-26T00:58:13.769Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 9
     },
@@ -38218,12 +38172,12 @@
         },
         {
           "n": 4,
-          "text": "Every non-JetOS Rust module in crates/jetpack (including src/bin), jetpack-bin, jet-nix-eval, jet-store and the Jetpack-owned parts of jet-env-model and jet-pkg-model has a named Jet home under Jetpack/<Area>/Source/, listed in Jetpack/Bootstrap/sources.list, with its unit and integration tests ported and no second copy of anything Compiler/ owns. Proof: `jet test Tests/Guards --filter jetpack_port_coverage` (each Rust module maps to a sources.list entry). (was #3590 c1)",
+          "text": "Every Rust module in crates/jetpack (including src/bin), jetpack-bin, jet-nix-eval, jet-store and the Jetpack-owned parts of jet-env-model and jet-pkg-model whose feature Jet still ships has a named Jet home under Jetpack/<Area>/Source/, listed in Jetpack/Bootstrap/sources.list, with its unit and integration tests ported and no second copy of anything Compiler/ owns. Proof: `jet test Tests/Guards --filter jetpack_port_coverage` (each Rust module maps to a sources.list entry). (was #3590 c1)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T13:03:14.404Z"
+          "at": "2026-11-26T00:58:14.620Z"
         },
         {
           "n": 5,
@@ -38326,12 +38280,12 @@
         },
         {
           "n": 16,
-          "text": "Jetpack sources pass the corpus_ast dogfood gate with no exception rows: the 246 dogfood-json sites (hand-built JSON wire text) use the typed JSON helper and the 122 dogfood-path-containment sites use Path.is_within, across PackageModel, CLI, Integrations, Provider, Store and JetOS (found 2026-11-07, d919fa4f22). Proof: `jet test Tests/Guards --filter corpus_ast`. (was #3590 c198)",
+          "text": "Jetpack sources pass the corpus_ast dogfood gate with no exception rows: the 246 dogfood-json sites (hand-built JSON wire text) use the typed JSON helper and the 122 dogfood-path-containment sites use Path.is_within, across PackageModel, CLI, Integrations, Provider and Store (found 2026-11-07, d919fa4f22). Proof: `jet test Tests/Guards --filter corpus_ast`. (was #3590 c198)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T13:03:17.168Z"
+          "at": "2026-11-26T00:58:15.977Z"
         }
       ],
       "refs": [],
@@ -38339,8 +38293,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T01:42:17.232Z",
-      "updated": "2026-11-22T02:10:23.718Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-26T00:58:15.977Z",
+      "updatedBy": "Orchestrator",
       "criteriaLastN": 16
     },
     {
@@ -40243,12 +40197,12 @@
         },
         {
           "n": 6,
-          "text": "dc_snapshot_texts (Tests/Guards/diagnostics_coverage.jet) and kit_ui_coverage (JetTestKit Ui.jet) credit only producer-checked snapshots. The E0979 (jetpack_jetos) and E1327 (module-eval-diagnostics) snapshots match their live producers' text, with no decision ids. Proof: jet test Tests/Guards/diagnostics_coverage.jet, plus the producer tests for E0979 and E1327, all passing.",
+          "text": "dc_snapshot_texts (Tests/Guards/diagnostics_coverage.jet) and kit_ui_coverage (JetTestKit Ui.jet) credit only producer-checked snapshots. The E1327 (module-eval-diagnostics) snapshot matches its live producer's text, with no decision ids. Proof: jet test Tests/Guards/diagnostics_coverage.jet, plus the producer test for E1327, both passing.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T13:04:12.614Z"
+          "at": "2026-11-26T00:58:16.924Z"
         },
         {
           "n": 7,
@@ -40358,7 +40312,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T01:02:07.487Z",
-      "updated": "2026-11-22T20:46:29.426Z",
+      "updated": "2026-11-26T00:58:16.924Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 17
     },
@@ -47463,8 +47417,8 @@
     {
       "id": "c0ho9o8j",
       "num": 6856,
-      "title": "Build tools, package sources and JetOS options are package providers",
-      "body": "Destination: a foreign build tool, a package registry or service preset, and a JetOS module option are each one package implementing a provider trait or declaring rows, not an edit to the build session, Jetpack or JetOS.\n\nWhy it matters: today Session.jet:664 names cmake, make, gradle, npm and cargo; Jetpack's ServicePresetKind has 43 presets and its provider list sits in four places that disagree (#6217); JetOS options render from a closed table (OptionsRendering.jet:117).\n\nDecisions: D-EXTEND-ARCH1=A, D-CORE-PROVIDER1, D-INFRA1. Design: Docs/research/2026-10-29-extensibility-every-layer.md sections 4.24, 4.25, 4.29 and 6.2 (`b.toolchain`, `b.action`, a Jetpack provider trait). Frozen cards #470 (JetOS option merge law) and #323 (JetOS option schema) cover nearby ground and are not touched.\n\nSplit from #6202.",
+      "title": "Build tools and package sources are package providers",
+      "body": "Destination: a foreign build tool and a package registry or service preset are each one package implementing a provider trait or declaring rows, not an edit to the build session or Jetpack.\n\nWhy it matters: today Session.jet:664 names cmake, make, gradle, npm and cargo; Jetpack's ServicePresetKind has 43 presets and its provider list sits in four places that disagree (#6217).\n\nDecisions: D-EXTEND-ARCH1=A, D-CORE-PROVIDER1, D-INFRA1. Design: Docs/research/2026-10-29-extensibility-every-layer.md sections 4.24, 4.25, 4.29 and 6.2 (`b.toolchain`, `b.action`, a Jetpack provider trait).\n\nSplit from #6202.",
       "kind": "feature",
       "track": "epoch",
       "epoch": "G5",
@@ -47477,7 +47431,18 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-26",
+          "by": "Orchestrator",
+          "text": "Owner order 2026-11-22: JetOS is removed from the project entirely."
+        },
+        {
+          "at": "2026-11-26",
+          "by": "Orchestrator",
+          "text": "Owner order 2026-11-22: JetOS is removed from the project entirely."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -47503,19 +47468,6 @@
           "proof": {
             "profile": "cases",
             "filter": "jetpack_provider_package"
-          }
-        },
-        {
-          "n": 3,
-          "text": "JetOS module options are package declarations with a stated merge law: two packages set one option and the result follows the law.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:25:12.098Z",
-          "proof": {
-            "profile": "cases",
-            "filter": "jetos_option_merge_law"
           }
         },
         {
@@ -47643,7 +47595,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:12.098Z",
-      "updated": "2026-11-24T02:41:01.202Z",
+      "updated": "2026-11-26T00:58:09.679Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 14
     },
@@ -135414,6 +135366,146 @@
   ],
   "events": [
     {
+      "at": "2026-11-26T00:58:41.429Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c01dyqov",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-26T00:58:39.670Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c01dyqov",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-26T00:58:38.636Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c01dyqov",
+      "note": "#1 Context visibility, typed keys and the task and foreign-thre"
+    },
+    {
+      "at": "2026-11-26T00:58:30.102Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c01dyqov",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-26T00:58:20.697Z",
+      "by": "Orchestrator",
+      "action": "card.delete",
+      "ref": "c00tizy7",
+      "note": "Secure, current and reproducible systems in the AI-attack era (JetOS and Jetpack)"
+    },
+    {
+      "at": "2026-11-26T00:58:19.636Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0svneex",
+      "note": "body,logEntry"
+    },
+    {
+      "at": "2026-11-26T00:58:17.872Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0svneex",
+      "note": "#8: Owner order 2026-11-22: JetOS is removed from the project entirely.; was: The native build-and-boot no-Nix contract (#410) holds: the adapter is bypassed for native Jet packages and supplies no boot-time Nix authority."
+    },
+    {
+      "at": "2026-11-26T00:58:16.924Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0pmy5fy",
+      "note": "#6: Owner order 2026-11-22: JetOS is removed from the project entirely.; was: dc_snapshot_texts (Tests/Guards/diagnostics_coverage.jet) and kit_ui_coverage (JetTestKit Ui.jet) credit only producer-checked snapshots. The E0979 (jetpack_jetos) and E1327 (module-eval-diagnostics) "
+    },
+    {
+      "at": "2026-11-26T00:58:15.977Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0slc5oo",
+      "note": "#16: Owner order 2026-11-22: JetOS is removed from the project entirely.; was: Jetpack sources pass the corpus_ast dogfood gate with no exception rows: the 246 dogfood-json sites (hand-built JSON wire text) use the typed JSON helper and the 122 dogfood-path-containment sites use"
+    },
+    {
+      "at": "2026-11-26T00:58:14.620Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0slc5oo",
+      "note": "#4: Owner order 2026-11-22: JetOS is removed from the project entirely.; was: Every non-JetOS Rust module in crates/jetpack (including src/bin), jetpack-bin, jet-nix-eval, jet-store and the Jetpack-owned parts of jet-env-model and jet-pkg-model has a named Jet home under Jetpac"
+    },
+    {
+      "at": "2026-11-26T00:58:13.769Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0nr5mre",
+      "note": "#5: Owner order 2026-11-22: JetOS is removed from the project entirely.; was: An imperative change to a package writes back into its declaration, and drift from the last good state is reported (system-root and boot attestation wait while JetOS is frozen)."
+    },
+    {
+      "at": "2026-11-26T00:58:12.912Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0nr5mre",
+      "note": "#1: Owner order 2026-11-22: JetOS is removed from the project entirely.; was: jetpack answers \"is this package affected by advisory X?\" from the exact lock and closure, down to version and build options (JetOS generations stay out of scope while JetOS is frozen). Proof: `jet te"
+    },
+    {
+      "at": "2026-11-26T00:58:11.888Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0nr5mre",
+      "note": "body,logEntry"
+    },
+    {
+      "at": "2026-11-26T00:58:09.679Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-remove",
+      "ref": "c0ho9o8j",
+      "note": "#3: Owner order 2026-11-22: JetOS is removed from the project entirely.; was [open]: JetOS module options are package declarations with a stated merge law: two packages set one option and the result follows the law."
+    },
+    {
+      "at": "2026-11-26T00:58:08.646Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0ho9o8j",
+      "note": "title,logEntry"
+    },
+    {
+      "at": "2026-11-26T00:58:06.771Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0ho9o8j",
+      "note": "body,logEntry"
+    },
+    {
+      "at": "2026-11-26T00:58:04.559Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0jm0xjt",
+      "note": "#10: Owner order 2026-11-22: JetOS is removed from the project entirely.; was: D-ECO1: One checked Jetspace graph connects package sources, environments, outputs, services, images, systems and fleets; a machine can point to the package it runs. Final names/file law are D-ECO-ROO"
+    },
+    {
+      "at": "2026-11-26T00:58:03.336Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0jm0xjt",
+      "note": "#8: Owner order 2026-11-22: JetOS is removed from the project entirely.; was: D-ECO-ROOTNAME2: Jetspace names the whole checked graph of sources, environments, outputs, systems and fleets. Package names the graph’s package nodes, not the complete root graph. Proof: `jet test Co"
+    },
+    {
+      "at": "2026-11-26T00:58:02.386Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-remove",
+      "ref": "c0jm0xjt",
+      "note": "#7: Owner order 2026-11-22: JetOS is removed from the project entirely.; was [open]: D-ECO-JETOS2: A System is another typed project value. Jet builds a complete generation, shows its changes, proves it is ready, switches once, and keeps the previous generation. Proof: `jet test Compi"
+    },
+    {
+      "at": "2026-11-26T00:58:01.414Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0jm0xjt",
+      "note": "body,logEntry"
+    },
+    {
       "at": "2026-11-26T00:56:40.597Z",
       "by": "Orchestrator",
       "action": "milestone.delete",
@@ -138859,713 +138951,6 @@
       "action": "card.criteria-add",
       "ref": "c0t3jsi0",
       "note": "#1 The adversarial review passes: Docs/Audits/2026-11-25-bindin"
-    },
-    {
-      "at": "2026-11-25T16:45:09.330Z",
-      "by": "Pip",
-      "action": "card.criteria-add",
-      "ref": "c090agiq",
-      "note": "#5 jet fmt prints one statement per line and removes every semi (blocked by D-SEMI-LINE1)"
-    },
-    {
-      "at": "2026-11-25T16:45:08.301Z",
-      "by": "Pip",
-      "action": "card.criteria-add",
-      "ref": "c090agiq",
-      "note": "#4 jet eval and the REPL split statements on the parser's bound (blocked by D-SEMI-LINE1)"
-    },
-    {
-      "at": "2026-11-25T16:45:07.302Z",
-      "by": "Pip",
-      "action": "card.criteria-add",
-      "ref": "c090agiq",
-      "note": "#3 A semicolon is accepted exactly where the lexer's terminator (blocked by D-SEMI-LINE1)"
-    },
-    {
-      "at": "2026-11-25T16:45:06.297Z",
-      "by": "Pip",
-      "action": "card.criteria-add",
-      "ref": "c090agiq",
-      "note": "#2 jet eval never joins two semicolon-separated statements into"
-    },
-    {
-      "at": "2026-11-25T16:45:05.245Z",
-      "by": "Pip",
-      "action": "card.criteria-add",
-      "ref": "c090agiq",
-      "note": "#1 The adversarial review passes: Docs/Audits/2026-11-25-bindin"
-    },
-    {
-      "at": "2026-11-25T16:45:04.238Z",
-      "by": "Pip",
-      "action": "card.criteria-add",
-      "ref": "c0yuue6m",
-      "note": "#6 A golden example with function, one-field, lambda, #run and  (blocked by D-BODY-RECORD1)"
-    },
-    {
-      "at": "2026-11-25T16:45:03.180Z",
-      "by": "Pip",
-      "action": "card.criteria-add",
-      "ref": "c0yuue6m",
-      "note": "#5 The ratified body-record rule ships as the ballot's cutover  (blocked by D-BODY-RECORD1)"
-    },
-    {
-      "at": "2026-11-25T16:45:01.938Z",
-      "by": "Pip",
-      "action": "card.criteria-add",
-      "ref": "c0yuue6m",
-      "note": "#4 parser_brace_record_value_at skips a generic argument list o"
-    },
-    {
-      "at": "2026-11-25T16:45:00.626Z",
-      "by": "Pip",
-      "action": "card.criteria-add",
-      "ref": "c0yuue6m",
-      "note": "#3 A lambda whose last line is a record where no value is expec"
-    },
-    {
-      "at": "2026-11-25T16:44:58.942Z",
-      "by": "Pip",
-      "action": "card.criteria-add",
-      "ref": "c0yuue6m",
-      "note": "#2 jet fmt never turns a valued function into a unit function: "
-    },
-    {
-      "at": "2026-11-25T16:44:55.981Z",
-      "by": "Pip",
-      "action": "card.criteria-add",
-      "ref": "c0yuue6m",
-      "note": "#1 The adversarial review passes: Docs/Audits/2026-11-25-bindin"
-    },
-    {
-      "at": "2026-11-25T16:44:31.865Z",
-      "by": "Pip",
-      "action": "decision.add",
-      "ref": "D-BIND-MARK1",
-      "note": "Changeable names carry Jet's write mark, `^count: 0` instead of `count := 0`, and write windows are made by `place.in_place()` (draft)"
-    },
-    {
-      "at": "2026-11-25T16:43:32.179Z",
-      "by": "Pip",
-      "action": "decision.post",
-      "ref": "D-SEMI-LINE1",
-      "note": "reviewed by ReviewSemiLine"
-    },
-    {
-      "at": "2026-11-25T16:43:30.580Z",
-      "by": "Pip",
-      "action": "decision.post",
-      "ref": "D-BODY-RECORD1",
-      "note": "reviewed by ReviewBodyRecord"
-    },
-    {
-      "at": "2026-11-25T16:43:22.938Z",
-      "by": "ReviewBodyRecord",
-      "action": "decision.review",
-      "ref": "D-BODY-RECORD1",
-      "note": "passed"
-    },
-    {
-      "at": "2026-11-25T16:43:22.066Z",
-      "by": "ReviewSemiLine",
-      "action": "decision.review",
-      "ref": "D-SEMI-LINE1",
-      "note": "passed"
-    },
-    {
-      "at": "2026-11-25T16:43:03.545Z",
-      "by": "Pip",
-      "action": "decision.update",
-      "ref": "D-SEMI-LINE1",
-      "note": "review cleared by the edit"
-    },
-    {
-      "at": "2026-11-25T16:43:01.548Z",
-      "by": "Pip",
-      "action": "decision.update",
-      "ref": "D-BODY-RECORD1",
-      "note": "review cleared by the edit"
-    },
-    {
-      "at": "2026-11-25T16:40:47.897Z",
-      "by": "ReviewSemiLine",
-      "action": "decision.review",
-      "ref": "D-SEMI-LINE1",
-      "note": "passed"
-    },
-    {
-      "at": "2026-11-25T16:40:46.793Z",
-      "by": "Pip",
-      "action": "decision.add",
-      "ref": "D-SEMI-LINE1",
-      "note": "A semicolon separates statements on one line where a line break would end one, and means that line break (draft)"
-    },
-    {
-      "at": "2026-11-25T16:40:45.627Z",
-      "by": "ReviewBodyRecord",
-      "action": "decision.review",
-      "ref": "D-BODY-RECORD1",
-      "note": "passed"
-    },
-    {
-      "at": "2026-11-25T16:40:35.824Z",
-      "by": "Pip",
-      "action": "decision.add",
-      "ref": "D-BODY-RECORD1",
-      "note": "A function or lambda body written as fields builds the record, as an arm body already does (draft)"
-    },
-    {
-      "at": "2026-11-25T16:28:45.744Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0mhrplj",
-      "note": "#5: The review showed a seven-part record copies the environment and program tables on every body check; its narrowed design is the one that holds, so the criterion names it.; was: E. Sema architecture: one checking-context record replaces the threaded environment/program/scopes/state/tail_store/context/diagnostics bundle; CheckProgram.jet and Statements.jet are split by concern"
-    },
-    {
-      "at": "2026-11-25T16:28:23.592Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0mhrplj",
-      "note": "#8"
-    },
-    {
-      "at": "2026-11-25T16:20:20.411Z",
-      "by": "Pip",
-      "action": "card.add",
-      "ref": "c090agiq",
-      "note": "A semicolon separates statements on one line, with the meaning of a line break"
-    },
-    {
-      "at": "2026-11-25T16:20:17.621Z",
-      "by": "Pip",
-      "action": "card.add",
-      "ref": "c0yuue6m",
-      "note": "Function and lambda bodies build a record from fields, as arm bodies do"
-    },
-    {
-      "at": "2026-11-25T16:20:15.096Z",
-      "by": "Pip",
-      "action": "card.add",
-      "ref": "c0t3jsi0",
-      "note": "Changeable names are written ^name: value instead of name := value"
-    },
-    {
-      "at": "2026-11-25T15:53:24.126Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0mhrplj",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-25T15:53:22.796Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0jjynlr",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-25T15:53:20.338Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0jjynlr",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-25T15:53:11.095Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c00ni11n",
-      "note": "#41"
-    },
-    {
-      "at": "2026-11-25T15:53:09.754Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0gokkbf",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-25T15:53:08.439Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0bk3yid",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-25T15:53:07.494Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0mhrplj",
-      "note": "#15"
-    },
-    {
-      "at": "2026-11-25T15:53:06.614Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0mhrplj",
-      "note": "#13"
-    },
-    {
-      "at": "2026-11-25T15:53:05.720Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0mhrplj",
-      "note": "#12"
-    },
-    {
-      "at": "2026-11-25T15:53:04.830Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0mhrplj",
-      "note": "#11"
-    },
-    {
-      "at": "2026-11-25T15:53:03.909Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0mhrplj",
-      "note": "#10"
-    },
-    {
-      "at": "2026-11-25T15:53:02.945Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0mhrplj",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-25T15:53:01.718Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0jjynlr",
-      "note": "#12"
-    },
-    {
-      "at": "2026-11-25T15:53:00.621Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0jjynlr",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-25T15:52:59.255Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0jjynlr",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-25T15:52:57.932Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0e6znz4",
-      "note": "#32"
-    },
-    {
-      "at": "2026-11-25T15:52:56.614Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0e6znz4",
-      "note": "#9"
-    },
-    {
-      "at": "2026-11-25T15:46:57.966Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0sdz4q0",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-25T15:46:57.024Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0sdz4q0",
-      "note": "#16: blocked by D-MEM-POOL-NAME1"
-    },
-    {
-      "at": "2026-11-25T15:46:55.793Z",
-      "by": "Orchestrator",
-      "action": "decision.add",
-      "ref": "D-MEM-POOL-NAME1",
-      "note": "Which of the two things called Pool keeps the name"
-    },
-    {
-      "at": "2026-11-25T15:42:10.753Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0mhrplj",
-      "note": "20 criteria, soft limit 6: regression from this card's B n19 port"
-    },
-    {
-      "at": "2026-11-25T15:42:10.753Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0mhrplj",
-      "note": "#21 DataWatchStatus.freshness_ms reports a real age again (now m"
-    },
-    {
-      "at": "2026-11-25T15:39:29.618Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0mhrplj",
-      "note": "19 criteria, soft limit 6: regressions found by the batch-44 sweep belong on the card whose work caused them"
-    },
-    {
-      "at": "2026-11-25T15:39:29.618Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0mhrplj",
-      "note": "#20 The compiler-data ratchet passes on dev (jet Tools/Agent/Com"
-    },
-    {
-      "at": "2026-11-25T15:26:24.258Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-RULE-DISPATCH-BUDGET1",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-25T15:17:58.960Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0sdz4q0",
-      "note": "#16: premise corrected: core.mem holds two different Pool types; renaming one is an owner ballot; was: mem.Arena/Bump/Pool/Fixed .new are declared in Core with their real types (Pool<T>, not a bare Pool), sema_call_try_memory_static (Sema/Calls/Memory.jet:307, which types them as Type.Named{name}) is d"
-    },
-    {
-      "at": "2026-11-25T15:15:09.246Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0sdz4q0",
-      "note": "16 criteria, soft limit 6: root-cause follow-up of this card's own p2a work"
-    },
-    {
-      "at": "2026-11-25T15:15:09.246Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0sdz4q0",
-      "note": "#16 mem.Arena/Bump/Pool/Fixed .new are declared in Core with the"
-    },
-    {
-      "at": "2026-11-25T14:49:55.902Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0mhrplj",
-      "note": "18 criteria, soft limit 6: follow-up of B belongs on its owning card"
-    },
-    {
-      "at": "2026-11-25T14:49:55.902Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0mhrplj",
-      "note": "#19 B leaves: the 8 receiver dispatcher rows whose symbol has no"
-    },
-    {
-      "at": "2026-11-25T14:46:14.426Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0t5gnhs",
-      "note": "21 criteria, soft limit 6: friction and defect findings go on their owning card the same hour (AGENTS.md)"
-    },
-    {
-      "at": "2026-11-25T14:46:14.426Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0t5gnhs",
-      "note": "#21 jet fmt on Compiler/JetIR/Source/BuildExpr.jet and BuildType"
-    },
-    {
-      "at": "2026-11-25T14:46:13.091Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c00ni11n",
-      "note": "42 criteria, soft limit 6: friction and defect findings go on their owning card the same hour (AGENTS.md)"
-    },
-    {
-      "at": "2026-11-25T14:46:13.091Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c00ni11n",
-      "note": "#44 jet perf run takes only a .jet source, not a built binary, a"
-    },
-    {
-      "at": "2026-11-25T14:46:11.818Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c00ni11n",
-      "note": "41 criteria, soft limit 6: friction and defect findings go on their owning card the same hour (AGENTS.md)"
-    },
-    {
-      "at": "2026-11-25T14:46:11.818Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c00ni11n",
-      "note": "#43 jet perf view --instructions with no argument shows only the"
-    },
-    {
-      "at": "2026-11-25T14:46:10.407Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c00ni11n",
-      "note": "40 criteria, soft limit 6: friction and defect findings go on their owning card the same hour (AGENTS.md)"
-    },
-    {
-      "at": "2026-11-25T14:46:10.406Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c00ni11n",
-      "note": "#42 jet perf run --help and jet perf view --help print only Usag"
-    },
-    {
-      "at": "2026-11-25T14:33:00.414Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0e6znz4",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-25T14:02:52.051Z",
-      "by": "Orchestrator",
-      "action": "decision.add",
-      "ref": "D-SERVICE-SHAPES1",
-      "note": "Who picks the form behind `tree.worker`, `tree.send` and `tree.call` when one name covers several Core functions"
-    },
-    {
-      "at": "2026-11-25T14:02:51.078Z",
-      "by": "Orchestrator",
-      "action": "decision.add",
-      "ref": "D-RULE-DISPATCH-BUDGET1",
-      "note": "How does card #6851 meet D-CORE-CHECK1's budget of 1 µs per heard call?"
-    },
-    {
-      "at": "2026-11-25T14:02:46.596Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0e6znz4",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-25T14:02:42.165Z",
-      "by": "Orchestrator",
-      "action": "decision.add",
-      "ref": "D-PROCESS-BUILDER-RECEIVER1",
-      "note": "When a ProcessSpec builder takes a named spec that is used again, is that an error, a silent copy, or a copy on every step"
-    },
-    {
-      "at": "2026-11-25T13:54:23.012Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0sdz4q0",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-25T13:54:16.868Z",
-      "by": "Orchestrator",
-      "action": "decision.add",
-      "ref": "D-FALLIBLE-CLOSE1",
-      "note": "How a stream whose close can fail also closes itself at the end of its scope"
-    },
-    {
-      "at": "2026-11-25T13:32:42.913Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0mhrplj",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-25T13:32:41.733Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-remove",
-      "ref": "c0mhrplj",
-      "note": "#18: Withdrawn: there is no intrinsic-argument defect. The probe ran against an older Core whose from_bits wraps on purpose. With the tip's Core, jet emit --ir shows the __numeric_stop call inside the bit-copy argument, and FloatBitsRangeStop stops with exit 70 natively.; was [open]: A '??' fallback in an intrinsic call's argument runs like one in an ordinary call's argument. Found by B: math.from_bits(1 << 70) returned 0.0 and did not stop, because the fallback of __from_bits_i64"
-    },
-    {
-      "at": "2026-11-25T13:29:28.765Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0mhrplj",
-      "note": "18 criteria, soft limit 6: The owner order puts a follow-up on the card whose work found it; B's Core bodies exposed this defect"
-    },
-    {
-      "at": "2026-11-25T13:29:28.765Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0mhrplj",
-      "note": "#18 A '??' fallback in an intrinsic call's argument runs like on"
-    },
-    {
-      "at": "2026-11-25T13:16:20.060Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0dktg7a",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-25T13:14:52.854Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0e6znz4",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-25T13:13:14.374Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0sdz4q0",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-25T13:12:40.762Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0sdz4q0",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-25T13:10:58.921Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c00ni11n",
-      "note": "#41"
-    },
-    {
-      "at": "2026-11-25T13:10:57.937Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0e6znz4",
-      "note": "#32"
-    },
-    {
-      "at": "2026-11-25T13:10:56.496Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0bk3yid",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-25T12:01:57.115Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0mhrplj",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-25T11:41:16.979Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0e6znz4",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-25T11:15:31.935Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0mhrplj",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-25T11:03:19.395Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0jjynlr",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-25T11:02:56.091Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0jjynlr",
-      "note": "#10"
-    },
-    {
-      "at": "2026-11-25T11:02:54.443Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0jjynlr",
-      "note": "#9"
-    },
-    {
-      "at": "2026-11-25T11:02:23.774Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0jjynlr",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-25T11:02:20.716Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0jjynlr",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-25T11:02:17.349Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0jjynlr",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-25T11:01:03.868Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0jjynlr",
-      "note": "#8"
-    },
-    {
-      "at": "2026-11-25T11:01:01.878Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0jjynlr",
-      "note": "#7"
-    },
-    {
-      "at": "2026-11-25T10:55:19.502Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0mhrplj",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-25T10:45:41.409Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0e6znz4",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-25T10:45:32.402Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0e6znz4",
-      "note": "#33"
-    },
-    {
-      "at": "2026-11-25T10:45:30.504Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-reopen",
-      "ref": "c0e6znz4",
-      "note": "#33: Re-met with the right evidence (it carried another criterion's)."
-    },
-    {
-      "at": "2026-11-25T10:45:29.541Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0e6znz4",
-      "note": "#39"
-    },
-    {
-      "at": "2026-11-25T10:45:28.134Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0e6znz4",
-      "note": "#34"
-    },
-    {
-      "at": "2026-11-25T10:45:25.208Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0e6znz4",
-      "note": "#19"
     }
   ],
   "nextNum": 368,
