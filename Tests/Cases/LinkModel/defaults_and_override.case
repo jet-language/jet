@@ -9,9 +9,9 @@ env: JET_STORE_DIR={work}/cache
 step inspect_pure: jet inspect choices main.jet
 cwd: pure
 exit: 0
-stdout: ~ "Linkage: jet.program = static (default: pure Jet)"
-stdout: ~ "Linkage: jet.runtime = static (default: pure Jet)"
-stdout: !~ "Linkage: libc"
+stdout: ~ "Linkage: jet.program = static (default: pure Jet)" # inspect output includes other settings
+stdout: ~ "Linkage: jet.runtime = static (default: pure Jet)" # inspect output includes other settings
+stdout: !~ "Linkage: libc" # pure Jet has no libc linkage row
 
 step build_pure: jet build main.jet
 cwd: pure
@@ -29,7 +29,7 @@ stdout: = "dynamic: false\ninterpreter: none\nneeded: none\n"
 step inspect_pure_dyn: jet inspect choices --linkage=dynamic main.jet
 cwd: pure
 exit: 0
-stdout: ~ "Linkage: libc = dynamic (`--linkage=dynamic`)"
+stdout: ~ "Linkage: libc = dynamic (`--linkage=dynamic`)" # inspect output includes other settings
 
 step build_pure_dyn: jet build --linkage=dynamic main.jet
 cwd: pure
@@ -41,18 +41,18 @@ stdout: = "pure-ok\n"
 
 step elf_pure_dyn: node {work}/elf_check.mjs {work}/pure/.jet/build/main
 exit: 0
-stdout: ~ "dynamic: true"
-stdout: ~ "interpreter: /lib64/ld-linux-x86-64.so.2"
-stdout: ~ "libc.so.6"
+stdout: ~ "dynamic: true" # ELF check prints interpreter and needed list
+stdout: ~ "interpreter: /lib64/ld-linux-x86-64.so.2" # host dynamic loader path
+stdout: ~ "libc.so.6" # dynamic build links glibc
 
 # 3. Bundled C defaults static and stays one static file.
 step inspect_bundled: jet inspect choices main.jet
 cwd: bundled
 exit: 0
-stdout: ~ "Linkage: jet.program = static (default: pure Jet)"
-stdout: ~ "Linkage: jet.runtime = static (default: pure Jet)"
-stdout: ~ "Linkage: helper = static (default: bundled C)"
-stdout: ~ "Linkage: libc = static (default: bundled C)"
+stdout: ~ "Linkage: jet.program = static (default: pure Jet)" # inspect output includes other settings
+stdout: ~ "Linkage: jet.runtime = static (default: pure Jet)" # inspect output includes other settings
+stdout: ~ "Linkage: helper = static (default: bundled C)" # inspect output includes other settings
+stdout: ~ "Linkage: libc = static (default: bundled C)" # inspect output includes other settings
 
 step inspect_bundled_json: jet inspect choices main.jet --json
 cwd: bundled
@@ -78,8 +78,8 @@ stdout: = "dynamic: false\ninterpreter: none\nneeded: none\n"
 step inspect_override: jet inspect choices main.jet
 cwd: override_fn_build
 exit: 0
-stdout: ~ "Linkage: helper = dynamic (`b.link_parts([\"helper=dynamic\"])` at build.jet:2)"
-stdout: ~ "Linkage: libc = dynamic (implied by dynamic part `helper`)"
+stdout: ~ "Linkage: helper = dynamic (`b.link_parts([\"helper=dynamic\"])` at build.jet:2)" # inspect output includes other settings
+stdout: ~ "Linkage: libc = dynamic (implied by dynamic part `helper`)" # inspect output includes other settings
 
 step build_override: jet build
 cwd: override_fn_build
@@ -91,23 +91,23 @@ stdout: = "42\n"
 
 step elf_override: node {work}/elf_check.mjs {work}/override_fn_build/.jet/build/app
 exit: 0
-stdout: ~ "dynamic: true"
-stdout: ~ "libhelper.so"
-stdout: ~ "libc.so.6"
+stdout: ~ "dynamic: true" # ELF check prints interpreter and needed list
+stdout: ~ "libhelper.so" # dynamic override emits shared library dependency
+stdout: ~ "libc.so.6" # dynamic override links glibc
 
 # 5. OS drivers default dynamic, and forcing static is refused as a diagnostic.
 step inspect_driver: jet inspect choices main.jet
 cwd: driver
 exit: 0
-stdout: ~ "Linkage: GL = dynamic (default: OS driver)"
-stdout: ~ "Linkage: libc = dynamic (implied by dynamic part `GL`)"
+stdout: ~ "Linkage: GL = dynamic (default: OS driver)" # inspect output includes other settings
+stdout: ~ "Linkage: libc = dynamic (implied by dynamic part `GL`)" # inspect output includes other settings
 
 step refuse_driver_static_whole: jet inspect choices --linkage=static main.jet
 cwd: driver
 exit: nonzero
-stderr: ~ "OS driver library `GL`"
+stderr: ~ "OS driver library `GL`" # diagnostic includes full explanation and help
 
 step refuse_driver_static_part: jet build --link-parts=GL=static main.jet
 cwd: driver
 exit: nonzero
-stderr: ~ "OS driver library `GL`"
+stderr: ~ "OS driver library `GL`" # diagnostic includes full explanation and help
