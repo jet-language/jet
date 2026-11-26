@@ -1,0 +1,11 @@
+# The compiler's own packages declare their layers in `package.jet`, and
+# `jet check Compiler` checks the compiler workspace with no layer violation.
+fixture: CompilerPackagesDeclareLayersAndCheckClean.fixture
+env: NO_COLOR=1
+step manifests: jet run check_manifests.jet -- {root}
+exit: 0
+stdout: ~ "compiler manifests checked: " # workspace and member manifests were scanned
+stdout: ~ "missing layers count: 0" # every compiler package declares its layers
+step check: jet check {root}/Compiler
+exit: 0
+stderr: !~ "Jet.ImportPointsUpALayer" # no compiler package imports upward across layers

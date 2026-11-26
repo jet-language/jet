@@ -1,0 +1,20 @@
+// Lowest layer: owns data records and the Presenter trait that upper layers
+// implement when lower layers need to hand back structured output.
+
+Row: struct {
+    id: Int,
+    title: String,
+}
+
+Presenter: trait {
+    present: fn(self, row: Row) -> String,
+}
+
+load_rows: fn() -> [Row] {
+    [Row]{
+        Row{id: 1, title: "alpha"},
+        Row{id: 2, title: "beta"},
+    }
+}
+
+deliver: fn<P: Presenter>(presenter: P, row: Row) -> String { presenter.present(row) }

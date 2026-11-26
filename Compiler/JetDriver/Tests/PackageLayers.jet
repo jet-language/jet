@@ -1,0 +1,342 @@
+// Regression tests for package `layers:` rules (E0646 Jet.ImportPointsUpALayer):
+// - upward imports are refused naming both modules and both layers
+// - every layer violation across a package is reported in one pass
+// - downward, same-layer, nested-subtree, and trait-inversion imports pass
+// - dedicated test files are exempt from layer restrictions
+// - cross-package dependency layers enforce order across loaded packages
+// - invalid manifests (duplicate module across layers) are refused
+use {
+    jet_foundation.[
+        Diagnostic,
+        EffectModuleSource,
+        compiler_threads_single,
+    ]
+    jet_driver.[
+        JetDriverAuthorizedSourceFile,
+        JetDriverAuthorizedSourceRoot,
+        JetDriverAuthorizedSourceSnapshot,
+        JetDriverCompileRequest,
+        JetDriverHostFacts,
+        jet_driver_load,
+        jet_driver_report_problems,
+    ]
+    jet_eval.[jet_eval_default_config]
+}
+
+priv layer_test_file: fn(root: String, rel: String, source: String) -> JetDriverAuthorizedSourceFile {
+    JetDriverAuthorizedSourceFile{path: "{root}/{rel}", relative_path: rel, identity: "{root}:{rel}", source: source}
+}
+
+priv layer_test_load: fn(roots: [JetDriverAuthorizedSourceRoot], entry_root: String, entry_path: String) -> [Diagnostic] {
+    request: JetDriverCompileRequest{
+        authorized_sources: JetDriverAuthorizedSourceSnapshot{roots: roots, entry_root_identity: entry_root, entry_path: entry_path},
+        canonical_effects: EffectModuleSource{source: "", line_starts: [], decls: []},
+        core_sources: [],
+        host_facts: JetDriverHostFacts{target_triple: None, active_os: None, compiler_identity: None},
+        eval_config: jet_eval_default_config(),
+        record_store: None,
+        trace_sink: None,
+        compiler_threads: compiler_threads_single(),
+    }
+    load: jet_driver_load(request)
+    load.diagnostics
+}
+
+priv layer_test_e0646: fn(diagnostics: [Diagnostic]) -> [Int] {
+    ^found: [Int]{}
+    loop (index, item) in diagnostics {
+        if item.code == "E0646" -> found.push(index)
+    }
+    found
+}
+
+#Test("package_layers_refuses_upward_import") {
+    manifest: `name: "app"
+version: "0.1.0"
+edition: "2026"
+layers: {
+    storage: ["storage"]
+    domain: ["domain"]
+    ui: ["ui"]
+}
+`
+    storage_source: `use ui
+
+load: fn() -> String { ui.render() }
+`
+    files: [JetDriverAuthorizedSourceFile]{
+        layer_test_file("/app", "package.jet", manifest),
+        layer_test_file(
+            "/app",
+            "ui.jet",
+            `render: fn() -> String { "ok" }
+`,
+        ),
+        layer_test_file("/app", "storage.jet", storage_source),
+        layer_test_file(
+            "/app",
+            "run.jet",
+            `use storage
+
+run: fn() { _: storage.load() }
+`,
+        ),
+    }
+    root: JetDriverAuthorizedSourceRoot{canonical_path: "/app", identity: "app-root", allow_hardlinks: false, files: files, foreign_cache_files: []}
+    diagnostics: layer_test_load([JetDriverAuthorizedSourceRoot]{root}, "app-root", "/app/run.jet")
+    errors: layer_test_e0646(diagnostics)
+    assert_eq(errors.len(), 1)
+    assert_eq(diagnostics[errors[0]].what, "`app.storage` in layer `storage` cannot import `app.ui` in higher layer `ui`")
+    assert_eq(diagnostics[errors[0]].source_path, "storage.jet")
+    rendered: jet_driver_report_problems("storage.jet", storage_source, diagnostics, false, false)
+    expected: "Error: Jet.ImportPointsUpALayer: `app.storage` in layer `storage` cannot import `app.ui` in higher layer `ui`\n  --> storage.jet:1:1\n    |\n  1 | use ui\n    | ^^^^^^\n Why: The package's `layers:` table orders layers lowest first, and imports may only point to the same layer or a lower one\n Fix: Move the code that imports `app.ui` up to layer `ui`, move what it needs down to `storage` or lower, or invert the dependency through a trait in `storage`\nMore: jet-lang.dev/e/Jet.ImportPointsUpALayer\n"
+    assert(rendered.starts_with(expected), "rendered E0646 did not match expected UI snapshot:\n{rendered}")
+}
+
+#Test("package_layers_reports_every_violation_in_one_pass") {
+    manifest: `name: "app"
+version: "0.1.0"
+edition: "2026"
+layers: {
+    storage: ["storage"]
+    domain: ["domain"]
+    ui: ["ui"]
+}
+`
+    files: [JetDriverAuthorizedSourceFile]{
+        layer_test_file("/app", "package.jet", manifest),
+        layer_test_file(
+            "/app",
+            "ui.jet",
+            `render: fn() -> String { "ui" }
+`,
+        ),
+        layer_test_file(
+            "/app",
+            "domain.jet",
+            `use ui
+
+rule: fn() -> String { ui.render() }
+`,
+        ),
+        layer_test_file(
+            "/app",
+            "storage.jet",
+            `use domain
+use ui
+
+load: fn() -> String { "{domain.rule()}:{ui.render()}" }
+`,
+        ),
+        layer_test_file(
+            "/app",
+            "run.jet",
+            `use storage
+use domain
+
+run: fn() {
+    _: storage.load()
+    _: domain.rule()
+}
+`,
+        ),
+    }
+    root: JetDriverAuthorizedSourceRoot{canonical_path: "/app", identity: "app-root", allow_hardlinks: false, files: files, foreign_cache_files: []}
+    diagnostics: layer_test_load([JetDriverAuthorizedSourceRoot]{root}, "app-root", "/app/run.jet")
+    errors: layer_test_e0646(diagnostics)
+    // All 3 upward imports (`storage -> domain`, `storage -> ui`, `domain -> ui`)
+    // are reported in a single pass.
+    assert_eq(errors.len(), 3)
+    ^whats: [String]{}
+    loop idx in errors -> whats.push("{diagnostics[idx].what}")
+    assert(whats.contains("`app.storage` in layer `storage` cannot import `app.domain` in higher layer `domain`"))
+    assert(whats.contains("`app.storage` in layer `storage` cannot import `app.ui` in higher layer `ui`"))
+    assert(whats.contains("`app.domain` in layer `domain` cannot import `app.ui` in higher layer `ui`"))
+}
+
+#Test("package_layers_allows_downward_same_layer_and_trait_inversion") {
+    manifest: `name: "app"
+version: "0.1.0"
+edition: "2026"
+layers: {
+    storage: ["storage"]
+    domain: ["domain"]
+    ui: ["ui"]
+}
+`
+    files: [JetDriverAuthorizedSourceFile]{
+        layer_test_file("/app", "package.jet", manifest),
+        layer_test_file(
+            "/app",
+            "storage/base.jet",
+            `Sink: trait {
+    write: fn(self, msg: String) -> String,
+}
+seed: fn() -> String { "db" }
+`,
+        ),
+        layer_test_file(
+            "/app",
+            "storage/repo.jet",
+            `use "base"
+
+fetch: fn() -> String { base.seed() }
+`,
+        ),
+        layer_test_file(
+            "/app",
+            "domain.jet",
+            `use "storage/repo"
+
+format: fn() -> String { repo.fetch() }
+`,
+        ),
+        layer_test_file(
+            "/app",
+            "ui.jet",
+            `use domain
+use "storage/base"
+
+Screen: struct {}
+impl Screen.base.Sink {
+    write: fn(self, msg: String) -> String { msg }
+}
+show: fn() -> String { domain.format() }
+`,
+        ),
+        layer_test_file(
+            "/app",
+            "run.jet",
+            `use ui
+
+run: fn() { _: ui.show() }
+`,
+        ),
+    }
+    root: JetDriverAuthorizedSourceRoot{canonical_path: "/app", identity: "app-root", allow_hardlinks: false, files: files, foreign_cache_files: []}
+    diagnostics: layer_test_load([JetDriverAuthorizedSourceRoot]{root}, "app-root", "/app/run.jet")
+    errors: layer_test_e0646(diagnostics)
+    assert_eq(errors.len(), 0)
+}
+
+#Test("package_layers_exempts_dedicated_test_files") {
+    manifest: `name: "app"
+version: "0.1.0"
+edition: "2026"
+layers: {
+    storage: ["storage"]
+    ui: ["ui"]
+}
+`
+    files: [JetDriverAuthorizedSourceFile]{
+        layer_test_file("/app", "package.jet", manifest),
+        layer_test_file(
+            "/app",
+            "storage.jet",
+            `seed: fn() -> String { "db" }
+`,
+        ),
+        layer_test_file(
+            "/app",
+            "ui.jet",
+            `use storage
+
+show: fn() -> String { storage.seed() }
+`,
+        ),
+        layer_test_file(
+            "/app",
+            "storage/repo_test.jet",
+            `use "../ui"
+
+#Test("cross_layer") {
+    _: ui.show()
+}
+`,
+        ),
+    }
+    root: JetDriverAuthorizedSourceRoot{canonical_path: "/app", identity: "app-root", allow_hardlinks: false, files: files, foreign_cache_files: []}
+    diagnostics: layer_test_load([JetDriverAuthorizedSourceRoot]{root}, "app-root", "/app/storage/repo_test.jet")
+    errors: layer_test_e0646(diagnostics)
+    assert_eq(errors.len(), 0)
+}
+
+#Test("package_layers_enforces_cross_package_dependency_layers") {
+    app_manifest: `name: "app"
+version: "0.1.0"
+edition: "2026"
+deps: {
+    low_pkg: ../low_pkg,
+    high_pkg: ../high_pkg,
+}
+layers: {
+    low: ["low_pkg"]
+    high: ["high_pkg"]
+    top: ["app"]
+}
+`
+    low_manifest: `name: "low_pkg"
+version: "0.1.0"
+edition: "2026"
+deps: {
+    high_pkg: ../high_pkg,
+}
+`
+    high_manifest: `name: "high_pkg"
+version: "0.1.0"
+edition: "2026"
+`
+    app_root: JetDriverAuthorizedSourceRoot{
+        canonical_path: "/ws/app",
+        identity: "app-root",
+        allow_hardlinks: false,
+        files: [JetDriverAuthorizedSourceFile]{
+            layer_test_file("/ws/app", "package.jet", app_manifest),
+            layer_test_file("/ws/app", "run.jet", "use low_pkg\n\nrun: fn() {{ _: low_pkg.read() }}\n"),
+        },
+        foreign_cache_files: [],
+    }
+    low_root: JetDriverAuthorizedSourceRoot{
+        canonical_path: "/ws/low_pkg",
+        identity: "low-root",
+        allow_hardlinks: false,
+        files: [JetDriverAuthorizedSourceFile]{
+            layer_test_file("/ws/low_pkg", "package.jet", low_manifest),
+            layer_test_file("/ws/low_pkg", "Source/Low.jet", "use high_pkg\n\nread: fn() -> Int {{ high_pkg.top() }}\n"),
+        },
+        foreign_cache_files: [],
+    }
+    high_root: JetDriverAuthorizedSourceRoot{
+        canonical_path: "/ws/high_pkg",
+        identity: "high-root",
+        allow_hardlinks: false,
+        files: [JetDriverAuthorizedSourceFile]{
+            layer_test_file("/ws/high_pkg", "package.jet", high_manifest),
+            layer_test_file("/ws/high_pkg", "Source/High.jet", "top: fn() -> Int {{ 7 }}\n"),
+        },
+        foreign_cache_files: [],
+    }
+    diagnostics: layer_test_load([JetDriverAuthorizedSourceRoot]{app_root, low_root, high_root}, "app-root", "/ws/app/run.jet")
+    errors: layer_test_e0646(diagnostics)
+    assert_eq(errors.len(), 1)
+    assert_eq(diagnostics[errors[0]].what, "`low_pkg.Source.Low` in layer `low` cannot import `high_pkg.Source.High` in higher layer `high`")
+}
+
+#Test("package_layers_rejects_duplicate_module_across_layers") {
+    manifest: `name: "app"
+version: "0.1.0"
+edition: "2026"
+layers: {
+    low: ["shared"]
+    high: ["shared"]
+}
+`
+    files: [JetDriverAuthorizedSourceFile]{
+        layer_test_file("/app", "package.jet", manifest),
+        layer_test_file("/app", "run.jet", "run: fn() {{}}\n"),
+    }
+    root: JetDriverAuthorizedSourceRoot{canonical_path: "/app", identity: "app-root", allow_hardlinks: false, files: files, foreign_cache_files: []}
+    diagnostics: layer_test_load([JetDriverAuthorizedSourceRoot]{root}, "app-root", "/app/run.jet")
+    assert(diagnostics.len() >= 1)
+    assert(diagnostics[0].why.contains("listed in more than one layer") || diagnostics[0].what.contains("listed in more than one layer"))
+}

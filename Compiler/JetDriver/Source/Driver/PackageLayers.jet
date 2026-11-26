@@ -1,0 +1,192 @@
+// A package's `layers:` table (`layers: { low: [...], high: [...] }`, lowest
+// layer first) orders its modules (and optionally its loaded dependency
+// packages) so imports may only point to the same layer or a lower one.
+//
+// Each import edge that points up to a higher layer is refused with E0646
+// (`Jet.ImportPointsUpALayer`) at its `use`, naming both modules and both
+// layers. Every violating import edge across the loaded package graph is
+// reported in one pass, and dedicated test files are exempt so tests may
+// verify across layers. The policy has no runtime representation.
+use {
+    jet_foundation.[Diagnostic, ModuleLayer, Span, StructureFact, StructureFactKind, diagnostic_with_source_path]
+    jet_pkg_model.[ManifestEntry, PackageParseError, pkg_manifest_diagnostic_from_row, pkg_parse_layers, pkg_retired_record_head_spans]
+    jet_sema.[SemaRegistrationImportEdge]
+}
+
+// The `layers:` field's value, read by the canonical Package reader.
+jet_driver_read_package_layers: fn(value: String) -> [ModuleLayer] PackageParseError! {
+    if pkg_retired_record_head_spans(value).len() > 0 {
+        return Err(PackageParseError.RetiredRecordHead)
+    }
+    pkg_parse_layers(value)
+}
+
+// Checks every loaded module import edge against declared package `layers:`
+// tables, reporting every upward layer import (E0646) in one pass.
+jet_driver_check_package_layers: fn(packages: [JetDriverPackageInfo], source_units: [JetDriverSourceUnit], modules: [JetDriverLoadedModule], imports: [SemaRegistrationImportEdge], diagnostics: ^[Diagnostic], facts: ^[StructureFact]) {
+    ^any_layers: false
+    loop package in packages {
+        if package.layers.len() > 0 -> any_layers = true
+    }
+    if !any_layers {
+        return
+    }
+
+    ^loaded_of_module: [U32:Int]{}
+    loop (loaded_index, loaded) in modules {
+        loaded_of_module[loaded.module_identity.id] = loaded_index
+    }
+
+    loop edge in imports {
+        if !jet_driver_import_is_module_edge(edge.declaration.kind) -> next
+        from_loaded_index: loaded_of_module.get(edge.source_module_identity.id) ?? next
+        to_loaded_index: loaded_of_module.get(edge.target_module_identity.id) ?? next
+        from_unit_index: modules[from_loaded_index].source_unit_index
+        to_unit_index: modules[to_loaded_index].source_unit_index
+        from_unit: source_units[from_unit_index]
+        to_unit: source_units[to_unit_index]
+        if from_unit.root_index < 0 || from_unit.root_index >= packages.len() || to_unit.root_index < 0 || to_unit.root_index >= packages.len() {
+            next
+        }
+        // Dedicated test files are exempt so tests can exercise across layers.
+        if jet_driver_layer_is_test_unit(from_unit, modules[from_loaded_index]) -> next
+
+        from_package: packages[from_unit.root_index]
+        to_package: packages[to_unit.root_index]
+        if from_package.name == "" || to_package.name == "" -> next
+
+        // Check the importing package's own `layers:` table first, then the
+        // entry package's `layers:` table (which governs cross-package
+        // dependency layers in a workspace or program check). Stop after
+        // reporting once for this edge so one `use` never duplicates E0646.
+        if jet_driver_check_edge_in_layers(from_package, from_package, from_unit, to_package, to_unit, edge, imports, diagnostics, facts) {
+            next
+        }
+        if from_unit.root_index != 0 && packages.len() > 0 && packages[0].layers.len() > 0 {
+            ^_: jet_driver_check_edge_in_layers(packages[0], from_package, from_unit, to_package, to_unit, edge, imports, diagnostics, facts)
+        }
+    }
+}
+
+priv jet_driver_check_edge_in_layers: fn(owner: JetDriverPackageInfo, from_package: JetDriverPackageInfo, from_unit: JetDriverSourceUnit, to_package: JetDriverPackageInfo, to_unit: JetDriverSourceUnit, edge: SemaRegistrationImportEdge, imports: [SemaRegistrationImportEdge], diagnostics: ^[Diagnostic], facts: ^[StructureFact]) -> Bool {
+    if owner.layers.len() == 0 -> return false
+    from_layer_index: jet_driver_package_layer_of(owner, from_package, from_unit)
+    if from_layer_index < 0 -> return false
+    to_layer_index: jet_driver_package_layer_of(owner, to_package, to_unit)
+    if to_layer_index <= from_layer_index -> return false
+
+    from_name: jet_driver_boundary_module_name(from_package.name, from_unit.relative_path)
+    to_name: jet_driver_boundary_module_name(to_package.name, to_unit.relative_path)
+    from_layer: owner.layers[from_layer_index].name
+    to_layer: owner.layers[to_layer_index].name
+    span: jet_driver_layer_edge_span(edge, imports)
+    refused: pkg_manifest_diagnostic_from_row(
+        "E0646",
+        [ManifestEntry]{
+            ManifestEntry{key: "from", value: from_name},
+            ManifestEntry{key: "from_layer", value: from_layer},
+            ManifestEntry{key: "to", value: to_name},
+            ManifestEntry{key: "to_layer", value: to_layer},
+        },
+        Val(span),
+    )
+    diagnostics.push(diagnostic_with_source_path(refused, from_unit.path, 0))
+    facts.push(
+        StructureFact{
+            kind: StructureFactKind.ImportEdge,
+            subject: "{from_name} -> {to_name}",
+            source: from_unit.path,
+            span: span,
+            status: "denied",
+            detail: "manifest layer policy denied upward edge from `{from_layer}` to `{to_layer}`",
+            gate: Val("manifest layer edit"),
+        },
+    )
+    true
+}
+
+// For a synthetic zero-width `.Module` edge paired with `use dep.[names]`,
+// recover the written `.Unqualified` import span covering that offset.
+priv jet_driver_layer_edge_span: fn(edge: SemaRegistrationImportEdge, imports: [SemaRegistrationImportEdge]) -> Span Never! {
+    span: edge.declaration.span
+    if span.end > span.start -> return span
+    loop other in imports {
+        if other.source_module_identity != edge.source_module_identity || other.target_module_identity != edge.target_module_identity {
+            next
+        }
+        other_span: other.declaration.span
+        if other_span.end > other_span.start && span.start >= other_span.start && span.start <= other_span.end {
+            return other_span
+        }
+    }
+    span
+}
+
+// Where `owner.layers` places `unit` (belonging to `unit_package`): the layer
+// index (lowest first) of the longest listed name that equals or prefixes the
+// unit's full boundary name, its package-relative module name (when inside
+// `owner`), or its package name; -1 when unlisted.
+priv jet_driver_package_layer_of: fn(owner: JetDriverPackageInfo, unit_package: JetDriverPackageInfo, unit: JetDriverSourceUnit) -> Int Never! {
+    full_name: jet_driver_boundary_module_name(unit_package.name, unit.relative_path)
+    same_package: unit_package.identity == owner.identity
+    rel_name: if same_package -> jet_driver_layer_relative_name(unit.relative_path) else -> ""
+    source_rel: if rel_name.starts_with("Source.") -> rel_name.removeprefix("Source.") else -> ""
+    pkg_name: unit_package.name
+
+    ^found: -1
+    ^longest: -1
+    loop (layer_index, layer) in owner.layers {
+        loop listed in layer.modules {
+            size: listed.count_bytes()
+            if size <= longest -> next
+            matches: jet_driver_layer_name_matches(full_name, listed, size) || (rel_name != "" && jet_driver_layer_name_matches(rel_name, listed, size)) || (source_rel != "" && jet_driver_layer_name_matches(source_rel, listed, size)) || (pkg_name != "" && jet_driver_layer_name_matches(pkg_name, listed, size))
+            if matches {
+                found = layer_index
+                longest = size
+            }
+        }
+    }
+    found
+}
+
+priv jet_driver_layer_name_matches: fn(candidate: String, listed: String, size: Int) -> Bool Never! {
+    if !candidate.starts_with(listed) -> return false
+    candidate.count_bytes() == size || candidate.starts_with("{listed}.")
+}
+
+// Package-relative dotted module path (`ui/forms.jet` -> `ui.forms`,
+// `ui/module.jet` -> `ui`).
+priv jet_driver_layer_relative_name: fn(relative_path: String) -> String Never! {
+    ^parts: [String]{}
+    loop part in relative_path.split("/") {
+        if part == "" || part == "." -> next
+        if part.ends_with(".jet") -> parts.push(part.removesuffix(".jet")) else -> parts.push(part)
+    }
+    if parts.len() > 1 && (parts[parts.len() - 1] == "main" || parts[parts.len() - 1] == "module") {
+        ^_: parts.pop()
+    }
+    parts.join(".")
+}
+
+// Dedicated test files are exempt from layer restrictions so tests may verify
+// across layers. Production modules containing inline `#Test` blocks alongside
+// production declarations remain subject to layer rules.
+priv jet_driver_layer_is_test_unit: fn(unit: JetDriverSourceUnit, loaded: JetDriverLoadedModule) -> Bool Never! {
+    rel: unit.relative_path
+    if rel.starts_with("Tests/") || rel.starts_with("tests/") || rel.contains("/Tests/") || rel.contains("/tests/") {
+        return true
+    }
+    if rel == "test.jet" || rel.ends_with("/test.jet") || rel.ends_with("_test.jet") || rel.ends_with("_tests.jet") || rel.ends_with(".test.jet") || rel.ends_with("Test.jet") || rel.ends_with("Tests.jet") {
+        return true
+    }
+    if loaded.program.script_body.len() == 0 && loaded.program.items.len() > 0 {
+        ^all_tests: true
+        loop item in loaded.program.items {
+            if item == .Test(_) -> next
+            all_tests = false
+            break
+        }
+        if all_tests -> return true
+    }
+    false
+}

@@ -58,6 +58,17 @@ members: [
     "JetTestKit",
     "JetCLI",
 ]
+// Compiler package layers, lowest layer first. A compiler package may only
+// import from its own layer or a lower one.
+layers: {
+    foundation: ["jet_foundation", "jet_wasm", "jet_queries", "jet_runtime", "jet_prelude", "jet_testkit"]
+    syntax: ["jet_lexer", "jet_parser", "jet_backend", "jet_debug", "jet_repl", "jet_migrations"]
+    sema: ["jet_sema"]
+    codegen: ["jet_ir", "jet_web", "jet_plugin", "jet_eval"]
+    driver: ["jet_driver"]
+    tools: ["jet_semindex", "jet_impact", "jet_canvas", "jet_lsp", "jet_devserver"]
+    cli: ["jet_cli"]
+}
 suites: {
     golden: TestSuite{
         golden_corpus: "../Examples"
