@@ -11376,6 +11376,54 @@ ExpertEffectNotHeld: struct {
     }
 }
 
+NonSwappableEffectContext: struct {
+    effect_name: String,
+
+    impl Diagnostic {
+        code: "E0782",
+        safety_class: .Soundness,
+        safety_reason: "Non-swappable machine and structural effects such as `Unsafe`, `Panic`, `Mem.*`, `FFI.*`, and `Meta.*` cannot be discharged by installing a user provider in `#Context`.",
+        expert_path: "none: structural and non-swappable effects are controlled by authority and effect rows, not `#Context` providers",
+        meaning: "A `#Context` block tries to install a handler for a non-swappable effect",
+
+        what: fn(self) -> String {
+            "`{self.effect_name}` is not a swappable effect and cannot be installed in `#Context`"
+        }
+
+        why: fn(self) -> String {
+            "Structural and non-swappable effects (`Unsafe`, `Panic`, `Mem.*`, `FFI.*`, `Meta.*`, or any `#Effect(swappable: false)` trait) represent language or machine guarantees that cannot be replaced or discharged by a local handler"
+        }
+
+        fix: fn(self) -> String {
+            "Remove `{self.effect_name}: ...` from `#Context(...)` and declare or control `{self.effect_name}` in the function's effect row"
+        }
+    }
+}
+
+ScopedContextHandlerEscape: struct {
+    effect_name: String,
+
+    impl Diagnostic {
+        code: "E0783",
+        safety_class: .Soundness,
+        safety_reason: "A borrowed or mutable (`^self`) `#Context` effect handler lives only for its block on the current task; capturing or inheriting it in a spawned task or escaping closure would cause a use-after-free or data race.",
+        expert_path: "use an owned handler whose `#Effect` trait methods take `self` (not `^self`), or install a fresh handler inside the spawned task",
+        meaning: "A scoped or mutable `#Context` effect handler escapes into a spawned task or escaping closure",
+
+        what: fn(self) -> String {
+            "Scoped `#Context` handler for `{self.effect_name}` cannot escape into a spawned task or escaping closure"
+        }
+
+        why: fn(self) -> String {
+            "A borrowed `#Context({self.effect_name}: ^local)` handler or an `#Effect` trait with `^self` methods is scoped to the current task and block; sharing it across tasks or letting it outlive the block would race or dangle"
+        }
+
+        fix: fn(self) -> String {
+            "Call `{self.effect_name}` inside the `#Context` block without spawning a task that uses it, or install an owned `self`-only handler"
+        }
+    }
+}
+
 FormActionInputMismatch: struct {
     action: String,
     form: String,

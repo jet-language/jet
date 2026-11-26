@@ -1,0 +1,26 @@
+// A borrowed or ^self #Context effect handler cannot escape into a spawned task; E0783.
+#Effect
+Emit: trait<T> {
+    emit: fn(^self, item: T)
+}
+
+IntBuf: struct {
+    items: [Int],
+
+    impl Emit<Int> {
+        emit: fn(^self, item: Int) {
+            self.items.push(item)
+        }
+    }
+}
+
+run: fn() {
+    ^buf: IntBuf{items: [Int]{}}
+    #Context(Emit<Int>: ^buf) {
+        task.group group {
+            task {
+                Emit<Int>.emit(1)
+            }
+        }
+    }
+}

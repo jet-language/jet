@@ -28,20 +28,27 @@
 use jet_foundation.[
     EFFECT_VOCABULARY_LEAVES,
     EFFECT_VOCABULARY_ROOTS,
+    MARKER_EFFECT,
+    AccessConvention,
     Diagnostic,
     EffectAccess,
     EffectValueField,
+    Expr,
     Item,
+    Marker,
     ModuleCap,
     NamedSpan,
     Span,
+    TraitDef,
     Type,
     authority_is_deny_only,
     diagnostic_with_rights,
+    effect_access_parse,
     effect_value_base,
     effect_value_fields,
     effect_value_is_valued,
     effect_vocabulary_access,
+    expr_span,
     sema_effect_covers,
     type_name,
 ]
@@ -74,6 +81,17 @@ SemaLibraryEffect: struct {
     has_explicit_access: Bool{false},
     // E0758 for its parent, reported once by the declaring module.
     problem: Diagnostic?{None},
+    // True when declared as an `#Effect` trait rather than a struct/enum tag.
+    is_trait: Bool{false},
+    // True when `#Context(E: handler)` may install a provider for this effect.
+    swappable: Bool{false},
+    irreversible: Bool{false},
+    deny_only: Bool{false},
+    expert: Bool{false},
+    action: String{""},
+    leaf: String{""},
+    // True when any method on the `#Effect` trait takes `^self`.
+    has_write_receiver: Bool{false},
 }
 
 // One name a module may write for a library effect, and the kernel effects
@@ -89,6 +107,9 @@ SemaLibraryEffectName: struct {
     ancestors: [String],
     fields: [SemaLibraryEffectField]{[SemaLibraryEffectField]{}},
     access: EffectAccess{EffectAccess.Reads},
+    is_trait: Bool{false},
+    swappable: Bool{false},
+    has_write_receiver: Bool{false},
 }
 
 // A `!` entry of a function row that names a library effect or a case.
@@ -102,10 +123,108 @@ SemaLibraryEffectDenial: struct {
 SemaLibraryEffectReach: struct {
     reached: [[String]],
     ancestry: [String:[String]],
+    trait_tokens: [String:Bool]{[String:Bool]{}},
 }
 
-// `name` is a struct or enum in `items` that implements `Effect` (the parser
-// writes its effect declaration beside the type) and is no Prelude effect.
+// Metadata extracted from an `#Effect(...)` marker on a trait declaration.
+SemaEffectTraitMeta: struct {
+    parent: NamedSpan?{None},
+    leaf: String{""},
+    access: EffectAccess{EffectAccess.Reads},
+    has_explicit_access: Bool{false},
+    irreversible: Bool{false},
+    swappable: Bool{true},
+    deny_only: Bool{false},
+    expert: Bool{false},
+    action: String{""},
+    has_write_receiver: Bool{false},
+}
+
+// Returns the `#Effect` marker on `definition`, if any.
+sema_effect_trait_marker: fn(definition: TraitDef) -> Marker? Never! {
+    loop marker in definition.markers {
+        if marker.name == MARKER_EFFECT && !marker.negated -> return Val(marker)
+    }
+    None
+}
+
+// Extracts an identifier or dotted path expression from a marker argument.
+sema_effect_marker_path_expr: fn(expr: Expr) -> NamedSpan? Never! {
+    if expr == {
+        .Ident(name, span, _) -> Val(NamedSpan{name: name, span: span})
+        .Field(base, member, span, _) -> {
+            head: sema_effect_marker_path_expr(base) ?? return None
+            Val(NamedSpan{name: "{head.name}.{member}", span: Span{start: head.span.start, end: span.end}})
+        }
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> None
+    }
+}
+
+sema_effect_marker_string_expr: fn(expr: Expr) -> String? Never! {
+    if expr == .Str(parts, _, _) && parts.len() == 1 {
+        if parts[0] == .Lit(text) -> return Val(text)
+    }
+    None
+}
+
+// Extracts `#Effect(...)` metadata from a trait declaration.
+sema_effect_trait_meta: fn(definition: TraitDef) -> SemaEffectTraitMeta? Never! {
+    marker: sema_effect_trait_marker(definition) ?? return None
+    ^meta: SemaEffectTraitMeta{}
+    loop method in definition.methods {
+        if method.params.len() > 0 && method.params[0].name == "self" && method.params[0].convention == AccessConvention.Write {
+            meta.has_write_receiver = true
+        }
+    }
+    loop index in 0..<marker.args.len() {
+        if index >= marker.arg_labels.len() -> next
+        arg_name: if marker.arg_labels[index] == .Val(written) -> written.name else -> next
+        if marker.args[index] == .Expr(arg_expr) {
+            if arg_name == {
+                "parent" -> {
+                    meta.parent = sema_effect_marker_path_expr(arg_expr)
+                }
+                "leaf" -> {
+                    if sema_effect_marker_string_expr(arg_expr) == .Val(text) -> meta.leaf = text
+                }
+                "action" -> {
+                    if sema_effect_marker_string_expr(arg_expr) == .Val(text) -> meta.action = text
+                }
+                "access" -> {
+                    ^access_text: ""
+                    if arg_expr == {
+                        .EnumLit(_, variant, _, _, _, _, _) -> access_text = ".{variant}"
+                        .Field(_, member, _, _) -> access_text = ".{member}"
+                        .Ident(word, _, _) -> access_text = ".{word}"
+                        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
+                    }
+                    if effect_access_parse(access_text) == .Val(parsed) {
+                        meta.access = parsed
+                        meta.has_explicit_access = true
+                    }
+                }
+                "irreversible" -> {
+                    if arg_expr == .Bool(flag, _, _) -> meta.irreversible = flag
+                }
+                "swappable" -> {
+                    if arg_expr == .Bool(flag, _, _) -> meta.swappable = flag
+                }
+                "deny_only" -> {
+                    if arg_expr == .Bool(flag, _, _) -> meta.deny_only = flag
+                }
+                "expert" -> {
+                    if arg_expr == .Bool(flag, _, _) -> meta.expert = flag
+                }
+                else -> {}
+            }
+            ^_: expr_span(arg_expr)
+        }
+    }
+    Val(meta)
+}
+
+// `name` is a struct or enum in `items` that implements `Effect`, or a trait
+// marked `#Effect`, and is no Prelude effect.
 sema_library_effect_declared: fn(items: [Item], name: String) -> Bool Never! {
     if EFFECT_VOCABULARY_ROOTS.contains(name) -> return false
     ^typed: false
@@ -118,10 +237,13 @@ sema_library_effect_declared: fn(items: [Item], name: String) -> Bool Never! {
             .Enum(definition) -> {
                 if definition.name == name -> typed = true
             }
+            .Trait(definition) -> {
+                if definition.name == name && sema_effect_trait_marker(definition) != None -> return true
+            }
             .EffectDecl(declaration) -> {
                 if declaration.name == name -> declared = true
             }
-            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Tag(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     typed && declared
@@ -173,7 +295,31 @@ sema_library_effect_collect: fn(effects: ^[SemaLibraryEffect], package_identity:
                     effects.push(SemaLibraryEffect{package_identity: package_identity, module_index: module_index, name: definition.name, cases: cases, kernel: sema_library_effect_kernel_list(definition.cap), access: sema_library_effect_declared_access(items, definition.name), case_accesses: case_accesses, has_explicit_access: explicit_access})
                 }
             }
-            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+            .Trait(definition) -> {
+                if !EFFECT_VOCABULARY_ROOTS.contains(definition.name) && definition.type_params.len() == 0 {
+                    if sema_effect_trait_meta(definition) == .Val(meta) {
+                        effects.push(SemaLibraryEffect{
+                            package_identity: package_identity,
+                            module_index: module_index,
+                            name: definition.name,
+                            cases: [String]{},
+                            kernel: sema_library_effect_kernel_list(definition.cap),
+                            parent: meta.parent,
+                            access: meta.access,
+                            has_explicit_access: meta.has_explicit_access,
+                            is_trait: true,
+                            swappable: meta.swappable && !meta.deny_only,
+                            irreversible: meta.irreversible,
+                            deny_only: meta.deny_only,
+                            expert: meta.expert,
+                            action: meta.action,
+                            leaf: meta.leaf,
+                            has_write_receiver: meta.has_write_receiver,
+                        })
+                    }
+                }
+            }
+            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
 }
@@ -318,10 +464,17 @@ sema_library_effect_check_parents: fn(effects: [SemaLibraryEffect], module_index
     }
 }
 
+sema_library_effect_push_name: fn(names: ^[SemaLibraryEffectName], written: String, token: String, declared: SemaLibraryEffect) Never! {
+    // copy: each name keeps its own kernel and ancestors.
+    names.push(SemaLibraryEffectName{written: written, kernel: declared.kernel.copy(), token: token, ancestors: declared.ancestors.copy(), fields: declared.fields.copy(), access: declared.access, is_trait: declared.is_trait, swappable: declared.swappable, has_write_receiver: declared.has_write_receiver})
+}
+
 sema_library_effect_add_names: fn(names: ^[SemaLibraryEffectName], prefix: String, declared: SemaLibraryEffect) Never! {
     token: "{declared.package_identity}/{declared.name}"
-    // copy: each name keeps its own kernel and ancestors.
-    names.push(SemaLibraryEffectName{written: "{prefix}{declared.name}", kernel: declared.kernel.copy(), token: token, ancestors: declared.ancestors.copy(), fields: declared.fields.copy(), access: declared.access})
+    sema_library_effect_push_name(names, "{prefix}{declared.name}", token, declared)
+    if declared.leaf != "" && declared.parent == .Val(parent_span) {
+        sema_library_effect_push_name(names, "{prefix}{parent_span.name}.{declared.leaf}", token, declared)
+    }
     loop (index, case_name) in declared.cases {
         case_access: if index < declared.case_accesses.len() -> declared.case_accesses[index] else -> declared.access
         names.push(SemaLibraryEffectName{written: "{prefix}{declared.name}.{case_name}", kernel: declared.kernel.copy(), token: "{token}.{case_name}", ancestors: [String]{}, access: case_access})  // copy: as above.
@@ -498,7 +651,10 @@ sema_library_effect_check_lists: fn(items: [Item], diagnostics: ^[Diagnostic]) {
             .Enum(definition) -> {
                 sema_library_effect_check_list(items, definition.name, definition.cap, diagnostics)
             }
-            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+            .Trait(definition) -> {
+                sema_library_effect_check_list(items, definition.name, definition.cap, diagnostics)
+            }
+            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
 }
@@ -515,20 +671,68 @@ sema_library_effect_check_list: fn(items: [Item], name: String, cap: ModuleCap?,
     }
 }
 
-// The library effects each node reaches: those its own row names with the
-// effects they are kinds of, and every one a function it can call reaches.
-// Empty rows when no node denies one and no row names a kind or a value.
+// Whether every call from `caller` to `callee_key` discharges `effect_name`
+// (either directly or via an ancestor of `effect_name` in `ancestry`).
+sema_effect_edge_discharges: fn(caller: SemaEffectNode, callee_key: String, effect_name: String, ancestry: [String:[String]]) -> Bool Never! {
+    rare: caller.rare ?? return false
+    if rare.discharged_calls.len() == 0 -> return false
+    if rare.undischarged_callees.get(callee_key) == Val(true) -> return false
+    ^matched_any: false
+    loop call in rare.discharged_calls {
+        if call.callee != callee_key -> next
+        matched_any = true
+        ^covered: false
+        loop discharged in call.effects {
+            if discharged == effect_name || sema_effect_covers(discharged, effect_name) {
+                covered = true
+                break
+            }
+            if ancestry.get(effect_name) == .Val(ancestors) {
+                loop ancestor in ancestors {
+                    if discharged == ancestor || sema_effect_covers(discharged, ancestor) {
+                        covered = true
+                        break
+                    }
+                }
+            }
+            if covered -> break
+        }
+        if !covered -> return false
+    }
+    matched_any
+}
+
+sema_library_effect_seed_one: fn(reached: ^[String], pending: ^[SemaEffectPending], index: Int, token: String, ancestors: [String]) Never! {
+    if sema_effect_set_add(reached, token) {
+        pending.push(SemaEffectPending{node: index, name: token.copy()})  // copy: the queue keeps its own name.
+    }
+    loop ancestor in ancestors {
+        if sema_effect_set_add(reached, ancestor) {
+            pending.push(SemaEffectPending{node: index, name: ancestor.copy()})  // copy: as above.
+        }
+    }
+}
+
+// The library effects each node reaches: those its own row or direct `#Effect`
+// trait calls name with the effects they are kinds of, and every one a
+// function it can call reaches (minus effects discharged by `#Context`).
 sema_library_effect_reach: fn(nodes: [SemaEffectNode], callers: [[Int]]) -> SemaLibraryEffectReach Never! {
     ^ancestry: [String:[String]]{}
+    ^trait_tokens: [String:Bool]{}
     loop node in nodes {
         rare: node.rare ?? next
         loop row in rare.library_rows {
             if row.ancestors.len() > 0 && ancestry.get(row.token) == None {
                 ancestry[row.token] = row.ancestors.copy()  // copy: the map keeps its own list.
             }
+            if row.is_trait -> trait_tokens[row.token] = true
+        }
+        loop direct in rare.direct_library {
+            trait_tokens[direct.name] = true
         }
     }
     any_kind: ancestry.len() > 0
+    any_trait: trait_tokens.len() > 0
     any_value: loop node in nodes {
         if node.rare == .Val(rare) && rare.library_rows.any(fn(row) { effect_value_is_valued(row.token) }) {
             break true
@@ -540,34 +744,70 @@ sema_library_effect_reach: fn(nodes: [SemaEffectNode], callers: [[Int]]) -> Sema
         }
     } ?? false
     ^reached: (loop _ in nodes -> [String]{})
-    if !any_denial && !any_kind && !any_value {
-        return SemaLibraryEffectReach{reached: reached, ancestry: ancestry}
+    if !any_denial && !any_kind && !any_value && !any_trait {
+        return SemaLibraryEffectReach{reached: reached, ancestry: ancestry, trait_tokens: trait_tokens}
     }
     ^pending: [SemaEffectPending]{}
     loop (index, node) in nodes {
         rare: node.rare ?? next
         loop row in rare.library_rows {
-            if sema_effect_set_add(reached[index], row.token) {
-                pending.push(SemaEffectPending{node: index, name: row.token.copy()})  // copy: the queue keeps its own name.
-            }
-            loop ancestor in row.ancestors {
-                if sema_effect_set_add(reached[index], ancestor) {
-                    pending.push(SemaEffectPending{node: index, name: ancestor.copy()})  // copy: as above.
-                }
-            }
+            sema_library_effect_seed_one(reached[index], pending, index, row.token, row.ancestors)
+        }
+        loop direct in rare.direct_library {
+            ancestors: ancestry.get(direct.name) ?? [String]{}
+            sema_library_effect_seed_one(reached[index], pending, index, direct.name, ancestors)
         }
     }
     ^cursor: 0
     loop cursor < pending.len() {
         incoming: pending[cursor]
         cursor += 1
+        callee_key: nodes[incoming.node].key
         loop caller in callers[incoming.node] {
+            if sema_effect_edge_discharges(nodes[caller], callee_key, incoming.name, ancestry) -> next
             if sema_effect_set_add(reached[caller], incoming.name) {
                 pending.push(SemaEffectPending{node: caller, name: incoming.name})
             }
         }
     }
-    SemaLibraryEffectReach{reached: reached, ancestry: ancestry}
+    SemaLibraryEffectReach{reached: reached, ancestry: ancestry, trait_tokens: trait_tokens}
+}
+
+// `e0740`: a function with a declared row (including `-[]>`) reaches an
+// `#Effect` trait effect that neither its signature nor an enclosing `#Context`
+// block discharges.
+sema_library_effect_check_traits: fn(node: SemaEffectNode, reach: SemaLibraryEffectReach, reached: [String], diagnostics: ^[Diagnostic]) {
+    if !node.has_declared_row && !node.is_pure -> return
+    if reached.len() == 0 -> return
+    rare: node.rare ?? SEMA_EFFECT_NODE_NO_RARE
+    loop token in reached {
+        if reach.trait_tokens.get(token) != Val(true) -> next
+        ^covered: sema_library_effect_row_names(rare.library_rows, token)
+        if !covered && reach.ancestry.get(token) == .Val(ancestors) {
+            loop ancestor in ancestors {
+                if sema_library_effect_row_names(rare.library_rows, ancestor) {
+                    covered = true
+                    break
+                }
+                if !ancestor.contains("/") {
+                    loop declared in node.declared {
+                        if sema_effect_covers(declared, ancestor) {
+                            covered = true
+                            break
+                        }
+                    }
+                }
+                if covered -> break
+            }
+        }
+        if covered -> next
+        parts: token.split("/").to_list()
+        leaf: parts[parts.len() - 1]
+        span: node.row_span ?? node.name_span
+        diagnostic: sema_error("E0740", span, "`{node.name}` uses the effect `{leaf}`, which its signature doesn't allow", "a function whose signature does not name `{leaf}` cannot invoke `{leaf}` or call a function that uses it unless a `#Context({leaf}: ...)` block discharges it", "add `{leaf}` to `{node.name}`'s effect row, wrap the call in `#Context({leaf}: ...)`, or remove the call that uses `{leaf}`")
+        diagnostics.push(diagnostic_with_rights(diagnostic, "invocation", [String]{node.name}, [String]{}, None))
+        return
+    }
 }
 
 // `e0749`: a function that denies a library effect, one of its cases or

@@ -2,21 +2,218 @@
 // guards, and the allocator a block installs with its handler.
 use jet_foundation.[
     AST_NODE_GENERATED,
+    EFFECT_VOCABULARY_ROOTS,
     AccessConvention,
     CallArg,
     ContextField,
     Expr,
     ExprPair,
     StrPart,
+    authority_is_deny_only,
     core_source_owns_type,
+    expr_span,
     Span,
     Stmt,
+    Symbol,
     SymbolID,
+    SymbolKind,
     TFieldRef,
+    TGenericParam,
+    TMethodRef,
     Type,
     AST_EMPTY_CALL_ARG_FLAGS,
     symbol_is_none,
+    symbol_none,
+    symbol_table_key,
+    type_name,
 ]
+
+// Resolved `#Effect` trait target for `#Context(Effect: handler)` and ambient
+// `Effect.method(...)` calls.
+SemaResolvedEffectTrait: struct {
+    written: String,
+    trait_name: String,
+    trait_symbol: Symbol,
+    trait_key: String,
+    effect_key: String,
+    effect_token: String,
+    module_index: Int,
+    nominal_row: Int,
+    meta: SemaEffectTraitMeta,
+}
+
+// Whether `name` names a structural or non-swappable built-in effect that can
+// never be replaced by a `#Context` handler (E0782).
+sema_context_non_swappable_builtin: fn(name: String) -> Bool Never! {
+    root: sema_effect_root(name)
+    if root == "Unsafe" || root == "Panic" || root == "FFI" || root == "Meta" -> return true
+    if root == "Mem" && name != "Mem.Alloc" -> return true
+    EFFECT_VOCABULARY_ROOTS.contains(root) && authority_is_deny_only(root)
+}
+
+// Resolves `written` (e.g. `Clock`, `Emit<Int>`, `mod.Clock`, or `FS.Read`)
+// to an `#Effect`-marked trait visible from `check`.
+sema_context_resolve_effect_trait: fn(written: String, check: SemaBodyCheck) -> SemaResolvedEffectTrait? {
+    graph: check.program.registration_graph
+    caller: sema_scope_caller_row(check.environment.*, graph)
+    ^resolved_symbol: sema_type_graph_trait_symbol_at(graph, caller, written)
+    if resolved_symbol == None && written.contains(".") {
+        dot: written.partition(".")
+        loop module_row in graph.modules {
+            loop item in module_row.program.items {
+                if item == .Trait(definition) && definition.type_params.len() == 0 {
+                    if sema_effect_trait_meta(definition) == .Val(meta) {
+                        if meta.leaf == dot.tail && meta.parent == .Val(parent_span) && parent_span.name == dot.head {
+                            resolved_symbol = sema_type_graph_trait_symbol_at(graph, sema_type_module_row(graph, module_row.module_identity), definition.name)
+                            if resolved_symbol != None -> break
+                        }
+                    }
+                }
+            }
+            if resolved_symbol != None -> break
+        }
+    }
+    trait_symbol: resolved_symbol ?? return None
+    trait_module: sema_registration_module_index(graph, trait_symbol.module_identity) ?? return None
+    ^found_meta: SemaEffectTraitMeta?{None}
+    ^trait_def_name: trait_symbol.name
+    loop item in graph.modules[trait_module].program.items {
+        if item == .Trait(definition) && definition.name == trait_symbol.name && definition.type_params.len() == 0 {
+            found_meta = sema_effect_trait_meta(definition)
+            trait_def_name = definition.name
+            break
+        }
+    }
+    meta: found_meta ?? return None
+    ^nominal_row: -1
+    loop (idx, nominal) in graph.modules[trait_module].nominals {
+        if nominal.symbol.id == trait_symbol.id {
+            nominal_row = idx
+            break
+        }
+    }
+    if nominal_row < 0 -> return None
+    trait_key: symbol_table_key(graph.symbols, trait_symbol.id)
+    module_name: graph.modules[trait_module].module_name
+    trait_full_name: if module_name == "" -> trait_def_name else -> "{module_name}.{trait_def_name}"
+    effect_token: "{graph.modules[trait_module].package_identity}/{trait_def_name}"
+    Val(SemaResolvedEffectTrait{
+        written: written,
+        trait_name: trait_full_name,
+        trait_symbol: trait_symbol,
+        trait_key: trait_key,
+        effect_key: "effect:{trait_key}",
+        effect_token: effect_token,
+        module_index: trait_module,
+        nominal_row: nominal_row,
+        meta: meta,
+    })
+}
+
+// Checks whether `actual` satisfies `resolved.trait_symbol`, returning
+// `(satisfied, concrete_type)`: concrete nominals return `Val(actual)` so
+// `#Context` discharges the effect to `actual`'s impl; opaque trait objects
+// return `None` so the effect ceiling is preserved.
+sema_context_effect_handler_check: fn(resolved: SemaResolvedEffectTrait, actual: Type, check: SemaBodyCheck) -> {satisfied: Bool, concrete: Type?} {
+    graph: check.program.registration_graph
+    caller: sema_scope_caller_row(check.environment.*, graph)
+    if actual == .TraitObject(bounds) {
+        loop bound in bounds {
+            if bound == resolved.trait_name || bound == resolved.trait_symbol.name || bound.ends_with(".{resolved.trait_symbol.name}") {
+                return {satisfied: true, concrete: None}
+            }
+            if sema_type_graph_trait_symbol_at(graph, caller, bound) == .Val(bound_sym) && bound_sym.id == resolved.trait_symbol.id {
+                return {satisfied: true, concrete: None}
+            }
+        }
+        return {satisfied: false, concrete: None}
+    }
+    nominal_row: sema_type_resolve_nominal_row_at(graph, actual, caller) ?? return {satisfied: false, concrete: None}
+    ok: sema_type_bound_satisfied_nominal(graph, graph.modules[nominal_row.module_index].nominals[nominal_row.row], resolved.trait_symbol, resolved.trait_symbol.name, actual, check.environment.generic_params) == Val(true)
+    if !ok -> return {satisfied: false, concrete: None}
+    {satisfied: true, concrete: Val(actual)}
+}
+
+// Extracts an effect trait receiver name from `Clock.now()`, `Emit<Int>.emit(v)`,
+// or `mod.Clock.now()`, returning None when the receiver is a local value.
+sema_effect_trait_receiver_name: fn(receiver: Expr, owner_type_args: [Type], check: SemaBodyCheck) -> String? Never! {
+    if receiver == {
+        .Ident(name, _, _) -> {
+            if sema_scope_resolve_index(check.scopes, name) == .Val(index) {
+                kind: sema_scope_binding_symbol(check.environment.*, check.scopes, index).kind
+                if kind != SymbolKind.Type && kind != SymbolKind.Trait && kind != SymbolKind.Import -> return None
+            }
+            if owner_type_args.len() > 0 {
+                args_text: loop arg_ty in owner_type_args -> type_name(arg_ty)
+                return Val("{name}<{args_text.join(", ")}>")
+            }
+            return Val(name)
+        }
+        .TypeValue(ty, _, _) -> {
+            return Val(type_name(ty))
+        }
+        .Field(base, member, _, _) -> {
+            if base == .Ident(head, _, _) {
+                if sema_scope_resolve_index(check.scopes, head) == .Val(index) {
+                    kind: sema_scope_binding_symbol(check.environment.*, check.scopes, index).kind
+                    if kind != SymbolKind.Type && kind != SymbolKind.Trait && kind != SymbolKind.Import -> return None
+                }
+                if owner_type_args.len() > 0 {
+                    args_text: loop arg_ty in owner_type_args -> type_name(arg_ty)
+                    return Val("{head}.{member}<{args_text.join(", ")}>")
+                }
+                return Val("{head}.{member}")
+            }
+            None
+        }
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) -> None
+    }
+}
+
+// Ambient call through an `#Effect` trait name (`Clock.now()`,
+// `Emit<Int>.emit(v)`): resolves the method on the `#Effect` trait, checks its
+// arguments, and emits `THostCall.EffectCall` dispatched through `#Context`.
+sema_call_effect_trait_method: fn(receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], expected: Type?, check: ^SemaBodyCheck) -> SemaDirectSpecialCheck {
+    unhandled: SemaDirectSpecialCheck{handled: false, value: None}
+    written: sema_effect_trait_receiver_name(receiver, owner_type_args, check) ?? return unhandled
+    resolved: sema_context_resolve_effect_trait(written, check) ?? return unhandled
+    failed: SemaDirectSpecialCheck{handled: true, value: None}
+    graph: check.program.registration_graph
+    nominal: graph.modules[resolved.module_index].nominals[resolved.nominal_row]
+    ^found_method: SemaRegistrationTraitMethod?{None}
+    loop candidate in nominal.trait_methods {
+        if candidate.symbol.name == method {
+            found_method = Val(candidate)
+            break
+        }
+    }
+    trait_method: found_method ?? {
+        check.diagnostics.push(sema_error("E0302", method_span, "effect trait `{written}` has no method `{method}`", "an `#Effect` trait exposes only the methods declared in its trait body", "call a method declared on `{written}`"))
+        return failed
+    }
+    param_offset: if trait_method.parameters.len() > 0 && trait_method.parameters[0].name == "self" -> 1 else -> 0
+    expected_count: trait_method.parameters.len() - param_offset
+    if args.len() != expected_count {
+        check.diagnostics.push(sema_error("E0104", method_span, "`{written}.{method}` expects {expected_count} arguments, got {args.len()}", "effect trait calls pass every non-`self` parameter declared on `{written}.{method}`", "pass {expected_count} arguments to `{written}.{method}`"))
+        return failed
+    }
+    ^checked_args: [TCallArg]{}
+    loop arg_index in 0..<args.len() {
+        param: trait_method.parameters[param_offset + arg_index]
+        param_ty: sema_type_resolve_declared_recursive(graph, param.ty, resolved.module_index, [TGenericParam]{})
+        checked_arg: sema_check_expression(args[arg_index].expr, Val(param_ty), check) ?? return failed
+        adapted_arg: sema_expr_expected_owned(checked_arg, Val(param_ty), check.environment.*, check.program.*, check.diagnostics) ?? return failed
+        checked_args.push(TCallArg{value: adapted_arg, template_items: [SymbolID]{}, borrow: param.convention == AccessConvention.Read, mut_borrow: param.convention == AccessConvention.Write, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false})
+    }
+    ^result_ty: Type.Named{name: "Unit"}
+    if trait_method.declaration.return_type == .Val(ret_ty) {
+        result_ty = sema_type_resolve_declared_recursive(graph, ret_ty, resolved.module_index, [TGenericParam]{})
+    }
+    span: Span{start: expr_span(receiver).start, end: method_span.end}
+    method_ref: TMethodRef{symbol: trait_method.symbol.id, name: method, mangled: false, trait_owner: Val(resolved.trait_symbol.id), operator_identity: None}
+    call_node: sema_tree_node(result_ty, TExprKind.HostCall{call: THostCall.EffectCall{effect_key: resolved.effect_key, effect_token: resolved.effect_token, trait_name: resolved.trait_name, method: method_ref, type_args: type_args, args: checked_args}}, span)
+    SemaDirectSpecialCheck{handled: true, value: sema_expr_expected_owned(call_node, expected, check.environment.*, check.program.*, check.diagnostics)}
+}
 
 // Desugar `{CC: "clang", ...}` (inferred anonymous StructLit) in `#Context(env: ...)`
 // into a `[String:String]` MapLit whose keys are the field names.
@@ -48,61 +245,112 @@ sema_stmt_context_dir_path: fn(ty: Type) -> Bool Never! {
 // sema_stmt_context_allocator_handler); `logger` is core.log's
 // `logger` key, `on_stop` the stop handler, a `fn(debug.Stop)`, `dir` the
 // task working directory (`String` or `Path`), `env` an environment overlay
-// (`[String:String]` or `{KEY: "value"}`), and any other label names a
-// `#ContextKey` constant, whose value takes the key's type; a label naming
-// neither is E0761. A `#Deadline(limit)` block is the context block of its
-// one `deadline` field, a `Duration` or an `Instant` (the marker binding,
-// E0930). Then the body is an ordinary nested block. Lowering installs the
-// guards around the body (IR BuildTransact.jet ir_context_block).
+// (`[String:String]` or `{KEY: "value"}`), any swappable `#Effect` trait name
+// (installing an implementation and discharging that effect for the block), and
+// any other label names a `#ContextKey` constant, whose value takes the key's
+// type; a label naming none of these is E0761. A `#Deadline(limit)` block is
+// the context block of its one `deadline` field, a `Duration` or an `Instant`
+// (the marker binding, E0930). Then the body is an ordinary nested block.
+// Lowering installs the guards around the body (IR BuildTransact.jet
+// ir_context_block).
 sema_stmt_check_context_block: fn(fields: [ContextField], body: [Stmt], span: Span, return_type: Type?, check: ^SemaBodyCheck, loop_depth: Int, output: ^[TStmt]) -> Bool {
     // The block's `#Context` or `#Deadline` application binds first; fields
     // that do not bind (E0930) get no E0762 of their own.
     signature_valid: sema_marker_rules_check_context_fact(span, check)
     ^complete: signature_valid
     ^guards: [TContextGuard]{}
+    ^pending_borrows: [SemaOwnershipContextBorrow]{}
     loop field in fields {
         if !sema_context_field_settable(field.name) {
             name_span: Span{start: field.span.start, end: field.span.start + field.name.len()}
-            found: sema_context_label_key(field.name, check) ?? {
+            if sema_context_label_key(field.name, check) == .Val(found) {
+                if field.name == "dir" {
+                    checked_dir: sema_check_expression(field.value, None, check) ?? {
+                        complete = false
+                        next
+                    }
+                    if sema_stmt_context_dir_path(checked_dir.ty) {
+                        reference: TFieldRef{owner: None, name: "raw", ty: Type.String, boxed: false}
+                        raw_dir: sema_tree_node(Type.String, TExprKind.Field{receiver: checked_dir, field: reference}, field.span)
+                        guards.push(TContextGuard{field: field.name, value: raw_dir, key: found.key})
+                        next
+                    }
+                    dir_val: sema_expr_expected_owned(checked_dir, Val(found.ty), check.environment.*, check.program.*, check.diagnostics) ?? {
+                        complete = false
+                        next
+                    }
+                    guards.push(TContextGuard{field: field.name, value: dir_val, key: found.key})
+                    next
+                }
+                checked_opt: if field.name == "env" && sema_stmt_context_env_desugar(field.value) == .Val(desugared) -> {
+                    sema_check_expression(desugared, Val(found.ty), check)
+                } else -> {
+                    sema_check_expression(field.value, Val(found.ty), check)
+                }
+                checked_key: checked_opt ?? {
+                    complete = false
+                    next
+                }
+                // A value of another type is the ordinary mismatch; an optional
+                // key takes a present value as `T?`.
+                value: sema_expr_expected_owned(checked_key, Val(found.ty), check.environment.*, check.program.*, check.diagnostics) ?? {
+                    complete = false
+                    next
+                }
+                guards.push(TContextGuard{field: field.name, value: value, key: found.key})
+                next
+            }
+            if sema_context_non_swappable_builtin(field.name) {
                 ^_: sema_check_expression(field.value, None, check)
-                check.diagnostics.push(sema_error("E0761", name_span, "`{field.name}` isn't a context field or key", "`#Context` sets `allocator`, `logger`, `on_stop`, `dir` and `env`, and the constants a package declares with `#ContextKey`", "declare `#ContextKey {field.name}: …` or write `#Context(allocator: …)`, `#Context(logger: …)`, `#Context(on_stop: …)`, `#Context(dir: …)` or `#Context(env: …)`"))
+                check.diagnostics.push(sema_error("E0782", name_span, "`{field.name}` is not a swappable effect and cannot be installed in `#Context`", "Structural and non-swappable effects (`Unsafe`, `Panic`, `Mem.*`, `FFI.*`, `Meta.*`, or any `#Effect(swappable: false)` trait) represent language or machine guarantees that cannot be replaced or discharged by a local handler", "Remove `{field.name}: ...` from `#Context(...)` and declare or control `{field.name}` in the function's effect row"))
                 complete = false
                 next
             }
-            if field.name == "dir" {
-                checked_dir: sema_check_expression(field.value, None, check) ?? {
+            if sema_context_resolve_effect_trait(field.name, check) == .Val(resolved) {
+                if !resolved.meta.swappable || resolved.meta.deny_only {
+                    ^_: sema_check_expression(field.value, None, check)
+                    check.diagnostics.push(sema_error("E0782", name_span, "`{field.name}` is not a swappable effect and cannot be installed in `#Context`", "Structural and non-swappable effects (`Unsafe`, `Panic`, `Mem.*`, `FFI.*`, `Meta.*`, or any `#Effect(swappable: false)` trait) represent language or machine guarantees that cannot be replaced or discharged by a local handler", "Remove `{field.name}: ...` from `#Context(...)` and declare or control `{field.name}` in the function's effect row"))
                     complete = false
                     next
                 }
-                if sema_stmt_context_dir_path(checked_dir.ty) {
-                    reference: TFieldRef{owner: None, name: "raw", ty: Type.String, boxed: false}
-                    raw_dir: sema_tree_node(Type.String, TExprKind.Field{receiver: checked_dir, field: reference}, field.span)
-                    guards.push(TContextGuard{field: field.name, value: raw_dir, key: found.key})
-                    next
-                }
-                dir_val: sema_expr_expected_owned(checked_dir, Val(found.ty), check.environment.*, check.program.*, check.diagnostics) ?? {
+                checked_handler: sema_check_expression(field.value, None, check) ?? {
                     complete = false
                     next
                 }
-                guards.push(TContextGuard{field: field.name, value: dir_val, key: found.key})
+                graph: check.program.registration_graph
+                caller: sema_scope_caller_row(check.environment.*, graph)
+                actual: sema_type_resolve_declared_recursive(graph, checked_handler.ty, caller, check.environment.generic_params)
+                fit: sema_context_effect_handler_check(resolved, actual, check)
+                if !fit.satisfied {
+                    check.diagnostics.push(sema_error("E0762", field.span, "`{field.name}` needs a handler implementing `{field.name}`, got {sema_type_show(checked_handler.ty)}", "installing an `#Effect` provider in `#Context({field.name}: ...)` requires a value whose type implements `{field.name}`", "implement `{field.name}` for `{sema_type_show(checked_handler.ty)}` or pass a type that implements `{field.name}`"))
+                    complete = false
+                    next
+                }
+                if field.borrowed {
+                    if sema_scope_place_root(field.value) == .Val(root) && sema_scope_resolve_index(check.scopes, root) == .Val(index) {
+                        sema_ownership_note_binding_write(check.state, check.scopes.bindings[index])
+                    }
+                    places: sema_ownership_places_from_expr_in_state(field.value, check.scopes, check.state)
+                    ^place_name: ""
+                    ^place_id: symbol_none()
+                    if places.len() > 0 && !symbol_is_none(places[0].root_id) {
+                        place_name = sema_ownership_place_name(places[0])
+                        place_id = SymbolID{id: places[0].root_id.id}
+                    }
+                    pending_borrows.push(SemaOwnershipContextBorrow{effect_name: field.name, effect_token: resolved.effect_token, place_name: place_name, place_id: place_id, has_write_receiver: resolved.meta.has_write_receiver, borrowed: true})
+                    guards.push(TContextGuard{field: field.name, value: checked_handler, key: resolved.effect_key, effect_trait: resolved.trait_key, effect_token: resolved.effect_token, borrowed: true, concrete_type: fit.concrete})
+                } else {
+                    if resolved.meta.has_write_receiver {
+                        pending_borrows.push(SemaOwnershipContextBorrow{effect_name: field.name, effect_token: resolved.effect_token, place_name: "", place_id: symbol_none(), has_write_receiver: true, borrowed: false})
+                    }
+                    boxed_value: if actual == .TraitObject(_) -> checked_handler else -> sema_tree_node(Type.TraitObject{bounds: [String]{resolved.trait_name}}, TExprKind.TraitBox{value: checked_handler, target: Type.TraitObject{bounds: [String]{resolved.trait_name}}}, field.span)
+                    guards.push(TContextGuard{field: field.name, value: boxed_value, key: resolved.effect_key, effect_trait: resolved.trait_key, effect_token: resolved.effect_token, borrowed: false, concrete_type: fit.concrete})
+                }
                 next
             }
-            checked_opt: if field.name == "env" && sema_stmt_context_env_desugar(field.value) == .Val(desugared) -> {
-                sema_check_expression(desugared, Val(found.ty), check)
-            } else -> {
-                sema_check_expression(field.value, Val(found.ty), check)
-            }
-            checked_key: checked_opt ?? {
-                complete = false
-                next
-            }
-            // A value of another type is the ordinary mismatch; an optional
-            // key takes a present value as `T?`.
-            value: sema_expr_expected_owned(checked_key, Val(found.ty), check.environment.*, check.program.*, check.diagnostics) ?? {
-                complete = false
-                next
-            }
-            guards.push(TContextGuard{field: field.name, value: value, key: found.key})
+            ^_: sema_check_expression(field.value, None, check)
+            check.diagnostics.push(sema_error("E0761", name_span, "`{field.name}` isn't a context field, effect trait, or key", "`#Context` sets `allocator`, `logger`, `on_stop`, `dir` and `env`, swappable `#Effect` traits, and constants declared with `#ContextKey`", "declare `#Effect {field.name}: trait {{ … }}`, declare `#ContextKey {field.name}: …`, or write `#Context(allocator: …)`"))
+            complete = false
             next
         }
         if field.name == "allocator" && sema_stmt_context_scratch(field.value, check) {
@@ -151,6 +399,7 @@ sema_stmt_check_context_block: fn(fields: [ContextField], body: [Stmt], span: Sp
     // Each open block's allocator stays in place while the block runs
     // (Ownership/Checks.jet SemaOwnershipBlockAllocator).
     open_allocators: check.state.block_allocators.len()
+    open_borrows: check.state.context_borrows.len()
     ^names_allocator: false
     loop field in fields {
         if field.name != "allocator" -> next
@@ -160,11 +409,17 @@ sema_stmt_check_context_block: fn(fields: [ContextField], body: [Stmt], span: Sp
             check.state.block_allocators.push(SemaOwnershipBlockAllocator{name: sema_ownership_place_name(places[0]), id: SymbolID{id: places[0].root_id.id}})
         }
     }
+    loop borrow in pending_borrows {
+        check.state.context_borrows.push(borrow)
+    }
     // A `#Deadline` or `#Frame` block sets no allocation context of its own;
     // L0506 reads the enclosing one.
     no_alloc_block: fields.len() == 1 && (fields[0].name == "deadline" || fields[0].name == "frame")
     check.scopes.context_allocation = if names_allocator || previous_allocation == 2 -> 2 else if no_alloc_block -> previous_allocation else -> 1
     nested: sema_stmt_check_block(body, return_type, check, "context@{span.start}", loop_depth)
+    loop check.state.context_borrows.len() > open_borrows {
+        ^_: check.state.context_borrows.pop()
+    }
     loop check.state.block_allocators.len() > open_allocators {
         ^_: check.state.block_allocators.pop()
     }

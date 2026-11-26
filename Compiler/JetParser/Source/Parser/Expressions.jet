@@ -2527,6 +2527,8 @@ parser_parse_call_args: fn(state: ^JetParserState, depth: Int, allow_marker_labe
                 ^label_name: parser_value(state, label_token)
                 if label_token.kind == TOKEN_KW_USE -> label_name = "use"
                 label = Val(CallLabel{name: label_name, span: label_token.span})
+            } else if allow_marker_labels && label_kind == TOKEN_IDENT && (parser_kind_at(state, 1) == TOKEN_DOT || parser_kind_at(state, 1) == TOKEN_LT) {
+                label = parser_try_parse_marker_path_label(state)
             }
             mark_kind: parser_current_kind(state)
             if {
@@ -2551,6 +2553,32 @@ parser_parse_call_args: fn(state: ^JetParserState, depth: Int, allow_marker_labe
     }
     parser_expect(state, TOKEN_RPAREN, "`)` after call arguments")
     args
+}
+
+// Speculatively parses a dotted or generic marker label (`FS.Read:` or
+// `Emit<Int>:`) in `#Context(...)` / marker arguments. Rewinds cleanly when
+// the path is not followed by `:`.
+parser_try_parse_marker_path_label: fn(state: ^JetParserState) -> CallLabel? {
+    saved_position: state.position
+    saved_diagnostics: state.diagnostics.len()
+    saved_blocks: state.block_spans.len()
+    saved_else_arms: state.else_arms.len()
+    saved_type_gt: state.pending_type_gt
+    saved_type_gt_span: Span{start: state.pending_type_gt_span.start, end: state.pending_type_gt_span.end}
+    start: parser_current(state).span.start
+    ^name: parser_parse_bound_path(state, "as a marker label")
+    if parser_current_kind(state) == TOKEN_LT {
+        name = "{name}{parser_parse_trait_args(state)}"
+    }
+    end: parser_previous_end(state)
+    if state.diagnostics.len() == saved_diagnostics && parser_current_kind(state) == TOKEN_COLON {
+        parser_bump(state)
+        return Val(CallLabel{name: name, span: Span{start: start, end: end}})
+    }
+    parser_rewind(state, saved_position, saved_diagnostics, saved_blocks, saved_else_arms)
+    state.pending_type_gt = saved_type_gt
+    state.pending_type_gt_span = saved_type_gt_span
+    None
 }
 
 // `grow(^xs)` / `archive(^^title)`: a call mark on an argument (`CallArg.mark`).

@@ -658,6 +658,24 @@ ContextKey: struct {
     }
 }
 
+// Marks a trait as an effect service: one declaration defines both the
+// trait's operations and the effect name usable in `-[Effect]>` rows and
+// `#Context(Effect: handler)` blocks.
+Effect: struct {
+    parent: Ident{none},
+    leaf: String{""},
+    access: EffectAccess{.Reads},
+    irreversible: Bool{false},
+    swappable: Bool{true},
+    deny_only: Bool{false},
+    expert: Bool{false},
+    action: String{""},
+
+    impl Marker {
+        sites: [.Trait],
+    }
+}
+
 // `#Deadline(limit)` bounds the waits of a block or a function body: a
 // `Duration` from entry or an `Instant`. A nested deadline can only shorten
 // the one in force; the earliest wins.

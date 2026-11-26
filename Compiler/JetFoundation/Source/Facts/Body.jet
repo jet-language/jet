@@ -304,6 +304,11 @@ BodyContextGuard: struct {
     field: String,
     value: Int,
     key: String{""},
+    effect_trait: String{""},
+    effect_token: String{""},
+    borrowed: Bool{false},
+    concrete_type: Type?{None},
+    handler_methods: [String]{[String]{}},
 }
 
 // The key text `context.on_stop` and `#Context(on_stop:)` carry the stop
@@ -1394,6 +1399,9 @@ body_each_host_call_child: fn(_tree: BodyTree, value: BodyHostCall, visit: fn(In
         .ComptimeInput(_, f1, _) -> { visit(f1) }
         .DebugTrace(f0) -> { visit(f0) }
         .ContextGet(_, f1, _) -> { visit(f1) }
+        .EffectCall(_, _, _, _, _, f5) -> {
+            loop item in f5 { visit(item.value) }
+        }
         .SwitchSubjectValue | .NumericBounds(_, _) | .MemoStats(_, _) | .ContextRead(_) -> {}
     }
 }

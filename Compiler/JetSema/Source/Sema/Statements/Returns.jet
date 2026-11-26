@@ -274,7 +274,11 @@ sema_stmt_return_lift_arm: fn(body: [Stmt], value: Expr, return_type: Type?, che
 sema_stmt_check_return_value: fn(value: Expr, return_type: Type?, check: ^SemaBodyCheck) -> TExpr? {
     diagnostic_start: check.diagnostics.len()
     checked: sema_stmt_check_return_value_typed(value, return_type, check)
-    if checked == None {
+    if checked == .Val(returned) {
+        if check.state.context_borrows.len() > 0 && returned.kind == .Lambda(lambda) {
+            sema_ownership_check_context_borrow_escape(lambda, expr_span(value), check.state, check.diagnostics)
+        }
+    } else {
         sema_stmt_value_return_mismatch(value, return_type, diagnostic_start, check)
     }
     checked

@@ -4785,6 +4785,8 @@ sema_expr_check_method_call: fn(receiver: Expr, method: String, method_span: Spa
     if root_call.handled -> return root_call.value
     ^ambient_input: sema_call_try_ambient_input_method(receiver, method, method_span, type_args, args, expected, check)
     if ambient_input.handled -> return ambient_input.value
+    ^effect_trait_call: sema_call_effect_trait_method(receiver, method, method_span, owner_type_args, type_args, args, expected, check)
+    if effect_trait_call.handled -> return effect_trait_call.value
     ^missing: sema_call_static_missing_member(receiver, method, method_span, args, check)
     if missing.handled -> return missing.value
     ^outcome_read: sema_value_method_outcome_read(receiver, method, method_span, args, expected, check)

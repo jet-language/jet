@@ -306,6 +306,11 @@ TContextGuard: struct {
     field: String,
     value: TExpr,
     key: String{""},
+    effect_trait: String{""},
+    effect_token: String{""},
+    borrowed: Bool{false},
+    concrete_type: Type?{None},
+    handler_methods: [String]{[String]{}},
 }
 
 TUnitRounding: struct {
@@ -481,6 +486,7 @@ THostCall: enum {
     ContextRead(field: String),
     ContextGet(key: String, default: TExpr, equatable: Bool),
     DebugTrace(write: TExpr),
+    EffectCall(effect_key: String, effect_token: String, trait_name: String, method: TMethodRef, type_args: [Type], args: [TCallArg]),
 }
 
 // A Tier-1 comptime input (`embed_file`, `embed_bytes`, `find`): its
@@ -928,6 +934,9 @@ tree_each_host_call_child: fn(call: THostCall, visit: fn(TExpr) -[Mem.Alloc, Mem
         .ComptimeInput(_, path, _) -> { visit(path) }
         .DebugTrace(write) -> { visit(write) }
         .ContextGet(_, default, _) -> visit(default)
+        .EffectCall(_, _, _, _, _, args) -> {
+            loop arg in args -> visit(arg.value)
+        }
         .SwitchSubjectValue | .NumericBounds(_, _) | .MemoStats(_, _) | .ContextRead(_) -> {}
     }
 }

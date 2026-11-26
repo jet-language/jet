@@ -243,13 +243,14 @@ ir_print_style_key: fn(p: IRProgram, site: IRPrintStyle) -> IRPrintStyleKey? Nev
 // into `print` while that holds none. `check_boxed` is true for non-generic
 // bodies (where trait boxing candidates are valid).
 ir_scan_function_nodes: fn(fn_row: Int, function: FnBody, check_boxed: Bool, interner: Interner, spawns: ^[IRBodyScanSpawn], boxed: ^[IRBodyScanBoxed], print: ^IRPrintStyle?) Never! {
-    if print == None {
-        loop (stmt, statement) in function.tree.stmts {
-            if statement == .ContextBlock(guards, _, _) {
-                loop (at, guard) in guards {
-                    if guard.field == "print" && guard.key != "" && print == None {
-                        print = Val(IRPrintStyle{fn_row: fn_row, stmt: stmt, guard: at})
-                    }
+    loop (stmt, statement) in function.tree.stmts {
+        if statement == .ContextBlock(guards, _, _) {
+            loop (at, guard) in guards {
+                if print == None && guard.field == "print" && guard.key != "" {
+                    print = Val(IRPrintStyle{fn_row: fn_row, stmt: stmt, guard: at})
+                }
+                if check_boxed && guard.effect_trait != "" && guard.borrowed && guard.concrete_type != None {
+                    ir_trait_boxed_candidate(body_type(interner, function.tree, guard.value), Type.TraitObject{bounds: [String]{ir_short_name(guard.effect_trait)}}, boxed)
                 }
             }
         }
@@ -679,32 +680,19 @@ IRTraitTarget: struct {
     args: [Type],
 }
 
-// `receiver.method(args)` on a trait value: the payload key selects the
-// implementation of the method's trait for the boxed concrete type; its
-// receiver is the payload's address (a write receiver or an aggregate) or the
-// payload value. A method every implementation takes by move (`^^self`)
-// consumes the trait value as sema reads it: the call owns the box
-// (ir_move_receiver), which hands the payload over to the implementation
-// (ir_box_hand_over), so only the implementation ends it. A move
-// implementation of a method the trait value is only read for gets a copy of
-// the payload, which the box keeps. No implementation, or an unknown key,
-// stops at jet_rt_unreachable; `ty` is the call's checked type.
-ir_trait_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, receiver: Int, method: TMethodRef, type_args: [Type], args: [BodyCallArg], ty: Type, span: Span) -> Int Never! {
-    if type_args.len() > 0 {
-        return ir_fail_slot(b, span, "generic dynamic trait receivers are not object-safe")
-    }
-    owner: method.trait_owner ?? return ir_fail_slot(b, span, "trait call has no trait owner")
+IRTraitDispatchTargets: struct {
+    targets: [IRTraitTarget],
+    returned: Type,
+    lent: Bool,
+}
+
+ir_trait_collect_targets: fn(p: IRProgram, b: ^IRBuilder, owner: SymbolID, method_name: String, span: Span) -> IRTraitDispatchTargets Never! {
     ^targets: [IRTraitTarget]{}
     ^returned: Type.Named{name: "Unit"}
     ^seen: name_table_sized(8)
-    // Whether an implementation returns a view (`-> T from self`), whose
-    // result the call marks lent.
     ^lent: false
     short: ir_short_name(ir_symbol_key(p, owner))
-    candidates: p.trait_methods.rows[ir_trait_method_slot(p.trait_methods, short, method.name)]
-    // The implementations for exact types come first; a generic owner's
-    // (`impl Box.Shape`) then serves each instance of it the program boxes
-    // as the trait's values (p.trait_boxed) that no exact one claimed.
+    candidates: p.trait_methods.rows[ir_trait_method_slot(p.trait_methods, short, method_name)]
     ^picks: [{row: Int, concrete: Type, args: [Type]}]{}
     ^generic: [Int]{}
     loop index in candidates {
@@ -738,6 +726,28 @@ ir_trait_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, receiver: Int, meth
         if p.functions[pick.row].return_view_provenance != None -> lent = true
         targets.push(IRTraitTarget{key: p.functions[pick.row].key.copy(), concrete: pick.concrete, access: ir_receiver_access(p.functions[pick.row].kind), args: pick.args})
     }
+    IRTraitDispatchTargets{targets: targets, returned: returned, lent: lent}
+}
+
+// `receiver.method(args)` on a trait value: the payload key selects the
+// implementation of the method's trait for the boxed concrete type; its
+// receiver is the payload's address (a write receiver or an aggregate) or the
+// payload value. A method every implementation takes by move (`^^self`)
+// consumes the trait value as sema reads it: the call owns the box
+// (ir_move_receiver), which hands the payload over to the implementation
+// (ir_box_hand_over), so only the implementation ends it. A move
+// implementation of a method the trait value is only read for gets a copy of
+// the payload, which the box keeps. No implementation, or an unknown key,
+// stops at jet_rt_unreachable; `ty` is the call's checked type.
+ir_trait_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, receiver: Int, method: TMethodRef, type_args: [Type], args: [BodyCallArg], ty: Type, span: Span) -> Int Never! {
+    if type_args.len() > 0 {
+        return ir_fail_slot(b, span, "generic dynamic trait receivers are not object-safe")
+    }
+    owner: method.trait_owner ?? return ir_fail_slot(b, span, "trait call has no trait owner")
+    collected: ir_trait_collect_targets(p, b, owner, method.name, span)
+    targets: collected.targets
+    returned: collected.returned
+    lent: collected.lent
     ^consumes: targets.len() > 0
     loop target in targets {
         if target.access != "move" -> consumes = false
@@ -817,6 +827,109 @@ ir_trait_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, receiver: Int, meth
         if lent -> b.lent[result] = true
     }
     ir_trait_propagate(m, p, b, method, result, ty, span)
+}
+
+// `Effect.method(args)` (BodyHostCall.EffectCall): looks up the innermost
+// `#Context(Effect: handler)` node on the task's context chain by canonical
+// monomorphized trait key, extracts `(payload_key, receiver_address)` for
+// either an owned `TraitBox` (tag 0 at +40, box at +48) or a borrowed local
+// handler (tag 1 at +40, payload_key at +48, local address at +56), and
+// dispatches to the matching implementation.
+ir_effect_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, effect_key: String, trait_name: String, method: TMethodRef, type_args: [Type], args: [BodyCallArg], ty: Type, span: Span) -> Int Never! {
+    if type_args.len() > 0 {
+        return ir_fail_slot(b, span, "generic dynamic effect trait methods are not supported yet")
+    }
+    owner: method.trait_owner ?? return ir_fail_slot(b, span, "effect trait call has no trait owner")
+    collected: ir_trait_collect_targets(p, b, owner, method.name, span)
+    targets: collected.targets
+    returned: collected.returned
+    lent: collected.lent
+    if targets.len() == 0 {
+        ir_effect_missing_unreachable(m, b, trait_name)
+        return ir_unreachable_value(m, p, b, ty)
+    }
+    pointer_row: ir_pointer_row(m)
+    word_row: ir_word_row(m)
+    key_word: ir_word_const(m, b, ir_context_key_word(effect_key))
+    node: ir_runtime(m, b, "jet_ctx_value_find", [Int]{key_word}, pointer_row)
+    zero: ir_word_const(m, b, 0)
+    missing: ir_bool_op(m, b, IROp.Eq, node, zero)
+    ir_open_if(b.f, missing, b.line)
+    ir_effect_missing_unreachable(m, b, trait_name)
+    ir_end(b.f, b.line)
+    is_borrowed: ir_load_word(m, b, node, 40)
+    borrowed_cond: ir_bool_op(m, b, IROp.Ne, is_borrowed, zero)
+    key_slot: ir_temp(m, b, word_row)
+    addr_slot: ir_temp(m, b, pointer_row)
+    ir_open_if(b.f, borrowed_cond, b.line)
+    borrowed_key: ir_load_word(m, b, node, 48)
+    borrowed_addr: ir_load_word(m, b, node, 56)
+    ir_emit(b.f, IROp.Copy, key_slot, borrowed_key, -1, -1, b.line)
+    ir_emit(b.f, IROp.Copy, addr_slot, borrowed_addr, -1, -1, b.line)
+    ir_else(b.f, b.line)
+    boxed: ir_load_word(m, b, node, 48)
+    owned_key: ir_load_word(m, b, boxed, 0)
+    owned_addr: ir_address_at(m, b, boxed, 8)
+    ir_emit(b.f, IROp.Copy, key_slot, owned_key, -1, -1, b.line)
+    ir_emit(b.f, IROp.Copy, addr_slot, owned_addr, -1, -1, b.line)
+    ir_end(b.f, b.line)
+    ^result: -1
+    if !ir_unit_type(returned) {
+        result_row: ir_value_type(m, p, returned) ?? return ir_type_fail(b, span, returned)
+        result = ir_temp(m, b, result_row)
+    }
+    before: ir_own_states(b, b.bindings.len())
+    ^tests: [Int]{}
+    ^arm_states: [[IROwnState]]{}
+    ^arm_leaves: [Bool]{}
+    loop target in targets {
+        target_key: ir_trait_key(p, target.concrete)
+        expected: ir_word_const(m, b, target_key)
+        selected: ir_bool_op(m, b, IROp.Eq, key_slot, expected)
+        ir_open_if(b.f, selected, b.line)
+        if ir_unit_type(target.concrete) {
+            return ir_fail_slot(b, span, "dynamic effect trait method lacks a receiver")
+        }
+        concrete_row: ir_value_type(m, p, target.concrete) ?? return ir_type_fail(b, span, target.concrete)
+        inline: m.types[concrete_row].kind == .Aggregate
+        ^self_slot: -1
+        if target.access == "write" && !inline {
+            self_slot = ir_address_at(m, b, addr_slot, 0)
+        } else {
+            self_slot = ir_load_at(m, b, addr_slot, 0, concrete_row)
+            if target.access == "move" && self_slot >= 0 {
+                self_slot = ir_copy_value(m, p, b, self_slot, span)
+            }
+        }
+        value: ir_call(m, p, b, target.key, target.args, self_slot, [IRWriteBack]{}, args, span)
+        if ir_failed(b) -> return -1
+        if result >= 0 && value >= 0 {
+            result_row: b.f.slot_type[result]
+            adapted: ir_adapt(m, p, b, value, result_row, span)
+            if ir_failed(b) -> return -1
+            ir_emit(b.f, IROp.Copy, result, adapted, -1, -1, b.line)
+            b.fresh[value] = false
+            b.fresh[adapted] = false
+        }
+        tests.push(selected)
+        arm_states.push(ir_own_states(b, before.len()))
+        arm_leaves.push(false)
+        ir_else(b.f, b.line)
+        ir_set_own_states(b, before)
+    }
+    ir_trait_unreachable(m, b)
+    ir_close_arms(m, b, tests, arm_states, arm_leaves, true)
+    if result >= 0 {
+        b.fresh[result] = ir_has_drop(m, b, result)
+        if lent -> b.lent[result] = true
+    }
+    ir_trait_propagate(m, p, b, method, result, ty, span)
+}
+
+ir_effect_missing_unreachable: fn(m: ^IRModule, b: ^IRBuilder, trait_name: String) Never! {
+    message: ir_static_text(m, b, "no active #Context handler for effect {trait_name}")
+    _: ir_runtime(m, b, "jet_rt_unreachable", message, -1)
+    ir_emit(b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
 }
 
 // Sema types a trait-owned call by the method's success value while the

@@ -1,0 +1,8 @@
+Error: Jet.ScopedContextHandlerEscape: Scoped `#Context` handler for `Emit<Int>` cannot escape into a spawned task or escaping closure
+  --> Tests/UI/context_effect_scoped_escape_e0783.jet:21:18
+    |
+ 21 |             task {
+    |                  ^
+ Why: A borrowed `#Context(Emit<Int>: ^local)` handler or an `#Effect` trait with `^self` methods is scoped to the current task and block; sharing it across tasks or letting it outlive the block would race or dangle
+ Fix: Call `Emit<Int>` inside the `#Context` block without spawning a task that uses it, or install an owned `self`-only handler
+More: jet-lang.dev/e/Jet.ScopedContextHandlerEscape

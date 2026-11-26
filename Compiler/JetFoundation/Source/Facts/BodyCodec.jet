@@ -4492,11 +4492,20 @@ body_codec_put_bodyhostcall: fn(out: ^BodyCodecOut, value: BodyHostCall) Never! 
             body_codec_put_tag(out, 11)
             body_codec_put_int(out, p0)
         }
+        .EffectCall(p0, p1, p2, p3, p4, p5) -> {
+            body_codec_put_tag(out, 12)
+            body_codec_put_string(out, p0)
+            body_codec_put_string(out, p1)
+            body_codec_put_string(out, p2)
+            body_codec_put_tmethodref(out, p3)
+            body_codec_put_list_type(out, p4)
+            body_codec_put_list_bodycallarg(out, p5)
+        }
     }
 }
 
 body_codec_get_bodyhostcall: fn(bytes: [U8], input: ^BodyCodecIn) -> BodyHostCall Never! {
-    position: body_codec_get_tag(bytes, input, 12, 4)
+    position: body_codec_get_tag(bytes, input, 13, 4)
     if position == {
         0 -> {
             f0: body_codec_get_int(bytes, input)
@@ -4555,6 +4564,15 @@ body_codec_get_bodyhostcall: fn(bytes: [U8], input: ^BodyCodecIn) -> BodyHostCal
         11 -> {
             f0: body_codec_get_int(bytes, input)
             BodyHostCall.DebugTrace{write: f0}
+        }
+        12 -> {
+            f0: body_codec_get_string(bytes, input)
+            f1: body_codec_get_string(bytes, input)
+            f2: body_codec_get_string(bytes, input)
+            f3: body_codec_get_tmethodref(bytes, input)
+            f4: body_codec_get_list_type(bytes, input)
+            f5: body_codec_get_list_bodycallarg(bytes, input)
+            BodyHostCall.EffectCall{effect_key: f0, effect_token: f1, trait_name: f2, method: f3, type_args: f4, args: f5}
         }
         else -> BodyHostCall.SwitchSubjectValue
     }
@@ -7933,13 +7951,23 @@ body_codec_put_bodycontextguard: fn(out: ^BodyCodecOut, value: BodyContextGuard)
     body_codec_put_string(out, value.field)
     body_codec_put_int(out, value.value)
     body_codec_put_string(out, value.key)
+    body_codec_put_string(out, value.effect_trait)
+    body_codec_put_string(out, value.effect_token)
+    body_codec_put_bool(out, value.borrowed)
+    body_codec_put_opt_type(out, value.concrete_type)
+    body_codec_put_list_string(out, value.handler_methods)
 }
 
 body_codec_get_bodycontextguard: fn(bytes: [U8], input: ^BodyCodecIn) -> BodyContextGuard Never! {
     f0: body_codec_get_string(bytes, input)
     f1: body_codec_get_int(bytes, input)
     f2: body_codec_get_string(bytes, input)
-    BodyContextGuard{field: f0, value: f1, key: f2}
+    f3: body_codec_get_string(bytes, input)
+    f4: body_codec_get_string(bytes, input)
+    f5: body_codec_get_bool(bytes, input)
+    f6: body_codec_get_opt_type(bytes, input)
+    f7: body_codec_get_list_string(bytes, input)
+    BodyContextGuard{field: f0, value: f1, key: f2, effect_trait: f3, effect_token: f4, borrowed: f5, concrete_type: f6, handler_methods: f7}
 }
 
 body_codec_put_bodyscopememberkind: fn(out: ^BodyCodecOut, value: BodyScopeMemberKind) Never! {

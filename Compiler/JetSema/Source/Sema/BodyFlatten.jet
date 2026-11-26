@@ -640,6 +640,11 @@ body_flat_context_guard: fn(value: TContextGuard, flat: ^BodyFlat) -> BodyContex
         field: value.field,
         value: body_flat_expr(value.value, flat),
         key: value.key,
+        effect_trait: value.effect_trait,
+        effect_token: value.effect_token,
+        borrowed: value.borrowed,
+        concrete_type: value.concrete_type,
+        handler_methods: value.handler_methods,
     }
 }
 
@@ -810,6 +815,7 @@ body_flat_host_call: fn(value: THostCall, flat: ^BodyFlat) -> BodyHostCall Never
         .ContextRead(f_field) -> BodyHostCall.ContextRead{field: f_field}
         .ContextGet(f_key, f_default, f_equatable) -> BodyHostCall.ContextGet{key: f_key, default: body_flat_expr(f_default, flat), equatable: f_equatable}
         .DebugTrace(f_write) -> BodyHostCall.DebugTrace{write: body_flat_expr(f_write, flat)}
+        .EffectCall(f_effect_key, f_effect_token, f_trait_name, f_method, f_type_args, f_args) -> BodyHostCall.EffectCall{effect_key: f_effect_key, effect_token: f_effect_token, trait_name: f_trait_name, method: f_method, type_args: f_type_args, args: body_flat_list_call_arg(f_args, flat)}
     }
 }
 
@@ -1227,6 +1233,11 @@ body_copy_context_guard: fn(value: BodyContextGuard, flat: ^BodyFlat) -> BodyCon
         field: value.field,
         value: body_copy_expr(value.value, flat),
         key: value.key,
+        effect_trait: value.effect_trait,
+        effect_token: value.effect_token,
+        borrowed: value.borrowed,
+        concrete_type: value.concrete_type,
+        handler_methods: value.handler_methods,
     }
 }
 
@@ -1392,6 +1403,7 @@ body_copy_host_call: fn(value: BodyHostCall, flat: ^BodyFlat) -> BodyHostCall Ne
         .ContextRead(f_field) -> BodyHostCall.ContextRead{field: f_field}
         .ContextGet(f_key, f_default, f_equatable) -> BodyHostCall.ContextGet{key: f_key, default: body_copy_expr(f_default, flat), equatable: f_equatable}
         .DebugTrace(f_write) -> BodyHostCall.DebugTrace{write: body_copy_expr(f_write, flat)}
+        .EffectCall(f_effect_key, f_effect_token, f_trait_name, f_method, f_type_args, f_args) -> BodyHostCall.EffectCall{effect_key: f_effect_key, effect_token: f_effect_token, trait_name: f_trait_name, method: f_method, type_args: f_type_args, args: body_copy_list_call_arg(f_args, flat)}
     }
 }
 

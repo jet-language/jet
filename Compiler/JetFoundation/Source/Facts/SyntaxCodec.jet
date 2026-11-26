@@ -4424,13 +4424,17 @@ body_codec_put_contextfield: fn(out: ^BodyCodecOut, value: ContextField) Never! 
     body_codec_put_string(out, value.name)
     body_codec_put_expr(out, value.value)
     body_codec_put_span(out, value.span)
+    body_codec_put_bool(out, value.borrowed)
+    body_codec_put_opt_span(out, value.mark_span)
 }
 
 body_codec_get_contextfield: fn(bytes: [U8], input: ^BodyCodecIn) -> ContextField Never! {
     f0: body_codec_get_string(bytes, input)
     f1: body_codec_get_expr(bytes, input)
     f2: body_codec_get_span(bytes, input)
-    ContextField{name: f0, value: f1, span: f2}
+    f3: body_codec_get_bool(bytes, input)
+    f4: body_codec_get_opt_span(bytes, input)
+    ContextField{name: f0, value: f1, span: f2, borrowed: f3, mark_span: f4}
 }
 
 body_codec_put_binderref: fn(out: ^BodyCodecOut, value: BinderRef) Never! {
@@ -5640,6 +5644,8 @@ body_codec_put_effectimpl: fn(out: ^BodyCodecOut, value: EffectImpl) Never! {
     body_codec_put_list_effectdecl(out, value.decls)
     body_codec_put_opt_expr(out, value.expert)
     body_codec_put_opt_span(out, value.expert_span)
+    body_codec_put_opt_expr(out, value.access)
+    body_codec_put_opt_span(out, value.access_span)
 }
 
 body_codec_get_effectimpl: fn(bytes: [U8], input: ^BodyCodecIn) -> EffectImpl Never! {
@@ -5650,7 +5656,9 @@ body_codec_get_effectimpl: fn(bytes: [U8], input: ^BodyCodecIn) -> EffectImpl Ne
     f4: body_codec_get_list_effectdecl(bytes, input)
     f5: body_codec_get_opt_expr(bytes, input)
     f6: body_codec_get_opt_span(bytes, input)
-    EffectImpl{span: f0, irreversible: f1, method_span: f2, parent: f3, decls: f4, expert: f5, expert_span: f6}
+    f7: body_codec_get_opt_expr(bytes, input)
+    f8: body_codec_get_opt_span(bytes, input)
+    EffectImpl{span: f0, irreversible: f1, method_span: f2, parent: f3, decls: f4, expert: f5, expert_span: f6, access: f7, access_span: f8}
 }
 
 body_codec_put_effectdecl: fn(out: ^BodyCodecOut, value: EffectDecl) Never! {
@@ -5658,6 +5666,7 @@ body_codec_put_effectdecl: fn(out: ^BodyCodecOut, value: EffectDecl) Never! {
     body_codec_put_span(out, value.name_span)
     body_codec_put_bool(out, value.irreversible)
     body_codec_put_span(out, value.span)
+    body_codec_put_effectaccess(out, value.access)
 }
 
 body_codec_get_effectdecl: fn(bytes: [U8], input: ^BodyCodecIn) -> EffectDecl Never! {
@@ -5665,7 +5674,25 @@ body_codec_get_effectdecl: fn(bytes: [U8], input: ^BodyCodecIn) -> EffectDecl Ne
     f1: body_codec_get_span(bytes, input)
     f2: body_codec_get_bool(bytes, input)
     f3: body_codec_get_span(bytes, input)
-    EffectDecl{name: f0, name_span: f1, irreversible: f2, span: f3}
+    f4: body_codec_get_effectaccess(bytes, input)
+    EffectDecl{name: f0, name_span: f1, irreversible: f2, span: f3, access: f4}
+}
+
+body_codec_put_effectaccess: fn(out: ^BodyCodecOut, value: EffectAccess) Never! {
+    if value == {
+        .Reads -> { body_codec_put_tag(out, 0) }
+        .Adds -> { body_codec_put_tag(out, 1) }
+        .Replaces -> body_codec_put_tag(out, 2)
+    }
+}
+
+body_codec_get_effectaccess: fn(bytes: [U8], input: ^BodyCodecIn) -> EffectAccess Never! {
+    position: body_codec_get_tag(bytes, input, 3, 0)
+    if position == {
+        1 -> EffectAccess.Adds
+        2 -> EffectAccess.Replaces
+        else -> EffectAccess.Reads
+    }
 }
 
 body_codec_put_factdecl: fn(out: ^BodyCodecOut, value: FactDecl) Never! {

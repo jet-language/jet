@@ -1478,6 +1478,10 @@ parser_expect_effect_path_name: fn(state: ^JetParserState) -> NamedSpan {
         name = "{name}.{parser_value(state, segment)}"
         end = segment.span.end
     }
+    if parser_current_kind(state) == TOKEN_LT && !parser_aborting(state) {
+        name = "{name}{parser_parse_trait_args(state)}"
+        end = parser_previous_end(state)
+    }
     if parser_current_kind(state) == TOKEN_LBRACE {
         return parser_effect_value_name(state, name, first.span.start)
     }

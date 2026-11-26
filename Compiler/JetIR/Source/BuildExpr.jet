@@ -2522,6 +2522,11 @@ ir_expr_slot_in: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, expression: Int, 
             if call == .ContextGet(key, default, _) {
                 return ir_context_get(m, p, b, expression_ty, key, default, span)
             }
+            if call == .EffectCall(effect_key, _, trait_name, method, type_args, args) {
+                concrete: ir_facts(p, b, type_args, span)
+                if ir_failed(b) -> return -1
+                return ir_effect_call(m, p, b, effect_key, trait_name, method, concrete, args, expression_ty, span)
+            }
             if call == .DebugTrace(write) {
                 // Running code writes `debug`'s trace line through its
                 // `core.term.eprint` call. Compile-time code hands the line to

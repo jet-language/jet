@@ -326,6 +326,11 @@ ir_context_block: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, guards: [BodyCon
     ^save: -1
     ^keys: [String]{}
     ^values: [Int]{}
+    ^effect_owned_keys: [String]{}
+    ^effect_owned_values: [Int]{}
+    ^effect_borrowed_keys: [String]{}
+    ^effect_borrowed_payload_keys: [Int]{}
+    ^effect_borrowed_ptrs: [Int]{}
     ^handler: -1
     ^arena: -1
     ^arena_owned: false
@@ -333,6 +338,27 @@ ir_context_block: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, guards: [BodyCon
     loop guard in guards {
         if guard.field == "allocator" && handler < 0 && arena < 0 && ir_context_scratch(p, b, guard.value) {
             arena = ir_word_const(m, b, 0)
+            next
+        }
+        if guard.effect_trait != "" {
+            span: ir_body_node(p, b, guard.value).span
+            if guard.borrowed {
+                concrete: guard.concrete_type ?? ir_ty(m, p, b, guard.value)
+                payload_key: ir_trait_key(p, concrete)
+                ^backs: [IRWriteBack]{}
+                local_ptr: ir_place_address(m, p, b, guard.value, backs, span)
+                if ir_failed(b) -> return
+                effect_borrowed_keys.push(guard.key)
+                effect_borrowed_payload_keys.push(payload_key)
+                effect_borrowed_ptrs.push(local_ptr)
+                next
+            }
+            value: ir_expr(m, p, b, guard.value)
+            if ir_failed(b) -> return
+            held: if value < 0 || b.fresh[value] -> value else -> ir_copy_value(m, p, b, value, span)
+            if ir_failed(b) -> return
+            effect_owned_keys.push(guard.key)
+            effect_owned_values.push(held)
             next
         }
         value: ir_expr(m, p, b, guard.value)
@@ -390,6 +416,9 @@ ir_context_block: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, guards: [BodyCon
         _: ir_runtime(m, b, push, [Int]{nanos, save}, -1)
     }
     loop index in 0..<keys.len() { ir_context_push_value(m, p, b, keys[index], values[index]) }
+    loop index in 0..<effect_owned_keys.len() { ir_context_push_effect_owned(m, p, b, effect_owned_keys[index], effect_owned_values[index]) }
+    loop index in 0..<effect_borrowed_keys.len() { ir_context_push_effect_borrowed(m, p, b, effect_borrowed_keys[index], effect_borrowed_payload_keys[index], effect_borrowed_ptrs[index]) }
+    total_values: keys.len() + effect_owned_keys.len() + effect_borrowed_keys.len()
     ^carrier: -1
     young_slots: b.young_slots
     young_ops: b.young_ops
@@ -412,9 +441,9 @@ ir_context_block: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, guards: [BodyCon
         b.young_slots = b.f.slot_type.len()
         b.young_ops = b.f.op.len()
     }
-    framed: save >= 0 || keys.len() > 0 || carrier >= 0 || frame_id >= 0
+    framed: save >= 0 || total_values > 0 || carrier >= 0 || frame_id >= 0
     if framed {
-        b.transactions.push(IRTxFrame{handle: -1, stm: -1, snapshots: [IRTxSnapshot]{}, loops: b.loops.len(), shield: false, deadline: save, values: keys.len(), allocator: carrier, frame_id: frame_id, bindings: b.bindings.len()})
+        b.transactions.push(IRTxFrame{handle: -1, stm: -1, snapshots: [IRTxSnapshot]{}, loops: b.loops.len(), shield: false, deadline: save, values: total_values, allocator: carrier, frame_id: frame_id, bindings: b.bindings.len()})
     }
     ir_scope_open(b)
     ir_stmts(m, p, b, body)
@@ -491,6 +520,46 @@ ir_context_push_value: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, key: String
     ir_store_at(m, p, b, node, 40, value)
     if value >= 0 -> b.fresh[value] = false
     if key == CONTEXT_ON_STOP_KEY -> _: ir_runtime(m, b, "jet_ctx_on_stop_arm", [Int]{}, -1)
+    _: ir_runtime(m, b, "jet_ctx_value_push", [Int]{node}, -1)
+}
+
+// Installs an owned `#Effect` trait handler (a `TraitBox`) on the task's
+// context value chain: tag word 0 at offset 40, owned TraitBox at offset 48.
+ir_context_push_effect_owned: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, key: String, boxed: Int) Never! {
+    pointer_row: ir_pointer_row(m)
+    ^captures: [IRCaptureSlot]{}
+    if boxed >= 0 {
+        row: b.f.slot_type[boxed]
+        captures.push(IRCaptureSlot{name: key, offset: 48, row: row, by_ref: false})
+    }
+    node: ir_closure_box(m, p, b, pointer_row, 56, captures)
+    zero: ir_word_const(m, b, 0)
+    ir_emit(b.f, IROp.Store, -1, node, 8, zero, b.line)
+    word: ir_word_const(m, b, ir_context_key_word(key))
+    ir_emit(b.f, IROp.Store, -1, node, 24, word, b.line)
+    ir_emit(b.f, IROp.Store, -1, node, 32, zero, b.line)
+    ir_emit(b.f, IROp.Store, -1, node, 40, zero, b.line)
+    ir_store_at(m, p, b, node, 48, boxed)
+    if boxed >= 0 -> b.fresh[boxed] = false
+    _: ir_runtime(m, b, "jet_ctx_value_push", [Int]{node}, -1)
+}
+
+// Installs a borrowed `#Effect` trait handler (`#Context(E: ^local)`) on the
+// task's context value chain: tag word 1 at offset 40, concrete payload key at
+// offset 48, non-owning local address at offset 56.
+ir_context_push_effect_borrowed: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, key: String, payload_key: Int, local_ptr: Int) Never! {
+    pointer_row: ir_pointer_row(m)
+    node: ir_closure_box(m, p, b, pointer_row, 64, [IRCaptureSlot]{})
+    zero: ir_word_const(m, b, 0)
+    one: ir_word_const(m, b, 1)
+    ir_emit(b.f, IROp.Store, -1, node, 8, zero, b.line)
+    word: ir_word_const(m, b, ir_context_key_word(key))
+    ir_emit(b.f, IROp.Store, -1, node, 24, word, b.line)
+    ir_emit(b.f, IROp.Store, -1, node, 32, zero, b.line)
+    ir_emit(b.f, IROp.Store, -1, node, 40, one, b.line)
+    key_word: ir_word_const(m, b, payload_key)
+    ir_emit(b.f, IROp.Store, -1, node, 48, key_word, b.line)
+    ir_emit(b.f, IROp.Store, -1, node, 56, local_ptr, b.line)
     _: ir_runtime(m, b, "jet_ctx_value_push", [Int]{node}, -1)
 }
 

@@ -1,0 +1,99 @@
+// End-to-end Wave 1 test for #Effect provider traits:
+// 1. Plain #Effect trait Clock with pure FixedClock discharge (-[Clock]> -> -[]>).
+// 2. Effect-substituting TracingClock (-[Clock]> -> -[IO]>).
+// 3. Nested #Context shadowing and LIFO restoration.
+// 4. Generic #Effect Emit: trait<T> with distinct borrowed ^self handlers Emit<Int> and Emit<String>.
+
+#Effect
+Clock: trait {
+    now: fn(self) -> Int
+}
+
+FixedClock: struct {
+    at: Int,
+
+    impl Clock {
+        now: fn(self) -> Int { self.at }
+    }
+}
+
+TracingClock: struct {
+    at: Int,
+
+    impl Clock {
+        now: fn(self) -[IO]> Int {
+            print("tick")
+            self.at
+        }
+    }
+}
+
+#Effect
+Emit: trait<T> {
+    emit: fn(^self, item: T)
+}
+
+IntBuf: struct {
+    items: [Int],
+
+    impl Emit<Int> {
+        emit: fn(^self, item: Int) {
+            self.items.push(item)
+        }
+    }
+}
+
+StrBuf: struct {
+    items: [String],
+
+    impl Emit<String> {
+        emit: fn(^self, item: String) {
+            self.items.push(item)
+        }
+    }
+}
+
+read_clock: fn() -[Clock]> Int {
+    Clock.now()
+}
+
+pure_clock_test: fn() -[]> Int {
+    ^total: 0
+    #Context(Clock: FixedClock{at: 42}) {
+        total += read_clock()
+        #Context(Clock: FixedClock{at: 100}) {
+            total += read_clock()
+        }
+        total += read_clock()
+    }
+    total
+}
+
+tracing_clock_test: fn() -[IO]> Int {
+    #Context(Clock: TracingClock{at: 7}) {
+        read_clock()
+    }
+}
+
+emit_both: fn() -[Emit<Int>, Emit<String>]> {
+    Emit<Int>.emit(10)
+    Emit<String>.emit("hello")
+    Emit<Int>.emit(32)
+    Emit<String>.emit("world")
+}
+
+pure_emit_test: fn() -[]> String {
+    ^ints: IntBuf{items: [Int]{}}
+    ^strs: StrBuf{items: [String]{}}
+    #Context(Emit<Int>: ^ints, Emit<String>: ^strs) {
+        emit_both()
+    }
+    sum: ints.items[0] + ints.items[1]
+    "{sum}:{strs.items[0]}-{strs.items[1]}"
+}
+
+run: fn() -[IO]> {
+    print("{pure_clock_test()}")
+    print("{tracing_clock_test()}")
+    print(pure_emit_test())
+}

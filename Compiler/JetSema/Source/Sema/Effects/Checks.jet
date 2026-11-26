@@ -652,6 +652,21 @@ SemaEffectNodeRare: struct {
     // The `#Repeatable` marker contract and `#App.Job` retry contract.
     repeatable: SemaEffectRepeatableSpec?{None},
     job_retry: SemaEffectJobRetrySpec?{None},
+    // Direct `#Effect` trait calls not discharged by an enclosing `#Context`.
+    direct_library: [TEffectSpan]{[TEffectSpan]{}},
+    // Calls made inside `#Context(Effect: concrete_handler)` blocks, with the
+    // effect tokens discharged at each call site.
+    discharged_calls: [SemaEffectDischargedCall]{[SemaEffectDischargedCall]{}},
+    // Callees also reached outside any `#Context` discharge.
+    undischarged_callees: [String:Bool]{[String:Bool]{}},
+    // Transient stack of effect tokens discharged by currently open `#Context`
+    // blocks during the body walk.
+    active_discharges: [String]{[String]{}},
+}
+
+SemaEffectDischargedCall: struct {
+    callee: String,
+    effects: [String],
 }
 
 // The rare rows of a node that fills none of them.
@@ -2437,7 +2452,7 @@ sema_effect_record_context: fn(interner: Interner, nodes: ^[SemaEffectNode], nod
                     sema_effect_add_context_key(rare.context_keys, TEffectContextKey{key: key.copy(), ty: body_type(interner, tree, default), equatable: equatable})
                 }
             }
-            .Method(_, _, _) | .CellGuardProject(_, _, _, _, _) | .OptionProbe(_, _) | .TupleIndex(_, _) | .SwitchSubjectValue | .YieldSend(_) | .NumericBounds(_, _) | .ComptimeInput(_, _, _) | .MemoStats(_, _) | .DebugTrace(_) -> {}
+            .Method(_, _, _) | .CellGuardProject(_, _, _, _, _) | .OptionProbe(_, _) | .TupleIndex(_, _) | .SwitchSubjectValue | .YieldSend(_) | .NumericBounds(_, _) | .ComptimeInput(_, _, _) | .MemoStats(_, _) | .DebugTrace(_) | .EffectCall(_, _, _, _, _, _) -> {}
         }
         return
     }
@@ -3367,6 +3382,15 @@ sema_effect_node_add_direct: fn(nodes: ^[SemaEffectNode], node_index: Int, name:
 sema_effect_node_add_edge: fn(nodes: ^[SemaEffectNode], node_index: Int, edge: String) Never! {
     // copy: the node's row owns its key; the caller keeps its own.
     nodes[node_index].call_edges.push(edge.copy())
+    if nodes[node_index].rare.in_place() == .Val(rare) {
+        if rare.active_discharges.len() > 0 {
+            ^discharged: [String]{}
+            loop name in rare.active_discharges -> discharged.push(name)
+            rare.discharged_calls.push(SemaEffectDischargedCall{callee: edge, effects: discharged})
+        } else if rare.discharged_calls.len() > 0 {
+            rare.undischarged_callees[edge] = true
+        }
+    }
 }
 
 // The call edges sema_effect_node_add_edge appended to `node`, as the
@@ -8377,6 +8401,7 @@ sema_effect_check_nodes_range: fn(nodes: [SemaEffectNode], inputs: [SemaEffectMo
         sema_library_effect_check_denials(nodes[node_index], library_reach.reached[node_index], solved[node_index], function_diagnostics)
         sema_library_effect_check_kinds(nodes[node_index], library_reach, library_reach.reached[node_index], function_diagnostics)
         sema_library_effect_check_values(nodes[node_index], library_reach.reached[node_index], function_diagnostics)
+        sema_library_effect_check_traits(nodes[node_index], library_reach, library_reach.reached[node_index], function_diagnostics)
         if pure_reached.len() > 0 {
             pure_nodes.push(node_index)
             pure_rows.push(pure_reached)
@@ -9724,7 +9749,42 @@ sema_effect_walk_stmt_children: fn(walk: SemaEffectWalk, nodes: ^[SemaEffectNode
             loop guard in guards {
                 sema_effect_walk_visit(walk, nodes, facts, module_facts, diagnostics, caller, tree, guard.value)
             }
+            ^pushed_discharges: 0
+            if sema_effect_walk_node_index(walk) == .Val(node_index) {
+                ^to_discharge: [String]{}
+                loop guard in guards {
+                    if guard.effect_token == "" -> next
+                    if guard.concrete_type == .Val(concrete) {
+                        owner_leaf: symbol_key_leaf(type_name(concrete))
+                        sema_effect_add_context_handler_edges(nodes, node_index, facts.impls, guard.effect_trait, owner_leaf)
+                        to_discharge.push(guard.effect_token)
+                    }
+                }
+                if to_discharge.len() > 0 {
+                    sema_effect_node_rare_open(nodes[node_index])
+                    if nodes[node_index].rare.in_place() == .Val(rare) {
+                        if rare.active_discharges.len() == 0 && rare.discharged_calls.len() == 0 {
+                            loop existing_edge in nodes[node_index].call_edges {
+                                rare.undischarged_callees[existing_edge] = true
+                            }
+                        }
+                        loop token in to_discharge {
+                            rare.active_discharges.push(token)
+                            pushed_discharges += 1
+                        }
+                    }
+                }
+            }
             sema_effect_walk_stmt_list_children(walk, nodes, facts, module_facts, diagnostics, caller, tree, body)
+            if pushed_discharges > 0 {
+                if sema_effect_walk_node_index(walk) == .Val(node_index) {
+                    if nodes[node_index].rare.in_place() == .Val(rare) {
+                        loop _ in 0..<pushed_discharges {
+                            ^_: rare.active_discharges.pop()
+                        }
+                    }
+                }
+            }
         }
         .ScopeMember(kind, body, _) -> {
             if kind == {
@@ -9954,7 +10014,59 @@ sema_effect_walk_host_call_children: fn(walk: SemaEffectWalk, nodes: ^[SemaEffec
         .ContextGet(_, default, _) -> {
             sema_effect_walk_visit(walk, nodes, facts, module_facts, diagnostics, caller, tree, default)
         }
+        .EffectCall(_, effect_token, _, _, _, args) -> {
+            loop argument in args {
+                sema_effect_walk_visit(walk, nodes, facts, module_facts, diagnostics, caller, tree, argument.value)
+            }
+            if effect_token != "" {
+                if sema_effect_walk_node_index(walk) == .Val(node_index) {
+                    ^discharged: false
+                    if nodes[node_index].rare == .Val(existing_rare) {
+                        loop active in existing_rare.active_discharges {
+                            if active == effect_token || sema_effect_covers(active, effect_token) {
+                                discharged = true
+                                break
+                            }
+                        }
+                    }
+                    if !discharged {
+                        sema_effect_node_rare_open(nodes[node_index])
+                        if nodes[node_index].rare.in_place() == .Val(rare) {
+                            ^seen: false
+                            loop entry in rare.direct_library {
+                                if entry.name == effect_token {
+                                    seen = true
+                                    break
+                                }
+                            }
+                            if !seen {
+                                rare.direct_library.push(TEffectSpan{name: effect_token, span: nodes[node_index].name_span})
+                            }
+                        }
+                    }
+                }
+            }
+        }
         .SwitchSubjectValue | .NumericBounds(_, _) | .MemoStats(_, _) | .ContextRead(_) -> {}
+    }
+}
+
+sema_effect_walk_node_index: fn(walk: SemaEffectWalk) -> Int? Never! {
+    if walk == {
+        .Collect(node_index) | .TransactCollect(node_index) | .Region(node_index, _, _) | .LambdaBody(node_index) -> Val(node_index)
+        .Unsafe(_) -> None
+    }
+}
+
+sema_effect_add_context_handler_edges: fn(nodes: ^[SemaEffectNode], node_index: Int, impls: SemaEffectTraitImpls, trait_key: String, owner: String) Never! {
+    trait_slot: name_pair_find_slot(impls.names, sema_effect_symbol_module(trait_key) ?? "", symbol_key_leaf(trait_key)) ?? return
+    trait_row: impls.traits.get(trait_slot) ?? return
+    owner_id: name_find(impls.names, owner) ?? return
+    loop method_row in 0..<impls.method_traits.len() {
+        if impls.method_traits[method_row] != trait_row -> next
+        if impls.impl_keys.get(sema_effect_impl_slot(method_row, owner_id)) == .Val(fn_key) {
+            sema_effect_node_add_edge(nodes, node_index, fn_key)
+        }
     }
 }
 

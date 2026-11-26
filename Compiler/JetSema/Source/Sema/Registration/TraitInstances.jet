@@ -12,9 +12,11 @@
 use {
     jet_foundation.[
         Diagnostic,
+        Expr,
         Func,
         Item,
         Span,
+        Stmt,
         TraitDef,
         TraitImplBlock,
         Type,
@@ -24,6 +26,7 @@ use {
         name_find,
         name_intern,
         name_table,
+        type_name,
     ]
     jet_parser.[parse_type_text]
 }
@@ -134,7 +137,10 @@ sema_trait_instances_rewrite_items: fn(items: ^^[Item], diagnostics: ^[Diagnosti
                     sema_trait_instances_function(instances, method, scope, diagnostics)
                 }
             }
-            .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+            .Test(test_def) -> {
+                sema_trait_instances_stmts(instances, test_def.body, [String]{}, diagnostics)
+            }
+            .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     ^out: [Item]{}
@@ -183,6 +189,132 @@ sema_trait_instances_function: fn(instances: ^SemaTraitInstances, function: Func
     ^scope: outer
     scope.extend(sema_trait_instances_param_names(function.type_params))
     sema_trait_instances_params(instances, function.type_params, scope, diagnostics)
+    if function.declared_effects == .Val(entries) {
+        loop entry in entries {
+            raw: if entry.name.starts_with("!") -> entry.name.slice(1, entry.name.len()) else -> entry.name
+            if raw.contains("<") -> sema_trait_instances_note(instances, raw, entry.span, scope, diagnostics)
+        }
+    }
+    sema_trait_instances_stmts(instances, function.body, scope, diagnostics)
+}
+
+sema_trait_instances_stmts: fn(instances: ^SemaTraitInstances, stmts: [Stmt], scope: [String], diagnostics: ^[Diagnostic]) Never! {
+    loop stmt in stmts {
+        if stmt == {
+            .ContextBlock(fields, body, _) -> {
+                loop field in fields {
+                    if field.name.contains("<") -> sema_trait_instances_note(instances, field.name, field.span, scope, diagnostics)
+                    sema_trait_instances_expr(instances, field.value, scope, diagnostics)
+                }
+                sema_trait_instances_stmts(instances, body, scope, diagnostics)
+            }
+            .Expr(expr) -> sema_trait_instances_expr(instances, expr, scope, diagnostics)
+            .Val(binding) -> sema_trait_instances_expr(instances, binding.init, scope, diagnostics)
+            .Assign(_, _, _, value) -> sema_trait_instances_expr(instances, value, scope, diagnostics)
+            .Return(value, _) -> {
+                if value == .Val(expr) -> sema_trait_instances_expr(instances, expr, scope, diagnostics)
+            }
+            .While(cond, body, _, _, _) -> {
+                sema_trait_instances_expr(instances, cond, scope, diagnostics)
+                sema_trait_instances_stmts(instances, body, scope, diagnostics)
+            }
+            .For(_, _, _, _, body, _, _, _, _) -> {
+                sema_trait_instances_stmts(instances, body, scope, diagnostics)
+            }
+            .Switch(subject, arms, else_body, _) -> {
+                sema_trait_instances_expr(instances, subject, scope, diagnostics)
+                loop arm in arms {
+                    sema_trait_instances_expr(instances, arm.cond, scope, diagnostics)
+                    sema_trait_instances_stmts(instances, arm.body, scope, diagnostics)
+                }
+                if else_body == .Val(eb) -> sema_trait_instances_stmts(instances, eb, scope, diagnostics)
+            }
+            .Loop(body, _, _, _) | .Unsafe(_, _, body, _) | .Impure(_, _, body, _) | .Reactive(body, _) | .Shield(body, _) | .Defer(body, _) | .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .ComptimeBlock(body, _, _) | .Live(body, _) | .AssumeDet(_, _, body, _) | .Transact(_, _, body, _, _) | .ScopeMember(_, _, _, _, body, _, _, _) -> {
+                sema_trait_instances_stmts(instances, body, scope, diagnostics)
+            }
+            .CountedLoop(init, cond, step, body, _, _, _) -> {
+                sema_trait_instances_expr(instances, init.init, scope, diagnostics)
+                sema_trait_instances_expr(instances, cond, scope, diagnostics)
+                if step == .Val(s) -> sema_trait_instances_stmts(instances, [Stmt]{s}, scope, diagnostics)
+                sema_trait_instances_stmts(instances, body, scope, diagnostics)
+            }
+            .ComptimeIf(cond, _, then_body, else_body, _, _) -> {
+                sema_trait_instances_expr(instances, cond, scope, diagnostics)
+                sema_trait_instances_stmts(instances, then_body, scope, diagnostics)
+                if else_body == .Val(eb) -> sema_trait_instances_stmts(instances, eb, scope, diagnostics)
+            }
+            .ComptimeSwitch(subject, arms, else_body, _) -> {
+                sema_trait_instances_expr(instances, subject, scope, diagnostics)
+                loop arm in arms -> sema_trait_instances_stmts(instances, arm.body, scope, diagnostics)
+                if else_body == .Val(eb) -> sema_trait_instances_stmts(instances, eb, scope, diagnostics)
+            }
+            .BreakValue(value, _) | .BreakLabelValue(_, _, value, _) | .Yield(value, _) -> {
+                sema_trait_instances_expr(instances, value, scope, diagnostics)
+            }
+            .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) | .DeferClose(_, _) -> {}
+        }
+    }
+}
+
+sema_trait_instances_expr: fn(instances: ^SemaTraitInstances, expr: Expr, scope: [String], diagnostics: ^[Diagnostic]) Never! {
+    if expr == {
+        .MethodCall(receiver, _, method_span, owner_type_args, _, args, _) -> {
+            if receiver == .TypeValue(ty, ty_span, _) {
+                rendered: type_name(ty)
+                if rendered.contains("<") -> sema_trait_instances_note(instances, rendered, ty_span, scope, diagnostics)
+            } else if receiver == .Ident(name, name_span, _) && owner_type_args.len() > 0 {
+                arg_texts: loop arg_ty in owner_type_args -> type_name(arg_ty)
+                sema_trait_instances_note(instances, "{name}<{arg_texts.join(", ")}>", name_span, scope, diagnostics)
+            } else {
+                sema_trait_instances_expr(instances, receiver, scope, diagnostics)
+            }
+            loop arg in args -> sema_trait_instances_expr(instances, arg.expr, scope, diagnostics)
+            ^_: method_span
+        }
+        .Call(call, _) -> {
+            loop arg in call.args -> sema_trait_instances_expr(instances, arg.expr, scope, diagnostics)
+        }
+        .Lambda(lambda, _) -> {
+            if lambda.body == {
+                .Expr(body_expr) -> sema_trait_instances_expr(instances, body_expr, scope, diagnostics)
+                .Block(body_stmts) -> sema_trait_instances_stmts(instances, body_stmts, scope, diagnostics)
+            }
+        }
+        .If(cond, then_stmts, then_val, else_stmts, else_val, _, _) -> {
+            sema_trait_instances_expr(instances, cond, scope, diagnostics)
+            sema_trait_instances_stmts(instances, then_stmts, scope, diagnostics)
+            sema_trait_instances_expr(instances, then_val, scope, diagnostics)
+            sema_trait_instances_stmts(instances, else_stmts, scope, diagnostics)
+            sema_trait_instances_expr(instances, else_val, scope, diagnostics)
+        }
+        .Binary(_, left, right, _, _) | .Range(left, right, _, _, _) -> {
+            sema_trait_instances_expr(instances, left, scope, diagnostics)
+            sema_trait_instances_expr(instances, right, scope, diagnostics)
+        }
+        .Pipe(head, _, _, _) -> sema_trait_instances_expr(instances, head, scope, diagnostics)
+        .OrFallback(value, _, _, _, _) -> sema_trait_instances_expr(instances, value, scope, diagnostics)
+        .Unary(_, inner, _, _) | .Paren(inner, _, _) | .Try(inner, _, _, _, _) | .Present(inner, _, _) | .Ok(inner, _, _) | .Err(inner, _, _) | .Place(inner, _, _, _) | .Copy(inner, _, _) | .Deref(inner, _, _) | .RawOf(inner, _, _) | .Field(inner, _, _, _) | .OptField(inner, _, _, _, _, _) -> {
+            sema_trait_instances_expr(instances, inner, scope, diagnostics)
+        }
+        .ListLit(values, _, _) | .CompareChain(values, _, _, _, _) -> {
+            loop value in values -> sema_trait_instances_expr(instances, value, scope, diagnostics)
+        }
+        .TupleLit(fields, _, _, _) -> {
+            loop field in fields -> sema_trait_instances_expr(instances, field.value, scope, diagnostics)
+        }
+        .StructLit(_, _, _, _, fields, _, _, _) -> {
+            loop field in fields -> sema_trait_instances_expr(instances, field.value, scope, diagnostics)
+        }
+        .CallValue(callee, args, _, _) -> {
+            sema_trait_instances_expr(instances, callee, scope, diagnostics)
+            loop arg in args -> sema_trait_instances_expr(instances, arg.expr, scope, diagnostics)
+        }
+        .OptMethodCall(receiver, _, _, _, args, _, _) -> {
+            sema_trait_instances_expr(instances, receiver, scope, diagnostics)
+            loop arg in args -> sema_trait_instances_expr(instances, arg.expr, scope, diagnostics)
+        }
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Ident(_, _, _) | .UnitLit(_, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .TypeValue(_, _, _) -> {}
+    }
 }
 
 sema_trait_instances_params: fn(instances: ^SemaTraitInstances, params: [TypeParam], scope: [String], diagnostics: ^[Diagnostic]) Never! {

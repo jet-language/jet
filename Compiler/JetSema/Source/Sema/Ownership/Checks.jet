@@ -393,6 +393,9 @@ SemaOwnershipState: struct {
     // checked, outermost first (Statements/ContextBlocks.jet
     // sema_stmt_check_context_block).
     block_allocators: [SemaOwnershipBlockAllocator]{[SemaOwnershipBlockAllocator]{}},
+    // The scoped or borrowed `#Context(Effect: ^h)` handlers active in the
+    // enclosing blocks, outermost first.
+    context_borrows: [SemaOwnershipContextBorrow]{[SemaOwnershipContextBorrow]{}},
 }
 
 // The allocator a `#Context(allocator: a)` block allocates from: `name` as
@@ -404,7 +407,21 @@ SemaOwnershipBlockAllocator: struct {
     id: SymbolID,
 }
 
-// E0204 when a write or move reaches an open block's allocator.
+// A borrowed (`^local`) or mutable (`^self`) `#Context(Effect: handler)`
+// handler active in an enclosing block. A borrowed place is pinned for the
+// block (E0204) and neither borrowed nor `^self` handlers may escape into a
+// spawned task or escaping closure (E0783).
+SemaOwnershipContextBorrow: struct {
+    effect_name: String,
+    effect_token: String,
+    place_name: String,
+    place_id: SymbolID,
+    has_write_receiver: Bool,
+    borrowed: Bool,
+}
+
+// E0204 when a write or move reaches an open block's allocator or a borrowed
+// `#Context(Effect: ^local)` handler place.
 sema_ownership_block_allocator_refuses: fn(state: SemaOwnershipState, places: [SemaOwnershipPlace], action: String, span: Span, diagnostics: ^[Diagnostic]) -> Bool {
     loop open in state.block_allocators {
         loop place in places {
@@ -413,7 +430,49 @@ sema_ownership_block_allocator_refuses: fn(state: SemaOwnershipState, places: [S
             return true
         }
     }
+    loop open in state.context_borrows {
+        if !open.borrowed || symbol_is_none(open.place_id) -> next
+        loop place in places {
+            if place.root_id != open.place_id -> next
+            diagnostics.push(sema_error("E0204", span, "`{open.place_name}` can't {action} here — the `#Context({open.effect_name}: ^{open.place_name})` block is borrowing it", "the `#Context` block holds a live borrow of `{open.place_name}` until it ends; changing or moving it inside the block would break the handler", "use `{open.place_name}` after the `#Context` block ends"))
+            return true
+        }
+    }
     false
+}
+
+// E0783 when a spawned task or escaping closure invokes a scoped (`^local`
+// borrowed or `^self` mutable) `#Context` effect handler from an enclosing
+// block.
+sema_ownership_check_context_borrow_escape: fn(lambda: TLambda, span: Span, state: SemaOwnershipState, diagnostics: ^[Diagnostic]) Never! {
+    if state.context_borrows.len() == 0 -> return
+    ^reported: [String:Bool]{[String:Bool]{}}
+    sema_ownership_scan_lambda_effect_escape(lambda, span, state.context_borrows, reported, diagnostics)
+}
+
+sema_ownership_scan_lambda_effect_escape: fn(lambda: TLambda, span: Span, borrows: [SemaOwnershipContextBorrow], reported: ^[String:Bool], diagnostics: ^[Diagnostic]) Never! {
+    tree_each_lambda_child(lambda, fn(child_expr: TExpr) {
+        sema_ownership_scan_expr_effect_escape(child_expr, span, borrows, reported, diagnostics)
+    })
+}
+
+sema_ownership_scan_expr_effect_escape: fn(expr: TExpr, span: Span, borrows: [SemaOwnershipContextBorrow], reported: ^[String:Bool], diagnostics: ^[Diagnostic]) Never! {
+    if expr.kind == .HostCall(call) {
+        if call == .EffectCall(_, effect_token, _, _, _, _) {
+            loop borrow in borrows {
+                if borrow.effect_token == effect_token && (borrow.borrowed || borrow.has_write_receiver) {
+                    if reported.get(borrow.effect_token) == None {
+                        reported[borrow.effect_token] = true
+                        diagnostics.push(sema_error("E0783", span, "Scoped `#Context` handler for `{borrow.effect_name}` cannot escape into a spawned task or escaping closure", "A borrowed `#Context({borrow.effect_name}: ^local)` handler or an `#Effect` trait with `^self` methods is scoped to the current task and block; sharing it across tasks or letting it outlive the block would race or dangle", "Call `{borrow.effect_name}` inside the `#Context` block without spawning a task that uses it, or install an owned `self`-only handler"))
+                    }
+                    break
+                }
+            }
+        }
+    }
+    tree_each_expr_child(expr, fn(child_expr: TExpr) {
+        sema_ownership_scan_expr_effect_escape(child_expr, span, borrows, reported, diagnostics)
+    })
 }
 
 // A written `^name: value` (or `{^a, ^b}: value`): the names it declares, by
@@ -668,6 +727,9 @@ sema_ownership_state_snapshot: fn(source: SemaOwnershipState) -> SemaOwnershipSt
     }
     loop open in source.block_allocators {
         snapshot.block_allocators.push(SemaOwnershipBlockAllocator{name: open.name.copy(), id: open.id})
+    }
+    loop open in source.context_borrows {
+        snapshot.context_borrows.push(SemaOwnershipContextBorrow{effect_name: open.effect_name, effect_token: open.effect_token, place_name: open.place_name, place_id: open.place_id, has_write_receiver: open.has_write_receiver, borrowed: open.borrowed})
     }
     snapshot
 }

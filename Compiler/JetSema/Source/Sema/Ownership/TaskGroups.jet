@@ -1173,6 +1173,7 @@ sema_taskgroup_check_spawn: fn(args: [CallArg], span: Span, expected: Type?, che
         }
     }
     sema_taskgroup_check_lambda_captures(lambda, capture_span, check.environment.*, check.program.*, check.scopes, check.state, check.context, check.diagnostics)
+    sema_ownership_check_context_borrow_escape(lambda, capture_span, check.state, check.diagnostics)
     sema_taskgroup_check_global_accesses(check, global_access_start, saved_in_spawn)
     ^task_result_ty: body_ty
     ^problem: sema_ownership_crossing_problem(task_result_ty, SemaSendCrossing.TaskResult, false, check.environment.*, check.program.*, check.scopes, check.context)

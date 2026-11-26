@@ -2609,10 +2609,12 @@ parser_context_fields: fn(state: ^JetParserState, marker: Marker, args: [CallArg
     ^fields: [ContextField]{}
     loop (index, arg) in args {
         value_span: expr_span(arg.expr)
+        borrowed: if arg.mark == .Val(mark) -> mark.access == PlaceAccess.Write else -> false
+        mark_span: if arg.mark == .Val(mark) -> Val(mark.span) else -> Span?{None}
         if arg.label == {
             // copy: `args` is a read parameter the marker keeps; each field owns its name and value.
             .Val(label) -> {
-                fields.push(ContextField{name: if single == .Val(name) -> name.copy() else -> label.name.copy(), value: arg.expr.copy(), span: Span{start: label.span.start, end: value_span.end}})
+                fields.push(ContextField{name: if single == .Val(name) -> name.copy() else -> label.name.copy(), value: arg.expr.copy(), span: Span{start: label.span.start, end: value_span.end}, borrowed: borrowed, mark_span: mark_span})
             }
             .None -> {
                 if index >= params.len() {
@@ -2620,7 +2622,7 @@ parser_context_fields: fn(state: ^JetParserState, marker: Marker, args: [CallArg
                     next
                 }
                 // copy: `args` is a read parameter the marker keeps; the field owns its value.
-                fields.push(ContextField{name: if single == .Val(name) -> name.copy() else -> params[index].copy(), value: arg.expr.copy(), span: value_span})
+                fields.push(ContextField{name: if single == .Val(name) -> name.copy() else -> params[index].copy(), value: arg.expr.copy(), span: value_span, borrowed: borrowed, mark_span: mark_span})
             }
         }
     }
