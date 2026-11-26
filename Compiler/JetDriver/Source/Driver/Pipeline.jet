@@ -87,6 +87,7 @@ use {
         sema_comptime_available_constants_add,
         sema_comptime_available_version,
         sema_comptime_body_work_flush,
+        sema_checked_text_reason,
         sema_comptime_checked_text_source,
         sema_comptime_key_set_add,
         sema_comptime_key_set_has,
@@ -162,6 +163,7 @@ use {
         sema_unsafe_path_within,
         SEMA_PRELUDE_ERROR_SOURCE_PATH,
         SEMA_PRELUDE_RULE_SOURCE_PATH,
+        SEMA_CHECKED_TEXT_REJECTED_WHY,
         sema_cli_command_record,
         sema_marker_is_guest_export,
         sema_guest_runtime_binding,
@@ -248,7 +250,6 @@ use {
         SymbolKind,
         SymbolKeys,
         SymbolTable,
-        TComptimeReport,
         TComptimeValue,
         BodyExpr,
         BodyNode,
@@ -2765,7 +2766,7 @@ jet_driver_first_error_since: fn(diagnostics: [Diagnostic], start: Int) -> Strin
 jet_driver_module_value_eval_reason: fn(result: JetEvalIRResult) -> String {
     if result.error == .Val(error) -> return "computing it stops ({error.diagnostic.what})"
     if result.value == .Val(value) {
-        if value == .Failed(report) && jet_driver_checked_text_reason(report) == .Val(text) {
+        if value == .Failed(report) && sema_checked_text_reason(report) == .Val(text) {
             return "computing it returns an error ({text})"
         }
     }
@@ -3347,7 +3348,7 @@ jet_driver_comptime_flush: fn(
                     flushed.stop = Val(jet_driver_comptime_run_result(values, checked_functions, trace, false, false))
                     return flushed
                 }
-                why: jet_driver_checked_text_reason(report) ?? "the type's pure `CheckedText.check` method must accept the complete literal body"
+                why: sema_checked_text_reason(report) ?? SEMA_CHECKED_TEXT_REJECTED_WHY
                 diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, source.module_identity, evaluation.code, evaluation.span, evaluation.what, why, evaluation.fix))
                 flushed.stop = Val(jet_driver_comptime_run_result(values, checked_functions, trace, false, false))
                 return flushed
@@ -3373,35 +3374,6 @@ jet_driver_comptime_discriminant_range: fn(program: SemaProgramTables, source: S
     if source.kind != SemaComptimeItemKind.TypeLevel -> return None
     if value == .BigInt(_) {
         return Val(jet_driver_diagnostic_at_program_site(program, source.module_identity, "E0035", source.span, "an enum discriminant is outside the signed integer range", "the enum number is stored as a signed 64-bit integer in the type layout", "use a number from -9223372036854775808 to 9223372036854775807"))
-    }
-    None
-}
-
-// The reason a CheckedText `check` gave for rejecting a body: its error when
-// that is a String, or the error's String `reason`/`message` field or one
-// String payload. Any other error shape gives the generic reason.
-jet_driver_checked_text_reason: fn(report: TComptimeReport) -> String? {
-    error: if report == {
-        .Told(value) -> value
-        .Clean(_) -> {
-            return None
-        }
-    }
-    if error == {
-        .String(text) -> return Val(text.copy())
-        .Struct(_, fields) -> {
-            loop field in fields {
-                if field.name == "reason" || field.name == "message" {
-                    if field.value == .String(text) -> return Val(text.copy())
-                }
-            }
-        }
-        .Enum(_, _, args) -> {
-            if args.len() == 1 {
-                if args[0].value == .String(text) -> return Val(text.copy())
-            }
-        }
-        .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Present(_) | .Failed(_) | .Unit | .Function(_) -> {}
     }
     None
 }

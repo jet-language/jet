@@ -234,6 +234,22 @@ ParseError: struct {
     }
 }
 
+// What a `CheckedText` type's `check` learned from a literal's parts:
+// `shape`, computed once while building and handed to `build`, and one slot
+// per hole, the kind of position the hole sits in, handed to `encode_hole`
+// (Core/prelude.jet). A program reaches it without naming it: every checked
+// text literal runs a `check` that returns one.
+Checked: struct<Shape, Slot> {
+    shape: Shape,
+    slots: [Slot],
+}
+
+// The one slot of a `CheckedText` type that declares no `Slot`: every hole
+// is text.
+TextSlot: enum {
+    Text,
+}
+
 // The phase of the compiled copy an expression runs in: `#phase` is
 // `.Preparation` in preparation and compile-time code and in a function's
 // compile-time copy, `.Build` in the copy a package's `fn build` runs, and

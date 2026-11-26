@@ -113,8 +113,9 @@ jet_driver_sql_driver_read: fn(tree: BodyTree, symbols: SymbolTable, method: TMe
 }
 
 // The first word the SQL text node `id` of `tree` spells, lowercased. A
-// checked SQL literal is `SQL.build(pieces, holes)` (or, with nothing to
-// build, the text itself), and the first piece is the text before the
+// checked SQL literal is `SQL.build(shape, holes)`, its shape the literal's
+// pieces as a constant (or, written to the contract before `Checked`, the
+// pieces as a list of strings), and the first piece is the text before the
 // first hole. The stop message the build carries shares the literal's span,
 // so the piece is read from the call, never as the earliest string there.
 // None when the statement is not written there (a binding or a call builds
@@ -125,6 +126,9 @@ jet_driver_sql_head: fn(tree: BodyTree, id: Int) -> String? Never! {
         if node.span.start < span.start || node.span.end > span.end -> next
         if node.kind == .Call(_, _, args) && args.len() == 2 {
             pieces: body_node(tree, args[0].value)
+            if pieces.kind == .CtLit(value) && value == .List(values) && values.len() > 0 && values[0] == .String(text) {
+                return Val(jet_driver_sql_first_word(text))
+            }
             if pieces.kind == .List(values, _) && values.len() > 0 && body_node(tree, values[0]).kind == .StrLit(parts) && parts.len() > 0 && parts[0] == .Literal(text) {
                 return Val(jet_driver_sql_first_word(text))
             }
