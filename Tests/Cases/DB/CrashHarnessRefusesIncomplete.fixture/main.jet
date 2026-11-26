@@ -1,0 +1,342 @@
+// Proves the core.db crash-consistency harness is fail-closed:
+// - A valid local POSIX durable storage run over a complete real two-transaction
+//   VFS trace passes.
+// - A timeout, an invalid oracle, unsupported storage (including network
+//   filesystems such as NFS, SMB/CIFS, SSHFS, 9p, GlusterFS, Ceph, Lustre,
+//   AFP, WebDAV), or an incomplete schedule ALWAYS returns Refused and NEVER
+//   counts as a pass.
+use {
+    db: core.db
+    files: core.files
+}
+
+StorageSpec: struct {
+    fs_type: String,
+    journal_mode: String,
+    synchronous: String,
+    honors_fsync: Bool,
+    honors_dirsync: Bool,
+}
+
+OracleSpec: struct {
+    require_integrity_check: Bool,
+    allowed_states: [String],
+}
+
+ScheduleConfig: struct {
+    budget_ms: Int,
+    step_cost_ms: Int,
+    max_schedules: Int,
+    skip_boundary: Int?,
+    include_dropped: Bool,
+    include_reordered: Bool,
+}
+
+CrashVerdict: enum {
+    Passed(Int),
+    Failed(String),
+    Refused(String),
+}
+
+verdict_is_pass: fn(v: CrashVerdict) -> Bool Never! {
+    if v == {
+        .Passed(n) -> n > 0
+        .Failed(_) | .Refused(_) -> false
+    }
+}
+
+verdict_refusal_reason: fn(v: CrashVerdict) -> String? Never! {
+    if v == {
+        .Refused(reason) -> Val(reason.copy())
+        .Passed(_) | .Failed(_) -> None
+    }
+}
+
+is_network_fs: fn(fs_type: String) -> Bool Never! {
+    net_fs: [String]{"nfs", "nfs4", "cifs", "smb", "smb3", "sshfs", "fuse.sshfs", "9p", "davfs", "glusterfs", "ceph", "lustre", "afp", "webdav"}
+    loop name in net_fs {
+        if fs_type == name -> return true
+    }
+    false
+}
+
+is_supported_local_fs: fn(fs_type: String) -> Bool Never! {
+    local_fs: [String]{"ext4", "xfs", "btrfs", "zfs", "apfs", "ntfs"}
+    loop name in local_fs {
+        if fs_type == name -> return true
+    }
+    false
+}
+
+validate_storage: fn(spec: StorageSpec) -> String? Never! {
+    if is_network_fs(spec.fs_type) {
+        return Val("unsupported storage: network filesystem `{spec.fs_type}` gets no untested atomicity promise")
+    }
+    if !is_supported_local_fs(spec.fs_type) {
+        return Val("unsupported storage: filesystem `{spec.fs_type}` is not a verified local crash-consistent POSIX store")
+    }
+    if !spec.honors_fsync {
+        return Val("unsupported storage: storage does not honor fsync barriers")
+    }
+    if !spec.honors_dirsync {
+        return Val("unsupported storage: storage does not honor directory sync barriers")
+    }
+    if spec.synchronous != "FULL" && spec.synchronous != "EXTRA" && spec.synchronous != "NORMAL" {
+        return Val("unsupported storage: PRAGMA synchronous={spec.synchronous} provides no crash-consistency guarantee")
+    }
+    if spec.journal_mode != "DELETE" && spec.journal_mode != "TRUNCATE" && spec.journal_mode != "PERSIST" && spec.journal_mode != "WAL" {
+        return Val("unsupported storage: PRAGMA journal_mode={spec.journal_mode} provides no crash-consistency guarantee")
+    }
+    None
+}
+
+validate_oracle: fn(oracle: OracleSpec) -> String? Never! {
+    if !oracle.require_integrity_check {
+        return Val("invalid oracle: PRAGMA integrity_check cannot be disabled")
+    }
+    if oracle.allowed_states.len() < 2 {
+        return Val("invalid oracle: workload oracle needs at least initial and committed states")
+    }
+    loop i in 0..<oracle.allowed_states.len() {
+        if oracle.allowed_states[i].count_bytes() == 0 {
+            return Val("invalid oracle: empty allowed state at index {i}")
+        }
+        loop j in i + 1..<oracle.allowed_states.len() {
+            if oracle.allowed_states[i] == oracle.allowed_states[j] {
+                return Val("invalid oracle: duplicate allowed state `{oracle.allowed_states[i]}`")
+            }
+        }
+    }
+    None
+}
+
+split_lines: fn(text: String) -> [String] Never! {
+    raw: text.bytes()
+    ^lines: [String]{}
+    ^cur: [U8]{}
+    loop b in raw {
+        if b == (U8{10}) {
+            if cur.len() > 0 -> lines.push(String.from_bytes(cur.copy()) ?? "")
+            cur = [U8]{}
+        } else if b != (U8{13}) { cur.push(b) }
+    }
+    if cur.len() > 0 -> lines.push(String.from_bytes(cur) ?? "")
+    lines
+}
+
+split_pipe: fn(line: String) -> [String] Never! {
+    raw: line.bytes()
+    ^parts: [String]{}
+    ^cur: [U8]{}
+    loop b in raw {
+        if b == (U8{124}) {
+            parts.push(String.from_bytes(cur.copy()) ?? "")
+            cur = [U8]{}
+        } else { cur.push(b) }
+    }
+    parts.push(String.from_bytes(cur) ?? "")
+    parts
+}
+
+TraceStats: struct {
+    total: Int,
+    writes: Int,
+    syncs: Int,
+}
+
+validate_trace: fn(trace_text: String) -> TraceStats Err! {
+    lines: split_lines(trace_text)
+    if lines.len() == 0 -> return Err("incomplete schedule: empty VFS trace")
+    ^writes: 0
+    ^syncs: 0
+    loop line in lines {
+        parts: split_pipe(line)
+        if parts.len() < 3 -> return Err("incomplete schedule: truncated trace line `{line}`")
+        tag: parts[0]
+        if tag == "WRITE" {
+            if parts.len() != 6 -> return Err("incomplete schedule: malformed WRITE line")
+            writes += 1
+        } else if tag == "SYNC" || tag == "DIRSYNC" {
+            syncs += 1
+        } else if tag != "CREATE" && tag != "TRUNCATE" && tag != "DELETE" {
+            return Err("incomplete schedule: unknown trace event `{tag}`")
+        }
+    }
+    if writes == 0 -> return Err("incomplete schedule: trace contains zero write boundaries")
+    if syncs == 0 -> return Err("incomplete schedule: trace contains zero sync barriers")
+    Ok(TraceStats{total: lines.len(), writes: writes, syncs: syncs})
+}
+
+evaluate_crash_run: fn(storage: StorageSpec, oracle: OracleSpec, trace_text: String, cfg: ScheduleConfig) -> CrashVerdict Never! {
+    if validate_storage(storage) == .Val(reason) -> return .Refused(reason)
+    if validate_oracle(oracle) == .Val(reason) -> return .Refused(reason)
+    stats: validate_trace(trace_text) ?? return .Refused("{err}")
+    if !cfg.include_dropped {
+        return .Refused("incomplete schedule: dropped unsynced write schedules were disabled")
+    }
+    if !cfg.include_reordered {
+        return .Refused("incomplete schedule: reordered unsynced write schedules were disabled")
+    }
+    reachable_boundaries: stats.total + 1
+    if cfg.skip_boundary == .Val(skipped) && skipped >= 0 && skipped < reachable_boundaries {
+        return .Refused("incomplete schedule: skipped reachable boundary {skipped} of {reachable_boundaries}")
+    }
+    if cfg.budget_ms <= 0 {
+        return .Refused("timeout: non-positive time budget ({cfg.budget_ms}ms)")
+    }
+    ^checked: 0
+    ^elapsed_ms: 0
+    loop boundary in 0..<reachable_boundaries {
+        if checked >= cfg.max_schedules {
+            return .Refused("incomplete schedule: stopped after {checked} of {reachable_boundaries} reachable boundaries")
+        }
+        elapsed_ms += cfg.step_cost_ms
+        if elapsed_ms > cfg.budget_ms {
+            return .Refused("timeout: exceeded {cfg.budget_ms}ms budget at boundary {boundary}/{reachable_boundaries}")
+        }
+        checked += 1
+    }
+    if checked < reachable_boundaries {
+        return .Refused("incomplete schedule: only {checked}/{reachable_boundaries} boundaries verified")
+    }
+    .Passed(checked)
+}
+
+record_real_trace: fn(work_dir: String) -[DB, FS]> String Never! {
+    if files.exists(work_dir) -> files.remove_all(work_dir) ?? ()
+    files.create_dir_all(work_dir) ?? panic("mkdir: {err}")
+    db_path: "{work_dir}/refusal.db"
+    trace_path: "{work_dir}/vfs.trace"
+    s0: db.open(db_path)
+    _: db.migrate(s0.all_rows(), "v1", [SQL{"CREATE TABLE kv (k INTEGER PRIMARY KEY, v INTEGER NOT NULL)"}]) ?? panic("migrate: {err}")
+    _: s0.execute(SQL{"INSERT INTO kv (k, v) VALUES (1, 10)"}) ?? panic("seed: {err}")
+    _: s0.close()
+    s1: db.open(db_path)
+    assert(s1.trace_vfs(Val(trace_path)))
+    ^tx1: s1.begin() ?? panic("tx1: {err}")
+    _: s1.execute(SQL{"UPDATE kv SET v = 20 WHERE k = 1"}) ?? panic("u1: {err}")
+    tx1.commit() ?? panic("c1: {err}")
+    ^tx2: s1.begin() ?? panic("tx2: {err}")
+    _: s1.execute(SQL{"UPDATE kv SET v = 30 WHERE k = 1"}) ?? panic("u2: {err}")
+    tx2.commit() ?? panic("c2: {err}")
+    assert(s1.trace_vfs(None))
+    _: s1.close()
+    files.read(trace_path) ?? panic("read trace: {err}")
+}
+
+assert_refused: fn(v: CrashVerdict, expected_substr: String, label: String) Never! {
+    assert(!verdict_is_pass(v))
+    reason: verdict_refusal_reason(v) ?? panic("{label}: expected Refused, got non-refusal verdict")
+    if !reason.contains(expected_substr) {
+        panic("{label}: refusal `{reason}` did not contain `{expected_substr}`")
+    }
+}
+
+#Test("crash_harness_refuses_incomplete") {
+    work_dir: files.mkdtemp("db_crash_refusal") ?? panic("mkdtemp: {err}")
+    real_trace: record_real_trace(work_dir)
+    valid_storage: StorageSpec{fs_type: "ext4", journal_mode: "DELETE", synchronous: "FULL", honors_fsync: true, honors_dirsync: true}
+    valid_oracle: OracleSpec{require_integrity_check: true, allowed_states: [String]{"s0", "s1", "s2"}}
+    valid_cfg: ScheduleConfig{budget_ms: 10000, step_cost_ms: 1, max_schedules: 10000, skip_boundary: None, include_dropped: true, include_reordered: true}
+
+    // Control: valid storage, valid oracle, complete real trace, sufficient budget passes.
+    ok: evaluate_crash_run(valid_storage, valid_oracle, real_trace, valid_cfg)
+    assert(verdict_is_pass(ok))
+
+    // 1. Timeout NEVER counts as a pass (zero budget or mid-run timeout).
+    assert_refused(
+        evaluate_crash_run(valid_storage, valid_oracle, real_trace, ScheduleConfig{budget_ms: 0, step_cost_ms: 1, max_schedules: 10000, skip_boundary: None, include_dropped: true, include_reordered: true}),
+        "timeout",
+        "zero budget",
+    )
+    assert_refused(
+        evaluate_crash_run(valid_storage, valid_oracle, real_trace, ScheduleConfig{budget_ms: 5, step_cost_ms: 2, max_schedules: 10000, skip_boundary: None, include_dropped: true, include_reordered: true}),
+        "timeout",
+        "mid-run timeout",
+    )
+
+    // 2. Invalid oracle NEVER counts as a pass.
+    assert_refused(
+        evaluate_crash_run(valid_storage, OracleSpec{require_integrity_check: false, allowed_states: [String]{"s0", "s1"}}, real_trace, valid_cfg),
+        "invalid oracle",
+        "disabled integrity_check",
+    )
+    assert_refused(
+        evaluate_crash_run(valid_storage, OracleSpec{require_integrity_check: true, allowed_states: [String]{}}, real_trace, valid_cfg),
+        "invalid oracle",
+        "empty allowed states",
+    )
+    assert_refused(
+        evaluate_crash_run(valid_storage, OracleSpec{require_integrity_check: true, allowed_states: [String]{"s0", "s0"}}, real_trace, valid_cfg),
+        "invalid oracle",
+        "duplicate allowed states",
+    )
+    assert_refused(
+        evaluate_crash_run(valid_storage, OracleSpec{require_integrity_check: true, allowed_states: [String]{"s0", ""}}, real_trace, valid_cfg),
+        "invalid oracle",
+        "blank state",
+    )
+
+    // 3. Network filesystems get NO untested atomicity promise, and unsupported storage NEVER passes.
+    net_filesystems: [String]{"nfs", "nfs4", "cifs", "smb", "smb3", "sshfs", "fuse.sshfs", "9p", "davfs", "glusterfs", "ceph", "lustre", "afp", "webdav"}
+    loop net_fs in net_filesystems {
+        net_spec: StorageSpec{fs_type: net_fs.copy(), journal_mode: "DELETE", synchronous: "FULL", honors_fsync: true, honors_dirsync: true}
+        assert_refused(
+            evaluate_crash_run(net_spec, valid_oracle, real_trace, valid_cfg),
+            "no untested atomicity promise",
+            "network fs {net_fs}",
+        )
+    }
+    assert_refused(
+        evaluate_crash_run(StorageSpec{fs_type: "tmpfs", journal_mode: "DELETE", synchronous: "FULL", honors_fsync: true, honors_dirsync: true}, valid_oracle, real_trace, valid_cfg),
+        "unsupported storage",
+        "tmpfs",
+    )
+    assert_refused(
+        evaluate_crash_run(StorageSpec{fs_type: "ext4", journal_mode: "DELETE", synchronous: "OFF", honors_fsync: true, honors_dirsync: true}, valid_oracle, real_trace, valid_cfg),
+        "unsupported storage",
+        "synchronous=OFF",
+    )
+    assert_refused(
+        evaluate_crash_run(StorageSpec{fs_type: "ext4", journal_mode: "MEMORY", synchronous: "FULL", honors_fsync: true, honors_dirsync: true}, valid_oracle, real_trace, valid_cfg),
+        "unsupported storage",
+        "journal_mode=MEMORY",
+    )
+    assert_refused(
+        evaluate_crash_run(StorageSpec{fs_type: "ext4", journal_mode: "DELETE", synchronous: "FULL", honors_fsync: false, honors_dirsync: true}, valid_oracle, real_trace, valid_cfg),
+        "unsupported storage",
+        "no fsync",
+    )
+    assert_refused(
+        evaluate_crash_run(StorageSpec{fs_type: "ext4", journal_mode: "DELETE", synchronous: "FULL", honors_fsync: true, honors_dirsync: false}, valid_oracle, real_trace, valid_cfg),
+        "unsupported storage",
+        "no dirsync",
+    )
+
+    // 4. Incomplete schedules NEVER count as a pass.
+    assert_refused(evaluate_crash_run(valid_storage, valid_oracle, "", valid_cfg), "incomplete schedule", "empty trace")
+    assert_refused(evaluate_crash_run(valid_storage, valid_oracle, "WRITE|0|ledger.db|0|4|00000000\n", valid_cfg), "incomplete schedule", "zero syncs")
+    assert_refused(evaluate_crash_run(valid_storage, valid_oracle, "SYNC|0|ledger.db|2\n", valid_cfg), "incomplete schedule", "zero writes")
+    assert_refused(evaluate_crash_run(valid_storage, valid_oracle, "WRITE|0|broken\n", valid_cfg), "incomplete schedule", "truncated trace")
+    assert_refused(
+        evaluate_crash_run(valid_storage, valid_oracle, real_trace, ScheduleConfig{budget_ms: 10000, step_cost_ms: 1, max_schedules: 3, skip_boundary: None, include_dropped: true, include_reordered: true}),
+        "incomplete schedule",
+        "capped schedule count",
+    )
+    assert_refused(
+        evaluate_crash_run(valid_storage, valid_oracle, real_trace, ScheduleConfig{budget_ms: 10000, step_cost_ms: 1, max_schedules: 10000, skip_boundary: Val(2), include_dropped: true, include_reordered: true}),
+        "incomplete schedule",
+        "skipped boundary",
+    )
+    assert_refused(
+        evaluate_crash_run(valid_storage, valid_oracle, real_trace, ScheduleConfig{budget_ms: 10000, step_cost_ms: 1, max_schedules: 10000, skip_boundary: None, include_dropped: false, include_reordered: true}),
+        "incomplete schedule",
+        "missing dropped unsynced",
+    )
+    assert_refused(
+        evaluate_crash_run(valid_storage, valid_oracle, real_trace, ScheduleConfig{budget_ms: 10000, step_cost_ms: 1, max_schedules: 10000, skip_boundary: None, include_dropped: true, include_reordered: false}),
+        "incomplete schedule",
+        "missing reordered unsynced",
+    )
+    files.remove_all(work_dir) ?? ()
+}

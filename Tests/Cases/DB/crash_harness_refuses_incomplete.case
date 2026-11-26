@@ -1,0 +1,10 @@
+# Fail-closed crash harness verification: a timeout, an invalid oracle,
+# unsupported storage (including network filesystems such as NFS, SMB/CIFS,
+# SSHFS, 9p, GlusterFS, Ceph, Lustre, AFP, WebDAV getting no untested
+# atomicity promise), or an incomplete schedule always refuses and never
+# counts as a pass.
+fixture: CrashHarnessRefusesIncomplete.fixture
+env: NO_COLOR=1
+step: jet test main.jet --filter crash_harness_refuses_incomplete
+exit: 0
+stdout: ~ "crash_harness_refuses_incomplete: pass" # fail-closed crash harness refuses every incomplete/invalid/timeout/unsupported case

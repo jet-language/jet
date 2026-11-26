@@ -1,0 +1,657 @@
+// Real crash-consistency test on the emitted core.db engine:
+// - Records every reachable VFS create, write, truncate, delete, sync, and
+//   dirsync boundary of a multi-page two-transaction workload in both
+//   rollback-journal (DELETE) and WAL modes.
+// - Materializes crash disk images under the local POSIX durable storage model
+//   (prefix-all, dropped unsynced writes, and seeded reordered unsynced writes).
+// - Reopens every crash image with real core.db.open, asserts
+//   PRAGMA integrity_check = ok and whole-or-absent transaction state.
+// - Runs the same harness with PRAGMA synchronous = OFF to prove a real
+//   failing schedule is caught, replayed deterministically from its seed,
+//   and reduced to a minimal failing schedule.
+use {
+    db: core.db
+    files: core.files
+    random: core.math.random
+}
+
+VfsOpKind: enum {
+    Create,
+    Write,
+    Truncate,
+    Sync,
+    Delete,
+    DirSync,
+}
+
+VfsEvent: struct {
+    kind: VfsOpKind,
+    seq: Int,
+    file: String,
+    inode: Int,
+    offset: Int,
+    size: Int,
+    bytes: [U8],
+}
+
+CrashSchedule: struct {
+    seed: Int,
+    boundary: Int,
+    kept_unsynced: [Int],
+    label: String,
+}
+
+CrashFailure: struct {
+    schedule: CrashSchedule,
+    reason: String,
+}
+
+hex_nibble: fn(b: U8) -> Int Never! {
+    v: Int{b}
+    if v >= 48 && v <= 57 -> return v - 48
+    if v >= 97 && v <= 102 -> return v - 87
+    if v >= 65 && v <= 70 {
+        return v - 55
+    }
+    -1
+}
+
+decode_hex: fn(text: String) -> [U8] Err! {
+    raw: text.bytes()
+    if raw.len() % 2 != 0 -> return Err("odd hex length")
+    ^out: [U8]{}
+    ^i: 0
+    loop i < raw.len() {
+        hi: hex_nibble(raw[i])
+        lo: hex_nibble(raw[i + 1])
+        if hi < 0 || lo < 0 -> return Err("invalid hex digit")
+        out.push(U8{(hi << 4) | lo})
+        i += 2
+    }
+    Ok(out)
+}
+
+parse_int_str: fn(text: String) -> Int Err! {
+    raw: text.bytes()
+    if raw.len() == 0 -> return Err("empty integer")
+    ^val: 0
+    loop b in raw {
+        d: Int{b}
+        if d < 48 || d > 57 -> return Err("bad integer `{text}`")
+        val = val * 10 + (d - 48)
+    }
+    Ok(val)
+}
+
+split_pipe: fn(line: String) -> [String] Never! {
+    raw: line.bytes()
+    ^parts: [String]{}
+    ^cur: [U8]{}
+    loop b in raw {
+        if b == (U8{124}) {
+            parts.push(String.from_bytes(cur.copy()) ?? "")
+            cur = [U8]{}
+        } else { cur.push(b) }
+    }
+    parts.push(String.from_bytes(cur) ?? "")
+    parts
+}
+
+parse_trace: fn(text: String) -> [VfsEvent] Err! {
+    ^events: [VfsEvent]{}
+    raw: text.bytes()
+    ^cur: [U8]{}
+    ^lines: [String]{}
+    loop b in raw {
+        if b == (U8{10}) {
+            if cur.len() > 0 -> lines.push(String.from_bytes(cur.copy()) ?? "")
+            cur = [U8]{}
+        } else if b != (U8{13}) { cur.push(b) }
+    }
+    if cur.len() > 0 -> lines.push(String.from_bytes(cur) ?? "")
+    loop line in lines {
+        parts: split_pipe(line)
+        if parts.len() < 3 -> return Err("malformed trace line: {line}")
+        tag: parts[0]
+        seq: parse_int_str(parts[1]) ?? return Err(err)
+        if tag == "CREATE" {
+            if parts.len() != 4 -> return Err("bad CREATE line: {line}")
+            events.push(VfsEvent{kind: .Create, seq: seq, file: parts[2].copy(), inode: -1, offset: 0, size: 0, bytes: [U8]{}})
+        } else if tag == "WRITE" {
+            if parts.len() != 6 -> return Err("bad WRITE line: {line}")
+            off: parse_int_str(parts[3]) ?? return Err(err)
+            sz: parse_int_str(parts[4]) ?? return Err(err)
+            payload: decode_hex(parts[5]) ?? return Err(err)
+            if payload.len() != sz -> return Err("WRITE length mismatch: {line}")
+            events.push(VfsEvent{kind: .Write, seq: seq, file: parts[2].copy(), inode: -1, offset: off, size: sz, bytes: payload})
+        } else if tag == "TRUNCATE" {
+            if parts.len() != 4 -> return Err("bad TRUNCATE line: {line}")
+            sz: parse_int_str(parts[3]) ?? return Err(err)
+            events.push(VfsEvent{kind: .Truncate, seq: seq, file: parts[2].copy(), inode: -1, offset: 0, size: sz, bytes: [U8]{}})
+        } else if tag == "SYNC" {
+            if parts.len() != 4 -> return Err("bad SYNC line: {line}")
+            flags: parse_int_str(parts[3]) ?? return Err(err)
+            events.push(VfsEvent{kind: .Sync, seq: seq, file: parts[2].copy(), inode: -1, offset: 0, size: flags, bytes: [U8]{}})
+        } else if tag == "DELETE" {
+            if parts.len() != 3 -> return Err("bad DELETE line: {line}")
+            events.push(VfsEvent{kind: .Delete, seq: seq, file: parts[2].copy(), inode: -1, offset: 0, size: 0, bytes: [U8]{}})
+        } else if tag == "DIRSYNC" {
+            if parts.len() != 3 -> return Err("bad DIRSYNC line: {line}")
+            events.push(VfsEvent{kind: .DirSync, seq: seq, file: parts[2].copy(), inode: -1, offset: 0, size: 0, bytes: [U8]{}})
+        } else {
+            return Err("unknown VFS trace event: {tag}")
+        }
+    }
+    Ok(events)
+}
+
+// Apply a single write to a byte buffer (zero-extending if offset > len).
+apply_write_bytes: fn(buf: ^[U8], offset: Int, data: [U8]) Never! {
+    end: offset + data.len()
+    loop buf.len() < end -> buf.push(U8{0})
+    loop i in 0..<data.len() -> buf[offset + i] = data[i]
+}
+
+// Apply a truncate to a byte buffer.
+apply_truncate_bytes: fn(buf: ^[U8], size: Int) Never! {
+    loop buf.len() > size -> _: buf.pop()
+    loop buf.len() < size -> buf.push(U8{0})
+}
+
+DiskFile: struct {
+    name: String,
+    exists: Bool,
+    data: [U8],
+}
+
+DirLink: struct {
+    name: String,
+    inode: Int,
+}
+
+InodeEntry: struct {
+    id: Int,
+    data: [U8],
+}
+
+dir_find: fn(links: [DirLink], name: String) -> Int Never! {
+    loop i in 0..<links.len() {
+        if links[i].name == name -> return i
+    }
+    -1
+}
+
+dir_set: fn(links: ^[DirLink], name: String, inode: Int) Never! {
+    found: dir_find(links, name)
+    if found >= 0 {
+        links[found].inode = inode
+        return
+    }
+    links.push(DirLink{name: name.copy(), inode: inode})
+}
+
+inode_find: fn(inodes: [InodeEntry], id: Int) -> Int Never! {
+    loop i in 0..<inodes.len() {
+        if inodes[i].id == id -> return i
+    }
+    -1
+}
+
+inode_ensure: fn(inodes: ^[InodeEntry], id: Int) -> Int Never! {
+    found: inode_find(inodes, id)
+    if found >= 0 -> return found
+    inodes.push(InodeEntry{id: id, data: [U8]{}})
+    inodes.len() - 1
+}
+
+// Tag every VFS event with its POSIX inode id: each pre-existing base file
+// gets a distinct inode id, and each CREATE allocates a fresh empty inode id
+// so writes to a newly created journal/WAL inode never bleed into a previously
+// unlinked inode of the same path.
+assign_inodes: fn(base_files: [DiskFile], raw_events: [VfsEvent]) -> [VfsEvent] Never! {
+    ^live: [DirLink]{}
+    ^next_id: 1
+    loop f in base_files {
+        if f.exists {
+            dir_set(live, f.name, next_id)
+            next_id += 1
+        }
+    }
+    ^out: [VfsEvent]{}
+    loop ev in raw_events {
+        ^e: ev.copy()
+        if e.kind == {
+            .Create -> {
+                e.inode = next_id
+                dir_set(live, e.file, next_id)
+                next_id += 1
+            }
+            .Write | .Truncate | .Sync -> {
+                idx: dir_find(live, e.file)
+                if idx >= 0 && live[idx].inode > 0 {
+                    e.inode = live[idx].inode
+                } else {
+                    e.inode = next_id
+                    dir_set(live, e.file, next_id)
+                    next_id += 1
+                }
+            }
+            .Delete -> {
+                idx: dir_find(live, e.file)
+                e.inode = if idx >= 0 -> live[idx].inode else -> -1
+                dir_set(live, e.file, -1)
+            }
+            .DirSync -> { e.inode = 0 }
+        }
+        out.push(e)
+    }
+    out
+}
+
+// Compute the durable POSIX filesystem state (directory entries + per-inode
+// synced bytes) plus the list of still-unsynced op indices after executing
+// events[0..<boundary].
+durable_at_boundary: fn(base_files: [DiskFile], events: [VfsEvent], boundary: Int) -> {links: [DirLink], inodes: [InodeEntry], pending: [Int]} Never! {
+    ^links: [DirLink]{}
+    ^inodes: [InodeEntry]{}
+    ^next_id: 1
+    loop f in base_files {
+        if f.exists {
+            dir_set(links, f.name, next_id)
+            inodes.push(InodeEntry{id: next_id, data: f.data.copy()})
+            next_id += 1
+        }
+    }
+    ^pending: [Int]{}
+    loop i in 0..<boundary {
+        ev: events[i]
+        if ev.kind == {
+            .Create | .Write | .Truncate | .Delete -> { pending.push(i) }
+            .Sync -> {
+                // fsync(fd) flushes all pending writes/truncates for ev.inode in order.
+                slot: inode_ensure(inodes, ev.inode)
+                ^still: [Int]{}
+                loop idx in pending {
+                    pe: events[idx]
+                    if pe.inode == ev.inode && pe.kind == .Write {
+                        apply_write_bytes(inodes[slot].data, pe.offset, pe.bytes)
+                    } else if pe.inode == ev.inode && pe.kind == .Truncate {
+                        apply_truncate_bytes(inodes[slot].data, pe.size)
+                    } else { still.push(idx) }
+                }
+                pending = still
+            }
+            .DirSync -> {
+                // fsync(dirfd) flushes all pending CREATE/DELETE directory entries in order.
+                ^still: [Int]{}
+                loop idx in pending {
+                    pe: events[idx]
+                    if pe.kind == .Create {
+                        _: inode_ensure(inodes, pe.inode)
+                        dir_set(links, pe.file, pe.inode)
+                    } else if pe.kind == .Delete {
+                        at: dir_find(links, pe.file)
+                        if at >= 0 && links[at].inode == pe.inode -> links[at].inode = -1
+                    } else { still.push(idx) }
+                }
+                pending = still
+            }
+        }
+    }
+    {links: links, inodes: inodes, pending: pending}
+}
+
+// Materialize the exact crash disk image for (boundary, kept_unsynced):
+// starts from durable (links, inodes) at `boundary`, then applies the ordered
+// subset `kept_unsynced` of unsynced operations to their own inodes/links.
+materialize_image: fn(base_files: [DiskFile], events: [VfsEvent], boundary: Int, kept_unsynced: [Int]) -> [DiskFile] Never! {
+    state: durable_at_boundary(base_files, events, boundary)
+    ^links: state.links
+    ^inodes: state.inodes
+    loop idx in kept_unsynced {
+        pe: events[idx]
+        if pe.kind == {
+            .Create -> {
+                _: inode_ensure(inodes, pe.inode)
+                dir_set(links, pe.file, pe.inode)
+            }
+            .Delete -> {
+                at: dir_find(links, pe.file)
+                if at >= 0 && links[at].inode == pe.inode -> links[at].inode = -1
+            }
+            .Write -> {
+                slot: inode_ensure(inodes, pe.inode)
+                apply_write_bytes(inodes[slot].data, pe.offset, pe.bytes)
+            }
+            .Truncate -> {
+                slot: inode_ensure(inodes, pe.inode)
+                apply_truncate_bytes(inodes[slot].data, pe.size)
+            }
+            .Sync | .DirSync -> {}
+        }
+    }
+    ^disk: [DiskFile]{}
+    loop link in links {
+        if link.inode > 0 {
+            slot: inode_find(inodes, link.inode)
+            data: if slot >= 0 -> inodes[slot].data.copy() else -> [U8]{}
+            disk.push(DiskFile{name: link.name.copy(), exists: true, data: data})
+        }
+    }
+    disk
+}
+
+// Read canonical workload state from a reopened database:
+// checks PRAGMA integrity_check = ok, then reads both `accounts` and `transfers`
+// (two separate tables / B-tree pages) so a torn multi-page write is always visible.
+// Returns Ok(state_index) in 0..<allowed.len(), or Err(failure_reason).
+reopen_and_check: fn(crash_dir: String, db_name: String, disk: [DiskFile], allowed: [String]) -[DB, FS]> Int Err! {
+    if files.exists(crash_dir) -> files.remove_all(crash_dir) ?? ()
+    files.create_dir_all(crash_dir) ?? return Err("could not create crash dir: {err}")
+    loop f in disk {
+        if !f.exists -> next
+        full: "{crash_dir}/{f.name}"
+        files.write_bytes(full, f.data) ?? return Err("could not write crash file {f.name}: {err}")
+    }
+    db_path: "{crash_dir}/{db_name}"
+    store: db.open(db_path)
+    // 1. PRAGMA integrity_check MUST return a single row "ok".
+    ic_rows: store.query(SQL{"PRAGMA integrity_check"}) ?? {
+        _: store.close()
+        return Err("PRAGMA integrity_check errored: {err.message()}")
+    }
+    if ic_rows.len() != 1 {
+        _: store.close()
+        return Err("PRAGMA integrity_check returned {ic_rows.len()} rows")
+    }
+    ic_text: db.row_text(ic_rows[0], "integrity_check") ?? {
+        _: store.close()
+        return Err("PRAGMA integrity_check missing text column")
+    }
+    if ic_text != "ok" {
+        _: store.close()
+        return Err("PRAGMA integrity_check failed: {ic_text}")
+    }
+    // 2. Query both tables to verify whole-or-absent multi-page atomicity.
+    acc_rows: store.query(SQL{"SELECT id, owner, balance FROM accounts ORDER BY id"}) ?? {
+        _: store.close()
+        return Err("accounts query errored: {err.message()}")
+    }
+    tx_rows: store.query(SQL{"SELECT id, amount, note FROM transfers ORDER BY id"}) ?? {
+        _: store.close()
+        return Err("transfers query errored: {err.message()}")
+    }
+    _: store.close()
+    ^acc_parts: [String]{}
+    loop row in acc_rows {
+        id: db.row_int(row, "id") ?? -1
+        owner: db.row_text(row, "owner") ?? "?"
+        bal: db.row_int(row, "balance") ?? -1
+        acc_parts.push("{id}:{owner}:{bal}")
+    }
+    ^tx_parts: [String]{}
+    loop row in tx_rows {
+        id: db.row_int(row, "id") ?? -1
+        amt: db.row_int(row, "amount") ?? -1
+        note: db.row_text(row, "note") ?? "?"
+        tx_parts.push("{id}:{amt}:{note}")
+    }
+    snapshot: "{acc_parts.join(",")}|{tx_parts.join(",")}"
+    loop i in 0..<allowed.len() {
+        if snapshot == allowed[i] -> return Ok(i)
+    }
+    Err("torn or unexpected state `{snapshot}`")
+}
+
+// Generate deterministic crash schedules covering EVERY reachable write,
+// truncate, delete, and sync boundary, including dropped and reordered
+// unsynced writes derived from `seed`.
+build_schedules: fn(base_files: [DiskFile], events: [VfsEvent], seed: Int) -> [CrashSchedule] Never! {
+    ^schedules: [CrashSchedule]{}
+    loop boundary in 0..<events.len() + 1 {
+        st: durable_at_boundary(base_files, events, boundary)
+        // 1. All unsynced writes dropped (pure durable state at boundary).
+        schedules.push(CrashSchedule{seed: seed, boundary: boundary, kept_unsynced: [Int]{}, label: "b{boundary}:drop_all"})
+        if st.pending.len() > 0 {
+            // 2. Prefix-all-kept (every unsynced op up to boundary landed).
+            schedules.push(CrashSchedule{seed: seed, boundary: boundary, kept_unsynced: st.pending.copy(), label: "b{boundary}:keep_all"})
+        }
+        if st.pending.len() >= 2 {
+            // 3. Reordered: keep only the newest unsynced write (earlier unsynced writes dropped).
+            last_idx: st.pending[st.pending.len() - 1]
+            ^only_last: [Int]{}
+            last_file: events[last_idx].file
+            loop p in st.pending {
+                if events[p].kind == .Create && events[p].file == last_file -> only_last.push(p)
+            }
+            if !only_last.contains(last_idx) -> only_last.push(last_idx)
+            schedules.push(CrashSchedule{seed: seed, boundary: boundary, kept_unsynced: only_last, label: "b{boundary}:reorder_last_only"})
+            // 4. Reordered: drop the earliest unsynced write while keeping later writes.
+            ^drop_first: [Int]{}
+            loop j in 1..<st.pending.len() -> drop_first.push(st.pending[j])
+            schedules.push(CrashSchedule{seed: seed, boundary: boundary, kept_unsynced: drop_first, label: "b{boundary}:drop_first"})
+            // 5. Seeded random reordered subset of unsynced ops.
+            ^rng: random.rng(seed * 1009 + boundary * 9176 + 17)
+            ^subset: [Int]{}
+            loop p in st.pending {
+                if rng.bool() -> subset.push(p)
+            }
+            ^k: subset.len() - 1
+            loop k > 0 {
+                j: rng.int(0, k)
+                tmp: subset[k]
+                subset[k] = subset[j]
+                subset[j] = tmp
+                k -= 1
+            }
+            schedules.push(CrashSchedule{seed: seed, boundary: boundary, kept_unsynced: subset, label: "b{boundary}:seeded_reorder"})
+        }
+    }
+    schedules
+}
+
+// Run the real two-transaction workload (updating two separate tables / pages
+// in each transaction) and return base disk snapshot + recorded VFS events.
+record_two_tx_workload: fn(work_dir: String, journal_mode: String, sync_mode: String) -[DB, FS]> {base: [DiskFile], events: [VfsEvent]} Never! {
+    if files.exists(work_dir) -> files.remove_all(work_dir) ?? ()
+    files.create_dir_all(work_dir) ?? panic("mkdir work_dir: {err}")
+    db_path: "{work_dir}/ledger.db"
+    trace_path: "{work_dir}/vfs.trace"
+    init_store: db.open(db_path)
+    _: db.migrate(init_store.all_rows(), "ledger-v1", [
+        SQL{"CREATE TABLE accounts (id INTEGER PRIMARY KEY, owner TEXT NOT NULL, balance INTEGER NOT NULL)"},
+        SQL{"CREATE TABLE transfers (id INTEGER PRIMARY KEY, amount INTEGER NOT NULL, note TEXT NOT NULL)"},
+    ]) ?? panic("migrate: {err}")
+    _: init_store.execute(SQL{"INSERT INTO accounts (id, owner, balance) VALUES (1, 'alice', 1000), (2, 'bob', 1000)"}) ?? panic("seed accounts: {err}")
+    _: init_store.execute(SQL{"INSERT INTO transfers (id, amount, note) VALUES (1, 0, 'opening')"}) ?? panic("seed transfers: {err}")
+    jm_rows: init_store.query(db.SQL.raw("PRAGMA journal_mode = {journal_mode}")) ?? panic("journal_mode: {err}")
+    assert_eq(jm_rows.len(), 1)
+    _: init_store.close()
+    store: db.open(db_path)
+    _: store.execute(db.SQL.raw("PRAGMA synchronous = {sync_mode}")) ?? panic("synchronous: {err}")
+    // Snapshot every durable DB file present at the moment tracing begins
+    // (in WAL mode, opening the store already creates the empty 0-byte -wal file).
+    ^base_files: [DiskFile]{DiskFile{name: "ledger.db", exists: true, data: files.read_bytes(db_path) ?? panic("read base db: {err}")}}
+    wal_path: "{work_dir}/ledger.db-wal"
+    if files.exists(wal_path) {
+        base_files.push(DiskFile{name: "ledger.db-wal", exists: true, data: files.read_bytes(wal_path) ?? [U8]{}})
+    }
+    jrnl_path: "{work_dir}/ledger.db-journal"
+    if files.exists(jrnl_path) {
+        base_files.push(DiskFile{name: "ledger.db-journal", exists: true, data: files.read_bytes(jrnl_path) ?? [U8]{}})
+    }
+    assert(store.trace_vfs(Val(trace_path)))
+    // Transaction 1: S0 -> S1 (mutates both `accounts` and `transfers` pages).
+    ^tx1: store.begin() ?? panic("tx1 begin: {err}")
+    _: store.execute(SQL{"UPDATE accounts SET balance = 750 WHERE id = 1"}) ?? panic("tx1 u1: {err}")
+    _: store.execute(SQL{"UPDATE accounts SET balance = 1250 WHERE id = 2"}) ?? panic("tx1 u2: {err}")
+    _: store.execute(SQL{"INSERT INTO transfers (id, amount, note) VALUES (2, 250, 'tx1')"}) ?? panic("tx1 ins: {err}")
+    tx1.commit() ?? panic("tx1 commit: {err}")
+    // Transaction 2: S1 -> S2 (mutates both `accounts` and `transfers` pages).
+    ^tx2: store.begin() ?? panic("tx2 begin: {err}")
+    _: store.execute(SQL{"UPDATE accounts SET balance = 850 WHERE id = 1"}) ?? panic("tx2 u1: {err}")
+    _: store.execute(SQL{"UPDATE accounts SET balance = 1150 WHERE id = 2"}) ?? panic("tx2 u2: {err}")
+    _: store.execute(SQL{"INSERT INTO accounts (id, owner, balance) VALUES (3, 'carol', 500)"}) ?? panic("tx2 ins acc: {err}")
+    _: store.execute(SQL{"INSERT INTO transfers (id, amount, note) VALUES (3, 100, 'tx2')"}) ?? panic("tx2 ins tx: {err}")
+    tx2.commit() ?? panic("tx2 commit: {err}")
+    assert(store.trace_vfs(None))
+    _: store.close()
+    trace_text: files.read(trace_path) ?? panic("read trace: {err}")
+    raw_events: parse_trace(trace_text) ?? panic("parse trace: {err}")
+    events: assign_inodes(base_files, raw_events)
+    {base: base_files, events: events}
+}
+
+// Replay a single CrashSchedule against the real core.db engine.
+check_schedule: fn(crash_dir: String, base_files: [DiskFile], events: [VfsEvent], sched: CrashSchedule, allowed: [String]) -[DB, FS]> Int Err! {
+    img: materialize_image(base_files, events, sched.boundary, sched.kept_unsynced)
+    reopen_and_check(crash_dir, "ledger.db", img, allowed)
+}
+
+// Reduce a failing CrashSchedule to a 1-minimal failing schedule:
+// drop unnecessary ops from kept_unsynced until every remaining op is necessary,
+// then shrink boundary to the minimal prefix covering kept_unsynced.
+reduce_failing_schedule: fn(crash_dir: String, base_files: [DiskFile], events: [VfsEvent], initial: CrashSchedule, allowed: [String]) -[DB, FS]> CrashFailure Never! {
+    ^best: initial.copy()
+    ^best_reason: ""
+    if check_schedule(crash_dir, base_files, events, best, allowed) == {
+        .Ok(_) -> panic("initial schedule must fail")
+        .Err(reason) -> { best_reason = "{reason}" }
+    }
+    ^changed: true
+    loop changed {
+        changed = false
+        ^i: 0
+        loop i < best.kept_unsynced.len() {
+            ^cand_kept: [Int]{}
+            loop j in 0..<best.kept_unsynced.len() {
+                if j != i -> cand_kept.push(best.kept_unsynced[j])
+            }
+            cand: CrashSchedule{seed: best.seed, boundary: best.boundary, kept_unsynced: cand_kept, label: "reduced"}
+            if check_schedule(crash_dir, base_files, events, cand, allowed) == {
+                .Ok(_) -> {}
+                .Err(reason) -> {
+                    best = cand
+                    best_reason = "{reason}"
+                    changed = true
+                    break
+                }
+            }
+            i += 1
+        }
+    }
+    ^min_b: 0
+    loop idx in best.kept_unsynced {
+        if idx + 1 > min_b -> min_b = idx + 1
+    }
+    if min_b < best.boundary {
+        cand: CrashSchedule{seed: best.seed, boundary: min_b, kept_unsynced: best.kept_unsynced.copy(), label: "reduced"}
+        if check_schedule(crash_dir, base_files, events, cand, allowed) == {
+            .Ok(_) -> {}
+            .Err(reason) -> {
+                best = cand
+                best_reason = "{reason}"
+            }
+        }
+    }
+    CrashFailure{schedule: best, reason: best_reason}
+}
+
+#Test("db_crash_reopen") {
+    root: files.mkdtemp("db_crash_reopen") ?? panic("mkdtemp: {err}")
+    s0: "1:alice:1000,2:bob:1000|1:0:opening"
+    s1: "1:alice:750,2:bob:1250|1:0:opening,2:250:tx1"
+    s2: "1:alice:850,2:bob:1150,3:carol:500|1:0:opening,2:250:tx1,3:100:tx2"
+    allowed: [String]{s0, s1, s2}
+    // Part 1: Rollback-journal mode (DELETE, synchronous=FULL) — every reachable
+    // write, truncate, delete, and sync boundary + dropped/reordered unsynced writes.
+    del_rec: record_two_tx_workload("{root}/delete_src", "DELETE", "FULL")
+    ^del_writes: 0
+    ^del_syncs: 0
+    loop ev in del_rec.events {
+        if ev.kind == .Write -> del_writes += 1
+        if ev.kind == .Sync || ev.kind == .DirSync -> del_syncs += 1
+    }
+    assert(del_writes >= 4)
+    assert(del_syncs >= 4)
+    del_schedules: build_schedules(del_rec.base, del_rec.events, 6876)
+    ^del_seen: [Int]{0, 0, 0}
+    loop sched in del_schedules {
+        if check_schedule("{root}/delete_crash", del_rec.base, del_rec.events, sched, allowed) == {
+            .Ok(state_idx) -> { del_seen[state_idx] = del_seen[state_idx] + 1 }
+            .Err(reason) -> panic("DELETE crash failed at {sched.label} (b={sched.boundary}, kept={sched.kept_unsynced}): {reason}")
+        }
+    }
+    assert(del_seen[0] > 0 && del_seen[1] > 0 && del_seen[2] > 0)
+    // Part 2: WAL mode (WAL, synchronous=FULL) — every reachable write & sync boundary.
+    wal_rec: record_two_tx_workload("{root}/wal_src", "WAL", "FULL")
+    ^wal_writes: 0
+    ^wal_syncs: 0
+    loop ev in wal_rec.events {
+        if ev.kind == .Write -> wal_writes += 1
+        if ev.kind == .Sync || ev.kind == .DirSync -> wal_syncs += 1
+    }
+    assert(wal_writes >= 4)
+    assert(wal_syncs >= 2)
+    wal_schedules: build_schedules(wal_rec.base, wal_rec.events, 6877)
+    ^wal_seen: [Int]{0, 0, 0}
+    loop sched in wal_schedules {
+        if check_schedule("{root}/wal_crash", wal_rec.base, wal_rec.events, sched, allowed) == {
+            .Ok(state_idx) -> { wal_seen[state_idx] = wal_seen[state_idx] + 1 }
+            .Err(reason) -> panic("WAL crash failed at {sched.label} (b={sched.boundary}, kept={sched.kept_unsynced}): {reason}")
+        }
+    }
+    assert(wal_seen[0] > 0 && wal_seen[1] > 0 && wal_seen[2] > 0)
+    // Part 3: Seed replay & 1-minimal schedule reduction proof on real core.db
+    // with synchronous=OFF (reordered unsynced writes yield a real torn state).
+    unsafe_rec: record_two_tx_workload("{root}/unsafe_src", "DELETE", "OFF")
+    unsafe_seed: 68760
+    unsafe_schedules: build_schedules(unsafe_rec.base, unsafe_rec.events, unsafe_seed)
+    ^found_idx: -1
+    ^first_reason: ""
+    loop i in 0..<unsafe_schedules.len() {
+        if check_schedule("{root}/unsafe_crash", unsafe_rec.base, unsafe_rec.events, unsafe_schedules[i], allowed) == {
+            .Ok(_) -> {}
+            .Err(reason) -> {
+                found_idx = i
+                first_reason = "{reason}"
+                break
+            }
+        }
+    }
+    assert(found_idx >= 0)
+    failing: unsafe_schedules[found_idx]
+    // Deterministic replay from seed alone reproduces the exact same failing schedule & failure.
+    replayed_list: build_schedules(unsafe_rec.base, unsafe_rec.events, unsafe_seed)
+    replayed: replayed_list[found_idx]
+    assert_eq(replayed.boundary, failing.boundary)
+    assert_eq(replayed.kept_unsynced, failing.kept_unsynced)
+    if check_schedule("{root}/unsafe_replay", unsafe_rec.base, unsafe_rec.events, replayed, allowed) == {
+        .Ok(_) -> panic("seed replay did not reproduce failure")
+        .Err(reason) -> assert_eq("{reason}", first_reason)
+    }
+    // Reduce to a 1-minimal failing schedule and verify every remaining op is necessary.
+    reduced: reduce_failing_schedule("{root}/unsafe_reduce", unsafe_rec.base, unsafe_rec.events, failing, allowed)
+    assert(reduced.schedule.kept_unsynced.len() <= failing.kept_unsynced.len())
+    assert(reduced.schedule.boundary <= failing.boundary)
+    assert(reduced.schedule.kept_unsynced.len() >= 1)
+    assert(reduced.schedule.kept_unsynced.len() <= 2)
+    // Verify 1-minimality: dropping any single op from reduced.kept_unsynced makes it pass.
+    loop drop_i in 0..<reduced.schedule.kept_unsynced.len() {
+        ^smaller: [Int]{}
+        loop j in 0..<reduced.schedule.kept_unsynced.len() {
+            if j != drop_i -> smaller.push(reduced.schedule.kept_unsynced[j])
+        }
+        smaller_sched: CrashSchedule{seed: reduced.schedule.seed, boundary: reduced.schedule.boundary, kept_unsynced: smaller, label: "minimality-check"}
+        if check_schedule("{root}/unsafe_mincheck", unsafe_rec.base, unsafe_rec.events, smaller_sched, allowed) == {
+            .Ok(_) -> {}
+            .Err(_) -> panic("reduced schedule was not 1-minimal")
+        }
+    }
+    // Confirm the reduced schedule replays deterministically and reproduces the exact failure.
+    if check_schedule("{root}/unsafe_reduced_replay", unsafe_rec.base, unsafe_rec.events, reduced.schedule, allowed) == {
+        .Ok(_) -> panic("reduced schedule did not reproduce")
+        .Err(reason) -> assert_eq("{reason}", reduced.reason)
+    }
+    files.remove_all(root) ?? ()
+}

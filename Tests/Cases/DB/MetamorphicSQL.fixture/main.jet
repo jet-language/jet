@@ -1,0 +1,370 @@
+// Metamorphic SQL testing on the real core.db engine:
+// - Generates deterministic multi-table datasets (including NULLs, duplicates,
+//   boundary integers, and empty tables) and compares 7 metamorphic SQL pairs
+//   using core.testing.compare.
+// - Compares a planted wrong query under core.testing.compare to verify it
+//   yields `first_difference` and reduces the failing dataset to a minimal
+//   1-row replayable witness.
+// - Verifies malformed SQL and malformed/corrupt DB files report typed
+//   DBError failures (or non-"ok" integrity reports) without panicking.
+use {
+    db: core.db
+    files: core.files
+    random: core.math.random
+    testing: core.testing
+    core.encoding.[Dyn]
+}
+
+ItemRow: struct {
+    id: Int,
+    cat: String?,
+    score: Int?,
+    active: Int?,
+}
+
+TagRow: struct {
+    id: Int,
+    item_id: Int,
+    label: String,
+}
+
+Dataset: struct {
+    items: [ItemRow],
+    tags: [TagRow],
+}
+
+generate_dataset: fn(seed: Int) -> Dataset Never! {
+    if seed == 0 -> return Dataset{items: [ItemRow]{}, tags: [TagRow]{}}
+    if seed == 1 {
+        return Dataset{
+            items: [ItemRow]{ItemRow{id: 1, cat: None, score: None, active: Val(1)}},
+            tags: [TagRow]{},
+        }
+    }
+    ^rng: random.rng(seed * 2654435761 + 97)
+    cats: [String]{"a", "b", "c", "d"}
+    tag_labels: [String]{"hot", "cold", "vip"}
+    n_items: rng.int(5, 12)
+    ^items: [ItemRow]{}
+    ^tags: [TagRow]{}
+    ^next_tag_id: 1
+    loop i in 0..<n_items {
+        id: i + 1
+        // Ensure boundary score=10, active=1 appears deterministically in cases >= 3.
+        cat: if rng.int(0, 5) == 0 -> None else -> Val(cats[rng.int(0, cats.len() - 1)].copy())
+        score: if seed >= 3 && i == 2 -> Val(10) else if rng.int(0, 4) == 0 -> None else -> Val(rng.int(-15, 35))
+        active: if seed >= 3 && i == 2 -> Val(1) else if rng.int(0, 5) == 0 -> None else -> Val(rng.int(0, 1))
+        items.push(ItemRow{id: id, cat: cat, score: score, active: active})
+        n_tags: rng.int(0, 2)
+        loop _ in 0..<n_tags {
+            tags.push(TagRow{id: next_tag_id, item_id: id, label: tag_labels[rng.int(0, tag_labels.len() - 1)].copy()})
+            next_tag_id += 1
+        }
+    }
+    Dataset{items: items, tags: tags}
+}
+
+db_value_to_dyn: fn(v: db.DBValue) -> Dyn Never! {
+    if v == {
+        .Null -> Dyn.Null
+        .Int(n) -> Dyn.Int(n)
+        .Float(f) -> Dyn.Float(f)
+        .Text(s) -> Dyn.Text(s.copy())
+        .Bool(b) -> Dyn.Bool(b)
+        .Blob(bytes) -> Dyn.Text("{bytes}")
+    }
+}
+
+rows_to_dyn: fn(rows: [[String:db.DBValue]], cols: [String]) -> Dyn Never! {
+    ^arr: [Dyn]{}
+    loop row in rows {
+        ^obj: [String:Dyn]{}
+        loop col in cols {
+            val: row.get(col) ?? db.DBValue.Null
+            obj[col.copy()] = db_value_to_dyn(val)
+        }
+        arr.push(Dyn.Object(obj))
+    }
+    Dyn.Array(arr)
+}
+
+load_dataset: fn(store: db.Store, data: Dataset, with_index: Bool) -[DB]> db.DBError! {
+    ^ddl: [db.SQL]{
+        SQL{"CREATE TABLE items (id INTEGER PRIMARY KEY, cat TEXT, score INTEGER, active INTEGER)"},
+        SQL{"CREATE TABLE tags (id INTEGER PRIMARY KEY, item_id INTEGER NOT NULL, label TEXT NOT NULL)"},
+    }
+    if with_index {
+        ddl.push(SQL{"CREATE INDEX idx_items_cat_score ON items (cat, score)"})
+        ddl.push(SQL{"CREATE INDEX idx_tags_item ON tags (item_id)"})
+    }
+    _: db.migrate(store.all_rows(), "meta-v1", ddl) ?? return Err(err)
+    loop item in data.items {
+        cat_val: if item.cat == .Val(s) -> db.DBValue.Text(s.copy()) else -> db.DBValue.Null
+        score_val: if item.score == .Val(n) -> db.DBValue.Int(n) else -> db.DBValue.Null
+        active_val: if item.active == .Val(n) -> db.DBValue.Int(n) else -> db.DBValue.Null
+        _: store.execute(SQL{"INSERT INTO items (id, cat, score, active) VALUES ({item.id}, {cat_val}, {score_val}, {active_val})"}) ?? return Err(err)
+    }
+    loop tag in data.tags {
+        _: store.execute(SQL{"INSERT INTO tags (id, item_id, label) VALUES ({tag.id}, {tag.item_id}, {tag.label})"}) ?? return Err(err)
+    }
+    Ok()
+}
+
+eval_dataset_sql: fn(data: Dataset, sql_text: String, cols: [String], with_index: Bool) -[DB]> Dyn db.DBError! {
+    store: db.open_memory()
+    load_dataset(store, data, with_index) ?? {
+        _: store.close()
+        return Err(err)
+    }
+    rows: store.query(db.SQL.raw(sql_text)) ?? {
+        _: store.close()
+        return Err(err)
+    }
+    _: store.close()
+    Ok(rows_to_dyn(rows, cols))
+}
+
+dyn_to_seed: fn(input: Dyn) -> Int Never! {
+    if input == .Int(n) -> return n
+    0
+}
+
+run_metamorphic_pair: fn(cases: [Dyn], ref_sql: String, cand_sql: String, cols: [String], cand_indexed: Bool) -[DB]> testing.TestComparison db.DBError! {
+    r_sql: ref_sql.copy()
+    c_sql: cand_sql.copy()
+    c_cols: cols.copy()
+    r_cols: cols.copy()
+    testing.compare<db.DBError>(
+        cases,
+        fn(input: Dyn) -[DB]> Dyn db.DBError! {
+            eval_dataset_sql(generate_dataset(dyn_to_seed(input)), r_sql, r_cols, false)
+        },
+        fn(input: Dyn) -[DB]> Dyn db.DBError! {
+            eval_dataset_sql(generate_dataset(dyn_to_seed(input)), c_sql, c_cols, cand_indexed)
+        },
+        "typed_equality",
+    )
+}
+
+// Delta-reduce a failing items list until removing any remaining row stops reproducing
+// the divergence between `ref_sql` and `wrong_sql`.
+reduce_failing_items: fn(items: [ItemRow], ref_sql: String, wrong_sql: String, cols: [String]) -[DB]> [ItemRow] db.DBError! {
+    ^best: items.copy()
+    ^changed: true
+    loop changed {
+        changed = false
+        ^i: 0
+        loop i < best.len() {
+            ^cand: [ItemRow]{}
+            loop j in 0..<best.len() {
+                if j != i -> cand.push(best[j].copy())
+            }
+            ds: Dataset{items: cand.copy(), tags: [TagRow]{}}
+            r_val: eval_dataset_sql(ds, ref_sql, cols, false) ?? return Err(err)
+            w_val: eval_dataset_sql(ds, wrong_sql, cols, false) ?? return Err(err)
+            if !r_val.equal_unordered(w_val) {
+                best = cand
+                changed = true
+                break
+            }
+            i += 1
+        }
+    }
+    Ok(best)
+}
+
+#Test("metamorphic_sql") {
+    ^cases: [Dyn]{}
+    loop seed in 0..<12 -> cases.push(Dyn.Int(seed))
+
+    // 1. Metamorphic SQL pairs over generated data compare equal under core.testing.compare.
+    // Pair 1: De Morgan / NULL-safe boolean equivalence.
+    p1: run_metamorphic_pair(
+        cases,
+        "SELECT id, score FROM items WHERE score IS NOT NULL AND score >= 10 AND active = 1 ORDER BY id",
+        "SELECT id, score FROM items WHERE NOT (score IS NULL OR score < 10 OR active != 1) AND active IS NOT NULL ORDER BY id",
+        [String]{"id", "score"},
+        false,
+    ) ?? panic("pair 1: {err}")
+    assert(testing.assert_equal(p1))
+    assert_eq(p1.status, "matched")
+    assert_eq(p1.first_difference, -1)
+
+    // Pair 2: IN-list vs OR disjunction.
+    p2: run_metamorphic_pair(
+        cases,
+        "SELECT id, cat FROM items WHERE cat IN ('a', 'b') ORDER BY id",
+        "SELECT id, cat FROM items WHERE cat = 'a' OR cat = 'b' ORDER BY id",
+        [String]{"id", "cat"},
+        false,
+    ) ?? panic("pair 2: {err}")
+    assert(testing.assert_equal(p2))
+
+    // Pair 3: BETWEEN vs explicit lower/upper bounds.
+    p3: run_metamorphic_pair(
+        cases,
+        "SELECT id, score FROM items WHERE score BETWEEN -5 AND 25 ORDER BY id",
+        "SELECT id, score FROM items WHERE score >= -5 AND score <= 25 ORDER BY id",
+        [String]{"id", "score"},
+        false,
+    ) ?? panic("pair 3: {err}")
+    assert(testing.assert_equal(p3))
+
+    // Pair 4: DISTINCT INNER JOIN vs EXISTS semi-join.
+    p4: run_metamorphic_pair(
+        cases,
+        "SELECT DISTINCT items.id, items.cat FROM items JOIN tags ON tags.item_id = items.id ORDER BY items.id",
+        "SELECT items.id, items.cat FROM items WHERE EXISTS (SELECT 1 FROM tags WHERE tags.item_id = items.id) ORDER BY items.id",
+        [String]{"id", "cat"},
+        false,
+    ) ?? panic("pair 4: {err}")
+    assert(testing.assert_equal(p4))
+
+    // Pair 5: Aggregate partition conservation (score >= 0 + score < 0 + score IS NULL == COUNT(*)).
+    p5: run_metamorphic_pair(
+        cases,
+        "SELECT COUNT(*) AS n FROM items",
+        "SELECT (SELECT COUNT(*) FROM items WHERE score >= 0) + (SELECT COUNT(*) FROM items WHERE score < 0) + (SELECT COUNT(*) FROM items WHERE score IS NULL) AS n",
+        [String]{"n"},
+        false,
+    ) ?? panic("pair 5: {err}")
+    assert(testing.assert_equal(p5))
+
+    // Pair 6: DISTINCT vs GROUP BY.
+    p6: run_metamorphic_pair(
+        cases,
+        "SELECT DISTINCT cat FROM items ORDER BY cat",
+        "SELECT cat FROM items GROUP BY cat ORDER BY cat",
+        [String]{"cat"},
+        false,
+    ) ?? panic("pair 6: {err}")
+    assert(testing.assert_equal(p6))
+
+    // Pair 7: Index invariance (unindexed scan vs indexed scan).
+    p7: run_metamorphic_pair(
+        cases,
+        "SELECT id, cat, score FROM items WHERE cat = 'a' AND score >= 0 ORDER BY score DESC, id ASC",
+        "SELECT id, cat, score FROM items WHERE cat = 'a' AND score >= 0 ORDER BY score DESC, id ASC",
+        [String]{"id", "cat", "score"},
+        true,
+    ) ?? panic("pair 7: {err}")
+    assert(testing.assert_equal(p7))
+
+    // 2. Planted wrong query yields `first_difference` and reduces to a minimal replay.
+    ref_sql: "SELECT id, score FROM items WHERE score >= 10 AND active = 1 ORDER BY id"
+    wrong_sql: "SELECT id, score FROM items WHERE score > 10 AND active = 1 ORDER BY id"
+    diff_cols: [String]{"id", "score"}
+    mismatch: run_metamorphic_pair(cases, ref_sql, wrong_sql, diff_cols, false) ?? panic("planted mismatch: {err}")
+    assert(!testing.assert_equal(mismatch))
+    assert_eq(mismatch.status, "mismatch")
+    assert(mismatch.first_difference >= 0)
+    first_idx: mismatch.first_difference
+    assert(!mismatch.reference[first_idx].equal_unordered(mismatch.candidate[first_idx]))
+    // Reduce the failing dataset at `first_difference` down to its 1-row minimal witness.
+    failing_seed: dyn_to_seed(mismatch.inputs[first_idx])
+    orig_data: generate_dataset(failing_seed)
+    assert(orig_data.items.len() > 1)
+    reduced_items: reduce_failing_items(orig_data.items, ref_sql, wrong_sql, diff_cols) ?? panic("reduce: {err}")
+    assert_eq(reduced_items.len(), 1)
+    assert_eq(reduced_items[0].score, Val(10))
+    assert_eq(reduced_items[0].active, Val(1))
+    // Replay the reduced 1-row witness through core.testing.compare and verify exact mismatch.
+    reduced_ds: Dataset{items: reduced_items.copy(), tags: [TagRow]{}}
+    replay: testing.compare<db.DBError>(
+        [Dyn]{Dyn.Int(failing_seed)},
+        fn(_in: Dyn) -[DB]> Dyn db.DBError! { eval_dataset_sql(reduced_ds, ref_sql, diff_cols, false) },
+        fn(_in: Dyn) -[DB]> Dyn db.DBError! { eval_dataset_sql(reduced_ds, wrong_sql, diff_cols, false) },
+        "typed_equality",
+    ) ?? panic("replay: {err}")
+    assert(!testing.assert_equal(replay))
+    assert_eq(replay.status, "mismatch")
+    assert_eq(replay.first_difference, 0)
+
+    // 3. Malformed SQL inputs report typed DBError.Failed failures (never panic).
+    sql_store: db.open_memory()
+    _: db.migrate(sql_store.all_rows(), "err-v1", [SQL{"CREATE TABLE t (id INTEGER PRIMARY KEY, v INTEGER)"}]) ?? panic("migrate: {err}")
+    _: sql_store.execute(SQL{"INSERT INTO t (id, v) VALUES (1, 10)"}) ?? panic("seed t: {err}")
+    bad_queries: [String]{
+        "SELECT FROM WHERE",
+        "SELECT (1 + 2",
+        "SELECT * FROM no_such_table",
+        "SELECT no_such_col FROM t",
+    }
+    loop q in bad_queries {
+        if sql_store.query(db.SQL.raw(q)) == {
+            .Ok(_) -> panic("malformed SQL `{q}` unexpectedly succeeded")
+            .Err(.Failed(msg)) -> { assert(msg.count_bytes() > 0) }
+            .Err(.Exists | .Denied) -> panic("expected DBError.Failed for `{q}`")
+        }
+    }
+    // Wrong bind parameter count.
+    if sql_store.query(db.SQL{text: "SELECT ? + ?", values: [db.DBValue]{.Int(1)}}) == {
+        .Ok(_) -> panic("wrong bind count unexpectedly succeeded")
+        .Err(.Failed(msg)) -> { assert(msg.contains("Wrong number of parameters")) }
+        .Err(.Exists | .Denied) -> panic("expected DBError.Failed for wrong bind count")
+    }
+    // Duplicate PRIMARY KEY constraint violation.
+    if sql_store.execute(SQL{"INSERT INTO t (id, v) VALUES (1, 99)"}) == {
+        .Ok(_) -> panic("duplicate PK unexpectedly succeeded")
+        .Err(.Failed(msg)) -> { assert(msg.count_bytes() > 0) }
+        .Err(.Exists | .Denied) -> panic("expected DBError.Failed for duplicate PK")
+    }
+    _: sql_store.close()
+
+    // 4. Malformed / corrupt DB files report typed DBError failures or non-"ok" integrity_check.
+    work_dir: files.mkdtemp("db_metamorphic_corrupt") ?? panic("mkdtemp: {err}")
+    // 4a. Non-SQLite garbage header bytes.
+    bad_magic_path: "{work_dir}/garbage.db"
+    files.write(bad_magic_path, "NOT A SQLITE DATABASE FILE -- INVALID HEADER BYTES 0123456789") ?? panic("write garbage: {err}")
+    s_bad: db.open(bad_magic_path)
+    if s_bad.query(SQL{"PRAGMA integrity_check"}) == {
+        .Ok(_) -> panic("garbage DB unexpectedly passed PRAGMA integrity_check")
+        .Err(.Failed(msg)) -> { assert(msg.count_bytes() > 0) }
+        .Err(.Exists | .Denied) -> panic("expected DBError.Failed for garbage DB")
+    }
+    _: s_bad.close()
+
+    // 4b. Truncated DB file (valid DB truncated mid-page 1).
+    valid_path: "{work_dir}/valid.db"
+    sv: db.open(valid_path)
+    _: db.migrate(sv.all_rows(), "corrupt-v1", [SQL{"CREATE TABLE docs (id INTEGER PRIMARY KEY, body TEXT NOT NULL)"}]) ?? panic("migrate valid: {err}")
+    loop k in 1..<40 {
+        body: "payload-record-number-{k}-with-enough-bytes-to-span-pages"
+        _: sv.execute(SQL{"INSERT INTO docs (id, body) VALUES ({k}, {body})"}) ?? panic("insert valid: {err}")
+    }
+    _: sv.close()
+    valid_bytes: files.read_bytes(valid_path) ?? panic("read valid db: {err}")
+    assert(valid_bytes.len() >= 8192)
+    ^trunc_bytes: [U8]{}
+    loop i in 0..<120 -> trunc_bytes.push(valid_bytes[i])
+    trunc_path: "{work_dir}/truncated.db"
+    files.write_bytes(trunc_path, trunc_bytes) ?? panic("write truncated: {err}")
+    s_trunc: db.open(trunc_path)
+    if s_trunc.query(SQL{"PRAGMA integrity_check"}) == {
+        .Ok(rows) -> {
+            // Either typed DBError.Failed or non-"ok" integrity_check report.
+            assert(rows.len() == 0 || (db.row_text(rows[0], "integrity_check") ?? "") != "ok")
+        }
+        .Err(.Failed(msg)) -> { assert(msg.count_bytes() > 0) }
+        .Err(.Exists | .Denied) -> panic("expected DBError.Failed for truncated DB")
+    }
+    _: s_trunc.close()
+
+    // 4c. Corrupted B-tree leaf page (corrupt page 2 B-tree header & cell offsets).
+    ^corrupt_bytes: valid_bytes.copy()
+    loop i in 4096..<4128 -> corrupt_bytes[i] = U8{255}
+    corrupt_path: "{work_dir}/corrupt_btree.db"
+    files.write_bytes(corrupt_path, corrupt_bytes) ?? panic("write corrupt: {err}")
+    s_corrupt: db.open(corrupt_path)
+    if s_corrupt.query(SQL{"PRAGMA integrity_check"}) == {
+        .Ok(rows) -> {
+            assert(rows.len() >= 1)
+            report: db.row_text(rows[0], "integrity_check") ?? ""
+            assert(report != "ok" && report.count_bytes() > 0)
+        }
+        .Err(.Failed(msg)) -> { assert(msg.count_bytes() > 0) }
+        .Err(.Exists | .Denied) -> panic("expected DBError.Failed for corrupt B-tree DB")
+    }
+    _: s_corrupt.close()
+    files.remove_all(work_dir) ?? ()
+}

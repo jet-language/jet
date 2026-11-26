@@ -1,0 +1,12 @@
+# Metamorphic SQL verification over generated relational data:
+# - Compares 7 metamorphic SQL pairs via core.testing.compare (typed_equality).
+# - Compares a planted wrong query via core.testing.compare, verifies
+#   `first_difference` and reduces the failing dataset to a minimal 1-row
+#   replayable witness.
+# - Verifies malformed SQL queries and corrupt/truncated DB files report
+#   typed DBError failures (or non-"ok" integrity reports) without panicking.
+fixture: MetamorphicSQL.fixture
+env: NO_COLOR=1
+step: jet test main.jet --filter metamorphic_sql
+exit: 0
+stdout: ~ "metamorphic_sql: pass" # metamorphic SQL pairs, planted mismatch reduction, and malformed SQL/DB typed failures pass
