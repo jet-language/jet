@@ -814,14 +814,12 @@ sema_serde_items_default_expr: fn(field: Field) -> Expr? Never! {
 // A leading-dot case default (`maturity: Maturity{.Tested}`) names its enum
 // from the field type, so the generated default names it wherever it lands.
 sema_serde_items_named_default: fn(ty: Type, value: Expr) -> Expr {
-    ^copied: value.copy()
-    if copied.in_place() == .EnumLit(type_name, _, _, _, leading_dot, _, _) {
+    if value == .EnumLit(type_name, variant, variant_span, args, leading_dot, span, node) {
         if leading_dot && type_name == "" && ty == .Named(name) {
-            type_name = name.copy()
-            leading_dot = false
+            return Expr.EnumLit{type_name: name.copy(), variant: variant.copy(), variant_span: variant_span.copy(), args: args.copy(), leading_dot: false, span: span, id: node}
         }
     }
-    copied
+    value.copy()
 }
 
 // A folded compile-time value as the literal that rebuilds it on every tier.
@@ -2292,10 +2290,12 @@ sema_codec_set_body: fn(graph: ^SemaRegistrationGraph, module_index: Int, row: I
         graph.modules[module_index].impls[row].methods[method_index].declaration.body = sema_serde_items_method_body(generated, name)
     }
     item_index: position ?? return
-    if graph.modules[module_index].program.items[item_index].in_place() == .Impl(implementation) {
-        loop method_index in 0..<implementation.methods.len() {
-            implementation.methods[method_index].body = sema_serde_items_method_body(generated, implementation.methods[method_index].name)
+    if graph.modules[module_index].program.items[item_index] == .Impl(implementation) {
+        ^rewritten: implementation.copy()
+        loop method_index in 0..<rewritten.methods.len() {
+            rewritten.methods[method_index].body = sema_serde_items_method_body(generated, rewritten.methods[method_index].name)
         }
+        graph.modules[module_index].program.items[item_index] = Item.Impl{value: rewritten.move()}
     }
 }
 

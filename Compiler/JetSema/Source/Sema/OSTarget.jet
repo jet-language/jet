@@ -7,35 +7,32 @@
 //   takes or returns a value of a type whose impl is OS-gated. The check reads
 //   signatures only, as the web partition's ABI check does; a `#build.target.os`
 //   dispatch arm that constructs the type is folded before this runs.
-use jet_foundation.[Diagnostic, Func, Span, TTargetOS, WebBucket, target_os_name, target_os_parse]
+use jet_foundation.[Diagnostic, Func, Span, WebBucket, target_os_name, target_os_parse]
 
 sema_os_target_check: fn(graph: SemaRegistrationGraph, diagnostics: ^[Diagnostic]) {
-    ^gate_of_type: [String:TTargetOS]{}
+    ^gate_of_type: [String:String]{}
     loop graph_module in graph.modules {
         ^found: [Diagnostic]{}
         loop item in graph_module.program.items {
             if item == {
                 .Impl(implementation) -> {
                     os: implementation.os_target ?? next
-                    target: target_os_parse(os) ?? next
+                    gate_of_type[implementation.type_name] = os.copy()
                     label: if implementation.trait_name == .Val(trait_name) -> "{implementation.type_name}.{trait_name}" else -> implementation.type_name
-                    sema_os_target_mixed_axis(graph_module.program.web_target_ceiling, target, label, implementation.type_span, found)
-                    gate_of_type[implementation.type_name] = target
+                    sema_os_target_mixed_axis(graph_module.program.web_target_ceiling, os, label, implementation.type_span, found)
                 }
                 .Struct(definition) -> {
                     loop block in definition.trait_impls {
                         os: block.os_target ?? next
-                        target: target_os_parse(os) ?? next
-                        sema_os_target_mixed_axis(graph_module.program.web_target_ceiling, target, "{definition.name}.{block.trait_name}", block.trait_span, found)
-                        gate_of_type[definition.name] = target
+                        gate_of_type[definition.name] = os.copy()
+                        sema_os_target_mixed_axis(graph_module.program.web_target_ceiling, os, "{definition.name}.{block.trait_name}", block.trait_span, found)
                     }
                 }
                 .Enum(definition) -> {
                     loop block in definition.trait_impls {
                         os: block.os_target ?? next
-                        target: target_os_parse(os) ?? next
-                        sema_os_target_mixed_axis(graph_module.program.web_target_ceiling, target, "{definition.name}.{block.trait_name}", block.trait_span, found)
-                        gate_of_type[definition.name] = target
+                        gate_of_type[definition.name] = os.copy()
+                        sema_os_target_mixed_axis(graph_module.program.web_target_ceiling, os, "{definition.name}.{block.trait_name}", block.trait_span, found)
                     }
                 }
                 .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
@@ -83,10 +80,10 @@ sema_os_target_check: fn(graph: SemaRegistrationGraph, diagnostics: ^[Diagnostic
     }
 }
 
-sema_os_target_mixed_axis: fn(ceiling: WebBucket?, target: TTargetOS, item: String, span: Span, found: ^[Diagnostic]) {
+sema_os_target_mixed_axis: fn(ceiling: WebBucket?, os: String, item: String, span: Span, found: ^[Diagnostic]) {
     bucket: ceiling ?? return
     row: sema_diagnostic_row("E-OSTARGET-MIXED-AXIS")
-    os_name: target_os_name(target)
+    os_name: sema_os_target_name(os)
     web: sema_web_bucket_name(bucket)
     found.push(
         sema_error(
@@ -103,7 +100,7 @@ sema_os_target_mixed_axis: fn(ceiling: WebBucket?, target: TTargetOS, item: Stri
 // type, so a method's receiver does not flag its own impl's siblings. Derived
 // methods (`equal`, `compare`, ...) are the compiler's, never the user's
 // ungated use.
-sema_os_target_signature: fn(function: Func, own_gate: String?, gate_of_type: [String:TTargetOS], found: ^[Diagnostic]) {
+sema_os_target_signature: fn(function: Func, own_gate: String?, gate_of_type: [String:String], found: ^[Diagnostic]) {
     if function.compiler_generated {
         return
     }
@@ -118,18 +115,16 @@ sema_os_target_signature: fn(function: Func, own_gate: String?, gate_of_type: [S
     }
 }
 
-sema_os_target_flag: fn(function: Func, own_gate: String?, type_name: String, gate_of_type: [String:TTargetOS], found: ^[Diagnostic]) {
+sema_os_target_flag: fn(function: Func, own_gate: String?, type_name: String, gate_of_type: [String:String], found: ^[Diagnostic]) {
     if type_name == "" {
         return
     }
-    target: gate_of_type.get(type_name) ?? return
-    if own_gate == .Val(gate) {
-        if target_os_parse(gate) == .Val(own_target) && own_target == target {
-            return
-        }
+    os: gate_of_type.get(type_name) ?? return
+    if own_gate == .Val(gate) && gate == os {
+        return
     }
     row: sema_diagnostic_row("E-OSTARGET-UNMATCHED-CALL")
-    os_name: target_os_name(target)
+    os_name: sema_os_target_name(os)
     found.push(
         sema_error(
             "E-OSTARGET-UNMATCHED-CALL",
@@ -139,4 +134,11 @@ sema_os_target_flag: fn(function: Func, own_gate: String?, type_name: String, ga
             row.fix.replace("{{caller}}", function.name).replace("{{gated_type}}", type_name).replace("{{os}}", os_name),
         ),
     )
+}
+
+// The parser spells an impl's OS as sema reads it (`linux`, `macos`,
+// `windows`); diagnostics name the marker's variant.
+sema_os_target_name: fn(os: String) -> String Never! {
+    if target_os_parse(os) == .Val(target) -> return target_os_name(target)
+    os.copy()
 }

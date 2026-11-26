@@ -397,14 +397,7 @@ sema_check_view_rounds_equal: fn(left: [ViewProvenanceMap?], right: [ViewProvena
 // (SemaDeclarationCheck), else None. Returns how many function jobs it checked,
 // which the trace counter `summary_functions_checked` reports.
 sema_check_view_summaries: fn(environment: ^SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, module_index: Int, host_hooks: SemaHostHookAccess?, memory_plan: SemaFunctionMemoryPlan, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: SemaComptimeFunctionRows, view_jobs: [Int]?, counter_phase: String, trace_sink: CompilerTraceSink?) -> Int {
-    if view_jobs == .Val(found) {
-        return sema_check_view_summaries_with(environment, program, scopes, module_index, host_hooks, memory_plan, comptime_functions, comptime_rows, found, counter_phase, trace_sink)
-    }
-    computed: sema_check_sorted_view_summary_jobs(environment, program, module_index)
-    sema_check_view_summaries_with(environment, program, scopes, module_index, host_hooks, memory_plan, comptime_functions, comptime_rows, computed, counter_phase, trace_sink)
-}
-
-priv sema_check_view_summaries_with: fn(environment: ^SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, module_index: Int, host_hooks: SemaHostHookAccess?, memory_plan: SemaFunctionMemoryPlan, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: SemaComptimeFunctionRows, summary_jobs: [Int], counter_phase: String, trace_sink: CompilerTraceSink?) -> Int {
+    summary_jobs: if view_jobs == .Val(found) -> found.copy() else -> sema_check_sorted_view_summary_jobs(environment, program, module_index)
     method_jobs: sema_check_view_summary_method_jobs(program, module_index)
     job_count: summary_jobs.len() + method_jobs.len()
     ^summary_functions_checked: 0

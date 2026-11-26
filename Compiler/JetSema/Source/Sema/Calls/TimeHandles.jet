@@ -10,6 +10,7 @@ use jet_foundation.[
     FunctionDefaultRef,
     InternalTag,
     Span,
+    TFailureCarrier,
     TagMarker,
     Type,
 ]
@@ -24,12 +25,23 @@ sema_time_handle_receiver_name: fn(ty: Type) -> String Never! {
     }
 }
 
+sema_time_failure_carrier: fn(result: Type) -> TFailureCarrier Never! {
+    if result == {
+        // copy: `ok` and `err` are payloads of read parameter `result`, which keeps the originals; the new TFailureCarrier.Result's fields own `ok` and `err`
+        .Result(ok, err) -> TFailureCarrier.Result{success: ok.copy(), error: err.copy()}
+        // copy: `inner` is a payload of read parameter `result`, which keeps the original; field `value` of the new TFailureCarrier.Optional owns this one
+        .Option(inner) -> TFailureCarrier.Optional{value: inner.copy()}
+        .Named(name) -> if name == "Never" -> TFailureCarrier.Diverges{value: result} else -> TFailureCarrier.Infallible
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> TFailureCarrier.Infallible
+    }
+}
+
 sema_time_record_intrinsic: fn(result: Type, effect_name: String, api: String, span: Span, check: ^SemaBodyCheck) -> Bool Never! {
     ^effects: [EffectRowEntry]{}
     if effect_name != "" -> effects.push(EffectRowEntry{name: effect_name, span: span})
     ^facts: SemaCallFacts{
         return_type: result,
-        failure_carrier: sema_expression_failure_carrier(result),
+        failure_carrier: sema_time_failure_carrier(result),
         effect_bound: Val(effects),
         type_args: [Type]{},
         default_refs: [FunctionDefaultRef]{},

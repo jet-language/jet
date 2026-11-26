@@ -86,13 +86,13 @@ sema_copy_site_report: fn(site: SemaCopySite, what: String, why: String, check: 
     sema_copy_site_push(sema_error("E0120", site.span, what, why, "copy it explicitly with `{site.name}.copy()`"), site, check)
 }
 
-sema_copy_site_push: fn(diagnostic: ^^Diagnostic, site: SemaCopySite, check: ^SemaBodyCheck) {
+sema_copy_site_push: fn(diagnostic: Diagnostic, site: SemaCopySite, check: ^SemaBodyCheck) {
     facts: sema_copy_classify(site.ty, SemaCopyIntent.Clone, check.environment.*, check.program.*, check.context.generic_params, false)
     if facts.complete && facts.cloneable && !facts.resource {
         check.diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: Span{start: site.span.end, end: site.span.end}, new_text: ".copy()"}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
         return
     }
-    check.diagnostics.push(diagnostic)
+    check.diagnostics.push(diagnostic.copy())
 }
 
 // A guard owns the lease, not its payload. Follow typed projections instead

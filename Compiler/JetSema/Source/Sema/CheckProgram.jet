@@ -373,15 +373,8 @@ sema_check_registration_module_head: fn(environment: ^SemaScopeEnvironment, prog
     ready.started = None
     precomputed: started != None
     // The view summary jobs the declaration check found ahead, if any.
-    ^view_jobs: [Int]?{None}
-    ^rebuilt_started: SemaDeclarationCheck?{None}
-    if started.move() == .Val(check) {
-        ^taken_check: check
-        view_jobs = taken_check.view_summary_jobs.move()
-        taken_check.view_summary_jobs = None
-        rebuilt_started = Val(taken_check)
-    }
-    ^module_result: sema_check_registration_module_started(environment, program, module_index, values, rebuilt_started, scopes, count_work, items_scanned)
+    view_jobs: if started == .Val(check) -> check.view_summary_jobs.copy() else -> [Int]?{None}
+    ^module_result: sema_check_registration_module_started(environment, program, module_index, values, started, scopes, count_work, items_scanned)
     // The original declaration/header boundary: do not substitute the comptime
     // module entry, which deliberately clears real else-arm source facts.
     // copy: a handle copy (Shared facts plus length and frontier ints): the module's context reads

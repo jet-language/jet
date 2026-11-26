@@ -30,17 +30,20 @@ use jet_foundation.[
     name_text,
 ]
 
-// The item index of each type the items declare, at the type name's id in `names`.
+// The part types of each type the items declare, and the type parameters a
+// generic one names its parts with, at the type name's id in `names`.
 SemaForkParts: struct {
     names: NameTable{name_table_sized(2)},
-    item_indices: [Int]{[Int]{-1}},
+    parts: [[Type]?]{[[Type]?]{None}},
+    params: [[String]?]{[[String]?]{None}},
 }
 
 // The row of `name` in `types`, added empty when new.
 sema_fork_parts_row: fn(types: ^SemaForkParts, name: String) -> Int Never! {
     row: name_index(name_intern(types.names, name))
-    if row == types.item_indices.len() {
-        types.item_indices.push(-1)
+    if row == types.parts.len() {
+        types.parts.push(None)
+        types.params.push(None)
     }
     row
 }
@@ -49,116 +52,85 @@ FORK_METHOD_NAME: "__fork"
 
 sema_fork_methods_expand: fn(items: ^[Item]) Never! {
     ^types: SemaForkParts{}
-    loop (item_index, item) in items {
+    loop item in items {
         if item == {
             .Struct(definition) -> {
+                stored: loop field in definition.fields if field.computed == None -> field.ty.copy()
                 row: sema_fork_parts_row(types, definition.name)
-                types.item_indices[row] = item_index
+                types.parts[row] = Val(stored)
+                types.params[row] = Val(sema_fork_methods_param_names(definition.type_params))
             }
             .Enum(definition) -> {
+                ^payloads: [Type]{}
+                loop variant in definition.variants {
+                    if variant.payload == {
+                        .Unit -> {}
+                        .Single(ty, _) -> { payloads.push(ty.copy()) }
+                        .Named(fields) -> {
+                            loop field in fields -> payloads.push(field.ty.copy())
+                        }
+                    }
+                }
                 row: sema_fork_parts_row(types, definition.name)
-                types.item_indices[row] = item_index
+                types.parts[row] = Val(payloads)
+                types.params[row] = Val(sema_fork_methods_param_names(definition.type_params))
             }
             .TypeAlias(definition) -> {
                 row: sema_fork_parts_row(types, definition.name)
-                types.item_indices[row] = item_index
+                types.parts[row] = Val([Type]{definition.target.copy()})
+                types.params[row] = Val(sema_fork_methods_param_names(definition.type_params))
             }
             .Distinct(definition) -> {
                 row: sema_fork_parts_row(types, definition.name)
-                types.item_indices[row] = item_index
+                types.parts[row] = Val([Type]{definition.base.copy()})
             }
             .Func(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
-    ^wanted: [Int]{}
-    loop (item_index, item) in items {
-        if item == {
+    loop index in 0..<items.len() {
+        if items[index] == {
             .Struct(definition) -> {
-                if sema_fork_methods_wanted(items, definition.name, definition.type_params, definition.methods, types) {
-                    wanted.push(item_index)
+                if !sema_fork_methods_wanted(definition.name, definition.type_params, definition.methods, types) {
+                    next
                 }
+                ^updated: definition.copy()
+                ^method: sema_fork_method(definition.name, definition.name_span)
+                method.is_pub = definition.is_pub
+                method.is_package_pub = definition.is_package_pub
+                updated.methods.push(method)
+                items[index] = Item.Struct{value: updated}
             }
             .Enum(definition) -> {
-                if sema_fork_methods_wanted(items, definition.name, definition.type_params, definition.methods, types) {
-                    wanted.push(item_index)
+                if !sema_fork_methods_wanted(definition.name, definition.type_params, definition.methods, types) {
+                    next
                 }
+                ^updated: definition.copy()
+                ^method: sema_fork_method(definition.name, definition.name_span)
+                method.is_pub = definition.is_pub
+                method.is_package_pub = definition.is_package_pub
+                updated.methods.push(method)
+                items[index] = Item.Enum{value: updated}
             }
             .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
-    loop index in wanted {
-        sema_fork_method_append(items[index])
-    }
 }
 
-priv sema_fork_method_append: fn(item: ^Item) Never! {
-    if item.in_place() == {
-        .Struct(definition) -> {
-            ^method: sema_fork_method(definition.name, definition.name_span)
-            method.is_pub = definition.is_pub
-            method.is_package_pub = definition.is_package_pub
-            definition.methods.push(method)
-        }
-        .Enum(definition) -> {
-            ^method: sema_fork_method(definition.name, definition.name_span)
-            method.is_pub = definition.is_pub
-            method.is_package_pub = definition.is_package_pub
-            definition.methods.push(method)
-        }
-        .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
-    }
-}
-
-priv sema_fork_methods_has_param: fn(type_params: [TypeParam], name: String) -> Bool Never! {
-    loop param in type_params {
-        if param.name == name -> return true
-    }
-    false
-}
-
-priv sema_fork_methods_walk_item: fn(items: [Item], item_index: Int, types: SemaForkParts, reached: ^NameTable) Never! {
-    if item_index < 0 -> return
-    if items[item_index] == {
-        .Struct(definition) -> {
-            loop field in definition.fields {
-                if field.computed == None {
-                    sema_fork_methods_names(items, field.ty, definition.type_params, types, reached)
-                }
-            }
-        }
-        .Enum(definition) -> {
-            loop variant in definition.variants {
-                if variant.payload == {
-                    .Unit -> {}
-                    .Single(ty, _) -> { sema_fork_methods_names(items, ty, definition.type_params, types, reached) }
-                    .Named(fields) -> {
-                        loop field in fields -> sema_fork_methods_names(items, field.ty, definition.type_params, types, reached)
-                    }
-                }
-            }
-        }
-        .TypeAlias(definition) -> {
-            sema_fork_methods_names(items, definition.target, definition.type_params, types, reached)
-        }
-        .Distinct(definition) -> {
-            sema_fork_methods_names(items, definition.base, [TypeParam]{}, types, reached)
-        }
-        .Func(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
-    }
+sema_fork_methods_param_names: fn(type_params: [TypeParam]) -> [String] Never! {
+    loop param in type_params -> param.name.copy()
 }
 
 // A non-generic type gets its fork function when its parts reach the type
 // itself and name a Clock, and it declares no `__fork` of its own.
-sema_fork_methods_wanted: fn(items: [Item], name: String, type_params: [TypeParam], methods: [Func], types: SemaForkParts) -> Bool Never! {
+sema_fork_methods_wanted: fn(name: String, type_params: [TypeParam], methods: [Func], types: SemaForkParts) -> Bool Never! {
     if type_params.len() > 0 -> return false
     loop method in methods {
         if method.name == FORK_METHOD_NAME -> return false
     }
     id: name_find(types.names, name) ?? return false
-    item_index: types.item_indices[name_index(id)]
-    if item_index < 0 -> return false
+    own: types.parts[name_index(id)] ?? return false
     ^reached: name_table_sized(2)
-    sema_fork_methods_walk_item(items, item_index, types, reached)
+    loop part in own -> sema_fork_methods_names(part, [String]{}, types, reached)
     if name_find(reached, name) == None -> return false
     loop reached_id in 1..<name_count(reached) {
         reached_name: name_text(reached, Name{id: U32{reached_id}})
@@ -171,42 +143,44 @@ sema_fork_methods_wanted: fn(items: [Item], name: String, type_params: [TypePara
 // declares; the parameters `bound` of a generic type's parts name no type. A
 // `Shared` value is one handle on its state, and a function or trait value
 // has no parts a copy rebuilds, so none of them is walked.
-sema_fork_methods_names: fn(items: [Item], ty: Type, bound: [TypeParam], types: SemaForkParts, reached: ^NameTable) Never! {
+sema_fork_methods_names: fn(ty: Type, bound: [String], types: SemaForkParts, reached: ^NameTable) Never! {
     if ty == {
-        .Named(name) -> { sema_fork_methods_name(items, name, bound, types, reached) }
+        .Named(name) -> { sema_fork_methods_name(name, bound, types, reached) }
         .Apply(name, args) -> {
-            loop argument in args { sema_fork_methods_names(items, argument, bound, types, reached) }
-            sema_fork_methods_name(items, name, bound, types, reached)
+            loop argument in args { sema_fork_methods_names(argument, bound, types, reached) }
+            sema_fork_methods_name(name, bound, types, reached)
         }
         .List(inner) | .Option(inner) | .FixedList(inner, _) | .Tagged(_, inner) | .Case(_, inner) | .InlineRange(inner, _, _) -> {
-            sema_fork_methods_names(items, inner, bound, types, reached)
+            sema_fork_methods_names(inner, bound, types, reached)
         }
         .Map(key, _, value) -> {
-            sema_fork_methods_names(items, key, bound, types, reached)
-            sema_fork_methods_names(items, value, bound, types, reached)
+            sema_fork_methods_names(key, bound, types, reached)
+            sema_fork_methods_names(value, bound, types, reached)
         }
         .Result(ok, err) -> {
-            sema_fork_methods_names(items, ok, bound, types, reached)
-            sema_fork_methods_names(items, err, bound, types, reached)
+            sema_fork_methods_names(ok, bound, types, reached)
+            sema_fork_methods_names(err, bound, types, reached)
         }
         .Tuple(fields) -> {
-            loop field in fields -> sema_fork_methods_names(items, field.ty, bound, types, reached)
+            loop field in fields -> sema_fork_methods_names(field.ty, bound, types, reached)
         }
         .Union(members) -> {
-            loop member in members -> sema_fork_methods_names(items, member, bound, types, reached)
+            loop member in members -> sema_fork_methods_names(member, bound, types, reached)
         }
         .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 | .Quantity(_, _) | .Measure(_) | .Shared(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) -> {}
     }
 }
 
-sema_fork_methods_name: fn(items: [Item], name: String, bound: [TypeParam], types: SemaForkParts, reached: ^NameTable) Never! {
-    if sema_fork_methods_has_param(bound, name) || name_find(reached, name) != None {
+sema_fork_methods_name: fn(name: String, bound: [String], types: SemaForkParts, reached: ^NameTable) Never! {
+    if bound.contains(name) || name_find(reached, name) != None {
         return
     }
     ^_: name_intern(reached, name)
     id: name_find(types.names, name) ?? return
-    item_index: types.item_indices[name_index(id)]
-    sema_fork_methods_walk_item(items, item_index, types, reached)
+    row: name_index(id)
+    own: types.parts[row] ?? return
+    own_bound: types.params[row] ?? [String]{}
+    loop part in own -> sema_fork_methods_names(part, own_bound, types, reached)
 }
 
 // `__fork: fn(self) -> T Never! { return self.copy() }`: a copy cannot fail,

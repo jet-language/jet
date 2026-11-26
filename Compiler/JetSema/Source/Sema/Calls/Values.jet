@@ -107,7 +107,12 @@ sema_call_value_checked_from_type: fn(check: ^SemaBodyCheck, callee: Expr, calle
     // A lambda that writes a capture changes it: not while a loop reads it,
     // and not while a view looks into it.
     if callee == .Ident(callee_name, callee_span, _) {
-        sema_ownership_check_callee_closure_writes(check, callee, callee_name, callee_span)
+        loop written in sema_ownership_closure_writes(check, callee) {
+            if check.context.iter_borrowed.contains(written) {
+                check.diagnostics.push(sema_collection_changed_in_loop(written, "calling `{callee_name}`, which writes `{written}` through its capture,", callee_span))
+            }
+            sema_ownership_check_closure_write_views(check, written, callee_name, callee_span)
+        }
     }
     {^lowered, ^pins}: sema_call_check_bound_arguments_owned(check, shown_callee, params, None, false, resolved_binding, checked_args, span) ?? return None
     ^call_callee: callee_value

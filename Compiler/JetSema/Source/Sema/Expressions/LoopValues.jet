@@ -104,121 +104,245 @@ sema_loop_value_collect_widen: fn(value: TExpr, item_type: Type, check: ^SemaBod
     sema_expr_numeric_literal_conversion(value, item_type, value.span, line, check.diagnostics)
 }
 
-priv sema_loop_value_rewrite_collecting_statement: fn(statement: ^TStmt, local: TLocal, item_type: Type, check: ^SemaBodyCheck) -> Bool Never! {
-    if statement.in_place() == {
-        .ExprStmt(value, span) -> {
-            if span.start == span.end {
-                widened: sema_loop_value_collect_widen(value, item_type, check) ?? return false
-                receiver: sema_loop_value_collect_local_expr(local, item_type, span)
-                value = sema_tree_node(Type.Named{name: "Unit"}, TExprKind.BuiltinMethod{receiver: receiver, operation: TBuiltinOp.Push, args: [TExpr]{widened}}, span)
-            }
-        }
-        .CountedLoop(_, _, _, _, _, body, _) -> { if !sema_loop_value_rewrite_collecting_statements(body, local, item_type, check) -> return false }
-        .ForRange(_, _, _, _, _, _, body, _, _) -> { if !sema_loop_value_rewrite_collecting_statements(body, local, item_type, check) -> return false }
-        .Range(_, _, _, _, _, _, _, _, body, _) -> { if !sema_loop_value_rewrite_collecting_statements(body, local, item_type, check) -> return false }
-        .ForIn(_, _, _, _, _, _, _, _, _, _, body, _) -> { if !sema_loop_value_rewrite_collecting_statements(body, local, item_type, check) -> return false }
-        .While(_, _, body, _) -> { if !sema_loop_value_rewrite_collecting_statements(body, local, item_type, check) -> return false }
-        .Loop(_, body, _) -> { if !sema_loop_value_rewrite_collecting_statements(body, local, item_type, check) -> return false }
-        .RefutableBind(_, _, body, _) -> { if !sema_loop_value_rewrite_collecting_statements(body, local, item_type, check) -> return false }
-        .ContractScope(_, body, _, _, _) -> { if !sema_loop_value_rewrite_collecting_statements(body, local, item_type, check) -> return false }
-        .TaskGroup(_, _, body, _) -> { if !sema_loop_value_rewrite_collecting_statements(body, local, item_type, check) -> return false }
-        .Layout(_, _, body, _) -> { if !sema_loop_value_rewrite_collecting_statements(body, local, item_type, check) -> return false }
-        .ContextBlock(_, body, _) -> { if !sema_loop_value_rewrite_collecting_statements(body, local, item_type, check) -> return false }
-        .Unsafe(_, body) -> { if !sema_loop_value_rewrite_collecting_statements(body, local, item_type, check) -> return false }
-        .Inline(body, _) -> { if !sema_loop_value_rewrite_collecting_statements(body, local, item_type, check) -> return false }
-        .DebugOnly(body, _) -> { if !sema_loop_value_rewrite_collecting_statements(body, local, item_type, check) -> return false }
-        .DeepCheck(body, _) -> { if !sema_loop_value_rewrite_collecting_statements(body, local, item_type, check) -> return false }
-        .UnsafeBlock(_, body, _) -> { if !sema_loop_value_rewrite_collecting_statements(body, local, item_type, check) -> return false }
-        .SentryPolicy(_, body, _) -> { if !sema_loop_value_rewrite_collecting_statements(body, local, item_type, check) -> return false }
-        .Impure(body, _) -> { if !sema_loop_value_rewrite_collecting_statements(body, local, item_type, check) -> return false }
-        .Region(body, _) -> { if !sema_loop_value_rewrite_collecting_statements(body, local, item_type, check) -> return false }
-        .Live(body, _) -> { if !sema_loop_value_rewrite_collecting_statements(body, local, item_type, check) -> return false }
-        .Shield(body, _) -> { if !sema_loop_value_rewrite_collecting_statements(body, local, item_type, check) -> return false }
-        .Defer(body, _) -> { if !sema_loop_value_rewrite_collecting_statements(body, local, item_type, check) -> return false }
-        .ScopeMember(_, body, _) -> { if !sema_loop_value_rewrite_collecting_statements(body, local, item_type, check) -> return false }
-        .Transact(_, _, _, body, _) -> { if !sema_loop_value_rewrite_collecting_statements(body, local, item_type, check) -> return false }
-        .If(_, then_body, else_body, _, _) -> {
-            if !sema_loop_value_rewrite_collecting_statements(then_body, local, item_type, check) {
-                return false
-            }
-            if else_body.in_place() == .Val(else_statements) {
-                if !sema_loop_value_rewrite_collecting_statements(else_statements, local, item_type, check) {
-                    return false
-                }
-            }
-        }
-        .Match(_, arms, _, _) -> {
-            loop arm_index in 0..<arms.len() {
-                if !sema_loop_value_rewrite_collecting_statements(arms[arm_index].body, local, item_type, check) {
-                    return false
-                }
-            }
-        }
-        .EnumMatch(_, arms, else_body, _, _) -> {
-            loop arm_index in 0..<arms.len() {
-                if !sema_loop_value_rewrite_collecting_statements(arms[arm_index].body, local, item_type, check) {
-                    return false
-                }
-            }
-            if else_body.in_place() == .Val(else_statements) {
-                if !sema_loop_value_rewrite_collecting_statements(else_statements, local, item_type, check) {
-                    return false
-                }
-            }
-        }
-        .RangeSwitch(_, arms, else_body, _) -> {
-            loop arm_index in 0..<arms.len() {
-                if !sema_loop_value_rewrite_collecting_statements(arms[arm_index].body, local, item_type, check) {
-                    return false
-                }
-            }
-            if !sema_loop_value_rewrite_collecting_statements(else_body, local, item_type, check) {
-                return false
-            }
-        }
-        .MixedSwitch(_, _, arms, else_body, _) -> {
-            loop arm_index in 0..<arms.len() {
-                if !sema_loop_value_rewrite_collecting_statements(arms[arm_index].body, local, item_type, check) {
-                    return false
-                }
-            }
-            if else_body.in_place() == .Val(else_statements) {
-                if !sema_loop_value_rewrite_collecting_statements(else_statements, local, item_type, check) {
-                    return false
-                }
-            }
-        }
-        .GCEdit(_, _, _, _, _, nested, _) -> {
-            if !sema_loop_value_rewrite_collecting_statement(nested, local, item_type, check) {
-                return false
-            }
-        }
-        .Contract(_) | .Let(_, _, _, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .Return(_, _) | .DeferClose(_, _, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) | .Reactive(_, _) -> {}
-    }
-    true
-}
-
 sema_loop_value_rewrite_collecting_statements: fn(statements: ^[TStmt], local: TLocal, item_type: Type, check: ^SemaBodyCheck) -> Bool Never! {
-    loop index in 0..<statements.len() {
-        if !sema_loop_value_rewrite_collecting_statement(statements[index], local, item_type, check) {
-            return false
+    ^index: 0
+    loop index < statements.len() {
+        ^statement: statements[index]
+        if statement == {
+            .ExprStmt(value, span) -> {
+                if span.start == span.end {
+                    widened: sema_loop_value_collect_widen(value, item_type, check) ?? return false
+                    statements[index] = sema_loop_value_collect_push(local, item_type, widened, span)
+                }
+            }
+            .CountedLoop(label, init, condition, step, vectorization, body, span) -> {
+                ^updated_body: body
+                if !sema_loop_value_rewrite_collecting_statements(updated_body, local, item_type, check) {
+                    return false
+                }
+                statements[index] = TStmt.CountedLoop{label: label, init: init, condition: condition, step: step, vectorization: vectorization, body: updated_body, span: span}
+            }
+            .ForRange(label, variable, start, end, step, exclusive, body, vectorization, span) -> {
+                ^updated_body: body
+                if !sema_loop_value_rewrite_collecting_statements(updated_body, local, item_type, check) {
+                    return false
+                }
+                statements[index] = TStmt.ForRange{label: label, local: variable, start: start, end: end, step: step, exclusive: exclusive, body: updated_body, vectorization: vectorization, span: span}
+            }
+            .Range(label, variable, source, start, end, step, exclusive, vectorization, body, span) -> {
+                ^updated_body: body
+                if !sema_loop_value_rewrite_collecting_statements(updated_body, local, item_type, check) {
+                    return false
+                }
+                statements[index] = TStmt.Range{label: label, variable: variable, source: source, start: start, end: end, step: step, exclusive: exclusive, vectorization: vectorization, body: updated_body, span: span}
+            }
+            .ForIn(label, variable, variable_two, source, collection, step, method_kind, columnar, by_value, source_stable, body, span) -> {
+                ^updated_body: body
+                if !sema_loop_value_rewrite_collecting_statements(updated_body, local, item_type, check) {
+                    return false
+                }
+                statements[index] = TStmt.ForIn{label: label, variable: variable, variable_two: variable_two, source: source, collection: collection, step: step, method_kind: method_kind, columnar: columnar, by_value: by_value, source_stable: source_stable, body: updated_body, span: span}
+            }
+            .While(label, condition, body, span) -> {
+                ^updated_body: body
+                if !sema_loop_value_rewrite_collecting_statements(updated_body, local, item_type, check) {
+                    return false
+                }
+                statements[index] = TStmt.While{label: label, condition: condition, body: updated_body, span: span}
+            }
+            .Loop(label, body, span) -> {
+                ^updated_body: body
+                if !sema_loop_value_rewrite_collecting_statements(updated_body, local, item_type, check) {
+                    return false
+                }
+                statements[index] = TStmt.Loop{label: label, body: updated_body, span: span}
+            }
+            .If(condition, then_body, else_body, else_is_elseif, span) -> {
+                ^updated_then_body: then_body
+                if !sema_loop_value_rewrite_collecting_statements(updated_then_body, local, item_type, check) {
+                    return false
+                }
+                updated_else_body: if else_body == .Val(else_statements) -> {
+                    ^rewritten: else_statements.copy()
+                    if !sema_loop_value_rewrite_collecting_statements(rewritten, local, item_type, check) {
+                        return false
+                    }
+                    Val(rewritten)
+                } else -> None
+                statements[index] = TStmt.If{condition: condition, then_body: updated_then_body, else_body: updated_else_body, else_is_elseif: else_is_elseif, span: span}
+            }
+            .Match(subject, arms, exhaustive, span) -> {
+                ^updated_arms: arms.copy()
+                loop arm_index in 0..<updated_arms.len() {
+                    if !sema_loop_value_rewrite_collecting_statements(updated_arms[arm_index].body, local, item_type, check) {
+                        return false
+                    }
+                }
+                statements[index] = TStmt.Match{subject: subject, arms: updated_arms, exhaustive: exhaustive, span: span}
+            }
+            .EnumMatch(subject, arms, else_body, fallthrough, span) -> {
+                ^updated_arms: arms.copy()
+                loop arm_index in 0..<updated_arms.len() {
+                    if !sema_loop_value_rewrite_collecting_statements(updated_arms[arm_index].body, local, item_type, check) {
+                        return false
+                    }
+                }
+                updated_else_body: if else_body == .Val(else_statements) -> {
+                    ^rewritten: else_statements.copy()
+                    if !sema_loop_value_rewrite_collecting_statements(rewritten, local, item_type, check) {
+                        return false
+                    }
+                    Val(rewritten)
+                } else -> None
+                statements[index] = TStmt.EnumMatch{scrutinee: subject, arms: updated_arms, else_body: updated_else_body, fallthrough: fallthrough, span: span}
+            }
+            .RangeSwitch(subject, arms, else_body, span) -> {
+                ^updated_else_body: else_body
+                ^updated_arms: arms.copy()
+                loop arm_index in 0..<updated_arms.len() {
+                    if !sema_loop_value_rewrite_collecting_statements(updated_arms[arm_index].body, local, item_type, check) {
+                        return false
+                    }
+                }
+                if !sema_loop_value_rewrite_collecting_statements(updated_else_body, local, item_type, check) {
+                    return false
+                }
+                statements[index] = TStmt.RangeSwitch{subject: subject, arms: updated_arms, else_body: updated_else_body, span: span}
+            }
+            .MixedSwitch(subject, branch_class, arms, else_body, span) -> {
+                ^updated_arms: arms.copy()
+                loop arm_index in 0..<updated_arms.len() {
+                    if !sema_loop_value_rewrite_collecting_statements(updated_arms[arm_index].body, local, item_type, check) {
+                        return false
+                    }
+                }
+                updated_else_body: if else_body == .Val(else_statements) -> {
+                    ^rewritten: else_statements.copy()
+                    if !sema_loop_value_rewrite_collecting_statements(rewritten, local, item_type, check) {
+                        return false
+                    }
+                    Val(rewritten)
+                } else -> None
+                statements[index] = TStmt.MixedSwitch{subject: subject, class: branch_class, arms: updated_arms, else_body: updated_else_body, span: span}
+            }
+            .RefutableBind(pattern, init, fallback, span) -> {
+                ^updated_fallback: fallback
+                if !sema_loop_value_rewrite_collecting_statements(updated_fallback, local, item_type, check) {
+                    return false
+                }
+                statements[index] = TStmt.RefutableBind{pattern: pattern, init: init, fallback: updated_fallback, span: span}
+            }
+            .ContractScope(pre, body, post, result, span) -> {
+                ^updated_body: body
+                if !sema_loop_value_rewrite_collecting_statements(updated_body, local, item_type, check) {
+                    return false
+                }
+                statements[index] = TStmt.ContractScope{pre: pre, body: updated_body, post: post, result: result, span: span}
+            }
+            .TaskGroup(group, args, body, span) -> {
+                ^updated_body: body
+                if !sema_loop_value_rewrite_collecting_statements(updated_body, local, item_type, check) {
+                    return false
+                }
+                statements[index] = TStmt.TaskGroup{group: group, args: args, body: updated_body, span: span}
+            }
+            .Layout(handle, label, body, span) -> {
+                ^updated_body: body
+                if !sema_loop_value_rewrite_collecting_statements(updated_body, local, item_type, check) {
+                    return false
+                }
+                statements[index] = TStmt.Layout{handle: handle, label: label, body: updated_body, span: span}
+            }
+            .ContextBlock(guards, body, span) -> {
+                ^updated_body: body
+                if !sema_loop_value_rewrite_collecting_statements(updated_body, local, item_type, check) {
+                    return false
+                }
+                statements[index] = TStmt.ContextBlock{guards: guards, body: updated_body, span: span}
+            }
+            .GCEdit(root, slot, edges, replace_all, index_temp, nested, span) -> {
+                ^nested_body: [TStmt]{nested}
+                if !sema_loop_value_rewrite_collecting_statements(nested_body, local, item_type, check) {
+                    return false
+                }
+                statements[index] = TStmt.GCEdit{root: root, slot: slot, edges: edges, replace_all: replace_all, index_temp: index_temp, statement: nested_body[0], span: span}
+            }
+            .Unsafe(gate, body) -> {
+                ^updated_body: body
+                if !sema_loop_value_rewrite_collecting_statements(updated_body, local, item_type, check) {
+                    return false
+                }
+                statements[index] = TStmt.Unsafe{gate: gate, body: updated_body}
+            }
+            .Inline(body, span) | .DebugOnly(body, span) | .DeepCheck(body, span) | .UnsafeBlock(_, body, span) | .SentryPolicy(_, body, span) | .Impure(body, span) | .Region(body, span) | .Live(body, span) | .Shield(body, span) | .Defer(body, span) | .ScopeMember(_, body, span) -> {
+                ^updated_body: body
+                if !sema_loop_value_rewrite_collecting_statements(updated_body, local, item_type, check) {
+                    return false
+                }
+                if statement == {
+                    .Inline(_, _) -> {
+                        statements[index] = TStmt.Inline{body: updated_body, span: span}
+                    }
+                    .DebugOnly(_, _) -> {
+                        statements[index] = TStmt.DebugOnly{body: updated_body, span: span}
+                    }
+                    .DeepCheck(_, _) -> {
+                        statements[index] = TStmt.DeepCheck{body: updated_body, span: span}
+                    }
+                    .UnsafeBlock(gate, _, _) -> {
+                        statements[index] = TStmt.UnsafeBlock{gate: gate, body: updated_body, span: span}
+                    }
+                    .SentryPolicy(enabled, _, _) -> {
+                        statements[index] = TStmt.SentryPolicy{enabled: enabled, body: updated_body, span: span}
+                    }
+                    .Impure(_, _) -> {
+                        statements[index] = TStmt.Impure{body: updated_body, span: span}
+                    }
+                    .Region(_, _) -> {
+                        statements[index] = TStmt.Region{body: updated_body, span: span}
+                    }
+                    .Live(_, _) -> {
+                        statements[index] = TStmt.Live{body: updated_body, span: span}
+                    }
+                    .Shield(_, _) -> {
+                        statements[index] = TStmt.Shield{body: updated_body, span: span}
+                    }
+                    .Defer(_, _) -> {
+                        statements[index] = TStmt.Defer{body: updated_body, span: span}
+                    }
+                    .ScopeMember(kind, _, _) -> {
+                        statements[index] = TStmt.ScopeMember{kind: kind, body: updated_body, span: span}
+                    }
+                    .Contract(_) | .ContractScope(_, _, _, _, _) | .Let(_, _, _, _, _, _) | .RefutableBind(_, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .ForRange(_, _, _, _, _, _, _, _, _) | .Range(_, _, _, _, _, _, _, _, _, _) | .ExprStmt(_, _) | .Return(_, _) | .TaskGroup(_, _, _, _) | .DeferClose(_, _, _) | .If(_, _, _, _, _) | .Loop(_, _, _) | .While(_, _, _, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) | .Match(_, _, _, _) | .EnumMatch(_, _, _, _, _) | .RangeSwitch(_, _, _, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, _, _) | .MixedSwitch(_, _, _, _, _) | .Unsafe(_, _) | .Reactive(_, _) | .Layout(_, _, _, _) | .ContextBlock(_, _, _) | .Transact(_, _, _, _, _) | .GCEdit(_, _, _, _, _, _, _) -> {}
+                }
+            }
+            .Transact(handle, snapshots, stm, body, span) -> {
+                ^updated_body: body
+                if !sema_loop_value_rewrite_collecting_statements(updated_body, local, item_type, check) {
+                    return false
+                }
+                statements[index] = TStmt.Transact{handle: handle, snapshots: snapshots, stm: stm, body: updated_body, span: span}
+            }
+            .Contract(_) | .Let(_, _, _, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .Return(_, _) | .DeferClose(_, _, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) | .Reactive(_, _) -> {}
         }
+        index += 1
     }
     true
 }
 
-sema_loop_value_lower_collecting_body: fn(body: ^[TStmt], item_type: Type, span: Span, check: ^SemaBodyCheck) -> Bool {
+sema_loop_value_lower_collecting_body: fn(body: [TStmt], item_type: Type, span: Span, check: ^SemaBodyCheck) -> [TStmt]? {
     ^collector_type: Type.List{element: item_type}
     ^local: checked_generated_local("__jet_collect_{span.start}", span, collector_type)
     local.mutable = true
     ^empty: sema_tree_node(collector_type, TExprKind.List{values: [TExpr]{}, trait_coercion: None}, span)
-    body.insert(0, TStmt.Let{local: local, let_ty: TLetTy.Annotated{ty: collector_type, wrapper: TLetWrapper.Plain}, init: empty, gc_promotion: None, gc_transferred: false, span: span})
-    if !sema_loop_value_rewrite_collecting_statements(body, local, item_type, check) {
-        return false
+    ^lowered: [TStmt]{TStmt.Let{local: local, let_ty: TLetTy.Annotated{ty: collector_type, wrapper: TLetWrapper.Plain}, init: empty, gc_promotion: None, gc_transferred: false, span: span}}
+    loop statement in body -> lowered.push(statement.copy())
+    if !sema_loop_value_rewrite_collecting_statements(lowered, local, item_type, check) {
+        return None
     }
     ^result: sema_loop_value_collect_local_expr(local, item_type, span)
-    body.push(TStmt.ExprStmt{value: result, span: span})
-    true
+    lowered.push(TStmt.ExprStmt{value: result, span: span})
+    Val(lowered)
 }
 
 sema_loop_value_result_exit_matches: fn(label: String?, root_label: String?, allow_unlabeled: Bool) -> Bool Never! {
@@ -226,109 +350,233 @@ sema_loop_value_result_exit_matches: fn(label: String?, root_label: String?, all
     allow_unlabeled && root_label == None
 }
 
-priv sema_loop_value_widen_result_break_statement: fn(statement: ^TStmt, root_label: String?, result_type: Type, allow_unlabeled: Bool, check: ^SemaBodyCheck) -> Bool {
-    if statement.in_place() == {
-        .BreakValue(label, value, _) -> {
-            if sema_loop_value_result_exit_matches(label, root_label, allow_unlabeled) && !type_identity_equal(value.ty, result_type) {
-                if sema_expr_numeric_value_widening(value, result_type) != (Val(true)) {
-                    check.diagnostics.push(sema_error("E0076", value.span, "this loop breaks with `{type_name(value.ty)}`, but another exit uses `{type_name(result_type)}`", "an ordinary loop used as a value has one result type", "make every break payload use the same type"))
-                    return false
-                }
-                line: sema_source_line_at(check.environment.source_segments, value.span) ?? 0
-                widened: sema_expr_numeric_literal_conversion(value, result_type, value.span, line, check.diagnostics) ?? return false
-                value = widened
-            }
-        }
-        .CountedLoop(_, _, _, _, _, body, _) -> { if !sema_loop_value_widen_result_breaks_in(body, root_label, result_type, false, check) -> return false }
-        .ForRange(_, _, _, _, _, _, body, _, _) -> { if !sema_loop_value_widen_result_breaks_in(body, root_label, result_type, false, check) -> return false }
-        .Range(_, _, _, _, _, _, _, _, body, _) -> { if !sema_loop_value_widen_result_breaks_in(body, root_label, result_type, false, check) -> return false }
-        .ForIn(_, _, _, _, _, _, _, _, _, _, body, _) -> { if !sema_loop_value_widen_result_breaks_in(body, root_label, result_type, false, check) -> return false }
-        .While(_, _, body, _) -> { if !sema_loop_value_widen_result_breaks_in(body, root_label, result_type, false, check) -> return false }
-        .Loop(_, body, _) -> { if !sema_loop_value_widen_result_breaks_in(body, root_label, result_type, false, check) -> return false }
-        .RefutableBind(_, _, body, _) -> { if !sema_loop_value_widen_result_breaks_in(body, root_label, result_type, allow_unlabeled, check) -> return false }
-        .ContractScope(_, body, _, _, _) -> { if !sema_loop_value_widen_result_breaks_in(body, root_label, result_type, allow_unlabeled, check) -> return false }
-        .TaskGroup(_, _, body, _) -> { if !sema_loop_value_widen_result_breaks_in(body, root_label, result_type, allow_unlabeled, check) -> return false }
-        .Layout(_, _, body, _) -> { if !sema_loop_value_widen_result_breaks_in(body, root_label, result_type, allow_unlabeled, check) -> return false }
-        .ContextBlock(_, body, _) -> { if !sema_loop_value_widen_result_breaks_in(body, root_label, result_type, allow_unlabeled, check) -> return false }
-        .Unsafe(_, body) -> { if !sema_loop_value_widen_result_breaks_in(body, root_label, result_type, allow_unlabeled, check) -> return false }
-        .Inline(body, _) -> { if !sema_loop_value_widen_result_breaks_in(body, root_label, result_type, allow_unlabeled, check) -> return false }
-        .DebugOnly(body, _) -> { if !sema_loop_value_widen_result_breaks_in(body, root_label, result_type, allow_unlabeled, check) -> return false }
-        .DeepCheck(body, _) -> { if !sema_loop_value_widen_result_breaks_in(body, root_label, result_type, allow_unlabeled, check) -> return false }
-        .UnsafeBlock(_, body, _) -> { if !sema_loop_value_widen_result_breaks_in(body, root_label, result_type, allow_unlabeled, check) -> return false }
-        .SentryPolicy(_, body, _) -> { if !sema_loop_value_widen_result_breaks_in(body, root_label, result_type, allow_unlabeled, check) -> return false }
-        .Impure(body, _) -> { if !sema_loop_value_widen_result_breaks_in(body, root_label, result_type, allow_unlabeled, check) -> return false }
-        .Region(body, _) -> { if !sema_loop_value_widen_result_breaks_in(body, root_label, result_type, allow_unlabeled, check) -> return false }
-        .Live(body, _) -> { if !sema_loop_value_widen_result_breaks_in(body, root_label, result_type, allow_unlabeled, check) -> return false }
-        .Shield(body, _) -> { if !sema_loop_value_widen_result_breaks_in(body, root_label, result_type, allow_unlabeled, check) -> return false }
-        .Defer(body, _) -> { if !sema_loop_value_widen_result_breaks_in(body, root_label, result_type, allow_unlabeled, check) -> return false }
-        .ScopeMember(_, body, _) -> { if !sema_loop_value_widen_result_breaks_in(body, root_label, result_type, allow_unlabeled, check) -> return false }
-        .Transact(_, _, _, body, _) -> { if !sema_loop_value_widen_result_breaks_in(body, root_label, result_type, allow_unlabeled, check) -> return false }
-        .If(_, then_body, else_body, _, _) -> {
-            if !sema_loop_value_widen_result_breaks_in(then_body, root_label, result_type, allow_unlabeled, check) {
-                return false
-            }
-            if else_body.in_place() == .Val(else_statements) {
-                if !sema_loop_value_widen_result_breaks_in(else_statements, root_label, result_type, allow_unlabeled, check) {
-                    return false
-                }
-            }
-        }
-        .Match(_, arms, _, _) -> {
-            loop arm_index in 0..<arms.len() {
-                if !sema_loop_value_widen_result_breaks_in(arms[arm_index].body, root_label, result_type, allow_unlabeled, check) {
-                    return false
-                }
-            }
-        }
-        .EnumMatch(_, arms, else_body, _, _) -> {
-            loop arm_index in 0..<arms.len() {
-                if !sema_loop_value_widen_result_breaks_in(arms[arm_index].body, root_label, result_type, allow_unlabeled, check) {
-                    return false
-                }
-            }
-            if else_body.in_place() == .Val(else_statements) {
-                if !sema_loop_value_widen_result_breaks_in(else_statements, root_label, result_type, allow_unlabeled, check) {
-                    return false
-                }
-            }
-        }
-        .RangeSwitch(_, arms, else_body, _) -> {
-            loop arm_index in 0..<arms.len() {
-                if !sema_loop_value_widen_result_breaks_in(arms[arm_index].body, root_label, result_type, allow_unlabeled, check) {
-                    return false
-                }
-            }
-            if !sema_loop_value_widen_result_breaks_in(else_body, root_label, result_type, allow_unlabeled, check) {
-                return false
-            }
-        }
-        .MixedSwitch(_, _, arms, else_body, _) -> {
-            loop arm_index in 0..<arms.len() {
-                if !sema_loop_value_widen_result_breaks_in(arms[arm_index].body, root_label, result_type, allow_unlabeled, check) {
-                    return false
-                }
-            }
-            if else_body.in_place() == .Val(else_statements) {
-                if !sema_loop_value_widen_result_breaks_in(else_statements, root_label, result_type, allow_unlabeled, check) {
-                    return false
-                }
-            }
-        }
-        .GCEdit(_, _, _, _, _, nested, _) -> {
-            if !sema_loop_value_widen_result_break_statement(nested, root_label, result_type, allow_unlabeled, check) {
-                return false
-            }
-        }
-        .Contract(_) | .Let(_, _, _, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .ExprStmt(_, _) | .Return(_, _) | .DeferClose(_, _, _) | .Break(_, _) | .Continue(_, _) | .Reactive(_, _) -> {}
-    }
-    true
-}
-
 sema_loop_value_widen_result_breaks_in: fn(statements: ^[TStmt], root_label: String?, result_type: Type, allow_unlabeled: Bool, check: ^SemaBodyCheck) -> Bool {
-    loop index in 0..<statements.len() {
-        if !sema_loop_value_widen_result_break_statement(statements[index], root_label, result_type, allow_unlabeled, check) {
-            return false
+    ^index: 0
+    loop index < statements.len() {
+        ^statement: statements[index]
+        if statement == {
+            .BreakValue(label, value, span) -> {
+                if sema_loop_value_result_exit_matches(label, root_label, allow_unlabeled) && !type_identity_equal(value.ty, result_type) {
+                    if sema_expr_numeric_value_widening(value, result_type) != (Val(true)) {
+                        check.diagnostics.push(sema_error("E0076", value.span, "this loop breaks with `{type_name(value.ty)}`, but another exit uses `{type_name(result_type)}`", "an ordinary loop used as a value has one result type", "make every break payload use the same type"))
+                        return false
+                    }
+                    line: sema_source_line_at(check.environment.source_segments, value.span) ?? 0
+                    widened: sema_expr_numeric_literal_conversion(value, result_type, value.span, line, check.diagnostics) ?? return false
+                    statements[index] = TStmt.BreakValue{label: label, value: widened, span: span}
+                }
+            }
+            .CountedLoop(label, init, condition, step, vectorization, body, span) -> {
+                ^updated_body: body
+                if !sema_loop_value_widen_result_breaks_in(updated_body, root_label, result_type, false, check) {
+                    return false
+                }
+                statements[index] = TStmt.CountedLoop{label: label, init: init, condition: condition, step: step, vectorization: vectorization, body: updated_body, span: span}
+            }
+            .ForRange(label, variable, start, end, step, exclusive, body, vectorization, span) -> {
+                ^updated_body: body
+                if !sema_loop_value_widen_result_breaks_in(updated_body, root_label, result_type, false, check) {
+                    return false
+                }
+                statements[index] = TStmt.ForRange{label: label, local: variable, start: start, end: end, step: step, exclusive: exclusive, body: updated_body, vectorization: vectorization, span: span}
+            }
+            .Range(label, variable, source, start, end, step, exclusive, vectorization, body, span) -> {
+                ^updated_body: body
+                if !sema_loop_value_widen_result_breaks_in(updated_body, root_label, result_type, false, check) {
+                    return false
+                }
+                statements[index] = TStmt.Range{label: label, variable: variable, source: source, start: start, end: end, step: step, exclusive: exclusive, vectorization: vectorization, body: updated_body, span: span}
+            }
+            .ForIn(label, variable, variable_two, source, collection, step, method_kind, columnar, by_value, source_stable, body, span) -> {
+                ^updated_body: body
+                if !sema_loop_value_widen_result_breaks_in(updated_body, root_label, result_type, false, check) {
+                    return false
+                }
+                statements[index] = TStmt.ForIn{label: label, variable: variable, variable_two: variable_two, source: source, collection: collection, step: step, method_kind: method_kind, columnar: columnar, by_value: by_value, source_stable: source_stable, body: updated_body, span: span}
+            }
+            .While(label, condition, body, span) -> {
+                ^updated_body: body
+                if !sema_loop_value_widen_result_breaks_in(updated_body, root_label, result_type, false, check) {
+                    return false
+                }
+                statements[index] = TStmt.While{label: label, condition: condition, body: updated_body, span: span}
+            }
+            .Loop(label, body, span) -> {
+                ^updated_body: body
+                if !sema_loop_value_widen_result_breaks_in(updated_body, root_label, result_type, false, check) {
+                    return false
+                }
+                statements[index] = TStmt.Loop{label: label, body: updated_body, span: span}
+            }
+            .If(condition, then_body, else_body, else_is_elseif, span) -> {
+                ^updated_then_body: then_body
+                if !sema_loop_value_widen_result_breaks_in(updated_then_body, root_label, result_type, allow_unlabeled, check) {
+                    return false
+                }
+                updated_else_body: if else_body == .Val(else_statements) -> {
+                    ^rewritten: else_statements.copy()
+                    if !sema_loop_value_widen_result_breaks_in(rewritten, root_label, result_type, allow_unlabeled, check) {
+                        return false
+                    }
+                    Val(rewritten)
+                } else -> None
+                statements[index] = TStmt.If{condition: condition, then_body: updated_then_body, else_body: updated_else_body, else_is_elseif: else_is_elseif, span: span}
+            }
+            .Match(subject, arms, exhaustive, span) -> {
+                ^updated_arms: arms.copy()
+                loop arm_index in 0..<updated_arms.len() {
+                    if !sema_loop_value_widen_result_breaks_in(updated_arms[arm_index].body, root_label, result_type, allow_unlabeled, check) {
+                        return false
+                    }
+                }
+                statements[index] = TStmt.Match{subject: subject, arms: updated_arms, exhaustive: exhaustive, span: span}
+            }
+            .EnumMatch(subject, arms, else_body, fallthrough, span) -> {
+                ^updated_arms: arms.copy()
+                loop arm_index in 0..<updated_arms.len() {
+                    if !sema_loop_value_widen_result_breaks_in(updated_arms[arm_index].body, root_label, result_type, allow_unlabeled, check) {
+                        return false
+                    }
+                }
+                updated_else_body: if else_body == .Val(else_statements) -> {
+                    ^rewritten: else_statements.copy()
+                    if !sema_loop_value_widen_result_breaks_in(rewritten, root_label, result_type, allow_unlabeled, check) {
+                        return false
+                    }
+                    Val(rewritten)
+                } else -> None
+                statements[index] = TStmt.EnumMatch{scrutinee: subject, arms: updated_arms, else_body: updated_else_body, fallthrough: fallthrough, span: span}
+            }
+            .RangeSwitch(subject, arms, else_body, span) -> {
+                ^updated_else_body: else_body
+                ^updated_arms: arms.copy()
+                loop arm_index in 0..<updated_arms.len() {
+                    if !sema_loop_value_widen_result_breaks_in(updated_arms[arm_index].body, root_label, result_type, allow_unlabeled, check) {
+                        return false
+                    }
+                }
+                if !sema_loop_value_widen_result_breaks_in(updated_else_body, root_label, result_type, allow_unlabeled, check) {
+                    return false
+                }
+                statements[index] = TStmt.RangeSwitch{subject: subject, arms: updated_arms, else_body: updated_else_body, span: span}
+            }
+            .MixedSwitch(subject, branch_class, arms, else_body, span) -> {
+                ^updated_arms: arms.copy()
+                loop arm_index in 0..<updated_arms.len() {
+                    if !sema_loop_value_widen_result_breaks_in(updated_arms[arm_index].body, root_label, result_type, allow_unlabeled, check) {
+                        return false
+                    }
+                }
+                updated_else_body: if else_body == .Val(else_statements) -> {
+                    ^rewritten: else_statements.copy()
+                    if !sema_loop_value_widen_result_breaks_in(rewritten, root_label, result_type, allow_unlabeled, check) {
+                        return false
+                    }
+                    Val(rewritten)
+                } else -> None
+                statements[index] = TStmt.MixedSwitch{subject: subject, class: branch_class, arms: updated_arms, else_body: updated_else_body, span: span}
+            }
+            .RefutableBind(pattern, init, fallback, span) -> {
+                ^updated_fallback: fallback
+                if !sema_loop_value_widen_result_breaks_in(updated_fallback, root_label, result_type, allow_unlabeled, check) {
+                    return false
+                }
+                statements[index] = TStmt.RefutableBind{pattern: pattern, init: init, fallback: updated_fallback, span: span}
+            }
+            .ContractScope(pre, body, post, result, span) -> {
+                ^updated_body: body
+                if !sema_loop_value_widen_result_breaks_in(updated_body, root_label, result_type, allow_unlabeled, check) {
+                    return false
+                }
+                statements[index] = TStmt.ContractScope{pre: pre, body: updated_body, post: post, result: result, span: span}
+            }
+            .TaskGroup(group, args, body, span) -> {
+                ^updated_body: body
+                if !sema_loop_value_widen_result_breaks_in(updated_body, root_label, result_type, allow_unlabeled, check) {
+                    return false
+                }
+                statements[index] = TStmt.TaskGroup{group: group, args: args, body: updated_body, span: span}
+            }
+            .Layout(handle, label, body, span) -> {
+                ^updated_body: body
+                if !sema_loop_value_widen_result_breaks_in(updated_body, root_label, result_type, allow_unlabeled, check) {
+                    return false
+                }
+                statements[index] = TStmt.Layout{handle: handle, label: label, body: updated_body, span: span}
+            }
+            .ContextBlock(guards, body, span) -> {
+                ^updated_body: body
+                if !sema_loop_value_widen_result_breaks_in(updated_body, root_label, result_type, allow_unlabeled, check) {
+                    return false
+                }
+                statements[index] = TStmt.ContextBlock{guards: guards, body: updated_body, span: span}
+            }
+            .GCEdit(root, slot, edges, replace_all, index_temp, nested, span) -> {
+                ^nested_body: [TStmt]{nested}
+                if !sema_loop_value_widen_result_breaks_in(nested_body, root_label, result_type, allow_unlabeled, check) {
+                    return false
+                }
+                statements[index] = TStmt.GCEdit{root: root, slot: slot, edges: edges, replace_all: replace_all, index_temp: index_temp, statement: nested_body[0], span: span}
+            }
+            .Inline(body, span) | .DebugOnly(body, span) | .DeepCheck(body, span) | .UnsafeBlock(_, body, span) | .SentryPolicy(_, body, span) | .Impure(body, span) | .Region(body, span) | .Live(body, span) | .Shield(body, span) | .Defer(body, span) | .ScopeMember(_, body, span) -> {
+                ^updated_body: body
+                if !sema_loop_value_widen_result_breaks_in(updated_body, root_label, result_type, allow_unlabeled, check) {
+                    return false
+                }
+                if statement == {
+                    .Inline(_, _) -> {
+                        statements[index] = TStmt.Inline{body: updated_body, span: span}
+                    }
+                    .DebugOnly(_, _) -> {
+                        statements[index] = TStmt.DebugOnly{body: updated_body, span: span}
+                    }
+                    .DeepCheck(_, _) -> {
+                        statements[index] = TStmt.DeepCheck{body: updated_body, span: span}
+                    }
+                    .UnsafeBlock(gate, _, _) -> {
+                        statements[index] = TStmt.UnsafeBlock{gate: gate, body: updated_body, span: span}
+                    }
+                    .SentryPolicy(enabled, _, _) -> {
+                        statements[index] = TStmt.SentryPolicy{enabled: enabled, body: updated_body, span: span}
+                    }
+                    .Impure(_, _) -> {
+                        statements[index] = TStmt.Impure{body: updated_body, span: span}
+                    }
+                    .Region(_, _) -> {
+                        statements[index] = TStmt.Region{body: updated_body, span: span}
+                    }
+                    .Live(_, _) -> {
+                        statements[index] = TStmt.Live{body: updated_body, span: span}
+                    }
+                    .Shield(_, _) -> {
+                        statements[index] = TStmt.Shield{body: updated_body, span: span}
+                    }
+                    .Defer(_, _) -> {
+                        statements[index] = TStmt.Defer{body: updated_body, span: span}
+                    }
+                    .ScopeMember(kind, _, _) -> {
+                        statements[index] = TStmt.ScopeMember{kind: kind, body: updated_body, span: span}
+                    }
+                    .Contract(_) | .ContractScope(_, _, _, _, _) | .Let(_, _, _, _, _, _) | .RefutableBind(_, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .ForRange(_, _, _, _, _, _, _, _, _) | .Range(_, _, _, _, _, _, _, _, _, _) | .ExprStmt(_, _) | .Return(_, _) | .TaskGroup(_, _, _, _) | .DeferClose(_, _, _) | .If(_, _, _, _, _) | .Loop(_, _, _) | .While(_, _, _, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) | .Match(_, _, _, _) | .EnumMatch(_, _, _, _, _) | .RangeSwitch(_, _, _, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, _, _) | .MixedSwitch(_, _, _, _, _) | .Unsafe(_, _) | .Reactive(_, _) | .Layout(_, _, _, _) | .ContextBlock(_, _, _) | .Transact(_, _, _, _, _) | .GCEdit(_, _, _, _, _, _, _) -> {}
+                }
+            }
+            .Unsafe(gate, body) -> {
+                ^updated_body: body
+                if !sema_loop_value_widen_result_breaks_in(updated_body, root_label, result_type, allow_unlabeled, check) {
+                    return false
+                }
+                statements[index] = TStmt.Unsafe{gate: gate, body: updated_body}
+            }
+            .Transact(handle, snapshots, stm, body, span) -> {
+                ^updated_body: body
+                if !sema_loop_value_widen_result_breaks_in(updated_body, root_label, result_type, allow_unlabeled, check) {
+                    return false
+                }
+                statements[index] = TStmt.Transact{handle: handle, snapshots: snapshots, stm: stm, body: updated_body, span: span}
+            }
+            .Contract(_) | .Let(_, _, _, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .ExprStmt(_, _) | .Return(_, _) | .DeferClose(_, _, _) | .Break(_, _) | .Continue(_, _) | .Reactive(_, _) -> {}
         }
+        index += 1
     }
     true
 }

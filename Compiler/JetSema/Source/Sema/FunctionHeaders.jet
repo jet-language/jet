@@ -95,27 +95,24 @@ sema_function_header_normalize_external_methods: fn(program: ^Program, in_packag
         if name != "" -> declared[name] = true
     }
     ^seen: SemaKeyRows{}
-    ^drop_indices: [Int]{}
-    loop index in 0..<program.items.len() {
-        if program.items[index] == .Func(function) && function.external_type == .Val(target) {
+    ^items: [Item]{}
+    loop item in program.items {
+        if item == .Func(function) && function.external_type == .Val(target) {
             target_id: sema_key_text(seen, target.name)
             function_id: sema_key_text(seen, function.name)
             key: sema_key_pair(seen, target_id, function_id)
             if !sema_key_first(seen, key) {
                 diagnostics.push(sema_defined_twice(function.name, "module declarations share one namespace", function.name_span))
-                drop_indices.push(index)
                 next
             }
             if in_package || imported || target.name.contains(".") || declared.get(target.name) != None {
-                program.items[index] = sema_function_header_normalize_external_method(function)
+                items.push(sema_function_header_normalize_external_method(function))
+                next
             }
         }
+        items.push(item.copy())
     }
-    ^position: drop_indices.len()
-    loop position > 0 {
-        position -= 1
-        ^_: program.items.remove(drop_indices[position], .Slot)
-    }
+    program.items = items
 }
 
 // E0301 for an external method header left a function (its type named by
@@ -277,69 +274,72 @@ sema_function_header_check_default_forward_refs: fn(function: Func, diagnostics:
     loop parameter_index in 0..<function.params.len() {
         if function.params[parameter_index].name == "self" -> next
         if !function.params[parameter_index].script_variable && function.params[parameter_index].default == .Val(default) {
-            sema_function_header_check_default_idents(default, function, names, parameter_index, index, diagnostics, invalid)
+            ^references: [Expr]{}
+            sema_function_header_default_idents(default, references)
+            loop reference in references {
+                if reference == .Ident(name, span, _) {
+                    ^later: false
+                    loop (position, candidate) in names {
+                        if candidate == name {
+                            later = position >= index
+                            break
+                        }
+                    }
+                    if later {
+                        diagnostics.push(sema_error("E0126", span, "default for `{function.params[parameter_index].name}` in `{function.name}` references `{name}`, which comes after it", "defaults fill left to right; a parameter isn't in scope until it appears in the list", "reorder the parameters so `{name}` comes before `{function.params[parameter_index].name}`, or use a constant default"))
+                        if invalid.len() == 0 || invalid[invalid.len() - 1] != parameter_index {
+                            invalid.push(parameter_index)
+                        }
+                    }
+                }
+            }
         }
         index += 1
     }
     invalid
 }
 
-// Walks the identifier nodes a default expression reads, in source order,
-// reporting E0126 for any parameter written at or after `index`.
-priv sema_function_header_check_default_idents: fn(value: Expr, function: Func, names: [String], parameter_index: Int, index: Int, diagnostics: ^[Diagnostic], invalid: ^[Int]) {
+// The identifier nodes a default expression reads, in source order.
+sema_function_header_default_idents: fn(value: Expr, found: ^[Expr]) {
     if value == {
-        .Ident(name, span, _) -> {
-            ^later: false
-            loop (position, candidate) in names {
-                if candidate == name {
-                    later = position >= index
-                    break
-                }
-            }
-            if later {
-                diagnostics.push(sema_error("E0126", span, "default for `{function.params[parameter_index].name}` in `{function.name}` references `{name}`, which comes after it", "defaults fill left to right; a parameter isn't in scope until it appears in the list", "reorder the parameters so `{name}` comes before `{function.params[parameter_index].name}`, or use a constant default"))
-                if invalid.len() == 0 || invalid[invalid.len() - 1] != parameter_index {
-                    invalid.push(parameter_index)
-                }
-            }
-        }
+        .Ident(_, _, _) -> { found.push(value.copy()) }
         .Binary(_, left, right, _, _) -> {
-            sema_function_header_check_default_idents(left, function, names, parameter_index, index, diagnostics, invalid)
-            sema_function_header_check_default_idents(right, function, names, parameter_index, index, diagnostics, invalid)
+            sema_function_header_default_idents(left, found)
+            sema_function_header_default_idents(right, found)
         }
         .Unary(_, inner, _, _) | .Paren(inner, _, _) | .Copy(inner, _, _) | .Place(inner, _, _, _) | .Field(inner, _, _, _) | .Spread(inner, _, _) | .Ok(inner, _, _) | .Err(inner, _, _) | .Present(inner, _, _) | .Tainted(inner, _, _, _) -> {
-            sema_function_header_check_default_idents(inner, function, names, parameter_index, index, diagnostics, invalid)
+            sema_function_header_default_idents(inner, found)
         }
-        .Index(base, idx, _, _, _) -> {
-            sema_function_header_check_default_idents(base, function, names, parameter_index, index, diagnostics, invalid)
-            sema_function_header_check_default_idents(idx, function, names, parameter_index, index, diagnostics, invalid)
+        .Index(base, index, _, _, _) -> {
+            sema_function_header_default_idents(base, found)
+            sema_function_header_default_idents(index, found)
         }
         .Call(call, _) -> {
-            loop argument in call.args -> sema_function_header_check_default_idents(argument.expr, function, names, parameter_index, index, diagnostics, invalid)
+            loop argument in call.args -> sema_function_header_default_idents(argument.expr, found)
         }
         .CallValue(callee, args, _, _) -> {
-            sema_function_header_check_default_idents(callee, function, names, parameter_index, index, diagnostics, invalid)
-            loop argument in args -> sema_function_header_check_default_idents(argument.expr, function, names, parameter_index, index, diagnostics, invalid)
+            sema_function_header_default_idents(callee, found)
+            loop argument in args -> sema_function_header_default_idents(argument.expr, found)
         }
         .MethodCall(receiver, _, _, _, _, args, _) -> {
-            sema_function_header_check_default_idents(receiver, function, names, parameter_index, index, diagnostics, invalid)
-            loop argument in args -> sema_function_header_check_default_idents(argument.expr, function, names, parameter_index, index, diagnostics, invalid)
+            sema_function_header_default_idents(receiver, found)
+            loop argument in args -> sema_function_header_default_idents(argument.expr, found)
         }
         .ListLit(items, _, _) -> {
-            loop item in items -> sema_function_header_check_default_idents(item, function, names, parameter_index, index, diagnostics, invalid)
+            loop item in items -> sema_function_header_default_idents(item, found)
         }
         .TupleLit(fields, _, _, _) -> {
-            loop field in fields -> sema_function_header_check_default_idents(field.value, function, names, parameter_index, index, diagnostics, invalid)
+            loop field in fields -> sema_function_header_default_idents(field.value, found)
         }
         .Str(parts, _, _) -> {
             loop part in parts {
-                if part == .Interp(inner, _) -> sema_function_header_check_default_idents(inner, function, names, parameter_index, index, diagnostics, invalid)
+                if part == .Interp(inner, _) -> sema_function_header_default_idents(inner, found)
             }
         }
         .If(cond, _, then_value, _, else_value, _, _) -> {
-            sema_function_header_check_default_idents(cond, function, names, parameter_index, index, diagnostics, invalid)
-            sema_function_header_check_default_idents(then_value, function, names, parameter_index, index, diagnostics, invalid)
-            sema_function_header_check_default_idents(else_value, function, names, parameter_index, index, diagnostics, invalid)
+            sema_function_header_default_idents(cond, found)
+            sema_function_header_default_idents(then_value, found)
+            sema_function_header_default_idents(else_value, found)
         }
         .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .MemberSpread(_, _, _, _) | .MapLit(_, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .Lambda(_, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
     }

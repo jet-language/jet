@@ -68,10 +68,6 @@ use jet_foundation.[
     name_column_get,
     name_column_set,
     name_column_table,
-    name_find,
-    name_index,
-    name_intern,
-    name_table_sized,
 ]
 
 SemaOwnershipProjection: enum {
@@ -304,10 +300,10 @@ SemaOwnershipState: struct {
     share_found: [SemaOwnershipShareSite],
     // Unmarked take arguments the typed argument check found eligible to move
     // at their last use; the call ownership check makes the move.
-    implicit_take_ok: [Int]{[Int]{}},
+    implicit_take_ok: [Span]{[Span]{}},
     // Eligible unmarked take arguments whose name another argument of the same
     // call also names. Such a name has no last use in that call: E0209.
-    implicit_take_twice: [Int]{[Int]{}},
+    implicit_take_twice: [Span]{[Span]{}},
     // Taken field arguments the typed argument check found to be exact
     // moves into a consuming parameter; the call ownership check records the
     // move, so a later use of the field is E0121.
@@ -316,8 +312,8 @@ SemaOwnershipState: struct {
     once_lambdas: [SemaOwnershipOnceLambda]{[SemaOwnershipOnceLambda]{}},
     // Lambda bindings that write a capture, by binding key.
     closure_writes: [SemaOwnershipClosureWrites]{[SemaOwnershipClosureWrites]{}},
-    // Lambda bindings that only direct calls reach, by lambda span key.
-    direct_call_lambdas: [Int]{[Int]{}},
+    // Lambda bindings that only direct calls reach, by lambda span.
+    direct_call_lambdas: [Span]{[Span]{}},
     // Lambda bindings whose calls read their captures, by binding key.
     closure_captures: [SemaOwnershipClosureCaptures]{[SemaOwnershipClosureCaptures]{}},
     // Names an escaping lambda bound in an open scope writes.
@@ -2485,10 +2481,10 @@ sema_ownership_check_list_view_element_aliases: fn(check: ^SemaBodyCheck, elemen
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
     ^previous: [SemaOwnershipPlace]{}
-    ^previous_writes: [Bool]{}
+    ^previous_access: [AccessConvention]{}
     loop element in elements {
         ^sources: [SemaOwnershipPlace]{}
-        ^is_write: false
+        ^access: AccessConvention.Read
         if element == .MethodCall(receiver, method, _, _, _, _, _) && method == "view" {
             loop place in sema_ownership_places_from_expr_in_state(receiver, check.scopes, check.state) {
                 ^windowed: place
@@ -2499,17 +2495,17 @@ sema_ownership_check_list_view_element_aliases: fn(check: ^SemaBodyCheck, elemen
         }
         if sources.len() == 0 && direct_mutable {
             sources = sema_ownership_places_from_expr_in_state(element, check.scopes, check.state)
-            is_write = true
+            access = AccessConvention.Write
         }
         loop place in sources {
             loop index in 0..<previous.len() {
-                if (previous_writes[index] || is_write) && sema_ownership_places_overlap(previous[index], place) {
+                if (previous_access[index] == AccessConvention.Write || access == AccessConvention.Write) && sema_ownership_places_overlap(previous[index], place) {
                     check.diagnostics.push(sema_error("E0212", expr_span(element), "list elements create overlapping views of `{sema_ownership_place_name(place)}`", "list elements coexist, so an exclusive mutable view cannot overlap another element's view", "use disjoint ranges, keep only one mutable view, or store owned values"))
                     break
                 }
             }
             previous.push(place)
-            previous_writes.push(is_write)
+            previous_access.push(access.copy())
         }
     }
 }
@@ -2666,10 +2662,6 @@ sema_ownership_move_origin: fn(expr: Expr, ty: Type, consumer: String, unmarked:
 // An exact `.move()` names the moved place; an unmarked move of a whole
 // binding names the place this use reads (`a.id`).
 sema_ownership_report_moved: fn(state: ^SemaOwnershipState, moved: SemaOwnershipMovedPlace, used: SemaOwnershipPlace, span: Span, diagnostics: ^[Diagnostic]) {
-    sema_ownership_report_moved_into(state.share_found, moved, used, span, diagnostics)
-}
-
-priv sema_ownership_report_moved_into: fn(share_found: ^[SemaOwnershipShareSite], moved: SemaOwnershipMovedPlace, used: SemaOwnershipPlace, span: Span, diagnostics: ^[Diagnostic]) {
     if moved.origin.once_capture == .Val(capture) {
         name: sema_ownership_place_name(moved.place)
         label: if sema_ownership_span_same(moved.origin.span, span) -> "`{name}` ran here on an earlier loop iteration" else -> "`{name}` ran here"
@@ -2680,8 +2672,9 @@ priv sema_ownership_report_moved_into: fn(share_found: ^[SemaOwnershipShareSite]
         sema_ownership_report_implicit_take_reused(callee, sema_ownership_place_name(moved.place), moved.origin.span, span, diagnostics)
         return
     }
+    // copy: `ty` is a payload of read parameter `moved`, which keeps the original; field `ty` of the new SemaOwnershipShareSite owns this one
     if moved.origin.share_ty == .Val(ty) {
-        sema_ownership_note_share_found_into(share_found, moved.origin.span, ty)
+        sema_ownership_note_share_found(state, SemaOwnershipShareSite{span: moved.origin.span, ty: ty.copy()})
     }
     shown: if moved.origin.share_ty != None -> used else -> moved.place
     diagnostics.push(sema_ownership_diag_moved(sema_ownership_place_name(shown), moved.origin, span))
@@ -2707,20 +2700,12 @@ sema_ownership_report_implicit_take_reused: fn(callee: String, name: String, sit
 }
 
 sema_ownership_note_share_found: fn(state: ^SemaOwnershipState, found: SemaOwnershipShareSite) Never! {
-    sema_ownership_note_share_found_into(state.share_found, found.span, found.ty)
-}
-
-sema_ownership_note_share_found_span: fn(state: ^SemaOwnershipState, span: Span, ty: Type) Never! {
-    sema_ownership_note_share_found_into(state.share_found, span, ty)
-}
-
-priv sema_ownership_note_share_found_into: fn(share_found: ^[SemaOwnershipShareSite], span: Span, ty: Type) Never! {
-    loop site in share_found {
-        if sema_ownership_span_same(site.span, span) {
+    loop site in state.share_found {
+        if sema_ownership_span_same(site.span, found.span) {
             return
         }
     }
-    share_found.push(SemaOwnershipShareSite{span: span, ty: ty.copy()})
+    state.share_found.push(found.copy())
 }
 
 // A share site found on a branch path is found for the
@@ -4378,9 +4363,11 @@ sema_ownership_diag_take_twice: fn(name: String, callee: String, span: Span) -> 
     sema_error("E0209", span, "`{name}` is passed to {consumer} more than once in this call", "a name used in two arguments of one call has no last use in that call, so {consumer} can't take `{name}` there", "write `{name}.copy()` in the argument that keeps a copy")
 }
 
-sema_ownership_expr_site_listed: fn(sites: [Int], expr: Expr) -> Bool Never! {
+sema_ownership_expr_site_listed: fn(sites: [Span], expr: Expr) -> Bool Never! {
     if expr == .Ident(_, span, _) {
-        return sites.contains(sema_ownership_span_key(span))
+        loop site in sites {
+            if sema_ownership_span_same(site, span) -> return true
+        }
     }
     false
 }
@@ -4435,41 +4422,28 @@ sema_ownership_bind_closure_writes: fn(state: ^SemaOwnershipState, key: String, 
     state.closure_writes.push(SemaOwnershipClosureWrites{key: key, names: names})
 }
 
-// Checks every captured name a call of the lambda binding `callee` writes:
-// not while a loop reads it, and not while a view looks into it.
-sema_ownership_check_callee_closure_writes: fn(check: ^SemaBodyCheck, callee: Expr, callee_name: String, callee_span: Span) {
-    binding: sema_ownership_binding_for_expr(check.state, callee, check.scopes) ?? return
-    ^row: -1
-    loop index in 0..<check.state.closure_writes.len() {
-        if check.state.closure_writes[index].key == binding.key {
-            row = index
-            break
-        }
+// The captured names a call of the lambda binding `callee` writes.
+sema_ownership_closure_writes: fn(check: ^SemaBodyCheck, callee: Expr) -> [String] Never! {
+    binding: sema_ownership_binding_for_expr(check.state, callee, check.scopes) ?? return [String]{}
+    loop writes in check.state.closure_writes {
+        if writes.key == binding.key -> return writes.names.copy()
     }
-    if row < 0 -> return
-    count: check.state.closure_writes[row].names.len()
-    loop name_index in 0..<count {
-        if check.context.iter_borrowed.contains(check.state.closure_writes[row].names[name_index]) {
-            written: check.state.closure_writes[row].names[name_index]
-            check.diagnostics.push(sema_collection_changed_in_loop(written, "calling `{callee_name}`, which writes `{written}` through its capture,", callee_span))
-        }
-        sema_ownership_check_closure_write_views_into(check.state, check.scopes, row, name_index, callee_name, callee_span, check.diagnostics)
-    }
+    [String]{}
 }
 
 // A call of a lambda that writes the captured `name` changes it as a direct
 // write would: not while a live view or window looks into it, since a push
 // or clear through the capture can move or free the storage under the view.
-priv sema_ownership_check_closure_write_views_into: fn(state: ^SemaOwnershipState, scopes: SemaScopeTable, row: Int, name_index: Int, callee_name: String, span: Span, diagnostics: ^[Diagnostic]) {
-    owner: Expr.Ident{name: state.closure_writes[row].names[name_index], span: span, id: AST_NODE_GENERATED}
+sema_ownership_check_closure_write_views: fn(check: ^SemaBodyCheck, name: String, callee_name: String, span: Span) {
+    owner: Expr.Ident{name: name, span: span, id: AST_NODE_GENERATED}
     action: "be changed by calling `{callee_name}`"
-    loop place in sema_ownership_places_from_expr_in_state(owner, scopes, state) {
-        if sema_ownership_conflicting_view_for_expr(state, place, AccessConvention.Write, owner, scopes) == .Val(fact) {
-            diagnostics.push(sema_ownership_diag_view_change(fact, place, action, span, scopes))
+    loop place in sema_ownership_places_from_expr_in_state(owner, check.scopes, check.state) {
+        if sema_ownership_conflicting_view_for_expr(check.state, place, AccessConvention.Write, owner, check.scopes) == .Val(fact) {
+            check.diagnostics.push(sema_ownership_diag_view_change(fact, place, action, span, check.scopes))
             return
         }
-        if sema_ownership_active_loan_conflict_for_expr(state, place, AccessConvention.Write, owner, scopes) == .Val(loan) {
-            diagnostics.push(sema_ownership_diag_loan_change(state, loan, place, action, span, scopes))
+        if sema_ownership_active_loan_conflict_for_expr(check.state, place, AccessConvention.Write, owner, check.scopes) == .Val(loan) {
+            check.diagnostics.push(sema_ownership_diag_loan_change(check.state, loan, place, action, span, check.scopes))
             return
         }
     }
@@ -4528,17 +4502,21 @@ sema_ownership_is_reactive_body: fn(state: SemaOwnershipState, span: Span) -> Bo
 // The lambda at `site` is bound to a local that only direct calls reach, or
 // is called where it is written.
 sema_ownership_note_direct_call_lambda: fn(state: ^SemaOwnershipState, site: Span) Never! {
-    key: sema_ownership_span_key(site)
-    if state.direct_call_lambdas.contains(key) {
-        return
+    loop known in state.direct_call_lambdas {
+        if sema_ownership_span_same(known, site) {
+            return
+        }
     }
-    state.direct_call_lambdas.push(key)
+    state.direct_call_lambdas.push(site.copy())
 }
 
 // Whether the lambda at `site` is bound to a local that only direct calls
 // reach, or is called where it is written.
 sema_ownership_is_direct_call_lambda: fn(state: SemaOwnershipState, site: Span) -> Bool Never! {
-    state.direct_call_lambdas.contains(sema_ownership_span_key(site))
+    loop known in state.direct_call_lambdas {
+        if sema_ownership_span_same(known, site) -> return true
+    }
+    false
 }
 
 // The binding `key` holds the lambda at `site` with `captures`. When only
@@ -4661,7 +4639,7 @@ sema_ownership_note_implicit_take: fn(state: ^SemaOwnershipState, expr: Expr, ty
         if !facts.accepted || !facts.complete || facts.copyable || !facts.cloneable || facts.resource || facts.materializes_view || facts.dynamic_loan {
             return None
         }
-        state.implicit_take_ok.push(sema_ownership_span_key(span))
+        state.implicit_take_ok.push(span.copy())
         return Val(binding.key)
     }
     None
@@ -4671,15 +4649,14 @@ sema_ownership_note_implicit_take: fn(state: ^SemaOwnershipState, expr: Expr, ty
 // the same call also references has no last use in that call; the call
 // ownership check reports E0209 there instead of moving it.
 sema_ownership_note_implicit_take_twice: fn(state: ^SemaOwnershipState, span: Span) Never! {
-    key: sema_ownership_span_key(span)
     ^index: state.implicit_take_ok.len()
     loop index > 0 {
         index -= 1
-        if state.implicit_take_ok[index] == key {
+        if sema_ownership_span_same(state.implicit_take_ok[index], span) {
             ^_: state.implicit_take_ok.remove(index, .Slot)
         }
     }
-    state.implicit_take_twice.push(key)
+    state.implicit_take_twice.push(span.copy())
 }
 
 // A binding declared outside the innermost lambda body around this point.
@@ -5283,12 +5260,14 @@ SemaOwnershipCapturePlace: struct {
 
 sema_ownership_span_key: fn(span: Span) -> Int Never! { span.start * 4294967296 + span.end }
 
-// Hand back what a checked lambda body's own state recorded for the walk
-// (receiver accesses, field types, inner lambdas).
-sema_ownership_note_lambda_body: fn(state: ^SemaOwnershipState, body: ^^SemaOwnershipState) Never! {
-    loop (key, value) in body.lambda_facts.move() -> state.lambda_facts[key] = value
-    loop (key, value) in body.receiver_accesses.move() -> state.receiver_accesses[key] = value
-    loop (key, value) in body.place_types.move() -> state.place_types[key] = value
+// The checked lambda records its capture modes, and hands back what its own
+// body state recorded for the walk (receiver accesses, field types, inner
+// lambdas).
+sema_ownership_note_lambda: fn(state: ^SemaOwnershipState, body: SemaOwnershipState, span: Span, facts: TCaptureFacts) Never! {
+    loop (key, value) in body.lambda_facts -> state.lambda_facts[key] = value.copy()
+    loop (key, value) in body.receiver_accesses -> state.receiver_accesses[key] = value.copy()
+    loop (key, value) in body.place_types -> state.place_types[key] = value.copy()
+    sema_ownership_note_lambda_facts(state, span, facts)
 }
 
 // The capture facts a call checks a lambda argument's construction against,
@@ -5555,21 +5534,7 @@ sema_ownership_walk_receiver_access: fn(state: SemaOwnershipState, receiver: Exp
     if written -> AccessConvention.Write else -> AccessConvention.Read
 }
 
-SemaOwnershipBoundNames: struct {
-    names: NameTable{name_table_sized(8)},
-    stack: [Int]{[Int]{}},
-}
-
-priv sema_ownership_bound_push: fn(bound: ^SemaOwnershipBoundNames, name: String) Never! {
-    bound.stack.push(name_index(name_intern(bound.names, name)))
-}
-
-priv sema_ownership_bound_contains: fn(bound: SemaOwnershipBoundNames, name: String) -> Bool Never! {
-    found: name_find(bound.names, name) ?? return false
-    bound.stack.contains(name_index(found))
-}
-
-sema_ownership_push_evaluated_access: fn(state: SemaOwnershipState, expr: Expr, access: AccessConvention, bound: SemaOwnershipBoundNames, scopes: SemaScopeTable, events: ^[SemaOwnershipEvaluatedAccess]) {
+sema_ownership_push_evaluated_access: fn(state: SemaOwnershipState, expr: Expr, access: AccessConvention, bound: [String], scopes: SemaScopeTable, events: ^[SemaOwnershipEvaluatedAccess]) {
     places: sema_ownership_walk_places(state, expr, scopes)
     if places.len() == 0 {
         return
@@ -5583,7 +5548,7 @@ sema_ownership_push_evaluated_access: fn(state: SemaOwnershipState, expr: Expr, 
             capture_place = sema_ownership_place_snapshot(info.place)
             capture_ty = info.ty
         }
-        if sema_ownership_bound_contains(bound, capture_place.root) -> next
+        if bound.contains(capture_place.root) -> next
         ^merged: false
         loop index in 0..<events.len() {
             if sema_ownership_place_exact(events[index].place, place) && sema_ownership_place_exact(events[index].capture_place, capture_place) {
@@ -5603,11 +5568,11 @@ sema_ownership_push_evaluated_access: fn(state: SemaOwnershipState, expr: Expr, 
     }
 }
 
-priv sema_ownership_truncate_bound: fn(bound: ^SemaOwnershipBoundNames, mark: Int) Never! {
-    loop bound.stack.len() > mark -> ^_: bound.stack.pop()
+priv sema_ownership_truncate_bound: fn(bound: ^[String], mark: Int) Never! {
+    loop bound.len() > mark -> ^_: bound.pop()
 }
 
-sema_ownership_collect_lvalue_access: fn(state: ^SemaOwnershipState, target: LValue, bound: ^SemaOwnershipBoundNames, nested: Bool, scopes: SemaScopeTable, events: ^[SemaOwnershipEvaluatedAccess], checks: ^[SemaOwnershipNestedCheck]) {
+sema_ownership_collect_lvalue_access: fn(state: ^SemaOwnershipState, target: LValue, bound: ^[String], nested: Bool, scopes: SemaScopeTable, events: ^[SemaOwnershipEvaluatedAccess], checks: ^[SemaOwnershipNestedCheck]) {
     if target == {
         .Local(name, name_span) -> {
             sema_ownership_push_evaluated_access(state, Expr.Ident{name: name, span: name_span, id: AST_NODE_GENERATED}, AccessConvention.Write, bound, scopes, events)
@@ -5633,8 +5598,7 @@ sema_ownership_collect_lvalue_access: fn(state: ^SemaOwnershipState, target: LVa
 // that receives the lambda, where the callee may run it: a write beside a
 // borrowed capture in that call conflicts.
 sema_ownership_collect_lambda_requirement_events: fn(state: ^SemaOwnershipState, lambda: Lambda, scopes: SemaScopeTable, events: ^[SemaOwnershipEvaluatedAccess]) {
-    ^bound: SemaOwnershipBoundNames{}
-    loop param in lambda.params -> sema_ownership_bound_push(bound, param.name)
+    ^bound: loop param in lambda.params -> param.name
     ^captured: [SemaOwnershipEvaluatedAccess]{}
     ^ignored: [SemaOwnershipNestedCheck]{}
     if lambda.body == {
@@ -5646,9 +5610,8 @@ sema_ownership_collect_lambda_requirement_events: fn(state: ^SemaOwnershipState,
         }
     }
     // `take` captures move at construction even when the body never names them.
-    empty_bound: SemaOwnershipBoundNames{}
     loop capture in lambda.take_names {
-        sema_ownership_push_evaluated_access(state, Expr.Ident{name: capture.name, span: capture.span, id: AST_NODE_GENERATED}, AccessConvention.Read, empty_bound, scopes, captured)
+        sema_ownership_push_evaluated_access(state, Expr.Ident{name: capture.name, span: capture.span, id: AST_NODE_GENERATED}, AccessConvention.Read, [String]{}, scopes, captured)
     }
     taken: loop capture in lambda.take_names -> capture.name
     // A lambda this check did not record keeps plain capture reads.
@@ -5695,7 +5658,7 @@ sema_ownership_collect_lambda_requirement_events: fn(state: ^SemaOwnershipState,
     }
 }
 
-sema_ownership_collect_evaluated_list: fn(state: ^SemaOwnershipState, values: [Expr], mode: SemaOwnershipAccessWalk, bound: ^SemaOwnershipBoundNames, nested: Bool, scopes: SemaScopeTable, events: ^[SemaOwnershipEvaluatedAccess], checks: ^[SemaOwnershipNestedCheck]) {
+sema_ownership_collect_evaluated_list: fn(state: ^SemaOwnershipState, values: [Expr], mode: SemaOwnershipAccessWalk, bound: ^[String], nested: Bool, scopes: SemaScopeTable, events: ^[SemaOwnershipEvaluatedAccess], checks: ^[SemaOwnershipNestedCheck]) {
     loop value in values {
         sema_ownership_collect_evaluated_expr_accesses(state, value, mode, bound, nested, scopes, events, checks)
     }
@@ -5703,7 +5666,7 @@ sema_ownership_collect_evaluated_list: fn(state: ^SemaOwnershipState, values: [E
 
 // The capture-requirement walk of call arguments: a `^` argument lends its
 // place for the call; it never moves the captured owner.
-sema_ownership_collect_argument_requirements: fn(state: ^SemaOwnershipState, args: [CallArg], bound: ^SemaOwnershipBoundNames, scopes: SemaScopeTable, events: ^[SemaOwnershipEvaluatedAccess], checks: ^[SemaOwnershipNestedCheck]) {
+sema_ownership_collect_argument_requirements: fn(state: ^SemaOwnershipState, args: [CallArg], bound: ^[String], scopes: SemaScopeTable, events: ^[SemaOwnershipEvaluatedAccess], checks: ^[SemaOwnershipNestedCheck]) {
     loop arg in args {
         sema_ownership_collect_evaluated_expr_accesses(state, arg.expr, SemaOwnershipAccessWalk.CaptureRequirements, bound, false, scopes, events, checks)
         if arg.convention == AccessConvention.Write {
@@ -5719,12 +5682,12 @@ sema_ownership_walk_inline_loop: fn(callee: Expr) -> Lambda? {
     None
 }
 
-sema_ownership_collect_evaluated_expr_accesses: fn(state: ^SemaOwnershipState, expr: Expr, mode: SemaOwnershipAccessWalk, bound: ^SemaOwnershipBoundNames, nested: Bool, scopes: SemaScopeTable, events: ^[SemaOwnershipEvaluatedAccess], checks: ^[SemaOwnershipNestedCheck]) {
+sema_ownership_collect_evaluated_expr_accesses: fn(state: ^SemaOwnershipState, expr: Expr, mode: SemaOwnershipAccessWalk, bound: ^[String], nested: Bool, scopes: SemaScopeTable, events: ^[SemaOwnershipEvaluatedAccess], checks: ^[SemaOwnershipNestedCheck]) {
     places: sema_ownership_walk_places(state, expr, scopes)
     if places.len() > 0 {
         ^unbound: false
         loop place in places {
-            if !sema_ownership_bound_contains(bound, place.root) -> unbound = true
+            if !bound.contains(place.root) -> unbound = true
         }
         if mode != SemaOwnershipAccessWalk.ConstructCaptures && unbound {
             ^written: false
@@ -5794,7 +5757,7 @@ sema_ownership_collect_evaluated_expr_accesses: fn(state: ^SemaOwnershipState, e
                         sema_ownership_collect_evaluated_expr_accesses(state, body, mode, bound, nested, scopes, events, checks)
                     }
                     .Block(body) -> {
-                        mark: bound.stack.len()
+                        mark: bound.len()
                         sema_ownership_collect_evaluated_stmt_accesses(state, body, mode, bound, nested, scopes, events, checks)
                         sema_ownership_truncate_bound(bound, mark)
                     }
@@ -5933,14 +5896,14 @@ sema_ownership_collect_evaluated_expr_accesses: fn(state: ^SemaOwnershipState, e
         }
         .If(condition, then_body, then_value, else_body, else_value, _, _) -> {
             sema_ownership_collect_evaluated_expr_accesses(state, condition, mode, bound, nested, scopes, events, checks)
-            then_mark: bound.stack.len()
+            then_mark: bound.len()
             if condition == .PatternTest(_, pattern, _, _) {
                 sema_ownership_bind_pattern_names(pattern, bound)
             }
             sema_ownership_collect_evaluated_stmt_accesses(state, then_body, mode, bound, nested, scopes, events, checks)
             sema_ownership_collect_evaluated_expr_accesses(state, then_value, mode, bound, nested, scopes, events, checks)
             sema_ownership_truncate_bound(bound, then_mark)
-            else_mark: bound.stack.len()
+            else_mark: bound.len()
             sema_ownership_collect_evaluated_stmt_accesses(state, else_body, mode, bound, nested, scopes, events, checks)
             sema_ownership_collect_evaluated_expr_accesses(state, else_value, mode, bound, nested, scopes, events, checks)
             sema_ownership_truncate_bound(bound, else_mark)
@@ -5951,9 +5914,9 @@ sema_ownership_collect_evaluated_expr_accesses: fn(state: ^SemaOwnershipState, e
         // Each step's hidden name is bound before the step runs.
         .Pipe(head, steps, _, _) -> {
             sema_ownership_collect_evaluated_expr_accesses(state, head, mode, bound, nested, scopes, events, checks)
-            step_mark: bound.stack.len()
+            step_mark: bound.len()
             loop step in steps {
-                sema_ownership_bound_push(bound, step.name)
+                bound.push(step.name)
                 sema_ownership_collect_evaluated_expr_accesses(state, step.value, mode, bound, nested, scopes, events, checks)
             }
             sema_ownership_truncate_bound(bound, step_mark)
@@ -5964,7 +5927,7 @@ sema_ownership_collect_evaluated_expr_accesses: fn(state: ^SemaOwnershipState, e
 
 // Walks the value expressions a pattern compares against or looks up with, in
 // source order, without copying them into an intermediate list.
-priv sema_ownership_collect_pattern_accesses: fn(state: ^SemaOwnershipState, pattern: Pattern, mode: SemaOwnershipAccessWalk, bound: ^SemaOwnershipBoundNames, nested: Bool, scopes: SemaScopeTable, events: ^[SemaOwnershipEvaluatedAccess], checks: ^[SemaOwnershipNestedCheck]) {
+priv sema_ownership_collect_pattern_accesses: fn(state: ^SemaOwnershipState, pattern: Pattern, mode: SemaOwnershipAccessWalk, bound: ^[String], nested: Bool, scopes: SemaScopeTable, events: ^[SemaOwnershipEvaluatedAccess], checks: ^[SemaOwnershipNestedCheck]) {
     if pattern == {
         .Variant(_, bindings, _, _) -> {
             loop slot in bindings {
@@ -6009,7 +5972,7 @@ priv sema_ownership_collect_pattern_accesses: fn(state: ^SemaOwnershipState, pat
     }
 }
 
-priv sema_ownership_collect_slot_accesses: fn(state: ^SemaOwnershipState, slot: PatSlot, mode: SemaOwnershipAccessWalk, bound: ^SemaOwnershipBoundNames, nested: Bool, scopes: SemaScopeTable, events: ^[SemaOwnershipEvaluatedAccess], checks: ^[SemaOwnershipNestedCheck]) {
+priv sema_ownership_collect_slot_accesses: fn(state: ^SemaOwnershipState, slot: PatSlot, mode: SemaOwnershipAccessWalk, bound: ^[String], nested: Bool, scopes: SemaScopeTable, events: ^[SemaOwnershipEvaluatedAccess], checks: ^[SemaOwnershipNestedCheck]) {
     if slot == {
         .Value(value) -> {
             sema_ownership_collect_evaluated_expr_accesses(state, value, mode, bound, nested, scopes, events, checks)
@@ -6025,11 +5988,11 @@ priv sema_ownership_collect_slot_accesses: fn(state: ^SemaOwnershipState, slot: 
 }
 
 // The names a matched pattern introduces.
-sema_ownership_bind_pattern_names: fn(pattern: Pattern, bound: ^SemaOwnershipBoundNames) Never! {
+sema_ownership_bind_pattern_names: fn(pattern: Pattern, bound: ^[String]) Never! {
     if pattern == {
         .Present(binding, _, inner, _) | .Ok(binding, _, inner, _) | .Err(binding, _, inner, _) -> {
             if inner == .Val(nested) -> sema_ownership_bind_pattern_names(nested, bound) else {
-                sema_ownership_bound_push(bound, binding)
+                bound.push(binding.copy())
             }
         }
         .Variant(_, bindings, _, _) -> {
@@ -6038,7 +6001,7 @@ sema_ownership_bind_pattern_names: fn(pattern: Pattern, bound: ^SemaOwnershipBou
         .Struct(fields, _, _, _) -> {
             loop field in fields {
                 if field == {
-                    .Bind(_, _, local, _) -> { sema_ownership_bound_push(bound, local) }
+                    .Bind(_, _, local, _) -> { bound.push(local.copy()) }
                     .Nested(_, _, nested) -> { sema_ownership_bind_pattern_names(nested, bound) }
                     .Value(_, _, _) -> {}
                 }
@@ -6046,7 +6009,7 @@ sema_ownership_bind_pattern_names: fn(pattern: Pattern, bound: ^SemaOwnershipBou
         }
         .List(_, _, _) | .Map(_, _, _) -> {
             loop name in pattern_binding_names(pattern) {
-                sema_ownership_bound_push(bound, if name.rename == .Val(rename) -> rename.name else -> name.name)
+                bound.push(if name.rename == .Val(rename) -> rename.name else -> name.name)
             }
         }
         .Or(alternatives, _) -> {
@@ -6054,34 +6017,34 @@ sema_ownership_bind_pattern_names: fn(pattern: Pattern, bound: ^SemaOwnershipBou
         }
         .StrMatch(parts, _) -> {
             loop part in parts {
-                if part == .Hole(name, _, _) -> sema_ownership_bound_push(bound, name)
+                if part == .Hole(name, _, _) -> bound.push(name.copy())
             }
         }
         .BinMatch(parts, _) -> {
             loop part in parts {
-                if part == .Hole(name, _, _) -> sema_ownership_bound_push(bound, name)
+                if part == .Hole(name, _, _) -> bound.push(name.copy())
             }
         }
         .Absent(_) | .Range(_, _, _) -> {}
     }
 }
 
-sema_ownership_bind_slot_names: fn(slot: PatSlot, bound: ^SemaOwnershipBoundNames) Never! {
+sema_ownership_bind_slot_names: fn(slot: PatSlot, bound: ^[String]) Never! {
     if slot == {
-        .Bind(name, _) -> { sema_ownership_bound_push(bound, name) }
+        .Bind(name, _) -> { bound.push(name.copy()) }
         .Nested(pattern) -> { sema_ownership_bind_pattern_names(pattern, bound) }
         .Named(_, _, inner) -> sema_ownership_bind_slot_names(inner, bound)
         .Wildcard | .Range(_, _) | .Rest(_) | .Value(_) -> {}
     }
 }
 
-sema_ownership_collect_evaluated_stmt_accesses: fn(state: ^SemaOwnershipState, body: [Stmt], mode: SemaOwnershipAccessWalk, bound: ^SemaOwnershipBoundNames, nested: Bool, scopes: SemaScopeTable, events: ^[SemaOwnershipEvaluatedAccess], checks: ^[SemaOwnershipNestedCheck]) {
+sema_ownership_collect_evaluated_stmt_accesses: fn(state: ^SemaOwnershipState, body: [Stmt], mode: SemaOwnershipAccessWalk, bound: ^[String], nested: Bool, scopes: SemaScopeTable, events: ^[SemaOwnershipEvaluatedAccess], checks: ^[SemaOwnershipNestedCheck]) {
     loop statement in body {
         sema_ownership_collect_evaluated_one_stmt(state, statement, mode, bound, nested, scopes, events, checks)
     }
 }
 
-priv sema_ownership_collect_evaluated_one_stmt: fn(state: ^SemaOwnershipState, statement: Stmt, mode: SemaOwnershipAccessWalk, bound: ^SemaOwnershipBoundNames, nested: Bool, scopes: SemaScopeTable, events: ^[SemaOwnershipEvaluatedAccess], checks: ^[SemaOwnershipNestedCheck]) {
+priv sema_ownership_collect_evaluated_one_stmt: fn(state: ^SemaOwnershipState, statement: Stmt, mode: SemaOwnershipAccessWalk, bound: ^[String], nested: Bool, scopes: SemaScopeTable, events: ^[SemaOwnershipEvaluatedAccess], checks: ^[SemaOwnershipNestedCheck]) {
     if statement == {
         .Expr(value) | .Yield(value, _) | .DeferClose(value, _) | .BreakValue(value, _) | .BreakLabelValue(_, _, value, _) -> {
             sema_ownership_collect_evaluated_expr_accesses(state, value, mode, bound, nested, scopes, events, checks)
@@ -6090,9 +6053,9 @@ priv sema_ownership_collect_evaluated_one_stmt: fn(state: ^SemaOwnershipState, s
             sema_ownership_collect_evaluated_expr_accesses(state, binding.init, mode, bound, nested, scopes, events, checks)
             if binding.pattern == .Val(pattern) {
                 loop name in sema_stmt_destructure_names(pattern) {
-                    sema_ownership_bound_push(bound, if name.rename == .Val(rename) -> rename.name else -> name.name)
+                    bound.push(if name.rename == .Val(rename) -> rename.name else -> name.name)
                 }
-            } else { sema_ownership_bound_push(bound, binding.name) }
+            } else { bound.push(binding.name) }
         }
         .Assign(target, _, _, value) -> {
             sema_ownership_collect_lvalue_access(state, target, bound, nested, scopes, events, checks)
@@ -6105,7 +6068,7 @@ priv sema_ownership_collect_evaluated_one_stmt: fn(state: ^SemaOwnershipState, s
         }
         .While(condition, loop_body, _, _, _) -> {
             sema_ownership_collect_evaluated_expr_accesses(state, condition, mode, bound, nested, scopes, events, checks)
-            mark: bound.stack.len()
+            mark: bound.len()
             sema_ownership_collect_evaluated_stmt_accesses(state, loop_body, mode, bound, nested, scopes, events, checks)
             sema_ownership_truncate_bound(bound, mark)
         }
@@ -6125,19 +6088,19 @@ priv sema_ownership_collect_evaluated_one_stmt: fn(state: ^SemaOwnershipState, s
                     }
                 }
             }
-            mark: bound.stack.len()
-            sema_ownership_bound_push(bound, var)
-            if var2 == .Val(second) -> sema_ownership_bound_push(bound, second.name)
+            mark: bound.len()
+            bound.push(var.copy())
+            if var2 == .Val(second) -> bound.push(second.name)
             sema_ownership_collect_evaluated_stmt_accesses(state, loop_body, mode, bound, nested, scopes, events, checks)
             sema_ownership_truncate_bound(bound, mark)
         }
         .Switch(subject, arms, else_body, _) -> {
             sema_ownership_collect_evaluated_expr_accesses(state, subject, mode, bound, nested, scopes, events, checks)
-            switch_mark: bound.stack.len()
-            sema_ownership_bound_push(bound, "it")
+            switch_mark: bound.len()
+            bound.push("it")
             loop arm in arms {
                 sema_ownership_collect_evaluated_expr_accesses(state, arm.cond, mode, bound, nested, scopes, events, checks)
-                arm_mark: bound.stack.len()
+                arm_mark: bound.len()
                 if arm.cond == .PatternTest(_, pattern, _, _) {
                     sema_ownership_bind_pattern_names(pattern, bound)
                 }
@@ -6146,15 +6109,15 @@ priv sema_ownership_collect_evaluated_one_stmt: fn(state: ^SemaOwnershipState, s
             }
             sema_ownership_truncate_bound(bound, switch_mark)
             if else_body == .Val(otherwise) {
-                else_mark: bound.stack.len()
+                else_mark: bound.len()
                 sema_ownership_collect_evaluated_stmt_accesses(state, otherwise, mode, bound, nested, scopes, events, checks)
                 sema_ownership_truncate_bound(bound, else_mark)
             }
         }
         .CountedLoop(init, condition, step, loop_body, _, _, _) -> {
             sema_ownership_collect_evaluated_expr_accesses(state, init.init, mode, bound, nested, scopes, events, checks)
-            loop_mark: bound.stack.len()
-            sema_ownership_bound_push(bound, init.name)
+            loop_mark: bound.len()
+            bound.push(init.name)
             sema_ownership_collect_evaluated_expr_accesses(state, condition, mode, bound, nested, scopes, events, checks)
             sema_ownership_collect_evaluated_stmt_accesses(state, loop_body, mode, bound, nested, scopes, events, checks)
             if step == .Val(step_stmt) {
@@ -6165,18 +6128,18 @@ priv sema_ownership_collect_evaluated_one_stmt: fn(state: ^SemaOwnershipState, s
         // An `#Off` or `#Off(.Release)` body never reaches the release runtime.
         .Switched(marker, switched_body, _) -> {
             if !sema_authority_switched_erased(marker.name) {
-                mark: bound.stack.len()
+                mark: bound.len()
                 sema_ownership_collect_evaluated_stmt_accesses(state, switched_body, mode, bound, nested, scopes, events, checks)
                 sema_ownership_truncate_bound(bound, mark)
             }
         }
         .Loop(inner, _, _, _) | .Unsafe(_, _, inner, _) | .Impure(_, _, inner, _) | .Shield(inner, _) | .Defer(inner, _) | .Region(_, _, inner, _) | .Policy(_, inner, _) | .TaskGroup(_, _, _, inner, _) | .Layout(_, _, inner, _) | .AuthorityScope(_, _, _, inner, _) | .Transact(_, _, inner, _, _) | .AssumeDet(_, _, inner, _) | .Live(inner, _) -> {
-            mark: bound.stack.len()
+            mark: bound.len()
             sema_ownership_collect_evaluated_stmt_accesses(state, inner, mode, bound, nested, scopes, events, checks)
             sema_ownership_truncate_bound(bound, mark)
         }
         .Reactive(inner, _) -> {
-            mark: bound.stack.len()
+            mark: bound.len()
             ^captures: [SemaOwnershipEvaluatedAccess]{}
             sema_ownership_collect_evaluated_stmt_accesses(state, inner, SemaOwnershipAccessWalk.CaptureRequirements, bound, false, scopes, captures, checks)
             sema_ownership_truncate_bound(bound, mark)
@@ -6213,13 +6176,13 @@ priv sema_ownership_collect_evaluated_one_stmt: fn(state: ^SemaOwnershipState, s
             loop field in fields {
                 sema_ownership_collect_evaluated_expr_accesses(state, field.value, mode, bound, nested, scopes, events, checks)
             }
-            mark: bound.stack.len()
+            mark: bound.len()
             sema_ownership_collect_evaluated_stmt_accesses(state, inner, mode, bound, nested, scopes, events, checks)
             sema_ownership_truncate_bound(bound, mark)
         }
         .ScopeMember(_, _, member_args, _, inner, _, _, _) -> {
             sema_ownership_collect_evaluated_list(state, member_args, mode, bound, nested, scopes, events, checks)
-            mark: bound.stack.len()
+            mark: bound.len()
             sema_ownership_collect_evaluated_stmt_accesses(state, inner, mode, bound, nested, scopes, events, checks)
             sema_ownership_truncate_bound(bound, mark)
         }
@@ -6233,12 +6196,12 @@ sema_ownership_collect_call_projection_accesses: fn(state: ^SemaOwnershipState, 
     if expr == {
         .Index(base, index, _, _, _) -> {
             sema_ownership_collect_call_projection_accesses(state, base, nested, scopes, events, checks)
-            ^bound: SemaOwnershipBoundNames{}
+            ^bound: [String]{}
             sema_ownership_collect_evaluated_expr_accesses(state, index, SemaOwnershipAccessWalk.EvaluateNow, bound, nested, scopes, events, checks)
         }
         .Slice(base, start, end, range, _, _) -> {
             sema_ownership_collect_call_projection_accesses(state, base, nested, scopes, events, checks)
-            ^bound: SemaOwnershipBoundNames{}
+            ^bound: [String]{}
             if range == .Val(range_expr) {
                 sema_ownership_collect_evaluated_expr_accesses(state, range_expr, SemaOwnershipAccessWalk.EvaluateNow, bound, nested, scopes, events, checks)
             } else {
@@ -6273,7 +6236,7 @@ sema_ownership_nested_argument_checks: fn(state: ^SemaOwnershipState, arg: CallA
     if mode == SemaOwnershipAccessWalk.EvaluateNow {
         places: sema_ownership_walk_places(state, arg.expr, scopes)
         if places.len() == 0 {
-            ^bound: SemaOwnershipBoundNames{}
+            ^bound: [String]{}
             sema_ownership_collect_evaluated_expr_accesses(state, arg.expr, mode, bound, true, scopes, transient, inner)
             sema_ownership_append_nested_events(transient, checks)
             sema_ownership_append_nested_checks(inner, checks)
@@ -6288,7 +6251,7 @@ sema_ownership_nested_argument_checks: fn(state: ^SemaOwnershipState, arg: CallA
         }
         return
     }
-    ^bound: SemaOwnershipBoundNames{}
+    ^bound: [String]{}
     sema_ownership_collect_evaluated_expr_accesses(state, arg.expr, mode, bound, true, scopes, transient, inner)
     sema_ownership_append_nested_checks(inner, checks)
     sema_ownership_append_nested_events(transient, checks)
@@ -6301,7 +6264,7 @@ sema_ownership_nested_receiver_checks: fn(state: ^SemaOwnershipState, receiver: 
     ^inner: [SemaOwnershipNestedCheck]{}
     if mode != SemaOwnershipAccessWalk.EvaluateNow {
         // Constructing captures: only calls inside the receiver build lambdas.
-        ^bound: SemaOwnershipBoundNames{}
+        ^bound: [String]{}
         sema_ownership_collect_evaluated_expr_accesses(state, receiver, mode, bound, true, scopes, transient, inner)
         sema_ownership_append_nested_checks(inner, checks)
         return
@@ -6312,7 +6275,7 @@ sema_ownership_nested_receiver_checks: fn(state: ^SemaOwnershipState, receiver: 
     }
     places: sema_ownership_walk_places(state, unmarked, scopes)
     if places.len() == 0 {
-        ^bound: SemaOwnershipBoundNames{}
+        ^bound: [String]{}
         sema_ownership_collect_evaluated_expr_accesses(state, unmarked, mode, bound, true, scopes, transient, inner)
         sema_ownership_append_nested_events(transient, checks)
         sema_ownership_append_nested_checks(inner, checks)
@@ -6339,7 +6302,7 @@ sema_ownership_nested_called_value_checks: fn(state: ^SemaOwnershipState, callee
     }
     ^transient: [SemaOwnershipEvaluatedAccess]{}
     ^inner: [SemaOwnershipNestedCheck]{}
-    ^bound: SemaOwnershipBoundNames{}
+    ^bound: [String]{}
     sema_ownership_collect_evaluated_expr_accesses(state, callee, mode, bound, true, scopes, transient, inner)
     sema_ownership_append_nested_checks(inner, checks)
     sema_ownership_append_nested_events(transient, checks)
@@ -6350,7 +6313,7 @@ sema_ownership_nested_receiver_value_check: fn(state: ^SemaOwnershipState, calle
     ^inner: [SemaOwnershipNestedCheck]{}
     places: sema_ownership_walk_places(state, callee, scopes)
     if places.len() == 0 {
-        ^bound: SemaOwnershipBoundNames{}
+        ^bound: [String]{}
         sema_ownership_collect_evaluated_expr_accesses(state, callee, SemaOwnershipAccessWalk.EvaluateNow, bound, true, scopes, transient, inner)
     } else {
         sema_ownership_collect_call_projection_accesses(state, callee, true, scopes, transient, inner)
@@ -6393,7 +6356,7 @@ sema_ownership_check_argument_evaluation: fn(state: ^SemaOwnershipState, accesse
     if is_place {
         sema_ownership_collect_call_projection_accesses(state, arg.expr, true, scopes, events, checks)
     } else {
-        ^bound: SemaOwnershipBoundNames{}
+        ^bound: [String]{}
         sema_ownership_collect_evaluated_expr_accesses(state, arg.expr, SemaOwnershipAccessWalk.EvaluateNow, bound, true, scopes, events, checks)
     }
     ^accepted: true
@@ -6414,7 +6377,7 @@ sema_ownership_check_argument_evaluation: fn(state: ^SemaOwnershipState, accesse
 sema_ownership_check_argument_captures: fn(state: ^SemaOwnershipState, accesses: ^[SemaOwnershipCallAccess], arg: CallArg, scopes: SemaScopeTable, known: Int, diagnostics: ^[Diagnostic]) -> Bool {
     ^events: [SemaOwnershipEvaluatedAccess]{}
     ^checks: [SemaOwnershipNestedCheck]{}
-    ^bound: SemaOwnershipBoundNames{}
+    ^bound: [String]{}
     sema_ownership_collect_evaluated_expr_accesses(state, arg.expr, SemaOwnershipAccessWalk.ConstructCaptures, bound, true, scopes, events, checks)
     ^accepted: sema_ownership_check_nested_accesses(accesses, checks, known, diagnostics)
     loop event in events {
@@ -7092,7 +7055,12 @@ sema_ownership_fork_apply: fn(state: ^SemaOwnershipState, path: ^^SemaOwnershipP
 }
 
 sema_ownership_share_found_add: fn(found: ^[SemaOwnershipShareSite], site: SemaOwnershipShareSite) Never! {
-    sema_ownership_note_share_found_into(found, site.span, site.ty)
+    loop known in found {
+        if sema_ownership_span_same(known.span, site.span) {
+            return
+        }
+    }
+    found.push(site.copy())
 }
 
 // A declaration of a path joins under an id neither the fork (the rows of
@@ -7404,22 +7372,24 @@ sema_ownership_loop_path_to_depth: fn(path: SemaOwnershipState, target_depth: In
 // once and dropped, as a later use would; the next pass checks that site as the
 // copy.
 sema_ownership_check_loop_move_backedge: fn(state: ^SemaOwnershipState, frame: SemaLoopValueFrame, diagnostics: ^[Diagnostic]) Never! {
-    // Rows that do not repeat stay in place; a repeated row is reported in
-    // forward order and leaves unless it stays standing too.
-    ^remove_indices: [Int]{}
-    loop index in 0..<state.moved.len() {
+    // Rows that do not repeat stay in place; a repeated row leaves unless it
+    // stays standing too. Walked from the back, so the reports reverse after.
+    ^repeated: [SemaOwnershipMovedPlace]{}
+    ^index: state.moved.len()
+    loop index > 0 {
+        index -= 1
         if !sema_ownership_loop_move_repeats(state, frame, state.moved[index]) -> next
-        if !sema_ownership_moved_reported(diagnostics, state.moved[index].origin.span) {
-            sema_ownership_report_moved_into(state.share_found, state.moved[index], state.moved[index].place, state.moved[index].origin.span, diagnostics)
-        }
-        if state.moved[index].origin.share_ty != None || state.moved[index].origin.implicit_take != None {
-            remove_indices.push(index)
+        if state.moved[index].origin.share_ty == None && state.moved[index].origin.implicit_take == None {
+            repeated.push(state.moved[index].copy())
+        } else {
+            if state.moved.remove(index, .Slot) == .Val(removed) -> repeated.push(removed)
         }
     }
-    ^position: remove_indices.len()
-    loop position > 0 {
-        position -= 1
-        ^_: state.moved.remove(remove_indices[position], .Slot)
+    repeated.reverse()
+    loop moved in repeated {
+        if !sema_ownership_moved_reported(diagnostics, moved.origin.span) {
+            sema_ownership_report_moved(state, moved, moved.place, moved.origin.span, diagnostics)
+        }
     }
 }
 

@@ -410,13 +410,13 @@ sema_coverage_three_state_missing: fn(ok: Type, shapes: [TPatternShape], keys: [
 
 // A partly matched `Ok`/`Err` names the payload cases its nested arms leave
 // open (`Err(.High)`, `Err(.BadNumStr(_))`) instead of `Err(...)`.
-sema_coverage_nested_witnesses: fn(subject_ty: Type, missing: ^^[String], shapes: [TPatternShape], check: SemaBodyCheck) -> [String] {
+sema_coverage_nested_witnesses: fn(subject_ty: Type, missing: [String], shapes: [TPatternShape], check: SemaBodyCheck) -> [String] {
     ^named: [String]{}
-    loop entry in missing.move() {
+    loop entry in missing {
         key: if entry == "Ok(...)" -> "Ok" else if entry == "Err(...)" -> "Err" else -> ""
         cases: if key == "" -> [String]{} else -> sema_coverage_nested_cases(subject_ty, key, shapes, check)
         if cases.len() == 0 {
-            named.push(entry)
+            named.push(entry.copy())
             next
         }
         loop case in cases -> named.push("{key}({case})")
@@ -547,7 +547,7 @@ sema_coverage_check_table: fn(conditions: [TExpr], multi_head: Bool, span: Span,
             missing = sema_coverage_three_state_missing(ok_ty, table.shapes, keys, check)
         }
     }
-    missing = sema_coverage_nested_witnesses(subject_ty, missing.move(), table.shapes, check)
+    missing = sema_coverage_nested_witnesses(subject_ty, missing, table.shapes, check)
     if missing.len() == 0 {
         return
     }

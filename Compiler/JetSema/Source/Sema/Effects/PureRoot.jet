@@ -27,19 +27,15 @@ SemaPureRootPosition: struct {
     function_index: Int,
 }
 
-sema_pure_root_diagnostic: fn(root: String, call: ^^String, path: ^[String], span: Span) -> Diagnostic {
-    what: "`{root}` calls the impure function `{call}`"
+sema_pure_root_diagnostic: fn(root: String, call: String, path: [String], span: Span) -> Diagnostic {
     why: if path.len() == 0 -> "`{call}` is impure, but `{root}` declares `-[]>`" else -> "{path.join(" → ")} calls `{call}`, which is impure — the whole call chain must be pure inside `{root}`"
-    fix: if path.len() == 0 -> "remove the call from `{root}`, or drop the `-[]>` bound from `{root}` so its effects are inferred" else -> "remove the call to `{call}`, or drop the `-[]>` bound from `{root}` so its effects are inferred"
-    ^drained: [String]{}
-    loop path.len() > 0 -> drained.push(path.pop() ?? break)
-    drained.reverse()
     ^chain: [String]{root}
-    loop component in drained.move() {
-        if chain[chain.len() - 1] != component -> chain.push(component)
+    loop component in path {
+        if chain[chain.len() - 1] != component -> chain.push(component.copy())
     }
-    if chain[chain.len() - 1] != call -> chain.push(call)
-    diagnostic_with_rights(sema_error("E3401", span, what, why, fix), "pure", chain, [String]{}, None)
+    if chain[chain.len() - 1] != call -> chain.push(call.copy())
+    fix: if path.len() == 0 -> "remove the call from `{root}`, or drop the `-[]>` bound from `{root}` so its effects are inferred" else -> "remove the call to `{call}`, or drop the `-[]>` bound from `{root}` so its effects are inferred"
+    diagnostic_with_rights(sema_error("E3401", span, "`{root}` calls the impure function `{call}`", why, fix), "pure", chain, [String]{}, None)
 }
 
 // `module_index` is the module of `owner`, whose call facts the walk reads.
