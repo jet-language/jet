@@ -22,7 +22,6 @@ jet dev [<file.jet|dir>] [-- <args>] Watch and run a program
 jet repl [<file.jet>] [--project <dir>] [--allow=<RIGHTS>] [--deny=<RIGHTS>] Try Jet code interactively
 jet self <command>                   Manage the Jet installation and editor tools
 jet fix <file.jet|dir>               Apply safe automatic fixes, including `fix memory`
-jet os <command>                     Manage Jetos machines and images
 jet prove [args]                     Create a proof report for code and tests
 jet fetch [args]                     Download locked dependencies
 jet debug [<file.jet|image>] [-- <args>] Debug a program from Jet source

@@ -4272,11 +4272,8 @@ run: fn() {
 `math: module` declares a file module. The loader searches beside the file for
 `math.jet`, then for `math/module.jet`. Neither file is **E0607**; finding both
 is **E0606**. `math: module { ... }` is inline and adds the `math` namespace to
-the containing file; it performs no file lookup. The same `module` keyword is
-used by JetOS declarations. The bodiless form always declares a code module,
-and the parser distinguishes braced code and JetOS contributions from their
-contents. A struct declared in an inline module prints by its own name:
-`geo.Point{x: 1, y: 2}` prints `Point { x: 1, y: 2 }`.
+the containing file; it performs no file lookup. A struct declared in an inline
+module prints by its own name: `geo.Point{x: 1, y: 2}` prints `Point { x: 1, y: 2 }`.
 
 Qualified access always works. `use math.clamp` imports one member, and
 `use math.[clamp, lerp]` imports a member group. The `.[ ]` member-list form
@@ -4470,15 +4467,14 @@ the name ledger, the spelling hover, reflection and diagnostics use: a file is
 its module path (`one.jet` is `one`) and a declared module follows it
 (`shapes.jet`'s `geo: module` is `shapes.geo`).
 
-The reserved role namespaces are `env` (an `Env` development environment),
-`system` (a `System` JetOS host), and `image` (an OCI image or JetOS installer
-input). An `env.<name>:` contribution uses the ordinary expression parser,
-usually an `Env{ ... }` struct literal. A string prompt is shorthand; the
-structured `Prompt` value selects label/path and stripping modes. The shell
-hook command is `jet env hook <shell>` for `bash`, `zsh`, or `fish`; the hook
-is opt-in, restores the prior shell outside an environment tree, and honors a
-non-empty `JET_ENV_DISABLE`. Activation of a trust-sensitive environment uses
-the normal trust gate (D-ENVHOOK1=A).
+The reserved role namespaces are `env` (an `Env` development environment) and
+`image` (an OCI image). An `env.<name>:` contribution uses the ordinary
+expression parser, usually an `Env{ ... }` struct literal. A string prompt is
+shorthand; the structured `Prompt` value selects label/path and stripping
+modes. The shell hook command is `jet env hook <shell>` for `bash`, `zsh`, or
+`fish`; the hook is opt-in, restores the prior shell outside an environment
+tree, and honors a non-empty `JET_ENV_DISABLE`. Activation of a trust-sensitive
+environment uses the normal trust gate (D-ENVHOOK1=A).
 
 ### Images and package adapters
 
@@ -4486,8 +4482,7 @@ An `image.<name>:` contribution describes a Jetpack OCI image. `from: env.<name>
 projects a typed environment into the image. Image records may carry `services`,
 `target`, `user`, `entrypoint`, `health`, `expose`, `env_vars`, `files`, and
 `base`. `files` explicitly layers project-relative non-secret paths; managed
-environment files and dotenv inputs are omitted. `.Iso`, `.Qcow`, and `.Raw`,
-and `from: system.<name>`, are JetOS installer inputs handled by `jet os image`.
+environment files and dotenv inputs are omitted.
 
 An environment package list may contain `Pkg.adapt(name:, source:, deps:,
 recipe:)`. Dependencies are realized first, and only their verified executable
@@ -4563,7 +4558,7 @@ through configuration reports **E1275** before launch (U28).
 
 `jet trust list`, `jet trust explain [<grant>]`, `jet trust grant <grant>
 [--scope user|repo]`, and `jet trust revoke <grant>` operate on package, build,
-environment, service, image, fleet, and JetOS authority grants. Trust decisions
+environment, service, image, and fleet authority grants. Trust decisions
 are `allow`, `prompt`, or `deny`; provenance requirements are `none`, `logged`,
 or `attested`. The grant store accepts the existing `hash:` and `pattern:`
 records (U19). A `package.jet` authority policy may set `authority.trust`
@@ -4594,7 +4589,7 @@ services: {
 ```
 
 They are managed with `jetpack services up`, `down`, `health`, `logs`, and
-`wait`. They are not system services and do not activate JetOS
+`wait`. They are project-local processes, not system services
 (D-JPK-SERVICE1).
 
 A `secrets` map contains secret metadata or a read-time composition. The
