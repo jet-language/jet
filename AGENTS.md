@@ -92,9 +92,12 @@ A violation stops the affected work until fixed at the root.
 - **I3 — Sema owns checks.** All language checking lives in sema; codegen lowers
   established facts and never probes the backend to find user errors.
 - **I4 — Complete diagnostics.** Every diagnostic has a registered code,
-  what/why/fix text, and a UI snapshot.
+  what/why/fix text, and a UI snapshot. Never reuse a code registered for a
+  different meaning, and keep registry text in step with the rule actually
+  shipped.
 - **I5 — Executable examples.** Every feature has a golden-tested example
-  proving the same meaning on every applicable tier.
+  proving the same meaning on every applicable tier. Its golden must show the
+  feature's own output (a report, diagnostic, or footprint), never only "ok".
 - **I6 — Dependency seams.** Compiler and seam packages use path dependencies
   only. New external stdlib dependencies require an owner decision.
 - **I7 — Ratified syntax.** Every user-typable keyword or sigil is registered in
@@ -135,18 +138,25 @@ A violation stops the affected work until fixed at the root.
   trade-offs, and edge cases. Decisions live only on ballots—never in card notes
   or plans. Within approved scope, make implementation choices and keep moving;
   do not stall work to ask the owner implementation questions.
-- **Tower hygiene:** Use `node Tools/Tower/tower.mjs` (never hand-edit
-  `Tools/Tower/.tower/`; only the owner starts `tower serve`). Workers never
-  write to Tower, close cards, or keep a competing task list. Attach regressions
-  and follow-ups as criteria on the owning card rather than creating new cards.
-  Never close an unmet criterion or reword criteria to pass.
-- **Branches and git safety:** Only three branches exist: `master` (live board +
-  latest proven compiler), `dev` (active landing branch), and `rust` (frozen
-  read-only reference). Never create extra branches, stashes, or ad-hoc refs
-  (`refs/keep`, `refs/archive`, etc.). Never run broad or destructive git
-  commands (`git add -A`, `git commit -a`, `git stash`, `git restore .`,
-  `git reset --hard`) or overwrite another task's paths. Concurrent writers need
-  disjoint paths.
+- **Tower hygiene and honest closure:** Use `node Tools/Tower/tower.mjs` (never
+  hand-edit `Tools/Tower/.tower/`; only the owner starts `tower serve`). Workers
+  never write to Tower, close cards, or keep a competing task list. Attach
+  regressions and follow-ups as criteria on the owning card rather than creating
+  new cards. A card closes only when its work is truly done; closed cards are
+  never reopened. Meet a criterion only when evidence proves its full text
+  (every boundary, tier, type, file, and sweep scope it names)—never on narrower
+  evidence, a "close enough" substitute, or a known owed row. Never narrow,
+  substitute, defer, or reword part of a criterion yourself; put any change on
+  an owner ballot before marking it.
+- **Branches, commit hygiene, and git safety:** Only three branches exist:
+  `master` (live board + latest proven compiler), `dev` (active landing branch),
+  and `rust` (frozen read-only reference). Never create extra branches, stashes,
+  or ad-hoc refs (`refs/keep`, `refs/archive`, etc.). Never run broad or
+  destructive git commands (`git add -A`, `git commit -a`, `git stash`,
+  `git restore .`, `git reset --hard`) or overwrite another task's paths.
+  Concurrent writers need disjoint paths. Every commit message body states what
+  changed, why, and its proof. Never commit temporary directories, object files,
+  or build output (`LaneCheck` refuses them).
 - **Worktree and subagent caps:**
   - At most **5 worktrees** exist at any time (master checkout and `dev`
     worktree included; git hooks hard-cap at 10). Each worktree has one live
@@ -164,20 +174,42 @@ A violation stops the affected work until fixed at the root.
   sweeps over serial one-error-at-a-time rebuilds. Before landing a stricter
   sema rule, guard, or gate, sweep every Jet source in the repo and fix all hits
   in the same batch.
-- **Build and prove honestly:** Run commands with `jet` (`JET` = admitted native
-  compiler). Use `jet build --profile dev Compiler` for fast dev rebuilds. Run
-  the exact narrow proof for your change; a type-check never proves runtime
-  behavior, tier parity, snapshots, or goldens. Milestones get one composed
-  sweep and fresh-context review; individual cards do not wait for that gate.
-  Local gates: `Tools/Agent/LaneCheck.jet` and `Tools/Agent/VerifyFull.jet`.
+- **Verification scoped to the claim:** Run commands with `jet` (`JET` =
+  admitted native compiler). Use `jet build --profile dev Compiler` for fast dev
+  rebuilds. Choose the proof that actually establishes the criterion: a code
+  review for structural/cutover claims (copies deleted, one source, rule matches
+  approved text); a targeted test/case for behavior; per-tier runs for tier
+  claims ("every tier" includes web and comptime where applicable, or states
+  explicitly why not); and a full suite for cross-cutting changes (sema rules,
+  codegen, runtime, Core-wide cutovers, ledger removals). Record exact command,
+  compiler identity, and result. A proof that silently skips on a missing tool
+  or file proves nothing on that host.
+- **Full suite cadence:** Land batches after a build and targeted proofs, but
+  run the full suite (collect-all, compared with the last run) at least every
+  few batches, and cleanly before any `a0.0.N` release. A card with a
+  cross-cutting change closes only after a full suite that includes it. Local
+  gates: `Tools/Agent/LaneCheck.jet` and `Tools/Agent/VerifyFull.jet`.
+- **Honest evidence and known-failing ledger:** Evidence states what was proven,
+  nothing more: compute metrics as defined (a sweep where every hit was correct
+  code is 100% false positives); state exact counts, never "38+"; cite only
+  tests that exercise the claim; and separate delivered criteria from criteria
+  moved to another card in closing logs. Removing a `Tests/known-failing.tsv`
+  row requires a real passing run on the batch compiler. Changing an expected
+  output to match current behavior requires a stated reason checked against the
+  spec or another primary source. Rows marked "owner question" are resolved only
+  by the owner.
 - **Dogfood Jet tools:** Debug Jet programs (including the compiler) with
   `jet debug` and profile with `jet perf`. Use external tools (`gdb`, `lldb`,
   `perf`, `strace`, `valgrind`) only as benchmark baselines or for a specific
   missing capability—and record the gap on the dogfooding card first.
-- **Whole-mechanism design:** Solve the full mechanism with one source of truth
-  and a complete cutover list, not a patch for one call site. Major designs
-  claiming superiority over existing solutions require an adversarial audit in
-  `Docs/Audits/` backed by code or measurements before building.
+- **Design review before build (binding cutover):** Solve the full mechanism
+  with one source of truth and a complete cutover list, not a patch for one call
+  site. Every design card (not only those claiming superiority) lands its review
+  in `Docs/Audits/` in a commit before the build commits. The review names the
+  strongest existing solutions with sources, attacks every claim, ends with a
+  verdict, and turns every gap into a criterion on the card or a ballot. Its
+  cutover list (copies to delete, registry text to reword, snapshots, sweeps) is
+  binding—the card cannot close while any item remains.
 
 ## References
 
