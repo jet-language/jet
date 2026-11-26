@@ -13,7 +13,7 @@ connect: fn(name: String, config: ClientConfig) -[Net, Time.Wait]> TLSStream Net
     tls.client(tcp, server_name: name, config: config, deadline: 5s)
 }
 
-exchange: fn(^secure: TLSStream) -[Net, Time.Wait]> String {
+exchange: fn(secure: ^TLSStream) -[Net, Time.Wait]> String {
     secure.write_bytes("ping\n".bytes(), deadline: 5s) ?? panic("write: {err}")
     ^reply: [U8]{}
     loop reply.len() < 5 {
