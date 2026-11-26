@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7042,
-    "rev": 114783,
+    "rev": 114784,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -60795,11 +60795,11 @@
         {
           "n": 21,
           "text": "DataWatchStatus.freshness_ms reports a real age again (now minus the last fresh publish, as the Rust runtime did: LiveLifecycle.rs:124, tracked.rs:828). After n19a's Core port it reads 0, because status and get are effect-free and can't read the clock. Restoring it needs either an effect on status (public API, so an owner ballot) or a design that keeps status effect-free (e.g. the status carries the publish instant and the age is read where Time is held); choose by ballot if it changes the surface (found by C16Perf, 2026-11-25).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T15:42:10.753Z",
+          "evidence": "dev 001443c5db3 / master d8144244333 (Batch 71 exact S1==S2==S3 fixed point 19ff1e8852c40087): implemented ratified D-WATCH-FRESHNESS1=A in Core/Data/Data.jet (published_at: Instant, -[Time]> on Query.watch, DataWatch.get, DataWatch.status; fresh publish stamps published_at, cache-hit/failed refresh preserve it, watch_status computes published_at.elapsed_millis()); CoreLib/core_data_tracked_rows_and_maintained_watch PASS 1/1 across O0/O1/O2 including deterministic testing.world advance (+25ms=25, cache-hit=25, +10ms=35, fresh publish=0, cancel+40ms=40), jet check Core 0 errors, CoreDeclarations 6/6 PASS, copy_ratchet 2/2 PASS.",
+          "at": "2026-11-26T10:26:22.601Z",
           "proof": {
             "profile": "cases",
             "filter": "core_data_tracked_rows_and_maintained_watch"
@@ -60824,8 +60824,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-24T17:01:07.086Z",
-      "updated": "2026-11-26T10:18:31.505Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-26T10:26:22.601Z",
+      "updatedBy": "Orchestrator",
       "criteriaLastN": 22
     },
     {
@@ -129303,6 +129303,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-26T10:26:22.601Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0mhrplj",
+      "note": "#21"
+    },
     {
       "at": "2026-11-26T10:24:24.508Z",
       "by": "owner",
