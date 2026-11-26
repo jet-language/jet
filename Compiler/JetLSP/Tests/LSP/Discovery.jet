@@ -1,0 +1,116 @@
+// Builtin member completion docs (from the shared semantic symbol index,
+// including unannotated locals during mid-edit) and local discovery index
+// package/option completion and hover.
+use {
+    core.encoding.[Dyn]
+    lsp_disc_files: core.files
+    lsp_disc_process: core.process
+    lsp_disc_sys: core.sys
+    jet_driver.[JetDriverSourceDocument, JetDriverToolStageItem]
+    jet_foundation.[Span]
+    jet_lsp.[LSPChecked, LSPChecker, lsp_server]
+    jet_semindex.[SemAnchor, SemRef]
+}
+
+// Fixture checker that resolves `items` on line 2 (`    items.f`) to the
+// unannotated local binding on line 1 (`    items: [1, 2, 3]`), matching
+// keep-going when an incomplete dot access traps the enclosing function body.
+LSPBuiltinDocChecker: struct {
+    impl LSPChecker {
+        check: fn(self, entry: String, overlays: [JetDriverSourceDocument]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> LSPChecked Never! {
+            ^checked: LSPFixtureChecker{}.check(entry, overlays)
+            ^index: checked.index ?? return checked
+            ^source: ""
+            loop overlay in overlays {
+                if overlay.path == entry -> source = overlay.source
+            }
+            use_at: source.find("items.f")
+            if use_at >= 0 {
+                loop definition in index.definitions {
+                    def: definition.def
+                    if def.name == "items" && def.kind == .Local(_, _) {
+                        index.references.push(SemRef{name: "items", span: Span{start: use_at, end: use_at + 5}, module_path: def.module_path, scope_identity: None, target: Val(SemAnchor{module_path: def.module_path, kind: "local", def_span: def.def_span, semantic_identity: None}), fact: None})
+                    }
+                }
+            }
+            checked.index = Val(index)
+            checked
+        }
+
+        stage: fn(self, entry: String, overlays: ^^[JetDriverSourceDocument], stage: String, bodies: [Span], program: ^^String) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [[JetDriverToolStageItem]] Never! {
+            LSPFixtureChecker{}.stage(entry, overlays, stage, bodies, program)
+        }
+
+        failure_marks: fn(self, entry: String, overlays: ^^[JetDriverSourceDocument]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [Int] Never! {
+            LSPFixtureChecker{}.failure_marks(entry, overlays)
+        }
+
+        sources: fn(self, root: String) -[FS]> [JetDriverSourceDocument] Never! {
+            LSPFixtureChecker{}.sources(root)
+        }
+
+        canonical: fn(self, _path: String) -[FS]> String? Never! { None }
+    }
+}
+
+#Test("builtin member completion offers shared semantic symbol docs on unannotated local") {
+    ^server: lsp_server(LSPBuiltinDocChecker{})
+    uri: "file:///w/lsp_shared_symbols.jet"
+    source: "run: fn() {{\n    items: [1, 2, 3]\n    items.f\n}}\n"
+    lsp_test_open(server, uri, source)
+    items: lsp_test_rows(lsp_test_field(lsp_test_result(server, "textDocument/completion", lsp_test_at(uri, 2, 11)), "items"))
+    ^found: Dyn?{None}
+    loop item in items {
+        if lsp_test_text(item, "label") == "filter" {
+            found = Val(item)
+            break
+        }
+    }
+    filter_item: found ?? panic("`filter` must be offered on `items.f`")
+    doc: lsp_test_text(lsp_test_field(filter_item, "documentation"), "value")
+    assert(doc.contains("Keeps items where f(item) is true."), "shared summary missing: {doc}")
+    assert(doc.contains("core.collections"), "owning core module missing: {doc}")
+}
+
+#Test("completion and hover read the local package discovery index for packages and options") {
+    root: "{lsp_disc_sys.temp_dir()}/jet-lsp-discovery-{lsp_disc_process.current_pid()}"
+    if lsp_disc_files.exists(root) {
+        lsp_disc_files.remove_all(root) ?? panic("clear {root}: {err}")
+    }
+    lsp_disc_files.create_dir_all("{root}/.jet/discovery") ?? panic("create discovery dir: {err}")
+    index_row: `{"source":"default","name":"postgres_16","reference":"postgres_16@default","version":"16.4","platforms":["linux"],"docs":"Postgres fixture from local discovery index","provenance":"test","tier":"not-registry","gate_status":"not-applicable","maintainer_liveness":"not-applicable","options":[{"name":"ready","default":"process/port probe","docs":"Command polled until ready."},{"name":"data_dir","default":".jet/services/db/data","docs":"Persisted state directory."}]}`
+    lsp_disc_files.write("{root}/.jet/discovery/index.jsonl", "{index_row}\n") ?? panic("write index.jsonl: {err}")
+    uri: "file://{root}/main.jet"
+    source: "env.dev: module {{\n    env.dev: Env{{\n        packages: [default.postgres_16]\n        services: {{ db: Service{{ re }}, configured: Service{{ ready: false }} }}\n    }}\n}}\n"
+    ^server: lsp_test_server()
+    lsp_test_open(server, uri, source)
+
+    pkg_items: lsp_test_rows(lsp_test_field(lsp_test_result(server, "textDocument/completion", lsp_test_at(uri, 2, 31)), "items"))
+    ^pkg_ok: false
+    loop item in pkg_items {
+        if lsp_test_text(item, "label") == "postgres_16" && lsp_test_text(item, "detail").contains("package from default") {
+            pkg_ok = true
+        }
+    }
+    assert(pkg_ok, "expected postgres_16 with `package from default`")
+
+    opt_items: lsp_test_rows(lsp_test_field(lsp_test_result(server, "textDocument/completion", lsp_test_at(uri, 3, 35)), "items"))
+    ^opt_ok: false
+    loop item in opt_items {
+        if lsp_test_text(item, "label") == "ready" && lsp_test_text(lsp_test_field(item, "documentation"), "value").contains("Command polled until ready.") {
+            opt_ok = true
+        }
+    }
+    assert(opt_ok, "expected ready option with docs")
+
+    pkg_hover: lsp_test_text(lsp_test_field(lsp_test_result(server, "textDocument/hover", lsp_test_at(uri, 2, 29)), "contents"), "value")
+    assert(pkg_hover.contains("postgres_16"), "package hover names package: {pkg_hover}")
+    assert(pkg_hover.contains("16.4"), "package hover names version: {pkg_hover}")
+    assert(pkg_hover.contains("maintainer liveness: not-applicable"), "package hover names liveness: {pkg_hover}")
+
+    opt_hover: lsp_test_text(lsp_test_field(lsp_test_result(server, "textDocument/hover", lsp_test_at(uri, 3, 63)), "contents"), "value")
+    assert(opt_hover.contains("Environment option `ready`"), "option hover names option: {opt_hover}")
+    assert(opt_hover.contains("Command polled until ready."), "option hover names docs: {opt_hover}")
+
+    lsp_disc_files.remove_all(root) ?? panic("remove {root}: {err}")
+}

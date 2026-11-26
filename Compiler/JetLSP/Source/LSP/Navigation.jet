@@ -149,6 +149,7 @@ lsp_hover_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
         }
     }
     if markdown == None -> markdown = lsp_keyword_hover(at.view, at.offset)
+    if markdown == None -> markdown = lsp_discovery_hover(server, at.view, at.offset)
     // Anywhere in a generated module, the hover names what made it.
     if at.view.checked.producer == .Val(producer) {
         note: lsp_producer_markdown(producer)

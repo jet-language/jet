@@ -1,0 +1,278 @@
+// Local package discovery index (`.jet/discovery/index.jsonl`) completions and
+// hovers for environment package references (`source.package`) and service /
+// environment options (`Service{ option: ... }`). Reads only the local JSONL
+// file on disk; never fetches or mutates project state.
+use {
+    core.encoding.[Dyn]
+    lsp_discovery_files: core.files
+    lsp_discovery_sys: core.sys
+    jet_foundation.[foundation_json_quote, foundation_parse_protocol_json_with_limit]
+    jet_lexer.[Lexed, TOKEN_DOT, TOKEN_IDENT, TOKEN_LBRACE, TOKEN_RBRACE, token_text]
+}
+
+LSP_DISCOVERY_DIR: ".jet/discovery"
+
+LSP_DISCOVERY_FILE: "index.jsonl"
+
+LSPDiscoveryOption: struct {
+    name: String,
+    default: String,
+    docs: String,
+}
+
+LSPDiscoveryPackage: struct {
+    source: String,
+    name: String,
+    reference: String,
+    version: String,
+    platforms: [String],
+    docs: String,
+    provenance: String,
+    tier: String,
+    gate_status: String,
+    maintainer_liveness: String,
+    options: [LSPDiscoveryOption],
+}
+
+// Finds the nearest `.jet/discovery/index.jsonl` at or above `folder`.
+lsp_discovery_find_from: fn(folder: String) -[FS]> String? Never! {
+    if folder == "" -> return None
+    ^current: folder
+    loop {
+        candidate: lsp_discovery_files.join(lsp_discovery_files.join(current, LSP_DISCOVERY_DIR), LSP_DISCOVERY_FILE)
+        if lsp_discovery_files.is_file(candidate) -> return Val(candidate)
+        parent: lsp_discovery_files.dirname(current)
+        if parent == "" || parent == current -> return None
+        current = parent
+    }
+}
+
+lsp_discovery_index_path: fn(server: LSPServer, doc_path: String) -[FS, Env]> String? Never! {
+    if doc_path != "" {
+        dir: lsp_discovery_files.dirname(doc_path)
+        if lsp_discovery_find_from(dir) == .Val(found) -> return Val(found)
+    }
+    loop root in server.workspace_roots {
+        if lsp_discovery_find_from(root) == .Val(found) -> return Val(found)
+    }
+    if lsp_discovery_sys.current_dir() == .Ok(cwd) {
+        if lsp_discovery_find_from(cwd) == .Val(found) -> return Val(found)
+    }
+    None
+}
+
+lsp_discovery_liveness: fn(value: Dyn, gate_status: String) -> String Never! {
+    if lsp_text_member(value, "maintainer_liveness") == .Val(liveness) && liveness != "" {
+        return liveness
+    }
+    if gate_status == "not-applicable" -> return "not-applicable"
+    loop field in gate_status.split(";") {
+        if field.starts_with("liveness=") -> return field.removeprefix("liveness=")
+    }
+    "unknown"
+}
+
+lsp_discovery_parse_package: fn(value: Dyn) -> LSPDiscoveryPackage? Never! {
+    source: lsp_text_member(value, "source") ?? return None
+    name: lsp_text_member(value, "name") ?? return None
+    if source == "" || name == "" -> return None
+    reference: lsp_text_member(value, "reference") ?? "{name}@{source}"
+    version: lsp_text_member(value, "version") ?? ""
+    docs: lsp_text_member(value, "docs") ?? ""
+    provenance: lsp_text_member(value, "provenance") ?? ""
+    tier: lsp_text_member(value, "tier") ?? ""
+    gate_status: lsp_text_member(value, "gate_status") ?? ""
+    maintainer_liveness: lsp_discovery_liveness(value, gate_status)
+    ^platforms: [String]{}
+    loop entry in lsp_member_rows(value, "platforms") {
+        if entry == .Text(platform) -> platforms.push(platform)
+    }
+    ^options: [LSPDiscoveryOption]{}
+    loop entry in lsp_member_rows(value, "options") {
+        option_name: lsp_text_member(entry, "name") ?? next
+        if option_name == "" -> next
+        options.push(
+            LSPDiscoveryOption{
+                name: option_name,
+                default: lsp_text_member(entry, "default") ?? "",
+                docs: lsp_text_member(entry, "docs") ?? "",
+            },
+        )
+    }
+    Val(
+        LSPDiscoveryPackage{
+            source: source,
+            name: name,
+            reference: reference,
+            version: version,
+            platforms: platforms,
+            docs: docs,
+            provenance: provenance,
+            tier: tier,
+            gate_status: gate_status,
+            maintainer_liveness: maintainer_liveness,
+            options: options,
+        }
+    )
+}
+
+lsp_discovery_parse_line: fn(line: String) -> LSPDiscoveryPackage? Never! {
+    if line == "" -> return None
+    parsed: foundation_parse_protocol_json_with_limit(line, LSP_MAX_MESSAGE_BYTES) ?? return None
+    lsp_discovery_parse_package(parsed)
+}
+
+// Loads all valid package rows from the local discovery index, if present.
+lsp_discovery_load: fn(server: LSPServer, doc_path: String) -[FS, Env]> [LSPDiscoveryPackage] Never! {
+    ^packages: [LSPDiscoveryPackage]{}
+    index_path: lsp_discovery_index_path(server, doc_path) ?? return packages
+    text: lsp_discovery_files.read(index_path) ?? return packages
+    loop raw_line in text.split("\n") {
+        if lsp_discovery_parse_line(raw_line.trim()) == .Val(pkg) -> packages.push(pkg)
+    }
+    packages
+}
+
+lsp_discovery_package_doc: fn(pkg: LSPDiscoveryPackage) -> String Never! {
+    ^lines: [String]{}
+    if pkg.docs != "" -> lines.push(pkg.docs)
+    if pkg.version != "" -> lines.push("version: `{pkg.version}`")
+    if pkg.provenance != "" -> lines.push("provenance: `{pkg.provenance}`")
+    if pkg.maintainer_liveness != "" -> lines.push("maintainer liveness: {pkg.maintainer_liveness}")
+    lines.join("\n\n")
+}
+
+// Completion items for `source.<prefix>` from the local discovery index.
+lsp_discovery_package_items: fn(server: LSPServer, view: LSPView, source_name: String, prefix: String) -[FS, Env]> [String] Never! {
+    ^items: [String]{}
+    ^seen: [String:Bool]{}
+    packages: lsp_discovery_load(server, view.doc.path)
+    loop pkg in packages {
+        if pkg.source != source_name || !pkg.name.starts_with(prefix) -> next
+        if seen.has_key(pkg.name) -> next
+        seen[pkg.name] = true
+        detail: if pkg.version != "" -> "package from {pkg.source} ({pkg.version})" else -> "package from {pkg.source}"
+        doc: lsp_discovery_package_doc(pkg)
+        documentation: if doc == "" -> "" else -> ",\"documentation\":{{\"kind\":\"markdown\",\"value\":{foundation_json_quote(doc)}}}"
+        items.push("{{\"label\":{foundation_json_quote(pkg.name)},\"kind\":9,\"detail\":{foundation_json_quote(detail)}{documentation}}}")
+    }
+    items
+}
+
+// Whether `offset` sits inside a `Service{ ... }` or `Env{ ... }` block in the
+// token stream.
+lsp_discovery_in_env_block: fn(lexed: Lexed, offset: Int) -> Bool Never! {
+    ^stack: [String]{}
+    tokens: lexed.tokens
+    loop (index, token) in tokens {
+        if token.span.start >= offset -> break
+        if {
+            token.kind == TOKEN_LBRACE -> {
+                head: if index > 0 && tokens[index - 1].kind == TOKEN_IDENT -> token_text(lexed.tables, tokens[index - 1]) else -> ""
+                stack.push(head)
+            }
+            token.kind == TOKEN_RBRACE && !stack.is_empty() -> {
+                ^_: stack.pop()
+            }
+            else -> {}
+        }
+    }
+    loop head in stack {
+        if head == "Service" || head == "Env" -> return true
+    }
+    false
+}
+
+// Whether `lexed` mentions `pkg.source.pkg.name`.
+lsp_discovery_doc_mentions: fn(lexed: Lexed, source_name: String, pkg_name: String) -> Bool Never! {
+    tokens: lexed.tokens
+    if tokens.len() < 3 -> return false
+    loop index in 0..<(tokens.len() - 2) {
+        if tokens[index].kind != TOKEN_IDENT || tokens[index + 1].kind != TOKEN_DOT || tokens[index + 2].kind != TOKEN_IDENT {
+            next
+        }
+        if token_text(lexed.tables, tokens[index]) == source_name && token_text(lexed.tables, tokens[index + 2]) == pkg_name {
+            return true
+        }
+    }
+    false
+}
+
+// Whether any indexed package is explicitly referenced in `lexed`.
+lsp_discovery_has_mentioned_package: fn(packages: [LSPDiscoveryPackage], lexed: Lexed) -> Bool Never! {
+    loop pkg in packages {
+        if lsp_discovery_doc_mentions(lexed, pkg.source, pkg.name) -> return true
+    }
+    false
+}
+
+lsp_discovery_option_doc: fn(option: LSPDiscoveryOption) -> String Never! {
+    if option.docs != "" && option.default != "" -> return "{option.docs}\n\nDefault: `{option.default}`"
+    if option.docs != "" -> return option.docs
+    if option.default != "" -> return "Default: `{option.default}`"
+    ""
+}
+
+// Appends matching environment/service option completions when `start` is
+// inside a `Service{ ... }` or `Env{ ... }` block.
+lsp_discovery_option_completions: fn(server: LSPServer, view: LSPView, start: Int, prefix: String, seen: ^[String:Bool], items: ^[String]) -[FS, Env]> Never! {
+    if !lsp_discovery_in_env_block(view.lexed, start) -> return
+    packages: lsp_discovery_load(server, view.doc.path)
+    if packages.is_empty() -> return
+    only_mentioned: lsp_discovery_has_mentioned_package(packages, view.lexed)
+    loop pkg in packages {
+        if only_mentioned && !lsp_discovery_doc_mentions(view.lexed, pkg.source, pkg.name) -> next
+        loop option in pkg.options {
+            if !option.name.starts_with(prefix) -> next
+            key: "{option.name}:5"
+            if seen.has_key(key) -> next
+            seen[key] = true
+            if items.len() >= LSP_COMPLETION_LIMIT -> return
+            detail: if option.default != "" -> "default: {option.default}" else -> "environment option"
+            doc: lsp_discovery_option_doc(option)
+            documentation: if doc == "" -> "" else -> ",\"documentation\":{{\"kind\":\"markdown\",\"value\":{foundation_json_quote(doc)}}}"
+            items.push("{{\"label\":{foundation_json_quote(option.name)},\"kind\":5,\"detail\":{foundation_json_quote(detail)}{documentation}}}")
+        }
+    }
+}
+
+// Hover markdown for an indexed package reference (`source.package`) or an
+// indexed environment option inside `Service{ ... }` / `Env{ ... }`.
+lsp_discovery_hover: fn(server: LSPServer, view: LSPView, offset: Int) -[FS, Env]> String? Never! {
+    tokens: view.lexed.tokens
+    at: lsp_ident_position(tokens, offset)
+    if at < 0 -> return None
+    word: token_text(view.lexed.tables, tokens[at])
+    packages: lsp_discovery_load(server, view.doc.path)
+    if packages.is_empty() -> return None
+    if at >= 2 && tokens[at - 1].kind == TOKEN_DOT && tokens[at - 2].kind == TOKEN_IDENT {
+        source_name: token_text(view.lexed.tables, tokens[at - 2])
+        loop pkg in packages {
+            if pkg.source != source_name || pkg.name != word -> next
+            ^lines: [String]{"```jet\n{pkg.source}.{pkg.name}\n```"}
+            if pkg.docs != "" -> lines.push(pkg.docs)
+            ^details: [String]{}
+            if pkg.version != "" -> details.push("version: {pkg.version}")
+            details.push("source: {pkg.source}")
+            if pkg.provenance != "" -> details.push("provenance: {pkg.provenance}")
+            if pkg.tier != "" -> details.push("tier: {pkg.tier}")
+            if pkg.maintainer_liveness != "" -> details.push("maintainer liveness: {pkg.maintainer_liveness}")
+            lines.push(details.join("\n"))
+            return Val(lines.join("\n\n"))
+        }
+    }
+    if lsp_discovery_in_env_block(view.lexed, tokens[at].span.start) {
+        only_mentioned: lsp_discovery_has_mentioned_package(packages, view.lexed)
+        loop pkg in packages {
+            if only_mentioned && !lsp_discovery_doc_mentions(view.lexed, pkg.source, pkg.name) -> next
+            loop option in pkg.options {
+                if option.name != word -> next
+                ^lines: [String]{"Environment option `{option.name}`"}
+                if option.docs != "" -> lines.push(option.docs)
+                if option.default != "" -> lines.push("Default: `{option.default}`")
+                return Val(lines.join("\n\n"))
+            }
+        }
+    }
+    None
+}

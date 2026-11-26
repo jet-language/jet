@@ -8,9 +8,9 @@
 // of its marker's package come first.
 use {
     core.encoding.[Dyn]
-    jet_foundation.[Span, TOOL_STAGE_LSP_COMPLETION, Type, foundation_byte_text, foundation_json_quote, jet_error_json_encode_value, type_name]
-    jet_lexer.[Lexed, Token, TOKEN_DOT, TOKEN_IDENT, TOKEN_LBRACE, TOKEN_RBRACE]
-    jet_semindex.[SemKind, SemSymbol, SemSymbolKind, semindex_symbol_imported_module]
+    jet_foundation.[Binding, Expr, Func, Item, Span, Stmt, TOOL_STAGE_LSP_COMPLETION, Type, foundation_byte_text, foundation_json_quote, jet_error_json_encode_value, type_name]
+    jet_lexer.[Lexed, Token, TOKEN_DOT, TOKEN_IDENT, TOKEN_LBRACE, TOKEN_RBRACE, token_text]
+    jet_semindex.[SemDef, SemKind, SemSymbol, SemSymbolKind, semindex_symbol_imported_module]
     jet_sema.[SEMA_METHOD_IDIOMS, SemaMethodIdiom]
 }
 
@@ -30,11 +30,29 @@ lsp_completion_item_kind: fn(kind: SemSymbolKind) -> Int Never! {
     }
 }
 
+// Documentation markdown for a semantic symbol. Builtin symbols include their
+// shared semantic summary, owning Core module, and example when present; source
+// declarations carry their doc comment summary.
+lsp_completion_symbol_doc: fn(symbol: SemSymbol) -> String Never! {
+    if symbol.summary == "" -> return ""
+    if symbol.provenance == .Builtin(module_name) {
+        ^parts: [String]{symbol.summary}
+        if module_name != "" -> parts.push("Module: `{module_name}`")
+        if symbol.examples.len() > 0 && symbol.examples[0] != "" {
+            parts.push("```jet\n{symbol.examples[0]}\n```")
+        }
+        return parts.join("\n\n")
+    }
+    symbol.summary
+}
+
 // A declaration's item names it in `data` when it has documentation, which
-// `completionItem/resolve` adds once the editor shows the item.
+// `completionItem/resolve` adds once the editor shows the item. Builtin symbols
+// also carry their shared semantic docs directly in the completion list.
 lsp_completion_item_json: fn(symbol: SemSymbol, uri: String) -> String Never! {
     data: if symbol.summary == "" -> "" else -> ",\"data\":{{\"uri\":{foundation_json_quote(uri)},\"identity\":{foundation_json_quote(symbol.identity)}}}"
-    "{{\"label\":{foundation_json_quote(symbol.name)},\"kind\":{lsp_completion_item_kind(symbol.kind)},\"detail\":{foundation_json_quote(symbol.signature)}{data}}}"
+    doc: if symbol.provenance == .Builtin(_) && symbol.summary != "" -> ",\"documentation\":{{\"kind\":\"markdown\",\"value\":{foundation_json_quote(lsp_completion_symbol_doc(symbol))}}}" else -> ""
+    "{{\"label\":{foundation_json_quote(symbol.name)},\"kind\":{lsp_completion_item_kind(symbol.kind)},\"detail\":{foundation_json_quote(symbol.signature)}{doc}{data}}}"
 }
 
 // `completionItem/resolve`: the item as sent, with the doc comment summary of
@@ -67,8 +85,9 @@ lsp_completion_summary_json: fn(server: LSPServer, data: Dyn) -> String? {
     view: lsp_view_of(server, uri) ?? return None
     loop symbol in view.checked.symbols {
         if symbol.identity == identity {
-            if symbol.summary == "" -> return None
-            return Val(foundation_json_quote(symbol.summary))
+            doc: lsp_completion_symbol_doc(symbol)
+            if doc == "" -> return None
+            return Val(foundation_json_quote(doc))
         }
     }
     None
@@ -226,12 +245,106 @@ LSPMemberScope: enum {
 // The members of values or of a type named this.
 // The declarations of the checked module at this path.
 
+// Infers the member owner of an initializer expression when keep-going trapped
+// the enclosing function before recording local types (e.g. `items: [1, 2, 3]`
+// followed by an incomplete `items.f`).
+lsp_expr_owner: fn(expr: Expr) -> String? Never! {
+    if expr == {
+        .ListLit(_, _, _) -> Val("List")
+        .MapLit(_, _, _) -> Val("Map")
+        .Str(_, _, _) -> Val("String")
+        .Int(_, _, _, _, _) -> Val("Int")
+        .Float(_, _, _, _, _) -> Val("Float")
+        .Bool(_, _, _) -> Val("Bool")
+        .Char(_, _, _) -> Val("Char")
+        .StructLit(name, _, _, _, _, _, _, _) -> Val(lsp_type_owner(name))
+        .TypedLit(head, body, _, _) -> {
+            if head == .Val(ty) -> return Val(lsp_type_owner(type_name(ty)))
+            if body == {
+                .Elements(_) -> Val("List")
+                .Entries(_) -> Val("Map")
+                .Fields(_) | .Value(_) | .ByteText(_) | .Empty -> None
+            }
+        }
+        .EnumLit(name, _, _, _, _, _, _) -> if name != "" -> Val(lsp_type_owner(name)) else -> None
+        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Unit(_, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .TypeValue(_, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) -> None
+    }
+}
+
+lsp_binding_owner: fn(binding: Binding) -> String? Never! {
+    if binding.ty == .Val(written) -> return Val(lsp_type_owner(type_name(written)))
+    lsp_expr_owner(binding.init)
+}
+
+lsp_stmt_find_local_owner: fn(stmts: [Stmt], span: Span) -> String? Never! {
+    loop stmt in stmts {
+        found: if stmt == {
+            .Val(binding) -> if binding.name_span.start == span.start && binding.name_span.end == span.end -> lsp_binding_owner(binding) else -> None
+            .While(_, body, _, _, _) | .For(_, _, _, _, body, _, _, _, _) | .Loop(body, _, _, _) | .Unsafe(_, _, body, _) | .Impure(_, _, body, _) | .Reactive(body, _) | .Shield(body, _) | .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .ComptimeBlock(body, _, _) | .ContextBlock(_, body, _) | .Live(body, _) | .AssumeDet(_, _, body, _) | .Transact(_, _, body, _, _) | .ScopeMember(_, _, _, _, body, _, _, _) | .Defer(body, _) -> lsp_stmt_find_local_owner(body, span)
+            .CountedLoop(init, _, _, body, _, _, _) -> if init.name_span.start == span.start && init.name_span.end == span.end -> lsp_binding_owner(init) else -> lsp_stmt_find_local_owner(body, span)
+            .Switch(_, arms, else_body, _) | .ComptimeSwitch(_, arms, else_body, _) -> {
+                ^arm_owner: String?{None}
+                loop arm in arms {
+                    if lsp_stmt_find_local_owner(arm.body, span) == .Val(owner) {
+                        arm_owner = Val(owner)
+                        break
+                    }
+                }
+                if {
+                    arm_owner != None -> arm_owner
+                    else_body == .Val(body) -> lsp_stmt_find_local_owner(body, span)
+                    else -> None
+                }
+            }
+            .ComptimeIf(_, _, then_body, else_body, _, _) -> if {
+                lsp_stmt_find_local_owner(then_body, span) == .Val(owner) -> Val(owner)
+                else_body == .Val(body) -> lsp_stmt_find_local_owner(body, span)
+                else -> None
+            }
+            .Expr(_) | .Assign(_, _, _, _) | .Return(_, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Yield(_, _) | .DeferClose(_, _) -> None
+        }
+        if found != None -> return found
+    }
+    None
+}
+
+lsp_funcs_find_local_owner: fn(funcs: [Func], span: Span) -> String? Never! {
+    loop func in funcs {
+        if lsp_stmt_find_local_owner(func.body, span) == .Val(owner) -> return Val(owner)
+    }
+    None
+}
+
+lsp_items_find_local_owner: fn(items: [Item], span: Span) -> String? Never! {
+    loop item in items {
+        found: if item == {
+            .Func(func) -> lsp_stmt_find_local_owner(func.body, span)
+            .Test(test_def) -> lsp_stmt_find_local_owner(test_def.body, span)
+            .Struct(struct_def) -> lsp_funcs_find_local_owner(struct_def.methods, span)
+            .Enum(enum_def) -> lsp_funcs_find_local_owner(enum_def.methods, span)
+            .Impl(impl_def) -> lsp_funcs_find_local_owner(impl_def.methods, span)
+            .CodeModule(code_mod) -> if code_mod.body == .Val(nested) -> lsp_items_find_local_owner(nested, span) else -> None
+            .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> None
+        }
+        if found != None -> return found
+    }
+    None
+}
+
+lsp_local_ast_owner: fn(view: LSPView, def: SemDef) -> String? Never! {
+    module_index: lsp_module_index(view.checked, def.module_path) ?? return None
+    lsp_items_find_local_owner(view.checked.modules[module_index].items, def.def_span)
+}
+
 lsp_member_scope: fn(view: LSPView, receiver_end: Int) -> LSPMemberScope? Never! {
     index: view.checked.index ?? return None
     target: lsp_target_at(view, receiver_end) ?? return None
     def: lsp_definition_at(index, target) ?? return None
     if def.kind == {
-        .Local(_, ty) -> Val(LSPMemberScope.Owner{name: lsp_type_owner(type_name(ty ?? return None))})
+        .Local(_, ty) -> {
+            owner: if ty == .Val(known) -> lsp_type_owner(type_name(known)) else -> (lsp_local_ast_owner(view, def) ?? return None)
+            Val(LSPMemberScope.Owner{name: owner})
+        }
         .Param(ty) -> Val(LSPMemberScope.Owner{name: lsp_type_owner(type_name(ty))})
         .Field(ty, _) -> Val(LSPMemberScope.Owner{name: lsp_type_owner(type_name(ty))})
         .Struct(_, _) | .Enum(_, _) | .Trait | .Type(_) -> Val(LSPMemberScope.Owner{name: def.name.copy()})
@@ -296,7 +409,15 @@ lsp_completion_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String 
     after: lsp_completion_after(view.lexed, start)
     if after == {
         .Plain -> {}
-        .Receiver(token) -> member = Val(lsp_member_scope(view, token.span.end - 1) ?? return lsp_response(id, "{{\"isIncomplete\":false,\"items\":[]}}"))
+        .Receiver(token) -> {
+            if lsp_member_scope(view, token.span.end - 1) == {
+                .Val(scope) -> member = Val(scope)
+                .None -> {
+                    packages: lsp_discovery_package_items(server, view, token_text(view.lexed.tables, token), prefix)
+                    return lsp_response(id, "{{\"isIncomplete\":false,\"items\":[{packages.join(",")}]}}")
+                }
+            }
+        }
         .Stray -> return lsp_response(id, "{{\"isIncomplete\":false,\"items\":[]}}")
     }
     ^seen: [String:Bool]{}
@@ -308,6 +429,9 @@ lsp_completion_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String 
         if !row.label.starts_with(prefix) || seen.has_key("{row.label}:1") -> next
         seen["{row.label}:1"] = true
         items.push("{{\"label\":{foundation_json_quote(row.label)},\"kind\":1,\"detail\":{foundation_json_quote(row.detail)}}}")
+    }
+    if member == None {
+        lsp_discovery_option_completions(server, view, start, prefix, seen, items)
     }
     if member == None && lsp_completion_statement_start(view.lexed, bytes, start) {
         loop snippet in LSP_COMPLETION_BIND_SNIPPETS {
