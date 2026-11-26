@@ -1,0 +1,435 @@
+// Power asserts (#7013 n2) and structural `assert_eq` diffs (#7013 n3):
+// 1. Compound `assert(a + 1 < b && c > 0)` emits `jet_rt_assert_diagram` ONLY
+//    inside the `if !condition` failure branch (zero passing-path formatting)
+//    and passes IR lint and x86-64 codegen across O0, O1, and O2.
+// 2. Bare literal `assert(false, "expected condition")` emits NO diagram call.
+// 3. `assert_eq` on a struct holding Int, String, `[Int]`, and `[String:Int]`
+//    emits structural diff IR (`"diff:\n"` + `jet_rt_assert_diff_text`) ONLY
+//    inside `if !equal` and passes IR lint and x86-64 codegen across O0/O1/O2.
+// 4. Scalar `assert_eq(a, b)` on Int emits NO structural diff.
+use {
+    jet_foundation.[
+        BinOp,
+        BodyMapEntry,
+        BodyNode,
+        BodyParameter,
+        BodyRequireKind,
+        BodyStrPart,
+        BodyStructFieldValue,
+        BodyTree,
+        DeclTable,
+        FnBody,
+        NameVisibility,
+        NodeKind,
+        SourceFile,
+        SourceFileID,
+        Span,
+        StmtKind,
+        Symbol,
+        SymbolKind,
+        TCLIBinding,
+        TConstantDef,
+        TDeclarationOwnership,
+        TEffectFacts,
+        TEffectSpan,
+        TExprType,
+        TFailureCarrier,
+        TField,
+        TFieldRef,
+        TFuncKind,
+        TGenericParam,
+        TImplDef,
+        TLetTy,
+        TLocal,
+        TPanicLoc,
+        TPanicLocal,
+        TSerdeAttribute,
+        TShapeFieldNames,
+        TShapeFormatName,
+        TTypeDef,
+        TTypeDefKind,
+        TWebParamReconstruction,
+        TYPE_ID_BOOL,
+        TYPE_ID_INT,
+        TYPE_ID_STRING,
+        TYPE_ID_UNIT,
+        Type,
+        TypeID,
+        body_tree_new,
+        compiler_threads_single,
+        decl_table_add,
+        decl_table_index,
+        interner,
+        module_none,
+        symbol_intern,
+        symbol_table,
+        type_intern_syntax,
+    ]
+    jet_ir.[
+        IRBacktrace,
+        IRBoundsMode,
+        IRBuildResult,
+        IRChecks,
+        IRModule,
+        IROp,
+        ir_build_program,
+        ir_lint_module,
+        ir_lint_text,
+        ir_opt_options,
+        ir_optimize_module,
+        ir_source_texts,
+        ir_x64_compile_module,
+    ]
+    jet_sema.[SemaCheckedForeignFunction]
+}
+
+priv pa_checks: fn() -> IRChecks {
+    IRChecks{bounds: IRBoundsMode.Fatal, modules: [U32:Bool]{}, backtrace: IRBacktrace.Brief, keep: false}
+}
+
+priv pa_local: fn(name: String, ty: Type, span: Span) -> TLocal {
+    TLocal{
+        name: name,
+        symbol_id: None,
+        span: span,
+        ty: ty,
+        generated: false,
+        deref: false,
+        address_lifetime: None,
+        persist_key: None,
+        persist_ty: None,
+        mutable: false,
+        string_bytes_source: None,
+        integer_bounds: None,
+        uninit_scalar: false,
+        uninit_fixed: false,
+    }
+}
+
+priv pa_node: fn(tree: ^BodyTree, kind: NodeKind, tid: TypeID, span: Span) -> Int {
+    id: tree.nodes.len() + 1
+    tree.nodes.push(BodyNode{id: id, kind: kind, span: span})
+    tree.expr_types.push(TExprType{id: id, ty: tid})
+    id
+}
+
+priv pa_fn_body: fn(name: String, key: String, params: [BodyParameter], body: [Int], tree: ^^BodyTree) -> FnBody {
+    FnBody{
+        name: name,
+        module_name: "demo",
+        module_identity: module_none(),
+        key: key,
+        source_file: "demo.jet",
+        source_span: Span{start: 0, end: 1},
+        failure_carrier: TFailureCarrier.Infallible,
+        effects: TEffectFacts{direct: [String]{}, solved: [String]{}, call_edges: [String]{}, maximal: false, direct_spans: [TEffectSpan]{}},
+        web_bucket: None,
+        web_marker: None,
+        visibility: NameVisibility.Public,
+        foreign: None,
+        params: params,
+        web_param_reconstructions: [TWebParamReconstruction]{},
+        ret: None,
+        gc_return: false,
+        gc_scope: false,
+        return_view_provenance: None,
+        generic_params: [TGenericParam]{},
+        is_main: true,
+        line: 1,
+        synthetic: false,
+        is_unsafe: false,
+        unsafe_gate: None,
+        is_pure: false,
+        memo_bound: None,
+        memo_unbounded: false,
+        is_reactive: false,
+        reactive_upgrades: [String]{},
+        is_inline: false,
+        is_inline_always: false,
+        is_scalar: false,
+        kernel_proof: None,
+        uses_stack_sentry: false,
+        body: body,
+        kind: TFuncKind.TopLevel,
+        tree: tree.move(),
+    }
+}
+
+priv pa_field: fn(name: String, ty: Type) -> TField {
+    TField{
+        name: name,
+        shape_names: TShapeFieldNames{text: name, formats: [TShapeFormatName]{}, args: name, env: name, db: None, layout: None},
+        skip: false,
+        ty: ty,
+        span: Span{start: 0, end: 1},
+        public: true,
+        package_public: true,
+        computed: false,
+        has_default: false,
+        redact: false,
+    }
+}
+
+priv pa_field_val: fn(name: String, ty: Type, value: Int) -> BodyStructFieldValue {
+    BodyStructFieldValue{
+        field: TFieldRef{owner: None, name: name, ty: ty, boxed: false},
+        value: value,
+        boxed: false,
+    }
+}
+
+priv pa_fn_calls_runtime: fn(m: IRModule, fn_id: Int, runtime_name: String) -> Bool {
+    f: m.functions[fn_id]
+    loop at in 0..<f.op.len() {
+        if f.op[at] == IROp.CallRuntime && m.names[f.a[at]] == runtime_name -> return true
+    }
+    false
+}
+
+priv pa_module_calls_runtime: fn(m: IRModule, runtime_name: String) -> Bool {
+    loop id in 0..<m.functions.len() {
+        if pa_fn_calls_runtime(m, id, runtime_name) -> return true
+    }
+    false
+}
+
+priv pa_module_has_text: fn(m: IRModule, needle: String) -> Bool {
+    wanted: needle.bytes()
+    loop entry in m.data {
+        if entry == wanted -> return true
+    }
+    false
+}
+
+// Verify that `runtime_name` never appears at control depth 0 (the passing path)
+// in `fn_id`, proving formatting/diffing only runs inside the failing `if` branch.
+priv pa_runtime_only_inside_branch: fn(m: IRModule, fn_id: Int, runtime_name: String) -> Bool {
+    f: m.functions[fn_id]
+    ^depth: 0
+    ^seen: false
+    loop at in 0..<f.op.len() {
+        op: f.op[at]
+        if op == IROp.If || op == IROp.Block || op == IROp.Loop -> depth += 1
+        if op == IROp.End && depth > 0 -> depth -= 1
+        if op == IROp.CallRuntime && m.names[f.a[at]] == runtime_name {
+            if depth == 0 -> return false
+            seen = true
+        }
+    }
+    seen
+}
+
+// Build `run: fn()` with `assert(a + 1 < b && c > 0)` (or bare `assert(false)`).
+priv pa_build_assert: fn(compound: Bool) -> IRBuildResult {
+    span: Span{start: 0, end: 1}
+    // Line 1: `run: fn() {` (12 bytes including `\n`)
+    // Line 2: `    assert(a + 1 < b && c > 0)`
+    source: if compound -> "run: fn() {{\n    assert(a + 1 < b && c > 0)\n}}\n" else -> "run: fn() {{\n    assert(false)\n}}\n"
+    ^symbols: symbol_table()
+    ^decls: DeclTable{}
+    ^types: interner()
+    entry_key: "function:demo.run"
+    entry_sym: symbol_intern(symbols, entry_key)
+    ^_: decl_table_add(decls, Symbol{id: entry_sym, kind: SymbolKind.Function, name: "run", module_identity: module_none(), owner: None, span: span, ty: None, visibility: 0})
+    decl_table_index(decls)
+
+    ^tree: body_tree_new()
+    ^stmts: [Int]{}
+    if compound {
+        la: pa_local("a", Type.Int, span)
+        lb: pa_local("b", Type.Int, span)
+        lc: pa_local("c", Type.Int, span)
+        n_5: pa_node(tree, NodeKind.IntLit{value: 5, width: None}, TYPE_ID_INT, span)
+        n_4: pa_node(tree, NodeKind.IntLit{value: 4, width: None}, TYPE_ID_INT, span)
+        n_2: pa_node(tree, NodeKind.IntLit{value: 2, width: None}, TYPE_ID_INT, span)
+        s_a: tree.stmts.len()
+        tree.stmts.push(StmtKind.Let{local: la, let_ty: TLetTy.Inferred, init: n_5, gc_promotion: None, gc_transferred: false, span: span})
+        s_b: tree.stmts.len()
+        tree.stmts.push(StmtKind.Let{local: lb, let_ty: TLetTy.Inferred, init: n_4, gc_promotion: None, gc_transferred: false, span: span})
+        s_c: tree.stmts.len()
+        tree.stmts.push(StmtKind.Let{local: lc, let_ty: TLetTy.Inferred, init: n_2, gc_promotion: None, gc_transferred: false, span: span})
+        stmts.push(s_a)
+        stmts.push(s_b)
+        stmts.push(s_c)
+
+        // Exact spans on line 2 (`    assert(a + 1 < b && c > 0)` starting at byte 12):
+        e_a: pa_node(tree, NodeKind.Local{local: la}, TYPE_ID_INT, Span{start: 23, end: 24})
+        e_1: pa_node(tree, NodeKind.IntLit{value: 1, width: None}, TYPE_ID_INT, Span{start: 27, end: 28})
+        e_add: pa_node(tree, NodeKind.Binary{op: BinOp.Add, overflow: false, line: 2, lhs: e_a, rhs: e_1}, TYPE_ID_INT, Span{start: 23, end: 28})
+        e_b: pa_node(tree, NodeKind.Local{local: lb}, TYPE_ID_INT, Span{start: 31, end: 32})
+        e_lt: pa_node(tree, NodeKind.Binary{op: BinOp.Lt, overflow: false, line: 2, lhs: e_add, rhs: e_b}, TYPE_ID_BOOL, Span{start: 23, end: 32})
+        e_c: pa_node(tree, NodeKind.Local{local: lc}, TYPE_ID_INT, Span{start: 36, end: 37})
+        e_0: pa_node(tree, NodeKind.IntLit{value: 0, width: None}, TYPE_ID_INT, Span{start: 40, end: 41})
+        e_gt: pa_node(tree, NodeKind.Binary{op: BinOp.Gt, overflow: false, line: 2, lhs: e_c, rhs: e_0}, TYPE_ID_BOOL, Span{start: 36, end: 41})
+        e_and: pa_node(tree, NodeKind.Binary{op: BinOp.And, overflow: false, line: 2, lhs: e_lt, rhs: e_gt}, TYPE_ID_BOOL, Span{start: 23, end: 41})
+        loc: TPanicLoc{file: "demo.jet", source_line: "", line: 2, column: 5, caret: 6, function: "run", locals: [TPanicLocal]{}}
+        e_req: pa_node(tree, NodeKind.RequireStop{kind: BodyRequireKind.Require{cond: e_and, msg: None}, location: loc, always_stops: false}, TYPE_ID_UNIT, Span{start: 16, end: 22})
+        s_req: tree.stmts.len()
+        tree.stmts.push(StmtKind.ExprStmt{value: e_req, span: Span{start: 16, end: 42}})
+        stmts.push(s_req)
+    } else {
+        e_false: pa_node(tree, NodeKind.BoolLit{value: false}, TYPE_ID_BOOL, Span{start: 23, end: 28})
+        loc: TPanicLoc{file: "demo.jet", source_line: "", line: 2, column: 5, caret: 6, function: "run", locals: [TPanicLocal]{}}
+        e_req: pa_node(tree, NodeKind.RequireStop{kind: BodyRequireKind.Require{cond: e_false, msg: None}, location: loc, always_stops: false}, TYPE_ID_UNIT, Span{start: 16, end: 22})
+        s_req: tree.stmts.len()
+        tree.stmts.push(StmtKind.ExprStmt{value: e_req, span: Span{start: 16, end: 29}})
+        stmts.push(s_req)
+    }
+
+    entry_fn: pa_fn_body("run", entry_key, [BodyParameter]{}, stmts, tree.move())
+    sources: ir_source_texts([SourceFile{id: SourceFileID{value: U64{0}}, path: "demo.jet", source: source}])
+    ir_build_program([FnBody]{entry_fn}, decls, symbols.move(), types.move(), [TTypeDef]{}, [TImplDef]{}, sources.move(), [TConstantDef]{}, [SemaCheckedForeignFunction]{}, entry_key, pa_checks(), compiler_threads_single(), None)
+}
+
+// Build `run: fn()` with `assert_eq` on either a composite `Order` struct
+// (holding Int, String, `[Int]`, `[String:Int]`) or scalar `Int`.
+priv pa_build_assert_eq: fn(composite: Bool) -> IRBuildResult {
+    span: Span{start: 0, end: 1}
+    ^symbols: symbol_table()
+    ^decls: DeclTable{}
+    ^types: interner()
+    entry_key: "function:demo.run"
+    entry_sym: symbol_intern(symbols, entry_key)
+    ^_: decl_table_add(decls, Symbol{id: entry_sym, kind: SymbolKind.Function, name: "run", module_identity: module_none(), owner: None, span: span, ty: None, visibility: 0})
+    decl_table_index(decls)
+
+    int_list_ty: Type.List{element: Type.Int}
+    str_int_map_ty: Type.Map{key: Type.String, key_span: span, value: Type.Int}
+    order_ty: Type.Named{name: "Order"}
+    int_list_tid: type_intern_syntax(types, int_list_ty)
+    map_tid: type_intern_syntax(types, str_int_map_ty)
+    order_tid: type_intern_syntax(types, order_ty)
+
+    ^type_defs: [TTypeDef]{}
+    if composite {
+        type_defs.push(TTypeDef{
+            module_identity: module_none(),
+            key: "type:demo.Order",
+            name: "Order",
+            span: span,
+            public: true,
+            package_public: true,
+            generic_params: [TGenericParam]{},
+            derives: [String]{},
+            auto_derive_default: false,
+            auto_printable: true,
+            published_schema: false,
+            single_use: false,
+            must_use: false,
+            layout: None,
+            c_layout_tag: None,
+            enum_layout: None,
+            layout_alignment: None,
+            serde: [TSerdeAttribute]{},
+            cli_bindings: [TCLIBinding]{},
+            ownership: TDeclarationOwnership.Owned,
+            boxed_edges: [String]{},
+            compiler_builtin: None,
+            kind: TTypeDefKind.Struct{
+                fields: [TField]{
+                    pa_field("id", Type.Int),
+                    pa_field("note", Type.String),
+                    pa_field("items", int_list_ty),
+                    pa_field("tags", str_int_map_ty),
+                },
+                methods: [String]{},
+            },
+        })
+    }
+
+    ^tree: body_tree_new()
+    loc: TPanicLoc{file: "demo.jet", source_line: "    assert_eq(left, right)", line: 2, column: 5, caret: 9, function: "run", locals: [TPanicLocal]{}}
+    ^stmts: [Int]{}
+    if composite {
+        n_id1: pa_node(tree, NodeKind.IntLit{value: 1, width: None}, TYPE_ID_INT, span)
+        n_id2: pa_node(tree, NodeKind.IntLit{value: 1, width: None}, TYPE_ID_INT, span)
+        n_s1: pa_node(tree, NodeKind.StrLit{parts: [BodyStrPart]{BodyStrPart.Literal{text: "alpha\nbeta"}}}, TYPE_ID_STRING, span)
+        n_s2: pa_node(tree, NodeKind.StrLit{parts: [BodyStrPart]{BodyStrPart.Literal{text: "alpha\ngamma"}}}, TYPE_ID_STRING, span)
+        n_e1: pa_node(tree, NodeKind.IntLit{value: 10, width: None}, TYPE_ID_INT, span)
+        n_e2: pa_node(tree, NodeKind.IntLit{value: 20, width: None}, TYPE_ID_INT, span)
+        n_list1: pa_node(tree, NodeKind.List{values: [Int]{n_e1}, trait_coercion: None}, int_list_tid, span)
+        n_list2: pa_node(tree, NodeKind.List{values: [Int]{n_e2}, trait_coercion: None}, int_list_tid, span)
+        n_k1: pa_node(tree, NodeKind.StrLit{parts: [BodyStrPart]{BodyStrPart.Literal{text: "k"}}}, TYPE_ID_STRING, span)
+        n_v1: pa_node(tree, NodeKind.IntLit{value: 1, width: None}, TYPE_ID_INT, span)
+        n_k2: pa_node(tree, NodeKind.StrLit{parts: [BodyStrPart]{BodyStrPart.Literal{text: "k"}}}, TYPE_ID_STRING, span)
+        n_v2: pa_node(tree, NodeKind.IntLit{value: 2, width: None}, TYPE_ID_INT, span)
+        n_map1: pa_node(tree, NodeKind.Map{entries: [BodyMapEntry]{BodyMapEntry{key: n_k1, value: n_v1}}}, map_tid, span)
+        n_map2: pa_node(tree, NodeKind.Map{entries: [BodyMapEntry]{BodyMapEntry{key: n_k2, value: n_v2}}}, map_tid, span)
+        n_left: pa_node(tree, NodeKind.StructLit{fields: [BodyStructFieldValue]{pa_field_val("id", Type.Int, n_id1), pa_field_val("note", Type.String, n_s1), pa_field_val("items", int_list_ty, n_list1), pa_field_val("tags", str_int_map_ty, n_map1)}}, order_tid, span)
+        n_right: pa_node(tree, NodeKind.StructLit{fields: [BodyStructFieldValue]{pa_field_val("id", Type.Int, n_id2), pa_field_val("note", Type.String, n_s2), pa_field_val("items", int_list_ty, n_list2), pa_field_val("tags", str_int_map_ty, n_map2)}}, order_tid, span)
+        e_eq: pa_node(tree, NodeKind.RequireStop{kind: BodyRequireKind.RequireEq{left: n_left, right: n_right, hook: None}, location: loc, always_stops: false}, TYPE_ID_UNIT, span)
+        s_eq: tree.stmts.len()
+        tree.stmts.push(StmtKind.ExprStmt{value: e_eq, span: span})
+        stmts.push(s_eq)
+    } else {
+        n_l: pa_node(tree, NodeKind.IntLit{value: 5, width: None}, TYPE_ID_INT, span)
+        n_r: pa_node(tree, NodeKind.IntLit{value: 2, width: None}, TYPE_ID_INT, span)
+        e_eq: pa_node(tree, NodeKind.RequireStop{kind: BodyRequireKind.RequireEq{left: n_l, right: n_r, hook: None}, location: loc, always_stops: false}, TYPE_ID_UNIT, span)
+        s_eq: tree.stmts.len()
+        tree.stmts.push(StmtKind.ExprStmt{value: e_eq, span: span})
+        stmts.push(s_eq)
+    }
+
+    entry_fn: pa_fn_body("run", entry_key, [BodyParameter]{}, stmts, tree.move())
+    sources: ir_source_texts([SourceFile{id: SourceFileID{value: U64{0}}, path: "demo.jet", source: "run: fn() {{\n    assert_eq(left, right)\n}}\n"}])
+    ir_build_program([FnBody]{entry_fn}, decls, symbols.move(), types.move(), type_defs.move(), [TImplDef]{}, sources.move(), [TConstantDef]{}, [SemaCheckedForeignFunction]{}, entry_key, pa_checks(), compiler_threads_single(), None)
+}
+
+priv pa_find_fn: fn(m: IRModule, key: String) -> Int? {
+    loop (idx, f) in m.functions {
+        if f.key == key -> return Val(idx)
+    }
+    None
+}
+
+#Test("power_assert_compound_short_circuit_compiles_o0_o1_o2_with_zero_passing_formatting") {
+    loop level in ([Int]{0, 1, 2}) {
+        built: pa_build_assert(true)
+        assert_eq(built.failures.len(), 0)
+        ^m: built.program
+        run_id: pa_find_fn(m, "function:demo.run") ?? panic("expected function:demo.run")
+        assert(pa_runtime_only_inside_branch(m, run_id, "jet_rt_assert_diagram"), "jet_rt_assert_diagram must only run inside the failing branch")
+        pre_lint: ir_lint_module(m, "pre-opt", compiler_threads_single())
+        assert(pre_lint.len() == 0, "pre-opt lint failed at O{level}: {ir_lint_text(pre_lint)}")
+        if level > 0 {
+            ^_: ir_optimize_module(m, ir_opt_options(level), compiler_threads_single())
+            post_lint: ir_lint_module(m, "post-opt", compiler_threads_single())
+            assert(post_lint.len() == 0, "post-opt lint failed at O{level}: {ir_lint_text(post_lint)}")
+        }
+        m.fast_o0 = level == 0
+        compiled: ir_x64_compile_module(m, compiler_threads_single())
+        assert(compiled.errors.len() == 0, "x64 compile failed at O{level}: {compiled.errors.join("; ")}")
+    }
+}
+
+#Test("power_assert_bare_literal_skips_diagram") {
+    built: pa_build_assert(false)
+    assert_eq(built.failures.len(), 0)
+    assert(!pa_module_calls_runtime(built.program, "jet_rt_assert_diagram"))
+}
+
+#Test("power_assert_eq_structural_diff_compiles_o0_o1_o2_and_skips_scalars") {
+    scalar_built: pa_build_assert_eq(false)
+    assert_eq(scalar_built.failures.len(), 0)
+    assert(!pa_module_has_text(scalar_built.program, "diff:\n"))
+    assert(!pa_module_calls_runtime(scalar_built.program, "jet_rt_assert_diff_text"))
+
+    loop level in ([Int]{0, 1, 2}) {
+        built: pa_build_assert_eq(true)
+        assert_eq(built.failures.len(), 0)
+        ^m: built.program
+        run_id: pa_find_fn(m, "function:demo.run") ?? panic("expected function:demo.run")
+        assert(pa_module_has_text(m, "diff:\n"))
+        assert(pa_runtime_only_inside_branch(m, run_id, "jet_rt_assert_diff_text"), "jet_rt_assert_diff_text must only run inside the failing branch")
+        pre_lint: ir_lint_module(m, "pre-opt", compiler_threads_single())
+        assert(pre_lint.len() == 0, "pre-opt lint failed at O{level}: {ir_lint_text(pre_lint)}")
+        if level > 0 {
+            ^_: ir_optimize_module(m, ir_opt_options(level), compiler_threads_single())
+            post_lint: ir_lint_module(m, "post-opt", compiler_threads_single())
+            assert(post_lint.len() == 0, "post-opt lint failed at O{level}: {ir_lint_text(post_lint)}")
+        }
+        m.fast_o0 = level == 0
+        compiled: ir_x64_compile_module(m, compiler_threads_single())
+        assert(compiled.errors.len() == 0, "x64 compile failed at O{level}: {compiled.errors.join("; ")}")
+    }
+}

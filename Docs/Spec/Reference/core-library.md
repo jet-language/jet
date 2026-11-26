@@ -470,7 +470,7 @@ The built-module inventory is a source-facing registry, not a missing-domain led
 - `core.sys`
 - `core.tasks`
 - `core.term`
-- `core.testing`
+- `core.testing` — deterministic tests, goldens, snapshots, and fake clocks; ambient `assert` renders aligned subexpression values on failure across `O0`/`O1`/`O2` with zero passing-path formatting, and `assert_eq` prints path-level structural diffs for structs, lists, maps, and text
 - `core.text`
 - `core.text.fmt`
 - `core.text.html`

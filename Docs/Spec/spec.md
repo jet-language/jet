@@ -6207,6 +6207,28 @@ source location. A test target with no tests or doctests reports E0601; bare
 package testing skips source members with neither, then reports the resolved
 package contains no testable member at all. (R9)
 
+### Power assertions and structural diffs
+
+A failing `assert(condition[, message])` renders the runtime value of every
+evaluated non-literal subexpression on the assertion's source line aligned
+directly under its source column on every optimization tier (`-O0`, `-O1`,
+`-O2`). Subexpressions evaluate once in Jet's normal left-to-right
+short-circuiting order: unevaluated branches of `&&`, `||`, or `??` are neither
+evaluated nor printed, and moved non-copyable temporaries are omitted rather
+than copied. Formatting runs strictly on the failure path, so passing
+assertions perform zero string formatting.
+
+A failing `assert_eq(got, expected)` on structs, lists, maps, tuples, payload
+enums, structured optionals/results, or text appends a `diff:` section naming
+each differing path (`field`, `outer.inner`, `[index]`, `["key"]`, extra and
+missing list/map entries, multi-line `line N:` unified entries, and single-line
+`at char N:` offsets), bounded to 32 leaf differences. Plain top-level scalars
+and `--backtrace=off` keep their compact stop output unchanged, and raw stop
+messages (`.expect_fail(message:)`) preserve `expected: <right>, got: <left>`.
+`assert` and `assert_eq` remain standard ambient builtins in the editor
+grammars (`Tools/Editors/jet.tmGrammar`, `Tools/Editors/TreeSitter/grammar.js`,
+and `Tools/Editors/Zed/languages/jet/highlights.scm`) with zero new syntax.
+
 Each `#Test` and `Output.Check` starts with fresh module state. After each test
 finishes, the runtime settles any leftover tasks started by that test, and the
 test harness resets every mutable module global (`^name: value` and

@@ -1060,7 +1060,10 @@ trap_require_stop: fn(kind: I64, descriptor: I64, message: I64, left: I64, right
         else -> trap_write_handle(message)
     }
     trap_msg_message_end()
-    trap_descriptor_context(descriptor, locals)
+    trap_context(trap_word(descriptor), trap_word(wrapping(descriptor + I64{8})), trap_line(trap_word(wrapping(descriptor + I64{16}))), trap_word(wrapping(descriptor + I64{24})), trap_word(wrapping(descriptor + I64{32})), trap_word(wrapping(descriptor + I64{40})), trap_word(wrapping(descriptor + I64{48})), trap_line(trap_word(wrapping(descriptor + I64{56}))), trap_line(trap_word(wrapping(descriptor + I64{64}))))
+    if (kind == I64{0}) { trap_detail(left) }
+    if (kind == I64{1}) { trap_detail(message) }
+    trap_locals(locals)
     // An equality stop's message is its operands, never a joined reason.
     if (kind != I64{1}) {
         trap_joined_site(trap_word(message), trap_word(wrapping(message + I64{8})))
@@ -1073,6 +1076,18 @@ trap_require_stop: fn(kind: I64, descriptor: I64, message: I64, left: I64, right
 trap_descriptor_context: fn(descriptor: I64, locals: I64) {
     trap_context(trap_word(descriptor), trap_word(wrapping(descriptor + I64{8})), trap_line(trap_word(wrapping(descriptor + I64{16}))), trap_word(wrapping(descriptor + I64{24})), trap_word(wrapping(descriptor + I64{32})), trap_word(wrapping(descriptor + I64{40})), trap_word(wrapping(descriptor + I64{48})), trap_line(trap_word(wrapping(descriptor + I64{56}))), trap_line(trap_word(wrapping(descriptor + I64{64}))))
     trap_locals(locals)
+}
+
+// Optional power-assert diagram (`kind == 0`, passed in `left`) or structural
+// `assert_eq` diff (`kind == 1`, passed in `message`): part of the stop's
+// frame, so `backtrace: off` prints none.
+trap_detail: fn(detail: I64) {
+    if (detail == I64{0} || fault_frames_off()) {
+        return
+    }
+    if (trap_word(wrapping(detail + I64{8})) > I64{0}) {
+        trap_write_handle(detail)
+    }
 }
 
 // A stop's locals line, when it has any: part of its frame, so `backtrace:
