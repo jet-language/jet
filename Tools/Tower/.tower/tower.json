@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7042,
-    "rev": 114625,
+    "rev": 114650,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -46,7 +46,8 @@
         "radar:G8",
         "radar:G2",
         "radar:G4",
-        "radar:G1"
+        "radar:G1",
+        "radar-sq"
       ]
     },
     "completionCursor": "2026-11-26T01:12:55.238Z",
@@ -206,7 +207,7 @@
     },
     {
       "status": "done",
-      "goal": "Every major language, runtime, library and tooling feature that makes Jet a daily-driver TypeScript/Swift replacement: JIT/dev loop, concurrency, derives/reflection, HTTP, stdlib, IDE tooling, reactive UI, data/compute (CPU path), and web. Excludes metaprogramming (E4), jetpack (E5), FFI/GPU backends (E6), agents/automation (E7), Canvas (E8), CI/docs (E10), and bootstrapping (E11).",
+      "goal": "Every major language, runtime, library and tooling feature that makes Jet a daily-driver TypeScript/Swift replacement: JIT/dev loop, concurrency, derives/reflection, HTTP, stdlib, IDE tooling, reactive UI, data/compute (CPU path), and web. Excludes metaprogramming (E4), jetpack (E5), FFI/GPU backends (E6), agents/automation (E7), Canvas (E8), jetos (E9), CI/docs (E10), and bootstrapping (E11).",
       "id": "e3",
       "num": 3,
       "name": "Product Pillars",
@@ -236,7 +237,7 @@
     },
     {
       "status": "done",
-      "goal": "The package-manager and environment layer on E4 programmable builds: jetpack environments replacing nix-shell, package build-from-source, registry/publish, content-addressed store, monorepo workspaces, package signing, providers, catalogs, locks, and migration importers.",
+      "goal": "The package-manager and environment layer on E4 programmable builds: jetpack environments replacing nix-shell, package build-from-source, registry/publish, content-addressed store, monorepo workspaces, package signing, providers, catalogs, locks, and migration importers. jetos (E9) sits on this substrate.",
       "id": "e5",
       "num": 5,
       "name": "jetpack",
@@ -290,12 +291,14 @@
     {
       "id": "e10",
       "name": "CI & Documentation",
-      "goal": "Release hygiene, CI pipelines, generated docs, adoption materials, and full reference documentation after Canvas, so docs and gates harden against a stable post-Canvas surface.",
+      "goal": "Release hygiene, CI pipelines, generated docs, adoption materials, and full reference documentation after Canvas and jetos, so docs and gates harden against a stable post-Canvas/post-jetos surface.",
       "status": "done",
       "num": 10,
       "order": 216,
       "exitCriteria": [
-        "[\"CI and release workflows enforce the full stable surface\", \"Adoption, reference, and generated API documentation are complete\", \"Quality gates, docs, examples, and package/reference material match post-Canvas behavior\"]"
+        "CI and release workflows enforce the full stable surface",
+        "Adoption, reference, and generated API documentation are complete",
+        "Quality gates, docs, examples, and package/reference material match post-Canvas/post-jetos behavior"
       ]
     },
     {
@@ -549,6 +552,18 @@
       "order": 8,
       "exitCriteria": [
         "Each card names its metric and a ratchet; the epoch never closes on its own, and no card in it blocks or gates another epoch."
+      ]
+    },
+    {
+      "id": "e9",
+      "name": "jetos",
+      "goal": "Declarative OS layer on top of jetpack: jetos commands, risk-aware activation/proof, generations, installable system image, VM proof, and source-backed Studio GUI for OS configuration.",
+      "status": "done",
+      "order": 215,
+      "exitCriteria": [
+        "jetos command surface, host plans, provenance, risk scoring, and activation proof are stable",
+        "Nameable generations, rollback, installer image, and VM proof are functional",
+        "jetos Studio edits canonical Jet source with diff/proof/rollback"
       ]
     }
   ],
@@ -845,7 +860,7 @@
       "id": "e3-ul13-boundaries",
       "epochId": "e3",
       "title": "UL13 · Product boundaries",
-      "goal": "Keep Jet and Jetpack ownership and build protocols explicit.",
+      "goal": "Keep Jet, Jetpack, and JetOS ownership and build protocols explicit.",
       "status": "retired",
       "created": "2026-07-26T13:03:21.037Z",
       "retired": {
@@ -1782,12 +1797,12 @@
       "exitCriteria": [
         {
           "n": 1,
-          "text": "[\"The platform acceptance, epoch gate, and package boundary cards are done.\"]",
+          "text": "The platform acceptance, epoch gate, and package/JetOS boundary cards are done.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-26T01:17:29.206Z"
+          "at": "2026-08-12T01:45:18.211Z"
         }
       ]
     },
@@ -10608,7 +10623,7 @@
       "title": "Audit Python Rust C Zig Go Core libraries against Jet domains",
       "body": "Owner instruction 2026-09-24: audit current peer core/standard libraries and select the best safe, low-friction behavior for Jet across appropriate CoreLib breadth and depth. Compare actual Jet source and executable examples, not stale spec catalogs; preserve versioned official peer citations, contextual same-program behavior, failure modes, Jet-style proposed contract, and uncertainty. Route accepted gaps to existing owning CoreLib cards #3548-#3551 or a narrowly scoped card; public API/default/dependency changes need Tower ballots. No absent-feature or world-class claim from documentation alone.",
       "kind": "feature",
-      "track": "sidequest",
+      "track": "epoch",
       "epoch": "G3",
       "milestoneId": null,
       "phase": "planning",
@@ -10750,8 +10765,8 @@
       "parentId": "c0lhkowp",
       "needsAcceptance": false,
       "created": "2026-09-24T11:43:17.593Z",
-      "updated": "2026-11-24T00:40:27.853Z",
-      "updatedBy": "Orchestrator"
+      "updated": "2026-11-26T01:21:20.535Z",
+      "updatedBy": "owner"
     },
     {
       "id": "c0iiv9ft",
@@ -12528,8 +12543,8 @@
       "title": "One lane type: width-parameterized and scalable SIMD vectors",
       "body": "Owner request: start from what hardware can do and turn it into high-level constructs, keeping both a bottom-up and a top-down path. Mojo defines every scalar and vector as one library type `SIMD[dtype, width]` (`Int = Scalar[DType.int]`, Modular commit 99e3a880 `std/simd.mojo:115-240,443-468`).\n\nToday Jet has a closed family of named lanes (D-SIMD3=B: F32x4, F32x8, F64x2, F64x4, I32x4, I32x8, I64x2, I64x4, U8x16, U8x32; Examples/features/lowlevel/simd_wide.jet). A width cannot be a parameter, so generic code over \"the widest native width\" cannot be written, and vector-length-agnostic hardware (Arm SVE, RISC-V V) has no spelling. Const generics (D-CONSTGEN1=A, #3505) make a parameterized lane type possible.\n\nBallot D-LANES1 decides the lane surface.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": "G7",
+      "track": "epoch",
+      "epoch": "G3",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -12540,6 +12555,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-26",
+          "by": "Orchestrator",
+          "text": "Close check on dev 4d947f0c96a: not closable. c2 open: no lane type is declared (no Lanes in Core or the Prelude; the only lane types are the closed F32x4/F64x2... family in Compiler/JetFoundation/Data/Syntax/MathLayout.jet), and there is no AArch64 backend under Compiler/, so NEON cannot run. c3 partial: Core/Prelude/Prelude.jet declares the fixed-width families as Core types (Signed<bits>, Unsigned<bits>, IEEE<exponent, fraction>, with I8..U64, F32 and F64 as aliases), but lanes are not, and Int, Float and Bool were not checked here. c4 open: no F16/BF16/FP8 alias, type or golden exists (the hits are CBOR's half-float decoding only)."
+        },
         {
           "at": "2026-11-22",
           "by": "owner",
@@ -12618,7 +12638,7 @@
       "parentId": "c0969ekj",
       "needsAcceptance": false,
       "created": "2026-10-02T01:15:07.022Z",
-      "updated": "2026-11-22T02:10:23.710Z",
+      "updated": "2026-11-26T01:21:10.806Z",
       "updatedBy": "owner"
     },
     {
@@ -14842,20 +14862,22 @@
         {
           "n": 1,
           "text": "Implement ratified D-CORE-BUILTINS1=A, D-CORE-ROLE1=A (owner: markers must use PascalCase), D-CORE-NUMFAMILY1=A, D-CORE-PROVIDER1=A as one greenfield cutover each (compiler both halves, Core, docs, examples, diagnostics with snapshots)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-05T01:17:37.942Z"
+          "evidence": "Split by decision (#5976 c27, 2026-10-31): D-CORE-BUILTINS1=A is #6851 c13 (met), D-CORE-ROLE1=A is #6853 c8 (met; #6853 done), D-CORE-NUMFAMILY1=A is #6846 c12 (met; #6846 done), and D-CORE-PROVIDER1=A is #4761 c3 (open, G3), which carries it.",
+          "at": "2026-11-26T01:26:13.757Z",
+          "closure": "duplicate"
         },
         {
           "n": 2,
           "text": "Implement ratified D-CORE-DERIVE-HOME1=A: markers are independent top-level declarations; a code-writing marker that implements a trait names it with ; traits stay pure contracts; existing auto-derivation, #!Trait refusal and hand-written precedence unchanged; one greenfield cutover of the marker registry, Core traits/derives, both compilers, docs, examples, snapshots",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-05T09:29:23.718Z"
+          "evidence": "D-CORE-DERIVE-HOME1=A is carried by #6849 (D-DECL-TYPES1, done): derives are impl Trait.Derive, markers are declared types, one migration cutover (c3, c4, c7 met). Its 'derives Trait' clause spelling was superseded there.",
+          "at": "2026-11-26T01:26:16.235Z",
+          "closure": "duplicate"
         }
       ],
       "refs": [
@@ -14869,8 +14891,8 @@
       "parentId": "c00dtttx",
       "needsAcceptance": false,
       "created": "2026-10-05T00:38:06.694Z",
-      "updated": "2026-11-22T02:10:23.711Z",
-      "updatedBy": "owner"
+      "updated": "2026-11-26T01:26:16.235Z",
+      "updatedBy": "Orchestrator"
     },
     {
       "id": "c0nxupyn",
@@ -19859,7 +19881,7 @@
       "track": "sidequest",
       "epoch": "G2",
       "milestoneId": null,
-      "phase": "frozen",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -19868,6 +19890,16 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-26",
+          "by": "owner",
+          "text": "Unfrozen."
+        },
+        {
+          "at": "2026-11-26",
+          "by": "owner",
+          "text": "Unfrozen."
+        },
         {
           "at": "2026-10-28",
           "by": "CardTrim",
@@ -19899,7 +19931,18 @@
           "text": "Audit questions answered by the registry or existing decisions (no ballot; overrule here if wrong): (1) tests/ui/type_double_optional.jet: the registry has a dedicated row, E0309 Nested T?? rejected, so the Jet result E0309 is right and the oracle E0080 cascade is wrong. (2) tests/ui/comptime_int_pow_negative.jet: int_pow(2, -1) stops inside a prep block; one meaning on every tier means the build reports that stop (E3010, the oracle result) with no E0107 cascade; the Jet E0956 is an evaluator gap, a defect. (3) tests/ui/pattern_ratified_list_impossible.jet: both compilers give E0305 for a three-element pattern against [Int#2]; the snapshot is E0305 alone, and the E0112 or E0107 cascade is a defect. Genuine questions are ballots D-PERSIST-BORROW1, D-DIAG-CORE-NAME1 and D-PREP-LOCAL1."
         }
       ],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The overnight golden-audit owner questions are answered and implemented.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "Duplicate of #4599 c8 (met; #4599 done 2026-11-10): D-CFFI-DIAG1=A and D-WEB-SUITE-QUOTE1=A built, tests/ui/cffi_callback_*.jet (9) and the 3 web_suite type_mismatch snapshots pass. D-PERSIST-BORROW1, D-DIAG-CORE-NAME1 and D-PREP-LOCAL1 are ratified A.",
+          "at": "2026-11-26T01:23:00.588Z",
+          "closure": "duplicate"
+        }
+      ],
       "refs": [],
       "tags": [
         "goldens",
@@ -19910,8 +19953,10 @@
       "parentId": "c0max8v8",
       "needsAcceptance": false,
       "created": "2026-10-22T05:33:30.296Z",
-      "updated": "2026-11-22T02:10:23.713Z",
-      "updatedBy": "owner"
+      "updated": "2026-11-26T01:24:34.518Z",
+      "updatedBy": "owner",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-26T01:24:34.518Z"
     },
     {
       "id": "c0m58g8t",
@@ -42890,6 +42935,11 @@
         {
           "at": "2026-11-26",
           "by": "Orchestrator",
+          "text": "JetOS removal, orchestrator decision within the owner's order: Jetpack fact-law ContributionLayer.System and .Fleet are deleted with JetOS. They were the only layers allowed to .Force, so the Force/pin path (with its GateLedger BuildFlag rows and GateProjection fixture rows) is deleted as dead code in the same cutover. A non-JetOS Force layer would need a new ballot."
+        },
+        {
+          "at": "2026-11-26",
+          "by": "Orchestrator",
           "text": "JetOS removal (owner order 2026-11-22), orchestrator decision within that order: the generic actions that sat under `jet os` return to the top level as `jet services` and `jet config` (with `config export`), with no alias or teaching row for the old spelling. `jet os push` and the system./fleet./vmtest. namespaces with Output.System/Output.Fleet are deleted. Flake bridging stays (as `jet bridge`) only where it serves package or environment flakes; the NixOS-system conversion is deleted."
         },
         {
@@ -43055,7 +43105,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:12.098Z",
-      "updated": "2026-11-26T01:03:55.622Z",
+      "updated": "2026-11-26T01:25:04.374Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 14
     },
@@ -64096,12 +64146,17 @@
       "body": "Planned successor to the Cranelift tier-1: a Jet-owned register/stack bytecode VM (bytecode design + compiler from TIR + VM loop), roughly 5-20x over the tree-walking tier-0 interpreter with ZERO runtime dependencies, removing the Cranelift exception. Not native speed. FROZEN: pursue after Cranelift tier-1 is proven. Owner: plan to move to our own bytecode VM.",
       "kind": "idea",
       "track": "epoch",
-      "epoch": "e3",
+      "epoch": "e9",
       "phase": "done",
       "priority": "P3",
       "plan": null,
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-11-26",
+          "by": "Orchestrator",
+          "text": "Returned to e9 as archived it was; the earlier move was a mistake."
+        },
         {
           "at": "2026-11-26",
           "by": "Orchestrator",
@@ -64136,7 +64191,7 @@
         }
       ],
       "created": "2026-06-24",
-      "updated": "2026-11-26T01:16:46.351Z",
+      "updated": "2026-11-26T01:18:53.375Z",
       "criteria": [],
       "needsAcceptance": false,
       "updatedBy": "Orchestrator",
@@ -64155,12 +64210,17 @@
       "body": "Eventual Jet-owned native codegen backend (instruction selection, register allocation, x64 + aarch64, calling conventions, relocations, W^X executable memory, JIT hardening) replacing Cranelift AND the bytecode VM. Multi-year effort with miscompilation + security surface; justified only as the long-horizon master-of-all goal since production is AOT. FROZEN: post-v1 / far-horizon. Owner: then eventually our own native jit.",
       "kind": "idea",
       "track": "epoch",
-      "epoch": "e3",
+      "epoch": "e9",
       "phase": "done",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-11-26",
+          "by": "Orchestrator",
+          "text": "Returned to e9 as archived it was; the earlier move was a mistake."
+        },
         {
           "at": "2026-11-26",
           "by": "Orchestrator",
@@ -64195,7 +64255,7 @@
         }
       ],
       "created": "2026-06-24",
-      "updated": "2026-11-26T01:16:49.060Z",
+      "updated": "2026-11-26T01:18:55.051Z",
       "criteria": [],
       "needsAcceptance": false,
       "updatedBy": "Orchestrator",
@@ -128921,6 +128981,174 @@
   ],
   "events": [
     {
+      "at": "2026-11-26T01:26:16.235Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0s7shwh",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-26T01:26:13.758Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0s7shwh",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-26T01:25:04.374Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0ho9o8j",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-26T01:24:34.518Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c07kbx9u",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-26T01:24:08.531Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c07kbx9u",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-26T01:24:07.679Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c07kbx9u",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-26T01:23:00.588Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c07kbx9u",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-26T01:22:58.734Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c07kbx9u",
+      "note": "#1 The overnight golden-audit owner questions are answered and "
+    },
+    {
+      "at": "2026-11-26T01:21:20.536Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c0ty25lu",
+      "note": "track"
+    },
+    {
+      "at": "2026-11-26T01:21:10.806Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c0x2k4me",
+      "note": "track"
+    },
+    {
+      "at": "2026-11-26T01:21:09.976Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c0x2k4me",
+      "note": "epoch"
+    },
+    {
+      "at": "2026-11-26T01:20:13.184Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0x2k4me",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-26T01:18:55.052Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c141",
+      "note": "epoch,logEntry"
+    },
+    {
+      "at": "2026-11-26T01:18:53.375Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c140",
+      "note": "epoch,logEntry"
+    },
+    {
+      "at": "2026-11-26T01:18:51.761Z",
+      "by": "Orchestrator",
+      "action": "milestone.update",
+      "ref": "e11-m02-rust-exit",
+      "note": ""
+    },
+    {
+      "at": "2026-11-26T01:18:50.859Z",
+      "by": "Orchestrator",
+      "action": "milestone.update",
+      "ref": "e5-platform-acceptance",
+      "note": ""
+    },
+    {
+      "at": "2026-11-26T01:18:49.957Z",
+      "by": "Orchestrator",
+      "action": "milestone.update",
+      "ref": "e5-m11-jetpack-in-jet",
+      "note": ""
+    },
+    {
+      "at": "2026-11-26T01:18:49.041Z",
+      "by": "Orchestrator",
+      "action": "milestone.update",
+      "ref": "e3-ul13-boundaries",
+      "note": ""
+    },
+    {
+      "at": "2026-11-26T01:18:48.117Z",
+      "by": "Orchestrator",
+      "action": "epoch.update",
+      "ref": "e10",
+      "note": "exitCriteria, goal"
+    },
+    {
+      "at": "2026-11-26T01:18:47.211Z",
+      "by": "Orchestrator",
+      "action": "epoch.update",
+      "ref": "e5",
+      "note": "goal"
+    },
+    {
+      "at": "2026-11-26T01:18:46.309Z",
+      "by": "Orchestrator",
+      "action": "epoch.update",
+      "ref": "e3",
+      "note": "goal"
+    },
+    {
+      "at": "2026-11-26T01:18:45.378Z",
+      "by": "Orchestrator",
+      "action": "epoch.add",
+      "ref": "e9",
+      "note": "jetos"
+    },
+    {
+      "at": "2026-11-26T01:17:31.485Z",
+      "by": "Orchestrator",
+      "action": "milestone.update",
+      "ref": "e11-m02-rust-exit",
+      "note": ""
+    },
+    {
+      "at": "2026-11-26T01:17:30.604Z",
+      "by": "Orchestrator",
+      "action": "milestone.update",
+      "ref": "e5-m11-jetpack-in-jet",
+      "note": ""
+    },
+    {
       "at": "2026-11-26T01:17:29.206Z",
       "by": "Orchestrator",
       "action": "milestone.update",
@@ -132344,721 +132572,6 @@
       "action": "card.over-limit",
       "ref": "c0uxxmpm",
       "note": "8 criteria, soft limit 6: Owner asked on 2026-11-25 that every changeable-global defect be recorded; these are unbuilt parts of D-MODULE-VAR1=A found by the D-GLOBAL-SAFE1 draft"
-    },
-    {
-      "at": "2026-11-25T18:25:23.121Z",
-      "by": "Pip",
-      "action": "card.criteria-add",
-      "ref": "c0uxxmpm",
-      "note": "#8 A #Persist global follows the same task rule as any module v"
-    },
-    {
-      "at": "2026-11-25T18:25:21.366Z",
-      "by": "Pip",
-      "action": "card.over-limit",
-      "ref": "c0uxxmpm",
-      "note": "7 criteria, soft limit 6: Owner asked on 2026-11-25 that every changeable-global defect be recorded; these are unbuilt parts of D-MODULE-VAR1=A found by the D-GLOBAL-SAFE1 draft"
-    },
-    {
-      "at": "2026-11-25T18:25:21.366Z",
-      "by": "Pip",
-      "action": "card.criteria-add",
-      "ref": "c0uxxmpm",
-      "note": "#7 A function changes a module variable in place like a local: "
-    },
-    {
-      "at": "2026-11-25T18:25:19.487Z",
-      "by": "Pip",
-      "action": "card.criteria-add",
-      "ref": "c0uxxmpm",
-      "note": "#6 Each test starts with its own copy of every module variable "
-    },
-    {
-      "at": "2026-11-25T18:23:39.663Z",
-      "by": "Pip",
-      "action": "card.update",
-      "ref": "c05bs1oq",
-      "note": "body"
-    },
-    {
-      "at": "2026-11-25T18:23:37.090Z",
-      "by": "Pip",
-      "action": "card.update",
-      "ref": "c0hnoa1d",
-      "note": "body"
-    },
-    {
-      "at": "2026-11-25T18:23:34.576Z",
-      "by": "Pip",
-      "action": "card.criteria-edit",
-      "ref": "c0hnoa1d",
-      "note": "#4: Owner answered on 2026-11-25: delete the writes policy; was: One greenfield cutover migrates every in-repository call, example, snapshot, doc and editor grammar, and #Policy(writes: .Explicit) is removed or narrowed as the ratified outcome says, with no paralle"
-    },
-    {
-      "at": "2026-11-25T18:23:33.538Z",
-      "by": "Pip",
-      "action": "card.criteria-edit",
-      "ref": "c0pej44b",
-      "note": "#3: Owner ordered each DSL head built immediately; row 3 now covers SQL only, HTML and Sh have rows 6 and 7; was: The SQL, HTML and Sh heads check their literal text at build time against their grammar, so a malformed literal is a build error, and each hole is typed and escaped by the position the grammar gives i"
-    },
-    {
-      "at": "2026-11-25T18:23:24.693Z",
-      "by": "Pip",
-      "action": "card.update",
-      "ref": "c0pej44b",
-      "note": "body,priority,logEntry"
-    },
-    {
-      "at": "2026-11-25T18:23:21.268Z",
-      "by": "Pip",
-      "action": "card.over-limit",
-      "ref": "c0pej44b",
-      "note": "8 criteria, soft limit 6: Owner ordered on 2026-11-25 that the Grammar feature and every DSL head's grammar be built immediately; each head gets its own row so none is lost"
-    },
-    {
-      "at": "2026-11-25T18:23:21.268Z",
-      "by": "Pip",
-      "action": "card.criteria-add",
-      "ref": "c0pej44b",
-      "note": "#8 The URL and DateTime heads (Core/Net/URL.jet:171, Core/Time/"
-    },
-    {
-      "at": "2026-11-25T18:23:20.306Z",
-      "by": "Pip",
-      "action": "card.over-limit",
-      "ref": "c0pej44b",
-      "note": "7 criteria, soft limit 6: Owner ordered on 2026-11-25 that the Grammar feature and every DSL head's grammar be built immediately; each head gets its own row so none is lost"
-    },
-    {
-      "at": "2026-11-25T18:23:20.306Z",
-      "by": "Pip",
-      "action": "card.criteria-add",
-      "ref": "c0pej44b",
-      "note": "#7 The Sh head (`Sh{\"…\"}`, Core/Process/Process.jet:142, whose "
-    },
-    {
-      "at": "2026-11-25T18:23:19.387Z",
-      "by": "Pip",
-      "action": "card.criteria-add",
-      "ref": "c0pej44b",
-      "note": "#6 The HTML head (`HTML{\"…\"}`, Core/Text/HTML.jet:115, whose ch"
-    },
-    {
-      "at": "2026-11-25T18:19:34.527Z",
-      "by": "Pip",
-      "action": "card.update",
-      "ref": "c0clpv28",
-      "note": "body,logEntry"
-    },
-    {
-      "at": "2026-11-25T18:18:52.887Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0mhrplj",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-25T18:17:12.350Z",
-      "by": "Pip",
-      "action": "card.add",
-      "ref": "c0hnoa1d",
-      "note": "Edit marks at call sites: `^` on every named argument a call changes, never required on receivers, inserted by jet fmt"
-    },
-    {
-      "at": "2026-11-25T18:17:09.526Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0mhrplj",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-25T18:17:04.112Z",
-      "by": "Pip",
-      "action": "card.add",
-      "ref": "c0pej44b",
-      "note": "Grammar literals: one Core Grammar type gives typed trees, parse, print and build-time format errors, and serves the checked text heads"
-    },
-    {
-      "at": "2026-11-25T18:17:02.711Z",
-      "by": "Pip",
-      "action": "card.add",
-      "ref": "c028o7uk",
-      "note": "Effect classes in plain words: Reads, Adds or Replaces, plus repeatable, checked at routes, retries, transactions and previews"
-    },
-    {
-      "at": "2026-11-25T18:09:38.213Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0mhrplj",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-25T18:01:35.588Z",
-      "by": "Pip",
-      "action": "card.add",
-      "ref": "c05bs1oq",
-      "note": "How failure points read in source: decide D-FAIL-VISIBLE2 and finish the failure-point tools"
-    },
-    {
-      "at": "2026-11-25T18:00:41.286Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0mhrplj",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-25T17:59:27.334Z",
-      "by": "Pip",
-      "action": "card.over-limit",
-      "ref": "c0aq9dry",
-      "note": "10 criteria, soft limit 6: Owner asked on 2026-11-25 to ballot each greenfield proposal item P1 second-tier respelling individually on this card"
-    },
-    {
-      "at": "2026-11-25T17:59:27.334Z",
-      "by": "Pip",
-      "action": "card.criteria-add",
-      "ref": "c0aq9dry",
-      "note": "#10 The ballot D-TABLE-IT1 (proposal item P1 second tier: the ta"
-    },
-    {
-      "at": "2026-11-25T17:59:26.426Z",
-      "by": "Pip",
-      "action": "card.over-limit",
-      "ref": "c0aq9dry",
-      "note": "9 criteria, soft limit 6: Owner asked on 2026-11-25 to ballot each greenfield proposal item P1 second-tier respelling individually on this card"
-    },
-    {
-      "at": "2026-11-25T17:59:26.426Z",
-      "by": "Pip",
-      "action": "card.criteria-add",
-      "ref": "c0aq9dry",
-      "note": "#9 The ballot D-YIELD-EMIT1 (proposal item P1 second tier: the "
-    },
-    {
-      "at": "2026-11-25T17:59:25.546Z",
-      "by": "Pip",
-      "action": "card.over-limit",
-      "ref": "c0aq9dry",
-      "note": "8 criteria, soft limit 6: Owner asked on 2026-11-25 to ballot each greenfield proposal item P1 second-tier respelling individually on this card"
-    },
-    {
-      "at": "2026-11-25T17:59:25.546Z",
-      "by": "Pip",
-      "action": "card.criteria-add",
-      "ref": "c0aq9dry",
-      "note": "#8 The ballot D-TASKS-SPAWN1 (proposal item P1 second tier: the"
-    },
-    {
-      "at": "2026-11-25T17:59:24.679Z",
-      "by": "Pip",
-      "action": "card.over-limit",
-      "ref": "c0aq9dry",
-      "note": "7 criteria, soft limit 6: Owner asked on 2026-11-25 to ballot each greenfield proposal item P1 second-tier respelling individually on this card"
-    },
-    {
-      "at": "2026-11-25T17:59:24.679Z",
-      "by": "Pip",
-      "action": "card.criteria-add",
-      "ref": "c0aq9dry",
-      "note": "#7 The ballot D-FOREIGN-MARKER1 (proposal item P1 second tier: "
-    },
-    {
-      "at": "2026-11-25T17:59:02.257Z",
-      "by": "Pip",
-      "action": "card.add",
-      "ref": "c0pi4dar",
-      "note": "Show what a block reads and writes: the editor and jet inspect report the inferred footprint of any selected block"
-    },
-    {
-      "at": "2026-11-25T17:59:00.830Z",
-      "by": "Pip",
-      "action": "card.add",
-      "ref": "c01wqict",
-      "note": "Changeable module globals stay, with their downsides engineered away: per-test isolation, task safety and visible global writes"
-    },
-    {
-      "at": "2026-11-25T17:58:59.300Z",
-      "by": "Pip",
-      "action": "card.add",
-      "ref": "c0clpv28",
-      "note": "Handles that read like links: relationships held as pool IDs with short, checked navigation instead of stored @T links"
-    },
-    {
-      "at": "2026-11-25T17:58:57.851Z",
-      "by": "Pip",
-      "action": "card.add",
-      "ref": "c0on1be8",
-      "note": "An effect is its provider trait: one name per service in effect rows, manifests, contexts and tests"
-    },
-    {
-      "at": "2026-11-25T17:58:43.235Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0mhrplj",
-      "note": "#22: SocketAddr/UDPPacket ICEs found by the same slice; was: B leaves: sema's synthetic Printable list is deleted; Point, Rect and Size (and any other type it names) print and Debug-render through Core impls, so print(p), \"{p}\" and \"{p:Debug}\" give the same out"
-    },
-    {
-      "at": "2026-11-25T17:55:09.546Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0mhrplj",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-25T17:45:34.351Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0mhrplj",
-      "note": "21 criteria, soft limit 6: B's leaves are criteria on the pillars card by the owner's one-card-per-stream order"
-    },
-    {
-      "at": "2026-11-25T17:45:34.351Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0mhrplj",
-      "note": "#22 B leaves: sema's synthetic Printable list is deleted; Point,"
-    },
-    {
-      "at": "2026-11-25T17:40:01.398Z",
-      "by": "Pip",
-      "action": "card.update",
-      "ref": "c090agiq",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-25T17:39:59.437Z",
-      "by": "Pip",
-      "action": "card.update",
-      "ref": "c0yuue6m",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-25T17:39:57.648Z",
-      "by": "Pip",
-      "action": "card.update",
-      "ref": "c0t3jsi0",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-25T17:39:44.239Z",
-      "by": "Pip",
-      "action": "board.apply",
-      "ref": null,
-      "refs": [
-        "c066t33h",
-        "c0nr5mre",
-        "c0aq9dry",
-        "c0odknr4",
-        "c0knga4o",
-        "c08iqfx7"
-      ],
-      "note": "7 ops: 2 add, 5 edit"
-    },
-    {
-      "at": "2026-11-25T17:39:44.239Z",
-      "by": "Pip",
-      "action": "card.criteria-edit",
-      "ref": "c08iqfx7",
-      "note": "#3: blocked by #7008"
-    },
-    {
-      "at": "2026-11-25T17:39:44.239Z",
-      "by": "Pip",
-      "action": "card.criteria-edit",
-      "ref": "c0knga4o",
-      "note": "#3: blocked by #7008"
-    },
-    {
-      "at": "2026-11-25T17:39:44.239Z",
-      "by": "Pip",
-      "action": "card.criteria-edit",
-      "ref": "c0odknr4",
-      "note": "#4: blocked by #7004"
-    },
-    {
-      "at": "2026-11-25T17:39:44.239Z",
-      "by": "Pip",
-      "action": "card.criteria-edit",
-      "ref": "c0aq9dry",
-      "note": "#4: blocked by #7006"
-    },
-    {
-      "at": "2026-11-25T17:39:44.238Z",
-      "by": "Pip",
-      "action": "card.criteria-edit",
-      "ref": "c0aq9dry",
-      "note": "#3: blocked by #7008"
-    },
-    {
-      "at": "2026-11-25T17:39:44.238Z",
-      "by": "Pip",
-      "action": "card.over-limit",
-      "ref": "c0nr5mre",
-      "note": "9 criteria, soft limit 6: Owner approved greenfield proposal item P28 (code diffs on dependency update) on 2026-11-25; it extends the capability diff on update this card owns."
-    },
-    {
-      "at": "2026-11-25T17:39:44.238Z",
-      "by": "Pip",
-      "action": "card.criteria-add",
-      "ref": "c0nr5mre",
-      "note": "#9 Reached-code diffs on update (owner-approved greenfield prop"
-    },
-    {
-      "at": "2026-11-25T17:39:44.237Z",
-      "by": "Pip",
-      "action": "card.over-limit",
-      "ref": "c066t33h",
-      "note": "15 criteria, soft limit 6: Owner approved greenfield proposal item P27 (live literals) on 2026-11-25; it extends this hot-reload stream."
-    },
-    {
-      "at": "2026-11-25T17:39:44.237Z",
-      "by": "Pip",
-      "action": "card.criteria-add",
-      "ref": "c066t33h",
-      "note": "#16 Live literals (owner-approved greenfield proposal item P27, "
-    },
-    {
-      "at": "2026-11-25T17:39:31.253Z",
-      "by": "Pip",
-      "action": "card.add",
-      "ref": "c0r8fk73",
-      "note": "#Layout(double) on a store gives a read copy and a write copy that swap at a step boundary"
-    },
-    {
-      "at": "2026-11-25T17:39:28.715Z",
-      "by": "Pip",
-      "action": "card.add",
-      "ref": "c0l8zuvs",
-      "note": "Paired corpus: tasks solved in Jet and its peers, published under a permissive licence for model training"
-    },
-    {
-      "at": "2026-11-25T17:39:25.562Z",
-      "by": "Pip",
-      "action": "card.add",
-      "ref": "c054h5qp",
-      "note": "Interpolation that keeps indentation: a multi-line value in a multi-line string indents its later lines to the hole's column"
-    },
-    {
-      "at": "2026-11-25T17:39:22.975Z",
-      "by": "Pip",
-      "action": "card.add",
-      "ref": "c0ybu1ut",
-      "note": "#UndoGroup(\"Move 3 objects\") { } gathers the patches made inside into one undo step"
-    },
-    {
-      "at": "2026-11-25T17:39:20.055Z",
-      "by": "Pip",
-      "action": "card.add",
-      "ref": "c0m16kro",
-      "note": "Asset folders as types: assets: #Dir(\"Assets\") is a value whose fields are the files, so a missing asset fails to compile"
-    },
-    {
-      "at": "2026-11-25T17:39:17.712Z",
-      "by": "Pip",
-      "action": "card.add",
-      "ref": "c0jadvdk",
-      "note": "Named tensor dimensions: Tensor<F32, [batch, 784]>, with static shapes checked at compile time and dynamic ones once at the boundary"
-    },
-    {
-      "at": "2026-11-25T17:39:14.857Z",
-      "by": "Pip",
-      "action": "card.add",
-      "ref": "c082nifn",
-      "note": "#Memo(across_runs) persists results keyed on arguments and every input the function's effects read"
-    },
-    {
-      "at": "2026-11-25T17:39:12.344Z",
-      "by": "Pip",
-      "action": "card.add",
-      "ref": "c02i9l7p",
-      "note": "Splittable randomness: rng.split(seed, keys…) gives the same stream for the same key in any order"
-    },
-    {
-      "at": "2026-11-25T17:39:09.736Z",
-      "by": "Pip",
-      "action": "card.add",
-      "ref": "c0vdpcu6",
-      "note": "#Assert(vectorized) on a loop fails the build and names what blocked vectorization"
-    },
-    {
-      "at": "2026-11-25T17:39:07.143Z",
-      "by": "Pip",
-      "action": "card.add",
-      "ref": "c0oi3k2t",
-      "note": "Crossed argument names: passing a variable named like a different parameter of the same type is an error"
-    },
-    {
-      "at": "2026-11-25T17:39:04.541Z",
-      "by": "Pip",
-      "action": "card.add",
-      "ref": "c0hgn7y3",
-      "note": "Layer rules: package.jet declares layers, and imports may only point down"
-    },
-    {
-      "at": "2026-11-25T17:39:01.823Z",
-      "by": "Pip",
-      "action": "card.add",
-      "ref": "c08iqfx7",
-      "note": "#EveryField(of: T) refuses a function that never reads one of T's fields"
-    },
-    {
-      "at": "2026-11-25T17:38:58.912Z",
-      "by": "Pip",
-      "action": "card.add",
-      "ref": "c0wdibsn",
-      "note": "Fields shared by every case of an enum: fields written before the cases belong to every case and read without a match"
-    },
-    {
-      "at": "2026-11-25T17:38:56.081Z",
-      "by": "Pip",
-      "action": "card.add",
-      "ref": "c0ljw5xu",
-      "note": "Working directory and environment are context keys: #Context(dir:, env:) { } and relative paths resolve against them"
-    },
-    {
-      "at": "2026-11-25T17:38:53.189Z",
-      "by": "Pip",
-      "action": "card.add",
-      "ref": "c09pfvak",
-      "note": "One rule for execution contexts: code may run where its effect row is covered, with one diagnostic naming the uncovered effect and call path"
-    },
-    {
-      "at": "2026-11-25T17:38:50.345Z",
-      "by": "Pip",
-      "action": "card.add",
-      "ref": "c0ypa1af",
-      "note": "Interaction is a provider: ask, choose, confirm, secret and progress call an installed handler (terminal, GUI, agent or test script)"
-    },
-    {
-      "at": "2026-11-25T17:38:47.373Z",
-      "by": "Pip",
-      "action": "card.add",
-      "ref": "c0ljryls",
-      "note": "Power asserts: a failing assert prints every subexpression's value and a structural diff"
-    },
-    {
-      "at": "2026-11-25T17:38:45.806Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0mhrplj",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-25T17:38:44.541Z",
-      "by": "Pip",
-      "action": "card.add",
-      "ref": "c0apcd3z",
-      "note": "jet primer prints the language and a Core index in about 12,000 tokens, generated from the syntax registry and Core sources"
-    },
-    {
-      "at": "2026-11-25T17:38:43.191Z",
-      "by": "Pip",
-      "action": "card.add",
-      "ref": "c0odknr4",
-      "note": "Markers apply at every site they declare (value, expression, statement, block, function, …); wrapping policies work on blocks, and Err answers transient()"
-    },
-    {
-      "at": "2026-11-25T17:38:41.834Z",
-      "by": "Pip",
-      "action": "card.add",
-      "ref": "c01xuayj",
-      "note": "Errors with two audiences: public() text safe for users and detail() for operators, chosen by each boundary"
-    },
-    {
-      "at": "2026-11-25T17:38:40.511Z",
-      "by": "Pip",
-      "action": "card.add",
-      "ref": "c0g2flly",
-      "note": "#Frame(text) { } pushes one breadcrumb that every error, log line, trace span and profile sample inside carries"
-    },
-    {
-      "at": "2026-11-25T17:38:39.164Z",
-      "by": "Pip",
-      "action": "card.add",
-      "ref": "c0trylxd",
-      "note": "Typed key paths: Path<T, V>, written .field.sub where one is expected, for sorting, forms, errors, patches, queries and migrations"
-    },
-    {
-      "at": "2026-11-25T17:38:37.769Z",
-      "by": "Pip",
-      "action": "card.add",
-      "ref": "c06pkzn5",
-      "note": "Run modes: jet run --preview prints a program's plan, --apply PLAN performs exactly it, --undo RUN reverses it"
-    },
-    {
-      "at": "2026-11-25T17:38:36.435Z",
-      "by": "Pip",
-      "action": "card.add",
-      "ref": "c0knga4o",
-      "note": "One Predicate value: #Check replaces validate, check and #Invariant, and feeds the prover, decode, forms, db filters, schema and tests"
-    },
-    {
-      "at": "2026-11-25T17:38:35.028Z",
-      "by": "Pip",
-      "action": "card.add",
-      "ref": "c0xdphrk",
-      "note": "One Boundary trait drives CLI, HTTP, MCP, jobs, tests, exports and foreign-language bridges"
-    },
-    {
-      "at": "2026-11-25T17:38:34.251Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c090agiq",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-25T17:38:33.260Z",
-      "by": "Pip",
-      "action": "card.add",
-      "ref": "c044xzcw",
-      "note": "Marker roles as one ladder, a wrap role that replaces policy declarations, and a jet expand source lens"
-    },
-    {
-      "at": "2026-11-25T17:38:32.455Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0yuue6m",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-25T17:38:31.482Z",
-      "by": "Pip",
-      "action": "card.add",
-      "ref": "c0aq9dry",
-      "note": "Clause sublanguages become marker vocabularies: #States, #Protocol, #Migration, #Defer, x.freeze() and Distinct<T>"
-    },
-    {
-      "at": "2026-11-25T17:38:30.536Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0t3jsi0",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-25T17:38:29.314Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0e6znz4",
-      "note": "#13"
-    },
-    {
-      "at": "2026-11-25T17:38:28.075Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0mhrplj",
-      "note": "#19"
-    },
-    {
-      "at": "2026-11-25T17:38:26.969Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0mhrplj",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-25T17:33:14.716Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-11-25T17:33:14.715Z"
-    },
-    {
-      "at": "2026-11-25T16:57:17.692Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-BIND-MARK1",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-25T16:57:17.692Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-SEMI-LINE1",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-25T16:57:17.692Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-BODY-RECORD1",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-25T16:46:02.111Z",
-      "by": "Pip",
-      "action": "card.update",
-      "ref": "c090agiq",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-25T16:46:01.165Z",
-      "by": "Pip",
-      "action": "card.update",
-      "ref": "c0yuue6m",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-25T16:46:00.283Z",
-      "by": "Pip",
-      "action": "card.update",
-      "ref": "c0t3jsi0",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-25T16:45:57.783Z",
-      "by": "Pip",
-      "action": "decision.post",
-      "ref": "D-BIND-MARK1",
-      "note": "reviewed by ReviewBindMark"
-    },
-    {
-      "at": "2026-11-25T16:45:45.868Z",
-      "by": "ReviewBindMark",
-      "action": "decision.review",
-      "ref": "D-BIND-MARK1",
-      "note": "passed"
-    },
-    {
-      "at": "2026-11-25T16:45:33.606Z",
-      "by": "Pip",
-      "action": "decision.update",
-      "ref": "D-BIND-MARK1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-25T16:45:20.438Z",
-      "by": "Pip",
-      "action": "card.criteria-add",
-      "ref": "c0t3jsi0",
-      "note": "#5 Every tool that writes Jet source, the LSP snippet, the edit (blocked by D-BIND-MARK1)"
-    },
-    {
-      "at": "2026-11-25T16:45:18.777Z",
-      "by": "Pip",
-      "action": "card.criteria-add",
-      "ref": "c0t3jsi0",
-      "note": "#4 A jet fix migration rewrites every in-repository site with m (blocked by D-BIND-MARK1)"
-    },
-    {
-      "at": "2026-11-25T16:45:17.672Z",
-      "by": "Pip",
-      "action": "card.criteria-add",
-      "ref": "c0t3jsi0",
-      "note": "#3 Sema machine fixes, every diagnostic row and message that qu (blocked by D-BIND-MARK1)"
-    },
-    {
-      "at": "2026-11-25T16:45:16.651Z",
-      "by": "Pip",
-      "action": "card.criteria-add",
-      "ref": "c0t3jsi0",
-      "note": "#2 The voted changeable-name mark and place.in_place() ship in  (blocked by D-BIND-MARK1)"
-    },
-    {
-      "at": "2026-11-25T16:45:15.702Z",
-      "by": "Pip",
-      "action": "card.criteria-add",
-      "ref": "c0t3jsi0",
-      "note": "#1 The adversarial review passes: Docs/Audits/2026-11-25-bindin"
     }
   ],
   "nextNum": 368,
