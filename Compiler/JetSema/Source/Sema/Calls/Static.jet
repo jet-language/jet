@@ -25,7 +25,6 @@ use jet_foundation.[
     SymbolID,
     SymbolKind,
     TBuiltinOp,
-    TFailureCarrier,
     TMethodRef,
     TGenericParam,
     TNumericOp,
@@ -547,43 +546,29 @@ sema_call_static_local_defaults: fn(target: SemaStaticMethodTarget, binding: Sem
 }
 
 sema_call_static_rewrite_value: fn(value: ^TExpr, target: SemaStaticMethodTarget, method_id: DeclID) -> Bool Never! {
-    if value.kind == {
-        .Call(symbol, type_args, args) -> {
-            if symbol.row.index() != method_id.row.index() -> return false
-            // The method's inferred type arguments bind any owner parameter
-            // its own same-named parameter shadows.
-            ^owner_type: target.owner_type
-            if type_args.len() > 0 && type_args.len() == target.target.generic_params.len() {
-                bindings: loop index in 0..<type_args.len() -> SemaInferenceBinding{name: target.target.generic_params[index].name, ty: type_args[index], source: "static method"}
-                owner_type = sema_inference_substitute_type_bindings(owner_type, bindings)
-            }
-            value.kind = TExprKind.StaticCall{owner: TStaticOwner.User{name: target.owner_name}, owner_type: Val(owner_type), method: target.method, type_args: type_args, args: args}
-            return true
+    if value.kind == .Call(symbol, type_args, args) {
+        if symbol.row.index() != method_id.row.index() -> return false
+        // The method's inferred type arguments bind any owner parameter
+        // its own same-named parameter shadows.
+        ^owner_type: target.owner_type
+        if type_args.len() > 0 && type_args.len() == target.target.generic_params.len() {
+            bindings: loop index in 0..<type_args.len() -> SemaInferenceBinding{name: target.target.generic_params[index].name, ty: type_args[index], source: "static method"}
+            owner_type = sema_inference_substitute_type_bindings(owner_type, bindings)
         }
-        .TraitBox(inner, target_type) -> {
-            ^updated_inner: inner
-            if !sema_call_static_rewrite_value(updated_inner, target, method_id) -> return false
-            value.kind = TExprKind.TraitBox{value: updated_inner, target: target_type}
-            return true
-        }
+        value.kind = TExprKind.StaticCall{owner: TStaticOwner.User{name: target.owner_name}, owner_type: Val(owner_type), method: target.method, type_args: type_args, args: args}
+        return true
+    }
+    if value.kind.in_place() == {
+        .TraitBox(inner, _) -> return sema_call_static_rewrite_value(inner, target, method_id)
         .InlineBlock(statements) -> {
             if statements.len() == 0 -> return false
             last: statements.len() - 1
-            if statements[last] == {
-                .ExprStmt(call, statement_span) -> {
-                    ^updated_call: call
-                    if !sema_call_static_rewrite_value(updated_call, target, method_id) {
-                        return false
-                    }
-                    ^updated_statements: statements.copy()
-                    updated_statements[last] = TStmt.ExprStmt{value: updated_call, span: statement_span}
-                    value.kind = TExprKind.InlineBlock{body: updated_statements}
-                    return true
-                }
-                .Contract(_) | .ContractScope(_, _, _, _, _) | .Let(_, _, _, _, _, _) | .RefutableBind(_, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .ForRange(_, _, _, _, _, _, _, _, _) | .Range(_, _, _, _, _, _, _, _, _, _) | .Return(_, _) | .TaskGroup(_, _, _, _) | .DeferClose(_, _, _) | .If(_, _, _, _, _) | .Loop(_, _, _) | .While(_, _, _, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) | .Match(_, _, _, _) | .EnumMatch(_, _, _, _, _) | .RangeSwitch(_, _, _, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, _, _) | .Inline(_, _) | .DebugOnly(_, _) | .DeepCheck(_, _) | .MixedSwitch(_, _, _, _, _) | .Unsafe(_, _) | .UnsafeBlock(_, _, _) | .SentryPolicy(_, _, _) | .Impure(_, _) | .Reactive(_, _) | .Region(_, _) | .Layout(_, _, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .Shield(_, _) | .Defer(_, _) | .ScopeMember(_, _, _) | .Transact(_, _, _, _, _) | .GCEdit(_, _, _, _, _, _, _) -> return false
+            if statements[last].in_place() == .ExprStmt(call, _) {
+                return sema_call_static_rewrite_value(call, target, method_id)
             }
+            return false
         }
-        .IntLit(_, _) | .StrLit(_) | .Local(_) | .CtLit(_) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) | .Flat(_) -> return false
+        .Call(_, _, _) | .IntLit(_, _) | .StrLit(_) | .Local(_) | .CtLit(_) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) | .Flat(_) -> return false
     }
     false
 }
@@ -835,16 +820,6 @@ sema_call_builtin_static_shape: fn(row: BuiltinStaticRow, callee: String, owner_
     true
 }
 
-sema_call_builtin_static_carrier: fn(result: Type) -> TFailureCarrier Never! {
-    if result == {
-        // copy: `ok` and `err` are payloads of read parameter `result`, which keeps the originals; the new TFailureCarrier.Result's fields own `ok` and `err`
-        .Result(ok, err) -> TFailureCarrier.Result{success: ok.copy(), error: err.copy()}
-        // copy: `inner` is a payload of read parameter `result`, which keeps the original; field `value` of the new TFailureCarrier.Optional owns this one
-        .Option(inner) -> TFailureCarrier.Optional{value: inner.copy()}
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> TFailureCarrier.Infallible
-    }
-}
-
 sema_call_builtin_static_call_arg: fn(value: TExpr, argument: CallArg) -> TCallArg Never! {
     TCallArg{
         value: value,
@@ -1029,7 +1004,7 @@ sema_call_try_builtin_static: fn(owner: String, module_name: String, method: Str
         check.diagnostics.push(sema_error("E0104", span, "static method call `{callee}` could not be lowered", "the built-in static row has no checked-tree construction", "use a registered built-in static method"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    ^facts: SemaCallFacts{return_type: result, failure_carrier: sema_call_builtin_static_carrier(result), effect_bound: Val([EffectRowEntry]{}), type_args: [Type]{}, default_refs: [FunctionDefaultRef]{}}
+    ^facts: SemaCallFacts{return_type: result, failure_carrier: sema_expression_failure_carrier(result), effect_bound: Val([EffectRowEntry]{}), type_args: [Type]{}, default_refs: [FunctionDefaultRef]{}}
     if !sema_effect_record_intrinsic_fact(check.environment.*, check.program.*, check.scopes, check.context, callee, span, facts, check.diagnostics) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }

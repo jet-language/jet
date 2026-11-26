@@ -279,12 +279,6 @@ sema_call_append_rewritten_default_ref: fn(default_refs: ^[FunctionDefaultRef], 
     sources.push(SemaCallArgSource.Default{parameter: parameter})
 }
 
-sema_call_append_remaining_written: fn(taken: [CallArg?], rewritten: ^[CallArg], sources: ^[SemaCallArgSource], source_index: Int) Never! {
-    written: taken[source_index] ?? return
-    rewritten.push(written.copy())
-    sources.push(SemaCallArgSource.Written{index: source_index})
-}
-
 sema_call_mark_written: fn(arg: CallArg, source_index: Int, parameter: Int, param: SemaCallParam, call_span: Span) -> CallArg Never! {
     ^value: arg
     value.flags.source_index = Val(source_index)
@@ -343,9 +337,10 @@ sema_call_rewrite_args: fn(params: [SemaCallParam], args: ^[CallArg], slots: [[I
     }
     // Preserve arguments outside the selected declaration shape for caller
     // recovery; they remain written expressions, never fabricated defaults.
-    loop source_index in 0..<taken.len() {
-        if taken[source_index] != None {
-            sema_call_append_remaining_written(taken, rewritten, sources, source_index)
+    loop (source_index, slot) in taken.move() {
+        if slot == .Val(written) {
+            rewritten.push(written)
+            sources.push(SemaCallArgSource.Written{index: source_index})
         }
     }
     loop args.len() > 0 -> ^_: args.pop()

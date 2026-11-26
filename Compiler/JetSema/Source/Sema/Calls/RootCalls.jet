@@ -84,7 +84,7 @@ sema_root_call_imported: fn(method: String, receiver: Type?, check: SemaBodyChec
     }
     aliases.sort()
     ^seen: [String]{}
-    loop alias in aliases {
+    loop alias in aliases.move() {
         imported: sema_call_source_import_target(check.environment.*, check.program.*, alias) ?? next
         if seen.contains(imported.module_identity) -> next
         seen.push(imported.module_identity)
@@ -100,7 +100,8 @@ sema_root_call_imported: fn(method: String, receiver: Type?, check: SemaBodyChec
             signature: sema_type_resolve_declared_with_generics(graph, registered.signature, export.source_module_identity, loop param in registered.generic_params -> TGenericParam{name: param.name, bounds: [SymbolID]{}})
             if !sema_root_call_param_accepts(signature, generic_names, receiver_type, check) -> next
         }
-        targets.push(SemaRootCallTarget{alias: Val(alias.copy()), shown: "{alias}.{method}"})
+        shown: "{alias}.{method}"
+        targets.push(SemaRootCallTarget{alias: Val(alias), shown: shown})
     }
     targets
 }
