@@ -505,6 +505,46 @@ impl ProcessChild {
     interrupt: fn(self) -[Exec]> IOError! { rt.child_interrupt(self) }
 }
 
+// A started child's input pipe. Each step is an Exec step on the pipe.
+impl ProcessStdin {
+    /// Writes all of `text` to the child.
+    write: fn(self, text: String) -[Exec]> IOError! { rt.stdin_write_text(self, text) }
+
+    /// Writes what the pipe takes of `bytes` in one write and answers how many
+    /// it took.
+    write_some: fn(self, bytes: [U8]) -[Exec]> Int IOError! { rt.stdin_write(self, bytes) }
+
+    /// Writes every byte of `bytes` to the child.
+    write_bytes: fn(self, bytes: [U8]) -[Exec]> IOError! { rt.stdin_write_all(self, bytes) }
+
+    /// Closes the pipe, so the child reads the end of its input.
+    close: fn(self) -[Exec]> { rt.stdin_close(self) }
+}
+
+// A started child's output pipe, read in pieces; `lines()` walks its lines.
+impl ProcessStdoutStream {
+    /// Up to `max` bytes of output; an empty list at the end of input.
+    read_bytes: fn(self, max: Int) -[Exec]> [U8] IOError! { rt.stdout_read(self, max) }
+
+    /// The output as a loop source of pieces of at most `size` bytes.
+    chunks: fn(self, size: Int{65536}) -> ProcessChunks Never! { ProcessChunks{__stdout: Val(self), __size: size} }
+}
+
+// A started child's error-output pipe, read as its output pipe is.
+impl ProcessStderrStream {
+    /// Up to `max` bytes of error output; an empty list at the end of input.
+    read_bytes: fn(self, max: Int) -[Exec]> [U8] IOError! { rt.stderr_read(self, max) }
+
+    /// The error output as a loop source of pieces of at most `size` bytes.
+    chunks: fn(self, size: Int{65536}) -> ProcessChunks Never! { ProcessChunks{__stderr: Val(self), __size: size} }
+}
+
+// A terminal child's session.
+impl TerminalSession {
+    /// Gives the child's terminal the window size `size`.
+    resize: fn(self, size: TerminalSize) -[IO]> IOError! { rt.terminal_session_resize(self, size) }
+}
+
 // The ProcessSpec builders: `spec.cwd(path)` and the rest check as calls of
 // these bodies, which the compiler finds by their roles (`terminal(policy)`
 // fills ProcessSpecTerminalWithPolicy), each the jet.runtime.process leaf of
@@ -1091,16 +1131,6 @@ priv ProcessChunkCursor: struct {
             Val(piece)
         }
     }
-}
-
-// The loop sources `child.stdout.chunks(size)` and `child.stderr.chunks(size)`
-// check to (Sema ProcessHandles).
-#Builtin.Role(.ProcessStdoutChunks) priv __stdout_chunks: fn(stream: ProcessStdoutStream, size: Int) -> ProcessChunks Never! {
-    ProcessChunks{__stdout: Val(stream), __size: size}
-}
-
-#Builtin.Role(.ProcessStderrChunks) priv __stderr_chunks: fn(stream: ProcessStderrStream, size: Int) -> ProcessChunks Never! {
-    ProcessChunks{__stderr: Val(stream), __size: size}
 }
 
 pipe_line: fn(input: ^^[U8]) -> String? IOError! {
