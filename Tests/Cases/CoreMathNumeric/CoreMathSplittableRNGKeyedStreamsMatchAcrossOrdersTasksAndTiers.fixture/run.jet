@@ -68,14 +68,21 @@ run: fn() {
     print("tasks_fwd:{par_fwd[0] == seq_0}:{par_fwd[1] == seq_1}:{par_fwd[2] == seq_2}:{par_fwd[3] == seq_3}")
     print("tasks_rev:{par_rev[3] == seq_0}:{par_rev[2] == seq_1}:{par_rev[1] == seq_2}:{par_rev[0] == seq_3}")
 
-    // Distinct keys and distinct parent seeds yield distinct streams.
+    // Distinct keys (including Int vs String) and distinct parent seeds yield distinct streams.
     ^k1: parent.split("a", "bc")
     ^k2: parent.split("ab", "c")
     ^k3: random.rng(1338, "a", "bc")
+    ^k4: parent.split("42")
+    ^k5: parent.split(42)
+    ^c1: parent.split("chunk", 12, 34)
+    ^c2: parent.split("chunk").split(12).split(34)
     d1: k1.int(0, 1000000000)
     d2: k2.int(0, 1000000000)
     d3: k3.int(0, 1000000000)
-    print("distinct:{d1 != d2 && d1 != d3 && d2 != d3}")
+    d4: k4.int(0, 1000000000)
+    d5: k5.int(0, 1000000000)
+    print("distinct:{d1 != d2 && d1 != d3 && d2 != d3 && d4 != d5}")
+    print("int_keys:{c1.int(0, 1000000) == c2.int(0, 1000000)}")
     print(seq_0)
     print(seq_1)
     print(seq_2)
