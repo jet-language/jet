@@ -354,6 +354,9 @@ os_open: fn(path: String?, flags_in: Int, psow: Bool{true}, modeof: String?{None
             open_mode = mode
         }
     }
+    // When VFS tracing is active, note whether a newly created file existed before open.
+    trace_check_create: is_create && !is_delete && os_trace_matches(name)
+    existed_before: if trace_check_create -> rt.vfs_access(name, OS_F_OK) == 0 else -> true
     ^fd: rt.vfs_open(name, open_flags, open_mode)
     ^rc: base.OK
     if fd < 0 {
@@ -373,6 +376,7 @@ os_open: fn(path: String?, flags_in: Int, psow: Bool{true}, modeof: String?{None
         if rc == base.OK -> rc = base.CANTOPEN
         return Err(base.fail(rc))
     }
+    if trace_check_create && !existed_before -> os_trace_emit_create(name)
     if open_mode != 0 && flags & (OPEN_WAL | OPEN_MAIN_JOURNAL) != 0 {
         // robustFchown: a root process gives the journal its database's owner.
         _: rt.vfs_chown_like(fd, owner_of)
@@ -446,7 +450,10 @@ os_read: fn(file: ^DBFile, buf: ^[U8], amt: Int, offset: Int) -[DB]> SQLError! {
 // or ENOSPC is SQLITE_FULL.
 os_write: fn(file: ^DBFile, data: [U8], amt: Int, offset: Int) -[DB]> SQLError! {
     wrote: rt.vfs_write(file.fd, offset, data, 0, amt)
-    if wrote >= amt -> return Ok()
+    if wrote >= amt {
+        os_trace_emit_write(file.path, offset, data, amt)
+        return Ok()
+    }
     if wrote < 0 && 0 - wrote != OS_ENOSPC {
         file.last_errno = 0 - wrote
         return Err(base.fail(base.IOERR_WRITE))
@@ -464,6 +471,7 @@ os_truncate: fn(file: ^DBFile, size: Int) -[DB]> SQLError! {
         file.last_errno = 0 - got
         return Err(base.fail(base.IOERR_TRUNCATE))
     }
+    os_trace_emit_truncate(file.path, n)
     Ok()
 }
 
@@ -478,11 +486,13 @@ os_sync: fn(file: ^DBFile, flags: Int) -[DB]> SQLError! {
         file.last_errno = 0 - got
         return Err(base.fail(base.IOERR_FSYNC))
     }
+    os_trace_emit_sync(file.path, flags)
     if file.ctrl & UNIXFILE_DIRSYNC != 0 {
         dirfd: os_open_directory(file.path)
         if dirfd >= 0 {
             _: rt.vfs_sync(dirfd)
             _: rt.vfs_close(dirfd)
+            os_trace_emit_dirsync(file.path)
         }
         file.ctrl &= UNIXFILE_DIRSYNC ~ 255
     }
@@ -643,6 +653,7 @@ os_size_hint: fn(file: ^DBFile, size: Int) -[DB]> SQLError! {
         if at >= target -> at = target - 1
         wrote: rt.vfs_write(file.fd, at, zero, 0, 1)
         if wrote != 1 -> return Err(base.fail(base.IOERR_WRITE))
+        os_trace_emit_write(file.path, at, zero, 1)
         at += SIZE_HINT_BLOCK
     }
     Ok()
@@ -725,12 +736,14 @@ os_delete: fn(path: String, dir_sync: Bool) -[DB]> SQLError! {
         if 0 - got == OS_ENOENT -> return Err(base.fail(base.IOERR_DELETE_NOENT))
         return Err(base.fail(base.IOERR_DELETE))
     }
+    os_trace_emit_delete(path)
     if dir_sync {
         dirfd: os_open_directory(path)
         if dirfd >= 0 {
             synced: rt.vfs_sync(dirfd)
             _: rt.vfs_close(dirfd)
             if synced < 0 -> return Err(base.fail(base.IOERR_DIR_FSYNC))
+            os_trace_emit_dirsync(path)
         }
     }
     Ok()
@@ -1239,6 +1252,193 @@ chacha_qr: fn(x: ^[Int], a: Int, b: Int, c: Int, d: Int) Never! {
 
 // random.c ROTL on a 32-bit word.
 chacha_rotl: fn(v: Int, n: Int) -> Int Never! { ((v << n) | v >> (32 - n)) & U32_MASK }
+
+// Opt-in process-wide VFS mutation and sync boundary trace recorder.
+// Inactive (zero I/O) unless explicitly enabled for a database directory
+// via os_trace_start / Store.trace_vfs.
+OSTraceState: struct {
+    active: Bool,
+    prefix: String,
+    trace_path: String,
+    fd: Int,
+    off: Int,
+    seq: Int,
+}
+
+init_os_trace: fn() -> Shared<OSTraceState> Never! {
+    Shared{OSTraceState{active: false, prefix: "", trace_path: "", fd: -1, off: 0, seq: 0}}
+}
+
+// Directory prefix ending in '/' for a canonical full pathname.
+os_dir_prefix: fn(path: String) -> String Never! {
+    bytes: path.bytes()
+    ^last_slash: -1
+    loop i in 0..<bytes.len() {
+        if bytes[i] == OS_SLASH -> last_slash = i
+    }
+    if last_slash < 0 -> return ""
+    os_bytes_text(bytes, last_slash + 1)
+}
+
+// Relative filename below `prefix`, or empty string when `path` is outside
+// `prefix` or names the trace output file itself.
+os_trace_rel: fn(prefix: String, trace_path: String, path: String) -> String Never! {
+    if prefix.count_bytes() == 0 || path.count_bytes() <= prefix.count_bytes() -> return ""
+    if path == trace_path -> return ""
+    if !path.starts_with(prefix) -> return ""
+    raw: path.bytes()
+    ^out: [U8]{}
+    loop i in prefix.count_bytes()..<raw.len() -> out.push(raw[i])
+    String.from_bytes(out) ?? ""
+}
+
+os_trace_matches: fn(path: String) -> Bool Never! {
+    guard: core.mem.__process_shared(init_os_trace).guard_read()
+    if !guard.value.active -> return false
+    os_trace_rel(guard.value.prefix, guard.value.trace_path, path).count_bytes() > 0
+}
+
+os_trace_start: fn(prefix: String, trace_path: String) -[DB]> Bool Never! {
+    full_trace: if os_full_pathname(trace_path) == .Ok(fp) -> fp.path else -> trace_path.copy()
+    fd: rt.vfs_open(full_trace, OS_O_RDWR | OS_O_CREAT | OS_O_NOFOLLOW, 384)
+    if fd < 0 -> return false
+    if rt.vfs_truncate(fd, 0) < 0 {
+        _: rt.vfs_close(fd)
+        return false
+    }
+    ^guard: core.mem.__process_shared(init_os_trace).guard_edit()
+    if guard.value.fd >= 0 -> _: rt.vfs_close(guard.value.fd)
+    guard.value.active = true
+    guard.value.prefix = prefix.copy()
+    guard.value.trace_path = full_trace
+    guard.value.fd = fd
+    guard.value.off = 0
+    guard.value.seq = 0
+    true
+}
+
+os_trace_stop: fn() -[DB]> Never! {
+    ^guard: core.mem.__process_shared(init_os_trace).guard_edit()
+    if guard.value.fd >= 0 {
+        _: rt.vfs_sync(guard.value.fd)
+        _: rt.vfs_close(guard.value.fd)
+    }
+    guard.value.active = false
+    guard.value.prefix = ""
+    guard.value.trace_path = ""
+    guard.value.fd = -1
+    guard.value.off = 0
+    guard.value.seq = 0
+}
+
+os_trace_append: fn(state: ^OSTraceState, line: String) -[DB]> Never! {
+    if !state.active || state.fd < 0 {
+        return
+    }
+    bytes: line.bytes()
+    n: bytes.len()
+    if n == 0 {
+        return
+    }
+    wrote: rt.vfs_write(state.fd, state.off, bytes, 0, n)
+    if wrote > 0 -> state.off += wrote
+}
+
+os_trace_hex: fn(data: [U8], amt: Int) -> String Never! {
+    digits: "0123456789abcdef".bytes()
+    ^out: [U8]{}
+    loop i in 0..<amt {
+        b: Int{data[i]}
+        out.push(digits[b >> 4])
+        out.push(digits[b & 15])
+    }
+    String.from_bytes(out) ?? ""
+}
+
+os_trace_emit_create: fn(path: String) -[DB]> Never! {
+    ^guard: core.mem.__process_shared(init_os_trace).guard_edit()
+    if !guard.value.active {
+        return
+    }
+    rel: os_trace_rel(guard.value.prefix, guard.value.trace_path, path)
+    if rel.count_bytes() == 0 {
+        return
+    }
+    seq: guard.value.seq
+    guard.value.seq += 1
+    os_trace_append(guard.value, "CREATE|{seq}|{rel}|.\n")
+}
+
+os_trace_emit_write: fn(path: String, offset: Int, data: [U8], amt: Int) -[DB]> Never! {
+    ^guard: core.mem.__process_shared(init_os_trace).guard_edit()
+    if !guard.value.active {
+        return
+    }
+    rel: os_trace_rel(guard.value.prefix, guard.value.trace_path, path)
+    if rel.count_bytes() == 0 {
+        return
+    }
+    seq: guard.value.seq
+    guard.value.seq += 1
+    hex: os_trace_hex(data, amt)
+    os_trace_append(guard.value, "WRITE|{seq}|{rel}|{offset}|{amt}|{hex}\n")
+}
+
+os_trace_emit_truncate: fn(path: String, size: Int) -[DB]> Never! {
+    ^guard: core.mem.__process_shared(init_os_trace).guard_edit()
+    if !guard.value.active {
+        return
+    }
+    rel: os_trace_rel(guard.value.prefix, guard.value.trace_path, path)
+    if rel.count_bytes() == 0 {
+        return
+    }
+    seq: guard.value.seq
+    guard.value.seq += 1
+    os_trace_append(guard.value, "TRUNCATE|{seq}|{rel}|{size}\n")
+}
+
+os_trace_emit_sync: fn(path: String, flags: Int) -[DB]> Never! {
+    ^guard: core.mem.__process_shared(init_os_trace).guard_edit()
+    if !guard.value.active {
+        return
+    }
+    rel: os_trace_rel(guard.value.prefix, guard.value.trace_path, path)
+    if rel.count_bytes() == 0 {
+        return
+    }
+    seq: guard.value.seq
+    guard.value.seq += 1
+    os_trace_append(guard.value, "SYNC|{seq}|{rel}|{flags}\n")
+}
+
+os_trace_emit_delete: fn(path: String) -[DB]> Never! {
+    ^guard: core.mem.__process_shared(init_os_trace).guard_edit()
+    if !guard.value.active {
+        return
+    }
+    rel: os_trace_rel(guard.value.prefix, guard.value.trace_path, path)
+    if rel.count_bytes() == 0 {
+        return
+    }
+    seq: guard.value.seq
+    guard.value.seq += 1
+    os_trace_append(guard.value, "DELETE|{seq}|{rel}\n")
+}
+
+os_trace_emit_dirsync: fn(path: String) -[DB]> Never! {
+    ^guard: core.mem.__process_shared(init_os_trace).guard_edit()
+    if !guard.value.active {
+        return
+    }
+    rel: os_trace_rel(guard.value.prefix, guard.value.trace_path, path)
+    if rel.count_bytes() == 0 {
+        return
+    }
+    seq: guard.value.seq
+    guard.value.seq += 1
+    os_trace_append(guard.value, "DIRSYNC|{seq}|.\n")
+}
 
 #Test("chacha_block matches the RFC 7539 2.3.2 test vector") {
     ^state: [Int]{1634760805, 857760878, 2036477234, 1797285236}

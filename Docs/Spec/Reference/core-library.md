@@ -527,6 +527,18 @@ route, mount and middleware registrations lower to its Jet `__http_*` methods
 after the existing escaping-callback admission. The original effects and
 resource conventions remain in force.
 
+### Database crash consistency and storage model
+
+`core.db` provides whole-or-absent transaction crash recovery (`PRAGMA integrity_check = ok`)
+in rollback-journal (`DELETE`/`TRUNCATE`/`PERSIST`) and write-ahead log (`WAL`) modes under
+a local POSIX durable storage model with `PRAGMA synchronous` set to `NORMAL`, `FULL`
+(default), or `EXTRA`, where the filesystem honors file `fsync` and directory `fsync`
+barriers and per-inode write isolation. Between sync barriers, unsynced writes may be
+dropped or reordered on crash. Network and remote filesystems (such as NFS, SMB/CIFS,
+SSHFS, 9p, GlusterFS, Ceph, Lustre, AFP, and WebDAV) receive **no untested atomicity or
+durability promise** and are refused by the crash-consistency harness alongside timeouts,
+invalid oracles, unsafe sync settings, and incomplete crash schedules.
+
 ### Examples in the repository
 
 Executable examples are organized by capability. Useful entry points for this

@@ -1,0 +1,12 @@
+# Real crash-reopen consistency test on the emitted core.db engine:
+# crashes every reachable write, truncate, delete, and sync boundary of a
+# multi-page two-transaction workload (both rollback-journal DELETE and WAL
+# modes, including dropped and seeded reordered unsynced writes), verifies
+# PRAGMA integrity_check = ok and whole-or-absent transactions on every reopen,
+# and proves a real failing schedule under synchronous = OFF replays from its
+# seed and reduces to a minimal counterexample.
+fixture: CrashReopen.fixture
+env: NO_COLOR=1
+step: jet test main.jet --filter db_crash_reopen
+exit: 0
+stdout: ~ "db_crash_reopen: pass" # db_crash_reopen passes across every reachable write/sync boundary

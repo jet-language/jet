@@ -869,6 +869,7 @@ priv policy_apply: fn(sql: SQL, policy: RowPolicy, user: String, allow_schema: B
     }
     kind: tokens[0].word.copy()
     if kind != "select" && kind != "update" && kind != "delete" && kind != "insert" {
+        if kind == "pragma" && (allow_schema || policy.table == "") -> return Ok(sql.copy())
         if kind == "create" || kind == "alter" || kind == "drop" || kind == "pragma" || kind == "begin" || kind == "commit" || kind == "rollback" {
             if allow_schema -> return Ok(sql.copy())
             return Err(db_error("schema and transaction-control SQL is only allowed in db.migrate or through the scope transaction controls"))
@@ -1078,6 +1079,25 @@ Store: struct {
     statements: fn(self) -> Int Never! {
         guard: self.state.guard_read()
         guard.value.driver.statements
+    }
+
+    // Record every durable VFS mutation and sync boundary in this store's
+    // database directory to `trace_path` (`Val(path)` starts, `None` stops).
+    trace_vfs: fn(self, trace_path: String?) -[DB]> Bool Never! {
+        if trace_path == {
+            .None -> {
+                os.os_trace_stop()
+                true
+            }
+            .Val(out_path) -> {
+                guard: self.state.guard_read()
+                if guard.value.path == ":memory:" -> return false
+                full: if os.os_full_pathname(guard.value.path) == .Ok(fp) -> fp.path else -> guard.value.path.copy()
+                prefix: os.os_dir_prefix(full)
+                if prefix.count_bytes() == 0 -> return false
+                os.os_trace_start(prefix, out_path)
+            }
+        }
     }
 
     // The typed table `name`: rows of type `T`, each found by the key that

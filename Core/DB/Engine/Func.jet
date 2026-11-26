@@ -36,6 +36,7 @@ use {
     record: __core_db_record
     tk: __core_db_tokenize
     os: __core_db_os
+    pager: __core_db_pager
     conn: __core_db_conn
     aux: __core_db_vdbeaux
     opc: __core_db_opcodes
@@ -2576,14 +2577,26 @@ builtin_call: fn(db: ^conn.Conn, v: ^conn.Vdbe, method: Int) -[DB]> Never! {
 // ---------------------------------------------------------------------------
 // PRAGMA (pragma.c).
 //
-// sqlite3Pragma for the pragmas the build runs, table_info and
-// table_xinfo (PragTyp_TABLE_INFO). Any other name is one pragmaLocate
-// does not find, which C ignores, with no error and no result; the other
-// pragmas of pragma.c are not ported.
+// sqlite3Pragma for the pragmas the build runs: table_info, table_xinfo,
+// integrity_check, quick_check, journal_mode, and synchronous. Any other
+// name is one pragmaLocate does not find, which C ignores, with no error
+// and no result; the other pragmas of pragma.c are not ported.
 
 // pragCName[8 .. 14]: the result columns of table_info (the first six)
 // and table_xinfo (all seven).
 PRAGMA_TABLE_INFO_COLUMNS: [String]{"cid", "name", "type", "notnull", "dflt_value", "pk", "hidden"}
+
+// Parse a non-negative decimal integer from a PRAGMA argument token, or -1.
+pragma_parse_int: fn(raw: [U8]) -> Int Never! {
+    if raw.len() == 0 -> return -1
+    ^val: 0
+    loop b in raw {
+        d: Int{b}
+        if d < 48 || d > 57 -> return -1
+        val = val * 10 + (d - 48)
+    }
+    val
+}
 
 // sqlite3Pragma: code PRAGMA [schema.]name, PRAGMA [schema.]name=value or
 // PRAGMA [schema.]name(value); minus is nonzero for a '-' before value.
@@ -2611,6 +2624,18 @@ pragma: fn(p: ^cg.Parse, a: ^ast.AST, name1: ast.SQLTok, name2: ast.SQLTok, valu
     // SQLITE_NOTFOUND for every pragma, so that step is left out.
     loop b in 0..<p.db.btrees.len() -> p.db.btrees[b].pager.busy.n_busy = 0
     // pragmaLocate.
+    if util.str_icmp(z_left, "integrity_check".bytes()) == 0 || util.str_icmp(z_left, "quick_check".bytes()) == 0 {
+        pragma_integrity_check(p, a, i_db, z_left, z_right)
+        return
+    }
+    if util.str_icmp(z_left, "journal_mode".bytes()) == 0 {
+        pragma_journal_mode(p, i_db, z_right)
+        return
+    }
+    if util.str_icmp(z_left, "synchronous".bytes()) == 0 {
+        pragma_synchronous(p, i_db, z_right)
+        return
+    }
     ^i_arg: 0
     if util.str_icmp(z_left, "table_info".bytes()) == 0 -> i_arg = 0 else if util.str_icmp(z_left, "table_xinfo".bytes()) == 0 {
         i_arg = 1
@@ -2630,6 +2655,109 @@ pragma: fn(p: ^cg.Parse, a: ^ast.AST, name1: ast.SQLTok, name2: ast.SQLTok, valu
     }
     table_name: z_right ?? return
     pragma_table_info(p, a, table_name, z_db, i_arg)
+}
+
+// PRAGMA integrity_check / PRAGMA quick_check: run OP_IntegrityCk across the
+// schema table, every table B-tree, every index B-tree, and the freelist of
+// database `i_db`, returning "ok" when zero errors are found or the engine's
+// error report otherwise.
+pragma_integrity_check: fn(p: ^cg.Parse, a: ^ast.AST, i_db: Int, z_left: [U8], z_right: [U8]?) -[DB]> Never! {
+    ^g: p.up
+    if g.read_schema(p, a) != base.OK {
+        return
+    }
+    col_name: if util.str_icmp(z_left, "quick_check".bytes()) == 0 -> "quick_check".bytes() else -> "integrity_check".bytes()
+    cg.v_set_num_cols(p, 1)
+    cg.v_set_col_name(p, 0, conn.COLNAME_NAME, col_name)
+    if p.db.dbs[i_db].bt < 0 {
+        p.f.n_mem = 2
+        _: cg.op4_text(p, opc.OP_STRING8, 0, 1, 0, "ok".bytes())
+        _: cg.op2(p, opc.OP_RESULT_ROW, 1, 1)
+        return
+    }
+    cg.code_verify_schema(p, a, i_db)
+    cg.v_uses_btree(p, i_db)
+    ^mx_err: 100
+    if z_right == .Val(arg) {
+        parsed: pragma_parse_int(arg)
+        if parsed > 0 -> mx_err = parsed
+    }
+    s: p.db.dbs[i_db].schema
+    ^roots: [Int]{1}
+    loop tab in conn.hash_values(p.db.schemas[s].tbl_hash) {
+        tnum: p.db.tables[tab].tnum
+        if tnum > 1 && !roots.contains(tnum) -> roots.push(tnum)
+    }
+    loop idx in conn.hash_values(p.db.schemas[s].idx_hash) {
+        tnum: p.db.indexes[idx].tnum
+        if tnum > 1 && !roots.contains(tnum) -> roots.push(tnum)
+    }
+    ^ai: [Int]{roots.len()}
+    loop root in roots -> ai.push(root)
+    p.f.n_mem = 3
+    _: cg.op2(p, opc.OP_INTEGER, mx_err, 2)
+    _: cg.op4(p, opc.OP_INTEGRITY_CK, 1, roots.len(), 2, .IntArray(ai))
+    cg.v_change_p5(p, i_db)
+    addr_ok: cg.op2(p, opc.OP_IS_NULL, 1, 0)
+    _: cg.op2(p, opc.OP_RESULT_ROW, 1, 1)
+    addr_done: cg.goto(p, 0)
+    cg.v_jump_here(p, addr_ok)
+    _: cg.op4_text(p, opc.OP_STRING8, 0, 1, 0, "ok".bytes())
+    _: cg.op2(p, opc.OP_RESULT_ROW, 1, 1)
+    cg.v_jump_here(p, addr_done)
+}
+
+// PRAGMA journal_mode [= delete|persist|off|truncate|memory|wal]: query or set
+// database `i_db`'s journal mode via OP_JournalMode.
+pragma_journal_mode: fn(p: ^cg.Parse, i_db: Int, z_right: [U8]?) Never! {
+    cg.v_set_num_cols(p, 1)
+    cg.v_set_col_name(p, 0, conn.COLNAME_NAME, "journal_mode".bytes())
+    ^e_mode: pager.JOURNALMODE_QUERY
+    if z_right == .Val(val) {
+        if util.str_icmp(val, "delete".bytes()) == 0 -> e_mode = pager.JOURNALMODE_DELETE else if util.str_icmp(val, "persist".bytes()) == 0 {
+            e_mode = pager.JOURNALMODE_PERSIST
+        } else if util.str_icmp(val, "off".bytes()) == 0 -> e_mode = pager.JOURNALMODE_OFF else if util.str_icmp(val, "truncate".bytes()) == 0 {
+            e_mode = pager.JOURNALMODE_TRUNCATE
+        } else if util.str_icmp(val, "memory".bytes()) == 0 -> e_mode = pager.JOURNALMODE_MEMORY else if util.str_icmp(val, "wal".bytes()) == 0 {
+            e_mode = pager.JOURNALMODE_WAL
+        }
+    }
+    p.f.n_mem = 2
+    _: cg.op3(p, opc.OP_JOURNAL_MODE, i_db, 1, e_mode)
+    cg.v_uses_btree(p, i_db)
+    _: cg.op2(p, opc.OP_RESULT_ROW, 1, 1)
+}
+
+// PRAGMA synchronous [= 0|1|2|3|off|normal|full|extra]: query or update
+// database `i_db`'s pager synchronous safety level.
+pragma_synchronous: fn(p: ^cg.Parse, i_db: Int, z_right: [U8]?) Never! {
+    if z_right == .Val(val) {
+        ^level: -1
+        if util.str_icmp(val, "0".bytes()) == 0 || util.str_icmp(val, "off".bytes()) == 0 -> level = pager.PAGER_SYNCHRONOUS_OFF else if util.str_icmp(val, "1".bytes()) == 0 || util.str_icmp(val, "normal".bytes()) == 0 {
+            level = pager.PAGER_SYNCHRONOUS_NORMAL
+        } else if util.str_icmp(val, "2".bytes()) == 0 || util.str_icmp(val, "full".bytes()) == 0 {
+            level = pager.PAGER_SYNCHRONOUS_FULL
+        } else if util.str_icmp(val, "3".bytes()) == 0 || util.str_icmp(val, "extra".bytes()) == 0 {
+            level = pager.PAGER_SYNCHRONOUS_EXTRA
+        }
+        if level < 0 {
+            return
+        }
+        p.db.dbs[i_db].safety_level = level
+        p.db.dbs[i_db].b_sync_set = true
+        bt: p.db.dbs[i_db].bt
+        if bt >= 0 {
+            spill: if p.db.flags & conn.SQLITE_CACHE_SPILL != 0 -> pager.PAGER_CACHESPILL else -> 0
+            pager.pager_set_flags(p.db.btrees[bt].pager, level | spill)
+        }
+        return
+    }
+    cg.v_set_num_cols(p, 1)
+    cg.v_set_col_name(p, 0, conn.COLNAME_NAME, "synchronous".bytes())
+    p.f.n_mem = 2
+    cur: if p.db.dbs[i_db].safety_level > 0 -> p.db.dbs[i_db].safety_level - 1 else -> 0
+    _: cg.op2(p, opc.OP_INTEGER, cur, 1)
+    _: cg.op2(p, opc.OP_RESULT_ROW, 1, 1)
 }
 
 // PRAGMA table_info(table) and table_xinfo(table) (i_arg 1): a row for
