@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7042,
-    "rev": 114545,
+    "rev": 114550,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -4840,7 +4840,7 @@
         }
       ],
       "created": "2026-07-06T19:15:48.960Z",
-      "updated": "2026-11-22T02:10:23.697Z",
+      "updated": "2026-11-26T01:00:03.712Z",
       "criteria": [
         {
           "n": 1,
@@ -68624,226 +68624,6 @@
     }
   ],
   "decisions": [
-    {
-      "id": "D-JOS-STUDIO-LAUNCH1",
-      "cardId": "c6q02qhw",
-      "group": "jetos",
-      "title": "jetos Studio launch command",
-      "gist": "Choose how users open jetos Studio.",
-      "explainer": "",
-      "story": "Eli wants to configure a laptop with rollback-safe declarative settings. They need one obvious command to open the GUI.",
-      "inWild": "jetos studio",
-      "detail": "",
-      "options": [
-        {
-          "key": "A",
-          "name": "jetos studio (recommended)",
-          "detail": "Studio belongs to the OS engine and keeps package-manager verbs out of OS UX.",
-          "code": "jetos studio"
-        },
-        {
-          "key": "B",
-          "name": "jet studio --os",
-          "detail": "One Jet umbrella command, but blurs engine boundary.",
-          "code": "jet studio --os"
-        },
-        {
-          "key": "C",
-          "name": "Editor command only",
-          "detail": "Friendly inside IDEs, weak for docs, CI repro, and support.",
-          "code": "Jetos: Open Studio"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "System Settings",
-          "note": "Discoverable but not scriptable; jetos needs both.",
-          "code": "settings app"
-        }
-      ],
-      "rec": "A",
-      "status": "ratified",
-      "created": "2026-07-07T00:40:08.877Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-07-07",
-      "draft": false
-    },
-    {
-      "id": "D-JOS-STUDIO-VIEW1",
-      "cardId": "c6q02qhw",
-      "group": "jetos",
-      "title": "jetos Studio default editing view",
-      "gist": "Choose Studio's default editing view.",
-      "explainer": "",
-      "story": "Ren enables Steam and SSH. They want safe toggles first, then the exact module diff before saving.",
-      "inWild": "Studio -> Services -> SSH -> Enable\nDiff: module system.laptop { services.ssh.enable: true }",
-      "detail": "",
-      "options": [
-        {
-          "key": "A",
-          "name": "Guided control center plus source/diff (recommended)",
-          "detail": "Panels for common tasks, source and provenance always one click away.",
-          "code": "Services -> SSH -> Enable -> Diff"
-        },
-        {
-          "key": "B",
-          "name": "Source-first IDE",
-          "detail": "Powerful and honest, but weak beginner onboarding.",
-          "code": "edit system.jet"
-        },
-        {
-          "key": "C",
-          "name": "Graph/canvas-first",
-          "detail": "Strong visual consistency with #182, but OS settings are usually forms and provenance trees.",
-          "code": "canvas"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "NixOS",
-          "note": "Declarative review is strong; beginner settings UI is weak.",
-          "code": "configuration.nix"
-        }
-      ],
-      "rec": "A",
-      "status": "ratified",
-      "created": "2026-07-07T00:40:08.967Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-07-07",
-      "draft": false
-    },
-    {
-      "id": "D-JOS-STUDIO-STATE1",
-      "cardId": "c6q02qhw",
-      "group": "jetos",
-      "title": "jetos Studio local state boundary",
-      "gist": "Decide what Studio may persist outside Jet source.",
-      "explainer": "",
-      "story": "Priya arranges panels and filters proof logs. She does not want those UI choices to become semantic config or noisy PR diffs.",
-      "inWild": ".jet/studio/cache.json\nsystem/laptop.jet",
-      "detail": "",
-      "options": [
-        {
-          "key": "A",
-          "name": "Generated cache only (recommended)",
-          "detail": "Studio may persist view prefs under .jet, never semantic settings.",
-          "code": ".jet/studio/cache.json"
-        },
-        {
-          "key": "B",
-          "name": "Committed .studio.jet metadata",
-          "detail": "Reviewable UI metadata, but another source-like artifact.",
-          "code": ".studio.jet"
-        },
-        {
-          "key": "C",
-          "name": "No persistence",
-          "detail": "Cleanest truth model, but poor UX for large systems.",
-          "code": "none"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "IDEs",
-          "note": "Keep local view state out of source.",
-          "code": ".vscode state"
-        }
-      ],
-      "rec": "A",
-      "status": "ratified",
-      "created": "2026-07-07T00:40:09.057Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-07-07",
-      "draft": false
-    },
-    {
-      "id": "D-JOS-STUDIO-PROOFGATE1",
-      "cardId": "c6q02qhw",
-      "group": "jetos",
-      "title": "jetos Studio activation proof gate",
-      "gist": "Choose how Studio blocks risky activation.",
-      "explainer": "",
-      "story": "Mara changes kernel and filesystem settings. Studio must tell them whether VM boot and rollback proof are required before switch.",
-      "inWild": "Risk: boot + filesystem\nRequired: plan, VM boot, rollback proof\nSwitch: disabled until proof passes",
-      "detail": "",
-      "options": [
-        {
-          "key": "A",
-          "name": "Plan-only warning",
-          "detail": "Always allow switch after diff approval. Fast, weaker than D-WD8 proof intent.",
-          "code": "warning only"
-        },
-        {
-          "key": "B",
-          "name": "Risk-based hard gate (recommended)",
-          "detail": "Boot/kernel/filesystem/service-risk changes require VM and rollback proof; low-risk changes require plan/diff unless policy says more.",
-          "code": "switch disabled until proof passes"
-        },
-        {
-          "key": "C",
-          "name": "Always VM proof",
-          "detail": "Simple and safe, but over-applies proof to trivial edits.",
-          "code": "VM required for every switch"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "NixOS",
-          "note": "Offers VM/build tools but leaves policy to user habit.",
-          "code": "nixos-rebuild build-vm"
-        }
-      ],
-      "rec": "B",
-      "status": "ratified",
-      "created": "2026-07-07T00:40:09.142Z",
-      "outcome": "B",
-      "ratifiedAt": "2026-07-07",
-      "draft": false
-    },
-    {
-      "id": "D-JOS-STUDIO-PROTOCOL1",
-      "cardId": "c6q02qhw",
-      "group": "jetos",
-      "title": "jetos Studio plan/proof schema stability",
-      "gist": "Decide whether Studio proof/diff artifacts are public schemas in v1.",
-      "explainer": "",
-      "story": "Owen wants CI to show the same plan, risk, and proof result that Studio shows before activation.",
-      "inWild": "jetos plan @laptop --json > plan.json\njetos prove @laptop --json > proof.json",
-      "detail": "",
-      "options": [
-        {
-          "key": "A",
-          "name": "Public schemas from first write flow",
-          "detail": "Studio and CI share stable JSON immediately.",
-          "code": "jetos plan --json"
-        },
-        {
-          "key": "B",
-          "name": "Internal GUI schema first",
-          "detail": "Faster GUI iteration, but CI cannot trust the same artifact.",
-          "code": "internal schema"
-        },
-        {
-          "key": "C",
-          "name": "Public after read-only Studio (recommended)",
-          "detail": "Stabilize once projection fields prove out, before activation handoff.",
-          "code": "public before switch flows"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Terraform",
-          "note": "Plans are useful because CI and humans inspect the same object.",
-          "code": "terraform plan -json"
-        }
-      ],
-      "rec": "C",
-      "status": "ratified",
-      "created": "2026-07-07T00:40:09.229Z",
-      "outcome": "C",
-      "ratifiedAt": "2026-07-07",
-      "draft": false
-    },
     {
       "id": "D-JOS-CONTAINER1",
       "cardId": "c0ppv63p",
@@ -135365,6 +135145,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-26T01:00:03.712Z",
+      "by": "owner",
+      "action": "decision.delete",
+      "ref": "D-JOS-STUDIO-PROTOCOL1",
+      "note": "jetos Studio plan/proof schema stability"
+    },
+    {
+      "at": "2026-11-26T01:00:02.847Z",
+      "by": "owner",
+      "action": "decision.delete",
+      "ref": "D-JOS-STUDIO-PROOFGATE1",
+      "note": "jetos Studio activation proof gate"
+    },
+    {
+      "at": "2026-11-26T01:00:02.012Z",
+      "by": "owner",
+      "action": "decision.delete",
+      "ref": "D-JOS-STUDIO-STATE1",
+      "note": "jetos Studio local state boundary"
+    },
+    {
+      "at": "2026-11-26T01:00:01.177Z",
+      "by": "owner",
+      "action": "decision.delete",
+      "ref": "D-JOS-STUDIO-VIEW1",
+      "note": "jetos Studio default editing view"
+    },
+    {
+      "at": "2026-11-26T01:00:00.302Z",
+      "by": "owner",
+      "action": "decision.delete",
+      "ref": "D-JOS-STUDIO-LAUNCH1",
+      "note": "jetos Studio launch command"
+    },
     {
       "at": "2026-11-26T00:58:41.429Z",
       "by": "Orchestrator",
