@@ -289,7 +289,7 @@ durable_queue: fn(state_path: String, payload: String, key: String) -> QueueRece
     tree.set_delivery(service.delivery_durable()) ?? panic("service.delivery_durable")
     store: service.state_store(state_path) ?? panic("service.state_store")
     tree.set_state_event_log(store, "backend-events", 1, "reversible") ?? panic("service.event_log")
-    endpoint: tree.worker("orders", backend_worker, capacity: 8) ?? panic("service.worker")
+    endpoint: tree.mailbox_worker("orders", backend_worker, capacity: 8) ?? panic("service.worker")
     tree.start() ?? panic("service.start")
     delivery: tree.send_durable(endpoint, payload.copy(), key: key.copy()) ?? panic("service.send_durable")
     retry: delivery.retry() ?? panic("service.retry")

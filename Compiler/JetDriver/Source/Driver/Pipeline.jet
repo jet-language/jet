@@ -7762,9 +7762,12 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: ^JetD
             if budget_rows.move() == .Val(found) {
                 ^budget: jet_driver_effect_budget_diagnostics(load, found)
                 if kg.enabled -> jet_driver_keep_going_diagnostics(kg, "assemble", budget)
-                if jet_driver_has_errors(budget) && !kg.enabled {
-                    jet_driver_trace_step_end(request.trace_sink, "driver.result.budget", -1)
-                    return jet_driver_effect_budget_failure(load, budget.move(), trace)
+                if jet_driver_has_errors(budget) {
+                    if !kg.enabled {
+                        jet_driver_trace_step_end(request.trace_sink, "driver.result.budget", -1)
+                        return jet_driver_effect_budget_failure(load, budget.move(), trace)
+                    }
+                    load.diagnostics.extend(budget.move())
                 }
                 package_effects = found.entries
             }
@@ -7778,9 +7781,12 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: ^JetD
                 if rows == .Val(found) {
                     ^budget: jet_driver_effect_budget_diagnostics(load, found)
                     if kg.enabled -> jet_driver_keep_going_diagnostics(kg, "assemble", budget)
-                    if jet_driver_has_errors(budget) && !kg.enabled {
-                        jet_driver_trace_step_end(request.trace_sink, "driver.result.budget", -1)
-                        return jet_driver_effect_budget_failure(load, budget.move(), trace)
+                    if jet_driver_has_errors(budget) {
+                        if !kg.enabled {
+                            jet_driver_trace_step_end(request.trace_sink, "driver.result.budget", -1)
+                            return jet_driver_effect_budget_failure(load, budget.move(), trace)
+                        }
+                        load.diagnostics.extend(budget.move())
                     }
                     package_effects = found.entries
                 }

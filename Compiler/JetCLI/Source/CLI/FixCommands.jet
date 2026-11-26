@@ -150,8 +150,8 @@ jet_cli_fix_collect: fn(file: String, source: String, files: [JetCLIFixFile], te
         }
     }
     offset: errors.len() - failed.len()
-    ^repairs: jet_cli_fixes_from_diagnostics(jet_cli_fix_fresh(failed.move(), jet_cli_fix_new_errors(errors, fresh_against), offset))
-    ^fixes: jet_cli_fixes_from_diagnostics(diagnostics.move())
+    ^repairs: if parse_failed -> [JetCLIFix]{} else -> jet_cli_fixes_from_diagnostics(jet_cli_fix_fresh(failed.move(), jet_cli_fix_new_errors(errors, fresh_against), offset))
+    ^fixes: if parse_failed -> [JetCLIFix]{} else -> jet_cli_fixes_from_diagnostics(diagnostics.move())
     // A migration repairs the error at the retired word, so it is both.
     loop site in migrations {
         fixes.push(jet_cli_fix_retired_run(site))

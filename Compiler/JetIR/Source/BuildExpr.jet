@@ -2262,6 +2262,11 @@ ir_expr_slot_in: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, expression: Int, 
             if concrete.len() > 0 && ir_function_row(p, key) == None {
                 return ir_fail_slot(b, span, "generic method call outside the checked program")
             }
+            if ir_function_row(p, key) == None && args.len() == 0 {
+                if method.trait_owner == .Val(owner) && ir_short_name(ir_symbol_key(p, owner)) == "Encode" && (method.name == "encode" || method.name == "encode_stored") {
+                    return ir_serde_encode(m, p, b, expression_ty, receiver, method.name == "encode_stored", span)
+                }
+            }
             row: ir_function_row(p, key) ?? return ir_fail_slot(b, span, "method call outside the checked program: {method.name}")
             receiver_access: ir_receiver_access(p.functions[row].kind)
             // A method of a generic type is built for the receiver's instance.
@@ -7125,7 +7130,7 @@ ir_core_function: fn(b: IRBuilder) -> Bool Never! {
 // program's `?` on its call: their spans index the generated fragment, not
 // the user's file, so, like Core, they are no journey hop.
 ir_generated_fragment_function: fn(p: IRProgram, b: IRBuilder) -> Bool Never! {
-    if b.f.key.ends_with(".__jet_cli_run") || b.f.key.contains(".__jet_cli_run_") -> return true
+    if b.f.key.contains(".__jet_cli_") -> return true
     if !ir_builder_body(p, b.row)[0].synthetic -> return false
     symbol_key_names(b.f.key, "__jet_cli_decode") || symbol_key_names(b.f.key, "merge") || symbol_key_names(b.f.key, "to_int") || symbol_key_names(b.f.key, "from_int")
 }
