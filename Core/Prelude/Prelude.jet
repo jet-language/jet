@@ -656,10 +656,10 @@ EffectAccess: enum {
     tool_annotations: fn(self, repeatable: Bool, open_world: Bool) -> ToolAnnotations Never! {
         read_only: self == EffectAccess.Reads
         ToolAnnotations{
-            readOnlyHint: read_only,
-            destructiveHint: self == EffectAccess.Replaces,
-            idempotentHint: read_only || repeatable,
-            openWorldHint: open_world,
+            read_only_hint: read_only,
+            destructive_hint: self == EffectAccess.Replaces,
+            idempotent_hint: read_only || repeatable,
+            open_world_hint: open_world,
         }
     }
 }
@@ -667,10 +667,10 @@ EffectAccess: enum {
 // MCP tool safety annotations derived from checked effect access, repeatability,
 // and external open-world reachability.
 ToolAnnotations: struct {
-    readOnlyHint: Bool,
-    destructiveHint: Bool,
-    idempotentHint: Bool,
-    openWorldHint: Bool,
+    read_only_hint: Bool,
+    destructive_hint: Bool,
+    idempotent_hint: Bool,
+    open_world_hint: Bool,
 }
 
 // A compiler fact plane is a field-less struct that implements Fact: the
