@@ -938,6 +938,7 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
     }
     if !complete -> return None
     sema_call_crypto_misuse(callee, params, args, values, slots, check)
+    sema_call_check_crossed_arguments(callee, params, binding, args, slots, required_types, check)
     // E2104: a C callback argument the compiler cannot hand to C itself (a
     // function value other than a named function or a lambda, or a tagged
     // callback parameter) is refused here, by a compile that lowers the call,
@@ -1884,4 +1885,171 @@ sema_call_read_shared_guard_argument: fn(check: ^SemaBodyCheck, required: Type, 
         return false
     }
     true
+}
+
+// The public name of a parameter eligible for E0773 crossed-argument checking.
+// Positional-only parameters (declared before `/`) keep their names private so
+// callers cannot label them to opt out, and unnamed function-type parameters
+// carry no public label.
+sema_call_crossed_param_name: fn(param: SemaCallParam) -> String Never! {
+    if param.zone == ParamZone.PositionalOnly -> return ""
+    param.label
+}
+
+// Simple variable name carried by an unlabeled, non-spread positional argument
+// (including `^x`, `^^x`, `x.move()`, and `x.copy()`). Labeled arguments opt
+// out explicitly, and field/index projections such as `a.x, b.x` are not bare
+// variable names.
+sema_call_crossed_arg_name: fn(arg: CallArg) -> String? {
+    if arg.label != None || arg.spread -> return None
+    if arg.expr == .Ident(name, _, _) -> return Val(name)
+    if arg.expr == .Copy(inner, _, _) {
+        if inner == .Ident(name, _, _) -> return Val(name)
+    }
+    if arg.expr == .MethodCall(receiver, method, _, _, _, method_args, _) {
+        if method_args.len() == 0 && (method == "copy" || method == "move") {
+            if receiver == .Ident(name, _, _) -> return Val(name)
+        }
+    }
+    None
+}
+
+sema_call_source_is_written: fn(source: SemaCallArgSource) -> Bool Never! {
+    if source == {
+        .Written(_) -> true
+        .Default(_) -> false
+    }
+}
+
+// Whether parameter `other_slot` has the same resolved type as `bound_ty`.
+sema_call_crossed_same_type: fn(params: [SemaCallParam], other_slot: Int, slot_type_index: [Int], required_types: [Type], bound_ty: Type, check: SemaBodyCheck) -> Bool Never! {
+    other_idx: slot_type_index[other_slot]
+    if other_idx >= 0 -> return required_types[other_idx] == bound_ty
+    declared: sema_call_parameter_type(params[other_slot]) ?? return false
+    resolved: sema_call_resolved_type(declared, check.environment.*, check.program.*)
+    resolved == bound_ty
+}
+
+// E0773: refuse calls where two or more unlabeled positional arguments form a
+// crossed name cycle across same-typed parameters (`copy(dst, src)` into
+// `fn(src, dst)`, or `rotate(b, c, a)` into `fn(a, b, c)`). Requiring a cycle
+// of at least two crossed arguments catches swapped and rotated calls with
+// zero false positives on ordinary one-way name collisions such as
+// `set_header(client, "User-Agent", name)` or `sign_extend(bits, 64)`. Labeled
+// arguments opt out explicitly, positional-only parameters (`/`) are excluded,
+// and duplicating one variable (`rect(width, width)`) forms no cycle.
+sema_call_check_crossed_arguments: fn(callee: String, params: [SemaCallParam], binding: SemaCallBinding, args: [CallArg], slots: [Int], required_types: [Type], check: ^SemaBodyCheck) {
+    param_count: params.len()
+    arg_count: args.len()
+    if param_count < 2 || arg_count < 2 -> return
+    // Fast skip unless at least two written positional arguments are bare names.
+    ^bare_count: 0
+    loop index in 0..<arg_count {
+        if index < binding.sources.len() && sema_call_source_is_written(binding.sources[index]) && sema_call_crossed_arg_name(args[index]) != None {
+            bare_count += 1
+            if bare_count >= 2 -> break
+        }
+    }
+    if bare_count < 2 -> return
+
+    ^slot_type_index: (loop _ in 0..<param_count -> -1)
+    ^slot_written_index: (loop _ in 0..<param_count -> -1)
+    loop index in 0..<arg_count {
+        slot: slots[index]
+        if slot >= 0 && slot < param_count {
+            if slot_type_index[slot] < 0 -> slot_type_index[slot] = index
+            if index < binding.sources.len() && sema_call_source_is_written(binding.sources[index]) && slot_written_index[slot] < 0 {
+                slot_written_index[slot] = index
+            }
+        }
+    }
+
+    // Directed edge `next_slot[slot] = target_slot` when `slot` received an
+    // unlabeled bare variable naming a different same-typed parameter
+    // `target_slot`. Each slot has at most one outgoing edge.
+    ^next_slot: (loop _ in 0..<param_count -> -1)
+    loop slot in 0..<param_count {
+        arg_index: slot_written_index[slot]
+        if arg_index < 0 -> next
+        arg_name: sema_call_crossed_arg_name(args[arg_index]) ?? next
+        bound_name: sema_call_crossed_param_name(params[slot])
+        if bound_name == "" || bound_name == arg_name -> next
+        loop other_slot in 0..<param_count {
+            if other_slot == slot -> next
+            if sema_call_crossed_param_name(params[other_slot]) != arg_name -> next
+            if sema_call_crossed_same_type(params, other_slot, slot_type_index, required_types, required_types[arg_index], check) {
+                next_slot[slot] = other_slot
+                break
+            }
+        }
+    }
+
+    // Walk functional graph to report each directed cycle (length >= 2) once.
+    // visit_state: 0 = unvisited, 1 = on current walk, 2 = finished.
+    ^visit_state: (loop _ in 0..<param_count -> 0)
+    shown_callee: if callee == "this function value" -> "this call" else -> "`{callee}`"
+    loop start_slot in 0..<param_count {
+        if visit_state[start_slot] != 0 || next_slot[start_slot] < 0 -> next
+        ^walk: [Int]{}
+        ^cursor: start_slot
+        loop cursor >= 0 && visit_state[cursor] == 0 {
+            visit_state[cursor] = 1
+            walk.push(cursor)
+            cursor = next_slot[cursor]
+        }
+        if cursor >= 0 && visit_state[cursor] == 1 {
+            ^cycle_start: 0
+            loop pos in 0..<walk.len() {
+                if walk[pos] == cursor {
+                    cycle_start = pos
+                    break
+                }
+            }
+            ^cycle_slots: [Int]{}
+            loop pos in cycle_start..<walk.len() -> cycle_slots.push(walk[pos])
+            if cycle_slots.len() >= 2 {
+                // Sort cycle members by source span order for deterministic,
+                // left-to-right diagnostics and suggested fixes.
+                ^order: [Int]{}
+                loop s in cycle_slots -> order.push(s)
+                loop i in 0..<order.len() {
+                    loop j in i + 1..<order.len() {
+                        si: args[slot_written_index[order[i]]].span.start
+                        sj: args[slot_written_index[order[j]]].span.start
+                        if sj < si {
+                            tmp: order[i]
+                            order[i] = order[j]
+                            order[j] = tmp
+                        }
+                    }
+                }
+                first_span: args[slot_written_index[order[0]]].span
+                last_span: args[slot_written_index[order[order.len() - 1]]].span
+                joined_span: Span{start: first_span.start, end: last_span.end}
+                shown_ty: type_name(required_types[slot_written_index[order[0]]])
+                ^written_names: [String]{}
+                ^param_names: [String]{}
+                ^labeled_pairs: [String]{}
+                loop s in order {
+                    p_name: sema_call_crossed_param_name(params[s])
+                    a_name: sema_call_crossed_arg_name(args[slot_written_index[s]]) ?? ""
+                    labeled_pairs.push("{p_name}: {a_name}")
+                    param_names.push(p_name)
+                    written_names.push(a_name)
+                }
+                ^has_trailing_positional: false
+                loop idx in 0..<arg_count {
+                    if idx < binding.sources.len() && sema_call_source_is_written(binding.sources[idx]) && args[idx].label == None && args[idx].span.start > last_span.end {
+                        has_trailing_positional = true
+                        break
+                    }
+                }
+                what: if order.len() == 2 -> "Arguments `{written_names[0]}` and `{written_names[1]}` are crossed in this call to {shown_callee}" else -> "Arguments `({written_names.join(", ")})` are crossed in this call to {shown_callee}"
+                why: if order.len() == 2 -> "{shown_callee} declares `{param_names[0]}` before `{param_names[1]}` with the same type `{shown_ty}`, so passing `({written_names[0]}, {written_names[1]})` by position looks swapped" else -> "{shown_callee} declares `({param_names.join(", ")})` with the same type `{shown_ty}`, so passing `({written_names.join(", ")})` by position looks rotated"
+                fix: if has_trailing_positional -> "Reorder them to `({param_names.join(", ")})`, or label them (and any following arguments) explicitly starting with `{labeled_pairs.join(", ")}`" else -> "Reorder them to `({param_names.join(", ")})`, or label them explicitly as `{labeled_pairs.join(", ")}`"
+                check.diagnostics.push(sema_error("E0773", joined_span, what, why, fix))
+            }
+        }
+        loop visited_slot in walk -> visit_state[visited_slot] = 2
+    }
 }

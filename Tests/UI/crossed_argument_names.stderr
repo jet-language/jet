@@ -1,0 +1,17 @@
+Error: Jet.CrossedArgumentNames: Arguments `dst` and `src` are crossed in this call to `copy_pair`
+  --> Tests/UI/crossed_argument_names.jet:8:18
+    |
+  8 |     _: copy_pair(dst, src)
+    |                  ^^^^^^^^
+ Why: `copy_pair` declares `src` before `dst` with the same type `String`, so passing `(dst, src)` by position looks swapped
+ Fix: Reorder them to `(src, dst)`, or label them explicitly as `src: dst, dst: src`
+More: jet-lang.dev/e/Jet.CrossedArgumentNames
+
+Error: Jet.CrossedArgumentNames: Arguments `(b, c, a)` are crossed in this call to `rotate`
+  --> Tests/UI/crossed_argument_names.jet:13:15
+    |
+ 13 |     _: rotate(b, c, a)
+    |               ^^^^^^^
+ Why: `rotate` declares `(a, b, c)` with the same type `Int`, so passing `(b, c, a)` by position looks rotated
+ Fix: Reorder them to `(a, b, c)`, or label them explicitly as `a: b, b: c, c: a`
+More: jet-lang.dev/e/Jet.CrossedArgumentNames

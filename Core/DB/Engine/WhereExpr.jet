@@ -514,7 +514,7 @@ allowed_op: fn(op: Int) -> Bool Never! {
 expr_commute: fn(p: ^cg.Parse, a: ^ast.AST, e: Int) -> Int Never! {
     l: a.exprs[e].left
     r: a.exprs[e].right
-    if a.exprs[l].op == tk.TK_VECTOR || a.exprs[r].op == tk.TK_VECTOR || ex.binary_compare_coll_seq(p, a, l, r) != ex.binary_compare_coll_seq(p, a, r, l) {
+    if a.exprs[l].op == tk.TK_VECTOR || a.exprs[r].op == tk.TK_VECTOR || ex.binary_compare_coll_seq(p, a, l, r) != ex.binary_compare_coll_seq(p, a, l: r, r: l) {
         a.exprs[e].flags = a.exprs[e].flags ~ ast.EP_COMMUTED
     }
     a.exprs[e].left = r

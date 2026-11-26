@@ -1,0 +1,48 @@
+// Regression tests for #7020 (E0773 CrossedArgumentNames): calls where two or
+// more unlabeled positional arguments form a crossed name cycle across
+// same-typed parameters are refused, while labeled calls, one-way name
+// coincidences with literals/expressions, same-variable duplication,
+// different-typed parameters, positional-only parameters (`/`), and field
+// projections remain accepted.
+use jet_foundation.[Diagnostic]
+
+priv crossed_arg_find: fn(diagnostics: [Diagnostic], code: String) -> [Int] {
+    ^found: [Int]{}
+    loop (index, item) in diagnostics {
+        if item.code == code -> found.push(index)
+    }
+    found
+}
+
+#Test("crossed_args_swap_and_rotation_cycles") {
+    source: "copy_pair: fn(src: String, dst: String) -> String {{ \"{{src}}->{{dst}}\" }}\nrotate: fn(a: Int, b: Int, c: Int) -> Int {{ a * 100 + b * 10 + c }}\nrun: fn() {{\n    src: \"a\"\n    dst: \"b\"\n    _: copy_pair(dst, src)\n    a: 1\n    b: 2\n    c: 3\n    _: rotate(b, c, a)\n}}\n"
+    diagnostics: core_failure_record_diagnostics(source, "user/crossed_cycles")
+    hits: crossed_arg_find(diagnostics, "E0773")
+    assert_eq(hits.len(), 2)
+    assert(diagnostics[hits[0]].what.contains("`dst` and `src` are crossed"))
+    assert(diagnostics[hits[0]].fix.contains("src: dst, dst: src"))
+    assert(diagnostics[hits[1]].what.contains("`(b, c, a)` are crossed"))
+    assert(diagnostics[hits[1]].fix.contains("a: b, b: c, c: a"))
+}
+
+#Test("crossed_args_opt_out_non_cycles_and_exclusions_allowed") {
+    source: "Box2: struct {{ width: Int, height: Int }}\narea: fn(width: Int, height: Int) -> Int {{ width * height }}\nset_header: fn(name: String, value: String) -> String {{ \"{{name}}: {{value}}\" }}\nsign_extend: fn(n: Int, bits: Int) -> Int {{ n + bits }}\nconnect: fn(host: String, port: Int) -> String {{ \"{{host}}:{{port}}\" }}\npositional_only: fn(src: String, dst: String, /) -> String {{ \"{{src}}->{{dst}}\" }}\nrun: fn() {{\n    width: 4\n    height: 9\n    _: area(width, height)\n    _: area(width: height, height: width)\n    _: area(width, width)\n    _: area(height, height)\n    a: Box2{{width: 1, height: 2}}\n    b: Box2{{width: 3, height: 4}}\n    _: area(a.height, b.width)\n    name: \"jet\"\n    _: set_header(\"User-Agent\", name)\n    bits: 42\n    _: sign_extend(bits, 64)\n    host: \"localhost\"\n    port: 8080\n    _: connect(host, port)\n    src: \"in\"\n    dst: \"out\"\n    _: positional_only(dst, src)\n}}\n"
+    diagnostics: core_failure_record_diagnostics(source, "user/crossed_allowed")
+    hits: crossed_arg_find(diagnostics, "E0773")
+    assert_eq(hits.len(), 0)
+}
+
+#Test("crossed_args_methods_generics_and_copy_move_marks") {
+    source: "Writer: struct {{\n    tag: String,\n    transfer: fn(self, src: String, dst: String) -> String {{ \"{{self.tag}}:{{src}}->{{dst}}\" }}\n}}\npair_up: fn<T>(first: T, second: T) -> [T] {{ [T]{{first, second}} }}\nmove_pair: fn(src: ^^String, dst: ^^String) -> String {{ \"{{src}}->{{dst}}\" }}\nwrite_pair: fn(src: ^Int, dst: ^Int) {{ src += dst }}\nrun: fn() {{\n    w: Writer{{tag: \"w\"}}\n    src: \"a\"\n    dst: \"b\"\n    _: w.transfer(dst, src)\n    first: 1\n    second: 2\n    _: pair_up(second, first)\n    _: move_pair(dst.copy(), src.copy())\n    ^x_src: \"p\"\n    ^x_dst: \"q\"\n    _: move_pair(src: x_dst.move(), dst: x_src.move())\n    ^src_n: 1\n    ^dst_n: 2\n    write_pair(^src_n, ^dst_n)\n}}\n"
+    diagnostics: core_failure_record_diagnostics(source, "user/crossed_methods_generics")
+    hits: crossed_arg_find(diagnostics, "E0773")
+    assert_eq(hits.len(), 3)
+}
+
+#Test("crossed_args_write_take_marks_and_trailing_fix_hint") {
+    source: "swap_writes: fn(left: ^Int, right: ^Int) {{ tmp: left; left = right; right = tmp }}\ntake_pair: fn(src: ^^String, dst: ^^String) -> String {{ \"{{src}}->{{dst}}\" }}\nrotate_with_tail: fn(old: String, next: String, flag: Bool) -> String {{ \"{{old}}->{{next}}:{{flag}}\" }}\nrun: fn() {{\n    ^left: 1\n    ^right: 2\n    swap_writes(^right, ^left)\n    src: \"a\"\n    dst: \"b\"\n    _: take_pair(^^dst, ^^src)\n    old: \"v1\"\n    next: \"v2\"\n    _: rotate_with_tail(next, old, true)\n}}\n"
+    diagnostics: core_failure_record_diagnostics(source, "user/crossed_marks")
+    hits: crossed_arg_find(diagnostics, "E0773")
+    assert_eq(hits.len(), 3)
+    assert(diagnostics[hits[2]].fix.contains("following arguments"))
+}

@@ -63,10 +63,10 @@ rt_ed25519_add: fn(p: I64, q: I64, scratch: I64, d2: I64, work: I64) {
     rt_x25519_mul(c, c, d2, work)
     rt_x25519_mul(d, wrapping(p + I64{256}), wrapping(q + I64{256}), work)
     rt_x25519_add(d, d, d)
-    rt_x25519_sub(e, b, a)
+    rt_x25519_sub(e, a: b, b: a)
     rt_x25519_sub(f, d, c)
     rt_x25519_add(g, d, c)
-    rt_x25519_add(h, b, a)
+    rt_x25519_add(h, a: b, b: a)
     rt_x25519_mul(p, e, f, work)
     rt_x25519_mul(wrapping(p + I64{128}), h, g, work)
     rt_x25519_mul(wrapping(p + I64{256}), g, f, work)
@@ -111,7 +111,7 @@ rt_ed25519_mul: fn(p: I64, q: I64, scalar: I64, temporaries: I64, d2: I64, work:
         if (i < I64{0}) { break }
         bit: (rt_text_byte(wrapping(scalar + i / I64{8})) >> (i % I64{8})) & I64{1}
         rt_ed25519_swap(p, q, bit)
-        rt_ed25519_add(q, p, temporaries, d2, work)
+        rt_ed25519_add(p: q, q: p, scratch: temporaries, d2: d2, work: work)
         rt_ed25519_add(p, p, temporaries, d2, work)
         rt_ed25519_swap(p, q, bit)
         i -= I64{1}

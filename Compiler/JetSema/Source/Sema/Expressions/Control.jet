@@ -2844,7 +2844,7 @@ sema_expression_if: fn(condition: Expr, then_body: [Stmt], then_value: Expr, els
     // evaluation is unchanged.
     if sema_expression_absent_optional_test(condition) == .Val(test) {
         if sema_expression_flow_optional_payload(check.scopes, test.name.name) != None && sema_expression_if_absent_test_swaps(else_value, test.name.name) {
-            return sema_expression_if(sema_expression_presence_test(test.name, test.span), else_body, else_value, then_body, then_value, span, expected, check)
+            return sema_expression_if(sema_expression_presence_test(test.name, test.span), then_body: else_body, then_value: else_value, else_body: then_body, else_value: then_value, span: span, expected: expected, check: check)
         }
     }
     // Card #1440 / E0307: the outermost level of an else-less dispatch chain

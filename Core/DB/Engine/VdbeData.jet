@@ -341,18 +341,18 @@ op_arith: fn(v: ^conn.Vdbe, r: Run) -> Int Never! {
         ^a: v.mem[i1].i
         b: v.mem[i2].i
         ^res: Int?{None}
-        if r.op == opc.OP_ADD -> res = util.add_int64(b, a) else if r.op == opc.OP_SUBTRACT {
-            res = util.sub_int64(b, a)
-        } else if r.op == opc.OP_MULTIPLY { res = util.mul_int64(b, a) } else {
+        if r.op == opc.OP_ADD -> res = util.add_int64(a: b, b: a) else if r.op == opc.OP_SUBTRACT {
+            res = util.sub_int64(a: b, b: a)
+        } else if r.op == opc.OP_MULTIPLY { res = util.mul_int64(a: b, b: a) } else {
             if a == 0 {
                 run.reg_null(v, out)
                 return GO_NEXT
             }
             if r.op == opc.OP_DIVIDE {
-                if a != -1 || b != base.I64_MIN -> res = Val(util.c_div(b, a))
+                if a != -1 || b != base.I64_MIN -> res = Val(util.c_div(a: b, b: a))
             } else {
                 if a == -1 -> a = 1
-                res = Val(util.c_rem(b, a))
+                res = Val(util.c_rem(a: b, b: a))
             }
         }
         if res == .Val(x) {
@@ -380,7 +380,7 @@ op_arith: fn(v: ^conn.Vdbe, r: Run) -> Int Never! {
             return GO_NEXT
         }
         if a == -1 -> a = 1
-        rb = util.int_to_double(util.c_rem(b, a))
+        rb = util.int_to_double(util.c_rem(a: b, b: a))
     }
     if math.is_nan(rb) {
         run.reg_null(v, out)
