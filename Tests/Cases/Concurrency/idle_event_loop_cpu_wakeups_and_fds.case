@@ -1,0 +1,8 @@
+# A 2s idle wait with 10 ticks uses under 5% of one CPU, shows exactly 10
+# wakeups, and returns open file descriptors to the baseline after cancel.
+fixture: IdleEventLoopCpuWakeupsAndFds.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run main.jet
+exit: 0
+stdout: = "wakeups: 10\nelapsed_ok: true\ncpu_under_5pct: true\nquiesced: true\nfds_restored: true\n"

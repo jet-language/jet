@@ -532,12 +532,16 @@ App: struct {
 
     // An `#App.Every` method of `app.mount(service)` (sema lowers each
     // here): schedule `name` runs `run` at each minute the cron line `cron`
-    // allows, from when a server first serves the app (`__on_serve`). The
-    // schedule waits in a cell of its own, which the start empties, so a
-    // second start finds nothing to start.
+    // allows, from when a server first serves the app (`__on_serve`), and is
+    // canceled and joined when that server stops (`__on_stop`). The schedule
+    // waits in a cell of its own, which the start empties, so a second start
+    // finds nothing to start.
     __every: fn(self, name: String, cron: String, run: ^^fn(RemoteArgs) -> String [FieldError]!) -> App Never! {
         waiting: Shared{[AppSchedule]{AppSchedule{name: name.copy(), cron: cron.copy(), run: run.move()}}}
-        http_server.__on_serve(app_table(self), fn() { app_schedules_start(waiting) })
+        started: Shared{[Int]{}}
+        started_stop: started.copy()
+        http_server.__on_serve(app_table(self), fn() { app_schedules_start(waiting, started) })
+        http_server.__on_stop(app_table(self), fn(wait_ms: Int) { app_schedules_stop(started_stop, wait_ms) })
         self.copy()
     }
 
@@ -3430,14 +3434,35 @@ priv AppSchedule: struct {
 }
 
 // Starts the schedules `waiting` holds (`calls.schedules`), each once, in
-// the order they were left: it takes each out, so a later start finds none,
-// and starts them after letting `waiting` go.
-priv app_schedules_start: fn(waiting: Shared<[AppSchedule]>) Never! {
+// the order they were left, recording their handle ids in `started` so
+// `app_schedules_stop` cancels and joins them when the server stops.
+priv app_schedules_start: fn(waiting: Shared<[AppSchedule]>, started: Shared<[Int]>) Never! {
     ^schedules: app_schedules_taken(waiting)
+    ^ids: [Int]{}
     loop {
-        schedule: schedules.pop() ?? return
-        calls.schedules.start(schedule.name, schedule.cron, schedule.run)
+        schedule: schedules.pop() ?? break
+        ids.push(calls.schedules.start(schedule.name, schedule.cron, schedule.run))
     }
+    if ids.len() > 0 {
+        ^guard: started.guard_edit()
+        loop id in ids -> guard.value.push(id)
+    }
+}
+
+// Cancels and joins every schedule started for this app when its server stops.
+priv app_schedules_stop: fn(started: Shared<[Int]>, wait_ms: Int) Never! {
+    ids: app_schedule_ids_taken(started)
+    calls.schedules.stop(ids, wait_ms)
+}
+
+priv app_schedule_ids_taken: fn(started: Shared<[Int]>) -> [Int] Never! {
+    ^guard: started.guard_edit()
+    ^ids: [Int]{}
+    loop {
+        id: guard.value.pop() ?? break
+        ids.push(id)
+    }
+    ids
 }
 
 // Takes the schedules `waiting` holds, last first, and leaves none.

@@ -1,0 +1,124 @@
+// After tasks.cancel, no timer or interval producer survives; and app shutdown
+// cancels and joins every scheduled job, preserving missed-tick recording with
+// zero replay on restart.
+use {
+    app
+    db: core.db
+    files: core.files
+    tasks: core.tasks
+    time: core.time
+    web: core.web
+}
+
+#Codable
+Count: struct {
+    name: String,
+    runs: Int,
+}
+
+#Error
+BoardError: enum {
+    Failed(String),
+}
+
+counts_in: fn(store: db.Store) -> db.Table<String, Count> {
+    store.table("counts", key: fn(count: Count) { count.name })
+}
+
+runs_now: fn(counts: db.Table<String, Count>) -[DB.Read]> Int BoardError! {
+    if counts.get("leap_day") == {
+        .Val(count) -> Ok(count.runs)
+        .None -> Ok(0)
+        .Err(failure) -> Err(BoardError.Failed(failure.message()))
+    }
+}
+
+Board: struct {
+    store: db.Store,
+    tries: Shared<Int>,
+
+    #App.Every(cron: "0 0 29 2 *") leap_day: fn(self) -> Int BoardError! {
+        self.tried()
+        self.count_run()
+    }
+
+    tried: fn(self) {
+        ^tried: self.tries.guard_edit()
+        tried.value += 1
+    }
+
+    count_run: fn(self) -[DB.Read, DB.Write]> Int BoardError! {
+        counts: counts_in(self.store)
+        runs: (runs_now(counts) ?? return Err(err)) + 1
+        _: counts.put(Count{name: "leap_day", runs: runs}) ?? return Err(BoardError.Failed(err.message()))
+        Ok(runs)
+    }
+}
+
+threads: fn() -[FS]> Int {
+    text: files.read("/proc/self/status") ?? panic("read status")
+    loop line in text.lines() {
+        if line.starts_with("Threads:") {
+            return Int.parse(line.remove_prefix("Threads:").trim()) ?? -1
+        }
+    }
+    -1
+}
+
+wait_quiesce: fn() -[Exec, Time.Wait]> Bool {
+    loop _ in 0..<100 {
+        if tasks.quiesce() -> return true
+        time.sleep(5ms)
+    }
+    false
+}
+
+tries_of: fn(cell: Shared<Int>) -> Int { cell.guard_read().value }
+
+run: fn() {
+    before_threads: threads()
+    long_interval: tasks.interval(60s)
+    long_after: tasks.after(60s, 42)
+    _: tasks.cancel(long_interval)
+    _: tasks.cancel(long_after)
+    interval_closed: long_interval.receive() == .Err(_)
+    after_closed: long_after.receive() == .Err(_)
+    timers_quiesced: wait_quiesce()
+    after_timer_threads: threads()
+    print("timers_canceled: {interval_closed && after_closed}")
+    print("timers_quiesced: {timers_quiesced && after_timer_threads == before_threads}")
+
+    // First app start: missed leap-day tick runs once and commits; shutdown
+    // cancels and joins the schedule task so no schedule task survives.
+    tries1: Shared{0}
+    server1: web.app().mount(Board{store: db.open("schedule_shutdown.db"), tries: tries1.copy()}).bind("127.0.0.1:0") ?? panic("bind1")
+    serving1: task { server1.serve() ?? panic("serve1") }
+    loop _ in 0..<400 {
+        if tries_of(tries1) > 0 -> break
+        time.sleep(10ms)
+    }
+    time.sleep(100ms)
+    _: server1.shutdown(grace: 2000ms) ?? panic("shutdown1")
+    _: serving1.join() ?? panic("join1")
+    shutdown1_quiesced: wait_quiesce()
+    runs1: runs_now(counts_in(db.open("schedule_shutdown.db"))) ?? panic("runs1")
+    print("shutdown1_quiesced: {shutdown1_quiesced}")
+    print("runs_after_first: {runs1}")
+
+    // Second app start (restart): recorded tick is NOT replayed, and shutdown
+    // again cancels and joins the schedule cleanly.
+    tries2: Shared{0}
+    server2: web.app().mount(Board{store: db.open("schedule_shutdown.db"), tries: tries2.copy()}).bind("127.0.0.1:0") ?? panic("bind2")
+    serving2: task { server2.serve() ?? panic("serve2") }
+    loop _ in 0..<400 {
+        if tries_of(tries2) > 0 -> break
+        time.sleep(10ms)
+    }
+    time.sleep(100ms)
+    _: server2.shutdown(grace: 2000ms) ?? panic("shutdown2")
+    _: serving2.join() ?? panic("join2")
+    shutdown2_quiesced: wait_quiesce()
+    runs2: runs_now(counts_in(db.open("schedule_shutdown.db"))) ?? panic("runs2")
+    print("shutdown2_quiesced: {shutdown2_quiesced}")
+    print("runs_after_restart: {runs2}")
+}

@@ -1,0 +1,58 @@
+// A supervised task group carries a restart policy (limit, window, backoff):
+// a worker failing 3 times is restarted 3 times, and a 4th failure inside the
+// window fails the group with a report naming the worker and its last failure
+// while canceling and joining every sibling.
+use {
+    tasks: core.tasks
+    time: core.time
+}
+
+bump: fn(cell: Shared<Int>, delta: Int) -> Int Never! {
+    ^guard: cell.guard_edit()
+    guard.value += delta
+    guard.value
+}
+
+run: fn() {
+    attempts: Shared{0}
+    sibling_active: Shared{0}
+    attempts_w: attempts.copy()
+    sibling_w: sibling_active.copy()
+    { sender: sib_tx, receiver: sib_rx }: channel<Int>(capacity: 2)
+    sw: time.start()
+    group: tasks.supervised_group(tasks.RestartPolicy{limit: 3, window: 5s, backoff: 10ms})
+    group.spawn("sibling", fn() Err! {
+        _: bump(sibling_w, 1)
+        defer { _: bump(sibling_w, -1) }
+        if sib_tx.send(1) == {
+            .Ok(_) -> {}
+            .Err(_) -> {}
+        }
+        time.sleep(10s)
+        Ok()
+    })
+    _: sib_rx.receive() ?? panic("sibling never started")
+    group.spawn("worker_alpha", fn() Err! {
+        n: bump(attempts_w, 1)
+        panic("boom attempt {n}")
+    })
+    if group.wait() == {
+        .Err(failure) -> {
+            elapsed_ms: sw.elapsed_millis()
+            report: failure.display()
+            if failure == {
+                .RestartExhausted(worker, restarts, _, _) -> {
+                    names_ok: report.contains("worker_alpha") && report.contains("boom attempt 4")
+                    print("attempts: {attempts.guard_read().value}")
+                    print("worker: {worker}")
+                    print("restarts: {restarts}")
+                    print("backoff_honored: {elapsed_ms >= 25}")
+                    print("report_names_worker_and_failure: {names_ok}")
+                    print("sibling_active: {sibling_active.guard_read().value}")
+                }
+                .Canceled -> panic("expected RestartExhausted, got Canceled")
+            }
+        }
+        .Ok(_) -> panic("expected RestartExhausted, got Ok")
+    }
+}

@@ -1,0 +1,9 @@
+# After tasks.cancel, no timer or interval producer survives; and app shutdown
+# cancels and joins every scheduled job, preserving missed-tick recording with
+# zero replay on restart.
+fixture: ScheduleCancelStopsProducerAndAppShutdownJoins.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run main.jet
+exit: 0
+stdout: = "timers_canceled: true\ntimers_quiesced: true\nshutdown1_quiesced: true\nruns_after_first: 1\nshutdown2_quiesced: true\nruns_after_restart: 1\n"
