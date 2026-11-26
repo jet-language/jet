@@ -207,7 +207,10 @@ context_inherit: fn(record: I64) {
     sync_store(wrapping(record + CONTEXT_ALLOCATOR), I64{0})
     sync_store(wrapping(record + CONTEXT_SCRATCH), I64{0})
     head: sync_load(wrapping(record + CONTEXT_VALUES))
-    if head != (I64{0}) -> jet_rt_native_closure_retain(head)
+    if head != (I64{0}) {
+        context_frame_materialize_borrowed(head)
+        jet_rt_native_closure_retain(head)
+    }
 }
 
 // Ends a task's record (Task.jet task_drop): its reference to its chain and
@@ -228,12 +231,19 @@ CONTEXT_DIR_KEY: I64{2}
 CONTEXT_ENV_KEY: I64{3}
 
 // Unified breadcrumb frame stack node on CONTEXT_VALUES (88 bytes, release == 0):
-//   0: owners, 8: reserved, 16: release(0), 24: key(CONTEXT_FRAME_KEY | IMPERATIVE),
-//  32: next, 40: text(owned E4), 48: file(owned E4 or 0), 56: line,
-//  64: id, 72: start_ns, 80: kind (0=#Frame block, 1=log.span, 2=perf.zone).
+//   0: owners, 8: flags (bit 0 = borrowed text, promoted on task spawn),
+//  16: release(0), 24: key(CONTEXT_FRAME_KEY | IMPERATIVE), 32: next,
+//  40: text(E4), 48: file(owned E4 or 0), 56: line, 64: id, 72: start_ns,
+//  80: kind (0=#Frame block, 1=log.span, 2=perf.zone).
 CONTEXT_FRAME_KEY: I64{4}
 
 CONTEXT_FRAME_BYTES: I64{88}
+
+CONTEXT_FRAME_FLAGS: I64{8}
+
+CONTEXT_FRAME_FLAG_BORROWED_TEXT: I64{1}
+
+CONTEXT_FRAME_POOL_LIMIT: I64{32}
 
 CONTEXT_FRAME_TEXT: I64{40}
 
@@ -259,6 +269,25 @@ CONTEXT_IMPERATIVE_FLAG: I64{4611686018427387904}
 
 CONTEXT_ENV_UNSET: I64{-1}
 
+// Promotes any borrowed-text frame nodes on `head` to owned String clones
+// before a spawned child task retains and shares the chain.
+context_frame_materialize_borrowed: fn(head: I64) {
+    ^at: head
+    loop at != (I64{0}) {
+        if ((sync_load(wrapping(at + CONTEXT_NODE_KEY)) & CONTEXT_KEY_MASK) == CONTEXT_FRAME_KEY) {
+            flags: sync_load(wrapping(at + CONTEXT_FRAME_FLAGS))
+            if ((flags & CONTEXT_FRAME_FLAG_BORROWED_TEXT) != I64{0}) {
+                text: sync_load(wrapping(at + CONTEXT_FRAME_TEXT))
+                if (text != I64{0}) {
+                    sync_store(wrapping(at + CONTEXT_FRAME_TEXT), jet_rt_string_clone(text))
+                }
+                sync_store(wrapping(at + CONTEXT_FRAME_FLAGS), flags & wrapping(I64{0} - I64{1} - CONTEXT_FRAME_FLAG_BORROWED_TEXT))
+            }
+        }
+        at = sync_load(wrapping(at + CONTEXT_NODE_NEXT))
+    }
+}
+
 // Drops a runtime-allocated imperative context node (release helper == 0).
 context_imperative_node_free: fn(node: I64) {
     key: sync_load(wrapping(node + CONTEXT_NODE_KEY)) & CONTEXT_KEY_MASK
@@ -269,8 +298,11 @@ context_imperative_node_free: fn(node: I64) {
         return
     }
     if (key == CONTEXT_FRAME_KEY) {
+        flags: sync_load(wrapping(node + CONTEXT_FRAME_FLAGS))
         text: sync_load(wrapping(node + CONTEXT_FRAME_TEXT))
-        if (text != I64{0}) { jet_rt_string_drop(text) }
+        if ((flags & CONTEXT_FRAME_FLAG_BORROWED_TEXT) == I64{0} && text != I64{0}) {
+            jet_rt_string_drop(text)
+        }
         file: sync_load(wrapping(node + CONTEXT_FRAME_FILE))
         if (file != I64{0}) { jet_rt_string_drop(file) }
         jet_rt_free(node, CONTEXT_FRAME_BYTES, I64{8})
@@ -287,9 +319,7 @@ context_imperative_node_free: fn(node: I64) {
             jet_rt_string_drop(sync_load(wrapping(row + I64{8})))
             at += I64{1}
         }
-        if (cap > I64{0} && data != I64{0}) {
-            jet_rt_free(data, wrapping(cap * I64{16}), I64{8})
-        }
+        if (cap > I64{0} && data != I64{0}) { jet_rt_free(data, wrapping(cap * I64{16}), I64{8}) }
         jet_rt_free(node, I64{64}, I64{8})
     }
 }
@@ -313,7 +343,7 @@ context_imperative_node_clone: fn(node: I64) -> I64 {
     if (key == CONTEXT_FRAME_KEY) {
         fresh: jet_rt_alloc(CONTEXT_FRAME_BYTES, I64{8})
         sync_store(fresh, I64{1})
-        sync_store(wrapping(fresh + I64{8}), I64{0})
+        sync_store(wrapping(fresh + CONTEXT_FRAME_FLAGS), I64{0})
         sync_store(wrapping(fresh + CONTEXT_NODE_RELEASE), I64{0})
         sync_store(wrapping(fresh + CONTEXT_NODE_KEY), raw_key)
         sync_store(wrapping(fresh + CONTEXT_NODE_NEXT), I64{0})
@@ -362,9 +392,7 @@ context_values_release: fn(node: I64) {
         }
         next: sync_load(wrapping(at + CONTEXT_NODE_NEXT))
         release: sync_load(wrapping(at + CONTEXT_NODE_RELEASE))
-        if (release == I64{0}) {
-            context_imperative_node_free(at)
-        } else {
+        if (release == I64{0}) { context_imperative_node_free(at) } else {
             before: jet_scheduler_native_status()
             coll_call1_unit(release, at)
             scheduler_hook_checks_arm(before)
@@ -429,9 +457,7 @@ context_dir_normalize: fn(bytes: I64, length: I64) -> I64 {
         seg_len += I64{1}
     }
     builder: jet_rt_string_builder_new()
-    if (seg_len == I64{0}) {
-        jet_rt_string_builder_push(builder, rt_static_text("/"))
-    } else {
+    if (seg_len == I64{0}) { jet_rt_string_builder_push(builder, rt_static_text("/")) } else {
         ^i: I64{0}
         loop i < seg_len {
             row: wrapping(segs + i * I64{16})
@@ -449,9 +475,7 @@ context_dir_normalize: fn(bytes: I64, length: I64) -> I64 {
 context_dir_resolve_owned: fn(raw: I64) -> I64 {
     len: rt_text_len(raw)
     data: rt_text_data(raw)
-    if (len > I64{0} && rt_text_byte(data) == I64{47}) {
-        return context_dir_normalize(data, len)
-    }
+    if (len > I64{0} && rt_text_byte(data) == I64{47}) { return context_dir_normalize(data, len) }
     cur: context_dir_current()
     base: if (cur != I64{0}) -> jet_rt_string_clone(cur) else -> context_os_getcwd()
     if (base == I64{0}) { return jet_rt_string_clone(raw) }
@@ -559,7 +583,7 @@ context_env_lookup: fn(bytes: I64, length: I64) -> I64 {
                 k: sync_load(row)
                 if (rt_text_len(k) == length && rt_text_equal_bytes(rt_text_data(k), bytes, length)) {
                     v: sync_load(wrapping(row + I64{8}))
-                    if context_env_is_tombstone(v) { return CONTEXT_ENV_UNSET }
+                    if context_env_is_tombstone(v) -> return CONTEXT_ENV_UNSET
                     return v
                 }
                 i -= I64{1}
@@ -596,7 +620,9 @@ context_env_set_imperative: fn(key: I64, value: I64) {
             grown: if (cap == I64{0}) -> I64{4} else -> cap * I64{2}
             next_data: jet_rt_alloc(wrapping(grown * I64{16}), I64{8})
             if (len > I64{0}) { coll_copy(data, next_data, wrapping(len * I64{16})) }
-            if (cap > I64{0} && data != I64{0}) { jet_rt_free(data, wrapping(cap * I64{16}), I64{8}) }
+            if (cap > I64{0} && data != I64{0}) {
+                jet_rt_free(data, wrapping(cap * I64{16}), I64{8})
+            }
             data = next_data
             sync_store(wrapping(head + I64{48}), grown)
             sync_store(wrapping(head + I64{56}), data)
@@ -662,27 +688,115 @@ context_current_safe: fn() -> I64 {
     sync_load(wrapping(base + CONTEXT_TCB_SLOT))
 }
 
+// Pop a cached 88-byte frame node from this thread's zone ring freelist,
+// allocating from the heap only when the pool is empty (at most once per
+// nesting depth per thread).
+#Inline(Always) context_frame_node_take: fn(ring: I64) -> I64 {
+    if (ring != I64{0}) {
+        slot: wrapping(ring + PERF_ZONE_FRAME_POOL)
+        cached: rt_text_word(slot)
+        if (cached != I64{0}) {
+            rt_text_store(slot, rt_text_word(wrapping(cached + CONTEXT_NODE_NEXT)))
+            count_slot: wrapping(ring + PERF_ZONE_FRAME_POOL_COUNT)
+            rt_text_store(count_slot, wrapping(rt_text_word(count_slot) - I64{1}))
+            return cached
+        }
+    }
+    jet_rt_alloc(CONTEXT_FRAME_BYTES, I64{8})
+}
+
+// Recycle an unshared 88-byte frame node onto this thread's zone ring freelist
+// up to CONTEXT_FRAME_POOL_LIMIT, freeing to the heap when full or when no
+// ring is installed on this thread.
+#Inline(Always) context_frame_node_give: fn(ring: I64, node: I64) {
+    if (ring != I64{0}) {
+        count_slot: wrapping(ring + PERF_ZONE_FRAME_POOL_COUNT)
+        count: rt_text_word(count_slot)
+        if (count < CONTEXT_FRAME_POOL_LIMIT) {
+            slot: wrapping(ring + PERF_ZONE_FRAME_POOL)
+            rt_text_store(wrapping(node + CONTEXT_NODE_NEXT), rt_text_word(slot))
+            rt_text_store(slot, node)
+            rt_text_store(count_slot, wrapping(count + I64{1}))
+            return
+        }
+    }
+    jet_rt_free(node, CONTEXT_FRAME_BYTES, I64{8})
+}
+
+// Fast zero-allocation push for lexical perf zones whose caller (`Zone`) keeps
+// `text` alive until `context_frame_pop_borrowed_fast` runs. If a child task
+// is spawned while active, `context_inherit` materializes `text` into an owned
+// clone before sharing the chain.
+#Inline(Always) context_frame_push_borrowed: fn(ring: I64, text: I64, id: I64, start_ns: I64, kind: I64) {
+    base: thread_base()
+    if (base == I64{0} || base == thread_detached_base()) {
+        return
+    }
+    record: rt_text_word(wrapping(base + CONTEXT_TCB_SLOT))
+    if (record == I64{0}) {
+        return
+    }
+    head_slot: wrapping(record + CONTEXT_VALUES)
+    head: rt_text_word(head_slot)
+    node: context_frame_node_take(ring)
+    rt_text_store(node, I64{1})
+    rt_text_store(wrapping(node + CONTEXT_FRAME_FLAGS), CONTEXT_FRAME_FLAG_BORROWED_TEXT)
+    rt_text_store(wrapping(node + CONTEXT_NODE_RELEASE), I64{0})
+    rt_text_store(wrapping(node + CONTEXT_NODE_KEY), CONTEXT_FRAME_KEY | CONTEXT_IMPERATIVE_FLAG)
+    rt_text_store(wrapping(node + CONTEXT_NODE_NEXT), head)
+    rt_text_store(wrapping(node + CONTEXT_FRAME_TEXT), text)
+    rt_text_store(wrapping(node + CONTEXT_FRAME_FILE), I64{0})
+    rt_text_store(wrapping(node + CONTEXT_FRAME_LINE), I64{0})
+    rt_text_store(wrapping(node + CONTEXT_FRAME_ID), id)
+    rt_text_store(wrapping(node + CONTEXT_FRAME_START), start_ns)
+    rt_text_store(wrapping(node + CONTEXT_FRAME_KIND), kind)
+    sync_store(head_slot, node)
+}
+
+// Fast zero-allocation head pop for unshared borrowed-text perf zones; falls
+// back to `context_frame_pop_match` when out-of-order or shared with a child.
+#Inline(Always) context_frame_pop_borrowed_fast: fn(match_kind: I64, match_id: I64) {
+    base: thread_base()
+    if (base == I64{0} || base == thread_detached_base()) {
+        return
+    }
+    record: rt_text_word(wrapping(base + CONTEXT_TCB_SLOT))
+    if (record == I64{0}) {
+        return
+    }
+    head_slot: wrapping(record + CONTEXT_VALUES)
+    head: rt_text_word(head_slot)
+    if (head != I64{0} && rt_text_word(wrapping(head + CONTEXT_NODE_KEY)) == (CONTEXT_FRAME_KEY | CONTEXT_IMPERATIVE_FLAG) && rt_text_word(wrapping(head + CONTEXT_FRAME_KIND)) == match_kind && rt_text_word(wrapping(head + CONTEXT_FRAME_ID)) == match_id && sync_load(head) == I64{1} && rt_text_word(wrapping(head + CONTEXT_FRAME_FLAGS)) == CONTEXT_FRAME_FLAG_BORROWED_TEXT) {
+        sync_store(head_slot, rt_text_word(wrapping(head + CONTEXT_NODE_NEXT)))
+        context_frame_node_give(rt_text_word(wrapping(base + PERF_ZONE_TCB_RING)), head)
+        return
+    }
+    ^_: context_frame_pop_match(match_kind, match_id, I64{0}, I64{0}, I64{0})
+}
+
 // Push one unified breadcrumb frame node onto the current task's CONTEXT_VALUES
 // chain. Returns the frame's matching id (its initial node address when `id == 0`),
 // or 0 if no task context record is installed.
 context_frame_push: fn(text: I64, file: I64, line: I64, id: I64, start_ns: I64, kind: I64) -> I64 {
-    record: context_current_safe()
+    base: thread_base()
+    if (base == I64{0} || base == thread_detached_base()) { return I64{0} }
+    record: sync_load(wrapping(base + CONTEXT_TCB_SLOT))
     if (record == I64{0}) { return I64{0} }
     head_slot: wrapping(record + CONTEXT_VALUES)
     head: sync_load(head_slot)
-    node: jet_rt_alloc(CONTEXT_FRAME_BYTES, I64{8})
+    node: context_frame_node_take(rt_text_word(wrapping(base + PERF_ZONE_TCB_RING)))
     assigned_id: if (id == I64{0}) -> node else -> id
-    sync_store(node, I64{1})
-    sync_store(wrapping(node + I64{8}), I64{0})
-    sync_store(wrapping(node + CONTEXT_NODE_RELEASE), I64{0})
-    sync_store(wrapping(node + CONTEXT_NODE_KEY), CONTEXT_FRAME_KEY | CONTEXT_IMPERATIVE_FLAG)
-    sync_store(wrapping(node + CONTEXT_NODE_NEXT), head)
-    sync_store(wrapping(node + CONTEXT_FRAME_TEXT), if (text == I64{0}) -> I64{0} else -> jet_rt_string_clone(text))
-    sync_store(wrapping(node + CONTEXT_FRAME_FILE), if (file == I64{0}) -> I64{0} else -> jet_rt_string_clone(file))
-    sync_store(wrapping(node + CONTEXT_FRAME_LINE), line)
-    sync_store(wrapping(node + CONTEXT_FRAME_ID), assigned_id)
-    sync_store(wrapping(node + CONTEXT_FRAME_START), start_ns)
-    sync_store(wrapping(node + CONTEXT_FRAME_KIND), kind)
+    rt_text_store(node, I64{1})
+    rt_text_store(wrapping(node + CONTEXT_FRAME_FLAGS), I64{0})
+    rt_text_store(wrapping(node + CONTEXT_NODE_RELEASE), I64{0})
+    rt_text_store(wrapping(node + CONTEXT_NODE_KEY), CONTEXT_FRAME_KEY | CONTEXT_IMPERATIVE_FLAG)
+    rt_text_store(wrapping(node + CONTEXT_NODE_NEXT), head)
+    rt_text_store(wrapping(node + CONTEXT_FRAME_TEXT), if (text == I64{0}) -> I64{0} else -> jet_rt_string_clone(text))
+    rt_text_store(wrapping(node + CONTEXT_FRAME_FILE), if (file == I64{0}) -> I64{0} else -> jet_rt_string_clone(file))
+    rt_text_store(wrapping(node + CONTEXT_FRAME_LINE), line)
+    rt_text_store(wrapping(node + CONTEXT_FRAME_ID), assigned_id)
+    rt_text_store(wrapping(node + CONTEXT_FRAME_START), start_ns)
+    rt_text_store(wrapping(node + CONTEXT_FRAME_KIND), kind)
     sync_store(head_slot, node)
     assigned_id
 }
@@ -739,7 +853,9 @@ context_frame_build_path_from: fn(start_node: I64) -> I64 {
 // at the chain head, in-place unlink when the prefix is unshared, or pure
 // copy-on-write cloning when a spawned task shares an imperative prefix.
 context_frame_pop_match: fn(match_kind: I64, match_id: I64, out_text: I64, out_start: I64, out_path: I64) -> Bool {
-    record: context_current_safe()
+    base: thread_base()
+    if (base == I64{0} || base == thread_detached_base()) { return false }
+    record: sync_load(wrapping(base + CONTEXT_TCB_SLOT))
     if (record == I64{0}) { return false }
     head_slot: wrapping(record + CONTEXT_VALUES)
     head: sync_load(head_slot)
@@ -765,11 +881,21 @@ context_frame_pop_match: fn(match_kind: I64, match_id: I64, out_text: I64, out_s
     if (out_start != I64{0}) {
         rt_text_store(out_start, sync_load(wrapping(cur + CONTEXT_FRAME_START)))
     }
-    if (out_path != I64{0}) {
-        rt_text_store(out_path, context_frame_build_path_from(cur))
-    }
+    if (out_path != I64{0}) { rt_text_store(out_path, context_frame_build_path_from(cur)) }
     after: sync_load(wrapping(cur + CONTEXT_NODE_NEXT))
     if (prev == I64{0}) {
+        if (sync_load(cur) == I64{1}) {
+            sync_store(head_slot, after)
+            flags: rt_text_word(wrapping(cur + CONTEXT_FRAME_FLAGS))
+            text: rt_text_word(wrapping(cur + CONTEXT_FRAME_TEXT))
+            if ((flags & CONTEXT_FRAME_FLAG_BORROWED_TEXT) == I64{0} && text != I64{0}) {
+                jet_rt_string_drop(text)
+            }
+            file: rt_text_word(wrapping(cur + CONTEXT_FRAME_FILE))
+            if (file != I64{0}) { jet_rt_string_drop(file) }
+            context_frame_node_give(rt_text_word(wrapping(base + PERF_ZONE_TCB_RING)), cur)
+            return true
+        }
         if after != (I64{0}) -> jet_rt_native_closure_retain(after)
         sync_store(head_slot, after)
         context_values_release(cur)
@@ -842,7 +968,9 @@ context_frame_pop_match: fn(match_kind: I64, match_id: I64, out_text: I64, out_s
 // created Err96's ERR_CONTEXT list.
 context_frame_snapshot_to_err: fn(err_ptr: I64) {
     record: context_current_safe()
-    if (record == I64{0}) { return }
+    if (record == I64{0}) {
+        return
+    }
     ^at: sync_load(wrapping(record + CONTEXT_VALUES))
     loop at != (I64{0}) {
         if ((sync_load(wrapping(at + CONTEXT_NODE_KEY)) & CONTEXT_KEY_MASK) == CONTEXT_FRAME_KEY && sync_load(wrapping(at + CONTEXT_FRAME_KIND)) >= I64{0}) {
@@ -862,14 +990,20 @@ context_frame_snapshot_to_err: fn(err_ptr: I64) {
 // active on the current task.
 context_frame_push_json: fn(target: I64) {
     record: context_current_safe()
-    if (record == I64{0}) { return }
+    if (record == I64{0}) {
+        return
+    }
     head: sync_load(wrapping(record + CONTEXT_VALUES))
-    if (head == I64{0}) { return }
+    if (head == I64{0}) {
+        return
+    }
     count_slot: jet_rt_alloc(I64{8}, I64{8})
     texts: context_frame_texts_outer_to_inner(head, count_slot)
     count: rt_text_word(count_slot)
     jet_rt_free(count_slot, I64{8}, I64{8})
-    if (count == I64{0}) { return }
+    if (count == I64{0}) {
+        return
+    }
     jet_rt_string_builder_push(target, rt_static_text(",\"spans\":["))
     ^i: I64{0}
     loop i < count {
@@ -888,14 +1022,20 @@ context_frame_push_json: fn(target: I64) {
 // on the current task (canonical rendering shared with `jet perf` and `jet debug`).
 context_frame_push_text: fn(target: I64) {
     record: context_current_safe()
-    if (record == I64{0}) { return }
+    if (record == I64{0}) {
+        return
+    }
     head: sync_load(wrapping(record + CONTEXT_VALUES))
-    if (head == I64{0}) { return }
+    if (head == I64{0}) {
+        return
+    }
     count_slot: jet_rt_alloc(I64{8}, I64{8})
     texts: context_frame_texts_outer_to_inner(head, count_slot)
     count: rt_text_word(count_slot)
     jet_rt_free(count_slot, I64{8}, I64{8})
-    if (count == I64{0}) { return }
+    if (count == I64{0}) {
+        return
+    }
     jet_rt_string_builder_push(target, rt_static_text(" frames=["))
     ^i: I64{0}
     loop i < count {
@@ -908,7 +1048,6 @@ context_frame_push_text: fn(target: I64) {
     jet_rt_free(texts, wrapping(count * I64{8}), I64{8})
 }
 
-
 // `#Context(key: value)` entry: `node`, a new node with one owner, goes in
 // front of the current record's chain, taking over the head's reference.
 // For CONTEXT_DIR_KEY, resolves relative paths against the enclosing context
@@ -920,9 +1059,7 @@ context_frame_push_text: fn(target: I64) {
         resolved: context_dir_resolve_owned(raw)
         sync_store(wrapping(node + I64{40}), resolved)
         jet_rt_string_drop(raw)
-    } else if (key == CONTEXT_ENV_KEY) {
-        context_env_validate_node(node)
-    }
+    } else if (key == CONTEXT_ENV_KEY) { context_env_validate_node(node) }
     head: wrapping(context_current() + CONTEXT_VALUES)
     sync_store(wrapping(node + CONTEXT_NODE_NEXT), sync_load(head))
     sync_store(head, node)
@@ -933,7 +1070,9 @@ context_frame_push_text: fn(target: I64) {
 // tasks keep their inherited chain untouched.
 context_pop_one_block: fn(head_slot: I64) {
     head: sync_load(head_slot)
-    if (head == I64{0}) { return }
+    if (head == I64{0}) {
+        return
+    }
     if ((sync_load(wrapping(head + CONTEXT_NODE_KEY)) & CONTEXT_IMPERATIVE_FLAG) == I64{0}) {
         next: sync_load(wrapping(head + CONTEXT_NODE_NEXT))
         if next != (I64{0}) -> jet_rt_native_closure_retain(next)
@@ -948,7 +1087,9 @@ context_pop_one_block: fn(head_slot: I64) {
         imp_count += I64{1}
         target = sync_load(wrapping(target + CONTEXT_NODE_NEXT))
     }
-    if (target == I64{0}) { return }
+    if (target == I64{0}) {
+        return
+    }
     target_key: sync_load(wrapping(target + CONTEXT_NODE_KEY)) & CONTEXT_KEY_MASK
     after: sync_load(wrapping(target + CONTEXT_NODE_NEXT))
     // Clone only imperative nodes of other keys; imperative mutations of
@@ -969,9 +1110,7 @@ context_pop_one_block: fn(head_slot: I64) {
         i += I64{1}
     }
     if after != (I64{0}) -> jet_rt_native_closure_retain(after)
-    if (new_head == I64{0}) {
-        sync_store(head_slot, after)
-    } else {
+    if (new_head == I64{0}) { sync_store(head_slot, after) } else {
         sync_store(wrapping(new_tail + CONTEXT_NODE_NEXT), after)
         sync_store(head_slot, new_head)
     }
@@ -994,7 +1133,7 @@ context_pop_one_block: fn(head_slot: I64) {
 #Export(c) jet_ctx_value_find: fn(key: I64) -> I64 {
     ^at: sync_load(wrapping(context_current() + CONTEXT_VALUES))
     loop at != (I64{0}) {
-        if ((sync_load(wrapping(at + CONTEXT_NODE_KEY)) & CONTEXT_KEY_MASK) == key) -> return at
+        if ((sync_load(wrapping(at + CONTEXT_NODE_KEY)) & CONTEXT_KEY_MASK) == key) { return at }
         at = sync_load(wrapping(at + CONTEXT_NODE_NEXT))
     }
     I64{0}

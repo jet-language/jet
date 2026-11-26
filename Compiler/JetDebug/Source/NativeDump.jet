@@ -639,7 +639,9 @@ native_dump_command: fn(session: ^NativeSession, line: String, events: [String],
                 return Ok(NativeAnswer{text: NATIVE_DEBUG_BACKTRACE_COUNT})
             }
             frames: session.backtrace() ?? return Err(err)
-            native_debug_backtrace(frames, routines: false, count: count)
+            active: session.context_frames()
+            frames_line: if active != "" -> "frames=[{active}]\n" else -> ""
+            "{native_debug_backtrace(frames, routines: false, count: count)}{frames_line}"
         }
         "locals" -> {
             ^locals: native_dump_locals(session) ?? return Err(err)

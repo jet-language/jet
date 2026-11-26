@@ -5053,6 +5053,32 @@ or variables run concurrently without interference. A program that spells
 `context.dir`, `context.env`, `#Context(dir: ...)`, or `#Context(env: ...)`
 loads `core.sys`.
 
+### Breadcrumb frames (`#Frame`)
+
+`#Frame(text: String) { ... }` pushes one task-inherited breadcrumb frame onto
+the task's context chain for the lexical duration of the block and pops it on
+every exit path (normal exit, `return`, `?`, or panic). One shared frame stack
+feeds all four observability surfaces:
+
+- **Errors (`Err` and `?("note")`)**: fresh `Err` values automatically
+  snapshot active `#Frame` entries (with file and line) into their context
+  frames; call-site `?("note")` annotations remain supported alongside them.
+- **Structured logs (`core.log`)**: text log lines append
+  `frames=[outer > inner]` whenever frames are active, and JSON lines record
+  `"spans":["outer","inner"]`. Explicit `core.log.span(name)` scopes push and
+  pop on the same task-inherited frame stack.
+- **Profiler samples and zones (`core.perf`, `jet perf`)**: active `#Frame`
+  blocks and `core.perf.zone(name)` intervals record on the same frame stack;
+  `jet perf view` correlates CPU samples across frames and zones and renders
+  breadcrumb paths in the same `frames=[outer > inner]` form.
+- **Debugger (`jet debug`)**: live breakpoint stops, crash dumps, and `bt`
+  read active frames from the stopped task's context chain and display
+  `frames=[outer > inner]`.
+
+Spawned `task { ... }` children inherit their parent's active frame stack at
+spawn time by reference without copying. See
+[`Examples/ErrorsAndEffects/Errors/FrameBreadcrumbs.jet`](../../Examples/ErrorsAndEffects/Errors/FrameBreadcrumbs.jet).
+
 ### Parallel collection adapters
 
 Lists expose `para_map`, `para_filter`, `para_partition`, and `para_fold`.

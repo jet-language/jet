@@ -1,0 +1,39 @@
+package: {
+    name: "frame_log_task"
+    authority: { allow: [Env, FS, IO, Log, Mem.Alloc, Time] }
+}
+
+use {
+    files: core.files
+    log: core.log
+}
+
+worker_step: fn() -> String {
+    #Frame("worker step") {
+        log.info("inside worker")
+        return "ok"
+    }
+    ""
+}
+
+run: fn() {
+    scratch: files.temp_dir("frame-case") ?? panic("temp_dir")
+    text_path: "{scratch.path}/events.log"
+    json_path: "{scratch.path}/events.jsonl"
+    log.set_sink("text", text_path)
+    #Frame("importing orders.csv") {
+        log.info("started")
+        #Frame("row 42") { log.info("parsing") }
+        worker: task { worker_step() }
+        _: worker.join() ?? panic("join")
+        audit: log.span("audit")
+        log.info("audited")
+        log.close(audit)
+        log.set_sink("jsonl", json_path)
+        #Frame("row 42") { log.info("json") }
+    }
+    log.flush()
+    print(files.read(text_path) ?? panic("read text"))
+    json_log: files.read(json_path) ?? panic("read json")
+    print("json_spans={json_log.contains("\"spans\":[\"importing orders.csv\",\"row 42\"]")}")
+}

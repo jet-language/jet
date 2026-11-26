@@ -2815,7 +2815,9 @@ NativeSession: struct {
                     return Ok(NativeDebugStep{text: NATIVE_DEBUG_BACKTRACE_COUNT, stop: stop, refused: true})
                 }
                 frames: self.backtrace() ?? return Err(err)
-                text = native_debug_backtrace(frames, count: count)
+                active: self.context_frames()
+                frames_line: if active != "" -> "frames=[{active}]\n" else -> ""
+                text = "{native_debug_backtrace(frames, count: count)}{frames_line}"
             }
             "disassemble" | "disas" -> {
                 text = native_disassemble(self, operand, file, lines) ?? return Err(err)

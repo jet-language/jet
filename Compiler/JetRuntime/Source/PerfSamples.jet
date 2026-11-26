@@ -2766,6 +2766,10 @@ PERF_ZONE_CALIBRATION_NS: I64{1000000}
 // record when 32 bytes are left and none when fewer are.
 ^perf_zone_rings: I64{0}
 
+PERF_ZONE_FRAME_POOL: I64{40}
+
+PERF_ZONE_FRAME_POOL_COUNT: I64{48}
+
 PERF_ZONE_RING_TAIL: I64{64}
 
 PERF_ZONE_RING_AT: I64{128}
@@ -3173,15 +3177,16 @@ perf_zone_task: fn() -> I64 {
 }
 
 // Pushes the zone that opened at `start`, named by `name`, onto the current
-// task's shared Context.jet frame stack.
-perf_zone_open_push: fn(start: I64, name: I64) {
-    ^_: context_frame_push(name, I64{0}, I64{0}, start, start, CONTEXT_FRAME_KIND_PERF_ZONE)
+// task's shared Context.jet frame stack using the per-thread node pool and
+// borrowed text (promoted to an owned clone on task spawn via context_inherit).
+#Inline(Always) perf_zone_open_push: fn(start: I64, name: I64) {
+    context_frame_push_borrowed(perf_zone_ring(), name, start, start, CONTEXT_FRAME_KIND_PERF_ZONE)
 }
 
 // Pops the innermost open perf zone that started at `start` from the current
-// task's shared Context.jet frame stack.
-perf_zone_open_drop: fn(start: I64) {
-    ^_: context_frame_pop_match(CONTEXT_FRAME_KIND_PERF_ZONE, start, I64{0}, I64{0}, I64{0})
+// task's shared Context.jet frame stack, recycling the node onto the thread pool.
+#Inline(Always) perf_zone_open_drop: fn(start: I64) {
+    context_frame_pop_borrowed_fast(CONTEXT_FRAME_KIND_PERF_ZONE, start)
 }
 
 // At the observation's exit step (perf_samples_exit): each perf zone or

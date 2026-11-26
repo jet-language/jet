@@ -1,0 +1,15 @@
+# `jet debug` reads active `#Frame(text) { ... }` breadcrumbs from the stopped
+# task's context chain and displays them in the canonical `frames=[outer > inner]`
+# form matching `core.log` and `jet perf view`.
+requires: os-name:linux
+requires: arch:x86_64
+fixture: FrameBreadcrumbsShowAtBreakpoint.fixture
+env: NO_COLOR=1
+step: jet build -O1 prog.jet
+exit: 0
+step: jet debug {work}/.jet/build/prog --break prog.jet:10
+stdin: frame_breadcrumbs_show_at_breakpoint.stdin
+exit: 0
+stdout+stderr: ~ "Breakpoint hit  prog.jet:10  in run()" # interactive debugger banner and source listing include addresses and prompts
+stdout+stderr: ~ "frames=[importing orders.csv > row 42]" # active #Frame breadcrumbs displayed at breakpoint stop
+stdout+stderr: ~ "Program finished" # program runs to clean exit after continue

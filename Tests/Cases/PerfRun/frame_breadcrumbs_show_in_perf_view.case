@@ -1,0 +1,17 @@
+# `jet perf run` + `jet perf view` records `#Frame(text) { ... }` intervals
+# alongside `perf.zone`, correlates CPU samples inside nested frames, and
+# renders unified `frames=[outer > inner]` breadcrumbs.
+requires: os-name:linux
+requires: arch:x86_64
+fixture: FrameBreadcrumbsShowInPerfView.fixture
+env: NO_COLOR=1
+step: jet perf run -O1 prog.jet --out {work}/prog.jettrace
+exit: 0
+stdout: ~ "done=" # checksum output and jet perf run summary banner vary by machine timing
+step: jet perf view {work}/prog.jettrace
+exit: 0
+stdout: ~ "zone importing orders.csv " # timings and sample counts vary across runs
+stdout: ~ "frames=[importing orders.csv]" # outer #Frame rendered in unified breadcrumb form
+stdout: ~ "zone importing orders.csv > row 42 " # nested #Frame recorded as zone path
+stdout: ~ "frames=[importing orders.csv > row 42]" # nested #Frame breadcrumb path
+stdout: ~ "zone score " # perf.zone recorded alongside #Frame on the same stack

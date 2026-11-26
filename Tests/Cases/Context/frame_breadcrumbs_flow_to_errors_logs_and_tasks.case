@@ -1,0 +1,42 @@
+# `#Frame(text) { ... }` pushes one task-inherited breadcrumb frame that
+# errors (alongside call-site `?("note")`), structured text/JSON log lines,
+# `log.span`, and spawned tasks all carry across O0, O1, and O2.
+fixture: FrameBreadcrumbsFlowToErrorsLogsAndTasks.fixture
+env: NO_COLOR=1
+step: jet run -O0 err_edge.jet
+exit: 1
+stderr: ~ "Error: invalid number: abc" # error edge also prints backtrace frames and compiler-run timing
+stderr: ~ "context (err_edge.jet:3): row 42" # inner #Frame breadcrumb with file and line
+stderr: ~ "context (err_edge.jet:11): importing orders.csv" # outer #Frame breadcrumb with file and line
+stderr: ~ "context (err_edge.jet:5): parsing amount" # call-site ?("note") annotation preserved alongside #Frame
+step: jet run -O1 err_edge.jet
+exit: 1
+stderr: ~ "Error: invalid number: abc" # error edge also prints backtrace frames
+stderr: ~ "context (err_edge.jet:3): row 42" # inner #Frame breadcrumb at O1
+stderr: ~ "context (err_edge.jet:11): importing orders.csv" # outer #Frame breadcrumb at O1
+stderr: ~ "context (err_edge.jet:5): parsing amount" # call-site ?("note") annotation at O1
+step: jet run -O2 err_edge.jet
+exit: 1
+stderr: ~ "Error: invalid number: abc" # error edge also prints backtrace frames
+stderr: ~ "context (err_edge.jet:3): row 42" # inner #Frame breadcrumb at O2
+stderr: ~ "context (err_edge.jet:11): importing orders.csv" # outer #Frame breadcrumb at O2
+stderr: ~ "context (err_edge.jet:5): parsing amount" # call-site ?("note") annotation at O2
+step: jet run -O0 log_and_task.jet
+exit: 0
+stdout: ~ "frames=[importing orders.csv]" # text log lines include wall-clock timestamps
+stdout: ~ "frames=[importing orders.csv > row 42]" # nested #Frame breadcrumb path in text log
+stdout: ~ "frames=[importing orders.csv > worker step]" # spawned task inherits parent #Frame stack
+stdout: ~ "frames=[importing orders.csv > audit]" # log.span shares the same breadcrumb stack
+stdout: ~ "json_spans=true" # JSON log sink records the same breadcrumb path in spans
+step: jet run -O1 log_and_task.jet
+exit: 0
+stdout: ~ "frames=[importing orders.csv > row 42]" # nested #Frame breadcrumb path at O1
+stdout: ~ "frames=[importing orders.csv > worker step]" # spawned task inheritance at O1
+stdout: ~ "frames=[importing orders.csv > audit]" # log.span sharing at O1
+stdout: ~ "json_spans=true" # JSON spans parity at O1
+step: jet run -O2 log_and_task.jet
+exit: 0
+stdout: ~ "frames=[importing orders.csv > row 42]" # nested #Frame breadcrumb path at O2
+stdout: ~ "frames=[importing orders.csv > worker step]" # spawned task inheritance at O2
+stdout: ~ "frames=[importing orders.csv > audit]" # log.span sharing at O2
+stdout: ~ "json_spans=true" # JSON spans parity at O2
