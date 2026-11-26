@@ -116,7 +116,7 @@ ir_assert_type_renderable: fn(m: ^IRModule, p: IRProgram, ty: Type, depth: Int) 
         .List(elem) -> return ir_assert_type_renderable(m, p, elem, depth + 1)
         .Tuple(fields) -> {
             loop f in fields {
-                if !ir_assert_type_renderable(m, p, f, depth + 1) -> return false
+                if !ir_assert_type_renderable(m, p, f.ty, depth + 1) -> return false
             }
             return true
         }
