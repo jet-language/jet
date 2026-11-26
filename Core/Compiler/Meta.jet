@@ -25,7 +25,13 @@ Meta: enum {
 
     impl Effect {
         expert: fn(self) -> Bool { self == .Code || self == .Host }
-        access: fn(self) -> EffectAccess { if self == .Generate -> .Adds else if self == .Code -> .Replaces else -> .Reads }
+        access: fn(self) -> EffectAccess {
+            if {
+                self == .Generate -> .Adds
+                self == .Code -> .Replaces
+                else -> .Reads
+            }
+        }
     }
 }
 

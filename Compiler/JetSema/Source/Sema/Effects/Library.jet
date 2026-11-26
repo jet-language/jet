@@ -29,6 +29,7 @@ use jet_foundation.[
     EFFECT_VOCABULARY_LEAVES,
     EFFECT_VOCABULARY_ROOTS,
     Diagnostic,
+    EffectAccess,
     EffectValueField,
     Item,
     ModuleCap,
@@ -40,6 +41,7 @@ use jet_foundation.[
     effect_value_base,
     effect_value_fields,
     effect_value_is_valued,
+    effect_vocabulary_access,
     sema_effect_covers,
     type_name,
 ]
@@ -64,6 +66,12 @@ SemaLibraryEffect: struct {
     ancestors: [String]{[String]{}},
     // A struct effect's fields, in declaration order.
     fields: [SemaLibraryEffectField]{[SemaLibraryEffectField]{}},
+    // Declared or inherited EffectAccess class of this effect root.
+    access: EffectAccess{EffectAccess.Reads},
+    // Declared EffectAccess per enum case (in `cases` order).
+    case_accesses: [EffectAccess]{[EffectAccess]{}},
+    // Whether `impl Effect` explicitly stated `access: fn(self) -> EffectAccess`.
+    has_explicit_access: Bool{false},
     // E0758 for its parent, reported once by the declaring module.
     problem: Diagnostic?{None},
 }
@@ -80,6 +88,7 @@ SemaLibraryEffectName: struct {
     token: String,
     ancestors: [String],
     fields: [SemaLibraryEffectField]{[SemaLibraryEffectField]{}},
+    access: EffectAccess{EffectAccess.Reads},
 }
 
 // A `!` entry of a function row that names a library effect or a case.
@@ -131,26 +140,61 @@ sema_library_effect_kernel_list: fn(cap: ModuleCap?) -> [String] Never! {
     kernel
 }
 
+sema_library_effect_declared_access: fn(items: [Item], name: String) -> EffectAccess Never! {
+    loop item in items {
+        if item == .EffectDecl(declaration) && declaration.name == name {
+            return declaration.access
+        }
+    }
+    EffectAccess.Reads
+}
+
 sema_library_effect_collect: fn(effects: ^[SemaLibraryEffect], package_identity: String, module_index: Int, items: [Item]) Never! {
     loop item in items {
         if item == {
             .Struct(definition) -> {
                 if sema_library_effect_declared(items, definition.name) {
                     ^parent: NamedSpan?{None}
-                    if definition.effect_impl == .Val(declared) -> parent = declared.parent
+                    ^explicit_access: false
+                    if definition.effect_impl == .Val(declared) {
+                        parent = declared.parent
+                        explicit_access = declared.access != None
+                    }
                     fields: loop field in definition.fields -> SemaLibraryEffectField{name: field.name, ty: field.ty}
-                    effects.push(SemaLibraryEffect{package_identity: package_identity, module_index: module_index, name: definition.name, cases: [String]{}, kernel: sema_library_effect_kernel_list(definition.cap), parent: parent, fields: fields})
+                    effects.push(SemaLibraryEffect{package_identity: package_identity, module_index: module_index, name: definition.name, cases: [String]{}, kernel: sema_library_effect_kernel_list(definition.cap), parent: parent, fields: fields, access: sema_library_effect_declared_access(items, definition.name), has_explicit_access: explicit_access})
                 }
             }
             .Enum(definition) -> {
                 if sema_library_effect_declared(items, definition.name) {
+                    ^explicit_access: false
+                    if definition.effect_impl == .Val(declared) -> explicit_access = declared.access != None
                     cases: loop variant in definition.variants -> variant.name
-                    effects.push(SemaLibraryEffect{package_identity: package_identity, module_index: module_index, name: definition.name, cases: cases, kernel: sema_library_effect_kernel_list(definition.cap)})
+                    case_accesses: loop variant in definition.variants -> sema_library_effect_declared_access(items, "{definition.name}.{variant.name}")
+                    effects.push(SemaLibraryEffect{package_identity: package_identity, module_index: module_index, name: definition.name, cases: cases, kernel: sema_library_effect_kernel_list(definition.cap), access: sema_library_effect_declared_access(items, definition.name), case_accesses: case_accesses, has_explicit_access: explicit_access})
                 }
             }
             .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
+}
+
+// The resolved EffectAccess of a library effect token (`pkg/Name`, `pkg/Name.Case`,
+// or valued `pkg/Name{...}`), or None when `name` matches no library effect.
+sema_library_effect_access: fn(effects: [SemaLibraryEffect], name: String) -> EffectAccess? Never! {
+    base: effect_value_base(name)
+    loop declared in effects {
+        token: "{declared.package_identity}/{declared.name}"
+        if base == token || base == declared.name -> return Val(declared.access)
+        loop (index, case_name) in declared.cases {
+            case_token: "{token}.{case_name}"
+            case_short: "{declared.name}.{case_name}"
+            if base == case_token || base == case_short {
+                if index < declared.case_accesses.len() -> return Val(declared.case_accesses[index])
+                return Val(declared.access)
+            }
+        }
+    }
+    None
 }
 
 // Every library effect the graph's source modules declare, each package
@@ -191,6 +235,7 @@ sema_library_effect_row: fn(effects: [SemaLibraryEffect], token: String) -> Int?
 SemaLibraryEffectParent: struct {
     limit: [String],
     ancestors: [String],
+    access: EffectAccess{EffectAccess.Reads},
     problem: Diagnostic?,
     blocked: Bool,
 }
@@ -226,6 +271,7 @@ sema_library_effect_resolve: fn(effects: ^[SemaLibraryEffect], graph: SemaRegist
         effects[index].problem = Val(sema_error("E0758", written.span, "the `#FX(…)` above `{name}` lists `{sema_effect_show(over)}`, which its parent `{written.name}` doesn't allow", "a kind of an effect may do at most what its parent may, so the `#FX(…)` above it may narrow that, never widen it", "remove `{sema_effect_show(over)}` from the `#FX(…)` above `{name}`, or name a parent that allows it"))
     }
     if own.len() == 0 -> effects[index].kernel = parent.limit
+    if !effects[index].has_explicit_access -> effects[index].access = parent.access
     effects[index].ancestors = parent.ancestors
 }
 
@@ -237,7 +283,7 @@ sema_library_effect_parent: fn(effects: ^[SemaLibraryEffect], graph: SemaRegistr
         if !sema_library_effect_open_parent(written.name) {
             return sema_library_effect_parent_problem(sema_library_effect_parent_family(name, written))
         }
-        return SemaLibraryEffectParent{limit: [String]{written.name}, ancestors: [String]{written.name}, problem: None, blocked: false}
+        return SemaLibraryEffectParent{limit: [String]{written.name}, ancestors: [String]{written.name}, access: effect_vocabulary_access(written.name), problem: None, blocked: false}
     }
     view: sema_library_effect_view(effects, graph.modules[module_index])
     found: sema_library_effect_find(view, written.name) ?? return sema_library_effect_parent_problem(sema_error("E0758", written.span, "the parent `{written.name}` of `{name}` is no effect", "a package effect is a kind of an open Prelude effect such as `Log`, or of a package effect this module can name", "write `parent: Log`, the name of a package effect, or `alias.Name` for one from an imported package"))
@@ -255,7 +301,7 @@ sema_library_effect_parent: fn(effects: ^[SemaLibraryEffect], graph: SemaRegistr
     ^ancestors: [String]{found.token}
     loop ancestor in effects[row].ancestors -> ancestors.push(ancestor.copy())  // copy: the parent keeps its own list.
     // copy: the kind keeps its own limit.
-    SemaLibraryEffectParent{limit: effects[row].kernel.copy(), ancestors: ancestors, problem: None, blocked: false}
+    SemaLibraryEffectParent{limit: effects[row].kernel.copy(), ancestors: ancestors, access: effects[row].access, problem: None, blocked: false}
 }
 
 // `e0758`: the parent is an enum family, one of its cases, or a deny-only
@@ -275,9 +321,10 @@ sema_library_effect_check_parents: fn(effects: [SemaLibraryEffect], module_index
 sema_library_effect_add_names: fn(names: ^[SemaLibraryEffectName], prefix: String, declared: SemaLibraryEffect) Never! {
     token: "{declared.package_identity}/{declared.name}"
     // copy: each name keeps its own kernel and ancestors.
-    names.push(SemaLibraryEffectName{written: "{prefix}{declared.name}", kernel: declared.kernel.copy(), token: token, ancestors: declared.ancestors.copy(), fields: declared.fields.copy()})
-    loop case_name in declared.cases {
-        names.push(SemaLibraryEffectName{written: "{prefix}{declared.name}.{case_name}", kernel: declared.kernel.copy(), token: "{token}.{case_name}", ancestors: [String]{}})  // copy: as above.
+    names.push(SemaLibraryEffectName{written: "{prefix}{declared.name}", kernel: declared.kernel.copy(), token: token, ancestors: declared.ancestors.copy(), fields: declared.fields.copy(), access: declared.access})
+    loop (index, case_name) in declared.cases {
+        case_access: if index < declared.case_accesses.len() -> declared.case_accesses[index] else -> declared.access
+        names.push(SemaLibraryEffectName{written: "{prefix}{declared.name}.{case_name}", kernel: declared.kernel.copy(), token: "{token}.{case_name}", ancestors: [String]{}, access: case_access})  // copy: as above.
     }
 }
 

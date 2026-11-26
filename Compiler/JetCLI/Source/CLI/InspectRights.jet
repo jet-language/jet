@@ -21,6 +21,7 @@ use {
         Func,
         Item,
         Span,
+        effect_access_name,
     ]
     jet_semindex.[semindex_module_alias, semindex_summaries, semindex_summary, semindex_witness, semindex_witnesses]
 }
@@ -348,9 +349,10 @@ jet_cli_inspect_rights: fn(result: JetDriverCompileResult, project: Bool, target
     text = "{text}Authority: {application.authority}\nGranted: {jet_cli_rights_text(application.granted)}\nDenied: {jet_cli_rights_text(application.denied)}\nAuthority facts:\n"
     ^facts: [JetCLIStatusValue]{}
     loop declaration in EFFECT_VOCABULARY_ROWS {
-        marker: if declaration.irreversible -> " (irreversible)" else -> ""
+        access_name: effect_access_name(declaration.access)
+        marker: if declaration.irreversible -> " ({access_name}, irreversible)" else -> " ({access_name})"
         text = "{text}  {declaration.name}{marker}\n"
-        facts.push(jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("name", jet_cli_status_text(declaration.name)), jet_cli_status_field("irreversible", jet_cli_status_bool(declaration.irreversible))}))
+        facts.push(jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("name", jet_cli_status_text(declaration.name)), jet_cli_status_field("access", jet_cli_status_text(access_name)), jet_cli_status_field("irreversible", jet_cli_status_bool(declaration.irreversible))}))
     }
     ^values: [JetCLIStatusValue]{}
     loop view in callables {

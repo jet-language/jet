@@ -100,6 +100,12 @@ use {
         foundation_named_type,
         module_is_core,
         module_text,
+        EffectAccess,
+        MARKER_REPEATABLE,
+        effect_access_max,
+        effect_access_name,
+        effect_scope_split,
+        effect_vocabulary_access,
         overflow_mode_name,
         registration_marker_rule,
     ]
@@ -778,6 +784,52 @@ sema_comptime_reflection_string_list: fn(values: [String]) -> TComptimeValue Nev
     TComptimeValue.List{values: loop value in values -> TComptimeValue.String{value: value}}
 }
 
+// The strongest EffectAccess across `effects`, ignoring `!` denials.
+sema_comptime_reflection_effect_access: fn(effects: [String]) -> EffectAccess Never! {
+    ^highest: EffectAccess.Reads
+    loop entry in effects {
+        if entry.starts_with("!") -> next
+        base: effect_scope_split(entry).base
+        highest = effect_access_max(highest, effect_vocabulary_access(base))
+    }
+    highest
+}
+
+// Whether `effects` reaches an open-world external boundary (`Net`, `Browser`,
+// `Exec`, or `FFI`), matching MCP's `openWorldHint`.
+sema_comptime_reflection_effect_open_world: fn(effects: [String]) -> Bool Never! {
+    loop entry in effects {
+        if entry.starts_with("!") -> next
+        base: effect_scope_split(entry).base
+        root: if base.index(".") == .Val(dot) -> base.slice(0..<dot) else -> base
+        if root == "Net" || root == "Browser" || root == "Exec" || root == "FFI" {
+            return true
+        }
+    }
+    false
+}
+
+// Whether `function` is repeatable: marked `#Repeatable` or only reading kept
+// data across its known effect row.
+sema_comptime_reflection_func_repeatable: fn(function: Func, inferred: [String]?) -> Bool Never! {
+    loop marker in function.markers {
+        if !marker.negated && marker.name == MARKER_REPEATABLE -> return true
+    }
+    if inferred == .Val(row) {
+        return sema_comptime_reflection_effect_access(row) == EffectAccess.Reads
+    }
+    if function.declared_effects == .Val(rows) {
+        ^highest: EffectAccess.Reads
+        loop entry in rows {
+            if entry.name.starts_with("!") -> next
+            base: effect_scope_split(entry.name).base
+            highest = effect_access_max(highest, effect_vocabulary_access(base))
+        }
+        return highest == EffectAccess.Reads
+    }
+    false
+}
+
 // A callable's EffectInfo. `declared` is the row its signature writes (`None`
 // when it writes none, so the row is inferred); `inferred` is the row the
 // checker solved from its body (`None` until the program is checked, as for a
@@ -787,6 +839,8 @@ sema_comptime_reflection_effect_info: fn(declared: [String]?, inferred: [String]
     row_type: Type.List{element: Type.String}
     declared_value: if declared == .Val(row) -> sema_comptime_reflection_string_list(row) else -> TComptimeValue.List{values: [TComptimeValue]{}}
     inferred_value: if inferred == .Val(row) -> sema_comptime_reflection_string_list(row) else -> TComptimeValue.List{values: [TComptimeValue]{}}
+    access: if inferred == .Val(row) -> sema_comptime_reflection_effect_access(row) else if declared == .Val(row) -> sema_comptime_reflection_effect_access(row) else -> EffectAccess.Reads
+    open_world: if inferred == .Val(row) -> sema_comptime_reflection_effect_open_world(row) else if declared == .Val(row) -> sema_comptime_reflection_effect_open_world(row) else -> false
     // copy: the known row is both `values` and its own member.
     values: if inferred != None -> inferred_value.copy() else -> declared_value.copy()
     sema_comptime_reflection_struct(
@@ -795,6 +849,8 @@ sema_comptime_reflection_effect_info: fn(declared: [String]?, inferred: [String]
             SemaComptimeReflectionField{name: "values", value: values},
             SemaComptimeReflectionField{name: "declared", value: if declared != None -> sema_comptime_reflection_some(declared_value) else -> sema_comptime_reflection_none(row_type)},
             SemaComptimeReflectionField{name: "inferred", value: if inferred != None -> sema_comptime_reflection_some(inferred_value) else -> sema_comptime_reflection_none(row_type)},
+            SemaComptimeReflectionField{name: "access", value: TComptimeValue.Enum{type_name: "EffectAccess", variant: effect_access_name(access), args: [TComptimeEnumArg]{}}},
+            SemaComptimeReflectionField{name: "open_world", value: TComptimeValue.Bool{value: open_world}},
         },
     )
 }
@@ -2232,6 +2288,7 @@ sema_comptime_reflection_method_info: fn(registration: SemaRegistrationGraph, ty
             SemaComptimeReflectionField{name: "span", value: sema_comptime_reflection_span(method.name_span, "")},
             SemaComptimeReflectionField{name: "module", value: TComptimeValue.String{value: module_path}},
             SemaComptimeReflectionField{name: "identity", value: TComptimeValue.String{value: "{identity}.{method.name}"}},
+            SemaComptimeReflectionField{name: "repeatable", value: TComptimeValue.Bool{value: sema_comptime_reflection_func_repeatable(method, None)}},
         },
     )
 }
@@ -2679,6 +2736,7 @@ sema_comptime_reflection_function_info: fn(registration: SemaRegistrationGraph, 
             SemaComptimeReflectionField{name: "markers", value: TComptimeValue.List{values: markers}},
             SemaComptimeReflectionField{name: "recorded", value: TComptimeValue.List{values: [TComptimeValue]{}}},
             SemaComptimeReflectionField{name: "returns", value: TComptimeValue.List{values: [TComptimeValue]{}}},
+            SemaComptimeReflectionField{name: "repeatable", value: TComptimeValue.Bool{value: sema_comptime_reflection_func_repeatable(function, None)}},
         },
     )
     sema_comptime_reflection_located(info, registered_module.source_segments, sema_comptime_reflection_module_of(registered_module), sema_comptime_reflection_doc_source(registered_module.source, registered_module.source_file))

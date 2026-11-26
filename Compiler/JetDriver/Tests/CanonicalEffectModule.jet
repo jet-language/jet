@@ -27,7 +27,7 @@ canonical_effect_require: fn(label: String, effects: EffectModuleSource) Never! 
     loop (index, declaration) in parsed {
         built: effects.decls[index]
         same_spans: declaration.span.start == built.span.start && declaration.span.end == built.span.end && declaration.name_span.start == built.name_span.start && declaration.name_span.end == built.name_span.end
-        if declaration.name != built.name || declaration.irreversible != built.irreversible || !same_spans {
+        if declaration.name != built.name || declaration.irreversible != built.irreversible || declaration.access != built.access || !same_spans {
             panic("{label}: declaration {index}: the parser reads {declaration:Debug}, the module holds {built:Debug}")
         }
     }

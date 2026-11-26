@@ -313,11 +313,14 @@ effect_vocabulary_source_scan: fn(source: String, path: String, machine: [Effect
     ^parent: String?{None}
     ^impl_seen: false
     ^in_impl: false
+    ^access_depth: 0
+    ^access_lines: [String]{}
     ^kernel: [String]{}
     ^listed: false
     impl_head: "irreversible: fn(self) -> Bool {{ "
     expert_head: "expert: fn(self) -> Bool {{ "
     access_head: "access: fn(self) -> EffectAccess {{ "
+    access_open: "access: fn(self) -> EffectAccess {{"
     parent_head: "parent: "
     ^offset: base
     loop index in 0..<lines.len() {
@@ -373,6 +376,21 @@ effect_vocabulary_source_scan: fn(source: String, path: String, machine: [Effect
             next
         }
         if in_impl {
+            if access_depth > 0 {
+                if line == "}}" {
+                    access_depth -= 1
+                    if access_depth == 0 {
+                        access_body = Val(access_lines.join("\n"))
+                        access_lines = [String]{}
+                        next
+                    }
+                    access_lines.push(line)
+                    next
+                }
+                if line.ends_with("{{") -> access_depth += 1
+                access_lines.push(line)
+                next
+            }
             if line == "}}" {
                 in_impl = false
                 next
@@ -390,6 +408,11 @@ effect_vocabulary_source_scan: fn(source: String, path: String, machine: [Effect
             }
             if line.starts_with(expert_head) && line.ends_with(" }}") && expert_body == None {
                 expert_body = Val(line.removeprefix(expert_head).removesuffix(" }}").trim())
+                next
+            }
+            if line == access_open && access_body == None {
+                access_depth = 1
+                access_lines = [String]{}
                 next
             }
             if line.starts_with(access_head) && line.ends_with(" }}") && access_body == None {
@@ -520,12 +543,36 @@ effect_vocabulary_fact: fn(body: String?, cases: [String], member: String?) -> B
 }
 
 // An `access` body's value for one case (None for a struct), or None when the
-// body is not `.Reads`, `.Adds`, `.Replaces`, or an `if self == .Case -> …`
-// chain. No body defaults to `Reads`.
+// body is not `.Reads`, `.Adds`, `.Replaces`, an `if self == .Case -> …`
+// chain, or an `if { self == .Case -> …; else -> … }` arm table. No body
+// defaults to `Reads`.
 effect_vocabulary_access_fact: fn(body: String?, cases: [String], member: String?) -> EffectAccess? {
     written: body ?? return Val(EffectAccess.Reads)
     if effect_access_parse(written) == .Val(direct) -> return Val(direct)
-    if member == None || !written.starts_with("if ") -> return None
+    if member == None -> return None
+    if written.starts_with("if {{") && written.ends_with("}}") {
+        inner: written.removeprefix("if {{").removesuffix("}}").trim()
+        ^matched: EffectAccess?{None}
+        ^fallback: EffectAccess?{None}
+        loop raw_arm in inner.split("\n") {
+            arm: raw_arm.trim()
+            if arm == "" -> next
+            arrow: arm.find(" -> ")
+            if arrow < 0 -> return None
+            cond_text: foundation_byte_text(arm.bytes(), 0, arrow).trim()
+            val_text: foundation_byte_text(arm.bytes(), arrow + 4, arm.bytes().len()).trim()
+            parsed: effect_access_parse(val_text) ?? return None
+            if cond_text == "else" {
+                fallback = Val(parsed)
+                next
+            }
+            cond: effect_vocabulary_fact(Val(cond_text), cases, member) ?? return None
+            if matched == None && cond -> matched = Val(parsed)
+        }
+        if matched == .Val(found) -> return Val(found)
+        return fallback
+    }
+    if !written.starts_with("if ") -> return None
     ^rest: written.removeprefix("if ")
     ^matched: EffectAccess?{None}
     loop {

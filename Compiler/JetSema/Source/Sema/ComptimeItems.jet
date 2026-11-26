@@ -1889,7 +1889,9 @@ sema_comptime_effect_source: fn(graph: SemaRegistrationGraph, source_module: Sem
     body: sema_registration_function_body(source_module, function)
     ^facts: sema_effect_body_facts(body)
     if top_level -> facts.kernel = sema_kernel_pending(function.declaration, body, compute_aliases)
-    sema_effect_source_from_header(function.declaration, symbol_table_key(graph.symbols, function.symbol.id), facts)
+    ^source: sema_effect_source_from_header(function.declaration, symbol_table_key(graph.symbols, function.symbol.id), facts)
+    source.job_retry = sema_effect_app_job_retry_spec(graph, source_module.module_identity, function.declaration)
+    source
 }
 
 // The trait each of `nominal`'s methods implements, by method row: None for

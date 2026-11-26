@@ -1,0 +1,291 @@
+// End-to-end checks for #7035 Wave 1B:
+// - Checked `#Repeatable` (E0778) and `#Repeatable(key: ...)` stability (E0779)
+// - Retried `#App.Job` unkeyed irreversible refusal (E0780) + `at_least_once: true` / `retries: 0` / keyed pass
+// - Unified `EffectAccess` reader, library-effect access resolution, and reflection (`EffectInfo.access`, `EffectInfo.open_world`, `FunctionInfo.repeatable`)
+use {
+    jet_cli.[jet_cli_driver_request]
+    jet_driver.[
+        JetDriverAuthorizedSourceFile,
+        JetDriverAuthorizedSourceRoot,
+        JetDriverAuthorizedSourceSnapshot,
+        JetDriverCompileMode,
+        JetDriverCompileRequest,
+        JetDriverCompileResult,
+        JetDriverCoreSource,
+        jet_driver_compile,
+        jet_driver_core_text,
+    ]
+    jet_foundation.[
+        Diagnostic,
+        EffectAccess,
+        TComptimeValue,
+    ]
+    jet_parser.[parse_source]
+    jet_sema.[
+        SemaLibraryEffectName,
+        sema_comptime_reflection_effect_info,
+        sema_comptime_reflection_func_repeatable,
+        sema_effect_access,
+        sema_effect_row_access,
+    ]
+}
+
+effect_access_test_compile: fn(source: String, extra_core: [JetDriverCoreSource]{[JetDriverCoreSource]{}}) -> JetDriverCompileResult {
+    snapshot: JetDriverAuthorizedSourceSnapshot{
+        roots: [JetDriverAuthorizedSourceRoot]{
+            JetDriverAuthorizedSourceRoot{
+                canonical_path: "/effect-access-fixture",
+                identity: "effect-access-root",
+                allow_hardlinks: false,
+                files: [JetDriverAuthorizedSourceFile]{
+                    JetDriverAuthorizedSourceFile{
+                        path: "/effect-access-fixture/main.jet",
+                        relative_path: "main.jet",
+                        identity: "effect-access-file",
+                        source: source,
+                    },
+                },
+                foreign_cache_files: [JetDriverAuthorizedSourceFile]{},
+            },
+        },
+        entry_root_identity: "effect-access-root",
+        entry_path: "/effect-access-fixture/main.jet",
+    }
+    request: jet_cli_driver_request(snapshot, extra_core, Val(1), JetDriverCompileMode.Check)
+    jet_driver_compile(request)
+}
+
+effect_access_test_has_code: fn(diagnostics: [Diagnostic], code: String) -> Bool Never! {
+    loop diagnostic in diagnostics {
+        if diagnostic.code == code -> return true
+    }
+    false
+}
+
+effect_access_test_error_codes: fn(diagnostics: [Diagnostic]) -> [String] Never! {
+    ^codes: [String]{}
+    loop diagnostic in diagnostics {
+        if diagnostic.severity == 1 -> codes.push(diagnostic.code)
+    }
+    codes
+}
+
+#Test("effect_access_repeatable_refuses_non_repeatable_callee_and_accepts_leaves") {
+    good: effect_access_test_compile(
+        `read_only: fn() -[FS.Read]> Int Never! { 1 }
+
+#Repeatable("same path overwrite is idempotent")
+write_leaf: fn(path: String) -[FS.Write]> Int Never! { path.len() }
+
+#Repeatable
+sync_state: fn(path: String) -[FS.Read, FS.Write]> Int Never! {
+    a: read_only()
+    b: write_leaf(path)
+    a + b
+}
+
+main: fn() -[FS.Read, FS.Write]> {
+    _: sync_state("a.txt")
+}
+`,
+    )
+    assert_eq(effect_access_test_error_codes(good.diagnostics), [String]{})
+
+    bad: effect_access_test_compile(
+        `append_line: fn(path: String) -[FS.Write]> Int Never! { path.len() }
+
+#Repeatable
+bad_sync: fn(path: String) -[FS.Write]> Int Never! {
+    append_line(path)
+}
+
+main: fn() -[FS.Write]> {
+    _: bad_sync("a.txt")
+}
+`,
+    )
+    assert(effect_access_test_has_code(bad.diagnostics, "E0778"), "expected E0778 for #Repeatable calling non-repeatable append_line, got: {effect_access_test_error_codes(bad.diagnostics)}")
+}
+
+#Test("effect_access_repeatable_key_checks_stability_against_rand_and_time") {
+    stable: effect_access_test_compile(
+        `charge_card: fn(order_id: Int) -[Net]> Int Never! { order_id }
+
+#Repeatable(key: "order:{order_id}")
+charge_once: fn(order_id: Int) -[Net]> Int Never! {
+    charge_card(order_id)
+}
+
+main: fn() -[Net]> {
+    _: charge_once(42)
+}
+`,
+    )
+    assert_eq(effect_access_test_error_codes(stable.diagnostics), [String]{})
+
+    bad_rand: effect_access_test_compile(
+        `make_nonce: fn() -[Rand]> Int Never! { 7 }
+charge_card: fn(order_id: Int) -[Net]> Int Never! { order_id }
+
+#Repeatable(key: "order:{order_id}:{make_nonce()}")
+charge_unstable_rand: fn(order_id: Int) -[Net]> Int Never! {
+    charge_card(order_id)
+}
+
+main: fn() -[Net]> {
+    _: charge_unstable_rand(42)
+}
+`,
+    )
+    assert(effect_access_test_has_code(bad_rand.diagnostics, "E0779"), "expected E0779 for #Repeatable(key:) reaching Rand, got: {effect_access_test_error_codes(bad_rand.diagnostics)}")
+
+    bad_time: effect_access_test_compile(
+        `stamp_now: fn() -[Time]> Int Never! { 9 }
+charge_card: fn(order_id: Int) -[Net]> Int Never! { order_id }
+
+#Repeatable(key: "order:{order_id}:{stamp_now()}")
+charge_unstable_time: fn(order_id: Int) -[Net]> Int Never! {
+    charge_card(order_id)
+}
+
+main: fn() -[Net]> {
+    _: charge_unstable_time(42)
+}
+`,
+    )
+    assert(effect_access_test_has_code(bad_time.diagnostics, "E0779"), "expected E0779 for #Repeatable(key:) reaching Time, got: {effect_access_test_error_codes(bad_time.diagnostics)}")
+}
+
+effect_access_test_app_stub: fn() -> JetDriverCoreSource {
+    JetDriverCoreSource{
+        module_name: "app",
+        alias: "app",
+        path: "Core/app-stub.jet",
+        owner: "",
+        owned_members: [String]{},
+        runtime: false,
+        text: jet_driver_core_text(
+            `Site: enum { Method }
+Marker: trait { sites: [Site] }
+
+Job: struct {
+    retries: Int{5},
+    at_least_once: Bool{false},
+    impl Marker {
+        sites: [.Method],
+    }
+}
+`,
+        ),
+    }
+}
+
+#Test("effect_access_app_job_retry_refuses_unkeyed_irreversible_and_accepts_safe_forms") {
+    bad_job: effect_access_test_compile(
+        `use { app }
+
+send_push: fn(id: Int) -[Net]> Int Never! { id }
+
+Mailer: struct {
+    #App.Job(retries: 3)
+    notify: fn(self, id: Int) -[Net]> Int Never! {
+        send_push(id)
+    }
+}
+
+main: fn() -[Net]> {
+    m: Mailer{}
+    _: m.notify(1)
+}
+`,
+        [JetDriverCoreSource]{effect_access_test_app_stub()},
+    )
+    assert(effect_access_test_has_code(bad_job.diagnostics, "E0780"), "expected E0780 for retried #App.Job reaching unkeyed irreversible Net, got: {effect_access_test_error_codes(bad_job.diagnostics)}")
+
+    safe_jobs: effect_access_test_compile(
+        `use { app }
+
+send_push: fn(id: Int) -[Net]> Int Never! { id }
+
+#Repeatable(key: "push:{id}")
+send_push_once: fn(id: Int) -[Net]> Int Never! {
+    send_push(id)
+}
+
+save_db: fn(id: Int) -[DB.Write]> Int Never! { id }
+
+Mailer: struct {
+    #App.Job(retries: 3, at_least_once: true)
+    notify_at_least_once: fn(self, id: Int) -[Net]> Int Never! {
+        send_push(id)
+    }
+
+    #App.Job(retries: 0)
+    notify_no_retry: fn(self, id: Int) -[Net]> Int Never! {
+        send_push(id)
+    }
+
+    #App.Job(retries: 3)
+    notify_keyed: fn(self, id: Int) -[Net]> Int Never! {
+        send_push_once(id)
+    }
+
+    #App.Job(retries: 3)
+    save_only_reversible_db: fn(self, id: Int) -[DB.Write]> Int Never! {
+        save_db(id)
+    }
+}
+
+main: fn() -[Net, DB.Write]> {
+    m: Mailer{}
+    _: m.notify_at_least_once(1)
+    _: m.notify_no_retry(2)
+    _: m.notify_keyed(3)
+    _: m.save_only_reversible_db(4)
+}
+`,
+        [JetDriverCoreSource]{effect_access_test_app_stub()},
+    )
+    assert_eq(effect_access_test_error_codes(safe_jobs.diagnostics), [String]{})
+}
+
+#Test("effect_access_reader_and_reflection_project_access_open_world_and_repeatable") {
+    library: [SemaLibraryEffectName]{
+        SemaLibraryEffectName{written: "Journal.Append", kernel: [String]{"FS.Write"}, token: "pkg/Journal.Append", ancestors: [String]{}, access: EffectAccess.Adds},
+    }
+    assert_eq(sema_effect_access("FS.Read(\"data/\")", library), EffectAccess.Reads)
+    assert_eq(sema_effect_access("pkg/Journal.Append", library), EffectAccess.Adds)
+    assert_eq(sema_effect_row_access([String]{"FS.Read", "pkg/Journal.Append"}, library), EffectAccess.Adds)
+    assert_eq(sema_effect_row_access([String]{"FS.Read", "Net"}, library), EffectAccess.Replaces)
+
+    info: sema_comptime_reflection_effect_info(Val([String]{"FS.Read", "Net"}), None)
+    ^saw_access: ""
+    ^saw_open_world: false
+    if info == .Struct(_, fields) {
+        loop field in fields {
+            if field.name == "access" {
+                if field.value == .Enum(_, variant, _) -> saw_access = variant
+            }
+            if field.name == "open_world" {
+                if field.value == .Bool(flag) -> saw_open_world = flag
+            }
+        }
+    }
+    assert_eq(saw_access, "Replaces")
+    assert(saw_open_world, "Net must mark EffectInfo.open_world = true")
+
+    parsed: parse_source(
+        `read_fn: fn() -[FS.Read]> Int Never! { 1 }
+write_fn: fn() -[FS.Write]> Int Never! { 1 }
+#Repeatable("idempotent")
+marked_fn: fn() -[FS.Write]> Int Never! { 1 }
+`.bytes(),
+    )
+    assert_eq(parsed.diagnostics.len(), 0)
+    parsed.program.items[0] == .Func(read_fn) ?? panic("expected read_fn")
+    parsed.program.items[1] == .Func(write_fn) ?? panic("expected write_fn")
+    parsed.program.items[2] == .Func(marked_fn) ?? panic("expected marked_fn")
+    assert(sema_comptime_reflection_func_repeatable(read_fn, Val([String]{"FS.Read"})))
+    assert(!sema_comptime_reflection_func_repeatable(write_fn, Val([String]{"FS.Write"})))
+    assert(sema_comptime_reflection_func_repeatable(marked_fn, Val([String]{"FS.Write"})))
+}
