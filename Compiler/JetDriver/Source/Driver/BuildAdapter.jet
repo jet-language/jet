@@ -376,14 +376,14 @@ jet_driver_build_action_session_strings: fn(values: [String]) -> BuildSessionVal
 
 // A `Compiler` value carries its build's checked program (the `program` of
 // the `Build` it was made from), which `meta.events` watches.
-jet_driver_build_compiler_value: fn(handle: TComptimeValue, context: TComptimeValue) -> TComptimeValue Never! {
-    ^program: jet_driver_build_field(context, "program") ?? return handle.copy()
+jet_driver_build_compiler_value: fn(handle: ^^TComptimeValue, context: TComptimeValue) -> TComptimeValue Never! {
+    ^program: jet_driver_build_field(context, "program") ?? return handle.move()
     if handle == .Struct(name, fields) {
         ^carried: fields.copy()
         carried.push(TComptimeField{name: "program", value: program.move()})
         return TComptimeValue.Struct{type_name: name.copy(), fields: carried}
     }
-    handle.copy()
+    handle.move()
 }
 
 // One spliced build value as the Jet literal the generated items read.
@@ -490,10 +490,11 @@ jet_driver_compiler_events: fn(session: ^BuildSession, host: JetDriverBuildAdapt
         return JetEvalBuildReply.Failure{diagnostic: jet_driver_build_session_diagnostic(error)}
     }
     program: jet_driver_build_field(args[0], "program") ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value lost its checked program")
-    watched: if args[1] == .String(text) -> text.copy() else -> {
+    heard: if args[1] == .String(watched) -> {
+        if calls -> jet_eval_reflection_calls_to(program, watched) else -> jet_eval_reflection_marked_functions(program, watched)
+    } else -> {
         return jet_driver_build_host_failure(session, span, "`{member}` lost its watched name")
     }
-    heard: if calls -> jet_eval_reflection_calls_to(program, watched) else -> jet_eval_reflection_marked_functions(program, watched)
     events: heard ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value's checked program lost what `{member}` reads")
     JetEvalBuildReply.Value{value: events}
 }
@@ -546,19 +547,14 @@ jet_driver_compiler_find_type: fn(session: ^BuildSession, host: JetDriverBuildAd
     if checked == .Failure(error) {
         return JetEvalBuildReply.Failure{diagnostic: jet_driver_build_session_diagnostic(error)}
     }
-    text: if args[1] == .String(written) -> written.copy() else -> {
+    parsed: if args[1] == .String(written) -> parse_type_text(written) else -> {
         return jet_driver_build_host_failure(session, span, "`{member}` lost its text")
     }
-    spelled: parse_type_text(text) ?? return jet_driver_meta_type_absent()
+    spelled: parsed ?? return jet_driver_meta_type_absent()
     made: build_session_made_structs(session, held)
-    ^names: [String]{}
-    jet_driver_meta_type_heads(spelled, names)
     ^permit: session.storage.guard_edit()
-    ^keys: [String:Type]{}
-    loop name in names {
-        keys["{name}"] = jet_driver_meta_type_key(permit.value.types, made, name) ?? return jet_driver_meta_type_absent()
-    }
-    JetEvalBuildReply.Value{value: TComptimeValue.Present{value: jet_driver_meta_type_id(permit.value.types, jet_driver_meta_type_renamed(spelled, keys))}}
+    resolved: jet_driver_meta_type_resolve(spelled, permit.value.types, made, true) ?? return jet_driver_meta_type_absent()
+    JetEvalBuildReply.Value{value: TComptimeValue.Present{value: jet_driver_meta_type_id(permit.value.types, resolved)}}
 }
 
 // The TypeId of keyed type `ty` a build makes in its type table `table`,
@@ -578,54 +574,58 @@ jet_driver_compiler_add_struct: fn(session: ^BuildSession, host: JetDriverBuildA
         return jet_driver_compiler_unknown(session, host, member, args, fallible, impure, span, file)
     }
     held: jet_driver_compiler_held(args) ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value lost its build")
-    name: if args[1] == .String(text) -> text.copy() else -> {
-        return jet_driver_build_host_failure(session, span, "`{member}` lost its type's name")
-    }
-    if sema_casing_ascii_has_case(name, SemaNameCase.Pascal) != .Val(true) || name == "_" {
-        return jet_driver_meta_name_refusal(span, "meta.add_struct", "type", name, "PascalCase, as in `Shape`")
-    }
-    // A field's name may be computed, so it is checked before it is
-    // written. Its type is a `TypeId` the compiler made, written from its
-    // row as the new module names each type in it.
-    made: build_session_made_structs(session, held)
-    ^source: "{name}: struct {{\n"
-    listed: if args[2] == .List(values) -> values.copy() else -> {
-        return jet_driver_build_host_failure(session, span, "`{member}` lost its fields")
-    }
-    loop field in listed {
-        field_name: jet_driver_build_field(field, "name") ?? return jet_driver_build_host_failure(session, span, "`{member}` lost a field's name")
-        field_type: jet_driver_build_field(field, "type") ?? return jet_driver_build_host_failure(session, span, "`{member}` lost a field's type")
-        written: if field_name == .String(text) -> text.copy() else -> {
-            return jet_driver_build_host_failure(session, span, "`{member}` lost a field's name")
+    if args[1] == .String(name) {
+        if sema_casing_ascii_has_case(name, SemaNameCase.Pascal) != .Val(true) || name == "_" {
+            return jet_driver_meta_name_refusal(span, "meta.add_struct", "type", name, "PascalCase, as in `Shape`")
         }
-        if sema_casing_ascii_has_case(written, SemaNameCase.Snake) != .Val(true) || written == "_" {
-            return jet_driver_meta_name_refusal(span, "meta.add_struct", "field", written, "snake_case, as in `count`")
+        // A field's name may be computed, so it is checked before it is
+        // written. Its type is a `TypeId` the compiler made, written from its
+        // row as the new module names each type in it.
+        made: build_session_made_structs(session, held)
+        ^source: "{name}: struct {{\n"
+        if args[2] == .List(listed) {
+            loop field in listed {
+                field_name: jet_driver_build_field(field, "name") ?? return jet_driver_build_host_failure(session, span, "`{member}` lost a field's name")
+                field_type: jet_driver_build_field(field, "type") ?? return jet_driver_build_host_failure(session, span, "`{member}` lost a field's type")
+                if field_name == .String(written) {
+                    if sema_casing_ascii_has_case(written, SemaNameCase.Snake) != .Val(true) || written == "_" {
+                        return jet_driver_meta_name_refusal(span, "meta.add_struct", "field", written, "snake_case, as in `count`")
+                    }
+                    field_type_name: jet_driver_build_field(field_type, "name") ?? return jet_driver_build_host_failure(session, span, "`{member}` lost a field's type")
+                    if field_type_name == .String(spelled) {
+                        row: jet_driver_meta_type_row(session, field_type) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost a field's type")
+                        ty: jet_driver_meta_field_type(session, made, row) ?? return jet_driver_meta_type_refusal(span, written, spelled)
+                        source = "{source}    {written}: {type_name(ty)},\n"
+                    } else {
+                        return jet_driver_build_host_failure(session, span, "`{member}` lost a field's type")
+                    }
+                } else {
+                    return jet_driver_build_host_failure(session, span, "`{member}` lost a field's name")
+                }
+            }
+        } else {
+            return jet_driver_build_host_failure(session, span, "`{member}` lost its fields")
         }
-        spelled: if jet_driver_build_field(field_type, "name") == .Val(.String(text)) -> text.copy() else -> {
-            return jet_driver_build_host_failure(session, span, "`{member}` lost a field's type")
+        source = "{source}}}\n"
+        if args[3] == .String(home_module) {
+            scope: jet_driver_build_session_input(args[3]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its name argument")
+            producer: jet_driver_build_session_input(args[4]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its caller")
+            authority: jet_driver_build_session_input(args[5]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its Meta effects")
+            reply: build_session_call(session, build_session_compiler_add, [BuildSessionValue]{held, scope, producer, authority, BuildSessionValue.Text{value: name.copy()}}, Val(source), false, span.start, span.end)
+            if reply == .Value(_) {
+                // The new struct's `TypeId`, made as every TypeId is: declared as
+                // `name` in the generated module `module`, which shares the
+                // package's namespace, its key its identity there.
+                identity: "{home_module}.{name}"
+                ^permit: session.storage.guard_edit()
+                jet_driver_meta_made_head(permit.value.types, name, identity)
+                return JetEvalBuildReply.Value{value: jet_driver_meta_type_id(permit.value.types, Type.Named{name: identity})}
+            }
+            return jet_driver_session_reply(session, reply, span)
         }
-        row: jet_driver_meta_type_row(session, field_type) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost a field's type")
-        ty: jet_driver_meta_field_type(session, made, row) ?? return jet_driver_meta_type_refusal(span, written, spelled)
-        source = "{source}    {written}: {type_name(ty)},\n"
-    }
-    source = "{source}}}\n"
-    home_module: if args[3] == .String(text) -> text.copy() else -> {
         return jet_driver_build_host_failure(session, span, "`{member}` lost its name argument")
     }
-    scope: jet_driver_build_session_input(args[3]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its name argument")
-    producer: jet_driver_build_session_input(args[4]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its caller")
-    authority: jet_driver_build_session_input(args[5]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its Meta effects")
-    reply: build_session_call(session, build_session_compiler_add, [BuildSessionValue]{held, scope, producer, authority, BuildSessionValue.Text{value: name.copy()}}, Val(source), false, span.start, span.end)
-    if reply == .Value(_) {
-        // The new struct's `TypeId`, made as every TypeId is: declared as
-        // `name` in the generated module `module`, which shares the
-        // package's namespace, its key its identity there.
-        identity: "{home_module}.{name}"
-        ^permit: session.storage.guard_edit()
-        jet_driver_meta_made_head(permit.value.types, name, identity)
-        return JetEvalBuildReply.Value{value: jet_driver_meta_type_id(permit.value.types, Type.Named{name: identity})}
-    }
-    jet_driver_session_reply(session, reply, span)
+    jet_driver_build_host_failure(session, span, "`{member}` lost its type's name")
 }
 
 // `meta.report(finding, at: c)` sends the finding's code, tier and texts
@@ -639,33 +639,33 @@ jet_driver_compiler_report: fn(session: ^BuildSession, host: JetDriverBuildAdapt
     }
     held: jet_driver_compiler_held(args) ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value lost its build")
     ^values: [BuildSessionValue]{held}
-    ^texts: [String]{}
-    loop index in 1..<8 {
-        text: if args[index] == .String(value) -> value.copy() else -> {
+    loop index in 1..<6 {
+        if args[index] == .String(value) -> values.push(BuildSessionValue.Text{value: value.copy()}) else {
             return jet_driver_build_host_failure(session, span, "`meta.report` lost a finding's text")
         }
-        texts.push(text)
     }
-    // copy: the five finding texts go to the session; the rewrite texts stay here.
-    loop index in 0..<5 -> values.push(BuildSessionValue.Text{value: texts[index].copy()})
-    place: jet_driver_build_field(args[8], "span") ?? return jet_driver_build_host_failure(session, span, "`meta.report` takes a call a `.Calls{{to: f}}` watch heard")
-    called_in: if jet_driver_build_field(place, "file") == .Val(.String(text)) -> text.copy() else -> {
-        return jet_driver_build_host_failure(session, span, "`meta.report` lost the file of its call")
-    }
-    first: if jet_driver_build_field(place, "start") == .Val(.Int(value)) -> value else -> -1
-    last: if jet_driver_build_field(place, "end") == .Val(.Int(value)) -> value else -> -1
-    ^rewrite: ""
-    if texts[5] != "" {
-        if jet_driver_build_field(args[8], "callee") == .Val(.String(called)) {
-            // copy: the replacement is read again for no other call.
-            if called == texts[5] -> rewrite = texts[6].copy()
+    if args[6] == .String(target) {
+        if args[7] == .String(replacement) {
+            place: jet_driver_build_field(args[8], "span") ?? return jet_driver_build_host_failure(session, span, "`meta.report` takes a call a `.Calls{{to: f}}` watch heard")
+            called_in: if jet_driver_build_field(place, "file") == .Val(.String(text)) -> text.copy() else -> {
+                return jet_driver_build_host_failure(session, span, "`meta.report` lost the file of its call")
+            }
+            first: if jet_driver_build_field(place, "start") == .Val(.Int(value)) -> value else -> -1
+            last: if jet_driver_build_field(place, "end") == .Val(.Int(value)) -> value else -> -1
+            ^rewrite: ""
+            if target != "" {
+                if jet_driver_build_field(args[8], "callee") == .Val(.String(called)) {
+                    if called == target -> rewrite = replacement.copy()
+                }
+            }
+            values.push(BuildSessionValue.Text{value: called_in})
+            values.push(BuildSessionValue.Span{start: first, end: last, file: ""})
+            values.push(BuildSessionValue.Text{value: rewrite})
+            reply: build_session_call(session, build_session_compiler_report, values, None, false, span.start, span.end)
+            return jet_driver_session_reply(session, reply, span)
         }
     }
-    values.push(BuildSessionValue.Text{value: called_in})
-    values.push(BuildSessionValue.Span{start: first, end: last, file: ""})
-    values.push(BuildSessionValue.Text{value: rewrite})
-    reply: build_session_call(session, build_session_compiler_report, values, None, false, span.start, span.end)
-    jet_driver_session_reply(session, reply, span)
+    jet_driver_build_host_failure(session, span, "`meta.report` lost a finding's text")
 }
 
 // The source a `meta.add` or `meta.rewrite_body` call adds: its `Code`
@@ -772,14 +772,16 @@ jet_driver_code_pasted: fn(session: ^BuildSession, _host: JetDriverBuildAdapter,
         marker: if args[at] == .Int(number) -> number else -> {
             return jet_driver_build_host_failure(session, span, "a `#code` paste lost its marker")
         }
-        name: if args[at + 1] == .String(written) -> written.copy() else -> {
+        if args[at + 1] == .String(name) {
+            if args[at + 2] == .String(text) {
+                if parse_type_text(text) == None -> return jet_driver_code_paste_refusal(span, name, text)
+                source = source.replace("{marker}", text)
+            } else {
+                return jet_driver_build_host_failure(session, span, "`#{{{name}}}` lost its text")
+            }
+        } else {
             return jet_driver_build_host_failure(session, span, "a `#code` paste lost its name")
         }
-        text: if args[at + 2] == .String(written) -> written.copy() else -> {
-            return jet_driver_build_host_failure(session, span, "`#{{{name}}}` lost its text")
-        }
-        if parse_type_text(text) == None -> return jet_driver_code_paste_refusal(span, name, text)
-        source = source.replace("{marker}", text)
     }
     // The pasted value keeps the rest of the value, its place included.
     ^kept: [TComptimeField]{TComptimeField{name: "source", value: TComptimeValue.String{value: source}}}
@@ -917,20 +919,9 @@ jet_driver_meta_type_row: fn(session: BuildSession, value: TComptimeValue) -> Ty
 // table's `scope`, or a struct the value's target made, `made`); None when
 // it names a declared type that module can't see.
 jet_driver_meta_field_type: fn(session: BuildSession, made: [BuildSessionMadeStruct], row: TypeID) -> Type? {
-    permit: session.storage.guard_read()
+    ^permit: session.storage.guard_edit()
     ty: type_syntax(permit.value.types.interner, row)
-    ^heads: [String]{}
-    jet_driver_meta_type_heads(ty, heads)
-    ^spellings: [String:Type]{}
-    loop head in heads {
-        spelling: jet_driver_meta_scope_spelling(permit.value.types, made, head) ?? {
-            // A key with no module names no declared type (a builtin).
-            if head.contains(".") -> return None
-            next
-        }
-        spellings["{head}"] = Type.Named{name: spelling}
-    }
-    Val(jet_driver_meta_type_renamed(ty, spellings))
+    jet_driver_meta_type_resolve(ty, permit.value.types, made, false)
 }
 
 // The bare name the generated module gives the declared type keyed `key`:
@@ -945,59 +936,86 @@ jet_driver_meta_scope_spelling: fn(table: JetCompilerServicesTypeTable, made: [B
     Val("{spelling}")
 }
 
-// Each name `ty` gives a type by, its own and its arguments', in the order
-// they are written.
-jet_driver_meta_type_heads: fn(ty: Type, heads: ^[String]) Never! {
+// Resolves each named type in `ty` in a single pass: to its keyed type in
+// `table` when `to_key` is true (`meta.find_type`), or to its in-scope
+// spelling when false (`meta.add_struct`).
+jet_driver_meta_type_resolve: fn(ty: Type, table: ^JetCompilerServicesTypeTable, made: [BuildSessionMadeStruct], to_key: Bool) -> Type? {
     if ty == {
-        .Named(name) -> { heads.push(name.copy()) }
+        .Named(name) -> {
+            if to_key -> return jet_driver_meta_type_key(table, made, name)
+            found: jet_driver_meta_scope_spelling(table, made, name)
+            if found != None -> return Val(Type.Named{name: found})
+            if name.contains(".") -> return None
+        }
         .Apply(name, args) -> {
-            heads.push(name.copy())
-            loop arg in args -> jet_driver_meta_type_heads(arg, heads)
+            ^head: ""
+            if to_key {
+                resolved_head: jet_driver_meta_type_key(table, made, name) ?? return None
+                chosen: if resolved_head == .Named(renamed) -> renamed else -> name
+                head = chosen.copy()
+            } else {
+                head = jet_driver_meta_scope_spelling(table, made, name) ?? {
+                    if name.contains(".") -> return None
+                    name.copy()
+                }
+            }
+            ^resolved_args: [Type]{}
+            loop arg in args {
+                resolved_arg: jet_driver_meta_type_resolve(arg, table, made, to_key) ?? return None
+                resolved_args.push(resolved_arg)
+            }
+            return Val(Type.Apply{name: head, args: resolved_args})
         }
-        .List(element) -> { jet_driver_meta_type_heads(element, heads) }
-        .Map(key, _, value) -> {
-            jet_driver_meta_type_heads(key, heads)
-            jet_driver_meta_type_heads(value, heads)
+        .List(element) -> {
+            resolved: jet_driver_meta_type_resolve(element, table, made, to_key) ?? return None
+            return Val(Type.List{element: resolved})
         }
-        .Shared(inner) | .Option(inner) -> { jet_driver_meta_type_heads(inner, heads) }
+        .Map(key, key_span, value) -> {
+            resolved_key: jet_driver_meta_type_resolve(key, table, made, to_key) ?? return None
+            resolved_value: jet_driver_meta_type_resolve(value, table, made, to_key) ?? return None
+            return Val(Type.Map{key: resolved_key, key_span: key_span, value: resolved_value})
+        }
+        .Shared(inner) -> {
+            resolved: jet_driver_meta_type_resolve(inner, table, made, to_key) ?? return None
+            return Val(Type.Shared{inner: resolved})
+        }
+        .Option(inner) -> {
+            resolved: jet_driver_meta_type_resolve(inner, table, made, to_key) ?? return None
+            return Val(Type.Option{inner: resolved})
+        }
         .Result(ok, err) -> {
-            jet_driver_meta_type_heads(ok, heads)
-            jet_driver_meta_type_heads(err, heads)
+            resolved_ok: jet_driver_meta_type_resolve(ok, table, made, to_key) ?? return None
+            resolved_err: jet_driver_meta_type_resolve(err, table, made, to_key) ?? return None
+            return Val(Type.Result{ok: resolved_ok, err: resolved_err})
         }
         .Tuple(fields) -> {
-            loop field in fields -> jet_driver_meta_type_heads(field.ty, heads)
+            ^resolved_fields: [TypeTupleField]{}
+            loop field in fields {
+                resolved_ty: jet_driver_meta_type_resolve(field.ty, table, made, to_key) ?? return None
+                resolved_fields.push(TypeTupleField{name: field.name, ty: resolved_ty})
+            }
+            return Val(Type.Tuple{fields: resolved_fields})
         }
-        .FixedList(elem, _) -> { jet_driver_meta_type_heads(elem, heads) }
+        .FixedList(elem, len) -> {
+            resolved: jet_driver_meta_type_resolve(elem, table, made, to_key) ?? return None
+            return Val(Type.FixedList{elem: resolved, len: len})
+        }
         .Union(members) -> {
-            loop member in members -> jet_driver_meta_type_heads(member, heads)
+            ^resolved_members: [Type]{}
+            loop member in members {
+                resolved_member: jet_driver_meta_type_resolve(member, table, made, to_key) ?? return None
+                resolved_members.push(resolved_member)
+            }
+            return Val(Type.Union{members: resolved_members})
         }
-        .Case(_, payload) -> jet_driver_meta_type_heads(payload, heads)
-        .Int | .Float | .Bool | .String | .Char | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Quantity(_, _) | .Measure(_) -> {}
-    }
-}
-
-// `ty` with each name `names` has replaced by its type, a head by its
-// type's name; a name it lacks stays.
-jet_driver_meta_type_renamed: fn(ty: Type, names: [String:Type]) -> Type Never! {
-    if ty == {
-        .Named(name) -> return (names.get(name) ?? ty).copy()
-        .Apply(name, args) -> {
-            head: if names.get(name) == .Val(.Named(renamed)) -> renamed else -> name
-            return Type.Apply{name: head.copy(), args: loop arg in args -> jet_driver_meta_type_renamed(arg, names)}
+        .Case(name, payload) -> {
+            resolved: jet_driver_meta_type_resolve(payload, table, made, to_key) ?? return None
+            return Val(Type.Case{name: name.copy(), payload: resolved})
         }
-        .List(element) -> return Type.List{element: jet_driver_meta_type_renamed(element, names)}
-        .Map(key, key_span, value) -> return Type.Map{key: jet_driver_meta_type_renamed(key, names), key_span: key_span, value: jet_driver_meta_type_renamed(value, names)}
-        .Shared(inner) -> return Type.Shared{inner: jet_driver_meta_type_renamed(inner, names)}
-        .Option(inner) -> return Type.Option{inner: jet_driver_meta_type_renamed(inner, names)}
-        .Result(ok, err) -> return Type.Result{ok: jet_driver_meta_type_renamed(ok, names), err: jet_driver_meta_type_renamed(err, names)}
-        .Tuple(fields) -> return Type.Tuple{fields: loop field in fields -> TypeTupleField{name: field.name, ty: jet_driver_meta_type_renamed(field.ty, names)}}
-        .FixedList(elem, len) -> return Type.FixedList{elem: jet_driver_meta_type_renamed(elem, names), len: len}
-        .Union(members) -> return Type.Union{members: loop member in members -> jet_driver_meta_type_renamed(member, names)}
-        .Case(name, payload) -> return Type.Case{name: name.copy(), payload: jet_driver_meta_type_renamed(payload, names)}
         .Int | .Float | .Bool | .String | .Char | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }
     // copy: a form that names no type by name stays as it is.
-    ty.copy()
+    Val(ty.copy())
 }
 
 // Whether `text`, read as a path under the build file's directory, names a

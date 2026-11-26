@@ -7,7 +7,7 @@
 // writes is a `^` parameter, from a second probe that checks each function
 // with its changeable variables as `^` (sema_script_helper_writes).
 use {
-    jet_foundation.[AST_NODE_GENERATED, AccessConvention, Diagnostic, Expr, Item, Param, ParamZone, Program, Span, TargetMachine]
+    jet_foundation.[AST_NODE_GENERATED, AccessConvention, Diagnostic, Expr, Item, Param, ParamZone, Program, Span, TargetMachine, compiler_take_rows]
     jet_sema.[
         SemaComptimeDeclarationStage,
         SemaForeignProviderInput,
@@ -119,8 +119,8 @@ jet_driver_script_reach: fn(load: JetDriverLoadResult) -> JetDriverScriptReach N
         }
         jet_driver_script_reach_chains(named, calls, hidden)
         loop (row, name) in functions {
-            // copy: the row lists keep their names and variables
-            if named[row].len() > 0 -> reach.variables[name.copy()] = named[row].copy()
+            // copy: the row lists keep their names
+            if named[row].len() > 0 -> reach.variables[name.copy()] = compiler_take_rows<String>(named[row])
             if calls[row].len() > 0 {
                 ^callees: [String]{}
                 // copy: the row list keeps its names
@@ -170,8 +170,7 @@ jet_driver_script_add_parameters: fn(load: ^JetDriverLoadResult, reach: [String:
                 ^writes: [String]{}
                 loop name in named {
                     variable: variables.get(name) ?? next
-                    // copy: the reach keeps its names; the parameter owns its own
-                    updated.params.push(jet_driver_script_parameter(name.copy(), variable, updated.name_span))
+                    updated.params.push(jet_driver_script_parameter(name, variable, updated.name_span))
                     // copy: the reach keeps its names; the write probe owns its list
                     if variable.mutable -> writes.push(name.copy())
                 }

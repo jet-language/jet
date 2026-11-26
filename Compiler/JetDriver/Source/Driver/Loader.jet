@@ -52,6 +52,8 @@ use {
         Span,
         StructureFact,
         ast_program,
+        compiler_take_rows,
+        compiler_transfer_rows,
         compiler_threads_admit,
         compiler_threads_beside,
         compiler_threads_failed,
@@ -3189,8 +3191,8 @@ jet_driver_bind_dependency_imports: fn(program: ^Program, unit: JetDriverSourceU
     if bindings.len() == 0 {
         return
     }
-    loop declaration in program.imports -> bindings.push(declaration.copy())
-    program.imports = bindings
+    compiler_transfer_rows<ImportDecl>(bindings, program.imports)
+    program.imports = bindings.move()
 }
 
 // A carrier's declaration in Core's builtins door (`priv Sender: struct<T>
@@ -5458,16 +5460,19 @@ jet_driver_parse_core_text: fn(text: String, text_bytes: ^^[U8], module_name: St
 //   sema_prelude_error_conversion), so X must be one and the target `Err`.
 jet_driver_parse_prelude_source: fn(text: String, threads: CompilerThreads, shared: NameTable, own: ^NameTable) -> JetDriverParsedUnit {
     ^unit: jet_driver_parse_core_source(text, "", [String]{}, true, true, None, threads, shared, own)
-    unit.parsed.program.items = jet_driver_prelude_checked_items(unit.parsed.program.items, "", text, unit.parsed.diagnostics)
+    unit.parsed.program.items = jet_driver_prelude_checked_items(compiler_take_rows<Item>(unit.parsed.program.items), "", text, unit.parsed.diagnostics)
     unit
 }
 
 // The items of one Prelude module body that are not embedded rows, with an
 // error for each marker declaration that builds no rule. `prefix` qualifies
 // a nested module's trait names (`Literal.Int`).
-jet_driver_prelude_checked_items: fn(items: [Item], prefix: String, text: String, diagnostics: ^[Diagnostic]) -> [Item] {
+jet_driver_prelude_checked_items: fn(items: ^^[Item], prefix: String, text: String, diagnostics: ^[Diagnostic]) -> [Item] {
     ^kept: [Item]{}
-    loop item in items {
+    ^pending: items.move()
+    pending.reverse()
+    loop pending.len() > 0 {
+        item: pending.pop() ?? break
         if item == {
             .MarkerDecl(declaration) -> {
                 if sema_marker_rules_applied_row(declaration, text) == .Val(_) -> next
@@ -5495,10 +5500,11 @@ jet_driver_prelude_checked_items: fn(items: [Item], prefix: String, text: String
                 if owned_trait("{prefix}{definition.name}") != None -> next
             }
             .CodeModule(code_module) -> {
-                if code_module.body == .Val(body) {
-                    nested: jet_driver_prelude_checked_items(body, "{prefix}{code_module.name}.", text, diagnostics)
-                    if nested.len() == 0 -> next
+                if code_module.body != None {
                     ^rebuilt: code_module.copy()
+                    body: rebuilt.body.move() ?? next
+                    nested: jet_driver_prelude_checked_items(body, "{prefix}{rebuilt.name}.", text, diagnostics)
+                    if nested.len() == 0 -> next
                     rebuilt.body = Val(nested)
                     kept.push(Item.CodeModule{value: rebuilt.move()})
                     next
@@ -5506,7 +5512,7 @@ jet_driver_prelude_checked_items: fn(items: [Item], prefix: String, text: String
             }
             .Const(_) | .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Tag(_) | .Impl(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .FactDecl(_) -> {}
         }
-        kept.push(item.copy())
+        kept.push(item)
     }
     kept
 }
@@ -5535,8 +5541,8 @@ jet_driver_core_runtime_row: fn(core_sources: [JetDriverCoreSource], path: Strin
 // the one-member list `use core.a.runtime.u.[f]` (local name `g`), so the unit
 // resolves through the selective-import path like any member list.
 jet_driver_core_runtime_member_imports: fn(program: ^Program, core_sources: [JetDriverCoreSource]) Never! {
-    ^rewritten: [ImportDecl]{}
-    loop declaration in program.imports {
+    loop index in 0..<program.imports.len() {
+        declaration: program.imports[index]
         if declaration.kind == .Module(name, span) {
             if jet_driver_core_runtime_row(core_sources, name) == .Val(row_index) {
                 unit: core_sources[row_index].module_name
@@ -5548,14 +5554,11 @@ jet_driver_core_runtime_member_imports: fn(program: ^Program, core_sources: [Jet
                     member_span: Span{start: unit_span.end + 1, end: span.end}
                     local_span: declaration.alias_span
                     local: if declaration.alias != item -> String?{Val(declaration.alias)} else -> String?{None}
-                    rewritten.push(ImportDecl{kind: ImportKind.Unqualified{module_alias: unit, module_alias_span: unit_span, items: [ImportedItem]{ImportedItem{original: item, alias: local}}, items_span: member_span, span: declaration.span}, alias: declaration.alias, alias_span: declaration.alias_span, span: declaration.span, item_spans: [Span]{member_span}, local_spans: [Span]{local_span}, is_pub: declaration.is_pub, is_package_pub: declaration.is_package_pub, inline_version: None, comptime_span: declaration.comptime_span})
-                    next
+                    program.imports[index] = ImportDecl{kind: ImportKind.Unqualified{module_alias: unit, module_alias_span: unit_span, items: [ImportedItem]{ImportedItem{original: item, alias: local}}, items_span: member_span, span: declaration.span}, alias: declaration.alias, alias_span: declaration.alias_span, span: declaration.span, item_spans: [Span]{member_span}, local_spans: [Span]{local_span}, is_pub: declaration.is_pub, is_package_pub: declaration.is_package_pub, inline_version: None, comptime_span: declaration.comptime_span}
                 }
             }
         }
-        rewritten.push(declaration.copy())
     }
-    program.imports = rewritten
 }
 
 // #6542: `alias: owner.x` binds whatever the path names. When the path names
@@ -5566,33 +5569,43 @@ jet_driver_core_runtime_member_imports: fn(program: ^Program, core_sources: [Jet
 // or a package dependency. Any other path stays a module import and keeps its
 // own error.
 jet_driver_member_imports: fn(program: ^Program, request: JetDriverCompileRequest, source_units: [JetDriverSourceUnit], unit: JetDriverSourceUnit, packages: [JetDriverPackageInfo], index: JetDriverSourceIndex) {
-    if jet_driver_member_rows(program.imports, program.imports, program.items, program.items, request, source_units, unit, packages, index) == .Val(rows) {
-        program.imports = rows
-    }
+    jet_driver_member_rows_in_place(program.imports, program.items, request, source_units, unit, packages, index)
     loop item_index in 0..<program.items.len() {
         if program.items[item_index] == .CodeModule(code_module) && code_module.body == .Val(body) {
-            rows: jet_driver_member_rows(code_module.imports, program.imports, body, program.items, request, source_units, unit, packages, index) ?? next
+            ^indices: [Int]{}
+            ^members: [ImportDecl]{}
+            loop (row_index, declaration) in code_module.imports {
+                if jet_driver_member_import(declaration, code_module.imports, program.imports, body, program.items, request, source_units, unit, packages, index) == .Val(member) {
+                    indices.push(row_index)
+                    members.push(member)
+                }
+            }
+            if indices.len() == 0 -> next
             ^module_value: code_module.copy()
-            module_value.imports = rows
+            ^pos: indices.len()
+            loop pos > 0 {
+                pos -= 1
+                if members.pop() == .Val(member) -> module_value.imports[indices[pos]] = member
+            }
             program.items[item_index] = Item.CodeModule{value: module_value}
         }
     }
 }
 
-// `imports` with each member row read as a member list, or None when no row
-// names a member. `scope` holds the items of the importing module body and
-// `outer` the file's top-level items; `outer_imports` are the file's imports.
-jet_driver_member_rows: fn(imports: [ImportDecl], outer_imports: [ImportDecl], scope: [Item], outer: [Item], request: JetDriverCompileRequest, source_units: [JetDriverSourceUnit], unit: JetDriverSourceUnit, packages: [JetDriverPackageInfo], index: JetDriverSourceIndex) -> [ImportDecl]? {
-    ^rows: [ImportDecl]{}
-    ^changed: false
-    loop declaration in imports {
-        if jet_driver_member_import(declaration, imports, outer_imports, scope, outer, request, source_units, unit, packages, index) == .Val(member) {
-            rows.push(member)
-            changed = true
-        } else { rows.push(declaration.copy()) }
+jet_driver_member_rows_in_place: fn(imports: ^[ImportDecl], items: [Item], request: JetDriverCompileRequest, source_units: [JetDriverSourceUnit], unit: JetDriverSourceUnit, packages: [JetDriverPackageInfo], index: JetDriverSourceIndex) {
+    ^indices: [Int]{}
+    ^members: [ImportDecl]{}
+    loop (row_index, declaration) in imports {
+        if jet_driver_member_import(declaration, imports, imports, items, items, request, source_units, unit, packages, index) == .Val(member) {
+            indices.push(row_index)
+            members.push(member)
+        }
     }
-    if !changed -> return None
-    Val(rows)
+    ^pos: indices.len()
+    loop pos > 0 {
+        pos -= 1
+        if members.pop() == .Val(member) -> imports[indices[pos]] = member
+    }
 }
 
 jet_driver_member_import: fn(declaration: ImportDecl, imports: [ImportDecl], outer_imports: [ImportDecl], scope: [Item], outer: [Item], request: JetDriverCompileRequest, source_units: [JetDriverSourceUnit], unit: JetDriverSourceUnit, packages: [JetDriverPackageInfo], index: JetDriverSourceIndex) -> ImportDecl? {
@@ -6392,12 +6405,15 @@ jet_driver_follow_core_demands: fn(
         jet_driver_reach_demand_follow(reach, at)
         followed = true
         // copy: reach_open may grow the reach while the name is read.
+        is_bare: reach.demands[at].bare
+        is_open: reach.demands[at].open
         module_name: reach.demands[at].module_name.copy()
-        if reach.demands[at].bare && !bare_modules.contains(module_name) {
-            bare_modules.push(module_name.copy())
+        if is_open -> jet_driver_reach_open(reach, module_name)
+        unit_index: jet_driver_core_unit(source_units, queued, pending, generated, core_sources, module_name, true, entry_module, entry_index, Span{start: 0, end: 0}, diagnostics)
+        if is_bare && !bare_modules.contains(module_name) {
+            bare_modules.push(module_name)
         }
-        if reach.demands[at].open -> jet_driver_reach_open(reach, module_name)
-        index: jet_driver_core_unit(source_units, queued, pending, generated, core_sources, module_name, true, entry_module, entry_index, Span{start: 0, end: 0}, diagnostics) ?? next
+        index: unit_index ?? next
         if !queued[index] {
             queued[index] = true
             pending.push(index)
@@ -7385,7 +7401,7 @@ jet_driver_load_walk: fn(
                 }
             }
             loop path in demand.core_paths {
-                parts: path.split(".").to_list()
+                ^parts: path.split(".").to_list()
                 rest: parts[1..<parts.len()].join(".")
                 ^module_name: ""
                 if root_aliases.contains(parts[0]) -> module_name = "core.{rest}" else {
@@ -7404,8 +7420,8 @@ jet_driver_load_walk: fn(
                 }
                 if !sourced -> next
                 if defers {
-                    path_words.push(parts[parts.len() - 1].copy())
-                    path_modules.push(module_name.copy())
+                    path_words.push(parts.pop() ?? "")
+                    path_modules.push(module_name)
                     next
                 }
                 path_index: jet_driver_core_unit(source_units, queued, pending, generated_records, request.core_sources, module_name, importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, diagnostics)

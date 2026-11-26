@@ -69,16 +69,17 @@ build_session_add_action: fn(state: ^BuildSessionState, args: [BuildSessionValue
     handle: if step == .Value(value) -> value else -> {
         return step
     }
+    step_id: build_session_handle(state, handle, "BuildStepHandle") ?? return build_session_fail(state, "the step does not belong to this build")
     loop arg in run.slice(1, run.len()) {
-        reply: build_session_step_arg(state, BuildSessionCall{args: [BuildSessionValue]{handle.copy(), BuildSessionValue.Text{value: arg}}})
+        reply: build_session_step_arg_text(state, step_id, arg)
         if reply != .Value(value: .Unit) -> return reply
     }
     loop path in inputs {
-        reply: build_session_step_reads(state, BuildSessionCall{args: [BuildSessionValue]{handle.copy(), BuildSessionValue.Text{value: path}}})
+        reply: build_session_step_read_path(state, step_id, path, "")
         if reply != .Value(value: .Unit) -> return reply
     }
     loop path in outputs {
-        reply: build_session_step_writes(state, BuildSessionCall{args: [BuildSessionValue]{handle.copy(), BuildSessionValue.Text{value: path}}})
+        reply: build_session_step_write_path(state, step_id, path, "", false)
         if reply != .Value(value: .Unit) -> return reply
     }
     step
@@ -272,9 +273,9 @@ build_session_dependency_folder: fn(name: String, root: String, path: String) ->
     BuildSessionFile{kind: "folder", path: "{BUILD_SESSION_DEPS_DIR}/{name}/{path}", probe: None, action: None, from: Val("{root}/{path}")}
 }
 
-build_session_new_file: fn(state: ^BuildSessionState, file: BuildSessionFile) -> BuildSessionReply {
+build_session_new_file: fn(state: ^BuildSessionState, file: ^^BuildSessionFile) -> BuildSessionReply {
     id: state.files.len()
-    state.files.push(file.copy())
+    state.files.push(file.move())
     BuildSessionReply.Value{value: BuildSessionValue.Handle{type_name: "BuildFile", session: state.id, id: id}}
 }
 
@@ -328,13 +329,18 @@ build_session_step_reads: fn(state: ^BuildSessionState, call: BuildSessionCall) 
 // A file the step reads (`.{written}`), and its argument when `passed`.
 build_session_step_read: fn(state: ^BuildSessionState, args: [BuildSessionValue], written: String, passed: Bool{false}) -> BuildSessionReply {
     id: build_session_step_id(state, args) ?? return build_session_step_refused(state, args)
-    ^step: state.actions[id]
     path: build_session_text(args, 1) ?? return build_session_fail(state, "`.{written}` takes a path")
+    flag: if passed -> build_session_text(args, 2) ?? "" else -> ""
+    build_session_step_read_path(state, id, path, flag, passed: passed)
+}
+
+build_session_step_read_path: fn(state: ^BuildSessionState, id: Int, path: String, flag: String, passed: Bool{false}) -> BuildSessionReply {
+    ^step: state.actions[id]
     if build_session_path_error(path) == .Val(error) {
         return build_session_error_fail(state, error)
     }
     build_session_append_unique(step.inputs, path)
-    if passed -> step.argv.push("{build_session_text(args, 2) ?? ""}{path}")
+    if passed -> step.argv.push("{flag}{path}")
     state.actions[id] = step
     BuildSessionReply.Value{value: BuildSessionValue.Unit}
 }
@@ -354,12 +360,17 @@ build_session_step_writes: fn(state: ^BuildSessionState, call: BuildSessionCall)
 // `passed`.
 build_session_step_write: fn(state: ^BuildSessionState, args: [BuildSessionValue], written: String, passed: Bool{false}) -> BuildSessionReply {
     id: build_session_step_id(state, args) ?? return build_session_step_refused(state, args)
-    ^step: state.actions[id]
     path: build_session_text(args, 1) ?? return build_session_fail(state, "`.{written}` takes a path")
+    flag: if passed -> build_session_text(args, 2) ?? "" else -> ""
+    kept: build_session_kept(args)
+    build_session_step_write_path(state, id, path, flag, kept, passed: passed)
+}
+
+build_session_step_write_path: fn(state: ^BuildSessionState, id: Int, path: ^^String, flag: String, kept: Bool, passed: Bool{false}) -> BuildSessionReply {
+    ^step: state.actions[id]
     if build_session_path_error(path) == .Val(error) {
         return build_session_error_fail(state, error)
     }
-    kept: build_session_kept(args)
     if kept && (path == ".jet" || path.starts_with(".jet/")) {
         return build_session_fail(state, "step `{step.name}` keeps `{path}` in git, and nothing under `.jet/` is ever committed; keep a file outside `.jet/`, or drop `kept: true`")
     }
@@ -377,9 +388,9 @@ build_session_step_write: fn(state: ^BuildSessionState, args: [BuildSessionValue
         state.actions[id] = step
         return BuildSessionReply.Value{value: BuildSessionValue.Unit}
     }
-    step.argv.push("{build_session_text(args, 2) ?? ""}{path}")
+    step.argv.push("{flag}{path}")
     state.actions[id] = step
-    build_session_new_file(state, BuildSessionFile{kind: "output", path: path, probe: None, action: Val(id)})
+    build_session_new_file(state, BuildSessionFile{kind: "output", path: path.move(), probe: None, action: Val(id)})
 }
 
 // `.file(file, flag:)`: a file, folder or program the step is passed.
@@ -395,8 +406,9 @@ build_session_step_file: fn(state: ^BuildSessionState, call: BuildSessionCall) -
         // The argument is the program's path, set as the step starts.
         probe: file.probe ?? return build_session_fail(state, "found program `{file.path}` lost its probe")
         if !step.probes.contains(probe) -> step.probes.push(probe)
-        step.programs.push(BuildSessionProgram{at: step.argv.len(), flag: flag.copy(), probe: probe})
+        at: step.argv.len()
         step.argv.push("{flag}{file.path}")
+        step.programs.push(BuildSessionProgram{at: at, flag: flag, probe: probe})
         state.actions[id] = step
         return unit
     }
@@ -445,12 +457,16 @@ build_session_step_file: fn(state: ^BuildSessionState, call: BuildSessionCall) -
 // `.arg(text)`: one argument of the tool.
 build_session_step_arg: fn(state: ^BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
     id: build_session_step_id(state, call.args) ?? return build_session_step_refused(state, call.args)
-    ^step: state.actions[id]
     text: build_session_text(call.args, 1) ?? return build_session_fail(state, "`.arg` takes text")
+    build_session_step_arg_text(state, id, text)
+}
+
+build_session_step_arg_text: fn(state: ^BuildSessionState, id: Int, text: ^^String) -> BuildSessionReply Never! {
+    ^step: state.actions[id]
     if text.trim() == "" {
         return build_session_error_fail(state, BuildSessionError.EmptyActionArgv{value: step.name})
     }
-    step.argv.push(text.copy())
+    step.argv.push(text.move())
     state.actions[id] = step
     BuildSessionReply.Value{value: BuildSessionValue.Unit}
 }
@@ -550,7 +566,7 @@ build_session_setting_text: fn(value: BuildSessionValue) -> String? Never! {
     }
 }
 
-build_session_insert_target: fn(state: ^BuildSessionState, target: BuildSessionTarget) -> BuildSessionReply {
+build_session_insert_target: fn(state: ^BuildSessionState, target: ^^BuildSessionTarget) -> BuildSessionReply {
     if target.name.trim() == "" -> return build_session_error_fail(state, .EmptyTargetName)
     loop old in state.targets {
         if old.name == target.name {
@@ -597,6 +613,6 @@ build_session_insert_target: fn(state: ^BuildSessionState, target: BuildSessionT
         }
     }
     id: state.targets.len()
-    state.targets.push(target.copy())
+    state.targets.push(target.move())
     BuildSessionReply.Value{value: BuildSessionValue.Handle{type_name: "BuildTarget", session: state.id, id: id}}
 }

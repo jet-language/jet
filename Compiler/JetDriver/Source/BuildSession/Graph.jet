@@ -38,7 +38,7 @@ build_session_cycle: fn(edges: [[Int]], names: [String]) -> [String]? Never! {
         colors[root] = 1
         loop stack.len() > 0 {
             last: stack.len() - 1
-            node: stack[last].copy()
+            node: stack[last]
             if positions[last] >= edges[node].len() {
                 colors[node] = 2
                 ^_: stack.pop()
@@ -159,9 +159,12 @@ build_session_validate: fn(state: BuildSessionState, default: Int) -> BuildSessi
     // so a target that compiles one, or a step that reads one, that nothing
     // makes has no producer, even when an earlier build left a file there.
     loop target in state.targets {
-        ^paths: target.sources
-        loop path in target.inputs -> paths.push(path.copy())
-        loop path in paths {
+        loop path in target.sources {
+            if build_session_unproduced(state, owners, path) {
+                return Val(build_session_missing_producer(path, "the target `{target.name}`", target.start, target.end))
+            }
+        }
+        loop path in target.inputs {
             if build_session_unproduced(state, owners, path) {
                 return Val(build_session_missing_producer(path, "the target `{target.name}`", target.start, target.end))
             }
@@ -211,6 +214,12 @@ build_session_missing_producer: fn(path: String, user: String, start: Int, end: 
     {code: "E3515", what: "Nothing in this build makes `{path}`, which {user} uses", why: "A file under `.jet/generated/` is what this build's producers make, so one that none of them makes is stale or was never made, and nothing checks it", fix: "Restore the `b.generate`, `meta.add` or step output that made `{path}`, or remove it from {user}", start: start, end: end}
 }
 
+build_session_file_push_target: fn(file_rows: ^[String:BuildGraphFile], path: String, target_id: Int, unique: Bool) Never! {
+    ^row: file_rows.get(path) ?? BuildGraphFile{path: path, owner: None, consumers: [Int]{}, targets: [Int]{}}
+    if unique -> build_session_append_int(row.targets, target_id) else -> row.targets.push(target_id)
+    file_rows[path] = row.move()
+}
+
 build_session_project: fn(state: BuildSessionState) -> BuildGraph Never! {
     ^targets: [BuildGraphTarget]{}
     ^actions: [BuildGraphAction]{}
@@ -239,26 +248,16 @@ build_session_project: fn(state: BuildSessionState) -> BuildGraph Never! {
         }
     }
     loop (id, target) in state.targets {
-        ^paths: target.sources
-        loop path in target.inputs -> paths.push(path.copy())
-        loop path in target.outputs -> paths.push(path.copy())
-        loop path in paths {
-            ^row: file_rows.get(path) ?? BuildGraphFile{path: path, owner: None, consumers: [Int]{}, targets: [Int]{}}
-            row.targets.push(id)
-            file_rows[path] = row.move()
-        }
+        loop path in target.sources -> build_session_file_push_target(file_rows, path, id, false)
+        loop path in target.inputs -> build_session_file_push_target(file_rows, path, id, false)
+        loop path in target.outputs -> build_session_file_push_target(file_rows, path, id, false)
         loop action_id in target.actions {
             action: state.actions[action_id]
             // `action_id` is one of this target's own actions, so the owner
             // search finds this target if no earlier one; the skip never runs.
             owner: build_session_action_target(state, action_id) ?? next
-            ^action_paths: action.inputs
-            loop path in action.outputs -> action_paths.push(path.copy())
-            loop path in action_paths {
-                ^row: file_rows.get(path) ?? BuildGraphFile{path: path, owner: None, consumers: [Int]{}, targets: [Int]{}}
-                build_session_append_int(row.targets, owner)
-                file_rows[path] = row.move()
-            }
+            loop path in action.inputs -> build_session_file_push_target(file_rows, path, owner, true)
+            loop path in action.outputs -> build_session_file_push_target(file_rows, path, owner, true)
         }
     }
     ^paths: file_rows.keys().collect()
@@ -434,7 +433,7 @@ build_plan_selected_generated: fn(plan: BuildSessionPlan) -> [BuildSessionGenera
     prerequisites: build_session_prerequisites(permit.value)
     ^cursor: 0
     loop cursor < selected_actions.len() {
-        current: selected_actions[cursor].copy()
+        current: selected_actions[cursor]
         cursor += 1
         loop dep in prerequisites[current] -> build_session_append_int(selected_actions, dep)
     }

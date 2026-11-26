@@ -396,7 +396,7 @@ build_graph_rules_made: fn(session: ^BuildSession, tool: BuildSessionValue, name
     meta: build_graph_rules_value(build_session_call(a, build_session_compiler, [BuildSessionValue]{app}, None, false, 5, 6))
     foreign: build_graph_rules_value(build_session_call(b, build_session_compiler, [BuildSessionValue]{other}, None, false, 7, 8))
     texts: [BuildSessionValue]{.Text{value: "mypkg.NoPrintInLib"}, .Text{value: "Tidy"}, .Text{value: "library code prints"}, .Text{value: "the caller owns the terminal"}, .Text{value: "log it"}, .Text{value: "main.jet"}}
-    ^found: [BuildSessionValue]{meta.copy()}
+    ^found: [BuildSessionValue]{meta}
     loop text in texts -> found.push(text.copy())
     found.push(.Span{start: 40, end: 48, file: ""})
     found.push(.Text{value: "log.info"})
@@ -406,16 +406,15 @@ build_graph_rules_made: fn(session: ^BuildSession, tool: BuildSessionValue, name
     stray.push(.Span{start: 50, end: 58, file: ""})
     stray.push(.Text{value: ""})
     assert(build_graph_rules_failed(build_session_call(a, build_session_compiler_report, stray, None, false, 11, 12)))
-    ^untiered: found.copy()
-    untiered[2] = .Text{value: "Warning"}
-    assert(build_graph_rules_failed(build_session_call(a, build_session_compiler_report, untiered, None, false, 13, 14)))
-    ^unplaced: found.copy()
-    unplaced[7] = .Int{value: 40}
-    assert(build_graph_rules_failed(build_session_call(a, build_session_compiler_report, unplaced, None, false, 15, 16)))
-    ^later: found.copy()
-    later[1] = .Text{value: "mypkg.Second"}
-    later[8] = .Text{value: ""}
-    assert(build_graph_rules_ok(build_session_call(a, build_session_compiler_report, later, None, false, 17, 18)))
+    found[2] = .Text{value: "Warning"}
+    assert(build_graph_rules_failed(build_session_call(a, build_session_compiler_report, found, None, false, 13, 14)))
+    found[2] = .Text{value: "Tidy"}
+    found[7] = .Int{value: 40}
+    assert(build_graph_rules_failed(build_session_call(a, build_session_compiler_report, found, None, false, 15, 16)))
+    found[7] = .Span{start: 40, end: 48, file: ""}
+    found[1] = .Text{value: "mypkg.Second"}
+    found[8] = .Text{value: ""}
+    assert(build_graph_rules_ok(build_session_call(a, build_session_compiler_report, found, None, false, 17, 18)))
     permit: a.storage.guard_read()
     assert_eq(permit.value.findings.len(), 2)
     assert_eq(permit.value.findings[0].code, "mypkg.NoPrintInLib")
