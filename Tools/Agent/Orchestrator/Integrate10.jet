@@ -174,7 +174,8 @@ run: fn() {
     // The repository ratchets and generator checks (Land.jet ratchets), with the seed on the composed tree, all at once.
     seed: files.canonicalize(r["JET_SEED"])
     id: files.read("{seed}/IDENTITY").trim()
-    ratchets: Sh{"{"{seed}/jet"} Tools/Agent/Land.jet ratchets"}.spec().cwd(t).env("JET_COMPILER_IDENTITY", id).env("JET_TOOLCHAIN_ROOT", t).run().output.lines()
+    seed_jet: Path.from("{seed}/jet")
+    ratchets: Sh{"{seed_jet} Tools/Agent/Land.jet ratchets"}.spec().cwd(t).env("JET_COMPILER_IDENTITY", id).env("JET_TOOLCHAIN_ROOT", t).run().output.lines()
     files.create_dir_all("{i}/ratchets")
     if ratchets.len() == 0 -> files.write("{i}/ratchets/none.out", "no ratchets listed\n")
     checks: process.run_all(loop tool in ratchets -> Sh{"nice -n 19 {"{seed}/jet"} {tool} --check"}.spec().cwd(t).env("JET_COMPILER_IDENTITY", id).env("JET_TOOLCHAIN_ROOT", t).timeout(900s).stderr(.Stdout), ratchets.len() + 1)
