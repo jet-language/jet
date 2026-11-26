@@ -1,0 +1,149 @@
+// End-to-end unit tests for single-source block footprint inference and
+// `jet inspect footprint FILE:LINE[-LINE]` (#7033 n2).
+use {
+    cli_files: core.files
+    cli_process: core.process
+    cli_sys: core.sys
+    jet_cli.[
+        jet_cli_execute,
+        jet_cli_front,
+        jet_cli_inspect_footprint_line_span,
+        jet_cli_inspect_footprint_parse_spec,
+    ]
+    jet_pkg_model.[WorkspaceDeclarationCache]
+}
+
+footprint_test_dir: fn(label: String) -[FS, Env]> String {
+    base: cli_sys.get("JET_TEST_TMPDIR") ?? (cli_sys.get("TMPDIR") ?? "/tmp")
+    dir: "{base}/jet-footprint-test-{label}-{cli_process.current_pid()}"
+    cli_files.remove_all(dir) ?? ()
+    cli_files.create_dir_all(dir) ?? panic("mkdir {dir}: {err}")
+    dir
+}
+
+#Test("footprint_inspect_spec_parser_and_line_span") {
+    if jet_cli_inspect_footprint_parse_spec("main.jet:12") == {
+        .Parsed(spec) -> {
+            assert_eq(spec.file, "main.jet")
+            assert_eq(spec.start_line, 12)
+            assert_eq(spec.end_line, 12)
+        }
+        .Failed(msg) -> panic("unexpected failure: {msg}")
+    }
+    if jet_cli_inspect_footprint_parse_spec("dir/sub.jet:4-9") == {
+        .Parsed(spec) -> {
+            assert_eq(spec.file, "dir/sub.jet")
+            assert_eq(spec.start_line, 4)
+            assert_eq(spec.end_line, 9)
+        }
+        .Failed(msg) -> panic("unexpected failure: {msg}")
+    }
+    assert(jet_cli_inspect_footprint_parse_spec("main.jet") == .Failed(_))
+    assert(jet_cli_inspect_footprint_parse_spec("main.jet:0") == .Failed(_))
+    assert(jet_cli_inspect_footprint_parse_spec("main.jet:9-4") == .Failed(_))
+    source: "line1\nline2\nline3\n"
+    span: jet_cli_inspect_footprint_line_span(source, 2, 2) ?? panic("expected line 2 span")
+    assert_eq(span.start, 6)
+    assert_eq(span.end, 11)
+    assert(jet_cli_inspect_footprint_line_span(source, 4, 4) == None)
+}
+
+#Test("footprint_inspect_reads_writes_takes_fields_and_receiver_footprints") {
+    dir: footprint_test_dir("main")
+    file: "{dir}/sample.jet"
+    copy_word: "copy"
+    copy_op: ".{copy_word}()"
+    source: (`Counter: struct {
+    hits: Int,
+    limit: Int,
+    tag: String,
+    bump: fn(^self.[hits], delta: Int) {
+        self.hits += delta
+    }
+}
+
+archive: fn(title: ^^String) -> Int {
+    title.len()
+}
+
+work: fn(c: ^Counter, xs: ^[Int], step: Int, note: String, drop_me: ^^String) -> Int {
+    local_copy: note__COPY__
+    if c.hits < c.limit {
+        c.bump(step)
+        xs.push(c.hits)
+        taken_len: archive(^^drop_me)
+        return taken_len + local_copy.len()
+    }
+    local_copy.len()
+}
+
+run: fn() {
+    ^c: Counter{hits: 0, limit: 5, tag: "a"}
+    ^xs: [Int]{}
+    drop_val: "bye"
+    n: work(^c, ^xs, 2, "hi", ^^drop_val)
+    print("{n} {c.hits} {xs.len()}")
+}
+`).replace("__COPY__", copy_op)
+    cli_files.write(file, source) ?? panic("write {file}: {err}")
+
+    // Lines 17-20: inside the `if` body — reads `step`, `local_copy`; writes
+    // `c.hits` (via solved `^self.[hits]` receiver footprint!) and `xs`; takes
+    // `drop_me`; excludes block-local `taken_len`.
+    ^discovery: WorkspaceDeclarationCache.new()
+    human_plan: jet_cli_front([String]{"inspect", "footprint", "{file}:17-20"}, discovery)
+    human_out: jet_cli_execute(human_plan)
+    assert_eq(human_out.exit_code, 0)
+    assert(human_out.stdout.contains("fn work"), "human stdout={human_out.stdout}")
+    assert(human_out.stdout.contains("write c.hits: Int"), "expected receiver footprint expansion `write c.hits: Int`, got:\n{human_out.stdout}")
+    assert(!human_out.stdout.contains("write c: Counter"), "receiver footprint should narrow to c.hits, got:\n{human_out.stdout}")
+    assert(human_out.stdout.contains("read  step: Int"), "expected `read  step: Int`, got:\n{human_out.stdout}")
+    assert(human_out.stdout.contains("write xs: [Int]"), "expected `write xs: [Int]`, got:\n{human_out.stdout}")
+    assert(human_out.stdout.contains("take  drop_me: String"), "expected `take  drop_me: String`, got:\n{human_out.stdout}")
+    assert(human_out.stdout.contains("read  local_copy: String"), "expected `read  local_copy: String`, got:\n{human_out.stdout}")
+    assert(!human_out.stdout.contains("taken_len"), "block-local `taken_len` must not appear in footprint:\n{human_out.stdout}")
+    assert(!human_out.stdout.contains("c.limit"), "outer `if` condition field `c.limit` must not appear in inner lines 17-20:\n{human_out.stdout}")
+
+    // JSON output matches the exact same single-source footprint facts.
+    json_plan: jet_cli_front([String]{"inspect", "footprint", "--json", "{file}:16-21"}, discovery)
+    json_out: jet_cli_execute(json_plan)
+    assert_eq(json_out.exit_code, 0)
+    assert(json_out.stdout.contains("\"ok\":true"), "json={json_out.stdout}")
+    assert(json_out.stdout.contains("\"function\":\"work\""), "json={json_out.stdout}")
+    assert(json_out.stdout.contains("\"name\":\"c.limit\",\"root\":\"c\",\"kind\":\"read\""), "expected c.limit read in whole if block:\n{json_out.stdout}")
+    assert(json_out.stdout.contains("\"name\":\"c.hits\",\"root\":\"c\",\"kind\":\"write\""), "expected c.hits write:\n{json_out.stdout}")
+    assert(json_out.stdout.contains("\"name\":\"xs\",\"root\":\"xs\",\"kind\":\"write\""), "expected xs write:\n{json_out.stdout}")
+    assert(json_out.stdout.contains("\"name\":\"drop_me\",\"root\":\"drop_me\",\"kind\":\"take\""), "expected drop_me take:\n{json_out.stdout}")
+    assert(json_out.stdout.contains("\"name\":\"c\",\"kind\":\"write\",\"sigil\":\"^\",\"type\":\"Counter\""), "expected aggregated param ^Counter:\n{json_out.stdout}")
+
+    // Explicit copy on line 15 reads `note` (never takes it).
+    copy_plan: jet_cli_front([String]{"inspect", "footprint", "{file}:15"}, discovery)
+    copy_out: jet_cli_execute(copy_plan)
+    assert_eq(copy_out.exit_code, 0)
+    assert(copy_out.stdout.contains("read  note: String"), "explicit copy must be read, got:\n{copy_out.stdout}")
+    assert(!copy_out.stdout.contains("take  note"), "explicit copy must never be take:\n{copy_out.stdout}")
+
+    cli_files.remove_all(dir) ?? ()
+}
+
+#Test("footprint_inspect_refuses_bad_range_and_non_checking_file") {
+    dir: footprint_test_dir("errors")
+    broken: "{dir}/broken.jet"
+    cli_files.write(broken, `bad: fn() -> Int {
+    "nope"
+}
+`) ?? panic("write {broken}: {err}")
+    ^discovery: WorkspaceDeclarationCache.new()
+
+    // Non-checking file fails closed with check diagnostics.
+    broken_out: jet_cli_execute(jet_cli_front([String]{"inspect", "footprint", "{broken}:2"}, discovery))
+    assert(broken_out.exit_code != 0, "expected non-zero exit for non-checking file")
+    assert(broken_out.stderr.contains("Jet.ReturnTypeMismatch"), "stderr={broken_out.stderr}")
+
+    // Malformed specifier fails with usage error.
+    bad_spec: jet_cli_execute(jet_cli_front([String]{"inspect", "footprint", broken}, discovery))
+    assert_eq(bad_spec.exit_code, 2)
+    assert(bad_spec.stderr.contains("FILE:LINE"), "stderr={bad_spec.stderr}")
+
+    cli_files.remove_all(dir) ?? ()
+}

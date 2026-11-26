@@ -2565,6 +2565,28 @@ methods publish the footprint (stated, else inferred) in the API snapshot as
 until the native emitter keeps disjoint field borrows of one local across
 statements.
 
+### Block footprints
+
+Without introducing new syntax, Jet infers what any checked block or line range
+reads, writes, and takes directly from the checked function body and solved
+receiver field footprints (`JetSemIndex` single-source analyzer). Accesses merge
+under the lattice `read < write < take`:
+
+- Direct field reads and writes report dotted field paths (`state.limit`,
+  `state.hits`); calling a method with a bounded receiver footprint
+  (`^self.[hits]`) expands onto those fields rather than the whole record.
+- Bindings declared inside the selected block or range are excluded as internal
+  locals; explicit copies and compiler-materialized copies stay `read`, while
+  moves, `drop`, and `close` report `take`.
+- `jet inspect footprint FILE:LINE[-LINE] [--json]` prints the inferred reads,
+  writes, and takes (and aggregated root parameter signatures) for any checked
+  line or range, failing closed on non-checking files.
+- JetLSP displays the exact same inferred footprint in hover (on compound block
+  headers and selected ranges) and in code lenses on compound blocks, and offers
+  the `Extract function` (`refactor.extract`) code action whose generated
+  parameters carry that exact inferred footprint (`x: T`, `x: ^T`, `x: ^^T`).
+  See `Examples/Tooling/BlockFootprint/BlockFootprint.jet`.
+
 ### Zero-copy string views
 
 Binding `String.trim()`, `.after(sep)`, or `.before(sep)` to a local creates a

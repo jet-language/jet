@@ -230,6 +230,18 @@ ir_foreign_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, foreign: SemaChec
     if foreign.language.starts_with("rust:") {
         return ir_rust_foreign_call(m, p, b, foreign, args, span)
     }
+    if foreign.language == "c" && foreign.abi == "C" && foreign.callback_transport != None {
+        transport: foreign.callback_transport ?? ""
+        if transport == "managed" {
+            return ir_foreign_managed_callback_register(m, p, b, foreign, args, span)
+        }
+        if transport == "emit-task" {
+            return ir_foreign_managed_emit_task(m, p, b, foreign, args, span)
+        }
+        if transport == "managed-close" {
+            return ir_foreign_managed_callback_close(m, p, b, foreign, args, span)
+        }
+    }
     if foreign.language != "c" || foreign.abi != "C" || foreign.callback_key != None || foreign.undo_function_key != None || foreign.symbol == "" {
         return ir_fail_slot(b, span, "foreign import requires a checked direct C scalar signature")
     }
@@ -909,4 +921,316 @@ ir_asm_source: fn(p: IRProgram, foreign: SemaCheckedForeignFunction) -> String? 
         at += 1
     }
     None
+}
+
+// Finds the paired `__jet_native_<name>` C row in the same `#Bindgen` module.
+ir_foreign_native_companion: fn(p: IRProgram, foreign: SemaCheckedForeignFunction, name: String) -> SemaCheckedForeignFunction? Never! {
+    wanted: "__jet_native_{name}"
+    loop row in p.foreign_rows {
+        if row.module_name == foreign.module_name && row.name == wanted -> return Val(row)
+    }
+    None
+}
+
+// Cached native unsubscribe adapter `fn(ctx: *U8) -> I64` calling `c_symbol`.
+ir_foreign_managed_unsub_thunk: fn(m: ^IRModule, b: ^IRBuilder, c_symbol: String) -> Int Never! {
+    key: "ffi.callback.unsub_thunk:{c_symbol}"
+    if ir_keyed_function(m, key) == .Val(known) -> return known
+    ^a: ir_builder_new(ir_hashed_function("ffi.callback.unsub_thunk", key, "jet_ir_ffi_cb_unsub_", b.f.source_file, b.line))
+    a.line = b.line
+    pointer_row: ir_pointer_row(m)
+    word_row: ir_word_row(m)
+    ctx: ir_new_slot(a, pointer_row, IRSlotKind.Param, ir_intern_name(m, "ctx"))
+    a.f.result = word_row
+    status: ir_runtime(m, a, c_symbol, [Int]{ctx}, word_row)
+    ir_emit(a.f, IROp.Return, -1, status, -1, -1, a.line)
+    id: m.functions.len()
+    m.functions.push(a.f.move())
+    ir_function_bind(m, key, id)
+    id
+}
+
+// Cached C callback trampoline `fn(id: *U8, value: T)` building a stack-borrowed
+// `FfiCallbackEvent<T>` (`{ __reg: id, value }`) and invoking
+// `jet_rt_ffi_callback_dispatch(id, &event)`.
+ir_foreign_managed_trampoline: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, event_ty: Type, payload_ty: Type, span: Span) -> Int Never! {
+    key: "ffi.callback.trampoline:{type_carrier_identity(event_ty)}"
+    if ir_keyed_function(m, key) == .Val(known) -> return known
+    event_row: ir_value_type(m, p, event_ty) ?? return ir_type_fail(b, span, event_ty)
+    payload_row: ir_value_type(m, p, payload_ty) ?? return ir_type_fail(b, span, payload_ty)
+    ^a: ir_builder_new(ir_hashed_function("ffi.callback.trampoline", key, "jet_ir_ffi_cb_tramp_", b.f.source_file, b.line))
+    a.line = b.line
+    pointer_row: ir_pointer_row(m)
+    token: ir_new_slot(a, pointer_row, IRSlotKind.Param, ir_intern_name(m, "ctx"))
+    val: ir_new_slot(a, payload_row, IRSlotKind.Param, ir_intern_name(m, "value"))
+    event_slot: ir_temp(m, a, pointer_row)
+    ir_emit(a.f, IROp.StackAddress, event_slot, m.types[event_row].size, 8, -1, a.line)
+    ir_emit(a.f, IROp.Store, -1, event_slot, 0, token, a.line)
+    ir_store_at(m, p, a, event_slot, 8, val)
+    _: ir_runtime(m, a, "jet_rt_ffi_callback_dispatch", [Int]{token, event_slot}, -1)
+    ir_emit(a.f, IROp.Return, -1, -1, -1, -1, a.line)
+    ir_resolve_deferred(m, p, a)
+    id: m.functions.len()
+    m.functions.push(a.f.move())
+    ir_function_bind(m, key, id)
+    id
+}
+
+// Managed callback registration (`on_data(callback: fn(FfiCallbackEvent<T>)) -> FfiCallbackRegistration`):
+// retains the capturing closure box in a runtime registration handle, registers
+// the C trampoline and opaque token with the C library, and binds the returned
+// native context handle.
+ir_foreign_managed_callback_register: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, foreign: SemaCheckedForeignFunction, args: [BodyCallArg], span: Span) -> Int Never! {
+    if args.len() != foreign.params.len() || args.len() != 1 {
+        return ir_fail_slot(b, span, "managed callback registration `{foreign.name}` expects 1 callback argument")
+    }
+    cb_ty: foreign.params[0].ty
+    ^event_ty: Type?{None}
+    ^payload_ty: Type?{None}
+    if ir_untag(cb_ty) == .Fn(fn_params, _, _, _, _, _) && fn_params.len() == 1 {
+        if ir_untag(fn_params[0]) == .Apply(name, type_args) && name == "FfiCallbackEvent" && type_args.len() == 1 {
+            event_ty = Val(fn_params[0])
+            payload_ty = Val(type_args[0])
+        }
+    }
+    checked_event: event_ty ?? return ir_fail_slot(b, span, "managed callback `{foreign.name}` parameter is not `fn(FfiCallbackEvent<T>)`")
+    checked_payload: payload_ty ?? return ir_fail_slot(b, span, "managed callback `{foreign.name}` event has no payload type")
+    closure: ir_expr(m, p, b, args[0].value)
+    if ir_failed(b) || closure < 0 -> return -1
+    handed: ir_closure_handover(m, p, b, closure, span)
+    if handed.held < 0 -> return -1
+    invoke_id: ir_lazy_helper(m, p, b, "callback", cb_ty, span)
+    if invoke_id < 0 -> return -1
+    invoke_addr: ir_lazy_address(m, b, invoke_id)
+    tramp_id: ir_foreign_managed_trampoline(m, p, b, checked_event, checked_payload, span)
+    if ir_failed(b) || tramp_id < 0 -> return -1
+    tramp_addr: ir_lazy_address(m, b, tramp_id)
+    ^unsub_addr: ir_word_const(m, b, 0)
+    if ir_foreign_native_companion(p, foreign, "unsubscribe") == .Val(unsub) && unsub.symbol != "" {
+        unsub_id: ir_foreign_managed_unsub_thunk(m, b, unsub.symbol)
+        unsub_addr = ir_lazy_address(m, b, unsub_id)
+    }
+    reg_ty: foreign.return_type ?? Type.Named{name: "FfiCallbackRegistration"}
+    reg_row: ir_value_type(m, p, reg_ty) ?? return ir_type_fail(b, span, reg_ty)
+    pointer_row: ir_pointer_row(m)
+    reg: ir_runtime(m, b, "jet_rt_ffi_callback_alloc", [Int]{handed.held, invoke_addr, handed.release, unsub_addr}, reg_row)
+    b.fresh[reg] = true
+    token: ir_runtime(m, b, "jet_rt_ffi_callback_id", [Int]{reg}, pointer_row)
+    native_ctx: ir_runtime(m, b, foreign.symbol, [Int]{tramp_addr, token}, pointer_row)
+    _: ir_runtime(m, b, "jet_rt_ffi_callback_bind_ctx", [Int]{reg, native_ctx}, -1)
+    reg
+}
+
+// Helper for task result metadata: mirrors BuildCoreClosures.jet ir_spawn for
+// Result<Ok, Err> so TaskFailure debug formatting works on fallible tasks.
+ir_foreign_task_meta: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, elem_ty: Type, span: Span) -> Int Never! {
+    meta: ir_lazy_meta(m, p, b, elem_ty, span)
+    if meta < 0 -> return -1
+    if ir_untag(elem_ty) == .Result(_, err_ty) {
+        pointer_row: ir_pointer_row(m)
+        child: ir_temp(m, b, pointer_row)
+        ir_emit(b.f, IROp.Load, child, meta, 64, -1, b.line)
+        ir_lazy_meta_trait(m, p, b, child, err_ty, "debug", span)
+        if ir_failed(b) -> return -1
+    }
+    meta
+}
+
+// Cached release helper freeing a 24-byte task env block.
+ir_foreign_task_env_release: fn(m: ^IRModule, b: ^IRBuilder) -> Int Never! {
+    key: "ffi.callback.task_env_release"
+    if ir_keyed_function(m, key) == .Val(known) -> return known
+    ^a: ir_builder_new(ir_hashed_function("ffi.callback.task_env_release", key, "jet_ir_ffi_cb_env_rel_", b.f.source_file, b.line))
+    a.line = b.line
+    pointer_row: ir_pointer_row(m)
+    env: ir_new_slot(a, pointer_row, IRSlotKind.Param, ir_intern_name(m, "env"))
+    size: ir_word_const(m, a, 24)
+    align: ir_word_const(m, a, 8)
+    _: ir_runtime(m, a, "jet_rt_free", [Int]{env, size, align}, -1)
+    ir_emit(a.f, IROp.Return, -1, -1, -1, -1, a.line)
+    id: m.functions.len()
+    m.functions.push(a.f.move())
+    ir_function_bind(m, key, id)
+    id
+}
+
+// Cached task body invoking native `emit_async(value)` and boxing `Ok(result)`.
+ir_foreign_emit_task_invoke: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, c_symbol: String, arg_ty: Type, elem_ty: Type, ok_ty: Type, span: Span) -> Int Never! {
+    key: "ffi.callback.emit_invoke:{c_symbol}:{type_carrier_identity(elem_ty)}"
+    if ir_keyed_function(m, key) == .Val(known) -> return known
+    arg_row: ir_value_type(m, p, arg_ty) ?? return ir_type_fail(b, span, arg_ty)
+    ok_row: ir_value_type(m, p, ok_ty) ?? return ir_type_fail(b, span, ok_ty)
+    ^a: ir_builder_new(ir_hashed_function("ffi.callback.emit_invoke", key, "jet_ir_ffi_cb_emit_", b.f.source_file, b.line))
+    a.line = b.line
+    pointer_row: ir_pointer_row(m)
+    word_row: ir_word_row(m)
+    env: ir_new_slot(a, pointer_row, IRSlotKind.Param, ir_intern_name(m, "env"))
+    out: ir_new_slot(a, pointer_row, IRSlotKind.Param, ir_intern_name(m, "out"))
+    a.f.result = word_row
+    val: ir_load_at(m, a, env, 16, arg_row)
+    res: ir_runtime(m, a, c_symbol, [Int]{val}, ok_row)
+    boxed: ir_result_box(m, p, a, elem_ty, true, res)
+    ir_store_at(m, p, a, out, 0, boxed)
+    zero: ir_word_const(m, a, 0)
+    ir_emit(a.f, IROp.Return, -1, zero, -1, -1, a.line)
+    ir_resolve_deferred(m, p, a)
+    id: m.functions.len()
+    m.functions.push(a.f.move())
+    ir_function_bind(m, key, id)
+    id
+}
+
+// Managed emit task (`emit_async(value: I64) -> Task<I64 Err!>`): spawns a Jet
+// Task whose body calls the paired native C symbol and yields `Ok(result)`.
+ir_foreign_managed_emit_task: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, foreign: SemaCheckedForeignFunction, args: [BodyCallArg], span: Span) -> Int Never! {
+    if args.len() != foreign.params.len() || args.len() != 1 {
+        return ir_fail_slot(b, span, "managed emit task `{foreign.name}` expects 1 argument")
+    }
+    task_ty: foreign.return_type ?? return ir_fail_slot(b, span, "managed emit task `{foreign.name}` has no return type")
+    elem_ty: ir_task_element(task_ty) ?? return ir_fail_slot(b, span, "managed emit task `{foreign.name}` must return Task<...>")
+    ok_ty: if ir_untag(elem_ty) == .Result(ok, _) -> ok else -> {
+        return ir_fail_slot(b, span, "managed emit task `{foreign.name}` must return Task<T Err!>")
+    }
+    arg_ty: foreign.params[0].ty
+    arg_row: ir_value_type(m, p, arg_ty) ?? return ir_type_fail(b, span, arg_ty)
+    val: ir_value_as(m, p, b, args[0].value, arg_row, span)
+    if ir_failed(b) || val < 0 -> return -1
+    c_symbol: if ir_foreign_native_companion(p, foreign, foreign.name) == .Val(native_row) -> native_row.symbol else -> foreign.name
+    invoke_id: ir_foreign_emit_task_invoke(m, p, b, c_symbol, arg_ty, elem_ty, ok_ty, span)
+    if ir_failed(b) || invoke_id < 0 -> return -1
+    invoke_addr: ir_lazy_address(m, b, invoke_id)
+    release_id: ir_foreign_task_env_release(m, b)
+    release_addr: ir_lazy_address(m, b, release_id)
+    meta: ir_foreign_task_meta(m, p, b, elem_ty, span)
+    if meta < 0 -> return -1
+    pointer_row: ir_pointer_row(m)
+    size: ir_word_const(m, b, 24)
+    align: ir_word_const(m, b, 8)
+    env: ir_runtime(m, b, "jet_rt_alloc", [Int]{size, align}, pointer_row)
+    zero: ir_word_const(m, b, 0)
+    ir_emit(b.f, IROp.Store, -1, env, 0, zero, b.line)
+    ir_emit(b.f, IROp.Store, -1, env, 8, invoke_addr, b.line)
+    ir_store_at(m, p, b, env, 16, val)
+    site: ir_word_const(m, b, 0)
+    string_row: ir_string_row(m)
+    label: ir_temp(m, b, string_row)
+    ir_emit(b.f, IROp.ConstText, label, ir_intern_text(m, foreign.name), -1, -1, b.line)
+    task_row: ir_task_row(m, p, task_ty)
+    spawned: ir_runtime(m, b, "jet_rt_native_task_spawn", [Int]{site, label, env, invoke_addr, release_addr, meta}, task_row)
+    b.fresh[spawned] = true
+    ir_release(m, b, val)
+    spawned
+}
+
+// Cached task body for consuming `unsubscribe(subscription: ^^FfiCallbackRegistration) -> Task<Err!>`:
+// closes admission, calls native C unsubscribe(ctx), drains in-flight calls,
+// releases captures, frees the registration, and yields Ok(()) or Err(...).
+ir_foreign_close_task_invoke: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, c_symbol: String, elem_ty: Type, err_ty: Type, span: Span) -> Int Never! {
+    key: "ffi.callback.close_invoke:{c_symbol}:{type_carrier_identity(elem_ty)}"
+    if ir_keyed_function(m, key) == .Val(known) -> return known
+    err_row: ir_value_type(m, p, err_ty) ?? return ir_type_fail(b, span, err_ty)
+    result_row: ir_value_type(m, p, elem_ty) ?? return ir_type_fail(b, span, elem_ty)
+    ^a: ir_builder_new(ir_hashed_function("ffi.callback.close_invoke", key, "jet_ir_ffi_cb_close_", b.f.source_file, b.line))
+    a.line = b.line
+    pointer_row: ir_pointer_row(m)
+    word_row: ir_word_row(m)
+    env: ir_new_slot(a, pointer_row, IRSlotKind.Param, ir_intern_name(m, "env"))
+    out: ir_new_slot(a, pointer_row, IRSlotKind.Param, ir_intern_name(m, "out"))
+    a.f.result = word_row
+    reg: ir_load_at(m, a, env, 16, pointer_row)
+    zero: ir_word_const(m, a, 0)
+    ir_emit(a.f, IROp.Store, -1, env, 16, zero, a.line)
+    ctx: ir_runtime(m, a, "jet_rt_ffi_callback_begin_close", [Int]{reg}, pointer_row)
+    raw_status: ir_runtime(m, a, c_symbol, [Int]{ctx}, word_row)
+    _: ir_runtime(m, a, "jet_rt_ffi_callback_finish_close", [Int]{reg}, -1)
+    mask: ir_word_const(m, a, 4294967295)
+    status: ir_temp(m, a, word_row)
+    ir_emit(a.f, IROp.BitAnd, status, raw_status, mask, IR_OVERFLOW_WRAP, a.line)
+    ok_cond: ir_bool_op(m, a, IROp.Eq, status, zero)
+    boxed: ir_fresh_temp(m, a, result_row)
+    ir_open_if(a.f, ok_cond, a.line)
+    ok_box: ir_result_box(m, p, a, elem_ty, true, -1)
+    ir_emit(a.f, IROp.Copy, boxed, ok_box, -1, -1, a.line)
+    ir_else(a.f, a.line)
+    string_row: ir_string_row(m)
+    msg: ir_temp(m, a, string_row)
+    ir_emit(a.f, IROp.ConstText, msg, ir_intern_text(m, "native callback unsubscribe failed"), -1, -1, a.line)
+    err_val: ir_runtime(m, a, "jet_err_from_message", [Int]{msg}, err_row)
+    err_box: ir_result_box(m, p, a, elem_ty, false, err_val)
+    ir_emit(a.f, IROp.Copy, boxed, err_box, -1, -1, a.line)
+    ir_end(a.f, a.line)
+    ir_store_at(m, p, a, out, 0, boxed)
+    ir_emit(a.f, IROp.Return, -1, zero, -1, -1, a.line)
+    ir_resolve_deferred(m, p, a)
+    id: m.functions.len()
+    m.functions.push(a.f.move())
+    ir_function_bind(m, key, id)
+    id
+}
+
+// Cached release helper for a close task env: drops any unconsumed registration
+// (if the task was canceled before its body ran), then frees the 24-byte env.
+ir_foreign_close_task_release: fn(m: ^IRModule, b: ^IRBuilder) -> Int Never! {
+    key: "ffi.callback.close_env_release"
+    if ir_keyed_function(m, key) == .Val(known) -> return known
+    ^a: ir_builder_new(ir_hashed_function("ffi.callback.close_env_release", key, "jet_ir_ffi_cb_crel_", b.f.source_file, b.line))
+    a.line = b.line
+    pointer_row: ir_pointer_row(m)
+    env: ir_new_slot(a, pointer_row, IRSlotKind.Param, ir_intern_name(m, "env"))
+    reg: ir_load_at(m, a, env, 16, pointer_row)
+    zero: ir_word_const(m, a, 0)
+    live: ir_bool_op(m, a, IROp.Ne, reg, zero)
+    ir_open_if(a.f, live, a.line)
+    _: ir_runtime(m, a, "jet_rt_handle_drop_jet_ffi_callback_registration_handle", [Int]{reg}, -1)
+    ir_end(a.f, a.line)
+    size: ir_word_const(m, a, 24)
+    align: ir_word_const(m, a, 8)
+    _: ir_runtime(m, a, "jet_rt_free", [Int]{env, size, align}, -1)
+    ir_emit(a.f, IROp.Return, -1, -1, -1, -1, a.line)
+    id: m.functions.len()
+    m.functions.push(a.f.move())
+    ir_function_bind(m, key, id)
+    id
+}
+
+// Managed consuming unsubscribe (`unsubscribe(subscription: ^^FfiCallbackRegistration) -> Task<Err!>`).
+ir_foreign_managed_callback_close: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, foreign: SemaCheckedForeignFunction, args: [BodyCallArg], span: Span) -> Int Never! {
+    if args.len() != foreign.params.len() || args.len() != 1 {
+        return ir_fail_slot(b, span, "managed callback close `{foreign.name}` expects 1 registration argument")
+    }
+    task_ty: foreign.return_type ?? return ir_fail_slot(b, span, "managed callback close `{foreign.name}` has no return type")
+    elem_ty: ir_task_element(task_ty) ?? return ir_fail_slot(b, span, "managed callback close `{foreign.name}` must return Task<Err!>")
+    err_ty: if ir_untag(elem_ty) == .Result(_, err) -> err else -> {
+        return ir_fail_slot(b, span, "managed callback close `{foreign.name}` must return Task<Err!>")
+    }
+    reg_row: ir_value_type(m, p, foreign.params[0].ty) ?? return ir_type_fail(b, span, foreign.params[0].ty)
+    sub_val: ir_value_as(m, p, b, args[0].value, reg_row, span)
+    if ir_failed(b) || sub_val < 0 -> return -1
+    ir_close_disarm(b, sub_val)
+    owned: ir_own(m, p, b, sub_val)
+    b.fresh[owned] = false
+    c_symbol: if ir_foreign_native_companion(p, foreign, foreign.name) == .Val(native_row) -> native_row.symbol else -> foreign.name
+    invoke_id: ir_foreign_close_task_invoke(m, p, b, c_symbol, elem_ty, err_ty, span)
+    if ir_failed(b) || invoke_id < 0 -> return -1
+    invoke_addr: ir_lazy_address(m, b, invoke_id)
+    release_id: ir_foreign_close_task_release(m, b)
+    release_addr: ir_lazy_address(m, b, release_id)
+    meta: ir_foreign_task_meta(m, p, b, elem_ty, span)
+    if meta < 0 -> return -1
+    pointer_row: ir_pointer_row(m)
+    size: ir_word_const(m, b, 24)
+    align: ir_word_const(m, b, 8)
+    env: ir_runtime(m, b, "jet_rt_alloc", [Int]{size, align}, pointer_row)
+    zero: ir_word_const(m, b, 0)
+    ir_emit(b.f, IROp.Store, -1, env, 0, zero, b.line)
+    ir_emit(b.f, IROp.Store, -1, env, 8, invoke_addr, b.line)
+    ir_emit(b.f, IROp.Store, -1, env, 16, owned, b.line)
+    site: ir_word_const(m, b, 0)
+    string_row: ir_string_row(m)
+    label: ir_temp(m, b, string_row)
+    ir_emit(b.f, IROp.ConstText, label, ir_intern_text(m, foreign.name), -1, -1, b.line)
+    task_row: ir_task_row(m, p, task_ty)
+    spawned: ir_runtime(m, b, "jet_rt_native_task_spawn", [Int]{site, label, env, invoke_addr, release_addr, meta}, task_row)
+    b.fresh[spawned] = true
+    spawned
 }

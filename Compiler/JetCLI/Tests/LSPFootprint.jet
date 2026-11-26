@@ -1,0 +1,197 @@
+// Real-checker JetLSP unit tests for block footprint hover, code lens, and
+// `Extract function` refactoring (#7033 n3) through `JetCLILSPChecker`.
+use {
+    cli_files: core.files
+    cli_process: core.process
+    cli_sys: core.sys
+    core.encoding.[Dyn]
+    jet_cli.[JetCLILSPChecker]
+    jet_foundation.[
+        foundation_json_integer,
+        foundation_json_quote,
+        foundation_parse_protocol_json,
+    ]
+    jet_lsp.[
+        LSPPos,
+        LSPRange,
+        LSPServer,
+        lsp_apply_edit,
+        lsp_handle_request,
+        lsp_member,
+        lsp_server,
+        lsp_update_document,
+    ]
+}
+
+LSP_FOOTPRINT_SRC: `Counter: struct {
+    hits: Int,
+    limit: Int,
+    bump: fn(^self.[hits], delta: Int) {
+        self.hits += delta
+    }
+}
+
+archive: fn(title: ^^String) -> Int {
+    title.len()
+}
+
+work: fn(c: ^Counter, xs: ^[Int], step: Int, note: String, drop_me: ^^String) -> Int {
+    local_copy: "{note}"
+    if c.hits < c.limit {
+        c.bump(step)
+        xs.push(c.hits)
+        taken_len: archive(^^drop_me)
+        return taken_len + local_copy.len()
+    }
+    local_copy.len()
+}
+
+run: fn() {
+    ^c: Counter{hits: 0, limit: 5}
+    ^xs: [Int]{}
+    drop_val: "bye"
+    n: work(^c, ^xs, 2, "hi", ^^drop_val)
+    print("{n} {c.hits} {xs.len()}")
+}
+`
+
+lsp_fp_dir: fn(label: String) -[FS, Env]> String {
+    base: cli_sys.get("JET_TEST_TMPDIR") ?? (cli_sys.get("TMPDIR") ?? "/tmp")
+    dir: "{base}/jet-lsp-footprint-{label}-{cli_process.current_pid()}"
+    cli_files.remove_all(dir) ?? ()
+    cli_files.create_dir_all(dir) ?? panic("mkdir {dir}: {err}")
+    dir
+}
+
+lsp_fp_parse: fn(raw: String) -> Dyn {
+    foundation_parse_protocol_json(raw) ?? panic("bad JSON: {raw}")
+}
+
+lsp_fp_field: fn(value: Dyn, key: String) -> Dyn {
+    lsp_member(value, key) ?? panic("missing field `{key}`")
+}
+
+lsp_fp_text: fn(value: Dyn, key: String) -> String {
+    if lsp_fp_field(value, key) == .Text(s) -> return "{s}"
+    panic("field `{key}` is not text")
+}
+
+lsp_fp_int: fn(value: Dyn, key: String) -> Int {
+    foundation_json_integer(lsp_fp_field(value, key)) ?? panic("field `{key}` is not int")
+}
+
+lsp_fp_rows: fn(value: ^^Dyn) -> [Dyn] {
+    if value == .Array(items) -> return items
+    panic("expected JSON array")
+}
+
+lsp_fp_send: fn(server: ^LSPServer, method: String, params_json: String) -> Dyn {
+    raw: lsp_handle_request(server, method, Val(lsp_fp_parse(params_json)), Dyn.Int(1))
+    lsp_fp_field(lsp_fp_parse(raw), "result")
+}
+
+lsp_fp_open: fn(server: ^LSPServer, uri: String, text: String, version: Int) {
+    params: lsp_fp_parse("{{\"textDocument\":{{\"uri\":{foundation_json_quote(uri)},\"languageId\":\"jet\",\"version\":{version},\"text\":{foundation_json_quote(text)}}}}}")
+    assert_eq(lsp_update_document(server.diagnostic_state, Val(params), is_open: true), Val(uri))
+    doc: server.diagnostic_state.docs.get(uri) ?? panic("doc not opened: {uri}")
+    server.published[uri] = server.check(doc)
+}
+
+lsp_fp_apply_edits: fn(text: String, edits: [Dyn]) -> String {
+    ^out: text
+    ^ordered: [{start_line: Int, start_char: Int, end_line: Int, end_char: Int, new_text: String}]{}
+    loop edit in edits {
+        range: lsp_fp_field(edit, "range")
+        start: lsp_fp_field(range, "start")
+        end: lsp_fp_field(range, "end")
+        ordered.push({
+            start_line: lsp_fp_int(start, "line"),
+            start_char: lsp_fp_int(start, "character"),
+            end_line: lsp_fp_int(end, "line"),
+            end_char: lsp_fp_int(end, "character"),
+            new_text: lsp_fp_text(edit, "newText"),
+        })
+    }
+    ordered.sort_by(fn(left: {start_line: Int, start_char: Int, end_line: Int, end_char: Int, new_text: String}, right: {start_line: Int, start_char: Int, end_line: Int, end_char: Int, new_text: String}) {
+        if right.start_line != left.start_line -> return right.start_line <=> left.start_line
+        right.start_char <=> left.start_char
+    })
+    loop edit in ordered {
+        range: LSPRange{
+            start: LSPPos{line: edit.start_line, character: edit.start_char},
+            end: LSPPos{line: edit.end_line, character: edit.end_char},
+        }
+        out = lsp_apply_edit(out, range, None, edit.new_text) ?? panic("failed to apply extract edit")
+    }
+    out
+}
+
+#Test("lsp_footprint_hover_code_lens_and_extract_function_checked_end_to_end") {
+    dir: lsp_fp_dir("e2e")
+    file: "{dir}/demo.jet"
+    cli_files.write(file, LSP_FOOTPRINT_SRC) ?? panic("write {file}: {err}")
+    uri: "file://{file}"
+    ^server: lsp_server(JetCLILSPChecker{})
+    lsp_fp_send(server, "initialize", "{{\"capabilities\":{{}}}}")
+    lsp_fp_open(server, uri, LSP_FOOTPRINT_SRC, 1)
+
+    // 1. Code lens on the `if` block carries the exact inferred footprint.
+    lenses: lsp_fp_rows(lsp_fp_send(server, "textDocument/codeLens", "{{\"textDocument\":{{\"uri\":{foundation_json_quote(uri)}}}}}"))
+    ^found_lens: false
+    loop lens in lenses {
+        title: lsp_fp_text(lsp_fp_field(lens, "command"), "title")
+        if title.starts_with("Footprint: ") {
+            assert(title.contains("c.limit"), "lens={title}")
+            assert(title.contains("^c.hits"), "lens={title}")
+            assert(title.contains("^xs"), "lens={title}")
+            assert(title.contains("^^drop_me"), "lens={title}")
+            found_lens = true
+        }
+    }
+    assert(found_lens, "expected Footprint code lens on compound block")
+
+    // 2. Hover on the `if` header line shows the block footprint.
+    header_hover: lsp_fp_send(server, "textDocument/hover", "{{\"textDocument\":{{\"uri\":{foundation_json_quote(uri)}}},\"position\":{{\"line\":14,\"character\":4}}}}")
+    header_md: lsp_fp_text(lsp_fp_field(header_hover, "contents"), "value")
+    assert(header_md.contains("**Block footprint** (`fn work`)"), "header_md={header_md}")
+    assert(header_md.contains("`write` `c.hits: Int`"), "header_md={header_md}")
+    assert(header_md.contains("`read` `c.limit: Int`"), "header_md={header_md}")
+    assert(header_md.contains("`take` `drop_me: String`"), "header_md={header_md}")
+
+    // 3. Explicit range hover on inner lines 15..18 excludes `c.limit` and block-local `taken_len`.
+    range_hover: lsp_fp_send(server, "textDocument/hover", "{{\"textDocument\":{{\"uri\":{foundation_json_quote(uri)}}},\"position\":{{\"line\":15,\"character\":8}},\"range\":{{\"start\":{{\"line\":15,\"character\":8}},\"end\":{{\"line\":18,\"character\":43}}}}}}")
+    range_md: lsp_fp_text(lsp_fp_field(range_hover, "contents"), "value")
+    assert(range_md.contains("`write` `c.hits: Int`"), "range_md={range_md}")
+    assert(range_md.contains("`read` `step: Int`"), "range_md={range_md}")
+    assert(range_md.contains("`write` `xs: [Int]`"), "range_md={range_md}")
+    assert(range_md.contains("`take` `drop_me: String`"), "range_md={range_md}")
+    assert(!range_md.contains("c.limit"), "inner range hover must exclude outer c.limit: {range_md}")
+    assert(!range_md.contains("taken_len"), "inner range hover must exclude block-local taken_len: {range_md}")
+
+    // 4. `Extract function` code action (`refactor.extract`) over lines 15..18.
+    ca_params: "{{\"textDocument\":{{\"uri\":{foundation_json_quote(uri)}}},\"range\":{{\"start\":{{\"line\":15,\"character\":8}},\"end\":{{\"line\":18,\"character\":43}}}},\"context\":{{\"diagnostics\":[],\"only\":[\"refactor.extract\"]}}}}"
+    actions: lsp_fp_rows(lsp_fp_send(server, "textDocument/codeAction", ca_params))
+    assert_eq(actions.len(), 1)
+    action: actions[0]
+    assert_eq(lsp_fp_text(action, "kind"), "refactor.extract")
+    title: lsp_fp_text(action, "title")
+    assert(title.starts_with("Extract function ("), "title={title}")
+
+    changes: lsp_fp_field(lsp_fp_field(action, "edit"), "changes")
+    edits: lsp_fp_rows(lsp_fp_field(changes, uri))
+    assert_eq(edits.len(), 2)
+    refactored: lsp_fp_apply_edits(LSP_FOOTPRINT_SRC, edits)
+    assert(refactored.contains(`_extracted: fn(c: ^Counter, step: Int, xs: ^[Int], drop_me: ^^String, local_copy: String) -> Int {`), "refactored=\n{refactored}")
+    assert(refactored.contains("return _extracted(^c, step, ^xs, ^^drop_me, local_copy)"), "refactored=\n{refactored}")
+
+    // 5. Re-open the refactored document in the real LSP checker: 0 errors!
+    lsp_fp_open(server, uri, refactored, 2)
+    published: server.published.get(uri) ?? panic("expected published check after extract")
+    ^errors: 0
+    loop diag in published.diagnostics {
+        if diag.severity == 1 -> errors += 1
+    }
+    assert_eq(errors, 0)
+
+    cli_files.remove_all(dir) ?? ()
+}

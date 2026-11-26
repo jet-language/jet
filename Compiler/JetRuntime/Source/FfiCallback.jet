@@ -1,0 +1,294 @@
+// Managed FFI callback registrations: each registration
+// retains its Jet closure box so captured locals stay alive across foreign
+// invocations, supports non-blocking admission close from the borrowed
+// FfiCallbackEvent<T>.stop(), drains in-flight invocations before releasing
+// captures, and safely refuses any invocation arriving after stop or
+// unsubscribe (including stale foreign ctx tokens).
+//
+// FfiCallbackRoot48: lock0 next_id8 entries{len16 cap24 data32}
+//   entries stores [id, reg] word pairs for live registrations.
+// FfiCallbackReg96: lock0 seq8 stopped16 in_flight24 closed32 id40 env48
+//   invoke56 release64 native_ctx72 native_unsub80 reserved88
+//   Lock order is always root.lock -> reg.lock (never reversed).
+
+FFI_CB_LOCK: I64{0}
+
+FFI_CB_SEQ: I64{8}
+
+FFI_CB_STOPPED: I64{16}
+
+FFI_CB_IN_FLIGHT: I64{24}
+
+FFI_CB_CLOSED: I64{32}
+
+FFI_CB_ID: I64{40}
+
+FFI_CB_ENV: I64{48}
+
+FFI_CB_INVOKE: I64{56}
+
+FFI_CB_RELEASE: I64{64}
+
+FFI_CB_NATIVE_CTX: I64{72}
+
+FFI_CB_NATIVE_UNSUB: I64{80}
+
+FFI_CB_REFS: I64{88}
+
+FFI_CB_BYTES: I64{96}
+
+^ffi_cb_root: I64{0}
+
+ffi_cb_reg_unref: fn(reg: I64) {
+    if (sync_add(wrapping(reg + FFI_CB_REFS), I64{-1}) == I64{1}) {
+        jet_rt_free(reg, FFI_CB_BYTES, I64{8})
+    }
+}
+
+ffi_cb_ensure_root: fn() -> I64 {
+    if (ffi_cb_root != I64{0}) { return ffi_cb_root }
+    if (thread_tls_registry == I64{0}) { jet_rt_thread_init() }
+    sync_mutex_lock(thread_tls_registry)
+    if (ffi_cb_root == I64{0}) {
+        root: jet_rt_alloc(I64{48}, I64{8})
+        coll_zero(root, I64{48})
+        sync_store(wrapping(root + I64{8}), I64{4096})
+        #Unsafe("published under thread_tls_registry lock and never freed") { ffi_cb_root = root }
+    }
+    sync_mutex_unlock(thread_tls_registry)
+    ffi_cb_root
+}
+
+// Ensures the calling OS thread has a live Jet TCB before running managed
+// callback code. Safe on a fresh foreign C pthread whose GS base may be 0 or
+// inherited, and preserves an active Jet fiber's TCB when invoked on a Jet
+// scheduler carrier. Returns true iff this call attached a new temporary TCB
+// that ffi_cb_thread_leave must detach.
+ffi_cb_thread_enter: fn() -> Bool {
+    if (thread_tls_registry == I64{0}) {
+        jet_rt_thread_init()
+        return false
+    }
+    ^saved_gs: I64{0}
+    #Unsafe("ARCH_GET_GS probes the caller's GS base without dereferencing it") {
+        saved_gs = os_tls_base_probe_i64()
+    }
+    detached: thread_detached_base()
+    thread_set_base(detached)
+    tid: thread_tid()
+    sync_mutex_lock(thread_tls_registry)
+    live: wrapping(thread_tls_registry + I64{64})
+    count: sync_load(live)
+    data: sync_load(wrapping(live + I64{16}))
+    ^at: I64{0}
+    loop at < count {
+        if (sync_load(wrapping(data + at * I64{8})) == tid) {
+            found_tcb: sync_load(wrapping(data + (at + I64{1}) * I64{8}))
+            sync_mutex_unlock(thread_tls_registry)
+            if (saved_gs != I64{0} && saved_gs != detached) { thread_set_base(saved_gs) } else {
+                thread_set_base(found_tcb)
+            }
+            return false
+        }
+        at += I64{2}
+    }
+    tcb: thread_new_tcb(tid)
+    thread_register_tcb(tid, tcb)
+    sync_mutex_unlock(thread_tls_registry)
+    thread_set_base(tcb)
+    true
+}
+
+ffi_cb_thread_leave: fn(attached_here: Bool) {
+    if attached_here -> jet_rt_thread_detach()
+}
+
+// Root lock is held. Returns reg for `id`, or 0 when absent.
+ffi_cb_table_find_locked: fn(root: I64, id: I64) -> I64 {
+    base: wrapping(root + I64{16})
+    count: event_word(base)
+    ^at: I64{0}
+    loop at < count {
+        if (event_words_get(base, at) == id) { return event_words_get(base, at + I64{1}) }
+        at += I64{2}
+    }
+    I64{0}
+}
+
+// Root lock is held. Removes `id` from the live table if present.
+ffi_cb_table_remove_locked: fn(root: I64, id: I64) {
+    base: wrapping(root + I64{16})
+    count: event_word(base)
+    data: event_word(wrapping(base + I64{16}))
+    ^at: I64{0}
+    loop at < count {
+        if (event_words_get(base, at) == id) {
+            last: count - I64{2}
+            if at < last {
+                event_store(wrapping(data + at * I64{8}), event_word(wrapping(data + last * I64{8})))
+                event_store(wrapping(data + (at + I64{1}) * I64{8}), event_word(wrapping(data + (last + I64{1}) * I64{8})))
+            }
+            event_store(base, last)
+            return
+        }
+        at += I64{2}
+    }
+}
+
+// Allocates a managed callback registration retaining `env` (closure box),
+// `invoke` (lazy.callback adapter), `release` (closure drop helper), and an
+// optional native unsubscribe adapter `native_unsub` (0 if none). Registers a
+// unique non-zero token id before native registration so synchronous callbacks
+// during native registration work too.
+#Export(c) jet_rt_ffi_callback_alloc: fn(env: I64, invoke: I64, release: I64, native_unsub: I64) -> I64 {
+    sync_sole_end()
+    root: ffi_cb_ensure_root()
+    reg: jet_rt_alloc(FFI_CB_BYTES, I64{8})
+    coll_zero(reg, FFI_CB_BYTES)
+    sync_store(wrapping(reg + FFI_CB_ENV), env)
+    sync_store(wrapping(reg + FFI_CB_INVOKE), invoke)
+    sync_store(wrapping(reg + FFI_CB_RELEASE), release)
+    sync_store(wrapping(reg + FFI_CB_NATIVE_UNSUB), native_unsub)
+    sync_store(wrapping(reg + FFI_CB_REFS), I64{1})
+    sync_mutex_lock(root)
+    id: sync_load(wrapping(root + I64{8}))
+    sync_store(wrapping(root + I64{8}), id + I64{1})
+    sync_store(wrapping(reg + FFI_CB_ID), id)
+    base: wrapping(root + I64{16})
+    event_words_push(base, id)
+    event_words_push(base, reg)
+    sync_mutex_unlock(root)
+    reg
+}
+
+// Returns the opaque non-zero ctx token passed to the C registration function.
+#Export(c) jet_rt_ffi_callback_id: fn(reg: I64) -> I64 {
+    if (reg == I64{0}) { return I64{0} }
+    sync_load(wrapping(reg + FFI_CB_ID))
+}
+
+// Records the opaque native handle returned by the C registration function.
+#Export(c) jet_rt_ffi_callback_bind_ctx: fn(reg: I64, native_ctx: I64) {
+    if (reg == I64{0}) {
+        return
+    }
+    sync_mutex_lock(reg)
+    sync_store(wrapping(reg + FFI_CB_NATIVE_CTX), native_ctx)
+    sync_mutex_unlock(reg)
+}
+
+// Dispatches a foreign callback invocation for token `id` with a stack-borrowed
+// FfiCallbackEvent<T> at `event_slot`. Refuses immediately if `id` is unknown
+// (already unsubscribed/freed) or admission has been closed via `event.stop()`.
+#Export(c) jet_rt_ffi_callback_dispatch: fn(id: I64, event_slot: I64) {
+    if (id == I64{0} || ffi_cb_root == I64{0}) {
+        return
+    }
+    attached: ffi_cb_thread_enter()
+    root: ffi_cb_root
+    sync_mutex_lock(root)
+    reg: ffi_cb_table_find_locked(root, id)
+    if (reg == I64{0}) {
+        sync_mutex_unlock(root)
+        ffi_cb_thread_leave(attached)
+        return
+    }
+    sync_mutex_lock(reg)
+    if (sync_load(wrapping(reg + FFI_CB_STOPPED)) != I64{0} || sync_load(wrapping(reg + FFI_CB_CLOSED)) != I64{0}) {
+        sync_mutex_unlock(reg)
+        sync_mutex_unlock(root)
+        ffi_cb_thread_leave(attached)
+        return
+    }
+    sync_store(wrapping(reg + FFI_CB_IN_FLIGHT), sync_load(wrapping(reg + FFI_CB_IN_FLIGHT)) + I64{1})
+    ^_: sync_add(wrapping(reg + FFI_CB_REFS), I64{1})
+    env: sync_load(wrapping(reg + FFI_CB_ENV))
+    invoke: sync_load(wrapping(reg + FFI_CB_INVOKE))
+    sync_mutex_unlock(reg)
+    sync_mutex_unlock(root)
+    ^_: coll_call3(invoke, env, event_slot, I64{0})
+    sync_mutex_lock(reg)
+    remaining: sync_load(wrapping(reg + FFI_CB_IN_FLIGHT)) - I64{1}
+    sync_store(wrapping(reg + FFI_CB_IN_FLIGHT), remaining)
+    if (remaining == I64{0}) { sync_cond_notify_all(wrapping(reg + FFI_CB_SEQ)) }
+    sync_mutex_unlock(reg)
+    ffi_cb_reg_unref(reg)
+    ffi_cb_thread_leave(attached)
+}
+
+// Non-blocking admission close from `FfiCallbackEvent<T>.stop()`. Never waits
+// on in-flight invocations, so calling it from inside the callback itself
+// cannot deadlock.
+#Export(c) jet_rt_ffi_callback_event_stop: fn(id: I64) {
+    if (id == I64{0} || ffi_cb_root == I64{0}) {
+        return
+    }
+    root: ffi_cb_root
+    sync_mutex_lock(root)
+    reg: ffi_cb_table_find_locked(root, id)
+    if (reg != I64{0}) {
+        sync_mutex_lock(reg)
+        sync_store(wrapping(reg + FFI_CB_STOPPED), I64{1})
+        sync_mutex_unlock(reg)
+    }
+    sync_mutex_unlock(root)
+}
+
+// Phase 1 of shutdown: closes admission and removes `reg` from the live token
+// table so no new foreign invocation can enter, then returns the native ctx
+// handle for the C unsubscribe call.
+#Export(c) jet_rt_ffi_callback_begin_close: fn(reg: I64) -> I64 {
+    if (reg == I64{0}) { return I64{0} }
+    root: ffi_cb_root
+    id: sync_load(wrapping(reg + FFI_CB_ID))
+    if (root != I64{0}) {
+        sync_mutex_lock(root)
+        ffi_cb_table_remove_locked(root, id)
+        sync_mutex_lock(reg)
+        sync_store(wrapping(reg + FFI_CB_STOPPED), I64{1})
+        sync_store(wrapping(reg + FFI_CB_CLOSED), I64{1})
+        ctx: sync_load(wrapping(reg + FFI_CB_NATIVE_CTX))
+        sync_mutex_unlock(reg)
+        sync_mutex_unlock(root)
+        return ctx
+    }
+    sync_mutex_lock(reg)
+    sync_store(wrapping(reg + FFI_CB_STOPPED), I64{1})
+    sync_store(wrapping(reg + FFI_CB_CLOSED), I64{1})
+    ctx: sync_load(wrapping(reg + FFI_CB_NATIVE_CTX))
+    sync_mutex_unlock(reg)
+    ctx
+}
+
+// Phase 2 of shutdown: waits for all in-flight invocations to drain, releases
+// the retained closure box (dropping all captures), and retires the handle's
+// reference to the registration.
+#Export(c) jet_rt_ffi_callback_finish_close: fn(reg: I64) {
+    if (reg == I64{0}) {
+        return
+    }
+    sync_mutex_lock(reg)
+    loop sync_load(wrapping(reg + FFI_CB_IN_FLIGHT)) > (I64{0}) {
+        ^_: sync_cond_wait(wrapping(reg + FFI_CB_SEQ), reg, I64{-1})
+    }
+    env: sync_load(wrapping(reg + FFI_CB_ENV))
+    release: sync_load(wrapping(reg + FFI_CB_RELEASE))
+    sync_store(wrapping(reg + FFI_CB_ENV), I64{0})
+    sync_store(wrapping(reg + FFI_CB_RELEASE), I64{0})
+    sync_mutex_unlock(reg)
+    event_release_closure(env, release)
+    ffi_cb_reg_unref(reg)
+}
+
+// Handle drop for FfiCallbackRegistration when dropped without an explicit
+// consuming unsubscribe: closes admission, invokes the bound native unsubscribe
+// if present, drains in-flight calls, releases captures, and retires the handle.
+#Export(c) jet_rt_handle_drop_jet_ffi_callback_registration_handle: fn(reg: I64) {
+    if (reg == I64{0}) {
+        return
+    }
+    ctx: jet_rt_ffi_callback_begin_close(reg)
+    unsub: sync_load(wrapping(reg + FFI_CB_NATIVE_UNSUB))
+    if (unsub != I64{0}) { ^_: coll_call1(unsub, ctx) }
+    jet_rt_ffi_callback_finish_close(reg)
+}

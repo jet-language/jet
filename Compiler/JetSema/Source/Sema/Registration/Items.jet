@@ -1654,7 +1654,7 @@ sema_registration_callable_abi_for_extern: fn(function: ExternFn, owner: SemaReg
         is_extern: true,
         is_c_abi: owner == SemaRegistrationForeignOwner.CModule,
         c_abi_name: c_abi_name,
-        callback_transport: function.callback_transport,
+        callback_transport: if function.generated -> function.callback_transport else -> None,
         callback_plan_digest: function.callback_plan_digest,
         callback_identity: function.callback_identity,
         foreign_effect_root: function.effect_root,

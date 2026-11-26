@@ -97,6 +97,13 @@ jet fill <file.jet[:line]>           Propose checked code for typed goals
   holders and declared points reset, and `#Memo` caches clear between
   tests. Shipped `jet run` and `jet build` binaries emit zero test-reset
   overhead.
+- **Block footprint inspection:** `jet inspect footprint FILE:LINE[-LINE] [--json]`
+  prints the names and fields a checked block or line range reads, writes, and
+  takes (expanding solved `^self.[a, b]` receiver footprints on method calls),
+  along with the root parameter conventions (`T`, `^T`, `^^T`) shared with
+  JetLSP's hover, code lenses, and `Extract function` refactoring. It fails
+  closed with diagnostics on non-checking files and exits `2` on malformed or
+  out-of-range line specifiers.
 - **Exit codes:** `0` success, `1` user/check/test/unhandled-error failure, `2`
   CLI usage error, `70` runtime fault/panic, `101` internal compiler error (ICE).
   See `Docs/Spec/architecture.md`.

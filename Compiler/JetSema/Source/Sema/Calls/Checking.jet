@@ -118,9 +118,7 @@ sema_call_default_ref_equal: fn(left: FunctionDefaultRef, right: FunctionDefault
 
 sema_call_default_value: fn(reference: FunctionDefaultRef, defaults: [SemaCallDefaultValue]) -> SemaCallDefaultValue? {
     loop candidate in defaults {
-        if sema_call_default_ref_equal(reference, candidate.reference) {
-            return Val(candidate)
-        }
+        if sema_call_default_ref_equal(reference, candidate.reference) -> return Val(candidate)
     }
     None
 }
@@ -730,7 +728,7 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
         // lambda whose body is safe on a foreign thread; anything else is
         // E3203, reported before the argument's own type check. One that
         // reads the task context is E3218, which names the read.
-        if abi_has_boundary && !default_in_owner && abi == .Val(callable_abi) {
+        if abi_has_boundary && !default_in_owner && abi == .Val(callable_abi) && callable_abi.callback_transport != Val("managed") {
             if sema_registration_callback_boundary_param(callable_abi, required_declared) {
                 context_read: if callable_abi.is_c_abi -> sema_call_c_callback_context_read(args[index].expr, check) else -> String?{None}
                 if context_read == .Val(member) {
@@ -1795,9 +1793,7 @@ sema_call_check_bound_arguments_owned: fn(check: ^SemaBodyCheck, callee: String,
                     }
                 }
             }
-        } else {
-            sema_call_note_possible_bound_writes(params, binding, args, check)
-        }
+        } else { sema_call_note_possible_bound_writes(params, binding, args, check) }
         return None
     }
     ownership: sema_ownership_check_call_arguments(check.state, callee, params, args, check.scopes, check.diagnostics)
@@ -1827,9 +1823,7 @@ sema_call_note_possible_bound_writes: fn(params: [SemaCallParam], binding: SemaC
 // could not be resolved or bound, so E0514 never strips `^` while the call
 // remains unresolved.
 sema_call_note_possible_arg_writes: fn(args: [CallArg], check: ^SemaBodyCheck) {
-    loop arg in args {
-        sema_ownership_note_possible_write(check.state, arg.expr, check.scopes)
-    }
+    loop arg in args { sema_ownership_note_possible_write(check.state, arg.expr, check.scopes) }
 }
 
 // A `Compiler` value passed to a function delegates the root's control, and

@@ -1,0 +1,1199 @@
+// Single-source block-footprint analyzer (#7033): computes what a checked
+// block or source span reads, writes, and takes directly from checked `FnBody`
+// trees (`JetDriverDocModule.functions`) and `SemIndex`, expanding solved
+// receiver field footprints (`^self.[a, b]`) on method calls.
+//
+// Both `jet inspect footprint` (JetCLI) and JetLSP (hover, code lens, and
+// `Extract function`) read this module so there is never a duplicate walker.
+use {
+    jet_driver.[JetDriverDocModule]
+    jet_foundation.[
+        AccessConvention,
+        BodyCallArg,
+        BodyHandleOp,
+        BodyIfCond,
+        BodyLambda,
+        BodyPattern,
+        BodyPatternBinding,
+        BodyPatternShape,
+        BodyTree,
+        FnBody,
+        Span,
+        StmtKind,
+        SymbolID,
+        SymbolTable,
+        TBuiltinOp,
+        TLocal,
+        Type,
+        body_each_node_kind_child,
+        body_node,
+        body_stmt,
+        symbol_is_none,
+        symbol_key,
+        type_name,
+    ]
+}
+
+// Clean human/source type spelling: strips internal `module:<id>:...::<file>.`
+// prefixes while preserving generics, lists, maps, and optionals.
+semindex_footprint_display_type: fn(ty: Type) -> String Never! {
+    raw: type_name(ty)
+    if !raw.contains("module:") -> return raw
+    bytes: raw.bytes()
+    ^out: ""
+    ^i: 0
+    loop i < bytes.len() {
+        // Match literal prefix `module:` at index `i`.
+        if i + 7 <= bytes.len() && raw.slice(i..<i + 7) == "module:" {
+            ^j: i + 7
+            ^last_dot: -1
+            loop j < bytes.len() {
+                c: Int{bytes[j]}
+                // Stop at type-syntax delimiters: space, `,`, `]`, `>`, `?`, `)`, `(`
+                if c == 32 || c == 44 || c == 93 || c == 62 || c == 63 || c == 41 || c == 40 {
+                    break
+                }
+                if c == 46 -> last_dot = j
+                j += 1
+            }
+            if last_dot >= i {
+                out = "{out}{raw.slice(last_dot + 1..<j)}"
+                i = j
+                next
+            }
+        }
+        out = "{out}{raw.slice(i..<i + 1)}"
+        i += 1
+    }
+    out
+}
+
+// Access lattice over a place inside a checked block: Read < Write < Take.
+SemFootprintAccess: enum {
+    Read,
+    Write,
+    Take,
+}
+
+semindex_footprint_access_rank: fn(access: SemFootprintAccess) -> Int Never! {
+    if access == {
+        .Read -> 1
+        .Write -> 2
+        .Take -> 3
+    }
+}
+
+semindex_footprint_access_name: fn(access: SemFootprintAccess) -> String Never! {
+    if access == {
+        .Read -> "read"
+        .Write -> "write"
+        .Take -> "take"
+    }
+}
+
+semindex_footprint_access_sigil: fn(access: SemFootprintAccess) -> String Never! {
+    if access == {
+        .Read -> ""
+        .Write -> "^"
+        .Take -> "^^"
+    }
+}
+
+semindex_footprint_access_from_convention: fn(convention: AccessConvention) -> SemFootprintAccess Never! {
+    if convention == {
+        .Read -> SemFootprintAccess.Read
+        .Write -> SemFootprintAccess.Write
+        .Move -> SemFootprintAccess.Take
+    }
+}
+
+// One accessed place (a root local/parameter or a dotted field path inside it).
+SemFootprintEntry: struct {
+    root: String,
+    root_key: String,
+    path: String,
+    access: SemFootprintAccess,
+    ty: Type,
+    root_ty: Type,
+    first_at: Int,
+    // "param" for a parameter of the enclosing function, "local" for an outer local.
+    origin: String,
+}
+
+// One root parameter signature derived from a block's footprint (for Extract
+// function): every distinct outer root binding folded to its strongest access.
+SemFootprintParam: struct {
+    name: String,
+    access: SemFootprintAccess,
+    ty: Type,
+    first_at: Int,
+}
+
+// The complete inferred footprint of one checked block or line range.
+SemBlockFootprint: struct {
+    module_path: String,
+    function_name: String,
+    span: Span,
+    entries: [SemFootprintEntry],
+    reads: [SemFootprintEntry],
+    writes: [SemFootprintEntry],
+    takes: [SemFootprintEntry],
+}
+
+// Method metadata indexed once per footprint query across all checked modules.
+SemFootprintMethodInfo: struct {
+    receiver_access: SemFootprintAccess,
+    receiver_footprint: [String]?,
+    receiver_field_types: [String:Type],
+}
+
+// Extracted place path from a checked `BodyTree` node: `root` and dotted
+// `fields` (e.g. `state.counts` -> root `state`, fields `["counts"]`).
+SemFootprintPlace: struct {
+    root: TLocal,
+    fields: [String],
+    ty: Type,
+}
+
+// Mutable accumulator for walking the selected checked statements.
+SemFootprintWalk: struct {
+    param_keys: [String:Bool],
+    internal_keys: [String:Bool],
+    internal_names: [String:Int],
+    // Generated binder_ref pin temps mapped to their initializer node id.
+    pin_inits: [String:Int],
+    pin_consumed: [String:Bool],
+    // Resolved methods stored once and indexed by symbol key and owner.method.
+    methods: [SemFootprintMethodInfo],
+    methods_by_key: [String:Int],
+    methods_by_owner_name: [String:Int],
+    // Accessed places keyed by "{root_key}|{path}".
+    by_place: [String:SemFootprintEntry],
+    order: [String],
+}
+
+semindex_footprint_local_key: fn(local: TLocal) -> String Never! {
+    if local.symbol_id == .Val(sid) && !symbol_is_none(sid) {
+        return "s:{Int{sid.id}}"
+    }
+    "n:{local.name}:{local.span.start}"
+}
+
+semindex_footprint_note_internal_local: fn(walk: ^SemFootprintWalk, local: TLocal) Never! {
+    walk.internal_keys[semindex_footprint_local_key(local)] = true
+}
+
+semindex_footprint_push_internal_name: fn(walk: ^SemFootprintWalk, name: String) Never! {
+    prev: walk.internal_names.get(name) ?? 0
+    walk.internal_names[name] = prev + 1
+}
+
+semindex_footprint_pop_internal_name: fn(walk: ^SemFootprintWalk, name: String) Never! {
+    prev: walk.internal_names.get(name) ?? 0
+    if prev <= 1 -> walk.internal_names[name] = 0 else -> walk.internal_names[name] = prev - 1
+}
+
+semindex_footprint_is_internal: fn(walk: SemFootprintWalk, local: TLocal) -> Bool Never! {
+    if local.generated -> return true
+    if walk.internal_keys.get(semindex_footprint_local_key(local)) == Val(true) -> return true
+    if (walk.internal_names.get(local.name) ?? 0) > 0 -> return true
+    false
+}
+
+semindex_footprint_record: fn(walk: ^SemFootprintWalk, root: TLocal, fields: [String], place_ty: Type, access: SemFootprintAccess, at: Int) Never! {
+    if semindex_footprint_is_internal(walk, root) -> return
+    root_key: semindex_footprint_local_key(root)
+    path: if fields.len() == 0 -> root.name else -> "{root.name}.{fields.join(".")}"
+    slot_key: "{root_key}|{path}"
+    origin: if walk.param_keys.get(root_key) == Val(true) || root.name == "self" -> "param" else -> "local"
+    if walk.by_place.get(slot_key) == .Val(existing) {
+        ^next_access: existing.access
+        if semindex_footprint_access_rank(access) > semindex_footprint_access_rank(existing.access) {
+            next_access = access
+        }
+        next_at: if at >= 0 && (existing.first_at < 0 || at < existing.first_at) -> at else -> existing.first_at
+        walk.by_place[slot_key] = SemFootprintEntry{
+            root: existing.root,
+            root_key: existing.root_key,
+            path: existing.path,
+            access: next_access,
+            ty: existing.ty,
+            root_ty: existing.root_ty,
+            first_at: next_at,
+            origin: existing.origin,
+        }
+        return
+    }
+    walk.order.push("{slot_key}")
+    walk.by_place[slot_key] = SemFootprintEntry{
+        root: root.name,
+        root_key: root_key,
+        path: path,
+        access: access,
+        ty: place_ty,
+        root_ty: root.ty,
+        first_at: at,
+        origin: origin,
+    }
+}
+
+semindex_footprint_span_union: fn(a: Span, b: Span) -> Span Never! {
+    has_a: a.start != 0 || a.end != 0
+    has_b: b.start != 0 || b.end != 0
+    if !has_a -> return Span{start: b.start, end: b.end}
+    if !has_b -> return Span{start: a.start, end: a.end}
+    lo: if a.start < b.start -> a.start else -> b.start
+    hi: if a.end > b.end -> a.end else -> b.end
+    Span{start: lo, end: hi}
+}
+
+// Compute the full source span of one checked `StmtKind`, unioning any
+// compound statement's header `span` with its child block spans so selections
+// inside an `if`, `loop`, or `match` body always overlap the enclosing statement.
+semindex_footprint_stmt_span: fn(tree: BodyTree, stmt: StmtKind) -> Span Never! {
+    if stmt == {
+        .Contract(contract) -> contract.span
+        .ContractScope(_, body, _, _, span) -> semindex_footprint_span_union(span, semindex_footprint_block_span(tree, body))
+        .Let(_, _, _, _, _, span) -> span
+        .RefutableBind(_, _, fallback, span) -> semindex_footprint_span_union(span, semindex_footprint_block_span(tree, fallback))
+        .TupleDestructure(_, _, _, _, span) -> span
+        .StructDestructure(_, _, _, _, span) -> span
+        .ListDestructure(_, _, _, _, _, span) -> span
+        .Assign(_, _, _, _, span) -> span
+        .CountedLoop(_, _, _, _, _, body, span) -> semindex_footprint_span_union(span, semindex_footprint_block_span(tree, body))
+        .ForRange(_, _, _, _, _, _, body, _, span) -> semindex_footprint_span_union(span, semindex_footprint_block_span(tree, body))
+        .Range(_, _, _, _, _, _, _, _, body, span) -> semindex_footprint_span_union(span, semindex_footprint_block_span(tree, body))
+        .ExprStmt(_, span) -> span
+        .Return(_, span) -> span
+        .TaskGroup(_, _, body, span) -> semindex_footprint_span_union(span, semindex_footprint_block_span(tree, body))
+        .DeferClose(_, _, span) -> span
+        .If(_, then_body, else_body, _, span) -> {
+            ^out: semindex_footprint_span_union(span, semindex_footprint_block_span(tree, then_body))
+            if else_body == .Val(eb) -> out = semindex_footprint_span_union(out, semindex_footprint_block_span(tree, eb))
+            out
+        }
+        .Loop(_, body, span) -> semindex_footprint_span_union(span, semindex_footprint_block_span(tree, body))
+        .While(_, _, body, span) -> semindex_footprint_span_union(span, semindex_footprint_block_span(tree, body))
+        .Break(_, span) -> span
+        .BreakValue(_, _, span) -> span
+        .Continue(_, span) -> span
+        .Match(_, arms, _, span) -> {
+            ^out: span
+            loop arm in arms -> out = semindex_footprint_span_union(out, semindex_footprint_block_span(tree, arm.body))
+            out
+        }
+        .EnumMatch(_, arms, else_body, _, span) -> {
+            ^out: span
+            loop arm in arms -> out = semindex_footprint_span_union(out, semindex_footprint_block_span(tree, arm.body))
+            if else_body == .Val(eb) -> out = semindex_footprint_span_union(out, semindex_footprint_block_span(tree, eb))
+            out
+        }
+        .RangeSwitch(_, arms, else_body, span) -> {
+            ^out: span
+            loop arm in arms -> out = semindex_footprint_span_union(out, semindex_footprint_block_span(tree, arm.body))
+            semindex_footprint_span_union(out, semindex_footprint_block_span(tree, else_body))
+        }
+        .ForIn(_, _, _, _, _, _, _, _, _, _, body, span) -> semindex_footprint_span_union(span, semindex_footprint_block_span(tree, body))
+        .Inline(body, span) -> semindex_footprint_span_union(span, semindex_footprint_block_span(tree, body))
+        .DebugOnly(body, span) -> semindex_footprint_span_union(span, semindex_footprint_block_span(tree, body))
+        .DeepCheck(body, span) -> semindex_footprint_span_union(span, semindex_footprint_block_span(tree, body))
+        .MixedSwitch(_, _, arms, else_body, span) -> {
+            ^out: span
+            loop arm in arms -> out = semindex_footprint_span_union(out, semindex_footprint_block_span(tree, arm.body))
+            if else_body == .Val(eb) -> out = semindex_footprint_span_union(out, semindex_footprint_block_span(tree, eb))
+            out
+        }
+        .Unsafe(_, body) -> semindex_footprint_block_span(tree, body)
+        .UnsafeBlock(_, body, span) -> semindex_footprint_span_union(span, semindex_footprint_block_span(tree, body))
+        .SentryPolicy(_, body, span) -> semindex_footprint_span_union(span, semindex_footprint_block_span(tree, body))
+        .Impure(body, span) -> semindex_footprint_span_union(span, semindex_footprint_block_span(tree, body))
+        .Reactive(_, span) -> span
+        .Region(body, span) -> semindex_footprint_span_union(span, semindex_footprint_block_span(tree, body))
+        .Layout(_, _, body, span) -> semindex_footprint_span_union(span, semindex_footprint_block_span(tree, body))
+        .ContextBlock(_, body, span) -> semindex_footprint_span_union(span, semindex_footprint_block_span(tree, body))
+        .Live(body, span) -> semindex_footprint_span_union(span, semindex_footprint_block_span(tree, body))
+        .Shield(body, span) -> semindex_footprint_span_union(span, semindex_footprint_block_span(tree, body))
+        .Defer(body, span) -> semindex_footprint_span_union(span, semindex_footprint_block_span(tree, body))
+        .ScopeMember(_, body, span) -> semindex_footprint_span_union(span, semindex_footprint_block_span(tree, body))
+        .Transact(_, _, _, body, span) -> semindex_footprint_span_union(span, semindex_footprint_block_span(tree, body))
+        .GCEdit(_, _, _, _, _, _, span) -> span
+    }
+}
+
+semindex_footprint_block_span: fn(tree: BodyTree, stmts: [Int]) -> Span Never! {
+    if stmts.len() == 0 -> return Span{start: 0, end: 0}
+    ^out: Span{start: 0, end: 0}
+    loop idx in stmts {
+        out = semindex_footprint_span_union(out, semindex_footprint_stmt_span(tree, body_stmt(tree, idx)))
+    }
+    out
+}
+
+semindex_footprint_span_overlaps: fn(sp: Span, range: Span) -> Bool Never! {
+    if sp.start == 0 && sp.end == 0 -> return false
+    if range.start == range.end -> return sp.start <= range.start && range.start <= sp.end
+    sp.end > range.start && sp.start < range.end
+}
+
+// Descend into child statement blocks of a compound `StmtKind` directly.
+// Returns true when `stmt` is a compound statement with child blocks.
+semindex_footprint_select_in_children: fn(tree: BodyTree, stmt: StmtKind, range: Span, nested: ^[Int]) -> Bool Never! {
+    if stmt == {
+        .ContractScope(_, body, _, _, _) -> semindex_footprint_select_stmts(tree, body, range, nested)
+        .RefutableBind(_, _, fallback, _) -> semindex_footprint_select_stmts(tree, fallback, range, nested)
+        .CountedLoop(_, _, _, _, _, body, _) -> semindex_footprint_select_stmts(tree, body, range, nested)
+        .ForRange(_, _, _, _, _, _, body, _, _) -> semindex_footprint_select_stmts(tree, body, range, nested)
+        .Range(_, _, _, _, _, _, _, _, body, _) -> semindex_footprint_select_stmts(tree, body, range, nested)
+        .TaskGroup(_, _, body, _) -> semindex_footprint_select_stmts(tree, body, range, nested)
+        .If(_, then_body, else_body, _, _) -> {
+            semindex_footprint_select_stmts(tree, then_body, range, nested)
+            if else_body == .Val(eb) -> semindex_footprint_select_stmts(tree, eb, range, nested)
+        }
+        .Loop(_, body, _) -> semindex_footprint_select_stmts(tree, body, range, nested)
+        .While(_, _, body, _) -> semindex_footprint_select_stmts(tree, body, range, nested)
+        .Match(_, arms, _, _) -> {
+            loop arm in arms -> semindex_footprint_select_stmts(tree, arm.body, range, nested)
+        }
+        .EnumMatch(_, arms, else_body, _, _) -> {
+            loop arm in arms -> semindex_footprint_select_stmts(tree, arm.body, range, nested)
+            if else_body == .Val(eb) -> semindex_footprint_select_stmts(tree, eb, range, nested)
+        }
+        .RangeSwitch(_, arms, else_body, _) -> {
+            loop arm in arms -> semindex_footprint_select_stmts(tree, arm.body, range, nested)
+            semindex_footprint_select_stmts(tree, else_body, range, nested)
+        }
+        .ForIn(_, _, _, _, _, _, _, _, _, _, body, _) -> semindex_footprint_select_stmts(tree, body, range, nested)
+        .Inline(body, _) -> semindex_footprint_select_stmts(tree, body, range, nested)
+        .DebugOnly(body, _) -> semindex_footprint_select_stmts(tree, body, range, nested)
+        .DeepCheck(body, _) -> semindex_footprint_select_stmts(tree, body, range, nested)
+        .MixedSwitch(_, _, arms, else_body, _) -> {
+            loop arm in arms -> semindex_footprint_select_stmts(tree, arm.body, range, nested)
+            if else_body == .Val(eb) -> semindex_footprint_select_stmts(tree, eb, range, nested)
+        }
+        .Unsafe(_, body) -> semindex_footprint_select_stmts(tree, body, range, nested)
+        .UnsafeBlock(_, body, _) -> semindex_footprint_select_stmts(tree, body, range, nested)
+        .SentryPolicy(_, body, _) -> semindex_footprint_select_stmts(tree, body, range, nested)
+        .Impure(body, _) -> semindex_footprint_select_stmts(tree, body, range, nested)
+        .Region(body, _) -> semindex_footprint_select_stmts(tree, body, range, nested)
+        .Layout(_, _, body, _) -> semindex_footprint_select_stmts(tree, body, range, nested)
+        .ContextBlock(_, body, _) -> semindex_footprint_select_stmts(tree, body, range, nested)
+        .Live(body, _) -> semindex_footprint_select_stmts(tree, body, range, nested)
+        .Shield(body, _) -> semindex_footprint_select_stmts(tree, body, range, nested)
+        .Defer(body, _) -> semindex_footprint_select_stmts(tree, body, range, nested)
+        .ScopeMember(_, body, _) -> semindex_footprint_select_stmts(tree, body, range, nested)
+        .Transact(_, _, _, body, _) -> semindex_footprint_select_stmts(tree, body, range, nested)
+        .Contract(_) | .Let(_, _, _, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .ExprStmt(_, _) | .Return(_, _) | .DeferClose(_, _, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) | .Reactive(_, _) | .GCEdit(_, _, _, _, _, _, _) -> return false
+    }
+    true
+}
+
+// Select the statements in `stmts` overlapping `range`. If a compound statement
+// strictly encloses `range`, descend into its child blocks so inner line ranges
+// treat enclosing loop/branch bindings as external inputs.
+semindex_footprint_select_stmts: fn(tree: BodyTree, stmts: [Int], range: Span, selected: ^[Int]) Never! {
+    loop idx in stmts {
+        stmt: body_stmt(tree, idx)
+        sp: semindex_footprint_stmt_span(tree, stmt)
+        if !semindex_footprint_span_overlaps(sp, range) -> next
+        if sp.start < range.start && sp.end >= range.end {
+            ^nested: [Int]{}
+            if semindex_footprint_select_in_children(tree, stmt, range, nested) && nested.len() > 0 {
+                loop n in nested -> selected.push(n)
+                next
+            }
+        }
+        selected.push(idx)
+    }
+}
+
+// Extract the root local and dotted field chain of a place node, unwrapping
+// Borrow/Move/Deref and generated binder_ref pins.
+semindex_footprint_extract_place: fn(tree: BodyTree, node_id: Int, walk: SemFootprintWalk) -> SemFootprintPlace? Never! {
+    node: body_node(tree, node_id)
+    if node.kind == {
+        .Local(local) -> {
+            if local.generated {
+                key: semindex_footprint_local_key(local)
+                if walk.pin_inits.get(key) == .Val(init_id) {
+                    return semindex_footprint_extract_place(tree, init_id, walk)
+                }
+                return None
+            }
+            Val(SemFootprintPlace{root: local, fields: [String]{}, ty: local.ty})
+        }
+        .Field(receiver, field) -> {
+            base: semindex_footprint_extract_place(tree, receiver, walk) ?? return None
+            ^fields: base.fields
+            fields.push(field.name)
+            Val(SemFootprintPlace{root: base.root, fields: fields, ty: field.ty})
+        }
+        .Index(base_id, _, _, _, _, _) -> semindex_footprint_extract_place(tree, base_id, walk)
+        .Borrow(inner, _) | .Move(inner) | .Deref(inner) -> semindex_footprint_extract_place(tree, inner, walk)
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .NumberParam(_) | .CopyPhase(_, _, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .RawAddressOf(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .TypePath(_) -> None
+    }
+}
+
+// Mark any generated binder_ref pin referenced by `node_id` as consumed by a
+// resolved method receiver so its raw Borrow init is not double-counted.
+semindex_footprint_mark_pin_consumed: fn(tree: BodyTree, node_id: Int, walk: ^SemFootprintWalk) Never! {
+    node: body_node(tree, node_id)
+    if node.kind == {
+        .Local(local) -> {
+            if local.generated {
+                walk.pin_consumed[semindex_footprint_local_key(local)] = true
+            }
+        }
+        .Move(inner) | .Borrow(inner, _) | .Deref(inner) -> semindex_footprint_mark_pin_consumed(tree, inner, walk)
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .NumberParam(_) | .CopyPhase(_, _, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .RawAddressOf(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .TypePath(_) -> {}
+    }
+}
+
+// Walk index expressions embedded inside a place (e.g. `i` in `xs[i] = 1`) as
+// reads without re-recording the outer place root itself.
+semindex_footprint_walk_place_indices: fn(tree: BodyTree, node_id: Int, symbols: SymbolTable?, walk: ^SemFootprintWalk) Never! {
+    node: body_node(tree, node_id)
+    if node.kind == {
+        .Field(receiver, _) -> semindex_footprint_walk_place_indices(tree, receiver, symbols, walk)
+        .Index(base, index, _, _, _, _) -> {
+            semindex_footprint_walk_place_indices(tree, base, symbols, walk)
+            semindex_footprint_walk_expr(tree, index, SemFootprintAccess.Read, symbols, walk)
+        }
+        .Borrow(inner, _) | .Move(inner) | .Deref(inner) -> semindex_footprint_walk_place_indices(tree, inner, symbols, walk)
+        .Local(_) | .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .NumberParam(_) | .CopyPhase(_, _, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .RawAddressOf(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .TypePath(_) -> {}
+    }
+}
+
+// Classify receiver access of a checked `TBuiltinOp`.
+semindex_footprint_builtin_receiver_access: fn(op: TBuiltinOp) -> SemFootprintAccess Never! {
+    if op == {
+        .AtomicMethod(operation) -> {
+            if operation == "store" || operation == "add" || operation == "try_add" || operation == "compare_exchange" {
+                return SemFootprintAccess.Write
+            }
+            SemFootprintAccess.Read
+        }
+        .Push | .TryPush | .TryReserve | .TryInsertMap | .TryStringPush | .StringEdit(_) | .Pop | .PriorityQueuePop | .InsertMap | .AddNewMap | .MapUpdate | .MapMerge | .MapMergeWith | .InsertList | .RemoveMap | .RemoveList(_, _) | .ExtendList | .Reverse | .SwapList | .ListFill | .ListFillRepeat | .Sort | .SortDesc | .Clear | .MapPopFirst | .ListReplace | .SetInsert | .SetUpdate | .SetDifferenceUpdate | .SetIntersectionUpdate | .SetSymmetricDifferenceUpdate | .SetRemove | .SetPop | .SetReplace | .SetSort | .SetShuffle | .SortedSetInsert | .SortedSetRemove | .PriorityQueueRemove(_, _) | .LRUPut | .LRUAddNew | .LRURemove | .BitSetAdd | .BitSetRemove | .ByteBufferWrite(_) | .BagAdd | .BagRemove | .DequePushFront | .DequePushBack | .DequePopFront | .DequePopBack | .DequeDelete | .DequeReverse | .DequeSplit | .SplitWrite | .GetDisjointWrite | .IterNext -> SemFootprintAccess.Write
+        .LenString | .LenList | .IsEmpty | .ListTryNew | .ListTryWithCapacity | .CountList | .Counts | .ConcatList | .GetMap | .GetList | .First | .Last | .Contains | .IndexOf | .OrderingThen | .OrderingReverse | .JoinSep | .Sum(_, _) | .Product(_) | .Min(_) | .Max(_) | .Flatten | .Intersperse | .Unzip | .Chars | .Bytes(_) | .StringFromBytes | .StringFromBytesLossy | .StringWithCapacity | .Trim | .TrimStart | .TrimEnd | .PadStart | .PadEnd | .StringIndexOf | .StringCount | .StringIsAlphabetic | .StringIsNumeric | .StringIsWhitespace | .StringIsASCII | .StringToTitle | .StringMethod(_) | .StringSplitOnce | .StringCutLast | .Split | .Lines | .ParseInt | .ParseFloat | .IntToRadix | .IntFromRadix | .StartsWith | .EndsWith | .Replace | .ToUpper | .ToLower | .ToASCIILower | .ToASCIIUpper | .Repeat | .Slice(_) | .After | .Before | .TrimView | .AfterView | .BeforeView | .Keys | .Values | .ContainsKey | .ToString | .Take | .Skip | .IterToList | .IterCollect | .ListLazy | .StepBy | .Dedup | .Chunks | .Windows | .IterRepeat | .IterCycle | .IterDropLast | .IterShuffle | .IterIsSorted | .IterLastIndexOf | .IterAverage(_) | .IterCompare | .IterSplit | .ListSlice | .ListEqual | .ListBinarySearch | .ListUnion | .ListIntersection | .ListDifference | .ListRandom | .ListMinMax | .MapEqual | .MapFirst | .MapToList | .MapTopN | .MapMin | .MapMax | .MapIntersection | .MapSliceKeys | .MapFromKeys | .MapContainsValue | .Indexed | .Indexes | .Zip(_, _, _, _, _, _) | .OptionZip(_) | .SetFrom | .SetToList | .SetUnion | .SetIntersection | .SetDifference | .SetSymmetricDifference | .SetIsSubset | .SetIsSuperset | .SetIsDisjoint | .SetEqual | .SetCapacity | .SetFirst | .SetValues | .SortedSetFrom | .SortedSetToList | .SortedSetUnion | .SortedSetIntersection | .SortedSetDifference | .SortedSetSymmetricDifference | .SortedSetIsSubset | .SortedSetIsSuperset | .SortedSetIsDisjoint | .PriorityQueueFrom | .PriorityQueuePeek | .PriorityQueueToSortedList | .KeyOrdered(_, _) | .LRUGet | .LRUCapacity | .LRUKeys | .BitSetCount | .BitSetToList | .ByteBufferFrom | .ByteBufferToBytes | .ByteBufferMethod(_) | .ByteBufferWithCapacity | .BagHas | .BagCount | .DequePeekFront | .DequePeekBack | .DequeCapacity | .DequeContains | .DequeGet | .DequeToList | .DequeJoin | .DequeFrom | .TryCollect | .ViewNew(_) -> SemFootprintAccess.Read
+    }
+}
+
+// Classify receiver access of a checked `BodyHandleOp`.
+semindex_footprint_handle_receiver_access: fn(op: BodyHandleOp) -> SemFootprintAccess Never! {
+    if op == {
+        .AllocAlloc | .AllocTryAlloc | .AllocReset | .ChannelReceive | .ChannelTryReceive | .ChannelClose | .SenderSend | .ReactiveSet | .DynRemove | .DynSetPath(_, _, _) | .ReaderReadU8 | .ReaderReadI8 | .ReaderReadU16Le | .ReaderReadU16Be | .ReaderReadI16Le | .ReaderReadI16Be | .ReaderReadU32Le | .ReaderReadU32Be | .ReaderReadI32Le | .ReaderReadI32Be | .ReaderReadU64Le | .ReaderReadU64Be | .ReaderReadI64Le | .ReaderReadI64Be | .ReaderReadF32Le | .ReaderReadF32Be | .ReaderReadF64Le | .ReaderReadF64Be | .ReaderSeek | .ReaderSkip | .ReaderTake | .CursorTakeUntil | .CursorSkipWs | .CursorTakePattern(_, _) | .ReaderTakePattern(_, _) | .TaskCancel | .TaskPause | .TaskResume | .RealtimeCancel -> SemFootprintAccess.Write
+        .TaskJoin | .TaskDetach -> SemFootprintAccess.Take
+        .DurationNew(_, _) | .LinesIter | .DataStreamNext | .RealtimeNextDeadline | .RealtimeReceipt | .RealtimeIsCanceled | .GameSceneNew | .GameReplayRecord | .GameBackendHeadless | .GameBackendShouldContinue | .GameBackendPresent | .GameSceneOnFrame(_, _) | .GameSceneComponent | .GameSceneQuery | .GameAssetsImage | .GameAssetsSound | .GameInputBind | .GameInputPressed | .DurationNsValue | .DurationScale | .DurationDivide | .PreciseMethod(_, _) | .ReflectValueRead(_) | .ReflectValueFields | .ReflectFieldName | .ReflectFieldValue | .ChannelIsTimer | .ChannelIsInterval | .ChannelIsCanceled | .ChannelIsReady | .ChannelDelayMs | .ReactiveGet | .ReactiveEffectMethod | .EventMethod(_) | .LayoutMethod(_) | .DynField | .DynAt | .DynInt | .DynText | .DynBool | .DynFloat | .DynToText | .DynEqualUnordered | .DynDecode(_, _) | .DynIndexKey(_, _) | .DynIndexAt(_, _) | .DynGetKey | .DynGetAt | .DynHas | .DynKeys | .DynLen(_, _) | .DynBinary(_, _, _) | .DynCompare(_, _, _) | .SerdeEncode(_) | .JSONField | .JSONAt | .JSONInt | .JSONText | .JSONBool | .JSONFloat | .JSONToText | .JSONEqualUnordered | .PluginInvoke(_, _) | .ReaderOver(_) | .ReaderPeek | .ReaderRemaining | .ReaderAtEnd | .CursorOver | .ProcessLines -> SemFootprintAccess.Read
+    }
+}
+
+semindex_footprint_walk_pattern: fn(tree: BodyTree, pattern: BodyPattern, symbols: SymbolTable?, walk: ^SemFootprintWalk) Never! {
+    loop binding in pattern.bindings {
+        if binding.symbol_id == .Val(sid) && !symbol_is_none(sid) {
+            walk.internal_keys["s:{Int{sid.id}}"] = true
+        }
+        walk.internal_keys["n:{binding.name}:{binding.span.start}"] = true
+    }
+    semindex_footprint_walk_pattern_shape(tree, pattern.shape, symbols, walk)
+}
+
+semindex_footprint_walk_pattern_shape: fn(tree: BodyTree, shape: BodyPatternShape, symbols: SymbolTable?, walk: ^SemFootprintWalk) Never! {
+    if shape == {
+        .Variant(_, bindings, _, _) -> {
+            loop item in bindings -> semindex_footprint_walk_pattern_binding(tree, item, symbols, walk)
+        }
+        .Present(_, _, inner, _) | .Ok(_, _, inner, _) | .Err(_, _, inner, _) -> {
+            if inner == .Val(nested) -> semindex_footprint_walk_pattern_shape(tree, nested.shape, symbols, walk)
+        }
+        .Or(alts, _) -> {
+            loop alt in alts -> semindex_footprint_walk_pattern_shape(tree, alt, symbols, walk)
+        }
+        .Struct(fields, _) -> {
+            loop field in fields {
+                if field == {
+                    .Value(_, val_id, _) -> semindex_footprint_walk_expr(tree, val_id, SemFootprintAccess.Read, symbols, walk)
+                    .Nested(_, nested, _) -> semindex_footprint_walk_pattern_shape(tree, nested.shape, symbols, walk)
+                    .Bind(_, _, _) -> {}
+                }
+            }
+        }
+        .List(items, _, _) -> {
+            loop item in items -> semindex_footprint_walk_pattern_binding(tree, item, symbols, walk)
+        }
+        .Map(entries, _, _) -> {
+            loop entry in entries {
+                semindex_footprint_walk_expr(tree, entry.key, SemFootprintAccess.Read, symbols, walk)
+                semindex_footprint_walk_pattern_binding(tree, entry.slot, symbols, walk)
+            }
+        }
+        .Absent(_) | .Range(_, _, _) | .Text(_, _) | .Binary(_, _) -> {}
+    }
+}
+
+semindex_footprint_walk_pattern_binding: fn(tree: BodyTree, binding: BodyPatternBinding, symbols: SymbolTable?, walk: ^SemFootprintWalk) Never! {
+    if binding == {
+        .Nested(nested) -> semindex_footprint_walk_pattern_shape(tree, nested.shape, symbols, walk)
+        .Value(val_id) -> semindex_footprint_walk_expr(tree, val_id, SemFootprintAccess.Read, symbols, walk)
+        .Wildcard | .Bind(_, _) | .Range(_, _) -> {}
+    }
+}
+
+semindex_footprint_walk_if_cond: fn(tree: BodyTree, cond: BodyIfCond, symbols: SymbolTable?, walk: ^SemFootprintWalk) Never! {
+    if cond == {
+        .Plain(value) -> semindex_footprint_walk_expr(tree, value, SemFootprintAccess.Read, symbols, walk)
+        .And(left, right) -> {
+            semindex_footprint_walk_if_cond(tree, left, symbols, walk)
+            semindex_footprint_walk_if_cond(tree, right, symbols, walk)
+        }
+        .IfLet(pattern, subj) -> {
+            semindex_footprint_walk_expr(tree, subj, SemFootprintAccess.Read, symbols, walk)
+            semindex_footprint_walk_pattern(tree, pattern, symbols, walk)
+        }
+    }
+}
+
+semindex_footprint_walk_call_args: fn(tree: BodyTree, args: [BodyCallArg], symbols: SymbolTable?, walk: ^SemFootprintWalk) Never! {
+    loop arg in args {
+        access: if arg.mut_borrow -> SemFootprintAccess.Write else -> SemFootprintAccess.Read
+        semindex_footprint_walk_expr(tree, arg.value, access, symbols, walk)
+    }
+}
+
+semindex_footprint_walk_lambda: fn(tree: BodyTree, lambda: BodyLambda, symbols: SymbolTable?, walk: ^SemFootprintWalk) Never! {
+    loop name in lambda.source_params -> semindex_footprint_push_internal_name(walk, name)
+    loop sid in lambda.source_param_symbols {
+        if !symbol_is_none(sid) -> walk.internal_keys["s:{Int{sid.id}}"] = true
+    }
+    if lambda.executable == {
+        .Expr(val_id) -> semindex_footprint_walk_expr(tree, val_id, SemFootprintAccess.Read, symbols, walk)
+        .Block(stmts) -> {
+            loop idx in stmts -> semindex_footprint_walk_stmt(tree, idx, symbols, walk)
+        }
+    }
+    loop name in lambda.source_params -> semindex_footprint_pop_internal_name(walk, name)
+}
+
+semindex_footprint_type_owner: fn(ty: Type) -> String Never! {
+    raw: type_name(ty)
+    ^cut: raw
+    if cut.contains("<") -> cut = cut.before("<")
+    if cut.contains(".") {
+        parts: cut.split(".").to_list()
+        if parts.len() > 0 -> cut = parts[parts.len() - 1]
+    }
+    cut
+}
+
+semindex_footprint_lookup_method: fn(tree: BodyTree, receiver_ty: Type, method_symbol: SymbolID, method_name: String, symbols: SymbolTable?, walk: SemFootprintWalk) -> Int? Never! {
+    if symbols == .Val(table) && !symbol_is_none(method_symbol) {
+        key: symbol_key(table, tree.symbols, method_symbol)
+        if walk.methods_by_key.get(key) == .Val(idx) -> return Val(idx)
+    }
+    owner: semindex_footprint_type_owner(receiver_ty)
+    if owner != "" {
+        if walk.methods_by_owner_name.get("{owner}.{method_name}") == .Val(idx) -> return Val(idx)
+    }
+    None
+}
+
+semindex_footprint_walk_expr: fn(tree: BodyTree, node_id: Int, access: SemFootprintAccess, symbols: SymbolTable?, walk: ^SemFootprintWalk) Never! {
+    node: body_node(tree, node_id)
+    if node.kind == {
+        .Local(local) -> {
+            if local.generated {
+                key: semindex_footprint_local_key(local)
+                if walk.pin_inits.get(key) == .Val(init_id) {
+                    walk.pin_consumed[key] = true
+                    semindex_footprint_walk_expr(tree, init_id, access, symbols, walk)
+                }
+                return
+            }
+            semindex_footprint_record(walk, local, [String]{}, local.ty, access, node.span.start)
+        }
+        .Field(_, _) -> {
+            if semindex_footprint_extract_place(tree, node_id, walk) == .Val(place) {
+                semindex_footprint_mark_pin_consumed(tree, node_id, walk)
+                semindex_footprint_record(walk, place.root, place.fields, place.ty, access, node.span.start)
+                semindex_footprint_walk_place_indices(tree, node_id, symbols, walk)
+                return
+            }
+            if node.kind == .Field(receiver, _) {
+                semindex_footprint_walk_expr(tree, receiver, access, symbols, walk)
+            }
+        }
+        .Index(base, index, _, idx_access, _, _) -> {
+            effective: if semindex_footprint_access_rank(access) > semindex_footprint_access_rank(semindex_footprint_access_from_convention(idx_access)) -> access else -> semindex_footprint_access_from_convention(idx_access)
+            semindex_footprint_walk_expr(tree, base, effective, symbols, walk)
+            semindex_footprint_walk_expr(tree, index, SemFootprintAccess.Read, symbols, walk)
+        }
+        .Borrow(place_id, borrow_access) -> {
+            mapped: semindex_footprint_access_from_convention(borrow_access)
+            effective: if semindex_footprint_access_rank(access) > semindex_footprint_access_rank(mapped) -> access else -> mapped
+            semindex_footprint_walk_expr(tree, place_id, effective, symbols, walk)
+        }
+        .Move(inner) | .Drop(inner) | .Close(inner) -> {
+            semindex_footprint_walk_expr(tree, inner, SemFootprintAccess.Take, symbols, walk)
+        }
+        .Clone(inner, _) | .ExplicitCopy(inner) -> {
+            semindex_footprint_walk_expr(tree, inner, SemFootprintAccess.Read, symbols, walk)
+        }
+        .Call(_, _, args) | .StaticCall(_, _, _, _, args) | .AllocNew(_, args) -> {
+            semindex_footprint_walk_call_args(tree, args, symbols, walk)
+        }
+        .IndirectCall(callee, _, args, _) -> {
+            semindex_footprint_walk_expr(tree, callee, SemFootprintAccess.Read, symbols, walk)
+            semindex_footprint_walk_call_args(tree, args, symbols, walk)
+        }
+        .MethodCall(receiver, method, _, args) -> {
+            ^recv_access: SemFootprintAccess.Read
+            ^method_idx: Int?{None}
+            place_opt: semindex_footprint_extract_place(tree, receiver, walk)
+            if place_opt == .Val(place) {
+                method_idx = semindex_footprint_lookup_method(tree, place.ty, method.symbol, method.name, symbols, walk)
+                if method_idx == .Val(mi) -> recv_access = walk.methods[mi].receiver_access
+            }
+            ^expanded_any: false
+            if place_opt == .Val(place) && method_idx == .Val(mi) && recv_access != SemFootprintAccess.Take {
+                ^field_names: [String]{}
+                ^field_tys: [Type]{}
+                if walk.methods[mi].receiver_footprint == .Val(fields) {
+                    loop field_name in fields {
+                        field_names.push("{field_name}")
+                        field_tys.push(walk.methods[mi].receiver_field_types.get(field_name) ?? place.ty)
+                    }
+                }
+                if field_names.len() > 0 {
+                    semindex_footprint_mark_pin_consumed(tree, receiver, walk)
+                    loop i in 0..<field_names.len() {
+                        ^expanded: place.fields
+                        expanded.push("{field_names[i]}")
+                        semindex_footprint_record(walk, place.root, expanded, field_tys[i], recv_access, node.span.start)
+                    }
+                    semindex_footprint_walk_place_indices(tree, receiver, symbols, walk)
+                    expanded_any = true
+                }
+            }
+            if !expanded_any {
+                semindex_footprint_walk_expr(tree, receiver, recv_access, symbols, walk)
+            }
+            semindex_footprint_walk_call_args(tree, args, symbols, walk)
+        }
+        .BuiltinMethod(receiver, op, args) -> {
+            recv_access: semindex_footprint_builtin_receiver_access(op)
+            semindex_footprint_walk_expr(tree, receiver, recv_access, symbols, walk)
+            loop arg in args -> semindex_footprint_walk_expr(tree, arg, SemFootprintAccess.Read, symbols, walk)
+        }
+        .HandleMethod(receiver, op, args) -> {
+            recv_access: semindex_footprint_handle_receiver_access(op)
+            semindex_footprint_walk_expr(tree, receiver, recv_access, symbols, walk)
+            loop arg in args -> semindex_footprint_walk_expr(tree, arg, SemFootprintAccess.Read, symbols, walk)
+        }
+        .SharedGuardMap(guard, _, editable) | .SharedGuardSplit(guard, _, _, editable) -> {
+            semindex_footprint_walk_expr(tree, guard, if editable -> SemFootprintAccess.Write else -> SemFootprintAccess.Read, symbols, walk)
+        }
+        .SharedGuardWait(guard, condition, predicate) -> {
+            semindex_footprint_walk_expr(tree, guard, SemFootprintAccess.Write, symbols, walk)
+            semindex_footprint_walk_expr(tree, condition, SemFootprintAccess.Read, symbols, walk)
+            semindex_footprint_walk_lambda(tree, predicate, symbols, walk)
+        }
+        .PoolSlot(pool, id, mutable, _, _, _) -> {
+            semindex_footprint_walk_expr(tree, pool, if mutable -> SemFootprintAccess.Write else -> SemFootprintAccess.Read, symbols, walk)
+            semindex_footprint_walk_expr(tree, id, SemFootprintAccess.Read, symbols, walk)
+        }
+        .Lambda(lambda) -> {
+            semindex_footprint_walk_lambda(tree, lambda, symbols, walk)
+        }
+        .CoreClosureCall(kind) -> {
+            if kind == {
+                .Spawn(group, _, _, executable) -> {
+                    if group == .Val(g) -> semindex_footprint_walk_expr(tree, g, SemFootprintAccess.Write, symbols, walk)
+                    semindex_footprint_walk_lambda(tree, executable, symbols, walk)
+                }
+                .Guard(executable) | .OnCommit(_, executable) | .OnRollback(_, executable) | .UIClickSlot(executable) | .UIDropSlot(executable) | .ReactiveDerived(executable) | .ReactiveEffect(executable) | .UIReactiveRender(executable) -> {
+                    semindex_footprint_walk_lambda(tree, executable, symbols, walk)
+                }
+            }
+        }
+        .InlineBlock(stmts) -> {
+            loop idx in stmts -> semindex_footprint_walk_stmt(tree, idx, symbols, walk)
+        }
+        .IfExpr(cond, then_body, then_val, else_body, else_val) -> {
+            semindex_footprint_walk_if_cond(tree, cond, symbols, walk)
+            loop idx in then_body -> semindex_footprint_walk_stmt(tree, idx, symbols, walk)
+            semindex_footprint_walk_expr(tree, then_val, access, symbols, walk)
+            loop idx in else_body -> semindex_footprint_walk_stmt(tree, idx, symbols, walk)
+            semindex_footprint_walk_expr(tree, else_val, access, symbols, walk)
+        }
+        .OptMethodCall(base, binding, call, _) -> {
+            semindex_footprint_walk_expr(tree, base, SemFootprintAccess.Read, symbols, walk)
+            semindex_footprint_note_internal_local(walk, binding)
+            semindex_footprint_walk_expr(tree, call, access, symbols, walk)
+        }
+        .OrFallback(value, fallback, ambient_err) -> {
+            semindex_footprint_walk_expr(tree, value, access, symbols, walk)
+            if ambient_err == .Val(err_local) -> semindex_footprint_note_internal_local(walk, err_local)
+            if fallback == {
+                .Value(inner) -> semindex_footprint_walk_expr(tree, inner, access, symbols, walk)
+                .Return(ret_opt) -> {
+                    if ret_opt == .Val(inner) -> semindex_footprint_walk_expr(tree, inner, SemFootprintAccess.Read, symbols, walk)
+                }
+                .Panic(msg, _) -> semindex_footprint_walk_expr(tree, msg, SemFootprintAccess.Read, symbols, walk)
+                .Break | .Continue | .BreakLabel(_) | .ContinueLabel(_) -> {}
+            }
+        }
+        .FnValue(kind) -> {
+            if kind == {
+                .NamedFn(_, lambda) -> {
+                    if lambda == .Val(lam) -> semindex_footprint_walk_lambda(tree, lam, symbols, walk)
+                }
+                .Policy(_, policy_args, _, _, _, callee) -> {
+                    semindex_footprint_walk_expr(tree, callee, SemFootprintAccess.Read, symbols, walk)
+                    semindex_footprint_walk_call_args(tree, policy_args, symbols, walk)
+                }
+                .Call(callee, args) -> {
+                    semindex_footprint_walk_expr(tree, callee, SemFootprintAccess.Read, symbols, walk)
+                    semindex_footprint_walk_call_args(tree, args, symbols, walk)
+                }
+                .Send(inner) -> semindex_footprint_walk_expr(tree, inner, SemFootprintAccess.Take, symbols, walk)
+            }
+        }
+        .RawAddressOf(place) -> {
+            if place == {
+                .Local(local) -> semindex_footprint_record(walk, local, [String]{}, local.ty, SemFootprintAccess.Write, node.span.start)
+                .Expr(inner) -> semindex_footprint_walk_expr(tree, inner, SemFootprintAccess.Write, symbols, walk)
+            }
+        }
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Unit | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .NumberParam(_) | .CopyPhase(_, _, _, _) | .GlobalShared(_, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .ConditionNotify(_, _) | .HostCall(_) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .MaterializeView(_) | .DecodeUnder(_, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OptField(_, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .Never(_, _) | .TypeTest(_, _) | .TypePath(_) -> {
+            ^children: [Int]{}
+            body_each_node_kind_child(tree, node.kind, fn(child: Int) { children.push(child) })
+            loop child in children -> semindex_footprint_walk_expr(tree, child, SemFootprintAccess.Read, symbols, walk)
+        }
+    }
+}
+
+semindex_footprint_walk_stmt: fn(tree: BodyTree, stmt_idx: Int, symbols: SymbolTable?, walk: ^SemFootprintWalk) Never! {
+    stmt: body_stmt(tree, stmt_idx)
+    if stmt == {
+        .Let(local, _, init, _, _, _) -> {
+            if local.generated && local.name.starts_with("binder_ref_") {
+                walk.pin_inits[semindex_footprint_local_key(local)] = init
+                semindex_footprint_note_internal_local(walk, local)
+                return
+            }
+            semindex_footprint_walk_expr(tree, init, SemFootprintAccess.Read, symbols, walk)
+            semindex_footprint_note_internal_local(walk, local)
+        }
+        .RefutableBind(pattern, init, fallback, _) -> {
+            semindex_footprint_walk_expr(tree, init, SemFootprintAccess.Read, symbols, walk)
+            semindex_footprint_walk_pattern(tree, pattern, symbols, walk)
+            loop idx in fallback -> semindex_footprint_walk_stmt(tree, idx, symbols, walk)
+        }
+        .TupleDestructure(temp, init, _, binds, _) | .StructDestructure(temp, init, _, binds, _) -> {
+            semindex_footprint_walk_expr(tree, init, SemFootprintAccess.Read, symbols, walk)
+            semindex_footprint_note_internal_local(walk, temp)
+            loop bind in binds -> semindex_footprint_note_internal_local(walk, bind.local)
+        }
+        .ListDestructure(temp, init, _, _, elements, _) -> {
+            semindex_footprint_walk_expr(tree, init, SemFootprintAccess.Read, symbols, walk)
+            semindex_footprint_note_internal_local(walk, temp)
+            loop elem in elements -> semindex_footprint_note_internal_local(walk, elem)
+        }
+        .Assign(place, _, value, _, span) -> {
+            if place == {
+                .Local(local) -> semindex_footprint_record(walk, local, [String]{}, local.ty, SemFootprintAccess.Write, span.start)
+                .Expr(place_id) -> semindex_footprint_walk_expr(tree, place_id, SemFootprintAccess.Write, symbols, walk)
+            }
+            semindex_footprint_walk_expr(tree, value, SemFootprintAccess.Read, symbols, walk)
+        }
+        .ExprStmt(value, _) -> semindex_footprint_walk_expr(tree, value, SemFootprintAccess.Read, symbols, walk)
+        .Return(value, _) -> {
+            if value == .Val(v) -> semindex_footprint_walk_expr(tree, v, SemFootprintAccess.Read, symbols, walk)
+        }
+        .If(cond, then_body, else_body, _, _) -> {
+            semindex_footprint_walk_if_cond(tree, cond, symbols, walk)
+            loop idx in then_body -> semindex_footprint_walk_stmt(tree, idx, symbols, walk)
+            if else_body == .Val(eb) {
+                loop idx in eb -> semindex_footprint_walk_stmt(tree, idx, symbols, walk)
+            }
+        }
+        .Loop(_, body, _) -> {
+            loop idx in body -> semindex_footprint_walk_stmt(tree, idx, symbols, walk)
+        }
+        .While(_, cond, body, _) -> {
+            semindex_footprint_walk_expr(tree, cond, SemFootprintAccess.Read, symbols, walk)
+            loop idx in body -> semindex_footprint_walk_stmt(tree, idx, symbols, walk)
+        }
+        .CountedLoop(_, init, cond, step, _, body, _) -> {
+            semindex_footprint_walk_stmt(tree, init, symbols, walk)
+            semindex_footprint_walk_expr(tree, cond, SemFootprintAccess.Read, symbols, walk)
+            if step == .Val(s) -> semindex_footprint_walk_stmt(tree, s, symbols, walk)
+            loop idx in body -> semindex_footprint_walk_stmt(tree, idx, symbols, walk)
+        }
+        .ForRange(_, local, start, end, step, _, body, _, _) -> {
+            semindex_footprint_walk_expr(tree, start, SemFootprintAccess.Read, symbols, walk)
+            semindex_footprint_walk_expr(tree, end, SemFootprintAccess.Read, symbols, walk)
+            if step == .Val(s) -> semindex_footprint_walk_expr(tree, s, SemFootprintAccess.Read, symbols, walk)
+            semindex_footprint_note_internal_local(walk, local)
+            loop idx in body -> semindex_footprint_walk_stmt(tree, idx, symbols, walk)
+        }
+        .Range(_, variable, source, start, end, step, _, _, body, _) -> {
+            if source == .Val(src) -> semindex_footprint_walk_expr(tree, src, SemFootprintAccess.Read, symbols, walk)
+            semindex_footprint_walk_expr(tree, start, SemFootprintAccess.Read, symbols, walk)
+            semindex_footprint_walk_expr(tree, end, SemFootprintAccess.Read, symbols, walk)
+            if step == .Val(s) -> semindex_footprint_walk_expr(tree, s, SemFootprintAccess.Read, symbols, walk)
+            semindex_footprint_note_internal_local(walk, variable)
+            loop idx in body -> semindex_footprint_walk_stmt(tree, idx, symbols, walk)
+        }
+        .ForIn(_, variable, variable_two, source, collection, step, _, _, _, _, body, _) -> {
+            semindex_footprint_walk_expr(tree, source, SemFootprintAccess.Read, symbols, walk)
+            semindex_footprint_walk_expr(tree, collection, SemFootprintAccess.Read, symbols, walk)
+            if step == .Val(s) -> semindex_footprint_walk_expr(tree, s, SemFootprintAccess.Read, symbols, walk)
+            semindex_footprint_note_internal_local(walk, variable)
+            if variable_two == .Val(v2) -> semindex_footprint_note_internal_local(walk, v2)
+            loop idx in body -> semindex_footprint_walk_stmt(tree, idx, symbols, walk)
+        }
+        .Match(subject, arms, _, _) -> {
+            semindex_footprint_walk_expr(tree, subject, SemFootprintAccess.Read, symbols, walk)
+            loop arm in arms {
+                semindex_footprint_walk_pattern(tree, arm.pattern, symbols, walk)
+                loop idx in arm.body -> semindex_footprint_walk_stmt(tree, idx, symbols, walk)
+            }
+        }
+        .EnumMatch(scrutinee, arms, else_body, _, _) -> {
+            semindex_footprint_walk_expr(tree, scrutinee, SemFootprintAccess.Read, symbols, walk)
+            loop arm in arms {
+                semindex_footprint_walk_pattern(tree, arm.pattern, symbols, walk)
+                loop idx in arm.body -> semindex_footprint_walk_stmt(tree, idx, symbols, walk)
+            }
+            if else_body == .Val(eb) {
+                loop idx in eb -> semindex_footprint_walk_stmt(tree, idx, symbols, walk)
+            }
+        }
+        .RangeSwitch(subject, arms, else_body, _) -> {
+            semindex_footprint_walk_expr(tree, subject, SemFootprintAccess.Read, symbols, walk)
+            loop arm in arms {
+                semindex_footprint_walk_expr(tree, arm.lo, SemFootprintAccess.Read, symbols, walk)
+                semindex_footprint_walk_expr(tree, arm.hi, SemFootprintAccess.Read, symbols, walk)
+                loop idx in arm.body -> semindex_footprint_walk_stmt(tree, idx, symbols, walk)
+            }
+            loop idx in else_body -> semindex_footprint_walk_stmt(tree, idx, symbols, walk)
+        }
+        .MixedSwitch(subject, _, arms, else_body, _) -> {
+            semindex_footprint_walk_expr(tree, subject, SemFootprintAccess.Read, symbols, walk)
+            loop arm in arms {
+                semindex_footprint_walk_expr(tree, arm.condition, SemFootprintAccess.Read, symbols, walk)
+                loop idx in arm.body -> semindex_footprint_walk_stmt(tree, idx, symbols, walk)
+            }
+            if else_body == .Val(eb) {
+                loop idx in eb -> semindex_footprint_walk_stmt(tree, idx, symbols, walk)
+            }
+        }
+        .TaskGroup(group, args, body, _) -> {
+            if args.limit == .Val(l) -> semindex_footprint_walk_expr(tree, l, SemFootprintAccess.Read, symbols, walk)
+            if args.stack == .Val(s) -> semindex_footprint_walk_expr(tree, s, SemFootprintAccess.Read, symbols, walk)
+            semindex_footprint_note_internal_local(walk, group)
+            loop idx in body -> semindex_footprint_walk_stmt(tree, idx, symbols, walk)
+        }
+        .DeferClose(close, _, _) -> semindex_footprint_walk_expr(tree, close, SemFootprintAccess.Take, symbols, walk)
+        .BreakValue(_, value, _) -> semindex_footprint_walk_expr(tree, value, SemFootprintAccess.Read, symbols, walk)
+        .Contract(contract) -> {
+            semindex_footprint_walk_expr(tree, contract.condition, SemFootprintAccess.Read, symbols, walk)
+            semindex_footprint_walk_expr(tree, contract.message, SemFootprintAccess.Read, symbols, walk)
+        }
+        .ContractScope(pre, body, post, _, _) -> {
+            loop c in pre {
+                semindex_footprint_walk_expr(tree, c.condition, SemFootprintAccess.Read, symbols, walk)
+                semindex_footprint_walk_expr(tree, c.message, SemFootprintAccess.Read, symbols, walk)
+            }
+            loop idx in body -> semindex_footprint_walk_stmt(tree, idx, symbols, walk)
+            loop c in post {
+                semindex_footprint_walk_expr(tree, c.condition, SemFootprintAccess.Read, symbols, walk)
+                semindex_footprint_walk_expr(tree, c.message, SemFootprintAccess.Read, symbols, walk)
+            }
+        }
+        .Layout(handle, _, body, _) -> {
+            semindex_footprint_note_internal_local(walk, handle)
+            loop idx in body -> semindex_footprint_walk_stmt(tree, idx, symbols, walk)
+        }
+        .ContextBlock(guards, body, _) -> {
+            loop guard in guards -> semindex_footprint_walk_expr(tree, guard.value, SemFootprintAccess.Read, symbols, walk)
+            loop idx in body -> semindex_footprint_walk_stmt(tree, idx, symbols, walk)
+        }
+        .Transact(handle, _, stm, body, _) -> {
+            if handle == .Val(h) -> semindex_footprint_note_internal_local(walk, h)
+            if stm == .Val(s) -> semindex_footprint_note_internal_local(walk, s)
+            loop idx in body -> semindex_footprint_walk_stmt(tree, idx, symbols, walk)
+        }
+        .Reactive(executable, _) -> semindex_footprint_walk_lambda(tree, executable, symbols, walk)
+        .GCEdit(_, _, _, _, index_temp, inner_stmt, _) -> {
+            if index_temp == .Val(t) -> semindex_footprint_walk_expr(tree, t, SemFootprintAccess.Read, symbols, walk)
+            semindex_footprint_walk_stmt(tree, inner_stmt, symbols, walk)
+        }
+        .Inline(body, _) | .DebugOnly(body, _) | .DeepCheck(body, _) | .Unsafe(_, body) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .Defer(body, _) | .ScopeMember(_, body, _) -> {
+            loop idx in body -> semindex_footprint_walk_stmt(tree, idx, symbols, walk)
+        }
+        .Break(_, _) | .Continue(_, _) -> {}
+    }
+}
+
+// Collect method receiver conventions and solved `^self.[a, b]` field footprints
+// across all checked user modules and `index`.
+semindex_footprint_index_methods: fn(modules: [JetDriverDocModule], index: SemIndex?, walk: ^SemFootprintWalk) Never! {
+    ^struct_fields: [String:[String:Type]]{}
+    loop doc_module in modules {
+        loop item in doc_module.items {
+            if item == .Struct(definition) {
+                ^fields: [String:Type]{}
+                loop field in definition.fields {
+                    fields[field.name] = field.ty
+                }
+                struct_fields[definition.name] = fields
+            }
+        }
+    }
+    if index == .Val(sem) {
+        loop member in sem.members {
+            if member.kind != "method" -> next
+            loop def_row in sem.definitions {
+                if def_row.def.identity != member.identity -> next
+                if def_row.def.kind == .Function(callable) {
+                    if callable.receiver == .Val(recv) {
+                        ftypes: struct_fields.get(member.owner) ?? [String:Type]{}
+                        row_idx: walk.methods.len()
+                        walk.methods.push(SemFootprintMethodInfo{
+                            receiver_access: semindex_footprint_access_from_convention(recv),
+                            receiver_footprint: None,
+                            receiver_field_types: ftypes,
+                        })
+                        walk.methods_by_owner_name["{member.owner}.{member.name}"] = row_idx
+                    }
+                }
+                break
+            }
+        }
+    }
+    loop doc_module in modules {
+        loop fn_body in doc_module.functions {
+            ^recv_conv: AccessConvention?{None}
+            ^owner_ty: Type?{None}
+            if fn_body.kind == {
+                .Method(self_convention, owner_type) -> {
+                    recv_conv = self_convention
+                    owner_ty = Val(owner_type)
+                }
+                .TraitMethod(_, self_convention, owner_type, _, _) -> {
+                    recv_conv = self_convention
+                    owner_ty = Val(owner_type)
+                }
+                .TopLevel -> {}
+            }
+            conv: recv_conv ?? next
+            owner_type: owner_ty ?? next
+            owner: semindex_footprint_type_owner(owner_type)
+            ^method_leaf: fn_body.name
+            if method_leaf.contains(".") {
+                parts: method_leaf.split(".").to_list()
+                if parts.len() > 0 -> method_leaf = parts[parts.len() - 1]
+            }
+            ftypes: struct_fields.get(owner) ?? [String:Type]{}
+            row_idx: walk.methods.len()
+            walk.methods.push(SemFootprintMethodInfo{
+                receiver_access: semindex_footprint_access_from_convention(conv),
+                receiver_footprint: fn_body.receiver_footprint,
+                receiver_field_types: ftypes,
+            })
+            walk.methods_by_key[fn_body.key] = row_idx
+            if owner != "" {
+                walk.methods_by_owner_name["{owner}.{method_leaf}"] = row_idx
+            }
+        }
+    }
+}
+
+// Whether `path` is subsumed by a wider prefix of the same root at `>=` access.
+semindex_footprint_is_subsumed: fn(entry: SemFootprintEntry, all: [SemFootprintEntry]) -> Bool Never! {
+    rank: semindex_footprint_access_rank(entry.access)
+    loop other in all {
+        if other.root_key != entry.root_key || other.path == entry.path -> next
+        if entry.path.starts_with("{other.path}.") && semindex_footprint_access_rank(other.access) >= rank {
+            return true
+        }
+    }
+    false
+}
+
+// Find the checked module matching `target_path`.
+semindex_footprint_find_module: fn(modules: [JetDriverDocModule], target_path: String) -> Int? Never! {
+    loop (idx, doc_module) in modules {
+        if doc_module.path == target_path || doc_module.physical_path == target_path -> return Val(idx)
+    }
+    None
+}
+
+// Full byte span of `fn_body`: the union of its declaration `source_span`
+// (which may cover only the header) and its checked body statements.
+semindex_footprint_function_span: fn(fn_body: FnBody) -> Span Never! {
+    body_sp: semindex_footprint_block_span(fn_body.tree, fn_body.body)
+    decl_sp: fn_body.source_span
+    has_decl: decl_sp.start != 0 || decl_sp.end != 0
+    has_body: body_sp.start != 0 || body_sp.end != 0
+    if !has_decl -> return body_sp
+    if !has_body -> return decl_sp
+    lo: if decl_sp.start < body_sp.start -> decl_sp.start else -> body_sp.start
+    hi: if decl_sp.end > body_sp.end -> decl_sp.end else -> body_sp.end
+    Span{start: lo, end: hi}
+}
+
+// Find the tightest enclosing non-synthetic `FnBody` covering `range`.
+semindex_footprint_find_function: fn(functions: [FnBody], range: Span) -> Int? Never! {
+    ^best: Int?{None}
+    ^best_size: -1
+    loop (idx, fn_body) in functions {
+        if fn_body.synthetic -> next
+        sp: semindex_footprint_function_span(fn_body)
+        if !semindex_footprint_span_overlaps(sp, range) -> next
+        encloses: sp.start <= range.start && range.end <= sp.end
+        size: sp.end - sp.start
+        if best == None {
+            best = Val(idx)
+            best_size = if encloses -> size else -> size + 1000000000
+            next
+        }
+        score: if encloses -> size else -> size + 1000000000
+        if score < best_size {
+            best = Val(idx)
+            best_size = score
+        }
+    }
+    best
+}
+
+// Compute the canonical inferred footprint of the checked statements covered by
+// `range` in `target_path`. Returns `None` when `target_path` has no enclosing
+// checked function or no checked statements overlap `range`.
+semindex_block_footprint: fn(modules: [JetDriverDocModule], index: SemIndex?, target_path: String, range: Span) -> SemBlockFootprint? {
+    mod_idx: semindex_footprint_find_module(modules, target_path) ?? return None
+    doc_module: modules[mod_idx]
+    fn_idx: semindex_footprint_find_function(doc_module.functions, range) ?? return None
+    fn_body: doc_module.functions[fn_idx]
+    ^selected: [Int]{}
+    semindex_footprint_select_stmts(fn_body.tree, fn_body.body, range, selected)
+    if selected.len() == 0 {
+        // Pointing at a function header line inspects the whole function body.
+        fn_sp: semindex_footprint_function_span(fn_body)
+        body_span: semindex_footprint_block_span(fn_body.tree, fn_body.body)
+        if fn_body.body.len() > 0 && range.start >= fn_sp.start && range.start <= body_span.start {
+            selected = fn_body.body
+        }
+    }
+    if selected.len() == 0 -> return None
+    ^walk: SemFootprintWalk{
+        param_keys: [String:Bool]{},
+        internal_keys: [String:Bool]{},
+        internal_names: [String:Int]{},
+        pin_inits: [String:Int]{},
+        pin_consumed: [String:Bool]{},
+        methods: [SemFootprintMethodInfo]{},
+        methods_by_key: [String:Int]{},
+        methods_by_owner_name: [String:Int]{},
+        by_place: [String:SemFootprintEntry]{},
+        order: [String]{},
+    }
+    loop param in fn_body.params {
+        walk.param_keys[semindex_footprint_local_key(param.local)] = true
+    }
+    semindex_footprint_index_methods(modules, index, walk)
+    ^symbols: SymbolTable?{None}
+    if doc_module.name_ledger == .Val(storage) {
+        permit: storage.guard_read()
+        symbols = Val(permit.value.symbols)
+    }
+    loop stmt_idx in selected {
+        semindex_footprint_walk_stmt(fn_body.tree, stmt_idx, symbols, walk)
+    }
+    // Any unconsumed generated binder_ref pin init still contributes its access.
+    loop (pin_key, init_id) in walk.pin_inits {
+        if walk.pin_consumed.get(pin_key) == Val(true) -> next
+        semindex_footprint_walk_expr(fn_body.tree, init_id, SemFootprintAccess.Read, symbols, walk)
+    }
+    ^raw_entries: [SemFootprintEntry]{}
+    loop key in walk.order {
+        if walk.by_place.get(key) == .Val(entry) -> raw_entries.push(entry)
+    }
+    ^entries: [SemFootprintEntry]{}
+    loop entry in raw_entries {
+        if !semindex_footprint_is_subsumed(entry, raw_entries) -> entries.push(entry)
+    }
+    entries.sort_by(fn(left: SemFootprintEntry, right: SemFootprintEntry) {
+        if left.first_at != right.first_at -> return left.first_at <=> right.first_at
+        left.path <=> right.path
+    })
+    ^reads: [SemFootprintEntry]{}
+    ^writes: [SemFootprintEntry]{}
+    ^takes: [SemFootprintEntry]{}
+    loop entry in entries {
+        if entry.access == {
+            .Read -> reads.push(entry)
+            .Write -> writes.push(entry)
+            .Take -> takes.push(entry)
+        }
+    }
+    actual_span: semindex_footprint_block_span(fn_body.tree, selected)
+    Val(SemBlockFootprint{
+        module_path: doc_module.path,
+        function_name: fn_body.name,
+        span: actual_span,
+        entries: entries,
+        reads: reads,
+        writes: writes,
+        takes: takes,
+    })
+}
+
+// Collapse a block's footprint into root parameter signatures (`x: T`, `x: ^T`,
+// `x: ^^T`) for `Extract function` and summary views, in first-use order.
+semindex_block_footprint_params: fn(footprint: SemBlockFootprint) -> [SemFootprintParam] Never! {
+    ^by_root: [String:SemFootprintParam]{}
+    ^order: [String]{}
+    loop entry in footprint.entries {
+        if by_root.get(entry.root_key) == .Val(existing) {
+            ^best: existing.access
+            if semindex_footprint_access_rank(entry.access) > semindex_footprint_access_rank(existing.access) {
+                best = entry.access
+            }
+            first: if entry.first_at < existing.first_at -> entry.first_at else -> existing.first_at
+            by_root[entry.root_key] = SemFootprintParam{name: existing.name, access: best, ty: existing.ty, first_at: first}
+            next
+        }
+        order.push(entry.root_key)
+        by_root[entry.root_key] = SemFootprintParam{name: entry.root, access: entry.access, ty: entry.root_ty, first_at: entry.first_at}
+    }
+    ^params: [SemFootprintParam]{}
+    loop key in order {
+        if by_root.get(key) == .Val(param) -> params.push(param)
+    }
+    params.sort_by(fn(left: SemFootprintParam, right: SemFootprintParam) {
+        if left.first_at != right.first_at -> return left.first_at <=> right.first_at
+        left.name <=> right.name
+    })
+    params
+}
+
+// Compact one-line summary used by JetLSP hover, code lens, and CLI headers:
+// e.g. `reads x, state.limit | writes ^state.count | takes ^^title`.
+semindex_block_footprint_summary: fn(footprint: SemBlockFootprint) -> String Never! {
+    ^parts: [String]{}
+    if footprint.reads.len() > 0 {
+        names: loop e in footprint.reads -> e.path
+        parts.push("reads {names.join(", ")}")
+    }
+    if footprint.writes.len() > 0 {
+        names: loop e in footprint.writes -> "^{e.path}"
+        parts.push("writes {names.join(", ")}")
+    }
+    if footprint.takes.len() > 0 {
+        names: loop e in footprint.takes -> "^^{e.path}"
+        parts.push("takes {names.join(", ")}")
+    }
+    if parts.len() == 0 -> return "reads nothing, writes nothing, takes nothing"
+    parts.join(" | ")
+}

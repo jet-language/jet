@@ -1,0 +1,465 @@
+// JetLSP block footprint presentation and `Extract function` refactoring
+// (#7033 n3), backed directly by the single-source `semindex_block_footprint`
+// analyzer in `Compiler/JetSemIndex/Source/SemIndex/Footprint.jet`.
+use {
+    core.encoding.[Dyn]
+    jet_driver.[JetDriverDocModule]
+    jet_foundation.[
+        BodyTree,
+        FnBody,
+        Span,
+        StmtKind,
+        TextEdit,
+        Type,
+        body_stmt,
+        foundation_byte_text,
+        foundation_json_quote,
+    ]
+    jet_semindex.[
+        SemBlockFootprint,
+        semindex_block_footprint,
+        semindex_block_footprint_params,
+        semindex_block_footprint_summary,
+        semindex_footprint_access_name,
+        semindex_footprint_access_sigil,
+        semindex_footprint_display_type,
+        semindex_footprint_find_function,
+        semindex_footprint_function_span,
+        semindex_footprint_select_stmts,
+        semindex_footprint_stmt_span,
+    ]
+}
+
+// Render one `SemBlockFootprint` as markdown for hover.
+lsp_footprint_format_markdown: fn(footprint: SemBlockFootprint) -> String Never! {
+    summary: semindex_block_footprint_summary(footprint)
+    ^lines: [String]{"**Block footprint** (`fn {footprint.function_name}`): {summary}"}
+    loop entry in footprint.entries {
+        kind: semindex_footprint_access_name(entry.access)
+        ty: semindex_footprint_display_type(entry.ty)
+        lines.push("- `{kind}` `{entry.path}: {ty}`")
+    }
+    lines.join("\n")
+}
+
+// Whether `stmt` is a compound control/scope block whose header carries a
+// footprint code lens and hover.
+lsp_footprint_is_compound_block: fn(stmt: StmtKind) -> Bool Never! {
+    if stmt == {
+        .If(_, _, _, _, _) | .Loop(_, _, _) | .While(_, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .ForRange(_, _, _, _, _, _, _, _, _) | .Range(_, _, _, _, _, _, _, _, _, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, _, _) | .Match(_, _, _, _) | .EnumMatch(_, _, _, _, _) | .RangeSwitch(_, _, _, _) | .MixedSwitch(_, _, _, _, _) | .Region(_, _) | .UnsafeBlock(_, _, _) | .Transact(_, _, _, _, _) -> true
+        .Contract(_) | .ContractScope(_, _, _, _, _) | .Let(_, _, _, _, _, _) | .RefutableBind(_, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .ExprStmt(_, _) | .Return(_, _) | .TaskGroup(_, _, _, _) | .DeferClose(_, _, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) | .Inline(_, _) | .DebugOnly(_, _) | .DeepCheck(_, _) | .Unsafe(_, _) | .SentryPolicy(_, _, _) | .Impure(_, _) | .Reactive(_, _) | .Layout(_, _, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .Shield(_, _) | .Defer(_, _) | .ScopeMember(_, _, _) | .GCEdit(_, _, _, _, _, _, _) -> false
+    }
+}
+
+// Find the byte extent of the line containing `offset`.
+lsp_footprint_line_bounds: fn(bytes: [U8], offset: Int) -> Span Never! {
+    clamped: if {
+        offset < 0 -> 0
+        offset > bytes.len() -> bytes.len()
+        else -> offset
+    }
+    ^start: clamped
+    loop start > 0 && bytes[start - 1] != (U8{10}) -> start -= 1
+    ^end: clamped
+    loop end < bytes.len() && bytes[end] != (U8{10}) -> end += 1
+    Span{start: start, end: end}
+}
+
+// Collect the full span of every compound block inside `stmts` (in source order).
+lsp_footprint_collect_blocks: fn(tree: BodyTree, stmts: [Int], blocks: ^[Span]) Never! {
+    loop idx in stmts {
+        stmt: body_stmt(tree, idx)
+        if lsp_footprint_is_compound_block(stmt) {
+            full: semindex_footprint_stmt_span(tree, stmt)
+            if full.start < full.end -> blocks.push(full)
+        }
+        if stmt == {
+            .If(_, then_body, else_body, _, _) -> {
+                lsp_footprint_collect_blocks(tree, then_body, blocks)
+                if else_body == .Val(eb) -> lsp_footprint_collect_blocks(tree, eb, blocks)
+            }
+            .Loop(_, body, _) | .While(_, _, body, _) | .CountedLoop(_, _, _, _, _, body, _) | .ForRange(_, _, _, _, _, _, body, _, _) | .Range(_, _, _, _, _, _, _, _, body, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, body, _) | .Region(body, _) | .UnsafeBlock(_, body, _) | .Transact(_, _, _, body, _) | .ContractScope(_, body, _, _, _) | .TaskGroup(_, _, body, _) | .Inline(body, _) | .DebugOnly(body, _) | .DeepCheck(body, _) | .Unsafe(_, body) | .SentryPolicy(_, body, _) | .Impure(body, _) | .Layout(_, _, body, _) | .ContextBlock(_, body, _) | .Live(body, _) | .Shield(body, _) | .Defer(body, _) | .ScopeMember(_, body, _) -> {
+                lsp_footprint_collect_blocks(tree, body, blocks)
+            }
+            .Match(_, arms, _, _) -> {
+                loop arm in arms -> lsp_footprint_collect_blocks(tree, arm.body, blocks)
+            }
+            .EnumMatch(_, arms, else_body, _, _) -> {
+                loop arm in arms -> lsp_footprint_collect_blocks(tree, arm.body, blocks)
+                if else_body == .Val(eb) -> lsp_footprint_collect_blocks(tree, eb, blocks)
+            }
+            .RangeSwitch(_, arms, else_body, _) -> {
+                loop arm in arms -> lsp_footprint_collect_blocks(tree, arm.body, blocks)
+                lsp_footprint_collect_blocks(tree, else_body, blocks)
+            }
+            .MixedSwitch(_, _, arms, else_body, _) -> {
+                loop arm in arms -> lsp_footprint_collect_blocks(tree, arm.body, blocks)
+                if else_body == .Val(eb) -> lsp_footprint_collect_blocks(tree, eb, blocks)
+            }
+            .Contract(_) | .Let(_, _, _, _, _, _) | .RefutableBind(_, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .ExprStmt(_, _) | .Return(_, _) | .DeferClose(_, _, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) | .Reactive(_, _) | .GCEdit(_, _, _, _, _, _, _) -> {}
+        }
+    }
+}
+
+// Find the tightest compound block whose opening header line covers `offset`.
+lsp_footprint_block_header_at: fn(doc_module: JetDriverDocModule, offset: Int) -> Span? Never! {
+    bytes: doc_module.source.bytes()
+    ^best: Span?{None}
+    loop fn_body in doc_module.functions {
+        if fn_body.synthetic -> next
+        ^blocks: [Span]{}
+        lsp_footprint_collect_blocks(fn_body.tree, fn_body.body, blocks)
+        loop full in blocks {
+            header_line: lsp_footprint_line_bounds(bytes, full.start)
+            if offset >= header_line.start && offset <= header_line.end {
+                if {
+                    best == None -> best = Val(full)
+                    best == .Val(prev) && (full.end - full.start) < (prev.end - prev.start) -> best = Val(full)
+                    else -> {}
+                }
+            }
+        }
+    }
+    best
+}
+
+// Block footprint hover: active when `params.range` names a selected range, or
+// when hovering the opening header line of a compound block (`if`/`loop`/etc.).
+lsp_footprint_hover_markdown: fn(at: LSPAt, params: Dyn?) -> String? {
+    module_path: at.view.module_path ?? return None
+    doc_idx: lsp_module_index(at.view.checked, module_path) ?? return None
+    doc_module: at.view.checked.modules[doc_idx]
+    ^target_span: Span?{None}
+    if lsp_param(params, "range") == .Val(range_json) {
+        if lsp_range_from_json(range_json) == .Val(req_range) {
+            bytes: at.view.doc.text.bytes()
+            table: lsp_line_table_bytes(bytes)
+            if lsp_clamped_offset_bytes(table, bytes, req_range.start) == .Val(s) {
+                if lsp_clamped_offset_bytes(table, bytes, req_range.end) == .Val(e) {
+                    if s < e -> target_span = Val(Span{start: s, end: e})
+                }
+            }
+        }
+    }
+    if target_span == None {
+        target_span = lsp_footprint_block_header_at(doc_module, at.offset)
+    }
+    span: target_span ?? return None
+    footprint: semindex_block_footprint(at.view.checked.modules, at.view.checked.index, module_path, span) ?? return None
+    if footprint.entries.len() == 0 -> return None
+    Val(lsp_footprint_format_markdown(footprint))
+}
+
+// Code lenses for compound blocks inside checked functions showing their exact
+// inferred footprint (`Footprint: reads ... | writes ... | takes ...`).
+lsp_footprint_code_lenses: fn(view: LSPView, doc_module: JetDriverDocModule) -> [String] {
+    ^lenses: [String]{}
+    ^seen_lines: [Int:Bool]{}
+    bytes: view.doc.text.bytes()
+    loop fn_body in doc_module.functions {
+        if fn_body.synthetic -> next
+        ^blocks: [Span]{}
+        lsp_footprint_collect_blocks(fn_body.tree, fn_body.body, blocks)
+        loop full in blocks {
+            header_line: lsp_footprint_line_bounds(bytes, full.start)
+            if seen_lines.get(header_line.start) == Val(true) -> next
+            footprint: semindex_block_footprint(view.checked.modules, view.checked.index, doc_module.path, full) ?? next
+            if footprint.entries.len() == 0 -> next
+            seen_lines[header_line.start] = true
+            title: "Footprint: {semindex_block_footprint_summary(footprint)}"
+            range: lsp_range_json(lsp_byte_span_to_range(view.doc.text, header_line))
+            lenses.push("{{\"range\":{range},\"command\":{{\"title\":{foundation_json_quote(title)},\"command\":\"\"}}}}")
+        }
+    }
+    lenses
+}
+
+// Whether `stmts` contain a `Break`, `Continue`, or `BreakValue` outside any
+// nested loop inside `stmts`.
+lsp_extract_has_escaping_loop_jump: fn(tree: BodyTree, stmts: [Int]) -> Bool Never! {
+    loop idx in stmts {
+        stmt: body_stmt(tree, idx)
+        if stmt == {
+            .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) -> return true
+            .If(_, then_body, else_body, _, _) -> {
+                if lsp_extract_has_escaping_loop_jump(tree, then_body) -> return true
+                if else_body == .Val(eb) && lsp_extract_has_escaping_loop_jump(tree, eb) -> return true
+            }
+            .Match(_, arms, _, _) -> {
+                loop arm in arms {
+                    if lsp_extract_has_escaping_loop_jump(tree, arm.body) -> return true
+                }
+            }
+            .EnumMatch(_, arms, else_body, _, _) -> {
+                loop arm in arms {
+                    if lsp_extract_has_escaping_loop_jump(tree, arm.body) -> return true
+                }
+                if else_body == .Val(eb) && lsp_extract_has_escaping_loop_jump(tree, eb) -> return true
+            }
+            .RangeSwitch(_, arms, else_body, _) -> {
+                loop arm in arms {
+                    if lsp_extract_has_escaping_loop_jump(tree, arm.body) -> return true
+                }
+                if lsp_extract_has_escaping_loop_jump(tree, else_body) -> return true
+            }
+            .MixedSwitch(_, _, arms, else_body, _) -> {
+                loop arm in arms {
+                    if lsp_extract_has_escaping_loop_jump(tree, arm.body) -> return true
+                }
+                if else_body == .Val(eb) && lsp_extract_has_escaping_loop_jump(tree, eb) -> return true
+            }
+            .Region(body, _) | .Unsafe(_, body) | .UnsafeBlock(_, body, _) | .Inline(body, _) | .DebugOnly(body, _) | .DeepCheck(body, _) | .ContractScope(_, body, _, _, _) | .TaskGroup(_, _, body, _) | .SentryPolicy(_, body, _) | .Impure(body, _) | .Layout(_, _, body, _) | .ContextBlock(_, body, _) | .Live(body, _) | .Shield(body, _) | .Defer(body, _) | .ScopeMember(_, body, _) | .Transact(_, _, _, body, _) -> {
+                if lsp_extract_has_escaping_loop_jump(tree, body) -> return true
+            }
+            .Loop(_, _, _) | .While(_, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .ForRange(_, _, _, _, _, _, _, _, _) | .Range(_, _, _, _, _, _, _, _, _, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, _, _) | .Contract(_) | .Let(_, _, _, _, _, _) | .RefutableBind(_, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .ExprStmt(_, _) | .Return(_, _) | .DeferClose(_, _, _) | .Reactive(_, _) | .GCEdit(_, _, _, _, _, _, _) -> {}
+        }
+    }
+    false
+}
+
+// Whether any statement in `stmts` contains a `Return`.
+lsp_extract_contains_return: fn(tree: BodyTree, stmts: [Int]) -> Bool Never! {
+    loop idx in stmts {
+        stmt: body_stmt(tree, idx)
+        if stmt == {
+            .Return(_, _) -> return true
+            .If(_, then_body, else_body, _, _) -> {
+                if lsp_extract_contains_return(tree, then_body) -> return true
+                if else_body == .Val(eb) && lsp_extract_contains_return(tree, eb) -> return true
+            }
+            .Loop(_, body, _) | .While(_, _, body, _) | .CountedLoop(_, _, _, _, _, body, _) | .ForRange(_, _, _, _, _, _, body, _, _) | .Range(_, _, _, _, _, _, _, _, body, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, body, _) | .Region(body, _) | .Unsafe(_, body) | .UnsafeBlock(_, body, _) | .Inline(body, _) | .DebugOnly(body, _) | .DeepCheck(body, _) | .ContractScope(_, body, _, _, _) | .TaskGroup(_, _, body, _) | .SentryPolicy(_, body, _) | .Impure(body, _) | .Layout(_, _, body, _) | .ContextBlock(_, body, _) | .Live(body, _) | .Shield(body, _) | .Defer(body, _) | .ScopeMember(_, body, _) | .Transact(_, _, _, body, _) -> {
+                if lsp_extract_contains_return(tree, body) -> return true
+            }
+            .Match(_, arms, _, _) -> {
+                loop arm in arms {
+                    if lsp_extract_contains_return(tree, arm.body) -> return true
+                }
+            }
+            .EnumMatch(_, arms, else_body, _, _) -> {
+                loop arm in arms {
+                    if lsp_extract_contains_return(tree, arm.body) -> return true
+                }
+                if else_body == .Val(eb) && lsp_extract_contains_return(tree, eb) -> return true
+            }
+            .RangeSwitch(_, arms, else_body, _) -> {
+                loop arm in arms {
+                    if lsp_extract_contains_return(tree, arm.body) -> return true
+                }
+                if lsp_extract_contains_return(tree, else_body) -> return true
+            }
+            .MixedSwitch(_, _, arms, else_body, _) -> {
+                loop arm in arms {
+                    if lsp_extract_contains_return(tree, arm.body) -> return true
+                }
+                if else_body == .Val(eb) && lsp_extract_contains_return(tree, eb) -> return true
+            }
+            .Contract(_) | .Let(_, _, _, _, _, _) | .RefutableBind(_, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .ExprStmt(_, _) | .DeferClose(_, _, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) | .Reactive(_, _) | .GCEdit(_, _, _, _, _, _, _) -> {}
+        }
+    }
+    false
+}
+
+// Whether any local declared directly by `selected` is referenced in `fn_body`
+// after byte offset `after_end`.
+lsp_extract_has_escaping_local: fn(fn_body: FnBody, selected: [Int], after_end: Int) -> Bool Never! {
+    ^declared_names: [String:Bool]{}
+    loop idx in selected {
+        stmt: body_stmt(fn_body.tree, idx)
+        if stmt == {
+            .Let(local, _, _, _, _, _) -> {
+                if !local.generated -> declared_names[local.name] = true
+            }
+            .TupleDestructure(_, _, _, binds, _) | .StructDestructure(_, _, _, binds, _) -> {
+                loop bind in binds -> declared_names[bind.local.name] = true
+            }
+            .ListDestructure(_, _, _, _, elems, _) -> {
+                loop elem in elems -> declared_names[elem.name] = true
+            }
+            .Contract(_) | .ContractScope(_, _, _, _, _) | .RefutableBind(_, _, _, _) | .Assign(_, _, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .ForRange(_, _, _, _, _, _, _, _, _) | .Range(_, _, _, _, _, _, _, _, _, _) | .ExprStmt(_, _) | .Return(_, _) | .TaskGroup(_, _, _, _) | .DeferClose(_, _, _) | .If(_, _, _, _, _) | .Loop(_, _, _) | .While(_, _, _, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) | .Match(_, _, _, _) | .EnumMatch(_, _, _, _, _) | .RangeSwitch(_, _, _, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, _, _) | .Inline(_, _) | .DebugOnly(_, _) | .DeepCheck(_, _) | .MixedSwitch(_, _, _, _, _) | .Unsafe(_, _) | .UnsafeBlock(_, _, _) | .SentryPolicy(_, _, _) | .Impure(_, _) | .Reactive(_, _) | .Region(_, _) | .Layout(_, _, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .Shield(_, _) | .Defer(_, _) | .ScopeMember(_, _, _) | .Transact(_, _, _, _, _) | .GCEdit(_, _, _, _, _, _, _) -> {}
+        }
+    }
+    if declared_names.len() == 0 -> return false
+    loop node in fn_body.tree.nodes {
+        if node.span.start < after_end -> next
+        if node.kind == .Local(local) && !local.generated {
+            if declared_names.get(local.name) == Val(true) -> return true
+        }
+    }
+    false
+}
+
+// Find the module-level line start immediately before the top-level item that
+// contains `fn_span`.
+lsp_extract_insert_offset: fn(doc_module: JetDriverDocModule, fn_span: Span) -> Int Never! {
+    bytes: doc_module.source.bytes()
+    ^anchor: fn_span.start
+    loop item in doc_module.items {
+        item_start: if item == {
+            .Func(f) -> f.span.start
+            .Struct(s) -> s.span.start
+            .Enum(e) -> e.span.start
+            .Impl(i) -> i.span.start
+            .Test(t) -> t.span.start
+            .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> -1
+        }
+        item_end: if item == {
+            .Func(f) -> f.span.end
+            .Struct(s) -> s.span.end
+            .Enum(e) -> e.span.end
+            .Impl(i) -> i.span.end
+            .Test(t) -> t.span.end
+            .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> -1
+        }
+        if item_start >= 0 && item_start <= fn_span.start && fn_span.start <= item_end {
+            anchor = item_start
+            break
+        }
+    }
+    lsp_footprint_line_bounds(bytes, anchor).start
+}
+
+// Pick a fresh module-private helper name `_extracted` (or `_extracted_N`).
+lsp_extract_helper_name: fn(source: String) -> String Never! {
+    if !source.contains("_extracted") -> return "_extracted"
+    ^n: 1
+    loop n < 100 {
+        candidate: "_extracted_{n}"
+        if !source.contains(candidate) -> return candidate
+        n += 1
+    }
+    "_extracted_fn"
+}
+
+// Compute the leading spaces of `line`.
+lsp_extract_indent: fn(line: String) -> String Never! {
+    bytes: line.bytes()
+    ^i: 0
+    loop i < bytes.len() && (bytes[i] == (U8{32}) || bytes[i] == (U8{9})) -> i += 1
+    foundation_byte_text(bytes, 0, i)
+}
+
+// Re-indent selected lines to 4-space top-level function body indentation.
+// When `strip_final_return` is true, strips a redundant `return ` prefix on
+// the last non-blank line so the extracted function compiles warning-free.
+lsp_extract_reindent_body: fn(raw: String, strip_final_return: Bool{false}) -> String Never! {
+    lines: raw.split("\n").to_list()
+    ^min_indent: -1
+    ^last_non_blank: -1
+    loop (idx, line) in lines {
+        if line.trim() == "" -> next
+        last_non_blank = idx
+        ind: lsp_extract_indent(line).count_bytes()
+        if min_indent < 0 || ind < min_indent -> min_indent = ind
+    }
+    if min_indent < 0 -> min_indent = 0
+    ^out: [String]{}
+    loop (idx, line) in lines {
+        if line.trim() == "" {
+            out.push("")
+            next
+        }
+        trimmed: if line.count_bytes() >= min_indent -> line.slice(min_indent..<line.count_bytes()) else -> line.trim_start()
+        final_line: if strip_final_return && idx == last_non_blank && trimmed.starts_with("return ") -> trimmed.slice(7..<trimmed.count_bytes()) else -> trimmed
+        out.push("    {final_line}")
+    }
+    out.join("\n")
+}
+
+// Format a checked return type as a clean Jet function signature suffix
+// (omitting redundant `Never!` and using unit-fallible ` Err!` without `->`).
+lsp_extract_return_suffix: fn(ret_ty: Type) -> String Never! {
+    if ret_ty == .Result(ok, err) {
+        is_unit: ok == (Type.Named{name: "Unit"})
+        is_never: err == (Type.Named{name: "Never"})
+        if is_never {
+            if is_unit -> return ""
+            return " -> {semindex_footprint_display_type(ok)}"
+        }
+        if is_unit -> return " {semindex_footprint_display_type(err)}!"
+        return " -> {semindex_footprint_display_type(ret_ty)}"
+    }
+    if ret_ty == (Type.Named{name: "Unit"}) -> return ""
+    " -> {semindex_footprint_display_type(ret_ty)}"
+}
+
+// `Extract function` code action (`refactor.extract`): turns the selected
+// checked block or statement range into a module-local function whose
+// parameters carry the exact inferred footprint (`x: T`, `x: ^T`, `x: ^^T`).
+lsp_extract_function_action: fn(view: LSPView, start: Int, end: Int) -> LSPCodeAction? {
+    if start >= end -> return None
+    module_path: view.module_path ?? return None
+    doc_idx: lsp_module_index(view.checked, module_path) ?? return None
+    doc_module: view.checked.modules[doc_idx]
+    range: Span{start: start, end: end}
+    fn_idx: semindex_footprint_find_function(doc_module.functions, range) ?? return None
+    fn_body: doc_module.functions[fn_idx]
+    ^selected: [Int]{}
+    semindex_footprint_select_stmts(fn_body.tree, fn_body.body, range, selected)
+    if selected.len() == 0 -> return None
+    if lsp_extract_has_escaping_loop_jump(fn_body.tree, selected) -> return None
+    // Check return shape: either no `return` at all, or a single final `return <value>`.
+    ^returns_value: false
+    last_stmt: body_stmt(fn_body.tree, selected[selected.len() - 1])
+    ^earlier: [Int]{}
+    loop i in 0..<selected.len() - 1 -> earlier.push(selected[i])
+    if lsp_extract_contains_return(fn_body.tree, earlier) -> return None
+    if {
+        last_stmt == .Return(val_opt, _) -> {
+            if val_opt == None || fn_body.ret == None -> return None
+            returns_value = true
+        }
+        lsp_extract_contains_return(fn_body.tree, [Int]{selected[selected.len() - 1]}) -> return None
+        else -> {}
+    }
+    footprint: semindex_block_footprint(view.checked.modules, view.checked.index, module_path, range) ?? return None
+    if lsp_extract_has_escaping_local(fn_body, selected, footprint.span.end) -> return None
+    params: semindex_block_footprint_params(footprint)
+    // Skip extracting blocks that directly require `self` as a standalone param.
+    loop param in params {
+        if param.name == "self" -> return None
+    }
+    bytes: view.doc.text.bytes()
+    // Align replacement range to full selected lines covering `footprint.span`.
+    first_line: lsp_footprint_line_bounds(bytes, footprint.span.start)
+    last_line: lsp_footprint_line_bounds(bytes, if footprint.span.end > footprint.span.start -> footprint.span.end - 1 else -> footprint.span.end)
+    replace_span: Span{start: first_line.start, end: last_line.end}
+    raw_block: foundation_byte_text(bytes, replace_span.start, replace_span.end)
+    if raw_block.trim() == "" -> return None
+    // Determine indentation of the first non-blank line in the selection.
+    ^base_indent: ""
+    loop line in raw_block.split("\n").to_list() {
+        if line.trim() != "" {
+            base_indent = lsp_extract_indent(line)
+            break
+        }
+    }
+    helper_name: lsp_extract_helper_name(view.doc.text)
+    ^param_decls: [String]{}
+    ^call_args: [String]{}
+    loop param in params {
+        sigil: semindex_footprint_access_sigil(param.access)
+        ty_text: semindex_footprint_display_type(param.ty)
+        param_decls.push("{param.name}: {sigil}{ty_text}")
+        call_args.push("{sigil}{param.name}")
+    }
+    ^ret_suffix: ""
+    if returns_value {
+        if fn_body.ret == .Val(ret_ty) {
+            ret_suffix = lsp_extract_return_suffix(ret_ty)
+        }
+    }
+    body_text: lsp_extract_reindent_body(raw_block, strip_final_return: returns_value)
+    helper_def: "{helper_name}: fn({param_decls.join(", ")}){ret_suffix} {{\n{body_text}\n}}\n\n"
+    call_prefix: if returns_value -> "return " else -> ""
+    call_line: "{base_indent}{call_prefix}{helper_name}({call_args.join(", ")})"
+    insert_at: lsp_extract_insert_offset(doc_module, semindex_footprint_function_span(fn_body))
+    insert_edit: TextEdit{span: Span{start: insert_at, end: insert_at}, new_text: helper_def}
+    replace_edit: TextEdit{span: replace_span, new_text: call_line}
+    title: "Extract function ({semindex_block_footprint_summary(footprint)})"
+    Val(LSPCodeAction{
+        title: title,
+        kind: "refactor.extract",
+        preferred: false,
+        edits: [TextEdit]{insert_edit, replace_edit},
+    })
+}

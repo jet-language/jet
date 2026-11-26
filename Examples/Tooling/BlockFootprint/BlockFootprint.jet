@@ -1,0 +1,62 @@
+// Golden example for block footprint inspection (#7033):
+// `jet inspect footprint Examples/Tooling/BlockFootprint/BlockFootprint.jet:36-39`
+// reports the exact names and fields read, written, and taken by the block
+// below — including solved `^self.[hits]` receiver footprints — without any
+// extra syntax. JetLSP shows the same footprint in hover and code lenses and
+// offers `Extract function` (`refactor.extract`) whose generated parameters
+// carry that exact `x: T`, `x: ^T`, `x: ^^T` signature.
+
+Counter: struct {
+    hits: Int,
+    limit: Int,
+    label: String,
+
+    bump: fn(^self.[hits], delta: Int) {
+        self.hits += delta
+    }
+}
+
+archive: fn(note: ^^String) -> Int {
+    note.len()
+}
+
+// Helper matching the exact inferred footprint of lines 36-39:
+// reads `step` and `prefix`, writes `^counter` (`counter.hits`) and `^log`,
+// and takes `^^final_note`.
+_record_step: fn(counter: ^Counter, step: Int, log: ^[Int], final_note: ^^String, prefix: String) -> Int {
+    counter.bump(step)
+    log.push(counter.hits)
+    archived: archive(^^final_note)
+    archived + prefix.len()
+}
+
+process_batch: fn(counter: ^Counter, log: ^[Int], step: Int, header: String, final_note: ^^String) -> Int {
+    prefix: header.copy()
+    if counter.hits < counter.limit {
+        counter.bump(step)
+        log.push(counter.hits)
+        archived: archive(^^final_note)
+        return archived + prefix.len()
+    }
+    prefix.len()
+}
+
+run: fn() {
+    ^c1: Counter{hits: 0, limit: 5, label: "direct"}
+    ^log1: [Int]{}
+    note1: "done"
+    r1: process_batch(^c1, ^log1, 2, "ok", ^^note1)
+
+    ^c2: Counter{hits: 0, limit: 5, label: "extracted"}
+    ^log2: [Int]{}
+    note2: "done"
+    r2: _record_step(^c2, 2, ^log2, ^^note2, "ok")
+
+    assert_eq(r1, 6)
+    assert_eq(r2, 6)
+    assert_eq(c1.hits, 2)
+    assert_eq(c2.hits, 2)
+    assert_eq(log1.len(), 1)
+    assert_eq(log2.len(), 1)
+    print("block footprint ok: {c1.label}={r1} {c2.label}={r2} hits={c1.hits}")
+}
