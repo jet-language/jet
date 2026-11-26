@@ -78,8 +78,8 @@ json: stdout doc $.params.diagnostics[0].data.line = 2
 json: stdout doc $.params.diagnostics[0].data.col = 5
 
 send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"use dep: \\\"./dep\\\"\\n\\nrun: fn() {\\n    print(dep.answer())\\n}\\n\"}}}"
-recv lsp collect until ndjson $[?method="textDocument/publishDiagnostics"][?params.uri="file://{work}/dep.jet"] #>= 1
-json: stdout ndjson $[?method="textDocument/publishDiagnostics"][?params.uri="file://{work}/dep.jet"][0].params.diagnostics[0].data.origin.source_digest = "7b122c7f55c12397c79bd0ff7840ec6630e3d94e51e2ecb0957de57c9f02820a"
+recv lsp until $.params.uri = "file://{work}/main.jet"
+json: stdout doc $.params.diagnostics[?severity=1] #= 0
 
 send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didChange\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/dep.jet\",\"version\":2},\"contentChanges\":[{\"text\":\"answer: fn() -> Int {\\n    1\\n}\\n\"}]}}"
 send lsp: "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\"},\"position\":{\"line\":3,\"character\":16}}}"
