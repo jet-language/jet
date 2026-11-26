@@ -19,12 +19,12 @@ Pattern: distinct String
 impl Pattern.CheckedText {
     Error: TextError,
 
-    check: fn(text: String) -[]> TextError! {
-        if text == "" -> return Err(TextError.Empty)
-        return Ok()
+    check: fn(parts: [String]) -[]> Checked<[String], TextSlot> TextError! {
+        if parts.join("") == "" -> return Err(TextError.Empty)
+        Ok(Checked{shape: parts.copy(), slots: [TextSlot]{}})
     }
 
-    encode_hole: fn<T: Printable>(value: T) -[]> String { return "[{value}]" }
+    encode_hole: fn<T: Printable>(value: T, _slot: TextSlot) -[]> String { return "[{value}]" }
 }
 
 Query: distinct String
@@ -32,13 +32,14 @@ Query: distinct String
 impl Query.CheckedText {
     Error: TextError,
 
-    check: fn(text: String) -[]> TextError! {
+    check: fn(parts: [String]) -[]> Checked<[String], TextSlot> TextError! {
+        text: parts.join("")
         if text == "" -> return Err(TextError.Empty)
         if !text.contains("select") -> return Err(TextError.QueryShape)
-        return Ok()
+        Ok(Checked{shape: parts.copy(), slots: [TextSlot]{}})
     }
 
-    encode_hole: fn<T: Printable>(value: T) -[]> String { return "?" }
+    encode_hole: fn<T: Printable>(value: T, _slot: TextSlot) -[]> String { return "?" }
 }
 
 Selector: distinct String
@@ -46,13 +47,14 @@ Selector: distinct String
 impl Selector.CheckedText {
     Error: TextError,
 
-    check: fn(text: String) -[]> TextError! {
+    check: fn(parts: [String]) -[]> Checked<[String], TextSlot> TextError! {
+        text: parts.join("")
         if text == "" -> return Err(TextError.Empty)
         if !text.contains(".") -> return Err(TextError.SelectorShape)
-        return Ok()
+        Ok(Checked{shape: parts.copy(), slots: [TextSlot]{}})
     }
 
-    encode_hole: fn<T: Printable>(value: T) -[]> String { return "[{value}]" }
+    encode_hole: fn<T: Printable>(value: T, _slot: TextSlot) -[]> String { return "[{value}]" }
 }
 
 Identity: distinct String
@@ -60,11 +62,12 @@ Identity: distinct String
 impl Identity.CheckedText {
     Error: TextError,
 
-    check: fn(text: String) -[]> TextError! {
+    check: fn(parts: [String]) -[]> Checked<[String], TextSlot> TextError! {
+        text: parts.join("")
         if text == "" -> return Err(TextError.Empty)
         if !text.contains("@") -> return Err(TextError.IdentityShape)
-        return Ok()
+        Ok(Checked{shape: parts.copy(), slots: [TextSlot]{}})
     }
 
-    encode_hole: fn<T: Printable>(value: T) -[]> String { return "{value}" }
+    encode_hole: fn<T: Printable>(value: T, _slot: TextSlot) -[]> String { return "{value}" }
 }

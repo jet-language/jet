@@ -140,12 +140,14 @@ Sh: struct {
     // A checked `Sh{…}` literal: literal text splits on whitespace and each
     // hole's display text is one argv item.
     impl CheckedText {
-        Error: Never,
+        Error: ShLiteralError,
         Hole: String,
 
-        check: fn(_text: String) -[]> Never! { return Ok() }
+        check: fn(parts: [String]) -[]> Checked<[String], TextSlot> ShLiteralError! {
+            Ok(Checked{shape: parts.copy(), slots: loop _ in 1..<parts.len() -> TextSlot.Text})
+        }
 
-        encode_hole: fn<T: Printable>(value: T) -[]> String { "{value}" }
+        encode_hole: fn<T: Printable>(value: T, _slot: TextSlot) -[]> String { "{value}" }
 
         build: fn(parts: [String], holes: [String]) -[]> Sh {
             ^argv: [String]{}
@@ -157,6 +159,12 @@ Sh: struct {
             Sh{argv: argv}
         }
     }
+}
+
+// Why a checked Sh literal was rejected.
+#Error
+ShLiteralError: struct {
+    reason: String,
 }
 
 sh_split_into: fn(text: String, argv: ^[String]) Never! {

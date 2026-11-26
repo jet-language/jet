@@ -439,7 +439,6 @@ sema_owned_pure: fn(method: Func) -> Bool Never! {
 // `TextSlot` and the literal is the joined text. Unbound, `Hole`, `Slot` and
 // `Shape` read as `String`, `TextSlot` and `[String]`.
 sema_owned_check_checked_text: fn(methods: [Func], associated: [NamedType], distinct_base: Type?, owner_type: Type, span: Span, diagnostics: ^[Diagnostic]) -> Bool {
-    if sema_owned_checked_text_old(methods) -> return sema_owned_check_checked_text_old(methods, associated, distinct_base, owner_type, span, diagnostics)
     trait_name: "CheckedText"
     owner_name: sema_owned_owner_name(owner_type)
     errors: loop index in 0..<associated.len() if associated[index].name == "Error" -> index
@@ -583,128 +582,6 @@ sema_owned_check_checked_text: fn(methods: [Func], associated: [NamedType], dist
     loop method in methods {
         if method.name != "check" && method.name != "accepts" && method.name != "encode_hole" && method.name != "build" {
             diagnostics.push(sema_owned_mismatch(trait_name, method.name, "only `check`, `accepts`, `encode_hole` and `build`", method.name_span))
-        }
-    }
-    diagnostics.len() == count
-}
-
-// Whether `methods` write the checker of the contract before `Checked`,
-// `check: fn(text: String)`. Such an impl is held to that contract
-// (sema_owned_check_checked_text_old) and its literals take its lowering
-// (Constructors.jet), so a compiler can build Core heads of either
-// contract while they move to the current one.
-sema_owned_checked_text_old: fn(methods: [Func]) -> Bool Never! {
-    loop method in methods {
-        if method.name == "check" -> return sema_owned_plain_param(method, Type.String)
-    }
-    false
-}
-
-// `impl T.CheckedText` of the contract before `Checked`: one `type Error`,
-// the pure checker `check: fn(text: String) -[]> Error!` and the pure hole
-// encoder `encode_hole: fn<T: Printable>(value: T) -[]> Hole`. A type whose
-// holes stay values binds `type Hole` and declares the pure assembler
-// `build: fn(parts: [String], holes: [Hole]) -[]> T`; without `build` the
-// owner is a `distinct String`, every hole encodes to String and the literal
-// is the joined text.
-sema_owned_check_checked_text_old: fn(methods: [Func], associated: [NamedType], distinct_base: Type?, owner_type: Type, span: Span, diagnostics: ^[Diagnostic]) -> Bool {
-    trait_name: "CheckedText"
-    owner_name: sema_owned_owner_name(owner_type)
-    errors: loop index in 0..<associated.len() if associated[index].name == "Error" -> index
-    hole_bindings: loop index in 0..<associated.len() if associated[index].name == "Hole" -> index
-    builds: loop index in 0..<methods.len() if methods[index].name == "build" -> index
-    // The bound `Error` and `Hole` are read in place (sema_owned_binding_is);
-    // unbound, they read as `Error` and `String`.
-    error_name: if errors.len() > 0 -> type_name(associated[errors[0]].ty) else -> "Error"
-    hole_name: if hole_bindings.len() > 0 -> type_name(associated[hole_bindings[0]].ty) else -> type_name(Type.String)
-    check_expected: "`check: fn(text: String) -[]> {error_name}!`"
-    hole_expected: "`encode_hole: fn<T: Printable>(value: T) -[]> {hole_name}`"
-    build_expected: "`build: fn(parts: [String], holes: [{hole_name}]) -[]> {owner_name}`"
-    string_backed: if distinct_base == .Val(base) -> type_identity_equal(base, Type.String) else -> false
-    if !string_backed && builds.len() == 0 {
-        diagnostics.push(sema_owned_mismatch(trait_name, "check", "{check_expected} on a `distinct String` type, or a `build` method that assembles `{owner_name}`", span))
-        return false
-    }
-    count: diagnostics.len()
-    if errors.len() == 0 {
-        diagnostics.push(sema_owned_unbound(trait_name, [String]{"Error"}, span))
-    }
-    loop index in 1..<errors.len() {
-        diagnostics.push(sema_owned_mismatch(trait_name, "type Error", "one `type Error = …` binding", associated[errors[index]].span))
-    }
-    loop index in 1..<hole_bindings.len() {
-        diagnostics.push(sema_owned_mismatch(trait_name, "type Hole", "one `type Hole = …` binding", associated[hole_bindings[index]].span))
-    }
-    if hole_bindings.len() > 0 && builds.len() == 0 {
-        diagnostics.push(sema_owned_mismatch(trait_name, "type Hole", "a `build` method that receives the holes", associated[hole_bindings[0]].span))
-    }
-    loop binding in associated {
-        if binding.name != "Error" && binding.name != "Hole" {
-            diagnostics.push(sema_owned_mismatch(trait_name, "type {binding.name}", "only `type Error = …` and `type Hole = …`", binding.span))
-        }
-    }
-    checks: loop index in 0..<methods.len() if methods[index].name == "check" -> index
-    holes: loop index in 0..<methods.len() if methods[index].name == "encode_hole" -> index
-    if checks.len() == 0 {
-        diagnostics.push(sema_owned_missing(trait_name, [String]{"check"}, span))
-    }
-    if holes.len() == 0 {
-        diagnostics.push(sema_owned_missing(trait_name, [String]{"encode_hole"}, span))
-    }
-    loop index in 1..<checks.len() {
-        diagnostics.push(sema_owned_mismatch(trait_name, "check", check_expected, methods[checks[index]].name_span))
-    }
-    loop index in 1..<holes.len() {
-        diagnostics.push(sema_owned_mismatch(trait_name, "encode_hole", hole_expected, methods[holes[index]].name_span))
-    }
-    loop index in 1..<builds.len() {
-        diagnostics.push(sema_owned_mismatch(trait_name, "build", build_expected, methods[builds[index]].name_span))
-    }
-    if checks.len() > 0 {
-        check: methods[checks[0]]
-        ^check_ok: check.type_params.len() == 0 && sema_owned_plain_param(check, Type.String) && sema_owned_pure(check) && errors.len() > 0
-        if check_ok {
-            check_ok = false
-            if check.return_type == .Val(returned) {
-                if returned == .Result(ok, err) {
-                    check_ok = ok == (Type.Named{name: "Unit"}) && sema_owned_binding_is(associated, errors, Type.Named{name: "Error"}, err)
-                }
-            }
-        }
-        if !check_ok {
-            diagnostics.push(sema_owned_mismatch(trait_name, "check", check_expected, check.name_span))
-        }
-    }
-    if holes.len() > 0 {
-        hole: methods[holes[0]]
-        ^hole_ok: sema_owned_plain_param(hole, Type.Named{name: "T"}) && sema_owned_pure(hole) && hole.type_params.len() == 1
-        if hole_ok {
-            hole_ok = hole.type_params[0].name == "T" && hole.type_params[0].bounds == ([String]{"Printable"})
-        }
-        if hole_ok {
-            hole_ok = if hole.return_type == .Val(returned) -> sema_owned_binding_is(associated, hole_bindings, Type.String, returned) else -> false
-        }
-        if !hole_ok {
-            diagnostics.push(sema_owned_mismatch(trait_name, "encode_hole", hole_expected, hole.name_span))
-        }
-    }
-    if builds.len() > 0 {
-        build: methods[builds[0]]
-        ^build_ok: build.type_params.len() == 0 && sema_owned_pure(build) && build.params.len() == 2
-        if build_ok {
-            holes_param: if hole_bindings.len() > 0 -> sema_owned_list_param(build.params[1], associated[hole_bindings[0]].ty) else -> sema_owned_list_param(build.params[1], Type.String)
-            build_ok = sema_owned_list_param(build.params[0], Type.String) && holes_param
-        }
-        if build_ok {
-            build_ok = if build.return_type == .Val(returned) -> sema_owned_owner_name(returned) == owner_name else -> false
-        }
-        if !build_ok {
-            diagnostics.push(sema_owned_mismatch(trait_name, "build", build_expected, build.name_span))
-        }
-    }
-    loop method in methods {
-        if method.name != "check" && method.name != "encode_hole" && method.name != "build" {
-            diagnostics.push(sema_owned_mismatch(trait_name, method.name, "only `check`, `encode_hole` and `build`", method.name_span))
         }
     }
     diagnostics.len() == count

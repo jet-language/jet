@@ -172,14 +172,14 @@ URL: struct {
         Error: URLLiteralError,
         Hole: String,
 
-        check: fn(text: String) -[]> URLLiteralError! {
-            if url_literal_reason(text) == .Val(reason) {
+        check: fn(parts: [String]) -[]> Checked<[String], TextSlot> URLLiteralError! {
+            if url_literal_reason(parts) == .Val(reason) {
                 return Err(URLLiteralError{reason: reason})
             }
-            return Ok()
+            Ok(Checked{shape: parts.copy(), slots: loop _ in 1..<parts.len() -> TextSlot.Text})
         }
 
-        encode_hole: fn<T: Printable>(value: T) -[]> String { "{value}" }
+        encode_hole: fn<T: Printable>(value: T, _slot: TextSlot) -[]> String { "{value}" }
 
         build: fn(parts: [String], holes: [String]) -[]> URL { literal(parts, holes) }
     }
@@ -230,20 +230,10 @@ priv url_hole_marker: fn(literals: [String]) -> String Never! {
     marker
 }
 
-// Why the checked skeleton `text` (a `{}` at each hole) is no URL, or None.
-// Scheme, port and data-URL MIME holes are found structurally; the rest
-// parses with the URL grammar `literal` uses.
-priv url_literal_reason: fn(text: String) -> String? {
-    raw: text.bytes()
-    ^literals: [String]{}
-    ^start: 0
-    loop {
-        next_hole: find_text(text, "{{}}", start)
-        if next_hole < 0 -> break
-        literals.push(slice(raw, start, next_hole))
-        start = next_hole + 2
-    }
-    literals.push(slice(raw, start, raw.len()))
+// Why the checked literal pieces `literals` (a hole between each two) are no
+// URL, or None. Scheme, port and data-URL MIME holes are found structurally;
+// the rest parses with the URL grammar `literal` uses.
+priv url_literal_reason: fn(literals: [String]) -> String? {
     marker: url_hole_marker(literals)
     skeleton: unicode.trim(literals.join(marker))
     bytes: skeleton.bytes()

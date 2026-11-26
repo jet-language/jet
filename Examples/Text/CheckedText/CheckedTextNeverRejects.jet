@@ -1,6 +1,7 @@
 // A checked text type whose `Error` is `Never` accepts every body: its
-// `check` cannot fail, so nothing is run before the program, and `build`
-// alone gives the literal its value.
+// `check` cannot fail. It still runs once, before the program, to hand
+// `build` the literal's parts as its shape, and `build` alone gives the
+// literal its value.
 
 Words: struct {
     text: String,
@@ -9,12 +10,14 @@ Words: struct {
         Error: Never,
         Hole: String,
 
-        check: fn(_text: String) -[]> Never! { Ok() }
+        check: fn(parts: [String]) -[]> Checked<[String], TextSlot> Never! {
+            Ok(Checked{shape: parts.copy(), slots: loop _ in 1..<parts.len() -> TextSlot.Text})
+        }
 
-        encode_hole: fn<T: Printable>(value: T) -[]> String { "<{value}>" }
+        encode_hole: fn<T: Printable>(value: T, _slot: TextSlot) -[]> String { "<{value}>" }
 
-        build: fn(parts: [String], holes: [String]) -[]> Words {
-            Words{text: "{parts.join("|")} [{holes.join(",")}]"}
+        build: fn(shape: [String], holes: [String]) -[]> Words {
+            Words{text: "{shape.join("|")} [{holes.join(",")}]"}
         }
     }
 }

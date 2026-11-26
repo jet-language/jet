@@ -1195,15 +1195,15 @@ DateTime: struct {
         Error: TimeError,
         Hole: String,
 
-        check: fn(text: String) -[]> TimeError! {
-            if text.contains("{{}}") {
+        check: fn(parts: [String]) -[]> Checked<[String], TextSlot> TimeError! {
+            if parts.len() > 1 {
                 return Err(TimeError{reason: "a `DateTime` literal cannot contain interpolation"})
             }
-            _: parse_rfc3339(text)
-            return Ok()
+            _: parse_rfc3339(parts.join(""))
+            Ok(Checked{shape: parts.copy(), slots: [TextSlot]{}})
         }
 
-        encode_hole: fn<T: Printable>(value: T) -[]> String { "{value}" }
+        encode_hole: fn<T: Printable>(value: T, _slot: TextSlot) -[]> String { "{value}" }
 
         build: fn(parts: [String], _holes: [String]) -[]> DateTime {
             parse_rfc3339(parts.join("")) ?? panic("a checked DateTime literal became invalid")

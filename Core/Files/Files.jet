@@ -61,14 +61,16 @@ impl Path.CheckedText {
     Error: PathLiteralError,
     Hole: String,
 
-    check: fn(text: String) -[]> PathLiteralError! {
-        if text.bytes().contains(U8{0}) {
-            return Err(PathLiteralError{reason: "a Path cannot contain a NUL character"})
+    check: fn(parts: [String]) -[]> Checked<[String], TextSlot> PathLiteralError! {
+        loop part in parts {
+            if part.bytes().contains(U8{0}) {
+                return Err(PathLiteralError{reason: "a Path cannot contain a NUL character"})
+            }
         }
-        return Ok()
+        Ok(Checked{shape: parts.copy(), slots: loop _ in 1..<parts.len() -> TextSlot.Text})
     }
 
-    encode_hole: fn<T: Printable>(value: T) -[]> String { "{value}" }
+    encode_hole: fn<T: Printable>(value: T, _slot: TextSlot) -[]> String { "{value}" }
 
     build: fn(parts: [String], holes: [String]) -[]> Path {
         ^text: parts[0].copy()

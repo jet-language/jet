@@ -8,16 +8,16 @@ Token: distinct String
 impl Token.CheckedText {
     Error: TokenError,
 
-    check: fn(text: String) TokenError! {
+    check: fn(parts: [String]) -> Checked<[String], TextSlot> TokenError! {
         print("checking")
-        if text == "" -> return Err(TokenError.Empty)
-        return Ok()
+        if parts.join("") == "" -> return Err(TokenError.Empty)
+        return Ok(Checked{shape: parts.copy(), slots: [TextSlot]{}})
     }
 
-    encode_hole: fn<T: Printable>(value: T) -> String { return "[{value}]" }
+    encode_hole: fn<T: Printable>(value: T, _slot: TextSlot) -> String { return "[{value}]" }
 }
 
 run: fn() {
-    Token.check("abc") ?? panic("rejected")
+    _: Token.check([String]{"abc"}) ?? panic("rejected")
     print("checked")
 }

@@ -1884,9 +1884,6 @@ sema_expression_checked_text_static_method_call: fn(receiver: Expr, method_name:
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     direct: sema_call_direct_target_from_registration(function, check.program.registration_graph, check.environment.module_identity, check.environment.package_identity, check.environment.generic_params, type_args, method_span, check.diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    // A head of the contract before `Checked` checks the text itself
-    // (sema_owned_checked_text_old).
-    old: sema_owned_plain_param(target.check.declaration, Type.String)
     ^call_args: args
     if method_name == "from" {
         if args.len() != 1 {
@@ -1895,7 +1892,7 @@ sema_expression_checked_text_static_method_call: fn(receiver: Expr, method_name:
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
         // `from(text)` is `check([text])`: the whole text is the one part.
-        if !old -> call_args = [CallArg]{sema_expression_checked_text_parts_arg([Expr]{args[0].expr.copy()}, args[0].span)}
+        call_args = [CallArg]{sema_expression_checked_text_parts_arg([Expr]{args[0].expr.copy()}, args[0].span)}
     }
     ^call: Call{
         name: "{type_name}.{method_name}",
@@ -1914,11 +1911,7 @@ sema_expression_checked_text_static_method_call: fn(receiver: Expr, method_name:
         check.diagnostics.push(sema_error("E0112", method_span, "a checked text hole encoder must return String", "every interpolation is passed through the type's pure `encode_hole` method before it reaches the checker", "make `encode_hole` return a String"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    if old && (method_name == "check" || method_name == "from") && !sema_expression_checked_text_unit_result(checked.value.ty) {
-        check.diagnostics.push(sema_error("E0907", method_span, "`{type_name}.check` must return `Result<Unit, Error>`", "the canonical CheckedText contract reports rejection through its error result", "match the pure CheckedText.check signature"))
-        return SemaMethodSpecialCheck{handled: true, value: None}
-    }
-    if !old && (method_name == "check" || method_name == "from") && sema_expression_checked_text_result_types(checked.value.ty) == None {
+    if (method_name == "check" || method_name == "from") && sema_expression_checked_text_result_types(checked.value.ty) == None {
         check.diagnostics.push(sema_error("E0907", method_span, "`{type_name}.check` must return `Checked<Shape, Slot>` with the type's `Error`", "the canonical CheckedText contract returns what it learned from the parts and reports rejection through its error result", "match the pure CheckedText.check signature"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
@@ -2062,15 +2055,11 @@ sema_expression_checked_text_literal: fn(head: Type, source_head: Type?, body: T
     }
     pieces.push(current)
     body_span: expr_span(body_value)
-    // A head of the contract before `Checked` (sema_owned_checked_text_old)
-    // checks the complete text: a type with `build` sees its pieces joined
-    // by `{}`, one per hole, and a text kind each hole encoded.
-    old: sema_owned_plain_param(target.check.declaration, Type.String)
     // A type with `build` checks the pieces, since its holes stay values. A
     // text kind checks its complete text, each hole encoded in the one
     // `TextSlot`, as its one part.
     ^check_parts: [Expr]{}
-    if building && !old {
+    if building {
         loop piece in pieces -> check_parts.push(sema_expression_checked_text_piece(piece, body_span))
     } else {
         ^encoded_parts: [StrPart]{}
@@ -2079,17 +2068,13 @@ sema_expression_checked_text_literal: fn(head: Type, source_head: Type?, body: T
                 .Lit(_) -> { encoded_parts.push(part) }
                 .Byte(value) -> { encoded_parts.push(StrPart.Lit{text: sema_expr_byte_text(value)}) }
                 .Interp(value, _) -> {
-                    encoded_parts.push(if {
-                        building -> StrPart.Lit{text: "{{}}"}
-                        old -> StrPart.Interp{expr: sema_expression_checked_text_encoder_old(type_name, value), format: None}
-                        else -> StrPart.Interp{expr: sema_expression_checked_text_encoder(type_name, value, sema_expression_checked_text_text_slot(expr_span(value))), format: None}
-                    })
+                    encoded_parts.push(StrPart.Interp{expr: sema_expression_checked_text_encoder(type_name, value, sema_expression_checked_text_text_slot(expr_span(value))), format: None})
                 }
             }
         }
         check_parts.push(Expr.Str{parts: encoded_parts, span: body_span, id: AST_NODE_GENERATED})
     }
-    check_call: if old -> sema_expression_checked_text_check_call_old(type_name, check_parts[0], span) else -> sema_expression_checked_text_check_call(type_name, check_parts, span)
+    check_call: sema_expression_checked_text_check_call(type_name, check_parts, span)
     runtime_owner: sema_expr_runtime_body_owner(check)
     ^fact_start: check.context.call_facts.len()
     ^reference_start: check.context.name_references.len()
@@ -2099,7 +2084,7 @@ sema_expression_checked_text_literal: fn(head: Type, source_head: Type?, body: T
     ^unresolved_hardware_start: check.context.hardware_use.unresolved_references.len()
     // A built literal's check runs only while building: in run-time code its
     // pieces are constant, and the shape it returns lands as a value.
-    staged: building && runtime_owner != None && !old
+    staged: building && runtime_owner != None
     if staged -> check.scopes.comptime_execution_depth += 1
     // The literal consumes the checker's Result itself: the call root keeps
     // its carrier instead of propagating into the enclosing function.
@@ -2122,7 +2107,7 @@ sema_expression_checked_text_literal: fn(head: Type, source_head: Type?, body: T
     // In run-time code the check is staged through the body comptime
     // evaluator, as a `#run` value is, and what it returns replaces the
     // check when the body is checked again.
-    if runtime_owner == .Val(owner_key) && !old {
+    if runtime_owner == .Val(owner_key) {
         if sema_stmt_comptime_site_refused(check, fact_start) -> return SemaExpressionCheckedTextLiteral{handled: true, value: None}
         landed: sema_comptime_body_value_find(check.context, check.environment.module_identity, owner_key, span, span) ?? {
             _: sema_comptime_body_capture(check.context, check.environment.*, check.program.*, check.scopes, "{type_name} checked text literal", check_call, checked.ty, span, span)
@@ -2203,7 +2188,6 @@ sema_expression_checked_text_literal: fn(head: Type, source_head: Type?, body: T
         )
     }
     if !building -> return sema_expression_checked_text_distinct(head, checked, span, expected, check)
-    if old -> return SemaExpressionCheckedTextLiteral{handled: true, value: sema_expression_checked_text_build_old(type_name, parts, span, expected, check)}
     SemaExpressionCheckedTextLiteral{handled: true, value: sema_expression_checked_text_inline(type_name, check_call, holes, span, expected, check)}
 }
 
@@ -2311,16 +2295,13 @@ sema_expression_checked_text_distinct: fn(head: Type, checked: TExpr, span: Span
     SemaExpressionCheckedTextLiteral{handled: true, value: sema_expr_expected(result, expected, check.environment.*, check.program.*, check.diagnostics)}
 }
 
-// The one part of the checked `Type.check([text])`, or the text of a head
-// of the contract before `Checked`'s `Type.check(text)`.
+// The one part of the checked `Type.check([text])`.
 sema_expression_checked_text_part: fn(checked: TExpr) -> TExpr? {
     if checked.kind == .Call(_, _, args) {
         if args.len() == 1 {
             if args[0].value.kind == .List(values, _) {
                 if values.len() == 1 -> return Val(values[0])
-                return None
             }
-            return Val(args[0].value)
         }
     }
     None
@@ -2344,14 +2325,7 @@ sema_expression_checked_text_split: fn(checked: TExpr, source: TExpr, span: Span
                     checker_args[0].value = sema_tree_node(args[0].value.ty, TExprKind.List{values: [TExpr]{copied}, trait_coercion: trait_coercion}, span)
                     return Val(SemaExpressionCheckedTextSplit{text: values[0], checker: sema_tree_node(checked.ty, TExprKind.Call{callee: callee, type_args: type_args, args: checker_args}, span)})
                 }
-                return None
             }
-            // A head of the contract before `Checked` checks the bound text
-            // itself.
-            ^checker_args: args
-            // copy: `source` is a read parameter; the checker call owns its argument
-            checker_args[0].value = source.copy()
-            return Val(SemaExpressionCheckedTextSplit{text: args[0].value, checker: sema_tree_node(checked.ty, TExprKind.Call{callee: callee, type_args: type_args, args: checker_args}, span)})
         }
     }
     None
@@ -2445,26 +2419,6 @@ sema_expression_checked_text_check_call: fn(type_name: String, parts: [Expr], sp
     }
 }
 
-// `Type.check(text)` of a head of the contract before `Checked`.
-sema_expression_checked_text_check_call_old: fn(type_name: String, text: Expr, span: Span) -> Expr Never! {
-    Expr.MethodCall{
-        receiver: Expr.Ident{name: type_name, span: span, id: AST_NODE_GENERATED},
-        method: "check",
-        method_span: span,
-        owner_type_args: [Type]{},
-        type_args: [Type]{},
-        args: [CallArg]{sema_expression_checked_text_arg(text, expr_span(text))},
-        id: AST_NODE_GENERATED,
-    }
-}
-
-// Whether `ty` is the `Unit Error!` a check of the contract before
-// `Checked` returns.
-sema_expression_checked_text_unit_result: fn(ty: Type) -> Bool Never! {
-    if ty == .Result(ok, _) -> return ok == (Type.Named{name: "Unit"})
-    false
-}
-
 // The parts list `[part, …]` as one read argument.
 sema_expression_checked_text_parts_arg: fn(parts: [Expr], span: Span) -> CallArg Never! {
     sema_expression_checked_text_arg(Expr.ListLit{elements: parts.copy(), span: span, id: AST_NODE_GENERATED}, span)
@@ -2498,21 +2452,6 @@ sema_expression_checked_text_encoder: fn(type_name: String, value: Expr, slot: E
     }
 }
 
-// `Type.encode_hole(value)` for one hole of a head of the contract before
-// `Checked`.
-sema_expression_checked_text_encoder_old: fn(type_name: String, value: Expr) -> Expr Never! {
-    span: expr_span(value)
-    Expr.MethodCall{
-        receiver: Expr.Ident{name: type_name, span: span, id: AST_NODE_GENERATED},
-        method: "encode_hole",
-        method_span: span,
-        owner_type_args: [Type]{},
-        type_args: [Type]{},
-        args: [CallArg]{sema_expression_checked_text_arg(value, span)},
-        id: AST_NODE_GENERATED,
-    }
-}
-
 // `call ?? panic(message)`: a built checked text literal is a value and adds
 // no failure route to the function it is in. `encode_hole` and `build` are
 // written `-[]> T`, the default failure route, and `check` has already
@@ -2538,38 +2477,6 @@ sema_expression_checked_text_build: fn(type_name: String, shape: Expr, slots: [E
         owner_type_args: [Type]{},
         type_args: [Type]{},
         args: [CallArg]{sema_expression_checked_text_arg(shape, span), sema_expression_checked_text_arg(Expr.ListLit{elements: hole_exprs, span: span, id: AST_NODE_GENERATED}, span)},
-        id: AST_NODE_GENERATED,
-    }
-    built: sema_expression_checked_text_stops(build_call, "{type_name}.build failed on this {type_name} literal", span)
-    sema_check_expression(built, expected, check)
-}
-
-// A literal of a head of the contract before `Checked` with `build` is
-// `Type.build(parts, holes)`: the literal pieces around the holes, and each
-// hole as `Type.encode_hole(value)`.
-sema_expression_checked_text_build_old: fn(type_name: String, parts: [StrPart], span: Span, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
-    ^literal_exprs: [Expr]{}
-    ^hole_exprs: [Expr]{}
-    ^current: ""
-    loop part in parts {
-        if part == {
-            .Lit(text) -> { current = "{current}{text}" }
-            .Byte(value) -> { current = "{current}{sema_expr_byte_text(value)}" }
-            .Interp(value, _) -> {
-                literal_exprs.push(sema_expression_checked_text_piece(current, span))
-                current = ""
-                hole_exprs.push(sema_expression_checked_text_stops(sema_expression_checked_text_encoder_old(type_name, value), "{type_name}.encode_hole failed on a hole of this {type_name} literal", expr_span(value)))
-            }
-        }
-    }
-    literal_exprs.push(sema_expression_checked_text_piece(current, span))
-    build_call: Expr.MethodCall{
-        receiver: Expr.Ident{name: type_name, span: span, id: AST_NODE_GENERATED},
-        method: "build",
-        method_span: span,
-        owner_type_args: [Type]{},
-        type_args: [Type]{},
-        args: [CallArg]{sema_expression_checked_text_arg(Expr.ListLit{elements: literal_exprs, span: span, id: AST_NODE_GENERATED}, span), sema_expression_checked_text_arg(Expr.ListLit{elements: hole_exprs, span: span, id: AST_NODE_GENERATED}, span)},
         id: AST_NODE_GENERATED,
     }
     built: sema_expression_checked_text_stops(build_call, "{type_name}.build failed on this {type_name} literal", span)

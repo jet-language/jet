@@ -6864,14 +6864,14 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Core",
       "file": "Core/Process/Process.jet",
-      "line": 239,
+      "line": 247,
       "column": 5,
       "reason": "transfer a fully initialized Jet process plan into the temporary native ProcessSpec carrier; paired environment columns have equal length"
     },
     {
       "package": "Core",
       "file": "Core/Process/Process.jet",
-      "line": 345,
+      "line": 353,
       "column": 1,
       "reason": "process exit_unmapped: the caller reports a Jet defect and owns the 101 defect status"
     },
@@ -7508,14 +7508,14 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Examples",
       "file": "Examples/Text/CheckedText/CheckedTextRuntimeHole.jet",
-      "line": 25,
+      "line": 26,
       "column": 5,
       "reason": "checked text example output"
     },
     {
       "package": "Examples",
       "file": "Examples/Text/CheckedText/CheckedTextRuntimeHoleStop.jet",
-      "line": 24,
+      "line": 25,
       "column": 5,
       "reason": "checked text example output"
     },
@@ -12727,8 +12727,8 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Core | Core/Net/SSL/TLS.jet | 4625:5 | "test keys and nonces, each used for this run only" |
 | Core | Core/Net/SSL/TLS.jet | 4628:1 | "`r` draws test keys and nonces, each used for this run only" |
 | Core | Core/Net/SSL/TLS.jet | 4658:5 | "test keys and nonces, each used for this run only" |
-| Core | Core/Process/Process.jet | 239:5 | "transfer a fully initialized Jet process plan into the temporary native ProcessSpec carrier; paired environment columns have equal length" |
-| Core | Core/Process/Process.jet | 345:1 | "process exit_unmapped: the caller reports a Jet defect and owns the 101 defect status" |
+| Core | Core/Process/Process.jet | 247:5 | "transfer a fully initialized Jet process plan into the temporary native ProcessSpec carrier; paired environment columns have equal length" |
+| Core | Core/Process/Process.jet | 353:1 | "process exit_unmapped: the caller reports a Jet defect and owns the 101 defect status" |
 | Core | Core/Sys/Sys.jet | 1020:1 | "posix umask: the caller owns the process file-creation mask and restores it when other code relies on it" |
 | Core | Core/Sys/Sys.jet | 1223:1 | "posix set_scheduling: the caller owns the CPU share of the process it changes" |
 | Core | Core/Sys/Sys.jet | 1354:1 | "posix set_wall_clock: the caller owns the machine's wall clock, which every process reads" |
@@ -12819,8 +12819,8 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Examples | Examples/Systems/Process/SystemPrivilegedEntry.jet | 10:5 | "run only inside a disposable user namespace with a dedicated test identity" |
 | Examples | Examples/Systems/Process/SystemProjection.jet | 21:5 | "the clock file was created above in this test-owned directory" |
 | Examples | Examples/Systems/Process/SystemProjection.jet | 27:5 | "fork and reap both children before returning" |
-| Examples | Examples/Text/CheckedText/CheckedTextRuntimeHole.jet | 25:5 | "checked text example output" |
-| Examples | Examples/Text/CheckedText/CheckedTextRuntimeHoleStop.jet | 24:5 | "checked text example output" |
+| Examples | Examples/Text/CheckedText/CheckedTextRuntimeHole.jet | 26:5 | "checked text example output" |
+| Examples | Examples/Text/CheckedText/CheckedTextRuntimeHoleStop.jet | 25:5 | "checked text example output" |
 | Examples | Examples/Text/CheckedText/CheckedTextType.jet | 20:5 | "checked text example output" |
 | Jetpack | Jetpack/Foundation/Source/TreeHash.jet | 601:9 | "the authority retains the held directory until the process provider duplicates its descriptor; the child descriptor slot is supplied by the compiler" |
 | Jetpack | Jetpack/Provider/Batteries/embedded/embedded.jet | 183:5 | "host replay uses a stack cell for the CMSDK UART0 control register and never dereferences the target address" |

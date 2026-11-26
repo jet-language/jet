@@ -1,6 +1,6 @@
-// A checked text type with `build` checks its literal parts joined by `{}`
-// before the program runs; an unbalanced skeleton is E2712 at the literal,
-// whatever the holes hold.
+// A checked text type with `build` checks its literal parts before the
+// program runs; an unbalanced skeleton is E2712 at the literal, whatever
+// the holes hold.
 
 #Error
 QueryError: enum {
@@ -15,20 +15,20 @@ Query: struct {
         Error: QueryError,
         Hole: String,
 
-        check: fn(text: String) -[]> QueryError! {
+        check: fn(parts: [String]) -[]> Checked<[String], TextSlot> QueryError! {
             ^depth: 0
-            loop byte in text.bytes() {
+            loop byte in parts.join("").bytes() {
                 if byte == (U8{40}) -> depth += 1
                 if byte == (U8{41}) -> depth -= 1
             }
             if depth != 0 -> return Err(QueryError.Unbalanced)
-            return Ok()
+            return Ok(Checked{shape: parts.copy(), slots: loop _ in 1..<parts.len() -> TextSlot.Text})
         }
 
-        encode_hole: fn<T: Printable>(value: T) -[]> String { "{value}" }
+        encode_hole: fn<T: Printable>(value: T, _slot: TextSlot) -[]> String { "{value}" }
 
-        build: fn(parts: [String], holes: [String]) -[]> Query {
-            Query{text: parts.join("?"), params: holes.copy()}
+        build: fn(shape: [String], holes: [String]) -[]> Query {
+            Query{text: shape.join("?"), params: holes.copy()}
         }
     }
 }

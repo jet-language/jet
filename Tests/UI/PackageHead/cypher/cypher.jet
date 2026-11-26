@@ -14,20 +14,22 @@ Cypher: struct {
         Error: CypherError,
         Hole: String,
 
-        check: fn(text: String) -[]> CypherError! {
+        check: fn(parts: [String]) -[]> Checked<[String], TextSlot> CypherError! {
             ^depth: 0
-            loop byte in text.bytes() {
-                if byte == (U8{40}) -> depth += 1
-                if byte == (U8{41}) -> depth -= 1
+            loop part in parts {
+                loop byte in part.bytes() {
+                    if byte == (U8{40}) -> depth += 1
+                    if byte == (U8{41}) -> depth -= 1
+                }
             }
             if depth != 0 -> return Err(CypherError{reason: "a Cypher query leaves a bracket open"})
-            return Ok()
+            Ok(Checked{shape: parts.copy(), slots: loop _ in 1..<parts.len() -> TextSlot.Text})
         }
 
-        encode_hole: fn<T: Printable>(value: T) -[]> String { "{value}" }
+        encode_hole: fn<T: Printable>(value: T, _slot: TextSlot) -[]> String { "{value}" }
 
-        build: fn(parts: [String], holes: [String]) -[]> Cypher {
-            Cypher{text: parts.join("$"), params: holes.copy()}
+        build: fn(shape: [String], holes: [String]) -[]> Cypher {
+            Cypher{text: shape.join("$"), params: holes.copy()}
         }
     }
 }

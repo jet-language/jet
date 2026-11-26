@@ -113,12 +113,14 @@ HTML: struct {
     // is and any other value as its text-escaped display text. `build` then
     // escapes a hole inside an attribute value for that value (html_value_hole).
     impl CheckedText {
-        Error: Never,
+        Error: HTMLLiteralError,
         Hole: String,
 
-        check: fn(_text: String) -[]> Never! { return Ok() }
+        check: fn(parts: [String]) -[]> Checked<[String], TextSlot> HTMLLiteralError! {
+            Ok(Checked{shape: parts.copy(), slots: loop _ in 1..<parts.len() -> TextSlot.Text})
+        }
 
-        encode_hole: fn<T: Printable>(value: T) -[]> String {
+        encode_hole: fn<T: Printable>(value: T, _slot: TextSlot) -[]> String {
             if T == {
                 HTML -> value.markup.copy()
                 else -> text_escape("{value}")
@@ -142,6 +144,12 @@ HTML: struct {
             HTML{markup: markup}
         }
     }
+}
+
+// Why a checked HTML literal was rejected.
+#Error
+HTMLLiteralError: struct {
+    reason: String,
 }
 
 // Where the markup so far leaves the next hole: in text, in a tag's attribute

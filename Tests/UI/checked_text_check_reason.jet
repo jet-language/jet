@@ -13,16 +13,16 @@ Route: struct {
         Error: RouteError,
         Hole: String,
 
-        check: fn(text: String) -[]> RouteError! {
-            if !text.starts_with("/") {
+        check: fn(parts: [String]) -[]> Checked<[String], TextSlot> RouteError! {
+            if !parts[0].starts_with("/") {
                 return Err(RouteError{reason: "a route must start with `/`"})
             }
-            return Ok()
+            return Ok(Checked{shape: parts.copy(), slots: loop _ in 1..<parts.len() -> TextSlot.Text})
         }
 
-        encode_hole: fn<T: Printable>(value: T) -[]> String { "{value}" }
+        encode_hole: fn<T: Printable>(value: T, _slot: TextSlot) -[]> String { "{value}" }
 
-        build: fn(parts: [String], holes: [String]) -[]> Route { Route{text: parts.join("*")} }
+        build: fn(shape: [String], holes: [String]) -[]> Route { Route{text: shape.join("*")} }
     }
 }
 

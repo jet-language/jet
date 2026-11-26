@@ -102,16 +102,25 @@ vocabulary](vocabulary.md).
   D-UNIFYLIT1=A). Jet has no string prefixes: a name written against quoted
   text, such as the retired `sql"…"`, `html"…"` and `sh"…"`, is E0003, and
   the retired three name their `SQL{"…"}`, `HTML{"…"}` or `Sh{"…"}` head.
-- A checked text type is any nominal with one `CheckedText` impl. A
-  `distinct String` type's literal is the joined text, with each hole passed
-  through `encode_hole`. A type that binds `Hole: T` and declares
-  `build: fn(parts: [String], holes: [Hole]) -[]> Owner` keeps its holes as
-  values: `Owner{"a {x} b"}` is `Owner.build(["a ", " b"],
-  [Owner.encode_hole(x)])`, and `check` accepts the parts joined by `{}`
-  before the program runs, or the literal is E2712. Such a literal adds no
-  failure route to the function it is in: a failure of `encode_hole` or
-  `build` stops the program at the literal, as a rejected run-time check
-  does. `Hole` without `build` is E0907 (D-TEXTHEAD-HOLES1=A;
+- A checked text type is any nominal with one `CheckedText` impl. Its
+  `check: fn(parts: [String]) -[]> Checked<Shape, Slot> Error!` receives the
+  literal's parts, the text between its holes and never the joined text, and
+  returns `Checked{shape, slots}`: `shape` is what it learned, computed once
+  before the program runs and embedded as constant data, and `slots[i]` the
+  kind of position hole `i` sits in. `Shape` defaults to `[String]` and
+  `Slot` to `TextSlot`. The check always runs, even for an `Error: Never`
+  type, and a failure is E2712. A `distinct String` type's literal is the
+  joined text, with each hole passed through `encode_hole(value, slot)`, and
+  its `check` sees that one text. A type that binds `Hole: T` and declares
+  `build: fn(shape: Shape, holes: [Hole]) -[]> Owner` keeps its holes as
+  values: `Owner{"a {x} b"}` is `Owner.build(shape,
+  [Owner.encode_hole(x, slots[0])])` with the shape and slots `check`
+  returned for `["a ", " b"]`, so `build` never parses again at run time.
+  `Owner.from(text)` is `check([text])`. Such a literal adds no failure route
+  to the function it is in: a failure of `encode_hole` or `build` stops the
+  program at the literal, as a rejected run-time check does. `Hole` without
+  `build` is E0907, as is a `check` that does not return `Checked<Shape,
+  Slot>` with the type's `Error` (D-TEXTHEAD-HOLES1=A;
   Examples/Text/CheckedText/CheckedTextBoundHoles.jet).
 - A marker is a struct whose fields are its arguments, with one
   `impl Marker { … }` block in its body. `Marker` is a Core trait
