@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 7055,
-    "rev": 115114,
+    "nextNum": 7056,
+    "rev": 115118,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -64011,6 +64011,62 @@
       "updated": "2026-11-27T18:34:44.048Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 3
+    },
+    {
+      "id": "c0gtkt1o",
+      "num": 7055,
+      "title": "Authoring friction P0: Section F (F34 empty []/{}/None inference, F36 String stdlib polish, F38 UseAfterMove hint) & G40 (anonymous task.group {})",
+      "body": "Owner-approved Section F (F34, F36, F38) and G40 from Docs/Research/jet-authoring-friction-2026-11-27.md: (1) F34: infer empty [], {}, and None automatically whenever an expected [T], [K: V], Set<T>, or T? type is known from a struct field, param, binding, or return (while keeping explicit [T]{} allowed). (2) F36: return Int? from String.find / rfind (eliminating -1 sentinel), add StringBuilder / ^s.push_str, String.from_byte(b: U8), String.byte_slice(a..<b), and a targeted .to_list() hint when indexing an iterator. (3) F38: enhance UseAfterMove hints on list literals [a, b] to suggest .copy() when the element type is cloneable. (4) G40: allow anonymous task.group { ... } and task.group(limit: 2) { ... } when the group handle is not referenced.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "G1",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "F34: Type inference infers empty [], {}, and None whenever an expected [T], [K: V], Set<T>, or T? type is known from struct field, parameter, binding, or return (keeping explicit typed constructors valid), verified O0/O1/O2",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T18:45:50.322Z"
+        },
+        {
+          "n": 2,
+          "text": "F36: String.find and rfind return Int? (migrating all -1 callers across Compiler/Core/Examples/Tests/Docs), add StringBuilder (or ^s.push_str), String.from_byte(b: U8), String.byte_slice(a..<b), and targeted .to_list() hint when indexing an iterator (UI snapshot + O0/O1/O2)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T18:45:51.651Z"
+        },
+        {
+          "n": 3,
+          "text": "F38 & G40: UseAfterMove hints on list literals suggest .copy() for cloneable types (UI snapshot); anonymous task.group { ... } and task.group(limit: N) { ... } work without inventing an unused group name across O0/O1/O2",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T18:45:52.637Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-27T18:45:49.293Z",
+      "updated": "2026-11-27T18:45:52.637Z",
+      "updatedBy": "Orchestrator",
+      "criteriaLastN": 3
     }
   ],
   "decisions": [
@@ -123080,6 +123136,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-27T18:45:52.637Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0gtkt1o",
+      "note": "#3 F38 & G40: UseAfterMove hints on list literals suggest .copy"
+    },
+    {
+      "at": "2026-11-27T18:45:51.651Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0gtkt1o",
+      "note": "#2 F36: String.find and rfind return Int? (migrating all -1 cal"
+    },
+    {
+      "at": "2026-11-27T18:45:50.322Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0gtkt1o",
+      "note": "#1 F34: Type inference infers empty [], {}, and None whenever a"
+    },
+    {
+      "at": "2026-11-27T18:45:49.293Z",
+      "by": "Orchestrator",
+      "action": "card.add",
+      "ref": "c0gtkt1o",
+      "note": "Authoring friction P0: Section F (F34 empty []/{}/None inference, F36 String stdlib polish, F38 UseAfterMove hint) & G40 (anonymous task.group {})"
+    },
     {
       "at": "2026-11-27T18:34:44.840Z",
       "by": "Orchestrator",
