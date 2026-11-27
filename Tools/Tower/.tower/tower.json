@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7052,
-    "rev": 115075,
+    "rev": 115100,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -60939,38 +60939,38 @@
         {
           "n": 1,
           "text": "Design review: a dated audit in Docs/Audits attacks the whole mechanism of proposal item P19: it names every place the same fact or operation lives today, the exact cutover list and the copies it deletes, and passes; every gap it finds becomes a row here or a ballot.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T17:38:58.912Z"
+          "evidence": "dev 64b7848f7dc: Docs/Audits/2026-11-27-enum-shared-fields-review.md landed before build with full compiler inventory and binding cutover list.",
+          "at": "2026-11-27T18:08:43.745Z"
         },
         {
           "n": 2,
           "text": "An enum body may hold fields before its cases; every case's constructor and pattern include them, and `e.field` reads a shared field on any case without a match.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T17:38:58.912Z"
+          "evidence": "dev 64b7848f7dc (batch91-s4): shared fields before enum cases, constructor/pattern/e.field access; Examples/Types/EnumSharedFields.jet O0/O1/O2 PASS; Tests/UI/enum_shared_field_*.jet 4/4 PASS.",
+          "at": "2026-11-27T18:08:44.615Z"
         },
         {
           "n": 3,
           "text": "Shared fields sit at one offset in every case, so a read is one load with no branch, proved by a codegen check.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T17:38:58.912Z"
+          "evidence": "dev 64b7848f7dc (batch91-s4): objdump -d at -O0 proved single branchless load (mov 0x8(%rax), %rax and mov 0x10(%rax), %rax, 0 tag reads, 0 branches).",
+          "at": "2026-11-27T18:08:45.466Z"
         },
         {
           "n": 4,
           "text": "Reflection, derives (equality, hashing, serialization, patches) and the formatter handle shared fields.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T17:38:58.912Z"
+          "evidence": "dev 64b7848f7dc (batch91-s4): reflection TypeInfo.fields, derives (Derives.jet/SerdeItems.jet/PreludeRows.jet), and jet fmt --check Examples/Types/EnumSharedFields.jet PASS.",
+          "at": "2026-11-27T18:08:46.293Z"
         },
         {
           "n": 5,
@@ -60987,8 +60987,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-25T17:38:58.912Z",
-      "updated": "2026-11-25T17:38:58.912Z",
-      "updatedBy": "Pip"
+      "updated": "2026-11-27T18:08:46.293Z",
+      "updatedBy": "Orchestrator"
     },
     {
       "id": "c08iqfx7",
@@ -62058,20 +62058,20 @@
         {
           "n": 2,
           "text": "The ratified outcome of D-GLOBAL-SAFE1 is built: each listed downside (test interference, cross-task races, hidden writes in purity and effect facts, hot reload, initialization order) has its ratified remedy with a registered diagnostic where a rule refuses code.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-26T16:15:22.886Z"
+          "evidence": "dev 64b7848f7dc (batch91-s4): lent ^ writes, fn-value bypasses, non-sendable E1102, Core __world_shared test resets; Tests/UI/Effects/module_state_* 6/6 PASS; global_state_resets_per_test_across_tiers.case PASS.",
+          "at": "2026-11-27T18:08:47.128Z"
         },
         {
           "n": 3,
           "text": "A #Memo function never returns a stale result because of a changeable module global it reads: today E0938 checks only the solved effect row (JetSema Effects/Checks.jet:6674-6686) and module reads are not recorded, so such a function is accepted. This is fixed whichever option of D-GLOBAL-SAFE1 wins (the ballot chooses refusal or keying the cache on the global), with a registered diagnostic or a proof the cache is keyed correctly.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-26T16:15:23.733Z"
+          "evidence": "dev 64b7848f7dc (batch91-s4): #Memo reading changeable module globals refused cleanly; Tests/UI/Effects/pure_and_memo_reading_module_state_refused.jet PASS.",
+          "at": "2026-11-27T18:08:47.958Z"
         },
         {
           "n": 4,
@@ -62106,7 +62106,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-25T17:59:00.830Z",
-      "updated": "2026-11-26T16:15:27.786Z",
+      "updated": "2026-11-27T18:08:47.958Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 6
     },
@@ -63113,7 +63113,7 @@
       "track": "epoch",
       "epoch": "G2",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P0",
       "plan": null,
       "checkSteps": null,
@@ -63144,38 +63144,38 @@
         {
           "n": 3,
           "text": "B14: Contextual untyped integer literal coercion to U8/I8/I16/U16/I32/U32/I64/U64 when the expected type is fixed by operator, parameter, or binding, with compile-time range checking (UI snapshot + O0/O1/O2 test).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-27T15:12:58.173Z"
+          "evidence": "dev 64b7848f7dc (batch91-s4): contextual IntN coercion + E1003 range checks; Tests/Cases/NumericWidening/contextual_fixed_int_and_min_literals.case PASS O0/O1/O2; Tests/UI/fixed_int_literal_range.jet PASS.",
+          "at": "2026-11-27T18:07:51.917Z"
         },
         {
           "n": 4,
           "text": "B15: Fold unary minus on integer literals so -9223372036854775808 (I64.MIN) parses and lowers cleanly across O0/O1/O2, and expose I64.MIN / I64.MAX (and fixed-width MIN/MAX) constants.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-27T15:12:58.980Z"
+          "evidence": "dev 64b7848f7dc (batch91-s4): unary-minus literal folding for I64.MIN (-9223372036854775808) + MIN/MAX constants; Tests/Cases/NumericWidening/contextual_fixed_int_and_min_literals.case PASS O0/O1/O2.",
+          "at": "2026-11-27T18:07:52.795Z"
         },
         {
           "n": 5,
           "text": "C20: Propagate enum expected types uniformly through Ok(...), Err(...), Val(...), and == comparisons so .Variant shorthand works consistently everywhere the type is known.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-27T15:12:59.802Z"
+          "evidence": "dev 64b7848f7dc (batch91-s4): enum .Variant shorthand propagation across Ok/Err/Val/==/!=; Tests/Cases/PatternsAndFields/enum_shorthand_and_struct_update.case PASS O0/O1/O2.",
+          "at": "2026-11-27T18:07:53.625Z"
         },
         {
           "n": 6,
           "text": "C21: Complete struct-update syntax (Struct{...base, field: val}) across Core and Compiler with default-field auto-fill, tested across O0/O1/O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-27T15:13:00.610Z"
+          "evidence": "dev 64b7848f7dc (batch91-s4): Struct{...base, field: val} update syntax + default auto-fill; Tests/Cases/PatternsAndFields/enum_shorthand_and_struct_update.case PASS O0/O1/O2; Tests/UI/struct_update_errors.jet PASS.",
+          "at": "2026-11-27T18:07:54.449Z"
         }
       ],
       "refs": [],
@@ -63183,9 +63183,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T15:12:55.804Z",
-      "updated": "2026-11-27T18:07:50.765Z",
+      "updated": "2026-11-27T18:07:56.043Z",
       "updatedBy": "Orchestrator",
-      "criteriaLastN": 6
+      "criteriaLastN": 6,
+      "completedAt": "2026-11-27T18:07:56.043Z"
     },
     {
       "id": "c0dzbcnu",
@@ -63196,7 +63197,7 @@
       "track": "epoch",
       "epoch": "G2",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P0",
       "plan": null,
       "checkSteps": null,
@@ -63209,47 +63210,47 @@
         {
           "n": 1,
           "text": "E32 / Go-2: Auto-lift #Error types implementing Describe into Err at Err! boundaries (run / #Test) without manual impl Err.From(MyErr), while preserving explicit impl Target.From(Source) between distinct typed domain error enums.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-27T15:13:05.341Z"
+          "evidence": "dev 64b7848f7dc (batch91-s4): #Error+Describe auto-lift to Err in FailureLaw.jet; Tests/Run/FailureFoundation/ErrorDescribeAutoLiftToErr.jet O0/O1/O2 PASS; Tests/UI/error_domain_no_auto_lift_between_enums.jet PASS.",
+          "at": "2026-11-27T18:08:01.533Z"
         },
         {
           "n": 2,
           "text": "E32 / Go-3: Dedicated diagnostics with clear Fix text when matching .Val/.None on a Result (suggest .Ok/.Err or ?), matching .Ok/.Err on an Option, or writing Name: error { ... } (suggest #Error Name: enum { ... }), each with UI snapshots.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-27T15:13:06.135Z"
+          "evidence": "dev 64b7848f7dc (batch91-s4): dedicated Option/Result mismatch E0305 and Name: error {} E0003 diagnostics; Tests/UI/{pattern_val_none_on_result,pattern_ok_err_on_option,error_keyword_declaration_suggests_marker_enum}.jet 3/3 PASS.",
+          "at": "2026-11-27T18:08:02.369Z"
         },
         {
           "n": 3,
           "text": "F35: Add Map.contains_key(k) in Core and ergonomic Set<T> literals + .insert()/.contains() in Prelude/Core, tested across O0/O1/O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-27T15:13:06.920Z"
+          "evidence": "dev 64b7848f7dc (batch91-s4): Map.contains_key + Set<T> literals/.insert/.contains; Tests/Run/Collections/MapContainsKeyAndSetLiterals.jet O0/O1/O2 PASS.",
+          "at": "2026-11-27T18:08:03.171Z"
         },
         {
           "n": 4,
           "text": "F37: Support in-place mutable element iteration loop ^item in list across O0/O1/O2 with aliasing/ownership safety checks and UI/golden tests.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-27T15:13:07.734Z"
+          "evidence": "dev 64b7848f7dc (batch91-s4): ForKind.InMut loop ^item in list + ownership/aliasing checks; Tests/Run/Collections/LoopMutItemInPlace.jet O0/O1/O2 PASS; Tests/UI/{loop_mut_item_immutable_list_refused,loop_mut_item_aliasing_refused}.jet 2/2 PASS.",
+          "at": "2026-11-27T18:08:03.980Z"
         },
         {
           "n": 5,
           "text": "G41: Emit a copy-pasteable authority: { allow: [...] } fix-it listing the exact missing capabilities inside Jet.ProhibitedEffectReached, pinned by UI snapshot.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-27T15:13:08.522Z"
+          "evidence": "dev 64b7848f7dc (batch91-s4): copy-pasteable authority: { allow: [...] } fix-it in E0749; Tests/UI/authority_allow_missing_capabilities_fixit.jet PASS.",
+          "at": "2026-11-27T18:08:04.786Z"
         }
       ],
       "refs": [],
@@ -63257,9 +63258,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T15:13:04.470Z",
-      "updated": "2026-11-27T15:13:08.522Z",
+      "updated": "2026-11-27T18:08:06.287Z",
       "updatedBy": "Orchestrator",
-      "criteriaLastN": 5
+      "criteriaLastN": 5,
+      "completedAt": "2026-11-27T18:08:06.287Z"
     },
     {
       "id": "c0rakyxu",
@@ -63270,7 +63272,7 @@
       "track": "epoch",
       "epoch": "G2",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P0",
       "plan": null,
       "checkSteps": null,
@@ -63283,29 +63285,29 @@
         {
           "n": 1,
           "text": "H44: Support #Layout(c) typed struct pointer field reads/writes and pointer .add(n) helpers inside #Unsafe blocks and JetRuntime across O0/O1/O2, migrating raw magic-offset sites in Compiler/JetRuntime/Source/{Task,Channel}.jet with S2==S3 fixed-point parity.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-27T15:13:10.407Z"
+          "evidence": "dev 64b7848f7dc (batch91-s4 S3==S4 exact match 1f7cdd2d): #Layout(c) typed struct pointer field access + .add(n) + JetRuntime Task.jet/Channel.jet migration; Tests/Run/UnsafeAndRuntime/CLayoutPtrFieldAndAdd.jet O0/O1/O2 PASS; Tests/UI/raw_ptr_field_and_add_require_unsafe.jet PASS.",
+          "at": "2026-11-27T18:08:30.765Z"
         },
         {
           "n": 2,
           "text": "C23: Add standard Neg operator trait (neg: fn(self) -> Self) in Core Prelude so user structs and Core math types support unary - uniformly across O0/O1/O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-27T15:13:41.581Z"
+          "evidence": "dev 64b7848f7dc (batch91-s4): Neg operator trait in Prelude + Core/Math impls; Tests/Cases/Traits/neg_operator_and_read_discard.case O0/O1/O2 PASS; Tests/UI/neg_trait_errors.jet PASS.",
+          "at": "2026-11-27T18:08:31.587Z"
         },
         {
           "n": 3,
           "text": "D26: Treat _: expr on a read parameter or binding as an explicit no-op discard instead of a consuming move (E0120), with UI and multi-tier tests.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-27T15:13:42.674Z"
+          "evidence": "dev 64b7848f7dc (batch91-s4): _: expr no-op read discard (no E0120 move); Tests/Cases/Traits/neg_operator_and_read_discard.case O0/O1/O2 PASS.",
+          "at": "2026-11-27T18:08:32.403Z"
         }
       ],
       "refs": [],
@@ -63313,9 +63315,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T15:13:09.628Z",
-      "updated": "2026-11-27T15:13:42.674Z",
+      "updated": "2026-11-27T18:08:33.907Z",
       "updatedBy": "Orchestrator",
-      "criteriaLastN": 3
+      "criteriaLastN": 3,
+      "completedAt": "2026-11-27T18:08:33.907Z"
     },
     {
       "id": "c0yzwara",
@@ -63339,29 +63342,29 @@
         {
           "n": 1,
           "text": "Bare decimal literals (e.g. 1.5, 0.0) infer Float (F64) by default while contextual Decimal positions (Decimal{19.99}, typed params/fields/vars/ops) parse exact Decimal with zero binary-float rounding loss and strict Float vs Decimal variable separation preserved (verified O0/O1/O2 + web where applicable)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-27T15:57:45.811Z"
+          "evidence": "dev 64b7848f7dc (batch91-s4): bare decimals default Float with exact contextual Decimal; Tests/Cases/Math/float_default_and_contextual_decimal.case + Examples/Math/Decimal.jet + Examples/Basics/Numbers.jet O0/O1/O2 PASS.",
+          "at": "2026-11-27T18:08:35.561Z"
         },
         {
           "n": 2,
           "text": "Prelude #UnitFamily(Time) renames h -> hour and d -> day (and rejects retired h/d with clear migration diagnostic) across Compiler/Prelude/Core/Examples/Tests/Docs with zero legacy shims",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-27T15:57:46.594Z"
+          "evidence": "dev 64b7848f7dc (batch91-s4): Time h->hour, d->day across Prelude/Core/Examples/Tests/Docs + retired E0134 diagnostic; Examples/Tooling/DevLoop/ScheduleEvery.jet + Examples/Types/Units/DimensionalQuantities.jet O0/O1/O2 PASS; Tests/UI/retired_suffixes_h_d_f.jet PASS.",
+          "at": "2026-11-27T18:08:36.377Z"
         },
         {
           "n": 3,
           "text": "Legacy hardcoded magic f numeric suffix deleted from Literals.jet, registries, Examples/Math/FloatSuffix (migrated), Tests, and Docs; golden feature examples verify Float default, exact contextual Decimal, and hour/day units on O0/O1/O2",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-27T15:57:47.379Z"
+          "evidence": "dev 64b7848f7dc (batch91-s4): deleted magic f suffix; Examples/Math/{FloatSuffix,Quaternion}.jet + Tests/Cases/Math/float_suffix_literal.case O0/O1/O2 PASS; Tests/UI/retired_suffixes_h_d_f.jet PASS.",
+          "at": "2026-11-27T18:08:37.192Z"
         },
         {
           "n": 4,
@@ -63378,7 +63381,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T15:56:42.233Z",
-      "updated": "2026-11-27T15:57:48.145Z",
+      "updated": "2026-11-27T18:08:37.192Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 4
     },
@@ -63410,11 +63413,11 @@
         {
           "n": 1,
           "text": "Design review landed in Docs/Audits/ before build commits: compares strongest peers (Swift result builders/macros, Rust proc-macros, Zig/Scala/Elixir sigils, Racket), attacks lexer/parser/hole-scope/LSP/fmt/cold-compile-speed edge cases, sets binding cutover list covering all CheckedText/Complex/Quaternion callers, registries, snapshots, and docs",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-27T15:57:48.932Z"
+          "evidence": "dev 64b7848f7dc: Docs/Audits/2026-11-27-unified-dsl-trait-review.md landed (3-stage smart lexer, Grammar unification, 4-step handshake, prior art, 8 adversarial attacks, 31-item binding cutover list).",
+          "at": "2026-11-27T18:08:34.717Z"
         },
         {
           "n": 2,
@@ -63467,7 +63470,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T15:56:43.377Z",
-      "updated": "2026-11-27T16:56:12.491Z",
+      "updated": "2026-11-27T18:08:34.717Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 6
     },
@@ -122900,6 +122903,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-27T18:08:47.958Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c01wqict",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-27T18:08:47.128Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c01wqict",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-27T18:08:46.293Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0wdibsn",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-27T18:08:45.466Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0wdibsn",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-27T18:08:44.615Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0wdibsn",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-27T18:08:43.746Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0wdibsn",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-27T18:08:37.192Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0yzwara",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-27T18:08:36.377Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0yzwara",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-27T18:08:35.561Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0yzwara",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-27T18:08:34.717Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0hx4sjb",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-27T18:08:33.907Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0rakyxu",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-27T18:08:32.404Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0rakyxu",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-27T18:08:31.587Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0rakyxu",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-27T18:08:30.765Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0rakyxu",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-27T18:08:06.287Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0dzbcnu",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-27T18:08:04.786Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0dzbcnu",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-27T18:08:03.980Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0dzbcnu",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-27T18:08:03.171Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0dzbcnu",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-27T18:08:02.369Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0dzbcnu",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-27T18:08:01.533Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0dzbcnu",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-27T18:07:56.043Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0enq2sb",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-27T18:07:54.449Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0enq2sb",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-27T18:07:53.625Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0enq2sb",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-27T18:07:52.795Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0enq2sb",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-27T18:07:51.917Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0enq2sb",
+      "note": "#3"
+    },
     {
       "at": "2026-11-27T18:07:50.765Z",
       "by": "Orchestrator",
