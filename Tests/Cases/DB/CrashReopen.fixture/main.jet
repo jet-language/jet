@@ -557,51 +557,184 @@ reduce_failing_schedule: fn(crash_dir: String, base_files: [DiskFile], events: [
     CrashFailure{schedule: best, reason: best_reason}
 }
 
+CrashStorageSpec: struct {
+    fs_type: String,
+    journal_mode: String,
+    synchronous: String,
+    honors_fsync: Bool,
+    honors_dirsync: Bool,
+}
+
+CrashOracleSpec: struct {
+    require_integrity_check: Bool,
+    allowed_states: [String],
+}
+
+CrashBudget: struct {
+    budget_ms: Int,
+    step_cost_ms: Int,
+    max_schedules: Int,
+    skip_boundary: Int?,
+}
+
+CrashVerdict: enum {
+    Passed(count: Int, seen: [Int]),
+    Failed(String),
+    Refused(String),
+}
+
+crash_is_network_fs: fn(fs_type: String) -> Bool Never! {
+    net_fs: [String]{"nfs", "nfs4", "cifs", "smb", "smb3", "sshfs", "fuse.sshfs", "9p", "davfs", "glusterfs", "ceph", "lustre", "afp", "webdav"}
+    loop name in net_fs {
+        if fs_type == name -> return true
+    }
+    false
+}
+
+crash_is_supported_local_fs: fn(fs_type: String) -> Bool Never! {
+    local_fs: [String]{"ext4", "xfs", "btrfs", "zfs", "apfs", "ntfs"}
+    loop name in local_fs {
+        if fs_type == name -> return true
+    }
+    false
+}
+
+validate_crash_storage: fn(spec: CrashStorageSpec) -> String? Never! {
+    if crash_is_network_fs(spec.fs_type) {
+        return Val("unsupported storage: network filesystem `{spec.fs_type}` gets no untested atomicity promise")
+    }
+    if !crash_is_supported_local_fs(spec.fs_type) {
+        return Val("unsupported storage: filesystem `{spec.fs_type}` is not a verified local crash-consistent POSIX store")
+    }
+    if !spec.honors_fsync {
+        return Val("unsupported storage: storage does not honor fsync barriers")
+    }
+    if !spec.honors_dirsync {
+        return Val("unsupported storage: storage does not honor directory sync barriers")
+    }
+    if spec.synchronous != "FULL" && spec.synchronous != "EXTRA" && spec.synchronous != "NORMAL" {
+        return Val("unsupported storage: PRAGMA synchronous={spec.synchronous} provides no crash-consistency guarantee")
+    }
+    if spec.journal_mode != "DELETE" && spec.journal_mode != "TRUNCATE" && spec.journal_mode != "PERSIST" && spec.journal_mode != "WAL" {
+        return Val("unsupported storage: PRAGMA journal_mode={spec.journal_mode} provides no crash-consistency guarantee")
+    }
+    None
+}
+
+validate_crash_oracle: fn(oracle: CrashOracleSpec) -> String? Never! {
+    if !oracle.require_integrity_check {
+        return Val("invalid oracle: PRAGMA integrity_check cannot be disabled")
+    }
+    if oracle.allowed_states.len() < 2 {
+        return Val("invalid oracle: workload oracle needs at least initial and committed states")
+    }
+    loop i in 0..<oracle.allowed_states.len() {
+        if oracle.allowed_states[i].count_bytes() == 0 {
+            return Val("invalid oracle: empty allowed state at index {i}")
+        }
+        loop j in i + 1..<oracle.allowed_states.len() {
+            if oracle.allowed_states[i] == oracle.allowed_states[j] {
+                return Val("invalid oracle: duplicate allowed state `{oracle.allowed_states[i]}`")
+            }
+        }
+    }
+    None
+}
+
+run_crash_harness: fn(work_dir: String, base: [DiskFile], events: [VfsEvent], seed: Int, storage: CrashStorageSpec, oracle: CrashOracleSpec, budget: CrashBudget) -[FS, DB]> CrashVerdict Never! {
+    if validate_crash_storage(storage) == .Val(reason) -> return CrashVerdict.Refused(reason)
+    if validate_crash_oracle(oracle) == .Val(reason) -> return CrashVerdict.Refused(reason)
+    if events.len() == 0 -> return CrashVerdict.Refused("incomplete schedule: VFS trace recorded zero events")
+    if budget.skip_boundary != None -> return CrashVerdict.Refused("incomplete schedule: boundary skipping is forbidden")
+    schedules: build_schedules(base, events, seed)
+    if schedules.len() == 0 -> return CrashVerdict.Refused("incomplete schedule: zero crash schedules generated")
+    if budget.max_schedules > 0 && schedules.len() > budget.max_schedules {
+        return CrashVerdict.Refused("incomplete schedule: cap {budget.max_schedules} omits {schedules.len() - budget.max_schedules} reachable crash states")
+    }
+    ^seen: [Int]{}
+    loop _ in 0..<oracle.allowed_states.len() -> seen.push(0)
+    ^elapsed_ms: 0
+    loop sched in schedules {
+        elapsed_ms += budget.step_cost_ms
+        if budget.budget_ms > 0 && elapsed_ms > budget.budget_ms {
+            return CrashVerdict.Refused("timeout: crash schedule budget {budget.budget_ms}ms exceeded before completing all {schedules.len()} schedules")
+        }
+        if check_schedule(work_dir, base, events, sched, oracle.allowed_states) == {
+            .Ok(state_idx) -> { seen[state_idx] = seen[state_idx] + 1 }
+            .Err(reason) -> return CrashVerdict.Failed("{storage.journal_mode}/{storage.synchronous} crash failed at {sched.label} (b={sched.boundary}, kept={sched.kept_unsynced}): {reason}")
+        }
+    }
+    CrashVerdict.Passed{count: schedules.len(), seen: seen}
+}
+
+assert_crash_refused: fn(v: CrashVerdict, expected_substr: String, label: String) Never! {
+    if v == {
+        .Refused(reason) -> {
+            if !reason.contains(expected_substr) {
+                panic("{label}: expected refusal containing `{expected_substr}`, got `{reason}`")
+            }
+        }
+        .Passed(n, _) -> panic("{label}: expected Refused, got Passed({n})")
+        .Failed(reason) -> panic("{label}: expected Refused, got Failed({reason})")
+    }
+}
+
+assert_mode_passes: fn(root: String, tag: String, journal_mode: String, synchronous: String, seed: Int, allowed: [String], min_writes: Int, min_syncs: Int) -[FS, DB]> {base: [DiskFile], events: [VfsEvent]} Never! {
+    rec: record_two_tx_workload("{root}/{tag}_src", journal_mode, synchronous)
+    ^writes: 0
+    ^syncs: 0
+    loop ev in rec.events {
+        if ev.kind == .Write -> writes += 1
+        if ev.kind == .Sync || ev.kind == .DirSync -> syncs += 1
+    }
+    assert(writes >= min_writes)
+    assert(syncs >= min_syncs)
+    storage: CrashStorageSpec{fs_type: "ext4", journal_mode: journal_mode, synchronous: synchronous, honors_fsync: true, honors_dirsync: true}
+    oracle: CrashOracleSpec{require_integrity_check: true, allowed_states: allowed}
+    budget: CrashBudget{budget_ms: 0, step_cost_ms: 1, max_schedules: 0, skip_boundary: None}
+    if run_crash_harness("{root}/{tag}_crash", rec.base, rec.events, seed, storage, oracle, budget) == {
+        .Passed(count, seen) -> {
+            assert(count > 0)
+            assert(seen[0] > 0 && seen[1] > 0 && seen[2] > 0)
+        }
+        .Failed(reason) -> panic("{tag}: {reason}")
+        .Refused(reason) -> panic("{tag}: unexpectedly refused: {reason}")
+    }
+    rec
+}
+
 #Test("db_crash_reopen") {
     root: files.mkdtemp("db_crash_reopen") ?? panic("mkdtemp: {err}")
     s0: "1:alice:1000,2:bob:1000|1:0:opening"
     s1: "1:alice:750,2:bob:1250|1:0:opening,2:250:tx1"
     s2: "1:alice:850,2:bob:1150,3:carol:500|1:0:opening,2:250:tx1,3:100:tx2"
     allowed: [String]{s0, s1, s2}
-    // Part 1: Rollback-journal mode (DELETE, synchronous=FULL) — every reachable
-    // write, truncate, delete, and sync boundary + dropped/reordered unsynced writes.
-    del_rec: record_two_tx_workload("{root}/delete_src", "DELETE", "FULL")
-    ^del_writes: 0
-    ^del_syncs: 0
-    loop ev in del_rec.events {
-        if ev.kind == .Write -> del_writes += 1
-        if ev.kind == .Sync || ev.kind == .DirSync -> del_syncs += 1
+    // Part 1: Rollback-journal modes (DELETE, TRUNCATE, PERSIST) and WAL under
+    // FULL, EXTRA, and NORMAL sync modes — every reachable write, truncate,
+    // delete, and sync boundary + dropped/reordered unsynced writes.
+    del_rec: assert_mode_passes(root, "delete_full", "DELETE", "FULL", 6876, allowed, 4, 4)
+    _: assert_mode_passes(root, "truncate_full", "TRUNCATE", "FULL", 6878, allowed, 4, 4)
+    _: assert_mode_passes(root, "persist_full", "PERSIST", "FULL", 6879, allowed, 4, 4)
+    _: assert_mode_passes(root, "delete_extra", "DELETE", "EXTRA", 6880, allowed, 4, 4)
+    _: assert_mode_passes(root, "wal_full", "WAL", "FULL", 6877, allowed, 4, 2)
+    _: assert_mode_passes(root, "wal_normal", "WAL", "NORMAL", 6881, allowed, 4, 1)
+    // Part 2: Fail-closed harness refusals exercised directly on the real
+    // `run_crash_harness` over the real `del_rec` trace.
+    valid_storage: CrashStorageSpec{fs_type: "ext4", journal_mode: "DELETE", synchronous: "FULL", honors_fsync: true, honors_dirsync: true}
+    valid_oracle: CrashOracleSpec{require_integrity_check: true, allowed_states: allowed}
+    valid_budget: CrashBudget{budget_ms: 0, step_cost_ms: 1, max_schedules: 0, skip_boundary: None}
+    net_fs_list: [String]{"nfs", "nfs4", "cifs", "smb", "smb3", "sshfs", "9p", "glusterfs", "ceph", "lustre", "afp", "webdav"}
+    loop net_fs in net_fs_list {
+        net_spec: CrashStorageSpec{fs_type: net_fs, journal_mode: "DELETE", synchronous: "FULL", honors_fsync: true, honors_dirsync: true}
+        assert_crash_refused(run_crash_harness("{root}/refuse_net", del_rec.base, del_rec.events, 6876, net_spec, valid_oracle, valid_budget), "network filesystem", "net:{net_fs}")
     }
-    assert(del_writes >= 4)
-    assert(del_syncs >= 4)
-    del_schedules: build_schedules(del_rec.base, del_rec.events, 6876)
-    ^del_seen: [Int]{0, 0, 0}
-    loop sched in del_schedules {
-        if check_schedule("{root}/delete_crash", del_rec.base, del_rec.events, sched, allowed) == {
-            .Ok(state_idx) -> { del_seen[state_idx] = del_seen[state_idx] + 1 }
-            .Err(reason) -> panic("DELETE crash failed at {sched.label} (b={sched.boundary}, kept={sched.kept_unsynced}): {reason}")
-        }
-    }
-    assert(del_seen[0] > 0 && del_seen[1] > 0 && del_seen[2] > 0)
-    // Part 2: WAL mode (WAL, synchronous=FULL) — every reachable write & sync boundary.
-    wal_rec: record_two_tx_workload("{root}/wal_src", "WAL", "FULL")
-    ^wal_writes: 0
-    ^wal_syncs: 0
-    loop ev in wal_rec.events {
-        if ev.kind == .Write -> wal_writes += 1
-        if ev.kind == .Sync || ev.kind == .DirSync -> wal_syncs += 1
-    }
-    assert(wal_writes >= 4)
-    assert(wal_syncs >= 2)
-    wal_schedules: build_schedules(wal_rec.base, wal_rec.events, 6877)
-    ^wal_seen: [Int]{0, 0, 0}
-    loop sched in wal_schedules {
-        if check_schedule("{root}/wal_crash", wal_rec.base, wal_rec.events, sched, allowed) == {
-            .Ok(state_idx) -> { wal_seen[state_idx] = wal_seen[state_idx] + 1 }
-            .Err(reason) -> panic("WAL crash failed at {sched.label} (b={sched.boundary}, kept={sched.kept_unsynced}): {reason}")
-        }
-    }
-    assert(wal_seen[0] > 0 && wal_seen[1] > 0 && wal_seen[2] > 0)
+    assert_crash_refused(run_crash_harness("{root}/refuse_fsync", del_rec.base, del_rec.events, 6876, CrashStorageSpec{fs_type: "ext4", journal_mode: "DELETE", synchronous: "FULL", honors_fsync: false, honors_dirsync: true}, valid_oracle, valid_budget), "fsync", "no-fsync")
+    assert_crash_refused(run_crash_harness("{root}/refuse_dirsync", del_rec.base, del_rec.events, 6876, CrashStorageSpec{fs_type: "ext4", journal_mode: "DELETE", synchronous: "FULL", honors_fsync: true, honors_dirsync: false}, valid_oracle, valid_budget), "directory sync", "no-dirsync")
+    assert_crash_refused(run_crash_harness("{root}/refuse_sync_off", del_rec.base, del_rec.events, 6876, CrashStorageSpec{fs_type: "ext4", journal_mode: "DELETE", synchronous: "OFF", honors_fsync: true, honors_dirsync: true}, valid_oracle, valid_budget), "synchronous=OFF", "sync-off")
+    assert_crash_refused(run_crash_harness("{root}/refuse_oracle", del_rec.base, del_rec.events, 6876, valid_storage, CrashOracleSpec{require_integrity_check: false, allowed_states: allowed}, valid_budget), "invalid oracle", "no-integrity-check")
+    assert_crash_refused(run_crash_harness("{root}/refuse_timeout", del_rec.base, del_rec.events, 6876, valid_storage, valid_oracle, CrashBudget{budget_ms: 2, step_cost_ms: 5, max_schedules: 0, skip_boundary: None}), "timeout", "timeout")
+    assert_crash_refused(run_crash_harness("{root}/refuse_cap", del_rec.base, del_rec.events, 6876, valid_storage, valid_oracle, CrashBudget{budget_ms: 0, step_cost_ms: 1, max_schedules: 1, skip_boundary: None}), "incomplete schedule", "capped")
+    assert_crash_refused(run_crash_harness("{root}/refuse_skip", del_rec.base, del_rec.events, 6876, valid_storage, valid_oracle, CrashBudget{budget_ms: 0, step_cost_ms: 1, max_schedules: 0, skip_boundary: Val(1)}), "incomplete schedule", "skipped")
     // Part 3: Seed replay & 1-minimal schedule reduction proof on real core.db
     // with synchronous=OFF (reordered unsynced writes yield a real torn state).
     unsafe_rec: record_two_tx_workload("{root}/unsafe_src", "DELETE", "OFF")

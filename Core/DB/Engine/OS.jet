@@ -1254,8 +1254,8 @@ chacha_qr: fn(x: ^[Int], a: Int, b: Int, c: Int, d: Int) Never! {
 chacha_rotl: fn(v: Int, n: Int) -> Int Never! { ((v << n) | v >> (32 - n)) & U32_MASK }
 
 // Opt-in process-wide VFS mutation and sync boundary trace recorder.
-// Inactive (zero I/O) unless explicitly enabled for a database directory
-// via os_trace_start / Store.trace_vfs.
+// Inactive (zero I/O and zero locks: single atomic load fast path) unless
+// explicitly enabled for a database directory via os_trace_start.
 OSTraceState: struct {
     active: Bool,
     prefix: String,
@@ -1264,6 +1264,8 @@ OSTraceState: struct {
     off: Int,
     seq: Int,
 }
+
+^os_trace_active: Bool{false}
 
 init_os_trace: fn() -> Shared<OSTraceState> Never! {
     Shared{OSTraceState{active: false, prefix: "", trace_path: "", fd: -1, off: 0, seq: 0}}
@@ -1292,7 +1294,8 @@ os_trace_rel: fn(prefix: String, trace_path: String, path: String) -> String Nev
     String.from_bytes(out) ?? ""
 }
 
-os_trace_matches: fn(path: String) -> Bool Never! {
+os_trace_matches: fn(path: String) -[DB]> Bool Never! {
+    if !os_trace_active -> return false
     guard: core.mem.__process_shared(init_os_trace).guard_read()
     if !guard.value.active -> return false
     os_trace_rel(guard.value.prefix, guard.value.trace_path, path).count_bytes() > 0
@@ -1314,11 +1317,13 @@ os_trace_start: fn(prefix: String, trace_path: String) -[DB]> Bool Never! {
     guard.value.fd = fd
     guard.value.off = 0
     guard.value.seq = 0
+    #Unsafe("serialized under init_os_trace exclusive guard; readers fast-check one Bool") { os_trace_active = true }
     true
 }
 
 os_trace_stop: fn() -[DB]> Never! {
     ^guard: core.mem.__process_shared(init_os_trace).guard_edit()
+    #Unsafe("serialized under init_os_trace exclusive guard; readers fast-check one Bool") { os_trace_active = false }
     if guard.value.fd >= 0 {
         _: rt.vfs_sync(guard.value.fd)
         _: rt.vfs_close(guard.value.fd)
@@ -1356,6 +1361,7 @@ os_trace_hex: fn(data: [U8], amt: Int) -> String Never! {
 }
 
 os_trace_emit_create: fn(path: String) -[DB]> Never! {
+    if !os_trace_active -> return
     ^guard: core.mem.__process_shared(init_os_trace).guard_edit()
     if !guard.value.active {
         return
@@ -1370,6 +1376,7 @@ os_trace_emit_create: fn(path: String) -[DB]> Never! {
 }
 
 os_trace_emit_write: fn(path: String, offset: Int, data: [U8], amt: Int) -[DB]> Never! {
+    if !os_trace_active -> return
     ^guard: core.mem.__process_shared(init_os_trace).guard_edit()
     if !guard.value.active {
         return
@@ -1385,6 +1392,7 @@ os_trace_emit_write: fn(path: String, offset: Int, data: [U8], amt: Int) -[DB]> 
 }
 
 os_trace_emit_truncate: fn(path: String, size: Int) -[DB]> Never! {
+    if !os_trace_active -> return
     ^guard: core.mem.__process_shared(init_os_trace).guard_edit()
     if !guard.value.active {
         return
@@ -1399,6 +1407,7 @@ os_trace_emit_truncate: fn(path: String, size: Int) -[DB]> Never! {
 }
 
 os_trace_emit_sync: fn(path: String, flags: Int) -[DB]> Never! {
+    if !os_trace_active -> return
     ^guard: core.mem.__process_shared(init_os_trace).guard_edit()
     if !guard.value.active {
         return
@@ -1413,6 +1422,7 @@ os_trace_emit_sync: fn(path: String, flags: Int) -[DB]> Never! {
 }
 
 os_trace_emit_delete: fn(path: String) -[DB]> Never! {
+    if !os_trace_active -> return
     ^guard: core.mem.__process_shared(init_os_trace).guard_edit()
     if !guard.value.active {
         return
@@ -1427,6 +1437,7 @@ os_trace_emit_delete: fn(path: String) -[DB]> Never! {
 }
 
 os_trace_emit_dirsync: fn(path: String) -[DB]> Never! {
+    if !os_trace_active -> return
     ^guard: core.mem.__process_shared(init_os_trace).guard_edit()
     if !guard.value.active {
         return
