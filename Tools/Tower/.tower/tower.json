@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 7045,
-    "rev": 115026,
+    "nextNum": 7047,
+    "rev": 115038,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -63311,6 +63311,154 @@
       "updated": "2026-11-27T15:13:42.674Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 3
+    },
+    {
+      "id": "c0yzwara",
+      "num": 7045,
+      "title": "Authoring friction P0: Bare Float default, exact contextual Decimal/Float, and Time hour/day units (B10 Option 1A)",
+      "body": "Owner-approved B10 Option 1A: bare decimal literals default to Float (F64) while preserving exact contextual coercion to Decimal/F16/F32/F64 (never routing Decimal literals through binary Float rounding) and keeping strict Float vs Decimal variable separation. Explicit scalar literals use Type{value} (one mechanism, I8). Numeric suffixes belong exclusively to #UnitFamily: rename Prelude Time suffixes h -> hour and d -> day across Prelude, Core, Compiler, Examples, Tests, and Docs, and delete the legacy magic f suffix.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "G1",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Bare decimal literals (e.g. 1.5, 0.0) infer Float (F64) by default while contextual Decimal positions (Decimal{19.99}, typed params/fields/vars/ops) parse exact Decimal with zero binary-float rounding loss and strict Float vs Decimal variable separation preserved (verified O0/O1/O2 + web where applicable)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T15:57:45.811Z"
+        },
+        {
+          "n": 2,
+          "text": "Prelude #UnitFamily(Time) renames h -> hour and d -> day (and rejects retired h/d with clear migration diagnostic) across Compiler/Prelude/Core/Examples/Tests/Docs with zero legacy shims",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T15:57:46.594Z"
+        },
+        {
+          "n": 3,
+          "text": "Legacy hardcoded magic f numeric suffix deleted from Literals.jet, registries, Examples/Math/FloatSuffix (migrated), Tests, and Docs; golden feature examples verify Float default, exact contextual Decimal, and hour/day units on O0/O1/O2",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T15:57:47.379Z"
+        },
+        {
+          "n": 4,
+          "text": "Full repo sweep + full test suite passes cleanly on the batch compiler with zero regressions",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T15:57:48.145Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-27T15:56:42.233Z",
+      "updated": "2026-11-27T15:57:48.145Z",
+      "updatedBy": "Orchestrator",
+      "criteriaLastN": 4
+    },
+    {
+      "id": "c0hx4sjb",
+      "num": 7046,
+      "title": "Authoring friction P0: Unified unquoted Type{...} / Type{{{...}}} DSL trait (SQL, HTML, Sh, Regex, Path, Complex, Quaternion, FFI foundation)",
+      "body": "Owner-approved unified DSL architecture (B10 Part 2 + CheckedText unification): evolve CheckedText into one canonical DSL trait so every checked domain literal and typed DSL constructor uses Type{...} (balanced braces, 99% case) and Type{{{...}}} (triple-brace raw verbatim delimiter for unbalanced braces, rhyming with triple-quoted strings) with ZERO double-quote wrapping noise. If Type implements DSL, Type owns the body via the 4-step compile-time handshake: (1) parser captures balanced {...} or raw {{{...}}} span without requiring foreign grammar in lexer, (2) #run Type.parse(raw) parses the foreign grammar and returns (shape, holes, highlight tokens) or exact-span diagnostics, (3) sema parses & type-checks each returned hole expression in the enclosing Jet lexical scope and validates Type.accepts(slot, type), (4) codegen emits Type.build(comptime_shape, encoded_holes) or folds 0-hole DSLs at comptime. LSP serves highlight tokens as Semantic Tokens and jet fmt preserves/formats DSL bodies cleanly. Full greenfield cutover of SQL, HTML, Sh, Regex, Path, URL, DateTime, Grammar, Complex, and Quaternion (deleting global magic i/j/k suffixes and legacy Type{\"...\"} quoted-head shims), laying the exact foundation for inline FFI blocks (e.g. C{...}).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "G1",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Design review landed in Docs/Audits/ before build commits: compares strongest peers (Swift result builders/macros, Rust proc-macros, Zig/Scala/Elixir sigils, Racket), attacks lexer/parser/hole-scope/LSP/fmt/cold-compile-speed edge cases, sets binding cutover list covering all CheckedText/Complex/Quaternion callers, registries, snapshots, and docs",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T15:57:48.932Z"
+        },
+        {
+          "n": 2,
+          "text": "Lexer & parser support balanced Type{...} lazy capture and raw Type{{{...}}} verbatim regions (plus clear unbalanced-brace diagnostic suggesting {{{...}}}) with zero false positives on normal Jet struct/type constructors",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T15:57:49.739Z"
+        },
+        {
+          "n": 3,
+          "text": "Unified DSL trait in Prelude + sema 4-step handshake (#run parse -> hole spans -> enclosing-scope Jet expr checking + accepts/encode_hole -> build/comptime fold) works identically across O0, O1, O2, comptime, and web",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T15:57:50.530Z"
+        },
+        {
+          "n": 4,
+          "text": "LSP Semantic Tokens serve DSL highlight spans (both foreign syntax and embedded Jet holes) and jet fmt preserves DSL bodies verbatim (or via optional format hook) without corrupting SQL/HTML/Regex/Sh/Complex/Quaternion",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T15:57:51.304Z"
+        },
+        {
+          "n": 5,
+          "text": "Full greenfield cutover: SQL, HTML, Sh, Regex, Path, URL, DateTime, Grammar, Complex, and Quaternion all use unquoted Type{...} / Type{{{...}}}; global magic i/j/k suffixes and legacy quoted Type{\"...\"} shims deleted across Compiler, Core, Examples, Tests, Tools, and Docs",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T15:57:52.096Z"
+        },
+        {
+          "n": 6,
+          "text": "Golden examples for SQL, HTML, Sh, Regex, Complex (constants + runtime vars), Quaternion, and unbalanced {{{...}}} pass across O0/O1/O2 + full suite passes cleanly",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T15:57:52.882Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-27T15:56:43.377Z",
+      "updated": "2026-11-27T15:57:52.882Z",
+      "updatedBy": "Orchestrator",
+      "criteriaLastN": 6
     }
   ],
   "decisions": [
@@ -122380,6 +122528,90 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-27T15:57:52.882Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0hx4sjb",
+      "note": "#6 Golden examples for SQL, HTML, Sh, Regex, Complex (constants"
+    },
+    {
+      "at": "2026-11-27T15:57:52.097Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0hx4sjb",
+      "note": "#5 Full greenfield cutover: SQL, HTML, Sh, Regex, Path, URL, Da"
+    },
+    {
+      "at": "2026-11-27T15:57:51.304Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0hx4sjb",
+      "note": "#4 LSP Semantic Tokens serve DSL highlight spans (both foreign "
+    },
+    {
+      "at": "2026-11-27T15:57:50.530Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0hx4sjb",
+      "note": "#3 Unified DSL trait in Prelude + sema 4-step handshake (#run p"
+    },
+    {
+      "at": "2026-11-27T15:57:49.739Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0hx4sjb",
+      "note": "#2 Lexer & parser support balanced Type{...} lazy capture and r"
+    },
+    {
+      "at": "2026-11-27T15:57:48.932Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0hx4sjb",
+      "note": "#1 Design review landed in Docs/Audits/ before build commits: c"
+    },
+    {
+      "at": "2026-11-27T15:57:48.145Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0yzwara",
+      "note": "#4 Full repo sweep + full test suite passes cleanly on the batc"
+    },
+    {
+      "at": "2026-11-27T15:57:47.379Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0yzwara",
+      "note": "#3 Legacy hardcoded magic f numeric suffix deleted from Literal"
+    },
+    {
+      "at": "2026-11-27T15:57:46.594Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0yzwara",
+      "note": "#2 Prelude #UnitFamily(Time) renames h -> hour and d -> day (an"
+    },
+    {
+      "at": "2026-11-27T15:57:45.811Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0yzwara",
+      "note": "#1 Bare decimal literals (e.g. 1.5, 0.0) infer Float (F64) by d"
+    },
+    {
+      "at": "2026-11-27T15:56:43.377Z",
+      "by": "Orchestrator",
+      "action": "card.add",
+      "ref": "c0hx4sjb",
+      "note": "Authoring friction P0: Unified unquoted Type{...} / Type{{{...}}} DSL trait (SQL, HTML, Sh, Regex, Path, Complex, Quaternion, FFI foundation)"
+    },
+    {
+      "at": "2026-11-27T15:56:42.233Z",
+      "by": "Orchestrator",
+      "action": "card.add",
+      "ref": "c0yzwara",
+      "note": "Authoring friction P0: Bare Float default, exact contextual Decimal/Float, and Time hour/day units (B10 Option 1A)"
+    },
     {
       "at": "2026-11-27T15:13:42.674Z",
       "by": "Orchestrator",
